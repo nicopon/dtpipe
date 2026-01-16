@@ -3,6 +3,7 @@ using System.CommandLine.Parsing;
 using System.ComponentModel;
 using System.Reflection;
 using QueryDump.Core.Options;
+using QueryDump.Core.Attributes;
 
 namespace QueryDump.Cli;
 
@@ -19,16 +20,17 @@ public static class CliOptionBuilder
 
         foreach (var property in typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
+            var cliOptionAttr = property.GetCustomAttribute<CliOptionAttribute>();
             var descriptionAttr = property.GetCustomAttribute<DescriptionAttribute>();
             
-            // Skip properties without [Description] attribute (they are bound manually)
-            if (descriptionAttr is null)
+            // Skip properties without [Description] OR [CliOption] attribute
+            if (cliOptionAttr is null && descriptionAttr is null)
             {
                 continue;
             }
             
-            var flagName = $"--{prefix}-{property.Name.ToKebabCase()}";
-            var description = descriptionAttr.Description;
+            var flagName = cliOptionAttr?.Name ?? $"--{prefix}-{property.Name.ToKebabCase()}";
+            var description = cliOptionAttr?.Description ?? descriptionAttr?.Description ?? string.Empty;
             
             // Check for list/array types (repeatable options)
             var propType = property.PropertyType;
@@ -37,7 +39,10 @@ public static class CliOptionBuilder
             if (isList)
             {
                 // Handle List<string> etc.
-                if (propType == typeof(IReadOnlyList<string>) || propType == typeof(List<string>) || propType == typeof(string[]))
+                if (propType == typeof(IReadOnlyList<string>) || 
+                    propType == typeof(List<string>) || 
+                    propType == typeof(string[]) || 
+                    propType == typeof(IEnumerable<string>))
                 {
                     var option = new Option<string[]>(flagName)
                     {
@@ -46,6 +51,9 @@ public static class CliOptionBuilder
                         AllowMultipleArgumentsPerToken = true
                     };
                     options.Add(option);
+
+                    // If manually named (via Attribute), consider adding legacy alias if needed, or just rely on the new name.
+                    // For now, simple override.
                 }
             }
             else
@@ -104,15 +112,22 @@ public static class CliOptionBuilder
 
         foreach (var property in typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
-            var flagName = $"--{prefix}-{property.Name.ToKebabCase()}";
+            var cliOptionAttr = property.GetCustomAttribute<CliOptionAttribute>();
+            var flagName = cliOptionAttr?.Name ?? $"--{prefix}-{property.Name.ToKebabCase()}";
+            
             var matchedOption = optionsList.FirstOrDefault(o => o.Name == flagName);
+            // Also check aliases if needed, but Name should suffice as we set it in GenerateOptions
             
             if (matchedOption is not null)
             {
                 var propType = property.PropertyType;
                 var isList = propType != typeof(string) && typeof(System.Collections.IEnumerable).IsAssignableFrom(propType);
 
-                if (isList && (propType == typeof(IReadOnlyList<string>) || propType == typeof(List<string>) || propType == typeof(string[])))
+                if (isList && (
+                    propType == typeof(IReadOnlyList<string>) || 
+                    propType == typeof(List<string>) || 
+                    propType == typeof(string[]) || 
+                    propType == typeof(IEnumerable<string>)))
                 {
                     var values = result.GetValue((Option<string[]>)matchedOption);
                     if (values is not null && values.Length > 0)

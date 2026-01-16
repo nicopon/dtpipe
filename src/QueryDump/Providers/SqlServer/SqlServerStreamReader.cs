@@ -9,7 +9,7 @@ namespace QueryDump.Providers.SqlServer;
 /// <summary>
 /// Streams data from SQL Server using IAsyncEnumerable.
 /// </summary>
-public sealed partial class SqlServerStreamReader : IDataSourceReader, IRequiresOptions<SqlServerOptions>
+public sealed partial class SqlServerStreamReader : IStreamReader, IRequiresOptions<SqlServerOptions>
 {
     private readonly SqlConnection _connection;
     private readonly SqlCommand _command;

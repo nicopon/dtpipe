@@ -7,7 +7,7 @@ using ColumnInfo = QueryDump.Core.ColumnInfo; // Alias to resolve conflict with 
 
 namespace QueryDump.Providers.DuckDB;
 
-public sealed partial class DuckDataSourceReader : IDataSourceReader, IRequiresOptions<DuckDbOptions>
+public sealed partial class DuckDataSourceReader : IStreamReader, IRequiresOptions<DuckDbOptions>
 {
     private readonly DuckDBConnection _connection;
     private readonly DuckDBCommand _command;

@@ -11,8 +11,9 @@ namespace QueryDump.Transformers.Fake;
 /// </summary>
 public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOptions<FakeOptions>
 {
+    public int Priority => 30; // Faker runs after Null (10) and Static (20)
+
     private readonly Dictionary<string, string> _mappings = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _nullColumns = new(StringComparer.OrdinalIgnoreCase);
     private readonly FakerRegistry _registry;
     private readonly Faker _faker;
     
@@ -39,21 +40,12 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
                 ParseMapping(mapping);
             }
         }
-
-        // Store null columns
-        if (options.NullColumns is not null)
-        {
-            foreach (var col in options.NullColumns)
-            {
-                _nullColumns.Add(col.Trim());
-            }
-        }
     }
 
     /// <summary>
-    /// Indicates whether any column mappings or null columns are configured.
+    /// Indicates whether any column mappings are configured.
     /// </summary>
-    public bool HasMappings => _mappings.Count > 0 || _nullColumns.Count > 0;
+    public bool HasMappings => _mappings.Count > 0;
 
     /// <summary>
     /// Get the FakerRegistry for listing available fakers.
@@ -84,14 +76,6 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
         for (var i = 0; i < columns.Count; i++)
         {
             var colName = columns[i].Name;
-            
-            // Check if this column should be nullified
-            if (_nullColumns.Contains(colName))
-            {
-                _processors[i] = new ColumnProcessor(i, _ => null);
-                nonTemplateColumns.Add(i);
-                continue;
-            }
             
             if (!_mappings.TryGetValue(colName, out var fakerPath))
             {
@@ -138,13 +122,9 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
             return new ValueTask<IReadOnlyList<object?[]>>(rows);
         }
 
-        var result = new List<object?[]>(rows.Count);
-        
+        // In-place modification
         foreach (var row in rows)
         {
-            var newRow = new object?[row.Length];
-            Array.Copy(row, newRow, row.Length);
-
             // Process columns in dependency order
             foreach (var colIdx in _generationOrder)
             {
@@ -152,19 +132,17 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
                 if (processor.IsTemplate)
                 {
                     // Template: substitute {{COL}} with already-generated values
-                    newRow[colIdx] = SubstituteTemplate(processor.Template!, newRow);
+                    row[colIdx] = SubstituteTemplate(processor.Template!, row);
                 }
                 else if (processor.Generator is not null)
                 {
                     // Faker or hardcoded
-                    newRow[colIdx] = processor.Generator(_faker);
+                    row[colIdx] = processor.Generator(_faker);
                 }
             }
-
-            result.Add(newRow);
         }
 
-        return new ValueTask<IReadOnlyList<object?[]>>(result);
+        return new ValueTask<IReadOnlyList<object?[]>>(rows);
     }
 
     private static bool IsTemplate(string value) => value.Contains("{{");

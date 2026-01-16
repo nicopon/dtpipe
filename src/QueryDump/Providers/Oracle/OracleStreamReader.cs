@@ -10,7 +10,7 @@ namespace QueryDump.Providers.Oracle;
 /// <summary>
 /// Streams data from Oracle using IAsyncEnumerable for memory efficiency.
 /// </summary>
-public sealed partial class OracleStreamReader : IDataSourceReader, IRequiresOptions<OracleOptions>
+public sealed partial class OracleStreamReader : IStreamReader, IRequiresOptions<OracleOptions>
 {
     private readonly OracleConnection _connection;
     private readonly OracleCommand _command;

@@ -2,27 +2,26 @@ using QueryDump.Configuration;
 using QueryDump.Core;
 using QueryDump.Core.Options;
 using QueryDump.Feedback;
-using QueryDump.Transformers.Fake;
 using QueryDump.Writers;
 
 namespace QueryDump;
 
 public class ExportService
 {
-    private readonly IDataSourceFactory _dataSourceFactory;
-    private readonly IDataWriterFactory _dataWriterFactory;
-    private readonly IFakeDataTransformerFactory _fakeDataTransformerFactory;
+    private readonly IEnumerable<IReaderFactory> _readerFactories;
+    private readonly IEnumerable<IWriterFactory> _writerFactories;
+    private readonly IEnumerable<ITransformerFactory> _transformerFactories;
     private readonly OptionsRegistry _optionsRegistry;
 
     public ExportService(
-        IDataSourceFactory dataSourceFactory, 
-        IDataWriterFactory dataWriterFactory,
-        IFakeDataTransformerFactory fakeDataTransformerFactory,
+        IEnumerable<IReaderFactory> readerFactories, 
+        IEnumerable<IWriterFactory> writerFactories,
+        IEnumerable<ITransformerFactory> transformerFactories,
         OptionsRegistry optionsRegistry)
     {
-        _dataSourceFactory = dataSourceFactory;
-        _dataWriterFactory = dataWriterFactory;
-        _fakeDataTransformerFactory = fakeDataTransformerFactory;
+        _readerFactories = readerFactories;
+        _writerFactories = writerFactories;
+        _transformerFactories = transformerFactories;
         _optionsRegistry = optionsRegistry;
     }
 
@@ -30,7 +29,12 @@ public class ExportService
     {
         Console.Error.WriteLine($"Connecting to {options.Provider}...");
         
-        await using var reader = _dataSourceFactory.Create(options);
+        // Resolve reader factory
+        var readerFactory = _readerFactories.FirstOrDefault(f => 
+            f.ProviderName.Equals(options.Provider, StringComparison.OrdinalIgnoreCase))
+            ?? throw new ArgumentException($"Unknown provider: {options.Provider}. Supported: {string.Join(", ", _readerFactories.Select(f => f.ProviderName))}");
+        
+        await using var reader = readerFactory.Create(options);
         
         await reader.OpenAsync(ct);
         
@@ -43,19 +47,36 @@ public class ExportService
         Console.Error.WriteLine($"Schema: {reader.Columns.Count} columns");
         Console.Error.WriteLine($"Writing to: {options.OutputPath}");
 
-        // Initialize transformer
-        var transformer = _fakeDataTransformerFactory.Create(options);
-        if (transformer is not null)
+        // Initialize transformation pipeline
+        var pipeline = new List<IDataTransformer>();
+        foreach (var factory in _transformerFactories)
         {
-             await transformer.InitializeAsync(reader.Columns, ct);
-             // Cannot cast to concrete to check property easily unless we cast or expose 'HasMappings' on IDataTransformer? 
-             // But InitializeAsync generally handles "no-op".
-             // We'll log based on options for now.
-             var fakeOptions = _optionsRegistry.Get<FakeOptions>();
-             Console.Error.WriteLine($"Fake data: {fakeOptions.Mappings.Count} column(s) masked");
+            var transformer = factory.Create(options);
+            if (transformer != null)
+            {
+                pipeline.Add(transformer);
+            }
+        }
+        
+        // Sort by Priority (Low -> High)
+        pipeline.Sort((a, b) => a.Priority.CompareTo(b.Priority));
+
+        if (pipeline.Count > 0)
+        {
+             Console.Error.WriteLine($"Transformation Pipeline: {string.Join(" -> ", pipeline.Select(p => $"{p.GetType().Name} (Pr:{p.Priority})"))}");
+             foreach (var t in pipeline)
+             {
+                 await t.InitializeAsync(reader.Columns, ct);
+             }
         }
 
-        await using var writer = _dataWriterFactory.Create(options);
+        // Resolve writer factory
+        var extension = Path.GetExtension(options.OutputPath).ToLowerInvariant();
+        var writerFactory = _writerFactories.FirstOrDefault(f =>
+            f.SupportedExtension.Equals(extension, StringComparison.OrdinalIgnoreCase))
+            ?? throw new ArgumentException($"Unsupported file format: {extension}. Supported: {string.Join(", ", _writerFactories.Select(f => f.SupportedExtension))}");
+
+        await using var writer = writerFactory.Create(options);
         await writer.InitializeAsync(reader.Columns, ct);
 
         using var progress = new ProgressReporter();
@@ -74,8 +95,8 @@ public class ExportService
 
                 IReadOnlyList<object?[]> processedBatch = rows;
 
-                // Transformation pipeline
-                if (transformer != null)
+                // Execute pipeline
+                foreach (var transformer in pipeline)
                 {
                     processedBatch = await transformer.TransformAsync(processedBatch, ct);
                 }

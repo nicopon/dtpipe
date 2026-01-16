@@ -121,14 +121,8 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvOptions>
     {
         if (value is null)
         {
-            // NullValue option might be null, which means empty string for text parts?
-            // Or if user set NullValue="NULL", we output "NULL".
-            // If user did not set NullValue (it's null), we typically return empty for CSV?
-            // Actually, for CsvHelper WriteField(null) writes nothing (empty).
-            // But if we return explicitly, let's see.
-            // If _options.NullValue is null, we return null? 
-            // CsvWriter.WriteField(null) -> writes "" (or whatever config says).
-            // But here we return string.
+            // If _options.NullValue is null, CsvHelper typically writes an empty string by default for nullable types,
+            // but we explicitly return the configured null value here.
             return _options.NullValue;
         }
 

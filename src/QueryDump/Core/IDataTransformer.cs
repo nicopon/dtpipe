@@ -6,6 +6,12 @@ namespace QueryDump.Core;
 public interface IDataTransformer
 {
     /// <summary>
+    /// Execution priority. Lower values are executed first.
+    /// Standard: Null=10, Static=20, Fake=30, Clone=100.
+    /// </summary>
+    int Priority { get; }
+
+    /// <summary>
     /// Initializes the transformer with column metadata.
     /// This is called once before processing batches.
     /// </summary>
