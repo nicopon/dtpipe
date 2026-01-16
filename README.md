@@ -53,6 +53,37 @@ Replaces real values with fake data (names, emails, cities...).
   --fake-locale fr
 ```
 
+### 4. Column References for Consistent Data
+Use `{{COLUMN}}` to reference other columns and create consistent data:
+
+```bash
+./dist/release/querydump \
+  -q "SELECT FIRSTNAME, LASTNAME, FULLNAME, EMAIL FROM USERS" \
+  -o users_anon.csv \
+  --fake "FIRSTNAME:name.firstname" \
+  --fake "LASTNAME:name.lastname" \
+  --fake "FULLNAME:{{FIRSTNAME}} {{LASTNAME}}" \
+  --fake "EMAIL:{{FIRSTNAME}}.{{LASTNAME}}@company.com"
+```
+
+This ensures that the generated `FULLNAME` and `EMAIL` use the same first and last names.
+
+### 5. Hardcoded Values
+If the value doesn't match a known faker, it's used as a literal string:
+
+```bash
+--fake "STATUS:anonymized"
+--fake "CODUSER:anonymous"
+```
+
+### 6. Setting Columns to Null
+Use `--null` to explicitly set columns to null:
+
+```bash
+--null "SENSITIVE_DATA"
+--null "INTERNAL_ID"
+```
+
 To list available data generators:
 ```bash
 ./dist/release/querydump --fake-list

@@ -123,35 +123,213 @@ public class FakeDataTransformerTests
     }
     
     [Fact]
-    public async Task Transform_ShouldHandleUnknownFaker_Gracefully()
+    public async Task Transform_ShouldFallbackToString_WhenDatasetIsUnknown()
     {
         // Arrange
+        // "invalid" is not a known dataset, so it should be treated as a hardcoded string
         var options = new FakeOptions { Mappings = new[] { "NAME:invalid.dataset" }, Seed = 123 };
         
         var columns = new List<ColumnInfo> { new("NAME", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { "Original" } };
 
         // Act
-        // Suppress error output to keep test runner clean
+        var transformer = new FakeDataTransformer(options);
+        await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+        var result = await transformer.TransformAsync(rows, TestContext.Current.CancellationToken);
+            
+        // Assert
+        result[0][0].Should().Be("invalid.dataset");
+    }
+
+    [Fact]
+    public async Task Transform_ShouldKeepOriginalValue_WhenDatasetValidButMethodInvalid()
+    {
+        // Arrange
+        // "name" is a valid dataset, but "invalidmethod" is not a method. 
+        // Should NOT fallback to string, should warn and keep original.
+        var options = new FakeOptions { Mappings = new[] { "NAME:name.invalidmethod" }, Seed = 123 };
+        
+        var columns = new List<ColumnInfo> { new("NAME", typeof(string), true) };
+        var rows = new List<object?[]> { new object?[] { "Original" } };
+
+        // Act
+        // Suppress error output
         var originalError = Console.Error;
         try
         {
             using var sw = new StringWriter();
             Console.SetError(sw);
-            
+
             var transformer = new FakeDataTransformer(options);
             await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
             var result = await transformer.TransformAsync(rows, TestContext.Current.CancellationToken);
             
             // Assert
             result[0][0].Should().Be("Original");
-            
-            // Verify it logged 
-            var log = sw.ToString();
         }
         finally
         {
             Console.SetError(originalError);
         }
+    }
+
+    [Fact]
+    public async Task Transform_ShouldFallbackToString_WhenNoDot()
+    {
+        // Arrange
+        var options = new FakeOptions { Mappings = new[] { "CITY:MyFixedCity" } };
+        var transformer = new FakeDataTransformer(options);
+        var columns = new List<ColumnInfo> { new("CITY", typeof(string), true) };
+        var rows = new List<object?[]> { new object?[] { "Original" } };
+
+        // Act
+        await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+        var result = await transformer.TransformAsync(rows, TestContext.Current.CancellationToken);
+
+        // Assert
+        result[0][0].Should().Be("MyFixedCity");
+    }
+
+    [Fact]
+    public async Task Transform_ShouldPreserveCase_WhenFallingBackToString()
+    {
+        // Arrange
+        var options = new FakeOptions { Mappings = new[] { "EMAIL:My.Email@Domain.com" } }; // "My" is not a dataset
+        var transformer = new FakeDataTransformer(options);
+        var columns = new List<ColumnInfo> { new("EMAIL", typeof(string), true) };
+        var rows = new List<object?[]> { new object?[] { "Original" } };
+
+        // Act
+        await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+        var result = await transformer.TransformAsync(rows, TestContext.Current.CancellationToken);
+
+        // Assert
+        result[0][0].Should().Be("My.Email@Domain.com");
+    }
+
+    // ===== Column Reference Tests =====
+
+    [Fact]
+    public async Task Transform_ShouldSubstituteColumnReferences()
+    {
+        // Arrange
+        var options = new FakeOptions 
+        { 
+            Mappings = new[] 
+            { 
+                "FIRSTNAME:name.firstname",
+                "LASTNAME:name.lastname",
+                "FULLNAME:{{FIRSTNAME}} {{LASTNAME}}"
+            },
+            Seed = 42
+        };
+        var transformer = new FakeDataTransformer(options);
+        var columns = new List<ColumnInfo>
+        {
+            new("FIRSTNAME", typeof(string), true),
+            new("LASTNAME", typeof(string), true),
+            new("FULLNAME", typeof(string), true)
+        };
+        var rows = new List<object?[]> { new object?[] { "Old1", "Old2", "Old3" } };
+
+        // Act
+        await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+        var result = await transformer.TransformAsync(rows, TestContext.Current.CancellationToken);
+
+        // Assert
+        var firstName = result[0][0]?.ToString();
+        var lastName = result[0][1]?.ToString();
+        var fullName = result[0][2]?.ToString();
+
+        firstName.Should().NotBeNullOrEmpty();
+        lastName.Should().NotBeNullOrEmpty();
+        fullName.Should().Be($"{firstName} {lastName}");
+    }
+
+    [Fact]
+    public async Task Transform_ShouldHandleMultipleReferencesInTemplate()
+    {
+        // Arrange
+        var options = new FakeOptions 
+        { 
+            Mappings = new[] 
+            { 
+                "FIRSTNAME:John",
+                "LASTNAME:Doe",
+                "EMAIL:{{FIRSTNAME}}.{{LASTNAME}}@company.com"
+            }
+        };
+        var transformer = new FakeDataTransformer(options);
+        var columns = new List<ColumnInfo>
+        {
+            new("FIRSTNAME", typeof(string), true),
+            new("LASTNAME", typeof(string), true),
+            new("EMAIL", typeof(string), true)
+        };
+        var rows = new List<object?[]> { new object?[] { "Old1", "Old2", "Old3" } };
+
+        // Act
+        await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+        var result = await transformer.TransformAsync(rows, TestContext.Current.CancellationToken);
+
+        // Assert
+        result[0][0].Should().Be("John");
+        result[0][1].Should().Be("Doe");
+        result[0][2].Should().Be("John.Doe@company.com");
+    }
+
+    [Fact]
+    public async Task Transform_ShouldBeCaseInsensitive_ForColumnReferences()
+    {
+        // Arrange
+        var options = new FakeOptions 
+        { 
+            Mappings = new[] 
+            { 
+                "firstname:John",
+                "FULLNAME:{{FIRSTNAME}} Smith" // Reference with different case
+            }
+        };
+        var transformer = new FakeDataTransformer(options);
+        var columns = new List<ColumnInfo>
+        {
+            new("FIRSTNAME", typeof(string), true),
+            new("FULLNAME", typeof(string), true)
+        };
+        var rows = new List<object?[]> { new object?[] { "Old1", "Old2" } };
+
+        // Act
+        await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+        var result = await transformer.TransformAsync(rows, TestContext.Current.CancellationToken);
+
+        // Assert
+        result[0][1].Should().Be("John Smith");
+    }
+
+    [Fact]
+    public async Task Transform_ShouldSetColumnToNull_WhenNullColumnsSpecified()
+    {
+        // Arrange
+        var options = new FakeOptions 
+        { 
+            NullColumns = new[] { "SENSITIVE" }
+        };
+        var transformer = new FakeDataTransformer(options);
+        var columns = new List<ColumnInfo>
+        {
+            new("ID", typeof(int), false),
+            new("SENSITIVE", typeof(string), true),
+            new("NAME", typeof(string), true)
+        };
+        var rows = new List<object?[]> { new object?[] { 1, "SecretData", "John" } };
+
+        // Act
+        await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+        var result = await transformer.TransformAsync(rows, TestContext.Current.CancellationToken);
+
+        // Assert
+        result[0][0].Should().Be(1);           // ID unchanged
+        result[0][1].Should().BeNull();        // SENSITIVE set to null
+        result[0][2].Should().Be("John");      // NAME unchanged
     }
 }

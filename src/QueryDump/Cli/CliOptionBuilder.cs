@@ -19,8 +19,16 @@ public static class CliOptionBuilder
 
         foreach (var property in typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
+            var descriptionAttr = property.GetCustomAttribute<DescriptionAttribute>();
+            
+            // Skip properties without [Description] attribute (they are bound manually)
+            if (descriptionAttr is null)
+            {
+                continue;
+            }
+            
             var flagName = $"--{prefix}-{property.Name.ToKebabCase()}";
-            var description = property.GetCustomAttribute<DescriptionAttribute>()?.Description ?? "";
+            var description = descriptionAttr.Description;
             
             // Check for list/array types (repeatable options)
             var propType = property.PropertyType;

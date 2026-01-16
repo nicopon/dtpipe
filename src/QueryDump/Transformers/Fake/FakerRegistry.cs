@@ -11,11 +11,17 @@ public sealed class FakerRegistry
 {
     private readonly Dictionary<string, Func<Faker, object?>> _generators = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _descriptions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _datasets = new(StringComparer.OrdinalIgnoreCase);
 
     public FakerRegistry()
     {
         RegisterBuiltInGenerators();
     }
+
+    /// <summary>
+    /// Check if a dataset exists (case-insensitive).
+    /// </summary>
+    public bool HasDataset(string datasetName) => _datasets.Contains(datasetName);
 
     /// <summary>
     /// Get a generator function for the given path (e.g., "address.city").
@@ -178,5 +184,11 @@ public sealed class FakerRegistry
     {
         _generators[path] = generator;
         _descriptions[path] = description;
+        
+        var parts = path.Split('.');
+        if (parts.Length == 2)
+        {
+            _datasets.Add(parts[0]);
+        }
     }
 }

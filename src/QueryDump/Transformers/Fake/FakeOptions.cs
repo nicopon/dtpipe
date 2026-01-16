@@ -7,7 +7,7 @@ public record FakeOptions : ITransformerOptions
 {
     public static string Prefix => "fake";
     
-    [Description("Column:faker.method mapping for fake data (repeatable)")]
+    // Mappings is bound manually via --fake in CliBuilder (not auto-generated)
     public IReadOnlyList<string> Mappings { get; init; } = [];  // e.g., "MYCITY:address.city"
     
     [Description("Bogus locale for fake data (fr, de, es, etc.)")]
@@ -15,4 +15,7 @@ public record FakeOptions : ITransformerOptions
     
     [Description("Seed for reproducible fake data")]
     public int? Seed { get; init; } = null;                      // Optional seed for determinism
+    
+    // NullColumns is bound manually via --null in CliBuilder (not auto-generated)
+    public IReadOnlyList<string> NullColumns { get; init; } = [];
 }

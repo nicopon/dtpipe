@@ -58,6 +58,22 @@ public static class CliBuilder
             Description = "List all available fake data generators and exit"
         };
 
+        // Custom --null option (separate from auto-generated options)
+        var nullOption = new Option<string[]>("--null")
+        {
+            Description = "Column(s) to set to null (repeatable)",
+            Arity = ArgumentArity.ZeroOrMore,
+            AllowMultipleArgumentsPerToken = true
+        };
+
+        // Custom --fake option (user-friendly alias for --fake-mappings)
+        var fakeOption = new Option<string[]>("--fake")
+        {
+            Description = "Column:faker.method mapping (repeatable, e.g. 'NAME:name.firstname')",
+            Arity = ArgumentArity.ZeroOrMore,
+            AllowMultipleArgumentsPerToken = true
+        };
+
         // Dynamic Options - discovered from factories
         var optionTypeProvider = serviceProvider.GetRequiredService<IOptionTypeProvider>();
         var dynamicOptions = new Dictionary<Type, List<Option>>();
@@ -78,6 +94,8 @@ public static class CliBuilder
         rootCommand.Options.Add(queryTimeoutOption);
         rootCommand.Options.Add(batchSizeOption);
         rootCommand.Options.Add(fakeListOption);
+        rootCommand.Options.Add(nullOption);
+        rootCommand.Options.Add(fakeOption);
 
         // Add dynamic options from all providers
         foreach (var options in dynamicOptions.Values)
@@ -120,6 +138,29 @@ public static class CliBuilder
             foreach (var (optionType, cliOpts) in dynamicOptions)
             {
                 var boundOptions = CliOptionBuilder.BindForType(optionType, parseResult, cliOpts);
+                
+                // Special handling: inject --fake and --null values into FakeOptions
+                if (optionType == typeof(FakeOptions))
+                {
+                    var fakeOptions = (FakeOptions)boundOptions;
+                    
+                    // Bind --fake option
+                    var fakeMappings = parseResult.GetValue(fakeOption);
+                    if (fakeMappings is not null && fakeMappings.Length > 0)
+                    {
+                        fakeOptions = fakeOptions with { Mappings = fakeMappings.ToList() };
+                    }
+                    
+                    // Bind --null option
+                    var nullColumns = parseResult.GetValue(nullOption);
+                    if (nullColumns is not null && nullColumns.Length > 0)
+                    {
+                        fakeOptions = fakeOptions with { NullColumns = nullColumns.ToList() };
+                    }
+                    
+                    boundOptions = fakeOptions;
+                }
+                
                 registry.RegisterByType(optionType, boundOptions);
             }
 
