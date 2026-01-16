@@ -1,0 +1,120 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - platform: linux-x64
+            rid: linux-x64
+            artifact: querydump-linux-x64
+          
+          - platform: linux-arm64
+            rid: linux-arm64
+            artifact: querydump-linux-arm64
+          
+          - platform: macos-x64
+            rid: osx-x64
+            artifact: querydump-macos-x64
+          
+          - platform: macos-arm64
+            rid: osx-arm64
+            artifact: querydump-macos-arm64
+          
+          - platform: windows-x64
+            rid: win-x64
+            artifact: querydump-windows-x64.exe
+          
+          - platform: windows-arm64
+            rid: win-arm64
+            artifact: querydump-windows-arm64.exe
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build Release
+        run: |
+          dotnet publish src/QueryDump/QueryDump.csproj -c Release \
+            -r ${{ matrix.rid }} \
+            --self-contained true \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:EnableCompressionInSingleFile=true \
+            -p:DebugType=none \
+            -p:DebugSymbols=false \
+            -o ./dist/release
+
+      - name: Prepare artifact (Unix)
+        if: "!contains(matrix.platform, 'windows')"
+        run: |
+          mv ./dist/release/QueryDump ./dist/release/${{ matrix.artifact }}
+          chmod +x ./dist/release/${{ matrix.artifact }}
+
+      - name: Prepare artifact (Windows)
+        if: contains(matrix.platform, 'windows')
+        run: |
+          mv ./dist/release/QueryDump.exe ./dist/release/${{ matrix.artifact }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ./dist/release/${{ matrix.artifact }}
+          if-no-files-found: error
+
+  release:
+    name: Create Release Archives
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure
+        run: ls -R artifacts
+
+      - name: Create Release Archives
+        run: |
+          cd artifacts
+          for dir in */; do
+            artifact_name="${dir%/}"
+            cd "$dir"
+            if [[ "$artifact_name" == *"windows"* ]]; then
+              zip "../${artifact_name}.zip" *
+            else
+              tar -czf "../${artifact_name}.tar.gz" *
+            fi
+            cd ..
+          done
+          cd ..
+          ls -lh artifacts/*.{tar.gz,zip} 2>/dev/null || true
+
+      - name: Upload Release Assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-archives
+          path: |
+            artifacts/*.tar.gz
+            artifacts/*.zip

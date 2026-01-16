@@ -1,0 +1,38 @@
+[
+  {
+    "Id": 1,
+    "Name": "Alice",
+    "Age": 30,
+    "IsActive": true,
+    "Score": 95.50,
+    "CreatedAt": "2023-01-01T10:00:00",
+    "BirthDate": "1993-05-15T00:00:00"
+  },
+  {
+    "Id": 2,
+    "Name": "Bob",
+    "Age": 45,
+    "IsActive": false,
+    "Score": 82.35,
+    "CreatedAt": "2023-01-02T14:30:00",
+    "BirthDate": "1978-11-20T00:00:00"
+  },
+  {
+    "Id": 3,
+    "Name": "Charlie",
+    "Age": 25,
+    "IsActive": true,
+    "Score": 60.00,
+    "CreatedAt": "2023-01-03T09:15:00",
+    "BirthDate": "1998-02-10T00:00:00"
+  },
+  {
+    "Id": 4,
+    "Name": "Dépôt légal & Garçon",
+    "Age": 100,
+    "IsActive": true,
+    "Score": 99.99,
+    "CreatedAt": "2023-12-31T23:59:59",
+    "BirthDate": "1923-01-01T00:00:00"
+  }
+]

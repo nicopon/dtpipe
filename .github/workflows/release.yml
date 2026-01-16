@@ -1,0 +1,134 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - platform: linux-x64
+            rid: linux-x64
+            artifact: querydump-linux-x64
+          
+          - platform: linux-arm64
+            rid: linux-arm64
+            artifact: querydump-linux-arm64
+          
+          - platform: macos-x64
+            rid: osx-x64
+            artifact: querydump-macos-x64
+          
+          - platform: macos-arm64
+            rid: osx-arm64
+            artifact: querydump-macos-arm64
+          
+          - platform: windows-x64
+            rid: win-x64
+            artifact: querydump-windows-x64.exe
+          
+          - platform: windows-arm64
+            rid: win-arm64
+            artifact: querydump-windows-arm64.exe
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build Release
+        run: |
+          dotnet publish src/QueryDump/QueryDump.csproj -c Release \
+            -r ${{ matrix.rid }} \
+            --self-contained true \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:EnableCompressionInSingleFile=true \
+            -p:DebugType=none \
+            -p:DebugSymbols=false \
+            -o ./dist/release
+
+      - name: Prepare artifact (Unix)
+        if: "!contains(matrix.platform, 'windows')"
+        run: |
+          mv ./dist/release/QueryDump ./dist/release/querydump
+          chmod +x ./dist/release/querydump
+
+      - name: Prepare artifact (Windows)
+        if: contains(matrix.platform, 'windows')
+        run: |
+          mv ./dist/release/QueryDump.exe ./dist/release/querydump.exe
+
+      - name: Create archive (Unix)
+        if: "!contains(matrix.platform, 'windows')"
+        run: |
+          cd ./dist/release
+          tar -czf ${{ matrix.artifact }}.tar.gz querydump
+
+      - name: Create archive (Windows)
+        if: contains(matrix.platform, 'windows')
+        run: |
+          cd ./dist/release
+          zip ${{ matrix.artifact }}.zip querydump.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ./dist/release/*.tar.gz
+            ./dist/release/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure
+        run: ls -R artifacts
+
+      - name: Move archives to release directory
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec mv {} release/ \;
+          ls -lh release/
+
+      - name: Determine if pre-release
+        id: prerelease
+        run: |
+          if [[ "${{ github.ref_name }}" =~ (alpha|beta|rc) ]]; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          prerelease: ${{ steps.prerelease.outputs.is_prerelease }}
+          generate_release_notes: true
