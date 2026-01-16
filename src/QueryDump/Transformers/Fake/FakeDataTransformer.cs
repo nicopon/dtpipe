@@ -209,8 +209,7 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
         
         if (_registry.HasDataset(dataset))
         {
-            Console.Error.WriteLine($"Warning: Unknown faker '{fakerPath}' for column '{colName}'");
-            return null;
+            throw new InvalidOperationException($"Unknown faker method '{fakerPath}' for column '{colName}'. Use --fake-list to see available options.");
         }
 
         // Hardcoded string fallback
@@ -251,9 +250,23 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
         {
             if (!_registry.HasGenerator(value))
             {
-                Console.Error.WriteLine($"Warning: Unknown faker method '{value}' for dataset '{datasetName}'. Use --fake-list to see available options.");
+                throw new InvalidOperationException($"Unknown faker method '{value}' for dataset '{datasetName}'. Use --fake-list to see available options.");
             }
             _mappings[column] = value;
+        }
+        else if (value.Contains(':'))
+        {
+             // Fallback: User might have used colon instead of dot (e.g. "finance:iban")
+             var normalized = value.Replace(':', '.');
+             if (_registry.HasGenerator(normalized))
+             {
+                 _mappings[column] = normalized;
+             }
+             else
+             {
+                 // Not a known faker even after normalization, treat as string
+                 _mappings[column] = value;
+             }
         }
         else
         {

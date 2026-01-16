@@ -6,6 +6,7 @@ namespace QueryDump.Transformers.Fake;
 public record FakeOptions : ITransformerOptions
 {
     public static string Prefix => "fake";
+    public static string DisplayName => "Anonymization";
     
     // Mappings is bound manually via --fake in CliBuilder (not auto-generated)
     public IReadOnlyList<string> Mappings { get; init; } = [];  // e.g., "MYCITY:address.city"

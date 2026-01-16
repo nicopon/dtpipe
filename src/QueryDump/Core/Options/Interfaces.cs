@@ -34,6 +34,11 @@ public interface IOptionSet
     /// The CLI prefix for this option set (e.g. "ora", "csv").
     /// </summary>
     static abstract string Prefix { get; }
+    
+    /// <summary>
+    /// Display name for help grouping (e.g. "Oracle Reader", "CSV Writer").
+    /// </summary>
+    static abstract string DisplayName { get; }
 }
 
 /// <summary>

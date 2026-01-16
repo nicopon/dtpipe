@@ -18,7 +18,21 @@ class Program
         var serviceProvider = services.BuildServiceProvider();
 
         var rootCommand = CliBuilder.Build(serviceProvider);
+        
+        // Show grouped help when no arguments or help flags provided
+        if (args.Length == 0 || IsHelpFlag(args))
+        {
+            var optionTypeProvider = serviceProvider.GetRequiredService<IOptionTypeProvider>();
+            CliBuilder.PrintGroupedHelp(optionTypeProvider);
+            return Task.FromResult(0);
+        }
+        
         return rootCommand.Parse(args).InvokeAsync();
+    }
+
+    private static bool IsHelpFlag(string[] args)
+    {
+        return args.Length == 1 && args[0] is "--help" or "-h" or "-?";
     }
 
     private static void ConfigureServices(IServiceCollection services)

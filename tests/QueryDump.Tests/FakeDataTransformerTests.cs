@@ -142,35 +142,17 @@ public class FakeDataTransformerTests
     }
 
     [Fact]
-    public async Task Transform_ShouldKeepOriginalValue_WhenDatasetValidButMethodInvalid()
+    public void Constructor_ShouldThrowException_WhenDatasetValidButMethodInvalid()
     {
         // Arrange
         // "name" is a valid dataset, but "invalidmethod" is not a method. 
-        // Should NOT fallback to string, should warn and keep original.
+        // Should throw InvalidOperationException to stop the export.
         var options = new FakeOptions { Mappings = new[] { "NAME:name.invalidmethod" }, Seed = 123 };
         
-        var columns = new List<ColumnInfo> { new("NAME", typeof(string), true) };
-        var rows = new List<object?[]> { new object?[] { "Original" } };
-
-        // Act
-        // Suppress error output
-        var originalError = Console.Error;
-        try
-        {
-            using var sw = new StringWriter();
-            Console.SetError(sw);
-
-            var transformer = new FakeDataTransformer(options);
-            await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-            var result = await transformer.TransformAsync(rows, TestContext.Current.CancellationToken);
-            
-            // Assert
-            result[0][0].Should().Be("Original");
-        }
-        finally
-        {
-            Console.SetError(originalError);
-        }
+        // Act & Assert
+        var act = () => new FakeDataTransformer(options);
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*Unknown faker method*name.invalidmethod*");
     }
 
     [Fact]
@@ -331,5 +313,43 @@ public class FakeDataTransformerTests
         result[0][0].Should().Be(1);           // ID unchanged
         result[0][1].Should().BeNull();        // SENSITIVE set to null
         result[0][2].Should().Be("John");      // NAME unchanged
+    }
+    [Fact]
+    public async Task Transform_Reproduction_ColonSyntaxCheck()
+    {
+        // Issue reproduction: "Finance:iban" (colon separator) vs "Finance.iban" (dot separator)
+        
+        // Case 1: "Finance:iban" (Colon) -> Should be treated as hardcoded string "Finance:iban" because it's not a valid fake path
+        var optionsColon = new FakeOptions { Mappings = new[] { "IBAN:finance:iban" } };
+        var transformerColon = new FakeDataTransformer(optionsColon);
+        var columns = new List<ColumnInfo> { new("IBAN", typeof(string), true) };
+        var rows = new List<object?[]> { new object?[] { "Original" } };
+
+        await transformerColon.InitializeAsync(columns, TestContext.Current.CancellationToken);
+        var resColon = await transformerColon.TransformAsync(rows, TestContext.Current.CancellationToken);
+        
+        // This confirms the user's colon syntax is now supported via normalization
+        resColon[0][0].Should().NotBe("finance:iban");
+        resColon[0][0]!.ToString().Length.Should().BeGreaterThan(10);
+        
+        // Case 2: "Finance.iban" (Dot) -> Should be recognized as faker
+        var optionsDot = new FakeOptions { Mappings = new[] { "IBAN:finance.iban" } };
+        var transformerDot = new FakeDataTransformer(optionsDot);
+        
+        await transformerDot.InitializeAsync(columns, TestContext.Current.CancellationToken);
+        var resDot = await transformerDot.TransformAsync(rows, TestContext.Current.CancellationToken);
+        
+        // This confirms correct syntax works
+        resDot[0][0].Should().NotBe("finance.iban");
+        resDot[0][0]!.ToString().Length.Should().BeGreaterThan(10);
+        
+        // Case 3: "finance.iban" (Lowercase Dot) -> Should also work (case insensitive)
+        var optionsLower = new FakeOptions { Mappings = new[] { "IBAN:finance.iban" } };
+        var transformerLower = new FakeDataTransformer(optionsLower);
+        
+        await transformerLower.InitializeAsync(columns, TestContext.Current.CancellationToken);
+        var resLower = await transformerLower.TransformAsync(rows, TestContext.Current.CancellationToken);
+        
+        resLower[0][0].Should().NotBe("finance.iban");
     }
 }

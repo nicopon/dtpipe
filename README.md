@@ -6,7 +6,7 @@ Command-line tool to export database data (Oracle, SQL Server, DuckDB...) to Par
 
 - **Streaming**: Stream-based reading (`IDataReader`) to handle large datasets.
 - **Formats**: Parquet (Snappy compression) and CSV (RFC 4180 compatible).
-- **Multi-Database**: Supports Oracle, SQL Server, DuckDB, Postgres, MySQL, SQLite.
+- **Multi-Database**: Supports Oracle, SQL Server, DuckDB.
 - **Anonymization**: Capability to mask sensitive columns with fake data during export.
 
 ## Build

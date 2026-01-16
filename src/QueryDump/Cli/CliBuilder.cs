@@ -58,6 +58,12 @@ public static class CliBuilder
             Description = "List all available fake data generators and exit"
         };
 
+        // Custom --help option to show grouped help
+        var customHelpOption = new Option<bool>("--help", "-h", "-?")
+        {
+            Description = "Show help and usage information"
+        };
+
         // Custom --null option (separate from auto-generated options)
         var nullOption = new Option<string[]>("--null")
         {
@@ -94,8 +100,16 @@ public static class CliBuilder
         rootCommand.Options.Add(queryTimeoutOption);
         rootCommand.Options.Add(batchSizeOption);
         rootCommand.Options.Add(fakeListOption);
+        rootCommand.Options.Add(customHelpOption);
         rootCommand.Options.Add(nullOption);
         rootCommand.Options.Add(fakeOption);
+
+        // Collect core options for help grouping
+        var coreOptions = new List<Option> 
+        { 
+            connectionOption, providerOption, queryOption, outputOption,
+            connectionTimeoutOption, queryTimeoutOption, batchSizeOption 
+        };
 
         // Add dynamic options from all providers
         foreach (var options in dynamicOptions.Values)
@@ -116,6 +130,14 @@ public static class CliBuilder
             var batchSize = parseResult.GetValue(batchSizeOption);
 
             // Handle informational flags
+            // Handle --help with grouped output
+            var showHelp = parseResult.GetValue(customHelpOption);
+            if (showHelp)
+            {
+                HelpPrinter.PrintGroupedHelp(rootCommand, coreOptions, dynamicOptions, fakeOption, nullOption, fakeListOption);
+                return 0;
+            }
+            
             var fakeList = parseResult.GetValue(fakeListOption);
             if (fakeList)
             {
@@ -256,5 +278,91 @@ public static class CliBuilder
         }
         
         Console.WriteLine("Example: --fake \"NAME:name.firstname\" --fake \"EMAIL:internet.email\" --fake-locale fr");
+    }
+
+    /// <summary>
+    /// Prints grouped help output organized by category.
+    /// </summary>
+    public static void PrintGroupedHelp(IOptionTypeProvider optionTypeProvider)
+    {
+        Console.WriteLine("Description:");
+        Console.WriteLine("  QueryDump - Export database data to Parquet or CSV (DuckDB-optimized)");
+        Console.WriteLine();
+        Console.WriteLine("Usage:");
+        Console.WriteLine("  querydump [options]");
+        Console.WriteLine();
+        
+        // Core Options
+        Console.WriteLine("Core Options:");
+        Console.WriteLine("  -c, --connection <connection>            Connection string (or env var)");
+        Console.WriteLine("  -p, --provider <provider>                Database provider [default: auto]");
+        Console.WriteLine("  -q, --query <query>                      SQL query (SELECT only)");
+        Console.WriteLine("  -o, --output <output>                    Output file (.parquet or .csv)");
+        Console.WriteLine("  --connection-timeout <seconds>           Connection timeout [default: 10]");
+        Console.WriteLine("  --query-timeout <seconds>                Query timeout [default: 0]");
+        Console.WriteLine("  -b, --batch-size <rows>                  Rows per batch [default: 50000]");
+        Console.WriteLine();
+        
+        // Group dynamic options by category
+        var allTypes = optionTypeProvider.GetAllOptionTypes().ToList();
+        
+        // Reader options
+        var readers = allTypes.Where(t => typeof(IProviderOptions).IsAssignableFrom(t));
+        foreach (var rt in readers)
+        {
+            var opts = CliOptionBuilder.GenerateOptionsForType(rt).ToList();
+            if (opts.Count == 0) continue;
+            var name = GetDisplayName(rt);
+            Console.WriteLine($"{name} Options:");
+            foreach (var opt in opts)
+            {
+                PrintOption(opt);
+            }
+            Console.WriteLine();
+        }
+        
+        // Writer options
+        var writers = allTypes.Where(t => typeof(IWriterOptions).IsAssignableFrom(t));
+        foreach (var wt in writers)
+        {
+            var opts = CliOptionBuilder.GenerateOptionsForType(wt).ToList();
+            if (opts.Count == 0) continue;
+            var name = GetDisplayName(wt);
+            Console.WriteLine($"{name} Options:");
+            foreach (var opt in opts)
+            {
+                PrintOption(opt);
+            }
+            Console.WriteLine();
+        }
+        
+        // Anonymization options (transformers + custom)
+        Console.WriteLine("Anonymization Options:");
+        Console.WriteLine("  --fake <COLUMN:faker.method>             Column to faker mapping (repeatable)");
+        Console.WriteLine("  --null <COLUMN>                          Column(s) to set to null (repeatable)");
+        Console.WriteLine("  --fake-locale <locale>                   Bogus locale [default: en]");
+        Console.WriteLine("  --fake-seed <seed>                       Seed for reproducible data");
+        Console.WriteLine("  --fake-list                              List available fakers");
+        Console.WriteLine();
+        
+        // Standard options
+        Console.WriteLine("Other Options:");
+        Console.WriteLine("  -?, -h, --help                           Show this help");
+        Console.WriteLine("  --version                                Show version");
+        Console.WriteLine();
+    }
+
+    private static void PrintOption(Option opt)
+    {
+        var name = opt.Name;
+        var desc = opt.Description ?? "";
+        Console.WriteLine($"  {name,-40} {desc}");
+    }
+
+    private static string GetDisplayName(Type optionType)
+    {
+        var prop = optionType.GetProperty("DisplayName", 
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+        return prop?.GetValue(null)?.ToString() ?? optionType.Name.Replace("Options", "");
     }
 }

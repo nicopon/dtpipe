@@ -6,6 +6,7 @@ namespace QueryDump.Writers.Csv;
 public record CsvOptions : IWriterOptions
 {
     public static string Prefix => "csv";
+    public static string DisplayName => "CSV Writer";
     
     [Description("CSV field separator")]
     public char Separator { get; init; } = ',';
