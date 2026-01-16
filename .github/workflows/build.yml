@@ -1,0 +1,141 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          # Linux x64
+          - os: linux
+            arch: x64
+            runner: ubuntu-latest
+            rid: linux-x64
+            artifact: querydump-linux-x64
+          
+          # Linux ARM64
+          - os: linux
+            arch: arm64
+            runner: ubuntu-latest
+            rid: linux-arm64
+            artifact: querydump-linux-arm64
+          
+          # macOS x64
+          - os: macos
+            arch: x64
+            runner: macos-13  # Intel-based runner
+            rid: osx-x64
+            artifact: querydump-macos-x64
+          
+          # macOS ARM64
+          - os: macos
+            arch: arm64
+            runner: macos-latest  # Apple Silicon runner
+            rid: osx-arm64
+            artifact: querydump-macos-arm64
+          
+          # Windows x64
+          - os: windows
+            arch: x64
+            runner: windows-latest
+            rid: win-x64
+            artifact: querydump-windows-x64.exe
+          
+          # Windows ARM64
+          - os: windows
+            arch: arm64
+            runner: windows-latest
+            rid: win-arm64
+            artifact: querydump-windows-arm64.exe
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build Release
+        run: |
+          dotnet publish src/QueryDump/QueryDump.csproj -c Release \
+            -r ${{ matrix.rid }} \
+            --self-contained true \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:EnableCompressionInSingleFile=true \
+            -p:PublishTrimmed=true \
+            -p:TrapUseOfUninitializedEvent=false \
+            -p:DebugType=none \
+            -p:DebugSymbols=false \
+            -o ./dist/release
+
+      - name: Prepare artifact (Unix)
+        if: matrix.os != 'windows'
+        run: |
+          mv ./dist/release/QueryDump ./dist/release/${{ matrix.artifact }}
+          chmod +x ./dist/release/${{ matrix.artifact }}
+
+      - name: Prepare artifact (Windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          Move-Item -Path ./dist/release/QueryDump.exe -Destination ./dist/release/${{ matrix.artifact }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ./dist/release/${{ matrix.artifact }}
+          if-no-files-found: error
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure
+        run: ls -R artifacts
+
+      - name: Create Release Archive
+        run: |
+          cd artifacts
+          for dir in */; do
+            artifact_name="${dir%/}"
+            cd "$dir"
+            if [[ "$artifact_name" == *"windows"* ]]; then
+              zip "../${artifact_name}.zip" *
+            else
+              tar -czf "../${artifact_name}.tar.gz" *
+            fi
+            cd ..
+          done
+          cd ..
+          ls -lh artifacts/*.{tar.gz,zip} 2>/dev/null || true
+
+      - name: Upload Release Assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-archives
+          path: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
