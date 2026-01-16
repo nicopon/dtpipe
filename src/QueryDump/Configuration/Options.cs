@@ -20,6 +20,6 @@ public sealed record DumpOptions
     /// Size of the batch for reading from source and writing to output.
     /// Controls memory conversion buffer size and Parquet RowGroup size.
     /// </summary>
-    public int BatchSize { get; init; } = 50_000; 
+    public int BatchSize { get; init; } = 5_000; 
 
 }

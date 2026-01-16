@@ -40,7 +40,7 @@ public class E2EFakeIntegrationTests : IAsyncLifetime
         // 1. Setup Database
         using (var connection = new DuckDB.NET.Data.DuckDBConnection(_connectionString))
         {
-            await connection.OpenAsync();
+            await connection.OpenAsync(TestContext.Current.CancellationToken);
             using var cmd = connection.CreateCommand();
             cmd.CommandText = TestDataSeeder.GenerateTableDDL(connection, "users");
             await cmd.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
@@ -48,15 +48,7 @@ public class E2EFakeIntegrationTests : IAsyncLifetime
             // Seeded names: Alice, Bob, Charlie, David
         }
 
-        // 2. Configure Services (Mimic Program.cs)
-        var services = new ServiceCollection();
-        services.AddSingleton<IDataSourceFactory, DataSourceFactory>();
-        services.AddSingleton<IDataWriterFactory, DataWriterFactory>();
-        services.AddSingleton<IFakeDataTransformerFactory, FakeDataTransformerFactory>();
-        services.AddSingleton<OptionsRegistry>();
-        services.AddSingleton<ExportService>();
-        
-        // Register Options manually as the CLI binder would do
+        // 2. Configure Services (Mimic Program.cs with new simplified architecture)
         var registry = new OptionsRegistry();
         registry.Register(new DuckDbOptions());
         registry.Register(new CsvOptions { Header = true });
@@ -67,7 +59,19 @@ public class E2EFakeIntegrationTests : IAsyncLifetime
             Seed = 12345 // Deterministic
         });
         
-        services.AddSingleton(registry); // Override the service registration above if needed, but we used the instance
+        var services = new ServiceCollection();
+        services.AddSingleton(registry);
+        
+        // Reader Factories
+        services.AddSingleton<IReaderFactory, DuckDbReaderFactory>();
+        
+        // Writer Factories
+        services.AddSingleton<IWriterFactory, CsvWriterFactory>();
+        
+        // Transformer Factories
+        services.AddSingleton<ITransformerFactory, FakeDataTransformerFactory>();
+        
+        services.AddSingleton<ExportService>();
         
         var serviceProvider = services.BuildServiceProvider();
         var exportService = serviceProvider.GetRequiredService<ExportService>();
@@ -105,5 +109,92 @@ public class E2EFakeIntegrationTests : IAsyncLifetime
         // Let's just assert it is NOT "Alice"
         maskedName.Should().NotBe("Alice");
         maskedName.Should().NotBeNullOrEmpty();
+    }
+    [Fact]
+    public async Task ExportService_ShouldRespectTransformerPipeline_Null_Overwrite_Clone()
+    {
+        // 1. Setup Database
+        using (var connection = new DuckDB.NET.Data.DuckDBConnection(_connectionString))
+        {
+            await connection.OpenAsync(TestContext.Current.CancellationToken);
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = TestDataSeeder.GenerateTableDDL(connection, "users");
+            await cmd.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+            await TestDataSeeder.SeedAsync(connection, "users");
+            // Seeded: 1, Alice, alice@example.com
+        }
+
+        // 2. Configure Services
+        var registry = new OptionsRegistry();
+        registry.Register(new DuckDbOptions());
+        registry.Register(new CsvOptions { Header = true });
+        
+        registry.Register(new Transformers.Null.NullOptions 
+        { 
+            Columns = new[] { "Age" } 
+        });
+        
+        registry.Register(new Transformers.Static.OverwriteOptions 
+        { 
+            Mappings = new[] { "Name:Bond" } 
+        });
+        
+        registry.Register(new Transformers.Clone.CloneOptions
+        {
+            Mappings = new[] { "CopiedName:{{Name}} is 007" }
+        });
+
+        var services = new ServiceCollection();
+        services.AddSingleton(registry);
+        
+        // Reader Factories
+        services.AddSingleton<IReaderFactory, DuckDbReaderFactory>();
+        
+        // Writer Factories
+        services.AddSingleton<IWriterFactory, CsvWriterFactory>();
+        
+        // Transformer Factories
+        services.AddSingleton<ITransformerFactory, Transformers.Null.NullDataTransformerFactory>();
+        services.AddSingleton<ITransformerFactory, Transformers.Static.StaticDataTransformerFactory>();
+        services.AddSingleton<ITransformerFactory, Transformers.Fake.FakeDataTransformerFactory>();
+        services.AddSingleton<ITransformerFactory, Transformers.Clone.CloneDataTransformerFactory>();
+        
+        services.AddSingleton<ExportService>();
+        
+        var serviceProvider = services.BuildServiceProvider();
+        var exportService = serviceProvider.GetRequiredService<ExportService>();
+
+        var options = new DumpOptions
+        {
+            Provider = "duckdb",
+            ConnectionString = _connectionString,
+            Query = "SELECT Id, Name, Age, Name as CopiedName FROM users ORDER BY Id",
+            OutputPath = _outputPath,
+            BatchSize = 100
+        };
+
+        // 3. Run Export
+        await exportService.RunExportAsync(options, TestContext.Current.CancellationToken);
+
+        // 4. Verify
+        File.Exists(_outputPath).Should().BeTrue();
+        var lines = await File.ReadAllLinesAsync(_outputPath, TestContext.Current.CancellationToken);
+        
+        // Header
+        var headers = lines[0].Split(',');
+        var nameIdx = Array.IndexOf(headers, "Name");
+        var ageIdx = Array.IndexOf(headers, "Age");
+        var copyIdx = Array.IndexOf(headers, "CopiedName");
+        
+        var row1 = lines[1].Split(',');
+        
+        // Nuller check
+        row1[ageIdx].Should().BeEmpty(); // CSV null is empty string by default
+        
+        // Overwriter check
+        row1[nameIdx].Should().Be("Bond");
+        
+        // Cloner check (should see "Bond" from Overwriter)
+        row1[copyIdx].Should().Be("Bond is 007"); 
     }
 }

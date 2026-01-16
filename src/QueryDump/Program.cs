@@ -1,50 +1,64 @@
 ﻿using System.CommandLine;
-using System.Reflection;
+using System.CommandLine.Parsing;
 using Microsoft.Extensions.DependencyInjection;
 using QueryDump.Cli;
 using QueryDump.Core;
 using QueryDump.Core.Options;
+using QueryDump.Transformers.Clone;
 using QueryDump.Transformers.Fake;
+using QueryDump.Transformers.Null;
+using QueryDump.Transformers.Static;
 using QueryDump.Writers;
+using QueryDump.Providers.Oracle;
+using QueryDump.Providers.SqlServer;
+using QueryDump.Providers.DuckDB;
 
 namespace QueryDump;
 
 class Program
 {
-    static Task<int> Main(string[] args)
+    static async Task<int> Main(string[] args)
     {
         var services = new ServiceCollection();
         ConfigureServices(services);
         var serviceProvider = services.BuildServiceProvider();
 
-        var rootCommand = CliBuilder.Build(serviceProvider);
+        var cliService = serviceProvider.GetRequiredService<CliService>();
+        var (rootCommand, printHelp) = cliService.Build();
         
-        // Show grouped help when no arguments or help flags provided
-        if (args.Length == 0 || IsHelpFlag(args))
+        if (args.Length == 0 || args.Any(a => a == "--help" || a == "-h" || a == "-?"))
         {
-            var optionTypeProvider = serviceProvider.GetRequiredService<IOptionTypeProvider>();
-            CliBuilder.PrintGroupedHelp(optionTypeProvider);
-            return Task.FromResult(0);
+            printHelp();
+            return 0;
         }
         
-        return rootCommand.Parse(args).InvokeAsync();
-    }
-
-    private static bool IsHelpFlag(string[] args)
-    {
-        return args.Length == 1 && args[0] is "--help" or "-h" or "-?";
+        return await rootCommand.Parse(args).InvokeAsync();
     }
 
     private static void ConfigureServices(IServiceCollection services)
     {
-        // Discover option types from factories
-        services.AddSingleton<IOptionTypeProvider, OptionTypeProvider>();
-        
-        // Core services
-        services.AddSingleton<IDataSourceFactory, DataSourceFactory>();
-        services.AddSingleton<IDataWriterFactory, DataWriterFactory>();
-        services.AddSingleton<IFakeDataTransformerFactory, FakeDataTransformerFactory>();
+        // Configuration
         services.AddSingleton<OptionsRegistry>();
+        
+        // CLI
+        services.AddSingleton<CliService>();
+        
+        // Reader Factories
+        services.AddSingleton<IReaderFactory, OracleReaderFactory>();
+        services.AddSingleton<IReaderFactory, SqlServerReaderFactory>();
+        services.AddSingleton<IReaderFactory, DuckDbReaderFactory>();
+        
+        // Writer Factories
+        services.AddSingleton<IWriterFactory, Writers.Csv.CsvWriterFactory>();
+        services.AddSingleton<IWriterFactory, Writers.Parquet.ParquetWriterFactory>();
+        
+        // Transformer Factories
+        services.AddSingleton<ITransformerFactory, NullDataTransformerFactory>();
+        services.AddSingleton<ITransformerFactory, StaticDataTransformerFactory>();
+        services.AddSingleton<ITransformerFactory, FakeDataTransformerFactory>();
+        services.AddSingleton<ITransformerFactory, CloneDataTransformerFactory>();
+        
+        // Export Service
         services.AddSingleton<ExportService>();
     }
 }
