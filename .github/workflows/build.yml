@@ -9,50 +9,32 @@ on:
 
 jobs:
   build:
-    name: Build ${{ matrix.os }} (${{ matrix.arch }})
-    runs-on: ${{ matrix.runner }}
+    name: Build ${{ matrix.platform }}
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
-          # Linux x64
-          - os: linux
-            arch: x64
-            runner: ubuntu-latest
+          - platform: linux-x64
             rid: linux-x64
             artifact: querydump-linux-x64
           
-          # Linux ARM64
-          - os: linux
-            arch: arm64
-            runner: ubuntu-latest
+          - platform: linux-arm64
             rid: linux-arm64
             artifact: querydump-linux-arm64
           
-          # macOS x64
-          - os: macos
-            arch: x64
-            runner: macos-13  # Intel-based runner
+          - platform: macos-x64
             rid: osx-x64
             artifact: querydump-macos-x64
           
-          # macOS ARM64
-          - os: macos
-            arch: arm64
-            runner: macos-latest  # Apple Silicon runner
+          - platform: macos-arm64
             rid: osx-arm64
             artifact: querydump-macos-arm64
           
-          # Windows x64
-          - os: windows
-            arch: x64
-            runner: windows-latest
+          - platform: windows-x64
             rid: win-x64
             artifact: querydump-windows-x64.exe
           
-          # Windows ARM64
-          - os: windows
-            arch: arm64
-            runner: windows-latest
+          - platform: windows-arm64
             rid: win-arm64
             artifact: querydump-windows-arm64.exe
 
@@ -83,16 +65,15 @@ jobs:
             -o ./dist/release
 
       - name: Prepare artifact (Unix)
-        if: matrix.os != 'windows'
+        if: "!contains(matrix.platform, 'windows')"
         run: |
           mv ./dist/release/QueryDump ./dist/release/${{ matrix.artifact }}
           chmod +x ./dist/release/${{ matrix.artifact }}
 
       - name: Prepare artifact (Windows)
-        if: matrix.os == 'windows'
-        shell: pwsh
+        if: contains(matrix.platform, 'windows')
         run: |
-          Move-Item -Path ./dist/release/QueryDump.exe -Destination ./dist/release/${{ matrix.artifact }}
+          mv ./dist/release/QueryDump.exe ./dist/release/${{ matrix.artifact }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -102,7 +83,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    name: Create Release
+    name: Create Release Archives
     needs: build
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -116,7 +97,7 @@ jobs:
       - name: Display structure
         run: ls -R artifacts
 
-      - name: Create Release Archive
+      - name: Create Release Archives
         run: |
           cd artifacts
           for dir in */; do
