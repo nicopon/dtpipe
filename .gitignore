@@ -1,0 +1,24 @@
+# User specific
+testScripts/
+exports/
+
+# Build results
+[Bb]in/
+[Oo]bj/
+dist/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.suo
+*.user
+*.sln.docstates
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dotnet
+.net/
+artifacts/
