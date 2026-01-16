@@ -65,25 +65,25 @@ jobs:
       - name: Prepare artifact (Unix)
         if: "!contains(matrix.platform, 'windows')"
         run: |
-          mv ./dist/release/QueryDump ./dist/release/${{ matrix.artifact }}
-          chmod +x ./dist/release/${{ matrix.artifact }}
+          mv ./dist/release/QueryDump ./dist/release/querydump
+          chmod +x ./dist/release/querydump
 
       - name: Prepare artifact (Windows)
         if: contains(matrix.platform, 'windows')
         run: |
-          mv ./dist/release/QueryDump.exe ./dist/release/${{ matrix.artifact }}
+          mv ./dist/release/QueryDump.exe ./dist/release/querydump.exe
 
       - name: Create archive (Unix)
         if: "!contains(matrix.platform, 'windows')"
         run: |
           cd ./dist/release
-          tar -czf ${{ matrix.artifact }}.tar.gz ${{ matrix.artifact }}
+          tar -czf ${{ matrix.artifact }}.tar.gz querydump
 
       - name: Create archive (Windows)
         if: contains(matrix.platform, 'windows')
         run: |
           cd ./dist/release
-          zip ${{ matrix.artifact }}.zip ${{ matrix.artifact }}
+          zip ${{ matrix.artifact }}.zip querydump.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
