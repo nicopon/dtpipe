@@ -174,7 +174,7 @@ To list available data generators:
 | `--fake-seed` | | Global seed for reproducible fakes | - |
 | `--fake-seed-column` | | Column for deterministic seeding | - |
 | `--fake-deterministic` | | Row-index based deterministic mode | false |
-| `--fake-table-size` | | Precomputed table size (power of 2) | 65536 |
+
 | **Reader Options** |
 | `--ora-fetch-size` | | Oracle fetch buffer size (bytes) | 1MB |
 

@@ -192,6 +192,7 @@ public class ExportService
         CancellationToken ct)
     {
         var buffer = new List<object?[]>(batchSize);
+        long cumulativeRows = 0;
 
         await foreach (var row in input.ReadAllAsync(ct))
         {
@@ -200,8 +201,9 @@ public class ExportService
             if (buffer.Count >= batchSize)
             {
                 await writer.WriteBatchAsync(buffer, ct);
+                cumulativeRows += buffer.Count;
                 updateRowCount(buffer.Count);
-                progress.Update(buffer.Count, writer.BytesWritten);
+                progress.Update(cumulativeRows, writer.BytesWritten);
                 buffer = new List<object?[]>(batchSize); // New buffer to avoid reference issues
             }
         }
@@ -210,8 +212,9 @@ public class ExportService
         if (buffer.Count > 0)
         {
             await writer.WriteBatchAsync(buffer, ct);
+            cumulativeRows += buffer.Count;
             updateRowCount(buffer.Count);
-            progress.Update(buffer.Count, writer.BytesWritten);
+            progress.Update(cumulativeRows, writer.BytesWritten);
         }
     }
 }

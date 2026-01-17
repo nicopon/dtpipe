@@ -21,8 +21,6 @@ public record FakeOptions : ITransformerOptions
     [Description("Column to use as seed for deterministic fake data (value-based)")]
     public string? SeedColumn { get; init; } = null;
     
-    [Description("Size of precomputed value table for deterministic mode (power of 2)")]
-    public int TableSize { get; init; } = 65536;
     
     [Description("Enable deterministic mode using row index as seed (when no seed column)")]
     public bool Deterministic { get; init; } = false;

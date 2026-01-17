@@ -20,11 +20,13 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
     
     // Deterministic mode fields
     private readonly string? _seedColumn;
-    private readonly int _tableSize;
     private readonly bool _deterministic;
     private int _seedColumnIndex = -1;
     private long _rowCounter = 0;  // For row-index-based deterministic mode
-    private Dictionary<int, object?[]>? _precomputedTables;
+    
+    // Paged Lazy Cache for deterministic mode
+    private const int PAGE_SIZE = 1024;
+    private Dictionary<int, PagedCache>? _pagedCaches;  // columnIndex -> cache
     
     // Regex to match {{COLUMN_NAME}} patterns - compiled once for performance
     [GeneratedRegex(@"\{\{([^}]+)\}\}", RegexOptions.Compiled)]
@@ -43,7 +45,6 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
         _registry = new FakerRegistry();
         _locale = options.Locale;
         _seedColumn = options.SeedColumn;
-        _tableSize = options.TableSize;
         _deterministic = options.Deterministic;
         
         _faker = options.Seed.HasValue 
@@ -161,7 +162,6 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
         }
 
         // Build generation order: non-templates first, then templates
-        // For now, simple ordering. Future: topological sort for nested templates
         _generationOrder = new int[nonTemplateColumns.Count + templateColumns.Count];
         var idx = 0;
         foreach (var col in nonTemplateColumns)
@@ -173,41 +173,26 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
             _generationOrder[idx++] = col;
         }
 
-        // Precompute tables for deterministic mode (seed column OR deterministic flag)
-        if (_seedColumn is not null || _deterministic)
+        // Resolve seed column index if specified (for deterministic mode)
+        if (_seedColumn is not null)
         {
-            // Resolve seed column index if specified
-            if (_seedColumn is not null)
+            if (!_columnNameToIndex.TryGetValue(_seedColumn, out _seedColumnIndex))
             {
-                if (!_columnNameToIndex.TryGetValue(_seedColumn, out _seedColumnIndex))
-                {
-                    throw new InvalidOperationException($"Seed column '{_seedColumn}' not found in result set.");
-                }
+                throw new InvalidOperationException($"Seed column '{_seedColumn}' not found in result set.");
             }
-            // else: _seedColumnIndex stays -1, will use row counter
-            
-            _precomputedTables = new Dictionary<int, object?[]>();
-            
+        }
+
+        // Initialize paged caches for deterministic mode
+        if (_deterministic || _seedColumnIndex >= 0)
+        {
+            _pagedCaches = new Dictionary<int, PagedCache>();
             foreach (var colIdx in _generationOrder)
             {
                 var processor = _processors[colIdx];
-                if (processor.IsTemplate || processor.Generator is null || processor.FakerPath is null)
+                if (!processor.IsTemplate && processor.Generator is not null && processor.FakerPath is not null)
                 {
-                    continue; // Skip templates and hardcoded strings
+                    _pagedCaches[colIdx] = new PagedCache(_locale, processor.Generator, processor.FakerHash);
                 }
-                
-                // Hash stable du faker path - garantit cohérence entre runs
-                var fakerHash = StableHash.ComputeFromString(processor.FakerPath);
-                
-                var table = new object?[_tableSize];
-                var tempFaker = new Faker(_locale);
-                for (int i = 0; i < _tableSize; i++)
-                {
-                    var seed = unchecked((int)(fakerHash + (uint)i));
-                    tempFaker.Random = new Randomizer(seed);
-                    table[i] = processor.Generator(tempFaker);
-                }
-                _precomputedTables[colIdx] = table;
             }
         }
 
@@ -240,20 +225,20 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
             }
         }
 
-        if (_precomputedTables is not null)
+        if (_pagedCaches is not null)
         {
-            int tableIndex;
+            // Paged Lazy Cache mode (deterministic)
+            int cacheIndex;
             if (_seedColumnIndex >= 0)
             {
-                // Seed column mode: hash the column value
+                // Based on column value
                 var seedValue = workingRow[_seedColumnIndex];
-                var hash = StableHash.Compute(seedValue);
-                tableIndex = (int)(hash % (uint)_tableSize);
+                cacheIndex = unchecked((int)StableHash.Compute(seedValue));
             }
             else
             {
-                // Row-index mode: use row counter directly
-                tableIndex = (int)(_rowCounter % (uint)_tableSize);
+                // Based on row index
+                cacheIndex = unchecked((int)_rowCounter);
                 _rowCounter++;
             }
 
@@ -264,21 +249,20 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
                 {
                     workingRow[colIdx] = SubstituteTemplate(processor.Template!, workingRow);
                 }
-                else if (_precomputedTables.TryGetValue(colIdx, out var table))
+                else if (_pagedCaches.TryGetValue(colIdx, out var cache))
                 {
-                     // Deterministic lookup
-                     workingRow[colIdx] = table[tableIndex];
+                    workingRow[colIdx] = cache.GetValue(cacheIndex);
                 }
                 else if (processor.Generator is not null)
                 {
-                    // Hardcoded string (no table)
-                    workingRow[colIdx] = processor.Generator(_faker!);
+                    // Fallback (e.g. hardcoded strings)
+                    workingRow[colIdx] = processor.Generator(_faker);
                 }
             }
         }
         else
         {
-            // Non-deterministic mode
+            // Non-deterministic mode (Standard Random)
             foreach (var colIdx in _generationOrder)
             {
                 var processor = _processors[colIdx];
@@ -288,7 +272,7 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
                 }
                 else if (processor.Generator is not null)
                 {
-                    workingRow[colIdx] = processor.Generator(_faker!);
+                    workingRow[colIdx] = processor.Generator(_faker);
                 }
             }
         }
@@ -425,6 +409,7 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
         public readonly string? Template;
         public readonly HashSet<string>? ReferencedColumns;
         public readonly string? FakerPath; // For deterministic mode hashing
+        public readonly uint FakerHash; // Precomputed hash
 
         public bool IsTemplate => Template is not null;
 
@@ -436,6 +421,7 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
             Template = null;
             ReferencedColumns = null;
             FakerPath = fakerPath;
+            FakerHash = fakerPath is not null ? StableHash.ComputeFromString(fakerPath) : 0;
         }
 
         // Constructor for template
@@ -446,7 +432,62 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
             Template = template;
             ReferencedColumns = referencedColumns;
             FakerPath = null;
+            FakerHash = 0;
+        }
+    }
+
+    /// <summary>
+    /// Lazily-populated paged cache for deterministic fake data generation.
+    /// Pages are generated on-demand to minimize Randomizer instantiation overhead.
+    /// </summary>
+    private sealed class PagedCache
+    {
+        private readonly string _locale;
+        private readonly Func<Faker, object?> _generator;
+        private readonly uint _fakerHash;
+        private readonly Dictionary<int, object?[]> _pages = new();
+
+        public PagedCache(string locale, Func<Faker, object?> generator, uint fakerHash)
+        {
+            _locale = locale;
+            _generator = generator;
+            _fakerHash = fakerHash;
+        }
+
+        public object? GetValue(int index)
+        {
+            // Apply modulo to limit total cached values (e.g., 64 pages × 1024 = 65536 values)
+            // This bounds memory while maintaining determinism (same index → same value)
+            const int MAX_CACHED_VALUES = 65536;
+            var boundedIndex = ((index % MAX_CACHED_VALUES) + MAX_CACHED_VALUES) % MAX_CACHED_VALUES;
+            
+            var pageIndex = boundedIndex / PAGE_SIZE;
+            var offset = boundedIndex % PAGE_SIZE;
+
+            if (!_pages.TryGetValue(pageIndex, out var page))
+            {
+                page = GeneratePage(pageIndex);
+                _pages[pageIndex] = page;
+            }
+
+            return page[offset];
+        }
+
+        private object?[] GeneratePage(int pageIndex)
+        {
+            // Compute a deterministic seed for this page
+            // Combine fakerHash + pageIndex to ensure different pages have different seeds
+            var pageSeed = unchecked((int)(_fakerHash + (uint)pageIndex * 397));
+            
+            var faker = new Faker(_locale) { Random = new Randomizer(pageSeed) };
+            var page = new object?[PAGE_SIZE];
+            
+            for (int i = 0; i < PAGE_SIZE; i++)
+            {
+                page[i] = _generator(faker);
+            }
+            
+            return page;
         }
     }
 }
-
