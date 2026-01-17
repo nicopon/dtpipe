@@ -52,9 +52,6 @@ public class CliService
         {
             foreach (var opt in contributor.GetCliOptions())
             {
-                // Avoid redundant options if multiple factories contribute same option?
-                // System.CommandLine might throw if duplicate alias.
-                // We trust factories to be distinct or share intentionally.
                 if (!rootCommand.Options.Any(o => o.Name == opt.Name))
                 {
                     rootCommand.Options.Add(opt);
@@ -64,19 +61,15 @@ public class CliService
 
         rootCommand.SetAction(async (parseResult, cancellationToken) =>
         {
-            // 1. Handle Fake List (Special Case)
-            if (parseResult.Tokens.Any(t => t.Value == "--fake-list"))
+            // 1. Contributor Autonomous Handling (e.g. valid flags that cause early exit like --fake-list, --version custom)
+            foreach (var contributor in _contributors)
             {
-                 // Handle special --fake-list flag which causes early exit.
-                 // This logic conceptually belongs to FakeDataTransformer but is handled here for CLI flow control.
-                 var isFakeList = parseResult.GetValue<bool>("--fake-list");
-                 if (isFakeList)
-                 {
-                     PrintFakerList();
-                     return 0;
-                 }
+                var exitCode = await contributor.HandleCommandAsync(parseResult, cancellationToken);
+                if (exitCode.HasValue)
+                {
+                    return exitCode.Value;
+                }
             }
-            // Just check --fake-list stringly typed is fine since we know FakeFactory adds it.
 
             // 2. Validate Core
             var query = parseResult.GetValue(queryOption);
@@ -101,7 +94,7 @@ public class CliService
             
             connection = ConnectionHelper.ResolveConnection(connection, provider);
             
-             if (string.IsNullOrWhiteSpace(connection))
+            if (string.IsNullOrWhiteSpace(connection))
             {
                 Console.Error.WriteLine("Error: Connection string required.");
                 return 1; // Exit code 1
@@ -202,21 +195,5 @@ public class CliService
         var name = string.Join(", ", allAliases.OrderByDescending(a => a.Length));
         var desc = opt.Description ?? "";
         Console.WriteLine($"  {name,-40} {desc}");
-    }
-    
-     private static void PrintFakerList()
-    {
-        var registry = new Transformers.Fake.FakerRegistry(); // Instantiating directly for list utility
-        Console.WriteLine("Available fakers (use format: COLUMN:dataset.method)");
-        Console.WriteLine();
-        foreach (var (dataset, methods) in registry.ListAll())
-        {
-            Console.WriteLine($"{char.ToUpper(dataset[0])}{dataset[1..]}:");
-            foreach (var (method, description) in methods)
-            {
-                Console.WriteLine($"  {$"{dataset}.{method}".ToLowerInvariant(),-30} {description}");
-            }
-            Console.WriteLine();
-        }
     }
 }

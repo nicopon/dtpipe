@@ -76,4 +76,36 @@ public class FakeDataTransformerFactory : IFakeDataTransformerFactory
 
         return new FakeDataTransformer(fakeOptions);
     }
+    
+    public Task<int?> HandleCommandAsync(ParseResult parseResult, CancellationToken ct = default)
+    {
+        // Check for --fake-list flag
+        if (parseResult.Tokens.Any(t => t.Value == "--fake-list"))
+        {
+             // Check value if needed, though presence is usually enough for a bool flag if defined properly
+             var isFakeList = parseResult.GetValue<bool>("--fake-list");
+             if (isFakeList)
+             {
+                 PrintFakerList();
+                 return Task.FromResult<int?>(0);
+             }
+        }
+        return Task.FromResult<int?>(null);
+    }
+    
+    private static void PrintFakerList()
+    {
+        var registry = new FakerRegistry();
+        Console.WriteLine("Available fakers (use format: COLUMN:dataset.method)");
+        Console.WriteLine();
+        foreach (var (dataset, methods) in registry.ListAll())
+        {
+            Console.WriteLine($"{char.ToUpper(dataset[0])}{dataset[1..]}:");
+            foreach (var (method, description) in methods)
+            {
+                Console.WriteLine($"  {$"{dataset}.{method}".ToLowerInvariant(),-30} {description}");
+            }
+            Console.WriteLine();
+        }
+    }
 }
