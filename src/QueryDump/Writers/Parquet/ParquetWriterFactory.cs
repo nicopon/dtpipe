@@ -8,7 +8,7 @@ using QueryDump.Writers.Parquet;
 
 namespace QueryDump.Writers.Parquet;
 
-public class ParquetWriterFactory : IWriterFactory
+public class ParquetWriterFactory : IDataWriterFactory
 {
     public string SupportedExtension => ".parquet";
     public string Category => "Writer Options";

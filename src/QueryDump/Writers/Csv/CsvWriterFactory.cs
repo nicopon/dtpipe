@@ -8,7 +8,7 @@ using QueryDump.Writers.Csv;
 
 namespace QueryDump.Writers.Csv;
 
-public class CsvWriterFactory : IWriterFactory
+public class CsvWriterFactory : IDataWriterFactory
 {
     private readonly OptionsRegistry _registry;
 

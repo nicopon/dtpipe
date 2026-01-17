@@ -2,12 +2,12 @@ using QueryDump.Configuration;
 using QueryDump.Core;
 using QueryDump.Core.Options;
 
-namespace QueryDump.Writers;
+namespace QueryDump.Core;
 
 /// <summary>
 /// Factory for creating data writers for a specific output format.
 /// </summary>
-public interface IWriterFactory : ICliContributor
+public interface IDataWriterFactory : ICliContributor
 {
     /// <summary>
     /// The file extension this factory handles (e.g., ".csv", ".parquet").

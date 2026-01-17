@@ -8,15 +8,15 @@ namespace QueryDump;
 
 public class ExportService
 {
-    private readonly IEnumerable<IReaderFactory> _readerFactories;
-    private readonly IEnumerable<IWriterFactory> _writerFactories;
-    private readonly IEnumerable<ITransformerFactory> _transformerFactories;
+    private readonly IEnumerable<IStreamReaderFactory> _readerFactories;
+    private readonly IEnumerable<IDataWriterFactory> _writerFactories;
+    private readonly IEnumerable<IDataTransformerFactory> _transformerFactories;
     private readonly OptionsRegistry _optionsRegistry;
 
     public ExportService(
-        IEnumerable<IReaderFactory> readerFactories, 
-        IEnumerable<IWriterFactory> writerFactories,
-        IEnumerable<ITransformerFactory> transformerFactories,
+        IEnumerable<IStreamReaderFactory> readerFactories, 
+        IEnumerable<IDataWriterFactory> writerFactories,
+        IEnumerable<IDataTransformerFactory> transformerFactories,
         OptionsRegistry optionsRegistry)
     {
         _readerFactories = readerFactories;

@@ -8,9 +8,9 @@ using QueryDump.Core.Options;
 
 namespace QueryDump.Transformers.Clone;
 
-public interface ICloneDataTransformerFactory : ITransformerFactory { }
+public interface ICloneDataTransformerFactory : IDataTransformerFactory { }
 
-public class CloneDataTransformerFactory : ICloneDataTransformerFactory
+public class CloneDataTransformerFactory : IDataTransformerFactory
 {
     private readonly OptionsRegistry _registry;
 

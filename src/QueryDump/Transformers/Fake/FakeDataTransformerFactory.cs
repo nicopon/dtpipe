@@ -11,7 +11,7 @@ namespace QueryDump.Transformers.Fake;
 /// <summary>
 /// Factory for creating fake data transformers.
 /// </summary>
-public interface IFakeDataTransformerFactory : ITransformerFactory
+public interface IFakeDataTransformerFactory : IDataTransformerFactory
 {
 }
 

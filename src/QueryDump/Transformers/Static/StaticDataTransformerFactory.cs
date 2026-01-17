@@ -8,9 +8,9 @@ using QueryDump.Core.Options;
 
 namespace QueryDump.Transformers.Static;
 
-public interface IStaticDataTransformerFactory : ITransformerFactory { }
+public interface IStaticDataTransformerFactory : IDataTransformerFactory { }
 
-public class StaticDataTransformerFactory : IStaticDataTransformerFactory
+public class StaticDataTransformerFactory : IDataTransformerFactory
 {
     private readonly OptionsRegistry _registry;
 

@@ -44,19 +44,19 @@ class Program
         services.AddSingleton<CliService>();
         
         // Reader Factories
-        services.AddSingleton<IReaderFactory, OracleReaderFactory>();
-        services.AddSingleton<IReaderFactory, SqlServerReaderFactory>();
-        services.AddSingleton<IReaderFactory, DuckDbReaderFactory>();
+        services.AddSingleton<IStreamReaderFactory, OracleReaderFactory>();
+        services.AddSingleton<IStreamReaderFactory, SqlServerReaderFactory>();
+        services.AddSingleton<IStreamReaderFactory, DuckDbReaderFactory>();
         
         // Writer Factories
-        services.AddSingleton<IWriterFactory, Writers.Csv.CsvWriterFactory>();
-        services.AddSingleton<IWriterFactory, Writers.Parquet.ParquetWriterFactory>();
+        services.AddSingleton<IDataWriterFactory, Writers.Csv.CsvWriterFactory>();
+        services.AddSingleton<IDataWriterFactory, Writers.Parquet.ParquetWriterFactory>();
         
         // Transformer Factories
-        services.AddSingleton<ITransformerFactory, NullDataTransformerFactory>();
-        services.AddSingleton<ITransformerFactory, StaticDataTransformerFactory>();
-        services.AddSingleton<ITransformerFactory, FakeDataTransformerFactory>();
-        services.AddSingleton<ITransformerFactory, CloneDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, NullDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, StaticDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, FakeDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, CloneDataTransformerFactory>();
         
         // Export Service
         services.AddSingleton<ExportService>();

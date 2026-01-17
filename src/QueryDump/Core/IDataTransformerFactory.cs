@@ -5,7 +5,7 @@ using QueryDump.Core.Options;
 
 namespace QueryDump.Core;
 
-public interface ITransformerFactory : ICliContributor
+public interface IDataTransformerFactory : ICliContributor
 {
     /// <summary>
     /// Creates the transformer if configured, or null if disabled.

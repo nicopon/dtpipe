@@ -16,9 +16,9 @@ public class CliService
 
     public CliService(
         IServiceProvider serviceProvider,
-        IEnumerable<IReaderFactory> readerFactories,
-        IEnumerable<ITransformerFactory> transformerFactories,
-        IEnumerable<IWriterFactory> writerFactories)
+        IEnumerable<IStreamReaderFactory> readerFactories,
+        IEnumerable<IDataTransformerFactory> transformerFactories,
+        IEnumerable<IDataWriterFactory> writerFactories)
     {
         _serviceProvider = serviceProvider;
         
@@ -92,7 +92,7 @@ public class CliService
             var provider = parseResult.GetValue(providerOption)!;
             var connection = parseResult.GetValue(connectionOption);
             
-            var readerFactories = _contributors.OfType<IReaderFactory>().ToList();
+            var readerFactories = _contributors.OfType<IStreamReaderFactory>().ToList();
 
             // Resolve connection using factories
             if (connection is null)

@@ -3,7 +3,7 @@ using QueryDump.Core;
 namespace QueryDump.Core;
 
 /// <summary>
-/// Interface for data writers (Parquet, CSV).
+/// Interface for data writers
 /// </summary>
 public interface IDataWriter : IAsyncDisposable
 {

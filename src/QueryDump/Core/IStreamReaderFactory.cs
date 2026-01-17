@@ -6,7 +6,7 @@ namespace QueryDump.Core;
 /// <summary>
 /// Factory for creating database readers for a specific provider.
 /// </summary>
-public interface IReaderFactory : ICliContributor
+public interface IStreamReaderFactory : ICliContributor
 {
     /// <summary>
     /// The provider name this factory handles (e.g., "oracle", "sqlserver", "duckdb").

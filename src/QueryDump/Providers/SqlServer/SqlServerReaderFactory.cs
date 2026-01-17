@@ -7,7 +7,7 @@ using QueryDump.Core.Options;
 
 namespace QueryDump.Providers.SqlServer;
 
-public class SqlServerReaderFactory : IReaderFactory
+public class SqlServerReaderFactory : IStreamReaderFactory
 {
     private readonly OptionsRegistry _registry;
 

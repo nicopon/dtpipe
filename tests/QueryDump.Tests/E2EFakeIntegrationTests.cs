@@ -63,13 +63,13 @@ public class E2EFakeIntegrationTests : IAsyncLifetime
         services.AddSingleton(registry);
         
         // Reader Factories
-        services.AddSingleton<IReaderFactory, DuckDbReaderFactory>();
+        services.AddSingleton<IStreamReaderFactory, DuckDbReaderFactory>();
         
         // Writer Factories
-        services.AddSingleton<IWriterFactory, CsvWriterFactory>();
+        services.AddSingleton<IDataWriterFactory, CsvWriterFactory>();
         
         // Transformer Factories
-        services.AddSingleton<ITransformerFactory, FakeDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, FakeDataTransformerFactory>();
         
         services.AddSingleton<ExportService>();
         
@@ -148,16 +148,16 @@ public class E2EFakeIntegrationTests : IAsyncLifetime
         services.AddSingleton(registry);
         
         // Reader Factories
-        services.AddSingleton<IReaderFactory, DuckDbReaderFactory>();
+        services.AddSingleton<IStreamReaderFactory, DuckDbReaderFactory>();
         
         // Writer Factories
-        services.AddSingleton<IWriterFactory, CsvWriterFactory>();
+        services.AddSingleton<IDataWriterFactory, CsvWriterFactory>();
         
         // Transformer Factories
-        services.AddSingleton<ITransformerFactory, Transformers.Null.NullDataTransformerFactory>();
-        services.AddSingleton<ITransformerFactory, Transformers.Static.StaticDataTransformerFactory>();
-        services.AddSingleton<ITransformerFactory, Transformers.Fake.FakeDataTransformerFactory>();
-        services.AddSingleton<ITransformerFactory, Transformers.Clone.CloneDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, Transformers.Null.NullDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, Transformers.Static.StaticDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, Transformers.Fake.FakeDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, Transformers.Clone.CloneDataTransformerFactory>();
         
         services.AddSingleton<ExportService>();
         

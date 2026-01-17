@@ -8,9 +8,9 @@ using QueryDump.Core.Options;
 
 namespace QueryDump.Transformers.Null;
 
-public interface INullDataTransformerFactory : ITransformerFactory { }
+public interface INullDataTransformerFactory : IDataTransformerFactory { }
 
-public class NullDataTransformerFactory : INullDataTransformerFactory
+public class NullDataTransformerFactory : IDataTransformerFactory
 {
     private readonly OptionsRegistry _registry;
 

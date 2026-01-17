@@ -7,7 +7,7 @@ using QueryDump.Core.Options;
 
 namespace QueryDump.Providers.Oracle;
 
-public class OracleReaderFactory : IReaderFactory
+public class OracleReaderFactory : IStreamReaderFactory
 {
     private readonly OptionsRegistry _registry;
 

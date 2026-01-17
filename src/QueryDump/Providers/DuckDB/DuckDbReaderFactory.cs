@@ -7,7 +7,7 @@ using QueryDump.Core.Options;
 
 namespace QueryDump.Providers.DuckDB;
 
-public class DuckDbReaderFactory : IReaderFactory
+public class DuckDbReaderFactory : IStreamReaderFactory
 {
     private readonly OptionsRegistry _registry;
 
