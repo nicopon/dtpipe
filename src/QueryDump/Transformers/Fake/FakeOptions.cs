@@ -9,19 +9,18 @@ public record FakeOptions : ITransformerOptions
     public static string Prefix => "fake";
     public static string DisplayName => "Anonymization";
     
-    [CliOption("--fake", Description = "Column:faker.method mapping (repeatable, e.g. 'NAME:name.firstname')")]
+    [CliOption("--fake", Description = "Column:faker mapping (e.g. EMAIL:internet.email, NAME:name.fullName#alt)")]
     public IReadOnlyList<string> Mappings { get; init; } = [];
     
-    [Description("Bogus locale for fake data (fr, de, es, etc.)")]
+    [Description("Locale for fake data (en, fr, de, es, ja, zh_CN...)")]
     public string Locale { get; init; } = "en";
     
-    [Description("Seed for reproducible fake data")]
+    [Description("Global seed for reproducible random fakes across all columns")]
     public int? Seed { get; init; } = null;
     
-    [Description("Column to use as seed for deterministic fake data (value-based)")]
+    [Description("Column to use as seed (same value = same fake output, ideal for ID columns)")]
     public string? SeedColumn { get; init; } = null;
     
-    
-    [Description("Enable deterministic mode using row index as seed (when no seed column)")]
+    [Description("Row-index based deterministic mode (row N always gets same values)")]
     public bool Deterministic { get; init; } = false;
 }

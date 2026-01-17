@@ -169,12 +169,12 @@ To list available data generators:
 | `--null` | | Column(s) to set to null (repeatable) | - |
 | `--overwrite` | | `COLUMN:value` static overwrite (repeatable) | - |
 | `--clone` | | `TARGET:{{SOURCE}}` template clone (repeatable) | - |
-| `--fake` | | `COLUMN:dataset.method` mapping (repeatable) | - |
-| `--fake-locale` | | Bogus locale for fake data | `en` |
-| `--fake-seed` | | Global seed for reproducible fakes | - |
-| `--fake-seed-column` | | Column for deterministic seeding | - |
-| `--fake-deterministic` | | Row-index based deterministic mode | false |
-
+| `--fake` | | `COLUMN:faker.method` mapping (supports `#variant` suffix) | - |
+| `--fake-locale` | | Locale for fake data (en, fr, de, ja, zh_CN...) | `en` |
+| `--fake-seed` | | Global seed for reproducible random fakes | - |
+| `--fake-seed-column` | | Column for deterministic seeding (same value = same output) | - |
+| `--fake-deterministic` | | Row-index based deterministic mode | `false` |
+| `--fake-list` | | List all available fake data generators and exit | - |
 | **Reader Options** |
 | `--ora-fetch-size` | | Oracle fetch buffer size (bytes) | 1MB |
 
