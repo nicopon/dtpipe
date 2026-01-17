@@ -19,6 +19,16 @@ public class OracleReaderFactory : IReaderFactory
     public string ProviderName => "oracle";
     public string Category => "Reader Options";
 
+    public string? ResolveConnectionFromEnvironment() => Environment.GetEnvironmentVariable("ORACLE_CONNECTION_STRING");
+
+    public bool CanHandle(string connectionString)
+    {
+        // Simple heuristic: Contains "Data Source=" or looks like a TNS alias (no space, no semicolons)
+        // Or starts with protocol like "tcps://"
+        return connectionString.Contains("Data Source=", StringComparison.OrdinalIgnoreCase) 
+               || !connectionString.Contains(';'); 
+    }
+
     public IStreamReader Create(DumpOptions options)
     {
         return new OracleStreamReader(

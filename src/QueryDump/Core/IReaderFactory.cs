@@ -19,6 +19,16 @@ public interface IReaderFactory : ICliContributor
     IStreamReader Create(DumpOptions options);
     
     /// <summary>
+    /// Resolves the default connection string from environment variables.
+    /// </summary>
+    string? ResolveConnectionFromEnvironment();
+
+    /// <summary>
+    /// Checks if the factory can handle the given connection string (for auto-detection).
+    /// </summary>
+    bool CanHandle(string connectionString);
+        
+    /// <summary>
     /// Gets the option types supported by this reader.
     /// </summary>
     IEnumerable<Type> GetSupportedOptionTypes();

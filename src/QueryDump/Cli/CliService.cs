@@ -92,7 +92,36 @@ public class CliService
             var provider = parseResult.GetValue(providerOption)!;
             var connection = parseResult.GetValue(connectionOption);
             
-            connection = ConnectionHelper.ResolveConnection(connection, provider);
+            var readerFactories = _contributors.OfType<IReaderFactory>().ToList();
+
+            // Resolve connection using factories
+            if (connection is null)
+            {
+                // Try to resolve based on provider if set, or just try all
+                if (string.Equals(provider, "auto", StringComparison.OrdinalIgnoreCase))
+                {
+                     // Try all readers for a default connection
+                     foreach (var factory in readerFactories)
+                     {
+                         var def = factory.ResolveConnectionFromEnvironment();
+                         if (def != null)
+                         {
+                             // We found a default connection. Is it the only one? 
+                             // Logic: If we find one, we use it. But which one if multiple?
+                             // Original logic: Oracle ?? SqlServer ?? DuckDB. Order of enumeration matters.
+                             // List order is fixed by DI registration order.
+                             connection = def;
+                             break;
+                         }
+                     }
+                }
+                else
+                {
+                    // Specific provider
+                    var factory = readerFactories.FirstOrDefault(f => f.ProviderName.Equals(provider, StringComparison.OrdinalIgnoreCase));
+                    connection = factory?.ResolveConnectionFromEnvironment();
+                }
+            }
             
             if (string.IsNullOrWhiteSpace(connection))
             {
@@ -102,19 +131,15 @@ public class CliService
 
             if (string.Equals(provider, "auto", StringComparison.OrdinalIgnoreCase))
             {
-                var detected = ProviderDetector.Detect(connection);
-                if (detected == DatabaseProvider.Unknown)
+                // Auto-detect provider using factories
+                var detectedFactory = readerFactories.FirstOrDefault(f => f.CanHandle(connection));
+                
+                if (detectedFactory == null)
                 {
                      Console.Error.WriteLine("Error: Could not auto-detect provider.");
                      return 1;
                 }
-                 provider = detected switch
-                {
-                    DatabaseProvider.Oracle => "oracle",
-                    DatabaseProvider.SqlServer => "sqlserver",
-                    DatabaseProvider.DuckDB => "duckdb",
-                    _ => "unknown"
-                };
+                provider = detectedFactory.ProviderName;
                 Console.WriteLine($"Auto-detected provider: {provider}");
             }
 

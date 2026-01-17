@@ -19,6 +19,15 @@ public class SqlServerReaderFactory : IReaderFactory
     public string ProviderName => "sqlserver";
     public string Category => "Reader Options";
 
+    public string? ResolveConnectionFromEnvironment() => Environment.GetEnvironmentVariable("MSSQL_CONNECTION_STRING");
+
+    public bool CanHandle(string connectionString)
+    {
+        return connectionString.Contains("Server=", StringComparison.OrdinalIgnoreCase) 
+               || connectionString.Contains("Initial Catalog=", StringComparison.OrdinalIgnoreCase)
+               || connectionString.Contains("Integrated Security=", StringComparison.OrdinalIgnoreCase);
+    }
+
     public IStreamReader Create(DumpOptions options)
     {
         return new SqlServerStreamReader(

@@ -19,6 +19,16 @@ public class DuckDbReaderFactory : IReaderFactory
     public string ProviderName => "duckdb";
     public string Category => "Reader Options";
 
+    public string? ResolveConnectionFromEnvironment() => Environment.GetEnvironmentVariable("DUCKDB_CONNECTION_STRING");
+
+    public bool CanHandle(string connectionString)
+    {
+        // DuckDB often just takes a file path or usage of specific keys
+        return connectionString.EndsWith(".duckdb", StringComparison.OrdinalIgnoreCase)
+               || connectionString.EndsWith(".db", StringComparison.OrdinalIgnoreCase)
+               || connectionString.Contains("DataSource=", StringComparison.OrdinalIgnoreCase) && connectionString.Contains(".duckdb", StringComparison.OrdinalIgnoreCase);
+    }
+
     public IStreamReader Create(DumpOptions options)
     {
         return new DuckDataSourceReader(
