@@ -28,13 +28,14 @@ public sealed partial class CloneDataTransformer : IDataTransformer, IRequiresOp
         }
     }
 
-    public ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
+    public ValueTask<IReadOnlyList<ColumnInfo>> InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
     {
         if (_mappings.Count == 0)
         {
-            return ValueTask.CompletedTask;
+            return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
         }
 
+        // Input columns already include virtual columns from upstream transformers (e.g., Fake)
         _columnNameToIndex = columns.Select((c, i) => (c.Name, i))
             .ToDictionary(x => x.Name, x => x.i, StringComparer.OrdinalIgnoreCase);
         
@@ -55,27 +56,23 @@ public sealed partial class CloneDataTransformer : IDataTransformer, IRequiresOp
         // We only need to sort the target columns.
         _generationOrder = TopologicalSort(targetIndices, _processors);
 
-        return ValueTask.CompletedTask;
+        return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
     }
 
-    public ValueTask<IReadOnlyList<object?[]>> TransformAsync(IReadOnlyList<object?[]> batch, CancellationToken ct = default)
+    public object?[] Transform(object?[] row)
     {
-        if (_generationOrder == null || batch.Count == 0)
+        if (_generationOrder == null)
         {
-            return new ValueTask<IReadOnlyList<object?[]>>(batch);
+            return row;
         }
 
-        // In-place modification
-        foreach (var row in batch)
+        foreach (var idx in _generationOrder)
         {
-            foreach (var idx in _generationOrder)
-            {
-                var proc = _processors![idx];
-                row[idx] = SubstituteTemplate(proc.Template, row);
-            }
+            var proc = _processors![idx];
+            row[idx] = SubstituteTemplate(proc.Template, row);
         }
 
-        return new ValueTask<IReadOnlyList<object?[]>>(batch);
+        return row;
     }
 
     private int[] TopologicalSort(List<int> targets, ColumnProcessor[] processors)

@@ -18,7 +18,7 @@ public class StaticDataTransformerTests
 
         // Act
         await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-        var result = await transformer.TransformAsync(rows, TestContext.Current.CancellationToken);
+        var result = rows.Select(r => transformer.Transform(r)).ToList();
 
         // Assert
         result[0][0].Should().Be("Paris");
@@ -35,7 +35,7 @@ public class StaticDataTransformerTests
 
         // Act
         await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-        var result = await transformer.TransformAsync(rows, TestContext.Current.CancellationToken);
+        var result = rows.Select(r => transformer.Transform(r)).ToList();
 
         // Assert
         result[0][0].Should().Be("London");

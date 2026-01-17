@@ -23,4 +23,7 @@ public record FakeOptions : ITransformerOptions
     
     [Description("Size of precomputed value table for deterministic mode (power of 2)")]
     public int TableSize { get; init; } = 65536;
+    
+    [Description("Enable deterministic mode using row index as seed (when no seed column)")]
+    public bool Deterministic { get; init; } = false;
 }

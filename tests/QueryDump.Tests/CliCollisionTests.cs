@@ -45,8 +45,7 @@ public class CliCollisionTests
         foreach (var type in contributorTypes)
         {
             object instance;
-            // Most factories either take (OptionsRegistry) or ().
-            // If we add complex deps later, we'll need a mock helper here.
+            // Most factories take (OptionsRegistry).
             try 
             {
                 instance = Activator.CreateInstance(type, optionsRegistry)!;

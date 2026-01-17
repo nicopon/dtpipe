@@ -21,7 +21,9 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
     // Deterministic mode fields
     private readonly string? _seedColumn;
     private readonly int _tableSize;
+    private readonly bool _deterministic;
     private int _seedColumnIndex = -1;
+    private long _rowCounter = 0;  // For row-index-based deterministic mode
     private Dictionary<int, object?[]>? _precomputedTables;
     
     // Regex to match {{COLUMN_NAME}} patterns - compiled once for performance
@@ -32,6 +34,9 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
     private int[]? _generationOrder;  // Indices in order of generation (dependencies first)
     private ColumnProcessor[]? _processors;  // Pre-built processors for each column
     private Dictionary<string, int>? _columnNameToIndex;  // Fast lookup for template substitution
+    private List<string> _virtualColumns = new();  // Columns defined in --fake but not in query
+    private int _realColumnCount;  // Number of real columns from query
+    private IReadOnlyList<ColumnInfo>? _inputColumns;  // Store for building output schema
 
     public FakeDataTransformer(FakeOptions options)
     {
@@ -39,10 +44,16 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
         _locale = options.Locale;
         _seedColumn = options.SeedColumn;
         _tableSize = options.TableSize;
+        _deterministic = options.Deterministic;
         
         _faker = options.Seed.HasValue 
             ? new Faker(options.Locale) { Random = new Randomizer(options.Seed.Value) } 
             : new Faker(options.Locale);
+
+        if (_deterministic && !string.IsNullOrEmpty(_seedColumn))
+        {
+            throw new ArgumentException("Options --fake-deterministic and --fake-seedcolumn cannot be used together.");
+        }
 
         if (options.Mappings is not null)
         {
@@ -63,27 +74,46 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
     /// </summary>
     public FakerRegistry Registry => _registry;
 
-    public ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
+    public ValueTask<IReadOnlyList<ColumnInfo>> InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
     {
+        _inputColumns = columns;
+        
         if (!HasMappings)
         {
             _processors = null;
             _generationOrder = null;
-            return ValueTask.CompletedTask;
+            return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
         }
 
         // Build column name to index map (once)
         _columnNameToIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        _realColumnCount = columns.Count;
         for (var i = 0; i < columns.Count; i++)
         {
             _columnNameToIndex[columns[i].Name] = i;
         }
+        
+        // Detect virtual columns: defined in --fake but not in query results
+        _virtualColumns.Clear();
+        foreach (var colName in _mappings.Keys)
+        {
+            if (!_columnNameToIndex.ContainsKey(colName))
+            {
+                // Virtual column: assign next available index
+                var virtualIndex = _realColumnCount + _virtualColumns.Count;
+                _columnNameToIndex[colName] = virtualIndex;
+                _virtualColumns.Add(colName);
+            }
+        }
+        
+        var totalColumns = _realColumnCount + _virtualColumns.Count;
 
-        // Build processors for each mapped column
-        _processors = new ColumnProcessor[columns.Count];
+        // Build processors for each mapped column (real and virtual)
+        _processors = new ColumnProcessor[totalColumns];
         var templateColumns = new List<int>();
         var nonTemplateColumns = new List<int>();
 
+        // Process real columns
         for (var i = 0; i < columns.Count; i++)
         {
             var colName = columns[i].Name;
@@ -109,6 +139,26 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
                 nonTemplateColumns.Add(i);
             }
         }
+        
+        // Process virtual columns
+        foreach (var virtualCol in _virtualColumns)
+        {
+            var virtualIndex = _columnNameToIndex[virtualCol];
+            var fakerPath = _mappings[virtualCol];
+            
+            if (IsTemplate(fakerPath))
+            {
+                var referencedColumns = ExtractReferencedColumns(fakerPath);
+                _processors[virtualIndex] = new ColumnProcessor(virtualIndex, fakerPath, referencedColumns);
+                templateColumns.Add(virtualIndex);
+            }
+            else
+            {
+                var generator = BuildGenerator(fakerPath, virtualCol);
+                _processors[virtualIndex] = new ColumnProcessor(virtualIndex, generator, fakerPath);
+                nonTemplateColumns.Add(virtualIndex);
+            }
+        }
 
         // Build generation order: non-templates first, then templates
         // For now, simple ordering. Future: topological sort for nested templates
@@ -123,13 +173,18 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
             _generationOrder[idx++] = col;
         }
 
-        // Precompute tables for deterministic mode
-        if (_seedColumn is not null)
+        // Precompute tables for deterministic mode (seed column OR deterministic flag)
+        if (_seedColumn is not null || _deterministic)
         {
-            if (!_columnNameToIndex.TryGetValue(_seedColumn, out _seedColumnIndex))
+            // Resolve seed column index if specified
+            if (_seedColumn is not null)
             {
-                throw new InvalidOperationException($"Seed column '{_seedColumn}' not found in result set.");
+                if (!_columnNameToIndex.TryGetValue(_seedColumn, out _seedColumnIndex))
+                {
+                    throw new InvalidOperationException($"Seed column '{_seedColumn}' not found in result set.");
+                }
             }
+            // else: _seedColumnIndex stays -1, will use row counter
             
             _precomputedTables = new Dictionary<int, object?[]>();
             
@@ -156,66 +211,89 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
             }
         }
 
-        return ValueTask.CompletedTask;
+        // Build output schema: input columns + virtual columns
+        var outputColumns = new List<ColumnInfo>(columns);
+        foreach (var virtualCol in _virtualColumns)
+        {
+            outputColumns.Add(new ColumnInfo(virtualCol, typeof(string), true, IsVirtual: true));
+        }
+        
+        return new ValueTask<IReadOnlyList<ColumnInfo>>(outputColumns);
     }
 
-    public ValueTask<IReadOnlyList<object?[]>> TransformAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
+    public object?[] Transform(object?[] row)
     {
-        if (_processors is null || _generationOrder is null || rows.Count == 0)
+        if (_processors is null || _generationOrder is null)
         {
-            return new ValueTask<IReadOnlyList<object?[]>>(rows);
+            return row;
         }
 
-        // Deterministic mode: use precomputed tables
-        if (_precomputedTables is not null && _seedColumnIndex >= 0)
+        // Row expansion
+        object?[] workingRow = row;
+        if (_virtualColumns.Count > 0)
         {
-            foreach (var row in rows)
+            var totalColumns = _realColumnCount + _virtualColumns.Count;
+            if (row.Length < totalColumns)
             {
-                var seedValue = row[_seedColumnIndex];
+                workingRow = new object?[totalColumns];
+                Array.Copy(row, workingRow, row.Length);
+            }
+        }
+
+        if (_precomputedTables is not null)
+        {
+            int tableIndex;
+            if (_seedColumnIndex >= 0)
+            {
+                // Seed column mode: hash the column value
+                var seedValue = workingRow[_seedColumnIndex];
                 var hash = StableHash.Compute(seedValue);
-                var tableIndex = (int)(hash % (uint)_tableSize);
-                
-                foreach (var colIdx in _generationOrder)
+                tableIndex = (int)(hash % (uint)_tableSize);
+            }
+            else
+            {
+                // Row-index mode: use row counter directly
+                tableIndex = (int)(_rowCounter % (uint)_tableSize);
+                _rowCounter++;
+            }
+
+            foreach (var colIdx in _generationOrder)
+            {
+                var processor = _processors[colIdx];
+                if (processor.IsTemplate)
                 {
-                    var processor = _processors[colIdx];
-                    if (processor.IsTemplate)
-                    {
-                        row[colIdx] = SubstituteTemplate(processor.Template!, row);
-                    }
-                    else if (_precomputedTables.TryGetValue(colIdx, out var table))
-                    {
-                        // Deterministic lookup
-                        row[colIdx] = table[tableIndex];
-                    }
-                    else if (processor.Generator is not null)
-                    {
-                        // Hardcoded string (no table)
-                        row[colIdx] = processor.Generator(_faker);
-                    }
+                    workingRow[colIdx] = SubstituteTemplate(processor.Template!, workingRow);
+                }
+                else if (_precomputedTables.TryGetValue(colIdx, out var table))
+                {
+                     // Deterministic lookup
+                     workingRow[colIdx] = table[tableIndex];
+                }
+                else if (processor.Generator is not null)
+                {
+                    // Hardcoded string (no table)
+                    workingRow[colIdx] = processor.Generator(_faker!);
                 }
             }
         }
         else
         {
-            // Non-deterministic mode (original behavior)
-            foreach (var row in rows)
+            // Non-deterministic mode
+            foreach (var colIdx in _generationOrder)
             {
-                foreach (var colIdx in _generationOrder)
+                var processor = _processors[colIdx];
+                if (processor.IsTemplate)
                 {
-                    var processor = _processors[colIdx];
-                    if (processor.IsTemplate)
-                    {
-                        row[colIdx] = SubstituteTemplate(processor.Template!, row);
-                    }
-                    else if (processor.Generator is not null)
-                    {
-                        row[colIdx] = processor.Generator(_faker);
-                    }
+                    workingRow[colIdx] = SubstituteTemplate(processor.Template!, workingRow);
+                }
+                else if (processor.Generator is not null)
+                {
+                    workingRow[colIdx] = processor.Generator(_faker!);
                 }
             }
         }
 
-        return new ValueTask<IReadOnlyList<object?[]>>(rows);
+        return workingRow;
     }
 
     private static bool IsTemplate(string value) => value.Contains("{{");
@@ -247,7 +325,11 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
 
     private Func<Faker, object?>? BuildGenerator(string fakerPath, string colName)
     {
-        var generator = _registry.GetGenerator(fakerPath.ToLowerInvariant());
+        // Extract variant suffix (#xxx) if present
+        var hashIndex = fakerPath.IndexOf('#');
+        var basePath = hashIndex >= 0 ? fakerPath[..hashIndex] : fakerPath;
+        
+        var generator = _registry.GetGenerator(basePath.ToLowerInvariant());
         
         if (generator is not null)
         {
@@ -255,15 +337,15 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
         }
 
         // Check if it was supposed to be a faker (valid dataset)
-        var parts = fakerPath.Split('.', 2);
+        var parts = basePath.Split('.', 2);
         var dataset = parts.Length > 0 ? parts[0] : "";
         
         if (_registry.HasDataset(dataset))
         {
-            throw new InvalidOperationException($"Unknown faker method '{fakerPath}' for column '{colName}'. Use --fake-list to see available options.");
+            throw new InvalidOperationException($"Unknown faker method '{basePath}' for column '{colName}'. Use --fake-list to see available options.");
         }
 
-        // Hardcoded string fallback
+        // Hardcoded string fallback (return full path including variant)
         return _ => fakerPath;
     }
 
@@ -294,24 +376,31 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
         }
 
         // For fakers/strings, apply existing validation logic
-        var parts = value.Split('.', 2);
+        // Extract variant suffix (#xxx) if present - used for same-faker different values
+        var hashIndex = value.IndexOf('#');
+        var baseFakerPath = hashIndex >= 0 ? value[..hashIndex] : value;
+        var variant = hashIndex >= 0 ? value[(hashIndex + 1)..] : null;
+        
+        var parts = baseFakerPath.Split('.', 2);
         var datasetName = parts.Length > 0 ? parts[0] : string.Empty;
 
         if (_registry.HasDataset(datasetName))
         {
-            if (!_registry.HasGenerator(value))
+            if (!_registry.HasGenerator(baseFakerPath))
             {
-                throw new InvalidOperationException($"Unknown faker method '{value}' for dataset '{datasetName}'. Use --fake-list to see available options.");
+                throw new InvalidOperationException($"Unknown faker method '{baseFakerPath}' for dataset '{datasetName}'. Use --fake-list to see available options.");
             }
+            // Store full path including variant for distinct hashing
             _mappings[column] = value;
         }
         else if (value.Contains(':'))
         {
              // Fallback: User might have used colon instead of dot (e.g. "finance:iban")
-             var normalized = value.Replace(':', '.');
+             var normalized = baseFakerPath.Replace(':', '.');
              if (_registry.HasGenerator(normalized))
              {
-                 _mappings[column] = normalized;
+                 // Keep variant if present
+                 _mappings[column] = variant is not null ? $"{normalized}#{variant}" : normalized;
              }
              else
              {

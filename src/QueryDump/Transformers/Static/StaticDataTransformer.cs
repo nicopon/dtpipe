@@ -25,12 +25,12 @@ public class StaticDataTransformer : IDataTransformer, IRequiresOptions<Overwrit
         }
     }
 
-    public ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
+    public ValueTask<IReadOnlyList<ColumnInfo>> InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
     {
         if (_staticMappings.Count == 0)
         {
             _columnValues = null;
-            return ValueTask.CompletedTask;
+            return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
         }
 
         bool hasMapping = false;
@@ -50,28 +50,25 @@ public class StaticDataTransformer : IDataTransformer, IRequiresOptions<Overwrit
         }
 
         _columnValues = hasMapping ? values : null;
-        return ValueTask.CompletedTask;
+        return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
     }
 
-    public ValueTask<IReadOnlyList<object?[]>> TransformAsync(IReadOnlyList<object?[]> batch, CancellationToken ct = default)
+    public object?[] Transform(object?[] row)
     {
-        if (_columnValues == null || batch.Count == 0)
+        if (_columnValues == null)
         {
-            return new ValueTask<IReadOnlyList<object?[]>>(batch);
+            return row;
         }
 
         // In-place modification
-        foreach (var row in batch)
+        for (var i = 0; i < row.Length; i++)
         {
-            for (var i = 0; i < row.Length; i++)
+            if (_columnValues[i] != null)
             {
-                if (_columnValues[i] != null)
-                {
-                    row[i] = _columnValues[i];
-                }
+                row[i] = _columnValues[i];
             }
         }
 
-        return new ValueTask<IReadOnlyList<object?[]>>(batch);
+        return row;
     }
 }

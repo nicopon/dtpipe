@@ -23,7 +23,7 @@ public class CloneDataTransformerTests
 
         // Act
         await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-        var result = await transformer.TransformAsync(rows, TestContext.Current.CancellationToken);
+        var result = rows.Select(r => transformer.Transform(r)).ToList();
 
         // Assert
         result[0][2].Should().Be("John Doe");
@@ -57,7 +57,7 @@ public class CloneDataTransformerTests
 
         // Act
         await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-        var result = await transformer.TransformAsync(rows, TestContext.Current.CancellationToken);
+        var result = rows.Select(r => transformer.Transform(r)).ToList();
 
         // Assert
         result[0][1].Should().Be("Base Copied");
@@ -89,7 +89,7 @@ public class CloneDataTransformerTests
         var rows = new List<object?[]> { new object?[] { "SourceData", "Old" } };
 
         await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-        var result = await transformer.TransformAsync(rows, TestContext.Current.CancellationToken);
+        var result = rows.Select(r => transformer.Transform(r)).ToList();
 
         result[0][1].Should().Be("SourceData");
     }

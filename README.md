@@ -84,7 +84,23 @@ Use `--null` to explicitly set columns to null:
 --null "INTERNAL_ID"
 ```
 
-### 7. Deterministic Fake Data
+### 7. Static Value Overwrite
+Use `--overwrite` to replace column values with a static string:
+
+```bash
+--overwrite "STATUS:anonymized"
+--overwrite "COMMENT:redacted"
+```
+
+### 8. Clone Columns with Templates
+Use `--clone` to copy values from other columns using templates:
+
+```bash
+--clone "DISPLAY_NAME:{{FIRSTNAME}} {{LASTNAME}}"
+--clone "FULL_ADDRESS:{{STREET}}, {{CITY}} {{ZIP}}"
+```
+
+### 9. Deterministic Fake Data
 Use `--fake-seed-column` to generate reproducible fake data based on a source column value:
 
 ```bash
@@ -97,6 +113,41 @@ Use `--fake-seed-column` to generate reproducible fake data based on a source co
 ```
 
 This ensures that the same `USER_ID` always produces the same fake `USERNAME` and `EMAIL`, even across different runs.
+
+### 10. Row-Index Deterministic Mode
+Use `--fake-deterministic` without a seed column for reproducible fakes based on row position:
+
+```bash
+./dist/release/querydump \
+  -q "SELECT * FROM USERS ORDER BY ID" \
+  -o users_anon.csv \
+  --fake "USERNAME:name.fullname" \
+  --fake-deterministic
+```
+
+### 11. Variant Suffix for Different Values
+Use `#variant` suffix to get different values from the same faker:
+
+```bash
+--fake "EMAIL_PERSO:internet.email"      # Value A
+--fake "EMAIL_PRO:internet.email#work"   # Different value B
+--fake "EMAIL_BKP:internet.email#work"   # Same as EMAIL_PRO (same variant)
+```
+
+### 12. Virtual Columns for Composition
+Create fake columns not in query, then compose them with `--clone`:
+
+```bash
+# Query: SELECT USER_ID, BANK_REF FROM users
+./dist/release/querydump \
+  -q "SELECT USER_ID, BANK_REF FROM users" \
+  -o users.csv \
+  --fake "IBAN:finance.iban" \
+  --fake "BIC:finance.bic" \
+  --clone "BANK_REF:{{IBAN}}-{{BIC}}"
+```
+
+Virtual columns (IBAN, BIC) are automatically detected (not in query) and available for `--clone` templates.
 
 To list available data generators:
 ```bash
@@ -111,12 +162,21 @@ To list available data generators:
 | `--output` | `-o` | Output file (.parquet or .csv) | **Required** |
 | `--connection` | `-c` | Connection string | Auto (ENV) |
 | `--provider` | `-p` | `auto`, `oracle`, `sqlserver`, `duckdb`... | `auto` |
-| `--fake` | | Mapping `COLUMN:dataset.method` | - |
-| `--fake-locale` | | Locale for fake data | `en` |
-| `--fake-seed-column` | | Column for deterministic seeding | - |
-| `--oracle-fetch-size` | `-f` | Oracle read buffer size (bytes) | 1MB |
-| `--batch-size` | `-b` | Output batch size (rows per Parquet group / CSV flush) | 50k |
+| `--batch-size` | `-b` | Rows per output batch | 5000 |
 | `--connection-timeout` | | Connection timeout (seconds) | 10 |
+| `--query-timeout` | | Query timeout (seconds, 0=none) | 0 |
+| **Transformers** |
+| `--null` | | Column(s) to set to null (repeatable) | - |
+| `--overwrite` | | `COLUMN:value` static overwrite (repeatable) | - |
+| `--clone` | | `TARGET:{{SOURCE}}` template clone (repeatable) | - |
+| `--fake` | | `COLUMN:dataset.method` mapping (repeatable) | - |
+| `--fake-locale` | | Bogus locale for fake data | `en` |
+| `--fake-seed` | | Global seed for reproducible fakes | - |
+| `--fake-seed-column` | | Column for deterministic seeding | - |
+| `--fake-deterministic` | | Row-index based deterministic mode | false |
+| `--fake-table-size` | | Precomputed table size (power of 2) | 65536 |
+| **Reader Options** |
+| `--ora-fetch-size` | | Oracle fetch buffer size (bytes) | 1MB |
 
 ## Common Fakers
 

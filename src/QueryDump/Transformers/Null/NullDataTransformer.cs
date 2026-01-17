@@ -18,12 +18,12 @@ public class NullDataTransformer : IDataTransformer, IRequiresOptions<NullOption
         _nullColumns = new HashSet<string>(options.Columns.Select(c => c.Trim()), StringComparer.OrdinalIgnoreCase);
     }
 
-    public ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
+    public ValueTask<IReadOnlyList<ColumnInfo>> InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
     {
         if (_nullColumns.Count == 0)
         {
             _targetIndices = null;
-            return ValueTask.CompletedTask;
+            return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
         }
 
         var indices = new List<int>();
@@ -36,25 +36,21 @@ public class NullDataTransformer : IDataTransformer, IRequiresOptions<NullOption
         }
 
         _targetIndices = indices.Count > 0 ? indices.ToArray() : null;
-        return ValueTask.CompletedTask;
+        return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
     }
 
-    public ValueTask<IReadOnlyList<object?[]>> TransformAsync(IReadOnlyList<object?[]> batch, CancellationToken ct = default)
+    public object?[] Transform(object?[] row)
     {
-        if (_targetIndices == null || batch.Count == 0)
+        if (_targetIndices == null)
         {
-            return new ValueTask<IReadOnlyList<object?[]>>(batch);
+            return row;
         }
 
-        // Perform in-place modification for performance
-        foreach (var row in batch)
+        foreach (var idx in _targetIndices)
         {
-            foreach (var idx in _targetIndices)
-            {
-                row[idx] = null;
-            }
+            row[idx] = null;
         }
 
-        return new ValueTask<IReadOnlyList<object?[]>>(batch);
+        return row;
     }
 }

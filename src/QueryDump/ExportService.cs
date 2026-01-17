@@ -1,3 +1,4 @@
+using System.Threading.Channels;
 using QueryDump.Configuration;
 using QueryDump.Core;
 using QueryDump.Core.Options;
@@ -61,12 +62,14 @@ public class ExportService
         // Sort by Priority (Low -> High)
         pipeline.Sort((a, b) => a.Priority.CompareTo(b.Priority));
 
+        // Cascade initialization: output of one transformer becomes input to next
+        var currentSchema = reader.Columns;
         if (pipeline.Count > 0)
         {
              Console.Error.WriteLine($"Transformation Pipeline: {string.Join(" -> ", pipeline.Select(p => $"{p.GetType().Name} (Pr:{p.Priority})"))}");
              foreach (var t in pipeline)
              {
-                 await t.InitializeAsync(reader.Columns, ct);
+                 currentSchema = await t.InitializeAsync(currentSchema, ct);
              }
         }
 
@@ -76,44 +79,139 @@ public class ExportService
             f.SupportedExtension.Equals(extension, StringComparison.OrdinalIgnoreCase))
             ?? throw new ArgumentException($"Unsupported file format: {extension}. Supported: {string.Join(", ", _writerFactories.Select(f => f.SupportedExtension))}");
 
+        // Writer receives only non-virtual columns (for output)
+        var exportableSchema = currentSchema.Where(c => !c.IsVirtual).ToList();
         await using var writer = writerFactory.Create(options);
-        await writer.InitializeAsync(reader.Columns, ct);
+        await writer.InitializeAsync(exportableSchema, ct);
+
+        // Create bounded channels for pipeline with backpressure
+        // Capacity 1000 rows allows for some buffering but keeps backpressure active
+        var readerToTransform = Channel.CreateBounded<object?[]>(new BoundedChannelOptions(1000)
+        {
+            SingleWriter = true,
+            SingleReader = true,
+            FullMode = BoundedChannelFullMode.Wait
+        });
+
+        var transformToWriter = Channel.CreateBounded<object?[]>(new BoundedChannelOptions(1000)
+        {
+            SingleWriter = true,
+            SingleReader = true,
+            FullMode = BoundedChannelFullMode.Wait
+        });
 
         using var progress = new ProgressReporter();
-        
         long totalRows = 0;
 
-        try 
+        try
         {
-            await foreach (var batchChunk in reader.ReadBatchesAsync(options.BatchSize, ct))
-            {
-                var rows = new List<object?[]>(batchChunk.Length);
-                for (var i = 0; i < batchChunk.Length; i++)
-                {
-                    rows.Add(batchChunk.Span[i]);
-                }
+            // Run concurrent pipeline: Producer (Reads/Unbatches) -> Transform (Streams rows) -> Consumer (Batches/Writes)
+            var producerTask = ProduceRowsAsync(reader, readerToTransform.Writer, options.BatchSize, ct);
+            var transformTask = TransformRowsAsync(readerToTransform.Reader, transformToWriter.Writer, pipeline, ct);
+            var consumerTask = ConsumeRowsAsync(transformToWriter.Reader, writer, options.BatchSize, progress, r => Interlocked.Add(ref totalRows, r), ct);
 
-                IReadOnlyList<object?[]> processedBatch = rows;
-
-                // Execute pipeline
-                foreach (var transformer in pipeline)
-                {
-                    processedBatch = await transformer.TransformAsync(processedBatch, ct);
-                }
-                
-                await writer.WriteBatchAsync(processedBatch, ct);
-                totalRows += processedBatch.Count;
-                progress.Update(totalRows, writer.BytesWritten);
-            }
+            await Task.WhenAll(producerTask, transformTask, consumerTask);
 
             await writer.CompleteAsync(ct);
             progress.Complete();
-            Console.Error.WriteLine($"Export complete: {totalRows:N0} rows");
+            Console.Error.WriteLine($"Export complete: {Interlocked.Read(ref totalRows):N0} rows");
         }
         catch (Exception ex)
         {
-             Console.Error.WriteLine($"Export failed: {ex.Message}");
-             throw;
+            Console.Error.WriteLine($"Export failed: {ex.Message}");
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Producer: Reads batches from database, unbatches them, and sends single rows to channel.
+    /// This keeps DB I/O efficient (batched) while allowing downstream streaming.
+    /// </summary>
+    private static async Task ProduceRowsAsync(
+        IStreamReader reader, 
+        ChannelWriter<object?[]> output, 
+        int batchSize, 
+        CancellationToken ct)
+    {
+        try
+        {
+            await foreach (var batchChunk in reader.ReadBatchesAsync(batchSize, ct))
+            {
+                for (var i = 0; i < batchChunk.Length; i++)
+                {
+                    await output.WriteAsync(batchChunk.Span[i], ct);
+                }
+            }
+        }
+        finally
+        {
+            output.Complete();
+        }
+    }
+
+    /// <summary>
+    /// Transform stage: Applies all transformers in sequence to each row individually.
+    /// </summary>
+    private static async Task TransformRowsAsync(
+        ChannelReader<object?[]> input,
+        ChannelWriter<object?[]> output,
+        IReadOnlyList<IDataTransformer> pipeline,
+        CancellationToken ct)
+    {
+        try
+        {
+            await foreach (var row in input.ReadAllAsync(ct))
+            {
+                var workingRow = row;
+                
+                // Pure streaming transformation
+                foreach (var transformer in pipeline)
+                {
+                    workingRow = transformer.Transform(workingRow);
+                }
+                
+                await output.WriteAsync(workingRow, ct);
+            }
+        }
+        finally
+        {
+            output.Complete();
+        }
+    }
+
+    /// <summary>
+    /// Consumer: Accumulates rows into batches and writes them to output file.
+    /// efficiently handling file I/O.
+    /// </summary>
+    private static async Task ConsumeRowsAsync(
+        ChannelReader<object?[]> input,
+        IDataWriter writer,
+        int batchSize,
+        ProgressReporter progress,
+        Action<int> updateRowCount,
+        CancellationToken ct)
+    {
+        var buffer = new List<object?[]>(batchSize);
+
+        await foreach (var row in input.ReadAllAsync(ct))
+        {
+            buffer.Add(row);
+            
+            if (buffer.Count >= batchSize)
+            {
+                await writer.WriteBatchAsync(buffer, ct);
+                updateRowCount(buffer.Count);
+                progress.Update(buffer.Count, writer.BytesWritten);
+                buffer = new List<object?[]>(batchSize); // New buffer to avoid reference issues
+            }
+        }
+
+        // Write remaining
+        if (buffer.Count > 0)
+        {
+            await writer.WriteBatchAsync(buffer, ct);
+            updateRowCount(buffer.Count);
+            progress.Update(buffer.Count, writer.BytesWritten);
         }
     }
 }

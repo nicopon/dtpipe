@@ -19,6 +19,24 @@ public class FakeDataTransformerTests
         // Assert
         transformer.HasMappings.Should().BeTrue();
     }
+
+    [Fact]
+    public void Constructor_ShouldThrowArgumentException_WhenBothDeterministicAndSeedColumnSet()
+    {
+        // Arrange
+        var options = new FakeOptions 
+        { 
+            Mappings = new[] { "NAME:name.firstname" },
+            Deterministic = true,
+            SeedColumn = "ID" 
+        };
+
+        // Act & Assert
+        var act = () => new FakeDataTransformer(options);
+        act.Should().Throw<ArgumentException>()
+           .WithMessage("*cannot be used together*");
+    }
+
     
     [Fact]
     public async Task Transform_ShouldReplaceValues_WhenMappingExists()
@@ -40,7 +58,7 @@ public class FakeDataTransformerTests
 
         // Act
         await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-        var result = await transformer.TransformAsync(rows, TestContext.Current.CancellationToken);
+        var result = rows.Select(r => transformer.Transform(r)).ToList();
 
         // Assert
         result.Should().HaveCount(2);
@@ -73,7 +91,7 @@ public class FakeDataTransformerTests
 
         // Act
         await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-        var result = await transformer.TransformAsync(rows, TestContext.Current.CancellationToken);
+        var result = rows.Select(r => transformer.Transform(r)).ToList();
 
         // Assert
         result[0][0].Should().NotBe("Original");
@@ -95,10 +113,10 @@ public class FakeDataTransformerTests
 
         // Act
         await transformer1.InitializeAsync(columns, TestContext.Current.CancellationToken);
-        var result1 = await transformer1.TransformAsync(rows, TestContext.Current.CancellationToken);
+        var result1 = rows.Select(r => transformer1.Transform(r)).ToList();
 
         await transformer2.InitializeAsync(columns, TestContext.Current.CancellationToken);
-        var result2 = await transformer2.TransformAsync(rows, TestContext.Current.CancellationToken);
+        var result2 = rows.Select(r => transformer2.Transform(r)).ToList();
 
         // Assert
         result1[0][0].Should().Be(result2[0][0]);
@@ -116,7 +134,7 @@ public class FakeDataTransformerTests
 
         // Act
         await transformerFr.InitializeAsync(columns, TestContext.Current.CancellationToken);
-        var resultFr = await transformerFr.TransformAsync(rows, TestContext.Current.CancellationToken);
+        var resultFr = rows.Select(r => transformerFr.Transform(r)).ToList();
         
         // Assert
         resultFr[0][0].Should().BeOfType<string>();
@@ -135,7 +153,7 @@ public class FakeDataTransformerTests
         // Act
         var transformer = new FakeDataTransformer(options);
         await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-        var result = await transformer.TransformAsync(rows, TestContext.Current.CancellationToken);
+        var result = rows.Select(r => transformer.Transform(r)).ToList();
             
         // Assert
         result[0][0].Should().Be("invalid.dataset");
@@ -171,7 +189,7 @@ public class FakeDataTransformerTests
         var rows = new List<object?[]> { new object?[] { "Original" } };
 
         await transformerColon.InitializeAsync(columns, TestContext.Current.CancellationToken);
-        var resColon = await transformerColon.TransformAsync(rows, TestContext.Current.CancellationToken);
+        var resColon = rows.Select(r => transformerColon.Transform(r)).ToList();
         
         // This confirms the user's colon syntax is now supported via normalization
         resColon[0][0].Should().NotBe("finance:iban");
@@ -183,7 +201,7 @@ public class FakeDataTransformerTests
         var transformerDot = new FakeDataTransformer(optionsDot);
         
         await transformerDot.InitializeAsync(columns, TestContext.Current.CancellationToken);
-        var resDot = await transformerDot.TransformAsync(rows, TestContext.Current.CancellationToken);
+        var resDot = rows.Select(r => transformerDot.Transform(r)).ToList();
         
         // This confirms correct syntax works
         resDot[0][0].Should().NotBe("finance.iban");
@@ -195,7 +213,7 @@ public class FakeDataTransformerTests
         var transformerLower = new FakeDataTransformer(optionsLower);
         
         await transformerLower.InitializeAsync(columns, TestContext.Current.CancellationToken);
-        var resLower = await transformerLower.TransformAsync(rows, TestContext.Current.CancellationToken);
+        var resLower = rows.Select(r => transformerLower.Transform(r)).ToList();
         
         resLower[0][0].Should().NotBe("finance.iban");
     }

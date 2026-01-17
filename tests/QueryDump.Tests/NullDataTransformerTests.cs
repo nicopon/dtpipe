@@ -23,7 +23,7 @@ public class NullDataTransformerTests
 
         // Act
         await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-        var result = await transformer.TransformAsync(rows, TestContext.Current.CancellationToken);
+        var result = rows.Select(r => transformer.Transform(r)).ToList();
 
         // Assert
         result[0][0].Should().Be(1);           // ID unchanged
@@ -42,7 +42,7 @@ public class NullDataTransformerTests
 
         // Act
         await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-        var result = await transformer.TransformAsync(rows, TestContext.Current.CancellationToken);
+        var result = rows.Select(r => transformer.Transform(r)).ToList();
 
         // Assert
         result[0][0].Should().Be(1);

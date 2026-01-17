@@ -1,7 +1,7 @@
 namespace QueryDump.Core;
 
 /// <summary>
-/// Interface for transforming data batches in the pipeline.
+/// Interface for transforming data in the pipeline.
 /// </summary>
 public interface IDataTransformer
 {
@@ -12,13 +12,16 @@ public interface IDataTransformer
     int Priority { get; }
 
     /// <summary>
-    /// Initializes the transformer with column metadata.
-    /// This is called once before processing batches.
+    /// Initializes the transformer with input column metadata.
+    /// Returns the output column schema (may include additional virtual columns).
+    /// This enables cascade initialization where output of one transformer
+    /// becomes input to the next.
     /// </summary>
-    ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default);
+    ValueTask<IReadOnlyList<ColumnInfo>> InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default);
 
     /// <summary>
-    /// Transforms a batch of rows.
+    /// Transforms a single row. Returns the transformed row (may be the same instance, mutated).
+    /// For pure streaming, each row is processed independently.
     /// </summary>
-    ValueTask<IReadOnlyList<object?[]>> TransformAsync(IReadOnlyList<object?[]> batch, CancellationToken ct = default);
+    object?[] Transform(object?[] row);
 }
