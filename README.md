@@ -84,6 +84,20 @@ Use `--null` to explicitly set columns to null:
 --null "INTERNAL_ID"
 ```
 
+### 7. Deterministic Fake Data
+Use `--fake-seed-column` to generate reproducible fake data based on a source column value:
+
+```bash
+./dist/release/querydump \
+  -q "SELECT USER_ID, USERNAME, EMAIL FROM USERS" \
+  -o users_anon.csv \
+  --fake "USERNAME:name.fullname" \
+  --fake "EMAIL:internet.email" \
+  --fake-seed-column USER_ID
+```
+
+This ensures that the same `USER_ID` always produces the same fake `USERNAME` and `EMAIL`, even across different runs.
+
 To list available data generators:
 ```bash
 ./dist/release/querydump --fake-list
@@ -99,6 +113,7 @@ To list available data generators:
 | `--provider` | `-p` | `auto`, `oracle`, `sqlserver`, `duckdb`... | `auto` |
 | `--fake` | | Mapping `COLUMN:dataset.method` | - |
 | `--fake-locale` | | Locale for fake data | `en` |
+| `--fake-seed-column` | | Column for deterministic seeding | - |
 | `--oracle-fetch-size` | `-f` | Oracle read buffer size (bytes) | 1MB |
 | `--batch-size` | `-b` | Output batch size (rows per Parquet group / CSV flush) | 50k |
 | `--connection-timeout` | | Connection timeout (seconds) | 10 |

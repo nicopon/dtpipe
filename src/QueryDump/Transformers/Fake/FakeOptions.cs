@@ -18,5 +18,9 @@ public record FakeOptions : ITransformerOptions
     [Description("Seed for reproducible fake data")]
     public int? Seed { get; init; } = null;
     
-    // NullColumns removed (unused)
+    [Description("Column to use as seed for deterministic fake data (value-based)")]
+    public string? SeedColumn { get; init; } = null;
+    
+    [Description("Size of precomputed value table for deterministic mode (power of 2)")]
+    public int TableSize { get; init; } = 65536;
 }

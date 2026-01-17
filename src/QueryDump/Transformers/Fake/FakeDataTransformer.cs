@@ -16,6 +16,13 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
     private readonly Dictionary<string, string> _mappings = new(StringComparer.OrdinalIgnoreCase);
     private readonly FakerRegistry _registry;
     private readonly Faker _faker;
+    private readonly string _locale;
+    
+    // Deterministic mode fields
+    private readonly string? _seedColumn;
+    private readonly int _tableSize;
+    private int _seedColumnIndex = -1;
+    private Dictionary<int, object?[]>? _precomputedTables;
     
     // Regex to match {{COLUMN_NAME}} patterns - compiled once for performance
     [GeneratedRegex(@"\{\{([^}]+)\}\}", RegexOptions.Compiled)]
@@ -29,6 +36,10 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
     public FakeDataTransformer(FakeOptions options)
     {
         _registry = new FakerRegistry();
+        _locale = options.Locale;
+        _seedColumn = options.SeedColumn;
+        _tableSize = options.TableSize;
+        
         _faker = options.Seed.HasValue 
             ? new Faker(options.Locale) { Random = new Randomizer(options.Seed.Value) } 
             : new Faker(options.Locale);
@@ -94,7 +105,7 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
             {
                 // Regular faker or hardcoded string
                 var generator = BuildGenerator(fakerPath, colName);
-                _processors[i] = new ColumnProcessor(i, generator);
+                _processors[i] = new ColumnProcessor(i, generator, fakerPath);
                 nonTemplateColumns.Add(i);
             }
         }
@@ -112,6 +123,39 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
             _generationOrder[idx++] = col;
         }
 
+        // Precompute tables for deterministic mode
+        if (_seedColumn is not null)
+        {
+            if (!_columnNameToIndex.TryGetValue(_seedColumn, out _seedColumnIndex))
+            {
+                throw new InvalidOperationException($"Seed column '{_seedColumn}' not found in result set.");
+            }
+            
+            _precomputedTables = new Dictionary<int, object?[]>();
+            
+            foreach (var colIdx in _generationOrder)
+            {
+                var processor = _processors[colIdx];
+                if (processor.IsTemplate || processor.Generator is null || processor.FakerPath is null)
+                {
+                    continue; // Skip templates and hardcoded strings
+                }
+                
+                // Hash stable du faker path - garantit cohérence entre runs
+                var fakerHash = StableHash.ComputeFromString(processor.FakerPath);
+                
+                var table = new object?[_tableSize];
+                var tempFaker = new Faker(_locale);
+                for (int i = 0; i < _tableSize; i++)
+                {
+                    var seed = unchecked((int)(fakerHash + (uint)i));
+                    tempFaker.Random = new Randomizer(seed);
+                    table[i] = processor.Generator(tempFaker);
+                }
+                _precomputedTables[colIdx] = table;
+            }
+        }
+
         return ValueTask.CompletedTask;
     }
 
@@ -122,22 +166,51 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
             return new ValueTask<IReadOnlyList<object?[]>>(rows);
         }
 
-        // In-place modification
-        foreach (var row in rows)
+        // Deterministic mode: use precomputed tables
+        if (_precomputedTables is not null && _seedColumnIndex >= 0)
         {
-            // Process columns in dependency order
-            foreach (var colIdx in _generationOrder)
+            foreach (var row in rows)
             {
-                var processor = _processors[colIdx];
-                if (processor.IsTemplate)
+                var seedValue = row[_seedColumnIndex];
+                var hash = StableHash.Compute(seedValue);
+                var tableIndex = (int)(hash % (uint)_tableSize);
+                
+                foreach (var colIdx in _generationOrder)
                 {
-                    // Template: substitute {{COL}} with already-generated values
-                    row[colIdx] = SubstituteTemplate(processor.Template!, row);
+                    var processor = _processors[colIdx];
+                    if (processor.IsTemplate)
+                    {
+                        row[colIdx] = SubstituteTemplate(processor.Template!, row);
+                    }
+                    else if (_precomputedTables.TryGetValue(colIdx, out var table))
+                    {
+                        // Deterministic lookup
+                        row[colIdx] = table[tableIndex];
+                    }
+                    else if (processor.Generator is not null)
+                    {
+                        // Hardcoded string (no table)
+                        row[colIdx] = processor.Generator(_faker);
+                    }
                 }
-                else if (processor.Generator is not null)
+            }
+        }
+        else
+        {
+            // Non-deterministic mode (original behavior)
+            foreach (var row in rows)
+            {
+                foreach (var colIdx in _generationOrder)
                 {
-                    // Faker or hardcoded
-                    row[colIdx] = processor.Generator(_faker);
+                    var processor = _processors[colIdx];
+                    if (processor.IsTemplate)
+                    {
+                        row[colIdx] = SubstituteTemplate(processor.Template!, row);
+                    }
+                    else if (processor.Generator is not null)
+                    {
+                        row[colIdx] = processor.Generator(_faker);
+                    }
                 }
             }
         }
@@ -262,16 +335,18 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
         public readonly Func<Faker, object?>? Generator;
         public readonly string? Template;
         public readonly HashSet<string>? ReferencedColumns;
+        public readonly string? FakerPath; // For deterministic mode hashing
 
         public bool IsTemplate => Template is not null;
 
         // Constructor for faker/hardcoded
-        public ColumnProcessor(int index, Func<Faker, object?>? generator)
+        public ColumnProcessor(int index, Func<Faker, object?>? generator, string? fakerPath = null)
         {
             Index = index;
             Generator = generator;
             Template = null;
             ReferencedColumns = null;
+            FakerPath = fakerPath;
         }
 
         // Constructor for template
@@ -281,6 +356,7 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
             Generator = null;
             Template = template;
             ReferencedColumns = referencedColumns;
+            FakerPath = null;
         }
     }
 }
