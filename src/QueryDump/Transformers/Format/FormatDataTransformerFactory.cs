@@ -6,22 +6,22 @@ using QueryDump.Core;
 using QueryDump.Configuration;
 using QueryDump.Core.Options;
 
-namespace QueryDump.Transformers.Clone;
+namespace QueryDump.Transformers.Format;
 
-public interface ICloneDataTransformerFactory : IDataTransformerFactory { }
+public interface IFormatDataTransformerFactory : IDataTransformerFactory { }
 
-public class CloneDataTransformerFactory : IDataTransformerFactory
+public class FormatDataTransformerFactory : IDataTransformerFactory
 {
     private readonly OptionsRegistry _registry;
 
-    public CloneDataTransformerFactory(OptionsRegistry registry)
+    public FormatDataTransformerFactory(OptionsRegistry registry)
     {
         _registry = registry;
     }
 
     public IEnumerable<Type> GetSupportedOptionTypes()
     {
-        yield return ComponentOptionsHelper.GetOptionsType<CloneDataTransformer>();
+        yield return ComponentOptionsHelper.GetOptionsType<FormatDataTransformer>();
     }
 
     public string Category => "Transformer Options";
@@ -46,13 +46,13 @@ public class CloneDataTransformerFactory : IDataTransformerFactory
 
     public IDataTransformer? Create(DumpOptions options)
     {
-        var cloneOptions = _registry.Get<CloneOptions>();
+        var formatOptions = _registry.Get<FormatOptions>();
         
-        if (!cloneOptions.Mappings.Any())
+        if (!formatOptions.Mappings.Any())
         {
             return null;
         }
 
-        return new CloneDataTransformer(cloneOptions);
+        return new FormatDataTransformer(formatOptions);
     }
 }

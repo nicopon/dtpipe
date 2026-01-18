@@ -53,30 +53,7 @@ Replaces real values with fake data (names, emails, cities...).
   --fake-locale fr
 ```
 
-### 4. Column References for Consistent Data
-Use `{{COLUMN}}` to reference other columns and create consistent data:
-
-```bash
-./dist/release/querydump \
-  -q "SELECT FIRSTNAME, LASTNAME, FULLNAME, EMAIL FROM USERS" \
-  -o users_anon.csv \
-  --fake "FIRSTNAME:name.firstname" \
-  --fake "LASTNAME:name.lastname" \
-  --fake "FULLNAME:{{FIRSTNAME}} {{LASTNAME}}" \
-  --fake "EMAIL:{{FIRSTNAME}}.{{LASTNAME}}@company.com"
-```
-
-This ensures that the generated `FULLNAME` and `EMAIL` use the same first and last names.
-
-### 5. Hardcoded Values
-If the value doesn't match a known faker, it's used as a literal string:
-
-```bash
---fake "STATUS:anonymized"
---fake "CODUSER:anonymous"
-```
-
-### 6. Setting Columns to Null
+### 4. Setting Columns to Null
 Use `--null` to explicitly set columns to null:
 
 ```bash
@@ -84,7 +61,7 @@ Use `--null` to explicitly set columns to null:
 --null "INTERNAL_ID"
 ```
 
-### 7. Static Value Overwrite
+### 5. Static Value Overwrite
 Use `--overwrite` to replace column values with a static string:
 
 ```bash
@@ -92,15 +69,29 @@ Use `--overwrite` to replace column values with a static string:
 --overwrite "COMMENT:redacted"
 ```
 
-### 8. Clone Columns with Templates
-Use `--clone` to copy values from other columns using templates:
+### 6. Format Columns with Templates
+Use `--format` to create derived columns using templates:
 
 ```bash
---clone "DISPLAY_NAME:{{FIRSTNAME}} {{LASTNAME}}"
---clone "FULL_ADDRESS:{{STREET}}, {{CITY}} {{ZIP}}"
+--format "DISPLAY_NAME:{{FIRSTNAME}} {{LASTNAME}}"
+--format "FULL_ADDRESS:{{STREET}}, {{CITY}} {{ZIP}}"
 ```
 
-### 9. Deterministic Fake Data
+### 7. Format Specifiers (string.Format style)
+Use `{COLUMN:format}` syntax for formatted output:
+
+```bash
+--format "DATE_FR:{DATE:dd/MM/yyyy}"    # Date: 15/01/2024
+--format "AMOUNT:{PRICE:0.00}€"          # Number: 123.46€
+--format "ID:{CODE:D6}"                  # Padding: 000042
+```
+
+You can combine both syntaxes:
+```bash
+--format "LABEL:{PRICE:0.00}€ - {{NAME}}"  # Result: 99.50€ - Product
+```
+
+### 8. Deterministic Fake Data
 Use `--fake-seed-column` to generate reproducible fake data based on a source column value:
 
 ```bash
@@ -114,7 +105,7 @@ Use `--fake-seed-column` to generate reproducible fake data based on a source co
 
 This ensures that the same `USER_ID` always produces the same fake `USERNAME` and `EMAIL`, even across different runs.
 
-### 10. Row-Index Deterministic Mode
+### 9. Row-Index Deterministic Mode
 Use `--fake-deterministic` without a seed column for reproducible fakes based on row position:
 
 ```bash
@@ -125,7 +116,7 @@ Use `--fake-deterministic` without a seed column for reproducible fakes based on
   --fake-deterministic
 ```
 
-### 11. Variant Suffix for Different Values
+### 10. Variant Suffix for Different Values
 Use `#variant` suffix to get different values from the same faker:
 
 ```bash
@@ -134,8 +125,8 @@ Use `#variant` suffix to get different values from the same faker:
 --fake "EMAIL_BKP:internet.email#work"   # Same as EMAIL_PRO (same variant)
 ```
 
-### 12. Virtual Columns for Composition
-Create fake columns not in query, then compose them with `--clone`:
+### 11. Virtual Columns for Composition
+Create fake columns not in query, then compose them with `--format`:
 
 ```bash
 # Query: SELECT USER_ID, BANK_REF FROM users
@@ -144,10 +135,10 @@ Create fake columns not in query, then compose them with `--clone`:
   -o users.csv \
   --fake "IBAN:finance.iban" \
   --fake "BIC:finance.bic" \
-  --clone "BANK_REF:{{IBAN}}-{{BIC}}"
+  --format "BANK_REF:{{IBAN}}-{{BIC}}"
 ```
 
-Virtual columns (IBAN, BIC) are automatically detected (not in query) and available for `--clone` templates.
+Virtual columns (IBAN, BIC) are automatically detected (not in query) and available for `--format` templates.
 
 To list available data generators:
 ```bash
@@ -168,7 +159,7 @@ To list available data generators:
 | **Transformers** |
 | `--null` | | Column(s) to set to null (repeatable) | - |
 | `--overwrite` | | `COLUMN:value` static overwrite (repeatable) | - |
-| `--clone` | | `TARGET:{{SOURCE}}` template clone (repeatable) | - |
+| `--format` | | `TARGET:{{SOURCE}}` or `{SOURCE:fmt}` format (repeatable) | - |
 | `--fake` | | `COLUMN:faker.method` mapping (supports `#variant` suffix) | - |
 | `--fake-locale` | | Locale for fake data (en, fr, de, ja, zh_CN...) | `en` |
 | `--fake-seed` | | Global seed for reproducible random fakes | - |

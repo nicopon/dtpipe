@@ -176,7 +176,7 @@ public class FakeDataTransformerTests
     // Tests for Null and Static/Clone functionality have been moved to their respective test files:
     // - NullDataTransformerTests.cs
     // - StaticDataTransformerTests.cs
-    // - CloneDataTransformerTests.cs
+    // - FormatDataTransformerTests.cs
     [Fact]
     public async Task Transform_Reproduction_ColonSyntaxCheck()
     {

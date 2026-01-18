@@ -4,7 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using QueryDump.Cli;
 using QueryDump.Core;
 using QueryDump.Core.Options;
-using QueryDump.Transformers.Clone;
+using QueryDump.Transformers.Format;
 using QueryDump.Transformers.Fake;
 using QueryDump.Transformers.Null;
 using QueryDump.Transformers.Static;
@@ -56,7 +56,7 @@ class Program
         services.AddSingleton<IDataTransformerFactory, NullDataTransformerFactory>();
         services.AddSingleton<IDataTransformerFactory, StaticDataTransformerFactory>();
         services.AddSingleton<IDataTransformerFactory, FakeDataTransformerFactory>();
-        services.AddSingleton<IDataTransformerFactory, CloneDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, FormatDataTransformerFactory>();
         
         // Export Service
         services.AddSingleton<ExportService>();

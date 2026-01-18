@@ -12,13 +12,13 @@ using Xunit;
 
 namespace QueryDump.Tests;
 
-public class E2EFakeIntegrationTests : IAsyncLifetime
+public class E2EIntegrationTests : IAsyncLifetime
 {
     private readonly string _dbPath;
     private readonly string _connectionString;
     private readonly string _outputPath;
 
-    public E2EFakeIntegrationTests()
+    public E2EIntegrationTests()
     {
         _dbPath = Path.Combine(Path.GetTempPath(), $"test_fake_{Guid.NewGuid()}.duckdb");
         _connectionString = $"Data Source={_dbPath}";
@@ -139,7 +139,7 @@ public class E2EFakeIntegrationTests : IAsyncLifetime
             Mappings = new[] { "Name:Bond" } 
         });
         
-        registry.Register(new Transformers.Clone.CloneOptions
+        registry.Register(new Transformers.Format.FormatOptions
         {
             Mappings = new[] { "CopiedName:{{Name}} is 007" }
         });
@@ -157,7 +157,7 @@ public class E2EFakeIntegrationTests : IAsyncLifetime
         services.AddSingleton<IDataTransformerFactory, Transformers.Null.NullDataTransformerFactory>();
         services.AddSingleton<IDataTransformerFactory, Transformers.Static.StaticDataTransformerFactory>();
         services.AddSingleton<IDataTransformerFactory, Transformers.Fake.FakeDataTransformerFactory>();
-        services.AddSingleton<IDataTransformerFactory, Transformers.Clone.CloneDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, Transformers.Format.FormatDataTransformerFactory>();
         
         services.AddSingleton<ExportService>();
         
