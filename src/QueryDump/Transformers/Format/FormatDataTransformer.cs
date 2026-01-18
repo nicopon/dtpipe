@@ -2,9 +2,9 @@ using System.Text.RegularExpressions;
 using QueryDump.Core;
 using QueryDump.Core.Options;
 
-namespace QueryDump.Transformers.Clone;
+namespace QueryDump.Transformers.Format;
 
-public sealed partial class CloneDataTransformer : IDataTransformer, IRequiresOptions<CloneOptions>
+public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresOptions<FormatOptions>
 {
     public int Priority => 100; // Last step
 
@@ -13,10 +13,15 @@ public sealed partial class CloneDataTransformer : IDataTransformer, IRequiresOp
     private ColumnProcessor[]? _processors;
     private Dictionary<string, int>? _columnNameToIndex;
 
+    // Pattern for simple substitution: {{COLUMN}}
     [GeneratedRegex(@"\{\{([^}]+)\}\}", RegexOptions.Compiled)]
-    private static partial Regex TemplatePattern();
+    private static partial Regex SimpleTemplatePattern();
 
-    public CloneDataTransformer(CloneOptions options)
+    // Pattern for formatted substitution: {COLUMN:format} - single braces with format specifier
+    [GeneratedRegex(@"(?<!\{)\{([^{}:]+):([^{}]+)\}(?!\})", RegexOptions.Compiled)]
+    private static partial Regex FormatSpecifierPattern();
+
+    public FormatDataTransformer(FormatOptions options)
     {
         foreach (var mapping in options.Mappings)
         {
@@ -87,7 +92,7 @@ public sealed partial class CloneDataTransformer : IDataTransformer, IRequiresOp
 
         void Visit(int u)
         {
-            if (recursionStack.Contains(u)) throw new InvalidOperationException($"Cycle detected in clone dependencies for column index {u}");
+            if (recursionStack.Contains(u)) throw new InvalidOperationException($"Cycle detected in format dependencies for column index {u}");
             if (visited.Contains(u)) return;
 
             recursionStack.Add(u);
@@ -123,18 +128,55 @@ public sealed partial class CloneDataTransformer : IDataTransformer, IRequiresOp
 
     private static HashSet<string> ExtractReferencedColumns(string template)
     {
-        var matches = TemplatePattern().Matches(template);
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (Match match in matches)
+        
+        // Extract from simple templates {{COLUMN}}
+        foreach (Match match in SimpleTemplatePattern().Matches(template))
         {
             result.Add(match.Groups[1].Value);
         }
+        
+        // Extract from format specifiers {COLUMN:format}
+        foreach (Match match in FormatSpecifierPattern().Matches(template))
+        {
+            result.Add(match.Groups[1].Value);
+        }
+        
         return result;
     }
 
     private string SubstituteTemplate(string template, object?[] row)
     {
-        return TemplatePattern().Replace(template, match =>
+        // Step 1: Process format specifiers {COLUMN:format}
+        var result = FormatSpecifierPattern().Replace(template, match =>
+        {
+            var colName = match.Groups[1].Value;
+            var formatSpec = match.Groups[2].Value;
+            
+            if (_columnNameToIndex!.TryGetValue(colName, out var idx))
+            {
+                var value = row[idx];
+                if (value == null)
+                {
+                    return string.Empty;
+                }
+                
+                try
+                {
+                    // Use string.Format with InvariantCulture for consistent output
+                    return string.Format(System.Globalization.CultureInfo.InvariantCulture, $"{{0:{formatSpec}}}", value);
+                }
+                catch (FormatException)
+                {
+                    // If format fails, return raw value
+                    return value.ToString() ?? string.Empty;
+                }
+            }
+            return match.Value;
+        });
+        
+        // Step 2: Process simple templates {{COLUMN}}
+        result = SimpleTemplatePattern().Replace(result, match =>
         {
             var colName = match.Groups[1].Value;
             if (_columnNameToIndex!.TryGetValue(colName, out var idx))
@@ -143,6 +185,8 @@ public sealed partial class CloneDataTransformer : IDataTransformer, IRequiresOp
             }
             return match.Value;
         });
+        
+        return result;
     }
 
     private readonly struct ColumnProcessor
