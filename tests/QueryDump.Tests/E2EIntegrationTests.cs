@@ -143,7 +143,7 @@ public class E2EIntegrationTests : IAsyncLifetime
         
         registry.Register(new Transformers.Format.FormatOptions
         {
-            Mappings = ["CopiedName:{{Name}} is 007"]
+            Mappings = ["CopiedName:{Name} is 007"]
         });
 
         var services = new ServiceCollection();
@@ -181,7 +181,7 @@ public class E2EIntegrationTests : IAsyncLifetime
             "querydump", 
             "--null", "Age",
             "--overwrite", "Name:Bond",
-            "--format", "CopiedName:{{Name}} is 007" 
+            "--format", "CopiedName:{Name} is 007" 
         };
         await exportService.RunExportAsync(options, TestContext.Current.CancellationToken, args);
 
@@ -262,17 +262,17 @@ public class E2EIntegrationTests : IAsyncLifetime
         // 3. Simulate CLI Args for Ordered Pipeline
         // Sequence:
         // 1. Overwrite A -> "Val1"
-        // 2. Format B -> "{{A}}" (should capture Val1)
+        // 2. Format B -> "{A}" (should capture Val1)
         // 3. Overwrite A -> "Val2"
-        // 4. Format C -> "{{A}}" (should capture Val2)
+        // 4. Format C -> "{A}" (should capture Val2)
 
         var newArgs = new[] 
         { 
             "querydump", // dummy exe name
             "--overwrite", "A:Val1",
-            "--format", "B:{{A}}",
+            "--format", "B:{A}",
             "--overwrite", "A:Val2",
-            "--format", "C:{{A}}"
+            "--format", "C:{A}"
         };
         
         // 4. Run Export
@@ -293,9 +293,9 @@ public class E2EIntegrationTests : IAsyncLifetime
         
         // Sequence:
         // 1. Overwrite A -> "Val1"
-        // 2. Format B -> "{{A}}" (captures "Val1")
+        // 2. Format B -> "{A}" (captures "Val1")
         // 3. Overwrite A -> "Val2"
-        // 4. Format C -> "{{A}}" (captures "Val2")
+        // 4. Format C -> "{A}" (captures "Val2")
         
         row[idxB].Should().Be("Val1");
         row[idxC].Should().Be("Val2");

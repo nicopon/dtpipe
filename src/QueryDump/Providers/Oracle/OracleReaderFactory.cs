@@ -19,7 +19,7 @@ public class OracleReaderFactory : IStreamReaderFactory
     public string ProviderName => "oracle";
     public string Category => "Reader Options";
 
-    public string? ResolveConnectionFromEnvironment() => Environment.GetEnvironmentVariable("ORACLE_CONNECTION_STRING");
+
 
     public bool CanHandle(string connectionString)
     {

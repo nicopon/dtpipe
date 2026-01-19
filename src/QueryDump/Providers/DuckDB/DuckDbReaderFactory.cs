@@ -19,7 +19,7 @@ public class DuckDbReaderFactory : IStreamReaderFactory
     public string ProviderName => "duckdb";
     public string Category => "Reader Options";
 
-    public string? ResolveConnectionFromEnvironment() => Environment.GetEnvironmentVariable("DUCKDB_CONNECTION_STRING");
+
 
     public bool CanHandle(string connectionString)
     {

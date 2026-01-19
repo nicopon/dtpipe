@@ -18,10 +18,7 @@ public interface IStreamReaderFactory : ICliContributor
     /// </summary>
     IStreamReader Create(DumpOptions options);
     
-    /// <summary>
-    /// Resolves the default connection string from environment variables.
-    /// </summary>
-    string? ResolveConnectionFromEnvironment();
+
 
     /// <summary>
     /// Checks if the factory can handle the given connection string (for auto-detection).

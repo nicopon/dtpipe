@@ -13,13 +13,9 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
     private ColumnProcessor[]? _processors;
     private Dictionary<string, int>? _columnNameToIndex;
 
-    // Pattern for simple substitution: {{COLUMN}}
-    [GeneratedRegex(@"\{\{([^}]+)\}\}", RegexOptions.Compiled)]
-    private static partial Regex SimpleTemplatePattern();
-
-    // Pattern for formatted substitution: {COLUMN:format} - single braces with format specifier
-    [GeneratedRegex(@"(?<!\{)\{([^{}:]+):([^{}]+)\}(?!\})", RegexOptions.Compiled)]
-    private static partial Regex FormatSpecifierPattern();
+    // Unified pattern for {COLUMN} or {COLUMN:format}
+    [GeneratedRegex(@"\{([^{}:]+)(?::([^{}]+))?\}", RegexOptions.Compiled)]
+    private static partial Regex PlaceholderPattern();
 
     public FormatDataTransformer(FormatOptions options)
     {
@@ -145,14 +141,8 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
     {
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         
-        // Extract from simple templates {{COLUMN}}
-        foreach (Match match in SimpleTemplatePattern().Matches(template))
-        {
-            result.Add(match.Groups[1].Value);
-        }
-        
-        // Extract from format specifiers {COLUMN:format}
-        foreach (Match match in FormatSpecifierPattern().Matches(template))
+        // Extract column names from {COLUMN} or {COLUMN:format}
+        foreach (Match match in PlaceholderPattern().Matches(template))
         {
             result.Add(match.Groups[1].Value);
         }
@@ -162,11 +152,11 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
 
     private string SubstituteTemplate(string template, object?[] row)
     {
-        // Step 1: Process format specifiers {COLUMN:format}
-        var result = FormatSpecifierPattern().Replace(template, match =>
+        // Process all placeholders: {COLUMN} or {COLUMN:format}
+        return PlaceholderPattern().Replace(template, match =>
         {
             var colName = match.Groups[1].Value;
-            var formatSpec = match.Groups[2].Value;
+            var formatSpec = match.Groups[2].Success ? match.Groups[2].Value : null;
             
             if (_columnNameToIndex!.TryGetValue(colName, out var idx))
             {
@@ -176,32 +166,22 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
                     return string.Empty;
                 }
                 
-                try
+                if (formatSpec != null)
                 {
-                    // Use string.Format with InvariantCulture for consistent output
-                    return string.Format(System.Globalization.CultureInfo.InvariantCulture, $"{{0:{formatSpec}}}", value);
+                    try
+                    {
+                        return string.Format(System.Globalization.CultureInfo.InvariantCulture, $"{{0:{formatSpec}}}", value);
+                    }
+                    catch (FormatException)
+                    {
+                        return value.ToString() ?? string.Empty;
+                    }
                 }
-                catch (FormatException)
-                {
-                    // If format fails, return raw value
-                    return value.ToString() ?? string.Empty;
-                }
+                
+                return value.ToString() ?? string.Empty;
             }
             return match.Value;
         });
-        
-        // Step 2: Process simple templates {{COLUMN}}
-        result = SimpleTemplatePattern().Replace(result, match =>
-        {
-            var colName = match.Groups[1].Value;
-            if (_columnNameToIndex!.TryGetValue(colName, out var idx))
-            {
-                return row[idx]?.ToString() ?? string.Empty;
-            }
-            return match.Value;
-        });
-        
-        return result;
     }
 
     private readonly struct ColumnProcessor

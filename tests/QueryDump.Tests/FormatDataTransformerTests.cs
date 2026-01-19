@@ -11,7 +11,7 @@ public class FormatDataTransformerTests
     public async Task Transform_ShouldSubstituteColumnReferences()
     {
         // Arrange
-        var options = new FormatOptions { Mappings = new[] { "FULLNAME:{{FIRST}} {{LAST}}" } };
+        var options = new FormatOptions { Mappings = new[] { "FULLNAME:{FIRST} {LAST}" } };
         var transformer = new FormatDataTransformer(options);
         var columns = new List<ColumnInfo>
         {
@@ -38,8 +38,8 @@ public class FormatDataTransformerTests
         { 
             Mappings = new[] 
             { 
-                "C:{{B}} Copied", 
-                "B:{{A}} Copied" 
+                "C:{B} Copied", 
+                "B:{A} Copied" 
             } 
         };
         var transformer = new FormatDataTransformer(options);
@@ -65,9 +65,9 @@ public class FormatDataTransformerTests
     }
     
     [Fact]
-    public async Task Transform_ShouldFormatWithDirectCopy_WhenUsingDoublebraces()
+    public async Task Transform_ShouldFormatWithDirectCopy()
     {
-        var options = new FormatOptions { Mappings = new[] { "COPY:{{ORIGINAL}}" } };
+        var options = new FormatOptions { Mappings = new[] { "COPY:{ORIGINAL}" } };
         var transformer = new FormatDataTransformer(options);
         var columns = new List<ColumnInfo>
         {
@@ -148,8 +148,8 @@ public class FormatDataTransformerTests
     [Fact]
     public async Task Transform_ShouldCombineBothSyntaxes()
     {
-        // Arrange: Mix {COLUMN:format} and {{COLUMN}}
-        var options = new FormatOptions { Mappings = new[] { "LABEL:{PRICE:0.00}€ - {{NAME}}" } };
+        // Arrange: Mix {COLUMN:format} and {COLUMN}
+        var options = new FormatOptions { Mappings = new[] { "LABEL:{PRICE:0.00}€ - {NAME}" } };
         var transformer = new FormatDataTransformer(options);
         var columns = new List<ColumnInfo>
         {

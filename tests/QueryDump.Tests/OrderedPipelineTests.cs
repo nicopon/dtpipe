@@ -67,7 +67,7 @@ public class OrderedPipelineTests
             "--fake", "NAME:name.fullName",
             "--null", "SENSITIVE_DATA",
             "--fake", "EMAIL:internet.email",
-            "--format", "DISPLAY:{{NAME}} <{{EMAIL}}>"
+            "--format", "DISPLAY:{NAME} <{EMAIL}>"
         };
 
         var fakeT1 = new Mock<IDataTransformer>();

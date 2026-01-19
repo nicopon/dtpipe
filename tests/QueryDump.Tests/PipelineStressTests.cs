@@ -100,10 +100,10 @@ public class PipelineStressTests : IAsyncLifetime
             "querydump",
             "--fake", "Name:name.firstName",
             "--overwrite", "Category:Processed",
-            "--format", "Greeting:Hello {{Name}}",
-            "--format", "Ref:Ref_{{Id}}",
+            "--format", "Greeting:Hello {Name}",
+            "--format", "Ref:Ref_{Id}",
             "--null", "Temp",
-            "--format", "FinalStatus:{{Category}}_{{Id}}"
+            "--format", "FinalStatus:{Category}_{Id}"
         };
 
         // 4. Run Export

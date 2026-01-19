@@ -19,7 +19,7 @@ public class SqlServerReaderFactory : IStreamReaderFactory
     public string ProviderName => "sqlserver";
     public string Category => "Reader Options";
 
-    public string? ResolveConnectionFromEnvironment() => Environment.GetEnvironmentVariable("MSSQL_CONNECTION_STRING");
+
 
     public bool CanHandle(string connectionString)
     {

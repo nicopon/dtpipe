@@ -1,196 +1,229 @@
 # QueryDump
 
-Command-line tool to export database data (Oracle, SQL Server, DuckDB...) to Parquet or CSV files, designed for low memory footprint and seamless DuckDB ingestion.
+Command-line tool to export database data (Oracle, SQL Server, DuckDB) to Parquet, CSV, or another database. Designed for low memory footprint and seamless DuckDB ingestion.
 
 ## Features
 
-- **Streaming**: Stream-based reading (`IDataReader`) to handle large datasets.
-- **Formats**: Parquet (Snappy compression) and CSV (RFC 4180 compatible).
-- **Multi-Database**: Supports Oracle, SQL Server, DuckDB.
-- **Anonymization**: Capability to mask sensitive columns with fake data during export.
+- **Streaming**: Stream-based reading (`IDataReader`) to handle large datasets with minimal memory.
+- **Formats**: Parquet (Snappy compression), CSV (RFC 4180), and Database Export (DuckDB, Oracle).
+- **Multi-Database**: Supports Oracle, SQL Server, DuckDB (Read & Write).
+- **Anonymization**: Mask sensitive columns with fake data during export.
 
-## Build
+## Quick Start
 
-Prerequisites: .NET 8 or higher.
-
+**Build**
 ```bash
 ./build.sh
 ```
-The executable will be generated in `./dist/release/querydump` (standalone, no runtime dependencies required).
+The executable is generated at `./dist/release/querydump` (standalone, no runtime dependencies).
 
-## Usage Examples
-
-The tool attempts to detect the database provider via the connection string if the `--provider` parameter is not specified.
-
-### 1. Standard Export (Oracle)
-Uses environment variable for the connection string.
-
-```bash
-export ORACLE_CONNECTION_STRING="Data Source=..."
-./dist/release/querydump -q "SELECT * FROM clients" -o ./clients.parquet
-```
-
-### 2. SQL Server to CSV Export
-Explicitly specifies provider and connection string.
-
+**Basic Usage**
 ```bash
 ./dist/release/querydump \
-  -p sqlserver \
-  -c "Server=myServer;Database=myDB;Trusted_Connection=True;" \
-  -q "SELECT * FROM Users" \
-  -o users.csv
+  --input "duckdb:source.db" \
+  --query "SELECT * FROM users" \
+  --output users.parquet
 ```
 
-### 3. Export with Anonymization
-Replaces real values with fake data (names, emails, cities...).
+> 💡 Yes, DuckDB can do this on its own. This is just to illustrate the basic syntax—keep reading for the *actually useful* stuff. 😉
 
+---
+
+## Usage
+
+### Input Sources
+
+Use `--input` (or `-i`) with a prefixed connection string:
+
+| Prefix | Provider | Example |
+|--------|----------|---------|
+| `duckdb:` | DuckDB | `duckdb:mydata.db` |
+| `oracle:` | Oracle | `oracle:Data Source=...;User Id=...` |
+| `mssql:` | SQL Server | `mssql:Server=...;Database=...` |
+
+The provider is auto-detected from the prefix. File extensions `.db` and `.duckdb` are also recognized for DuckDB.
+
+### Output Destinations
+
+Use `--output` (or `-o`) with either:
+
+**File path** (extension determines format):
+- `.parquet` → Parquet with Snappy compression
+- `.csv` → RFC 4180 CSV
+
+**Database connection** (prefixed):
+```bash
+--output "duckdb:target.db"
+--output "oracle:User/Pass@TargetDB"
+```
+
+#### Database Writer Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--duckdb-writer-table` | Target table name | `Export` |
+| `--duckdb-writer-strategy` | `Append`, `Truncate`, `Recreate` | `Append` |
+| `--oracle-writer-table` | Target table name | `EXPORT_DATA` |
+| `--oracle-writer-strategy` | `Append`, `Truncate`, `Recreate` | `Append` |
+| `--oracle-writer-bulk-size` | Bulk copy batch size | `5000` |
+
+**Example: DuckDB to DuckDB with table recreation**
 ```bash
 ./dist/release/querydump \
-  -q "SELECT CUSTNAME, EMAIL FROM CLI" \
-  -o export_gdpr.csv \
-  --fake "CUSTNAME:name.lastname" \
-  --fake "EMAIL:internet.email" \
-  --fake-locale fr
+  --input "duckdb:source.db" \
+  --query "SELECT * FROM Users" \
+  --output "duckdb:target.db" \
+  --duckdb-writer-table "AnonymizedUsers" \
+  --duckdb-writer-strategy Recreate
 ```
 
-### 4. Setting Columns to Null
-Use `--null` to explicitly set columns to null:
+---
 
+### Data Transformation
+
+Transform column values during export using the following options (applied in order: Null → Overwrite → Format).
+
+#### Setting Columns to Null
 ```bash
 --null "SENSITIVE_DATA"
 --null "INTERNAL_ID"
 ```
 
-### 5. Static Value Overwrite
-Use `--overwrite` to replace column values with a static string:
-
+#### Static Value Overwrite
 ```bash
 --overwrite "STATUS:anonymized"
 --overwrite "COMMENT:redacted"
 ```
 
-### 6. Format Columns with Templates
-Use `--format` to create derived columns using templates:
+#### Format Templates
+Use `{COLUMN}` placeholders to create derived columns, with optional format specifiers.
 
+**Simple substitution:**
 ```bash
---format "DISPLAY_NAME:{{FIRSTNAME}} {{LASTNAME}}"
---format "FULL_ADDRESS:{{STREET}}, {{CITY}} {{ZIP}}"
+--format "DISPLAY_NAME:{FIRSTNAME} {LASTNAME}"
+--format "FULL_ADDRESS:{STREET}, {CITY} {ZIP}"
 ```
 
-### 7. Format Specifiers (string.Format style)
-Use `{COLUMN:format}` syntax for formatted output:
-
+**With .NET format specifiers** (see [numeric](https://learn.microsoft.com/en-us/dotnet/standard/base-types/standard-numeric-format-strings) and [date/time](https://learn.microsoft.com/en-us/dotnet/standard/base-types/custom-date-and-time-format-strings) docs):
 ```bash
---format "DATE_FR:{DATE:dd/MM/yyyy}"    # Date: 15/01/2024
---format "AMOUNT:{PRICE:0.00}€"          # Number: 123.46€
---format "ID:{CODE:D6}"                  # Padding: 000042
+--format "DATE_FR:{DATE:dd/MM/yyyy}"    # → 15/01/2024
+--format "AMOUNT:{PRICE:0.00}€"          # → 123.46€
+--format "ID:{CODE:D6}"                  # → 000042
 ```
 
-You can combine both syntaxes:
+**Combined:**
 ```bash
---format "LABEL:{PRICE:0.00}€ - {{NAME}}"  # Result: 99.50€ - Product
+--format "LABEL:{PRICE:0.00}€ - {NAME}"  # → 99.50€ - Product
 ```
 
-### 8. Deterministic Fake Data
-Use `--fake-seed-column` to generate reproducible fake data based on a source column value:
+---
 
+### Anonymization (Fake Data)
+
+Replace real data with realistic fake values using [Bogus](https://github.com/bchavez/Bogus).
+
+#### Basic Usage
 ```bash
 ./dist/release/querydump \
-  -q "SELECT USER_ID, USERNAME, EMAIL FROM USERS" \
-  -o users_anon.csv \
-  --fake "USERNAME:name.fullname" \
+  --input "duckdb:customers.db" \
+  --query "SELECT NAME, EMAIL FROM customers" \
+  --output customers_anon.csv \
+  --fake "NAME:name.fullName" \
   --fake "EMAIL:internet.email" \
-  --fake-seed-column USER_ID
+  --fake-locale fr
 ```
 
-This ensures that the same `USER_ID` always produces the same fake `USERNAME` and `EMAIL`, even across different runs.
+#### Deterministic Mode
 
-### 9. Row-Index Deterministic Mode
-Use `--fake-deterministic` without a seed column for reproducible fakes based on row position:
-
+**Column-based seeding** (same input value = same fake output):
 ```bash
-./dist/release/querydump \
-  -q "SELECT * FROM USERS ORDER BY ID" \
-  -o users_anon.csv \
-  --fake "USERNAME:name.fullname" \
-  --fake-deterministic
+--fake "USERNAME:name.fullName" \
+--fake-seed-column USER_ID
 ```
 
-### 10. Variant Suffix for Different Values
-Use `#variant` suffix to get different values from the same faker:
-
+**Row-index seeding** (reproducible order-based):
 ```bash
---fake "EMAIL_PERSO:internet.email"      # Value A
---fake "EMAIL_PRO:internet.email#work"   # Different value B
---fake "EMAIL_BKP:internet.email#work"   # Same as EMAIL_PRO (same variant)
+--fake "USERNAME:name.fullName" \
+--fake-deterministic
 ```
 
-### 11. Virtual Columns for Composition
-Create fake columns not in query, then compose them with `--format`:
-
+#### Variant Suffix
+Get different values from the same faker using `#variant`:
 ```bash
-# Query: SELECT USER_ID, BANK_REF FROM users
-./dist/release/querydump \
-  -q "SELECT USER_ID, BANK_REF FROM users" \
-  -o users.csv \
-  --fake "IBAN:finance.iban" \
-  --fake "BIC:finance.bic" \
-  --format "BANK_REF:{{IBAN}}-{{BIC}}"
+--fake "EMAIL_PERSO:internet.email"       # Value A
+--fake "EMAIL_PRO:internet.email#work"    # Different value B
 ```
 
-Virtual columns (IBAN, BIC) are automatically detected (not in query) and available for `--format` templates.
+#### Virtual Columns
+Create fake columns not in the query, then use them in `--format`:
+```bash
+--query "SELECT USER_ID FROM users" \
+--fake "IBAN:finance.iban" \
+--fake "BIC:finance.bic" \
+--format "BANK_REF:{IBAN}-{BIC}"
+```
 
-To list available data generators:
+#### List Available Fakers
 ```bash
 ./dist/release/querydump --fake-list
 ```
 
-## Options
+---
+
+## CLI Reference
 
 | Option | Alias | Description | Default |
-|---|---|---|---|
-| `--query` | `-q` | SQL query to execute (SELECT only) | **Required** |
-| `--output` | `-o` | Output file (.parquet or .csv) | **Required** |
-| `--connection` | `-c` | Connection string | Auto (ENV) |
-| `--provider` | `-p` | `auto`, `oracle`, `sqlserver`, `duckdb`... | `auto` |
-| `--batch-size` | `-b` | Rows per output batch | 5000 |
-| `--connection-timeout` | | Connection timeout (seconds) | 10 |
-| `--query-timeout` | | Query timeout (seconds, 0=none) | 0 |
-| **Transformers** |
-| `--null` | | Column(s) to set to null (repeatable) | - |
-| `--overwrite` | | `COLUMN:value` static overwrite (repeatable) | - |
-| `--format` | | `TARGET:{{SOURCE}}` or `{SOURCE:fmt}` format (repeatable) | - |
-| `--fake` | | `COLUMN:faker.method` mapping (supports `#variant` suffix) | - |
-| `--fake-locale` | | Locale for fake data (en, fr, de, ja, zh_CN...) | `en` |
-| `--fake-seed` | | Global seed for reproducible random fakes | - |
-| `--fake-seed-column` | | Column for deterministic seeding (same value = same output) | - |
-| `--fake-deterministic` | | Row-index based deterministic mode | `false` |
-| `--fake-list` | | List all available fake data generators and exit | - |
-| **Reader Options** |
-| `--ora-fetch-size` | | Oracle fetch buffer size (bytes) | 1MB |
+|--------|-------|-------------|---------|
+| `--input` | `-i` | Input connection string (prefixed) | **Required** |
+| `--query` | `-q` | SQL query (SELECT only) | **Required** |
+| `--output` | `-o` | Output file or connection (prefixed) | **Required** |
+| `--batch-size` | `-b` | Rows per batch | `50000` |
+| `--connection-timeout` | | Connection timeout (seconds) | `10` |
+| `--query-timeout` | | Query timeout (seconds, 0=none) | `0` |
+| **Transformation** |
+| `--null` | | Set column(s) to null | - |
+| `--overwrite` | | `COLUMN:value` static replacement | - |
+| `--format` | | `TARGET:{SOURCE}` or `{SOURCE:fmt}` | - |
+| **Anonymization** |
+| `--fake` | | `COLUMN:faker.method` mapping | - |
+| `--fake-locale` | | Locale (en, fr, de, ja...) | `en` |
+| `--fake-seed` | | Global seed for reproducibility | - |
+| `--fake-seed-column` | | Column for deterministic seeding | - |
+| `--fake-deterministic` | | Row-index based determinism | `false` |
+| `--fake-list` | | List fakers and exit | - |
+| **Reader** |
+| `--ora-fetch-size` | | Oracle fetch buffer (bytes) | `1048576` |
+| **Writer** |
+| `--duckdb-writer-table` | | DuckDB target table | `Export` |
+| `--duckdb-writer-strategy` | | `Append`/`Truncate`/`Recreate` | `Append` |
+| `--oracle-writer-table` | | Oracle target table | `EXPORT_DATA` |
+| `--oracle-writer-strategy` | | `Append`/`Truncate`/`Recreate` | `Append` |
+| `--oracle-writer-bulk-size` | | Oracle bulk batch size | `5000` |
+
+---
 
 ## Common Fakers
 
-Here are some of the most useful fakers you can use with `--fake`. Use `--fake-list` to see the full list of 100+ available generators.
-
 | Dataset | Method | Description | Example (fr) |
-|---|---|---|---|
+|---------|--------|-------------|--------------|
 | **Name** | `name.firstName` | First name | *Jean* |
 | | `name.lastName` | Last name | *Dupont* |
 | | `name.fullName` | Full name | *Jean Dupont* |
 | **Internet** | `internet.email` | Email address | *jean.dupont@gmail.com* |
 | | `internet.userName` | Username | *jdupont* |
-| **Address** | `address.streetAddress` | Street address | *12 rue de la Paix* |
-| | `address.city` | City name | *Paris* |
+| **Address** | `address.streetAddress` | Street | *12 rue de la Paix* |
+| | `address.city` | City | *Paris* |
 | | `address.zipCode` | Zip code | *75001* |
-| | `address.country` | Country | *France* |
-| **Phone** | `phone.phoneNumber` | Phone number | *01 02 03 04 05* |
-| **Company** | `company.companyName` | Company name | *Corp Inc.* |
-| **Date** | `date.past` | Date in the past | *2023-12-01* |
-| | `date.future` | Date in the future | *2030-01-01* |
+| **Phone** | `phone.phoneNumber` | Phone | *01 02 03 04 05* |
+| **Company** | `company.companyName` | Company | *Corp Inc.* |
+| **Date** | `date.past` | Past date | *2023-12-01* |
+| | `date.future` | Future date | *2030-01-01* |
+| **Finance** | `finance.iban` | IBAN | *FR76...* |
+| | `finance.bic` | BIC/SWIFT | *BNPAFRPP* |
 
-> **Note**: The anonymization feature is powered by [Bogus](https://github.com/bchavez/Bogus). For a complete list of all available datasets and methods, please refer to their official documentation.
+> Use `--fake-list` to see all 100+ available generators.
 
+---
 
 ## License
 

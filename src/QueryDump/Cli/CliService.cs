@@ -33,8 +33,7 @@ public class CliService
     public (RootCommand, Action) Build()
     {
         // Core Options
-        var connectionOption = new Option<string?>("--connection", "-c") { Description = "Connection string (or set *_CONNECTION_STRING env var)" };
-        var providerOption = new Option<string>("--provider", "-p") { Description = "Database provider (auto, oracle, sqlserver, duckdb)", DefaultValueFactory = _ => "auto" };
+        var inputOption = new Option<string?>("--input|-i") { Description = "Input connection string or file path" };
         var queryOption = new Option<string?>("--query", "-q") { Description = "SQL query to execute (SELECT only)" };
         var outputOption = new Option<string?>("--output", "-o") { Description = "Output file path (.parquet or .csv)" };
         var connectionTimeoutOption = new Option<int>("--connection-timeout") { Description = "Connection timeout in seconds", DefaultValueFactory = _ => 10 };
@@ -42,7 +41,7 @@ public class CliService
         var batchSizeOption = new Option<int>("--batch-size", "-b") { Description = "Rows per output batch", DefaultValueFactory = _ => 50_000 };
         
         // Core Help Options
-        var coreOptions = new List<Option> { connectionOption, providerOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption };
+        var coreOptions = new List<Option> { inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption };
 
         var rootCommand = new RootCommand("QueryDump - Export database data to Parquet or CSV (DuckDB-optimized)");
         foreach(var opt in coreOptions) rootCommand.Options.Add(opt);
@@ -88,66 +87,35 @@ public class CliService
                 contributor.BindOptions(parseResult, registry);
             }
 
-            // 4. Resolve Connection & Provider
-            var provider = parseResult.GetValue(providerOption)!;
-            var connection = parseResult.GetValue(connectionOption);
+            // 4. Resolve Input & Provider
+            var input = parseResult.GetValue(inputOption);
             
+            if (string.IsNullOrWhiteSpace(input))
+            {
+                Console.Error.WriteLine("Error: --input is required.");
+                return 1;
+            }
+
             var readerFactories = _contributors.OfType<IStreamReaderFactory>().ToList();
 
-            // Resolve connection using factories
-            if (connection is null)
+            // Auto-detect provider
+            var detectedFactory = readerFactories.FirstOrDefault(f => f.CanHandle(input));
+            
+            if (detectedFactory == null)
             {
-                // Try to resolve based on provider if set, or just try all
-                if (string.Equals(provider, "auto", StringComparison.OrdinalIgnoreCase))
-                {
-                     // Try all readers for a default connection
-                     foreach (var factory in readerFactories)
-                     {
-                         var def = factory.ResolveConnectionFromEnvironment();
-                         if (def != null)
-                         {
-                             // We found a default connection. Is it the only one? 
-                             // Logic: If we find one, we use it. But which one if multiple?
-                             // Original logic: Oracle ?? SqlServer ?? DuckDB. Order of enumeration matters.
-                             // List order is fixed by DI registration order.
-                             connection = def;
-                             break;
-                         }
-                     }
-                }
-                else
-                {
-                    // Specific provider
-                    var factory = readerFactories.FirstOrDefault(f => f.ProviderName.Equals(provider, StringComparison.OrdinalIgnoreCase));
-                    connection = factory?.ResolveConnectionFromEnvironment();
-                }
+                 Console.Error.WriteLine($"Error: Could not detect provider for input: '{input}'.");
+                 Console.Error.WriteLine("Please use a known prefix (e.g. 'duckdb:', 'oracle:', 'mssql:').");
+                 return 1;
             }
             
-            if (string.IsNullOrWhiteSpace(connection))
-            {
-                Console.Error.WriteLine("Error: Connection string required.");
-                return 1; // Exit code 1
-            }
-
-            if (string.Equals(provider, "auto", StringComparison.OrdinalIgnoreCase))
-            {
-                // Auto-detect provider using factories
-                var detectedFactory = readerFactories.FirstOrDefault(f => f.CanHandle(connection));
-                
-                if (detectedFactory == null)
-                {
-                     Console.Error.WriteLine("Error: Could not auto-detect provider.");
-                     return 1;
-                }
-                provider = detectedFactory.ProviderName;
-                Console.WriteLine($"Auto-detected provider: {provider}");
-            }
+            var provider = detectedFactory.ProviderName;
+            Console.WriteLine($"Auto-detected provider: {provider}");
 
             // 5. Run Export
              var options = new DumpOptions
             {
                 Provider = provider,
-                ConnectionString = connection,
+                ConnectionString = input,
                 Query = query!,
                 OutputPath = output!,
                 ConnectionTimeout = parseResult.GetValue(connectionTimeoutOption),
