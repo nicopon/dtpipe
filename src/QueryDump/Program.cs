@@ -7,7 +7,7 @@ using QueryDump.Core.Options;
 using QueryDump.Transformers.Format;
 using QueryDump.Transformers.Fake;
 using QueryDump.Transformers.Null;
-using QueryDump.Transformers.Static;
+using QueryDump.Transformers.Overwrite;
 using QueryDump.Writers;
 using QueryDump.Providers.Oracle;
 using QueryDump.Providers.SqlServer;
@@ -51,10 +51,12 @@ class Program
         // Writer Factories
         services.AddSingleton<IDataWriterFactory, Writers.Csv.CsvWriterFactory>();
         services.AddSingleton<IDataWriterFactory, Writers.Parquet.ParquetWriterFactory>();
+        services.AddSingleton<IDataWriterFactory, Providers.DuckDB.DuckDbDataWriterFactory>();
+        services.AddSingleton<IDataWriterFactory, Providers.Oracle.OracleDataWriterFactory>();
         
         // Transformer Factories
         services.AddSingleton<IDataTransformerFactory, NullDataTransformerFactory>();
-        services.AddSingleton<IDataTransformerFactory, StaticDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, OverwriteDataTransformerFactory>();
         services.AddSingleton<IDataTransformerFactory, FakeDataTransformerFactory>();
         services.AddSingleton<IDataTransformerFactory, FormatDataTransformerFactory>();
         

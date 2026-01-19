@@ -25,14 +25,13 @@ public class OracleReaderFactory : IStreamReaderFactory
     {
         // Simple heuristic: Contains "Data Source=" or looks like a TNS alias (no space, no semicolons)
         // Or starts with protocol like "tcps://"
-        return connectionString.Contains("Data Source=", StringComparison.OrdinalIgnoreCase) 
-               || !connectionString.Contains(';'); 
+        return OracleConnectionHelper.CanHandle(connectionString); 
     }
 
     public IStreamReader Create(DumpOptions options)
     {
         return new OracleStreamReader(
-            options.ConnectionString, 
+            OracleConnectionHelper.GetConnectionString(options.ConnectionString), 
             options.Query,
             _registry.Get<OracleOptions>(),
             options.QueryTimeout);

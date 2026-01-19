@@ -26,7 +26,7 @@ public class ExportService
         _optionsRegistry = optionsRegistry;
     }
 
-    public async Task RunExportAsync(DumpOptions options, CancellationToken ct)
+    public async Task RunExportAsync(DumpOptions options, CancellationToken ct, string[]? args = null)
     {
         Console.Error.WriteLine($"Connecting to {options.Provider}...");
         
@@ -48,19 +48,18 @@ public class ExportService
         Console.Error.WriteLine($"Schema: {reader.Columns.Count} columns");
         Console.Error.WriteLine($"Writing to: {options.OutputPath}");
 
-        // Initialize transformation pipeline
-        var pipeline = new List<IDataTransformer>();
-        foreach (var factory in _transformerFactories)
-        {
-            var transformer = factory.Create(options);
-            if (transformer != null)
-            {
-                pipeline.Add(transformer);
-            }
-        }
+        // Initialize transformation pipeline using ordered arguments
+        // This ensures the pipeline executes in the exact order specified by the user in CLI
+        var pipelineBuilder = new TransformerPipelineBuilder(_transformerFactories);
+        var pipeline = pipelineBuilder.Build(args ?? Environment.GetCommandLineArgs());
         
-        // Sort by Priority (Low -> High)
-        pipeline.Sort((a, b) => a.Priority.CompareTo(b.Priority));
+        // If no pipeline was built (e.g. no args matching transformers), pipeline is empty.
+        // Legacy fallback: if pipeline is empty, we could check registry, but for now we follow the "ordered" paradigm strictness.
+        // Actually, for backward compatibility or ease of use, if the new builder yields nothing but the registry has options,
+        // we might want to fallback, but the requirement was "no compatibility" and "order by args".
+        // However, we must ensure we don't accidentally pick up "dotnet exec dll" args if not careful, 
+        // but the builder logic maps known options.
+
 
         // Cascade initialization: output of one transformer becomes input to next
         var currentSchema = reader.Columns;

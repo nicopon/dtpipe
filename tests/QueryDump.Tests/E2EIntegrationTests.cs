@@ -31,6 +31,7 @@ public class E2EIntegrationTests : IAsyncLifetime
     {
         try { if (File.Exists(_dbPath)) File.Delete(_dbPath); } catch { }
         try { if (File.Exists(_outputPath)) File.Delete(_outputPath); } catch { }
+        GC.SuppressFinalize(this);
         return ValueTask.CompletedTask;
     }
 
@@ -55,7 +56,7 @@ public class E2EIntegrationTests : IAsyncLifetime
         // Register Fake Options: Mask "Name" with "name.firstname"
         registry.Register(new FakeOptions 
         { 
-            Mappings = new[] { "Name:name.firstname" },
+            Mappings = ["Name:name.firstname"],
             Seed = 12345 // Deterministic
         });
         
@@ -87,7 +88,8 @@ public class E2EIntegrationTests : IAsyncLifetime
         };
 
         // 4. Run Export
-        await exportService.RunExportAsync(options, TestContext.Current.CancellationToken);
+        var args = new[] { "querydump", "--fake", "Name:name.firstname" };
+        await exportService.RunExportAsync(options, TestContext.Current.CancellationToken, args);
 
         // 5. Verify Output
         File.Exists(_outputPath).Should().BeTrue();
@@ -131,17 +133,17 @@ public class E2EIntegrationTests : IAsyncLifetime
         
         registry.Register(new Transformers.Null.NullOptions 
         { 
-            Columns = new[] { "Age" } 
+            Columns = ["Age"] 
         });
         
-        registry.Register(new Transformers.Static.OverwriteOptions 
+        registry.Register(new Transformers.Overwrite.OverwriteOptions 
         { 
-            Mappings = new[] { "Name:Bond" } 
+            Mappings = ["Name:Bond"] 
         });
         
         registry.Register(new Transformers.Format.FormatOptions
         {
-            Mappings = new[] { "CopiedName:{{Name}} is 007" }
+            Mappings = ["CopiedName:{{Name}} is 007"]
         });
 
         var services = new ServiceCollection();
@@ -155,7 +157,7 @@ public class E2EIntegrationTests : IAsyncLifetime
         
         // Transformer Factories
         services.AddSingleton<IDataTransformerFactory, Transformers.Null.NullDataTransformerFactory>();
-        services.AddSingleton<IDataTransformerFactory, Transformers.Static.StaticDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, Transformers.Overwrite.OverwriteDataTransformerFactory>();
         services.AddSingleton<IDataTransformerFactory, Transformers.Fake.FakeDataTransformerFactory>();
         services.AddSingleton<IDataTransformerFactory, Transformers.Format.FormatDataTransformerFactory>();
         
@@ -174,7 +176,14 @@ public class E2EIntegrationTests : IAsyncLifetime
         };
 
         // 3. Run Export
-        await exportService.RunExportAsync(options, TestContext.Current.CancellationToken);
+        var args = new[] 
+        { 
+            "querydump", 
+            "--null", "Age",
+            "--overwrite", "Name:Bond",
+            "--format", "CopiedName:{{Name}} is 007" 
+        };
+        await exportService.RunExportAsync(options, TestContext.Current.CancellationToken, args);
 
         // 4. Verify
         File.Exists(_outputPath).Should().BeTrue();
@@ -196,5 +205,100 @@ public class E2EIntegrationTests : IAsyncLifetime
         
         // Cloner check (should see "Bond" from Overwriter)
         row1[copyIdx].Should().Be("Bond is 007"); 
+    }
+    [Fact]
+    public async Task ExportService_ShouldRespectInterleavedOrder()
+    {
+        // 1. Setup Database
+        using (var connection = new DuckDB.NET.Data.DuckDBConnection(_connectionString))
+        {
+            await connection.OpenAsync(TestContext.Current.CancellationToken);
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "CREATE TABLE test (A VARCHAR, B VARCHAR, C VARCHAR)";
+            await cmd.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+            cmd.CommandText = "INSERT INTO test VALUES ('Init', '', '')";
+            await cmd.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
+
+        // 2. Configure Services
+        var registry = new OptionsRegistry();
+        registry.Register(new DuckDbOptions());
+        registry.Register(new CsvOptions { Header = true });
+        
+        // Register empty options, they will be populated by the pipeline builder from args
+        registry.Register(new Transformers.Null.NullOptions());
+        registry.Register(new Transformers.Overwrite.OverwriteOptions());
+        registry.Register(new Transformers.Format.FormatOptions());
+        registry.Register(new FakeOptions());
+
+        var services = new ServiceCollection();
+        services.AddSingleton(registry);
+        
+        // Reader Factories
+        services.AddSingleton<IStreamReaderFactory, DuckDbReaderFactory>();
+        
+        // Writer Factories
+        services.AddSingleton<IDataWriterFactory, CsvWriterFactory>();
+        
+        // Transformer Factories
+        services.AddSingleton<IDataTransformerFactory, Transformers.Null.NullDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, Transformers.Overwrite.OverwriteDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, Transformers.Fake.FakeDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, Transformers.Format.FormatDataTransformerFactory>();
+        
+        services.AddSingleton<ExportService>();
+        
+        var serviceProvider = services.BuildServiceProvider();
+        var exportService = serviceProvider.GetRequiredService<ExportService>();
+
+        var options = new DumpOptions
+        {
+            Provider = "duckdb",
+            ConnectionString = _connectionString,
+            Query = "SELECT A, B, C FROM test",
+            OutputPath = _outputPath
+        };
+        
+        // 3. Simulate CLI Args for Ordered Pipeline
+        // Sequence:
+        // 1. Overwrite A -> "Val1"
+        // 2. Format B -> "{{A}}" (should capture Val1)
+        // 3. Overwrite A -> "Val2"
+        // 4. Format C -> "{{A}}" (should capture Val2)
+
+        var newArgs = new[] 
+        { 
+            "querydump", // dummy exe name
+            "--overwrite", "A:Val1",
+            "--format", "B:{{A}}",
+            "--overwrite", "A:Val2",
+            "--format", "C:{{A}}"
+        };
+        
+        // 4. Run Export
+        await exportService.RunExportAsync(options, TestContext.Current.CancellationToken, newArgs);
+        
+        // 5. Verify Output
+        var lines = await File.ReadAllLinesAsync(_outputPath, TestContext.Current.CancellationToken);
+        
+        // Header + 1 row
+        lines.Should().HaveCount(2);
+        
+        var headers = lines[0].Split(',');
+        var idxA = Array.IndexOf(headers, "A");
+        var idxB = Array.IndexOf(headers, "B");
+        var idxC = Array.IndexOf(headers, "C");
+        
+        var row = lines[1].Split(',');
+        
+        // Sequence:
+        // 1. Overwrite A -> "Val1"
+        // 2. Format B -> "{{A}}" (captures "Val1")
+        // 3. Overwrite A -> "Val2"
+        // 4. Format C -> "{{A}}" (captures "Val2")
+        
+        row[idxB].Should().Be("Val1");
+        row[idxC].Should().Be("Val2");
+        row[idxA].Should().Be("Val2"); // Final value of A
     }
 }

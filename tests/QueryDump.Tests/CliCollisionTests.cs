@@ -76,17 +76,16 @@ public class CliCollisionTests
 
         foreach (var (source, opt) in allOptions)
         {
-            var namesToCheck = new HashSet<string>();
-            namesToCheck.Add(opt.Name);
-            foreach (var alias in opt.Aliases) namesToCheck.Add(alias);
+            HashSet<string> namesToCheck = [opt.Name, .. opt.Aliases];
 
             foreach (var name in namesToCheck)
             {
-                if (!definedAliases.ContainsKey(name))
+                if (!definedAliases.TryGetValue(name, out var sources))
                 {
-                    definedAliases[name] = new List<string>();
+                    sources = [];
+                    definedAliases[name] = sources;
                 }
-                definedAliases[name].Add(source);
+                sources.Add(source);
             }
         }
 

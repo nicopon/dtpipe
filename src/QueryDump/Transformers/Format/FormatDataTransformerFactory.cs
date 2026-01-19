@@ -10,16 +10,11 @@ namespace QueryDump.Transformers.Format;
 
 public interface IFormatDataTransformerFactory : IDataTransformerFactory { }
 
-public class FormatDataTransformerFactory : IDataTransformerFactory
+public class FormatDataTransformerFactory(OptionsRegistry registry) : IDataTransformerFactory
 {
-    private readonly OptionsRegistry _registry;
+    private readonly OptionsRegistry _registry = registry;
 
-    public FormatDataTransformerFactory(OptionsRegistry registry)
-    {
-        _registry = registry;
-    }
-
-    public IEnumerable<Type> GetSupportedOptionTypes()
+    public static IEnumerable<Type> GetSupportedOptionTypes()
     {
         yield return ComponentOptionsHelper.GetOptionsType<FormatDataTransformer>();
     }
@@ -30,7 +25,7 @@ public class FormatDataTransformerFactory : IDataTransformerFactory
 
     public IEnumerable<Option> GetCliOptions()
     {
-        return _cliOptions ??= GetSupportedOptionTypes().SelectMany(CliOptionBuilder.GenerateOptionsForType).ToList();
+        return _cliOptions ??= [.. GetSupportedOptionTypes().SelectMany(CliOptionBuilder.GenerateOptionsForType)];
     }
 
     public void BindOptions(ParseResult parseResult, OptionsRegistry registry)
@@ -54,5 +49,14 @@ public class FormatDataTransformerFactory : IDataTransformerFactory
         }
 
         return new FormatDataTransformer(formatOptions);
+    }
+
+    public IDataTransformer CreateFromConfiguration(IEnumerable<string> values)
+    {
+        var options = new FormatOptions
+        {
+            Mappings = values
+        };
+        return new FormatDataTransformer(options);
     }
 }

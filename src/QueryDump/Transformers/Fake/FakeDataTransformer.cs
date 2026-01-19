@@ -11,7 +11,7 @@ namespace QueryDump.Transformers.Fake;
 /// </summary>
 public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOptions<FakeOptions>
 {
-    public int Priority => 30; // Faker runs after Null (10) and Static (20)
+    public int Priority => 30; // Faker runs after Null (10) and Overwrite (20)
 
     private readonly Dictionary<string, string> _mappings = new(StringComparer.OrdinalIgnoreCase);
     private readonly FakerRegistry _registry;
@@ -36,7 +36,7 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
     private int[]? _generationOrder;  // Indices in order of generation (dependencies first)
     private ColumnProcessor[]? _processors;  // Pre-built processors for each column
     private Dictionary<string, int>? _columnNameToIndex;  // Fast lookup for template substitution
-    private List<string> _virtualColumns = new();  // Columns defined in --fake but not in query
+    private readonly List<string> _virtualColumns = [];  // Columns defined in --fake but not in query
     private int _realColumnCount;  // Number of real columns from query
     private IReadOnlyList<ColumnInfo>? _inputColumns;  // Store for building output schema
 
@@ -185,7 +185,7 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
         // Initialize paged caches for deterministic mode
         if (_deterministic || _seedColumnIndex >= 0)
         {
-            _pagedCaches = new Dictionary<int, PagedCache>();
+            _pagedCaches = [];
             foreach (var colIdx in _generationOrder)
             {
                 var processor = _processors[colIdx];
@@ -440,19 +440,12 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
     /// Lazily-populated paged cache for deterministic fake data generation.
     /// Pages are generated on-demand to minimize Randomizer instantiation overhead.
     /// </summary>
-    private sealed class PagedCache
+    private sealed class PagedCache(string locale, Func<Faker, object?> generator, uint fakerHash)
     {
-        private readonly string _locale;
-        private readonly Func<Faker, object?> _generator;
-        private readonly uint _fakerHash;
-        private readonly Dictionary<int, object?[]> _pages = new();
-
-        public PagedCache(string locale, Func<Faker, object?> generator, uint fakerHash)
-        {
-            _locale = locale;
-            _generator = generator;
-            _fakerHash = fakerHash;
-        }
+        private readonly string _locale = locale;
+        private readonly Func<Faker, object?> _generator = generator;
+        private readonly uint _fakerHash = fakerHash;
+        private readonly Dictionary<int, object?[]> _pages = [];
 
         public object? GetValue(int index)
         {

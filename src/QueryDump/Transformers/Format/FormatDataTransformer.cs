@@ -61,7 +61,21 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
         // We only need to sort the target columns.
         _generationOrder = TopologicalSort(targetIndices, _processors);
 
-        return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
+        // Update schema: Transformed columns become Strings
+        var newColumns = new List<ColumnInfo>(columns.Count);
+        for (int i = 0; i < columns.Count; i++)
+        {
+             if (_mappings.ContainsKey(columns[i].Name))
+             {
+                 newColumns.Add(new ColumnInfo(columns[i].Name, typeof(string), columns[i].IsNullable));
+             }
+             else
+             {
+                 newColumns.Add(columns[i]);
+             }
+        }
+
+        return new ValueTask<IReadOnlyList<ColumnInfo>>(newColumns);
     }
 
     public object?[] Transform(object?[] row)
@@ -105,7 +119,8 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
                     if (_columnNameToIndex!.TryGetValue(refColName, out var refIdx))
                     {
                         // If the referenced column is also a target, visit it first
-                        if (targets.Contains(refIdx))
+                        // Ignore self-references (A -> A) as they simply use the original value
+                        if (targets.Contains(refIdx) && refIdx != u)
                         {
                             Visit(refIdx);
                         }

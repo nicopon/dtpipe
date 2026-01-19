@@ -24,15 +24,21 @@ public class DuckDbReaderFactory : IStreamReaderFactory
     public bool CanHandle(string connectionString)
     {
         // DuckDB often just takes a file path or usage of specific keys
-        return connectionString.EndsWith(".duckdb", StringComparison.OrdinalIgnoreCase)
-               || connectionString.EndsWith(".db", StringComparison.OrdinalIgnoreCase)
-               || connectionString.Contains("DataSource=", StringComparison.OrdinalIgnoreCase) && connectionString.Contains(".duckdb", StringComparison.OrdinalIgnoreCase);
+        return DuckDbConnectionHelper.CanHandle(connectionString);
     }
 
     public IStreamReader Create(DumpOptions options)
     {
+        var connectionString = DuckDbConnectionHelper.GetConnectionString(options.ConnectionString);
+
+        if (!connectionString.Contains("DataSource=", StringComparison.OrdinalIgnoreCase) 
+            && !connectionString.StartsWith("Data Source=", StringComparison.OrdinalIgnoreCase))
+        {
+            connectionString = $"Data Source={connectionString}";
+        }
+
         return new DuckDataSourceReader(
-            options.ConnectionString,
+            connectionString,
             options.Query,
             _registry.Get<DuckDbOptions>(),
             options.QueryTimeout);

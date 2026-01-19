@@ -10,16 +10,11 @@ namespace QueryDump.Transformers.Null;
 
 public interface INullDataTransformerFactory : IDataTransformerFactory { }
 
-public class NullDataTransformerFactory : IDataTransformerFactory
+public class NullDataTransformerFactory(OptionsRegistry registry) : IDataTransformerFactory
 {
-    private readonly OptionsRegistry _registry;
+    private readonly OptionsRegistry _registry = registry;
 
-    public NullDataTransformerFactory(OptionsRegistry registry)
-    {
-        _registry = registry;
-    }
-
-    public IEnumerable<Type> GetSupportedOptionTypes()
+    public static IEnumerable<Type> GetSupportedOptionTypes()
     {
         yield return ComponentOptionsHelper.GetOptionsType<NullDataTransformer>();
     }
@@ -30,7 +25,7 @@ public class NullDataTransformerFactory : IDataTransformerFactory
 
     public IEnumerable<Option> GetCliOptions()
     {
-        return _cliOptions ??= GetSupportedOptionTypes().SelectMany(CliOptionBuilder.GenerateOptionsForType).ToList();
+        return _cliOptions ??= [.. GetSupportedOptionTypes().SelectMany(CliOptionBuilder.GenerateOptionsForType)];
     }
 
     public void BindOptions(ParseResult parseResult, OptionsRegistry registry)
@@ -55,5 +50,14 @@ public class NullDataTransformerFactory : IDataTransformerFactory
         }
 
         return new NullDataTransformer(nullOptions);
+    }
+
+    public IDataTransformer CreateFromConfiguration(IEnumerable<string> values)
+    {
+        var options = new NullOptions
+        {
+            Columns = [.. values]
+        };
+        return new NullDataTransformer(options);
     }
 }

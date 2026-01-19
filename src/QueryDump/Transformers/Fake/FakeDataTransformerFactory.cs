@@ -15,16 +15,11 @@ public interface IFakeDataTransformerFactory : IDataTransformerFactory
 {
 }
 
-public class FakeDataTransformerFactory : IFakeDataTransformerFactory
+public class FakeDataTransformerFactory(OptionsRegistry registry) : IFakeDataTransformerFactory
 {
-    private readonly OptionsRegistry _registry;
+    private readonly OptionsRegistry _registry = registry;
 
-    public FakeDataTransformerFactory(OptionsRegistry registry)
-    {
-        _registry = registry;
-    }
-
-    public IEnumerable<Type> GetSupportedOptionTypes()
+    public static IEnumerable<Type> GetSupportedOptionTypes()
     {
         yield return ComponentOptionsHelper.GetOptionsType<FakeDataTransformer>();
     }
@@ -37,14 +32,14 @@ public class FakeDataTransformerFactory : IFakeDataTransformerFactory
     {
         if (_cliOptions != null) return _cliOptions;
 
-        var list = new List<Option>();
-
         // Manual option for listing fakers (not bound to POCO yet)
-        var fakeListOption = new Option<bool>("--fake-list")
+        var list = new List<Option> 
         {
-            Description = "List all available fake data generators and exit"
+            new Option<bool>("--fake-list")
+            {
+                Description = "List all available fake data generators and exit"
+            }
         };
-        list.Add(fakeListOption);
 
         foreach (var type in GetSupportedOptionTypes())
         {
@@ -75,6 +70,23 @@ public class FakeDataTransformerFactory : IFakeDataTransformerFactory
         }
 
         return new FakeDataTransformer(fakeOptions);
+    }
+
+    public IDataTransformer CreateFromConfiguration(IEnumerable<string> values)
+    {
+        // Retrieve global options (like Locale, Seed) from registry as they apply to all fake instances
+        var globalOptions = _registry.Get<FakeOptions>();
+        
+        var options = new FakeOptions
+        {
+            Mappings = values.ToList(),
+            Locale = globalOptions.Locale,
+            Seed = globalOptions.Seed,
+            SeedColumn = globalOptions.SeedColumn,
+            Deterministic = globalOptions.Deterministic
+        };
+        
+        return new FakeDataTransformer(options);
     }
     
     public Task<int?> HandleCommandAsync(ParseResult parseResult, CancellationToken ct = default)

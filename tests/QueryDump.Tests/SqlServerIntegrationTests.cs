@@ -63,8 +63,7 @@ public class SqlServerIntegrationTests : IAsyncLifetime
         // Act
         await using var reader = new SqlServerStreamReader(
             connectionString, 
-            "SELECT * FROM test_data ORDER BY Id",
-            new SqlServerOptions());
+            "SELECT * FROM test_data ORDER BY Id");
         
         await reader.OpenAsync(TestContext.Current.CancellationToken);
         
@@ -102,8 +101,7 @@ public class SqlServerIntegrationTests : IAsyncLifetime
             // Act
             await using var reader = new SqlServerStreamReader(
                 connectionString, 
-                "SELECT * FROM test_data ORDER BY Id",
-                new SqlServerOptions());
+                "SELECT * FROM test_data ORDER BY Id");
             
             await reader.OpenAsync(TestContext.Current.CancellationToken);
             

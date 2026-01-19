@@ -1,18 +1,18 @@
 using FluentAssertions;
 using QueryDump.Core;
-using QueryDump.Transformers.Static;
+using QueryDump.Transformers.Overwrite;
 using Xunit;
 
 namespace QueryDump.Tests;
 
-public class StaticDataTransformerTests
+public class OverwriteDataTransformerTests
 {
     [Fact]
     public async Task Transform_ShouldOverwriteColumn_WhenMappingExists()
     {
         // Arrange
         var options = new OverwriteOptions { Mappings = new[] { "CITY:Paris" } };
-        var transformer = new StaticDataTransformer(options);
+        var transformer = new OverwriteDataTransformer(options);
         var columns = new List<ColumnInfo> { new("CITY", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { "London" } };
 
@@ -29,7 +29,7 @@ public class StaticDataTransformerTests
     {
         // Arrange
         var options = new OverwriteOptions { Mappings = new[] { "UNKNOWN:Value" } };
-        var transformer = new StaticDataTransformer(options);
+        var transformer = new OverwriteDataTransformer(options);
         var columns = new List<ColumnInfo> { new("CITY", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { "London" } };
 

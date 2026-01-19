@@ -6,22 +6,17 @@ using QueryDump.Core;
 using QueryDump.Configuration;
 using QueryDump.Core.Options;
 
-namespace QueryDump.Transformers.Static;
+namespace QueryDump.Transformers.Overwrite;
 
-public interface IStaticDataTransformerFactory : IDataTransformerFactory { }
+public interface IOverwriteDataTransformerFactory : IDataTransformerFactory { }
 
-public class StaticDataTransformerFactory : IDataTransformerFactory
+public class OverwriteDataTransformerFactory(OptionsRegistry registry) : IDataTransformerFactory
 {
-    private readonly OptionsRegistry _registry;
+    private readonly OptionsRegistry _registry = registry;
 
-    public StaticDataTransformerFactory(OptionsRegistry registry)
+    public static IEnumerable<Type> GetSupportedOptionTypes()
     {
-        _registry = registry;
-    }
-
-    public IEnumerable<Type> GetSupportedOptionTypes()
-    {
-        yield return ComponentOptionsHelper.GetOptionsType<StaticDataTransformer>();
+        yield return ComponentOptionsHelper.GetOptionsType<OverwriteDataTransformer>();
     }
 
     public string Category => "Transformer Options";
@@ -30,7 +25,7 @@ public class StaticDataTransformerFactory : IDataTransformerFactory
 
     public IEnumerable<Option> GetCliOptions()
     {
-        return _cliOptions ??= GetSupportedOptionTypes().SelectMany(CliOptionBuilder.GenerateOptionsForType).ToList();
+        return _cliOptions ??= [.. GetSupportedOptionTypes().SelectMany(CliOptionBuilder.GenerateOptionsForType)];
     }
 
     public void BindOptions(ParseResult parseResult, OptionsRegistry registry)
@@ -53,6 +48,15 @@ public class StaticDataTransformerFactory : IDataTransformerFactory
             return null;
         }
 
-        return new StaticDataTransformer(overwriteOptions);
+        return new OverwriteDataTransformer(overwriteOptions);
+    }
+
+    public IDataTransformer CreateFromConfiguration(IEnumerable<string> values)
+    {
+        var options = new OverwriteOptions
+        {
+            Mappings = [.. values]
+        };
+        return new OverwriteDataTransformer(options);
     }
 }

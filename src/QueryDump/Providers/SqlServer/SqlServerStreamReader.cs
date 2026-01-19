@@ -20,16 +20,16 @@ public sealed partial class SqlServerStreamReader : IStreamReader, IRequiresOpti
 
     // DDL keywords that should be rejected
     private static readonly string[] DdlKeywords = 
-    {
+    [
         "CREATE", "DROP", "ALTER", "TRUNCATE", "RENAME", 
         "GRANT", "REVOKE", "COMMENT", "BACKUP", "RESTORE",
         "INSERT", "UPDATE", "DELETE", "MERGE", "EXEC", "EXECUTE"
-    };
+    ];
 
     [GeneratedRegex(@"^\s*(\w+)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex FirstWordRegex();
 
-    public SqlServerStreamReader(string connectionString, string query, SqlServerOptions options, int queryTimeout = 0)
+    public SqlServerStreamReader(string connectionString, string query, int queryTimeout = 0)
     {
         ValidateQueryIsSafeSelect(query);
         

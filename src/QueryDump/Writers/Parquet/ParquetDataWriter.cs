@@ -10,10 +10,12 @@ namespace QueryDump.Writers.Parquet;
 /// <summary>
 /// Writes data to Parquet format with row group streaming.
 /// </summary>
-public sealed class ParquetDataWriter : IDataWriter, IRequiresOptions<ParquetOptions>
+public sealed class ParquetDataWriter(string outputPath) : IDataWriter, IRequiresOptions<ParquetOptions>
 {
-    private readonly string _outputPath;
-    private readonly FileStream _fileStream;
+    private readonly string _outputPath = outputPath;
+    private readonly FileStream _fileStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.None,
+        bufferSize: 65536, useAsync: true);
+
     private ParquetSchema? _schema;
     private ParquetWriter? _writer;
     private IReadOnlyList<ColumnInfo>? _columns;
@@ -21,19 +23,12 @@ public sealed class ParquetDataWriter : IDataWriter, IRequiresOptions<ParquetOpt
 
     public long BytesWritten => _fileStream.Position;
 
-    public ParquetDataWriter(string outputPath)
-    {
-        _outputPath = outputPath;
-        _fileStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.None,
-            bufferSize: 65536, useAsync: true);
-    }
-
     public async ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
     {
         _columns = columns;
         _dataFields = BuildDataFields(columns);
         _schema = new ParquetSchema(_dataFields);
-        _writer = await ParquetWriter.CreateAsync(_schema, _fileStream);
+        _writer = await ParquetWriter.CreateAsync(_schema, _fileStream, cancellationToken: ct);
         _writer.CompressionMethod = CompressionMethod.Snappy;
     }
 
@@ -154,10 +149,7 @@ public sealed class ParquetDataWriter : IDataWriter, IRequiresOptions<ParquetOpt
 
     public async ValueTask DisposeAsync()
     {
-        if (_writer is not null)
-        {
-            _writer.Dispose();
-        }
+        _writer?.Dispose();
         await _fileStream.DisposeAsync();
     }
 }

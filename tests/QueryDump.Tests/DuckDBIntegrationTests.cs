@@ -21,10 +21,8 @@ public class DuckDBIntegrationTests : IAsyncLifetime
 
     public ValueTask DisposeAsync()
     {
-        if (File.Exists(_dbPath))
-        {
-            try { File.Delete(_dbPath); } catch { /* best effort */ }
-        }
+        try { File.Delete(_dbPath); } catch { /* best effort */ }
+        GC.SuppressFinalize(this);
         return ValueTask.CompletedTask;
     }
 
@@ -72,7 +70,7 @@ public class DuckDBIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ThrowsOnDDL()
+    public void ThrowsOnDDL()
     {
         // QueryDump throws InvalidOperationException or ArgumentException depending on where it catches it
         // The regex check throws InvalidOperationException for forbidden keywords at the start

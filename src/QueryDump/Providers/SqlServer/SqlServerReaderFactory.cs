@@ -23,17 +23,14 @@ public class SqlServerReaderFactory : IStreamReaderFactory
 
     public bool CanHandle(string connectionString)
     {
-        return connectionString.Contains("Server=", StringComparison.OrdinalIgnoreCase) 
-               || connectionString.Contains("Initial Catalog=", StringComparison.OrdinalIgnoreCase)
-               || connectionString.Contains("Integrated Security=", StringComparison.OrdinalIgnoreCase);
+        return SqlServerConnectionHelper.CanHandle(connectionString);
     }
 
     public IStreamReader Create(DumpOptions options)
     {
         return new SqlServerStreamReader(
-            options.ConnectionString,
+            SqlServerConnectionHelper.GetConnectionString(options.ConnectionString),
             options.Query,
-            _registry.Get<SqlServerOptions>(),
             options.QueryTimeout);
     }
 
@@ -46,7 +43,7 @@ public class SqlServerReaderFactory : IStreamReaderFactory
 
     public IEnumerable<Option> GetCliOptions()
     {
-        return _cliOptions ??= GetSupportedOptionTypes().SelectMany(CliOptionBuilder.GenerateOptionsForType).ToList();
+        return _cliOptions ??= [.. GetSupportedOptionTypes().SelectMany(CliOptionBuilder.GenerateOptionsForType)];
     }
 
     public void BindOptions(ParseResult parseResult, OptionsRegistry registry)

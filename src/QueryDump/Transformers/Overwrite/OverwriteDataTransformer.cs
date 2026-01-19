@@ -1,19 +1,19 @@
 using QueryDump.Core;
 using QueryDump.Core.Options;
 
-namespace QueryDump.Transformers.Static;
+namespace QueryDump.Transformers.Overwrite;
 
 /// <summary>
 /// Overwrites specified columns with static values. Priority: 20.
 /// </summary>
-public class StaticDataTransformer : IDataTransformer, IRequiresOptions<OverwriteOptions>
+public class OverwriteDataTransformer : IDataTransformer, IRequiresOptions<OverwriteOptions>
 {
     public int Priority => 20;
 
     private readonly Dictionary<string, string> _staticMappings = new(StringComparer.OrdinalIgnoreCase);
     private string?[]? _columnValues; // Array matching column count, null if no overwrite for that index
 
-    public StaticDataTransformer(OverwriteOptions options)
+    public OverwriteDataTransformer(OverwriteOptions options)
     {
         foreach (var mapping in options.Mappings)
         {

@@ -2,7 +2,7 @@ using System.ComponentModel;
 using QueryDump.Core.Options;
 using QueryDump.Core.Attributes;
 
-namespace QueryDump.Transformers.Static;
+namespace QueryDump.Transformers.Overwrite;
 
 public class OverwriteOptions : ITransformerOptions
 {
