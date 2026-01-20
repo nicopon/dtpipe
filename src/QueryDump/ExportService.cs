@@ -3,7 +3,7 @@ using QueryDump.Configuration;
 using QueryDump.Core;
 using QueryDump.Core.Options;
 using QueryDump.Feedback;
-using QueryDump.Writers;
+using Spectre.Console;
 
 namespace QueryDump;
 
@@ -13,22 +13,25 @@ public class ExportService
     private readonly IEnumerable<IDataWriterFactory> _writerFactories;
     private readonly IEnumerable<IDataTransformerFactory> _transformerFactories;
     private readonly OptionsRegistry _optionsRegistry;
+    private readonly IAnsiConsole _console;
 
     public ExportService(
         IEnumerable<IStreamReaderFactory> readerFactories, 
         IEnumerable<IDataWriterFactory> writerFactories,
         IEnumerable<IDataTransformerFactory> transformerFactories,
-        OptionsRegistry optionsRegistry)
+        OptionsRegistry optionsRegistry,
+        IAnsiConsole console)
     {
         _readerFactories = readerFactories;
         _writerFactories = writerFactories;
         _transformerFactories = transformerFactories;
         _optionsRegistry = optionsRegistry;
+        _console = console;
     }
 
-    public async Task RunExportAsync(DumpOptions options, CancellationToken ct, string[]? args = null)
+    public async Task RunExportAsync(DumpOptions options, CancellationToken ct, List<IDataTransformer> pipeline)
     {
-        Console.Error.WriteLine($"Connecting to {options.Provider}...");
+        _console.MarkupLine($"[grey]Connecting to provider:[/] [blue]{options.Provider}[/]");
         
         // Resolve reader factory
         var readerFactory = _readerFactories.FirstOrDefault(f => 
@@ -41,50 +44,130 @@ public class ExportService
         
         if (reader.Columns is null || reader.Columns.Count == 0)
         {
-            Console.Error.WriteLine("No columns returned by query.");
+            _console.MarkupLine("[red]No columns returned by query.[/]");
             return;
         }
 
-        Console.Error.WriteLine($"Schema: {reader.Columns.Count} columns");
-        
-        // Display column details for dry-run or verbose mode
-        foreach (var col in reader.Columns)
-        {
-            Console.Error.WriteLine($"  - {col.Name}: {col.ClrType.Name}{(col.IsNullable ? "?" : "")}");
-        }
-
-        // Dry-run mode: exit after displaying schema
-        if (options.DryRun)
-        {
-            Console.Error.WriteLine("\n[Dry-run mode] Schema displayed. No data exported.");
-            return;
-        }
-
-        Console.Error.WriteLine($"Writing to: {options.OutputPath}");
-
-        // Initialize transformation pipeline using ordered arguments
-        // This ensures the pipeline executes in the exact order specified by the user in CLI
-        var pipelineBuilder = new TransformerPipelineBuilder(_transformerFactories);
-        var pipeline = pipelineBuilder.Build(args ?? Environment.GetCommandLineArgs());
-        
-        // If no pipeline was built (e.g. no args matching transformers), pipeline is empty.
-        // Legacy fallback: if pipeline is empty, we could check registry, but for now we follow the "ordered" paradigm strictness.
-        // Actually, for backward compatibility or ease of use, if the new builder yields nothing but the registry has options,
-        // we might want to fallback, but the requirement was "no compatibility" and "order by args".
-        // However, we must ensure we don't accidentally pick up "dotnet exec dll" args if not careful, 
-        // but the builder logic maps known options.
-
-
-        // Cascade initialization: output of one transformer becomes input to next
+        // Initialize pipeline to get Target Schema
         var currentSchema = reader.Columns;
         if (pipeline.Count > 0)
         {
-             Console.Error.WriteLine($"Transformation Pipeline: {string.Join(" -> ", pipeline.Select(p => $"{p.GetType().Name} (Pr:{p.Priority})"))}");
+             _console.WriteLine();
+             _console.Write(new Rule("[yellow]Pipeline[/]").LeftJustified());
+             var grid = new Grid();
+             grid.AddColumn();
+             foreach(var t in pipeline)
+             {
+                 var name = t.GetType().Name.Replace("DataTransformer", "");
+                 grid.AddRow($"[yellow]↓[/] [cyan]{name}[/]");
+             }
+             _console.Write(grid);
+             
              foreach (var t in pipeline)
              {
                  currentSchema = await t.InitializeAsync(currentSchema, ct);
              }
         }
+
+        // Dry-run mode: display unified analysis
+        if (options.DryRun)
+        {
+            _console.WriteLine();
+            _console.MarkupLine("[grey]Fetching sample row for analysis...[/]");
+            
+            object?[]? inputRow = null;
+            object?[]? outputRow = null;
+
+            // Fetch one row
+            await foreach(var batch in reader.ReadBatchesAsync(1, ct))
+            {
+                if (batch.Length > 0)
+                {
+                    var span = batch.Span[0];
+                    inputRow = span.ToArray(); // Capture input
+                    var rowToTransform = span.ToArray(); // Copy for transform
+                    
+                    // Transform
+                    foreach (var t in pipeline)
+                    {
+                        rowToTransform = t.Transform(rowToTransform);
+                    }
+                    outputRow = rowToTransform;
+                }
+                break;
+            }
+
+            _console.WriteLine();
+            _console.Write(new Rule("[green]Dry-Run Analysis[/]").LeftJustified());
+
+            var table = new Table().Border(TableBorder.Rounded);
+            table.AddColumn("Column");
+            table.AddColumn("Input Type");
+            table.AddColumn("Input Value");
+            table.AddColumn("Output Type");
+            table.AddColumn("Output Value");
+
+            for (int i = 0; i < currentSchema.Count; i++)
+            {
+                var col = currentSchema[i];
+                var nameDisplay = col.IsVirtual ? $"{col.Name} [grey](virtual)[/]" : col.Name;
+
+                // Input Info
+                string inputType = "";
+                string inputValue = "";
+                
+                // Find column in reader to get Input details
+                var readerColIndex = -1;
+                for (int k = 0; k < reader.Columns.Count; k++)
+                {
+                    if (reader.Columns[k].Name == col.Name)
+                    {
+                        readerColIndex = k;
+                        break;
+                    }
+                }
+
+                if (readerColIndex >= 0)
+                {
+                    inputType = $"[grey]{reader.Columns[readerColIndex].ClrType.Name}[/]";
+                    if (inputRow != null && readerColIndex < inputRow.Length)
+                    {
+                        var val = inputRow[readerColIndex];
+                        inputValue = val is null ? "[grey]null[/]" : Markup.Escape(val.ToString() ?? "");
+                    }
+                }
+
+                // Output Info
+                var outputType = $"[blue]{col.ClrType.Name}[/]";
+                var outputValue = "";
+                if (outputRow != null && i < outputRow.Length)
+                {
+                    var val = outputRow[i];
+                    var valStr = val is null ? "[grey]null[/]" : Markup.Escape(val.ToString() ?? "");
+                    
+                    // Highlight difference
+                    if (valStr != inputValue && inputValue != "")
+                        outputValue = $"[yellow]{valStr}[/]";
+                    else
+                        outputValue = valStr;
+                }
+
+                table.AddRow(
+                    nameDisplay,
+                    inputType,
+                    inputValue,
+                    outputType,
+                    outputValue
+                );
+            }
+            _console.Write(table);
+            
+            _console.WriteLine();
+            _console.MarkupLine("[green]Dry-run complete. No data exported.[/]");
+            return;
+        }
+
+        _console.MarkupLine($"[grey]Writing to:[/] [blue]{options.OutputPath}[/]");
 
         // Resolve writer factory
         var extension = Path.GetExtension(options.OutputPath).ToLowerInvariant();
@@ -244,7 +327,7 @@ public class ExportService
                 updateRowCount(buffer.Count); // Update total
                 progress.ReportWrite(buffer.Count, bytesDelta);
                 
-                buffer = new List<object?[]>(batchSize); // New buffer to avoid reference issues
+                buffer.Clear();
             }
         }
 

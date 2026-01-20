@@ -20,6 +20,8 @@ public class FormatDataTransformerFactory(OptionsRegistry registry) : IDataTrans
     }
 
     public string Category => "Transformer Options";
+    
+    public string TransformerType => FormatOptions.Prefix; // "format"
 
     private IEnumerable<Option>? _cliOptions;
 
@@ -51,12 +53,24 @@ public class FormatDataTransformerFactory(OptionsRegistry registry) : IDataTrans
         return new FormatDataTransformer(formatOptions);
     }
 
-    public IDataTransformer CreateFromConfiguration(IEnumerable<string> values)
+    public IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration)
     {
         var options = new FormatOptions
         {
-            Mappings = values
+            Mappings = configuration.Select(x => x.Value)
         };
+        return new FormatDataTransformer(options);
+    }
+
+    public IDataTransformer? CreateFromYamlConfig(TransformerConfig config)
+    {
+        if (config.Mappings == null || config.Mappings.Count == 0)
+            return null;
+
+        // Convert YAML dict to "COLUMN:template" format
+        var mappings = config.Mappings.Select(kvp => $"{kvp.Key}:{kvp.Value}");
+        
+        var options = new FormatOptions { Mappings = mappings };
         return new FormatDataTransformer(options);
     }
 }

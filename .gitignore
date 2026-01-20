@@ -22,3 +22,10 @@ Thumbs.db
 # Dotnet
 .net/
 artifacts/
+BenchmarkDotNet.Artifacts/
+
+# Database
+*.db
+*.duckdb
+*.sqlite
+*.sqlite3

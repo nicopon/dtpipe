@@ -93,12 +93,41 @@ public static partial class JobFileParser
             // Each transformer is a dict with a single key (the type)
             foreach (var (type, value) in transformer)
             {
-                var config = new TransformerConfig
+                var config = new TransformerConfig { Type = type };
+
+                if (value is Dictionary<object, object> dict)
                 {
-                    Type = type,
-                    Mappings = ParseMappings(value),
-                    Options = null // Could be extended later
-                };
+                    // Check if this is a complex structure with explicit 'mappings' or 'options'
+                    // Keys are 'object' because YamlDotNet deserializes them as such
+                    object? mappingsObj = null;
+                    object? optionsObj = null;
+
+                    // Manual key lookup to be safe with types
+                    foreach (var key in dict.Keys)
+                    {
+                        var keyStr = key.ToString();
+                        if (string.Equals(keyStr, "mappings", StringComparison.OrdinalIgnoreCase))
+                            mappingsObj = dict[key];
+                        else if (string.Equals(keyStr, "options", StringComparison.OrdinalIgnoreCase))
+                            optionsObj = dict[key];
+                    }
+
+                    if (mappingsObj != null || optionsObj != null)
+                    {
+                        // Complex structure
+                        if (mappingsObj is Dictionary<object, object> mappingsDict)
+                            config = config with { Mappings = ParseStringDictionary(mappingsDict) };
+                        
+                        if (optionsObj is Dictionary<object, object> optionsDict)
+                            config = config with { Options = ParseStringDictionary(optionsDict) };
+                    }
+                    else
+                    {
+                        // Simple structure: the dictionary itself is the mappings
+                        config = config with { Mappings = ParseStringDictionary(dict) };
+                    }
+                }
+                
                 result.Add(config);
             }
         }
@@ -106,19 +135,14 @@ public static partial class JobFileParser
         return result;
     }
 
-    private static Dictionary<string, string>? ParseMappings(object? value)
+    private static Dictionary<string, string>? ParseStringDictionary(Dictionary<object, object>? dict)
     {
-        if (value is null) return null;
+        if (dict is null) return null;
 
-        if (value is Dictionary<object, object> dict)
-        {
-            return dict.ToDictionary(
-                kvp => kvp.Key.ToString()!,
-                kvp => kvp.Value?.ToString() ?? string.Empty
-            );
-        }
-
-        return null;
+        return dict.ToDictionary(
+            kvp => kvp.Key.ToString()!,
+            kvp => kvp.Value?.ToString() ?? string.Empty
+        );
     }
 
     /// <summary>

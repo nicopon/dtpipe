@@ -8,8 +8,6 @@ namespace QueryDump.Transformers.Overwrite;
 /// </summary>
 public class OverwriteDataTransformer : IDataTransformer, IRequiresOptions<OverwriteOptions>
 {
-    public int Priority => 20;
-
     private readonly Dictionary<string, string> _staticMappings = new(StringComparer.OrdinalIgnoreCase);
     private string?[]? _columnValues; // Array matching column count, null if no overwrite for that index
 

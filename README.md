@@ -1,137 +1,161 @@
 # QueryDump
 
-Command-line tool to export database data (Oracle, SQL Server, DuckDB) to Parquet, CSV, or another database. Designed for low memory footprint and seamless DuckDB ingestion.
-
-## Features
-
-- **Streaming**: Stream-based reading (`IDataReader`) to handle large datasets with minimal memory.
-- **Formats**: Parquet (Snappy compression), CSV (RFC 4180), and Database Export (DuckDB, Oracle).
-- **Multi-Database**: Supports Oracle, SQL Server, DuckDB (Read & Write).
-- **Anonymization**: Mask sensitive columns with fake data during export.
+CLI tool to export database data to Parquet, CSV, or another database. Supports anonymization, light data transformation, and YAML job files. Designed for low memory footprint via streaming.
 
 ## Quick Start
 
-**Build**
 ```bash
 ./build.sh
-```
-The executable is generated at `./dist/release/querydump` (standalone, no runtime dependencies).
-
-**Basic Usage**
-```bash
-./dist/release/querydump \
-  --input "duckdb:source.db" \
-  --query "SELECT * FROM users" \
-  --output users.parquet
+./dist/release/querydump --input "duckdb:source.db" --query "SELECT * FROM users" --output users.parquet
 ```
 
 > 💡 Yes, DuckDB can do this on its own. This is just to illustrate the basic syntax—keep reading for the *actually useful* stuff. 😉
 
+## Features
+
+- **Multi-Database**: Oracle, SQL Server, PostgreSQL, DuckDB, SQLite, CSV, Parquet
+- **Streaming**: `IDataReader`-based processing for large datasets with minimal memory
+- **Anonymization**: Replace sensitive data with realistic fake values thanks to [Bogus](https://github.com/bchavez/Bogus)
+- **Transformations**: Null, Overwrite, Format templates with .NET format specifiers
+- **YAML Job Files**: Define reusable export configurations
+- **Output Formats**: Parquet (Snappy), CSV, or direct database insert
+
 ---
 
-## Usage
+## Installation
 
-### Input Sources
+```bash
+./build.sh
+```
+Executable: `./dist/release/querydump` (standalone, no runtime dependencies)
 
-Use `--input` (or `-i`) with a prefixed connection string:
+---
+
+## Input & Output
+
+### Input Sources (`--input`)
 
 | Prefix | Provider | Example |
 |--------|----------|---------|
 | `duckdb:` | DuckDB | `duckdb:mydata.db` |
 | `sqlite:` | SQLite | `sqlite:local.sqlite` |
+| `postgresql:` | PostgreSQL | `postgresql:Host=...;Database=...` |
 | `oracle:` | Oracle | `oracle:Data Source=...;User Id=...` |
 | `mssql:` | SQL Server | `mssql:Server=...;Database=...` |
 | `csv:` | CSV File | `csv:data.csv` or `data.csv` |
 | `parquet:` | Parquet File | `parquet:data.parquet` or `data.parquet` |
 
-The provider is auto-detected from the prefix or file extension (`.db`, `.duckdb`, `.sqlite`, `.sqlite3`, `.csv`, `.parquet`).
+Provider is auto-detected from prefix or file extension where possible.
 
-### Output Destinations
+### Output Destinations (`--output`)
 
-Use `--output` (or `-o`) with either:
-
-**File path** (extension determines format):
+**File** (extension determines format):
 - `.parquet` → Parquet with Snappy compression
 - `.csv` → RFC 4180 CSV
 
-**Database connection** (prefixed):
+**Database** (prefixed connection string):
 ```bash
 --output "duckdb:target.db"
 --output "sqlite:target.sqlite"
 --output "oracle:User/Pass@TargetDB"
 ```
 
-#### Database Writer Options
+---
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--duckdb-writer-table` | Target table name | `Export` |
-| `--duckdb-writer-strategy` | `Append`, `Truncate`, `Recreate` | `Append` |
-| `--sqlite-table` | Target table name | `Export` |
-| `--sqlite-strategy` | `Append`, `Truncate`, `Recreate` | `Append` |
-| `--oracle-writer-table` | Target table name | `EXPORT_DATA` |
-| `--oracle-writer-strategy` | `Append`, `Truncate`, `Recreate` | `Append` |
-| `--oracle-writer-bulk-size` | Bulk copy batch size | `5000` |
+## YAML Job Files
 
-**Example: DuckDB to DuckDB with table recreation**
+Define reusable export configurations in YAML. Use `--job` to load, `--export-job` to export current CLI config.
+
+### Example Job File
+
+```yaml
+# Source: DuckDB database with customers table
+input: duckdb:customers.db
+query: SELECT id, name, email, phone FROM customers
+output: customers_anon.parquet
+
+# Transformers applied in order (same as CLI order)
+transformers:
+  # 1. Set phone column to NULL
+  - null:
+      mappings:
+        phone: ~  # Value is ignored, only key matters if no column to list
+
+  # 2. Replace name and email with fake data
+  - fake:
+      mappings:
+        name: name.fullName
+        email: internet.email
+        # Note: Values are based on Bogus capabilities
+      options:
+        locale: fr
+        seed-column: id  # Same id = same fake values
+```
+
+### Usage
+
 ```bash
-./dist/release/querydump \
-  --input "duckdb:source.db" \
-  --query "SELECT * FROM Users" \
-  --output "duckdb:target.db" \
-  --duckdb-writer-table "AnonymizedUsers" \
-  --duckdb-writer-strategy Recreate
+# Run from job file
+./querydump --job export_config.yaml
+
+# Run for test (overrides limit/dry-run only)
+./querydump --job export_config.yaml --limit 100 --dry-run
+
+# Export current CLI config to YAML
+./querydump --input "..." --query "..." --output "..." --fake "NAME:name.fullName" --export-job config.yaml
 ```
 
 ---
 
-### Data Transformation
+## Data Transformation
 
-Transform column values during export using the following options (applied in order: Null → Overwrite → Format).
+Transformers are applied in **CLI argument order**. Each `--null`, `--overwrite`, `--fake`, or `--format` creates a pipeline step.
 
-#### Setting Columns to Null
+### Transform Order Example
+
 ```bash
---null "SENSITIVE_DATA"
---null "INTERNAL_ID"
+--null "PHONE" --fake "NAME:name.fullName" --format "DISPLAY:{NAME}"
+```
+Pipeline: `Null → Fake → Format`
+
+```bash
+--fake "NAME:name.fullName" --null "PHONE" --format "DISPLAY:{NAME}"
+```
+Pipeline: `Fake → Null → Format`
+
+### Setting Columns to Null
+
+```bash
+--null "SENSITIVE_DATA" --null "INTERNAL_ID"
 ```
 
-#### Static Value Overwrite
+### Static Value Overwrite
+
 ```bash
 --overwrite "STATUS:anonymized"
 --overwrite "COMMENT:redacted"
 ```
 
-#### Format Templates
-Use `{COLUMN}` placeholders to create derived columns, with optional format specifiers.
+### Format Templates
 
-**Simple substitution:**
+Use `{COLUMN}` placeholders with optional [.NET format specifiers](https://learn.microsoft.com/en-us/dotnet/standard/base-types/formatting-types):
+
 ```bash
 --format "DISPLAY_NAME:{FIRSTNAME} {LASTNAME}"
---format "FULL_ADDRESS:{STREET}, {CITY} {ZIP}"
-```
-
-**With .NET format specifiers** (see [numeric](https://learn.microsoft.com/en-us/dotnet/standard/base-types/standard-numeric-format-strings) and [date/time](https://learn.microsoft.com/en-us/dotnet/standard/base-types/custom-date-and-time-format-strings) docs):
-```bash
---format "DATE_FR:{DATE:dd/MM/yyyy}"    # → 15/01/2024
---format "AMOUNT:{PRICE:0.00}€"          # → 123.46€
---format "ID:{CODE:D6}"                  # → 000042
-```
-
-**Combined:**
-```bash
---format "LABEL:{PRICE:0.00}€ - {NAME}"  # → 99.50€ - Product
+--format "DATE_FR:{DATE:dd/MM/yyyy}"
+--format "AMOUNT:{PRICE:0.00}€"
 ```
 
 ---
 
-### Anonymization (Fake Data)
+## Anonymization (Fake Data)
 
-Replace real data with realistic fake values using [Bogus](https://github.com/bchavez/Bogus).
+Replace real data with fake values using [Bogus](https://github.com/bchavez/Bogus?tab=readme-ov-file#bogus-api-support).
 
-#### Basic Usage
+### Basic Usage
+
 ```bash
-./dist/release/querydump \
-  --input "duckdb:customers.db" \
+./querydump --input "duckdb:customers.db" \
   --query "SELECT NAME, EMAIL FROM customers" \
   --output customers_anon.csv \
   --fake "NAME:name.fullName" \
@@ -139,28 +163,30 @@ Replace real data with realistic fake values using [Bogus](https://github.com/bc
   --fake-locale fr
 ```
 
-#### Deterministic Mode
+### Deterministic Mode
 
-**Column-based seeding** (same input value = same fake output):
+**Column-based seeding** (same input value → same fake output):
 ```bash
---fake "USERNAME:name.fullName" \
---fake-seed-column USER_ID
+--fake "USERNAME:name.fullName" --fake-seed-column USER_ID
 ```
 
 **Row-index seeding** (reproducible order-based):
 ```bash
---fake "USERNAME:name.fullName" \
---fake-deterministic
+--fake "USERNAME:name.fullName" --fake-deterministic
 ```
 
-#### Variant Suffix
-Get different values from the same faker using `#variant`:
+> ⚠️ Row-index seeding depends on query order. If rows are added, removed, or reordered, fake values will shift. Prefer `--fake-seed-column` for stable determinism.
+
+### Variant Suffix
+
+Get different values from the same faker:
 ```bash
---fake "EMAIL_PERSO:internet.email"       # Value A
---fake "EMAIL_PRO:internet.email#work"    # Different value B
+--fake "EMAIL_PERSO:internet.email"
+--fake "EMAIL_PRO:internet.email#work"
 ```
 
-#### Virtual Columns
+### Virtual Columns
+
 Create fake columns not in the query, then use them in `--format`:
 ```bash
 --query "SELECT USER_ID FROM users" \
@@ -169,63 +195,78 @@ Create fake columns not in the query, then use them in `--format`:
 --format "BANK_REF:{IBAN}-{BIC}"
 ```
 
-#### List Available Fakers
+### List Available Fakers
+
 ```bash
-./dist/release/querydump --fake-list
+./querydump --fake-list
 ```
 
 ---
 
 ## CLI Reference
 
+### Core Options
+
 | Option | Alias | Description | Default |
 |--------|-------|-------------|---------|
-| `--input` | `-i` | Input connection string (prefixed) | **Required** |
-| `--query` | `-q` | SQL query (SELECT only) | **Required** |
-| `--output` | `-o` | Output file or connection (prefixed) | **Required** |
+| `--input` | `-i` | Input connection string (prefixed) | Required* |
+| `--query` | `-q` | SQL query (SELECT only) | Required* |
+| `--output` | `-o` | Output file or connection (prefixed) | Required* |
+| `--job` | | Path to YAML job file | - |
+| `--export-job` | | Export config to YAML file and exit | - |
 | `--batch-size` | `-b` | Rows per batch | `50000` |
+| `--limit` | | Maximum rows to export (overrides YAML) | `0` |
+| `--dry-run` | | Display source/target schemas and sample row (overrides YAML) | `false` |
 | `--connection-timeout` | | Connection timeout (seconds) | `10` |
 | `--query-timeout` | | Query timeout (seconds, 0=none) | `0` |
-| **Transformation** |
-| `--null` | | Set column(s) to null | - |
-| `--overwrite` | | `COLUMN:value` static replacement | - |
-| `--format` | | `TARGET:{SOURCE}` or `{SOURCE:fmt}` | - |
-| **Anonymization** |
-| `--fake` | | `COLUMN:faker.method` mapping | - |
-| `--fake-locale` | | Locale (en, fr, de, ja...) | `en` |
-| `--fake-seed` | | Global seed for reproducibility | - |
-| `--fake-seed-column` | | Column for deterministic seeding | - |
-| `--fake-deterministic` | | Row-index based determinism | `false` |
-| `--fake-list` | | List fakers and exit | - |
-| **Reader** |
-| `--ora-fetch-size` | | Oracle fetch buffer (bytes) | `1048576` |
-| **Writer** |
-| `--duckdb-writer-table` | | DuckDB target table | `Export` |
-| `--duckdb-writer-strategy` | | `Append`/`Truncate`/`Recreate` | `Append` |
-| `--oracle-writer-table` | | Oracle target table | `EXPORT_DATA` |
-| `--oracle-writer-strategy` | | `Append`/`Truncate`/`Recreate` | `Append` |
-| `--oracle-writer-bulk-size` | | Oracle bulk batch size | `5000` |
+| `--unsafe-query` | | Bypass SQL validation (allow DDL) | `false` |
+
+> \* Required unless `--job` is specified. When using `--job`, these options are ignored.
+
+### Transformation Options
+
+| Option | Description |
+|--------|-------------|
+| `--null` | Set column(s) to null (repeatable) |
+| `--overwrite` | `COLUMN:value` static replacement (repeatable) |
+| `--format` | `TARGET:{SOURCE}` or `{SOURCE:fmt}` template (repeatable) |
+
+### Anonymization Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--fake` | `COLUMN:faker.method` mapping (repeatable) | - |
+| `--fake-locale` | Locale (en, fr, de, ja...) | `en` |
+| `--fake-seed` | Global seed for reproducibility | - |
+| `--fake-seed-column` | Column for deterministic seeding | - |
+| `--fake-deterministic` | Row-index based determinism | `false` |
+| `--fake-list` | List fakers and exit | - |
+
+### Database Writer Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--duckdb-writer-table` | DuckDB target table | `Export` |
+| `--duckdb-writer-strategy` | `Append`/`Truncate`/`Recreate` | `Append` |
+| `--sqlite-table` | SQLite target table | `Export` |
+| `--sqlite-strategy` | `Append`/`Truncate`/`Recreate` | `Append` |
+| `--oracle-writer-table` | Oracle target table | `EXPORT_DATA` |
+| `--oracle-writer-strategy` | `Append`/`Truncate`/`Recreate` | `Append` |
+| `--oracle-writer-bulk-size` | Oracle bulk batch size | `5000` |
 
 ---
 
 ## Common Fakers
 
-| Dataset | Method | Description | Example (fr) |
-|---------|--------|-------------|--------------|
-| **Name** | `name.firstName` | First name | *Jean* |
-| | `name.lastName` | Last name | *Dupont* |
-| | `name.fullName` | Full name | *Jean Dupont* |
-| **Internet** | `internet.email` | Email address | *jean.dupont@gmail.com* |
-| | `internet.userName` | Username | *jdupont* |
-| **Address** | `address.streetAddress` | Street | *12 rue de la Paix* |
-| | `address.city` | City | *Paris* |
-| | `address.zipCode` | Zip code | *75001* |
-| **Phone** | `phone.phoneNumber` | Phone | *01 02 03 04 05* |
-| **Company** | `company.companyName` | Company | *Corp Inc.* |
-| **Date** | `date.past` | Past date | *2023-12-01* |
-| | `date.future` | Future date | *2030-01-01* |
-| **Finance** | `finance.iban` | IBAN | *FR76...* |
-| | `finance.bic` | BIC/SWIFT | *BNPAFRPP* |
+| Dataset | Method | Description |
+|---------|--------|-------------|
+| **Name** | `name.firstName`, `name.lastName`, `name.fullName` | Names |
+| **Internet** | `internet.email`, `internet.userName` | Email, usernames |
+| **Address** | `address.streetAddress`, `address.city`, `address.zipCode` | Addresses |
+| **Phone** | `phone.phoneNumber` | Phone numbers |
+| **Company** | `company.companyName` | Company names |
+| **Date** | `date.past`, `date.future` | Dates |
+| **Finance** | `finance.iban`, `finance.bic` | Banking |
 
 > Use `--fake-list` to see all 100+ available generators.
 

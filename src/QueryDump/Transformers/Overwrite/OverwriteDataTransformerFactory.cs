@@ -20,6 +20,8 @@ public class OverwriteDataTransformerFactory(OptionsRegistry registry) : IDataTr
     }
 
     public string Category => "Transformer Options";
+    
+    public string TransformerType => OverwriteOptions.Prefix; // "overwrite"
 
     private IEnumerable<Option>? _cliOptions;
 
@@ -51,12 +53,24 @@ public class OverwriteDataTransformerFactory(OptionsRegistry registry) : IDataTr
         return new OverwriteDataTransformer(overwriteOptions);
     }
 
-    public IDataTransformer CreateFromConfiguration(IEnumerable<string> values)
+    public IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration)
     {
         var options = new OverwriteOptions
         {
-            Mappings = [.. values]
+            Mappings = [.. configuration.Select(x => x.Value)]
         };
+        return new OverwriteDataTransformer(options);
+    }
+
+    public IDataTransformer? CreateFromYamlConfig(TransformerConfig config)
+    {
+        if (config.Mappings == null || config.Mappings.Count == 0)
+            return null;
+
+        // Convert YAML dict to "COLUMN:value" format
+        var mappings = config.Mappings.Select(kvp => $"{kvp.Key}:{kvp.Value}");
+        
+        var options = new OverwriteOptions { Mappings = [.. mappings] };
         return new OverwriteDataTransformer(options);
     }
 }

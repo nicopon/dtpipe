@@ -43,9 +43,10 @@ public class CliService
         var dryRunOption = new Option<bool>("--dry-run") { Description = "Display query schema without exporting data", DefaultValueFactory = _ => false };
         var limitOption = new Option<int>("--limit") { Description = "Maximum rows to export (0 = unlimited)", DefaultValueFactory = _ => 0 };
         var jobOption = new Option<string?>("--job") { Description = "Path to YAML job file" };
+        var exportJobOption = new Option<string?>("--export-job") { Description = "Export current configuration to YAML file and exit" };
         
         // Core Help Options
-        var coreOptions = new List<Option> { inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption, unsafeQueryOption, dryRunOption, limitOption, jobOption };
+        var coreOptions = new List<Option> { inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption, unsafeQueryOption, dryRunOption, limitOption, jobOption, exportJobOption };
 
         var rootCommand = new RootCommand("QueryDump - Export database data to Parquet or CSV (DuckDB-optimized)");
         foreach(var opt in coreOptions) rootCommand.Options.Add(opt);
@@ -86,17 +87,10 @@ public class CliService
                     job = JobFileParser.Parse(jobFile);
                     Console.Error.WriteLine($"Loaded job file: {jobFile}");
                     
-                    // CLI args override job file values
-                    var cliQuery = parseResult.GetValue(queryOption);
-                    var cliOutput = parseResult.GetValue(outputOption);
-                    var cliInput = parseResult.GetValue(inputOption);
-                    
-                    if (!string.IsNullOrWhiteSpace(cliQuery)) job = job with { Query = cliQuery };
-                    if (!string.IsNullOrWhiteSpace(cliOutput)) job = job with { Output = cliOutput };
-                    if (!string.IsNullOrWhiteSpace(cliInput)) job = job with { Input = cliInput };
+                // CLI args can override execution-time parameters only
+                    // (dry-run and limit are not part of job definition, they're execution parameters)
                     if (parseResult.GetValue(limitOption) > 0) job = job with { Limit = parseResult.GetValue(limitOption) };
                     if (parseResult.GetValue(dryRunOption)) job = job with { DryRun = true };
-                    if (parseResult.GetValue(unsafeQueryOption)) job = job with { UnsafeQuery = true };
                 }
                 catch (Exception ex)
                 {
@@ -135,6 +129,18 @@ public class CliService
                     DryRun = parseResult.GetValue(dryRunOption),
                     Limit = parseResult.GetValue(limitOption)
                 };
+            }
+
+            // 2b. Handle --export-job: export configuration to YAML and exit
+            var exportJobPath = parseResult.GetValue(exportJobOption);
+            if (!string.IsNullOrWhiteSpace(exportJobPath))
+            {
+                // Build TransformerConfig list from CLI args for export
+                var exportTransformerFactories = _contributors.OfType<IDataTransformerFactory>().ToList();
+                job = job with { Transformers = BuildTransformerConfigsFromCli(parseResult, exportTransformerFactories) };
+                
+                JobFileWriter.Write(exportJobPath, job);
+                return 0;
             }
 
             // 3. Bind Options
@@ -187,9 +193,24 @@ public class CliService
             };
 
             var exportService = _serviceProvider.GetRequiredService<ExportService>();
+            
+            // Build transformer pipeline: from YAML if present, otherwise from CLI args
+            var transformerFactories = _contributors.OfType<IDataTransformerFactory>().ToList();
+            List<IDataTransformer> pipeline;
+            
+            if (job.Transformers != null && job.Transformers.Count > 0)
+            {
+                pipeline = BuildPipelineFromYaml(job.Transformers, transformerFactories);
+            }
+            else
+            {
+                var pipelineBuilder = new TransformerPipelineBuilder(transformerFactories);
+                pipeline = pipelineBuilder.Build(Environment.GetCommandLineArgs());
+            }
+            
              try
             {
-                await exportService.RunExportAsync(options, cancellationToken);
+                await exportService.RunExportAsync(options, cancellationToken, pipeline);
                 return 0;
             }
             catch (Exception ex)
@@ -251,5 +272,141 @@ public class CliService
         var name = string.Join(", ", allAliases.OrderByDescending(a => a.Length));
         var desc = opt.Description ?? "";
         Console.WriteLine($"  {name,-40} {desc}");
+    }
+
+    /// <summary>
+    /// Builds a transformer pipeline from YAML TransformerConfig list.
+    /// Matches each config's Type to factory's TransformerType and calls CreateFromYamlConfig.
+    /// </summary>
+    private static List<IDataTransformer> BuildPipelineFromYaml(
+        List<TransformerConfig> configs, 
+        List<IDataTransformerFactory> factories)
+    {
+        var pipeline = new List<IDataTransformer>();
+        
+        foreach (var config in configs)
+        {
+            var factory = factories.FirstOrDefault(f => 
+                f.TransformerType.Equals(config.Type, StringComparison.OrdinalIgnoreCase));
+            
+            if (factory == null)
+            {
+                Console.Error.WriteLine($"Warning: Unknown transformer type '{config.Type}' in job file. Skipping.");
+                continue;
+            }
+            
+            var transformer = factory.CreateFromYamlConfig(config);
+            if (transformer != null)
+            {
+                pipeline.Add(transformer);
+            }
+        }
+        
+        return pipeline;
+    }
+
+    /// <summary>
+    /// Builds TransformerConfig list from CLI args for YAML export.
+    /// Uses TransformerPipelineBuilder logic to parse args, then converts to YAML-friendly format.
+    /// </summary>
+    private static List<TransformerConfig>? BuildTransformerConfigsFromCli(
+        ParseResult parseResult, 
+        List<IDataTransformerFactory> factories)
+    {
+        var configs = new List<TransformerConfig>();
+        var args = Environment.GetCommandLineArgs();
+        
+        // Build option map (option alias -> factory)
+        var optionToFactory = new Dictionary<string, IDataTransformerFactory>(StringComparer.OrdinalIgnoreCase);
+        foreach (var factory in factories)
+        {
+            foreach (var option in factory.GetCliOptions())
+            {
+                if (!string.IsNullOrEmpty(option.Name))
+                    optionToFactory[option.Name] = factory;
+                foreach (var alias in option.Aliases)
+                    optionToFactory[alias] = factory;
+            }
+        }
+
+        // Group consecutive args by transformer type
+        IDataTransformerFactory? currentFactory = null;
+        var currentMappings = new Dictionary<string, string>();
+        var currentOptions = new Dictionary<string, string>();
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            var arg = args[i];
+            
+            if (optionToFactory.TryGetValue(arg, out var factory))
+            {
+                // New transformer type? Flush current
+                if (factory != currentFactory && currentFactory != null && currentMappings.Count > 0)
+                {
+                    configs.Add(new TransformerConfig
+                    {
+                        Type = currentFactory.TransformerType,
+                        Mappings = currentMappings.Count > 0 ? new Dictionary<string, string>(currentMappings) : null,
+                        Options = currentOptions.Count > 0 ? new Dictionary<string, string>(currentOptions) : null
+                    });
+                    currentMappings.Clear();
+                    currentOptions.Clear();
+                }
+                
+                currentFactory = factory;
+                
+                // Get value
+                if (i + 1 < args.Length)
+                {
+                    var value = args[i + 1];
+                    i++;
+                    
+                    // Determine if this is a mapping or option based on the option name
+                    // Mapping options typically use the base transformer name (--fake, --format, etc.)
+                    // Config options have suffixes (--fake-locale, --fake-seed-column)
+                    var optionName = arg.TrimStart('-');
+                    var factoryType = factory.TransformerType;
+                    
+                    if (optionName.Equals(factoryType, StringComparison.OrdinalIgnoreCase))
+                    {
+                        // This is a mapping (e.g., --fake "NAME:faker.method")
+                        var parts = value.Split(':', 2);
+                        if (parts.Length == 2)
+                        {
+                            currentMappings[parts[0].Trim()] = parts[1];
+                        }
+                        else
+                        {
+                            // For --null, just store column name with empty value
+                            currentMappings[value.Trim()] = "";
+                        }
+                    }
+                    else
+                    {
+                        // This is a config option (e.g., --fake-locale "fr")
+                        // Strip prefix to get option key
+                        var optionKey = optionName;
+                        if (optionKey.StartsWith(factoryType + "-", StringComparison.OrdinalIgnoreCase))
+                        {
+                            optionKey = optionKey[(factoryType.Length + 1)..];
+                        }
+                        currentOptions[optionKey] = value;
+                    }
+                }
+            }
+        }
+        
+        // Flush last transformer
+        if (currentFactory != null && currentMappings.Count > 0)
+        {
+            configs.Add(new TransformerConfig
+            {
+                Type = currentFactory.TransformerType,
+                Mappings = currentMappings.Count > 0 ? new Dictionary<string, string>(currentMappings) : null,
+                Options = currentOptions.Count > 0 ? new Dictionary<string, string>(currentOptions) : null
+            });
+        }
+
+        return configs.Count > 0 ? configs : null;
     }
 }

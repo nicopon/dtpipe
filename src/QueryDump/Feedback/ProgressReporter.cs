@@ -47,7 +47,7 @@ public sealed class ProgressReporter : IDisposable
                         while (!_disposed)
                         {
                             ctx.UpdateTarget(CreateLayout());
-                            await Task.Delay(100);
+                            await Task.Delay(500); // 2Hz refresh rate
                         }
                     });
             });
@@ -106,7 +106,7 @@ public sealed class ProgressReporter : IDisposable
         table.AddRow("Writing", $"{_writeCount:N0}", FormatSpeed(writeSpeed));
         
         // Footer: File size
-        table.AddRow("File Size", FormatBytes(Interlocked.Read(ref _bytesWritten)), "");
+        table.AddRow("Dump Size", FormatBytes(Interlocked.Read(ref _bytesWritten)), "");
 
         return table;
     }

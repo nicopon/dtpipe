@@ -11,8 +11,6 @@ namespace QueryDump.Transformers.Fake;
 /// </summary>
 public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOptions<FakeOptions>
 {
-    public int Priority => 30; // Faker runs after Null (10) and Overwrite (20)
-
     private readonly FakeMappingParser _parser;
     private readonly FakerRegistry _registry;
     private readonly Faker _faker;

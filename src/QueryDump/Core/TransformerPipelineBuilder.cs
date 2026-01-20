@@ -23,10 +23,11 @@ public class TransformerPipelineBuilder
         foreach (var group in groups)
         {
             var factory = group.Factory;
-            var values = group.Values;
+            var config = group.Configuration;
             
             // Instantiate transformer with collected values
-            var transformer = factory.CreateFromConfiguration(values);
+            // Instantiate transformer with collected values
+            var transformer = factory.CreateFromConfiguration(group.Configuration);
             if (transformer != null)
             {
                 pipeline.Add(transformer);
@@ -36,8 +37,8 @@ public class TransformerPipelineBuilder
         return pipeline;
     }
 
-    private record Instruction(IDataTransformerFactory Factory, string Value);
-    private record InstructionGroup(IDataTransformerFactory Factory, List<string> Values);
+    private record Instruction(IDataTransformerFactory Factory, string Option, string Value);
+    private record InstructionGroup(IDataTransformerFactory Factory, List<(string Option, string Value)> Configuration);
 
     private List<Instruction> ParseInstructions(string[] args)
     {
@@ -74,7 +75,7 @@ public class TransformerPipelineBuilder
                 if (i + 1 < args.Length)
                 {
                     var value = args[i + 1];
-                    instructions.Add(new Instruction(factory, value));
+                    instructions.Add(new Instruction(factory, arg, value));
                     i++; // Skip next arg since we consumed it
                 }
             }
@@ -94,11 +95,11 @@ public class TransformerPipelineBuilder
         {
             if (currentGroup == null || currentGroup.Factory != instr.Factory)
             {
-                currentGroup = new InstructionGroup(instr.Factory, new List<string>());
+                currentGroup = new InstructionGroup(instr.Factory, new List<(string Option, string Value)>());
                 groups.Add(currentGroup);
             }
             
-            currentGroup.Values.Add(instr.Value);
+            currentGroup.Configuration.Add((instr.Option, instr.Value));
         }
 
         return groups;

@@ -1,6 +1,4 @@
-﻿using System.CommandLine;
-using System.CommandLine.Parsing;
-using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.DependencyInjection;
 using QueryDump.Cli;
 using QueryDump.Core;
 using QueryDump.Core.Options;
@@ -8,7 +6,6 @@ using QueryDump.Transformers.Format;
 using QueryDump.Transformers.Fake;
 using QueryDump.Transformers.Null;
 using QueryDump.Transformers.Overwrite;
-using QueryDump.Writers;
 using QueryDump.Providers.Oracle;
 using QueryDump.Providers.SqlServer;
 using QueryDump.Providers.DuckDB;
@@ -36,13 +33,25 @@ class Program
             return 0;
         }
         
-        return await rootCommand.Parse(args).InvokeAsync();
+        // Ensure cursor is restored on Ctrl+C
+        Console.CancelKeyPress += (_, _) => Console.CursorVisible = true;
+
+        try 
+        {
+            return await rootCommand.Parse(args).InvokeAsync();
+        }
+        finally
+        {
+            // Ensure cursor is always visible upon exit, even after crash or Ctrl+C
+            try { Console.CursorVisible = true; } catch { /* Ignore if unable to access console */ }
+        }
     }
 
     private static void ConfigureServices(IServiceCollection services)
     {
         // Configuration
         services.AddSingleton<OptionsRegistry>();
+        services.AddSingleton(Spectre.Console.AnsiConsole.Console);
         
         // CLI
         services.AddSingleton<CliService>();

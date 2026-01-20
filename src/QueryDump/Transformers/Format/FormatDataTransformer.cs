@@ -6,8 +6,6 @@ namespace QueryDump.Transformers.Format;
 
 public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresOptions<FormatOptions>
 {
-    public int Priority => 100; // Last step
-
     private readonly Dictionary<string, string> _mappings = new(StringComparer.OrdinalIgnoreCase);
     private int[]? _generationOrder;
     private ColumnProcessor[]? _processors;
@@ -47,8 +45,9 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
         {
             if (_mappings.TryGetValue(columns[i].Name, out var template))
             {
-                var refs = ExtractReferencedColumns(template);
-                _processors[i] = new ColumnProcessor(i, template, refs);
+                var segments = ParseTemplate(template);
+                var refs = ExtractReferencedColumns(segments);
+                _processors[i] = new ColumnProcessor(i, segments, refs);
                 targetIndices.Add(i);
             }
         }
@@ -81,13 +80,101 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
             return row;
         }
 
+        // Avoid allocation of StringBuilder if possible? 
+        // We use a shared StringBuilder/Buffer? Thread safety valid here?
+        // Method Transform is called serially per row in pipeline (single thread per pipeline stage usually).
+        // BUT ExportService uses parallelism if stages are parallel. 
+        // ExportService.TransformRowsAsync calls pipeline serially.
+        // So we can allocate one StringBuilder per instance potentially?
+        // But let's verify reuse. `FormatDataTransformer` instance is created once.
+        // `Transform` is called in loop.
+        // If we make `_sb` a field, it's not thread safe if `Transform` is called concurrently.
+        // Pipeline seems serial: `foreach (var row in input.ReadAllAsync...` one by one.
+        // So reuse is safe IF strict single thread.
+        // To be safe, local StringBuilder or simple string concat (allocations).
+        // Since we optimize for PERF, let's use `string.Join`/`Concat` on segments logic?
+        // Or `StringBuilder` pool. 
+        // Simple StringBuilder per call is cleaner than Regex. 
+        
+        var sb = new System.Text.StringBuilder(128); // Small allocation
+
         foreach (var idx in _generationOrder)
         {
             var proc = _processors![idx];
-            row[idx] = SubstituteTemplate(proc.Template, row);
+            sb.Clear();
+            
+            foreach (var segment in proc.Segments)
+            {
+                if (segment.IsLiteral)
+                {
+                    sb.Append(segment.Value);
+                }
+                else
+                {
+                    // Column Reference
+                    var val = row[segment.ColumnIndex];
+                    if (val != null)
+                    {
+                        if (segment.Format != null)
+                        {
+                            try 
+                            { 
+                                sb.AppendFormat(System.Globalization.CultureInfo.InvariantCulture, $"{{0:{segment.Format}}}", val);
+                            }
+                            catch (FormatException)
+                            {
+                                sb.Append(val);
+                            }
+                        }
+                        else
+                        {
+                            sb.Append(val);
+                        }
+                    }
+                }
+            }
+            row[idx] = sb.ToString();
         }
 
         return row;
+    }
+
+    private TemplateSegment[] ParseTemplate(string template)
+    {
+        var segments = new List<TemplateSegment>();
+        var matches = PlaceholderPattern().Matches(template);
+        int lastIndex = 0;
+
+        foreach (Match match in matches)
+        {
+            if (match.Index > lastIndex)
+            {
+                // Literal before match
+                segments.Add(TemplateSegment.CreateLiteral(template.Substring(lastIndex, match.Index - lastIndex)));
+            }
+            
+            var colName = match.Groups[1].Value;
+            var format = match.Groups[2].Success ? match.Groups[2].Value : null;
+
+            if (_columnNameToIndex!.TryGetValue(colName, out var idx))
+            {
+                segments.Add(TemplateSegment.CreateColumn(idx, format, colName));
+            }
+            else
+            {
+                // Unresolved column -> Treat as literal text (original match)
+                segments.Add(TemplateSegment.CreateLiteral(match.Value));
+            }
+
+            lastIndex = match.Index + match.Length;
+        }
+
+        if (lastIndex < template.Length)
+        {
+            segments.Add(TemplateSegment.CreateLiteral(template.Substring(lastIndex)));
+        }
+
+        return segments.ToArray();
     }
 
     private int[] TopologicalSort(List<int> targets, ColumnProcessor[] processors)
@@ -137,63 +224,52 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
         return sorted.ToArray();
     }
 
-    private static HashSet<string> ExtractReferencedColumns(string template)
+    private static HashSet<string> ExtractReferencedColumns(TemplateSegment[] segments)
     {
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        
-        // Extract column names from {COLUMN} or {COLUMN:format}
-        foreach (Match match in PlaceholderPattern().Matches(template))
+        foreach (var segment in segments)
         {
-            result.Add(match.Groups[1].Value);
+            // If it has a SourceColumnName (we stored it for dependency resolution)
+            if (!segment.IsLiteral && segment.SourceColumnName != null)
+            {
+                result.Add(segment.SourceColumnName);
+            }
         }
-        
         return result;
     }
 
-    private string SubstituteTemplate(string template, object?[] row)
+    // Removed SubstituteTemplate as it's replaced by loop in Transform
+    
+    private readonly struct TemplateSegment
     {
-        // Process all placeholders: {COLUMN} or {COLUMN:format}
-        return PlaceholderPattern().Replace(template, match =>
+        public readonly bool IsLiteral;
+        public readonly string? Value; // Literal text OR Format specifier
+        public readonly int ColumnIndex;
+        public readonly string? SourceColumnName; // For dependency resolution
+        public string? Format => !IsLiteral ? Value : null;
+
+        private TemplateSegment(bool isLiteral, string? value, int columnIndex, string? sourceColumnName)
         {
-            var colName = match.Groups[1].Value;
-            var formatSpec = match.Groups[2].Success ? match.Groups[2].Value : null;
-            
-            if (_columnNameToIndex!.TryGetValue(colName, out var idx))
-            {
-                var value = row[idx];
-                if (value == null)
-                {
-                    return string.Empty;
-                }
-                
-                if (formatSpec != null)
-                {
-                    try
-                    {
-                        return string.Format(System.Globalization.CultureInfo.InvariantCulture, $"{{0:{formatSpec}}}", value);
-                    }
-                    catch (FormatException)
-                    {
-                        return value.ToString() ?? string.Empty;
-                    }
-                }
-                
-                return value.ToString() ?? string.Empty;
-            }
-            return match.Value;
-        });
+            IsLiteral = isLiteral;
+            Value = value;
+            ColumnIndex = columnIndex;
+            SourceColumnName = sourceColumnName;
+        }
+
+        public static TemplateSegment CreateLiteral(string text) => new(true, text, -1, null);
+        public static TemplateSegment CreateColumn(int index, string? format, string colName) => new(false, format, index, colName);
     }
 
     private readonly struct ColumnProcessor
     {
         public readonly int Index;
-        public readonly string Template;
+        public readonly TemplateSegment[] Segments;
         public readonly HashSet<string> ReferencedColumns;
 
-        public ColumnProcessor(int index, string template, HashSet<string> referencedColumns)
+        public ColumnProcessor(int index, TemplateSegment[] segments, HashSet<string> referencedColumns)
         {
             Index = index;
-            Template = template;
+            Segments = segments;
             ReferencedColumns = referencedColumns;
         }
     }

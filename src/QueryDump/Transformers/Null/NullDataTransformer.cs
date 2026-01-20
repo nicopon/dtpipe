@@ -7,9 +7,7 @@ namespace QueryDump.Transformers.Null;
 /// Sets specified columns to null. Priority: 10 (First).
 /// </summary>
 public class NullDataTransformer : IDataTransformer, IRequiresOptions<NullOptions>
-{
-    public int Priority => 10;
-    
+{  
     private readonly HashSet<string> _nullColumns;
     private int[]? _targetIndices;
 

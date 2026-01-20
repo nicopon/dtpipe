@@ -5,6 +5,12 @@ namespace QueryDump.Core;
 public interface IDataTransformerFactory : ICliContributor
 {
     /// <summary>
+    /// Transformer type identifier for YAML matching and CLI prefix.
+    /// Example: "fake" matches YAML type and --fake-* options.
+    /// </summary>
+    string TransformerType { get; }
+
+    /// <summary>
     /// Creates a transformer instance from a global options context.
     /// This is legacy/unordered mode where options are pre-parsed into the registry.
     /// </summary>
@@ -12,9 +18,15 @@ public interface IDataTransformerFactory : ICliContributor
 
     /// <summary>
     /// Creates a transformer instance from specific configuration values.
-    /// Example: values=["NAME:name.firstName", "EMAIL:internet.email"] for a FakeDataTransformerFactory.
+    /// Example: config=[("--fake", "NAME:name.firstName"), ("--fake-locale", "fr")]
     /// This is used for the ordered pipeline where we group values by factory.
     /// </summary>
-    /// <param name="values">The raw string values provided for this transformer type in the CLI arguments.</param>
-    IDataTransformer CreateFromConfiguration(IEnumerable<string> values);
+    /// <param name="configuration">The ordered list of (Option, Value) pairs provided in the CLI arguments.</param>
+    IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration);
+
+    /// <summary>
+    /// Creates a transformer instance from YAML TransformerConfig.
+    /// </summary>
+    /// <param name="config">The YAML transformer configuration with Mappings and Options dictionaries.</param>
+    IDataTransformer? CreateFromYamlConfig(TransformerConfig config);
 }
