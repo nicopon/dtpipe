@@ -22,31 +22,35 @@ public sealed class OracleDataWriter : IDataWriter
         _connection = new OracleConnection(connectionString);
     }
 
+    private string _targetTableName = "";
+
     public async ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
     {
+        var targetTable = NormalizeTableName(_options.Table);
+        Console.WriteLine($"[OracleDataWriter] Target Table (Raw): '{_options.Table}' -> Normalized: '{targetTable}'");
+        
+        _targetTableName = targetTable;
         _columns = columns;
         await _connection.OpenAsync(ct);
 
-        if (_options.Strategy == OracleWriteStrategy.Recreate)
+        if (_options.Strategy == OracleWriteStrategy.DeleteThenInsert)
         {
-            // Drop Table logic
             try {
-                using var dropCmd = _connection.CreateCommand();
-                dropCmd.CommandText = $"DROP TABLE \"{_options.Table}\"";
-                await dropCmd.ExecuteNonQueryAsync(ct);
+                using var deleteCmd = _connection.CreateCommand();
+                deleteCmd.CommandText = $"DELETE FROM {_targetTableName}";
+                await deleteCmd.ExecuteNonQueryAsync(ct);
             } catch (OracleException ex) when (ex.Number == 942) { /* ORA-00942: table or view does not exist */ }
         }
         else if (_options.Strategy == OracleWriteStrategy.Truncate)
         {
-            // Truncate logic
              try {
                 using var truncCmd = _connection.CreateCommand();
-                truncCmd.CommandText = $"TRUNCATE TABLE \"{_options.Table}\"";
+                truncCmd.CommandText = $"TRUNCATE TABLE {_targetTableName}";
                 await truncCmd.ExecuteNonQueryAsync(ct);
             } catch (OracleException ex) when (ex.Number == 942) { /* Table doesn't exist, ignore */ }
         }
 
-        var createTableSql = BuildCreateTableSql(_options.Table, columns);
+        var createTableSql = BuildCreateTableSql(_targetTableName, columns);
         
         try
         {
@@ -56,7 +60,7 @@ public sealed class OracleDataWriter : IDataWriter
         }
         catch (OracleException ex) when (ex.Number == 955) // ORA-00955: name already used
         {
-            // Expected if table exists (Append/Truncate modes)
+            // Expected if table exists
         }
     }
 
@@ -64,29 +68,75 @@ public sealed class OracleDataWriter : IDataWriter
     {
         if (_columns is null) throw new InvalidOperationException("Not initialized");
 
-        using var bulkCopy = new OracleBulkCopy(_connection);
-        bulkCopy.DestinationTableName = _options.Table;
-        bulkCopy.BulkCopyTimeout = 0; // Infinite (or config?)
-        bulkCopy.BatchSize = _options.BulkSize;
-
-        // Convert rows to DataTable or IDataReader
-        using var dataTable = new DataTable();
-        foreach (var col in _columns)
+        if (_options.BulkSize <= 0)
         {
-            dataTable.Columns.Add(col.Name, Nullable.GetUnderlyingType(col.ClrType) ?? col.ClrType);
-        }
-
-        foreach (var rowData in rows)
-        {
-            var row = dataTable.NewRow();
-            for (int i = 0; i < rowData.Length; i++)
+            // Standard INSERT fallback
+            // Build parameterized INSERT statement
+            var sb = new StringBuilder();
+            sb.Append($"INSERT INTO {_targetTableName} (");
+            for (int i = 0; i < _columns.Count; i++)
             {
-                row[i] = rowData[i] ?? DBNull.Value;
+                if (i > 0) sb.Append(", ");
+                sb.Append($"\"{_columns[i].Name}\"");
             }
-            dataTable.Rows.Add(row);
-        }
+            sb.Append(") VALUES (");
+            for (int i = 0; i < _columns.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append($":v{i}");
+            }
+            sb.Append(")");
+            
+            var insertSql = sb.ToString();
 
-        await Task.Run(() => bulkCopy.WriteToServer(dataTable), ct);
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = insertSql;
+            // Pre-create parameters
+            var parameters = new OracleParameter[_columns.Count];
+            for (int i = 0; i < _columns.Count; i++)
+            {
+                parameters[i] = cmd.CreateParameter();
+                parameters[i].ParameterName = $"v{i}";
+                // Map types if needed or let inference handle simple types
+                cmd.Parameters.Add(parameters[i]);
+            }
+
+            foreach (var rowData in rows)
+            {
+                for (int i = 0; i < rowData.Length; i++)
+                {
+                   parameters[i].Value = rowData[i] ?? DBNull.Value;
+                }
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
+        }
+        else
+        {
+            // Existing BulkCopy logic
+            using var bulkCopy = new OracleBulkCopy(_connection);
+            bulkCopy.DestinationTableName = _targetTableName;
+            bulkCopy.BulkCopyTimeout = 0; 
+            bulkCopy.BatchSize = _options.BulkSize;
+
+            // Convert rows to DataTable or IDataReader
+            using var dataTable = new DataTable();
+            foreach (var col in _columns)
+            {
+                dataTable.Columns.Add(col.Name, Nullable.GetUnderlyingType(col.ClrType) ?? col.ClrType);
+            }
+
+            foreach (var rowData in rows)
+            {
+                var row = dataTable.NewRow();
+                for (int i = 0; i < rowData.Length; i++)
+                {
+                    row[i] = rowData[i] ?? DBNull.Value;
+                }
+                dataTable.Rows.Add(row);
+            }
+
+            await Task.Run(() => bulkCopy.WriteToServer(dataTable), ct);
+        }
     }
 
     public ValueTask CompleteAsync(CancellationToken ct = default)
@@ -107,8 +157,6 @@ public sealed class OracleDataWriter : IDataWriter
         for (int i = 0; i < columns.Count; i++)
         {
             if (i > 0) sb.Append(", ");
-            // Oracle max identifier length matters (30 bytes in <12.2, 128 in 12.2+)
-            // We assume sensible names.
             sb.Append($"\"{columns[i].Name}\" {MapToOracleType(columns[i].ClrType)}");
         }
         
@@ -124,15 +172,36 @@ public sealed class OracleDataWriter : IDataWriter
         if (type == typeof(long)) return "NUMBER(19)";
         if (type == typeof(short)) return "NUMBER(5)";
         if (type == typeof(byte)) return "NUMBER(3)";
-        if (type == typeof(bool)) return "NUMBER(1)"; // Oracle has no BOOLEAN in SQL
-        if (type == typeof(float)) return "FLOAT"; // or BINARY_FLOAT
-        if (type == typeof(double)) return "FLOAT"; // or BINARY_DOUBLE
-        if (type == typeof(decimal)) return "NUMBER(38, 4)"; // Default precision?
+        if (type == typeof(bool)) return "NUMBER(1)"; 
+        if (type == typeof(float)) return "FLOAT"; 
+        if (type == typeof(double)) return "FLOAT"; 
+        if (type == typeof(decimal)) return "NUMBER(38, 4)"; 
         if (type == typeof(DateTime)) return "TIMESTAMP";
         if (type == typeof(DateTimeOffset)) return "TIMESTAMP WITH TIME ZONE";
         if (type == typeof(Guid)) return "RAW(16)";
         if (type == typeof(byte[])) return "BLOB";
         
         return "VARCHAR2(4000)";
+    }
+
+
+    private static string NormalizeTableName(string tableName)
+    {
+        if (string.IsNullOrWhiteSpace(tableName)) return tableName;
+
+        var parts = tableName.Split('.');
+        for (int i = 0; i < parts.Length; i++)
+        {
+            var part = parts[i];
+            if (!part.StartsWith("\"") && !part.EndsWith("\""))
+            {
+                // Unquoted identifier: normalize to uppercase and quote
+                parts[i] = $"\"{part.ToUpperInvariant()}\"";
+            }
+            // Else: verify if it's properly quoted? 
+            // For now assume if user quoted it, they know what they are doing.
+        }
+        
+        return string.Join(".", parts);
     }
 }

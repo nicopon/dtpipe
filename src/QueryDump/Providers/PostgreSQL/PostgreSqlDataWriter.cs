@@ -26,10 +26,10 @@ public sealed class PostgreSqlDataWriter : IDataWriter
         _connection = new NpgsqlConnection(_connectionString);
         await _connection.OpenAsync(ct);
 
-        // Handle Strategy (Create/Truncate/Append)
-        if (_options.Strategy == PostgreSqlWriteStrategy.Recreate)
+        // Handle Strategy (Create/Truncate/Append/Delete)
+        if (_options.Strategy == PostgreSqlWriteStrategy.DeleteThenInsert)
         {
-            await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS \"{_options.Table}\"", ct);
+            await ExecuteNonQueryAsync($"DELETE FROM \"{_options.Table}\"", ct);
         }
 
         // Create table if not exists
