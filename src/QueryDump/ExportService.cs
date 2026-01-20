@@ -48,7 +48,7 @@ public class ExportService
             return;
         }
 
-        // Initialize pipeline to get Target Schema
+        // Initialize pipeline to define Target Schema
         var currentSchema = reader.Columns;
         if (pipeline.Count > 0)
         {
@@ -69,102 +69,149 @@ public class ExportService
              }
         }
 
-        // Dry-run mode: display unified analysis
+        // Dry-run mode: Display Trace Matrix and exit
         if (options.DryRun)
         {
-            _console.WriteLine();
-            _console.MarkupLine("[grey]Fetching sample row for analysis...[/]");
-            
-            object?[]? inputRow = null;
-            object?[]? outputRow = null;
+             _console.WriteLine();
+             _console.MarkupLine("[grey]Fetching sample row for trace analysis...[/]");
+             
+             // Capture schema evolution
+             var traceSchemas = new List<IReadOnlyList<ColumnInfo>>();
+             var pipelineStepNames = new List<string>();
+             
+             var simSchema = reader.Columns; 
+             traceSchemas.Add(simSchema); // Input Step
 
-            // Fetch one row
-            await foreach(var batch in reader.ReadBatchesAsync(1, ct))
-            {
-                if (batch.Length > 0)
-                {
-                    var span = batch.Span[0];
-                    inputRow = span.ToArray(); // Capture input
-                    var rowToTransform = span.ToArray(); // Copy for transform
-                    
-                    // Transform
-                    foreach (var t in pipeline)
-                    {
-                        rowToTransform = t.Transform(rowToTransform);
-                    }
-                    outputRow = rowToTransform;
-                }
-                break;
-            }
+             if (pipeline.Count > 0)
+             {
+                 foreach(var t in pipeline)
+                 {
+                     simSchema = await t.InitializeAsync(simSchema, ct);
+                     traceSchemas.Add(simSchema);
+                     pipelineStepNames.Add(t.GetType().Name.Replace("DataTransformer", ""));
+                 }
+             }
 
-            _console.WriteLine();
-            _console.Write(new Rule("[green]Dry-Run Analysis[/]").LeftJustified());
+             // Capture row value evolution (using a single sample row)
+             var traceValues = new List<object?[]>();
+             
+             await foreach(var batch in reader.ReadBatchesAsync(1, ct))
+             {
+                 if (batch.Length > 0)
+                 {
+                     var row = batch.Span[0].ToArray();
+                     // Clone input to protect history
+                     traceValues.Add((object?[])row.Clone()); 
+                     
+                     var currentRow = row;
+                     foreach (var t in pipeline)
+                     {
+                         currentRow = t.Transform(currentRow);
+                         traceValues.Add((object?[])currentRow.Clone());
+                     }
+                 }
+                 break;
+             }
 
-            var table = new Table().Border(TableBorder.Rounded);
-            table.AddColumn("Column");
-            table.AddColumn("Input Type");
-            table.AddColumn("Input Value");
-            table.AddColumn("Output Type");
-            table.AddColumn("Output Value");
+             // Render Trace Matrix
+             _console.WriteLine();
+             _console.Write(new Rule("[green]Pipeline Trace Analysis[/]").LeftJustified());
 
-            for (int i = 0; i < currentSchema.Count; i++)
-            {
-                var col = currentSchema[i];
-                var nameDisplay = col.IsVirtual ? $"{col.Name} [grey](virtual)[/]" : col.Name;
+             var table = new Table().Border(TableBorder.Rounded);
+             table.AddColumn("Column");
+             table.AddColumn("Input");
+             
+             for(int s=0; s<pipelineStepNames.Count; s++)
+             {
+                 table.AddColumn($"[yellow]{pipelineStepNames[s]} (Step {s+1})[/]");
+             }
 
-                // Input Info
-                string inputType = "";
-                string inputValue = "";
-                
-                // Find column in reader to get Input details
-                var readerColIndex = -1;
-                for (int k = 0; k < reader.Columns.Count; k++)
-                {
-                    if (reader.Columns[k].Name == col.Name)
-                    {
-                        readerColIndex = k;
-                        break;
-                    }
-                }
+             table.AddColumn("[green]Output[/]");
+             
+             // Iterate over Final Schema
+             var finalSchema = traceSchemas.Last();
+             
+             foreach(var col in finalSchema)
+             {
+                 var rowMarkup = new List<string>();
+                 
+                 // Column Name
+                 rowMarkup.Add(col.IsVirtual ? $"{col.Name} [grey](virtual)[/]" : col.Name);
+                 
+                 string lastValue = "";
+                 
+                 // Columns for input + each step
+                 for(int step=0; step<traceSchemas.Count; step++)
+                 {
+                     var schema = traceSchemas[step];
+                     var values = traceValues.Count > step ? traceValues[step] : null;
+                     
+                     // Helper: Find column index by name in this step's schema
+                     var idx = -1;
+                     for(int k=0; k<schema.Count; k++) if(schema[k].Name == col.Name) { idx = k; break; }
 
-                if (readerColIndex >= 0)
-                {
-                    inputType = $"[grey]{reader.Columns[readerColIndex].ClrType.Name}[/]";
-                    if (inputRow != null && readerColIndex < inputRow.Length)
-                    {
-                        var val = inputRow[readerColIndex];
-                        inputValue = val is null ? "[grey]null[/]" : Markup.Escape(val.ToString() ?? "");
-                    }
-                }
+                     string displayVal;
+                     string rawVal = "";
+                     
+                     if (idx == -1 || values == null || idx >= values.Length)
+                     {
+                         displayVal = ""; 
+                         rawVal = "N/A_NOT_EXIST";
+                     }
+                     else
+                     {
+                         var v = values[idx];
+                         rawVal = v?.ToString() ?? "";
+                         displayVal = v is null ? "[grey]null[/]" : Markup.Escape(rawVal);
+                     }
+                     
+                     // Highlight Logic: Green if new, Yellow if modified
+                     if (step > 0 && rawVal != "N/A_NOT_EXIST")
+                     {
+                         bool isNew = (idx != -1) && (lastValue == "N/A_NOT_EXIST");
+                         bool isMod = (idx != -1) && (!isNew) && (rawVal != lastValue);
+                         
+                         if (isNew) displayVal = $"[green]{displayVal}[/]";
+                         else if (isMod) displayVal = $"[yellow]{displayVal}[/]";
+                         
+                         if (idx != -1) lastValue = rawVal;
+                         else lastValue = "N/A_NOT_EXIST";
+                     }
+                     else
+                     {
+                         if (idx != -1) lastValue = rawVal;
+                         else lastValue = "N/A_NOT_EXIST";
+                     }
 
-                // Output Info
-                var outputType = $"[blue]{col.ClrType.Name}[/]";
-                var outputValue = "";
-                if (outputRow != null && i < outputRow.Length)
-                {
-                    var val = outputRow[i];
-                    var valStr = val is null ? "[grey]null[/]" : Markup.Escape(val.ToString() ?? "");
-                    
-                    // Highlight difference
-                    if (valStr != inputValue && inputValue != "")
-                        outputValue = $"[yellow]{valStr}[/]";
-                    else
-                        outputValue = valStr;
-                }
+                     rowMarkup.Add(displayVal);
+                 }
 
-                table.AddRow(
-                    nameDisplay,
-                    inputType,
-                    inputValue,
-                    outputType,
-                    outputValue
-                );
-            }
-            _console.Write(table);
-            
-            _console.WriteLine();
-            _console.MarkupLine("[green]Dry-run complete. No data exported.[/]");
-            return;
+                 // Final Output Column
+                 {
+                     var finalVals = traceValues.Last();
+                     var finalIdx = -1;
+                     for(int k=0; k<finalSchema.Count; k++) if(finalSchema[k].Name == col.Name) { finalIdx = k; break; }
+                     
+                     if (finalIdx >= 0 && finalIdx < finalVals.Length)
+                     {
+                         var v = finalVals[finalIdx];
+                         var valStr = v is null ? "[grey]null[/]" : Markup.Escape(v.ToString() ?? "");
+                         rowMarkup.Add($"[blue]{valStr}[/]");
+                     }
+                     else
+                     {
+                         rowMarkup.Add("");
+                     }
+                 }
+                 
+                 table.AddRow(rowMarkup.ToArray());
+             }
+
+             _console.Write(table);
+             
+             _console.WriteLine();
+             _console.MarkupLine("[green]Dry-run complete. No data exported.[/]");
+             return;
         }
 
         _console.MarkupLine($"[grey]Writing to:[/] [blue]{options.OutputPath}[/]");
@@ -175,13 +222,12 @@ public class ExportService
             f.SupportedExtension.Equals(extension, StringComparison.OrdinalIgnoreCase))
             ?? throw new ArgumentException($"Unsupported file format: {extension}. Supported: {string.Join(", ", _writerFactories.Select(f => f.SupportedExtension))}");
 
-        // Writer receives only non-virtual columns (for output)
+        // Filter out virtual columns for physical writer
         var exportableSchema = currentSchema.Where(c => !c.IsVirtual).ToList();
         await using var writer = writerFactory.Create(options);
         await writer.InitializeAsync(exportableSchema, ct);
 
-        // Create bounded channels for pipeline with backpressure
-        // Capacity 1000 rows allows for some buffering but keeps backpressure active
+        // Bounded Channels for backpressure
         var readerToTransform = Channel.CreateBounded<object?[]>(new BoundedChannelOptions(1000)
         {
             SingleWriter = true,
@@ -199,13 +245,12 @@ public class ExportService
         using var progress = new ProgressReporter(true, pipeline);
         long totalRows = 0;
 
-        // Create a linked token source for limit-based cancellation
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var effectiveCt = linkedCts.Token;
 
         try
         {
-            // Run concurrent pipeline: Producer (Reads/Unbatches) -> Transform (Streams rows) -> Consumer (Batches/Writes)
+            // Run Concurrent Pipeline
             var producerTask = ProduceRowsAsync(reader, readerToTransform.Writer, options.BatchSize, options.Limit, progress, linkedCts, effectiveCt);
             var transformTask = TransformRowsAsync(readerToTransform.Reader, transformToWriter.Writer, pipeline, progress, effectiveCt);
             var consumerTask = ConsumeRowsAsync(transformToWriter.Reader, writer, options.BatchSize, progress, r => Interlocked.Add(ref totalRows, r), effectiveCt);
