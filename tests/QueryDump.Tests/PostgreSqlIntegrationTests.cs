@@ -90,7 +90,7 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
         var targetTable = "test_export";
         
         // Options
-        var options = new PostgreSqlOptions 
+        var options = new PostgreSqlWriterOptions 
         { 
             Table = targetTable, 
             Strategy = PostgreSqlWriteStrategy.Recreate 

@@ -162,7 +162,9 @@ public class ExportService
                      {
                          var v = values[idx];
                          rawVal = v?.ToString() ?? "";
-                         displayVal = v is null ? "[grey]null[/]" : Markup.Escape(rawVal);
+                         var typeName = v?.GetType().Name ?? "null";
+                         var typeSuffix = $" [dim]({typeName})[/]";
+                         displayVal = v is null ? "[grey]null[/]" : Markup.Escape(rawVal) + typeSuffix;
                      }
                      
                      // Highlight Logic: Green if new, Yellow if modified
@@ -195,7 +197,9 @@ public class ExportService
                      if (finalIdx >= 0 && finalIdx < finalVals.Length)
                      {
                          var v = finalVals[finalIdx];
-                         var valStr = v is null ? "[grey]null[/]" : Markup.Escape(v.ToString() ?? "");
+                         var typeName = v?.GetType().Name ?? "null";
+                         var typeSuffix = $" [dim]({typeName})[/]";
+                         var valStr = v is null ? "[grey]null[/]" : Markup.Escape(v.ToString() ?? "") + typeSuffix;
                          rowMarkup.Add($"[blue]{valStr}[/]");
                      }
                      else

@@ -9,10 +9,12 @@ namespace QueryDump.Transformers.Overwrite;
 public class OverwriteDataTransformer : IDataTransformer, IRequiresOptions<OverwriteOptions>
 {
     private readonly Dictionary<string, string> _staticMappings = new(StringComparer.OrdinalIgnoreCase);
+    private readonly bool _skipNull;
     private string?[]? _columnValues; // Array matching column count, null if no overwrite for that index
 
     public OverwriteDataTransformer(OverwriteOptions options)
     {
+        _skipNull = options.SkipNull;
         foreach (var mapping in options.Mappings)
         {
             var parts = mapping.Split(':', 2);
@@ -63,6 +65,11 @@ public class OverwriteDataTransformer : IDataTransformer, IRequiresOptions<Overw
         {
             if (_columnValues[i] != null)
             {
+                // Skip if source is null and SkipNull is enabled
+                if (_skipNull && row[i] is null)
+                {
+                    continue;
+                }
                 row[i] = _columnValues[i];
             }
         }

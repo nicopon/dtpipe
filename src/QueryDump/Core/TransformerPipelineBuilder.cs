@@ -44,10 +44,9 @@ public class TransformerPipelineBuilder
     {
         var instructions = new List<Instruction>();
         
-        // Map option aliases to factories
-        // We need to know which CLI option corresponds to which factory
-        // E.g. "--fake" -> FakeDataTransformerFactory
-        var optionMap = new Dictionary<string, IDataTransformerFactory>(StringComparer.OrdinalIgnoreCase);
+        // Map option aliases to (Factory, Option) tuple
+        // We need to know which CLI option corresponds to which factory AND access the Option metadata (Arity)
+        var optionMap = new Dictionary<string, (IDataTransformerFactory Factory, Option Option)>(StringComparer.OrdinalIgnoreCase);
         
         foreach (var factory in _factories)
         {
@@ -55,11 +54,11 @@ public class TransformerPipelineBuilder
             {
                 if (!string.IsNullOrEmpty(option.Name))
                 {
-                    optionMap[option.Name] = factory;
+                    optionMap[option.Name] = (factory, option);
                 }
                 foreach (var alias in option.Aliases)
                 {
-                    optionMap[alias] = factory;
+                    optionMap[alias] = (factory, option);
                 }
             }
         }
@@ -69,14 +68,29 @@ public class TransformerPipelineBuilder
             var arg = args[i];
             
             // Is this a transformer option?
-            if (optionMap.TryGetValue(arg, out var factory))
+            if (optionMap.TryGetValue(arg, out var match))
             {
-                // Capture the value (next argument)
-                if (i + 1 < args.Length)
+                var factory = match.Factory;
+                var option = match.Option;
+                
+                // Check Arity to determine if we should consume the next argument
+                // For flags (Arity 0), we assume value is "true" and don't consume next arg
+                // For values (Arity > 0), we consume next arg
+                
+                if (option.Arity.MaximumNumberOfValues > 0)
                 {
-                    var value = args[i + 1];
-                    instructions.Add(new Instruction(factory, arg, value));
-                    i++; // Skip next arg since we consumed it
+                    // Expect value
+                    if (i + 1 < args.Length)
+                    {
+                        var value = args[i + 1];
+                        instructions.Add(new Instruction(factory, arg, value));
+                        i++; // Skip next arg since we consumed it
+                    }
+                }
+                else
+                {
+                    // Flag (boolean) -> Assume true, do NOT consume next arg
+                    instructions.Add(new Instruction(factory, arg, "true"));
                 }
             }
         }

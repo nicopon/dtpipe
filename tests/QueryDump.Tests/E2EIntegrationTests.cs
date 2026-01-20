@@ -8,6 +8,8 @@ using QueryDump.Tests.Helpers;
 using QueryDump.Transformers.Fake;
 using QueryDump.Writers;
 using QueryDump.Writers.Csv;
+using Spectre.Console;
+using Moq;
 using Xunit;
 
 namespace QueryDump.Tests;
@@ -72,7 +74,9 @@ public class E2EIntegrationTests : IAsyncLifetime
         // Transformer Factories
         services.AddSingleton<IDataTransformerFactory, FakeDataTransformerFactory>();
         
+        
         services.AddSingleton<ExportService>();
+        services.AddSingleton(new Mock<IAnsiConsole>().Object);
         
         var serviceProvider = services.BuildServiceProvider();
         var exportService = serviceProvider.GetRequiredService<ExportService>();
@@ -87,9 +91,12 @@ public class E2EIntegrationTests : IAsyncLifetime
             BatchSize = 100
         };
 
-        // 4. Run Export
+        // 4. Run Export using TransformerPipelineBuilder
         var args = new[] { "querydump", "--fake", "Name:name.firstname" };
-        await exportService.RunExportAsync(options, TestContext.Current.CancellationToken, args);
+        var transformerFactories = serviceProvider.GetServices<IDataTransformerFactory>().ToList();
+        var pipelineBuilder = new TransformerPipelineBuilder(transformerFactories);
+        var pipeline = pipelineBuilder.Build(args);
+        await exportService.RunExportAsync(options, TestContext.Current.CancellationToken, pipeline);
 
         // 5. Verify Output
         File.Exists(_outputPath).Should().BeTrue();
@@ -162,6 +169,7 @@ public class E2EIntegrationTests : IAsyncLifetime
         services.AddSingleton<IDataTransformerFactory, Transformers.Format.FormatDataTransformerFactory>();
         
         services.AddSingleton<ExportService>();
+        services.AddSingleton(new Mock<IAnsiConsole>().Object);
         
         var serviceProvider = services.BuildServiceProvider();
         var exportService = serviceProvider.GetRequiredService<ExportService>();
@@ -183,7 +191,10 @@ public class E2EIntegrationTests : IAsyncLifetime
             "--overwrite", "Name:Bond",
             "--format", "CopiedName:{Name} is 007" 
         };
-        await exportService.RunExportAsync(options, TestContext.Current.CancellationToken, args);
+        var transformerFactories = serviceProvider.GetServices<IDataTransformerFactory>().ToList();
+        var pipelineBuilder = new TransformerPipelineBuilder(transformerFactories);
+        var pipeline = pipelineBuilder.Build(args);
+        await exportService.RunExportAsync(options, TestContext.Current.CancellationToken, pipeline);
 
         // 4. Verify
         File.Exists(_outputPath).Should().BeTrue();
@@ -247,6 +258,7 @@ public class E2EIntegrationTests : IAsyncLifetime
         services.AddSingleton<IDataTransformerFactory, Transformers.Format.FormatDataTransformerFactory>();
         
         services.AddSingleton<ExportService>();
+        services.AddSingleton(new Mock<IAnsiConsole>().Object);
         
         var serviceProvider = services.BuildServiceProvider();
         var exportService = serviceProvider.GetRequiredService<ExportService>();
@@ -276,7 +288,10 @@ public class E2EIntegrationTests : IAsyncLifetime
         };
         
         // 4. Run Export
-        await exportService.RunExportAsync(options, TestContext.Current.CancellationToken, newArgs);
+        var transformerFactories = serviceProvider.GetServices<IDataTransformerFactory>().ToList();
+        var pipelineBuilder = new TransformerPipelineBuilder(transformerFactories);
+        var pipeline = pipelineBuilder.Build(newArgs);
+        await exportService.RunExportAsync(options, TestContext.Current.CancellationToken, pipeline);
         
         // 5. Verify Output
         var lines = await File.ReadAllLinesAsync(_outputPath, TestContext.Current.CancellationToken);

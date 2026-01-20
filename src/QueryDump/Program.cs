@@ -78,6 +78,7 @@ class Program
         services.AddSingleton<IDataTransformerFactory, OverwriteDataTransformerFactory>();
         services.AddSingleton<IDataTransformerFactory, FakeDataTransformerFactory>();
         services.AddSingleton<IDataTransformerFactory, FormatDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, Transformers.Mask.MaskDataTransformerFactory>();
         
         // Export Service
         services.AddSingleton<ExportService>();

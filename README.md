@@ -16,7 +16,7 @@ CLI tool to export database data to Parquet, CSV, or another database. Supports 
 - **Multi-Database**: Oracle, SQL Server, PostgreSQL, DuckDB, SQLite, CSV, Parquet
 - **Streaming**: `IDataReader`-based processing for large datasets with minimal memory
 - **Anonymization**: Replace sensitive data with realistic fake values thanks to [Bogus](https://github.com/bchavez/Bogus)
-- **Transformations**: Null, Overwrite, Format templates with .NET format specifiers
+- **Transformations**: Null, Overwrite, Format templates with .NET format specifiers, Mask patterns
 - **YAML Job Files**: Define reusable export configurations
 - **Output Formats**: Parquet (Snappy), CSV, or direct database insert
 
@@ -146,6 +146,18 @@ Use `{COLUMN}` placeholders with optional [.NET format specifiers](https://learn
 --format "AMOUNT:{PRICE:0.00}€"
 ```
 
+### Mask Patterns
+
+Mask data using patterns where `#` preserves the original character and any other character replaces it:
+
+```bash
+--mask "EMAIL:###****"        # "test@example.com" → "tes****ample.com"
+--mask "PHONE:##-##-****"     # "0612345678" → "06-12-****5678"
+--mask "SSN:***-**-####"      # "123-45-6789" → "***-**-6789"
+```
+
+> 💡 If the pattern is shorter than the data, remaining characters are preserved.
+
 ---
 
 ## Anonymization (Fake Data)
@@ -231,11 +243,23 @@ Create fake columns not in the query, then use them in `--format`:
 | `--overwrite` | `COLUMN:value` static replacement (repeatable) |
 | `--format` | `TARGET:{SOURCE}` or `{SOURCE:fmt}` template (repeatable) |
 
+### Skip-Null Options
+
+Prevent transformers from modifying null values:
+
+| Option | Description |
+|--------|-------------|
+| `--overwrite-skip-null` | Don't overwrite null values |
+| `--fake-skip-null` | Don't generate fake for null values |
+| `--format-skip-null` | Skip if all source data is null |
+
 ### Anonymization Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--fake` | `COLUMN:faker.method` mapping (repeatable) | - |
+| `--mask` | `COLUMN:pattern` masking (`#` = keep) (repeatable) | - |
+| `--mask-skip-null` | Don't mask null values | `false` |
 | `--fake-locale` | Locale (en, fr, de, ja...) | `en` |
 | `--fake-seed` | Global seed for reproducibility | - |
 | `--fake-seed-column` | Column for deterministic seeding | - |

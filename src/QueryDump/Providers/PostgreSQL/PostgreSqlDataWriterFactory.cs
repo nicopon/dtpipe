@@ -9,7 +9,7 @@ public class PostgreSqlDataWriterFactory : BaseCliContributor, IDataWriterFactor
     public PostgreSqlDataWriterFactory(OptionsRegistry registry) : base(registry) { }
 
     public override string ProviderName => "postgresql-writer";
-    public override string Category => "PostgreSQL Writer Options";
+    public override string Category => "Writer Options";
     public string SupportedExtension => ".dump";
 
     public bool CanHandle(string connectionString)
@@ -19,7 +19,7 @@ public class PostgreSqlDataWriterFactory : BaseCliContributor, IDataWriterFactor
 
     public IDataWriter Create(DumpOptions options)
     {
-        var pgOptions = Registry.Get<PostgreSqlOptions>();
+        var pgOptions = Registry.Get<PostgreSqlWriterOptions>();
         return new PostgreSqlDataWriter(
             PostgreSqlConnectionHelper.GetConnectionString(options.OutputPath),
             pgOptions
@@ -28,6 +28,6 @@ public class PostgreSqlDataWriterFactory : BaseCliContributor, IDataWriterFactor
 
     public override IEnumerable<Type> GetSupportedOptionTypes()
     {
-        yield return typeof(PostgreSqlOptions);
+        yield return typeof(PostgreSqlWriterOptions);
     }
 }

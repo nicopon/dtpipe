@@ -8,14 +8,14 @@ namespace QueryDump.Providers.PostgreSQL;
 public sealed class PostgreSqlDataWriter : IDataWriter
 {
     private readonly string _connectionString;
-    private readonly PostgreSqlOptions _options;
+    private readonly PostgreSqlWriterOptions _options;
     private NpgsqlConnection? _connection;
     private NpgsqlBinaryImporter? _writer;
     private long _bytesWritten;
 
     public long BytesWritten => _bytesWritten;
 
-    public PostgreSqlDataWriter(string connectionString, PostgreSqlOptions options)
+    public PostgreSqlDataWriter(string connectionString, PostgreSqlWriterOptions options)
     {
         _connectionString = connectionString;
         _options = options;

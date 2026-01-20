@@ -9,7 +9,7 @@ public class PostgreSqlReaderFactory : BaseCliContributor, IStreamReaderFactory
     public PostgreSqlReaderFactory(OptionsRegistry registry) : base(registry) { }
 
     public override string ProviderName => "postgresql";
-    public override string Category => "PostgreSQL Options";
+    public override string Category => "Reader Options";
 
     public bool CanHandle(string connectionString)
     {
@@ -27,6 +27,6 @@ public class PostgreSqlReaderFactory : BaseCliContributor, IStreamReaderFactory
 
     public override IEnumerable<Type> GetSupportedOptionTypes()
     {
-        yield return typeof(PostgreSqlOptions);
+        return Enumerable.Empty<Type>();
     }
 }

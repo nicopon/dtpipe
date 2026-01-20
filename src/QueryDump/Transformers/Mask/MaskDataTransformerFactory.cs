@@ -1,27 +1,24 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
-using System.Linq;
 using QueryDump.Cli;
 using QueryDump.Core;
 using QueryDump.Configuration;
 using QueryDump.Core.Options;
 
-namespace QueryDump.Transformers.Format;
+namespace QueryDump.Transformers.Mask;
 
-public interface IFormatDataTransformerFactory : IDataTransformerFactory { }
-
-public class FormatDataTransformerFactory(OptionsRegistry registry) : IDataTransformerFactory
+public class MaskDataTransformerFactory(OptionsRegistry registry) : IDataTransformerFactory
 {
     private readonly OptionsRegistry _registry = registry;
 
     public static IEnumerable<Type> GetSupportedOptionTypes()
     {
-        yield return ComponentOptionsHelper.GetOptionsType<FormatDataTransformer>();
+        yield return ComponentOptionsHelper.GetOptionsType<MaskDataTransformer>();
     }
 
     public string Category => "Transformer Options";
     
-    public string TransformerType => FormatOptions.Prefix; // "format"
+    public string TransformerType => MaskOptions.Prefix; // "mask"
 
     private IEnumerable<Option>? _cliOptions;
 
@@ -33,7 +30,7 @@ public class FormatDataTransformerFactory(OptionsRegistry registry) : IDataTrans
     public void BindOptions(ParseResult parseResult, OptionsRegistry registry)
     {
         var options = GetCliOptions();
-
+        
         foreach (var type in GetSupportedOptionTypes())
         {
             var boundOptions = CliOptionBuilder.BindForType(type, parseResult, options);
@@ -43,38 +40,38 @@ public class FormatDataTransformerFactory(OptionsRegistry registry) : IDataTrans
 
     public IDataTransformer? Create(DumpOptions options)
     {
-        var formatOptions = _registry.Get<FormatOptions>();
+        var maskOptions = _registry.Get<MaskOptions>();
         
-        if (!formatOptions.Mappings.Any())
+        // Return null if no mappings, to skip execution overhead
+        if (!maskOptions.Mappings.Any())
         {
             return null;
         }
 
-        return new FormatDataTransformer(formatOptions);
+        return new MaskDataTransformer(maskOptions);
     }
 
     public IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration)
     {
         // Get config options (like SkipNull) from registry-bound options
-        var registryOptions = _registry.Get<FormatOptions>();
+        var registryOptions = _registry.Get<MaskOptions>();
         
-        var options = new FormatOptions
+        var options = new MaskOptions
         {
-            Mappings = configuration.Select(x => x.Value),
+            Mappings = [.. configuration.Select(x => x.Value)],
             SkipNull = registryOptions.SkipNull
         };
-        return new FormatDataTransformer(options);
+        return new MaskDataTransformer(options);
     }
 
     public IDataTransformer? CreateFromYamlConfig(TransformerConfig config)
     {
+        // For mask transformer, Mappings are key=column, value=pattern
         if (config.Mappings == null || config.Mappings.Count == 0)
             return null;
 
-        // Convert YAML dict to "COLUMN:template" format
-        var mappings = config.Mappings.Select(kvp => $"{kvp.Key}:{kvp.Value}");
-        
-        var options = new FormatOptions { Mappings = mappings };
-        return new FormatDataTransformer(options);
+        var mappings = config.Mappings.Select(kv => $"{kv.Key}:{kv.Value}").ToList();
+        var options = new MaskOptions { Mappings = mappings };
+        return new MaskDataTransformer(options);
     }
 }

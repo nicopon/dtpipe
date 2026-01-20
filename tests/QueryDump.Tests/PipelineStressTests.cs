@@ -8,6 +8,8 @@ using QueryDump.Providers.DuckDB;
 using QueryDump.Transformers.Fake;
 using QueryDump.Writers;
 using QueryDump.Writers.Csv;
+using Moq;
+using Spectre.Console;
 using Xunit;
 
 
@@ -80,6 +82,7 @@ public class PipelineStressTests : IAsyncLifetime
         services.AddSingleton<IDataTransformerFactory, Transformers.Fake.FakeDataTransformerFactory>();
         services.AddSingleton<IDataTransformerFactory, Transformers.Format.FormatDataTransformerFactory>();
         services.AddSingleton<ExportService>();
+        services.AddSingleton(new Mock<IAnsiConsole>().Object);
 
         var serviceProvider = services.BuildServiceProvider();
         var exportService = serviceProvider.GetRequiredService<ExportService>();
@@ -110,7 +113,10 @@ public class PipelineStressTests : IAsyncLifetime
         _output.WriteLine("Starting Export...");
         sw.Restart();
         
-        await exportService.RunExportAsync(options, TestContext.Current.CancellationToken, args);
+        var transformerFactories = serviceProvider.GetServices<IDataTransformerFactory>().ToList();
+        var pipelineBuilder = new TransformerPipelineBuilder(transformerFactories);
+        var pipeline = pipelineBuilder.Build(args);
+        await exportService.RunExportAsync(options, TestContext.Current.CancellationToken, pipeline);
         
         sw.Stop();
         _output.WriteLine($"Export took {sw.ElapsedMilliseconds}ms ({sw.Elapsed.TotalSeconds:N2}s)");

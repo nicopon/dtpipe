@@ -3,10 +3,10 @@ using QueryDump.Core.Options;
 
 namespace QueryDump.Providers.PostgreSQL;
 
-public class PostgreSqlOptions : IOptionSet
+public class PostgreSqlWriterOptions : IWriterOptions
 {
     public static string Prefix => "pg";
-    public static string DisplayName => "PostgreSQL Options";
+    public static string DisplayName => "PostgreSQL Writer Options";
 
     // Writer Options
     [CliOption("--pg-table", Description = "Target table name for PostgreSQL export")]

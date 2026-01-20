@@ -166,4 +166,44 @@ public class FormatDataTransformerTests
         // Assert
         result[0][2].Should().Be("99.50€ - Product");
     }
+    [Fact]
+    public async Task Transform_ShouldSkipFormat_OnlyWhenAllSourceColumnsAreNull()
+    {
+        // Arrange
+        // Template uses A and B. SkipNull set to true.
+        var options = new FormatOptions 
+        { 
+            Mappings = new[] { "RESULT:{A}-{B}" }, 
+            SkipNull = true 
+        };
+        var transformer = new FormatDataTransformer(options);
+        var columns = new List<ColumnInfo>
+        {
+            new("A", typeof(string), true),
+            new("B", typeof(string), true),
+            new("RESULT", typeof(string), true)
+        };
+        
+        var rows = new List<object?[]> 
+        { 
+            new object?[] { null, null, "Old" },  // Case 1: Both null -> Skip (Result=Null)
+            new object?[] { "ValA", null, "Old" },// Case 2: One present -> Format (Result="ValA-")
+            new object?[] { null, "ValB", "Old" } // Case 3: Other present -> Format (Result="-ValB")
+        };
+
+        // Act
+        await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+        var result = rows.Select(r => transformer.Transform(r)).ToList();
+
+        // Assert
+        // Case 1: All null -> Skipped -> Result set to NULL (not "Old", transformer logic sets null on skip)
+        // Wait, current logic: "row[idx] = null; continue;" so it explicitly NULLs the target.
+        result[0][2].Should().BeNull("All sources are null, so format is skipped and target is nulled");
+
+        // Case 2: Mixed -> Formatted
+        result[1][2].Should().Be("ValA-");
+
+        // Case 3: Mixed -> Formatted
+        result[2][2].Should().Be("-ValB");
+    }
 }
