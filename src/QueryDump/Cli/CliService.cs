@@ -102,9 +102,15 @@ public class CliService
                 var output = parseResult.GetValue(outputOption);
                 var input = parseResult.GetValue(inputOption);
 
-                if (string.IsNullOrWhiteSpace(query) || string.IsNullOrWhiteSpace(output))
+                if (string.IsNullOrWhiteSpace(query))
                 {
-                    Console.Error.WriteLine("Options '--query' and '--output' are required (or use --job).");
+                    Console.Error.WriteLine("Error: Option '--query' is required (or use --job).");
+                    return 1;
+                }
+
+                if (string.IsNullOrWhiteSpace(output))
+                {
+                    Console.Error.WriteLine("Error: Option '--output' is required (or use --job).");
                     return 1;
                 }
 

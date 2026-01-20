@@ -12,7 +12,7 @@ public class PostgreSqlWriterOptions : IWriterOptions
     [CliOption("--pg-table", Description = "Target table name for PostgreSQL export")]
     public string Table { get; set; } = "Export";
 
-    [CliOption("--pg-strategy", Description = "Write strategy: Append, Truncate, or Recreate")]
+    [CliOption("--pg-strategy", Description = "Write strategy: Append, Truncate, or DeleteThenInsert")]
     public PostgreSqlWriteStrategy Strategy { get; set; } = PostgreSqlWriteStrategy.Append;
     
     // Potential future options: UseCopy (bool), BatchSize (for Copy buffer)
@@ -22,6 +22,6 @@ public enum PostgreSqlWriteStrategy
 {
     Append,
     Truncate,
-    Recreate
+    DeleteThenInsert
 }
 
