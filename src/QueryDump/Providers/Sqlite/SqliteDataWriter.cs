@@ -83,7 +83,7 @@ public class SqliteDataWriter : IDataWriter
         {
             if (i > 0) sb.Append(", ");
             var col = _columns[i];
-            sb.Append($"\"{col.Name}\" {MapClrTypeToSqlite(col.ClrType)}");
+            sb.Append($"\"{col.Name}\" {SqliteTypeMapper.MapClrType(col.ClrType)}");
         }
 
         sb.Append(')');
@@ -91,28 +91,6 @@ public class SqliteDataWriter : IDataWriter
         using var cmd = _connection!.CreateCommand();
         cmd.CommandText = sb.ToString();
         await cmd.ExecuteNonQueryAsync(ct);
-    }
-
-    private static string MapClrTypeToSqlite(Type clrType)
-    {
-        var underlying = Nullable.GetUnderlyingType(clrType) ?? clrType;
-
-        return underlying switch
-        {
-            _ when underlying == typeof(int) => "INTEGER",
-            _ when underlying == typeof(long) => "INTEGER",
-            _ when underlying == typeof(short) => "INTEGER",
-            _ when underlying == typeof(byte) => "INTEGER",
-            _ when underlying == typeof(bool) => "INTEGER",
-            _ when underlying == typeof(float) => "REAL",
-            _ when underlying == typeof(double) => "REAL",
-            _ when underlying == typeof(decimal) => "REAL",
-            _ when underlying == typeof(DateTime) => "TEXT",
-            _ when underlying == typeof(DateTimeOffset) => "TEXT",
-            _ when underlying == typeof(byte[]) => "BLOB",
-            _ when underlying == typeof(Guid) => "TEXT",
-            _ => "TEXT"
-        };
     }
 
     public async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)

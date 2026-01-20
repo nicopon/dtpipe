@@ -1,6 +1,4 @@
 using QueryDump.Configuration;
-using QueryDump.Core;
-using QueryDump.Core.Options;
 
 namespace QueryDump.Core;
 

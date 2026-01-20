@@ -15,6 +15,14 @@ public static class OracleConnectionHelper
             return true;
         }
 
+        // Avoid claiming other providers' connection strings
+        if (connectionString.StartsWith("duckdb:", StringComparison.OrdinalIgnoreCase) || 
+            connectionString.StartsWith("sqlite:", StringComparison.OrdinalIgnoreCase) ||
+            connectionString.StartsWith("sqlserver:", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
         // Simple heuristic: Contains "Data Source="
         return connectionString.Contains("Data Source=", StringComparison.OrdinalIgnoreCase); 
     }

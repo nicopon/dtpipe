@@ -1,5 +1,3 @@
-using QueryDump.Core;
-
 namespace QueryDump.Core;
 
 /// <summary>

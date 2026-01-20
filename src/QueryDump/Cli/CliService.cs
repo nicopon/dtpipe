@@ -33,15 +33,19 @@ public class CliService
     public (RootCommand, Action) Build()
     {
         // Core Options
-        var inputOption = new Option<string?>("--input|-i") { Description = "Input connection string or file path" };
-        var queryOption = new Option<string?>("--query", "-q") { Description = "SQL query to execute (SELECT only)" };
-        var outputOption = new Option<string?>("--output", "-o") { Description = "Output file path (.parquet or .csv)" };
+        var inputOption = new Option<string?>("--input") { Description = "Input connection string or file path" };
+        var queryOption = new Option<string?>("--query") { Description = "SQL query to execute (SELECT only)" };
+        var outputOption = new Option<string?>("--output") { Description = "Output file path (.parquet or .csv)" };
         var connectionTimeoutOption = new Option<int>("--connection-timeout") { Description = "Connection timeout in seconds", DefaultValueFactory = _ => 10 };
         var queryTimeoutOption = new Option<int>("--query-timeout") { Description = "Query timeout in seconds (0 = no timeout)", DefaultValueFactory = _ => 0 };
-        var batchSizeOption = new Option<int>("--batch-size", "-b") { Description = "Rows per output batch", DefaultValueFactory = _ => 50_000 };
+        var batchSizeOption = new Option<int>("--batch-size") { Description = "Rows per output batch", DefaultValueFactory = _ => 50_000 };
+        var unsafeQueryOption = new Option<bool>("--unsafe-query") { Description = "Bypass SQL query validation (allows DDL/DML - use with caution!)", DefaultValueFactory = _ => false };
+        var dryRunOption = new Option<bool>("--dry-run") { Description = "Display query schema without exporting data", DefaultValueFactory = _ => false };
+        var limitOption = new Option<int>("--limit") { Description = "Maximum rows to export (0 = unlimited)", DefaultValueFactory = _ => 0 };
+        var jobOption = new Option<string?>("--job") { Description = "Path to YAML job file" };
         
         // Core Help Options
-        var coreOptions = new List<Option> { inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption };
+        var coreOptions = new List<Option> { inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption, unsafeQueryOption, dryRunOption, limitOption, jobOption };
 
         var rootCommand = new RootCommand("QueryDump - Export database data to Parquet or CSV (DuckDB-optimized)");
         foreach(var opt in coreOptions) rootCommand.Options.Add(opt);
@@ -70,14 +74,67 @@ public class CliService
                 }
             }
 
-            // 2. Validate Core
-            var query = parseResult.GetValue(queryOption);
-            var output = parseResult.GetValue(outputOption);
+            // 2. Handle Job File or CLI args
+            var jobFile = parseResult.GetValue(jobOption);
+            JobDefinition job;
 
-            if (string.IsNullOrWhiteSpace(query) || string.IsNullOrWhiteSpace(output))
+            if (!string.IsNullOrWhiteSpace(jobFile))
             {
-                Console.Error.WriteLine("Options '--query' and '--output' are required.");
-                return 1;
+                // Load from job file
+                try
+                {
+                    job = JobFileParser.Parse(jobFile);
+                    Console.Error.WriteLine($"Loaded job file: {jobFile}");
+                    
+                    // CLI args override job file values
+                    var cliQuery = parseResult.GetValue(queryOption);
+                    var cliOutput = parseResult.GetValue(outputOption);
+                    var cliInput = parseResult.GetValue(inputOption);
+                    
+                    if (!string.IsNullOrWhiteSpace(cliQuery)) job = job with { Query = cliQuery };
+                    if (!string.IsNullOrWhiteSpace(cliOutput)) job = job with { Output = cliOutput };
+                    if (!string.IsNullOrWhiteSpace(cliInput)) job = job with { Input = cliInput };
+                    if (parseResult.GetValue(limitOption) > 0) job = job with { Limit = parseResult.GetValue(limitOption) };
+                    if (parseResult.GetValue(dryRunOption)) job = job with { DryRun = true };
+                    if (parseResult.GetValue(unsafeQueryOption)) job = job with { UnsafeQuery = true };
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"Error loading job file: {ex.Message}");
+                    return 1;
+                }
+            }
+            else
+            {
+                // CLI mode: validate required args
+                var query = parseResult.GetValue(queryOption);
+                var output = parseResult.GetValue(outputOption);
+                var input = parseResult.GetValue(inputOption);
+
+                if (string.IsNullOrWhiteSpace(query) || string.IsNullOrWhiteSpace(output))
+                {
+                    Console.Error.WriteLine("Options '--query' and '--output' are required (or use --job).");
+                    return 1;
+                }
+
+                if (string.IsNullOrWhiteSpace(input))
+                {
+                    Console.Error.WriteLine("Error: --input is required.");
+                    return 1;
+                }
+
+                job = new JobDefinition
+                {
+                    Input = input,
+                    Query = query,
+                    Output = output,
+                    ConnectionTimeout = parseResult.GetValue(connectionTimeoutOption),
+                    QueryTimeout = parseResult.GetValue(queryTimeoutOption),
+                    BatchSize = parseResult.GetValue(batchSizeOption),
+                    UnsafeQuery = parseResult.GetValue(unsafeQueryOption),
+                    DryRun = parseResult.GetValue(dryRunOption),
+                    Limit = parseResult.GetValue(limitOption)
+                };
             }
 
             // 3. Bind Options
@@ -87,23 +144,15 @@ public class CliService
                 contributor.BindOptions(parseResult, registry);
             }
 
-            // 4. Resolve Input & Provider
-            var input = parseResult.GetValue(inputOption);
-            
-            if (string.IsNullOrWhiteSpace(input))
-            {
-                Console.Error.WriteLine("Error: --input is required.");
-                return 1;
-            }
-
+            // 4. Resolve Provider from job.Input
             var readerFactories = _contributors.OfType<IStreamReaderFactory>().ToList();
 
             // Auto-detect provider
-            var detectedFactory = readerFactories.FirstOrDefault(f => f.CanHandle(input));
+            var detectedFactory = readerFactories.FirstOrDefault(f => f.CanHandle(job.Input));
             
             if (detectedFactory == null)
             {
-                 Console.Error.WriteLine($"Error: Could not detect provider for input: '{input}'.");
+                 Console.Error.WriteLine($"Error: Could not detect provider for input: '{job.Input}'.");
                  Console.Error.WriteLine("Please use a known prefix (e.g. 'duckdb:', 'oracle:', 'mssql:').");
                  return 1;
             }
@@ -111,16 +160,30 @@ public class CliService
             var provider = detectedFactory.ProviderName;
             Console.WriteLine($"Auto-detected provider: {provider}");
 
-            // 5. Run Export
-             var options = new DumpOptions
+            // 5. Validate SQL query for safety
+            try
+            {
+                SqlQueryValidator.Validate(job.Query, job.UnsafeQuery);
+            }
+            catch (InvalidOperationException ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
+
+            // 6. Build DumpOptions from JobDefinition
+            var options = new DumpOptions
             {
                 Provider = provider,
-                ConnectionString = input,
-                Query = query!,
-                OutputPath = output!,
-                ConnectionTimeout = parseResult.GetValue(connectionTimeoutOption),
-                QueryTimeout = parseResult.GetValue(queryTimeoutOption),
-                BatchSize = parseResult.GetValue(batchSizeOption)
+                ConnectionString = job.Input,
+                Query = job.Query,
+                OutputPath = job.Output,
+                ConnectionTimeout = job.ConnectionTimeout,
+                QueryTimeout = job.QueryTimeout,
+                BatchSize = job.BatchSize,
+                UnsafeQuery = job.UnsafeQuery,
+                DryRun = job.DryRun,
+                Limit = job.Limit
             };
 
             var exportService = _serviceProvider.GetRequiredService<ExportService>();

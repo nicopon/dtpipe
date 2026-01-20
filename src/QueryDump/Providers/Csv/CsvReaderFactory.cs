@@ -1,30 +1,24 @@
-using System.CommandLine;
-using System.CommandLine.Parsing;
-using QueryDump.Cli;
 using QueryDump.Configuration;
 using QueryDump.Core;
 using QueryDump.Core.Options;
 
 namespace QueryDump.Providers.Csv;
 
-public class CsvReaderFactory : IStreamReaderFactory
+public class CsvReaderFactory : BaseCliContributor, IStreamReaderFactory
 {
-    private readonly OptionsRegistry _registry;
+    private const string Prefix = "csv:";
 
-    public CsvReaderFactory(OptionsRegistry registry)
+    public CsvReaderFactory(OptionsRegistry registry) : base(registry)
     {
-        _registry = registry;
         // Register default options
-        if (!_registry.Has<CsvReaderOptions>())
+        if (!Registry.Has<CsvReaderOptions>())
         {
-            _registry.Register(new CsvReaderOptions());
+            Registry.Register(new CsvReaderOptions());
         }
     }
 
-    public string ProviderName => "csv";
-    public string Category => "Reader Options";
-
-    private const string Prefix = "csv:";
+    public override string ProviderName => "csv";
+    public override string Category => "Reader Options";
 
     public bool CanHandle(string connectionString)
     {
@@ -46,28 +40,11 @@ public class CsvReaderFactory : IStreamReaderFactory
             filePath = filePath[Prefix.Length..];
         }
 
-        return new CsvStreamReader(filePath, _registry.Get<CsvReaderOptions>());
+        return new CsvStreamReader(filePath, Registry.Get<CsvReaderOptions>());
     }
 
-    public IEnumerable<Type> GetSupportedOptionTypes()
+    public override IEnumerable<Type> GetSupportedOptionTypes()
     {
         yield return typeof(CsvReaderOptions);
-    }
-
-    private IEnumerable<Option>? _cliOptions;
-
-    public IEnumerable<Option> GetCliOptions()
-    {
-        return _cliOptions ??= GetSupportedOptionTypes().SelectMany(CliOptionBuilder.GenerateOptionsForType).ToList();
-    }
-
-    public void BindOptions(ParseResult parseResult, OptionsRegistry registry)
-    {
-        var options = GetCliOptions();
-        foreach (var type in GetSupportedOptionTypes())
-        {
-            var boundOptions = CliOptionBuilder.BindForType(type, parseResult, options);
-            registry.RegisterByType(type, boundOptions);
-        }
     }
 }

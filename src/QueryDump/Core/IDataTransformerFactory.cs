@@ -1,4 +1,3 @@
-using QueryDump.Core.Options;
 using QueryDump.Configuration;
 
 namespace QueryDump.Core;

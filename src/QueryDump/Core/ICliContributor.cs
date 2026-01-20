@@ -1,5 +1,4 @@
 using System.CommandLine;
-using System.CommandLine.Parsing;
 using QueryDump.Core.Options;
 
 namespace QueryDump.Core;

@@ -35,11 +35,17 @@ public sealed class DuckDbDataWriter : IDataWriter
         }
         else if (_options.Strategy == DuckDbWriteStrategy.Truncate)
         {
-            try {
+            // Check if table exists before truncating
+            var checkCmd = _connection.CreateCommand();
+            checkCmd.CommandText = $"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{_options.Table}'";
+            var exists = Convert.ToInt32(await checkCmd.ExecuteScalarAsync(ct)) > 0;
+            
+            if (exists)
+            {
                 var truncCmd = _connection.CreateCommand();
                 truncCmd.CommandText = $"DELETE FROM {_options.Table}";
                 await truncCmd.ExecuteNonQueryAsync(ct);
-            } catch { /* Ignore if table does not exist */ }
+            }
         }
 
         var createTableSql = BuildCreateTableSql(_options.Table, columns);
@@ -112,30 +118,10 @@ public sealed class DuckDbDataWriter : IDataWriter
         for (int i = 0; i < columns.Count; i++)
         {
             if (i > 0) sb.Append(", ");
-            sb.Append($"{columns[i].Name} {MapToDuckDbType(columns[i].ClrType)}");
+            sb.Append($"{columns[i].Name} {DuckDbTypeMapper.MapClrType(columns[i].ClrType)}");
         }
         
         sb.Append(")");
         return sb.ToString();
-    }
-
-    private static string MapToDuckDbType(Type type)
-    {
-        type = Nullable.GetUnderlyingType(type) ?? type;
-
-        if (type == typeof(int)) return "INTEGER";
-        if (type == typeof(long)) return "BIGINT";
-        if (type == typeof(short)) return "SMALLINT";
-        if (type == typeof(byte)) return "TINYINT";
-        if (type == typeof(bool)) return "BOOLEAN";
-        if (type == typeof(float)) return "FLOAT";
-        if (type == typeof(double)) return "DOUBLE";
-        if (type == typeof(decimal)) return "DECIMAL";
-        if (type == typeof(DateTime)) return "TIMESTAMP";
-        if (type == typeof(DateTimeOffset)) return "TIMESTAMP";
-        if (type == typeof(Guid)) return "UUID";
-        if (type == typeof(byte[])) return "BLOB";
-        
-        return "VARCHAR";
     }
 }

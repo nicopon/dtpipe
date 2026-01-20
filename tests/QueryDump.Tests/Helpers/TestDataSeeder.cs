@@ -91,6 +91,16 @@ public static class TestDataSeeder
                     CreatedAt TIMESTAMP,
                     BirthDate DATE
                 )",
+            "PostgreSQL" => $@"
+                CREATE TABLE {tableName} (
+                    Id INTEGER PRIMARY KEY,
+                    Name VARCHAR(100),
+                    Age INTEGER,
+                    IsActive BOOLEAN,
+                    Score DECIMAL(10,2),
+                    CreatedAt TIMESTAMP,
+                    BirthDate DATE
+                )",
             _ => throw new NotSupportedException($"Provider {provider} not supported for DDL generation.")
         };
     }
@@ -102,10 +112,12 @@ public static class TestDataSeeder
         {
             "Oracle" => ":",
             "DuckDB" => "$",
+            "PostgreSQL" => "@",
             _ => "@"
         };
         
         var columns = string.Join(", ", parameters.Keys);
+        // Ensure keys are wrapped if needed, but simple names are fine
         var values = string.Join(", ", parameters.Keys.Select(k => $"{paramPrefix}{k}"));
 
         return $"INSERT INTO {tableName} ({columns}) VALUES ({values})";
@@ -138,6 +150,7 @@ public static class TestDataSeeder
         if (typeName.Contains("Oracle")) return "Oracle";
         if (typeName.Contains("SqlConnection")) return "SqlServer";
         if (typeName.Contains("DuckDB")) return "DuckDB";
+        if (typeName.Contains("Npgsql")) return "PostgreSQL";
         return "Unknown";
     }
 }

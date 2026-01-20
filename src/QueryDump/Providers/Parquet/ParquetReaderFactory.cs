@@ -1,25 +1,17 @@
-using System.CommandLine;
-using System.CommandLine.Parsing;
-using QueryDump.Cli;
 using QueryDump.Configuration;
 using QueryDump.Core;
 using QueryDump.Core.Options;
 
 namespace QueryDump.Providers.Parquet;
 
-public class ParquetReaderFactory : IStreamReaderFactory
+public class ParquetReaderFactory : BaseCliContributor, IStreamReaderFactory
 {
-    private readonly OptionsRegistry _registry;
-
-    public ParquetReaderFactory(OptionsRegistry registry)
-    {
-        _registry = registry;
-    }
-
-    public string ProviderName => "parquet";
-    public string Category => "Reader Options";
-
     private const string Prefix = "parquet:";
+
+    public ParquetReaderFactory(OptionsRegistry registry) : base(registry) { }
+
+    public override string ProviderName => "parquet";
+    public override string Category => "Reader Options";
 
     public bool CanHandle(string connectionString)
     {
@@ -44,25 +36,8 @@ public class ParquetReaderFactory : IStreamReaderFactory
         return new ParquetStreamReader(filePath);
     }
 
-    public IEnumerable<Type> GetSupportedOptionTypes()
+    public override IEnumerable<Type> GetSupportedOptionTypes()
     {
-        yield break; // No specific reader options for Parquet for now
-    }
-
-    private IEnumerable<Option>? _cliOptions;
-
-    public IEnumerable<Option> GetCliOptions()
-    {
-        return _cliOptions ??= GetSupportedOptionTypes().SelectMany(CliOptionBuilder.GenerateOptionsForType).ToList();
-    }
-
-    public void BindOptions(ParseResult parseResult, OptionsRegistry registry)
-    {
-        var options = GetCliOptions();
-        foreach (var type in GetSupportedOptionTypes())
-        {
-            var boundOptions = CliOptionBuilder.BindForType(type, parseResult, options);
-            registry.RegisterByType(type, boundOptions);
-        }
+        yield break; // No specific reader options for Parquet
     }
 }

@@ -1,58 +1,114 @@
+using Spectre.Console;
 using System.Diagnostics;
+using QueryDump.Core;
 
 namespace QueryDump.Feedback;
 
-/// <summary>
-/// Reports progress to STDERR with 500ms refresh, overwriting the same line.
-/// </summary>
 public sealed class ProgressReporter : IDisposable
 {
-    private readonly Timer _timer;
     private readonly Stopwatch _stopwatch;
-    private readonly object _lock = new();
-    
-    private long _rowCount;
-    private long _bytesWritten;
+    private readonly bool _enabled;
     private bool _disposed;
-    private int _lastLineLength;
+    
+    // Stats
+    private long _readCount;
+    private long _writeCount;
+    private long _bytesWritten;
 
-    public ProgressReporter()
+    // Transformers stats
+    private readonly Dictionary<string, long> _transformerStats = new();
+    private readonly List<string> _transformerNames = new();
+
+    public ProgressReporter(bool enabled = true, IEnumerable<IDataTransformer>? transformers = null)
     {
+        _enabled = enabled;
         _stopwatch = Stopwatch.StartNew();
-        _timer = new Timer(OnTick, null, TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(500));
-    }
 
-    public void Update(long rowCount, long bytesWritten)
-    {
-        lock (_lock)
+        if (transformers != null)
         {
-            _rowCount = rowCount;
-            _bytesWritten = bytesWritten;
+            foreach (var t in transformers)
+            {
+                _transformerNames.Add(t.GetType().Name);
+                _transformerStats[t.GetType().Name] = 0;
+            }
+        }
+
+        if (_enabled)
+        {
+            // Start the live display in a background task
+            Task.Run(async () => 
+            {
+                await AnsiConsole.Live(CreateLayout())
+                    .AutoClear(false)
+                    .Overflow(VerticalOverflow.Ellipsis)
+                    .Cropping(VerticalOverflowCropping.Bottom)
+                    .StartAsync(async ctx => 
+                    {
+                        while (!_disposed)
+                        {
+                            ctx.UpdateTarget(CreateLayout());
+                            await Task.Delay(100);
+                        }
+                    });
+            });
         }
     }
 
-    private void OnTick(object? state)
+    public void ReportRead(int count)
     {
-        if (_disposed) return;
+        Interlocked.Add(ref _readCount, count);
+        // Refresh is handled by background loop
+    }
 
-        long rows, bytes;
-        lock (_lock)
+    public void ReportTransform(string transformerName, int count)
+    {
+        lock (_transformerStats)
         {
-            rows = _rowCount;
-            bytes = _bytesWritten;
+            if (_transformerStats.ContainsKey(transformerName))
+            {
+                _transformerStats[transformerName] += count;
+            }
+        }
+    }
+
+    public void ReportWrite(int count, long bytes)
+    {
+        Interlocked.Add(ref _writeCount, count);
+        Interlocked.Add(ref _bytesWritten, bytes);
+    }
+
+    private Table CreateLayout()
+    {
+        var elapsed = _stopwatch.Elapsed.TotalSeconds;
+        
+        var table = new Table().Border(TableBorder.Rounded);
+        table.AddColumn("Stage");
+        table.AddColumn("Rows");
+        table.AddColumn("Speed");
+
+        // Reading
+        var readSpeed = elapsed > 0 ? _readCount / elapsed : 0;
+        table.AddRow("Reading", $"{_readCount:N0}", FormatSpeed(readSpeed));
+
+        // Transformers
+        lock (_transformerStats)
+        {
+            foreach (var name in _transformerNames)
+            {
+                var count = _transformerStats[name];
+                var speed = elapsed > 0 ? count / elapsed : 0;
+                table.AddRow($"→ {name}", $"{count:N0}", FormatSpeed(speed));
+            }
         }
 
-        var elapsed = _stopwatch.Elapsed;
-        var rowsPerSec = elapsed.TotalSeconds > 0 ? rows / elapsed.TotalSeconds : 0;
+        // Writing
+        var writeSpeed = elapsed > 0 ? _writeCount / elapsed : 0;
+        table.AddRow("Writing", $"{_writeCount:N0}", FormatSpeed(writeSpeed));
         
-        var message = $"\rRows: {rows:N0} | File: {FormatBytes(bytes)} | Speed: {FormatSpeed(rowsPerSec)}";
-        
-        // Pad with spaces to overwrite previous content
-        var padding = Math.Max(0, _lastLineLength - message.Length);
-        var output = message + new string(' ', padding);
-        
-        Console.Error.Write(output);
-        _lastLineLength = message.Length;
+        // Footer: File size
+        table.AddRow("File Size", FormatBytes(Interlocked.Read(ref _bytesWritten)), "");
+
+        return table;
     }
 
     private static string FormatBytes(long bytes)
@@ -70,24 +126,27 @@ public sealed class ProgressReporter : IDisposable
     {
         return rowsPerSec switch
         {
-            >= 1_000_000 => $"{rowsPerSec / 1_000_000:F1}M rows/s",
-            >= 1_000 => $"{rowsPerSec / 1_000:F1}K rows/s",
-            _ => $"{rowsPerSec:F0} rows/s"
+            >= 1_000_000 => $"{rowsPerSec / 1_000_000:F1}M/s",
+            >= 1_000 => $"{rowsPerSec / 1_000:F1}K/s",
+            _ => $"{rowsPerSec:F0}/s"
         };
     }
 
     public void Complete()
     {
-        // Final update
-        OnTick(null);
-        Console.Error.WriteLine(); // New line after completion
+        _stopwatch.Stop();
+        _disposed = true;
+        if (_enabled)
+        {
+            // Give a small moment for the last refresh to happen if needed, or just let it close
+            // We rely on the background task seeing _disposed = true and exiting the Live block
+            
+            AnsiConsole.MarkupLine($"[green]✓ Completed in {_stopwatch.Elapsed.TotalSeconds:F1}s | {_writeCount:N0} rows | {FormatBytes(_bytesWritten)}[/]");
+        }
     }
 
     public void Dispose()
     {
-        if (_disposed) return;
         _disposed = true;
-        _timer.Dispose();
-        _stopwatch.Stop();
     }
 }

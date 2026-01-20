@@ -46,6 +46,20 @@ public class ExportService
         }
 
         Console.Error.WriteLine($"Schema: {reader.Columns.Count} columns");
+        
+        // Display column details for dry-run or verbose mode
+        foreach (var col in reader.Columns)
+        {
+            Console.Error.WriteLine($"  - {col.Name}: {col.ClrType.Name}{(col.IsNullable ? "?" : "")}");
+        }
+
+        // Dry-run mode: exit after displaying schema
+        if (options.DryRun)
+        {
+            Console.Error.WriteLine("\n[Dry-run mode] Schema displayed. No data exported.");
+            return;
+        }
+
         Console.Error.WriteLine($"Writing to: {options.OutputPath}");
 
         // Initialize transformation pipeline using ordered arguments
@@ -99,21 +113,24 @@ public class ExportService
             FullMode = BoundedChannelFullMode.Wait
         });
 
-        using var progress = new ProgressReporter();
+        using var progress = new ProgressReporter(true, pipeline);
         long totalRows = 0;
+
+        // Create a linked token source for limit-based cancellation
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var effectiveCt = linkedCts.Token;
 
         try
         {
             // Run concurrent pipeline: Producer (Reads/Unbatches) -> Transform (Streams rows) -> Consumer (Batches/Writes)
-            var producerTask = ProduceRowsAsync(reader, readerToTransform.Writer, options.BatchSize, ct);
-            var transformTask = TransformRowsAsync(readerToTransform.Reader, transformToWriter.Writer, pipeline, ct);
-            var consumerTask = ConsumeRowsAsync(transformToWriter.Reader, writer, options.BatchSize, progress, r => Interlocked.Add(ref totalRows, r), ct);
+            var producerTask = ProduceRowsAsync(reader, readerToTransform.Writer, options.BatchSize, options.Limit, progress, linkedCts, effectiveCt);
+            var transformTask = TransformRowsAsync(readerToTransform.Reader, transformToWriter.Writer, pipeline, progress, effectiveCt);
+            var consumerTask = ConsumeRowsAsync(transformToWriter.Reader, writer, options.BatchSize, progress, r => Interlocked.Add(ref totalRows, r), effectiveCt);
 
             await Task.WhenAll(producerTask, transformTask, consumerTask);
 
             await writer.CompleteAsync(ct);
             progress.Complete();
-            Console.Error.WriteLine($"Export complete: {Interlocked.Read(ref totalRows):N0} rows");
         }
         catch (Exception ex)
         {
@@ -129,9 +146,13 @@ public class ExportService
     private static async Task ProduceRowsAsync(
         IStreamReader reader, 
         ChannelWriter<object?[]> output, 
-        int batchSize, 
+        int batchSize,
+        int limit,
+        ProgressReporter progress,
+        CancellationTokenSource linkedCts,
         CancellationToken ct)
     {
+        long rowCount = 0;
         try
         {
             await foreach (var batchChunk in reader.ReadBatchesAsync(batchSize, ct))
@@ -139,8 +160,21 @@ public class ExportService
                 for (var i = 0; i < batchChunk.Length; i++)
                 {
                     await output.WriteAsync(batchChunk.Span[i], ct);
+                    progress.ReportRead(1);
+                    rowCount++;
+
+                    // Check limit and cancel if reached
+                    if (limit > 0 && rowCount >= limit)
+                    {
+                        await linkedCts.CancelAsync();
+                        return;
+                    }
                 }
             }
+        }
+        catch (OperationCanceledException) when (limit > 0 && rowCount >= limit)
+        {
+            // Expected cancellation due to limit reached
         }
         finally
         {
@@ -155,6 +189,7 @@ public class ExportService
         ChannelReader<object?[]> input,
         ChannelWriter<object?[]> output,
         IReadOnlyList<IDataTransformer> pipeline,
+        ProgressReporter progress,
         CancellationToken ct)
     {
         try
@@ -167,6 +202,7 @@ public class ExportService
                 foreach (var transformer in pipeline)
                 {
                     workingRow = transformer.Transform(workingRow);
+                    progress.ReportTransform(transformer.GetType().Name, 1);
                 }
                 
                 await output.WriteAsync(workingRow, ct);
@@ -191,7 +227,7 @@ public class ExportService
         CancellationToken ct)
     {
         var buffer = new List<object?[]>(batchSize);
-        long cumulativeRows = 0;
+        long previousBytes = 0;
 
         await foreach (var row in input.ReadAllAsync(ct))
         {
@@ -200,9 +236,14 @@ public class ExportService
             if (buffer.Count >= batchSize)
             {
                 await writer.WriteBatchAsync(buffer, ct);
-                cumulativeRows += buffer.Count;
-                updateRowCount(buffer.Count);
-                progress.Update(cumulativeRows, writer.BytesWritten);
+                
+                var currentBytes = writer.BytesWritten;
+                var bytesDelta = currentBytes - previousBytes;
+                previousBytes = currentBytes;
+
+                updateRowCount(buffer.Count); // Update total
+                progress.ReportWrite(buffer.Count, bytesDelta);
+                
                 buffer = new List<object?[]>(batchSize); // New buffer to avoid reference issues
             }
         }
@@ -211,9 +252,12 @@ public class ExportService
         if (buffer.Count > 0)
         {
             await writer.WriteBatchAsync(buffer, ct);
-            cumulativeRows += buffer.Count;
+            
+            var currentBytes = writer.BytesWritten;
+            var bytesDelta = currentBytes - previousBytes;
+            
             updateRowCount(buffer.Count);
-            progress.Update(cumulativeRows, writer.BytesWritten);
+            progress.ReportWrite(buffer.Count, bytesDelta);
         }
     }
 }

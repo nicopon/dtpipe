@@ -22,4 +22,21 @@ public sealed record DumpOptions
     /// </summary>
     public int BatchSize { get; init; } = 5_000; 
 
+    // --- Safety Options ---
+    /// <summary>
+    /// If true, bypasses SQL query validation (allows DDL/DML operations).
+    /// Use with extreme caution!
+    /// </summary>
+    public bool UnsafeQuery { get; init; } = false;
+
+    // --- Validation Options ---
+    /// <summary>
+    /// If true, only displays the query schema without exporting data.
+    /// </summary>
+    public bool DryRun { get; init; } = false;
+
+    /// <summary>
+    /// Maximum number of rows to export. 0 = unlimited.
+    /// </summary>
+    public int Limit { get; init; } = 0;
 }
