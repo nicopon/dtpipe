@@ -7,9 +7,11 @@ namespace QueryDump.Transformers.Format;
 public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresOptions<FormatOptions>
 {
     private readonly Dictionary<string, string> _mappings = new(StringComparer.OrdinalIgnoreCase);
+    private readonly bool _skipNull;
     private int[]? _generationOrder;
     private ColumnProcessor[]? _processors;
     private Dictionary<string, int>? _columnNameToIndex;
+    private int _realColumnCount;
 
     // Unified pattern for {COLUMN} or {COLUMN:format}
     [GeneratedRegex(@"\{([^{}:]+)(?::([^{}]+))?\}", RegexOptions.Compiled)]
@@ -17,6 +19,7 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
 
     public FormatDataTransformer(FormatOptions options)
     {
+        _skipNull = options.SkipNull;
         foreach (var mapping in options.Mappings)
         {
             var parts = mapping.Split(':', 2);
@@ -41,6 +44,7 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
         var virtualColumns = _mappings.Keys.Where(k => !inputNames.Contains(k)).ToList();
         
         _virtualColumnCount = virtualColumns.Count;
+        _realColumnCount = columns.Count;
         var totalCount = columns.Count + _virtualColumnCount;
 
         // Map names to indices (Inputs + Virtuals)
@@ -58,7 +62,8 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
             {
                 var segments = ParseTemplate(template);
                 var refs = ExtractReferencedColumns(segments);
-                _processors[i] = new ColumnProcessor(i, segments, refs);
+                var refIndices = ResolveReferencedIndices(refs, _columnNameToIndex);
+                _processors[i] = new ColumnProcessor(i, segments, refs, refIndices);
                 targetIndices.Add(i);
             }
         }
@@ -72,7 +77,8 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
             
             var segments = ParseTemplate(template);
             var refs = ExtractReferencedColumns(segments);
-            _processors[idx] = new ColumnProcessor(idx, segments, refs);
+            var refIndices = ResolveReferencedIndices(refs, _columnNameToIndex);
+            _processors[idx] = new ColumnProcessor(idx, segments, refs, refIndices);
             targetIndices.Add(idx);
         }
 
@@ -123,7 +129,29 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
 
         foreach (var idx in _generationOrder)
         {
+            // Skip check based on source columns if SkipNull is enabled
             var proc = _processors![idx];
+            bool shouldSkip = false;
+
+            if (_skipNull && proc.ReferencedIndices.Length > 0)
+            {
+                shouldSkip = true;
+                foreach (var refIdx in proc.ReferencedIndices)
+                {
+                    // If ANY referenced column is NOT null, we do NOT skip
+                    if (row[refIdx] is not null)
+                    {
+                        shouldSkip = false;
+                        break;
+                    }
+                }
+            }
+
+            if (shouldSkip)
+            {
+                row[idx] = null;
+                continue;
+            }
             sb.Clear();
             
             foreach (var segment in proc.Segments)
@@ -265,6 +293,19 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
         return result;
     }
 
+    private static int[] ResolveReferencedIndices(HashSet<string> refs, Dictionary<string, int> nameToIndex)
+    {
+        var indices = new List<int>(refs.Count);
+        foreach (var r in refs)
+        {
+            if (nameToIndex.TryGetValue(r, out var idx))
+            {
+                indices.Add(idx);
+            }
+        }
+        return indices.ToArray();
+    }
+
     // Private helper methods
 
     
@@ -294,11 +335,14 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
         public readonly TemplateSegment[] Segments;
         public readonly HashSet<string> ReferencedColumns;
 
-        public ColumnProcessor(int index, TemplateSegment[] segments, HashSet<string> referencedColumns)
+        public readonly int[] ReferencedIndices;
+
+        public ColumnProcessor(int index, TemplateSegment[] segments, HashSet<string> referencedColumns, int[] referencedIndices)
         {
             Index = index;
             Segments = segments;
             ReferencedColumns = referencedColumns;
+            ReferencedIndices = referencedIndices;
         }
     }
 }

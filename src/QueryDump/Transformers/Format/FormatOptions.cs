@@ -10,4 +10,7 @@ public class FormatOptions : ITransformerOptions
 
     [CliOption("--format", Description = "Target:Template mapping with optional format specifiers (repeatable, e.g. 'DATE_FR:{DATE:dd/MM/yyyy}' or 'FULL:{FIRST} {LAST}')")]
     public IEnumerable<string> Mappings { get; set; } = Array.Empty<string>();
+
+    [CliOption("--format-skip-null", Description = "Skip format when all referenced source columns are null")]
+    public bool SkipNull { get; set; } = false;
 }

@@ -19,6 +19,7 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
     // Deterministic mode fields
     private readonly string? _seedColumn;
     private readonly bool _deterministic;
+    private readonly bool _skipNull;
     private int _seedColumnIndex = -1;
     private long _rowCounter = 0;
     
@@ -43,6 +44,7 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
         _locale = options.Locale;
         _seedColumn = options.SeedColumn;
         _deterministic = options.Deterministic;
+        _skipNull = options.SkipNull;
         
         _faker = options.Seed.HasValue 
             ? new Faker(options.Locale) { Random = new Randomizer(options.Seed.Value) } 
@@ -193,6 +195,12 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
 
             foreach (var colIdx in _generationOrder)
             {
+                // Skip if source is null and SkipNull is enabled (for real columns only)
+                if (_skipNull && colIdx < _realColumnCount && workingRow[colIdx] is null)
+                {
+                    continue;
+                }
+                
                 var processor = _processors[colIdx];
                 if (processor.IsTemplate)
                 {
@@ -213,6 +221,12 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
             // Non-deterministic mode
             foreach (var colIdx in _generationOrder)
             {
+                // Skip if source is null and SkipNull is enabled (for real columns only)
+                if (_skipNull && colIdx < _realColumnCount && workingRow[colIdx] is null)
+                {
+                    continue;
+                }
+                
                 var processor = _processors[colIdx];
                 if (processor.IsTemplate)
                 {

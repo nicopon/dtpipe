@@ -69,6 +69,12 @@ public static class CliOptionBuilder
                 // Set description
                 option.Description = description;
 
+                // Force boolean options to be flags (Arity 0) to prevent consuming next tokens
+                if (underlyingType == typeof(bool))
+                {
+                    option.Arity = ArgumentArity.Zero;
+                }
+
                 // Set default value if not null using DefaultValueFactory
                 if (defaultValue != null)
                 {
@@ -130,6 +136,13 @@ public static class CliOptionBuilder
                 var optionType = typeof(Option<>).MakeGenericType(underlyingType);
                 option = (Option)Activator.CreateInstance(optionType, flagName)!;
                 option.Description = description;
+                
+                // Force boolean options to be flags (Arity 0) to prevent consuming next tokens
+                if (underlyingType == typeof(bool))
+                {
+                    option.Arity = ArgumentArity.Zero;
+                }
+
                 if (defaultValue != null)
                 {
                     SetDefaultValue(option, optionType, underlyingType, defaultValue);
@@ -192,8 +205,8 @@ public static class CliOptionBuilder
             var cliOptionAttr = property.GetCustomAttribute<CliOptionAttribute>();
             var flagName = cliOptionAttr?.Name ?? $"--{prefix}-{property.Name.ToKebabCase()}";
             
+            // Match by Name - System.CommandLine stores the full name including dashes in Name property
             var matchedOption = optionsList.FirstOrDefault(o => o.Name == flagName);
-            // Also check aliases if needed, but Name should suffice as we set it in GenerateOptions
             
             if (matchedOption is not null)
             {
@@ -227,7 +240,9 @@ public static class CliOptionBuilder
                     var typedMethod = genericGetValue.MakeGenericMethod(underlyingType);
                     var value = typedMethod.Invoke(null, new object[] { result, matchedOption });
                     
-                    if (value is not null)
+                    // For value types (bool, int, etc.), always set - they can't be null
+                    // For reference types, only set if not null
+                    if (value is not null || underlyingType.IsValueType)
                     {
                         property.SetValue(instance, value);
                     }

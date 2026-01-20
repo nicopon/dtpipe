@@ -94,6 +94,7 @@ public class FakeDataTransformerFactory : IFakeDataTransformerFactory
         var seedColumn = globalOptions.SeedColumn;
         var deterministic = globalOptions.Deterministic;
         var seed = globalOptions.Seed;
+        var skipNull = globalOptions.SkipNull;
 
         foreach (var (option, value) in configuration)
         {
@@ -117,6 +118,9 @@ public class FakeDataTransformerFactory : IFakeDataTransformerFactory
                     case nameof(FakeOptions.Deterministic):
                         if (bool.TryParse(value, out var d)) deterministic = d;
                         break;
+                    case nameof(FakeOptions.SkipNull):
+                        if (bool.TryParse(value, out var sn)) skipNull = sn;
+                        break;
                 }
             }
             // Unknown options are ignored (could be from --fake-list or other)
@@ -128,7 +132,8 @@ public class FakeDataTransformerFactory : IFakeDataTransformerFactory
             Locale = locale,
             Seed = seed,
             SeedColumn = seedColumn,
-            Deterministic = deterministic
+            Deterministic = deterministic,
+            SkipNull = skipNull
         };
         
         return new FakeDataTransformer(options);

@@ -55,9 +55,13 @@ public class OverwriteDataTransformerFactory(OptionsRegistry registry) : IDataTr
 
     public IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration)
     {
+        // Get config options (like SkipNull) from registry-bound options
+        var registryOptions = _registry.Get<OverwriteOptions>();
+        
         var options = new OverwriteOptions
         {
-            Mappings = [.. configuration.Select(x => x.Value)]
+            Mappings = [.. configuration.Select(x => x.Value)],
+            SkipNull = registryOptions.SkipNull
         };
         return new OverwriteDataTransformer(options);
     }

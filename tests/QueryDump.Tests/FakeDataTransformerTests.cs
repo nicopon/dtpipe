@@ -217,4 +217,25 @@ public class FakeDataTransformerTests
         
         resLower[0][0].Should().NotBe("finance.iban");
     }
+    [Fact]
+    public async Task Transform_ShouldSkipFake_WhenSkipNullEnabled_AndValueIsNull()
+    {
+        // Arrange
+        var options = new FakeOptions { Mappings = new[] { "NAME:name.firstname" }, SkipNull = true, Seed = 123 };
+        var transformer = new FakeDataTransformer(options);
+        var columns = new List<ColumnInfo> { new("NAME", typeof(string), true) };
+        var rows = new List<object?[]> 
+        { 
+            new object?[] { null }, 
+            new object?[] { "Original" } 
+        };
+
+        // Act
+        await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+        var result = rows.Select(r => transformer.Transform(r)).ToList();
+
+        // Assert
+        result[0][0].Should().BeNull("Should not fake null because SkipNull is true");
+        result[1][0].Should().NotBe("Original").And.NotBeNull("Should still fake non-null values");
+    }
 }
