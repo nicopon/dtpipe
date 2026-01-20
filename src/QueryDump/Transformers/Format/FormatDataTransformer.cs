@@ -27,6 +27,8 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
         }
     }
 
+    private int _virtualColumnCount;
+
     public ValueTask<IReadOnlyList<ColumnInfo>> InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
     {
         if (_mappings.Count == 0)
@@ -34,13 +36,22 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
             return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
         }
 
-        // Input columns already include virtual columns from upstream transformers (e.g., Fake)
-        _columnNameToIndex = columns.Select((c, i) => (c.Name, i))
-            .ToDictionary(x => x.Name, x => x.i, StringComparer.OrdinalIgnoreCase);
+        var inputNames = columns.Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // Identify virtual columns (mappings key NOT in input)
+        var virtualColumns = _mappings.Keys.Where(k => !inputNames.Contains(k)).ToList();
         
-        _processors = new ColumnProcessor[columns.Count];
+        _virtualColumnCount = virtualColumns.Count;
+        var totalCount = columns.Count + _virtualColumnCount;
+
+        // Map names to indices (Inputs + Virtuals)
+        _columnNameToIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < columns.Count; i++) _columnNameToIndex[columns[i].Name] = i;
+        for (int i = 0; i < virtualColumns.Count; i++) _columnNameToIndex[virtualColumns[i]] = columns.Count + i;
+        
+        _processors = new ColumnProcessor[totalCount];
         var targetIndices = new List<int>();
 
+        // Register processors for Input columns (Overwrite)
         for (int i = 0; i < columns.Count; i++)
         {
             if (_mappings.TryGetValue(columns[i].Name, out var template))
@@ -51,13 +62,27 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
                 targetIndices.Add(i);
             }
         }
+        
+        // Register processors for Virtual columns (Creation)
+        for (int i = 0; i < virtualColumns.Count; i++)
+        {
+            var name = virtualColumns[i];
+            var template = _mappings[name];
+            var idx = columns.Count + i;
+            
+            var segments = ParseTemplate(template);
+            var refs = ExtractReferencedColumns(segments);
+            _processors[idx] = new ColumnProcessor(idx, segments, refs);
+            targetIndices.Add(idx);
+        }
 
-        // Topological Sort for dependency resolution to determine field generation order.
-        // We only need to sort the target columns.
+        // Topological Sort
         _generationOrder = TopologicalSort(targetIndices, _processors);
 
-        // Update schema: Transformed columns become Strings
-        var newColumns = new List<ColumnInfo>(columns.Count);
+        // Build Output Schema
+        var newColumns = new List<ColumnInfo>(totalCount);
+        
+        // Add Inputs (changed to string if overwritten)
         for (int i = 0; i < columns.Count; i++)
         {
              if (_mappings.ContainsKey(columns[i].Name))
@@ -68,6 +93,12 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
              {
                  newColumns.Add(columns[i]);
              }
+        }
+        
+        // Add Virtuals (always String, assuming nullable for safety)
+        foreach(var name in virtualColumns)
+        {
+            newColumns.Add(new ColumnInfo(name, typeof(string), true));
         }
 
         return new ValueTask<IReadOnlyList<ColumnInfo>>(newColumns);
@@ -80,22 +111,14 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
             return row;
         }
 
-        // Avoid allocation of StringBuilder if possible? 
-        // We use a shared StringBuilder/Buffer? Thread safety valid here?
-        // Method Transform is called serially per row in pipeline (single thread per pipeline stage usually).
-        // BUT ExportService uses parallelism if stages are parallel. 
-        // ExportService.TransformRowsAsync calls pipeline serially.
-        // So we can allocate one StringBuilder per instance potentially?
-        // But let's verify reuse. `FormatDataTransformer` instance is created once.
-        // `Transform` is called in loop.
-        // If we make `_sb` a field, it's not thread safe if `Transform` is called concurrently.
-        // Pipeline seems serial: `foreach (var row in input.ReadAllAsync...` one by one.
-        // So reuse is safe IF strict single thread.
-        // To be safe, local StringBuilder or simple string concat (allocations).
-        // Since we optimize for PERF, let's use `string.Join`/`Concat` on segments logic?
-        // Or `StringBuilder` pool. 
-        // Simple StringBuilder per call is cleaner than Regex. 
-        
+        // Handle resizing for virtual columns
+        if (_virtualColumnCount > 0)
+        {
+            var newRow = new object?[row.Length + _virtualColumnCount];
+            Array.Copy(row, newRow, row.Length);
+            row = newRow;
+        }
+
         var sb = new System.Text.StringBuilder(128); // Small allocation
 
         foreach (var idx in _generationOrder)
@@ -112,23 +135,27 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
                 else
                 {
                     // Column Reference
-                    var val = row[segment.ColumnIndex];
-                    if (val != null)
+                    // Ensure we don't access out of bounds if bad config
+                    if (segment.ColumnIndex < row.Length)
                     {
-                        if (segment.Format != null)
+                        var val = row[segment.ColumnIndex];
+                        if (val != null)
                         {
-                            try 
-                            { 
-                                sb.AppendFormat(System.Globalization.CultureInfo.InvariantCulture, $"{{0:{segment.Format}}}", val);
+                            if (segment.Format != null)
+                            {
+                                try 
+                                { 
+                                    sb.AppendFormat(System.Globalization.CultureInfo.InvariantCulture, $"{{0:{segment.Format}}}", val);
+                                }
+                                catch (FormatException)
+                                {
+                                    sb.Append(val);
+                                }
                             }
-                            catch (FormatException)
+                            else
                             {
                                 sb.Append(val);
                             }
-                        }
-                        else
-                        {
-                            sb.Append(val);
                         }
                     }
                 }
@@ -238,7 +265,8 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
         return result;
     }
 
-    // Removed SubstituteTemplate as it's replaced by loop in Transform
+    // Private helper methods
+
     
     private readonly struct TemplateSegment
     {

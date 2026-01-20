@@ -173,7 +173,7 @@ public class FakeDataTransformerFactory : IFakeDataTransformerFactory
         // Check for --fake-list flag
         if (parseResult.Tokens.Any(t => t.Value == "--fake-list"))
         {
-             // Check value if needed, though presence is usually enough for a bool flag if defined properly
+             // Handle flag if present
              var isFakeList = parseResult.GetValue<bool>("--fake-list");
              if (isFakeList)
              {

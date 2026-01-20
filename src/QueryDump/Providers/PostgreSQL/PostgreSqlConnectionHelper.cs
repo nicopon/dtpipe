@@ -17,13 +17,7 @@ public static class PostgreSqlConnectionHelper
             return true;
         }
 
-        // Heuristic: Npgsql usually uses "Host=" or "Server=" and "Port=" or "User ID="
-        // But to be safe and avoid conflicts (SQL Server uses Server= too), we rely on explicit prefix mostly.
-        // Or if it contains specific PostgreSQL keywords like "searchpath="?
-        // We'll stick to prefix for auto-detection in this tool, or weak heuristic if needed.
-        // NpgsqlBuilder.ConnectionString ? 
-        
-        // Let's support "Host=" AND "Port=" combination as strong indicator?
+        // Heuristic: Match standard Npgsql connection string keywords
         return connectionString.Contains("Host=", StringComparison.OrdinalIgnoreCase) && 
                (connectionString.Contains("Port=", StringComparison.OrdinalIgnoreCase) || connectionString.Contains("User ID=", StringComparison.OrdinalIgnoreCase));
     }

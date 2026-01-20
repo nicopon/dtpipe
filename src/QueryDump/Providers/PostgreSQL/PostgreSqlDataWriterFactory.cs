@@ -10,7 +10,7 @@ public class PostgreSqlDataWriterFactory : BaseCliContributor, IDataWriterFactor
 
     public override string ProviderName => "postgresql-writer";
     public override string Category => "PostgreSQL Writer Options";
-    public string SupportedExtension => ".dump"; // Or .sql? Maybe .dump is safer for binary/text copy.
+    public string SupportedExtension => ".dump";
 
     public bool CanHandle(string connectionString)
     {
