@@ -12,6 +12,9 @@ using QueryDump.Writers;
 using QueryDump.Providers.Oracle;
 using QueryDump.Providers.SqlServer;
 using QueryDump.Providers.DuckDB;
+using QueryDump.Providers.Sqlite;
+using QueryDump.Providers.Csv;
+using QueryDump.Providers.Parquet;
 
 namespace QueryDump;
 
@@ -47,12 +50,16 @@ class Program
         services.AddSingleton<IStreamReaderFactory, OracleReaderFactory>();
         services.AddSingleton<IStreamReaderFactory, SqlServerReaderFactory>();
         services.AddSingleton<IStreamReaderFactory, DuckDbReaderFactory>();
+        services.AddSingleton<IStreamReaderFactory, SqliteReaderFactory>();
+        services.AddSingleton<IStreamReaderFactory, CsvReaderFactory>();
+        services.AddSingleton<IStreamReaderFactory, ParquetReaderFactory>();
         
         // Writer Factories
         services.AddSingleton<IDataWriterFactory, Writers.Csv.CsvWriterFactory>();
         services.AddSingleton<IDataWriterFactory, Writers.Parquet.ParquetWriterFactory>();
         services.AddSingleton<IDataWriterFactory, Providers.DuckDB.DuckDbDataWriterFactory>();
         services.AddSingleton<IDataWriterFactory, Providers.Oracle.OracleDataWriterFactory>();
+        services.AddSingleton<IDataWriterFactory, SqliteDataWriterFactory>();
         
         // Transformer Factories
         services.AddSingleton<IDataTransformerFactory, NullDataTransformerFactory>();

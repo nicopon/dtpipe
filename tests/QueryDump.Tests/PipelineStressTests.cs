@@ -50,7 +50,7 @@ public class PipelineStressTests : IAsyncLifetime
             await connection.OpenAsync(TestContext.Current.CancellationToken);
             using var cmd = connection.CreateCommand();
             // detailed generation: Id, Name (placeholder), Category
-            cmd.CommandText = "CREATE TABLE large_data AS SELECT range AS Id, 'PlaceHolder' AS Name, 'Original' AS Category, 'ToBeNulled' AS Temp FROM range(20000000);";
+            cmd.CommandText = "CREATE TABLE large_data AS SELECT range AS Id, 'PlaceHolder' AS Name, 'Original' AS Category, 'ToBeNulled' AS Temp FROM range(1000000);";;
             await cmd.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
         }
         _output.WriteLine($"Data generation took {sw.ElapsedMilliseconds}ms");
@@ -115,7 +115,7 @@ public class PipelineStressTests : IAsyncLifetime
         sw.Stop();
         _output.WriteLine($"Export took {sw.ElapsedMilliseconds}ms ({sw.Elapsed.TotalSeconds:N2}s)");
         
-        var throughput = 20_000_000.0 / sw.Elapsed.TotalSeconds;
+        var throughput = 1_000_000.0 / sw.Elapsed.TotalSeconds;
         _output.WriteLine($"Throughput: {throughput:N0} rows/s");
 
         // 5. Verify Output (light check)

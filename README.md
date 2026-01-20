@@ -38,10 +38,13 @@ Use `--input` (or `-i`) with a prefixed connection string:
 | Prefix | Provider | Example |
 |--------|----------|---------|
 | `duckdb:` | DuckDB | `duckdb:mydata.db` |
+| `sqlite:` | SQLite | `sqlite:local.sqlite` |
 | `oracle:` | Oracle | `oracle:Data Source=...;User Id=...` |
 | `mssql:` | SQL Server | `mssql:Server=...;Database=...` |
+| `csv:` | CSV File | `csv:data.csv` or `data.csv` |
+| `parquet:` | Parquet File | `parquet:data.parquet` or `data.parquet` |
 
-The provider is auto-detected from the prefix. File extensions `.db` and `.duckdb` are also recognized for DuckDB.
+The provider is auto-detected from the prefix or file extension (`.db`, `.duckdb`, `.sqlite`, `.sqlite3`, `.csv`, `.parquet`).
 
 ### Output Destinations
 
@@ -54,6 +57,7 @@ Use `--output` (or `-o`) with either:
 **Database connection** (prefixed):
 ```bash
 --output "duckdb:target.db"
+--output "sqlite:target.sqlite"
 --output "oracle:User/Pass@TargetDB"
 ```
 
@@ -63,6 +67,8 @@ Use `--output` (or `-o`) with either:
 |--------|-------------|---------|
 | `--duckdb-writer-table` | Target table name | `Export` |
 | `--duckdb-writer-strategy` | `Append`, `Truncate`, `Recreate` | `Append` |
+| `--sqlite-table` | Target table name | `Export` |
+| `--sqlite-strategy` | `Append`, `Truncate`, `Recreate` | `Append` |
 | `--oracle-writer-table` | Target table name | `EXPORT_DATA` |
 | `--oracle-writer-strategy` | `Append`, `Truncate`, `Recreate` | `Append` |
 | `--oracle-writer-bulk-size` | Bulk copy batch size | `5000` |

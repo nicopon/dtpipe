@@ -22,6 +22,7 @@
     <PackageReference Include="DuckDB.NativeBinaries" Version="1.4.2" />
     <PackageReference Include="DuckDB.NET.Data" Version="1.4.3" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.4" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.2" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.2" />
     <PackageReference Include="Microsoft.IO.RecyclableMemoryStream" Version="3.0.1" />
     <PackageReference Include="Oracle.ManagedDataAccess.Core" Version="23.26.0" />
