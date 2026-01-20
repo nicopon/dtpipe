@@ -1,11 +1,8 @@
 using System.CommandLine;
-using System.CommandLine.Parsing;
 using Microsoft.Extensions.DependencyInjection;
-using QueryDump.Cli;
 using QueryDump.Configuration;
 using QueryDump.Core;
 using QueryDump.Core.Options;
-using QueryDump.Writers;
 
 namespace QueryDump.Cli;
 
@@ -35,7 +32,7 @@ public class CliService
         // Core Options
         var inputOption = new Option<string?>("--input") { Description = "Input connection string or file path" };
         var queryOption = new Option<string?>("--query") { Description = "SQL query to execute (SELECT only)" };
-        var outputOption = new Option<string?>("--output") { Description = "Output file path (.parquet or .csv)" };
+        var outputOption = new Option<string?>("--output") { Description = "Output file path or connection string" };
         var connectionTimeoutOption = new Option<int>("--connection-timeout") { Description = "Connection timeout in seconds", DefaultValueFactory = _ => 10 };
         var queryTimeoutOption = new Option<int>("--query-timeout") { Description = "Query timeout in seconds (0 = no timeout)", DefaultValueFactory = _ => 0 };
         var batchSizeOption = new Option<int>("--batch-size") { Description = "Rows per output batch", DefaultValueFactory = _ => 50_000 };
