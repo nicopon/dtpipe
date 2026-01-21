@@ -37,7 +37,7 @@ public class CliService
         var queryTimeoutOption = new Option<int>("--query-timeout") { Description = "Query timeout in seconds (0 = no timeout)", DefaultValueFactory = _ => 0 };
         var batchSizeOption = new Option<int>("--batch-size") { Description = "Rows per output batch", DefaultValueFactory = _ => 50_000 };
         var unsafeQueryOption = new Option<bool>("--unsafe-query") { Description = "Bypass SQL query validation (allows DDL/DML - use with caution!)", DefaultValueFactory = _ => false };
-        var dryRunOption = new Option<bool>("--dry-run") { Description = "Display query schema without exporting data", DefaultValueFactory = _ => false };
+        var dryRunOption = new Option<int>("--dry-run") { Description = "Dry-run mode: display pipeline trace analysis (N = sample count, default 1)", DefaultValueFactory = _ => 0, Arity = ArgumentArity.ZeroOrOne };
         var limitOption = new Option<int>("--limit") { Description = "Maximum rows to export (0 = unlimited)", DefaultValueFactory = _ => 0 };
         var jobOption = new Option<string?>("--job") { Description = "Path to YAML job file" };
         var exportJobOption = new Option<string?>("--export-job") { Description = "Export current configuration to YAML file and exit" };
@@ -87,7 +87,8 @@ public class CliService
                 // CLI args can override execution-time parameters only
                     // (dry-run and limit are not part of job definition, they're execution parameters)
                     if (parseResult.GetValue(limitOption) > 0) job = job with { Limit = parseResult.GetValue(limitOption) };
-                    if (parseResult.GetValue(dryRunOption)) job = job with { DryRun = true };
+                    var dryRunVal = ParseDryRunFromArgs(Environment.GetCommandLineArgs());
+                    if (dryRunVal > 0) job = job with { DryRun = true };
                 }
                 catch (Exception ex)
                 {
@@ -129,7 +130,7 @@ public class CliService
                     QueryTimeout = parseResult.GetValue(queryTimeoutOption),
                     BatchSize = parseResult.GetValue(batchSizeOption),
                     UnsafeQuery = parseResult.GetValue(unsafeQueryOption),
-                    DryRun = parseResult.GetValue(dryRunOption),
+                    DryRun = false, // DryRun parsed separately for custom handling
                     Limit = parseResult.GetValue(limitOption)
                 };
             }
@@ -191,7 +192,7 @@ public class CliService
                 QueryTimeout = job.QueryTimeout,
                 BatchSize = job.BatchSize,
                 UnsafeQuery = job.UnsafeQuery,
-                DryRun = job.DryRun,
+                DryRunCount = ParseDryRunFromArgs(Environment.GetCommandLineArgs()),
                 Limit = job.Limit
             };
 
@@ -411,5 +412,27 @@ public class CliService
         }
 
         return configs.Count > 0 ? configs : null;
+    }
+
+    /// <summary>
+    /// Custom parser for --dry-run with optional int value.
+    /// --dry-run alone = 1, --dry-run N = N, no flag = 0.
+    /// </summary>
+    private static int ParseDryRunFromArgs(string[] args)
+    {
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (args[i] == "--dry-run")
+            {
+                // Check if next arg is a number
+                if (i + 1 < args.Length && int.TryParse(args[i + 1], out var count) && count > 0)
+                {
+                    return count;
+                }
+                // No number follows = default to 1 sample
+                return 1;
+            }
+        }
+        return 0;
     }
 }
