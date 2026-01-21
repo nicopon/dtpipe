@@ -31,9 +31,10 @@ public sealed record DumpOptions
 
     // --- Validation Options ---
     /// <summary>
-    /// If true, only displays the query schema without exporting data.
+    /// Number of sample rows to collect for dry-run trace analysis.
+    /// 0 = disabled, 1+ = sample count.
     /// </summary>
-    public bool DryRun { get; init; } = false;
+    public int DryRunCount { get; init; } = 0;
 
     /// <summary>
     /// Maximum number of rows to export. 0 = unlimited.
