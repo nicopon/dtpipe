@@ -4,7 +4,7 @@ using Parquet.Data;
 using Parquet.Schema;
 using QueryDump.Core;
 using QueryDump.Core.Options;
-using QueryDump.Providers.Parquet;
+using QueryDump.Adapters.Parquet;
 using Xunit;
 
 namespace QueryDump.Tests;

@@ -4,7 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using QueryDump.Configuration;
 using QueryDump.Core;
 using QueryDump.Core.Options;
-using QueryDump.Providers.Sqlite;
+using QueryDump.Adapters.Sqlite;
 using Xunit;
 
 namespace QueryDump.Tests;

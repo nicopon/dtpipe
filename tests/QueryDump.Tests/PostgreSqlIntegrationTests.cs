@@ -1,12 +1,13 @@
 using Testcontainers.PostgreSql;
 using Xunit;
 using Npgsql;
-using QueryDump.Providers.PostgreSQL;
+using QueryDump.Adapters.PostgreSQL;
 using QueryDump.Tests.Helpers;
 
 namespace QueryDump.Tests;
 
 [Trait("Category", "Integration")]
+[Collection("Docker Integration Tests")]
 public class PostgreSqlIntegrationTests : IAsyncLifetime
 {
     private PostgreSqlContainer? _postgres;
@@ -93,7 +94,7 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
         var options = new PostgreSqlWriterOptions 
         { 
             Table = targetTable, 
-            Strategy = PostgreSqlWriteStrategy.Recreate 
+            Strategy = PostgreSqlWriteStrategy.Truncate 
         };
         
         // Prepare Data

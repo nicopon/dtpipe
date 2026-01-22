@@ -1,6 +1,6 @@
 using DuckDB.NET.Data;
 using FluentAssertions;
-using QueryDump.Providers.DuckDB;
+using QueryDump.Adapters.DuckDB;
 using QueryDump.Tests.Helpers;
 using Xunit;
 

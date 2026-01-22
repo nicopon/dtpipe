@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using QueryDump.Core;
 using QueryDump.Configuration;
 using QueryDump.Core.Options;
-using QueryDump.Providers.DuckDB;
+using QueryDump.Adapters.DuckDB;
 using Xunit;
 using ColumnInfo = QueryDump.Core.ColumnInfo;
 

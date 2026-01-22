@@ -6,13 +6,13 @@ using QueryDump.Transformers.Format;
 using QueryDump.Transformers.Fake;
 using QueryDump.Transformers.Null;
 using QueryDump.Transformers.Overwrite;
-using QueryDump.Providers.Oracle;
-using QueryDump.Providers.SqlServer;
-using QueryDump.Providers.DuckDB;
-using QueryDump.Providers.Sqlite;
-using QueryDump.Providers.Csv;
-using QueryDump.Providers.Parquet;
-using QueryDump.Providers.PostgreSQL;
+using QueryDump.Adapters.Oracle;
+using QueryDump.Adapters.SqlServer;
+using QueryDump.Adapters.DuckDB;
+using QueryDump.Adapters.Sqlite;
+using QueryDump.Adapters.Csv;
+using QueryDump.Adapters.Parquet;
+using QueryDump.Adapters.PostgreSQL;
 
 namespace QueryDump;
 
@@ -66,10 +66,10 @@ class Program
         services.AddSingleton<IStreamReaderFactory, ParquetReaderFactory>();
         
         // Writer Factories
-        services.AddSingleton<IDataWriterFactory, Writers.Csv.CsvWriterFactory>();
-        services.AddSingleton<IDataWriterFactory, Writers.Parquet.ParquetWriterFactory>();
-        services.AddSingleton<IDataWriterFactory, Providers.DuckDB.DuckDbDataWriterFactory>();
-        services.AddSingleton<IDataWriterFactory, Providers.Oracle.OracleDataWriterFactory>();
+        services.AddSingleton<IDataWriterFactory, Adapters.Csv.CsvWriterFactory>();
+        services.AddSingleton<IDataWriterFactory, Adapters.Parquet.ParquetWriterFactory>();
+        services.AddSingleton<IDataWriterFactory, Adapters.DuckDB.DuckDbDataWriterFactory>();
+        services.AddSingleton<IDataWriterFactory, Adapters.Oracle.OracleDataWriterFactory>();
         services.AddSingleton<IDataWriterFactory, PostgreSqlDataWriterFactory>();
         services.AddSingleton<IDataWriterFactory, SqliteDataWriterFactory>();
         

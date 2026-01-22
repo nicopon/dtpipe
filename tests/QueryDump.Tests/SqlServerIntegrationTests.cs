@@ -1,9 +1,9 @@
 using Testcontainers.MsSql;
 using Xunit;
 using Microsoft.Data.SqlClient;
-using QueryDump.Providers.SqlServer;
-using QueryDump.Writers;
-using QueryDump.Writers.Parquet;
+using QueryDump.Adapters.SqlServer;
+using QueryDump.Adapters;
+using QueryDump.Adapters.Parquet;
 using QueryDump.Tests.Helpers;
 
 namespace QueryDump.Tests;
@@ -12,6 +12,7 @@ namespace QueryDump.Tests;
 /// Integration tests using SQL Server Testcontainers.
 /// </summary>
 [Trait("Category", "Integration")]
+[Collection("Docker Integration Tests")]
 public class SqlServerIntegrationTests : IAsyncLifetime
 {
     private MsSqlContainer? _sqlServer;

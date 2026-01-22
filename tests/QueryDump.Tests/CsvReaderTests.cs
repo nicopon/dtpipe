@@ -1,7 +1,7 @@
 using FluentAssertions;
 using QueryDump.Core;
 using QueryDump.Core.Options;
-using QueryDump.Providers.Csv;
+using QueryDump.Adapters.Csv;
 using Xunit;
 
 namespace QueryDump.Tests;
