@@ -1,17 +1,19 @@
 using DuckDB.NET.Data;
-using QueryDump.Core;
+using QueryDump.Core.Abstractions;
+using QueryDump.Cli.Abstractions;
+using QueryDump.Core.Models;
 using QueryDump.Core.Options;
 using System.Text;
-using ColumnInfo = QueryDump.Core.ColumnInfo;
+using ColumnInfo = QueryDump.Core.Models.ColumnInfo;
 
 namespace QueryDump.Adapters.DuckDB;
 
-public sealed class DuckDbDataWriter : IDataWriter
+public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
 {
     private readonly string _connectionString;
     private readonly DuckDBConnection _connection;
     private readonly DuckDbWriterOptions _options;
-    private IReadOnlyList<QueryDump.Core.ColumnInfo>? _columns;
+    private IReadOnlyList<ColumnInfo>? _columns;
 
     public long BytesWritten => 0; 
 
@@ -22,7 +24,116 @@ public sealed class DuckDbDataWriter : IDataWriter
         _connection = new DuckDBConnection(connectionString);
     }
 
-    public async ValueTask InitializeAsync(IReadOnlyList<QueryDump.Core.ColumnInfo> columns, CancellationToken ct = default)
+    #region ISchemaInspector Implementation
+
+    public async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
+    {
+        await using var connection = new DuckDBConnection(_connectionString);
+        await connection.OpenAsync(ct);
+
+        var tableName = _options.Table;
+
+        // Check if table exists
+        using var existsCmd = connection.CreateCommand();
+        existsCmd.CommandText = $"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{tableName}'";
+        var exists = Convert.ToInt32(await existsCmd.ExecuteScalarAsync(ct)) > 0;
+        
+        if (!exists)
+        {
+            return new TargetSchemaInfo([], false, null, null, null);
+        }
+
+        // Get columns from information_schema
+        var columnsSql = $@"
+            SELECT 
+                column_name,
+                data_type,
+                is_nullable
+            FROM information_schema.columns 
+            WHERE table_name = '{tableName}'
+            ORDER BY ordinal_position";
+        
+        using var columnsCmd = connection.CreateCommand();
+        columnsCmd.CommandText = columnsSql;
+
+        // Get row count
+        long? rowCount = null;
+        try
+        {
+            using var countCmd = connection.CreateCommand();
+            countCmd.CommandText = $"SELECT COUNT(*) FROM {tableName}";
+            var countResult = await countCmd.ExecuteScalarAsync(ct);
+            rowCount = countResult == null ? null : Convert.ToInt64(countResult);
+        }
+        catch { /* Row count not available */ }
+
+        // DuckDB doesn't have easy access to PK/UNIQUE constraints via SQL
+        // We'll return empty sets for now
+        var pkColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var uniqueColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Build column list
+        var columns = new List<TargetColumnInfo>();
+        using var reader = await columnsCmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var colName = reader.GetString(0);
+            var dataType = reader.GetString(1);
+            var isNullable = reader.GetString(2) == "YES";
+
+            columns.Add(new TargetColumnInfo(
+                colName,
+                dataType.ToUpperInvariant(),
+                MapDuckDbToClr(dataType),
+                isNullable,
+                pkColumns.Contains(colName),
+                uniqueColumns.Contains(colName),
+                null // DuckDB doesn't expose max length easily
+            ));
+        }
+
+        return new TargetSchemaInfo(
+            columns,
+            true,
+            rowCount,
+            null, // DuckDB doesn't expose table size easily
+            pkColumns.Count > 0 ? pkColumns.ToList() : null
+        );
+    }
+
+    private static Type? MapDuckDbToClr(string dataType)
+    {
+        // Handle parameterized types like DECIMAL(10,2) or VARCHAR(50)
+        var baseType = dataType.Split('(')[0].Trim().ToUpperInvariant();
+
+        return baseType switch
+        {
+            "TINYINT" => typeof(byte),
+            "SMALLINT" => typeof(short),
+            "INTEGER" or "INT" => typeof(int),
+            "BIGINT" => typeof(long),
+            "HUGEINT" => typeof(decimal),
+            "FLOAT" or "REAL" => typeof(float),
+            "DOUBLE" => typeof(double),
+            "DECIMAL" or "NUMERIC" => typeof(decimal),
+            "BOOLEAN" => typeof(bool),
+            "VARCHAR" or "TEXT" or "STRING" => typeof(string),
+            "DATE" => typeof(DateTime),
+            "TIME" => typeof(TimeSpan),
+            "TIMESTAMP" or "DATETIME" => typeof(DateTime),
+            "TIMESTAMPTZ" => typeof(DateTimeOffset),
+            "UUID" => typeof(Guid),
+            "BLOB" or "BYTEA" => typeof(byte[]),
+            _ => typeof(string)
+        };
+    }
+
+    #endregion
+
+
+    private IDisposable? _appender;
+
+    public async ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
     {
         _columns = columns;
         await _connection.OpenAsync(ct);
@@ -52,33 +163,37 @@ public sealed class DuckDbDataWriter : IDataWriter
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = createTableSql;
         await cmd.ExecuteNonQueryAsync(ct);
+
+        _appender = _connection.CreateAppender(_options.Table);
     }
 
     public async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
     {
-        if (_columns is null) throw new InvalidOperationException("Not initialized");
+        if (_columns is null || _appender is null) throw new InvalidOperationException("Not initialized");
 
-        using var appender = _connection.CreateAppender(_options.Table);
-        
-        foreach (var rowData in rows)
+        await Task.Run(() =>
         {
-            var row = appender.CreateRow();
-            for (int i = 0; i < rowData.Length; i++)
+            var appender = (DuckDBAppender)_appender;
+            foreach (var rowData in rows)
             {
-                var val = rowData[i];
-                var col = _columns[i];
-                
-                if (val is null)
+                var row = appender.CreateRow();
+                for (int i = 0; i < rowData.Length; i++)
                 {
-                    row.AppendNullValue();
+                    var val = rowData[i];
+                    var col = _columns[i];
+                    
+                    if (val is null)
+                    {
+                        row.AppendNullValue();
+                    }
+                    else
+                    {
+                        AppendValue(row, val, col.ClrType);
+                    }
                 }
-                else
-                {
-                    AppendValue(row, val, col.ClrType);
-                }
+                row.EndRow();
             }
-            row.EndRow();
-        }
+        }, ct);
     }
 
     private void AppendValue(IDuckDBAppenderRow row, object val, Type type)
@@ -102,15 +217,18 @@ public sealed class DuckDbDataWriter : IDataWriter
 
     public ValueTask CompleteAsync(CancellationToken ct = default)
     {
+        _appender?.Dispose();
+        _appender = null;
         return ValueTask.CompletedTask;
     }
 
     public async ValueTask DisposeAsync()
     {
+        _appender?.Dispose();
         await _connection.DisposeAsync();
     }
 
-    private string BuildCreateTableSql(string tableName, IReadOnlyList<QueryDump.Core.ColumnInfo> columns)
+    private string BuildCreateTableSql(string tableName, IReadOnlyList<ColumnInfo> columns)
     {
         var sb = new StringBuilder();
         sb.Append($"CREATE TABLE IF NOT EXISTS {tableName} (");

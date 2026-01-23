@@ -1,7 +1,9 @@
 using System.Data;
 using System.Runtime.CompilerServices;
 using Npgsql;
-using QueryDump.Core;
+using QueryDump.Core.Abstractions;
+using QueryDump.Cli.Abstractions;
+using QueryDump.Core.Models;
 
 namespace QueryDump.Adapters.PostgreSQL;
 

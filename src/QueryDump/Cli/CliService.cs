@@ -1,8 +1,13 @@
 using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
 using QueryDump.Configuration;
-using QueryDump.Core;
+using QueryDump.Core.Abstractions;
+using QueryDump.Cli.Abstractions;
+using QueryDump.Core.Models;
 using QueryDump.Core.Options;
+using QueryDump.Core.Pipelines;
+using QueryDump.Core.Validation;
+using Serilog;
 
 namespace QueryDump.Cli;
 
@@ -20,10 +25,11 @@ public class CliService
         _serviceProvider = serviceProvider;
         
         // Aggregate all contributors
+        // Aggregate all contributors
         var list = new List<ICliContributor>();
-        list.AddRange(readerFactories);
-        list.AddRange(transformerFactories);
-        list.AddRange(writerFactories);
+        list.AddRange(readerFactories.OfType<ICliContributor>());
+        list.AddRange(transformerFactories.OfType<ICliContributor>());
+        list.AddRange(writerFactories.OfType<ICliContributor>());
         _contributors = list;
     }
 
@@ -41,9 +47,10 @@ public class CliService
         var limitOption = new Option<int>("--limit") { Description = "Maximum rows to export (0 = unlimited)", DefaultValueFactory = _ => 0 };
         var jobOption = new Option<string?>("--job") { Description = "Path to YAML job file" };
         var exportJobOption = new Option<string?>("--export-job") { Description = "Export current configuration to YAML file and exit" };
+        var logOption = new Option<string?>("--log") { Description = "Path to log file" };
         
         // Core Help Options
-        var coreOptions = new List<Option> { inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption, unsafeQueryOption, dryRunOption, limitOption, jobOption, exportJobOption };
+        var coreOptions = new List<Option> { inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption, unsafeQueryOption, dryRunOption, limitOption, jobOption, exportJobOption, logOption };
 
         var rootCommand = new RootCommand("QueryDump - Export database data to Parquet or CSV (DuckDB-optimized)");
         foreach(var opt in coreOptions) rootCommand.Options.Add(opt);
@@ -87,8 +94,12 @@ public class CliService
                 // CLI args can override execution-time parameters only
                     // (dry-run and limit are not part of job definition, they're execution parameters)
                     if (parseResult.GetValue(limitOption) > 0) job = job with { Limit = parseResult.GetValue(limitOption) };
+                    if (parseResult.GetValue(limitOption) > 0) job = job with { Limit = parseResult.GetValue(limitOption) };
                     var dryRunVal = ParseDryRunFromArgs(Environment.GetCommandLineArgs());
                     if (dryRunVal > 0) job = job with { DryRun = true };
+                    
+                    var logPathOverride = parseResult.GetValue(logOption);
+                    if (!string.IsNullOrEmpty(logPathOverride)) job = job with { LogPath = logPathOverride };
                 }
                 catch (Exception ex)
                 {
@@ -131,7 +142,8 @@ public class CliService
                     BatchSize = parseResult.GetValue(batchSizeOption),
                     UnsafeQuery = parseResult.GetValue(unsafeQueryOption),
                     DryRun = false, // DryRun parsed separately for custom handling
-                    Limit = parseResult.GetValue(limitOption)
+                    Limit = parseResult.GetValue(limitOption),
+                    LogPath = parseResult.GetValue(logOption)
                 };
             }
 
@@ -154,23 +166,21 @@ public class CliService
                 contributor.BindOptions(parseResult, registry);
             }
 
-            // 4. Resolve Provider from job.Input
+            // Resolve Input (Reader)
             var readerFactories = _contributors.OfType<IStreamReaderFactory>().ToList();
-
-            // Auto-detect provider
-            var detectedFactory = readerFactories.FirstOrDefault(f => f.CanHandle(job.Input));
+            var (readerFactory, cleanedInput) = ResolveFactory(readerFactories, job.Input, "reader");
             
-            if (detectedFactory == null)
-            {
-                 Console.Error.WriteLine($"Error: Could not detect provider for input: '{job.Input}'.");
-                 Console.Error.WriteLine("Please use a known prefix (e.g. 'duckdb:', 'oracle:', 'mssql:').");
-                 return 1;
-            }
+            job = job with { Input = cleanedInput };
             
-            var provider = detectedFactory.ProviderName;
-            Console.WriteLine($"Auto-detected provider: {provider}");
+            Console.WriteLine($"Auto-detected input source: {readerFactory.ProviderName}");
 
-            // 5. Validate SQL query for safety
+            // Resolve Output (Writer)
+            var writerFactories = _contributors.OfType<IDataWriterFactory>().ToList();
+            var (writerFactory, cleanedOutput) = ResolveFactory(writerFactories, job.Output, "writer");
+            
+            job = job with { Output = cleanedOutput };
+
+            // Validate SQL query
             try
             {
                 SqlQueryValidator.Validate(job.Query, job.UnsafeQuery);
@@ -181,10 +191,10 @@ public class CliService
                 return 1;
             }
 
-            // 6. Build DumpOptions from JobDefinition
+            // Build DumpOptions
             var options = new DumpOptions
             {
-                Provider = provider,
+                Provider = readerFactory.ProviderName,
                 ConnectionString = job.Input,
                 Query = job.Query,
                 OutputPath = job.Output,
@@ -193,12 +203,12 @@ public class CliService
                 BatchSize = job.BatchSize,
                 UnsafeQuery = job.UnsafeQuery,
                 DryRunCount = ParseDryRunFromArgs(Environment.GetCommandLineArgs()),
-                Limit = job.Limit
+                Limit = job.Limit,
+                LogPath = job.LogPath
             };
 
             var exportService = _serviceProvider.GetRequiredService<ExportService>();
             
-            // Build transformer pipeline: from YAML if present, otherwise from CLI args
             var transformerFactories = _contributors.OfType<IDataTransformerFactory>().ToList();
             List<IDataTransformer> pipeline;
             
@@ -208,13 +218,21 @@ public class CliService
             }
             else
             {
+                if (!string.IsNullOrEmpty(options.LogPath))
+                {
+                    Serilog.Log.Logger = new Serilog.LoggerConfiguration()
+                        .MinimumLevel.Debug()
+                        .WriteTo.File(options.LogPath)
+                        .CreateLogger();
+                }
+
                 var pipelineBuilder = new TransformerPipelineBuilder(transformerFactories);
                 pipeline = pipelineBuilder.Build(Environment.GetCommandLineArgs());
             }
             
              try
             {
-                await exportService.RunExportAsync(options, cancellationToken, pipeline);
+                await exportService.RunExportAsync(options, cancellationToken, pipeline, readerFactory, writerFactory);
                 return 0;
             }
             catch (Exception ex)
@@ -324,12 +342,15 @@ public class CliService
         var optionToFactory = new Dictionary<string, IDataTransformerFactory>(StringComparer.OrdinalIgnoreCase);
         foreach (var factory in factories)
         {
-            foreach (var option in factory.GetCliOptions())
+            if (factory is ICliContributor contributor)
             {
-                if (!string.IsNullOrEmpty(option.Name))
-                    optionToFactory[option.Name] = factory;
-                foreach (var alias in option.Aliases)
-                    optionToFactory[alias] = factory;
+                foreach (var option in contributor.GetCliOptions())
+                {
+                    if (!string.IsNullOrEmpty(option.Name))
+                        optionToFactory[option.Name] = factory;
+                    foreach (var alias in option.Aliases)
+                        optionToFactory[alias] = factory;
+                }
             }
         }
 
@@ -434,5 +455,34 @@ public class CliService
             }
         }
         return 0;
+    }
+
+    /// <summary>
+    /// Resolves the appropriate factory for a given connection string or file path.
+    /// Supports deterministic resolution via "prefix:" and fallback to CanHandle().
+    /// Returns the factory and the (potentially cleaned) connection string.
+    /// </summary>
+    private static (T Factory, string CleanedString) ResolveFactory<T>(IEnumerable<T> factories, string rawString, string typeName) where T : IDataFactory
+    {
+        // 1. Deterministic Prefix Check
+        foreach (var factory in factories)
+        {
+            var prefix = factory.ProviderName + ":";
+            if (rawString.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                // Strip prefix
+                var cleaned = rawString.Substring(prefix.Length);
+                return (factory, cleaned);
+            }
+        }
+
+        // 2. Fallback to CanHandle
+        var detected = factories.FirstOrDefault(f => f.CanHandle(rawString));
+        if (detected != null)
+        {
+            return (detected, rawString);
+        }
+
+        throw new InvalidOperationException($"Could not detect {typeName} provider for '{rawString}'. Please use a known prefix (e.g. 'duckdb:', 'oracle:') or file extension.");
     }
 }

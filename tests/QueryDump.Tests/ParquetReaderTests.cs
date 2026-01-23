@@ -2,9 +2,12 @@ using FluentAssertions;
 using Parquet;
 using Parquet.Data;
 using Parquet.Schema;
-using QueryDump.Core;
+using QueryDump.Core.Abstractions;
+using QueryDump.Core.Models;
+using QueryDump.Cli.Abstractions;
 using QueryDump.Core.Options;
 using QueryDump.Adapters.Parquet;
+using QueryDump.Cli.Infrastructure;
 using Xunit;
 
 namespace QueryDump.Tests;
@@ -94,7 +97,7 @@ public class ParquetReaderTests : IAsyncLifetime
     public void ParquetReaderFactory_ShouldDetectParquetFiles()
     {
         var registry = new OptionsRegistry();
-        var factory = new ParquetReaderFactory(registry);
+        var factory = new CliStreamReaderFactory(new ParquetReaderDescriptor(), registry, null!);
 
         factory.CanHandle("parquet:data.parquet").Should().BeTrue();
         factory.CanHandle("data.parquet").Should().BeTrue();

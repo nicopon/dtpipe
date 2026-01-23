@@ -3,7 +3,9 @@ using System.CommandLine.Parsing;
 using System.Linq;
 using QueryDump.Cli;
 using QueryDump.Configuration;
-using QueryDump.Core;
+using QueryDump.Core.Abstractions;
+using QueryDump.Cli.Abstractions;
+using QueryDump.Core.Models;
 using QueryDump.Core.Options;
 
 namespace QueryDump.Transformers.Fake;

@@ -1,8 +1,11 @@
+using QueryDump.Core.Pipelines;
 using System.CommandLine;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
-using QueryDump.Core;
+using QueryDump.Core.Abstractions;
+using QueryDump.Core.Models;
+using QueryDump.Cli.Abstractions;
 using QueryDump.Core.Options;
 using QueryDump.Transformers.Fake;
 using QueryDump.Transformers.Format;
@@ -45,16 +48,13 @@ public class OrderedPipelineTests
 
     private void SetupFactory<T>(Mock<T> mock, string mainAlias, params string[] aliases) where T : class, IDataTransformerFactory
     {
-        // For testing purposes, we only strictly need the alias used in the test arguments.
-        // System.CommandLine 2.0.2 Option<T> constructor with string[] aliases seems elusive or I'm missing something.
-        // Since we don't use the aliases (e.g. -f) in the test cases, we can just register the main one.
         var option = new Option<string>(mainAlias);
         
-        // If we really needed aliases, we would need to find the correct way to add them (e.g. option.AddAlias() if available, 
-        // or check correct constructor signature). 
-        // But preventing build failure is priority.
+        // Since IDataTransformerFactory no longer inherits ICliContributor (Refactoring Prop 1),
+        // we need to mock the intersection IDataTransformerFactory + ICliContributor.
+        // Moq's As<TInterface>() allows us to add an interface implementation to the mock.
         
-        mock.Setup(f => f.GetCliOptions()).Returns(new List<Option> { option });
+        mock.As<ICliContributor>().Setup(f => f.GetCliOptions()).Returns(new List<Option> { option });
     }
 
     [Fact]
@@ -152,7 +152,7 @@ public class OrderedPipelineTests
         var skipNullOption = new Option<bool>("--skip-null") { Arity = ArgumentArity.Zero };
         var fakeOption = new Option<string>("--fake");
         
-        _fakeFactory.Setup(f => f.GetCliOptions()).Returns(new List<Option> { fakeOption, skipNullOption });
+        _fakeFactory.As<ICliContributor>().Setup(f => f.GetCliOptions()).Returns(new List<Option> { fakeOption, skipNullOption });
 
         var args = new[]
         {

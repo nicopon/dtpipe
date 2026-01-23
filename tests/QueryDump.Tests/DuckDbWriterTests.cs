@@ -2,26 +2,32 @@ using System.Data;
 using DuckDB.NET.Data;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
-using QueryDump.Core;
+using QueryDump.Core.Abstractions;
+using QueryDump.Core.Models;
+using QueryDump.Cli.Abstractions;
 using QueryDump.Configuration;
 using QueryDump.Core.Options;
 using QueryDump.Adapters.DuckDB;
 using Xunit;
-using ColumnInfo = QueryDump.Core.ColumnInfo;
+using ColumnInfo = QueryDump.Core.Models.ColumnInfo;
+
+using QueryDump.Cli.Infrastructure;
 
 namespace QueryDump.Tests;
 
 public class DuckDbWriterTests : IAsyncLifetime
 {
     private readonly string _outputPath;
-    private readonly DuckDbDataWriterFactory _factory;
+    private readonly CliDataWriterFactory _factory;
     private readonly OptionsRegistry _registry;
 
     public DuckDbWriterTests()
     {
         _outputPath = Path.GetTempFileName() + ".duckdb";
         _registry = new OptionsRegistry();
-        _factory = new DuckDbDataWriterFactory(_registry);
+        var serviceProvider = new ServiceCollection().BuildServiceProvider(); // Dummy SP
+        var descriptor = new DuckDbWriterDescriptor();
+        _factory = new CliDataWriterFactory(descriptor, _registry, serviceProvider);
     }
 
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;

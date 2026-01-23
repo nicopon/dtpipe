@@ -55,6 +55,11 @@ public record JobDefinition
     /// Transformer configurations from YAML.
     /// </summary>
     public List<TransformerConfig>? Transformers { get; init; }
+
+    /// <summary>
+    /// Path to the log file.
+    /// </summary>
+    public string? LogPath { get; init; }
 }
 
 /// <summary>

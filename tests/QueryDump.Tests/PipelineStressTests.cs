@@ -1,8 +1,11 @@
+using QueryDump.Core.Pipelines;
 using System.Diagnostics;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using QueryDump.Configuration;
-using QueryDump.Core;
+using QueryDump.Core.Abstractions;
+using QueryDump.Core.Models;
+using QueryDump.Cli.Abstractions;
 using QueryDump.Core.Options;
 using QueryDump.Adapters.DuckDB;
 using QueryDump.Transformers.Fake;
@@ -10,6 +13,7 @@ using QueryDump.Adapters;
 using QueryDump.Adapters.Csv;
 using Moq;
 using Spectre.Console;
+using QueryDump.Cli.Infrastructure;
 using Xunit;
 
 
@@ -75,8 +79,14 @@ public class PipelineStressTests : IAsyncLifetime
 
         var services = new ServiceCollection();
         services.AddSingleton(registry);
-        services.AddSingleton<IStreamReaderFactory, DuckDbReaderFactory>();
-        services.AddSingleton<IDataWriterFactory, CsvWriterFactory>();
+        services.AddSingleton<IStreamReaderFactory>(sp => new CliStreamReaderFactory(
+            new DuckDbReaderDescriptor(),
+            sp.GetRequiredService<OptionsRegistry>(),
+            sp));
+        services.AddSingleton<IDataWriterFactory>(sp => new CliDataWriterFactory(
+            new CsvWriterDescriptor(),
+            sp.GetRequiredService<OptionsRegistry>(),
+            sp));
         services.AddSingleton<IDataTransformerFactory, Transformers.Null.NullDataTransformerFactory>();
         services.AddSingleton<IDataTransformerFactory, Transformers.Overwrite.OverwriteDataTransformerFactory>();
         services.AddSingleton<IDataTransformerFactory, Transformers.Fake.FakeDataTransformerFactory>();
@@ -84,6 +94,7 @@ public class PipelineStressTests : IAsyncLifetime
         services.AddSingleton<ExportService>();
         services.AddSingleton(new Mock<IAnsiConsole>().Object);
 
+        services.AddLogging(); // Required for Serilog/Loggers used in ExportService
         var serviceProvider = services.BuildServiceProvider();
         var exportService = serviceProvider.GetRequiredService<ExportService>();
 
@@ -116,7 +127,9 @@ public class PipelineStressTests : IAsyncLifetime
         var transformerFactories = serviceProvider.GetServices<IDataTransformerFactory>().ToList();
         var pipelineBuilder = new TransformerPipelineBuilder(transformerFactories);
         var pipeline = pipelineBuilder.Build(args);
-        await exportService.RunExportAsync(options, TestContext.Current.CancellationToken, pipeline);
+        var readerFactory = serviceProvider.GetRequiredService<IStreamReaderFactory>();
+        var writerFactory = serviceProvider.GetRequiredService<IDataWriterFactory>();
+        await exportService.RunExportAsync(options, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory);
         
         sw.Stop();
         _output.WriteLine($"Export took {sw.ElapsedMilliseconds}ms ({sw.Elapsed.TotalSeconds:N2}s)");

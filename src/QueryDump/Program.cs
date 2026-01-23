@@ -1,7 +1,11 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using QueryDump.Cli;
-using QueryDump.Core;
+using QueryDump.Core.Abstractions;
+using QueryDump.Cli.Abstractions;
+using QueryDump.Core.Models;
 using QueryDump.Core.Options;
+using QueryDump.Cli.Infrastructure;
+using QueryDump.Core.Pipelines;
 using QueryDump.Transformers.Format;
 using QueryDump.Transformers.Fake;
 using QueryDump.Transformers.Null;
@@ -14,6 +18,9 @@ using QueryDump.Adapters.Csv;
 using QueryDump.Adapters.Parquet;
 using QueryDump.Adapters.PostgreSQL;
 
+using Serilog;
+using Microsoft.Extensions.Logging;
+
 namespace QueryDump;
 
 class Program
@@ -23,6 +30,11 @@ class Program
         var services = new ServiceCollection();
         ConfigureServices(services);
         var serviceProvider = services.BuildServiceProvider();
+
+        // Initialize Serilog with default console logger (or no-op if we prefer only explicit file log)
+        Log.Logger = new LoggerConfiguration()
+            .MinimumLevel.Debug()
+            .CreateLogger();
 
         var cliService = serviceProvider.GetRequiredService<CliService>();
         var (rootCommand, printHelp) = cliService.Build();
@@ -44,11 +56,19 @@ class Program
         {
             // Ensure cursor is always visible upon exit, even after crash or Ctrl+C
             try { Console.CursorVisible = true; } catch { /* Ignore if unable to access console */ }
+            await Log.CloseAndFlushAsync();
         }
     }
 
     private static void ConfigureServices(IServiceCollection services)
     {
+        // Serilog
+        services.AddLogging(logging => 
+        {
+            logging.ClearProviders();
+            logging.AddSerilog(); // Uses global Log.Logger
+        });
+
         // Configuration
         services.AddSingleton<OptionsRegistry>();
         services.AddSingleton(Spectre.Console.AnsiConsole.Console);
@@ -56,22 +76,45 @@ class Program
         // CLI
         services.AddSingleton<CliService>();
         
-        // Reader Factories
-        services.AddSingleton<IStreamReaderFactory, OracleReaderFactory>();
-        services.AddSingleton<IStreamReaderFactory, SqlServerReaderFactory>();
-        services.AddSingleton<IStreamReaderFactory, DuckDbReaderFactory>();
-        services.AddSingleton<IStreamReaderFactory, PostgreSqlReaderFactory>();
-        services.AddSingleton<IStreamReaderFactory, SqliteReaderFactory>();
-        services.AddSingleton<IStreamReaderFactory, CsvReaderFactory>();
-        services.AddSingleton<IStreamReaderFactory, ParquetReaderFactory>();
+        // Reader Factories using Generic Descriptor Bridge
+        RegisterReader<OracleReaderDescriptor>(services);
+        RegisterReader<SqlServerReaderDescriptor>(services);
+        RegisterReader<DuckDbReaderDescriptor>(services);
+        RegisterReader<PostgreSqlReaderDescriptor>(services);
+        RegisterReader<SqliteReaderDescriptor>(services);
+        RegisterReader<CsvReaderDescriptor>(services);
+        RegisterReader<ParquetReaderDescriptor>(services);
         
-        // Writer Factories
-        services.AddSingleton<IDataWriterFactory, Adapters.Csv.CsvWriterFactory>();
-        services.AddSingleton<IDataWriterFactory, Adapters.Parquet.ParquetWriterFactory>();
-        services.AddSingleton<IDataWriterFactory, Adapters.DuckDB.DuckDbDataWriterFactory>();
-        services.AddSingleton<IDataWriterFactory, Adapters.Oracle.OracleDataWriterFactory>();
-        services.AddSingleton<IDataWriterFactory, PostgreSqlDataWriterFactory>();
-        services.AddSingleton<IDataWriterFactory, SqliteDataWriterFactory>();
+        // Writer Factories using Generic Descriptor Bridge
+        RegisterWriter<Adapters.Csv.CsvWriterDescriptor>(services);
+        RegisterWriter<Adapters.Parquet.ParquetWriterDescriptor>(services);
+        RegisterWriter<Adapters.DuckDB.DuckDbWriterDescriptor>(services);
+        RegisterWriter<Adapters.Oracle.OracleWriterDescriptor>(services);
+        RegisterWriter<PostgreSqlWriterDescriptor>(services);
+        RegisterWriter<SqliteWriterDescriptor>(services);
+        
+        /* 
+           Helper for DI Registration 
+           (Inlined logic for clean reading, ideally moved to extension method)
+        */
+    }
+
+    private static void RegisterWriter<TDesc>(IServiceCollection services) where TDesc : class, IProviderDescriptor<IDataWriter>, new()
+    {
+        services.AddSingleton<IDataWriterFactory>(sp => new CliDataWriterFactory(
+            new TDesc(),
+            sp.GetRequiredService<OptionsRegistry>(),
+            sp
+        ));
+    }
+
+    private static void RegisterReader<TDesc>(IServiceCollection services) where TDesc : class, IProviderDescriptor<IStreamReader>, new()
+    {
+        services.AddSingleton<IStreamReaderFactory>(sp => new CliStreamReaderFactory(
+            new TDesc(),
+            sp.GetRequiredService<OptionsRegistry>(),
+            sp
+        ));
         
         // Transformer Factories
         services.AddSingleton<IDataTransformerFactory, NullDataTransformerFactory>();

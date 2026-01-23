@@ -34,6 +34,27 @@ public class OptionsRegistry
         // Return default option if not registered (fallback)
         return new T();
     }
+
+    /// <summary>
+    /// Retrieves options of a specific type by runtime Type.
+    /// </summary>
+    public object Get(Type optionType)
+    {
+        if (_options.TryGetValue(optionType, out var value))
+        {
+            return value;
+        }
+
+        // Return default instance if not registered
+        try
+        {
+            return Activator.CreateInstance(optionType) ?? throw new InvalidOperationException($"Could not create instance of {optionType.Name}");
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Could not create default instance for option type {optionType.Name}. Ensure it has a parameterless constructor.", ex);
+        }
+    }
     
     /// <summary>
     /// Checks if options of a specific type are registered.

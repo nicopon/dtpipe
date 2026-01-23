@@ -1,9 +1,12 @@
 using System.Threading.Channels;
 using QueryDump.Configuration;
-using QueryDump.Core;
+using QueryDump.Core.Abstractions;
+using QueryDump.Cli.Abstractions;
+using QueryDump.Core.Models;
 using QueryDump.Core.Options;
 using QueryDump.Feedback;
 using Spectre.Console;
+using Microsoft.Extensions.Logging;
 
 namespace QueryDump;
 
@@ -14,33 +17,47 @@ public class ExportService
     private readonly IEnumerable<IDataTransformerFactory> _transformerFactories;
     private readonly OptionsRegistry _optionsRegistry;
     private readonly IAnsiConsole _console;
+    private readonly ILogger<ExportService> _logger;
 
     public ExportService(
         IEnumerable<IStreamReaderFactory> readerFactories, 
         IEnumerable<IDataWriterFactory> writerFactories,
         IEnumerable<IDataTransformerFactory> transformerFactories,
         OptionsRegistry optionsRegistry,
-        IAnsiConsole console)
+        IAnsiConsole console,
+        ILogger<ExportService> logger)
     {
         _readerFactories = readerFactories;
         _writerFactories = writerFactories;
         _transformerFactories = transformerFactories;
         _optionsRegistry = optionsRegistry;
         _console = console;
+        _logger = logger;
     }
 
-    public async Task RunExportAsync(DumpOptions options, CancellationToken ct, List<IDataTransformer> pipeline)
+    public async Task RunExportAsync(
+        QueryDump.Configuration.DumpOptions options, 
+        CancellationToken ct, 
+        List<IDataTransformer> pipeline,
+        IStreamReaderFactory readerFactory,
+        IDataWriterFactory writerFactory)
     {
-        _console.MarkupLine($"[grey]Connecting to provider:[/] [blue]{options.Provider}[/]");
-        
-        // Resolve reader factory
-        var readerFactory = _readerFactories.FirstOrDefault(f => 
-            f.ProviderName.Equals(options.Provider, StringComparison.OrdinalIgnoreCase))
-            ?? throw new ArgumentException($"Unknown provider: {options.Provider}. Supported: {string.Join(", ", _readerFactories.Select(f => f.ProviderName))}");
+        _logger.LogInformation("Starting export from {Provider} to {OutputPath}", options.Provider, options.OutputPath);
+
+        // Display Source Info
+        var table = new Table();
+        table.Border(TableBorder.None);
+        table.AddColumn(new TableColumn("[grey]Source[/]").RightAligned());
+        table.AddColumn(new TableColumn($"[blue]{options.Provider}[/]"));
+        _console.Write(table);
+
+        _console.MarkupLine($"   [grey]Connecting...[/]");
         
         await using var reader = readerFactory.Create(options);
         
         await reader.OpenAsync(ct);
+        
+        _console.MarkupLine($"   [grey]Connected. Schema: [green]{reader.Columns?.Count ?? 0}[/] columns.[/]");        
         
         if (reader.Columns is null || reader.Columns.Count == 0)
         {
@@ -72,18 +89,47 @@ public class ExportService
         // Dry-run mode: Delegate to DryRunService
         if (options.DryRunCount > 0)
         {
-            var dryRunService = new DryRun.DryRunService();
-            await dryRunService.RunAsync(reader, pipeline, options.DryRunCount, _console, ct);
+            // Try to create writer for schema inspection (if output is specified)
+            IDataWriter? writerForInspection = null;
+            if (!string.IsNullOrEmpty(options.OutputPath))
+            {
+               // We reuse the resolved writerFactory for inspection
+               try 
+               {
+                   writerForInspection = writerFactory.Create(options);
+               }
+               catch 
+               {
+                   // Ignore if we can't create it for inspection (e.g. if it requires valid connection string and we have dry run logic)
+               }
+            }
+
+            var dryRunController = new Cli.DryRun.DryRunCliController(_console);
+            await dryRunController.RunAsync(reader, pipeline, options.DryRunCount, writerForInspection, ct);
+            
+            // Dispose writer if created
+            if (writerForInspection != null)
+            {
+                await writerForInspection.DisposeAsync();
+            }
             return;
         }
 
-        _console.MarkupLine($"[grey]Writing to:[/] [blue]{options.OutputPath}[/]");
-
-        // Resolve writer factory
-        var extension = Path.GetExtension(options.OutputPath).ToLowerInvariant();
-        var writerFactory = _writerFactories.FirstOrDefault(f =>
-            f.SupportedExtension.Equals(extension, StringComparison.OrdinalIgnoreCase))
-            ?? throw new ArgumentException($"Unsupported file format: {extension}. Supported: {string.Join(", ", _writerFactories.Select(f => f.SupportedExtension))}");
+        string writerName = writerFactory.ProviderName;
+        // Display Target Info
+        var targetTable = new Table();
+        targetTable.Border(TableBorder.None);
+        targetTable.AddColumn(new TableColumn("[grey]Target[/]").RightAligned());
+        targetTable.AddColumn(new TableColumn($"[blue]{writerName}[/]"));
+        
+        // Show output path if it's likely a file or simple string
+        if (!string.IsNullOrEmpty(options.OutputPath)) 
+        {
+             targetTable.AddColumn(new TableColumn($"([grey]{options.OutputPath}[/])"));
+        }
+        
+        _console.Write(targetTable);
+        _console.MarkupLine($"   [grey]Initializing...[/]");
 
         // Filter out virtual columns for physical writer
         var exportableSchema = currentSchema.Where(c => !c.IsVirtual).ToList();
@@ -114,17 +160,37 @@ public class ExportService
         try
         {
             // Run Concurrent Pipeline
-            var producerTask = ProduceRowsAsync(reader, readerToTransform.Writer, options.BatchSize, options.Limit, progress, linkedCts, effectiveCt);
+            var producerTask = ProduceRowsAsync(reader, readerToTransform.Writer, options.BatchSize, options.Limit, progress, linkedCts, effectiveCt, _logger);
             var transformTask = TransformRowsAsync(readerToTransform.Reader, transformToWriter.Writer, pipeline, progress, effectiveCt);
-            var consumerTask = ConsumeRowsAsync(transformToWriter.Reader, writer, options.BatchSize, progress, r => Interlocked.Add(ref totalRows, r), effectiveCt);
+            var consumerTask = ConsumeRowsAsync(transformToWriter.Reader, writer, options.BatchSize, progress, r => Interlocked.Add(ref totalRows, r), effectiveCt, _logger);
 
-            await Task.WhenAll(producerTask, transformTask, consumerTask);
+            var tasks = new List<Task> { producerTask, transformTask, consumerTask };
+            
+            while (tasks.Count > 0)
+            {
+                 var finishedTask = await Task.WhenAny(tasks);
+                 if (finishedTask.IsFaulted)
+                 {
+                     // If any task fails, cancel the others to prevent deadlock/hanging
+                     await linkedCts.CancelAsync();
+                     // Re-await the failed task to propagate exception
+                     await finishedTask; 
+                 }
+                 else if (finishedTask.IsCanceled)
+                 {
+                     // If one task is cancelled (e.g. limit reached), ensure others stop
+                     await linkedCts.CancelAsync();
+                 }
+                 
+                 tasks.Remove(finishedTask);
+            }
 
             await writer.CompleteAsync(ct);
             progress.Complete();
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Export failed");
             Console.Error.WriteLine($"Export failed: {ex.Message}");
             throw;
         }
@@ -141,13 +207,16 @@ public class ExportService
         int limit,
         ProgressReporter progress,
         CancellationTokenSource linkedCts,
-        CancellationToken ct)
+        CancellationToken ct,
+        ILogger logger)
     {
+        logger.LogDebug("Producer/Reader started");
         long rowCount = 0;
         try
         {
             await foreach (var batchChunk in reader.ReadBatchesAsync(batchSize, ct))
             {
+                logger.LogDebug("Read batch of {Count} rows", batchChunk.Length);
                 for (var i = 0; i < batchChunk.Length; i++)
                 {
                     await output.WriteAsync(batchChunk.Span[i], ct);
@@ -157,6 +226,7 @@ public class ExportService
                     // Check limit and cancel if reached
                     if (limit > 0 && rowCount >= limit)
                     {
+                        logger.LogInformation("Limit of {Limit} rows reached. Cancelling.", limit);
                         await linkedCts.CancelAsync();
                         return;
                     }
@@ -215,8 +285,10 @@ public class ExportService
         int batchSize,
         ProgressReporter progress,
         Action<int> updateRowCount,
-        CancellationToken ct)
+        CancellationToken ct,
+        ILogger logger)
     {
+        logger.LogDebug("Consumer/Writer started");
         var buffer = new List<object?[]>(batchSize);
         long previousBytes = 0;
 
@@ -226,7 +298,9 @@ public class ExportService
             
             if (buffer.Count >= batchSize)
             {
+                logger.LogDebug("Writing batch of {Count} rows", buffer.Count);
                 await writer.WriteBatchAsync(buffer, ct);
+                logger.LogDebug("Batch written");
                 
                 var currentBytes = writer.BytesWritten;
                 var bytesDelta = currentBytes - previousBytes;
@@ -242,7 +316,9 @@ public class ExportService
         // Write remaining
         if (buffer.Count > 0)
         {
+            logger.LogDebug("Writing final batch of {Count} rows", buffer.Count);
             await writer.WriteBatchAsync(buffer, ct);
+            logger.LogDebug("Final batch written");
             
             var currentBytes = writer.BytesWritten;
             var bytesDelta = currentBytes - previousBytes;

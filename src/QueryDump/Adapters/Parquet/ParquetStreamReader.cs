@@ -1,6 +1,8 @@
 using Parquet;
 using Parquet.Schema;
-using QueryDump.Core;
+using QueryDump.Core.Abstractions;
+using QueryDump.Cli.Abstractions;
+using QueryDump.Core.Models;
 
 namespace QueryDump.Adapters.Parquet;
 

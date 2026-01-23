@@ -1,7 +1,9 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
 using QueryDump.Cli;
-using QueryDump.Core;
+using QueryDump.Core.Abstractions;
+using QueryDump.Cli.Abstractions;
+using QueryDump.Core.Models;
 using QueryDump.Configuration;
 using QueryDump.Core.Options;
 

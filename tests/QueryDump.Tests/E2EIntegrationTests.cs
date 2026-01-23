@@ -1,7 +1,10 @@
+using QueryDump.Core.Pipelines;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using QueryDump.Configuration;
-using QueryDump.Core;
+using QueryDump.Core.Abstractions;
+using QueryDump.Core.Models;
+using QueryDump.Cli.Abstractions;
 using QueryDump.Core.Options;
 using QueryDump.Adapters.DuckDB;
 using QueryDump.Tests.Helpers;
@@ -10,6 +13,7 @@ using QueryDump.Adapters;
 using QueryDump.Adapters.Csv;
 using Spectre.Console;
 using Moq;
+using QueryDump.Cli.Infrastructure;
 using Xunit;
 
 namespace QueryDump.Tests;
@@ -63,13 +67,22 @@ public class E2EIntegrationTests : IAsyncLifetime
         });
         
         var services = new ServiceCollection();
+        services.AddLogging(); // Required for Serilog/Loggers used in ExportService
         services.AddSingleton(registry);
         
         // Reader Factories
-        services.AddSingleton<IStreamReaderFactory, DuckDbReaderFactory>();
+        services.AddSingleton<IStreamReaderFactory>(sp => new CliStreamReaderFactory(
+            new DuckDbReaderDescriptor(),
+            sp.GetRequiredService<OptionsRegistry>(),
+            sp));
         
         // Writer Factories
-        services.AddSingleton<IDataWriterFactory, CsvWriterFactory>();
+        services.AddSingleton<IProviderDescriptor<IDataWriter>, DuckDbWriterDescriptor>();
+        services.AddSingleton<IDataWriterFactory>(sp => new CliDataWriterFactory(
+            sp.GetRequiredService<IProviderDescriptor<IDataWriter>>(),
+            sp.GetRequiredService<OptionsRegistry>(),
+            sp
+        ));
         
         // Transformer Factories
         services.AddSingleton<IDataTransformerFactory, FakeDataTransformerFactory>();
@@ -96,7 +109,9 @@ public class E2EIntegrationTests : IAsyncLifetime
         var transformerFactories = serviceProvider.GetServices<IDataTransformerFactory>().ToList();
         var pipelineBuilder = new TransformerPipelineBuilder(transformerFactories);
         var pipeline = pipelineBuilder.Build(args);
-        await exportService.RunExportAsync(options, TestContext.Current.CancellationToken, pipeline);
+        var readerFactory = serviceProvider.GetRequiredService<IStreamReaderFactory>();
+        var writerFactory = serviceProvider.GetRequiredService<IDataWriterFactory>();
+        await exportService.RunExportAsync(options, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory);
 
         // 5. Verify Output
         File.Exists(_outputPath).Should().BeTrue();
@@ -154,13 +169,20 @@ public class E2EIntegrationTests : IAsyncLifetime
         });
 
         var services = new ServiceCollection();
+        services.AddLogging();
         services.AddSingleton(registry);
         
         // Reader Factories
-        services.AddSingleton<IStreamReaderFactory, DuckDbReaderFactory>();
+        services.AddSingleton<IStreamReaderFactory>(sp => new CliStreamReaderFactory(
+            new DuckDbReaderDescriptor(),
+            sp.GetRequiredService<OptionsRegistry>(),
+            sp));
         
         // Writer Factories
-        services.AddSingleton<IDataWriterFactory, CsvWriterFactory>();
+        services.AddSingleton<IDataWriterFactory>(sp => new CliDataWriterFactory(
+            new CsvWriterDescriptor(),
+            sp.GetRequiredService<OptionsRegistry>(),
+            sp));
         
         // Transformer Factories
         services.AddSingleton<IDataTransformerFactory, Transformers.Null.NullDataTransformerFactory>();
@@ -194,7 +216,9 @@ public class E2EIntegrationTests : IAsyncLifetime
         var transformerFactories = serviceProvider.GetServices<IDataTransformerFactory>().ToList();
         var pipelineBuilder = new TransformerPipelineBuilder(transformerFactories);
         var pipeline = pipelineBuilder.Build(args);
-        await exportService.RunExportAsync(options, TestContext.Current.CancellationToken, pipeline);
+        var readerFactory = serviceProvider.GetRequiredService<IStreamReaderFactory>();
+        var writerFactory = serviceProvider.GetRequiredService<IDataWriterFactory>();
+        await exportService.RunExportAsync(options, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory);
 
         // 4. Verify
         File.Exists(_outputPath).Should().BeTrue();
@@ -243,13 +267,20 @@ public class E2EIntegrationTests : IAsyncLifetime
         registry.Register(new FakeOptions());
 
         var services = new ServiceCollection();
+        services.AddLogging();
         services.AddSingleton(registry);
         
         // Reader Factories
-        services.AddSingleton<IStreamReaderFactory, DuckDbReaderFactory>();
+        services.AddSingleton<IStreamReaderFactory>(sp => new CliStreamReaderFactory(
+            new DuckDbReaderDescriptor(),
+            sp.GetRequiredService<OptionsRegistry>(),
+            sp));
         
         // Writer Factories
-        services.AddSingleton<IDataWriterFactory, CsvWriterFactory>();
+        services.AddSingleton<IDataWriterFactory>(sp => new CliDataWriterFactory(
+            new CsvWriterDescriptor(),
+            sp.GetRequiredService<OptionsRegistry>(),
+            sp));
         
         // Transformer Factories
         services.AddSingleton<IDataTransformerFactory, Transformers.Null.NullDataTransformerFactory>();
@@ -291,7 +322,9 @@ public class E2EIntegrationTests : IAsyncLifetime
         var transformerFactories = serviceProvider.GetServices<IDataTransformerFactory>().ToList();
         var pipelineBuilder = new TransformerPipelineBuilder(transformerFactories);
         var pipeline = pipelineBuilder.Build(newArgs);
-        await exportService.RunExportAsync(options, TestContext.Current.CancellationToken, pipeline);
+        var readerFactory = serviceProvider.GetRequiredService<IStreamReaderFactory>();
+        var writerFactory = serviceProvider.GetRequiredService<IDataWriterFactory>();
+        await exportService.RunExportAsync(options, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory);
         
         // 5. Verify Output
         var lines = await File.ReadAllLinesAsync(_outputPath, TestContext.Current.CancellationToken);

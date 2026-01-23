@@ -1,5 +1,7 @@
 using FluentAssertions;
-using QueryDump.Core;
+using QueryDump.Core.Abstractions;
+using QueryDump.Core.Models;
+using QueryDump.Cli.Abstractions;
 using QueryDump.Transformers.Fake;
 using Xunit;
 

@@ -2,7 +2,9 @@ using System.Globalization;
 using System.Text;
 using CsvHelper;
 using CsvHelper.Configuration;
-using QueryDump.Core;
+using QueryDump.Core.Abstractions;
+using QueryDump.Cli.Abstractions;
+using QueryDump.Core.Models;
 
 namespace QueryDump.Adapters.Csv;
 

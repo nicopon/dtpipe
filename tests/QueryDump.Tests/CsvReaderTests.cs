@@ -1,7 +1,10 @@
 using FluentAssertions;
-using QueryDump.Core;
+using QueryDump.Core.Abstractions;
+using QueryDump.Core.Models;
+using QueryDump.Cli.Abstractions;
 using QueryDump.Core.Options;
 using QueryDump.Adapters.Csv;
+using QueryDump.Cli.Infrastructure;
 using Xunit;
 
 namespace QueryDump.Tests;
@@ -106,7 +109,7 @@ public class CsvReaderTests : IAsyncLifetime
     {
         var registry = new OptionsRegistry();
         registry.Register(new CsvReaderOptions());
-        var factory = new CsvReaderFactory(registry);
+        var factory = new CliStreamReaderFactory(new CsvReaderDescriptor(), registry, null!);
 
         factory.CanHandle("csv:data.csv").Should().BeTrue();
         factory.CanHandle("data.csv").Should().BeTrue();

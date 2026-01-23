@@ -3,7 +3,7 @@ using BenchmarkDotNet.Running;
 using QueryDump.Transformers.Format;
 using QueryDump.Core;
 using QueryDump.Core.Options;
-
+using QueryDump.Core.Models;
 namespace QueryDump.Benchmarks;
 
 [MemoryDiagnoser]

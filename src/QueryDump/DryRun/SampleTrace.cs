@@ -1,13 +1,20 @@
 namespace QueryDump.DryRun;
 
-using QueryDump.Core;
+using QueryDump.Core.Abstractions;
+using QueryDump.Cli.Abstractions;
+using QueryDump.Core.Models;
+
+/// <summary>
+/// Represents the state of a row at a specific pipeline stage.
+/// </summary>
+public record StageTrace(
+    IReadOnlyList<ColumnInfo> Schema,
+    object?[] Values
+);
 
 /// <summary>
 /// Captures the trace of a single sample row through all pipeline stages.
 /// </summary>
 public record SampleTrace(
-    /// <summary>Schema at each pipeline stage (input + each transformer output)</summary>
-    List<IReadOnlyList<ColumnInfo>> Schemas,
-    /// <summary>Values at each pipeline stage (input + each transformer output)</summary>
-    List<object?[]> Values
+    List<StageTrace> Stages
 );

@@ -1,5 +1,7 @@
 using System.Text;
-using QueryDump.Core;
+using QueryDump.Core.Abstractions;
+using QueryDump.Cli.Abstractions;
+using QueryDump.Core.Models;
 using QueryDump.Core.Options;
 
 namespace QueryDump.Transformers.Mask;

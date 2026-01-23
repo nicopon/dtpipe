@@ -3,7 +3,9 @@ using Xunit;
 using Oracle.ManagedDataAccess.Client;
 using QueryDump.Adapters.Oracle;
 using QueryDump.Adapters.DuckDB;
-using QueryDump.Core;
+using QueryDump.Core.Abstractions;
+using QueryDump.Core.Models;
+using QueryDump.Cli.Abstractions;
 using QueryDump.Adapters;
 using QueryDump.Adapters.Csv;
 using QueryDump.Adapters.Parquet;
@@ -213,7 +215,7 @@ public class OracleIntegrationTests : IAsyncLifetime
                 BulkSize = 1000 // Enable bulk copy with IDataReader
             };
             
-            await using var writer = new OracleDataWriter(_oracle.GetConnectionString(), writerOptions);
+            await using var writer = new OracleDataWriter(_oracle.GetConnectionString(), writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance);
             await writer.InitializeAsync(columns, TestContext.Current.CancellationToken);
             
             // Read all rows and write in batches

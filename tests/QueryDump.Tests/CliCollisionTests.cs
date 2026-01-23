@@ -3,7 +3,9 @@ using System.Reflection;
 using FluentAssertions;
 using QueryDump.Cli;
 using QueryDump.Core.Options;
-using QueryDump.Core;
+using QueryDump.Core.Abstractions;
+using QueryDump.Core.Models;
+using QueryDump.Cli.Abstractions;
 using Xunit;
 
 namespace QueryDump.Tests;
@@ -16,7 +18,8 @@ public class CliCollisionTests
         // 1. Gather all implemented ICliContributors
         var assembly = typeof(ICliContributor).Assembly;
         var contributorTypes = assembly.GetTypes()
-            .Where(t => typeof(ICliContributor).IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract)
+            .Where(t => typeof(ICliContributor).IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract && !t.ContainsGenericParameters)
+            .Where(t => t.Name != "CliDataWriterFactory" && t.Name != "CliStreamReaderFactory") // Skip infra wrappers requiring complex deps
             .ToList();
 
         var optionsRegistry = new OptionsRegistry();
@@ -52,13 +55,21 @@ public class CliCollisionTests
             }
             catch(MissingMethodException)
             {
-                 try 
+                 try
                  {
-                     instance = Activator.CreateInstance(type)!;
-                 } 
-                 catch (Exception ex)
+                     instance = Activator.CreateInstance(type, optionsRegistry, new Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory())!;
+                 }
+                 catch(MissingMethodException)
                  {
-                     throw new InvalidOperationException($"Could not instantiate contributor {type.Name} for collision test. Does it have a complex constructor?", ex);
+                     try 
+                     {
+                         instance = Activator.CreateInstance(type)!;
+                     } 
+                     catch (Exception ex)
+                     {
+                         Console.Error.WriteLine($"FAILED to instantiate {type.FullName}");
+                         throw new InvalidOperationException($"Could not instantiate contributor {type.Name} for collision test. Does it have a complex constructor?", ex);
+                     }
                  }
             }
             

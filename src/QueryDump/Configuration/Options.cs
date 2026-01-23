@@ -40,4 +40,9 @@ public sealed record DumpOptions
     /// Maximum number of rows to export. 0 = unlimited.
     /// </summary>
     public int Limit { get; init; } = 0;
+
+    /// <summary>
+    /// Path to the log file. If set, file logging is enabled.
+    /// </summary>
+    public string? LogPath { get; init; }
 }

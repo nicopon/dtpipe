@@ -18,8 +18,7 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
 
         try
         {
-            _postgres = new PostgreSqlBuilder()
-                .WithImage("postgres:15-alpine")
+            _postgres = new PostgreSqlBuilder("postgres:15-alpine")
                 .Build();
             await _postgres.StartAsync();
 
@@ -98,7 +97,7 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
         };
         
         // Prepare Data
-        var columns = new List<QueryDump.Core.ColumnInfo>
+        var columns = new List<QueryDump.Core.Models.ColumnInfo>
         {
             new("Id", typeof(int), false, true),
             new("Name", typeof(string), true, false),

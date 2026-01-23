@@ -1,9 +1,11 @@
 using System.Data;
 using System.Text.RegularExpressions;
 using DuckDB.NET.Data;
-using QueryDump.Core;
+using QueryDump.Core.Abstractions;
+using QueryDump.Cli.Abstractions;
+using QueryDump.Core.Models;
 using QueryDump.Core.Options;
-using ColumnInfo = QueryDump.Core.ColumnInfo; // Alias to resolve conflict with DuckDB.NET.Data.ColumnInfo
+using ColumnInfo = QueryDump.Core.Models.ColumnInfo; // Alias to resolve conflict with DuckDB.NET.Data.ColumnInfo
 
 namespace QueryDump.Adapters.DuckDB;
 

@@ -2,7 +2,9 @@ using System.Buffers;
 using System.Data;
 using System.Text.RegularExpressions;
 using Oracle.ManagedDataAccess.Client;
-using QueryDump.Core;
+using QueryDump.Core.Abstractions;
+using QueryDump.Cli.Abstractions;
+using QueryDump.Core.Models;
 using QueryDump.Core.Options;
 
 namespace QueryDump.Adapters.Oracle;
