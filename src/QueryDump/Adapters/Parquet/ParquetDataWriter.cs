@@ -11,22 +11,74 @@ namespace QueryDump.Adapters.Parquet;
 
 /// <summary>
 /// Writes data to Parquet format with row group streaming.
+/// Supports safe dry-run inspection.
 /// </summary>
-public sealed class ParquetDataWriter(string outputPath) : IDataWriter, IRequiresOptions<ParquetOptions>
+public sealed class ParquetDataWriter(string outputPath) : IDataWriter, IRequiresOptions<ParquetOptions>, ISchemaInspector
 {
     private readonly string _outputPath = outputPath;
-    private readonly FileStream _fileStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.None,
-        bufferSize: 65536, useAsync: true);
+    private FileStream? _fileStream;
 
     private ParquetSchema? _schema;
     private ParquetWriter? _writer;
     private IReadOnlyList<ColumnInfo>? _columns;
     private DataField[]? _dataFields;
 
-    public long BytesWritten => _fileStream.Position;
+    public long BytesWritten => _fileStream?.Position ?? 0;
+
+    public async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
+    {
+        if (!File.Exists(_outputPath))
+        {
+             return new TargetSchemaInfo([], false, null, null, null);
+        }
+
+        try 
+        {
+            using var fileStream = new FileStream(_outputPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = await ParquetReader.CreateAsync(fileStream, cancellationToken: ct);
+            
+            var schema = reader.Schema;
+            var columns = new List<TargetColumnInfo>();
+
+            foreach(var field in schema.DataFields)
+            {
+                Type clrType = field.ClrNullableIfHasNullsType;
+
+                columns.Add(new TargetColumnInfo(
+                    field.Name,
+                    clrType.Name, 
+                    clrType,
+                    field.IsNullable,
+                    IsPrimaryKey: false, 
+                    IsUnique: false,
+                    MaxLength: null,
+                    Precision: null,
+                    Scale: null
+                ));
+            }
+
+            long rowCount = 0;
+            for(int i = 0; i < reader.RowGroupCount; i++)
+            {
+                 using var groupReader = reader.OpenRowGroupReader(i);
+                 rowCount += groupReader.RowCount;
+            }
+
+            return new TargetSchemaInfo(columns, true, rowCount, fileStream.Length, null);
+        }
+        catch
+        {
+            // If file is corrupted or unreadable
+            return null;
+        }
+    }
 
     public async ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
     {
+        // Defer file creation until here to avoid overwriting during dry-run
+        _fileStream = new FileStream(_outputPath, FileMode.Create, FileAccess.Write, FileShare.None,
+            bufferSize: 65536, useAsync: true);
+
         _columns = columns;
         _dataFields = BuildDataFields(columns);
         _schema = new ParquetSchema(_dataFields);
@@ -151,7 +203,14 @@ public sealed class ParquetDataWriter(string outputPath) : IDataWriter, IRequire
 
     public async ValueTask DisposeAsync()
     {
-        _writer?.Dispose();
-        await _fileStream.DisposeAsync();
+        if (_writer != null)
+        {
+            _writer.Dispose();
+        }
+        
+        if (_fileStream != null) 
+        {
+            await _fileStream.DisposeAsync();
+        }
     }
 }

@@ -29,3 +29,7 @@ BenchmarkDotNet.Artifacts/
 *.duckdb
 *.sqlite
 *.sqlite3
+
+# Test Data
+tests/QueryDump.Tests/Data/Target/*
+!tests/QueryDump.Tests/Data/Target/.gitkeep

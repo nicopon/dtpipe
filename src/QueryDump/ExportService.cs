@@ -307,7 +307,10 @@ public class ExportService
                 previousBytes = currentBytes;
 
                 updateRowCount(buffer.Count); // Update total
-                progress.ReportWrite(buffer.Count, bytesDelta);
+            progress.ReportWrite(buffer.Count, bytesDelta);
+                
+                // Trace memory usage
+                LogMemoryUsage(logger);
                 
                 buffer.Clear();
             }
@@ -325,6 +328,20 @@ public class ExportService
             
             updateRowCount(buffer.Count);
             progress.ReportWrite(buffer.Count, bytesDelta);
+            LogMemoryUsage(logger);
         }
+    }
+
+    private static void LogMemoryUsage(ILogger logger)
+    {
+        if (!logger.IsEnabled(LogLevel.Debug)) return;
+
+        var managedMemory = GC.GetTotalMemory(false) / 1024 / 1024;
+        using var process = System.Diagnostics.Process.GetCurrentProcess();
+        var totalMemory = process.WorkingSet64 / 1024 / 1024;
+        
+        // Managed = .NET Objects (GC)
+        // WorkingSet = Actual RAM usage (includes Native/Unmanaged drivers like DuckDB/Oracle)
+        logger.LogDebug("Memory Stats: Managed={Managed}MB, WorkingSet={Total}MB", managedMemory, totalMemory);
     }
 }

@@ -76,7 +76,13 @@ public class FormatDataTransformerFactory(OptionsRegistry registry) : IDataTrans
         // Convert YAML dict to "COLUMN:template" format
         var mappings = config.Mappings.Select(kvp => $"{kvp.Key}:{kvp.Value}");
         
-        var options = new FormatOptions { Mappings = mappings };
+        var skipNull = false;
+        if (config.Options != null && config.Options.TryGetValue("skip-null", out var snStr))
+        {
+             bool.TryParse(snStr, out skipNull);
+        }
+
+        var options = new FormatOptions { Mappings = mappings, SkipNull = skipNull };
         return new FormatDataTransformer(options);
     }
 }

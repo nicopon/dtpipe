@@ -355,8 +355,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
             
             var insertSql = sb.ToString();
             _logger.LogDebug("Generated Insert SQL: {Sql}", insertSql);
-            // Console.WriteLine removed/commented to avoid spam, relying on logger
-            // Console.WriteLine($"[OracleDataWriter] Insert SQL: {insertSql}");
+            
             using var cmd = _connection.CreateCommand();
             cmd.BindByName = true;
             cmd.CommandText = insertSql;
@@ -385,7 +384,6 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
         }
         else
         {
-            // Existing BulkCopy logic
             using var bulkCopy = new OracleBulkCopy(_connection);
             bulkCopy.DestinationTableName = _targetTableName;
             bulkCopy.BulkCopyTimeout = 0; 

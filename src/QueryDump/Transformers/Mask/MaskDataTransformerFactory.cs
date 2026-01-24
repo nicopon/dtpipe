@@ -73,7 +73,14 @@ public class MaskDataTransformerFactory(OptionsRegistry registry) : IDataTransfo
             return null;
 
         var mappings = config.Mappings.Select(kv => $"{kv.Key}:{kv.Value}").ToList();
-        var options = new MaskOptions { Mappings = mappings };
+        
+        var skipNull = false;
+        if (config.Options != null && config.Options.TryGetValue("skip-null", out var snStr))
+        {
+             bool.TryParse(snStr, out skipNull);
+        }
+
+        var options = new MaskOptions { Mappings = mappings, SkipNull = skipNull };
         return new MaskDataTransformer(options);
     }
 }
