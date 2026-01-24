@@ -232,8 +232,24 @@ Create fake columns not in the query, then use them in `--format`:
 | `--connection-timeout` | | Connection timeout (seconds) | `10` |
 | `--query-timeout` | | Query timeout (seconds, 0=none) | `0` |
 | `--unsafe-query` | | Bypass SQL validation (allow DDL) | `false` |
+| `--log` | | Log file path (debug + memory stats) | - |
 
 > \* Required unless `--job` is specified. When using `--job`, these options are ignored.
+
+### Troubleshooting & Logs
+
+Use the `--log <file>` option to generate a debug log. This log includes **Memory Stats** (Managed vs WorkingSet) printed after each batch, which is useful for diagnosing memory leaks.
+
+```bash
+./querydump ... --log export.log
+```
+
+Log entry example:
+```
+[DBG] Memory Stats: Managed=240MB, WorkingSet=2803MB
+```
+- **Managed**: .NET memory (GC).
+- **WorkingSet**: Total physical memory (includes native drivers like DuckDB/Oracle).
 
 ### Transformation Options
 

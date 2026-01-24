@@ -154,6 +154,7 @@ public class FakeDataTransformerFactory : IFakeDataTransformerFactory
         string? seedColumn = null;
         int? seed = null;
         var deterministic = false;
+        var skipNull = false;
 
         if (config.Options != null)
         {
@@ -161,6 +162,7 @@ public class FakeDataTransformerFactory : IFakeDataTransformerFactory
             if (config.Options.TryGetValue("seed-column", out var sc)) seedColumn = sc;
             if (config.Options.TryGetValue("seed", out var seedStr) && int.TryParse(seedStr, out var s)) seed = s;
             if (config.Options.TryGetValue("deterministic", out var detStr) && bool.TryParse(detStr, out var d)) deterministic = d;
+            if (config.Options.TryGetValue("skip-null", out var snStr) && bool.TryParse(snStr, out var sn)) skipNull = sn;
         }
 
         var options = new FakeOptions
@@ -169,7 +171,8 @@ public class FakeDataTransformerFactory : IFakeDataTransformerFactory
             Locale = locale,
             Seed = seed,
             SeedColumn = seedColumn,
-            Deterministic = deterministic
+            Deterministic = deterministic,
+            SkipNull = skipNull
         };
         
         return new FakeDataTransformer(options);

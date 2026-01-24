@@ -10,6 +10,7 @@ using QueryDump.Transformers.Format;
 using QueryDump.Transformers.Fake;
 using QueryDump.Transformers.Null;
 using QueryDump.Transformers.Overwrite;
+using QueryDump.Transformers.Script;
 using QueryDump.Adapters.Oracle;
 using QueryDump.Adapters.SqlServer;
 using QueryDump.Adapters.DuckDB;
@@ -66,7 +67,7 @@ class Program
         services.AddLogging(logging => 
         {
             logging.ClearProviders();
-            logging.AddSerilog(); // Uses global Log.Logger
+            logging.SetMinimumLevel(LogLevel.Debug);
         });
 
         // Configuration
@@ -122,6 +123,7 @@ class Program
         services.AddSingleton<IDataTransformerFactory, FakeDataTransformerFactory>();
         services.AddSingleton<IDataTransformerFactory, FormatDataTransformerFactory>();
         services.AddSingleton<IDataTransformerFactory, Transformers.Mask.MaskDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, ScriptDataTransformerFactory>();
         
         // Export Service
         services.AddSingleton<ExportService>();

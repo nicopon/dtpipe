@@ -20,6 +20,9 @@ public sealed class ProgressReporter : IDisposable
     // Transformers stats
     private readonly Dictionary<string, long> _transformerStats = new();
     private readonly List<string> _transformerNames = new();
+    
+    // UI Task
+    private Task? _uiTask;
 
     public ProgressReporter(bool enabled = true, IEnumerable<IDataTransformer>? transformers = null)
     {
@@ -38,7 +41,7 @@ public sealed class ProgressReporter : IDisposable
         if (_enabled)
         {
             // Start the live display in a background task
-            Task.Run(async () => 
+            _uiTask = Task.Run(async () => 
             {
                 await AnsiConsole.Live(CreateLayout())
                     .AutoClear(false)
@@ -49,8 +52,14 @@ public sealed class ProgressReporter : IDisposable
                         while (!_disposed)
                         {
                             ctx.UpdateTarget(CreateLayout());
-                            await Task.Delay(500); // 2Hz refresh rate
+                            try 
+                            { 
+                                await Task.Delay(500); 
+                            } 
+                            catch (TaskCanceledException) { break; }
                         }
+                        // Ensure final update
+                        ctx.UpdateTarget(CreateLayout());
                     });
             });
         }
@@ -138,11 +147,15 @@ public sealed class ProgressReporter : IDisposable
     {
         _stopwatch.Stop();
         _disposed = true;
+        
+        if (_uiTask != null)
+        {
+            // Wait for UI to finish cleanly
+            _uiTask.Wait(1000);
+        }
+
         if (_enabled)
         {
-            // Give a small moment for the last refresh to happen if needed, or just let it close
-            // We rely on the background task seeing _disposed = true and exiting the Live block
-            
             AnsiConsole.MarkupLine($"[green]✓ Completed in {_stopwatch.Elapsed.TotalSeconds:F1}s | {_writeCount:N0} rows | {FormatBytes(_bytesWritten)}[/]");
         }
     }
@@ -150,5 +163,9 @@ public sealed class ProgressReporter : IDisposable
     public void Dispose()
     {
         _disposed = true;
+        if (_uiTask != null && !_uiTask.IsCompleted)
+        {
+            try { _uiTask.Wait(500); } catch { }
+        }
     }
 }

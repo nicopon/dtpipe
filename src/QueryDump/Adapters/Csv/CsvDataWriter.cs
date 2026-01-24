@@ -15,8 +15,9 @@ namespace QueryDump.Adapters.Csv;
 /// Writes data to CSV format with streaming.
 /// Uses RecyclableMemoryStream for reduced GC pressure.
 /// Optimized for DuckDB compatibility.
+/// Supports safe dry-run inspection.
 /// </summary>
-public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvOptions>
+public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvOptions>, ISchemaInspector
 {
     // Shared RecyclableMemoryStreamManager for all instances
     private static readonly RecyclableMemoryStreamManager MemoryStreamManager = new(
@@ -30,15 +31,18 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvOptions>
 
     private readonly string _outputPath;
     private readonly CsvOptions _options;
-    private readonly FileStream _fileStream;
-    private readonly RecyclableMemoryStream _memoryStream;
-    private readonly StreamWriter _streamWriter;
-    private readonly CsvWriter _csvWriter;
+    
+    // Initialized in InitializeAsync
+    private FileStream? _fileStream;
+    private RecyclableMemoryStream? _memoryStream;
+    private StreamWriter? _streamWriter;
+    private CsvWriter? _csvWriter;
+    
     private IReadOnlyList<ColumnInfo>? _columns;
     private int _rowsInBuffer;
     private const int FlushThreshold = 1000; // Flush every N rows
 
-    public long BytesWritten => _fileStream.Position;
+    public long BytesWritten => _fileStream?.Position ?? 0;
 
     public CsvDataWriter(string outputPath) : this(outputPath, new CsvOptions())
     {
@@ -48,7 +52,66 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvOptions>
     {
         _outputPath = outputPath;
         _options = options;
-        _fileStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.None, 
+    }
+
+    public async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
+    {
+        if (!File.Exists(_outputPath))
+        {
+             return new TargetSchemaInfo([], false, null, null, null);
+        }
+
+        try
+        {
+            // Simple CSV inspection: Read header
+            using var reader = new StreamReader(_outputPath);
+            var headerLine = await reader.ReadLineAsync(ct);
+            if (string.IsNullOrEmpty(headerLine))
+            {
+                 return new TargetSchemaInfo([], true, 0, new FileInfo(_outputPath).Length, null);
+            }
+
+            // Parse header using same separator options if possible, or naive split
+            // Using CsvHelper to parse just the header is safer
+            using var stringReader = new StringReader(headerLine);
+            var config = new CsvConfiguration(CultureInfo.InvariantCulture)
+            {
+                Delimiter = _options.Separator.ToString(),
+                Quote = _options.Quote,
+                HasHeaderRecord = true
+            };
+            using var csvParser = new CsvParser(stringReader, config);
+            if (await csvParser.ReadAsync())
+            {
+                var headers = csvParser.Record;
+                if (headers != null)
+                {
+                     var columns = headers.Select(h => new TargetColumnInfo(
+                         h,
+                         "STRING",
+                         typeof(string),
+                         true,
+                         false,
+                         false,
+                         null, null, null
+                     )).ToList();
+                     
+                     return new TargetSchemaInfo(columns, true, null, new FileInfo(_outputPath).Length, null);
+                }
+            }
+             
+            return new TargetSchemaInfo([], true, null, new FileInfo(_outputPath).Length, null);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    public ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
+    {
+        // Check if writable?
+        _fileStream = new FileStream(_outputPath, FileMode.Create, FileAccess.Write, FileShare.None, 
             bufferSize: 65536, useAsync: true);
         
         // Use RecyclableMemoryStream as intermediate buffer
@@ -58,16 +121,13 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvOptions>
         // DuckDB-compatible CSV configuration
         var config = new CsvConfiguration(CultureInfo.InvariantCulture)
         {
-            HasHeaderRecord = options.Header,
-            Delimiter = options.Separator.ToString(),
-            Quote = options.Quote,
-            ShouldQuote = args => ShouldQuoteField(args.Field, options)
+            HasHeaderRecord = _options.Header,
+            Delimiter = _options.Separator.ToString(),
+            Quote = _options.Quote,
+            ShouldQuote = args => ShouldQuoteField(args.Field, _options)
         };
         _csvWriter = new CsvWriter(_streamWriter, config);
-    }
 
-    public ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
-    {
         _columns = columns;
         
         if (_options.Header)
@@ -83,7 +143,7 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvOptions>
 
     public async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
     {
-        if (_columns is null)
+        if (_columns is null || _csvWriter is null)
             throw new InvalidOperationException("Call InitializeAsync first.");
 
         foreach (var row in rows)
@@ -106,6 +166,8 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvOptions>
 
     private async ValueTask FlushBufferToFileAsync(CancellationToken ct)
     {
+        if (_csvWriter is null || _streamWriter is null || _memoryStream is null || _fileStream is null) return;
+
         await _csvWriter.FlushAsync();
         await _streamWriter.FlushAsync(ct);
         
@@ -196,14 +258,16 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvOptions>
         {
             await FlushBufferToFileAsync(ct);
         }
-        await _fileStream.FlushAsync(ct);
+        
+        if (_fileStream != null)
+             await _fileStream.FlushAsync(ct);
     }
 
     public async ValueTask DisposeAsync()
     {
-        await _csvWriter.DisposeAsync();
-        await _streamWriter.DisposeAsync();
-        await _memoryStream.DisposeAsync();
-        await _fileStream.DisposeAsync();
+        if (_csvWriter != null) await _csvWriter.DisposeAsync();
+        if (_streamWriter != null) await _streamWriter.DisposeAsync();
+        if (_memoryStream != null) await _memoryStream.DisposeAsync();
+        if (_fileStream != null) await _fileStream.DisposeAsync();
     }
 }

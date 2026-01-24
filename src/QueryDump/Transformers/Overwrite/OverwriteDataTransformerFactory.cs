@@ -76,7 +76,13 @@ public class OverwriteDataTransformerFactory(OptionsRegistry registry) : IDataTr
         // Convert YAML dict to "COLUMN:value" format
         var mappings = config.Mappings.Select(kvp => $"{kvp.Key}:{kvp.Value}");
         
-        var options = new OverwriteOptions { Mappings = [.. mappings] };
+        var skipNull = false;
+        if (config.Options != null && config.Options.TryGetValue("skip-null", out var snStr))
+        {
+             bool.TryParse(snStr, out skipNull);
+        }
+
+        var options = new OverwriteOptions { Mappings = [.. mappings], SkipNull = skipNull };
         return new OverwriteDataTransformer(options);
     }
 }

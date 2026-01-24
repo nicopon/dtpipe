@@ -24,7 +24,7 @@ public static class TestDataSeeder
 
     public static async Task SeedAsync(IDbConnection connection, string tableName)
     {
-        var json = await File.ReadAllTextAsync(Path.Combine("Resources", "test-data.json"));
+        var json = await File.ReadAllTextAsync(Path.Combine("Data", "Source", "test-data.json"));
         var records = JsonSerializer.Deserialize<List<TestRecord>>(json, JsonOptions) 
                       ?? throw new InvalidOperationException("Failed to load test data.");
 

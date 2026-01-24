@@ -1,5 +1,6 @@
 using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using QueryDump.Configuration;
 using QueryDump.Core.Abstractions;
 using QueryDump.Cli.Abstractions;
@@ -15,16 +16,18 @@ public class CliService
 {
     private readonly IEnumerable<ICliContributor> _contributors;
     private readonly IServiceProvider _serviceProvider;
+    private readonly ILoggerFactory _loggerFactory;
 
     public CliService(
         IServiceProvider serviceProvider,
+        ILoggerFactory loggerFactory,
         IEnumerable<IStreamReaderFactory> readerFactories,
         IEnumerable<IDataTransformerFactory> transformerFactories,
         IEnumerable<IDataWriterFactory> writerFactories)
     {
         _serviceProvider = serviceProvider;
+        _loggerFactory = loggerFactory;
         
-        // Aggregate all contributors
         // Aggregate all contributors
         var list = new List<ICliContributor>();
         list.AddRange(readerFactories.OfType<ICliContributor>());
@@ -207,6 +210,18 @@ public class CliService
                 LogPath = job.LogPath
             };
 
+            // Configure Serilog Dynamic logging if requested
+            if (!string.IsNullOrEmpty(options.LogPath))
+            {
+                Serilog.Log.Logger = new Serilog.LoggerConfiguration()
+                    .MinimumLevel.Debug()
+                    .WriteTo.File(options.LogPath)
+                    .CreateLogger();
+                
+                // Add Serilog to Factory LATE to capture this config
+                _loggerFactory.AddSerilog();
+            }
+
             var exportService = _serviceProvider.GetRequiredService<ExportService>();
             
             var transformerFactories = _contributors.OfType<IDataTransformerFactory>().ToList();
@@ -218,14 +233,6 @@ public class CliService
             }
             else
             {
-                if (!string.IsNullOrEmpty(options.LogPath))
-                {
-                    Serilog.Log.Logger = new Serilog.LoggerConfiguration()
-                        .MinimumLevel.Debug()
-                        .WriteTo.File(options.LogPath)
-                        .CreateLogger();
-                }
-
                 var pipelineBuilder = new TransformerPipelineBuilder(transformerFactories);
                 pipeline = pipelineBuilder.Build(Environment.GetCommandLineArgs());
             }
