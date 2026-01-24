@@ -93,6 +93,7 @@ class Program
         RegisterWriter<Adapters.Parquet.ParquetWriterDescriptor>(services);
         RegisterWriter<Adapters.DuckDB.DuckDbWriterDescriptor>(services);
         RegisterWriter<Adapters.Oracle.OracleWriterDescriptor>(services);
+        RegisterWriter<Adapters.Checksum.ChecksumWriterDescriptor>(services);
         RegisterWriter<PostgreSqlWriterDescriptor>(services);
         RegisterWriter<SqliteWriterDescriptor>(services);
         
