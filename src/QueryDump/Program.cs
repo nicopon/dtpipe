@@ -18,6 +18,7 @@ using QueryDump.Adapters.Sqlite;
 using QueryDump.Adapters.Csv;
 using QueryDump.Adapters.Parquet;
 using QueryDump.Adapters.PostgreSQL;
+using QueryDump.Adapters.Sample;
 
 using Serilog;
 using Microsoft.Extensions.Logging;
@@ -85,6 +86,7 @@ class Program
         RegisterReader<SqliteReaderDescriptor>(services);
         RegisterReader<CsvReaderDescriptor>(services);
         RegisterReader<ParquetReaderDescriptor>(services);
+        RegisterReader<SampleReaderDescriptor>(services);
         
         // Writer Factories using Generic Descriptor Bridge
         RegisterWriter<Adapters.Csv.CsvWriterDescriptor>(services);
