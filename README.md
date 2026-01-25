@@ -16,6 +16,7 @@ CLI tool to export database data to Parquet, CSV, or another database. Supports 
 ## Features
 
 - **Multi-Database**: Oracle, SQL Server, PostgreSQL, DuckDB, SQLite, CSV, Parquet
+- **Zero Dependencies**: Self-contained binary. Uses embedded engines (DuckDB, SQLite) and fully managed drivers (Oracle, SQL Server, PostgreSQL)—no external client installation required.
 - **Streaming**: `IDataReader`-based processing for large datasets with minimal memory
 - **Anonymization**: Replace sensitive data with realistic fake values thanks to [Bogus](https://github.com/bchavez/Bogus)
 - **Transformations**: Null, Overwrite, Format templates with .NET format specifiers, Mask patterns

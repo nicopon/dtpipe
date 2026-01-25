@@ -95,7 +95,7 @@ public static partial class JobFileParser
         {
             foreach (var kvp in transformerDict)
             {
-                var type = kvp.Key.ToString();
+                var type = kvp.Key?.ToString() ?? string.Empty;
                 if (string.IsNullOrWhiteSpace(type))
                 {
                     throw new InvalidOperationException($"Transformer type cannot be null or empty.");

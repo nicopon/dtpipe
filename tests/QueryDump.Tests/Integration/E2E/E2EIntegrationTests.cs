@@ -77,7 +77,8 @@ public class E2EIntegrationTests : IAsyncLifetime
             sp));
         
         // Writer Factories
-        services.AddSingleton<IProviderDescriptor<IDataWriter>, DuckDbWriterDescriptor>();
+        // Use CSV writer for file output verification
+        services.AddSingleton<IProviderDescriptor<IDataWriter>, CsvWriterDescriptor>();
         services.AddSingleton<IDataWriterFactory>(sp => new CliDataWriterFactory(
             sp.GetRequiredService<IProviderDescriptor<IDataWriter>>(),
             sp.GetRequiredService<OptionsRegistry>(),

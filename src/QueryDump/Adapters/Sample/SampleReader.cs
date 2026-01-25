@@ -31,6 +31,7 @@ public class SampleReader : IStreamReader
         int batchSize, 
         [EnumeratorCancellation] CancellationToken ct = default)
     {
+        await Task.Yield();
         long totalRows = _options.RowCount;
         long produced = 0;
         

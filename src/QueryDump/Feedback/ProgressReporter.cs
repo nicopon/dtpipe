@@ -10,6 +10,7 @@ public sealed class ProgressReporter : IDisposable
 {
     private readonly Stopwatch _stopwatch;
     private readonly bool _enabled;
+    private readonly bool _uiEnabled;
     private bool _disposed;
     
     // Stats
@@ -38,30 +39,41 @@ public sealed class ProgressReporter : IDisposable
             }
         }
 
-        if (_enabled)
+        // Compute whether a live TUI should be started. Disable when output is
+        // redirected or when a CI/non-interactive environment is detected.
+        _uiEnabled = _enabled && !IsNonInteractiveEnvironment();
+
+        if (_uiEnabled)
         {
-            // Start the live display in a background task
-            _uiTask = Task.Run(async () => 
+            // Start the live display in a background task but make it tolerant to
+            // non-interactive/test environments where Spectre.Console may throw
+            // when multiple interactive displays are attempted concurrently.
+            _uiTask = Task.Run(async () =>
             {
-                await AnsiConsole.Live(CreateLayout())
-                    .AutoClear(false)
-                    .Overflow(VerticalOverflow.Ellipsis)
-                    .Cropping(VerticalOverflowCropping.Bottom)
-                    .StartAsync(async ctx => 
-                    {
-                        while (!_disposed)
+                try
+                {
+                    await AnsiConsole.Live(CreateLayout())
+                        .AutoClear(false)
+                        .Overflow(VerticalOverflow.Ellipsis)
+                        .Cropping(VerticalOverflowCropping.Bottom)
+                        .StartAsync(async ctx =>
                         {
+                            while (!_disposed)
+                            {
+                                ctx.UpdateTarget(CreateLayout());
+                                try { await Task.Delay(500); } catch (TaskCanceledException) { break; }
+                            }
+                            // Ensure final update
                             ctx.UpdateTarget(CreateLayout());
-                            try 
-                            { 
-                                await Task.Delay(500); 
-                            } 
-                            catch (TaskCanceledException) { break; }
-                        }
-                        // Ensure final update
-                        ctx.UpdateTarget(CreateLayout());
-                    });
-            });
+                        });
+                }
+                catch (InvalidOperationException)
+                {
+                    // Spectre.Console can throw when interactive displays are used
+                    // concurrently (e.g. during tests). Silently ignore and continue
+                    // without a live UI.
+                }
+            }).ContinueWith(t => { /* swallow exceptions from the UI task */ });
         }
     }
 
@@ -150,14 +162,39 @@ public sealed class ProgressReporter : IDisposable
         
         if (_uiTask != null)
         {
-            // Wait for UI to finish cleanly
-            _uiTask.Wait(1000);
+            try { _uiTask.Wait(1000); } catch { /* ignore UI task failures/timeouts */ }
         }
 
-        if (_enabled)
+        if (_uiEnabled)
         {
             AnsiConsole.MarkupLine($"[green]✓ Completed in {_stopwatch.Elapsed.TotalSeconds:F1}s | {_writeCount:N0} rows | {FormatBytes(_bytesWritten)}[/]");
         }
+    }
+
+    private static bool IsNonInteractiveEnvironment()
+    {
+        // Explicit opt-out
+        var noTui = Environment.GetEnvironmentVariable("QUERYDUMP_NO_TUI");
+        if (!string.IsNullOrWhiteSpace(noTui) && (noTui == "1" || noTui.Equals("true", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        // Common CI indicators
+        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CI"))) return true;
+
+        // Redirected outputs (non-interactive shells / test runners)
+        try
+        {
+            if (Console.IsOutputRedirected) return true;
+        }
+        catch
+        {
+            // Some environments may throw; treat as non-interactive conservatively
+            return true;
+        }
+
+        return false;
     }
 
     public void Dispose()
