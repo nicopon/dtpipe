@@ -58,187 +58,109 @@ Provider is auto-detected from prefix or file extension where possible.
 --output "duckdb:target.db"
 --output "sqlite:target.sqlite"
 --output "oracle:User/Pass@TargetDB"
+--output "mssql:Server=.;Database=TargetDB;Trusted_Connection=True;"
+--output "postgresql:Host=localhost;Database=TargetDB;Username=postgres;"
 ```
 
 ---
 
-## YAML Job Files
+## Job Lifecycle (YAML & CLI)
 
-Define reusable export configurations in YAML. Use `--job` to load, `--export-job` to export current CLI config.
+QueryDump is designed for an iterative workflow: **Experiment** in CLI, **Export** to YAML, and **Automate** in production.
 
-### Example Job File
+### 1. The Iterative Workflow
+```bash
+# A. Experiment interactively (Dry Run + Sampling)
+./querydump --input "oracle:..." --query "SELECT * FROM Users" --output users.csv --sample-rate 0.1 --dry-run
 
+# B. Export stable configuration to YAML
+./querydump --input "oracle:..." --query "SELECT * FROM Users" --output users.parquet --fake "NAME:name.fullName" --export-job job.yaml
+
+# C. Run in production using the job file
+./querydump --job job.yaml
+```
+
+### 2. Job File Example
 ```yaml
-# Source: DuckDB database with customers table
-input: duckdb:customers.db
-query: SELECT id, name, email, phone FROM customers
-output: customers_anon.parquet
+input: oracle:Data Source=PROD_DB;User Id=scott;Password=tiger;
+query: SELECT id, name, email, phone FROM subscribers
+output: subscribers_anonymized.parquet
 
-# Transformers applied in order (same as CLI order)
+# Data Processing Pipeline (Transformers)
 transformers:
-  # 1. Set phone column to NULL
   - null:
       mappings:
-        phone: ~  # Value is ignored, only key matters if no column to list
-
-  # 2. Replace name and email with fake data
-  - fake:
+        phone: ~
+  - fake: 
       mappings:
         name: name.fullName
         email: internet.email
-        # Note: Values are based on Bogus capabilities
       options:
         locale: fr
-        seed-column: id  # Same id = same fake values
+        seed-column: id
 
-# Provider-specific Options
-# Use standard aliases (sqlite, mssql, pg, oracle, duckdb)
+# Provider-specific Settings
 provider-options:
-  sqlite:
-    table: Users_Anon
-    strategy: Recreate
-  mssql:
-    table: [Inventory].[Items]
-    strategy: Truncate
-    bulk-size: 10000
+  parquet:
+    compression: snappy
 ```
 
-### Usage
-
+### 3. CLI Overrides
+You can override job file settings at runtime:
 ```bash
-# Run from job file
-./querydump --job export_config.yaml
-
-# Run for test (overrides limit/dry-run only)
-./querydump --job export_config.yaml --limit 100 --dry-run
-
-# Export current CLI config to YAML
-./querydump --input "..." --query "..." --output "..." --fake "NAME:name.fullName" --export-job config.yaml
+# Run job but limit output for a quick check
+./querydump --job job.yaml --limit 100 --dry-run
 ```
 
 ---
 
-## Data Transformation
+## Data Processing Pipeline
 
-Transformers are applied in **CLI argument order**. Each `--null`, `--overwrite`, `--fake`, or `--format` creates a pipeline step.
+QueryDump processes data in a streaming pipeline. Transformations are applied in **CLI argument order**. 
 
-### Transform Order Example
+> 💡 **Grouping Rule**: Consecutive arguments of the same type (e.g., three `--fake`) form a **single pipeline step** to optimize performance.
 
+### 1. Transformer Types
+| Feature | Flag | Description |
+|---------|------|-------------|
+| **Nullify**| `--null` | Sets specific columns to `null` |
+| **Mask** | `--mask` | Replaces characters using pattern (e.g., `###-**`) |
+| **Fake** | `--fake` | Inserts realistic fake data (Bogus) |
+| **Format** | `--format` | .NET string templates (e.g. `{NAME}: {DATE:d}`) |
+| **Script** | `--script` | Custom Javascript logic (Jint) |
+| **Static** | `--overwrite`| Forces a fixed value |
+| **Filter** | `--project` / `--drop` | Whitelist or blacklist columns |
+
+### 2. Common Configurations
+#### Basics: Null, Overwrite, Format
 ```bash
---null "PHONE" --fake "NAME:name.fullName" --project "ID,NAME"
-```
-Pipeline: `Null → Fake → Project`
-
-```bash
---fake "NAME:name.fullName" --null "PHONE" --format "DISPLAY:{NAME}"
-```
-Pipeline: `Fake → Null → Format`
-
-### Setting Columns to Null
-
-```bash
---null "SENSITIVE_DATA" --null "INTERNAL_ID"
-```
-
-### Static Value Overwrite
-
-```bash
---overwrite "STATUS:anonymized"
---overwrite "COMMENT:redacted"
-```
-
-### Format Templates
-
-Use `{COLUMN}` placeholders with optional [.NET format specifiers](https://learn.microsoft.com/en-us/dotnet/standard/base-types/formatting-types):
-
-```bash
+--null "INTERNAL_ID" \
+--overwrite "STATUS:anonymized" \
 --format "DISPLAY_NAME:{FIRSTNAME} {LASTNAME}"
---format "DATE_FR:{DATE:dd/MM/yyyy}"
---format "AMOUNT:{PRICE:0.00}€"
 ```
 
-### Mask Patterns
-
-Mask data using patterns where `#` preserves the original character and any other character replaces it:
-
+#### Advanced: Masking & Scripting
 ```bash
---mask "EMAIL:###****"        # "test@example.com" → "tes****ample.com"
---mask "PHONE:##-##-****"     # "0612345678" → "06-12-****5678"
---mask "SSN:***-**-####"      # "123-45-6789" → "***-**-6789"
-```
-
-> 💡 If the pattern is shorter than the data, remaining characters are preserved.
-
----
-
-## Anonymization (Fake Data)
-
-Replace real data with fake values using [Bogus](https://github.com/bchavez/Bogus?tab=readme-ov-file#bogus-api-support).
-
-### Basic Usage
-
-```bash
-./querydump --input "duckdb:customers.db" \
-  --query "SELECT NAME, EMAIL FROM customers" \
-  --output customers_anon.csv \
-  --fake "NAME:name.fullName" \
-  --fake "EMAIL:internet.email" \
-  --fake-locale fr
-```
-
-### Deterministic Mode
-
-**Column-based seeding** (same input value → same fake output):
-```bash
---fake "USERNAME:name.fullName" --fake-seed-column USER_ID
-```
-
-**Row-index seeding** (reproducible order-based):
-```bash
---fake "USERNAME:name.fullName" --fake-deterministic
-```
-
-> ⚠️ Row-index seeding depends on query order. If rows are added, removed, or reordered, fake values will shift. Prefer `--fake-seed-column` for stable determinism.
-
-### Variant Suffix
-
-Get different values from the same faker:
-```bash
---fake "EMAIL_PERSO:internet.email"
---fake "EMAIL_PRO:internet.email#work"
-```
-
-### Scripting (Javascript)
-
-Calculated columns using Javascript (Jint):
-```bash
+--mask "EMAIL:###****" \
 --script "FULL_NAME:return row.FIRSTNAME + ' ' + row.LASTNAME;"
---script "IS_ADULT:return row.AGE >= 18;"
 ```
 
-### Column Selection
-
-Filter output columns:
+#### Anonymization (Fake Data)
+Use [Bogus API](https://github.com/bchavez/Bogus) selectors for realistic data.
 ```bash
-# Keep only specified columns
---project "ID, NAME, EMAIL"
-
-# Remove temporary or sensitive columns
---drop "INTERNAL_ID, TEMP_CALCULATION"
+--fake "NAME:name.fullName" --fake "EMAIL:internet.email" --fake-locale fr
 ```
 
-### List Available Fakers
-
-```bash
-./querydump --fake-list
-```
+### 3. Pipeline Control
+- **Determinism**: Use `--fake-seed-column ID` for stable fake values across runs.
+- **Skip Nulls**: Use `--fake-skip-null`, `--mask-skip-null`, or `--format-skip-null` to preserve existing null values.
+- **Filtering**: `--project "ID,NAME,EMAIL"` (keep only these) or `--drop "TEMP_COL"` (remove this).
 
 ---
 
-## CLI Reference
+### Full CLI Reference
 
-### Core Options
-
+#### 1. Core Options
 | Option | Alias | Description | Default |
 |--------|-------|-------------|---------|
 | `--input` | `-i` | Input connection string (prefixed) | Required* |
@@ -247,68 +169,30 @@ Filter output columns:
 | `--job` | | Path to YAML job file | - |
 | `--export-job` | | Export config to YAML file and exit | - |
 | `--batch-size` | `-b` | Rows per batch | `50000` |
-| `--limit` | | Maximum rows to export (overrides YAML) | `0` |
-| `--dry-run` | | Display source/target schemas and sample row (overrides YAML) | `false` |
-| `--connection-timeout` | | Connection timeout (seconds) | `10` |
-| `--query-timeout` | | Query timeout (seconds, 0=none) | `0` |
-| `--unsafe-query` | | Bypass SQL validation (allow DDL) | `false` |
-| `--log` | | Log file path (debug + memory stats) | - |
+| `--limit` | | Max rows to export | `0` (unlimited) |
+| `--dry-run` | | Preview schemas & sample data | `false` |
+| `--log [FILE]` | | Log file path (incl. memory stats) | - |
 
-> \* Required unless `--job` is specified. When using `--job`, these options are ignored.
+#### 2. Debugging & Performance
+- **Enable Trace**: Set env var `DEBUG=1` to see full stack traces.
+- **Memory Stats**: Use `--log` to see Managed vs WorkingSet memory usage after each batch.
 
-### Troubleshooting & Logs
+#### 2. Pipeline Tools (Flags)
+Detailed lists for fine-tuning your data processing.
 
-Use the `--log <file>` option to generate a debug log. This log includes **Memory Stats** (Managed vs WorkingSet) printed after each batch, which is useful for diagnosing memory leaks.
+**Transformers:**
+- `--null` / `--overwrite` / `--format` / `--mask` / `--script`
+- `--project` (whitelist) / `--drop` (blacklist)
 
-```bash
-./querydump ... --log export.log
-```
+**Pipeline Modifiers:**
+- `--fake-locale` (en, fr, etc.)
+- `--fake-seed-column [COL]` (Deterministic)
+- `--fake-deterministic` (Row-index based)
+- `--{transformer}-skip-null` (Preserve original nulls)
 
-Log entry example:
-```
-[DBG] Memory Stats: Managed=240MB, WorkingSet=2803MB
-```
-- **Managed**: .NET memory (GC).
-- **WorkingSet**: Total physical memory (includes native drivers like DuckDB/Oracle).
+#### 3. Database Writer Options
+Customize target behavior per provider.
 
-### Transformation Options
-
-| Option | Description |
-|--------|-------------|
-| `--null` | Set column(s) to null (repeatable) |
-| `--overwrite` | `COLUMN:value` static replacement (repeatable) |
-| `--format` | `TARGET:{SOURCE}` or `{SOURCE:fmt}` template (repeatable) |
-| `--script` | `COLUMN:js_code` (e.g. `is_adult:return row.age >= 18;`) |
-| `--project` | `Col1, Col2` Keep only specific columns (whitelist) |
-| `--drop` | `Col3` Remove specific columns (blacklist) |
-
-### Skip-Null Options
-
-Prevent transformers from modifying null values:
-
-| Option | Description |
-|--------|-------------|
-| `--overwrite-skip-null` | Don't overwrite null values |
-| `--fake-skip-null` | Don't generate fake for null values |
-| `--format-skip-null` | Skip if all source data is null |
-
-### Anonymization Options
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--fake` | `COLUMN:faker.method` mapping (repeatable) | - |
-| `--mask` | `COLUMN:pattern` masking (`#` = keep) (repeatable) | - |
-| `--mask-skip-null` | Don't mask null values | `false` |
-| `--fake-locale` | Locale (en, fr, de, ja...) | `en` |
-| `--fake-seed` | Global seed for reproducibility | - |
-| `--fake-seed-column` | Column for deterministic seeding | - |
-| `--fake-deterministic` | Row-index based determinism | `false` |
-| `--fake-list` | List fakers and exit | - |
-
-### Database Writer Options
-
-| Option | Description | Default |
-|--------|-------------|---------|
 | Option | Description | Providers |
 |--------|-------------|-----------|
 | `--{prefix}-table` | Target table name | All (e.g. `--ora-table`, `--mssql-table`, `--pg-table`) |
@@ -333,7 +217,6 @@ Prevent transformers from modifying null values:
 
 ---
 
----
 ## Testing
 
 For information on how to run and extend the integration tests, see [Integration Tests](tests/scripts/README.md).

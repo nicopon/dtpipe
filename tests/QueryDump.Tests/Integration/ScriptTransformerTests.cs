@@ -23,7 +23,7 @@ public class ScriptTransformerTests
         // Arrange
         var options = new ScriptOptions
         {
-            Mappings = new[] { "Name:value.substring(0,2)" }
+            Mappings = new[] { "Name:row.Name.substring(0,2)" }
         };
         var transformer = new ScriptDataTransformer(options);
         var columns = new List<ColumnInfo>
@@ -44,7 +44,7 @@ public class ScriptTransformerTests
         // Arrange
         var options = new ScriptOptions
         {
-            Mappings = new[] { "Name:value.toUpperCase()" }
+            Mappings = new[] { "Name:row.Name.toUpperCase()" }
         };
         var transformer = new ScriptDataTransformer(options);
         var columns = new List<ColumnInfo>
@@ -75,7 +75,7 @@ public class ScriptTransformerTests
         
         var options = new ScriptOptions
         {
-            Mappings = new[] { "Val:value * 2" }
+            Mappings = new[] { "Val:row.Val * 2" }
         };
         var transformer = new ScriptDataTransformer(options);
         var columns = new[] { new ColumnInfo("Val", typeof(int), false) };
@@ -121,7 +121,7 @@ public class ScriptTransformerTests
         // Arrange
         var options = new ScriptOptions
         {
-            Mappings = new[] { "Val:value + '_processed'" },
+            Mappings = new[] { "Val:row.Val + '_processed'" },
             SkipNull = true
         };
         var transformer = new ScriptDataTransformer(options);
@@ -142,5 +142,31 @@ public class ScriptTransformerTests
         var row2 = new object?[] { "test" };
         transformer.Transform(row2);
         row2[0].Should().Be("test_processed");
+    }
+
+    [Fact]
+    public async Task Transform_CanAccessOtherColumns_UsingRow()
+    {
+        // Arrange
+        var options = new ScriptOptions
+        {
+            Mappings = new[] { "FullName:return row.FirstName + ' ' + row.LastName;" }
+        };
+        var transformer = new ScriptDataTransformer(options);
+        var columns = new List<ColumnInfo>
+        {
+            new("FirstName", typeof(string), false),
+            new("LastName", typeof(string), false),
+            new("FullName", typeof(string), false)
+        };
+        
+        await transformer.InitializeAsync(columns);
+        var row = new object?[] { "Alice", "Smith", "" };
+
+        // Act
+        transformer.Transform(row);
+
+        // Assert
+        row[2].Should().Be("Alice Smith");
     }
 }

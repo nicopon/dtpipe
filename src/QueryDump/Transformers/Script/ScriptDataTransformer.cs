@@ -16,8 +16,8 @@ public sealed class ScriptDataTransformer : IDataTransformer, IRequiresOptions<S
     
     // State initialized in InitializeAsync
     private Dictionary<string, int>? _columnNameToIndex;
+    private string[]? _columnNames;
     private ScriptColumnProcessor[]? _processors;
-    private int[]? _processingOrder;
     
     // Lock for thread safety of Jint Engine
     private readonly object _engineLock = new();
@@ -53,6 +53,7 @@ public sealed class ScriptDataTransformer : IDataTransformer, IRequiresOptions<S
             return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
         }
 
+        _columnNames = columns.Select(c => c.Name).ToArray();
         _columnNameToIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < columns.Count; i++)
         {
@@ -60,22 +61,22 @@ public sealed class ScriptDataTransformer : IDataTransformer, IRequiresOptions<S
         }
 
         var processors = new List<ScriptColumnProcessor>();
-        var processingOrder = new List<int>();
 
-        // We prepare a JS function for each mapped column
-        // function col_INDEX(value) { return ...userScript...; }
-        
         foreach (var (colName, script) in _mappings)
         {
             if (_columnNameToIndex.TryGetValue(colName, out var colIndex))
             {
-                // Wrap user script in a function to allow return value capture
-                // If user scipt is an expression like "value.slice(0,2)", we return it.
-                // If it's complex code block, user must handle return? 
-                // Requirement said: "return {script_to_process}"
-                // So we wrap it as: 
                 var functionName = $"proc_{colIndex}";
-                var wrappedScript = $"function {functionName}(value) {{ return {script}; }}";
+                
+                // If the script contains a return statement, use it as is.
+                // Otherwise, wrap it to return the expression result.
+                string body = script.Trim();
+                if (!body.Contains("return ") && !body.EndsWith(";"))
+                {
+                    body = "return " + body + ";";
+                }
+                
+                var wrappedScript = $"function {functionName}(row) {{ {body} }}";
                 
                 lock(_engineLock)
                 {
@@ -83,22 +84,27 @@ public sealed class ScriptDataTransformer : IDataTransformer, IRequiresOptions<S
                 }
 
                 processors.Add(new ScriptColumnProcessor(colIndex, functionName));
-                processingOrder.Add(colIndex);
             }
         }
 
         _processors = processors.ToArray();
-        _processingOrder = processingOrder.ToArray();
 
         return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
     }
 
     public object?[] Transform(object?[] row)
     {
-        if (_processors == null || _processors.Length == 0) return row;
+        if (_processors == null || _processors.Length == 0 || _columnNames == null) return row;
 
         lock (_engineLock)
         {
+            // Build a JS object representing the current row
+            var jsRow = new JsObject(_engine);
+            for (int i = 0; i < row.Length; i++)
+            {
+                jsRow.Set(_columnNames[i], JsValue.FromObject(_engine, row[i]));
+            }
+
             foreach (var processor in _processors)
             {
                 var originalValue = row[processor.ColumnIndex];
@@ -111,8 +117,8 @@ public sealed class ScriptDataTransformer : IDataTransformer, IRequiresOptions<S
                 // Convert .NET value to JS value if needed, or let Jint handle it
                 // Jint handles basic types well.
                 
-                // Call the pre-compiled function
-                var result = _engine.Invoke(processor.FunctionName, originalValue);
+                // Call the pre-compiled function with full row
+                var result = _engine.Invoke(processor.FunctionName, jsRow);
 
                 // Convert back to .NET
                 // Depending on type, we might need specific handling. 

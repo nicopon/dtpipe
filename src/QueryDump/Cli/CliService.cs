@@ -123,7 +123,6 @@ public class CliService
                         {
                             var key = kvp.Key;
                             
-                            // Check if this factory handles this key (by prefix or provider name)
                             // Check writers
                             if (contributor is IDataWriterFactory wFactory)
                             {
