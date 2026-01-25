@@ -86,14 +86,17 @@ rm postgres_out.csv
 echo "------------------------------------------------"
 echo "Starting MSSQL Test..."
 
-docker run --name querydump-mssql -e "ACCEPT_EULA=Y" -e "SA_PASSWORD=MySecretPassword123!" -p 1433:1433 -d mcr.microsoft.com/mssql/server:2022-latest
+docker run --name querydump-mssql -e "ACCEPT_EULA=Y" -e "MSSQL_SA_PASSWORD=MySecretPassword123!" -p 1433:1433 -d mcr.microsoft.com/azure-sql-edge:latest
 
 # Wait for MSSQL (slower startup)
 echo "Waiting for MSSQL (15s)..."
 sleep 15
 
-# Create seed data (using sqlcmd inside container)
-docker exec -i querydump-mssql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "MySecretPassword123!" -C <<EOF
+# Create seed data using mssql-tools container (since sqlcmd is missing in azure-sql-edge)
+# We use --network container:... to access the DB container as localhost
+echo "Seeding data via mssql-tools..."
+
+docker run --rm --network container:querydump-mssql -i mcr.microsoft.com/mssql-tools /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "MySecretPassword123!" <<EOF
 CREATE DATABASE TestDB;
 GO
 USE TestDB;
@@ -101,6 +104,9 @@ CREATE TABLE Users (Id INT IDENTITY(1,1) PRIMARY KEY, Name NVARCHAR(50), Email N
 INSERT INTO Users (Name, Email) VALUES ('Charlie', 'charlie@example.com'), ('David', 'david@example.com');
 GO
 EOF
+
+# Wait a bit for commit/flush if needed
+sleep 2
 
 echo "Running export from MSSQL..."
 $QUERYDUMP_BIN --input "mssql:Server=localhost,1433;Database=TestDB;User Id=sa;Password=MySecretPassword123!;TrustServerCertificate=True" \

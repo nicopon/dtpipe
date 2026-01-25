@@ -2,8 +2,12 @@
 set -e
 
 # Setup
-SCRIPT_DIR="$(dirname "$0")"
-source "$SCRIPT_DIR/common.sh" # Load PROJECT_ROOT, QUERYDUMP, etc.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# Path to binary (Release build)
+QUERYDUMP="$PROJECT_ROOT/dist/release/querydump"
+
+source "$SCRIPT_DIR/common.sh" # Load helpers
 OUTPUT_DIR="$SCRIPT_DIR/output"
 mkdir -p "$OUTPUT_DIR"
 

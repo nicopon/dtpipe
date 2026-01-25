@@ -8,18 +8,16 @@ TEST_DIR="$ROOT_DIR/tests/output/yaml_options"
 rm -rf "$TEST_DIR"
 mkdir -p "$TEST_DIR"
 
-DB_IN="$TEST_DIR/input.db"
 DB_OUT="$TEST_DIR/output.db"
 JOB_FILE="$TEST_DIR/job.yaml"
-
-# Create input db
-sqlite3 "$DB_IN" "CREATE TABLE Source (id INTEGER, name TEXT); INSERT INTO Source VALUES (1, 'Test');"
+CHECK_TABLE_CSV="$TEST_DIR/check_table.csv"
+CHECK_DATA_CSV="$TEST_DIR/check_data.csv"
 
 # Create Job File with providerOptions
 # We verify that 'strategy' (enum) and 'table' (string) are correctly mapped
 cat <<EOF > "$JOB_FILE"
-input: "$DB_IN"
-query: "SELECT * FROM Source"
+input: "duckdb::memory:"
+query: "SELECT 1 as id, 'Test' as name"
 output: "sqlite:$DB_OUT"
 provider-options:
   sqlite:
@@ -27,26 +25,36 @@ provider-options:
     strategy: "Recreate"
 EOF
 
-echo "Running QueryDump..."
+echo "Running QueryDump (Creation)..."
 "$ROOT_DIR/dist/release/querydump" --job "$JOB_FILE"
 
 echo "Verifying output..."
 
-# 1. Verify Table Name
-TABLE_COUNT=$(sqlite3 "$DB_OUT" "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='CustomTable'")
-if [[ "$TABLE_COUNT" -eq "1" ]]; then
+# 1. Verify Table Name using QueryDump
+# We query sqlite_master table from the generated DB
+"$ROOT_DIR/dist/release/querydump" --input "sqlite:$DB_OUT" \
+    --query "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='CustomTable'" \
+    --output "csv:$CHECK_TABLE_CSV"
+
+TABLE_COUNT=$(tail -n 1 "$CHECK_TABLE_CSV" | tr -d '\r' | tr -d ' ')
+
+if [[ "$TABLE_COUNT" == "1" ]]; then
     echo "[PASS] Table 'CustomTable' found."
 else
-    echo "[FAIL] Table 'CustomTable' NOT found."
+    echo "[FAIL] Table 'CustomTable' NOT found (Count: $TABLE_COUNT)."
     exit 1
 fi
 
-# 2. Verify Data
-ROW_COUNT=$(sqlite3 "$DB_OUT" "SELECT count(*) FROM CustomTable")
-if [[ "$ROW_COUNT" -eq "1" ]]; then
+# 2. Verify Data using QueryDump
+"$ROOT_DIR/dist/release/querydump" --input "sqlite:$DB_OUT" \
+    --query "SELECT count(*) as cnt FROM CustomTable" \
+    --output "csv:$CHECK_DATA_CSV"
+
+ROW_COUNT=$(tail -n 1 "$CHECK_DATA_CSV" | tr -d '\r' | tr -d ' ')
+if [[ "$ROW_COUNT" == "1" ]]; then
     echo "[PASS] Data row found."
 else
-    echo "[FAIL] Data row NOT found."
+    echo "[FAIL] Data row NOT found (Count: $ROW_COUNT)."
     exit 1
 fi
 

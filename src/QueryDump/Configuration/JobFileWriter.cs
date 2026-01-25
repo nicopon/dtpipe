@@ -30,6 +30,8 @@ public static class JobFileWriter
             UnsafeQuery = job.UnsafeQuery ? true : null,
             ConnectionTimeout = job.ConnectionTimeout != 10 ? job.ConnectionTimeout : null,
             QueryTimeout = job.QueryTimeout != 0 ? job.QueryTimeout : null,
+            SampleRate = Math.Abs(job.SampleRate - 1.0) > 0.0001 ? job.SampleRate : null,
+            SampleSeed = job.SampleSeed,
             Transformers = ConvertTransformers(job.Transformers)
         };
 
@@ -81,6 +83,8 @@ public static class JobFileWriter
         public bool? UnsafeQuery { get; set; }
         public int? ConnectionTimeout { get; set; }
         public int? QueryTimeout { get; set; }
+        public double? SampleRate { get; set; }
+        public int? SampleSeed { get; set; }
         public List<Dictionary<string, object>>? Transformers { get; set; }
     }
 }

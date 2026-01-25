@@ -69,7 +69,7 @@ eval $CMD1
 echo "----------------------------------------"
 echo "Step 2: Postgres -> MSSQL"
 echo "----------------------------------------"
-MSSQL_CONN="sqlserver:Server=localhost,1434;Database=master;User Id=sa;Password=Password123!;TrustServerCertificate=True"
+MSSQL_CONN="mssql:Server=localhost,1434;Database=master;User Id=sa;Password=Password123!;TrustServerCertificate=True"
 $QUERYDUMP --input "$PG_CONN" \
            --query "SELECT * FROM \"Export\"" \
            --output "$MSSQL_CONN" \
@@ -86,8 +86,8 @@ ORACLE_CONN="oracle:Data Source=localhost:1522/FREEPDB1;User Id=testuser;Passwor
 $QUERYDUMP --input "$MSSQL_CONN" \
            --query "SELECT * FROM ExportedData" \
            --output "$ORACLE_CONN" \
-           --oracle-writer-table "EXPORT_DATA" \
-           --oracle-writer-strategy "Truncate" # Ensure clean table
+           --ora-table "EXPORT_DATA" \
+           --ora-strategy "Truncate" # Ensure clean table
 
 echo "----------------------------------------"
 echo "Step 4: Oracle -> Parquet"

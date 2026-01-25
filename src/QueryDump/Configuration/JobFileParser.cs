@@ -57,6 +57,8 @@ public static partial class JobFileParser
             UnsafeQuery = yamlJob.UnsafeQuery ?? false,
             ConnectionTimeout = yamlJob.ConnectionTimeout ?? 10,
             QueryTimeout = yamlJob.QueryTimeout ?? 0,
+            SampleRate = yamlJob.SampleRate ?? 1.0,
+            SampleSeed = yamlJob.SampleSeed,
             Transformers = ParseTransformers(yamlJob.Transformers),
             ProviderOptions = yamlJob.ProviderOptions
         };
@@ -167,6 +169,8 @@ public static partial class JobFileParser
         public bool? UnsafeQuery { get; set; }
         public int? ConnectionTimeout { get; set; }
         public int? QueryTimeout { get; set; }
+        public double? SampleRate { get; set; }
+        public int? SampleSeed { get; set; }
         public List<Dictionary<object, object>>? Transformers { get; set; }
         public Dictionary<string, Dictionary<string, object>>? ProviderOptions { get; set; }
     }
