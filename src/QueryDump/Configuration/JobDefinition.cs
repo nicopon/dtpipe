@@ -60,6 +60,24 @@ public record JobDefinition
     /// Path to the log file.
     /// </summary>
     public string? LogPath { get; init; }
+
+    /// <summary>
+    /// Probability 0.0-1.0 to include a row.
+    /// </summary>
+    public double SampleRate { get; init; } = 1.0;
+
+    /// <summary>
+    /// Seed for random sampling.
+    /// </summary>
+    /// <summary>
+    /// Seed for random sampling.
+    /// </summary>
+    public int? SampleSeed { get; init; }
+
+    /// <summary>
+    /// Provider-specific options (e.g. oracle-writer: { table: "MY_TABLE" }).
+    /// </summary>
+    public Dictionary<string, Dictionary<string, object>>? ProviderOptions { get; init; }
 }
 
 /// <summary>

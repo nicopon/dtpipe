@@ -15,7 +15,7 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector
     private SqliteConnection? _connection;
     private IReadOnlyList<ColumnInfo>? _columns;
     private string _tableName = "Export";
-    private string _strategy = "Append";
+    private SqliteWriteStrategy _strategy = SqliteWriteStrategy.Append;
 
     public long BytesWritten { get; private set; }
 
@@ -159,13 +159,13 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector
     {
         using var cmd = _connection!.CreateCommand();
 
-        if (_strategy.Equals("Recreate", StringComparison.OrdinalIgnoreCase))
+        if (_strategy == SqliteWriteStrategy.Recreate)
         {
             cmd.CommandText = $"DROP TABLE IF EXISTS \"{_tableName}\"";
             await cmd.ExecuteNonQueryAsync(ct);
             await CreateTableAsync(ct);
         }
-        else if (_strategy.Equals("Truncate", StringComparison.OrdinalIgnoreCase))
+        else if (_strategy == SqliteWriteStrategy.Truncate)
         {
             cmd.CommandText = $"SELECT name FROM sqlite_master WHERE type='table' AND name='{_tableName}'";
             var exists = await cmd.ExecuteScalarAsync(ct) != null;

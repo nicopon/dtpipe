@@ -9,6 +9,7 @@ using QueryDump.Core.Options;
 using QueryDump.Core.Pipelines;
 using QueryDump.Core.Validation;
 using Serilog;
+using QueryDump.Cli.Infrastructure;
 
 namespace QueryDump.Cli;
 
@@ -48,12 +49,14 @@ public class CliService
         var unsafeQueryOption = new Option<bool>("--unsafe-query") { Description = "Bypass SQL query validation (allows DDL/DML - use with caution!)", DefaultValueFactory = _ => false };
         var dryRunOption = new Option<int>("--dry-run") { Description = "Dry-run mode: display pipeline trace analysis (N = sample count, default 1)", DefaultValueFactory = _ => 0, Arity = ArgumentArity.ZeroOrOne };
         var limitOption = new Option<int>("--limit") { Description = "Maximum rows to export (0 = unlimited)", DefaultValueFactory = _ => 0 };
+        var sampleRateOption = new Option<double>("--sample-rate") { Description = "Sampling probability (0.0 to 1.0). e.g. 0.1 for 10%", DefaultValueFactory = _ => 1.0 };
+        var sampleSeedOption = new Option<int?>("--sample-seed") { Description = "Seed for reproducible sampling" };
         var jobOption = new Option<string?>("--job") { Description = "Path to YAML job file" };
         var exportJobOption = new Option<string?>("--export-job") { Description = "Export current configuration to YAML file and exit" };
         var logOption = new Option<string?>("--log") { Description = "Path to log file" };
         
         // Core Help Options
-        var coreOptions = new List<Option> { inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption, unsafeQueryOption, dryRunOption, limitOption, jobOption, exportJobOption, logOption };
+        var coreOptions = new List<Option> { inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption, unsafeQueryOption, dryRunOption, limitOption, sampleRateOption, sampleSeedOption, jobOption, exportJobOption, logOption };
 
         var rootCommand = new RootCommand("QueryDump - Export database data to Parquet or CSV (DuckDB-optimized)");
         foreach(var opt in coreOptions) rootCommand.Options.Add(opt);
@@ -72,118 +75,100 @@ public class CliService
 
         rootCommand.SetAction(async (parseResult, cancellationToken) =>
         {
-            // 1. Contributor Autonomous Handling (e.g. valid flags that cause early exit like --fake-list, --version custom)
+            // 1. Contributor Autonomous Handling
             foreach (var contributor in _contributors)
             {
                 var exitCode = await contributor.HandleCommandAsync(parseResult, cancellationToken);
-                if (exitCode.HasValue)
-                {
-                    return exitCode.Value;
-                }
+                if (exitCode.HasValue) return exitCode.Value;
             }
 
-            // 2. Handle Job File or CLI args
-            var jobFile = parseResult.GetValue(jobOption);
-            JobDefinition job;
+            // 2. Build Job Definition
+            var (job, jobExitCode) = RawJobBuilder.Build(
+                parseResult,
+                jobOption, inputOption, queryOption, outputOption, 
+                connectionTimeoutOption, queryTimeoutOption, batchSizeOption, 
+                unsafeQueryOption, limitOption, sampleRateOption, sampleSeedOption, logOption);
 
-            if (!string.IsNullOrWhiteSpace(jobFile))
-            {
-                // Load from job file
-                try
-                {
-                    job = JobFileParser.Parse(jobFile);
-                    Console.Error.WriteLine($"Loaded job file: {jobFile}");
-                    
-                // CLI args can override execution-time parameters only
-                    // (dry-run and limit are not part of job definition, they're execution parameters)
-                    if (parseResult.GetValue(limitOption) > 0) job = job with { Limit = parseResult.GetValue(limitOption) };
-                    if (parseResult.GetValue(limitOption) > 0) job = job with { Limit = parseResult.GetValue(limitOption) };
-                    var dryRunVal = ParseDryRunFromArgs(Environment.GetCommandLineArgs());
-                    if (dryRunVal > 0) job = job with { DryRun = true };
-                    
-                    var logPathOverride = parseResult.GetValue(logOption);
-                    if (!string.IsNullOrEmpty(logPathOverride)) job = job with { LogPath = logPathOverride };
-                }
-                catch (Exception ex)
-                {
-                    Console.Error.WriteLine($"Error loading job file: {ex.Message}");
-                    return 1;
-                }
-            }
-            else
-            {
-                // CLI mode: validate required args
-                var query = parseResult.GetValue(queryOption);
-                var output = parseResult.GetValue(outputOption);
-                var input = parseResult.GetValue(inputOption);
+            if (jobExitCode != 0) return jobExitCode;
 
-                if (string.IsNullOrWhiteSpace(query))
-                {
-                    Console.Error.WriteLine("Error: Option '--query' is required (or use --job).");
-                    return 1;
-                }
-
-                if (string.IsNullOrWhiteSpace(output))
-                {
-                    Console.Error.WriteLine("Error: Option '--output' is required (or use --job).");
-                    return 1;
-                }
-
-                if (string.IsNullOrWhiteSpace(input))
-                {
-                    Console.Error.WriteLine("Error: --input is required.");
-                    return 1;
-                }
-
-                job = new JobDefinition
-                {
-                    Input = input,
-                    Query = query,
-                    Output = output,
-                    ConnectionTimeout = parseResult.GetValue(connectionTimeoutOption),
-                    QueryTimeout = parseResult.GetValue(queryTimeoutOption),
-                    BatchSize = parseResult.GetValue(batchSizeOption),
-                    UnsafeQuery = parseResult.GetValue(unsafeQueryOption),
-                    DryRun = false, // DryRun parsed separately for custom handling
-                    Limit = parseResult.GetValue(limitOption),
-                    LogPath = parseResult.GetValue(logOption)
-                };
-            }
-
-            // 2b. Handle --export-job: export configuration to YAML and exit
+            // 3. Handle --export-job
             var exportJobPath = parseResult.GetValue(exportJobOption);
             if (!string.IsNullOrWhiteSpace(exportJobPath))
             {
-                // Build TransformerConfig list from CLI args for export
-                var exportTransformerFactories = _contributors.OfType<IDataTransformerFactory>().ToList();
-                job = job with { Transformers = BuildTransformerConfigsFromCli(parseResult, exportTransformerFactories) };
+                var factoryList = _contributors.OfType<IDataTransformerFactory>().ToList();
+                var configs = RawJobBuilder.BuildTransformerConfigsFromCli(
+                    Environment.GetCommandLineArgs(), 
+                    factoryList, 
+                    _contributors);
                 
+                job = job with { Transformers = configs };
                 JobFileWriter.Write(exportJobPath, job);
                 return 0;
             }
 
-            // 3. Bind Options
+            // 4. Bind Options
             var registry = _serviceProvider.GetRequiredService<OptionsRegistry>();
+
+            // 4a. Hydrate from YAML ProviderOptions
+            if (job.ProviderOptions != null)
+            {
+                // We need to map provider prefix -> option type
+                // Contributors act as factory sources.
+                foreach (var contributor in _contributors)
+                {
+                   if (contributor is IDataFactory factory && factory is IDataWriterFactory or IStreamReaderFactory)
+                   {
+                        // Match keys in ProviderOptions
+                        foreach (var kvp in job.ProviderOptions)
+                        {
+                            var key = kvp.Key;
+                            
+                            // Check if this factory handles this key (by prefix or provider name)
+                            // Check writers
+                            if (contributor is IDataWriterFactory wFactory)
+                            {
+                                var optionsType = wFactory.GetSupportedOptionTypes().FirstOrDefault();
+                                if (optionsType != null && IsPrefixMatch(optionsType, key)) 
+                                {
+                                     var instance = registry.Get(optionsType);
+                                     ConfigurationBinder.Bind(instance, kvp.Value);
+                                     registry.RegisterByType(optionsType, instance);
+                                }
+                            }
+                            // Check readers
+                            else if (contributor is IStreamReaderFactory rFactory)
+                            {
+                                var optionsType = rFactory.GetSupportedOptionTypes().FirstOrDefault();
+                                if (optionsType != null && IsPrefixMatch(optionsType, key)) 
+                                {
+                                     var instance = registry.Get(optionsType);
+                                     ConfigurationBinder.Bind(instance, kvp.Value);
+                                     registry.RegisterByType(optionsType, instance);
+                                }
+                            }
+                        }
+                   }
+                }
+            }
+
+            // 4. Bind Options
             foreach(var contributor in _contributors)
             {
                 contributor.BindOptions(parseResult, registry);
             }
 
-            // Resolve Input (Reader)
+            // 5. Resolve Reader & Writer
             var readerFactories = _contributors.OfType<IStreamReaderFactory>().ToList();
             var (readerFactory, cleanedInput) = ResolveFactory(readerFactories, job.Input, "reader");
-            
             job = job with { Input = cleanedInput };
             
             Console.WriteLine($"Auto-detected input source: {readerFactory.ProviderName}");
 
-            // Resolve Output (Writer)
             var writerFactories = _contributors.OfType<IDataWriterFactory>().ToList();
             var (writerFactory, cleanedOutput) = ResolveFactory(writerFactories, job.Output, "writer");
-            
             job = job with { Output = cleanedOutput };
 
-            // Validate SQL query
+            // 6. Validate Query
             try
             {
                 SqlQueryValidator.Validate(job.Query, job.UnsafeQuery);
@@ -194,7 +179,7 @@ public class CliService
                 return 1;
             }
 
-            // Build DumpOptions
+            // 7. Build Runtime Options
             var options = new DumpOptions
             {
                 Provider = readerFactory.ProviderName,
@@ -205,25 +190,25 @@ public class CliService
                 QueryTimeout = job.QueryTimeout,
                 BatchSize = job.BatchSize,
                 UnsafeQuery = job.UnsafeQuery,
-                DryRunCount = ParseDryRunFromArgs(Environment.GetCommandLineArgs()),
+                DryRunCount = RawJobBuilder.ParseDryRunFromArgs(Environment.GetCommandLineArgs()),
                 Limit = job.Limit,
+                SampleRate = job.SampleRate,
+                SampleSeed = job.SampleSeed,
                 LogPath = job.LogPath
             };
 
-            // Configure Serilog Dynamic logging if requested
+            // 8. Configure Logging
             if (!string.IsNullOrEmpty(options.LogPath))
             {
                 Serilog.Log.Logger = new Serilog.LoggerConfiguration()
                     .MinimumLevel.Debug()
                     .WriteTo.File(options.LogPath)
                     .CreateLogger();
-                
-                // Add Serilog to Factory LATE to capture this config
                 _loggerFactory.AddSerilog();
             }
 
+            // 9. Build Pipeline & Run
             var exportService = _serviceProvider.GetRequiredService<ExportService>();
-            
             var transformerFactories = _contributors.OfType<IDataTransformerFactory>().ToList();
             List<IDataTransformer> pipeline;
             
@@ -334,135 +319,6 @@ public class CliService
         return pipeline;
     }
 
-    /// <summary>
-    /// Builds TransformerConfig list from CLI args for YAML export.
-    /// Uses TransformerPipelineBuilder logic to parse args, then converts to YAML-friendly format.
-    /// </summary>
-    private static List<TransformerConfig>? BuildTransformerConfigsFromCli(
-        ParseResult parseResult, 
-        List<IDataTransformerFactory> factories)
-    {
-        var configs = new List<TransformerConfig>();
-        var args = Environment.GetCommandLineArgs();
-        
-        // Build option map (option alias -> factory)
-        var optionToFactory = new Dictionary<string, IDataTransformerFactory>(StringComparer.OrdinalIgnoreCase);
-        foreach (var factory in factories)
-        {
-            if (factory is ICliContributor contributor)
-            {
-                foreach (var option in contributor.GetCliOptions())
-                {
-                    if (!string.IsNullOrEmpty(option.Name))
-                        optionToFactory[option.Name] = factory;
-                    foreach (var alias in option.Aliases)
-                        optionToFactory[alias] = factory;
-                }
-            }
-        }
-
-        // Group consecutive args by transformer type
-        IDataTransformerFactory? currentFactory = null;
-        var currentMappings = new Dictionary<string, string>();
-        var currentOptions = new Dictionary<string, string>();
-
-        for (int i = 0; i < args.Length; i++)
-        {
-            var arg = args[i];
-            
-            if (optionToFactory.TryGetValue(arg, out var factory))
-            {
-                // New transformer type? Flush current
-                if (factory != currentFactory && currentFactory != null && currentMappings.Count > 0)
-                {
-                    configs.Add(new TransformerConfig
-                    {
-                        Type = currentFactory.TransformerType,
-                        Mappings = currentMappings.Count > 0 ? new Dictionary<string, string>(currentMappings) : null,
-                        Options = currentOptions.Count > 0 ? new Dictionary<string, string>(currentOptions) : null
-                    });
-                    currentMappings.Clear();
-                    currentOptions.Clear();
-                }
-                
-                currentFactory = factory;
-                
-                // Get value
-                if (i + 1 < args.Length)
-                {
-                    var value = args[i + 1];
-                    i++;
-                    
-                    // Determine if this is a mapping or option based on the option name
-                    // Mapping options typically use the base transformer name (--fake, --format, etc.)
-                    // Config options have suffixes (--fake-locale, --fake-seed-column)
-                    var optionName = arg.TrimStart('-');
-                    var factoryType = factory.TransformerType;
-                    
-                    if (optionName.Equals(factoryType, StringComparison.OrdinalIgnoreCase))
-                    {
-                        // This is a mapping (e.g., --fake "NAME:faker.method")
-                        var parts = value.Split(':', 2);
-                        if (parts.Length == 2)
-                        {
-                            currentMappings[parts[0].Trim()] = parts[1];
-                        }
-                        else
-                        {
-                            // For --null, just store column name with empty value
-                            currentMappings[value.Trim()] = "";
-                        }
-                    }
-                    else
-                    {
-                        // This is a config option (e.g., --fake-locale "fr")
-                        // Strip prefix to get option key
-                        var optionKey = optionName;
-                        if (optionKey.StartsWith(factoryType + "-", StringComparison.OrdinalIgnoreCase))
-                        {
-                            optionKey = optionKey[(factoryType.Length + 1)..];
-                        }
-                        currentOptions[optionKey] = value;
-                    }
-                }
-            }
-        }
-        
-        // Flush last transformer
-        if (currentFactory != null && currentMappings.Count > 0)
-        {
-            configs.Add(new TransformerConfig
-            {
-                Type = currentFactory.TransformerType,
-                Mappings = currentMappings.Count > 0 ? new Dictionary<string, string>(currentMappings) : null,
-                Options = currentOptions.Count > 0 ? new Dictionary<string, string>(currentOptions) : null
-            });
-        }
-
-        return configs.Count > 0 ? configs : null;
-    }
-
-    /// <summary>
-    /// Custom parser for --dry-run with optional int value.
-    /// --dry-run alone = 1, --dry-run N = N, no flag = 0.
-    /// </summary>
-    private static int ParseDryRunFromArgs(string[] args)
-    {
-        for (int i = 0; i < args.Length; i++)
-        {
-            if (args[i] == "--dry-run")
-            {
-                // Check if next arg is a number
-                if (i + 1 < args.Length && int.TryParse(args[i + 1], out var count) && count > 0)
-                {
-                    return count;
-                }
-                // No number follows = default to 1 sample
-                return 1;
-            }
-        }
-        return 0;
-    }
 
     /// <summary>
     /// Resolves the appropriate factory for a given connection string or file path.
@@ -491,5 +347,17 @@ public class CliService
         }
 
         throw new InvalidOperationException($"Could not detect {typeName} provider for '{rawString}'. Please use a known prefix (e.g. 'duckdb:', 'oracle:') or file extension.");
+    }
+
+    private static bool IsPrefixMatch(Type optionsType, string configKey)
+    {
+        // Check "Prefix" static property
+        var prefixProp = optionsType.GetProperty("Prefix", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+        if (prefixProp != null)
+        {
+            var prefix = prefixProp.GetValue(null) as string;
+            if (string.Equals(prefix, configKey, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
     }
 }

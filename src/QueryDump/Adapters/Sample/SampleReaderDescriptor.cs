@@ -20,11 +20,6 @@ public class SampleReaderDescriptor : IProviderDescriptor<IStreamReader>
     {
         var sampleOptions = (SampleOptions)options;
         
-        // Parse connection string: "1000;Id=int;Name=string" (Prefix "sample:" is already stripped by CliService if resolved via prefix)
-        // However, if resolved via CanHandle, it might still have it? 
-        // CliService.ResolveFactory ALWAYS strips prefix if it matches by prefix.
-        // If it falls back to CanHandle, it returns rawString.
-        
         string config = connectionString;
         if (config.StartsWith("sample:", StringComparison.OrdinalIgnoreCase))
         {

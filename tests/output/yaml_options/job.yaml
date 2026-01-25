@@ -1,0 +1,7 @@
+input: "/Users/PonsartNi/Source/QueryDump/tests/scripts/../..//tests/output/yaml_options/input.db"
+query: "SELECT * FROM Source"
+output: "sqlite:/Users/PonsartNi/Source/QueryDump/tests/scripts/../..//tests/output/yaml_options/output.db"
+provider-options:
+  sqlite:
+    table: "CustomTable"
+    strategy: "Recreate"

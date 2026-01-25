@@ -166,7 +166,7 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
         var outputColumns = new List<ColumnInfo>(columns);
         foreach (var virtualCol in _virtualColumns)
         {
-            outputColumns.Add(new ColumnInfo(virtualCol, typeof(string), true, IsVirtual: true));
+            outputColumns.Add(new ColumnInfo(virtualCol, typeof(string), true));
         }
         
         return new ValueTask<IReadOnlyList<ColumnInfo>>(outputColumns);

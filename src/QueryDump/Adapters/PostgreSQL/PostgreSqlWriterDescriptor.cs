@@ -7,7 +7,7 @@ namespace QueryDump.Adapters.PostgreSQL;
 
 public class PostgreSqlWriterDescriptor : IProviderDescriptor<IDataWriter>
 {
-    public string ProviderName => "postgresql-writer";
+    public string ProviderName => "postgresql";
 
     public Type OptionsType => typeof(PostgreSqlWriterOptions);
 

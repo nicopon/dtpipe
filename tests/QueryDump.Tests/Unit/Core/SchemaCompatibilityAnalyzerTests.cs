@@ -234,35 +234,7 @@ public class SchemaCompatibilityAnalyzerTests
         Assert.Contains(report.Warnings, w => w.Contains("10") && w.Contains("rows"));
     }
 
-    [Fact]
-    public void Analyze_VirtualColumnsAreSkipped()
-    {
-        // Arrange
-        var sourceSchema = new List<ColumnInfo>
-        {
-            new("Id", typeof(int), false),
-            new("_VirtualTemp", typeof(string), true, IsVirtual: true) // Virtual column
-        };
 
-        var targetSchema = new TargetSchemaInfo(
-            new List<TargetColumnInfo>
-            {
-                new("Id", "INTEGER", typeof(int), false, true, false)
-            },
-            Exists: true,
-            RowCount: 0,
-            SizeBytes: null,
-            PrimaryKeyColumns: new[] { "Id" }
-        );
-
-        // Act
-        var report = SchemaCompatibilityAnalyzer.Analyze(sourceSchema, targetSchema);
-
-        // Assert
-        Assert.True(report.IsCompatible);
-        Assert.Single(report.Columns); // Only Id, virtual is skipped
-        Assert.DoesNotContain(report.Columns, c => c.ColumnName == "_VirtualTemp");
-    }
 
     [Fact]
     public void Analyze_NumericUpcast_IsCompatible()

@@ -90,6 +90,17 @@ transformers:
       options:
         locale: fr
         seed-column: id  # Same id = same fake values
+
+# Provider-specific Options
+# Use standard aliases (sqlite, mssql, pg, oracle, duckdb)
+provider-options:
+  sqlite:
+    table: Users_Anon
+    strategy: Recreate
+  mssql:
+    table: [Inventory].[Items]
+    strategy: Truncate
+    bulk-size: 10000
 ```
 
 ### Usage
@@ -114,9 +125,9 @@ Transformers are applied in **CLI argument order**. Each `--null`, `--overwrite`
 ### Transform Order Example
 
 ```bash
---null "PHONE" --fake "NAME:name.fullName" --format "DISPLAY:{NAME}"
+--null "PHONE" --fake "NAME:name.fullName" --project "ID,NAME"
 ```
-Pipeline: `Null → Fake → Format`
+Pipeline: `Null → Fake → Project`
 
 ```bash
 --fake "NAME:name.fullName" --null "PHONE" --format "DISPLAY:{NAME}"
@@ -197,14 +208,23 @@ Get different values from the same faker:
 --fake "EMAIL_PRO:internet.email#work"
 ```
 
-### Virtual Columns
+### Scripting (Javascript)
 
-Create fake columns not in the query, then use them in `--format`:
+Calculated columns using Javascript (Jint):
 ```bash
---query "SELECT USER_ID FROM users" \
---fake "IBAN:finance.iban" \
---fake "BIC:finance.bic" \
---format "BANK_REF:{IBAN}-{BIC}"
+--script "FULL_NAME:return row.FIRSTNAME + ' ' + row.LASTNAME;"
+--script "IS_ADULT:return row.AGE >= 18;"
+```
+
+### Column Selection
+
+Filter output columns:
+```bash
+# Keep only specified columns
+--project "ID, NAME, EMAIL"
+
+# Remove temporary or sensitive columns
+--drop "INTERNAL_ID, TEMP_CALCULATION"
 ```
 
 ### List Available Fakers
@@ -258,6 +278,9 @@ Log entry example:
 | `--null` | Set column(s) to null (repeatable) |
 | `--overwrite` | `COLUMN:value` static replacement (repeatable) |
 | `--format` | `TARGET:{SOURCE}` or `{SOURCE:fmt}` template (repeatable) |
+| `--script` | `COLUMN:js_code` (e.g. `is_adult:return row.age >= 18;`) |
+| `--project` | `Col1, Col2` Keep only specific columns (whitelist) |
+| `--drop` | `Col3` Remove specific columns (blacklist) |
 
 ### Skip-Null Options
 
@@ -286,13 +309,11 @@ Prevent transformers from modifying null values:
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--duckdb-writer-table` | DuckDB target table | `Export` |
-| `--duckdb-writer-strategy` | `Append`/`Truncate`/`Recreate` | `Append` |
-| `--sqlite-table` | SQLite target table | `Export` |
-| `--sqlite-strategy` | `Append`/`Truncate`/`Recreate` | `Append` |
-| `--oracle-writer-table` | Oracle target table | `EXPORT_DATA` |
-| `--oracle-writer-strategy` | `Append`/`Truncate`/`Recreate` | `Append` |
-| `--oracle-writer-bulk-size` | Oracle bulk batch size | `5000` |
+| Option | Description | Providers |
+|--------|-------------|-----------|
+| `--{prefix}-table` | Target table name | All (e.g. `--ora-table`, `--mssql-table`, `--pg-table`) |
+| `--{prefix}-strategy` | Write strategy (`Append`, `Truncate`, `Recreate`*) | All (*Recreate supported by Sqlite/DuckDB/PG) |
+| `--{prefix}-bulk-size` | Batch size for bulk insert | Oracle (`--ora-`), MSSQL (`--mssql-`) |
 
 ---
 
@@ -309,6 +330,13 @@ Prevent transformers from modifying null values:
 | **Finance** | `finance.iban`, `finance.bic` | Banking |
 
 > Use `--fake-list` to see all 100+ available generators.
+
+---
+
+---
+## Testing
+
+For information on how to run and extend the integration tests, see [Integration Tests](tests/scripts/README.md).
 
 ---
 

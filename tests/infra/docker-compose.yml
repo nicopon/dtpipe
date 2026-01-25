@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: querydump-integ-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: integration
+    ports:
+      - "5440:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  mssql:
+    image: mcr.microsoft.com/azure-sql-edge:latest
+    container_name: querydump-integ-mssql
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Password123!"
+    ports:
+      - "1434:1433"
+    healthcheck:
+      test: ["CMD-SHELL", "exit 0"]
+      interval: 10s
+      start_period: 10s
+
+  oracle:
+    image: gvenzl/oracle-free:slim
+    container_name: querydump-integ-oracle
+    environment:
+      ORACLE_PASSWORD: "password"
+      APP_USER: "testuser"
+      APP_USER_PASSWORD: "password"
+    ports:
+      - "1522:1521"
+    healthcheck:
+      test: ["CMD-SHELL", "exit 0"]
+      interval: 10s
+      start_period: 10s

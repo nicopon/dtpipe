@@ -19,10 +19,10 @@ public class OverwriteDataTransformer : IDataTransformer, IRequiresOptions<Overw
         _skipNull = options.SkipNull;
         foreach (var mapping in options.Mappings)
         {
-            var parts = mapping.Split(':', 2);
+            var parts = mapping.Split(new[] { ':', '=' }, 2);
             if (parts.Length == 2)
             {
-                _staticMappings[parts[0].Trim()] = parts[1]; // Value is kept as string, might need trimming? user might want spaces.
+                _staticMappings[parts[0].Trim()] = parts[1]; 
             }
         }
     }

@@ -57,7 +57,8 @@ public static partial class JobFileParser
             UnsafeQuery = yamlJob.UnsafeQuery ?? false,
             ConnectionTimeout = yamlJob.ConnectionTimeout ?? 10,
             QueryTimeout = yamlJob.QueryTimeout ?? 0,
-            Transformers = ParseTransformers(yamlJob.Transformers)
+            Transformers = ParseTransformers(yamlJob.Transformers),
+            ProviderOptions = yamlJob.ProviderOptions
         };
     }
 
@@ -81,40 +82,39 @@ public static partial class JobFileParser
         });
     }
 
-    private static List<TransformerConfig>? ParseTransformers(List<Dictionary<string, object>>? transformers)
+    private static List<TransformerConfig>? ParseTransformers(List<Dictionary<object, object>>? transformers)
     {
         if (transformers is null || transformers.Count == 0)
             return null;
 
         var result = new List<TransformerConfig>();
 
-        foreach (var transformer in transformers)
+        foreach (var transformerDict in transformers)
         {
-            // Each transformer is a dict with a single key (the type)
-            foreach (var (type, value) in transformer)
+            foreach (var kvp in transformerDict)
             {
+                var type = kvp.Key.ToString();
+                var value = kvp.Value;
+                
                 var config = new TransformerConfig { Type = type };
 
                 if (value is Dictionary<object, object> dict)
                 {
                     // Check if this is a complex structure with explicit 'mappings' or 'options'
-                    // Keys are 'object' because YamlDotNet deserializes them as such
                     object? mappingsObj = null;
                     object? optionsObj = null;
 
-                    // Manual key lookup to be safe with types
-                    foreach (var key in dict.Keys)
+                    foreach (var subKvp in dict)
                     {
-                        var keyStr = key.ToString();
+                        var keyStr = subKvp.Key.ToString();
                         if (string.Equals(keyStr, "mappings", StringComparison.OrdinalIgnoreCase))
-                            mappingsObj = dict[key];
+                            mappingsObj = subKvp.Value;
                         else if (string.Equals(keyStr, "options", StringComparison.OrdinalIgnoreCase))
-                            optionsObj = dict[key];
+                            optionsObj = subKvp.Value;
                     }
 
                     if (mappingsObj != null || optionsObj != null)
                     {
-                        // Complex structure
                         if (mappingsObj is Dictionary<object, object> mappingsDict)
                             config = config with { Mappings = ParseStringDictionary(mappingsDict) };
                         
@@ -139,10 +139,13 @@ public static partial class JobFileParser
     {
         if (dict is null) return null;
 
-        return dict.ToDictionary(
-            kvp => kvp.Key.ToString()!,
-            kvp => kvp.Value?.ToString() ?? string.Empty
-        );
+        var result = new Dictionary<string, string>();
+        foreach (var kvp in dict)
+        {
+            if (kvp.Key != null)
+                result[kvp.Key.ToString()!] = kvp.Value?.ToString() ?? string.Empty;
+        }
+        return result;
     }
 
     /// <summary>
@@ -159,6 +162,7 @@ public static partial class JobFileParser
         public bool? UnsafeQuery { get; set; }
         public int? ConnectionTimeout { get; set; }
         public int? QueryTimeout { get; set; }
-        public List<Dictionary<string, object>>? Transformers { get; set; }
+        public List<Dictionary<object, object>>? Transformers { get; set; }
+        public Dictionary<string, Dictionary<string, object>>? ProviderOptions { get; set; }
     }
 }

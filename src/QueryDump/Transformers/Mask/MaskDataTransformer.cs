@@ -24,12 +24,21 @@ public class MaskDataTransformer : IDataTransformer, IRequiresOptions<MaskOption
         
         foreach (var mapping in options.Mappings)
         {
-            var colonIndex = mapping.IndexOf(':');
-            if (colonIndex > 0 && colonIndex < mapping.Length - 1)
+            var delimiterChars = new[] { ':', '=' };
+            var delimiterIndex = mapping.IndexOfAny(delimiterChars);
+            
+            if (delimiterIndex > 0)
             {
-                var column = mapping[..colonIndex].Trim();
-                var pattern = mapping[(colonIndex + 1)..];
+                var column = mapping[..delimiterIndex].Trim();
+                var pattern = mapping[(delimiterIndex + 1)..];
                 _columnPatterns[column] = pattern;
+            }
+            else
+            {
+                 // No delimiter? Assume entire string is column name and use default mask
+                 var column = mapping.Trim();
+                 // Default pattern: Mask with 15 asterisks (safe default)
+                 _columnPatterns[column] = "***************";
             }
         }
     }

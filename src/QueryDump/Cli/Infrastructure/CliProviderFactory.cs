@@ -49,16 +49,19 @@ public class CliProviderFactory<TService> : ICliContributor, IDataFactory
     public void BindOptions(ParseResult parseResult, OptionsRegistry registry)
     {
         var options = GetCliOptions();
-        var boundOptions = CliOptionBuilder.BindForType(_descriptor.OptionsType, parseResult, options);
-        registry.RegisterByType(_descriptor.OptionsType, boundOptions);
+        
+        // Get existing options (from YAML default or generic default)
+        var existingOptions = registry.Get(_descriptor.OptionsType);
+        
+        // Apply CLI overrides on top
+        CliOptionBuilder.BindForType(_descriptor.OptionsType, existingOptions, parseResult, options);
+        
+        // Register/Update
+        registry.RegisterByType(_descriptor.OptionsType, existingOptions);
     }
     
     // Factory method to actually produce the service
-    // Note: We need specific interfaces like IDataWriterFactory to expose a strongly typed Create(DumpOptions)
-    // This class serves as the base for those specific adapters or we can implement them explicitly if we change the architecture slightly.
-    // However, CliService expects IDataWriterFactory, which has Create(DumpOptions).
-    // So we need specific wrappers for Writer/Reader, or make this class implement them dynamically.
-    // Simpler approach: Specific Generic Wrappers.
+    // Factory method to actually produce the service
 }
 
 public class CliDataWriterFactory : CliProviderFactory<IDataWriter>, IDataWriterFactory
@@ -74,9 +77,6 @@ public class CliDataWriterFactory : CliProviderFactory<IDataWriter>, IDataWriter
         var specificOptions = _registry.Get(_descriptor.OptionsType);
         
         // Use the descriptor to create. 
-        // Note: We assume options.OutputPath is the connection string for Writers.
-        // The descriptor expects "connectionString" and "optionsObject".
-        // Now also passing full DumpOptions context.
         return _descriptor.Create(options.OutputPath, specificOptions, options, _serviceProvider);
     }
     

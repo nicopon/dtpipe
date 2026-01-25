@@ -7,7 +7,7 @@ namespace QueryDump.Adapters.SqlServer;
 
 public class SqlServerReaderDescriptor : IProviderDescriptor<IStreamReader>
 {
-    public string ProviderName => "sqlserver";
+    public string ProviderName => "mssql";
 
     public Type OptionsType => typeof(SqlServerOptions);
 

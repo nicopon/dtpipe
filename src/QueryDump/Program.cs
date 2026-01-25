@@ -29,6 +29,9 @@ class Program
 {
     static async Task<int> Main(string[] args)
     {
+        System.Globalization.CultureInfo.DefaultThreadCurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
+        System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = System.Globalization.CultureInfo.InvariantCulture;
+
         var services = new ServiceCollection();
         ConfigureServices(services);
         var serviceProvider = services.BuildServiceProvider();
@@ -94,6 +97,7 @@ class Program
         RegisterWriter<Adapters.DuckDB.DuckDbWriterDescriptor>(services);
         RegisterWriter<Adapters.Oracle.OracleWriterDescriptor>(services);
         RegisterWriter<Adapters.Checksum.ChecksumWriterDescriptor>(services);
+        RegisterWriter<SqlServerWriterDescriptor>(services);
         RegisterWriter<PostgreSqlWriterDescriptor>(services);
         RegisterWriter<SqliteWriterDescriptor>(services);
         
@@ -127,6 +131,7 @@ class Program
         services.AddSingleton<IDataTransformerFactory, FormatDataTransformerFactory>();
         services.AddSingleton<IDataTransformerFactory, Transformers.Mask.MaskDataTransformerFactory>();
         services.AddSingleton<IDataTransformerFactory, ScriptDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, Transformers.Project.ProjectDataTransformerFactory>();
         
         // Export Service
         services.AddSingleton<ExportService>();

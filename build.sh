@@ -5,6 +5,17 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Configure local build environment to avoid sandbox permission issues
+export DOTNET_CLI_HOME="$SCRIPT_DIR/.dotnet_home"
+export NUGET_PACKAGES="$SCRIPT_DIR/.nuget_packages"
+export NUGET_HTTP_CACHE_PATH="$SCRIPT_DIR/.nuget_cache"
+export NUGET_PLUGINS_CACHE_PATH="$SCRIPT_DIR/.nuget_plugins"
+export NUGET_SCRATCH="$SCRIPT_DIR/.nuget_scratch"
+
+# Create directories if they don't exist
+mkdir -p "$DOTNET_CLI_HOME" "$NUGET_PACKAGES" "$NUGET_HTTP_CACHE_PATH" "$NUGET_PLUGINS_CACHE_PATH" "$NUGET_SCRATCH"
+
 cd "$SCRIPT_DIR"
 
 # Colors
