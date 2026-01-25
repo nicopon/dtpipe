@@ -41,7 +41,7 @@ public class PostgreSqlReader : IStreamReader
         // Populate Columns
         var schema = await _reader.GetColumnSchemaAsync(ct);
         // ColumnInfo(name, type, isNullable, isPrimaryKey)
-        Columns = schema.Select(c => new ColumnInfo(c.ColumnName, c.DataType ?? typeof(object), c.AllowDBNull ?? true, c.IsKey ?? false)).ToList();
+        Columns = schema.Select(c => new ColumnInfo(c.ColumnName, c.DataType ?? typeof(object), c.AllowDBNull ?? true)).ToList();
     }
 
     public async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(int batchSize, [EnumeratorCancellation] CancellationToken ct = default)

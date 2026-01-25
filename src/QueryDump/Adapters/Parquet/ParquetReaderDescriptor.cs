@@ -13,9 +13,6 @@ public class ParquetReaderDescriptor : IProviderDescriptor<IStreamReader>
 
     public Type OptionsType => typeof(EmptyOptions);
 
-    // Note: Factory yielded break, meaning no options. Descriptor interface requires OptionsType.
-    // I should use NullOptions or similar. I'll use NullOptions.
-
     public bool CanHandle(string connectionString)
     {
         if (string.IsNullOrWhiteSpace(connectionString)) return false;

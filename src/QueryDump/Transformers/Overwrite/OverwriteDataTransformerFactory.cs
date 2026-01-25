@@ -73,8 +73,9 @@ public class OverwriteDataTransformerFactory(OptionsRegistry registry) : IDataTr
         if (config.Mappings == null || config.Mappings.Count == 0)
             return null;
 
-        // Convert YAML dict to "COLUMN:value" format
-        var mappings = config.Mappings.Select(kvp => $"{kvp.Key}:{kvp.Value}");
+        // Convert YAML dict to "COLUMN:value" or "COLUMN=value" format
+        // If value is empty, just return key (which might already contain the separator like "Col=Val")
+        var mappings = config.Mappings.Select(kvp => string.IsNullOrEmpty(kvp.Value) ? kvp.Key : $"{kvp.Key}:{kvp.Value}");
         
         var skipNull = false;
         if (config.Options != null && config.Options.TryGetValue("skip-null", out var snStr))

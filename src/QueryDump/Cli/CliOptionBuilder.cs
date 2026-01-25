@@ -194,9 +194,21 @@ public static class CliOptionBuilder
     /// <summary>
     /// Binds parsed results back to an instance of T, using the provided list of options.
     /// </summary>
+    /// <summary>
+    /// Binds parsed results back to an instance of T, using the provided list of options.
+    /// </summary>
     public static T Bind<T>(ParseResult result, IEnumerable<Option> options) where T : class, IOptionSet, new()
     {
         var instance = new T();
+        Bind(instance, result, options);
+        return instance;
+    }
+
+    /// <summary>
+    /// Binds parsed results to an existing instance of T.
+    /// </summary>
+    public static void Bind<T>(T instance, ParseResult result, IEnumerable<Option> options) where T : class, IOptionSet
+    {
         var prefix = T.Prefix;
         var optionsList = options.ToList();
 
@@ -210,6 +222,17 @@ public static class CliOptionBuilder
             
             if (matchedOption is not null)
             {
+                // check if option was implicitly or explicitly matched? 
+                // ParseResult.GetValue returns default if not matched. 
+                // We shouldn't overwrite existing value with default if CLI didn't provide it?
+                // Actually System.CommandLine GetValue returns the value. 
+                // If we want to only overwrite if PRESENT, we need to check match result.
+                
+                // Check if option is explicitly present in the parse result (by checking tokens)
+                var hasOption = result.Tokens.Any(t => t.Value == matchedOption.Name || matchedOption.Aliases.Contains(t.Value));
+                
+                if (!hasOption) continue; // Option not present in CLI, keep existing value
+
                 var propType = property.PropertyType;
                 var isList = propType != typeof(string) && typeof(System.Collections.IEnumerable).IsAssignableFrom(propType);
 
@@ -249,8 +272,6 @@ public static class CliOptionBuilder
                 }
             }
         }
-
-        return instance;
     }
     
     private static T? GetTypedValue<T>(ParseResult result, Option option)
@@ -281,15 +302,21 @@ public static class CliOptionBuilder
         return (IEnumerable<Option>)genericMethod.Invoke(null, null)!;
     }
     
-    /// <summary>
-    /// Non-generic version of Bind for runtime type handling.
-    /// </summary>
-
     public static object BindForType(Type optionSetType, ParseResult result, IEnumerable<Option> options)
     {
-        var method = typeof(CliOptionBuilder).GetMethod(nameof(Bind), BindingFlags.Public | BindingFlags.Static)!;
+        var method = typeof(CliOptionBuilder).GetMethods(BindingFlags.Public | BindingFlags.Static)
+            .First(m => m.Name == nameof(Bind) && m.IsGenericMethod && m.GetParameters().Length == 2);
         var genericMethod = method.MakeGenericMethod(optionSetType);
         return genericMethod.Invoke(null, new object[] { result, options })!;
+    }
+
+    public static void BindForType(Type optionSetType, object instance, ParseResult result, IEnumerable<Option> options)
+    {
+        var method = typeof(CliOptionBuilder).GetMethods(BindingFlags.Public | BindingFlags.Static)
+            .First(m => m.Name == nameof(Bind) && m.IsGenericMethod && m.GetParameters().Length == 3);
+        
+        var genericMethod = method.MakeGenericMethod(optionSetType);
+        genericMethod.Invoke(null, new object[] { instance, result, options });
     }
 
     /// <summary>

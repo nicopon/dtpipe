@@ -94,14 +94,6 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
         var consView = GetView("CONSTRAINTS");
         var consColView = GetView("CONS_COLUMNS");
         
-        // Note: USER_ views imply owner is current user, so joining on owner is valid if columns exist, 
-        // but explicit owner check in WHERE is only needed for ALL_ views.
-        // For USER_ views, we don't filter by owner in WHERE clause.
-        // Also: USER_CONSTRAINTS usually has OWNER column in recent Oracle versions, 
-        // but to be safe/standard we might rely on the fact that they are implicitly ours.
-        // The join ON cons.owner = cols.owner might fail if USER_ views don't have OWNER column.
-        // Safe approach for USER_ views: Join on constraint_name only (unique within schema usually? No, constraint names are schema scoped).
-        
         string pkSql;
         if (hasOwner)
         {
@@ -116,9 +108,6 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
         }
         else
         {
-            // For USER_ views, assume no OWNER column requirement for join if names are unique enough, 
-            // OR checks generic constraint name join.
-            // Constraint names are unique per user.
             pkSql = $@"
             SELECT cols.column_name
             FROM {consView} cons

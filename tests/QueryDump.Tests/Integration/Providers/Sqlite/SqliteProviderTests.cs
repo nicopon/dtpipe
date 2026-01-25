@@ -77,7 +77,7 @@ public class SqliteProviderTests : IAsyncLifetime
     {
         // Arrange
         var registry = new OptionsRegistry();
-        registry.Register(new SqliteWriterOptions { Table = "Export", Strategy = "Recreate" });
+        registry.Register(new SqliteWriterOptions { Table = "Export", Strategy = SqliteWriteStrategy.Recreate });
 
         var columns = new List<ColumnInfo>
         {
@@ -124,7 +124,7 @@ public class SqliteProviderTests : IAsyncLifetime
         }
 
         var registry = new OptionsRegistry();
-        registry.Register(new SqliteWriterOptions { Table = "Target", Strategy = "Recreate" });
+        registry.Register(new SqliteWriterOptions { Table = "Target", Strategy = SqliteWriteStrategy.Recreate });
 
         // Act: Read from source
         var reader = new SqliteStreamReader(_connectionString, "SELECT * FROM Source");

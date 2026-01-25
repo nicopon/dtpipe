@@ -99,9 +99,9 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
         // Prepare Data
         var columns = new List<QueryDump.Core.Models.ColumnInfo>
         {
-            new("Id", typeof(int), false, true),
-            new("Name", typeof(string), true, false),
-            new("Created", typeof(DateTime), true, false)
+            new("Id", typeof(int), false),
+            new("Name", typeof(string), true),
+            new("Created", typeof(DateTime), true)
         };
         
         var data = new List<object?[]>

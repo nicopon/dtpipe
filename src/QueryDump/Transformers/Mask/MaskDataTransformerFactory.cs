@@ -72,7 +72,9 @@ public class MaskDataTransformerFactory(OptionsRegistry registry) : IDataTransfo
         if (config.Mappings == null || config.Mappings.Count == 0)
             return null;
 
-        var mappings = config.Mappings.Select(kv => $"{kv.Key}:{kv.Value}").ToList();
+        // For mask transformer, Mappings are key=column, value=pattern
+        // If value is empty, use key only (implies default mask)
+        var mappings = config.Mappings.Select(kvp => string.IsNullOrEmpty(kvp.Value) ? kvp.Key : $"{kvp.Key}:{kvp.Value}").ToList();
         
         var skipNull = false;
         if (config.Options != null && config.Options.TryGetValue("skip-null", out var snStr))

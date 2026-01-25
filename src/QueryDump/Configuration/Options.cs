@@ -42,6 +42,18 @@ public sealed record DumpOptions
     public int Limit { get; init; } = 0;
 
     /// <summary>
+    /// Probability 0.0-1.0 to include a row.
+    /// 1.0 = Include all (default). 0.1 = Include 10%.
+    /// </summary>
+    public double SampleRate { get; init; } = 1.0;
+
+    /// <summary>
+    /// Seed for random sampling to ensure reproducibility.
+    /// If null, a system-generated seed is used.
+    /// </summary>
+    public int? SampleSeed { get; init; }
+
+    /// <summary>
     /// Path to the log file. If set, file logging is enabled.
     /// </summary>
     public string? LogPath { get; init; }

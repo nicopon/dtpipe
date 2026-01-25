@@ -131,8 +131,7 @@ public class ExportService
         _console.Write(targetTable);
         _console.MarkupLine($"   [grey]Initializing...[/]");
 
-        // Filter out virtual columns for physical writer
-        var exportableSchema = currentSchema.Where(c => !c.IsVirtual).ToList();
+        var exportableSchema = currentSchema;
         await using var writer = writerFactory.Create(options);
         await writer.InitializeAsync(exportableSchema, ct);
 
@@ -160,7 +159,7 @@ public class ExportService
         try
         {
             // Run Concurrent Pipeline
-            var producerTask = ProduceRowsAsync(reader, readerToTransform.Writer, options.BatchSize, options.Limit, progress, linkedCts, effectiveCt, _logger);
+            var producerTask = ProduceRowsAsync(reader, readerToTransform.Writer, options.BatchSize, options.Limit, options.SampleRate, options.SampleSeed, progress, linkedCts, effectiveCt, _logger);
             var transformTask = TransformRowsAsync(readerToTransform.Reader, transformToWriter.Writer, pipeline, progress, effectiveCt);
             var consumerTask = ConsumeRowsAsync(transformToWriter.Reader, writer, options.BatchSize, progress, r => Interlocked.Add(ref totalRows, r), effectiveCt, _logger);
 
@@ -205,12 +204,23 @@ public class ExportService
         ChannelWriter<object?[]> output, 
         int batchSize,
         int limit,
+        double sampleRate,
+        int? sampleSeed,
         ProgressReporter progress,
         CancellationTokenSource linkedCts,
         CancellationToken ct,
         ILogger logger)
     {
         logger.LogDebug("Producer/Reader started");
+        
+        // Sampling initialization
+        Random? sampler = null;
+        if (sampleRate > 0 && sampleRate < 1.0)
+        {
+            sampler = sampleSeed.HasValue ? new Random(sampleSeed.Value) : Random.Shared;
+            logger.LogInformation("Data sampling enabled: {Rate:P0} (Seed: {Seed})", sampleRate, sampleSeed.HasValue ? sampleSeed.Value.ToString() : "Auto");
+        }
+
         long rowCount = 0;
         try
         {
@@ -219,6 +229,12 @@ public class ExportService
                 logger.LogDebug("Read batch of {Count} rows", batchChunk.Length);
                 for (var i = 0; i < batchChunk.Length; i++)
                 {
+                    // Apply Sampling High-Performance Filter
+                    if (sampler != null && sampler.NextDouble() > sampleRate)
+                    {
+                        continue;
+                    }
+
                     await output.WriteAsync(batchChunk.Span[i], ct);
                     progress.ReportRead(1);
                     rowCount++;

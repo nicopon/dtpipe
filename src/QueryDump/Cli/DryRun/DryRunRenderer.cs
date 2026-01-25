@@ -77,7 +77,7 @@ public class DryRunRenderer
             foreach (var col in finalSchema)
             {
                 // Column name width
-                var colNameLen = col.Name.Length + (col.IsVirtual ? 10 : 0); // "(virtual)"
+                var colNameLen = col.Name.Length;
                 maxWidths[0] = Math.Max(maxWidths[0], colNameLen);
                 
                 // Values for input + each step
@@ -95,7 +95,7 @@ public class DryRunRenderer
                     
                     // Input is column 1. Step 1 is column 2 (stageIdx 1).
                     // So stageIdx maps directly to maxWidths[1 + stageIdx].
-                    // Wait, input is Stage 0.
+
                     // maxWidths[1] = Input.
                     
                     if (idx >= 0 && idx < values.Length)
@@ -216,7 +216,7 @@ public class DryRunRenderer
             var rowMarkup = new List<string>();
             
             // Column Name
-            rowMarkup.Add(col.IsVirtual ? $"{col.Name} [grey](virtual)[/]" : col.Name);
+            rowMarkup.Add(col.Name);
             
             string lastValue = "";
             

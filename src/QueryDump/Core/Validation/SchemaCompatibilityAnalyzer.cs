@@ -26,7 +26,6 @@ public static class SchemaCompatibilityAnalyzer
         {
             foreach (var srcCol in sourceSchema)
             {
-                if (srcCol.IsVirtual) continue;
                 
                 columns.Add(new ColumnCompatibility(
                     srcCol.Name,
@@ -46,7 +45,6 @@ public static class SchemaCompatibilityAnalyzer
         // Check each source column
         foreach (var srcCol in sourceSchema)
         {
-            if (srcCol.IsVirtual) continue;
             
             if (targetLookup.TryGetValue(srcCol.Name, out var tgtCol))
             {

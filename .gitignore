@@ -1,4 +1,10 @@
 # User specific
+.dotnet_home/
+.nuget_packages/
+.nuget_cache/
+.nuget_plugins/
+.nuget_scratch/
+
 testScripts/
 exports/
 
@@ -33,3 +39,5 @@ BenchmarkDotNet.Artifacts/
 # Test Data
 tests/QueryDump.Tests/Data/Target/*
 !tests/QueryDump.Tests/Data/Target/.gitkeep
+tests/scripts/output/
+!tests/scripts/input/*

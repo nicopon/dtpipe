@@ -1,0 +1,21 @@
+{
+	"name": "QueryDump Dev",
+	"image": "mcr.microsoft.com/dotnet/sdk:10.0",
+	"features": {
+		"ghcr.io/devcontainers/features/docker-in-docker:2": {
+			"version": "latest",
+			"enableNonRootDocker": "true",
+			"moby": "true"
+		},
+		"ghcr.io/devcontainers/features/git:1": {}
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-dotnettools.csharp",
+				"ms-azuretools.vscode-docker"
+			]
+		}
+	},
+	"postCreateCommand": "dotnet restore src/QueryDump/QueryDump.csproj"
+}
