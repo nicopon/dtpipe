@@ -94,6 +94,11 @@ public static partial class JobFileParser
             foreach (var kvp in transformerDict)
             {
                 var type = kvp.Key.ToString();
+                if (string.IsNullOrWhiteSpace(type))
+                {
+                    throw new InvalidOperationException($"Transformer type cannot be null or empty.");
+                }
+
                 var value = kvp.Value;
                 
                 var config = new TransformerConfig { Type = type };
@@ -106,7 +111,7 @@ public static partial class JobFileParser
 
                     foreach (var subKvp in dict)
                     {
-                        var keyStr = subKvp.Key.ToString();
+                        var keyStr = subKvp.Key.ToString() ?? string.Empty;
                         if (string.Equals(keyStr, "mappings", StringComparison.OrdinalIgnoreCase))
                             mappingsObj = subKvp.Value;
                         else if (string.Equals(keyStr, "options", StringComparison.OrdinalIgnoreCase))

@@ -6,7 +6,7 @@ using QueryDump.Core.Models;
 using QueryDump.Transformers.Script;
 using Xunit;
 
-namespace QueryDump.Tests.Integration;
+namespace QueryDump.Tests.Unit.Transformers;
 
 public class ScriptTransformerTests
 {
@@ -168,5 +168,30 @@ public class ScriptTransformerTests
 
         // Assert
         row[2].Should().Be("Alice Smith");
+    }
+
+    [Fact]
+    public async Task Transform_CanAccessColumns_UsingDictionarySyntax()
+    {
+        // Arrange: Handle columns with spaces using row["Col Name"]
+        var options = new ScriptOptions
+        {
+            Mappings = new[] { "Code:row['Product Code']" }
+        };
+        var transformer = new ScriptDataTransformer(options);
+        var columns = new List<ColumnInfo>
+        {
+            new("Product Code", typeof(string), false),
+            new("Code", typeof(string), false)
+        };
+        
+        await transformer.InitializeAsync(columns);
+        var row = new object?[] { "ABC-123", "" };
+
+        // Act
+        transformer.Transform(row);
+
+        // Assert
+        row[1].Should().Be("ABC-123");
     }
 }
