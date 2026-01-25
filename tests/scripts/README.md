@@ -1,72 +1,35 @@
-# Integration Tests
+# Integration Validation Scripts
 
-This document describes the integration validation scripts located in `tests/scripts/`. These scripts verify the end-to-end functionality of QueryDump, ensuring that CLI arguments, YAML configuration, and core features work as expected.
+This directory contains a suite of Bash scripts used to validate the QueryDump functionality from end to end. These tests go beyond unit testing by verifying the actual binary execution, file system interaction, and configuration persistence.
 
-## Overview
+## General Usage
 
-The integration tests are Bash scripts that:
-1.  Build the project in Release mode.
-2.  Generate input test data.
-3.  Run various `querydump` commands.
-4.  Verify the output (exit codes, file content, data accuracy).
-5.  **Crucially**: Verify the CLI-to-YAML export loop to ensure full configuration persistency.
+All scripts should be executed from the project root or the `tests/scripts` directory. They generally rebuild the project in `Release` mode before running the tests.
 
-## Test Scripts
+### Prerequisites
+- Docker (for `validate_drivers_docker.sh` and `validate_chain.sh`)
+- `dotnet` SDK 10.0+
+- `sqlite3` (for `validate_yaml_options.sh`)
 
-| Script | Purpose |
-|--------|---------|
-| `common.sh` | Shared helper functions, including the core `run_via_yaml` logic. |
-| `validate_project.sh` | Tests the `--project` (whitelist) and `--drop` (blacklist) transformers. |
-| `validate_transformers.sh` | Tests data transformers (`--overwrite`, `--null`, `--mask`, etc.). |
+## Scripts List and Purpose
 
-## Validation Logic (`run_via_yaml`)
+| Script | Main Purpose | Dependencies |
+|--------|--------------|--------------|
+| **`common.sh`** | **Utility**. Contains shared functions, notably `run_via_yaml` which exports config to YAML before replaying it (CLI/YAML cross-validation). Not executed directly. | - |
+| **`validate_drivers_docker.sh`** | **Real Database Tests**. Spins up Postgres, MSSQL, and Oracle containers, injects data, and verifies that QueryDump can read these sources correctly. | Docker |
+| **`validate_chain.sh`** | **Complex Chaining Tests**. Verifies an end-to-end pipeline: CSV -> Postgres -> MSSQL -> Oracle -> Parquet, with input/output checksum (hash) verification to ensure data integrity. | Docker, `docker-compose` |
+| **`validate_transformers.sh`** | **Transformer Tests**. Verifies correct behavior of `--overwrite`, `--null`, `--mask` options on generated source CSV data. | - |
+| **`validate_project.sh`** | **Projection Tests**. Verifies that `--project` (whitelist) and `--drop` (blacklist) options correctly filter output columns, including combined cases. | - |
+| **`verify_sampling.sh`** | **Sampling Tests**. Verifies that the `--sample-rate` option effectively reduces the number of output rows (simple statistical test on 100 rows). | - |
+| **`validate_readme_examples.sh`** | **Documentation Tests**. Literally executes the commands present in the main `README.md` to ensure documentation is up-to-date and functional (adapting file paths to `/tmp`). | - |
+| **`validate_yaml_options.sh`** | **Provider Options Tests**. Verifies that provider-specific options (e.g., `strategy: Recreate` for SQLite) defined in YAML are correctly applied by the engine. | `sqlite3` |
 
-To ensure robust configuration support, we use a wrapper function `run_via_yaml` instead of running `querydump` directly. This tests not just the execution, but the ability to **save and restore** the configuration.
+## Technical Details
 
-### Flow Diagram
+### `run_via_yaml` Methodology
+Most scripts use the `run_via_yaml` function (defined in `common.sh`). This approach enforces a double check:
+1.  **CLI Parsing**: The command is first run with `--export-job temp.yaml`. This verifies that the CLI correctly parses arguments.
+2.  **YAML Parsing**: The command is then re-run with `--job temp.yaml`. This verifies that the generated YAML file is valid and produces the expected result.
 
-```mermaid
-sequenceDiagram
-    participant TestScript as Test Script
-    participant Common as common.sh
-    participant QueryDump as QueryDump CLI
-    participant FileSystem as File System
-
-    TestScript->>Common: run_via_yaml(args...)
-    
-    Note over Common: 1. Export Config
-    Common->>QueryDump: run args... --export-job temp.yaml
-    QueryDump->>FileSystem: Write temp.yaml
-    
-    Note over Common: 2. Execute via YAML
-    Common->>QueryDump: run --job temp.yaml
-    QueryDump->>FileSystem: Read temp.yaml
-    QueryDump->>FileSystem: Write Output (CSV/Parquet)
-    
-    Common->>TestScript: Return Exit Code
-    
-    Note over TestScript: 3. Verify Output
-    TestScript->>FileSystem: Check Output Content
-```
-
-### Why this approach?
-
-1.  **CLI Verification**: The first step (export) proves that CLI parsing works and that all arguments are correctly mapped to internal configuration objects.
-2.  **Serialization Verification**: The export process proves that the internal configuration can be correctly serialized to YAML.
-3.  **Deserialization Verification**: The second step (run) proves that the YAML can be correctly parsed back into a valid job.
-4.  **Runtime Verification**: The final execution proves the core logic (readers, transformers, writers) works as intended.
-
-## Adding a New Test
-
-To add a new integration test:
-
-1.  Create a new script (e.g., `validate_new_feature.sh`) or add to an existing one.
-2.  Source `common.sh`:
-    ```bash
-    source "$SCRIPT_DIR/common.sh"
-    ```
-3.  Use `run_via_yaml` for any execution you want to verify via the config loop:
-    ```bash
-    run_via_yaml --input "..." --query "..." --output "..." --new-feature "value"
-    ```
-4.  Add manual assertions (grep, wc, diff) to verify the output file.
+### Outputs
+Temporary files and test results are generated in the `tests/scripts/output/` folder. This folder is automatically cleaned up after each successful execution (via `trap cleanup EXIT`), except in case of failure to allow debugging.

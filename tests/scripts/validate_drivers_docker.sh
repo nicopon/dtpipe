@@ -1,131 +1,157 @@
 #!/bin/bash
-set -e
 
-# Path to executables
-QUERYDUMP="./dist/release/querydump"
+# Configuration
+SCRIPT_DIR="$(dirname "$0")"
+PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
+DIST_DIR="$PROJECT_ROOT/dist/release"
+QUERYDUMP_BIN="$DIST_DIR/querydump"
 
-echo "========================================"
-echo "    QueryDump Docker Integration Tests"
-echo "========================================"
+# Colors
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
 
-# 1. Check for Docker
-if ! command -v docker &> /dev/null; then
-    echo "⚠️  Docker not found. Skipping Docker-based integration tests."
+# Check if querydump exists
+if [ ! -f "$QUERYDUMP_BIN" ]; then
+    echo -e "${RED}Error: querydump binary not found at $QUERYDUMP_BIN${NC}"
+    echo "Please run ./build.sh first."
+    exit 1
+fi
+
+# Function to check Docker availability
+check_docker() {
+    if ! command -v docker &> /dev/null; then
+        echo -e "${YELLOW}Docker is not installed. Skipping container tests.${NC}"
+        return 1
+    fi
+
+    if ! docker info &> /dev/null; then
+        echo -e "${YELLOW}Docker is installed but not running (or permission denied). Skipping container tests.${NC}"
+        return 1
+    fi
+    
+    echo -e "${GREEN}Docker is available.${NC}"
+    return 0
+}
+
+# Run Docker Check
+if ! check_docker; then
+    echo -e "${YELLOW}SKIP: Docker-based integration tests skipped.${NC}"
     exit 0
 fi
 
-if ! docker info &> /dev/null; then
-    echo "⚠️  Docker daemon not running. Skipping Docker-based integration tests."
-    exit 0
-fi
+echo -e "${GREEN}Starting Docker-based Integration Tests...${NC}"
 
-echo "🐳 Docker detected. Starting test containers..."
-
+# Cleanup function
 cleanup() {
-    echo "🧹 Cleaning up containers..."
-    docker rm -f qd_postgres qd_mssql &> /dev/null || true
+    echo "Cleaning up containers..."
+    docker rm -f querydump-postgres &> /dev/null
+    docker rm -f querydump-mssql &> /dev/null
+    docker rm -f querydump-oracle &> /dev/null
 }
 trap cleanup EXIT
 
-# 2. Start PostgreSQL
-echo "Starting PostgreSQL..."
-docker run -d --name qd_postgres -e POSTGRES_PASSWORD=Password123! -p 5432:5432 postgres:15-alpine
-# Wait for PG
-echo "Waiting for PostgreSQL..."
+# --- TEST: Postgres ---
+echo "------------------------------------------------"
+echo "Starting PostgreSQL Test..."
+
+docker run --name querydump-postgres -e POSTGRES_PASSWORD=mysecretpassword -p 5432:5432 -d postgres:latest
+# Wait for PG to be ready
+echo "Waiting for Postgres..."
 sleep 5
 
-# Create some dummy data in PG
-docker exec qd_postgres psql -U postgres -d postgres -c "CREATE TABLE test_data (id INT, name TEXT); INSERT INTO test_data VALUES (1, 'Alice'), (2, 'Bob');"
+# Create seed data
+docker exec -i querydump-postgres psql -U postgres <<EOF
+CREATE TABLE users (id SERIAL PRIMARY KEY, name VARCHAR(50), email VARCHAR(50));
+INSERT INTO users (name, email) VALUES ('Alice', 'alice@example.com'), ('Bob', 'bob@example.com');
+EOF
 
-# 3. Test QueryDump against PostgreSQL
-echo "Running QueryDump -> PostgreSQL..."
-"$QUERYDUMP" --input "postgres:Host=localhost;Username=postgres;Password=Password123!;Database=postgres" \
-             --query "SELECT * FROM test_data" \
-             --output "csv:dist/pg_export.csv" \
-             --limit 10
+echo "Running export from Postgres..."
+$QUERYDUMP_BIN --input "postgres:Host=localhost;Port=5432;Username=postgres;Password=mysecretpassword;Database=postgres" \
+               --query "SELECT * FROM users ORDER BY id" \
+               --output "postgres_out.csv"
 
-if [ -f "dist/pg_export.csv" ]; then
-    echo "✅ PostgreSQL Export Successful"
+# Verify Output
+if grep -q "Alice" "postgres_out.csv" && grep -q "Bob" "postgres_out.csv"; then
+    echo -e "${GREEN}✓ Postgres Test Passed${NC}"
 else
-    echo "❌ PostgreSQL Export Failed (File not found)"
+    echo -e "${RED}✗ Postgres Test Failed${NC}"
+    cat postgres_out.csv
     exit 1
 fi
+rm postgres_out.csv
 
-# 4. Start SQL Server (MSSQL)
-# Note: MSSQL takes longer to start
-echo "Starting SQL Server..."
+# --- TEST: MSSQL ---
+echo "------------------------------------------------"
+echo "Starting MSSQL Test..."
 
-# Detect Architecture
-ARCH=$(uname -m)
-if [ "$ARCH" == "arm64" ]; then
-    echo "🍎 ARM64 detected (Apple Silicon). Using Azure SQL Edge (lighter, native support)."
-    docker run -d --name qd_mssql -e "ACCEPT_EULA=Y" -e "MSSQL_SA_PASSWORD=Password123!" -p 1433:1433 mcr.microsoft.com/azure-sql-edge
+docker run --name querydump-mssql -e "ACCEPT_EULA=Y" -e "SA_PASSWORD=MySecretPassword123!" -p 1433:1433 -d mcr.microsoft.com/mssql/server:2022-latest
+
+# Wait for MSSQL (slower startup)
+echo "Waiting for MSSQL (15s)..."
+sleep 15
+
+# Create seed data (using sqlcmd inside container)
+docker exec -i querydump-mssql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "MySecretPassword123!" -C <<EOF
+CREATE DATABASE TestDB;
+GO
+USE TestDB;
+CREATE TABLE Users (Id INT IDENTITY(1,1) PRIMARY KEY, Name NVARCHAR(50), Email NVARCHAR(50));
+INSERT INTO Users (Name, Email) VALUES ('Charlie', 'charlie@example.com'), ('David', 'david@example.com');
+GO
+EOF
+
+echo "Running export from MSSQL..."
+$QUERYDUMP_BIN --input "mssql:Server=localhost,1433;Database=TestDB;User Id=sa;Password=MySecretPassword123!;TrustServerCertificate=True" \
+               --query "SELECT * FROM Users ORDER BY Id" \
+               --output "mssql_out.csv"
+
+# Verify Output
+if grep -q "Charlie" "mssql_out.csv" && grep -q "David" "mssql_out.csv"; then
+    echo -e "${GREEN}✓ MSSQL Test Passed${NC}"
 else
-    echo "💻 AMD64 detected. Using official MSSQL Server."
-    docker run -d --name qd_mssql -e "ACCEPT_EULA=Y" -e "MSSQL_SA_PASSWORD=Password123!" -p 1433:1433 mcr.microsoft.com/mssql/server:2022-latest
-fi
-
-echo "Waiting for SQL Server (this takes ~15s)..."
-until docker exec qd_mssql /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'Password123!' -Q "SELECT 1" &> /dev/null; do
-    echo -n "."
-    sleep 2
-done
-echo " Ready!"
-
-# Create data in MSSQL
-docker exec qd_mssql /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'Password123!' -Q "CREATE DATABASE TestDB; GO; USE TestDB; CREATE TABLE TestTable (ID INT, Name NVARCHAR(50)); INSERT INTO TestTable VALUES (1, 'Charlie'), (2, 'Dave'); GO;"
-
-# 5. Test QueryDump against MSSQL
-echo "Running QueryDump -> MSSQL..."
-"$QUERYDUMP" --input "mssql:Server=localhost;Database=TestDB;User Id=sa;Password=Password123!;TrustServerCertificate=True" \
-             --query "SELECT * FROM TestTable" \
-             --output "csv:dist/mssql_export.csv" \
-             --limit 10
-
-if [ -f "dist/mssql_export.csv" ]; then
-    echo "✅ MSSQL Export Successful"
-else
-    echo "❌ MSSQL Export Failed"
+    echo -e "${RED}✗ MSSQL Test Failed${NC}"
+    cat mssql_out.csv
     exit 1
 fi
+rm mssql_out.csv
 
-# 6. Start Oracle (gvenzl/oracle-free)
-# Using gvenzl image which supports ARM64/AMD64 and is lighter than official
-echo "Starting Oracle (gvenzl/oracle-free)..."
-docker run -d --name qd_oracle -e ORACLE_PASSWORD=Password123! -p 1521:1521 gvenzl/oracle-free:slim-faststart
+# --- TEST: Oracle ---
+echo "------------------------------------------------"
+echo "Starting Oracle Test..."
 
-echo "Waiting for Oracle (this can take 30-60s)..."
-# Healthcheck loop: check for "DATABASE IS READY TO USE" in logs
-until docker logs qd_oracle 2>&1 | grep -q "DATABASE IS READY TO USE"; do
-    echo -n "."
-    sleep 5
-done
-echo " Ready!"
+# Use slim image for speed
+docker run --name querydump-oracle -e ORACLE_PASSWORD=MySecretPassword123! -p 1521:1521 -d gvenzl/oracle-free:slim
 
-# Create data in Oracle
-echo "Seeding Oracle data..."
-docker exec qd_oracle sqlplus -s system/Password123!@//localhost:1521/FREEPDB1 <<EOF
-CREATE TABLE TEST_DATA (ID NUMBER, NAME VARCHAR2(50));
-INSERT INTO TEST_DATA VALUES (1, 'Eve');
-INSERT INTO TEST_DATA VALUES (2, 'Frank');
+# Wait for Oracle (slowest)
+echo "Waiting for Oracle (30s)..."
+sleep 30
+
+# Seed data
+# Note: Oracle system user, typical SID=FREE or service=FREEPDB1
+docker exec -i querydump-oracle sqlplus system/MySecretPassword123!@localhost:1521/FREEPDB1 <<EOF
+CREATE TABLE Users (Id NUMBER GENERATED BY DEFAULT AS IDENTITY, Name VARCHAR2(50), Email VARCHAR2(50));
+INSERT INTO Users (Name, Email) VALUES ('Eve', 'eve@example.com');
+INSERT INTO Users (Name, Email) VALUES ('Frank', 'frank@example.com');
 COMMIT;
 EXIT;
 EOF
 
-# 7. Test QueryDump against Oracle
-echo "Running QueryDump -> Oracle..."
-"$QUERYDUMP" --input "oracle:User Id=system;Password=Password123!;Data Source=localhost:1521/FREEPDB1" \
-             --query "SELECT * FROM TEST_DATA" \
-             --output "csv:dist/oracle_export.csv" \
-             --limit 10
+echo "Running export from Oracle..."
+$QUERYDUMP_BIN --input "oracle:Data Source=localhost:1521/FREEPDB1;User Id=system;Password=MySecretPassword123!;" \
+               --query "SELECT * FROM Users ORDER BY Id" \
+               --output "oracle_out.csv"
 
-if [ -f "dist/oracle_export.csv" ]; then
-    echo "✅ Oracle Export Successful"
+# Verify Output
+if grep -q "Eve" "oracle_out.csv" && grep -q "Frank" "oracle_out.csv"; then
+    echo -e "${GREEN}✓ Oracle Test Passed${NC}"
 else
-    echo "❌ Oracle Export Failed"
+    echo -e "${RED}✗ Oracle Test Failed${NC}"
+    cat oracle_out.csv
     exit 1
 fi
+rm oracle_out.csv
 
-cleanup
-
-echo "🎉 All Docker Integration Tests Passed!"
+echo -e "${GREEN}All Docker tests passed!${NC}"
+exit 0

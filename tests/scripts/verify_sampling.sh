@@ -1,36 +1,46 @@
 #!/bin/bash
 set -e
 
-# Path to executables
-QUERYDUMP="./dist/release/querydump"
+# Setup
+SCRIPT_DIR="$(dirname "$0")"
+source "$SCRIPT_DIR/common.sh" # Load PROJECT_ROOT, QUERYDUMP, etc.
+OUTPUT_DIR="$SCRIPT_DIR/output"
+mkdir -p "$OUTPUT_DIR"
 
 echo "========================================"
 echo "    QueryDump Sampling Verification"
 echo "========================================"
 
+# Always build
+"$PROJECT_ROOT/build.sh" > /dev/null
+
 # Generate 100 rows with 10% sampling -> Expect ~10 rows
 echo "Test 1: Sampling 10% of 100 rows (Sample Provider)"
-"$QUERYDUMP" --input "sample:100;Id=int;Name=string" \
+
+OUTPUT_FILE="$OUTPUT_DIR/sampling_test.csv"
+
+# Using run_via_yaml to ensure sampling works via YAML configuration as well
+run_via_yaml --input "sample:100;Id=int;Name=string" \
              --query "SELECT * FROM data" \
-             --output "csv:dist/sampling_test.csv" \
+             --output "csv:$OUTPUT_FILE" \
              --limit 100 \
              --sample-rate 0.1 \
              --sample-seed 12345
 
-ROW_COUNT=$(wc -l < dist/sampling_test.csv | tr -d ' ')
+ROW_COUNT=$(wc -l < "$OUTPUT_FILE" | tr -d ' ')
 # Remove header
 ROW_COUNT=$((ROW_COUNT - 1))
 
 echo "Rows gathered: $ROW_COUNT"
 
 if [ "$ROW_COUNT" -gt 0 ] && [ "$ROW_COUNT" -lt 30 ]; then
-    echo "✅ Sampling logic works (Got $ROW_COUNT rows, expected ~10)"
+    echo -e "${GREEN}✅ Sampling logic works (Got $ROW_COUNT rows, expected ~10)${NC}"
 else
-    echo "❌ Sampling logic failed (Got $ROW_COUNT rows)"
+    echo -e "${RED}❌ Sampling logic failed (Got $ROW_COUNT rows)${NC}"
     exit 1
 fi
 
 # Clean up
-rm dist/sampling_test.csv
+rm -f "$OUTPUT_FILE"
 
-echo "Sampling Verification Passed!"
+echo -e "${GREEN}Sampling Verification Passed!${NC}"
