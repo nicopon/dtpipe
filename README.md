@@ -1,5 +1,7 @@
 # QueryDump
 
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://github.com/codespaces/new?repo=nicopon/QueryDump)
+
 CLI tool to export database data to Parquet, CSV, or another database. Supports anonymization, light data transformation, and YAML job files. Designed for low memory footprint via streaming.
 
 ## Quick Start
