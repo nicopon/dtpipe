@@ -249,4 +249,71 @@ public class OracleIntegrationTests : IAsyncLifetime
                 File.Delete(duckDbPath);
         }
     }
+    
+    [Fact]
+    public async Task OracleDataWriter_BulkCopy_WithDifferentColumnOrder_MapsCorrectly()
+    {
+        if (!DockerHelper.IsAvailable() || _oracle is null) return;
+
+        // Arrange
+        var connectionString = _oracle.GetConnectionString();
+        var tableName = $"TEST_MAPPING_{Guid.NewGuid():N}".Substring(0, 20).ToUpperInvariant();
+
+        // 1. Manually create target table with mixed order: Name (VARCHAR), Score (NUMBER), Id (NUMBER)
+        // Source will be: Id, Name, Score
+        await using (var connection = new OracleConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            // Oracle default is uppercase.
+            cmd.CommandText = $"CREATE TABLE {tableName} (\"Name\" VARCHAR2(100), \"Score\" NUMBER(10,2), \"Id\" NUMBER(10))";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // 2. Setup Source Data
+        var columns = new List<ColumnInfo>
+        {
+            new("Id", typeof(int), false),
+            new("Name", typeof(string), true),
+            new("Score", typeof(decimal), false)
+        };
+
+        var row1 = new object?[] { 1, "Alice", 95.5m };
+        var row2 = new object?[] { 2, "Bob", 80.0m };
+        var batch = new List<object?[]> { row1, row2 };
+
+        var writerOptions = new OracleWriterOptions
+        {
+            Table = tableName,
+            Strategy = OracleWriteStrategy.Truncate, // Or Append
+            BulkSize = 100 // Force Bulk Copy
+        };
+
+        // Act
+        // Use NullLogger to avoid test output noise
+        await using var writer = new OracleDataWriter(connectionString, writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance);
+        await writer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+        await writer.WriteBatchAsync(batch, TestContext.Current.CancellationToken);
+        await writer.CompleteAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        await using (var connection = new OracleConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = $"SELECT \"Id\", \"Name\", \"Score\" FROM {tableName} ORDER BY \"Id\"";
+            using var reader = await cmd.ExecuteReaderAsync();
+
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal(1, Convert.ToInt32(reader["Id"])); // Should be 1, not "Alice" or 95.5
+            Assert.Equal("Alice", reader["Name"]);
+            Assert.Equal(95.5m, Convert.ToDecimal(reader["Score"]));
+
+             Assert.True(await reader.ReadAsync());
+            Assert.Equal(2, Convert.ToInt32(reader["Id"]));
+            Assert.Equal("Bob", reader["Name"]);
+            Assert.Equal(80.0m, Convert.ToDecimal(reader["Score"]));
+        }
+    }
 }
+

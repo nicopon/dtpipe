@@ -111,4 +111,73 @@ public class DuckDbWriterTests : IAsyncLifetime
 
         reader.Read().Should().BeFalse();
     }
+    [Fact]
+    public async Task Write_Append_WithDifferentColumnOrder_MapsCorrectly()
+    {
+        // Arrange
+        // 1. Pre-create table with mixed order: Score (double), Name (string), Id (int), IsActive (bool)
+        // Source order will be: Id, Name, IsActive, Score
+        using (var connection = new DuckDBConnection($"Data Source={_outputPath}"))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "CREATE TABLE Export (Score DOUBLE, Name VARCHAR, Id INTEGER, IsActive BOOLEAN)";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // 2. Configure options: Append strategy
+        var duckOptions = new DuckDbWriterOptions { Strategy = DuckDbWriteStrategy.Append, Table = "Export" };
+        _registry.Register(duckOptions);
+
+        var options = new DumpOptions 
+        { 
+            OutputPath = _outputPath, 
+            Provider = "duckdb",
+            Query = "SELECT 1", // Dummy
+            ConnectionString = "dummy"
+        };
+        var writer = _factory.Create(options);
+
+        var columns = new List<ColumnInfo>
+        {
+            new("Id", typeof(int), false),
+            new("Name", typeof(string), true),
+            new("IsActive", typeof(bool), false),
+            new("Score", typeof(double), false)
+        };
+
+        var rows = new List<object?[]>
+        {
+            new object?[] { 1, "Alice", true, 95.5 },
+            new object?[] { 2, "Bob", false, 80.0 }
+        };
+
+        // Act
+        await writer.InitializeAsync(columns, CancellationToken.None);
+        await writer.WriteBatchAsync(rows, CancellationToken.None);
+        await writer.CompleteAsync(CancellationToken.None);
+        await writer.DisposeAsync();
+
+        // Assert
+        using (var connection = new DuckDBConnection($"Data Source={_outputPath}"))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT * FROM Export ORDER BY Id"; // Id is the 3rd column in DB
+            using var reader = await cmd.ExecuteReaderAsync();
+
+            reader.Read().Should().BeTrue();
+            // DB Order: Score, Name, Id, IsActive
+            reader.GetDouble(0).Should().Be(95.5);
+            reader.GetString(1).Should().Be("Alice");
+            reader.GetInt32(2).Should().Be(1);
+            reader.GetBoolean(3).Should().BeTrue();
+
+            reader.Read().Should().BeTrue();
+            reader.GetDouble(0).Should().Be(80.0);
+            reader.GetString(1).Should().Be("Bob");
+            reader.GetInt32(2).Should().Be(2);
+            reader.GetBoolean(3).Should().BeFalse();
+        }
+    }
 }

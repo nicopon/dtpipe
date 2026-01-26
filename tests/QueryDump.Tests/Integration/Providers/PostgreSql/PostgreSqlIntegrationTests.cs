@@ -124,4 +124,66 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
         
         Assert.Equal(2, count);
     }
+    [Fact]
+    public async Task PostgreSqlDataWriter_MixedOrder_MapsCorrectly()
+    {
+        if (!DockerHelper.IsAvailable() || _postgres is null) return;
+
+        // Arrange
+        var connectionString = _postgres.GetConnectionString();
+        var tableName = "MixedOrderTest";
+
+        // 1. Manually create table with mixed order: Score (NUMERIC), Name (TEXT), Id (INT)
+        // Use quoted identifiers to match exact casing which PostgreSqlDataWriter uses.
+        await using (var connection = new NpgsqlConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = $"CREATE TABLE \"{tableName}\" (\"Score\" NUMERIC, \"Name\" TEXT, \"Id\" INT)";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // 2. Setup Source Data
+        var columns = new List<QueryDump.Core.Models.ColumnInfo>
+        {
+            new("Id", typeof(int), false),
+            new("Name", typeof(string), true),
+            new("Score", typeof(decimal), false)
+        };
+
+        var row1 = new object?[] { 1, "Alice", 95.5m };
+        var row2 = new object?[] { 2, "Bob", 80.0m };
+        var batch = new List<object?[]> { row1, row2 };
+
+        var writerOptions = new PostgreSqlWriterOptions
+        {
+            Table = tableName, // Writer will quote this -> "MixedOrderTest"
+            Strategy = PostgreSqlWriteStrategy.Append
+        };
+
+        // Act
+        await using var writer = new PostgreSqlDataWriter(connectionString, writerOptions);
+        await writer.InitializeAsync(columns); // Will find table and append
+        await writer.WriteBatchAsync(batch);
+        await writer.CompleteAsync();
+
+        // Assert
+        await using (var connection = new NpgsqlConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = $"SELECT \"Id\", \"Name\", \"Score\" FROM \"{tableName}\" ORDER BY \"Id\"";
+            await using var reader = await cmd.ExecuteReaderAsync();
+
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal(1, reader.GetInt32(0)); // Id
+            Assert.Equal("Alice", reader.GetString(1)); // Name
+            Assert.Equal(95.5m, reader.GetDecimal(2)); // Score
+            
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal(2, reader.GetInt32(0));
+            Assert.Equal("Bob", reader.GetString(1));
+            Assert.Equal(80.0m, reader.GetDecimal(2));
+        }
+    }
 }

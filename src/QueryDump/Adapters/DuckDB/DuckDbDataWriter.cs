@@ -132,6 +132,7 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
 
 
     private IDisposable? _appender;
+    private int[]? _columnMapping; // Maps: TargetIndex -> SourceIndex (or -1 if missing)
 
     public async ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
     {
@@ -164,12 +165,43 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
         cmd.CommandText = createTableSql;
         await cmd.ExecuteNonQueryAsync(ct);
 
+        // Compute mapping: The Appender expects values in the PHYSICAL order of the table.
+        // We must map that to our Source Columns.
+        
+        // 1. Get Target Columns in ordinal order
+        var targetInfo = await InspectTargetAsync(ct);
+        if (targetInfo != null && targetInfo.Columns.Count > 0)
+        {
+             _columnMapping = new int[targetInfo.Columns.Count];
+             for(int i=0; i<targetInfo.Columns.Count; i++)
+             {
+                 var targetName = targetInfo.Columns[i].Name;
+                 var sourceIndex = -1;
+                 
+                 // Find corresponding source column
+                 for(int s=0; s<_columns.Count; s++)
+                 {
+                     if (string.Equals(_columns[s].Name, targetName, StringComparison.OrdinalIgnoreCase))
+                     {
+                         sourceIndex = s;
+                         break;
+                     }
+                 }
+                 _columnMapping[i] = sourceIndex;
+             }
+        }
+        else
+        {
+            // Should not happen if table exists, fallback to 1:1
+             _columnMapping = Enumerable.Range(0, _columns.Count).ToArray();
+        }
+
         _appender = _connection.CreateAppender(_options.Table);
     }
 
     public async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
     {
-        if (_columns is null || _appender is null) throw new InvalidOperationException("Not initialized");
+        if (_columns is null || _appender is null || _columnMapping is null) throw new InvalidOperationException("Not initialized");
 
         await Task.Run(() =>
         {
@@ -177,18 +209,32 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
             foreach (var rowData in rows)
             {
                 var row = appender.CreateRow();
-                for (int i = 0; i < rowData.Length; i++)
+                
+                // We iterate over the MAPPING (which corresponds to Target Table Columns in implicit order)
+                // for k = 0 (First column of table), we get matching Source Index.
+                for (int i = 0; i < _columnMapping.Length; i++)
                 {
-                    var val = rowData[i];
-                    var col = _columns[i];
-                    
-                    if (val is null)
+                    var sourceIndex = _columnMapping[i];
+
+                    if (sourceIndex == -1)
                     {
+                        // Target table has a column that Source doesn't have.
+                        // Append NULL.
                         row.AppendNullValue();
                     }
                     else
                     {
-                        AppendValue(row, val, col.ClrType);
+                        var val = rowData[sourceIndex];
+                        var col = _columns[sourceIndex];
+                        
+                        if (val is null)
+                        {
+                            row.AppendNullValue();
+                        }
+                        else
+                        {
+                            AppendValue(row, val, col.ClrType);
+                        }
                     }
                 }
                 row.EndRow();
@@ -208,6 +254,7 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
         else if (underlying == typeof(float)) row.AppendValue((float)val);
         else if (underlying == typeof(double)) row.AppendValue((double)val);
         else if (underlying == typeof(decimal)) row.AppendValue((decimal)val);
+        // Date/Time handling: DuckDB sometimes picky.
         else if (underlying == typeof(DateTime)) row.AppendValue((DateTime)val);
         else if (underlying == typeof(DateTimeOffset)) row.AppendValue((DateTimeOffset)val);
         else if (underlying == typeof(Guid)) row.AppendValue((Guid)val);

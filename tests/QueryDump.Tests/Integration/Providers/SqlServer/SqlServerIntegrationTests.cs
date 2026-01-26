@@ -131,4 +131,67 @@ public class SqlServerIntegrationTests : IAsyncLifetime
                 File.Delete(outputPath);
         }
     }
+    [Fact]
+    public async Task SqlServerDataWriter_MixedOrder_MapsCorrectly()
+    {
+        if (!DockerHelper.IsAvailable() || _sqlServer is null) return;
+
+        // Arrange
+        var connectionString = _sqlServer.GetConnectionString();
+        var tableName = "MixedOrderTest";
+
+        // 1. Manually create table with mixed order: Score (DECIMAL), Name (NVARCHAR), Id (INT)
+        // Source will be: Id, Name, Score
+        await using (var connection = new SqlConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = $"CREATE TABLE {tableName} (Score DECIMAL(18,2), Name NVARCHAR(100), Id INT)";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // 2. Setup Source Data
+        var columns = new List<QueryDump.Core.Models.ColumnInfo>
+        {
+            new("Id", typeof(int), false),
+            new("Name", typeof(string), true),
+            new("Score", typeof(decimal), false)
+        };
+
+        var row1 = new object?[] { 1, "Alice", 95.5m };
+        var row2 = new object?[] { 2, "Bob", 80.0m };
+        var batch = new List<object?[]> { row1, row2 };
+
+        var writerOptions = new SqlServerWriterOptions
+        {
+            Table = tableName,
+            Strategy = SqlServerWriteStrategy.Append,
+            BulkSize = 100
+        };
+
+        // Act
+        await using var writer = new SqlServerDataWriter(connectionString, writerOptions);
+        await writer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+        await writer.WriteBatchAsync(batch, TestContext.Current.CancellationToken);
+        await writer.CompleteAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        await using (var connection = new SqlConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = $"SELECT Id, Name, Score FROM {tableName} ORDER BY Id";
+            using var reader = await cmd.ExecuteReaderAsync();
+
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal(1, reader.GetInt32(0)); // Id
+            Assert.Equal("Alice", reader.GetString(1)); // Name
+            Assert.Equal(95.5m, reader.GetDecimal(2)); // Score
+            
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal(2, reader.GetInt32(0));
+            Assert.Equal("Bob", reader.GetString(1));
+            Assert.Equal(80.0m, reader.GetDecimal(2));
+        }
+    }
 }

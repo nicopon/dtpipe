@@ -171,4 +171,63 @@ public class SqliteProviderTests : IAsyncLifetime
         SqliteConnectionHelper.CanHandle("test.db").Should().BeFalse(); // .db is DuckDB by default
         SqliteConnectionHelper.CanHandle("oracle:connection").Should().BeFalse();
     }
+    [Fact]
+    public async Task SqliteDataWriter_MixedOrder_MapsCorrectly()
+    {
+        // Arrange
+        var tableName = "MixedOrderTest";
+        
+        // 1. Manually create table with mixed order: Score (REAL), Name (TEXT), Id (INTEGER)
+        await using (var connection = new SqliteConnection(_outputConnectionString))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = $"CREATE TABLE {tableName} (Score REAL, Name TEXT, Id INTEGER)";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // 2. Setup Source Data
+        var columns = new List<QueryDump.Core.Models.ColumnInfo>
+        {
+            new("Id", typeof(int), false),
+            new("Name", typeof(string), true),
+            new("Score", typeof(double), false)
+        };
+
+        var row1 = new object?[] { 1, "Alice", 95.5 };
+        var row2 = new object?[] { 2, "Bob", 80.0 };
+        var batch = new List<object?[]> { row1, row2 };
+
+        var registry = new OptionsRegistry();
+        registry.Register(new SqliteWriterOptions 
+        { 
+            Table = tableName, 
+            Strategy = SqliteWriteStrategy.Append 
+        });
+
+        // Act
+        await using var writer = new SqliteDataWriter(_outputConnectionString, registry);
+        await writer.InitializeAsync(columns, CancellationToken.None);
+        await writer.WriteBatchAsync(batch, CancellationToken.None);
+        await writer.CompleteAsync(CancellationToken.None);
+        
+        // Assert
+        await using (var connection = new SqliteConnection(_outputConnectionString))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = $"SELECT Id, Name, Score FROM {tableName} ORDER BY Id";
+            using var reader = await cmd.ExecuteReaderAsync();
+
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal(1, reader.GetInt32(0)); // Id
+            Assert.Equal("Alice", reader.GetString(1)); // Name
+            Assert.Equal(95.5, reader.GetDouble(2)); // Score
+            
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal(2, reader.GetInt32(0));
+            Assert.Equal("Bob", reader.GetString(1));
+            Assert.Equal(80.0, reader.GetDouble(2));
+        }
+    }
 }
