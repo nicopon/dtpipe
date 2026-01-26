@@ -4,6 +4,7 @@ using QueryDump.Cli.Abstractions;
 using QueryDump.Core.Models;
 using QueryDump.Core.Options;
 using System.Text;
+using QueryDump.Core.Helpers;
 using ColumnInfo = QueryDump.Core.Models.ColumnInfo;
 
 namespace QueryDump.Adapters.DuckDB;
@@ -203,43 +204,55 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
     {
         if (_columns is null || _appender is null || _columnMapping is null) throw new InvalidOperationException("Not initialized");
 
-        await Task.Run(() =>
+        try
         {
-            var appender = (DuckDBAppender)_appender;
-            foreach (var rowData in rows)
+            await Task.Run(() =>
             {
-                var row = appender.CreateRow();
-                
-                // We iterate over the MAPPING (which corresponds to Target Table Columns in implicit order)
-                // for k = 0 (First column of table), we get matching Source Index.
-                for (int i = 0; i < _columnMapping.Length; i++)
+                var appender = (DuckDBAppender)_appender;
+                foreach (var rowData in rows)
                 {
-                    var sourceIndex = _columnMapping[i];
+                    var row = appender.CreateRow();
+                    
+                    // We iterate over the MAPPING (which corresponds to Target Table Columns in implicit order)
+                    // for k = 0 (First column of table), we get matching Source Index.
+                    for (int i = 0; i < _columnMapping.Length; i++)
+                    {
+                        var sourceIndex = _columnMapping[i];
 
-                    if (sourceIndex == -1)
-                    {
-                        // Target table has a column that Source doesn't have.
-                        // Append NULL.
-                        row.AppendNullValue();
-                    }
-                    else
-                    {
-                        var val = rowData[sourceIndex];
-                        var col = _columns[sourceIndex];
-                        
-                        if (val is null)
+                        if (sourceIndex == -1)
                         {
+                            // Target table has a column that Source doesn't have.
+                            // Append NULL.
                             row.AppendNullValue();
                         }
                         else
                         {
-                            AppendValue(row, val, col.ClrType);
+                            var val = rowData[sourceIndex];
+                            var col = _columns[sourceIndex];
+                            
+                            if (val is null)
+                            {
+                                row.AppendNullValue();
+                            }
+                            else
+                            {
+                                AppendValue(row, val, col.ClrType);
+                            }
                         }
                     }
+                    row.EndRow();
                 }
-                row.EndRow();
+            }, ct);
+        }
+        catch (Exception ex)
+        {
+            var analysis = await BatchFailureAnalyzer.AnalyzeAsync(this, rows, _columns, ct);
+             if (!string.IsNullOrEmpty(analysis))
+            {
+                throw new InvalidOperationException($"DuckDB Appender Failed with detailed analysis:\n{analysis}", ex);
             }
-        }, ct);
+            throw;
+        }
     }
 
     private void AppendValue(IDuckDBAppenderRow row, object val, Type type)

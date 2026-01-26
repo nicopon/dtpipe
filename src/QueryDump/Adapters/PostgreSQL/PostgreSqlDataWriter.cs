@@ -5,6 +5,7 @@ using QueryDump.Core.Abstractions;
 using QueryDump.Cli.Abstractions;
 using QueryDump.Core.Models;
 using QueryDump.Core.Options;
+using QueryDump.Core.Helpers;
 
 namespace QueryDump.Adapters.PostgreSQL;
 
@@ -15,6 +16,8 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
     private NpgsqlConnection? _connection;
     private NpgsqlBinaryImporter? _writer;
     private long _bytesWritten;
+    private IReadOnlyList<ColumnInfo>? _columns;
+
 
     public long BytesWritten => _bytesWritten;
 
@@ -216,6 +219,7 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
     {
         _connection = new NpgsqlConnection(_connectionString);
         await _connection.OpenAsync(ct);
+        _columns = columns;
 
         // Handle Strategy (Create/Truncate/Append/Delete)
         if (_options.Strategy == PostgreSqlWriteStrategy.DeleteThenInsert)
@@ -247,23 +251,36 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
     public async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
     {
         if (_writer is null) throw new InvalidOperationException("Writer not initialized");
+        if (_columns is null) throw new InvalidOperationException("Columns not initialized");
 
-        foreach (var row in rows)
+        try
         {
-            await _writer.StartRowAsync(ct);
-            foreach (var val in row)
+            foreach (var row in rows)
             {
-                if (val is null)
+                await _writer.StartRowAsync(ct);
+                foreach (var val in row)
                 {
-                    await _writer.WriteNullAsync(ct);
+                    if (val is null)
+                    {
+                         await _writer.WriteNullAsync(ct);
+                    }
+                    else
+                    {
+                        await _writer.WriteAsync(val, ct);
+                    }
                 }
-                else
-                {
-                    await _writer.WriteAsync(val, ct);
-                }
+                // Rough estimation of bytes (row overhead + data)
+                _bytesWritten += 8 + row.Sum(o => o?.ToString()?.Length ?? 0);
             }
-            // Rough estimation of bytes (row overhead + data)
-            _bytesWritten += 8 + row.Sum(o => o?.ToString()?.Length ?? 0);
+        }
+        catch (Exception ex)
+        {
+             var analysis = await BatchFailureAnalyzer.AnalyzeAsync(this, rows, _columns, ct);
+             if (!string.IsNullOrEmpty(analysis))
+            {
+                throw new InvalidOperationException($"PostgreSQL Binary Import Failed with detailed analysis:\n{analysis}", ex);
+            }
+            throw;
         }
     }
 

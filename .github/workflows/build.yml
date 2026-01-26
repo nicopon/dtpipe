@@ -50,6 +50,9 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore
 
+      - name: Run Tests
+        run: dotnet test --no-restore --verbosity normal
+
       - name: Build Release
         run: |
           dotnet publish src/QueryDump/QueryDump.csproj -c Release \

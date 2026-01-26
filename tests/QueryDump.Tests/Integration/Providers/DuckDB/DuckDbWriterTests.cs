@@ -180,4 +180,50 @@ public class DuckDbWriterTests : IAsyncLifetime
             reader.GetBoolean(3).Should().BeFalse();
         }
     }
+    [Fact]
+    public async Task Write_WithIncompatibleData_ThrowsDetailedError()
+    {
+        // Arrange
+        using (var connection = new DuckDBConnection($"Data Source={_outputPath}"))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "CREATE TABLE Export (Id INTEGER)";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var duckOptions = new DuckDbWriterOptions { Strategy = DuckDbWriteStrategy.Append, Table = "Export" };
+        _registry.Register(duckOptions);
+
+        var options = new DumpOptions 
+        { 
+            OutputPath = _outputPath, 
+            Provider = "duckdb", 
+            Query = "SELECT 1",
+            ConnectionString = "dummy"
+        };
+        var writer = _factory.Create(options);
+
+        // Source says ID is String, but Target is Integer
+        var columns = new List<ColumnInfo>
+        {
+            new("Id", typeof(string), true)
+        };
+
+        var rows = new List<object?[]>
+        {
+            new object?[] { "NotAnInteger" }
+        };
+
+        // Act
+        await writer.InitializeAsync(columns, CancellationToken.None);
+        
+        var act = async () => await writer.WriteBatchAsync(rows, CancellationToken.None);
+
+        // Assert
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(act);
+        ex.Message.Should().Contain("DuckDB Appender Failed with detailed analysis");
+        ex.Message.Should().Contain("Issue detected at Row 1");
+        ex.Message.Should().Contain("Value: 'NotAnInteger'");
+    }
 }

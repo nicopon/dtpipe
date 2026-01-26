@@ -4,6 +4,7 @@ using QueryDump.Core.Abstractions;
 using QueryDump.Cli.Abstractions;
 using QueryDump.Core.Models;
 using QueryDump.Core.Options;
+using QueryDump.Core.Helpers;
 
 namespace QueryDump.Adapters.Sqlite;
 
@@ -215,34 +216,46 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector
     {
         if (rows.Count == 0) return;
 
-        using var transaction = _connection!.BeginTransaction();
-
-        var paramNames = string.Join(", ", Enumerable.Range(0, _columns!.Count).Select(i => $"@p{i}"));
-        var columnNames = string.Join(", ", _columns.Select(c => $"\"{c.Name}\""));
-
-        using var cmd = _connection.CreateCommand();
-        cmd.CommandText = $"INSERT INTO \"{_tableName}\" ({columnNames}) VALUES ({paramNames})";
-        cmd.Transaction = transaction;
-
-        // Create parameters once
-        for (int i = 0; i < _columns.Count; i++)
+        try
         {
-            cmd.Parameters.Add(new SqliteParameter($"@p{i}", null));
-        }
+            using var transaction = _connection!.BeginTransaction();
 
-        foreach (var row in rows)
-        {
+            var paramNames = string.Join(", ", Enumerable.Range(0, _columns!.Count).Select(i => $"@p{i}"));
+            var columnNames = string.Join(", ", _columns.Select(c => $"\"{c.Name}\""));
+
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = $"INSERT INTO \"{_tableName}\" ({columnNames}) VALUES ({paramNames})";
+            cmd.Transaction = transaction;
+
+            // Create parameters once
             for (int i = 0; i < _columns.Count; i++)
             {
-                cmd.Parameters[i].Value = row[i] ?? DBNull.Value;
+                cmd.Parameters.Add(new SqliteParameter($"@p{i}", null));
             }
-            await cmd.ExecuteNonQueryAsync(ct);
+
+            foreach (var row in rows)
+            {
+                for (int i = 0; i < _columns.Count; i++)
+                {
+                    cmd.Parameters[i].Value = row[i] ?? DBNull.Value;
+                }
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
+
+            await transaction.CommitAsync(ct);
+
+            // Estimate bytes written (rough approximation)
+            BytesWritten += rows.Count * _columns.Count * 8; // Rough estimate
         }
-
-        await transaction.CommitAsync(ct);
-
-        // Estimate bytes written (rough approximation)
-        BytesWritten += rows.Count * _columns.Count * 8; // Rough estimate
+        catch (Exception ex)
+        {
+             var analysis = await BatchFailureAnalyzer.AnalyzeAsync(this, rows, _columns!, ct);
+             if (!string.IsNullOrEmpty(analysis))
+            {
+                throw new InvalidOperationException($"SQLite Insert Failed with detailed analysis:\n{analysis}", ex);
+            }
+            throw;
+        }
     }
 
     public ValueTask CompleteAsync(CancellationToken ct = default)

@@ -8,6 +8,7 @@ using System.Text;
 
 using QueryDump.Adapters.Oracle;
 using Microsoft.Extensions.Logging;
+using QueryDump.Core.Helpers;
 
 public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
 {
@@ -395,7 +396,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "OracleBulkCopy failed. Starting in-depth analysis of the batch...");
-                var analysis = await AnalyzeBatchFailureAsync(rows);
+                var analysis = await BatchFailureAnalyzer.AnalyzeAsync(this, rows, _columns, ct);
                 if (!string.IsNullOrEmpty(analysis))
                 {
                     throw new InvalidOperationException($"Bulk Copy Failed with detailed analysis:\n{analysis}", ex);
@@ -506,119 +507,5 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
         return true;
     }
 
-    private async Task<string?> AnalyzeBatchFailureAsync(IReadOnlyList<object?[]> rows)
-    {
-        if (_columns == null) return null;
 
-        try 
-        {
-            // 1. Fetch Target Schema to know what Oracle expects
-            var targetSchema = await InspectTargetAsync();
-            if (targetSchema == null || targetSchema.Columns.Count == 0) 
-            {
-                return "Could not retrieve target schema definition from Oracle. Cannot perform deep analysis.";
-            }
-
-            // 2. OracleBulkCopy (without mappings) maps by ORDINAL.
-            // We must verify that SourceColumn[i] is compatible with TargetColumn[i]
-            
-            int checkCount = Math.Min(_columns.Count, targetSchema.Columns.Count);
-
-            for (int r = 0; r < rows.Count; r++)
-            {
-                var row = rows[r];
-                for (int c = 0; c < checkCount; c++)
-                {
-                    var val = row[c];
-                    var sourceCol = _columns[c];
-                    var targetCol = targetSchema.Columns[c]; // Mapping by position
-                    
-                    if (val == null || val == DBNull.Value) continue;
-
-                    try
-                    {
-                        var rawTargetType = targetCol.InferredClrType ?? typeof(object);
-                        var targetType = Nullable.GetUnderlyingType(rawTargetType) ?? rawTargetType;
-
-                        // Check 1: Is this a String trying to go into a non-String column?
-                        // This is the most common cause of "Input string 'N' was not in a correct format"
-                        if (val is string s)
-                        {
-                            if (targetType != typeof(string) && targetType != typeof(object))
-                            {
-                                // Try strict conversion to see if it fails
-                                // Using InvariantCulture for system types, but Oracle might be picky.
-                                // The key is: Can this string be interpreted as that type?
-                                
-                                if (targetType == typeof(decimal) || targetType == typeof(double) || targetType == typeof(float) || 
-                                    targetType == typeof(int) || targetType == typeof(long))
-                                {
-                                     // Check for common non-numeric chars
-                                     // But let's just let Convert throw
-                                     Convert.ChangeType(val, targetType, System.Globalization.CultureInfo.InvariantCulture);
-                                }
-                                else if (targetType == typeof(DateTime) || targetType == typeof(DateTimeOffset))
-                                {
-                                     DateTime.Parse(s, System.Globalization.CultureInfo.InvariantCulture);
-                                }
-                                else if (targetType == typeof(Guid))
-                                {
-                                     Guid.Parse(s);
-                                }
-                                else 
-                                {
-                                     // Generic fallback
-                                     Convert.ChangeType(val, targetType);
-                                }
-                            }
-                        }
-                        else
-                        {
-                            // Check 2: Value is not null, not string. Type Compatibility?
-                            // e.g. input is double, target is int (might overflow or match)
-                            if (val.GetType() != targetType && !targetType.IsAssignableFrom(val.GetType()))
-                            {
-                                 if (val is IConvertible)
-                                 {
-                                     Convert.ChangeType(val, targetType);
-                                 }
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        // Found a failure!
-                        var sb = new StringBuilder();
-                        sb.AppendLine($"[Error Analysis] Issue detected at Row {r + 1} (in batch), Column Index {c}.");
-                        // sourceCol has ClrType (from DuckDb/Parquet schema)
-                        sb.AppendLine($"Source Column: '{sourceCol.Name}' ({sourceCol.ClrType.Name})");
-                         // targetCol has InferredClrType (from Oracle inspection)
-                        sb.AppendLine($"Target Column: '{targetCol.Name}' ({targetCol.InferredClrType?.Name ?? "Unknown"})");
-                        sb.AppendLine($"Value: '{val}' ({val?.GetType().Name ?? "null"})");
-                        sb.AppendLine($"Error Logic: Value '{val}' could not be converted to Target Type '{targetCol.InferredClrType?.Name ?? targetCol.NativeType}'.");
-                        sb.AppendLine($"Conversion Error: {ex.Message}");
-                        sb.AppendLine();
-                        
-                        sb.AppendLine("Row Values:");
-                        for(int i=0; i<checkCount; i++)
-                        {
-                            var v = row[i];
-                            var sVal = v?.ToString() ?? "NULL";
-                            if (sVal.Length > 50) sVal = sVal.Substring(0, 47) + "...";
-                            
-                            var marker = (i == c) ? " <--- ERROR" : "";
-                            sb.AppendLine($"  [{i}] {targetSchema.Columns[i].Name}: {sVal}{marker}");
-                        }
-                        return sb.ToString(); 
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            return $"Analysis failed itself: {ex.Message}";
-        }
-
-        return "Analysis completed but no obvious type mismatches found in the first " + rows.Count + " rows vs Target Schema.";
-    }
 }
