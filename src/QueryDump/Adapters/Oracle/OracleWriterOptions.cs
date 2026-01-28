@@ -32,6 +32,5 @@ public record OracleWriterOptions : IProviderOptions
     [CliOption(Description = "Data insert mode (Standard, Bulk, Append)")]
     public OracleInsertMode InsertMode { get; set; }
 
-    [CliOption(Description = "Connection recycle interval in seconds (0 to disable)")]
-    public int ConnectionRecycleIntervalSeconds { get; set; } = 300;
+
 }

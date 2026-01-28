@@ -20,7 +20,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
     private OracleBulkCopy? _bulkCopy;
     private OracleCommand? _insertCommand;
     private OracleParameter[]? _insertParameters;
-    private DateTime _lastConnectionTime;
+
 
     public long BytesWritten => 0;
 
@@ -288,7 +288,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
         
         _logger.LogInformation("Initializing Oracle Writer for table {Table} (WriteStrategy={Strategy})", _targetTableName, _options.Strategy);
         await _connection.OpenAsync(ct);
-        _lastConnectionTime = DateTime.UtcNow;
+
 
         if (_options.Strategy == OracleWriteStrategy.DeleteThenInsert)
         {
@@ -383,34 +383,13 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
         }
     }
 
-    private async Task RecycleConnectionAsync(CancellationToken ct)
-    {
-        _logger.LogInformation("Recycling Oracle connection (Session limit reached)...");
-        
-        // Dispose commands relative to current connection
-        if (_bulkCopy != null) { ((IDisposable)_bulkCopy).Dispose(); _bulkCopy = null; }
-        if (_insertCommand != null) { _insertCommand.Dispose(); _insertCommand = null; }
-        
-        // Close and reopen connection
-        await _connection.CloseAsync();
-        await _connection.OpenAsync(ct);
-        _lastConnectionTime = DateTime.UtcNow;
-        
-        
-        // Re-initialize commands
-        InitializeCommands();
-    }
+
 
     public async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
     {
         if (_columns is null) throw new InvalidOperationException("Not initialized");
 
-        // Check for connection recycling
-        if (_options.ConnectionRecycleIntervalSeconds > 0 && 
-            (DateTime.UtcNow - _lastConnectionTime).TotalSeconds > _options.ConnectionRecycleIntervalSeconds)
-        {
-            await RecycleConnectionAsync(ct);
-        }
+
 
         if (_options.InsertMode == OracleInsertMode.Standard || _options.InsertMode == OracleInsertMode.Append)
         {
