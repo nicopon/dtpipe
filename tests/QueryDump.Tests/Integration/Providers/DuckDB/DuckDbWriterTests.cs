@@ -45,8 +45,9 @@ public class DuckDbWriterTests : IAsyncLifetime
     public void CanHandle_Detects_DuckDb_Patterns()
     {
         _factory.CanHandle("output.duckdb").Should().BeTrue();
-        _factory.CanHandle("output.db").Should().BeTrue();
-        _factory.CanHandle("duckdb:output.foo").Should().BeTrue();
+        _factory.CanHandle("output.db").Should().BeFalse(); // .db removed
+        _factory.CanHandle("duckdb:output.foo").Should().BeFalse(); // Prefix removed
+        _factory.CanHandle("output.foo").Should().BeFalse();
         _factory.CanHandle("output.csv").Should().BeFalse();
     }
 

@@ -8,16 +8,16 @@ namespace QueryDump.Tests;
 public class FakeDataTransformerTests
 {
     [Fact]
-    public void Constructor_WithMappings_ShouldParseCorrectly()
+    public void Constructor_WithFake_ShouldParseCorrectly()
     {
         // Arrange
-        var options = new FakeOptions { Mappings = new[] { "CITY:address.city", "NAME:name.firstname" } };
+        var options = new FakeOptions { Fake = new[] { "CITY:address.city", "NAME:name.firstname" } };
 
         // Act
         var transformer = new FakeDataTransformer(options);
 
         // Assert
-        transformer.HasMappings.Should().BeTrue();
+        transformer.HasFake.Should().BeTrue();
     }
 
     [Fact]
@@ -26,7 +26,7 @@ public class FakeDataTransformerTests
         // Arrange
         var options = new FakeOptions 
         { 
-            Mappings = new[] { "NAME:name.firstname" },
+            Fake = new[] { "NAME:name.firstname" },
             Deterministic = true,
             SeedColumn = "ID" 
         };
@@ -42,7 +42,7 @@ public class FakeDataTransformerTests
     public async Task Transform_ShouldReplaceValues_WhenMappingExists()
     {
         // Arrange
-        var options = new FakeOptions { Mappings = new[] { "Name:name.firstname", "City:address.city" }, Seed = 12345 };
+        var options = new FakeOptions { Fake = new[] { "Name:name.firstname", "City:address.city" }, Seed = 12345 };
         var transformer = new FakeDataTransformer(options);
         
         var columns = new List<ColumnInfo>
@@ -79,7 +79,7 @@ public class FakeDataTransformerTests
     public async Task Transform_ShouldBeCaseInsensitive_ForColumnNames()
     {
          // Arrange
-        var options = new FakeOptions { Mappings = new[] { "NAME:name.firstname" }, Seed = 123 };
+        var options = new FakeOptions { Fake = new[] { "NAME:name.firstname" }, Seed = 123 };
         var transformer = new FakeDataTransformer(options);
         
         var columns = new List<ColumnInfo>
@@ -102,8 +102,8 @@ public class FakeDataTransformerTests
     {
         // Arrange
         var mappings = new[] { "NAME:name.firstname" };
-        var options1 = new FakeOptions { Mappings = mappings, Seed = 42 };
-        var options2 = new FakeOptions { Mappings = mappings, Seed = 42 };
+        var options1 = new FakeOptions { Fake = mappings, Seed = 42 };
+        var options2 = new FakeOptions { Fake = mappings, Seed = 42 };
 
         var transformer1 = new FakeDataTransformer(options1);
         var transformer2 = new FakeDataTransformer(options2);
@@ -126,7 +126,7 @@ public class FakeDataTransformerTests
     public async Task Transform_ShouldRespectLocale()
     {
         // Arrange
-        var options = new FakeOptions { Mappings = new[] { "COUNTRY:address.country" }, Locale = "fr", Seed = 1 };
+        var options = new FakeOptions { Fake = new[] { "COUNTRY:address.country" }, Locale = "fr", Seed = 1 };
         var transformerFr = new FakeDataTransformer(options);
         
         var columns = new List<ColumnInfo> { new("COUNTRY", typeof(string), true) };
@@ -145,7 +145,7 @@ public class FakeDataTransformerTests
     {
         // Arrange
         // "invalid" is not a known dataset, so it should be treated as a hardcoded string
-        var options = new FakeOptions { Mappings = new[] { "NAME:invalid.dataset" }, Seed = 123 };
+        var options = new FakeOptions { Fake = new[] { "NAME:invalid.dataset" }, Seed = 123 };
         
         var columns = new List<ColumnInfo> { new("NAME", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { "Original" } };
@@ -165,7 +165,7 @@ public class FakeDataTransformerTests
         // Arrange
         // "name" is a valid dataset, but "invalidmethod" is not a method. 
         // Should throw InvalidOperationException to stop the export.
-        var options = new FakeOptions { Mappings = new[] { "NAME:name.invalidmethod" }, Seed = 123 };
+        var options = new FakeOptions { Fake = new[] { "NAME:name.invalidmethod" }, Seed = 123 };
         
         // Act & Assert
         var act = () => new FakeDataTransformer(options);
@@ -183,7 +183,7 @@ public class FakeDataTransformerTests
         // Issue reproduction: "Finance:iban" (colon separator) vs "Finance.iban" (dot separator)
         
         // Case 1: "Finance:iban" (Colon) -> Should be treated as hardcoded string "Finance:iban" because it's not a valid fake path
-        var optionsColon = new FakeOptions { Mappings = new[] { "IBAN:finance:iban" } };
+        var optionsColon = new FakeOptions { Fake = new[] { "IBAN:finance:iban" } };
         var transformerColon = new FakeDataTransformer(optionsColon);
         var columns = new List<ColumnInfo> { new("IBAN", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { "Original" } };
@@ -197,7 +197,7 @@ public class FakeDataTransformerTests
         resColon[0][0]!.ToString()!.Length.Should().BeGreaterThan(10);
         
         // Case 2: "Finance.iban" (Dot) -> Should be recognized as faker
-        var optionsDot = new FakeOptions { Mappings = new[] { "IBAN:finance.iban" } };
+        var optionsDot = new FakeOptions { Fake = new[] { "IBAN:finance.iban" } };
         var transformerDot = new FakeDataTransformer(optionsDot);
         
         await transformerDot.InitializeAsync(columns, TestContext.Current.CancellationToken);
@@ -209,7 +209,7 @@ public class FakeDataTransformerTests
         resDot[0][0]!.ToString()!.Length.Should().BeGreaterThan(10);
         
         // Case 3: "finance.iban" (Lowercase Dot) -> Should also work (case insensitive)
-        var optionsLower = new FakeOptions { Mappings = new[] { "IBAN:finance.iban" } };
+        var optionsLower = new FakeOptions { Fake = new[] { "IBAN:finance.iban" } };
         var transformerLower = new FakeDataTransformer(optionsLower);
         
         await transformerLower.InitializeAsync(columns, TestContext.Current.CancellationToken);
@@ -221,7 +221,7 @@ public class FakeDataTransformerTests
     public async Task Transform_ShouldSkipFake_WhenSkipNullEnabled_AndValueIsNull()
     {
         // Arrange
-        var options = new FakeOptions { Mappings = new[] { "NAME:name.firstname" }, SkipNull = true, Seed = 123 };
+        var options = new FakeOptions { Fake = new[] { "NAME:name.firstname" }, SkipNull = true, Seed = 123 };
         var transformer = new FakeDataTransformer(options);
         var columns = new List<ColumnInfo> { new("NAME", typeof(string), true) };
         var rows = new List<object?[]> 

@@ -7,7 +7,7 @@ namespace QueryDump.Adapters.DuckDB;
 
 public class DuckDbWriterDescriptor : IProviderDescriptor<IDataWriter>
 {
-    public string ProviderName => "duckdb";
+    public string ProviderName => DuckDbConstants.ProviderName;
 
     public Type OptionsType => typeof(DuckDbWriterOptions);
 

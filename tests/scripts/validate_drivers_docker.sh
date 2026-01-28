@@ -68,7 +68,7 @@ INSERT INTO users (name, email) VALUES ('Alice', 'alice@example.com'), ('Bob', '
 EOF
 
 echo "Running export from Postgres..."
-$QUERYDUMP_BIN --input "postgres:Host=localhost;Port=5432;Username=postgres;Password=mysecretpassword;Database=postgres" \
+$QUERYDUMP_BIN --input "pg:Host=localhost;Port=5432;Username=postgres;Password=mysecretpassword;Database=postgres" \
                --query "SELECT * FROM users ORDER BY id" \
                --output "postgres_out.csv"
 
@@ -145,7 +145,7 @@ EXIT;
 EOF
 
 echo "Running export from Oracle..."
-$QUERYDUMP_BIN --input "oracle:Data Source=localhost:1521/FREEPDB1;User Id=system;Password=MySecretPassword123!;" \
+$QUERYDUMP_BIN --input "ora:Data Source=localhost:1521/FREEPDB1;User Id=system;Password=MySecretPassword123!;" \
                --query "SELECT * FROM Users ORDER BY Id" \
                --output "oracle_out.csv"
 

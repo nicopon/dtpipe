@@ -13,7 +13,7 @@ public class OverwriteDataTransformerTests
     public async Task Transform_ShouldOverwriteColumn_WhenMappingExists()
     {
         // Arrange
-        var options = new OverwriteOptions { Mappings = new[] { "CITY:Paris" } };
+        var options = new OverwriteOptions { Overwrite = new[] { "CITY:Paris" } };
         var transformer = new OverwriteDataTransformer(options);
         var columns = new List<ColumnInfo> { new("CITY", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { "London" } };
@@ -30,7 +30,7 @@ public class OverwriteDataTransformerTests
     public async Task Transform_ShouldIgnore_WhenColumnDoesNotExist()
     {
         // Arrange
-        var options = new OverwriteOptions { Mappings = new[] { "UNKNOWN:Value" } };
+        var options = new OverwriteOptions { Overwrite = new[] { "UNKNOWN:Value" } };
         var transformer = new OverwriteDataTransformer(options);
         var columns = new List<ColumnInfo> { new("CITY", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { "London" } };
@@ -46,7 +46,7 @@ public class OverwriteDataTransformerTests
     public async Task Transform_ShouldSkipOverwrite_WhenSkipNullEnabled_AndValueIsNull()
     {
         // Arrange
-        var options = new OverwriteOptions { Mappings = new[] { "CITY:Paris" }, SkipNull = true };
+        var options = new OverwriteOptions { Overwrite = new[] { "CITY:Paris" }, SkipNull = true };
         var transformer = new OverwriteDataTransformer(options);
         var columns = new List<ColumnInfo> { new("CITY", typeof(string), true) };
         var rows = new List<object?[]> 

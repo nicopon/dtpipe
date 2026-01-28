@@ -9,7 +9,7 @@ using ColumnInfo = QueryDump.Core.Models.ColumnInfo; // Alias to resolve conflic
 
 namespace QueryDump.Adapters.DuckDB;
 
-public sealed partial class DuckDataSourceReader : IStreamReader, IRequiresOptions<DuckDbOptions>
+public sealed partial class DuckDataSourceReader : IStreamReader, IRequiresOptions<DuckDbReaderOptions>
 {
     private readonly DuckDBConnection _connection;
     private readonly DuckDBCommand _command;
@@ -28,7 +28,7 @@ public sealed partial class DuckDataSourceReader : IStreamReader, IRequiresOptio
     [GeneratedRegex(@"^\s*(\w+)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex FirstWordRegex();
 
-    public DuckDataSourceReader(string connectionString, string query, DuckDbOptions options, int queryTimeout = 0)
+    public DuckDataSourceReader(string connectionString, string query, DuckDbReaderOptions options, int queryTimeout = 0)
     {
         ValidateQueryIsSafeSelect(query);
         

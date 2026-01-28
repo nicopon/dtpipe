@@ -41,8 +41,8 @@ class Program
             .MinimumLevel.Debug()
             .CreateLogger();
 
-        var cliService = serviceProvider.GetRequiredService<CliService>();
-        var (rootCommand, printHelp) = cliService.Build();
+        var jobService = serviceProvider.GetRequiredService<JobService>();
+        var (rootCommand, printHelp) = jobService.Build();
         
         if (args.Length == 0 || args.Any(a => a == "--help" || a == "-h" || a == "-?"))
         {
@@ -79,7 +79,7 @@ class Program
         services.AddSingleton(Spectre.Console.AnsiConsole.Console);
         
         // CLI
-        services.AddSingleton<CliService>();
+        services.AddSingleton<JobService>();
         
         // Reader Factories using Generic Descriptor Bridge
         RegisterReader<OracleReaderDescriptor>(services);

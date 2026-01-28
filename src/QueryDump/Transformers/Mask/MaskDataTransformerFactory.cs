@@ -45,7 +45,7 @@ public class MaskDataTransformerFactory(OptionsRegistry registry) : IDataTransfo
         var maskOptions = _registry.Get<MaskOptions>();
         
         // Return null if no mappings, to skip execution overhead
-        if (!maskOptions.Mappings.Any())
+        if (!maskOptions.Mask.Any())
         {
             return null;
         }
@@ -60,7 +60,7 @@ public class MaskDataTransformerFactory(OptionsRegistry registry) : IDataTransfo
         
         var options = new MaskOptions
         {
-            Mappings = [.. configuration.Select(x => x.Value)],
+            Mask = [.. configuration.Select(x => x.Value)],
             SkipNull = registryOptions.SkipNull
         };
         return new MaskDataTransformer(options);
@@ -82,7 +82,7 @@ public class MaskDataTransformerFactory(OptionsRegistry registry) : IDataTransfo
              bool.TryParse(snStr, out skipNull);
         }
 
-        var options = new MaskOptions { Mappings = mappings, SkipNull = skipNull };
+        var options = new MaskOptions { Mask = mappings, SkipNull = skipNull };
         return new MaskDataTransformer(options);
     }
 }

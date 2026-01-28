@@ -13,7 +13,7 @@ public class FormatDataTransformerTests
     public async Task Transform_ShouldSubstituteColumnReferences()
     {
         // Arrange
-        var options = new FormatOptions { Mappings = new[] { "FULLNAME:{FIRST} {LAST}" } };
+        var options = new FormatOptions { Format = new[] { "FULLNAME:{FIRST} {LAST}" } };
         var transformer = new FormatDataTransformer(options);
         var columns = new List<ColumnInfo>
         {
@@ -38,7 +38,7 @@ public class FormatDataTransformerTests
         // C depends on B, B depends on A
         var options = new FormatOptions 
         { 
-            Mappings = new[] 
+            Format = new[] 
             { 
                 "C:{B} Copied", 
                 "B:{A} Copied" 
@@ -69,7 +69,7 @@ public class FormatDataTransformerTests
     [Fact]
     public async Task Transform_ShouldFormatWithDirectCopy()
     {
-        var options = new FormatOptions { Mappings = new[] { "COPY:{ORIGINAL}" } };
+        var options = new FormatOptions { Format = new[] { "COPY:{ORIGINAL}" } };
         var transformer = new FormatDataTransformer(options);
         var columns = new List<ColumnInfo>
         {
@@ -88,7 +88,7 @@ public class FormatDataTransformerTests
     public async Task Transform_ShouldApplyFormatSpecifier_ForNumbers()
     {
         // Arrange: Use {COLUMN:format} syntax
-        var options = new FormatOptions { Mappings = new[] { "PRICE_FMT:{PRICE:0.00}" } };
+        var options = new FormatOptions { Format = new[] { "PRICE_FMT:{PRICE:0.00}" } };
         var transformer = new FormatDataTransformer(options);
         var columns = new List<ColumnInfo>
         {
@@ -109,7 +109,7 @@ public class FormatDataTransformerTests
     public async Task Transform_ShouldApplyFormatSpecifier_ForDates()
     {
         // Arrange: Date formatting
-        var options = new FormatOptions { Mappings = new[] { "DATE_FR:{DATE:dd/MM/yyyy}" } };
+        var options = new FormatOptions { Format = new[] { "DATE_FR:{DATE:dd/MM/yyyy}" } };
         var transformer = new FormatDataTransformer(options);
         var columns = new List<ColumnInfo>
         {
@@ -130,7 +130,7 @@ public class FormatDataTransformerTests
     public async Task Transform_ShouldApplyFormatSpecifier_ForIntegerPadding()
     {
         // Arrange: Padding with zeros
-        var options = new FormatOptions { Mappings = new[] { "CODE_PADDED:{CODE:D6}" } };
+        var options = new FormatOptions { Format = new[] { "CODE_PADDED:{CODE:D6}" } };
         var transformer = new FormatDataTransformer(options);
         var columns = new List<ColumnInfo>
         {
@@ -151,7 +151,7 @@ public class FormatDataTransformerTests
     public async Task Transform_ShouldCombineBothSyntaxes()
     {
         // Arrange: Mix {COLUMN:format} and {COLUMN}
-        var options = new FormatOptions { Mappings = new[] { "LABEL:{PRICE:0.00}€ - {NAME}" } };
+        var options = new FormatOptions { Format = new[] { "LABEL:{PRICE:0.00}€ - {NAME}" } };
         var transformer = new FormatDataTransformer(options);
         var columns = new List<ColumnInfo>
         {
@@ -175,7 +175,7 @@ public class FormatDataTransformerTests
         // Template uses A and B. SkipNull set to true.
         var options = new FormatOptions 
         { 
-            Mappings = new[] { "RESULT:{A}-{B}" }, 
+            Format = new[] { "RESULT:{A}-{B}" }, 
             SkipNull = true 
         };
         var transformer = new FormatDataTransformer(options);

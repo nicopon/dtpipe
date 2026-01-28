@@ -150,7 +150,7 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
             columns.Add(new TargetColumnInfo(
                 colName,
                 nativeType,
-                MapPostgresToClr(dataType, udtName),
+                PostgreSqlTypeMapper.Instance.MapFromProviderType(udtName),
                 isNullable,
                 pkColumns.Contains(colName),
                 uniqueColumns.Contains(colName),
@@ -192,26 +192,7 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
         };
     }
 
-    private static Type? MapPostgresToClr(string dataType, string udtName)
-    {
-        return udtName.ToLowerInvariant() switch
-        {
-            "int2" => typeof(short),
-            "int4" => typeof(int),
-            "int8" => typeof(long),
-            "float4" => typeof(float),
-            "float8" => typeof(double),
-            "numeric" => typeof(decimal),
-            "bool" => typeof(bool),
-            "text" or "varchar" or "bpchar" => typeof(string),
-            "timestamp" or "timestamptz" => typeof(DateTime),
-            "date" => typeof(DateTime),
-            "time" or "timetz" => typeof(TimeSpan),
-            "uuid" => typeof(Guid),
-            "bytea" => typeof(byte[]),
-            _ => typeof(string) // Default to string for unknown types
-        };
-    }
+
 
     #endregion
 
@@ -269,7 +250,7 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
                         await _writer.WriteAsync(val, ct);
                     }
                 }
-                // Rough estimation of bytes (row overhead + data)
+                // Estimated byte count (overhead + string length)
                 _bytesWritten += 8 + row.Sum(o => o?.ToString()?.Length ?? 0);
             }
         }
@@ -313,7 +294,7 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
         {
             if (i > 0) sb.Append(", ");
             // Use double quotes for column names to handle case sensitivity and keywords
-            sb.Append($"\"{columns[i].Name}\" {PostgreSqlTypeMapper.Instance.MapClrType(columns[i].ClrType)}");
+            sb.Append($"\"{columns[i].Name}\" {PostgreSqlTypeMapper.Instance.MapToProviderType(columns[i].ClrType)}");
         }
         
         sb.Append(")");

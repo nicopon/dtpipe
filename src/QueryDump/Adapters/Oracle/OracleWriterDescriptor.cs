@@ -9,7 +9,7 @@ namespace QueryDump.Adapters.Oracle;
 
 public class OracleWriterDescriptor : IProviderDescriptor<IDataWriter>
 {
-    public string ProviderName => "oracle";
+    public string ProviderName => OracleConstants.ProviderName;
 
     public Type OptionsType => typeof(OracleWriterOptions);
 

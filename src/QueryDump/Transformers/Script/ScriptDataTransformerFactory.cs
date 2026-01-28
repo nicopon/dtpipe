@@ -49,10 +49,12 @@ public class ScriptDataTransformerFactory : IDataTransformerFactory
     public IDataTransformer? Create(DumpOptions options)
     {
         var scriptOptions = _registry.Get<ScriptOptions>();
-        if (scriptOptions.Mappings.Count == 0)
+        
+        if (scriptOptions.Script == null || !scriptOptions.Script.Any())
         {
             return null;
         }
+
         return new ScriptDataTransformer(scriptOptions);
     }
 
@@ -73,14 +75,14 @@ public class ScriptDataTransformerFactory : IDataTransformerFactory
             }
         }
         
-        return new ScriptDataTransformer(new ScriptOptions { Mappings = mappings, SkipNull = skipNull });
+        return new ScriptDataTransformer(new ScriptOptions { Script = mappings, SkipNull = skipNull });
     }
 
     public IDataTransformer? CreateFromYamlConfig(TransformerConfig config)
     {
-        if (config.Mappings == null || config.Mappings.Count == 0) return null;
+        if (config.Script == null || !config.Script.Any()) return null;
 
-        var mappings = config.Mappings.Select(kvp => $"{kvp.Key}:{kvp.Value}").ToList();
+        var mappings = config.Script.Select(kvp => $"{kvp.Key}:{kvp.Value}").ToList();
         
         bool skipNull = false;
         if (config.Options != null && config.Options.TryGetValue("skip-null", out var snStr))
@@ -88,7 +90,7 @@ public class ScriptDataTransformerFactory : IDataTransformerFactory
              bool.TryParse(snStr, out skipNull);
         }
 
-        return new ScriptDataTransformer(new ScriptOptions { Mappings = mappings, SkipNull = skipNull });
+        return new ScriptDataTransformer(new ScriptOptions { Script = mappings, SkipNull = skipNull });
     }
 
     public Task<int?> HandleCommandAsync(ParseResult parseResult, CancellationToken ct = default)

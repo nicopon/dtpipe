@@ -9,7 +9,7 @@ public class PostgreSqlTypeMapper : ITypeMapper
 {
     public static readonly PostgreSqlTypeMapper Instance = new();
 
-    public string MapClrType(Type clrType)
+    public string MapToProviderType(Type clrType)
     {
         var type = Nullable.GetUnderlyingType(clrType) ?? clrType;
 
@@ -35,6 +35,29 @@ public class PostgreSqlTypeMapper : ITypeMapper
             Type t when t == typeof(Guid) => "UUID",
             Type t when t == typeof(byte[]) => "BYTEA",
             _ => "TEXT"
+        };
+    }
+
+    public Type MapFromProviderType(string providerType)
+    {
+        var baseType = providerType.Split('(')[0].Trim().ToLowerInvariant();
+
+        return baseType switch
+        {
+            "boolean" or "bool" => typeof(bool),
+            "smallint" or "int2" => typeof(short),
+            "integer" or "int" or "int4" => typeof(int),
+            "bigint" or "int8" => typeof(long),
+            "real" or "float4" => typeof(float),
+            "double precision" or "float8" => typeof(double),
+            "numeric" or "decimal" => typeof(decimal),
+            "timestamp" or "timestamp without time zone" => typeof(DateTime),
+            "timestamptz" or "timestamp with time zone" => typeof(DateTimeOffset),
+            "interval" => typeof(TimeSpan),
+            "uuid" => typeof(Guid),
+            "bytea" => typeof(byte[]),
+            "text" or "varchar" or "character varying" or "char" or "character" => typeof(string),
+            _ => typeof(string)
         };
     }
 }

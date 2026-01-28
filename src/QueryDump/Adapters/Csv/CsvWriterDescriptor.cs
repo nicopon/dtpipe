@@ -7,9 +7,9 @@ namespace QueryDump.Adapters.Csv;
 
 public class CsvWriterDescriptor : IProviderDescriptor<IDataWriter>
 {
-    public string ProviderName => "csv";
+    public string ProviderName => CsvConstants.ProviderName;
 
-    public Type OptionsType => typeof(CsvOptions);
+    public Type OptionsType => typeof(CsvWriterOptions);
 
     public bool CanHandle(string connectionString)
     {
@@ -18,6 +18,6 @@ public class CsvWriterDescriptor : IProviderDescriptor<IDataWriter>
 
     public IDataWriter Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
     {
-        return new CsvDataWriter(connectionString, (CsvOptions)options);
+        return new CsvDataWriter(connectionString, (CsvWriterOptions)options);
     }
 }

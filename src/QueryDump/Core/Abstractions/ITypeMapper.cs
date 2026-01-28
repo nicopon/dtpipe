@@ -7,9 +7,9 @@ namespace QueryDump.Core.Abstractions;
 public interface ITypeMapper
 {
     /// <summary>
-    /// Maps a CLR type to the corresponding database/format type string.
+    /// Maps a CLR type to the corresponding provider-specific type string.
     /// </summary>
     /// <param name="clrType">The CLR type to map.</param>
-    /// <returns>The database/format-specific type string.</returns>
-    string MapClrType(Type clrType);
+    /// <returns>The provider-specific type string.</returns>
+    string MapToProviderType(Type clrType);
 }

@@ -47,7 +47,7 @@ public class FormatDataTransformerFactory(OptionsRegistry registry) : IDataTrans
     {
         var formatOptions = _registry.Get<FormatOptions>();
         
-        if (!formatOptions.Mappings.Any())
+        if (!formatOptions.Format.Any())
         {
             return null;
         }
@@ -62,7 +62,7 @@ public class FormatDataTransformerFactory(OptionsRegistry registry) : IDataTrans
         
         var options = new FormatOptions
         {
-            Mappings = configuration.Select(x => x.Value),
+            Format = configuration.Select(x => x.Value),
             SkipNull = registryOptions.SkipNull
         };
         return new FormatDataTransformer(options);
@@ -82,7 +82,7 @@ public class FormatDataTransformerFactory(OptionsRegistry registry) : IDataTrans
              bool.TryParse(snStr, out skipNull);
         }
 
-        var options = new FormatOptions { Mappings = mappings, SkipNull = skipNull };
+        var options = new FormatOptions { Format = mappings, SkipNull = skipNull };
         return new FormatDataTransformer(options);
     }
 }

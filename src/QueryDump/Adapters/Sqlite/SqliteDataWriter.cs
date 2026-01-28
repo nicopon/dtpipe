@@ -70,7 +70,7 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector
             columns.Add(new TargetColumnInfo(
                 colName,
                 dataType.ToUpperInvariant(),
-                MapSqliteToClr(dataType),
+                SqliteTypeMapper.MapFromProviderType(dataType),
                 !notNull && !isPk, // Nullable if not marked NOT NULL and not PK
                 isPk,
                 false, // SQLite doesn't easily expose UNIQUE via PRAGMA
@@ -111,22 +111,7 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector
         );
     }
 
-    private static Type? MapSqliteToClr(string dataType)
-    {
-        // SQLite uses type affinity, so we need to parse the type name
-        var upperType = dataType.ToUpperInvariant();
-        
-        if (upperType.Contains("INT")) return typeof(long);
-        if (upperType.Contains("CHAR") || upperType.Contains("TEXT") || upperType.Contains("CLOB")) return typeof(string);
-        if (upperType.Contains("BLOB")) return typeof(byte[]);
-        if (upperType.Contains("REAL") || upperType.Contains("FLOA") || upperType.Contains("DOUB")) return typeof(double);
-        if (upperType.Contains("BOOL")) return typeof(bool);
-        if (upperType.Contains("DATE") || upperType.Contains("TIME")) return typeof(DateTime);
-        if (upperType.Contains("DECIMAL") || upperType.Contains("NUMERIC")) return typeof(decimal);
-        
-        // Default to string for NUMERIC affinity or unknown types
-        return typeof(string);
-    }
+
 
     private static int? ExtractMaxLength(string dataType)
     {
@@ -202,7 +187,7 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector
         {
             if (i > 0) sb.Append(", ");
             var col = _columns[i];
-            sb.Append($"\"{col.Name}\" {SqliteTypeMapper.MapClrType(col.ClrType)}");
+            sb.Append($"\"{col.Name}\" {SqliteTypeMapper.MapToProviderType(col.ClrType)}");
         }
 
         sb.Append(')');

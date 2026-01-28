@@ -47,7 +47,7 @@ public class OverwriteDataTransformerFactory(OptionsRegistry registry) : IDataTr
     {
         var overwriteOptions = _registry.Get<OverwriteOptions>();
         
-        if (!overwriteOptions.Mappings.Any())
+        if (!overwriteOptions.Overwrite.Any())
         {
             return null;
         }
@@ -62,7 +62,7 @@ public class OverwriteDataTransformerFactory(OptionsRegistry registry) : IDataTr
         
         var options = new OverwriteOptions
         {
-            Mappings = [.. configuration.Select(x => x.Value)],
+            Overwrite = configuration.Select(x => x.Value),
             SkipNull = registryOptions.SkipNull
         };
         return new OverwriteDataTransformer(options);
@@ -83,7 +83,7 @@ public class OverwriteDataTransformerFactory(OptionsRegistry registry) : IDataTr
              bool.TryParse(snStr, out skipNull);
         }
 
-        var options = new OverwriteOptions { Mappings = [.. mappings], SkipNull = skipNull };
+        var options = new OverwriteOptions { Overwrite = mappings, SkipNull = skipNull };
         return new OverwriteDataTransformer(options);
     }
 }

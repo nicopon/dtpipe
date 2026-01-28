@@ -28,7 +28,7 @@ public sealed class ScriptDataTransformer : IDataTransformer, IRequiresOptions<S
     {
         // Parse mappings: "COLUMN:script"
         _mappings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var mapping in options.Mappings)
+        foreach (var mapping in options.Script)
         {
             var parts = mapping.Split(':', 2);
             if (parts.Length == 2)
@@ -46,9 +46,11 @@ public sealed class ScriptDataTransformer : IDataTransformer, IRequiresOptions<S
         _skipNull = options.SkipNull;
     }
 
+    public bool HasScript => _mappings.Count > 0;
+
     public ValueTask<IReadOnlyList<ColumnInfo>> InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
     {
-        if (_mappings.Count == 0)
+        if (!HasScript)
         {
             return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
         }
@@ -120,9 +122,7 @@ public sealed class ScriptDataTransformer : IDataTransformer, IRequiresOptions<S
                 // Call the pre-compiled function with full row
                 var result = _engine.Invoke(processor.FunctionName, jsRow);
 
-                // Convert back to .NET
-                // Depending on type, we might need specific handling. 
-                // For now, assume simple types (string, number, bool) or ToString().
+                // Convert back to .NET types (simple types or string fallback)
                 
                 if (result.IsString())
                 {
@@ -142,8 +142,7 @@ public sealed class ScriptDataTransformer : IDataTransformer, IRequiresOptions<S
                 }
                 else 
                 {
-                    // Fallback for objects/arrays -> JSON/String? 
-                    // Or simply ToString()
+                    // Fallback for complex objects
                     row[processor.ColumnIndex] = result.ToString();
                 }
             }

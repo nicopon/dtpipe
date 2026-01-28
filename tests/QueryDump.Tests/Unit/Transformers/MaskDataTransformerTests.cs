@@ -13,7 +13,7 @@ public class MaskDataTransformerTests
     public async Task Transform_ShouldMaskData_UsingPattern()
     {
         // Arrange
-        var options = new MaskOptions { Mappings = new[] { "EMAIL:###****" } };
+        var options = new MaskOptions { Mask = new[] { "EMAIL:###****" } };
         var transformer = new MaskDataTransformer(options);
         var columns = new List<ColumnInfo> { new("EMAIL", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { "test@example.com" } };
@@ -31,7 +31,7 @@ public class MaskDataTransformerTests
     public async Task Transform_ShouldMaskData_FullReplacement()
     {
         // Arrange
-        var options = new MaskOptions { Mappings = new[] { "PIN:****" } };
+        var options = new MaskOptions { Mask = new[] { "PIN:****" } };
         var transformer = new MaskDataTransformer(options);
         var columns = new List<ColumnInfo> { new("PIN", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { "1234" } };
@@ -52,7 +52,7 @@ public class MaskDataTransformerTests
         // Logic is 1:1 replacement. 
         // Input: 0612345678 (10 chars)
         // Pattern: ##******## (10 chars) -> Keep first 2, mask middle 6, keep last 2
-        var options = new MaskOptions { Mappings = new[] { "PHONE:##******##" } };
+        var options = new MaskOptions { Mask = new[] { "PHONE:##******##" } };
         var transformer = new MaskDataTransformer(options);
         var columns = new List<ColumnInfo> { new("PHONE", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { "0612345678" } };
@@ -73,7 +73,7 @@ public class MaskDataTransformerTests
         // Let's check implementation: Transform checks "if (value is string str)"
         // So non-string or null values are preserved by default logic.
         
-        var options = new MaskOptions { Mappings = new[] { "COL:***" } };
+        var options = new MaskOptions { Mask = new[] { "COL:***" } };
         var transformer = new MaskDataTransformer(options);
         var columns = new List<ColumnInfo> { new("COL", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { null } };
@@ -90,7 +90,7 @@ public class MaskDataTransformerTests
     public async Task Transform_ShouldSkipFormatting_WhenSkipNullEnabled_AndValueNull()
     {
         // Arrange
-        var options = new MaskOptions { Mappings = new[] { "COL:***" }, SkipNull = true };
+        var options = new MaskOptions { Mask = new[] { "COL:***" }, SkipNull = true };
         var transformer = new MaskDataTransformer(options);
         var columns = new List<ColumnInfo> { new("COL", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { null } };

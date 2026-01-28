@@ -85,7 +85,7 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
             columns.Add(new TargetColumnInfo(
                 colName,
                 dataType.ToUpperInvariant(),
-                MapDuckDbToClr(dataType),
+                DuckDbTypeMapper.MapFromProviderType(dataType),
                 isNullable,
                 pkColumns.Contains(colName),
                 uniqueColumns.Contains(colName),
@@ -102,32 +102,7 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
         );
     }
 
-    private static Type? MapDuckDbToClr(string dataType)
-    {
-        // Handle parameterized types like DECIMAL(10,2) or VARCHAR(50)
-        var baseType = dataType.Split('(')[0].Trim().ToUpperInvariant();
 
-        return baseType switch
-        {
-            "TINYINT" => typeof(byte),
-            "SMALLINT" => typeof(short),
-            "INTEGER" or "INT" => typeof(int),
-            "BIGINT" => typeof(long),
-            "HUGEINT" => typeof(decimal),
-            "FLOAT" or "REAL" => typeof(float),
-            "DOUBLE" => typeof(double),
-            "DECIMAL" or "NUMERIC" => typeof(decimal),
-            "BOOLEAN" => typeof(bool),
-            "VARCHAR" or "TEXT" or "STRING" => typeof(string),
-            "DATE" => typeof(DateTime),
-            "TIME" => typeof(TimeSpan),
-            "TIMESTAMP" or "DATETIME" => typeof(DateTime),
-            "TIMESTAMPTZ" => typeof(DateTimeOffset),
-            "UUID" => typeof(Guid),
-            "BLOB" or "BYTEA" => typeof(byte[]),
-            _ => typeof(string)
-        };
-    }
 
     #endregion
 
@@ -267,7 +242,7 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
         else if (underlying == typeof(float)) row.AppendValue((float)val);
         else if (underlying == typeof(double)) row.AppendValue((double)val);
         else if (underlying == typeof(decimal)) row.AppendValue((decimal)val);
-        // Date/Time handling: DuckDB sometimes picky.
+        // Handle date/time types specifically for DuckDB compatibility
         else if (underlying == typeof(DateTime)) row.AppendValue((DateTime)val);
         else if (underlying == typeof(DateTimeOffset)) row.AppendValue((DateTimeOffset)val);
         else if (underlying == typeof(Guid)) row.AppendValue((Guid)val);
@@ -296,7 +271,7 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
         for (int i = 0; i < columns.Count; i++)
         {
             if (i > 0) sb.Append(", ");
-            sb.Append($"{columns[i].Name} {DuckDbTypeMapper.MapClrType(columns[i].ClrType)}");
+            sb.Append($"{columns[i].Name} {DuckDbTypeMapper.MapToProviderType(columns[i].ClrType)}");
         }
         
         sb.Append(")");

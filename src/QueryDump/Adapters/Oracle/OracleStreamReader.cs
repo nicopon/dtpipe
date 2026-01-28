@@ -12,7 +12,7 @@ namespace QueryDump.Adapters.Oracle;
 /// <summary>
 /// Streams data from Oracle using IAsyncEnumerable for memory efficiency.
 /// </summary>
-public sealed partial class OracleStreamReader : IStreamReader, IRequiresOptions<OracleOptions>
+public sealed partial class OracleStreamReader : IStreamReader, IRequiresOptions<OracleReaderOptions>
 {
     private readonly OracleConnection _connection;
     private readonly OracleCommand _command;
@@ -33,7 +33,7 @@ public sealed partial class OracleStreamReader : IStreamReader, IRequiresOptions
     [GeneratedRegex(@"^\s*(\w+)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex FirstWordRegex();
 
-    public OracleStreamReader(string connectionString, string query, OracleOptions options, int queryTimeout = 0)
+    public OracleStreamReader(string connectionString, string query, OracleReaderOptions options, int queryTimeout = 0)
     {
         ValidateQueryIsSafeSelect(query);
         

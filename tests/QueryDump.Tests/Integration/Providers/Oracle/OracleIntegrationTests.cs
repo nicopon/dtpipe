@@ -72,7 +72,7 @@ public class OracleIntegrationTests : IAsyncLifetime
         await using var reader = new OracleStreamReader(
             connectionString, 
             "SELECT id, name FROM test_data ORDER BY id",
-            new OracleOptions { FetchSize = 65536 });
+            new OracleReaderOptions { FetchSize = 65536 });
         
         await reader.OpenAsync(TestContext.Current.CancellationToken);
         
@@ -103,7 +103,7 @@ public class OracleIntegrationTests : IAsyncLifetime
             await using var reader = new OracleStreamReader(
                 connectionString, 
                 "SELECT id, name FROM test_data ORDER BY id",
-                new OracleOptions { FetchSize = 65536 });
+                new OracleReaderOptions { FetchSize = 65536 });
             
             await reader.OpenAsync(TestContext.Current.CancellationToken);
             
@@ -145,7 +145,7 @@ public class OracleIntegrationTests : IAsyncLifetime
             await using (var reader = new OracleStreamReader(
                 connectionString, 
                 "SELECT id, name FROM test_data ORDER BY id",
-                new OracleOptions { FetchSize = 65536 }))
+                new OracleReaderOptions { FetchSize = 65536 }))
             {
                 await reader.OpenAsync(TestContext.Current.CancellationToken);
                 
@@ -203,7 +203,7 @@ public class OracleIntegrationTests : IAsyncLifetime
             await using var reader = new DuckDataSourceReader(
                 duckConnectionString,
                 "SELECT Id, Name, Score FROM source_data ORDER BY Id",
-                new DuckDbOptions());
+                new DuckDbReaderOptions());
             
             await reader.OpenAsync(TestContext.Current.CancellationToken);
             var columns = reader.Columns!;
@@ -211,8 +211,7 @@ public class OracleIntegrationTests : IAsyncLifetime
             var writerOptions = new OracleWriterOptions
             {
                 Table = targetTable,
-                Strategy = OracleWriteStrategy.Truncate,
-                BulkSize = 1000 // Enable bulk copy with IDataReader
+                Strategy = OracleWriteStrategy.Truncate
             };
             
             await using var writer = new OracleDataWriter(_oracle.GetConnectionString(), writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance);
@@ -286,7 +285,6 @@ public class OracleIntegrationTests : IAsyncLifetime
         {
             Table = tableName,
             Strategy = OracleWriteStrategy.Truncate, // Or Append
-            BulkSize = 100 // Force Bulk Copy
         };
 
         // Act

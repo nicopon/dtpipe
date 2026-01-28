@@ -7,7 +7,7 @@ namespace QueryDump.Adapters.PostgreSQL;
 
 public class PostgreSqlReaderDescriptor : IProviderDescriptor<IStreamReader>
 {
-    public string ProviderName => "postgresql";
+    public string ProviderName => PostgreSqlConstants.ProviderName;
 
     public Type OptionsType => typeof(EmptyOptions);
 

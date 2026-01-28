@@ -57,12 +57,12 @@ public class E2EIntegrationTests : IAsyncLifetime
 
         // 2. Configure Services (Mimic Program.cs with new simplified architecture)
         var registry = new OptionsRegistry();
-        registry.Register(new DuckDbOptions());
-        registry.Register(new CsvOptions { Header = true });
+        registry.Register(new DuckDbReaderOptions());
+        registry.Register(new CsvWriterOptions { Header = true });
         // Register Fake Options: Mask "Name" with "name.firstname"
         registry.Register(new FakeOptions 
         { 
-            Mappings = ["Name:name.firstname"],
+            Fake = ["Name:name.firstname"],
             Seed = 12345 // Deterministic
         });
         
@@ -151,8 +151,8 @@ public class E2EIntegrationTests : IAsyncLifetime
 
         // 2. Configure Services
         var registry = new OptionsRegistry();
-        registry.Register(new DuckDbOptions());
-        registry.Register(new CsvOptions { Header = true });
+        registry.Register(new DuckDbReaderOptions());
+        registry.Register(new CsvWriterOptions { Header = true });
         
         registry.Register(new Transformers.Null.NullOptions 
         { 
@@ -161,12 +161,12 @@ public class E2EIntegrationTests : IAsyncLifetime
         
         registry.Register(new Transformers.Overwrite.OverwriteOptions 
         { 
-            Mappings = ["Name:Bond"] 
+            Overwrite = ["Name:Bond"] 
         });
         
         registry.Register(new Transformers.Format.FormatOptions
         {
-            Mappings = ["CopiedName:{Name} is 007"]
+            Format = ["CopiedName:{Name} is 007"]
         });
 
         var services = new ServiceCollection();
@@ -258,8 +258,8 @@ public class E2EIntegrationTests : IAsyncLifetime
 
         // 2. Configure Services
         var registry = new OptionsRegistry();
-        registry.Register(new DuckDbOptions());
-        registry.Register(new CsvOptions { Header = true });
+        registry.Register(new DuckDbReaderOptions());
+        registry.Register(new CsvWriterOptions { Header = true });
         
         // Register empty options, they will be populated by the pipeline builder from args
         registry.Register(new Transformers.Null.NullOptions());

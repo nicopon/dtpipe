@@ -2,9 +2,9 @@ using QueryDump.Core.Options;
 
 namespace QueryDump.Adapters.Sample;
 
-public class SampleOptions : IProviderOptions
+public record SampleReaderOptions : IProviderOptions
 {
-    public static string Prefix => "sample";
+    public static string Prefix => SampleConstants.ProviderName;
     public static string DisplayName => "Sample Data Generator";
 
     public long RowCount { get; set; } = 100;

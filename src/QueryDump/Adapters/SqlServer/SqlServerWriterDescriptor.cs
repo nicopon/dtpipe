@@ -7,19 +7,17 @@ namespace QueryDump.Adapters.SqlServer;
 
 public class SqlServerWriterDescriptor : IProviderDescriptor<IDataWriter>
 {
-    public string ProviderName => "mssql";
+    public string ProviderName => SqlServerConstants.ProviderName;
     public Type OptionsType => typeof(SqlServerWriterOptions);
 
     public bool CanHandle(string connectionString)
     {
-        return connectionString.StartsWith("sqlserver:", StringComparison.OrdinalIgnoreCase);
+        return connectionString.StartsWith("mssql:", StringComparison.OrdinalIgnoreCase);
     }
 
     public IDataWriter Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
     {
         var sqlOptions = (SqlServerWriterOptions)options;
-        // Strip prefix
-        var conn = connectionString.StartsWith("sqlserver:") ? connectionString.Substring(10) : connectionString;
-        return new SqlServerDataWriter(conn, sqlOptions);
+        return new SqlServerDataWriter(connectionString, sqlOptions);
     }
 }

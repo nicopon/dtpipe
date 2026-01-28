@@ -17,6 +17,10 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
     private readonly OracleWriterOptions _options;
     private IReadOnlyList<ColumnInfo>? _columns;
     private readonly ILogger<OracleDataWriter> _logger;
+    private OracleBulkCopy? _bulkCopy;
+    private OracleCommand? _insertCommand;
+    private OracleParameter[]? _insertParameters;
+    private DateTime _lastConnectionTime;
 
     public long BytesWritten => 0;
 
@@ -235,7 +239,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
         {
             return (parts[0].ToUpperInvariant(), parts[1].ToUpperInvariant());
         }
-        // Default owner would need to be determined from connection, using empty for now
+        // Determine owner and table name
         return ("", parts[0].ToUpperInvariant());
     }
 
@@ -284,6 +288,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
         
         _logger.LogInformation("Initializing Oracle Writer for table {Table} (WriteStrategy={Strategy})", _targetTableName, _options.Strategy);
         await _connection.OpenAsync(ct);
+        _lastConnectionTime = DateTime.UtcNow;
 
         if (_options.Strategy == OracleWriteStrategy.DeleteThenInsert)
         {
@@ -317,20 +322,36 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
         {
             // Expected if table exists
         }
+
+        // Initialize reusable objects
+        InitializeCommands();
     }
 
-    public async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
+    private void InitializeCommands()
     {
-        if (_columns is null) throw new InvalidOperationException("Not initialized");
-
-        if (_options.BulkSize <= 0)
+        if (_options.InsertMode == OracleInsertMode.Bulk)
         {
-            // Standard INSERT fallback
-            _logger.LogInformation("Using Standard Insert mode (BulkSize={BulkSize})", _options.BulkSize);
-            // Build parameterized INSERT statement
+            _bulkCopy = new OracleBulkCopy(_connection);
+            _bulkCopy.DestinationTableName = _targetTableName;
+            _bulkCopy.BulkCopyTimeout = 0;
+            foreach (var col in _columns!)
+            {
+                _bulkCopy.ColumnMappings.Add(col.Name, col.Name);
+            }
+        }
+        else
+        {
+            // Build parameterized INSERT statement once
             var sb = new StringBuilder();
-            sb.Append($"INSERT INTO {_targetTableName} (");
-            for (int i = 0; i < _columns.Count; i++)
+            sb.Append("INSERT ");
+            
+            if (_options.InsertMode == OracleInsertMode.Append)
+            {
+                sb.Append("/*+ APPEND */ ");
+            }
+
+            sb.Append($"INTO {_targetTableName} (");
+            for (int i = 0; i < _columns!.Count; i++)
             {
                 if (i > 0) sb.Append(", ");
                 sb.Append($"\"{_columns[i].Name}\"");
@@ -345,53 +366,111 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
             
             var insertSql = sb.ToString();
             _logger.LogDebug("Generated Insert SQL: {Sql}", insertSql);
+
+            _insertCommand = _connection.CreateCommand();
+            _insertCommand.BindByName = true;
+            _insertCommand.CommandText = insertSql;
             
-            using var cmd = _connection.CreateCommand();
-            cmd.BindByName = true;
-            cmd.CommandText = insertSql;
-            // Pre-create parameters
-            var parameters = new OracleParameter[_columns.Count];
+            _insertParameters = new OracleParameter[_columns.Count];
             for (int i = 0; i < _columns.Count; i++)
             {
-                parameters[i] = cmd.CreateParameter();
-                parameters[i].ParameterName = $"v{i}";
-                // Map types if needed or let inference handle simple types
-                cmd.Parameters.Add(parameters[i]);
+                _insertParameters[i] = _insertCommand.CreateParameter();
+                _insertParameters[i].ParameterName = $"v{i}";               
+                _insertParameters[i].OracleDbType = OracleTypeMapper.GetOracleDbType(_columns[i].ClrType);
+                
+                _insertCommand.Parameters.Add(_insertParameters[i]);
+            }
+        }
+    }
+
+    private async Task RecycleConnectionAsync(CancellationToken ct)
+    {
+        _logger.LogInformation("Recycling Oracle connection (Session limit reached)...");
+        
+        // Dispose commands relative to current connection
+        if (_bulkCopy != null) { ((IDisposable)_bulkCopy).Dispose(); _bulkCopy = null; }
+        if (_insertCommand != null) { _insertCommand.Dispose(); _insertCommand = null; }
+        
+        // Close and reopen connection
+        await _connection.CloseAsync();
+        await _connection.OpenAsync(ct);
+        _lastConnectionTime = DateTime.UtcNow;
+        
+        
+        // Re-initialize commands
+        InitializeCommands();
+    }
+
+    public async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
+    {
+        if (_columns is null) throw new InvalidOperationException("Not initialized");
+
+        // Check for connection recycling
+        if (_options.ConnectionRecycleIntervalSeconds > 0 && 
+            (DateTime.UtcNow - _lastConnectionTime).TotalSeconds > _options.ConnectionRecycleIntervalSeconds)
+        {
+            await RecycleConnectionAsync(ct);
+        }
+
+        if (_options.InsertMode == OracleInsertMode.Standard || _options.InsertMode == OracleInsertMode.Append)
+        {
+            // Standard/Append INSERT using Array Binding
+            if (_insertCommand == null || _insertParameters == null) 
+                 throw new InvalidOperationException("Insert command not initialized");
+
+            int rowCount = rows.Count;
+            _insertCommand.ArrayBindCount = rowCount;
+
+            // Transpose rows to columns with type safety
+            for (int colIndex = 0; colIndex < _columns.Count; colIndex++)
+            {
+                var colValues = new object?[rowCount];
+                var colType = _columns[colIndex].ClrType;
+                bool isBool = colType == typeof(bool);
+
+                for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+                {
+                    var val = rows[rowIndex][colIndex];
+                    if (val is null || val == DBNull.Value)
+                    {
+                        colValues[rowIndex] = DBNull.Value;
+                    }
+                    else if (isBool)
+                    {
+                        colValues[rowIndex] = ((bool)val) ? 1 : 0;
+                    }
+                    else
+                    {
+                        colValues[rowIndex] = val;
+                    }
+                }
+                _insertParameters[colIndex].Value = colValues;
             }
 
-            long rowsInserted = 0;
-            foreach (var rowData in rows)
+            try
             {
-                for (int i = 0; i < rowData.Length; i++)
-                {
-                   parameters[i].Value = rowData[i] ?? DBNull.Value;
-                }
-                await cmd.ExecuteNonQueryAsync(ct);
-                rowsInserted++;
-                if (rowsInserted % 100 == 0) _logger.LogDebug("Inserted {Count} rows via standard insert...", rowsInserted);
+                await _insertCommand.ExecuteNonQueryAsync(ct);
+                _logger.LogDebug("Inserted {Count} rows via Array Binding ({Mode})...", rowCount, _options.InsertMode);
             }
-            _logger.LogDebug("Batch completed. Total rows inserted in this batch: {Count}", rowsInserted);
+            catch (Exception ex)
+            {
+                // Fallback analysis could be added here if needed
+                throw new InvalidOperationException($"Array Binding Insert Failed. Error: {ex.Message}", ex);
+            }
         }
         else
         {
-            using var bulkCopy = new OracleBulkCopy(_connection);
-            bulkCopy.DestinationTableName = _targetTableName;
-            bulkCopy.BulkCopyTimeout = 0; 
-            bulkCopy.BatchSize = _options.BulkSize;
-
-            foreach (var col in _columns)
-            {
-                bulkCopy.ColumnMappings.Add(col.Name, col.Name);
-            }
-
+            if (_bulkCopy == null) throw new InvalidOperationException("BulkCopy not initialized");
+            
+            _bulkCopy.BatchSize = rows.Count;
             _logger.LogDebug("Starting BulkCopy for batch of {Count} rows into {Table}", rows.Count, _targetTableName);
             var watch = System.Diagnostics.Stopwatch.StartNew();
 
-            // Use IDataReader wrapper instead of DataTable for better performance
+            // Use IDataReader wrapper for performance
             using var dataReader = new ObjectArrayDataReader(_columns, rows);
             try 
             {
-                await Task.Run(() => bulkCopy.WriteToServer(dataReader), ct);
+                await Task.Run(() => _bulkCopy.WriteToServer(dataReader), ct);
             }
             catch (Exception ex)
             {
@@ -415,6 +494,18 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
 
     public async ValueTask DisposeAsync()
     {
+        if (_bulkCopy != null)
+        {
+            ((IDisposable)_bulkCopy).Dispose();
+            _bulkCopy = null;
+        }
+
+        if (_insertCommand != null)
+        {
+            _insertCommand.Dispose();
+            _insertCommand = null;
+        }
+
         await _connection.DisposeAsync();
     }
 
@@ -426,32 +517,14 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
         for (int i = 0; i < columns.Count; i++)
         {
             if (i > 0) sb.Append(", ");
-            sb.Append($"\"{columns[i].Name}\" {MapToOracleType(columns[i].ClrType)}");
+            sb.Append($"\"{columns[i].Name}\" {OracleTypeMapper.MapToProviderType(columns[i].ClrType)}");
         }
         
         sb.Append(")");
         return sb.ToString();
     }
 
-    private static string MapToOracleType(Type type)
-    {
-        type = Nullable.GetUnderlyingType(type) ?? type;
 
-        if (type == typeof(int)) return "NUMBER(10)";
-        if (type == typeof(long)) return "NUMBER(19)";
-        if (type == typeof(short)) return "NUMBER(5)";
-        if (type == typeof(byte)) return "NUMBER(3)";
-        if (type == typeof(bool)) return "NUMBER(1)"; 
-        if (type == typeof(float)) return "FLOAT"; 
-        if (type == typeof(double)) return "FLOAT"; 
-        if (type == typeof(decimal)) return "NUMBER(38, 4)"; 
-        if (type == typeof(DateTime)) return "TIMESTAMP";
-        if (type == typeof(DateTimeOffset)) return "TIMESTAMP WITH TIME ZONE";
-        if (type == typeof(Guid)) return "RAW(16)";
-        if (type == typeof(byte[])) return "BLOB";
-        
-        return "VARCHAR2(4000)";
-    }
 
 
     private static string NormalizeTableName(string tableName)
@@ -469,15 +542,12 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
                 continue;
             }
 
-            // Check if it's a simple identifier (starts with letter, contains letters/digits/underscore/$)
-            // If simple, uppercase it but DON'T quote it, to be safe with DBMS_ASSERT in older/specific Oracle versions
             if (IsSimpleIdentifier(part))
             {
                 parts[i] = part.ToUpperInvariant();
             }
             else
             {
-                // Complex identifier: must quote
                 parts[i] = $"\"{part.ToUpperInvariant()}\"";
             }
         }

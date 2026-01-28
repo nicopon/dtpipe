@@ -22,7 +22,7 @@ public class MaskDataTransformer : IDataTransformer, IRequiresOptions<MaskOption
         _columnPatterns = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         _skipNull = options.SkipNull;
         
-        foreach (var mapping in options.Mappings)
+        foreach (var mapping in options.Mask)
         {
             var delimiterChars = new[] { ':', '=' };
             var delimiterIndex = mapping.IndexOfAny(delimiterChars);

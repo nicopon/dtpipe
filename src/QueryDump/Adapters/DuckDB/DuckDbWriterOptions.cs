@@ -13,12 +13,12 @@ public enum DuckDbWriteStrategy
 
 public record DuckDbWriterOptions : IProviderOptions
 {
-    public static string Prefix => "duckdb";
+    public static string Prefix => DuckDbConstants.ProviderName;
     public static string DisplayName => "DuckDB Writer Options";
 
-    [CliOption("--duck-table", Description = "Target table name. Defaults to 'Export'.")]
+    [CliOption(Description = "Target table name")]
     public string Table { get; set; } = "Export";
 
-    [CliOption("--duck-strategy", Description = "Strategy for writing data: Append (default), Truncate, or Recreate.")]
+    [CliOption(Description = "Data write strategy (Append, Truncate, or Recreate)")]
     public DuckDbWriteStrategy Strategy { get; set; } = DuckDbWriteStrategy.Append;
 }

@@ -11,13 +11,7 @@ using QueryDump.Adapters.Csv;
 
 namespace QueryDump.Adapters.Csv;
 
-/// <summary>
-/// Writes data to CSV format with streaming.
-/// Uses RecyclableMemoryStream for reduced GC pressure.
-/// Optimized for DuckDB compatibility.
-/// Supports safe dry-run inspection.
-/// </summary>
-public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvOptions>, ISchemaInspector
+public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvWriterOptions>, ISchemaInspector
 {
     // Shared RecyclableMemoryStreamManager for all instances
     private static readonly RecyclableMemoryStreamManager MemoryStreamManager = new(
@@ -30,7 +24,7 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvOptions>, I
         });
 
     private readonly string _outputPath;
-    private readonly CsvOptions _options;
+    private readonly CsvWriterOptions _options;
     
     // Initialized in InitializeAsync
     private FileStream? _fileStream;
@@ -44,11 +38,11 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvOptions>, I
 
     public long BytesWritten => _fileStream?.Position ?? 0;
 
-    public CsvDataWriter(string outputPath) : this(outputPath, new CsvOptions())
+    public CsvDataWriter(string outputPath) : this(outputPath, new CsvWriterOptions())
     {
     }
 
-    public CsvDataWriter(string outputPath, CsvOptions options)
+    public CsvDataWriter(string outputPath, CsvWriterOptions options)
     {
         _outputPath = outputPath;
         _options = options;
@@ -240,7 +234,7 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvOptions>, I
         return str;
     }
 
-    private static bool ShouldQuoteField(string? field, CsvOptions options)
+    private static bool ShouldQuoteField(string? field, CsvWriterOptions options)
     {
         if (string.IsNullOrEmpty(field))
             return false;

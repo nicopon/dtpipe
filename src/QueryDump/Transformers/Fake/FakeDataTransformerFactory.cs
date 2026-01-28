@@ -74,8 +74,8 @@ public class FakeDataTransformerFactory : IFakeDataTransformerFactory
     public IDataTransformer? Create(DumpOptions options)
     {
         var fakeOptions = _registry.Get<FakeOptions>();
-
-        if (fakeOptions.Mappings.Count == 0)
+        
+        if (fakeOptions.Fake == null || !fakeOptions.Fake.Any())
         {
             return null;
         }
@@ -105,7 +105,7 @@ public class FakeDataTransformerFactory : IFakeDataTransformerFactory
             {
                 switch (propertyName)
                 {
-                    case nameof(FakeOptions.Mappings):
+                    case nameof(FakeOptions.Fake):
                         mappings.Add(value);
                         break;
                     case nameof(FakeOptions.Locale):
@@ -130,7 +130,7 @@ public class FakeDataTransformerFactory : IFakeDataTransformerFactory
         
         var options = new FakeOptions
         {
-            Mappings = mappings,
+            Fake = mappings,
             Locale = locale,
             Seed = seed,
             SeedColumn = seedColumn,
@@ -143,11 +143,11 @@ public class FakeDataTransformerFactory : IFakeDataTransformerFactory
 
     public IDataTransformer? CreateFromYamlConfig(TransformerConfig config)
     {
-        if (config.Mappings == null || config.Mappings.Count == 0)
+        if (config.Fake == null || config.Fake.Count == 0)
             return null;
 
         // Convert YAML dict mappings to list format: "COLUMN:faker.method"
-        var mappings = config.Mappings.Select(kvp => $"{kvp.Key}:{kvp.Value}").ToList();
+        var mappings = config.Fake.Select(kvp => $"{kvp.Key}:{kvp.Value}").ToList();
         
         // Parse options from YAML
         var locale = "en";
@@ -167,7 +167,7 @@ public class FakeDataTransformerFactory : IFakeDataTransformerFactory
 
         var options = new FakeOptions
         {
-            Mappings = mappings,
+            Fake = mappings,
             Locale = locale,
             Seed = seed,
             SeedColumn = seedColumn,
