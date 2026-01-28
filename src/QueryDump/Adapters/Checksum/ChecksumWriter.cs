@@ -3,12 +3,14 @@ using System.Text;
 using QueryDump.Core.Abstractions;
 using QueryDump.Core.Models;
 using Microsoft.Extensions.Logging;
+using QueryDump.Cli.Abstractions;
+using QueryDump.Core.Options;
 
 namespace QueryDump.Adapters.Checksum;
 
-public class ChecksumWriter : IDataWriter
+public sealed class ChecksumDataWriter : IDataWriter, IRequiresOptions<ChecksumWriterOptions>
 {
-    private readonly ChecksumOptions _options;
+    private readonly ChecksumWriterOptions _options;
     private readonly ILogger _logger;
     private readonly StringBuilder _buffer = new();
     private readonly SHA256 _hasher = SHA256.Create();
@@ -28,7 +30,7 @@ public class ChecksumWriter : IDataWriter
     
     public long BytesWritten { get; private set; }
 
-    public ChecksumWriter(ChecksumOptions options, ILogger<ChecksumWriter> logger)
+    public ChecksumDataWriter(string connectionString, ChecksumWriterOptions options, ILogger<ChecksumDataWriter> logger)
     {
         _options = options;
         _logger = logger;

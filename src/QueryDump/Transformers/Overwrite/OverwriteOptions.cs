@@ -9,9 +9,9 @@ public class OverwriteOptions : ITransformerOptions
     public static string Prefix => "overwrite";
     public static string DisplayName => "Static Overwrite Transformer";
 
-    [CliOption("--overwrite", Description = "Column:value mapping to overwrite with static value (repeatable)")]
-    public IEnumerable<string> Mappings { get; set; } = Array.Empty<string>();
+    [CliOption(Description = "Column:value mapping to overwrite with static value (repeatable)")]
+    public IEnumerable<string> Overwrite { get; set; } = Array.Empty<string>();
 
-    [CliOption("--overwrite-skip-null", Description = "Skip overwrite when source value is null")]
+    [CliOption(Description = "Skip overwrite when source value is null")]
     public bool SkipNull { get; set; } = false;
 }

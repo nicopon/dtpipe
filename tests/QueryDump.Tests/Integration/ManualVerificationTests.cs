@@ -71,11 +71,11 @@ public class ManualVerificationTests : IAsyncLifetime
 
         // 2. Configure Services
         var registry = new OptionsRegistry();
-        registry.Register(new DuckDbOptions());
+        registry.Register(new DuckDbReaderOptions());
         // Faking rule: Name -> name.fullName
         registry.Register(new FakeOptions 
         { 
-            Mappings = ["Name:name.fullName"],
+            Fake = ["Name:name.fullName"],
             Seed = 12345 // Deterministic
         });
 

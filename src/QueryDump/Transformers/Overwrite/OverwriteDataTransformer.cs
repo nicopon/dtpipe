@@ -12,12 +12,14 @@ public class OverwriteDataTransformer : IDataTransformer, IRequiresOptions<Overw
 {
     private readonly Dictionary<string, string> _staticMappings = new(StringComparer.OrdinalIgnoreCase);
     private readonly bool _skipNull;
-    private string?[]? _columnValues; // Array matching column count, null if no overwrite for that index
+    private object?[]? _columnValues;
+
+    public bool HasOverwrite => _staticMappings.Count > 0;
 
     public OverwriteDataTransformer(OverwriteOptions options)
     {
         _skipNull = options.SkipNull;
-        foreach (var mapping in options.Mappings)
+        foreach (var mapping in options.Overwrite)
         {
             var parts = mapping.Split(new[] { ':', '=' }, 2);
             if (parts.Length == 2)
@@ -29,13 +31,13 @@ public class OverwriteDataTransformer : IDataTransformer, IRequiresOptions<Overw
 
     public ValueTask<IReadOnlyList<ColumnInfo>> InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
     {
-        if (_staticMappings.Count == 0)
+        if (!HasOverwrite) // Use the new property
         {
             _columnValues = null;
             return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
         }
 
-        bool hasMapping = false;
+        bool hasMappingForColumns = false;
         var values = new string?[columns.Count];
         
         for (var i = 0; i < columns.Count; i++)
@@ -43,7 +45,7 @@ public class OverwriteDataTransformer : IDataTransformer, IRequiresOptions<Overw
             if (_staticMappings.TryGetValue(columns[i].Name, out var val))
             {
                 values[i] = val;
-                hasMapping = true;
+                hasMappingForColumns = true;
             }
             else
             {
@@ -51,7 +53,13 @@ public class OverwriteDataTransformer : IDataTransformer, IRequiresOptions<Overw
             }
         }
 
-        _columnValues = hasMapping ? values : null;
+        if (!hasMappingForColumns)
+        {
+            _columnValues = null;
+            return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
+        }
+
+        _columnValues = values;
         return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
     }
 

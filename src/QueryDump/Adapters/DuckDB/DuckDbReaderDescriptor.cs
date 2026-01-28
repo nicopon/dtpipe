@@ -7,9 +7,9 @@ namespace QueryDump.Adapters.DuckDB;
 
 public class DuckDbReaderDescriptor : IProviderDescriptor<IStreamReader>
 {
-    public string ProviderName => "duckdb";
+    public string ProviderName => DuckDbConstants.ProviderName;
 
-    public Type OptionsType => typeof(DuckDbOptions);
+    public Type OptionsType => typeof(DuckDbReaderOptions);
 
     public bool CanHandle(string connectionString)
     {
@@ -18,7 +18,7 @@ public class DuckDbReaderDescriptor : IProviderDescriptor<IStreamReader>
 
     public IStreamReader Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
     {
-        var finalConnectionString = DuckDbConnectionHelper.GetConnectionString(connectionString);
+        var finalConnectionString = connectionString;
 
         if (!finalConnectionString.Contains("DataSource=", StringComparison.OrdinalIgnoreCase) 
             && !finalConnectionString.StartsWith("Data Source=", StringComparison.OrdinalIgnoreCase))
@@ -29,7 +29,7 @@ public class DuckDbReaderDescriptor : IProviderDescriptor<IStreamReader>
         return new DuckDataSourceReader(
             finalConnectionString,
             context.Query,
-            (DuckDbOptions)options,
+            (DuckDbReaderOptions)options,
             context.QueryTimeout);
     }
 }

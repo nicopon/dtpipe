@@ -50,9 +50,8 @@ public class OrderedPipelineTests
     {
         var option = new Option<string>(mainAlias);
         
-        // Since IDataTransformerFactory no longer inherits ICliContributor (Refactoring Prop 1),
-        // we need to mock the intersection IDataTransformerFactory + ICliContributor.
-        // Moq's As<TInterface>() allows us to add an interface implementation to the mock.
+        // Mock the intersection of IDataTransformerFactory and ICliContributor.
+        // Moq's As<TInterface>() allows adding an interface implementation to the mock.
         
         mock.As<ICliContributor>().Setup(f => f.GetCliOptions()).Returns(new List<Option> { option });
     }
@@ -148,7 +147,7 @@ public class OrderedPipelineTests
         var builder = new TransformerPipelineBuilder(_factories);
         
         // Setup --skip-null as a FLAG (Arity 0) for Fake factory
-        // NOTE: We override the global setup for this test
+
         var skipNullOption = new Option<bool>("--skip-null") { Arity = ArgumentArity.Zero };
         var fakeOption = new Option<string>("--fake");
         

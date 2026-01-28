@@ -30,7 +30,6 @@ public class TransformerPipelineBuilder
             var config = group.Configuration;
             
             // Instantiate transformer with collected values
-            // Instantiate transformer with collected values
             var transformer = factory.CreateFromConfiguration(group.Configuration);
             if (transformer != null)
             {

@@ -13,13 +13,13 @@ using QueryDump.Cli.Infrastructure;
 
 namespace QueryDump.Cli;
 
-public class CliService
+public class JobService
 {
     private readonly IEnumerable<ICliContributor> _contributors;
     private readonly IServiceProvider _serviceProvider;
     private readonly ILoggerFactory _loggerFactory;
 
-    public CliService(
+    public JobService(
         IServiceProvider serviceProvider,
         ILoggerFactory loggerFactory,
         IEnumerable<IStreamReaderFactory> readerFactories,

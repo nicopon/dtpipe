@@ -22,7 +22,7 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
     public FormatDataTransformer(FormatOptions options)
     {
         _skipNull = options.SkipNull;
-        foreach (var mapping in options.Mappings)
+        foreach (var mapping in options.Format)
         {
             var parts = mapping.Split(':', 2);
             if (parts.Length == 2)
@@ -34,9 +34,11 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
 
     private int _virtualColumnCount;
 
+    public bool HasFormat => _mappings.Count > 0;
+
     public ValueTask<IReadOnlyList<ColumnInfo>> InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
     {
-        if (_mappings.Count == 0)
+        if (!HasFormat)
         {
             return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
         }

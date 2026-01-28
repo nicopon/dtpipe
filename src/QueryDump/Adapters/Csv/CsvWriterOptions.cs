@@ -3,9 +3,9 @@ using QueryDump.Core.Options;
 
 namespace QueryDump.Adapters.Csv;
 
-public record CsvOptions : IWriterOptions
+public record CsvWriterOptions : IWriterOptions
 {
-    public static string Prefix => "csv";
+    public static string Prefix => CsvConstants.ProviderName;
     public static string DisplayName => "CSV Writer";
     
     [Description("CSV field separator")]

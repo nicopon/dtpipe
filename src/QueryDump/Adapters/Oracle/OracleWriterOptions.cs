@@ -11,17 +11,27 @@ public enum OracleWriteStrategy
     DeleteThenInsert
 }
 
+public enum OracleInsertMode
+{
+    Standard,
+    Bulk,
+    Append
+}
+
 public record OracleWriterOptions : IProviderOptions
 {
-    public static string Prefix => "oracle";
+    public static string Prefix => OracleConstants.ProviderName;
     public static string DisplayName => "Oracle Writer Options";
 
-    [CliOption("--ora-table", Description = "Target table name. Defaults to 'EXPORT_DATA'.")]
-    public string Table { get; set; } = "EXPORT_DATA";
+    [CliOption(Description = "Target table name")]
+    public string Table { get; set; } = "Export";
 
-    [CliOption("--ora-strategy", Description = "Strategy for writing data: Append (default), Truncate, or DeleteThenInsert.")]
-    public OracleWriteStrategy Strategy { get; set; } = OracleWriteStrategy.Append;
+    [CliOption(Description = "Data write strategy (Append, Truncate, DeleteThenInsert)")]
+    public OracleWriteStrategy Strategy { get; set; }
 
-    [CliOption("--ora-bulk-size", Description = "Rows per batch for OracleBulkCopy. Default 5000. Set to 0 to use standard INSERT statements.")]
-    public int BulkSize { get; set; } = 5000;
+    [CliOption(Description = "Data insert mode (Standard, Bulk, Append)")]
+    public OracleInsertMode InsertMode { get; set; }
+
+    [CliOption(Description = "Connection recycle interval in seconds (0 to disable)")]
+    public int ConnectionRecycleIntervalSeconds { get; set; } = 300;
 }

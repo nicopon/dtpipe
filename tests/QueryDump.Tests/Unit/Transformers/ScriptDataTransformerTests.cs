@@ -18,12 +18,12 @@ public class ScriptTransformerTests
     }
 
     [Fact]
-    public async Task Initialize_WithMappings_PreparesProcessors()
+    public async Task Initialize_WithScript_PreparesProcessors()
     {
         // Arrange
         var options = new ScriptOptions
         {
-            Mappings = new[] { "Name:row.Name.substring(0,2)" }
+            Script = new[] { "Name:row.Name.substring(0,2)" }
         };
         var transformer = new ScriptDataTransformer(options);
         var columns = new List<ColumnInfo>
@@ -44,7 +44,7 @@ public class ScriptTransformerTests
         // Arrange
         var options = new ScriptOptions
         {
-            Mappings = new[] { "Name:row.Name.toUpperCase()" }
+            Script = new[] { "Name:row.Name.toUpperCase()" }
         };
         var transformer = new ScriptDataTransformer(options);
         var columns = new List<ColumnInfo>
@@ -75,7 +75,7 @@ public class ScriptTransformerTests
         
         var options = new ScriptOptions
         {
-            Mappings = new[] { "Val:row.Val * 2" }
+            Script = new[] { "Val:row.Val * 2" }
         };
         var transformer = new ScriptDataTransformer(options);
         var columns = new[] { new ColumnInfo("Val", typeof(int), false) };
@@ -96,7 +96,7 @@ public class ScriptTransformerTests
         // Require Jint to be in strict mode / sandbox
         var options = new ScriptOptions
         {
-            Mappings = new[] { "Val:System.IO.File.Exists('foo')" }
+            Script = new[] { "Val:System.IO.File.Exists('foo')" }
         };
         var transformer = new ScriptDataTransformer(options);
         var columns = new[] { new ColumnInfo("Val", typeof(string), false) };
@@ -121,7 +121,7 @@ public class ScriptTransformerTests
         // Arrange
         var options = new ScriptOptions
         {
-            Mappings = new[] { "Val:row.Val + '_processed'" },
+            Script = new[] { "Val:row.Val + '_processed'" },
             SkipNull = true
         };
         var transformer = new ScriptDataTransformer(options);
@@ -150,7 +150,7 @@ public class ScriptTransformerTests
         // Arrange
         var options = new ScriptOptions
         {
-            Mappings = new[] { "FullName:return row.FirstName + ' ' + row.LastName;" }
+            Script = new[] { "FullName:return row.FirstName + ' ' + row.LastName;" }
         };
         var transformer = new ScriptDataTransformer(options);
         var columns = new List<ColumnInfo>
@@ -176,7 +176,7 @@ public class ScriptTransformerTests
         // Arrange: Handle columns with spaces using row["Col Name"]
         var options = new ScriptOptions
         {
-            Mappings = new[] { "Code:row['Product Code']" }
+            Script = new[] { "Code:row['Product Code']" }
         };
         var transformer = new ScriptDataTransformer(options);
         var columns = new List<ColumnInfo>

@@ -196,11 +196,23 @@ Detailed lists for fine-tuning your data processing.
 #### 3. Database Writer Options
 Customize target behavior per provider.
 
-| Option | Description | Providers |
-|--------|-------------|-----------|
-| `--{prefix}-table` | Target table name | All (e.g. `--ora-table`, `--mssql-table`, `--pg-table`) |
-| `--{prefix}-strategy` | Write strategy (`Append`, `Truncate`, `Recreate`*) | All (*Recreate supported by Sqlite/DuckDB/PG) |
-| `--{prefix}-bulk-size` | Batch size for bulk insert | Oracle (`--ora-`), MSSQL (`--mssql-`) |
+### Oracle (`oracle`)
+- `--ora-table`: Target table name (default: `EXPORT_DATA`).
+- `--ora-strategy`: `Append` (default), `Truncate`, or `DeleteThenInsert`.
+- `--ora-insert-mode`: Insertion method (default: `Standard`).
+  - `Standard`: Uses efficient Array Binding.
+  - `Append`: Same as Standard but adds `/*+APPEND*/` hint for direct-path insertion.
+  - `Bulk`: Uses `OracleBulkCopy`.
+
+### SQL Server (`mssql`)
+- `--mssql-table`: Target table name (default: `EXPORT_DATA`).
+- `--mssql-strategy`: `Append` (default), `Truncate`, or `DeleteThenInsert`.
+- `--mssql-insert-mode`: `Standard` (default) or `Bulk`.
+
+### PostgreSQL (`postgres`)
+- `--pg-table`: Target table name (default: `Export`).
+- `--pg-strategy`: `Append` (default), `Truncate`, or `DeleteThenInsert`.
+- `--pg-insert-mode`: `Standard` (default) or `Bulk` (Binary Copy).
 
 ---
 

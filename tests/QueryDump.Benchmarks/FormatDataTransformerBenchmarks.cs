@@ -15,7 +15,7 @@ public class FormatDataTransformerBenchmarks
     [GlobalSetup]
     public async Task Setup()
     {
-        var options = new FormatOptions { Mappings = new[] { "FULLNAME:{FIRST} {LAST}", "PRICE_FMT:{PRICE:0.00} USD" } };
+        var options = new FormatOptions { Format = new[] { "FULLNAME:{FIRST} {LAST}", "PRICE_FMT:{PRICE:0.00} USD" } };
         _transformer = new FormatDataTransformer(options);
         var columns = new List<ColumnInfo>
         {

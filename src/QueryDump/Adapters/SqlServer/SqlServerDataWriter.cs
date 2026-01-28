@@ -43,8 +43,6 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
         }
         else
         {
-            // Default Append: Check if table exists, create if not?
-            // Simple Create Table Logic for testing convenience
             var checkCmd = new SqlCommand($"SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '{_options.Table}'", _connection);
             var exists = (int)(await checkCmd.ExecuteScalarAsync(ct) ?? 0) > 0;
             
@@ -60,8 +58,9 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
         _bulkCopy = new SqlBulkCopy(_connection, SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.UseInternalTransaction, null)
         {
             DestinationTableName = _options.Table,
-            BatchSize = _options.BulkSize > 0 ? _options.BulkSize : 5000,
-            BulkCopyTimeout = 0 // Infinite
+            // BatchSize is controlled by pipeline buffer
+            BatchSize = 0, 
+            BulkCopyTimeout = 0
         };
 
         // Initialize Buffer Table for Bulk Copy
@@ -80,7 +79,7 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
         await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync(ct);
 
-        var tableName = _options.Table; // Assuming simple name for now, skipping deep parsing logic for MVP
+        var tableName = _options.Table;
 
         // Check exists
         var checkCmd = new SqlCommand("SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @Table", connection);
@@ -108,10 +107,10 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
             cols.Add(new TargetColumnInfo(
                 name,
                 type,
-                MapSqlTypeToClr(type),
+                SqlServerTypeMapper.MapFromProviderType(type),
                 nullable,
-                false, // PK check omitted for brevity in MVP
-                false, // Unique check omitted
+                false,
+                false,
                 null
             ));
         }
@@ -119,25 +118,7 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
         return new TargetSchemaInfo(cols, true, null, null, null);
     }
 
-    private static Type? MapSqlTypeToClr(string sqlType)
-    {
-        return sqlType.ToLowerInvariant() switch
-        {
-            "int" => typeof(int),
-            "bigint" => typeof(long),
-            "smallint" => typeof(short),
-            "tinyint" => typeof(byte),
-            "bit" => typeof(bool),
-            "decimal" or "numeric" or "money" => typeof(decimal),
-            "float" => typeof(double),
-            "real" => typeof(float),
-            "datetime" or "datetime2" or "date" => typeof(DateTime),
-            "uniqueidentifier" => typeof(Guid),
-            "nvarchar" or "varchar" or "text" or "ntext" or "char" or "nchar" => typeof(string),
-            "binary" or "varbinary" or "image" => typeof(byte[]),
-            _ => typeof(string)
-        };
-    }
+
 
     #endregion
 
@@ -147,28 +128,14 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
         var cols = new List<string>();
         foreach (var col in columns)
         {
-            string type = MapType(col.ClrType);
+            string type = SqlServerTypeMapper.MapToProviderType(col.ClrType);
             cols.Add($"[{col.Name}] {type} NULL");
         }
         sql += string.Join(", ", cols) + ")";
         return sql;
     }
 
-    private string MapType(Type type)
-    {
-        type = Nullable.GetUnderlyingType(type) ?? type;
-        if (type == typeof(int)) return "INT";
-        if (type == typeof(long)) return "BIGINT";
-        if (type == typeof(short)) return "SMALLINT";
-        if (type == typeof(string)) return "NVARCHAR(MAX)";
-        if (type == typeof(DateTime)) return "DATETIME2";
-        if (type == typeof(bool)) return "BIT";
-        if (type == typeof(double)) return "FLOAT";
-        if (type == typeof(decimal)) return "DECIMAL(18,2)";
-        if (type == typeof(Guid)) return "UNIQUEIDENTIFIER";
-        if (type == typeof(byte[])) return "VARBINARY(MAX)";
-        return "NVARCHAR(MAX)";
-    }
+
 
     public async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
     {

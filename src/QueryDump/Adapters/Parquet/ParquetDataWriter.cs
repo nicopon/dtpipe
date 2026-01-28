@@ -13,7 +13,7 @@ namespace QueryDump.Adapters.Parquet;
 /// Writes data to Parquet format with row group streaming.
 /// Supports safe dry-run inspection.
 /// </summary>
-public sealed class ParquetDataWriter(string outputPath) : IDataWriter, IRequiresOptions<ParquetOptions>, ISchemaInspector
+public sealed class ParquetDataWriter(string outputPath) : IDataWriter, IRequiresOptions<ParquetWriterOptions>, ISchemaInspector
 {
     private readonly string _outputPath = outputPath;
     private FileStream? _fileStream;

@@ -28,10 +28,6 @@ public class ParquetReaderDescriptor : IProviderDescriptor<IStreamReader>
     public IStreamReader Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
     {
         var filePath = connectionString;
-        if (filePath.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            filePath = filePath[Prefix.Length..];
-        }
 
         return new ParquetStreamReader(filePath);
     }

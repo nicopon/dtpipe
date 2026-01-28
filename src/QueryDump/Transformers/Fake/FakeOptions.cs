@@ -9,8 +9,8 @@ public record FakeOptions : ITransformerOptions
     public static string Prefix => "fake";
     public static string DisplayName => "Anonymization";
     
-    [CliOption("--fake", Description = "Column:faker mapping (e.g. EMAIL:internet.email, NAME:name.fullName, EMAIL_ALT:internet.email#alt)")]
-    public IReadOnlyList<string> Mappings { get; init; } = [];
+    [CliOption(Description = "Column:faker mapping (e.g. EMAIL:internet.email, NAME:name.fullName, EMAIL_ALT:internet.email#alt)")]
+    public IReadOnlyList<string> Fake { get; init; } = [];
     
     [Description("Locale for fake data (en, fr, de, es, ja, zh_CN...)")]
     public string Locale { get; init; } = "en";

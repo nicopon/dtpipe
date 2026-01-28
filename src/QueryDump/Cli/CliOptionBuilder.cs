@@ -29,7 +29,15 @@ public static class CliOptionBuilder
                 continue;
             }
             
-            var flagName = cliOptionAttr?.Name ?? $"--{prefix}-{property.Name.ToKebabCase()}";
+            var flagName = cliOptionAttr?.Name;
+            if (string.IsNullOrEmpty(flagName))
+            {
+                var kebabProp = property.Name.ToKebabCase();
+                flagName = kebabProp == prefix.ToLowerInvariant() 
+                    ? $"--{prefix}" 
+                    : $"--{prefix}-{kebabProp}";
+            }
+            
             var description = cliOptionAttr?.Description ?? descriptionAttr?.Description ?? string.Empty;
             
             // Check for list/array types (repeatable options)
@@ -110,7 +118,15 @@ public static class CliOptionBuilder
                 continue;
             }
             
-            var flagName = cliOptionAttr?.Name ?? $"--{prefix}-{property.Name.ToKebabCase()}";
+            var flagName = cliOptionAttr?.Name;
+            if (string.IsNullOrEmpty(flagName))
+            {
+                var kebabProp = property.Name.ToKebabCase();
+                flagName = kebabProp == prefix.ToLowerInvariant() 
+                    ? $"--{prefix}" 
+                    : $"--{prefix}-{kebabProp}";
+            }
+            
             var description = cliOptionAttr?.Description ?? descriptionAttr?.Description ?? string.Empty;
             
             var propType = property.PropertyType;
@@ -215,7 +231,14 @@ public static class CliOptionBuilder
         foreach (var property in typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
             var cliOptionAttr = property.GetCustomAttribute<CliOptionAttribute>();
-            var flagName = cliOptionAttr?.Name ?? $"--{prefix}-{property.Name.ToKebabCase()}";
+            var flagName = cliOptionAttr?.Name;
+            if (string.IsNullOrEmpty(flagName))
+            {
+                var kebabProp = property.Name.ToKebabCase();
+                flagName = kebabProp == prefix.ToLowerInvariant() 
+                    ? $"--{prefix}" 
+                    : $"--{prefix}-{kebabProp}";
+            }
             
             // Match by Name - System.CommandLine stores the full name including dashes in Name property
             var matchedOption = optionsList.FirstOrDefault(o => o.Name == flagName);

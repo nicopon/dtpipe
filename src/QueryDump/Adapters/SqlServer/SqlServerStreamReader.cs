@@ -11,7 +11,7 @@ namespace QueryDump.Adapters.SqlServer;
 /// <summary>
 /// Streams data from SQL Server using IAsyncEnumerable.
 /// </summary>
-public sealed partial class SqlServerStreamReader : IStreamReader, IRequiresOptions<SqlServerOptions>
+public sealed partial class SqlServerStreamReader : IStreamReader, IRequiresOptions<SqlServerReaderOptions>
 {
     private readonly SqlConnection _connection;
     private readonly SqlCommand _command;
@@ -31,7 +31,7 @@ public sealed partial class SqlServerStreamReader : IStreamReader, IRequiresOpti
     [GeneratedRegex(@"^\s*(\w+)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex FirstWordRegex();
 
-    public SqlServerStreamReader(string connectionString, string query, int queryTimeout = 0)
+    public SqlServerStreamReader(string connectionString, string query, SqlServerReaderOptions options, int queryTimeout = 0)
     {
         ValidateQueryIsSafeSelect(query);
         

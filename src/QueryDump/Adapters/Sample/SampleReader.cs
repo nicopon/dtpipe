@@ -1,16 +1,18 @@
 using QueryDump.Core.Abstractions;
 using QueryDump.Core.Models;
+using QueryDump.Cli.Abstractions;
+using QueryDump.Core.Options;
 using System.Runtime.CompilerServices;
 
 namespace QueryDump.Adapters.Sample;
 
-public class SampleReader : IStreamReader
+public partial class SampleReader : IStreamReader, IRequiresOptions<SampleReaderOptions>
 {
-    private readonly SampleOptions _options;
+    private readonly SampleReaderOptions _options;
     
     public IReadOnlyList<ColumnInfo>? Columns { get; private set; }
 
-    public SampleReader(SampleOptions options)
+    public SampleReader(string config, string query, SampleReaderOptions options)
     {
         _options = options;
     }

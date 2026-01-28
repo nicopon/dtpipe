@@ -3,19 +3,25 @@ using QueryDump.Core.Options;
 
 namespace QueryDump.Adapters.SqlServer;
 
-public class SqlServerWriterOptions : IWriterOptions
+public enum SqlServerInsertMode
 {
-    public static string Prefix => "mssql";
+    Standard,
+    Bulk
+}
+
+public record SqlServerWriterOptions : IProviderOptions
+{
+    public static string Prefix => SqlServerConstants.ProviderName;
     public static string DisplayName => "SQL Server Writer Options";
 
-    [CliOption("--mssql-table", Description = "Target table name. Defaults to 'ExportData'.")]
-    public string Table { get; set; } = "ExportData";
+    [CliOption(Description = "Target table name")]
+    public string Table { get; set; } = "Export";
 
-    [CliOption("--mssql-strategy", Description = "Write strategy: Append, Truncate, or DeleteThenInsert.")]
-    public SqlServerWriteStrategy Strategy { get; set; } = SqlServerWriteStrategy.Append;
-    
-    [CliOption("--mssql-bulk-size", Description = "Rows per batch for SqlBulkCopy.")]
-    public int BulkSize { get; set; } = 5000;
+    [CliOption(Description = "Data write strategy (Append, Truncate, DeleteThenInsert)")]
+    public SqlServerWriteStrategy Strategy { get; set; }
+
+    [CliOption(Description = "Data insert mode (Standard, Bulk)")]
+    public SqlServerInsertMode InsertMode { get; set; } = SqlServerInsertMode.Standard;
 }
 
 public enum SqlServerWriteStrategy

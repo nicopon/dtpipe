@@ -7,9 +7,9 @@ namespace QueryDump.Adapters.Sample;
 
 public class SampleReaderDescriptor : IProviderDescriptor<IStreamReader>
 {
-    public string ProviderName => "sample";
+    public string ProviderName => SampleConstants.ProviderName;
 
-    public Type OptionsType => typeof(SampleOptions);
+    public Type OptionsType => typeof(SampleReaderOptions);
 
     public bool CanHandle(string connectionString)
     {
@@ -18,7 +18,7 @@ public class SampleReaderDescriptor : IProviderDescriptor<IStreamReader>
 
     public IStreamReader Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
     {
-        var sampleOptions = (SampleOptions)options;
+        var sampleOptions = (SampleReaderOptions)options;
         
         string config = connectionString;
         if (config.StartsWith("sample:", StringComparison.OrdinalIgnoreCase))
@@ -64,6 +64,9 @@ public class SampleReaderDescriptor : IProviderDescriptor<IStreamReader>
             sampleOptions.ColumnDefinitions.Add(new SampleColumnDef { Name = "dummy", Type = typeof(string) });
         }
 
-        return new SampleReader(sampleOptions);
+        return new SampleReader(
+            connectionString,
+            context.Query,
+            (SampleReaderOptions)options);
     }
 }

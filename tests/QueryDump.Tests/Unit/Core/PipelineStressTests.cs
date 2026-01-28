@@ -63,14 +63,14 @@ public class PipelineStressTests : IAsyncLifetime
 
         // 2. Setup Services
         var registry = new OptionsRegistry();
-        registry.Register(new DuckDbOptions());
-        registry.Register(new CsvOptions { Header = true });
+        registry.Register(new DuckDbReaderOptions());
+        registry.Register(new CsvWriterOptions { Header = true });
         // Register transformer options to be populated by builder
         registry.Register(new Transformers.Null.NullOptions());
         registry.Register(new Transformers.Overwrite.OverwriteOptions());
         registry.Register(new Transformers.Format.FormatOptions());
         // Register FakeOptions with specific configuration (Seed/Locale)
-        // Note: New PipelineBuilder ignores Mappings from registry, but Global options (Seed/Locale) are still used by Factory.CreateFromConfiguration
+        // Global options (Seed/Locale) are still used by Factory.CreateFromConfiguration
         registry.Register(new FakeOptions 
         { 
             Seed = 12345,
@@ -139,8 +139,7 @@ public class PipelineStressTests : IAsyncLifetime
 
         // 5. Verify Output (light check)
         File.Exists(_outputPath).Should().BeTrue();
-        var fileInfo = new FileInfo(_outputPath);
-        _output.WriteLine($"Output file size: {fileInfo.Length / 1024 / 1024} MB");
+
         
         // Check first few lines
         using var reader = new StreamReader(_outputPath);
@@ -174,6 +173,6 @@ public class PipelineStressTests : IAsyncLifetime
         cols[6].Should().Be("Processed_0");
         
         // Performance assertion (sanity check, e.g. > 10k rows/s)
-        throughput.Should().BeGreaterThan(10_000, "Performance should be reasonable");
+        throughput.Should().BeGreaterThan(10_000);
     }
 }

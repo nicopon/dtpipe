@@ -4,28 +4,19 @@ namespace QueryDump.Adapters.SqlServer;
 
 public static class SqlServerConnectionHelper
 {
-    private const string Prefix = "mssql:"; // Using mssql: as prefix (common standard)
+    private const string Prefix = "mssql:";
 
     public static bool CanHandle(string connectionString)
     {
         if (string.IsNullOrWhiteSpace(connectionString)) return false;
 
-        if (connectionString.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        return connectionString.Contains("Server=", StringComparison.OrdinalIgnoreCase) 
-               || connectionString.Contains("Initial Catalog=", StringComparison.OrdinalIgnoreCase)
-               || connectionString.Contains("Integrated Security=", StringComparison.OrdinalIgnoreCase);
+        // Fallback heuristic
+        return connectionString.Contains("Data Source=", StringComparison.OrdinalIgnoreCase) ||
+               connectionString.Contains("Server=", StringComparison.OrdinalIgnoreCase);
     }
 
-    public static string GetConnectionString(string original)
+    public static string GetConnectionString(string connectionString)
     {
-        if (original.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return original[Prefix.Length..];
-        }
-        return original;
+        return connectionString;
     }
 }

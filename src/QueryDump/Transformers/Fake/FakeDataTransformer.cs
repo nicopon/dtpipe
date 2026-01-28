@@ -57,15 +57,15 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
             throw new ArgumentException("Options --fake-deterministic and --fake-seedcolumn cannot be used together.");
         }
 
-        _parser.ParseAll(options.Mappings);
+        _parser.ParseAll(options.Fake);
     }
 
-    public bool HasMappings => _parser.HasMappings;
+    public bool HasFake => _parser.HasMappings;
     public FakerRegistry Registry => _registry;
 
     public ValueTask<IReadOnlyList<ColumnInfo>> InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
     {
-        if (!HasMappings)
+        if (!HasFake)
         {
             _processors = null;
             _generationOrder = null;

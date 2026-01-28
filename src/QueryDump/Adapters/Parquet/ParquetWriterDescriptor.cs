@@ -7,7 +7,7 @@ namespace QueryDump.Adapters.Parquet;
 
 public class ParquetWriterDescriptor : IProviderDescriptor<IDataWriter>
 {
-    public string ProviderName => "parquet";
+    public string ProviderName => ParquetConstants.ProviderName;
 
     // Parquet has no specific options class in factory usage?
     // Factory used ComponentOptionsHelper.GetOptionsType<ParquetDataWriter>();
@@ -17,7 +17,7 @@ public class ParquetWriterDescriptor : IProviderDescriptor<IDataWriter>
     // I will check ParquetDataWriter content in next step if unsure, but for now I will use what factory used: ComponentOptionsHelper.GetOptionsType<ParquetDataWriter>()
     // But OptionsType property must return a Type. ComponentOptionsHelper.GetOptionsType<T> returns Type. Perfect.
     
-    public Type OptionsType => typeof(ParquetOptions);
+    public Type OptionsType => typeof(ParquetWriterOptions);
     
     public bool CanHandle(string connectionString)
     {

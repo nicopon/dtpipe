@@ -45,7 +45,7 @@ public class DuckDBIntegrationTests : IAsyncLifetime
         await using var reader = new DuckDataSourceReader(
             _connectionString, 
             "SELECT * FROM users ORDER BY id",
-            new DuckDbOptions());
+            new DuckDbReaderOptions());
         await reader.OpenAsync(TestContext.Current.CancellationToken);
 
         // 3. Verify Columns
@@ -77,7 +77,7 @@ public class DuckDBIntegrationTests : IAsyncLifetime
         var act = () => new DuckDataSourceReader(
             _connectionString, 
             "DROP TABLE users",
-            new DuckDbOptions());
+            new DuckDbReaderOptions());
         act.Should().Throw<Exception>(); // Relaxed check to catch either ArgumentException or InvalidOperationException
     }
 }
