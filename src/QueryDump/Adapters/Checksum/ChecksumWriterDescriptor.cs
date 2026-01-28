@@ -11,6 +11,8 @@ public class ChecksumWriterDescriptor : IProviderDescriptor<IDataWriter>
     public string ProviderName => ChecksumConstants.ProviderName;
     public Type OptionsType => typeof(ChecksumWriterOptions);
 
+    public bool RequiresQuery => false;
+
     public bool CanHandle(string connectionString)
     {
         return connectionString.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase);

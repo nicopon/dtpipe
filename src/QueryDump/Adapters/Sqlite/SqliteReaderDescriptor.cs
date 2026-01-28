@@ -11,6 +11,8 @@ public class SqliteReaderDescriptor : IProviderDescriptor<IStreamReader>
 
     public Type OptionsType => typeof(EmptyOptions);
 
+    public bool RequiresQuery => true;
+
     public bool CanHandle(string connectionString)
     {
         return SqliteConnectionHelper.CanHandle(connectionString);
@@ -22,7 +24,7 @@ public class SqliteReaderDescriptor : IProviderDescriptor<IStreamReader>
 
         return new SqliteStreamReader(
             connStr,
-            context.Query,
+            context.Query!,
             context.QueryTimeout);
     }
 }

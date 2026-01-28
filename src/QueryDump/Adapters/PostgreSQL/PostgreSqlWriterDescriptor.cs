@@ -11,6 +11,8 @@ public class PostgreSqlWriterDescriptor : IProviderDescriptor<IDataWriter>
 
     public Type OptionsType => typeof(PostgreSqlWriterOptions);
 
+    public bool RequiresQuery => false;
+
     public bool CanHandle(string connectionString)
     {
         return PostgreSqlConnectionHelper.CanHandle(connectionString);

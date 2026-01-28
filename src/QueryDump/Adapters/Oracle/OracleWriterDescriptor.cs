@@ -13,6 +13,8 @@ public class OracleWriterDescriptor : IProviderDescriptor<IDataWriter>
 
     public Type OptionsType => typeof(OracleWriterOptions);
 
+    public bool RequiresQuery => false;
+
     public bool CanHandle(string connectionString)
     {
         return OracleConnectionHelper.CanHandle(connectionString);

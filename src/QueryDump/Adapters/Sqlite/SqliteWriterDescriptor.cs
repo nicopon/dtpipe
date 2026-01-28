@@ -12,6 +12,8 @@ public class SqliteWriterDescriptor : IProviderDescriptor<IDataWriter>
 
     public Type OptionsType => typeof(SqliteWriterOptions);
 
+    public bool RequiresQuery => false;
+
     public bool CanHandle(string connectionString)
     {
         return SqliteConnectionHelper.CanHandle(connectionString);

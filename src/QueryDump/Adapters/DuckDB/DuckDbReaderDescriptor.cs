@@ -11,6 +11,8 @@ public class DuckDbReaderDescriptor : IProviderDescriptor<IStreamReader>
 
     public Type OptionsType => typeof(DuckDbReaderOptions);
 
+    public bool RequiresQuery => true;
+
     public bool CanHandle(string connectionString)
     {
         return DuckDbConnectionHelper.CanHandle(connectionString);
@@ -28,7 +30,7 @@ public class DuckDbReaderDescriptor : IProviderDescriptor<IStreamReader>
 
         return new DuckDataSourceReader(
             finalConnectionString,
-            context.Query,
+            context.Query!,
             (DuckDbReaderOptions)options,
             context.QueryTimeout);
     }

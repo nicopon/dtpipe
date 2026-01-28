@@ -85,12 +85,6 @@ public static class RawJobBuilder
             var input = parseResult.GetValue(inputOption);
 
             // Validation (Required args)
-            if (string.IsNullOrWhiteSpace(query))
-            {
-                Console.Error.WriteLine("Error: Option '--query' is required (or use --job).");
-                return (new JobDefinition { Input = "", Query = "", Output = "" }, 1);
-            }
-
             if (string.IsNullOrWhiteSpace(output))
             {
                 Console.Error.WriteLine("Error: Option '--output' is required (or use --job).");

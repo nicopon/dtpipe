@@ -11,6 +11,8 @@ public class SampleReaderDescriptor : IProviderDescriptor<IStreamReader>
 
     public Type OptionsType => typeof(SampleReaderOptions);
 
+    public bool RequiresQuery => false;
+
     public bool CanHandle(string connectionString)
     {
         return connectionString.StartsWith("sample:", StringComparison.OrdinalIgnoreCase);
@@ -66,7 +68,7 @@ public class SampleReaderDescriptor : IProviderDescriptor<IStreamReader>
 
         return new SampleReader(
             connectionString,
-            context.Query,
+            context.Query ?? "",
             (SampleReaderOptions)options);
     }
 }

@@ -104,4 +104,6 @@ public class CliStreamReaderFactory : CliProviderFactory<IStreamReader>, IStream
     {
          yield return _descriptor.OptionsType;
     }
+
+    public bool RequiresQuery => _descriptor.RequiresQuery;
 }

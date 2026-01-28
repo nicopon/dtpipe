@@ -13,6 +13,8 @@ public class ParquetReaderDescriptor : IProviderDescriptor<IStreamReader>
 
     public Type OptionsType => typeof(EmptyOptions);
 
+    public bool RequiresQuery => false;
+
     public bool CanHandle(string connectionString)
     {
         if (string.IsNullOrWhiteSpace(connectionString)) return false;

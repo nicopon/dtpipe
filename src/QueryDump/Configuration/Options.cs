@@ -8,7 +8,7 @@ public sealed record DumpOptions
     // --- General Options ---
     public string Provider { get; init; } = "oracle";
     public required string ConnectionString { get; init; }
-    public required string Query { get; init; }
+    public required string? Query { get; init; }
     public required string OutputPath { get; init; }
     
     // --- Execution Options ---

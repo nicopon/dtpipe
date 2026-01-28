@@ -13,6 +13,8 @@ public class CsvReaderDescriptor : IProviderDescriptor<IStreamReader>
 
     public Type OptionsType => typeof(CsvReaderOptions);
 
+    public bool RequiresQuery => false;
+
     public bool CanHandle(string connectionString)
     {
         if (string.IsNullOrWhiteSpace(connectionString)) return false;

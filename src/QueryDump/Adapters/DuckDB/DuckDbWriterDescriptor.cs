@@ -11,6 +11,8 @@ public class DuckDbWriterDescriptor : IProviderDescriptor<IDataWriter>
 
     public Type OptionsType => typeof(DuckDbWriterOptions);
 
+    public bool RequiresQuery => false;
+
     public bool CanHandle(string connectionString)
     {
         return DuckDbConnectionHelper.CanHandle(connectionString);

@@ -11,6 +11,8 @@ public class PostgreSqlReaderDescriptor : IProviderDescriptor<IStreamReader>
 
     public Type OptionsType => typeof(EmptyOptions);
 
+    public bool RequiresQuery => true;
+
     public bool CanHandle(string connectionString)
     {
         return PostgreSqlConnectionHelper.CanHandle(connectionString);
@@ -20,7 +22,7 @@ public class PostgreSqlReaderDescriptor : IProviderDescriptor<IStreamReader>
     {
         return new PostgreSqlReader(
             PostgreSqlConnectionHelper.GetConnectionString(connectionString),
-            context.Query,
+            context.Query!,
             context.QueryTimeout
         );
     }

@@ -14,7 +14,7 @@ public record JobDefinition
     /// <summary>
     /// SQL query to execute.
     /// </summary>
-    public required string Query { get; init; }
+    public string? Query { get; init; }
 
     /// <summary>
     /// Output file path.

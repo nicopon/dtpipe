@@ -11,6 +11,8 @@ public class SqlServerReaderDescriptor : IProviderDescriptor<IStreamReader>
 
     public Type OptionsType => typeof(SqlServerReaderOptions);
 
+    public bool RequiresQuery => true;
+
     public bool CanHandle(string connectionString)
     {
         return SqlServerConnectionHelper.CanHandle(connectionString);
@@ -20,7 +22,7 @@ public class SqlServerReaderDescriptor : IProviderDescriptor<IStreamReader>
     {
         return new SqlServerStreamReader(
             SqlServerConnectionHelper.GetConnectionString(connectionString),
-            context.Query,
+            context.Query!,
             (SqlServerReaderOptions)options,
             context.QueryTimeout);
     }

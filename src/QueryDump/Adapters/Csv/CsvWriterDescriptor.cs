@@ -11,6 +11,8 @@ public class CsvWriterDescriptor : IProviderDescriptor<IDataWriter>
 
     public Type OptionsType => typeof(CsvWriterOptions);
 
+    public bool RequiresQuery => false;
+
     public bool CanHandle(string connectionString)
     {
         return connectionString.EndsWith(".csv", StringComparison.OrdinalIgnoreCase);

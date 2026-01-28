@@ -168,14 +168,23 @@ public class JobService
             job = job with { Output = cleanedOutput };
 
             // 6. Validate Query
-            try
+            if (readerFactory.RequiresQuery)
             {
-                SqlQueryValidator.Validate(job.Query, job.UnsafeQuery);
-            }
-            catch (InvalidOperationException ex)
-            {
-                Console.Error.WriteLine($"Error: {ex.Message}");
-                return 1;
+                if (string.IsNullOrWhiteSpace(job.Query))
+                {
+                    Console.Error.WriteLine($"Error: A query is required for provider '{readerFactory.ProviderName}'. Use --query \"SELECT...\"");
+                    return 1;
+                }
+
+                try
+                {
+                    SqlQueryValidator.Validate(job.Query, job.UnsafeQuery);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    Console.Error.WriteLine($"Error: {ex.Message}");
+                    return 1;
+                }
             }
 
             // 7. Build Runtime Options

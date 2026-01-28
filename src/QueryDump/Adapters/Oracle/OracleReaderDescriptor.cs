@@ -11,6 +11,8 @@ public class OracleReaderDescriptor : IProviderDescriptor<IStreamReader>
 
     public Type OptionsType => typeof(OracleReaderOptions);
 
+    public bool RequiresQuery => true;
+
     public bool CanHandle(string connectionString)
     {
         return OracleConnectionHelper.CanHandle(connectionString); 
@@ -20,7 +22,7 @@ public class OracleReaderDescriptor : IProviderDescriptor<IStreamReader>
     {
         return new OracleStreamReader(
             OracleConnectionHelper.GetConnectionString(connectionString), 
-            context.Query,
+            context.Query!,
             (OracleReaderOptions)options,
             context.QueryTimeout);
     }

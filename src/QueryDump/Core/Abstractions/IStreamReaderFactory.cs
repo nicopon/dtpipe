@@ -16,4 +16,9 @@ public interface IStreamReaderFactory : IDataFactory
     /// Gets the option types supported by this reader.
     /// </summary>
     IEnumerable<Type> GetSupportedOptionTypes();
+
+    /// <summary>
+    /// Indicates if this factory requires a SQL query to create a reader.
+    /// </summary>
+    bool RequiresQuery { get; }
 }

@@ -16,6 +16,12 @@ public interface IProviderDescriptor<out TService>
     bool CanHandle(string connectionString);
 
     /// <summary>
+    /// Indicates if this provider requires a SQL query to read data.
+    /// True for DBs (Oracle, SQL Server), False for Files (CSV, Parquet) or Generators (Sample).
+    /// </summary>
+    bool RequiresQuery { get; }
+
+    /// <summary>
     /// Creates the service instance.
     /// </summary>
     /// <param name="connectionString">The resolved connection string (potentially stripped of prefix).</param>
