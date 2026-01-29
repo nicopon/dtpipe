@@ -2,6 +2,8 @@ using System;
 using System.IO;
 using QueryDump.Feedback;
 using Xunit;
+using Moq;
+using Spectre.Console;
 
 namespace QueryDump.Tests.Unit.Feedback;
 
@@ -21,7 +23,7 @@ public class ProgressReporterTests
 
             try
             {
-                using var reporter = new ProgressReporter(enabled: true, transformers: null);
+                using var reporter = new ProgressReporter(new Mock<IAnsiConsole>().Object, enabled: true, transformers: null);
                 // perform some activity reports
                 reporter.ReportRead(1);
                 reporter.ReportWrite(1, 0);
