@@ -4,7 +4,7 @@ namespace QueryDump.Adapters.SqlServer;
 
 public static class SqlServerConnectionHelper
 {
-    private const string Prefix = "mssql:";
+
 
     public static bool CanHandle(string connectionString)
     {
