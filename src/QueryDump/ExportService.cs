@@ -159,6 +159,7 @@ public class ExportService
         try
         {
             // Run Concurrent Pipeline
+            var startTime = DateTime.UtcNow;
             var producerTask = ProduceRowsAsync(reader, readerToTransform.Writer, options.BatchSize, options.Limit, options.SampleRate, options.SampleSeed, progress, linkedCts, effectiveCt, _logger);
             var transformTask = TransformRowsAsync(readerToTransform.Reader, transformToWriter.Writer, pipeline, progress, effectiveCt);
             var consumerTask = ConsumeRowsAsync(transformToWriter.Reader, writer, options.BatchSize, progress, r => Interlocked.Add(ref totalRows, r), effectiveCt, _logger);
@@ -186,6 +187,11 @@ public class ExportService
 
             await writer.CompleteAsync(ct);
             progress.Complete();
+
+            var elapsed = DateTime.UtcNow - startTime;
+            var rowsPerSecond = elapsed.TotalSeconds > 0 ? totalRows / elapsed.TotalSeconds : 0;
+            _logger.LogInformation("Export completed in {Elapsed}. Written {Rows} rows ({Speed:F1} rows/s). Total {Bytes} bytes.", 
+                elapsed, totalRows, rowsPerSecond, writer.BytesWritten);
         }
         catch (Exception ex)
         {
@@ -308,44 +314,39 @@ public class ExportService
         var buffer = new List<object?[]>(batchSize);
         long previousBytes = 0;
 
+        async Task WriteBufferAsync()
+        {
+            if (buffer.Count == 0) return;
+
+            logger.LogDebug("Writing batch of {Count} rows", buffer.Count);
+            await writer.WriteBatchAsync(buffer, ct);
+            logger.LogDebug("Batch written");
+
+            var currentBytes = writer.BytesWritten;
+            var bytesDelta = currentBytes - previousBytes;
+            previousBytes = currentBytes;
+
+            updateRowCount(buffer.Count);
+            progress.ReportWrite(buffer.Count, bytesDelta);
+
+            // Trace memory usage
+            LogMemoryUsage(logger);
+
+            buffer.Clear();
+        }
+
         await foreach (var row in input.ReadAllAsync(ct))
         {
             buffer.Add(row);
-            
+
             if (buffer.Count >= batchSize)
             {
-                logger.LogDebug("Writing batch of {Count} rows", buffer.Count);
-                await writer.WriteBatchAsync(buffer, ct);
-                logger.LogDebug("Batch written");
-                
-                var currentBytes = writer.BytesWritten;
-                var bytesDelta = currentBytes - previousBytes;
-                previousBytes = currentBytes;
-
-                updateRowCount(buffer.Count); // Update total
-            progress.ReportWrite(buffer.Count, bytesDelta);
-                
-                // Trace memory usage
-                LogMemoryUsage(logger);
-                
-                buffer.Clear();
+                await WriteBufferAsync();
             }
         }
 
         // Write remaining
-        if (buffer.Count > 0)
-        {
-            logger.LogDebug("Writing final batch of {Count} rows", buffer.Count);
-            await writer.WriteBatchAsync(buffer, ct);
-            logger.LogDebug("Final batch written");
-            
-            var currentBytes = writer.BytesWritten;
-            var bytesDelta = currentBytes - previousBytes;
-            
-            updateRowCount(buffer.Count);
-            progress.ReportWrite(buffer.Count, bytesDelta);
-            LogMemoryUsage(logger);
-        }
+        await WriteBufferAsync();
     }
 
     private static void LogMemoryUsage(ILogger logger)
