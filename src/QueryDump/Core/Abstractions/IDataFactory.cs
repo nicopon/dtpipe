@@ -6,8 +6,8 @@ namespace QueryDump.Core.Abstractions;
 public interface IDataFactory
 {
     /// <summary>
-    /// Unique provider name (e.g., "duckdb", "oracle", "csv").
-    /// Used for deterministic prefix-based resolution (e.g. "duckdb:my.db") and display.
+    /// Unique provider name (e.g., "duck", "ora", "csv").
+    /// Used for deterministic prefix-based resolution (e.g. "duck:my.db") and display.
     /// </summary>
     string ProviderName { get; }
 

@@ -342,7 +342,7 @@ public class JobService
             if (rawString.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             {
                 // Strip prefix
-                var cleaned = rawString.Substring(prefix.Length);
+                var cleaned = rawString.Substring(prefix.Length).Trim();
                 return (factory, cleaned);
             }
         }
@@ -354,7 +354,7 @@ public class JobService
             return (detected, rawString);
         }
 
-        throw new InvalidOperationException($"Could not detect {typeName} provider for '{rawString}'. Please use a known prefix (e.g. 'duckdb:', 'oracle:') or file extension.");
+        throw new InvalidOperationException($"Could not detect {typeName} provider for '{rawString}'. Please use a known prefix (e.g. 'duck:', 'ora:' ...) or file extension.");
     }
 
     private static bool IsPrefixMatch(Type optionsType, string configKey)
