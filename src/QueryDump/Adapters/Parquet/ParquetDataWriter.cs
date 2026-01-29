@@ -16,17 +16,22 @@ namespace QueryDump.Adapters.Parquet;
 public sealed class ParquetDataWriter(string outputPath) : IDataWriter, IRequiresOptions<ParquetWriterOptions>, ISchemaInspector
 {
     private readonly string _outputPath = outputPath;
-    private FileStream? _fileStream;
+    private Stream? _outputStream;
 
     private ParquetSchema? _schema;
     private ParquetWriter? _writer;
     private IReadOnlyList<ColumnInfo>? _columns;
     private DataField[]? _dataFields;
 
-    public long BytesWritten => _fileStream?.Position ?? 0;
+    public long BytesWritten => _outputStream?.Position ?? 0;
 
     public async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
     {
+        if (string.IsNullOrEmpty(_outputPath) || _outputPath == "-")
+        {
+             return new TargetSchemaInfo([], false, null, null, null);
+        }
+
         if (!File.Exists(_outputPath))
         {
              return new TargetSchemaInfo([], false, null, null, null);
@@ -75,14 +80,25 @@ public sealed class ParquetDataWriter(string outputPath) : IDataWriter, IRequire
 
     public async ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
     {
-        // Defer file creation until here to avoid overwriting during dry-run
-        _fileStream = new FileStream(_outputPath, FileMode.Create, FileAccess.Write, FileShare.None,
-            bufferSize: 65536, useAsync: true);
+        if (string.IsNullOrEmpty(_outputPath) || _outputPath == "-")
+        {
+             if (!Console.IsOutputRedirected)
+             {
+                 throw new InvalidOperationException("Refusing to write binary Parquet data to the console. Redirect output with > or use a file path.");
+             }
+             _outputStream = Console.OpenStandardOutput();
+        }
+        else
+        {
+             // Defer file creation until here to avoid overwriting during dry-run
+             _outputStream = new FileStream(_outputPath, FileMode.Create, FileAccess.Write, FileShare.None,
+                 bufferSize: 65536, useAsync: true);
+        }
 
         _columns = columns;
         _dataFields = BuildDataFields(columns);
         _schema = new ParquetSchema(_dataFields);
-        _writer = await ParquetWriter.CreateAsync(_schema, _fileStream, cancellationToken: ct);
+        _writer = await ParquetWriter.CreateAsync(_schema, _outputStream, cancellationToken: ct);
         _writer.CompressionMethod = CompressionMethod.Snappy;
     }
 
@@ -208,9 +224,9 @@ public sealed class ParquetDataWriter(string outputPath) : IDataWriter, IRequire
             _writer.Dispose();
         }
         
-        if (_fileStream != null) 
+        if (_outputStream != null) 
         {
-            await _fileStream.DisposeAsync();
+            await _outputStream.DisposeAsync();
         }
     }
 }

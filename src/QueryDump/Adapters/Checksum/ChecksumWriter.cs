@@ -96,10 +96,9 @@ public sealed class ChecksumDataWriter : IDataWriter, IRequiresOptions<ChecksumW
         var finalHash = Convert.ToHexString(_currentHash);
         _logger.LogInformation("Final Checksum: {Hash}", finalHash);
         
-        if (!string.IsNullOrEmpty(_options.OutputPath))
+        if (!string.IsNullOrEmpty(_options.OutputPath) && _options.OutputPath != "-")
         {
             var output = _options.OutputPath;
-            // Handle console output special case? No, file is safer for automation.
             await File.WriteAllTextAsync(output, finalHash, ct);
         }
         else
