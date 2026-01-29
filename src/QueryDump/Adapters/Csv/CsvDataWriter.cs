@@ -27,7 +27,7 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvWriterOptio
     private readonly CsvWriterOptions _options;
     
     // Initialized in InitializeAsync
-    private FileStream? _fileStream;
+    private Stream? _outputStream;
     private RecyclableMemoryStream? _memoryStream;
     private StreamWriter? _streamWriter;
     private CsvWriter? _csvWriter;
@@ -36,7 +36,7 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvWriterOptio
     private int _rowsInBuffer;
     private const int FlushThreshold = 1000; // Flush every N rows
 
-    public long BytesWritten => _fileStream?.Position ?? 0;
+    public long BytesWritten => _outputStream?.Position ?? 0;
 
     public CsvDataWriter(string outputPath) : this(outputPath, new CsvWriterOptions())
     {
@@ -50,6 +50,12 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvWriterOptio
 
     public async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
     {
+        if (string.IsNullOrEmpty(_outputPath) || _outputPath == "-")
+        {
+             // For stdout, we assume new/overwrite.
+             return new TargetSchemaInfo([], false, null, null, null);
+        }
+
         if (!File.Exists(_outputPath))
         {
              return new TargetSchemaInfo([], false, null, null, null);
@@ -104,9 +110,15 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvWriterOptio
 
     public ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
     {
-        // Check if writable?
-        _fileStream = new FileStream(_outputPath, FileMode.Create, FileAccess.Write, FileShare.None, 
-            bufferSize: 65536, useAsync: true);
+        if (string.IsNullOrEmpty(_outputPath) || _outputPath == "-")
+        {
+            _outputStream = Console.OpenStandardOutput();
+        }
+        else
+        {
+            _outputStream = new FileStream(_outputPath, FileMode.Create, FileAccess.Write, FileShare.None, 
+                bufferSize: 65536, useAsync: true);
+        }
         
         // Use RecyclableMemoryStream as intermediate buffer
         _memoryStream = (RecyclableMemoryStream)MemoryStreamManager.GetStream("CsvDataWriter");
@@ -160,15 +172,15 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvWriterOptio
 
     private async ValueTask FlushBufferToFileAsync(CancellationToken ct)
     {
-        if (_csvWriter is null || _streamWriter is null || _memoryStream is null || _fileStream is null) return;
+        if (_csvWriter is null || _streamWriter is null || _memoryStream is null || _outputStream is null) return;
 
         await _csvWriter.FlushAsync();
         await _streamWriter.FlushAsync(ct);
         
         // Copy from memory stream to file
         _memoryStream.Position = 0;
-        await _memoryStream.CopyToAsync(_fileStream, ct);
-        await _fileStream.FlushAsync(ct);
+        await _memoryStream.CopyToAsync(_outputStream, ct);
+        await _outputStream.FlushAsync(ct);
         
         // Reset memory stream for reuse
         _memoryStream.SetLength(0);
@@ -253,8 +265,8 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvWriterOptio
             await FlushBufferToFileAsync(ct);
         }
         
-        if (_fileStream != null)
-             await _fileStream.FlushAsync(ct);
+        if (_outputStream != null)
+             await _outputStream.FlushAsync(ct);
     }
 
     public async ValueTask DisposeAsync()
@@ -262,6 +274,6 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvWriterOptio
         if (_csvWriter != null) await _csvWriter.DisposeAsync();
         if (_streamWriter != null) await _streamWriter.DisposeAsync();
         if (_memoryStream != null) await _memoryStream.DisposeAsync();
-        if (_fileStream != null) await _fileStream.DisposeAsync();
+        if (_outputStream != null) await _outputStream.DisposeAsync();
     }
 }

@@ -28,8 +28,22 @@ public class CsvStreamReader : IStreamReader
     public async Task OpenAsync(CancellationToken ct = default)
     {
         var encoding = Encoding.GetEncoding(_options.Encoding);
-        _streamReader = new StreamReader(_filePath, encoding);
+        
+        if (string.IsNullOrEmpty(_filePath) || _filePath == "-")
+        {
+            if (!Console.IsInputRedirected)
+            {
+                throw new InvalidOperationException("Structure input (STDIN) is not redirected. To read from STDIN, pipe data into querydump (e.g. 'cat file.csv | querydump ...').");
+            }
 
+            // Use Standard Input
+            _streamReader = new StreamReader(Console.OpenStandardInput(), encoding);
+        }
+        else
+        {
+            _streamReader = new StreamReader(_filePath, encoding);
+        }
+        
         var config = new CsvConfiguration(CultureInfo.InvariantCulture)
         {
             Delimiter = _options.Delimiter,
