@@ -76,7 +76,13 @@ class Program
 
         // Configuration
         services.AddSingleton<OptionsRegistry>();
-        services.AddSingleton(Spectre.Console.AnsiConsole.Console);
+        services.AddSingleton<Spectre.Console.IAnsiConsole>(sp => 
+        {
+            return Spectre.Console.AnsiConsole.Create(new Spectre.Console.AnsiConsoleSettings 
+            { 
+                Out = new Spectre.Console.AnsiConsoleOutput(Console.Error) 
+            });
+        });
         
         // CLI
         services.AddSingleton<JobService>();

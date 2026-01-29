@@ -10,6 +10,7 @@ using QueryDump.Core.Pipelines;
 using QueryDump.Core.Validation;
 using Serilog;
 using QueryDump.Cli.Infrastructure;
+using Spectre.Console;
 
 namespace QueryDump.Cli;
 
@@ -17,16 +18,19 @@ public class JobService
 {
     private readonly IEnumerable<ICliContributor> _contributors;
     private readonly IServiceProvider _serviceProvider;
+    private readonly IAnsiConsole _console;
     private readonly ILoggerFactory _loggerFactory;
 
     public JobService(
         IServiceProvider serviceProvider,
+        IAnsiConsole console,
         ILoggerFactory loggerFactory,
         IEnumerable<IStreamReaderFactory> readerFactories,
         IEnumerable<IDataTransformerFactory> transformerFactories,
         IEnumerable<IDataWriterFactory> writerFactories)
     {
         _serviceProvider = serviceProvider;
+        _console = console;
         _loggerFactory = loggerFactory;
         
         // Aggregate all contributors
@@ -161,7 +165,7 @@ public class JobService
             var (readerFactory, cleanedInput) = ResolveFactory(readerFactories, job.Input, "reader");
             job = job with { Input = cleanedInput };
             
-            Console.WriteLine($"Auto-detected input source: {readerFactory.ProviderName}");
+            _console.WriteLine($"Auto-detected input source: {readerFactory.ProviderName}");
 
             var writerFactories = _contributors.OfType<IDataWriterFactory>().ToList();
             var (writerFactory, cleanedOutput) = ResolveFactory(writerFactories, job.Output, "writer");
@@ -172,7 +176,7 @@ public class JobService
             {
                 if (string.IsNullOrWhiteSpace(job.Query))
                 {
-                    Console.Error.WriteLine($"Error: A query is required for provider '{readerFactory.ProviderName}'. Use --query \"SELECT...\"");
+                    _console.Write(new Spectre.Console.Markup($"[red]Error: A query is required for provider '{readerFactory.ProviderName}'. Use --query \"SELECT...\"[/]{Environment.NewLine}"));
                     return 1;
                 }
 
@@ -182,7 +186,7 @@ public class JobService
                 }
                 catch (InvalidOperationException ex)
                 {
-                    Console.Error.WriteLine($"Error: {ex.Message}");
+                    _console.Write(new Spectre.Console.Markup($"[red]Error: {ex.Message}[/]{Environment.NewLine}"));
                     return 1;
                 }
             }
@@ -222,7 +226,7 @@ public class JobService
             
             if (job.Transformers != null && job.Transformers.Count > 0)
             {
-                pipeline = BuildPipelineFromYaml(job.Transformers, transformerFactories);
+                pipeline = BuildPipelineFromYaml(job.Transformers, transformerFactories, _console);
             }
             else
             {
@@ -237,34 +241,37 @@ public class JobService
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"\nError: {ex.Message}");
-                if (options.Provider == "duckdb" || Environment.GetEnvironmentVariable("DEBUG") == "1") Console.Error.WriteLine(ex.StackTrace);
+                _console.Write(new Spectre.Console.Markup($"{Environment.NewLine}[red]Error: {Markup.Escape(ex.Message)}[/]{Environment.NewLine}"));
+                if (options.Provider == "duckdb" || Environment.GetEnvironmentVariable("DEBUG") == "1") 
+                {
+                     _console.WriteLine(ex.StackTrace ?? "");
+                }
                 return 1;
             }
         });
 
-        Action printHelp = () => PrintGroupedHelp(rootCommand, coreOptions, _contributors);
+        Action printHelp = () => PrintGroupedHelp(rootCommand, coreOptions, _contributors, _console);
         return (rootCommand, printHelp);
     }
 
-    private static void PrintGroupedHelp(RootCommand rootCommand, List<Option> coreOptions, IEnumerable<ICliContributor> contributors)
+    private static void PrintGroupedHelp(RootCommand rootCommand, List<Option> coreOptions, IEnumerable<ICliContributor> contributors, IAnsiConsole console)
     {
-        Console.WriteLine("Description:");
-        Console.WriteLine("  QueryDump - Export database data to Parquet or CSV (DuckDB-optimized)");
-        Console.WriteLine();
-        Console.WriteLine("Usage:");
-        Console.WriteLine("  querydump [options]");
-        Console.WriteLine();
+        console.WriteLine("Description:");
+        console.WriteLine("  QueryDump - Export database data to Parquet or CSV (DuckDB-optimized)");
+        console.WriteLine();
+        console.WriteLine("Usage:");
+        console.WriteLine("  querydump [options]");
+        console.WriteLine();
         
-        Console.WriteLine("Core Options:");
-        foreach (var opt in coreOptions) PrintOption(opt);
-        Console.WriteLine();
+        console.WriteLine("Core Options:");
+        foreach (var opt in coreOptions) PrintOption(opt, console);
+        console.WriteLine();
 
         var groups = contributors.GroupBy(c => c.Category).OrderBy(g => g.Key);
         
         foreach (var group in groups)
         {
-            Console.WriteLine($"{group.Key}:");
+            console.WriteLine($"{group.Key}:");
             // Collect all options for this group
             var optionsPrinted = new HashSet<string>();
             foreach (var contributor in group)
@@ -273,27 +280,27 @@ public class JobService
                 {
                     if (optionsPrinted.Add(opt.Name))
                     {
-                         PrintOption(opt);
+                         PrintOption(opt, console);
                     }
                 }
             }
-            Console.WriteLine();
+            console.WriteLine();
         }
 
-        Console.WriteLine("Other Options:");
-        Console.WriteLine("  -?, -h, --help                           Show this help");
-        Console.WriteLine("  --version                                Show version");
-        Console.WriteLine();
+        console.WriteLine("Other Options:");
+        console.WriteLine("  -?, -h, --help                           Show this help");
+        console.WriteLine("  --version                                Show version");
+        console.WriteLine();
     }
 
-    private static void PrintOption(Option opt)
+    private static void PrintOption(Option opt, IAnsiConsole console)
     {
         var allAliases = new HashSet<string> { opt.Name };
         foreach (var alias in opt.Aliases) allAliases.Add(alias);
         
         var name = string.Join(", ", allAliases.OrderByDescending(a => a.Length));
         var desc = opt.Description ?? "";
-        Console.WriteLine($"  {name,-40} {desc}");
+        console.WriteLine($"  {name,-40} {desc}");
     }
 
     /// <summary>
@@ -302,7 +309,8 @@ public class JobService
     /// </summary>
     private static List<IDataTransformer> BuildPipelineFromYaml(
         List<TransformerConfig> configs, 
-        List<IDataTransformerFactory> factories)
+        List<IDataTransformerFactory> factories,
+        IAnsiConsole console)
     {
         var pipeline = new List<IDataTransformer>();
         
@@ -313,7 +321,7 @@ public class JobService
             
             if (factory == null)
             {
-                Console.Error.WriteLine($"Warning: Unknown transformer type '{config.Type}' in job file. Skipping.");
+                console.Write(new Markup($"[yellow]Warning: Unknown transformer type '{config.Type}' in job file. Skipping.[/]{Environment.NewLine}"));
                 continue;
             }
             

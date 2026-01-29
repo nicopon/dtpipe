@@ -9,6 +9,7 @@ namespace QueryDump.Feedback;
 public sealed class ProgressReporter : IDisposable
 {
     private readonly Stopwatch _stopwatch;
+    private readonly IAnsiConsole _console;
     private readonly bool _enabled;
     private readonly bool _uiEnabled;
     private bool _disposed;
@@ -25,8 +26,9 @@ public sealed class ProgressReporter : IDisposable
     // UI Task
     private Task? _uiTask;
 
-    public ProgressReporter(bool enabled = true, IEnumerable<IDataTransformer>? transformers = null)
+    public ProgressReporter(IAnsiConsole console, bool enabled = true, IEnumerable<IDataTransformer>? transformers = null)
     {
+        _console = console;
         _enabled = enabled;
         _stopwatch = Stopwatch.StartNew();
 
@@ -52,7 +54,7 @@ public sealed class ProgressReporter : IDisposable
             {
                 try
                 {
-                    await AnsiConsole.Live(CreateLayout())
+                    await _console.Live(CreateLayout())
                         .AutoClear(false)
                         .Overflow(VerticalOverflow.Ellipsis)
                         .Cropping(VerticalOverflowCropping.Bottom)
@@ -167,11 +169,11 @@ public sealed class ProgressReporter : IDisposable
 
         if (_uiEnabled)
         {
-            AnsiConsole.MarkupLine($"[green]✓ Completed in {_stopwatch.Elapsed.TotalSeconds:F1}s | {_writeCount:N0} rows | {FormatBytes(_bytesWritten)}[/]");
+            _console.MarkupLine($"[green]✓ Completed in {_stopwatch.Elapsed.TotalSeconds:F1}s | {_writeCount:N0} rows | {FormatBytes(_bytesWritten)}[/]");
         }
     }
 
-    private static bool IsNonInteractiveEnvironment()
+    private bool IsNonInteractiveEnvironment()
     {
         // Explicit opt-out
         var noTui = Environment.GetEnvironmentVariable("QUERYDUMP_NO_TUI");
@@ -180,20 +182,12 @@ public sealed class ProgressReporter : IDisposable
             return true;
         }
 
+        // Trust Spectre Console detection if configured
+        if (!_console.Profile.Capabilities.Interactive) return true;
+
         // Common CI indicators
         if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CI"))) return true;
-
-        // Redirected outputs (non-interactive shells / test runners)
-        try
-        {
-            if (Console.IsOutputRedirected) return true;
-        }
-        catch
-        {
-            // Some environments may throw; treat as non-interactive conservatively
-            return true;
-        }
-
+        
         return false;
     }
 

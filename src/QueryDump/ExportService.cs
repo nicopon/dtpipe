@@ -150,7 +150,7 @@ public class ExportService
             FullMode = BoundedChannelFullMode.Wait
         });
 
-        using var progress = new ProgressReporter(true, pipeline);
+        using var progress = new ProgressReporter(_console, true, pipeline);
         long totalRows = 0;
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
