@@ -20,12 +20,41 @@ New-Item -ItemType Directory -Force -Path $env:NUGET_SCRATCH | Out-Null
 Write-Host "QueryDump Build Script (Windows)" -ForegroundColor Green
 Write-Host "========================"
 
-# Detect Architecture
-$Arch = $env:PROCESSOR_ARCHITECTURE
-$Rid = "win-x64"
+# Detect Platform and Architecture
+$FullMac = $false
+$FullLinux = $false
+$FullWindows = $false
 
-if ($Arch -eq "ARM64") {
-    $Rid = "win-arm64"
+if ($PSVersionTable.PSVersion.Major -ge 6) {
+    # PowerShell Core
+    if ($IsMacOS) { $FullMac = $true }
+    if ($IsLinux) { $FullLinux = $true }
+    if ($IsWindows) { $FullWindows = $true }
+} else {
+    # Windows PowerShell (Desktop)
+    $FullWindows = $true
+}
+
+$Arch = $env:PROCESSOR_ARCHITECTURE
+# Normalize Arch for non-Windows if needed
+if ([string]::IsNullOrEmpty($Arch)) {
+    $Arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+}
+
+$Rid = "win-x64"
+$Ext = ".exe"
+
+if ($FullMac) {
+    $Ext = ""
+    if ($Arch -match "ARM64|Arm64") { $Rid = "osx-arm64" } else { $Rid = "osx-x64" }
+}
+elseif ($FullLinux) {
+    $Ext = ""
+    if ($Arch -match "ARM64|Arm64") { $Rid = "linux-arm64" } else { $Rid = "linux-x64" }
+}
+else {
+    $Ext = ".exe"
+    if ($Arch -match "ARM64|Arm64") { $Rid = "win-arm64" } else { $Rid = "win-x64" }
 }
 
 Write-Host "Platform: $Rid" -ForegroundColor Yellow
@@ -39,6 +68,18 @@ if (Test-Path $ReleaseDir) {
     Remove-Item -Recurse -Force $ReleaseDir
 }
 New-Item -ItemType Directory -Force -Path $ReleaseDir | Out-Null
+
+# ============================================================
+# Run Tests
+# ============================================================
+Write-Host ""
+Write-Host "Running Tests..." -ForegroundColor Yellow
+dotnet test "tests\QueryDump.Tests\QueryDump.Tests.csproj" -c Release --filter "FullyQualifiedName~.Unit."
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Tests failed with exit code $LASTEXITCODE"
+    exit $LASTEXITCODE
+}
 
 Write-Host ""
 Write-Host "Building Release (single-file)..." -ForegroundColor Yellow
@@ -60,13 +101,13 @@ if ($LASTEXITCODE -ne 0) {
 
 # Ensure lowercase name (optional on Windows case-insensitive fs, but good for consistency)
 # Creating a copy/rename explicitly if needed, but output name from dotnet is usually standard.
-# Visual Studio / dotnet usually produces "QueryDump.exe". To match "querydump.exe" preference:
+# Visual Studio / dotnet usually produces "QueryDump.exe" (or no ext on unix). To match "querydump" preference:
 
-$ExePath = Join-Path $ReleaseDir "QueryDump.exe"
-$TargetExePath = Join-Path $ReleaseDir "querydump.exe"
+$ExePath = Join-Path $ReleaseDir ("QueryDump" + $Ext)
+$TargetExePath = Join-Path $ReleaseDir ("querydump" + $Ext)
 
 if (Test-Path $ExePath) {
-    Rename-Item -Path $ExePath -NewName "querydump.exe" -Force
+    Rename-Item -Path $ExePath -NewName ("querydump" + $Ext) -Force
 }
 
 # ============================================================
@@ -76,7 +117,7 @@ Write-Host ""
 Write-Host "Build complete!" -ForegroundColor Green
 Write-Host ""
 Write-Host "Release (single-file):"
-Get-ChildItem "$ReleaseDir\querydump.exe" | Format-Table Name, Length
+Get-ChildItem "$ReleaseDir\querydump$Ext" | Format-Table Name, Length
 Write-Host ""
 Write-Host "Usage:" -ForegroundColor Yellow
-Write-Host "  .\dist\release\querydump.exe --help"
+Write-Host "  .\dist\release\querydump$Ext --help"

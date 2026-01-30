@@ -15,11 +15,8 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
     private readonly PostgreSqlWriterOptions _options;
     private NpgsqlConnection? _connection;
     private NpgsqlBinaryImporter? _writer;
-    private long _bytesWritten;
+
     private IReadOnlyList<ColumnInfo>? _columns;
-
-
-    public long BytesWritten => _bytesWritten;
 
     public PostgreSqlDataWriter(string connectionString, PostgreSqlWriterOptions options)
     {
@@ -250,8 +247,6 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
                         await _writer.WriteAsync(val, ct);
                     }
                 }
-                // Estimated byte count (overhead + string length)
-                _bytesWritten += 8 + row.Sum(o => o?.ToString()?.Length ?? 0);
             }
         }
         catch (Exception ex)

@@ -13,10 +13,8 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
     private SqlConnection? _connection;
     private SqlBulkCopy? _bulkCopy;
     private DataTable? _bufferTable;
-    private long _bytesWritten;
-    private IReadOnlyList<ColumnInfo>? _columns;
 
-    public long BytesWritten => _bytesWritten;
+    private IReadOnlyList<ColumnInfo>? _columns;
 
     public SqlServerDataWriter(string connectionString, SqlServerWriterOptions options)
     {
@@ -118,8 +116,6 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
         return new TargetSchemaInfo(cols, true, null, null, null);
     }
 
-
-
     #endregion
 
     private string BuildCreateTableSql(string tableName, IReadOnlyList<ColumnInfo> columns)
@@ -135,8 +131,6 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
         return sql;
     }
 
-
-
     public async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
     {
         if (_bulkCopy == null || _bufferTable == null || _columns == null) throw new InvalidOperationException("Not initialized");
@@ -150,7 +144,6 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
                 dataRow[i] = row[i] ?? DBNull.Value;
             }
             _bufferTable.Rows.Add(dataRow);
-             _bytesWritten += 100; 
         }
 
         try

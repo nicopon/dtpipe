@@ -23,8 +23,6 @@ public sealed class ParquetDataWriter(string outputPath) : IDataWriter, IRequire
     private IReadOnlyList<ColumnInfo>? _columns;
     private DataField[]? _dataFields;
 
-    public long BytesWritten => _outputStream?.Position ?? 0;
-
     public async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(_outputPath) || _outputPath == "-")

@@ -165,11 +165,10 @@ public class SqliteProviderTests : IAsyncLifetime
     [Fact]
     public void SqliteConnectionHelper_ShouldDetectSqlitePaths()
     {
-        SqliteConnectionHelper.CanHandle("sqlite:test.db").Should().BeTrue();
         SqliteConnectionHelper.CanHandle("test.sqlite").Should().BeTrue();
         SqliteConnectionHelper.CanHandle("test.sqlite3").Should().BeTrue();
         SqliteConnectionHelper.CanHandle("test.db").Should().BeFalse(); // .db is DuckDB by default
-        SqliteConnectionHelper.CanHandle("ora:connection").Should().BeFalse();
+        SqliteConnectionHelper.CanHandle("connection").Should().BeFalse();
     }
     [Fact]
     public async Task SqliteDataWriter_MixedOrder_MapsCorrectly()

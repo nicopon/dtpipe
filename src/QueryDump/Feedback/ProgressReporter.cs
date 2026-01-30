@@ -17,7 +17,6 @@ public sealed class ProgressReporter : IDisposable
     // Stats
     private long _readCount;
     private long _writeCount;
-    private long _bytesWritten;
 
     // Transformers stats
     private readonly Dictionary<string, long> _transformerStats = new();
@@ -96,10 +95,9 @@ public sealed class ProgressReporter : IDisposable
         }
     }
 
-    public void ReportWrite(int count, long bytes)
+    public void ReportWrite(int count)
     {
         Interlocked.Add(ref _writeCount, count);
-        Interlocked.Add(ref _bytesWritten, bytes);
     }
 
     private Table CreateLayout()
@@ -130,21 +128,7 @@ public sealed class ProgressReporter : IDisposable
         var writeSpeed = elapsed > 0 ? _writeCount / elapsed : 0;
         table.AddRow("Writing", $"{_writeCount:N0}", FormatSpeed(writeSpeed));
         
-        // Footer: File size
-        table.AddRow("Dump Size", FormatBytes(Interlocked.Read(ref _bytesWritten)), "");
-
         return table;
-    }
-
-    private static string FormatBytes(long bytes)
-    {
-        return bytes switch
-        {
-            >= 1_073_741_824 => $"{bytes / 1_073_741_824.0:F1} GB",
-            >= 1_048_576 => $"{bytes / 1_048_576.0:F1} MB",
-            >= 1024 => $"{bytes / 1024.0:F1} KB",
-            _ => $"{bytes} B"
-        };
     }
 
     private static string FormatSpeed(double rowsPerSec)
@@ -169,7 +153,7 @@ public sealed class ProgressReporter : IDisposable
 
         if (_uiEnabled)
         {
-            _console.MarkupLine($"[green]✓ Completed in {_stopwatch.Elapsed.TotalSeconds:F1}s | {_writeCount:N0} rows | {FormatBytes(_bytesWritten)}[/]");
+            _console.MarkupLine($"[green]✓ Completed in {_stopwatch.Elapsed.TotalSeconds:F1}s | {_writeCount:N0} rows[/]");
         }
     }
 
@@ -181,6 +165,10 @@ public sealed class ProgressReporter : IDisposable
         {
             return true;
         }
+
+        // If STDOUT is redirected (e.g. piped), we should disable the interactive TUI
+        // to avoid polluting the terminal or confusing the user, even if TUI goes to STDERR.
+        if (Console.IsOutputRedirected) return true;
 
         // Trust Spectre Console detection if configured
         if (!_console.Profile.Capabilities.Interactive) return true;

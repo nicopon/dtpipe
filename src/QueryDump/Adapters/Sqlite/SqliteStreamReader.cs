@@ -1,6 +1,5 @@
 using Microsoft.Data.Sqlite;
 using QueryDump.Core.Abstractions;
-using QueryDump.Cli.Abstractions;
 using QueryDump.Core.Models;
 
 namespace QueryDump.Adapters.Sqlite;
@@ -14,6 +13,7 @@ public class SqliteStreamReader : IStreamReader
     private SqliteConnection? _connection;
     private SqliteCommand? _command;
     private SqliteDataReader? _reader;
+    private readonly SemaphoreSlim _semaphore = new(1, 1);
 
     public IReadOnlyList<ColumnInfo>? Columns { get; private set; }
 
@@ -47,31 +47,40 @@ public class SqliteStreamReader : IStreamReader
         if (_reader is null)
             throw new InvalidOperationException("Call OpenAsync first.");
 
-        var columnCount = _reader.FieldCount;
-        var batch = new object?[batchSize][];
-        var index = 0;
-        
-        while (await _reader.ReadAsync(ct))
+        // Lock to ensure we don't dispose while reading
+        await _semaphore.WaitAsync(ct);
+        try
         {
-            var row = new object?[columnCount];
-            for (var i = 0; i < columnCount; i++)
+            var columnCount = _reader.FieldCount;
+            var batch = new object?[batchSize][];
+            var index = 0;
+            
+            while (await _reader.ReadAsync(ct))
             {
-                row[i] = _reader.IsDBNull(i) ? null : _reader.GetValue(i);
+                var row = new object?[columnCount];
+                for (var i = 0; i < columnCount; i++)
+                {
+                    row[i] = _reader.IsDBNull(i) ? null : _reader.GetValue(i);
+                }
+                
+                batch[index++] = row;
+                
+                if (index >= batchSize)
+                {
+                    yield return new ReadOnlyMemory<object?[]>(batch, 0, index);
+                    batch = new object?[batchSize][];
+                    index = 0;
+                }
             }
             
-            batch[index++] = row;
-            
-            if (index >= batchSize)
+            if (index > 0)
             {
                 yield return new ReadOnlyMemory<object?[]>(batch, 0, index);
-                batch = new object?[batchSize][];
-                index = 0;
             }
         }
-        
-        if (index > 0)
+        finally
         {
-            yield return new ReadOnlyMemory<object?[]>(batch, 0, index);
+            _semaphore.Release();
         }
     }
 
@@ -90,20 +99,29 @@ public class SqliteStreamReader : IStreamReader
 
     public async ValueTask DisposeAsync()
     {
-        if (_reader != null)
+        await _semaphore.WaitAsync();
+        try
         {
-            await _reader.DisposeAsync();
-            _reader = null;
+            if (_reader != null)
+            {
+                await _reader.DisposeAsync();
+                _reader = null;
+            }
+            if (_command != null)
+            {
+                await _command.DisposeAsync();
+                _command = null;
+            }
+            if (_connection != null)
+            {
+                await _connection.DisposeAsync();
+                _connection = null;
+            }
         }
-        if (_command != null)
+        finally
         {
-            await _command.DisposeAsync();
-            _command = null;
-        }
-        if (_connection != null)
-        {
-            await _connection.DisposeAsync();
-            _connection = null;
+            _semaphore.Release();
+            _semaphore.Dispose();
         }
     }
 }

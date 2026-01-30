@@ -1,7 +1,6 @@
 using System.Text;
 using Microsoft.Data.Sqlite;
 using QueryDump.Core.Abstractions;
-using QueryDump.Cli.Abstractions;
 using QueryDump.Core.Models;
 using QueryDump.Core.Options;
 using QueryDump.Core.Helpers;
@@ -17,8 +16,6 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector
     private IReadOnlyList<ColumnInfo>? _columns;
     private string _tableName = "Export";
     private SqliteWriteStrategy _strategy = SqliteWriteStrategy.Append;
-
-    public long BytesWritten { get; private set; }
 
     public SqliteDataWriter(string connectionString, OptionsRegistry registry)
     {
@@ -110,8 +107,6 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector
             pkColumns.Count > 0 ? pkColumns.ToList() : null
         );
     }
-
-
 
     private static int? ExtractMaxLength(string dataType)
     {
@@ -228,9 +223,6 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector
             }
 
             await transaction.CommitAsync(ct);
-
-            // Estimate bytes written (rough approximation)
-            BytesWritten += rows.Count * _columns.Count * 8; // Rough estimate
         }
         catch (Exception ex)
         {

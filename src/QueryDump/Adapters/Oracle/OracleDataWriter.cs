@@ -21,9 +21,6 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
     private OracleCommand? _insertCommand;
     private OracleParameter[]? _insertParameters;
 
-
-    public long BytesWritten => 0;
-
     public OracleDataWriter(string connectionString, OracleWriterOptions options, ILogger<OracleDataWriter> logger)
     {
         _connectionString = connectionString;

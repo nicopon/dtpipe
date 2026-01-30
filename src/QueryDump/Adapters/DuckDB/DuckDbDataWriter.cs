@@ -16,8 +16,6 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
     private readonly DuckDbWriterOptions _options;
     private IReadOnlyList<ColumnInfo>? _columns;
 
-    public long BytesWritten => 0; 
-
     public DuckDbDataWriter(string connectionString, DuckDbWriterOptions options)
     {
         _connectionString = connectionString;

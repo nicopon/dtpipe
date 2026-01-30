@@ -27,23 +27,33 @@ echo -e "${GREEN}QueryDump Build Script${NC}"
 echo "========================"
 
 # Detect platform
-case "$(uname -s)" in
+OS="$(uname -s)"
+ARCH="$(uname -m)"
+RID=""
+EXT=""
+
+case "$OS" in
     Darwin)
-        if [[ "$(uname -m)" == "arm64" ]]; then
+        if [[ "$ARCH" == "arm64" ]]; then
             RID="osx-arm64"
         else
             RID="osx-x64"
         fi
         ;;
     Linux)
-        if [[ "$(uname -m)" == "aarch64" ]]; then
+        if [[ "$ARCH" == "aarch64" ]]; then
             RID="linux-arm64"
         else
             RID="linux-x64"
         fi
         ;;
+    MINGW*|CYGWIN*|MSYS*)
+        # Default to x64 for Windows bash unless explicitly arm64
+        RID="win-x64" 
+        EXT=".exe"
+        ;;
     *)
-        echo "Unsupported platform"
+        echo "Unsupported platform: $OS"
         exit 1
         ;;
 esac
@@ -56,6 +66,13 @@ echo -e "Platform: ${YELLOW}$RID${NC}"
 RELEASE_DIR="./dist/release"
 rm -rf "$RELEASE_DIR"
 mkdir -p "$RELEASE_DIR"
+
+# ============================================================
+# Run Tests
+# ============================================================
+echo ""
+echo -e "${YELLOW}Running Tests...${NC}"
+dotnet test tests/QueryDump.Tests/QueryDump.Tests.csproj -c Release --filter "FullyQualifiedName~.Unit."
 
 echo ""
 echo -e "${YELLOW}Building Release (single-file)...${NC}"
@@ -70,7 +87,9 @@ dotnet publish src/QueryDump/QueryDump.csproj -c Release \
     -o "$RELEASE_DIR"
 
 # Rename to lowercase (standard unix convention)
-mv "$RELEASE_DIR/QueryDump" "$RELEASE_DIR/querydump"
+if [ -f "$RELEASE_DIR/QueryDump$EXT" ]; then
+    mv "$RELEASE_DIR/QueryDump$EXT" "$RELEASE_DIR/querydump$EXT"
+fi
 
 # ============================================================
 # Summary
@@ -79,7 +98,7 @@ echo ""
 echo -e "${GREEN}Build complete!${NC}"
 echo ""
 echo "Release (single-file):"
-ls -lh "$RELEASE_DIR/querydump"
+ls -lh "$RELEASE_DIR/querydump$EXT"
 echo ""
 echo -e "${YELLOW}Usage:${NC}"
-echo "  ./dist/release/querydump --help"
+echo "  ./dist/release/querydump$EXT --help"

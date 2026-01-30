@@ -20,9 +20,4 @@ public interface IDataWriter : IAsyncDisposable
     /// Complete writing and flush all buffers.
     /// </summary>
     ValueTask CompleteAsync(CancellationToken ct = default);
-
-    /// <summary>
-    /// Current file size in bytes.
-    /// </summary>
-    long BytesWritten { get; }
 }

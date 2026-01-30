@@ -4,12 +4,10 @@ using Microsoft.Extensions.Logging;
 using QueryDump.Configuration;
 using QueryDump.Core.Abstractions;
 using QueryDump.Cli.Abstractions;
-using QueryDump.Core.Models;
 using QueryDump.Core.Options;
 using QueryDump.Core.Pipelines;
 using QueryDump.Core.Validation;
 using Serilog;
-using QueryDump.Cli.Infrastructure;
 using Spectre.Console;
 
 namespace QueryDump.Cli;
@@ -43,13 +41,20 @@ public class JobService
 
     public (RootCommand, Action) Build()
     {
-        // Core Options
         var inputOption = new Option<string?>("--input") { Description = "Input connection string or file path" };
+        inputOption.Aliases.Add("-i");
+        
         var queryOption = new Option<string?>("--query") { Description = "SQL query to execute (SELECT only)" };
+        queryOption.Aliases.Add("-q");
+
         var outputOption = new Option<string?>("--output") { Description = "Output file path or connection string" };
+        outputOption.Aliases.Add("-o");
+        
         var connectionTimeoutOption = new Option<int>("--connection-timeout") { Description = "Connection timeout in seconds", DefaultValueFactory = _ => 10 };
         var queryTimeoutOption = new Option<int>("--query-timeout") { Description = "Query timeout in seconds (0 = no timeout)", DefaultValueFactory = _ => 0 };
+        
         var batchSizeOption = new Option<int>("--batch-size") { Description = "Rows per output batch", DefaultValueFactory = _ => 50_000 };
+        batchSizeOption.Aliases.Add("-b");
         var unsafeQueryOption = new Option<bool>("--unsafe-query") { Description = "Bypass SQL query validation (allows DDL/DML - use with caution!)", DefaultValueFactory = _ => false };
         var dryRunOption = new Option<int>("--dry-run") { Description = "Dry-run mode: display pipeline trace analysis (N = sample count, default 1)", DefaultValueFactory = _ => 0, Arity = ArgumentArity.ZeroOrOne };
         var limitOption = new Option<int>("--limit") { Description = "Maximum rows to export (0 = unlimited)", DefaultValueFactory = _ => 0 };
@@ -343,15 +348,25 @@ public class JobService
     /// </summary>
     private static (T Factory, string CleanedString) ResolveFactory<T>(IEnumerable<T> factories, string rawString, string typeName) where T : IDataFactory
     {
+        rawString = rawString.Trim();
+
         // 1. Deterministic Prefix Check
         foreach (var factory in factories)
         {
             var prefix = factory.ProviderName + ":";
+            
+            // Check for "prefix:" behavior (standard)
             if (rawString.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             {
-                // Strip prefix
                 var cleaned = rawString.Substring(prefix.Length).Trim();
                 return (factory, cleaned);
+            }
+
+            // Check for "prefix" behavior (e.g. "csv" or "parquet" for streams)
+            // This allows syntax like: querydump -i csv -o parquet
+            if (rawString.Equals(factory.ProviderName, StringComparison.OrdinalIgnoreCase))
+            {
+                return (factory, "");
             }
         }
 
