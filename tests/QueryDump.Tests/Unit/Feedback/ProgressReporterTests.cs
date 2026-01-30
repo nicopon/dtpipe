@@ -26,7 +26,7 @@ public class ProgressReporterTests
                 using var reporter = new ProgressReporter(new Mock<IAnsiConsole>().Object, enabled: true, transformers: null);
                 // perform some activity reports
                 reporter.ReportRead(1);
-                reporter.ReportWrite(1, 0);
+                reporter.ReportWrite(1);
                 reporter.Complete();
             }
             finally

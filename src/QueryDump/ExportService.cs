@@ -190,8 +190,8 @@ public class ExportService
 
             var elapsed = DateTime.UtcNow - startTime;
             var rowsPerSecond = elapsed.TotalSeconds > 0 ? totalRows / elapsed.TotalSeconds : 0;
-            _logger.LogInformation("Export completed in {Elapsed}. Written {Rows} rows ({Speed:F1} rows/s). Total {Bytes} bytes.", 
-                elapsed, totalRows, rowsPerSecond, writer.BytesWritten);
+            _logger.LogInformation("Export completed in {Elapsed}. Written {Rows} rows ({Speed:F1} rows/s).", 
+                elapsed, totalRows, rowsPerSecond);
         }
         catch (Exception ex)
         {
@@ -248,8 +248,7 @@ public class ExportService
                     // Check limit and cancel if reached
                     if (limit > 0 && rowCount >= limit)
                     {
-                        logger.LogInformation("Limit of {Limit} rows reached. Cancelling.", limit);
-                        await linkedCts.CancelAsync();
+                        logger.LogInformation("Limit of {Limit} rows reached. Stopping producer.", limit);
                         return;
                     }
                 }
@@ -312,7 +311,6 @@ public class ExportService
     {
         logger.LogDebug("Consumer/Writer started");
         var buffer = new List<object?[]>(batchSize);
-        long previousBytes = 0;
 
         async Task WriteBufferAsync()
         {
@@ -322,12 +320,10 @@ public class ExportService
             await writer.WriteBatchAsync(buffer, ct);
             logger.LogDebug("Batch written");
 
-            var currentBytes = writer.BytesWritten;
-            var bytesDelta = currentBytes - previousBytes;
-            previousBytes = currentBytes;
+            logger.LogDebug("Batch written");
 
             updateRowCount(buffer.Count);
-            progress.ReportWrite(buffer.Count, bytesDelta);
+            progress.ReportWrite(buffer.Count);
 
             // Trace memory usage
             LogMemoryUsage(logger);

@@ -36,8 +36,6 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvWriterOptio
     private int _rowsInBuffer;
     private const int FlushThreshold = 1000; // Flush every N rows
 
-    public long BytesWritten => _outputStream?.Position ?? 0;
-
     public CsvDataWriter(string outputPath) : this(outputPath, new CsvWriterOptions())
     {
     }

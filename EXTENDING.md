@@ -5,15 +5,15 @@ This quick guide explains where and how to add a new *adapter* (reader/writer) o
 ## Recommended locations
 - Adapters: `src/QueryDump/Adapters/<Provider>/`
 - Transformers: `src/QueryDump/Transformers/<Name>/`
-- Documentation: `docs/EXTENDING.md` (this file)
+- Documentation: `EXTENDING.md` (this file)
 
 ## Adding an Adapter (Reader or Writer)
 1. Create a folder `src/QueryDump/Adapters/<YourProvider>/`.
 2. Add an options class (e.g. `MyProviderOptions.cs`) for provider-specific settings.
 3. Implement the appropriate interface:
-   - Reader: `IStreamReader` (key methods: `OpenAsync`, `ReadBatchesAsync`, `DisposeAsync`; see `OracleStreamReader.cs`).
+   - Reader: `IStreamReader` (key methods: `OpenAsync`, `ReadBatchesAsync` returning `IAsyncEnumerable`, `DisposeAsync`).
    - Writer: `IDataWriter` (key methods: `InitializeAsync`, `WriteBatchAsync`, `CompleteAsync`, `DisposeAsync`).
-4. Add a `Descriptor` implementing `IProviderDescriptor<T>` (e.g. `MyProviderReaderDescriptor.cs` / `MyProviderWriterDescriptor.cs`) — existing descriptors show the pattern.
+4. Add a `Descriptor` implementing `IProviderDescriptor<T>` (e.g. `MyProviderReaderDescriptor.cs`).
 5. (Optional) Add a `ConnectionHelper` / `TypeMapper` if your driver requires specific conversions.
 6. Register the provider in DI: open `src/QueryDump/Program.cs` and call `RegisterReader<MyProviderReaderDescriptor>(services);` or `RegisterWriter<MyProviderWriterDescriptor>(services);`.
 7. Add unit/integration tests under `tests/QueryDump.Tests/Unit` or `tests/QueryDump.Tests/Integration`. Provide a small dataset or docker-compose if needed (see `tests/infra`).
@@ -34,17 +34,16 @@ public class MyProviderReaderDescriptor : IProviderDescriptor<IStreamReader>
     public string Id => "myprovider";
 
     // How to create the Reader instance
-    public IStreamReader Create(IServiceProvider sp, JobConfig config)
+    public IStreamReader Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
     {
-        // 1. Retrieve options bound by the CLI/Job parser
-        var options = sp.GetRequiredService<OptionsRegistry>().Get<MyProviderOptions>();
+        var myOptions = (MyProviderOptions)options;
         
-        // 2. Validate options if necessary (e.g. ConnectionString)
-        if (string.IsNullOrEmpty(options.ConnectionString))
+        // Validate options if necessary
+        if (string.IsNullOrEmpty(myOptions.ConnectionString))
             throw new InvalidOperationException("Missing connection string for MyProvider.");
 
-        // 3. Create the reader
-        return new MyProviderReader(options, config.BatchSize);
+        // Create the reader
+        return new MyProviderReader(myOptions, context.BatchSize);
     }
 
     // Register your options so the CLI knows them
@@ -72,7 +71,7 @@ public class MyProviderReaderDescriptor : IProviderDescriptor<IStreamReader>
    }
    ```
 3. Implement `IDataTransformer` (or follow existing classes):
-   - `Task<IReadOnlyList<Column>> InitializeAsync(IReadOnlyList<Column> schema, CancellationToken ct)` — prepare the target schema.
+   - `ValueTask<IReadOnlyList<ColumnInfo>> InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct)` — prepare the target schema.
    - `object?[] Transform(object?[] row)` — transform a single row (should be fast and avoid excessive allocations when possible).
 4. Provide an `IDataTransformerFactory` (e.g. `YourTransformerFactory`) that reads options and creates transformer instances.
 5. Register the factory in DI: in `Program.cs` add `services.AddSingleton<IDataTransformerFactory, YourTransformerFactory>();`.
@@ -85,9 +84,10 @@ Minimal transformer skeleton (simplified):
 ```csharp
 public class MyTransformer : IDataTransformer
 {
-    public Task<IReadOnlyList<Column>> InitializeAsync(IReadOnlyList<Column> schema, CancellationToken ct)
+    public ValueTask<IReadOnlyList<ColumnInfo>> InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct)
     {
         // return modified schema
+        return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
     }
 
     public object?[] Transform(object?[] row)
@@ -129,6 +129,3 @@ QueryDump uses a live terminal UI for progress reporting. In CI or non-interacti
 - Follow naming conventions and the Descriptor/Factory pattern.
 - Add tests and a minimal usage example.
 - Document options exposed in the `Options` classes and the README if noteworthy.
-
----
-File created: `docs/EXTENDING.md` — edit if you want more code examples or a template integration test.

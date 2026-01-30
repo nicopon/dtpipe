@@ -14,22 +14,10 @@ public sealed class ChecksumDataWriter : IDataWriter, IRequiresOptions<ChecksumW
     private readonly ILogger _logger;
     private readonly StringBuilder _buffer = new();
     private readonly SHA256 _hasher = SHA256.Create();
-    // Using a simple XOR incremental hash or accumulating text then hashing at end? 
-    // For large datasets, we must update incrementally.
-    // Approach: Hash each row string representation, then XOR or Add to global state.
-    // Better: Feed row bytes directly into incremental hash.
-    // However, .NET standard incremental hash requires collecting bytes.
-    // Let's stick to: Hash(RowString) -> XOR/Add to Accumulator? 
-    // Or: Just keep updating one IncrementalHash instance if available, or just chain hashes.
-    
-    // Simple robust approach for "Chain Validation":
-    // running_hash = SHA256(running_hash + SHA256(current_row))
-    // This is order-dependent and content-dependent.
-    
+    // Uses incremental hash chaining to ensure both data integrity and row order.
+    // Computation: running_hash = SHA256(running_hash + SHA256(current_row))
     private byte[] _currentHash = new byte[32]; // Start with zeroed
     
-    public long BytesWritten { get; private set; }
-
     public ChecksumDataWriter(string connectionString, ChecksumWriterOptions options, ILogger<ChecksumDataWriter> logger)
     {
         _options = options;
@@ -75,7 +63,6 @@ public sealed class ChecksumDataWriter : IDataWriter, IRequiresOptions<ChecksumW
 
             var rowString = _buffer.ToString();
             var rowBytes = Encoding.UTF8.GetBytes(rowString);
-            BytesWritten += rowBytes.Length;
             
             // Hash current row
             var rowHash = SHA256.HashData(rowBytes);
