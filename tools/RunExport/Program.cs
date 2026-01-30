@@ -1,15 +1,15 @@
 using System;
 using Microsoft.Extensions.DependencyInjection;
-using QueryDump.Configuration;
-using QueryDump.Core.Options;
-using QueryDump.Adapters.DuckDB;
-using QueryDump.Adapters.Csv;
-using QueryDump.Transformers.Fake;
-using QueryDump.Core.Abstractions;
-using QueryDump.Cli.Infrastructure;
-using QueryDump.Cli.Abstractions;
-using QueryDump.Feedback;
-using QueryDump;
+using DtPipe.Configuration;
+using DtPipe.Core.Options;
+using DtPipe.Adapters.DuckDB;
+using DtPipe.Adapters.Csv;
+using DtPipe.Transformers.Fake;
+using DtPipe.Core.Abstractions;
+using DtPipe.Cli.Infrastructure;
+using DtPipe.Cli.Abstractions;
+using DtPipe.Feedback;
+using DtPipe;
 using Spectre.Console;
 using System.IO;
 using System.Threading.Tasks;
@@ -49,7 +49,7 @@ class Program
                 new DuckDbReaderDescriptor(), sp.GetRequiredService<OptionsRegistry>(), sp));
 
             services.AddSingleton<IDataWriterFactory>(sp => new CliDataWriterFactory(
-                new QueryDump.Adapters.Csv.CsvWriterDescriptor(), sp.GetRequiredService<OptionsRegistry>(), sp));
+                new DtPipe.Adapters.Csv.CsvWriterDescriptor(), sp.GetRequiredService<OptionsRegistry>(), sp));
 
             services.AddSingleton<IDataTransformerFactory, FakeDataTransformerFactory>();
             services.AddSingleton<ExportService>();
@@ -58,7 +58,7 @@ class Program
             var sp = services.BuildServiceProvider();
             var exportService = sp.GetRequiredService<ExportService>();
 
-            var options = new QueryDump.Configuration.DumpOptions
+            var options = new DtPipe.Configuration.DumpOptions
             {
                 Provider = "duckdb",
                 ConnectionString = connStr,
@@ -68,8 +68,8 @@ class Program
             };
 
             var transformerFactories = sp.GetServices<IDataTransformerFactory>().ToList();
-            var pipelineBuilder = new QueryDump.Core.Pipelines.TransformerPipelineBuilder(transformerFactories);
-            var pipeline = pipelineBuilder.Build(new[] { "querydump", "--fake", "Name:name.firstname" });
+            var pipelineBuilder = new DtPipe.Core.Pipelines.TransformerPipelineBuilder(transformerFactories);
+            var pipeline = pipelineBuilder.Build(new[] { "dtpipe", "--fake", "Name:name.firstname" });
 
             var readerFactory = sp.GetRequiredService<IStreamReaderFactory>();
             var writerFactory = sp.GetRequiredService<IDataWriterFactory>();

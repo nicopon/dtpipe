@@ -1,6 +1,6 @@
-# QueryDump Cookbook 🍳
+# DtPipe Cookbook 🍳
 
-This document contains recipes and examples for using QueryDump to solve common data export and transformation problems.
+This document contains recipes and examples for using DtPipe to solve common data export and transformation problems.
 
 **Table of Contents**
 - [Basic Usage](#basic-usage)
@@ -8,6 +8,7 @@ This document contains recipes and examples for using QueryDump to solve common 
 - [Common Transformations](#common-transformations)
 - [Advanced Pipelines](#advanced-pipelines)
 - [Standard Streams & Linux Pipes](#standard-streams--linux-pipes)
+- [Database Import & Migration](#database-import--migration)
 - [Production Automation (YAML)](#production-automation-yaml)
 
 ---
@@ -19,28 +20,28 @@ Export a table from a database (detects `duck`, `sqlite`, `pg`, `ora`, `mssql`) 
 
 ```bash
 # Export from PostgreSQL to Parquet
-./dist/release/querydump -i "pg:Host=localhost;Database=prod;Username=postgres" -q "SELECT * FROM users" -o users.parquet
+./dist/release/dtpipe -i "pg:Host=localhost;Database=prod;Username=postgres" -q "SELECT * FROM users" -o users.parquet
 ```
 
 ### Export to CSV
 Simply change the output extension to `.csv`.
 
 ```bash
-./dist/release/querydump -i "pg:Host=localhost;Database=prod;Username=postgres" -q "SELECT * FROM users" -o users.csv
+./dist/release/dtpipe -i "pg:Host=localhost;Database=prod;Username=postgres" -q "SELECT * FROM users" -o users.csv
 ```
 
 ### Dry Run (Preview)
 Use `--dry-run [LIMIT]` to preview data without writing a full file.
 
 ```bash
-./dist/release/querydump -i "pg:Host=localhost;Database=prod;Username=postgres" -q "SELECT * FROM users" --dry-run 100
+./dist/release/dtpipe -i "pg:Host=localhost;Database=prod;Username=postgres" -q "SELECT * FROM users" --dry-run 100
 ```
 
 ---
 
 ## Anonymization (The "Fakers")
  
-QueryDump maps your configuration directly to [Bogus Datasets](https://github.com/bchavez/Bogus?tab=readme-ov-file#locales).
+DtPipe maps your configuration directly to [Bogus Datasets](https://github.com/bchavez/Bogus?tab=readme-ov-file#locales).
  
 **Resources:**
 - [Available Locales](https://github.com/bchavez/Bogus?tab=readme-ov-file#locales)
@@ -53,7 +54,7 @@ The syntax is `--fake "{Column}:{Dataset}.{Method}"`, where `Dataset.Method` cor
 Replace names and emails with culturally appropriate fake data.
  
 ```bash
-./dist/release/querydump ... \
+./dist/release/dtpipe ... \
   --fake "FirstName:name.firstName" \
   --fake "LastName:name.lastName" \
   --fake "Email:internet.email" \
@@ -64,13 +65,13 @@ Replace names and emails with culturally appropriate fake data.
 Generate other types of data using the same mechanism.
  
 ```bash
-./dist/release/querydump ... \
+./dist/release/dtpipe ... \
   --fake "BirthDate:date.past" \
   --fake "Score:random.number"
 ```
  
 ### 2. Deterministic Faking
-QueryDump provides a special **Deterministic Mode** that guarantees referential integrity across tables.
+DtPipe provides a special **Deterministic Mode** that guarantees referential integrity across tables.
  
 Unlike standard seeding (which restarts the sequence), this mode uses a **stable hash** of a specific column (e.g., `UserId`) to generate the fake value.
  
@@ -78,7 +79,7 @@ Unlike standard seeding (which restarts the sequence), this mode uses a **stable
 - This allows you to anonymize `Users` and `Orders` tables separately while maintaining the foreign key relationships (provided they both use the same fake seed).
  
 ```bash
-./dist/release/querydump ... \
+./dist/release/dtpipe ... \
   --fake "Name:name.fullName" \
   --fake-seed-column "UserId"
 ```
@@ -94,7 +95,7 @@ Partially hide data instead of fully replacing it.
 
 ```bash
 # Turns "555-0199" into "555-****"
-./dist/release/querydump ... --mask "Phone:###-****"
+./dist/release/dtpipe ... --mask "Phone:###-****"
 
 # Masking patterns:
 # # - Keep original character
@@ -106,7 +107,7 @@ Hardcode values or erase sensitive columns.
 
 ```bash
 # Force "Status" to "Archived" and "Notes" to NULL
-./dist/release/querydump ... \
+./dist/release/dtpipe ... \
   --overwrite "Status:Archived" \
   --null "Notes"
 ```
@@ -116,7 +117,7 @@ Combine columns using [.NET Composite Formatting](https://learn.microsoft.com/en
 
 ```bash
 # Create "DisplayName" from First and Last names
-./dist/release/querydump ... --format "DisplayName:{FirstName} {LastName}"
+./dist/release/dtpipe ... --format "DisplayName:{FirstName} {LastName}"
 ```
 
 ---
@@ -126,7 +127,7 @@ Combine columns using [.NET Composite Formatting](https://learn.microsoft.com/en
 Chain multiple transformers to clean and shape your data.
 
 ### Pipeline Construction
-QueryDump builds the pipeline by scanning your CLI arguments from left to right.
+DtPipe builds the pipeline by scanning your CLI arguments from left to right.
 Crucially, **consecutive** arguments of the same type (e.g., multiple `--fake` flags) are grouped into a single transformation step.
 
 ```mermaid
@@ -159,7 +160,7 @@ This means:
 ```bash
 # 1. First, anonymize the Name
 # 2. Then, use the NEW (anonymized) name to format the greeting
-./dist/release/querydump ... \
+./dist/release/dtpipe ... \
   --fake "Name:name.fullName" \
   --format "Greeting:Hello, {Name}!"
 ```
@@ -178,10 +179,10 @@ Use `--script` for complex logic.
 
 ```bash
 # Simple Expression (Implicit Return)
-./dist/release/querydump ... --script "IsAdult:row.Age > 18"
+./dist/release/dtpipe ... --script "IsAdult:row.Age > 18"
 
 # Complex Logic (Explicit Return)
-./dist/release/querydump ... \
+./dist/release/dtpipe ... \
    --script "Category:if (row.Age < 18) return 'Minor'; else return 'Adult';"
 ```
 
@@ -189,21 +190,21 @@ Use `--script` for complex logic.
 
 ## Standard Streams & Linux Pipes
 
-Integrate QueryDump with standard Unix tools using `stdin`/`stdout`.
+Integrate DtPipe with standard Unix tools using `stdin`/`stdout`.
 
 ### Zipped Parquet Output
 Read a CSV natively and compress the output on-the-fly using `gzip`.
 
 ```bash
-./dist/release/querydump -i "csv:large_data.csv" -o parquet | gzip > large_data.parquet.gz
+./dist/release/dtpipe -i "csv:large_data.csv" -o parquet | gzip > large_data.parquet.gz
 ```
 
 ### Filter and Anonymize in a Pipe
-Use another tool (like DuckDB or `jq`) to filter, then QueryDump to anonymize.
+Use another tool (like DuckDB or `jq`) to filter, then DtPipe to anonymize.
 
 ```bash
 duckdb -csv -c "SELECT * FROM 'source.csv' WHERE active=true" | \
-  ./querydump -i csv \
+  ./dtpipe -i csv \
   --fake "Name:name.fullName" \
   -o parquet:clean_data.parquet
 ```
@@ -212,7 +213,50 @@ duckdb -csv -c "SELECT * FROM 'source.csv' WHERE active=true" | \
 
 ---
 
-## Production Automation (YAML)
+---
+ 
+ ## Database Import & Migration
+ 
+ DtPipe can write to DuckDB, SQLite, PostgreSQL, Oracle, and SQL Server using 4 standardized strategies.
+ 
+ ### The 4 Write Strategies
+ 
+ Control how DtPipe handles existing tables using the `--[provider]-strategy` flag.
+ 
+ | Strategy | Behavior | Use Case |
+ |:--- |:--- |:--- |
+ | **Append** (Default) | Inserts rows into the existing table. | Log shipping, daily increments. |
+ | **Truncate** | Empties the table via native `TRUNCATE TABLE`. *(Not available for SQLite)* | Prudent refresh (preserves schema & indexes). |
+ | **DeleteThenInsert** | Deletes rows (via `DELETE FROM`) then inserts. | Use when TRUNCATE is unavailable/restricted. |
+ | **Recreate** | Drops the table (`DROP IF EXISTS`) and recreates it. | Full refresh including schema updates. |
+ 
+ ### Examples
+ 
+ #### 1. Load Parquet into PostgreSQL (Recreate)
+ Good for full reloads where the schema might have changed.
+ 
+ ```bash
+ ./dist/release/dtpipe \
+   -i data.parquet \
+   -o "pg:Host=localhost;Database=prod" \
+   --pg-table "public.imported_data" \
+   --pg-strategy Recreate
+ ```
+ 
+ #### 2. Append to Oracle Table
+ Efficiently adds new rows to an existing table.
+ 
+ ```bash
+ ./dist/release/dtpipe \
+   -i "new_sales.csv" \
+   -o "ora:Data Source=PROD;..." \
+   --ora-table "SALES_DATA" \
+   --ora-strategy Append
+ ```
+ 
+ ---
+ 
+ ## Production Automation (YAML)
 
 For repeated tasks, define your job in a YAML file.
 
@@ -220,19 +264,19 @@ For repeated tasks, define your job in a YAML file.
 Configure your export in the CLI once, then save it.
 
 ```bash
-./dist/release/querydump -i "ora:..." -q "SELECT..." --fake "..." --export-job nightly_export.yaml
+./dist/release/dtpipe -i "ora:..." -q "SELECT..." --fake "..." --export-job nightly_export.yaml
 ```
 
 ### 2. Run the Job
 ```bash
-./dist/release/querydump --job nightly_export.yaml
+./dist/release/dtpipe --job nightly_export.yaml
 ```
 
 ### 3. Override at Runtime
 You can override specific settings from the YAML file via CLI flags (e.g., for ad-hoc limits).
 
 ```bash
-./dist/release/querydump --job nightly_export.yaml --limit 50
+./dist/release/dtpipe --job nightly_export.yaml --limit 50
 ```
 
 ### Example YAML

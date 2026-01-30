@@ -1,10 +1,10 @@
-# QueryDump
+# DtPipe
 
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://github.com/codespaces/new?repo=nicopon/QueryDump)
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://github.com/codespaces/new?repo=nicopon/DtPipe)
 
-**High-performance CLI tool for database exports, anonymization, and transformation.**
+**A simple, self-contained CLI for performance-focused data streaming & anonymization.**
 
-QueryDump streams data from any source (SQL, CSV, Parquet) to any destination, applying intelligent transformations on the fly. It is designed for CI/CD pipelines, test data generation, and large dataset migration.
+DtPipe streams data from any source (SQL, CSV, Parquet) to any destination, applying intelligent transformations on the fly. It is designed for CI/CD pipelines, test data generation, and large dataset migration.
 
 ---
 
@@ -35,21 +35,21 @@ QueryDump streams data from any source (SQL, CSV, Parquet) to any destination, a
 ./build.ps1
 ```
 
-Binary created at: `./dist/release/querydump`
+Binary created at: `./dist/release/dtpipe`
 
-> **Note:** The pre-compiled binaries in [GitHub Releases](https://github.com/nicopon/QueryDump/releases) are **self-contained**. You do NOT need to install .NET to run them.
+> **Note:** The pre-compiled binaries in [GitHub Releases](https://github.com/nicopon/DtPipe/releases) are **self-contained**. You do NOT need to install .NET to run them.
 
 ## Quick Reference
 
 ### CLI Usage
 
 ```bash
-./querydump --input [SOURCE] --query [SQL] --output [DEST] [OPTIONS]
+./dtpipe --input [SOURCE] --query [SQL] --output [DEST] [OPTIONS]
 ```
 
 ### 1. Connection Strings (Input & Output)
 
-QueryDump auto-detects providers from file extensions (`.csv`, `.parquet`, `.db`, `.sqlite`) or explicit prefixes.
+DtPipe auto-detects providers from file extensions (`.csv`, `.parquet`, `.db`, `.sqlite`) or explicit prefixes.
 
 | Provider | Prefix / Format | Example |
 |:---|:---|:---|
@@ -118,11 +118,13 @@ Use `--fake "Col:Generator"` to replace sensitive data.
 #### Database Writer Options
 | Flag | Description |
 |:---|:---|
-| `--ora-strategy` | `Append`, `Truncate`, `DeleteThenInsert`. |
+| `--ora-strategy` | `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`. |
 | `--ora-insert-mode` | `Standard`, `Append` (Direct-Path), `Bulk`. |
-| `--pg-strategy` | `Append`, `Truncate`, `DeleteThenInsert`. |
+| `--pg-strategy` | `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`. |
 | `--pg-insert-mode` | `Standard`, `Bulk` (Binary Copy). |
-| `--mssql-strategy` | `Append`, `Truncate`, `DeleteThenInsert`. |
+| `--mssql-strategy` | `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`. |
+| `--duck-strategy` | `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`. |
+| `--sqlite-strategy` | `Append`, `DeleteThenInsert`, `Recreate`. |
 
 ---
 

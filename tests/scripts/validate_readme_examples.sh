@@ -1,9 +1,9 @@
 #!/bin/bash
 
-echo "QueryDump README Examples Validation"
+echo "DtPipe README Examples Validation"
 echo "===================================="
 
-APP="./dist/release/querydump"
+APP="./dist/release/dtpipe"
 
 # Ensure app is built
 if [ ! -f "$APP" ]; then
@@ -16,7 +16,7 @@ function run_test() {
     local cmd=$2
     echo -n "Testing: $title... "
     
-    local TMP_DIR="/tmp/querydump_test"
+    local TMP_DIR="/tmp/dtpipe_test"
     mkdir -p "$TMP_DIR"
     
     local final_cmd=$(echo "$cmd" | sed "s|users.parquet|$TMP_DIR/users.parquet|g" \
@@ -29,7 +29,7 @@ function run_test() {
     if [[ "$final_cmd" == *"input"* ]]; then
         output=$(eval "$final_cmd" 2>&1)
     else
-        output=$(eval "$APP --input \"duckdb::memory:\" --query \"SELECT 'Alice' as FIRSTNAME, 'Smith' as LASTNAME, 30 as AGE, '0612345678' as PHONE, 'TEMP' as STATUS, 'JS' as FULL_NAME, 'EMAIL' as EMAIL, 'INTERNAL_ID' as INTERNAL_ID\" --output \"$TMP_DIR/test.csv\" $final_cmd --dry-run" 2>&1)
+        output=$(eval "$APP --input \"duck::memory:\" --query \"SELECT 'Alice' as FIRSTNAME, 'Smith' as LASTNAME, 30 as AGE, '0612345678' as PHONE, 'TEMP' as STATUS, 'JS' as FULL_NAME, 'EMAIL' as EMAIL, 'INTERNAL_ID' as INTERNAL_ID\" --output \"$TMP_DIR/test.csv\" $final_cmd --dry-run" 2>&1)
     fi
 
     if [ $? -eq 0 ]; then
@@ -45,11 +45,11 @@ function run_test() {
 }
 
 # 1. Quick Start
-run_test "Quick Start" "$APP --input \"duckdb:source.db\" --query \"SELECT 1\" --output \"users.parquet\""
+run_test "Quick Start" "$APP --input \"duck:source.db\" --query \"SELECT 1\" --output \"users.parquet\""
 
 # 2. Iterate Workflow Examples
-run_test "Iterative Workflow (Dry Run)" "$APP --input \"duckdb::memory:\" --query \"SELECT 1\" --output \"users.csv\" --sample-rate 0.1 --dry-run"
-run_test "Iterative Workflow (Export)" "$APP --input \"duckdb::memory:\" --query \"SELECT 1\" --output \"users.parquet\" --fake \"NAME:name.fullName\" --export-job /tmp/job.yaml"
+run_test "Iterative Workflow (Dry Run)" "$APP --input \"duck::memory:\" --query \"SELECT 1\" --output \"users.csv\" --sample-rate 0.1 --dry-run"
+run_test "Iterative Workflow (Export)" "$APP --input \"duck::memory:\" --query \"SELECT 1\" --output \"users.parquet\" --fake \"NAME:name.fullName\" --export-job /tmp/job.yaml"
 
 # 3. Transformer Basics
 run_test "Nullify" "--null \"INTERNAL_ID\""
@@ -71,7 +71,7 @@ run_test "Drop" "--drop \"INTERNAL_ID\""
 
 # 7. YAML Validation
 cat <<EOF > /tmp/readme_test_job.yaml
-input: "duckdb::memory:"
+input: "duck::memory:"
 query: "SELECT 'Alice' as name, 'test@example.com' as email, '0612345678' as phone, 1 as id"
 output: "/tmp/customers_anon.parquet"
 transformers:
@@ -98,4 +98,4 @@ fi
 
 echo "===================================="
 echo "All README examples validated successfully!"
-rm -rf /tmp/querydump_test
+rm -rf /tmp/dtpipe_test
