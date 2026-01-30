@@ -69,6 +69,7 @@ jobs:
       - name: Prepare artifact (Windows)
         if: contains(matrix.platform, 'windows')
         run: |
+          if [ -f "./dist/release/DtPipe.exe" ]; then mv ./dist/release/DtPipe.exe ./dist/release/dtpipe.exe; fi
           mv ./dist/release/dtpipe.exe ./dist/release/dtpipe.exe
 
       - name: Create archive (Unix)
