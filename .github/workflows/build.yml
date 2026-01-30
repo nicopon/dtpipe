@@ -68,6 +68,7 @@ jobs:
       - name: Prepare artifact (Unix)
         if: "!contains(matrix.platform, 'windows')"
         run: |
+          if [ -f "./dist/release/DtPipe" ]; then mv ./dist/release/DtPipe ./dist/release/dtpipe; fi
           mv ./dist/release/dtpipe ./dist/release/${{ matrix.artifact }}
           chmod +x ./dist/release/${{ matrix.artifact }}
 

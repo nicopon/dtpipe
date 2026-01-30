@@ -63,7 +63,7 @@ jobs:
       - name: Prepare artifact (Unix)
         if: "!contains(matrix.platform, 'windows')"
         run: |
-          mv ./dist/release/dtpipe ./dist/release/dtpipe
+          if [ -f "./dist/release/DtPipe" ]; then mv ./dist/release/DtPipe ./dist/release/dtpipe; fi
           chmod +x ./dist/release/dtpipe
 
       - name: Prepare artifact (Windows)
