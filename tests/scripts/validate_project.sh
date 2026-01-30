@@ -7,13 +7,13 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 OUTPUT_DIR="$SCRIPT_DIR/output"
 
 # Path to binary (Release build)
-QUERYDUMP="$PROJECT_ROOT/dist/release/querydump"
+DTPIPE="$PROJECT_ROOT/dist/release/dtpipe"
 
 # Source common helpers
 source "$SCRIPT_DIR/common.sh"
 
 echo "========================================"
-echo "    QueryDump Project Transformer Testing"
+echo "    DtPipe Project Transformer Testing"
 echo "========================================"
 
 # Always Build Release
@@ -21,8 +21,8 @@ echo "🔨 Building Release..."
 "$PROJECT_ROOT/build.sh" > /dev/null
 
 # Check if binary exists
-if [ ! -f "$QUERYDUMP" ]; then
-    echo "❌ Error: Build failed or binary not found at $QUERYDUMP"
+if [ ! -f "$DTPIPE" ]; then
+    echo "❌ Error: Build failed or binary not found at $DTPIPE"
     exit 1
 fi
 
@@ -39,7 +39,7 @@ echo "----------------------------------------"
 # note: sample generation can be direct, no need to test yaml for setup phase usually, 
 # but lets stick to consistent usage or just keep setup direct.
 # Let's keep setup direct to avoid complexity if yaml export fails on sample generation (unlikely but simpler).
-$QUERYDUMP --input "sample:10;Id=int;Name=string;Amount=double;Secret=string" \
+$DTPIPE --input "sample:10;Id=int;Name=string;Amount=double;Secret=string" \
            --query "SELECT * FROM dummy" \
            --output "$OUTPUT_DIR/ref_project.csv"
 

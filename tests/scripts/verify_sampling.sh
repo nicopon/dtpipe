@@ -5,14 +5,14 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # Path to binary (Release build)
-QUERYDUMP="$PROJECT_ROOT/dist/release/querydump"
+DTPIPE="$PROJECT_ROOT/dist/release/dtpipe"
 
 source "$SCRIPT_DIR/common.sh" # Load helpers
 OUTPUT_DIR="$SCRIPT_DIR/output"
 mkdir -p "$OUTPUT_DIR"
 
 echo "========================================"
-echo "    QueryDump Sampling Verification"
+echo "    DtPipe Sampling Verification"
 echo "========================================"
 
 # Always build

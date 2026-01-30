@@ -1,6 +1,6 @@
 # Integration Validation Scripts
 
-This directory contains a suite of Bash scripts used to validate the QueryDump functionality from end to end. These tests go beyond unit testing by verifying the actual binary execution, file system interaction, and configuration persistence.
+This directory contains a suite of Bash scripts used to validate the DtPipe functionality from end to end. These tests go beyond unit testing by verifying the actual binary execution, file system interaction, and configuration persistence.
 
 ## General Usage
 
@@ -15,7 +15,7 @@ All scripts should be executed from the project root or the `tests/scripts` dire
 | Script | Main Purpose | Dependencies |
 |--------|--------------|--------------|
 | **`common.sh`** | **Utility**. Contains shared functions, notably `run_via_yaml` which exports config to YAML before replaying it (CLI/YAML cross-validation). Not executed directly. | - |
-| **`validate_drivers_docker.sh`** | **Real Database Tests**. Spins up Postgres, MSSQL, and Oracle containers, injects data, and verifies that QueryDump can read these sources correctly. | Docker |
+| **`validate_drivers_docker.sh`** | **Real Database Tests**. Spins up Postgres, MSSQL, and Oracle containers, injects data, and verifies that DtPipe can read these sources correctly. | Docker |
 | **`validate_chain.sh`** | **Complex Chaining Tests**. Verifies an end-to-end pipeline: CSV -> Postgres -> MSSQL -> Oracle -> Parquet, with input/output checksum (hash) verification to ensure data integrity. | Docker, `docker-compose` |
 | **`validate_transformers.sh`** | **Transformer Tests**. Verifies correct behavior of `--overwrite`, `--null`, `--mask`, options on generated source CSV data. | - |
 | **`validate_project.sh`** | **Projection Tests**. Verifies that `--project` (whitelist) and `--drop` (blacklist) options correctly filter output columns, including combined cases. | - |

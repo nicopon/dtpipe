@@ -1,7 +1,7 @@
 services:
   postgres:
     image: postgres:15-alpine
-    container_name: querydump-integ-postgres
+    container_name: dtpipe-integ-postgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
@@ -16,7 +16,7 @@ services:
 
   mssql:
     image: mcr.microsoft.com/azure-sql-edge:latest
-    container_name: querydump-integ-mssql
+    container_name: dtpipe-integ-mssql
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: "Password123!"
@@ -29,7 +29,7 @@ services:
 
   oracle:
     image: gvenzl/oracle-free:slim
-    container_name: querydump-integ-oracle
+    container_name: dtpipe-integ-oracle
     environment:
       ORACLE_PASSWORD: "password"
       APP_USER: "testuser"

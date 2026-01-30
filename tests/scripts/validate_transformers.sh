@@ -7,13 +7,13 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 OUTPUT_DIR="$SCRIPT_DIR/output"
 
 # Path to binary (Release build)
-QUERYDUMP="$PROJECT_ROOT/dist/release/querydump"
+DTPIPE="$PROJECT_ROOT/dist/release/dtpipe"
 
 # Source common helpers
 source "$SCRIPT_DIR/common.sh"
 
 echo "========================================"
-echo "    QueryDump Transformer Testing"
+echo "    DtPipe Transformer Testing"
 echo "========================================"
 
 # Always Build Release
@@ -21,8 +21,8 @@ echo "🔨 Building Release..."
 "$PROJECT_ROOT/build.sh" > /dev/null
 
 # Check if binary exists
-if [ ! -f "$QUERYDUMP" ]; then
-    echo "❌ Error: Build failed or binary not found at $QUERYDUMP"
+if [ ! -f "$DTPIPE" ]; then
+    echo "❌ Error: Build failed or binary not found at $DTPIPE"
     exit 1
 fi
 
@@ -35,7 +35,7 @@ trap cleanup EXIT
 echo "----------------------------------------"
 echo "Step 0: Generate Reference Source"
 echo "----------------------------------------"
-$QUERYDUMP --input "sample:20;Id=int;Name=string;Amount=double;Secret=string" \
+$DTPIPE --input "sample:20;Id=int;Name=string;Amount=double;Secret=string" \
            --query "SELECT * FROM dummy" \
            --output "$OUTPUT_DIR/ref_trans.csv"
 
@@ -75,7 +75,7 @@ run_via_yaml --input "csv:$OUTPUT_DIR/ref_trans.csv" \
 # CSV format: Id,Name,Amount,Secret
 # 0,Name 0,,Secret 0
 # Grep for ",," might match empty values if Amount is in middle?
-# Actually QueryDump CSV writer might write empty string for null.
+# Actually DtPipe CSV writer might write empty string for null.
 # Let's check typical row structure. if Amount is 3rd column: "val,val,,val"
 # Or verify via checksum/inspect logic. 
 # Simple check: Amount column shouldn't contain digits if it's strictly null/empty?

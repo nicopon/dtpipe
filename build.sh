@@ -1,5 +1,5 @@
 #!/bin/bash
-# QueryDump Build Script
+# DtPipe Build Script
 # Builds both Release and AOT binaries
 
 set -e
@@ -23,7 +23,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo -e "${GREEN}QueryDump Build Script${NC}"
+echo -e "${GREEN}DtPipe Build Script${NC}"
 echo "========================"
 
 # Detect platform
@@ -72,11 +72,11 @@ mkdir -p "$RELEASE_DIR"
 # ============================================================
 echo ""
 echo -e "${YELLOW}Running Tests...${NC}"
-dotnet test tests/QueryDump.Tests/QueryDump.Tests.csproj -c Release --filter "FullyQualifiedName~.Unit."
+dotnet test tests/DtPipe.Tests/DtPipe.Tests.csproj -c Release --filter "FullyQualifiedName~.Unit."
 
 echo ""
 echo -e "${YELLOW}Building Release (single-file)...${NC}"
-dotnet publish src/QueryDump/QueryDump.csproj -c Release \
+dotnet publish src/DtPipe/DtPipe.csproj -c Release \
     -r "$RID" \
     --self-contained true \
     -p:PublishSingleFile=true \
@@ -87,8 +87,8 @@ dotnet publish src/QueryDump/QueryDump.csproj -c Release \
     -o "$RELEASE_DIR"
 
 # Rename to lowercase (standard unix convention)
-if [ -f "$RELEASE_DIR/QueryDump$EXT" ]; then
-    mv "$RELEASE_DIR/QueryDump$EXT" "$RELEASE_DIR/querydump$EXT"
+if [ -f "$RELEASE_DIR/DtPipe$EXT" ]; then
+    mv "$RELEASE_DIR/DtPipe$EXT" "$RELEASE_DIR/dtpipe$EXT"
 fi
 
 # ============================================================
@@ -98,7 +98,7 @@ echo ""
 echo -e "${GREEN}Build complete!${NC}"
 echo ""
 echo "Release (single-file):"
-ls -lh "$RELEASE_DIR/querydump$EXT"
+ls -lh "$RELEASE_DIR/dtpipe$EXT"
 echo ""
 echo -e "${YELLOW}Usage:${NC}"
-echo "  ./dist/release/querydump$EXT --help"
+echo "  ./dist/release/dtpipe$EXT --help"

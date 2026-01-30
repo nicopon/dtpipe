@@ -14,27 +14,27 @@ jobs:
         include:
           - platform: linux-x64
             rid: linux-x64
-            artifact: querydump-linux-x64
+            artifact: dtpipe-linux-x64
           
           - platform: linux-arm64
             rid: linux-arm64
-            artifact: querydump-linux-arm64
+            artifact: dtpipe-linux-arm64
           
           - platform: macos-x64
             rid: osx-x64
-            artifact: querydump-macos-x64
+            artifact: dtpipe-macos-x64
           
           - platform: macos-arm64
             rid: osx-arm64
-            artifact: querydump-macos-arm64
+            artifact: dtpipe-macos-arm64
           
           - platform: windows-x64
             rid: win-x64
-            artifact: querydump-windows-x64.exe
+            artifact: dtpipe-windows-x64.exe
           
           - platform: windows-arm64
             rid: win-arm64
-            artifact: querydump-windows-arm64.exe
+            artifact: dtpipe-windows-arm64.exe
 
     steps:
       - name: Checkout
@@ -50,7 +50,7 @@ jobs:
 
       - name: Build Release
         run: |
-          dotnet publish src/QueryDump/QueryDump.csproj -c Release \
+          dotnet publish src/DtPipe/DtPipe.csproj -c Release \
             -r ${{ matrix.rid }} \
             --self-contained true \
             -p:PublishSingleFile=true \
@@ -63,25 +63,25 @@ jobs:
       - name: Prepare artifact (Unix)
         if: "!contains(matrix.platform, 'windows')"
         run: |
-          mv ./dist/release/QueryDump ./dist/release/querydump
-          chmod +x ./dist/release/querydump
+          mv ./dist/release/dtpipe ./dist/release/dtpipe
+          chmod +x ./dist/release/dtpipe
 
       - name: Prepare artifact (Windows)
         if: contains(matrix.platform, 'windows')
         run: |
-          mv ./dist/release/QueryDump.exe ./dist/release/querydump.exe
+          mv ./dist/release/dtpipe.exe ./dist/release/dtpipe.exe
 
       - name: Create archive (Unix)
         if: "!contains(matrix.platform, 'windows')"
         run: |
           cd ./dist/release
-          tar -czf ${{ matrix.artifact }}.tar.gz querydump
+          tar -czf ${{ matrix.artifact }}.tar.gz dtpipe
 
       - name: Create archive (Windows)
         if: contains(matrix.platform, 'windows')
         run: |
           cd ./dist/release
-          zip ${{ matrix.artifact }}.zip querydump.exe
+          zip ${{ matrix.artifact }}.zip dtpipe.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

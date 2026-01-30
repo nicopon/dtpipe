@@ -1,5 +1,5 @@
 {
-	"name": "QueryDump Dev",
+	"name": "DtPipe Dev",
 	"image": "mcr.microsoft.com/dotnet/sdk:10.0",
 	"features": {
 		"ghcr.io/devcontainers/features/docker-in-docker:2": {
@@ -18,5 +18,5 @@
 			]
 		}
 	},
-	"postCreateCommand": "dotnet restore src/QueryDump/QueryDump.csproj"
+	"postCreateCommand": "dotnet restore src/DtPipe/DtPipe.csproj"
 }

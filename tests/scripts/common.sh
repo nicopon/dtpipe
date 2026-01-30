@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Shared helper functions for QueryDump integration tests
+# Shared helper functions for DtPipe integration tests
 
-# Run querydump with automatic YAML export/import verification
+# Run dtpipe with automatic YAML export/import verification
 # Usage: run_via_yaml [args...]
 # This function will:
 # 1. Run the command directly (to verify CLI args work)
@@ -14,7 +14,7 @@
 # However, the user request "production des yaml via la ligne de commande puis deuxième run avec le yaml" implies doing both or at least the chain.
 # To match the user request exactly: "export yaml via CLI args -> run with yaml". 
 # So we can skip the direct run if we want to be strict about "using yaml for the run", allows testing that export works.
-# But for now let's be safe: If we replace $QUERYDUMP with this, previous tests expected $QUERYDUMP to execute the action.
+# But for now let's be safe: If we replace $DTPIPE with this, previous tests expected $DTPIPE to execute the action.
 # So we should probably do:
 # 1. Export to YAML
 # 2. Run from YAML
@@ -25,7 +25,7 @@ run_via_yaml() {
     
     # 1. Export configuration to YAML
     echo "  📄 Exporting config to YAML..."
-    "$QUERYDUMP" "$@" "--export-job" "$yaml_file"
+    "$DTPIPE" "$@" "--export-job" "$yaml_file"
     
     if [ ! -f "$yaml_file" ]; then
         echo "❌ YAML Export failed: File $yaml_file not created."
@@ -43,7 +43,7 @@ run_via_yaml() {
     # But some args might be runtime overrides (like limit, dry-run). 
     # For simplicity in these tests, the YAML contains everything.
     echo "  🚀 Running via YAML..."
-    "$QUERYDUMP" "--job" "$yaml_file"
+    "$DTPIPE" "--job" "$yaml_file"
     
     # Clean up
     rm -f "$yaml_file"

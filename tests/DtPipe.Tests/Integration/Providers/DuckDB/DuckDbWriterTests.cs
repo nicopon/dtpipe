@@ -1,0 +1,319 @@
+using System.Data;
+using DuckDB.NET.Data;
+using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
+using DtPipe.Core.Abstractions;
+using DtPipe.Core.Models;
+using DtPipe.Cli.Abstractions;
+using DtPipe.Configuration;
+using DtPipe.Core.Options;
+using DtPipe.Adapters.DuckDB;
+using Xunit;
+using ColumnInfo = DtPipe.Core.Models.ColumnInfo;
+
+using DtPipe.Cli.Infrastructure;
+
+namespace DtPipe.Tests;
+
+public class DuckDbWriterTests : IAsyncLifetime
+{
+    private readonly string _outputPath;
+    private readonly CliDataWriterFactory _factory;
+    private readonly OptionsRegistry _registry;
+
+    public DuckDbWriterTests()
+    {
+        _outputPath = Path.GetTempFileName() + ".duckdb";
+        _registry = new OptionsRegistry();
+        var serviceProvider = new ServiceCollection().BuildServiceProvider(); // Dummy SP
+        var descriptor = new DuckDbWriterDescriptor();
+        _factory = new CliDataWriterFactory(descriptor, _registry, serviceProvider);
+    }
+
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
+
+    public ValueTask DisposeAsync()
+    {
+        if (File.Exists(_outputPath))
+        {
+            try { File.Delete(_outputPath); } catch { }
+        }
+        return ValueTask.CompletedTask;
+    }
+
+    [Fact]
+    public void CanHandle_Detects_DuckDb_Patterns()
+    {
+        _factory.CanHandle("output.duckdb").Should().BeTrue();
+        _factory.CanHandle("output.db").Should().BeFalse(); // .db removed
+        _factory.CanHandle("duckdb:output.foo").Should().BeFalse(); // Prefix removed
+        _factory.CanHandle("output.foo").Should().BeFalse();
+        _factory.CanHandle("output.csv").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Write_CreatesTable_And_InsertsData()
+    {
+        // Arrange
+        var options = new DumpOptions 
+        { 
+            OutputPath = _outputPath, 
+            ConnectionString = "fake_connection", 
+            Query = "SELECT 1" 
+        };
+        var writer = _factory.Create(options);
+
+        var columns = new List<ColumnInfo>
+        {
+            new("Id", typeof(int), false),
+            new("Name", typeof(string), true),
+            new("IsActive", typeof(bool), false),
+            new("Score", typeof(double), false)
+        };
+
+        var rows = new List<object?[]>
+        {
+            new object?[] { 1, "Alice", true, 95.5 },
+            new object?[] { 2, "Bob", false, 80.0 },
+            new object?[] { 3, null, true, 0.0 }
+        };
+
+        // Act
+        await writer.InitializeAsync(columns, CancellationToken.None);
+        await writer.WriteBatchAsync(rows, CancellationToken.None);
+        await writer.CompleteAsync(CancellationToken.None);
+        await writer.DisposeAsync();
+
+        // Assert
+        using var connection = new DuckDBConnection($"Data Source={_outputPath}");
+        await connection.OpenAsync();
+
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT * FROM Export ORDER BY Id";
+        using var reader = await cmd.ExecuteReaderAsync();
+
+        // Row 1
+        reader.Read().Should().BeTrue();
+        reader.GetInt32(0).Should().Be(1);
+        reader.GetString(1).Should().Be("Alice");
+        reader.GetBoolean(2).Should().BeTrue();
+        reader.GetDouble(3).Should().Be(95.5);
+
+        // Row 2
+        reader.Read().Should().BeTrue();
+        reader.GetInt32(0).Should().Be(2);
+        reader.GetString(1).Should().Be("Bob");
+        reader.GetBoolean(2).Should().BeFalse();
+
+        // Row 3 (Null Name)
+        reader.Read().Should().BeTrue();
+        reader.GetInt32(0).Should().Be(3);
+        reader.IsDBNull(1).Should().BeTrue();
+
+        reader.Read().Should().BeFalse();
+    }
+    [Fact]
+    public async Task Write_Append_WithDifferentColumnOrder_MapsCorrectly()
+    {
+        // Arrange
+        // 1. Pre-create table with mixed order: Score (double), Name (string), Id (int), IsActive (bool)
+        // Source order will be: Id, Name, IsActive, Score
+        using (var connection = new DuckDBConnection($"Data Source={_outputPath}"))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "CREATE TABLE Export (Score DOUBLE, Name VARCHAR, Id INTEGER, IsActive BOOLEAN)";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // 2. Configure options: Append strategy
+        var duckOptions = new DuckDbWriterOptions { Strategy = DuckDbWriteStrategy.Append, Table = "Export" };
+        _registry.Register(duckOptions);
+
+        var options = new DumpOptions 
+        { 
+            OutputPath = _outputPath, 
+            Provider = "duckdb",
+            Query = "SELECT 1", // Dummy
+            ConnectionString = "dummy"
+        };
+        var writer = _factory.Create(options);
+
+        var columns = new List<ColumnInfo>
+        {
+            new("Id", typeof(int), false),
+            new("Name", typeof(string), true),
+            new("IsActive", typeof(bool), false),
+            new("Score", typeof(double), false)
+        };
+
+        var rows = new List<object?[]>
+        {
+            new object?[] { 1, "Alice", true, 95.5 },
+            new object?[] { 2, "Bob", false, 80.0 }
+        };
+
+        // Act
+        await writer.InitializeAsync(columns, CancellationToken.None);
+        await writer.WriteBatchAsync(rows, CancellationToken.None);
+        await writer.CompleteAsync(CancellationToken.None);
+        await writer.DisposeAsync();
+
+        // Assert
+        using (var connection = new DuckDBConnection($"Data Source={_outputPath}"))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT * FROM Export ORDER BY Id"; // Id is the 3rd column in DB
+            using var reader = await cmd.ExecuteReaderAsync();
+
+            reader.Read().Should().BeTrue();
+            // DB Order: Score, Name, Id, IsActive
+            reader.GetDouble(0).Should().Be(95.5);
+            reader.GetString(1).Should().Be("Alice");
+            reader.GetInt32(2).Should().Be(1);
+            reader.GetBoolean(3).Should().BeTrue();
+
+            reader.Read().Should().BeTrue();
+            reader.GetDouble(0).Should().Be(80.0);
+            reader.GetString(1).Should().Be("Bob");
+            reader.GetInt32(2).Should().Be(2);
+            reader.GetBoolean(3).Should().BeFalse();
+        }
+    }
+    [Fact]
+    public async Task Write_WithIncompatibleData_ThrowsDetailedError()
+    {
+        // Arrange
+        using (var connection = new DuckDBConnection($"Data Source={_outputPath}"))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "CREATE TABLE Export (Id INTEGER)";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var duckOptions = new DuckDbWriterOptions { Strategy = DuckDbWriteStrategy.Append, Table = "Export" };
+        _registry.Register(duckOptions);
+
+        var options = new DumpOptions 
+        { 
+            OutputPath = _outputPath, 
+            Provider = "duckdb", 
+            Query = "SELECT 1",
+            ConnectionString = "dummy"
+        };
+        var writer = _factory.Create(options);
+
+        // Source says ID is String, but Target is Integer
+        var columns = new List<ColumnInfo>
+        {
+            new("Id", typeof(string), true)
+        };
+
+        var rows = new List<object?[]>
+        {
+            new object?[] { "NotAnInteger" }
+        };
+
+        // Act
+        await writer.InitializeAsync(columns, CancellationToken.None);
+        
+        var act = async () => await writer.WriteBatchAsync(rows, CancellationToken.None);
+
+        // Assert
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(act);
+        ex.Message.Should().Contain("DuckDB Appender Failed with detailed analysis");
+        ex.Message.Should().Contain("Issue detected at Row 1");
+        ex.Message.Should().Contain("Value: 'NotAnInteger'");
+    }
+    [Fact]
+    public async Task Write_Truncate_EmptyTable_BeforeInsert()
+    {
+        // Arrange
+        // 1. Create table and insert initial data
+        using (var connection = new DuckDBConnection($"Data Source={_outputPath}"))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "CREATE TABLE Export (Id INTEGER, Name VARCHAR)";
+            await cmd.ExecuteNonQueryAsync();
+            cmd.CommandText = "INSERT INTO Export VALUES (999, 'OldData')";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var duckOptions = new DuckDbWriterOptions { Strategy = DuckDbWriteStrategy.Truncate, Table = "Export" };
+        _registry.Register(duckOptions);
+
+        var options = new DumpOptions { OutputPath = _outputPath, Provider = "duckdb", Query = "SELECT 1", ConnectionString = "dummy" };
+        var writer = _factory.Create(options);
+
+        var columns = new List<ColumnInfo> { new("Id", typeof(int), false), new("Name", typeof(string), true) };
+        var rows = new List<object?[]> { new object?[] { 1, "NewData" } };
+
+        // Act
+        await writer.InitializeAsync(columns, CancellationToken.None);
+        await writer.WriteBatchAsync(rows, CancellationToken.None);
+        await writer.CompleteAsync(CancellationToken.None);
+        await writer.DisposeAsync();
+
+        // Assert
+        using (var connection = new DuckDBConnection($"Data Source={_outputPath}"))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT * FROM Export";
+            using var reader = await cmd.ExecuteReaderAsync();
+
+            reader.Read().Should().BeTrue();
+            reader.GetInt32(0).Should().Be(1); // Should remain
+            reader.GetString(1).Should().Be("NewData");
+
+            reader.Read().Should().BeFalse(); // Old data gone
+        }
+    }
+
+    [Fact]
+    public async Task Write_DeleteThenInsert_EmptyTable_BeforeInsert()
+    {
+        // Arrange
+        // 1. Create table and insert initial data
+        using (var connection = new DuckDBConnection($"Data Source={_outputPath}"))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "CREATE TABLE Export (Id INTEGER, Name VARCHAR)";
+            await cmd.ExecuteNonQueryAsync();
+            cmd.CommandText = "INSERT INTO Export VALUES (999, 'OldData')";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var duckOptions = new DuckDbWriterOptions { Strategy = DuckDbWriteStrategy.DeleteThenInsert, Table = "Export" };
+        _registry.Register(duckOptions);
+
+        var options = new DumpOptions { OutputPath = _outputPath, Provider = "duckdb", Query = "SELECT 1", ConnectionString = "dummy" };
+        var writer = _factory.Create(options);
+
+        var columns = new List<ColumnInfo> { new("Id", typeof(int), false), new("Name", typeof(string), true) };
+        var rows = new List<object?[]> { new object?[] { 1, "NewData" } };
+
+        // Act
+        await writer.InitializeAsync(columns, CancellationToken.None);
+        await writer.WriteBatchAsync(rows, CancellationToken.None);
+        await writer.CompleteAsync(CancellationToken.None);
+        await writer.DisposeAsync();
+
+        // Assert
+        using (var connection = new DuckDBConnection($"Data Source={_outputPath}"))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT * FROM Export";
+            using var reader = await cmd.ExecuteReaderAsync();
+
+            reader.Read().Should().BeTrue();
+            reader.GetInt32(0).Should().Be(1);
+            reader.Read().Should().BeFalse();
+        }
+    }
+}

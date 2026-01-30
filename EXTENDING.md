@@ -1,22 +1,22 @@
-# Extending QueryDump: adding an Adapter or a Transformer
+# Extending DtPipe: adding an Adapter or a Transformer
 
-This quick guide explains where and how to add a new *adapter* (reader/writer) or a *transformer* in QueryDump.
+This quick guide explains where and how to add a new *adapter* (reader/writer) or a *transformer* in DtPipe.
 
 ## Recommended locations
-- Adapters: `src/QueryDump/Adapters/<Provider>/`
-- Transformers: `src/QueryDump/Transformers/<Name>/`
+- Adapters: `src/DtPipe/Adapters/<Provider>/`
+- Transformers: `src/DtPipe/Transformers/<Name>/`
 - Documentation: `EXTENDING.md` (this file)
 
 ## Adding an Adapter (Reader or Writer)
-1. Create a folder `src/QueryDump/Adapters/<YourProvider>/`.
+1. Create a folder `src/DtPipe/Adapters/<YourProvider>/`.
 2. Add an options class (e.g. `MyProviderOptions.cs`) for provider-specific settings.
 3. Implement the appropriate interface:
    - Reader: `IStreamReader` (key methods: `OpenAsync`, `ReadBatchesAsync` returning `IAsyncEnumerable`, `DisposeAsync`).
    - Writer: `IDataWriter` (key methods: `InitializeAsync`, `WriteBatchAsync`, `CompleteAsync`, `DisposeAsync`).
 4. Add a `Descriptor` implementing `IProviderDescriptor<T>` (e.g. `MyProviderReaderDescriptor.cs`).
 5. (Optional) Add a `ConnectionHelper` / `TypeMapper` if your driver requires specific conversions.
-6. Register the provider in DI: open `src/QueryDump/Program.cs` and call `RegisterReader<MyProviderReaderDescriptor>(services);` or `RegisterWriter<MyProviderWriterDescriptor>(services);`.
-7. Add unit/integration tests under `tests/QueryDump.Tests/Unit` or `tests/QueryDump.Tests/Integration`. Provide a small dataset or docker-compose if needed (see `tests/infra`).
+6. Register the provider in DI: open `src/DtPipe/Program.cs` and call `RegisterReader<MyProviderReaderDescriptor>(services);` or `RegisterWriter<MyProviderWriterDescriptor>(services);`.
+7. Add unit/integration tests under `tests/DtPipe.Tests/Unit` or `tests/DtPipe.Tests/Integration`. Provide a small dataset or docker-compose if needed (see `tests/infra`).
 8. Add a usage example to the README or scripts in `scripts/` if relevant.
 
 Practical tips:
@@ -55,7 +55,7 @@ public class MyProviderReaderDescriptor : IProviderDescriptor<IStreamReader>
 ```
 
 ## Adding a Transformer
-1. Create `src/QueryDump/Transformers/<YourTransformer>/`.
+1. Create `src/DtPipe/Transformers/<YourTransformer>/`.
 2. Add an options class `YourTransformerOptions.cs`.
    - Implement `IOptionSet`.
    - Define a `Prefix` (e.g. `fake` -> flags will be `--fake-seed`, `--fake-locale`).
@@ -76,7 +76,7 @@ public class MyProviderReaderDescriptor : IProviderDescriptor<IStreamReader>
 4. Provide an `IDataTransformerFactory` (e.g. `YourTransformerFactory`) that reads options and creates transformer instances.
 5. Register the factory in DI: in `Program.cs` add `services.AddSingleton<IDataTransformerFactory, YourTransformerFactory>();`.
 6. Add CLI/YAML support:
-   - To expose CLI flags, see `src/QueryDump/Cli/CliOptionBuilder.cs` and `OptionsRegistry` for how options are declared and bound.
+   - To expose CLI flags, see `src/DtPipe/Cli/CliOptionBuilder.cs` and `OptionsRegistry` for how options are declared and bound.
    - Document YAML syntax in `README.md` or here (see example below).
 7. Add unit tests for the transformation logic.
 
@@ -106,15 +106,15 @@ transformers:
 The name `mytransformer` must match the identifier handled by your `IDataTransformerFactory`/`OptionsRegistry`.
 
 ## Registration and debugging
-- To register: modify `src/QueryDump/Program.cs` (see `RegisterReader` / `RegisterWriter` and the `IDataTransformerFactory` registrations already present).
+- To register: modify `src/DtPipe/Program.cs` (see `RegisterReader` / `RegisterWriter` and the `IDataTransformerFactory` registrations already present).
 - Quick local build & run:
 ```bash
 ./build.sh
-./dist/release/querydump --input "sqlite:sample.db" --query "SELECT 1" --output out.csv
+./dist/release/dtpipe --input "sqlite:sample.db" --query "SELECT 1" --output out.csv
 ```
 - Run tests:
 ```bash
-dotnet test QueryDump.sln
+dotnet test DtPipe.sln
 ```
 
 ## Tests & CI
@@ -123,7 +123,7 @@ dotnet test QueryDump.sln
 
 ## Disabling the TUI (non-interactive / CI)
 
-QueryDump uses a live terminal UI for progress reporting. In CI or non-interactive environments you can disable the live TUI by setting the environment variable `QUERYDUMP_NO_TUI=1`, or by ensuring output is redirected. The reporter also disables itself when a `CI` environment variable is present.
+DtPipe uses a live terminal UI for progress reporting. In CI or non-interactive environments you can disable the live TUI by setting the environment variable `DTPIPE_NO_TUI=1`, or by ensuring output is redirected. The reporter also disables itself when a `CI` environment variable is present.
 
 ## Contribution rules (quick)
 - Follow naming conventions and the Descriptor/Factory pattern.

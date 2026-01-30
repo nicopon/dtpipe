@@ -38,7 +38,7 @@ BenchmarkDotNet.Artifacts/
 
 # Test Data
 tests/output/*
-tests/QueryDump.Tests/Data/Target/*
-!tests/QueryDump.Tests/Data/Target/.gitkeep
+tests/DtPipe.Tests/Data/Target/*
+!tests/DtPipe.Tests/Data/Target/.gitkeep
 tests/scripts/output/
 !tests/scripts/input/*

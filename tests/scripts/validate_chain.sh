@@ -8,10 +8,10 @@ INFRA_DIR="$PROJECT_ROOT/tests/infra"
 OUTPUT_DIR="$SCRIPT_DIR/output"
 
 # Path to binary (Release build)
-QUERYDUMP="$PROJECT_ROOT/dist/release/querydump"
+DTPIPE="$PROJECT_ROOT/dist/release/dtpipe"
 
 echo "========================================"
-echo "    QueryDump Integration Testing"
+echo "    DtPipe Integration Testing"
 echo "========================================"
 
 # Always Build Release
@@ -19,8 +19,8 @@ echo "🔨 Building Release..."
 "$PROJECT_ROOT/build.sh" > /dev/null
 
 # Check if binary exists (Double check)
-if [ ! -f "$QUERYDUMP" ]; then
-    echo "❌ Error: Build failed or binary not found at $QUERYDUMP"
+if [ ! -f "$DTPIPE" ]; then
+    echo "❌ Error: Build failed or binary not found at $DTPIPE"
     exit 1
 fi
 
@@ -44,7 +44,7 @@ echo "----------------------------------------"
 echo "Step 0: Generate Reference Source (CSV)"
 echo "----------------------------------------"
 # Sample -> CSV (Immutable Source)
-$QUERYDUMP --input "sample:100;Id=int;Amount=double;Created=date" \
+$DTPIPE --input "sample:100;Id=int;Amount=double;Created=date" \
            --query "SELECT * FROM dummy" \
            --output "$OUTPUT_DIR/reference.csv"
 
@@ -52,7 +52,7 @@ echo "----------------------------------------"
 echo "Step 0b: Generate Reference Checksum"
 echo "----------------------------------------"
 # CSV -> Checksum
-$QUERYDUMP --input "csv:$OUTPUT_DIR/reference.csv" \
+$DTPIPE --input "csv:$OUTPUT_DIR/reference.csv" \
            --query "SELECT * FROM data" \
            --output "checksum:$OUTPUT_DIR/ref.hash"
 REF_HASH=$(cat "$OUTPUT_DIR/ref.hash")
@@ -61,8 +61,8 @@ echo "Reference Hash: $REF_HASH"
 echo "----------------------------------------"
 echo "Step 1: CSV -> Postgres"
 echo "----------------------------------------"
-PG_CONN="postgresql:Host=localhost;Port=5440;Database=integration;Username=postgres;Password=password"
-CMD1="$QUERYDUMP --input \"csv:$OUTPUT_DIR/reference.csv\" --query \"SELECT * FROM data\" --output \"$PG_CONN\""
+PG_CONN="pg:Host=localhost;Port=5440;Database=integration;Username=postgres;Password=password"
+CMD1="$DTPIPE --input \"csv:$OUTPUT_DIR/reference.csv\" --query \"SELECT * FROM data\" --output \"$PG_CONN\""
 echo "Running: $CMD1"
 eval $CMD1
 
@@ -70,7 +70,7 @@ echo "----------------------------------------"
 echo "Step 2: Postgres -> MSSQL"
 echo "----------------------------------------"
 MSSQL_CONN="mssql:Server=localhost,1434;Database=master;User Id=sa;Password=Password123!;TrustServerCertificate=True"
-$QUERYDUMP --input "$PG_CONN" \
+$DTPIPE --input "$PG_CONN" \
            --query "SELECT * FROM \"Export\"" \
            --output "$MSSQL_CONN" \
            --mssql-table "ExportedData"
@@ -82,8 +82,8 @@ echo "----------------------------------------"
 echo "Waiting extra time for Oracle..."
 sleep 20 
 
-ORACLE_CONN="oracle:Data Source=localhost:1522/FREEPDB1;User Id=testuser;Password=password;Pooling=false"
-$QUERYDUMP --input "$MSSQL_CONN" \
+ORACLE_CONN="ora:Data Source=localhost:1522/FREEPDB1;User Id=testuser;Password=password;Pooling=false"
+$DTPIPE --input "$MSSQL_CONN" \
            --query "SELECT * FROM ExportedData" \
            --output "$ORACLE_CONN" \
            --ora-table "EXPORT_DATA" \
@@ -92,14 +92,14 @@ $QUERYDUMP --input "$MSSQL_CONN" \
 echo "----------------------------------------"
 echo "Step 4: Oracle -> Parquet"
 echo "----------------------------------------"
-$QUERYDUMP --input "$ORACLE_CONN" \
+$DTPIPE --input "$ORACLE_CONN" \
            --query "SELECT * FROM EXPORT_DATA" \
            --output "$OUTPUT_DIR/test.parquet"
 
 echo "----------------------------------------"
 echo "Step 5: Parquet -> Checksum"
 echo "----------------------------------------"
-$QUERYDUMP --input "parquet:$OUTPUT_DIR/test.parquet" \
+$DTPIPE --input "parquet:$OUTPUT_DIR/test.parquet" \
            --query "SELECT * FROM data" \
            --output "checksum:$OUTPUT_DIR/final.hash"
 

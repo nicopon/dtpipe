@@ -6,6 +6,6 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../../src/QueryDump/QueryDump.csproj" />
+    <ProjectReference Include="../../src/DtPipe/DtPipe.csproj" />
   </ItemGroup>
 </Project>

@@ -4,7 +4,7 @@
 SCRIPT_DIR="$(dirname "$0")"
 PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 DIST_DIR="$PROJECT_ROOT/dist/release"
-QUERYDUMP_BIN="$DIST_DIR/querydump"
+DTPIPE_BIN="$DIST_DIR/dtpipe"
 
 # Colors
 GREEN='\033[0;32m'
@@ -12,9 +12,9 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Check if querydump exists
-if [ ! -f "$QUERYDUMP_BIN" ]; then
-    echo -e "${RED}Error: querydump binary not found at $QUERYDUMP_BIN${NC}"
+# Check if dtpipe exists
+if [ ! -f "$DTPIPE_BIN" ]; then
+    echo -e "${RED}Error: dtpipe binary not found at $DTPIPE_BIN${NC}"
     echo "Please run ./build.sh first."
     exit 1
 fi
@@ -46,7 +46,7 @@ echo -e "${GREEN}Starting Oracle Performance Test...${NC}"
 # Cleanup function
 cleanup() {
     echo "Cleaning up containers..."
-    docker rm -f querydump-oracle-perf &> /dev/null
+    docker rm -f dtpipe-oracle-perf &> /dev/null
 }
 trap cleanup EXIT
 
@@ -55,7 +55,7 @@ echo "------------------------------------------------"
 echo "Starting Oracle Container..."
 
 # Use slim image for speed
-docker run --name querydump-oracle-perf -e ORACLE_PASSWORD=MySecretPassword123! -p 1521:1521 -d gvenzl/oracle-free:slim
+docker run --name dtpipe-oracle-perf -e ORACLE_PASSWORD=MySecretPassword123! -p 1521:1521 -d gvenzl/oracle-free:slim
 
 # Wait for Oracle
 echo "Waiting for Oracle (30s)..."
@@ -64,11 +64,11 @@ sleep 30
 
 # Create Target Table
 echo "Creating target table..."
-docker exec -i querydump-oracle-perf sqlplus system/MySecretPassword123!@localhost:1521/FREEPDB1 <<EOF
+docker exec -i dtpipe-oracle-perf sqlplus system/MySecretPassword123!@localhost:1521/FREEPDB1 <<EOF
 CREATE TABLE PerformanceTest (
-    Id NUMBER,
-    Name VARCHAR2(100),
-    CreatedDate TIMESTAMP
+    "Id" NUMBER,
+    "Name" VARCHAR2(100),
+    "CreatedDate" TIMESTAMP
 );
 EXIT;
 EOF
@@ -83,7 +83,7 @@ run_test() {
     
     local START_TIME=$(date +%s)
     
-    $QUERYDUMP_BIN --input "sample:$ROW_COUNT;Id=int;Name=string;CreatedDate=date" \
+    $DTPIPE_BIN --input "sample:$ROW_COUNT;Id=int;Name=string;CreatedDate=date" \
                    --query "SELECT 1" \
                    --output "ora:Data Source=localhost:1521/FREEPDB1;User Id=system;Password=MySecretPassword123!;" \
                    --ora-table "PerformanceTest" \
@@ -102,7 +102,7 @@ run_test "Bulk"
 
 # Verify count
 echo "Verifying row count..."
-COUNT=$(docker exec -i querydump-oracle-perf sqlplus -s system/MySecretPassword123!@localhost:1521/FREEPDB1 <<EOF
+COUNT=$(docker exec -i dtpipe-oracle-perf sqlplus -s system/MySecretPassword123!@localhost:1521/FREEPDB1 <<EOF
 SET HEADING OFF;
 SELECT COUNT(*) FROM PerformanceTest;
 EXIT;

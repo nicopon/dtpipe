@@ -16,7 +16,7 @@ CHECK_DATA_CSV="$TEST_DIR/check_data.csv"
 # Create Job File with providerOptions
 # We verify that 'strategy' (enum) and 'table' (string) are correctly mapped
 cat <<EOF > "$JOB_FILE"
-input: "duckdb::memory:"
+input: "duck::memory:"
 query: "SELECT 1 as id, 'Test' as name"
 output: "sqlite:$DB_OUT"
 provider-options:
@@ -25,14 +25,14 @@ provider-options:
     strategy: "Recreate"
 EOF
 
-echo "Running QueryDump (Creation)..."
-"$ROOT_DIR/dist/release/querydump" --job "$JOB_FILE"
+echo "Running DtPipe (Creation)..."
+"$ROOT_DIR/dist/release/dtpipe" --job "$JOB_FILE"
 
 echo "Verifying output..."
 
-# 1. Verify Table Name using QueryDump
+# 1. Verify Table Name using DtPipe
 # We query sqlite_master table from the generated DB
-"$ROOT_DIR/dist/release/querydump" --input "sqlite:$DB_OUT" \
+"$ROOT_DIR/dist/release/dtpipe" --input "sqlite:$DB_OUT" \
     --query "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='CustomTable'" \
     --output "csv:$CHECK_TABLE_CSV"
 
@@ -45,8 +45,8 @@ else
     exit 1
 fi
 
-# 2. Verify Data using QueryDump
-"$ROOT_DIR/dist/release/querydump" --input "sqlite:$DB_OUT" \
+# 2. Verify Data using DtPipe
+"$ROOT_DIR/dist/release/dtpipe" --input "sqlite:$DB_OUT" \
     --query "SELECT count(*) as cnt FROM CustomTable" \
     --output "csv:$CHECK_DATA_CSV"
 

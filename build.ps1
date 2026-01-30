@@ -17,7 +17,7 @@ New-Item -ItemType Directory -Force -Path $env:NUGET_HTTP_CACHE_PATH | Out-Null
 New-Item -ItemType Directory -Force -Path $env:NUGET_PLUGINS_CACHE_PATH | Out-Null
 New-Item -ItemType Directory -Force -Path $env:NUGET_SCRATCH | Out-Null
 
-Write-Host "QueryDump Build Script (Windows)" -ForegroundColor Green
+Write-Host "DtPipe Build Script (Windows)" -ForegroundColor Green
 Write-Host "========================"
 
 # Detect Platform and Architecture
@@ -74,7 +74,7 @@ New-Item -ItemType Directory -Force -Path $ReleaseDir | Out-Null
 # ============================================================
 Write-Host ""
 Write-Host "Running Tests..." -ForegroundColor Yellow
-dotnet test "tests\QueryDump.Tests\QueryDump.Tests.csproj" -c Release --filter "FullyQualifiedName~.Unit."
+dotnet test "tests\DtPipe.Tests\DtPipe.Tests.csproj" -c Release --filter "FullyQualifiedName~.Unit."
 
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Tests failed with exit code $LASTEXITCODE"
@@ -84,7 +84,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host ""
 Write-Host "Building Release (single-file)..." -ForegroundColor Yellow
 
-dotnet publish "src\QueryDump\QueryDump.csproj" -c Release `
+dotnet publish "src\DtPipe\DtPipe.csproj" -c Release `
     -r $Rid `
     --self-contained true `
     -p:PublishSingleFile=true `
@@ -101,13 +101,13 @@ if ($LASTEXITCODE -ne 0) {
 
 # Ensure lowercase name (optional on Windows case-insensitive fs, but good for consistency)
 # Creating a copy/rename explicitly if needed, but output name from dotnet is usually standard.
-# Visual Studio / dotnet usually produces "QueryDump.exe" (or no ext on unix). To match "querydump" preference:
+# Visual Studio / dotnet usually produces "DtPipe.exe" (or no ext on unix). To match "dtpipe" preference:
 
-$ExePath = Join-Path $ReleaseDir ("QueryDump" + $Ext)
-$TargetExePath = Join-Path $ReleaseDir ("querydump" + $Ext)
+$ExePath = Join-Path $ReleaseDir ("DtPipe" + $Ext)
+$TargetExePath = Join-Path $ReleaseDir ("dtpipe" + $Ext)
 
 if (Test-Path $ExePath) {
-    Rename-Item -Path $ExePath -NewName ("querydump" + $Ext) -Force
+    Rename-Item -Path $ExePath -NewName ("dtpipe" + $Ext) -Force
 }
 
 # ============================================================
@@ -117,7 +117,7 @@ Write-Host ""
 Write-Host "Build complete!" -ForegroundColor Green
 Write-Host ""
 Write-Host "Release (single-file):"
-Get-ChildItem "$ReleaseDir\querydump$Ext" | Format-Table Name, Length
+Get-ChildItem "$ReleaseDir\dtpipe$Ext" | Format-Table Name, Length
 Write-Host ""
 Write-Host "Usage:" -ForegroundColor Yellow
-Write-Host "  .\dist\release\querydump$Ext --help"
+Write-Host "  .\dist\release\dtpipe$Ext --help"
