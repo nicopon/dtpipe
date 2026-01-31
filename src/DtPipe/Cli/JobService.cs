@@ -63,9 +63,10 @@ public class JobService
         var jobOption = new Option<string?>("--job") { Description = "Path to YAML job file" };
         var exportJobOption = new Option<string?>("--export-job") { Description = "Export current configuration to YAML file and exit" };
         var logOption = new Option<string?>("--log") { Description = "Path to log file" };
+        var keyOption = new Option<string?>("--key") { Description = "Comma-separated Primary Key columns for Upsert/Ignore (overrides auto-detection)" };
         
         // Core Help Options
-        var coreOptions = new List<Option> { inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption, unsafeQueryOption, dryRunOption, limitOption, sampleRateOption, sampleSeedOption, jobOption, exportJobOption, logOption };
+        var coreOptions = new List<Option> { inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption, unsafeQueryOption, dryRunOption, limitOption, sampleRateOption, sampleSeedOption, keyOption, jobOption, exportJobOption, logOption };
 
         var rootCommand = new RootCommand("A simple, self-contained CLI for performance-focused data streaming & anonymization");
         foreach(var opt in coreOptions) rootCommand.Options.Add(opt);
@@ -96,7 +97,7 @@ public class JobService
                 parseResult,
                 jobOption, inputOption, queryOption, outputOption, 
                 connectionTimeoutOption, queryTimeoutOption, batchSizeOption, 
-                unsafeQueryOption, limitOption, sampleRateOption, sampleSeedOption, logOption);
+                unsafeQueryOption, limitOption, sampleRateOption, sampleSeedOption, logOption, keyOption);
 
             if (jobExitCode != 0) return jobExitCode;
 
@@ -140,6 +141,17 @@ public class JobService
                                 {
                                      var instance = registry.Get(optionsType);
                                      ConfigurationBinder.Bind(instance, kvp.Value);
+
+                                     // Propagate Global Key if set
+                                     if (!string.IsNullOrEmpty(job.Key))
+                                     {
+                                         var prop = optionsType.GetProperty("Key");
+                                         if (prop != null && prop.CanWrite)
+                                         {
+                                             prop.SetValue(instance, job.Key);
+                                         }
+                                     }
+
                                      registry.RegisterByType(optionsType, instance);
                                 }
                             }
@@ -159,10 +171,30 @@ public class JobService
                 }
             }
 
-            // 4. Bind Options
+            // 4. Bind Options (CLI overrides YAML)
             foreach(var contributor in _contributors)
             {
                 contributor.BindOptions(parseResult, registry);
+                
+                // Propagate Global Key to Writers (if CLI binding didn't handle it or to override)
+                // Note: CLI binding usually happens via System.CommandLine binding to the options object directly if setup that way.
+                // But DtPipe uses manual binding mostly. 
+                // We double check and force the key if present.
+                if (!string.IsNullOrEmpty(job.Key) && contributor is IDataWriterFactory wFactory)
+                {
+                     var optionsType = wFactory.GetSupportedOptionTypes().FirstOrDefault();
+                     if (optionsType != null)
+                     {
+                         var instance = registry.Get(optionsType);
+                         var prop = optionsType.GetProperty("Key");
+                         if (prop != null && prop.CanWrite)
+                         {
+                             prop.SetValue(instance, job.Key);
+                             // Re-register to be safe, though it's likely the same reference
+                             registry.RegisterByType(optionsType, instance); 
+                         }
+                     }
+                }
             }
 
             // 5. Resolve Reader & Writer
@@ -218,7 +250,8 @@ public class JobService
                 Limit = job.Limit,
                 SampleRate = job.SampleRate,
                 SampleSeed = job.SampleSeed,
-                LogPath = job.LogPath
+                LogPath = job.LogPath,
+                Key = job.Key
             };
 
             // 8. Configure Logging

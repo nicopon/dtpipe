@@ -57,4 +57,9 @@ public sealed record DumpOptions
     /// Path to the log file. If set, file logging is enabled.
     /// </summary>
     public string? LogPath { get; init; }
+    /// <summary>
+    /// Comma-separated list of primary key columns for Upsert/Ignore strategies.
+    /// If null, auto-detection via schema inspection is attempted.
+    /// </summary>
+    public string? Key { get; init; }
 }

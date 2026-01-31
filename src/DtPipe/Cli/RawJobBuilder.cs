@@ -25,7 +25,8 @@ public static class RawJobBuilder
         Option<int> limitOption,
         Option<double> sampleRateOption,
         Option<int?> sampleSeedOption,
-        Option<string?> logOption)
+        Option<string?> logOption,
+        Option<string?> keyOption)
     {
         var jobFile = parseResult.GetValue(jobOption);
         JobDefinition job;
@@ -70,6 +71,12 @@ public static class RawJobBuilder
                 {
                     job = job with { LogPath = logPathOverride };
                 }
+
+                var keyOverride = parseResult.GetValue(keyOption);
+                if (!string.IsNullOrEmpty(keyOverride))
+                {
+                    job = job with { Key = keyOverride };
+                }
             }
             catch (Exception ex)
             {
@@ -110,7 +117,8 @@ public static class RawJobBuilder
                 Limit = parseResult.GetValue(limitOption),
                 SampleRate = parseResult.GetValue(sampleRateOption),
                 SampleSeed = parseResult.GetValue(sampleSeedOption),
-                LogPath = parseResult.GetValue(logOption)
+                LogPath = parseResult.GetValue(logOption),
+                Key = parseResult.GetValue(keyOption)
             };
         }
 

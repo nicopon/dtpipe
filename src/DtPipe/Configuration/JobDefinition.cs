@@ -61,6 +61,9 @@ public record JobDefinition
     /// </summary>
     public string? LogPath { get; init; }
 
+    // Incremental Loading
+    public string? Key { get; init; }
+
     /// <summary>
     /// Probability 0.0-1.0 to include a row.
     /// </summary>

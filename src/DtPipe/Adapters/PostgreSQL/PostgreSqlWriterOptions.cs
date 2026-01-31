@@ -7,6 +7,7 @@ public class PostgreSqlWriterOptions : IWriterOptions
 {
     public static string Prefix => PostgreSqlConstants.ProviderName;
     public static string DisplayName => "PostgreSQL Writer Options";
+    public string? Key { get; init; }
 
     // Writer Options
     [CliOption(Description = "Target table name")]
@@ -30,6 +31,8 @@ public enum PostgreSqlWriteStrategy
     Append,
     Truncate,
     DeleteThenInsert,
-    Recreate
+    Recreate,
+    Upsert,
+    Ignore
 }
 

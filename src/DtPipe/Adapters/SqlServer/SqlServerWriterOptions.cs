@@ -13,6 +13,7 @@ public record SqlServerWriterOptions : IProviderOptions
 {
     public static string Prefix => SqlServerConstants.ProviderName;
     public static string DisplayName => "SQL Server Writer Options";
+    public string? Key { get; init; }
 
     [CliOption(Description = "Target table name")]
     public string Table { get; set; } = "Export";
@@ -29,5 +30,7 @@ public enum SqlServerWriteStrategy
     Append,
     Truncate,
     DeleteThenInsert,
-    Recreate
+    Recreate,
+    Upsert,
+    Ignore
 }
