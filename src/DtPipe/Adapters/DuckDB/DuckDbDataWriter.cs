@@ -15,6 +15,8 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
     private readonly DuckDBConnection _connection;
     private readonly DuckDbWriterOptions _options;
     private IReadOnlyList<ColumnInfo>? _columns;
+    private string? _stagingTable; // Table to load data into before merging
+    private List<string> _keyColumns = new();
 
     public DuckDbDataWriter(string connectionString, DuckDbWriterOptions options)
     {
@@ -42,20 +44,10 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
             return new TargetSchemaInfo([], false, null, null, null);
         }
 
-        // Get columns from information_schema
-        var columnsSql = $@"
-            SELECT 
-                column_name,
-                data_type,
-                is_nullable
-            FROM information_schema.columns 
-            WHERE table_name = '{tableName}'
-            ORDER BY ordinal_position";
-        
+        // Use PRAGMA table_info which gives Name, Type, NotNull, PK (boolean)
         using var columnsCmd = connection.CreateCommand();
-        columnsCmd.CommandText = columnsSql;
+        columnsCmd.CommandText = $"PRAGMA table_info('{tableName}')";
 
-        // Get row count
         long? rowCount = null;
         try
         {
@@ -66,28 +58,28 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
         }
         catch { /* Row count not available */ }
 
-        // DuckDB doesn't have easy access to PK/UNIQUE constraints via SQL
-        // We'll return empty sets for now
         var pkColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var uniqueColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        // Build column list
         var columns = new List<TargetColumnInfo>();
+
         using var reader = await columnsCmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
-            var colName = reader.GetString(0);
-            var dataType = reader.GetString(1);
-            var isNullable = reader.GetString(2) == "YES";
+            // PRAGMA table_info: cid, name, type, notnull, dflt_value, pk
+            var colName = reader.GetString(1);
+            var dataType = reader.GetString(2);
+            var notNull = reader.GetBoolean(3);
+            var isPk = reader.GetBoolean(5);
 
+            if (isPk) pkColumns.Add(colName);
+            
             columns.Add(new TargetColumnInfo(
                 colName,
                 dataType.ToUpperInvariant(),
                 DuckDbTypeMapper.MapFromProviderType(dataType),
-                isNullable,
-                pkColumns.Contains(colName),
-                uniqueColumns.Contains(colName),
-                null // DuckDB doesn't expose max length easily
+                !notNull,
+                isPk,
+                false, // Unique not easily available
+                null
             ));
         }
 
@@ -153,6 +145,45 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
         cmd.CommandText = createTableSql;
         await cmd.ExecuteNonQueryAsync(ct);
 
+        // Incremental Loading Setup
+        if (_options.Strategy == DuckDbWriteStrategy.Upsert || _options.Strategy == DuckDbWriteStrategy.Ignore)
+        {
+            // 1. Resolve Keys
+            TargetSchemaInfo? targetInfoKeys = await InspectTargetAsync(ct);
+            // Use manual keys if provided
+            
+            if (targetInfoKeys?.PrimaryKeyColumns != null)
+            {
+                _keyColumns.AddRange(targetInfoKeys.PrimaryKeyColumns);
+            }
+
+            // TODO: Fallback to manual Keys if passed?
+            // The Architecture passes `options` (DuckDbWriterOptions) to Constructor.
+            // I need to add `Key` to `DuckDbWriterOptions` or update `CliDataWriterFactory` to map it.
+            
+            if (_keyColumns.Count == 0 && string.IsNullOrEmpty(_options.Key))
+            {
+                 throw new InvalidOperationException($"Strategy {_options.Strategy} requires a Primary Key. None detected and none specified.");
+            }
+
+             // If manual key is in options
+             if (!string.IsNullOrEmpty(_options.Key))
+             {
+                 _keyColumns.Clear();
+                 _keyColumns.AddRange(_options.Key.Split(',').Select(k => k.Trim()));
+             }
+
+            // 2. Create Staging Table
+            _stagingTable = $"{_options.Table}_stage_{Guid.NewGuid():N}";
+            // Create stage with same schema as target (or source cols?)
+            // Stage should match target schema to facilitate INSERT INTO SELECT
+            var createStageSql = BuildPropertiesCopySql(_options.Table, _stagingTable); // DuckDB "CREATE TABLE stage AS SELECT * FROM target WHERE 0=1"
+            
+            using var stageCmd = _connection.CreateCommand();
+            stageCmd.CommandText = $"CREATE TABLE {_stagingTable} AS SELECT * FROM {_options.Table} WHERE 1=0";
+            await stageCmd.ExecuteNonQueryAsync(ct);
+        }
+
         // Compute mapping: The Appender expects values in the PHYSICAL order of the table.
         // We must map that to our Source Columns.
         
@@ -184,7 +215,10 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
              _columnMapping = Enumerable.Range(0, _columns.Count).ToArray();
         }
 
-        _appender = _connection.CreateAppender(_options.Table);
+        // Initialize Appender
+        // If Staging, append to stage. Else append to target.
+        var targetForAppender = _stagingTable ?? _options.Table;
+        _appender = _connection.CreateAppender(targetForAppender);
     }
 
     public async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
@@ -262,11 +296,50 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
         else row.AppendValue(val.ToString());
     }
 
-    public ValueTask CompleteAsync(CancellationToken ct = default)
+    public async ValueTask CompleteAsync(CancellationToken ct = default)
     {
         _appender?.Dispose();
         _appender = null;
-        return ValueTask.CompletedTask;
+
+        if (_stagingTable != null)
+        {
+            try
+            {
+                // Perform Merge
+                var cols = _columns!.Select(c => c.Name).ToList(); // Source columns
+                // Actually we need the columns present in the table.
+                
+                // Construct ON CONFLICT clause
+                var conflictTarget = string.Join(", ", _keyColumns);
+                var updateSet = string.Join(", ", cols.Where(c => !_keyColumns.Contains(c, StringComparer.OrdinalIgnoreCase))
+                                                      .Select(c => $"{c} = EXCLUDED.{c}"));
+
+                var sql = new StringBuilder();
+                sql.Append($"INSERT INTO {_options.Table} SELECT * FROM {_stagingTable} "); // Assumes generic matching
+                
+                if (_options.Strategy == DuckDbWriteStrategy.Ignore)
+                {
+                    sql.Append($"ON CONFLICT ({conflictTarget}) DO NOTHING");
+                }
+                else if (_options.Strategy == DuckDbWriteStrategy.Upsert)
+                {
+                    sql.Append($"ON CONFLICT ({conflictTarget}) DO UPDATE SET {updateSet}");
+                }
+
+                using var mergeCmd = _connection.CreateCommand();
+                mergeCmd.CommandText = sql.ToString();
+                await mergeCmd.ExecuteNonQueryAsync(ct);
+            }
+            finally
+            {
+                // Drop Stage
+                using var dropCmd = _connection.CreateCommand();
+                dropCmd.CommandText = $"DROP TABLE IF EXISTS {_stagingTable}";
+                await dropCmd.ExecuteNonQueryAsync(ct);
+            }
+        }
+
+        return; // Already completed task
     }
 
     public async ValueTask DisposeAsync()
@@ -285,8 +358,19 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
             if (i > 0) sb.Append(", ");
             sb.Append($"{columns[i].Name} {DuckDbTypeMapper.MapToProviderType(columns[i].ClrType)}");
         }
+
+        if (!string.IsNullOrEmpty(_options.Key))
+        {
+             sb.Append($", PRIMARY KEY ({_options.Key})");
+        }
         
         sb.Append(")");
         return sb.ToString();
+    }
+
+    private string BuildPropertiesCopySql(string sourceTable, string targetTable)
+    {
+        // "CREATE TABLE target AS SELECT * FROM source WHERE 1=0"
+        return $"CREATE TABLE {targetTable} AS SELECT * FROM {sourceTable} WHERE 1=0";
     }
 }

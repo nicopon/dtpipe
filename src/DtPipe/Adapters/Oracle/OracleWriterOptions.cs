@@ -9,7 +9,9 @@ public enum OracleWriteStrategy
     Append,
     Truncate,
     DeleteThenInsert,
-    Recreate
+    Recreate,
+    Upsert,
+    Ignore
 }
 
 public enum OracleInsertMode
@@ -23,6 +25,7 @@ public record OracleWriterOptions : IProviderOptions
 {
     public static string Prefix => OracleConstants.ProviderName;
     public static string DisplayName => "Oracle Writer Options";
+    public string? Key { get; init; }
 
     [CliOption(Description = "Target table name")]
     public string Table { get; set; } = "Export";

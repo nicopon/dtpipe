@@ -15,6 +15,8 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
     private readonly PostgreSqlWriterOptions _options;
     private NpgsqlConnection? _connection;
     private NpgsqlBinaryImporter? _writer;
+    private string? _stagingTable;
+    private List<string> _keyColumns = new();
 
     private IReadOnlyList<ColumnInfo>? _columns;
 
@@ -218,9 +220,40 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
             await ExecuteNonQueryAsync($"TRUNCATE TABLE \"{_options.Table}\"", ct);
         }
 
+        // Incremental Loading Setup
+        string targetTable = _options.Table;
+
+        if (_options.Strategy == PostgreSqlWriteStrategy.Upsert || _options.Strategy == PostgreSqlWriteStrategy.Ignore)
+        {
+             // 1. Resolve Keys
+            var targetInfo = await InspectTargetAsync(ct);
+            if (targetInfo?.PrimaryKeyColumns != null)
+            {
+                _keyColumns.AddRange(targetInfo.PrimaryKeyColumns);
+            }
+
+            if (_keyColumns.Count == 0 && !string.IsNullOrEmpty(_options.Key))
+            {
+                 _keyColumns.AddRange(_options.Key.Split(',').Select(k => k.Trim()));
+            }
+
+            if (_keyColumns.Count == 0)
+            {
+                  throw new InvalidOperationException($"Strategy {_options.Strategy} requires a Primary Key. None detected. Please ensure the target table has a primary key.");
+            }
+             
+            // 2. Create Staging Table (TEMP table)
+            _stagingTable = $"tmp_stage_{Guid.NewGuid():N}";
+            // Remove ON COMMIT DROP because in autocommit mode it drops immediately.
+            // We explicit drop in CompleteAsync anyway.
+            await ExecuteNonQueryAsync($"CREATE TEMP TABLE \"{_stagingTable}\" (LIKE \"{_options.Table}\" INCLUDING DEFAULTS)", ct);
+            
+            targetTable = _stagingTable;
+        }
+
         // Begin Binary Import
         // Construct COPY command
-        var copySql = BuildCopySql(_options.Table, columns);
+        var copySql = BuildCopySql(targetTable, columns);
         _writer = await _connection.BeginBinaryImportAsync(copySql, ct);
     }
     
@@ -269,6 +302,36 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
         if (_writer != null)
         {
             await _writer.CompleteAsync(ct);
+            await _writer.DisposeAsync(); 
+            _writer = null;
+
+            // Perform Merge if Staging
+            if (_stagingTable != null)
+            {
+                var cols = _columns!.Select(c => $"\"{c.Name}\"").ToList();
+                var conflictTarget = string.Join(", ", _keyColumns.Select(c => $"\"{c}\""));
+                var updateSet = string.Join(", ", cols.Where(c => !_keyColumns.Contains(c.Replace("\"", ""), StringComparer.OrdinalIgnoreCase))
+                                                      .Select(c => $"{c} = EXCLUDED.{c}"));
+
+                var sb = new StringBuilder();
+                sb.Append($"INSERT INTO \"{_options.Table}\" ({string.Join(", ", cols)}) SELECT {string.Join(", ", cols)} FROM \"{_stagingTable}\" ");
+                
+                if (_options.Strategy == PostgreSqlWriteStrategy.Ignore)
+                {
+                    sb.Append($"ON CONFLICT ({conflictTarget}) DO NOTHING");
+                }
+                else if (_options.Strategy == PostgreSqlWriteStrategy.Upsert)
+                {
+                     sb.Append($"ON CONFLICT ({conflictTarget}) DO UPDATE SET {updateSet}");
+                }
+
+                // Debug SQL
+                Console.WriteLine($"[Postgres Merge SQL]: {sb}");
+
+                await ExecuteNonQueryAsync(sb.ToString(), ct);
+                // Temp table drops on commit/session end, but we can drop explicitly to be clean
+                await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS \"{_stagingTable}\"", ct);
+            }
         }
     }
 
@@ -294,6 +357,21 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
             if (i > 0) sb.Append(", ");
             // Use double quotes for column names to handle case sensitivity and keywords
             sb.Append($"\"{columns[i].Name}\" {PostgreSqlTypeMapper.Instance.MapToProviderType(columns[i].ClrType)}");
+        }
+
+        // PostgreSqlWriterOptions doesn't explicitly have Key property in current view, 
+        // BUT I propagated it via reflection in JobService.
+        // Wait, did I verify PostgreSqlWriterOptions HAS a Key property?
+        // I checked file previously... let me verify if I added it?
+        // Yes, in previous turn I viewed PostgreSqlWriterOptions and added Key.
+        // So _options.Key should access it.
+        // Wait, PostgreSqlDataWriter stores _options as PostgreSqlWriterOptions
+        
+        if (!string.IsNullOrEmpty(_options.Key))
+        {
+             // Use quoted column names for PK
+             var keys = _options.Key.Split(',').Select(k => $"\"{k.Trim()}\"");
+             sb.Append($", PRIMARY KEY ({string.Join(", ", keys)})");
         }
         
         sb.Append(")");

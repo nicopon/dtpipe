@@ -9,7 +9,9 @@ public enum DuckDbWriteStrategy
     Append,
     Truncate,
     DeleteThenInsert,
-    Recreate
+    Recreate,
+    Upsert,
+    Ignore
 }
 
 public record DuckDbWriterOptions : IProviderOptions
@@ -22,4 +24,5 @@ public record DuckDbWriterOptions : IProviderOptions
 
     [CliOption(Description = "Data write strategy (Append, Truncate, or Recreate)")]
     public DuckDbWriteStrategy Strategy { get; set; } = DuckDbWriteStrategy.Append;
+    public string? Key { get; init; }
 }

@@ -16,6 +16,7 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector
     private IReadOnlyList<ColumnInfo>? _columns;
     private string _tableName = "Export";
     private SqliteWriteStrategy _strategy = SqliteWriteStrategy.Append;
+    private List<string> _keyColumns = new();
 
     public SqliteDataWriter(string connectionString, OptionsRegistry registry)
     {
@@ -134,6 +135,29 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector
         await _connection.OpenAsync(ct);
 
         await HandleStrategyAsync(ct);
+        
+        // Resolve Keys for Incremental Strategies
+        if (_strategy == SqliteWriteStrategy.Upsert || _strategy == SqliteWriteStrategy.Ignore)
+        {
+             var targetInfo = await InspectTargetAsync(ct);
+             if (targetInfo?.PrimaryKeyColumns != null)
+             {
+                 _keyColumns.AddRange(targetInfo.PrimaryKeyColumns);
+             }
+
+             // Handle manual key override if available (need to refactor Options to pass Key here too? 
+             // Assume implicit pass via some mechanism or fix later. For now relies on PK detection.
+             // Actually, JobService passes DumpOptions.Key, but SqliteWriterOptions doesn't have it.
+             // SAME ISSUE AS PG/DUCKDB. 
+             // Workaround: If no PKs found, we can't Upsert.
+             
+             if (_keyColumns.Count == 0)
+             {
+                  // Try to see if options has Key? No, options is typed. 
+                  // If we really need manual keys, we must add Key to SqliteWriterOptions.
+                  throw new InvalidOperationException($"Strategy {_strategy} requires a Primary Key. None detected.");
+             }
+        }
     }
 
     private async Task HandleStrategyAsync(CancellationToken ct)
@@ -186,6 +210,12 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector
             sb.Append($"\"{col.Name}\" {SqliteTypeMapper.MapToProviderType(col.ClrType)}");
         }
 
+        var options = _registry.Get<SqliteWriterOptions>();
+        if (!string.IsNullOrEmpty(options.Key))
+        {
+             sb.Append($", PRIMARY KEY ({options.Key})");
+        }
+
         sb.Append(')');
 
         using var cmd = _connection!.CreateCommand();
@@ -205,7 +235,27 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector
             var columnNames = string.Join(", ", _columns.Select(c => $"\"{c.Name}\""));
 
             using var cmd = _connection.CreateCommand();
-            cmd.CommandText = $"INSERT INTO \"{_tableName}\" ({columnNames}) VALUES ({paramNames})";
+            
+            var sql = new StringBuilder();
+            if (_strategy == SqliteWriteStrategy.Ignore)
+            {
+                sql.Append($"INSERT OR IGNORE INTO \"{_tableName}\" ({columnNames}) VALUES ({paramNames})");
+            }
+            else if (_strategy == SqliteWriteStrategy.Upsert)
+            {
+                var conflictTarget = string.Join(", ", _keyColumns.Select(k => $"\"{k}\""));
+                var updateSet = string.Join(", ", _columns.Where(c => !_keyColumns.Contains(c.Name, StringComparer.OrdinalIgnoreCase))
+                                                      .Select(c => $"\"{c.Name}\" = excluded.\"{c.Name}\""));
+                
+                sql.Append($"INSERT INTO \"{_tableName}\" ({columnNames}) VALUES ({paramNames}) ");
+                sql.Append($"ON CONFLICT ({conflictTarget}) DO UPDATE SET {updateSet}");
+            }
+            else
+            {
+                 sql.Append($"INSERT INTO \"{_tableName}\" ({columnNames}) VALUES ({paramNames})");
+            }
+
+            cmd.CommandText = sql.ToString();
             cmd.Transaction = transaction;
 
             // Create parameters once

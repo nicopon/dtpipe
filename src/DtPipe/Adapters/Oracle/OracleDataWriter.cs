@@ -20,6 +20,12 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
     private OracleBulkCopy? _bulkCopy;
     private OracleCommand? _insertCommand;
     private OracleParameter[]? _insertParameters;
+    private OracleCommand? _updateCommand;
+    private OracleParameter[]? _updateParameters;
+
+    private List<string> _keyColumns = new();
+    private List<int> _keyIndices = new();
+    private BatchDiffProcessor? _diffProcessor;
 
     public OracleDataWriter(string connectionString, OracleWriterOptions options, ILogger<OracleDataWriter> logger)
     {
@@ -27,6 +33,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
         _options = options;
         _logger = logger;
         _connection = new OracleConnection(connectionString);
+        _diffProcessor = new BatchDiffProcessor(logger);
         _logger.LogDebug("OracleDataWriter created");
     }
 
@@ -357,6 +364,43 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
              _logger.LogDebug("Skipping table creation (Strategy=Append)");
         }
 
+        if (_options.Strategy == OracleWriteStrategy.Upsert || _options.Strategy == OracleWriteStrategy.Ignore)
+        {
+             // 1. Resolve Keys
+            var targetInfo = await InspectTargetAsync(ct);
+            if (targetInfo?.PrimaryKeyColumns != null)
+            {
+                _keyColumns.AddRange(targetInfo.PrimaryKeyColumns);
+            }
+
+            if (_keyColumns.Count == 0 && !string.IsNullOrEmpty(_options.Key))
+            {
+                 _keyColumns.AddRange(_options.Key.Split(',').Select(k => k.Trim()));
+            }
+
+            if (_keyColumns.Count == 0)
+            {
+                 // Fallback for manual keys (should have been passed properly)
+                 throw new InvalidOperationException($"Strategy {_options.Strategy} requires a Primary Key. None detected.");
+            }
+
+            // Resolve Indices
+            foreach(var key in _keyColumns)
+            {
+                var idx = -1;
+                for(int i=0; i<columns.Count; i++)
+                {
+                    if (string.Equals(columns[i].Name, key, StringComparison.OrdinalIgnoreCase))
+                    {
+                        idx = i;
+                        break;
+                    }
+                }
+                if (idx == -1) throw new InvalidOperationException($"Key column '{key}' not found in source columns.");
+                _keyIndices.Add(idx);
+            }
+        }
+
         // Initialize reusable objects
         InitializeCommands();
     }
@@ -415,6 +459,45 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
                 _insertCommand.Parameters.Add(_insertParameters[i]);
             }
         }
+
+        if (_options.Strategy == OracleWriteStrategy.Upsert && _keyColumns.Count > 0)
+        {
+            var sb = new StringBuilder();
+            sb.Append($"UPDATE {_targetTableName} SET ");
+            
+            var nonKeys = _columns!.Where(c => !_keyColumns.Contains(c.Name, StringComparer.OrdinalIgnoreCase)).ToList();
+            
+            for (int i = 0; i < nonKeys.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append($"\"{nonKeys[i].Name}\" = :{nonKeys[i].Name}");
+            }
+            
+            sb.Append(" WHERE ");
+            for (int i = 0; i < _keyColumns.Count; i++)
+            {
+                if (i > 0) sb.Append(" AND ");
+                sb.Append($"\"{_keyColumns[i]}\" = :{_keyColumns[i]}");
+            }
+            
+            var updateSql = sb.ToString();
+            _logger.LogDebug("Generated Update SQL: {Sql}", updateSql);
+
+            _updateCommand = _connection.CreateCommand();
+            _updateCommand.BindByName = true;
+            _updateCommand.CommandText = updateSql;
+
+            // Bind ALL columns by name for simplicity
+            _updateParameters = new OracleParameter[_columns!.Count];
+            for (int i = 0; i < _columns.Count; i++)
+            {
+                var p = _updateCommand.CreateParameter();
+                p.ParameterName = _columns[i].Name;
+                p.OracleDbType = OracleTypeMapper.GetOracleDbType(_columns[i].ClrType);
+                _updateCommand.Parameters.Add(p);
+                _updateParameters[i] = p;
+            }
+        }
     }
 
 
@@ -424,6 +507,34 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
         if (_columns is null) throw new InvalidOperationException("Not initialized");
 
 
+
+        if (_columns is null) throw new InvalidOperationException("Not initialized");
+
+        if (_options.Strategy == OracleWriteStrategy.Upsert || _options.Strategy == OracleWriteStrategy.Ignore)
+        {
+             // 1. Partition Batch
+             var (newRows, existingRows) = await _diffProcessor!.PartitionBatchAsync(
+                 rows, 
+                 _keyIndices,
+                 FetchExistingKeysAsync,
+                 ct);
+                 
+             // 2. Insert New Rows
+             if (newRows.Count > 0)
+             {
+                  _logger.LogDebug("Inserting {Count} new rows...", newRows.Count);
+                  await ExecuteArrayInsertAsync(newRows, ct);
+             }
+             
+             // 3. Update Existing Rows (if Upsert)
+             if (_options.Strategy == OracleWriteStrategy.Upsert && existingRows.Count > 0)
+             {
+                 _logger.LogDebug("Updating {Count} existing rows...", existingRows.Count);
+                 await ExecuteArrayUpdateAsync(existingRows, ct);
+             }
+             
+             return;
+        }
 
         if (_options.InsertMode == OracleInsertMode.Standard || _options.InsertMode == OracleInsertMode.Append)
         {
@@ -500,6 +611,120 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
         }
     }
 
+    private async Task<HashSet<string>> FetchExistingKeysAsync(IEnumerable<object[]> keys, CancellationToken ct)
+    {
+        // Chunking because Oracle IN clause limit ~1000
+        var allFoundKeys = new HashSet<string>();
+        var chunks = keys.Chunk(1000);
+        
+        foreach(var chunk in chunks)
+        {
+            var chunkList = chunk.ToList();
+            if (chunkList.Count == 0) continue;
+
+            using var cmd = _connection.CreateCommand();
+            cmd.BindByName = true;
+            
+            var sb = new StringBuilder();
+            sb.Append($"SELECT ");
+             // Select all Key Columns? Or just composite string?
+             // Since BatchDiffProcessor expects HashSet<string> (composite key string),
+             // We can select columns and composite them in C#.
+             for(int i=0; i<_keyColumns.Count; i++) 
+             {
+                 if (i>0) sb.Append(", ");
+                 sb.Append($"\"{_keyColumns[i]}\"");
+             }
+             sb.Append($" FROM {_targetTableName} WHERE ");
+             
+             // Composite IN clause is tricky in Oracle: (A,B) IN ((1,2), (3,4))
+             // Supported? Yes. WHERE (Key1, Key2) IN ((:v0_0, :v0_1), ...)
+             
+             sb.Append("(");
+             sb.Append(string.Join(", ", _keyColumns.Select(c => $"\"{c}\"")));
+             sb.Append(") IN (");
+             
+             for(int i=0; i<chunkList.Count; i++)
+             {
+                 if (i>0) sb.Append(", ");
+                 sb.Append("(");
+                 for(int k=0; k<_keyColumns.Count; k++)
+                 {
+                     if (k>0) sb.Append(", ");
+                     var pName = $"k_{i}_{k}";
+                     sb.Append($":{pName}");
+                     
+                     var p = cmd.CreateParameter();
+                     p.ParameterName = pName;
+                     p.Value = chunkList[i][k] ?? DBNull.Value;
+                     cmd.Parameters.Add(p);
+                 }
+                 sb.Append(")");
+             }
+             sb.Append(")");
+             
+            cmd.CommandText = sb.ToString();
+            
+            using var reader = await cmd.ExecuteReaderAsync(ct);
+            while(await reader.ReadAsync(ct))
+            {
+                var values = new object[_keyColumns.Count];
+                reader.GetValues(values);
+                allFoundKeys.Add(BatchDiffProcessor.GenerateKeyString(values));
+            }
+        }
+        return allFoundKeys;
+    }
+
+    private async Task ExecuteArrayInsertAsync(List<object?[]> rows, CancellationToken ct)
+    {
+        // Same logic as standard insert but extracted
+         if (_insertCommand == null || _insertParameters == null) return;
+         
+         await BindAndExecuteAsync(_insertCommand, _insertParameters, rows, ct);
+    }
+
+    private async Task ExecuteArrayUpdateAsync(List<object?[]> rows, CancellationToken ct)
+    {
+         if (_updateCommand == null || _updateParameters == null) return;
+         
+         await BindAndExecuteAsync(_updateCommand, _updateParameters, rows, ct);
+    }
+    
+    private async Task BindAndExecuteAsync(OracleCommand cmd, OracleParameter[] paramsArray, List<object?[]> rows, CancellationToken ct)
+    {
+            int rowCount = rows.Count;
+            cmd.ArrayBindCount = rowCount;
+
+            // Transpose rows to columns with type safety
+            for (int colIndex = 0; colIndex < _columns!.Count; colIndex++)
+            {
+                var colValues = new object?[rowCount];
+                var colType = _columns[colIndex].ClrType;
+                bool isBool = colType == typeof(bool);
+
+                for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+                {
+                    var val = rows[rowIndex][colIndex];
+                    if (val is null || val == DBNull.Value)
+                    {
+                        colValues[rowIndex] = DBNull.Value;
+                    }
+                    else if (isBool)
+                    {
+                        colValues[rowIndex] = ((bool)val) ? 1 : 0;
+                    }
+                    else
+                    {
+                        colValues[rowIndex] = val;
+                    }
+                }
+                paramsArray[colIndex].Value = colValues;
+            }
+            
+            await cmd.ExecuteNonQueryAsync(ct);
+    }
+
     public ValueTask CompleteAsync(CancellationToken ct = default)
     {
         return ValueTask.CompletedTask;
@@ -531,6 +756,13 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
         {
             if (i > 0) sb.Append(", ");
             sb.Append($"\"{columns[i].Name}\" {OracleTypeMapper.MapToProviderType(columns[i].ClrType)}");
+        }
+
+        if (!string.IsNullOrEmpty(_options.Key))
+        {
+             // Oracle quoted identifiers
+             var keys = _options.Key.Split(',').Select(k => $"\"{k.Trim()}\"");
+             sb.Append($", PRIMARY KEY ({string.Join(", ", keys)})");
         }
         
         sb.Append(")");
