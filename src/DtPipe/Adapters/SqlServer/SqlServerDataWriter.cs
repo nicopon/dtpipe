@@ -171,20 +171,6 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
             // If resolved != null, the table exists, and _targetTableName is set.
         }
         
-        // Logic fix: Ensure _targetTableName is set if it wasn't already (e.g. earlier exception path removed?)
-        // The earlier block (lines 78-90 in my new code) handles Recreate.
-        // Lines 91-99 handled exceptions. I need to make sure the structure is sound.
-        
-        // RE-WRITING LOGIC FLOW CLEARLY BELOW:
-        /*
-          1. Resolve.
-          2. If Resolved: Set _targetTableName.
-          3. If Not Resolved:
-             If Recreate: Parse -> Set _targetTableName.
-             If Other: Parse -> Set _targetTableName -> Try Create.
-          4. Execute specific Recreate/Truncate/Delete logic.
-        */
-
         // Configure SqlBulkCopy
         _bulkCopy = new SqlBulkCopy(_connection, SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.UseInternalTransaction, null)
         {
@@ -379,10 +365,7 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
         // 1. Create Staging Table
         var stageTable = $"#Stage_{Guid.NewGuid():N}";
 
-        // Create temp table with same structure as target (quickest way is SELECT INTO WHERE 1=0)
-        // But we need to be careful about column types if we use SELECT INTO.
-        // Better: Use the same create table logic or just standard "SELECT TOP 0 * INTO ...".
-        // SELECT INTO copies schema including nullability but NOT constraints/indexes. Perfect for staging.
+        // Create staging table by cloning target structure (SELECT INTO avoids constraints/indexes overhead)
         var createStageCmd = new SqlCommand($"SELECT TOP 0 * INTO [{stageTable}] FROM {_targetTableName}", _connection);
         await createStageCmd.ExecuteNonQueryAsync(ct);
         

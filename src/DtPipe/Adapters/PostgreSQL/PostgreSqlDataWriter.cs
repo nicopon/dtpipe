@@ -316,7 +316,7 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
         // Begin Binary Import
         // Construct COPY command - use staging table if Upsert/Ignore, otherwise use target
         var copyTarget = _stagingTable ?? _quotedTargetTableName;
-        var copySql = BuildCopySql(copyTarget, columns);
+        var copySql = BuildCopySql(copyTarget, _columns);
         _writer = await _connection.BeginBinaryImportAsync(copySql, ct);
     }
     
@@ -469,6 +469,7 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
         }
         
         sb.Append(")");
+
         return sb.ToString();
     }
 
