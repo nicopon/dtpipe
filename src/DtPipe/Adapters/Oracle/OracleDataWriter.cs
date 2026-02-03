@@ -42,11 +42,24 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
 
     public async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
     {
-        _logger.LogDebug("Starting target schema inspection for table {Table}", _targetTableName);
+        _logger.LogDebug("Starting target schema inspection for table {Table}", _options.Table);
         await using var connection = new OracleConnection(_connectionString);
         await connection.OpenAsync(ct);
 
-        var (owner, tableName) = ParseTableName(_targetTableName);
+        // Use native resolution (consistent with InitializeAsync)
+        // This handles synonyms, cross-schema tables, and proper Oracle name resolution
+        string owner, tableName;
+        try
+        {
+            (owner, tableName) = await ResolveTargetTableAsync(connection, _options.Table, ct);
+        }
+        catch
+        {
+            // Table doesn't exist or cannot be resolved
+            _logger.LogDebug("Table {Table} could not be resolved via DBMS_UTILITY.NAME_RESOLVE", _options.Table);
+            return new TargetSchemaInfo([], false, null, null, null);
+        }
+        
         bool hasOwner = !string.IsNullOrEmpty(owner);
 
         // Helper to switch between ALL_ (with owner check) and USER_ (implicit owner) views
@@ -798,6 +811,11 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
 
     private async Task<(string Schema, string Table)> ResolveTargetTableAsync(string inputName, CancellationToken ct)
     {
+        return await ResolveTargetTableAsync(_connection, inputName, ct);
+    }
+
+    private async Task<(string Schema, string Table)> ResolveTargetTableAsync(OracleConnection connection, string inputName, CancellationToken ct)
+    {
         // DBMS_UTILITY.NAME_RESOLVE signature:
         // PROCEDURE NAME_RESOLVE (
         //    name          IN  VARCHAR2, 
@@ -809,7 +827,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
         //    part1_type    OUT NUMBER, 
         //    object_number OUT NUMBER);
 
-        using var cmd = _connection.CreateCommand();
+        using var cmd = connection.CreateCommand();
         cmd.CommandText = @"
             DECLARE
               v_schema VARCHAR2(30);
