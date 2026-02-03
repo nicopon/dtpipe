@@ -6,7 +6,7 @@ using DtPipe.Core.Helpers;
 
 namespace DtPipe.Adapters.PostgreSQL;
 
-public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
+public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
 {
     private readonly string _connectionString;
     private readonly PostgreSqlWriterOptions _options;
@@ -157,7 +157,8 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
             true,
             rowCount >= 0 ? rowCount : null, // negative means stats not available
             sizeBytes,
-            pkColumns.Count > 0 ? pkColumns.ToList() : null
+            pkColumns.Count > 0 ? pkColumns.ToList() : null,
+            IsRowCountEstimate: true  // PostgreSQL uses reltuples from pg_class (statistics)
         );
     }
 
@@ -527,5 +528,31 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
     private string NormalizeIdentifier(string id)
     {
         return id.Trim('"');
+    }
+
+    // IKeyValidator implementation (Phase 1)
+    
+    public string? GetWriteStrategy()
+    {
+        return _options.Strategy.ToString();
+    }
+    
+    public IReadOnlyList<string>? GetRequestedPrimaryKeys()
+    {
+        if (string.IsNullOrEmpty(_options.Key))
+            return null;
+            
+        // Return the RAW user input (not yet resolved)
+        return _options.Key.Split(',')
+            .Select(k => k.Trim())
+            .Where(k => !string.IsNullOrEmpty(k))
+            .ToList();
+    }
+    
+    public bool RequiresPrimaryKey()
+    {
+        return _options.Strategy is 
+            PostgreSqlWriteStrategy.Upsert or 
+            PostgreSqlWriteStrategy.Ignore;
     }
 }

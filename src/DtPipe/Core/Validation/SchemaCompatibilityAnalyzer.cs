@@ -52,32 +52,23 @@ public static class SchemaCompatibilityAnalyzer
         {
             TargetColumnInfo? tgtCol = null;
 
+            // CRITICAL: Use ColumnMatcher as single source of truth
             if (dialect != null)
             {
-                // 1. Determine effective identifier sent to DB
-                // If dialect says it needs quoting or source says it is case sensitive, we quote it.
-                // Otherwise we normalize it.
-                
-                string effectivePhysicalName;
-                if (srcCol.IsCaseSensitive || dialect.NeedsQuoting(srcCol.Name))
-                {
-                     // Quoted. The physical name is the name stripped of quotes (which we don't have here, we have the name).
-                     // The Name inside quotes IS the physical name (case sensitive).
-                     effectivePhysicalName = srcCol.Name;
-                }
-                else
-                {
-                     // Unquoted. Normalized.
-                     effectivePhysicalName = dialect.Normalize(srcCol.Name);
-                }
-
-                // Find exact match in remaining target columns
-                tgtCol = remainingTargetCols.FirstOrDefault(c => c.Name.Equals(effectivePhysicalName, StringComparison.Ordinal));
+                tgtCol = Core.Helpers.ColumnMatcher.FindMatchingColumn(
+                    srcCol.Name,
+                    srcCol.IsCaseSensitive,
+                    remainingTargetCols,
+                    c => c.Name,
+                    dialect);
             }
             else
             {
-                // Fallback: Case Insensitive match
-                 tgtCol = remainingTargetCols.FirstOrDefault(c => c.Name.Equals(srcCol.Name, StringComparison.OrdinalIgnoreCase));
+                // Fallback: Case Insensitive match when no dialect available
+                tgtCol = Core.Helpers.ColumnMatcher.FindMatchingColumnCaseInsensitive(
+                    srcCol.Name,
+                    remainingTargetCols,
+                    c => c.Name);
             }
 
             if (tgtCol != null)

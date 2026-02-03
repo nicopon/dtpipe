@@ -12,8 +12,29 @@ public record DryRunResult(
     List<string> StepNames,
     SchemaCompatibilityReport? CompatibilityReport,
     string? SchemaInspectionError,
-    ISqlDialect? Dialect = null
+    ISqlDialect? Dialect = null,
+    KeyValidationResult? KeyValidation = null  // Phase 1: Primary key validation
 );
+
+/// <summary>
+/// Result of primary key validation in dry run.
+/// </summary>
+/// <param name="IsRequired">Does the strategy require a primary key?</param>
+/// <param name="RequestedKeys">Keys specified via --key option (raw user input)</param>
+/// <param name="ResolvedKeys">Keys successfully resolved against final schema</param>
+/// <param name="Errors">Error messages for unresolved or missing keys</param>
+public record KeyValidationResult(
+    bool IsRequired,
+    IReadOnlyList<string>? RequestedKeys,
+    IReadOnlyList<string>? ResolvedKeys,
+    IReadOnlyList<string>? Errors
+)
+{
+    /// <summary>
+    /// Returns true if validation passed (no errors).
+    /// </summary>
+    public bool IsValid => Errors == null || Errors.Count == 0;
+};
 
 /// <summary>
 /// Analyzes a data pipeline by running a sample of data through it.
@@ -97,7 +118,74 @@ public class DryRunAnalyzer
             }
         }
 
-        return new DryRunResult(samples, stepNames, compatibilityReport, schemaInspectionError, dialect);
+        // 4. Primary Key Validation (Phase 1 - NEW)
+        KeyValidationResult? keyValidation = null;
+        
+        if (inspector is IKeyValidator keyValidator && samples.Count > 0)
+        {
+            var finalSchema = traceSchemas.Last(); // Schema AFTER all transformations
+            keyValidation = ValidatePrimaryKeys(keyValidator, finalSchema, dialect);
+        }
+
+        return new DryRunResult(
+            samples, 
+            stepNames, 
+            compatibilityReport, 
+            schemaInspectionError, 
+            dialect,
+            keyValidation);  // Phase 1: Include key validation
+    }
+
+    private KeyValidationResult ValidatePrimaryKeys(
+        IKeyValidator validator,
+        IReadOnlyList<ColumnInfo> finalSchema,
+        ISqlDialect? dialect)
+    {
+        var isRequired = validator.RequiresPrimaryKey();
+        var requestedKeys = validator.GetRequestedPrimaryKeys();
+        
+        if (!isRequired)
+        {
+            // Strategy doesn't need a key (Recreate, Truncate, Append)
+            return new KeyValidationResult(false, null, null, null);
+        }
+        
+        if (requestedKeys == null || requestedKeys.Count == 0)
+        {
+            // Strategy requires a key but none was provided
+            return new KeyValidationResult(
+                true,
+                null,
+                null,
+                new[] { $"Strategy '{validator.GetWriteStrategy()}' requires a primary key. Specify with --key option." });
+        }
+        
+        // Validate each requested key
+        var resolvedKeys = new List<string>();
+        var errors = new List<string>();
+        
+        foreach (var keyName in requestedKeys)
+        {
+            // CRITICAL: Use ColumnMatcher for consistency with schema matching
+            var match = Core.Helpers.ColumnMatcher.FindMatchingColumnCaseInsensitive(
+                keyName,
+                finalSchema,
+                c => c.Name);
+            
+            if (match != null)
+            {
+                resolvedKeys.Add(match.Name);
+            }
+            else
+            {
+                var available = string.Join(", ", finalSchema.Select(c => c.Name));
+                errors.Add(
+                    $"Key column '{keyName}' not found in final schema. " +
+                    $"Available columns after transformations: {available}");
+            }
+        }
+        
+        return new KeyValidationResult(isRequired, requestedKeys, resolvedKeys, errors);
     }
 
     private SampleTrace ProcessRowThroughPipeline(
@@ -128,3 +216,4 @@ public class DryRunAnalyzer
         return new SampleTrace(stages);
     }
 }
+

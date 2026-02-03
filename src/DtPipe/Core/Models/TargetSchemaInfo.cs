@@ -8,12 +8,14 @@ namespace DtPipe.Core.Models;
 /// <param name="RowCount">Approximate number of rows (null if unknown or not applicable)</param>
 /// <param name="SizeBytes">Size in bytes (null if unknown or not applicable)</param>
 /// <param name="PrimaryKeyColumns">List of primary key column names (null if no PK or unknown)</param>
+/// <param name="IsRowCountEstimate">True if RowCount is based on statistics (Oracle, PostgreSQL), false if exact (DuckDB, SQLite)</param>
 public sealed record TargetSchemaInfo(
     IReadOnlyList<TargetColumnInfo> Columns,
     bool Exists,
     long? RowCount,
     long? SizeBytes,
-    IReadOnlyList<string>? PrimaryKeyColumns
+    IReadOnlyList<string>? PrimaryKeyColumns,
+    bool IsRowCountEstimate = false  // Default false for backward compatibility
 );
 
 /// <summary>

@@ -90,6 +90,19 @@ public class DryRunCliController
              Console.ReadKey(true);
         }
 
+        // 3.5. Render Primary Key Validation (Phase 1)
+        if (result.KeyValidation != null)
+        {
+            renderer.RenderKeyValidation(result.KeyValidation, _console);
+            
+            // If there's an error, pause before continuing
+            if (!result.KeyValidation.IsValid && result.KeyValidation.IsRequired)
+            {
+                _console.MarkupLine("[dim]Press any key to continue to trace analysis...[/]");
+                Console.ReadKey(true);
+            }
+        }
+
         // 4. Calculate Layout
         var hasSchemaWarning = !string.IsNullOrEmpty(result.SchemaInspectionError);
         var targetInfo = result.CompatibilityReport?.TargetInfo;
