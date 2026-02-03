@@ -1,9 +1,7 @@
-using System.Buffers;
 using System.Data;
 using System.Text.RegularExpressions;
 using Oracle.ManagedDataAccess.Client;
 using DtPipe.Core.Abstractions;
-using DtPipe.Cli.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 
@@ -77,11 +75,8 @@ public sealed partial class OracleStreamReader : IStreamReader, IRequiresOptions
             if (Regex.IsMatch(upperQuery, $@"\b{keyword}\b"))
             {
                 // Allow SELECT, but warn about embedded dangerous keywords
-                // This is a heuristic - embedded DDL in subqueries is rare but possible
                 if (keyword != "SELECT" && firstWord == "SELECT")
                 {
-                    // Only block if it's clearly at statement level (very basic check)
-                    // More sophisticated parsing would require a SQL parser
                     continue;
                 }
             }
@@ -165,10 +160,13 @@ public sealed partial class OracleStreamReader : IStreamReader, IRequiresOptions
         {
             for (var i = 0; i < reader.FieldCount; i++)
             {
+                var name = reader.GetName(i);
                 columns.Add(new ColumnInfo(
-                    reader.GetName(i),
+                    name,
                     reader.GetFieldType(i),
-                    true));
+                    true,
+                    IsCaseSensitive: name != name.ToUpperInvariant() // Oracle normalizes to UPPERCASE
+                ));
             }
             return columns;
         }
@@ -179,7 +177,10 @@ public sealed partial class OracleStreamReader : IStreamReader, IRequiresOptions
             var clrType = row["DataType"] as Type ?? typeof(object);
             var allowNull = row["AllowDBNull"] as bool? ?? true;
             
-            columns.Add(new ColumnInfo(name, clrType, allowNull));
+            // Oracle normalizes unquoted identifiers to UPPERCASE
+            // If column name contains lowercase, it was created with quotes (case-sensitive)
+            columns.Add(new ColumnInfo(name, clrType, allowNull, 
+                IsCaseSensitive: name != name.ToUpperInvariant()));
         }
 
         return columns;

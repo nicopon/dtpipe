@@ -1,8 +1,6 @@
 using DuckDB.NET.Data;
 using DtPipe.Core.Abstractions;
-using DtPipe.Cli.Abstractions;
 using DtPipe.Core.Models;
-using DtPipe.Core.Options;
 using System.Text;
 using DtPipe.Core.Helpers;
 using ColumnInfo = DtPipe.Core.Models.ColumnInfo;
@@ -17,6 +15,9 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
     private IReadOnlyList<ColumnInfo>? _columns;
     private string? _stagingTable; // Table to load data into before merging
     private List<string> _keyColumns = new();
+    
+    private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.DuckDbDialect();
+    public ISqlDialect Dialect => _dialect;
 
     public DuckDbDataWriter(string connectionString, DuckDbWriterOptions options)
     {
@@ -104,24 +105,28 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
     {
         _columns = columns;
         await _connection.OpenAsync(ct);
+        
+        // Smart Quoting
+        var targetTable = _dialect.NeedsQuoting(_options.Table) ? _dialect.Quote(_options.Table) : _options.Table;
 
         if (_options.Strategy == DuckDbWriteStrategy.Recreate)
         {
             var dropCmd = _connection.CreateCommand();
-            dropCmd.CommandText = $"DROP TABLE IF EXISTS {_options.Table}";
+            dropCmd.CommandText = $"DROP TABLE IF EXISTS {targetTable}";
             await dropCmd.ExecuteNonQueryAsync(ct);
         }
         else if (_options.Strategy == DuckDbWriteStrategy.DeleteThenInsert)
         {
              // Check if table exists before deleting
             var checkCmd = _connection.CreateCommand();
-            checkCmd.CommandText = $"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{_options.Table}'";
+            // check exists uses raw name in string literal roughly
+            checkCmd.CommandText = $"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{_options.Table}'"; 
             var exists = Convert.ToInt32(await checkCmd.ExecuteScalarAsync(ct)) > 0;
             
             if (exists)
             {
                 var delCmd = _connection.CreateCommand();
-                delCmd.CommandText = $"DELETE FROM {_options.Table}";
+                delCmd.CommandText = $"DELETE FROM {targetTable}";
                 await delCmd.ExecuteNonQueryAsync(ct);
             }
         }
@@ -135,12 +140,12 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
             if (exists)
             {
                 var truncCmd = _connection.CreateCommand();
-                truncCmd.CommandText = $"TRUNCATE TABLE {_options.Table}";
+                truncCmd.CommandText = $"TRUNCATE TABLE {targetTable}";
                 await truncCmd.ExecuteNonQueryAsync(ct);
             }
         }
 
-        var createTableSql = BuildCreateTableSql(_options.Table, columns);
+        var createTableSql = BuildCreateTableSql(targetTable, columns);
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = createTableSql;
         await cmd.ExecuteNonQueryAsync(ct);
@@ -157,10 +162,6 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
                 _keyColumns.AddRange(targetInfoKeys.PrimaryKeyColumns);
             }
 
-            // TODO: Fallback to manual Keys if passed?
-            // The Architecture passes `options` (DuckDbWriterOptions) to Constructor.
-            // I need to add `Key` to `DuckDbWriterOptions` or update `CliDataWriterFactory` to map it.
-            
             if (_keyColumns.Count == 0 && string.IsNullOrEmpty(_options.Key))
             {
                  throw new InvalidOperationException($"Strategy {_options.Strategy} requires a Primary Key. None detected and none specified.");
@@ -307,15 +308,39 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
             {
                 // Perform Merge
                 var cols = _columns!.Select(c => c.Name).ToList(); // Source columns
-                // Actually we need the columns present in the table.
                 
                 // Construct ON CONFLICT clause
-                var conflictTarget = string.Join(", ", _keyColumns);
-                var updateSet = string.Join(", ", cols.Where(c => !_keyColumns.Contains(c, StringComparer.OrdinalIgnoreCase))
-                                                      .Select(c => $"{c} = EXCLUDED.{c}"));
+                // keyColumns are strings. We should try to match them to _columns to get IsCaseSensitive info if possible.
+                // If not found in _columns (e.g. implicit rowid?), fallback to string quoting.
+                var conflictTargetParts = new List<string>();
+                foreach (var k in _keyColumns)
+                {
+                    var col = _columns!.FirstOrDefault(c => c.Name.Equals(k, StringComparison.OrdinalIgnoreCase));
+                    if (col != null)
+                    {
+                        conflictTargetParts.Add(SqlIdentifierHelper.GetSafeIdentifier(_dialect, col));
+                    }
+                    else
+                    {
+                        conflictTargetParts.Add(SqlIdentifierHelper.GetSafeIdentifier(_dialect, k));
+                    }
+                }
+                var conflictTarget = string.Join(", ", conflictTargetParts);
+                
+                var targetTable = _dialect.NeedsQuoting(_options.Table) ? _dialect.Quote(_options.Table) : _options.Table;
+                var stageTable = _stagingTable; // Stage is temp/internal, likely safe or handled local
+
+                // Update Set
+                // EXCLUDED in DuckDB upsert works like Postgres
+                var updateSet = string.Join(", ", _columns!.Where(c => !_keyColumns.Contains(c.Name, StringComparer.OrdinalIgnoreCase))
+                                                      .Select(c => 
+                                                      {
+                                                          var safe = SqlIdentifierHelper.GetSafeIdentifier(_dialect, c);
+                                                          return $"{safe} = EXCLUDED.{safe}";
+                                                      }));
 
                 var sql = new StringBuilder();
-                sql.Append($"INSERT INTO {_options.Table} SELECT * FROM {_stagingTable} "); // Assumes generic matching
+                sql.Append($"INSERT INTO {targetTable} SELECT * FROM {stageTable} "); 
                 
                 if (_options.Strategy == DuckDbWriteStrategy.Ignore)
                 {
@@ -338,8 +363,6 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
                 await dropCmd.ExecuteNonQueryAsync(ct);
             }
         }
-
-        return; // Already completed task
     }
 
     public async ValueTask DisposeAsync()
@@ -356,12 +379,13 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
         for (int i = 0; i < columns.Count; i++)
         {
             if (i > 0) sb.Append(", ");
-            sb.Append($"{columns[i].Name} {DuckDbTypeMapper.MapToProviderType(columns[i].ClrType)}");
+            sb.Append($"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, columns[i])} {DuckDbTypeMapper.MapToProviderType(columns[i].ClrType)}");
         }
 
         if (!string.IsNullOrEmpty(_options.Key))
         {
-             sb.Append($", PRIMARY KEY ({_options.Key})");
+             var keys = _options.Key.Split(',').Select(k => SqlIdentifierHelper.GetSafeIdentifier(_dialect, k.Trim()));
+             sb.Append($", PRIMARY KEY ({string.Join(", ", keys)})");
         }
         
         sb.Append(")");

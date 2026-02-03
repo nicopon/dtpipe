@@ -217,9 +217,9 @@ duckdb -csv -c "SELECT * FROM 'source.csv' WHERE active=true" | \
  
  ## Database Import & Migration
  
- DtPipe can write to DuckDB, SQLite, PostgreSQL, Oracle, and SQL Server using 4 standardized strategies.
+ DtPipe can write to DuckDB, SQLite, PostgreSQL, Oracle, and SQL Server using 6 standardized strategies.
  
- ### The 4 Write Strategies
+ ### Write Strategies
  
  Control how DtPipe handles existing tables using the `--[provider]-strategy` flag.
  
@@ -229,6 +229,10 @@ duckdb -csv -c "SELECT * FROM 'source.csv' WHERE active=true" | \
  | **Truncate** | Empties the table via native `TRUNCATE TABLE`. *(Not available for SQLite)* | Prudent refresh (preserves schema & indexes). |
  | **DeleteThenInsert** | Deletes rows (via `DELETE FROM`) then inserts. | Use when TRUNCATE is unavailable/restricted. |
  | **Recreate** | Drops the table (`DROP IF EXISTS`) and recreates it. | Full refresh including schema updates. |
+ | **Upsert** | Updates existing rows (by PK), inserts new ones. | Syncing data where source is source-of-truth. |
+ | **Ignore** | Inserts new rows, ignores existing ones (by PK). | Loading "missing" data only. |
+
+ > **Note for Upsert/Ignore**: These strategies require a Primary Key. DtPipe attempts to auto-detect it, but you can force it via `--key "Col1,Col2"`.
  
  ### Examples
  
@@ -252,6 +256,18 @@ duckdb -csv -c "SELECT * FROM 'source.csv' WHERE active=true" | \
    -o "ora:Data Source=PROD;..." \
    --ora-table "SALES_DATA" \
    --ora-strategy Append
+ ```
+ 
+ #### 3. Upsert with Explicit Key
+ Syncs data from CSV to SQL Server, updating existing records based on `OrderId`.
+ 
+ ```bash
+ ./dist/release/dtpipe \
+   -i "orders_update.csv" \
+   -o "mssql:Server=.;Database=mydb" \
+   --mssql-table "Orders" \
+   --mssql-strategy Upsert \
+   --key "OrderId"
  ```
  
  ---

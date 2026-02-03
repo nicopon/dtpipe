@@ -1,6 +1,5 @@
-using System.ComponentModel;
 using DtPipe.Core.Options;
-using DtPipe.Core.Attributes;
+using DtPipe.Cli.Attributes;
 
 namespace DtPipe.Adapters.Sqlite;
 

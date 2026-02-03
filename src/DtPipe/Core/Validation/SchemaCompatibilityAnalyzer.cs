@@ -1,6 +1,6 @@
-namespace DtPipe.Core.Validation;
-
 using DtPipe.Core.Models;
+
+namespace DtPipe.Core.Validation;
 
 /// <summary>
 /// Analyzes compatibility between source schema and target schema.
@@ -12,10 +12,12 @@ public static class SchemaCompatibilityAnalyzer
     /// </summary>
     /// <param name="sourceSchema">Schema of the data being written (after transformations)</param>
     /// <param name="targetSchema">Schema of the target (null if target doesn't exist)</param>
+    /// <param name="dialect">SQL Dialect for identifier matching (optional)</param>
     /// <returns>Compatibility report with warnings and errors</returns>
     public static SchemaCompatibilityReport Analyze(
         IReadOnlyList<ColumnInfo> sourceSchema,
-        TargetSchemaInfo? targetSchema)
+        TargetSchemaInfo? targetSchema,
+        DtPipe.Core.Abstractions.ISqlDialect? dialect = null)
     {
         var columns = new List<ColumnCompatibility>();
         var warnings = new List<string>();
@@ -26,7 +28,6 @@ public static class SchemaCompatibilityAnalyzer
         {
             foreach (var srcCol in sourceSchema)
             {
-                
                 columns.Add(new ColumnCompatibility(
                     srcCol.Name,
                     srcCol,
@@ -38,15 +39,48 @@ public static class SchemaCompatibilityAnalyzer
             return new SchemaCompatibilityReport(targetSchema, columns, warnings, errors);
         }
 
-        // Build lookup for target columns (case-insensitive)
-        var targetLookup = targetSchema.Columns
-            .ToDictionary(c => c.Name, c => c, StringComparer.OrdinalIgnoreCase);
+        // Build lookup for target columns
+        // Target columns are PHYSICAL names (usually).
+        // If we have a dialect, we should simulate how the DB resolves the source name to a physical name.
+        // If no dialect, fallback to fuzzy OrdinalIgnoreCase.
+        
+        // We use a mutable list of target columns to track matched ones
+        var remainingTargetCols = targetSchema.Columns.ToList();
 
         // Check each source column
         foreach (var srcCol in sourceSchema)
         {
-            
-            if (targetLookup.TryGetValue(srcCol.Name, out var tgtCol))
+            TargetColumnInfo? tgtCol = null;
+
+            if (dialect != null)
+            {
+                // 1. Determine effective identifier sent to DB
+                // If dialect says it needs quoting or source says it is case sensitive, we quote it.
+                // Otherwise we normalize it.
+                
+                string effectivePhysicalName;
+                if (srcCol.IsCaseSensitive || dialect.NeedsQuoting(srcCol.Name))
+                {
+                     // Quoted. The physical name is the name stripped of quotes (which we don't have here, we have the name).
+                     // The Name inside quotes IS the physical name (case sensitive).
+                     effectivePhysicalName = srcCol.Name;
+                }
+                else
+                {
+                     // Unquoted. Normalized.
+                     effectivePhysicalName = dialect.Normalize(srcCol.Name);
+                }
+
+                // Find exact match in remaining target columns
+                tgtCol = remainingTargetCols.FirstOrDefault(c => c.Name.Equals(effectivePhysicalName, StringComparison.Ordinal));
+            }
+            else
+            {
+                // Fallback: Case Insensitive match
+                 tgtCol = remainingTargetCols.FirstOrDefault(c => c.Name.Equals(srcCol.Name, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (tgtCol != null)
             {
                 var (status, message) = CheckColumnCompatibility(srcCol, tgtCol);
                 columns.Add(new ColumnCompatibility(srcCol.Name, srcCol, tgtCol, status, message));
@@ -60,7 +94,7 @@ public static class SchemaCompatibilityAnalyzer
                     warnings.Add($"Column '{srcCol.Name}': {message}");
                 }
                 
-                targetLookup.Remove(srcCol.Name);
+                remainingTargetCols.Remove(tgtCol);
             }
             else
             {
@@ -71,12 +105,12 @@ public static class SchemaCompatibilityAnalyzer
                     null,
                     CompatibilityStatus.MissingInTarget,
                     "Column does not exist in target - data will be lost"));
-                errors.Add($"Column '{srcCol.Name}': Missing in target schema - data will be lost unless table is recreated");
+                errors.Add($"Column '{srcCol.Name}': Missing in target schema (Checked as '{(dialect != null ? (srcCol.IsCaseSensitive || dialect.NeedsQuoting(srcCol.Name) ? srcCol.Name : dialect.Normalize(srcCol.Name)) : srcCol.Name)}') - data will be lost unless table is recreated");
             }
         }
 
         // Check for extra columns in target
-        foreach (var (name, tgtCol) in targetLookup)
+        foreach (var tgtCol in remainingTargetCols)
         {
             var status = tgtCol.IsNullable 
                 ? CompatibilityStatus.ExtraInTarget 
@@ -86,15 +120,15 @@ public static class SchemaCompatibilityAnalyzer
                 ? "Exists in target but not in source (will be NULL)"
                 : "Exists in target but not in source - NOT NULL constraint may fail";
                 
-            columns.Add(new ColumnCompatibility(name, null, tgtCol, status, message));
+            columns.Add(new ColumnCompatibility(tgtCol.Name, null, tgtCol, status, message));
             
             if (!tgtCol.IsNullable)
             {
-                errors.Add($"Column '{name}': {message}");
+                errors.Add($"Column '{tgtCol.Name}': {message}");
             }
             else
             {
-                warnings.Add($"Column '{name}': {message}");
+                warnings.Add($"Column '{tgtCol.Name}': {message}");
             }
         }
 

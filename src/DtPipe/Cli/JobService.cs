@@ -212,7 +212,7 @@ public class JobService
             if (!string.IsNullOrWhiteSpace(job.Query) && File.Exists(job.Query))
             {
                 _console.MarkupLine($"[grey]Loading query from file: {Markup.Escape(job.Query)}[/]");
-                job = job with { Query = await File.ReadAllTextAsync(job.Query, cancellationToken) };
+                job = job with { Query = File.ReadAllText(job.Query) }; // Sync read used globally for stability (prevents AVs on small files)
             }
 
             // 7. Validate Query

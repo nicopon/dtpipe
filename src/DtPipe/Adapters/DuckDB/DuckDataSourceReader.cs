@@ -131,10 +131,13 @@ public sealed partial class DuckDataSourceReader : IStreamReader, IRequiresOptio
         {
             for (var i = 0; i < reader.FieldCount; i++)
             {
+                var name = reader.GetName(i);
                 columns.Add(new ColumnInfo(
-                    reader.GetName(i),
+                    name,
                     reader.GetFieldType(i),
-                    true));
+                    true,
+                    IsCaseSensitive: name != name.ToLowerInvariant() // DuckDB normalizes to lowercase
+                ));
             }
             return columns;
         }
@@ -145,7 +148,10 @@ public sealed partial class DuckDataSourceReader : IStreamReader, IRequiresOptio
             var clrType = row["DataType"] as Type ?? typeof(object);
             var allowNull = row["AllowDBNull"] as bool? ?? true;
             
-            columns.Add(new ColumnInfo(name, clrType, allowNull));
+            // DuckDB normalizes unquoted identifiers to lowercase (like PostgreSQL)
+            // If column name contains uppercase, it was created with quotes (case-sensitive)
+            columns.Add(new ColumnInfo(name, clrType, allowNull, 
+                IsCaseSensitive: name != name.ToLowerInvariant()));
         }
 
         return columns;

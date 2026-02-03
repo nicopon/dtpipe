@@ -3,7 +3,6 @@ using System.Text;
 using CsvHelper;
 using CsvHelper.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Cli.Abstractions;
 using DtPipe.Core.Models;
 
 namespace DtPipe.Adapters.Csv;
@@ -13,6 +12,7 @@ public class CsvStreamReader : IStreamReader
     private readonly string _filePath;
     private readonly CsvReaderOptions _options;
 
+    private FileStream? _fileStream;
     private StreamReader? _streamReader;
     private CsvReader? _csvReader;
     private string[]? _headers;
@@ -41,7 +41,8 @@ public class CsvStreamReader : IStreamReader
         }
         else
         {
-            _streamReader = new StreamReader(_filePath, encoding);
+            _fileStream = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 81920, useAsync: true);
+            _streamReader = new StreamReader(_fileStream, encoding, detectEncodingFromByteOrderMarks: false, leaveOpen: false);
         }
         
         var config = new CsvConfiguration(CultureInfo.InvariantCulture)
@@ -130,8 +131,13 @@ public class CsvStreamReader : IStreamReader
     {
         _csvReader?.Dispose();
         _csvReader = null;
+        
         _streamReader?.Dispose();
         _streamReader = null;
+        
+        _fileStream?.Dispose();
+        _fileStream = null;
+        
         return ValueTask.CompletedTask;
     }
 }

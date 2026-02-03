@@ -5,6 +5,8 @@ SCRIPT_DIR="$(dirname "$0")"
 PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 DIST_DIR="$PROJECT_ROOT/dist/release"
 DTPIPE_BIN="$DIST_DIR/dtpipe"
+ARTIFACTS_DIR="tests/scripts/artifacts"
+mkdir -p "$ARTIFACTS_DIR"
 
 # Colors
 GREEN='\033[0;32m'
@@ -49,6 +51,7 @@ cleanup() {
     docker rm -f dtpipe-postgres &> /dev/null
     docker rm -f dtpipe-mssql &> /dev/null
     docker rm -f dtpipe-oracle &> /dev/null
+    rm -f "$ARTIFACTS_DIR"/postgres_out.csv "$ARTIFACTS_DIR"/mssql_out.csv "$ARTIFACTS_DIR"/oracle_out.csv
 }
 trap cleanup EXIT
 
@@ -70,17 +73,16 @@ EOF
 echo "Running export from Postgres..."
 $DTPIPE_BIN --input "pg:Host=localhost;Port=5432;Username=postgres;Password=mysecretpassword;Database=postgres" \
                --query "SELECT * FROM users ORDER BY id" \
-               --output "postgres_out.csv"
+               --output "$ARTIFACTS_DIR/postgres_out.csv"
 
 # Verify Output
-if grep -q "Alice" "postgres_out.csv" && grep -q "Bob" "postgres_out.csv"; then
+if grep -q "Alice" "$ARTIFACTS_DIR/postgres_out.csv" && grep -q "Bob" "$ARTIFACTS_DIR/postgres_out.csv"; then
     echo -e "${GREEN}✓ Postgres Test Passed${NC}"
 else
     echo -e "${RED}✗ Postgres Test Failed${NC}"
-    cat postgres_out.csv
+    cat "$ARTIFACTS_DIR/postgres_out.csv"
     exit 1
 fi
-rm postgres_out.csv
 
 # --- TEST: MSSQL ---
 echo "------------------------------------------------"
@@ -111,17 +113,16 @@ sleep 2
 echo "Running export from MSSQL..."
 $DTPIPE_BIN --input "mssql:Server=localhost,1433;Database=TestDB;User Id=sa;Password=MySecretPassword123!;TrustServerCertificate=True" \
                --query "SELECT * FROM Users ORDER BY Id" \
-               --output "mssql_out.csv"
+               --output "$ARTIFACTS_DIR/mssql_out.csv"
 
 # Verify Output
-if grep -q "Charlie" "mssql_out.csv" && grep -q "David" "mssql_out.csv"; then
+if grep -q "Charlie" "$ARTIFACTS_DIR/mssql_out.csv" && grep -q "David" "$ARTIFACTS_DIR/mssql_out.csv"; then
     echo -e "${GREEN}✓ MSSQL Test Passed${NC}"
 else
     echo -e "${RED}✗ MSSQL Test Failed${NC}"
-    cat mssql_out.csv
+    cat "$ARTIFACTS_DIR/mssql_out.csv"
     exit 1
 fi
-rm mssql_out.csv
 
 # --- TEST: Oracle ---
 echo "------------------------------------------------"
@@ -147,17 +148,16 @@ EOF
 echo "Running export from Oracle..."
 $DTPIPE_BIN --input "ora:Data Source=localhost:1521/FREEPDB1;User Id=system;Password=MySecretPassword123!;" \
                --query "SELECT * FROM Users ORDER BY Id" \
-               --output "oracle_out.csv"
+               --output "$ARTIFACTS_DIR/oracle_out.csv"
 
 # Verify Output
-if grep -q "Eve" "oracle_out.csv" && grep -q "Frank" "oracle_out.csv"; then
+if grep -q "Eve" "$ARTIFACTS_DIR/oracle_out.csv" && grep -q "Frank" "$ARTIFACTS_DIR/oracle_out.csv"; then
     echo -e "${GREEN}✓ Oracle Test Passed${NC}"
 else
     echo -e "${RED}✗ Oracle Test Failed${NC}"
-    cat oracle_out.csv
+    cat "$ARTIFACTS_DIR/oracle_out.csv"
     exit 1
 fi
-rm oracle_out.csv
 
 echo -e "${GREEN}All Docker tests passed!${NC}"
 exit 0

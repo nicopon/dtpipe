@@ -1,5 +1,4 @@
 namespace DtPipe.Cli.DryRun;
-
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Validation;
@@ -104,7 +103,7 @@ public class DryRunCliController
         }
 
         // Find errors for navigation
-        var errorIndices = FindErrorIndices(result.Samples, targetInfo);
+        var errorIndices = FindErrorIndices(result.Samples, targetInfo, result.Dialect);
         int initialIndex = errorIndices.Count > 0 ? errorIndices[0] : 0;
 
         if (errorIndices.Count > 0)
@@ -116,15 +115,57 @@ public class DryRunCliController
         navigator.Navigate(result.Samples, result.StepNames, columnWidths, result.SchemaInspectionError, targetInfo, initialIndex, errorIndices);
     }
     
-    private List<int> FindErrorIndices(List<SampleTrace> samples, TargetSchemaInfo? targetInfo)
+    private List<int> FindErrorIndices(List<SampleTrace> samples, TargetSchemaInfo? targetInfo, ISqlDialect? dialect)
     {
         var indices = new List<int>();
         if (targetInfo == null || !targetInfo.Exists) return indices;
 
+        // Pre-compute lookup for performance
+        // But samples all share the same schema (final stage).
+        
+        if (samples.Count == 0) return indices;
+        var schema = samples[0].Stages.Last().Schema;
+        
+        // Build map: SourceIndex -> TargetColumnInfo (or null)
+        var columnMap = new TargetColumnInfo?[schema.Count];
+        var remainingTargetCols = targetInfo.Columns.ToList();
+        
+        // We must replicate the matching logic from SchemaCompatibilityAnalyzer to be consistent
+        // Note: SchemaCompatibilityAnalyzer consumes target columns as it matches. 
+        // We should do the same to ensure 1:1 mapping if possible.
+        for (int k = 0; k < schema.Count; k++)
+        {
+            var srcCol = schema[k];
+            TargetColumnInfo? tgtCol = null;
+
+            if (dialect != null)
+            {
+                string effectivePhysicalName;
+                if (srcCol.IsCaseSensitive || dialect.NeedsQuoting(srcCol.Name))
+                {
+                     effectivePhysicalName = srcCol.Name;
+                }
+                else
+                {
+                     effectivePhysicalName = dialect.Normalize(srcCol.Name);
+                }
+                tgtCol = remainingTargetCols.FirstOrDefault(c => c.Name.Equals(effectivePhysicalName, StringComparison.Ordinal));
+            }
+            else
+            {
+                 tgtCol = remainingTargetCols.FirstOrDefault(c => c.Name.Equals(srcCol.Name, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (tgtCol != null)
+            {
+                columnMap[k] = tgtCol;
+                remainingTargetCols.Remove(tgtCol);
+            }
+        }
+
         for (int i = 0; i < samples.Count; i++)
         {
             var finalStage = samples[i].Stages.Last();
-            var schema = finalStage.Schema;
             var values = finalStage.Values;
             
             bool hasViolation = false;
@@ -133,8 +174,7 @@ public class DryRunCliController
             {
                 if (k >= values.Length) break;
                 
-                var colName = schema[k].Name;
-                var targetCol = targetInfo.Columns.FirstOrDefault(c => c.Name.Equals(colName, StringComparison.OrdinalIgnoreCase));
+                var targetCol = columnMap[k];
                 
                 if (targetCol != null)
                 {

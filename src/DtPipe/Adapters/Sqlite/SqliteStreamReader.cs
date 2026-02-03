@@ -92,7 +92,9 @@ public class SqliteStreamReader : IStreamReader
             columns.Add(new ColumnInfo(
                 reader.GetName(i),
                 reader.GetFieldType(i),
-                true)); // SQLite is dynamically typed, assume nullable
+                true, // SQLite is dynamically typed, assume nullable
+                IsCaseSensitive: false // SQLite is case-insensitive
+            ));
         }
         return columns;
     }

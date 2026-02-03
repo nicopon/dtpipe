@@ -1,16 +1,15 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using DtPipe.Cli;
 using DtPipe.Core.Abstractions;
-using DtPipe.Cli.Abstractions;
-using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Cli.Infrastructure;
-using DtPipe.Core.Pipelines;
 using DtPipe.Transformers.Format;
 using DtPipe.Transformers.Fake;
 using DtPipe.Transformers.Null;
 using DtPipe.Transformers.Overwrite;
 using DtPipe.Transformers.Script;
+using DtPipe.Transformers.Mask;
+using DtPipe.Transformers.Project;
 using DtPipe.Adapters.Oracle;
 using DtPipe.Adapters.SqlServer;
 using DtPipe.Adapters.DuckDB;
@@ -19,7 +18,7 @@ using DtPipe.Adapters.Csv;
 using DtPipe.Adapters.Parquet;
 using DtPipe.Adapters.PostgreSQL;
 using DtPipe.Adapters.Sample;
-
+using DtPipe.Adapters.Checksum;
 using Serilog;
 using Microsoft.Extensions.Logging;
 
@@ -98,19 +97,26 @@ class Program
         RegisterReader<SampleReaderDescriptor>(services);
         
         // Writer Factories using Generic Descriptor Bridge
-        RegisterWriter<Adapters.Csv.CsvWriterDescriptor>(services);
-        RegisterWriter<Adapters.Parquet.ParquetWriterDescriptor>(services);
-        RegisterWriter<Adapters.DuckDB.DuckDbWriterDescriptor>(services);
-        RegisterWriter<Adapters.Oracle.OracleWriterDescriptor>(services);
-        RegisterWriter<Adapters.Checksum.ChecksumWriterDescriptor>(services);
+        RegisterWriter<CsvWriterDescriptor>(services);
+        RegisterWriter<ParquetWriterDescriptor>(services);
+        RegisterWriter<DuckDbWriterDescriptor>(services);
+        RegisterWriter<OracleWriterDescriptor>(services);
+        RegisterWriter<ChecksumWriterDescriptor>(services);
         RegisterWriter<SqlServerWriterDescriptor>(services);
         RegisterWriter<PostgreSqlWriterDescriptor>(services);
         RegisterWriter<SqliteWriterDescriptor>(services);
         
-        /* 
-           Helper for DI Registration 
-           (Inlined logic for clean reading, ideally moved to extension method)
-        */
+        // Transformer Factories
+        services.AddSingleton<IDataTransformerFactory, NullDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, OverwriteDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, FakeDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, FormatDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, MaskDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, ScriptDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, ProjectDataTransformerFactory>();
+        
+        // Export Service
+        services.AddSingleton<ExportService>();
     }
 
     private static void RegisterWriter<TDesc>(IServiceCollection services) where TDesc : class, IProviderDescriptor<IDataWriter>, new()
@@ -129,17 +135,5 @@ class Program
             sp.GetRequiredService<OptionsRegistry>(),
             sp
         ));
-        
-        // Transformer Factories
-        services.AddSingleton<IDataTransformerFactory, NullDataTransformerFactory>();
-        services.AddSingleton<IDataTransformerFactory, OverwriteDataTransformerFactory>();
-        services.AddSingleton<IDataTransformerFactory, FakeDataTransformerFactory>();
-        services.AddSingleton<IDataTransformerFactory, FormatDataTransformerFactory>();
-        services.AddSingleton<IDataTransformerFactory, Transformers.Mask.MaskDataTransformerFactory>();
-        services.AddSingleton<IDataTransformerFactory, ScriptDataTransformerFactory>();
-        services.AddSingleton<IDataTransformerFactory, Transformers.Project.ProjectDataTransformerFactory>();
-        
-        // Export Service
-        services.AddSingleton<ExportService>();
     }
 }

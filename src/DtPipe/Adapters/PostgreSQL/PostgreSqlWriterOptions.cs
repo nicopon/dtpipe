@@ -1,4 +1,4 @@
-using DtPipe.Core.Attributes;
+using DtPipe.Cli.Attributes;
 using DtPipe.Core.Options;
 
 namespace DtPipe.Adapters.PostgreSQL;

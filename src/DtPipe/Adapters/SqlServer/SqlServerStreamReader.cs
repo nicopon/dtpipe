@@ -134,7 +134,9 @@ public sealed partial class SqlServerStreamReader : IStreamReader, IRequiresOpti
                 columns.Add(new ColumnInfo(
                     reader.GetName(i),
                     reader.GetFieldType(i),
-                    true));
+                    true,
+                    IsCaseSensitive: false // SQL Server is case-insensitive by default
+                ));
             }
             return columns;
         }
@@ -145,7 +147,9 @@ public sealed partial class SqlServerStreamReader : IStreamReader, IRequiresOpti
             var clrType = row["DataType"] as Type ?? typeof(object);
             var allowNull = row["AllowDBNull"] as bool? ?? true;
             
-            columns.Add(new ColumnInfo(name, clrType, allowNull));
+            // SQL Server is case-insensitive by default (collation-dependent)
+            // For simplicity, assume case-insensitive unless user has exotic collation
+            columns.Add(new ColumnInfo(name, clrType, allowNull, IsCaseSensitive: false));
         }
 
         return columns;

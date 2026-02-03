@@ -3,7 +3,7 @@ using System.CommandLine.Parsing;
 using System.ComponentModel;
 using System.Reflection;
 using DtPipe.Core.Options;
-using DtPipe.Core.Attributes;
+using DtPipe.Cli.Attributes;
 
 namespace DtPipe.Cli;
 
@@ -245,12 +245,6 @@ public static class CliOptionBuilder
             
             if (matchedOption is not null)
             {
-                // check if option was implicitly or explicitly matched? 
-                // ParseResult.GetValue returns default if not matched. 
-                // We shouldn't overwrite existing value with default if CLI didn't provide it?
-                // Actually System.CommandLine GetValue returns the value. 
-                // If we want to only overwrite if PRESENT, we need to check match result.
-                
                 // Check if option is explicitly present in the parse result (by checking tokens)
                 var hasOption = result.Tokens.Any(t => t.Value == matchedOption.Name || matchedOption.Aliases.Contains(t.Value));
                 

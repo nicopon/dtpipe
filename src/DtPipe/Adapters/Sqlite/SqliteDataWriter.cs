@@ -17,6 +17,9 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector
     private string _tableName = "Export";
     private SqliteWriteStrategy _strategy = SqliteWriteStrategy.Append;
     private List<string> _keyColumns = new();
+    
+    private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.SqliteDialect();
+    public ISqlDialect Dialect => _dialect;
 
     public SqliteDataWriter(string connectionString, OptionsRegistry registry)
     {
@@ -128,7 +131,8 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector
         _columns = columns;
 
         var options = _registry.Get<SqliteWriterOptions>();
-        _tableName = options.Table;
+        // Smart Quoting for Table Name
+        _tableName = _dialect.NeedsQuoting(options.Table) ? _dialect.Quote(options.Table) : options.Table;
         _strategy = options.Strategy;
 
         _connection = new SqliteConnection(_connectionString);
@@ -145,16 +149,8 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector
                  _keyColumns.AddRange(targetInfo.PrimaryKeyColumns);
              }
 
-             // Handle manual key override if available (need to refactor Options to pass Key here too? 
-             // Assume implicit pass via some mechanism or fix later. For now relies on PK detection.
-             // Actually, JobService passes DumpOptions.Key, but SqliteWriterOptions doesn't have it.
-             // SAME ISSUE AS PG/DUCKDB. 
-             // Workaround: If no PKs found, we can't Upsert.
-             
              if (_keyColumns.Count == 0)
              {
-                  // Try to see if options has Key? No, options is typed. 
-                  // If we really need manual keys, we must add Key to SqliteWriterOptions.
                   throw new InvalidOperationException($"Strategy {_strategy} requires a Primary Key. None detected.");
              }
         }
@@ -166,29 +162,30 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector
 
         if (_strategy == SqliteWriteStrategy.Recreate)
         {
-            cmd.CommandText = $"DROP TABLE IF EXISTS \"{_tableName}\"";
+            cmd.CommandText = $"DROP TABLE IF EXISTS {_tableName}";
             await cmd.ExecuteNonQueryAsync(ct);
             await CreateTableAsync(ct);
         }
         else if (_strategy == SqliteWriteStrategy.DeleteThenInsert)
         {
-            cmd.CommandText = $"SELECT name FROM sqlite_master WHERE type='table' AND name='{_tableName}'";
+            var rawName = _registry.Get<SqliteWriterOptions>().Table;
+            cmd.CommandText = $"SELECT name FROM sqlite_master WHERE type='table' AND name='{rawName}'";
             var exists = await cmd.ExecuteScalarAsync(ct) != null;
             
             if (exists)
             {
-                cmd.CommandText = $"DELETE FROM \"{_tableName}\"";
+                cmd.CommandText = $"DELETE FROM {_tableName}";
                 await cmd.ExecuteNonQueryAsync(ct);
             }
             else
             {
-                 // Behaves like Append/Create if table missing
                  await CreateTableAsync(ct);
             }
         }
         else // Append
         {
-            cmd.CommandText = $"SELECT name FROM sqlite_master WHERE type='table' AND name='{_tableName}'";
+            var rawName = _registry.Get<SqliteWriterOptions>().Table;
+            cmd.CommandText = $"SELECT name FROM sqlite_master WHERE type='table' AND name='{rawName}'";
             var exists = await cmd.ExecuteScalarAsync(ct) != null;
             
             if (!exists)
@@ -198,22 +195,24 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector
         }
     }
 
+
     private async Task CreateTableAsync(CancellationToken ct)
     {
         var sb = new StringBuilder();
-        sb.Append($"CREATE TABLE \"{_tableName}\" (");
+        sb.Append($"CREATE TABLE {_tableName} (");
 
         for (int i = 0; i < _columns!.Count; i++)
         {
             if (i > 0) sb.Append(", ");
             var col = _columns[i];
-            sb.Append($"\"{col.Name}\" {SqliteTypeMapper.MapToProviderType(col.ClrType)}");
+            sb.Append($"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, col)} {SqliteTypeMapper.MapToProviderType(col.ClrType)}");
         }
 
         var options = _registry.Get<SqliteWriterOptions>();
         if (!string.IsNullOrEmpty(options.Key))
         {
-             sb.Append($", PRIMARY KEY ({options.Key})");
+             var keys = options.Key.Split(',').Select(k => SqlIdentifierHelper.GetSafeIdentifier(_dialect, k.Trim()));
+             sb.Append($", PRIMARY KEY ({string.Join(", ", keys)})");
         }
 
         sb.Append(')');
@@ -232,27 +231,35 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector
             using var transaction = _connection!.BeginTransaction();
 
             var paramNames = string.Join(", ", Enumerable.Range(0, _columns!.Count).Select(i => $"@p{i}"));
-            var columnNames = string.Join(", ", _columns.Select(c => $"\"{c.Name}\""));
+            var columnNames = string.Join(", ", _columns.Select(c => SqlIdentifierHelper.GetSafeIdentifier(_dialect, c)));
 
             using var cmd = _connection.CreateCommand();
             
             var sql = new StringBuilder();
             if (_strategy == SqliteWriteStrategy.Ignore)
             {
-                sql.Append($"INSERT OR IGNORE INTO \"{_tableName}\" ({columnNames}) VALUES ({paramNames})");
+                sql.Append($"INSERT OR IGNORE INTO {_tableName} ({columnNames}) VALUES ({paramNames})");
             }
             else if (_strategy == SqliteWriteStrategy.Upsert)
             {
-                var conflictTarget = string.Join(", ", _keyColumns.Select(k => $"\"{k}\""));
-                var updateSet = string.Join(", ", _columns.Where(c => !_keyColumns.Contains(c.Name, StringComparer.OrdinalIgnoreCase))
-                                                      .Select(c => $"\"{c.Name}\" = excluded.\"{c.Name}\""));
+                // Conflict Target must be safe
+                var conflictTarget = string.Join(", ", _keyColumns.Select(k => SqlIdentifierHelper.GetSafeIdentifier(_dialect, k)));
                 
-                sql.Append($"INSERT INTO \"{_tableName}\" ({columnNames}) VALUES ({paramNames}) ");
+                // Update Set must use safe naming
+                // SafeName = excluded.SafeName
+                var updateSet = string.Join(", ", _columns.Where(c => !_keyColumns.Contains(c.Name, StringComparer.OrdinalIgnoreCase))
+                                                      .Select(c => 
+                                                      {
+                                                          var safe = SqlIdentifierHelper.GetSafeIdentifier(_dialect, c);
+                                                          return $"{safe} = excluded.{safe}";
+                                                      }));
+                
+                sql.Append($"INSERT INTO {_tableName} ({columnNames}) VALUES ({paramNames}) ");
                 sql.Append($"ON CONFLICT ({conflictTarget}) DO UPDATE SET {updateSet}");
             }
             else
             {
-                 sql.Append($"INSERT INTO \"{_tableName}\" ({columnNames}) VALUES ({paramNames})");
+                 sql.Append($"INSERT INTO {_tableName} ({columnNames}) VALUES ({paramNames})");
             }
 
             cmd.CommandText = sql.ToString();
