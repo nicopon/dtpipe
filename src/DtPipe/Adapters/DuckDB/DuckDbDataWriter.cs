@@ -14,6 +14,7 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
     private readonly DuckDbWriterOptions _options;
     private IReadOnlyList<ColumnInfo>? _columns;
     private string? _stagingTable; // Table to load data into before merging
+    private string _quotedTargetTableName = ""; // Computed once with smart quoting
     private List<string> _keyColumns = new();
     
     private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.DuckDbDialect();
@@ -106,13 +107,13 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
         _columns = columns;
         await _connection.OpenAsync(ct);
         
-        // Smart Quoting
-        var targetTable = _dialect.NeedsQuoting(_options.Table) ? _dialect.Quote(_options.Table) : _options.Table;
+        // Smart Quoting - compute once and reuse
+        _quotedTargetTableName = _dialect.NeedsQuoting(_options.Table) ? _dialect.Quote(_options.Table) : _options.Table;
 
         if (_options.Strategy == DuckDbWriteStrategy.Recreate)
         {
             var dropCmd = _connection.CreateCommand();
-            dropCmd.CommandText = $"DROP TABLE IF EXISTS {targetTable}";
+            dropCmd.CommandText = $"DROP TABLE IF EXISTS {_quotedTargetTableName}";
             await dropCmd.ExecuteNonQueryAsync(ct);
         }
         else if (_options.Strategy == DuckDbWriteStrategy.DeleteThenInsert)
@@ -126,7 +127,7 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
             if (exists)
             {
                 var delCmd = _connection.CreateCommand();
-                delCmd.CommandText = $"DELETE FROM {targetTable}";
+                delCmd.CommandText = $"DELETE FROM {_quotedTargetTableName}";
                 await delCmd.ExecuteNonQueryAsync(ct);
             }
         }
@@ -140,12 +141,12 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
             if (exists)
             {
                 var truncCmd = _connection.CreateCommand();
-                truncCmd.CommandText = $"TRUNCATE TABLE {targetTable}";
+                truncCmd.CommandText = $"TRUNCATE TABLE {_quotedTargetTableName}";
                 await truncCmd.ExecuteNonQueryAsync(ct);
             }
         }
 
-        var createTableSql = BuildCreateTableSql(targetTable, columns);
+        var createTableSql = BuildCreateTableSql(_quotedTargetTableName, columns);
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = createTableSql;
         await cmd.ExecuteNonQueryAsync(ct);
@@ -327,7 +328,7 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
                 }
                 var conflictTarget = string.Join(", ", conflictTargetParts);
                 
-                var targetTable = _dialect.NeedsQuoting(_options.Table) ? _dialect.Quote(_options.Table) : _options.Table;
+                // Use pre-computed quoted table name
                 var stageTable = _stagingTable; // Stage is temp/internal, likely safe or handled local
 
                 // Update Set
@@ -340,7 +341,7 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
                                                       }));
 
                 var sql = new StringBuilder();
-                sql.Append($"INSERT INTO {targetTable} SELECT * FROM {stageTable} "); 
+                sql.Append($"INSERT INTO {_quotedTargetTableName} SELECT * FROM {stageTable} "); 
                 
                 if (_options.Strategy == DuckDbWriteStrategy.Ignore)
                 {
