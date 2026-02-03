@@ -440,43 +440,73 @@ public class DryRunRenderer
         {
             content.AppendLine("[dim]Key requirement:[/] [grey]Not required for this strategy[/]");
         }
-        // Scenario 2: Key required but not provided
-        else if (validation.RequestedKeys == null || validation.RequestedKeys.Count == 0)
+        else 
         {
-            content.AppendLine("[dim]Key requirement:[/] [yellow]⚠️ Required[/]");
-            content.AppendLine("[red]❌ No primary key specified (use --key option)[/]");
-        }
-        // Scenario 3: Key provided and valid
-        else if (validation.IsValid)
-        {
-            content.AppendLine("[dim]Key requirement:[/] [green]✅ Required[/]");
-            content.AppendLine($"[dim]Requested keys:[/] {string.Join(", ", validation.RequestedKeys)}");
-            content.AppendLine($"[dim]Resolved keys:[/] [green]{string.Join(", ", validation.ResolvedKeys ?? new string[0])}[/]");
-        }
-        // Scenario 4: Key provided but has errors
-        else
-        {
-            content.AppendLine("[dim]Key requirement:[/] [red]❌ Required[/]");
-            content.AppendLine($"[dim]Requested keys:[/] {string.Join(", ", validation.RequestedKeys)}");
-            
-            if (validation.ResolvedKeys != null && validation.ResolvedKeys.Count > 0)
+            // Requirement Status
+            string reqStatus;
+            if (!validation.IsValid)
             {
-                content.AppendLine($"[dim]Resolved keys:[/] [yellow]{string.Join(", ", validation.ResolvedKeys)}[/]");
+                reqStatus = "[red]❌ Required[/]";
+            }
+            else if (validation.Warnings != null && validation.Warnings.Count > 0)
+            {
+                reqStatus = "[yellow]⚠️ Required (with warnings)[/]";
+            }
+            else
+            {
+                reqStatus = "[green]✅ Required[/]";
             }
             
-            if (validation.Errors != null && validation.Errors.Count > 0)
+            content.AppendLine($"[dim]Key requirement:[/] {reqStatus}");
+
+            // Requested Keys
+            if (validation.RequestedKeys != null && validation.RequestedKeys.Count > 0)
             {
-                content.AppendLine();
-                content.AppendLine("[red bold]Errors:[/]");
-                foreach (var error in validation.Errors)
-                {
-                    content.AppendLine($"[red]  • {Markup.Escape(error)}[/]");
-                }
+                 content.AppendLine($"[dim]Requested keys:[/] {string.Join(", ", validation.RequestedKeys)}");
+            }
+            else
+            {
+                 content.AppendLine($"[dim]Requested keys:[/] [red italic]None specified (use --key option)[/]");
+            }
+
+            // Resolved Keys
+            if (validation.ResolvedKeys != null && validation.ResolvedKeys.Count > 0)
+            {
+                var color = validation.IsValid ? "green" : "yellow";
+                content.AppendLine($"[dim]Resolved keys:[/] [{color}]{string.Join(", ", validation.ResolvedKeys)}[/]");
+            }
+
+            // Target Keys (New in Phase 2)
+            if (validation.TargetPrimaryKeys != null && validation.TargetPrimaryKeys.Count > 0)
+            {
+                content.AppendLine($"[dim]Target PK columns:[/] [blue]{string.Join(", ", validation.TargetPrimaryKeys)}[/]");
             }
         }
 
-        var panelStyle = validation.IsValid || !validation.IsRequired ? "green" : "red";
-        var panelIcon = validation.IsValid || !validation.IsRequired ? "🔑" : "❌";
+        // Warnings (New in Phase 2)
+        if (validation.Warnings != null && validation.Warnings.Count > 0)
+        {
+            content.AppendLine();
+            content.AppendLine("[yellow bold]Warnings:[/]");
+            foreach (var warning in validation.Warnings)
+            {
+                content.AppendLine($"[yellow]  • {Markup.Escape(warning)}[/]");
+            }
+        }
+
+        // Errors
+        if (validation.Errors != null && validation.Errors.Count > 0)
+        {
+            content.AppendLine();
+            content.AppendLine("[red bold]Errors:[/]");
+            foreach (var error in validation.Errors)
+            {
+                content.AppendLine($"[red]  • {Markup.Escape(error)}[/]");
+            }
+        }
+
+        var panelStyle = validation.IsValid ? (validation.Warnings?.Count > 0 ? "yellow" : "green") : "red";
+        var panelIcon = validation.IsValid ? (validation.Warnings?.Count > 0 ? "⚠️" : "🔑") : "❌";
         var panelHeader = $"[{panelStyle}]{panelIcon} Primary Key Validation[/]";
 
         var panel = new Panel(new Markup(content.ToString().TrimEnd()))

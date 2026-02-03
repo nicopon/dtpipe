@@ -16,25 +16,7 @@ public record DryRunResult(
     KeyValidationResult? KeyValidation = null  // Phase 1: Primary key validation
 );
 
-/// <summary>
-/// Result of primary key validation in dry run.
-/// </summary>
-/// <param name="IsRequired">Does the strategy require a primary key?</param>
-/// <param name="RequestedKeys">Keys specified via --key option (raw user input)</param>
-/// <param name="ResolvedKeys">Keys successfully resolved against final schema</param>
-/// <param name="Errors">Error messages for unresolved or missing keys</param>
-public record KeyValidationResult(
-    bool IsRequired,
-    IReadOnlyList<string>? RequestedKeys,
-    IReadOnlyList<string>? ResolvedKeys,
-    IReadOnlyList<string>? Errors
-)
-{
-    /// <summary>
-    /// Returns true if validation passed (no errors).
-    /// </summary>
-    public bool IsValid => Errors == null || Errors.Count == 0;
-};
+
 
 /// <summary>
 /// Analyzes a data pipeline by running a sample of data through it.
@@ -95,6 +77,9 @@ public class DryRunAnalyzer
         SchemaCompatibilityReport? compatibilityReport = null;
         string? schemaInspectionError = null;
         ISqlDialect? dialect = null;
+        
+        // 4. Primary Key Validation (Phase 2 - Enhanced)
+        KeyValidationResult? keyValidation = null;
 
         if (inspector != null)
         {
@@ -107,9 +92,17 @@ public class DryRunAnalyzer
             {
                 try
                 {
+                    // CRITICAL: Capture target info for PK validation
                     var targetSchema = await inspector.InspectTargetAsync(ct);
                     var finalSourceSchema = traceSchemas.Last();
+                    
                     compatibilityReport = SchemaCompatibilityAnalyzer.Analyze(finalSourceSchema, targetSchema, dialect);
+                    
+                    // 4. Primary Key Validation (Phase 2 - Enhanced)
+                    if (inspector is IKeyValidator keyValidator)
+                    {
+                        keyValidation = ValidatePrimaryKeys(keyValidator, finalSourceSchema, targetSchema, dialect);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -117,14 +110,14 @@ public class DryRunAnalyzer
                 }
             }
         }
-
-        // 4. Primary Key Validation (Phase 1 - NEW)
-        KeyValidationResult? keyValidation = null;
-        
-        if (inspector is IKeyValidator keyValidator && samples.Count > 0)
+        else
         {
-            var finalSchema = traceSchemas.Last(); // Schema AFTER all transformations
-            keyValidation = ValidatePrimaryKeys(keyValidator, finalSchema, dialect);
+            // No inspector, but purely validating key presence in schema (Phase 1 behavior)
+            if (inspector is IKeyValidator keyValidator && samples.Count > 0)
+            {
+                var finalSchema = traceSchemas.Last();
+                keyValidation = ValidatePrimaryKeys(keyValidator, finalSchema, null, dialect);
+            }
         }
 
         return new DryRunResult(
@@ -133,40 +126,38 @@ public class DryRunAnalyzer
             compatibilityReport, 
             schemaInspectionError, 
             dialect,
-            keyValidation);  // Phase 1: Include key validation
+            keyValidation); 
     }
 
     private KeyValidationResult ValidatePrimaryKeys(
         IKeyValidator validator,
         IReadOnlyList<ColumnInfo> finalSchema,
+        TargetSchemaInfo? targetInfo,
         ISqlDialect? dialect)
     {
         var isRequired = validator.RequiresPrimaryKey();
         var requestedKeys = validator.GetRequestedPrimaryKeys();
         
+        // Default result containers
+        var resolvedKeys = new List<string>();
+        var errors = new List<string>();
+        var warnings = new List<string>();
+        
+        // 1. Check Requirement
         if (!isRequired)
         {
-            // Strategy doesn't need a key (Recreate, Truncate, Append)
-            return new KeyValidationResult(false, null, null, null);
+            return new KeyValidationResult(false, requestedKeys, null, null, null, null);
         }
         
         if (requestedKeys == null || requestedKeys.Count == 0)
         {
-            // Strategy requires a key but none was provided
-            return new KeyValidationResult(
-                true,
-                null,
-                null,
-                new[] { $"Strategy '{validator.GetWriteStrategy()}' requires a primary key. Specify with --key option." });
+            errors.Add($"Strategy '{validator.GetWriteStrategy()}' requires a primary key. Specify with --key option.");
+            return new KeyValidationResult(true, null, null, null, errors, null);
         }
         
-        // Validate each requested key
-        var resolvedKeys = new List<string>();
-        var errors = new List<string>();
-        
+        // 2. Validate existence in Flow Schema (Output)
         foreach (var keyName in requestedKeys)
         {
-            // CRITICAL: Use ColumnMatcher for consistency with schema matching
             var match = Core.Helpers.ColumnMatcher.FindMatchingColumnCaseInsensitive(
                 keyName,
                 finalSchema,
@@ -179,13 +170,87 @@ public class DryRunAnalyzer
             else
             {
                 var available = string.Join(", ", finalSchema.Select(c => c.Name));
-                errors.Add(
-                    $"Key column '{keyName}' not found in final schema. " +
-                    $"Available columns after transformations: {available}");
+                errors.Add($"Key column '{keyName}' not found in final schema. Available columns: {available}");
             }
         }
-        
-        return new KeyValidationResult(isRequired, requestedKeys, resolvedKeys, errors);
+
+        // If schema validation failed, stop here
+        if (errors.Count > 0)
+        {
+            return new KeyValidationResult(true, requestedKeys, resolvedKeys, null, errors, null);
+        }
+
+        // 3. Cross-Validate against Target Table (Phase 2)
+        // Only if target exists and has PKs defined
+        if (targetInfo != null && targetInfo.Exists && targetInfo.PrimaryKeyColumns?.Count > 0)
+        {
+            var targetPKs = targetInfo.PrimaryKeyColumns;
+            
+            // Normalize resolved keys to physical names for comparison
+            var physicalResolvedKeys = resolvedKeys.Select(k => 
+                Core.Helpers.ColumnMatcher.ResolvePhysicalName(k, false, dialect)) // Assuming output cols are not case sensitive by default
+                .ToHashSet(StringComparer.OrdinalIgnoreCase); // Use set for easy lookup
+
+            // Check 1: Do we have all target PK columns?
+            // "Target requires (A, B) but user provided (A)" -> Error
+            var missingInUser = new List<string>();
+            foreach (var targetKey in targetPKs)
+            {
+                // We need to check if any physical resolved key matches this target key
+                // Since we normalized both (conceptually), we can check existence
+                // Note: ResolvePhysicalName might produce quoted names depending on dialect.
+                // TargetPKs from InspectTargetAsync should be raw names (usually).
+                
+                // Let's assume loose matching to be safe: 
+                // Does any resolved key normalize to this target key?
+                bool found = resolvedKeys.Any(rk => 
+                {
+                    var phys = Core.Helpers.ColumnMatcher.ResolvePhysicalName(rk, false, dialect);
+                    return phys.Equals(targetKey, StringComparison.OrdinalIgnoreCase);
+                });
+
+                if (!found)
+                {
+                    missingInUser.Add(targetKey);
+                }
+            }
+
+            if (missingInUser.Count > 0)
+            {
+                errors.Add($"Target table primary key requires columns: {string.Join(", ", targetPKs)}. Missing: {string.Join(", ", missingInUser)}.");
+            }
+
+            // Check 2: Do we have extra keys?
+            // "Target requires (A) but user provided (A, B)" -> Warning (or Error depending on strictness)
+            // Usually, using extra columns for key matching in Upsert is actually OK (it just becomes a more specific filter), 
+            // BUT for actual database constraints, it might be misleading.
+            // Let's treat it as a warning for now.
+             var extraInUser = new List<string>();
+             foreach (var rk in resolvedKeys)
+             {
+                 var phys = Core.Helpers.ColumnMatcher.ResolvePhysicalName(rk, false, dialect);
+                 if (!targetPKs.Contains(phys, StringComparer.OrdinalIgnoreCase))
+                 {
+                     extraInUser.Add(rk);
+                 }
+             }
+
+             if (extraInUser.Count > 0)
+             {
+                 warnings.Add($"User key includes columns not present in target primary key: {string.Join(", ", extraInUser)}. Upsert may behave unexpectedly.");
+             }
+
+             return new KeyValidationResult(true, requestedKeys, resolvedKeys, targetPKs, errors.Count > 0 ? errors : null, warnings.Count > 0 ? warnings : null);
+        }
+        else if (targetInfo != null && targetInfo.Exists && (targetInfo.PrimaryKeyColumns == null || targetInfo.PrimaryKeyColumns.Count == 0))
+        {
+            // Table exists but has NO PK.
+            // Upserting into a table without PK is dangerous/impossible efficiently.
+            warnings.Add("Target table has no primary key defined. Upsert strategy may degrade to Insert or fail.");
+             return new KeyValidationResult(true, requestedKeys, resolvedKeys, null, errors.Count > 0 ? errors : null, warnings);
+        }
+
+        return new KeyValidationResult(true, requestedKeys, resolvedKeys, null, errors.Count > 0 ? errors : null, null);
     }
 
     private SampleTrace ProcessRowThroughPipeline(
