@@ -2,7 +2,6 @@
 set -e
 
 # Resolve Project Root and Paths
-# Resolve Project Root and Paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 INFRA_DIR="$PROJECT_ROOT/tests/infra"
@@ -18,7 +17,7 @@ echo "========================================"
 
 # Always Build Release
 echo "🔨 Building Release..."
-"$PROJECT_ROOT/build.sh" > /dev/null
+"$PROJECT_ROOT/build.sh" > /dev/null || { echo "❌ Build Failed!"; exit 1; }
 
 # Check if binary exists (Double check)
 if [ ! -f "$DTPIPE" ]; then
@@ -36,14 +35,14 @@ cleanup() {
 trap cleanup EXIT
 
 
-echo "🐳 Starting Infrastructure (Postgres, MSSQL, Oracle)..."
+echo "🐳 Starting Infrastructure Postgres, MSSQL, Oracle..."
 docker-compose -f "$INFRA_DIR/docker-compose.yml" up -d
 
 echo "⏳ Waiting 60s for Databases to Initialize..."
 sleep 60
 
 echo "----------------------------------------"
-echo "Step 0: Generate Reference Source (CSV)"
+echo "Step 0: Generate Reference Source CSV"
 echo "----------------------------------------"
 # Sample -> CSV (Immutable Source)
 $DTPIPE --input "sample:100;Id=int;Amount=double;Created=date" \
@@ -55,7 +54,7 @@ echo "Step 0b: Generate Reference Checksum"
 echo "----------------------------------------"
 # CSV -> Checksum
 $DTPIPE --input "csv:$ARTIFACTS_DIR/reference.csv" \
-           --query "SELECT * FROM data" \
+           --query 'SELECT * FROM data' \
            --output "checksum:$ARTIFACTS_DIR/ref.hash"
 REF_HASH=$(cat "$ARTIFACTS_DIR/ref.hash")
 echo "Reference Hash: $REF_HASH"
@@ -64,7 +63,7 @@ echo "----------------------------------------"
 echo "Step 1: CSV -> Postgres"
 echo "----------------------------------------"
 PG_CONN="pg:Host=localhost;Port=5440;Database=integration;Username=postgres;Password=password"
-CMD1="$DTPIPE --input \"csv:$ARTIFACTS_DIR/reference.csv\" --query \"SELECT * FROM data\" --output \"$PG_CONN\""
+CMD1="$DTPIPE --input \"csv:$ARTIFACTS_DIR/reference.csv\" --query 'SELECT * FROM data' --output \"$PG_CONN\" --pg-table \"export\" --pg-strategy \"Recreate\""
 echo "Running: $CMD1"
 eval $CMD1
 
@@ -73,9 +72,10 @@ echo "Step 2: Postgres -> MSSQL"
 echo "----------------------------------------"
 MSSQL_CONN="mssql:Server=localhost,1434;Database=master;User Id=sa;Password=Password123!;TrustServerCertificate=True"
 $DTPIPE --input "$PG_CONN" \
-           --query "SELECT * FROM \"Export\"" \
+           --query 'SELECT * FROM export' \
            --output "$MSSQL_CONN" \
-           --mssql-table "ExportedData"
+           --mssql-table "ExportedData" \
+           --mssql-strategy "Recreate"
 
 echo "----------------------------------------"
 echo "Step 3: MSSQL -> Oracle"
@@ -86,16 +86,16 @@ sleep 20
 
 ORACLE_CONN="ora:Data Source=localhost:1522/FREEPDB1;User Id=testuser;Password=password;Pooling=false"
 $DTPIPE --input "$MSSQL_CONN" \
-           --query "SELECT * FROM ExportedData" \
+           --query 'SELECT * FROM ExportedData' \
            --output "$ORACLE_CONN" \
            --ora-table "EXPORT_DATA" \
-           --ora-strategy "Truncate" # Ensure clean table
+           --ora-strategy "Recreate" # Ensure clean table
 
 echo "----------------------------------------"
 echo "Step 4: Oracle -> Parquet"
 echo "----------------------------------------"
 $DTPIPE --input "$ORACLE_CONN" \
-           --query "SELECT * FROM EXPORT_DATA" \
+           --query 'SELECT * FROM EXPORT_DATA' \
            --output "$ARTIFACTS_DIR/test.parquet"
 
 echo "----------------------------------------"

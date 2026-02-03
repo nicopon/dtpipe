@@ -269,9 +269,6 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
             {
                 var p0 = parts[0].Trim('"');
                 var p1 = parts[1].Trim('"');
-                // If not quoted, uppercase it? No, ResolveTargetTableAsync already handles casing/quoting logic.
-                // But if it came from _options.Table (Recreate strategy), we might need normalization?
-                // Let's rely on IsQuoted verification.
                 
                 return (NormalizeIdentifier(parts[0]), NormalizeIdentifier(parts[1]));
             }
