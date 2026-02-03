@@ -208,7 +208,7 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
 
              if (_keyColumns.Count == 0 && !string.IsNullOrEmpty(_options.Key))
              {
-                 _keyColumns.AddRange(_options.Key.Split(',').Select(k => k.Trim()));
+                 _keyColumns.AddRange(ColumnHelper.ResolveKeyColumns(_options.Key, _columns));
              }
              
              if (_keyColumns.Count == 0)

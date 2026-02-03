@@ -251,7 +251,7 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
                 await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS {_quotedTargetTableName}", ct);
             }
             // Create table
-            var createSql = BuildCreateTableSql(_quotedTargetTableName, columns);
+            var createSql = BuildCreateTableSql(_quotedTargetTableName, _columns);
             await ExecuteNonQueryAsync(createSql, ct);
         }
         else if (_options.Strategy == PostgreSqlWriteStrategy.DeleteThenInsert)
@@ -259,7 +259,7 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
             // Table should exist - if not, create it
             if (resolved == null)
             {
-                var createSql = BuildCreateTableSql(_quotedTargetTableName, columns);
+                var createSql = BuildCreateTableSql(_quotedTargetTableName, _columns);
                 await ExecuteNonQueryAsync( createSql, ct);
             }
             await ExecuteNonQueryAsync($"DELETE FROM {_quotedTargetTableName}", ct);
@@ -269,7 +269,7 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
             // Table should exist - if not, create it first
             if (resolved == null)
             {
-                var createSql = BuildCreateTableSql(_quotedTargetTableName, columns);
+                var createSql = BuildCreateTableSql(_quotedTargetTableName, _columns);
                 await ExecuteNonQueryAsync(createSql, ct);
             }
             await ExecuteNonQueryAsync($"TRUNCATE TABLE {_quotedTargetTableName}", ct);
@@ -279,7 +279,7 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
             // Create table only if it doesn't exist
             if (resolved == null)
             {
-                var createSql = BuildCreateTableSql(_quotedTargetTableName, columns);
+                var createSql = BuildCreateTableSql(_quotedTargetTableName, _columns);
                 await ExecuteNonQueryAsync(createSql, ct);
             }
         }
@@ -297,7 +297,7 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
 
             if (_keyColumns.Count == 0 && !string.IsNullOrEmpty(_options.Key))
             {
-                 _keyColumns.AddRange(_options.Key.Split(',').Select(k => k.Trim()));
+                 _keyColumns.AddRange(ColumnHelper.ResolveKeyColumns(_options.Key, _columns));
             }
 
             if (_keyColumns.Count == 0)
@@ -451,20 +451,12 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
         
         if (!string.IsNullOrEmpty(_options.Key))
         {
-             var keyNames = _options.Key.Split(',').Select(k => k.Trim());
-             var safeKeys = new List<string>();
-             foreach(var k in keyNames)
+             var resolvedKeys = ColumnHelper.ResolveKeyColumns(_options.Key, columns.ToList());
+             var safeKeys = resolvedKeys.Select(keyName =>
              {
-                 var col = columns.FirstOrDefault(c => string.Equals(c.Name, k, StringComparison.OrdinalIgnoreCase));
-                 if (col != null)
-                 {
-                     safeKeys.Add(SqlIdentifierHelper.GetSafeIdentifier(_dialect, col));
-                 }
-                 else
-                 {
-                     safeKeys.Add(_dialect.Quote(k));
-                 }
-             }
+                 var col = columns.First(c => c.Name == keyName);
+                 return SqlIdentifierHelper.GetSafeIdentifier(_dialect, col);
+             }).ToList();
              sb.Append($", PRIMARY KEY ({string.Join(", ", safeKeys)})");
         }
         
