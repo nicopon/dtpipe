@@ -229,7 +229,7 @@ echo "✅ Query File Verified."
 echo "[8/9] Testing SQL Server..."
 MSSQL_CONN="mssql:Server=localhost,1434;Database=master;User Id=sa;Password=MySecretPassword123!;TrustServerCertificate=True"
 # Load Parquet -> MSSQL
-$DTPIPE_BIN -i "parquet:$INPUT_DIR/vicious.parquet" -o "$MSSQL_CONN" --mssql-table "ViciousUsers" --mssql-strategy Recreate > /dev/null
+$DTPIPE_BIN -i "$INPUT_DIR/vicious_source.csv" -o "$MSSQL_CONN" --mssql-table "ViciousUsers" --mssql-strategy Recreate > /dev/null
 # Verify Recreate
 $DTPIPE_BIN -i "$MSSQL_CONN" -q "SELECT COUNT(*) FROM ViciousUsers" -o "csv" > "$INPUT_DIR/result_mssql.csv"
 COUNT=$(tail -n 1 "$INPUT_DIR/result_mssql.csv" | tr -d '\r')

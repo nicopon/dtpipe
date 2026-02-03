@@ -423,7 +423,7 @@ public class DryRunRenderer
     }
 
     /// <summary>
-    /// Renders the primary key validation panel (Phase 1).
+    /// Renders the primary key validation panel.
     /// </summary>
     public void RenderKeyValidation(KeyValidationResult? validation, IAnsiConsole console)
     {
@@ -476,14 +476,14 @@ public class DryRunRenderer
                 content.AppendLine($"[dim]Resolved keys:[/] [{color}]{string.Join(", ", validation.ResolvedKeys)}[/]");
             }
 
-            // Target Keys (New in Phase 2)
+            // Target Keys
             if (validation.TargetPrimaryKeys != null && validation.TargetPrimaryKeys.Count > 0)
             {
                 content.AppendLine($"[dim]Target PK columns:[/] [blue]{string.Join(", ", validation.TargetPrimaryKeys)}[/]");
             }
         }
 
-        // Warnings (New in Phase 2)
+        // Warnings
         if (validation.Warnings != null && validation.Warnings.Count > 0)
         {
             content.AppendLine();
@@ -600,5 +600,60 @@ public class DryRunRenderer
         if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
         if (bytes < 1024 * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
         return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
+    }
+
+    /// <summary>
+    /// Renders the data constraint validation panel.
+    /// </summary>
+    public void RenderConstraintValidation(ConstraintValidationResult? validation, IAnsiConsole console)
+    {
+        if (validation == null) return;
+        
+        // If everything is valid, we might not want to show a big panel unless we want to be explicit.
+        // For now, let's only show if there are issues, or maybe a small green "Data Check Passed".
+        
+        if (validation.IsValid)
+        {
+            // Optional: Concise success message?
+            // console.MarkupLine("[green]✅ Data Sample Constraints Verified (NOT NULL, UNIQUE)[/]");
+            return; 
+        }
+
+        var content = new StringBuilder();
+
+        // Warnings (UNIQUE duplicates in sample)
+        if (validation.Warnings != null && validation.Warnings.Count > 0)
+        {
+            content.AppendLine("[yellow bold]⚠️ Constraint Warnings:[/]");
+            foreach (var warning in validation.Warnings)
+            {
+                content.AppendLine($"[yellow]  • {Markup.Escape(warning)}[/]");
+            }
+        }
+
+        // Errors (NOT NULL violations)
+        if (validation.Errors != null && validation.Errors.Count > 0)
+        {
+            if (validation.Warnings?.Count > 0) content.AppendLine();
+            
+            content.AppendLine("[red bold]❌ Data Violations:[/]");
+            foreach (var error in validation.Errors)
+            {
+                content.AppendLine($"[red]  • {Markup.Escape(error)}[/]");
+            }
+        }
+
+        var panelStyle = (validation.Errors?.Count > 0) ? "red" : "yellow";
+        var panelHeader = (validation.Errors?.Count > 0) ? "[red]❌ Data Constraint Violations[/]" : "[yellow]⚠️ Data Constraint Warnings[/]";
+
+        var panel = new Panel(new Markup(content.ToString().TrimEnd()))
+        {
+            Border = BoxBorder.Rounded,
+            Padding = new Padding(1, 0),
+            Header = new PanelHeader(panelHeader)
+        };
+
+        console.Write(panel);
+        console.WriteLine();
     }
 }
