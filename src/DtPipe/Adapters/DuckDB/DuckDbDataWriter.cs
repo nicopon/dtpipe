@@ -172,7 +172,7 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
              if (!string.IsNullOrEmpty(_options.Key))
              {
                  _keyColumns.Clear();
-                 _keyColumns.AddRange(_options.Key.Split(',').Select(k => k.Trim()));
+                 _keyColumns.AddRange(ColumnHelper.ResolveKeyColumns(_options.Key, _columns));
              }
 
             // 2. Create Staging Table

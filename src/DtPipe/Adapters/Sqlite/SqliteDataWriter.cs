@@ -149,6 +149,12 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector
                  _keyColumns.AddRange(targetInfo.PrimaryKeyColumns);
              }
 
+             // Allow manual key specification via options
+             if (_keyColumns.Count == 0 && !string.IsNullOrEmpty(options.Key))
+             {
+                 _keyColumns.AddRange(ColumnHelper.ResolveKeyColumns(options.Key, _columns));
+             }
+
              if (_keyColumns.Count == 0)
              {
                   throw new InvalidOperationException($"Strategy {_strategy} requires a Primary Key. None detected.");
@@ -211,7 +217,12 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector
         var options = _registry.Get<SqliteWriterOptions>();
         if (!string.IsNullOrEmpty(options.Key))
         {
-             var keys = options.Key.Split(',').Select(k => SqlIdentifierHelper.GetSafeIdentifier(_dialect, k.Trim()));
+             var resolvedKeys = ColumnHelper.ResolveKeyColumns(options.Key, _columns.ToList());
+             var keys = resolvedKeys.Select(keyName =>
+             {
+                 var col = _columns.First(c => c.Name == keyName);
+                 return SqlIdentifierHelper.GetSafeIdentifier(_dialect, col);
+             });
              sb.Append($", PRIMARY KEY ({string.Join(", ", keys)})");
         }
 

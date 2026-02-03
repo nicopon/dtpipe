@@ -472,7 +472,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
 
             if (_keyColumns.Count == 0 && !string.IsNullOrEmpty(_options.Key))
             {
-                 _keyColumns.AddRange(_options.Key.Split(',').Select(k => k.Trim()));
+                 _keyColumns.AddRange(ColumnHelper.ResolveKeyColumns(_options.Key, _columns));
             }
 
             if (_keyColumns.Count == 0)
@@ -545,7 +545,30 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
         else if (_options.InsertMode == OracleInsertMode.Bulk)
         {
             _bulkCopy = new OracleBulkCopy(_connection);
-            _bulkCopy.DestinationTableName = _targetTableName;
+            
+            // IMPORTANT: OracleBulkCopy requires SEPARATE properties for schema and table.
+            // Unlike SqlBulkCopy, it does NOT accept "SCHEMA.TABLE" format in DestinationTableName.
+            // We must split _targetTableName (e.g., "SYSTEM.PERFORMANCETEST") into:
+            //   - DestinationSchemaName = "SYSTEM"
+            //   - DestinationTableName = "PERFORMANCETEST"
+            // This allows cross-schema inserts (user != owner).
+            
+            if (_targetTableName.Contains('.'))
+            {
+                var parts = _targetTableName.Split('.');
+                // Remove quotes if present (e.g., "SYSTEM"."MyTable" -> SYSTEM, MyTable)
+                var schema = parts[0].Trim('"');
+                var table = parts[1].Trim('"');
+                
+                _bulkCopy.DestinationSchemaName = schema;
+                _bulkCopy.DestinationTableName = table;
+            }
+            else
+            {
+                // No schema prefix, use table name only (defaults to connection user's schema)
+                _bulkCopy.DestinationTableName = _targetTableName.Trim('"');
+            }
+            
             _bulkCopy.BulkCopyTimeout = 0;
             foreach (var col in _columns!)
             {
@@ -764,20 +787,12 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
 
         if (!string.IsNullOrEmpty(_options.Key))
         {
-             var keyNames = _options.Key.Split(',').Select(k => k.Trim());
-             var safeKeys = new List<string>();
-             foreach(var k in keyNames)
+             var resolvedKeys = ColumnHelper.ResolveKeyColumns(_options.Key, columns.ToList());
+             var safeKeys = resolvedKeys.Select(keyName =>
              {
-                 var col = columns.FirstOrDefault(c => string.Equals(c.Name, k, StringComparison.OrdinalIgnoreCase));
-                 if (col != null)
-                 {
-                     safeKeys.Add(SqlIdentifierHelper.GetSafeIdentifier(_dialect, col));
-                 }
-                 else
-                 {
-                     safeKeys.Add(_dialect.Quote(k));
-                 }
-             }
+                 var col = columns.First(c => c.Name == keyName);
+                 return SqlIdentifierHelper.GetSafeIdentifier(_dialect, col);
+             }).ToList();
              sb.Append($", PRIMARY KEY ({string.Join(", ", safeKeys)})");
         }
         
