@@ -4,8 +4,8 @@ set -e
 # Resolve Project Root and Paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-OUTPUT_DIR="$SCRIPT_DIR/output"
-
+OUTPUT_DIR="$SCRIPT_DIR/artifacts"
+mkdir -p "$OUTPUT_DIR"
 # Path to binary (Release build)
 DTPIPE="$PROJECT_ROOT/dist/release/dtpipe"
 

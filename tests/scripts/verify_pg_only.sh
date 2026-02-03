@@ -107,14 +107,14 @@ echo "Postgres: Upsert Strategy"
 $DTPIPE_BIN -i "source_v1.csv" -o "$PG_CONN" --pg-table "users_upsert" --pg-strategy Recreate --key "Id" > /dev/null
 echo "Running Upsert..."
 $DTPIPE_BIN -i "source_v2.csv" -o "$PG_CONN" --pg-table "users_upsert" --pg-strategy Upsert --key "Id"
-$DTPIPE_BIN -i "$PG_CONN" -q "SELECT * FROM users_upsert ORDER BY \"Id\"" -o "result_pg_upsert.csv" > /dev/null
+$DTPIPE_BIN -i "$PG_CONN" -q "SELECT * FROM users_upsert ORDER BY id" -o "result_pg_upsert.csv" > /dev/null
 verify_upsert "result_pg_upsert.csv"
 
 # B. Ignore Test
 echo "Postgres: Ignore Strategy"
 $DTPIPE_BIN -i "source_v1.csv" -o "$PG_CONN" --pg-table "users_ignore" --pg-strategy Recreate --key "Id" > /dev/null
 $DTPIPE_BIN -i "source_v2.csv" -o "$PG_CONN" --pg-table "users_ignore" --pg-strategy Ignore --key "Id" > /dev/null
-$DTPIPE_BIN -i "$PG_CONN" -q "SELECT * FROM users_ignore ORDER BY \"Id\"" -o "result_pg_ignore.csv" > /dev/null
+$DTPIPE_BIN -i "$PG_CONN" -q "SELECT * FROM users_ignore ORDER BY id" -o "result_pg_ignore.csv" > /dev/null
 verify_ignore "result_pg_ignore.csv"
 
 
