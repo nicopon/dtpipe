@@ -186,7 +186,7 @@ if [ "$USE_DOCKER" -eq 1 ]; then
     
     # A. Upsert Test (Debug enabled: no > /dev/null)
     echo "Postgres: Upsert Strategy"
-    $DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v1.csv" -o "$PG_CONN" --pg-table "users_upsert" --pg-strategy Recreate --key "Id" > /dev/null
+    $DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v1.csv" -o "$PG_CONN" --pg-table "users_upsert" --pg-strategy Recreate --key "id" > /dev/null
     echo "Running Upsert..."
     $DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v2.csv" -o "$PG_CONN" --pg-table "users_upsert" --pg-strategy Upsert --key "Id"
     $DTPIPE_BIN -i "$PG_CONN" -q "SELECT * FROM users_upsert ORDER BY Id" -o "$ARTIFACTS_DIR/result_pg_upsert.csv" > /dev/null
