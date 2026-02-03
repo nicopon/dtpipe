@@ -158,6 +158,7 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
             rowCount >= 0 ? rowCount : null, // negative means stats not available
             sizeBytes,
             pkColumns.Count > 0 ? pkColumns.ToList() : null,
+            uniqueColumns.Count > 0 ? uniqueColumns.ToList() : null,
             IsRowCountEstimate: true  // PostgreSQL uses reltuples from pg_class (statistics)
         );
     }

@@ -302,6 +302,28 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
             }
         }
 
+        // Get Unique Columns (Phase 3)
+        var uniqueCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        {
+            var uqCmd = new SqlCommand(@"
+                SELECT KCU.COLUMN_NAME
+                FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS TC
+                JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE KCU ON TC.CONSTRAINT_NAME = KCU.CONSTRAINT_NAME
+                    AND TC.TABLE_SCHEMA = KCU.TABLE_SCHEMA
+                WHERE TC.CONSTRAINT_TYPE = 'UNIQUE' 
+                  AND TC.TABLE_SCHEMA = @Schema 
+                  AND TC.TABLE_NAME = @Table
+                ORDER BY KCU.ORDINAL_POSITION", connection);
+            uqCmd.Parameters.AddWithValue("@Schema", schema);
+            uqCmd.Parameters.AddWithValue("@Table", table);
+            
+            using var uqReader = await uqCmd.ExecuteReaderAsync(ct);
+            while(await uqReader.ReadAsync(ct))
+            {
+                uniqueCols.Add(uqReader.GetString(0));
+            }
+        }
+
         // Get Row Count Estimate (sys.partitions)
         var countCmd = new SqlCommand(@"
             SELECT SUM(p.rows) 
@@ -321,6 +343,7 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
             rowCount, 
             null, 
             pkCols.Count > 0 ? pkCols.ToList() : null,
+            uniqueCols.Count > 0 ? uniqueCols.ToList() : null,
             IsRowCountEstimate: true // SQL Server sys.partitions is an estimate
         );
     }

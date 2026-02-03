@@ -13,7 +13,8 @@ public record DryRunResult(
     SchemaCompatibilityReport? CompatibilityReport,
     string? SchemaInspectionError,
     ISqlDialect? Dialect = null,
-    KeyValidationResult? KeyValidation = null  // Phase 1: Primary key validation
+    KeyValidationResult? KeyValidation = null,
+    ConstraintValidationResult? ConstraintValidation = null
 );
 
 
@@ -78,8 +79,11 @@ public class DryRunAnalyzer
         string? schemaInspectionError = null;
         ISqlDialect? dialect = null;
         
-        // 4. Primary Key Validation (Phase 2 - Enhanced)
+        // 4. Primary Key Validation
         KeyValidationResult? keyValidation = null;
+        
+        // 5. Data Constraint Validation
+        ConstraintValidationResult? constraintValidation = null;
 
         if (inspector != null)
         {
@@ -98,10 +102,16 @@ public class DryRunAnalyzer
                     
                     compatibilityReport = SchemaCompatibilityAnalyzer.Analyze(finalSourceSchema, targetSchema, dialect);
                     
-                    // 4. Primary Key Validation (Phase 2 - Enhanced)
+                    // 4. Primary Key Validation
                     if (inspector is IKeyValidator keyValidator)
                     {
                         keyValidation = ValidatePrimaryKeys(keyValidator, finalSourceSchema, targetSchema, dialect);
+                    }
+                    
+                    // 5. Data Constraint Validation
+                    if (targetSchema != null && targetSchema.Exists)
+                    {
+                        constraintValidation = ValidateDataConstraints(samples, targetSchema, dialect);
                     }
                 }
                 catch (Exception ex)
@@ -126,7 +136,97 @@ public class DryRunAnalyzer
             compatibilityReport, 
             schemaInspectionError, 
             dialect,
-            keyValidation); 
+            keyValidation,
+            constraintValidation); 
+    }
+
+    private ConstraintValidationResult ValidateDataConstraints(
+        List<SampleTrace> samples,
+        TargetSchemaInfo targetInfo,
+        ISqlDialect? dialect)
+    {
+        var errors = new List<string>();
+        var warnings = new List<string>();
+        
+        if (samples.Count == 0 || targetInfo.Columns.Count == 0)
+        {
+             return new ConstraintValidationResult(errors, warnings);
+        }
+
+        // We use the FINAL stage of the sample (what is about to be written)
+        var sampleSchema = samples[0].Stages.Last().Schema;
+        
+        // Cache column indices for faster lookup
+        // We match Sample Column Name -> Target Column Name
+        // (Using ColumnMatcher with fuzzy matching)
+        
+        var colMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for(int i=0; i<sampleSchema.Count; i++)
+        {
+            colMap[sampleSchema[i].Name] = i;
+        }
+
+        // 1. Validate NOT NULL Constraints against Sample
+        foreach (var targetCol in targetInfo.Columns)
+        {
+            if (!targetCol.IsNullable)
+            {
+                // Find corresponding source column
+                var match = Core.Helpers.ColumnMatcher.FindMatchingColumnCaseInsensitive(
+                    targetCol.Name, 
+                    sampleSchema, 
+                    c => c.Name);
+
+                if (match != null && colMap.TryGetValue(match.Name, out int srcIdx))
+                {
+                    // Check all samples for NULL in this column
+                    bool hasNull = samples.Any(s => s.Stages.Last().Values[srcIdx] == null || s.Stages.Last().Values[srcIdx] == DBNull.Value);
+                    
+                    if (hasNull)
+                    {
+                        errors.Add($"Column '{targetCol.Name}' is NOT NULL in target but contains NULL values in sample data.");
+                    }
+                }
+            }
+        }
+        
+        // 2. Validate UNIQUE Constraints (Duplicates in Sample)
+        if (targetInfo.UniqueColumns != null)
+        {
+            foreach (var uniqueColName in targetInfo.UniqueColumns)
+            {
+                var match = Core.Helpers.ColumnMatcher.FindMatchingColumnCaseInsensitive(
+                    uniqueColName,
+                    sampleSchema,
+                    c => c.Name);
+
+                if (match != null && colMap.TryGetValue(match.Name, out int srcIdx))
+                {
+                    // Check for duplicates in sample
+                    var seen = new HashSet<object>();
+                    bool hasDuplicates = false;
+                    foreach(var s in samples)
+                    {
+                        var val = s.Stages.Last().Values[srcIdx];
+                        if (val != null && val != DBNull.Value)
+                        {
+                            if (!seen.Add(val))
+                            {
+                                hasDuplicates = true;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (hasDuplicates)
+                    {
+                        warnings.Add($"Column '{uniqueColName}' is UNIQUE in target but sample contains duplicates. Only the first occurrence will succeed (depending on strategy).");
+                    }
+                }
+            }
+        }
+        
+        return new ConstraintValidationResult(errors, warnings);
     }
 
     private KeyValidationResult ValidatePrimaryKeys(
@@ -180,7 +280,7 @@ public class DryRunAnalyzer
             return new KeyValidationResult(true, requestedKeys, resolvedKeys, null, errors, null);
         }
 
-        // 3. Cross-Validate against Target Table (Phase 2)
+        // 3. Cross-Validate against Target Table
         // Only if target exists and has PKs defined
         if (targetInfo != null && targetInfo.Exists && targetInfo.PrimaryKeyColumns?.Count > 0)
         {

@@ -90,13 +90,26 @@ public class DryRunCliController
              Console.ReadKey(true);
         }
 
-        // 3.5. Render Primary Key Validation (Phase 1)
+        // 3.5. Render Primary Key Validation
         if (result.KeyValidation != null)
         {
             renderer.RenderKeyValidation(result.KeyValidation, _console);
             
             // If there's an error, pause before continuing
             if (!result.KeyValidation.IsValid && result.KeyValidation.IsRequired)
+            {
+                _console.MarkupLine("[dim]Press any key to continue to trace analysis...[/]");
+                Console.ReadKey(true);
+            }
+        }
+
+        // 3.6. Render Data Constraint Validation
+        if (result.ConstraintValidation != null)
+        {
+            renderer.RenderConstraintValidation(result.ConstraintValidation, _console);
+
+            // If there's an error, pause before continuing
+            if (result.ConstraintValidation.Errors != null && result.ConstraintValidation.Errors.Count > 0)
             {
                 _console.MarkupLine("[dim]Press any key to continue to trace analysis...[/]");
                 Console.ReadKey(true);

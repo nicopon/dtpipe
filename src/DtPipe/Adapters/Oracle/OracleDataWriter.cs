@@ -243,6 +243,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
             rowCount,
             sizeBytes,
             pkColumns.Count > 0 ? pkColumns.ToList() : null,
+            uniqueColumns.Count > 0 ? uniqueColumns.ToList() : null,
             IsRowCountEstimate: true  // Oracle uses num_rows from ALL_TABLES (statistics)
         );
     }

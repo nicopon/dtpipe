@@ -89,7 +89,7 @@ Use `--fake "Col:Generator"` to replace sensitive data.
 | `-o`, `--output`| **Required**. Target connection string or file path. |
 | `--limit` | Stop after N rows. |
 | `--batch-size` | Rows per buffer (default: 50,000). |
-| `--dry-run` | Preview data and schema without writing. |
+| `--dry-run` | Preview data, **validate constraints**, and check schema compatibility. |
 | `--key` | Comma-separated Primary Keys for Upsert/Ignore. Auto-detected from target if omitted. |
 
 #### Automation

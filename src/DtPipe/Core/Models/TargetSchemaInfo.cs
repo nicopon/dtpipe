@@ -15,6 +15,7 @@ public sealed record TargetSchemaInfo(
     long? RowCount,
     long? SizeBytes,
     IReadOnlyList<string>? PrimaryKeyColumns,
+    IReadOnlyList<string>? UniqueColumns = null,
     bool IsRowCountEstimate = false  // Default false for backward compatibility
 );
 
