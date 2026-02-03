@@ -51,6 +51,13 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
         if (parts.Length == 2) return (parts[0].Trim('[',']'), parts[1].Trim('[',']'));
         return ("dbo", tableName.Trim('[',']'));
     }
+
+    private string GetSmartQuotedIdentifier(string identifier)
+    {
+        // Quote only if necessary (special chars, reserved words, mixed case)
+        // Standard simple identifiers (alphanumeric, underscore, uppercase/lowercase only) don't need quoting
+        return _dialect.NeedsQuoting(identifier) ? _dialect.Quote(identifier) : identifier;
+    }
     private List<int> _keyIndices = new();
 
     private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.SqlServerDialect();
@@ -93,9 +100,11 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
         }
         
         // Construct canonical Quoted Name for SQL usage
-        // SQL Server quoting: [Schema].[Table]
+        // Use smart quoting: only quote if necessary (mixed case, special chars, reserved words)
         // Note: ResolveTableAsync returns unquoted names from DB metadata.
-        _targetTableName = $"[{resolvedSchema}].[{resolvedTable}]";
+        var safeSchema = GetSmartQuotedIdentifier(resolvedSchema);
+        var safeTable = GetSmartQuotedIdentifier(resolvedTable);
+        _targetTableName = $"{safeSchema}.{safeTable}";
         
         if (_options.Strategy == SqlServerWriteStrategy.Recreate)
         {
@@ -342,13 +351,12 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
     {
         // 1. Create Staging Table
         var stageTable = $"#Stage_{Guid.NewGuid():N}";
-        var targetTable = _targetTableName;
 
         // Create temp table with same structure as target (quickest way is SELECT INTO WHERE 1=0)
         // But we need to be careful about column types if we use SELECT INTO.
         // Better: Use the same create table logic or just standard "SELECT TOP 0 * INTO ...".
         // SELECT INTO copies schema including nullability but NOT constraints/indexes. Perfect for staging.
-        var createStageCmd = new SqlCommand($"SELECT TOP 0 * INTO [{stageTable}] FROM {targetTable}", _connection);
+        var createStageCmd = new SqlCommand($"SELECT TOP 0 * INTO [{stageTable}] FROM {_targetTableName}", _connection);
         await createStageCmd.ExecuteNonQueryAsync(ct);
         
         try
@@ -381,7 +389,7 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
             
             // 3. Perform Merge
             var sb = new StringBuilder();
-            sb.Append($"MERGE {targetTable} AS T ");
+            sb.Append($"MERGE {_targetTableName} AS T ");
             sb.Append($"USING [{stageTable}] AS S ON (");
             
             for(int i=0; i<_keyColumns.Count; i++)
