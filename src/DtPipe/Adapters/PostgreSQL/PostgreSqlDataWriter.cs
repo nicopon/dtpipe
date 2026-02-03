@@ -184,7 +184,24 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
     {
         _connection = new NpgsqlConnection(_connectionString);
         await _connection.OpenAsync(ct);
-        _columns = columns;
+        // GLOBAL NORMALIZATION:
+        // Create a secure list of columns where names are normalized if not case-sensitive.
+        // This ensures consistency across CREATE TABLE, INSERT, COPY, etc.
+        var normalizedColumns = new List<ColumnInfo>(columns.Count);
+        foreach (var col in columns)
+        {
+            if (col.IsCaseSensitive)
+            {
+                normalizedColumns.Add(col);
+            }
+            else
+            {
+                // Unquoted/Insensitive -> Normalize to PostgreSQL default (lowercase)
+                // e.g. "UserName" -> "username"
+                normalizedColumns.Add(col with { Name = _dialect.Normalize(col.Name) });
+            }
+        }
+        _columns = normalizedColumns;
 
         string resolvedSchema;
         string resolvedTable;
@@ -399,6 +416,16 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
         }
     }
 
+    /// <summary>
+    /// Builds CREATE TABLE DDL from source column info.
+    /// </summary>
+    /// <remarks>
+    /// NOTE: Types are mapped from CLR types (e.g., decimal → NUMERIC, string → TEXT),
+    /// not preserved from target schema. Type precision, scale, and length constraints
+    /// may differ from the original table when using the Recreate strategy.
+    /// 
+    /// For exact structure preservation, use Append strategy or manage DDL separately.
+    /// </remarks>
     private string BuildCreateTableSql(string quotedTableName, IReadOnlyList<ColumnInfo> columns)
     {
         var sb = new StringBuilder();

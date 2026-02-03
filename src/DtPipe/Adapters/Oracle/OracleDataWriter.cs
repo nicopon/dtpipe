@@ -743,6 +743,16 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
 
 
 
+    /// <summary>
+    /// Builds CREATE TABLE DDL from source column info.
+    /// </summary>
+    /// <remarks>
+    /// NOTE: Types are mapped from CLR types (e.g., decimal → NUMBER, string → VARCHAR2),
+    /// not preserved from target schema. Type precision, scale, and length constraints
+    /// may differ from the original table when using the Recreate strategy.
+    /// 
+    /// For exact structure preservation, use Append strategy or manage DDL separately.
+    /// </remarks>
     private string BuildCreateTableSql(string tableName, IReadOnlyList<ColumnInfo> columns)
     {
         var sb = new StringBuilder();

@@ -17,7 +17,6 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
 
     private IReadOnlyList<ColumnInfo>? _columns;
 
-    private string? _stagingTable;
     private string _targetTableName = ""; // Resolved or Fallback
     private List<string> _keyColumns = new();
     
@@ -71,7 +70,25 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
 
     public async ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
     {
-        _columns = columns;
+        // GLOBAL NORMALIZATION:
+        // Create a secure list of columns where names are normalized if not case-sensitive.
+        // This ensures consistency across CREATE TABLE, INSERT, BULK COPY, MERGE, etc.
+        var normalizedColumns = new List<ColumnInfo>(columns.Count);
+        foreach (var col in columns)
+        {
+            if (col.IsCaseSensitive)
+            {
+                normalizedColumns.Add(col);
+            }
+            else
+            {
+                // Unquoted/Insensitive -> Normalize to SQL Server default (lowercase for consistency)
+                // Note: SQL Server is case-insensitive by default, but we normalize for consistency
+                // e.g. "UserName" -> "username"
+                normalizedColumns.Add(col with { Name = _dialect.Normalize(col.Name) });
+            }
+        }
+        _columns = normalizedColumns;
         _connection = new SqlConnection(_connectionString);
         await _connection.OpenAsync(ct);
 
@@ -303,6 +320,16 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
     #endregion
     
 
+    /// <summary>
+    /// Builds CREATE TABLE DDL from source column info.
+    /// </summary>
+    /// <remarks>
+    /// NOTE: Types are mapped from CLR types (e.g., decimal → DECIMAL, string → NVARCHAR),
+    /// not preserved from target schema. Type precision, scale, and length constraints
+    /// may differ from the original table when using the Recreate strategy.
+    /// 
+    /// For exact structure preservation, use Append strategy or manage DDL separately.
+    /// </remarks>
     private string BuildCreateTableSql(string schema, string table, IReadOnlyList<ColumnInfo> columns)
     {
         // Quote if needed or always quote for safety
