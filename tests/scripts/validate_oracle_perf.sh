@@ -66,9 +66,9 @@ sleep 30
 echo "Creating target table..."
 docker exec -i dtpipe-oracle-perf sqlplus system/MySecretPassword123!@localhost:1521/FREEPDB1 <<EOF
 CREATE TABLE PerformanceTest (
-    "Id" NUMBER,
-    "Name" VARCHAR2(100),
-    "CreatedDate" TIMESTAMP
+    Id NUMBER,
+    Name VARCHAR2(100),
+    CreatedDate TIMESTAMP
 );
 EXIT;
 EOF

@@ -1,5 +1,4 @@
 using System.CommandLine;
-using System.CommandLine.Parsing;
 using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
 using DtPipe.Cli.Abstractions;
@@ -163,7 +162,7 @@ public static class RawJobBuilder
             
             if (optionToFactory.TryGetValue(arg, out var factory))
             {
-                // New transformer type? Flush current
+
                 if (factory != currentFactory && currentFactory != null && (currentMappings.Count > 0 || currentOptions.Count > 0))
                 {
                     configs.Add(new TransformerConfig

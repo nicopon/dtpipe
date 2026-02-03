@@ -2,10 +2,12 @@
 set -e
 
 # Resolve Project Root and Paths
+# Resolve Project Root and Paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 INFRA_DIR="$PROJECT_ROOT/tests/infra"
-OUTPUT_DIR="$SCRIPT_DIR/output"
+ARTIFACTS_DIR="$SCRIPT_DIR/artifacts"
+mkdir -p "$ARTIFACTS_DIR"
 
 # Path to binary (Release build)
 DTPIPE="$PROJECT_ROOT/dist/release/dtpipe"
@@ -29,7 +31,7 @@ cleanup() {
     echo ""
     echo "🧹 Cleaning up..."
     docker-compose -f "$INFRA_DIR/docker-compose.yml" down 2>/dev/null || true
-    rm -f "$OUTPUT_DIR/ref.hash" "$OUTPUT_DIR/final.hash" "$OUTPUT_DIR/test.parquet" "$OUTPUT_DIR/reference.csv" reference.db
+    rm -f "$ARTIFACTS_DIR/ref.hash" "$ARTIFACTS_DIR/final.hash" "$ARTIFACTS_DIR/test.parquet" "$ARTIFACTS_DIR/reference.csv"
 }
 trap cleanup EXIT
 
@@ -46,23 +48,23 @@ echo "----------------------------------------"
 # Sample -> CSV (Immutable Source)
 $DTPIPE --input "sample:100;Id=int;Amount=double;Created=date" \
            --query "SELECT * FROM dummy" \
-           --output "$OUTPUT_DIR/reference.csv"
+           --output "$ARTIFACTS_DIR/reference.csv"
 
 echo "----------------------------------------"
 echo "Step 0b: Generate Reference Checksum"
 echo "----------------------------------------"
 # CSV -> Checksum
-$DTPIPE --input "csv:$OUTPUT_DIR/reference.csv" \
+$DTPIPE --input "csv:$ARTIFACTS_DIR/reference.csv" \
            --query "SELECT * FROM data" \
-           --output "checksum:$OUTPUT_DIR/ref.hash"
-REF_HASH=$(cat "$OUTPUT_DIR/ref.hash")
+           --output "checksum:$ARTIFACTS_DIR/ref.hash"
+REF_HASH=$(cat "$ARTIFACTS_DIR/ref.hash")
 echo "Reference Hash: $REF_HASH"
 
 echo "----------------------------------------"
 echo "Step 1: CSV -> Postgres"
 echo "----------------------------------------"
 PG_CONN="pg:Host=localhost;Port=5440;Database=integration;Username=postgres;Password=password"
-CMD1="$DTPIPE --input \"csv:$OUTPUT_DIR/reference.csv\" --query \"SELECT * FROM data\" --output \"$PG_CONN\""
+CMD1="$DTPIPE --input \"csv:$ARTIFACTS_DIR/reference.csv\" --query \"SELECT * FROM data\" --output \"$PG_CONN\""
 echo "Running: $CMD1"
 eval $CMD1
 
@@ -94,16 +96,16 @@ echo "Step 4: Oracle -> Parquet"
 echo "----------------------------------------"
 $DTPIPE --input "$ORACLE_CONN" \
            --query "SELECT * FROM EXPORT_DATA" \
-           --output "$OUTPUT_DIR/test.parquet"
+           --output "$ARTIFACTS_DIR/test.parquet"
 
 echo "----------------------------------------"
 echo "Step 5: Parquet -> Checksum"
 echo "----------------------------------------"
-$DTPIPE --input "parquet:$OUTPUT_DIR/test.parquet" \
+$DTPIPE --input "parquet:$ARTIFACTS_DIR/test.parquet" \
            --query "SELECT * FROM data" \
-           --output "checksum:$OUTPUT_DIR/final.hash"
+           --output "checksum:$ARTIFACTS_DIR/final.hash"
 
-FINAL_HASH=$(cat "$OUTPUT_DIR/final.hash")
+FINAL_HASH=$(cat "$ARTIFACTS_DIR/final.hash")
 echo "Final Hash:     $FINAL_HASH"
 
 

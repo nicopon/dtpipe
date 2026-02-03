@@ -99,9 +99,9 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
         // Prepare Data
         var columns = new List<DtPipe.Core.Models.ColumnInfo>
         {
-            new("Id", typeof(int), false),
-            new("Name", typeof(string), true),
-            new("Created", typeof(DateTime), true)
+            new("id", typeof(int), false),
+            new("name", typeof(string), true),
+            new("created", typeof(DateTime), true)
         };
         
         var data = new List<object?[]>
@@ -119,7 +119,7 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
         // Assert
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync();
-        await using var cmd = new NpgsqlCommand($"SELECT COUNT(*) FROM \"{targetTable}\"", connection);
+        await using var cmd = new NpgsqlCommand($"SELECT COUNT(*) FROM {targetTable}", connection);
         var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
         
         Assert.Equal(2, count);
@@ -131,24 +131,24 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
 
         // Arrange
         var connectionString = _postgres.GetConnectionString();
-        var tableName = "MixedOrderTest";
+        var tableName = "mixed_order_test";
 
-        // 1. Manually create table with mixed order: Score (NUMERIC), Name (TEXT), Id (INT)
-        // Use quoted identifiers to match exact casing which PostgreSqlDataWriter uses.
+        // 1. Manually create table with DIFFERENT column order than source data
+        // Table: (score, name, id) vs Source: (id, name, score)
         await using (var connection = new NpgsqlConnection(connectionString))
         {
             await connection.OpenAsync();
             await using var cmd = connection.CreateCommand();
-            cmd.CommandText = $"CREATE TABLE \"{tableName}\" (\"Score\" NUMERIC, \"Name\" TEXT, \"Id\" INT)";
+            cmd.CommandText = $"CREATE TABLE {tableName} (score NUMERIC, name TEXT, id INT)";
             await cmd.ExecuteNonQueryAsync();
         }
 
         // 2. Setup Source Data
         var columns = new List<DtPipe.Core.Models.ColumnInfo>
         {
-            new("Id", typeof(int), false),
-            new("Name", typeof(string), true),
-            new("Score", typeof(decimal), false)
+            new("id", typeof(int), false),
+            new("name", typeof(string), true),
+            new("score", typeof(decimal), false)
         };
 
         var row1 = new object?[] { 1, "Alice", 95.5m };
@@ -157,7 +157,7 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
 
         var writerOptions = new PostgreSqlWriterOptions
         {
-            Table = tableName, // Writer will quote this -> "MixedOrderTest"
+            Table = tableName,
             Strategy = PostgreSqlWriteStrategy.Append
         };
 
@@ -172,7 +172,7 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
         {
             await connection.OpenAsync();
             await using var cmd = connection.CreateCommand();
-            cmd.CommandText = $"SELECT \"Id\", \"Name\", \"Score\" FROM \"{tableName}\" ORDER BY \"Id\"";
+            cmd.CommandText = $"SELECT id, name, score FROM {tableName} ORDER BY id";
             await using var reader = await cmd.ExecuteReaderAsync();
 
             Assert.True(await reader.ReadAsync());
@@ -199,14 +199,14 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
         {
             await connection.OpenAsync();
             await using var cmd = connection.CreateCommand();
-            cmd.CommandText = $"CREATE TABLE \"{targetTable}\" (\"Id\" INT, \"Name\" TEXT)";
+            cmd.CommandText = $"CREATE TABLE {targetTable} (id INT, name TEXT)";
             await cmd.ExecuteNonQueryAsync();
-            cmd.CommandText = $"INSERT INTO \"{targetTable}\" VALUES (999, 'OldData')";
+            cmd.CommandText = $"INSERT INTO {targetTable} VALUES (999, 'OldData')";
             await cmd.ExecuteNonQueryAsync();
         }
 
         var options = new PostgreSqlWriterOptions { Table = targetTable, Strategy = PostgreSqlWriteStrategy.DeleteThenInsert };
-        var columns = new List<DtPipe.Core.Models.ColumnInfo> { new("Id", typeof(int), false), new("Name", typeof(string), true) };
+        var columns = new List<DtPipe.Core.Models.ColumnInfo> { new("id", typeof(int), false), new("name", typeof(string), true) };
         var data = new List<object?[]> { new object?[] { 1, "NewData" } };
 
         // Act
@@ -219,11 +219,11 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
         await using (var connection = new NpgsqlConnection(connectionString))
         {
             await connection.OpenAsync();
-            await using var cmd = new NpgsqlCommand($"SELECT COUNT(*) FROM \"{targetTable}\"", connection);
+            await using var cmd = new NpgsqlCommand($"SELECT COUNT(*) FROM {targetTable}", connection);
             var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
             Assert.Equal(1, count); // Only new data
 
-            await using var checkCmd = new NpgsqlCommand($"SELECT \"Id\" FROM \"{targetTable}\"", connection);
+            await using var checkCmd = new NpgsqlCommand($"SELECT id FROM {targetTable}", connection);
             var id = Convert.ToInt32(await checkCmd.ExecuteScalarAsync());
             Assert.Equal(1, id);
         }
@@ -242,13 +242,13 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
         {
             await connection.OpenAsync();
             await using var cmd = connection.CreateCommand();
-            cmd.CommandText = $"CREATE TABLE \"{targetTable}\" (\"Id\" INT, \"Name\" INT)"; // Incompatible!
+            cmd.CommandText = $"CREATE TABLE {targetTable} (id INT, name INT)"; // Incompatible!
             await cmd.ExecuteNonQueryAsync();
         }
 
         var options = new PostgreSqlWriterOptions { Table = targetTable, Strategy = PostgreSqlWriteStrategy.Recreate };
         // Source defines Name as String
-        var columns = new List<DtPipe.Core.Models.ColumnInfo> { new("Id", typeof(int), false), new("Name", typeof(string), true) };
+        var columns = new List<DtPipe.Core.Models.ColumnInfo> { new("id", typeof(int), false), new("name", typeof(string), true) };
         var data = new List<object?[]> { new object?[] { 1, "NewData" } };
 
         // Act
@@ -262,7 +262,7 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
         {
             await connection.OpenAsync();
             // Verify data exists (means write succeeded)
-            await using var cmd = new NpgsqlCommand($"SELECT \"Name\" FROM \"{targetTable}\"", connection);
+            await using var cmd = new NpgsqlCommand($"SELECT name FROM {targetTable}", connection);
             var name = await cmd.ExecuteScalarAsync() as string;
             Assert.Equal("NewData", name);
         }

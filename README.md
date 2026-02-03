@@ -47,6 +47,7 @@ Binary created at: `./dist/release/dtpipe`
 ./dtpipe --input [SOURCE] --query [SQL] --output [DEST] [OPTIONS]
 ```
 
+
 ### 1. Connection Strings (Input & Output)
 
 DtPipe auto-detects providers from file extensions (`.csv`, `.parquet`, `.db`, `.sqlite`) or explicit prefixes.
@@ -83,19 +84,20 @@ Use `--fake "Col:Generator"` to replace sensitive data.
 #### Core
 | Flag | Description |
 |:---|:---|
-| `-i`, `--input` | **Required**. Source connection string. |
-| `-q`, `--query` | **Required** (for DBs). SQL SELECT statement. |
-| `-o`, `--output`| **Required**. Destination path or connection. |
+| `-i`, `--input` | **Required**. Source connection string or file path. |
+| `-q`, `--query` | **Required** (for queryable sources). SQL statement. |
+| `-o`, `--output`| **Required**. Target connection string or file path. |
 | `--limit` | Stop after N rows. |
 | `--batch-size` | Rows per buffer (default: 50,000). |
 | `--dry-run` | Preview data and schema without writing. |
+| `--key` | Comma-separated Primary Keys for Upsert/Ignore. Auto-detected from target if omitted. |
 
 #### Automation
 | Flag | Description |
 |:---|:---|
 | `--job [FILE]` | Execute a YAML job file. |
 | `--export-job` | Save current CLI args as a YAML job. |
-| `--log [FILE]` | Write execution statistics to file. |
+| `--log [FILE]` | Write execution statistics to file (Optional). |
 
 #### Transformation Pipeline
 | Flag | Description |
@@ -118,13 +120,13 @@ Use `--fake "Col:Generator"` to replace sensitive data.
 #### Database Writer Options
 | Flag | Description |
 |:---|:---|
-| `--ora-strategy` | `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`. |
+| `--ora-strategy` | `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`, `Upsert`, `Ignore`. |
 | `--ora-insert-mode` | `Standard`, `Append` (Direct-Path), `Bulk`. |
-| `--pg-strategy` | `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`. |
+| `--pg-strategy` | `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`, `Upsert`, `Ignore`. |
 | `--pg-insert-mode` | `Standard`, `Bulk` (Binary Copy). |
-| `--mssql-strategy` | `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`. |
-| `--duck-strategy` | `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`. |
-| `--sqlite-strategy` | `Append`, `DeleteThenInsert`, `Recreate`. |
+| `--mssql-strategy` | `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`, `Upsert`, `Ignore`. |
+| `--duck-strategy` | `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`, `Upsert`, `Ignore`. |
+| `--sqlite-strategy` | `Append`, `DeleteThenInsert`, `Recreate`, `Upsert`, `Ignore`. |
 
 ---
 

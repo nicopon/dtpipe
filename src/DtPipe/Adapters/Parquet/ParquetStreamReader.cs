@@ -10,6 +10,7 @@ public class ParquetStreamReader : IStreamReader
     private readonly string _filePath;
     private ParquetReader? _reader;
     private readonly SemaphoreSlim _semaphore = new(1, 1);
+    private FileStream? _fileStream;
 
     public IReadOnlyList<ColumnInfo>? Columns { get; private set; }
 
@@ -20,7 +21,8 @@ public class ParquetStreamReader : IStreamReader
 
     public async Task OpenAsync(CancellationToken ct = default)
     {
-        _reader = await ParquetReader.CreateAsync(_filePath);
+        _fileStream = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 81920, useAsync: true);
+        _reader = await ParquetReader.CreateAsync(_fileStream, leaveStreamOpen: true, cancellationToken: ct);
 
         var schema = _reader.Schema;
         var columns = new List<ColumnInfo>();
@@ -108,6 +110,11 @@ public class ParquetStreamReader : IStreamReader
         {
             _reader?.Dispose();
             _reader = null;
+            if (_fileStream != null)
+            {
+                await _fileStream.DisposeAsync();
+                _fileStream = null;
+            }
         }
         finally
         {

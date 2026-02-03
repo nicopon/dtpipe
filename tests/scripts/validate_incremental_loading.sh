@@ -5,6 +5,8 @@ SCRIPT_DIR="$(dirname "$0")"
 PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 DIST_DIR="$PROJECT_ROOT/dist/release"
 DTPIPE_BIN="$DIST_DIR/dtpipe"
+ARTIFACTS_DIR="tests/scripts/artifacts"
+mkdir -p "$ARTIFACTS_DIR"
 
 # Colors
 GREEN='\033[0;32m'
@@ -46,7 +48,7 @@ check_docker() {
 cleanup() {
     echo "Cleaning up..."
     docker rm -f dtpipe-inc-postgres dtpipe-inc-mssql dtpipe-inc-oracle &> /dev/null
-    rm -f source_v1.csv source_v2.csv result_*.csv *.db *.duckdb
+    rm -f "$ARTIFACTS_DIR"/source_v1.csv "$ARTIFACTS_DIR"/source_v2.csv "$ARTIFACTS_DIR"/result_*.csv "$ARTIFACTS_DIR"/*.db "$ARTIFACTS_DIR"/*.duckdb
 }
 trap cleanup EXIT
 
@@ -56,14 +58,14 @@ generate_data() {
     echo "Generating Test Data..."
     
     # V1: Initial Load (IDs 1, 2)
-    echo "Id,Name,Value" > source_v1.csv
-    echo "1,Alice,100" >> source_v1.csv
-    echo "2,Bob,200" >> source_v1.csv
+    echo "Id,Name,Value" > "$ARTIFACTS_DIR/source_v1.csv"
+    echo "1,Alice,100" >> "$ARTIFACTS_DIR/source_v1.csv"
+    echo "2,Bob,200" >> "$ARTIFACTS_DIR/source_v1.csv"
     
     # V2: Delta Load (ID 1 Updated, ID 3 New)
-    echo "Id,Name,Value" > source_v2.csv
-    echo "1,Alice_Updated,150" >> source_v2.csv
-    echo "3,Charlie,300" >> source_v2.csv
+    echo "Id,Name,Value" > "$ARTIFACTS_DIR/source_v2.csv"
+    echo "1,Alice_Updated,150" >> "$ARTIFACTS_DIR/source_v2.csv"
+    echo "3,Charlie,300" >> "$ARTIFACTS_DIR/source_v2.csv"
 }
 
 verify_upsert() {
@@ -124,50 +126,50 @@ generate_data
 # 1. DUCKDB (Local)
 # ==============================================================================
 echo -e "\n${CYAN}--- Testing DuckDB ---${NC}"
-DB_PATH="test_inc.duckdb"
+DB_PATH="$ARTIFACTS_DIR/test_inc.duckdb"
 rm -f "$DB_PATH"
 
 # A. Upsert Test
 echo "DuckDB: Upsert Strategy"
 # 1. Load V1
-$DTPIPE_BIN -i "source_v1.csv" -o "duck:$DB_PATH" --duck-table "users_upsert" --duck-strategy Recreate --key "Id" > /dev/null
+$DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v1.csv" -o "duck:$DB_PATH" --duck-table "users_upsert" --duck-strategy Recreate --key "Id" > /dev/null
 # 2. Load V2 (Upsert)
-$DTPIPE_BIN -i "source_v2.csv" -o "duck:$DB_PATH" --duck-table "users_upsert" --duck-strategy Upsert --key "Id" > /dev/null
+$DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v2.csv" -o "duck:$DB_PATH" --duck-table "users_upsert" --duck-strategy Upsert --key "Id" > /dev/null
 # 3. Export & Verify
-$DTPIPE_BIN -i "duck:$DB_PATH" -q "SELECT * FROM users_upsert ORDER BY Id" -o "result_duck_upsert.csv" > /dev/null
-verify_upsert "result_duck_upsert.csv" "DuckDB"
+$DTPIPE_BIN -i "duck:$DB_PATH" -q "SELECT * FROM users_upsert ORDER BY Id" -o "$ARTIFACTS_DIR/result_duck_upsert.csv" > /dev/null
+verify_upsert "$ARTIFACTS_DIR/result_duck_upsert.csv" "DuckDB"
 
 # B. Ignore Test
 echo "DuckDB: Ignore Strategy"
 # 1. Load V1
-$DTPIPE_BIN -i "source_v1.csv" -o "duck:$DB_PATH" --duck-table "users_ignore" --duck-strategy Recreate --key "Id" > /dev/null
+$DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v1.csv" -o "duck:$DB_PATH" --duck-table "users_ignore" --duck-strategy Recreate --key "Id" > /dev/null
 # 2. Load V2 (Ignore)
-$DTPIPE_BIN -i "source_v2.csv" -o "duck:$DB_PATH" --duck-table "users_ignore" --duck-strategy Ignore --key "Id" > /dev/null
+$DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v2.csv" -o "duck:$DB_PATH" --duck-table "users_ignore" --duck-strategy Ignore --key "Id" > /dev/null
 # 3. Export & Verify
-$DTPIPE_BIN -i "duck:$DB_PATH" -q "SELECT * FROM users_ignore ORDER BY Id" -o "result_duck_ignore.csv" > /dev/null
-verify_ignore "result_duck_ignore.csv" "DuckDB"
+$DTPIPE_BIN -i "duck:$DB_PATH" -q "SELECT * FROM users_ignore ORDER BY Id" -o "$ARTIFACTS_DIR/result_duck_ignore.csv" > /dev/null
+verify_ignore "$ARTIFACTS_DIR/result_duck_ignore.csv" "DuckDB"
 
 
 # ==============================================================================
 # 2. SQLITE (Local)
 # ==============================================================================
 echo -e "\n${CYAN}--- Testing SQLite ---${NC}"
-DB_PATH="test_inc.db"
+DB_PATH="$ARTIFACTS_DIR/test_inc.db"
 rm -f "$DB_PATH"
 
 # A. Upsert Test
 echo "SQLite: Upsert Strategy"
-$DTPIPE_BIN -i "source_v1.csv" -o "sqlite:$DB_PATH" --sqlite-table "users_upsert" --sqlite-strategy Recreate --key "Id" > /dev/null
-$DTPIPE_BIN -i "source_v2.csv" -o "sqlite:$DB_PATH" --sqlite-table "users_upsert" --sqlite-strategy Upsert --key "Id" > /dev/null
-$DTPIPE_BIN -i "sqlite:$DB_PATH" -q "SELECT * FROM users_upsert ORDER BY Id" -o "result_sqlite_upsert.csv" > /dev/null
-verify_upsert "result_sqlite_upsert.csv" "SQLite"
+$DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v1.csv" -o "sqlite:$DB_PATH" --sqlite-table "users_upsert" --sqlite-strategy Recreate --key "Id" > /dev/null
+$DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v2.csv" -o "sqlite:$DB_PATH" --sqlite-table "users_upsert" --sqlite-strategy Upsert --key "Id" > /dev/null
+$DTPIPE_BIN -i "sqlite:$DB_PATH" -q "SELECT * FROM users_upsert ORDER BY Id" -o "$ARTIFACTS_DIR/result_sqlite_upsert.csv" > /dev/null
+verify_upsert "$ARTIFACTS_DIR/result_sqlite_upsert.csv" "SQLite"
 
 # B. Ignore Test
 echo "SQLite: Ignore Strategy"
-$DTPIPE_BIN -i "source_v1.csv" -o "sqlite:$DB_PATH" --sqlite-table "users_ignore" --sqlite-strategy Recreate --key "Id" > /dev/null
-$DTPIPE_BIN -i "source_v2.csv" -o "sqlite:$DB_PATH" --sqlite-table "users_ignore" --sqlite-strategy Ignore --key "Id" > /dev/null
-$DTPIPE_BIN -i "sqlite:$DB_PATH" -q "SELECT * FROM users_ignore ORDER BY Id" -o "result_sqlite_ignore.csv" > /dev/null
-verify_ignore "result_sqlite_ignore.csv" "SQLite"
+$DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v1.csv" -o "sqlite:$DB_PATH" --sqlite-table "users_ignore" --sqlite-strategy Recreate --key "Id" > /dev/null
+$DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v2.csv" -o "sqlite:$DB_PATH" --sqlite-table "users_ignore" --sqlite-strategy Ignore --key "Id" > /dev/null
+$DTPIPE_BIN -i "sqlite:$DB_PATH" -q "SELECT * FROM users_ignore ORDER BY Id" -o "$ARTIFACTS_DIR/result_sqlite_ignore.csv" > /dev/null
+verify_ignore "$ARTIFACTS_DIR/result_sqlite_ignore.csv" "SQLite"
 
 
 if [ "$USE_DOCKER" -eq 1 ]; then
@@ -184,18 +186,18 @@ if [ "$USE_DOCKER" -eq 1 ]; then
     
     # A. Upsert Test (Debug enabled: no > /dev/null)
     echo "Postgres: Upsert Strategy"
-    $DTPIPE_BIN -i "source_v1.csv" -o "$PG_CONN" --pg-table "users_upsert" --pg-strategy Recreate --key "Id" > /dev/null
+    $DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v1.csv" -o "$PG_CONN" --pg-table "users_upsert" --pg-strategy Recreate --key "Id" > /dev/null
     echo "Running Upsert..."
-    $DTPIPE_BIN -i "source_v2.csv" -o "$PG_CONN" --pg-table "users_upsert" --pg-strategy Upsert --key "Id"
-    $DTPIPE_BIN -i "$PG_CONN" -q "SELECT * FROM users_upsert ORDER BY \"Id\"" -o "result_pg_upsert.csv" > /dev/null
-    verify_upsert "result_pg_upsert.csv" "Postgres"
+    $DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v2.csv" -o "$PG_CONN" --pg-table "users_upsert" --pg-strategy Upsert --key "Id"
+    $DTPIPE_BIN -i "$PG_CONN" -q "SELECT * FROM users_upsert ORDER BY Id" -o "$ARTIFACTS_DIR/result_pg_upsert.csv" > /dev/null
+    verify_upsert "$ARTIFACTS_DIR/result_pg_upsert.csv" "Postgres"
     
     # B. Ignore Test
     echo "Postgres: Ignore Strategy"
-    $DTPIPE_BIN -i "source_v1.csv" -o "$PG_CONN" --pg-table "users_ignore" --pg-strategy Recreate --key "Id" > /dev/null
-    $DTPIPE_BIN -i "source_v2.csv" -o "$PG_CONN" --pg-table "users_ignore" --pg-strategy Ignore --key "Id" > /dev/null
-    $DTPIPE_BIN -i "$PG_CONN" -q "SELECT * FROM users_ignore ORDER BY \"Id\"" -o "result_pg_ignore.csv" > /dev/null
-    verify_ignore "result_pg_ignore.csv" "Postgres"
+    $DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v1.csv" -o "$PG_CONN" --pg-table "users_ignore" --pg-strategy Recreate --key "Id" > /dev/null
+    $DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v2.csv" -o "$PG_CONN" --pg-table "users_ignore" --pg-strategy Ignore --key "Id" > /dev/null
+    $DTPIPE_BIN -i "$PG_CONN" -q "SELECT * FROM users_ignore ORDER BY Id" -o "$ARTIFACTS_DIR/result_pg_ignore.csv" > /dev/null
+    verify_ignore "$ARTIFACTS_DIR/result_pg_ignore.csv" "Postgres"
 
 
     # ==============================================================================
@@ -214,17 +216,17 @@ if [ "$USE_DOCKER" -eq 1 ]; then
     
     # A. Upsert Test
     echo "MSSQL: Upsert Strategy"
-    $DTPIPE_BIN -i "source_v1.csv" -o "$MSSQL_CONN" --mssql-table "UsersUpsert" --mssql-strategy Recreate --key "Id" > /dev/null
-    $DTPIPE_BIN -i "source_v2.csv" -o "$MSSQL_CONN" --mssql-table "UsersUpsert" --mssql-strategy Upsert --key "Id" > /dev/null
-    $DTPIPE_BIN -i "$MSSQL_CONN" -q "SELECT * FROM UsersUpsert ORDER BY Id" -o "result_mssql_upsert.csv" > /dev/null
-    verify_upsert "result_mssql_upsert.csv" "MSSQL"
+    $DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v1.csv" -o "$MSSQL_CONN" --mssql-table "UsersUpsert" --mssql-strategy Recreate --key "Id" > /dev/null
+    $DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v2.csv" -o "$MSSQL_CONN" --mssql-table "UsersUpsert" --mssql-strategy Upsert --key "Id" > /dev/null
+    $DTPIPE_BIN -i "$MSSQL_CONN" -q "SELECT * FROM UsersUpsert ORDER BY Id" -o "$ARTIFACTS_DIR/result_mssql_upsert.csv" > /dev/null
+    verify_upsert "$ARTIFACTS_DIR/result_mssql_upsert.csv" "MSSQL"
     
     # B. Ignore Test
     echo "MSSQL: Ignore Strategy"
-    $DTPIPE_BIN -i "source_v1.csv" -o "$MSSQL_CONN" --mssql-table "UsersIgnore" --mssql-strategy Recreate --key "Id" > /dev/null
-    $DTPIPE_BIN -i "source_v2.csv" -o "$MSSQL_CONN" --mssql-table "UsersIgnore" --mssql-strategy Ignore --key "Id" > /dev/null
-    $DTPIPE_BIN -i "$MSSQL_CONN" -q "SELECT * FROM UsersIgnore ORDER BY Id" -o "result_mssql_ignore.csv" > /dev/null
-    verify_ignore "result_mssql_ignore.csv" "MSSQL"
+    $DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v1.csv" -o "$MSSQL_CONN" --mssql-table "UsersIgnore" --mssql-strategy Recreate --key "Id" > /dev/null
+    $DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v2.csv" -o "$MSSQL_CONN" --mssql-table "UsersIgnore" --mssql-strategy Ignore --key "Id" > /dev/null
+    $DTPIPE_BIN -i "$MSSQL_CONN" -q "SELECT * FROM UsersIgnore ORDER BY Id" -o "$ARTIFACTS_DIR/result_mssql_ignore.csv" > /dev/null
+    verify_ignore "$ARTIFACTS_DIR/result_mssql_ignore.csv" "MSSQL"
     
     
     # ==============================================================================
@@ -239,17 +241,17 @@ if [ "$USE_DOCKER" -eq 1 ]; then
     
     # A. Upsert Test
     echo "Oracle: Upsert Strategy"
-    $DTPIPE_BIN -i "source_v1.csv" -o "$ORA_CONN" --ora-table "USERS_UPSERT" --ora-strategy Recreate --key "Id" > /dev/null
-    $DTPIPE_BIN -i "source_v2.csv" -o "$ORA_CONN" --ora-table "USERS_UPSERT" --ora-strategy Upsert --key "Id" > /dev/null
-    $DTPIPE_BIN -i "$ORA_CONN" -q "SELECT * FROM USERS_UPSERT ORDER BY \"Id\"" -o "result_ora_upsert.csv" > /dev/null
-    verify_upsert "result_ora_upsert.csv" "Oracle"
+    $DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v1.csv" -o "$ORA_CONN" --ora-table "USERS_UPSERT" --ora-strategy Recreate --key "Id" > /dev/null
+    $DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v2.csv" -o "$ORA_CONN" --ora-table "USERS_UPSERT" --ora-strategy Upsert --key "Id" > /dev/null
+    $DTPIPE_BIN -i "$ORA_CONN" -q "SELECT * FROM USERS_UPSERT ORDER BY Id" -o "$ARTIFACTS_DIR/result_ora_upsert.csv" > /dev/null
+    verify_upsert "$ARTIFACTS_DIR/result_ora_upsert.csv" "Oracle"
     
     # B. Ignore Test
     echo "Oracle: Ignore Strategy"
-    $DTPIPE_BIN -i "source_v1.csv" -o "$ORA_CONN" --ora-table "USERS_IGNORE" --ora-strategy Recreate --key "Id" > /dev/null
-    $DTPIPE_BIN -i "source_v2.csv" -o "$ORA_CONN" --ora-table "USERS_IGNORE" --ora-strategy Ignore --key "Id" > /dev/null
-    $DTPIPE_BIN -i "$ORA_CONN" -q "SELECT * FROM USERS_IGNORE ORDER BY \"Id\"" -o "result_ora_ignore.csv" > /dev/null
-    verify_ignore "result_ora_ignore.csv" "Oracle"
+    $DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v1.csv" -o "$ORA_CONN" --ora-table "USERS_IGNORE" --ora-strategy Recreate --key "Id" > /dev/null
+    $DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v2.csv" -o "$ORA_CONN" --ora-table "USERS_IGNORE" --ora-strategy Ignore --key "Id" > /dev/null
+    $DTPIPE_BIN -i "$ORA_CONN" -q "SELECT * FROM USERS_IGNORE ORDER BY Id" -o "$ARTIFACTS_DIR/result_ora_ignore.csv" > /dev/null
+    verify_ignore "$ARTIFACTS_DIR/result_ora_ignore.csv" "Oracle"
 
 fi
 

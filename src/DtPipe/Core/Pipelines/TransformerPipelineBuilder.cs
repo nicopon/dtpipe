@@ -1,11 +1,8 @@
 using System.CommandLine;
-using DtPipe.Configuration;
-
-namespace DtPipe.Core.Pipelines;
-
 using DtPipe.Core.Abstractions;
 using DtPipe.Cli.Abstractions;
-using DtPipe.Core.Models;
+
+namespace DtPipe.Core.Pipelines;
 
 public class TransformerPipelineBuilder
 {
@@ -73,7 +70,7 @@ public class TransformerPipelineBuilder
         {
             var arg = args[i];
             
-            // Is this a transformer option?
+
             if (optionMap.TryGetValue(arg, out var match))
             {
                 var factory = match.Factory;

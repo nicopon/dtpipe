@@ -1,10 +1,7 @@
 using System.Text;
-using System.Text.RegularExpressions;
 using Npgsql;
 using DtPipe.Core.Abstractions;
-using DtPipe.Cli.Abstractions;
 using DtPipe.Core.Models;
-using DtPipe.Core.Options;
 using DtPipe.Core.Helpers;
 
 namespace DtPipe.Adapters.PostgreSQL;
@@ -15,10 +12,12 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
     private readonly PostgreSqlWriterOptions _options;
     private NpgsqlConnection? _connection;
     private NpgsqlBinaryImporter? _writer;
+    private IReadOnlyList<ColumnInfo>? _columns;
     private string? _stagingTable;
     private List<string> _keyColumns = new();
-
-    private IReadOnlyList<ColumnInfo>? _columns;
+    
+    private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.PostgreSqlDialect();
+    public ISqlDialect Dialect => _dialect;
 
     public PostgreSqlDataWriter(string connectionString, PostgreSqlWriterOptions options)
     {
@@ -33,22 +32,17 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(ct);
 
-        var (schemaName, tableName) = ParseTableName(_options.Table);
-
-        // Check if table exists
-        var existsSql = @"
-            SELECT COUNT(*) FROM information_schema.tables 
-            WHERE table_schema = @schema AND table_name = @table";
+        // Resolve table using native logic
+        var resolved = await ResolveTableAsync(connection, _options.Table, ct);
         
-        await using var existsCmd = new NpgsqlCommand(existsSql, connection);
-        existsCmd.Parameters.AddWithValue("schema", schemaName);
-        existsCmd.Parameters.AddWithValue("table", tableName);
-        
-        var exists = Convert.ToInt64(await existsCmd.ExecuteScalarAsync(ct)) > 0;
-        if (!exists)
+        if (resolved == null)
         {
-            return new TargetSchemaInfo([], false, null, null, null);
+             // Table does not exist (or at least could not be resolved)
+             return new TargetSchemaInfo([], false, null, null, null);
         }
+
+        var (schemaName, tableName) = resolved.Value;
+
 
         // Get columns
         var columnsSql = @"
@@ -74,7 +68,7 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
             FROM pg_constraint c
             JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
             WHERE c.contype = 'p' 
-              AND c.conrelid = (SELECT oid FROM pg_class WHERE relname = @table 
+            AND c.conrelid = (SELECT oid FROM pg_class WHERE relname = @table 
                   AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = @schema))";
         
         var pkColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -95,7 +89,7 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
             FROM pg_constraint c
             JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
             WHERE c.contype = 'u' 
-              AND c.conrelid = (SELECT oid FROM pg_class WHERE relname = @table 
+            AND c.conrelid = (SELECT oid FROM pg_class WHERE relname = @table 
                   AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = @schema))";
         
         var uniqueColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -166,32 +160,22 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
         );
     }
 
-    private static (string schema, string table) ParseTableName(string fullName)
-    {
-        // Remove quotes and parse schema.table
-        var cleaned = fullName.Replace("\"", "");
-        var parts = cleaned.Split('.');
-        return parts.Length == 2 
-            ? (parts[0], parts[1]) 
-            : ("public", parts[0]);
-    }
+
 
     private static string BuildNativeType(string dataType, string udtName, int? maxLength, int? precision, int? scale)
     {
         return dataType.ToUpperInvariant() switch
         {
-            "character varying" when maxLength.HasValue => $"VARCHAR({maxLength})",
-            "character varying" => "VARCHAR",
-            "character" when maxLength.HasValue => $"CHAR({maxLength})",
-            "character" => "CHAR",
-            "numeric" when precision.HasValue && scale.HasValue => $"NUMERIC({precision},{scale})",
-            "numeric" when precision.HasValue => $"NUMERIC({precision})",
-            "numeric" => "NUMERIC",
+            "CHARACTER VARYING" when maxLength.HasValue => $"VARCHAR({maxLength})",
+            "CHARACTER VARYING" => "VARCHAR",
+            "CHARACTER" when maxLength.HasValue => $"CHAR({maxLength})",
+            "CHARACTER" => "CHAR",
+            "NUMERIC" when precision.HasValue && scale.HasValue => $"NUMERIC({precision},{scale})",
+            "NUMERIC" when precision.HasValue => $"NUMERIC({precision})",
+            "NUMERIC" => "NUMERIC",
             _ => udtName.ToUpperInvariant()
         };
     }
-
-
 
     #endregion
 
@@ -201,27 +185,66 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
         await _connection.OpenAsync(ct);
         _columns = columns;
 
+        string resolvedSchema;
+        string resolvedTable;
+        
+        // 1. Native Resolution
+        var resolved = await ResolveTableAsync(_connection, _options.Table, ct);
+
+        if (resolved != null)
+        {
+            // Table exists (or at least resolved to an object)
+            resolvedSchema = resolved.Value.Schema;
+            resolvedTable = resolved.Value.Table;
+        }
+        else
+        {
+            // Table does not exist (or could not be resolved)
+            if (_options.Strategy == PostgreSqlWriteStrategy.Recreate)
+            {
+                // Fallback: Parse user input to determine where to create the new table
+                var (s, t) = ParseTableName(_options.Table);
+                resolvedSchema = s;
+                resolvedTable = t;
+            }
+            else
+            {
+                // Strict check: Strategy requires table to exist
+                throw new InvalidOperationException($"Table '{_options.Table}' does not exist or could not be resolved via search_path. Strategy {_options.Strategy} requires an existing table.");
+            }
+        }
+        
+        // Quote for SQL generation
+        // Note: Resolved names from Postgres are "clean" (unquoted) but might need quoting if they contain mixed case/special chars.
+        string quotedTable = _dialect.NeedsQuoting(resolvedTable) ? $"{_dialect.Quote(resolvedSchema)}.{_dialect.Quote(resolvedTable)}" : $"{_dialect.Quote(resolvedSchema)}.{resolvedTable}";
+
         // Handle Strategy (Create/Truncate/Append/Delete)
         if (_options.Strategy == PostgreSqlWriteStrategy.Recreate)
         {
-            await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS \"{_options.Table}\"", ct);
+            // If it resolved, we drop THAT specific table.
+            if (resolved != null)
+            {
+                await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS {quotedTable}", ct);
+            }
         }
         else if (_options.Strategy == PostgreSqlWriteStrategy.DeleteThenInsert)
         {
-            await ExecuteNonQueryAsync($"DELETE FROM \"{_options.Table}\"", ct);
+            await ExecuteNonQueryAsync($"DELETE FROM {quotedTable}", ct);
         }
 
-        // Create table if not exists
-        var createSql = BuildCreateTableSql(_options.Table, columns);
+        // Create table if not exists (Only for Recreate essentially, or if user manually deleted it concurrently)
+        // Note: BuildCreateTableSql needs to use the Resolved Schema/Table logic, not the _options.Table blindly.
+        // We refactor BuildCreateTableSql to take schema/table.
+        var createSql = BuildCreateTableSql(resolvedSchema, resolvedTable, columns);
         await ExecuteNonQueryAsync(createSql, ct);
         
         if (_options.Strategy == PostgreSqlWriteStrategy.Truncate)
         {
-            await ExecuteNonQueryAsync($"TRUNCATE TABLE \"{_options.Table}\"", ct);
+            await ExecuteNonQueryAsync($"TRUNCATE TABLE {quotedTable}", ct);
         }
 
         // Incremental Loading Setup
-        string targetTable = _options.Table;
+        string targetTable = quotedTable;
 
         if (_options.Strategy == PostgreSqlWriteStrategy.Upsert || _options.Strategy == PostgreSqlWriteStrategy.Ignore)
         {
@@ -243,16 +266,19 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
             }
              
             // 2. Create Staging Table (TEMP table)
-            _stagingTable = $"tmp_stage_{Guid.NewGuid():N}";
+            _stagingTable = $"tmp_stage_{Guid.NewGuid():N}"; // Safe GUID
+            
             // Remove ON COMMIT DROP because in autocommit mode it drops immediately.
             // We explicit drop in CompleteAsync anyway.
-            await ExecuteNonQueryAsync($"CREATE TEMP TABLE \"{_stagingTable}\" (LIKE \"{_options.Table}\" INCLUDING DEFAULTS)", ct);
+            await ExecuteNonQueryAsync($"CREATE TEMP TABLE {_stagingTable} (LIKE {quotedTable} INCLUDING DEFAULTS)", ct);
             
             targetTable = _stagingTable;
         }
 
         // Begin Binary Import
         // Construct COPY command
+        // Note: For COPY, targetTable is already quoted if needed
+        
         var copySql = BuildCopySql(targetTable, columns);
         _writer = await _connection.BeginBinaryImportAsync(copySql, ct);
     }
@@ -308,13 +334,21 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
             // Perform Merge if Staging
             if (_stagingTable != null)
             {
-                var cols = _columns!.Select(c => $"\"{c.Name}\"").ToList();
-                var conflictTarget = string.Join(", ", _keyColumns.Select(c => $"\"{c}\""));
-                var updateSet = string.Join(", ", cols.Where(c => !_keyColumns.Contains(c.Replace("\"", ""), StringComparer.OrdinalIgnoreCase))
-                                                      .Select(c => $"{c} = EXCLUDED.{c}"));
+                var cols = _columns!.Select(c => SqlIdentifierHelper.GetSafeIdentifier(_dialect, c)).ToList();
+                var rawCols = _columns!.Select(c => c.Name).ToList();
+
+                var conflictTarget = string.Join(", ", _keyColumns.Select(c => _dialect.Quote(c)));
+                
+                // Exclude keys from update set
+                var updateSet = string.Join(", ", 
+                    _columns!.Where(c => !_keyColumns.Contains(c.Name, StringComparer.OrdinalIgnoreCase))
+                             .Select(c => $"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, c)} = EXCLUDED.{SqlIdentifierHelper.GetSafeIdentifier(_dialect, c)}"));
 
                 var sb = new StringBuilder();
-                sb.Append($"INSERT INTO \"{_options.Table}\" ({string.Join(", ", cols)}) SELECT {string.Join(", ", cols)} FROM \"{_stagingTable}\" ");
+                string quotedTarget = _dialect.Quote(_options.Table);
+                string quotedStaging = _dialect.Quote(_stagingTable);
+
+                sb.Append($"INSERT INTO {quotedTarget} ({string.Join(", ", cols)}) SELECT {string.Join(", ", cols)} FROM {quotedStaging} ");
                 
                 if (_options.Strategy == PostgreSqlWriteStrategy.Ignore)
                 {
@@ -329,8 +363,8 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
                 Console.WriteLine($"[Postgres Merge SQL]: {sb}");
 
                 await ExecuteNonQueryAsync(sb.ToString(), ct);
-                // Temp table drops on commit/session end, but we can drop explicitly to be clean
-                await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS \"{_stagingTable}\"", ct);
+                await ExecuteNonQueryAsync(sb.ToString(), ct);
+                await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS {_stagingTable}", ct);
             }
         }
     }
@@ -347,31 +381,50 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
         }
     }
 
-    private string BuildCreateTableSql(string tableName, IReadOnlyList<ColumnInfo> columns)
+    private string BuildCreateTableSql(string schema, string table, IReadOnlyList<ColumnInfo> columns)
     {
         var sb = new StringBuilder();
-        sb.Append($"CREATE TABLE IF NOT EXISTS \"{tableName}\" (");
+        // Quote table name if necessary
+        string quotedSchema = _dialect.NeedsQuoting(schema) ? _dialect.Quote(schema) : schema;
+        string quotedTable = _dialect.NeedsQuoting(table) ? _dialect.Quote(table) : table;
+        string fullTableName = $"{quotedSchema}.{quotedTable}";
+        
+        sb.Append($"CREATE TABLE IF NOT EXISTS {fullTableName} (");
         
         for (int i = 0; i < columns.Count; i++)
         {
             if (i > 0) sb.Append(", ");
-            // Use double quotes for column names to handle case sensitivity and keywords
-            sb.Append($"\"{columns[i].Name}\" {PostgreSqlTypeMapper.Instance.MapToProviderType(columns[i].ClrType)}");
+            
+            var col = columns[i];
+            string nameToUse = col.Name;
+            
+            // Normalize if not case sensitive to avoid unnecessary quoting of case mismatches
+            if (!col.IsCaseSensitive)
+            {
+                nameToUse = _dialect.Normalize(col.Name);
+            }
+            
+            string safeName = SqlIdentifierHelper.GetSafeIdentifier(_dialect, nameToUse);
+            sb.Append($"{safeName} {PostgreSqlTypeMapper.Instance.MapToProviderType(col.ClrType)}");
         }
-
-        // PostgreSqlWriterOptions doesn't explicitly have Key property in current view, 
-        // BUT I propagated it via reflection in JobService.
-        // Wait, did I verify PostgreSqlWriterOptions HAS a Key property?
-        // I checked file previously... let me verify if I added it?
-        // Yes, in previous turn I viewed PostgreSqlWriterOptions and added Key.
-        // So _options.Key should access it.
-        // Wait, PostgreSqlDataWriter stores _options as PostgreSqlWriterOptions
         
         if (!string.IsNullOrEmpty(_options.Key))
         {
-             // Use quoted column names for PK
-             var keys = _options.Key.Split(',').Select(k => $"\"{k.Trim()}\"");
-             sb.Append($", PRIMARY KEY ({string.Join(", ", keys)})");
+             var keyNames = _options.Key.Split(',').Select(k => k.Trim());
+             var safeKeys = new List<string>();
+             foreach(var k in keyNames)
+             {
+                 var col = columns.FirstOrDefault(c => string.Equals(c.Name, k, StringComparison.OrdinalIgnoreCase));
+                 if (col != null)
+                 {
+                     safeKeys.Add(SqlIdentifierHelper.GetSafeIdentifier(_dialect, col));
+                 }
+                 else
+                 {
+                     safeKeys.Add(_dialect.Quote(k));
+                 }
+             }
+             sb.Append($", PRIMARY KEY ({string.Join(", ", safeKeys)})");
         }
         
         sb.Append(")");
@@ -381,13 +434,63 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
     private string BuildCopySql(string tableName, IReadOnlyList<ColumnInfo> columns)
     {
         var sb = new StringBuilder();
-        sb.Append($"COPY \"{tableName}\" (");
+        // Quote table name if necessary
+        string quotedTable = _dialect.NeedsQuoting(tableName) ? _dialect.Quote(tableName) : tableName;
+        
+        sb.Append($"COPY {quotedTable} (");
         for (int i = 0; i < columns.Count; i++)
         {
             if (i > 0) sb.Append(", ");
-            sb.Append($"\"{columns[i].Name}\"");
+            sb.Append(SqlIdentifierHelper.GetSafeIdentifier(_dialect, columns[i]));
         }
         sb.Append(") FROM STDIN (FORMAT BINARY)");
         return sb.ToString();
+    }
+    
+    // Legacy helper 
+    private string BuildCopySqlUnquoted(string tableName, IReadOnlyList<ColumnInfo> columns) => BuildCopySql(tableName, columns);
+
+    private static async Task<(string Schema, string Table)?> ResolveTableAsync(NpgsqlConnection connection, string inputName, CancellationToken ct = default)
+    {
+        // Use to_regclass to resolve the table name using search_path
+        // This handles "table", "schema.table", "quoted.table", etc.
+        // It returns NULL if not found.
+        
+        var sql = @"
+            SELECT n.nspname, c.relname
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE c.oid = to_regclass(@input)::oid";
+
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.Parameters.AddWithValue("input", inputName);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (await reader.ReadAsync(ct))
+        {
+            return (reader.GetString(0), reader.GetString(1));
+        }
+        
+        return null;
+    }
+
+    private (string Schema, string Table) ParseTableName(string tableName)
+    {
+        // Fallback manual parser for Creation scenarios where table doesn't exist yet
+        if (string.IsNullOrWhiteSpace(tableName)) return ("public", tableName);
+        
+        string[] parts = tableName.Split('.');
+        if (parts.Length == 2)
+        {
+             return (NormalizeIdentifier(parts[0]), NormalizeIdentifier(parts[1]));
+        }
+        
+        return ("public", NormalizeIdentifier(tableName));
+    }
+    
+    private string NormalizeIdentifier(string id)
+    {
+        return id.Trim('"');
     }
 }

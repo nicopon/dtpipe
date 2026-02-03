@@ -11,7 +11,8 @@ public record DryRunResult(
     List<SampleTrace> Samples,
     List<string> StepNames,
     SchemaCompatibilityReport? CompatibilityReport,
-    string? SchemaInspectionError
+    string? SchemaInspectionError,
+    ISqlDialect? Dialect = null
 );
 
 /// <summary>
@@ -72,22 +73,31 @@ public class DryRunAnalyzer
         // 3. Schema Compatibility Analysis (if inspector provided)
         SchemaCompatibilityReport? compatibilityReport = null;
         string? schemaInspectionError = null;
+        ISqlDialect? dialect = null;
 
-        if (inspector != null && samples.Count > 0)
+        if (inspector != null)
         {
-            try
+            if (inspector is IHasSqlDialect hasDialect)
             {
-                var targetSchema = await inspector.InspectTargetAsync(ct);
-                var finalSourceSchema = traceSchemas.Last();
-                compatibilityReport = SchemaCompatibilityAnalyzer.Analyze(finalSourceSchema, targetSchema);
+                dialect = hasDialect.Dialect;
             }
-            catch (Exception ex)
+
+            if (samples.Count > 0)
             {
-                schemaInspectionError = ex.Message;
+                try
+                {
+                    var targetSchema = await inspector.InspectTargetAsync(ct);
+                    var finalSourceSchema = traceSchemas.Last();
+                    compatibilityReport = SchemaCompatibilityAnalyzer.Analyze(finalSourceSchema, targetSchema, dialect);
+                }
+                catch (Exception ex)
+                {
+                    schemaInspectionError = ex.Message;
+                }
             }
         }
 
-        return new DryRunResult(samples, stepNames, compatibilityReport, schemaInspectionError);
+        return new DryRunResult(samples, stepNames, compatibilityReport, schemaInspectionError, dialect);
     }
 
     private SampleTrace ProcessRowThroughPipeline(

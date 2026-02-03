@@ -1,11 +1,10 @@
-namespace DtPipe.Cli.DryRun;
-
 using System.Text;
-using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Validation;
 using DtPipe.DryRun; // For SampleTrace, StageTrace
 using Spectre.Console;
+
+namespace DtPipe.Cli.DryRun;
 
 /// <summary>
 /// Builds Spectre.Console tables for dry-run trace visualization.
@@ -129,7 +128,6 @@ public class DryRunRenderer
                     if (targetSchema != null)
                     {
                          // "{ClrType} -> {NativeType} [PK,UQ]"
-                         // Approx 50 chars?
                          displayLen += 30; 
                     }
 

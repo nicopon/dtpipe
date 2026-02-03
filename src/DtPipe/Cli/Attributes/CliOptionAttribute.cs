@@ -1,6 +1,6 @@
 using System;
 
-namespace DtPipe.Core.Attributes;
+namespace DtPipe.Cli.Attributes;
 
 [AttributeUsage(AttributeTargets.Property)]
 public class CliOptionAttribute : Attribute

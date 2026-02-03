@@ -3,7 +3,6 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using System.Data;
 using DtPipe.Core.Helpers;
-using Microsoft.Extensions.Logging;
 using System.Text;
 
 namespace DtPipe.Adapters.SqlServer;
@@ -18,24 +17,49 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
 
     private IReadOnlyList<ColumnInfo>? _columns;
 
+    private string? _stagingTable;
+    private string _targetTableName = ""; // Resolved or Fallback
     private List<string> _keyColumns = new();
-    private List<int> _keyIndices = new();
-    private BatchDiffProcessor? _diffProcessor;
-    private ILogger<SqlServerDataWriter>? _logger; // Need Logger?
-
-    // We can't change constructor signature easily without breaking signature compatibility 
-    // BUT we need logger for DiffProcessor.
-    // However, BatchDiffProcessor constructor takes ILogger (nullable?).
-    // Yes, BatchDiffProcessor takes ILogger?.
     
-    // Actually, I can instantiate BatchDiffProcessor with null logger if I don't have one.
-    // The current class doesn't have a logger. I'll add one if possible, or proceed without.
+    private static async Task<(string Schema, string Table)?> ResolveTableAsync(SqlConnection connection, string inputName, CancellationToken ct)
+    {
+        var sql = @"
+            SELECT 
+                OBJECT_SCHEMA_NAME(OBJECT_ID(@input)), 
+                OBJECT_NAME(OBJECT_ID(@input))
+            WHERE OBJECT_ID(@input) IS NOT NULL";
+
+        using var cmd = new SqlCommand(sql, connection);
+        cmd.Parameters.AddWithValue("@input", inputName);
+
+        using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (await reader.ReadAsync(ct))
+        {
+             if (!reader.IsDBNull(0) && !reader.IsDBNull(1))
+             {
+                 return (reader.GetString(0), reader.GetString(1));
+             }
+        }
+        return null;
+    }
+
+    private static (string Schema, string Table) ParseTableName(string tableName)
+    {
+        // Simple fallback parser
+        if (string.IsNullOrWhiteSpace(tableName)) return ("dbo", tableName); // dbo is default
+        var parts = tableName.Split('.');
+        if (parts.Length == 2) return (parts[0].Trim('[',']'), parts[1].Trim('[',']'));
+        return ("dbo", tableName.Trim('[',']'));
+    }
+    private List<int> _keyIndices = new();
+
+    private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.SqlServerDialect();
+    public ISqlDialect Dialect => _dialect;
 
     public SqlServerDataWriter(string connectionString, SqlServerWriterOptions options)
     {
         _connectionString = connectionString;
         _options = options;
-        _diffProcessor = new BatchDiffProcessor(null); 
     }
 
     public async ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
@@ -44,43 +68,101 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
         _connection = new SqlConnection(_connectionString);
         await _connection.OpenAsync(ct);
 
-        // Pre-action
+        // Native Resolution logic
+        string resolvedSchema;
+        string resolvedTable;
+        
+        var resolved = await ResolveTableAsync(_connection, _options.Table, ct);
+        if (resolved != null)
+        {
+            resolvedSchema = resolved.Value.Schema;
+            resolvedTable = resolved.Value.Table;
+        }
+        else
+        {
+            if (_options.Strategy == SqlServerWriteStrategy.Recreate)
+            {
+                var (s, t) = ParseTableName(_options.Table);
+                resolvedSchema = s;
+                resolvedTable = t;
+            }
+            else
+            {
+                throw new InvalidOperationException($"Table '{_options.Table}' does not exist or could not be resolved (Synonym/Path). Strategy {_options.Strategy} requires an existing table.");
+            }
+        }
+        
+        // Construct canonical Quoted Name for SQL usage
+        // SQL Server quoting: [Schema].[Table]
+        // Note: ResolveTableAsync returns unquoted names from DB metadata.
+        _targetTableName = $"[{resolvedSchema}].[{resolvedTable}]";
+        
         if (_options.Strategy == SqlServerWriteStrategy.Recreate)
         {
-            var cmd = new SqlCommand($"DROP TABLE IF EXISTS [{_options.Table}]", _connection);
+            // DROP uses quoted name
+            var cmd = new SqlCommand($"DROP TABLE IF EXISTS {_targetTableName}", _connection);
             await cmd.ExecuteNonQueryAsync(ct);
 
-            var createSql = BuildCreateTableSql(_options.Table, columns);
+            // Create using canonical names
+            var createSql = BuildCreateTableSql(resolvedSchema, resolvedTable, columns);
             var createCmd = new SqlCommand(createSql, _connection);
             await createCmd.ExecuteNonQueryAsync(ct);
         }
         else if (_options.Strategy == SqlServerWriteStrategy.Truncate)
         {
-            var cmd = new SqlCommand($"TRUNCATE TABLE [{_options.Table}]", _connection);
+            var cmd = new SqlCommand($"TRUNCATE TABLE {_targetTableName}", _connection);
             await cmd.ExecuteNonQueryAsync(ct);
         }
         else if (_options.Strategy == SqlServerWriteStrategy.DeleteThenInsert)
         {
-            var cmd = new SqlCommand($"DELETE FROM [{_options.Table}]", _connection);
+            var cmd = new SqlCommand($"DELETE FROM {_targetTableName}", _connection);
             await cmd.ExecuteNonQueryAsync(ct);
         }
         else
         {
-            var checkCmd = new SqlCommand($"SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '{_options.Table}'", _connection);
-            var exists = (int)(await checkCmd.ExecuteScalarAsync(ct) ?? 0) > 0;
-            
-            if (!exists)
+            // For Append/Upsert/Ignore/etc., if table resolved -> Good.
+            // If NOT resolved -> We must try to create it.
+            if (resolved == null)
             {
-                var createSql = BuildCreateTableSql(_options.Table, columns);
+                // Native resolution failed, so it likely doesn't exist.
+                // Fallback to manual parsing for creation.
+                var (s, t) = ParseTableName(_options.Table);
+                resolvedSchema = s;
+                resolvedTable = t;
+                _targetTableName = $"[{resolvedSchema}].[{resolvedTable}]";
+
+                var createSql = BuildCreateTableSql(resolvedSchema, resolvedTable, columns);
                 var createCmd = new SqlCommand(createSql, _connection);
-                await createCmd.ExecuteNonQueryAsync(ct);
+                try 
+                {
+                    await createCmd.ExecuteNonQueryAsync(ct);
+                }
+                catch (SqlException ex) when (ex.Number == 2714) // Table already exists (race condition)
+                {
+                   // Ignore
+                }
             }
+            // If resolved != null, the table exists, and _targetTableName is set.
         }
+        
+        // Logic fix: Ensure _targetTableName is set if it wasn't already (e.g. earlier exception path removed?)
+        // The earlier block (lines 78-90 in my new code) handles Recreate.
+        // Lines 91-99 handled exceptions. I need to make sure the structure is sound.
+        
+        // RE-WRITING LOGIC FLOW CLEARLY BELOW:
+        /*
+          1. Resolve.
+          2. If Resolved: Set _targetTableName.
+          3. If Not Resolved:
+             If Recreate: Parse -> Set _targetTableName.
+             If Other: Parse -> Set _targetTableName -> Try Create.
+          4. Execute specific Recreate/Truncate/Delete logic.
+        */
 
         // Configure SqlBulkCopy
         _bulkCopy = new SqlBulkCopy(_connection, SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.UseInternalTransaction, null)
         {
-            DestinationTableName = _options.Table,
+            DestinationTableName = _targetTableName,
             // BatchSize is controlled by pipeline buffer
             BatchSize = 0, 
             BulkCopyTimeout = 0
@@ -90,7 +172,16 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
         _bufferTable = new DataTable();
         foreach (var col in columns)
         {
-            _bufferTable.Columns.Add(col.Name, Nullable.GetUnderlyingType(col.ClrType) ?? col.ClrType);
+            var type = Nullable.GetUnderlyingType(col.ClrType) ?? col.ClrType;
+            // DataTable needs Base Type for nullable columns? Or just Type?
+            // "Nullable types are not supported in DataTable" - traditionally.
+            // Correct approach: Use base type and AllowDBNull = true.
+            _bufferTable.Columns.Add(col.Name, type); 
+            
+            // Map Source (in buffer) to Dest (in DB)
+            // Buffer col name is col.Name.
+            // Dest col name is col.Name.
+            // Smart quoting applies to SQL text, not Mapping names usually.
             _bulkCopy.ColumnMappings.Add(col.Name, col.Name);
         }
 
@@ -138,50 +229,57 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
         await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync(ct);
 
-        var tableName = _options.Table;
-
-        // Check exists
-        var checkCmd = new SqlCommand("SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @Table", connection);
-        checkCmd.Parameters.AddWithValue("@Table", tableName);
-        var exists = (int)(await checkCmd.ExecuteScalarAsync(ct) ?? 0) > 0;
-
-        if (!exists) return new TargetSchemaInfo([], false, null, null, null);
+        // Resolve target using native logic
+        var resolved = await ResolveTableAsync(connection, _options.Table, ct);
+        if (resolved == null)
+        {
+             return new TargetSchemaInfo([], false, null, null, null);
+        }
+        
+        var (schema, table) = resolved.Value;
 
         // Get Columns
         var cols = new List<TargetColumnInfo>();
-        var colCmd = new SqlCommand(@"
-            SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
-            FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_NAME = @Table
-            ORDER BY ORDINAL_POSITION", connection);
-        colCmd.Parameters.AddWithValue("@Table", tableName);
-
-        using var reader = await colCmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
         {
-            var name = reader.GetString(0);
-            var type = reader.GetString(1);
-            var nullable = reader.GetString(2) == "YES";
-            
-            cols.Add(new TargetColumnInfo(
-                name,
-                type,
-                SqlServerTypeMapper.MapFromProviderType(type),
-                nullable,
-                false,
-                false,
-                null
-            ));
+            var colCmd = new SqlCommand(@"
+                SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = @Schema AND TABLE_NAME = @Table
+                ORDER BY ORDINAL_POSITION", connection);
+            colCmd.Parameters.AddWithValue("@Schema", schema);
+            colCmd.Parameters.AddWithValue("@Table", table);
+
+            using var reader = await colCmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var name = reader.GetString(0);
+                var type = reader.GetString(1);
+                var nullable = reader.GetString(2) == "YES";
+                
+                cols.Add(new TargetColumnInfo(
+                    name,
+                    type,
+                    SqlServerTypeMapper.MapFromProviderType(type),
+                    nullable,
+                    false,
+                    false,
+                    null
+                ));
+            }
         }
 
         // Get Primary Key
         var pkCmd = new SqlCommand(@"
-            SELECT COLUMN_NAME
+            SELECT KCU.COLUMN_NAME
             FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS TC
             JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE KCU ON TC.CONSTRAINT_NAME = KCU.CONSTRAINT_NAME
-            WHERE TC.CONSTRAINT_TYPE = 'PRIMARY KEY' AND TC.TABLE_NAME = @Table
+                AND TC.TABLE_SCHEMA = KCU.TABLE_SCHEMA
+            WHERE TC.CONSTRAINT_TYPE = 'PRIMARY KEY' 
+              AND TC.TABLE_SCHEMA = @Schema 
+              AND TC.TABLE_NAME = @Table
             ORDER BY KCU.ORDINAL_POSITION", connection);
-        pkCmd.Parameters.AddWithValue("@Table", tableName);
+        pkCmd.Parameters.AddWithValue("@Schema", schema);
+        pkCmd.Parameters.AddWithValue("@Table", table);
         
         var pkCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         using var pkReader = await pkCmd.ExecuteReaderAsync(ct);
@@ -194,15 +292,18 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
     }
 
     #endregion
+    
 
-    private string BuildCreateTableSql(string tableName, IReadOnlyList<ColumnInfo> columns)
+    private string BuildCreateTableSql(string schema, string table, IReadOnlyList<ColumnInfo> columns)
     {
-        var sql = $"CREATE TABLE [{tableName}] (";
+        // Quote if needed or always quote for safety
+        var fullTable = $"[{schema}].[{table}]";
+        var sql = $"CREATE TABLE {fullTable} (";
         var cols = new List<string>();
         foreach (var col in columns)
         {
             string type = SqlServerTypeMapper.MapToProviderType(col.ClrType);
-            cols.Add($"[{col.Name}] {type} NULL");
+            cols.Add($"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, col)} {type} NULL");
         }
         sql += string.Join(", ", cols) + ")";
         return sql;
@@ -214,24 +315,7 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
 
         if (_options.Strategy == SqlServerWriteStrategy.Upsert || _options.Strategy == SqlServerWriteStrategy.Ignore)
         {
-             // 1. Partition Batch
-             var (newRows, existingRows) = await _diffProcessor!.PartitionBatchAsync(
-                 rows, 
-                 _keyIndices,
-                 FetchExistingKeysAsync,
-                 ct);
-                 
-             // 2. Insert New Rows
-             if (newRows.Count > 0)
-             {
-                  await ExecuteBulkInsertAsync(newRows, ct);
-             }
-             
-             // 3. Update Existing Rows (if Upsert)
-             if (_options.Strategy == SqlServerWriteStrategy.Upsert && existingRows.Count > 0)
-             {
-                 await ExecuteBulkUpdateAsync(existingRows, ct);
-             }
+             await ExecuteMergeAsync(rows, ct);
              return;
         }
 
@@ -254,11 +338,17 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
         await _bulkCopy!.WriteToServerAsync(_bufferTable, ct);
     }
     
-    private async Task ExecuteBulkUpdateAsync(List<object?[]> rows, CancellationToken ct)
+    private async Task ExecuteMergeAsync(IReadOnlyList<object?[]> rows, CancellationToken ct)
     {
         // 1. Create Staging Table
         var stageTable = $"#Stage_{Guid.NewGuid():N}";
-        var createStageCmd = new SqlCommand($"SELECT TOP 0 * INTO [{stageTable}] FROM [{_options.Table}]", _connection);
+        var targetTable = _targetTableName;
+
+        // Create temp table with same structure as target (quickest way is SELECT INTO WHERE 1=0)
+        // But we need to be careful about column types if we use SELECT INTO.
+        // Better: Use the same create table logic or just standard "SELECT TOP 0 * INTO ...".
+        // SELECT INTO copies schema including nullability but NOT constraints/indexes. Perfect for staging.
+        var createStageCmd = new SqlCommand($"SELECT TOP 0 * INTO [{stageTable}] FROM {targetTable}", _connection);
         await createStageCmd.ExecuteNonQueryAsync(ct);
         
         try
@@ -266,10 +356,12 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
             // 2. Bulk Copy to Stage
             using var stageBulk = new SqlBulkCopy(_connection, SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.UseInternalTransaction, null)
             {
-                DestinationTableName = stageTable,
+                DestinationTableName = stageTable, 
                 BatchSize = 0,
                 BulkCopyTimeout = 0
             };
+            
+            // Map columns 1:1
             foreach (var col in _columns!)
             {
                 stageBulk.ColumnMappings.Add(col.Name, col.Name);
@@ -287,88 +379,56 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
             }
             await stageBulk.WriteToServerAsync(_bufferTable, ct);
             
-            // 3. Perform Update
+            // 3. Perform Merge
             var sb = new StringBuilder();
-            sb.Append($"UPDATE T SET ");
+            sb.Append($"MERGE {targetTable} AS T ");
+            sb.Append($"USING [{stageTable}] AS S ON (");
             
-            var nonKeys = _columns.Where(c => !_keyColumns.Contains(c.Name, StringComparer.OrdinalIgnoreCase)).ToList();
-            for(int i=0; i<nonKeys.Count; i++)
-            {
-                if (i>0) sb.Append(", ");
-                sb.Append($"T.[{nonKeys[i].Name}] = S.[{nonKeys[i].Name}]");
-            }
-            
-            sb.Append($" FROM [{_options.Table}] T INNER JOIN [{stageTable}] S ON ");
             for(int i=0; i<_keyColumns.Count; i++)
             {
                 if (i>0) sb.Append(" AND ");
-                sb.Append($"T.[{_keyColumns[i]}] = S.[{_keyColumns[i]}]");
+                // Keys link T and S
+                var keyCol = _columns.First(c => c.Name.Equals(_keyColumns[i], StringComparison.OrdinalIgnoreCase));
+                var safeKey = SqlIdentifierHelper.GetSafeIdentifier(_dialect, keyCol);
+                sb.Append($"T.{safeKey} = S.[{_keyColumns[i]}]");
+            }
+            sb.Append(") ");
+            
+            if (_options.Strategy == SqlServerWriteStrategy.Upsert)
+            {
+                sb.Append("WHEN MATCHED THEN UPDATE SET ");
+                var nonKeys = _columns.Where(c => !_keyColumns.Contains(c.Name, StringComparer.OrdinalIgnoreCase)).ToList();
+                for(int i=0; i<nonKeys.Count; i++)
+                {
+                    if (i>0) sb.Append(", ");
+                    var safeName = SqlIdentifierHelper.GetSafeIdentifier(_dialect, nonKeys[i]);
+                    sb.Append($"T.{safeName} = S.[{nonKeys[i].Name}]");
+                }
             }
             
-            var updateCmd = new SqlCommand(sb.ToString(), _connection);
-            await updateCmd.ExecuteNonQueryAsync(ct);
+            sb.Append(" WHEN NOT MATCHED THEN INSERT (");
+            for(int i=0; i<_columns.Count; i++)
+            {
+                if (i>0) sb.Append(", ");
+                sb.Append(SqlIdentifierHelper.GetSafeIdentifier(_dialect, _columns[i]));
+            }
+            sb.Append(") VALUES (");
+            for(int i=0; i<_columns.Count; i++)
+            {
+                if (i>0) sb.Append(", ");
+                sb.Append($"S.[{_columns[i].Name}]");
+            }
+            sb.Append(");"); // Merge requires semicolon
+            
+            var mergeCmd = new SqlCommand(sb.ToString(), _connection);
+            mergeCmd.CommandTimeout = 0; // Infinite timeout for large merges
+            await mergeCmd.ExecuteNonQueryAsync(ct);
         }
         finally
         {
             var dropCmd = new SqlCommand($"DROP TABLE IF EXISTS [{stageTable}]", _connection);
             await dropCmd.ExecuteNonQueryAsync(ct);
         }
-    }
-    
-    private async Task<HashSet<string>> FetchExistingKeysAsync(IEnumerable<object[]> keys, CancellationToken ct)
-    {
-        var allFoundKeys = new HashSet<string>();
-        // SQL Server max params ~2100. Chunk size 1000 is safe.
-        var chunks = keys.Chunk(1000);
-        
-        foreach(var chunk in chunks)
-        {
-            var chunkList = chunk.ToList();
-            if (chunkList.Count == 0) continue;
-
-             var sb = new StringBuilder();
-             sb.Append($"SELECT ");
-             for(int i=0; i<_keyColumns.Count; i++) 
-             {
-                 if (i>0) sb.Append(", ");
-                 sb.Append($"[{_keyColumns[i]}]");
-             }
-             sb.Append($" FROM [{_options.Table}] WHERE ");
-             
-             // Composite IN: (A,B) IN (VALUES (1,2), (3,4)) - Only modern SQL
-             // Or (A=1 AND B=2) OR (A=3 AND B=4)
-             // Cleanest for standard SQL Server: OR clauses
-             
-             for(int i=0; i<chunkList.Count; i++)
-             {
-                 if (i>0) sb.Append(" OR ");
-                 sb.Append("(");
-                 for(int k=0; k<_keyColumns.Count; k++)
-                 {
-                     if (k>0) sb.Append(" AND ");
-                     sb.Append($"[{_keyColumns[k]}] = @k_{i}_{k}");
-                 }
-                 sb.Append(")");
-             }
-            
-            using var cmd = new SqlCommand(sb.ToString(), _connection);
-            for(int i=0; i<chunkList.Count; i++)
-            {
-                 for(int k=0; k<_keyColumns.Count; k++)
-                 {
-                     cmd.Parameters.AddWithValue($"@k_{i}_{k}", chunkList[i][k] ?? DBNull.Value);
-                 }
-            }
-            
-            using var reader = await cmd.ExecuteReaderAsync(ct);
-            while(await reader.ReadAsync(ct))
-            {
-                var values = new object[_keyColumns.Count];
-                reader.GetValues(values);
-                allFoundKeys.Add(BatchDiffProcessor.GenerateKeyString(values));
-            }
-        }
-        return allFoundKeys;
     }
     
     // Original WriteBatchAsync replaced above

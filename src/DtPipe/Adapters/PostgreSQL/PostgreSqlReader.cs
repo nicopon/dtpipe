@@ -40,8 +40,15 @@ public class PostgreSqlReader : IStreamReader
         
         // Populate Columns
         var schema = await _reader.GetColumnSchemaAsync(ct);
-        // ColumnInfo(name, type, isNullable, isPrimaryKey)
-        Columns = schema.Select(c => new ColumnInfo(c.ColumnName, c.DataType ?? typeof(object), c.AllowDBNull ?? true)).ToList();
+        
+        // PostgreSQL normalizes unquoted identifiers to lowercase
+        // If column name contains uppercase, it was created with quotes (case-sensitive)
+        Columns = schema.Select(c => new ColumnInfo(
+            c.ColumnName, 
+            c.DataType ?? typeof(object), 
+            c.AllowDBNull ?? true,
+            IsCaseSensitive: c.ColumnName != c.ColumnName.ToLowerInvariant() // Detect quoted columns
+        )).ToList();
     }
 
     public async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(int batchSize, [EnumeratorCancellation] CancellationToken ct = default)

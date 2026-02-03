@@ -6,9 +6,7 @@ using Oracle.ManagedDataAccess.Client;
 using DtPipe.Adapters.Oracle;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
-using DtPipe.Cli.Abstractions;
 using DtPipe.Tests.Helpers;
-using DotNet.Testcontainers.Builders;
 
 namespace DtPipe.Tests;
 

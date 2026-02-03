@@ -4,7 +4,8 @@ set -e
 # Resolve Project Root and Paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-OUTPUT_DIR="$SCRIPT_DIR/output"
+ARTIFACTS_DIR="$SCRIPT_DIR/artifacts"
+mkdir -p "$ARTIFACTS_DIR"
 
 # Path to binary (Release build)
 DTPIPE="$PROJECT_ROOT/dist/release/dtpipe"
@@ -28,7 +29,7 @@ fi
 
 # Cleanup
 cleanup() {
-    rm -f "$OUTPUT_DIR/ref_trans.csv" "$OUTPUT_DIR/test_overwrite.csv" "$OUTPUT_DIR/test_null.csv" "$OUTPUT_DIR/test_mask.csv"
+    rm -f "$ARTIFACTS_DIR/ref_trans.csv" "$ARTIFACTS_DIR/test_overwrite.csv" "$ARTIFACTS_DIR/test_null.csv" "$ARTIFACTS_DIR/test_mask.csv"
 }
 trap cleanup EXIT
 
@@ -37,19 +38,19 @@ echo "Step 0: Generate Reference Source"
 echo "----------------------------------------"
 $DTPIPE --input "sample:20;Id=int;Name=string;Amount=double;Secret=string" \
            --query "SELECT * FROM dummy" \
-           --output "$OUTPUT_DIR/ref_trans.csv"
+           --output "$ARTIFACTS_DIR/ref_trans.csv"
 
 echo "----------------------------------------"
 echo "Step 1: Overwrite Transformer"
 echo "----------------------------------------"
 # Overwrite Secret with "HIDDEN"
-run_via_yaml --input "csv:$OUTPUT_DIR/ref_trans.csv" \
+run_via_yaml --input "csv:$ARTIFACTS_DIR/ref_trans.csv" \
            --query "SELECT * FROM data" \
-           --output "$OUTPUT_DIR/test_overwrite.csv" \
+           --output "$ARTIFACTS_DIR/test_overwrite.csv" \
            --overwrite "Secret=HIDDEN"
 
 # Validation
-COUNT=$(grep "HIDDEN" "$OUTPUT_DIR/test_overwrite.csv" | wc -l)
+COUNT=$(grep "HIDDEN" "$ARTIFACTS_DIR/test_overwrite.csv" | wc -l)
 # Expect 20 rows + maybe execution logic overhead? 
 # Header row shouldn't have HIDDEN unless specified.
 # Sample rows: 20. So 20 times HIDDEN.
@@ -66,9 +67,9 @@ echo "----------------------------------------"
 echo "Step 2: Null Transformer"
 echo "----------------------------------------"
 # Nullify Amount
-run_via_yaml --input "csv:$OUTPUT_DIR/ref_trans.csv" \
+run_via_yaml --input "csv:$ARTIFACTS_DIR/ref_trans.csv" \
            --query "SELECT * FROM data" \
-           --output "$OUTPUT_DIR/test_null.csv" \
+           --output "$ARTIFACTS_DIR/test_null.csv" \
            --null "Amount"
 
 # Validation: Check if Amount column is empty. 
@@ -82,14 +83,14 @@ run_via_yaml --input "csv:$OUTPUT_DIR/ref_trans.csv" \
 # But other columns might have digits (Id).
 # Better check: cut command to extract column.
 # Amount is column 3.
-NON_EMPTY_COUNT=$(cut -d',' -f3 "$OUTPUT_DIR/test_null.csv" | tail -n +2 | grep "[0-9]" | wc -l)
+NON_EMPTY_COUNT=$(cut -d',' -f3 "$ARTIFACTS_DIR/test_null.csv" | tail -n +2 | grep "[0-9]" | wc -l)
 echo "Non-Empty Amount Count: $NON_EMPTY_COUNT"
 
 if [ "$NON_EMPTY_COUNT" -eq 0 ]; then
     echo "✅ Null Success"
 else
     echo "❌ Null Failed (Expected 0 non-empty values, got $NON_EMPTY_COUNT)"
-    head -n 5 "$OUTPUT_DIR/test_null.csv"
+    head -n 5 "$ARTIFACTS_DIR/test_null.csv"
     exit 1
 fi
 
@@ -101,15 +102,15 @@ echo "----------------------------------------"
 # Let's try simple asterisk mask if supported, or fake data.
 # Wait, mask transformer usually implies replacing with valid-looking but masked data, or just fixed char?
 # Checking codebase capability... defaults might apply.
-run_via_yaml --input "csv:$OUTPUT_DIR/ref_trans.csv" \
+run_via_yaml --input "csv:$ARTIFACTS_DIR/ref_trans.csv" \
            --query "SELECT * FROM data" \
-           --output "$OUTPUT_DIR/test_mask.csv" \
+           --output "$ARTIFACTS_DIR/test_mask.csv" \
            --mask "Name"
 
 # Validation
 # Original Name: "Name 0", "Name 1"
 # Masked Name: Should NOT contain "Name 0"
-MATCH_COUNT=$(grep "Name 0" "$OUTPUT_DIR/test_mask.csv" | wc -l)
+MATCH_COUNT=$(grep "Name 0" "$ARTIFACTS_DIR/test_mask.csv" | wc -l)
 echo "Leaked Data Count: $MATCH_COUNT"
 
 if [ "$MATCH_COUNT" -eq 0 ]; then

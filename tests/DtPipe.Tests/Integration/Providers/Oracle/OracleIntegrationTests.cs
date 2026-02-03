@@ -3,10 +3,7 @@ using Xunit;
 using Oracle.ManagedDataAccess.Client;
 using DtPipe.Adapters.Oracle;
 using DtPipe.Adapters.DuckDB;
-using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
-using DtPipe.Cli.Abstractions;
-using DtPipe.Adapters;
 using DtPipe.Adapters.Csv;
 using DtPipe.Adapters.Parquet;
 using DtPipe.Tests.Helpers;
@@ -211,7 +208,7 @@ public class OracleIntegrationTests : IAsyncLifetime
             var writerOptions = new OracleWriterOptions
             {
                 Table = targetTable,
-                Strategy = OracleWriteStrategy.Truncate
+                Strategy = OracleWriteStrategy.Recreate
             };
             
             await using var writer = new OracleDataWriter(_oracle.GetConnectionString(), writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance);
@@ -272,9 +269,9 @@ public class OracleIntegrationTests : IAsyncLifetime
         // 2. Setup Source Data
         var columns = new List<ColumnInfo>
         {
-            new("Id", typeof(int), false),
-            new("Name", typeof(string), true),
-            new("Score", typeof(decimal), false)
+            new("Id", typeof(int), false, true),
+            new("Name", typeof(string), true, true),
+            new("Score", typeof(decimal), false, true)
         };
 
         var row1 = new object?[] { 1, "Alice", 95.5m };
@@ -355,7 +352,7 @@ public class OracleIntegrationTests : IAsyncLifetime
         {
             await connection.OpenAsync();
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = $"SELECT \"Name\" FROM {tableName}";
+            cmd.CommandText = $"SELECT Name FROM {tableName}";
             using var reader = await cmd.ExecuteReaderAsync();
 
             Assert.True(await reader.ReadAsync());
