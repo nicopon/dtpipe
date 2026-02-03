@@ -14,6 +14,7 @@ public class DryRunKeyValidationTests
         public List<string> RequestedKeys { get; set; } = new();
         public ISqlDialect Dialect { get; set; } = null!;
         public List<ColumnInfo> TargetColumns { get; set; } = new();
+        public List<string>? TargetPKs { get; set; } = null; // Phase 2: Target PKs
 
         public Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
         {
@@ -21,7 +22,7 @@ public class DryRunKeyValidationTests
                 c.Name, "VARCHAR", typeof(string), true, false, false)).ToList();
             
             return Task.FromResult<TargetSchemaInfo?>(
-                new TargetSchemaInfo(cols, true, 0, 0, null)
+                new TargetSchemaInfo(cols, true, 0, 0, TargetPKs)
             );
         }
 
@@ -49,7 +50,8 @@ public class DryRunKeyValidationTests
         var cols = new List<ColumnInfo>
         {
             new("id", typeof(int), false),
-            new("name", typeof(string), true)
+            new("name", typeof(string), true),
+            new("tenant_id", typeof(int), false) // Added tenant_id for composite tests
         };
         readerMock.Setup(r => r.Columns).Returns(cols);
         
@@ -74,7 +76,8 @@ public class DryRunKeyValidationTests
         {
             IsRequired = true,
             RequestedKeys = new List<string> { "id" },
-            Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect()
+            Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect(),
+            TargetPKs = new List<string> { "id" } // Target agrees
         };
         writer.TargetColumns = new List<ColumnInfo>
         {
@@ -93,12 +96,13 @@ public class DryRunKeyValidationTests
         Assert.NotNull(result.KeyValidation);
         Assert.True(result.KeyValidation.IsValid);
         Assert.Equal("id", result.KeyValidation.ResolvedKeys![0]);
-        Assert.Empty(result.KeyValidation.Errors!);
+        Assert.Null(result.KeyValidation.Errors); // Errors should be null if valid
     }
 
     [Fact]
     public async Task Validate_InvalidKey_ReturnsError()
     {
+        // ... (previous test implementation remains same but careful with TargetPKs default which is null so no check)
         // Arrange
         var analyzer = new DryRunAnalyzer();
         var reader = new Mock<IStreamReader>();
@@ -129,10 +133,12 @@ public class DryRunKeyValidationTests
         Assert.Contains("not found in final schema", result.KeyValidation.Errors![0]);
     }
 
+    // ... (Other Phase 1 tests) ... Keeping simplified here for replacement context, 
+    // actually I should preserve them. I will include them in the replace block content to avoid deleting them.
+    
     [Fact]
     public async Task Validate_CaseMismatch_ResolvesCorrectly()
     {
-        // Arrange
         var analyzer = new DryRunAnalyzer();
         var reader = new Mock<IStreamReader>();
         SetupReader(reader);
@@ -140,57 +146,35 @@ public class DryRunKeyValidationTests
         var writer = new MockKeyValidator
         {
             IsRequired = true,
-            RequestedKeys = new List<string> { "ID" }, // Uppercase request
-            Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect()
+            RequestedKeys = new List<string> { "ID" }, 
+            Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect(),
+            TargetPKs = new List<string> { "id" }
         };
-        writer.TargetColumns = new List<ColumnInfo>
-        {
-            new("id", typeof(int), false),
-            new("name", typeof(string), true)
-        };
+        writer.TargetColumns = new List<ColumnInfo> { new("id", typeof(int), false) };
 
-        // Act
-        var result = await analyzer.AnalyzeAsync(
-            reader.Object, 
-            new List<IDataTransformer>(), 
-            10, 
-            writer);
+        var result = await analyzer.AnalyzeAsync(reader.Object, new List<IDataTransformer>(), 10, writer);
 
-        // Assert
-        Assert.NotNull(result.KeyValidation);
         Assert.True(result.KeyValidation.IsValid);
-        Assert.Equal("id", result.KeyValidation.ResolvedKeys![0]); // Resolved to lowercase "id"
+        Assert.Equal("id", result.KeyValidation.ResolvedKeys![0]); 
     }
 
     [Fact]
     public async Task Validate_NotRequired_ReturnsValid()
     {
-        // Arrange
         var analyzer = new DryRunAnalyzer();
         var reader = new Mock<IStreamReader>();
         SetupReader(reader);
 
         var writer = new MockKeyValidator
         {
-            IsRequired = false, // Not required (e.g. Recreate strategy)
+            IsRequired = false, 
             RequestedKeys = new List<string>(),
             Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect()
         };
-        writer.TargetColumns = new List<ColumnInfo>
-        {
-            new("id", typeof(int), false),
-            new("name", typeof(string), true)
-        };
+        writer.TargetColumns = new List<ColumnInfo> { new("id", typeof(int), false) };
 
-        // Act
-        var result = await analyzer.AnalyzeAsync(
-            reader.Object, 
-            new List<IDataTransformer>(), 
-            10, 
-            writer);
+        var result = await analyzer.AnalyzeAsync(reader.Object, new List<IDataTransformer>(), 10, writer);
 
-        // Assert
-        Assert.NotNull(result.KeyValidation);
         Assert.False(result.KeyValidation.IsRequired);
         Assert.True(result.KeyValidation.IsValid);
     }
@@ -198,7 +182,6 @@ public class DryRunKeyValidationTests
     [Fact]
     public async Task Validate_MissingRequiredKey_ReturnsError()
     {
-        // Arrange
         var analyzer = new DryRunAnalyzer();
         var reader = new Mock<IStreamReader>();
         SetupReader(reader);
@@ -206,26 +189,131 @@ public class DryRunKeyValidationTests
         var writer = new MockKeyValidator
         {
             IsRequired = true, 
-            RequestedKeys = new List<string>(), // Empty!
+            RequestedKeys = new List<string>(), 
             Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect()
         };
-        writer.TargetColumns = new List<ColumnInfo>
-        {
-            new("id", typeof(int), false),
-            new("name", typeof(string), true)
-        };
+        writer.TargetColumns = new List<ColumnInfo> { new("id", typeof(int), false) };
 
-        // Act
-        var result = await analyzer.AnalyzeAsync(
-            reader.Object, 
-            new List<IDataTransformer>(), 
-            10, 
-            writer);
+        var result = await analyzer.AnalyzeAsync(reader.Object, new List<IDataTransformer>(), 10, writer);
 
-        // Assert
-        Assert.NotNull(result.KeyValidation);
         Assert.True(result.KeyValidation.IsRequired);
         Assert.False(result.KeyValidation.IsValid);
         Assert.Contains("requires a primary key", result.KeyValidation.Errors![0]);
+    }
+
+    // --- Phase 2 Tests ---
+
+    [Fact]
+    public async Task Validate_CompositeKeySuccess_MatchesTarget()
+    {
+        var analyzer = new DryRunAnalyzer();
+        var reader = new Mock<IStreamReader>();
+        SetupReader(reader);
+
+        var writer = new MockKeyValidator
+        {
+            IsRequired = true,
+            RequestedKeys = new List<string> { "id", "tenant_id" },
+            Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect(),
+            TargetPKs = new List<string> { "id", "tenant_id" } // Exact match
+        };
+        writer.TargetColumns = new List<ColumnInfo> 
+        { 
+            new("id", typeof(int), false),
+            new("tenant_id", typeof(int), false)
+        };
+
+        var result = await analyzer.AnalyzeAsync(reader.Object, new List<IDataTransformer>(), 10, writer);
+
+        Assert.NotNull(result.KeyValidation);
+        Assert.True(result.KeyValidation.IsValid);
+        Assert.Equal(2, result.KeyValidation.ResolvedKeys!.Count);
+    }
+
+    [Fact]
+    public async Task Validate_TargetPKMismatch_MissingKey_ReturnsError()
+    {
+        // User provides (id), Target requires (id, tenant_id)
+        var analyzer = new DryRunAnalyzer();
+        var reader = new Mock<IStreamReader>();
+        SetupReader(reader);
+
+        var writer = new MockKeyValidator
+        {
+            IsRequired = true,
+            RequestedKeys = new List<string> { "id" },
+            Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect(),
+            TargetPKs = new List<string> { "id", "tenant_id" } // Mismatch
+        };
+        writer.TargetColumns = new List<ColumnInfo> 
+        { 
+            new("id", typeof(int), false),
+            new("tenant_id", typeof(int), false)
+        };
+
+        var result = await analyzer.AnalyzeAsync(reader.Object, new List<IDataTransformer>(), 10, writer);
+
+        Assert.NotNull(result.KeyValidation);
+        Assert.False(result.KeyValidation.IsValid);
+        Assert.Contains("Missing: tenant_id", result.KeyValidation.Errors![0]);
+    }
+
+    [Fact]
+    public async Task Validate_TargetPKMismatch_ExtraUserKey_ReturnsWarning()
+    {
+        // User provides (id, tenant_id), Target requires (id)
+        var analyzer = new DryRunAnalyzer();
+        var reader = new Mock<IStreamReader>();
+        SetupReader(reader);
+
+        var writer = new MockKeyValidator
+        {
+            IsRequired = true,
+            RequestedKeys = new List<string> { "id", "tenant_id" },
+            Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect(),
+            TargetPKs = new List<string> { "id" } // Target is simpler
+        };
+        writer.TargetColumns = new List<ColumnInfo> 
+        { 
+            new("id", typeof(int), false),
+            new("tenant_id", typeof(int), false)
+        };
+
+        var result = await analyzer.AnalyzeAsync(reader.Object, new List<IDataTransformer>(), 10, writer);
+
+        Assert.NotNull(result.KeyValidation);
+        Assert.True(result.KeyValidation.IsValid); // Still valid!
+        Assert.NotNull(result.KeyValidation.Warnings);
+        Assert.NotEmpty(result.KeyValidation.Warnings);
+        Assert.Contains("User key includes columns not present in target", result.KeyValidation.Warnings![0]);
+    }
+
+    [Fact]
+    public async Task Validate_TargetHasNoPK_ReturnsWarning()
+    {
+        // User provides (id), Target exists but has NO PK
+        var analyzer = new DryRunAnalyzer();
+        var reader = new Mock<IStreamReader>();
+        SetupReader(reader);
+
+        var writer = new MockKeyValidator
+        {
+            IsRequired = true,
+            RequestedKeys = new List<string> { "id" },
+            Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect(),
+            TargetPKs = new List<string>() // Empty!
+        };
+        writer.TargetColumns = new List<ColumnInfo> 
+        { 
+            new("id", typeof(int), false)
+        };
+
+        var result = await analyzer.AnalyzeAsync(reader.Object, new List<IDataTransformer>(), 10, writer);
+
+        Assert.NotNull(result.KeyValidation);
+        Assert.True(result.KeyValidation.IsValid);
+        Assert.NotNull(result.KeyValidation.Warnings);
+        Assert.NotEmpty(result.KeyValidation.Warnings);
+        Assert.Contains("Target table has no primary key defined", result.KeyValidation.Warnings![0]);
     }
 }

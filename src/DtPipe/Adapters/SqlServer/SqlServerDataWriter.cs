@@ -281,23 +281,25 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
         }
 
         // Get Primary Key
-        var pkCmd = new SqlCommand(@"
-            SELECT KCU.COLUMN_NAME
-            FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS TC
-            JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE KCU ON TC.CONSTRAINT_NAME = KCU.CONSTRAINT_NAME
-                AND TC.TABLE_SCHEMA = KCU.TABLE_SCHEMA
-            WHERE TC.CONSTRAINT_TYPE = 'PRIMARY KEY' 
-              AND TC.TABLE_SCHEMA = @Schema 
-              AND TC.TABLE_NAME = @Table
-            ORDER BY KCU.ORDINAL_POSITION", connection);
-        pkCmd.Parameters.AddWithValue("@Schema", schema);
-        pkCmd.Parameters.AddWithValue("@Table", table);
-        
         var pkCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        using var pkReader = await pkCmd.ExecuteReaderAsync(ct);
-        while(await pkReader.ReadAsync(ct))
         {
-            pkCols.Add(pkReader.GetString(0));
+            var pkCmd = new SqlCommand(@"
+                SELECT KCU.COLUMN_NAME
+                FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS TC
+                JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE KCU ON TC.CONSTRAINT_NAME = KCU.CONSTRAINT_NAME
+                    AND TC.TABLE_SCHEMA = KCU.TABLE_SCHEMA
+                WHERE TC.CONSTRAINT_TYPE = 'PRIMARY KEY' 
+                  AND TC.TABLE_SCHEMA = @Schema 
+                  AND TC.TABLE_NAME = @Table
+                ORDER BY KCU.ORDINAL_POSITION", connection);
+            pkCmd.Parameters.AddWithValue("@Schema", schema);
+            pkCmd.Parameters.AddWithValue("@Table", table);
+            
+            using var pkReader = await pkCmd.ExecuteReaderAsync(ct);
+            while(await pkReader.ReadAsync(ct))
+            {
+                pkCols.Add(pkReader.GetString(0));
+            }
         }
 
         // Get Row Count Estimate (sys.partitions)
