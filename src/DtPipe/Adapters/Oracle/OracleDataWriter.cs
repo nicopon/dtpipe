@@ -7,7 +7,7 @@ using DtPipe.Adapters.Oracle;
 using Microsoft.Extensions.Logging;
 using DtPipe.Core.Helpers;
 
-public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
+public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
 {
     private readonly string _connectionString;
     private readonly OracleConnection _connection;
@@ -242,7 +242,8 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
             true,
             rowCount,
             sizeBytes,
-            pkColumns.Count > 0 ? pkColumns.ToList() : null
+            pkColumns.Count > 0 ? pkColumns.ToList() : null,
+            IsRowCountEstimate: true  // Oracle uses num_rows from ALL_TABLES (statistics)
         );
     }
 
@@ -889,6 +890,32 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector
         return (schema, table);
     }
     
+    // IKeyValidator implementation (Phase 1)
+    
+    public string? GetWriteStrategy()
+    {
+        return _options.Strategy.ToString();
+    }
+    
+    public IReadOnlyList<string>? GetRequestedPrimaryKeys()
+    {
+        if (string.IsNullOrEmpty(_options.Key))
+            return null;
+            
+        // Return the RAW user input (not yet resolved)
+        return _options.Key.Split(',')
+            .Select(k => k.Trim())
+            .Where(k => !string.IsNullOrEmpty(k))
+            .ToList();
+    }
+    
+    public bool RequiresPrimaryKey()
+    {
+        return _options.Strategy is 
+            OracleWriteStrategy.Upsert or 
+            OracleWriteStrategy.Ignore;
+    }
+
     private static string GetSmartQuotedIdentifier(string identifier)
     {
         if (string.IsNullOrEmpty(identifier)) return "";

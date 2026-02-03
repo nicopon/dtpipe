@@ -14,10 +14,18 @@ public static class ColumnHelper
     /// <param name="columns">Available columns (already normalized)</param>
     /// <returns>Matched column name</returns>
     /// <exception cref="InvalidOperationException">If key column is not found</exception>
+    /// <remarks>
+    /// BACKWARD COMPATIBILITY: This method continues to throw exceptions for consistency
+    /// with existing code. For non-throwing behavior, use <see cref="ColumnMatcher"/> directly.
+    /// </remarks>
     public static string ResolveKeyColumn(string keyName, IReadOnlyList<ColumnInfo> columns)
     {
-        var match = columns.FirstOrDefault(c => 
-            string.Equals(c.Name, keyName, StringComparison.OrdinalIgnoreCase));
+        // CRITICAL: Delegate to ColumnMatcher as single source of truth
+        // Use case-insensitive matching for backward compatibility
+        var match = ColumnMatcher.FindMatchingColumnCaseInsensitive(
+            keyName, 
+            columns, 
+            c => c.Name);
         
         if (match == null)
         {

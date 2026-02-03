@@ -7,7 +7,7 @@ using ColumnInfo = DtPipe.Core.Models.ColumnInfo;
 
 namespace DtPipe.Adapters.DuckDB;
 
-public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
+public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
 {
     private readonly string _connectionString;
     private readonly DuckDBConnection _connection;
@@ -397,5 +397,30 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector
     {
         // "CREATE TABLE target AS SELECT * FROM source WHERE 1=0"
         return $"CREATE TABLE {targetTable} AS SELECT * FROM {sourceTable} WHERE 1=0";
+    }
+
+    // IKeyValidator implementation (Phase 1)
+    
+    public string? GetWriteStrategy()
+    {
+        return _options.Strategy.ToString();
+    }
+    
+    public IReadOnlyList<string>? GetRequestedPrimaryKeys()
+    {
+        if (string.IsNullOrEmpty(_options.Key))
+            return null;
+            
+        return _options.Key.Split(',')
+            .Select(k => k.Trim())
+            .Where(k => !string.IsNullOrEmpty(k))
+            .ToList();
+    }
+    
+    public bool RequiresPrimaryKey()
+    {
+        return _options.Strategy is 
+            DuckDbWriteStrategy.Upsert or 
+            DuckDbWriteStrategy.Ignore;
     }
 }

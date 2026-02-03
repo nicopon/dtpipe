@@ -7,7 +7,7 @@ using DtPipe.Core.Helpers;
 
 namespace DtPipe.Adapters.Sqlite;
 
-public class SqliteDataWriter : IDataWriter, ISchemaInspector
+public class SqliteDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
 {
     private readonly string _connectionString;
     private readonly OptionsRegistry _registry;
@@ -316,5 +316,33 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector
             await _connection.DisposeAsync();
             _connection = null;
         }
+    }
+
+    // IKeyValidator implementation (Phase 1)
+    
+    public string? GetWriteStrategy()
+    {
+        var options = _registry.Get<SqliteWriterOptions>();
+        return options.Strategy.ToString();
+    }
+    
+    public IReadOnlyList<string>? GetRequestedPrimaryKeys()
+    {
+        var options = _registry.Get<SqliteWriterOptions>();
+        if (string.IsNullOrEmpty(options.Key))
+            return null;
+            
+        return options.Key.Split(',')
+            .Select(k => k.Trim())
+            .Where(k => !string.IsNullOrEmpty(k))
+            .ToList();
+    }
+    
+    public bool RequiresPrimaryKey()
+    {
+        var options = _registry.Get<SqliteWriterOptions>();
+        return options.Strategy is 
+            SqliteWriteStrategy.Upsert or 
+            SqliteWriteStrategy.Ignore;
     }
 }

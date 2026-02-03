@@ -7,7 +7,7 @@ using System.Text;
 
 namespace DtPipe.Adapters.SqlServer;
 
-public class SqlServerDataWriter : IDataWriter, ISchemaInspector
+public class SqlServerDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
 {
     private readonly string _connectionString;
     private readonly SqlServerWriterOptions _options;
@@ -300,7 +300,27 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
             pkCols.Add(pkReader.GetString(0));
         }
 
-        return new TargetSchemaInfo(cols, true, null, null, pkCols.Count > 0 ? pkCols.ToList() : null);
+        // Get Row Count Estimate (sys.partitions)
+        var countCmd = new SqlCommand(@"
+            SELECT SUM(p.rows) 
+            FROM sys.partitions p
+            JOIN sys.tables t ON p.object_id = t.object_id
+            JOIN sys.schemas s ON t.schema_id = s.schema_id
+            WHERE t.name = @Table AND s.name = @Schema AND p.index_id < 2", connection);
+        countCmd.Parameters.AddWithValue("@Schema", schema);
+        countCmd.Parameters.AddWithValue("@Table", table);
+        
+        var countResult = await countCmd.ExecuteScalarAsync(ct);
+        long? rowCount = countResult != null && countResult != DBNull.Value ? Convert.ToInt64(countResult) : null;
+
+        return new TargetSchemaInfo(
+            cols, 
+            true, 
+            rowCount, 
+            null, 
+            pkCols.Count > 0 ? pkCols.ToList() : null,
+            IsRowCountEstimate: true // SQL Server sys.partitions is an estimate
+        );
     }
 
     #endregion
@@ -461,5 +481,30 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector
         if (_bulkCopy != null) (_bulkCopy as IDisposable).Dispose();
         if (_connection != null) await _connection.DisposeAsync();
         if (_bufferTable != null) _bufferTable.Dispose();
+    }
+
+    // IKeyValidator implementation (Phase 1)
+    
+    public string? GetWriteStrategy()
+    {
+        return _options.Strategy.ToString();
+    }
+    
+    public IReadOnlyList<string>? GetRequestedPrimaryKeys()
+    {
+        if (string.IsNullOrEmpty(_options.Key))
+            return null;
+            
+        return _options.Key.Split(',')
+            .Select(k => k.Trim())
+            .Where(k => !string.IsNullOrEmpty(k))
+            .ToList();
+    }
+    
+    public bool RequiresPrimaryKey()
+    {
+        return _options.Strategy is 
+            SqlServerWriteStrategy.Upsert or 
+            SqlServerWriteStrategy.Ignore;
     }
 }

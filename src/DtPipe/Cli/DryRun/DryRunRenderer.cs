@@ -422,6 +422,74 @@ public class DryRunRenderer
         console.WriteLine();
     }
 
+    /// <summary>
+    /// Renders the primary key validation panel (Phase 1).
+    /// </summary>
+    public void RenderKeyValidation(KeyValidationResult? validation, IAnsiConsole console)
+    {
+        if (validation == null)
+        {
+            // No validation available (e.g., non-database target or no IKeyValidator)
+            return;
+        }
+
+        var content = new StringBuilder();
+        
+        // Scenario 1: Key not required
+        if (!validation.IsRequired)
+        {
+            content.AppendLine("[dim]Key requirement:[/] [grey]Not required for this strategy[/]");
+        }
+        // Scenario 2: Key required but not provided
+        else if (validation.RequestedKeys == null || validation.RequestedKeys.Count == 0)
+        {
+            content.AppendLine("[dim]Key requirement:[/] [yellow]⚠️ Required[/]");
+            content.AppendLine("[red]❌ No primary key specified (use --key option)[/]");
+        }
+        // Scenario 3: Key provided and valid
+        else if (validation.IsValid)
+        {
+            content.AppendLine("[dim]Key requirement:[/] [green]✅ Required[/]");
+            content.AppendLine($"[dim]Requested keys:[/] {string.Join(", ", validation.RequestedKeys)}");
+            content.AppendLine($"[dim]Resolved keys:[/] [green]{string.Join(", ", validation.ResolvedKeys ?? new string[0])}[/]");
+        }
+        // Scenario 4: Key provided but has errors
+        else
+        {
+            content.AppendLine("[dim]Key requirement:[/] [red]❌ Required[/]");
+            content.AppendLine($"[dim]Requested keys:[/] {string.Join(", ", validation.RequestedKeys)}");
+            
+            if (validation.ResolvedKeys != null && validation.ResolvedKeys.Count > 0)
+            {
+                content.AppendLine($"[dim]Resolved keys:[/] [yellow]{string.Join(", ", validation.ResolvedKeys)}[/]");
+            }
+            
+            if (validation.Errors != null && validation.Errors.Count > 0)
+            {
+                content.AppendLine();
+                content.AppendLine("[red bold]Errors:[/]");
+                foreach (var error in validation.Errors)
+                {
+                    content.AppendLine($"[red]  • {Markup.Escape(error)}[/]");
+                }
+            }
+        }
+
+        var panelStyle = validation.IsValid || !validation.IsRequired ? "green" : "red";
+        var panelIcon = validation.IsValid || !validation.IsRequired ? "🔑" : "❌";
+        var panelHeader = $"[{panelStyle}]{panelIcon} Primary Key Validation[/]";
+
+        var panel = new Panel(new Markup(content.ToString().TrimEnd()))
+        {
+            Border = BoxBorder.Rounded,
+            Padding = new Padding(1, 0),
+            Header = new PanelHeader(panelHeader)
+        };
+
+        console.Write(panel);
+        console.WriteLine();
+    }
+
     private Panel BuildHeaderPanel(SchemaCompatibilityReport report)
     {
         var content = new StringBuilder();
@@ -432,8 +500,9 @@ public class DryRunRenderer
         }
         else
         {
+            var estimateSuffix = report.TargetInfo.IsRowCountEstimate ? " [dim](estimate)[/]" : "";
             var rowInfo = report.TargetInfo.RowCount.HasValue 
-                ? $"{report.TargetInfo.RowCount:N0} rows" 
+                ? $"{report.TargetInfo.RowCount:N0} rows{estimateSuffix}" 
                 : "unknown rows";
             var sizeInfo = report.TargetInfo.SizeBytes.HasValue 
                 ? $" • {FormatSize(report.TargetInfo.SizeBytes.Value)}"
