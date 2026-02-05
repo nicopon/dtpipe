@@ -27,7 +27,7 @@ public record OracleWriterOptions : IProviderOptions
     public string? Key { get; init; }
 
     [CliOption(Description = "Target table name")]
-    public string Table { get; set; } = "Export";
+    public string Table { get; set; } = "export";
 
     [CliOption(Description = "Data write strategy (Append, Truncate, DeleteThenInsert)")]
     public OracleWriteStrategy Strategy { get; set; }

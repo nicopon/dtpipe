@@ -62,4 +62,25 @@ public sealed record DumpOptions
     /// If null, auto-detection via schema inspection is attempted.
     /// </summary>
     public string? Key { get; init; }
+
+    // --- Lifecycle Hooks ---
+    /// <summary>
+    /// Command to execute before data transfer (Pre-Execution).
+    /// </summary>
+    public string? PreExec { get; init; }
+
+    /// <summary>
+    /// Command to execute after successful data transfer (Post-Execution).
+    /// </summary>
+    public string? PostExec { get; init; }
+
+    /// <summary>
+    /// Command to execute if an error occurs (On-Error).
+    /// </summary>
+    public string? OnErrorExec { get; init; }
+
+    /// <summary>
+    /// Command to execute always after transfer (Finally).
+    /// </summary>
+    public string? FinallyExec { get; init; }
 }

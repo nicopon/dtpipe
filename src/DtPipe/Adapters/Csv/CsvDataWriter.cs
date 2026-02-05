@@ -4,10 +4,8 @@ using CsvHelper;
 using CsvHelper.Configuration;
 using Microsoft.IO;
 using DtPipe.Core.Abstractions;
-using DtPipe.Cli.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
-using DtPipe.Adapters.Csv;
 
 namespace DtPipe.Adapters.Csv;
 
@@ -114,8 +112,7 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvWriterOptio
         }
         else
         {
-            _outputStream = new FileStream(_outputPath, FileMode.Create, FileAccess.Write, FileShare.None, 
-                bufferSize: 65536, useAsync: true);
+            _outputStream = new FileStream(_outputPath, FileMode.Create, FileAccess.Write, FileShare.None);
         }
         
         // Use RecyclableMemoryStream as intermediate buffer
@@ -265,6 +262,11 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvWriterOptio
         
         if (_outputStream != null)
              await _outputStream.FlushAsync(ct);
+    }
+
+    public ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
+    {
+        throw new NotSupportedException("Executing raw commands is not supported for CSV targets.");
     }
 
     public async ValueTask DisposeAsync()

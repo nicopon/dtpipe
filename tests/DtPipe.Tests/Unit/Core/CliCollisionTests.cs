@@ -1,10 +1,6 @@
 using System.CommandLine;
-using System.Reflection;
 using FluentAssertions;
-using DtPipe.Cli;
 using DtPipe.Core.Options;
-using DtPipe.Core.Abstractions;
-using DtPipe.Core.Models;
 using DtPipe.Cli.Abstractions;
 using Xunit;
 
@@ -29,17 +25,35 @@ public class CliCollisionTests
 
         // Add Core Options manually (mirrors CliService build logic)
         // Note: If you add core options, update this list!
+        var connOpt = new Option<string?>("--connection");
+        connOpt.Aliases.Add("-c");
+        
+        var provOpt = new Option<string>("--provider");
+        provOpt.Aliases.Add("-p");
+
+        var queryOpt = new Option<string?>("--query");
+        queryOpt.Aliases.Add("-q");
+
+        var outputOpt = new Option<string?>("--output");
+        outputOpt.Aliases.Add("-o");
+
+        var batchOpt = new Option<int>("--batch-size");
+        batchOpt.Aliases.Add("-b");
+
+        var helpOpt = new Option<bool>("--help");
+        helpOpt.Aliases.Add("-h");
+        helpOpt.Aliases.Add("-?");
+
         var coreOptions = new List<Option>
         {
-            new Option<string?>("--connection", "-c"),
-            new Option<string>("--provider", "-p"),
-            new Option<string?>("--query", "-q"),
-            new Option<string?>("--output", "-o"),
+            connOpt,
+            provOpt,
+            queryOpt,
+            outputOpt,
             new Option<int>("--connection-timeout"),
             new Option<int>("--query-timeout"),
-            new Option<int>("--batch-size", "-b"),
-            // Help and Version are standard sys-commandline but included for completeness if customized
-            new Option<bool>("--help", "-h", "-?"),
+            batchOpt,
+            helpOpt,
             new Option<bool>("--version")
         };
         

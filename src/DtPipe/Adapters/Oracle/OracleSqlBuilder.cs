@@ -109,4 +109,47 @@ internal static class OracleSqlBuilder
         var types = columns.Select(c => OracleTypeMapper.GetOracleDbType(c.ClrType)).ToArray();
         return (sb.ToString(), types);
     }
+
+    /// <summary>
+    /// Builds CREATE TABLE DDL from introspection info (preserves native types).
+    /// </summary>
+    public static string BuildCreateTableFromIntrospection(
+        string targetTable,
+        TargetSchemaInfo schemaInfo,
+        ISqlDialect dialect)
+    {
+        var sb = new StringBuilder();
+        sb.Append($"CREATE TABLE {targetTable} (");
+        
+        for (int i = 0; i < schemaInfo.Columns.Count; i++)
+        {
+            if (i > 0) sb.Append(", ");
+            var col = schemaInfo.Columns[i];
+            
+            // Quote identifier
+            var safeName = dialect.Quote(col.Name);
+            
+            sb.Append($"{safeName} {col.NativeType}");
+            
+            if (!col.IsNullable)
+            {
+                sb.Append(" NOT NULL");
+            }
+        }
+        
+        // Add primary key constraint if present
+        if (schemaInfo.PrimaryKeyColumns != null && schemaInfo.PrimaryKeyColumns.Count > 0)
+        {
+            sb.Append(", PRIMARY KEY (");
+            for(int i=0; i < schemaInfo.PrimaryKeyColumns.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(dialect.Quote(schemaInfo.PrimaryKeyColumns[i]));
+            }
+            sb.Append(")");
+        }
+        
+        sb.Append(")");
+        return sb.ToString();
+    }
 }

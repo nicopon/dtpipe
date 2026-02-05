@@ -8,7 +8,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DTPIPE="$PROJECT_ROOT/dist/release/dtpipe"
 
 source "$SCRIPT_DIR/common.sh" # Load helpers
-OUTPUT_DIR="$SCRIPT_DIR/output"
+OUTPUT_DIR="$SCRIPT_DIR/artifacts"
 mkdir -p "$OUTPUT_DIR"
 
 echo "========================================"

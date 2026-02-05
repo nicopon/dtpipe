@@ -11,7 +11,7 @@ public class PostgreSqlWriterOptions : IWriterOptions
 
     // Writer Options
     [CliOption(Description = "Target table name")]
-    public string Table { get; set; } = "Export";
+    public string Table { get; set; } = "export";
 
     [CliOption(Description = "Write strategy: Append, Truncate, or DeleteThenInsert")]
     public PostgreSqlWriteStrategy Strategy { get; set; } = PostgreSqlWriteStrategy.Append;

@@ -129,10 +129,29 @@ public class ExportService
         }
         
         _console.Write(targetTable);
-        _console.MarkupLine($"   [grey]Initializing...[/]");
+
+        // --- PRE-EXEC HOOK ---
+        if (!string.IsNullOrWhiteSpace(options.PreExec))
+        {
+            _console.MarkupLine($"   [yellow]Executing Pre-Hook...[/]");
+            try 
+            {
+                // Ensure writer is created if not already (it is created below, we need strict ordering)
+                // We create writer here, executed hook, then Initialize
+            } 
+            catch {} 
+        }
 
         var exportableSchema = currentSchema;
         await using var writer = writerFactory.Create(options);
+
+        // Execute Pre-Hook (Before Initialize, as it might create objects)
+         if (!string.IsNullOrWhiteSpace(options.PreExec))
+        {
+            _console.MarkupLine($"   [yellow]Executing Pre-Hook: {Markup.Escape(options.PreExec)}[/]");
+            await writer.ExecuteCommandAsync(options.PreExec, ct);
+        }
+
         await writer.InitializeAsync(exportableSchema, ct);
 
         // Bounded Channels for backpressure
@@ -192,12 +211,56 @@ public class ExportService
             var rowsPerSecond = elapsed.TotalSeconds > 0 ? totalRows / elapsed.TotalSeconds : 0;
             _logger.LogInformation("Export completed in {Elapsed}. Written {Rows} rows ({Speed:F1} rows/s).", 
                 elapsed, totalRows, rowsPerSecond);
+
+            // --- POST-EXEC HOOK ---
+            if (!string.IsNullOrWhiteSpace(options.PostExec))
+            {
+                _console.MarkupLine($"   [yellow]Executing Post-Hook: {Markup.Escape(options.PostExec)}[/]");
+                await writer.ExecuteCommandAsync(options.PostExec, ct);
+            }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Export failed");
             Console.Error.WriteLine($"Export failed: {ex.Message}");
+            
+            // --- ON-ERROR HOOK ---
+            if (!string.IsNullOrWhiteSpace(options.OnErrorExec))
+            {
+                try
+                {
+                    _console.MarkupLine($"   [red]Executing On-Error Hook: {Markup.Escape(options.OnErrorExec)}[/]");
+                    // Use a new token (short timeout) to ensure it runs even if original CT is processing cancellation
+                    using var errorCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                    await writer.ExecuteCommandAsync(options.OnErrorExec, errorCts.Token);
+                }
+                catch (Exception hookEx)
+                {
+                    _logger.LogError(hookEx, "On-Error Hook failed");
+                    Console.Error.WriteLine($"On-Error Hook failed: {hookEx.Message}");
+                }
+            }
+
             throw;
+        }
+        finally
+        {
+            // --- FINALLY HOOK ---
+            if (!string.IsNullOrWhiteSpace(options.FinallyExec))
+            {
+                try
+                {
+                    _console.MarkupLine($"   [yellow]Executing Finally Hook: {Markup.Escape(options.FinallyExec)}[/]");
+                    // Similar to On-Error, ensure it runs
+                    using var finallyCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                    await writer.ExecuteCommandAsync(options.FinallyExec, finallyCts.Token);
+                }
+                catch (Exception hookEx)
+                {
+                     _logger.LogError(hookEx, "Finally Hook failed");
+                     Console.Error.WriteLine($"Finally Hook failed: {hookEx.Message}");
+                }
+            }
         }
     }
 

@@ -1,5 +1,5 @@
 using System.CommandLine;
-using Microsoft.Extensions.DependencyInjection;
+using System.CommandLine.Parsing;
 using DtPipe.Cli.Abstractions;
 using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;

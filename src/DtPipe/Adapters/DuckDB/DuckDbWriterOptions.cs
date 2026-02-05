@@ -19,7 +19,7 @@ public record DuckDbWriterOptions : IProviderOptions
     public static string DisplayName => "DuckDB Writer Options";
 
     [CliOption(Description = "Target table name")]
-    public string Table { get; set; } = "Export";
+    public string Table { get; set; } = "export";
 
     [CliOption(Description = "Data write strategy (Append, Truncate, or Recreate)")]
     public DuckDbWriteStrategy Strategy { get; set; } = DuckDbWriteStrategy.Append;

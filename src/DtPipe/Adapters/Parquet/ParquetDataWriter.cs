@@ -2,10 +2,8 @@ using Parquet;
 using Parquet.Data;
 using Parquet.Schema;
 using DtPipe.Core.Abstractions;
-using DtPipe.Cli.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
-using DtPipe.Adapters.Parquet;
 
 namespace DtPipe.Adapters.Parquet;
 
@@ -89,8 +87,7 @@ public sealed class ParquetDataWriter(string outputPath) : IDataWriter, IRequire
         else
         {
              // Defer file creation until here to avoid overwriting during dry-run
-             _outputStream = new FileStream(_outputPath, FileMode.Create, FileAccess.Write, FileShare.None,
-                 bufferSize: 65536, useAsync: true);
+             _outputStream = new FileStream(_outputPath, FileMode.Create, FileAccess.Write, FileShare.None);
         }
 
         _columns = columns;
@@ -213,6 +210,11 @@ public sealed class ParquetDataWriter(string outputPath) : IDataWriter, IRequire
     {
         // Parquet.Net handles flushing on dispose
         return ValueTask.CompletedTask;
+    }
+
+    public ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
+    {
+        throw new NotSupportedException("Executing raw commands is not supported for Parquet targets.");
     }
 
     public async ValueTask DisposeAsync()
