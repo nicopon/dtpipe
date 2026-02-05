@@ -13,7 +13,7 @@
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="DuckDB.NativeBinaries" Version="1.4.2" />
-    <PackageReference Include="DuckDB.NET.Data" Version="1.4.3" />
+    <PackageReference Include="DuckDB.NET.Data" Version="1.4.4" />
     <PackageReference Include="FluentAssertions" Version="8.8.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="Moq" Version="4.20.72" />
