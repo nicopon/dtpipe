@@ -88,9 +88,17 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
                 normalizedColumns.Add(col with { Name = _dialect.Normalize(col.Name) });
             }
         }
+
         _columns = normalizedColumns;
-        _connection = new SqlConnection(_connectionString);
-        await _connection.OpenAsync(ct);
+        
+        if (_connection == null)
+        {
+            _connection = new SqlConnection(_connectionString);
+        }
+        if (_connection.State != ConnectionState.Open)
+        {
+            await _connection.OpenAsync(ct);
+        }
 
         // Native Resolution logic
         string resolvedSchema;
@@ -125,12 +133,32 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
         
         if (_options.Strategy == SqlServerWriteStrategy.Recreate)
         {
-            // DROP uses quoted name
-            var cmd = new SqlCommand($"DROP TABLE IF EXISTS {_targetTableName}", _connection);
-            await cmd.ExecuteNonQueryAsync(ct);
+            TargetSchemaInfo? existingSchema = null;
+            if (resolved != null)
+            {
+                // Table exists. Introspect BEFORE Drop to preserve native types.
+                try 
+                {
+                    existingSchema = await InspectTargetAsync(ct);
+                }
+                catch { /* Ignore introspection errors during recreate, treat as not existing */ }
+                
+                // DROP uses quoted name
+                var cmd = new SqlCommand($"DROP TABLE IF EXISTS {_targetTableName}", _connection);
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
 
             // Create using canonical names
-            var createSql = BuildCreateTableSql(resolvedSchema, resolvedTable, columns);
+            string createSql;
+            if (existingSchema != null && existingSchema.Exists)
+            {
+                 createSql = BuildCreateTableFromIntrospection(_targetTableName, existingSchema);
+            }
+            else
+            {
+                 createSql = BuildCreateTableSql(resolvedSchema, resolvedTable, columns);
+            }
+
             var createCmd = new SqlCommand(createSql, _connection);
             await createCmd.ExecuteNonQueryAsync(ct);
         }
@@ -376,6 +404,43 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
         return sql;
     }
 
+    private string BuildCreateTableFromIntrospection(string quotedTableName, TargetSchemaInfo schemaInfo)
+    {
+        var sb = new StringBuilder();
+        sb.Append($"CREATE TABLE {quotedTableName} (");
+        
+        for (int i = 0; i < schemaInfo.Columns.Count; i++)
+        {
+            if (i > 0) sb.Append(", ");
+            var col = schemaInfo.Columns[i];
+            
+            // Quote identifier
+            var safeName = _dialect.Quote(col.Name);
+            
+            sb.Append($"{safeName} {col.NativeType}");
+            
+            if (!col.IsNullable)
+            {
+                sb.Append(" NOT NULL");
+            }
+        }
+        
+        // Add primary key constraint if present
+        if (schemaInfo.PrimaryKeyColumns != null && schemaInfo.PrimaryKeyColumns.Count > 0)
+        {
+            sb.Append(", PRIMARY KEY (");
+            for(int i=0; i < schemaInfo.PrimaryKeyColumns.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(_dialect.Quote(schemaInfo.PrimaryKeyColumns[i]));
+            }
+            sb.Append(")");
+        }
+        
+        sb.Append(")");
+        return sb.ToString();
+    }
+
     public async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
     {
         if (_bulkCopy == null || _bufferTable == null || _columns == null) throw new InvalidOperationException("Not initialized");
@@ -495,6 +560,22 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
     }
     
     // Original WriteBatchAsync replaced above
+
+    public async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
+    {
+        if (_connection == null)
+        {
+            _connection = new SqlConnection(_connectionString);
+        }
+        
+        if (_connection.State != ConnectionState.Open)
+        {
+            await _connection.OpenAsync(ct);
+        }
+
+        using var cmd = new SqlCommand(command, _connection);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
 
     public ValueTask CompleteAsync(CancellationToken ct = default)
     {

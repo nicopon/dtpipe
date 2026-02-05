@@ -273,4 +273,94 @@ public class SqliteProviderTests : IAsyncLifetime
             name.Should().Be("NewData");
         }
     }
+
+    [Fact]
+    public async Task SqliteDataWriter_Recreate_PreservesNativeStructure()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"test_recreate_p_{Guid.NewGuid():N}.sqlite");
+        var connectionString = $"Data Source={dbPath}";
+        var tableNameRaw = "TestRecreateEnh";
+
+        try
+        {
+            // 1. Manually create table with specific structure:
+            // - Code: VARCHAR(10) (Explicit length)
+            // - Score: DECIMAL(10,5) (Specific precision)
+            // - "Memo Text": TEXT (Quoted)
+            // - BlobData: BLOB
+            await using (var connection = new SqliteConnection(connectionString))
+            {
+                await connection.OpenAsync();
+                using var cmd = connection.CreateCommand();
+                cmd.CommandText = $@"
+                    CREATE TABLE {tableNameRaw} (
+                        Code VARCHAR(10) NOT NULL, 
+                        Score DECIMAL(10,5), 
+                        ""Memo Text"" TEXT,
+                        BlobData BLOB,
+                        PRIMARY KEY (Code)
+                    )";
+                await cmd.ExecuteNonQueryAsync();
+                
+                cmd.CommandText = $"INSERT INTO {tableNameRaw} VALUES ('OLD', 10.5, 'OldMemo', X'AA')";
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            var registry = new OptionsRegistry();
+            registry.Register(new SqliteWriterOptions { Table = tableNameRaw, Strategy = SqliteWriteStrategy.Recreate });
+
+            var columns = new List<ColumnInfo> 
+            { 
+                new("Code", typeof(string), true), 
+                new("Score", typeof(decimal), false),
+                new("Memo Text", typeof(string), true),
+                new("BlobData", typeof(byte[]), true)
+            };
+            
+            var batch = new List<object?[]> { new object?[] { "NEW", 99.12345m, "NewMemo", new byte[] { 0xBB } } };
+
+            // Act
+            await using var writer = new SqliteDataWriter(connectionString, registry);
+            await writer.InitializeAsync(columns);
+            await writer.WriteBatchAsync(batch);
+            await writer.CompleteAsync();
+
+            // Assert
+            await using (var connection = new SqliteConnection(connectionString))
+            {
+                await connection.OpenAsync();
+
+                // Check Data
+                using var cmd = connection.CreateCommand();
+                cmd.CommandText = $"SELECT Code, Score, \"Memo Text\", BlobData FROM {tableNameRaw}";
+                using var reader = await cmd.ExecuteReaderAsync();
+                Assert.True(await reader.ReadAsync());
+                Assert.Equal("NEW", reader.GetString(0));
+                Assert.Equal(99.12345m, reader.GetDecimal(1));
+                Assert.Equal("NewMemo", reader.GetString(2));
+                var blob = (byte[])reader.GetValue(3);
+                Assert.Equal(0xBB, blob[0]);
+
+                // Check Metadata (using PRAGMA table_info)
+                using var metaCmd = connection.CreateCommand();
+                metaCmd.CommandText = $"PRAGMA table_info('{tableNameRaw}')";
+                
+                var types = new Dictionary<string, string>();
+                using var metaReader = await metaCmd.ExecuteReaderAsync();
+                while(await metaReader.ReadAsync())
+                {
+                    types[metaReader.GetString(1)] = metaReader.GetString(2);
+                }
+                
+                Assert.Contains("VARCHAR(10)", types["Code"]);
+                Assert.Contains("DECIMAL(10,5)", types["Score"]);
+                Assert.Contains("TEXT", types["Memo Text"]);
+                Assert.Contains("BLOB", types["BlobData"]);
+            }
+        }
+        finally
+        {
+            if (File.Exists(dbPath)) File.Delete(dbPath);
+        }
+    }
 }

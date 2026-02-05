@@ -3,6 +3,7 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using System.Text;
 using DtPipe.Core.Helpers;
+using System.Data;
 using ColumnInfo = DtPipe.Core.Models.ColumnInfo;
 
 namespace DtPipe.Adapters.DuckDB;
@@ -105,16 +106,39 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector, IKeyValida
     public async ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
     {
         _columns = columns;
-        await _connection.OpenAsync(ct);
+        if (_connection.State != ConnectionState.Open)
+        {
+            await _connection.OpenAsync(ct);
+        }
         
         // Smart Quoting - compute once and reuse
         _quotedTargetTableName = _dialect.NeedsQuoting(_options.Table) ? _dialect.Quote(_options.Table) : _options.Table;
 
         if (_options.Strategy == DuckDbWriteStrategy.Recreate)
         {
+            // 0. Introspect BEFORE Drop to preserve native types (Introspect-Before-Recreate)
+            TargetSchemaInfo? existingSchema = null;
+            try
+            {
+                existingSchema = await InspectTargetAsync(ct);
+            }
+            catch 
+            {
+                // Ignore introspection failures
+            }
+
             var dropCmd = _connection.CreateCommand();
             dropCmd.CommandText = $"DROP TABLE IF EXISTS {_quotedTargetTableName}";
             await dropCmd.ExecuteNonQueryAsync(ct);
+
+            // 1. Recreate from Introspection if available
+            if (existingSchema?.Exists == true && existingSchema.Columns.Count > 0)
+            {
+                 var recreateSql = BuildCreateTableFromIntrospection(_quotedTargetTableName, existingSchema);
+                 using var recreateCmd = _connection.CreateCommand();
+                 recreateCmd.CommandText = recreateSql;
+                 await recreateCmd.ExecuteNonQueryAsync(ct);
+            }
         }
         else if (_options.Strategy == DuckDbWriteStrategy.DeleteThenInsert)
         {
@@ -298,6 +322,18 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector, IKeyValida
         else row.AppendValue(val.ToString());
     }
 
+    public async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
+    {
+         if (_connection.State != ConnectionState.Open)
+         {
+             await _connection.OpenAsync(ct);
+         }
+         
+         using var cmd = _connection.CreateCommand();
+         cmd.CommandText = command;
+         await cmd.ExecuteNonQueryAsync(ct);
+    }
+
     public async ValueTask CompleteAsync(CancellationToken ct = default)
     {
         _appender?.Dispose();
@@ -397,6 +433,34 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector, IKeyValida
     {
         // "CREATE TABLE target AS SELECT * FROM source WHERE 1=0"
         return $"CREATE TABLE {targetTable} AS SELECT * FROM {sourceTable} WHERE 1=0";
+    }
+
+    private string BuildCreateTableFromIntrospection(string tableName, TargetSchemaInfo schema)
+    {
+        var sb = new StringBuilder();
+        sb.Append($"CREATE TABLE {tableName} (");
+        
+        for (int i = 0; i < schema.Columns.Count; i++)
+        {
+            var col = schema.Columns[i];
+            if (i > 0) sb.Append(", ");
+            // Use native type directly
+            sb.Append($"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, col.Name)} {col.NativeType}");
+            
+            if (!col.IsNullable)
+            {
+                sb.Append(" NOT NULL");
+            }
+        }
+        
+        if (schema.PrimaryKeyColumns != null && schema.PrimaryKeyColumns.Count > 0)
+        {
+             var keys = schema.PrimaryKeyColumns.Select(k => SqlIdentifierHelper.GetSafeIdentifier(_dialect, k));
+             sb.Append($", PRIMARY KEY ({string.Join(", ", keys)})");
+        }
+        
+        sb.Append(")");
+        return sb.ToString();
     }
 
     // IKeyValidator implementation (Phase 1)

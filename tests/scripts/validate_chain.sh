@@ -63,7 +63,7 @@ echo "----------------------------------------"
 echo "Step 1: CSV -> Postgres"
 echo "----------------------------------------"
 PG_CONN="pg:Host=localhost;Port=5440;Database=integration;Username=postgres;Password=password"
-CMD1="$DTPIPE --input \"csv:$ARTIFACTS_DIR/reference.csv\" --query 'SELECT * FROM data' --output \"$PG_CONN\" --pg-table \"export\" --pg-strategy \"Recreate\""
+CMD1="$DTPIPE --input \"csv:$ARTIFACTS_DIR/reference.csv\" --output \"$PG_CONN\" --pg-table \"export\" --pg-strategy \"Recreate\""
 echo "Running: $CMD1"
 eval $CMD1
 

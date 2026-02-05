@@ -4,7 +4,7 @@ set -e
 # Setup
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$SCRIPT_DIR/../../"
-TEST_DIR="$ROOT_DIR/tests/output/yaml_options"
+TEST_DIR="$SCRIPT_DIR/artifacts/yaml_options"
 rm -rf "$TEST_DIR"
 mkdir -p "$TEST_DIR"
 

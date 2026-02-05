@@ -1,11 +1,8 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
-using System.Linq;
 using DtPipe.Cli;
 using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Cli.Abstractions;
-using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 
 namespace DtPipe.Transformers.Fake;
@@ -100,7 +97,6 @@ public class FakeDataTransformerFactory : IFakeDataTransformerFactory
 
         foreach (var (option, value) in configuration)
         {
-            // Lookup property name from option alias - NO HARDCODED STRINGS
             if (_aliasToProperty!.TryGetValue(option, out var propertyName))
             {
                 switch (propertyName)
@@ -125,7 +121,6 @@ public class FakeDataTransformerFactory : IFakeDataTransformerFactory
                         break;
                 }
             }
-            // Unknown options are ignored (could be from --fake-list or other)
         }
         
         var options = new FakeOptions
@@ -184,7 +179,8 @@ public class FakeDataTransformerFactory : IFakeDataTransformerFactory
         if (parseResult.Tokens.Any(t => t.Value == "--fake-list"))
         {
              // Handle flag if present
-             var isFakeList = parseResult.GetValue<bool>("--fake-list");
+             var option = GetCliOptions().FirstOrDefault(o => o.Name == "--fake-list") as Option<bool>;
+             var isFakeList = option != null && parseResult.GetValue(option);
              if (isFakeList)
              {
                  PrintFakerList();

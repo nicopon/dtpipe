@@ -154,6 +154,7 @@ public class DryRunKeyValidationTests
 
         var result = await analyzer.AnalyzeAsync(reader.Object, new List<IDataTransformer>(), 10, writer);
 
+        Assert.NotNull(result.KeyValidation);
         Assert.True(result.KeyValidation.IsValid);
         Assert.Equal("id", result.KeyValidation.ResolvedKeys![0]); 
     }
@@ -175,6 +176,7 @@ public class DryRunKeyValidationTests
 
         var result = await analyzer.AnalyzeAsync(reader.Object, new List<IDataTransformer>(), 10, writer);
 
+        Assert.NotNull(result.KeyValidation);
         Assert.False(result.KeyValidation.IsRequired);
         Assert.True(result.KeyValidation.IsValid);
     }
@@ -196,6 +198,7 @@ public class DryRunKeyValidationTests
 
         var result = await analyzer.AnalyzeAsync(reader.Object, new List<IDataTransformer>(), 10, writer);
 
+        Assert.NotNull(result.KeyValidation);
         Assert.True(result.KeyValidation.IsRequired);
         Assert.False(result.KeyValidation.IsValid);
         Assert.Contains("requires a primary key", result.KeyValidation.Errors![0]);

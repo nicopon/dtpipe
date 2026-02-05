@@ -1,14 +1,14 @@
 #!/bin/bash
 
-echo "DtPipe README Examples Validation"
-echo "===================================="
-
-APP="./dist/release/dtpipe"
+# Configuration
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+APP="$PROJECT_ROOT/dist/release/dtpipe"
 
 # Ensure app is built
 if [ ! -f "$APP" ]; then
     echo "Error: $APP not found. Running build.sh..."
-    ./build.sh
+    "$PROJECT_ROOT/build.sh"
 fi
 
 function run_test() {
@@ -16,7 +16,7 @@ function run_test() {
     local cmd=$2
     echo -n "Testing: $title... "
     
-    local TMP_DIR="/tmp/dtpipe_test"
+    local TMP_DIR="$SCRIPT_DIR/artifacts/readme_examples"
     mkdir -p "$TMP_DIR"
     
     local final_cmd=$(echo "$cmd" | sed "s|users.parquet|$TMP_DIR/users.parquet|g" \
@@ -49,7 +49,7 @@ run_test "Quick Start" "$APP --input \"duck:source.db\" --query \"SELECT 1\" --o
 
 # 2. Iterate Workflow Examples
 run_test "Iterative Workflow (Dry Run)" "$APP --input \"duck::memory:\" --query \"SELECT 1\" --output \"users.csv\" --sample-rate 0.1 --dry-run"
-run_test "Iterative Workflow (Export)" "$APP --input \"duck::memory:\" --query \"SELECT 1\" --output \"users.parquet\" --fake \"NAME:name.fullName\" --export-job /tmp/job.yaml"
+run_test "Iterative Workflow (Export)" "$APP --input \"duck::memory:\" --query \"SELECT 1\" --output \"users.parquet\" --fake \"NAME:name.fullName\" --export-job \"$SCRIPT_DIR/artifacts/readme_examples/job.yaml\""
 
 # 3. Transformer Basics
 run_test "Nullify" "--null \"INTERNAL_ID\""
@@ -70,10 +70,14 @@ run_test "Project" "--project \"FIRSTNAME,LASTNAME,EMAIL\""
 run_test "Drop" "--drop \"INTERNAL_ID\""
 
 # 7. YAML Validation
-cat <<EOF > /tmp/readme_test_job.yaml
+TMP_DIR="$SCRIPT_DIR/artifacts/readme_examples"
+mkdir -p "$TMP_DIR"
+JOB_FILE_README="$TMP_DIR/readme_test_job.yaml"
+
+cat <<EOF > "$JOB_FILE_README"
 input: "duck::memory:"
 query: "SELECT 'Alice' as name, 'test@example.com' as email, '0612345678' as phone, 1 as id"
-output: "/tmp/customers_anon.parquet"
+output: "$TMP_DIR/customers_anon.parquet"
 transformers:
   - null:
       mappings:
@@ -88,7 +92,7 @@ transformers:
 EOF
 
 echo -n "Testing: YAML Job File... "
-$APP --job /tmp/readme_test_job.yaml --dry-run > /dev/null 2>&1
+$APP --job "$JOB_FILE_README" --dry-run > /dev/null 2>&1
 if [ $? -eq 0 ]; then
     echo "✅ PASS"
 else
@@ -98,4 +102,4 @@ fi
 
 echo "===================================="
 echo "All README examples validated successfully!"
-rm -rf /tmp/dtpipe_test
+rm -rf "$TMP_DIR"

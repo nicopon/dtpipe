@@ -73,9 +73,13 @@ public record JobDefinition
     /// Seed for random sampling.
     /// </summary>
     /// <summary>
-    /// Seed for random sampling.
-    /// </summary>
     public int? SampleSeed { get; init; }
+
+    // Lifecycle Hooks
+    public string? PreExec { get; init; }
+    public string? PostExec { get; init; }
+    public string? OnErrorExec { get; init; }
+    public string? FinallyExec { get; init; }
 
     /// <summary>
     /// Provider-specific options (e.g. oracle-writer: { table: "MY_TABLE" }).

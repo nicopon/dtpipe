@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.CommandLine.Parsing;
 using System.ComponentModel;
 using System.Reflection;
+using System.Linq.Expressions;
 using DtPipe.Core.Options;
 using DtPipe.Cli.Attributes;
 
@@ -60,8 +61,6 @@ public static class CliOptionBuilder
                     };
                     options.Add(option);
 
-                    // If manually named (via Attribute), consider adding legacy alias if needed, or just rely on the new name.
-                    // For now, simple override.
                 }
             }
             else
@@ -72,7 +71,7 @@ public static class CliOptionBuilder
                 
                 // Create generic option dynamically
                 var optionType = typeof(Option<>).MakeGenericType(underlyingType);
-                var option = (Option)Activator.CreateInstance(optionType, flagName)!;
+                var option = (Option)Activator.CreateInstance(optionType, new object[] { flagName })!;
                 
                 // Set description
                 option.Description = description;
@@ -150,7 +149,7 @@ public static class CliOptionBuilder
                 var defaultValue = property.GetValue(defaultInstance);
                 var underlyingType = GetUnderlyingType(propType);
                 var optionType = typeof(Option<>).MakeGenericType(underlyingType);
-                option = (Option)Activator.CreateInstance(optionType, flagName)!;
+                option = (Option)Activator.CreateInstance(optionType, new object[] { flagName })!;
                 option.Description = description;
                 
                 // Force boolean options to be flags (Arity 0) to prevent consuming next tokens
@@ -190,21 +189,41 @@ public static class CliOptionBuilder
     
     private static void SetDefaultValue(Option option, Type optionType, Type valueType, object defaultValue)
     {
-        // Get the DefaultValueFactory property
-        var defaultValueFactoryProperty = optionType.GetProperty("DefaultValueFactory");
-        if (defaultValueFactoryProperty == null) return;
-        
-        // Create a Func<ArgumentResult, T> delegate
-        var method = typeof(CliOptionBuilder).GetMethod(nameof(CreateDefaultFactory), BindingFlags.NonPublic | BindingFlags.Static)!;
-        var genericMethod = method.MakeGenericMethod(valueType);
-        var factory = genericMethod.Invoke(null, new[] { defaultValue });
-        
-        defaultValueFactoryProperty.SetValue(option, factory);
-    }
-    
-    private static Func<ArgumentResult, T> CreateDefaultFactory<T>(T value)
-    {
-        return _ => value;
+        // For System.CommandLine 2.0.2, use DefaultValueFactory property
+        var prop = optionType.GetProperty("DefaultValueFactory");
+        if (prop != null)
+        {
+            try
+            {
+                // Create Func<ParseResult, T> that returns the constant defaultValue
+                var parseResultParam = Expression.Parameter(typeof(ParseResult), "p");
+                var body = Expression.Constant(defaultValue, valueType);
+                var lambda = Expression.Lambda(typeof(Func<,>).MakeGenericType(typeof(ParseResult), valueType), body, parseResultParam);
+                var delegateInstance = lambda.Compile();
+                prop.SetValue(option, delegateInstance);
+                return;
+            }
+            catch
+            {
+                // Fallback if Expression fails
+            }
+        }
+
+        // Fallback for older versions or if property is missing/fails
+        var method = optionType.GetMethod("SetDefaultValue", new[] { valueType });
+        if (method != null)
+        {
+            method.Invoke(option, new[] { defaultValue });
+        }
+        else 
+        {
+             // Try setting the property if it exists
+             var defaultValueProp = optionType.GetProperty("DefaultValue");
+             if (defaultValueProp != null && defaultValueProp.CanWrite)
+             {
+                 defaultValueProp.SetValue(option, defaultValue);
+             }
+        }
     }
     
     /// <summary>
@@ -240,20 +259,56 @@ public static class CliOptionBuilder
                     : $"--{prefix}-{kebabProp}";
             }
             
-            // Match by Name - System.CommandLine stores the full name including dashes in Name property
-            var matchedOption = optionsList.FirstOrDefault(o => o.Name == flagName);
+            // Match by Alias - System.CommandLine stripping dashes from Name, but Aliases keeps them.
+            var matchedOption = optionsList.FirstOrDefault(o => o.Name == flagName || o.Aliases.Contains(flagName));
             
             if (matchedOption is not null)
             {
-                // Check if option is explicitly present in the parse result (by checking tokens)
-                var hasOption = result.Tokens.Any(t => t.Value == matchedOption.Name || matchedOption.Aliases.Contains(t.Value));
+                // Robust check for option presence in the parse result.
+                // 1. Try direct instance match (standard/fastest)
+                var optionResult = result.GetResult(matchedOption);
                 
-                if (!hasOption) continue; // Option not present in CLI, keep existing value
+                // 2. Fallback: if instance match fails (cloned symbols), check by alias presence in tokens.
+                if (optionResult is null)
+                {
+                    bool presentInTokens = false;
+                    foreach (var token in result.Tokens)
+                    {
+                        if (token.Type == TokenType.Option && 
+                           (token.Value == matchedOption.Name || matchedOption.Aliases.Contains(token.Value)))
+                        {
+                            presentInTokens = true;
+                            break;
+                        }
+                    }
+                    if (!presentInTokens) continue;
+                }
+                else
+                {
+                    // If GetResult returns a result, we should check if it was provided or just contains the default.
+                    // System.CommandLine 2.0.2 OptionResult doesn't have an easy "WasProvided" but usually
+                    // we can check if it has any tokens.
+                    if (!optionResult.Tokens.Any())
+                    {
+                        // Check if it's a bool flag (Arity 0). If it's a flag and not in tokens, keep POCO default.
+                        bool presentInTokens = false;
+                        foreach (var token in result.Tokens)
+                        {
+                            if (token.Type == TokenType.Option && 
+                               (token.Value == matchedOption.Name || matchedOption.Aliases.Contains(token.Value)))
+                            {
+                                presentInTokens = true;
+                                break;
+                            }
+                        }
+                        if (!presentInTokens) continue;
+                    }
+                }
 
                 var propType = property.PropertyType;
                 var isList = propType != typeof(string) && typeof(System.Collections.IEnumerable).IsAssignableFrom(propType);
 
-                if (isList && (
+                    if (isList && (
                     propType == typeof(IReadOnlyList<string>) || 
                     propType == typeof(List<string>) || 
                     propType == typeof(string[]) || 
@@ -274,7 +329,6 @@ public static class CliOptionBuilder
                 }
                 else
                 {
-                    // Scalar value - use reflection to call GetValue<T>
                     var underlyingType = GetUnderlyingType(propType);
                     var genericGetValue = typeof(CliOptionBuilder).GetMethod(nameof(GetTypedValue), BindingFlags.NonPublic | BindingFlags.Static)!;
                     var typedMethod = genericGetValue.MakeGenericMethod(underlyingType);

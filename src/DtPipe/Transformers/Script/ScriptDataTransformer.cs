@@ -11,7 +11,8 @@ namespace DtPipe.Transformers.Script;
 /// </summary>
 public sealed class ScriptDataTransformer : IDataTransformer, IRequiresOptions<ScriptOptions>
 {
-    private readonly Engine _engine;
+    private ThreadLocal<Engine>? _threadLocalEngine;
+    private readonly List<string> _initializationScripts = new();
     private readonly Dictionary<string, string> _mappings;
     
     // State initialized in InitializeAsync
@@ -19,9 +20,6 @@ public sealed class ScriptDataTransformer : IDataTransformer, IRequiresOptions<S
     private string[]? _columnNames;
     private ScriptColumnProcessor[]? _processors;
     
-    // Lock for thread safety of Jint Engine
-    private readonly object _engineLock = new();
-
     private readonly bool _skipNull;
 
     public ScriptDataTransformer(ScriptOptions options)
@@ -36,13 +34,6 @@ public sealed class ScriptDataTransformer : IDataTransformer, IRequiresOptions<S
                 _mappings[parts[0]] = parts[1];
             }
         }
-
-        // Initialize Jint in strict sandbox mode
-        _engine = new Engine(cfg => cfg
-            .Strict(true)
-            .LimitMemory(20_000_000) // 20MB limit for safety
-            .TimeoutInterval(TimeSpan.FromSeconds(2)) // 2s timeout per script execution
-        );
         _skipNull = options.SkipNull;
     }
 
@@ -80,75 +71,92 @@ public sealed class ScriptDataTransformer : IDataTransformer, IRequiresOptions<S
                 
                 var wrappedScript = $"function {functionName}(row) {{ {body} }}";
                 
-                lock(_engineLock)
-                {
-                    _engine.Execute(wrappedScript);
-                }
-
+                // Validate syntax immediately
+                new Engine(cfg => cfg.Strict(true)).Execute(wrappedScript);
+                
+                _initializationScripts.Add(wrappedScript);
                 processors.Add(new ScriptColumnProcessor(colIndex, functionName));
             }
         }
 
         _processors = processors.ToArray();
 
+        // Initialize ThreadLocal Factory
+        // This will be called on each thread that accesses .Value
+        _threadLocalEngine = new ThreadLocal<Engine>(() => 
+        {
+            var engine = new Engine(cfg => cfg
+                .Strict(true)
+                .LimitMemory(20_000_000) // 20MB limit for safety
+                .TimeoutInterval(TimeSpan.FromSeconds(2)) // 2s timeout per script execution
+            );
+            
+            foreach(var script in _initializationScripts)
+            {
+                 engine.Execute(script);
+            }
+            return engine;
+        });
+
         return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
     }
 
     public object?[] Transform(object?[] row)
     {
-        if (_processors == null || _processors.Length == 0 || _columnNames == null) return row;
+        if (_processors == null || _processors.Length == 0 || _columnNames == null || _threadLocalEngine == null) return row;
 
-        lock (_engineLock)
+        var engine = _threadLocalEngine.Value!;
+
+        // Build a JS object representing the current row
+        var jsRow = new JsObject(engine);
+        for (int i = 0; i < row.Length; i++)
         {
-            // Build a JS object representing the current row
-            var jsRow = new JsObject(_engine);
-            for (int i = 0; i < row.Length; i++)
+            jsRow.Set(_columnNames[i], JsValue.FromObject(engine, row[i]));
+        }
+
+        foreach (var processor in _processors)
+        {
+            var originalValue = row[processor.ColumnIndex];
+            
+            if (_skipNull && originalValue is null)
             {
-                jsRow.Set(_columnNames[i], JsValue.FromObject(_engine, row[i]));
+                continue;
             }
+            
+            // Call the pre-compiled function with full row
+            var result = engine.Invoke(processor.FunctionName, jsRow);
 
-            foreach (var processor in _processors)
+            // Convert back to .NET types (simple types or string fallback)
+            
+            if (result.IsString())
             {
-                var originalValue = row[processor.ColumnIndex];
-                
-                if (_skipNull && originalValue is null)
-                {
-                    continue;
-                }
-                
-                // Convert .NET value to JS value if needed, or let Jint handle it
-                // Jint handles basic types well.
-                
-                // Call the pre-compiled function with full row
-                var result = _engine.Invoke(processor.FunctionName, jsRow);
-
-                // Convert back to .NET types (simple types or string fallback)
-                
-                if (result.IsString())
-                {
-                    row[processor.ColumnIndex] = result.AsString();
-                }
-                else if (result.IsNumber())
-                {
-                     row[processor.ColumnIndex] = result.AsNumber();
-                }
-                else if (result.IsBoolean())
-                {
-                    row[processor.ColumnIndex] = result.AsBoolean();
-                }
-                else if (result.IsNull() || result.IsUndefined())
-                {
-                    row[processor.ColumnIndex] = null;
-                }
-                else 
-                {
-                    // Fallback for complex objects
-                    row[processor.ColumnIndex] = result.ToString();
-                }
+                row[processor.ColumnIndex] = result.AsString();
+            }
+            else if (result.IsNumber())
+            {
+                    row[processor.ColumnIndex] = result.AsNumber();
+            }
+            else if (result.IsBoolean())
+            {
+                row[processor.ColumnIndex] = result.AsBoolean();
+            }
+            else if (result.IsNull() || result.IsUndefined())
+            {
+                row[processor.ColumnIndex] = null;
+            }
+            else 
+            {
+                // Fallback for complex objects
+                row[processor.ColumnIndex] = result.ToString();
             }
         }
 
         return row;
+    }
+
+    public void Dispose()
+    {
+        _threadLocalEngine?.Dispose();
     }
 
     private record struct ScriptColumnProcessor(int ColumnIndex, string FunctionName);

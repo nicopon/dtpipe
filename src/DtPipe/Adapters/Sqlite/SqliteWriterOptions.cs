@@ -19,7 +19,7 @@ public class SqliteWriterOptions : IOptionSet
     public string? Key { get; init; }
 
     [CliOption(Description = "Target table name")]
-    public string Table { get; set; } = "Export";
+    public string Table { get; set; } = "export";
 
     [CliOption(Description = "Data write strategy (Append, Truncate, or Recreate)")]
     public SqliteWriteStrategy Strategy { get; set; } = SqliteWriteStrategy.Append;

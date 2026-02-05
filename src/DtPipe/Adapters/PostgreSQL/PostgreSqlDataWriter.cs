@@ -3,6 +3,7 @@ using Npgsql;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Helpers;
+using System.Data;
 
 namespace DtPipe.Adapters.PostgreSQL;
 
@@ -184,8 +185,14 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
 
     public async ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
     {
-        _connection = new NpgsqlConnection(_connectionString);
-        await _connection.OpenAsync(ct);
+        if (_connection == null)
+        {
+            _connection = new NpgsqlConnection(_connectionString);
+        }
+        if (_connection.State != ConnectionState.Open)
+        {
+            await _connection.OpenAsync(ct);
+        }
         // GLOBAL NORMALIZATION:
         // Create a secure list of columns where names are normalized if not case-sensitive.
         // This ensures consistency across CREATE TABLE, INSERT, COPY, etc.
@@ -247,13 +254,30 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
         // Handle Strategy-Specific Logic
         if (_options.Strategy == PostgreSqlWriteStrategy.Recreate)
         {
-            // Recreate: Always drop (if exists) and create fresh table
+            TargetSchemaInfo? existingSchema = null;
             if (resolved != null)
             {
+                // Table exists. Introspect BEFORE Drop to preserve native types.
+                try 
+                {
+                    existingSchema = await InspectTargetAsync(ct);
+                }
+                catch { /* Ignore introspection errors during recreate, treat as not existing */ }
+                
                 await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS {_quotedTargetTableName}", ct);
             }
+
             // Create table
-            var createSql = BuildCreateTableSql(_quotedTargetTableName, _columns);
+            string createSql;
+            if (existingSchema != null && existingSchema.Exists)
+            {
+                 createSql = BuildCreateTableFromIntrospection(_quotedTargetTableName, existingSchema);
+            }
+            else
+            {
+                 createSql = BuildCreateTableSql(_quotedTargetTableName, _columns);
+            }
+            
             await ExecuteNonQueryAsync(createSql, ct);
         }
         else if (_options.Strategy == PostgreSqlWriteStrategy.DeleteThenInsert)
@@ -362,6 +386,23 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
         }
     }
 
+    public async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
+    {
+        if (_connection == null)
+        {
+             _connection = new NpgsqlConnection(_connectionString);
+        }
+
+        if (_connection.State != ConnectionState.Open)
+        {
+            await _connection.OpenAsync(ct);
+        }
+
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = command;
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
     public async ValueTask CompleteAsync(CancellationToken ct = default)
     {
         if (_writer != null)
@@ -464,6 +505,43 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
         
         sb.Append(")");
 
+        return sb.ToString();
+    }
+
+    private string BuildCreateTableFromIntrospection(string quotedTableName, TargetSchemaInfo schemaInfo)
+    {
+        var sb = new StringBuilder();
+        sb.Append($"CREATE TABLE {quotedTableName} (");
+        
+        for (int i = 0; i < schemaInfo.Columns.Count; i++)
+        {
+            if (i > 0) sb.Append(", ");
+            var col = schemaInfo.Columns[i];
+            
+            // Quote identifier
+            var safeName = _dialect.Quote(col.Name);
+            
+            sb.Append($"{safeName} {col.NativeType}");
+            
+            if (!col.IsNullable)
+            {
+                sb.Append(" NOT NULL");
+            }
+        }
+        
+        // Add primary key constraint if present
+        if (schemaInfo.PrimaryKeyColumns != null && schemaInfo.PrimaryKeyColumns.Count > 0)
+        {
+            sb.Append(", PRIMARY KEY (");
+            for(int i=0; i < schemaInfo.PrimaryKeyColumns.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(_dialect.Quote(schemaInfo.PrimaryKeyColumns[i]));
+            }
+            sb.Append(")");
+        }
+        
+        sb.Append(")");
         return sb.ToString();
     }
 

@@ -4,6 +4,7 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Core.Helpers;
+using System.Data;
 
 namespace DtPipe.Adapters.Sqlite;
 
@@ -135,8 +136,16 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
         _tableName = _dialect.NeedsQuoting(options.Table) ? _dialect.Quote(options.Table) : options.Table;
         _strategy = options.Strategy;
 
-        _connection = new SqliteConnection(_connectionString);
-        await _connection.OpenAsync(ct);
+        _strategy = options.Strategy;
+
+        if (_connection == null)
+        {
+            _connection = new SqliteConnection(_connectionString);
+        }
+        if (_connection.State != ConnectionState.Open)
+        {
+            await _connection.OpenAsync(ct);
+        }
 
         await HandleStrategyAsync(ct);
         
@@ -168,8 +177,20 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
 
         if (_strategy == SqliteWriteStrategy.Recreate)
         {
+            TargetSchemaInfo? existingSchema = null;
+            try { existingSchema = await InspectTargetAsync(ct); } catch {}
+
             cmd.CommandText = $"DROP TABLE IF EXISTS {_tableName}";
             await cmd.ExecuteNonQueryAsync(ct);
+
+            if (existingSchema?.Exists == true && existingSchema.Columns.Count > 0)
+            {
+                 var sql = BuildCreateTableFromIntrospection(_tableName, existingSchema);
+                 cmd.CommandText = sql;
+                 await cmd.ExecuteNonQueryAsync(ct);
+                 return;
+            }
+
             await CreateTableAsync(ct);
         }
         else if (_strategy == SqliteWriteStrategy.DeleteThenInsert)
@@ -304,6 +325,23 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
         }
     }
 
+    public async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
+    {
+        if (_connection == null)
+        {
+            _connection = new SqliteConnection(_connectionString);
+        }
+
+        if (_connection.State != ConnectionState.Open)
+        {
+            await _connection.OpenAsync(ct);
+        }
+        
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = command;
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
     public ValueTask CompleteAsync(CancellationToken ct = default)
     {
         return ValueTask.CompletedTask;
@@ -338,6 +376,33 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
             .ToList();
     }
     
+    private string BuildCreateTableFromIntrospection(string tableName, TargetSchemaInfo schema)
+    {
+        var sb = new StringBuilder();
+        sb.Append($"CREATE TABLE {tableName} (");
+        
+        for (int i = 0; i < schema.Columns.Count; i++)
+        {
+            var col = schema.Columns[i];
+            if (i > 0) sb.Append(", ");
+            sb.Append($"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, col.Name)} {col.NativeType}");
+            
+            if (!col.IsNullable)
+            {
+                sb.Append(" NOT NULL");
+            }
+        }
+        
+        if (schema.PrimaryKeyColumns != null && schema.PrimaryKeyColumns.Count > 0)
+        {
+             var keys = schema.PrimaryKeyColumns.Select(k => SqlIdentifierHelper.GetSafeIdentifier(_dialect, k));
+             sb.Append($", PRIMARY KEY ({string.Join(", ", keys)})");
+        }
+        
+        sb.Append(")");
+        return sb.ToString();
+    }
+
     public bool RequiresPrimaryKey()
     {
         var options = _registry.Get<SqliteWriterOptions>();

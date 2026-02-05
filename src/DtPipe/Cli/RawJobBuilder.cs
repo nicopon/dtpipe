@@ -1,7 +1,8 @@
 using System.CommandLine;
-using DtPipe.Configuration;
+using System.CommandLine.Parsing;
 using DtPipe.Core.Abstractions;
 using DtPipe.Cli.Abstractions;
+using DtPipe.Configuration;
 
 namespace DtPipe.Cli;
 
@@ -25,14 +26,17 @@ public static class RawJobBuilder
         Option<double> sampleRateOption,
         Option<int?> sampleSeedOption,
         Option<string?> logOption,
-        Option<string?> keyOption)
+        Option<string?> keyOption,
+        Option<string?> preExecOption,
+        Option<string?> postExecOption,
+        Option<string?> onErrorExecOption,
+        Option<string?> finallyExecOption)
     {
         var jobFile = parseResult.GetValue(jobOption);
         JobDefinition job;
 
         if (!string.IsNullOrWhiteSpace(jobFile))
         {
-            // --- Mode A: Loaded from Job File ---
             try
             {
                 job = JobFileParser.Parse(jobFile);
@@ -62,7 +66,6 @@ public static class RawJobBuilder
                 if (dryRunVal > 0) 
                 {
                     job = job with { DryRun = true };
-                    job = job with { DryRun = true };
                 }
 
                 var logPathOverride = parseResult.GetValue(logOption);
@@ -76,6 +79,18 @@ public static class RawJobBuilder
                 {
                     job = job with { Key = keyOverride };
                 }
+
+                var preExecOverride = parseResult.GetValue(preExecOption);
+                if (!string.IsNullOrEmpty(preExecOverride)) job = job with { PreExec = preExecOverride };
+                
+                var postExecOverride = parseResult.GetValue(postExecOption);
+                if (!string.IsNullOrEmpty(postExecOverride)) job = job with { PostExec = postExecOverride };
+                
+                var onErrorExecOverride = parseResult.GetValue(onErrorExecOption);
+                if (!string.IsNullOrEmpty(onErrorExecOverride)) job = job with { OnErrorExec = onErrorExecOverride };
+                
+                var finallyExecOverride = parseResult.GetValue(finallyExecOption);
+                if (!string.IsNullOrEmpty(finallyExecOverride)) job = job with { FinallyExec = finallyExecOverride };
             }
             catch (Exception ex)
             {
@@ -85,7 +100,6 @@ public static class RawJobBuilder
         }
         else
         {
-            // --- Mode B: CLI Arguments ---
             var query = parseResult.GetValue(queryOption);
             var output = parseResult.GetValue(outputOption);
             var input = parseResult.GetValue(inputOption);
@@ -117,7 +131,11 @@ public static class RawJobBuilder
                 SampleRate = parseResult.GetValue(sampleRateOption),
                 SampleSeed = parseResult.GetValue(sampleSeedOption),
                 LogPath = parseResult.GetValue(logOption),
-                Key = parseResult.GetValue(keyOption)
+                Key = parseResult.GetValue(keyOption),
+                PreExec = parseResult.GetValue(preExecOption),
+                PostExec = parseResult.GetValue(postExecOption),
+                OnErrorExec = parseResult.GetValue(onErrorExecOption),
+                FinallyExec = parseResult.GetValue(finallyExecOption)
             };
         }
 
@@ -183,10 +201,9 @@ public static class RawJobBuilder
                     var value = args[i + 1];
                     i++;
                     
-                    // Determine if this is a mapping or option based on the option name
                     var optionName = arg.TrimStart('-');
                     var factoryType = factory.TransformerType;
-                    
+
                     if (optionName.Equals(factoryType, StringComparison.OrdinalIgnoreCase))
                     {
                         // Mapping (e.g., --fake "NAME:faker")

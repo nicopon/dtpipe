@@ -41,7 +41,7 @@ public class CsvStreamReader : IStreamReader
         }
         else
         {
-            _fileStream = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 81920, useAsync: true);
+            _fileStream = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
             _streamReader = new StreamReader(_fileStream, encoding, detectEncodingFromByteOrderMarks: false, leaveOpen: false);
         }
         

@@ -267,4 +267,99 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
             Assert.Equal("NewData", name);
         }
     }
+
+    [Fact]
+    public async Task PostgreSqlWriter_Recreate_PreservesNativeStructure()
+    {
+        if (!DockerHelper.IsAvailable() || _postgres is null) return;
+
+        var connectionString = _postgres.GetConnectionString();
+        var tableNameRaw = $"test_recreate_p_{Guid.NewGuid():N}".Substring(0, 30); // Lowercase unquoted
+
+        // 1. Manually create table with specific structure:
+        // - code: CHAR(10) (Fixed length, unquoted)
+        // - "MixedScore": NUMERIC(10,5) (Quoted, mixed case)
+        // - description: TEXT
+        // - flags: BIT(3) (Specific bit string)
+        await using (var connection = new NpgsqlConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = $@"
+                CREATE TABLE {tableNameRaw} (
+                    code CHAR(10) NOT NULL,
+                    ""MixedScore"" NUMERIC(10,5),
+                    description TEXT,
+                    flags BIT(3),
+                    PRIMARY KEY (code)
+                )";
+            await cmd.ExecuteNonQueryAsync();
+            
+            cmd.CommandText = $"INSERT INTO {tableNameRaw} (code, \"MixedScore\", description, flags) VALUES ('OLD', 10.5, 'OldDesc', B'101')";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var options = new PostgreSqlWriterOptions { Table = tableNameRaw, Strategy = PostgreSqlWriteStrategy.Recreate };
+        
+        // Source defines columns generically
+        var columns = new List<DtPipe.Core.Models.ColumnInfo> 
+        { 
+            new("code", typeof(string), true), 
+            new("MixedScore", typeof(decimal), false),
+            new("description", typeof(string), true),
+            new("flags", typeof(string), true)
+        };
+        
+        var batch = new List<object?[]> { new object?[] { "NEW", 99.12345m, "NewDesc", "010" } }; // "010" string -> BIT(3)
+
+        // Act
+        // Recreate should Drop and Re-Create using Introspection
+        await using var writer = new PostgreSqlDataWriter(connectionString, options);
+        await writer.InitializeAsync(columns); 
+        await writer.WriteBatchAsync(batch);
+        await writer.CompleteAsync();
+
+        // Assert
+        // Inspect table structure to verify it matches original, not default
+        await using (var connection = new NpgsqlConnection(connectionString))
+        {
+            await connection.OpenAsync();
+
+            // Check Data
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = $"SELECT code, \"MixedScore\", description, flags::TEXT FROM {tableNameRaw}"; // Cast flags to text for easy reading
+            using var reader = await cmd.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal("NEW       ", reader.GetString(0)); // CHAR(10) padded
+            Assert.Equal(99.12345m, reader.GetDecimal(1));
+            Assert.Equal("NewDesc", reader.GetString(2));
+            Assert.Equal("010", reader.GetString(3));
+            
+            // Check Metadata using information_schema
+            
+            // 1. code (CHAR(10))
+            using var metaCode = connection.CreateCommand();
+            metaCode.CommandText = $"SELECT data_type, character_maximum_length FROM information_schema.columns WHERE table_name = '{tableNameRaw}' AND column_name = 'code'";
+            using var rCode = await metaCode.ExecuteReaderAsync();
+            Assert.True(await rCode.ReadAsync());
+            Assert.Equal("character", rCode.GetString(0)); // Postgres often calls CHAR "character"
+            Assert.Equal(10, Convert.ToInt32(rCode["character_maximum_length"]));
+
+            // 2. MixedScore (NUMERIC(10,5)) - Preserved case in quotes?
+            using var metaScore = connection.CreateCommand();
+            metaScore.CommandText = $"SELECT numeric_precision, numeric_scale FROM information_schema.columns WHERE table_name = '{tableNameRaw}' AND column_name = 'MixedScore'";
+            using var rScore = await metaScore.ExecuteReaderAsync();
+            Assert.True(await rScore.ReadAsync());
+            Assert.Equal(10, Convert.ToInt32(rScore["numeric_precision"]));
+            Assert.Equal(5, Convert.ToInt32(rScore["numeric_scale"]));
+            
+            // 3. flags (BIT(3))
+            using var metaFlags = connection.CreateCommand();
+            metaFlags.CommandText = $"SELECT data_type, character_maximum_length FROM information_schema.columns WHERE table_name = '{tableNameRaw}' AND column_name = 'flags'";
+            using var rFlags = await metaFlags.ExecuteReaderAsync();
+            Assert.True(await rFlags.ReadAsync());
+            Assert.Equal("bit", rFlags.GetString(0));
+            Assert.Equal(3, Convert.ToInt32(rFlags["character_maximum_length"]));
+        }
+    }
 }

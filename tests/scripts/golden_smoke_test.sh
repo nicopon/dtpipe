@@ -24,9 +24,9 @@ echo "=========================================="
 
 # Cleanup Setup
 cleanup() {
-    rm -f "$INPUT_DIR"/vicious_source.csv "$INPUT_DIR"/vicious.parquet "$INPUT_DIR"/vicious.db "$INPUT_DIR"/query.sql "$INPUT_DIR"/result_*.csv "$INPUT_DIR"/high_volume.csv "$INPUT_DIR"/high_volume.parquet "$INPUT_DIR"/composite_*.csv "$INPUT_DIR"/comp_*.csv "$INPUT_DIR"/vicious_inc.csv
+    rm -f "$INPUT_DIR"/vicious_source.csv "$INPUT_DIR"/vicious.parquet "$INPUT_DIR"/vicious.db "$INPUT_DIR"/query.sql "$INPUT_DIR"/result_*.csv "$INPUT_DIR"/high_volume.csv "$INPUT_DIR"/high_volume.parquet "$INPUT_DIR"/high_volume.db "$INPUT_DIR"/composite_*.csv "$INPUT_DIR"/comp_*.csv "$INPUT_DIR"/vicious_inc.csv "$INPUT_DIR"/composite.db "$INPUT_DIR"/composite.duckdb
     # Also clean locally just in case
-    rm -f result_*.csv high_volume.csv high_volume.parquet
+    rm -f result_*.csv high_volume.csv high_volume.parquet high_volume.db composite.db composite.duckdb
     docker rm -f $PG_CONTAINER $MSSQL_CONTAINER $ORA_CONTAINER > /dev/null 2>&1 || true
 }
 cleanup # Pre-clean
@@ -81,11 +81,6 @@ ORA_CONN_CHECK="ora:Data Source=localhost:1522/FREEPDB1;User Id=system;Password=
 wait_for_db "Postgres" "$PG_CONN" "SELECT 1"
 wait_for_db "MSSQL" "$MSSQL_CONN_CHECK" "SELECT 1"
 wait_for_db "Oracle" "$ORA_CONN_CHECK" "SELECT 1 FROM DUAL"
-
-cleanup() {
-    rm -f vicious_source.csv vicious.parquet vicious.db query.sql result_*.csv high_volume.csv high_volume.parquet
-    docker rm -f $PG_CONTAINER $MSSQL_CONTAINER $ORA_CONTAINER > /dev/null 2>&1 || true
-}
 
 # ---------------------------------------------------------
 # 2. Generate VICIOUS Source Data (CSV)

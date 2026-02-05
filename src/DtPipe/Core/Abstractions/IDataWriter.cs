@@ -20,4 +20,9 @@ public interface IDataWriter : IAsyncDisposable
     /// Complete writing and flush all buffers.
     /// </summary>
     ValueTask CompleteAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Execute a raw command (e.g. SQL) against the target.
+    /// </summary>
+    ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default);
 }

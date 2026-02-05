@@ -359,5 +359,119 @@ public class OracleIntegrationTests : IAsyncLifetime
             Assert.Equal("NewData", reader.GetString(0)); // If schema wasn't dropped, this would fail or contain "100" (if types matched)
         }
     }
+
+    [Fact]
+    public async Task OracleDataWriter_Recreate_PreservesNativeStructure()
+    {
+        if (!DockerHelper.IsAvailable() || _oracle is null) return;
+
+        var connectionString = _oracle.GetConnectionString();
+        // Use unquoted name to verify case handling (Oracle uppercases this)
+        var tableNamePrefix = "TEST_REC_P_"; 
+        var tableNameRaw = $"{tableNamePrefix}{Guid.NewGuid():N}".Substring(0, 25); 
+
+        // 1. Manually create table with specific structure AND data
+        // We use a mix of quoted and unquoted identifiers to test robustness
+        // - Code: CHAR(10) - Fixed length, unquoted (becomes CODE)
+        // - "MixedCase": VARCHAR2(50) - Quoted, specific case
+        // - Score: NUMBER(7,3) - Specific precision/scale
+        // - Flag: CHAR(1) - Boolean-ish
+        // - GenericNum: NUMBER - No precision (should be preserved as such)
+        await using (var connection = new OracleConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = $@"
+                CREATE TABLE {tableNameRaw} (
+                    Code CHAR(10) NOT NULL,
+                    ""MixedCase"" VARCHAR2(50),
+                    Score NUMBER(7,3),
+                    Flag CHAR(1),
+                    GenericNum NUMBER,
+                    PRIMARY KEY (Code)
+                )";
+            await cmd.ExecuteNonQueryAsync();
+            
+            // Insert initial data
+            cmd.CommandText = $"INSERT INTO {tableNameRaw} (Code, \"MixedCase\", Score, Flag, GenericNum) VALUES ('OLD', 'OldVal', 10.123, 'Y', 12345)";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var writerOptions = new OracleWriterOptions
+        {
+            Table = tableNameRaw, // Pass unquoted, writer should resolve it to TEST_REC_P_...
+            Strategy = OracleWriteStrategy.Recreate
+        };
+
+        // Source defines columns with simple types, we expect the writer to ignore these and use the existing schema
+        var columns = new List<ColumnInfo> 
+        { 
+            new("Code", typeof(string), true), 
+            new("MixedCase", typeof(string), true),
+            new("Score", typeof(decimal), false),
+            new("Flag", typeof(string), true), // Source says string, target is CHAR(1)
+            new("GenericNum", typeof(decimal), true)
+        };
+        
+        var rows = new List<object?[]> { new object?[] { "NEW", "NewVal", 99.999m, "N", 67890m } };
+
+        // Act
+        // Recreate should Drop and Re-Create using Introspection
+        await using var writer = new OracleDataWriter(connectionString, writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance);
+        await writer.InitializeAsync(columns, TestContext.Current.CancellationToken); 
+        await writer.WriteBatchAsync(rows, TestContext.Current.CancellationToken);
+        await writer.CompleteAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        // Inspect table structure to verify it matches original, not default
+        await using (var connection = new OracleConnection(connectionString))
+        {
+            await connection.OpenAsync();
+
+            // Check Data
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = $"SELECT Code, \"MixedCase\", Score, Flag, GenericNum FROM {tableNameRaw}";
+            using var reader = await cmd.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal("NEW       ", reader.GetString(0)); // CHAR(10) is padded! Verification of CHAR type.
+            Assert.Equal("NewVal", reader.GetString(1));
+            Assert.Equal(99.999m, reader.GetDecimal(2));
+            Assert.Equal("N", reader.GetString(3));
+            Assert.Equal(67890m, reader.GetDecimal(4));
+            
+            // Check Metadata using Oracle system views
+            // Note: USER_TAB_COLUMNS stores names in UPPERCASE unless quoted during creation
+            
+            // 1. Check CHAR(10) - (stored as CODE)
+            using var metaCode = connection.CreateCommand();
+            metaCode.CommandText = $"SELECT DATA_TYPE, CHAR_LENGTH FROM USER_TAB_COLUMNS WHERE TABLE_NAME = UPPER('{tableNameRaw}') AND COLUMN_NAME = 'CODE'";
+            using var rCode = await metaCode.ExecuteReaderAsync();
+            Assert.True(await rCode.ReadAsync());
+            Assert.Equal("CHAR", rCode.GetString(0));
+            Assert.Equal(10, Convert.ToInt32(rCode["CHAR_LENGTH"]));
+
+            // 2. Check NUMBER(7,3) - (stored as SCORE)
+            using var metaScore = connection.CreateCommand();
+            metaScore.CommandText = $"SELECT DATA_PRECISION, DATA_SCALE FROM USER_TAB_COLUMNS WHERE TABLE_NAME = UPPER('{tableNameRaw}') AND COLUMN_NAME = 'SCORE'";
+            using var rScore = await metaScore.ExecuteReaderAsync();
+            Assert.True(await rScore.ReadAsync());
+            Assert.Equal(7, Convert.ToInt32(rScore["DATA_PRECISION"]));
+            Assert.Equal(3, Convert.ToInt32(rScore["DATA_SCALE"]));
+
+            // 3. Check VARCHAR2(50) for MixedCase column - (stored as MixedCase because it was quoted)
+            using var metaMixed = connection.CreateCommand();
+            metaMixed.CommandText = $"SELECT CHAR_LENGTH FROM USER_TAB_COLUMNS WHERE TABLE_NAME = UPPER('{tableNameRaw}') AND COLUMN_NAME = 'MixedCase'";
+            var len = await metaMixed.ExecuteScalarAsync();
+            Assert.Equal(50, Convert.ToInt32(len));
+            
+            // 4. Check GenericNum - NUMBER (no precision)
+            using var metaGen = connection.CreateCommand();
+            metaGen.CommandText = $"SELECT DATA_PRECISION, DATA_SCALE FROM USER_TAB_COLUMNS WHERE TABLE_NAME = UPPER('{tableNameRaw}') AND COLUMN_NAME = 'GENERICNUM'";
+            using var rGen = await metaGen.ExecuteReaderAsync();
+            Assert.True(await rGen.ReadAsync());
+            // When NUMBER is defined without precision, PRECISION/SCALE are often null in metadata
+            Assert.True(rGen.IsDBNull(0) || rGen.IsDBNull(1));
+        }
+    }
 }
 

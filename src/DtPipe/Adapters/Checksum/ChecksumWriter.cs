@@ -3,7 +3,6 @@ using System.Text;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using Microsoft.Extensions.Logging;
-using DtPipe.Cli.Abstractions;
 using DtPipe.Core.Options;
 
 namespace DtPipe.Adapters.Checksum;
@@ -92,6 +91,11 @@ public sealed class ChecksumDataWriter : IDataWriter, IRequiresOptions<ChecksumW
         {
             Console.WriteLine(finalHash);
         }
+    }
+
+    public ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
+    {
+        throw new NotSupportedException("Executing raw commands is not supported for Checksum targets.");
     }
 
     public ValueTask DisposeAsync()

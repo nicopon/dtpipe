@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.CommandLine.Parsing;
 using DtPipe.Core.Options;
 
 namespace DtPipe.Cli.Abstractions;
@@ -8,7 +9,6 @@ public interface ICliContributor
     IEnumerable<Option> GetCliOptions();
     void BindOptions(ParseResult parseResult, OptionsRegistry registry);
     
-    // "Reader Options", "Writer Options", "Transformer Options"
     // "Reader Options", "Writer Options", "Transformer Options"
     string Category { get; }
 

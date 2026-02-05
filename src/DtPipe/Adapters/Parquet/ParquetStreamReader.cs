@@ -21,7 +21,7 @@ public class ParquetStreamReader : IStreamReader
 
     public async Task OpenAsync(CancellationToken ct = default)
     {
-        _fileStream = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 81920, useAsync: true);
+        _fileStream = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
         _reader = await ParquetReader.CreateAsync(_fileStream, leaveStreamOpen: true, cancellationToken: ct);
 
         var schema = _reader.Schema;
