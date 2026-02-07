@@ -149,7 +149,10 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
                 isNullable,
                 pkColumns.Contains(colName),
                 uniqueColumns.Contains(colName),
-                maxLength
+                maxLength,
+                Precision: reader.IsDBNull(5) ? null : reader.GetInt32(5),
+                Scale: reader.IsDBNull(6) ? null : reader.GetInt32(6),
+                IsCaseSensitive: colName != colName.ToLowerInvariant()
             ));
         }
 
@@ -193,7 +196,7 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
         {
             await _connection.OpenAsync(ct);
         }
-        // GLOBAL NORMALIZATION:
+        // Column and table normalization logic
         // Create a secure list of columns where names are normalized if not case-sensitive.
         // This ensures consistency across CREATE TABLE, INSERT, COPY, etc.
         var normalizedColumns = new List<ColumnInfo>(columns.Count);
@@ -215,7 +218,7 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
         string resolvedSchema;
         string resolvedTable;
         
-        // 1. Native Resolution
+        // 1. Table name resolution logic
         var resolved = await ResolveTableAsync(_connection, _options.Table, ct);
 
         if (resolved != null)
@@ -279,6 +282,25 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
             }
             
             await ExecuteNonQueryAsync(createSql, ct);
+
+            // Sync columns metadata from introspection to ensure future DML (COPY) matches the exact case/quotes
+            if (existingSchema != null)
+            {
+                var newCols = new List<ColumnInfo>(_columns!.Count);
+                foreach (var col in _columns!)
+                {
+                    var introspected = existingSchema.Columns.FirstOrDefault(c => c.Name.Equals(col.Name, StringComparison.OrdinalIgnoreCase));
+                    if (introspected != null)
+                    {
+                        newCols.Add(col with { Name = introspected.Name, IsCaseSensitive = introspected.IsCaseSensitive });
+                    }
+                    else
+                    {
+                        newCols.Add(col);
+                    }
+                }
+                _columns = newCols;
+            }
         }
         else if (_options.Strategy == PostgreSqlWriteStrategy.DeleteThenInsert)
         {
@@ -609,7 +631,7 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
         return id.Trim('"');
     }
 
-    // IKeyValidator implementation (Phase 1)
+    // IKeyValidator implementation
     
     public string? GetWriteStrategy()
     {

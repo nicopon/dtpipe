@@ -38,5 +38,6 @@ public sealed record TargetColumnInfo(
     bool IsUnique,
     int? MaxLength = null,
     int? Precision = null,
-    int? Scale = null
+    int? Scale = null,
+    bool IsCaseSensitive = false
 );

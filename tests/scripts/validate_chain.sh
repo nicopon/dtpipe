@@ -80,7 +80,7 @@ $DTPIPE --input "$PG_CONN" \
 echo "----------------------------------------"
 echo "Step 3: MSSQL -> Oracle"
 echo "----------------------------------------"
-# Wait for Oracle to be really ready (Healthcheck is just a weak test)
+# Step 3: Wait for Oracle to be fully ready
 echo "Waiting extra time for Oracle..."
 sleep 20 
 
@@ -89,7 +89,7 @@ $DTPIPE --input "$MSSQL_CONN" \
            --query 'SELECT * FROM ExportedData' \
            --output "$ORACLE_CONN" \
            --ora-table "EXPORT_DATA" \
-           --ora-strategy "Recreate" # Ensure clean table
+           --ora-strategy "Recreate" 
 
 echo "----------------------------------------"
 echo "Step 4: Oracle -> Parquet"

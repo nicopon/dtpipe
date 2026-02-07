@@ -14,7 +14,7 @@ public class DryRunKeyValidationTests
         public List<string> RequestedKeys { get; set; } = new();
         public ISqlDialect Dialect { get; set; } = null!;
         public List<ColumnInfo> TargetColumns { get; set; } = new();
-        public List<string>? TargetPKs { get; set; } = null; // Phase 2: Target PKs
+        public List<string>? TargetPKs { get; set; } = null;
 
         public Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
         {
@@ -133,8 +133,7 @@ public class DryRunKeyValidationTests
         Assert.Contains("not found in final schema", result.KeyValidation.Errors![0]);
     }
 
-    // ... (Other Phase 1 tests) ... Keeping simplified here for replacement context, 
-    // actually I should preserve them. I will include them in the replace block content to avoid deleting them.
+    // Additional structural validation tests
     
     [Fact]
     public async Task Validate_CaseMismatch_ResolvesCorrectly()
@@ -204,7 +203,7 @@ public class DryRunKeyValidationTests
         Assert.Contains("requires a primary key", result.KeyValidation.Errors![0]);
     }
 
-    // --- Phase 2 Tests ---
+    // Composite Key Tests
 
     [Fact]
     public async Task Validate_CompositeKeySuccess_MatchesTarget()

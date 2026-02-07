@@ -16,9 +16,9 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
     private DataTable? _bufferTable;
 
     private IReadOnlyList<ColumnInfo>? _columns;
-
     private string _targetTableName = ""; // Resolved or Fallback
     private List<string> _keyColumns = new();
+    private bool _isDbCaseSensitive = false;
     
     private static async Task<(string Schema, string Table)?> ResolveTableAsync(SqlConnection connection, string inputName, CancellationToken ct)
     {
@@ -53,9 +53,46 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
 
     private string GetSmartQuotedIdentifier(string identifier)
     {
-        // Quote only if necessary (special chars, reserved words, mixed case)
-        // Standard simple identifiers (alphanumeric, underscore, uppercase/lowercase only) don't need quoting
-        return _dialect.NeedsQuoting(identifier) ? _dialect.Quote(identifier) : identifier;
+        // Quote only if necessary (special chars, reserved words)
+        if (string.IsNullOrEmpty(identifier)) return identifier;
+        
+        bool needsQuoting = _dialect.NeedsQuoting(identifier);
+        
+        // If DB is case sensitive, any mixed-case or lower-case identifier should probably be quoted 
+        // to be safe, although SQL Server's rules for unquoted identifiers in CS collation 
+        // are that they must match exactly.
+        if (!needsQuoting && _isDbCaseSensitive)
+        {
+            // If the identifier has ANY lowercase letters and we are in a CS collation, 
+            // it's safer to quote it if we want to preserve exactly that case.
+            if (identifier.Any(char.IsLower))
+            {
+                needsQuoting = true;
+            }
+        }
+
+        return needsQuoting ? _dialect.Quote(identifier) : identifier;
+    }
+
+    private async Task DetectDatabaseCollationAsync(CancellationToken ct)
+    {
+        if (_connection == null) return;
+        
+        try
+        {
+            var dbCmd = new SqlCommand("SELECT collation_name FROM sys.databases WHERE name = DB_NAME()", _connection);
+            var result = await dbCmd.ExecuteScalarAsync(ct);
+            if (result != null && result != DBNull.Value)
+            {
+                var collation = (string)result;
+                _isDbCaseSensitive = collation.Contains("_CS", StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        catch
+        {
+            // Fallback to safe default
+            _isDbCaseSensitive = false;
+        }
     }
     private List<int> _keyIndices = new();
 
@@ -70,7 +107,7 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
 
     public async ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
     {
-        // GLOBAL NORMALIZATION:
+        // Column and table normalization logic
         // Create a secure list of columns where names are normalized if not case-sensitive.
         // This ensures consistency across CREATE TABLE, INSERT, BULK COPY, MERGE, etc.
         var normalizedColumns = new List<ColumnInfo>(columns.Count);
@@ -100,7 +137,19 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
             await _connection.OpenAsync(ct);
         }
 
-        // Native Resolution logic
+        // Detect DB Case Sensitivity early
+        await DetectDatabaseCollationAsync(ct);
+
+        // Initialize Buffer Table and Bulk Copy early so sync logic can update them
+        _bufferTable = new DataTable();
+        _bulkCopy = new SqlBulkCopy(_connection, SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.UseInternalTransaction, null)
+        {
+            DestinationTableName = _options.Table, // Will be updated later
+            BatchSize = 0, 
+            BulkCopyTimeout = 0
+        };
+
+        // Table name resolution logic
         string resolvedSchema;
         string resolvedTable;
         
@@ -161,6 +210,35 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
 
             var createCmd = new SqlCommand(createSql, _connection);
             await createCmd.ExecuteNonQueryAsync(ct);
+
+            // Sync columns metadata from introspection to ensure future DML (BulkCopy) matches exact case/quotes
+            if (existingSchema != null)
+            {
+                var newCols = new List<ColumnInfo>(_columns!.Count);
+                foreach (var col in _columns!)
+                {
+                    var introspected = existingSchema.Columns.FirstOrDefault(c => c.Name.Equals(col.Name, StringComparison.OrdinalIgnoreCase));
+                    if (introspected != null)
+                    {
+                        newCols.Add(col with { Name = introspected.Name, IsCaseSensitive = introspected.IsCaseSensitive });
+                    }
+                    else
+                    {
+                        newCols.Add(col);
+                    }
+                }
+                _columns = newCols;
+
+                // Re-initialize buffer table columns if names changed
+                _bufferTable!.Columns.Clear();
+                _bulkCopy!.ColumnMappings.Clear();
+                foreach (var col in _columns)
+                {
+                    var type = Nullable.GetUnderlyingType(col.ClrType) ?? col.ClrType;
+                    _bufferTable.Columns.Add(col.Name, type);
+                    _bulkCopy.ColumnMappings.Add(col.Name, col.Name);
+                }
+            }
         }
         else if (_options.Strategy == SqlServerWriteStrategy.Truncate)
         {
@@ -199,29 +277,16 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
             // If resolved != null, the table exists, and _targetTableName is set.
         }
         
-        // Configure SqlBulkCopy
-        _bulkCopy = new SqlBulkCopy(_connection, SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.UseInternalTransaction, null)
-        {
-            DestinationTableName = _targetTableName,
-            // BatchSize is controlled by pipeline buffer
-            BatchSize = 0, 
-            BulkCopyTimeout = 0
-        };
+        // Update BulkCopy destination with the resolved quoted name
+        _bulkCopy!.DestinationTableName = _targetTableName;
 
-        // Initialize Buffer Table for Bulk Copy
-        _bufferTable = new DataTable();
-        foreach (var col in columns)
+        // Initialize Column Mappings and Buffer Table Schema
+        _bufferTable!.Columns.Clear();
+        _bulkCopy.ColumnMappings.Clear();
+        foreach (var col in _columns)
         {
             var type = Nullable.GetUnderlyingType(col.ClrType) ?? col.ClrType;
-            // DataTable needs Base Type for nullable columns? Or just Type?
-            // "Nullable types are not supported in DataTable" - traditionally.
-            // Correct approach: Use base type and AllowDBNull = true.
             _bufferTable.Columns.Add(col.Name, type); 
-            
-            // Map Source (in buffer) to Dest (in DB)
-            // Buffer col name is col.Name.
-            // Dest col name is col.Name.
-            // Smart quoting applies to SQL text, not Mapping names usually.
             _bulkCopy.ColumnMappings.Add(col.Name, col.Name);
         }
 
@@ -278,11 +343,14 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
         
         var (schema, table) = resolved.Value;
 
-        // Get Columns
+        // 1. Ensure we have the latest DB collation info
+        await DetectDatabaseCollationAsync(ct);
+
+        // 2. Get Columns
         var cols = new List<TargetColumnInfo>();
         {
             var colCmd = new SqlCommand(@"
-                SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
+                SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE, COLLATION_NAME, DATETIME_PRECISION
                 FROM INFORMATION_SCHEMA.COLUMNS
                 WHERE TABLE_SCHEMA = @Schema AND TABLE_NAME = @Table
                 ORDER BY ORDINAL_POSITION", connection);
@@ -295,7 +363,22 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
                 var name = reader.GetString(0);
                 var type = reader.GetString(1);
                 var nullable = reader.GetString(2) == "YES";
-                
+                var maxLength = reader.IsDBNull(3) ? null : (int?)Convert.ToInt32(reader[3]);
+                var precision = reader.IsDBNull(4) ? null : (int?)Convert.ToInt32(reader[4]);
+                var scale = reader.IsDBNull(5) ? null : (int?)Convert.ToInt32(reader[5]);
+                var collation = reader.IsDBNull(6) ? null : reader.GetString(6);
+                var datetimePrecision = reader.IsDBNull(7) ? null : (int?)Convert.ToInt32(reader[7]);
+
+                // NUMERIC_PRECISION is null for datetime types, so we use datetimePrecision if available
+                var finalPrecision = precision ?? datetimePrecision;
+
+                // Collation based Case Sensitivity (preferred over simple name casing for SQL Server)
+                // If it's a non-text type (numeric/etc), it inherits behavior or is irrelevant.
+                // If text type, it clearly indicates CS/CI.
+                bool isColCaseSensitive = collation != null 
+                    ? collation.Contains("_CS", StringComparison.OrdinalIgnoreCase)
+                    : _isDbCaseSensitive; // Inherit from DB if per-column collation is null
+
                 cols.Add(new TargetColumnInfo(
                     name,
                     type,
@@ -303,7 +386,10 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
                     nullable,
                     false,
                     false,
-                    null
+                    maxLength,
+                    finalPrecision,
+                    scale,
+                    IsCaseSensitive: isColCaseSensitive
                 ));
             }
         }
@@ -330,7 +416,7 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
             }
         }
 
-        // Get Unique Columns (Phase 3)
+        // Get Unique Columns
         var uniqueCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         {
             var uqCmd = new SqlCommand(@"
@@ -414,10 +500,27 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
             if (i > 0) sb.Append(", ");
             var col = schemaInfo.Columns[i];
             
-            // Quote identifier
-            var safeName = _dialect.Quote(col.Name);
+            // Quote identifier only if necessary
+            var safeName = col.IsCaseSensitive || _dialect.NeedsQuoting(col.Name) ? _dialect.Quote(col.Name) : col.Name;
             
-            sb.Append($"{safeName} {col.NativeType}");
+            var typeLower = col.NativeType.ToLowerInvariant();
+            var fullType = col.NativeType;
+            
+            if (col.MaxLength.HasValue && (typeLower.Contains("char") || typeLower.Contains("binary")))
+            {
+                var lenStr = col.MaxLength.Value == -1 ? "MAX" : col.MaxLength.Value.ToString();
+                fullType += $"({lenStr})";
+            }
+            else if (col.Precision.HasValue && col.Scale.HasValue && (typeLower == "decimal" || typeLower == "numeric"))
+            {
+                fullType += $"({col.Precision.Value},{col.Scale.Value})";
+            }
+            else if (col.Precision.HasValue && (typeLower.Contains("datetime2") || typeLower.Contains("datetimeoffset") || typeLower.Contains("time")))
+            {
+                fullType += $"({col.Precision.Value})";
+            }
+
+            sb.Append($"{safeName} {fullType}");
             
             if (!col.IsNullable)
             {
@@ -589,7 +692,7 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
         if (_bufferTable != null) _bufferTable.Dispose();
     }
 
-    // IKeyValidator implementation (Phase 1)
+    // IKeyValidator implementation
     
     public string? GetWriteStrategy()
     {

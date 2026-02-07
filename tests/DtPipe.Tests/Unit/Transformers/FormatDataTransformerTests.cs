@@ -198,8 +198,7 @@ public class FormatDataTransformerTests
         var result = rows.Select(r => transformer.Transform(r)).ToList();
 
         // Assert
-        // Case 1: All null -> Skipped -> Result set to NULL (not "Old", transformer logic sets null on skip)
-        // Wait, current logic: "row[idx] = null; continue;" so it explicitly NULLs the target.
+        // Case 1: All sources are null -> Result set to NULL
         result[0][2].Should().BeNull("All sources are null, so format is skipped and target is nulled");
 
         // Case 2: Mixed -> Formatted

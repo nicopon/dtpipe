@@ -10,6 +10,7 @@ This document contains recipes and examples for using DtPipe to solve common dat
 - [Standard Streams & Linux Pipes](#standard-streams--linux-pipes)
 - [Database Import & Migration](#database-import--migration)
 - [Production Automation (YAML)](#production-automation-yaml)
+- [Security & Secrets](#security--secrets)
 
 ---
 
@@ -311,3 +312,43 @@ transformers:
         locale: fr
         seed-column: id
 ```
+
+---
+
+## Security & Secrets
+
+Never hardcode passwords in scripts or YAML files. DtPipe provides multiple ways to handle credentials safely.
+
+### 1. Using Environment Variables
+The most common approach for CI/CD. The shell expands variables before passing them to DtPipe.
+
+```bash
+# Set your connection string
+export MY_CONN="ora:Data Source=PROD;User Id=scott;Password=tiger"
+
+# Use it in the CLI
+./dtpipe -i "$MY_CONN" -q "SELECT * FROM users" -o users.parquet
+```
+
+### 2. Using the OS Keyring (Zero-Exposure)
+For local development or secure servers, store secrets in the system keyring (macOS Keychain, Windows Credential Manager, Linux Secret Service).
+
+**Step 1: Store the secret once**
+```bash
+./dtpipe secret set oracle-prod "ora:Data Source=PROD;User Id=scott;Password=tiger"
+```
+
+**Step 2: Reference it by alias**
+The password never appears in your shell history or `ps` output.
+```bash
+./dtpipe -i keyring://oracle-prod -q "SELECT * FROM users" -o users.parquet
+```
+
+### 3. Loading Queries from Files
+Avoid exposing complex or sensitive SQL queries in your command line or job files.
+
+```bash
+# Store your SQL in a file
+./dtpipe -i keyring://prod-db -q "./queries/extract_users.sql" -o users.parquet
+```
+DtPipe automatically detects if `-q` points to a file and loads its content.

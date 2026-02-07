@@ -356,7 +356,7 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
         }
     }
 
-    // IKeyValidator implementation (Phase 1)
+    // IKeyValidator implementation
     
     public string? GetWriteStrategy()
     {

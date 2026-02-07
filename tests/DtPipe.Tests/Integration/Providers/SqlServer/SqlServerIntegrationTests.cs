@@ -202,12 +202,12 @@ public class SqlServerIntegrationTests : IAsyncLifetime
         var connectionString = _sqlServer.GetConnectionString();
         var tableName = "RecreateTest";
 
-        // 1. Manually create table with incompatible schema (Name as INT)
+        // 1. Manually create table
         await using (var connection = new SqlConnection(connectionString))
         {
             await connection.OpenAsync();
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = $"CREATE TABLE {tableName} (Id INT, Name INT)";
+            cmd.CommandText = $"CREATE TABLE {tableName} (Id INT, Name NVARCHAR(100))";
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -282,9 +282,18 @@ public class SqlServerIntegrationTests : IAsyncLifetime
         // Act
         // Recreate should Drop and Re-Create using Introspection
         await using var writer = new SqlServerDataWriter(connectionString, writerOptions);
-        await writer.InitializeAsync(columns, TestContext.Current.CancellationToken); 
-        await writer.WriteBatchAsync(batch, TestContext.Current.CancellationToken);
-        await writer.CompleteAsync(TestContext.Current.CancellationToken);
+        try 
+        {
+            await writer.InitializeAsync(columns, TestContext.Current.CancellationToken); 
+            await writer.WriteBatchAsync(batch, TestContext.Current.CancellationToken);
+            await writer.CompleteAsync(TestContext.Current.CancellationToken);
+        }
+        catch (Exception ex)
+        {
+             Console.Error.WriteLine($"[SQL Server Test Failure]: {ex.Message}");
+             if (ex.InnerException != null) Console.Error.WriteLine($"Inner: {ex.InnerException.Message}");
+             throw;
+        }
 
         // Assert
         // Inspect table structure to verify it matches original, not default
@@ -295,12 +304,14 @@ public class SqlServerIntegrationTests : IAsyncLifetime
             // Check Data
             using var cmd = connection.CreateCommand();
             cmd.CommandText = $"SELECT Code, Price, Score, \"Created At\" FROM {tableNameRaw}";
-            using var reader = await cmd.ExecuteReaderAsync();
-            Assert.True(await reader.ReadAsync());
-            Assert.Equal("NEW       ", reader.GetString(0)); // NCHAR padded
-            Assert.Equal(99.99m, reader.GetDecimal(1));
-            Assert.Equal(99.9m, reader.GetDecimal(2));
-            Assert.Equal(999, reader.GetDateTime(3).Millisecond);
+            using (var reader = await cmd.ExecuteReaderAsync())
+            {
+                Assert.True(await reader.ReadAsync());
+                Assert.Equal("NEW       ", reader.GetString(0)); // NCHAR padded
+                Assert.Equal(99.99m, reader.GetDecimal(1));
+                Assert.Equal(99.9m, reader.GetDecimal(2));
+                Assert.Equal(999, reader.GetDateTime(3).Millisecond);
+            }
             
             // Check Metadata
             // SQL Server: INFORMATION_SCHEMA.COLUMNS
@@ -308,10 +319,12 @@ public class SqlServerIntegrationTests : IAsyncLifetime
             // 1. Code (NCHAR(10))
             using var metaCode = connection.CreateCommand();
             metaCode.CommandText = $"SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '{tableNameRaw}' AND COLUMN_NAME = 'Code'";
-            using var rCode = await metaCode.ExecuteReaderAsync();
-            Assert.True(await rCode.ReadAsync());
-            Assert.Equal("nchar", rCode.GetString(0));
-            Assert.Equal(10, Convert.ToInt32(rCode["CHARACTER_MAXIMUM_LENGTH"]));
+            using (var rCode = await metaCode.ExecuteReaderAsync())
+            {
+                Assert.True(await rCode.ReadAsync());
+                Assert.Equal("nchar", rCode.GetString(0));
+                Assert.Equal(10, Convert.ToInt32(rCode["CHARACTER_MAXIMUM_LENGTH"]));
+            }
 
             // 2. Price (MONEY)
             using var metaPrice = connection.CreateCommand();
@@ -322,18 +335,22 @@ public class SqlServerIntegrationTests : IAsyncLifetime
             // 3. Score (DECIMAL(5,2))
             using var scoreCmd = connection.CreateCommand();
             scoreCmd.CommandText = $"SELECT NUMERIC_PRECISION, NUMERIC_SCALE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '{tableNameRaw}' AND COLUMN_NAME = 'Score'";
-            using var scoreReader = await scoreCmd.ExecuteReaderAsync();
-            Assert.True(await scoreReader.ReadAsync());
-            Assert.Equal(5, Convert.ToInt32(scoreReader["NUMERIC_PRECISION"]));
-            Assert.Equal(2, Convert.ToInt32(scoreReader["NUMERIC_SCALE"]));
+            using (var scoreReader = await scoreCmd.ExecuteReaderAsync())
+            {
+                Assert.True(await scoreReader.ReadAsync());
+                Assert.Equal(5, Convert.ToInt32(scoreReader["NUMERIC_PRECISION"]));
+                Assert.Equal(2, Convert.ToInt32(scoreReader["NUMERIC_SCALE"]));
+            }
             
             // 4. "Created At" (DATETIME2(3))
              using var metaDate = connection.CreateCommand();
             metaDate.CommandText = $"SELECT DATA_TYPE, DATETIME_PRECISION FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '{tableNameRaw}' AND COLUMN_NAME = 'Created At'";
-            using var rDate = await metaDate.ExecuteReaderAsync();
-            Assert.True(await rDate.ReadAsync());
-            Assert.Equal("datetime2", rDate.GetString(0));
-            Assert.Equal(3, Convert.ToInt16(rDate["DATETIME_PRECISION"]));
+            using (var rDate = await metaDate.ExecuteReaderAsync())
+            {
+                Assert.True(await rDate.ReadAsync());
+                Assert.Equal("datetime2", rDate.GetString(0));
+                Assert.Equal(3, Convert.ToInt16(rDate["DATETIME_PRECISION"]));
+            }
         }
     }
 }

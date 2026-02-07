@@ -8,8 +8,6 @@ namespace DtPipe.Core.Abstractions;
 /// This interface is designed to be implemented alongside <see cref="ISchemaInspector"/>
 /// by data writers that support key-based operations (Upsert, Ignore, Delete).
 /// 
-/// ARCHITECTURAL NOTE: This is an OPTIONAL interface. Writers that don't support
-/// key-based operations (CSV, Parquet) do not need to implement this.
 /// </remarks>
 public interface IKeyValidator
 {

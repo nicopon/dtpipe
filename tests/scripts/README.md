@@ -28,6 +28,7 @@ All scripts should be executed from the project root or the `tests/scripts` dire
 | **`validate_yaml_options.sh`** | **Config Test**. Verifies YAML-defined provider options application. | - |
 | **`validate_drivers_docker.sh`** | **Connectivity Test**. Spins up containers specifically to test provider read/write drivers. | Docker |
 | **`validate_oracle_perf.sh`** | **Performance Test**. Benchmarks Oracle `Standard` vs `Bulk` vs `Append` modes. | Docker |
+| **`verify_pg_only.sh`** | **Targeted Test**. Fast validation focused exclusively on PostgreSQL features. | Docker |
 
 ## Technical Details
 

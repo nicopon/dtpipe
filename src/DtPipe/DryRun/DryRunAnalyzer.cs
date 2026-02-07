@@ -122,7 +122,7 @@ public class DryRunAnalyzer
         }
         else
         {
-            // No inspector, but purely validating key presence in schema (Phase 1 behavior)
+            // No inspector, but purely validating key presence in schema
             if (inspector is IKeyValidator keyValidator && samples.Count > 0)
             {
                 var finalSchema = traceSchemas.Last();
@@ -320,11 +320,7 @@ public class DryRunAnalyzer
                 errors.Add($"Target table primary key requires columns: {string.Join(", ", targetPKs)}. Missing: {string.Join(", ", missingInUser)}.");
             }
 
-            // Check 2: Do we have extra keys?
-            // "Target requires (A) but user provided (A, B)" -> Warning (or Error depending on strictness)
-            // Usually, using extra columns for key matching in Upsert is actually OK (it just becomes a more specific filter), 
-            // BUT for actual database constraints, it might be misleading.
-            // Let's treat it as a warning for now.
+            // Warning for extra keys (not present in target PK but provided by user)
              var extraInUser = new List<string>();
              foreach (var rk in resolvedKeys)
              {

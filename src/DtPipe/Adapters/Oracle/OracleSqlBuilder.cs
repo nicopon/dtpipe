@@ -126,8 +126,8 @@ internal static class OracleSqlBuilder
             if (i > 0) sb.Append(", ");
             var col = schemaInfo.Columns[i];
             
-            // Quote identifier
-            var safeName = dialect.Quote(col.Name);
+            // Quote identifier only if case sensitive or reserved keyword
+            var safeName = col.IsCaseSensitive || dialect.NeedsQuoting(col.Name) ? dialect.Quote(col.Name) : col.Name;
             
             sb.Append($"{safeName} {col.NativeType}");
             
