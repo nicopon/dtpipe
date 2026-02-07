@@ -33,7 +33,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
         _options = options;
         _logger = logger;
         _connection = new OracleConnection(connectionString);
-        _logger.LogDebug("OracleDataWriter created");
+        if(_logger.IsEnabled(LogLevel.Debug)) _logger.LogDebug("OracleDataWriter created");
     }
 
     private string _targetTableName = "";
@@ -70,7 +70,8 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
         }
         _columns = normalizedColumns;
         
-        _logger.LogInformation("Initializing Oracle Writer for table {Table} (WriteStrategy={Strategy})", _targetTableName, _options.Strategy);
+        if(_logger.IsEnabled(LogLevel.Information))
+            _logger.LogInformation("Initializing Oracle Writer for table {Table} (WriteStrategy={Strategy})", _targetTableName, _options.Strategy);
         
         if (_connection.State != ConnectionState.Open)
         {
@@ -97,7 +98,8 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
                     existingSchema = await InspectTargetAsync(ct);
                     if (existingSchema?.Exists == true)
                     {
-                        _logger.LogInformation("Table {Table} exists. Preserved native schema for recreation.", _targetTableName);
+                        if(_logger.IsEnabled(LogLevel.Information))
+                            _logger.LogInformation("Table {Table} exists. Preserved native schema for recreation.", _targetTableName);
                     }
                 }
             }
@@ -105,7 +107,8 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
             {
                 // Table likely doesn't exist or cannot be resolved. 
                 // We will proceed with default creation from CLR types.
-                _logger.LogDebug("Target table {Table} could not be resolved or inspected. Proceeding with fresh creation.", _options.Table);
+                if(_logger.IsEnabled(LogLevel.Debug))
+                    _logger.LogDebug("Target table {Table} could not be resolved or inspected. Proceeding with fresh creation.", _options.Table);
             }
 
             // 1. Drop existing table
@@ -114,7 +117,8 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
                 var sql = $"DROP TABLE {_targetTableName}";
                 dropCmd.CommandText = sql;
                 await dropCmd.ExecuteNonQueryAsync(ct);
-                _logger.LogInformation("Dropped table {Table} (Recreate Strategy)", _targetTableName);
+                if(_logger.IsEnabled(LogLevel.Information))
+                    _logger.LogInformation("Dropped table {Table} (Recreate Strategy)", _targetTableName);
             } 
             catch (OracleException ex) when (ex.Number == 942) { /* ORA-00942: table or view does not exist */ }
             catch (Exception ex)
@@ -138,7 +142,8 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
                 using var cmd = _connection.CreateCommand();
                 cmd.CommandText = createTableSql;
                 await cmd.ExecuteNonQueryAsync(ct);
-                _logger.LogInformation("Created table {Table}", _targetTableName);
+                if(_logger.IsEnabled(LogLevel.Information))
+                    _logger.LogInformation("Created table {Table}", _targetTableName);
 
                 // Sync columns metadata from introspection to ensure future DML (INSERT/MERGE) matches exact case/quotes
                 if (existingSchema != null)
@@ -181,7 +186,8 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
                 // Store globally for subsequent queries (Introspection, DML)
                 _targetTableName = $"{safeSchema}.{safeTable}";
                 
-                _logger.LogInformation("Resolved table {Input} to {Resolved} (Schema: {Schema})", _options.Table, _targetTableName, resolved.Schema);
+                if(_logger.IsEnabled(LogLevel.Information))
+                    _logger.LogInformation("Resolved table {Input} to {Resolved} (Schema: {Schema})", _options.Table, _targetTableName, resolved.Schema);
             }
             catch (OracleException ex) when (ex.Number == 6550 || ex.Message.Contains("ORA-06550")) 
             {
@@ -212,7 +218,8 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to inspect target schema types. Parameter binding will rely on Source types.");
+                if(_logger.IsEnabled(LogLevel.Warning))
+                    _logger.LogWarning(ex, "Failed to inspect target schema types. Parameter binding will rely on Source types.");
             }
             
             // Handle cleanup for strategies that require it
@@ -223,7 +230,8 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
                     var sql = $"DELETE FROM {_targetTableName}";
                     deleteCmd.CommandText = sql;
                     await deleteCmd.ExecuteNonQueryAsync(ct);
-                    _logger.LogInformation("Deleted existing rows from table {Table}", _targetTableName);
+                    if(_logger.IsEnabled(LogLevel.Information))
+                        _logger.LogInformation("Deleted existing rows from table {Table}", _targetTableName);
                 } 
                 catch (Exception ex)
                 {
@@ -237,7 +245,8 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
                     var sql = $"TRUNCATE TABLE {_targetTableName}";
                     truncCmd.CommandText = sql;
                     await truncCmd.ExecuteNonQueryAsync(ct);
-                    _logger.LogInformation("Truncated table {Table}", _targetTableName);
+                    if(_logger.IsEnabled(LogLevel.Information))
+                        _logger.LogInformation("Truncated table {Table}", _targetTableName);
                 } 
                 catch (Exception ex)
                 {
@@ -301,7 +310,8 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
                  _dialect, 
                  isUpsert);
              
-             _logger.LogDebug("Generated MERGE SQL: {Sql}", mergeSql);
+             if(_logger.IsEnabled(LogLevel.Debug))
+                 _logger.LogDebug("Generated MERGE SQL: {Sql}", mergeSql);
              
              _mergeCommand = _connection.CreateCommand();
              _mergeCommand.BindByName = true;
@@ -370,7 +380,8 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
                 _dialect, 
                 useAppendHint);
             
-            _logger.LogDebug("Generated Insert SQL: {Sql}", insertSql);
+            if(_logger.IsEnabled(LogLevel.Debug))
+                _logger.LogDebug("Generated Insert SQL: {Sql}", insertSql);
 
             _insertCommand = _connection.CreateCommand();
             _insertCommand.BindByName = true;
@@ -405,7 +416,8 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
         {
              if (_mergeCommand == null || _mergeParameters == null) throw new InvalidOperationException("Merge command not initialized");
              
-             _logger.LogDebug("Executing Merge for batch of {Count} rows", rows.Count);
+             if(_logger.IsEnabled(LogLevel.Debug))
+                 _logger.LogDebug("Executing Merge for batch of {Count} rows", rows.Count);
              await BindAndExecuteAsync(_mergeCommand, _mergeParameters, rows, ct);
              return;
         }
@@ -448,7 +460,8 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
             try
             {
                 await _insertCommand.ExecuteNonQueryAsync(ct);
-                _logger.LogDebug("Inserted {Count} rows via Array Binding ({Mode})...", rowCount, _options.InsertMode);
+                if(_logger.IsEnabled(LogLevel.Debug))
+                    _logger.LogDebug("Inserted {Count} rows via Array Binding ({Mode})...", rowCount, _options.InsertMode);
             }
             catch (Exception ex)
             {
@@ -460,7 +473,8 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
             if (_bulkCopy == null) throw new InvalidOperationException("BulkCopy not initialized");
             
             _bulkCopy.BatchSize = rows.Count;
-            _logger.LogDebug("Starting BulkCopy for batch of {Count} rows into {Table}", rows.Count, _targetTableName);
+            if(_logger.IsEnabled(LogLevel.Debug))
+                _logger.LogDebug("Starting BulkCopy for batch of {Count} rows into {Table}", rows.Count, _targetTableName);
             var watch = System.Diagnostics.Stopwatch.StartNew();
 
             // Use IDataReader wrapper for performance
@@ -471,7 +485,8 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "OracleBulkCopy failed. Starting in-depth analysis of the batch...");
+                if(_logger.IsEnabled(LogLevel.Warning))
+                    _logger.LogWarning(ex, "OracleBulkCopy failed. Starting in-depth analysis of the batch...");
                 var analysis = await BatchFailureAnalyzer.AnalyzeAsync(this, rows, _columns, ct);
                 if (!string.IsNullOrEmpty(analysis))
                 {
@@ -480,7 +495,8 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
                 throw; // Rethrow original if we couldn't find the specific culprit
             }
             watch.Stop();
-            _logger.LogDebug("BulkCopy finished in {ElapsedMs}ms", watch.ElapsedMilliseconds);
+            if(_logger.IsEnabled(LogLevel.Debug))
+                _logger.LogDebug("BulkCopy finished in {ElapsedMs}ms", watch.ElapsedMilliseconds);
         }
     }
 
@@ -525,7 +541,8 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
 
     public async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
     {
-        _logger.LogInformation("Executing Raw Command: {Command}", command);
+        if(_logger.IsEnabled(LogLevel.Information))
+            _logger.LogInformation("Executing Raw Command: {Command}", command);
         
         if (_connection.State != ConnectionState.Open)
         {
