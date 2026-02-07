@@ -108,7 +108,7 @@ Use `--fake "Col:Generator"` to replace sensitive data.
 | `--null "[Col]"` | Force column to NULL. |
 | `--overwrite "[Col]:[Val]"`| Set column to fixed value. |
 | `--format "[Col]:[Fmt]"` | Apply .NET format string. |
-| `--script "[Col]:[JS]"` | Apply Javascript logic. |
+| `--script "[Col]:[JS]"` | Apply Javascript logic. Supports inline code or file paths (`@file.js`). |
 | `--project`, `--drop` | Whitelist or Blacklist columns. |
 
 #### Pipeline Modifiers

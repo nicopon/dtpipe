@@ -234,35 +234,13 @@ public class JobService
             var (writerFactory, cleanedOutput) = ResolveFactory(writerFactories, job.Output, "writer");
             job = job with { Output = cleanedOutput };
 
-            if (!string.IsNullOrWhiteSpace(job.Query) && File.Exists(job.Query))
-            {
-                _console.MarkupLine($"[grey]Loading query from file: {Markup.Escape(job.Query)}[/]");
-                job = job with { Query = File.ReadAllText(job.Query) }; 
-            }
-
-            if (!string.IsNullOrWhiteSpace(job.PreExec) && File.Exists(job.PreExec))
-            {
-                _console.MarkupLine($"[grey]Loading Pre-Exec from file: {Markup.Escape(job.PreExec)}[/]");
-                job = job with { PreExec = File.ReadAllText(job.PreExec) };
-            }
-
-            if (!string.IsNullOrWhiteSpace(job.PostExec) && File.Exists(job.PostExec))
-            {
-                _console.MarkupLine($"[grey]Loading Post-Exec from file: {Markup.Escape(job.PostExec)}[/]");
-                job = job with { PostExec = File.ReadAllText(job.PostExec) };
-            }
-
-            if (!string.IsNullOrWhiteSpace(job.OnErrorExec) && File.Exists(job.OnErrorExec))
-            {
-                _console.MarkupLine($"[grey]Loading On-Error-Exec from file: {Markup.Escape(job.OnErrorExec)}[/]");
-                job = job with { OnErrorExec = File.ReadAllText(job.OnErrorExec) };
-            }
-
-            if (!string.IsNullOrWhiteSpace(job.FinallyExec) && File.Exists(job.FinallyExec))
-            {
-                _console.MarkupLine($"[grey]Loading Finally-Exec from file: {Markup.Escape(job.FinallyExec)}[/]");
-                job = job with { FinallyExec = File.ReadAllText(job.FinallyExec) };
-            }
+            job = job with { 
+                Query = LoadOrReadContent(job.Query, _console, "query"),
+                PreExec = LoadOrReadContent(job.PreExec, _console, "Pre-Exec"),
+                PostExec = LoadOrReadContent(job.PostExec, _console, "Post-Exec"),
+                OnErrorExec = LoadOrReadContent(job.OnErrorExec, _console, "On-Error-Exec"),
+                FinallyExec = LoadOrReadContent(job.FinallyExec, _console, "Finally-Exec")
+            };
 
             if (readerFactory.RequiresQuery)
             {
@@ -507,6 +485,33 @@ public class JobService
                 console.MarkupLine($"[red]Error resolving keyring secret: {ex.Message}[/]");
                 return null;
             }
+        }
+
+        return input;
+    }
+
+    private static string? LoadOrReadContent(string? input, IAnsiConsole console, string contextName)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return input;
+
+        // Explicit @ syntax
+        if (input.StartsWith('@'))
+        {
+             var path = input.Substring(1);
+             if (File.Exists(path))
+             {
+                 console.MarkupLine($"[grey]Loading {contextName} from file: {Markup.Escape(path)}[/]");
+                 return File.ReadAllText(path);
+             }
+             // Fallback: treat as literal string if file not found (e.g. SQL variable @foo)
+             return input;
+        }
+
+        // Implicit syntax
+        if (File.Exists(input))
+        {
+            console.MarkupLine($"[grey]Loading {contextName} from file: {Markup.Escape(input)}[/]");
+            return File.ReadAllText(input);
         }
 
         return input;

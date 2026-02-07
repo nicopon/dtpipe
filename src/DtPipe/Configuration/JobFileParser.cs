@@ -41,8 +41,7 @@ public static partial class JobFileParser
         // Validate required fields
         if (string.IsNullOrWhiteSpace(yamlJob.Input))
             throw new InvalidOperationException("Job file missing required field: input");
-        if (string.IsNullOrWhiteSpace(yamlJob.Query))
-            throw new InvalidOperationException("Job file missing required field: query");
+
         if (string.IsNullOrWhiteSpace(yamlJob.Output))
             throw new InvalidOperationException("Job file missing required field: output");
 
