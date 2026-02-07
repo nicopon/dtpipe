@@ -67,7 +67,15 @@ public class ScriptDataTransformerFactory : IDataTransformerFactory
         {
             if (option == "script" || option == "--script") 
             {
-                mappings.Add(value);
+                var parts = value.Split(':', 2);
+                if (parts.Length == 2)
+                {
+                    mappings.Add($"{parts[0]}:{ResolveScriptContent(parts[1])}");
+                }
+                else
+                {
+                     mappings.Add(value);
+                }
             }
             else if (option == "script-skip-null" || option == "--script-skip-null")
             {
@@ -82,7 +90,7 @@ public class ScriptDataTransformerFactory : IDataTransformerFactory
     {
         if (config.Script == null || !config.Script.Any()) return null;
 
-        var mappings = config.Script.Select(kvp => $"{kvp.Key}:{kvp.Value}").ToList();
+        var mappings = config.Script.Select(kvp => $"{kvp.Key}:{ResolveScriptContent(kvp.Value)}").ToList();
         
         bool skipNull = false;
         if (config.Options != null && config.Options.TryGetValue("skip-null", out var snStr))
@@ -96,5 +104,32 @@ public class ScriptDataTransformerFactory : IDataTransformerFactory
     public Task<int?> HandleCommandAsync(ParseResult parseResult, CancellationToken ct = default)
     {
         return Task.FromResult<int?>(null);
+    }
+    private static string ResolveScriptContent(string script)
+    {
+        if (string.IsNullOrWhiteSpace(script)) return script;
+
+        // Explicit @ syntax
+        if (script.StartsWith("@"))
+        {
+             var path = script.Substring(1);
+             if (File.Exists(path))
+             {
+                 return File.ReadAllText(path);
+             }
+             // Fallback: return as-is if file not found
+             return script;
+        }
+
+        // Implicit syntax
+        // Only load if it looks like a file path (not a short script like "return 1;")
+        // But to be consistent with --query, we just check existence.
+        // A script "return 1;" is unlikely to match a filename unless someone is very evil.
+        if (File.Exists(script))
+        {
+            return File.ReadAllText(script);
+        }
+
+        return script;
     }
 }

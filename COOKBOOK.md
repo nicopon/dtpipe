@@ -187,6 +187,17 @@ Use `--script` for complex logic.
    --script "Category:if (row.Age < 18) return 'Minor'; else return 'Adult';"
 ```
 
+### External Script Files
+Keep your CLI clean by moving complex logic into `.js` files.
+
+```bash
+# Explicit file loading (recommended)
+./dist/release/dtpipe ... --script "Category:@scripts/categorize_age.js"
+
+# Implicit file loading (if file exists)
+./dist/release/dtpipe ... --script "Category:scripts/categorize_age.js"
+```
+
 ---
 
 ## Standard Streams & Linux Pipes
@@ -311,6 +322,19 @@ transformers:
       options:
         locale: fr
         seed-column: id
+
+### Example 2: File-to-File (No Query)
+When transforming from CSV or Parquet, the `query` field is optional.
+
+```yaml
+input: raw_data.csv
+output: clean_data.parquet
+
+transformers:
+  - script:
+      # Use @ to load script from file
+      category: "@scripts/categorize.js"
+```
 ```
 
 ---
@@ -349,6 +373,6 @@ Avoid exposing complex or sensitive SQL queries in your command line or job file
 
 ```bash
 # Store your SQL in a file
-./dtpipe -i keyring://prod-db -q "./queries/extract_users.sql" -o users.parquet
+./dtpipe -i keyring://prod-db -q "@queries/extract_users.sql" -o users.parquet
 ```
-DtPipe automatically detects if `-q` points to a file and loads its content.
+DtPipe automatically detects if `-q` points to a file and loads its content. Using the `@` prefix is recommended to be explicit.
