@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
+using DtPipe.Core.Security;
 using Microsoft.Extensions.Logging;
 using DtPipe.Core.Options;
 
@@ -25,7 +26,10 @@ public sealed class ChecksumDataWriter : IDataWriter, IRequiresOptions<ChecksumW
 
     public ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
     {
-        _logger.LogInformation("Initializing Checksum Writer to {Path}", _options.OutputPath);
+        if (_logger.IsEnabled(LogLevel.Information))
+        {
+            _logger.LogInformation("Initializing Checksum Writer to {Path}", ConnectionStringSanitizer.Sanitize(_options.OutputPath));
+        }
         return ValueTask.CompletedTask;
     }
 
@@ -80,7 +84,10 @@ public sealed class ChecksumDataWriter : IDataWriter, IRequiresOptions<ChecksumW
     public async ValueTask CompleteAsync(CancellationToken ct = default)
     {
         var finalHash = Convert.ToHexString(_currentHash);
-        _logger.LogInformation("Final Checksum: {Hash}", finalHash);
+        if (_logger.IsEnabled(LogLevel.Information))
+        {
+            _logger.LogInformation("Final Checksum: {Hash}", finalHash);
+        }
         
         if (!string.IsNullOrEmpty(_options.OutputPath) && _options.OutputPath != "-")
         {

@@ -21,7 +21,7 @@ public sealed class OracleSchemaInspector : ISchemaInspector
 
     public async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
     {
-        _logger.LogDebug("Starting target schema inspection for table {Table}", _tableName);
+        if(_logger.IsEnabled(LogLevel.Debug)) _logger.LogDebug("Starting target schema inspection for table {Table}", _tableName);
         await using var connection = new OracleConnection(_connectionString);
         await connection.OpenAsync(ct);
 
@@ -33,7 +33,8 @@ public sealed class OracleSchemaInspector : ISchemaInspector
         }
         catch
         {
-            _logger.LogDebug("Table {Table} could not be resolved via DBMS_UTILITY.NAME_RESOLVE", _tableName);
+            if(_logger.IsEnabled(LogLevel.Debug))
+                _logger.LogDebug("Table {Table} could not be resolved via DBMS_UTILITY.NAME_RESOLVE", _tableName);
             return new TargetSchemaInfo([], false, null, null, null);
         }
         
@@ -58,7 +59,8 @@ public sealed class OracleSchemaInspector : ISchemaInspector
         AddOwnerParam(existsCmd);
         existsCmd.Parameters.Add(new OracleParameter("p_table", tableName));
         
-        _logger.LogDebug("Checking table existence with SQL: {Sql}", existsSql);
+        if(_logger.IsEnabled(LogLevel.Debug))
+            _logger.LogDebug("Checking table existence with SQL: {Sql}", existsSql);
         var result = await existsCmd.ExecuteScalarAsync(ct);
         if (result == null)
         {
@@ -98,7 +100,8 @@ public sealed class OracleSchemaInspector : ISchemaInspector
 
         // Build column list
         var columns = new List<TargetColumnInfo>();
-        _logger.LogDebug("Retrieving columns with SQL: {Sql}", columnsSql);
+        if(_logger.IsEnabled(LogLevel.Debug))
+            _logger.LogDebug("Retrieving columns with SQL: {Sql}", columnsSql);
         using var reader = await columnsCmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {

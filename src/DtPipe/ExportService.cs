@@ -1,9 +1,7 @@
 using System.Threading.Channels;
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Cli.Abstractions;
-using DtPipe.Core.Models;
 using DtPipe.Core.Options;
+using DtPipe.Core.Security;
 using DtPipe.Feedback;
 using Spectre.Console;
 using Microsoft.Extensions.Logging;
@@ -42,7 +40,8 @@ public class ExportService
         IStreamReaderFactory readerFactory,
         IDataWriterFactory writerFactory)
     {
-        _logger.LogInformation("Starting export from {Provider} to {OutputPath}", options.Provider, options.OutputPath);
+        if(_logger.IsEnabled(LogLevel.Information))
+            _logger.LogInformation("Starting export from {Provider} to {OutputPath}", options.Provider, ConnectionStringSanitizer.Sanitize(options.OutputPath));
 
         // Display Source Info
         var table = new Table();
@@ -209,8 +208,8 @@ public class ExportService
 
             var elapsed = DateTime.UtcNow - startTime;
             var rowsPerSecond = elapsed.TotalSeconds > 0 ? totalRows / elapsed.TotalSeconds : 0;
-            _logger.LogInformation("Export completed in {Elapsed}. Written {Rows} rows ({Speed:F1} rows/s).", 
-                elapsed, totalRows, rowsPerSecond);
+            if(_logger.IsEnabled(LogLevel.Information))
+                _logger.LogInformation("Export completed in {Elapsed}. Written {Rows} rows ({Speed:F1} rows/s).", elapsed, totalRows, rowsPerSecond);
 
             // --- POST-EXEC HOOK ---
             if (!string.IsNullOrWhiteSpace(options.PostExec))
@@ -287,7 +286,8 @@ public class ExportService
         if (sampleRate > 0 && sampleRate < 1.0)
         {
             sampler = sampleSeed.HasValue ? new Random(sampleSeed.Value) : Random.Shared;
-            logger.LogInformation("Data sampling enabled: {Rate:P0} (Seed: {Seed})", sampleRate, sampleSeed.HasValue ? sampleSeed.Value.ToString() : "Auto");
+            if(logger.IsEnabled(LogLevel.Information))
+                logger.LogInformation("Data sampling enabled: {Rate:P0} (Seed: {Seed})", sampleRate, sampleSeed.HasValue ? sampleSeed.Value.ToString() : "Auto");
         }
 
         long rowCount = 0;
@@ -295,7 +295,8 @@ public class ExportService
         {
             await foreach (var batchChunk in reader.ReadBatchesAsync(batchSize, ct))
             {
-                logger.LogDebug("Read batch of {Count} rows", batchChunk.Length);
+                if(logger.IsEnabled(LogLevel.Debug))
+                    logger.LogDebug("Read batch of {Count} rows", batchChunk.Length);
                 for (var i = 0; i < batchChunk.Length; i++)
                 {
                     // Apply Sampling High-Performance Filter
@@ -311,7 +312,8 @@ public class ExportService
                     // Check limit and cancel if reached
                     if (limit > 0 && rowCount >= limit)
                     {
-                        logger.LogInformation("Limit of {Limit} rows reached. Stopping producer.", limit);
+                        if(logger.IsEnabled(LogLevel.Information))
+                            logger.LogInformation("Limit of {Limit} rows reached. Stopping producer.", limit);
                         return;
                     }
                 }
@@ -372,18 +374,23 @@ public class ExportService
         CancellationToken ct,
         ILogger logger)
     {
-        logger.LogDebug("Consumer/Writer started");
+        if(logger.IsEnabled(LogLevel.Debug))
+            logger.LogDebug("Consumer/Writer started");
         var buffer = new List<object?[]>(batchSize);
 
         async Task WriteBufferAsync()
         {
             if (buffer.Count == 0) return;
 
-            logger.LogDebug("Writing batch of {Count} rows", buffer.Count);
+            if(logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug("Writing batch of {Count} rows", buffer.Count);
+            }
             await writer.WriteBatchAsync(buffer, ct);
-            logger.LogDebug("Batch written");
-
-            logger.LogDebug("Batch written");
+            if(logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug("Batch written");
+            }
 
             updateRowCount(buffer.Count);
             progress.ReportWrite(buffer.Count);
