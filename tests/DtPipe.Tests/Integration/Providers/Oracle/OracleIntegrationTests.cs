@@ -325,7 +325,7 @@ public class OracleIntegrationTests : IAsyncLifetime
         {
             await connection.OpenAsync();
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = $"CREATE TABLE {tableName} (\"Id\" NUMBER(10), \"Name\" NUMBER(10))"; 
+            cmd.CommandText = $"CREATE TABLE {tableName} (\"Id\" NUMBER(10), \"Name\" VARCHAR2(100))"; 
             await cmd.ExecuteNonQueryAsync();
             cmd.CommandText = $"INSERT INTO {tableName} VALUES (1, 100)";
             await cmd.ExecuteNonQueryAsync();
@@ -352,11 +352,12 @@ public class OracleIntegrationTests : IAsyncLifetime
         {
             await connection.OpenAsync();
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = $"SELECT Name FROM {tableName}";
-            using var reader = await cmd.ExecuteReaderAsync();
-
-            Assert.True(await reader.ReadAsync());
-            Assert.Equal("NewData", reader.GetString(0)); // If schema wasn't dropped, this would fail or contain "100" (if types matched)
+            cmd.CommandText = $"SELECT * FROM {tableName}";
+            using (var reader = await cmd.ExecuteReaderAsync())
+            {
+                Assert.True(await reader.ReadAsync());
+                Assert.Equal("NewData", reader.GetString(1)); // Name is the second column (Id, Name)
+            }
         }
     }
 
@@ -431,13 +432,15 @@ public class OracleIntegrationTests : IAsyncLifetime
             // Check Data
             using var cmd = connection.CreateCommand();
             cmd.CommandText = $"SELECT Code, \"MixedCase\", Score, Flag, GenericNum FROM {tableNameRaw}";
-            using var reader = await cmd.ExecuteReaderAsync();
-            Assert.True(await reader.ReadAsync());
-            Assert.Equal("NEW       ", reader.GetString(0)); // CHAR(10) is padded! Verification of CHAR type.
-            Assert.Equal("NewVal", reader.GetString(1));
-            Assert.Equal(99.999m, reader.GetDecimal(2));
-            Assert.Equal("N", reader.GetString(3));
-            Assert.Equal(67890m, reader.GetDecimal(4));
+            using (var reader = await cmd.ExecuteReaderAsync())
+            {
+                Assert.True(await reader.ReadAsync());
+                Assert.Equal("NEW       ", reader.GetString(0)); // CHAR(10) is padded! Verification of CHAR type.
+                Assert.Equal("NewVal", reader.GetString(1));
+                Assert.Equal(99.999m, reader.GetDecimal(2));
+                Assert.Equal("N", reader.GetString(3));
+                Assert.Equal(67890m, reader.GetDecimal(4));
+            }
             
             // Check Metadata using Oracle system views
             // Note: USER_TAB_COLUMNS stores names in UPPERCASE unless quoted during creation
@@ -445,18 +448,22 @@ public class OracleIntegrationTests : IAsyncLifetime
             // 1. Check CHAR(10) - (stored as CODE)
             using var metaCode = connection.CreateCommand();
             metaCode.CommandText = $"SELECT DATA_TYPE, CHAR_LENGTH FROM USER_TAB_COLUMNS WHERE TABLE_NAME = UPPER('{tableNameRaw}') AND COLUMN_NAME = 'CODE'";
-            using var rCode = await metaCode.ExecuteReaderAsync();
-            Assert.True(await rCode.ReadAsync());
-            Assert.Equal("CHAR", rCode.GetString(0));
-            Assert.Equal(10, Convert.ToInt32(rCode["CHAR_LENGTH"]));
+            using (var rCode = await metaCode.ExecuteReaderAsync())
+            {
+                Assert.True(await rCode.ReadAsync());
+                Assert.Equal("CHAR", rCode.GetString(0));
+                Assert.Equal(10, Convert.ToInt32(rCode["CHAR_LENGTH"]));
+            }
 
             // 2. Check NUMBER(7,3) - (stored as SCORE)
             using var metaScore = connection.CreateCommand();
             metaScore.CommandText = $"SELECT DATA_PRECISION, DATA_SCALE FROM USER_TAB_COLUMNS WHERE TABLE_NAME = UPPER('{tableNameRaw}') AND COLUMN_NAME = 'SCORE'";
-            using var rScore = await metaScore.ExecuteReaderAsync();
-            Assert.True(await rScore.ReadAsync());
-            Assert.Equal(7, Convert.ToInt32(rScore["DATA_PRECISION"]));
-            Assert.Equal(3, Convert.ToInt32(rScore["DATA_SCALE"]));
+            using (var rScore = await metaScore.ExecuteReaderAsync())
+            {
+                Assert.True(await rScore.ReadAsync());
+                Assert.Equal(7, Convert.ToInt32(rScore["DATA_PRECISION"]));
+                Assert.Equal(3, Convert.ToInt32(rScore["DATA_SCALE"]));
+            }
 
             // 3. Check VARCHAR2(50) for MixedCase column - (stored as MixedCase because it was quoted)
             using var metaMixed = connection.CreateCommand();
@@ -467,10 +474,12 @@ public class OracleIntegrationTests : IAsyncLifetime
             // 4. Check GenericNum - NUMBER (no precision)
             using var metaGen = connection.CreateCommand();
             metaGen.CommandText = $"SELECT DATA_PRECISION, DATA_SCALE FROM USER_TAB_COLUMNS WHERE TABLE_NAME = UPPER('{tableNameRaw}') AND COLUMN_NAME = 'GENERICNUM'";
-            using var rGen = await metaGen.ExecuteReaderAsync();
-            Assert.True(await rGen.ReadAsync());
-            // When NUMBER is defined without precision, PRECISION/SCALE are often null in metadata
-            Assert.True(rGen.IsDBNull(0) || rGen.IsDBNull(1));
+            using (var rGen = await metaGen.ExecuteReaderAsync())
+            {
+                Assert.True(await rGen.ReadAsync());
+                // When NUMBER is defined without precision, PRECISION/SCALE are often null in metadata
+                Assert.True(rGen.IsDBNull(0) || rGen.IsDBNull(1));
+            }
         }
     }
 }

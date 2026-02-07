@@ -609,8 +609,7 @@ public class DryRunRenderer
     {
         if (validation == null) return;
         
-        // If everything is valid, we might not want to show a big panel unless we want to be explicit.
-        // For now, let's only show if there are issues, or maybe a small green "Data Check Passed".
+        // If everything is valid, we don't display a dedicated panel for brevity.
         
         if (validation.IsValid)
         {

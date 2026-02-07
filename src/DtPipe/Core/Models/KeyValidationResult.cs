@@ -1,7 +1,7 @@
 namespace DtPipe.Core.Models;
 
 /// <summary>
-/// Result of the primary key validation analysis (Phase 1 & Phase 2).
+/// Result of the primary key validation analysis.
 /// </summary>
 /// <param name="IsRequired">Whether a primary key is required by the write strategy</param>
 /// <param name="RequestedKeys">The keys requested by the user (--key)</param>

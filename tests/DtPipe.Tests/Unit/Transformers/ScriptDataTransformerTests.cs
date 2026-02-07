@@ -66,12 +66,7 @@ public class ScriptTransformerTests
     [Fact]
     public async Task Transform_SequentialExecution_MaintainsState_IfScriptAllows()
     {
-        // Jint with strict option usually doesn't persist var across execute calls unless engine reused
-        // But here we wrap in a function "function name(value) { ... }" inside Initialize
-        // The Engine instance is reused. 
-        // But the function scope is local. Globals would be shared?
-        // Verify sandbox/no-globals or at least function isolation.
-        // Actually, we want to VERIFY parallelism is safe (lock).
+        // Verify parallelism is safe with engine locking.
         
         var options = new ScriptOptions
         {

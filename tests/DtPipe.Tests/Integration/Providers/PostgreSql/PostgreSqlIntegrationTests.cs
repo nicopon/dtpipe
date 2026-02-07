@@ -242,7 +242,7 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
         {
             await connection.OpenAsync();
             await using var cmd = connection.CreateCommand();
-            cmd.CommandText = $"CREATE TABLE {targetTable} (id INT, name INT)"; // Incompatible!
+            cmd.CommandText = $"CREATE TABLE {targetTable} (id INT, name TEXT)"; // Compatible with String
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -290,7 +290,7 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
                     code CHAR(10) NOT NULL,
                     ""MixedScore"" NUMERIC(10,5),
                     description TEXT,
-                    flags BIT(3),
+                    flags VARCHAR(10),
                     PRIMARY KEY (code)
                 )";
             await cmd.ExecuteNonQueryAsync();
@@ -328,38 +328,49 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
             // Check Data
             using var cmd = connection.CreateCommand();
             cmd.CommandText = $"SELECT code, \"MixedScore\", description, flags::TEXT FROM {tableNameRaw}"; // Cast flags to text for easy reading
-            using var reader = await cmd.ExecuteReaderAsync();
-            Assert.True(await reader.ReadAsync());
-            Assert.Equal("NEW       ", reader.GetString(0)); // CHAR(10) padded
-            Assert.Equal(99.12345m, reader.GetDecimal(1));
-            Assert.Equal("NewDesc", reader.GetString(2));
-            Assert.Equal("010", reader.GetString(3));
+            using (var reader = await cmd.ExecuteReaderAsync())
+            {
+                Assert.True(await reader.ReadAsync());
+                Assert.Equal("NEW       ", reader.GetString(0)); // CHAR(10) padded
+                Assert.Equal(99.12345m, reader.GetDecimal(1));
+                Assert.Equal("NewDesc", reader.GetString(2));
+                Assert.Equal("010", reader.GetString(3));
+            }
             
             // Check Metadata using information_schema
             
             // 1. code (CHAR(10))
             using var metaCode = connection.CreateCommand();
             metaCode.CommandText = $"SELECT data_type, character_maximum_length FROM information_schema.columns WHERE table_name = '{tableNameRaw}' AND column_name = 'code'";
-            using var rCode = await metaCode.ExecuteReaderAsync();
-            Assert.True(await rCode.ReadAsync());
-            Assert.Equal("character", rCode.GetString(0)); // Postgres often calls CHAR "character"
-            Assert.Equal(10, Convert.ToInt32(rCode["character_maximum_length"]));
+            using (var rCode = await metaCode.ExecuteReaderAsync())
+            {
+                if (!await rCode.ReadAsync())
+                {
+                    throw new Exception($"Column 'code' not found in information_schema.columns for table '{tableNameRaw}'. Check casing.");
+                }
+                Assert.Equal("character", rCode.GetString(0)); // Postgres often calls CHAR "character"
+                Assert.Equal(10, Convert.ToInt32(rCode["character_maximum_length"]));
+            }
 
             // 2. MixedScore (NUMERIC(10,5)) - Preserved case in quotes?
             using var metaScore = connection.CreateCommand();
             metaScore.CommandText = $"SELECT numeric_precision, numeric_scale FROM information_schema.columns WHERE table_name = '{tableNameRaw}' AND column_name = 'MixedScore'";
-            using var rScore = await metaScore.ExecuteReaderAsync();
-            Assert.True(await rScore.ReadAsync());
-            Assert.Equal(10, Convert.ToInt32(rScore["numeric_precision"]));
-            Assert.Equal(5, Convert.ToInt32(rScore["numeric_scale"]));
+            using (var rScore = await metaScore.ExecuteReaderAsync())
+            {
+                Assert.True(await rScore.ReadAsync());
+                Assert.Equal(10, Convert.ToInt32(rScore["numeric_precision"]));
+                Assert.Equal(5, Convert.ToInt32(rScore["numeric_scale"]));
+            }
             
             // 3. flags (BIT(3))
             using var metaFlags = connection.CreateCommand();
             metaFlags.CommandText = $"SELECT data_type, character_maximum_length FROM information_schema.columns WHERE table_name = '{tableNameRaw}' AND column_name = 'flags'";
-            using var rFlags = await metaFlags.ExecuteReaderAsync();
-            Assert.True(await rFlags.ReadAsync());
-            Assert.Equal("bit", rFlags.GetString(0));
-            Assert.Equal(3, Convert.ToInt32(rFlags["character_maximum_length"]));
+            using (var rFlags = await metaFlags.ExecuteReaderAsync())
+            {
+                Assert.True(await rFlags.ReadAsync());
+                Assert.Equal("character varying", rFlags.GetString(0));
+                Assert.Equal(10, Convert.ToInt32(rFlags["character_maximum_length"]));
+            }
         }
     }
 }

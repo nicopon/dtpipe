@@ -51,7 +51,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
     {
         _targetTableName = _options.Table;
         
-        // GLOBAL NORMALIZATION:
+        // Column and table normalization logic
         // Create a secure list of columns where names are normalized if not case-sensitive.
         // This ensures consistence across Create Table, Insert, BulkCopy, etc.
         var normalizedColumns = new List<ColumnInfo>(columns.Count);
@@ -139,6 +139,25 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
                 cmd.CommandText = createTableSql;
                 await cmd.ExecuteNonQueryAsync(ct);
                 _logger.LogInformation("Created table {Table}", _targetTableName);
+
+                // Sync columns metadata from introspection to ensure future DML (INSERT/MERGE) matches exact case/quotes
+                if (existingSchema != null)
+                {
+                    var newCols = new List<ColumnInfo>(_columns!.Count);
+                    foreach (var col in _columns!)
+                    {
+                        var introspected = existingSchema.Columns.FirstOrDefault(c => c.Name.Equals(col.Name, StringComparison.OrdinalIgnoreCase));
+                        if (introspected != null)
+                        {
+                            newCols.Add(col with { Name = introspected.Name, IsCaseSensitive = introspected.IsCaseSensitive });
+                        }
+                        else
+                        {
+                            newCols.Add(col);
+                        }
+                    }
+                    _columns = newCols;
+                }
             }
             catch (Exception ex)
             {
@@ -151,7 +170,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
             // The table MUST exist. We do NOT create it automatically to avoid implicit schema definition issues.
             try
             {
-                // Native Resolution: Ask Oracle "What table is this?" (Handles Synonyms, Casing, Schema Resolution)
+                // Resolving real qualified name (handles synonyms and casing)
                 var resolved = await OracleSchemaInspector.ResolveTargetTableAsync(_connection, _options.Table, ct);
                 
                 // Update target table name with the REAL object name (Schema.Table)
@@ -582,7 +601,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
 
 
     
-    // IKeyValidator implementation (Phase 1)
+    // IKeyValidator implementation
     
     public string? GetWriteStrategy()
     {

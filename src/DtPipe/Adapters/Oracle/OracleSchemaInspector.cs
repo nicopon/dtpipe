@@ -122,7 +122,8 @@ public sealed class OracleSchemaInspector : ISchemaInspector
                 uniqueColumns.Contains(colName),
                 maxLength,
                 precision,
-                scale
+                scale,
+                IsCaseSensitive: colName != colName.ToUpperInvariant()
             ));
         }
 

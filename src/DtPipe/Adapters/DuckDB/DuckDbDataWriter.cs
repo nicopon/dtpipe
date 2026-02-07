@@ -463,7 +463,7 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector, IKeyValida
         return sb.ToString();
     }
 
-    // IKeyValidator implementation (Phase 1)
+    // IKeyValidator implementation
     
     public string? GetWriteStrategy()
     {

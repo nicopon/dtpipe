@@ -143,33 +143,37 @@ public class DuckDBIntegrationTests : IAsyncLifetime
                 // Check Data
                 using var cmd = connection.CreateCommand();
                 cmd.CommandText = $"SELECT Code, PreciseNum, \"My Blob\", Tiny FROM {tableNameRaw}";
-                using var reader = await cmd.ExecuteReaderAsync();
-                Assert.True(await reader.ReadAsync());
-                Assert.Equal("NEW", reader.GetString(0));
-                Assert.Equal(99.12345m, reader.GetDecimal(1));
-                
-                Assert.IsAssignableFrom<Stream>(reader.GetValue(2)); 
-                var stream = (Stream)reader.GetValue(2);
-                var buffer = new byte[stream.Length];
-                int bytesRead = 0;
-                while (bytesRead < buffer.Length)
+                using (var reader = await cmd.ExecuteReaderAsync())
                 {
-                    int read = stream.Read(buffer, bytesRead, buffer.Length - bytesRead);
-                    if (read == 0) break;
-                    bytesRead += read;
+                    Assert.True(await reader.ReadAsync());
+                    Assert.Equal("NEW", reader.GetString(0));
+                    Assert.Equal(99.12345m, reader.GetDecimal(1));
+                    
+                    Assert.IsAssignableFrom<Stream>(reader.GetValue(2)); 
+                    var stream = (Stream)reader.GetValue(2);
+                    var buffer = new byte[stream.Length];
+                    int bytesRead = 0;
+                    while (bytesRead < buffer.Length)
+                    {
+                        int read = stream.Read(buffer, bytesRead, buffer.Length - bytesRead);
+                        if (read == 0) break;
+                        bytesRead += read;
+                    }
+                    Assert.Equal(0xBB, buffer[0]);
+                    Assert.Equal(120, reader.GetInt32(3)); 
                 }
-                Assert.Equal(0xBB, buffer[0]);
-                Assert.Equal(120, reader.GetInt32(3)); 
 
                 // Check Metadata (using PRAGMA table_info)
                 using var metaCmd = connection.CreateCommand();
                 metaCmd.CommandText = $"PRAGMA table_info('{tableNameRaw}')";
                 
                 var types = new Dictionary<string, string>();
-                using var metaReader = await metaCmd.ExecuteReaderAsync();
-                while(await metaReader.ReadAsync())
+                using (var metaReader = await metaCmd.ExecuteReaderAsync())
                 {
-                    types[metaReader.GetString(1)] = metaReader.GetString(2);
+                    while(await metaReader.ReadAsync())
+                    {
+                        types[metaReader.GetString(1)] = metaReader.GetString(2);
+                    }
                 }
                 
                 Assert.Contains("DECIMAL(10,5)", types["PreciseNum"]);

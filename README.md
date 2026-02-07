@@ -61,6 +61,7 @@ DtPipe auto-detects providers from file extensions (`.csv`, `.parquet`, `.db`, `
 | **SQL Server**| `mssql:` | `mssql:Server=.;Database=mydb` |
 | **CSV** | `csv:` / `.csv` | `data.csv` |
 | **Parquet** | `parquet:` / `.parquet`| `data.parquet` |
+| **Keyring** | `keyring://` | `keyring://my-prod-db` |
 | **STDIN/OUT** | `csv` or `parquet` | `csv` (no file path) |
 
 ### 2. Anonymization & Fakers
@@ -127,6 +128,32 @@ Use `--fake "Col:Generator"` to replace sensitive data.
 | `--mssql-strategy` | `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`, `Upsert`, `Ignore`. |
 | `--duck-strategy` | `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`, `Upsert`, `Ignore`. |
 | `--sqlite-strategy` | `Append`, `DeleteThenInsert`, `Recreate`, `Upsert`, `Ignore`. |
+| `--unsafe-query` | Allow non-SELECT queries (use with caution). |
+
+---
+
+## 🔒 Secret Management
+
+DtPipe includes a built-in secret manager that uses your **Operating System's Keyring** (Windows Credential Manager, macOS Keychain, or Linux Secret Service) to store connection strings securely.
+
+### 1. Store a Secret
+```bash
+dtpipe secret set prod-db "ora:Data Source=PROD;User Id=scott;Password=tiger"
+```
+
+### 2. Use it in a Transfer
+Use the `keyring://` prefix followed by your alias.
+```bash
+dtpipe -i keyring://prod-db -q "SELECT * FROM users" -o users.parquet
+```
+
+### 3. Manage Secrets
+| Command | Description |
+|:---|:---|
+| `dtpipe secret list` | List all stored aliases. |
+| `dtpipe secret get <alias>` | Print the secret value (useful for verification). |
+| `dtpipe secret delete <alias>`| Delete a specific secret. |
+| `dtpipe secret nuke` | Delete ALL secrets. |
 
 ---
 

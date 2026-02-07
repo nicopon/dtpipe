@@ -333,23 +333,27 @@ public class SqliteProviderTests : IAsyncLifetime
                 // Check Data
                 using var cmd = connection.CreateCommand();
                 cmd.CommandText = $"SELECT Code, Score, \"Memo Text\", BlobData FROM {tableNameRaw}";
-                using var reader = await cmd.ExecuteReaderAsync();
-                Assert.True(await reader.ReadAsync());
-                Assert.Equal("NEW", reader.GetString(0));
-                Assert.Equal(99.12345m, reader.GetDecimal(1));
-                Assert.Equal("NewMemo", reader.GetString(2));
-                var blob = (byte[])reader.GetValue(3);
-                Assert.Equal(0xBB, blob[0]);
+                using (var reader = await cmd.ExecuteReaderAsync())
+                {
+                    Assert.True(await reader.ReadAsync());
+                    Assert.Equal("NEW", reader.GetString(0));
+                    Assert.Equal(99.12345m, reader.GetDecimal(1));
+                    Assert.Equal("NewMemo", reader.GetString(2));
+                    var blob = (byte[])reader.GetValue(3);
+                    Assert.Equal(0xBB, blob[0]);
+                }
 
                 // Check Metadata (using PRAGMA table_info)
                 using var metaCmd = connection.CreateCommand();
                 metaCmd.CommandText = $"PRAGMA table_info('{tableNameRaw}')";
                 
                 var types = new Dictionary<string, string>();
-                using var metaReader = await metaCmd.ExecuteReaderAsync();
-                while(await metaReader.ReadAsync())
+                using (var metaReader = await metaCmd.ExecuteReaderAsync())
                 {
-                    types[metaReader.GetString(1)] = metaReader.GetString(2);
+                    while(await metaReader.ReadAsync())
+                    {
+                        types[metaReader.GetString(1)] = metaReader.GetString(2);
+                    }
                 }
                 
                 Assert.Contains("VARCHAR(10)", types["Code"]);
