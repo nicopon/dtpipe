@@ -330,7 +330,8 @@ public class ExportService
     }
 
     /// <summary>
-    /// Transform stage: Applies all transformers in sequence to each row individually.
+    /// Transform stage: Applies all transformers in sequence to each row.
+    /// Supports 1-to-1 and 1-to-N (Expand) transformations recursively.
     /// </summary>
     private static async Task TransformRowsAsync(
         ChannelReader<object?[]> input,
@@ -343,21 +344,73 @@ public class ExportService
         {
             await foreach (var row in input.ReadAllAsync(ct))
             {
-                var workingRow = row;
-                
-                // Pure streaming transformation
-                foreach (var transformer in pipeline)
+                // Process one input row through the entire pipeline recursively
+                await ProcessPipelineAsync(row, 0, pipeline, output, progress, ct);
+            }
+
+            // Flush pipeline
+            for (int i = 0; i < pipeline.Count; i++)
+            {
+                var transformer = pipeline[i];
+                var flushedRows = transformer.Flush();
+                foreach (var row in flushedRows)
                 {
-                    workingRow = transformer.Transform(workingRow);
-                    progress.ReportTransform(transformer.GetType().Name, 1);
+                    if (row != null)
+                    {
+                        // Pass flushed row to the NEXT step in pipeline
+                        await ProcessPipelineAsync(row, i + 1, pipeline, output, progress, ct);
+                    }
                 }
-                
-                await output.WriteAsync(workingRow, ct);
             }
         }
         finally
         {
             output.Complete();
+        }
+    }
+
+    private static async ValueTask ProcessPipelineAsync(
+        object?[] currentRow,
+        int stepIndex,
+        IReadOnlyList<IDataTransformer> pipeline,
+        ChannelWriter<object?[]> finalOutput,
+        ProgressReporter progress,
+        CancellationToken ct)
+    {
+        // Base case: End of pipeline, write to output
+        if (stepIndex >= pipeline.Count)
+        {
+            await finalOutput.WriteAsync(currentRow, ct);
+            return;
+        }
+
+        var transformer = pipeline[stepIndex];
+        var transformerName = transformer.GetType().Name;
+
+        // Handle Multi-Row (Expand)
+        if (transformer is IMultiRowTransformer multiTransformer)
+        {
+            var results = multiTransformer.TransformMany(currentRow);
+            
+            foreach (var resultRow in results)
+            {
+                if (resultRow != null)
+                {
+                    progress.ReportTransform(transformerName, 1);
+                    await ProcessPipelineAsync(resultRow, stepIndex + 1, pipeline, finalOutput, progress, ct);
+                }
+            }
+        }
+        // Handle Single-Row (Standard)
+        else
+        {
+            var resultRow = transformer.Transform(currentRow);
+            if (resultRow != null)
+            {
+                progress.ReportTransform(transformerName, 1);
+                await ProcessPipelineAsync(resultRow, stepIndex + 1, pipeline, finalOutput, progress, ct);
+            }
+            // else dropped
         }
     }
 

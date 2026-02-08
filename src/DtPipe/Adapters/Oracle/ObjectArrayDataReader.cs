@@ -12,12 +12,12 @@ namespace DtPipe.Adapters.Oracle;
 /// </summary>
 internal sealed class ObjectArrayDataReader : IDataReader
 {
-    private readonly IReadOnlyList<ColumnInfo> _columns;
+    private readonly IReadOnlyList<PipeColumnInfo> _columns;
     private readonly IReadOnlyList<object?[]> _rows;
     private int _currentIndex = -1;
     private bool _isClosed;
 
-    public ObjectArrayDataReader(IReadOnlyList<ColumnInfo> columns, IReadOnlyList<object?[]> rows)
+    public ObjectArrayDataReader(IReadOnlyList<PipeColumnInfo> columns, IReadOnlyList<object?[]> rows)
     {
         _columns = columns ?? throw new ArgumentNullException(nameof(columns));
         _rows = rows ?? throw new ArgumentNullException(nameof(rows));

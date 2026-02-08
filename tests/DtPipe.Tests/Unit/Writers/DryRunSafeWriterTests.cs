@@ -1,11 +1,7 @@
-using System;
-using System.IO;
-using System.Threading.Tasks;
 using FluentAssertions;
 using DtPipe.Adapters.Csv;
 using DtPipe.Adapters.Parquet;
 using DtPipe.Core.Models;
-using DtPipe.Core.Options;
 using Xunit;
 
 namespace DtPipe.Tests.Unit.Writers;
@@ -44,7 +40,7 @@ public class DryRunSafeWriterTests : IAsyncLifetime
     {
         // Arrange
         var writer = new ParquetDataWriter(_testParquetPath);
-        var columns = new List<ColumnInfo> { new("Id", typeof(int), false) };
+        var columns = new List<PipeColumnInfo> { new("Id", typeof(int), false) };
 
         // Act
         await writer.InitializeAsync(columns);
@@ -69,7 +65,7 @@ public class DryRunSafeWriterTests : IAsyncLifetime
     {
         // Arrange
         var writer = new CsvDataWriter(_testCsvPath);
-        var columns = new List<ColumnInfo> { new("Id", typeof(int), false) };
+        var columns = new List<PipeColumnInfo> { new("Id", typeof(int), false) };
 
         // Act
         await writer.InitializeAsync(columns);

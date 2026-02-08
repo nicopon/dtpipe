@@ -37,7 +37,7 @@ public class DryRunConstraintValidationTests
         await Task.CompletedTask;
     }
 
-    private void SetupReader(Mock<IStreamReader> readerMock, List<ColumnInfo> columns, object?[][] rows)
+    private void SetupReader(Mock<IStreamReader> readerMock, List<PipeColumnInfo> columns, object?[][] rows)
     {
         readerMock.Setup(r => r.Columns).Returns(columns);
         readerMock.Setup(r => r.ReadBatchesAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
@@ -54,7 +54,7 @@ public class DryRunConstraintValidationTests
         var reader = new Mock<IStreamReader>();
         
         // Source has NULL in 'name'
-        var sourceCols = new List<ColumnInfo> { new("id", typeof(int), false), new("name", typeof(string), true) };
+        var sourceCols = new List<PipeColumnInfo> { new("id", typeof(int), false), new("name", typeof(string), true) };
         var rows = new object?[][] 
         {
             new object?[] { 1, "Alice" },
@@ -90,7 +90,7 @@ public class DryRunConstraintValidationTests
         var reader = new Mock<IStreamReader>();
         
         // Source has duplicate 'email'
-        var sourceCols = new List<ColumnInfo> { new("id", typeof(int), false), new("email", typeof(string), true) };
+        var sourceCols = new List<PipeColumnInfo> { new("id", typeof(int), false), new("email", typeof(string), true) };
         var rows = new object?[][] 
         {
             new object?[] { 1, "bob@example.com" },
@@ -126,7 +126,7 @@ public class DryRunConstraintValidationTests
         var analyzer = new DryRunAnalyzer();
         var reader = new Mock<IStreamReader>();
         
-        var sourceCols = new List<ColumnInfo> { new("id", typeof(int), false), new("email", typeof(string), true) };
+        var sourceCols = new List<PipeColumnInfo> { new("id", typeof(int), false), new("email", typeof(string), true) };
         var rows = new object?[][] 
         {
             new object?[] { 1, "alice@example.com" },
@@ -161,7 +161,7 @@ public class DryRunConstraintValidationTests
         var analyzer = new DryRunAnalyzer();
         var reader = new Mock<IStreamReader>();
         
-        var sourceCols = new List<ColumnInfo> { new("id", typeof(int), false), new("description", typeof(string), true) };
+        var sourceCols = new List<PipeColumnInfo> { new("id", typeof(int), false), new("description", typeof(string), true) };
         var rows = new object?[][] 
         {
             new object?[] { 1, "test" },

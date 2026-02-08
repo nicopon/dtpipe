@@ -193,7 +193,7 @@ public class SqliteSchemaInspectorTests : IDisposable
     {
         await ExecuteSql("CREATE TABLE compat_test (id INTEGER PRIMARY KEY, name TEXT, value REAL)");
 
-        var sourceSchema = new List<ColumnInfo>
+        var sourceSchema = new List<PipeColumnInfo>
         {
             new("id", typeof(int), false),
             new("name", typeof(string), true),
@@ -217,7 +217,7 @@ public class SqliteSchemaInspectorTests : IDisposable
     {
         await ExecuteSql("CREATE TABLE missing_test (id INTEGER PRIMARY KEY)");
 
-        var sourceSchema = new List<ColumnInfo>
+        var sourceSchema = new List<PipeColumnInfo>
         {
             new("id", typeof(int), false),
             new("extra_column", typeof(string), true) // Not in target
@@ -241,7 +241,7 @@ public class SqliteSchemaInspectorTests : IDisposable
     {
         await ExecuteSql("CREATE TABLE extra_nn_test (id INTEGER PRIMARY KEY, required TEXT NOT NULL)");
 
-        var sourceSchema = new List<ColumnInfo>
+        var sourceSchema = new List<PipeColumnInfo>
         {
             new("id", typeof(int), false)
             // Missing 'required' which is NOT NULL in target
@@ -265,7 +265,7 @@ public class SqliteSchemaInspectorTests : IDisposable
     {
         await ExecuteSql("CREATE TABLE null_test (id INTEGER PRIMARY KEY, status TEXT NOT NULL)");
 
-        var sourceSchema = new List<ColumnInfo>
+        var sourceSchema = new List<PipeColumnInfo>
         {
             new("id", typeof(int), false),
             new("status", typeof(string), true) // Nullable in source, NOT NULL in target
@@ -290,7 +290,7 @@ public class SqliteSchemaInspectorTests : IDisposable
             CREATE TABLE data_warn_test (id INTEGER PRIMARY KEY, name TEXT);
             INSERT INTO data_warn_test VALUES (1, 'Alice'), (2, 'Bob');");
 
-        var sourceSchema = new List<ColumnInfo>
+        var sourceSchema = new List<PipeColumnInfo>
         {
             new("id", typeof(int), false),
             new("name", typeof(string), true)
@@ -310,7 +310,7 @@ public class SqliteSchemaInspectorTests : IDisposable
     [Fact]
     public async Task Sqlite_SchemaCompatibility_WhenTableNotExists_AllColumnsWillBeCreated()
     {
-        var sourceSchema = new List<ColumnInfo>
+        var sourceSchema = new List<PipeColumnInfo>
         {
             new("id", typeof(int), false),
             new("name", typeof(string), true),

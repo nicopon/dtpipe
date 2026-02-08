@@ -1,15 +1,13 @@
-namespace DtPipe.DryRun;
-
-using DtPipe.Core.Abstractions;
-using DtPipe.Cli.Abstractions;
 using DtPipe.Core.Models;
+
+namespace DtPipe.DryRun;
 
 /// <summary>
 /// Represents the state of a row at a specific pipeline stage.
 /// </summary>
 public record StageTrace(
-    IReadOnlyList<ColumnInfo> Schema,
-    object?[] Values
+    IReadOnlyList<PipeColumnInfo> Schema,
+    object?[]? Values
 );
 
 /// <summary>

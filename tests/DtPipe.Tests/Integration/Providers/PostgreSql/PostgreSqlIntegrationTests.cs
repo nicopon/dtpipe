@@ -97,7 +97,7 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
         };
         
         // Prepare Data
-        var columns = new List<DtPipe.Core.Models.ColumnInfo>
+        var columns = new List<DtPipe.Core.Models.PipeColumnInfo>
         {
             new("id", typeof(int), false),
             new("name", typeof(string), true),
@@ -144,7 +144,7 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
         }
 
         // 2. Setup Source Data
-        var columns = new List<DtPipe.Core.Models.ColumnInfo>
+        var columns = new List<DtPipe.Core.Models.PipeColumnInfo>
         {
             new("id", typeof(int), false),
             new("name", typeof(string), true),
@@ -206,7 +206,7 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
         }
 
         var options = new PostgreSqlWriterOptions { Table = targetTable, Strategy = PostgreSqlWriteStrategy.DeleteThenInsert };
-        var columns = new List<DtPipe.Core.Models.ColumnInfo> { new("id", typeof(int), false), new("name", typeof(string), true) };
+        var columns = new List<DtPipe.Core.Models.PipeColumnInfo> { new("id", typeof(int), false), new("name", typeof(string), true) };
         var data = new List<object?[]> { new object?[] { 1, "NewData" } };
 
         // Act
@@ -248,7 +248,7 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
 
         var options = new PostgreSqlWriterOptions { Table = targetTable, Strategy = PostgreSqlWriteStrategy.Recreate };
         // Source defines Name as String
-        var columns = new List<DtPipe.Core.Models.ColumnInfo> { new("id", typeof(int), false), new("name", typeof(string), true) };
+        var columns = new List<DtPipe.Core.Models.PipeColumnInfo> { new("id", typeof(int), false), new("name", typeof(string), true) };
         var data = new List<object?[]> { new object?[] { 1, "NewData" } };
 
         // Act
@@ -302,7 +302,7 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
         var options = new PostgreSqlWriterOptions { Table = tableNameRaw, Strategy = PostgreSqlWriteStrategy.Recreate };
         
         // Source defines columns generically
-        var columns = new List<DtPipe.Core.Models.ColumnInfo> 
+        var columns = new List<DtPipe.Core.Models.PipeColumnInfo> 
         { 
             new("code", typeof(string), true), 
             new("MixedScore", typeof(decimal), false),

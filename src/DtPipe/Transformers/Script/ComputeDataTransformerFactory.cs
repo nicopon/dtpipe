@@ -1,29 +1,30 @@
 using System.CommandLine;
-using System.CommandLine.Parsing;
 using DtPipe.Cli;
 using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Models;
 using DtPipe.Core.Options;
+using DtPipe.Core.Services;
 
 namespace DtPipe.Transformers.Script;
 
-public class ScriptDataTransformerFactory : IDataTransformerFactory
+public class ComputeDataTransformerFactory : IDataTransformerFactory
 {
     private readonly OptionsRegistry _registry;
+    private readonly IJsEngineProvider _jsEngineProvider;
 
-    public ScriptDataTransformerFactory(OptionsRegistry registry)
+    public ComputeDataTransformerFactory(OptionsRegistry registry, IJsEngineProvider jsEngineProvider)
     {
         _registry = registry;
+        _jsEngineProvider = jsEngineProvider;
     }
 
     public static IEnumerable<Type> GetSupportedOptionTypes()
     {
-        yield return ComponentOptionsHelper.GetOptionsType<ScriptDataTransformer>();
+        yield return ComponentOptionsHelper.GetOptionsType<ComputeDataTransformer>();
     }
 
     public string Category => "Transformer Options";
-    public string TransformerType => ScriptOptions.Prefix;
+    public string TransformerType => ComputeOptions.Prefix;
 
     public IEnumerable<Option> GetCliOptions()
     {
@@ -48,14 +49,14 @@ public class ScriptDataTransformerFactory : IDataTransformerFactory
 
     public IDataTransformer? Create(DumpOptions options)
     {
-        var scriptOptions = _registry.Get<ScriptOptions>();
+        var computeOptions = _registry.Get<ComputeOptions>();
         
-        if (scriptOptions.Script == null || !scriptOptions.Script.Any())
+        if (computeOptions.Compute == null || !computeOptions.Compute.Any())
         {
             return null;
         }
 
-        return new ScriptDataTransformer(scriptOptions);
+        return new ComputeDataTransformer(computeOptions, _jsEngineProvider);
     }
 
     public IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration)
@@ -65,7 +66,7 @@ public class ScriptDataTransformerFactory : IDataTransformerFactory
         bool skipNull = false;
         foreach (var (option, value) in configuration)
         {
-            if (option == "script" || option == "--script") 
+            if (option == "compute" || option == "--compute" || option == "script" || option == "--script") 
             {
                 var parts = value.Split(':', 2);
                 if (parts.Length == 2)
@@ -77,28 +78,43 @@ public class ScriptDataTransformerFactory : IDataTransformerFactory
                      mappings.Add(value);
                 }
             }
-            else if (option == "script-skip-null" || option == "--script-skip-null")
+            else if (option == "compute-skip-null" || option == "--compute-skip-null" || option == "script-skip-null" || option == "--script-skip-null")
             {
                 if (bool.TryParse(value, out var b)) skipNull = b;
             }
         }
         
-        return new ScriptDataTransformer(new ScriptOptions { Script = mappings, SkipNull = skipNull });
+        return new ComputeDataTransformer(new ComputeOptions { Compute = mappings, SkipNull = skipNull }, _jsEngineProvider);
     }
 
     public IDataTransformer? CreateFromYamlConfig(TransformerConfig config)
     {
-        if (config.Script == null || !config.Script.Any()) return null;
-
-        var mappings = config.Script.Select(kvp => $"{kvp.Key}:{ResolveScriptContent(kvp.Value)}").ToList();
+        // Support both specific 'compute' config or legacy 'script' if mapped
+        // But usually YAML config is a dictionary.
+        // If config.Script is populated (from legacy mapping), use it.
+        // We probably need to update TransformerConfig to support Compute?
+        // Or just map it here?
         
+        var mappings = new List<string>();
+        
+        if (config.Script != null && config.Script.Any())
+        {
+            mappings.AddRange(config.Script.Select(kvp => $"{kvp.Key}:{ResolveScriptContent(kvp.Value)}"));
+        }
+        
+        // For now, assume Script property covers it or we look at Options.
+        // If we want to support 'compute: { col: val }' in YAML, we will need to update TransformerConfig.
+        // For this refactor, let's rely on Script property being the carrier.
+        
+        if (!mappings.Any()) return null;
+
         bool skipNull = false;
         if (config.Options != null && config.Options.TryGetValue("skip-null", out var snStr))
         {
              bool.TryParse(snStr, out skipNull);
         }
 
-        return new ScriptDataTransformer(new ScriptOptions { Script = mappings, SkipNull = skipNull });
+        return new ComputeDataTransformer(new ComputeOptions { Compute = mappings, SkipNull = skipNull }, _jsEngineProvider);
     }
 
     public Task<int?> HandleCommandAsync(ParseResult parseResult, CancellationToken ct = default)

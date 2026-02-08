@@ -119,7 +119,7 @@ public class DuckDBIntegrationTests : IAsyncLifetime
                 Strategy = DuckDbWriteStrategy.Recreate
             };
 
-            var columns = new List<Core.Models.ColumnInfo> 
+            var columns = new List<Core.Models.PipeColumnInfo> 
             { 
                 new("Code", typeof(string), true), 
                 new("PreciseNum", typeof(decimal), false),

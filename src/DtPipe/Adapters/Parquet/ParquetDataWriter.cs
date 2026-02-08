@@ -18,7 +18,7 @@ public sealed class ParquetDataWriter(string outputPath) : IDataWriter, IRequire
 
     private ParquetSchema? _schema;
     private ParquetWriter? _writer;
-    private IReadOnlyList<ColumnInfo>? _columns;
+    private IReadOnlyList<PipeColumnInfo>? _columns;
     private DataField[]? _dataFields;
 
     public async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
@@ -74,7 +74,7 @@ public sealed class ParquetDataWriter(string outputPath) : IDataWriter, IRequire
         }
     }
 
-    public async ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
+    public async ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(_outputPath) || _outputPath == "-")
         {
@@ -116,7 +116,7 @@ public sealed class ParquetDataWriter(string outputPath) : IDataWriter, IRequire
         }
     }
 
-    private static DataField[] BuildDataFields(IReadOnlyList<ColumnInfo> columns)
+    private static DataField[] BuildDataFields(IReadOnlyList<PipeColumnInfo> columns)
     {
         var fields = new DataField[columns.Count];
 
@@ -128,7 +128,7 @@ public sealed class ParquetDataWriter(string outputPath) : IDataWriter, IRequire
         return fields;
     }
 
-    private static DataField MapToDataField(ColumnInfo col)
+    private static DataField MapToDataField(PipeColumnInfo col)
     {
         var baseType = Nullable.GetUnderlyingType(col.ClrType) ?? col.ClrType;
 
@@ -152,7 +152,7 @@ public sealed class ParquetDataWriter(string outputPath) : IDataWriter, IRequire
         };
     }
 
-    private static DataColumn CreateDataColumn(DataField dataField, ColumnInfo col, IReadOnlyList<object?[]> rows, int colIndex)
+    private static DataColumn CreateDataColumn(DataField dataField, PipeColumnInfo col, IReadOnlyList<object?[]> rows, int colIndex)
     {
         var baseType = Nullable.GetUnderlyingType(col.ClrType) ?? col.ClrType;
 

@@ -152,7 +152,7 @@ public class SqlServerIntegrationTests : IAsyncLifetime
         }
 
         // 2. Setup Source Data
-        var columns = new List<DtPipe.Core.Models.ColumnInfo>
+        var columns = new List<DtPipe.Core.Models.PipeColumnInfo>
         {
             new("Id", typeof(int), false),
             new("Name", typeof(string), true),
@@ -212,7 +212,7 @@ public class SqlServerIntegrationTests : IAsyncLifetime
         }
 
         var writerOptions = new SqlServerWriterOptions { Table = tableName, Strategy = SqlServerWriteStrategy.Recreate };
-        var columns = new List<DtPipe.Core.Models.ColumnInfo> { new("Id", typeof(int), false), new("Name", typeof(string), true) };
+        var columns = new List<DtPipe.Core.Models.PipeColumnInfo> { new("Id", typeof(int), false), new("Name", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { 1, "NewData" } };
 
         // Act
@@ -269,7 +269,7 @@ public class SqlServerIntegrationTests : IAsyncLifetime
             Strategy = SqlServerWriteStrategy.Recreate 
         };
         
-        var columns = new List<DtPipe.Core.Models.ColumnInfo> 
+        var columns = new List<DtPipe.Core.Models.PipeColumnInfo> 
         { 
             new("Code", typeof(string), true), 
             new("Price", typeof(decimal), false),

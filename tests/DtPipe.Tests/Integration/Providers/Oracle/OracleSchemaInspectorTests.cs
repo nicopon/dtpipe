@@ -129,7 +129,7 @@ public class OracleSchemaInspectorTests : IAsyncLifetime
 
         await ExecuteSql("CREATE TABLE COMPAT_TEST (ID NUMBER(10), NAME VARCHAR2(50))");
 
-        var sourceSchema = new List<ColumnInfo>
+        var sourceSchema = new List<PipeColumnInfo>
         {
             new("ID", typeof(decimal), false), // Match number
             new("NAME", typeof(string), true)
@@ -154,7 +154,7 @@ public class OracleSchemaInspectorTests : IAsyncLifetime
 
         await ExecuteSql("CREATE TABLE MISSING_TEST (ID NUMBER(10))");
 
-        var sourceSchema = new List<ColumnInfo>
+        var sourceSchema = new List<PipeColumnInfo>
         {
             new("ID", typeof(decimal), false),
             new("EXTRA_COLUMN", typeof(string), true) // Not in target

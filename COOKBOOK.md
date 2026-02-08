@@ -21,21 +21,21 @@ Export a table from a database (detects `duck`, `sqlite`, `pg`, `ora`, `mssql`) 
 
 ```bash
 # Export from PostgreSQL to Parquet
-./dist/release/dtpipe -i "pg:Host=localhost;Database=prod;Username=postgres" -q "SELECT * FROM users" -o users.parquet
+dtpipe -i "pg:Host=localhost;Database=prod;Username=postgres" -q "SELECT * FROM users" -o users.parquet
 ```
 
 ### Export to CSV
 Simply change the output extension to `.csv`.
 
 ```bash
-./dist/release/dtpipe -i "pg:Host=localhost;Database=prod;Username=postgres" -q "SELECT * FROM users" -o users.csv
+dtpipe -i "pg:Host=localhost;Database=prod;Username=postgres" -q "SELECT * FROM users" -o users.csv
 ```
 
 ### Dry Run (Preview)
 Use `--dry-run [LIMIT]` to preview data without writing a full file.
 
 ```bash
-./dist/release/dtpipe -i "pg:Host=localhost;Database=prod;Username=postgres" -q "SELECT * FROM users" --dry-run 100
+dtpipe -i "pg:Host=localhost;Database=prod;Username=postgres" -q "SELECT * FROM users" --dry-run 100
 ```
 
 ---
@@ -55,7 +55,7 @@ The syntax is `--fake "{Column}:{Dataset}.{Method}"`, where `Dataset.Method` cor
 Replace names and emails with culturally appropriate fake data.
  
 ```bash
-./dist/release/dtpipe ... \
+dtpipe ... \
   --fake "FirstName:name.firstName" \
   --fake "LastName:name.lastName" \
   --fake "Email:internet.email" \
@@ -66,7 +66,7 @@ Replace names and emails with culturally appropriate fake data.
 Generate other types of data using the same mechanism.
  
 ```bash
-./dist/release/dtpipe ... \
+dtpipe ... \
   --fake "BirthDate:date.past" \
   --fake "Score:random.number"
 ```
@@ -80,7 +80,7 @@ Unlike standard seeding (which restarts the sequence), this mode uses a **stable
 - This allows you to anonymize `Users` and `Orders` tables separately while maintaining the foreign key relationships (provided they both use the same fake seed).
  
 ```bash
-./dist/release/dtpipe ... \
+dtpipe ... \
   --fake "Name:name.fullName" \
   --fake-seed-column "UserId"
 ```
@@ -108,7 +108,7 @@ Hardcode values or erase sensitive columns.
 
 ```bash
 # Force "Status" to "Archived" and "Notes" to NULL
-./dist/release/dtpipe ... \
+dtpipe ... \
   --overwrite "Status:Archived" \
   --null "Notes"
 ```
@@ -118,7 +118,7 @@ Combine columns using [.NET Composite Formatting](https://learn.microsoft.com/en
 
 ```bash
 # Create "DisplayName" from First and Last names
-./dist/release/dtpipe ... --format "DisplayName:{FirstName} {LastName}"
+dtpipe ... --format "DisplayName:{FirstName} {LastName}"
 ```
 
 ---
@@ -161,7 +161,7 @@ This means:
 ```bash
 # 1. First, anonymize the Name
 # 2. Then, use the NEW (anonymized) name to format the greeting
-./dist/release/dtpipe ... \
+dtpipe ... \
   --fake "Name:name.fullName" \
   --format "Greeting:Hello, {Name}!"
 ```
@@ -180,11 +180,49 @@ Use `--script` for complex logic.
 
 ```bash
 # Simple Expression (Implicit Return)
-./dist/release/dtpipe ... --script "IsAdult:row.Age > 18"
+./dtpipe ... --compute "IsAdult:row.Age > 18"
 
 # Complex Logic (Explicit Return)
-./dist/release/dtpipe ... \
-   --script "Category:if (row.Age < 18) return 'Minor'; else return 'Adult';"
+./dtpipe ... \
+   --compute "Category:if (row.Age < 18) return 'Minor'; else return 'Adult';"
+
+### 4. Generating Test Data
+Use the `sample:<count>` provider to generate rows on-the-fly, typically combined with `--fake`.
+
+```bash
+# Generate 1M rows of fake users
+./dtpipe -i "sample:1000000" \
+  --fake "Id:random.number" \
+  --fake "Name:name.fullName" \
+  --fake "Email:internet.email" \
+  -o users.csv
+```
+```
+
+### Filtering Data
+Use `--filter` to drop rows that don't match a JavaScript condition.
+
+```bash
+# Only keep active users over 18
+./dtpipe ... --filter "row.IsActive && row.Age >= 18"
+```
+
+### Row Expansion
+Use `--expand` to turn a single input row into multiple output rows. The expression must return an array.
+
+```bash
+# If 'Tags' is "A,B,C", this creates 3 rows, one for each tag
+./dtpipe ... --expand "row.Tags.split(',').map(t => ({ ...row, Tag: t }))"
+```
+
+### Window Aggregations (Stateful)
+Accumulate rows and process them as a batch using `--window-count` and `--window-script`.
+
+```bash
+# Calculate a rolling average for 5 rows
+./dtpipe ... \
+  --window-count 5 \
+  --window-script "rows.map(r => ({ ...r, Avg: rows.reduce((s, x) => s + x.Val, 0) / rows.length }))"
 ```
 
 ### External Script Files
@@ -192,10 +230,7 @@ Keep your CLI clean by moving complex logic into `.js` files.
 
 ```bash
 # Explicit file loading (recommended)
-./dist/release/dtpipe ... --script "Category:@scripts/categorize_age.js"
-
-# Implicit file loading (if file exists)
-./dist/release/dtpipe ... --script "Category:scripts/categorize_age.js"
+./dtpipe ... --compute "Category:@scripts/categorize_age.js"
 ```
 
 ---
@@ -208,7 +243,7 @@ Integrate DtPipe with standard Unix tools using `stdin`/`stdout`.
 Read a CSV natively and compress the output on-the-fly using `gzip`.
 
 ```bash
-./dist/release/dtpipe -i "csv:large_data.csv" -o parquet | gzip > large_data.parquet.gz
+dtpipe -i "csv:large_data.csv" -o parquet | gzip > large_data.parquet.gz
 ```
 
 ### Filter and Anonymize in a Pipe
@@ -216,7 +251,7 @@ Use another tool (like DuckDB or `jq`) to filter, then DtPipe to anonymize.
 
 ```bash
 duckdb -csv -c "SELECT * FROM 'source.csv' WHERE active=true" | \
-  ./dtpipe -i csv \
+  dtpipe -i csv \
   --fake "Name:name.fullName" \
   -o parquet:clean_data.parquet
 ```
@@ -252,7 +287,7 @@ duckdb -csv -c "SELECT * FROM 'source.csv' WHERE active=true" | \
  Good for full reloads where the schema might have changed.
  
  ```bash
- ./dist/release/dtpipe \
+ dtpipe \
    -i data.parquet \
    -o "pg:Host=localhost;Database=prod" \
    --pg-table "public.imported_data" \
@@ -263,7 +298,7 @@ duckdb -csv -c "SELECT * FROM 'source.csv' WHERE active=true" | \
  Efficiently adds new rows to an existing table.
  
  ```bash
- ./dist/release/dtpipe \
+ dtpipe \
    -i "new_sales.csv" \
    -o "ora:Data Source=PROD;..." \
    --ora-table "SALES_DATA" \
@@ -274,7 +309,7 @@ duckdb -csv -c "SELECT * FROM 'source.csv' WHERE active=true" | \
  Syncs data from CSV to SQL Server, updating existing records based on `OrderId`.
  
  ```bash
- ./dist/release/dtpipe \
+ dtpipe \
    -i "orders_update.csv" \
    -o "mssql:Server=.;Database=mydb" \
    --mssql-table "Orders" \
@@ -292,19 +327,19 @@ For repeated tasks, define your job in a YAML file.
 Configure your export in the CLI once, then save it.
 
 ```bash
-./dist/release/dtpipe -i "ora:..." -q "SELECT..." --fake "..." --export-job nightly_export.yaml
+dtpipe -i "ora:..." -q "SELECT..." --fake "..." --export-job nightly_export.yaml
 ```
 
 ### 2. Run the Job
 ```bash
-./dist/release/dtpipe --job nightly_export.yaml
+dtpipe --job nightly_export.yaml
 ```
 
 ### 3. Override at Runtime
 You can override specific settings from the YAML file via CLI flags (e.g., for ad-hoc limits).
 
 ```bash
-./dist/release/dtpipe --job nightly_export.yaml --limit 50
+dtpipe --job nightly_export.yaml --limit 50
 ```
 
 ### Example YAML
@@ -351,7 +386,7 @@ The most common approach for CI/CD. The shell expands variables before passing t
 export MY_CONN="ora:Data Source=PROD;User Id=scott;Password=tiger"
 
 # Use it in the CLI
-./dtpipe -i "$MY_CONN" -q "SELECT * FROM users" -o users.parquet
+dtpipe -i "$MY_CONN" -q "SELECT * FROM users" -o users.parquet
 ```
 
 ### 2. Using the OS Keyring (Zero-Exposure)
@@ -359,13 +394,13 @@ For local development or secure servers, store secrets in the system keyring (ma
 
 **Step 1: Store the secret once**
 ```bash
-./dtpipe secret set oracle-prod "ora:Data Source=PROD;User Id=scott;Password=tiger"
+dtpipe secret set oracle-prod "ora:Data Source=PROD;User Id=scott;Password=tiger"
 ```
 
 **Step 2: Reference it by alias**
 The password never appears in your shell history or `ps` output.
 ```bash
-./dtpipe -i keyring://oracle-prod -q "SELECT * FROM users" -o users.parquet
+dtpipe -i keyring://oracle-prod -q "SELECT * FROM users" -o users.parquet
 ```
 
 ### 3. Loading Queries from Files
@@ -373,6 +408,6 @@ Avoid exposing complex or sensitive SQL queries in your command line or job file
 
 ```bash
 # Store your SQL in a file
-./dtpipe -i keyring://prod-db -q "@queries/extract_users.sql" -o users.parquet
+dtpipe -i keyring://prod-db -q "@queries/extract_users.sql" -o users.parquet
 ```
 DtPipe automatically detects if `-q` points to a file and loads its content. Using the `@` prefix is recommended to be explicit.

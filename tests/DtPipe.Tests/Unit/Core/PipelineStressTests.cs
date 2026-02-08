@@ -4,14 +4,14 @@ using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Models;
-using DtPipe.Cli.Abstractions;
 using DtPipe.Core.Options;
 using DtPipe.Adapters.DuckDB;
-using DtPipe.Transformers.Fake;
-using DtPipe.Adapters;
 using DtPipe.Adapters.Csv;
 using Moq;
+using DtPipe.Transformers.Null;
+using DtPipe.Transformers.Overwrite;
+using DtPipe.Transformers.Format;
+using DtPipe.Transformers.Fake;
 using Spectre.Console;
 using DtPipe.Cli.Infrastructure;
 using Xunit;
@@ -66,9 +66,9 @@ public class PipelineStressTests : IAsyncLifetime
         registry.Register(new DuckDbReaderOptions());
         registry.Register(new CsvWriterOptions { Header = true });
         // Register transformer options to be populated by builder
-        registry.Register(new Transformers.Null.NullOptions());
-        registry.Register(new Transformers.Overwrite.OverwriteOptions());
-        registry.Register(new Transformers.Format.FormatOptions());
+        registry.Register(new NullOptions());
+        registry.Register(new OverwriteOptions());
+        registry.Register(new FormatOptions());
         // Register FakeOptions with specific configuration (Seed/Locale)
         // Global options (Seed/Locale) are still used by Factory.CreateFromConfiguration
         registry.Register(new FakeOptions 
@@ -87,10 +87,10 @@ public class PipelineStressTests : IAsyncLifetime
             new CsvWriterDescriptor(),
             sp.GetRequiredService<OptionsRegistry>(),
             sp));
-        services.AddSingleton<IDataTransformerFactory, Transformers.Null.NullDataTransformerFactory>();
-        services.AddSingleton<IDataTransformerFactory, Transformers.Overwrite.OverwriteDataTransformerFactory>();
-        services.AddSingleton<IDataTransformerFactory, Transformers.Fake.FakeDataTransformerFactory>();
-        services.AddSingleton<IDataTransformerFactory, Transformers.Format.FormatDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, NullDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, OverwriteDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, FakeDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, FormatDataTransformerFactory>();
         services.AddSingleton<ExportService>();
         services.AddSingleton(new Mock<IAnsiConsole>().Object);
 

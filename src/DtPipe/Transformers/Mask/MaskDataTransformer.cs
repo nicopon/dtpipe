@@ -1,6 +1,5 @@
 using System.Text;
 using DtPipe.Core.Abstractions;
-using DtPipe.Cli.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 
@@ -43,12 +42,12 @@ public class MaskDataTransformer : IDataTransformer, IRequiresOptions<MaskOption
         }
     }
 
-    public ValueTask<IReadOnlyList<ColumnInfo>> InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
+    public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
     {
         if (_columnPatterns.Count == 0)
         {
             _indexPatterns = null;
-            return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
+            return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
         }
 
         _indexPatterns = new Dictionary<int, string>();
@@ -66,10 +65,10 @@ public class MaskDataTransformer : IDataTransformer, IRequiresOptions<MaskOption
             _indexPatterns = null;
         }
 
-        return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
+        return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
     }
 
-    public object?[] Transform(object?[] row)
+    public object?[]? Transform(object?[] row)
     {
         if (_indexPatterns == null)
         {

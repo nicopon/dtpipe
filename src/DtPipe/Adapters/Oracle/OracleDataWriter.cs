@@ -12,7 +12,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
     private readonly string _connectionString;
     private readonly OracleConnection _connection;
     private readonly OracleWriterOptions _options;
-    private IReadOnlyList<ColumnInfo>? _columns;
+    private IReadOnlyList<PipeColumnInfo>? _columns;
     private readonly ILogger<OracleDataWriter> _logger;
     private OracleBulkCopy? _bulkCopy;
     private OracleCommand? _insertCommand;
@@ -47,14 +47,14 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
 
     #endregion
 
-    public async ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
+    public async ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
     {
         _targetTableName = _options.Table;
         
         // Column and table normalization logic
         // Create a secure list of columns where names are normalized if not case-sensitive.
         // This ensures consistence across Create Table, Insert, BulkCopy, etc.
-        var normalizedColumns = new List<ColumnInfo>(columns.Count);
+        var normalizedColumns = new List<PipeColumnInfo>(columns.Count);
         foreach (var col in columns)
         {
             if (col.IsCaseSensitive)
@@ -148,7 +148,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
                 // Sync columns metadata from introspection to ensure future DML (INSERT/MERGE) matches exact case/quotes
                 if (existingSchema != null)
                 {
-                    var newCols = new List<ColumnInfo>(_columns!.Count);
+                    var newCols = new List<PipeColumnInfo>(_columns!.Count);
                     foreach (var col in _columns!)
                     {
                         var introspected = existingSchema.Columns.FirstOrDefault(c => c.Name.Equals(col.Name, StringComparison.OrdinalIgnoreCase));
@@ -589,7 +589,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
     /// 
     /// For exact structure preservation, use Append strategy or manage DDL separately.
     /// </remarks>
-    private string BuildCreateTableSql(string tableName, IReadOnlyList<ColumnInfo> columns)
+    private string BuildCreateTableSql(string tableName, IReadOnlyList<PipeColumnInfo> columns)
     {
         var sb = new StringBuilder();
         sb.Append($"CREATE TABLE {tableName} (");

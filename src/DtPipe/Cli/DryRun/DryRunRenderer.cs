@@ -97,7 +97,7 @@ public class DryRunRenderer
 
                     // maxWidths[1] = Input.
                     
-                    if (idx >= 0 && idx < values.Length)
+                    if (values != null && idx >= 0 && idx < values.Length)
                     {
                         var v = values[idx];
                         var rawVal = v?.ToString() ?? "null";
@@ -117,7 +117,7 @@ public class DryRunRenderer
                     if (finalSchema[k].Name == col.Name) { finalIdx = k; break; }
                 }
                 
-                if (finalIdx >= 0 && finalIdx < finalVals.Length)
+                if (finalVals != null && finalIdx >= 0 && finalIdx < finalVals.Length)
                 {
                     var typeName = finalSchema[finalIdx].ClrType.Name;
                     
@@ -223,6 +223,7 @@ public class DryRunRenderer
             {
                 var stage = trace.Stages[stageIdx];
                 var schema = stage.Schema;
+                // Values can be null if row was filtered out at this stage
                 var values = stage.Values;
                 
                 // Find column index by name in this step's schema
@@ -239,9 +240,9 @@ public class DryRunRenderer
                 string displayVal;
                 string rawVal;
                 
-                if (idx == -1 || idx >= values.Length)
+                if (values == null || idx == -1 || idx >= values.Length)
                 {
-                    displayVal = "";
+                    displayVal = values == null ? "[dim]Filtered[/]" : ""; // Indicate filtered if null
                     rawVal = "N/A_NOT_EXIST";
                 }
                 else
@@ -288,7 +289,7 @@ public class DryRunRenderer
                     }
                 }
                 
-                if (finalIdx >= 0 && finalIdx < finalVals.Length)
+                if (finalVals != null && finalIdx >= 0 && finalIdx < finalVals.Length)
                 {
                     var v = finalVals[finalIdx];
                     var colName = finalSchema[finalIdx].Name;

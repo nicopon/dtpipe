@@ -12,7 +12,7 @@ public class ParquetStreamReader : IStreamReader
     private readonly SemaphoreSlim _semaphore = new(1, 1);
     private FileStream? _fileStream;
 
-    public IReadOnlyList<ColumnInfo>? Columns { get; private set; }
+    public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
 
     public ParquetStreamReader(string filePath)
     {
@@ -25,13 +25,13 @@ public class ParquetStreamReader : IStreamReader
         _reader = await ParquetReader.CreateAsync(_fileStream, leaveStreamOpen: true, cancellationToken: ct);
 
         var schema = _reader.Schema;
-        var columns = new List<ColumnInfo>();
+        var columns = new List<PipeColumnInfo>();
 
         foreach (var field in schema.Fields)
         {
             if (field is DataField dataField)
             {
-                columns.Add(new ColumnInfo(dataField.Name, dataField.ClrType, dataField.IsNullable));
+                columns.Add(new PipeColumnInfo(dataField.Name, dataField.ClrType, dataField.IsNullable));
             }
         }
 

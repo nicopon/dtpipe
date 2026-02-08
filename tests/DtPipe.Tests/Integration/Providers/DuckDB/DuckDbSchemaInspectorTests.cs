@@ -6,7 +6,6 @@ using DtPipe.Core.Models;
 using DtPipe.Cli.Abstractions;
 using DtPipe.Core.Options;
 using Xunit;
-using ColumnInfo = DtPipe.Core.Models.ColumnInfo;
 
 namespace DtPipe.Tests;
 
@@ -152,7 +151,7 @@ public class DuckDbSchemaInspectorTests : IDisposable
     {
         await ExecuteSql("CREATE TABLE compat_test (id INTEGER, name VARCHAR)");
 
-        var sourceSchema = new List<ColumnInfo>
+        var sourceSchema = new List<PipeColumnInfo>
         {
             new("id", typeof(int), false),
             new("name", typeof(string), true)
@@ -175,7 +174,7 @@ public class DuckDbSchemaInspectorTests : IDisposable
     {
         await ExecuteSql("CREATE TABLE missing_test (id INTEGER)");
 
-        var sourceSchema = new List<ColumnInfo>
+        var sourceSchema = new List<PipeColumnInfo>
         {
             new("id", typeof(int), false),
             new("extra_column", typeof(string), true)

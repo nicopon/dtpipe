@@ -210,7 +210,7 @@ public class SchemaInspectorIntegrationTests : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
         
         // Source schema that matches target
-        var sourceSchema = new List<ColumnInfo>
+        var sourceSchema = new List<PipeColumnInfo>
         {
             new("id", typeof(int), false),
             new("name", typeof(string), true),
@@ -244,7 +244,7 @@ public class SchemaInspectorIntegrationTests : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
         
         // Source has extra column not in target
-        var sourceSchema = new List<ColumnInfo>
+        var sourceSchema = new List<PipeColumnInfo>
         {
             new("id", typeof(int), false),
             new("name", typeof(string), true),
@@ -283,7 +283,7 @@ public class SchemaInspectorIntegrationTests : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
         
         // Source doesn't have required_field - will fail on insert!
-        var sourceSchema = new List<ColumnInfo>
+        var sourceSchema = new List<PipeColumnInfo>
         {
             new("id", typeof(int), false)
         };
@@ -319,7 +319,7 @@ public class SchemaInspectorIntegrationTests : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
         
         // Source has nullable status, but target requires NOT NULL
-        var sourceSchema = new List<ColumnInfo>
+        var sourceSchema = new List<PipeColumnInfo>
         {
             new("id", typeof(int), false),
             new("status", typeof(string), true) // Nullable in source
@@ -355,7 +355,7 @@ public class SchemaInspectorIntegrationTests : IAsyncLifetime
             ANALYZE existing_data_test;";
         await cmd.ExecuteNonQueryAsync();
         
-        var sourceSchema = new List<ColumnInfo>
+        var sourceSchema = new List<PipeColumnInfo>
         {
             new("id", typeof(int), false),
             new("name", typeof(string), true)

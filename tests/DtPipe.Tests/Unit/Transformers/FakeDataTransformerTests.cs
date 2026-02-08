@@ -45,7 +45,7 @@ public class FakeDataTransformerTests
         var options = new FakeOptions { Fake = new[] { "Name:name.firstname", "City:address.city" }, Seed = 12345 };
         var transformer = new FakeDataTransformer(options);
         
-        var columns = new List<ColumnInfo>
+        var columns = new List<PipeColumnInfo>
         {
             new("ID", typeof(int), false),
             new("Name", typeof(string), true),
@@ -64,15 +64,15 @@ public class FakeDataTransformerTests
         result.Should().HaveCount(2);
         
         // ID should be unchanged
-        result[0][0].Should().Be(1);
-        result[1][0].Should().Be(2);
+        result[0]![0].Should().Be(1);
+        result[1]![0].Should().Be(2);
 
         // Name and City should be changed and not null
-        result[0][1].Should().NotBe("OldName1").And.NotBeNull();
-        result[0][2].Should().NotBe("OldCity1").And.NotBeNull();
+        result[0]![1].Should().NotBe("OldName1").And.NotBeNull();
+        result[0]![2].Should().NotBe("OldCity1").And.NotBeNull();
         
-        result[1][1].Should().NotBe("OldName2").And.NotBeNull();
-        result[1][2].Should().NotBe("OldCity2").And.NotBeNull();
+        result[1]![1].Should().NotBe("OldName2").And.NotBeNull();
+        result[1]![2].Should().NotBe("OldCity2").And.NotBeNull();
     }
     
     [Fact]
@@ -82,7 +82,7 @@ public class FakeDataTransformerTests
         var options = new FakeOptions { Fake = new[] { "NAME:name.firstname" }, Seed = 123 };
         var transformer = new FakeDataTransformer(options);
         
-        var columns = new List<ColumnInfo>
+        var columns = new List<PipeColumnInfo>
         {
             new("name", typeof(string), true) // Lowercase in schema
         };
@@ -94,7 +94,7 @@ public class FakeDataTransformerTests
         var result = rows.Select(r => transformer.Transform(r)).ToList();
 
         // Assert
-        result[0][0].Should().NotBe("Original");
+        result[0]![0].Should().NotBe("Original");
     }
 
     [Fact]
@@ -108,7 +108,7 @@ public class FakeDataTransformerTests
         var transformer1 = new FakeDataTransformer(options1);
         var transformer2 = new FakeDataTransformer(options2);
         
-        var columns = new List<ColumnInfo> { new("NAME", typeof(string), true) };
+        var columns = new List<PipeColumnInfo> { new("NAME", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { "Original" } };
 
         // Act
@@ -119,7 +119,7 @@ public class FakeDataTransformerTests
         var result2 = rows.Select(r => transformer2.Transform(r)).ToList();
 
         // Assert
-        result1[0][0].Should().Be(result2[0][0]);
+        result1[0]![0].Should().Be(result2[0]![0]);
     }
 
     [Fact]
@@ -129,7 +129,7 @@ public class FakeDataTransformerTests
         var options = new FakeOptions { Fake = new[] { "COUNTRY:address.country" }, Locale = "fr", Seed = 1 };
         var transformerFr = new FakeDataTransformer(options);
         
-        var columns = new List<ColumnInfo> { new("COUNTRY", typeof(string), true) };
+        var columns = new List<PipeColumnInfo> { new("COUNTRY", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { "Orig" } };
 
         // Act
@@ -137,7 +137,7 @@ public class FakeDataTransformerTests
         var resultFr = rows.Select(r => transformerFr.Transform(r)).ToList();
         
         // Assert
-        resultFr[0][0].Should().BeOfType<string>();
+        resultFr[0]![0].Should().BeOfType<string>();
     }
     
     [Fact]
@@ -147,7 +147,7 @@ public class FakeDataTransformerTests
         // "invalid" is not a known dataset, so it should be treated as a hardcoded string
         var options = new FakeOptions { Fake = new[] { "NAME:invalid.dataset" }, Seed = 123 };
         
-        var columns = new List<ColumnInfo> { new("NAME", typeof(string), true) };
+        var columns = new List<PipeColumnInfo> { new("NAME", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { "Original" } };
 
         // Act
@@ -156,7 +156,7 @@ public class FakeDataTransformerTests
         var result = rows.Select(r => transformer.Transform(r)).ToList();
             
         // Assert
-        result[0][0].Should().Be("invalid.dataset");
+        result[0]![0].Should().Be("invalid.dataset");
     }
 
     [Fact]
@@ -185,16 +185,16 @@ public class FakeDataTransformerTests
         // Case 1: "Finance:iban" (Colon) -> Should be treated as hardcoded string "Finance:iban" because it's not a valid fake path
         var optionsColon = new FakeOptions { Fake = new[] { "IBAN:finance:iban" } };
         var transformerColon = new FakeDataTransformer(optionsColon);
-        var columns = new List<ColumnInfo> { new("IBAN", typeof(string), true) };
+        var columns = new List<PipeColumnInfo> { new("IBAN", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { "Original" } };
 
         await transformerColon.InitializeAsync(columns, TestContext.Current.CancellationToken);
         var resColon = rows.Select(r => transformerColon.Transform(r)).ToList();
         
         // This confirms the user's colon syntax is now supported via normalization
-        resColon[0][0].Should().NotBe("finance:iban");
-        resColon[0][0].Should().NotBeNull();
-        resColon[0][0]!.ToString()!.Length.Should().BeGreaterThan(10);
+        resColon[0]![0].Should().NotBe("finance:iban");
+        resColon[0]![0].Should().NotBeNull();
+        resColon[0]![0]!.ToString()!.Length.Should().BeGreaterThan(10);
         
         // Case 2: "Finance.iban" (Dot) -> Should be recognized as faker
         var optionsDot = new FakeOptions { Fake = new[] { "IBAN:finance.iban" } };
@@ -204,9 +204,9 @@ public class FakeDataTransformerTests
         var resDot = rows.Select(r => transformerDot.Transform(r)).ToList();
         
         // This confirms correct syntax works
-        resDot[0][0].Should().NotBe("finance.iban");
-        resDot[0][0].Should().NotBeNull();
-        resDot[0][0]!.ToString()!.Length.Should().BeGreaterThan(10);
+        resDot[0]![0].Should().NotBe("finance.iban");
+        resDot[0]![0].Should().NotBeNull();
+        resDot[0]![0]!.ToString()!.Length.Should().BeGreaterThan(10);
         
         // Case 3: "finance.iban" (Lowercase Dot) -> Should also work (case insensitive)
         var optionsLower = new FakeOptions { Fake = new[] { "IBAN:finance.iban" } };
@@ -215,7 +215,7 @@ public class FakeDataTransformerTests
         await transformerLower.InitializeAsync(columns, TestContext.Current.CancellationToken);
         var resLower = rows.Select(r => transformerLower.Transform(r)).ToList();
         
-        resLower[0][0].Should().NotBe("finance.iban");
+        resLower[0]![0].Should().NotBe("finance.iban");
     }
     [Fact]
     public async Task Transform_ShouldSkipFake_WhenSkipNullEnabled_AndValueIsNull()
@@ -223,7 +223,7 @@ public class FakeDataTransformerTests
         // Arrange
         var options = new FakeOptions { Fake = new[] { "NAME:name.firstname" }, SkipNull = true, Seed = 123 };
         var transformer = new FakeDataTransformer(options);
-        var columns = new List<ColumnInfo> { new("NAME", typeof(string), true) };
+        var columns = new List<PipeColumnInfo> { new("NAME", typeof(string), true) };
         var rows = new List<object?[]> 
         { 
             new object?[] { null }, 
@@ -235,7 +235,7 @@ public class FakeDataTransformerTests
         var result = rows.Select(r => transformer.Transform(r)).ToList();
 
         // Assert
-        result[0][0].Should().BeNull("Should not fake null because SkipNull is true");
-        result[1][0].Should().NotBe("Original").And.NotBeNull("Should still fake non-null values");
+        result[0]![0].Should().BeNull("Should not fake null because SkipNull is true");
+        result[1]![0].Should().NotBe("Original").And.NotBeNull("Should still fake non-null values");
     }
 }

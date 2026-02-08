@@ -1,7 +1,6 @@
 using System.Text.RegularExpressions;
 using Bogus;
 using DtPipe.Core.Abstractions;
-using DtPipe.Cli.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 
@@ -63,13 +62,13 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
     public bool HasFake => _parser.HasMappings;
     public FakerRegistry Registry => _registry;
 
-    public ValueTask<IReadOnlyList<ColumnInfo>> InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
+    public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
     {
         if (!HasFake)
         {
             _processors = null;
             _generationOrder = null;
-            return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
+            return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
         }
 
         // Build column name to index map
@@ -163,16 +162,16 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
         }
 
         // Build output schema
-        var outputColumns = new List<ColumnInfo>(columns);
+        var outputColumns = new List<PipeColumnInfo>(columns);
         foreach (var virtualCol in _virtualColumns)
         {
-            outputColumns.Add(new ColumnInfo(virtualCol, typeof(string), true));
+            outputColumns.Add(new PipeColumnInfo(virtualCol, typeof(string), true));
         }
         
-        return new ValueTask<IReadOnlyList<ColumnInfo>>(outputColumns);
+        return new ValueTask<IReadOnlyList<PipeColumnInfo>>(outputColumns);
     }
 
-    public object?[] Transform(object?[] row)
+    public object?[]? Transform(object?[] row)
     {
         if (_processors is null || _generationOrder is null) return row;
 

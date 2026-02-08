@@ -15,7 +15,7 @@ public class MaskDataTransformerTests
         // Arrange
         var options = new MaskOptions { Mask = new[] { "EMAIL:###****" } };
         var transformer = new MaskDataTransformer(options);
-        var columns = new List<ColumnInfo> { new("EMAIL", typeof(string), true) };
+        var columns = new List<PipeColumnInfo> { new("EMAIL", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { "test@example.com" } };
 
         // Act
@@ -24,7 +24,7 @@ public class MaskDataTransformerTests
 
         // Assert
         // "tes" kept (#), "****" replaced, "ample.com" unmatched kept
-        result[0][0].Should().Be("tes****ample.com");
+        result[0]![0].Should().Be("tes****ample.com");
     }
 
     [Fact]
@@ -33,7 +33,7 @@ public class MaskDataTransformerTests
         // Arrange
         var options = new MaskOptions { Mask = new[] { "PIN:****" } };
         var transformer = new MaskDataTransformer(options);
-        var columns = new List<ColumnInfo> { new("PIN", typeof(string), true) };
+        var columns = new List<PipeColumnInfo> { new("PIN", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { "1234" } };
 
         // Act
@@ -41,7 +41,7 @@ public class MaskDataTransformerTests
         var result = rows.Select(r => transformer.Transform(r)).ToList();
 
         // Assert
-        result[0][0].Should().Be("****");
+        result[0]![0].Should().Be("****");
     }
 
     [Fact]
@@ -54,7 +54,7 @@ public class MaskDataTransformerTests
         // Pattern: ##******## (10 chars) -> Keep first 2, mask middle 6, keep last 2
         var options = new MaskOptions { Mask = new[] { "PHONE:##******##" } };
         var transformer = new MaskDataTransformer(options);
-        var columns = new List<ColumnInfo> { new("PHONE", typeof(string), true) };
+        var columns = new List<PipeColumnInfo> { new("PHONE", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { "0612345678" } };
 
         // Act
@@ -62,7 +62,7 @@ public class MaskDataTransformerTests
         var result = rows.Select(r => transformer.Transform(r)).ToList();
 
         // Assert
-        result[0][0].Should().Be("06******78");
+        result[0]![0].Should().Be("06******78");
     }
 
     [Fact]
@@ -75,7 +75,7 @@ public class MaskDataTransformerTests
         
         var options = new MaskOptions { Mask = new[] { "COL:***" } };
         var transformer = new MaskDataTransformer(options);
-        var columns = new List<ColumnInfo> { new("COL", typeof(string), true) };
+        var columns = new List<PipeColumnInfo> { new("COL", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { null } };
 
         // Act
@@ -83,7 +83,7 @@ public class MaskDataTransformerTests
         var result = rows.Select(r => transformer.Transform(r)).ToList();
 
         // Assert
-        result[0][0].Should().BeNull("Mask works on strings, so nulls should pass through naturally unless SkipNull changes pipeline behavior");
+        result[0]![0].Should().BeNull("Mask works on strings, so nulls should pass through naturally unless SkipNull changes pipeline behavior");
     }
 
     [Fact]
@@ -92,7 +92,7 @@ public class MaskDataTransformerTests
         // Arrange
         var options = new MaskOptions { Mask = new[] { "COL:***" }, SkipNull = true };
         var transformer = new MaskDataTransformer(options);
-        var columns = new List<ColumnInfo> { new("COL", typeof(string), true) };
+        var columns = new List<PipeColumnInfo> { new("COL", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { null } };
 
         // Act
@@ -100,6 +100,6 @@ public class MaskDataTransformerTests
         var result = rows.Select(r => transformer.Transform(r)).ToList();
 
         // Assert
-        result[0][0].Should().BeNull();
+        result[0]![0].Should().BeNull();
     }
 }

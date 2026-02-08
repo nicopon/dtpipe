@@ -10,7 +10,7 @@ public static class BatchFailureAnalyzer
     public static async Task<string?> AnalyzeAsync(
         ISchemaInspector schemaInspector, 
         IReadOnlyList<object?[]> rows, 
-        IReadOnlyList<ColumnInfo> sourceColumns, 
+        IReadOnlyList<PipeColumnInfo> sourceColumns, 
         CancellationToken ct = default)
     {
         try 

@@ -57,7 +57,7 @@ public static class ColumnMatcher
     /// Finds a target column that matches the source column name using dialect-aware rules.
     /// Returns null if no match is found (never throws exceptions).
     /// </summary>
-    /// <typeparam name="T">Type of target column (ColumnInfo, TargetColumnInfo, string, etc.)</typeparam>
+    /// <typeparam name="T">Type of target column (PipeColumnInfo, TargetColumnInfo, string, etc.)</typeparam>
     /// <param name="sourceName">Source column name to find</param>
     /// <param name="isCaseSensitive">Whether source column is case-sensitive</param>
     /// <param name="targetColumns">List of target columns to search</param>

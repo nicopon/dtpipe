@@ -13,7 +13,7 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
     private readonly PostgreSqlWriterOptions _options;
     private NpgsqlConnection? _connection;
     private NpgsqlBinaryImporter? _writer;
-    private IReadOnlyList<ColumnInfo>? _columns;
+    private IReadOnlyList<PipeColumnInfo>? _columns;
     private string? _stagingTable;
     private string _quotedTargetTableName = ""; // Computed once after resolution, used everywhere
     private List<string> _keyColumns = new();
@@ -186,7 +186,7 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
 
     #endregion
 
-    public async ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
+    public async ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
     {
         if (_connection == null)
         {
@@ -199,7 +199,7 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
         // Column and table normalization logic
         // Create a secure list of columns where names are normalized if not case-sensitive.
         // This ensures consistency across CREATE TABLE, INSERT, COPY, etc.
-        var normalizedColumns = new List<ColumnInfo>(columns.Count);
+        var normalizedColumns = new List<PipeColumnInfo>(columns.Count);
         foreach (var col in columns)
         {
             if (col.IsCaseSensitive)
@@ -286,7 +286,7 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
             // Sync columns metadata from introspection to ensure future DML (COPY) matches the exact case/quotes
             if (existingSchema != null)
             {
-                var newCols = new List<ColumnInfo>(_columns!.Count);
+                var newCols = new List<PipeColumnInfo>(_columns!.Count);
                 foreach (var col in _columns!)
                 {
                     var introspected = existingSchema.Columns.FirstOrDefault(c => c.Name.Equals(col.Name, StringComparison.OrdinalIgnoreCase));
@@ -491,7 +491,7 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
     /// 
     /// For exact structure preservation, use Append strategy or manage DDL separately.
     /// </remarks>
-    private string BuildCreateTableSql(string quotedTableName, IReadOnlyList<ColumnInfo> columns)
+    private string BuildCreateTableSql(string quotedTableName, IReadOnlyList<PipeColumnInfo> columns)
     {
         var sb = new StringBuilder();
         // Table name is already quoted if necessary by caller
@@ -567,7 +567,7 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
         return sb.ToString();
     }
 
-    private string BuildCopySql(string tableName, IReadOnlyList<ColumnInfo> columns)
+    private string BuildCopySql(string tableName, IReadOnlyList<PipeColumnInfo> columns)
     {
         var sb = new StringBuilder();
         // IMPORTANT: tableName is already smart-quoted by caller (_quotedTargetTableName or _stagingTable)
@@ -583,7 +583,7 @@ public sealed partial class PostgreSqlDataWriter : IDataWriter, ISchemaInspector
     }
     
     // Legacy helper 
-    private string BuildCopySqlUnquoted(string tableName, IReadOnlyList<ColumnInfo> columns) => BuildCopySql(tableName, columns);
+    private string BuildCopySqlUnquoted(string tableName, IReadOnlyList<PipeColumnInfo> columns) => BuildCopySql(tableName, columns);
 
     private static async Task<(string Schema, string Table)?> ResolveTableAsync(NpgsqlConnection connection, string inputName, CancellationToken ct = default)
     {

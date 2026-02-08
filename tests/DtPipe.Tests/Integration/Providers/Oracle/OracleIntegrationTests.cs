@@ -267,7 +267,7 @@ public class OracleIntegrationTests : IAsyncLifetime
         }
 
         // 2. Setup Source Data
-        var columns = new List<ColumnInfo>
+        var columns = new List<PipeColumnInfo>
         {
             new("Id", typeof(int), false, true),
             new("Name", typeof(string), true, true),
@@ -338,7 +338,7 @@ public class OracleIntegrationTests : IAsyncLifetime
         };
 
         // Source defines Name as String
-        var columns = new List<ColumnInfo> { new("Id", typeof(int), false), new("Name", typeof(string), true) };
+        var columns = new List<PipeColumnInfo> { new("Id", typeof(int), false), new("Name", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { 1, "NewData" } };
 
         // Act
@@ -405,7 +405,7 @@ public class OracleIntegrationTests : IAsyncLifetime
         };
 
         // Source defines columns with simple types, we expect the writer to ignore these and use the existing schema
-        var columns = new List<ColumnInfo> 
+        var columns = new List<PipeColumnInfo> 
         { 
             new("Code", typeof(string), true), 
             new("MixedCase", typeof(string), true),

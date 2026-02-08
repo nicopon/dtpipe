@@ -43,7 +43,7 @@ public class DryRunAnalyzer
         CancellationToken ct = default)
     {
         // 1. Capture schema evolution through pipeline
-        var traceSchemas = new List<IReadOnlyList<ColumnInfo>>();
+        var traceSchemas = new List<IReadOnlyList<PipeColumnInfo>>();
         var stepNames = new List<string>();
 
         var simSchema = reader.Columns ?? throw new InvalidOperationException("Reader columns must be initialized before analysis.");
@@ -180,7 +180,13 @@ public class DryRunAnalyzer
                 if (match != null && colMap.TryGetValue(match.Name, out int srcIdx))
                 {
                     // Check all samples for NULL in this column
-                    bool hasNull = samples.Any(s => s.Stages.Last().Values[srcIdx] == null || s.Stages.Last().Values[srcIdx] == DBNull.Value);
+                    // If Values is null, the row was filtered out, so it doesn't violate NOT NULL
+                    bool hasNull = samples.Any(s => 
+                    {
+                        var vals = s.Stages.Last().Values;
+                        if (vals == null) return false;
+                        return vals[srcIdx] == null || vals[srcIdx] == DBNull.Value;
+                    });
                     
                     if (hasNull)
                     {
@@ -207,7 +213,10 @@ public class DryRunAnalyzer
                     bool hasDuplicates = false;
                     foreach(var s in samples)
                     {
-                        var val = s.Stages.Last().Values[srcIdx];
+                        var vals = s.Stages.Last().Values;
+                        if (vals == null) continue; // Skip filtered rows
+
+                        var val = vals[srcIdx];
                         if (val != null && val != DBNull.Value)
                         {
                             if (!seen.Add(val))
@@ -231,7 +240,7 @@ public class DryRunAnalyzer
 
     private KeyValidationResult ValidatePrimaryKeys(
         IKeyValidator validator,
-        IReadOnlyList<ColumnInfo> finalSchema,
+        IReadOnlyList<PipeColumnInfo> finalSchema,
         TargetSchemaInfo? targetInfo,
         ISqlDialect? dialect)
     {
@@ -352,7 +361,7 @@ public class DryRunAnalyzer
     private SampleTrace ProcessRowThroughPipeline(
         object?[] inputRow,
         List<IDataTransformer> pipeline,
-        List<IReadOnlyList<ColumnInfo>> traceSchemas)
+        List<IReadOnlyList<PipeColumnInfo>> traceSchemas)
     {
         var stages = new List<StageTrace>();
         
@@ -369,6 +378,14 @@ public class DryRunAnalyzer
             var schema = traceSchemas[i + 1]; // +1 because 0 is input
 
             currentRow = transformer.Transform(currentRow);
+            
+            if (currentRow == null)
+            {
+                // Row consumed or filtered out
+                stages.Add(new StageTrace(schema, null)); // Indicate no output
+                break; 
+            }
+
             var nextValues = (object?[])currentRow.Clone();
             
             stages.Add(new StageTrace(schema, nextValues));

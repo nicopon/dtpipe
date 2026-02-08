@@ -1,7 +1,5 @@
 using FluentAssertions;
-using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
-using DtPipe.Cli.Abstractions;
 using DtPipe.Transformers.Overwrite;
 using Xunit;
 
@@ -15,7 +13,7 @@ public class OverwriteDataTransformerTests
         // Arrange
         var options = new OverwriteOptions { Overwrite = new[] { "CITY:Paris" } };
         var transformer = new OverwriteDataTransformer(options);
-        var columns = new List<ColumnInfo> { new("CITY", typeof(string), true) };
+        var columns = new List<PipeColumnInfo> { new("CITY", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { "London" } };
 
         // Act
@@ -23,7 +21,7 @@ public class OverwriteDataTransformerTests
         var result = rows.Select(r => transformer.Transform(r)).ToList();
 
         // Assert
-        result[0][0].Should().Be("Paris");
+        result[0]![0].Should().Be("Paris");
     }
 
     [Fact]
@@ -32,7 +30,7 @@ public class OverwriteDataTransformerTests
         // Arrange
         var options = new OverwriteOptions { Overwrite = new[] { "UNKNOWN:Value" } };
         var transformer = new OverwriteDataTransformer(options);
-        var columns = new List<ColumnInfo> { new("CITY", typeof(string), true) };
+        var columns = new List<PipeColumnInfo> { new("CITY", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { "London" } };
 
         // Act
@@ -40,7 +38,7 @@ public class OverwriteDataTransformerTests
         var result = rows.Select(r => transformer.Transform(r)).ToList();
 
         // Assert
-        result[0][0].Should().Be("London");
+        result[0]![0].Should().Be("London");
     }
     [Fact]
     public async Task Transform_ShouldSkipOverwrite_WhenSkipNullEnabled_AndValueIsNull()
@@ -48,7 +46,7 @@ public class OverwriteDataTransformerTests
         // Arrange
         var options = new OverwriteOptions { Overwrite = new[] { "CITY:Paris" }, SkipNull = true };
         var transformer = new OverwriteDataTransformer(options);
-        var columns = new List<ColumnInfo> { new("CITY", typeof(string), true) };
+        var columns = new List<PipeColumnInfo> { new("CITY", typeof(string), true) };
         var rows = new List<object?[]> 
         { 
             new object?[] { null }, 
@@ -60,7 +58,7 @@ public class OverwriteDataTransformerTests
         var result = rows.Select(r => transformer.Transform(r)).ToList();
 
         // Assert
-        result[0][0].Should().BeNull("Should not overwrite null because SkipNull is true");
-        result[1][0].Should().Be("Paris", "Should still overwrite non-null values");
+        result[0]![0].Should().BeNull("Should not overwrite null because SkipNull is true");
+        result[1]![0].Should().Be("Paris", "Should still overwrite non-null values");
     }
 }

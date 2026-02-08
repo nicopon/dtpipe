@@ -3,15 +3,16 @@ using Jint.Native;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
+using DtPipe.Core.Services;
 
 namespace DtPipe.Transformers.Script;
 
 /// <summary>
 /// Transforms data rows using Javascript scripts via Jint.
 /// </summary>
-public sealed class ScriptDataTransformer : IDataTransformer, IRequiresOptions<ScriptOptions>
+public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<ComputeOptions>
 {
-    private ThreadLocal<Engine>? _threadLocalEngine;
+    private readonly IJsEngineProvider _jsEngineProvider;
     private readonly List<string> _initializationScripts = new();
     private readonly Dictionary<string, string> _mappings;
     
@@ -22,11 +23,13 @@ public sealed class ScriptDataTransformer : IDataTransformer, IRequiresOptions<S
     
     private readonly bool _skipNull;
 
-    public ScriptDataTransformer(ScriptOptions options)
+    public ComputeDataTransformer(ComputeOptions options, IJsEngineProvider jsEngineProvider)
     {
+        _jsEngineProvider = jsEngineProvider;
+        
         // Parse mappings: "COLUMN:script"
         _mappings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var mapping in options.Script)
+        foreach (var mapping in options.Compute)
         {
             var parts = mapping.Split(':', 2);
             if (parts.Length == 2)
@@ -39,11 +42,11 @@ public sealed class ScriptDataTransformer : IDataTransformer, IRequiresOptions<S
 
     public bool HasScript => _mappings.Count > 0;
 
-    public ValueTask<IReadOnlyList<ColumnInfo>> InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
+    public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
     {
         if (!HasScript)
         {
-            return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
+            return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
         }
 
         _columnNames = columns.Select(c => c.Name).ToArray();
@@ -54,6 +57,7 @@ public sealed class ScriptDataTransformer : IDataTransformer, IRequiresOptions<S
         }
 
         var processors = new List<ScriptColumnProcessor>();
+        var engine = _jsEngineProvider.GetEngine();
 
         foreach (var (colName, script) in _mappings)
         {
@@ -71,41 +75,33 @@ public sealed class ScriptDataTransformer : IDataTransformer, IRequiresOptions<S
                 
                 var wrappedScript = $"function {functionName}(row) {{ {body} }}";
                 
-                // Validate syntax immediately
-                new Engine(cfg => cfg.Strict(true)).Execute(wrappedScript);
+                // Validate syntax immediately (and register function in the shared engine!)
+                // NOTE: Since engine is shared/scoped, we register functions directly.
+                // BUT: If multiple transformers use same function names, we have a collision issue.
+                // Solution: Make function names unique per transformer instance? 
+                // Or just use anonymous execution? 
+                // Using named functions is faster for repeated calls.
+                // We should make function name unique.
                 
-                _initializationScripts.Add(wrappedScript);
-                processors.Add(new ScriptColumnProcessor(colIndex, functionName));
+                var uniqueFunctionName = $"{functionName}_{Guid.NewGuid().ToString("N")}";
+                wrappedScript = $"function {uniqueFunctionName}(row) {{ {body} }}";
+                
+                engine.Execute(wrappedScript);
+                
+                processors.Add(new ScriptColumnProcessor(colIndex, uniqueFunctionName));
             }
         }
 
         _processors = processors.ToArray();
 
-        // Initialize ThreadLocal Factory
-        // This will be called on each thread that accesses .Value
-        _threadLocalEngine = new ThreadLocal<Engine>(() => 
-        {
-            var engine = new Engine(cfg => cfg
-                .Strict(true)
-                .LimitMemory(20_000_000) // 20MB limit for safety
-                .TimeoutInterval(TimeSpan.FromSeconds(2)) // 2s timeout per script execution
-            );
-            
-            foreach(var script in _initializationScripts)
-            {
-                 engine.Execute(script);
-            }
-            return engine;
-        });
-
-        return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
+        return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
     }
 
-    public object?[] Transform(object?[] row)
+    public object?[]? Transform(object?[] row)
     {
-        if (_processors == null || _processors.Length == 0 || _columnNames == null || _threadLocalEngine == null) return row;
+        if (_processors == null || _processors.Length == 0 || _columnNames == null) return row;
 
-        var engine = _threadLocalEngine.Value!;
+        var engine = _jsEngineProvider.GetEngine();
 
         // Build a JS object representing the current row
         var jsRow = new JsObject(engine);
@@ -153,11 +149,9 @@ public sealed class ScriptDataTransformer : IDataTransformer, IRequiresOptions<S
 
         return row;
     }
-
-    public void Dispose()
-    {
-        _threadLocalEngine?.Dispose();
-    }
+    
+    // Dispose handled by DI scope? No, provider is singleton/scoped. 
+    // ComputeDataTransformer does not own the engine anymore.
 
     private record struct ScriptColumnProcessor(int ColumnIndex, string FunctionName);
 }

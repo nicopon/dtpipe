@@ -62,29 +62,54 @@ public class CliCollisionTests
         foreach (var type in contributorTypes)
         {
             object instance;
-            // Most factories take (OptionsRegistry).
-            try 
+            // Use reflection to find the constructor and inject known dependencies
+            var ctor = type.GetConstructors().FirstOrDefault();
+            if (ctor != null)
             {
-                instance = Activator.CreateInstance(type, optionsRegistry)!;
+                var args = new List<object?>();
+                foreach (var param in ctor.GetParameters())
+                {
+                    if (param.ParameterType == typeof(OptionsRegistry))
+                    {
+                        args.Add(optionsRegistry);
+                    }
+                    else if (param.ParameterType == typeof(DtPipe.Core.Services.IJsEngineProvider))
+                    {
+                        args.Add(Moq.Mock.Of<DtPipe.Core.Services.IJsEngineProvider>());
+                    }
+                    else if (param.ParameterType == typeof(Microsoft.Extensions.Logging.ILoggerFactory))
+                    {
+                        args.Add(new Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory());
+                    }
+                    else
+                    {
+                        // Fallback for unknown optional params? For now assume null or try creating default
+                        args.Add(null); 
+                    }
+                }
+                
+                try
+                {
+                    instance = ctor.Invoke(args.ToArray());
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"FAILED to instantiate {type.FullName} via reflection.");
+                    throw new InvalidOperationException($"Could not instantiate contributor {type.Name}. Constructor parameters: {string.Join(", ", ctor.GetParameters().Select(p => p.ParameterType.Name))}", ex);
+                }
             }
-            catch(MissingMethodException)
+            else
             {
-                 try
-                 {
-                     instance = Activator.CreateInstance(type, optionsRegistry, new Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory())!;
-                 }
-                 catch(MissingMethodException)
-                 {
-                     try 
-                     {
-                         instance = Activator.CreateInstance(type)!;
-                     } 
-                     catch (Exception ex)
-                     {
-                         Console.Error.WriteLine($"FAILED to instantiate {type.FullName}");
-                         throw new InvalidOperationException($"Could not instantiate contributor {type.Name} for collision test. Does it have a complex constructor?", ex);
-                     }
-                 }
+                // No public constructor? Try parameterless just in case
+                try 
+                {
+                    instance = Activator.CreateInstance(type)!;
+                }
+                catch(Exception ex)
+                {
+                     Console.Error.WriteLine($"FAILED to instantiate {type.FullName} (no public constructor found).");
+                     throw new InvalidOperationException($"Could not instantiate contributor {type.Name}.", ex);
+                }
             }
             
             if (instance is ICliContributor contributor)

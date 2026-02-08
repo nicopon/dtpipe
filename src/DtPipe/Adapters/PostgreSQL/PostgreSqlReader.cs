@@ -15,7 +15,7 @@ public class PostgreSqlReader : IStreamReader
     private NpgsqlConnection? _connection;
     private NpgsqlCommand? _command;
     private NpgsqlDataReader? _reader;
-    public IReadOnlyList<ColumnInfo>? Columns { get; private set; }
+    public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
 
     public PostgreSqlReader(string connectionString, string query, int timeout)
     {
@@ -43,7 +43,7 @@ public class PostgreSqlReader : IStreamReader
         
         // PostgreSQL normalizes unquoted identifiers to lowercase
         // If column name contains uppercase, it was created with quotes (case-sensitive)
-        Columns = schema.Select(c => new ColumnInfo(
+        Columns = schema.Select(c => new PipeColumnInfo(
             c.ColumnName, 
             c.DataType ?? typeof(object), 
             c.AllowDBNull ?? true,

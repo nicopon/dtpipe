@@ -18,7 +18,7 @@ public sealed partial class SqlServerStreamReader : IStreamReader, IRequiresOpti
     private readonly string _query;
     private SqlDataReader? _reader;
 
-    public IReadOnlyList<ColumnInfo>? Columns { get; private set; }
+    public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
 
     // DDL keywords that should be rejected
     private static readonly string[] DdlKeywords = 
@@ -122,16 +122,16 @@ public sealed partial class SqlServerStreamReader : IStreamReader, IRequiresOpti
         }
     }
 
-    private static List<ColumnInfo> ExtractColumns(SqlDataReader reader)
+    private static List<PipeColumnInfo> ExtractColumns(SqlDataReader reader)
     {
-        var columns = new List<ColumnInfo>(reader.FieldCount);
+        var columns = new List<PipeColumnInfo>(reader.FieldCount);
         var schemaTable = reader.GetSchemaTable();
         
         if (schemaTable is null)
         {
             for (var i = 0; i < reader.FieldCount; i++)
             {
-                columns.Add(new ColumnInfo(
+                columns.Add(new PipeColumnInfo(
                     reader.GetName(i),
                     reader.GetFieldType(i),
                     true,
@@ -149,7 +149,7 @@ public sealed partial class SqlServerStreamReader : IStreamReader, IRequiresOpti
             
             // SQL Server is case-insensitive by default (collation-dependent)
             // For simplicity, assume case-insensitive unless user has exotic collation
-            columns.Add(new ColumnInfo(name, clrType, allowNull, IsCaseSensitive: false));
+            columns.Add(new PipeColumnInfo(name, clrType, allowNull, IsCaseSensitive: false));
         }
 
         return columns;

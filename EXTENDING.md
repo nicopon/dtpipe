@@ -71,7 +71,7 @@ public class MyProviderReaderDescriptor : IProviderDescriptor<IStreamReader>
    }
    ```
 3. Implement `IDataTransformer` (or follow existing classes):
-   - `ValueTask<IReadOnlyList<ColumnInfo>> InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct)` — prepare the target schema.
+   - `ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct)` — prepare the target schema.
    - `object?[] Transform(object?[] row)` — transform a single row (should be fast and avoid excessive allocations when possible).
 4. Provide an `IDataTransformerFactory` (e.g. `YourTransformerFactory`) that reads options and creates transformer instances.
 5. Register the factory in DI: in `Program.cs` add `services.AddSingleton<IDataTransformerFactory, YourTransformerFactory>();`.
@@ -84,10 +84,10 @@ Minimal transformer skeleton (simplified):
 ```csharp
 public class MyTransformer : IDataTransformer
 {
-    public ValueTask<IReadOnlyList<ColumnInfo>> InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct)
+    public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct)
     {
         // return modified schema
-        return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
+        return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
     }
 
     public object?[] Transform(object?[] row)
@@ -110,7 +110,7 @@ The name `mytransformer` must match the identifier handled by your `IDataTransfo
 - Quick local build & run:
 ```bash
 ./build.sh
-./dist/release/dtpipe --input "sqlite:sample.db" --query "SELECT 1" --output out.csv
+dtpipe --input "sqlite:sample.db" --query "SELECT 1" --output out.csv
 ```
 - Run tests:
 ```bash

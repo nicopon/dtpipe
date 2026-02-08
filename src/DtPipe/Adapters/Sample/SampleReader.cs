@@ -10,7 +10,7 @@ public partial class SampleReader : IStreamReader, IRequiresOptions<SampleReader
 {
     private readonly SampleReaderOptions _options;
     
-    public IReadOnlyList<ColumnInfo>? Columns { get; private set; }
+    public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
 
     public SampleReader(string config, string query, SampleReaderOptions options)
     {
@@ -20,10 +20,10 @@ public partial class SampleReader : IStreamReader, IRequiresOptions<SampleReader
     public Task OpenAsync(CancellationToken ct = default)
     {
         // Build Schema from options
-        var cols = new List<ColumnInfo>();
+        var cols = new List<PipeColumnInfo>();
         foreach (var def in _options.ColumnDefinitions)
         {
-            cols.Add(new ColumnInfo(def.Name, def.Type, false));
+            cols.Add(new PipeColumnInfo(def.Name, def.Type, false));
         }
         Columns = cols;
         return Task.CompletedTask;

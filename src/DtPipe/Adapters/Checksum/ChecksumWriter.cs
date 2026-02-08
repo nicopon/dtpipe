@@ -24,7 +24,7 @@ public sealed class ChecksumDataWriter : IDataWriter, IRequiresOptions<ChecksumW
         _logger = logger;
     }
 
-    public ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
+    public ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
     {
         if (_logger.IsEnabled(LogLevel.Information))
         {

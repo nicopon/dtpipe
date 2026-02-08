@@ -15,7 +15,7 @@ public static class SchemaCompatibilityAnalyzer
     /// <param name="dialect">SQL Dialect for identifier matching (optional)</param>
     /// <returns>Compatibility report with warnings and errors</returns>
     public static SchemaCompatibilityReport Analyze(
-        IReadOnlyList<ColumnInfo> sourceSchema,
+        IReadOnlyList<PipeColumnInfo> sourceSchema,
         TargetSchemaInfo? targetSchema,
         DtPipe.Core.Abstractions.ISqlDialect? dialect = null)
     {
@@ -135,7 +135,7 @@ public static class SchemaCompatibilityAnalyzer
         return new SchemaCompatibilityReport(targetSchema, columns, warnings, errors);
     }
 
-    private static (CompatibilityStatus, string?) CheckColumnCompatibility(ColumnInfo source, TargetColumnInfo target)
+    private static (CompatibilityStatus, string?) CheckColumnCompatibility(PipeColumnInfo source, TargetColumnInfo target)
     {
         // Check nullability conflict
         if (source.IsNullable && !target.IsNullable && !target.IsPrimaryKey)
@@ -240,7 +240,7 @@ public sealed record SchemaCompatibilityReport(
 /// <param name="Message">Optional message explaining the status</param>
 public sealed record ColumnCompatibility(
     string ColumnName,
-    ColumnInfo? SourceColumn,
+    PipeColumnInfo? SourceColumn,
     TargetColumnInfo? TargetColumn,
     CompatibilityStatus Status,
     string? Message

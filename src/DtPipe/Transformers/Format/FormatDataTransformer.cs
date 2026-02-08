@@ -1,6 +1,5 @@
 using System.Text.RegularExpressions;
 using DtPipe.Core.Abstractions;
-using DtPipe.Cli.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 
@@ -36,11 +35,11 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
 
     public bool HasFormat => _mappings.Count > 0;
 
-    public ValueTask<IReadOnlyList<ColumnInfo>> InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
+    public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
     {
         if (!HasFormat)
         {
-            return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
+            return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
         }
 
         var inputNames = columns.Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -90,14 +89,14 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
         _generationOrder = TopologicalSort(targetIndices, _processors);
 
         // Build Output Schema
-        var newColumns = new List<ColumnInfo>(totalCount);
+        var newColumns = new List<PipeColumnInfo>(totalCount);
         
         // Add Inputs (changed to string if overwritten)
         for (int i = 0; i < columns.Count; i++)
         {
              if (_mappings.ContainsKey(columns[i].Name))
              {
-                 newColumns.Add(new ColumnInfo(columns[i].Name, typeof(string), columns[i].IsNullable));
+                 newColumns.Add(new PipeColumnInfo(columns[i].Name, typeof(string), columns[i].IsNullable));
              }
              else
              {
@@ -108,13 +107,13 @@ public sealed partial class FormatDataTransformer : IDataTransformer, IRequiresO
         // Add Virtuals (always String, assuming nullable for safety)
         foreach(var name in virtualColumns)
         {
-            newColumns.Add(new ColumnInfo(name, typeof(string), true));
+            newColumns.Add(new PipeColumnInfo(name, typeof(string), true));
         }
 
-        return new ValueTask<IReadOnlyList<ColumnInfo>>(newColumns);
+        return new ValueTask<IReadOnlyList<PipeColumnInfo>>(newColumns);
     }
 
-    public object?[] Transform(object?[] row)
+    public object?[]? Transform(object?[] row)
     {
         if (_generationOrder == null)
         {

@@ -12,7 +12,7 @@ public class SchemaCompatibilityAnalyzerTests
     public void Analyze_WhenTargetDoesNotExist_ReturnsWillBeCreatedStatus()
     {
         // Arrange
-        var sourceSchema = new List<ColumnInfo>
+        var sourceSchema = new List<PipeColumnInfo>
         {
             new("Id", typeof(int), false),
             new("Name", typeof(string), true)
@@ -31,7 +31,7 @@ public class SchemaCompatibilityAnalyzerTests
     public void Analyze_WhenTargetExistsButEmpty_ReturnsWillBeCreatedStatus()
     {
         // Arrange
-        var sourceSchema = new List<ColumnInfo>
+        var sourceSchema = new List<PipeColumnInfo>
         {
             new("Id", typeof(int), false),
             new("Name", typeof(string), true)
@@ -51,7 +51,7 @@ public class SchemaCompatibilityAnalyzerTests
     public void Analyze_WhenTypesMatch_ReturnsCompatibleStatus()
     {
         // Arrange
-        var sourceSchema = new List<ColumnInfo>
+        var sourceSchema = new List<PipeColumnInfo>
         {
             new("Id", typeof(int), false),
             new("Name", typeof(string), true)
@@ -82,7 +82,7 @@ public class SchemaCompatibilityAnalyzerTests
     public void Analyze_WhenColumnMissingInTarget_ReturnsError()
     {
         // Arrange
-        var sourceSchema = new List<ColumnInfo>
+        var sourceSchema = new List<PipeColumnInfo>
         {
             new("Id", typeof(int), false),
             new("Email", typeof(string), true) // Not in target
@@ -115,7 +115,7 @@ public class SchemaCompatibilityAnalyzerTests
     public void Analyze_WhenExtraColumnInTargetIsNullable_ReturnsWarning()
     {
         // Arrange
-        var sourceSchema = new List<ColumnInfo>
+        var sourceSchema = new List<PipeColumnInfo>
         {
             new("Id", typeof(int), false)
         };
@@ -147,7 +147,7 @@ public class SchemaCompatibilityAnalyzerTests
     public void Analyze_WhenExtraColumnInTargetIsNotNull_ReturnsError()
     {
         // Arrange
-        var sourceSchema = new List<ColumnInfo>
+        var sourceSchema = new List<PipeColumnInfo>
         {
             new("Id", typeof(int), false)
         };
@@ -179,7 +179,7 @@ public class SchemaCompatibilityAnalyzerTests
     public void Analyze_WhenNullabilityConflict_ReturnsWarning()
     {
         // Arrange
-        var sourceSchema = new List<ColumnInfo>
+        var sourceSchema = new List<PipeColumnInfo>
         {
             new("Status", typeof(string), true) // Nullable source
         };
@@ -209,7 +209,7 @@ public class SchemaCompatibilityAnalyzerTests
     public void Analyze_WhenTargetHasExistingData_AddsWarning()
     {
         // Arrange
-        var sourceSchema = new List<ColumnInfo>
+        var sourceSchema = new List<PipeColumnInfo>
         {
             new("Id", typeof(int), false)
         };
@@ -240,7 +240,7 @@ public class SchemaCompatibilityAnalyzerTests
     public void Analyze_NumericUpcast_IsCompatible()
     {
         // Arrange
-        var sourceSchema = new List<ColumnInfo>
+        var sourceSchema = new List<PipeColumnInfo>
         {
             new("SmallValue", typeof(short), false) // short
         };

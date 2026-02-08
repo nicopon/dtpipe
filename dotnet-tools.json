@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "isRoot": true,
+  "tools": {
+    "dtpipe": {
+      "version": "0.9.8.7-beta",
+      "commands": [
+        "dtpipe"
+      ],
+      "rollForward": false
+    }
+  }
+}

@@ -15,7 +15,7 @@ public class NullDataTransformerTests
         // Arrange
         var options = new NullOptions { Columns = new[] { "SENSITIVE" } };
         var transformer = new NullDataTransformer(options);
-        var columns = new List<ColumnInfo>
+        var columns = new List<PipeColumnInfo>
         {
             new("ID", typeof(int), false),
             new("SENSITIVE", typeof(string), true),
@@ -28,9 +28,9 @@ public class NullDataTransformerTests
         var result = rows.Select(r => transformer.Transform(r)).ToList();
 
         // Assert
-        result[0][0].Should().Be(1);           // ID unchanged
-        result[0][1].Should().BeNull();        // SENSITIVE set to null
-        result[0][2].Should().Be("John");      // NAME unchanged
+        result[0]![0].Should().Be(1);           // ID unchanged
+        result[0]![1].Should().BeNull();        // SENSITIVE set to null
+        result[0]![2].Should().Be("John");      // NAME unchanged
     }
 
     [Fact]
@@ -39,7 +39,7 @@ public class NullDataTransformerTests
         // Arrange
         var options = new NullOptions { Columns = new[] { "NONEXISTENT" } };
         var transformer = new NullDataTransformer(options);
-        var columns = new List<ColumnInfo> { new("ID", typeof(int), false) };
+        var columns = new List<PipeColumnInfo> { new("ID", typeof(int), false) };
         var rows = new List<object?[]> { new object?[] { 1 } };
 
         // Act
@@ -47,6 +47,6 @@ public class NullDataTransformerTests
         var result = rows.Select(r => transformer.Transform(r)).ToList();
 
         // Assert
-        result[0][0].Should().Be(1);
+        result[0]![0].Should().Be(1);
     }
 }

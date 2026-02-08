@@ -11,7 +11,7 @@ public static class SqlIdentifierHelper
     /// <summary>
     /// Gets a safe identifier for a column, quoting if necessary based on case sensitivity or reserved keywords.
     /// </summary>
-    public static string GetSafeIdentifier(ISqlDialect dialect, ColumnInfo col)
+    public static string GetSafeIdentifier(ISqlDialect dialect, PipeColumnInfo col)
     {
         if (col.IsCaseSensitive || dialect.NeedsQuoting(col.Name))
         {

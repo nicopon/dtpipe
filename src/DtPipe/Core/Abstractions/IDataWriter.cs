@@ -9,7 +9,7 @@ public interface IDataWriter : IAsyncDisposable
     /// <summary>
     /// Initialize the writer with column metadata.
     /// </summary>
-    ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default);
+    ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default);
 
     /// <summary>
     /// Write a batch of rows.

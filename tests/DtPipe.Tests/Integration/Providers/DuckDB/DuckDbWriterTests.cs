@@ -9,7 +9,6 @@ using DtPipe.Configuration;
 using DtPipe.Core.Options;
 using DtPipe.Adapters.DuckDB;
 using Xunit;
-using ColumnInfo = DtPipe.Core.Models.ColumnInfo;
 
 using DtPipe.Cli.Infrastructure;
 
@@ -63,7 +62,7 @@ public class DuckDbWriterTests : IAsyncLifetime
         };
         var writer = _factory.Create(options);
 
-        var columns = new List<ColumnInfo>
+        var columns = new List<PipeColumnInfo>
         {
             new("Id", typeof(int), false),
             new("Name", typeof(string), true),
@@ -139,7 +138,7 @@ public class DuckDbWriterTests : IAsyncLifetime
         };
         var writer = _factory.Create(options);
 
-        var columns = new List<ColumnInfo>
+        var columns = new List<PipeColumnInfo>
         {
             new("Id", typeof(int), false),
             new("Name", typeof(string), true),
@@ -206,7 +205,7 @@ public class DuckDbWriterTests : IAsyncLifetime
         var writer = _factory.Create(options);
 
         // Source says ID is String, but Target is Integer
-        var columns = new List<ColumnInfo>
+        var columns = new List<PipeColumnInfo>
         {
             new("Id", typeof(string), true)
         };
@@ -248,7 +247,7 @@ public class DuckDbWriterTests : IAsyncLifetime
         var options = new DumpOptions { OutputPath = _outputPath, Provider = "duckdb", Query = "SELECT 1", ConnectionString = "dummy" };
         var writer = _factory.Create(options);
 
-        var columns = new List<ColumnInfo> { new("Id", typeof(int), false), new("Name", typeof(string), true) };
+        var columns = new List<PipeColumnInfo> { new("Id", typeof(int), false), new("Name", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { 1, "NewData" } };
 
         // Act
@@ -294,7 +293,7 @@ public class DuckDbWriterTests : IAsyncLifetime
         var options = new DumpOptions { OutputPath = _outputPath, Provider = "duckdb", Query = "SELECT 1", ConnectionString = "dummy" };
         var writer = _factory.Create(options);
 
-        var columns = new List<ColumnInfo> { new("Id", typeof(int), false), new("Name", typeof(string), true) };
+        var columns = new List<PipeColumnInfo> { new("Id", typeof(int), false), new("Name", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { 1, "NewData" } };
 
         // Act

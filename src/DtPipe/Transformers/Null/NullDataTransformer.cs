@@ -1,5 +1,4 @@
 using DtPipe.Core.Abstractions;
-using DtPipe.Cli.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 
@@ -18,12 +17,12 @@ public class NullDataTransformer : IDataTransformer, IRequiresOptions<NullOption
         _nullColumns = new HashSet<string>(options.Columns.Select(c => c.Trim()), StringComparer.OrdinalIgnoreCase);
     }
 
-    public ValueTask<IReadOnlyList<ColumnInfo>> InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
+    public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
     {
         if (_nullColumns.Count == 0)
         {
             _targetIndices = null;
-            return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
+            return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
         }
 
         var indices = new List<int>();
@@ -36,10 +35,10 @@ public class NullDataTransformer : IDataTransformer, IRequiresOptions<NullOption
         }
 
         _targetIndices = indices.Count > 0 ? indices.ToArray() : null;
-        return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
+        return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
     }
 
-    public object?[] Transform(object?[] row)
+    public object?[]? Transform(object?[] row)
     {
         if (_targetIndices == null)
         {

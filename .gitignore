@@ -43,3 +43,4 @@ tests/DtPipe.Tests/Data/Target/*
 !tests/DtPipe.Tests/Data/Target/.gitkeep
 tests/scripts/artifacts/
 !tests/scripts/artifacts/.gitkeep
+tests/scripts/sandbox/

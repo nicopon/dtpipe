@@ -15,7 +15,7 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
     private SqlBulkCopy? _bulkCopy;
     private DataTable? _bufferTable;
 
-    private IReadOnlyList<ColumnInfo>? _columns;
+    private IReadOnlyList<PipeColumnInfo>? _columns;
     private string _targetTableName = ""; // Resolved or Fallback
     private List<string> _keyColumns = new();
     private bool _isDbCaseSensitive = false;
@@ -105,12 +105,12 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
         _options = options;
     }
 
-    public async ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
+    public async ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
     {
         // Column and table normalization logic
         // Create a secure list of columns where names are normalized if not case-sensitive.
         // This ensures consistency across CREATE TABLE, INSERT, BULK COPY, MERGE, etc.
-        var normalizedColumns = new List<ColumnInfo>(columns.Count);
+        var normalizedColumns = new List<PipeColumnInfo>(columns.Count);
         foreach (var col in columns)
         {
             if (col.IsCaseSensitive)
@@ -214,7 +214,7 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
             // Sync columns metadata from introspection to ensure future DML (BulkCopy) matches exact case/quotes
             if (existingSchema != null)
             {
-                var newCols = new List<ColumnInfo>(_columns!.Count);
+                var newCols = new List<PipeColumnInfo>(_columns!.Count);
                 foreach (var col in _columns!)
                 {
                     var introspected = existingSchema.Columns.FirstOrDefault(c => c.Name.Equals(col.Name, StringComparison.OrdinalIgnoreCase));
@@ -475,7 +475,7 @@ public class SqlServerDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
     /// 
     /// For exact structure preservation, use Append strategy or manage DDL separately.
     /// </remarks>
-    private string BuildCreateTableSql(string schema, string table, IReadOnlyList<ColumnInfo> columns)
+    private string BuildCreateTableSql(string schema, string table, IReadOnlyList<PipeColumnInfo> columns)
     {
         // Quote if needed or always quote for safety
         var fullTable = $"[{schema}].[{table}]";
