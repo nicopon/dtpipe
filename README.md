@@ -24,6 +24,14 @@ DtPipe streams data from any source (SQL, CSV, Parquet) to any destination, appl
 
 ## Installation
 
+### .NET Global Tool (Recommended)
+You can install DtPipe as a global tool if you have the .NET SDK installed.
+
+```bash
+dotnet tool install -g dtpipe --prerelease
+dtpipe --help
+```
+
 ### Build from Source
 **Prerequisite:** [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) is required to compile.
 
@@ -44,7 +52,7 @@ Binary created at: `./dist/release/dtpipe`
 ### CLI Usage
 
 ```bash
-./dtpipe --input [SOURCE] --query [SQL] --output [DEST] [OPTIONS]
+dtpipe --input [SOURCE] --query [SQL] --output [DEST] [OPTIONS]
 ```
 
 
@@ -61,6 +69,7 @@ DtPipe auto-detects providers from file extensions (`.csv`, `.parquet`, `.db`, `
 | **SQL Server**| `mssql:` | `mssql:Server=.;Database=mydb` |
 | **CSV** | `csv:` / `.csv` | `data.csv` |
 | **Parquet** | `parquet:` / `.parquet`| `data.parquet` |
+| **Sample Gen** | `sample:` | `sample:1000000` (generate 1M rows) |
 | **Keyring** | `keyring://` | `keyring://my-prod-db` |
 | **STDIN/OUT** | `csv` or `parquet` | `csv` (no file path) |
 
@@ -103,12 +112,16 @@ Use `--fake "Col:Generator"` to replace sensitive data.
 #### Transformation Pipeline
 | Flag | Description |
 |:---|:---|
-| `--fake "[Col]:[Method]"` | Generate fake data. |
+| `--fake "[Col]:[Method]"` | Generate fake data using Bogus. |
 | `--mask "[Col]:[Pattern]"` | Mask chars (`#` keeps char, others replace). |
 | `--null "[Col]"` | Force column to NULL. |
 | `--overwrite "[Col]:[Val]"`| Set column to fixed value. |
 | `--format "[Col]:[Fmt]"` | Apply .NET format string. |
-| `--script "[Col]:[JS]"` | Apply Javascript logic. Supports inline code or file paths (`@file.js`). |
+| `--compute "[Col]:[JS]"` | Apply Javascript logic. Supports inline code or file paths (`@file.js`). |
+| `--filter "[JS]"` | Drop rows based on JS logic (must return true/false). |
+| `--expand "[JS]"` | Multi-row expansion. JS expression returning an array. |
+| `--window-count [N]` | Accumulate rows in a window of size N. |
+| `--window-script "[JS]"` | Script to execute on window `rows` (must return array). |
 | `--project`, `--drop` | Whitelist or Blacklist columns. |
 
 #### Pipeline Modifiers

@@ -46,7 +46,7 @@ public class CaseSensitivityIntegrationTests : IAsyncLifetime
         
         // 3. Define Source Columns
         // If IsCaseSensitive=true, Writer should Quote it.
-        var columns = new List<DtPipe.Core.Models.ColumnInfo> { 
+        var columns = new List<DtPipe.Core.Models.PipeColumnInfo> { 
             new("Id", typeof(int), false, IsCaseSensitive: true),
             new("MixedCol", typeof(string), true, IsCaseSensitive: true)
         };
@@ -85,7 +85,7 @@ public class CaseSensitivityIntegrationTests : IAsyncLifetime
         };
         await using var writer = new DuckDbDataWriter(_connectionString, options);
         
-        var columns = new List<DtPipe.Core.Models.ColumnInfo> { 
+        var columns = new List<DtPipe.Core.Models.PipeColumnInfo> { 
             new("Id", typeof(int), false, IsCaseSensitive: false), // "Id" -> SafeIdentifier "Id" (unquoted) -> Matches "id" in DuckDB
             new("Val", typeof(string), true, IsCaseSensitive: false)
         };
@@ -121,7 +121,7 @@ public class CaseSensitivityIntegrationTests : IAsyncLifetime
         await using var writer = new DuckDbDataWriter(_connectionString, options);
         
         // 3. Columns with Case Sensitivity = true
-        var columns = new List<DtPipe.Core.Models.ColumnInfo> { 
+        var columns = new List<DtPipe.Core.Models.PipeColumnInfo> { 
             new("Id", typeof(int), false, IsCaseSensitive: true),
             new("Val", typeof(string), true, IsCaseSensitive: true)
         };

@@ -7,6 +7,7 @@ public class CliOptionAttribute : Attribute
 {
     public string? Name { get; }
     public string? Description { get; set; }
+    public string[]? Aliases { get; set; }
 
     public CliOptionAttribute() { }
 

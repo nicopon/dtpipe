@@ -110,7 +110,7 @@ public class JobService
 
         rootCommand.SetAction(async (ParseResult parseResult, CancellationToken ct) =>
         {
-            // Execution logic
+            // Perform preliminary contributor actions
 
             foreach (var contributor in _contributors)
             {

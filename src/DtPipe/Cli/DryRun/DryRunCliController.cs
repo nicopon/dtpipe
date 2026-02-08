@@ -198,7 +198,7 @@ public class DryRunCliController
 
             for (int k = 0; k < schema.Count; k++)
             {
-                if (k >= values.Length) break;
+                if (values == null || k >= values.Length) break;
                 
                 var targetCol = columnMap[k];
                 

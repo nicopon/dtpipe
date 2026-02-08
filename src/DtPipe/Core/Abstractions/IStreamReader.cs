@@ -9,7 +9,7 @@ public interface IStreamReader : IAsyncDisposable
     /// <summary>
     /// Gets the columns of the result set. Available after OpenAsync.
     /// </summary>
-    IReadOnlyList<ColumnInfo>? Columns { get; }
+    IReadOnlyList<PipeColumnInfo>? Columns { get; }
 
     /// <summary>
     /// Opens the connection and executes the query.

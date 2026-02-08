@@ -9,7 +9,7 @@ namespace DtPipe.Core.Models;
 /// <param name="IsVirtual">Virtual columns are not exported (used for intermediate values)</param>
 /// <param name="IsCaseSensitive">Whether the column name requires case-sensitive handling (must be quoted)</param>
 /// <param name="OriginalName">Original column name if normalization occurred (e.g. from UPPERCASE to Normal case)</param>
-public sealed record ColumnInfo(
+public sealed record PipeColumnInfo(
     string Name, 
     Type ClrType, 
     bool IsNullable,

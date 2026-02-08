@@ -2,14 +2,18 @@
 using DtPipe.Cli;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Options;
+using DtPipe.Core.Services;
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Transformers.Format;
 using DtPipe.Transformers.Fake;
 using DtPipe.Transformers.Null;
 using DtPipe.Transformers.Overwrite;
 using DtPipe.Transformers.Script;
+using DtPipe.Transformers.Filter;
+using DtPipe.Transformers.Expand;
 using DtPipe.Transformers.Mask;
 using DtPipe.Transformers.Project;
+using DtPipe.Transformers.Window;
 using DtPipe.Adapters.Oracle;
 using DtPipe.Adapters.SqlServer;
 using DtPipe.Adapters.DuckDB;
@@ -112,8 +116,14 @@ class Program
         services.AddSingleton<IDataTransformerFactory, FakeDataTransformerFactory>();
         services.AddSingleton<IDataTransformerFactory, FormatDataTransformerFactory>();
         services.AddSingleton<IDataTransformerFactory, MaskDataTransformerFactory>();
-        services.AddSingleton<IDataTransformerFactory, ScriptDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, ComputeDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, FilterDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, ExpandDataTransformerFactory>();
         services.AddSingleton<IDataTransformerFactory, ProjectDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, WindowDataTransformerFactory>();
+        
+        // Services
+        services.AddSingleton<IJsEngineProvider, JsEngineProvider>();
         
         // Export Service
         services.AddSingleton<ExportService>();

@@ -17,7 +17,7 @@ public class CsvStreamReader : IStreamReader
     private CsvReader? _csvReader;
     private string[]? _headers;
 
-    public IReadOnlyList<ColumnInfo>? Columns { get; private set; }
+    public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
 
     public CsvStreamReader(string filePath, CsvReaderOptions options)
     {
@@ -77,7 +77,7 @@ public class CsvStreamReader : IStreamReader
         }
 
         // All CSV columns are strings
-        Columns = _headers.Select(h => new ColumnInfo(h, typeof(string), true)).ToList();
+        Columns = _headers.Select(h => new PipeColumnInfo(h, typeof(string), true)).ToList();
     }
 
     public async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(

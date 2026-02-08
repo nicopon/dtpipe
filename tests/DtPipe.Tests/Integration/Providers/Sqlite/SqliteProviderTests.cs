@@ -79,7 +79,7 @@ public class SqliteProviderTests : IAsyncLifetime
         var registry = new OptionsRegistry();
         registry.Register(new SqliteWriterOptions { Table = "Export", Strategy = SqliteWriteStrategy.Recreate });
 
-        var columns = new List<ColumnInfo>
+        var columns = new List<PipeColumnInfo>
         {
             new("Id", typeof(int), false),
             new("Name", typeof(string), true),
@@ -186,7 +186,7 @@ public class SqliteProviderTests : IAsyncLifetime
         }
 
         // 2. Setup Source Data
-        var columns = new List<DtPipe.Core.Models.ColumnInfo>
+        var columns = new List<DtPipe.Core.Models.PipeColumnInfo>
         {
             new("Id", typeof(int), false),
             new("Name", typeof(string), true),
@@ -249,7 +249,7 @@ public class SqliteProviderTests : IAsyncLifetime
         var registry = new OptionsRegistry();
         registry.Register(new SqliteWriterOptions { Table = tableName, Strategy = SqliteWriteStrategy.DeleteThenInsert });
 
-        var columns = new List<ColumnInfo> { new("Id", typeof(int), false), new("Name", typeof(string), true) };
+        var columns = new List<PipeColumnInfo> { new("Id", typeof(int), false), new("Name", typeof(string), true) };
         var rows = new List<object?[]> { new object?[] { 1, "NewData" } };
 
         // Act
@@ -309,7 +309,7 @@ public class SqliteProviderTests : IAsyncLifetime
             var registry = new OptionsRegistry();
             registry.Register(new SqliteWriterOptions { Table = tableNameRaw, Strategy = SqliteWriteStrategy.Recreate });
 
-            var columns = new List<ColumnInfo> 
+            var columns = new List<PipeColumnInfo> 
             { 
                 new("Code", typeof(string), true), 
                 new("Score", typeof(decimal), false),

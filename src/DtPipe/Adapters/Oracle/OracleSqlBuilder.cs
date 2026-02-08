@@ -16,7 +16,7 @@ internal static class OracleSqlBuilder
     /// </summary>
     public static (string Sql, OracleDbType[] Types) BuildMergeSql(
         string targetTable,
-        IReadOnlyList<ColumnInfo> columns,
+        IReadOnlyList<PipeColumnInfo> columns,
         List<string> keyColumns,
         ISqlDialect dialect,
         bool isUpsert)
@@ -80,7 +80,7 @@ internal static class OracleSqlBuilder
     /// </summary>
     public static (string Sql, OracleDbType[] Types) BuildInsertSql(
         string targetTable,
-        IReadOnlyList<ColumnInfo> columns,
+        IReadOnlyList<PipeColumnInfo> columns,
         ISqlDialect dialect,
         bool useAppendHint)
     {

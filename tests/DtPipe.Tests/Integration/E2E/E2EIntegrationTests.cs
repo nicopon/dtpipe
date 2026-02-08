@@ -3,14 +3,14 @@ using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Models;
-using DtPipe.Cli.Abstractions;
 using DtPipe.Core.Options;
 using DtPipe.Adapters.DuckDB;
-using DtPipe.Tests.Helpers;
-using DtPipe.Transformers.Fake;
-using DtPipe.Adapters;
 using DtPipe.Adapters.Csv;
+using DtPipe.Tests.Helpers;
+using DtPipe.Transformers.Null;
+using DtPipe.Transformers.Overwrite;
+using DtPipe.Transformers.Format;
+using DtPipe.Transformers.Fake;
 using Spectre.Console;
 using Moq;
 using DtPipe.Cli.Infrastructure;
@@ -154,17 +154,17 @@ public class E2EIntegrationTests : IAsyncLifetime
         registry.Register(new DuckDbReaderOptions());
         registry.Register(new CsvWriterOptions { Header = true });
         
-        registry.Register(new Transformers.Null.NullOptions 
+        registry.Register(new NullOptions 
         { 
             Columns = ["Age"] 
         });
         
-        registry.Register(new Transformers.Overwrite.OverwriteOptions 
+        registry.Register(new OverwriteOptions 
         { 
             Overwrite = ["Name:Bond"] 
         });
         
-        registry.Register(new Transformers.Format.FormatOptions
+        registry.Register(new FormatOptions
         {
             Format = ["CopiedName:{Name} is 007"]
         });
@@ -186,10 +186,10 @@ public class E2EIntegrationTests : IAsyncLifetime
             sp));
         
         // Transformer Factories
-        services.AddSingleton<IDataTransformerFactory, Transformers.Null.NullDataTransformerFactory>();
-        services.AddSingleton<IDataTransformerFactory, Transformers.Overwrite.OverwriteDataTransformerFactory>();
-        services.AddSingleton<IDataTransformerFactory, Transformers.Fake.FakeDataTransformerFactory>();
-        services.AddSingleton<IDataTransformerFactory, Transformers.Format.FormatDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, NullDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, OverwriteDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, FakeDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, FormatDataTransformerFactory>();
         
         services.AddSingleton<ExportService>();
         services.AddSingleton(new Mock<IAnsiConsole>().Object);
@@ -262,9 +262,9 @@ public class E2EIntegrationTests : IAsyncLifetime
         registry.Register(new CsvWriterOptions { Header = true });
         
         // Register empty options, they will be populated by the pipeline builder from args
-        registry.Register(new Transformers.Null.NullOptions());
-        registry.Register(new Transformers.Overwrite.OverwriteOptions());
-        registry.Register(new Transformers.Format.FormatOptions());
+        registry.Register(new NullOptions());
+        registry.Register(new OverwriteOptions());
+        registry.Register(new FormatOptions());
         registry.Register(new FakeOptions());
 
         var services = new ServiceCollection();
@@ -284,10 +284,10 @@ public class E2EIntegrationTests : IAsyncLifetime
             sp));
         
         // Transformer Factories
-        services.AddSingleton<IDataTransformerFactory, Transformers.Null.NullDataTransformerFactory>();
-        services.AddSingleton<IDataTransformerFactory, Transformers.Overwrite.OverwriteDataTransformerFactory>();
-        services.AddSingleton<IDataTransformerFactory, Transformers.Fake.FakeDataTransformerFactory>();
-        services.AddSingleton<IDataTransformerFactory, Transformers.Format.FormatDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, NullDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, OverwriteDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, FakeDataTransformerFactory>();
+        services.AddSingleton<IDataTransformerFactory, FormatDataTransformerFactory>();
         
         services.AddSingleton<ExportService>();
         services.AddSingleton(new Mock<IAnsiConsole>().Object);

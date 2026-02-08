@@ -30,7 +30,7 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvWriterOptio
     private StreamWriter? _streamWriter;
     private CsvWriter? _csvWriter;
     
-    private IReadOnlyList<ColumnInfo>? _columns;
+    private IReadOnlyList<PipeColumnInfo>? _columns;
     private int _rowsInBuffer;
     private const int FlushThreshold = 1000; // Flush every N rows
 
@@ -104,7 +104,7 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvWriterOptio
         }
     }
 
-    public ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
+    public ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(_outputPath) || _outputPath == "-")
         {
@@ -182,7 +182,7 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvWriterOptio
         _rowsInBuffer = 0;
     }
 
-    private string? FormatValue(object? value, ColumnInfo column)
+    private string? FormatValue(object? value, PipeColumnInfo column)
     {
         if (value is null)
         {

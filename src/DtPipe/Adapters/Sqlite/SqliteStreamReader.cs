@@ -15,7 +15,7 @@ public class SqliteStreamReader : IStreamReader
     private SqliteDataReader? _reader;
     private readonly SemaphoreSlim _semaphore = new(1, 1);
 
-    public IReadOnlyList<ColumnInfo>? Columns { get; private set; }
+    public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
 
     public SqliteStreamReader(string connectionString, string query, int queryTimeout = 0)
     {
@@ -84,12 +84,12 @@ public class SqliteStreamReader : IStreamReader
         }
     }
 
-    private static List<ColumnInfo> ExtractColumns(SqliteDataReader reader)
+    private static List<PipeColumnInfo> ExtractColumns(SqliteDataReader reader)
     {
-        var columns = new List<ColumnInfo>(reader.FieldCount);
+        var columns = new List<PipeColumnInfo>(reader.FieldCount);
         for (int i = 0; i < reader.FieldCount; i++)
         {
-            columns.Add(new ColumnInfo(
+            columns.Add(new PipeColumnInfo(
                 reader.GetName(i),
                 reader.GetFieldType(i),
                 true, // SQLite is dynamically typed, assume nullable

@@ -17,7 +17,7 @@ public class FormatDataTransformerBenchmarks
     {
         var options = new FormatOptions { Format = new[] { "FULLNAME:{FIRST} {LAST}", "PRICE_FMT:{PRICE:0.00} USD" } };
         _transformer = new FormatDataTransformer(options);
-        var columns = new List<ColumnInfo>
+        var columns = new List<PipeColumnInfo>
         {
             new("FIRST", typeof(string), true),
             new("LAST", typeof(string), true),

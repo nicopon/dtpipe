@@ -45,6 +45,8 @@ public static class CliOptionBuilder
             var propType = property.PropertyType;
             var isList = propType != typeof(string) && typeof(System.Collections.IEnumerable).IsAssignableFrom(propType);
 
+            Option option;
+
             if (isList)
             {
                 // Handle List<string> etc.
@@ -53,14 +55,16 @@ public static class CliOptionBuilder
                     propType == typeof(string[]) || 
                     propType == typeof(IEnumerable<string>))
                 {
-                    var option = new Option<string[]>(flagName)
+                    option = new Option<string[]>(flagName)
                     {
                         Description = description,
                         Arity = ArgumentArity.ZeroOrMore,
                         AllowMultipleArgumentsPerToken = true
                     };
-                    options.Add(option);
-
+                }
+                else
+                {
+                    continue;
                 }
             }
             else
@@ -71,7 +75,7 @@ public static class CliOptionBuilder
                 
                 // Create generic option dynamically
                 var optionType = typeof(Option<>).MakeGenericType(underlyingType);
-                var option = (Option)Activator.CreateInstance(optionType, new object[] { flagName })!;
+                option = (Option)Activator.CreateInstance(optionType, new object[] { flagName })!;
                 
                 // Set description
                 option.Description = description;
@@ -87,9 +91,24 @@ public static class CliOptionBuilder
                 {
                     SetDefaultValue(option, optionType, underlyingType, defaultValue);
                 }
-                
-                options.Add(option);
             }
+            
+            // Add Aliases if defined
+            if (cliOptionAttr?.Aliases != null)
+            {
+                foreach (var alias in cliOptionAttr.Aliases)
+                {
+                    // Reflection workaround for AddAlias
+                    var addAliasMethod = option.GetType().GetMethod("AddAlias") 
+                                         ?? typeof(Symbol).GetMethod("AddAlias");
+                    if (addAliasMethod != null)
+                    {
+                        addAliasMethod.Invoke(option, new object[] { alias });
+                    }
+                }
+            }
+
+            options.Add(option);
         }
 
         return options;
@@ -161,6 +180,21 @@ public static class CliOptionBuilder
                 if (defaultValue != null)
                 {
                     SetDefaultValue(option, optionType, underlyingType, defaultValue);
+                }
+            }
+            
+            // Add Aliases if defined
+            if (cliOptionAttr?.Aliases != null)
+            {
+                foreach (var alias in cliOptionAttr.Aliases)
+                {
+                    // Reflection workaround for AddAlias
+                    var addAliasMethod = option.GetType().GetMethod("AddAlias") 
+                                         ?? typeof(Symbol).GetMethod("AddAlias");
+                    if (addAliasMethod != null)
+                    {
+                        addAliasMethod.Invoke(option, new object[] { alias });
+                    }
                 }
             }
             

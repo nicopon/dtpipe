@@ -88,11 +88,11 @@ public class ColumnMatcherTests
     public void FindMatchingColumnCaseInsensitive_WithColumnInfo_ReturnsColumn()
     {
         // Arrange
-        var columns = new List<ColumnInfo>
+        var columns = new List<PipeColumnInfo>
         {
-            new ColumnInfo("id", typeof(int), false),
-            new ColumnInfo("Name", typeof(string), false),
-            new ColumnInfo("Email", typeof(string), false)
+            new PipeColumnInfo("id", typeof(int), false),
+            new PipeColumnInfo("Name", typeof(string), false),
+            new PipeColumnInfo("Email", typeof(string), false)
         };
         
         // Act
@@ -128,7 +128,7 @@ public class ColumnMatcherTests
     public void FindMatchingColumnCaseInsensitive_EmptyList_ReturnsNull()
     {
         // Arrange
-        var columns = new List<ColumnInfo>();
+        var columns = new List<PipeColumnInfo>();
         
         // Act
         var result = ColumnMatcher.FindMatchingColumnCaseInsensitive(
@@ -160,10 +160,10 @@ public class ColumnMatcherTests
     public void FindMatchingColumnCaseInsensitive_SpecialCharacters_Match()
     {
         // Arrange
-        var columns = new List<ColumnInfo>
+        var columns = new List<PipeColumnInfo>
         {
-            new ColumnInfo("user-id", typeof(int), false, true), // Case-sensitive
-            new ColumnInfo("normal_col", typeof(string), false)
+            new PipeColumnInfo("user-id", typeof(int), false, true), // Case-sensitive
+            new PipeColumnInfo("normal_col", typeof(string), false)
         };
         
         // Act

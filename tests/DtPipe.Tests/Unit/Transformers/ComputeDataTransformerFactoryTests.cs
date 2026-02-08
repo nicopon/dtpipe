@@ -1,18 +1,15 @@
 using DtPipe.Transformers.Script;
 using FluentAssertions;
 using Xunit;
-using DtPipe.Core.Options;
+using DtPipe.Core.Services;
 
 namespace DtPipe.Tests.Unit.Transformers;
 
-public class ScriptDataTransformerFactoryTests
+public class ComputeDataTransformerFactoryTests
 {
-    private class TestableScriptDataTransformerFactory : ScriptDataTransformerFactory
+    private class TestableComputeDataTransformerFactory : ComputeDataTransformerFactory
     {
-        public TestableScriptDataTransformerFactory() : base(new DtPipe.Core.Options.OptionsRegistry()) { }
-
-        // Expose protected/private logic if needed, but here we test public methods
-        // Since ResolveScriptContent is private static, we test it via CreateFromConfiguration
+        public TestableComputeDataTransformerFactory() : base(new DtPipe.Core.Options.OptionsRegistry(), new JsEngineProvider()) { }
     }
 
     [Fact]
@@ -23,19 +20,15 @@ public class ScriptDataTransformerFactoryTests
         var scriptContent = "return row.NAME.toUpperCase();";
         File.WriteAllText(tempFile, scriptContent);
         
-        var factory = new TestableScriptDataTransformerFactory();
+        var factory = new TestableComputeDataTransformerFactory();
         var config = new List<(string, string)> { ("--script", $"NAME:{tempFile}") };
 
         try 
         {
             // Act
-            var transformer = (ScriptDataTransformer)factory.CreateFromConfiguration(config);
+            var transformer = (ComputeDataTransformer)factory.CreateFromConfiguration(config);
 
             // Assert
-            // We can't easily inspect private state without reflection, 
-            // but we can verify it behaves correctly or check if it throws if invalid.
-            // For now, let's assume if it returns a transformer, it parsed it.
-            // Improve: use reflection to check internal mappings if necessary.
             transformer.Should().NotBeNull();
         }
         finally
@@ -52,14 +45,14 @@ public class ScriptDataTransformerFactoryTests
         var scriptContent = "return row.NAME.toUpperCase();";
         File.WriteAllText(tempFile, scriptContent);
         
-        var factory = new TestableScriptDataTransformerFactory();
+        var factory = new TestableComputeDataTransformerFactory();
         // Use @ prefix
         var config = new List<(string, string)> { ("--script", $"NAME:@{tempFile}") };
 
         try 
         {
             // Act
-            var transformer = (ScriptDataTransformer)factory.CreateFromConfiguration(config);
+            var transformer = (ComputeDataTransformer)factory.CreateFromConfiguration(config);
 
             // Assert
             transformer.Should().NotBeNull();
@@ -75,11 +68,26 @@ public class ScriptDataTransformerFactoryTests
     {
         // Arrange
         var inlineScript = "return row.AGE * 2;";
-        var factory = new TestableScriptDataTransformerFactory();
+        var factory = new TestableComputeDataTransformerFactory();
         var config = new List<(string, string)> { ("--script", $"AGE:{inlineScript}") };
 
         // Act
-        var transformer = (ScriptDataTransformer)factory.CreateFromConfiguration(config);
+        var transformer = (ComputeDataTransformer)factory.CreateFromConfiguration(config);
+
+        // Assert
+        transformer.Should().NotBeNull();
+    }
+    
+    [Fact]
+    public void CreateFromConfiguration_ShouldSupportComputeAlias()
+    {
+        // Arrange
+        var inlineScript = "return row.AGE * 2;";
+        var factory = new TestableComputeDataTransformerFactory();
+        var config = new List<(string, string)> { ("--compute", $"AGE:{inlineScript}") };
+
+        // Act
+        var transformer = (ComputeDataTransformer)factory.CreateFromConfiguration(config);
 
         // Assert
         transformer.Should().NotBeNull();

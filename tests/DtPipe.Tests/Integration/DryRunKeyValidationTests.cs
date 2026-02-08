@@ -13,7 +13,7 @@ public class DryRunKeyValidationTests
         public bool IsRequired { get; set; } = true;
         public List<string> RequestedKeys { get; set; } = new();
         public ISqlDialect Dialect { get; set; } = null!;
-        public List<ColumnInfo> TargetColumns { get; set; } = new();
+        public List<PipeColumnInfo> TargetColumns { get; set; } = new();
         public List<string>? TargetPKs { get; set; } = null;
 
         public Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
@@ -47,7 +47,7 @@ public class DryRunKeyValidationTests
     private void SetupReader(Mock<IStreamReader> readerMock)
     {
         // Setup Columns
-        var cols = new List<ColumnInfo>
+        var cols = new List<PipeColumnInfo>
         {
             new("id", typeof(int), false),
             new("name", typeof(string), true),
@@ -79,7 +79,7 @@ public class DryRunKeyValidationTests
             Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect(),
             TargetPKs = new List<string> { "id" } // Target agrees
         };
-        writer.TargetColumns = new List<ColumnInfo>
+        writer.TargetColumns = new List<PipeColumnInfo>
         {
             new("id", typeof(int), false),
             new("name", typeof(string), true)
@@ -114,7 +114,7 @@ public class DryRunKeyValidationTests
             RequestedKeys = new List<string> { "invalid_col" },
             Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect()
         };
-        writer.TargetColumns = new List<ColumnInfo>
+        writer.TargetColumns = new List<PipeColumnInfo>
         {
             new("id", typeof(int), false),
             new("name", typeof(string), true)
@@ -149,7 +149,7 @@ public class DryRunKeyValidationTests
             Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect(),
             TargetPKs = new List<string> { "id" }
         };
-        writer.TargetColumns = new List<ColumnInfo> { new("id", typeof(int), false) };
+        writer.TargetColumns = new List<PipeColumnInfo> { new("id", typeof(int), false) };
 
         var result = await analyzer.AnalyzeAsync(reader.Object, new List<IDataTransformer>(), 10, writer);
 
@@ -171,7 +171,7 @@ public class DryRunKeyValidationTests
             RequestedKeys = new List<string>(),
             Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect()
         };
-        writer.TargetColumns = new List<ColumnInfo> { new("id", typeof(int), false) };
+        writer.TargetColumns = new List<PipeColumnInfo> { new("id", typeof(int), false) };
 
         var result = await analyzer.AnalyzeAsync(reader.Object, new List<IDataTransformer>(), 10, writer);
 
@@ -193,7 +193,7 @@ public class DryRunKeyValidationTests
             RequestedKeys = new List<string>(), 
             Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect()
         };
-        writer.TargetColumns = new List<ColumnInfo> { new("id", typeof(int), false) };
+        writer.TargetColumns = new List<PipeColumnInfo> { new("id", typeof(int), false) };
 
         var result = await analyzer.AnalyzeAsync(reader.Object, new List<IDataTransformer>(), 10, writer);
 
@@ -219,7 +219,7 @@ public class DryRunKeyValidationTests
             Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect(),
             TargetPKs = new List<string> { "id", "tenant_id" } // Exact match
         };
-        writer.TargetColumns = new List<ColumnInfo> 
+        writer.TargetColumns = new List<PipeColumnInfo> 
         { 
             new("id", typeof(int), false),
             new("tenant_id", typeof(int), false)
@@ -247,7 +247,7 @@ public class DryRunKeyValidationTests
             Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect(),
             TargetPKs = new List<string> { "id", "tenant_id" } // Mismatch
         };
-        writer.TargetColumns = new List<ColumnInfo> 
+        writer.TargetColumns = new List<PipeColumnInfo> 
         { 
             new("id", typeof(int), false),
             new("tenant_id", typeof(int), false)
@@ -275,7 +275,7 @@ public class DryRunKeyValidationTests
             Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect(),
             TargetPKs = new List<string> { "id" } // Target is simpler
         };
-        writer.TargetColumns = new List<ColumnInfo> 
+        writer.TargetColumns = new List<PipeColumnInfo> 
         { 
             new("id", typeof(int), false),
             new("tenant_id", typeof(int), false)
@@ -305,7 +305,7 @@ public class DryRunKeyValidationTests
             Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect(),
             TargetPKs = new List<string>() // Empty!
         };
-        writer.TargetColumns = new List<ColumnInfo> 
+        writer.TargetColumns = new List<PipeColumnInfo> 
         { 
             new("id", typeof(int), false)
         };

@@ -18,7 +18,7 @@ public static class ColumnHelper
     /// BACKWARD COMPATIBILITY: This method continues to throw exceptions for consistency
     /// with existing code. For non-throwing behavior, use <see cref="ColumnMatcher"/> directly.
     /// </remarks>
-    public static string ResolveKeyColumn(string keyName, IReadOnlyList<ColumnInfo> columns)
+    public static string ResolveKeyColumn(string keyName, IReadOnlyList<PipeColumnInfo> columns)
     {
         // CRITICAL: Delegate to ColumnMatcher as single source of truth
         // Use case-insensitive matching for backward compatibility
@@ -44,7 +44,7 @@ public static class ColumnHelper
     /// <param name="keySpec">Comma-separated key column names (e.g., "Id,Name")</param>
     /// <param name="columns">Available columns (already normalized)</param>
     /// <returns>List of resolved column names</returns>
-    public static List<string> ResolveKeyColumns(string keySpec, IReadOnlyList<ColumnInfo> columns)
+    public static List<string> ResolveKeyColumns(string keySpec, IReadOnlyList<PipeColumnInfo> columns)
     {
         if (string.IsNullOrEmpty(keySpec))
             return new List<string>();

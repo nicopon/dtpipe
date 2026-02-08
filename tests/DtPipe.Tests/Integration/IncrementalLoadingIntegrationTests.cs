@@ -57,7 +57,7 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
         };
         await using var writer = new DuckDbDataWriter(_connectionString, options);
         
-        var columns = new List<DtPipe.Core.Models.ColumnInfo> { 
+        var columns = new List<DtPipe.Core.Models.PipeColumnInfo> { 
             new("id", typeof(int), false),
             new("name", typeof(string), true)
         };
@@ -101,7 +101,7 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
         };
         await using var writer = new DuckDbDataWriter(_connectionString, options);
         
-        var columns = new List<DtPipe.Core.Models.ColumnInfo> { 
+        var columns = new List<DtPipe.Core.Models.PipeColumnInfo> { 
             new("id", typeof(int), false),
             new("name", typeof(string), true)
         };
@@ -165,7 +165,7 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
         // 2. Write
         var options = new SqlServerWriterOptions { Table = "users", Strategy = SqlServerWriteStrategy.Upsert, Key="id" };
         await using var writer = new SqlServerDataWriter(cs, options);
-        var columns = new List<DtPipe.Core.Models.ColumnInfo> { new("id", typeof(int), false), new("name", typeof(string), true) };
+        var columns = new List<DtPipe.Core.Models.PipeColumnInfo> { new("id", typeof(int), false), new("name", typeof(string), true) };
         await writer.InitializeAsync(columns);
 
         var batch = new List<object?[]> {
@@ -215,7 +215,7 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
         // 2. Write
         var options = new SqlServerWriterOptions { Table = "users_ign", Strategy = SqlServerWriteStrategy.Ignore, Key="id" };
         await using var writer = new SqlServerDataWriter(cs, options);
-        var columns = new List<DtPipe.Core.Models.ColumnInfo> { new("id", typeof(int), false), new("name", typeof(string), true) };
+        var columns = new List<DtPipe.Core.Models.PipeColumnInfo> { new("id", typeof(int), false), new("name", typeof(string), true) };
         await writer.InitializeAsync(columns);
 
         var batch = new List<object?[]> {
@@ -265,7 +265,7 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
         // 2. Write
         var options = new PostgreSqlWriterOptions { Table = "users", Strategy = PostgreSqlWriteStrategy.Upsert, Key="id" };
         await using var writer = new PostgreSqlDataWriter(cs, options);
-        var columns = new List<DtPipe.Core.Models.ColumnInfo> { new("id", typeof(int), false), new("name", typeof(string), true) };
+        var columns = new List<DtPipe.Core.Models.PipeColumnInfo> { new("id", typeof(int), false), new("name", typeof(string), true) };
         await writer.InitializeAsync(columns);
 
         var batch = new List<object?[]> {
@@ -315,7 +315,7 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
         // 2. Write
         var options = new PostgreSqlWriterOptions { Table = "users_ign", Strategy = PostgreSqlWriteStrategy.Ignore, Key="id" };
         await using var writer = new PostgreSqlDataWriter(cs, options);
-        var columns = new List<DtPipe.Core.Models.ColumnInfo> { new("id", typeof(int), false), new("name", typeof(string), true) };
+        var columns = new List<DtPipe.Core.Models.PipeColumnInfo> { new("id", typeof(int), false), new("name", typeof(string), true) };
         await writer.InitializeAsync(columns);
 
         var batch = new List<object?[]> {
@@ -368,7 +368,7 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
             registry.Register(options);
             
             await using var writer = new SqliteDataWriter(cs, registry);
-            var columns = new List<DtPipe.Core.Models.ColumnInfo> { new("id", typeof(int), false), new("name", typeof(string), true) };
+            var columns = new List<DtPipe.Core.Models.PipeColumnInfo> { new("id", typeof(int), false), new("name", typeof(string), true) };
             await writer.InitializeAsync(columns);
 
             var batch = new List<object?[]> {
@@ -426,7 +426,7 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
         // 2. Write
         var options = new OracleWriterOptions { Table = "users", Strategy = OracleWriteStrategy.Upsert, Key="id" };
         await using var writer = new OracleDataWriter(cs, options, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance);
-        var columns = new List<DtPipe.Core.Models.ColumnInfo> { new("id", typeof(int), false), new("name", typeof(string), true) };
+        var columns = new List<DtPipe.Core.Models.PipeColumnInfo> { new("id", typeof(int), false), new("name", typeof(string), true) };
         await writer.InitializeAsync(columns);
 
         var batch = new List<object?[]> {
@@ -468,7 +468,7 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
         // 2. Write
         var options = new DuckDbWriterOptions { Table = "comp_users", Strategy = DuckDbWriteStrategy.Upsert, Key="region,branch" };
         await using var writer = new DuckDbDataWriter(_connectionString, options);
-        var columns = new List<DtPipe.Core.Models.ColumnInfo> { 
+        var columns = new List<DtPipe.Core.Models.PipeColumnInfo> { 
             new("region", typeof(string), true), 
             new("branch", typeof(string), true),
             new("target", typeof(int), false)
@@ -513,7 +513,7 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 
         var options = new SqlServerWriterOptions { Table = "CompUsers", Strategy = SqlServerWriteStrategy.Upsert, Key="Region,Branch" };
         await using var writer = new SqlServerDataWriter(cs, options);
-        var columns = new List<DtPipe.Core.Models.ColumnInfo> { 
+        var columns = new List<DtPipe.Core.Models.PipeColumnInfo> { 
              new("Region", typeof(string), true), new("Branch", typeof(string), true), new("Target", typeof(int), false) 
         };
         await writer.InitializeAsync(columns);
@@ -552,7 +552,7 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 
         var options = new PostgreSqlWriterOptions { Table = "comp_users", Strategy = PostgreSqlWriteStrategy.Upsert, Key="region,branch" };
         await using var writer = new PostgreSqlDataWriter(cs, options);
-        var columns = new List<DtPipe.Core.Models.ColumnInfo> { 
+        var columns = new List<DtPipe.Core.Models.PipeColumnInfo> { 
              new("region", typeof(string), true), new("branch", typeof(string), true), new("target", typeof(int), false) 
         };
         await writer.InitializeAsync(columns);
@@ -591,7 +591,7 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 
         var options = new OracleWriterOptions { Table = "COMP_USERS", Strategy = OracleWriteStrategy.Upsert, Key="REGION,BRANCH" };
         await using var writer = new OracleDataWriter(cs, options, NullLogger<OracleDataWriter>.Instance);
-        var columns = new List<DtPipe.Core.Models.ColumnInfo> { 
+        var columns = new List<DtPipe.Core.Models.PipeColumnInfo> { 
              new("REGION", typeof(string), true), new("BRANCH", typeof(string), true), new("TARGET", typeof(int), false) 
         };
         await writer.InitializeAsync(columns);
@@ -635,7 +635,7 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
             registry.Register(options);
             
             await using var writer = new SqliteDataWriter(cs, registry);
-            var columns = new List<DtPipe.Core.Models.ColumnInfo> { 
+            var columns = new List<DtPipe.Core.Models.PipeColumnInfo> { 
                 new("region", typeof(string), true), new("branch", typeof(string), true), new("target", typeof(int), false) 
             };
             await writer.InitializeAsync(columns);
@@ -686,7 +686,7 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
             registry.Register(options);
             
             await using var writer = new SqliteDataWriter(cs, registry);
-            var columns = new List<DtPipe.Core.Models.ColumnInfo> { new("id", typeof(int), false), new("name", typeof(string), true) };
+            var columns = new List<DtPipe.Core.Models.PipeColumnInfo> { new("id", typeof(int), false), new("name", typeof(string), true) };
             await writer.InitializeAsync(columns);
 
             var batch = new List<object?[]> {
@@ -743,7 +743,7 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
         // 2. Write
         var options = new OracleWriterOptions { Table = "USERS_IGN", Strategy = OracleWriteStrategy.Ignore, Key="ID" };
         await using var writer = new OracleDataWriter(cs, options, NullLogger<OracleDataWriter>.Instance);
-        var columns = new List<DtPipe.Core.Models.ColumnInfo> { new("ID", typeof(int), false), new("NAME", typeof(string), true) };
+        var columns = new List<DtPipe.Core.Models.PipeColumnInfo> { new("ID", typeof(int), false), new("NAME", typeof(string), true) };
         await writer.InitializeAsync(columns);
 
         var batch = new List<object?[]> {

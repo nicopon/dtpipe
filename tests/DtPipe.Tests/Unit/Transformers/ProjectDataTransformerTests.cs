@@ -6,7 +6,7 @@ namespace DtPipe.Tests.Unit.Transformers;
 
 public class ProjectDataTransformerTests
 {
-    private readonly IReadOnlyList<ColumnInfo> _sourceSchema = new List<ColumnInfo>
+    private readonly IReadOnlyList<PipeColumnInfo> _sourceSchema = new List<PipeColumnInfo>
     {
         new("A", typeof(int), false),
         new("B", typeof(string), true),
@@ -57,7 +57,7 @@ public class ProjectDataTransformerTests
         var row = new object?[] { 1, "text", 3.14, now };
         var transformedRow = transformer.Transform(row);
         
-        Assert.Equal(2, transformedRow.Length);
+        Assert.Equal(2, transformedRow!.Length);
         Assert.Equal(3.14, transformedRow[0]);
         Assert.Equal(1, transformedRow[1]);
     }
@@ -81,7 +81,7 @@ public class ProjectDataTransformerTests
         var row = new object?[] { 1, "text", 3.14, DateTime.Now };
         var transformedRow = transformer.Transform(row);
         
-        Assert.Equal(2, transformedRow.Length);
+        Assert.Equal(2, transformedRow!.Length);
         Assert.Equal(1, transformedRow[0]);
         Assert.Equal(3.14, transformedRow[1]);
     }
@@ -97,13 +97,15 @@ public class ProjectDataTransformerTests
         var resultSchema = await transformer.InitializeAsync(_sourceSchema);
 
         // Assert
-        Assert.Single(resultSchema);
+        Assert.NotNull(resultSchema);
+        Assert.Single(resultSchema!);
         Assert.Equal("C", resultSchema[0].Name);
 
         // Check data
         var row = new object?[] { 1, "text", 3.14, DateTime.Now };
         var transformedRow = transformer.Transform(row);
 
+        Assert.NotNull(transformedRow);
         Assert.Single(transformedRow);
         Assert.Equal(3.14, transformedRow[0]);
     }
@@ -122,6 +124,7 @@ public class ProjectDataTransformerTests
         var result = transformer.Transform(shortRow);
 
         // Assert
+        Assert.NotNull(result);
         Assert.Single(result);
         Assert.Null(result[0]); // Safe fallback
     }

@@ -1,5 +1,4 @@
 using DtPipe.Core.Abstractions;
-using DtPipe.Cli.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 
@@ -29,12 +28,12 @@ public class OverwriteDataTransformer : IDataTransformer, IRequiresOptions<Overw
         }
     }
 
-    public ValueTask<IReadOnlyList<ColumnInfo>> InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
+    public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
     {
         if (!HasOverwrite) // Use the new property
         {
             _columnValues = null;
-            return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
+            return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
         }
 
         bool hasMappingForColumns = false;
@@ -56,14 +55,14 @@ public class OverwriteDataTransformer : IDataTransformer, IRequiresOptions<Overw
         if (!hasMappingForColumns)
         {
             _columnValues = null;
-            return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
+            return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
         }
 
         _columnValues = values;
-        return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
+        return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
     }
 
-    public object?[] Transform(object?[] row)
+    public object?[]? Transform(object?[] row)
     {
         if (_columnValues == null)
         {

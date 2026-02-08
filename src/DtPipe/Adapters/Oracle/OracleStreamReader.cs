@@ -17,7 +17,7 @@ public sealed partial class OracleStreamReader : IStreamReader, IRequiresOptions
     private readonly string _query;
     private OracleDataReader? _reader;
 
-    public IReadOnlyList<ColumnInfo>? Columns { get; private set; }
+    public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
 
     // DDL keywords that should be rejected
     private static readonly string[] DdlKeywords = 
@@ -151,9 +151,9 @@ public sealed partial class OracleStreamReader : IStreamReader, IRequiresOptions
         }
     }
 
-    private static List<ColumnInfo> ExtractColumns(OracleDataReader reader)
+    private static List<PipeColumnInfo> ExtractColumns(OracleDataReader reader)
     {
-        var columns = new List<ColumnInfo>(reader.FieldCount);
+        var columns = new List<PipeColumnInfo>(reader.FieldCount);
         var schemaTable = reader.GetSchemaTable();
         
         if (schemaTable is null)
@@ -161,7 +161,7 @@ public sealed partial class OracleStreamReader : IStreamReader, IRequiresOptions
             for (var i = 0; i < reader.FieldCount; i++)
             {
                 var name = reader.GetName(i);
-                columns.Add(new ColumnInfo(
+                columns.Add(new PipeColumnInfo(
                     name,
                     reader.GetFieldType(i),
                     true,
@@ -179,7 +179,7 @@ public sealed partial class OracleStreamReader : IStreamReader, IRequiresOptions
             
             // Oracle normalizes unquoted identifiers to UPPERCASE
             // If column name contains lowercase, it was created with quotes (case-sensitive)
-            columns.Add(new ColumnInfo(name, clrType, allowNull, 
+            columns.Add(new PipeColumnInfo(name, clrType, allowNull, 
                 IsCaseSensitive: name != name.ToUpperInvariant()));
         }
 

@@ -4,7 +4,6 @@ using DtPipe.Core.Models;
 using System.Text;
 using DtPipe.Core.Helpers;
 using System.Data;
-using ColumnInfo = DtPipe.Core.Models.ColumnInfo;
 
 namespace DtPipe.Adapters.DuckDB;
 
@@ -13,7 +12,7 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector, IKeyValida
     private readonly string _connectionString;
     private readonly DuckDBConnection _connection;
     private readonly DuckDbWriterOptions _options;
-    private IReadOnlyList<ColumnInfo>? _columns;
+    private IReadOnlyList<PipeColumnInfo>? _columns;
     private string? _stagingTable; // Table to load data into before merging
     private string _quotedTargetTableName = ""; // Computed once with smart quoting
     private List<string> _keyColumns = new();
@@ -103,7 +102,7 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector, IKeyValida
     private IDisposable? _appender;
     private int[]? _columnMapping; // Maps: TargetIndex -> SourceIndex (or -1 if missing)
 
-    public async ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
+    public async ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
     {
         _columns = columns;
         if (_connection.State != ConnectionState.Open)
@@ -408,7 +407,7 @@ public sealed class DuckDbDataWriter : IDataWriter, ISchemaInspector, IKeyValida
         await _connection.DisposeAsync();
     }
 
-    private string BuildCreateTableSql(string tableName, IReadOnlyList<ColumnInfo> columns)
+    private string BuildCreateTableSql(string tableName, IReadOnlyList<PipeColumnInfo> columns)
     {
         var sb = new StringBuilder();
         sb.Append($"CREATE TABLE IF NOT EXISTS {tableName} (");

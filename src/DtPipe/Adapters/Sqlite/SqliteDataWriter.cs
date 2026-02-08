@@ -14,7 +14,7 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
     private readonly OptionsRegistry _registry;
 
     private SqliteConnection? _connection;
-    private IReadOnlyList<ColumnInfo>? _columns;
+    private IReadOnlyList<PipeColumnInfo>? _columns;
     private string _tableName = "Export";
     private SqliteWriteStrategy _strategy = SqliteWriteStrategy.Append;
     private List<string> _keyColumns = new();
@@ -127,7 +127,7 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
     #endregion
 
 
-    public async ValueTask InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
+    public async ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
     {
         _columns = columns;
 

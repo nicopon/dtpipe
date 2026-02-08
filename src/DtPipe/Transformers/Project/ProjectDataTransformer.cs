@@ -1,5 +1,4 @@
 using DtPipe.Core.Abstractions;
-using DtPipe.Cli.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 
@@ -34,13 +33,13 @@ public class ProjectDataTransformer : IDataTransformer, IRequiresOptions<Project
         }
     }
 
-    public ValueTask<IReadOnlyList<ColumnInfo>> InitializeAsync(IReadOnlyList<ColumnInfo> columns, CancellationToken ct = default)
+    public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
     {
         // If no options, pass through
         if (_projectColumns == null && _dropColumns == null)
         {
             _outputToSourceIndex = null;
-            return new ValueTask<IReadOnlyList<ColumnInfo>>(columns);
+            return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
         }
 
         var sourceIndices = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -49,7 +48,7 @@ public class ProjectDataTransformer : IDataTransformer, IRequiresOptions<Project
             sourceIndices[columns[i].Name] = i;
         }
 
-        var newColumns = new List<ColumnInfo>();
+        var newColumns = new List<PipeColumnInfo>();
         var indexMap = new List<int>();
 
         // Logic:
@@ -89,10 +88,10 @@ public class ProjectDataTransformer : IDataTransformer, IRequiresOptions<Project
         }
 
         _outputToSourceIndex = indexMap.ToArray();
-        return new ValueTask<IReadOnlyList<ColumnInfo>>(newColumns);
+        return new ValueTask<IReadOnlyList<PipeColumnInfo>>(newColumns);
     }
 
-    public object?[] Transform(object?[] row)
+    public object?[]? Transform(object?[] row)
     {
         if (_outputToSourceIndex == null) return row;
 

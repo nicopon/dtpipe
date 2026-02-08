@@ -5,7 +5,6 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Cli.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
-using ColumnInfo = DtPipe.Core.Models.ColumnInfo; // Alias to resolve conflict with DuckDB.NET.Data.ColumnInfo
 
 namespace DtPipe.Adapters.DuckDB;
 
@@ -17,7 +16,7 @@ public sealed partial class DuckDataSourceReader : IStreamReader, IRequiresOptio
     private DuckDBDataReader? _reader;
     private readonly SemaphoreSlim _semaphore = new(1, 1);
 
-    public IReadOnlyList<ColumnInfo>? Columns { get; private set; }
+    public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
 
     // Minimal safety check - DuckDB is local/embedded so less risky, but consistent with others
     // We block destructive commands
@@ -122,9 +121,9 @@ public sealed partial class DuckDataSourceReader : IStreamReader, IRequiresOptio
         }
     }
 
-    private static List<ColumnInfo> ExtractColumns(DuckDBDataReader reader)
+    private static List<PipeColumnInfo> ExtractColumns(DuckDBDataReader reader)
     {
-        var columns = new List<ColumnInfo>(reader.FieldCount);
+        var columns = new List<PipeColumnInfo>(reader.FieldCount);
         var schemaTable = reader.GetSchemaTable();
         
         if (schemaTable is null)
@@ -132,7 +131,7 @@ public sealed partial class DuckDataSourceReader : IStreamReader, IRequiresOptio
             for (var i = 0; i < reader.FieldCount; i++)
             {
                 var name = reader.GetName(i);
-                columns.Add(new ColumnInfo(
+                columns.Add(new PipeColumnInfo(
                     name,
                     reader.GetFieldType(i),
                     true,
@@ -150,7 +149,7 @@ public sealed partial class DuckDataSourceReader : IStreamReader, IRequiresOptio
             
             // DuckDB normalizes unquoted identifiers to lowercase (like PostgreSQL)
             // If column name contains uppercase, it was created with quotes (case-sensitive)
-            columns.Add(new ColumnInfo(name, clrType, allowNull, 
+            columns.Add(new PipeColumnInfo(name, clrType, allowNull, 
                 IsCaseSensitive: name != name.ToLowerInvariant()));
         }
 
