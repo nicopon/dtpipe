@@ -27,6 +27,21 @@ public record JobDefinition
     public int BatchSize { get; init; } = 50_000;
 
     /// <summary>
+    /// Generic Write strategy (Append, Truncate, etc.).
+    /// </summary>
+    public string? Strategy { get; init; }
+
+    /// <summary>
+    /// Generic Insert mode (Standard, Bulk).
+    /// </summary>
+    public string? InsertMode { get; init; }
+    
+    /// <summary>
+    /// Generic Table name.
+    /// </summary>
+    public string? Table { get; init; }
+
+    /// <summary>
     /// Maximum rows to export (0 = unlimited).
     /// </summary>
     public int Limit { get; init; } = 0;

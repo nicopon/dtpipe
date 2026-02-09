@@ -56,6 +56,8 @@ public static partial class JobFileParser
             UnsafeQuery = yamlJob.UnsafeQuery ?? false,
             ConnectionTimeout = yamlJob.ConnectionTimeout ?? 10,
             QueryTimeout = yamlJob.QueryTimeout ?? 0,
+            Strategy = yamlJob.Strategy,
+            InsertMode = yamlJob.InsertMode,
             SampleRate = yamlJob.SampleRate ?? 1.0,
             SampleSeed = yamlJob.SampleSeed,
             Transformers = ParseTransformers(yamlJob.Transformers),
@@ -166,6 +168,8 @@ public static partial class JobFileParser
         public int? Limit { get; set; }
         public bool? DryRun { get; set; }
         public bool? UnsafeQuery { get; set; }
+        public string? Strategy { get; set; }
+        public string? InsertMode { get; set; }
         public int? ConnectionTimeout { get; set; }
         public int? QueryTimeout { get; set; }
         public double? SampleRate { get; set; }

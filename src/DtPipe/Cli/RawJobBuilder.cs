@@ -30,7 +30,10 @@ public static class RawJobBuilder
         Option<string?> preExecOption,
         Option<string?> postExecOption,
         Option<string?> onErrorExecOption,
-        Option<string?> finallyExecOption)
+        Option<string?> finallyExecOption,
+        Option<string?> strategyOption,
+        Option<string?> insertModeOption,
+        Option<string?> tableOption)
     {
         var jobFile = parseResult.GetValue(jobOption);
         JobDefinition job;
@@ -91,6 +94,15 @@ public static class RawJobBuilder
                 
                 var finallyExecOverride = parseResult.GetValue(finallyExecOption);
                 if (!string.IsNullOrEmpty(finallyExecOverride)) job = job with { FinallyExec = finallyExecOverride };
+
+                var strategyOverride = parseResult.GetValue(strategyOption);
+                if (!string.IsNullOrEmpty(strategyOverride)) job = job with { Strategy = strategyOverride };
+
+                var insertModeOverride = parseResult.GetValue(insertModeOption);
+                if (!string.IsNullOrEmpty(insertModeOverride)) job = job with { InsertMode = insertModeOverride };
+
+                var tableOverride = parseResult.GetValue(tableOption);
+                if (!string.IsNullOrEmpty(tableOverride)) job = job with { Table = tableOverride };
             }
             catch (Exception ex)
             {
@@ -132,10 +144,12 @@ public static class RawJobBuilder
                 SampleSeed = parseResult.GetValue(sampleSeedOption),
                 LogPath = parseResult.GetValue(logOption),
                 Key = parseResult.GetValue(keyOption),
-                PreExec = parseResult.GetValue(preExecOption),
                 PostExec = parseResult.GetValue(postExecOption),
                 OnErrorExec = parseResult.GetValue(onErrorExecOption),
-                FinallyExec = parseResult.GetValue(finallyExecOption)
+                FinallyExec = parseResult.GetValue(finallyExecOption),
+                Strategy = parseResult.GetValue(strategyOption),
+                InsertMode = parseResult.GetValue(insertModeOption),
+                Table = parseResult.GetValue(tableOption)
             };
         }
 

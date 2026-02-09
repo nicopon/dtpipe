@@ -134,9 +134,7 @@ public class SqliteDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
         var options = _registry.Get<SqliteWriterOptions>();
         // Smart Quoting for Table Name
         _tableName = _dialect.NeedsQuoting(options.Table) ? _dialect.Quote(options.Table) : options.Table;
-        _strategy = options.Strategy;
-
-        _strategy = options.Strategy;
+        _strategy = options.Strategy ?? SqliteWriteStrategy.Append;
 
         if (_connection == null)
         {

@@ -67,9 +67,16 @@ public class MyProviderReaderDescriptor : IProviderDescriptor<IStreamReader>
        public static string Prefix => "my"; // Flags: --my-property
 
        [Description("Description shown in --help")]
-       public string Property { get; set; } = "default";
-   }
-   ```
+    public string Property { get; set; } = "default";
+
+    [CliOption(Description = "Target table name", Hidden = true)]
+    public string Table { get; set; } = "export";
+}
+```
+
+> [!TIP]
+> Use `Hidden = true` for provider-specific options that have a generic equivalent (like `--table`, `--strategy`, `--insert-mode`). This keeps the default help output clean while maintaining backward compatibility.
+
 3. Implement `IDataTransformer` (or follow existing classes):
    - `ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct)` — prepare the target schema.
    - `object?[] Transform(object?[] row)` — transform a single row (should be fast and avoid excessive allocations when possible).

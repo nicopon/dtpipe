@@ -61,7 +61,6 @@ public class CliProviderFactory<TService> : ICliContributor, IDataFactory
     }
     
     // Factory method to actually produce the service
-    // Factory method to actually produce the service
 }
 
 public class CliDataWriterFactory : CliProviderFactory<IDataWriter>, IDataWriterFactory
@@ -76,8 +75,76 @@ public class CliDataWriterFactory : CliProviderFactory<IDataWriter>, IDataWriter
         // Resolve the specific options object from registry
         var specificOptions = _registry.Get(_descriptor.OptionsType);
         
+        // 1. Resolve Strategy
+        ResolveGenericOption(specificOptions, "Strategy", options.Strategy, _descriptor.ProviderName);
+
+        // 2. Resolve InsertMode
+        ResolveGenericOption(specificOptions, "InsertMode", options.InsertMode, _descriptor.ProviderName);
+
+        // 3. Resolve Table
+        ResolveGenericOption(specificOptions, "Table", options.Table, _descriptor.ProviderName);
+        
         // Use the descriptor to create. 
         return _descriptor.Create(options.OutputPath, specificOptions, options, _serviceProvider);
+    }
+
+    private void ResolveGenericOption(object specificOptions, string propertyName, string? genericValue, string providerName)
+    {
+        var prop = specificOptions.GetType().GetProperty(propertyName);
+        if (prop == null) return; // This provider doesn't support this option (e.g. SQLite has no InsertMode)
+
+        // Check if specific option is already set to a non-default value
+        var currentValue = prop.GetValue(specificOptions);
+        
+        try
+        {
+            var defaultInstance = Activator.CreateInstance(specificOptions.GetType());
+            var defaultValue = prop.GetValue(defaultInstance);
+            
+            // If current value differs from default, assume user set it specifically -> Precedence to specific
+            if (!Equals(currentValue, defaultValue)) return;
+        }
+        catch
+        {
+            // Ignore error creates default, just proceed if standard checks fail
+            if (currentValue != null) return; 
+        }
+
+        var enumType = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
+
+        // If generic option is provided, try to parse and set it
+        if (!string.IsNullOrEmpty(genericValue))
+        {
+            if (enumType == typeof(string))
+            {
+                prop.SetValue(specificOptions, genericValue);
+                return;
+            }
+
+            if (enumType.IsEnum)
+            {
+                try
+                {
+                    var parsedValue = Enum.Parse(enumType, genericValue, ignoreCase: true);
+                    prop.SetValue(specificOptions, parsedValue);
+                }
+                catch (ArgumentException)
+                {
+                    var allowed = string.Join(", ", Enum.GetNames(enumType));
+                    throw new InvalidOperationException($"Invalid {propertyName} '{genericValue}' for provider '{providerName}'. Allowed values: {allowed}");
+                }
+            }
+        }
+        else
+        {
+             // If still null, set to default (0-value of enum).
+             if (prop.GetValue(specificOptions) == null && enumType.IsValueType)
+             {
+                  // Instantiate default value (usually 0 = Append / Standard)
+                  var defaultValue = Activator.CreateInstance(enumType);
+                  prop.SetValue(specificOptions, defaultValue);
+             }
+        }
     }
     
     // IEnumerable<Type> IDataWriterFactory.GetSupportedOptionTypes()

@@ -422,7 +422,9 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
              return;
         }
 
-        if (_options.InsertMode == OracleInsertMode.Standard || _options.InsertMode == OracleInsertMode.Append)
+        var effectiveMode = _options.InsertMode ?? OracleInsertMode.Standard;
+
+        if (effectiveMode == OracleInsertMode.Standard || effectiveMode == OracleInsertMode.Append)
         {
             // Standard/Append INSERT using Array Binding
             if (_insertCommand == null || _insertParameters == null) 
@@ -461,7 +463,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
             {
                 await _insertCommand.ExecuteNonQueryAsync(ct);
                 if(_logger.IsEnabled(LogLevel.Debug))
-                    _logger.LogDebug("Inserted {Count} rows via Array Binding ({Mode})...", rowCount, _options.InsertMode);
+                    _logger.LogDebug("Inserted {Count} rows via Array Binding ({Mode})...", rowCount, effectiveMode);
             }
             catch (Exception ex)
             {
