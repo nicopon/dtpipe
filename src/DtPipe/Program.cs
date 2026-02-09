@@ -34,6 +34,7 @@ class Program
     {
         System.Globalization.CultureInfo.DefaultThreadCurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
         System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = System.Globalization.CultureInfo.InvariantCulture;
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
 
         var services = new ServiceCollection();
         ConfigureServices(services);
