@@ -73,22 +73,15 @@ public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<
                     body = "return " + body + ";";
                 }
                 
-                var wrappedScript = $"function {functionName}(row) {{ {body} }}";
-                
                 // Validate syntax immediately (and register function in the shared engine!)
-                // NOTE: Since engine is shared/scoped, we register functions directly.
-                // BUT: If multiple transformers use same function names, we have a collision issue.
-                // Solution: Make function names unique per transformer instance? 
-                // Or just use anonymous execution? 
-                // Using named functions is faster for repeated calls.
-                // We should make function name unique.
-                
                 var uniqueFunctionName = $"{functionName}_{Guid.NewGuid().ToString("N")}";
-                wrappedScript = $"function {uniqueFunctionName}(row) {{ {body} }}";
+                // Wrap in function expression
+                var wrappedScript = $"function(row) {{ {body} }}";
                 
-                engine.Execute(wrappedScript);
+                // Register globally
+                engine.SetValue(uniqueFunctionName, engine.Evaluate($"({wrappedScript})"));
                 
-                processors.Add(new ScriptColumnProcessor(colIndex, uniqueFunctionName));
+                processors.Add(new ScriptColumnProcessor(colIndex, uniqueFunctionName, wrappedScript));
             }
         }
 
@@ -102,6 +95,7 @@ public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<
         if (_processors == null || _processors.Length == 0 || _columnNames == null) return row;
 
         var engine = _jsEngineProvider.GetEngine();
+        EnsureFunctionsCompiled(engine);
 
         // Build a JS object representing the current row
         var jsRow = new JsObject(engine);
@@ -109,6 +103,9 @@ public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<
         {
             jsRow.Set(_columnNames[i], JsValue.FromObject(engine, row[i]));
         }
+
+        // Set 'row' in global scope for Evaluate Call
+        engine.SetValue("row", jsRow);
 
         foreach (var processor in _processors)
         {
@@ -120,30 +117,37 @@ public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<
             }
             
             // Call the pre-compiled function with full row
-            var result = engine.Invoke(processor.FunctionName, jsRow);
+            try
+            {
+                 var result = engine.Evaluate($"{processor.FunctionName}(row)");
 
-            // Convert back to .NET types (simple types or string fallback)
-            
-            if (result.IsString())
-            {
-                row[processor.ColumnIndex] = result.AsString();
-            }
-            else if (result.IsNumber())
-            {
+                // Convert back to .NET types (simple types or string fallback)
+                
+                if (result.IsString())
+                {
+                    row[processor.ColumnIndex] = result.AsString();
+                }
+                else if (result.IsNumber())
+                {
                     row[processor.ColumnIndex] = result.AsNumber();
+                }
+                else if (result.IsBoolean())
+                {
+                    row[processor.ColumnIndex] = result.AsBoolean();
+                }
+                else if (result.IsNull() || result.IsUndefined())
+                {
+                    row[processor.ColumnIndex] = null;
+                }
+                else 
+                {
+                    // Fallback for complex objects
+                    row[processor.ColumnIndex] = result.ToString();
+                }
             }
-            else if (result.IsBoolean())
+            catch (Exception ex)
             {
-                row[processor.ColumnIndex] = result.AsBoolean();
-            }
-            else if (result.IsNull() || result.IsUndefined())
-            {
-                row[processor.ColumnIndex] = null;
-            }
-            else 
-            {
-                // Fallback for complex objects
-                row[processor.ColumnIndex] = result.ToString();
+                 throw new InvalidOperationException($"Error evaluating compute script for column index {processor.ColumnIndex}: {ex.Message}", ex);
             }
         }
 
@@ -153,5 +157,22 @@ public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<
     // Dispose handled by DI scope? No, provider is singleton/scoped. 
     // ComputeDataTransformer does not own the engine anymore.
 
-    private record struct ScriptColumnProcessor(int ColumnIndex, string FunctionName);
+    private void EnsureFunctionsCompiled(Engine engine)
+    {
+        if (_processors != null && _processors.Length > 0)
+        {
+            var firstFunc = _processors[0].FunctionName;
+            var val = engine.GetValue(firstFunc);
+            if (val.IsUndefined())
+            {
+                foreach (var p in _processors)
+                {
+                     // Re-register using SetValue/Evaluate
+                     engine.SetValue(p.FunctionName, engine.Evaluate($"({p.WrappedScript})"));
+                }
+            }
+        }
+    }
+
+    private record struct ScriptColumnProcessor(int ColumnIndex, string FunctionName, string WrappedScript);
 }

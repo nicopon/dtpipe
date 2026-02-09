@@ -114,9 +114,9 @@ public class ComputeDataTransformerTests : IDisposable
         
         var act = () => transformer.Transform(row);
         
-        // Jint throws JavaScriptException: System is not defined
-        act.Should().Throw<Jint.Runtime.JavaScriptException>()
-           .WithMessage("*System is not defined*");
+        // Changed: ComputeDataTransformer now wraps execution errors in InvalidOperationException
+        act.Should().Throw<InvalidOperationException>()
+           .WithInnerException<Jint.Runtime.JavaScriptException>();
     }
 
     [Fact]

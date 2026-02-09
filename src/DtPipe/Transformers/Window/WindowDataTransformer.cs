@@ -14,6 +14,7 @@ public class WindowDataTransformer : IMultiRowTransformer, IRequiresOptions<Wind
     private string[]? _columnNames;
     private string? _funcName;
     private int _keyColumnIndex = -1;
+
     private readonly List<object?[]> _buffer = new();
     private object? _lastKey = null;
 
@@ -22,6 +23,8 @@ public class WindowDataTransformer : IMultiRowTransformer, IRequiresOptions<Wind
         _options = options;
         _jsEngineProvider = jsEngineProvider;
     }
+
+    private string? _wrappedScript;
 
     public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> sourceColumns, CancellationToken cancellationToken = default)
     {
@@ -39,10 +42,12 @@ public class WindowDataTransformer : IMultiRowTransformer, IRequiresOptions<Wind
                 script = "return " + script + ";";
             }
 
-            _funcName = $"__window_{GetHashCode()}_{Guid.NewGuid().ToString("N")}";
+            _funcName = $"__window_{Guid.NewGuid():N}";
             // Function takes 'rows' array
-            var wrappedScript = $"function {_funcName}(rows) {{ {script} }}";
-            engine.Execute(wrappedScript);
+            // Wrap in function expression
+            var wrappedScript = $"function(rows) {{ {script} }}";
+            _wrappedScript = wrappedScript;
+            
         }
 
         // Key column index
@@ -108,13 +113,10 @@ public class WindowDataTransformer : IMultiRowTransformer, IRequiresOptions<Wind
         
         if (_funcName == null)
         {
-            // No script, just pass through (identity window)
-            foreach (var r in _buffer) yield return r;
-            _buffer.Clear();
-            yield break;
         }
 
         var engine = _jsEngineProvider.GetEngine();
+        EnsureFunctionCompiled(engine);
         
         // Convert buffer to JS array of objects
         var jsRows = new Jint.Native.JsArray(engine);
@@ -128,19 +130,32 @@ public class WindowDataTransformer : IMultiRowTransformer, IRequiresOptions<Wind
             jsRows.Push(jsObj);
         }
         
+        // Set 'rows' in global scope for Evaluate Call
+        engine.SetValue("rows", jsRows);
+
         // Execute script
-        var result = engine.Invoke(_funcName, jsRows);
+        JsValue result;
+        try
+        {
+             result = engine.Evaluate($"{_funcName}(rows)");
+        }
+        catch (Exception ex)
+        {
+             throw new InvalidOperationException($"Error evaluating window script: {ex.Message}", ex);
+        }
         
         // Result should be array of rows
         if (result.IsArray())
         {
             var array = result.AsArray();
+            
             foreach (var item in array)
             {
                 if (item.IsObject())
                 {
                     var newRow = new object?[_columnNames!.Length];
                     var obj = item.AsObject();
+                    
                     for (int c = 0; c < _columnNames.Length; c++)
                     {
                         var val = obj.Get(_columnNames[c]);
@@ -162,5 +177,17 @@ public class WindowDataTransformer : IMultiRowTransformer, IRequiresOptions<Wind
     {
         // Process remaining buffer
         foreach (var r in ProcessBuffer()) yield return r;
+    }
+
+    private void EnsureFunctionCompiled(Engine engine)
+    {
+        if (_funcName != null && _wrappedScript != null)
+        {
+            if (engine.GetValue(_funcName).IsUndefined())
+            {
+                 // Re-register using SetValue/Evaluate
+                 engine.SetValue(_funcName, engine.Evaluate($"({_wrappedScript})"));
+            }
+        }
     }
 }

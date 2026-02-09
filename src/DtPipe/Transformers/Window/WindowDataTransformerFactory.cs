@@ -70,15 +70,15 @@ public class WindowDataTransformerFactory : IDataTransformerFactory
         
         foreach (var (key, val) in configuration)
         {
-            if (key.Equals("count", StringComparison.OrdinalIgnoreCase))
+            if (key.Equals("window-count", StringComparison.OrdinalIgnoreCase) || key.Equals("--window-count", StringComparison.OrdinalIgnoreCase))
             {
                 if (int.TryParse(val, out int c)) options.Count = c;
             }
-            else if (key.Equals("key", StringComparison.OrdinalIgnoreCase))
+            else if (key.Equals("window-key", StringComparison.OrdinalIgnoreCase) || key.Equals("--window-key", StringComparison.OrdinalIgnoreCase))
             {
                 options.Key = val;
             }
-            else if (key.Equals("script", StringComparison.OrdinalIgnoreCase))
+            else if (key.Equals("window-script", StringComparison.OrdinalIgnoreCase) || key.Equals("--window-script", StringComparison.OrdinalIgnoreCase))
             {
                 options.Script = val;
             }
