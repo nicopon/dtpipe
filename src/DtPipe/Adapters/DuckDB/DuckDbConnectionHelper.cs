@@ -8,7 +8,7 @@ public static class DuckDbConnectionHelper
     {
         if (string.IsNullOrWhiteSpace(connectionString)) return false;
         
-        return connectionString.Contains(".duckdb", StringComparison.OrdinalIgnoreCase);
+        return connectionString.EndsWith(".duckdb", StringComparison.OrdinalIgnoreCase);
     }
 
     public static string GetConnectionString(string connectionString)

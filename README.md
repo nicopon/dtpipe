@@ -58,11 +58,11 @@ dtpipe --input [SOURCE] --query [SQL] --output [DEST] [OPTIONS]
 
 ### 1. Connection Strings (Input & Output)
 
-DtPipe auto-detects providers from file extensions (`.csv`, `.parquet`, `.db`, `.sqlite`) or explicit prefixes.
+DtPipe auto-detects providers from file extensions (`.csv`, `.parquet`, `.duckdb`, `.sqlite`) or explicit prefixes.
 
 | Provider | Prefix / Format | Example |
 |:---|:---|:---|
-| **DuckDB** | `duck:` | `duck:my.db` |
+| **DuckDB** | `duck:` | `duck:my.duckdb` |
 | **SQLite** | `sqlite:` | `sqlite:data.sqlite` |
 | **PostgreSQL**| `pg:` | `pg:Host=localhost;Database=mydb` |
 | **Oracle** | `ora:` | `ora:Data Source=PROD;User Id=scott` |
