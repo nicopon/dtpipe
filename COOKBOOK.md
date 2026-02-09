@@ -268,7 +268,7 @@ duckdb -csv -c "SELECT * FROM 'source.csv' WHERE active=true" | \
  
  ### Write Strategies
  
- Control how DtPipe handles existing tables using the `--[provider]-strategy` flag.
+ Control how DtPipe handles existing tables using the `--strategy` flag.
  
  | Strategy | Behavior | Use Case |
  |:--- |:--- |:--- |
@@ -290,8 +290,8 @@ duckdb -csv -c "SELECT * FROM 'source.csv' WHERE active=true" | \
  dtpipe \
    -i data.parquet \
    -o "pg:Host=localhost;Database=prod" \
-   --pg-table "public.imported_data" \
-   --pg-strategy Recreate
+   --table "public.imported_data" \
+   --strategy Recreate
  ```
  
  #### 2. Append to Oracle Table
@@ -301,8 +301,8 @@ duckdb -csv -c "SELECT * FROM 'source.csv' WHERE active=true" | \
  dtpipe \
    -i "new_sales.csv" \
    -o "ora:Data Source=PROD;..." \
-   --ora-table "SALES_DATA" \
-   --ora-strategy Append
+   --table "SALES_DATA" \
+   --strategy Append
  ```
  
  #### 3. Upsert with Explicit Key
@@ -312,8 +312,8 @@ duckdb -csv -c "SELECT * FROM 'source.csv' WHERE active=true" | \
  dtpipe \
    -i "orders_update.csv" \
    -o "mssql:Server=.;Database=mydb" \
-   --mssql-table "Orders" \
-   --mssql-strategy Upsert \
+   --table "Orders" \
+   --strategy Upsert \
    --key "OrderId"
  ```
  

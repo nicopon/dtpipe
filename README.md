@@ -117,7 +117,7 @@ Use `--fake "Col:Generator"` to replace sensitive data.
 | `--null "[Col]"` | Force column to NULL. |
 | `--overwrite "[Col]:[Val]"`| Set column to fixed value. |
 | `--format "[Col]:[Fmt]"` | Apply .NET format string. |
-| `--compute "[Col]:[JS]"` | Apply Javascript logic. Supports inline code or file paths (`@file.js`). |
+| `--compute "[Col]:[JS]"` | Apply Javascript logic on the `row` object. Supports inline code or file paths (`@file.js`). Example: `TITLE:row.TITLE.substring(0,5)` |
 | `--filter "[JS]"` | Drop rows based on JS logic (must return true/false). |
 | `--expand "[JS]"` | Multi-row expansion. JS expression returning an array. |
 | `--window-count [N]` | Accumulate rows in a window of size N. |
@@ -134,13 +134,9 @@ Use `--fake "Col:Generator"` to replace sensitive data.
 #### Database Writer Options
 | Flag | Description |
 |:---|:---|
-| `--ora-strategy` | `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`, `Upsert`, `Ignore`. |
-| `--ora-insert-mode` | `Standard`, `Append` (Direct-Path), `Bulk`. |
-| `--pg-strategy` | `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`, `Upsert`, `Ignore`. |
-| `--pg-insert-mode` | `Standard`, `Bulk` (Binary Copy). |
-| `--mssql-strategy` | `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`, `Upsert`, `Ignore`. |
-| `--duck-strategy` | `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`, `Upsert`, `Ignore`. |
-| `--sqlite-strategy` | `Append`, `DeleteThenInsert`, `Recreate`, `Upsert`, `Ignore`. |
+| `--strategy` | `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`, `Upsert`, `Ignore`. Works for all providers. |
+| `--insert-mode` | `Standard`, `Bulk`. Works for supported providers (SqlSever, Oracle, PostgreSQL). |
+| `--table` | Target table name. Overrides default 'export'. |
 | `--unsafe-query` | Allow non-SELECT queries (use with caution). |
 
 ---

@@ -15,14 +15,14 @@ public record SqlServerWriterOptions : IProviderOptions
     public static string DisplayName => "SQL Server Writer Options";
     public string? Key { get; init; }
 
-    [CliOption(Description = "Target table name")]
+    [CliOption(Description = "Target table name", Hidden = true)]
     public string Table { get; set; } = "export";
 
-    [CliOption(Description = "Data write strategy (Append, Truncate, DeleteThenInsert)")]
-    public SqlServerWriteStrategy Strategy { get; set; }
+    [CliOption(Description = "Data write strategy (Append, Truncate, DeleteThenInsert)", Hidden = true)]
+    public SqlServerWriteStrategy? Strategy { get; set; }
 
-    [CliOption(Description = "Data insert mode (Standard, Bulk)")]
-    public SqlServerInsertMode InsertMode { get; set; } = SqlServerInsertMode.Standard;
+    [CliOption(Description = "Data insert mode (Standard, Bulk)", Hidden = true)]
+    public SqlServerInsertMode? InsertMode { get; set; }
 }
 
 public enum SqlServerWriteStrategy

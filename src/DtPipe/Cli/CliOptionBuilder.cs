@@ -98,14 +98,14 @@ public static class CliOptionBuilder
             {
                 foreach (var alias in cliOptionAttr.Aliases)
                 {
-                    // Reflection workaround for AddAlias
-                    var addAliasMethod = option.GetType().GetMethod("AddAlias") 
-                                         ?? typeof(Symbol).GetMethod("AddAlias");
-                    if (addAliasMethod != null)
-                    {
-                        addAliasMethod.Invoke(option, new object[] { alias });
-                    }
+                    option.Aliases.Add(alias);
                 }
+            }
+
+            // Set Hidden status (workaround for older System.CommandLine)
+            if (cliOptionAttr?.Hidden == true)
+            {
+                option.Description = "[HIDDEN] " + (option.Description ?? "");
             }
 
             options.Add(option);
@@ -188,14 +188,14 @@ public static class CliOptionBuilder
             {
                 foreach (var alias in cliOptionAttr.Aliases)
                 {
-                    // Reflection workaround for AddAlias
-                    var addAliasMethod = option.GetType().GetMethod("AddAlias") 
-                                         ?? typeof(Symbol).GetMethod("AddAlias");
-                    if (addAliasMethod != null)
-                    {
-                        addAliasMethod.Invoke(option, new object[] { alias });
-                    }
+                    option.Aliases.Add(alias);
                 }
+            }
+            
+            // Set Hidden status (workaround for older System.CommandLine)
+            if (cliOptionAttr?.Hidden == true)
+            {
+                option.Description = "[HIDDEN] " + (option.Description ?? "");
             }
             
             options.Add(option);

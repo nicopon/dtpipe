@@ -61,7 +61,7 @@ public class ComputeDataTransformerFactory : IDataTransformerFactory
 
     public IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration)
     {
-        // Simple manual parsing or reuse builder if needed, but here simple enough
+        // Manual parsing for CLI options
         var mappings = new List<string>();
         bool skipNull = false;
         foreach (var (option, value) in configuration)
@@ -90,11 +90,6 @@ public class ComputeDataTransformerFactory : IDataTransformerFactory
     public IDataTransformer? CreateFromYamlConfig(TransformerConfig config)
     {
         // Support both specific 'compute' config or legacy 'script' if mapped
-        // But usually YAML config is a dictionary.
-        // If config.Script is populated (from legacy mapping), use it.
-        // We probably need to update TransformerConfig to support Compute?
-        // Or just map it here?
-        
         var mappings = new List<string>();
         
         if (config.Script != null && config.Script.Any())
@@ -102,10 +97,7 @@ public class ComputeDataTransformerFactory : IDataTransformerFactory
             mappings.AddRange(config.Script.Select(kvp => $"{kvp.Key}:{ResolveScriptContent(kvp.Value)}"));
         }
         
-        // For now, assume Script property covers it or we look at Options.
-        // If we want to support 'compute: { col: val }' in YAML, we will need to update TransformerConfig.
-        // For this refactor, let's rely on Script property being the carrier.
-        
+        // Use Script property as carrier for backward compatibility
         if (!mappings.Any()) return null;
 
         bool skipNull = false;
@@ -138,9 +130,7 @@ public class ComputeDataTransformerFactory : IDataTransformerFactory
         }
 
         // Implicit syntax
-        // Only load if it looks like a file path (not a short script like "return 1;")
-        // But to be consistent with --query, we just check existence.
-        // A script "return 1;" is unlikely to match a filename unless someone is very evil.
+        // Only load if it looks like a file path
         if (File.Exists(script))
         {
             return File.ReadAllText(script);

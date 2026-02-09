@@ -87,8 +87,15 @@ public class JobService
         var onErrorExecOption = new Option<string?>("--on-error-exec") { Description = "SQL/Command ON ERROR" };
         var finallyExecOption = new Option<string?>("--finally-exec") { Description = "SQL/Command ALWAYS" };
 
+        var strategyOption = new Option<string?>("--strategy") { Description = "Write strategy (Append, Truncate, Recreate, Upsert, Ignore)" };
+        strategyOption.Aliases.Add("-s");
+
+        var insertModeOption = new Option<string?>("--insert-mode") { Description = "Insert mode (Standard, Bulk)" };
+        var tableOption = new Option<string?>("--table") { Description = "Target table name" };
+        tableOption.Aliases.Add("-t");
+
         // Core Help Options
-        var coreOptions = new List<Option> { inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption, unsafeQueryOption, dryRunOption, limitOption, sampleRateOption, sampleSeedOption, keyOption, jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption, finallyExecOption };
+        var coreOptions = new List<Option> { inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption, unsafeQueryOption, dryRunOption, limitOption, sampleRateOption, sampleSeedOption, keyOption, jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption, finallyExecOption, strategyOption, insertModeOption, tableOption };
 
         var rootCommand = new RootCommand("A simple, self-contained CLI for performance-focused data streaming & anonymization");
         foreach(var opt in coreOptions) rootCommand.Options.Add(opt);
@@ -127,7 +134,7 @@ public class JobService
                 jobOption, inputOption, queryOption, outputOption, 
                 connectionTimeoutOption, queryTimeoutOption, batchSizeOption, 
                 unsafeQueryOption, limitOption, sampleRateOption, sampleSeedOption, logOption, keyOption,
-                preExecOption, postExecOption, onErrorExecOption, finallyExecOption);
+                preExecOption, postExecOption, onErrorExecOption, finallyExecOption, strategyOption, insertModeOption, tableOption);
 
             if (jobExitCode != 0) 
             {
@@ -278,10 +285,12 @@ public class JobService
                 SampleSeed = job.SampleSeed,
                 LogPath = job.LogPath,
                 Key = job.Key,
-                PreExec = job.PreExec,
                 PostExec = job.PostExec,
                 OnErrorExec = job.OnErrorExec,
-                FinallyExec = job.FinallyExec
+                FinallyExec = job.FinallyExec,
+                Strategy = job.Strategy,
+                InsertMode = job.InsertMode,
+                Table = job.Table
             };
 
             if (!string.IsNullOrEmpty(options.LogPath))
@@ -368,6 +377,8 @@ public class JobService
 
     private static void PrintOption(Option opt, IAnsiConsole console)
     {
+        if (opt.Description?.StartsWith("[HIDDEN]") == true) return;
+
         var allAliases = new HashSet<string> { opt.Name };
         foreach (var alias in opt.Aliases) allAliases.Add(alias);
         

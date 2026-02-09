@@ -10,14 +10,14 @@ public class PostgreSqlWriterOptions : IWriterOptions
     public string? Key { get; init; }
 
     // Writer Options
-    [CliOption(Description = "Target table name")]
+    [CliOption(Description = "Target table name", Hidden = true)]
     public string Table { get; set; } = "export";
 
-    [CliOption(Description = "Write strategy: Append, Truncate, or DeleteThenInsert")]
-    public PostgreSqlWriteStrategy Strategy { get; set; } = PostgreSqlWriteStrategy.Append;
+    [CliOption(Description = "Write strategy: Append, Truncate, or DeleteThenInsert", Hidden = true)]
+    public PostgreSqlWriteStrategy? Strategy { get; set; }
 
-    [CliOption(Description = "Data insert mode (Standard, Bulk)")]
-    public PostgreSqlInsertMode InsertMode { get; set; } = PostgreSqlInsertMode.Standard;
+    [CliOption(Description = "Data insert mode (Standard, Bulk)", Hidden = true)]
+    public PostgreSqlInsertMode? InsertMode { get; set; }
 }
 
 public enum PostgreSqlInsertMode
