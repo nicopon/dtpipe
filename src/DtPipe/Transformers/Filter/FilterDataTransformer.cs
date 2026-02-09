@@ -21,6 +21,9 @@ public class FilterDataTransformer : IDataTransformer, IRequiresOptions<FilterTr
 
     private string[]? _columnNames;
 
+    // Cache wrapped scripts for fast re-compilation
+    private readonly List<string> _wrappedScripts = new();
+
     public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> sourceColumns, CancellationToken cancellationToken = default)
     {
         if (_options.Filters == null || _options.Filters.Length == 0)
@@ -35,7 +38,7 @@ public class FilterDataTransformer : IDataTransformer, IRequiresOptions<FilterTr
         for (int i = 0; i < _options.Filters.Length; i++)
         {
             var filterScript = _options.Filters[i];
-            var funcName = $"__filter_{GetHashCode()}_{i}_{Guid.NewGuid().ToString("N")}"; 
+            var funcName = $"__filter_{Guid.NewGuid():N}"; 
             
             string body = filterScript.Trim();
             if (!body.Contains("return ") && !body.EndsWith(";"))
@@ -43,9 +46,13 @@ public class FilterDataTransformer : IDataTransformer, IRequiresOptions<FilterTr
                body = "return " + body + ";";
             }
             
-            // Wrap in function
-            var wrappedScript = $"function {funcName}(row) {{ {body} }}";
-            engine.Execute(wrappedScript);
+            // Wrap in function expression
+            var wrappedScript = $"function(row) {{ {body} }}";
+            _wrappedScripts.Add(wrappedScript);
+            
+            // Compile in initial engine (validation)
+            // Use SetValue/Evaluate pattern here too
+            engine.SetValue(funcName, engine.Evaluate($"({wrappedScript})"));
             
             _compiledFilters.Add(new JsString(funcName));
         }
@@ -58,6 +65,7 @@ public class FilterDataTransformer : IDataTransformer, IRequiresOptions<FilterTr
         if (_compiledFilters.Count == 0 || _columnNames == null) return row;
 
         var engine = _jsEngineProvider.GetEngine();
+        EnsureFiltersCompiled(engine);
         
         // Build JS Context
         var jsRow = new JsObject(engine);
@@ -67,24 +75,48 @@ public class FilterDataTransformer : IDataTransformer, IRequiresOptions<FilterTr
             jsRow.Set(_columnNames[i], JsValue.FromObject(engine, row[i]));
         }
 
+        // Set 'row' in global scope for Evaluate Call
+        engine.SetValue("row", jsRow);
+
         foreach (var funcName in _compiledFilters)
         {
-            var result = engine.Invoke(funcName.ToString(), jsRow);
-            
-            // If result is falsy (false, null, undefined, 0, ""), drop row
-            // Jint's AsBoolean rules:
-            // boolean: value
-            // number: != 0 && !NaN
-            // string: length > 0
-            // object: true
-            // null/undefined: false
-            
-            if (!result.AsBoolean())
-            {
-                return null; // Drop row
-            }
+             // Direct evaluation of function call
+             try 
+             {
+                 var result = engine.Evaluate($"{funcName}(row)");
+                 if (!result.AsBoolean())
+                 {
+                     return null; // Drop row
+                 }
+             }
+             catch (Exception ex)
+             {
+                 throw new InvalidOperationException($"Error evaluating filter '{funcName}': {ex.Message}", ex);
+             }
         }
 
+
         return row; 
+    }
+
+    private void EnsureFiltersCompiled(Engine engine)
+    {
+        if (_compiledFilters.Count > 0)
+        {
+            var firstFunc = _compiledFilters[0].ToString();
+            var val = engine.GetValue(firstFunc);
+            
+            if (val.IsUndefined() || val.IsNull())
+            {
+                for (int i = 0; i < _compiledFilters.Count; i++)
+                {
+                    // Evaluate function expression
+                    var script = _wrappedScripts[i]; // "function(row) { ... }"
+                    // Wrap in parens to ensure expression evaluation
+                    var funcVal = engine.Evaluate($"({script})");
+                    engine.SetValue(_compiledFilters[i].ToString(), funcVal);
+                }
+            }
+        }
     }
 }

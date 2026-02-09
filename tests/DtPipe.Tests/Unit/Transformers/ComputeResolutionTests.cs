@@ -60,12 +60,13 @@ public class ComputeResolutionTests : IDisposable
         // Act & Assert
         // Initialize compiles the script and executes it immediately if it's registration script? 
         // No, ComputeDataTransformer executes row transformation on Transform.
-        // But Initialize executes initialization logic?
-        // Actually, ComputeDataTransformer registers functions in Initialize.
+        // Initialize compiles the script
         await transformer.InitializeAsync(columns);
 
         Action act = () => transformer.Transform(new object?[] { "test" });
 
-        act.Should().Throw<JavaScriptException>();
+        // Changed: ComputeDataTransformer now wraps execution errors in InvalidOperationException
+        act.Should().Throw<InvalidOperationException>()
+           .WithInnerException<JavaScriptException>(); 
     }
 }

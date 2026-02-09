@@ -12,6 +12,7 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<Expa
     private readonly ExpandOptions _options;
     private readonly IJsEngineProvider _jsEngineProvider;
     private readonly List<JsValue> _compiledExpands = new();
+    private readonly List<string> _wrappedScripts = new();
     private string[]? _columnNames;
 
     public ExpandDataTransformer(ExpandOptions options, IJsEngineProvider jsEngineProvider)
@@ -33,7 +34,7 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<Expa
         for (int i = 0; i < _options.Expand.Length; i++)
         {
             var expandScript = _options.Expand[i];
-            var funcName = $"__expand_{GetHashCode()}_{i}_{Guid.NewGuid().ToString("N")}";
+            var funcName = $"__expand_{Guid.NewGuid():N}";
             
             string body = expandScript.Trim();
             if (!body.Contains("return ") && !body.EndsWith(";"))
@@ -41,9 +42,13 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<Expa
                body = "return " + body + ";";
             }
             
-            // Wrap in function
-            var wrappedScript = $"function {funcName}(row) {{ {body} }}";
-            engine.Execute(wrappedScript);
+            // Wrap in function expression
+            var wrappedScript = $"function(row) {{ {body} }}";
+            
+            // Register globally
+            engine.SetValue(funcName, engine.Evaluate($"({wrappedScript})"));
+            
+            _wrappedScripts.Add(wrappedScript);
             
             _compiledExpands.Add(new JsString(funcName));
         }
@@ -51,18 +56,9 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<Expa
         return ValueTask.FromResult(sourceColumns);
     }
 
-    // Required by IDataTransformer (base interface), but for MultiRow usage we prefer TransformMany.
-    // However, if pipeline calls Transform() on us, we should return the FIRST row or throw?
-    // Or return null if we want to force usage of TransformMany?
-    // Given the pipeline logic will check for IMultiRowTransformer, this might not be called.
-    // But to be safe, return null or implement partial logic?
-    // Let's return null to signify "Not a simple transform".
-    // Or implemented as "Take first expanded row"? No, dangerous.
+    // Required by IDataTransformer (base interface)
     public object?[]? Transform(object?[] row)
     {
-        // Fallback: Return first expanded row?
-        // Or throw NotSupportedException?
-        // Ideally, the pipeline runner handles IMultiRowTransformer specifically.
         var results = TransformMany(row);
         return results.FirstOrDefault();
     }
@@ -76,6 +72,7 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<Expa
         }
 
         var engine = _jsEngineProvider.GetEngine();
+        EnsureFunctionsCompiled(engine);
         
         // Build JS Context (Same as Filter/Compute - should refactor!)
         var jsRow = new JsObject(engine);
@@ -84,11 +81,6 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<Expa
             jsRow.Set(_columnNames[i], JsValue.FromObject(engine, row[i]));
         }
 
-        // We only support ONE expand step per transformer instance logically?
-        // If multiple expands are provided, do we chain them?
-        // Step 1 expands to N rows. Step 2 expands each of N rows to M rows?
-        // If so, we need recursion here or just flat loop.
-        
         // Helper to process a list of rows through a specific expand function
         IEnumerable<object?[]> currentRows = new[] { row };
 
@@ -98,13 +90,6 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<Expa
             
             foreach (var r in currentRows)
             {
-                // We need to re-bind 'row' if we are chaining expands!
-                // Because 'row' variable in JS context refers to the INPUT row of the transformer.
-                // If we have multiple expands in one transformer, intermediate rows need to be bound.
-                // This means rebuilding jsRow for every intermediate row. Expensive.
-                
-                // Optimization: If only 1 expand script (common case), we skip re-binding.
-                
                 JsValue currentJsRow;
                 if (_compiledExpands.Count == 1) 
                 {
@@ -120,62 +105,53 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<Expa
                      }
                 }
 
-                var result = engine.Invoke(funcName.ToString(), currentJsRow);
+                // Set 'row' in global scope for Evaluate Call
+                engine.SetValue("row", currentJsRow);
 
-                if (result.IsArray())
+                try 
                 {
-                    var array = result.AsArray();
-                    foreach (var item in array)
+                    var result = engine.Evaluate($"{funcName}(row)");
+    
+                    // Result should be array of rows
+                    if (result.IsArray())
                     {
-                        // Convert JS object back to row array?
-                        // Or if script returns array of objects?
-                        // "return [ { AGE: 1 }, { AGE: 2 } ]"
-                        // Or "return [ row, row ]" (duplicates)
-                        
-                        // We expect the script to return an Array of Rows (objects).
-                        // We need to map these objects back to object?[].
-                        
-                        if (item.IsObject())
+                        var array = result.AsArray();
+                        // Console.Error.WriteLine($"[Window] Result array length: {array.Length}");
+                        foreach (var item in array)
                         {
-                            var newRow = new object?[_columnNames.Length];
-                            var obj = item.AsObject();
-                            
-                            // Map by column name
-                            for (int c = 0; c < _columnNames.Length; c++)
+                            if (item.IsObject())
                             {
-                                var val = obj.Get(_columnNames[c]);
-                                if (val.IsUndefined()) 
+                                var newRow = new object?[_columnNames.Length];
+                                var obj = item.AsObject();
+                                
+                                // Console.Error.WriteLine($"[Window] Item Value: {obj.Get("Value")}");
+
+                                // Map by column name
+                                for (int c = 0; c < _columnNames.Length; c++)
                                 {
-                                    // Keep original value? Or null?
-                                    // If we are expanding, usually we modify some fields.
-                                    // If script returns partial object, should we merge with method row?
-                                    // JS 'row' is immutable-ish.
-                                    // Common pattern: return [ {...row, copy: 1}, {...row, copy: 2} ]
-                                    
-                                    // If undefined, let's look at original row?
-                                    // But original 'r' is accessible.
-                                    // Actually, if user returns partial object, missing keys are undefined.
-                                    // We should probably rely on user to return full objects or we implement merge.
-                                    // Jint doesn't auto-merge.
-                                    
-                                    // Use 'r' (current input row) for missing values?
-                                    // This matches 'project' logic where missing targets are null?
-                                    // Let's assume user returns full objects or we treat missing as null.
-                                    newRow[c] = null;
+                                    var val = obj.Get(_columnNames[c]);
+                                    if (val.IsUndefined()) 
+                                    {
+                                        newRow[c] = null;
+                                    }
+                                    else
+                                    {
+                                        // Convert JsValue to primitive
+                                        if(val.IsString()) newRow[c] = val.AsString();
+                                        else if(val.IsNumber()) newRow[c] = val.AsNumber();
+                                        else if(val.IsBoolean()) newRow[c] = val.AsBoolean();
+                                        else if(val.IsNull()) newRow[c] = null;
+                                        else newRow[c] = val.ToString();
+                                    }
                                 }
-                                else
-                                {
-                                    // Convert JsValue to primitive
-                                    if(val.IsString()) newRow[c] = val.AsString();
-                                    else if(val.IsNumber()) newRow[c] = val.AsNumber();
-                                    else if(val.IsBoolean()) newRow[c] = val.AsBoolean();
-                                    else if(val.IsNull()) newRow[c] = null;
-                                    else newRow[c] = val.ToString();
-                                }
+                                nextRows.Add(newRow);
                             }
-                            nextRows.Add(newRow);
                         }
                     }
+                }
+                catch (Exception ex)
+                {
+                     throw new InvalidOperationException($"Error evaluating expand script '{funcName}': {ex.Message}", ex);
                 }
             }
             currentRows = nextRows;
@@ -184,6 +160,24 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<Expa
         foreach (var r in currentRows)
         {
             yield return r;
+        }
+    }
+
+    private void EnsureFunctionsCompiled(Engine engine)
+    {
+        if (_compiledExpands.Count > 0)
+        {
+            var firstFunc = _compiledExpands[0].ToString();
+            var val = engine.GetValue(firstFunc);
+            if (val.IsUndefined())
+            {
+                for (int i=0; i < _compiledExpands.Count; i++)
+                {
+                    var script = _wrappedScripts[i];
+                    var name = _compiledExpands[i].ToString();
+                    engine.SetValue(name, engine.Evaluate($"({script})"));
+                }
+            }
         }
     }
 }
