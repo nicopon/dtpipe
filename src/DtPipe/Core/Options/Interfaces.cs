@@ -5,19 +5,19 @@ namespace DtPipe.Core.Options;
 /// </summary>
 public static class ComponentOptionsHelper
 {
-    public static Type GetOptionsType<TComponent>()
-    {
-        var type = typeof(TComponent);
-        var interfaceType = type.GetInterfaces()
-            .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IRequiresOptions<>));
+	public static Type GetOptionsType<TComponent>()
+	{
+		var type = typeof(TComponent);
+		var interfaceType = type.GetInterfaces()
+			.FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IRequiresOptions<>));
 
-        if (interfaceType == null)
-        {
-            throw new InvalidOperationException($"Type {type.Name} does not implement IRequiresOptions<T>");
-        }
+		if (interfaceType == null)
+		{
+			throw new InvalidOperationException($"Type {type.Name} does not implement IRequiresOptions<T>");
+		}
 
-        return interfaceType.GetGenericArguments()[0];
-    }
+		return interfaceType.GetGenericArguments()[0];
+	}
 }
 
 /// <summary>
@@ -30,15 +30,15 @@ public interface IRequiresOptions<TOptions> where TOptions : class, IOptionSet, 
 /// </summary>
 public interface IOptionSet
 {
-    /// <summary>
-    /// The CLI prefix for this option set (e.g. "ora", "csv").
-    /// </summary>
-    static abstract string Prefix { get; }
-    
-    /// <summary>
-    /// Display name for help grouping (e.g. "Oracle Reader", "CSV Writer").
-    /// </summary>
-    static abstract string DisplayName { get; }
+	/// <summary>
+	/// The CLI prefix for this option set (e.g. "ora", "csv").
+	/// </summary>
+	static abstract string Prefix { get; }
+
+	/// <summary>
+	/// Display name for help grouping (e.g. "Oracle Reader", "CSV Writer").
+	/// </summary>
+	static abstract string DisplayName { get; }
 }
 
 /// <summary>

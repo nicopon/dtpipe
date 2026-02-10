@@ -5,5 +5,5 @@ namespace DtPipe.Core.Abstractions;
 /// </summary>
 public interface IHasSqlDialect
 {
-    ISqlDialect Dialect { get; }
+	ISqlDialect Dialect { get; }
 }

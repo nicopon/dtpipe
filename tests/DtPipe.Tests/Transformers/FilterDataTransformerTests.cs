@@ -7,69 +7,69 @@ namespace DtPipe.Tests.Transformers;
 
 public class FilterDataTransformerTests
 {
-    private readonly JsEngineProvider _realJsProvider;
+	private readonly JsEngineProvider _realJsProvider;
 
-    public FilterDataTransformerTests()
-    {
-        _realJsProvider = new JsEngineProvider();
-    }
+	public FilterDataTransformerTests()
+	{
+		_realJsProvider = new JsEngineProvider();
+	}
 
-    [Fact]
-    public async Task Transform_ShouldKeepRow_WhenConditionIsTrue()
-    {
-        // Arrange
-        var options = new FilterTransformerOptions { Filters = new[] { "return row.Age > 18;" } };
-        var transformer = new FilterDataTransformer(options, _realJsProvider);
-        
-        var columns = new List<PipeColumnInfo> { new("Name", typeof(string), true), new("Age", typeof(int), false) };
-        await transformer.InitializeAsync(columns);
+	[Fact]
+	public async Task Transform_ShouldKeepRow_WhenConditionIsTrue()
+	{
+		// Arrange
+		var options = new FilterTransformerOptions { Filters = new[] { "return row.Age > 18;" } };
+		var transformer = new FilterDataTransformer(options, _realJsProvider);
 
-        var row = new object?[] { "John", 25 };
+		var columns = new List<PipeColumnInfo> { new("Name", typeof(string), true), new("Age", typeof(int), false) };
+		await transformer.InitializeAsync(columns);
 
-        // Act
-        var result = transformer.Transform(row);
+		var row = new object?[] { "John", 25 };
 
-        // Assert
-        Assert.NotNull(result);
-        Assert.Equal(row, result);
-    }
+		// Act
+		var result = transformer.Transform(row);
 
-    [Fact]
-    public async Task Transform_ShouldDropRow_WhenConditionIsFalse()
-    {
-        // Arrange
-        var options = new FilterTransformerOptions { Filters = new[] { "return row.Age > 18;" } };
-        var transformer = new FilterDataTransformer(options, _realJsProvider);
-        
-        var columns = new List<PipeColumnInfo> { new("Name", typeof(string), true), new("Age", typeof(int), false) };
-        await transformer.InitializeAsync(columns);
+		// Assert
+		Assert.NotNull(result);
+		Assert.Equal(row, result);
+	}
 
-        var row = new object?[] { "Kid", 10 };
+	[Fact]
+	public async Task Transform_ShouldDropRow_WhenConditionIsFalse()
+	{
+		// Arrange
+		var options = new FilterTransformerOptions { Filters = new[] { "return row.Age > 18;" } };
+		var transformer = new FilterDataTransformer(options, _realJsProvider);
 
-        // Act
-        var result = transformer.Transform(row);
+		var columns = new List<PipeColumnInfo> { new("Name", typeof(string), true), new("Age", typeof(int), false) };
+		await transformer.InitializeAsync(columns);
 
-        // Assert
-        Assert.Null(result);
-    }
+		var row = new object?[] { "Kid", 10 };
 
-    [Fact]
-    public async Task Transform_ShouldApplyMultipleFilters()
-    {
-        // Arrange
-        var options = new FilterTransformerOptions { Filters = new[] { "row.A > 0", "row.B < 100" } };
-        var transformer = new FilterDataTransformer(options, _realJsProvider);
-        
-        var columns = new List<PipeColumnInfo> { new("A", typeof(int), false), new("B", typeof(int), false) };
-        await transformer.InitializeAsync(columns);
+		// Act
+		var result = transformer.Transform(row);
 
-        // Case 1: Both true
-        Assert.NotNull(transformer.Transform(new object?[] { 10, 50 }));
+		// Assert
+		Assert.Null(result);
+	}
 
-        // Case 2: First false
-        Assert.Null(transformer.Transform(new object?[] { -1, 50 }));
+	[Fact]
+	public async Task Transform_ShouldApplyMultipleFilters()
+	{
+		// Arrange
+		var options = new FilterTransformerOptions { Filters = new[] { "row.A > 0", "row.B < 100" } };
+		var transformer = new FilterDataTransformer(options, _realJsProvider);
 
-        // Case 3: Second false
-        Assert.Null(transformer.Transform(new object?[] { 10, 200 }));
-    }
+		var columns = new List<PipeColumnInfo> { new("A", typeof(int), false), new("B", typeof(int), false) };
+		await transformer.InitializeAsync(columns);
+
+		// Case 1: Both true
+		Assert.NotNull(transformer.Transform(new object?[] { 10, 50 }));
+
+		// Case 2: First false
+		Assert.Null(transformer.Transform(new object?[] { -1, 50 }));
+
+		// Case 3: Second false
+		Assert.Null(transformer.Transform(new object?[] { 10, 200 }));
+	}
 }

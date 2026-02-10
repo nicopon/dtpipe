@@ -12,268 +12,268 @@ namespace DtPipe.Transformers.Fake;
 /// </summary>
 public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOptions<FakeOptions>
 {
-    private readonly FakeMappingParser _parser;
-    private readonly FakerRegistry _registry;
-    private readonly Faker _faker;
-    private readonly string _locale;
-    
-    // Deterministic mode fields
-    private readonly string? _seedColumn;
-    private readonly bool _deterministic;
-    private readonly bool _skipNull;
-    private int _seedColumnIndex = -1;
-    private long _rowCounter = 0;
-    
-    // Paged caches for deterministic mode
-    private Dictionary<int, PagedFakeValueCache>? _pagedCaches;
-    
-    // State initialized in InitializeAsync
-    private int[]? _generationOrder;
-    private FakeColumnProcessor[]? _processors;
-    private Dictionary<string, int>? _columnNameToIndex;
-    private readonly List<string> _virtualColumns = [];
-    private int _realColumnCount;
+	private readonly FakeMappingParser _parser;
+	private readonly FakerRegistry _registry;
+	private readonly Faker _faker;
+	private readonly string _locale;
 
-    // Regex for template substitution
-    [GeneratedRegex(@"\{([^{}]+)\}", RegexOptions.Compiled)]
-    private static partial Regex TemplatePattern();
+	// Deterministic mode fields
+	private readonly string? _seedColumn;
+	private readonly bool _deterministic;
+	private readonly bool _skipNull;
+	private int _seedColumnIndex = -1;
+	private long _rowCounter = 0;
 
-    public FakeDataTransformer(FakeOptions options)
-    {
-        _registry = new FakerRegistry();
-        _parser = new FakeMappingParser(_registry);
-        _locale = options.Locale;
-        _seedColumn = options.SeedColumn;
-        _deterministic = options.Deterministic;
-        _skipNull = options.SkipNull;
-        
-        _faker = options.Seed.HasValue 
-            ? new Faker(options.Locale) { Random = new Randomizer(options.Seed.Value) } 
-            : new Faker(options.Locale);
+	// Paged caches for deterministic mode
+	private Dictionary<int, PagedFakeValueCache>? _pagedCaches;
 
-        if (_deterministic && !string.IsNullOrEmpty(_seedColumn))
-        {
-            throw new ArgumentException("Options --fake-deterministic and --fake-seedcolumn cannot be used together.");
-        }
+	// State initialized in InitializeAsync
+	private int[]? _generationOrder;
+	private FakeColumnProcessor[]? _processors;
+	private Dictionary<string, int>? _columnNameToIndex;
+	private readonly List<string> _virtualColumns = [];
+	private int _realColumnCount;
 
-        _parser.ParseAll(options.Fake);
-    }
+	// Regex for template substitution
+	[GeneratedRegex(@"\{([^{}]+)\}", RegexOptions.Compiled)]
+	private static partial Regex TemplatePattern();
 
-    public bool HasFake => _parser.HasMappings;
-    public FakerRegistry Registry => _registry;
+	public FakeDataTransformer(FakeOptions options)
+	{
+		_registry = new FakerRegistry();
+		_parser = new FakeMappingParser(_registry);
+		_locale = options.Locale;
+		_seedColumn = options.SeedColumn;
+		_deterministic = options.Deterministic;
+		_skipNull = options.SkipNull;
 
-    public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
-    {
-        if (!HasFake)
-        {
-            _processors = null;
-            _generationOrder = null;
-            return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
-        }
+		_faker = options.Seed.HasValue
+			? new Faker(options.Locale) { Random = new Randomizer(options.Seed.Value) }
+			: new Faker(options.Locale);
 
-        // Build column name to index map
-        _columnNameToIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        _realColumnCount = columns.Count;
-        for (var i = 0; i < columns.Count; i++)
-        {
-            _columnNameToIndex[columns[i].Name] = i;
-        }
-        
-        // Detect virtual columns
-        _virtualColumns.Clear();
-        foreach (var colName in _parser.Mappings.Keys)
-        {
-            if (!_columnNameToIndex.ContainsKey(colName))
-            {
-                var virtualIndex = _realColumnCount + _virtualColumns.Count;
-                _columnNameToIndex[colName] = virtualIndex;
-                _virtualColumns.Add(colName);
-            }
-        }
-        
-        var totalColumns = _realColumnCount + _virtualColumns.Count;
+		if (_deterministic && !string.IsNullOrEmpty(_seedColumn))
+		{
+			throw new ArgumentException("Options --fake-deterministic and --fake-seedcolumn cannot be used together.");
+		}
 
-        // Build processors
-        _processors = new FakeColumnProcessor[totalColumns];
-        var templateColumns = new List<int>();
-        var nonTemplateColumns = new List<int>();
+		_parser.ParseAll(options.Fake);
+	}
 
-        // Process real columns
-        for (var i = 0; i < columns.Count; i++)
-        {
-            var colName = columns[i].Name;
-            if (!_parser.Mappings.TryGetValue(colName, out var fakerPath)) continue;
+	public bool HasFake => _parser.HasMappings;
+	public FakerRegistry Registry => _registry;
 
-            if (FakeMappingParser.IsTemplate(fakerPath))
-            {
-                var refCols = FakeMappingParser.ExtractReferencedColumns(fakerPath);
-                _processors[i] = new FakeColumnProcessor(i, fakerPath, refCols);
-                templateColumns.Add(i);
-            }
-            else
-            {
-                var generator = BuildGenerator(fakerPath, colName);
-                _processors[i] = new FakeColumnProcessor(i, generator, fakerPath);
-                nonTemplateColumns.Add(i);
-            }
-        }
-        
-        // Process virtual columns
-        foreach (var virtualCol in _virtualColumns)
-        {
-            var virtualIndex = _columnNameToIndex[virtualCol];
-            var fakerPath = _parser.Mappings[virtualCol];
-            
-            if (FakeMappingParser.IsTemplate(fakerPath))
-            {
-                var refCols = FakeMappingParser.ExtractReferencedColumns(fakerPath);
-                _processors[virtualIndex] = new FakeColumnProcessor(virtualIndex, fakerPath, refCols);
-                templateColumns.Add(virtualIndex);
-            }
-            else
-            {
-                var generator = BuildGenerator(fakerPath, virtualCol);
-                _processors[virtualIndex] = new FakeColumnProcessor(virtualIndex, generator, fakerPath);
-                nonTemplateColumns.Add(virtualIndex);
-            }
-        }
+	public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
+	{
+		if (!HasFake)
+		{
+			_processors = null;
+			_generationOrder = null;
+			return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
+		}
 
-        // Build generation order: non-templates first, then templates
-        _generationOrder = [..nonTemplateColumns, ..templateColumns];
+		// Build column name to index map
+		_columnNameToIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+		_realColumnCount = columns.Count;
+		for (var i = 0; i < columns.Count; i++)
+		{
+			_columnNameToIndex[columns[i].Name] = i;
+		}
 
-        // Resolve seed column index
-        if (_seedColumn is not null && !_columnNameToIndex.TryGetValue(_seedColumn, out _seedColumnIndex))
-        {
-            throw new InvalidOperationException($"Seed column '{_seedColumn}' not found in result set.");
-        }
+		// Detect virtual columns
+		_virtualColumns.Clear();
+		foreach (var colName in _parser.Mappings.Keys)
+		{
+			if (!_columnNameToIndex.ContainsKey(colName))
+			{
+				var virtualIndex = _realColumnCount + _virtualColumns.Count;
+				_columnNameToIndex[colName] = virtualIndex;
+				_virtualColumns.Add(colName);
+			}
+		}
 
-        // Initialize paged caches for deterministic mode
-        if (_deterministic || _seedColumnIndex >= 0)
-        {
-            _pagedCaches = [];
-            foreach (var colIdx in _generationOrder)
-            {
-                var processor = _processors[colIdx];
-                if (!processor.IsTemplate && processor.Generator is not null && processor.FakerPath is not null)
-                {
-                    _pagedCaches[colIdx] = new PagedFakeValueCache(_locale, processor.Generator, processor.FakerHash);
-                }
-            }
-        }
+		var totalColumns = _realColumnCount + _virtualColumns.Count;
 
-        // Build output schema
-        var outputColumns = new List<PipeColumnInfo>(columns);
-        foreach (var virtualCol in _virtualColumns)
-        {
-            outputColumns.Add(new PipeColumnInfo(virtualCol, typeof(string), true));
-        }
-        
-        return new ValueTask<IReadOnlyList<PipeColumnInfo>>(outputColumns);
-    }
+		// Build processors
+		_processors = new FakeColumnProcessor[totalColumns];
+		var templateColumns = new List<int>();
+		var nonTemplateColumns = new List<int>();
 
-    public object?[]? Transform(object?[] row)
-    {
-        if (_processors is null || _generationOrder is null) return row;
+		// Process real columns
+		for (var i = 0; i < columns.Count; i++)
+		{
+			var colName = columns[i].Name;
+			if (!_parser.Mappings.TryGetValue(colName, out var fakerPath)) continue;
 
-        // Row expansion for virtual columns
-        object?[] workingRow = row;
-        if (_virtualColumns.Count > 0)
-        {
-            var totalColumns = _realColumnCount + _virtualColumns.Count;
-            if (row.Length < totalColumns)
-            {
-                workingRow = new object?[totalColumns];
-                Array.Copy(row, workingRow, row.Length);
-            }
-        }
+			if (FakeMappingParser.IsTemplate(fakerPath))
+			{
+				var refCols = FakeMappingParser.ExtractReferencedColumns(fakerPath);
+				_processors[i] = new FakeColumnProcessor(i, fakerPath, refCols);
+				templateColumns.Add(i);
+			}
+			else
+			{
+				var generator = BuildGenerator(fakerPath, colName);
+				_processors[i] = new FakeColumnProcessor(i, generator, fakerPath);
+				nonTemplateColumns.Add(i);
+			}
+		}
 
-        if (_pagedCaches is not null)
-        {
-            // Deterministic mode
-            int cacheIndex = _seedColumnIndex >= 0
-                ? unchecked((int)StableHash.Compute(workingRow[_seedColumnIndex]))
-                : unchecked((int)_rowCounter++);
+		// Process virtual columns
+		foreach (var virtualCol in _virtualColumns)
+		{
+			var virtualIndex = _columnNameToIndex[virtualCol];
+			var fakerPath = _parser.Mappings[virtualCol];
 
-            foreach (var colIdx in _generationOrder)
-            {
-                // Skip if source is null and SkipNull is enabled (for real columns only)
-                if (_skipNull && colIdx < _realColumnCount && workingRow[colIdx] is null)
-                {
-                    continue;
-                }
-                
-                var processor = _processors[colIdx];
-                if (processor.IsTemplate)
-                {
-                    workingRow[colIdx] = SubstituteTemplate(processor.Template!, workingRow);
-                }
-                else if (_pagedCaches.TryGetValue(colIdx, out var cache))
-                {
-                    workingRow[colIdx] = cache.GetValue(cacheIndex);
-                }
-                else if (processor.Generator is not null)
-                {
-                    workingRow[colIdx] = processor.Generator(_faker);
-                }
-            }
-        }
-        else
-        {
-            // Non-deterministic mode
-            foreach (var colIdx in _generationOrder)
-            {
-                // Skip if source is null and SkipNull is enabled (for real columns only)
-                if (_skipNull && colIdx < _realColumnCount && workingRow[colIdx] is null)
-                {
-                    continue;
-                }
-                
-                var processor = _processors[colIdx];
-                if (processor.IsTemplate)
-                {
-                    workingRow[colIdx] = SubstituteTemplate(processor.Template!, workingRow);
-                }
-                else if (processor.Generator is not null)
-                {
-                    workingRow[colIdx] = processor.Generator(_faker);
-                }
-            }
-        }
+			if (FakeMappingParser.IsTemplate(fakerPath))
+			{
+				var refCols = FakeMappingParser.ExtractReferencedColumns(fakerPath);
+				_processors[virtualIndex] = new FakeColumnProcessor(virtualIndex, fakerPath, refCols);
+				templateColumns.Add(virtualIndex);
+			}
+			else
+			{
+				var generator = BuildGenerator(fakerPath, virtualCol);
+				_processors[virtualIndex] = new FakeColumnProcessor(virtualIndex, generator, fakerPath);
+				nonTemplateColumns.Add(virtualIndex);
+			}
+		}
 
-        return workingRow;
-    }
+		// Build generation order: non-templates first, then templates
+		_generationOrder = [.. nonTemplateColumns, .. templateColumns];
 
-    private string SubstituteTemplate(string template, object?[] row)
-    {
-        return TemplatePattern().Replace(template, match =>
-        {
-            var colName = match.Groups[1].Value;
-            if (_columnNameToIndex!.TryGetValue(colName, out var idx))
-            {
-                return row[idx]?.ToString() ?? string.Empty;
-            }
-            return match.Value;
-        });
-    }
+		// Resolve seed column index
+		if (_seedColumn is not null && !_columnNameToIndex.TryGetValue(_seedColumn, out _seedColumnIndex))
+		{
+			throw new InvalidOperationException($"Seed column '{_seedColumn}' not found in result set.");
+		}
 
-    private Func<Faker, object?>? BuildGenerator(string fakerPath, string colName)
-    {
-        var hashIndex = fakerPath.IndexOf('#');
-        var basePath = hashIndex >= 0 ? fakerPath[..hashIndex] : fakerPath;
-        
-        var generator = _registry.GetGenerator(basePath.ToLowerInvariant());
-        
-        if (generator is not null) return generator;
+		// Initialize paged caches for deterministic mode
+		if (_deterministic || _seedColumnIndex >= 0)
+		{
+			_pagedCaches = [];
+			foreach (var colIdx in _generationOrder)
+			{
+				var processor = _processors[colIdx];
+				if (!processor.IsTemplate && processor.Generator is not null && processor.FakerPath is not null)
+				{
+					_pagedCaches[colIdx] = new PagedFakeValueCache(_locale, processor.Generator, processor.FakerHash);
+				}
+			}
+		}
 
-        var parts = basePath.Split('.', 2);
-        var dataset = parts.Length > 0 ? parts[0] : "";
-        
-        if (_registry.HasDataset(dataset))
-        {
-            throw new InvalidOperationException($"Unknown faker method '{basePath}' for column '{colName}'. Use --fake-list to see available options.");
-        }
+		// Build output schema
+		var outputColumns = new List<PipeColumnInfo>(columns);
+		foreach (var virtualCol in _virtualColumns)
+		{
+			outputColumns.Add(new PipeColumnInfo(virtualCol, typeof(string), true));
+		}
 
-        // Hardcoded string fallback
-        return _ => fakerPath;
-    }
+		return new ValueTask<IReadOnlyList<PipeColumnInfo>>(outputColumns);
+	}
+
+	public object?[]? Transform(object?[] row)
+	{
+		if (_processors is null || _generationOrder is null) return row;
+
+		// Row expansion for virtual columns
+		object?[] workingRow = row;
+		if (_virtualColumns.Count > 0)
+		{
+			var totalColumns = _realColumnCount + _virtualColumns.Count;
+			if (row.Length < totalColumns)
+			{
+				workingRow = new object?[totalColumns];
+				Array.Copy(row, workingRow, row.Length);
+			}
+		}
+
+		if (_pagedCaches is not null)
+		{
+			// Deterministic mode
+			int cacheIndex = _seedColumnIndex >= 0
+				? unchecked((int)StableHash.Compute(workingRow[_seedColumnIndex]))
+				: unchecked((int)_rowCounter++);
+
+			foreach (var colIdx in _generationOrder)
+			{
+				// Skip if source is null and SkipNull is enabled (for real columns only)
+				if (_skipNull && colIdx < _realColumnCount && workingRow[colIdx] is null)
+				{
+					continue;
+				}
+
+				var processor = _processors[colIdx];
+				if (processor.IsTemplate)
+				{
+					workingRow[colIdx] = SubstituteTemplate(processor.Template!, workingRow);
+				}
+				else if (_pagedCaches.TryGetValue(colIdx, out var cache))
+				{
+					workingRow[colIdx] = cache.GetValue(cacheIndex);
+				}
+				else if (processor.Generator is not null)
+				{
+					workingRow[colIdx] = processor.Generator(_faker);
+				}
+			}
+		}
+		else
+		{
+			// Non-deterministic mode
+			foreach (var colIdx in _generationOrder)
+			{
+				// Skip if source is null and SkipNull is enabled (for real columns only)
+				if (_skipNull && colIdx < _realColumnCount && workingRow[colIdx] is null)
+				{
+					continue;
+				}
+
+				var processor = _processors[colIdx];
+				if (processor.IsTemplate)
+				{
+					workingRow[colIdx] = SubstituteTemplate(processor.Template!, workingRow);
+				}
+				else if (processor.Generator is not null)
+				{
+					workingRow[colIdx] = processor.Generator(_faker);
+				}
+			}
+		}
+
+		return workingRow;
+	}
+
+	private string SubstituteTemplate(string template, object?[] row)
+	{
+		return TemplatePattern().Replace(template, match =>
+		{
+			var colName = match.Groups[1].Value;
+			if (_columnNameToIndex!.TryGetValue(colName, out var idx))
+			{
+				return row[idx]?.ToString() ?? string.Empty;
+			}
+			return match.Value;
+		});
+	}
+
+	private Func<Faker, object?>? BuildGenerator(string fakerPath, string colName)
+	{
+		var hashIndex = fakerPath.IndexOf('#');
+		var basePath = hashIndex >= 0 ? fakerPath[..hashIndex] : fakerPath;
+
+		var generator = _registry.GetGenerator(basePath.ToLowerInvariant());
+
+		if (generator is not null) return generator;
+
+		var parts = basePath.Split('.', 2);
+		var dataset = parts.Length > 0 ? parts[0] : "";
+
+		if (_registry.HasDataset(dataset))
+		{
+			throw new InvalidOperationException($"Unknown faker method '{basePath}' for column '{colName}'. Use --fake-list to see available options.");
+		}
+
+		// Hardcoded string fallback
+		return _ => fakerPath;
+	}
 }

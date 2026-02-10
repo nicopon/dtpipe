@@ -7,9 +7,9 @@ namespace DtPipe.Core.Services;
 /// </summary>
 public interface IJsEngineProvider : IDisposable
 {
-    /// <summary>
-    /// Gets the Jint Engine instance. 
-    /// The engine is initialized on first access and reused within the scope/thread.
-    /// </summary>
-    Engine GetEngine();
+	/// <summary>
+	/// Gets the Jint Engine instance. 
+	/// The engine is initialized on first access and reused within the scope/thread.
+	/// </summary>
+	Engine GetEngine();
 }

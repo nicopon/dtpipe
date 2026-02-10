@@ -1,74 +1,77 @@
+using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
-using DtPipe.Configuration;
 using DtPipe.Core.Options;
 
 namespace DtPipe.Adapters.Sample;
 
 public class SampleReaderDescriptor : IProviderDescriptor<IStreamReader>
 {
-    public string ProviderName => SampleConstants.ProviderName;
+	public string ProviderName => SampleConstants.ProviderName;
 
-    public Type OptionsType => typeof(SampleReaderOptions);
+	public Type OptionsType => typeof(SampleReaderOptions);
 
-    public bool RequiresQuery => false;
+	public bool RequiresQuery => false;
 
-    public bool CanHandle(string connectionString)
-    {
-        return connectionString.StartsWith("sample:", StringComparison.OrdinalIgnoreCase);
-    }
+	public bool CanHandle(string connectionString)
+	{
+		return connectionString.StartsWith("sample:", StringComparison.OrdinalIgnoreCase);
+	}
 
-    public IStreamReader Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
-    {
-        var sampleOptions = (SampleReaderOptions)options;
-        
-        string config = connectionString;
-        if (config.StartsWith("sample:", StringComparison.OrdinalIgnoreCase))
-        {
-            config = config.Substring(7);
-        }
+	public IStreamReader Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
+	{
+		var sampleOptions = (SampleReaderOptions)options;
 
-        var parts = config.Split(';', StringSplitOptions.RemoveEmptyEntries);
+		string config = connectionString;
+		if (config.StartsWith("sample:", StringComparison.OrdinalIgnoreCase))
+		{
+			config = config.Substring(7);
+		}
 
-        if (parts.Length > 0 && long.TryParse(parts[0], out long count))
-        {
-            sampleOptions.RowCount = count;
-        }
+		var parts = config.Split(';', StringSplitOptions.RemoveEmptyEntries);
 
-        // Parse custom columns if any
-        if (parts.Length > 1)
-        {
-            for (int i = 1; i < parts.Length; i++)
-            {
-                var kvp = parts[i].Split('=');
-                if (kvp.Length == 2)
-                {
-                    string name = kvp[0].Trim();
-                    string typeStr = kvp[1].Trim().ToLowerInvariant();
-                    Type type = typeStr switch
-                    {
-                        "int" => typeof(int),
-                        "long" => typeof(long),
-                        "bool" => typeof(bool),
-                        "double" => typeof(double),
-                        "date" => typeof(DateTime),
-                        "guid" => typeof(Guid),
-                        _ => typeof(string)
-                    };
-                    sampleOptions.ColumnDefinitions.Add(new SampleColumnDef { Name = name, Type = type });
-                }
-            }
-        }
+		if (parts.Length > 0 && long.TryParse(parts[0], out long count))
+		{
+			sampleOptions.RowCount = count;
+		}
 
-        // Default if no columns specified
-        if (sampleOptions.ColumnDefinitions.Count == 0)
-        {
-            sampleOptions.ColumnDefinitions.Add(new SampleColumnDef { Name = "dummy", Type = typeof(string) });
-        }
+		// Always prepend sampleindex
+		sampleOptions.ColumnDefinitions.Insert(0, new SampleColumnDef { Name = "sampleindex", Type = typeof(long) });
 
-        return new SampleReader(
-            connectionString,
-            context.Query ?? "",
-            (SampleReaderOptions)options);
-    }
+		// Parse custom columns if any
+		if (parts.Length > 1)
+		{
+			for (int i = 1; i < parts.Length; i++)
+			{
+				var kvp = parts[i].Split('=');
+				if (kvp.Length == 2)
+				{
+					string name = kvp[0].Trim();
+					string typeStr = kvp[1].Trim().ToLowerInvariant();
+					Type type = typeStr switch
+					{
+						"int" => typeof(int),
+						"long" => typeof(long),
+						"bool" => typeof(bool),
+						"double" => typeof(double),
+						"date" => typeof(DateTime),
+						"guid" => typeof(Guid),
+						_ => typeof(string)
+					};
+					sampleOptions.ColumnDefinitions.Add(new SampleColumnDef { Name = name, Type = type });
+				}
+			}
+		}
+
+		// Default if no columns specified (besides sampleindex)
+		if (sampleOptions.ColumnDefinitions.Count == 1)
+		{
+			sampleOptions.ColumnDefinitions.Add(new SampleColumnDef { Name = "dummy", Type = typeof(string) });
+		}
+
+		return new SampleReader(
+			connectionString,
+			context.Query ?? "",
+			(SampleReaderOptions)options);
+	}
 }

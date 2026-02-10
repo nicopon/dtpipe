@@ -1,190 +1,188 @@
-using Spectre.Console;
 using System.Diagnostics;
 using DtPipe.Core.Abstractions;
-using DtPipe.Cli.Abstractions;
-using DtPipe.Core.Models;
+using Spectre.Console;
 
 namespace DtPipe.Feedback;
 
-public sealed class ProgressReporter : IDisposable
+public sealed class ProgressReporter : IExportProgress
 {
-    private readonly Stopwatch _stopwatch;
-    private readonly IAnsiConsole _console;
-    private readonly bool _enabled;
-    private readonly bool _uiEnabled;
-    private bool _disposed;
-    
-    // Stats
-    private long _readCount;
-    private long _writeCount;
+	private readonly Stopwatch _stopwatch;
+	private readonly IAnsiConsole _console;
+	private readonly bool _enabled;
+	private readonly bool _uiEnabled;
+	private bool _disposed;
 
-    // Transformers stats
-    private readonly Dictionary<string, long> _transformerStats = new();
-    private readonly List<string> _transformerNames = new();
-    
-    // UI Task
-    private Task? _uiTask;
+	// Stats
+	private long _readCount;
+	private long _writeCount;
 
-    public ProgressReporter(IAnsiConsole console, bool enabled = true, IEnumerable<IDataTransformer>? transformers = null)
-    {
-        _console = console;
-        _enabled = enabled;
-        _stopwatch = Stopwatch.StartNew();
+	// Transformers stats
+	private readonly Dictionary<string, long> _transformerStats = new();
+	private readonly List<string> _transformerNames = new();
 
-        if (transformers != null)
-        {
-            foreach (var t in transformers)
-            {
-                _transformerNames.Add(t.GetType().Name);
-                _transformerStats[t.GetType().Name] = 0;
-            }
-        }
+	// UI Task
+	private Task? _uiTask;
 
-        // Compute whether a live TUI should be started. Disable when output is
-        // redirected or when a CI/non-interactive environment is detected.
-        _uiEnabled = _enabled && !IsNonInteractiveEnvironment();
+	public ProgressReporter(IAnsiConsole console, bool enabled = true, IEnumerable<string>? transformerNames = null)
+	{
+		_console = console;
+		_enabled = enabled;
+		_stopwatch = Stopwatch.StartNew();
 
-        if (_uiEnabled)
-        {
-            // Start the live display in a background task but make it tolerant to
-            // non-interactive/test environments where Spectre.Console may throw
-            // when multiple interactive displays are attempted concurrently.
-            _uiTask = Task.Run(async () =>
-            {
-                try
-                {
-                    await _console.Live(CreateLayout())
-                        .AutoClear(false)
-                        .Overflow(VerticalOverflow.Ellipsis)
-                        .Cropping(VerticalOverflowCropping.Bottom)
-                        .StartAsync(async ctx =>
-                        {
-                            while (!_disposed)
-                            {
-                                ctx.UpdateTarget(CreateLayout());
-                                try { await Task.Delay(500); } catch (TaskCanceledException) { break; }
-                            }
-                            // Ensure final update
-                            ctx.UpdateTarget(CreateLayout());
-                        });
-                }
-                catch (InvalidOperationException)
-                {
-                    // Spectre.Console can throw when interactive displays are used
-                    // concurrently (e.g. during tests). Silently ignore and continue
-                    // without a live UI.
-                }
-            }).ContinueWith(t => { /* swallow exceptions from the UI task */ });
-        }
-    }
+		if (transformerNames != null)
+		{
+			foreach (var name in transformerNames)
+			{
+				_transformerNames.Add(name);
+				_transformerStats[name] = 0;
+			}
+		}
 
-    public void ReportRead(int count)
-    {
-        Interlocked.Add(ref _readCount, count);
-        // Refresh is handled by background loop
-    }
+		// Compute whether a live TUI should be started. Disable when output is
+		// redirected or when a CI/non-interactive environment is detected.
+		_uiEnabled = _enabled && !IsNonInteractiveEnvironment();
 
-    public void ReportTransform(string transformerName, int count)
-    {
-        lock (_transformerStats)
-        {
-            if (_transformerStats.ContainsKey(transformerName))
-            {
-                _transformerStats[transformerName] += count;
-            }
-        }
-    }
+		if (_uiEnabled)
+		{
+			// Start the live display in a background task but make it tolerant to
+			// non-interactive/test environments where Spectre.Console may throw
+			// when multiple interactive displays are attempted concurrently.
+			_uiTask = Task.Run(async () =>
+			{
+				try
+				{
+					await _console.Live(CreateLayout())
+						.AutoClear(false)
+						.Overflow(VerticalOverflow.Ellipsis)
+						.Cropping(VerticalOverflowCropping.Bottom)
+						.StartAsync(async ctx =>
+						{
+							while (!_disposed)
+							{
+								ctx.UpdateTarget(CreateLayout());
+								try { await Task.Delay(500); } catch (TaskCanceledException) { break; }
+							}
+							// Ensure final update
+							ctx.UpdateTarget(CreateLayout());
+						});
+				}
+				catch (InvalidOperationException)
+				{
+					// Spectre.Console can throw when interactive displays are used
+					// concurrently (e.g. during tests). Silently ignore and continue
+					// without a live UI.
+				}
+			}).ContinueWith(t => { /* swallow exceptions from the UI task */ });
+		}
+	}
 
-    public void ReportWrite(int count)
-    {
-        Interlocked.Add(ref _writeCount, count);
-    }
+	public void ReportRead(int count)
+	{
+		Interlocked.Add(ref _readCount, count);
+		// Refresh is handled by background loop
+	}
 
-    private Table CreateLayout()
-    {
-        var elapsed = _stopwatch.Elapsed.TotalSeconds;
-        
-        var table = new Table().Border(TableBorder.Rounded);
-        table.AddColumn("Stage");
-        table.AddColumn("Rows");
-        table.AddColumn("Speed");
+	public void ReportTransform(string transformerName, int count)
+	{
+		lock (_transformerStats)
+		{
+			if (_transformerStats.ContainsKey(transformerName))
+			{
+				_transformerStats[transformerName] += count;
+			}
+		}
+	}
 
-        // Reading
-        var readSpeed = elapsed > 0 ? _readCount / elapsed : 0;
-        table.AddRow("Reading", $"{_readCount:N0}", FormatSpeed(readSpeed));
+	public void ReportWrite(int count)
+	{
+		Interlocked.Add(ref _writeCount, count);
+	}
 
-        // Transformers
-        lock (_transformerStats)
-        {
-            foreach (var name in _transformerNames)
-            {
-                var count = _transformerStats[name];
-                var speed = elapsed > 0 ? count / elapsed : 0;
-                table.AddRow($"→ {name}", $"{count:N0}", FormatSpeed(speed));
-            }
-        }
+	private Table CreateLayout()
+	{
+		var elapsed = _stopwatch.Elapsed.TotalSeconds;
 
-        // Writing
-        var writeSpeed = elapsed > 0 ? _writeCount / elapsed : 0;
-        table.AddRow("Writing", $"{_writeCount:N0}", FormatSpeed(writeSpeed));
-        
-        return table;
-    }
+		var table = new Table().Border(TableBorder.Rounded);
+		table.AddColumn("Stage");
+		table.AddColumn("Rows");
+		table.AddColumn("Speed");
 
-    private static string FormatSpeed(double rowsPerSec)
-    {
-        return rowsPerSec switch
-        {
-            >= 1_000_000 => $"{rowsPerSec / 1_000_000:F1}M/s",
-            >= 1_000 => $"{rowsPerSec / 1_000:F1}K/s",
-            _ => $"{rowsPerSec:F0}/s"
-        };
-    }
+		// Reading
+		var readSpeed = elapsed > 0 ? _readCount / elapsed : 0;
+		table.AddRow("Reading", $"{_readCount:N0}", FormatSpeed(readSpeed));
 
-    public void Complete()
-    {
-        _stopwatch.Stop();
-        _disposed = true;
-        
-        if (_uiTask != null)
-        {
-            try { _uiTask.Wait(1000); } catch { /* ignore UI task failures/timeouts */ }
-        }
+		// Transformers
+		lock (_transformerStats)
+		{
+			foreach (var name in _transformerNames)
+			{
+				var count = _transformerStats[name];
+				var speed = elapsed > 0 ? count / elapsed : 0;
+				table.AddRow($"→ {name}", $"{count:N0}", FormatSpeed(speed));
+			}
+		}
 
-        if (_uiEnabled)
-        {
-            _console.MarkupLine($"[green]✓ Completed in {_stopwatch.Elapsed.TotalSeconds:F1}s | {_writeCount:N0} rows[/]");
-        }
-    }
+		// Writing
+		var writeSpeed = elapsed > 0 ? _writeCount / elapsed : 0;
+		table.AddRow("Writing", $"{_writeCount:N0}", FormatSpeed(writeSpeed));
 
-    private bool IsNonInteractiveEnvironment()
-    {
-        // Explicit opt-out
-        var noTui = Environment.GetEnvironmentVariable("DTPIPE_NO_TUI");
-        if (!string.IsNullOrWhiteSpace(noTui) && (noTui == "1" || noTui.Equals("true", StringComparison.OrdinalIgnoreCase)))
-        {
-            return true;
-        }
+		return table;
+	}
 
-        // If STDOUT is redirected (e.g. piped), we should disable the interactive TUI
-        // to avoid polluting the terminal or confusing the user, even if TUI goes to STDERR.
-        if (Console.IsOutputRedirected) return true;
+	private static string FormatSpeed(double rowsPerSec)
+	{
+		return rowsPerSec switch
+		{
+			>= 1_000_000 => $"{rowsPerSec / 1_000_000:F1}M/s",
+			>= 1_000 => $"{rowsPerSec / 1_000:F1}K/s",
+			_ => $"{rowsPerSec:F0}/s"
+		};
+	}
 
-        // Trust Spectre Console detection if configured
-        if (!_console.Profile.Capabilities.Interactive) return true;
+	public void Complete()
+	{
+		_stopwatch.Stop();
+		_disposed = true;
 
-        // Common CI indicators
-        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CI"))) return true;
-        
-        return false;
-    }
+		if (_uiTask != null)
+		{
+			try { _uiTask.Wait(1000); } catch { /* ignore UI task failures/timeouts */ }
+		}
 
-    public void Dispose()
-    {
-        _disposed = true;
-        if (_uiTask != null && !_uiTask.IsCompleted)
-        {
-            try { _uiTask.Wait(500); } catch { }
-        }
-    }
+		if (_uiEnabled)
+		{
+			_console.MarkupLine($"[green]✓ Completed in {_stopwatch.Elapsed.TotalSeconds:F1}s | {_writeCount:N0} rows[/]");
+		}
+	}
+
+	private bool IsNonInteractiveEnvironment()
+	{
+		// Explicit opt-out
+		var noTui = Environment.GetEnvironmentVariable("DTPIPE_NO_TUI");
+		if (!string.IsNullOrWhiteSpace(noTui) && (noTui == "1" || noTui.Equals("true", StringComparison.OrdinalIgnoreCase)))
+		{
+			return true;
+		}
+
+		// If STDOUT is redirected (e.g. piped), we should disable the interactive TUI
+		// to avoid polluting the terminal or confusing the user, even if TUI goes to STDERR.
+		if (Console.IsOutputRedirected) return true;
+
+		// Trust Spectre Console detection if configured
+		if (!_console.Profile.Capabilities.Interactive) return true;
+
+		// Common CI indicators
+		if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CI"))) return true;
+
+		return false;
+	}
+
+	public void Dispose()
+	{
+		_disposed = true;
+		if (_uiTask != null && !_uiTask.IsCompleted)
+		{
+			try { _uiTask.Wait(500); } catch { }
+		}
+	}
 }

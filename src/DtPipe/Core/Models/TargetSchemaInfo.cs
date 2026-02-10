@@ -10,13 +10,13 @@ namespace DtPipe.Core.Models;
 /// <param name="PrimaryKeyColumns">List of primary key column names (null if no PK or unknown)</param>
 /// <param name="IsRowCountEstimate">True if RowCount is based on statistics (Oracle, PostgreSQL), false if exact (DuckDB, SQLite)</param>
 public sealed record TargetSchemaInfo(
-    IReadOnlyList<TargetColumnInfo> Columns,
-    bool Exists,
-    long? RowCount,
-    long? SizeBytes,
-    IReadOnlyList<string>? PrimaryKeyColumns,
-    IReadOnlyList<string>? UniqueColumns = null,
-    bool IsRowCountEstimate = false  // Default false for backward compatibility
+	IReadOnlyList<TargetColumnInfo> Columns,
+	bool Exists,
+	long? RowCount,
+	long? SizeBytes,
+	IReadOnlyList<string>? PrimaryKeyColumns,
+	IReadOnlyList<string>? UniqueColumns = null,
+	bool IsRowCountEstimate = false  // Default false for backward compatibility
 );
 
 /// <summary>
@@ -30,14 +30,14 @@ public sealed record TargetSchemaInfo(
 /// <param name="IsUnique">Whether the column has a UNIQUE constraint</param>
 /// <param name="MaxLength">Maximum length for string/binary types (null if not applicable)</param>
 public sealed record TargetColumnInfo(
-    string Name,
-    string NativeType,
-    Type? InferredClrType,
-    bool IsNullable,
-    bool IsPrimaryKey,
-    bool IsUnique,
-    int? MaxLength = null,
-    int? Precision = null,
-    int? Scale = null,
-    bool IsCaseSensitive = false
+	string Name,
+	string NativeType,
+	Type? InferredClrType,
+	bool IsNullable,
+	bool IsPrimaryKey,
+	bool IsUnique,
+	int? MaxLength = null,
+	int? Precision = null,
+	int? Scale = null,
+	bool IsCaseSensitive = false
 );

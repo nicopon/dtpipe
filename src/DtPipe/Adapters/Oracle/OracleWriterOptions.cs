@@ -1,39 +1,39 @@
-using DtPipe.Core.Options;
 using DtPipe.Cli.Attributes;
+using DtPipe.Core.Options;
 
 namespace DtPipe.Adapters.Oracle;
 
 public enum OracleWriteStrategy
 {
-    Append,
-    Truncate,
-    DeleteThenInsert,
-    Recreate,
-    Upsert,
-    Ignore
+	Append,
+	Truncate,
+	DeleteThenInsert,
+	Recreate,
+	Upsert,
+	Ignore
 }
 
 public enum OracleInsertMode
 {
-    Standard,
-    Bulk,
-    Append
+	Standard,
+	Bulk,
+	Append
 }
 
 public record OracleWriterOptions : IProviderOptions
 {
-    public static string Prefix => OracleConstants.ProviderName;
-    public static string DisplayName => "Oracle Writer Options";
-    public string? Key { get; init; }
+	public static string Prefix => OracleConstants.ProviderName;
+	public static string DisplayName => "Oracle Writer Options";
+	public string? Key { get; init; }
 
-    [CliOption(Description = "Target table name", Hidden = true)]
-    public string Table { get; set; } = "export";
+	[CliOption(Description = "Target table name", Hidden = true)]
+	public string Table { get; set; } = "export";
 
-    [CliOption(Description = "Data write strategy (Append, Truncate, DeleteThenInsert)", Hidden = true)]
-    public OracleWriteStrategy? Strategy { get; set; }
+	[CliOption(Description = "Data write strategy (Append, Truncate, DeleteThenInsert)", Hidden = true)]
+	public OracleWriteStrategy? Strategy { get; set; }
 
-    [CliOption(Description = "Data insert mode (Standard, Bulk, Append)", Hidden = true)]
-    public OracleInsertMode? InsertMode { get; set; }
+	[CliOption(Description = "Data insert mode (Standard, Bulk, Append)", Hidden = true)]
+	public OracleInsertMode? InsertMode { get; set; }
 
 
 }

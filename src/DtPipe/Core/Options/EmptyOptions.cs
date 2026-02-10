@@ -7,6 +7,6 @@ namespace DtPipe.Core.Options;
 /// </summary>
 public class EmptyOptions : IProviderOptions
 {
-    public static string Prefix => string.Empty;
-    public static string DisplayName => "Empty Options";
+	public static string Prefix => string.Empty;
+	public static string DisplayName => "Empty Options";
 }

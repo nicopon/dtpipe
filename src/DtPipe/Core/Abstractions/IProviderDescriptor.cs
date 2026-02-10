@@ -1,5 +1,5 @@
-using DtPipe.Core.Options;
 using DtPipe.Configuration;
+using DtPipe.Core.Options;
 
 namespace DtPipe.Core.Abstractions;
 
@@ -10,23 +10,23 @@ namespace DtPipe.Core.Abstractions;
 /// <typeparam name="TService">The type of service to create (IDataWriter, IStreamReader, etc)</typeparam>
 public interface IProviderDescriptor<out TService>
 {
-    string ProviderName { get; }
-    Type OptionsType { get; }
-    
-    bool CanHandle(string connectionString);
+	string ProviderName { get; }
+	Type OptionsType { get; }
 
-    /// <summary>
-    /// Indicates if this provider requires a SQL query to read data.
-    /// True for DBs (Oracle, SQL Server), False for Files (CSV, Parquet) or Generators (Sample).
-    /// </summary>
-    bool RequiresQuery { get; }
+	bool CanHandle(string connectionString);
 
-    /// <summary>
-    /// Creates the service instance.
-    /// </summary>
-    /// <param name="connectionString">The resolved connection string (potentially stripped of prefix).</param>
-    /// <param name="options">The bound options object (of type OptionsType).</param>
-    /// <param name="context">The full DumpOptions context (provides Query, Timeout, etc).</param>
-    /// <param name="serviceProvider">Service provider for resolving dependencies (logger, etc).</param>
-    TService Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider);
+	/// <summary>
+	/// Indicates if this provider requires a SQL query to read data.
+	/// True for DBs (Oracle, SQL Server), False for Files (CSV, Parquet) or Generators (Sample).
+	/// </summary>
+	bool RequiresQuery { get; }
+
+	/// <summary>
+	/// Creates the service instance.
+	/// </summary>
+	/// <param name="connectionString">The resolved connection string (potentially stripped of prefix).</param>
+	/// <param name="options">The bound options object (of type OptionsType).</param>
+	/// <param name="context">The full DumpOptions context (provides Query, Timeout, etc).</param>
+	/// <param name="serviceProvider">Service provider for resolving dependencies (logger, etc).</param>
+	TService Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider);
 }

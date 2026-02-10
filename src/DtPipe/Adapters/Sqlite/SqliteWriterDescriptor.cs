@@ -1,35 +1,29 @@
-using DtPipe.Core.Abstractions;
-using DtPipe.Core.Models;
 using DtPipe.Configuration;
-using DtPipe.Core.Options;
+using DtPipe.Core.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace DtPipe.Adapters.Sqlite;
 
 public class SqliteWriterDescriptor : IProviderDescriptor<IDataWriter>
 {
-    public string ProviderName => "sqlite";
+	public string ProviderName => "sqlite";
 
-    public Type OptionsType => typeof(SqliteWriterOptions);
+	public Type OptionsType => typeof(SqliteWriterOptions);
 
-    public bool RequiresQuery => false;
+	public bool RequiresQuery => false;
 
-    public bool CanHandle(string connectionString)
-    {
-        return SqliteConnectionHelper.CanHandle(connectionString);
-    }
+	public bool CanHandle(string connectionString)
+	{
+		return SqliteConnectionHelper.CanHandle(connectionString);
+	}
 
-    public IDataWriter Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
-    {
-        var registry = serviceProvider.GetRequiredService<OptionsRegistry>();
-        // Ensure registry has options if not present (logic from original factory)
-        if (!registry.Has<SqliteWriterOptions>())
-        {
-            registry.Register((SqliteWriterOptions)options);
-        }
-        
-        
-        var dsConnectionString = SqliteConnectionHelper.ToDataSourceConnectionString(connectionString);
-        return new SqliteDataWriter(dsConnectionString, registry);
-    }
+	public IDataWriter Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
+	{
+		var sqliteOptions = (SqliteWriterOptions)options;
+		var logger = serviceProvider.GetRequiredService<ILogger<SqliteDataWriter>>();
+
+		var dsConnectionString = SqliteConnectionHelper.ToDataSourceConnectionString(connectionString);
+		return new SqliteDataWriter(dsConnectionString, sqliteOptions, logger);
+	}
 }

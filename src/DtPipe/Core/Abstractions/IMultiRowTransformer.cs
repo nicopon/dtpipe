@@ -6,10 +6,10 @@ namespace DtPipe.Core.Abstractions;
 /// </summary>
 public interface IMultiRowTransformer : IDataTransformer
 {
-    /// <summary>
-    /// Transforms a single row into multiple rows.
-    /// </summary>
-    /// <param name="row">The input row.</param>
-    /// <returns>An enumerable of output rows.</returns>
-    IEnumerable<object?[]> TransformMany(object?[] row);
+	/// <summary>
+	/// Transforms a single row into multiple rows.
+	/// </summary>
+	/// <param name="row">The input row.</param>
+	/// <returns>An enumerable of output rows.</returns>
+	IEnumerable<object?[]> TransformMany(object?[] row);
 }

@@ -5,32 +5,32 @@ namespace DtPipe.Adapters.SqlServer;
 
 public enum SqlServerInsertMode
 {
-    Standard,
-    Bulk
+	Standard,
+	Bulk
 }
 
 public record SqlServerWriterOptions : IProviderOptions
 {
-    public static string Prefix => SqlServerConstants.ProviderName;
-    public static string DisplayName => "SQL Server Writer Options";
-    public string? Key { get; init; }
+	public static string Prefix => SqlServerConstants.ProviderName;
+	public static string DisplayName => "SQL Server Writer Options";
+	public string? Key { get; init; }
 
-    [CliOption(Description = "Target table name", Hidden = true)]
-    public string Table { get; set; } = "export";
+	[CliOption(Description = "Target table name", Hidden = true)]
+	public string Table { get; set; } = "export";
 
-    [CliOption(Description = "Data write strategy (Append, Truncate, DeleteThenInsert)", Hidden = true)]
-    public SqlServerWriteStrategy? Strategy { get; set; }
+	[CliOption(Description = "Data write strategy (Append, Truncate, DeleteThenInsert)", Hidden = true)]
+	public SqlServerWriteStrategy? Strategy { get; set; }
 
-    [CliOption(Description = "Data insert mode (Standard, Bulk)", Hidden = true)]
-    public SqlServerInsertMode? InsertMode { get; set; }
+	[CliOption(Description = "Data insert mode (Standard, Bulk)", Hidden = true)]
+	public SqlServerInsertMode? InsertMode { get; set; }
 }
 
 public enum SqlServerWriteStrategy
 {
-    Append,
-    Truncate,
-    DeleteThenInsert,
-    Recreate,
-    Upsert,
-    Ignore
+	Append,
+	Truncate,
+	DeleteThenInsert,
+	Recreate,
+	Upsert,
+	Ignore
 }

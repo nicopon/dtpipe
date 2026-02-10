@@ -1,483 +1,438 @@
 using System.Threading.Channels;
+using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Options;
 using DtPipe.Core.Security;
-using DtPipe.Feedback;
-using Spectre.Console;
 using Microsoft.Extensions.Logging;
+using Spectre.Console;
 
 namespace DtPipe;
 
 public class ExportService
 {
-    private readonly IEnumerable<IStreamReaderFactory> _readerFactories;
-    private readonly IEnumerable<IDataWriterFactory> _writerFactories;
-    private readonly IEnumerable<IDataTransformerFactory> _transformerFactories;
-    private readonly OptionsRegistry _optionsRegistry;
-    private readonly IAnsiConsole _console;
-    private readonly ILogger<ExportService> _logger;
+	private readonly IEnumerable<IStreamReaderFactory> _readerFactories;
+	private readonly IEnumerable<IDataWriterFactory> _writerFactories;
+	private readonly IEnumerable<IDataTransformerFactory> _transformerFactories;
+	private readonly OptionsRegistry _optionsRegistry;
+	private readonly IExportObserver _observer;
+	private readonly ILogger<ExportService> _logger;
 
-    public ExportService(
-        IEnumerable<IStreamReaderFactory> readerFactories, 
-        IEnumerable<IDataWriterFactory> writerFactories,
-        IEnumerable<IDataTransformerFactory> transformerFactories,
-        OptionsRegistry optionsRegistry,
-        IAnsiConsole console,
-        ILogger<ExportService> logger)
-    {
-        _readerFactories = readerFactories;
-        _writerFactories = writerFactories;
-        _transformerFactories = transformerFactories;
-        _optionsRegistry = optionsRegistry;
-        _console = console;
-        _logger = logger;
-    }
+	public ExportService(
+		IEnumerable<IStreamReaderFactory> readerFactories,
+		IEnumerable<IDataWriterFactory> writerFactories,
+		IEnumerable<IDataTransformerFactory> transformerFactories,
+		OptionsRegistry optionsRegistry,
+		IExportObserver observer,
+		ILogger<ExportService> logger)
+	{
+		_readerFactories = readerFactories;
+		_writerFactories = writerFactories;
+		_transformerFactories = transformerFactories;
+		_optionsRegistry = optionsRegistry;
+		_observer = observer;
+		_logger = logger;
+	}
 
-    public async Task RunExportAsync(
-        DtPipe.Configuration.DumpOptions options, 
-        CancellationToken ct, 
-        List<IDataTransformer> pipeline,
-        IStreamReaderFactory readerFactory,
-        IDataWriterFactory writerFactory)
-    {
-        if(_logger.IsEnabled(LogLevel.Information))
-            _logger.LogInformation("Starting export from {Provider} to {OutputPath}", options.Provider, ConnectionStringSanitizer.Sanitize(options.OutputPath));
+	public async Task RunExportAsync(
+		DumpOptions options,
+		CancellationToken ct,
+		List<IDataTransformer> pipeline,
+		IStreamReaderFactory readerFactory,
+		IDataWriterFactory writerFactory)
+	{
+		if (_logger.IsEnabled(LogLevel.Information))
+			_logger.LogInformation("Starting export from {Provider} to {OutputPath}", options.Provider, ConnectionStringSanitizer.Sanitize(options.OutputPath));
 
-        // Display Source Info
-        var table = new Table();
-        table.Border(TableBorder.None);
-        table.AddColumn(new TableColumn("[grey]Source[/]").RightAligned());
-        table.AddColumn(new TableColumn($"[blue]{options.Provider}[/]"));
-        _console.Write(table);
+		// Display Source Info
+		_observer.ShowIntro(options.Provider, options.ConnectionString);
+		// options.Provider is "postgres", options.Connection is connection string.
+		// Wait, ShowIntro previously showed "Source" and "Provider".
+		// I should pass "options.Provider".
 
-        _console.MarkupLine($"   [grey]Connecting...[/]");
-        
-        await using var reader = readerFactory.Create(options);
-        
-        await reader.OpenAsync(ct);
-        
-        _console.MarkupLine($"   [grey]Connected. Schema: [green]{reader.Columns?.Count ?? 0}[/] columns.[/]");        
-        
-        if (reader.Columns is null || reader.Columns.Count == 0)
-        {
-            _console.MarkupLine("[red]No columns returned by query.[/]");
-            return;
-        }
+		_observer.ShowConnectionStatus(false, null);
 
-        // Initialize pipeline to define Target Schema
-        var currentSchema = reader.Columns;
-        if (pipeline.Count > 0)
-        {
-             _console.WriteLine();
-             _console.Write(new Rule("[yellow]Pipeline[/]").LeftJustified());
-             var grid = new Grid();
-             grid.AddColumn();
-             foreach(var t in pipeline)
-             {
-                 var name = t.GetType().Name.Replace("DataTransformer", "");
-                 grid.AddRow($"[yellow]↓[/] [cyan]{name}[/]");
-             }
-             _console.Write(grid);
-             
-             foreach (var t in pipeline)
-             {
-                 currentSchema = await t.InitializeAsync(currentSchema, ct);
-             }
-        }
+		await using var reader = readerFactory.Create(options);
 
-        // Dry-run mode: Delegate to DryRunService
-        if (options.DryRunCount > 0)
-        {
-            // Try to create writer for schema inspection (if output is specified)
-            IDataWriter? writerForInspection = null;
-            if (!string.IsNullOrEmpty(options.OutputPath))
-            {
-               // We reuse the resolved writerFactory for inspection
-               try 
-               {
-                   writerForInspection = writerFactory.Create(options);
-               }
-               catch 
-               {
-                   // Ignore if we can't create it for inspection (e.g. if it requires valid connection string and we have dry run logic)
-               }
-            }
+		await reader.OpenAsync(ct);
 
-            var dryRunController = new Cli.DryRun.DryRunCliController(_console);
-            await dryRunController.RunAsync(reader, pipeline, options.DryRunCount, writerForInspection, ct);
-            
-            // Dispose writer if created
-            if (writerForInspection != null)
-            {
-                await writerForInspection.DisposeAsync();
-            }
-            return;
-        }
+		_observer.ShowConnectionStatus(true, reader.Columns?.Count);
 
-        string writerName = writerFactory.ProviderName;
-        // Display Target Info
-        var targetTable = new Table();
-        targetTable.Border(TableBorder.None);
-        targetTable.AddColumn(new TableColumn("[grey]Target[/]").RightAligned());
-        targetTable.AddColumn(new TableColumn($"[blue]{writerName}[/]"));
-        
-        // Show output path if it's likely a file or simple string
-        if (!string.IsNullOrEmpty(options.OutputPath)) 
-        {
-             targetTable.AddColumn(new TableColumn($"([grey]{options.OutputPath}[/])"));
-        }
-        
-        _console.Write(targetTable);
+		if (reader.Columns is null || reader.Columns.Count == 0)
+		{
+			_observer.LogWarning("No columns returned by query.");
+			return;
+		}
 
-        // --- PRE-EXEC HOOK ---
-        if (!string.IsNullOrWhiteSpace(options.PreExec))
-        {
-            _console.MarkupLine($"   [yellow]Executing Pre-Hook...[/]");
-            try 
-            {
-                // Ensure writer is created if not already (it is created below, we need strict ordering)
-                // We create writer here, executed hook, then Initialize
-            } 
-            catch {} 
-        }
+		// Initialize pipeline to define Target Schema
+		var currentSchema = reader.Columns;
+		if (pipeline.Count > 0)
+		{
+			var transformerNames = pipeline.Select(t => t.GetType().Name.Replace("DataTransformer", ""));
+			_observer.ShowPipeline(transformerNames);
 
-        var exportableSchema = currentSchema;
-        await using var writer = writerFactory.Create(options);
+			foreach (var t in pipeline)
+			{
+				currentSchema = await t.InitializeAsync(currentSchema, ct);
+			}
+		}
 
-        // Execute Pre-Hook (Before Initialize, as it might create objects)
-         if (!string.IsNullOrWhiteSpace(options.PreExec))
-        {
-            _console.MarkupLine($"   [yellow]Executing Pre-Hook: {Markup.Escape(options.PreExec)}[/]");
-            await writer.ExecuteCommandAsync(options.PreExec, ct);
-        }
+		// Dry-run mode
+		if (options.DryRunCount > 0)
+		{
+			IDataWriter? writerForInspection = null;
+			if (!string.IsNullOrEmpty(options.OutputPath))
+			{
+				try
+				{
+					writerForInspection = writerFactory.Create(options);
+				}
+				catch { }
+			}
 
-        await writer.InitializeAsync(exportableSchema, ct);
+			await _observer.RunDryRunAsync(reader, pipeline, options.DryRunCount, writerForInspection, ct);
 
-        // Bounded Channels for backpressure
-        var readerToTransform = Channel.CreateBounded<object?[]>(new BoundedChannelOptions(1000)
-        {
-            SingleWriter = true,
-            SingleReader = true,
-            FullMode = BoundedChannelFullMode.Wait
-        });
+			if (writerForInspection != null)
+			{
+				await writerForInspection.DisposeAsync();
+			}
+			return;
+		}
 
-        var transformToWriter = Channel.CreateBounded<object?[]>(new BoundedChannelOptions(1000)
-        {
-            SingleWriter = true,
-            SingleReader = true,
-            FullMode = BoundedChannelFullMode.Wait
-        });
+		string writerName = writerFactory.ProviderName;
+		_observer.ShowTarget(writerName, options.OutputPath);
 
-        using var progress = new ProgressReporter(_console, true, pipeline);
-        long totalRows = 0;
+		// --- PRE-EXEC HOOK ---
+		if (!string.IsNullOrWhiteSpace(options.PreExec))
+		{
+			_observer.OnHookExecuting("Pre-Hook", options.PreExec);
+			try
+			{
+				// Just logging here, execution happens below
+			}
+			catch { }
+		}
 
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var effectiveCt = linkedCts.Token;
+		var exportableSchema = currentSchema;
+		await using var writer = writerFactory.Create(options);
 
-        try
-        {
-            // Run Concurrent Pipeline
-            var startTime = DateTime.UtcNow;
-            var producerTask = ProduceRowsAsync(reader, readerToTransform.Writer, options.BatchSize, options.Limit, options.SampleRate, options.SampleSeed, progress, linkedCts, effectiveCt, _logger);
-            var transformTask = TransformRowsAsync(readerToTransform.Reader, transformToWriter.Writer, pipeline, progress, effectiveCt);
-            var consumerTask = ConsumeRowsAsync(transformToWriter.Reader, writer, options.BatchSize, progress, r => Interlocked.Add(ref totalRows, r), effectiveCt, _logger);
+		// Execute Pre-Hook
+		if (!string.IsNullOrWhiteSpace(options.PreExec))
+		{
+			await writer.ExecuteCommandAsync(options.PreExec, ct);
+		}
 
-            var tasks = new List<Task> { producerTask, transformTask, consumerTask };
-            
-            while (tasks.Count > 0)
-            {
-                 var finishedTask = await Task.WhenAny(tasks);
-                 if (finishedTask.IsFaulted)
-                 {
-                     // If any task fails, cancel the others to prevent deadlock/hanging
-                     await linkedCts.CancelAsync();
-                     // Re-await the failed task to propagate exception
-                     await finishedTask; 
-                 }
-                 else if (finishedTask.IsCanceled)
-                 {
-                     // If one task is cancelled (e.g. limit reached), ensure others stop
-                     await linkedCts.CancelAsync();
-                 }
-                 
-                 tasks.Remove(finishedTask);
-            }
+		await writer.InitializeAsync(exportableSchema, ct);
 
-            await writer.CompleteAsync(ct);
-            progress.Complete();
+		// Bounded Channels
+		var readerToTransform = Channel.CreateBounded<object?[]>(new BoundedChannelOptions(1000)
+		{
+			SingleWriter = true,
+			SingleReader = true,
+			FullMode = BoundedChannelFullMode.Wait
+		});
 
-            var elapsed = DateTime.UtcNow - startTime;
-            var rowsPerSecond = elapsed.TotalSeconds > 0 ? totalRows / elapsed.TotalSeconds : 0;
-            if(_logger.IsEnabled(LogLevel.Information))
-                _logger.LogInformation("Export completed in {Elapsed}. Written {Rows} rows ({Speed:F1} rows/s).", elapsed, totalRows, rowsPerSecond);
+		var transformToWriter = Channel.CreateBounded<object?[]>(new BoundedChannelOptions(1000)
+		{
+			SingleWriter = true,
+			SingleReader = true,
+			FullMode = BoundedChannelFullMode.Wait
+		});
 
-            // --- POST-EXEC HOOK ---
-            if (!string.IsNullOrWhiteSpace(options.PostExec))
-            {
-                _console.MarkupLine($"   [yellow]Executing Post-Hook: {Markup.Escape(options.PostExec)}[/]");
-                await writer.ExecuteCommandAsync(options.PostExec, ct);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Export failed");
-            Console.Error.WriteLine($"Export failed: {ex.Message}");
-            
-            // --- ON-ERROR HOOK ---
-            if (!string.IsNullOrWhiteSpace(options.OnErrorExec))
-            {
-                try
-                {
-                    _console.MarkupLine($"   [red]Executing On-Error Hook: {Markup.Escape(options.OnErrorExec)}[/]");
-                    // Use a new token (short timeout) to ensure it runs even if original CT is processing cancellation
-                    using var errorCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-                    await writer.ExecuteCommandAsync(options.OnErrorExec, errorCts.Token);
-                }
-                catch (Exception hookEx)
-                {
-                    _logger.LogError(hookEx, "On-Error Hook failed");
-                    Console.Error.WriteLine($"On-Error Hook failed: {hookEx.Message}");
-                }
-            }
+		// Use Observer to create Progress
+		var transformerNamesList = pipeline.Select(t => t.GetType().Name.Replace("DataTransformer", ""));
+		using var progress = _observer.CreateProgressReporter(!options.NoStats, transformerNamesList);
 
-            throw;
-        }
-        finally
-        {
-            // --- FINALLY HOOK ---
-            if (!string.IsNullOrWhiteSpace(options.FinallyExec))
-            {
-                try
-                {
-                    _console.MarkupLine($"   [yellow]Executing Finally Hook: {Markup.Escape(options.FinallyExec)}[/]");
-                    // Similar to On-Error, ensure it runs
-                    using var finallyCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-                    await writer.ExecuteCommandAsync(options.FinallyExec, finallyCts.Token);
-                }
-                catch (Exception hookEx)
-                {
-                     _logger.LogError(hookEx, "Finally Hook failed");
-                     Console.Error.WriteLine($"Finally Hook failed: {hookEx.Message}");
-                }
-            }
-        }
-    }
+		long totalRows = 0;
 
-    /// <summary>
-    /// Producer: Reads batches from database, unbatches them, and sends single rows to channel.
-    /// This keeps DB I/O efficient (batched) while allowing downstream streaming.
-    /// </summary>
-    private static async Task ProduceRowsAsync(
-        IStreamReader reader, 
-        ChannelWriter<object?[]> output, 
-        int batchSize,
-        int limit,
-        double sampleRate,
-        int? sampleSeed,
-        ProgressReporter progress,
-        CancellationTokenSource linkedCts,
-        CancellationToken ct,
-        ILogger logger)
-    {
-        logger.LogDebug("Producer/Reader started");
-        
-        // Sampling initialization
-        Random? sampler = null;
-        if (sampleRate > 0 && sampleRate < 1.0)
-        {
-            sampler = sampleSeed.HasValue ? new Random(sampleSeed.Value) : Random.Shared;
-            if(logger.IsEnabled(LogLevel.Information))
-                logger.LogInformation("Data sampling enabled: {Rate:P0} (Seed: {Seed})", sampleRate, sampleSeed.HasValue ? sampleSeed.Value.ToString() : "Auto");
-        }
+		using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+		var effectiveCt = linkedCts.Token;
 
-        long rowCount = 0;
-        try
-        {
-            await foreach (var batchChunk in reader.ReadBatchesAsync(batchSize, ct))
-            {
-                if(logger.IsEnabled(LogLevel.Debug))
-                    logger.LogDebug("Read batch of {Count} rows", batchChunk.Length);
-                for (var i = 0; i < batchChunk.Length; i++)
-                {
-                    // Apply Sampling High-Performance Filter
-                    if (sampler != null && sampler.NextDouble() > sampleRate)
-                    {
-                        continue;
-                    }
+		try
+		{
+			// Run Concurrent Pipeline
+			var startTime = DateTime.UtcNow;
+			var producerTask = ProduceRowsAsync(reader, readerToTransform.Writer, options.BatchSize, options.Limit, options.SampleRate, options.SampleSeed, progress, linkedCts, effectiveCt, _logger);
+			var transformTask = TransformRowsAsync(readerToTransform.Reader, transformToWriter.Writer, pipeline, progress, effectiveCt);
+			// Consumer needs IExportProgress
+			var consumerTask = ConsumeRowsAsync(transformToWriter.Reader, writer, options.BatchSize, progress, r => Interlocked.Add(ref totalRows, r), effectiveCt, _logger);
 
-                    await output.WriteAsync(batchChunk.Span[i], ct);
-                    progress.ReportRead(1);
-                    rowCount++;
+			var tasks = new List<Task> { producerTask, transformTask, consumerTask };
 
-                    // Check limit and cancel if reached
-                    if (limit > 0 && rowCount >= limit)
-                    {
-                        if(logger.IsEnabled(LogLevel.Information))
-                            logger.LogInformation("Limit of {Limit} rows reached. Stopping producer.", limit);
-                        return;
-                    }
-                }
-            }
-        }
-        catch (OperationCanceledException) when (limit > 0 && rowCount >= limit)
-        {
-            // Expected cancellation due to limit reached
-        }
-        finally
-        {
-            output.Complete();
-        }
-    }
+			while (tasks.Count > 0)
+			{
+				var finishedTask = await Task.WhenAny(tasks);
+				if (finishedTask.IsFaulted)
+				{
+					await linkedCts.CancelAsync();
+					await finishedTask;
+				}
+				else if (finishedTask.IsCanceled)
+				{
+					await linkedCts.CancelAsync();
+				}
 
-    /// <summary>
-    /// Transform stage: Applies all transformers in sequence to each row.
-    /// Supports 1-to-1 and 1-to-N (Expand) transformations recursively.
-    /// </summary>
-    private static async Task TransformRowsAsync(
-        ChannelReader<object?[]> input,
-        ChannelWriter<object?[]> output,
-        IReadOnlyList<IDataTransformer> pipeline,
-        ProgressReporter progress,
-        CancellationToken ct)
-    {
-        try
-        {
-            await foreach (var row in input.ReadAllAsync(ct))
-            {
-                // Process one input row through the entire pipeline recursively
-                await ProcessPipelineAsync(row, 0, pipeline, output, progress, ct);
-            }
+				tasks.Remove(finishedTask);
+			}
 
-            // Flush pipeline
-            for (int i = 0; i < pipeline.Count; i++)
-            {
-                var transformer = pipeline[i];
-                var flushedRows = transformer.Flush();
-                foreach (var row in flushedRows)
-                {
-                    if (row != null)
-                    {
-                        // Pass flushed row to the NEXT step in pipeline
-                        await ProcessPipelineAsync(row, i + 1, pipeline, output, progress, ct);
-                    }
-                }
-            }
-        }
-        finally
-        {
-            output.Complete();
-        }
-    }
+			await writer.CompleteAsync(ct);
+			progress.Complete();
 
-    private static async ValueTask ProcessPipelineAsync(
-        object?[] currentRow,
-        int stepIndex,
-        IReadOnlyList<IDataTransformer> pipeline,
-        ChannelWriter<object?[]> finalOutput,
-        ProgressReporter progress,
-        CancellationToken ct)
-    {
-        // Base case: End of pipeline, write to output
-        if (stepIndex >= pipeline.Count)
-        {
-            await finalOutput.WriteAsync(currentRow, ct);
-            return;
-        }
+			var elapsed = DateTime.UtcNow - startTime;
+			var rowsPerSecond = elapsed.TotalSeconds > 0 ? totalRows / elapsed.TotalSeconds : 0;
+			if (_logger.IsEnabled(LogLevel.Information))
+				_logger.LogInformation("Export completed in {Elapsed}. Written {Rows} rows ({Speed:F1} rows/s).", elapsed, totalRows, rowsPerSecond);
 
-        var transformer = pipeline[stepIndex];
-        var transformerName = transformer.GetType().Name;
+			// --- POST-EXEC HOOK ---
+			if (!string.IsNullOrWhiteSpace(options.PostExec))
+			{
+				_observer.OnHookExecuting("Post-Hook", options.PostExec);
+				await writer.ExecuteCommandAsync(options.PostExec, ct);
+			}
+		}
+		catch (Exception ex)
+		{
+			_logger.LogError(ex, "Export failed");
+			_observer.LogError(ex);
 
-        // Handle Multi-Row (Expand)
-        if (transformer is IMultiRowTransformer multiTransformer)
-        {
-            var results = multiTransformer.TransformMany(currentRow);
-            
-            foreach (var resultRow in results)
-            {
-                if (resultRow != null)
-                {
-                    progress.ReportTransform(transformerName, 1);
-                    await ProcessPipelineAsync(resultRow, stepIndex + 1, pipeline, finalOutput, progress, ct);
-                }
-            }
-        }
-        // Handle Single-Row (Standard)
-        else
-        {
-            var resultRow = transformer.Transform(currentRow);
-            if (resultRow != null)
-            {
-                progress.ReportTransform(transformerName, 1);
-                await ProcessPipelineAsync(resultRow, stepIndex + 1, pipeline, finalOutput, progress, ct);
-            }
-            // else dropped
-        }
-    }
+			// --- ON-ERROR HOOK ---
+			if (!string.IsNullOrWhiteSpace(options.OnErrorExec))
+			{
+				try
+				{
+					_observer.OnHookExecuting("On-Error Hook", options.OnErrorExec);
+					using var errorCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+					await writer.ExecuteCommandAsync(options.OnErrorExec, errorCts.Token);
+				}
+				catch (Exception hookEx)
+				{
+					_logger.LogError(hookEx, "On-Error Hook failed");
+					_observer.LogError(hookEx);
+				}
+			}
 
-    /// <summary>
-    /// Consumer: Accumulates rows into batches and writes them to output file.
-    /// efficiently handling file I/O.
-    /// </summary>
-    private static async Task ConsumeRowsAsync(
-        ChannelReader<object?[]> input,
-        IDataWriter writer,
-        int batchSize,
-        ProgressReporter progress,
-        Action<int> updateRowCount,
-        CancellationToken ct,
-        ILogger logger)
-    {
-        if(logger.IsEnabled(LogLevel.Debug))
-            logger.LogDebug("Consumer/Writer started");
-        var buffer = new List<object?[]>(batchSize);
+			throw;
+		}
+		finally
+		{
+			// --- FINALLY HOOK ---
+			if (!string.IsNullOrWhiteSpace(options.FinallyExec))
+			{
+				try
+				{
+					_observer.OnHookExecuting("Finally Hook", options.FinallyExec);
+					using var finallyCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+					await writer.ExecuteCommandAsync(options.FinallyExec, finallyCts.Token);
+				}
+				catch (Exception hookEx)
+				{
+					_logger.LogError(hookEx, "Finally Hook failed");
+					_observer.LogError(hookEx);
+				}
+			}
+		}
+	}
 
-        async Task WriteBufferAsync()
-        {
-            if (buffer.Count == 0) return;
+	/// <summary>
+	/// Producer: Reads batches from database, unbatches them, and sends single rows to channel.
+	/// </summary>
+	private static async Task ProduceRowsAsync(
+		IStreamReader reader,
+		ChannelWriter<object?[]> output,
+		int batchSize,
+		int limit,
+		double sampleRate,
+		int? sampleSeed,
+		IExportProgress progress, // Changed type
+		CancellationTokenSource linkedCts,
+		CancellationToken ct,
+		ILogger logger)
+	{
+		logger.LogDebug("Producer/Reader started");
 
-            if(logger.IsEnabled(LogLevel.Debug))
-            {
-                logger.LogDebug("Writing batch of {Count} rows", buffer.Count);
-            }
-            await writer.WriteBatchAsync(buffer, ct);
-            if(logger.IsEnabled(LogLevel.Debug))
-            {
-                logger.LogDebug("Batch written");
-            }
+		// Sampling initialization
+		Random? sampler = null;
+		if (sampleRate > 0 && sampleRate < 1.0)
+		{
+			sampler = sampleSeed.HasValue ? new Random(sampleSeed.Value) : Random.Shared;
+			if (logger.IsEnabled(LogLevel.Information))
+				logger.LogInformation("Data sampling enabled: {Rate:P0} (Seed: {Seed})", sampleRate, sampleSeed.HasValue ? sampleSeed.Value.ToString() : "Auto");
+		}
 
-            updateRowCount(buffer.Count);
-            progress.ReportWrite(buffer.Count);
+		long rowCount = 0;
+		try
+		{
+			await foreach (var batchChunk in reader.ReadBatchesAsync(batchSize, ct))
+			{
+				if (logger.IsEnabled(LogLevel.Debug))
+					logger.LogDebug("Read batch of {Count} rows", batchChunk.Length);
+				for (var i = 0; i < batchChunk.Length; i++)
+				{
+					if (sampler != null && sampler.NextDouble() > sampleRate)
+					{
+						continue;
+					}
 
-            // Trace memory usage
-            LogMemoryUsage(logger);
+					await output.WriteAsync(batchChunk.Span[i], ct);
+					progress.ReportRead(1);
+					rowCount++;
 
-            buffer.Clear();
-        }
+					if (limit > 0 && rowCount >= limit)
+					{
+						if (logger.IsEnabled(LogLevel.Information))
+							logger.LogInformation("Limit of {Limit} rows reached. Stopping producer.", limit);
+						return;
+					}
+				}
+			}
+		}
+		catch (OperationCanceledException) when (limit > 0 && rowCount >= limit)
+		{
+			// Expected
+		}
+		finally
+		{
+			output.Complete();
+		}
+	}
 
-        await foreach (var row in input.ReadAllAsync(ct))
-        {
-            buffer.Add(row);
+	/// <summary>
+	/// Transform stage
+	/// </summary>
+	private static async Task TransformRowsAsync(
+		ChannelReader<object?[]> input,
+		ChannelWriter<object?[]> output,
+		IReadOnlyList<IDataTransformer> pipeline,
+		IExportProgress progress, // Changed type
+		CancellationToken ct)
+	{
+		try
+		{
+			await foreach (var row in input.ReadAllAsync(ct))
+			{
+				await ProcessPipelineAsync(row, 0, pipeline, output, progress, ct);
+			}
 
-            if (buffer.Count >= batchSize)
-            {
-                await WriteBufferAsync();
-            }
-        }
+			// Flush
+			for (int i = 0; i < pipeline.Count; i++)
+			{
+				var transformer = pipeline[i];
+				var flushedRows = transformer.Flush();
+				foreach (var row in flushedRows)
+				{
+					if (row != null)
+					{
+						await ProcessPipelineAsync(row, i + 1, pipeline, output, progress, ct);
+					}
+				}
+			}
+		}
+		finally
+		{
+			output.Complete();
+		}
+	}
 
-        // Write remaining
-        await WriteBufferAsync();
-    }
+	private static async ValueTask ProcessPipelineAsync(
+		object?[] currentRow,
+		int stepIndex,
+		IReadOnlyList<IDataTransformer> pipeline,
+		ChannelWriter<object?[]> finalOutput,
+		IExportProgress progress, // Changed type
+		CancellationToken ct)
+	{
+		// Base case
+		if (stepIndex >= pipeline.Count)
+		{
+			await finalOutput.WriteAsync(currentRow, ct);
+			return;
+		}
 
-    private static void LogMemoryUsage(ILogger logger)
-    {
-        if (!logger.IsEnabled(LogLevel.Debug)) return;
+		var transformer = pipeline[stepIndex];
+		var transformerName = transformer.GetType().Name;
 
-        var managedMemory = GC.GetTotalMemory(false) / 1024 / 1024;
-        using var process = System.Diagnostics.Process.GetCurrentProcess();
-        var totalMemory = process.WorkingSet64 / 1024 / 1024;
-        
-        // Managed = .NET Objects (GC)
-        // WorkingSet = Actual RAM usage (includes Native/Unmanaged drivers like DuckDB/Oracle)
-        logger.LogDebug("Memory Stats: Managed={Managed}MB, WorkingSet={Total}MB", managedMemory, totalMemory);
-    }
+		if (transformer is IMultiRowTransformer multiTransformer)
+		{
+			var results = multiTransformer.TransformMany(currentRow);
+
+			foreach (var resultRow in results)
+			{
+				if (resultRow != null)
+				{
+					progress.ReportTransform(transformerName, 1);
+					await ProcessPipelineAsync(resultRow, stepIndex + 1, pipeline, finalOutput, progress, ct);
+				}
+			}
+		}
+		else
+		{
+			var resultRow = transformer.Transform(currentRow);
+			if (resultRow != null)
+			{
+				progress.ReportTransform(transformerName, 1);
+				await ProcessPipelineAsync(resultRow, stepIndex + 1, pipeline, finalOutput, progress, ct);
+			}
+		}
+	}
+
+	/// <summary>
+	/// Consumer
+	/// </summary>
+	private static async Task ConsumeRowsAsync(
+		ChannelReader<object?[]> input,
+		IDataWriter writer,
+		int batchSize,
+		IExportProgress progress, // Changed type
+		Action<int> updateRowCount,
+		CancellationToken ct,
+		ILogger logger)
+	{
+		if (logger.IsEnabled(LogLevel.Debug))
+			logger.LogDebug("Consumer/Writer started");
+		var buffer = new List<object?[]>(batchSize);
+
+		async Task WriteBufferAsync()
+		{
+			if (buffer.Count == 0) return;
+
+			if (logger.IsEnabled(LogLevel.Debug))
+			{
+				logger.LogDebug("Writing batch of {Count} rows", buffer.Count);
+			}
+			await writer.WriteBatchAsync(buffer, ct);
+			if (logger.IsEnabled(LogLevel.Debug))
+			{
+				logger.LogDebug("Batch written");
+			}
+
+			updateRowCount(buffer.Count);
+			progress.ReportWrite(buffer.Count);
+
+			LogMemoryUsage(logger);
+
+			buffer.Clear();
+		}
+
+		await foreach (var row in input.ReadAllAsync(ct))
+		{
+			buffer.Add(row);
+
+			if (buffer.Count >= batchSize)
+			{
+				await WriteBufferAsync();
+			}
+		}
+
+		await WriteBufferAsync();
+	}
+
+	private static void LogMemoryUsage(ILogger logger)
+	{
+		if (!logger.IsEnabled(LogLevel.Debug)) return;
+
+		var managedMemory = GC.GetTotalMemory(false) / 1024 / 1024;
+		using var process = System.Diagnostics.Process.GetCurrentProcess();
+		var totalMemory = process.WorkingSet64 / 1024 / 1024;
+
+		logger.LogDebug("Memory Stats: Managed={Managed}MB, WorkingSet={Total}MB", managedMemory, totalMemory);
+	}
 }

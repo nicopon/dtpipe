@@ -1,118 +1,115 @@
-using System;
 using Oracle.ManagedDataAccess.Client;
 
 namespace DtPipe.Adapters.Oracle;
 
 internal static class OracleTypeMapper
 {
-    public static OracleDbType GetOracleDbType(Type type)
-    {
-        type = Nullable.GetUnderlyingType(type) ?? type;
+	public static OracleDbType GetOracleDbType(Type type)
+	{
+		type = Nullable.GetUnderlyingType(type) ?? type;
 
-        if (type == typeof(int) || type == typeof(short) || type == typeof(byte))
-            return OracleDbType.Int32;
-        if (type == typeof(long))
-            return OracleDbType.Int64;
-        if (type == typeof(decimal))
-            return OracleDbType.Decimal;
-        if (type == typeof(bool))
-            return OracleDbType.Int16;
-        if (type == typeof(float))
-            return OracleDbType.Single;
-        if (type == typeof(double))
-            return OracleDbType.Double;
-        if (type == typeof(DateTime))
-            return OracleDbType.Date;
-        if (type == typeof(DateTimeOffset))
-            return OracleDbType.TimeStampTZ;
-        if (type == typeof(Guid))
-            return OracleDbType.Raw;
-        if (type == typeof(byte[]))
-            return OracleDbType.Blob;
+		if (type == typeof(int) || type == typeof(short) || type == typeof(byte))
+			return OracleDbType.Int32;
+		if (type == typeof(long))
+			return OracleDbType.Int64;
+		if (type == typeof(decimal))
+			return OracleDbType.Decimal;
+		if (type == typeof(bool))
+			return OracleDbType.Int16;
+		if (type == typeof(float))
+			return OracleDbType.Single;
+		if (type == typeof(double))
+			return OracleDbType.Double;
+		if (type == typeof(DateTime))
+			return OracleDbType.Date;
+		if (type == typeof(DateTimeOffset))
+			return OracleDbType.TimeStampTZ;
+		if (type == typeof(Guid))
+			return OracleDbType.Raw;
+		if (type == typeof(byte[]))
+			return OracleDbType.Blob;
 
-        return OracleDbType.Varchar2;
-    }
+		return OracleDbType.Varchar2;
+	}
 
-    public static string MapToProviderType(Type type)
-    {
-        type = Nullable.GetUnderlyingType(type) ?? type;
+	public static string MapToProviderType(Type type)
+	{
+		type = Nullable.GetUnderlyingType(type) ?? type;
 
-        if (type == typeof(int)) return "NUMBER(10)";
-        if (type == typeof(long)) return "NUMBER(19)";
-        if (type == typeof(short)) return "NUMBER(5)";
-        if (type == typeof(byte)) return "NUMBER(3)";
-        if (type == typeof(bool)) return "NUMBER(1)"; 
-        if (type == typeof(float)) return "FLOAT"; 
-        if (type == typeof(double)) return "FLOAT"; 
-        if (type == typeof(decimal)) return "NUMBER(38, 4)"; 
-        if (type == typeof(DateTime)) return "TIMESTAMP";
-        if (type == typeof(DateTimeOffset)) return "TIMESTAMP WITH TIME ZONE";
-        if (type == typeof(Guid)) return "RAW(16)";
-        if (type == typeof(byte[])) return "BLOB";
-        
-        return "VARCHAR2(4000)";
-    }
+		if (type == typeof(int)) return "NUMBER(10)";
+		if (type == typeof(long)) return "NUMBER(19)";
+		if (type == typeof(short)) return "NUMBER(5)";
+		if (type == typeof(byte)) return "NUMBER(3)";
+		if (type == typeof(bool)) return "NUMBER(1)";
+		if (type == typeof(float)) return "FLOAT";
+		if (type == typeof(double)) return "FLOAT";
+		if (type == typeof(decimal)) return "NUMBER(38, 4)";
+		if (type == typeof(DateTime)) return "TIMESTAMP";
+		if (type == typeof(DateTimeOffset)) return "TIMESTAMP WITH TIME ZONE";
+		if (type == typeof(Guid)) return "RAW(16)";
+		if (type == typeof(byte[])) return "BLOB";
 
-    public static string BuildOracleNativeType(string dataType, int? dataLength, int? precision, int? scale, int? charLength)
-    {
-        return dataType.ToUpperInvariant() switch
-        {
-            "VARCHAR2" when charLength.HasValue => $"VARCHAR2({charLength})",
-            "CHAR" when charLength.HasValue => $"CHAR({charLength})",
-            "NVARCHAR2" when charLength.HasValue => $"NVARCHAR2({charLength})",
-            "NCHAR" when charLength.HasValue => $"NCHAR({charLength})",
-            "NUMBER" when precision.HasValue && scale.HasValue && scale > 0 => $"NUMBER({precision},{scale})",
-            "NUMBER" when precision.HasValue => $"NUMBER({precision})",
-            "RAW" when dataLength.HasValue => $"RAW({dataLength})",
-            _ => dataType.ToUpperInvariant()
-        };
-    }
+		return "VARCHAR2(4000)";
+	}
 
-    public static Type? MapOracleToClr(string dataType)
-    {
-        return dataType.ToUpperInvariant() switch
-        {
-            "NUMBER" => typeof(decimal),
-            "INTEGER" => typeof(int),
-            "FLOAT" => typeof(double),
-            "BINARY_FLOAT" => typeof(float),
-            "BINARY_DOUBLE" => typeof(double),
-            "VARCHAR2" or "NVARCHAR2" or "CHAR" or "NCHAR" or "CLOB" or "NCLOB" => typeof(string),
-            "DATE" or "TIMESTAMP" => typeof(DateTime),
-            "TIMESTAMP WITH TIME ZONE" or "TIMESTAMP WITH LOCAL TIME ZONE" => typeof(DateTimeOffset),
-            "RAW" or "BLOB" => typeof(byte[]),
-            _ => typeof(string)
-        };
-    }
+	public static string BuildOracleNativeType(string dataType, int? dataLength, int? precision, int? scale, int? charLength)
+	{
+		return dataType.ToUpperInvariant() switch
+		{
+			"VARCHAR2" when charLength.HasValue => $"VARCHAR2({charLength})",
+			"CHAR" when charLength.HasValue => $"CHAR({charLength})",
+			"NVARCHAR2" when charLength.HasValue => $"NVARCHAR2({charLength})",
+			"NCHAR" when charLength.HasValue => $"NCHAR({charLength})",
+			"NUMBER" when precision.HasValue && scale.HasValue && scale > 0 => $"NUMBER({precision},{scale})",
+			"NUMBER" when precision.HasValue => $"NUMBER({precision})",
+			"RAW" when dataLength.HasValue => $"RAW({dataLength})",
+			_ => dataType.ToUpperInvariant()
+		};
+	}
 
-    public static OracleDbType? MapNativeTypeToOracleDbType(string nativeType)
-    {
-        // nativeType often includes size: "RAW(16)", "VARCHAR2(100)", "NUMBER(10,2)"
-        // We only care about the base type name
-        var parenIndex = nativeType.IndexOf('(');
-        var baseType = parenIndex > 0 ? nativeType.Substring(0, parenIndex) : nativeType;
-        
-        return baseType.ToUpperInvariant() switch
-        {
-            "RAW" => OracleDbType.Raw,
-            "BLOB" => OracleDbType.Blob,
-            "CLOB" => OracleDbType.Clob,
-            "NCLOB" => OracleDbType.NClob,
-            "DATE" => OracleDbType.Date,
-            "TIMESTAMP" => OracleDbType.TimeStamp,
-            "TIMESTAMP WITH TIME ZONE" => OracleDbType.TimeStampTZ,
-            "TIMESTAMP WITH LOCAL TIME ZONE" => OracleDbType.TimeStampLTZ,
-            "VARCHAR2" => OracleDbType.Varchar2,
-            "NVARCHAR2" => OracleDbType.NVarchar2,
-            "CHAR" => OracleDbType.Char,
-            "NCHAR" => OracleDbType.NChar,
-            "NUMBER" => OracleDbType.Decimal,
-            "FLOAT" => OracleDbType.BinaryDouble, // Or Single depending on precision
-            "BINARY_FLOAT" => OracleDbType.BinaryFloat,
-            "BINARY_DOUBLE" => OracleDbType.BinaryDouble,
-            "INTERVAL YEAR TO MONTH" => OracleDbType.IntervalYM,
-            "INTERVAL DAY TO SECOND" => OracleDbType.IntervalDS,
-            _ => null // Keep default mapping
-        };
-    }
+	public static Type? MapOracleToClr(string dataType)
+	{
+		return dataType.ToUpperInvariant() switch
+		{
+			"NUMBER" => typeof(decimal),
+			"INTEGER" => typeof(int),
+			"FLOAT" => typeof(double),
+			"BINARY_FLOAT" => typeof(float),
+			"BINARY_DOUBLE" => typeof(double),
+			"VARCHAR2" or "NVARCHAR2" or "CHAR" or "NCHAR" or "CLOB" or "NCLOB" => typeof(string),
+			"DATE" or "TIMESTAMP" => typeof(DateTime),
+			"TIMESTAMP WITH TIME ZONE" or "TIMESTAMP WITH LOCAL TIME ZONE" => typeof(DateTimeOffset),
+			"RAW" or "BLOB" => typeof(byte[]),
+			_ => typeof(string)
+		};
+	}
+
+	public static OracleDbType? MapNativeTypeToOracleDbType(string nativeType)
+	{
+		var parenIndex = nativeType.IndexOf('(');
+		var baseType = parenIndex > 0 ? nativeType.Substring(0, parenIndex) : nativeType;
+
+		return baseType.ToUpperInvariant() switch
+		{
+			"RAW" => OracleDbType.Raw,
+			"BLOB" => OracleDbType.Blob,
+			"CLOB" => OracleDbType.Clob,
+			"NCLOB" => OracleDbType.NClob,
+			"DATE" => OracleDbType.Date,
+			"TIMESTAMP" => OracleDbType.TimeStamp,
+			"TIMESTAMP WITH TIME ZONE" => OracleDbType.TimeStampTZ,
+			"TIMESTAMP WITH LOCAL TIME ZONE" => OracleDbType.TimeStampLTZ,
+			"VARCHAR2" => OracleDbType.Varchar2,
+			"NVARCHAR2" => OracleDbType.NVarchar2,
+			"CHAR" => OracleDbType.Char,
+			"NCHAR" => OracleDbType.NChar,
+			"NUMBER" => OracleDbType.Decimal,
+			"FLOAT" => OracleDbType.BinaryDouble,
+			"BINARY_FLOAT" => OracleDbType.BinaryFloat,
+			"BINARY_DOUBLE" => OracleDbType.BinaryDouble,
+			"INTERVAL YEAR TO MONTH" => OracleDbType.IntervalYM,
+			"INTERVAL DAY TO SECOND" => OracleDbType.IntervalDS,
+			_ => null
+		};
+	}
 }

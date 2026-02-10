@@ -1,105 +1,105 @@
-using FluentAssertions;
+using DtPipe.Cli.Abstractions;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
-using DtPipe.Cli.Abstractions;
 using DtPipe.Transformers.Mask;
+using FluentAssertions;
 using Xunit;
 
 namespace DtPipe.Tests;
 
 public class MaskDataTransformerTests
 {
-    [Fact]
-    public async Task Transform_ShouldMaskData_UsingPattern()
-    {
-        // Arrange
-        var options = new MaskOptions { Mask = new[] { "EMAIL:###****" } };
-        var transformer = new MaskDataTransformer(options);
-        var columns = new List<PipeColumnInfo> { new("EMAIL", typeof(string), true) };
-        var rows = new List<object?[]> { new object?[] { "test@example.com" } };
+	[Fact]
+	public async Task Transform_ShouldMaskData_UsingPattern()
+	{
+		// Arrange
+		var options = new MaskOptions { Mask = new[] { "EMAIL:###****" } };
+		var transformer = new MaskDataTransformer(options);
+		var columns = new List<PipeColumnInfo> { new("EMAIL", typeof(string), true) };
+		var rows = new List<object?[]> { new object?[] { "test@example.com" } };
 
-        // Act
-        await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-        var result = rows.Select(r => transformer.Transform(r)).ToList();
+		// Act
+		await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+		var result = rows.Select(r => transformer.Transform(r)).ToList();
 
-        // Assert
-        // "tes" kept (#), "****" replaced, "ample.com" unmatched kept
-        result[0]![0].Should().Be("tes****ample.com");
-    }
+		// Assert
+		// "tes" kept (#), "****" replaced, "ample.com" unmatched kept
+		result[0]![0].Should().Be("tes****ample.com");
+	}
 
-    [Fact]
-    public async Task Transform_ShouldMaskData_FullReplacement()
-    {
-        // Arrange
-        var options = new MaskOptions { Mask = new[] { "PIN:****" } };
-        var transformer = new MaskDataTransformer(options);
-        var columns = new List<PipeColumnInfo> { new("PIN", typeof(string), true) };
-        var rows = new List<object?[]> { new object?[] { "1234" } };
+	[Fact]
+	public async Task Transform_ShouldMaskData_FullReplacement()
+	{
+		// Arrange
+		var options = new MaskOptions { Mask = new[] { "PIN:****" } };
+		var transformer = new MaskDataTransformer(options);
+		var columns = new List<PipeColumnInfo> { new("PIN", typeof(string), true) };
+		var rows = new List<object?[]> { new object?[] { "1234" } };
 
-        // Act
-        await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-        var result = rows.Select(r => transformer.Transform(r)).ToList();
+		// Act
+		await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+		var result = rows.Select(r => transformer.Transform(r)).ToList();
 
-        // Assert
-        result[0]![0].Should().Be("****");
-    }
+		// Assert
+		result[0]![0].Should().Be("****");
+	}
 
-    [Fact]
-    public async Task Transform_ShouldMaskData_WithComplexPattern()
-    {
-        // Arrange
-        // Pattern length matches input length roughly. 
-        // Logic is 1:1 replacement. 
-        // Input: 0612345678 (10 chars)
-        // Pattern: ##******## (10 chars) -> Keep first 2, mask middle 6, keep last 2
-        var options = new MaskOptions { Mask = new[] { "PHONE:##******##" } };
-        var transformer = new MaskDataTransformer(options);
-        var columns = new List<PipeColumnInfo> { new("PHONE", typeof(string), true) };
-        var rows = new List<object?[]> { new object?[] { "0612345678" } };
+	[Fact]
+	public async Task Transform_ShouldMaskData_WithComplexPattern()
+	{
+		// Arrange
+		// Pattern length matches input length roughly. 
+		// Logic is 1:1 replacement. 
+		// Input: 0612345678 (10 chars)
+		// Pattern: ##******## (10 chars) -> Keep first 2, mask middle 6, keep last 2
+		var options = new MaskOptions { Mask = new[] { "PHONE:##******##" } };
+		var transformer = new MaskDataTransformer(options);
+		var columns = new List<PipeColumnInfo> { new("PHONE", typeof(string), true) };
+		var rows = new List<object?[]> { new object?[] { "0612345678" } };
 
-        // Act
-        await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-        var result = rows.Select(r => transformer.Transform(r)).ToList();
+		// Act
+		await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+		var result = rows.Select(r => transformer.Transform(r)).ToList();
 
-        // Assert
-        result[0]![0].Should().Be("06******78");
-    }
+		// Assert
+		result[0]![0].Should().Be("06******78");
+	}
 
-    [Fact]
-    public async Task Transform_ShouldHandleNullValues_ByDefault()
-    {
-        // Arrange - Default behavior (replace with pattern chars if pattern length allows, or keep null?)
-        // Mask logic: if value is null, result is null unless specific handling
-        // Let's check implementation: Transform checks "if (value is string str)"
-        // So non-string or null values are preserved by default logic.
-        
-        var options = new MaskOptions { Mask = new[] { "COL:***" } };
-        var transformer = new MaskDataTransformer(options);
-        var columns = new List<PipeColumnInfo> { new("COL", typeof(string), true) };
-        var rows = new List<object?[]> { new object?[] { null } };
+	[Fact]
+	public async Task Transform_ShouldHandleNullValues_ByDefault()
+	{
+		// Arrange - Default behavior (replace with pattern chars if pattern length allows, or keep null?)
+		// Mask logic: if value is null, result is null unless specific handling
+		// Let's check implementation: Transform checks "if (value is string str)"
+		// So non-string or null values are preserved by default logic.
 
-        // Act
-        await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-        var result = rows.Select(r => transformer.Transform(r)).ToList();
+		var options = new MaskOptions { Mask = new[] { "COL:***" } };
+		var transformer = new MaskDataTransformer(options);
+		var columns = new List<PipeColumnInfo> { new("COL", typeof(string), true) };
+		var rows = new List<object?[]> { new object?[] { null } };
 
-        // Assert
-        result[0]![0].Should().BeNull("Mask works on strings, so nulls should pass through naturally unless SkipNull changes pipeline behavior");
-    }
+		// Act
+		await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+		var result = rows.Select(r => transformer.Transform(r)).ToList();
 
-    [Fact]
-    public async Task Transform_ShouldSkipFormatting_WhenSkipNullEnabled_AndValueNull()
-    {
-        // Arrange
-        var options = new MaskOptions { Mask = new[] { "COL:***" }, SkipNull = true };
-        var transformer = new MaskDataTransformer(options);
-        var columns = new List<PipeColumnInfo> { new("COL", typeof(string), true) };
-        var rows = new List<object?[]> { new object?[] { null } };
+		// Assert
+		result[0]![0].Should().BeNull("Mask works on strings, so nulls should pass through naturally unless SkipNull changes pipeline behavior");
+	}
 
-        // Act
-        await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-        var result = rows.Select(r => transformer.Transform(r)).ToList();
+	[Fact]
+	public async Task Transform_ShouldSkipFormatting_WhenSkipNullEnabled_AndValueNull()
+	{
+		// Arrange
+		var options = new MaskOptions { Mask = new[] { "COL:***" }, SkipNull = true };
+		var transformer = new MaskDataTransformer(options);
+		var columns = new List<PipeColumnInfo> { new("COL", typeof(string), true) };
+		var rows = new List<object?[]> { new object?[] { null } };
 
-        // Assert
-        result[0]![0].Should().BeNull();
-    }
+		// Act
+		await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+		var result = rows.Select(r => transformer.Transform(r)).ToList();
+
+		// Assert
+		result[0]![0].Should().BeNull();
+	}
 }
