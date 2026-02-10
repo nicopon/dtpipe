@@ -1,4 +1,5 @@
 namespace DtPipe.Core.Abstractions;
+
 using DtPipe.Core.Models;
 
 /// <summary>
@@ -7,11 +8,11 @@ using DtPipe.Core.Models;
 /// </summary>
 public interface ISchemaInspector
 {
-    /// <summary>
-    /// Inspects the target schema (table, file).
-    /// Returns null if the target does not exist yet.
-    /// </summary>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>Target schema information, or null if target doesn't exist</returns>
-    Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default);
+	/// <summary>
+	/// Inspects the target schema (table, file).
+	/// Returns null if the target does not exist yet.
+	/// </summary>
+	/// <param name="ct">Cancellation token</param>
+	/// <returns>Target schema information, or null if target doesn't exist</returns>
+	Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default);
 }

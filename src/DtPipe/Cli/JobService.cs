@@ -1,530 +1,535 @@
 using System.CommandLine;
-using System.CommandLine.Parsing;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
+using DtPipe.Cli.Abstractions;
+using DtPipe.Cli.Commands;
+using DtPipe.Cli.Security;
 using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Cli.Abstractions;
 using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
 using DtPipe.Core.Validation;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Serilog;
 using Spectre.Console;
-using DtPipe.Cli.Commands;
-using DtPipe.Cli.Security;
 
 namespace DtPipe.Cli;
 
 public class JobService
 {
-    private readonly IEnumerable<ICliContributor> _contributors;
-    private readonly IServiceProvider _serviceProvider;
-    private readonly IAnsiConsole _console;
-    private readonly ILoggerFactory _loggerFactory;
+	private readonly IEnumerable<ICliContributor> _contributors;
+	private readonly IServiceProvider _serviceProvider;
+	private readonly IAnsiConsole _console;
+	private readonly ILoggerFactory _loggerFactory;
 
-    public JobService(
-        IServiceProvider serviceProvider,
-        IAnsiConsole console,
-        ILoggerFactory loggerFactory,
-        IEnumerable<IStreamReaderFactory> readerFactories,
-        IEnumerable<IDataTransformerFactory> transformerFactories,
-        IEnumerable<IDataWriterFactory> writerFactories)
-    {
-        _serviceProvider = serviceProvider;
-        _console = console;
-        _loggerFactory = loggerFactory;
-        
-        // Aggregate all contributors
-        var list = new List<ICliContributor>();
-        list.AddRange(readerFactories.OfType<ICliContributor>());
-        list.AddRange(transformerFactories.OfType<ICliContributor>());
-        list.AddRange(writerFactories.OfType<ICliContributor>());
-        _contributors = list;
-    }
+	public JobService(
+		IServiceProvider serviceProvider,
+		IAnsiConsole console,
+		ILoggerFactory loggerFactory,
+		IEnumerable<IStreamReaderFactory> readerFactories,
+		IEnumerable<IDataTransformerFactory> transformerFactories,
+		IEnumerable<IDataWriterFactory> writerFactories)
+	{
+		_serviceProvider = serviceProvider;
+		_console = console;
+		_loggerFactory = loggerFactory;
 
-    public (RootCommand, Action) Build()
-    {
-        var inputOption = new Option<string?>("--input") { Description = "Input connection string or file path" };
-        inputOption.Aliases.Add("-i");
-        
-        var queryOption = new Option<string?>("--query") { Description = "SQL query to execute (SELECT only)" };
-        queryOption.Aliases.Add("-q");
+		// Aggregate all contributors
+		var list = new List<ICliContributor>();
+		list.AddRange(readerFactories.OfType<ICliContributor>());
+		list.AddRange(transformerFactories.OfType<ICliContributor>());
+		list.AddRange(writerFactories.OfType<ICliContributor>());
+		_contributors = list;
+	}
 
-        var outputOption = new Option<string?>("--output") { Description = "Output file path or connection string" };
-        outputOption.Aliases.Add("-o");
-        
-        var connectionTimeoutOption = new Option<int>("--connection-timeout") { Description = "Connection timeout in seconds" };
-        connectionTimeoutOption.DefaultValueFactory = _ => 10;
+	public (RootCommand, Action) Build()
+	{
+		var inputOption = new Option<string?>("--input") { Description = "Input connection string or file path" };
+		inputOption.Aliases.Add("-i");
 
-        var queryTimeoutOption = new Option<int>("--query-timeout") { Description = "Query timeout in seconds (0 = no timeout)" };
-        queryTimeoutOption.DefaultValueFactory = _ => 0;
-        
-        var batchSizeOption = new Option<int>("--batch-size") { Description = "Rows per output batch" };
-        batchSizeOption.DefaultValueFactory = _ => 50_000;
-        batchSizeOption.Aliases.Add("-b");
+		var queryOption = new Option<string?>("--query") { Description = "SQL query to execute (SELECT only)" };
+		queryOption.Aliases.Add("-q");
 
-        var unsafeQueryOption = new Option<bool>("--unsafe-query") { Description = "Bypass SQL validation" };
-        unsafeQueryOption.DefaultValueFactory = _ => false;
+		var outputOption = new Option<string?>("--output") { Description = "Output file path or connection string" };
+		outputOption.Aliases.Add("-o");
 
-        var dryRunOption = new Option<int>("--dry-run") { Description = "Dry-run mode (N samples)", Arity = ArgumentArity.ZeroOrOne };
-        dryRunOption.DefaultValueFactory = _ => 0;
+		var connectionTimeoutOption = new Option<int>("--connection-timeout") { Description = "Connection timeout in seconds" };
+		connectionTimeoutOption.DefaultValueFactory = _ => 10;
 
-        var limitOption = new Option<int>("--limit") { Description = "Max rows (0 = unlimited)" };
-        limitOption.DefaultValueFactory = _ => 0;
+		var queryTimeoutOption = new Option<int>("--query-timeout") { Description = "Query timeout in seconds (0 = no timeout)" };
+		queryTimeoutOption.DefaultValueFactory = _ => 0;
 
-        var sampleRateOption = new Option<double>("--sample-rate") { Description = "Sampling probability (0.0-1.0)" };
-        sampleRateOption.DefaultValueFactory = _ => 1.0;
+		var batchSizeOption = new Option<int>("--batch-size") { Description = "Rows per output batch" };
+		batchSizeOption.DefaultValueFactory = _ => 50_000;
+		batchSizeOption.Aliases.Add("-b");
 
-        var sampleSeedOption = new Option<int?>("--sample-seed") { Description = "Seed for sampling" };
-        var jobOption = new Option<string?>("--job") { Description = "Path to YAML job file" };
-        var exportJobOption = new Option<string?>("--export-job") { Description = "Export config to YAML" };
-        var logOption = new Option<string?>("--log") { Description = "Path to log file" };
-        var keyOption = new Option<string?>("--key") { Description = "Primary Key columns" };
+		var unsafeQueryOption = new Option<bool>("--unsafe-query") { Description = "Bypass SQL validation" };
+		unsafeQueryOption.DefaultValueFactory = _ => false;
 
-        // Lifecycle Hooks Options
-        var preExecOption = new Option<string?>("--pre-exec") { Description = "SQL/Command BEFORE transfer" };
-        var postExecOption = new Option<string?>("--post-exec") { Description = "SQL/Command AFTER transfer" };
-        var onErrorExecOption = new Option<string?>("--on-error-exec") { Description = "SQL/Command ON ERROR" };
-        var finallyExecOption = new Option<string?>("--finally-exec") { Description = "SQL/Command ALWAYS" };
+		var dryRunOption = new Option<int>("--dry-run") { Description = "Dry-run mode (N samples)", Arity = ArgumentArity.ZeroOrOne };
+		dryRunOption.DefaultValueFactory = _ => 0;
 
-        var strategyOption = new Option<string?>("--strategy") { Description = "Write strategy (Append, Truncate, Recreate, Upsert, Ignore)" };
-        strategyOption.Aliases.Add("-s");
+		var limitOption = new Option<int>("--limit") { Description = "Max rows (0 = unlimited)" };
+		limitOption.DefaultValueFactory = _ => 0;
 
-        var insertModeOption = new Option<string?>("--insert-mode") { Description = "Insert mode (Standard, Bulk)" };
-        var tableOption = new Option<string?>("--table") { Description = "Target table name" };
-        tableOption.Aliases.Add("-t");
+		var sampleRateOption = new Option<double>("--sample-rate") { Description = "Sampling probability (0.0-1.0)" };
+		sampleRateOption.DefaultValueFactory = _ => 1.0;
 
-        // Core Help Options
-        var coreOptions = new List<Option> { inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption, unsafeQueryOption, dryRunOption, limitOption, sampleRateOption, sampleSeedOption, keyOption, jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption, finallyExecOption, strategyOption, insertModeOption, tableOption };
+		var sampleSeedOption = new Option<int?>("--sample-seed") { Description = "Seed for sampling" };
+		var jobOption = new Option<string?>("--job") { Description = "Path to YAML job file" };
+		var exportJobOption = new Option<string?>("--export-job") { Description = "Export config to YAML" };
+		var logOption = new Option<string?>("--log") { Description = "Path to log file" };
+		var keyOption = new Option<string?>("--key") { Description = "Primary Key columns" };
 
-        var rootCommand = new RootCommand("A simple, self-contained CLI for performance-focused data streaming & anonymization");
-        foreach(var opt in coreOptions) rootCommand.Options.Add(opt);
+		// Lifecycle Hooks Options
+		var preExecOption = new Option<string?>("--pre-exec") { Description = "SQL/Command BEFORE transfer" };
+		var postExecOption = new Option<string?>("--post-exec") { Description = "SQL/Command AFTER transfer" };
+		var onErrorExecOption = new Option<string?>("--on-error-exec") { Description = "SQL/Command ON ERROR" };
+		var finallyExecOption = new Option<string?>("--finally-exec") { Description = "SQL/Command ALWAYS" };
 
-        // Add Contributor Options
-        foreach (var contributor in _contributors)
-        {
-            foreach (var opt in contributor.GetCliOptions())
-            {
-                if (!rootCommand.Options.Any(o => o.Name == opt.Name))
-                {
-                    rootCommand.Options.Add(opt);
-                }
-            }
-        }
+		var strategyOption = new Option<string?>("--strategy") { Description = "Write strategy (Append, Truncate, Recreate, Upsert, Ignore)" };
+		strategyOption.Aliases.Add("-s");
 
-        // Add Secret Command
-        rootCommand.Subcommands.Add(new SecretCommand());
+		var insertModeOption = new Option<string?>("--insert-mode") { Description = "Insert mode (Standard, Bulk)" };
+		var tableOption = new Option<string?>("--table") { Description = "Target table name" };
+		tableOption.Aliases.Add("-t");
 
-        rootCommand.SetAction(async (ParseResult parseResult, CancellationToken ct) =>
-        {
-            // Perform preliminary contributor actions
+		// Core Help Options
+		var coreOptions = new List<Option> { inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption, unsafeQueryOption, dryRunOption, limitOption, sampleRateOption, sampleSeedOption, keyOption, jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption, finallyExecOption, strategyOption, insertModeOption, tableOption };
 
-            foreach (var contributor in _contributors)
-            {
-                var exitCode = await contributor.HandleCommandAsync(parseResult, ct);
-                if (exitCode.HasValue) 
-                {
-                    return exitCode.Value;
-                }
-            }
+		var rootCommand = new RootCommand("A simple, self-contained CLI for performance-focused data streaming & anonymization");
+		foreach (var opt in coreOptions) rootCommand.Options.Add(opt);
 
-            // Build Job Definition
-            var (job, jobExitCode) = RawJobBuilder.Build(
-                parseResult,
-                jobOption, inputOption, queryOption, outputOption, 
-                connectionTimeoutOption, queryTimeoutOption, batchSizeOption, 
-                unsafeQueryOption, limitOption, sampleRateOption, sampleSeedOption, logOption, keyOption,
-                preExecOption, postExecOption, onErrorExecOption, finallyExecOption, strategyOption, insertModeOption, tableOption);
+		// Add Contributor Options
+		foreach (var contributor in _contributors)
+		{
+			foreach (var opt in contributor.GetCliOptions())
+			{
+				if (!rootCommand.Options.Any(o => o.Name == opt.Name))
+				{
+					rootCommand.Options.Add(opt);
+				}
+			}
+		}
 
-            if (jobExitCode != 0) 
-            {
-                return jobExitCode;
-            }
+		// Add Secret Command
+		rootCommand.Subcommands.Add(new SecretCommand());
 
-            job = job with { 
-                Input = ResolveKeyring(job.Input, _console) ?? job.Input,
-                Output = ResolveKeyring(job.Output, _console) ?? job.Output
-            };
+		rootCommand.SetAction(async (ParseResult parseResult, CancellationToken ct) =>
+		{
+			// Perform preliminary contributor actions
 
-            // Export job
-            var exportJobPath = parseResult.GetValue(exportJobOption);
-            if (!string.IsNullOrWhiteSpace(exportJobPath))
-            {
-                var factoryList = _contributors.OfType<IDataTransformerFactory>().ToList();
-                var configs = RawJobBuilder.BuildTransformerConfigsFromCli(
-                    Environment.GetCommandLineArgs(), 
-                    factoryList, 
-                    _contributors);
-                
-                job = job with { Transformers = configs };
-                JobFileWriter.Write(exportJobPath, job);
-                return 0;
-            }
+			foreach (var contributor in _contributors)
+			{
+				var exitCode = await contributor.HandleCommandAsync(parseResult, ct);
+				if (exitCode.HasValue)
+				{
+					return exitCode.Value;
+				}
+			}
 
-            var registry = _serviceProvider.GetRequiredService<OptionsRegistry>();
+			// Build Job Definition
+			var (job, jobExitCode) = RawJobBuilder.Build(
+				parseResult,
+				jobOption, inputOption, queryOption, outputOption,
+				connectionTimeoutOption, queryTimeoutOption, batchSizeOption,
+				unsafeQueryOption, limitOption, sampleRateOption, sampleSeedOption, logOption, keyOption,
+				preExecOption, postExecOption, onErrorExecOption, finallyExecOption, strategyOption, insertModeOption, tableOption);
 
-            // Hydrate from YAML ProviderOptions
-            if (job.ProviderOptions != null)
-            {
-                foreach (var contributor in _contributors)
-                {
-                   if (contributor is IDataFactory factory && factory is IDataWriterFactory or IStreamReaderFactory)
-                   {
-                        foreach (var kvp in job.ProviderOptions)
-                        {
-                            var key = kvp.Key;
-                            
-                            if (contributor is IDataWriterFactory wFactory)
-                            {
-                                var optionsType = wFactory.GetSupportedOptionTypes().FirstOrDefault();
-                                if (optionsType != null && IsPrefixMatch(optionsType, key)) 
-                                {
-                                     var instance = registry.Get(optionsType);
-                                     ConfigurationBinder.Bind(instance, kvp.Value);
+			if (jobExitCode != 0)
+			{
+				return jobExitCode;
+			}
 
-                                     if (!string.IsNullOrEmpty(job.Key))
-                                     {
-                                         var prop = optionsType.GetProperty("Key");
-                                         if (prop != null && prop.CanWrite)
-                                         {
-                                             prop.SetValue(instance, job.Key);
-                                         }
-                                     }
+			job = job with
+			{
+				Input = ResolveKeyring(job.Input, _console) ?? job.Input,
+				Output = ResolveKeyring(job.Output, _console) ?? job.Output
+			};
 
-                                     registry.RegisterByType(optionsType, instance);
-                                }
-                            }
-                            else if (contributor is IStreamReaderFactory rFactory)
-                            {
-                                var optionsType = rFactory.GetSupportedOptionTypes().FirstOrDefault();
-                                if (optionsType != null && IsPrefixMatch(optionsType, key)) 
-                                {
-                                     var instance = registry.Get(optionsType);
-                                     ConfigurationBinder.Bind(instance, kvp.Value);
-                                     registry.RegisterByType(optionsType, instance);
-                                }
-                            }
-                        }
-                   }
-                }
-            }
+			// Export job
+			var exportJobPath = parseResult.GetValue(exportJobOption);
+			if (!string.IsNullOrWhiteSpace(exportJobPath))
+			{
+				var factoryList = _contributors.OfType<IDataTransformerFactory>().ToList();
+				var configs = RawJobBuilder.BuildTransformerConfigsFromCli(
+					Environment.GetCommandLineArgs(),
+					factoryList,
+					_contributors);
 
-            // Bind Options
-            foreach(var contributor in _contributors)
-            {
-                contributor.BindOptions(parseResult, registry);
-                
-                if (!string.IsNullOrEmpty(job.Key) && contributor is IDataWriterFactory wFactory)
-                {
-                     var optionsType = wFactory.GetSupportedOptionTypes().FirstOrDefault();
-                     if (optionsType != null)
-                     {
-                         var instance = registry.Get(optionsType);
-                         var prop = optionsType.GetProperty("Key");
-                         if (prop != null && prop.CanWrite)
-                         {
-                             prop.SetValue(instance, job.Key);
-                             registry.RegisterByType(optionsType, instance); 
-                         }
-                     }
-                }
-            }
+				job = job with { Transformers = configs };
+				JobFileWriter.Write(exportJobPath, job);
+				return 0;
+			}
 
-            // Resolve Infrastructure
-            var readerFactories = _contributors.OfType<IStreamReaderFactory>().ToList();
-            var (readerFactory, cleanedInput) = ResolveFactory(readerFactories, job.Input, "reader");
-            job = job with { Input = cleanedInput };
-            
-            _console.WriteLine($"Auto-detected input source: {readerFactory.ProviderName}");
+			var registry = _serviceProvider.GetRequiredService<OptionsRegistry>();
 
-            var writerFactories = _contributors.OfType<IDataWriterFactory>().ToList();
-            var (writerFactory, cleanedOutput) = ResolveFactory(writerFactories, job.Output, "writer");
-            job = job with { Output = cleanedOutput };
+			// Hydrate from YAML ProviderOptions
+			// This allows providers to expose custom options in YAML (e.g. "duck:Extension: httpfs")
+			// matching them via reflection to their Option classes.
+			if (job.ProviderOptions != null)
+			{
+				foreach (var contributor in _contributors)
+				{
+					if (contributor is IDataFactory factory && factory is IDataWriterFactory or IStreamReaderFactory)
+					{
+						foreach (var kvp in job.ProviderOptions)
+						{
+							var key = kvp.Key;
 
-            job = job with { 
-                Query = LoadOrReadContent(job.Query, _console, "query"),
-                PreExec = LoadOrReadContent(job.PreExec, _console, "Pre-Exec"),
-                PostExec = LoadOrReadContent(job.PostExec, _console, "Post-Exec"),
-                OnErrorExec = LoadOrReadContent(job.OnErrorExec, _console, "On-Error-Exec"),
-                FinallyExec = LoadOrReadContent(job.FinallyExec, _console, "Finally-Exec")
-            };
+							// Check if this config block belongs to this provider (by prefix match)
+							if (contributor is IDataWriterFactory wFactory)
+							{
+								var optionsType = wFactory.GetSupportedOptionTypes().FirstOrDefault();
+								if (optionsType != null && IsPrefixMatch(optionsType, key))
+								{
+									var instance = registry.Get(optionsType);
+									ConfigurationBinder.Bind(instance, kvp.Value);
 
-            if (readerFactory.RequiresQuery)
-            {
-                if (string.IsNullOrWhiteSpace(job.Query))
-                {
-                    _console.Write(new Spectre.Console.Markup($"[red]Error: A query is required for provider '{readerFactory.ProviderName}'. Use --query \"SELECT...\"[/]{Environment.NewLine}"));
-                    return 1;
-                }
+									// Manually propagate Key if present, as it might be separate
+									if (!string.IsNullOrEmpty(job.Key))
+									{
+										var prop = optionsType.GetProperty("Key");
+										if (prop != null && prop.CanWrite)
+										{
+											prop.SetValue(instance, job.Key);
+										}
+									}
 
-                try
-                {
-                    SqlQueryValidator.Validate(job.Query, job.UnsafeQuery);
-                }
-                catch (InvalidOperationException ex)
-                {
-                    _console.Write(new Spectre.Console.Markup($"[red]Error: {ex.Message}[/]{Environment.NewLine}"));
-                    return 1;
-                }
-            }
+									registry.RegisterByType(optionsType, instance);
+								}
+							}
+							else if (contributor is IStreamReaderFactory rFactory)
+							{
+								var optionsType = rFactory.GetSupportedOptionTypes().FirstOrDefault();
+								if (optionsType != null && IsPrefixMatch(optionsType, key))
+								{
+									var instance = registry.Get(optionsType);
+									ConfigurationBinder.Bind(instance, kvp.Value);
+									registry.RegisterByType(optionsType, instance);
+								}
+							}
+						}
+					}
+				}
+			}
 
-            // Execution
-            var options = new DumpOptions
-            {
-                Provider = readerFactory.ProviderName,
-                ConnectionString = job.Input,
-                Query = job.Query,
-                OutputPath = job.Output,
-                ConnectionTimeout = job.ConnectionTimeout,
-                QueryTimeout = job.QueryTimeout,
-                BatchSize = job.BatchSize,
-                UnsafeQuery = job.UnsafeQuery,
-                DryRunCount = RawJobBuilder.ParseDryRunFromArgs(Environment.GetCommandLineArgs()),
-                Limit = job.Limit,
-                SampleRate = job.SampleRate,
-                SampleSeed = job.SampleSeed,
-                LogPath = job.LogPath,
-                Key = job.Key,
-                PostExec = job.PostExec,
-                OnErrorExec = job.OnErrorExec,
-                FinallyExec = job.FinallyExec,
-                Strategy = job.Strategy,
-                InsertMode = job.InsertMode,
-                Table = job.Table
-            };
+			// Bind Options
+			foreach (var contributor in _contributors)
+			{
+				contributor.BindOptions(parseResult, registry);
 
-            if (!string.IsNullOrEmpty(options.LogPath))
-            {
-                Serilog.Log.Logger = new Serilog.LoggerConfiguration()
-                    .MinimumLevel.Debug()
-                    .WriteTo.File(options.LogPath)
-                    .CreateLogger();
-                _loggerFactory.AddSerilog();
-            }
+				if (!string.IsNullOrEmpty(job.Key) && contributor is IDataWriterFactory wFactory)
+				{
+					var optionsType = wFactory.GetSupportedOptionTypes().FirstOrDefault();
+					if (optionsType != null)
+					{
+						var instance = registry.Get(optionsType);
+						var prop = optionsType.GetProperty("Key");
+						if (prop != null && prop.CanWrite)
+						{
+							prop.SetValue(instance, job.Key);
+							registry.RegisterByType(optionsType, instance);
+						}
+					}
+				}
+			}
 
-            var exportService = _serviceProvider.GetRequiredService<ExportService>();
-            var tFactories = _contributors.OfType<IDataTransformerFactory>().ToList();
-            List<IDataTransformer> pipeline;
-            
-            if (job.Transformers != null && job.Transformers.Count > 0)
-            {
-                pipeline = BuildPipelineFromYaml(job.Transformers, tFactories, _console);
-            }
-            else
-            {
-                var pipelineBuilder = new TransformerPipelineBuilder(tFactories);
-                pipeline = pipelineBuilder.Build(Environment.GetCommandLineArgs());
-            }
-            
-             try
-            {
-                await exportService.RunExportAsync(options, ct, pipeline, readerFactory, writerFactory);
-                return 0;
-            }
-            catch (Exception ex)
-            {
-                _console.Write(new Spectre.Console.Markup($"{Environment.NewLine}[red]Error: {Markup.Escape(ex.Message)}[/]{Environment.NewLine}"));
-                if (options.Provider == "duckdb" || Environment.GetEnvironmentVariable("DEBUG") == "1") 
-                {
-                     _console.WriteLine(ex.StackTrace ?? "");
-                }
-                return 1;
-            }
-        });
+			// Resolve Infrastructure
+			var readerFactories = _contributors.OfType<IStreamReaderFactory>().ToList();
+			var (readerFactory, cleanedInput) = ResolveFactory(readerFactories, job.Input, "reader");
+			job = job with { Input = cleanedInput };
 
-        Action printHelp = () => PrintGroupedHelp(rootCommand, coreOptions, _contributors, _console);
-        return (rootCommand, printHelp);
-    }
+			_console.WriteLine($"Auto-detected input source: {readerFactory.ProviderName}");
 
-    private static void PrintGroupedHelp(RootCommand rootCommand, List<Option> coreOptions, IEnumerable<ICliContributor> contributors, IAnsiConsole console)
-    {
-        console.WriteLine("Description:");
-        console.WriteLine($"  {rootCommand.Description}");
-        console.WriteLine();
-        console.WriteLine("Usage:");
-        console.WriteLine("  dtpipe [options]");
-        console.WriteLine();
-        
-        console.WriteLine("Core Options:");
-        foreach (var opt in coreOptions) PrintOption(opt, console);
-        console.WriteLine();
+			var writerFactories = _contributors.OfType<IDataWriterFactory>().ToList();
+			var (writerFactory, cleanedOutput) = ResolveFactory(writerFactories, job.Output, "writer");
+			job = job with { Output = cleanedOutput };
 
-        var groups = contributors.GroupBy(c => c.Category).OrderBy(g => g.Key);
-        
-        foreach (var group in groups)
-        {
-            console.WriteLine($"{group.Key}:");
-            // Collect all options for this group
-            var optionsPrinted = new HashSet<string>();
-            foreach (var contributor in group)
-            {
-                foreach (var opt in contributor.GetCliOptions())
-                {
-                    if (optionsPrinted.Add(opt.Name))
-                    {
-                         PrintOption(opt, console);
-                    }
-                }
-            }
-            console.WriteLine();
-        }
+			job = job with
+			{
+				Query = LoadOrReadContent(job.Query, _console, "query"),
+				PreExec = LoadOrReadContent(job.PreExec, _console, "Pre-Exec"),
+				PostExec = LoadOrReadContent(job.PostExec, _console, "Post-Exec"),
+				OnErrorExec = LoadOrReadContent(job.OnErrorExec, _console, "On-Error-Exec"),
+				FinallyExec = LoadOrReadContent(job.FinallyExec, _console, "Finally-Exec")
+			};
 
-        console.WriteLine("Other Options:");
-        console.WriteLine("  -?, -h, --help                           Show this help");
-        console.WriteLine("  --version                                Show version");
-        console.WriteLine();
-    }
+			if (readerFactory.RequiresQuery)
+			{
+				if (string.IsNullOrWhiteSpace(job.Query))
+				{
+					_console.Write(new Spectre.Console.Markup($"[red]Error: A query is required for provider '{readerFactory.ProviderName}'. Use --query \"SELECT...\"[/]{Environment.NewLine}"));
+					return 1;
+				}
 
-    private static void PrintOption(Option opt, IAnsiConsole console)
-    {
-        if (opt.Description?.StartsWith("[HIDDEN]") == true) return;
+				try
+				{
+					SqlQueryValidator.Validate(job.Query, job.UnsafeQuery);
+				}
+				catch (InvalidOperationException ex)
+				{
+					_console.Write(new Spectre.Console.Markup($"[red]Error: {ex.Message}[/]{Environment.NewLine}"));
+					return 1;
+				}
+			}
 
-        var allAliases = new HashSet<string> { opt.Name };
-        foreach (var alias in opt.Aliases) allAliases.Add(alias);
-        
-        var name = string.Join(", ", allAliases.OrderByDescending(a => a.Length));
-        var desc = opt.Description ?? "";
-        console.WriteLine($"  {name,-40} {desc}");
-    }
+			// Execution
+			var options = new DumpOptions
+			{
+				Provider = readerFactory.ProviderName,
+				ConnectionString = job.Input,
+				Query = job.Query,
+				OutputPath = job.Output,
+				ConnectionTimeout = job.ConnectionTimeout,
+				QueryTimeout = job.QueryTimeout,
+				BatchSize = job.BatchSize,
+				UnsafeQuery = job.UnsafeQuery,
+				DryRunCount = RawJobBuilder.ParseDryRunFromArgs(Environment.GetCommandLineArgs()),
+				Limit = job.Limit,
+				SampleRate = job.SampleRate,
+				SampleSeed = job.SampleSeed,
+				LogPath = job.LogPath,
+				Key = job.Key,
+				PostExec = job.PostExec,
+				OnErrorExec = job.OnErrorExec,
+				FinallyExec = job.FinallyExec,
+				Strategy = job.Strategy,
+				InsertMode = job.InsertMode,
+				Table = job.Table
+			};
 
-    /// <summary>
-    /// Builds a transformer pipeline from YAML TransformerConfig list.
-    /// Matches each config's Type to factory's TransformerType and calls CreateFromYamlConfig.
-    /// </summary>
-    private static List<IDataTransformer> BuildPipelineFromYaml(
-        List<TransformerConfig> configs, 
-        List<IDataTransformerFactory> factories,
-        IAnsiConsole console)
-    {
-        var pipeline = new List<IDataTransformer>();
-        
-        foreach (var config in configs)
-        {
-            var factory = factories.FirstOrDefault(f => 
-                f.TransformerType.Equals(config.Type, StringComparison.OrdinalIgnoreCase));
-            
-            if (factory == null)
-            {
-                console.Write(new Markup($"[yellow]Warning: Unknown transformer type '{config.Type}' in job file. Skipping.[/]{Environment.NewLine}"));
-                continue;
-            }
-            
-            var transformer = factory.CreateFromYamlConfig(config);
-            if (transformer != null)
-            {
-                pipeline.Add(transformer);
-            }
-        }
-        
-        return pipeline;
-    }
+			if (!string.IsNullOrEmpty(options.LogPath))
+			{
+				Serilog.Log.Logger = new Serilog.LoggerConfiguration()
+					.MinimumLevel.Debug()
+					.WriteTo.File(options.LogPath)
+					.CreateLogger();
+				_loggerFactory.AddSerilog();
+			}
+
+			var exportService = _serviceProvider.GetRequiredService<ExportService>();
+			var tFactories = _contributors.OfType<IDataTransformerFactory>().ToList();
+			List<IDataTransformer> pipeline;
+
+			if (job.Transformers != null && job.Transformers.Count > 0)
+			{
+				pipeline = BuildPipelineFromYaml(job.Transformers, tFactories, _console);
+			}
+			else
+			{
+				var pipelineBuilder = new TransformerPipelineBuilder(tFactories);
+				pipeline = pipelineBuilder.Build(Environment.GetCommandLineArgs());
+			}
+
+			try
+			{
+				await exportService.RunExportAsync(options, ct, pipeline, readerFactory, writerFactory);
+				return 0;
+			}
+			catch (Exception ex)
+			{
+				_console.Write(new Spectre.Console.Markup($"{Environment.NewLine}[red]Error: {Markup.Escape(ex.Message)}[/]{Environment.NewLine}"));
+				if (options.Provider == "duckdb" || Environment.GetEnvironmentVariable("DEBUG") == "1")
+				{
+					_console.WriteLine(ex.StackTrace ?? "");
+				}
+				return 1;
+			}
+		});
+
+		Action printHelp = () => PrintGroupedHelp(rootCommand, coreOptions, _contributors, _console);
+		return (rootCommand, printHelp);
+	}
+
+	private static void PrintGroupedHelp(RootCommand rootCommand, List<Option> coreOptions, IEnumerable<ICliContributor> contributors, IAnsiConsole console)
+	{
+		console.WriteLine("Description:");
+		console.WriteLine($"  {rootCommand.Description}");
+		console.WriteLine();
+		console.WriteLine("Usage:");
+		console.WriteLine("  dtpipe [options]");
+		console.WriteLine();
+
+		console.WriteLine("Core Options:");
+		foreach (var opt in coreOptions) PrintOption(opt, console);
+		console.WriteLine();
+
+		var groups = contributors.GroupBy(c => c.Category).OrderBy(g => g.Key);
+
+		foreach (var group in groups)
+		{
+			console.WriteLine($"{group.Key}:");
+			// Collect all options for this group
+			var optionsPrinted = new HashSet<string>();
+			foreach (var contributor in group)
+			{
+				foreach (var opt in contributor.GetCliOptions())
+				{
+					if (optionsPrinted.Add(opt.Name))
+					{
+						PrintOption(opt, console);
+					}
+				}
+			}
+			console.WriteLine();
+		}
+
+		console.WriteLine("Other Options:");
+		console.WriteLine("  -?, -h, --help                           Show this help");
+		console.WriteLine("  --version                                Show version");
+		console.WriteLine();
+	}
+
+	private static void PrintOption(Option opt, IAnsiConsole console)
+	{
+		if (opt.Description?.StartsWith("[HIDDEN]") == true) return;
+
+		var allAliases = new HashSet<string> { opt.Name };
+		foreach (var alias in opt.Aliases) allAliases.Add(alias);
+
+		var name = string.Join(", ", allAliases.OrderByDescending(a => a.Length));
+		var desc = opt.Description ?? "";
+		console.WriteLine($"  {name,-40} {desc}");
+	}
+
+	/// <summary>
+	/// Builds a transformer pipeline from YAML TransformerConfig list.
+	/// Matches each config's Type to factory's TransformerType and calls CreateFromYamlConfig.
+	/// </summary>
+	private static List<IDataTransformer> BuildPipelineFromYaml(
+		List<TransformerConfig> configs,
+		List<IDataTransformerFactory> factories,
+		IAnsiConsole console)
+	{
+		var pipeline = new List<IDataTransformer>();
+
+		foreach (var config in configs)
+		{
+			var factory = factories.FirstOrDefault(f =>
+				f.TransformerType.Equals(config.Type, StringComparison.OrdinalIgnoreCase));
+
+			if (factory == null)
+			{
+				console.Write(new Markup($"[yellow]Warning: Unknown transformer type '{config.Type}' in job file. Skipping.[/]{Environment.NewLine}"));
+				continue;
+			}
+
+			var transformer = factory.CreateFromYamlConfig(config);
+			if (transformer != null)
+			{
+				pipeline.Add(transformer);
+			}
+		}
+
+		return pipeline;
+	}
 
 
-    /// <summary>
-    /// Resolves the appropriate factory for a given connection string or file path.
-    /// Supports deterministic resolution via "prefix:" and fallback to CanHandle().
-    /// Returns the factory and the (potentially cleaned) connection string.
-    /// </summary>
-    private static (T Factory, string CleanedString) ResolveFactory<T>(IEnumerable<T> factories, string rawString, string typeName) where T : IDataFactory
-    {
-        rawString = rawString.Trim();
+	/// <summary>
+	/// Resolves the appropriate factory for a given connection string or file path.
+	/// Supports deterministic resolution via "prefix:" and fallback to CanHandle().
+	/// Returns the factory and the (potentially cleaned) connection string.
+	/// </summary>
+	private static (T Factory, string CleanedString) ResolveFactory<T>(IEnumerable<T> factories, string rawString, string typeName) where T : IDataFactory
+	{
+		rawString = rawString.Trim();
 
-        // 1. Deterministic Prefix Check
-        foreach (var factory in factories)
-        {
-            var prefix = factory.ProviderName + ":";
-            
-            // Check for "prefix:" behavior (standard)
-            if (rawString.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                var cleaned = rawString.Substring(prefix.Length).Trim();
-                return (factory, cleaned);
-            }
+		// 1. Deterministic Prefix Check
+		foreach (var factory in factories)
+		{
+			var prefix = factory.ProviderName + ":";
 
-            // Check for "prefix" behavior (e.g. "csv" or "parquet" for streams)
-            // This allows syntax like: dtpipe -i csv -o parquet
-            if (rawString.Equals(factory.ProviderName, StringComparison.OrdinalIgnoreCase))
-            {
-                return (factory, "");
-            }
-        }
+			// Check for "prefix:" behavior (standard)
+			if (rawString.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+			{
+				var cleaned = rawString.Substring(prefix.Length).Trim();
+				return (factory, cleaned);
+			}
 
-        // 2. Fallback to CanHandle
-        var detected = factories.FirstOrDefault(f => f.CanHandle(rawString));
-        if (detected != null)
-        {
-            return (detected, rawString);
-        }
+			// Check for "prefix" behavior (e.g. "csv" or "parquet" for streams)
+			// This allows syntax like: dtpipe -i csv -o parquet
+			if (rawString.Equals(factory.ProviderName, StringComparison.OrdinalIgnoreCase))
+			{
+				return (factory, "");
+			}
+		}
 
-        throw new InvalidOperationException($"Could not detect {typeName} provider for '{rawString}'. Please use a known prefix (e.g. 'duck:', 'ora:' ...) or file extension.");
-    }
+		// 2. Fallback to CanHandle
+		var detected = factories.FirstOrDefault(f => f.CanHandle(rawString));
+		if (detected != null)
+		{
+			return (detected, rawString);
+		}
 
-    private static bool IsPrefixMatch(Type optionsType, string configKey)
-    {
-        // Check "Prefix" static property
-        var prefixProp = optionsType.GetProperty("Prefix", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-        if (prefixProp != null)
-        {
-            var prefix = prefixProp.GetValue(null) as string;
-            if (string.Equals(prefix, configKey, StringComparison.OrdinalIgnoreCase)) return true;
-        }
-        return false;
-    }
+		throw new InvalidOperationException($"Could not detect {typeName} provider for '{rawString}'. Please use a known prefix (e.g. 'duck:', 'ora:' ...) or file extension.");
+	}
 
-    private static string? ResolveKeyring(string? input, IAnsiConsole console)
-    {
-        if (string.IsNullOrWhiteSpace(input)) return input;
-        
-        const string prefix = "keyring://";
-        if (input.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            var alias = input.Substring(prefix.Length).Trim();
-            try
-            {
-                var mgr = new SecretsManager();
-                var secret = mgr.GetSecret(alias);
-                if (secret == null)
-                {
-                    console.MarkupLine($"[red]Error: Secret alias '{alias}' not found in keyring.[/]");
-                    Environment.Exit(1); 
-                }
-                console.MarkupLine($"[grey]Resolved keyring secret for alias: {alias}[/]");
-                return secret;
-            }
-            catch (Exception ex)
-            {
-                console.MarkupLine($"[red]Error resolving keyring secret: {ex.Message}[/]");
-                return null;
-            }
-        }
+	private static bool IsPrefixMatch(Type optionsType, string configKey)
+	{
+		// Check "Prefix" static property
+		var prefixProp = optionsType.GetProperty("Prefix", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+		if (prefixProp != null)
+		{
+			var prefix = prefixProp.GetValue(null) as string;
+			if (string.Equals(prefix, configKey, StringComparison.OrdinalIgnoreCase)) return true;
+		}
+		return false;
+	}
 
-        return input;
-    }
+	private static string? ResolveKeyring(string? input, IAnsiConsole console)
+	{
+		if (string.IsNullOrWhiteSpace(input)) return input;
 
-    private static string? LoadOrReadContent(string? input, IAnsiConsole console, string contextName)
-    {
-        if (string.IsNullOrWhiteSpace(input)) return input;
+		const string prefix = "keyring://";
+		if (input.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+		{
+			var alias = input.Substring(prefix.Length).Trim();
+			try
+			{
+				var mgr = new SecretsManager();
+				var secret = mgr.GetSecret(alias);
+				if (secret == null)
+				{
+					console.MarkupLine($"[red]Error: Secret alias '{alias}' not found in keyring.[/]");
+					Environment.Exit(1);
+				}
+				console.MarkupLine($"[grey]Resolved keyring secret for alias: {alias}[/]");
+				return secret;
+			}
+			catch (Exception ex)
+			{
+				console.MarkupLine($"[red]Error resolving keyring secret: {ex.Message}[/]");
+				return null;
+			}
+		}
 
-        // Explicit @ syntax
-        if (input.StartsWith('@'))
-        {
-             var path = input.Substring(1);
-             if (File.Exists(path))
-             {
-                 console.MarkupLine($"[grey]Loading {contextName} from file: {Markup.Escape(path)}[/]");
-                 return File.ReadAllText(path);
-             }
-             // Fallback: treat as literal string if file not found (e.g. SQL variable @foo)
-             return input;
-        }
+		return input;
+	}
 
-        // Implicit syntax
-        if (File.Exists(input))
-        {
-            console.MarkupLine($"[grey]Loading {contextName} from file: {Markup.Escape(input)}[/]");
-            return File.ReadAllText(input);
-        }
+	private static string? LoadOrReadContent(string? input, IAnsiConsole console, string contextName)
+	{
+		if (string.IsNullOrWhiteSpace(input)) return input;
 
-        return input;
-    }
+		// Explicit @ syntax for forcing file read
+		if (input.StartsWith('@'))
+		{
+			var path = input.Substring(1);
+			if (File.Exists(path))
+			{
+				console.MarkupLine($"[grey]Loading {contextName} from file: {Markup.Escape(path)}[/]");
+				return File.ReadAllText(path);
+			}
+			// Fallback: treat as literal string if file not found (e.g. SQL variable @foo)
+			return input;
+		}
+
+		// Implicit file read if input matches an existing file path
+		if (File.Exists(input))
+		{
+			console.MarkupLine($"[grey]Loading {contextName} from file: {Markup.Escape(input)}[/]");
+			return File.ReadAllText(input);
+		}
+
+		return input;
+	}
 }

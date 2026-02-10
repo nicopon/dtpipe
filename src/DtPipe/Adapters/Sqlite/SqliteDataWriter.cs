@@ -1,411 +1,340 @@
-using System.Text;
-using Microsoft.Data.Sqlite;
-using DtPipe.Core.Abstractions;
-using DtPipe.Core.Models;
-using DtPipe.Core.Options;
-using DtPipe.Core.Helpers;
 using System.Data;
+using System.Data.Common;
+using System.Text;
+using System.Text.RegularExpressions;
+using DtPipe.Core.Abstractions;
+using DtPipe.Core.Helpers;
+using DtPipe.Core.Models;
+using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging;
 
 namespace DtPipe.Adapters.Sqlite;
 
-public class SqliteDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
+public sealed class SqliteDataWriter : BaseSqlDataWriter
 {
-    private readonly string _connectionString;
-    private readonly OptionsRegistry _registry;
+	private readonly SqliteWriterOptions _options;
+	private readonly ILogger<SqliteDataWriter> _logger;
+	private List<string> _keyColumns = new();
 
-    private SqliteConnection? _connection;
-    private IReadOnlyList<PipeColumnInfo>? _columns;
-    private string _tableName = "Export";
-    private SqliteWriteStrategy _strategy = SqliteWriteStrategy.Append;
-    private List<string> _keyColumns = new();
-    
-    private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.SqliteDialect();
-    public ISqlDialect Dialect => _dialect;
+	private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.SqliteDialect();
+	public override ISqlDialect Dialect => _dialect;
 
-    public SqliteDataWriter(string connectionString, OptionsRegistry registry)
-    {
-        _connectionString = connectionString;
-        _registry = registry;
-    }
+	public SqliteDataWriter(string connectionString, SqliteWriterOptions options, ILogger<SqliteDataWriter> logger) : base(connectionString)
+	{
+		_options = options;
+		_logger = logger;
+	}
 
-    #region ISchemaInspector Implementation
+	protected override IDbConnection CreateConnection(string connectionString)
+	{
+		return new SqliteConnection(connectionString);
+	}
 
-    public async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
-    {
-        var options = _registry.Get<SqliteWriterOptions>();
-        var tableName = options.Table;
+	protected override Task<(string Schema, string Table)> ResolveTargetTableAsync(CancellationToken ct)
+	{
+		// SQLite doesn't really use schemas in the same way (usually just 'main')
+		return Task.FromResult((string.Empty, _options.Table));
+	}
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(ct);
+	protected override async Task ApplyWriteStrategyAsync(string resolvedSchema, string resolvedTable, CancellationToken ct)
+	{
+		if (_options.Strategy == SqliteWriteStrategy.Recreate)
+		{
+			// Recreate Strategy:
+			// 1. Introspect existing table (if any) to preserve schema types
+			TargetSchemaInfo? existingSchema = null;
+			try { existingSchema = await InspectTargetAsync(ct); } catch { }
 
-        // Check if table exists
-        using var existsCmd = connection.CreateCommand();
-        existsCmd.CommandText = $"SELECT name FROM sqlite_master WHERE type='table' AND name='{tableName}'";
-        var exists = await existsCmd.ExecuteScalarAsync(ct) != null;
-        
-        if (!exists)
-        {
-            return new TargetSchemaInfo([], false, null, null, null);
-        }
+			// Drop
+			await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS {_quotedTargetTableName}", ct);
+			if (_logger.IsEnabled(LogLevel.Information)) _logger.LogInformation("Dropped table {Table}", _quotedTargetTableName);
 
-        // Get columns using PRAGMA table_info
-        using var columnsCmd = connection.CreateCommand();
-        columnsCmd.CommandText = $"PRAGMA table_info(\"{tableName}\")";
+			// Recreate
+			if (existingSchema?.Exists == true && existingSchema.Columns.Count > 0)
+			{
+				var recreateSql = BuildCreateTableFromIntrospection(_quotedTargetTableName, existingSchema);
+				await ExecuteNonQueryAsync(recreateSql, ct);
+			}
+			else
+			{
+				var createTableSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
+				await ExecuteNonQueryAsync(createTableSql, ct);
+			}
+			if (_logger.IsEnabled(LogLevel.Information)) _logger.LogInformation("Created table {Table}", _quotedTargetTableName);
+		}
+		else if (_options.Strategy == SqliteWriteStrategy.DeleteThenInsert)
+		{
+			if (await TableExistsAsync(ct))
+			{
+				await ExecuteNonQueryAsync($"DELETE FROM {_quotedTargetTableName}", ct);
+				if (_logger.IsEnabled(LogLevel.Information)) _logger.LogInformation("Deleted rows from {Table}", _quotedTargetTableName);
+			}
+			else
+			{
+				var createTableSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
+				await ExecuteNonQueryAsync(createTableSql, ct);
+			}
+		}
+		else if (_options.Strategy == SqliteWriteStrategy.Truncate)
+		{
+			if (await TableExistsAsync(ct))
+			{
+				await ExecuteNonQueryAsync(GetTruncateTableSql(_quotedTargetTableName), ct);
+				if (_logger.IsEnabled(LogLevel.Information)) _logger.LogInformation("Truncated table {Table}", _quotedTargetTableName);
+			}
+			else
+			{
+				var createTableSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
+				await ExecuteNonQueryAsync(createTableSql, ct);
+			}
+		}
+		else // Append
+		{
+			if (!await TableExistsAsync(ct))
+			{
+				var createTableSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
+				await ExecuteNonQueryAsync(createTableSql, ct);
+				if (_logger.IsEnabled(LogLevel.Information)) _logger.LogInformation("Created table {Table} (Append strategy)", _quotedTargetTableName);
+			}
+		}
 
-        var pkColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var columns = new List<TargetColumnInfo>();
-        
-        using var reader = await columnsCmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            // PRAGMA table_info returns: cid, name, type, notnull, dflt_value, pk
-            var colName = reader.GetString(1);
-            var dataType = reader.GetString(2);
-            var notNull = reader.GetInt32(3) == 1;
-            var isPk = reader.GetInt32(5) > 0;
+		// Initialize Keys for Upsert/Ignore
+		if (_options.Strategy == SqliteWriteStrategy.Upsert || _options.Strategy == SqliteWriteStrategy.Ignore)
+		{
+			var targetInfo = await InspectTargetAsync(ct);
+			if (targetInfo?.PrimaryKeyColumns != null)
+			{
+				_keyColumns.AddRange(targetInfo.PrimaryKeyColumns);
+			}
 
-            if (isPk)
-            {
-                pkColumns.Add(colName);
-            }
+			if (_keyColumns.Count == 0 && !string.IsNullOrEmpty(_options.Key))
+			{
+				_keyColumns.AddRange(ColumnHelper.ResolveKeyColumns(_options.Key, _columns!));
+			}
 
-            columns.Add(new TargetColumnInfo(
-                colName,
-                dataType.ToUpperInvariant(),
-                SqliteTypeMapper.MapFromProviderType(dataType),
-                !notNull && !isPk, // Nullable if not marked NOT NULL and not PK
-                isPk,
-                false, // SQLite doesn't easily expose UNIQUE via PRAGMA
-                ExtractMaxLength(dataType)
-            ));
-        }
+			if (_keyColumns.Count == 0)
+			{
+				throw new InvalidOperationException($"Strategy {_options.Strategy} requires a Primary Key. None detected.");
+			}
+		}
+	}
 
-        // Get row count
-        long? rowCount = null;
-        try
-        {
-            using var countCmd = connection.CreateCommand();
-            countCmd.CommandText = $"SELECT COUNT(*) FROM \"{tableName}\"";
-            var countResult = await countCmd.ExecuteScalarAsync(ct);
-            rowCount = countResult == null ? null : Convert.ToInt64(countResult);
-        }
-        catch { /* Row count not available */ }
+	private async Task<bool> TableExistsAsync(CancellationToken ct)
+	{
+		using var existsCmd = (DbCommand)_connection!.CreateCommand();
+		existsCmd.CommandText = $"SELECT name FROM sqlite_master WHERE type='table' AND name='{_options.Table}'";
+		return await existsCmd.ExecuteScalarAsync(ct) != null;
+	}
 
-        // Get file size (database file size)
-        long? sizeBytes = null;
-        try
-        {
-            // Extract file path from connection string
-            var builder = new SqliteConnectionStringBuilder(_connectionString);
-            if (!string.IsNullOrEmpty(builder.DataSource) && File.Exists(builder.DataSource))
-            {
-                sizeBytes = new FileInfo(builder.DataSource).Length;
-            }
-        }
-        catch { /* Size info not available */ }
+	public override async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
+	{
+		if (rows.Count == 0) return;
+		if (_connection!.State != ConnectionState.Open) await ((DbConnection)_connection).OpenAsync(ct);
 
-        return new TargetSchemaInfo(
-            columns,
-            true,
-            rowCount,
-            sizeBytes,
-            pkColumns.Count > 0 ? pkColumns.ToList() : null
-        );
-    }
+		try
+		{
+			await using var transaction = await ((DbConnection)_connection).BeginTransactionAsync(ct);
 
-    private static int? ExtractMaxLength(string dataType)
-    {
-        // Try to extract length from types like VARCHAR(100), CHAR(50), etc.
-        var match = System.Text.RegularExpressions.Regex.Match(dataType, @"\((\d+)\)");
-        if (match.Success && int.TryParse(match.Groups[1].Value, out var length))
-        {
-            return length;
-        }
-        return null;
-    }
+			var paramNames = string.Join(", ", Enumerable.Range(0, _columns!.Count).Select(i => $"@p{i}"));
+			var columnNames = string.Join(", ", _columns.Select(c => SqlIdentifierHelper.GetSafeIdentifier(_dialect, c)));
 
-    #endregion
+			using var cmd = (SqliteCommand)_connection.CreateCommand();
+			cmd.Transaction = (SqliteTransaction)transaction;
 
+			var sql = new StringBuilder();
+			if (_options.Strategy == SqliteWriteStrategy.Ignore)
+			{
+				sql.Append($"INSERT OR IGNORE INTO {_quotedTargetTableName} ({columnNames}) VALUES ({paramNames})");
+			}
+			else if (_options.Strategy == SqliteWriteStrategy.Upsert)
+			{
+				var conflictTarget = string.Join(", ", _keyColumns.Select(k => SqlIdentifierHelper.GetSafeIdentifier(_dialect, k)));
+				var updateSet = string.Join(", ", _columns.Where(c => !_keyColumns.Contains(c.Name, StringComparer.OrdinalIgnoreCase))
+													  .Select(c =>
+													  {
+														  var safe = SqlIdentifierHelper.GetSafeIdentifier(_dialect, c);
+														  return $"{safe} = excluded.{safe}";
+													  }));
 
-    public async ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
-    {
-        _columns = columns;
+				sql.Append($"INSERT INTO {_quotedTargetTableName} ({columnNames}) VALUES ({paramNames}) ");
+				sql.Append($"ON CONFLICT ({conflictTarget}) DO UPDATE SET {updateSet}");
+			}
+			else
+			{
+				sql.Append($"INSERT INTO {_quotedTargetTableName} ({columnNames}) VALUES ({paramNames})");
+			}
 
-        var options = _registry.Get<SqliteWriterOptions>();
-        // Smart Quoting for Table Name
-        _tableName = _dialect.NeedsQuoting(options.Table) ? _dialect.Quote(options.Table) : options.Table;
-        _strategy = options.Strategy ?? SqliteWriteStrategy.Append;
+			cmd.CommandText = sql.ToString();
 
-        if (_connection == null)
-        {
-            _connection = new SqliteConnection(_connectionString);
-        }
-        if (_connection.State != ConnectionState.Open)
-        {
-            await _connection.OpenAsync(ct);
-        }
+			for (int i = 0; i < _columns.Count; i++)
+			{
+				cmd.Parameters.Add(new SqliteParameter($"@p{i}", null));
+			}
 
-        await HandleStrategyAsync(ct);
-        
-        // Resolve Keys for Incremental Strategies
-        if (_strategy == SqliteWriteStrategy.Upsert || _strategy == SqliteWriteStrategy.Ignore)
-        {
-             var targetInfo = await InspectTargetAsync(ct);
-             if (targetInfo?.PrimaryKeyColumns != null)
-             {
-                 _keyColumns.AddRange(targetInfo.PrimaryKeyColumns);
-             }
+			foreach (var row in rows)
+			{
+				for (int i = 0; i < _columns.Count; i++)
+				{
+					cmd.Parameters[i].Value = row[i] ?? DBNull.Value;
+				}
+				await cmd.ExecuteNonQueryAsync(ct);
+			}
 
-             // Allow manual key specification via options
-             if (_keyColumns.Count == 0 && !string.IsNullOrEmpty(options.Key))
-             {
-                 _keyColumns.AddRange(ColumnHelper.ResolveKeyColumns(options.Key, _columns));
-             }
+			await transaction.CommitAsync(ct);
+		}
+		catch (Exception ex)
+		{
+			var analysis = await BatchFailureAnalyzer.AnalyzeAsync(this, rows, _columns!, ct);
+			if (!string.IsNullOrEmpty(analysis))
+			{
+				throw new InvalidOperationException($"SQLite Insert Failed with detailed analysis:\n{analysis}", ex);
+			}
+			throw;
+		}
+	}
 
-             if (_keyColumns.Count == 0)
-             {
-                  throw new InvalidOperationException($"Strategy {_strategy} requires a Primary Key. None detected.");
-             }
-        }
-    }
+	public override async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
+	{
+		if (_connection!.State != ConnectionState.Open) await ((DbConnection)_connection).OpenAsync(ct);
 
-    private async Task HandleStrategyAsync(CancellationToken ct)
-    {
-        using var cmd = _connection!.CreateCommand();
+		using var cmd = (DbCommand)_connection.CreateCommand();
+		cmd.CommandText = command;
+		await cmd.ExecuteNonQueryAsync(ct);
+	}
 
-        if (_strategy == SqliteWriteStrategy.Recreate)
-        {
-            TargetSchemaInfo? existingSchema = null;
-            try { existingSchema = await InspectTargetAsync(ct); } catch {}
+	protected override ValueTask DisposeResourcesAsync()
+	{
+		return ValueTask.CompletedTask;
+	}
 
-            cmd.CommandText = $"DROP TABLE IF EXISTS {_tableName}";
-            await cmd.ExecuteNonQueryAsync(ct);
+	public override async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
+	{
+		await using var connection = new SqliteConnection(_connectionString);
+		await connection.OpenAsync(ct);
 
-            if (existingSchema?.Exists == true && existingSchema.Columns.Count > 0)
-            {
-                 var sql = BuildCreateTableFromIntrospection(_tableName, existingSchema);
-                 cmd.CommandText = sql;
-                 await cmd.ExecuteNonQueryAsync(ct);
-                 return;
-            }
+		var tableName = _options.Table;
 
-            await CreateTableAsync(ct);
-        }
-        else if (_strategy == SqliteWriteStrategy.DeleteThenInsert)
-        {
-            var rawName = _registry.Get<SqliteWriterOptions>().Table;
-            cmd.CommandText = $"SELECT name FROM sqlite_master WHERE type='table' AND name='{rawName}'";
-            var exists = await cmd.ExecuteScalarAsync(ct) != null;
-            
-            if (exists)
-            {
-                cmd.CommandText = $"DELETE FROM {_tableName}";
-                await cmd.ExecuteNonQueryAsync(ct);
-            }
-            else
-            {
-                 await CreateTableAsync(ct);
-            }
-        }
-        else // Append
-        {
-            var rawName = _registry.Get<SqliteWriterOptions>().Table;
-            cmd.CommandText = $"SELECT name FROM sqlite_master WHERE type='table' AND name='{rawName}'";
-            var exists = await cmd.ExecuteScalarAsync(ct) != null;
-            
-            if (!exists)
-            {
-                await CreateTableAsync(ct);
-            }
-        }
-    }
+		// Check if table exists
+		using var existsCmd = connection.CreateCommand();
+		existsCmd.CommandText = $"SELECT name FROM sqlite_master WHERE type='table' AND name='{tableName}'";
+		var exists = await existsCmd.ExecuteScalarAsync(ct) != null;
 
+		if (!exists) return new TargetSchemaInfo([], false, null, null, null);
 
-    private async Task CreateTableAsync(CancellationToken ct)
-    {
-        var sb = new StringBuilder();
-        sb.Append($"CREATE TABLE {_tableName} (");
+		// Get columns using PRAGMA table_info
+		using var columnsCmd = connection.CreateCommand();
+		columnsCmd.CommandText = $"PRAGMA table_info(\"{tableName}\")";
 
-        for (int i = 0; i < _columns!.Count; i++)
-        {
-            if (i > 0) sb.Append(", ");
-            var col = _columns[i];
-            sb.Append($"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, col)} {SqliteTypeMapper.MapToProviderType(col.ClrType)}");
-        }
+		var pkColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var columns = new List<TargetColumnInfo>();
 
-        var options = _registry.Get<SqliteWriterOptions>();
-        if (!string.IsNullOrEmpty(options.Key))
-        {
-             var resolvedKeys = ColumnHelper.ResolveKeyColumns(options.Key, _columns.ToList());
-             var keys = resolvedKeys.Select(keyName =>
-             {
-                 var col = _columns.First(c => c.Name == keyName);
-                 return SqlIdentifierHelper.GetSafeIdentifier(_dialect, col);
-             });
-             sb.Append($", PRIMARY KEY ({string.Join(", ", keys)})");
-        }
+		using var reader = await columnsCmd.ExecuteReaderAsync(ct);
+		while (await reader.ReadAsync(ct))
+		{
+			var colName = reader.GetString(1);
+			var dataType = reader.GetString(2);
+			var notNull = reader.GetInt32(3) == 1;
+			var isPk = reader.GetInt32(5) > 0;
 
-        sb.Append(')');
+			if (isPk) pkColumns.Add(colName);
 
-        using var cmd = _connection!.CreateCommand();
-        cmd.CommandText = sb.ToString();
-        await cmd.ExecuteNonQueryAsync(ct);
-    }
+			columns.Add(new TargetColumnInfo(
+				colName,
+				dataType.ToUpperInvariant(),
+				SqliteTypeMapper.MapFromProviderType(dataType),
+				!notNull && !isPk,
+				isPk,
+				false,
+				ExtractMaxLength(dataType)
+			));
+		}
 
-    public async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
-    {
-        if (rows.Count == 0) return;
+		long? rowCount = null;
+		try
+		{
+			using var countCmd = connection.CreateCommand();
+			countCmd.CommandText = $"SELECT COUNT(*) FROM \"{tableName}\"";
+			var countResult = await countCmd.ExecuteScalarAsync(ct);
+			rowCount = countResult == null ? null : Convert.ToInt64(countResult);
+		}
+		catch { }
 
-        try
-        {
-            using var transaction = _connection!.BeginTransaction();
+		long? sizeBytes = null;
+		try
+		{
+			var builder = new SqliteConnectionStringBuilder(_connectionString);
+			if (!string.IsNullOrEmpty(builder.DataSource) && File.Exists(builder.DataSource))
+			{
+				sizeBytes = new FileInfo(builder.DataSource).Length;
+			}
+		}
+		catch { }
 
-            var paramNames = string.Join(", ", Enumerable.Range(0, _columns!.Count).Select(i => $"@p{i}"));
-            var columnNames = string.Join(", ", _columns.Select(c => SqlIdentifierHelper.GetSafeIdentifier(_dialect, c)));
+		return new TargetSchemaInfo(columns, true, rowCount, sizeBytes, pkColumns.Count > 0 ? pkColumns.ToList() : null);
+	}
 
-            using var cmd = _connection.CreateCommand();
-            
-            var sql = new StringBuilder();
-            if (_strategy == SqliteWriteStrategy.Ignore)
-            {
-                sql.Append($"INSERT OR IGNORE INTO {_tableName} ({columnNames}) VALUES ({paramNames})");
-            }
-            else if (_strategy == SqliteWriteStrategy.Upsert)
-            {
-                // Conflict Target must be safe
-                var conflictTarget = string.Join(", ", _keyColumns.Select(k => SqlIdentifierHelper.GetSafeIdentifier(_dialect, k)));
-                
-                // Update Set must use safe naming
-                // SafeName = excluded.SafeName
-                var updateSet = string.Join(", ", _columns.Where(c => !_keyColumns.Contains(c.Name, StringComparer.OrdinalIgnoreCase))
-                                                      .Select(c => 
-                                                      {
-                                                          var safe = SqlIdentifierHelper.GetSafeIdentifier(_dialect, c);
-                                                          return $"{safe} = excluded.{safe}";
-                                                      }));
-                
-                sql.Append($"INSERT INTO {_tableName} ({columnNames}) VALUES ({paramNames}) ");
-                sql.Append($"ON CONFLICT ({conflictTarget}) DO UPDATE SET {updateSet}");
-            }
-            else
-            {
-                 sql.Append($"INSERT INTO {_tableName} ({columnNames}) VALUES ({paramNames})");
-            }
+	private static int? ExtractMaxLength(string dataType)
+	{
+		var match = Regex.Match(dataType, @"\((\d+)\)");
+		if (match.Success && int.TryParse(match.Groups[1].Value, out var length)) return length;
+		return null;
+	}
 
-            cmd.CommandText = sql.ToString();
-            cmd.Transaction = transaction;
+	protected override string GetCreateTableSql(string tableName, IEnumerable<PipeColumnInfo> columns)
+	{
+		var sb = new StringBuilder();
+		sb.Append($"CREATE TABLE {tableName} (");
 
-            // Create parameters once
-            for (int i = 0; i < _columns.Count; i++)
-            {
-                cmd.Parameters.Add(new SqliteParameter($"@p{i}", null));
-            }
+		var cols = columns.ToList();
+		for (int i = 0; i < cols.Count; i++)
+		{
+			if (i > 0) sb.Append(", ");
+			var col = cols[i];
+			sb.Append($"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, col)} {SqliteTypeMapper.MapToProviderType(col.ClrType)}");
+		}
 
-            foreach (var row in rows)
-            {
-                for (int i = 0; i < _columns.Count; i++)
-                {
-                    cmd.Parameters[i].Value = row[i] ?? DBNull.Value;
-                }
-                await cmd.ExecuteNonQueryAsync(ct);
-            }
+		if (!string.IsNullOrEmpty(_options.Key))
+		{
+			var resolvedKeys = ColumnHelper.ResolveKeyColumns(_options.Key, cols);
+			var keys = resolvedKeys.Select(keyName => SqlIdentifierHelper.GetSafeIdentifier(_dialect, cols.First(c => c.Name == keyName)));
+			sb.Append($", PRIMARY KEY ({string.Join(", ", keys)})");
+		}
+		sb.Append(')');
+		return sb.ToString();
+	}
 
-            await transaction.CommitAsync(ct);
-        }
-        catch (Exception ex)
-        {
-             var analysis = await BatchFailureAnalyzer.AnalyzeAsync(this, rows, _columns!, ct);
-             if (!string.IsNullOrEmpty(analysis))
-            {
-                throw new InvalidOperationException($"SQLite Insert Failed with detailed analysis:\n{analysis}", ex);
-            }
-            throw;
-        }
-    }
+	protected override string GetTruncateTableSql(string tableName) => $"DELETE FROM {tableName}"; // VACUUM is handled outside usually
 
-    public async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
-    {
-        if (_connection == null)
-        {
-            _connection = new SqliteConnection(_connectionString);
-        }
+	protected override string GetDropTableSql(string tableName) => $"DROP TABLE {tableName}";
 
-        if (_connection.State != ConnectionState.Open)
-        {
-            await _connection.OpenAsync(ct);
-        }
-        
-        using var cmd = _connection.CreateCommand();
-        cmd.CommandText = command;
-        await cmd.ExecuteNonQueryAsync(ct);
-    }
+	private string BuildCreateTableFromIntrospection(string tableName, TargetSchemaInfo schema)
+	{
+		var sb = new StringBuilder();
+		sb.Append($"CREATE TABLE {tableName} (");
 
-    public ValueTask CompleteAsync(CancellationToken ct = default)
-    {
-        return ValueTask.CompletedTask;
-    }
+		for (int i = 0; i < schema.Columns.Count; i++)
+		{
+			var col = schema.Columns[i];
+			if (i > 0) sb.Append(", ");
+			sb.Append($"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, col.Name)} {col.NativeType}");
+			if (!col.IsNullable) sb.Append(" NOT NULL");
+		}
 
-    public async ValueTask DisposeAsync()
-    {
-        if (_connection != null)
-        {
-            await _connection.DisposeAsync();
-            _connection = null;
-        }
-    }
+		if (schema.PrimaryKeyColumns != null && schema.PrimaryKeyColumns.Count > 0)
+		{
+			var keys = schema.PrimaryKeyColumns.Select(k => SqlIdentifierHelper.GetSafeIdentifier(_dialect, k));
+			sb.Append($", PRIMARY KEY ({string.Join(", ", keys)})");
+		}
+		sb.Append(")");
+		return sb.ToString();
+	}
 
-    // IKeyValidator implementation
-    
-    public string? GetWriteStrategy()
-    {
-        var options = _registry.Get<SqliteWriterOptions>();
-        return options.Strategy.ToString();
-    }
-    
-    public IReadOnlyList<string>? GetRequestedPrimaryKeys()
-    {
-        var options = _registry.Get<SqliteWriterOptions>();
-        if (string.IsNullOrEmpty(options.Key))
-            return null;
-            
-        return options.Key.Split(',')
-            .Select(k => k.Trim())
-            .Where(k => !string.IsNullOrEmpty(k))
-            .ToList();
-    }
-    
-    private string BuildCreateTableFromIntrospection(string tableName, TargetSchemaInfo schema)
-    {
-        var sb = new StringBuilder();
-        sb.Append($"CREATE TABLE {tableName} (");
-        
-        for (int i = 0; i < schema.Columns.Count; i++)
-        {
-            var col = schema.Columns[i];
-            if (i > 0) sb.Append(", ");
-            sb.Append($"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, col.Name)} {col.NativeType}");
-            
-            if (!col.IsNullable)
-            {
-                sb.Append(" NOT NULL");
-            }
-        }
-        
-        if (schema.PrimaryKeyColumns != null && schema.PrimaryKeyColumns.Count > 0)
-        {
-             var keys = schema.PrimaryKeyColumns.Select(k => SqlIdentifierHelper.GetSafeIdentifier(_dialect, k));
-             sb.Append($", PRIMARY KEY ({string.Join(", ", keys)})");
-        }
-        
-        sb.Append(")");
-        return sb.ToString();
-    }
-
-    public bool RequiresPrimaryKey()
-    {
-        var options = _registry.Get<SqliteWriterOptions>();
-        return options.Strategy is 
-            SqliteWriteStrategy.Upsert or 
-            SqliteWriteStrategy.Ignore;
-    }
+	// IKeyValidator Override
+	public override string? GetWriteStrategy() => _options.Strategy.ToString();
+	public override IReadOnlyList<string>? GetRequestedPrimaryKeys()
+	{
+		if (string.IsNullOrEmpty(_options.Key)) return null;
+		return _options.Key.Split(',').Select(k => k.Trim()).Where(k => !string.IsNullOrEmpty(k)).ToList();
+	}
+	public override bool RequiresPrimaryKey() => _options.Strategy is SqliteWriteStrategy.Upsert or SqliteWriteStrategy.Ignore;
 }

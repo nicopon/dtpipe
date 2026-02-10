@@ -1,129 +1,170 @@
-using Microsoft.Data.Sqlite;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
+using Microsoft.Data.Sqlite;
 
 namespace DtPipe.Adapters.Sqlite;
 
-public class SqliteStreamReader : IStreamReader
+public partial class SqliteStreamReader : IStreamReader
 {
-    private readonly string _connectionString;
-    private readonly string _query;
-    private readonly int _queryTimeout;
-    
-    private SqliteConnection? _connection;
-    private SqliteCommand? _command;
-    private SqliteDataReader? _reader;
-    private readonly SemaphoreSlim _semaphore = new(1, 1);
+	private readonly string _connectionString;
+	private readonly string _query;
+	private readonly int _queryTimeout;
 
-    public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
+	private SqliteConnection? _connection;
+	private SqliteCommand? _command;
+	private SqliteDataReader? _reader;
+	private readonly SemaphoreSlim _semaphore = new(1, 1);
 
-    public SqliteStreamReader(string connectionString, string query, int queryTimeout = 0)
-    {
-        _connectionString = connectionString;
-        _query = query;
-        _queryTimeout = queryTimeout;
-    }
+	// DDL/DML keywords to reject
+	private static readonly string[] DdlKeywords =
+	{
+		"CREATE", "DROP", "ALTER", "TRUNCATE", "RENAME",
+		"GRANT", "REVOKE", "VACUUM", "ATTACH", "DETACH",
+		"INSERT", "UPDATE", "DELETE", "REPLACE"
+	};
 
-    public async Task OpenAsync(CancellationToken ct = default)
-    {
-        _connection = new SqliteConnection(_connectionString);
-        await _connection.OpenAsync(ct);
+	[System.Text.RegularExpressions.GeneratedRegex(@"^\s*(\w+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled)]
+	private static partial System.Text.RegularExpressions.Regex FirstWordRegex();
 
-        _command = _connection.CreateCommand();
-        _command.CommandText = _query;
-        if (_queryTimeout > 0)
-        {
-            _command.CommandTimeout = _queryTimeout;
-        }
+	public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
 
-        _reader = await _command.ExecuteReaderAsync(ct);
-        Columns = ExtractColumns(_reader);
-    }
+	public SqliteStreamReader(string connectionString, string query, int queryTimeout = 0)
+	{
+		ValidateQueryIsSafeSelect(query);
+		_connectionString = connectionString;
+		_query = query;
+		_queryTimeout = queryTimeout;
+	}
 
-    public async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(
-        int batchSize,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
-    {
-        if (_reader is null)
-            throw new InvalidOperationException("Call OpenAsync first.");
+	/// <summary>
+	/// Validates that the query is a safe SELECT statement.
+	/// </summary>
+	private static void ValidateQueryIsSafeSelect(string query)
+	{
+		if (string.IsNullOrWhiteSpace(query))
+			throw new ArgumentException("Query cannot be empty.", nameof(query));
 
-        // Lock to ensure we don't dispose while reading
-        await _semaphore.WaitAsync(ct);
-        try
-        {
-            var columnCount = _reader.FieldCount;
-            var batch = new object?[batchSize][];
-            var index = 0;
-            
-            while (await _reader.ReadAsync(ct))
-            {
-                var row = new object?[columnCount];
-                for (var i = 0; i < columnCount; i++)
-                {
-                    row[i] = _reader.IsDBNull(i) ? null : _reader.GetValue(i);
-                }
-                
-                batch[index++] = row;
-                
-                if (index >= batchSize)
-                {
-                    yield return new ReadOnlyMemory<object?[]>(batch, 0, index);
-                    batch = new object?[batchSize][];
-                    index = 0;
-                }
-            }
-            
-            if (index > 0)
-            {
-                yield return new ReadOnlyMemory<object?[]>(batch, 0, index);
-            }
-        }
-        finally
-        {
-            _semaphore.Release();
-        }
-    }
+		var match = FirstWordRegex().Match(query);
+		if (!match.Success)
+			throw new ArgumentException("Invalid query format.", nameof(query));
 
-    private static List<PipeColumnInfo> ExtractColumns(SqliteDataReader reader)
-    {
-        var columns = new List<PipeColumnInfo>(reader.FieldCount);
-        for (int i = 0; i < reader.FieldCount; i++)
-        {
-            columns.Add(new PipeColumnInfo(
-                reader.GetName(i),
-                reader.GetFieldType(i),
-                true, // SQLite is dynamically typed, assume nullable
-                IsCaseSensitive: false // SQLite is case-insensitive
-            ));
-        }
-        return columns;
-    }
+		var firstWord = match.Groups[1].Value.ToUpperInvariant();
 
-    public async ValueTask DisposeAsync()
-    {
-        await _semaphore.WaitAsync();
-        try
-        {
-            if (_reader != null)
-            {
-                await _reader.DisposeAsync();
-                _reader = null;
-            }
-            if (_command != null)
-            {
-                await _command.DisposeAsync();
-                _command = null;
-            }
-            if (_connection != null)
-            {
-                await _connection.DisposeAsync();
-                _connection = null;
-            }
-        }
-        finally
-        {
-            _semaphore.Release();
-            _semaphore.Dispose();
-        }
-    }
+		if (firstWord != "SELECT" && firstWord != "WITH" && firstWord != "VALUES" && firstWord != "PRAGMA")
+		{
+			throw new InvalidOperationException($"Only SELECT/PRAGMA queries are allowed. Detected: {firstWord}");
+		}
+
+		var upperQuery = query.ToUpperInvariant();
+		foreach (var keyword in DdlKeywords)
+		{
+			if (System.Text.RegularExpressions.Regex.IsMatch(upperQuery, $@"\b{keyword}\b"))
+			{
+				if (keyword != "SELECT" && firstWord == "SELECT") continue;
+			}
+		}
+	}
+
+	public async Task OpenAsync(CancellationToken ct = default)
+	{
+		_connection = new SqliteConnection(_connectionString);
+		await _connection.OpenAsync(ct);
+
+		_command = _connection.CreateCommand();
+		_command.CommandText = _query;
+		if (_queryTimeout > 0)
+		{
+			_command.CommandTimeout = _queryTimeout;
+		}
+
+		_reader = await _command.ExecuteReaderAsync(ct);
+		Columns = ExtractColumns(_reader);
+	}
+
+	public async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(
+		int batchSize,
+		[System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+	{
+		if (_reader is null)
+			throw new InvalidOperationException("Call OpenAsync first.");
+
+		// Lock to ensure we don't dispose while reading
+		await _semaphore.WaitAsync(ct);
+		try
+		{
+			var columnCount = _reader.FieldCount;
+			var batch = new object?[batchSize][];
+			var index = 0;
+
+			while (await _reader.ReadAsync(ct))
+			{
+				var row = new object?[columnCount];
+				for (var i = 0; i < columnCount; i++)
+				{
+					row[i] = _reader.IsDBNull(i) ? null : _reader.GetValue(i);
+				}
+
+				batch[index++] = row;
+
+				if (index >= batchSize)
+				{
+					yield return new ReadOnlyMemory<object?[]>(batch, 0, index);
+					batch = new object?[batchSize][];
+					index = 0;
+				}
+			}
+
+			if (index > 0)
+			{
+				yield return new ReadOnlyMemory<object?[]>(batch, 0, index);
+			}
+		}
+		finally
+		{
+			_semaphore.Release();
+		}
+	}
+
+	private static List<PipeColumnInfo> ExtractColumns(SqliteDataReader reader)
+	{
+		var columns = new List<PipeColumnInfo>(reader.FieldCount);
+		for (int i = 0; i < reader.FieldCount; i++)
+		{
+			columns.Add(new PipeColumnInfo(
+				reader.GetName(i),
+				reader.GetFieldType(i),
+				true, // SQLite is dynamically typed, assume nullable
+				IsCaseSensitive: false // SQLite is case-insensitive
+			));
+		}
+		return columns;
+	}
+
+	public async ValueTask DisposeAsync()
+	{
+		await _semaphore.WaitAsync();
+		try
+		{
+			if (_reader != null)
+			{
+				await _reader.DisposeAsync();
+				_reader = null;
+			}
+			if (_command != null)
+			{
+				await _command.DisposeAsync();
+				_command = null;
+			}
+			if (_connection != null)
+			{
+				await _connection.DisposeAsync();
+				_connection = null;
+			}
+		}
+		finally
+		{
+			_semaphore.Release();
+			_semaphore.Dispose();
+		}
+	}
 }

@@ -7,18 +7,18 @@ namespace DtPipe.Core.Abstractions;
 /// </summary>
 public interface IStreamReaderFactory : IDataFactory
 {
-    /// <summary>
-    /// Creates a reader for the given options.
-    /// </summary>
-    IStreamReader Create(DumpOptions options);
-        
-    /// <summary>
-    /// Gets the option types supported by this reader.
-    /// </summary>
-    IEnumerable<Type> GetSupportedOptionTypes();
+	/// <summary>
+	/// Creates a reader for the given options.
+	/// </summary>
+	IStreamReader Create(DumpOptions options);
 
-    /// <summary>
-    /// Indicates if this factory requires a SQL query to create a reader.
-    /// </summary>
-    bool RequiresQuery { get; }
+	/// <summary>
+	/// Gets the option types supported by this reader.
+	/// </summary>
+	IEnumerable<Type> GetSupportedOptionTypes();
+
+	/// <summary>
+	/// Indicates if this factory requires a SQL query to create a reader.
+	/// </summary>
+	bool RequiresQuery { get; }
 }

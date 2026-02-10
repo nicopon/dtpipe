@@ -10,13 +10,13 @@ namespace DtPipe.Core.Models;
 /// <param name="Errors">Validation errors (blocking)</param>
 /// <param name="Warnings">Validation warnings (non-blocking, e.g. mismatches)</param>
 public record KeyValidationResult(
-    bool IsRequired,
-    IReadOnlyList<string>? RequestedKeys,
-    IReadOnlyList<string>? ResolvedKeys,
-    IReadOnlyList<string>? TargetPrimaryKeys,
-    IReadOnlyList<string>? Errors,
-    IReadOnlyList<string>? Warnings = null
+	bool IsRequired,
+	IReadOnlyList<string>? RequestedKeys,
+	IReadOnlyList<string>? ResolvedKeys,
+	IReadOnlyList<string>? TargetPrimaryKeys,
+	IReadOnlyList<string>? Errors,
+	IReadOnlyList<string>? Warnings = null
 )
 {
-    public bool IsValid => (Errors == null || Errors.Count == 0);
+	public bool IsValid => (Errors == null || Errors.Count == 0);
 }
