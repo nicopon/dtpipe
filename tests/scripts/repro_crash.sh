@@ -15,7 +15,9 @@ if [ ! -f "$DTPIPE" ]; then
 fi
 
 echo "Generating data (CSV)..."
-"$DTPIPE" --input "sample:100;Id=int;Name=string;Amount=double;Secret=string" \
+"$DTPIPE" --input "sample:100" \
+            --fake "Id:random.number" --fake "Name:name.fullName" --fake "Amount:finance.amount" --fake "Secret:internet.password" \
+            --drop "SampleIndex" \
             --output "$OUTPUT_DIR/ref.csv"
 
 echo "Running failing step (Iterative - CSV)..."

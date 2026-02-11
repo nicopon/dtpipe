@@ -45,7 +45,9 @@ echo "----------------------------------------"
 echo "Step 0: Generate Reference Source CSV"
 echo "----------------------------------------"
 # Sample -> CSV (Immutable Source)
-$DTPIPE --input "sample:100;Id=int;Amount=double;Created=date" \
+$DTPIPE --input "sample:100" \
+           --fake "Id:random.number" --fake "Amount:finance.amount" --fake "Created:date.past" \
+           --drop "SampleIndex" \
            --query "SELECT * FROM dummy" \
            --output "$ARTIFACTS_DIR/reference.csv"
 

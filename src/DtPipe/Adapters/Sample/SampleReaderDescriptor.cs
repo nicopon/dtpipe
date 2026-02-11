@@ -35,43 +35,9 @@ public class SampleReaderDescriptor : IProviderDescriptor<IStreamReader>
 			sampleOptions.RowCount = count;
 		}
 
-		// Always prepend sampleindex
-		sampleOptions.ColumnDefinitions.Insert(0, new SampleColumnDef { Name = "sampleindex", Type = typeof(long) });
-
-		// Parse custom columns if any
-		if (parts.Length > 1)
-		{
-			for (int i = 1; i < parts.Length; i++)
-			{
-				var kvp = parts[i].Split('=');
-				if (kvp.Length == 2)
-				{
-					string name = kvp[0].Trim();
-					string typeStr = kvp[1].Trim().ToLowerInvariant();
-					Type type = typeStr switch
-					{
-						"int" => typeof(int),
-						"long" => typeof(long),
-						"bool" => typeof(bool),
-						"double" => typeof(double),
-						"date" => typeof(DateTime),
-						"guid" => typeof(Guid),
-						_ => typeof(string)
-					};
-					sampleOptions.ColumnDefinitions.Add(new SampleColumnDef { Name = name, Type = type });
-				}
-			}
-		}
-
-		// Default if no columns specified (besides sampleindex)
-		if (sampleOptions.ColumnDefinitions.Count == 1)
-		{
-			sampleOptions.ColumnDefinitions.Add(new SampleColumnDef { Name = "dummy", Type = typeof(string) });
-		}
-
 		return new SampleReader(
 			connectionString,
 			context.Query ?? "",
-			(SampleReaderOptions)options);
+			sampleOptions);
 	}
 }

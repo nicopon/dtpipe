@@ -187,7 +187,7 @@ Use `--script` for complex logic.
    --compute "Category:if (row.Age < 18) return 'Minor'; else return 'Adult';"
 
 ### 4. Generating Test Data
-Use the `sample:<count>` provider to generate rows on-the-fly, typically combined with `--fake`.
+Use the `sample:<count>` provider to generate rows on-the-fly. By default, it only generates a `SampleIndex` column (useful for seeding). Combine it with `--fake` for rich datasets.
 
 ```bash
 # Generate 1M rows of fake users
@@ -195,8 +195,10 @@ Use the `sample:<count>` provider to generate rows on-the-fly, typically combine
   --fake "Id:random.number" \
   --fake "Name:name.fullName" \
   --fake "Email:internet.email" \
+  --drop "SampleIndex" \
   -o users.csv
 ```
+> **Tip:** Use `--drop "SampleIndex"` if you don't want the sequence index in your final output.
 ```
 
 ### Filtering Data

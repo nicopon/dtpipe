@@ -24,7 +24,9 @@ echo "Test 1: Sampling 10% of 100 rows (Sample Provider)"
 OUTPUT_FILE="$OUTPUT_DIR/sampling_test.csv"
 
 # Using run_via_yaml to ensure sampling works via YAML configuration as well
-run_via_yaml --input "sample:100;Id=int;Name=string" \
+run_via_yaml --input "sample:100" \
+             --fake "Id:random.number" --fake "Name:name.fullName" \
+             --drop "SampleIndex" \
              --query "SELECT * FROM data" \
              --output "csv:$OUTPUT_FILE" \
              --limit 100 \
