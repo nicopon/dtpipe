@@ -282,7 +282,7 @@ public sealed class DuckDbDataWriter : BaseSqlDataWriter
 		object convertedVal;
 		try
 		{
-			convertedVal = ConvertValue(val, underlying);
+			convertedVal = ValueConverter.ConvertValue(val, underlying);
 		}
 		catch
 		{
@@ -305,22 +305,6 @@ public sealed class DuckDbDataWriter : BaseSqlDataWriter
 		else row.AppendValue(convertedVal.ToString() ?? "");
 	}
 
-	private object ConvertValue(object val, Type targetType)
-	{
-		if (val == null || val == DBNull.Value) return null!;
-		if (targetType.IsInstanceOfType(val)) return val;
-
-		if (val is string s)
-		{
-			if (targetType == typeof(Guid)) return Guid.Parse(s);
-			if (targetType == typeof(DateTime)) return DateTime.Parse(s);
-			if (targetType == typeof(DateTimeOffset)) return DateTimeOffset.Parse(s);
-			if (targetType == typeof(bool)) return bool.Parse(s);
-			return Convert.ChangeType(s, targetType, System.Globalization.CultureInfo.InvariantCulture);
-		}
-
-		return Convert.ChangeType(val, targetType, System.Globalization.CultureInfo.InvariantCulture);
-	}
 
 	public override async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
 	{

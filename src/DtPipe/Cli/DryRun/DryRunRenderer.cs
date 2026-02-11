@@ -1,43 +1,28 @@
 using System.Text;
 using DtPipe.Core.Models;
 using DtPipe.Core.Validation;
-using DtPipe.DryRun; // For SampleTrace, StageTrace
+using DtPipe.DryRun;
 using Spectre.Console;
 
 namespace DtPipe.Cli.DryRun;
 
-/// <summary>
-/// Builds Spectre.Console tables for dry-run trace visualization.
-/// </summary>
 public class DryRunRenderer
 {
 	#region Style Constants
+	private const string ColorOutput = "blue";
+	private const string ColorNewValue = "green";
+	private const string ColorModifiedValue = "yellow";
+	private const string ColorStep = "yellow";
+	private const string ColorNull = "grey";
+	private const string ColorDim = "dim";
+	private const string ColorWarning = "yellow";
 
-	// Colors for trace table
-	private const string ColorOutput = "blue";           // Output column (header + values)
-	private const string ColorNewValue = "green";        // New value introduced in pipeline
-	private const string ColorModifiedValue = "yellow";  // Modified value in pipeline
-	private const string ColorStep = "yellow";           // Pipeline step headers
-	private const string ColorNull = "grey";             // Null values
-	private const string ColorDim = "dim";               // Secondary/muted text
-	private const string ColorWarning = "yellow";        // Warning indicators
-
-	// Output column header text
 	private const string OutputHeaderNormal = "Output";
 	private const string OutputWarningEmoji = "⚠️";
 	private const string OutputWarningSuffix = OutputWarningEmoji + " unverified";
 	private const string OutputHeaderWithWarningText = OutputHeaderNormal + " (" + OutputWarningSuffix + ")";
-
 	#endregion
 
-	/// <summary>
-	/// Calculates maximum column widths across all samples for stable layout.
-	/// Returns array of widths: [ColumnName, Input, Step1, Step2, ..., Output]
-	/// </summary>
-	/// <param name="samples">Sample traces</param>
-	/// <param name="stepNames">Pipeline step names</param>
-	/// <param name="hasSchemaWarning">If set, Output header will be longer to include warning</param>
-	/// <param name="targetSchema">Target schema info (for estimating Output width)</param>
 	public int[] CalculateMaxWidths(
 		List<SampleTrace> samples,
 		List<string> stepNames,
@@ -46,28 +31,18 @@ public class DryRunRenderer
 	{
 		if (samples.Count == 0) return Array.Empty<int>();
 
-		// Column count: ColumnName + Input + Steps + Output
-		// Input is Stage 0. Steps are Stages 1 to N.
-		// Stage 0 -> Input
-		// Stage 1 -> Step 1
-		// ...
-		// Last Stage -> Output (this is a duplicate display column for clarity)
-
 		int columnCount = 2 + stepNames.Count + 1;
 		var maxWidths = new int[columnCount];
 
-		// Initialize with header widths
 		maxWidths[0] = "Column".Length;
 		maxWidths[1] = "Input".Length;
 		for (int s = 0; s < stepNames.Count; s++)
 		{
-			maxWidths[2 + s] = Math.Max(maxWidths[2 + s], stepNames[s].Length + 10); // "(Step N)"
+			maxWidths[2 + s] = Math.Max(maxWidths[2 + s], stepNames[s].Length + 10);
 		}
-		// Output header length depends on warning state
 		var outputHeaderText = hasSchemaWarning ? OutputHeaderWithWarningText : OutputHeaderNormal;
 		maxWidths[columnCount - 1] = outputHeaderText.Length;
 
-		// Scan all samples for max content widths
 		foreach (var trace in samples)
 		{
 			var finalStage = trace.Stages.Last();
@@ -75,86 +50,42 @@ public class DryRunRenderer
 
 			foreach (var col in finalSchema)
 			{
-				// Column name width
-				var colNameLen = col.Name.Length;
-				maxWidths[0] = Math.Max(maxWidths[0], colNameLen);
+				maxWidths[0] = Math.Max(maxWidths[0], col.Name.Length);
 
-				// Values for input + each step
 				for (int stageIdx = 0; stageIdx < trace.Stages.Count; stageIdx++)
 				{
 					var stage = trace.Stages[stageIdx];
 					var schema = stage.Schema;
 					var values = stage.Values;
 
-					var idx = -1;
-					for (int k = 0; k < schema.Count; k++)
-					{
-						if (schema[k].Name == col.Name) { idx = k; break; }
-					}
-
-					// Input is column 1. Step 1 is column 2 (stageIdx 1).
-					// So stageIdx maps directly to maxWidths[1 + stageIdx].
-
-					// maxWidths[1] = Input.
+					int idx = -1;
+					for (int k = 0; k < schema.Count; k++) if (schema[k].Name == col.Name) { idx = k; break; }
 
 					if (values != null && idx >= 0 && idx < values.Length)
 					{
 						var v = values[idx];
-						var rawVal = v?.ToString() ?? "null";
-						var typeName = v?.GetType().Name ?? "null";
-						// Approximate display length: value + " (Type)"
-						var displayLen = rawVal.Length + typeName.Length + 3;
+						var displayLen = (v?.ToString() ?? "null").Length + (v?.GetType().Name ?? "null").Length + 3;
 						maxWidths[1 + stageIdx] = Math.Max(maxWidths[1 + stageIdx], displayLen);
 					}
 				}
 
-				// Output column (same as last step but in separate column)
-				// Maps to maxWidths[columnCount - 1]
-				var finalVals = finalStage.Values;
-				var finalIdx = -1;
-				for (int k = 0; k < finalSchema.Count; k++)
+				int finalIdx = -1;
+				for (int k = 0; k < finalSchema.Count; k++) if (finalSchema[k].Name == col.Name) { finalIdx = k; break; }
+
+				if (finalIdx >= 0 && finalStage.Values != null)
 				{
-					if (finalSchema[k].Name == col.Name) { finalIdx = k; break; }
-				}
-
-				if (finalVals != null && finalIdx >= 0 && finalIdx < finalVals.Length)
-				{
-					var typeName = finalSchema[finalIdx].ClrType.Name;
-
-					// Default length estimate for simple type display
-					var displayLen = typeName.Length + 5;
-
-					// If we have target schema, estimating length is harder but usually longer
-					if (targetSchema != null)
-					{
-						// "{ClrType} -> {NativeType} [PK,UQ]"
-						displayLen += 30;
-					}
-
+					var displayLen = finalSchema[finalIdx].ClrType.Name.Length + 5;
+					if (targetSchema != null) displayLen += 30;
 					maxWidths[columnCount - 1] = Math.Max(maxWidths[columnCount - 1], displayLen);
 				}
 			}
 		}
 
-		// Add padding and cap at reasonable max
-		for (int i = 0; i < maxWidths.Length; i++)
-		{
-			maxWidths[i] = Math.Min(maxWidths[i] + 2, 50); // Cap at 50 chars
-		}
+		for (int i = 0; i < maxWidths.Length; i++) maxWidths[i] = Math.Min(maxWidths[i] + 2, 50);
 
 		return maxWidths;
 	}
 
-	/// <summary>
-	/// Builds a trace table for a single sample showing values at each pipeline stage.
-	/// </summary>
-	/// <param name="sampleIndex">Current sample index (0-based)</param>
-	/// <param name="totalSamples">Total number of samples</param>
-	/// <param name="trace">Sample trace data</param>
-	/// <param name="stepNames">Pipeline step names</param>
-	/// <param name="columnWidths">Fixed column widths for stable layout</param>
-	/// <param name="schemaWarning">Warning message if schema inspection failed (changes Output column header)</param>
-	/// <param name="targetSchema">Target schema info (for validation)</param>
 	public Table BuildTraceTable(
 		int sampleIndex,
 		int totalSamples,
@@ -165,112 +96,80 @@ public class DryRunRenderer
 		TargetSchemaInfo? targetSchema = null)
 	{
 		var table = new Table().Border(TableBorder.Rounded);
-
-		// Header with sample index
-		var header = totalSamples > 1
+		table.Title = new TableTitle(totalSamples > 1
 			? $"[green]Pipeline Trace Analysis[/] — Record {sampleIndex + 1}/{totalSamples}"
-			: "[green]Pipeline Trace Analysis[/]";
-		table.Title = new TableTitle(header);
+			: "[green]Pipeline Trace Analysis[/]");
 
-		// Columns: Column Name | Input | Step1 | Step2 | ... | Output
 		int colIdx = 0;
 
 		var colNameColumn = new TableColumn("Column");
-		if (columnWidths != null && colIdx < columnWidths.Length)
-			colNameColumn.Width = columnWidths[colIdx];
+		if (columnWidths != null) colNameColumn.Width = columnWidths[colIdx++];
 		table.AddColumn(colNameColumn);
-		colIdx++;
 
 		var inputColumn = new TableColumn("Input");
-		if (columnWidths != null && colIdx < columnWidths.Length)
-			inputColumn.Width = columnWidths[colIdx];
+		if (columnWidths != null) inputColumn.Width = columnWidths[colIdx++];
 		table.AddColumn(inputColumn);
-		colIdx++;
 
 		for (int s = 0; s < stepNames.Count; s++)
 		{
 			var stepColumn = new TableColumn($"[{ColorStep}]{stepNames[s]} (Step {s + 1})[/]");
-			if (columnWidths != null && colIdx < columnWidths.Length)
-				stepColumn.Width = columnWidths[colIdx];
+			if (columnWidths != null) stepColumn.Width = columnWidths[colIdx++];
 			table.AddColumn(stepColumn);
-			colIdx++;
 		}
 
-		// Output column with optional warning indicator (Variante C)
 		var outputHeader = string.IsNullOrEmpty(schemaWarning)
 			? $"[{ColorOutput}]{OutputHeaderNormal}[/]"
 			: $"[{ColorOutput}]{OutputHeaderNormal}[/] [{ColorDim}]({OutputWarningSuffix})[/]";
 		var outputColumn = new TableColumn(outputHeader);
-		if (columnWidths != null && colIdx < columnWidths.Length)
-			outputColumn.Width = columnWidths[colIdx];
+		if (columnWidths != null) outputColumn.Width = columnWidths[colIdx];
 		table.AddColumn(outputColumn);
 
-		// Final schema is the last in trace
 		var finalStage = trace.Stages.Last();
 		var finalSchema = finalStage.Schema;
 
 		foreach (var col in finalSchema)
 		{
-			var rowMarkup = new List<string>();
-
-			// Column Name
-			rowMarkup.Add(Markup.Escape(col.Name));
-
+			var rowMarkup = new List<string> { Markup.Escape(col.Name) };
 			string lastValue = "";
 
-			// Values for input + each step
 			for (int stageIdx = 0; stageIdx < trace.Stages.Count; stageIdx++)
 			{
 				var stage = trace.Stages[stageIdx];
 				var schema = stage.Schema;
-				// Values can be null if row was filtered out at this stage
 				var values = stage.Values;
 
-				// Find column index by name in this step's schema
-				var idx = -1;
-				for (int k = 0; k < schema.Count; k++)
-				{
-					if (schema[k].Name == col.Name)
-					{
-						idx = k;
-						break;
-					}
-				}
+				int idx = -1;
+				for (int k = 0; k < schema.Count; k++) if (schema[k].Name == col.Name) { idx = k; break; }
 
 				string displayVal;
 				string rawVal;
 
 				if (values == null || idx == -1 || idx >= values.Length)
 				{
-					displayVal = values == null ? "[dim]Filtered[/]" : ""; // Indicate filtered if null
+					displayVal = values == null ? "[dim]Filtered[/]" : "";
 					rawVal = "N/A_NOT_EXIST";
 				}
 				else
 				{
 					var v = values[idx];
 					rawVal = v?.ToString() ?? "";
-					var typeName = v?.GetType().Name ?? "null";
-					var typeSuffix = $" [{ColorDim}]({Markup.Escape(typeName)})[/]";
+					var typeSuffix = $" [{ColorDim}]({Markup.Escape(v?.GetType().Name ?? "null")})[/]";
 					displayVal = v is null ? $"[{ColorNull}]null[/]" : Markup.Escape(rawVal) + typeSuffix;
 				}
 
-				// Highlight Logic: Green if new, Yellow if modified
-				// Stage 0 is Input. Stage > 0 is transformed.
 				if (stageIdx > 0 && rawVal != "N/A_NOT_EXIST")
 				{
-					bool isNew = (idx != -1) && (lastValue == "N/A_NOT_EXIST");
-					bool isMod = (idx != -1) && (!isNew) && (rawVal != lastValue);
+					bool isNew = idx != -1 && lastValue == "N/A_NOT_EXIST";
+					bool isMod = idx != -1 && !isNew && rawVal != lastValue;
 
 					if (isNew) displayVal = $"[{ColorNewValue}]{displayVal}[/]";
 					else if (isMod) displayVal = $"[{ColorModifiedValue}]{displayVal}[/]";
 
-					if (idx != -1) lastValue = rawVal;
-					else lastValue = "N/A_NOT_EXIST";
+					lastValue = idx != -1 ? rawVal : "N/A_NOT_EXIST";
 				}
 				else
 				{
-					if (idx != -1) lastValue = rawVal;
-					else lastValue = "N/A_NOT_EXIST";
+					lastValue = idx != -1 ? rawVal : "N/A_NOT_EXIST";
 				}
 
 				rowMarkup.Add(displayVal);
@@ -278,20 +177,12 @@ public class DryRunRenderer
 
 			// Final Output Column
 			{
-				var finalVals = finalStage.Values;
-				var finalIdx = -1;
-				for (int k = 0; k < finalSchema.Count; k++)
-				{
-					if (finalSchema[k].Name == col.Name)
-					{
-						finalIdx = k;
-						break;
-					}
-				}
+				int finalIdx = -1;
+				for (int k = 0; k < finalSchema.Count; k++) if (finalSchema[k].Name == col.Name) { finalIdx = k; break; }
 
-				if (finalVals != null && finalIdx >= 0 && finalIdx < finalVals.Length)
+				if (finalIdx >= 0 && finalStage.Values != null)
 				{
-					var v = finalVals[finalIdx];
+					var v = finalStage.Values[finalIdx];
 					var colName = finalSchema[finalIdx].Name;
 					var typeName = finalSchema[finalIdx].ClrType.Name;
 
@@ -303,53 +194,30 @@ public class DryRunRenderer
 						var targetCol = targetSchema.Columns.FirstOrDefault(c => c.Name.Equals(colName, StringComparison.OrdinalIgnoreCase));
 						if (targetCol != null)
 						{
-							// 1. Validation via Core logic
 							var validation = SchemaValidator.Validate(v, targetCol);
-
-							// 2. Build Display String
 							sb.Append(" -> ");
 
-							// Native Type
-							var nativeTypeMarkup = $"[blue]{Markup.Escape(targetCol.NativeType)}[/]";
-							if (validation.HasAnyViolation)
-							{
-								nativeTypeMarkup = $"[red]{Markup.Escape(targetCol.NativeType)}[/]";
-							}
+							var nativeTypeMarkup = validation.HasAnyViolation
+								? $"[red]{Markup.Escape(targetCol.NativeType)}[/]"
+								: $"[blue]{Markup.Escape(targetCol.NativeType)}[/]";
 							sb.Append(nativeTypeMarkup);
 
-							// Constraints
 							var constraints = new List<string>();
 							if (targetCol.IsPrimaryKey) constraints.Add("PK");
 							if (targetCol.IsUnique) constraints.Add("UQ");
 							if (!targetCol.IsNullable && !targetCol.IsPrimaryKey) constraints.Add("NN");
 
-							if (constraints.Count > 0)
-							{
-								sb.Append($" [yellow][[{string.Join(",", constraints)}]][/]");
-							}
+							if (constraints.Count > 0) sb.Append($" [yellow][[{string.Join(",", constraints)}]][/]");
 
-							// Dynamic Validation Markers
-							if (validation.IsNullViolation)
-							{
-								sb.Append(" [red bold]❌ NULL VIOLATION[/]");
-							}
-
-							if (validation.IsLengthViolation)
-							{
-								sb.Append($" [red bold]❌ LEN {validation.ActualLength} > {targetCol.MaxLength}[/]");
-							}
-
-							if (validation.IsPrecisionViolation)
-							{
-								sb.Append($" [red bold]❌ OVERFLOW {validation.ActualIntegerDigits} > {validation.MaxIntegerDigits} digits[/]");
-							}
+							if (validation.IsNullViolation) sb.Append(" [red bold]❌ NULL VIOLATION[/]");
+							if (validation.IsLengthViolation) sb.Append($" [red bold]❌ LEN {validation.ActualLength} > {targetCol.MaxLength}[/]");
+							if (validation.IsPrecisionViolation) sb.Append($" [red bold]❌ OVERFLOW {validation.ActualIntegerDigits} > {validation.MaxIntegerDigits} digits[/]");
 						}
 						else
 						{
 							sb.Append(" -> [red]Missing[/]");
 						}
 					}
-
 					rowMarkup.Add(sb.ToString());
 				}
 				else
@@ -364,20 +232,14 @@ public class DryRunRenderer
 		return table;
 	}
 
-	/// <summary>
-	/// Renders the schema compatibility report.
-	/// </summary>
 	public void RenderCompatibilityReport(SchemaCompatibilityReport report, IAnsiConsole console)
 	{
 		var table = new Table().Border(TableBorder.Rounded);
 		table.Title = new TableTitle("[blue]🔍 Target Schema Compatibility Analysis[/]");
 
-		// Header info
-		var headerPanel = BuildHeaderPanel(report);
-		console.Write(headerPanel);
+		console.Write(BuildHeaderPanel(report));
 		console.WriteLine();
 
-		// Column compatibility table
 		table.AddColumn(new TableColumn("Column").Width(20));
 		table.AddColumn(new TableColumn("Source Type").Width(15));
 		table.AddColumn(new TableColumn("Target Type").Width(20));
@@ -385,136 +247,81 @@ public class DryRunRenderer
 
 		foreach (var col in report.Columns)
 		{
-			var sourceType = col.SourceColumn?.ClrType.Name ?? "—";
-			var targetType = BuildTargetTypeDisplay(col.TargetColumn);
-			var statusDisplay = BuildStatusDisplay(col.Status, col.Message);
-
 			table.AddRow(
 				Markup.Escape(col.ColumnName),
-				Markup.Escape(sourceType),
-				targetType,
-				statusDisplay
+				Markup.Escape(col.SourceColumn?.ClrType.Name ?? "—"),
+				BuildTargetTypeDisplay(col.TargetColumn),
+				BuildStatusDisplay(col.Status, col.Message)
 			);
 		}
 
 		console.Write(table);
 
-		// Warnings and Errors
 		if (report.Warnings.Count > 0)
 		{
 			console.WriteLine();
 			console.MarkupLine("[yellow]⚠️ Warnings:[/]");
-			foreach (var warning in report.Warnings)
-			{
-				console.MarkupLine($"  [yellow]• {Markup.Escape(warning)}[/]");
-			}
+			foreach (var warning in report.Warnings) console.MarkupLine($"  [yellow]• {Markup.Escape(warning)}[/]");
 		}
 
 		if (report.Errors.Count > 0)
 		{
 			console.WriteLine();
 			console.MarkupLine("[red]❌ Errors:[/]");
-			foreach (var error in report.Errors)
-			{
-				console.MarkupLine($"  [red]• {Markup.Escape(error)}[/]");
-			}
+			foreach (var error in report.Errors) console.MarkupLine($"  [red]• {Markup.Escape(error)}[/]");
 		}
 
 		console.WriteLine();
 	}
 
-	/// <summary>
-	/// Renders the primary key validation panel.
-	/// </summary>
 	public void RenderKeyValidation(KeyValidationResult? validation, IAnsiConsole console)
 	{
-		if (validation == null)
-		{
-			// No validation available (e.g., non-database target or no IKeyValidator)
-			return;
-		}
+		if (validation == null) return;
 
 		var content = new StringBuilder();
-
-		// Scenario 1: Key not required
 		if (!validation.IsRequired)
 		{
 			content.AppendLine("[dim]Key requirement:[/] [grey]Not required for this strategy[/]");
 		}
 		else
 		{
-			// Requirement Status
-			string reqStatus;
-			if (!validation.IsValid)
-			{
-				reqStatus = "[red]❌ Required[/]";
-			}
-			else if (validation.Warnings != null && validation.Warnings.Count > 0)
-			{
-				reqStatus = "[yellow]⚠️ Required (with warnings)[/]";
-			}
-			else
-			{
-				reqStatus = "[green]✅ Required[/]";
-			}
-
+			string reqStatus = !validation.IsValid ? "[red]❌ Required[/]" : (validation.Warnings?.Count > 0 ? "[yellow]⚠️ Required (with warnings)[/]" : "[green]✅ Required[/]");
 			content.AppendLine($"[dim]Key requirement:[/] {reqStatus}");
 
-			// Requested Keys
-			if (validation.RequestedKeys != null && validation.RequestedKeys.Count > 0)
-			{
-				content.AppendLine($"[dim]Requested keys:[/] {string.Join(", ", validation.RequestedKeys)}");
-			}
-			else
-			{
-				content.AppendLine($"[dim]Requested keys:[/] [red italic]None specified (use --key option)[/]");
-			}
+			if (validation.RequestedKeys?.Count > 0) content.AppendLine($"[dim]Requested keys:[/] {string.Join(", ", validation.RequestedKeys)}");
+			else content.AppendLine($"[dim]Requested keys:[/] [red italic]None specified (use --key option)[/]");
 
-			// Resolved Keys
-			if (validation.ResolvedKeys != null && validation.ResolvedKeys.Count > 0)
+			if (validation.ResolvedKeys?.Count > 0)
 			{
 				var color = validation.IsValid ? "green" : "yellow";
 				content.AppendLine($"[dim]Resolved keys:[/] [{color}]{string.Join(", ", validation.ResolvedKeys)}[/]");
 			}
 
-			// Target Keys
-			if (validation.TargetPrimaryKeys != null && validation.TargetPrimaryKeys.Count > 0)
-			{
-				content.AppendLine($"[dim]Target PK columns:[/] [blue]{string.Join(", ", validation.TargetPrimaryKeys)}[/]");
-			}
+			if (validation.TargetPrimaryKeys?.Count > 0) content.AppendLine($"[dim]Target PK columns:[/] [blue]{string.Join(", ", validation.TargetPrimaryKeys)}[/]");
 		}
 
-		// Warnings
-		if (validation.Warnings != null && validation.Warnings.Count > 0)
+		if (validation.Warnings?.Count > 0)
 		{
 			content.AppendLine();
 			content.AppendLine("[yellow bold]Warnings:[/]");
-			foreach (var warning in validation.Warnings)
-			{
-				content.AppendLine($"[yellow]  • {Markup.Escape(warning)}[/]");
-			}
+			foreach (var warning in validation.Warnings) content.AppendLine($"[yellow]  • {Markup.Escape(warning)}[/]");
 		}
 
-		// Errors
-		if (validation.Errors != null && validation.Errors.Count > 0)
+		if (validation.Errors?.Count > 0)
 		{
 			content.AppendLine();
 			content.AppendLine("[red bold]Errors:[/]");
-			foreach (var error in validation.Errors)
-			{
-				content.AppendLine($"[red]  • {Markup.Escape(error)}[/]");
-			}
+			foreach (var error in validation.Errors) content.AppendLine($"[red]  • {Markup.Escape(error)}[/]");
 		}
 
 		var panelStyle = validation.IsValid ? (validation.Warnings?.Count > 0 ? "yellow" : "green") : "red";
 		var panelIcon = validation.IsValid ? (validation.Warnings?.Count > 0 ? "⚠️" : "🔑") : "❌";
-		var panelHeader = $"[{panelStyle}]{panelIcon} Primary Key Validation[/]";
 
 		var panel = new Panel(new Markup(content.ToString().TrimEnd()))
 		{
 			Border = BoxBorder.Rounded,
 			Padding = new Padding(1, 0),
-			Header = new PanelHeader(panelHeader)
+			Header = new PanelHeader($"[{panelStyle}]{panelIcon} Primary Key Validation[/]")
 		};
 
 		console.Write(panel);
@@ -532,28 +339,16 @@ public class DryRunRenderer
 		else
 		{
 			var estimateSuffix = report.TargetInfo.IsRowCountEstimate ? " [dim](estimate)[/]" : "";
-			var rowInfo = report.TargetInfo.RowCount.HasValue
-				? $"{report.TargetInfo.RowCount:N0} rows{estimateSuffix}"
-				: "unknown rows";
-			var sizeInfo = report.TargetInfo.SizeBytes.HasValue
-				? $" • {FormatSize(report.TargetInfo.SizeBytes.Value)}"
-				: "";
-
+			var rowInfo = report.TargetInfo.RowCount.HasValue ? $"{report.TargetInfo.RowCount:N0} rows{estimateSuffix}" : "unknown rows";
+			var sizeInfo = report.TargetInfo.SizeBytes.HasValue ? $" • {FormatSize(report.TargetInfo.SizeBytes.Value)}" : "";
 			var statusColor = report.TargetInfo.RowCount > 0 ? "yellow" : "green";
 			var statusIcon = report.TargetInfo.RowCount > 0 ? "⚠️" : "✅";
 
 			content.AppendLine($"[dim]Target:[/] [{statusColor}]{statusIcon} Table exists ({rowInfo}{sizeInfo})[/]");
-
-			if (report.TargetInfo.PrimaryKeyColumns?.Count > 0)
-			{
-				content.AppendLine($"[dim]Primary Key:[/] {string.Join(", ", report.TargetInfo.PrimaryKeyColumns)}");
-			}
+			if (report.TargetInfo.PrimaryKeyColumns?.Count > 0) content.AppendLine($"[dim]Primary Key:[/] {string.Join(", ", report.TargetInfo.PrimaryKeyColumns)}");
 		}
 
-		var overallStatus = report.IsCompatible
-			? "[green]✅ Schema is compatible[/]"
-			: "[red]❌ Schema has compatibility issues[/]";
-		content.AppendLine($"[dim]Status:[/] {overallStatus}");
+		content.AppendLine($"[dim]Status:[/] {(report.IsCompatible ? "[green]✅ Schema is compatible[/]" : "[red]❌ Schema has compatibility issues[/]")}");
 
 		return new Panel(new Markup(content.ToString().TrimEnd()))
 		{
@@ -566,16 +361,11 @@ public class DryRunRenderer
 	private static string BuildTargetTypeDisplay(TargetColumnInfo? targetColumn)
 	{
 		if (targetColumn is null) return "—";
-
 		var constraints = new List<string>();
 		if (targetColumn.IsPrimaryKey) constraints.Add("PK");
 		if (!targetColumn.IsNullable && !targetColumn.IsPrimaryKey) constraints.Add("NN");
 		if (targetColumn.IsUnique) constraints.Add("UQ");
-
-		var constraintSuffix = constraints.Count > 0
-			? $" [dim][[{string.Join(",", constraints)}]][/]"
-			: "";
-
+		var constraintSuffix = constraints.Count > 0 ? $" [dim][[{string.Join(",", constraints)}]][/]" : "";
 		return $"{Markup.Escape(targetColumn.NativeType)}{constraintSuffix}";
 	}
 
@@ -585,8 +375,8 @@ public class DryRunRenderer
 		{
 			CompatibilityStatus.Compatible => "[green]✅ Compatible[/]",
 			CompatibilityStatus.WillBeCreated => "[green]✅ Will be created[/]",
-			CompatibilityStatus.PossibleTruncation => $"[yellow]⚠️ Possible truncation[/]",
-			CompatibilityStatus.TypeMismatch => $"[red]❌ Type mismatch[/]",
+			CompatibilityStatus.PossibleTruncation => "[yellow]⚠️ Possible truncation[/]",
+			CompatibilityStatus.TypeMismatch => "[red]❌ Type mismatch[/]",
 			CompatibilityStatus.MissingInTarget => "[red]❌ Missing in target[/]",
 			CompatibilityStatus.ExtraInTarget => "[yellow]⚠️ Extra in target[/]",
 			CompatibilityStatus.ExtraInTargetNotNull => "[red]❌ Extra (NOT NULL)[/]",
@@ -603,48 +393,26 @@ public class DryRunRenderer
 		return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
 	}
 
-	/// <summary>
-	/// Renders the data constraint validation panel.
-	/// </summary>
 	public void RenderConstraintValidation(ConstraintValidationResult? validation, IAnsiConsole console)
 	{
-		if (validation == null) return;
-
-		// If everything is valid, we don't display a dedicated panel for brevity.
-
-		if (validation.IsValid)
-		{
-			// Optional: Concise success message?
-			// console.MarkupLine("[green]✅ Data Sample Constraints Verified (NOT NULL, UNIQUE)[/]");
-			return;
-		}
+		if (validation == null || validation.IsValid) return;
 
 		var content = new StringBuilder();
-
-		// Warnings (UNIQUE duplicates in sample)
-		if (validation.Warnings != null && validation.Warnings.Count > 0)
+		if (validation.Warnings?.Count > 0)
 		{
 			content.AppendLine("[yellow bold]⚠️ Constraint Warnings:[/]");
-			foreach (var warning in validation.Warnings)
-			{
-				content.AppendLine($"[yellow]  • {Markup.Escape(warning)}[/]");
-			}
+			foreach (var warning in validation.Warnings) content.AppendLine($"[yellow]  • {Markup.Escape(warning)}[/]");
 		}
 
-		// Errors (NOT NULL violations)
-		if (validation.Errors != null && validation.Errors.Count > 0)
+		if (validation.Errors?.Count > 0)
 		{
 			if (validation.Warnings?.Count > 0) content.AppendLine();
-
 			content.AppendLine("[red bold]❌ Data Violations:[/]");
-			foreach (var error in validation.Errors)
-			{
-				content.AppendLine($"[red]  • {Markup.Escape(error)}[/]");
-			}
+			foreach (var error in validation.Errors) content.AppendLine($"[red]  • {Markup.Escape(error)}[/]");
 		}
 
-		var panelStyle = (validation.Errors?.Count > 0) ? "red" : "yellow";
-		var panelHeader = (validation.Errors?.Count > 0) ? "[red]❌ Data Constraint Violations[/]" : "[yellow]⚠️ Data Constraint Warnings[/]";
+		var panelStyle = validation.Errors?.Count > 0 ? "red" : "yellow";
+		var panelHeader = validation.Errors?.Count > 0 ? "[red]❌ Data Constraint Violations[/]" : "[yellow]⚠️ Data Constraint Warnings[/]";
 
 		var panel = new Panel(new Markup(content.ToString().TrimEnd()))
 		{

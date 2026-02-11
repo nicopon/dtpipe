@@ -18,7 +18,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
     private OracleCommand? _insertCommand;
     private OracleParameter[]? _insertParameters;
 
-    // Map column names to actual DB types (e.g. "ID" -> OracleDbType.Raw)
+    // Maps column names to target DB types (e.g. "ID" -> OracleDbType.Raw)
     private Dictionary<string, OracleDbType>? _targetColumnTypes;
 
     private List<string> _keyColumns = new();
@@ -51,21 +51,21 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
     {
         _targetTableName = _options.Table;
 
-        // Column and table normalization logic
-        // Create a secure list of columns where names are normalized if not case-sensitive.
-        // This ensures consistence across Create Table, Insert, BulkCopy, etc.
+        // Create normalized list of columns to ensure consistency across DDL and DML
         var normalizedColumns = new List<PipeColumnInfo>(columns.Count);
         foreach (var col in columns)
         {
+            // Strip BOM and whitespace (common in CSV headers)
+            var cleanName = col.Name.Trim('\uFEFF', ' ', '\t', '\r', '\n');
+
             if (col.IsCaseSensitive)
             {
-                normalizedColumns.Add(col);
+                normalizedColumns.Add(col with { Name = cleanName });
             }
             else
             {
-                // Unquoted/Insensitive -> Normalize to Oracle default (UPPERCASE)
-                // e.g. "id" -> "ID"
-                normalizedColumns.Add(col with { Name = _dialect.Normalize(col.Name) });
+                // Normalize to Oracle default (UPPERCASE)
+                normalizedColumns.Add(col with { Name = _dialect.Normalize(cleanName) });
             }
         }
         _columns = normalizedColumns;
@@ -80,35 +80,29 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
 
         if (_options.Strategy == OracleWriteStrategy.Recreate)
         {
-            // STRATEGY: RECREATE
-
-            // 0. Introspect BEFORE Drop to preserve native types (Introspect-Before-Recreate)
+            // 0. Introspect existing table to preserve native types
             TargetSchemaInfo? existingSchema = null;
             try
             {
-                // Try to resolve the real table name first (handles synonyms, schema prefix, case sensitivity)
                 var resolved = await OracleSchemaInspector.ResolveTargetTableAsync(_connection, _options.Table, ct);
                 if (!string.IsNullOrEmpty(resolved.Table))
                 {
                     var safeSchema = OracleSchemaInspector.GetSmartQuotedIdentifier(resolved.Schema);
                     var safeTable = OracleSchemaInspector.GetSmartQuotedIdentifier(resolved.Table);
-                    _targetTableName = $"{safeSchema}.{safeTable}"; // Update to real qualified name for DROP/CREATE
+                    _targetTableName = $"{safeSchema}.{safeTable}";
 
-                    // Now inspect the schema
                     existingSchema = await InspectTargetAsync(ct);
                     if (existingSchema?.Exists == true)
                     {
                         if(_logger.IsEnabled(LogLevel.Information))
-                            _logger.LogInformation("Table {Table} exists. Preserved native schema for recreation.", _targetTableName);
+                            _logger.LogInformation("Table {Table} exists. Preserving native schema for recreation.", _targetTableName);
                     }
                 }
             }
             catch
             {
-                // Table likely doesn't exist or cannot be resolved.
-                // We will proceed with default creation from CLR types.
                 if(_logger.IsEnabled(LogLevel.Debug))
-                    _logger.LogDebug("Target table {Table} could not be resolved or inspected. Proceeding with fresh creation.", _options.Table);
+                    _logger.LogDebug("Target table {Table} could not be resolved. Proceeding with default creation.", _options.Table);
             }
 
             // 1. Drop existing table
@@ -148,20 +142,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
                 // Sync columns metadata from introspection to ensure future DML (INSERT/MERGE) matches exact case/quotes
                 if (existingSchema != null)
                 {
-                    var newCols = new List<PipeColumnInfo>(_columns!.Count);
-                    foreach (var col in _columns!)
-                    {
-                        var introspected = existingSchema.Columns.FirstOrDefault(c => c.Name.Equals(col.Name, StringComparison.OrdinalIgnoreCase));
-                        if (introspected != null)
-                        {
-                            newCols.Add(col with { Name = introspected.Name, IsCaseSensitive = introspected.IsCaseSensitive });
-                        }
-                        else
-                        {
-                            newCols.Add(col);
-                        }
-                    }
-                    _columns = newCols;
+                    SyncColumnsFromIntrospection(existingSchema);
                 }
             }
             catch (Exception ex)
@@ -171,23 +152,17 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
         }
         else
         {
-            // STRATEGY: INSERT, UPSERT, IGNORE, DELETE, TRUNCATE, APPEND
-            // The table MUST exist. We do NOT create it automatically to avoid implicit schema definition issues.
             try
             {
-                // Resolving real qualified name (handles synonyms and casing)
                 var resolved = await OracleSchemaInspector.ResolveTargetTableAsync(_connection, _options.Table, ct);
 
-                // Update target table name with the REAL object name (Schema.Table)
-                // Use "Smart Quoting" to respect user's preference (minimize quotes)
                 var safeSchema = OracleSchemaInspector.GetSmartQuotedIdentifier(resolved.Schema);
                 var safeTable = OracleSchemaInspector.GetSmartQuotedIdentifier(resolved.Table);
 
-                // Store globally for subsequent queries (Introspection, DML)
                 _targetTableName = $"{safeSchema}.{safeTable}";
 
                 if(_logger.IsEnabled(LogLevel.Information))
-                    _logger.LogInformation("Resolved table {Input} to {Resolved} (Schema: {Schema})", _options.Table, _targetTableName, resolved.Schema);
+                    _logger.LogInformation("Resolved table {Input} to {Resolved}", _options.Table, _targetTableName);
             }
             catch (OracleException ex) when (ex.Number == 6550 || ex.Message.Contains("ORA-06550"))
             {
@@ -199,12 +174,13 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
                  throw new InvalidOperationException($"Failed to resolve table {_options.Table}. Error: {ex.Message}", ex);
             }
 
-            // Introspect target schema to get actual column types (Fix for ORA-00932 BLOB/RAW mismatch)
+            // Introspect target types (Fix for ORA-00932 BLOB/RAW mismatch)
             try
             {
                 var schemaInfo = await InspectTargetAsync(ct);
                 if (schemaInfo != null)
                 {
+                    SyncColumnsFromIntrospection(schemaInfo);
                     _targetColumnTypes = new Dictionary<string, OracleDbType>(StringComparer.OrdinalIgnoreCase);
                     foreach(var col in schemaInfo.Columns)
                     {
@@ -259,9 +235,13 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
         {
              // 1. Resolve Keys
             var targetInfo = await InspectTargetAsync(ct);
-            if (targetInfo?.PrimaryKeyColumns != null)
+            if (targetInfo != null)
             {
-                _keyColumns.AddRange(targetInfo.PrimaryKeyColumns);
+                SyncColumnsFromIntrospection(targetInfo);
+                if (targetInfo.PrimaryKeyColumns != null)
+                {
+                    _keyColumns.AddRange(targetInfo.PrimaryKeyColumns);
+                }
             }
 
             if (_keyColumns.Count == 0 && !string.IsNullOrEmpty(_options.Key))
@@ -308,7 +288,8 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
                  _columns!,
                  _keyColumns,
                  _dialect,
-                 isUpsert);
+                 isUpsert,
+                 _options.DateTimeMapping);
 
              if(_logger.IsEnabled(LogLevel.Debug))
                  _logger.LogDebug("Generated MERGE SQL: {Sql}", mergeSql);
@@ -342,11 +323,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
             _bulkCopy = new OracleBulkCopy(_connection);
 
             // IMPORTANT: OracleBulkCopy requires SEPARATE properties for schema and table.
-            // Unlike SqlBulkCopy, it does NOT accept "SCHEMA.TABLE" format in DestinationTableName.
-            // We must split _targetTableName (e.g., "SYSTEM.PERFORMANCETEST") into:
-            //   - DestinationSchemaName = "SYSTEM"
-            //   - DestinationTableName = "PERFORMANCETEST"
-            // This allows cross-schema inserts (user != owner).
+            // It does NOT accept "SCHEMA.TABLE" in DestinationTableName.
 
             if (_targetTableName.Contains('.'))
             {
@@ -378,7 +355,8 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
                 _targetTableName,
                 _columns!,
                 _dialect,
-                useAppendHint);
+                useAppendHint,
+                _options.DateTimeMapping);
 
             if(_logger.IsEnabled(LogLevel.Debug))
                 _logger.LogDebug("Generated Insert SQL: {Sql}", insertSql);
@@ -453,7 +431,13 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
                     }
                     else
                     {
-                        colValues[rowIndex] = val;
+                        var converted = DtPipe.Core.Helpers.ValueConverter.ConvertValue(val, colType);
+                        if (rowIndex == 0 && _logger.IsEnabled(LogLevel.Debug))
+                        {
+                            _logger.LogDebug("Column {Col} (Type: {Type}) value: {Val} (Actual Type: {ActualType})",
+                                _columns[colIndex].Name, colType.Name, converted, converted?.GetType().Name);
+                        }
+                        colValues[rowIndex] = converted;
                     }
                 }
                 _insertParameters[colIndex].Value = colValues;
@@ -467,6 +451,14 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
             }
             catch (Exception ex)
             {
+                if (_logger.IsEnabled(LogLevel.Warning))
+                    _logger.LogWarning(ex, "Array Binding Insert failed. Starting in-depth analysis of the batch...");
+
+                var analysis = await BatchFailureAnalyzer.AnalyzeAsync(this, rows, _columns, ct);
+                if (!string.IsNullOrEmpty(analysis))
+                {
+                    throw new InvalidOperationException($"Array Binding Insert Failed with detailed analysis:\n{analysis}{Environment.NewLine}SQL: {_insertCommand.CommandText}", ex);
+                }
                 throw new InvalidOperationException($"Array Binding Insert Failed.{Environment.NewLine}SQL: {_insertCommand.CommandText}{Environment.NewLine}Error: {ex.Message}", ex);
             }
         }
@@ -527,7 +519,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
                     }
                     else
                     {
-                        colValues[rowIndex] = val;
+                        colValues[rowIndex] = DtPipe.Core.Helpers.ValueConverter.ConvertValue(val, colType);
                     }
                 }
                 paramsArray[colIndex].Value = colValues;
@@ -585,11 +577,8 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
     /// Builds CREATE TABLE DDL from source column info.
     /// </summary>
     /// <remarks>
-    /// NOTE: Types are mapped from CLR types (e.g., decimal → NUMBER, string → VARCHAR2),
-    /// not preserved from target schema. Type precision, scale, and length constraints
-    /// may differ from the original table when using the Recreate strategy.
-    ///
-    /// For exact structure preservation, use Append strategy or manage DDL separately.
+    /// Types are mapped from CLR types. Use existing schema or manage DDL separately
+    /// if exact structure (precision/scale) must be preserved.
     /// </remarks>
     private string BuildCreateTableSql(string tableName, IReadOnlyList<PipeColumnInfo> columns)
     {
@@ -600,7 +589,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
         {
             if (i > 0) sb.Append(", ");
             // Columns are passed from _columns which is already globally normalized
-            sb.Append($"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, columns[i])} {OracleTypeMapper.MapToProviderType(columns[i].ClrType)}");
+            sb.Append($"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, columns[i])} {OracleTypeMapper.MapToProviderType(columns[i].ClrType, _options.DateTimeMapping)}");
         }
 
         if (!string.IsNullOrEmpty(_options.Key))
@@ -646,5 +635,43 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
             OracleWriteStrategy.Ignore;
     }
 
+    /// <summary>
+    /// Synchronizes source column metadata with the target schema information.
+    /// Updates Name (to match exact casing in target DB), IsCaseSensitive flag,
+    /// and ClrType (to enable correct type conversion, e.g. string → DateTime).
+    /// Columns not found in the target schema are kept unchanged.
+    /// </summary>
+    private void SyncColumnsFromIntrospection(TargetSchemaInfo targetSchema)
+    {
+        if (_columns == null) return;
 
+        var synced = new List<PipeColumnInfo>(_columns.Count);
+        foreach (var col in _columns)
+        {
+            var targetCol = targetSchema.Columns.FirstOrDefault(
+                tc => tc.Name.Equals(col.Name, StringComparison.OrdinalIgnoreCase)
+            );
+
+            if (targetCol != null)
+            {
+                if (_logger.IsEnabled(LogLevel.Debug))
+                    _logger.LogDebug("Syncing column {Col}: Name {Old} -> {New}, ClrType {OldType} -> {NewType}, IsCaseSensitive {OldCS} -> {NewCS}",
+                        col.Name, col.Name, targetCol.Name, col.ClrType.Name, (targetCol.InferredClrType ?? col.ClrType).Name, col.IsCaseSensitive, targetCol.IsCaseSensitive);
+
+                synced.Add(col with
+                {
+                    Name = targetCol.Name,
+                    IsCaseSensitive = targetCol.IsCaseSensitive,
+                    ClrType = targetCol.InferredClrType ?? col.ClrType
+                });
+            }
+            else
+            {
+                if (_logger.IsEnabled(LogLevel.Information))
+                    _logger.LogInformation("Column {Col} was NOT found in target introspection. It will remain mapped to {Type} (IsCaseSensitive: {CS}).", col.Name, col.ClrType.Name, col.IsCaseSensitive);
+                synced.Add(col);
+            }
+        }
+        _columns = synced;
+    }
 }

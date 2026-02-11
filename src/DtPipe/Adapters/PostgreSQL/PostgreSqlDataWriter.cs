@@ -16,8 +16,8 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 	private NpgsqlBinaryImporter? _writer;
 	private string? _stagingTable;
 	private List<string> _keyColumns = new();
-	private Type[]? _targetTypes; // To match database types instead of just source types
-	private NpgsqlTypes.NpgsqlDbType[]? _columnTypes; // For strict binary import types
+	private Type[]? _targetTypes;
+	private NpgsqlTypes.NpgsqlDbType[]? _columnTypes;
 	private readonly ILogger<PostgreSqlDataWriter> _logger;
 
 	private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.PostgreSqlDialect();
@@ -37,8 +37,7 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 
 	protected override async Task<(string Schema, string Table)> ResolveTargetTableAsync(CancellationToken ct)
 	{
-		// 1. Try to resolve using native PG logic (to_regclass)
-		// to_regclass handles schema search path automatically and validates existence.
+		// Use native PG to_regclass to resolve table name (handles search path and existence)
 		if (_connection is NpgsqlConnection pgConn)
 		{
 			var resolved = await ResolveTableNativeAsync(pgConn, _options.Table, ct);
@@ -48,19 +47,16 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 			}
 		}
 
-		// 2. Fallback: Parse user input (e.g. "schema.table" or just "table")
-		// This is necessary if the table does not exist yet (Recreate strategy)
+		// Fallback for tables that don't exist yet (e.g. Recreate strategy)
 		return ParseTableName(_options.Table);
 	}
 
 	protected override async Task ApplyWriteStrategyAsync(string resolvedSchema, string resolvedTable, CancellationToken ct)
 	{
-		// Handle Recreate Logic
 		if (_options.Strategy == PostgreSqlWriteStrategy.Recreate)
 		{
-			// Introspect BEFORE Drop to preserve native types.
+			// Introspect before Drop to preserve native types
 			TargetSchemaInfo? existingSchema = null;
-			// Check if table exists (we resolved it)
 			bool tableExists = !string.IsNullOrEmpty(resolvedSchema) || await TableExistsAsync(resolvedTable, ct);
 
 			if (tableExists)
@@ -74,12 +70,10 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 				await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS {_quotedTargetTableName}", ct);
 			}
 
-			// Create table
 			string createSql;
 			if (existingSchema != null && existingSchema.Exists)
 			{
 				createSql = BuildCreateTableFromIntrospection(_quotedTargetTableName, existingSchema);
-				// Sync columns metadata from introspection
 				SyncColumnsFromIntrospection(existingSchema);
 			}
 			else
@@ -99,21 +93,17 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 			await EnsureTableExistsAsync(ct);
 			await ExecuteNonQueryAsync($"TRUNCATE TABLE {_quotedTargetTableName}", ct);
 		}
-		else // Append, Upsert, Ignore
+		else
 		{
 			await EnsureTableExistsAsync(ct);
 		}
 
-		// Incremental Loading Setup (Staging Table)
-		// PostgreSQL COPY command does not support ON CONFLICT handling directly.
-		// We must import into a temporary staging table first, then MERGE (INSERT ... ON CONFLICT) into the target.
+		// PostgreSQL COPY does not support ON CONFLICT. Use staging table for Upsert/Ignore.
 		if (_options.Strategy == PostgreSqlWriteStrategy.Upsert || _options.Strategy == PostgreSqlWriteStrategy.Ignore)
 		{
 			await SetupStagingTableAsync(ct);
 		}
 
-		// Initialize Binary Writer (COPY)
-		// We write either to the final table (Append/Truncate) or the staging table (Upsert/Ignore)
 		var copyTarget = _stagingTable ?? _quotedTargetTableName;
 		var copySql = BuildCopySql(copyTarget, _columns!);
 
@@ -139,35 +129,16 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		}
 	}
 
-	private void SyncColumnsFromIntrospection(TargetSchemaInfo existingSchema)
-	{
-		var newCols = new List<PipeColumnInfo>(_columns!.Count);
-		foreach (var col in _columns!)
-		{
-			var introspected = existingSchema.Columns.FirstOrDefault(c => c.Name.Equals(col.Name, StringComparison.OrdinalIgnoreCase));
-			if (introspected != null)
-			{
-				newCols.Add(col with { Name = introspected.Name, IsCaseSensitive = introspected.IsCaseSensitive });
-			}
-			else
-			{
-				newCols.Add(col);
-			}
-		}
-		_columns = newCols;
-	}
 
 	private async Task EnsureTableExistsAsync(CancellationToken ct)
 	{
-		// Simple check: try to inspect, if null or empty, create
-		// Or simpler: just try CREATE TABLE IF NOT EXISTS
+		// Try CREATE TABLE IF NOT EXISTS
 		var createSql = BuildCreateTableSql(_quotedTargetTableName, _columns!);
 		await ExecuteNonQueryAsync(createSql, ct);
 	}
 
 	private async Task<bool> TableExistsAsync(string tableName, CancellationToken ct)
 	{
-		// Check if we can select from it or resolve it
 		if (_connection is NpgsqlConnection pgConn)
 		{
 			var res = await ResolveTableNativeAsync(pgConn, tableName, ct);
@@ -196,7 +167,7 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		}
 
 		// 2. Create Staging Table (TEMP table)
-		_stagingTable = $"tmp_stage_{Guid.NewGuid():N}"; // Safe GUID
+		_stagingTable = $"tmp_stage_{Guid.NewGuid():N}";
 		await ExecuteNonQueryAsync($"CREATE TEMP TABLE {_stagingTable} (LIKE {_quotedTargetTableName} INCLUDING DEFAULTS)", ct);
 	}
 
@@ -219,10 +190,9 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 					}
 					else
 					{
-						// Use strict type to avoid 08P01 protocol violation
-						// And convert value to the expected target type (e.g. from String to Long for CSV sources)
+						// Use strict types and convert value if needed
 						var targetType = _targetTypes![i];
-						var convertedVal = ConvertValue(val, targetType);
+						var convertedVal = ValueConverter.ConvertValue(val, targetType);
 						await _writer.WriteAsync(convertedVal, _columnTypes![i], ct);
 					}
 				}
@@ -239,24 +209,6 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		}
 	}
 
-	private object ConvertValue(object val, Type targetType)
-	{
-		if (val == null || val == DBNull.Value) return null!;
-		// Remove Nullable wrapper for targetType comparison
-		var underlyingTarget = Nullable.GetUnderlyingType(targetType) ?? targetType;
-		if (underlyingTarget.IsInstanceOfType(val)) return val;
-
-		if (val is string s)
-		{
-			if (underlyingTarget == typeof(Guid)) return Guid.Parse(s);
-			if (underlyingTarget == typeof(DateTime)) return DateTime.Parse(s);
-			if (underlyingTarget == typeof(DateTimeOffset)) return DateTimeOffset.Parse(s);
-			if (underlyingTarget == typeof(bool)) return bool.Parse(s);
-			return Convert.ChangeType(s, underlyingTarget, System.Globalization.CultureInfo.InvariantCulture);
-		}
-
-		return Convert.ChangeType(val, underlyingTarget, System.Globalization.CultureInfo.InvariantCulture);
-	}
 
 	public override async ValueTask CompleteAsync(CancellationToken ct = default)
 	{
@@ -266,7 +218,6 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 			await _writer.DisposeAsync();
 			_writer = null;
 
-			// Perform Merge if Staging
 			if (_stagingTable != null)
 			{
 				await MergeStagingTableAsync(ct);
@@ -279,7 +230,6 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		var cols = _columns!.Select(c => SqlIdentifierHelper.GetSafeIdentifier(_dialect, c)).ToList();
 		var conflictTarget = string.Join(", ", _keyColumns.Select(c => _dialect.Quote(c)));
 
-		// Exclude keys from update set
 		var updateSet = string.Join(", ",
 			_columns!.Where(c => !_keyColumns.Contains(c.Name, StringComparer.OrdinalIgnoreCase))
 						.Select(c => $"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, c)} = EXCLUDED.{SqlIdentifierHelper.GetSafeIdentifier(_dialect, c)}"));
@@ -318,7 +268,6 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		}
 		else
 		{
-			// Fallback (should not happen for this class)
 			if (_connection.State != ConnectionState.Open) _connection.Open();
 			using var cmd = _connection.CreateCommand();
 			cmd.CommandText = command;
@@ -337,7 +286,6 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 
 	#region Helpers (Parsing, Native Resolution, SQL Building)
 
-	// Abstract impl helpers
 	protected override string GetCreateTableSql(string tableName, IEnumerable<PipeColumnInfo> columns)
 		=> BuildCreateTableSql(tableName, columns.ToList());
 	protected override string GetTruncateTableSql(string tableName) => $"TRUNCATE TABLE {tableName}";
@@ -375,10 +323,6 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 	}
 
 	private string NormalizeIdentifier(string id) => id.Trim('"');
-
-	// ... (Keep existing SQL Builder methods: BuildCopySql, BuildCreateTableSql, BuildCreateTableFromIntrospection, BuildNativeType) ...
-	// Note: I will copy them back fully to ensure the file is complete, but compacted for brevity in this replace block if possible.
-	// For safety, I am including them.
 
 	private string BuildCreateTableSql(string quotedTableName, IReadOnlyList<PipeColumnInfo> columns)
 	{
@@ -460,11 +404,9 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 	#endregion
 
 	#region ISchemaInspector Implementation
-	// Kept as is, but utilizing _connectionString which is now in base, but locally accessible via constructor capture or base
 
 	public override async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
 	{
-		// Must use a fresh connection for introspection to be safe/independent
 		await using var connection = new NpgsqlConnection(_connectionString);
 		await connection.OpenAsync(ct);
 
@@ -473,11 +415,6 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 
 		var (schemaName, tableName) = resolved.Value;
 
-		// ... exact same introspection logic ...
-		// To save tokens, I'll implement a concise version calling the same internal logic
-		// But since this is a ReplaceFile, I must provide the full body.
-
-		// Get columns
 		var columnsSql = @"
             SELECT column_name, data_type, udt_name, is_nullable, character_maximum_length, numeric_precision, numeric_scale
             FROM information_schema.columns
@@ -487,7 +424,6 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		columnsCmd.Parameters.AddWithValue("schema", schemaName);
 		columnsCmd.Parameters.AddWithValue("table", tableName);
 
-		// Get PKs
 		var pkColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var pkSql = @"
             SELECT a.attname
@@ -504,7 +440,6 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 			while (await r.ReadAsync(ct)) pkColumns.Add(r.GetString(0));
 		}
 
-		// Get Unique Constraints
 		var uniqueColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var uSql = @"
             SELECT a.attname
@@ -521,13 +456,12 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 			while (await r.ReadAsync(ct)) uniqueColumns.Add(r.GetString(0));
 		}
 
-		// Get Table Stats (Row Count Estimate and Size)
 		long? rowCount = null;
 		long? sizeBytes = null;
 		var sSql = @"
             SELECT
                 (SELECT reltuples::bigint FROM pg_class WHERE relname = @table AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = @schema)),
-                (SELECT pg_total_relation_size((@schema || '.' || @table)::regclass))";
+                (SELECT pg_total_relation_size((quote_ident(@schema) || '.' || quote_ident(@table))::regclass))";
 
 		await using (var sCmd = new NpgsqlCommand(sSql, connection))
 		{
@@ -558,10 +492,6 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		return new TargetSchemaInfo(columns, true, rowCount >= 0 ? rowCount : null, sizeBytes, pkColumns.Count > 0 ? pkColumns.ToList() : null, uniqueColumns.Count > 0 ? uniqueColumns.ToList() : null, IsRowCountEstimate: true);
 	}
 	#endregion
-
-	// IKeyValidator (Base implementation returns defaults, override if needed, but here we can rely on Base logic mostly if we implemented it there?)
-	// Base returns "Unknown" and nulls. We need to implement it to respect interface.
-	// Wait, I implemented virtuals in Base. I can override them here.
 
 	public override string? GetWriteStrategy() => _options.Strategy.ToString();
 

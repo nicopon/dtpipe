@@ -41,7 +41,7 @@ public class CsvStreamReader : IStreamReader
 		// Test read access with minimal I/O
 		await using var testStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 1, FileOptions.None);
 		var buffer = new byte[1];
-		await testStream.ReadAsync(buffer, ct);
+		await testStream.ReadExactlyAsync(buffer, ct);
 	}
 
 	public async Task OpenAsync(CancellationToken ct = default)

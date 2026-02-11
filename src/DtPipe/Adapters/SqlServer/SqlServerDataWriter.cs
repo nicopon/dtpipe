@@ -324,7 +324,7 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 				if (sourceIndex != -1)
 				{
 					var val = row[sourceIndex];
-					dataRow[i] = (val == null || val == DBNull.Value) ? DBNull.Value : ConvertValue(val, targetType);
+					dataRow[i] = (val == null || val == DBNull.Value) ? DBNull.Value : ValueConverter.ConvertValue(val, targetType);
 				}
 				else
 				{
@@ -383,7 +383,7 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 					if (sourceIndex != -1)
 					{
 						var val = row[sourceIndex];
-						dataRow[i] = (val == null || val == DBNull.Value) ? DBNull.Value : ConvertValue(val, targetType);
+						dataRow[i] = (val == null || val == DBNull.Value) ? DBNull.Value : ValueConverter.ConvertValue(val, targetType);
 					}
 					else
 					{
@@ -442,23 +442,6 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 		}
 	}
 
-	private object ConvertValue(object val, Type targetType)
-	{
-		if (val == null || val == DBNull.Value) return DBNull.Value;
-		var underlyingTarget = Nullable.GetUnderlyingType(targetType) ?? targetType;
-		if (underlyingTarget.IsInstanceOfType(val)) return val;
-
-		if (val is string s)
-		{
-			if (underlyingTarget == typeof(Guid)) return Guid.Parse(s);
-			if (underlyingTarget == typeof(DateTime)) return DateTime.Parse(s);
-			if (underlyingTarget == typeof(DateTimeOffset)) return DateTimeOffset.Parse(s);
-			if (underlyingTarget == typeof(bool)) return bool.Parse(s);
-			return Convert.ChangeType(s, underlyingTarget, System.Globalization.CultureInfo.InvariantCulture);
-		}
-
-		return Convert.ChangeType(val, underlyingTarget, System.Globalization.CultureInfo.InvariantCulture);
-	}
 
 	#region Helpers (Introspection & Collation) - Kept from original
 

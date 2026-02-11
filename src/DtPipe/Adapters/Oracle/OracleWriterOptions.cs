@@ -20,11 +20,20 @@ public enum OracleInsertMode
 	Append
 }
 
+public enum OracleDateTimeMapping
+{
+	Date,
+	Timestamp
+}
+
 public record OracleWriterOptions : IProviderOptions
 {
 	public static string Prefix => OracleConstants.ProviderName;
 	public static string DisplayName => "Oracle Writer Options";
 	public string? Key { get; init; }
+
+	[CliOption(Description = "Mapping for DateTime columns (Date, Timestamp)", Hidden = true)]
+	public OracleDateTimeMapping DateTimeMapping { get; init; } = OracleDateTimeMapping.Date;
 
 	[CliOption(Description = "Target table name", Hidden = true)]
 	public string Table { get; set; } = "export";
