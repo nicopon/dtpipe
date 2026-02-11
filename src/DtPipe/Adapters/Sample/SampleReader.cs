@@ -19,13 +19,10 @@ public partial class SampleReader : IStreamReader, IRequiresOptions<SampleReader
 
 	public Task OpenAsync(CancellationToken ct = default)
 	{
-		// Build Schema from options
-		var cols = new List<PipeColumnInfo>();
-		foreach (var def in _options.ColumnDefinitions)
+		Columns = new List<PipeColumnInfo>
 		{
-			cols.Add(new PipeColumnInfo(def.Name, def.Type, false));
-		}
-		Columns = cols;
+			new("SampleIndex", typeof(long), false)
+		};
 		return Task.CompletedTask;
 	}
 
@@ -72,42 +69,7 @@ public partial class SampleReader : IStreamReader, IRequiresOptions<SampleReader
 
 	private object?[] GenerateRow(long rowIndex)
 	{
-		var cols = _options.ColumnDefinitions;
-		var row = new object?[cols.Count];
-
-		for (int i = 0; i < cols.Count; i++)
-		{
-			var def = cols[i];
-			if (def.Type == typeof(int))
-			{
-				row[i] = (int)(rowIndex % int.MaxValue);
-			}
-			else if (def.Type == typeof(long))
-			{
-				row[i] = rowIndex;
-			}
-			else if (def.Type == typeof(double))
-			{
-				row[i] = rowIndex * 1.1;
-			}
-			else if (def.Type == typeof(bool))
-			{
-				row[i] = rowIndex % 2 == 0;
-			}
-			else if (def.Type == typeof(DateTime))
-			{
-				row[i] = DateTime.Now;
-			}
-			else if (def.Type == typeof(Guid))
-			{
-				row[i] = Guid.NewGuid();
-			}
-			else
-			{
-				row[i] = $"{def.Name} {rowIndex}";
-			}
-		}
-		return row;
+		return new object?[] { rowIndex };
 	}
 
 	public ValueTask DisposeAsync()

@@ -69,7 +69,7 @@ DtPipe auto-detects providers from file extensions (`.csv`, `.parquet`, `.duckdb
 | **SQL Server**| `mssql:` | `mssql:Server=.;Database=mydb` |
 | **CSV** | `csv:` / `.csv` | `data.csv` |
 | **Parquet** | `parquet:` / `.parquet`| `data.parquet` |
-| **Sample Gen** | `sample:` | `sample:1000000` (generate 1M rows) |
+| **Sample Gen** | `sample:` | `sample:1000000` (generate `SampleIndex` column) |
 | **Keyring** | `keyring://` | `keyring://my-prod-db` |
 | **STDIN/OUT** | `csv` or `parquet` | `csv` (no file path) |
 

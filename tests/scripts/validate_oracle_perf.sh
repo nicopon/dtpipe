@@ -83,7 +83,9 @@ run_test() {
     
     local START_TIME=$(date +%s)
     
-    $DTPIPE_BIN --input "sample:$ROW_COUNT;Id=int;Name=string;CreatedDate=date" \
+    $DTPIPE_BIN --input "sample:$ROW_COUNT" \
+                   --fake "Id:random.number" --fake "Name:name.fullName" --fake "CreatedDate:date.past" \
+                   --drop "SampleIndex" \
                    --query "SELECT 1" \
                    --output "ora:Data Source=localhost:1521/FREEPDB1;User Id=system;Password=MySecretPassword123!;" \
                    --ora-table "PerformanceTest" \
