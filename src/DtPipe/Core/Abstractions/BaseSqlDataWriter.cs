@@ -14,7 +14,6 @@ public abstract class BaseSqlDataWriter : IDataWriter, ISchemaInspector, IKeyVal
 	protected string _quotedTargetTableName = "";
 	protected IReadOnlyList<PipeColumnInfo>? _columns;
 
-	// Derived classes must provide the dialect for quoting and normalization
 	public abstract ISqlDialect Dialect { get; }
 
 	protected BaseSqlDataWriter(string connectionString)
@@ -32,28 +31,17 @@ public abstract class BaseSqlDataWriter : IDataWriter, ISchemaInspector, IKeyVal
 	public virtual bool RequiresPrimaryKey() => false;
 	#endregion
 
-	/// <summary>
-	/// Initializes the writer by normalizing columns, opening the connection, resolving the target table, and applying the write strategy.
-	/// This ensures the writer is ready to accept batches of data.
-	/// </summary>
 	public async ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
 	{
-		// 1. Normalize Column Names based on dialect rules (e.g. lowercase for Postgres)
 		_columns = NormalizeColumns(columns);
 
-		// 2. Open Connection (ensuring async opening where possible)
 		await EnsureConnectionOpenAsync(ct);
 
-		// 3. Resolve Target Table (handling synonyms, default schemas, etc.)
 		var (resolvedSchema, resolvedTable) = await ResolveTargetTableAsync(ct);
-
-		// Compute quoted name once for efficiency
 		_quotedTargetTableName = BuildQuotedTableName(resolvedSchema, resolvedTable);
 
-		// 4. Apply Write Strategy (Recreate, Truncate, Append, etc.)
 		await ApplyWriteStrategyAsync(resolvedSchema, resolvedTable, ct);
 
-		// 5. Post-Initialization Hook (e.g. prepare commands, configure bulk copy)
 		await OnInitializedAsync(ct);
 	}
 
@@ -68,12 +56,45 @@ public abstract class BaseSqlDataWriter : IDataWriter, ISchemaInspector, IKeyVal
 			}
 			else
 			{
-				// Normalize to dialect default (e.g. lowercase for PG, uppercase for Oracle)
-				// This prevents issues where source column "ID" becomes "id" in PG but "ID" was expected
+				// Normalize to dialect default (e.g. lowercase for PG) to match target schema expectations
 				normalized.Add(col with { Name = Dialect.Normalize(col.Name) });
 			}
 		}
 		return normalized;
+	}
+
+	/// <summary>
+	/// Synchronizes source column metadata with the target schema information.
+	/// Updates Name (to match exact casing in target DB), IsCaseSensitive flag,
+	/// and ClrType (to enable correct type conversion, e.g. string → DateTime).
+	/// Columns not found in the target schema are kept unchanged.
+	/// </summary>
+	protected void SyncColumnsFromIntrospection(TargetSchemaInfo targetSchema)
+	{
+		if (_columns == null) return;
+
+		var synced = new List<PipeColumnInfo>(_columns.Count);
+		foreach (var col in _columns)
+		{
+			var targetCol = targetSchema.Columns.FirstOrDefault(
+				tc => tc.Name.Equals(col.Name, StringComparison.OrdinalIgnoreCase)
+			);
+
+			if (targetCol != null)
+			{
+				synced.Add(col with
+				{
+					Name = targetCol.Name,
+					IsCaseSensitive = targetCol.IsCaseSensitive,
+					ClrType = targetCol.InferredClrType ?? col.ClrType
+				});
+			}
+			else
+			{
+				synced.Add(col);
+			}
+		}
+		_columns = synced;
 	}
 
 	protected virtual async Task EnsureConnectionOpenAsync(CancellationToken ct)
@@ -84,10 +105,6 @@ public abstract class BaseSqlDataWriter : IDataWriter, ISchemaInspector, IKeyVal
 		}
 		if (_connection.State != ConnectionState.Open)
 		{
-			// IDbConnection.Open() is synchronous, but we wrap it in Task.Run if needed or just call it.
-			// Async methods are usually on DbConnection (System.Data.Common).
-			// Here we assume the derived class creates a DbConnection which has OpenAsync.
-			// Casting to DbConnection to access OpenAsync if possible.
 			if (_connection is System.Data.Common.DbConnection dbConn)
 			{
 				await dbConn.OpenAsync(ct);
@@ -105,7 +122,7 @@ public abstract class BaseSqlDataWriter : IDataWriter, ISchemaInspector, IKeyVal
 	protected abstract IDbConnection CreateConnection(string connectionString);
 
 	/// <summary>
-	/// Resolves the effective Schema and Table name. 
+	/// Resolves the effective Schema and Table name.
 	/// If table doesn't exist, returns the parsed strategy intention.
 	/// </summary>
 	protected abstract Task<(string Schema, string Table)> ResolveTargetTableAsync(CancellationToken ct);
@@ -130,7 +147,6 @@ public abstract class BaseSqlDataWriter : IDataWriter, ISchemaInspector, IKeyVal
 
 	public virtual async ValueTask CompleteAsync(CancellationToken ct = default)
 	{
-		// Default no-op
 		await ValueTask.CompletedTask;
 	}
 

@@ -4,7 +4,7 @@ namespace DtPipe.Adapters.Oracle;
 
 internal static class OracleTypeMapper
 {
-	public static OracleDbType GetOracleDbType(Type type)
+	public static OracleDbType GetOracleDbType(Type type, OracleDateTimeMapping mapping = OracleDateTimeMapping.Date)
 	{
 		type = Nullable.GetUnderlyingType(type) ?? type;
 
@@ -21,7 +21,7 @@ internal static class OracleTypeMapper
 		if (type == typeof(double))
 			return OracleDbType.Double;
 		if (type == typeof(DateTime))
-			return OracleDbType.Date;
+			return mapping == OracleDateTimeMapping.Timestamp ? OracleDbType.TimeStamp : OracleDbType.Date;
 		if (type == typeof(DateTimeOffset))
 			return OracleDbType.TimeStampTZ;
 		if (type == typeof(Guid))
@@ -32,7 +32,7 @@ internal static class OracleTypeMapper
 		return OracleDbType.Varchar2;
 	}
 
-	public static string MapToProviderType(Type type)
+	public static string MapToProviderType(Type type, OracleDateTimeMapping mapping = OracleDateTimeMapping.Date)
 	{
 		type = Nullable.GetUnderlyingType(type) ?? type;
 
@@ -44,7 +44,7 @@ internal static class OracleTypeMapper
 		if (type == typeof(float)) return "FLOAT";
 		if (type == typeof(double)) return "FLOAT";
 		if (type == typeof(decimal)) return "NUMBER(38, 4)";
-		if (type == typeof(DateTime)) return "TIMESTAMP";
+		if (type == typeof(DateTime)) return mapping == OracleDateTimeMapping.Timestamp ? "TIMESTAMP" : "DATE";
 		if (type == typeof(DateTimeOffset)) return "TIMESTAMP WITH TIME ZONE";
 		if (type == typeof(Guid)) return "RAW(16)";
 		if (type == typeof(byte[])) return "BLOB";
@@ -69,7 +69,10 @@ internal static class OracleTypeMapper
 
 	public static Type? MapOracleToClr(string dataType)
 	{
-		return dataType.ToUpperInvariant() switch
+		var parenIndex = dataType.IndexOf('(');
+		var baseType = parenIndex > 0 ? dataType.Substring(0, parenIndex) : dataType;
+
+		return baseType.ToUpperInvariant() switch
 		{
 			"NUMBER" => typeof(decimal),
 			"INTEGER" => typeof(int),

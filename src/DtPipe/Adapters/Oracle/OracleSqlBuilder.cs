@@ -13,7 +13,8 @@ internal static class OracleSqlBuilder
 		IReadOnlyList<PipeColumnInfo> columns,
 		List<string> keyColumns,
 		ISqlDialect dialect,
-		bool isUpsert)
+		bool isUpsert,
+		OracleDateTimeMapping dateTimeMapping)
 	{
 		var sb = new StringBuilder();
 		sb.Append($"MERGE INTO {targetTable} T ");
@@ -63,9 +64,9 @@ internal static class OracleSqlBuilder
 			if (i > 0) sb.Append(", ");
 			sb.Append($"S.\"{columns[i].Name}\"");
 		}
-		sb.Append(")");
+		sb.Append(')');
 
-		var types = columns.Select(c => OracleTypeMapper.GetOracleDbType(c.ClrType)).ToArray();
+		var types = columns.Select(c => OracleTypeMapper.GetOracleDbType(c.ClrType, dateTimeMapping)).ToArray();
 		return (sb.ToString(), types);
 	}
 
@@ -73,7 +74,8 @@ internal static class OracleSqlBuilder
 		string targetTable,
 		IReadOnlyList<PipeColumnInfo> columns,
 		ISqlDialect dialect,
-		bool useAppendHint)
+		bool useAppendHint,
+		OracleDateTimeMapping dateTimeMapping)
 	{
 		var sb = new StringBuilder();
 		sb.Append("INSERT ");
@@ -95,9 +97,9 @@ internal static class OracleSqlBuilder
 			if (i > 0) sb.Append(", ");
 			sb.Append($":v{i}");
 		}
-		sb.Append(")");
+		sb.Append(')');
 
-		var types = columns.Select(c => OracleTypeMapper.GetOracleDbType(c.ClrType)).ToArray();
+		var types = columns.Select(c => OracleTypeMapper.GetOracleDbType(c.ClrType, dateTimeMapping)).ToArray();
 		return (sb.ToString(), types);
 	}
 
@@ -132,10 +134,10 @@ internal static class OracleSqlBuilder
 				if (i > 0) sb.Append(", ");
 				sb.Append(dialect.Quote(schemaInfo.PrimaryKeyColumns[i]));
 			}
-			sb.Append(")");
+			sb.Append(')');
 		}
 
-		sb.Append(")");
+		sb.Append(')');
 		return sb.ToString();
 	}
 }
