@@ -23,6 +23,6 @@ public class OracleWriterDescriptor : IProviderDescriptor<IDataWriter>
 	public IDataWriter Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
 	{
 		var loggerFactory = serviceProvider.GetRequiredService<ILoggerFactory>();
-		return new OracleDataWriter(connectionString, (OracleWriterOptions)options, loggerFactory.CreateLogger<OracleDataWriter>());
+		return new OracleDataWriter(connectionString, (OracleWriterOptions)options, loggerFactory.CreateLogger<OracleDataWriter>(), OracleTypeConverter.Instance);
 	}
 }

@@ -24,6 +24,6 @@ public class SqliteWriterDescriptor : IProviderDescriptor<IDataWriter>
 		var logger = serviceProvider.GetRequiredService<ILogger<SqliteDataWriter>>();
 
 		var dsConnectionString = SqliteConnectionHelper.ToDataSourceConnectionString(connectionString);
-		return new SqliteDataWriter(dsConnectionString, sqliteOptions, logger);
+		return new SqliteDataWriter(dsConnectionString, sqliteOptions, logger, SqliteTypeConverter.Instance);
 	}
 }

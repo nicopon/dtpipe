@@ -14,6 +14,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
     private readonly OracleWriterOptions _options;
     private IReadOnlyList<PipeColumnInfo>? _columns;
     private readonly ILogger<OracleDataWriter> _logger;
+    private readonly ITypeMapper _typeMapper;
     private OracleBulkCopy? _bulkCopy;
     private OracleCommand? _insertCommand;
     private OracleParameter[]? _insertParameters;
@@ -27,11 +28,12 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
     private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.OracleDialect();
     public ISqlDialect Dialect => _dialect;
 
-    public OracleDataWriter(string connectionString, OracleWriterOptions options, ILogger<OracleDataWriter> logger)
+    public OracleDataWriter(string connectionString, OracleWriterOptions options, ILogger<OracleDataWriter> logger, ITypeMapper typeMapper)
     {
         _connectionString = connectionString;
         _options = options;
         _logger = logger;
+        _typeMapper = typeMapper;
         _connection = new OracleConnection(connectionString);
         if(_logger.IsEnabled(LogLevel.Debug)) _logger.LogDebug("OracleDataWriter created");
     }
@@ -184,7 +186,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
                     _targetColumnTypes = new Dictionary<string, OracleDbType>(StringComparer.OrdinalIgnoreCase);
                     foreach(var col in schemaInfo.Columns)
                     {
-                        var dbType = OracleTypeMapper.MapNativeTypeToOracleDbType(col.NativeType);
+                        var dbType = OracleTypeConverter.MapNativeTypeToOracleDbType(col.NativeType);
                         if (dbType.HasValue)
                         {
                             _targetColumnTypes[col.Name] = dbType.Value;
@@ -532,12 +534,8 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
     {
         return ValueTask.CompletedTask;
     }
-
     public async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
     {
-        if(_logger.IsEnabled(LogLevel.Information))
-            _logger.LogInformation("Executing Raw Command: {Command}", command);
-
         if (_connection.State != ConnectionState.Open)
         {
             await _connection.OpenAsync(ct);
@@ -589,7 +587,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
         {
             if (i > 0) sb.Append(", ");
             // Columns are passed from _columns which is already globally normalized
-            sb.Append($"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, columns[i])} {OracleTypeMapper.MapToProviderType(columns[i].ClrType, _options.DateTimeMapping)}");
+            sb.Append($"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, columns[i])} {_typeMapper.MapToProviderType(columns[i].ClrType)}");
         }
 
         if (!string.IsNullOrEmpty(_options.Key))

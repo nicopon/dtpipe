@@ -19,15 +19,17 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 	private Type[]? _targetTypes;
 	private NpgsqlTypes.NpgsqlDbType[]? _columnTypes;
 	private readonly ILogger<PostgreSqlDataWriter> _logger;
+	private readonly ITypeMapper _typeMapper;
 
 	private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.PostgreSqlDialect();
 	public override ISqlDialect Dialect => _dialect;
 
-	public PostgreSqlDataWriter(string connectionString, PostgreSqlWriterOptions options, ILogger<PostgreSqlDataWriter> logger)
+	public PostgreSqlDataWriter(string connectionString, PostgreSqlWriterOptions options, ILogger<PostgreSqlDataWriter> logger, ITypeMapper typeMapper)
 		: base(connectionString)
 	{
 		_options = options;
 		_logger = logger;
+		_typeMapper = typeMapper;
 	}
 
 	protected override IDbConnection CreateConnection(string connectionString)
@@ -120,7 +122,7 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 			// Use target type if available, otherwise source type
 			var effectiveType = targetCol?.InferredClrType ?? sourceCol.ClrType;
 			_targetTypes[i] = effectiveType;
-			_columnTypes[i] = PostgreSqlTypeMapper.Instance.MapToNpgsqlDbType(effectiveType);
+			_columnTypes[i] = PostgreSqlTypeConverter.Instance.MapToNpgsqlDbType(effectiveType);
 		}
 
 		if (_connection is NpgsqlConnection pgConn)
@@ -271,25 +273,11 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 
 	public override async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
 	{
-		if (_connection == null)
-		{
-			_connection = new NpgsqlConnection(_connectionString);
-		}
+		await EnsureConnectionOpenAsync(ct);
 
-		if (_connection is NpgsqlConnection pgConn)
-		{
-			if (pgConn.State != ConnectionState.Open) await pgConn.OpenAsync(ct);
-			await using var cmd = pgConn.CreateCommand();
-			cmd.CommandText = command;
-			await cmd.ExecuteNonQueryAsync(ct);
-		}
-		else
-		{
-			if (_connection.State != ConnectionState.Open) _connection.Open();
-			using var cmd = _connection.CreateCommand();
-			cmd.CommandText = command;
-			cmd.ExecuteNonQuery();
-		}
+		using var cmd = (NpgsqlCommand)_connection!.CreateCommand();
+		cmd.CommandText = command;
+		await cmd.ExecuteNonQueryAsync(ct);
 	}
 
 	protected override ValueTask DisposeResourcesAsync()
@@ -351,8 +339,8 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 			if (i > 0) sb.Append(", ");
 			var col = columns[i];
 			string nameToUse = !col.IsCaseSensitive ? _dialect.Normalize(col.Name) : col.Name;
-			string safeName = SqlIdentifierHelper.GetSafeIdentifier(_dialect, nameToUse);
-			sb.Append($"{safeName} {PostgreSqlTypeMapper.Instance.MapToProviderType(col.ClrType)}");
+			var safeName = SqlIdentifierHelper.GetSafeIdentifier(_dialect, col.Name);
+			sb.Append($"{safeName} {_typeMapper.MapToProviderType(col.ClrType)}");
 		}
 
 		if (!string.IsNullOrEmpty(_options.Key))
@@ -503,7 +491,7 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 			var maxLength = colReader.IsDBNull(4) ? (int?)null : colReader.GetInt32(4);
 			var nativeType = BuildNativeType(dataType, udtName, maxLength, colReader.IsDBNull(5) ? null : colReader.GetInt32(5), colReader.IsDBNull(6) ? null : colReader.GetInt32(6));
 
-			columns.Add(new TargetColumnInfo(colName, nativeType, PostgreSqlTypeMapper.Instance.MapFromProviderType(udtName), isNullable, pkColumns.Contains(colName), uniqueColumns.Contains(colName), maxLength, Precision: colReader.IsDBNull(5) ? null : colReader.GetInt32(5), Scale: colReader.IsDBNull(6) ? null : colReader.GetInt32(6), IsCaseSensitive: colName != colName.ToLowerInvariant()));
+			columns.Add(new TargetColumnInfo(colName, nativeType, _typeMapper.MapFromProviderType(udtName), isNullable, pkColumns.Contains(colName), uniqueColumns.Contains(colName), maxLength, Precision: colReader.IsDBNull(5) ? null : colReader.GetInt32(5), Scale: colReader.IsDBNull(6) ? null : colReader.GetInt32(6), IsCaseSensitive: colName != colName.ToLowerInvariant()));
 		}
 
 		return new TargetSchemaInfo(columns, true, rowCount >= 0 ? rowCount : null, sizeBytes, pkColumns.Count > 0 ? pkColumns.ToList() : null, uniqueColumns.Count > 0 ? uniqueColumns.ToList() : null, IsRowCountEstimate: true);

@@ -30,6 +30,6 @@ public class DuckDbWriterDescriptor : IProviderDescriptor<IDataWriter>
 		}
 
 		var logger = serviceProvider.GetRequiredService<ILogger<DuckDbDataWriter>>();
-		return new DuckDbDataWriter(connectionString, duckOptions, logger);
+		return new DuckDbDataWriter(connectionString, duckOptions, logger, DuckDbTypeConverter.Instance);
 	}
 }

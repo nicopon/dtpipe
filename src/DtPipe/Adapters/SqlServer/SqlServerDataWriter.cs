@@ -22,10 +22,13 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 	private Type[]? _targetTypes;
 	private string[]? _targetColumnNames;
 
-	public SqlServerDataWriter(string connectionString, SqlServerWriterOptions options, ILogger<SqlServerDataWriter> logger) : base(connectionString)
+	private readonly ITypeMapper _typeMapper;
+
+	public SqlServerDataWriter(string connectionString, SqlServerWriterOptions options, ILogger<SqlServerDataWriter> logger, ITypeMapper typeMapper) : base(connectionString)
 	{
 		_options = options;
 		_logger = logger;
+		_typeMapper = typeMapper;
 	}
 
 	protected override IDbConnection CreateConnection(string connectionString)
@@ -243,17 +246,6 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 
 	public override async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
 	{
-		if (_connection == null)
-		{
-			// Should not happen if initialized, but strictly required by abstraction
-			_connection = CreateConnection(_connectionString);
-		}
-
-		if (_connection.State != ConnectionState.Open)
-		{
-			await ((SqlConnection)_connection).OpenAsync(ct);
-		}
-
 		using var cmd = new SqlCommand(command, (SqlConnection)_connection);
 		cmd.CommandTimeout = 0; // Disable timeout for maintenance commands
 		await cmd.ExecuteNonQueryAsync(ct);
@@ -275,7 +267,7 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 		var cols = new List<string>();
 		foreach (var col in columns)
 		{
-			string type = SqlServerTypeMapper.MapToProviderType(col.ClrType);
+			string type = _typeMapper.MapToProviderType(col.ClrType);
 			cols.Add($"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, col)} {type} NULL");
 		}
 		sb.Append(string.Join(", ", cols));
@@ -481,9 +473,6 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 
 		await DetectDatabaseCollationAsync(ct); // Update local state for CS check
 
-		// ... exact same introspection logic as before ...
-		// Re-implementing logic here for brevity in diff but strictly copying the logic
-
 		// 2. Get Columns
 		var cols = new List<TargetColumnInfo>();
 		{
@@ -513,7 +502,7 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 					: _isDbCaseSensitive;
 
 				cols.Add(new TargetColumnInfo(
-					name, type, SqlServerTypeMapper.MapFromProviderType(type), nullable, false, false, maxLength, finalPrecision, scale, IsCaseSensitive: isColCaseSensitive
+					name, type, _typeMapper.MapFromProviderType(type), nullable, false, false, maxLength, finalPrecision, scale, IsCaseSensitive: isColCaseSensitive
 				));
 			}
 		}
