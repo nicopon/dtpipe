@@ -49,7 +49,7 @@ public class SqliteSchemaInspectorTests : IDisposable
 	{
 		var options = new SqliteWriterOptions { Table = "non_existent" };
 
-		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance);
+		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
 		var inspector = writer as ISchemaInspector;
 
 		Assert.NotNull(inspector);
@@ -75,7 +75,7 @@ public class SqliteSchemaInspectorTests : IDisposable
 
 		var options = new SqliteWriterOptions { Table = "type_test" };
 
-		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance);
+		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var result = await inspector.InspectTargetAsync();
@@ -113,7 +113,7 @@ public class SqliteSchemaInspectorTests : IDisposable
 
 		var options = new SqliteWriterOptions { Table = "pk_test" };
 
-		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance);
+		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var result = await inspector.InspectTargetAsync();
@@ -135,7 +135,7 @@ public class SqliteSchemaInspectorTests : IDisposable
 
 		var options = new SqliteWriterOptions { Table = "count_test" };
 
-		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance);
+		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var result = await inspector.InspectTargetAsync();
@@ -155,7 +155,7 @@ public class SqliteSchemaInspectorTests : IDisposable
 
 		var options = new SqliteWriterOptions { Table = "size_test" };
 
-		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance);
+		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var result = await inspector.InspectTargetAsync();
@@ -172,7 +172,7 @@ public class SqliteSchemaInspectorTests : IDisposable
 
 		var options = new SqliteWriterOptions { Table = "length_test" };
 
-		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance);
+		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var result = await inspector.InspectTargetAsync();
@@ -202,7 +202,7 @@ public class SqliteSchemaInspectorTests : IDisposable
 
 		var options = new SqliteWriterOptions { Table = "compat_test" };
 
-		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance);
+		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var targetSchema = await inspector.InspectTargetAsync();
@@ -225,7 +225,7 @@ public class SqliteSchemaInspectorTests : IDisposable
 
 		var options = new SqliteWriterOptions { Table = "missing_test" };
 
-		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance);
+		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var targetSchema = await inspector.InspectTargetAsync();
@@ -249,7 +249,7 @@ public class SqliteSchemaInspectorTests : IDisposable
 
 		var options = new SqliteWriterOptions { Table = "extra_nn_test" };
 
-		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance);
+		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var targetSchema = await inspector.InspectTargetAsync();
@@ -273,7 +273,7 @@ public class SqliteSchemaInspectorTests : IDisposable
 
 		var options = new SqliteWriterOptions { Table = "null_test" };
 
-		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance);
+		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var targetSchema = await inspector.InspectTargetAsync();
@@ -298,7 +298,7 @@ public class SqliteSchemaInspectorTests : IDisposable
 
 		var options = new SqliteWriterOptions { Table = "data_warn_test" };
 
-		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance);
+		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var targetSchema = await inspector.InspectTargetAsync();
@@ -319,7 +319,7 @@ public class SqliteSchemaInspectorTests : IDisposable
 
 		var options = new SqliteWriterOptions { Table = "will_be_created" };
 
-		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance);
+		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var targetSchema = await inspector.InspectTargetAsync();

@@ -63,7 +63,7 @@ ORA_PORT=1522
 
 # Create Target Table
 echo "Creating target table..."
-docker exec -i "$ORA_CONTAINER" sqlplus system/password@localhost:"$ORA_PORT"/FREEPDB1 <<EOF
+docker exec -i "$ORA_CONTAINER" sqlplus system/password@localhost:1521/FREEPDB1 <<EOF
 CREATE TABLE PerformanceTest (
     Id NUMBER,
     Name VARCHAR2(100),
@@ -103,7 +103,7 @@ run_test "Bulk"
 
 # Verify count
 echo "Verifying row count..."
-COUNT=$(docker exec -i "$ORA_CONTAINER" sqlplus -s system/password@localhost:"$ORA_PORT"/FREEPDB1 <<EOF
+COUNT=$(docker exec -i "$ORA_CONTAINER" sqlplus -s system/password@localhost:1521/FREEPDB1 <<EOF
 SET HEADING OFF;
 SELECT COUNT(*) FROM PerformanceTest;
 EXIT;

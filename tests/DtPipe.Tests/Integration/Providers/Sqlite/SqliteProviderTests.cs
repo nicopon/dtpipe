@@ -91,7 +91,7 @@ public class SqliteProviderTests : IAsyncLifetime
 		};
 
 		// Act
-		var writer = new SqliteDataWriter(_outputConnectionString, registry.Get<SqliteWriterOptions>(), NullLogger<SqliteDataWriter>.Instance);
+		var writer = new SqliteDataWriter(_outputConnectionString, registry.Get<SqliteWriterOptions>(), NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
 		await writer.InitializeAsync(columns);
 		await writer.WriteBatchAsync(rows);
 		await writer.CompleteAsync();
@@ -129,7 +129,7 @@ public class SqliteProviderTests : IAsyncLifetime
 		var columns = reader.Columns!;
 
 		// Write to target
-		var writer = new SqliteDataWriter(_outputConnectionString, registry.Get<SqliteWriterOptions>(), NullLogger<SqliteDataWriter>.Instance);
+		var writer = new SqliteDataWriter(_outputConnectionString, registry.Get<SqliteWriterOptions>(), NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
 		await writer.InitializeAsync(columns);
 
 		await foreach (var batch in reader.ReadBatchesAsync(100))
@@ -202,7 +202,7 @@ public class SqliteProviderTests : IAsyncLifetime
 		});
 
 		// Act
-		await using var writer = new SqliteDataWriter(_outputConnectionString, registry.Get<SqliteWriterOptions>(), NullLogger<SqliteDataWriter>.Instance);
+		await using var writer = new SqliteDataWriter(_outputConnectionString, registry.Get<SqliteWriterOptions>(), NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
 		await writer.InitializeAsync(columns, CancellationToken.None);
 		await writer.WriteBatchAsync(batch, CancellationToken.None);
 		await writer.CompleteAsync(CancellationToken.None);
@@ -250,7 +250,7 @@ public class SqliteProviderTests : IAsyncLifetime
 		var rows = new List<object?[]> { new object?[] { 1, "NewData" } };
 
 		// Act
-		await using var writer = new SqliteDataWriter(_outputConnectionString, registry.Get<SqliteWriterOptions>(), NullLogger<SqliteDataWriter>.Instance);
+		await using var writer = new SqliteDataWriter(_outputConnectionString, registry.Get<SqliteWriterOptions>(), NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
 		await writer.InitializeAsync(columns, CancellationToken.None);
 		await writer.WriteBatchAsync(rows, CancellationToken.None);
 		await writer.CompleteAsync(CancellationToken.None);
@@ -317,7 +317,7 @@ public class SqliteProviderTests : IAsyncLifetime
 			var batch = new List<object?[]> { new object?[] { "NEW", 99.12345m, "NewMemo", new byte[] { 0xBB } } };
 
 			// Act
-			await using var writer = new SqliteDataWriter(connectionString, registry.Get<SqliteWriterOptions>(), NullLogger<SqliteDataWriter>.Instance);
+			await using var writer = new SqliteDataWriter(connectionString, registry.Get<SqliteWriterOptions>(), NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
 			await writer.InitializeAsync(columns);
 			await writer.WriteBatchAsync(batch);
 			await writer.CompleteAsync();

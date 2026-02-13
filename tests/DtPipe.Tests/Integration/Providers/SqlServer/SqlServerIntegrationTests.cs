@@ -165,7 +165,7 @@ public class SqlServerIntegrationTests : IAsyncLifetime
 		};
 
 		// Act
-		await using var writer = new SqlServerDataWriter(connectionString, writerOptions, NullLogger<SqlServerDataWriter>.Instance);
+		await using var writer = new SqlServerDataWriter(connectionString, writerOptions, NullLogger<SqlServerDataWriter>.Instance, SqlServerTypeConverter.Instance);
 		await writer.InitializeAsync(columns, TestContext.Current.CancellationToken);
 		await writer.WriteBatchAsync(batch, TestContext.Current.CancellationToken);
 		await writer.CompleteAsync(TestContext.Current.CancellationToken);
@@ -211,7 +211,7 @@ public class SqlServerIntegrationTests : IAsyncLifetime
 		var rows = new List<object?[]> { new object?[] { 1, "NewData" } };
 
 		// Act
-		await using var writer = new SqlServerDataWriter(connectionString, writerOptions, NullLogger<SqlServerDataWriter>.Instance);
+		await using var writer = new SqlServerDataWriter(connectionString, writerOptions, NullLogger<SqlServerDataWriter>.Instance, SqlServerTypeConverter.Instance);
 		await writer.InitializeAsync(columns, TestContext.Current.CancellationToken);
 		await writer.WriteBatchAsync(rows, TestContext.Current.CancellationToken);
 		await writer.CompleteAsync(TestContext.Current.CancellationToken);
@@ -276,7 +276,7 @@ public class SqlServerIntegrationTests : IAsyncLifetime
 
 		// Act
 		// Recreate should Drop and Re-Create using Introspection
-		await using var writer = new SqlServerDataWriter(connectionString, writerOptions, NullLogger<SqlServerDataWriter>.Instance);
+		await using var writer = new SqlServerDataWriter(connectionString, writerOptions, NullLogger<SqlServerDataWriter>.Instance, SqlServerTypeConverter.Instance);
 		try
 		{
 			await writer.InitializeAsync(columns, TestContext.Current.CancellationToken);

@@ -47,7 +47,7 @@ public class SchemaInspectorIntegrationTests : IAsyncLifetime
 		var connectionString = _connectionString;
 		var options = new PostgreSqlWriterOptions { Table = "non_existent_table" };
 
-		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance);
+		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance, PostgreSqlTypeConverter.Instance);
 		var inspector = writer as ISchemaInspector;
 
 		Assert.NotNull(inspector);
@@ -84,7 +84,7 @@ public class SchemaInspectorIntegrationTests : IAsyncLifetime
 		await cmd.ExecuteNonQueryAsync();
 
 		var options = new PostgreSqlWriterOptions { Table = "schema_test" };
-		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance);
+		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance, PostgreSqlTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var result = await inspector.InspectTargetAsync();
@@ -135,7 +135,7 @@ public class SchemaInspectorIntegrationTests : IAsyncLifetime
 		await cmd.ExecuteNonQueryAsync();
 
 		var options = new PostgreSqlWriterOptions { Table = "schema_pk_unique_test" };
-		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance);
+		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance, PostgreSqlTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var result = await inspector.InspectTargetAsync();
@@ -172,7 +172,7 @@ public class SchemaInspectorIntegrationTests : IAsyncLifetime
 		await cmd.ExecuteNonQueryAsync();
 
 		var options = new PostgreSqlWriterOptions { Table = "stats_test" };
-		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance);
+		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance, PostgreSqlTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var result = await inspector.InspectTargetAsync();
@@ -219,7 +219,7 @@ public class SchemaInspectorIntegrationTests : IAsyncLifetime
 		};
 
 		var options = new PostgreSqlWriterOptions { Table = "compat_test" };
-		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance);
+		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance, PostgreSqlTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var targetSchema = await inspector.InspectTargetAsync();
@@ -253,7 +253,7 @@ public class SchemaInspectorIntegrationTests : IAsyncLifetime
         };
 
 		var options = new PostgreSqlWriterOptions { Table = "missing_col_test" };
-		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance);
+		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance, PostgreSqlTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var targetSchema = await inspector.InspectTargetAsync();
@@ -291,7 +291,7 @@ public class SchemaInspectorIntegrationTests : IAsyncLifetime
 		};
 
 		var options = new PostgreSqlWriterOptions { Table = "extra_notnull_test" };
-		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance);
+		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance, PostgreSqlTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var targetSchema = await inspector.InspectTargetAsync();
@@ -329,7 +329,7 @@ public class SchemaInspectorIntegrationTests : IAsyncLifetime
         };
 
 		var options = new PostgreSqlWriterOptions { Table = "nullability_test" };
-		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance);
+		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance, PostgreSqlTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var targetSchema = await inspector.InspectTargetAsync();
@@ -366,7 +366,7 @@ public class SchemaInspectorIntegrationTests : IAsyncLifetime
 		};
 
 		var options = new PostgreSqlWriterOptions { Table = "existing_data_test" };
-		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance);
+		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance, PostgreSqlTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var targetSchema = await inspector.InspectTargetAsync();

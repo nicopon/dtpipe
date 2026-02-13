@@ -213,10 +213,10 @@ public class UniversalQuotingTests : IAsyncLifetime
     {
         return provider switch
         {
-            "postgres" => (new PostgreSqlDataWriter(_postgresConn!, new PostgreSqlWriterOptions { Table = tableNameExpected }, NullLogger<PostgreSqlDataWriter>.Instance), new DtPipe.Core.Dialects.PostgreSqlDialect()),
-            "sqlserver" => (new SqlServerDataWriter(_sqlServerConn!, new SqlServerWriterOptions { Table = tableNameExpected }, NullLogger<SqlServerDataWriter>.Instance), new DtPipe.Core.Dialects.SqlServerDialect()),
-            "oracle" => (new OracleDataWriter(_oracleConn!, new OracleWriterOptions { Table = tableNameExpected }, NullLogger<OracleDataWriter>.Instance), new DtPipe.Core.Dialects.OracleDialect()),
-            "sqlite" => (new SqliteDataWriter(SqliteConn, new SqliteWriterOptions { Table = tableNameExpected }, NullLogger<SqliteDataWriter>.Instance), new DtPipe.Core.Dialects.SqliteDialect()),
+            "postgres" => (new PostgreSqlDataWriter(_postgresConn!, new PostgreSqlWriterOptions { Table = tableNameExpected }, NullLogger<PostgreSqlDataWriter>.Instance, PostgreSqlTypeConverter.Instance), new DtPipe.Core.Dialects.PostgreSqlDialect()),
+            "sqlserver" => (new SqlServerDataWriter(_sqlServerConn!, new SqlServerWriterOptions { Table = tableNameExpected }, NullLogger<SqlServerDataWriter>.Instance, SqlServerTypeConverter.Instance), new DtPipe.Core.Dialects.SqlServerDialect()),
+            "oracle" => (new OracleDataWriter(_oracleConn!, new OracleWriterOptions { Table = tableNameExpected }, NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance), new DtPipe.Core.Dialects.OracleDialect()),
+            "sqlite" => (new SqliteDataWriter(SqliteConn, new SqliteWriterOptions { Table = tableNameExpected }, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance), new DtPipe.Core.Dialects.SqliteDialect()),
             _ => throw new ArgumentException("Unknown provider")
         };
     }

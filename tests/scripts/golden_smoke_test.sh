@@ -44,7 +44,7 @@ echo "[1/9] Starting Infrastructure (Postgres, MSSQL, Oracle)..."
 # Connection Strings (Matching Shared Infrastructure)
 PG_CONN="pg:Host=localhost;Port=5440;Database=integration;Username=postgres;Password=password"
 MSSQL_CONN="mssql:Server=localhost,1434;Database=master;User Id=sa;Password=Password123!;TrustServerCertificate=True"
-ORA_CONN="ora:Data Source=localhost:1522/FREEPDB1;User Id=testuser;Password=password;Pooling=false"
+ORA_CONN="ora:Data Source=localhost:1522/FREEPDB1;User Id=system;Password=password;Pooling=false"
 
 # ---------------------------------------------------------
 # 2. Generate VICIOUS Source Data (CSV)
@@ -102,7 +102,7 @@ echo "✅ Postgres 1M Load Verified."
 
 # MSSQL Load (1M)
 echo "      Loading 1M rows into MSSQL..."
-MSSQL_CONN="mssql:Server=localhost,1434;Database=master;User Id=sa;Password=MySecretPassword123!;TrustServerCertificate=True;Encrypt=False;MultipleActiveResultSets=True"
+MSSQL_CONN="mssql:Server=localhost,1434;Database=master;User Id=sa;Password=Password123!;TrustServerCertificate=True;Encrypt=False;MultipleActiveResultSets=True"
 $DTPIPE_BIN -i "parquet:$INPUT_DIR/high_volume.parquet" -o "$MSSQL_CONN" --mssql-table "VolData" --mssql-strategy Recreate > /dev/null
 $DTPIPE_BIN -i "$MSSQL_CONN" -q "SELECT COUNT(*) FROM VolData" -o "csv" > "$INPUT_DIR/result_vol_mssql.csv"
 COUNT=$(tail -n 1 "$INPUT_DIR/result_vol_mssql.csv" | tr -d '\r')
@@ -111,7 +111,7 @@ echo "✅ MSSQL 1M Load Verified."
 
 # Oracle Load (1M)
 echo "      Loading 1M rows into Oracle..."
-ORA_CONN="ora:Data Source=localhost:1522/FREEPDB1;User Id=system;Password=MySecretPassword123!;"
+ORA_CONN="ora:Data Source=localhost:1522/FREEPDB1;User Id=system;Password=password;"
 $DTPIPE_BIN -i "parquet:$INPUT_DIR/high_volume.parquet" -o "$ORA_CONN" --ora-table "VOL_DATA" --ora-strategy Recreate > /dev/null
 $DTPIPE_BIN -i "$ORA_CONN" -q "SELECT COUNT(*) FROM VOL_DATA" -o "csv" > "$INPUT_DIR/result_vol_ora.csv"
 COUNT=$(tail -n 1 "$INPUT_DIR/result_vol_ora.csv" | tr -d '\r')
@@ -184,7 +184,7 @@ echo "✅ Query File Verified."
 # 8. SQL Server Test
 # ---------------------------------------------------------
 echo "[8/9] Testing SQL Server..."
-MSSQL_CONN="mssql:Server=localhost,1434;Database=master;User Id=sa;Password=MySecretPassword123!;TrustServerCertificate=True"
+MSSQL_CONN="mssql:Server=localhost,1434;Database=master;User Id=sa;Password=Password123!;TrustServerCertificate=True"
 # Load Parquet -> MSSQL
 $DTPIPE_BIN -i "$INPUT_DIR/vicious_source.csv" -o "$MSSQL_CONN" --mssql-table "ViciousUsers" --mssql-strategy Recreate > /dev/null
 # Verify Recreate
@@ -203,7 +203,7 @@ echo "✅ SQL Server Upsert Verified."
 # 9. Oracle Test
 # ---------------------------------------------------------
 echo "[9/9] Testing Oracle..."
-ORA_CONN="ora:Data Source=localhost:1522/FREEPDB1;User Id=system;Password=MySecretPassword123!;"
+ORA_CONN="ora:Data Source=localhost:1522/FREEPDB1;User Id=system;Password=password;"
 # Load Parquet -> Oracle
 # Note: Oracle table names UPPERCASE usually, and columns too. DtPipe handles this via minimal quoting (so "ViciousUsers" might be "VICIOUSUSERS").
 $DTPIPE_BIN -i "parquet:$INPUT_DIR/vicious.parquet" -o "$ORA_CONN" --ora-table "VICIOUS_USERS" --ora-strategy Recreate > /dev/null

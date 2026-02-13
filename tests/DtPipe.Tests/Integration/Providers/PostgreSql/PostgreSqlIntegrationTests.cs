@@ -109,7 +109,7 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
 		};
 
 		// Act
-		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance);
+		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance, PostgreSqlTypeConverter.Instance);
 		await writer.InitializeAsync(columns);
 		await writer.WriteBatchAsync(data);
 		await writer.CompleteAsync();
@@ -160,7 +160,7 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
 		};
 
 		// Act
-		await using var writer = new PostgreSqlDataWriter(connectionString, writerOptions, NullLogger<PostgreSqlDataWriter>.Instance);
+		await using var writer = new PostgreSqlDataWriter(connectionString, writerOptions, NullLogger<PostgreSqlDataWriter>.Instance, PostgreSqlTypeConverter.Instance);
 		await writer.InitializeAsync(columns); // Will find table and append
 		await writer.WriteBatchAsync(batch);
 		await writer.CompleteAsync();
@@ -208,7 +208,7 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
 		var data = new List<object?[]> { new object?[] { 1, "NewData" } };
 
 		// Act
-		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance);
+		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance, PostgreSqlTypeConverter.Instance);
 		await writer.InitializeAsync(columns);
 		await writer.WriteBatchAsync(data);
 		await writer.CompleteAsync();
@@ -250,7 +250,7 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
 		var data = new List<object?[]> { new object?[] { 1, "NewData" } };
 
 		// Act
-		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance);
+		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance, PostgreSqlTypeConverter.Instance);
 		await writer.InitializeAsync(columns); // Should Drop and Recreate with correct schema (Name TEXT)
 		await writer.WriteBatchAsync(data);
 		await writer.CompleteAsync();
@@ -312,7 +312,7 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
 
 		// Act
 		// Recreate should Drop and Re-Create using Introspection
-		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance);
+		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance, PostgreSqlTypeConverter.Instance);
 		await writer.InitializeAsync(columns);
 		await writer.WriteBatchAsync(batch);
 		await writer.CompleteAsync();

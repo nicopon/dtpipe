@@ -207,7 +207,7 @@ public class OracleIntegrationTests : IAsyncLifetime
 				Strategy = OracleWriteStrategy.Recreate
 			};
 
-			await using var writer = new OracleDataWriter(_oracle.GetConnectionString(), writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance);
+			await using var writer = new OracleDataWriter(_oracle.GetConnectionString(), writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
 			await writer.InitializeAsync(columns, TestContext.Current.CancellationToken);
 
 			// Read all rows and write in batches
@@ -284,7 +284,7 @@ public class OracleIntegrationTests : IAsyncLifetime
 
 		// Act
 		// Use NullLogger to avoid test output noise
-		await using var writer = new OracleDataWriter(connectionString, writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance);
+		await using var writer = new OracleDataWriter(connectionString, writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
 		await writer.InitializeAsync(columns, TestContext.Current.CancellationToken);
 		await writer.WriteBatchAsync(batch, TestContext.Current.CancellationToken);
 		await writer.CompleteAsync(TestContext.Current.CancellationToken);
@@ -342,7 +342,7 @@ public class OracleIntegrationTests : IAsyncLifetime
 		var rows = new List<object?[]> { new object?[] { 1, "NewData" } };
 
 		// Act
-		await using var writer = new OracleDataWriter(connectionString, writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance);
+		await using var writer = new OracleDataWriter(connectionString, writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
 		await writer.InitializeAsync(columns, TestContext.Current.CancellationToken); // Should Drop and Recreate
 		await writer.WriteBatchAsync(rows, TestContext.Current.CancellationToken);
 		await writer.CompleteAsync(TestContext.Current.CancellationToken);
@@ -418,7 +418,7 @@ public class OracleIntegrationTests : IAsyncLifetime
 
 		// Act
 		// Recreate should Drop and Re-Create using Introspection
-		await using var writer = new OracleDataWriter(connectionString, writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance);
+		await using var writer = new OracleDataWriter(connectionString, writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
 		await writer.InitializeAsync(columns, TestContext.Current.CancellationToken);
 		await writer.WriteBatchAsync(rows, TestContext.Current.CancellationToken);
 		await writer.CompleteAsync(TestContext.Current.CancellationToken);
