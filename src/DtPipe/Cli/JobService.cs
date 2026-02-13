@@ -65,7 +65,7 @@ public class JobService
 		var unsafeQueryOption = new Option<bool>("--unsafe-query") { Description = "Bypass SQL validation" };
 		unsafeQueryOption.DefaultValueFactory = _ => false;
 
-		var dryRunOption = new Option<int>("--dry-run") { Description = "Dry-run mode (N samples)", Arity = ArgumentArity.ZeroOrOne };
+		var dryRunOption = new Option<int>("--dry-run") { Description = "Dry-run mode (N rows)", Arity = ArgumentArity.ZeroOrOne };
 		dryRunOption.DefaultValueFactory = _ => 0;
 
 		var limitOption = new Option<int>("--limit") { Description = "Max rows (0 = unlimited)" };
@@ -391,7 +391,16 @@ public class JobService
 		if (opt.Description?.StartsWith("[HIDDEN]") == true) return;
 
 		var allAliases = new HashSet<string> { opt.Name };
-		foreach (var alias in opt.Aliases) allAliases.Add(alias);
+		foreach (var alias in opt.Aliases)
+		{
+			// Hide deprecated sampling aliases from help
+			if (alias.Equals("--sample-rate", StringComparison.OrdinalIgnoreCase) ||
+			    alias.Equals("--sample-seed", StringComparison.OrdinalIgnoreCase))
+			{
+				continue;
+			}
+			allAliases.Add(alias);
+		}
 
 		var name = string.Join(", ", allAliases.OrderByDescending(a => a.Length));
 		var desc = opt.Description ?? "";
