@@ -1,11 +1,15 @@
+using DtPipe.Core.Abstractions;
+
 namespace DtPipe.Adapters.Sqlite;
 
 /// <summary>
-/// Maps CLR types to SQLite SQL types.
+/// SQLite-specific type mapper implementing CLR ↔ SQLite type conversions.
 /// </summary>
-public static class SqliteTypeMapper
+public class SqliteTypeConverter : ITypeMapper
 {
-	public static string MapToProviderType(Type clrType)
+	public static readonly SqliteTypeConverter Instance = new();
+
+	public string MapToProviderType(Type clrType)
 	{
 		var underlying = Nullable.GetUnderlyingType(clrType) ?? clrType;
 
@@ -27,7 +31,7 @@ public static class SqliteTypeMapper
 		};
 	}
 
-	public static Type MapFromProviderType(string providerType)
+	public Type MapFromProviderType(string providerType)
 	{
 		var upperType = providerType.Split('(')[0].Trim().ToUpperInvariant();
 
@@ -40,5 +44,11 @@ public static class SqliteTypeMapper
 		if (upperType.Contains("DECIMAL") || upperType.Contains("NUMERIC")) return typeof(decimal);
 
 		return typeof(string);
+	}
+
+	public string BuildNativeType(string dataType, int? dataLength, int? precision, int? scale, int? charLength)
+	{
+		// Fallback as acceptable per Tâche 2.2 step 3
+		return dataType;
 	}
 }
