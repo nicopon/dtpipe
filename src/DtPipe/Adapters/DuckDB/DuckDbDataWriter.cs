@@ -380,7 +380,7 @@ public sealed class DuckDbDataWriter : BaseSqlDataWriter
 
 	// Abstract implementations
 
-	public override async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
+	protected override async Task<TargetSchemaInfo?> InspectTargetInternalAsync(CancellationToken ct = default)
 	{
 		await using var connection = new DuckDBConnection(_connectionString);
 		await connection.OpenAsync(ct);

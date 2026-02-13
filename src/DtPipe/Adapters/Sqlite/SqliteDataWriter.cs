@@ -209,7 +209,7 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter
 		return ValueTask.CompletedTask;
 	}
 
-	public override async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
+	protected override async Task<TargetSchemaInfo?> InspectTargetInternalAsync(CancellationToken ct = default)
 	{
 		await using var connection = new SqliteConnection(_connectionString);
 		await connection.OpenAsync(ct);

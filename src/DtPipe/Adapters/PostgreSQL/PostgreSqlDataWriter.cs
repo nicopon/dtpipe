@@ -410,7 +410,7 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 
 	#region ISchemaInspector Implementation
 
-	public override async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
+	protected override async Task<TargetSchemaInfo?> InspectTargetInternalAsync(CancellationToken ct = default)
 	{
 		await using var connection = new NpgsqlConnection(_connectionString);
 		await connection.OpenAsync(ct);
