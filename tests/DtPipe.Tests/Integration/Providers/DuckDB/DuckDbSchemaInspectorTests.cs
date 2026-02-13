@@ -50,7 +50,7 @@ public class DuckDbSchemaInspectorTests : IDisposable
 	{
 		var options = new DuckDbWriterOptions { Table = "non_existent" };
 
-		await using var writer = new DuckDbDataWriter(_connectionString, options, NullLogger<DuckDbDataWriter>.Instance);
+		await using var writer = new DuckDbDataWriter(_connectionString, options, NullLogger<DuckDbDataWriter>.Instance, DuckDbTypeConverter.Instance);
 		var inspector = writer as ISchemaInspector;
 
 		Assert.NotNull(inspector);
@@ -76,7 +76,7 @@ public class DuckDbSchemaInspectorTests : IDisposable
 
 		var options = new DuckDbWriterOptions { Table = "type_test" };
 
-		await using var writer = new DuckDbDataWriter(_connectionString, options, NullLogger<DuckDbDataWriter>.Instance);
+		await using var writer = new DuckDbDataWriter(_connectionString, options, NullLogger<DuckDbDataWriter>.Instance, DuckDbTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var result = await inspector.InspectTargetAsync();
@@ -107,7 +107,7 @@ public class DuckDbSchemaInspectorTests : IDisposable
 
 		var options = new DuckDbWriterOptions { Table = "count_test" };
 
-		await using var writer = new DuckDbDataWriter(_connectionString, options, NullLogger<DuckDbDataWriter>.Instance);
+		await using var writer = new DuckDbDataWriter(_connectionString, options, NullLogger<DuckDbDataWriter>.Instance, DuckDbTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var result = await inspector.InspectTargetAsync();
@@ -129,7 +129,7 @@ public class DuckDbSchemaInspectorTests : IDisposable
 
 		var options = new DuckDbWriterOptions { Table = "notnull_test" };
 
-		await using var writer = new DuckDbDataWriter(_connectionString, options, NullLogger<DuckDbDataWriter>.Instance);
+		await using var writer = new DuckDbDataWriter(_connectionString, options, NullLogger<DuckDbDataWriter>.Instance, DuckDbTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var result = await inspector.InspectTargetAsync();
@@ -158,7 +158,7 @@ public class DuckDbSchemaInspectorTests : IDisposable
 
 		var options = new DuckDbWriterOptions { Table = "compat_test" };
 
-		await using var writer = new DuckDbDataWriter(_connectionString, options, NullLogger<DuckDbDataWriter>.Instance);
+		await using var writer = new DuckDbDataWriter(_connectionString, options, NullLogger<DuckDbDataWriter>.Instance, DuckDbTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var targetSchema = await inspector.InspectTargetAsync();
@@ -181,7 +181,7 @@ public class DuckDbSchemaInspectorTests : IDisposable
 
 		var options = new DuckDbWriterOptions { Table = "missing_test" };
 
-		await using var writer = new DuckDbDataWriter(_connectionString, options, NullLogger<DuckDbDataWriter>.Instance);
+		await using var writer = new DuckDbDataWriter(_connectionString, options, NullLogger<DuckDbDataWriter>.Instance, DuckDbTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var targetSchema = await inspector.InspectTargetAsync();

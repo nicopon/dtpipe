@@ -44,7 +44,7 @@ public class CaseSensitivityIntegrationTests : IAsyncLifetime
 			Table = "MixedCaseTable",
 			Strategy = DuckDbWriteStrategy.Append
 		};
-		await using var writer = new DuckDbDataWriter(_connectionString, options, NullLogger<DuckDbDataWriter>.Instance);
+		await using var writer = new DuckDbDataWriter(_connectionString, options, NullLogger<DuckDbDataWriter>.Instance, DuckDbTypeConverter.Instance);
 
 		// 3. Define Source Columns
 		// If IsCaseSensitive=true, Writer should Quote it.
@@ -86,7 +86,7 @@ public class CaseSensitivityIntegrationTests : IAsyncLifetime
 			Table = "simple_table",
 			Strategy = DuckDbWriteStrategy.Append
 		};
-		await using var writer = new DuckDbDataWriter(_connectionString, options, NullLogger<DuckDbDataWriter>.Instance);
+		await using var writer = new DuckDbDataWriter(_connectionString, options, NullLogger<DuckDbDataWriter>.Instance, DuckDbTypeConverter.Instance);
 
 		var columns = new List<DtPipe.Core.Models.PipeColumnInfo> {
 			new("Id", typeof(int), false, IsCaseSensitive: false), // "Id" -> SafeIdentifier "Id" (unquoted) -> Matches "id" in DuckDB
@@ -122,7 +122,7 @@ public class CaseSensitivityIntegrationTests : IAsyncLifetime
 			Strategy = DuckDbWriteStrategy.Upsert,
 			Key = "Id" // Passed as string
 		};
-		await using var writer = new DuckDbDataWriter(_connectionString, options, NullLogger<DuckDbDataWriter>.Instance);
+		await using var writer = new DuckDbDataWriter(_connectionString, options, NullLogger<DuckDbDataWriter>.Instance, DuckDbTypeConverter.Instance);
 
 		// 3. Columns with Case Sensitivity = true
 		var columns = new List<DtPipe.Core.Models.PipeColumnInfo> {
