@@ -40,3 +40,8 @@ services:
       test: ["CMD-SHELL", "exit 0"]
       interval: 10s
       start_period: 10s
+  mssql-tools:
+    image: mcr.microsoft.com/mssql-tools
+    container_name: dtpipe-integ-mssql-tools
+    entrypoint: /bin/sh -c "while true; do sleep 3600; done"
+    network_mode: service:mssql
