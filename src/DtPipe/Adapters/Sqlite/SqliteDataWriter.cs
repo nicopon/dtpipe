@@ -14,15 +14,17 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter
 {
 	private readonly SqliteWriterOptions _options;
 	private readonly ILogger<SqliteDataWriter> _logger;
+	private readonly ITypeMapper _typeMapper;
 	private List<string> _keyColumns = new();
 
 	private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.SqliteDialect();
 	public override ISqlDialect Dialect => _dialect;
 
-	public SqliteDataWriter(string connectionString, SqliteWriterOptions options, ILogger<SqliteDataWriter> logger) : base(connectionString)
+	public SqliteDataWriter(string connectionString, SqliteWriterOptions options, ILogger<SqliteDataWriter> logger, ITypeMapper typeMapper) : base(connectionString)
 	{
 		_options = options;
 		_logger = logger;
+		_typeMapper = typeMapper;
 	}
 
 	protected override IDbConnection CreateConnection(string connectionString)
@@ -195,9 +197,9 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter
 
 	public override async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
 	{
-		if (_connection!.State != ConnectionState.Open) await ((DbConnection)_connection).OpenAsync(ct);
+		await EnsureConnectionOpenAsync(ct);
 
-		using var cmd = (DbCommand)_connection.CreateCommand();
+		using var cmd = (DbCommand)_connection!.CreateCommand();
 		cmd.CommandText = command;
 		await cmd.ExecuteNonQueryAsync(ct);
 	}
@@ -241,7 +243,7 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter
 			columns.Add(new TargetColumnInfo(
 				colName,
 				dataType.ToUpperInvariant(),
-				SqliteTypeMapper.MapFromProviderType(dataType),
+				_typeMapper.MapFromProviderType(dataType),
 				!notNull && !isPk,
 				isPk,
 				false,
@@ -290,7 +292,7 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter
 		{
 			if (i > 0) sb.Append(", ");
 			var col = cols[i];
-			sb.Append($"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, col)} {SqliteTypeMapper.MapToProviderType(col.ClrType)}");
+			sb.Append($"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, col)} {_typeMapper.MapToProviderType(col.ClrType)}");
 		}
 
 		if (!string.IsNullOrEmpty(_options.Key))

@@ -12,6 +12,7 @@ public sealed class DuckDbDataWriter : BaseSqlDataWriter
 {
 	private readonly DuckDbWriterOptions _options;
 	private readonly ILogger<DuckDbDataWriter> _logger;
+	private readonly ITypeMapper _typeMapper;
 	private string? _stagingTable; // Table to load data into before merging
 	private string? _unquotedSchema;
 	private string? _unquotedTable;
@@ -23,10 +24,11 @@ public sealed class DuckDbDataWriter : BaseSqlDataWriter
 	private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.DuckDbDialect();
 	public override ISqlDialect Dialect => _dialect;
 
-	public DuckDbDataWriter(string connectionString, DuckDbWriterOptions options, ILogger<DuckDbDataWriter> logger) : base(connectionString)
+	public DuckDbDataWriter(string connectionString, DuckDbWriterOptions options, ILogger<DuckDbDataWriter> logger, ITypeMapper typeMapper) : base(connectionString)
 	{
 		_options = options;
 		_logger = logger;
+		_typeMapper = typeMapper;
 	}
 
 	protected override IDbConnection CreateConnection(string connectionString)
@@ -308,12 +310,9 @@ public sealed class DuckDbDataWriter : BaseSqlDataWriter
 
 	public override async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
 	{
-		if (_connection!.State != ConnectionState.Open)
-		{
-			await ((DuckDBConnection)_connection).OpenAsync(ct);
-		}
+		await EnsureConnectionOpenAsync(ct);
 
-		using var cmd = ((DuckDBConnection)_connection).CreateCommand();
+		using var cmd = (DuckDBCommand)_connection!.CreateCommand();
 		cmd.CommandText = command;
 		await cmd.ExecuteNonQueryAsync(ct);
 	}
@@ -439,7 +438,7 @@ public sealed class DuckDbDataWriter : BaseSqlDataWriter
 			columns.Add(new TargetColumnInfo(
 				colName,
 				dataType.ToUpperInvariant(),
-				DuckDbTypeMapper.MapFromProviderType(dataType),
+				_typeMapper.MapFromProviderType(dataType),
 				!notNull,
 				isPk,
 				false,
@@ -467,7 +466,7 @@ public sealed class DuckDbDataWriter : BaseSqlDataWriter
 		for (int i = 0; i < colsList.Count; i++)
 		{
 			if (i > 0) sb.Append(", ");
-			sb.Append($"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, colsList[i])} {DuckDbTypeMapper.MapToProviderType(colsList[i].ClrType)}");
+			sb.Append($"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, colsList[i])} {_typeMapper.MapToProviderType(colsList[i].ClrType)}");
 		}
 
 		if (!string.IsNullOrEmpty(_options.Key))

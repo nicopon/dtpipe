@@ -24,7 +24,8 @@ public class PostgreSqlWriterDescriptor : IProviderDescriptor<IDataWriter>
 		return new PostgreSqlDataWriter(
 			PostgreSqlConnectionHelper.GetConnectionString(connectionString),
 			(PostgreSqlWriterOptions)options,
-			logger
+			logger,
+			PostgreSqlTypeConverter.Instance
 		);
 	}
 }

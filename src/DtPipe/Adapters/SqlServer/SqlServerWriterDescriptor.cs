@@ -21,6 +21,6 @@ public class SqlServerWriterDescriptor : IProviderDescriptor<IDataWriter>
 	{
 		var sqlOptions = (SqlServerWriterOptions)options;
 		var logger = serviceProvider.GetRequiredService<ILogger<SqlServerDataWriter>>();
-		return new SqlServerDataWriter(connectionString, sqlOptions, logger);
+		return new SqlServerDataWriter(connectionString, sqlOptions, logger, SqlServerTypeConverter.Instance);
 	}
 }
