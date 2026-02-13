@@ -12,7 +12,7 @@ cd "$ROOT_DIR"
 SRC_DB="$ARTIFACTS_DIR/hooks_source.db"
 TGT_DB="$ARTIFACTS_DIR/hooks_target.db"
 PRE_EXEC_SQL="$ARTIFACTS_DIR/pre_exec.sql"
-EXE="./src/DtPipe/bin/Debug/net10.0/DtPipe"
+EXE="./dist/release/dtpipe"
 
 rm -f "$SRC_DB" "$TGT_DB" "$PRE_EXEC_SQL"
 

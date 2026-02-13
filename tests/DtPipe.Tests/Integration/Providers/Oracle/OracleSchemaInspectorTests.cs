@@ -63,7 +63,7 @@ public class OracleSchemaInspectorTests : IAsyncLifetime
 
 		var options = new OracleWriterOptions { Table = "NON_EXISTENT" };
 
-		await using var writer = new OracleDataWriter(GetConnectionString(), options, NullLogger<OracleDataWriter>.Instance);
+		await using var writer = new OracleDataWriter(GetConnectionString(), options, NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
 		var inspector = writer as ISchemaInspector;
 
 		Assert.NotNull(inspector);
@@ -91,7 +91,7 @@ public class OracleSchemaInspectorTests : IAsyncLifetime
 
 		var options = new OracleWriterOptions { Table = "TYPE_TEST" };
 
-		await using var writer = new OracleDataWriter(GetConnectionString(), options, NullLogger<OracleDataWriter>.Instance);
+		await using var writer = new OracleDataWriter(GetConnectionString(), options, NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var result = await inspector.InspectTargetAsync();
@@ -137,7 +137,7 @@ public class OracleSchemaInspectorTests : IAsyncLifetime
 
 		var options = new OracleWriterOptions { Table = "COMPAT_TEST" };
 
-		await using var writer = new OracleDataWriter(GetConnectionString(), options, NullLogger<OracleDataWriter>.Instance);
+		await using var writer = new OracleDataWriter(GetConnectionString(), options, NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var targetSchema = await inspector.InspectTargetAsync();
@@ -162,7 +162,7 @@ public class OracleSchemaInspectorTests : IAsyncLifetime
 
 		var options = new OracleWriterOptions { Table = "MISSING_TEST" };
 
-		await using var writer = new OracleDataWriter(GetConnectionString(), options, NullLogger<OracleDataWriter>.Instance);
+		await using var writer = new OracleDataWriter(GetConnectionString(), options, NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var targetSchema = await inspector.InspectTargetAsync();
