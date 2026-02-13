@@ -44,7 +44,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.102'
+          dotnet-version: '10.0.103'
 
       - name: Restore dependencies
         run: dotnet restore
@@ -144,7 +144,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.102'
+          dotnet-version: '10.0.103'
       
       - name: Pack
         run: dotnet pack src/DtPipe/DtPipe.csproj -c Release
