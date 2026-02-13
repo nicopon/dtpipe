@@ -168,8 +168,8 @@ public static class RawJobBuilder
 	{
 		var configs = new List<TransformerConfig>();
 
-		// Build option map (option alias -> factory)
-		var optionToFactory = new Dictionary<string, IDataTransformerFactory>(StringComparer.OrdinalIgnoreCase);
+		// Build option map (option alias -> (Factory, Option) tuple)
+		var optionMap = new Dictionary<string, (IDataTransformerFactory Factory, Option Option)>(StringComparer.OrdinalIgnoreCase);
 		foreach (var factory in factories)
 		{
 			if (factory is ICliContributor contributor)
@@ -177,9 +177,9 @@ public static class RawJobBuilder
 				foreach (var option in contributor.GetCliOptions())
 				{
 					if (!string.IsNullOrEmpty(option.Name))
-						optionToFactory[option.Name] = factory;
+						optionMap[option.Name] = (factory, option);
 					foreach (var alias in option.Aliases)
-						optionToFactory[alias] = factory;
+						optionMap[alias] = (factory, option);
 				}
 			}
 		}
@@ -193,8 +193,10 @@ public static class RawJobBuilder
 		{
 			var arg = args[i];
 
-			if (optionToFactory.TryGetValue(arg, out var factory))
+			if (optionMap.TryGetValue(arg, out var match))
 			{
+				var factory = match.Factory;
+				var option = match.Option;
 
 				if (factory != currentFactory && currentFactory != null && (currentMappings.Count > 0 || currentOptions.Count > 0))
 				{
@@ -210,12 +212,24 @@ public static class RawJobBuilder
 
 				currentFactory = factory;
 
-				// Get value
-				if (i + 1 < args.Length)
+				// Determine if we should consume a value
+				string? value = null;
+				if (option.Arity.MaximumNumberOfValues > 0)
 				{
-					var value = args[i + 1];
-					i++;
+					if (i + 1 < args.Length)
+					{
+						value = args[i + 1];
+						i++;
+					}
+				}
+				else
+				{
+					// Flag/Boolean option (Arity 0)
+					value = "true";
+				}
 
+				if (value != null)
+				{
 					var optionName = arg.TrimStart('-');
 					var factoryType = factory.TransformerType;
 
