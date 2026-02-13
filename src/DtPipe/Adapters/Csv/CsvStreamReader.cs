@@ -38,10 +38,31 @@ public class CsvStreamReader : IStreamReader
 		if (fileInfo.Length == 0)
 			throw new InvalidOperationException($"CSV file is empty: {filePath}");
 
-		// Test read access with minimal I/O
-		await using var testStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 1, FileOptions.None);
-		var buffer = new byte[1];
-		await testStream.ReadExactlyAsync(buffer, ct);
+		// Retry loop to handle transient locks or filesystem lag (especially on Mac/Unix)
+		int retries = 5;
+		while (retries > 0)
+		{
+			try
+			{
+				// Test read access with minimal I/O
+				await using var testStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 1, FileOptions.None);
+				var buffer = new byte[1];
+				// Use Memory-based ReadAsync to avoid CA2022 and potentially mitigate runtime async pooling issues
+				_ = await testStream.ReadAsync(buffer.AsMemory(0, 1), ct);
+				return;
+			}
+			catch (Exception ex) when (retries > 1 && (ex is IOException || ex.GetType().Name == "AccessViolationException"))
+			{
+				retries--;
+				await Task.Delay(100, ct);
+			}
+			catch
+			{
+				if (retries <= 1) throw;
+				retries--;
+				await Task.Delay(100, ct);
+			}
+		}
 	}
 
 	public async Task OpenAsync(CancellationToken ct = default)

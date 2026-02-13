@@ -46,6 +46,11 @@ public static class ValueConverter
             return Convert.ChangeType(s, underlyingTarget, CultureInfo.InvariantCulture);
         }
 
+        if (val is DateTime dtVal && underlyingTarget == typeof(DateTimeOffset))
+        {
+            return new DateTimeOffset(dtVal);
+        }
+
         return Convert.ChangeType(val, underlyingTarget, CultureInfo.InvariantCulture);
     }
 }

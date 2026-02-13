@@ -193,6 +193,23 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 						// Use strict types and convert value if needed
 						var targetType = _targetTypes![i];
 						var convertedVal = ValueConverter.ConvertValue(val, targetType);
+
+						// Normalize DateTime for Npgsql 6.0+ strictness based on column type
+						if (convertedVal is DateTime dt)
+						{
+							var dbType = _columnTypes![i];
+							if (dbType == NpgsqlTypes.NpgsqlDbType.Timestamp && dt.Kind != DateTimeKind.Unspecified)
+							{
+								// Writing to 'timestamp' (naive): Convert to Unspecified
+								convertedVal = DateTime.SpecifyKind(dt, DateTimeKind.Unspecified);
+							}
+							else if (dbType == NpgsqlTypes.NpgsqlDbType.TimestampTz && dt.Kind == DateTimeKind.Unspecified)
+							{
+								// Writing to 'timestamptz': Default to Utc
+								convertedVal = DateTime.SpecifyKind(dt, DateTimeKind.Utc);
+							}
+						}
+
 						await _writer.WriteAsync(convertedVal, _columnTypes![i], ct);
 					}
 				}
