@@ -40,7 +40,7 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
 
     #region BaseSqlDataWriter Implementation
 
-    public override async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
+    protected override async Task<TargetSchemaInfo?> InspectTargetInternalAsync(CancellationToken ct = default)
     {
         return await new OracleSchemaInspector(_connectionString, _options.Table, _logger).InspectTargetAsync(ct);
     }

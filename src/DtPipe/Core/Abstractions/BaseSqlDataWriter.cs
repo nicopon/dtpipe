@@ -21,8 +21,24 @@ public abstract class BaseSqlDataWriter : IDataWriter, ISchemaInspector, IKeyVal
 		_connectionString = connectionString;
 	}
 
-	#region ISchemaInspector Implementation (Abstract or Virtual)
-	public abstract Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default);
+	#region ISchemaInspector Implementation
+	private TargetSchemaInfo? _cachedSchema;
+
+	/// <summary>
+	/// Implementation of ISchemaInspector. Returns a cached result if available.
+	/// Derived classes should implement InspectTargetInternalAsync.
+	/// </summary>
+	public virtual async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
+	{
+		if (_cachedSchema != null) return _cachedSchema;
+		_cachedSchema = await InspectTargetInternalAsync(ct);
+		return _cachedSchema;
+	}
+
+	/// <summary>
+	/// Actual implementation of schema inspection, to be implemented by derived classes.
+	/// </summary>
+	protected abstract Task<TargetSchemaInfo?> InspectTargetInternalAsync(CancellationToken ct);
 	#endregion
 
 	#region IKeyValidator Implementation (Virtual with default empty)

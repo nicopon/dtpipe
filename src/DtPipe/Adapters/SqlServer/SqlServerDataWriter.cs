@@ -460,7 +460,7 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 	}
 
 	// ISchemaInspector ... (Kept similar to original but using _connection from base)
-	public override async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
+	protected override async Task<TargetSchemaInfo?> InspectTargetInternalAsync(CancellationToken ct = default)
 	{
 		// Create NEW connection for inspection to avoid interference with main connection state/transaction if any
 		await using var connection = new SqlConnection(_connectionString);

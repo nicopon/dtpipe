@@ -46,11 +46,18 @@ public sealed class OracleSchemaInspector : ISchemaInspector
 		bool hasOwner = !string.IsNullOrEmpty(inputOwner);
 		string GetView(string viewSuffix) => hasOwner ? $"ALL_{viewSuffix}" : $"USER_{viewSuffix}";
 
-		// Case-insensitive catalog lookup to find the actual table name
+		// Case-insensitive catalog lookup to find the actual table name AND its size
 		var tablesView = GetView("TABLES");
+		var segView = GetView("SEGMENTS");
 		var findSql = hasOwner
-			? $"SELECT table_name, num_rows FROM {tablesView} WHERE UPPER(owner) = UPPER(:p_owner) AND UPPER(table_name) = UPPER(:p_table)"
-			: $"SELECT table_name, num_rows FROM {tablesView} WHERE UPPER(table_name) = UPPER(:p_table)";
+			? $@"SELECT t.table_name, t.num_rows, s.bytes
+                 FROM {tablesView} t
+                 LEFT JOIN {segView} s ON t.table_name = s.segment_name AND t.owner = s.owner AND s.segment_type = 'TABLE'
+                 WHERE UPPER(t.owner) = UPPER(:p_owner) AND UPPER(t.table_name) = UPPER(:p_table)"
+			: $@"SELECT t.table_name, t.num_rows, s.bytes
+                 FROM {tablesView} t
+                 LEFT JOIN {segView} s ON t.table_name = s.segment_name AND s.segment_type = 'TABLE'
+                 WHERE UPPER(t.table_name) = UPPER(:p_table)";
 
 		using var findCmd = connection.CreateCommand();
 		findCmd.BindByName = true;
@@ -59,16 +66,17 @@ public sealed class OracleSchemaInspector : ISchemaInspector
 		findCmd.Parameters.Add(new OracleParameter("p_table", inputTable));
 
 		if (_logger.IsEnabled(LogLevel.Debug))
-			_logger.LogDebug("Case-insensitive table lookup: {Sql} with table={Table}", findSql, inputTable);
+			_logger.LogDebug("Case-insensitive table lookup with size: {Sql} with table={Table}", findSql, inputTable);
 
-		var matches = new List<(string TableName, long? RowCount)>();
+		var matches = new List<(string TableName, long? RowCount, long? SizeBytes)>();
 		using (var findReader = await findCmd.ExecuteReaderAsync(ct))
 		{
 			while (await findReader.ReadAsync(ct))
 			{
 				var catName = findReader.GetString(0);
 				var rows = findReader.IsDBNull(1) ? (long?)null : Convert.ToInt64(findReader.GetValue(1));
-				matches.Add((catName, rows));
+				var bytes = findReader.IsDBNull(2) ? (long?)null : Convert.ToInt64(findReader.GetValue(2));
+				matches.Add((catName, rows, bytes));
 			}
 		}
 
@@ -82,11 +90,13 @@ public sealed class OracleSchemaInspector : ISchemaInspector
 		// Resolve ambiguity: if multiple tables match case-insensitively, prefer exact match
 		string tableName;
 		long? rowCount;
+		long? sizeBytes;
 
 		if (matches.Count == 1)
 		{
 			tableName = matches[0].TableName;
 			rowCount = matches[0].RowCount;
+			sizeBytes = matches[0].SizeBytes;
 		}
 		else
 		{
@@ -96,6 +106,7 @@ public sealed class OracleSchemaInspector : ISchemaInspector
 			{
 				tableName = exactMatch.TableName;
 				rowCount = exactMatch.RowCount;
+				sizeBytes = exactMatch.SizeBytes;
 			}
 			else
 			{
@@ -105,11 +116,13 @@ public sealed class OracleSchemaInspector : ISchemaInspector
 				{
 					tableName = upperMatch.TableName;
 					rowCount = upperMatch.RowCount;
+					sizeBytes = upperMatch.SizeBytes;
 				}
 				else
 				{
 					tableName = matches[0].TableName;
 					rowCount = matches[0].RowCount;
+					sizeBytes = matches[0].SizeBytes;
 				}
 
 				if (_logger.IsEnabled(LogLevel.Warning))
@@ -145,11 +158,9 @@ public sealed class OracleSchemaInspector : ISchemaInspector
 		AddOwnerParam(columnsCmd);
 		columnsCmd.Parameters.Add(new OracleParameter("p_table", tableName));
 
-		var pkColumns = await GetConstraintColumnsAsync(connection, GetView("CONSTRAINTS"), GetView("CONS_COLUMNS"), "P", hasOwner, owner, tableName, ct);
-
-		var uniqueColumns = await GetConstraintColumnsAsync(connection, GetView("CONSTRAINTS"), GetView("CONS_COLUMNS"), "U", hasOwner, owner, tableName, ct);
-
-		long? sizeBytes = await GetTableSizeAsync(connection, GetView("SEGMENTS"), hasOwner, owner, tableName, ct);
+		var allConstraints = await GetAllConstraintColumnsAsync(connection, GetView("CONSTRAINTS"), GetView("CONS_COLUMNS"), hasOwner, owner, tableName, ct);
+		var pkColumns = allConstraints.Where(c => c.Type == "P").Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+		var uniqueColumns = allConstraints.Where(c => c.Type == "U").Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
 		var columns = new List<TargetColumnInfo>();
 		if (_logger.IsEnabled(LogLevel.Debug))
@@ -193,68 +204,33 @@ public sealed class OracleSchemaInspector : ISchemaInspector
 		);
 	}
 
-	private async Task<HashSet<string>> GetConstraintColumnsAsync(OracleConnection connection, string consView, string consColView, string constraintType, bool hasOwner, string owner, string tableName, CancellationToken ct)
+	private async Task<List<(string Name, string Type)>> GetAllConstraintColumnsAsync(OracleConnection connection, string consView, string consColView, bool hasOwner, string owner, string tableName, CancellationToken ct)
 	{
-		string sql;
-		if (hasOwner)
-		{
-			sql = $@"
-            SELECT cols.column_name
-            FROM {consView} cons
-            JOIN {consColView} cols ON cons.constraint_name = cols.constraint_name
-                AND cons.owner = cols.owner
-            WHERE cons.constraint_type = :p_type
-              AND cons.owner = :p_owner
-              AND cons.table_name = :p_table";
-		}
-		else
-		{
-			sql = $@"
-            SELECT cols.column_name
-            FROM {consView} cons
-            JOIN {consColView} cols ON cons.constraint_name = cols.constraint_name
-            WHERE cons.constraint_type = :p_type
-              AND cons.table_name = :p_table";
-		}
+		string sql = hasOwner
+			? $@"SELECT cols.column_name, cons.constraint_type
+                 FROM {consView} cons
+                 JOIN {consColView} cols ON cons.constraint_name = cols.constraint_name AND cons.owner = cols.owner
+                 WHERE cons.owner = :p_owner AND cons.table_name = :p_table AND cons.constraint_type IN ('P', 'U')"
+			: $@"SELECT cols.column_name, cons.constraint_type
+                 FROM {consView} cons
+                 JOIN {consColView} cols ON cons.constraint_name = cols.constraint_name
+                 WHERE cons.table_name = :p_table AND cons.constraint_type IN ('P', 'U')";
 
-		var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		using var cmd = connection.CreateCommand();
 		cmd.BindByName = true;
 		cmd.CommandText = sql;
-		cmd.Parameters.Add(new OracleParameter("p_type", constraintType));
 		if (hasOwner) cmd.Parameters.Add(new OracleParameter("p_owner", owner));
 		cmd.Parameters.Add(new OracleParameter("p_table", tableName));
 
+		var results = new List<(string Name, string Type)>();
 		using var reader = await cmd.ExecuteReaderAsync(ct);
 		while (await reader.ReadAsync(ct))
 		{
-			columns.Add(reader.GetString(0));
+			results.Add((reader.GetString(0), reader.GetString(1)));
 		}
-		return columns;
+		return results;
 	}
 
-	private async Task<long?> GetTableSizeAsync(OracleConnection connection, string segmentsView, bool hasOwner, string owner, string tableName, CancellationToken ct)
-	{
-		try
-		{
-			var sql = hasOwner
-				? $"SELECT bytes FROM {segmentsView} WHERE owner = :p_owner AND segment_name = :p_table AND segment_type = 'TABLE'"
-				: $"SELECT bytes FROM {segmentsView} WHERE segment_name = :p_table AND segment_type = 'TABLE'";
-
-			using var cmd = connection.CreateCommand();
-			cmd.BindByName = true;
-			cmd.CommandText = sql;
-			if (hasOwner) cmd.Parameters.Add(new OracleParameter("p_owner", owner));
-			cmd.Parameters.Add(new OracleParameter("p_table", tableName));
-
-			var result = await cmd.ExecuteScalarAsync(ct);
-			return result == null || result == DBNull.Value ? null : Convert.ToInt64(result);
-		}
-		catch
-		{
-			return null;
-		}
-	}
 
 	/// <summary>
 	/// Resolves a table name using DBMS_UTILITY.NAME_RESOLVE.

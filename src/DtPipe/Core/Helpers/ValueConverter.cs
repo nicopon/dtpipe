@@ -27,21 +27,25 @@ public static class ValueConverter
         if (val is string s)
         {
             if (underlyingTarget == typeof(Guid))
-                return Guid.Parse(s);
+                return Guid.TryParse(s, out var g) ? g : Guid.Parse(s);
             if (underlyingTarget == typeof(DateTime))
             {
                 if (DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dt))
                     return dt;
-                return DateTime.Parse(s, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces);
+                if (DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out dt))
+                    return dt;
+                return DateTime.Parse(s, CultureInfo.InvariantCulture);
             }
             if (underlyingTarget == typeof(DateTimeOffset))
             {
                 if (DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dto))
                     return dto;
-                return DateTimeOffset.Parse(s, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces);
+                if (DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out dto))
+                    return dto;
+                return DateTimeOffset.Parse(s, CultureInfo.InvariantCulture);
             }
             if (underlyingTarget == typeof(bool))
-                return bool.Parse(s);
+                return bool.TryParse(s, out var b) ? b : bool.Parse(s);
 
             return Convert.ChangeType(s, underlyingTarget, CultureInfo.InvariantCulture);
         }
