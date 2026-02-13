@@ -4,25 +4,18 @@ set -e
 # Configuration
 DIST_DIR="./dist/release"
 DTPIPE_BIN="$DIST_DIR/dtpipe"
-PG_CONN="pg:Host=localhost;Port=5433;Username=postgres;Password=password;Database=postgres"
-DB_CONTAINER="dtpipe-smoke-postgres"
-ARTIFACTS_DIR="tests/scripts/artifacts"
-mkdir -p "$ARTIFACTS_DIR"
-
-# Check binary
-if [ ! -f "$DTPIPE_BIN" ]; then
-    echo "Error: Binary not found at $DTPIPE_BIN. Run ./build.sh first."
-    exit 1
-fi
+# Resolve Infrastructure Dir
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+INFRA_DIR="$PROJECT_ROOT/tests/infra"
 
 echo "--- DtPipe Smoke Test ---"
 
 # 1. Setup Environment
-echo "1. Setting up Postgres..."
-docker rm -f $DB_CONTAINER 2>/dev/null || true
-docker run --name $DB_CONTAINER -e POSTGRES_PASSWORD=password -p 5433:5432 -d postgres:15-alpine > /dev/null
-echo "   Waiting for Postgres..."
-sleep 5 # Give it a moment to init
+echo "1. Setting up Shared Infrastructure..."
+"$INFRA_DIR/start_infra.sh"
+
+PG_CONN="pg:Host=localhost;Port=5440;Username=postgres;Password=password;Database=integration"
 
 # 2. Generate Source Data
 echo "2. Generating Source Data..."
@@ -71,4 +64,3 @@ fi
 
 # Cleanup
 rm "$ARTIFACTS_DIR"/smoke_source.csv "$ARTIFACTS_DIR"/smoke_verify.csv "$ARTIFACTS_DIR"/source_norm.csv "$ARTIFACTS_DIR"/verify_norm.csv
-docker rm -f $DB_CONTAINER > /dev/null

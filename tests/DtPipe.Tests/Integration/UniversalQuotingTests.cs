@@ -11,6 +11,9 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Oracle.ManagedDataAccess.Client;
+using Testcontainers.MsSql;
+using Testcontainers.Oracle;
+using Testcontainers.PostgreSql;
 using Xunit;
 using FluentAssertions;
 using System.Security.Cryptography;
@@ -22,22 +25,48 @@ namespace DtPipe.Tests.Integration;
 [Collection("Docker Integration Tests")]
 public class UniversalQuotingTests : IAsyncLifetime
 {
-    private const string PostgresConn = "Host=localhost;Port=5440;Database=integration;Username=postgres;Password=password";
-    private const string SqlServerConn = "Server=localhost,1434;Database=master;User Id=sa;Password=Password123!;Encrypt=False;TrustServerCertificate=True";
-    private const string OracleConn = "Data Source=localhost:1522/FREEPDB1;User Id=testuser;Password=password";
+    private string? _postgresConn;
+    private string? _sqlServerConn;
+    private string? _oracleConn;
     private string _sqlitePath = "";
     private string SqliteConn => $"Data Source={_sqlitePath}";
+
+    private PostgreSqlContainer? _postgresContainer;
+    private MsSqlContainer? _sqlServerContainer;
+    private OracleContainer? _oracleContainer;
 
     public async ValueTask InitializeAsync()
     {
         _sqlitePath = Path.Combine(Path.GetTempPath(), $"quoting_test_{Guid.NewGuid()}.db");
-        await Task.CompletedTask;
+
+        _postgresConn = await DockerHelper.GetPostgreSqlConnectionString(async () =>
+        {
+            _postgresContainer = new PostgreSqlBuilder("postgres:15-alpine").Build();
+            await _postgresContainer.StartAsync();
+            return _postgresContainer.GetConnectionString();
+        });
+
+        _sqlServerConn = await DockerHelper.GetSqlServerConnectionString(async () =>
+        {
+            _sqlServerContainer = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest").Build();
+            await _sqlServerContainer.StartAsync();
+            return _sqlServerContainer.GetConnectionString();
+        });
+
+        _oracleConn = await DockerHelper.GetOracleConnectionString(async () =>
+        {
+            _oracleContainer = new OracleBuilder("gvenzl/oracle-xe:21-slim-faststart").Build();
+            await _oracleContainer.StartAsync();
+            return _oracleContainer.GetConnectionString();
+        });
     }
 
     public async ValueTask DisposeAsync()
     {
         if (File.Exists(_sqlitePath)) try { File.Delete(_sqlitePath); } catch { }
-        await Task.CompletedTask;
+        if (_postgresContainer != null) await _postgresContainer.DisposeAsync();
+        if (_sqlServerContainer != null) await _sqlServerContainer.DisposeAsync();
+        if (_oracleContainer != null) await _oracleContainer.DisposeAsync();
     }
 
     public record QuotingScenario(
@@ -166,13 +195,13 @@ public class UniversalQuotingTests : IAsyncLifetime
         switch (provider)
         {
             case "postgres":
-                await using (var conn = new NpgsqlConnection(PostgresConn)) { await conn.OpenAsync(); await using (var cmd = new NpgsqlCommand(sql, conn)) await cmd.ExecuteNonQueryAsync(); }
+                await using (var conn = new NpgsqlConnection(_postgresConn)) { await conn.OpenAsync(); await using (var cmd = new NpgsqlCommand(sql, conn)) await cmd.ExecuteNonQueryAsync(); }
                 break;
             case "sqlserver":
-                await using (var conn = new SqlConnection(SqlServerConn)) { await conn.OpenAsync(); await using (var cmd = new SqlCommand(sql, conn)) await cmd.ExecuteNonQueryAsync(); }
+                await using (var conn = new SqlConnection(_sqlServerConn)) { await conn.OpenAsync(); await using (var cmd = new SqlCommand(sql, conn)) await cmd.ExecuteNonQueryAsync(); }
                 break;
             case "oracle":
-                await using (var conn = new OracleConnection(OracleConn)) { await conn.OpenAsync(); await using (var cmd = new OracleCommand(sql, conn)) await cmd.ExecuteNonQueryAsync(); }
+                await using (var conn = new OracleConnection(_oracleConn)) { await conn.OpenAsync(); await using (var cmd = new OracleCommand(sql, conn)) await cmd.ExecuteNonQueryAsync(); }
                 break;
             case "sqlite":
                 await using (var conn = new SqliteConnection(SqliteConn)) { await conn.OpenAsync(); await using (var cmd = new SqliteCommand(sql, conn)) await cmd.ExecuteNonQueryAsync(); }
@@ -184,9 +213,9 @@ public class UniversalQuotingTests : IAsyncLifetime
     {
         return provider switch
         {
-            "postgres" => (new PostgreSqlDataWriter(PostgresConn, new PostgreSqlWriterOptions { Table = tableNameExpected }, NullLogger<PostgreSqlDataWriter>.Instance), new DtPipe.Core.Dialects.PostgreSqlDialect()),
-            "sqlserver" => (new SqlServerDataWriter(SqlServerConn, new SqlServerWriterOptions { Table = tableNameExpected }, NullLogger<SqlServerDataWriter>.Instance), new DtPipe.Core.Dialects.SqlServerDialect()),
-            "oracle" => (new OracleDataWriter(OracleConn, new OracleWriterOptions { Table = tableNameExpected }, NullLogger<OracleDataWriter>.Instance), new DtPipe.Core.Dialects.OracleDialect()),
+            "postgres" => (new PostgreSqlDataWriter(_postgresConn!, new PostgreSqlWriterOptions { Table = tableNameExpected }, NullLogger<PostgreSqlDataWriter>.Instance), new DtPipe.Core.Dialects.PostgreSqlDialect()),
+            "sqlserver" => (new SqlServerDataWriter(_sqlServerConn!, new SqlServerWriterOptions { Table = tableNameExpected }, NullLogger<SqlServerDataWriter>.Instance), new DtPipe.Core.Dialects.SqlServerDialect()),
+            "oracle" => (new OracleDataWriter(_oracleConn!, new OracleWriterOptions { Table = tableNameExpected }, NullLogger<OracleDataWriter>.Instance), new DtPipe.Core.Dialects.OracleDialect()),
             "sqlite" => (new SqliteDataWriter(SqliteConn, new SqliteWriterOptions { Table = tableNameExpected }, NullLogger<SqliteDataWriter>.Instance), new DtPipe.Core.Dialects.SqliteDialect()),
             _ => throw new ArgumentException("Unknown provider")
         };

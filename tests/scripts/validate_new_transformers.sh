@@ -19,7 +19,7 @@ echo "---------------------------------------------------"
 # 0. Generate Source Data
 echo "Generating source data..."
 export DTPIPE_NO_TUI=1
-"$DTPIPE" -i "sample:100" \
+"$DTPIPE" -i "generate:100" \
     --fake "Id:random.number" \
     --fake "Category:vehicle.type" \
     --fake "Value:random.number" \

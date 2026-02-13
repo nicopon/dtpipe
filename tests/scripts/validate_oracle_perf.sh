@@ -41,30 +41,29 @@ if ! check_docker; then
     exit 0
 fi
 
+# Resolve Infrastructure Dir
+INFRA_DIR="$PROJECT_ROOT/tests/infra"
+
 echo -e "${GREEN}Starting Oracle Performance Test...${NC}"
 
-# Cleanup function
+# Cleanup function (modified for shared infra)
 cleanup() {
-    echo "Cleaning up containers..."
-    docker rm -f dtpipe-oracle-perf &> /dev/null
+    echo "Cleaning up..."
+    # We don't delete shared containers anymore
 }
 trap cleanup EXIT
 
-# Start Oracle Container
+# Use shared infrastructure
 echo "------------------------------------------------"
-echo "Starting Oracle Container..."
+echo "Ensuring Shared Infrastructure is Ready..."
+"$INFRA_DIR/start_infra.sh"
 
-# Use slim image for speed
-docker run --name dtpipe-oracle-perf -e ORACLE_PASSWORD=MySecretPassword123! -p 1521:1521 -d gvenzl/oracle-free:slim
-
-# Wait for Oracle
-echo "Waiting for Oracle (30s)..."
-# In a real script we might want a loop checking port availability or log output, but sleep is simple
-sleep 30
+ORA_CONTAINER="dtpipe-integ-oracle"
+ORA_PORT=1522
 
 # Create Target Table
 echo "Creating target table..."
-docker exec -i dtpipe-oracle-perf sqlplus system/MySecretPassword123!@localhost:1521/FREEPDB1 <<EOF
+docker exec -i "$ORA_CONTAINER" sqlplus system/password@localhost:"$ORA_PORT"/FREEPDB1 <<EOF
 CREATE TABLE PerformanceTest (
     Id NUMBER,
     Name VARCHAR2(100),
@@ -83,11 +82,11 @@ run_test() {
     
     local START_TIME=$(date +%s)
     
-    $DTPIPE_BIN --input "sample:$ROW_COUNT" \
+    $DTPIPE_BIN --input "generate:$ROW_COUNT" \
                    --fake "Id:random.number" --fake "Name:name.fullName" --fake "CreatedDate:date.past" \
-                   --drop "SampleIndex" \
+                   --drop "GenerateIndex" \
                    --query "SELECT 1" \
-                   --output "ora:Data Source=localhost:1521/FREEPDB1;User Id=system;Password=MySecretPassword123!;" \
+                   --output "ora:Data Source=localhost:$ORA_PORT/FREEPDB1;User Id=system;Password=password;" \
                    --ora-table "PerformanceTest" \
                    --ora-strategy "Truncate" \
                    --ora-insert-mode "$MODE" \
@@ -104,7 +103,7 @@ run_test "Bulk"
 
 # Verify count
 echo "Verifying row count..."
-COUNT=$(docker exec -i dtpipe-oracle-perf sqlplus -s system/MySecretPassword123!@localhost:1521/FREEPDB1 <<EOF
+COUNT=$(docker exec -i "$ORA_CONTAINER" sqlplus -s system/password@localhost:"$ORA_PORT"/FREEPDB1 <<EOF
 SET HEADING OFF;
 SELECT COUNT(*) FROM PerformanceTest;
 EXIT;

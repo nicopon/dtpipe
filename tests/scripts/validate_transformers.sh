@@ -37,9 +37,9 @@ trap cleanup EXIT
 echo "----------------------------------------"
 echo "Step 0: Generate Reference Source"
 echo "----------------------------------------"
-$DTPIPE --input "sample:20" \
+$DTPIPE --input "generate:20" \
            --fake "Id:random.number" --fake "Name:name.fullName" --fake "Amount:finance.amount" --fake "Secret:internet.password" \
-           --drop "SampleIndex" \
+           --drop "GenerateIndex" \
            --query "SELECT * FROM dummy" \
            --output "$ARTIFACTS_DIR/ref_trans.csv"
 

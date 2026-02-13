@@ -27,60 +27,24 @@ cleanup() {
     rm -f "$INPUT_DIR"/vicious_source.csv "$INPUT_DIR"/vicious.parquet "$INPUT_DIR"/vicious.db "$INPUT_DIR"/query.sql "$INPUT_DIR"/result_*.csv "$INPUT_DIR"/high_volume.csv "$INPUT_DIR"/high_volume.parquet "$INPUT_DIR"/high_volume.db "$INPUT_DIR"/composite_*.csv "$INPUT_DIR"/comp_*.csv "$INPUT_DIR"/vicious_inc.csv "$INPUT_DIR"/composite.db "$INPUT_DIR"/composite.duckdb
     # Also clean locally just in case
     rm -f result_*.csv high_volume.csv high_volume.parquet high_volume.db composite.db composite.duckdb
-    docker rm -f $PG_CONTAINER $MSSQL_CONTAINER $ORA_CONTAINER > /dev/null 2>&1 || true
 }
 cleanup # Pre-clean
 
+# Resolve Infrastructure Dir
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+INFRA_DIR="$PROJECT_ROOT/tests/infra"
+
 # ---------------------------------------------------------
-# 1. Environment Setup
+# 1. Environment Setup (Using Shared Infrastructure)
 # ---------------------------------------------------------
-# ---------------------------------------------------------
-# 1. Environment Setup (Parallel Startup)
-# ---------------------------------------------------------
-echo "[1/9] Starting Containers (Postgres, MSSQL, Oracle)..."
-docker run --name $PG_CONTAINER -e POSTGRES_PASSWORD=password -p 5434:5432 -d postgres:15-alpine > /dev/null
+echo "[1/9] Starting Infrastructure (Postgres, MSSQL, Oracle)..."
+"$INFRA_DIR/start_infra.sh"
 
-# MSSQL
-MSSQL_CONTAINER="dtpipe-golden-mssql"
-docker run --name $MSSQL_CONTAINER -e "ACCEPT_EULA=Y" -e "MSSQL_SA_PASSWORD=MySecretPassword123!" -p 1434:1433 -d mcr.microsoft.com/azure-sql-edge:latest > /dev/null
-
-# Oracle
-ORA_CONTAINER="dtpipe-golden-oracle"
-docker run --name $ORA_CONTAINER -e ORACLE_PASSWORD=MySecretPassword123! -p 1522:1521 -d gvenzl/oracle-free:slim > /dev/null
-
-echo "      Waiting for containers to initialize..."
-
-# Wait Loop Helper
-wait_for_db() {
-    local name=$1
-    local conn=$2
-    local query=$3
-    local max_retries=20
-    local i=0
-    
-    echo -n "      Waiting for $name..."
-    until $DTPIPE_BIN -i "$conn" -q "$query" -o "csv" > /dev/null 2>&1; do
-        i=$((i + 1))
-        if [ $i -ge $max_retries ]; then
-            echo " FAILED (Timeout)"
-            docker logs $name | tail -n 10
-            exit 1
-        fi
-        echo -n "."
-        sleep 5
-    done
-    echo " OK"
-}
-
-# MSSQL Connection for Check
-MSSQL_CONN_CHECK="mssql:Server=localhost,1434;Database=master;User Id=sa;Password=MySecretPassword123!;TrustServerCertificate=True;Encrypt=False"
-# Oracle Connection for Check
-ORA_CONN_CHECK="ora:Data Source=localhost:1522/FREEPDB1;User Id=system;Password=MySecretPassword123!;"
-
-# Perform Checks
-wait_for_db "Postgres" "$PG_CONN" "SELECT 1"
-wait_for_db "MSSQL" "$MSSQL_CONN_CHECK" "SELECT 1"
-wait_for_db "Oracle" "$ORA_CONN_CHECK" "SELECT 1 FROM DUAL"
+# Connection Strings (Matching Shared Infrastructure)
+PG_CONN="pg:Host=localhost;Port=5440;Database=integration;Username=postgres;Password=password"
+MSSQL_CONN="mssql:Server=localhost,1434;Database=master;User Id=sa;Password=Password123!;TrustServerCertificate=True"
+ORA_CONN="ora:Data Source=localhost:1522/FREEPDB1;User Id=testuser;Password=password;Pooling=false"
 
 # ---------------------------------------------------------
 # 2. Generate VICIOUS Source Data (CSV)
@@ -184,10 +148,8 @@ if [ "$COUNT" != "7" ]; then echo "❌ FAILED: SQLite Count Mismatch"; exit 1; f
 echo "✅ SQLite Count Verified."
 rm "$INPUT_DIR"/result_count.csv
 
-# ... Wait for containers if needed ...
-echo "      Ensuring containers are ready..."
-sleep 20 # Total wait ~20s + exec time of steps 2-5 (~5s) = 25s. Oracle needs 30s. Adding small buffer.
-sleep 10 
+# Container readiness is now guaranteed by start_infra.sh
+echo "      Containers are ready."
 
 # ---------------------------------------------------------
 # 6. Pipeline 3: SQLite -> Postgres (Upsert)

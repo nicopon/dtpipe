@@ -28,7 +28,6 @@ fi
 # Cleanup function
 cleanup() {
     echo "Cleaning up..."
-    docker rm -f dtpipe-inc-postgres-debug &> /dev/null
     rm -f source_v1.csv source_v2.csv result_*.csv
 }
 trap cleanup EXIT
@@ -95,12 +94,18 @@ verify_ignore() {
 
 generate_data
 
-echo -e "\n${CYAN}--- Testing PostgreSQL (Debug) ---${NC}"
-docker run --name dtpipe-inc-postgres-debug -e POSTGRES_PASSWORD=password -p 5434:5432 -d postgres:latest > /dev/null
-echo "Waiting for Postgres (5s)..."
-sleep 5
+# Start Infrastructure
+INFRA_DIR="$PROJECT_ROOT/tests/infra"
+if [ -f "$INFRA_DIR/start_infra.sh" ]; then
+    echo -e "${YELLOW}Starting shared infrastructure...${NC}"
+    "$INFRA_DIR/start_infra.sh"
+else
+    echo -e "${RED}Error: start_infra.sh not found at $INFRA_DIR${NC}"
+    exit 1
+fi
 
-PG_CONN="pg:Host=localhost;Port=5434;Username=postgres;Password=password;Database=postgres"
+PG_CONN="pg:Host=localhost;Port=5440;Username=postgres;Password=password;Database=integration"
+
 
 # A. Upsert Test
 echo "Postgres: Upsert Strategy"
