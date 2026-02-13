@@ -151,7 +151,7 @@ public class ExportService
 		{
 			// Run Concurrent Pipeline
 			var startTime = DateTime.UtcNow;
-			var producerTask = ProduceRowsAsync(reader, readerToTransform.Writer, options.BatchSize, options.Limit, options.SampleRate, options.SampleSeed, progress, linkedCts, effectiveCt, _logger);
+			var producerTask = ProduceRowsAsync(reader, readerToTransform.Writer, options.BatchSize, options.Limit, options.SamplingRate, options.SamplingSeed, progress, linkedCts, effectiveCt, _logger);
 			var transformTask = TransformRowsAsync(readerToTransform.Reader, transformToWriter.Writer, pipeline, progress, effectiveCt);
 			// Consumer needs IExportProgress
 			var consumerTask = ConsumeRowsAsync(transformToWriter.Reader, writer, options.BatchSize, progress, r => Interlocked.Add(ref totalRows, r), effectiveCt, _logger);
@@ -240,8 +240,8 @@ public class ExportService
 		ChannelWriter<object?[]> output,
 		int batchSize,
 		int limit,
-		double sampleRate,
-		int? sampleSeed,
+		double samplingRate,
+		int? samplingSeed,
 		IExportProgress progress, // Changed type
 		CancellationTokenSource linkedCts,
 		CancellationToken ct,
@@ -251,11 +251,11 @@ public class ExportService
 
 		// Sampling initialization
 		Random? sampler = null;
-		if (sampleRate > 0 && sampleRate < 1.0)
+		if (samplingRate > 0 && samplingRate < 1.0)
 		{
-			sampler = sampleSeed.HasValue ? new Random(sampleSeed.Value) : Random.Shared;
+			sampler = samplingSeed.HasValue ? new Random(samplingSeed.Value) : Random.Shared;
 			if (logger.IsEnabled(LogLevel.Information))
-				logger.LogInformation("Data sampling enabled: {Rate:P0} (Seed: {Seed})", sampleRate, sampleSeed.HasValue ? sampleSeed.Value.ToString() : "Auto");
+				logger.LogInformation("Data sampling enabled: {Rate:P0} (Seed: {Seed})", samplingRate, samplingSeed.HasValue ? samplingSeed.Value.ToString() : "Auto");
 		}
 
 		long rowCount = 0;
@@ -267,7 +267,7 @@ public class ExportService
 					logger.LogDebug("Read batch of {Count} rows", batchChunk.Length);
 				for (var i = 0; i < batchChunk.Length; i++)
 				{
-					if (sampler != null && sampler.NextDouble() > sampleRate)
+					if (sampler != null && sampler.NextDouble() > samplingRate)
 					{
 						continue;
 					}

@@ -23,8 +23,8 @@ public static class RawJobBuilder
 		Option<int> batchSizeOption,
 		Option<bool> unsafeQueryOption,
 		Option<int> limitOption,
-		Option<double> sampleRateOption,
-		Option<int?> sampleSeedOption,
+		Option<double> samplingRateOption,
+		Option<int?> samplingSeedOption,
 		Option<string?> logOption,
 		Option<string?> keyOption,
 		Option<string?> preExecOption,
@@ -52,16 +52,16 @@ public static class RawJobBuilder
 					job = job with { Limit = limitOverride };
 				}
 
-				var sampleRateOverride = parseResult.GetValue(sampleRateOption);
-				if (sampleRateOverride is > 0 and < 1.0)
+				var samplingRateOverride = parseResult.GetValue(samplingRateOption);
+				if (samplingRateOverride is > 0 and < 1.0)
 				{
-					job = job with { SampleRate = sampleRateOverride };
+					job = job with { SamplingRate = samplingRateOverride };
 				}
 
-				var sampleSeedOverride = parseResult.GetValue(sampleSeedOption);
-				if (sampleSeedOverride.HasValue)
+				var samplingSeedOverride = parseResult.GetValue(samplingSeedOption);
+				if (samplingSeedOverride.HasValue)
 				{
-					job = job with { SampleSeed = sampleSeedOverride };
+					job = job with { SamplingSeed = samplingSeedOverride };
 				}
 
 				// Parse --dry-run (special handling for flag/value)
@@ -140,8 +140,8 @@ public static class RawJobBuilder
 				UnsafeQuery = parseResult.GetValue(unsafeQueryOption),
 				DryRun = false, // Handled later for options
 				Limit = parseResult.GetValue(limitOption),
-				SampleRate = parseResult.GetValue(sampleRateOption),
-				SampleSeed = parseResult.GetValue(sampleSeedOption),
+				SamplingRate = parseResult.GetValue(samplingRateOption),
+				SamplingSeed = parseResult.GetValue(samplingSeedOption),
 				LogPath = parseResult.GetValue(logOption),
 				Key = parseResult.GetValue(keyOption),
 				PostExec = parseResult.GetValue(postExecOption),

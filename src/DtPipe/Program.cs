@@ -4,7 +4,7 @@ using DtPipe.Adapters.DuckDB;
 using DtPipe.Adapters.Oracle;
 using DtPipe.Adapters.Parquet;
 using DtPipe.Adapters.PostgreSQL;
-using DtPipe.Adapters.Sample;
+using DtPipe.Adapters.Generate;
 using DtPipe.Adapters.Sqlite;
 using DtPipe.Adapters.SqlServer;
 using DtPipe.Cli;
@@ -100,7 +100,7 @@ class Program
 		RegisterReader<SqliteReaderDescriptor>(services);
 		RegisterReader<CsvReaderDescriptor>(services);
 		RegisterReader<ParquetReaderDescriptor>(services);
-		RegisterReader<SampleReaderDescriptor>(services);
+		RegisterReader<GenerateReaderDescriptor>(services);
 
 		// Writer Factories using Generic Descriptor Bridge
 		RegisterWriter<CsvWriterDescriptor>(services);

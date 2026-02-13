@@ -58,8 +58,8 @@ public static partial class JobFileParser
 			QueryTimeout = yamlJob.QueryTimeout ?? 0,
 			Strategy = yamlJob.Strategy,
 			InsertMode = yamlJob.InsertMode,
-			SampleRate = yamlJob.SampleRate ?? 1.0,
-			SampleSeed = yamlJob.SampleSeed,
+			SamplingRate = yamlJob.SamplingRate ?? 1.0,
+			SamplingSeed = yamlJob.SamplingSeed,
 			Transformers = ParseTransformers(yamlJob.Transformers),
 			ProviderOptions = yamlJob.ProviderOptions
 		};
@@ -179,8 +179,8 @@ public static partial class JobFileParser
 		public string? InsertMode { get; set; }
 		public int? ConnectionTimeout { get; set; }
 		public int? QueryTimeout { get; set; }
-		public double? SampleRate { get; set; }
-		public int? SampleSeed { get; set; }
+		public double? SamplingRate { get; set; }
+		public int? SamplingSeed { get; set; }
 		public List<Dictionary<object, object>>? Transformers { get; set; }
 		public Dictionary<string, Dictionary<string, object>>? ProviderOptions { get; set; }
 	}

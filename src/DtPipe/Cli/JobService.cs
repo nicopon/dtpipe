@@ -71,10 +71,12 @@ public class JobService
 		var limitOption = new Option<int>("--limit") { Description = "Max rows (0 = unlimited)" };
 		limitOption.DefaultValueFactory = _ => 0;
 
-		var sampleRateOption = new Option<double>("--sample-rate") { Description = "Sampling probability (0.0-1.0)" };
-		sampleRateOption.DefaultValueFactory = _ => 1.0;
+		var samplingRateOption = new Option<double>("--sampling-rate") { Description = "Sampling probability (0.0-1.0)" };
+		samplingRateOption.DefaultValueFactory = _ => 1.0;
+		samplingRateOption.Aliases.Add("--sample-rate"); // Hidden alias support for backward compatibility
 
-		var sampleSeedOption = new Option<int?>("--sample-seed") { Description = "Seed for sampling" };
+		var samplingSeedOption = new Option<int?>("--sampling-seed") { Description = "Seed for sampling (for reproducibility)" };
+		samplingSeedOption.Aliases.Add("--sample-seed");
 		var jobOption = new Option<string?>("--job") { Description = "Path to YAML job file" };
 		var exportJobOption = new Option<string?>("--export-job") { Description = "Export config to YAML" };
 		var logOption = new Option<string?>("--log") { Description = "Path to log file" };
@@ -94,7 +96,7 @@ public class JobService
 		tableOption.Aliases.Add("-t");
 
 		// Core Help Options
-		var coreOptions = new List<Option> { inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption, unsafeQueryOption, dryRunOption, limitOption, sampleRateOption, sampleSeedOption, keyOption, jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption, finallyExecOption, strategyOption, insertModeOption, tableOption };
+		var coreOptions = new List<Option> { inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption, unsafeQueryOption, dryRunOption, limitOption, samplingRateOption, samplingSeedOption, keyOption, jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption, finallyExecOption, strategyOption, insertModeOption, tableOption };
 
 		var rootCommand = new RootCommand("A simple, self-contained CLI for performance-focused data streaming & anonymization");
 		foreach (var opt in coreOptions) rootCommand.Options.Add(opt);
@@ -127,12 +129,15 @@ public class JobService
 				}
 			}
 
+			// Check for deprecated options/prefixes
+			CheckDeprecations(parseResult, _console);
+
 			// Build Job Definition
 			var (job, jobExitCode) = RawJobBuilder.Build(
 				parseResult,
 				jobOption, inputOption, queryOption, outputOption,
 				connectionTimeoutOption, queryTimeoutOption, batchSizeOption,
-				unsafeQueryOption, limitOption, sampleRateOption, sampleSeedOption, logOption, keyOption,
+				unsafeQueryOption, limitOption, samplingRateOption, samplingSeedOption, logOption, keyOption,
 				preExecOption, postExecOption, onErrorExecOption, finallyExecOption, strategyOption, insertModeOption, tableOption);
 
 			if (jobExitCode != 0)
@@ -286,8 +291,8 @@ public class JobService
 				UnsafeQuery = job.UnsafeQuery,
 				DryRunCount = RawJobBuilder.ParseDryRunFromArgs(Environment.GetCommandLineArgs()),
 				Limit = job.Limit,
-				SampleRate = job.SampleRate,
-				SampleSeed = job.SampleSeed,
+				SamplingRate = job.SamplingRate,
+				SamplingSeed = job.SamplingSeed,
 				LogPath = job.LogPath,
 				Key = job.Key,
 				PostExec = job.PostExec,
@@ -531,5 +536,36 @@ public class JobService
 		}
 
 		return input;
+	}
+
+	private static void CheckDeprecations(ParseResult parseResult, IAnsiConsole console)
+	{
+		var args = Environment.GetCommandLineArgs();
+
+		// 1. Check for --sample-rate or --sample-seed
+		if (args.Any(a => a.Equals("--sample-rate", StringComparison.OrdinalIgnoreCase)))
+		{
+			console.Write(new Markup($"[yellow]Warning: Option '--sample-rate' is deprecated and will be removed in a future version. Please use '--sampling-rate' instead.[/]{Environment.NewLine}"));
+		}
+		if (args.Any(a => a.Equals("--sample-seed", StringComparison.OrdinalIgnoreCase)))
+		{
+			console.Write(new Markup($"[yellow]Warning: Option '--sample-seed' is deprecated and will be removed in a future version. Please use '--sampling-seed' instead.[/]{Environment.NewLine}"));
+		}
+
+		// 2. Check for sample: prefix in -i/--input
+		// We look for any argument that starts with sample:
+		// However, to be more precise, we should check if it follows -i or --input
+		for (int i = 0; i < args.Length; i++)
+		{
+			var arg = args[i];
+			if (arg.Equals("-i", StringComparison.OrdinalIgnoreCase) || arg.Equals("--input", StringComparison.OrdinalIgnoreCase))
+			{
+				if (i + 1 < args.Length && args[i + 1].StartsWith("sample:", StringComparison.OrdinalIgnoreCase))
+				{
+					console.Write(new Markup($"[yellow]Warning: Provider prefix 'sample:' is deprecated and will be removed in a future version. Please use 'generate:' instead.[/]{Environment.NewLine}"));
+					break;
+				}
+			}
+		}
 	}
 }
