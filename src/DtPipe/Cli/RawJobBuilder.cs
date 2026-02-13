@@ -144,6 +144,7 @@ public static class RawJobBuilder
 				SamplingSeed = parseResult.GetValue(samplingSeedOption),
 				LogPath = parseResult.GetValue(logOption),
 				Key = parseResult.GetValue(keyOption),
+				PreExec = parseResult.GetValue(preExecOption),
 				PostExec = parseResult.GetValue(postExecOption),
 				OnErrorExec = parseResult.GetValue(onErrorExecOption),
 				FinallyExec = parseResult.GetValue(finallyExecOption),

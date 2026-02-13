@@ -295,6 +295,7 @@ public class JobService
 				SamplingSeed = job.SamplingSeed,
 				LogPath = job.LogPath,
 				Key = job.Key,
+				PreExec = job.PreExec,
 				PostExec = job.PostExec,
 				OnErrorExec = job.OnErrorExec,
 				FinallyExec = job.FinallyExec,
