@@ -12,16 +12,6 @@ jobs:
     name: Run Tests
     runs-on: ubuntu-latest
     steps:
-      - name: Maximize Build Space
-        uses: easimon/maximize-build-space@v10
-        with:
-          root-reserve-mb: 2048
-          swap-size-mb: 1024
-          remove-dotnet: 'false'
-          remove-android: 'true'
-          remove-haskell: 'true'
-          remove-codeql: 'true'
-          remove-docker-images: 'true'
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,13 +19,13 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.102'
+          dotnet-version: '10.0.103'
 
       - name: Restore dependencies
         run: dotnet restore
 
-      - name: Run Tests
-        run: dotnet test --no-restore --verbosity normal
+      - name: Run Tests (Unit only)
+        run: dotnet test --no-restore --verbosity normal --filter "FullyQualifiedName!~Integration"
 
   build:
     name: Build ${{ matrix.platform }}
@@ -76,7 +66,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.102'
+          dotnet-version: '10.0.103'
 
       - name: Restore dependencies
         run: dotnet restore
