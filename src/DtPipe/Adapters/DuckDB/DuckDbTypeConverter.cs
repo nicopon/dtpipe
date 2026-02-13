@@ -1,11 +1,15 @@
+using DtPipe.Core.Abstractions;
+
 namespace DtPipe.Adapters.DuckDB;
 
 /// <summary>
-/// Maps CLR types to DuckDB SQL types.
+/// DuckDB-specific type mapper implementing CLR ↔ DuckDB type conversions.
 /// </summary>
-public static class DuckDbTypeMapper
+public class DuckDbTypeConverter : ITypeMapper
 {
-	public static string MapToProviderType(Type clrType)
+	public static readonly DuckDbTypeConverter Instance = new();
+
+	public string MapToProviderType(Type clrType)
 	{
 		var underlying = Nullable.GetUnderlyingType(clrType) ?? clrType;
 
@@ -27,7 +31,7 @@ public static class DuckDbTypeMapper
 		};
 	}
 
-	public static Type MapFromProviderType(string providerType)
+	public Type MapFromProviderType(string providerType)
 	{
 		var baseType = providerType.Split('(')[0].Trim().ToUpperInvariant();
 
@@ -46,5 +50,11 @@ public static class DuckDbTypeMapper
 			"BLOB" or "BINARY" or "VARBINARY" => typeof(byte[]),
 			_ => typeof(string)
 		};
+	}
+
+	public string BuildNativeType(string dataType, int? dataLength, int? precision, int? scale, int? charLength)
+	{
+		// Fallback as acceptable per Tâche 2.2 step 3
+		return dataType;
 	}
 }

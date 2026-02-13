@@ -1,13 +1,10 @@
-using System;
-using DtPipe.Cli.Abstractions;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Models;
 
 namespace DtPipe.Adapters.PostgreSQL;
 
-public class PostgreSqlTypeMapper : ITypeMapper
+public class PostgreSqlTypeConverter : ITypeMapper
 {
-	public static readonly PostgreSqlTypeMapper Instance = new();
+	public static readonly PostgreSqlTypeConverter Instance = new();
 
 	public string MapToProviderType(Type clrType)
 	{
@@ -59,6 +56,13 @@ public class PostgreSqlTypeMapper : ITypeMapper
 			"text" or "varchar" or "character varying" or "char" or "character" => typeof(string),
 			_ => typeof(string)
 		};
+	}
+
+	public string BuildNativeType(string dataType, int? dataLength, int? precision, int? scale, int? charLength)
+	{
+		// Simplified: return the type as-is for adapters that don't need detailed native type building
+		// Fallback as acceptable per Tâche 2.2 step 3
+		return dataType;
 	}
 
 	public NpgsqlTypes.NpgsqlDbType MapToNpgsqlDbType(Type clrType)
