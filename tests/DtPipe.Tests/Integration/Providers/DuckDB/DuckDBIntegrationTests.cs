@@ -102,8 +102,8 @@ public class DuckDBIntegrationTests : IAsyncLifetime
 				using var cmd = connection.CreateCommand();
 				cmd.CommandText = $@"
                     CREATE TABLE {tableNameRaw} (
-                        Code VARCHAR NOT NULL, 
-                        PreciseNum DECIMAL(10,5), 
+                        Code VARCHAR NOT NULL,
+                        PreciseNum DECIMAL(10,5),
                         ""My Blob"" BLOB,
                         Tiny TINYINT,
                         PRIMARY KEY (Code)
@@ -131,7 +131,7 @@ public class DuckDBIntegrationTests : IAsyncLifetime
 			var batch = new List<object?[]> { new object?[] { "NEW", 99.12345m, new byte[] { 0xBB }, 120 } };
 
 			// Act
-			await using var writer = new DuckDbDataWriter(connectionString, writerOptions, NullLogger<DuckDbDataWriter>.Instance);
+			await using var writer = new DuckDbDataWriter(connectionString, writerOptions, NullLogger<DuckDbDataWriter>.Instance, DuckDbTypeConverter.Instance);
 			await writer.InitializeAsync(columns);
 			await writer.WriteBatchAsync(batch);
 			await writer.CompleteAsync();
