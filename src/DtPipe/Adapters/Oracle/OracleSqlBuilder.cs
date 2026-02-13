@@ -66,7 +66,7 @@ internal static class OracleSqlBuilder
 		}
 		sb.Append(')');
 
-		var types = columns.Select(c => OracleTypeMapper.GetOracleDbType(c.ClrType, dateTimeMapping)).ToArray();
+		var types = columns.Select(c => OracleTypeConverter.GetOracleDbType(c.ClrType)).ToArray();
 		return (sb.ToString(), types);
 	}
 
@@ -99,7 +99,7 @@ internal static class OracleSqlBuilder
 		}
 		sb.Append(')');
 
-		var types = columns.Select(c => OracleTypeMapper.GetOracleDbType(c.ClrType, dateTimeMapping)).ToArray();
+		var types = columns.Select(c => OracleTypeConverter.GetOracleDbType(c.ClrType)).ToArray();
 		return (sb.ToString(), types);
 	}
 

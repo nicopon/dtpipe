@@ -165,13 +165,13 @@ public sealed class OracleSchemaInspector : ISchemaInspector
 			var scale = reader.IsDBNull(5) ? (int?)null : reader.GetInt32(5);
 			var charLength = reader.IsDBNull(6) ? (int?)null : reader.GetInt32(6);
 
-			var nativeType = OracleTypeMapper.BuildOracleNativeType(dataType, dataLength, precision, scale, charLength);
+			var nativeType = OracleTypeConverter.Instance.BuildNativeType(dataType, dataLength, precision, scale, charLength);
 			var maxLength = charLength ?? dataLength;
 
 			columns.Add(new TargetColumnInfo(
 				colName,
 				nativeType,
-				OracleTypeMapper.MapOracleToClr(dataType),
+				OracleTypeConverter.Instance.MapFromProviderType(dataType),
 				isNullable,
 				pkColumns.Contains(colName),
 				uniqueColumns.Contains(colName),
