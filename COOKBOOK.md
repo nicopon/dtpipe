@@ -187,11 +187,11 @@ Use `--script` for complex logic.
    --compute "Category:if (row.Age < 18) return 'Minor'; else return 'Adult';"
 
 ### 4. Generating Test Data
-Use the `sample:<count>` provider to generate rows on-the-fly. By default, it only generates a `SampleIndex` column (useful for seeding). Combine it with `--fake` for rich datasets.
+Use the `generate:<count>` provider to generate rows on-the-fly. By default, it only generates a `SampleIndex` column (useful for seeding). Combine it with `--fake` for rich datasets.
 
 ```bash
 # Generate 1M rows of fake users
-./dtpipe -i "sample:1000000" \
+./dtpipe -i "generate:1000000" \
   --fake "Id:random.number" \
   --fake "Name:name.fullName" \
   --fake "Email:internet.email" \
@@ -199,6 +199,23 @@ Use the `sample:<count>` provider to generate rows on-the-fly. By default, it on
   -o users.csv
 ```
 > **Tip:** Use `--drop "SampleIndex"` if you don't want the sequence index in your final output.
+
+### 5. Random Sampling
+Use `--sampling-rate [0-1]` to export only a subset of your data. This works with any provider.
+
+```bash
+# Export only 10% of a large database table
+dtpipe -i "ora:..." -q "SELECT * FROM LargeTable" --sampling-rate 0.1 -o subset.parquet
+```
+
+#### Deterministic Sampling (Seed)
+By default, sampling is random. Use `--sampling-seed [N]` to initialize the random generator with a specific value.
+This ensures that the **same subset of rows** is selected for the same input data, which is essential for **reproducibility** in tests or debugging.
+
+```bash
+# Always get the same 10% subset
+dtpipe ... --sampling-rate 0.1 --sampling-seed 12345 ...
+```
 ```
 
 ### Filtering Data

@@ -69,7 +69,7 @@ DtPipe auto-detects providers from file extensions (`.csv`, `.parquet`, `.duckdb
 | **SQL Server**| `mssql:` | `mssql:Server=.;Database=mydb` |
 | **CSV** | `csv:` / `.csv` | `data.csv` |
 | **Parquet** | `parquet:` / `.parquet`| `data.parquet` |
-| **Sample Gen** | `sample:` | `sample:1000000` (generate `SampleIndex` column) |
+| **Data Gen** | `generate:` | `generate:1000000` (generate `SampleIndex` column) |
 | **Keyring** | `keyring://` | `keyring://my-prod-db` |
 | **STDIN/OUT** | `csv` or `parquet` | `csv` (no file path) |
 
@@ -101,6 +101,8 @@ Use `--fake "Col:Generator"` to replace sensitive data.
 | `--batch-size` | Rows per buffer (default: 50,000). |
 | `--dry-run` | Preview data, **validate constraints**, and check schema compatibility. |
 | `--key` | Comma-separated Primary Keys for Upsert/Ignore. Auto-detected from target if omitted. |
+| `--sampling-rate` | Probability 0.0-1.0 to include a row (default: 1.0). |
+| `--sampling-seed` | Seed for sampling (ensures reproducibility). |
 
 #### Automation
 | Flag | Description |
