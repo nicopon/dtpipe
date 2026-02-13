@@ -39,9 +39,9 @@ echo "----------------------------------------"
 # note: sample generation can be direct, no need to test yaml for setup phase usually, 
 # but lets stick to consistent usage or just keep setup direct.
 # Let's keep setup direct to avoid complexity if yaml export fails on sample generation (unlikely but simpler).
-$DTPIPE --input "sample:10" \
+$DTPIPE --input "generate:10" \
            --fake "Id:random.number" --fake "Name:name.fullName" --fake "Amount:finance.amount" --fake "Secret:internet.password" \
-           --drop "SampleIndex" \
+           --drop "GenerateIndex" \
            --query "SELECT * FROM dummy" \
            --output "$OUTPUT_DIR/ref_project.csv"
 

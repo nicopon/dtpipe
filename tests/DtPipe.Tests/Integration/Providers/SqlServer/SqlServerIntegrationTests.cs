@@ -16,33 +16,28 @@ namespace DtPipe.Tests;
 public class SqlServerIntegrationTests : IAsyncLifetime
 {
 	private MsSqlContainer? _sqlServer;
+	private string? _connectionString;
 
 	public async ValueTask InitializeAsync()
 	{
-		if (!DockerHelper.IsAvailable())
-		{
-			return;
-		}
-
-		try
+		_connectionString = await DockerHelper.GetSqlServerConnectionString(async () =>
 		{
 			_sqlServer = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest").Build();
 			await _sqlServer.StartAsync();
+			return _sqlServer.GetConnectionString();
+		});
 
-			await using var connection = new SqlConnection(_sqlServer.GetConnectionString());
-			await connection.OpenAsync();
+		if (_connectionString == null) return;
 
-			// Use Seeder for DDL and Data
-			await using var cmd = connection.CreateCommand();
-			cmd.CommandText = TestDataSeeder.GenerateTableDDL(connection, "test_data");
-			await cmd.ExecuteNonQueryAsync();
+		await using var connection = new SqlConnection(_connectionString);
+		await connection.OpenAsync();
 
-			await TestDataSeeder.SeedAsync(connection, "test_data");
-		}
-		catch (Exception)
-		{
-			_sqlServer = null;
-		}
+		// Use Seeder for DDL and Data
+		await using var cmd = connection.CreateCommand();
+		cmd.CommandText = "IF OBJECT_ID('test_data', 'U') IS NOT NULL DROP TABLE test_data; " + TestDataSeeder.GenerateTableDDL(connection, "test_data");
+		await cmd.ExecuteNonQueryAsync();
+
+		await TestDataSeeder.SeedAsync(connection, "test_data");
 	}
 
 	public async ValueTask DisposeAsync()
@@ -56,10 +51,10 @@ public class SqlServerIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task SqlServerStreamReader_ReadsAllRows()
 	{
-		if (!DockerHelper.IsAvailable() || _sqlServer is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
 		// Arrange
-		var connectionString = _sqlServer.GetConnectionString();
+		var connectionString = _connectionString;
 
 		// Act
 		await using var reader = new SqlServerStreamReader(
@@ -91,10 +86,10 @@ public class SqlServerIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task ParquetWriter_CreatesValidFile_FromSqlServer()
 	{
-		if (!DockerHelper.IsAvailable() || _sqlServer is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
 		// Arrange
-		var connectionString = _sqlServer.GetConnectionString();
+		var connectionString = _connectionString;
 		var outputPath = Path.Combine(Path.GetTempPath(), $"test_sql_{Guid.NewGuid()}.parquet");
 
 		try
@@ -135,10 +130,10 @@ public class SqlServerIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task SqlServerDataWriter_MixedOrder_MapsCorrectly()
 	{
-		if (!DockerHelper.IsAvailable() || _sqlServer is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
 		// Arrange
-		var connectionString = _sqlServer.GetConnectionString();
+		var connectionString = _connectionString;
 		var tableName = "MixedOrderTest";
 
 		// 1. Manually create table with mixed order: Score (DECIMAL), Name (NVARCHAR), Id (INT)
@@ -147,7 +142,7 @@ public class SqlServerIntegrationTests : IAsyncLifetime
 		{
 			await connection.OpenAsync();
 			using var cmd = connection.CreateCommand();
-			cmd.CommandText = $"CREATE TABLE {tableName} (Score DECIMAL(18,2), Name NVARCHAR(100), Id INT)";
+			cmd.CommandText = $"IF OBJECT_ID('{tableName}', 'U') IS NOT NULL DROP TABLE {tableName}; CREATE TABLE {tableName} (Score DECIMAL(18,2), Name NVARCHAR(100), Id INT)";
 			await cmd.ExecuteNonQueryAsync();
 		}
 
@@ -207,7 +202,7 @@ public class SqlServerIntegrationTests : IAsyncLifetime
 		{
 			await connection.OpenAsync();
 			using var cmd = connection.CreateCommand();
-			cmd.CommandText = $"CREATE TABLE {tableName} (Id INT, Name NVARCHAR(100))";
+			cmd.CommandText = $"IF OBJECT_ID('{tableName}', 'U') IS NOT NULL DROP TABLE {tableName}; CREATE TABLE {tableName} (Id INT, Name NVARCHAR(100))";
 			await cmd.ExecuteNonQueryAsync();
 		}
 

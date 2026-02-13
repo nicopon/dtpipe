@@ -19,34 +19,30 @@ namespace DtPipe.Tests;
 public class OracleIntegrationTests : IAsyncLifetime
 {
 	private OracleContainer? _oracle;
+	private string? _connectionString;
 
 	public async ValueTask InitializeAsync()
 	{
-		if (!DockerHelper.IsAvailable())
-		{
-			return;
-		}
-
-		try
+		_connectionString = await DockerHelper.GetOracleConnectionString(async () =>
 		{
 			_oracle = new OracleBuilder("gvenzl/oracle-xe:21-slim-faststart").Build();
 			await _oracle.StartAsync();
+			return _oracle.GetConnectionString();
+		});
 
-			await using var connection = new OracleConnection(_oracle.GetConnectionString());
-			await connection.OpenAsync();
+		if (_connectionString == null) return;
 
-			// Use Seeder for DDL and Data
-			await using var cmd = connection.CreateCommand();
-			cmd.CommandText = TestDataSeeder.GenerateTableDDL(connection, "test_data");
-			await cmd.ExecuteNonQueryAsync();
+		await using var connection = new OracleConnection(_connectionString);
+		await connection.OpenAsync();
 
-			await TestDataSeeder.SeedAsync(connection, "test_data");
-		}
-		catch (Exception)
-		{
-			// If Docker fails to start despite checks, we treat it as unavailable
-			_oracle = null;
-		}
+		// Use Seeder for DDL and Data
+		await using var cmd = connection.CreateCommand();
+		cmd.CommandText = "BEGIN EXECUTE IMMEDIATE 'DROP TABLE test_data'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
+		await cmd.ExecuteNonQueryAsync();
+		cmd.CommandText = TestDataSeeder.GenerateTableDDL(connection, "test_data");
+		await cmd.ExecuteNonQueryAsync();
+
+		await TestDataSeeder.SeedAsync(connection, "test_data");
 	}
 
 	public async ValueTask DisposeAsync()
@@ -60,10 +56,10 @@ public class OracleIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task OracleStreamReader_ReadsAllRows()
 	{
-		if (!DockerHelper.IsAvailable() || _oracle is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
 		// Arrange
-		var connectionString = _oracle.GetConnectionString();
+		var connectionString = _connectionString;
 
 		// Act
 		await using var reader = new OracleStreamReader(
@@ -88,10 +84,10 @@ public class OracleIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task ParquetWriter_CreatesValidFile()
 	{
-		if (!DockerHelper.IsAvailable() || _oracle is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
 		// Arrange
-		var connectionString = _oracle.GetConnectionString();
+		var connectionString = _connectionString;
 		var outputPath = Path.Combine(Path.GetTempPath(), $"test_{Guid.NewGuid()}.parquet");
 
 		try
@@ -130,10 +126,10 @@ public class OracleIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task CsvWriter_CreatesValidFile()
 	{
-		if (!DockerHelper.IsAvailable() || _oracle is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
 		// Arrange
-		var connectionString = _oracle.GetConnectionString();
+		var connectionString = _connectionString;
 		var outputPath = Path.Combine(Path.GetTempPath(), $"test_{Guid.NewGuid()}.csv");
 
 		try
@@ -249,10 +245,10 @@ public class OracleIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task OracleDataWriter_BulkCopy_WithDifferentColumnOrder_MapsCorrectly()
 	{
-		if (!DockerHelper.IsAvailable() || _oracle is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
 		// Arrange
-		var connectionString = _oracle.GetConnectionString();
+		var connectionString = _connectionString;
 		var tableName = $"TEST_MAPPING_{Guid.NewGuid():N}".Substring(0, 20).ToUpperInvariant();
 
 		// 1. Manually create target table with mixed order: Name (VARCHAR), Score (NUMBER), Id (NUMBER)
@@ -261,6 +257,8 @@ public class OracleIntegrationTests : IAsyncLifetime
 		{
 			await connection.OpenAsync();
 			using var cmd = connection.CreateCommand();
+			cmd.CommandText = $"BEGIN EXECUTE IMMEDIATE 'DROP TABLE {tableName}'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
+			await cmd.ExecuteNonQueryAsync();
 			// Oracle default is uppercase.
 			cmd.CommandText = $"CREATE TABLE {tableName} (\"Name\" VARCHAR2(100), \"Score\" NUMBER(10,2), \"Id\" NUMBER(10))";
 			await cmd.ExecuteNonQueryAsync();
@@ -314,10 +312,10 @@ public class OracleIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task OracleDataWriter_Recreate_DropsAndCreatesTable()
 	{
-		if (!DockerHelper.IsAvailable() || _oracle is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
 		// Arrange
-		var connectionString = _oracle.GetConnectionString();
+		var connectionString = _connectionString;
 		var tableName = ($"TEST_RECREATE_{Guid.NewGuid():N}").Substring(0, 20).ToUpperInvariant();
 
 		// 1. Manually create table with incompatible schema (Name as NUMBER) to prove drop happened
@@ -325,6 +323,8 @@ public class OracleIntegrationTests : IAsyncLifetime
 		{
 			await connection.OpenAsync();
 			using var cmd = connection.CreateCommand();
+			cmd.CommandText = $"BEGIN EXECUTE IMMEDIATE 'DROP TABLE {tableName}'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
+			await cmd.ExecuteNonQueryAsync();
 			cmd.CommandText = $"CREATE TABLE {tableName} (\"Id\" NUMBER(10), \"Name\" VARCHAR2(100))";
 			await cmd.ExecuteNonQueryAsync();
 			cmd.CommandText = $"INSERT INTO {tableName} VALUES (1, 100)";

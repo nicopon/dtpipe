@@ -149,16 +149,19 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 	{
 		if (!DockerHelper.IsAvailable()) return;
 
-		await using var container = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest").Build();
-		await container.StartAsync();
-		var cs = container.GetConnectionString();
+		var cs = await DockerHelper.GetSqlServerConnectionString(async () =>
+		{
+			var container = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest").Build();
+			await container.StartAsync();
+			return container.GetConnectionString();
+		});
 
 		// 1. Setup
 		await using (var conn = new SqlConnection(cs))
 		{
 			await conn.OpenAsync();
 			using var cmd = conn.CreateCommand();
-			cmd.CommandText = "CREATE TABLE users (id INT PRIMARY KEY, name NVARCHAR(100))";
+			cmd.CommandText = "IF OBJECT_ID('users', 'U') IS NOT NULL DROP TABLE users; CREATE TABLE users (id INT PRIMARY KEY, name NVARCHAR(100))";
 			await cmd.ExecuteNonQueryAsync();
 			cmd.CommandText = "INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob')";
 			await cmd.ExecuteNonQueryAsync();
@@ -199,16 +202,19 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 	{
 		if (!DockerHelper.IsAvailable()) return;
 
-		await using var container = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest").Build();
-		await container.StartAsync();
-		var cs = container.GetConnectionString();
+		var cs = await DockerHelper.GetSqlServerConnectionString(async () =>
+		{
+			var container = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest").Build();
+			await container.StartAsync();
+			return container.GetConnectionString();
+		});
 
 		// 1. Setup
 		await using (var conn = new SqlConnection(cs))
 		{
 			await conn.OpenAsync();
 			using var cmd = conn.CreateCommand();
-			cmd.CommandText = "CREATE TABLE users_ign (id INT PRIMARY KEY, name NVARCHAR(100))";
+			cmd.CommandText = "IF OBJECT_ID('users_ign', 'U') IS NOT NULL DROP TABLE users_ign; CREATE TABLE users_ign (id INT PRIMARY KEY, name NVARCHAR(100))";
 			await cmd.ExecuteNonQueryAsync();
 			cmd.CommandText = "INSERT INTO users_ign VALUES (1, 'Alice'), (2, 'Bob')";
 			await cmd.ExecuteNonQueryAsync();
@@ -249,16 +255,19 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 	{
 		if (!DockerHelper.IsAvailable()) return;
 
-		await using var container = new PostgreSqlBuilder("postgres:15-alpine").Build();
-		await container.StartAsync();
-		var cs = container.GetConnectionString();
+		var cs = await DockerHelper.GetPostgreSqlConnectionString(async () =>
+		{
+			var container = new PostgreSqlBuilder("postgres:15-alpine").Build();
+			await container.StartAsync();
+			return container.GetConnectionString();
+		});
 
 		// 1. Setup
 		await using (var conn = new NpgsqlConnection(cs))
 		{
 			await conn.OpenAsync();
 			using var cmd = conn.CreateCommand();
-			cmd.CommandText = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT)";
+			cmd.CommandText = "DROP TABLE IF EXISTS users; CREATE TABLE users (id INT PRIMARY KEY, name TEXT)";
 			await cmd.ExecuteNonQueryAsync();
 			cmd.CommandText = "INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob')";
 			await cmd.ExecuteNonQueryAsync();
@@ -299,16 +308,19 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 	{
 		if (!DockerHelper.IsAvailable()) return;
 
-		await using var container = new PostgreSqlBuilder("postgres:15-alpine").Build();
-		await container.StartAsync();
-		var cs = container.GetConnectionString();
+		var cs = await DockerHelper.GetPostgreSqlConnectionString(async () =>
+		{
+			var container = new PostgreSqlBuilder("postgres:15-alpine").Build();
+			await container.StartAsync();
+			return container.GetConnectionString();
+		});
 
 		// 1. Setup
 		await using (var conn = new NpgsqlConnection(cs))
 		{
 			await conn.OpenAsync();
 			using var cmd = conn.CreateCommand();
-			cmd.CommandText = "CREATE TABLE users_ign (id INT PRIMARY KEY, name TEXT)";
+			cmd.CommandText = "DROP TABLE IF EXISTS users_ign; CREATE TABLE users_ign (id INT PRIMARY KEY, name TEXT)";
 			await cmd.ExecuteNonQueryAsync();
 			cmd.CommandText = "INSERT INTO users_ign VALUES (1, 'Alice'), (2, 'Bob')";
 			await cmd.ExecuteNonQueryAsync();
@@ -408,15 +420,20 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 		if (!DockerHelper.IsAvailable()) return;
 
 		// Use cached/reused image if possible or standard one
-		await using var container = new OracleBuilder("gvenzl/oracle-xe:21-slim-faststart").Build();
-		await container.StartAsync();
-		var cs = container.GetConnectionString();
+		var cs = await DockerHelper.GetOracleConnectionString(async () =>
+		{
+			var container = new OracleBuilder("gvenzl/oracle-xe:21-slim-faststart").Build();
+			await container.StartAsync();
+			return container.GetConnectionString();
+		});
 
 		// 1. Setup
 		await using (var conn = new OracleConnection(cs))
 		{
 			await conn.OpenAsync();
 			using var cmd = conn.CreateCommand();
+			cmd.CommandText = "BEGIN EXECUTE IMMEDIATE 'DROP TABLE users'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
+			await cmd.ExecuteNonQueryAsync();
 			cmd.CommandText = "CREATE TABLE users (id NUMBER(10) PRIMARY KEY, name VARCHAR2(100))";
 			await cmd.ExecuteNonQueryAsync();
 			cmd.CommandText = "INSERT INTO users VALUES (1, 'Alice')";
@@ -499,15 +516,18 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 	public async Task SqlServer_Upsert_CompositeKey_UpdatesExisting_InsertsNew()
 	{
 		if (!DockerHelper.IsAvailable()) return;
-		await using var container = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest").Build();
-		await container.StartAsync();
-		var cs = container.GetConnectionString();
+		var cs = await DockerHelper.GetSqlServerConnectionString(async () =>
+		{
+			var container = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest").Build();
+			await container.StartAsync();
+			return container.GetConnectionString();
+		});
 
 		await using (var conn = new SqlConnection(cs))
 		{
 			await conn.OpenAsync();
 			using var cmd = conn.CreateCommand();
-			cmd.CommandText = "CREATE TABLE CompUsers (Region NVARCHAR(50), Branch NVARCHAR(50), Target INT, PRIMARY KEY(Region, Branch))";
+			cmd.CommandText = "IF OBJECT_ID('CompUsers', 'U') IS NOT NULL DROP TABLE CompUsers; CREATE TABLE CompUsers (Region NVARCHAR(50), Branch NVARCHAR(50), Target INT, PRIMARY KEY(Region, Branch))";
 			await cmd.ExecuteNonQueryAsync();
 			cmd.CommandText = "INSERT INTO CompUsers VALUES ('EU', 'Paris', 100), ('EU', 'Berlin', 200)";
 			await cmd.ExecuteNonQueryAsync();
@@ -539,15 +559,18 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 	public async Task PostgreSql_Upsert_CompositeKey_UpdatesExisting_InsertsNew()
 	{
 		if (!DockerHelper.IsAvailable()) return;
-		await using var container = new PostgreSqlBuilder("postgres:15-alpine").Build();
-		await container.StartAsync();
-		var cs = container.GetConnectionString();
+		var cs = await DockerHelper.GetPostgreSqlConnectionString(async () =>
+		{
+			var container = new PostgreSqlBuilder("postgres:15-alpine").Build();
+			await container.StartAsync();
+			return container.GetConnectionString();
+		});
 
 		await using (var conn = new NpgsqlConnection(cs))
 		{
 			await conn.OpenAsync();
 			using var cmd = conn.CreateCommand();
-			cmd.CommandText = "CREATE TABLE comp_users (region TEXT, branch TEXT, target INT, PRIMARY KEY(region, branch))";
+			cmd.CommandText = "DROP TABLE IF EXISTS comp_users; CREATE TABLE comp_users (region TEXT, branch TEXT, target INT, PRIMARY KEY(region, branch))";
 			await cmd.ExecuteNonQueryAsync();
 			cmd.CommandText = "INSERT INTO comp_users VALUES ('EU', 'Paris', 100), ('EU', 'Berlin', 200)";
 			await cmd.ExecuteNonQueryAsync();
@@ -579,14 +602,19 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 	public async Task Oracle_Upsert_CompositeKey_UpdatesExisting_InsertsNew()
 	{
 		if (!DockerHelper.IsAvailable()) return;
-		await using var container = new OracleBuilder("gvenzl/oracle-xe:21-slim-faststart").Build();
-		await container.StartAsync();
-		var cs = container.GetConnectionString();
+		var cs = await DockerHelper.GetOracleConnectionString(async () =>
+		{
+			var container = new OracleBuilder("gvenzl/oracle-xe:21-slim-faststart").Build();
+			await container.StartAsync();
+			return container.GetConnectionString();
+		});
 
 		await using (var conn = new OracleConnection(cs))
 		{
 			await conn.OpenAsync();
 			using var cmd = conn.CreateCommand();
+			cmd.CommandText = "BEGIN EXECUTE IMMEDIATE 'DROP TABLE COMP_USERS'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
+			await cmd.ExecuteNonQueryAsync();
 			cmd.CommandText = "CREATE TABLE COMP_USERS (REGION VARCHAR2(50), BRANCH VARCHAR2(50), TARGET NUMBER(10), PRIMARY KEY(REGION, BRANCH))";
 			await cmd.ExecuteNonQueryAsync();
 			cmd.CommandText = "INSERT INTO COMP_USERS VALUES ('EU', 'Paris', 100)";
@@ -728,15 +756,20 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 	{
 		if (!DockerHelper.IsAvailable()) return;
 
-		await using var container = new OracleBuilder("gvenzl/oracle-xe:21-slim-faststart").Build();
-		await container.StartAsync();
-		var cs = container.GetConnectionString();
+		var cs = await DockerHelper.GetOracleConnectionString(async () =>
+		{
+			var container = new OracleBuilder("gvenzl/oracle-xe:21-slim-faststart").Build();
+			await container.StartAsync();
+			return container.GetConnectionString();
+		});
 
 		// 1. Setup
 		await using (var conn = new OracleConnection(cs))
 		{
 			await conn.OpenAsync();
 			using var cmd = conn.CreateCommand();
+			cmd.CommandText = "BEGIN EXECUTE IMMEDIATE 'DROP TABLE USERS_IGN'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
+			await cmd.ExecuteNonQueryAsync();
 			cmd.CommandText = "CREATE TABLE USERS_IGN (ID NUMBER(10) PRIMARY KEY, NAME VARCHAR2(100))";
 			await cmd.ExecuteNonQueryAsync();
 			cmd.CommandText = "INSERT INTO USERS_IGN VALUES (1, 'Alice')";

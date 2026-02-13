@@ -48,7 +48,7 @@ function run_test() {
 run_test "Quick Start" "$APP --input \"duck:source.db\" --query \"SELECT 1\" --output \"users.parquet\""
 
 # 2. Iterate Workflow Examples
-run_test "Iterative Workflow (Dry Run)" "$APP --input \"duck::memory:\" --query \"SELECT 1\" --output \"users.csv\" --sample-rate 0.1 --dry-run"
+run_test "Iterative Workflow (Dry Run)" "$APP --input \"duck::memory:\" --query \"SELECT 1\" --output \"users.csv\" --sampling-rate 0.1 --dry-run"
 run_test "Iterative Workflow (Export)" "$APP --input \"duck::memory:\" --query \"SELECT 1\" --output \"users.parquet\" --fake \"NAME:name.fullName\" --export-job \"$SCRIPT_DIR/artifacts/readme_examples/job.yaml\""
 
 # 3. Transformer Basics

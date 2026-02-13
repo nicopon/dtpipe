@@ -15,21 +15,18 @@ namespace DtPipe.Tests;
 public class SchemaInspectorIntegrationTests : IAsyncLifetime
 {
 	private PostgreSqlContainer? _postgres;
+	private string? _connectionString;
 
 	public async ValueTask InitializeAsync()
 	{
-		if (!DockerHelper.IsAvailable()) return;
-
-		try
+		_connectionString = await DockerHelper.GetPostgreSqlConnectionString(async () =>
 		{
-			_postgres = new PostgreSqlBuilder("postgres:15-alpine")
-				.Build();
+			_postgres = new PostgreSqlBuilder("postgres:15-alpine").Build();
 			await _postgres.StartAsync();
-		}
-		catch (Exception)
-		{
-			_postgres = null;
-		}
+			return _postgres.GetConnectionString();
+		});
+		// If GetPostgreSqlConnectionString returns null, it means Docker is not available or container failed to start.
+		// In this case, _postgres would remain null, which is handled by subsequent tests.
 	}
 
 	public async ValueTask DisposeAsync()
@@ -45,9 +42,9 @@ public class SchemaInspectorIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task PostgreSql_InspectTargetAsync_WhenTableDoesNotExist_ReturnsNotExists()
 	{
-		if (!DockerHelper.IsAvailable() || _postgres is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		var connectionString = _postgres.GetConnectionString();
+		var connectionString = _connectionString;
 		var options = new PostgreSqlWriterOptions { Table = "non_existent_table" };
 
 		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance);
@@ -65,15 +62,16 @@ public class SchemaInspectorIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task PostgreSql_InspectTargetAsync_DetectsColumnsAndTypes()
 	{
-		if (!DockerHelper.IsAvailable() || _postgres is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		var connectionString = _postgres.GetConnectionString();
+		var connectionString = _connectionString;
 
 		// Create a table with various types
 		await using var connection = new NpgsqlConnection(connectionString);
 		await connection.OpenAsync();
 		await using var cmd = connection.CreateCommand();
 		cmd.CommandText = @"
+            DROP TABLE IF EXISTS schema_test;
             CREATE TABLE schema_test (
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(100) NOT NULL,
@@ -120,22 +118,23 @@ public class SchemaInspectorIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task PostgreSql_InspectTargetAsync_DetectsPrimaryKeyAndUnique()
 	{
-		if (!DockerHelper.IsAvailable() || _postgres is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		var connectionString = _postgres.GetConnectionString();
+		var connectionString = _connectionString;
 
 		await using var connection = new NpgsqlConnection(connectionString);
 		await connection.OpenAsync();
 		await using var cmd = connection.CreateCommand();
 		cmd.CommandText = @"
-            CREATE TABLE constraint_test (
-                id INTEGER PRIMARY KEY,
-                code VARCHAR(20) UNIQUE NOT NULL,
-                name TEXT
+            DROP TABLE IF EXISTS schema_pk_unique_test;
+            CREATE TABLE schema_pk_unique_test (
+                id INT PRIMARY KEY,
+                code VARCHAR(100) UNIQUE NOT NULL,
+                normal_col TEXT
             )";
 		await cmd.ExecuteNonQueryAsync();
 
-		var options = new PostgreSqlWriterOptions { Table = "constraint_test" };
+		var options = new PostgreSqlWriterOptions { Table = "schema_pk_unique_test" };
 		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance);
 		var inspector = (ISchemaInspector)writer;
 
@@ -156,9 +155,9 @@ public class SchemaInspectorIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task PostgreSql_InspectTargetAsync_ReturnsRowCountAndSize()
 	{
-		if (!DockerHelper.IsAvailable() || _postgres is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		var connectionString = _postgres.GetConnectionString();
+		var connectionString = _connectionString;
 
 		await using var connection = new NpgsqlConnection(connectionString);
 		await connection.OpenAsync();
@@ -166,6 +165,7 @@ public class SchemaInspectorIntegrationTests : IAsyncLifetime
 		// Create and populate table
 		await using var cmd = connection.CreateCommand();
 		cmd.CommandText = @"
+            DROP TABLE IF EXISTS stats_test;
             CREATE TABLE stats_test (id SERIAL PRIMARY KEY, data TEXT);
             INSERT INTO stats_test (data) VALUES ('row1'), ('row2'), ('row3');
             ANALYZE stats_test;"; // Force stats update
@@ -194,14 +194,15 @@ public class SchemaInspectorIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task SchemaCompatibilityAnalyzer_DetectsCompatibleSchema()
 	{
-		if (!DockerHelper.IsAvailable() || _postgres is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		var connectionString = _postgres.GetConnectionString();
+		var connectionString = _connectionString;
 
 		await using var connection = new NpgsqlConnection(connectionString);
 		await connection.OpenAsync();
 		await using var cmd = connection.CreateCommand();
 		cmd.CommandText = @"
+            DROP TABLE IF EXISTS compat_test;
             CREATE TABLE compat_test (
                 id INTEGER PRIMARY KEY,
                 name VARCHAR(100),
@@ -233,14 +234,14 @@ public class SchemaInspectorIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task SchemaCompatibilityAnalyzer_DetectsMissingColumn()
 	{
-		if (!DockerHelper.IsAvailable() || _postgres is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		var connectionString = _postgres.GetConnectionString();
+		var connectionString = _connectionString;
 
 		await using var connection = new NpgsqlConnection(connectionString);
 		await connection.OpenAsync();
 		await using var cmd = connection.CreateCommand();
-		cmd.CommandText = "CREATE TABLE missing_col_test (id INTEGER PRIMARY KEY, name TEXT)";
+		cmd.CommandText = "DROP TABLE IF EXISTS missing_col_test; CREATE TABLE missing_col_test (id INTEGER PRIMARY KEY, name TEXT)";
 		await cmd.ExecuteNonQueryAsync();
 
 		// Source has extra column not in target
@@ -268,14 +269,15 @@ public class SchemaInspectorIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task SchemaCompatibilityAnalyzer_DetectsExtraNotNullColumn()
 	{
-		if (!DockerHelper.IsAvailable() || _postgres is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		var connectionString = _postgres.GetConnectionString();
+		var connectionString = _connectionString;
 
 		await using var connection = new NpgsqlConnection(connectionString);
 		await connection.OpenAsync();
 		await using var cmd = connection.CreateCommand();
 		cmd.CommandText = @"
+            DROP TABLE IF EXISTS extra_notnull_test;
             CREATE TABLE extra_notnull_test (
                 id INTEGER PRIMARY KEY,
                 required_field TEXT NOT NULL
@@ -304,14 +306,15 @@ public class SchemaInspectorIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task SchemaCompatibilityAnalyzer_DetectsNullabilityConflict()
 	{
-		if (!DockerHelper.IsAvailable() || _postgres is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		var connectionString = _postgres.GetConnectionString();
+		var connectionString = _connectionString;
 
 		await using var connection = new NpgsqlConnection(connectionString);
 		await connection.OpenAsync();
 		await using var cmd = connection.CreateCommand();
 		cmd.CommandText = @"
+            DROP TABLE IF EXISTS nullability_test;
             CREATE TABLE nullability_test (
                 id INTEGER PRIMARY KEY,
                 status TEXT NOT NULL
@@ -342,14 +345,15 @@ public class SchemaInspectorIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task SchemaCompatibilityAnalyzer_WhenTableHasData_AddsWarning()
 	{
-		if (!DockerHelper.IsAvailable() || _postgres is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		var connectionString = _postgres.GetConnectionString();
+		var connectionString = _connectionString;
 
 		await using var connection = new NpgsqlConnection(connectionString);
 		await connection.OpenAsync();
 		await using var cmd = connection.CreateCommand();
 		cmd.CommandText = @"
+            DROP TABLE IF EXISTS existing_data_test;
             CREATE TABLE existing_data_test (id INTEGER PRIMARY KEY, name TEXT);
             INSERT INTO existing_data_test VALUES (1, 'Existing'), (2, 'Data');
             ANALYZE existing_data_test;";

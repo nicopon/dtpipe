@@ -44,10 +44,9 @@ check_docker() {
     return 0
 }
 
-# Cleanup function
+# Cleanup Function
 cleanup() {
     echo "Cleaning up..."
-    docker rm -f dtpipe-inc-postgres dtpipe-inc-mssql dtpipe-inc-oracle &> /dev/null
     rm -f "$ARTIFACTS_DIR"/source_v1.csv "$ARTIFACTS_DIR"/source_v2.csv "$ARTIFACTS_DIR"/result_*.csv "$ARTIFACTS_DIR"/*.db "$ARTIFACTS_DIR"/*.duckdb
 }
 trap cleanup EXIT
@@ -174,21 +173,21 @@ verify_ignore "$ARTIFACTS_DIR/result_sqlite_ignore.csv" "SQLite"
 
 if [ "$USE_DOCKER" -eq 1 ]; then
 
+    # Resolve Infrastructure Dir
+    INFRA_DIR="$PROJECT_ROOT/tests/infra"
+    echo -e "\n${CYAN}--- Ensuring Shared Infrastructure is Ready ---${NC}"
+    "$INFRA_DIR/start_infra.sh"
+
     # ==============================================================================
     # 3. POSTGRESQL (Docker)
     # ==============================================================================
     echo -e "\n${CYAN}--- Testing PostgreSQL ---${NC}"
-    docker run --name dtpipe-inc-postgres -e POSTGRES_PASSWORD=password -p 5433:5432 -d postgres:latest > /dev/null
-    echo "Waiting for Postgres..."
-    sleep 5
+    PG_CONN="pg:Host=localhost;Port=5440;Username=postgres;Password=password;Database=integration"
     
-    PG_CONN="pg:Host=localhost;Port=5433;Username=postgres;Password=password;Database=postgres"
-    
-    # A. Upsert Test (Debug enabled: no > /dev/null)
+    # A. Upsert Test
     echo "Postgres: Upsert Strategy"
     $DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v1.csv" -o "$PG_CONN" --pg-table "users_upsert" --pg-strategy Recreate --key "id" > /dev/null
-    echo "Running Upsert..."
-    $DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v2.csv" -o "$PG_CONN" --pg-table "users_upsert" --pg-strategy Upsert --key "Id"
+    $DTPIPE_BIN -i "$ARTIFACTS_DIR/source_v2.csv" -o "$PG_CONN" --pg-table "users_upsert" --pg-strategy Upsert --key "Id" > /dev/null
     $DTPIPE_BIN -i "$PG_CONN" -q "SELECT * FROM users_upsert ORDER BY Id" -o "$ARTIFACTS_DIR/result_pg_upsert.csv" > /dev/null
     verify_upsert "$ARTIFACTS_DIR/result_pg_upsert.csv" "Postgres"
     
@@ -204,15 +203,8 @@ if [ "$USE_DOCKER" -eq 1 ]; then
     # 4. SQL SERVER (Docker)
     # ==============================================================================
     echo -e "\n${CYAN}--- Testing SQL Server ---${NC}"
-    docker run --name dtpipe-inc-mssql -e "ACCEPT_EULA=Y" -e "MSSQL_SA_PASSWORD=MySecretPassword123!" -p 1434:1433 -d mcr.microsoft.com/azure-sql-edge:latest > /dev/null
-    echo "Waiting for MSSQL (15s)..."
-    sleep 15
-    
-    # Create DB
-    docker run --rm --network container:dtpipe-inc-mssql -i mcr.microsoft.com/mssql-tools/bin/sqlcmd -S localhost -U sa -P "MySecretPassword123!" -Q "CREATE DATABASE TestDB;" > /dev/null || \
-    docker run --rm --network container:dtpipe-inc-mssql -i mcr.microsoft.com/mssql-tools /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "MySecretPassword123!" -Q "CREATE DATABASE TestDB;" > /dev/null
-    
-    MSSQL_CONN="mssql:Server=localhost,1434;Database=TestDB;User Id=sa;Password=MySecretPassword123!;TrustServerCertificate=True;MultipleActiveResultSets=True"
+    # Use Master for simplicity as in other tests, or integration if we create it
+    MSSQL_CONN="mssql:Server=localhost,1434;Database=master;User Id=sa;Password=Password123!;TrustServerCertificate=True;MultipleActiveResultSets=True"
     
     # A. Upsert Test
     echo "MSSQL: Upsert Strategy"
@@ -233,11 +225,7 @@ if [ "$USE_DOCKER" -eq 1 ]; then
     # 5. ORACLE (Docker)
     # ==============================================================================
     echo -e "\n${CYAN}--- Testing Oracle ---${NC}"
-    docker run --name dtpipe-inc-oracle -e ORACLE_PASSWORD=MySecretPassword123! -p 1522:1521 -d gvenzl/oracle-free:slim > /dev/null
-    echo "Waiting for Oracle (30s)..."
-    sleep 30
-    
-    ORA_CONN="ora:Data Source=localhost:1522/FREEPDB1;User Id=system;Password=MySecretPassword123!;"
+    ORA_CONN="ora:Data Source=localhost:1522/FREEPDB1;User Id=testuser;Password=password;"
     
     # A. Upsert Test
     echo "Oracle: Upsert Strategy"

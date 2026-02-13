@@ -24,14 +24,14 @@ echo "Test 1: Sampling 10% of 100 rows (Sample Provider)"
 OUTPUT_FILE="$OUTPUT_DIR/sampling_test.csv"
 
 # Using run_via_yaml to ensure sampling works via YAML configuration as well
-run_via_yaml --input "sample:100" \
+run_via_yaml --input "generate:100" \
              --fake "Id:random.number" --fake "Name:name.fullName" \
-             --drop "SampleIndex" \
+             --drop "GenerateIndex" \
              --query "SELECT * FROM data" \
              --output "csv:$OUTPUT_FILE" \
              --limit 100 \
-             --sample-rate 0.1 \
-             --sample-seed 12345
+             --sampling-rate 0.1 \
+             --sampling-seed 12345
 
 ROW_COUNT=$(wc -l < "$OUTPUT_FILE" | tr -d ' ')
 # Remove header

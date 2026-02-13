@@ -19,7 +19,7 @@ echo "========================================"
 echo "🔨 Building Release..."
 "$PROJECT_ROOT/build.sh" > /dev/null || { echo "❌ Build Failed!"; exit 1; }
 
-# Check if binary exists (Double check)
+# Check if binary exists
 if [ ! -f "$DTPIPE" ]; then
     echo "❌ Error: Build failed or binary not found at $DTPIPE"
     exit 1
@@ -29,32 +29,28 @@ fi
 cleanup() {
     echo ""
     echo "🧹 Cleaning up..."
-    docker-compose -f "$INFRA_DIR/docker-compose.yml" down 2>/dev/null || true
-    rm -f "$ARTIFACTS_DIR/ref.hash" "$ARTIFACTS_DIR/final.hash" "$ARTIFACTS_DIR/test.parquet" "$ARTIFACTS_DIR/reference.csv"
+    rm -f "$ARTIFACTS_DIR"/ref.hash "$ARTIFACTS_DIR"/final.hash "$ARTIFACTS_DIR"/test.parquet "$ARTIFACTS_DIR"/reference.csv
 }
 trap cleanup EXIT
 
 
-echo "🐳 Starting Infrastructure Postgres, MSSQL, Oracle..."
-docker-compose -f "$INFRA_DIR/docker-compose.yml" up -d
-
-echo "⏳ Waiting 60s for Databases to Initialize..."
-sleep 60
+echo "🐳 Starting Infrastructure..."
+"$INFRA_DIR/start_infra.sh"
 
 echo "----------------------------------------"
 echo "Step 0: Generate Reference Source CSV"
 echo "----------------------------------------"
-# Sample -> CSV (Immutable Source)
-$DTPIPE --input "sample:100" \
+# Generate reference CSV
+$DTPIPE --input "generate:100" \
            --fake "Id:random.number" --fake "Amount:finance.amount" --fake "Created:date.past" \
-           --drop "SampleIndex" \
+           --drop "GenerateIndex" \
            --query "SELECT * FROM dummy" \
            --output "$ARTIFACTS_DIR/reference.csv"
 
 echo "----------------------------------------"
 echo "Step 0b: Generate Reference Checksum"
 echo "----------------------------------------"
-# CSV -> Checksum
+# Calculate reference checksum
 $DTPIPE --input "csv:$ARTIFACTS_DIR/reference.csv" \
            --query 'SELECT * FROM data' \
            --output "checksum:$ARTIFACTS_DIR/ref.hash"
@@ -79,13 +75,7 @@ $DTPIPE --input "$PG_CONN" \
            --mssql-table "ExportedData" \
            --mssql-strategy "Recreate"
 
-echo "----------------------------------------"
-echo "Step 3: MSSQL -> Oracle"
-echo "----------------------------------------"
-# Step 3: Wait for Oracle to be fully ready
-echo "Waiting extra time for Oracle..."
-sleep 20 
-
+# Step 3: Oracle is already confirmed ready by start_infra.sh
 ORACLE_CONN="ora:Data Source=localhost:1522/FREEPDB1;User Id=testuser;Password=password;Pooling=false"
 $DTPIPE --input "$MSSQL_CONN" \
            --query 'SELECT * FROM ExportedData' \

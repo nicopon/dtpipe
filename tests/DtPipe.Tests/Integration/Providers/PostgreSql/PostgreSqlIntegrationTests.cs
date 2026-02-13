@@ -12,30 +12,27 @@ namespace DtPipe.Tests;
 public class PostgreSqlIntegrationTests : IAsyncLifetime
 {
 	private PostgreSqlContainer? _postgres;
+	private string? _connectionString;
 
 	public async ValueTask InitializeAsync()
 	{
-		if (!DockerHelper.IsAvailable()) return;
-
-		try
+		_connectionString = await DockerHelper.GetPostgreSqlConnectionString(async () =>
 		{
-			_postgres = new PostgreSqlBuilder("postgres:15-alpine")
-				.Build();
+			_postgres = new PostgreSqlBuilder("postgres:15-alpine").Build();
 			await _postgres.StartAsync();
+			return _postgres.GetConnectionString();
+		});
 
-			await using var connection = new NpgsqlConnection(_postgres.GetConnectionString());
-			await connection.OpenAsync();
+		if (_connectionString == null) return;
 
-			await using var cmd = connection.CreateCommand();
-			cmd.CommandText = TestDataSeeder.GenerateTableDDL(connection, "test_data");
-			await cmd.ExecuteNonQueryAsync();
+		await using var connection = new NpgsqlConnection(_connectionString);
+		await connection.OpenAsync();
 
-			await TestDataSeeder.SeedAsync(connection, "test_data");
-		}
-		catch (Exception)
-		{
-			_postgres = null;
-		}
+		await using var cmd = connection.CreateCommand();
+		cmd.CommandText = "DROP TABLE IF EXISTS test_data; " + TestDataSeeder.GenerateTableDDL(connection, "test_data");
+		await cmd.ExecuteNonQueryAsync();
+
+		await TestDataSeeder.SeedAsync(connection, "test_data");
 	}
 
 	public async ValueTask DisposeAsync()
@@ -49,9 +46,9 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task PostgreSqlReader_ReadsAllRows()
 	{
-		if (!DockerHelper.IsAvailable() || _postgres is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		var connectionString = _postgres.GetConnectionString();
+		var connectionString = _connectionString;
 
 		await using var reader = new PostgreSqlReader(
 			connectionString,
@@ -85,9 +82,9 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task PostgreSqlWriter_WritesRows()
 	{
-		if (!DockerHelper.IsAvailable() || _postgres is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		var connectionString = _postgres.GetConnectionString();
+		var connectionString = _connectionString;
 		var targetTable = "test_export";
 
 		// Options
@@ -140,7 +137,7 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
 		{
 			await connection.OpenAsync();
 			await using var cmd = connection.CreateCommand();
-			cmd.CommandText = $"CREATE TABLE {tableName} (score NUMERIC, name TEXT, id INT)";
+			cmd.CommandText = $"DROP TABLE IF EXISTS {tableName}; CREATE TABLE {tableName} (score NUMERIC, name TEXT, id INT)";
 			await cmd.ExecuteNonQueryAsync();
 		}
 
@@ -190,9 +187,9 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task PostgreSqlWriter_DeleteThenInsert_ClearsTable()
 	{
-		if (!DockerHelper.IsAvailable() || _postgres is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		var connectionString = _postgres.GetConnectionString();
+		var connectionString = _connectionString;
 		var targetTable = "test_delete_insert";
 
 		// 1. Create table and insert initial data
@@ -200,7 +197,7 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
 		{
 			await connection.OpenAsync();
 			await using var cmd = connection.CreateCommand();
-			cmd.CommandText = $"CREATE TABLE {targetTable} (id INT, name TEXT)";
+			cmd.CommandText = $"DROP TABLE IF EXISTS {targetTable}; CREATE TABLE {targetTable} (id INT, name TEXT)";
 			await cmd.ExecuteNonQueryAsync();
 			cmd.CommandText = $"INSERT INTO {targetTable} VALUES (999, 'OldData')";
 			await cmd.ExecuteNonQueryAsync();
@@ -233,9 +230,9 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task PostgreSqlWriter_Recreate_DropsAndCreatesTable()
 	{
-		if (!DockerHelper.IsAvailable() || _postgres is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		var connectionString = _postgres.GetConnectionString();
+		var connectionString = _connectionString;
 		var targetTable = "test_recreate";
 
 		// 1. Create table with incompatible schema (Name as INT)
@@ -243,7 +240,7 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
 		{
 			await connection.OpenAsync();
 			await using var cmd = connection.CreateCommand();
-			cmd.CommandText = $"CREATE TABLE {targetTable} (id INT, name TEXT)"; // Compatible with String
+			cmd.CommandText = $"DROP TABLE IF EXISTS {targetTable}; CREATE TABLE {targetTable} (id INT, name TEXT)"; // Compatible with String
 			await cmd.ExecuteNonQueryAsync();
 		}
 
@@ -272,9 +269,9 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task PostgreSqlWriter_Recreate_PreservesNativeStructure()
 	{
-		if (!DockerHelper.IsAvailable() || _postgres is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		var connectionString = _postgres.GetConnectionString();
+		var connectionString = _connectionString;
 		var tableNameRaw = $"test_recreate_p_{Guid.NewGuid():N}".Substring(0, 30); // Lowercase unquoted
 
 		// 1. Manually create table with specific structure:
