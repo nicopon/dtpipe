@@ -246,7 +246,8 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 
 	public override async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
 	{
-		using var cmd = new SqlCommand(command, (SqlConnection)_connection);
+		await EnsureConnectionOpenAsync(ct);
+		using var cmd = new SqlCommand(command, (SqlConnection)_connection!);
 		cmd.CommandTimeout = 0; // Disable timeout for maintenance commands
 		await cmd.ExecuteNonQueryAsync(ct);
 	}

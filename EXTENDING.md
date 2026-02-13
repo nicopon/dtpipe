@@ -14,7 +14,7 @@ This quick guide explains where and how to add a new *adapter* (reader/writer) o
    - Reader: `IStreamReader` (key methods: `OpenAsync`, `ReadBatchesAsync` returning `IAsyncEnumerable`, `DisposeAsync`).
    - Writer: `IDataWriter` (key methods: `InitializeAsync`, `WriteBatchAsync`, `CompleteAsync`, `DisposeAsync`).
 4. Add a `Descriptor` implementing `IProviderDescriptor<T>` (e.g. `MyProviderReaderDescriptor.cs`).
-5. (Optional) Add a `ConnectionHelper` / `TypeMapper` if your driver requires specific conversions.
+5. (Optional) Implement `ITypeMapper` in a dedicated converter (e.g. `MyProviderTypeConverter.cs`) for custom type mapping.
 6. Register the provider in DI: open `src/DtPipe/Program.cs` and call `RegisterReader<MyProviderReaderDescriptor>(services);` or `RegisterWriter<MyProviderWriterDescriptor>(services);`.
 7. Add unit/integration tests under `tests/DtPipe.Tests/Unit` or `tests/DtPipe.Tests/Integration`. Provide a small dataset or docker-compose if needed (see `tests/infra`).
 8. Add a usage example to the README or scripts in `scripts/` if relevant.
