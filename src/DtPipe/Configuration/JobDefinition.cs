@@ -27,8 +27,8 @@ public record JobDefinition
 	public string? LogPath { get; init; }
 	public string? Key { get; init; }
 
-	public double SampleRate { get; init; } = 1.0;
-	public int? SampleSeed { get; init; }
+	public double SamplingRate { get; init; } = 1.0;
+	public int? SamplingSeed { get; init; }
 
 	// Lifecycle Hooks
 	public string? PreExec { get; init; }

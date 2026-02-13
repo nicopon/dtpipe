@@ -4,15 +4,15 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 
-namespace DtPipe.Adapters.Sample;
+namespace DtPipe.Adapters.Generate;
 
-public partial class SampleReader : IStreamReader, IRequiresOptions<SampleReaderOptions>
+public partial class GenerateReader : IStreamReader, IRequiresOptions<GenerateReaderOptions>
 {
-	private readonly SampleReaderOptions _options;
+	private readonly GenerateReaderOptions _options;
 
 	public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
 
-	public SampleReader(string config, string query, SampleReaderOptions options)
+	public GenerateReader(string config, string query, GenerateReaderOptions options)
 	{
 		_options = options;
 	}
@@ -21,7 +21,7 @@ public partial class SampleReader : IStreamReader, IRequiresOptions<SampleReader
 	{
 		Columns = new List<PipeColumnInfo>
 		{
-			new("SampleIndex", typeof(long), false)
+			new("GenerateIndex", typeof(long), false)
 		};
 		return Task.CompletedTask;
 	}

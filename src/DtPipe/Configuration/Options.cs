@@ -55,13 +55,13 @@ public sealed record DumpOptions
 	/// Probability 0.0-1.0 to include a row.
 	/// 1.0 = Include all (default). 0.1 = Include 10%.
 	/// </summary>
-	public double SampleRate { get; init; } = 1.0;
+	public double SamplingRate { get; init; } = 1.0;
 
 	/// <summary>
 	/// Seed for random sampling to ensure reproducibility.
 	/// If null, a system-generated seed is used.
 	/// </summary>
-	public int? SampleSeed { get; init; }
+	public int? SamplingSeed { get; init; }
 
 	/// <summary>
 	/// Path to the log file. If set, file logging is enabled.
