@@ -7,17 +7,19 @@ using DtPipe.Adapters.Oracle;
 using Microsoft.Extensions.Logging;
 using DtPipe.Core.Helpers;
 
-public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
+public sealed class OracleDataWriter : BaseSqlDataWriter
 {
-    private readonly string _connectionString;
-    private readonly OracleConnection _connection;
     private readonly OracleWriterOptions _options;
-    private IReadOnlyList<PipeColumnInfo>? _columns;
     private readonly ILogger<OracleDataWriter> _logger;
     private readonly ITypeMapper _typeMapper;
     private OracleBulkCopy? _bulkCopy;
     private OracleCommand? _insertCommand;
     private OracleParameter[]? _insertParameters;
+    private OracleCommand? _mergeCommand;
+    private OracleParameter[]? _mergeParameters;
+
+    // Helper property to avoid casting _connection everywhere
+    private OracleConnection OracleConnection => (OracleConnection)_connection!;
 
     // Maps column names to target DB types (e.g. "ID" -> OracleDbType.Raw)
     private Dictionary<string, OracleDbType>? _targetColumnTypes;
@@ -25,370 +27,250 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
     private List<string> _keyColumns = new();
     private List<int> _keyIndices = new();
 
-    private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.OracleDialect();
-    public ISqlDialect Dialect => _dialect;
+    public override ISqlDialect Dialect => DtPipe.Core.Dialects.OracleDialect.Instance;
 
     public OracleDataWriter(string connectionString, OracleWriterOptions options, ILogger<OracleDataWriter> logger, ITypeMapper typeMapper)
+        : base(connectionString)
     {
-        _connectionString = connectionString;
         _options = options;
         _logger = logger;
         _typeMapper = typeMapper;
-        _connection = new OracleConnection(connectionString);
         if(_logger.IsEnabled(LogLevel.Debug)) _logger.LogDebug("OracleDataWriter created");
     }
 
-    private string _targetTableName = "";
+    #region BaseSqlDataWriter Implementation
 
-    #region ISchemaInspector Implementation
-
-    public async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
+    public override async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
     {
         return await new OracleSchemaInspector(_connectionString, _options.Table, _logger).InspectTargetAsync(ct);
     }
 
-    #endregion
+    protected override IDbConnection CreateConnection(string connectionString)
+        => new OracleConnection(connectionString);
 
-    public async ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
+    protected override async Task<(string Schema, string Table)> ResolveTargetTableAsync(CancellationToken ct)
     {
-        _targetTableName = _options.Table;
-
-        // Create normalized list of columns to ensure consistency across DDL and DML
-        var normalizedColumns = new List<PipeColumnInfo>(columns.Count);
-        foreach (var col in columns)
+        try
         {
-            // Strip BOM and whitespace (common in CSV headers)
-            var cleanName = col.Name.Trim('\uFEFF', ' ', '\t', '\r', '\n');
-
-            if (col.IsCaseSensitive)
-            {
-                normalizedColumns.Add(col with { Name = cleanName });
-            }
-            else
-            {
-                // Normalize to Oracle default (UPPERCASE)
-                normalizedColumns.Add(col with { Name = _dialect.Normalize(cleanName) });
-            }
+            var resolved = await OracleSchemaInspector.ResolveTargetTableAsync(OracleConnection, _options.Table, ct);
+            return (resolved.Schema, resolved.Table);
         }
-        _columns = normalizedColumns;
-
-        if(_logger.IsEnabled(LogLevel.Information))
-            _logger.LogInformation("Initializing Oracle Writer for table {Table} (WriteStrategy={Strategy})", _targetTableName, _options.Strategy);
-
-        if (_connection.State != ConnectionState.Open)
+        catch (OracleException ex) when (ex.Number == 6550 || ex.Number == 6564 || ex.Message.Contains("ORA-06550") || ex.Message.Contains("ORA-06564"))
         {
-            await _connection.OpenAsync(ct);
+            // Object doesn't exist yet - return raw input
+            return ("", _options.Table);
         }
+    }
 
-        if (_options.Strategy == OracleWriteStrategy.Recreate)
+    protected override async Task ApplyWriteStrategyAsync(string resolvedSchema, string resolvedTable, CancellationToken ct)
+    {
+        switch (_options.Strategy)
         {
-            // 0. Introspect existing table to preserve native types
-            TargetSchemaInfo? existingSchema = null;
-            try
-            {
-                var resolved = await OracleSchemaInspector.ResolveTargetTableAsync(_connection, _options.Table, ct);
-                if (!string.IsNullOrEmpty(resolved.Table))
-                {
-                    var safeSchema = OracleSchemaInspector.GetSmartQuotedIdentifier(resolved.Schema);
-                    var safeTable = OracleSchemaInspector.GetSmartQuotedIdentifier(resolved.Table);
-                    _targetTableName = $"{safeSchema}.{safeTable}";
+            case OracleWriteStrategy.Recreate:
+                await ApplyRecreateStrategyAsync(resolvedSchema, resolvedTable, ct);
+                break;
+            case OracleWriteStrategy.Truncate:
+                await ApplyTruncateStrategyAsync(ct);
+                break;
+            case OracleWriteStrategy.Append:
+                await ApplyAppendStrategyAsync(ct);
+                break;
+            case OracleWriteStrategy.DeleteThenInsert:
+                await ApplyDeleteThenInsertStrategyAsync(ct);
+                break;
+            case OracleWriteStrategy.Upsert:
+            case OracleWriteStrategy.Ignore:
+                await ApplyUpsertIgnoreStrategyAsync(ct);
+                break;
+        }
+    }
 
-                    existingSchema = await InspectTargetAsync(ct);
-                    if (existingSchema?.Exists == true)
-                    {
-                        if(_logger.IsEnabled(LogLevel.Information))
-                            _logger.LogInformation("Table {Table} exists. Preserving native schema for recreation.", _targetTableName);
-                    }
-                }
-            }
-            catch
-            {
-                if(_logger.IsEnabled(LogLevel.Debug))
-                    _logger.LogDebug("Target table {Table} could not be resolved. Proceeding with default creation.", _options.Table);
-            }
+    protected override async ValueTask OnInitializedAsync(CancellationToken ct)
+    {
+        InitializeCommands();
+        await ValueTask.CompletedTask;
+    }
 
-            // 1. Drop existing table
-            try {
-                using var dropCmd = _connection.CreateCommand();
-                var sql = $"DROP TABLE {_targetTableName}";
-                dropCmd.CommandText = sql;
-                await dropCmd.ExecuteNonQueryAsync(ct);
-                if(_logger.IsEnabled(LogLevel.Information))
-                    _logger.LogInformation("Dropped table {Table} (Recreate Strategy)", _targetTableName);
-            }
-            catch (OracleException ex) when (ex.Number == 942) { /* ORA-00942: table or view does not exist */ }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException($"Recreate Drop failed. SQL: DROP TABLE {_targetTableName}. Error: {ex.Message}", ex);
-            }
-
-            // 2. Create new table
-            string createTableSql;
+    private async Task ApplyRecreateStrategyAsync(string resolvedSchema, string resolvedTable, CancellationToken ct)
+    {
+        // 0. Introspect existing table to preserve native types
+        TargetSchemaInfo? existingSchema = null;
+        try
+        {
+            existingSchema = await InspectTargetAsync(ct);
             if (existingSchema?.Exists == true)
             {
-                createTableSql = OracleSqlBuilder.BuildCreateTableFromIntrospection(_targetTableName, existingSchema, _dialect);
+                if (_logger.IsEnabled(LogLevel.Information))
+                    _logger.LogInformation("Table {Table} exists. Preserving native schema for recreation.", _quotedTargetTableName);
             }
-            else
-            {
-                createTableSql = BuildCreateTableSql(_targetTableName, normalizedColumns);
-            }
+        }
+        catch
+        {
+            if (_logger.IsEnabled(LogLevel.Debug))
+                _logger.LogDebug("Target table {Table} could not be resolved. Proceeding with default creation.", _options.Table);
+        }
 
-            try
-            {
-                using var cmd = _connection.CreateCommand();
-                cmd.CommandText = createTableSql;
-                await cmd.ExecuteNonQueryAsync(ct);
-                if(_logger.IsEnabled(LogLevel.Information))
-                    _logger.LogInformation("Created table {Table}", _targetTableName);
+        // 1. Drop existing table
+        try
+        {
+            await ExecuteNonQueryAsync(GetDropTableSql(_quotedTargetTableName), ct);
+            if (_logger.IsEnabled(LogLevel.Information))
+                _logger.LogInformation("Dropped table {Table} (Recreate Strategy)", _quotedTargetTableName);
+        }
+        catch (OracleException ex) when (ex.Number == 942) { /* ORA-00942: table or view does not exist */ }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Recreate Drop failed. SQL: DROP TABLE {_quotedTargetTableName}. Error: {ex.Message}", ex);
+        }
 
-                // Sync columns metadata from introspection to ensure future DML (INSERT/MERGE) matches exact case/quotes
-                if (existingSchema != null)
-                {
-                    SyncColumnsFromIntrospection(existingSchema);
-                }
-            }
-            catch (Exception ex)
-            {
-                 throw new InvalidOperationException($"Create Table failed. SQL: {createTableSql}{Environment.NewLine}Error: {ex.Message}", ex);
-            }
+        // 2. Create new table
+        string createTableSql;
+        if (existingSchema?.Exists == true)
+        {
+            createTableSql = OracleSqlBuilder.BuildCreateTableFromIntrospection(_quotedTargetTableName, existingSchema, Dialect);
         }
         else
         {
-            try
-            {
-                var resolved = await OracleSchemaInspector.ResolveTargetTableAsync(_connection, _options.Table, ct);
-
-                var safeSchema = OracleSchemaInspector.GetSmartQuotedIdentifier(resolved.Schema);
-                var safeTable = OracleSchemaInspector.GetSmartQuotedIdentifier(resolved.Table);
-
-                _targetTableName = $"{safeSchema}.{safeTable}";
-
-                if(_logger.IsEnabled(LogLevel.Information))
-                    _logger.LogInformation("Resolved table {Input} to {Resolved}", _options.Table, _targetTableName);
-            }
-            catch (OracleException ex) when (ex.Number == 6550 || ex.Message.Contains("ORA-06550"))
-            {
-                // ORA-06550: PL/SQL compilation error often means the object does not exist or access denied in NAME_RESOLVE
-                 throw new InvalidOperationException($"Table {_options.Table} could not be resolved or does not exist. (Oracle NAME_RESOLVE failed). Strategy: {_options.Strategy}", ex);
-            }
-            catch (Exception ex)
-            {
-                 throw new InvalidOperationException($"Failed to resolve table {_options.Table}. Error: {ex.Message}", ex);
-            }
-
-            // Introspect target types (Fix for ORA-00932 BLOB/RAW mismatch)
-            try
-            {
-                var schemaInfo = await InspectTargetAsync(ct);
-                if (schemaInfo != null)
-                {
-                    SyncColumnsFromIntrospection(schemaInfo);
-                    _targetColumnTypes = new Dictionary<string, OracleDbType>(StringComparer.OrdinalIgnoreCase);
-                    foreach(var col in schemaInfo.Columns)
-                    {
-                        var dbType = OracleTypeConverter.MapNativeTypeToOracleDbType(col.NativeType);
-                        if (dbType.HasValue)
-                        {
-                            _targetColumnTypes[col.Name] = dbType.Value;
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                if(_logger.IsEnabled(LogLevel.Warning))
-                    _logger.LogWarning(ex, "Failed to inspect target schema types. Parameter binding will rely on Source types.");
-            }
-
-            // Handle cleanup for strategies that require it
-            if (_options.Strategy == OracleWriteStrategy.DeleteThenInsert)
-            {
-                try {
-                    using var deleteCmd = _connection.CreateCommand();
-                    var sql = $"DELETE FROM {_targetTableName}";
-                    deleteCmd.CommandText = sql;
-                    await deleteCmd.ExecuteNonQueryAsync(ct);
-                    if(_logger.IsEnabled(LogLevel.Information))
-                        _logger.LogInformation("Deleted existing rows from table {Table}", _targetTableName);
-                }
-                catch (Exception ex)
-                {
-                    throw new InvalidOperationException($"Delete failed. SQL: DELETE FROM {_targetTableName}. Error: {ex.Message}", ex);
-                }
-            }
-            else if (_options.Strategy == OracleWriteStrategy.Truncate)
-            {
-                 try {
-                    using var truncCmd = _connection.CreateCommand();
-                    var sql = $"TRUNCATE TABLE {_targetTableName}";
-                    truncCmd.CommandText = sql;
-                    await truncCmd.ExecuteNonQueryAsync(ct);
-                    if(_logger.IsEnabled(LogLevel.Information))
-                        _logger.LogInformation("Truncated table {Table}", _targetTableName);
-                }
-                catch (Exception ex)
-                {
-                    throw new InvalidOperationException($"Truncate failed. SQL: TRUNCATE TABLE {_targetTableName}. Error: {ex.Message}", ex);
-                }
-            }
+            createTableSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
         }
 
-        if (_options.Strategy == OracleWriteStrategy.Upsert || _options.Strategy == OracleWriteStrategy.Ignore)
+        try
         {
-             // 1. Resolve Keys
-            var targetInfo = await InspectTargetAsync(ct);
-            if (targetInfo != null)
-            {
-                SyncColumnsFromIntrospection(targetInfo);
-                if (targetInfo.PrimaryKeyColumns != null)
-                {
-                    _keyColumns.AddRange(targetInfo.PrimaryKeyColumns);
-                }
-            }
+            await ExecuteNonQueryAsync(createTableSql, ct);
+            if (_logger.IsEnabled(LogLevel.Information))
+                _logger.LogInformation("Created table {Table}", _quotedTargetTableName);
 
-            if (_keyColumns.Count == 0 && !string.IsNullOrEmpty(_options.Key))
+            // Sync columns metadata from introspection to ensure future DML (INSERT/MERGE) matches exact case/quotes
+            if (existingSchema != null)
             {
-                 _keyColumns.AddRange(ColumnHelper.ResolveKeyColumns(_options.Key, _columns));
-            }
-
-            if (_keyColumns.Count == 0)
-            {
-                 throw new InvalidOperationException($"Strategy {_options.Strategy} requires a Primary Key. None detected.");
-            }
-
-            // Resolve Indices
-            foreach(var key in _keyColumns)
-            {
-                var idx = -1;
-                for(int i=0; i<columns.Count; i++)
-                {
-                    if (string.Equals(columns[i].Name, key, StringComparison.OrdinalIgnoreCase))
-                    {
-                        idx = i;
-                        break;
-                    }
-                }
-                if (idx == -1) throw new InvalidOperationException($"Key column '{key}' not found in source columns.");
-                _keyIndices.Add(idx);
+                SyncColumnsFromIntrospection(existingSchema);
             }
         }
-
-        // Initialize reusable objects
-        InitializeCommands();
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Create Table failed. SQL: {createTableSql}{Environment.NewLine}Error: {ex.Message}", ex);
+        }
     }
 
-    private OracleCommand? _mergeCommand;
-    private OracleParameter[]? _mergeParameters;
-
-    private void InitializeCommands()
+    private async Task ApplyTruncateStrategyAsync(CancellationToken ct)
     {
-        if (_options.Strategy == OracleWriteStrategy.Upsert || _options.Strategy == OracleWriteStrategy.Ignore)
+        try
         {
-             bool isUpsert = _options.Strategy == OracleWriteStrategy.Upsert;
-             var (mergeSql, types) = OracleSqlBuilder.BuildMergeSql(
-                 _targetTableName,
-                 _columns!,
-                 _keyColumns,
-                 _dialect,
-                 isUpsert,
-                 _options.DateTimeMapping);
+            await ExecuteNonQueryAsync(GetTruncateTableSql(_quotedTargetTableName), ct);
+            if (_logger.IsEnabled(LogLevel.Information))
+                _logger.LogInformation("Truncated table {Table}", _quotedTargetTableName);
 
-             if(_logger.IsEnabled(LogLevel.Debug))
-                 _logger.LogDebug("Generated MERGE SQL: {Sql}", mergeSql);
-
-             _mergeCommand = _connection.CreateCommand();
-             _mergeCommand.BindByName = true;
-             _mergeCommand.CommandText = mergeSql;
-
-             _mergeParameters = new OracleParameter[_columns!.Count];
-             for(int i=0; i<_columns.Count; i++)
-             {
-                 var p = _mergeCommand.CreateParameter();
-                 p.ParameterName = $"v{i}";
-
-                 // Override type if target is known (e.g. RAW vs BLOB)
-                 if (_targetColumnTypes != null && _targetColumnTypes.TryGetValue(_columns[i].Name, out var targetType))
-                 {
-                     p.OracleDbType = targetType;
-                 }
-                 else
-                 {
-                     p.OracleDbType = types[i];
-                 }
-
-                 _mergeCommand.Parameters.Add(p);
-                 _mergeParameters[i] = p;
-             }
+            await SyncFromTargetAsync(ct);
         }
-        else if (_options.InsertMode == OracleInsertMode.Bulk)
+        catch (Exception ex)
         {
-            _bulkCopy = new OracleBulkCopy(_connection);
-
-            // IMPORTANT: OracleBulkCopy requires SEPARATE properties for schema and table.
-            // It does NOT accept "SCHEMA.TABLE" in DestinationTableName.
-
-            if (_targetTableName.Contains('.'))
-            {
-                var parts = _targetTableName.Split('.');
-                // Remove quotes if present (e.g., "SYSTEM"."MyTable" -> SYSTEM, MyTable)
-                var schema = parts[0].Trim('"');
-                var table = parts[1].Trim('"');
-
-                _bulkCopy.DestinationSchemaName = schema;
-                _bulkCopy.DestinationTableName = table;
-            }
-            else
-            {
-                // No schema prefix, use table name only (defaults to connection user's schema)
-                _bulkCopy.DestinationTableName = _targetTableName.Trim('"');
-            }
-
-            _bulkCopy.BulkCopyTimeout = 0;
-            foreach (var col in _columns!)
-            {
-                // Columns are already globally normalized in InitializeAsync
-                _bulkCopy.ColumnMappings.Add(col.Name, SqlIdentifierHelper.GetSafeIdentifier(_dialect, col));
-            }
-        }
-        else
-        {
-            bool useAppendHint = _options.InsertMode == OracleInsertMode.Append;
-            var (insertSql, types) = OracleSqlBuilder.BuildInsertSql(
-                _targetTableName,
-                _columns!,
-                _dialect,
-                useAppendHint,
-                _options.DateTimeMapping);
-
-            if(_logger.IsEnabled(LogLevel.Debug))
-                _logger.LogDebug("Generated Insert SQL: {Sql}", insertSql);
-
-            _insertCommand = _connection.CreateCommand();
-            _insertCommand.BindByName = true;
-            _insertCommand.CommandText = insertSql;
-
-            _insertParameters = new OracleParameter[_columns!.Count];
-            for (int i = 0; i < _columns.Count; i++)
-            {
-                _insertParameters[i] = _insertCommand.CreateParameter();
-                _insertParameters[i].ParameterName = $"v{i}";
-
-                // Override type if target is known
-                if (_targetColumnTypes != null && _targetColumnTypes.TryGetValue(_columns[i].Name, out var targetType))
-                {
-                    _insertParameters[i].OracleDbType = targetType;
-                }
-                else
-                {
-                    _insertParameters[i].OracleDbType = types[i];
-                }
-
-                _insertCommand.Parameters.Add(_insertParameters[i]);
-            }
+            throw new InvalidOperationException($"Truncate failed. SQL: TRUNCATE TABLE {_quotedTargetTableName}. Error: {ex.Message}", ex);
         }
     }
 
-    public async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
+    private async Task ApplyAppendStrategyAsync(CancellationToken ct)
+    {
+        await SyncFromTargetAsync(ct);
+    }
+
+    private async Task ApplyDeleteThenInsertStrategyAsync(CancellationToken ct)
+    {
+        try
+        {
+            var sql = $"DELETE FROM {_quotedTargetTableName}";
+            await ExecuteNonQueryAsync(sql, ct);
+            if (_logger.IsEnabled(LogLevel.Information))
+                _logger.LogInformation("Deleted existing rows from table {Table}", _quotedTargetTableName);
+
+            await SyncFromTargetAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Delete failed. SQL: DELETE FROM {_quotedTargetTableName}. Error: {ex.Message}", ex);
+        }
+    }
+
+    private async Task ApplyUpsertIgnoreStrategyAsync(CancellationToken ct)
+    {
+        // 1. Resolve Keys
+        var targetInfo = await InspectTargetAsync(ct);
+        if (targetInfo != null)
+        {
+            SyncColumnsFromIntrospection(targetInfo);
+            if (targetInfo.PrimaryKeyColumns != null)
+            {
+                foreach (var pk in targetInfo.PrimaryKeyColumns)
+                {
+                    if (!_keyColumns.Contains(pk, StringComparer.OrdinalIgnoreCase))
+                        _keyColumns.Add(pk);
+                }
+            }
+        }
+
+        if (_keyColumns.Count == 0 && !string.IsNullOrEmpty(_options.Key))
+        {
+            _keyColumns.AddRange(ColumnHelper.ResolveKeyColumns(_options.Key, _columns!));
+        }
+
+        if (_keyColumns.Count == 0)
+        {
+            throw new InvalidOperationException($"Strategy {_options.Strategy} requires a Primary Key. None detected.");
+        }
+
+        // Resolve Indices
+        foreach (var key in _keyColumns)
+        {
+            var idx = -1;
+            for (int i = 0; i < _columns!.Count; i++)
+            {
+                if (string.Equals(_columns[i].Name, key, StringComparison.OrdinalIgnoreCase))
+                {
+                    idx = i;
+                    break;
+                }
+            }
+            if (idx == -1) throw new InvalidOperationException($"Key column '{key}' not found in source columns.");
+            _keyIndices.Add(idx);
+        }
+    }
+
+    private async Task SyncFromTargetAsync(CancellationToken ct)
+    {
+        // Introspect target types (Fix for ORA-00932 BLOB/RAW mismatch)
+        try
+        {
+            var schemaInfo = await InspectTargetAsync(ct);
+            if (schemaInfo != null)
+            {
+                SyncColumnsFromIntrospection(schemaInfo);
+                _targetColumnTypes = new Dictionary<string, OracleDbType>(StringComparer.OrdinalIgnoreCase);
+                foreach (var col in schemaInfo.Columns)
+                {
+                    var dbType = OracleTypeConverter.MapNativeTypeToOracleDbType(col.NativeType);
+                    if (dbType.HasValue)
+                    {
+                        _targetColumnTypes[col.Name] = dbType.Value;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            if (_logger.IsEnabled(LogLevel.Warning))
+                _logger.LogWarning(ex, "Failed to inspect target schema types. Parameter binding will rely on Source types.");
+        }
+    }
+
+    protected override string GetCreateTableSql(string tableName, IEnumerable<PipeColumnInfo> columns)
+        => BuildCreateTableSql(tableName, columns.ToList());
+
+    protected override string GetTruncateTableSql(string tableName)
+        => $"TRUNCATE TABLE {tableName}";
+
+    protected override string GetDropTableSql(string tableName)
+        => $"DROP TABLE {tableName}";
+
+    public override async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
     {
         if (_columns is null) throw new InvalidOperationException("Not initialized");
 
@@ -470,7 +352,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
 
             _bulkCopy.BatchSize = rows.Count;
             if(_logger.IsEnabled(LogLevel.Debug))
-                _logger.LogDebug("Starting BulkCopy for batch of {Count} rows into {Table}", rows.Count, _targetTableName);
+                _logger.LogDebug("Starting BulkCopy for batch of {Count} rows into {Table}", rows.Count, _quotedTargetTableName);
             var watch = System.Diagnostics.Stopwatch.StartNew();
 
             // Use IDataReader wrapper for performance
@@ -530,23 +412,28 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
             await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    public ValueTask CompleteAsync(CancellationToken ct = default)
+    public override async ValueTask CompleteAsync(CancellationToken ct = default)
     {
-        return ValueTask.CompletedTask;
+        await ValueTask.CompletedTask;
     }
-    public async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
-    {
-        if (_connection.State != ConnectionState.Open)
-        {
-            await _connection.OpenAsync(ct);
-        }
 
-        using var cmd = _connection.CreateCommand();
+    public override async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
+    {
+        await EnsureConnectionOpenAsync(ct);
+
+        using var cmd = _connection!.CreateCommand();
         cmd.CommandText = command;
-        await cmd.ExecuteNonQueryAsync(ct);
+        if (cmd is System.Data.Common.DbCommand dbCmd)
+        {
+            await dbCmd.ExecuteNonQueryAsync(ct);
+        }
+        else
+        {
+            cmd.ExecuteNonQuery();
+        }
     }
 
-    public async ValueTask DisposeAsync()
+    protected override async ValueTask DisposeResourcesAsync()
     {
         if (_bulkCopy != null)
         {
@@ -566,18 +453,32 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
             _mergeCommand = null;
         }
 
-        await _connection.DisposeAsync();
+        await ValueTask.CompletedTask;
     }
 
+    public override string? GetWriteStrategy() => _options.Strategy.ToString();
 
+    public override IReadOnlyList<string>? GetRequestedPrimaryKeys()
+    {
+        if (string.IsNullOrEmpty(_options.Key))
+            return null;
+
+        return _options.Key.Split(',')
+            .Select(k => k.Trim())
+            .Where(k => !string.IsNullOrEmpty(k))
+            .ToList();
+    }
+
+    public override bool RequiresPrimaryKey()
+    {
+        return _options.Strategy is
+            OracleWriteStrategy.Upsert or
+            OracleWriteStrategy.Ignore;
+    }
 
     /// <summary>
     /// Builds CREATE TABLE DDL from source column info.
     /// </summary>
-    /// <remarks>
-    /// Types are mapped from CLR types. Use existing schema or manage DDL separately
-    /// if exact structure (precision/scale) must be preserved.
-    /// </remarks>
     private string BuildCreateTableSql(string tableName, IReadOnlyList<PipeColumnInfo> columns)
     {
         var sb = new StringBuilder();
@@ -586,8 +487,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
         for (int i = 0; i < columns.Count; i++)
         {
             if (i > 0) sb.Append(", ");
-            // Columns are passed from _columns which is already globally normalized
-            sb.Append($"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, columns[i])} {_typeMapper.MapToProviderType(columns[i].ClrType)}");
+            sb.Append($"{SqlIdentifierHelper.GetSafeIdentifier(Dialect, columns[i])} {_typeMapper.MapToProviderType(columns[i].ClrType)}");
         }
 
         if (!string.IsNullOrEmpty(_options.Key))
@@ -596,7 +496,7 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
              var safeKeys = resolvedKeys.Select(keyName =>
              {
                  var col = columns.First(c => c.Name == keyName);
-                 return SqlIdentifierHelper.GetSafeIdentifier(_dialect, col);
+                 return SqlIdentifierHelper.GetSafeIdentifier(Dialect, col);
              }).ToList();
              sb.Append($", PRIMARY KEY ({string.Join(", ", safeKeys)})");
         }
@@ -605,71 +505,113 @@ public sealed class OracleDataWriter : IDataWriter, ISchemaInspector, IKeyValida
         return sb.ToString();
     }
 
-
-
-    // IKeyValidator implementation
-
-    public string? GetWriteStrategy()
+    private void InitializeCommands()
     {
-        return _options.Strategy.ToString();
-    }
-
-    public IReadOnlyList<string>? GetRequestedPrimaryKeys()
-    {
-        if (string.IsNullOrEmpty(_options.Key))
-            return null;
-
-        // Return the RAW user input (not yet resolved)
-        return _options.Key.Split(',')
-            .Select(k => k.Trim())
-            .Where(k => !string.IsNullOrEmpty(k))
-            .ToList();
-    }
-
-    public bool RequiresPrimaryKey()
-    {
-        return _options.Strategy is
-            OracleWriteStrategy.Upsert or
-            OracleWriteStrategy.Ignore;
-    }
-
-    /// <summary>
-    /// Synchronizes source column metadata with the target schema information.
-    /// Updates Name (to match exact casing in target DB), IsCaseSensitive flag,
-    /// and ClrType (to enable correct type conversion, e.g. string → DateTime).
-    /// Columns not found in the target schema are kept unchanged.
-    /// </summary>
-    private void SyncColumnsFromIntrospection(TargetSchemaInfo targetSchema)
-    {
-        if (_columns == null) return;
-
-        var synced = new List<PipeColumnInfo>(_columns.Count);
-        foreach (var col in _columns)
+        if (_options.Strategy == OracleWriteStrategy.Upsert || _options.Strategy == OracleWriteStrategy.Ignore)
         {
-            var targetCol = targetSchema.Columns.FirstOrDefault(
-                tc => tc.Name.Equals(col.Name, StringComparison.OrdinalIgnoreCase)
-            );
+             bool isUpsert = _options.Strategy == OracleWriteStrategy.Upsert;
+             var (mergeSql, types) = OracleSqlBuilder.BuildMergeSql(
+                 _quotedTargetTableName,
+                 _columns!,
+                 _keyColumns,
+                 Dialect,
+                 isUpsert,
+                 _options.DateTimeMapping);
 
-            if (targetCol != null)
+             if(_logger.IsEnabled(LogLevel.Debug))
+                 _logger.LogDebug("Generated MERGE SQL: {Sql}", mergeSql);
+
+             _mergeCommand = OracleConnection.CreateCommand();
+             _mergeCommand.BindByName = true;
+             _mergeCommand.CommandText = mergeSql;
+
+             _mergeParameters = new OracleParameter[_columns!.Count];
+             for(int i=0; i<_columns.Count; i++)
+             {
+                 var p = _mergeCommand.CreateParameter();
+                 p.ParameterName = $"v{i}";
+
+                 // Override type if target is known (e.g. RAW vs BLOB)
+                 if (_targetColumnTypes != null && _targetColumnTypes.TryGetValue(_columns[i].Name, out var targetType))
+                 {
+                     p.OracleDbType = targetType;
+                 }
+                 else
+                 {
+                     p.OracleDbType = types[i];
+                 }
+
+                 _mergeCommand.Parameters.Add(p);
+                 _mergeParameters[i] = p;
+             }
+        }
+        else if (_options.InsertMode == OracleInsertMode.Bulk)
+        {
+            _bulkCopy = new OracleBulkCopy(OracleConnection);
+
+            // IMPORTANT: OracleBulkCopy requires SEPARATE properties for schema and table.
+            // It does NOT accept "SCHEMA.TABLE" in DestinationTableName.
+
+            if (_quotedTargetTableName.Contains('.'))
             {
-                if (_logger.IsEnabled(LogLevel.Debug))
-                    _logger.LogDebug("Syncing column {Col}: Name {Old} -> {New}, ClrType {OldType} -> {NewType}, IsCaseSensitive {OldCS} -> {NewCS}",
-                        col.Name, col.Name, targetCol.Name, col.ClrType.Name, (targetCol.InferredClrType ?? col.ClrType).Name, col.IsCaseSensitive, targetCol.IsCaseSensitive);
+                var parts = _quotedTargetTableName.Split('.');
+                // Remove quotes if present (e.g., "SYSTEM"."MyTable" -> SYSTEM, MyTable)
+                var schema = parts[0].Trim('"');
+                var table = parts[1].Trim('"');
 
-                synced.Add(col with
-                {
-                    Name = targetCol.Name,
-                    IsCaseSensitive = targetCol.IsCaseSensitive,
-                    ClrType = targetCol.InferredClrType ?? col.ClrType
-                });
+                _bulkCopy.DestinationSchemaName = schema;
+                _bulkCopy.DestinationTableName = table;
             }
             else
             {
-                if (_logger.IsEnabled(LogLevel.Information))
-                    _logger.LogInformation("Column {Col} was NOT found in target introspection. It will remain mapped to {Type} (IsCaseSensitive: {CS}).", col.Name, col.ClrType.Name, col.IsCaseSensitive);
-                synced.Add(col);
+                // No schema prefix, use table name only (defaults to connection user's schema)
+                _bulkCopy.DestinationTableName = _quotedTargetTableName.Trim('"');
+            }
+
+            _bulkCopy.BulkCopyTimeout = 0;
+            foreach (var col in _columns!)
+            {
+                // Columns are already globally normalized in InitializeAsync
+                _bulkCopy.ColumnMappings.Add(col.Name, SqlIdentifierHelper.GetSafeIdentifier(Dialect, col));
             }
         }
-        _columns = synced;
+        else
+        {
+            bool useAppendHint = _options.InsertMode == OracleInsertMode.Append;
+            var (insertSql, types) = OracleSqlBuilder.BuildInsertSql(
+                _quotedTargetTableName,
+                _columns!,
+                Dialect,
+                useAppendHint,
+                _options.DateTimeMapping);
+
+            if(_logger.IsEnabled(LogLevel.Debug))
+                _logger.LogDebug("Generated Insert SQL: {Sql}", insertSql);
+
+            _insertCommand = OracleConnection.CreateCommand();
+            _insertCommand.BindByName = true;
+            _insertCommand.CommandText = insertSql;
+
+            _insertParameters = new OracleParameter[_columns!.Count];
+            for (int i = 0; i < _columns.Count; i++)
+            {
+                _insertParameters[i] = _insertCommand.CreateParameter();
+                _insertParameters[i].ParameterName = $"v{i}";
+
+                // Override type if target is known
+                if (_targetColumnTypes != null && _targetColumnTypes.TryGetValue(_columns[i].Name, out var targetType))
+                {
+                    _insertParameters[i].OracleDbType = targetType;
+                }
+                else
+                {
+                    _insertParameters[i].OracleDbType = types[i];
+                }
+
+                _insertCommand.Parameters.Add(_insertParameters[i]);
+            }
+        }
     }
+
+    #endregion
 }
