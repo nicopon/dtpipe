@@ -41,4 +41,23 @@ public class ProgressReporterTests
 			Environment.SetEnvironmentVariable("DTPIPE_NO_TUI", prev);
 		}
 	}
+
+	[Fact]
+	public void GetMetrics_ReturnsCorrectData()
+	{
+		var console = new Mock<IAnsiConsole>();
+		var reporter = new ProgressReporter(console.Object, enabled: true, transformerNames: new[] { "TestTr" });
+
+		reporter.ReportRead(10);
+		reporter.ReportTransform("TestTr", 5);
+		reporter.ReportWrite(8);
+
+		var metrics = reporter.GetMetrics();
+
+		Assert.Equal(10, metrics.ReadCount);
+		Assert.Equal(8, metrics.WriteCount);
+		Assert.True(metrics.TransformerStats.ContainsKey("TestTr"));
+		Assert.Equal(5, metrics.TransformerStats["TestTr"]);
+		Assert.True(metrics.PeakMemoryWorkingSetMb > 0);
+	}
 }

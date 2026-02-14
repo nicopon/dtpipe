@@ -6,4 +6,5 @@ public interface IExportProgress : IDisposable
 	void ReportTransform(string transformerName, int count);
 	void ReportWrite(int count);
 	void Complete();
+	DtPipe.Core.Models.ExportMetrics GetMetrics();
 }

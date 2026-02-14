@@ -4,6 +4,7 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Options;
 using DtPipe.Core.Security;
 using DtPipe.Core.Resilience;
+using DtPipe.Core.Validation;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
 
@@ -119,6 +120,61 @@ public class ExportService
 
         await writer.InitializeAsync(exportableSchema, ct);
 
+        // --- SCHEMA VALIDATION ---
+        if (!options.NoSchemaValidation && writer is ISchemaInspector inspector)
+        {
+            _observer.LogMessage("Verifying target schema compatibility...");
+            var targetSchema = await inspector.InspectTargetAsync(ct);
+            var dialect = (writer as IHasSqlDialect)?.Dialect;
+
+            var report = SchemaCompatibilityAnalyzer.Analyze(exportableSchema, targetSchema, dialect);
+
+            // Show report via observer (needs update to IExportObserver to handle report)
+            // For now, let's log errors/warnings manually or add to observer
+            foreach (var warning in report.Warnings) _observer.LogWarning(warning);
+            foreach (var error in report.Errors) _observer.LogError(new Exception(error));
+
+            if (!report.IsCompatible && options.StrictSchema)
+            {
+                // Before aborting, check if we can migrate
+                var missingInTargetCount = report.Columns.Count(c => c.Status == CompatibilityStatus.MissingInTarget);
+                if (options.AutoMigrate && missingInTargetCount > 0 && writer is ISchemaMigrator migrator)
+                {
+                    _observer.LogMessage($"[yellow]Auto-migrating schema: Adding {missingInTargetCount} missing columns...[/]");
+                    await migrator.MigrateSchemaAsync(report, ct);
+
+                    // Re-analyze
+                    targetSchema = await inspector.InspectTargetAsync(ct);
+                    report = SchemaCompatibilityAnalyzer.Analyze(exportableSchema, targetSchema, dialect);
+
+                    if (report.IsCompatible || !options.StrictSchema)
+                    {
+                        _observer.LogMessage("[green]Schema migration successful. Continuing export.[/]");
+                    }
+                    else
+                    {
+                         throw new InvalidOperationException("Export aborted: Schema migration failed to resolve all incompatibilities in Strict Mode.");
+                    }
+                }
+                else
+                {
+                    throw new InvalidOperationException("Export aborted due to schema incompatibilities (Strict Mode).");
+                }
+            }
+            else if (options.AutoMigrate && writer is ISchemaMigrator migrator)
+            {
+                var missingInTargetCount = report.Columns.Count(c => c.Status == CompatibilityStatus.MissingInTarget);
+                if (missingInTargetCount > 0)
+                {
+                    _observer.LogMessage($"[yellow]Auto-migrating schema: Adding {missingInTargetCount} missing columns...[/]");
+                    await migrator.MigrateSchemaAsync(report, ct);
+
+                    // Update our view of the target
+                    targetSchema = await inspector.InspectTargetAsync(ct);
+                }
+            }
+        }
+
         // Bounded Channels
         // Reader to Transform remains row-level because transformers work row-by-row
         var readerToTransform = Channel.CreateBounded<object?[]>(new BoundedChannelOptions(1000)
@@ -187,6 +243,26 @@ public class ExportService
             {
                 _observer.OnHookExecuting("Post-Hook", options.PostExec);
                 await writer.ExecuteCommandAsync(options.PostExec, ct);
+            }
+
+            _observer.LogMessage($"[green]✓ Export completed successfully.[/]");
+
+            var metrics = progress.GetMetrics();
+            if (!string.IsNullOrEmpty(options.MetricsPath))
+            {
+                try
+                {
+                    var json = System.Text.Json.JsonSerializer.Serialize(metrics, new System.Text.Json.JsonSerializerOptions
+                    {
+                        WriteIndented = true
+                    });
+                    await File.WriteAllTextAsync(options.MetricsPath, json, ct);
+                    _observer.LogMessage($"   [grey]Metrics saved to: {options.MetricsPath}[/]");
+                }
+                catch (Exception ex)
+                {
+                    _observer.LogWarning($"Failed to save metrics: {ex.Message}");
+                }
             }
         }
         catch (Exception ex)
