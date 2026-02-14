@@ -55,6 +55,7 @@ public class RetryPolicyTests
             await policy.ExecuteAsync(async () =>
             {
                 calls++;
+                await Task.CompletedTask;
                 throw new Exception("persistent timeout error");
             });
         });
@@ -72,7 +73,7 @@ public class RetryPolicyTests
         await policy.ExecuteValueAsync(async () =>
         {
             calls++;
-            await ValueTask.CompletedTask;
+            await Task.CompletedTask;
         });
 
         Assert.Equal(1, calls);
@@ -89,6 +90,7 @@ public class RetryPolicyTests
             await policy.ExecuteAsync(async () =>
             {
                 calls++;
+                await Task.CompletedTask;
                 throw new Exception("CRITICAL DAMAGE");
             });
         });

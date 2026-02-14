@@ -32,6 +32,12 @@ public static class JobFileWriter
 			QueryTimeout = job.QueryTimeout != 0 ? job.QueryTimeout : null,
 			SamplingRate = Math.Abs(job.SamplingRate - 1.0) > 0.0001 ? job.SamplingRate : null,
 			SamplingSeed = job.SamplingSeed,
+			MaxRetries = job.MaxRetries != 3 ? job.MaxRetries : null,
+			RetryDelayMs = job.RetryDelayMs != 1000 ? job.RetryDelayMs : null,
+			MetricsPath = job.MetricsPath,
+			AutoMigrate = job.AutoMigrate == true ? true : null,
+			StrictSchema = job.StrictSchema ? true : null,
+			NoSchemaValidation = job.NoSchemaValidation ? true : null,
 			Transformers = ConvertTransformers(job.Transformers)
 		};
 
@@ -81,8 +87,14 @@ public static class JobFileWriter
 		public int? Limit { get; set; }
 		public bool? DryRun { get; set; }
 		public bool? UnsafeQuery { get; set; }
+		public bool? StrictSchema { get; set; }
+		public bool? NoSchemaValidation { get; set; }
 		public int? ConnectionTimeout { get; set; }
 		public int? QueryTimeout { get; set; }
+		public int? MaxRetries { get; set; }
+		public int? RetryDelayMs { get; set; }
+		public string? MetricsPath { get; set; }
+		public bool? AutoMigrate { get; set; }
 		public double? SamplingRate { get; set; }
 		public int? SamplingSeed { get; set; }
 		public List<Dictionary<string, object>>? Transformers { get; set; }

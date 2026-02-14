@@ -19,12 +19,16 @@ public record JobDefinition
 	public int Limit { get; init; } = 0;
 	public bool DryRun { get; init; } = false;
 	public bool UnsafeQuery { get; init; } = false;
+	public bool StrictSchema { get; init; } = false;
+	public bool NoSchemaValidation { get; init; } = false;
 
 	public int ConnectionTimeout { get; init; } = 10;
 	public int QueryTimeout { get; init; } = 0;
 
 	public int MaxRetries { get; init; } = 3;
 	public int RetryDelayMs { get; init; } = 1000;
+	public string? MetricsPath { get; init; }
+    public bool? AutoMigrate { get; set; }
 
 	public List<TransformerConfig>? Transformers { get; init; }
 	public string? LogPath { get; init; }
