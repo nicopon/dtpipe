@@ -95,6 +95,12 @@ public class JobService
 		var tableOption = new Option<string?>("--table") { Description = "Target table name" };
 		tableOption.Aliases.Add("-t");
 
+		var strictSchemaOption = new Option<bool?>("--strict-schema") { Description = "Abort if schema errors found" };
+		var noSchemaValidationOption = new Option<bool?>("--no-schema-validation") { Description = "Disable schema check" };
+
+		var metricsPathOption = new Option<string?>("--metrics-path") { Description = "Path to structured metrics JSON output" };
+		var autoMigrateOption = new Option<bool?>("--auto-migrate") { Description = "Automatically add missing columns to target table" };
+
 		var maxRetriesOption = new Option<int>("--max-retries") { Description = "Max retries for transient errors" };
 		maxRetriesOption.DefaultValueFactory = _ => 3;
 
@@ -102,7 +108,7 @@ public class JobService
 		retryDelayMsOption.DefaultValueFactory = _ => 1000;
 
 		// Core Help Options
-		var coreOptions = new List<Option> { inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption, unsafeQueryOption, dryRunOption, limitOption, samplingRateOption, samplingSeedOption, keyOption, jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption, finallyExecOption, strategyOption, insertModeOption, tableOption, maxRetriesOption, retryDelayMsOption };
+		var coreOptions = new List<Option> { inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption, unsafeQueryOption, dryRunOption, limitOption, samplingRateOption, samplingSeedOption, keyOption, jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption, finallyExecOption, strategyOption, insertModeOption, tableOption, maxRetriesOption, retryDelayMsOption, strictSchemaOption, noSchemaValidationOption, metricsPathOption, autoMigrateOption };
 
 		var rootCommand = new RootCommand("A simple, self-contained CLI for performance-focused data streaming & anonymization");
 		foreach (var opt in coreOptions) rootCommand.Options.Add(opt);
@@ -145,7 +151,11 @@ public class JobService
 				connectionTimeoutOption, queryTimeoutOption, batchSizeOption,
 				unsafeQueryOption, limitOption, samplingRateOption, samplingSeedOption, logOption, keyOption,
 				preExecOption, postExecOption, onErrorExecOption, finallyExecOption, strategyOption, insertModeOption, tableOption,
-				maxRetriesOption, retryDelayMsOption);
+				maxRetriesOption, retryDelayMsOption,
+				strictSchemaOption,
+				noSchemaValidationOption,
+				metricsPathOption,
+				autoMigrateOption);
 
 			if (jobExitCode != 0)
 			{
@@ -310,7 +320,11 @@ public class JobService
 				InsertMode = job.InsertMode,
 				Table = job.Table,
 				MaxRetries = job.MaxRetries,
-				RetryDelayMs = job.RetryDelayMs
+				RetryDelayMs = job.RetryDelayMs,
+				StrictSchema = job.StrictSchema,
+				NoSchemaValidation = job.NoSchemaValidation,
+				MetricsPath = job.MetricsPath,
+				AutoMigrate = job.AutoMigrate ?? false
 			};
 
 			if (!string.IsNullOrEmpty(options.LogPath))

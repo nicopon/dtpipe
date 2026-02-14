@@ -49,6 +49,16 @@ public sealed record DumpOptions
 	/// </summary>
 	public bool NoStats { get; init; } = false;
 
+	/// <summary>
+	/// If true, aborts the export if schema incompatibilities (errors) are detected.
+	/// </summary>
+	public bool StrictSchema { get; init; } = false;
+
+	/// <summary>
+	/// If true, disables pre-write schema compatibility validation.
+	/// </summary>
+	public bool NoSchemaValidation { get; init; } = false;
+
 	// --- Validation Options ---
 	/// <summary>
 	/// Number of sample rows to collect for dry-run trace analysis.
@@ -82,6 +92,13 @@ public sealed record DumpOptions
 	/// If null, auto-detection via schema inspection is attempted.
 	/// </summary>
 	public string? Key { get; init; }
+	/// <summary>
+	/// Path to save structured metrics (JSON). If null, metrics are only logged/displayed.
+	/// </summary>
+	public string? MetricsPath { get; init; }
+
+	/// <summary>Automatically add missing columns to target table.</summary>
+	public bool AutoMigrate { get; init; } = false;
 
 	// --- Lifecycle Hooks ---
 	/// <summary>
