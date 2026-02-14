@@ -15,6 +15,8 @@ public sealed class ProgressReporter : IExportProgress
 	// Stats
 	private long _readCount;
 	private long _writeCount;
+	private double _peakMemoryMb;
+	private readonly DateTime _startTime;
 
 	// Transformers stats
 	private readonly Dictionary<string, long> _transformerStats = new();
@@ -28,6 +30,7 @@ public sealed class ProgressReporter : IExportProgress
 		_console = console;
 		_enabled = enabled;
 		_stopwatch = Stopwatch.StartNew();
+		_startTime = DateTime.UtcNow;
 
 		if (transformerNames != null)
 		{
@@ -59,6 +62,7 @@ public sealed class ProgressReporter : IExportProgress
 						{
 							while (!_disposed)
 							{
+								UpdatePeakMemory();
 								ctx.UpdateTarget(CreateLayout());
 								try { await Task.Delay(500); } catch (TaskCanceledException) { break; }
 							}
@@ -175,6 +179,50 @@ public sealed class ProgressReporter : IExportProgress
 		if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CI"))) return true;
 
 		return false;
+	}
+
+	public DtPipe.Core.Models.ExportMetrics GetMetrics()
+	{
+		UpdatePeakMemory();
+
+		var transformerStats = new Dictionary<string, long>();
+		lock (_transformerStats)
+		{
+			foreach (var kvp in _transformerStats)
+			{
+				transformerStats[kvp.Key] = kvp.Value;
+			}
+		}
+
+		var elapsed = _stopwatch.Elapsed.TotalSeconds;
+		var overallThroughput = elapsed > 0 ? _writeCount / elapsed : 0;
+
+		return new DtPipe.Core.Models.ExportMetrics(
+			_startTime,
+			DateTime.UtcNow,
+			_readCount,
+			_writeCount,
+			overallThroughput,
+			_peakMemoryMb,
+			transformerStats
+		);
+	}
+
+	private void UpdatePeakMemory()
+	{
+		try
+		{
+			using var process = Process.GetCurrentProcess();
+			var currentMemory = process.WorkingSet64 / 1024.0 / 1024.0;
+			if (currentMemory > _peakMemoryMb)
+			{
+				_peakMemoryMb = currentMemory;
+			}
+		}
+		catch
+		{
+			// Ignore if process info cannot be accessed
+		}
 	}
 
 	public void Dispose()
