@@ -23,6 +23,9 @@ public record JobDefinition
 	public int ConnectionTimeout { get; init; } = 10;
 	public int QueryTimeout { get; init; } = 0;
 
+	public int MaxRetries { get; init; } = 3;
+	public int RetryDelayMs { get; init; } = 1000;
+
 	public List<TransformerConfig>? Transformers { get; init; }
 	public string? LogPath { get; init; }
 	public string? Key { get; init; }

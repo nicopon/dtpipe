@@ -33,7 +33,9 @@ public static class RawJobBuilder
 		Option<string?> finallyExecOption,
 		Option<string?> strategyOption,
 		Option<string?> insertModeOption,
-		Option<string?> tableOption)
+		Option<string?> tableOption,
+		Option<int> maxRetriesOption,
+		Option<int> retryDelayMsOption)
 	{
 		var jobFile = parseResult.GetValue(jobOption);
 		JobDefinition job;
@@ -103,6 +105,12 @@ public static class RawJobBuilder
 
 				var tableOverride = parseResult.GetValue(tableOption);
 				if (!string.IsNullOrEmpty(tableOverride)) job = job with { Table = tableOverride };
+
+				var maxRetriesOverride = parseResult.GetValue(maxRetriesOption);
+				if (maxRetriesOverride > 0) job = job with { MaxRetries = maxRetriesOverride };
+
+				var retryDelayMsOverride = parseResult.GetValue(retryDelayMsOption);
+				if (retryDelayMsOverride > 0) job = job with { RetryDelayMs = retryDelayMsOverride };
 			}
 			catch (Exception ex)
 			{
@@ -150,7 +158,9 @@ public static class RawJobBuilder
 				FinallyExec = parseResult.GetValue(finallyExecOption),
 				Strategy = parseResult.GetValue(strategyOption),
 				InsertMode = parseResult.GetValue(insertModeOption),
-				Table = parseResult.GetValue(tableOption)
+				Table = parseResult.GetValue(tableOption),
+				MaxRetries = parseResult.GetValue(maxRetriesOption),
+				RetryDelayMs = parseResult.GetValue(retryDelayMsOption)
 			};
 		}
 

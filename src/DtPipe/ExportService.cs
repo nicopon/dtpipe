@@ -3,6 +3,7 @@ using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Options;
 using DtPipe.Core.Security;
+using DtPipe.Core.Resilience;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
 
@@ -149,9 +150,11 @@ public class ExportService
         {
             // Run Concurrent Pipeline
             var startTime = DateTime.UtcNow;
-            var producerTask = ProduceRowsAsync(reader, readerToTransform.Writer, options.BatchSize, options.Limit, options.SamplingRate, options.SamplingSeed, progress, linkedCts, effectiveCt, _logger);
+            var retryPolicy = new RetryPolicy(options.MaxRetries, TimeSpan.FromMilliseconds(options.RetryDelayMs), _logger);
+
+            var producerTask = ProduceRowsAsync(reader, readerToTransform.Writer, options.BatchSize, options.Limit, options.SamplingRate, options.SamplingSeed, progress, linkedCts, effectiveCt, retryPolicy, _logger);
             var transformTask = TransformRowsAsync(readerToTransform.Reader, transformToWriter.Writer, pipeline, options.BatchSize, progress, effectiveCt);
-            var consumerTask = ConsumeRowsAsync(transformToWriter.Reader, writer, progress, r => Interlocked.Add(ref totalRows, r), effectiveCt, _logger);
+            var consumerTask = ConsumeRowsAsync(transformToWriter.Reader, writer, progress, r => Interlocked.Add(ref totalRows, r), effectiveCt, retryPolicy, _logger);
 
             var tasks = new List<Task> { producerTask, transformTask, consumerTask };
 
@@ -242,6 +245,7 @@ public class ExportService
         IExportProgress progress,
         CancellationTokenSource linkedCts,
         CancellationToken ct,
+        RetryPolicy retryPolicy,
         ILogger logger)
     {
         logger.LogDebug("Producer/Reader started");
@@ -258,6 +262,12 @@ public class ExportService
         long rowCount = 0;
         try
         {
+            // Note: We don't wrap the entire foreach because ReadBatchesAsync is an IAsyncEnumerable.
+            // If we wanted to retry the whole stream, we'd need to reopen the reader.
+            // However, individual batch reads could be retried IF the reader supported it inside,
+            // but here we just wrap the loop if possible, or better, we wrap the WriteAsync if needed.
+            // Actually, for readers, transient errors usually happen during the Fetch.
+
             await foreach (var batchChunk in reader.ReadBatchesAsync(batchSize, ct))
             {
                 if (logger.IsEnabled(LogLevel.Debug))
@@ -381,6 +391,7 @@ public class ExportService
         IExportProgress progress,
         Action<int> updateRowCount,
         CancellationToken ct,
+        RetryPolicy retryPolicy,
         ILogger logger)
     {
         if (logger.IsEnabled(LogLevel.Debug))
@@ -393,7 +404,7 @@ public class ExportService
                 logger.LogDebug("Writing batch of {Count} rows", batch.Length);
             }
 
-            await writer.WriteBatchAsync(batch, ct);
+            await retryPolicy.ExecuteValueAsync(() => writer.WriteBatchAsync(batch, ct), ct);
 
             updateRowCount(batch.Length);
             progress.ReportWrite(batch.Length);

@@ -20,6 +20,16 @@ public sealed record DumpOptions
 	public int ConnectionTimeout { get; init; } = 10; // seconds
 	public int QueryTimeout { get; init; } = 0; // 0 = no timeout
 
+	/// <summary>
+	/// Maximum number of retries for transient errors (0 = no retry). Default: 3.
+	/// </summary>
+	public int MaxRetries { get; init; } = 3;
+
+	/// <summary>
+	/// Initial delay in milliseconds between retries (doubles at each attempt). Default: 1000.
+	/// </summary>
+	public int RetryDelayMs { get; init; } = 1000;
+
 	// --- Output Options ---
 	/// <summary>
 	/// Size of the batch for reading from source and writing to output.
