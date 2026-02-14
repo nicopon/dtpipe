@@ -95,8 +95,14 @@ public class JobService
 		var tableOption = new Option<string?>("--table") { Description = "Target table name" };
 		tableOption.Aliases.Add("-t");
 
+		var maxRetriesOption = new Option<int>("--max-retries") { Description = "Max retries for transient errors" };
+		maxRetriesOption.DefaultValueFactory = _ => 3;
+
+		var retryDelayMsOption = new Option<int>("--retry-delay-ms") { Description = "Initial retry delay in ms" };
+		retryDelayMsOption.DefaultValueFactory = _ => 1000;
+
 		// Core Help Options
-		var coreOptions = new List<Option> { inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption, unsafeQueryOption, dryRunOption, limitOption, samplingRateOption, samplingSeedOption, keyOption, jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption, finallyExecOption, strategyOption, insertModeOption, tableOption };
+		var coreOptions = new List<Option> { inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption, unsafeQueryOption, dryRunOption, limitOption, samplingRateOption, samplingSeedOption, keyOption, jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption, finallyExecOption, strategyOption, insertModeOption, tableOption, maxRetriesOption, retryDelayMsOption };
 
 		var rootCommand = new RootCommand("A simple, self-contained CLI for performance-focused data streaming & anonymization");
 		foreach (var opt in coreOptions) rootCommand.Options.Add(opt);
@@ -138,7 +144,8 @@ public class JobService
 				jobOption, inputOption, queryOption, outputOption,
 				connectionTimeoutOption, queryTimeoutOption, batchSizeOption,
 				unsafeQueryOption, limitOption, samplingRateOption, samplingSeedOption, logOption, keyOption,
-				preExecOption, postExecOption, onErrorExecOption, finallyExecOption, strategyOption, insertModeOption, tableOption);
+				preExecOption, postExecOption, onErrorExecOption, finallyExecOption, strategyOption, insertModeOption, tableOption,
+				maxRetriesOption, retryDelayMsOption);
 
 			if (jobExitCode != 0)
 			{
@@ -301,7 +308,9 @@ public class JobService
 				FinallyExec = job.FinallyExec,
 				Strategy = job.Strategy,
 				InsertMode = job.InsertMode,
-				Table = job.Table
+				Table = job.Table,
+				MaxRetries = job.MaxRetries,
+				RetryDelayMs = job.RetryDelayMs
 			};
 
 			if (!string.IsNullOrEmpty(options.LogPath))
