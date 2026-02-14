@@ -84,22 +84,25 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 		return ("dbo", tableName.Trim('[', ']'));
 	}
 
-	protected override async ValueTask OnInitializedAsync(CancellationToken ct)
+	private async Task EnsureBulkCopyInitializedAsync(CancellationToken ct)
 	{
-		await DetectDatabaseCollationAsync(ct);
+		if (_bulkCopy != null) return;
 
 		var targetInfo = await InspectTargetAsync(ct);
 		_bufferTable = new DataTable();
 
-		int colCount = targetInfo?.Columns.Count ?? _columns!.Count;
+		bool useTargetCols = targetInfo != null && targetInfo.Columns.Count > 0;
+		int colCount = useTargetCols ? targetInfo!.Columns.Count : _columns!.Count;
+
 		_targetTypes = new Type[colCount];
 		_targetColumnNames = new string[colCount];
 
-		if (targetInfo != null && targetInfo.Columns.Count > 0)
+		if (useTargetCols)
 		{
-			for (int i = 0; i < targetInfo.Columns.Count; i++)
+			var targetCols = targetInfo!.Columns;
+			for (int i = 0; i < targetCols.Count; i++)
 			{
-				var targetCol = targetInfo.Columns[i];
+				var targetCol = targetCols[i];
 				_targetColumnNames[i] = targetCol.Name;
 				_targetTypes[i] = targetCol.InferredClrType ?? typeof(string);
 
@@ -188,10 +191,13 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 				var createSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
 				await ExecuteNonQueryAsync(createSql, ct);
 			}
+
+			InvalidateSchemaCache();
 		}
 		else if (_options.Strategy == SqlServerWriteStrategy.Truncate)
 		{
 			await ExecuteNonQueryAsync(GetTruncateTableSql(_quotedTargetTableName), ct);
+			InvalidateSchemaCache();
 		}
 		else if (_options.Strategy == SqlServerWriteStrategy.DeleteThenInsert)
 		{
@@ -210,6 +216,7 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 				try
 				{
 					await ExecuteNonQueryAsync(createSql, ct);
+					InvalidateSchemaCache();
 				}
 				catch (SqlException ex) when (ex.Number == 2714) { /* Ignore race */ }
 			}
@@ -226,6 +233,7 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 
 	private async Task AnalyzeKeysAsync(CancellationToken ct)
 	{
+		_keyColumns.Clear();
 		// 1. Resolve Keys
 		var targetInfo = await InspectTargetAsync(ct);
 		if (targetInfo?.PrimaryKeyColumns != null)
@@ -279,9 +287,26 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 	protected override string GetTruncateTableSql(string tableName) => $"TRUNCATE TABLE {tableName}";
 	protected override string GetDropTableSql(string tableName) => $"DROP TABLE {tableName}";
 
+	protected override string GetAddColumnSql(string tableName, PipeColumnInfo column)
+	{
+		var safeName = Dialect.NeedsQuoting(column.Name) ? Dialect.Quote(column.Name) : column.Name;
+		var type = _typeMapper.MapToProviderType(column.ClrType);
+		var nullability = column.IsNullable ? "NULL" : "NOT NULL";
+		return $"ALTER TABLE {tableName} ADD {safeName} {type} {nullability}";
+	}
+
+	protected override async ValueTask OnInitializedAsync(CancellationToken ct)
+	{
+		await DetectDatabaseCollationAsync(ct);
+	}
+
 	public override async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
 	{
-		if (_bulkCopy == null || _bufferTable == null || _columns == null) throw new InvalidOperationException("Not initialized");
+		if (rows.Count == 0) return;
+
+		await EnsureBulkCopyInitializedAsync(ct);
+
+		_bufferTable!.Rows.Clear();
 
 		if (_options.Strategy == SqlServerWriteStrategy.Upsert || _options.Strategy == SqlServerWriteStrategy.Ignore)
 		{
@@ -487,16 +512,25 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 			colCmd.Parameters.AddWithValue("@Table", table);
 
 			using var reader = await colCmd.ExecuteReaderAsync(ct);
+			int nameIdx = reader.GetOrdinal("COLUMN_NAME");
+			int typeIdx = reader.GetOrdinal("DATA_TYPE");
+			int nullIdx = reader.GetOrdinal("IS_NULLABLE");
+			int maxIdx = reader.GetOrdinal("CHARACTER_MAXIMUM_LENGTH");
+			int precIdx = reader.GetOrdinal("NUMERIC_PRECISION");
+			int scaleIdx = reader.GetOrdinal("NUMERIC_SCALE");
+			int collIdx = reader.GetOrdinal("COLLATION_NAME");
+			int dtPrecIdx = reader.FieldCount > 7 ? reader.GetOrdinal("DATETIME_PRECISION") : -1;
+
 			while (await reader.ReadAsync(ct))
 			{
-				var name = reader.GetString(0);
-				var type = reader.GetString(1);
-				var nullable = reader.GetString(2) == "YES";
-				var maxLength = reader.IsDBNull(3) ? null : (int?)Convert.ToInt32(reader[3]);
-				var precision = reader.IsDBNull(4) ? null : (int?)Convert.ToInt32(reader[4]);
-				var scale = reader.IsDBNull(5) ? null : (int?)Convert.ToInt32(reader[5]);
-				var collation = reader.IsDBNull(6) ? null : reader.GetString(6);
-				var datetimePrecision = reader.IsDBNull(7) ? null : (int?)Convert.ToInt32(reader[7]);
+				var name = reader.GetString(nameIdx);
+				var type = reader.GetString(typeIdx);
+				var nullable = reader.GetString(nullIdx) == "YES";
+				var maxLength = reader.IsDBNull(maxIdx) ? null : (int?)Convert.ToInt32(reader[maxIdx]);
+				var precision = reader.IsDBNull(precIdx) ? null : (int?)Convert.ToInt32(reader[precIdx]);
+				var scale = reader.IsDBNull(scaleIdx) ? null : (int?)Convert.ToInt32(reader[scaleIdx]);
+				var collation = reader.IsDBNull(collIdx) ? null : reader.GetString(collIdx);
+				var datetimePrecision = (dtPrecIdx != -1 && !reader.IsDBNull(dtPrecIdx)) ? (int?)Convert.ToInt32(reader[dtPrecIdx]) : null;
 				var finalPrecision = precision ?? datetimePrecision;
 				bool isColCaseSensitive = collation != null
 					? collation.Contains("_CS", StringComparison.OrdinalIgnoreCase)

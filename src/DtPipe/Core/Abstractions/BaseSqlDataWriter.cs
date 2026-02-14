@@ -7,7 +7,7 @@ namespace DtPipe.Core.Abstractions;
 /// Abstract base class for SQL-based DataWriters that share common lifecycle logic:
 /// Connection management, Table resolution, Strategy handling (Recreate/Truncate/etc.), and Schema introspection.
 /// </summary>
-public abstract class BaseSqlDataWriter : IDataWriter, ISchemaInspector, IKeyValidator
+public abstract class BaseSqlDataWriter : IDataWriter, ISchemaInspector, IKeyValidator, ISchemaMigrator
 {
 	protected readonly string _connectionString;
 	protected IDbConnection? _connection;
@@ -34,6 +34,8 @@ public abstract class BaseSqlDataWriter : IDataWriter, ISchemaInspector, IKeyVal
 		_cachedSchema = await InspectTargetInternalAsync(ct);
 		return _cachedSchema;
 	}
+
+	public void InvalidateSchemaCache() => _cachedSchema = null;
 
 	/// <summary>
 	/// Actual implementation of schema inspection, to be implemented by derived classes.
@@ -190,6 +192,31 @@ public abstract class BaseSqlDataWriter : IDataWriter, ISchemaInspector, IKeyVal
 	protected abstract string GetCreateTableSql(string tableName, IEnumerable<PipeColumnInfo> columns);
 	protected abstract string GetTruncateTableSql(string tableName);
 	protected abstract string GetDropTableSql(string tableName);
+	protected abstract string GetAddColumnSql(string tableName, PipeColumnInfo column);
+
+	public virtual async ValueTask MigrateSchemaAsync(DtPipe.Core.Validation.SchemaCompatibilityReport report, CancellationToken ct)
+	{
+		var missingColumns = report.Columns
+			.Where(c => c.Status == DtPipe.Core.Validation.CompatibilityStatus.MissingInTarget && c.SourceColumn != null)
+			.Select(c => c.SourceColumn!)
+			.ToList();
+
+		if (missingColumns.Count == 0) return;
+
+		foreach (var col in missingColumns)
+		{
+			var sql = GetAddColumnSql(_quotedTargetTableName, col);
+			await ExecuteNonQueryAsync(sql, ct);
+		}
+
+		// Clear cached schema and re-sync columns from introspection to pick up new metadata
+		_cachedSchema = null;
+		var updatedSchema = await InspectTargetAsync(ct);
+		if (updatedSchema != null)
+		{
+			SyncColumnsFromIntrospection(updatedSchema);
+		}
+	}
 
 	// Helpers for Strategy Implementation
 

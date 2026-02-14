@@ -270,6 +270,14 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
     protected override string GetDropTableSql(string tableName)
         => $"DROP TABLE {tableName}";
 
+    protected override string GetAddColumnSql(string tableName, PipeColumnInfo column)
+    {
+        var safeName = Dialect.NeedsQuoting(column.Name) ? Dialect.Quote(column.Name) : column.Name;
+        var type = _typeMapper.MapToProviderType(column.ClrType);
+        var nullability = column.IsNullable ? "NULL" : "NOT NULL";
+        return $"ALTER TABLE {tableName} ADD {safeName} {type} {nullability}";
+    }
+
     public override async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
     {
         if (_columns is null) throw new InvalidOperationException("Not initialized");

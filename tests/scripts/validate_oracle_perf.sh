@@ -64,6 +64,15 @@ ORA_PORT=1522
 # Create Target Table
 echo "Creating target table..."
 docker exec -i "$ORA_CONTAINER" sqlplus system/password@localhost:1521/FREEPDB1 <<EOF
+BEGIN
+   EXECUTE IMMEDIATE 'DROP TABLE PerformanceTest';
+EXCEPTION
+   WHEN OTHERS THEN
+      IF SQLCODE != -942 THEN
+         RAISE;
+      END IF;
+END;
+/
 CREATE TABLE PerformanceTest (
     Id NUMBER,
     Name VARCHAR2(100),

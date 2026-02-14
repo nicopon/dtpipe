@@ -35,7 +35,11 @@ public static class RawJobBuilder
 		Option<string?> insertModeOption,
 		Option<string?> tableOption,
 		Option<int> maxRetriesOption,
-		Option<int> retryDelayMsOption)
+		Option<int> retryDelayMsOption,
+		Option<bool?> strictSchemaOption,
+		Option<bool?> noSchemaValidationOption,
+		Option<string?> metricsPathOption,
+		Option<bool?> autoMigrateOption)
 	{
 		var jobFile = parseResult.GetValue(jobOption);
 		JobDefinition job;
@@ -109,8 +113,14 @@ public static class RawJobBuilder
 				var maxRetriesOverride = parseResult.GetValue(maxRetriesOption);
 				if (maxRetriesOverride > 0) job = job with { MaxRetries = maxRetriesOverride };
 
-				var retryDelayMsOverride = parseResult.GetValue(retryDelayMsOption);
-				if (retryDelayMsOverride > 0) job = job with { RetryDelayMs = retryDelayMsOverride };
+				var strictSchemaOverride = parseResult.GetValue(strictSchemaOption);
+				if (strictSchemaOverride.HasValue) job = job with { StrictSchema = strictSchemaOverride.Value };
+
+				var noSchemaValidationOverride = parseResult.GetValue(noSchemaValidationOption);
+				if (noSchemaValidationOverride.HasValue) job = job with { NoSchemaValidation = noSchemaValidationOverride.Value };
+
+				var metricsPathOverride = parseResult.GetValue(metricsPathOption);
+				if (!string.IsNullOrEmpty(metricsPathOverride)) job = job with { MetricsPath = metricsPathOverride };
 			}
 			catch (Exception ex)
 			{
@@ -160,7 +170,11 @@ public static class RawJobBuilder
 				InsertMode = parseResult.GetValue(insertModeOption),
 				Table = parseResult.GetValue(tableOption),
 				MaxRetries = parseResult.GetValue(maxRetriesOption),
-				RetryDelayMs = parseResult.GetValue(retryDelayMsOption)
+				RetryDelayMs = parseResult.GetValue(retryDelayMsOption),
+				StrictSchema = parseResult.GetValue(strictSchemaOption) ?? false,
+				NoSchemaValidation = parseResult.GetValue(noSchemaValidationOption) ?? false,
+				MetricsPath = parseResult.GetValue(metricsPathOption),
+				AutoMigrate = parseResult.GetValue(autoMigrateOption) ?? false
 			};
 		}
 
