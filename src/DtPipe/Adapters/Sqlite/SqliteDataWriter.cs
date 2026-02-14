@@ -309,6 +309,14 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter
 
 	protected override string GetDropTableSql(string tableName) => $"DROP TABLE {tableName}";
 
+	protected override string GetAddColumnSql(string tableName, PipeColumnInfo column)
+	{
+		var safeName = SqlIdentifierHelper.GetSafeIdentifier(_dialect, column.Name);
+		var type = _typeMapper.MapToProviderType(column.ClrType);
+		var nullability = column.IsNullable ? "" : " NOT NULL";
+		return $"ALTER TABLE {tableName} ADD COLUMN {safeName} {type}{nullability}";
+	}
+
 	private string BuildCreateTableFromIntrospection(string tableName, TargetSchemaInfo schema)
 	{
 		var sb = new StringBuilder();

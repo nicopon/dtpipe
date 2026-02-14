@@ -105,6 +105,11 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		{
 			await SetupStagingTableAsync(ct);
 		}
+	}
+
+	private async Task EnsureWriterInitializedAsync(CancellationToken ct)
+	{
+		if (_writer != null) return;
 
 		var copyTarget = _stagingTable ?? _quotedTargetTableName;
 		var copySql = BuildCopySql(copyTarget, _columns!);
@@ -175,6 +180,8 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 
 	public override async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
 	{
+		if (rows.Count == 0) return;
+		await EnsureWriterInitializedAsync(ct);
 		if (_writer is null) throw new InvalidOperationException("Writer not initialized");
 		if (_columns is null) throw new InvalidOperationException("Columns not initialized");
 
@@ -268,7 +275,10 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		}
 
 		await ExecuteNonQueryAsync(sb.ToString(), ct);
-		await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS {_stagingTable}", ct);
+		if (_stagingTable != null)
+		{
+			await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS {_dialect.Quote(_stagingTable)}", ct);
+		}
 	}
 
 	public override async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
@@ -295,6 +305,14 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		=> BuildCreateTableSql(tableName, columns.ToList());
 	protected override string GetTruncateTableSql(string tableName) => $"TRUNCATE TABLE {tableName}";
 	protected override string GetDropTableSql(string tableName) => $"DROP TABLE {tableName}";
+
+	protected override string GetAddColumnSql(string tableName, PipeColumnInfo column)
+	{
+		var safeName = Dialect.NeedsQuoting(column.Name) ? Dialect.Quote(column.Name) : column.Name;
+		var type = _typeMapper.MapToProviderType(column.ClrType);
+		var nullability = column.IsNullable ? "" : " NOT NULL";
+		return $"ALTER TABLE {tableName} ADD COLUMN {safeName} {type}{nullability}";
+	}
 
 	private static async Task<(string Schema, string Table)?> ResolveTableNativeAsync(NpgsqlConnection connection, string inputName, CancellationToken ct)
 	{
@@ -338,8 +356,7 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		{
 			if (i > 0) sb.Append(", ");
 			var col = columns[i];
-			string nameToUse = !col.IsCaseSensitive ? _dialect.Normalize(col.Name) : col.Name;
-			var safeName = SqlIdentifierHelper.GetSafeIdentifier(_dialect, col.Name);
+			var safeName = SqlIdentifierHelper.GetSafeIdentifier(_dialect, col);
 			sb.Append($"{safeName} {_typeMapper.MapToProviderType(col.ClrType)}");
 		}
 

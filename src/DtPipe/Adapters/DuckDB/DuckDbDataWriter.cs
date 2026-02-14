@@ -296,6 +296,7 @@ public sealed class DuckDbDataWriter : BaseSqlDataWriter
 		else if (underlying == typeof(long)) row.AppendValue((long)convertedVal);
 		else if (underlying == typeof(short)) row.AppendValue((short)convertedVal);
 		else if (underlying == typeof(byte)) row.AppendValue((byte)convertedVal);
+		else if (underlying == typeof(sbyte)) row.AppendValue((sbyte)convertedVal);
 		else if (underlying == typeof(bool)) row.AppendValue((bool)convertedVal);
 		else if (underlying == typeof(float)) row.AppendValue((float)convertedVal);
 		else if (underlying == typeof(double)) row.AppendValue((double)convertedVal);
@@ -481,6 +482,14 @@ public sealed class DuckDbDataWriter : BaseSqlDataWriter
 
 	protected override string GetTruncateTableSql(string tableName) => $"TRUNCATE TABLE {tableName}";
 	protected override string GetDropTableSql(string tableName) => $"DROP TABLE {tableName}";
+
+	protected override string GetAddColumnSql(string tableName, PipeColumnInfo column)
+	{
+		var safeName = Dialect.NeedsQuoting(column.Name) ? Dialect.Quote(column.Name) : column.Name;
+		var type = _typeMapper.MapToProviderType(column.ClrType);
+		var nullability = column.IsNullable ? "" : " NOT NULL";
+		return $"ALTER TABLE {tableName} ADD COLUMN {safeName} {type}{nullability}";
+	}
 
 	private string BuildCreateTableFromIntrospection(string tableName, TargetSchemaInfo schema)
 	{
