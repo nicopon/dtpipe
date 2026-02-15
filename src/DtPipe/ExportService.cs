@@ -7,6 +7,7 @@ using DtPipe.Core.Resilience;
 using DtPipe.Core.Validation;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
+using DtPipe.Core.Models;
 
 namespace DtPipe;
 
@@ -47,9 +48,6 @@ public class ExportService
 
 		// Display Source Info
 		_observer.ShowIntro(options.Provider, options.ConnectionString);
-		// options.Provider is "postgres", options.Connection is connection string.
-		// Wait, ShowIntro previously showed "Source" and "Provider".
-		// I should pass "options.Provider".
 
 		_observer.ShowConnectionStatus(false, null);
 
@@ -65,248 +63,233 @@ public class ExportService
 			return;
 		}
 
-        // Initialize pipeline to define Target Schema
-        var currentSchema = reader.Columns;
-        if (pipeline.Count > 0)
-        {
-            var transformerNames = pipeline.Select(t => t.GetType().Name.Replace("DataTransformer", ""));
-            _observer.ShowPipeline(transformerNames);
+		// Initialize pipeline to define Target Schema
+		var currentSchema = reader.Columns;
+		if (pipeline.Count > 0)
+		{
+			var transformerNames = pipeline.Select(t => t.GetType().Name.Replace("DataTransformer", ""));
+			_observer.ShowPipeline(transformerNames);
 
-            foreach (var t in pipeline)
-            {
-                currentSchema = await t.InitializeAsync(currentSchema, ct);
-            }
-        }
+			foreach (var t in pipeline)
+			{
+				currentSchema = await t.InitializeAsync(currentSchema, ct);
+			}
+		}
 
-        // Dry-run mode
-        if (options.DryRunCount > 0)
-        {
-            IDataWriter? writerForInspection = null;
-            if (!string.IsNullOrEmpty(options.OutputPath))
-            {
-                try
-                {
-                    writerForInspection = writerFactory.Create(options);
-                }
-                catch { }
-            }
+		// Dry-run mode
+		if (options.DryRunCount > 0)
+		{
+			IDataWriter? writerForInspection = null;
+			if (!string.IsNullOrEmpty(options.OutputPath))
+			{
+				try
+				{
+					writerForInspection = writerFactory.Create(options);
+				}
+				catch { }
+			}
 
-            await _observer.RunDryRunAsync(reader, pipeline, options.DryRunCount, writerForInspection, ct);
+			await _observer.RunDryRunAsync(reader, pipeline, options.DryRunCount, writerForInspection, ct);
 
-            if (writerForInspection != null)
-            {
-                await writerForInspection.DisposeAsync();
-            }
-            return;
-        }
+			if (writerForInspection != null)
+			{
+				await writerForInspection.DisposeAsync();
+			}
+			return;
+		}
 
-        string writerName = writerFactory.ProviderName;
-        _observer.ShowTarget(writerName, options.OutputPath);
+		string writerName = writerFactory.ProviderName;
+		_observer.ShowTarget(writerName, options.OutputPath);
 
-        // --- PRE-EXEC HOOK ---
-        if (!string.IsNullOrWhiteSpace(options.PreExec))
-        {
-            _observer.OnHookExecuting("Pre-Hook", options.PreExec);
-        }
+		var exportableSchema = currentSchema;
+		await using var writer = writerFactory.Create(options);
 
-        var exportableSchema = currentSchema;
-        await using var writer = writerFactory.Create(options);
+		// Execute Pre-Hook
+		await ExecuteHookAsync(writer, "Pre-Hook", options.PreExec, ct);
 
-        // Execute Pre-Hook
-        if (!string.IsNullOrWhiteSpace(options.PreExec))
-        {
-            await writer.ExecuteCommandAsync(options.PreExec, ct);
-        }
+		await writer.InitializeAsync(exportableSchema, ct);
 
-        await writer.InitializeAsync(exportableSchema, ct);
+		// Schema Validation
+		await ValidateAndMigrateSchemaAsync(writer, exportableSchema, options, ct);
 
-        // --- SCHEMA VALIDATION ---
-        if (!options.NoSchemaValidation && writer is ISchemaInspector inspector)
-        {
-            _observer.LogMessage("Verifying target schema compatibility...");
-            var targetSchema = await inspector.InspectTargetAsync(ct);
-            var dialect = (writer as IHasSqlDialect)?.Dialect;
+		// Bounded Channels
+		// Reader to Transform remains row-level because transformers work row-by-row
+		var readerToTransform = Channel.CreateBounded<object?[]>(new BoundedChannelOptions(1000)
+		{
+			SingleWriter = true,
+			SingleReader = true,
+			FullMode = BoundedChannelFullMode.Wait
+		});
 
-            var report = SchemaCompatibilityAnalyzer.Analyze(exportableSchema, targetSchema, dialect);
+		// Transform to Writer becomes batch-level to reduce channel overhead
+		// We reduce capacity because each item is now a batch of ~BatchSize rows
+		var transformToWriter = Channel.CreateBounded<object?[][]>(new BoundedChannelOptions(100)
+		{
+			SingleWriter = true,
+			SingleReader = true,
+			FullMode = BoundedChannelFullMode.Wait
+		});
 
-            // Show report via observer (needs update to IExportObserver to handle report)
-            // For now, let's log errors/warnings manually or add to observer
-            foreach (var warning in report.Warnings) _observer.LogWarning(warning);
-            foreach (var error in report.Errors) _observer.LogError(new Exception(error));
+		// Use Observer to create Progress
+		var transformerNamesList = pipeline.Select(t => t.GetType().Name.Replace("DataTransformer", ""));
+		using var progress = _observer.CreateProgressReporter(!options.NoStats, transformerNamesList);
 
-            if (!report.IsCompatible && options.StrictSchema)
-            {
-                // Before aborting, check if we can migrate
-                var missingInTargetCount = report.Columns.Count(c => c.Status == CompatibilityStatus.MissingInTarget);
-                if (options.AutoMigrate && missingInTargetCount > 0 && writer is ISchemaMigrator migrator)
-                {
-                    _observer.LogMessage($"[yellow]Auto-migrating schema: Adding {missingInTargetCount} missing columns...[/]");
-                    await migrator.MigrateSchemaAsync(report, ct);
+		long totalRows = 0;
 
-                    // Re-analyze
-                    targetSchema = await inspector.InspectTargetAsync(ct);
-                    report = SchemaCompatibilityAnalyzer.Analyze(exportableSchema, targetSchema, dialect);
+		using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+		var effectiveCt = linkedCts.Token;
 
-                    if (report.IsCompatible || !options.StrictSchema)
-                    {
-                        _observer.LogMessage("[green]Schema migration successful. Continuing export.[/]");
-                    }
-                    else
-                    {
-                         throw new InvalidOperationException("Export aborted: Schema migration failed to resolve all incompatibilities in Strict Mode.");
-                    }
-                }
-                else
-                {
-                    throw new InvalidOperationException("Export aborted due to schema incompatibilities (Strict Mode).");
-                }
-            }
-            else if (options.AutoMigrate && writer is ISchemaMigrator migrator)
-            {
-                var missingInTargetCount = report.Columns.Count(c => c.Status == CompatibilityStatus.MissingInTarget);
-                if (missingInTargetCount > 0)
-                {
-                    _observer.LogMessage($"[yellow]Auto-migrating schema: Adding {missingInTargetCount} missing columns...[/]");
-                    await migrator.MigrateSchemaAsync(report, ct);
+		try
+		{
+			// Run Concurrent Pipeline
+			var startTime = DateTime.UtcNow;
+			var retryPolicy = new RetryPolicy(options.MaxRetries, TimeSpan.FromMilliseconds(options.RetryDelayMs), _logger);
 
-                    // Update our view of the target
-                    targetSchema = await inspector.InspectTargetAsync(ct);
-                }
-            }
-        }
+			var producerTask = ProduceRowsAsync(reader, readerToTransform.Writer, options.BatchSize, options.Limit, options.SamplingRate, options.SamplingSeed, progress, linkedCts, effectiveCt, retryPolicy, _logger);
+			var transformTask = TransformRowsAsync(readerToTransform.Reader, transformToWriter.Writer, pipeline, options.BatchSize, progress, effectiveCt);
+			var consumerTask = ConsumeRowsAsync(transformToWriter.Reader, writer, progress, r => Interlocked.Add(ref totalRows, r), effectiveCt, retryPolicy, _logger);
 
-        // Bounded Channels
-        // Reader to Transform remains row-level because transformers work row-by-row
-        var readerToTransform = Channel.CreateBounded<object?[]>(new BoundedChannelOptions(1000)
-        {
-            SingleWriter = true,
-            SingleReader = true,
-            FullMode = BoundedChannelFullMode.Wait
-        });
+			var tasks = new List<Task> { producerTask, transformTask, consumerTask };
 
-        // Transform to Writer becomes batch-level to reduce channel overhead
-        // We reduce capacity because each item is now a batch of ~BatchSize rows
-        var transformToWriter = Channel.CreateBounded<object?[][]>(new BoundedChannelOptions(100)
-        {
-            SingleWriter = true,
-            SingleReader = true,
-            FullMode = BoundedChannelFullMode.Wait
-        });
+			while (tasks.Count > 0)
+			{
+				var finishedTask = await Task.WhenAny(tasks);
+				if (finishedTask.IsFaulted)
+				{
+					await linkedCts.CancelAsync();
+					await finishedTask;
+				}
+				else if (finishedTask.IsCanceled)
+				{
+					await linkedCts.CancelAsync();
+				}
 
-        // Use Observer to create Progress
-        var transformerNamesList = pipeline.Select(t => t.GetType().Name.Replace("DataTransformer", ""));
-        using var progress = _observer.CreateProgressReporter(!options.NoStats, transformerNamesList);
+				tasks.Remove(finishedTask);
+			}
 
-        long totalRows = 0;
+			await writer.CompleteAsync(ct);
+			progress.Complete();
 
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var effectiveCt = linkedCts.Token;
+			var elapsed = DateTime.UtcNow - startTime;
+			var rowsPerSecond = elapsed.TotalSeconds > 0 ? totalRows / elapsed.TotalSeconds : 0;
+			if (_logger.IsEnabled(LogLevel.Information))
+				_logger.LogInformation("Export completed in {Elapsed}. Written {Rows} rows ({Speed:F1} rows/s).", elapsed, totalRows, rowsPerSecond);
 
-        try
-        {
-            // Run Concurrent Pipeline
-            var startTime = DateTime.UtcNow;
-            var retryPolicy = new RetryPolicy(options.MaxRetries, TimeSpan.FromMilliseconds(options.RetryDelayMs), _logger);
+			// --- POST-EXEC HOOK ---
+			await ExecuteHookAsync(writer, "Post-Hook", options.PostExec, ct);
 
-            var producerTask = ProduceRowsAsync(reader, readerToTransform.Writer, options.BatchSize, options.Limit, options.SamplingRate, options.SamplingSeed, progress, linkedCts, effectiveCt, retryPolicy, _logger);
-            var transformTask = TransformRowsAsync(readerToTransform.Reader, transformToWriter.Writer, pipeline, options.BatchSize, progress, effectiveCt);
-            var consumerTask = ConsumeRowsAsync(transformToWriter.Reader, writer, progress, r => Interlocked.Add(ref totalRows, r), effectiveCt, retryPolicy, _logger);
+			_observer.LogMessage($"[green]✓ Export completed successfully.[/]");
 
-            var tasks = new List<Task> { producerTask, transformTask, consumerTask };
+			await SaveMetricsAsync(progress, options.MetricsPath, ct);
+		}
+		catch (Exception ex)
+		{
+			_logger.LogError(ex, "Export failed");
+			_observer.LogError(ex);
 
-            while (tasks.Count > 0)
-            {
-                var finishedTask = await Task.WhenAny(tasks);
-                if (finishedTask.IsFaulted)
-                {
-                    await linkedCts.CancelAsync();
-                    await finishedTask;
-                }
-                else if (finishedTask.IsCanceled)
-                {
-                    await linkedCts.CancelAsync();
-                }
+			// --- ON-ERROR HOOK ---
+			try
+			{
+				await ExecuteHookAsync(writer, "On-Error Hook", options.OnErrorExec, CancellationToken.None, TimeSpan.FromSeconds(30));
+			}
+			catch (Exception hookEx)
+			{
+				_logger.LogError(hookEx, "On-Error Hook failed");
+				_observer.LogError(hookEx);
+			}
 
-                tasks.Remove(finishedTask);
-            }
+			throw;
+		}
+		finally
+		{
+			// --- FINALLY HOOK ---
+			try
+			{
+				await ExecuteHookAsync(writer, "Finally Hook", options.FinallyExec, CancellationToken.None, TimeSpan.FromSeconds(30));
+			}
+			catch (Exception hookEx)
+			{
+				_logger.LogError(hookEx, "Finally Hook failed");
+				_observer.LogError(hookEx);
+			}
+		}
+	}
 
-            await writer.CompleteAsync(ct);
-            progress.Complete();
+	/// <summary>
+	/// Validates schema compatibility and performs auto-migration if enabled.
+	/// </summary>
+	private async Task ValidateAndMigrateSchemaAsync(
+		IDataWriter writer,
+		IReadOnlyList<PipeColumnInfo> exportableSchema,
+		DumpOptions options,
+		CancellationToken ct)
+	{
+		if (options.NoSchemaValidation || writer is not ISchemaInspector inspector) return;
 
-            var elapsed = DateTime.UtcNow - startTime;
-            var rowsPerSecond = elapsed.TotalSeconds > 0 ? totalRows / elapsed.TotalSeconds : 0;
-            if (_logger.IsEnabled(LogLevel.Information))
-                _logger.LogInformation("Export completed in {Elapsed}. Written {Rows} rows ({Speed:F1} rows/s).", elapsed, totalRows, rowsPerSecond);
+		_observer.LogMessage("Verifying target schema compatibility...");
+		var targetSchema = await inspector.InspectTargetAsync(ct);
+		var dialect = (writer as IHasSqlDialect)?.Dialect;
+		var report = SchemaCompatibilityAnalyzer.Analyze(exportableSchema, targetSchema, dialect);
 
-            // --- POST-EXEC HOOK ---
-            if (!string.IsNullOrWhiteSpace(options.PostExec))
-            {
-                _observer.OnHookExecuting("Post-Hook", options.PostExec);
-                await writer.ExecuteCommandAsync(options.PostExec, ct);
-            }
+		foreach (var warning in report.Warnings) _observer.LogWarning(warning);
+		foreach (var error in report.Errors) _observer.LogError(new Exception(error));
 
-            _observer.LogMessage($"[green]✓ Export completed successfully.[/]");
+		// Auto-migrate if needed
+		var missingCount = report.Columns.Count(c => c.Status == CompatibilityStatus.MissingInTarget);
+		if (missingCount > 0 && options.AutoMigrate && writer is ISchemaMigrator migrator)
+		{
+			_observer.LogMessage($"[yellow]Auto-migrating schema: Adding {missingCount} missing columns...[/]");
+			await migrator.MigrateSchemaAsync(report, ct);
 
-            var metrics = progress.GetMetrics();
-            if (!string.IsNullOrEmpty(options.MetricsPath))
-            {
-                try
-                {
-                    var json = System.Text.Json.JsonSerializer.Serialize(metrics, new System.Text.Json.JsonSerializerOptions
-                    {
-                        WriteIndented = true
-                    });
-                    await File.WriteAllTextAsync(options.MetricsPath, json, ct);
-                    _observer.LogMessage($"   [grey]Metrics saved to: {options.MetricsPath}[/]");
-                }
-                catch (Exception ex)
-                {
-                    _observer.LogWarning($"Failed to save metrics: {ex.Message}");
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Export failed");
-            _observer.LogError(ex);
+			// Re-validate after migration
+			targetSchema = await inspector.InspectTargetAsync(ct);
+			report = SchemaCompatibilityAnalyzer.Analyze(exportableSchema, targetSchema, dialect);
 
-            // --- ON-ERROR HOOK ---
-            if (!string.IsNullOrWhiteSpace(options.OnErrorExec))
-            {
-                try
-                {
-                    _observer.OnHookExecuting("On-Error Hook", options.OnErrorExec);
-                    using var errorCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-                    await writer.ExecuteCommandAsync(options.OnErrorExec, errorCts.Token);
-                }
-                catch (Exception hookEx)
-                {
-                    _logger.LogError(hookEx, "On-Error Hook failed");
-                    _observer.LogError(hookEx);
-                }
-            }
+			if (!report.IsCompatible && options.StrictSchema)
+				throw new InvalidOperationException("Export aborted: Schema migration failed to resolve all incompatibilities in Strict Mode.");
 
-            throw;
-        }
-        finally
-        {
-            // --- FINALLY HOOK ---
-            if (!string.IsNullOrWhiteSpace(options.FinallyExec))
-            {
-                try
-                {
-                    _observer.OnHookExecuting("Finally Hook", options.FinallyExec);
-                    using var finallyCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-                    await writer.ExecuteCommandAsync(options.FinallyExec, finallyCts.Token);
-                }
-                catch (Exception hookEx)
-                {
-                    _logger.LogError(hookEx, "Finally Hook failed");
-                    _observer.LogError(hookEx);
-                }
-            }
-        }
-    }
+			_observer.LogMessage("[green]Schema migration successful. Continuing export.[/]");
+		}
+		else if (!report.IsCompatible && options.StrictSchema)
+		{
+			throw new InvalidOperationException("Export aborted due to schema incompatibilities (Strict Mode).");
+		}
+	}
+
+	private async Task ExecuteHookAsync(IDataWriter writer, string hookName, string? command, CancellationToken ct, TimeSpan? timeout = null)
+	{
+		if (string.IsNullOrWhiteSpace(command)) return;
+
+		_observer.OnHookExecuting(hookName, command);
+
+		if (timeout.HasValue)
+		{
+			using var hookCts = new CancellationTokenSource(timeout.Value);
+			await writer.ExecuteCommandAsync(command, hookCts.Token);
+		}
+		else
+		{
+			await writer.ExecuteCommandAsync(command, ct);
+		}
+	}
+
+	private async Task SaveMetricsAsync(IExportProgress progress, string? metricsPath, CancellationToken ct)
+	{
+		if (string.IsNullOrEmpty(metricsPath)) return;
+
+		var metrics = progress.GetMetrics();
+		try
+		{
+			var json = System.Text.Json.JsonSerializer.Serialize(metrics,
+				new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+			await File.WriteAllTextAsync(metricsPath, json, ct);
+			_observer.LogMessage($"   [grey]Metrics saved to: {metricsPath}[/]");
+		}
+		catch (Exception ex)
+		{
+			_observer.LogWarning($"Failed to save metrics: {ex.Message}");
+		}
+	}
 
     /// <summary>
     /// Producer: Reads batches from database, unbatches them, and sends single rows to channel.
