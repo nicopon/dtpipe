@@ -31,7 +31,7 @@ public class FormatDataTransformerBenchmarks
 	}
 
 	[Benchmark]
-	public object?[] Transform()
+	public object?[]? Transform()
 	{
 		return _transformer.Transform(_row);
 	}
