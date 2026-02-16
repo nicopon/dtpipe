@@ -48,9 +48,31 @@ public class SqlServerTypeConverter : ITypeMapper
         };
     }
 
-    public string BuildNativeType(string dataType, int? dataLength, int? precision, int? scale, int? charLength)
-    {
-        // Fallback as acceptable per Tâche 2.2 step 3
-        return dataType;
-    }
+    	public string BuildNativeType(string dataType, int? dataLength, int? precision, int? scale, int? charLength)
+	{
+		var typeLower = dataType.ToLowerInvariant();
+		var fullType = dataType;
+		var length = charLength ?? dataLength;
+
+		// Handle char/varchar/binary/varbinary
+		if (length.HasValue && (typeLower.Contains("char") || typeLower.Contains("binary")))
+		{
+			var lenStr = length.Value == -1 ? "MAX" : length.Value.ToString();
+			return $"{fullType}({lenStr})";
+		}
+
+		// Handle decimal/numeric
+		if (precision.HasValue && scale.HasValue && (typeLower == "decimal" || typeLower == "numeric"))
+		{
+			return $"{fullType}({precision.Value},{scale.Value})";
+		}
+
+		// Handle datetime types with precision
+		if (precision.HasValue && (typeLower.Contains("datetime2") || typeLower.Contains("datetimeoffset") || typeLower.Contains("time")))
+		{
+			return $"{fullType}({precision.Value})";
+		}
+
+		return fullType;
+	}
 }

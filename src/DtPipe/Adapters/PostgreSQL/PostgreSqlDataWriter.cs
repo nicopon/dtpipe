@@ -24,6 +24,8 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 	private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.PostgreSqlDialect();
 	public override ISqlDialect Dialect => _dialect;
 
+	protected override ITypeMapper GetTypeMapper() => _typeMapper;
+
 	public PostgreSqlDataWriter(string connectionString, PostgreSqlWriterOptions options, ILogger<PostgreSqlDataWriter> logger, ITypeMapper typeMapper)
 		: base(connectionString)
 	{
@@ -370,30 +372,7 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		return sb.ToString();
 	}
 
-	private string BuildCreateTableFromIntrospection(string quotedTableName, TargetSchemaInfo schemaInfo)
-	{
-		var sb = new StringBuilder();
-		sb.Append($"CREATE TABLE {quotedTableName} (");
-		for (int i = 0; i < schemaInfo.Columns.Count; i++)
-		{
-			if (i > 0) sb.Append(", ");
-			var col = schemaInfo.Columns[i];
-			sb.Append($"{_dialect.Quote(col.Name)} {col.NativeType}");
-			if (!col.IsNullable) sb.Append(" NOT NULL");
-		}
-		if (schemaInfo.PrimaryKeyColumns != null && schemaInfo.PrimaryKeyColumns.Count > 0)
-		{
-			sb.Append(", PRIMARY KEY (");
-			for (int i = 0; i < schemaInfo.PrimaryKeyColumns.Count; i++)
-			{
-				if (i > 0) sb.Append(", ");
-				sb.Append(_dialect.Quote(schemaInfo.PrimaryKeyColumns[i]));
-			}
-			sb.Append(")");
-		}
-		sb.Append(")");
-		return sb.ToString();
-	}
+
 
 	private string BuildCopySql(string tableName, IReadOnlyList<PipeColumnInfo> columns)
 	{

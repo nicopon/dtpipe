@@ -24,6 +24,8 @@ public sealed class DuckDbDataWriter : BaseSqlDataWriter
 	private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.DuckDbDialect();
 	public override ISqlDialect Dialect => _dialect;
 
+	protected override ITypeMapper GetTypeMapper() => _typeMapper;
+
 	public DuckDbDataWriter(string connectionString, DuckDbWriterOptions options, ILogger<DuckDbDataWriter> logger, ITypeMapper typeMapper) : base(connectionString)
 	{
 		_options = options;
@@ -491,32 +493,7 @@ public sealed class DuckDbDataWriter : BaseSqlDataWriter
 		return $"ALTER TABLE {tableName} ADD COLUMN {safeName} {type}{nullability}";
 	}
 
-	private string BuildCreateTableFromIntrospection(string tableName, TargetSchemaInfo schema)
-	{
-		var sb = new StringBuilder();
-		sb.Append($"CREATE TABLE {tableName} (");
 
-		for (int i = 0; i < schema.Columns.Count; i++)
-		{
-			var col = schema.Columns[i];
-			if (i > 0) sb.Append(", ");
-			sb.Append($"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, col.Name)} {col.NativeType}");
-
-			if (!col.IsNullable)
-			{
-				sb.Append(" NOT NULL");
-			}
-		}
-
-		if (schema.PrimaryKeyColumns != null && schema.PrimaryKeyColumns.Count > 0)
-		{
-			var keys = schema.PrimaryKeyColumns.Select(k => SqlIdentifierHelper.GetSafeIdentifier(_dialect, k));
-			sb.Append($", PRIMARY KEY ({string.Join(", ", keys)})");
-		}
-
-		sb.Append(")");
-		return sb.ToString();
-	}
 
 	// IKeyValidator Override
 	public override string? GetWriteStrategy() => _options.Strategy.ToString();
