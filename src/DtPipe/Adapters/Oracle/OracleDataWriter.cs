@@ -27,7 +27,9 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
     private List<string> _keyColumns = new();
     private List<int> _keyIndices = new();
 
-    public override ISqlDialect Dialect => DtPipe.Core.Dialects.OracleDialect.Instance;
+    public override ISqlDialect Dialect => new DtPipe.Core.Dialects.OracleDialect();
+
+	protected override ITypeMapper GetTypeMapper() => _typeMapper;
 
     public OracleDataWriter(string connectionString, OracleWriterOptions options, ILogger<OracleDataWriter> logger, ITypeMapper typeMapper)
         : base(connectionString)
@@ -127,7 +129,7 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
         string createTableSql;
         if (existingSchema?.Exists == true)
         {
-            createTableSql = OracleSqlBuilder.BuildCreateTableFromIntrospection(_quotedTargetTableName, existingSchema, Dialect);
+            createTableSql = BuildCreateTableFromIntrospection(_quotedTargetTableName, existingSchema);
         }
         else
         {
@@ -622,4 +624,9 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
     }
 
     #endregion
+
+    protected override string BuildCreateTableFromIntrospection(string tableName, TargetSchemaInfo schema)
+    {
+        return OracleSqlBuilder.BuildCreateTableFromIntrospection(tableName, schema, Dialect);
+    }
 }

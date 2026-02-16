@@ -234,4 +234,45 @@ public abstract class BaseSqlDataWriter : IDataWriter, ISchemaInspector, IKeyVal
 			cmd.ExecuteNonQuery();
 		}
 	}
+
+	/// <summary>
+	/// Builds a CREATE TABLE DDL statement from introspected schema metadata.
+	/// Uses Dialect.Quote() for identifier quoting and ITypeMapper.BuildNativeType() for type construction.
+	/// Derived classes can override this if they need adapter-specific DDL syntax (e.g. Oracle PK constraints).
+	/// </summary>
+	protected virtual string BuildCreateTableFromIntrospection(string tableName, TargetSchemaInfo schema)
+	{
+		var sb = new System.Text.StringBuilder();
+		sb.AppendLine($"CREATE TABLE {tableName} (");
+
+		var columns = schema.Columns;
+		for (int i = 0; i < columns.Count; i++)
+		{
+			var col = columns[i];
+			var quotedName = Dialect.NeedsQuoting(col.Name) ? Dialect.Quote(col.Name) : col.Name;
+			var nativeType = GetTypeMapper().BuildNativeType(
+				col.NativeType, col.MaxLength, col.Precision, col.Scale, col.MaxLength);
+			var nullable = col.IsNullable ? "" : " NOT NULL";
+
+			sb.Append($"    {quotedName} {nativeType}{nullable}");
+			if (i < columns.Count - 1) sb.AppendLine(",");
+			else sb.AppendLine();
+		}
+
+		// Primary Key constraint
+		if (schema.PrimaryKeyColumns?.Count > 0)
+		{
+			var pkCols = string.Join(", ", schema.PrimaryKeyColumns.Select(
+				pk => Dialect.NeedsQuoting(pk) ? Dialect.Quote(pk) : pk));
+			sb.AppendLine($"    , PRIMARY KEY ({pkCols})");
+		}
+
+		sb.AppendLine(")");
+		return sb.ToString();
+	}
+
+	/// <summary>
+	/// Returns the ITypeMapper instance. Must be implemented by derived classes.
+	/// </summary>
+	protected abstract ITypeMapper GetTypeMapper();
 }

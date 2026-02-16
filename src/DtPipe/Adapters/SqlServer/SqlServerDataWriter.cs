@@ -22,6 +22,8 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 	private Type[]? _targetTypes;
 	private string[]? _targetColumnNames;
 
+	protected override ITypeMapper GetTypeMapper() => _typeMapper;
+
 	private readonly ITypeMapper _typeMapper;
 
 	public SqlServerDataWriter(string connectionString, SqlServerWriterOptions options, ILogger<SqlServerDataWriter> logger, ITypeMapper typeMapper) : base(connectionString)
@@ -596,50 +598,7 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 		return new TargetSchemaInfo(cols, true, rowCount, null, pkCols.Count > 0 ? pkCols.ToList() : null, uniqueCols.Count > 0 ? uniqueCols.ToList() : null, IsRowCountEstimate: true);
 	}
 
-	private string BuildCreateTableFromIntrospection(string quotedTableName, TargetSchemaInfo schemaInfo)
-	{
-		var sb = new StringBuilder();
-		sb.Append($"CREATE TABLE {quotedTableName} (");
 
-		for (int i = 0; i < schemaInfo.Columns.Count; i++)
-		{
-			if (i > 0) sb.Append(", ");
-			var col = schemaInfo.Columns[i];
-			var safeName = col.IsCaseSensitive || _dialect.NeedsQuoting(col.Name) ? _dialect.Quote(col.Name) : col.Name;
-			var typeLower = col.NativeType.ToLowerInvariant();
-			var fullType = col.NativeType;
-
-			if (col.MaxLength.HasValue && (typeLower.Contains("char") || typeLower.Contains("binary")))
-			{
-				var lenStr = col.MaxLength.Value == -1 ? "MAX" : col.MaxLength.Value.ToString();
-				fullType += $"({lenStr})";
-			}
-			else if (col.Precision.HasValue && col.Scale.HasValue && (typeLower == "decimal" || typeLower == "numeric"))
-			{
-				fullType += $"({col.Precision.Value},{col.Scale.Value})";
-			}
-			else if (col.Precision.HasValue && (typeLower.Contains("datetime2") || typeLower.Contains("datetimeoffset") || typeLower.Contains("time")))
-			{
-				fullType += $"({col.Precision.Value})";
-			}
-
-			sb.Append($"{safeName} {fullType}");
-			if (!col.IsNullable) sb.Append(" NOT NULL");
-		}
-
-		if (schemaInfo.PrimaryKeyColumns != null && schemaInfo.PrimaryKeyColumns.Count > 0)
-		{
-			sb.Append(", PRIMARY KEY (");
-			for (int i = 0; i < schemaInfo.PrimaryKeyColumns.Count; i++)
-			{
-				if (i > 0) sb.Append(", ");
-				sb.Append(_dialect.Quote(schemaInfo.PrimaryKeyColumns[i]));
-			}
-			sb.Append(")");
-		}
-		sb.Append(")");
-		return sb.ToString();
-	}
 	#endregion
 
 	// IKeyValidator methods
