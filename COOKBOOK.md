@@ -376,6 +376,7 @@ transformers:
       options:
         locale: fr
         seed-column: id
+```
 
 ### Example 2: File-to-File (No Query)
 When transforming from CSV or Parquet, the `query` field is optional.
@@ -388,7 +389,6 @@ transformers:
   - script:
       # Use @ to load script from file
       category: "@scripts/categorize.js"
-```
 ```
 
 ---
