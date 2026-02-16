@@ -4,7 +4,8 @@
 .nuget_cache/
 .nuget_plugins/
 .nuget_scratch/
-/.notes/
+.notes/
+.scripts/
 
 testScripts/
 exports/
