@@ -74,6 +74,12 @@ public class RetryPolicy
                msg.Contains("broken pipe") ||
                msg.Contains("transport") ||
                msg.Contains("io error") ||
+               msg.Contains("locked") ||
+               msg.Contains("busy") ||
+               msg.Contains("lock") ||
+               msg.Contains("stream") ||
+               msg.Contains("read") ||
+               msg.Contains("not open") ||
                msg.Contains("socket");
     }
 }

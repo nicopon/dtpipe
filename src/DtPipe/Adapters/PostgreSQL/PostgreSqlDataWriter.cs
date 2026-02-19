@@ -13,13 +13,14 @@ namespace DtPipe.Adapters.PostgreSQL;
 public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 {
 	private readonly PostgreSqlWriterOptions _options;
-	private NpgsqlBinaryImporter? _writer;
-	private string? _stagingTable;
-	private List<string> _keyColumns = new();
+	// _writer is removed as it is now per-batch
+	// _stagingTable is removed as it is now per-batch
+	private readonly List<string> _keyColumns = new();
 	private Type[]? _targetTypes;
 	private NpgsqlTypes.NpgsqlDbType[]? _columnTypes;
 	private readonly ILogger<PostgreSqlDataWriter> _logger;
 	private readonly ITypeMapper _typeMapper;
+	private bool _metaDataInitialized;
 
 	private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.PostgreSqlDialect();
 	public override ISqlDialect Dialect => _dialect;
@@ -102,21 +103,21 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 			await EnsureTableExistsAsync(ct);
 		}
 
-		// PostgreSQL COPY does not support ON CONFLICT. Use staging table for Upsert/Ignore.
-		if (_options.Strategy == PostgreSqlWriteStrategy.Upsert || _options.Strategy == PostgreSqlWriteStrategy.Ignore)
-		{
-			await SetupStagingTableAsync(ct);
-		}
+		// Key resolution is now deferred to EnsureMetaDataInitializedAsync
 	}
 
-	private async Task EnsureWriterInitializedAsync(CancellationToken ct)
+	private async Task EnsureMetaDataInitializedAsync(CancellationToken ct)
 	{
-		if (_writer != null) return;
+		if (_metaDataInitialized) return;
+		await EnsureConnectionOpenAsync(ct);
 
-		var copyTarget = _stagingTable ?? _quotedTargetTableName;
-		var copySql = BuildCopySql(copyTarget, _columns!);
+		// 1. Resolve Keys if needed for Upsert/Ignore
+		if (_options.Strategy == PostgreSqlWriteStrategy.Upsert || _options.Strategy == PostgreSqlWriteStrategy.Ignore)
+		{
+			await ResolveKeysAsync(ct);
+		}
 
-		// Prepare conversion types from target schema
+		// 2. Prepare conversion types from target schema
 		var targetInfo = await InspectTargetAsync(ct);
 		_targetTypes = new Type[_columns!.Count];
 		_columnTypes = new NpgsqlTypes.NpgsqlDbType[_columns.Count];
@@ -132,10 +133,7 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 			_columnTypes[i] = PostgreSqlTypeConverter.Instance.MapToNpgsqlDbType(effectiveType);
 		}
 
-		if (_connection is NpgsqlConnection pgConn)
-		{
-			_writer = await pgConn.BeginBinaryImportAsync(copySql, ct);
-		}
+		_metaDataInitialized = true;
 	}
 
 
@@ -156,9 +154,8 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		return false;
 	}
 
-	private async Task SetupStagingTableAsync(CancellationToken ct)
+	private async Task ResolveKeysAsync(CancellationToken ct)
 	{
-		// 1. Resolve Keys
 		var targetInfo = await InspectTargetAsync(ct);
 		if (targetInfo?.PrimaryKeyColumns != null)
 		{
@@ -174,60 +171,39 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		{
 			throw new InvalidOperationException($"Strategy {_options.Strategy} requires a Primary Key. None detected.");
 		}
-
-		// 2. Create Staging Table (TEMP table)
-		_stagingTable = $"tmp_stage_{Guid.NewGuid():N}";
-		await ExecuteNonQueryAsync($"CREATE TEMP TABLE {_stagingTable} (LIKE {_quotedTargetTableName} INCLUDING DEFAULTS)", ct);
 	}
 
 	public override async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
 	{
 		if (rows.Count == 0) return;
-		await EnsureWriterInitializedAsync(ct);
-		if (_writer is null) throw new InvalidOperationException("Writer not initialized");
+
+		await EnsureConnectionOpenAsync(ct);
+		await EnsureMetaDataInitializedAsync(ct);
+
 		if (_columns is null) throw new InvalidOperationException("Columns not initialized");
 
 		try
 		{
-			foreach (var row in rows)
+			if (_options.Strategy is PostgreSqlWriteStrategy.Upsert or PostgreSqlWriteStrategy.Ignore)
 			{
-				await _writer.StartRowAsync(ct);
-				for (int i = 0; i < row.Length; i++)
-				{
-					var val = row[i];
-					if (val is null)
-					{
-						await _writer.WriteNullAsync(ct);
-					}
-					else
-					{
-						// Use strict types and convert value if needed
-						var targetType = _targetTypes![i];
-						var convertedVal = ValueConverter.ConvertValue(val, targetType);
-
-						// Normalize DateTime for Npgsql 6.0+ strictness based on column type
-						if (convertedVal is DateTime dt)
-						{
-							var dbType = _columnTypes![i];
-							if (dbType == NpgsqlTypes.NpgsqlDbType.Timestamp && dt.Kind != DateTimeKind.Unspecified)
-							{
-								// Writing to 'timestamp' (naive): Convert to Unspecified
-								convertedVal = DateTime.SpecifyKind(dt, DateTimeKind.Unspecified);
-							}
-							else if (dbType == NpgsqlTypes.NpgsqlDbType.TimestampTz && dt.Kind == DateTimeKind.Unspecified)
-							{
-								// Writing to 'timestamptz': Default to Utc
-								convertedVal = DateTime.SpecifyKind(dt, DateTimeKind.Utc);
-							}
-						}
-
-						await _writer.WriteAsync(convertedVal, _columnTypes![i], ct);
-					}
-				}
+				await WriteBatchViaStagingAsync(rows, ct);
+			}
+			else
+			{
+				await WriteBatchDirectAsync(rows, ct);
 			}
 		}
 		catch (Exception ex)
 		{
+			// On failure, dispose connection to force a fresh one on retry.
+			// No explicit rollback needed for simple COPY as we didn't Complete() it (for direct)
+			// or we dropped/rollback txn (for staging).
+			if (_connection != null)
+			{
+				try { _connection.Dispose(); } catch { }
+				_connection = null;
+			}
+
 			var analysis = await BatchFailureAnalyzer.AnalyzeAsync(this, rows, _columns, ct);
 			if (!string.IsNullOrEmpty(analysis))
 			{
@@ -237,33 +213,107 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		}
 	}
 
-
-	public override async ValueTask CompleteAsync(CancellationToken ct = default)
+	private async Task WriteBatchDirectAsync(IReadOnlyList<object?[]> rows, CancellationToken ct)
 	{
-		if (_writer != null)
-		{
-			await _writer.CompleteAsync(ct);
-			await _writer.DisposeAsync();
-			_writer = null;
+		var copySql = BuildCopySql(_quotedTargetTableName, _columns!);
+		await using var writer = await ((NpgsqlConnection)_connection!).BeginBinaryImportAsync(copySql, ct);
 
-			if (_stagingTable != null)
+		await WriteRowsToCopyAsync(writer, rows, ct);
+
+		// Atomic Commit for this batch
+		await writer.CompleteAsync(ct);
+	}
+
+	private async Task WriteBatchViaStagingAsync(IReadOnlyList<object?[]> rows, CancellationToken ct)
+	{
+		// Create unique staging table for this batch
+		var stagingTable = $"tmp_batch_{Guid.NewGuid():N}";
+
+		// Typically TEMP tables are visible only to the session.
+		// ON COMMIT DROP is useful if we were inside a transaction block,
+		// but here we manage lifecycle manually for clarity.
+		await ExecuteNonQueryAsync($"CREATE TEMP TABLE {stagingTable} (LIKE {_quotedTargetTableName} INCLUDING DEFAULTS)", ct);
+
+		try
+		{
+			var copySql = BuildCopySql(stagingTable, _columns!);
+			await using (var writer = await ((NpgsqlConnection)_connection!).BeginBinaryImportAsync(copySql, ct))
 			{
-				await MergeStagingTableAsync(ct);
+				await WriteRowsToCopyAsync(writer, rows, ct);
+				await writer.CompleteAsync(ct);
+			}
+
+			await MergeStagingBatchAsync(stagingTable, ct);
+		}
+		finally
+		{
+			// Cleanup staging table
+			try
+			{
+				await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS {stagingTable}", ct);
+			}
+			catch (Exception ex)
+			{
+				_logger.LogWarning(ex, "Failed to drop staging table {TableName}", stagingTable);
 			}
 		}
 	}
 
-	private async Task MergeStagingTableAsync(CancellationToken ct)
+	private async Task WriteRowsToCopyAsync(NpgsqlBinaryImporter writer, IReadOnlyList<object?[]> rows, CancellationToken ct)
+	{
+		foreach (var row in rows)
+		{
+			await writer.StartRowAsync(ct);
+			for (int i = 0; i < row.Length; i++)
+			{
+				var val = row[i];
+				if (val is null)
+				{
+					await writer.WriteNullAsync(ct);
+				}
+				else
+				{
+					// Use strict types and convert value if needed
+					var targetType = _targetTypes![i];
+					var convertedVal = ValueConverter.ConvertValue(val, targetType);
+
+					// Normalize DateTime for Npgsql 6.0+ strictness based on column type
+					if (convertedVal is DateTime dt)
+					{
+						var dbType = _columnTypes![i];
+						if (dbType == NpgsqlTypes.NpgsqlDbType.Timestamp && dt.Kind != DateTimeKind.Unspecified)
+						{
+							convertedVal = DateTime.SpecifyKind(dt, DateTimeKind.Unspecified);
+						}
+						else if (dbType == NpgsqlTypes.NpgsqlDbType.TimestampTz && dt.Kind == DateTimeKind.Unspecified)
+						{
+							convertedVal = DateTime.SpecifyKind(dt, DateTimeKind.Utc);
+						}
+					}
+
+					await writer.WriteAsync(convertedVal, _columnTypes![i], ct);
+				}
+			}
+		}
+	}
+
+	public override async ValueTask CompleteAsync(CancellationToken ct = default)
+	{
+		// No global cleanup needed with Transactional Batches
+		await ValueTask.CompletedTask;
+	}
+
+	private async Task MergeStagingBatchAsync(string stagingTable, CancellationToken ct)
 	{
 		var cols = _columns!.Select(c => SqlIdentifierHelper.GetSafeIdentifier(_dialect, c)).ToList();
 		var conflictTarget = string.Join(", ", _keyColumns.Select(c => _dialect.Quote(c)));
+		var quotedStaging = _dialect.Quote(stagingTable);
 
 		var updateSet = string.Join(", ",
 			_columns!.Where(c => !_keyColumns.Contains(c.Name, StringComparer.OrdinalIgnoreCase))
 						.Select(c => $"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, c)} = EXCLUDED.{SqlIdentifierHelper.GetSafeIdentifier(_dialect, c)}"));
 
 		var sb = new StringBuilder();
-		string quotedStaging = _dialect.Quote(_stagingTable!);
 
 		sb.Append($"INSERT INTO {_quotedTargetTableName} ({string.Join(", ", cols)}) SELECT {string.Join(", ", cols)} FROM {quotedStaging} ");
 
@@ -277,10 +327,6 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		}
 
 		await ExecuteNonQueryAsync(sb.ToString(), ct);
-		if (_stagingTable != null)
-		{
-			await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS {_dialect.Quote(_stagingTable)}", ct);
-		}
 	}
 
 	public override async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
@@ -294,10 +340,6 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 
 	protected override ValueTask DisposeResourcesAsync()
 	{
-		if (_writer != null)
-		{
-			return _writer.DisposeAsync();
-		}
 		return ValueTask.CompletedTask;
 	}
 

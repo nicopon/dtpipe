@@ -34,10 +34,19 @@ public class GenerateReaderDescriptor : IProviderDescriptor<IStreamReader>
 		}
 
 		var parts = config.Split(';', StringSplitOptions.RemoveEmptyEntries);
-
-		if (parts.Length > 0 && long.TryParse(parts[0], out long count))
+		foreach (var part in parts)
 		{
-			sampleOptions.RowCount = count;
+			if (long.TryParse(part, out long count))
+			{
+				sampleOptions.RowCount = count;
+			}
+			else if (part.StartsWith("rate=", StringComparison.OrdinalIgnoreCase))
+			{
+				if (int.TryParse(part.Substring(5), out int rate))
+				{
+					sampleOptions.RowsPerSecond = rate;
+				}
+			}
 		}
 
 		return new GenerateReader(

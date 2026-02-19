@@ -45,3 +45,12 @@ services:
     container_name: dtpipe-integ-mssql-tools
     entrypoint: /bin/sh -c "while true; do sleep 3600; done"
     network_mode: service:mssql
+
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.12.0
+    container_name: dtpipe-integ-toxiproxy
+    ports:
+      - "8474:8474"
+      - "5441:5441"
+    depends_on:
+      - postgres

@@ -33,6 +33,8 @@ public partial class GenerateReader : IStreamReader, IRequiresOptions<GenerateRe
 		await Task.Yield();
 		long totalRows = _options.RowCount;
 		long produced = 0;
+		int? rowsPerSecond = _options.RowsPerSecond;
+		var sw = rowsPerSecond.HasValue ? System.Diagnostics.Stopwatch.StartNew() : null;
 
 		var buffer = new object?[batchSize][];
 		int bufferIndex = 0;
@@ -52,17 +54,35 @@ public partial class GenerateReader : IStreamReader, IRequiresOptions<GenerateRe
 				if (bufferIndex >= batchSize)
 				{
 					yield return new ReadOnlyMemory<object?[]>(buffer, 0, bufferIndex);
+
+					produced += bufferIndex;
+					await ThrottleAsync(produced, rowsPerSecond, sw, ct);
+
 					buffer = new object?[batchSize][]; // New buffer for next batch
 					bufferIndex = 0;
 				}
 			}
-			produced += currentBatchLimit;
 
-			// Yield partial buffer if any
+			// Yield partial buffer if any (last batch)
 			if (bufferIndex > 0)
 			{
 				yield return new ReadOnlyMemory<object?[]>(buffer, 0, bufferIndex);
+				produced += bufferIndex;
+				await ThrottleAsync(produced, rowsPerSecond, sw, ct);
 				bufferIndex = 0;
+			}
+		}
+	}
+
+	private async Task ThrottleAsync(long produced, int? rowsPerSecond, System.Diagnostics.Stopwatch? sw, CancellationToken ct)
+	{
+		if (sw != null && rowsPerSecond.HasValue && rowsPerSecond.Value > 0)
+		{
+			double expectedMs = (double)produced / rowsPerSecond.Value * 1000;
+			double actualMs = sw.Elapsed.TotalMilliseconds;
+			if (actualMs < expectedMs)
+			{
+				await Task.Delay((int)(expectedMs - actualMs), ct);
 			}
 		}
 	}
