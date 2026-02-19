@@ -1,7 +1,4 @@
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Models;
-using DtPipe.Core.Options;
 
 namespace DtPipe.Adapters.Generate;
 
@@ -19,7 +16,7 @@ public class GenerateReaderDescriptor : IProviderDescriptor<IStreamReader>
 		       connectionString.StartsWith(GenerateConstants.LegacyProviderName + ":", StringComparison.OrdinalIgnoreCase);
 	}
 
-	public IStreamReader Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
+	public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
 	{
 		var sampleOptions = (GenerateReaderOptions)options;
 
@@ -51,7 +48,7 @@ public class GenerateReaderDescriptor : IProviderDescriptor<IStreamReader>
 
 		return new GenerateReader(
 			connectionString,
-			context.Query ?? "",
+			"", // Query will be set via Reader instance or JobService before execution
 			sampleOptions);
 	}
 }

@@ -1,20 +1,21 @@
 using System.CommandLine;
-using System.CommandLine.Parsing;
-using System.Linq;
 using DtPipe.Cli;
 using DtPipe.Cli.Abstractions;
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Models;
 using DtPipe.Core.Options;
+using DtPipe.Core.Pipelines;
 
 namespace DtPipe.Transformers.Format;
 
-public interface IFormatDataTransformerFactory : IDataTransformerFactory { }
+public interface IFormatDataTransformerFactory : IDataTransformerFactory, ICliContributor { }
 
-public class FormatDataTransformerFactory(OptionsRegistry registry) : IDataTransformerFactory
+public class FormatDataTransformerFactory(OptionsRegistry registry) : IFormatDataTransformerFactory
 {
 	private readonly OptionsRegistry _registry = registry;
+
+	public string ProviderName => TransformerType;
+
+	public bool CanHandle(string connectionString) => false;
 
 	public static IEnumerable<Type> GetSupportedOptionTypes()
 	{
@@ -43,17 +44,8 @@ public class FormatDataTransformerFactory(OptionsRegistry registry) : IDataTrans
 		}
 	}
 
-	public IDataTransformer? Create(DumpOptions options)
-	{
-		var formatOptions = _registry.Get<FormatOptions>();
+	// Create(DumpOptions) removed
 
-		if (!formatOptions.Format.Any())
-		{
-			return null;
-		}
-
-		return new FormatDataTransformer(formatOptions);
-	}
 
 	public IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration)
 	{
@@ -65,6 +57,10 @@ public class FormatDataTransformerFactory(OptionsRegistry registry) : IDataTrans
 			Format = configuration.Select(x => x.Value),
 			SkipNull = registryOptions.SkipNull
 		};
+		// Debugging: verify config
+		var configStr = string.Join(" | ", configuration.Select(x => $"{x.Option}={x.Value}"));
+		// Console.WriteLine($"[FormatFactoryDebug] Config: {configStr}");
+
 		return new FormatDataTransformer(options);
 	}
 

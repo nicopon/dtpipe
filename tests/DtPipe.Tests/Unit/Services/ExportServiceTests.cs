@@ -65,7 +65,7 @@ public class ExportServiceTests
 				  .Returns(ToAsyncEnumerable(new[] { new object?[] { 1 } }));
 		mockReader.Setup(r => r.DisposeAsync()).Returns(ValueTask.CompletedTask);
 
-		_mockReaderFactory.Setup(f => f.Create(It.IsAny<DumpOptions>())).Returns(mockReader.Object);
+		_mockReaderFactory.Setup(f => f.Create(It.IsAny<OptionsRegistry>())).Returns(mockReader.Object);
 
 		// Mock Writer
 		var mockWriter = new Mock<IDataWriter>();
@@ -76,13 +76,13 @@ public class ExportServiceTests
 		mockWriter.Setup(w => w.DisposeAsync()).Returns(ValueTask.CompletedTask);
 
 		_mockWriterFactory.Setup(f => f.ProviderName).Returns("test-target");
-		_mockWriterFactory.Setup(f => f.Create(It.IsAny<DumpOptions>())).Returns(mockWriter.Object);
+		_mockWriterFactory.Setup(f => f.Create(It.IsAny<OptionsRegistry>())).Returns(mockWriter.Object);
 
 		// Act
-		await _service.RunExportAsync(options, cts.Token, pipeline, _mockReaderFactory.Object, _mockWriterFactory.Object);
+		await _service.RunExportAsync(new PipelineOptions { NoStats = options.NoStats }, options.Provider, options.OutputPath, cts.Token, pipeline, _mockReaderFactory.Object, _mockWriterFactory.Object, new OptionsRegistry());
 
 		// Assert
-		_mockObserver.Verify(o => o.ShowIntro("test-source", "source-conn"), Times.Once);
+		_mockObserver.Verify(o => o.ShowIntro("test-source", "target-path"), Times.Once);
 		_mockObserver.Verify(o => o.ShowConnectionStatus(false, null), Times.Once); // Connecting...
 		_mockObserver.Verify(o => o.ShowConnectionStatus(true, 1), Times.Once); // Connected
 		_mockObserver.Verify(o => o.ShowTarget("test-target", "target-path"), Times.Once);

@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using DtPipe.Core.Pipelines;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 

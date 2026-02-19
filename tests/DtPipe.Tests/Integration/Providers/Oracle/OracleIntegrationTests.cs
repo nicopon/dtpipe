@@ -5,7 +5,6 @@ using DtPipe.Adapters.Parquet;
 using DtPipe.Core.Models;
 using DtPipe.Tests.Helpers;
 using Oracle.ManagedDataAccess.Client;
-using Testcontainers.Oracle;
 using Xunit;
 
 namespace DtPipe.Tests;
@@ -18,17 +17,17 @@ namespace DtPipe.Tests;
 [Collection("Docker Integration Tests")]
 public class OracleIntegrationTests : IAsyncLifetime
 {
-	private OracleContainer? _oracle;
+	private readonly DtPipe.Tests.Fixtures.GlobalDatabaseFixture _fixture;
 	private string? _connectionString;
+
+	public OracleIntegrationTests(DtPipe.Tests.Fixtures.GlobalDatabaseFixture fixture)
+	{
+		_fixture = fixture;
+	}
 
 	public async ValueTask InitializeAsync()
 	{
-		_connectionString = await DockerHelper.GetOracleConnectionString(async () =>
-		{
-			_oracle = new OracleBuilder("gvenzl/oracle-xe:21-slim-faststart").Build();
-			await _oracle.StartAsync();
-			return _oracle.GetConnectionString();
-		});
+		_connectionString = _fixture.OracleConnectionString;
 
 		if (_connectionString == null) return;
 
@@ -45,12 +44,9 @@ public class OracleIntegrationTests : IAsyncLifetime
 		await TestDataSeeder.SeedAsync(connection, "test_data");
 	}
 
-	public async ValueTask DisposeAsync()
+	public ValueTask DisposeAsync()
 	{
-		if (_oracle is not null)
-		{
-			await _oracle.DisposeAsync();
-		}
+		return ValueTask.CompletedTask;
 	}
 
 	[Fact]
@@ -172,7 +168,7 @@ public class OracleIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task OracleDataWriter_BulkCopy_FromDuckDb_ToOracle()
 	{
-		if (!DockerHelper.IsAvailable() || _oracle is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
 		// Arrange: Create in-memory DuckDB source with test data
 		var duckDbPath = Path.Combine(Path.GetTempPath(), $"test_source_{Guid.NewGuid()}.duckdb");
@@ -207,7 +203,7 @@ public class OracleIntegrationTests : IAsyncLifetime
 				Strategy = OracleWriteStrategy.Recreate
 			};
 
-			await using var writer = new OracleDataWriter(_oracle.GetConnectionString(), writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
+			await using var writer = new OracleDataWriter(_connectionString, writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
 			await writer.InitializeAsync(columns, TestContext.Current.CancellationToken);
 
 			// Read all rows and write in batches
@@ -219,7 +215,7 @@ public class OracleIntegrationTests : IAsyncLifetime
 			await writer.CompleteAsync(TestContext.Current.CancellationToken);
 
 			// Assert: Verify data in Oracle
-			await using var verifyConnection = new OracleConnection(_oracle.GetConnectionString());
+			await using var verifyConnection = new OracleConnection(_connectionString);
 			await verifyConnection.OpenAsync(TestContext.Current.CancellationToken);
 
 			await using var countCmd = verifyConnection.CreateCommand();
@@ -364,9 +360,9 @@ public class OracleIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task OracleDataWriter_Recreate_PreservesNativeStructure()
 	{
-		if (!DockerHelper.IsAvailable() || _oracle is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		var connectionString = _oracle.GetConnectionString();
+		var connectionString = _connectionString;
 		// Use unquoted name to verify case handling (Oracle uppercases this)
 		var tableNamePrefix = "TEST_REC_P_";
 		var tableNameRaw = $"{tableNamePrefix}{Guid.NewGuid():N}".Substring(0, 25);

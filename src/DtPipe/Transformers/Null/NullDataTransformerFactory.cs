@@ -1,20 +1,27 @@
 using System.CommandLine;
-using System.CommandLine.Parsing;
-using System.Linq;
 using DtPipe.Cli;
 using DtPipe.Cli.Abstractions;
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Models;
 using DtPipe.Core.Options;
+
+using DtPipe.Core.Pipelines;
 
 namespace DtPipe.Transformers.Null;
 
-public interface INullDataTransformerFactory : IDataTransformerFactory { }
+public interface INullDataTransformerFactory : IDataTransformerFactory, ICliContributor { }
 
-public class NullDataTransformerFactory(OptionsRegistry registry) : IDataTransformerFactory
+public class NullDataTransformerFactory : INullDataTransformerFactory
 {
-	private readonly OptionsRegistry _registry = registry;
+	private readonly OptionsRegistry _registry;
+
+	public NullDataTransformerFactory(OptionsRegistry registry)
+	{
+		_registry = registry;
+	}
+
+	public string ProviderName => TransformerType;
+
+	public bool CanHandle(string connectionString) => false;
 
 	public static IEnumerable<Type> GetSupportedOptionTypes()
 	{
@@ -43,18 +50,8 @@ public class NullDataTransformerFactory(OptionsRegistry registry) : IDataTransfo
 		}
 	}
 
-	public IDataTransformer? Create(DumpOptions options)
-	{
-		var nullOptions = _registry.Get<NullOptions>();
+	// Create(DumpOptions) removed
 
-		// Return null if no columns to nullify, to skip execution overhead
-		if (!nullOptions.Columns.Any())
-		{
-			return null;
-		}
-
-		return new NullDataTransformer(nullOptions);
-	}
 
 	public IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration)
 	{

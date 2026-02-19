@@ -3,6 +3,7 @@ using DtPipe.Adapters.DuckDB;
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
 using DtPipe.Tests.Helpers;
@@ -116,7 +117,7 @@ public class E2EIntegrationTests : IAsyncLifetime
 		var pipeline = pipelineBuilder.Build(args);
 		var readerFactory = serviceProvider.GetRequiredService<IStreamReaderFactory>();
 		var writerFactory = serviceProvider.GetRequiredService<IDataWriterFactory>();
-		await exportService.RunExportAsync(options, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory);
+		await exportService.RunExportAsync(new PipelineOptions { BatchSize = options.BatchSize }, options.Provider, options.OutputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
 
 		// 5. Verify Output
 		File.Exists(_outputPath).Should().BeTrue();
@@ -133,7 +134,7 @@ public class E2EIntegrationTests : IAsyncLifetime
 		var firstRow = lines[1].Split(',');
 		var maskedName = firstRow[nameIndex];
 
-		// "Alice" is the original name for ID 1. 
+		// "Alice" is the original name for ID 1.
 		// With Seed 12345, "name.firstname" should produce "Dillie".
 		// Let's just assert it is NOT "Alice"
 		maskedName.Should().NotBe("Alice");
@@ -228,7 +229,7 @@ public class E2EIntegrationTests : IAsyncLifetime
 		var pipeline = pipelineBuilder.Build(args);
 		var readerFactory = serviceProvider.GetRequiredService<IStreamReaderFactory>();
 		var writerFactory = serviceProvider.GetRequiredService<IDataWriterFactory>();
-		await exportService.RunExportAsync(options, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory);
+		await exportService.RunExportAsync(new PipelineOptions { BatchSize = options.BatchSize }, options.Provider, options.OutputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
 
 		// 4. Verify
 		File.Exists(_outputPath).Should().BeTrue();
@@ -339,7 +340,7 @@ public class E2EIntegrationTests : IAsyncLifetime
 		var pipeline = pipelineBuilder.Build(newArgs);
 		var readerFactory = serviceProvider.GetRequiredService<IStreamReaderFactory>();
 		var writerFactory = serviceProvider.GetRequiredService<IDataWriterFactory>();
-		await exportService.RunExportAsync(options, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory);
+		await exportService.RunExportAsync(new PipelineOptions { BatchSize = options.BatchSize }, options.Provider, options.OutputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
 
 		// 5. Verify Output
 		var lines = await File.ReadAllLinesAsync(_outputPath, TestContext.Current.CancellationToken);

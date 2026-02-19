@@ -1,4 +1,3 @@
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -17,7 +16,7 @@ public class SqlServerWriterDescriptor : IProviderDescriptor<IDataWriter>
 		return connectionString.StartsWith("mssql:", StringComparison.OrdinalIgnoreCase);
 	}
 
-	public IDataWriter Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
+	public IDataWriter Create(string connectionString, object options, IServiceProvider serviceProvider)
 	{
 		var sqlOptions = (SqlServerWriterOptions)options;
 		var logger = serviceProvider.GetRequiredService<ILogger<SqlServerDataWriter>>();

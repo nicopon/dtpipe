@@ -7,7 +7,7 @@ namespace DtPipe.Tests;
 /// Tests in this collection run sequentially to avoid Docker resource conflicts.
 /// </summary>
 [CollectionDefinition("Docker Integration Tests", DisableParallelization = true)]
-public class DockerIntegrationTestsCollection
+public class DockerIntegrationTestsCollection : ICollectionFixture<Fixtures.GlobalDatabaseFixture>
 {
 	// This class has no code, and is never created. Its purpose is simply
 	// to be the place to apply [CollectionDefinition] and all the

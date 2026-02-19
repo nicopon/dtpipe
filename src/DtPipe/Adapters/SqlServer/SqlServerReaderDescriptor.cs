@@ -1,7 +1,4 @@
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Models;
-using DtPipe.Core.Options;
 
 namespace DtPipe.Adapters.SqlServer;
 
@@ -18,12 +15,12 @@ public class SqlServerReaderDescriptor : IProviderDescriptor<IStreamReader>
 		return SqlServerConnectionHelper.CanHandle(connectionString);
 	}
 
-	public IStreamReader Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
+	public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
 	{
 		return new SqlServerStreamReader(
 			SqlServerConnectionHelper.GetConnectionString(connectionString),
-			context.Query!,
+			((SqlServerReaderOptions)options).Query!, // Query is set by CliStreamReaderFactory
 			(SqlServerReaderOptions)options,
-			context.QueryTimeout);
+			0);    // Timeout will be set similarly
 	}
 }

@@ -1,4 +1,4 @@
-using DtPipe.Cli.Attributes;
+using DtPipe.Core.Attributes;
 using DtPipe.Core.Options;
 
 namespace DtPipe.Adapters.Sqlite;
@@ -13,11 +13,11 @@ public enum SqliteWriteStrategy
 	Ignore
 }
 
-public class SqliteWriterOptions : IOptionSet
+public class SqliteWriterOptions : IOptionSet, IKeyAwareOptions
 {
 	public static string Prefix => "sqlite";
 	public static string DisplayName => "SQLite Writer";
-	public string? Key { get; init; }
+	public string? Key { get; set; }
 
 	[CliOption(Description = "Target table name", Hidden = true)]
 	public string Table { get; set; } = "export";

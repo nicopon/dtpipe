@@ -1,7 +1,4 @@
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Models;
-using DtPipe.Core.Options;
 
 namespace DtPipe.Adapters.DuckDB;
 
@@ -18,7 +15,7 @@ public class DuckDbReaderDescriptor : IProviderDescriptor<IStreamReader>
 		return DuckDbConnectionHelper.CanHandle(connectionString);
 	}
 
-	public IStreamReader Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
+	public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
 	{
 		var finalConnectionString = connectionString;
 
@@ -28,10 +25,11 @@ public class DuckDbReaderDescriptor : IProviderDescriptor<IStreamReader>
 			finalConnectionString = $"Data Source={finalConnectionString}";
 		}
 
+		var duckOptions = (DuckDbReaderOptions)options;
 		return new DuckDataSourceReader(
 			finalConnectionString,
-			context.Query!,
-			(DuckDbReaderOptions)options,
-			context.QueryTimeout);
+			duckOptions.Query!, // Query is now populated by factory if available
+			duckOptions,
+			0);    // Timeout will be set similarly
 	}
 }

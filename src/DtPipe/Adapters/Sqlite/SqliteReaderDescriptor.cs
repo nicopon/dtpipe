@@ -1,7 +1,4 @@
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Models;
-using DtPipe.Core.Options;
 
 namespace DtPipe.Adapters.Sqlite;
 
@@ -9,7 +6,7 @@ public class SqliteReaderDescriptor : IProviderDescriptor<IStreamReader>
 {
 	public string ProviderName => "sqlite";
 
-	public Type OptionsType => typeof(EmptyOptions);
+	public Type OptionsType => typeof(SqliteReaderOptions);
 
 	public bool RequiresQuery => true;
 
@@ -18,13 +15,14 @@ public class SqliteReaderDescriptor : IProviderDescriptor<IStreamReader>
 		return SqliteConnectionHelper.CanHandle(connectionString);
 	}
 
-	public IStreamReader Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
+	public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
 	{
 		var connStr = SqliteConnectionHelper.ToDataSourceConnectionString(connectionString);
+		var readerOptions = (SqliteReaderOptions)options;
 
 		return new SqliteStreamReader(
 			connStr,
-			context.Query!,
-			context.QueryTimeout);
+			readerOptions.Query!, // Query is set by CliStreamReaderFactory
+			0);    // Timeout will be set similarly
 	}
 }

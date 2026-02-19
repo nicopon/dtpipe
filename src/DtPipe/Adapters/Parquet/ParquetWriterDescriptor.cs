@@ -1,7 +1,4 @@
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Models;
-using DtPipe.Core.Options;
 
 namespace DtPipe.Adapters.Parquet;
 
@@ -18,7 +15,7 @@ public class ParquetWriterDescriptor : IProviderDescriptor<IDataWriter>
 		return connectionString.EndsWith(".parquet", StringComparison.OrdinalIgnoreCase);
 	}
 
-	public IDataWriter Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
+	public IDataWriter Create(string connectionString, object options, IServiceProvider serviceProvider)
 	{
 		return new ParquetDataWriter(connectionString);
 	}

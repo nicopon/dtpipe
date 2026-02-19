@@ -1,15 +1,20 @@
+using DtPipe.Core.Options;
+
 namespace DtPipe.Configuration;
 
 /// <summary>
 /// Export configuration options.
 /// </summary>
-public sealed record DumpOptions
+public sealed record DumpOptions : IOptionSet
 {
 	// --- General Options ---
 	public string Provider { get; init; } = "oracle";
-	public required string ConnectionString { get; init; }
-	public required string? Query { get; init; }
-	public required string OutputPath { get; init; }
+	public string ConnectionString { get; init; } = "";
+	public string? Query { get; init; } = "";
+	public string OutputPath { get; init; } = "";
+
+	public static string Prefix => "global";
+	public static string DisplayName => "Global Options";
 
 	// --- Generic Write Options ---
 	public string? Strategy { get; init; }

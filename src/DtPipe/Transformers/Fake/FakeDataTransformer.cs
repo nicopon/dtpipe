@@ -102,7 +102,10 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
 		for (var i = 0; i < columns.Count; i++)
 		{
 			var colName = columns[i].Name;
-			if (!_parser.Mappings.TryGetValue(colName, out var fakerPath)) continue;
+			if (!_parser.Mappings.TryGetValue(colName, out var fakerPath))
+			{
+				continue;
+			}
 
 			if (FakeMappingParser.IsTemplate(fakerPath))
 			{

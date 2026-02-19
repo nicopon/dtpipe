@@ -11,9 +11,6 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Oracle.ManagedDataAccess.Client;
-using Testcontainers.MsSql;
-using Testcontainers.Oracle;
-using Testcontainers.PostgreSql;
 using Xunit;
 using FluentAssertions;
 using System.Security.Cryptography;
@@ -31,42 +28,28 @@ public class UniversalQuotingTests : IAsyncLifetime
     private string _sqlitePath = "";
     private string SqliteConn => $"Data Source={_sqlitePath}";
 
-    private PostgreSqlContainer? _postgresContainer;
-    private MsSqlContainer? _sqlServerContainer;
-    private OracleContainer? _oracleContainer;
+    private readonly DtPipe.Tests.Fixtures.GlobalDatabaseFixture _fixture;
+
+    public UniversalQuotingTests(DtPipe.Tests.Fixtures.GlobalDatabaseFixture fixture)
+    {
+        _fixture = fixture;
+    }
 
     public async ValueTask InitializeAsync()
     {
         _sqlitePath = Path.Combine(Path.GetTempPath(), $"quoting_test_{Guid.NewGuid()}.db");
 
-        _postgresConn = await DockerHelper.GetPostgreSqlConnectionString(async () =>
-        {
-            _postgresContainer = new PostgreSqlBuilder("postgres:15-alpine").Build();
-            await _postgresContainer.StartAsync();
-            return _postgresContainer.GetConnectionString();
-        });
+        _postgresConn = _fixture.PostgresConnectionString;
+        _sqlServerConn = _fixture.SqlServerConnectionString;
+        _oracleConn = _fixture.OracleConnectionString;
 
-        _sqlServerConn = await DockerHelper.GetSqlServerConnectionString(async () =>
-        {
-            _sqlServerContainer = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest").Build();
-            await _sqlServerContainer.StartAsync();
-            return _sqlServerContainer.GetConnectionString();
-        });
-
-        _oracleConn = await DockerHelper.GetOracleConnectionString(async () =>
-        {
-            _oracleContainer = new OracleBuilder("gvenzl/oracle-xe:21-slim-faststart").Build();
-            await _oracleContainer.StartAsync();
-            return _oracleContainer.GetConnectionString();
-        });
+        await Task.CompletedTask;
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         if (File.Exists(_sqlitePath)) try { File.Delete(_sqlitePath); } catch { }
-        if (_postgresContainer != null) await _postgresContainer.DisposeAsync();
-        if (_sqlServerContainer != null) await _sqlServerContainer.DisposeAsync();
-        if (_oracleContainer != null) await _oracleContainer.DisposeAsync();
+        return ValueTask.CompletedTask;
     }
 
     public record QuotingScenario(

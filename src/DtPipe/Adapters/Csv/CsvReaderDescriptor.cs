@@ -1,7 +1,4 @@
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Models;
-using DtPipe.Core.Options;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -24,7 +21,7 @@ public class CsvReaderDescriptor : IProviderDescriptor<IStreamReader>
 		return connectionString.EndsWith(".csv", StringComparison.OrdinalIgnoreCase);
 	}
 
-	public IStreamReader Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
+	public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
 	{
 		var filePath = connectionString;
 		var logger = serviceProvider.GetService<ILogger<CsvStreamReader>>();

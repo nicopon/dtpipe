@@ -1,7 +1,4 @@
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Models;
-using DtPipe.Core.Options;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -20,7 +17,7 @@ public class OracleWriterDescriptor : IProviderDescriptor<IDataWriter>
 		return OracleConnectionHelper.CanHandle(connectionString);
 	}
 
-	public IDataWriter Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
+	public IDataWriter Create(string connectionString, object options, IServiceProvider serviceProvider)
 	{
 		var loggerFactory = serviceProvider.GetRequiredService<ILoggerFactory>();
 		return new OracleDataWriter(connectionString, (OracleWriterOptions)options, loggerFactory.CreateLogger<OracleDataWriter>(), OracleTypeConverter.Instance);

@@ -1,7 +1,4 @@
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Models;
-using DtPipe.Core.Options;
 
 namespace DtPipe.Adapters.PostgreSQL;
 
@@ -9,7 +6,7 @@ public class PostgreSqlReaderDescriptor : IProviderDescriptor<IStreamReader>
 {
 	public string ProviderName => PostgreSqlConstants.ProviderName;
 
-	public Type OptionsType => typeof(EmptyOptions);
+	public Type OptionsType => typeof(PostgreSqlReaderOptions);
 
 	public bool RequiresQuery => true;
 
@@ -18,12 +15,13 @@ public class PostgreSqlReaderDescriptor : IProviderDescriptor<IStreamReader>
 		return PostgreSqlConnectionHelper.CanHandle(connectionString);
 	}
 
-	public IStreamReader Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
+	public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
 	{
+		var readerOptions = (PostgreSqlReaderOptions)options;
 		return new PostgreSqlReader(
 			PostgreSqlConnectionHelper.GetConnectionString(connectionString),
-			context.Query!,
-			context.QueryTimeout
+			readerOptions.Query!, // Query is set by CliStreamReaderFactory
+			0      // Timeout will be set similarly
 		);
 	}
 }

@@ -55,3 +55,21 @@ public interface IWriterOptions : IOptionSet { }
 /// Options specific to a data transformer (Faker, etc.).
 /// </summary>
 public interface ITransformerOptions : IOptionSet { }
+
+/// <summary>
+/// Implemented by reader options that accept a SQL query.
+/// Allows CliStreamReaderFactory to propagate the global --query without reflection.
+/// </summary>
+public interface IQueryAwareOptions
+{
+	string? Query { get; set; }
+}
+
+/// <summary>
+/// Implemented by writer options that accept a keyring alias.
+/// Allows JobService to propagate the global --key without reflection.
+/// </summary>
+public interface IKeyAwareOptions
+{
+	string? Key { get; set; }
+}

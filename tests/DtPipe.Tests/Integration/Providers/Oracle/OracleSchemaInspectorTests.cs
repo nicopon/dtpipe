@@ -5,7 +5,6 @@ using DtPipe.Core.Validation;
 using DtPipe.Tests.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Oracle.ManagedDataAccess.Client;
-using Testcontainers.Oracle;
 using Xunit;
 
 namespace DtPipe.Tests;
@@ -14,35 +13,28 @@ namespace DtPipe.Tests;
 [Collection("Docker Integration Tests")]
 public class OracleSchemaInspectorTests : IAsyncLifetime
 {
-	private OracleContainer? _oracle;
+	private readonly DtPipe.Tests.Fixtures.GlobalDatabaseFixture _fixture;
+	private string? _connectionString;
+
+	public OracleSchemaInspectorTests(DtPipe.Tests.Fixtures.GlobalDatabaseFixture fixture)
+	{
+		_fixture = fixture;
+	}
 
 	public async ValueTask InitializeAsync()
 	{
-		if (!DockerHelper.IsAvailable()) return;
-
-		try
-		{
-			_oracle = new OracleBuilder("gvenzl/oracle-xe:21-slim-faststart")
-				.Build();
-			await _oracle.StartAsync();
-		}
-		catch (Exception)
-		{
-			_oracle = null;
-		}
+		_connectionString = _fixture.OracleConnectionString;
+		await Task.CompletedTask;
 	}
 
-	public async ValueTask DisposeAsync()
+	public ValueTask DisposeAsync()
 	{
-		if (_oracle is not null)
-		{
-			await _oracle.DisposeAsync();
-		}
+		return ValueTask.CompletedTask;
 	}
 
 	private string GetConnectionString()
 	{
-		return _oracle!.GetConnectionString();
+		return _connectionString!;
 	}
 
 	private async Task ExecuteSql(string sql)
@@ -59,7 +51,7 @@ public class OracleSchemaInspectorTests : IAsyncLifetime
 	[Fact]
 	public async Task Oracle_InspectTargetAsync_WhenTableDoesNotExist_ReturnsNotExists()
 	{
-		if (!DockerHelper.IsAvailable() || _oracle is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
 		var options = new OracleWriterOptions { Table = "NON_EXISTENT" };
 
@@ -78,7 +70,7 @@ public class OracleSchemaInspectorTests : IAsyncLifetime
 	[Fact]
 	public async Task Oracle_InspectTargetAsync_DetectsColumnsAndTypes()
 	{
-		if (!DockerHelper.IsAvailable() || _oracle is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
 		// Oracle creates tables in UPPERCASE by default unless quoted
 		await ExecuteSql(@"
@@ -125,7 +117,7 @@ public class OracleSchemaInspectorTests : IAsyncLifetime
 	[Fact]
 	public async Task Oracle_SchemaCompatibility_CompatibleSchema()
 	{
-		if (!DockerHelper.IsAvailable() || _oracle is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
 		await ExecuteSql("CREATE TABLE COMPAT_TEST (ID NUMBER(10), NAME VARCHAR2(50))");
 
@@ -150,7 +142,7 @@ public class OracleSchemaInspectorTests : IAsyncLifetime
 	[Fact]
 	public async Task Oracle_SchemaCompatibility_MissingColumn()
 	{
-		if (!DockerHelper.IsAvailable() || _oracle is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
 		await ExecuteSql("CREATE TABLE MISSING_TEST (ID NUMBER(10))");
 

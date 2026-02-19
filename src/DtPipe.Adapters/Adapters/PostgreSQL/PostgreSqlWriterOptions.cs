@@ -1,13 +1,13 @@
-using DtPipe.Cli.Attributes;
+using DtPipe.Core.Attributes;
 using DtPipe.Core.Options;
 
 namespace DtPipe.Adapters.PostgreSQL;
 
-public class PostgreSqlWriterOptions : IWriterOptions
+public class PostgreSqlWriterOptions : IWriterOptions, IKeyAwareOptions
 {
 	public static string Prefix => PostgreSqlConstants.ProviderName;
 	public static string DisplayName => "PostgreSQL Writer Options";
-	public string? Key { get; init; }
+	public string? Key { get; set; }
 
 	// Writer Options
 	[CliOption(Description = "Target table name", Hidden = true)]

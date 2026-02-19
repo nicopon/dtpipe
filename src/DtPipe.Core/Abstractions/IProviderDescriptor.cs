@@ -1,10 +1,9 @@
-using DtPipe.Configuration;
 using DtPipe.Core.Options;
 
 namespace DtPipe.Core.Abstractions;
 
 /// <summary>
-/// Pure metadata descriptor for a data provider. 
+/// Pure metadata descriptor for a data provider.
 /// Decoupled from CLI concerns.
 /// </summary>
 /// <typeparam name="TService">The type of service to create (IDataWriter, IStreamReader, etc)</typeparam>
@@ -26,7 +25,6 @@ public interface IProviderDescriptor<out TService>
 	/// </summary>
 	/// <param name="connectionString">The resolved connection string (potentially stripped of prefix).</param>
 	/// <param name="options">The bound options object (of type OptionsType).</param>
-	/// <param name="context">The full DumpOptions context (provides Query, Timeout, etc).</param>
 	/// <param name="serviceProvider">Service provider for resolving dependencies (logger, etc).</param>
-	TService Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider);
+	TService Create(string connectionString, object options, IServiceProvider serviceProvider);
 }

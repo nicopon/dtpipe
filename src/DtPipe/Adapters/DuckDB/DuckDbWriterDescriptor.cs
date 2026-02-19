@@ -1,4 +1,3 @@
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -18,7 +17,7 @@ public class DuckDbWriterDescriptor : IProviderDescriptor<IDataWriter>
 		return DuckDbConnectionHelper.CanHandle(connectionString);
 	}
 
-	public IDataWriter Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
+	public IDataWriter Create(string connectionString, object options, IServiceProvider serviceProvider)
 	{
 		var duckOptions = (DuckDbWriterOptions)options;
 

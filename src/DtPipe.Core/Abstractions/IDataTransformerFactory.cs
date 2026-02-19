@@ -1,10 +1,10 @@
-using DtPipe.Cli.Abstractions;
-using DtPipe.Configuration;
 using DtPipe.Core.Options;
+using DtPipe.Core.Pipelines;
 
 namespace DtPipe.Core.Abstractions;
 
-public interface IDataTransformerFactory : ICliContributor
+
+public interface IDataTransformerFactory : IDataFactory
 {
 	/// <summary>
 	/// Transformer type identifier for YAML matching and CLI prefix.
@@ -12,11 +12,7 @@ public interface IDataTransformerFactory : ICliContributor
 	/// </summary>
 	string TransformerType { get; }
 
-	/// <summary>
-	/// Creates a transformer instance from a global options context.
-	/// This is legacy/unordered mode where options are pre-parsed into the registry.
-	/// </summary>
-	IDataTransformer? Create(DumpOptions options);
+	// Create(DumpOptions) removed as legacy
 
 	/// <summary>
 	/// Creates a transformer instance from specific configuration values.

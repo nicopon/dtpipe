@@ -1,7 +1,4 @@
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Models;
-using DtPipe.Core.Options;
 
 namespace DtPipe.Adapters.Oracle;
 
@@ -18,12 +15,14 @@ public class OracleReaderDescriptor : IProviderDescriptor<IStreamReader>
 		return OracleConnectionHelper.CanHandle(connectionString);
 	}
 
-	public IStreamReader Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
+	public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
 	{
+		var readerOptions = (OracleReaderOptions)options;
 		return new OracleStreamReader(
 			OracleConnectionHelper.GetConnectionString(connectionString),
-			context.Query!,
-			(OracleReaderOptions)options,
-			context.QueryTimeout);
+			readerOptions.Query!, // Query is set by CliStreamReaderFactory
+			readerOptions,
+			0      // Timeout will be set similarly
+		);
 	}
 }

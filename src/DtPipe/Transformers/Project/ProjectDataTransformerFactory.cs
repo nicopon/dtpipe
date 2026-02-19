@@ -1,21 +1,19 @@
 using System.CommandLine;
-using System.CommandLine.Parsing;
 using DtPipe.Cli;
 using DtPipe.Cli.Abstractions;
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Options;
+using DtPipe.Core.Pipelines;
 
 namespace DtPipe.Transformers.Project;
 
-public class ProjectDataTransformerFactory : IDataTransformerFactory
+public class ProjectDataTransformerFactory(OptionsRegistry registry) : IDataTransformerFactory, ICliContributor
 {
-	private readonly OptionsRegistry _registry;
+	private readonly OptionsRegistry _registry = registry;
 
-	public ProjectDataTransformerFactory(OptionsRegistry registry)
-	{
-		_registry = registry;
-	}
+	public string ProviderName => TransformerType;
+
+	public bool CanHandle(string connectionString) => false;
 
 	public static IEnumerable<Type> GetSupportedOptionTypes()
 	{
@@ -44,18 +42,8 @@ public class ProjectDataTransformerFactory : IDataTransformerFactory
 		}
 	}
 
-	public IDataTransformer? Create(DumpOptions options)
-	{
-		var projectOptions = _registry.Get<ProjectOptions>();
+	// Create(DumpOptions) removed
 
-		// Return null if no projection configured
-		if (string.IsNullOrWhiteSpace(projectOptions.Project) && string.IsNullOrWhiteSpace(projectOptions.Drop))
-		{
-			return null;
-		}
-
-		return new ProjectDataTransformer(projectOptions);
-	}
 
 	public IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration)
 	{
