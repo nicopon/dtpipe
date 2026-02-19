@@ -8,4 +8,5 @@ public record GenerateReaderOptions : IProviderOptions
 	public static string DisplayName => "Data Generator";
 
 	public long RowCount { get; set; } = 100;
+	public int? RowsPerSecond { get; set; }
 }

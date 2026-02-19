@@ -117,10 +117,17 @@ public abstract class BaseSqlDataWriter : IDataWriter, ISchemaInspector, IKeyVal
 
 	protected virtual async Task EnsureConnectionOpenAsync(CancellationToken ct)
 	{
+		if (_connection != null && _connection.State != ConnectionState.Open)
+		{
+			_connection.Dispose();
+			_connection = null;
+		}
+
 		if (_connection == null)
 		{
 			_connection = CreateConnection(_connectionString);
 		}
+
 		if (_connection.State != ConnectionState.Open)
 		{
 			if (_connection is System.Data.Common.DbConnection dbConn)

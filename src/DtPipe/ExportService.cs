@@ -51,9 +51,12 @@ public class ExportService
 
 		_observer.ShowConnectionStatus(false, null);
 
+		// Initialize RetryPolicy early to cover setup phase
+		var retryPolicy = new RetryPolicy(options.MaxRetries, TimeSpan.FromMilliseconds(options.RetryDelayMs), _logger);
+
 		await using var reader = readerFactory.Create(options);
 
-		await reader.OpenAsync(ct);
+		await retryPolicy.ExecuteAsync(() => reader.OpenAsync(ct), ct);
 
 		_observer.ShowConnectionStatus(true, reader.Columns?.Count);
 
@@ -107,10 +110,10 @@ public class ExportService
 		// Execute Pre-Hook
 		await ExecuteHookAsync(writer, "Pre-Hook", options.PreExec, ct);
 
-		await writer.InitializeAsync(exportableSchema, ct);
+		await retryPolicy.ExecuteValueAsync(() => writer.InitializeAsync(exportableSchema, ct), ct);
 
 		// Schema Validation
-		await ValidateAndMigrateSchemaAsync(writer, exportableSchema, options, ct);
+		await retryPolicy.ExecuteAsync(() => ValidateAndMigrateSchemaAsync(writer, exportableSchema, options, ct), ct);
 
 		// Bounded Channels
 		// Reader to Transform remains row-level because transformers work row-by-row
@@ -143,7 +146,6 @@ public class ExportService
 		{
 			// Run Concurrent Pipeline
 			var startTime = DateTime.UtcNow;
-			var retryPolicy = new RetryPolicy(options.MaxRetries, TimeSpan.FromMilliseconds(options.RetryDelayMs), _logger);
 
 			var producerTask = ProduceRowsAsync(reader, readerToTransform.Writer, options.BatchSize, options.Limit, options.SamplingRate, options.SamplingSeed, progress, linkedCts, effectiveCt, retryPolicy, _logger);
 			var transformTask = TransformRowsAsync(readerToTransform.Reader, transformToWriter.Writer, pipeline, options.BatchSize, progress, effectiveCt);
