@@ -169,7 +169,7 @@ dtpipe ... \
 If you swap the order, the `Greeting` would contain the *original* name, because formatting would happen before faking.
 
 ### Javascript Scripting
-Use `--script` for complex logic.
+Use `--compute` for complex logic.
 
 **Syntax Rules:**
 1.  **Implicit Return**: If your script is a single expression without a semicolon, it is automatically returned.
@@ -186,8 +186,14 @@ Use `--script` for complex logic.
 ./dtpipe ... \
    --compute "Category:if (row.Age < 18) return 'Minor'; else return 'Adult';"
 
+# Create a NEW column (virtual column)
+./dtpipe ... --compute "FullName:row.FirstName + ' ' + row.LastName"
+```
+
+> **Tip:** If the column name doesn't exist in the input, `--compute` creates it as a new virtual column. Use `--compute-types "Col:type"` to set its CLR type (default: `string`).
+
 ### 4. Generating Test Data
-Use the `generate:<count>` provider to generate rows on-the-fly. By default, it only generates a `SampleIndex` column (useful for seeding). Combine it with `--fake` for rich datasets.
+Use the `generate:<count>` provider to generate rows on-the-fly. By default, it only generates a `GenerateIndex` column (useful for seeding). Combine it with `--fake` for rich datasets.
 
 ```bash
 # Generate 1M rows of fake users
@@ -195,10 +201,10 @@ Use the `generate:<count>` provider to generate rows on-the-fly. By default, it 
   --fake "Id:random.number" \
   --fake "Name:name.fullName" \
   --fake "Email:internet.email" \
-  --drop "SampleIndex" \
+  --drop "GenerateIndex" \
   -o users.csv
 ```
-> **Tip:** Use `--drop "SampleIndex"` if you don't want the sequence index in your final output.
+> **Tip:** Use `--drop "GenerateIndex"` if you don't want the sequence index in your final output.
 
 ### 5. Random Sampling
 Use `--sampling-rate [0-1]` to export only a subset of your data. This works with any provider.
@@ -215,6 +221,8 @@ This ensures that the **same subset of rows** is selected for the same input dat
 ```bash
 # Always get the same 10% subset
 dtpipe ... --sampling-rate 0.1 --sampling-seed 12345 ...
+
+```
 
 ### Filtering Data
 Use `--filter` to drop rows that don't match a JavaScript condition.

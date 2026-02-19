@@ -75,7 +75,6 @@ public class CliDataWriterFactory : CliProviderFactory<IDataWriter>, IDataWriter
 		// Resolve the specific options object from registry
 		var specificOptions = registry.Get(_descriptor.OptionsType);
 
-		// We need the OutputPath. In Option 3, it should be in registry.
 		// For now, it's globally in DumpOptions, but we want to move away.
 		// CliProviderFactory depends on Cli, so it's okay to know about DumpOptions for a transition,
 		// but IDataWriterFactory (the interface) must NOT.

@@ -10,7 +10,7 @@ public class DuckDbDialect : BaseSqlDialect
 	public override string Normalize(string identifier)
 	{
 		// DuckDB is generally case-insensitive for unquoted SQL identifiers.
-		// We will treat it like SQLite/SQLServer: Check for keywords/special chars.
+		// Treated like SQLite/SQLServer: Check for keywords/special chars.
 		return identifier;
 	}
 

@@ -59,7 +59,21 @@ public class OverwriteDataTransformer : IDataTransformer, IRequiresOptions<Overw
 		}
 
 		_columnValues = values;
-		return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
+
+		var outputColumns = new List<PipeColumnInfo>(columns.Count);
+		for (var i = 0; i < columns.Count; i++)
+		{
+			if (values[i] != null)
+			{
+				outputColumns.Add(columns[i] with { ClrType = typeof(string) });
+			}
+			else
+			{
+				outputColumns.Add(columns[i]);
+			}
+		}
+
+		return new ValueTask<IReadOnlyList<PipeColumnInfo>>(outputColumns);
 	}
 
 	public object?[]? Transform(object?[] row)

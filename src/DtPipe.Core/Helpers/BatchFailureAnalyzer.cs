@@ -23,7 +23,7 @@ public static class BatchFailureAnalyzer
 			}
 
 			// 2. Build Mapping: Source Index -> Target Column Info (By Name)
-			// We assume name-based mapping is the standard for safety.
+			// Assume name-based mapping is the standard for safety.
 			var columnMap = new TargetColumnInfo?[sourceColumns.Count];
 			for (int i = 0; i < sourceColumns.Count; i++)
 			{
@@ -46,7 +46,7 @@ public static class BatchFailureAnalyzer
 					{
 						// Column exists in source but not in target. 
 						// Usually handled by ignoring or erroring depending on provider.
-						// We skip analysis for it.
+						// Skip analysis.
 						continue;
 					}
 

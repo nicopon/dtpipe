@@ -69,7 +69,7 @@ DtPipe auto-detects providers from file extensions (`.csv`, `.parquet`, `.duckdb
 | **SQL Server**| `mssql:` | `mssql:Server=.;Database=mydb` |
 | **CSV** | `csv:` / `.csv` | `data.csv` |
 | **Parquet** | `parquet:` / `.parquet`| `data.parquet` |
-| **Data Gen** | `generate:` | `generate:1000000` (generate `SampleIndex` column) |
+| **Data Gen** | `generate:` | `generate:1000000` (generates `GenerateIndex` column) |
 | **Keyring** | `keyring://` | `keyring://my-prod-db` |
 | **STDIN/OUT** | `csv` or `parquet` | `csv` (no file path) |
 
@@ -119,7 +119,7 @@ Use `--fake "Col:Generator"` to replace sensitive data.
 | `--null "[Col]"` | Force column to NULL. |
 | `--overwrite "[Col]:[Val]"`| Set column to fixed value. |
 | `--format "[Col]:[Fmt]"` | Apply .NET format string. |
-| `--compute "[Col]:[JS]"` | Apply Javascript logic on the `row` object. Supports inline code or file paths (`@file.js`). Example: `TITLE:row.TITLE.substring(0,5)` |
+| `--compute "[Col]:[JS]"` | Apply Javascript logic on the `row` object. If `[Col]` doesn't exist, it is created as a **new virtual column**. Supports inline code or file paths (`@file.js`). Example: `TITLE:row.TITLE.substring(0,5)` |
 | `--filter "[JS]"` | Drop rows based on JS logic (must return true/false). |
 | `--expand "[JS]"` | Multi-row expansion. JS expression returning an array. |
 | `--window-count [N]` | Accumulate rows in a window of size N. |

@@ -58,7 +58,7 @@ public class WindowDataTransformerFactory : IDataTransformerFactory, ICliContrib
 		// This is used for pipeline string configuration e.g. "window:count=100;script='...'"
 		// But current architecture uses options registry for typed options?
 		// Actually, CreateFromConfiguration is likely used by PipelineBuilder when parsing --pipeline "transform1:args...".
-		// We need to parse 'Value' into WindowOptions.
+		// Parse 'Value' into WindowOptions.
 
 		var options = new WindowOptions();
 

@@ -127,7 +127,7 @@ public class ExportService
 		});
 
 		// Transform to Writer becomes batch-level to reduce channel overhead
-		// We reduce capacity because each item is now a batch of ~BatchSize rows
+		// Reduce capacity because each item is now a batch of ~BatchSize rows.
 		var transformToWriter = Channel.CreateBounded<object?[][]>(new BoundedChannelOptions(100)
 		{
 			SingleWriter = true,
@@ -325,7 +325,7 @@ public class ExportService
         long rowCount = 0;
         try
         {
-            // Note: We don't wrap the entire foreach because ReadBatchesAsync is an IAsyncEnumerable.
+            // ReadBatchesAsync is an IAsyncEnumerable, so we don't wrap the entire foreach.
             // If we wanted to retry the whole stream, we'd need to reopen the reader.
             // However, individual batch reads could be retried IF the reader supported it inside,
             // but here we just wrap the loop if possible, or better, we wrap the WriteAsync if needed.

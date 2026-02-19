@@ -11,7 +11,8 @@ public record DryRunResult(
 	string? SchemaInspectionError,
 	ISqlDialect? Dialect = null,
 	KeyValidationResult? KeyValidation = null,
-	ConstraintValidationResult? ConstraintValidation = null
+	ConstraintValidationResult? ConstraintValidation = null,
+	IReadOnlyDictionary<string, string>? PerformanceHints = null
 );
 
 /// <summary>
@@ -44,6 +45,7 @@ public class DryRunAnalyzer
 
 		// 2. Process data samples through pipeline
 		var samples = new List<SampleTrace>();
+		var typeObserver = new DynamicTypeObserver();
 		int collected = 0;
 		int batchLimit = Math.Min(sampleCount, DefaultSampleLimit);
 
@@ -52,7 +54,7 @@ public class DryRunAnalyzer
 			for (int i = 0; i < batch.Length && collected < sampleCount; i++)
 			{
 				var row = batch.Span[i].ToArray();
-				samples.Add(ProcessRowThroughPipeline(row, pipeline, traceSchemas));
+				samples.Add(ProcessRowThroughPipeline(row, pipeline, traceSchemas, typeObserver));
 				collected++;
 			}
 			if (collected >= sampleCount) break;
@@ -99,7 +101,9 @@ public class DryRunAnalyzer
 			keyValidation = ValidatePrimaryKeys(keyValidator, traceSchemas.Last(), null, dialect);
 		}
 
-		return new DryRunResult(samples, stepNames, compatibilityReport, schemaInspectionError, dialect, keyValidation, constraintValidation);
+		var performanceHints = typeObserver.GenerateHints();
+
+		return new DryRunResult(samples, stepNames, compatibilityReport, schemaInspectionError, dialect, keyValidation, constraintValidation, performanceHints);
 	}
 
 	private ConstraintValidationResult ValidateDataConstraints(List<SampleTrace> samples, TargetSchemaInfo targetInfo, ISqlDialect? dialect)
@@ -198,7 +202,7 @@ public class DryRunAnalyzer
 		return new KeyValidationResult(true, requestedKeys, resolvedKeys, null, null, null);
 	}
 
-	private SampleTrace ProcessRowThroughPipeline(object?[] inputRow, List<IDataTransformer> pipeline, List<IReadOnlyList<PipeColumnInfo>> traceSchemas)
+	private SampleTrace ProcessRowThroughPipeline(object?[] inputRow, List<IDataTransformer> pipeline, List<IReadOnlyList<PipeColumnInfo>> traceSchemas, DynamicTypeObserver typeObserver)
 	{
 		var stages = new List<StageTrace>();
 		var currentRow = (object?[])inputRow.Clone();
@@ -216,6 +220,9 @@ public class DryRunAnalyzer
 				break;
 			}
 			stages.Add(new StageTrace(schema, (object?[])currentRow.Clone()));
+
+			// Let the observer track runtime types
+			typeObserver.ObserveRow(schema, currentRow);
 		}
 
 		return new SampleTrace(stages);

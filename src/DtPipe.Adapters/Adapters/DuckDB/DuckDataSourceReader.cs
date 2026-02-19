@@ -18,7 +18,7 @@ public sealed partial class DuckDataSourceReader : IStreamReader, IRequiresOptio
 	public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
 
 	// DDL/DML keywords to reject
-	// We block destructive commands
+	// Block destructive commands.
 	private static readonly string[] DdlKeywords =
 	{
 		"CREATE", "DROP", "ALTER", "TRUNCATE", "RENAME",

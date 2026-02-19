@@ -604,7 +604,7 @@ public class JobService
 		}
 
 		// 2. Check for sample: prefix in -i/--input
-		// We look for any argument that starts with sample:
+		// Identify any argument starting with sample:
 		// However, to be more precise, we should check if it follows -i or --input
 		for (int i = 0; i < args.Length; i++)
 		{

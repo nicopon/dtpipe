@@ -2,6 +2,7 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Core.Services;
+using DtPipe.Core.Helpers;
 using Jint;
 using Jint.Native;
 
@@ -53,7 +54,21 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<Expa
 			_compiledExpands.Add(new JsString(funcName));
 		}
 
-		return ValueTask.FromResult(sourceColumns);
+		var updatedColumns = new List<PipeColumnInfo>(sourceColumns);
+		foreach (var (col, typeStr) in _options.ExpandTypes)
+		{
+			var type = TypeHelper.ParseTypeHint(typeStr);
+			if (type != null)
+			{
+				var idx = updatedColumns.FindIndex(c => c.Name.Equals(col, StringComparison.OrdinalIgnoreCase));
+				if (idx >= 0)
+				{
+					updatedColumns[idx] = updatedColumns[idx] with { ClrType = type };
+				}
+			}
+		}
+
+		return ValueTask.FromResult<IReadOnlyList<PipeColumnInfo>>(updatedColumns);
 	}
 
 	// Required by IDataTransformer (base interface)
@@ -130,18 +145,14 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<Expa
 								for (int c = 0; c < _columnNames.Length; c++)
 								{
 									var val = obj.Get(_columnNames[c]);
-									if (val.IsUndefined())
+									if (val.IsUndefined() || val.IsNull())
 									{
 										newRow[c] = null;
 									}
 									else
 									{
-										// Convert JsValue to primitive
-										if (val.IsString()) newRow[c] = val.AsString();
-										else if (val.IsNumber()) newRow[c] = val.AsNumber();
-										else if (val.IsBoolean()) newRow[c] = val.AsBoolean();
-										else if (val.IsNull()) newRow[c] = null;
-										else newRow[c] = val.ToString();
+										// Convert JsValue to primitive safely via ToObject()
+										newRow[c] = val.ToObject();
 									}
 								}
 								nextRows.Add(newRow);

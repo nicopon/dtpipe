@@ -10,4 +10,6 @@ public class ExpandOptions : IOptionSet
 
 	[CliOption("--expand", Description = "A JavaScript expression that returns an array of rows. Each element becomes a new row.")]
 	public string[]? Expand { get; set; }
+
+	public Dictionary<string, string> ExpandTypes { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 }

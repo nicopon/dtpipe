@@ -71,7 +71,6 @@ public class FilterDataTransformer : IDataTransformer, IRequiresOptions<FilterTr
 		var jsRow = new JsObject(engine);
 		for (int i = 0; i < row.Length; i++)
 		{
-			// Note: Optimizing this to reuse object or array would be better, but tricky with Jint
 			jsRow.Set(_columnNames[i], JsValue.FromObject(engine, row[i]));
 		}
 

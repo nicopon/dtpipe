@@ -41,7 +41,7 @@ public sealed class DuckDbDataWriter : BaseSqlDataWriter
 	protected override Task<(string Schema, string Table)> ResolveTargetTableAsync(CancellationToken ct)
 	{
 		// DuckDB usually uses "schema.table" or just "table" (default schema is main)
-		// We do simple parsing if '.' exists, otherwise schema is empty.
+		// Simple parsing if '.' exists, otherwise schema is empty.
 		var parts = _options.Table.Split('.');
 		if (parts.Length == 2)
 		{
@@ -141,9 +141,8 @@ public sealed class DuckDbDataWriter : BaseSqlDataWriter
 		// Better to use parameter? But system tables?
 		// information_schema.tables works standardly.
 
-		// We can reuse InspectTargetAsync but it might be heavy.
 		// Let's use a quick COUNT check.
-		// Note: _options.Table might be "schema.table".
+		// _options.Table might be "schema.table".
 		// information_schema.tables wants table_name and table_schema.
 
 		// Parsing again:
@@ -461,7 +460,7 @@ public sealed class DuckDbDataWriter : BaseSqlDataWriter
 	protected override string GetCreateTableSql(string tableName, IEnumerable<PipeColumnInfo> columns)
 	{
 		var sb = new StringBuilder();
-		// We don't use IF NOT EXISTS here because Base logic might control it,
+		// Do not use IF NOT EXISTS here because Base logic might control it,
 		// BUT for standard Create strategy it relies on this returning the CREATE statement.
 		sb.Append($"CREATE TABLE {tableName} (");
 

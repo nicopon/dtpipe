@@ -1,10 +1,10 @@
-namespace DtPipe.Cli.DryRun;
-
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Validation;
 using DtPipe.DryRun;
 using Spectre.Console;
+
+namespace DtPipe.Cli.DryRun;
 
 /// <summary>
 /// CLI Controller for Dry Run execution.
@@ -117,6 +117,12 @@ public class DryRunCliController
 			}
 		}
 
+		// 3.7. Render Performance Hints
+		if (result.PerformanceHints != null && result.PerformanceHints.Count > 0)
+		{
+			renderer.RenderPerformanceHints(result.PerformanceHints, _console);
+		}
+
 		// 4. Calculate Layout
 		var hasSchemaWarning = !string.IsNullOrEmpty(result.SchemaInspectionError);
 		var targetInfo = result.CompatibilityReport?.TargetInfo;
@@ -157,9 +163,8 @@ public class DryRunCliController
 		var columnMap = new TargetColumnInfo?[schema.Count];
 		var remainingTargetCols = targetInfo.Columns.ToList();
 
-		// We must replicate the matching logic from SchemaCompatibilityAnalyzer to be consistent
-		// Note: SchemaCompatibilityAnalyzer consumes target columns as it matches. 
-		// We should do the same to ensure 1:1 mapping if possible.
+		// Replicate matching logic from SchemaCompatibilityAnalyzer for consistency.
+		// SchemaCompatibilityAnalyzer consumes target columns as it matches.
 		for (int k = 0; k < schema.Count; k++)
 		{
 			var srcCol = schema[k];
