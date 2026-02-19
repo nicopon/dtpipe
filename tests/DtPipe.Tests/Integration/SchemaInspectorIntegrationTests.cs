@@ -5,7 +5,6 @@ using DtPipe.Core.Validation;
 using DtPipe.Tests.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
-using Testcontainers.PostgreSql;
 using Xunit;
 
 namespace DtPipe.Tests;
@@ -14,27 +13,23 @@ namespace DtPipe.Tests;
 [Collection("Docker Integration Tests")]
 public class SchemaInspectorIntegrationTests : IAsyncLifetime
 {
-	private PostgreSqlContainer? _postgres;
+	private readonly DtPipe.Tests.Fixtures.GlobalDatabaseFixture _fixture;
 	private string? _connectionString;
+
+	public SchemaInspectorIntegrationTests(DtPipe.Tests.Fixtures.GlobalDatabaseFixture fixture)
+	{
+		_fixture = fixture;
+	}
 
 	public async ValueTask InitializeAsync()
 	{
-		_connectionString = await DockerHelper.GetPostgreSqlConnectionString(async () =>
-		{
-			_postgres = new PostgreSqlBuilder("postgres:15-alpine").Build();
-			await _postgres.StartAsync();
-			return _postgres.GetConnectionString();
-		});
-		// If GetPostgreSqlConnectionString returns null, it means Docker is not available or container failed to start.
-		// In this case, _postgres would remain null, which is handled by subsequent tests.
+		_connectionString = _fixture.PostgresConnectionString;
+		await Task.CompletedTask;
 	}
 
-	public async ValueTask DisposeAsync()
+	public ValueTask DisposeAsync()
 	{
-		if (_postgres is not null)
-		{
-			await _postgres.DisposeAsync();
-		}
+		return ValueTask.CompletedTask;
 	}
 
 	#region PostgreSQL Schema Inspection Tests

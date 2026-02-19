@@ -215,8 +215,6 @@ This ensures that the **same subset of rows** is selected for the same input dat
 ```bash
 # Always get the same 10% subset
 dtpipe ... --sampling-rate 0.1 --sampling-seed 12345 ...
-```
-```
 
 ### Filtering Data
 Use `--filter` to drop rows that don't match a JavaScript condition.

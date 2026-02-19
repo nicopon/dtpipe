@@ -1,4 +1,4 @@
-using DtPipe.Cli.Attributes;
+using DtPipe.Core.Attributes;
 using DtPipe.Core.Options;
 
 namespace DtPipe.Adapters.SqlServer;
@@ -9,11 +9,11 @@ public enum SqlServerInsertMode
 	Bulk
 }
 
-public record SqlServerWriterOptions : IProviderOptions
+public record SqlServerWriterOptions : IProviderOptions, IKeyAwareOptions
 {
 	public static string Prefix => SqlServerConstants.ProviderName;
 	public static string DisplayName => "SQL Server Writer Options";
-	public string? Key { get; init; }
+	public string? Key { get; set; }
 
 	[CliOption(Description = "Target table name", Hidden = true)]
 	public string Table { get; set; } = "export";

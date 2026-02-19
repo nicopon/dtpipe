@@ -4,6 +4,7 @@ using DtPipe.Adapters.DuckDB;
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
 using DtPipe.Transformers.Fake;
@@ -133,7 +134,7 @@ public class PipelineStressTests : IAsyncLifetime
 		var pipeline = pipelineBuilder.Build(args);
 		var readerFactory = serviceProvider.GetRequiredService<IStreamReaderFactory>();
 		var writerFactory = serviceProvider.GetRequiredService<IDataWriterFactory>();
-		await exportService.RunExportAsync(options, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory);
+		await exportService.RunExportAsync(new PipelineOptions { BatchSize = options.BatchSize }, options.Provider, options.OutputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
 
 		sw.Stop();
 		_output.WriteLine($"Export took {sw.ElapsedMilliseconds}ms ({sw.Elapsed.TotalSeconds:N2}s)");

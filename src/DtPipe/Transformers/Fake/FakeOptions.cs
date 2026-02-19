@@ -1,5 +1,5 @@
 using System.ComponentModel;
-using DtPipe.Cli.Attributes;
+using DtPipe.Core.Attributes;
 using DtPipe.Core.Options;
 
 namespace DtPipe.Transformers.Fake;

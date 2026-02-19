@@ -1,6 +1,4 @@
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -24,7 +22,7 @@ public class ParquetReaderDescriptor : IProviderDescriptor<IStreamReader>
 		return connectionString.EndsWith(".parquet", StringComparison.OrdinalIgnoreCase);
 	}
 
-	public IStreamReader Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
+	public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
 	{
 		var filePath = connectionString;
 		var logger = serviceProvider.GetService<ILogger<ParquetStreamReader>>();

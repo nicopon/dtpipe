@@ -4,6 +4,7 @@ using DtPipe.Cli.Commands;
 using DtPipe.Cli.Security;
 using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
 using DtPipe.Core.Validation;
@@ -207,14 +208,10 @@ public class JobService
 									var instance = registry.Get(optionsType);
 									ConfigurationBinder.Bind(instance, kvp.Value);
 
-									// Manually propagate Key if present, as it might be separate
-									if (!string.IsNullOrEmpty(job.Key))
+									// Propagate Key via interface — no reflection needed
+									if (!string.IsNullOrEmpty(job.Key) && instance is IKeyAwareOptions keyAware1)
 									{
-										var prop = optionsType.GetProperty("Key");
-										if (prop != null && prop.CanWrite)
-										{
-											prop.SetValue(instance, job.Key);
-										}
+										keyAware1.Key = job.Key;
 									}
 
 									registry.RegisterByType(optionsType, instance);
@@ -246,10 +243,10 @@ public class JobService
 					if (optionsType != null)
 					{
 						var instance = registry.Get(optionsType);
-						var prop = optionsType.GetProperty("Key");
-						if (prop != null && prop.CanWrite)
+						// Propagate Key via interface — no reflection needed
+						if (instance is IKeyAwareOptions keyAware2)
 						{
-							prop.SetValue(instance, job.Key);
+							keyAware2.Key = job.Key;
 							registry.RegisterByType(optionsType, instance);
 						}
 					}
@@ -327,6 +324,8 @@ public class JobService
 				AutoMigrate = job.AutoMigrate ?? false
 			};
 
+			registry.Register(options); // Register DumpOptions here, after it's declared
+
 			if (!string.IsNullOrEmpty(options.LogPath))
 			{
 				Serilog.Log.Logger = new Serilog.LoggerConfiguration()
@@ -352,7 +351,26 @@ public class JobService
 
 			try
 			{
-				await exportService.RunExportAsync(options, ct, pipeline, readerFactory, writerFactory);
+				var pipelineOptions = new PipelineOptions
+				{
+					BatchSize      = options.BatchSize,
+					Limit          = options.Limit,
+					MaxRetries     = options.MaxRetries,
+					RetryDelayMs   = options.RetryDelayMs,
+					SamplingRate   = options.SamplingRate,
+					SamplingSeed   = options.SamplingSeed,
+					StrictSchema   = options.StrictSchema,
+					NoSchemaValidation = options.NoSchemaValidation,
+					AutoMigrate    = options.AutoMigrate,
+					DryRunCount    = options.DryRunCount,
+					PreExec        = options.PreExec,
+					PostExec       = options.PostExec,
+					OnErrorExec    = options.OnErrorExec,
+					FinallyExec    = options.FinallyExec,
+					NoStats        = options.NoStats,
+					MetricsPath    = options.MetricsPath,
+				};
+				await exportService.RunExportAsync(pipelineOptions, options.Provider, options.OutputPath, ct, pipeline, readerFactory, writerFactory, registry);
 				return 0;
 			}
 			catch (Exception ex)

@@ -1,138 +1,278 @@
 # Extending DtPipe: adding an Adapter or a Transformer
 
-This quick guide explains where and how to add a new *adapter* (reader/writer) or a *transformer* in DtPipe.
+This guide explains where and how to add a new *adapter* (reader/writer) or a *transformer* in DtPipe.
 
-## Recommended locations
-- Adapters: `src/DtPipe/Adapters/<Provider>/`
-- Transformers: `src/DtPipe/Transformers/<Name>/`
-- Documentation: `EXTENDING.md` (this file)
+---
+
+## Architecture Overview
+
+The solution is split into three layers:
+
+| Project | Role |
+|---|---|
+| `DtPipe.Core` | Interfaces, models, pipeline engine — **no external deps** |
+| `DtPipe.Adapters` | All provider implementations (readers/writers) |
+| `DtPipe` | CLI, DI wiring, Descriptors, Transformers |
+
+### Where to put new code
+
+| What | Implementation | Descriptor / Registration |
+|---|---|---|
+| **New reader/writer** | `src/DtPipe.Adapters/Adapters/<Provider>/` | `src/DtPipe/Adapters/<Provider>/` |
+| **New transformer** | `src/DtPipe/Transformers/<Name>/` | `src/DtPipe/Program.cs` |
+
+---
 
 ## Adding an Adapter (Reader or Writer)
-1. Create a folder `src/DtPipe/Adapters/<YourProvider>/`.
-2. Add an options class (e.g. `MyProviderOptions.cs`) for provider-specific settings.
-3. Implement the appropriate interface:
-   - Reader: `IStreamReader` (key methods: `OpenAsync`, `ReadBatchesAsync` returning `IAsyncEnumerable`, `DisposeAsync`).
-   - Writer: `IDataWriter` (key methods: `InitializeAsync`, `WriteBatchAsync`, `CompleteAsync`, `DisposeAsync`).
-4. Add a `Descriptor` implementing `IProviderDescriptor<T>` (e.g. `MyProviderReaderDescriptor.cs`).
-5. (Optional) Implement `ITypeMapper` in a dedicated converter (e.g. `MyProviderTypeConverter.cs`) for custom type mapping.
-6. Register the provider in DI: open `src/DtPipe/Program.cs` and call `RegisterReader<MyProviderReaderDescriptor>(services);` or `RegisterWriter<MyProviderWriterDescriptor>(services);`.
-7. Add unit/integration tests under `tests/DtPipe.Tests/Unit` or `tests/DtPipe.Tests/Integration`. Provide a small dataset or docker-compose if needed (see `tests/infra`).
-8. Add a usage example to the README or scripts in `scripts/` if relevant.
 
-Practical tips:
-- Follow the structure and class names of existing adapters (DuckDB, PostgreSQL, Csv) for consistency.
-- Respect the batching model (`ReadBatchesAsync`) to benefit from the streaming pipeline and keep memory usage low.
+### Step 1 — Options class (in DtPipe.Adapters)
 
-### Adapter Descriptor (Skeleton)
+Create `src/DtPipe.Adapters/Adapters/MyProvider/MyProviderReaderOptions.cs`.
 
-The descriptor bridges your implementation (Reader/Writer) and its options to the application.
+For SQL readers, implement **`IQueryAwareOptions`** so the CLI propagates `--query` automatically:
 
 ```csharp
-public class MyProviderReaderDescriptor : IProviderDescriptor<IStreamReader>
+using DtPipe.Core.Options;
+
+public record MyProviderReaderOptions : IProviderOptions, IQueryAwareOptions
 {
-    // Unique identifier for this provider (used in CLI/YAML, e.g. "myprovider")
-    public string Id => "myprovider";
+    public static string Prefix => "myprovider";
+    public static string DisplayName => "MyProvider Reader";
 
-    // How to create the Reader instance
-    public IStreamReader Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
-    {
-        var myOptions = (MyProviderOptions)options;
-        
-        // Validate options if necessary
-        if (string.IsNullOrEmpty(myOptions.ConnectionString))
-            throw new InvalidOperationException("Missing connection string for MyProvider.");
-
-        // Create the reader
-        return new MyProviderReader(myOptions, context.BatchSize);
-    }
-
-    // Register your options so the CLI knows them
-    public IEnumerable<Option> GetOptions()
-    {
-        return CliOptionBuilder.GenerateOptions<MyProviderOptions>();
-    }
+    public string? Query { get; set; }  // propagated by CliStreamReaderFactory
 }
 ```
 
-## Adding a Transformer
-1. Create `src/DtPipe/Transformers/<YourTransformer>/`.
-2. Add an options class `YourTransformerOptions.cs`.
-   - Implement `IOptionSet`.
-   - Define a `Prefix` (e.g. `fake` -> flags will be `--fake-seed`, `--fake-locale`).
-   - Use `[Description]` or `[CliOption]` on properties to expose them to the CLI.
+For SQL writers, implement **`IKeyAwareOptions`** so the CLI propagates `--key` automatically:
 
-   ```csharp
-   public class MyOptions : IOptionSet
-   {
-       public static string Prefix => "my"; // Flags: --my-property
+```csharp
+public class MyProviderWriterOptions : IWriterOptions, IKeyAwareOptions
+{
+    public static string Prefix => "myprovider";
+    public static string DisplayName => "MyProvider Writer";
 
-       [Description("Description shown in --help")]
-    public string Property { get; set; } = "default";
+    public string? Key { get; set; }  // propagated by JobService
 
     [CliOption(Description = "Target table name", Hidden = true)]
     public string Table { get; set; } = "export";
+
+    [CliOption(Description = "Write strategy", Hidden = true)]
+    public MyProviderWriteStrategy? Strategy { get; set; }
 }
 ```
 
-> [!TIP]
-> Use `Hidden = true` for provider-specific options that have a generic equivalent (like `--table`, `--strategy`, `--insert-mode`). This keeps the default help output clean while maintaining backward compatibility.
+> **Why `Hidden = true`?** Generic options (`--table`, `--strategy`, `--insert-mode`) appear once in the CLI help under "Core". Provider-specific versions of these options are hidden to keep help output clean while retaining backward compatibility.
 
-3. Implement `IDataTransformer` (or follow existing classes):
-   - `ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct)` — prepare the target schema.
-   - `object?[] Transform(object?[] row)` — transform a single row (should be fast and avoid excessive allocations when possible).
-4. Provide an `IDataTransformerFactory` (e.g. `YourTransformerFactory`) that reads options and creates transformer instances.
-5. Register the factory in DI: in `Program.cs` add `services.AddSingleton<IDataTransformerFactory, YourTransformerFactory>();`.
-6. Add CLI/YAML support:
-   - To expose CLI flags, see `src/DtPipe/Cli/CliOptionBuilder.cs` and `OptionsRegistry` for how options are declared and bound.
-   - Document YAML syntax in `README.md` or here (see example below).
-7. Add unit tests for the transformation logic.
+### Step 2 — IStreamReader / IDataWriter (in DtPipe.Adapters)
 
-Minimal transformer skeleton (simplified):
+```csharp
+public class MyProviderStreamReader : IStreamReader
+{
+    private readonly string _connectionString;
+    private readonly string _query;
+
+    public MyProviderStreamReader(string connectionString, string query)
+    {
+        _connectionString = connectionString;
+        _query = query;
+    }
+
+    public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
+
+    public async Task OpenAsync(CancellationToken ct = default)
+    {
+        // Open connection, execute query, read schema → populate Columns
+    }
+
+    public async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(
+        int batchSize, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        // Yield batches of rows as object?[][] wrapped in ReadOnlyMemory
+    }
+
+    public ValueTask DisposeAsync() { ... }
+}
+```
+
+### Step 3 — Descriptor (in DtPipe/Adapters)
+
+Create `src/DtPipe/Adapters/MyProvider/MyProviderReaderDescriptor.cs`.
+
+The descriptor is the only coupling point between `DtPipe` (CLI) and `DtPipe.Adapters`. It must **not** use `DumpOptions` — the query is received via the casted options object:
+
+```csharp
+using DtPipe.Core.Abstractions;
+
+public class MyProviderReaderDescriptor : IProviderDescriptor<IStreamReader>
+{
+    public string ProviderName => "myprovider";
+    public Type OptionsType => typeof(MyProviderReaderOptions);
+    public bool RequiresQuery => true;
+
+    public bool CanHandle(string connectionString)
+        => connectionString.StartsWith("myprovider:", StringComparison.OrdinalIgnoreCase);
+
+    public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
+    {
+        var o = (MyProviderReaderOptions)options;
+        return new MyProviderStreamReader(connectionString, o.Query!);
+        // o.Query is set by CliStreamReaderFactory via IQueryAwareOptions — never null here
+    }
+}
+```
+
+### Step 4 — Register in DI
+
+In `src/DtPipe/Program.cs`:
+
+```csharp
+RegisterReader<MyProviderReaderDescriptor>(services);
+RegisterWriter<MyProviderWriterDescriptor>(services);
+```
+
+### Step 5 — (Optional) Type mapping
+
+Implement `ITypeMapper` in `MyProviderTypeConverter.cs` for custom CLR → column type mapping.
+
+### Step 6 — Tests
+
+Place unit tests under `tests/DtPipe.Tests/Unit/` and integration tests under `tests/DtPipe.Tests/Integration/`. If the provider requires a database, provide a Docker Compose service in `tests/infra/`.
+
+---
+
+## Adding a Transformer
+
+### Step 1 — Options class
+
+```csharp
+// src/DtPipe/Transformers/MyTransformer/MyTransformerOptions.cs
+public class MyTransformerOptions : IOptionSet
+{
+    public static string Prefix => "my";  // CLI flags: --my-column, etc.
+    public static string DisplayName => "My Transformer";
+
+    [Description("Description shown in --help")]
+    public string? Column { get; set; }
+}
+```
+
+### Step 2 — IDataTransformer
+
 ```csharp
 public class MyTransformer : IDataTransformer
 {
-    public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct)
+    public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(
+        IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct)
     {
-        // return modified schema
-        return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
+        // Optionally add/remove columns from schema
+        return ValueTask.FromResult(columns);
     }
 
     public object?[] Transform(object?[] row)
     {
-        // return transformed row
+        // Transform and return the row (avoid excessive allocations in hot path)
+        return row;
     }
 }
 ```
 
-## YAML — Example for adding a transformer
+### Step 3 — IDataTransformerFactory
+
+The factory must implement **`ICliContributor`** so the CLI discovers its options:
+
+```csharp
+public class MyTransformerFactory : IDataTransformerFactory, ICliContributor
+{
+    private readonly OptionsRegistry _registry;
+
+    public MyTransformerFactory(OptionsRegistry registry) => _registry = registry;
+
+    public string Category => "Transformers";
+
+    public IEnumerable<Option> GetCliOptions()
+        => CliOptionBuilder.GenerateOptions<MyTransformerOptions>();
+
+    public void BindOptions(ParseResult parseResult, OptionsRegistry registry)
+        => CliOptionBuilder.BindOptions<MyTransformerOptions>(parseResult, registry);
+
+    public IDataTransformer CreateFromConfiguration(IReadOnlyList<(string Key, string Value)> config)
+    {
+        var options = _registry.Get<MyTransformerOptions>();
+        // Apply config overrides if needed
+        return new MyTransformer(options);
+    }
+}
+```
+
+### Step 4 — Register in DI
+
+```csharp
+// src/DtPipe/Program.cs
+services.AddSingleton<IDataTransformerFactory, MyTransformerFactory>();
+```
+
+### Step 5 — YAML syntax
+
+```yaml
 transformers:
-  - mytransformer:
-      options:
-        foo: bar
+  - my:
+      column: MyColumn
+```
 
-The name `mytransformer` must match the identifier handled by your `IDataTransformerFactory`/`OptionsRegistry`.
+The key (`my`) must match your `Prefix`.
 
-## Registration and debugging
-- To register: modify `src/DtPipe/Program.cs` (see `RegisterReader` / `RegisterWriter` and the `IDataTransformerFactory` registrations already present).
-- Quick local build & run:
+---
+
+## Build & Test
+
 ```bash
+# Build + unit tests
 ./build.sh
-dtpipe --input "sqlite:sample.db" --query "SELECT 1" --output out.csv
-```
-- Run tests:
-```bash
+
+# Integration tests (requires Docker)
 dotnet test DtPipe.sln
+
+# Quick smoke test
+./dist/release/dtpipe -i "sqlite:sample.db" -q "SELECT 1" -o out.csv
 ```
 
-## Tests & CI
-- Add unit tests for logic (transformers) and integration tests for adapters that depend on databases.
-- If the provider requires native components (Oracle clients, etc.), document prerequisites in `README.md` and/or provide Docker images for tests in `tests/infra`.
+---
 
-## Disabling the TUI (non-interactive / CI)
+## Contribution rules
 
-DtPipe uses a live terminal UI for progress reporting. In CI or non-interactive environments you can disable the live TUI by setting the environment variable `DTPIPE_NO_TUI=1`, or by ensuring output is redirected. The reporter also disables itself when a `CI` environment variable is present.
-
-## Contribution rules (quick)
-- Follow naming conventions and the Descriptor/Factory pattern.
+- Follow the Descriptor/Factory pattern. Use existing adapters (PostgreSQL, DuckDB) as reference.
+- Implement `IQueryAwareOptions` for SQL readers, `IKeyAwareOptions` for SQL writers.
+- Factory **must** implement `ICliContributor` or its options will be silently ignored.
+- Respect the batching model (`ReadBatchesAsync`) to keep memory usage constant.
 - Add tests and a minimal usage example.
-- Document options exposed in the `Options` classes and the README if noteworthy.
+
+---
+
+## Using ExportService Programmatically (Library Mode)
+
+When consuming DtPipe as a library (without the CLI), drive the pipeline through `ExportService` directly using `PipelineOptions` — a CLI-neutral DTO that lives in `DtPipe.Core.Models`.
+
+```csharp
+var pipelineOptions = new PipelineOptions
+{
+    BatchSize    = 10_000,
+    MaxRetries   = 3,
+    RetryDelayMs = 1000,
+    // Schema options, sampling, dry-run, hooks — all optional
+};
+
+await exportService.RunExportAsync(
+    options:       pipelineOptions,
+    providerName:  "myprovider",    // display only — used in logs/UI
+    outputPath:    "output.parquet", // display only
+    ct:            cancellationToken,
+    pipeline:      new List<IDataTransformer>(),
+    readerFactory: myReaderFactory,
+    writerFactory: myWriterFactory,
+    registry:      optionsRegistry);
+```
+
+> [!NOTE]
+> `providerName` and `outputPath` are display-only strings forwarded to the `IExportObserver` for logging/UI. They do not affect the pipeline execution itself.
+>
+> Connection strings, queries, and strategies are passed via the `OptionsRegistry` (populated from your own options classes that implement `IQueryAwareOptions` / `IKeyAwareOptions`).

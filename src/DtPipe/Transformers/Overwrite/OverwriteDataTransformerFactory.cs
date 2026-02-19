@@ -1,20 +1,26 @@
 using System.CommandLine;
-using System.CommandLine.Parsing;
-using System.Linq;
 using DtPipe.Cli;
 using DtPipe.Cli.Abstractions;
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Models;
 using DtPipe.Core.Options;
+using DtPipe.Core.Pipelines;
 
 namespace DtPipe.Transformers.Overwrite;
 
-public interface IOverwriteDataTransformerFactory : IDataTransformerFactory { }
+public interface IOverwriteDataTransformerFactory : IDataTransformerFactory, ICliContributor { }
 
-public class OverwriteDataTransformerFactory(OptionsRegistry registry) : IDataTransformerFactory
+public class OverwriteDataTransformerFactory : IOverwriteDataTransformerFactory
 {
-	private readonly OptionsRegistry _registry = registry;
+	private readonly OptionsRegistry _registry;
+
+	public OverwriteDataTransformerFactory(OptionsRegistry registry)
+	{
+		_registry = registry;
+	}
+
+	public string ProviderName => TransformerType;
+
+	public bool CanHandle(string connectionString) => false;
 
 	public static IEnumerable<Type> GetSupportedOptionTypes()
 	{
@@ -43,17 +49,8 @@ public class OverwriteDataTransformerFactory(OptionsRegistry registry) : IDataTr
 		}
 	}
 
-	public IDataTransformer? Create(DumpOptions options)
-	{
-		var overwriteOptions = _registry.Get<OverwriteOptions>();
+	// Create(DumpOptions) removed
 
-		if (!overwriteOptions.Overwrite.Any())
-		{
-			return null;
-		}
-
-		return new OverwriteDataTransformer(overwriteOptions);
-	}
 
 	public IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration)
 	{

@@ -2,7 +2,6 @@ using DtPipe.Adapters.PostgreSQL;
 using DtPipe.Tests.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
-using Testcontainers.PostgreSql;
 using Xunit;
 
 namespace DtPipe.Tests;
@@ -11,17 +10,17 @@ namespace DtPipe.Tests;
 [Collection("Docker Integration Tests")]
 public class PostgreSqlIntegrationTests : IAsyncLifetime
 {
-	private PostgreSqlContainer? _postgres;
+	private readonly DtPipe.Tests.Fixtures.GlobalDatabaseFixture _fixture;
 	private string? _connectionString;
+
+	public PostgreSqlIntegrationTests(DtPipe.Tests.Fixtures.GlobalDatabaseFixture fixture)
+	{
+		_fixture = fixture;
+	}
 
 	public async ValueTask InitializeAsync()
 	{
-		_connectionString = await DockerHelper.GetPostgreSqlConnectionString(async () =>
-		{
-			_postgres = new PostgreSqlBuilder("postgres:15-alpine").Build();
-			await _postgres.StartAsync();
-			return _postgres.GetConnectionString();
-		});
+		_connectionString = _fixture.PostgresConnectionString;
 
 		if (_connectionString == null) return;
 
@@ -29,18 +28,16 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
 		await connection.OpenAsync();
 
 		await using var cmd = connection.CreateCommand();
+		// Ensure clean state for each test method
 		cmd.CommandText = "DROP TABLE IF EXISTS test_data; " + TestDataSeeder.GenerateTableDDL(connection, "test_data");
 		await cmd.ExecuteNonQueryAsync();
 
 		await TestDataSeeder.SeedAsync(connection, "test_data");
 	}
 
-	public async ValueTask DisposeAsync()
+	public ValueTask DisposeAsync()
 	{
-		if (_postgres is not null)
-		{
-			await _postgres.DisposeAsync();
-		}
+		return ValueTask.CompletedTask;
 	}
 
 	[Fact]
@@ -125,10 +122,10 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task PostgreSqlDataWriter_MixedOrder_MapsCorrectly()
 	{
-		if (!DockerHelper.IsAvailable() || _postgres is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
 		// Arrange
-		var connectionString = _postgres.GetConnectionString();
+		var connectionString = _connectionString;
 		var tableName = "mixed_order_test";
 
 		// 1. Manually create table with DIFFERENT column order than source data

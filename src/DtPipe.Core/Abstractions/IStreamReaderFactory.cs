@@ -1,4 +1,3 @@
-using DtPipe.Configuration;
 using DtPipe.Core.Options;
 namespace DtPipe.Core.Abstractions;
 
@@ -8,9 +7,9 @@ namespace DtPipe.Core.Abstractions;
 public interface IStreamReaderFactory : IDataFactory
 {
 	/// <summary>
-	/// Creates a reader for the given options.
+	/// Creates a reader for the given options registry.
 	/// </summary>
-	IStreamReader Create(DumpOptions options);
+	IStreamReader Create(OptionsRegistry registry);
 
 	/// <summary>
 	/// Gets the option types supported by this reader.

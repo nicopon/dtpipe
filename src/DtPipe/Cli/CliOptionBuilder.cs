@@ -3,7 +3,7 @@ using System.CommandLine.Parsing;
 using System.ComponentModel;
 using System.Linq.Expressions;
 using System.Reflection;
-using DtPipe.Cli.Attributes;
+using DtPipe.Core.Attributes;
 using DtPipe.Core.Options;
 
 namespace DtPipe.Cli;

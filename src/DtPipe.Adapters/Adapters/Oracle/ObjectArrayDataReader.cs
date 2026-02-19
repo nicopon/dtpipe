@@ -1,6 +1,4 @@
 using System.Data;
-using DtPipe.Cli.Abstractions;
-using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 
 namespace DtPipe.Adapters.Oracle;

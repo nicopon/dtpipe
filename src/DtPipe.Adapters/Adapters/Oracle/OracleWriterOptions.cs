@@ -1,4 +1,4 @@
-using DtPipe.Cli.Attributes;
+using DtPipe.Core.Attributes;
 using DtPipe.Core.Options;
 
 namespace DtPipe.Adapters.Oracle;
@@ -26,11 +26,11 @@ public enum OracleDateTimeMapping
 	Timestamp
 }
 
-public record OracleWriterOptions : IProviderOptions
+public record OracleWriterOptions : IProviderOptions, IKeyAwareOptions
 {
 	public static string Prefix => OracleConstants.ProviderName;
 	public static string DisplayName => "Oracle Writer Options";
-	public string? Key { get; init; }
+	public string? Key { get; set; }
 
 	[CliOption(Description = "Mapping for DateTime columns (Date, Timestamp)", Hidden = true)]
 	public OracleDateTimeMapping DateTimeMapping { get; init; } = OracleDateTimeMapping.Date;

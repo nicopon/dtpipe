@@ -3,19 +3,23 @@ using DtPipe.Cli;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Options;
 using DtPipe.Core.Services;
+using DtPipe.Core.Pipelines;
+using DtPipe.Cli.Abstractions;
 
 namespace DtPipe.Transformers.Window;
 
-public class WindowDataTransformerFactory : IDataTransformerFactory
+public class WindowDataTransformerFactory : IDataTransformerFactory, ICliContributor
 {
-	private readonly OptionsRegistry _registry;
 	private readonly IJsEngineProvider _jsEngineProvider;
 
-	public WindowDataTransformerFactory(OptionsRegistry registry, IJsEngineProvider jsEngineProvider)
+	public WindowDataTransformerFactory(IJsEngineProvider jsEngineProvider)
 	{
-		_registry = registry;
 		_jsEngineProvider = jsEngineProvider;
 	}
+
+	public string ProviderName => TransformerType;
+
+	public bool CanHandle(string connectionString) => false;
 
 	public string Category => "Transformer Options";
 	public string TransformerType => "window";
@@ -46,18 +50,8 @@ public class WindowDataTransformerFactory : IDataTransformerFactory
 		yield return ComponentOptionsHelper.GetOptionsType<WindowDataTransformer>();
 	}
 
-	public IDataTransformer? Create(Configuration.DumpOptions options)
-	{
-		var windowOptions = _registry.Get<WindowOptions>();
+	// Create(DumpOptions) removed
 
-		// Only create if any window option is set
-		if (windowOptions.Count.HasValue || !string.IsNullOrEmpty(windowOptions.Key) || !string.IsNullOrEmpty(windowOptions.Script))
-		{
-			return new WindowDataTransformer(windowOptions, _jsEngineProvider);
-		}
-
-		return null;
-	}
 
 	public IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration)
 	{
@@ -87,7 +81,7 @@ public class WindowDataTransformerFactory : IDataTransformerFactory
 		return new WindowDataTransformer(options, _jsEngineProvider);
 	}
 
-	public IDataTransformer? CreateFromYamlConfig(Configuration.TransformerConfig config)
+	public IDataTransformer? CreateFromYamlConfig(TransformerConfig config)
 	{
 		// For YAML, we map properties from dictionary
 		var options = new WindowOptions();

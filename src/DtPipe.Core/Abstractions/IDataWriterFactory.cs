@@ -1,4 +1,3 @@
-using DtPipe.Configuration;
 using DtPipe.Core.Options;
 namespace DtPipe.Core.Abstractions;
 
@@ -8,9 +7,9 @@ namespace DtPipe.Core.Abstractions;
 public interface IDataWriterFactory : IDataFactory
 {
 	/// <summary>
-	/// Creates a writer for the given options.
+	/// Creates a writer for the given options registry.
 	/// </summary>
-	IDataWriter Create(DumpOptions options);
+	IDataWriter Create(OptionsRegistry registry);
 
 	/// <summary>
 	/// Gets the option types supported by this writer.

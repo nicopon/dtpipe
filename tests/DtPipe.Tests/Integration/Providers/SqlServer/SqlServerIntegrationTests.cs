@@ -3,7 +3,6 @@ using DtPipe.Adapters.SqlServer;
 using DtPipe.Tests.Helpers;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging.Abstractions;
-using Testcontainers.MsSql;
 using Xunit;
 
 namespace DtPipe.Tests;
@@ -15,17 +14,17 @@ namespace DtPipe.Tests;
 [Collection("Docker Integration Tests")]
 public class SqlServerIntegrationTests : IAsyncLifetime
 {
-	private MsSqlContainer? _sqlServer;
+	private readonly DtPipe.Tests.Fixtures.GlobalDatabaseFixture _fixture;
 	private string? _connectionString;
+
+	public SqlServerIntegrationTests(DtPipe.Tests.Fixtures.GlobalDatabaseFixture fixture)
+	{
+		_fixture = fixture;
+	}
 
 	public async ValueTask InitializeAsync()
 	{
-		_connectionString = await DockerHelper.GetSqlServerConnectionString(async () =>
-		{
-			_sqlServer = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest").Build();
-			await _sqlServer.StartAsync();
-			return _sqlServer.GetConnectionString();
-		});
+		_connectionString = _fixture.SqlServerConnectionString;
 
 		if (_connectionString == null) return;
 
@@ -34,18 +33,16 @@ public class SqlServerIntegrationTests : IAsyncLifetime
 
 		// Use Seeder for DDL and Data
 		await using var cmd = connection.CreateCommand();
+		// Ensure clean state
 		cmd.CommandText = "IF OBJECT_ID('test_data', 'U') IS NOT NULL DROP TABLE test_data; " + TestDataSeeder.GenerateTableDDL(connection, "test_data");
 		await cmd.ExecuteNonQueryAsync();
 
 		await TestDataSeeder.SeedAsync(connection, "test_data");
 	}
 
-	public async ValueTask DisposeAsync()
+	public ValueTask DisposeAsync()
 	{
-		if (_sqlServer is not null)
-		{
-			await _sqlServer.DisposeAsync();
-		}
+		return ValueTask.CompletedTask;
 	}
 
 	[Fact]
@@ -192,9 +189,9 @@ public class SqlServerIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task SqlServerDataWriter_Recreate_DropsAndCreatesTable()
 	{
-		if (!DockerHelper.IsAvailable() || _sqlServer is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		var connectionString = _sqlServer.GetConnectionString();
+		var connectionString = _connectionString;
 		var tableName = "RecreateTest";
 
 		// 1. Manually create table
@@ -230,9 +227,9 @@ public class SqlServerIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task SqlServerDataWriter_Recreate_PreservesNativeStructure()
 	{
-		if (!DockerHelper.IsAvailable() || _sqlServer is null) return;
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		var connectionString = _sqlServer.GetConnectionString();
+		var connectionString = _connectionString;
 		var tableNameRaw = $"TestRecreateEnh_{Guid.NewGuid():N}".Substring(0, 25);
 
 		// 1. Manually create table with specific structure:

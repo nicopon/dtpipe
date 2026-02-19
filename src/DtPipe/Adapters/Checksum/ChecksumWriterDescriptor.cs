@@ -1,7 +1,4 @@
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Models;
-using DtPipe.Core.Options;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace DtPipe.Adapters.Checksum;
@@ -18,7 +15,7 @@ public class ChecksumWriterDescriptor : IProviderDescriptor<IDataWriter>
 		return connectionString.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase);
 	}
 
-	public IDataWriter Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
+	public IDataWriter Create(string connectionString, object options, IServiceProvider serviceProvider)
 	{
 		var chkOptions = (ChecksumWriterOptions)options;
 		chkOptions.OutputPath = connectionString;

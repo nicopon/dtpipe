@@ -1,9 +1,6 @@
-using System.Data;
 using DtPipe.Adapters.DuckDB;
-using DtPipe.Cli.Abstractions;
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Configuration;
-using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DuckDB.NET.Data;
@@ -61,7 +58,8 @@ public class DuckDbWriterTests : IAsyncLifetime
 			ConnectionString = "fake_connection",
 			Query = "SELECT 1"
 		};
-		var writer = _factory.Create(options);
+		_registry.Register(options);
+		var writer = _factory.Create(_registry);
 
 		var columns = new List<PipeColumnInfo>
 		{
@@ -137,7 +135,8 @@ public class DuckDbWriterTests : IAsyncLifetime
 			Query = "SELECT 1", // Dummy
 			ConnectionString = "dummy"
 		};
-		var writer = _factory.Create(options);
+		_registry.Register(options);
+		var writer = _factory.Create(_registry);
 
 		var columns = new List<PipeColumnInfo>
 		{
@@ -203,7 +202,8 @@ public class DuckDbWriterTests : IAsyncLifetime
 			Query = "SELECT 1",
 			ConnectionString = "dummy"
 		};
-		var writer = _factory.Create(options);
+		_registry.Register(options);
+		var writer = _factory.Create(_registry);
 
 		// Source says ID is String, but Target is Integer
 		var columns = new List<PipeColumnInfo>
@@ -246,7 +246,8 @@ public class DuckDbWriterTests : IAsyncLifetime
 		_registry.Register(duckOptions);
 
 		var options = new DumpOptions { OutputPath = _outputPath, Provider = "duckdb", Query = "SELECT 1", ConnectionString = "dummy" };
-		var writer = _factory.Create(options);
+		_registry.Register(options);
+		var writer = _factory.Create(_registry);
 
 		var columns = new List<PipeColumnInfo> { new("Id", typeof(int), false), new("Name", typeof(string), true) };
 		var rows = new List<object?[]> { new object?[] { 1, "NewData" } };
@@ -292,7 +293,8 @@ public class DuckDbWriterTests : IAsyncLifetime
 		_registry.Register(duckOptions);
 
 		var options = new DumpOptions { OutputPath = _outputPath, Provider = "duckdb", Query = "SELECT 1", ConnectionString = "dummy" };
-		var writer = _factory.Create(options);
+		_registry.Register(options);
+		var writer = _factory.Create(_registry);
 
 		var columns = new List<PipeColumnInfo> { new("Id", typeof(int), false), new("Name", typeof(string), true) };
 		var rows = new List<object?[]> { new object?[] { 1, "NewData" } };

@@ -1,5 +1,4 @@
 using System.CommandLine;
-using System.CommandLine.Parsing;
 using DtPipe.Cli.Abstractions;
 using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
@@ -71,22 +70,32 @@ public class CliDataWriterFactory : CliProviderFactory<IDataWriter>, IDataWriter
 	{
 	}
 
-	public IDataWriter Create(DumpOptions options)
+	public IDataWriter Create(OptionsRegistry registry)
 	{
 		// Resolve the specific options object from registry
-		var specificOptions = _registry.Get(_descriptor.OptionsType);
+		var specificOptions = registry.Get(_descriptor.OptionsType);
+
+		// We need the OutputPath. In Option 3, it should be in registry.
+		// For now, it's globally in DumpOptions, but we want to move away.
+		// CliProviderFactory depends on Cli, so it's okay to know about DumpOptions for a transition,
+		// but IDataWriterFactory (the interface) must NOT.
+
+		// To follow Option 3, 'Output' string should be in the registry or passed another way.
+		// Let's assume for now we look it up from the registry's global options or a specific key.
+		// Actually, JobService will populate the registry.
+		var dumpOptions = registry.Get<DumpOptions>();
 
 		// 1. Resolve Strategy
-		ResolveGenericOption(specificOptions, "Strategy", options.Strategy, _descriptor.ProviderName);
+		ResolveGenericOption(specificOptions, "Strategy", dumpOptions.Strategy, _descriptor.ProviderName);
 
 		// 2. Resolve InsertMode
-		ResolveGenericOption(specificOptions, "InsertMode", options.InsertMode, _descriptor.ProviderName);
+		ResolveGenericOption(specificOptions, "InsertMode", dumpOptions.InsertMode, _descriptor.ProviderName);
 
 		// 3. Resolve Table
-		ResolveGenericOption(specificOptions, "Table", options.Table, _descriptor.ProviderName);
+		ResolveGenericOption(specificOptions, "Table", dumpOptions.Table, _descriptor.ProviderName);
 
-		// Use the descriptor to create. 
-		return _descriptor.Create(options.OutputPath, specificOptions, options, _serviceProvider);
+		// Use the descriptor to create.
+		return _descriptor.Create(dumpOptions.OutputPath, specificOptions, _serviceProvider);
 	}
 
 	private void ResolveGenericOption(object specificOptions, string propertyName, string? genericValue, string providerName)
@@ -162,10 +171,17 @@ public class CliStreamReaderFactory : CliProviderFactory<IStreamReader>, IStream
 	{
 	}
 
-	public IStreamReader Create(DumpOptions options)
+	public IStreamReader Create(OptionsRegistry registry)
 	{
-		var specificOptions = _registry.Get(_descriptor.OptionsType);
-		return _descriptor.Create(options.ConnectionString, specificOptions, options, _serviceProvider);
+		var specificOptions = registry.Get(_descriptor.OptionsType);
+		var dumpOptions = registry.Get<DumpOptions>();
+
+		if (specificOptions is IQueryAwareOptions queryAware && !string.IsNullOrWhiteSpace(dumpOptions.Query))
+		{
+			queryAware.Query = dumpOptions.Query;
+		}
+
+		return _descriptor.Create(dumpOptions.ConnectionString, specificOptions!, _serviceProvider);
 	}
 
 	public IEnumerable<Type> GetSupportedOptionTypes()

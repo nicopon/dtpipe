@@ -1,17 +1,22 @@
 using System.CommandLine;
-using System.CommandLine.Parsing;
 using DtPipe.Cli;
 using DtPipe.Cli.Abstractions;
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Models;
 using DtPipe.Core.Options;
+
+using DtPipe.Core.Pipelines;
 
 namespace DtPipe.Transformers.Mask;
 
-public class MaskDataTransformerFactory(OptionsRegistry registry) : IDataTransformerFactory
+public interface IMaskDataTransformerFactory : IDataTransformerFactory, ICliContributor { }
+
+public class MaskDataTransformerFactory(OptionsRegistry registry) : IMaskDataTransformerFactory
 {
 	private readonly OptionsRegistry _registry = registry;
+
+	public string ProviderName => TransformerType;
+
+	public bool CanHandle(string connectionString) => false;
 
 	public static IEnumerable<Type> GetSupportedOptionTypes()
 	{
@@ -40,18 +45,8 @@ public class MaskDataTransformerFactory(OptionsRegistry registry) : IDataTransfo
 		}
 	}
 
-	public IDataTransformer? Create(DumpOptions options)
-	{
-		var maskOptions = _registry.Get<MaskOptions>();
+	// Create(DumpOptions) removed
 
-		// Return null if no mappings, to skip execution overhead
-		if (!maskOptions.Mask.Any())
-		{
-			return null;
-		}
-
-		return new MaskDataTransformer(maskOptions);
-	}
 
 	public IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration)
 	{

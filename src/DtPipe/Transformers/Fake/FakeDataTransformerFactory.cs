@@ -1,16 +1,16 @@
 using System.CommandLine;
-using System.CommandLine.Parsing;
 using DtPipe.Cli;
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Options;
+using DtPipe.Core.Pipelines;
+using DtPipe.Cli.Abstractions;
 
 namespace DtPipe.Transformers.Fake;
 
 /// <summary>
 /// Factory for creating fake data transformers.
 /// </summary>
-public interface IFakeDataTransformerFactory : IDataTransformerFactory
+public interface IFakeDataTransformerFactory : IDataTransformerFactory, ICliContributor
 {
 }
 
@@ -24,6 +24,10 @@ public class FakeDataTransformerFactory : IFakeDataTransformerFactory
 	{
 		_registry = registry;
 	}
+
+	public string ProviderName => TransformerType;
+
+	public bool CanHandle(string connectionString) => false;
 
 	public static IEnumerable<Type> GetSupportedOptionTypes()
 	{
@@ -68,17 +72,8 @@ public class FakeDataTransformerFactory : IFakeDataTransformerFactory
 		}
 	}
 
-	public IDataTransformer? Create(DumpOptions options)
-	{
-		var fakeOptions = _registry.Get<FakeOptions>();
+	// Create(DumpOptions) removed
 
-		if (fakeOptions.Fake == null || !fakeOptions.Fake.Any())
-		{
-			return null;
-		}
-
-		return new FakeDataTransformer(fakeOptions);
-	}
 
 	public IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration)
 	{

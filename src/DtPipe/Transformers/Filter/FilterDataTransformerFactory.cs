@@ -1,13 +1,14 @@
 using System.CommandLine;
 using DtPipe.Cli;
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Options;
 using DtPipe.Core.Services;
+using DtPipe.Core.Pipelines;
+using DtPipe.Cli.Abstractions;
 
 namespace DtPipe.Transformers.Filter;
 
-public class FilterDataTransformerFactory : IDataTransformerFactory
+public class FilterDataTransformerFactory : IDataTransformerFactory, ICliContributor
 {
 	private readonly OptionsRegistry _registry;
 	private readonly IJsEngineProvider _jsEngineProvider;
@@ -17,6 +18,10 @@ public class FilterDataTransformerFactory : IDataTransformerFactory
 		_registry = registry;
 		_jsEngineProvider = jsEngineProvider;
 	}
+
+	public string ProviderName => TransformerType;
+
+	public bool CanHandle(string connectionString) => false;
 
 	public string Category => "Transformer Options";
 	public string TransformerType => "filter";
@@ -47,17 +52,8 @@ public class FilterDataTransformerFactory : IDataTransformerFactory
 		}
 	}
 
-	public IDataTransformer? Create(DumpOptions options)
-	{
-		var filterOptions = _registry.Get<FilterTransformerOptions>();
+	// Create(DumpOptions) removed
 
-		if (filterOptions.Filters == null || filterOptions.Filters.Length == 0)
-		{
-			return null;
-		}
-
-		return new FilterDataTransformer(filterOptions, _jsEngineProvider);
-	}
 
 	public IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration)
 	{

@@ -3,6 +3,7 @@ using DtPipe.Adapters.Parquet;
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
 using DtPipe.Transformers.Fake;
@@ -120,7 +121,7 @@ public class ManualVerificationTests : IAsyncLifetime
 		{
 			var readerFactory = serviceProvider.GetRequiredService<IStreamReaderFactory>();
 			var writerFactory = serviceProvider.GetRequiredService<IDataWriterFactory>();
-			await exportService.RunExportAsync(options, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory);
+			await exportService.RunExportAsync(new PipelineOptions { BatchSize = options.BatchSize }, options.Provider, options.OutputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
 		}
 		catch (Exception ex)
 		{

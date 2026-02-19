@@ -1,13 +1,12 @@
 using System.Threading.Channels;
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Core.Security;
 using DtPipe.Core.Resilience;
 using DtPipe.Core.Validation;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
-using DtPipe.Core.Models;
 
 namespace DtPipe;
 
@@ -37,24 +36,27 @@ public class ExportService
 	}
 
 	public async Task RunExportAsync(
-		DumpOptions options,
+		PipelineOptions options,
+		string providerName,
+		string outputPath,
 		CancellationToken ct,
 		List<IDataTransformer> pipeline,
 		IStreamReaderFactory readerFactory,
-		IDataWriterFactory writerFactory)
+		IDataWriterFactory writerFactory,
+		OptionsRegistry registry)
 	{
 		if (_logger.IsEnabled(LogLevel.Information))
-			_logger.LogInformation("Starting export from {Provider} to {OutputPath}", options.Provider, ConnectionStringSanitizer.Sanitize(options.OutputPath));
+			_logger.LogInformation("Starting export from {Provider} to {OutputPath}", providerName, ConnectionStringSanitizer.Sanitize(outputPath));
 
 		// Display Source Info
-		_observer.ShowIntro(options.Provider, options.ConnectionString);
+		_observer.ShowIntro(providerName, outputPath);
 
 		_observer.ShowConnectionStatus(false, null);
 
 		// Initialize RetryPolicy early to cover setup phase
 		var retryPolicy = new RetryPolicy(options.MaxRetries, TimeSpan.FromMilliseconds(options.RetryDelayMs), _logger);
 
-		await using var reader = readerFactory.Create(options);
+		await using var reader = readerFactory.Create(registry);
 
 		await retryPolicy.ExecuteAsync(() => reader.OpenAsync(ct), ct);
 
@@ -83,11 +85,11 @@ public class ExportService
 		if (options.DryRunCount > 0)
 		{
 			IDataWriter? writerForInspection = null;
-			if (!string.IsNullOrEmpty(options.OutputPath))
+			if (!string.IsNullOrEmpty(outputPath))
 			{
 				try
 				{
-					writerForInspection = writerFactory.Create(options);
+					writerForInspection = writerFactory.Create(registry);
 				}
 				catch { }
 			}
@@ -102,10 +104,10 @@ public class ExportService
 		}
 
 		string writerName = writerFactory.ProviderName;
-		_observer.ShowTarget(writerName, options.OutputPath);
+		_observer.ShowTarget(writerName, outputPath);
 
 		var exportableSchema = currentSchema;
-		await using var writer = writerFactory.Create(options);
+		await using var writer = writerFactory.Create(registry);
 
 		// Execute Pre-Hook
 		await ExecuteHookAsync(writer, "Pre-Hook", options.PreExec, ct);
@@ -223,7 +225,7 @@ public class ExportService
 	private async Task ValidateAndMigrateSchemaAsync(
 		IDataWriter writer,
 		IReadOnlyList<PipeColumnInfo> exportableSchema,
-		DumpOptions options,
+		PipelineOptions options,
 		CancellationToken ct)
 	{
 		if (options.NoSchemaValidation || writer is not ISchemaInspector inspector) return;

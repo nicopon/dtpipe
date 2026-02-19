@@ -1,7 +1,4 @@
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Models;
-using DtPipe.Core.Options;
 
 namespace DtPipe.Adapters.Csv;
 
@@ -18,7 +15,7 @@ public class CsvWriterDescriptor : IProviderDescriptor<IDataWriter>
 		return connectionString.EndsWith(".csv", StringComparison.OrdinalIgnoreCase);
 	}
 
-	public IDataWriter Create(string connectionString, object options, DumpOptions context, IServiceProvider serviceProvider)
+	public IDataWriter Create(string connectionString, object options, IServiceProvider serviceProvider)
 	{
 		return new CsvDataWriter(connectionString, (CsvWriterOptions)options);
 	}
