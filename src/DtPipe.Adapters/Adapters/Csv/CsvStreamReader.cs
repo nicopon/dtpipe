@@ -115,7 +115,7 @@ public class CsvStreamReader : IStreamReader
 			{
 				var fieldCount = _csvReader.Parser.Count;
 				_headers = Enumerable.Range(0, fieldCount).Select(i => $"Column{i}").ToArray();
-				// Note: First data row will be yielded in ReadBatchesAsync
+				// First data row is yielded in ReadBatchesAsync.
 			}
 			else
 			{

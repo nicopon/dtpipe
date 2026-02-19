@@ -424,4 +424,27 @@ public class DryRunRenderer
 		console.Write(panel);
 		console.WriteLine();
 	}
+
+	public void RenderPerformanceHints(IReadOnlyDictionary<string, string> hints, IAnsiConsole console)
+	{
+		if (hints == null || hints.Count == 0) return;
+
+		var content = new StringBuilder();
+		content.AppendLine("[yellow]Dynamic JS transformers generate implicit 'string' types by default. To optimize mapping overhead, provide strict types:[/]");
+		content.AppendLine();
+
+		var options = string.Join(" ", hints.Select(kv => $"--compute-types {Markup.Escape(kv.Key)}:{kv.Value}"));
+
+		content.AppendLine($"  [cyan]dtpipe ... {options}[/]");
+
+		var panel = new Panel(new Markup(content.ToString().TrimEnd()))
+		{
+			Border = BoxBorder.Rounded,
+			Padding = new Padding(1, 0),
+			Header = new PanelHeader("[yellow]⚡ Performance Hints[/]")
+		};
+
+		console.Write(panel);
+		console.WriteLine();
+	}
 }

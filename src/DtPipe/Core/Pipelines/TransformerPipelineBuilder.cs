@@ -45,7 +45,7 @@ public class TransformerPipelineBuilder
 		var instructions = new List<Instruction>();
 
 		// Map option aliases to (Factory, Option) tuple
-		// We need to know which CLI option corresponds to which factory AND access the Option metadata (Arity)
+		// Requires mapping CLI options to their corresponding factory and Option metadata (Arity).
 		var optionMap = new Dictionary<string, (IDataTransformerFactory Factory, Option Option)>(StringComparer.OrdinalIgnoreCase);
 
 		foreach (var factory in _factories)

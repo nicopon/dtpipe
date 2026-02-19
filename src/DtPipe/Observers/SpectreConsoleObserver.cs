@@ -92,7 +92,6 @@ public class SpectreConsoleObserver : IExportObserver
 	public async Task RunDryRunAsync(IStreamReader reader, IReadOnlyList<IDataTransformer> pipeline, int count, IDataWriter? inspectionWriter, CancellationToken ct)
 	{
 		// Explicitly using the CLI controller here
-		// Note: This still couples Observer to Cli assembly, but ExportService is free.
 		var controller = new DtPipe.Cli.DryRun.DryRunCliController(_console);
 		// Controller expects List<IDataTransformer>, so we convert.
 		await controller.RunAsync(reader, pipeline.ToList(), count, inspectionWriter, ct);

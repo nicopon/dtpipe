@@ -165,10 +165,40 @@ public sealed partial class FakeDataTransformer : IDataTransformer, IRequiresOpt
 		}
 
 		// Build output schema
-		var outputColumns = new List<PipeColumnInfo>(columns);
+		var outputColumns = new List<PipeColumnInfo>(columns.Count + _virtualColumns.Count);
+
+		for (var i = 0; i < columns.Count; i++)
+		{
+			var col = columns[i];
+			var processor = _processors[i];
+
+			if (!processor.IsTemplate && processor.FakerPath != null)
+			{
+				var returnType = _registry.GetReturnType(processor.FakerPath) ?? typeof(string);
+				outputColumns.Add(col with { ClrType = returnType });
+			}
+			else if (processor.IsTemplate)
+			{
+				outputColumns.Add(col with { ClrType = typeof(string) });
+			}
+			else
+			{
+				outputColumns.Add(col);
+			}
+		}
+
 		foreach (var virtualCol in _virtualColumns)
 		{
-			outputColumns.Add(new PipeColumnInfo(virtualCol, typeof(string), true));
+			var virtualIndex = _columnNameToIndex[virtualCol];
+			var processor = _processors[virtualIndex];
+			var returnType = typeof(string);
+
+			if (!processor.IsTemplate && processor.FakerPath != null)
+			{
+				returnType = _registry.GetReturnType(processor.FakerPath) ?? typeof(string);
+			}
+
+			outputColumns.Add(new PipeColumnInfo(virtualCol, returnType, true));
 		}
 
 		return new ValueTask<IReadOnlyList<PipeColumnInfo>>(outputColumns);

@@ -160,10 +160,7 @@ public class WindowDataTransformer : IMultiRowTransformer, IRequiresOptions<Wind
 					{
 						var val = obj.Get(_columnNames[c]);
 						if (val.IsUndefined() || val.IsNull()) newRow[c] = null;
-						else if (val.IsString()) newRow[c] = val.AsString();
-						else if (val.IsNumber()) newRow[c] = val.AsNumber();
-						else if (val.IsBoolean()) newRow[c] = val.AsBoolean();
-						else newRow[c] = val.ToString();
+						else newRow[c] = val.ToObject();
 					}
 					yield return newRow;
 				}

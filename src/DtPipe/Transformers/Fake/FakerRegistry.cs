@@ -1,4 +1,3 @@
-using System.Reflection;
 using Bogus;
 
 namespace DtPipe.Transformers.Fake;
@@ -11,11 +10,20 @@ public sealed class FakerRegistry
 {
 	private readonly Dictionary<string, Func<Faker, object?>> _generators = new(StringComparer.OrdinalIgnoreCase);
 	private readonly Dictionary<string, string> _descriptions = new(StringComparer.OrdinalIgnoreCase);
+	private readonly Dictionary<string, Type> _returnTypes = new(StringComparer.OrdinalIgnoreCase);
 	private readonly HashSet<string> _datasets = new(StringComparer.OrdinalIgnoreCase);
 
 	public FakerRegistry()
 	{
 		RegisterBuiltInGenerators();
+	}
+
+	/// <summary>
+	/// Get the CLR return type for the given generator path.
+	/// </summary>
+	public Type? GetReturnType(string path)
+	{
+		return _returnTypes.TryGetValue(path, out var type) ? type : null;
 	}
 
 	/// <summary>
@@ -180,10 +188,11 @@ public sealed class FakerRegistry
 		Register("database.engine", f => f.Database.Engine(), "Get a database engine");
 	}
 
-	private void Register(string path, Func<Faker, object?> generator, string description)
+	private void Register<T>(string path, Func<Faker, T> generator, string description)
 	{
-		_generators[path] = generator;
+		_generators[path] = f => generator(f);
 		_descriptions[path] = description;
+		_returnTypes[path] = typeof(T);
 
 		var parts = path.Split('.');
 		if (parts.Length == 2)

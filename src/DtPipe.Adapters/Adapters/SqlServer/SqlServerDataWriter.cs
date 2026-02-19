@@ -145,7 +145,6 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 		if (_options.Strategy == SqlServerWriteStrategy.Recreate)
 		{
 			// Recreate logic is complex (Introspect -> Drop -> Create from Introspection OR Create from Source)
-			// We can implement strict logic here.
 
 			// 1. Check if exists (we have _quotedTargetTableName from base now)
 			// But we need strict schema/table.
@@ -167,7 +166,6 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 				await ExecuteNonQueryAsync(createSql, ct);
 
 				// Sync columns metadata from introspection to ensure future DML matches
-				// We need to update _columns to match DB casing if we want strictness.
 				if (_columns != null)
 				{
 					var newCols = new List<PipeColumnInfo>(_columns.Count);
@@ -209,7 +207,7 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 		{
 			// Append/Upsert/Ignore
 			// Create if not exists
-			// We check existence via InspectTargetAsync or just try create
+			// Check existence via InspectTargetAsync or try create.
 			var exists = (await InspectTargetAsync(ct))?.Exists ?? false;
 
 			if (!exists)

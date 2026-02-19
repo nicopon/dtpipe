@@ -40,7 +40,7 @@ public static class SchemaValidator
 		}
 
 		// 2. Check Length Violation (for string types)
-		// We restrict this to String type to avoid false positives on binary-sized types like Oracle DATE
+		// Restrict to String type to avoid false positives on binary-sized types like Oracle DATE.
 		if (column.InferredClrType == typeof(string) && column.MaxLength.HasValue && column.MaxLength.Value > 0)
 		{
 			var strVal = value.ToString() ?? "";

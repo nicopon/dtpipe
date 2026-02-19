@@ -13,4 +13,6 @@ public record ComputeOptions : ITransformerOptions
 
 	[CliOption(Description = "Skip script execution when input value is null", Aliases = new[] { "--script-skip-null" })]
 	public bool SkipNull { get; init; } = false;
+
+	public Dictionary<string, string> ComputeTypes { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 }

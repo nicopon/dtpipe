@@ -44,7 +44,7 @@ public static class SchemaCompatibilityAnalyzer
 		// If we have a dialect, we should simulate how the DB resolves the source name to a physical name.
 		// If no dialect, fallback to fuzzy OrdinalIgnoreCase.
 
-		// We use a mutable list of target columns to track matched ones
+		// Use a mutable list of target columns to track matched ones.
 		var remainingTargetCols = targetSchema.Columns.ToList();
 
 		// Check each source column
