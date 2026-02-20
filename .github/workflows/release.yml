@@ -146,8 +146,9 @@ jobs:
         with:
           dotnet-version: '10.0.103'
       
-      - name: Pack
-        run: dotnet pack src/DtPipe/DtPipe.csproj -c Release
+      - name: Pack All Projects
+        run: dotnet pack DtPipe.sln -c Release
       
       - name: Push to NuGet
-        run: dotnet nuget push src/DtPipe/bin/Release/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+        # Push all generated nupkg files, continuing on error if any single package fails (e.g. duplicate)
+        run: dotnet nuget push "**/*.nupkg" --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate

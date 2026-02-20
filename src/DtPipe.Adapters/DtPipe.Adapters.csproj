@@ -1,19 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-
-    <!-- NuGet Metadata -->
+    <!-- Specific NuGet Metadata -->
     <PackageId>DtPipe.Adapters</PackageId>
-    <Version>1.0.0</Version>
-    <Authors>NicoPon</Authors>
-    <Description>Database and file adapters for DtPipe.Core (PostgreSQL, Oracle, SQL Server, SQLite, DuckDB, CSV, Parquet).</Description>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/nicopon/dtpipe</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/nicopon/dtpipe</RepositoryUrl>
-    <PackageTags>etl;data;pipeline;postgres;oracle;sqlserver;sqlite;duckdb;csv;parquet</PackageTags>
+    <Description>Database and file adapters for DtPipe.Core (PostgreSQL, Oracle, SQL Server, SQLite, DuckDB, CSV, Parquet, JsonL, Apache Arrow).</Description>
+    <PackageTags>etl;data;pipeline;postgres;oracle;sqlserver;sqlite;duckdb;csv;parquet;jsonl;arrow</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
@@ -21,6 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Apache.Arrow" Version="19.0.0" />
     <PackageReference Include="Bogus" Version="35.6.5" />
     <PackageReference Include="CsvHelper" Version="33.1.0" />
     <PackageReference Include="DuckDB.NativeBinaries" Version="1.4.2" />
