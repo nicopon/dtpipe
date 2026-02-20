@@ -1,5 +1,6 @@
 # Extending DtPipe: adding an Adapter or a Transformer
 
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://github.com/codespaces/new?repo=nicopon/DtPipe)
 This guide explains where and how to add a new *adapter* (reader/writer) or a *transformer* in DtPipe.
 
 ---
