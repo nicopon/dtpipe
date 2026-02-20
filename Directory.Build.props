@@ -1,10 +1,10 @@
 <Project>
   <PropertyGroup>
     <!-- Centralized Versioning -->
-    <Version>1.1.0</Version>
-    <AssemblyVersion>1.1.0</AssemblyVersion>
-    <FileVersion>1.1.0</FileVersion>
-    <InformationalVersion>1.1.0</InformationalVersion>
+    <Version>1.1.1</Version>
+    <AssemblyVersion>1.1.1</AssemblyVersion>
+    <FileVersion>1.1.1</FileVersion>
+    <InformationalVersion>1.1.1</InformationalVersion>
 
     <!-- NuGet Global Metadata -->
     <Authors>NicoPon</Authors>
