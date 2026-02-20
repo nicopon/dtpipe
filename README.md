@@ -1,7 +1,5 @@
 # DtPipe
 
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://github.com/codespaces/new?repo=nicopon/DtPipe)
-
 **A simple, self-contained CLI for performance-focused data streaming & anonymization.**
 
 DtPipe streams data from any source (SQL, CSV, Parquet) to any destination, applying intelligent transformations on the fly. It is designed for CI/CD pipelines, test data generation, and large dataset migration.
