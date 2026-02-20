@@ -117,6 +117,10 @@ public class E2EIntegrationTests : IAsyncLifetime
 		var pipeline = pipelineBuilder.Build(args);
 		var readerFactory = serviceProvider.GetRequiredService<IStreamReaderFactory>();
 		var writerFactory = serviceProvider.GetRequiredService<IDataWriterFactory>();
+
+		registry.Register(options);
+		registry.Register(new DuckDbReaderOptions { Query = options.Query });
+
 		await exportService.RunExportAsync(new PipelineOptions { BatchSize = options.BatchSize }, options.Provider, options.OutputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
 
 		// 5. Verify Output
@@ -229,6 +233,10 @@ public class E2EIntegrationTests : IAsyncLifetime
 		var pipeline = pipelineBuilder.Build(args);
 		var readerFactory = serviceProvider.GetRequiredService<IStreamReaderFactory>();
 		var writerFactory = serviceProvider.GetRequiredService<IDataWriterFactory>();
+
+		registry.Register(options);
+		registry.Register(new DuckDbReaderOptions { Query = options.Query });
+
 		await exportService.RunExportAsync(new PipelineOptions { BatchSize = options.BatchSize }, options.Provider, options.OutputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
 
 		// 4. Verify
@@ -340,6 +348,10 @@ public class E2EIntegrationTests : IAsyncLifetime
 		var pipeline = pipelineBuilder.Build(newArgs);
 		var readerFactory = serviceProvider.GetRequiredService<IStreamReaderFactory>();
 		var writerFactory = serviceProvider.GetRequiredService<IDataWriterFactory>();
+
+		registry.Register(options);
+		registry.Register(new DuckDbReaderOptions { Query = options.Query });
+
 		await exportService.RunExportAsync(new PipelineOptions { BatchSize = options.BatchSize }, options.Provider, options.OutputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
 
 		// 5. Verify Output

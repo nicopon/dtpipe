@@ -63,7 +63,7 @@ public class PipelineStressTests : IAsyncLifetime
 
 		// 2. Setup Services
 		var registry = new OptionsRegistry();
-		registry.Register(new DuckDbReaderOptions());
+		registry.Register(new DuckDbReaderOptions { Query = "SELECT Id, Name, Category, Temp, '' as Greeting, '' as Ref, '' as FinalStatus FROM large_data" });
 		registry.Register(new CsvWriterOptions { Header = true });
 		// Register transformer options to be populated by builder
 		registry.Register(new NullOptions());
@@ -112,6 +112,7 @@ public class PipelineStressTests : IAsyncLifetime
 			OutputPath = _outputPath,
 			BatchSize = 10000 // Large batch for performance
 		};
+		registry.Register(options);
 
 		// 3. Define Pipeline Args
 		var args = new[]
