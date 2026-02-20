@@ -1,0 +1,38 @@
+<Project>
+  <PropertyGroup>
+    <!-- Centralized Versioning -->
+    <Version>1.1.0</Version>
+    <AssemblyVersion>1.1.0</AssemblyVersion>
+    <FileVersion>1.1.0</FileVersion>
+    <InformationalVersion>1.1.0</InformationalVersion>
+
+    <!-- NuGet Global Metadata -->
+    <Authors>NicoPon</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/nicopon/dtpipe</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/nicopon/dtpipe</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+
+    <!-- Code Quality & Build Settings -->
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+
+    <!-- Deterministic Builds & SourceLink (when building in CI) -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <!-- Prevent test and internal projects from being packed into NuGet -->
+  <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('.Tests')) Or $(MSBuildProjectName.EndsWith('.Benchmarks')) Or '$(MSBuildProjectName)' == 'RunExport'">
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!-- Enable XML Documentation for the main libraries to provide intellisense on NuGet.org consumers -->
+  <PropertyGroup Condition="$(MSBuildProjectName) == 'DtPipe.Core' Or $(MSBuildProjectName) == 'DtPipe.Adapters'">
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn> <!-- Suppress warning code 1591 (Missing XML comments) for now -->
+  </PropertyGroup>
+</Project>

@@ -1,18 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-
-    <!-- NuGet Metadata -->
+    <!-- Specific NuGet Metadata -->
     <PackageId>DtPipe.Core</PackageId>
-    <Version>1.0.0</Version>
-    <Authors>NicoPon</Authors>
     <Description>High-performance data pipeline engine and SQL writer abstractions.</Description>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/nicopon/dtpipe</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/nicopon/dtpipe</RepositoryUrl>
     <PackageTags>etl;data;pipeline;sql;bulk-insert;abstractions</PackageTags>
   </PropertyGroup>
 
