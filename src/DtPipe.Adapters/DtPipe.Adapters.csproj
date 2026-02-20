@@ -5,7 +5,12 @@
     <PackageId>DtPipe.Adapters</PackageId>
     <Description>Database and file adapters for DtPipe.Core (PostgreSQL, Oracle, SQL Server, SQLite, DuckDB, CSV, Parquet, JsonL, Apache Arrow).</Description>
     <PackageTags>etl;data;pipeline;postgres;oracle;sqlserver;sqlite;duckdb;csv;parquet;jsonl;arrow</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="../DtPipe.Core/DtPipe.Core.csproj" />
