@@ -94,7 +94,7 @@ public class CsvStreamReader : IStreamReader
 
 		var config = new CsvConfiguration(CultureInfo.InvariantCulture)
 		{
-			Delimiter = _options.Delimiter,
+			Delimiter = _options.Separator,
 			HasHeaderRecord = _options.HasHeader,
 			MissingFieldFound = null,
 			BadDataFound = null

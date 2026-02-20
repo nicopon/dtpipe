@@ -72,7 +72,7 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvWriterOptio
 			using var stringReader = new StringReader(headerLine);
 			var config = new CsvConfiguration(CultureInfo.InvariantCulture)
 			{
-				Delimiter = _options.Separator.ToString(),
+				Delimiter = _options.Separator,
 				Quote = _options.Quote,
 				HasHeaderRecord = true
 			};
@@ -123,7 +123,7 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvWriterOptio
 		var config = new CsvConfiguration(CultureInfo.InvariantCulture)
 		{
 			HasHeaderRecord = _options.Header,
-			Delimiter = _options.Separator.ToString(),
+			Delimiter = _options.Separator,
 			Quote = _options.Quote,
 			ShouldQuote = args => ShouldQuoteField(args.Field, _options)
 		};
