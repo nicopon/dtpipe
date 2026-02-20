@@ -8,6 +8,7 @@ namespace DtPipe.Core.Models;
 /// <param name="RowCount">Approximate number of rows (null if unknown or not applicable)</param>
 /// <param name="SizeBytes">Size in bytes (null if unknown or not applicable)</param>
 /// <param name="PrimaryKeyColumns">List of primary key column names (null if no PK or unknown)</param>
+/// <param name="UniqueColumns">List of columns with a UNIQUE constraint</param>
 /// <param name="IsRowCountEstimate">True if RowCount is based on statistics (Oracle, PostgreSQL), false if exact (DuckDB, SQLite)</param>
 public sealed record TargetSchemaInfo(
 	IReadOnlyList<TargetColumnInfo> Columns,
@@ -29,6 +30,9 @@ public sealed record TargetSchemaInfo(
 /// <param name="IsPrimaryKey">Whether the column is part of the primary key</param>
 /// <param name="IsUnique">Whether the column has a UNIQUE constraint</param>
 /// <param name="MaxLength">Maximum length for string/binary types (null if not applicable)</param>
+/// <param name="Precision">Precision for numeric types (null if not applicable)</param>
+/// <param name="Scale">Scale for numeric types (null if not applicable)</param>
+/// <param name="IsCaseSensitive">Whether the column identifier is explicitly case sensitive</param>
 public sealed record TargetColumnInfo(
 	string Name,
 	string NativeType,
