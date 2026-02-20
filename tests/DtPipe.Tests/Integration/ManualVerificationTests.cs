@@ -67,7 +67,7 @@ public class ManualVerificationTests : IAsyncLifetime
 
 		// 2. Configure Services
 		var registry = new OptionsRegistry();
-		registry.Register(new DuckDbReaderOptions());
+		registry.Register(new DuckDbReaderOptions { Query = "SELECT * FROM users" });
 		// Faking rule: Name -> name.fullName
 		registry.Register(new FakeOptions
 		{
@@ -109,6 +109,7 @@ public class ManualVerificationTests : IAsyncLifetime
 			OutputPath = _outputPath,
 			BatchSize = 100
 		};
+		registry.Register(options);
 
 		// 4. Build Pipeline
 		var transformerFactories = serviceProvider.GetServices<IDataTransformerFactory>().ToList();
