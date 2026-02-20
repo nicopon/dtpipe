@@ -47,6 +47,8 @@ Binary created at: `./dist/release/dtpipe`
 
 > **Note:** The pre-compiled binaries in [GitHub Releases](https://github.com/nicopon/DtPipe/releases) are **self-contained**. You do NOT need to install .NET to run them.
 
+> **Developers:** Want to use DtPipe programmatically via NuGet packages? Check out the **[src/DtPipe.Sample](./src/DtPipe.Sample)** project for a hands-on API example.
+
 ## Quick Reference
 
 ### CLI Usage
@@ -68,10 +70,12 @@ DtPipe auto-detects providers from file extensions (`.csv`, `.parquet`, `.duckdb
 | **Oracle** | `ora:` | `ora:Data Source=PROD;User Id=scott` |
 | **SQL Server**| `mssql:` | `mssql:Server=.;Database=mydb` |
 | **CSV** | `csv:` / `.csv` | `data.csv` |
+| **JsonL** | `jsonl:` / `.jsonl`| `data.jsonl` |
+| **Apache Arrow** | `arrow:` / `.arrow`| `data.arrow` |
 | **Parquet** | `parquet:` / `.parquet`| `data.parquet` |
 | **Data Gen** | `generate:` | `generate:1000000` (generates `GenerateIndex` column) |
 | **Keyring** | `keyring://` | `keyring://my-prod-db` |
-| **STDIN/OUT** | `csv` or `parquet` | `csv` (no file path) |
+| **STDIN/OUT** | `csv`, `jsonl`, `arrow` or `parquet` | `csv` (no file path) |
 
 ### 2. Anonymization & Fakers
 
@@ -89,7 +93,19 @@ Use `--fake "Col:Generator"` to replace sensitive data.
 
 > Use `--fake-list` to print all available generators.
 
-### 3. CLI Options Reference
+### 3. Positional CLI Option Scoping (Reader vs Writer)
+
+DtPipe resolves options logically based on their position relative to the **output flag (`-o`)**.
+
+* **Global / Reader Scope:** Options placed *before* `-o` apply universally to the pipeline, acting as Reader properties or global pipeline properties.
+* **Writer Scope:** Options placed *after* `-o` specifically target the Writer, overriding global defaults.
+
+```bash
+# Example: Use a comma separator for the Reader, but a semicolon separator for the Writer
+dtpipe -i input.csv --csv-separator "," -o output.csv --csv-separator ";"
+```
+
+### 4. CLI Options Reference
 
 #### Core
 | Flag | Description |

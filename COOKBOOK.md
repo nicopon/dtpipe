@@ -281,6 +281,16 @@ duckdb -csv -c "SELECT * FROM 'source.csv' WHERE active=true" | \
   -o parquet:clean_data.parquet
 ```
 
+### Streaming JSON Lines to Apache Arrow
+Process a continuous or large stream of JSON logs, anonymizing data on-the-fly, and outputting to a highly optimized Apache Arrow file.
+
+```bash
+cat server_logs.jsonl | \
+  dtpipe -i jsonl \
+  --mask "IPAddress:***.***.*.*" \
+  -o "arrow:secure_logs.arrow"
+```
+
 > **Note**: When using pipes, you MUST explicitly specify the format (e.g. `-i csv` or `-o csv`) because there is no file extension to detect.
 
 ---
@@ -382,6 +392,22 @@ transformers:
       options:
         locale: fr
         seed-column: id
+
+### 3. Provider Configurations (Reader vs Writer)
+To supply specific configurations for specific adapters (like CSV formatting), use `provider-options` mapped by their provider prefix. 
+To differentiate between input and output scoping, append `-writer` to override the output stream defaults.
+
+```yaml
+input: input_data.csv
+output: export_data.csv
+
+provider-options:
+  csv:                 # Applied to the reader (Global Default)
+    separator: ","     
+    has-header: true
+  csv-writer:          # Applied explicitly to the writer
+    separator: ";"     
+    quote: "'"
 ```
 
 ### Example 2: File-to-File (No Query)

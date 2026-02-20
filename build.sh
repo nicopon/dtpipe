@@ -91,6 +91,10 @@ if [ -f "$RELEASE_DIR/DtPipe$EXT" ]; then
     mv "$RELEASE_DIR/DtPipe$EXT" "$RELEASE_DIR/dtpipe$EXT"
 fi
 
+echo ""
+echo -e "${YELLOW}Building Sample Project...${NC}"
+dotnet build src/DtPipe.Sample/DtPipe.Sample.csproj -c Release
+
 # ============================================================
 # Summary
 # ============================================================
