@@ -1,13 +1,4 @@
-﻿using DtPipe.Adapters.Checksum;
-using DtPipe.Adapters.Csv;
-using DtPipe.Adapters.DuckDB;
-using DtPipe.Adapters.Oracle;
-using DtPipe.Adapters.Parquet;
-using DtPipe.Adapters.PostgreSQL;
-using DtPipe.Adapters.Generate;
-using DtPipe.Adapters.Sqlite;
-using DtPipe.Adapters.SqlServer;
-using DtPipe.Cli;
+﻿using DtPipe.Cli;
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Options;
@@ -92,25 +83,32 @@ class Program
 		// CLI
 		services.AddSingleton<JobService>();
 
-		// Reader Factories using Generic Descriptor Bridge
-		RegisterReader<OracleReaderDescriptor>(services);
-		RegisterReader<SqlServerReaderDescriptor>(services);
-		RegisterReader<DuckDbReaderDescriptor>(services);
-		RegisterReader<PostgreSqlReaderDescriptor>(services);
-		RegisterReader<SqliteReaderDescriptor>(services);
-		RegisterReader<CsvReaderDescriptor>(services);
-		RegisterReader<ParquetReaderDescriptor>(services);
-		RegisterReader<GenerateReaderDescriptor>(services);
+		// Provider Auto-Discovery
+		var readerDescType = typeof(IProviderDescriptor<IStreamReader>);
+		var writerDescType = typeof(IProviderDescriptor<IDataWriter>);
 
-		// Writer Factories using Generic Descriptor Bridge
-		RegisterWriter<CsvWriterDescriptor>(services);
-		RegisterWriter<ParquetWriterDescriptor>(services);
-		RegisterWriter<DuckDbWriterDescriptor>(services);
-		RegisterWriter<OracleWriterDescriptor>(services);
-		RegisterWriter<ChecksumWriterDescriptor>(services);
-		RegisterWriter<SqlServerWriterDescriptor>(services);
-		RegisterWriter<PostgreSqlWriterDescriptor>(services);
-		RegisterWriter<SqliteWriterDescriptor>(services);
+		var assemblies = new[] { typeof(Program).Assembly };
+
+		var registerReaderMethod = typeof(Program).GetMethod(nameof(RegisterReader), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+		var registerWriterMethod = typeof(Program).GetMethod(nameof(RegisterWriter), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+
+		foreach (var assembly in assemblies)
+		{
+			foreach (var type in assembly.GetTypes())
+			{
+				if (!type.IsAbstract && !type.IsInterface)
+				{
+					if (readerDescType.IsAssignableFrom(type))
+					{
+						registerReaderMethod.MakeGenericMethod(type).Invoke(null, new object[] { services });
+					}
+					if (writerDescType.IsAssignableFrom(type))
+					{
+						registerWriterMethod.MakeGenericMethod(type).Invoke(null, new object[] { services });
+					}
+				}
+			}
+		}
 
 		// Transformer Factories
 		services.AddSingleton<IDataTransformerFactory, NullDataTransformerFactory>();

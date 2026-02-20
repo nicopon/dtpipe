@@ -53,8 +53,12 @@ public class CliProviderFactory<TService> : ICliContributor, IDataFactory
 		// Get existing options (from YAML default or generic default)
 		var existingOptions = registry.Get(_descriptor.OptionsType);
 
+		bool? isReaderScope = null;
+		if (typeof(TService) == typeof(IStreamReader)) isReaderScope = true;
+		else if (typeof(TService) == typeof(IDataWriter)) isReaderScope = false;
+
 		// Apply CLI overrides on top
-		CliOptionBuilder.BindForType(_descriptor.OptionsType, existingOptions, parseResult, options);
+		CliOptionBuilder.BindForType(_descriptor.OptionsType, existingOptions, parseResult, options, isReaderScope);
 
 		// Register/Update
 		registry.RegisterByType(_descriptor.OptionsType, existingOptions);

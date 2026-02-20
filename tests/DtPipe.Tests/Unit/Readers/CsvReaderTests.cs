@@ -1,8 +1,5 @@
 using DtPipe.Adapters.Csv;
-using DtPipe.Cli.Abstractions;
 using DtPipe.Cli.Infrastructure;
-using DtPipe.Core.Abstractions;
-using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using FluentAssertions;
 using Xunit;
@@ -37,7 +34,7 @@ public class CsvReaderTests : IAsyncLifetime
 	public async Task CsvReader_ShouldReadHeaderAndData()
 	{
 		// Arrange
-		var options = new CsvReaderOptions { Delimiter = ",", HasHeader = true };
+		var options = new CsvReaderOptions { Separator = ",", HasHeader = true };
 		var reader = new CsvStreamReader(_testCsvPath, options);
 
 		// Act
@@ -76,7 +73,7 @@ public class CsvReaderTests : IAsyncLifetime
 
 		try
 		{
-			var options = new CsvReaderOptions { Delimiter = ";", HasHeader = true };
+			var options = new CsvReaderOptions { Separator = ";", HasHeader = true };
 			var reader = new CsvStreamReader(semicolonPath, options);
 
 			// Act

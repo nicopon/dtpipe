@@ -195,35 +195,65 @@ public class JobService
 				{
 					if (contributor is IDataFactory factory && factory is IDataWriterFactory or IStreamReaderFactory)
 					{
-						foreach (var kvp in job.ProviderOptions)
+						string providerName = factory.ProviderName;
+
+						if (contributor is IDataWriterFactory wFactory)
 						{
-							var key = kvp.Key;
-
-							// Check if this config block belongs to this provider (by prefix match)
-							if (contributor is IDataWriterFactory wFactory)
+							var optionsType = wFactory.GetSupportedOptionTypes().FirstOrDefault();
+							if (optionsType != null)
 							{
-								var optionsType = wFactory.GetSupportedOptionTypes().FirstOrDefault();
-								if (optionsType != null && IsPrefixMatch(optionsType, key))
-								{
-									var instance = registry.Get(optionsType);
-									ConfigurationBinder.Bind(instance, kvp.Value);
+								var instance = registry.Get(optionsType);
+								bool hasUpdates = false;
 
-									// Propagate Key via interface — no reflection needed
+								// Apply global provider config (e.g., "csv")
+								if (job.ProviderOptions.TryGetValue(providerName, out var globalOpts))
+								{
+									ConfigurationBinder.Bind(instance, globalOpts);
+									hasUpdates = true;
+								}
+
+								// Apply writer-specific config (e.g., "csv-writer")
+								if (job.ProviderOptions.TryGetValue($"{providerName}-writer", out var writerOpts))
+								{
+									ConfigurationBinder.Bind(instance, writerOpts);
+									hasUpdates = true;
+								}
+
+								if (hasUpdates)
+								{
+									// Propagate Key via interface
 									if (!string.IsNullOrEmpty(job.Key) && instance is IKeyAwareOptions keyAware1)
 									{
 										keyAware1.Key = job.Key;
 									}
-
 									registry.RegisterByType(optionsType, instance);
 								}
 							}
-							else if (contributor is IStreamReaderFactory rFactory)
+						}
+						else if (contributor is IStreamReaderFactory rFactory)
+						{
+							var optionsType = rFactory.GetSupportedOptionTypes().FirstOrDefault();
+							if (optionsType != null)
 							{
-								var optionsType = rFactory.GetSupportedOptionTypes().FirstOrDefault();
-								if (optionsType != null && IsPrefixMatch(optionsType, key))
+								var instance = registry.Get(optionsType);
+								bool hasUpdates = false;
+
+								// Apply global provider config (e.g., "csv")
+								if (job.ProviderOptions.TryGetValue(providerName, out var globalOpts))
 								{
-									var instance = registry.Get(optionsType);
-									ConfigurationBinder.Bind(instance, kvp.Value);
+									ConfigurationBinder.Bind(instance, globalOpts);
+									hasUpdates = true;
+								}
+
+								// Apply reader-specific config (e.g., "csv-reader")
+								if (job.ProviderOptions.TryGetValue($"{providerName}-reader", out var readerOpts))
+								{
+									ConfigurationBinder.Bind(instance, readerOpts);
+									hasUpdates = true;
+								}
+
+								if (hasUpdates)
+								{
 									registry.RegisterByType(optionsType, instance);
 								}
 							}

@@ -5,6 +5,7 @@ using System.Linq.Expressions;
 using System.Reflection;
 using DtPipe.Core.Attributes;
 using DtPipe.Core.Options;
+using Serilog;
 
 namespace DtPipe.Cli;
 
@@ -263,20 +264,32 @@ public static class CliOptionBuilder
 	/// <summary>
 	/// Binds parsed results back to an instance of T, using the provided list of options.
 	/// </summary>
-	public static T Bind<T>(ParseResult result, IEnumerable<Option> options) where T : class, IOptionSet, new()
+	public static T Bind<T>(ParseResult result, IEnumerable<Option> options, bool? isReaderScope = null) where T : class, IOptionSet, new()
 	{
 		var instance = new T();
-		Bind(instance, result, options);
+		Bind(instance, result, options, isReaderScope);
 		return instance;
 	}
 
 	/// <summary>
 	/// Binds parsed results to an existing instance of T.
 	/// </summary>
-	public static void Bind<T>(T instance, ParseResult result, IEnumerable<Option> options) where T : class, IOptionSet
+	public static void Bind<T>(T instance, ParseResult result, IEnumerable<Option> options, bool? isReaderScope = null) where T : class, IOptionSet
 	{
 		var prefix = T.Prefix;
 		var optionsList = options.ToList();
+
+		int outIndex = -1;
+		var parsedTokens = result.Tokens.ToList();
+		for (int i = 0; i < parsedTokens.Count; i++)
+		{
+			if (parsedTokens[i].Type == TokenType.Option &&
+				(parsedTokens[i].Value == "-o" || parsedTokens[i].Value == "--output"))
+			{
+				outIndex = i;
+				break;
+			}
+		}
 
 		foreach (var property in typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance))
 		{
@@ -299,20 +312,35 @@ public static class CliOptionBuilder
 				// 1. Try direct instance match (standard/fastest)
 				var optionResult = result.GetResult(matchedOption);
 
+				int optIndex = -1;
+				bool presentInTokens = false;
+				for (int i = 0; i < parsedTokens.Count; i++)
+				{
+					if (parsedTokens[i].Type == TokenType.Option &&
+					   (parsedTokens[i].Value == matchedOption.Name || matchedOption.Aliases.Contains(parsedTokens[i].Value)))
+					{
+						presentInTokens = true;
+						optIndex = i;
+						break;
+					}
+				}
+
+				// Apply CLI Contextual Scoping (if the flag is provided explicitly via CLI)
+				if (presentInTokens && outIndex != -1 && isReaderScope.HasValue)
+				{
+					if (isReaderScope.Value && optIndex > outIndex)
+					{
+						// Reader scope, but flag is after -o (intended for Writer only)
+						continue;
+					}
+					// If flag is before -o, it applies to Reader AND Writer (global default context)
+				}
+
 				// 2. Fallback: if instance match fails (cloned symbols), check by alias presence in tokens.
 				if (optionResult is null)
 				{
-					bool presentInTokens = false;
-					foreach (var token in result.Tokens)
-					{
-						if (token.Type == TokenType.Option &&
-						   (token.Value == matchedOption.Name || matchedOption.Aliases.Contains(token.Value)))
-						{
-							presentInTokens = true;
-							break;
-						}
-					}
 					if (!presentInTokens) continue;
+					optionResult = result.CommandResult.Children.OfType<OptionResult>().FirstOrDefault(c => c.Option.Name == matchedOption.Name);
 				}
 				else
 				{
@@ -322,16 +350,6 @@ public static class CliOptionBuilder
 					if (!optionResult.Tokens.Any())
 					{
 						// Check if it's a bool flag (Arity 0). If it's a flag and not in tokens, keep POCO default.
-						bool presentInTokens = false;
-						foreach (var token in result.Tokens)
-						{
-							if (token.Type == TokenType.Option &&
-							   (token.Value == matchedOption.Name || matchedOption.Aliases.Contains(token.Value)))
-							{
-								presentInTokens = true;
-								break;
-							}
-						}
 						if (!presentInTokens) continue;
 					}
 				}
@@ -345,7 +363,12 @@ public static class CliOptionBuilder
 				propType == typeof(string[]) ||
 				propType == typeof(IEnumerable<string>)))
 				{
-					var values = result.GetValue((Option<string[]>)matchedOption);
+					string[]? values = null;
+					try {
+						if (optionResult != null) values = optionResult.GetValueOrDefault<string[]>();
+						else values = result.GetValue((Option<string[]>)matchedOption);
+					} catch {}
+
 					if (values is not null && values.Length > 0)
 					{
 						if (propType == typeof(IReadOnlyList<string>) || propType == typeof(List<string>))
@@ -363,7 +386,7 @@ public static class CliOptionBuilder
 					var underlyingType = GetUnderlyingType(propType);
 					var genericGetValue = typeof(CliOptionBuilder).GetMethod(nameof(GetTypedValue), BindingFlags.NonPublic | BindingFlags.Static)!;
 					var typedMethod = genericGetValue.MakeGenericMethod(underlyingType);
-					var value = typedMethod.Invoke(null, new object[] { result, matchedOption });
+					var value = typedMethod.Invoke(null, new object?[] { result, matchedOption, optionResult });
 
 					// For value types (bool, int, etc.), always set - they can't be null
 					// For reference types, only set if not null
@@ -376,14 +399,16 @@ public static class CliOptionBuilder
 		}
 	}
 
-	private static T? GetTypedValue<T>(ParseResult result, Option option)
+	private static T? GetTypedValue<T>(ParseResult result, Option option, OptionResult? fallbackResult)
 	{
 		try
 		{
+			if (fallbackResult != null) return fallbackResult.GetValueOrDefault<T>();
 			return result.GetValue((Option<T>)option);
 		}
-		catch
+		catch (Exception ex)
 		{
+			Log.Warning("Failed to parse option '{OptionName}': {Message}", option.Name, ex.Message);
 			return default;
 		}
 	}
@@ -404,21 +429,21 @@ public static class CliOptionBuilder
 		return (IEnumerable<Option>)genericMethod.Invoke(null, null)!;
 	}
 
-	public static object BindForType(Type optionSetType, ParseResult result, IEnumerable<Option> options)
-	{
-		var method = typeof(CliOptionBuilder).GetMethods(BindingFlags.Public | BindingFlags.Static)
-			.First(m => m.Name == nameof(Bind) && m.IsGenericMethod && m.GetParameters().Length == 2);
-		var genericMethod = method.MakeGenericMethod(optionSetType);
-		return genericMethod.Invoke(null, new object[] { result, options })!;
-	}
-
-	public static void BindForType(Type optionSetType, object instance, ParseResult result, IEnumerable<Option> options)
+	public static object BindForType(Type optionSetType, ParseResult result, IEnumerable<Option> options, bool? isReaderScope = null)
 	{
 		var method = typeof(CliOptionBuilder).GetMethods(BindingFlags.Public | BindingFlags.Static)
 			.First(m => m.Name == nameof(Bind) && m.IsGenericMethod && m.GetParameters().Length == 3);
+		var genericMethod = method.MakeGenericMethod(optionSetType);
+		return genericMethod.Invoke(null, new object?[] { result, options, isReaderScope })!;
+	}
+
+	public static void BindForType(Type optionSetType, object instance, ParseResult result, IEnumerable<Option> options, bool? isReaderScope = null)
+	{
+		var method = typeof(CliOptionBuilder).GetMethods(BindingFlags.Public | BindingFlags.Static)
+			.First(m => m.Name == nameof(Bind) && m.IsGenericMethod && m.GetParameters().Length == 4);
 
 		var genericMethod = method.MakeGenericMethod(optionSetType);
-		genericMethod.Invoke(null, new object[] { instance, result, options });
+		genericMethod.Invoke(null, new object?[] { instance, result, options, isReaderScope });
 	}
 
 	/// <summary>

@@ -9,7 +9,7 @@ public record CsvWriterOptions : IWriterOptions
 	public static string DisplayName => "CSV Writer";
 
 	[Description("CSV field separator")]
-	public char Separator { get; init; } = ',';
+	public string Separator { get; init; } = ",";
 
 	[Description("Include header row in CSV")]
 	public bool Header { get; init; } = true;

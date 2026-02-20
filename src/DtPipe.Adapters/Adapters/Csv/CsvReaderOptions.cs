@@ -5,11 +5,11 @@ namespace DtPipe.Adapters.Csv;
 
 public class CsvReaderOptions : IOptionSet
 {
-	public static string Prefix => "csv-reader";
+	public static string Prefix => "csv";
 	public static string DisplayName => "CSV Reader";
 
-	[Description("CSV field delimiter character")]
-	public string Delimiter { get; set; } = ",";
+	[Description("CSV field separator")]
+	public string Separator { get; set; } = ",";
 
 	[Description("Whether the CSV file has a header row")]
 	public bool HasHeader { get; set; } = true;
