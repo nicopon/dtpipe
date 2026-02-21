@@ -15,6 +15,9 @@ exports/
 [Oo]bj/
 dist/
 
+# Rust
+target/
+
 # IDEs
 .idea/
 .vscode/

@@ -1,0 +1,8 @@
+[package]
+name = "dtpolars"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5.3", features = ["derive"] }
+polars = { version = "0.38", features = ["sql", "lazy", "ipc", "ipc_streaming", "parquet", "streaming"] }

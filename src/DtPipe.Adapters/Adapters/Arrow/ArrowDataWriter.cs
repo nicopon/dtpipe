@@ -90,7 +90,7 @@ public sealed class ArrowAdapterDataWriter : IDataWriter, IRequiresOptions<Arrow
 		if (baseType == typeof(long)) return Int64Type.Default;
 		if (baseType == typeof(float)) return FloatType.Default;
 		if (baseType == typeof(double)) return DoubleType.Default;
-		if (baseType == typeof(decimal)) return new Decimal128Type(38, 10);
+		if (baseType == typeof(decimal)) return DoubleType.Default;
 		if (baseType == typeof(DateTime)) return Date64Type.Default;
 		if (baseType == typeof(DateTimeOffset)) return TimestampType.Default;
 		if (baseType == typeof(byte[])) return BinaryType.Default;
@@ -152,6 +152,18 @@ public sealed class ArrowAdapterDataWriter : IDataWriter, IRequiresOptions<Arrow
             ((dynamic)builder).AppendNull();
 			return;
 		}
+
+        if (builder is StringArray.Builder stringBuilder)
+        {
+            stringBuilder.Append(value.ToString() ?? string.Empty);
+            return;
+        }
+
+        if (builder is DoubleArray.Builder doubleBuilder && value is decimal dec)
+        {
+            doubleBuilder.Append((double)dec);
+            return;
+        }
 
         ((dynamic)builder).Append((dynamic)value);
 	}
