@@ -14,6 +14,26 @@ public partial class GenerateReader : IStreamReader, IRequiresOptions<GenerateRe
 	public GenerateReader(string config, string query, GenerateReaderOptions options)
 	{
 		_options = options;
+		var countStr = config.StartsWith("generate:", StringComparison.OrdinalIgnoreCase)
+			? config["generate:".Length..]
+			: config;
+
+		var parts = countStr.Split(';', StringSplitOptions.RemoveEmptyEntries);
+		if (parts.Length > 0 && long.TryParse(parts[0], out var count))
+		{
+			_options.RowCount = count;
+		}
+
+		foreach (var part in parts.Skip(1))
+		{
+			if (part.StartsWith("rate=", StringComparison.OrdinalIgnoreCase))
+			{
+				if (int.TryParse(part["rate=".Length..], out var rate))
+				{
+					_options.RowsPerSecond = rate;
+				}
+			}
+		}
 	}
 
 	public Task OpenAsync(CancellationToken ct = default)

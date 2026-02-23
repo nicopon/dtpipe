@@ -13,6 +13,13 @@ public static class DuckDbConnectionHelper
 
 	public static string GetConnectionString(string connectionString)
 	{
+		if (string.IsNullOrWhiteSpace(connectionString)) return "Data Source=:memory:;";
+
+		if (!connectionString.Contains('=', StringComparison.OrdinalIgnoreCase))
+		{
+			return $"Data Source={connectionString};";
+		}
+
 		return connectionString;
 	}
 }

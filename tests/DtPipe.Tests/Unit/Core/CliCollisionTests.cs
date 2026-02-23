@@ -1,5 +1,5 @@
 using System.CommandLine;
-using DtPipe.Cli.Abstractions;
+using DtPipe.Cli.Infrastructure;
 using DtPipe.Core.Options;
 using FluentAssertions;
 using Xunit;
@@ -73,9 +73,9 @@ public class CliCollisionTests
 					{
 						args.Add(optionsRegistry);
 					}
-					else if (param.ParameterType == typeof(DtPipe.Core.Services.IJsEngineProvider))
+					else if (param.ParameterType == typeof(DtPipe.Transformers.Services.IJsEngineProvider))
 					{
-						args.Add(Moq.Mock.Of<DtPipe.Core.Services.IJsEngineProvider>());
+						args.Add(Moq.Mock.Of<DtPipe.Transformers.Services.IJsEngineProvider>());
 					}
 					else if (param.ParameterType == typeof(Microsoft.Extensions.Logging.ILoggerFactory))
 					{

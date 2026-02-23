@@ -7,7 +7,35 @@ namespace DtPipe.Core.Options;
 /// </summary>
 public class OptionsRegistry
 {
-	private readonly ConcurrentDictionary<Type, object> _options = new();
+	private readonly AsyncLocal<Dictionary<Type, object>> _options = new();
+
+	private Dictionary<Type, object> CurrentOptions
+	{
+		get
+		{
+			if (_options.Value == null)
+			{
+				_options.Value = new Dictionary<Type, object>();
+			}
+			return _options.Value;
+		}
+	}
+
+	/// <summary>
+	/// Forks the current registry state into an isolated asynchronous scope.
+	/// </summary>
+	public void BeginScope()
+	{
+		var newDict = new Dictionary<Type, object>();
+		if (_options.Value != null)
+		{
+			foreach (var kvp in _options.Value)
+			{
+				newDict[kvp.Key] = kvp.Value;
+			}
+		}
+		_options.Value = newDict;
+	}
 
 	/// <summary>
 	/// Registers an options instance.
@@ -17,7 +45,7 @@ public class OptionsRegistry
 	/// </summary>
 	public T Register<T>(T options) where T : class, IOptionSet
 	{
-		_options[typeof(T)] = options;
+		CurrentOptions[typeof(T)] = options;
 		return options;
 	}
 
@@ -26,7 +54,7 @@ public class OptionsRegistry
 	/// </summary>
 	public T Get<T>() where T : class, IOptionSet, new()
 	{
-		if (_options.TryGetValue(typeof(T), out var value))
+		if (CurrentOptions.TryGetValue(typeof(T), out var value))
 		{
 			return (T)value;
 		}
@@ -40,7 +68,7 @@ public class OptionsRegistry
 	/// </summary>
 	public object Get(Type optionType)
 	{
-		if (_options.TryGetValue(optionType, out var value))
+		if (CurrentOptions.TryGetValue(optionType, out var value))
 		{
 			return value;
 		}
@@ -61,7 +89,7 @@ public class OptionsRegistry
 	/// </summary>
 	public bool Has<T>() where T : class, IOptionSet
 	{
-		return _options.ContainsKey(typeof(T));
+		return CurrentOptions.ContainsKey(typeof(T));
 	}
 
 	/// <summary>
@@ -69,6 +97,6 @@ public class OptionsRegistry
 	/// </summary>
 	public void RegisterByType(Type optionType, object options)
 	{
-		_options[optionType] = options;
+		CurrentOptions[optionType] = options;
 	}
 }

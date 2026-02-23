@@ -58,8 +58,8 @@ run_test "Format" "--format \"DISPLAY_NAME:{FIRSTNAME} {LASTNAME}\""
 
 # 4. Advanced Transformers
 run_test "Masking" "--mask \"EMAIL:###****\""
-run_test "Scripting (Row based)" "--script \"FULL_NAME:return row.FIRSTNAME + ' ' + row.LASTNAME;\""
-run_test "Scripting (Auto-return)" "--script \"NAME:row.FIRSTNAME.toUpperCase()\""
+run_test "Scripting (Row based)" "--compute \"FULL_NAME:return row.FIRSTNAME + ' ' + row.LASTNAME;\""
+run_test "Scripting (Auto-return)" "--compute \"NAME:row.FIRSTNAME.toUpperCase()\""
 
 # 5. Anonymization
 run_test "Anonymization (Basic)" "--fake \"NAME:name.fullName\" --fake \"EMAIL:internet.email\" --fake-locale fr"

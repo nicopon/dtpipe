@@ -15,13 +15,13 @@ public record SqlServerWriterOptions : IProviderOptions, IKeyAwareOptions
 	public static string DisplayName => "SQL Server Writer Options";
 	public string? Key { get; set; }
 
-	[CliOption(Description = "Target table name", Hidden = true)]
+	[ComponentOption(Description = "Target table name", Hidden = true)]
 	public string Table { get; set; } = "export";
 
-	[CliOption(Description = "Data write strategy (Append, Truncate, DeleteThenInsert)", Hidden = true)]
+	[ComponentOption(Description = "Data write strategy (Append, Truncate, DeleteThenInsert)", Hidden = true)]
 	public SqlServerWriteStrategy? Strategy { get; set; }
 
-	[CliOption(Description = "Data insert mode (Standard, Bulk)", Hidden = true)]
+	[ComponentOption(Description = "Data insert mode (Standard, Bulk)", Hidden = true)]
 	public SqlServerInsertMode? InsertMode { get; set; }
 }
 

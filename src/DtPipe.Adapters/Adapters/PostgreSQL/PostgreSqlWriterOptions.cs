@@ -10,13 +10,13 @@ public class PostgreSqlWriterOptions : IWriterOptions, IKeyAwareOptions
 	public string? Key { get; set; }
 
 	// Writer Options
-	[CliOption(Description = "Target table name", Hidden = true)]
+	[ComponentOption(Description = "Target table name", Hidden = true)]
 	public string Table { get; set; } = "export";
 
-	[CliOption(Description = "Write strategy: Append, Truncate, or DeleteThenInsert", Hidden = true)]
+	[ComponentOption(Description = "Write strategy: Append, Truncate, or DeleteThenInsert", Hidden = true)]
 	public PostgreSqlWriteStrategy? Strategy { get; set; }
 
-	[CliOption(Description = "Data insert mode (Standard, Bulk)", Hidden = true)]
+	[ComponentOption(Description = "Data insert mode (Standard, Bulk)", Hidden = true)]
 	public PostgreSqlInsertMode? InsertMode { get; set; }
 }
 

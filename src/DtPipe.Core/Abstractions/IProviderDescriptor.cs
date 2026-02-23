@@ -7,13 +7,8 @@ namespace DtPipe.Core.Abstractions;
 /// Decoupled from CLI concerns.
 /// </summary>
 /// <typeparam name="TService">The type of service to create (IDataWriter, IStreamReader, etc)</typeparam>
-public interface IProviderDescriptor<out TService>
+public interface IProviderDescriptor<out TService> : IDataFactory
 {
-	string ProviderName { get; }
-	Type OptionsType { get; }
-
-	bool CanHandle(string connectionString);
-
 	/// <summary>
 	/// Indicates if this provider requires a SQL query to read data.
 	/// True for DBs (Oracle, SQL Server), False for Files (CSV, Parquet) or Generators (Sample).

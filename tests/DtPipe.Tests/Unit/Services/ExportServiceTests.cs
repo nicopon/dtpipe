@@ -75,7 +75,7 @@ public class ExportServiceTests
 		mockWriter.Setup(w => w.CompleteAsync(It.IsAny<CancellationToken>())).Returns(ValueTask.CompletedTask);
 		mockWriter.Setup(w => w.DisposeAsync()).Returns(ValueTask.CompletedTask);
 
-		_mockWriterFactory.Setup(f => f.ProviderName).Returns("test-target");
+		_mockWriterFactory.Setup(f => f.ComponentName).Returns("test-target");
 		_mockWriterFactory.Setup(f => f.Create(It.IsAny<OptionsRegistry>())).Returns(mockWriter.Object);
 
 		// Act

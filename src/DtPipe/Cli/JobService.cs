@@ -1,9 +1,14 @@
+
 using System.CommandLine;
-using DtPipe.Cli.Abstractions;
+using DtPipe.Cli.Infrastructure;
 using DtPipe.Cli.Commands;
+using DtPipe.Cli.Dag;
+using System.CommandLine;
+using System.CommandLine.Parsing;
 using DtPipe.Cli.Security;
 using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
@@ -44,13 +49,13 @@ public class JobService
 
 	public (RootCommand, Action) Build()
 	{
-		var inputOption = new Option<string?>("--input") { Description = "Input connection string or file path" };
+		var inputOption = new Option<string[]>("--input") { Description = "Input connection string(s) or file path(s)" };
 		inputOption.Aliases.Add("-i");
 
-		var queryOption = new Option<string?>("--query") { Description = "SQL query to execute (SELECT only)" };
+		var queryOption = new Option<string[]>("--query") { Description = "SQL query to execute (SELECT only)" };
 		queryOption.Aliases.Add("-q");
 
-		var outputOption = new Option<string?>("--output") { Description = "Output file path or connection string" };
+		var outputOption = new Option<string[]>("--output") { Description = "Output file path or connection string" };
 		outputOption.Aliases.Add("-o");
 
 		var connectionTimeoutOption = new Option<int>("--connection-timeout") { Description = "Connection timeout in seconds" };
@@ -68,6 +73,9 @@ public class JobService
 
 		var dryRunOption = new Option<int>("--dry-run") { Description = "Dry-run mode (N rows)", Arity = ArgumentArity.ZeroOrOne };
 		dryRunOption.DefaultValueFactory = _ => 0;
+
+		var noStatsOption = new Option<bool>("--no-stats") { Description = "Disable progress bars and stats" };
+		noStatsOption.DefaultValueFactory = _ => false;
 
 		var limitOption = new Option<int>("--limit") { Description = "Max rows (0 = unlimited)" };
 		limitOption.DefaultValueFactory = _ => 0;
@@ -108,8 +116,14 @@ public class JobService
 		var retryDelayMsOption = new Option<int>("--retry-delay-ms") { Description = "Initial retry delay in ms" };
 		retryDelayMsOption.DefaultValueFactory = _ => 1000;
 
+		// DAG Options
+		var xstreamerOption = new Option<string[]>("--xstreamer") { Description = "XStreamer provider (e.g. duck)" };
+		xstreamerOption.Aliases.Add("-x");
+
+		var aliasOption = new Option<string[]>("--alias") { Description = "Alias(es) for the current DAG branch or streams" };
+
 		// Core Help Options
-		var coreOptions = new List<Option> { inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption, unsafeQueryOption, dryRunOption, limitOption, samplingRateOption, samplingSeedOption, keyOption, jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption, finallyExecOption, strategyOption, insertModeOption, tableOption, maxRetriesOption, retryDelayMsOption, strictSchemaOption, noSchemaValidationOption, metricsPathOption, autoMigrateOption };
+		var coreOptions = new List<Option> { inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption, unsafeQueryOption, dryRunOption, noStatsOption, limitOption, samplingRateOption, samplingSeedOption, keyOption, jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption, finallyExecOption, strategyOption, insertModeOption, tableOption, maxRetriesOption, retryDelayMsOption, strictSchemaOption, noSchemaValidationOption, metricsPathOption, autoMigrateOption, xstreamerOption, aliasOption };
 
 		var rootCommand = new RootCommand("A simple, self-contained CLI for performance-focused data streaming & anonymization");
 		foreach (var opt in coreOptions) rootCommand.Options.Add(opt);
@@ -131,287 +145,305 @@ public class JobService
 
 		rootCommand.SetAction(async (ParseResult parseResult, CancellationToken ct) =>
 		{
-			// Perform preliminary contributor actions
+			// 1. Check if we have a DAG
+			var rawArgs = Environment.GetCommandLineArgs().Skip(1).ToArray(); // Skip executable path
+			var dagDefinition = CliDagParser.Parse(rawArgs);
 
-			foreach (var contributor in _contributors)
+			Func<ParseResult, CancellationToken, string[], Task<int>> executePipeline = async (pr, token, currentRawArgs) =>
 			{
-				var exitCode = await contributor.HandleCommandAsync(parseResult, ct);
-				if (exitCode.HasValue)
-				{
-					return exitCode.Value;
-				}
-			}
+				// 1. Recover Scalar Value for branch context
+				var localInput = pr.GetValue(inputOption)?.FirstOrDefault();
+				var localAlias = pr.GetValue(aliasOption)?.FirstOrDefault();
 
-			// Check for deprecated options/prefixes
-			CheckDeprecations(parseResult, _console);
-
-			// Build Job Definition
-			var (job, jobExitCode) = RawJobBuilder.Build(
-				parseResult,
-				jobOption, inputOption, queryOption, outputOption,
-				connectionTimeoutOption, queryTimeoutOption, batchSizeOption,
-				unsafeQueryOption, limitOption, samplingRateOption, samplingSeedOption, logOption, keyOption,
-				preExecOption, postExecOption, onErrorExecOption, finallyExecOption, strategyOption, insertModeOption, tableOption,
-				maxRetriesOption, retryDelayMsOption,
-				strictSchemaOption,
-				noSchemaValidationOption,
-				metricsPathOption,
-				autoMigrateOption);
-
-			if (jobExitCode != 0)
-			{
-				return jobExitCode;
-			}
-
-			job = job with
-			{
-				Input = ResolveKeyring(job.Input, _console) ?? job.Input,
-				Output = ResolveKeyring(job.Output, _console) ?? job.Output
-			};
-
-			// Export job
-			var exportJobPath = parseResult.GetValue(exportJobOption);
-			if (!string.IsNullOrWhiteSpace(exportJobPath))
-			{
-				var factoryList = _contributors.OfType<IDataTransformerFactory>().ToList();
-				var configs = RawJobBuilder.BuildTransformerConfigsFromCli(
-					Environment.GetCommandLineArgs(),
-					factoryList,
-					_contributors);
-
-				job = job with { Transformers = configs };
-				JobFileWriter.Write(exportJobPath, job);
-				return 0;
-			}
-
-			var registry = _serviceProvider.GetRequiredService<OptionsRegistry>();
-
-			// Hydrate from YAML ProviderOptions
-			// This allows providers to expose custom options in YAML (e.g. "duck:Extension: httpfs")
-			// matching them via reflection to their Option classes.
-			if (job.ProviderOptions != null)
-			{
+				// Perform preliminary contributor actions
 				foreach (var contributor in _contributors)
 				{
-					if (contributor is IDataFactory factory && factory is IDataWriterFactory or IStreamReaderFactory)
+					var exitCode = await contributor.HandleCommandAsync(pr, token);
+					if (exitCode.HasValue) return exitCode.Value;
+				}
+
+				// Check for deprecated options/prefixes
+				CheckDeprecations(pr, _console, currentRawArgs);
+
+				// Build Job Definition
+				var (job, jobExitCode) = RawJobBuilder.Build(
+					pr,
+					jobOption, inputOption, queryOption, outputOption,
+					connectionTimeoutOption, queryTimeoutOption, batchSizeOption,
+					unsafeQueryOption, noStatsOption, limitOption, samplingRateOption, samplingSeedOption, logOption, keyOption,
+					preExecOption, postExecOption, onErrorExecOption, finallyExecOption, strategyOption, insertModeOption, tableOption,
+					maxRetriesOption, retryDelayMsOption,
+					strictSchemaOption,
+					noSchemaValidationOption,
+					metricsPathOption,
+					autoMigrateOption,
+					xstreamerOption);
+
+				if (jobExitCode != 0) return jobExitCode;
+
+				job = job with
+				{
+					Input = ResolveKeyring(job.Input, _console) ?? job.Input,
+					Output = ResolveKeyring(job.Output, _console) ?? job.Output
+				};
+
+				// Export job
+				var exportJobPath = pr.GetValue(exportJobOption);
+				if (!string.IsNullOrWhiteSpace(exportJobPath))
+				{
+					var factoryList = _contributors.OfType<IDataTransformerFactory>().ToList();
+					var configs = RawJobBuilder.BuildTransformerConfigsFromCli(
+						currentRawArgs,
+						factoryList,
+						_contributors);
+
+					job = job with { Transformers = configs };
+					JobFileWriter.Write(exportJobPath, job);
+					return 0;
+				}
+
+				var registry = _serviceProvider.GetRequiredService<OptionsRegistry>();
+
+
+				if (job.ProviderOptions != null)
+				{
+					foreach (var contributor in _contributors)
 					{
-						string providerName = factory.ProviderName;
-
-						if (contributor is IDataWriterFactory wFactory)
+						if (contributor is IDataFactory factory && factory is IDataWriterFactory or IStreamReaderFactory)
 						{
-							var optionsType = wFactory.GetSupportedOptionTypes().FirstOrDefault();
-							if (optionsType != null)
+							string providerName = factory.ComponentName;
+							if (contributor is IDataWriterFactory wFactory)
 							{
-								var instance = registry.Get(optionsType);
-								bool hasUpdates = false;
-
-								// Apply global provider config (e.g., "csv")
-								if (job.ProviderOptions.TryGetValue(providerName, out var globalOpts))
+								var optionsType = wFactory.GetSupportedOptionTypes().FirstOrDefault();
+								if (optionsType != null)
 								{
-									ConfigurationBinder.Bind(instance, globalOpts);
-									hasUpdates = true;
-								}
+									var instance = registry.Get(optionsType);
+									bool hasUpdates = false;
 
-								// Apply writer-specific config (e.g., "csv-writer")
-								if (job.ProviderOptions.TryGetValue($"{providerName}-writer", out var writerOpts))
-								{
-									ConfigurationBinder.Bind(instance, writerOpts);
-									hasUpdates = true;
-								}
-
-								if (hasUpdates)
-								{
-									// Propagate Key via interface
-									if (!string.IsNullOrEmpty(job.Key) && instance is IKeyAwareOptions keyAware1)
+									if (job.ProviderOptions.TryGetValue(providerName, out var globalOpts))
 									{
-										keyAware1.Key = job.Key;
+										ConfigurationBinder.Bind(instance, globalOpts);
+										hasUpdates = true;
 									}
-									registry.RegisterByType(optionsType, instance);
+									if (job.ProviderOptions.TryGetValue($"{providerName}-writer", out var writerOpts))
+									{
+										ConfigurationBinder.Bind(instance, writerOpts);
+										hasUpdates = true;
+									}
+
+									if (hasUpdates)
+									{
+										if (!string.IsNullOrEmpty(job.Key) && instance is IKeyAwareOptions keyAware1)
+											keyAware1.Key = job.Key;
+										registry.RegisterByType(optionsType, instance);
+									}
 								}
 							}
-						}
-						else if (contributor is IStreamReaderFactory rFactory)
-						{
-							var optionsType = rFactory.GetSupportedOptionTypes().FirstOrDefault();
-							if (optionsType != null)
+							else if (contributor is IStreamReaderFactory rFactory)
 							{
-								var instance = registry.Get(optionsType);
-								bool hasUpdates = false;
-
-								// Apply global provider config (e.g., "csv")
-								if (job.ProviderOptions.TryGetValue(providerName, out var globalOpts))
+								var optionsType = rFactory.GetSupportedOptionTypes().FirstOrDefault();
+								if (optionsType != null)
 								{
-									ConfigurationBinder.Bind(instance, globalOpts);
-									hasUpdates = true;
-								}
+									var instance = registry.Get(optionsType);
+									bool hasUpdates = false;
 
-								// Apply reader-specific config (e.g., "csv-reader")
-								if (job.ProviderOptions.TryGetValue($"{providerName}-reader", out var readerOpts))
-								{
-									ConfigurationBinder.Bind(instance, readerOpts);
-									hasUpdates = true;
-								}
+									if (job.ProviderOptions.TryGetValue(providerName, out var globalOpts))
+									{
+										ConfigurationBinder.Bind(instance, globalOpts);
+										hasUpdates = true;
+									}
+									if (job.ProviderOptions.TryGetValue($"{providerName}-reader", out var readerOpts))
+									{
+										ConfigurationBinder.Bind(instance, readerOpts);
+										hasUpdates = true;
+									}
 
-								if (hasUpdates)
-								{
-									registry.RegisterByType(optionsType, instance);
+									if (hasUpdates) registry.RegisterByType(optionsType, instance);
 								}
 							}
 						}
 					}
 				}
-			}
 
-			// Bind Options
-			foreach (var contributor in _contributors)
-			{
-				contributor.BindOptions(parseResult, registry);
-
-				if (!string.IsNullOrEmpty(job.Key) && contributor is IDataWriterFactory wFactory)
+				foreach (var contributor in _contributors)
 				{
-					var optionsType = wFactory.GetSupportedOptionTypes().FirstOrDefault();
-					if (optionsType != null)
+					contributor.BindOptions(pr, registry);
+
+					if (!string.IsNullOrEmpty(job.Key) && contributor is IDataWriterFactory wFactory)
 					{
-						var instance = registry.Get(optionsType);
-						// Propagate Key via interface — no reflection needed
-						if (instance is IKeyAwareOptions keyAware2)
+						var optionsType = wFactory.GetSupportedOptionTypes().FirstOrDefault();
+						if (optionsType != null)
 						{
-							keyAware2.Key = job.Key;
-							registry.RegisterByType(optionsType, instance);
+							var instance = registry.Get(optionsType);
+							if (instance is IKeyAwareOptions keyAware2)
+							{
+								keyAware2.Key = job.Key;
+								registry.RegisterByType(optionsType, instance);
+							}
 						}
 					}
 				}
-			}
 
-			// Resolve Infrastructure
-			var readerFactories = _contributors.OfType<IStreamReaderFactory>().ToList();
-			var (readerFactory, cleanedInput) = ResolveFactory(readerFactories, job.Input, "reader");
-			job = job with { Input = cleanedInput };
+				var readerFactories = _contributors.OfType<IStreamReaderFactory>().ToList();
+				var (readerFactory, cleanedInput) = ResolveFactory(readerFactories, job.Input, "reader");
+				job = job with { Input = cleanedInput };
 
-			_console.WriteLine($"Auto-detected input source: {readerFactory.ProviderName}");
+				if (!dagDefinition.IsDag) _console.WriteLine($"Auto-detected input source: {readerFactory.ComponentName}");
 
-			var writerFactories = _contributors.OfType<IDataWriterFactory>().ToList();
-			var (writerFactory, cleanedOutput) = ResolveFactory(writerFactories, job.Output, "writer");
-			job = job with { Output = cleanedOutput };
+				var writerFactories = _contributors.OfType<IDataWriterFactory>().ToList();
+				var (writerFactory, cleanedOutput) = ResolveFactory(writerFactories, job.Output, "writer");
+				job = job with { Output = cleanedOutput };
 
-			job = job with
-			{
-				Query = LoadOrReadContent(job.Query, _console, "query"),
-				PreExec = LoadOrReadContent(job.PreExec, _console, "Pre-Exec"),
-				PostExec = LoadOrReadContent(job.PostExec, _console, "Post-Exec"),
-				OnErrorExec = LoadOrReadContent(job.OnErrorExec, _console, "On-Error-Exec"),
-				FinallyExec = LoadOrReadContent(job.FinallyExec, _console, "Finally-Exec")
-			};
-
-			if (readerFactory.RequiresQuery)
-			{
-				if (string.IsNullOrWhiteSpace(job.Query))
+				job = job with
 				{
-					_console.Write(new Spectre.Console.Markup($"[red]Error: A query is required for provider '{readerFactory.ProviderName}'. Use --query \"SELECT...\"[/]{Environment.NewLine}"));
-					return 1;
+					Query = LoadOrReadContent(job.Query, _console, "query"),
+					PreExec = LoadOrReadContent(job.PreExec, _console, "Pre-Exec"),
+					PostExec = LoadOrReadContent(job.PostExec, _console, "Post-Exec"),
+					OnErrorExec = LoadOrReadContent(job.OnErrorExec, _console, "On-Error-Exec"),
+					FinallyExec = LoadOrReadContent(job.FinallyExec, _console, "Finally-Exec")
+				};
+
+				if (readerFactory.RequiresQuery)
+				{
+					if (string.IsNullOrWhiteSpace(job.Query))
+					{
+						_console.Write(new Spectre.Console.Markup($"[red]Error: A query is required for provider '{readerFactory.ComponentName}'. Use --query \"SELECT...\"[/]{Environment.NewLine}"));
+						return 1;
+					}
+					try { SqlQueryValidator.Validate(job.Query, job.UnsafeQuery); }
+					catch (InvalidOperationException ex)
+					{
+						_console.Write(new Spectre.Console.Markup($"[red]Error: {ex.Message}[/]{Environment.NewLine}"));
+						return 1;
+					}
+				}
+
+				var options = new DumpOptions
+				{
+					Provider = readerFactory.ComponentName,
+					ConnectionString = job.Input,
+					Query = job.Query,
+					OutputPath = job.Output,
+					ConnectionTimeout = job.ConnectionTimeout,
+					QueryTimeout = job.QueryTimeout,
+					BatchSize = job.BatchSize,
+					UnsafeQuery = job.UnsafeQuery,
+					DryRunCount = RawJobBuilder.ParseDryRunFromArgs(currentRawArgs),
+					Limit = job.Limit,
+					SamplingRate = job.SamplingRate,
+					SamplingSeed = job.SamplingSeed,
+					LogPath = job.LogPath,
+					Key = job.Key,
+					PreExec = job.PreExec,
+					PostExec = job.PostExec,
+					OnErrorExec = job.OnErrorExec,
+					FinallyExec = job.FinallyExec,
+					Strategy = job.Strategy,
+					InsertMode = job.InsertMode,
+					Table = job.Table,
+					MaxRetries = job.MaxRetries,
+					RetryDelayMs = job.RetryDelayMs,
+					StrictSchema = job.StrictSchema,
+					NoSchemaValidation = job.NoSchemaValidation,
+					NoStats = job.NoStats,
+					MetricsPath = job.MetricsPath,
+					AutoMigrate = job.AutoMigrate ?? false
+				};
+
+				registry.Register(options);
+
+				var exportService = _serviceProvider.GetRequiredService<ExportService>();
+				var tFactories = _contributors.OfType<IDataTransformerFactory>().ToList();
+				List<IDataTransformer> pipeline;
+
+				if (job.Transformers != null && job.Transformers.Count > 0)
+				{
+					pipeline = BuildPipelineFromYaml(job.Transformers, tFactories, _console);
+				}
+				else
+				{
+					var pipelineBuilder = new TransformerPipelineBuilder(tFactories);
+					pipeline = pipelineBuilder.Build(currentRawArgs);
 				}
 
 				try
 				{
-					SqlQueryValidator.Validate(job.Query, job.UnsafeQuery);
+					var pipelineOptions = new PipelineOptions
+					{
+						BatchSize      = options.BatchSize,
+						Limit          = options.Limit,
+						MaxRetries     = options.MaxRetries,
+						RetryDelayMs   = options.RetryDelayMs,
+						SamplingRate   = options.SamplingRate,
+						SamplingSeed   = options.SamplingSeed,
+						StrictSchema   = options.StrictSchema,
+						NoSchemaValidation = options.NoSchemaValidation,
+						AutoMigrate    = options.AutoMigrate,
+						DryRunCount    = options.DryRunCount,
+						PreExec        = options.PreExec,
+						PostExec       = options.PostExec,
+						OnErrorExec    = options.OnErrorExec,
+						FinallyExec    = options.FinallyExec,
+						NoStats        = options.NoStats,
+						MetricsPath    = options.MetricsPath,
+					};
+					await exportService.RunExportAsync(pipelineOptions, options.Provider, options.OutputPath, token, pipeline, readerFactory, writerFactory, registry);
+					return 0;
 				}
-				catch (InvalidOperationException ex)
+				catch (Exception ex)
 				{
-					_console.Write(new Spectre.Console.Markup($"[red]Error: {ex.Message}[/]{Environment.NewLine}"));
+					_console.Write(new Spectre.Console.Markup($"{Environment.NewLine}[red]Error: {Markup.Escape(ex.Message)}[/]{Environment.NewLine}"));
+					if (options.Provider == "duckdb" || Environment.GetEnvironmentVariable("DEBUG") == "1")
+						_console.WriteLine(ex.StackTrace ?? "");
 					return 1;
 				}
-			}
-
-			// Execution
-			var options = new DumpOptions
-			{
-				Provider = readerFactory.ProviderName,
-				ConnectionString = job.Input,
-				Query = job.Query,
-				OutputPath = job.Output,
-				ConnectionTimeout = job.ConnectionTimeout,
-				QueryTimeout = job.QueryTimeout,
-				BatchSize = job.BatchSize,
-				UnsafeQuery = job.UnsafeQuery,
-				DryRunCount = RawJobBuilder.ParseDryRunFromArgs(Environment.GetCommandLineArgs()),
-				Limit = job.Limit,
-				SamplingRate = job.SamplingRate,
-				SamplingSeed = job.SamplingSeed,
-				LogPath = job.LogPath,
-				Key = job.Key,
-				PreExec = job.PreExec,
-				PostExec = job.PostExec,
-				OnErrorExec = job.OnErrorExec,
-				FinallyExec = job.FinallyExec,
-				Strategy = job.Strategy,
-				InsertMode = job.InsertMode,
-				Table = job.Table,
-				MaxRetries = job.MaxRetries,
-				RetryDelayMs = job.RetryDelayMs,
-				StrictSchema = job.StrictSchema,
-				NoSchemaValidation = job.NoSchemaValidation,
-				MetricsPath = job.MetricsPath,
-				AutoMigrate = job.AutoMigrate ?? false
 			};
-
-			registry.Register(options); // Register DumpOptions here, after it's declared
-
-			if (!string.IsNullOrEmpty(options.LogPath))
+			// Initialize logging early for DAG execution
+			var logPath = parseResult.GetValue(logOption);
+			if (!string.IsNullOrEmpty(logPath))
 			{
 				Serilog.Log.Logger = new Serilog.LoggerConfiguration()
 					.MinimumLevel.Debug()
-					.WriteTo.File(options.LogPath)
+					.WriteTo.File(logPath)
 					.CreateLogger();
 				_loggerFactory.AddSerilog();
 			}
 
-			var exportService = _serviceProvider.GetRequiredService<ExportService>();
-			var tFactories = _contributors.OfType<IDataTransformerFactory>().ToList();
-			List<IDataTransformer> pipeline;
-
-			if (job.Transformers != null && job.Transformers.Count > 0)
+			if (dagDefinition.IsDag)
 			{
-				pipeline = BuildPipelineFromYaml(job.Transformers, tFactories, _console);
-			}
-			else
-			{
-				var pipelineBuilder = new TransformerPipelineBuilder(tFactories);
-				pipeline = pipelineBuilder.Build(Environment.GetCommandLineArgs());
-			}
-
-			try
-			{
-				var pipelineOptions = new PipelineOptions
+				try
 				{
-					BatchSize      = options.BatchSize,
-					Limit          = options.Limit,
-					MaxRetries     = options.MaxRetries,
-					RetryDelayMs   = options.RetryDelayMs,
-					SamplingRate   = options.SamplingRate,
-					SamplingSeed   = options.SamplingSeed,
-					StrictSchema   = options.StrictSchema,
-					NoSchemaValidation = options.NoSchemaValidation,
-					AutoMigrate    = options.AutoMigrate,
-					DryRunCount    = options.DryRunCount,
-					PreExec        = options.PreExec,
-					PostExec       = options.PostExec,
-					OnErrorExec    = options.OnErrorExec,
-					FinallyExec    = options.FinallyExec,
-					NoStats        = options.NoStats,
-					MetricsPath    = options.MetricsPath,
-				};
-				await exportService.RunExportAsync(pipelineOptions, options.Provider, options.OutputPath, ct, pipeline, readerFactory, writerFactory, registry);
-				return 0;
-			}
-			catch (Exception ex)
-			{
-				_console.Write(new Spectre.Console.Markup($"{Environment.NewLine}[red]Error: {Markup.Escape(ex.Message)}[/]{Environment.NewLine}"));
-				if (options.Provider == "duckdb" || Environment.GetEnvironmentVariable("DEBUG") == "1")
-				{
-					_console.WriteLine(ex.StackTrace ?? "");
+					var orchestrator = _serviceProvider.GetRequiredService<IDagOrchestrator>();
+					orchestrator.OnLogEvent = msg => _console.MarkupLine(msg);
+
+					Func<string[], CancellationToken, Task<int>> branchExecutor = async (branchArgs, token) =>
+					{
+						var branchPr = rootCommand.Parse(branchArgs);
+						if (branchPr.Errors.Count > 0)
+						{
+							_console.Write(new Spectre.Console.Markup($"[red]Error parsing branch arguments:[/]{Environment.NewLine}"));
+							foreach(var err in branchPr.Errors) _console.WriteLine(err.Message);
+							return 1;
+						}
+						// Suppress log file setup on branches, they will inherit global settings or orchestrator will capture
+						return await executePipeline(branchPr, token, branchArgs);
+					};
+
+					return await orchestrator.ExecuteAsync(dagDefinition, branchExecutor, ct);
 				}
-				return 1;
+				catch (Exception ex)
+				{
+					_console.Write(new Spectre.Console.Markup($"{Environment.NewLine}[red]Error:[/] {Spectre.Console.Markup.Escape(ex.Message)}{Environment.NewLine}"));
+					if (Environment.GetEnvironmentVariable("DEBUG") == "1")
+					{
+						_console.WriteException(ex);
+					}
+					return 1;
+				}
 			}
+
+			// Execution for non-DAG
+			return await executePipeline(parseResult, ct, rawArgs);
 		});
 
 		Action printHelp = () => PrintGroupedHelp(rootCommand, coreOptions, _contributors, _console);
@@ -492,7 +524,7 @@ public class JobService
 		foreach (var config in configs)
 		{
 			var factory = factories.FirstOrDefault(f =>
-				f.TransformerType.Equals(config.Type, StringComparison.OrdinalIgnoreCase));
+				f.ComponentName.Equals(config.Type, StringComparison.OrdinalIgnoreCase));
 
 			if (factory == null)
 			{
@@ -523,7 +555,7 @@ public class JobService
 		// 1. Deterministic Prefix Check
 		foreach (var factory in factories)
 		{
-			var prefix = factory.ProviderName + ":";
+			var prefix = factory.ComponentName + ":";
 
 			// Check for "prefix:" behavior (standard)
 			if (rawString.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
@@ -534,7 +566,7 @@ public class JobService
 
 			// Check for "prefix" behavior (e.g. "csv" or "parquet" for streams)
 			// This allows syntax like: dtpipe -i csv -o parquet
-			if (rawString.Equals(factory.ProviderName, StringComparison.OrdinalIgnoreCase))
+			if (rawString.Equals(factory.ComponentName, StringComparison.OrdinalIgnoreCase))
 			{
 				return (factory, "");
 			}
@@ -619,9 +651,8 @@ public class JobService
 		return input;
 	}
 
-	private static void CheckDeprecations(ParseResult parseResult, IAnsiConsole console)
+	private static void CheckDeprecations(ParseResult parseResult, IAnsiConsole console, string[] args)
 	{
-		var args = Environment.GetCommandLineArgs();
 
 		// 1. Check for --sample-rate or --sample-seed
 		if (args.Any(a => a.Equals("--sample-rate", StringComparison.OrdinalIgnoreCase)))

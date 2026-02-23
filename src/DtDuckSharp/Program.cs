@@ -1,4 +1,5 @@
-﻿using System.CommandLine;
+﻿
+using System.CommandLine;
 using System.Diagnostics;
 using System.Linq;
 using Apache.Arrow;

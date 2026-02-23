@@ -3,13 +3,8 @@ namespace DtPipe.Core.Abstractions;
 /// <summary>
 /// Base factory interface for data components (Readers/Writers) that can be selected via connection string.
 /// </summary>
-public interface IDataFactory
+public interface IDataFactory : IComponentDescriptor
 {
-	/// <summary>
-	/// Unique provider name (e.g., "duck", "ora", "csv").
-	/// Used for deterministic prefix-based resolution (e.g. "duck:my.db") and display.
-	/// </summary>
-	string ProviderName { get; }
 
 	/// <summary>
 	/// Determines if this factory can handle the given connection string or file path.

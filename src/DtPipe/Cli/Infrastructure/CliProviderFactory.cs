@@ -1,5 +1,6 @@
+
 using System.CommandLine;
-using DtPipe.Cli.Abstractions;
+using DtPipe.Cli.Infrastructure;
 using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Options;
@@ -28,18 +29,13 @@ public class CliProviderFactory<TService> : ICliContributor, IDataFactory
 	}
 
 	// IDataFactory Implementation
-	public string ProviderName => _descriptor.ProviderName;
+	public string ComponentName => _descriptor.ComponentName;
 	public bool CanHandle(string connectionString) => _descriptor.CanHandle(connectionString);
+	public Type OptionsType => _descriptor.OptionsType;
 
 	// ICliContributor Implementation
 	// Determine category based on TService type
-	public string Category => typeof(TService).Name switch
-	{
-		nameof(IDataWriter) => "Writer Options",
-		nameof(IStreamReader) => "Reader Options",
-		nameof(IDataTransformer) => "Transformer Options",
-		_ => "Provider Options"
-	};
+	public string Category => _descriptor.Category;
 
 	public IEnumerable<Option> GetCliOptions()
 	{
@@ -89,13 +85,13 @@ public class CliDataWriterFactory : CliProviderFactory<IDataWriter>, IDataWriter
 		var dumpOptions = registry.Get<DumpOptions>();
 
 		// 1. Resolve Strategy
-		ResolveGenericOption(specificOptions, "Strategy", dumpOptions.Strategy, _descriptor.ProviderName);
+		ResolveGenericOption(specificOptions, "Strategy", dumpOptions.Strategy, _descriptor.ComponentName);
 
 		// 2. Resolve InsertMode
-		ResolveGenericOption(specificOptions, "InsertMode", dumpOptions.InsertMode, _descriptor.ProviderName);
+		ResolveGenericOption(specificOptions, "InsertMode", dumpOptions.InsertMode, _descriptor.ComponentName);
 
 		// 3. Resolve Table
-		ResolveGenericOption(specificOptions, "Table", dumpOptions.Table, _descriptor.ProviderName);
+		ResolveGenericOption(specificOptions, "Table", dumpOptions.Table, _descriptor.ComponentName);
 
 		// Use the descriptor to create.
 		return _descriptor.Create(dumpOptions.OutputPath, specificOptions, _serviceProvider);

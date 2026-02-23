@@ -12,7 +12,10 @@ public record TransformerConfig
 	public Dictionary<string, string>? Mask => Type == "mask" ? Mappings : null;
 	public Dictionary<string, string>? Fake => Type == "fake" ? Mappings : null;
 	public Dictionary<string, string>? Format => Type == "format" ? Mappings : null;
-	public Dictionary<string, string>? Script => Type == "script" ? Mappings : null;
+	public Dictionary<string, string>? Compute => Type == "compute" ? Mappings : null;
+	public Dictionary<string, string>? Filter => (Type == "filter" || Type == "where") ? Mappings : null;
+	public Dictionary<string, string>? Window => Type == "window" ? Mappings : null;
+	public Dictionary<string, string>? Expand => Type == "expand" ? Mappings : null;
 	public Dictionary<string, string>? Overwrite => Type == "overwrite" ? Mappings : null;
 
 	public Dictionary<string, string>? Options { get; init; }

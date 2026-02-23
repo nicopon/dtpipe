@@ -4,7 +4,7 @@ set -eo pipefail
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 ROOT_DIR="$DIR/../.."
 
-echo "--- Benchmarking SQL Engines (75M rows + 2 JOINs) ---"
+echo "--- Benchmarking SQL Engines (5M rows + 2 JOINs) ---"
 
 # Build all just in case
 echo "Building binaries..."
@@ -34,7 +34,7 @@ for i in {1..1000}; do
     echo "$i,desc_$i" >> "$REF2_CSV"
 done
 
-ROWS=75000000
+ROWS=5000000
 PIPE_CMD="$DTPIPE_CMD -i generate:$ROWS --fake Email:internet.email --fake Name:name.fullname --fake Amount:finance.amount --fake Country:address.countrycode -o arrow:-"
 
 echo ""
@@ -87,6 +87,19 @@ echo "======================================"
   --query "$QUERY_DUCK" \
   --out "csv:-"
 
-rm "$REF_CSV" "$REF2_CSV"
+echo ""
+echo "======================================"
+echo "          5. DtPipe Native Join ($ROWS rows) "
+echo "======================================"
+# DtPipe XStreamer Native Join Pipeline
+/usr/bin/time -l "$DTPIPE_CMD" \
+  -i "generate:$ROWS" --fake Email:internet.email --fake Name:name.fullname --fake Amount:finance.amount --fake Country:address.countrycode --alias stream \
+  -i "csv:$REF_CSV" --alias ref \
+  -i "csv:$REF2_CSV" --alias ref2 \
+  -x native-join --main stream --ref ref --on "GenerateIndex=Id" --select "Val" --alias j1 \
+  -x native-join --main j1 --ref ref2 --on "GenerateIndex=Id" --select "Desc" \
+  -o "null.sha256"
+
+rm "$REF_CSV" "$REF2_CSV" "null.sha256"
 echo ""
 echo "Benchmark finished."

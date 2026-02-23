@@ -19,9 +19,9 @@ public class SqliteWriterOptions : IOptionSet, IKeyAwareOptions
 	public static string DisplayName => "SQLite Writer";
 	public string? Key { get; set; }
 
-	[CliOption(Description = "Target table name", Hidden = true)]
+	[ComponentOption(Description = "Target table name", Hidden = true)]
 	public string Table { get; set; } = "export";
 
-	[CliOption(Description = "Data write strategy (Append, Truncate, or Recreate)", Hidden = true)]
+	[ComponentOption(Description = "Data write strategy (Append, Truncate, or Recreate)", Hidden = true)]
 	public SqliteWriteStrategy? Strategy { get; set; }
 }

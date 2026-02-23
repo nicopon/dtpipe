@@ -1,5 +1,7 @@
+
 using System.CommandLine;
-using DtPipe.Cli.Abstractions;
+using System.CommandLine.Parsing;
+using DtPipe.Cli.Infrastructure;
 using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Pipelines;
@@ -15,13 +17,14 @@ public static class RawJobBuilder
 	public static (JobDefinition Job, int ExitCode) Build(
 		ParseResult parseResult,
 		Option<string?> jobOption,
-		Option<string?> inputOption,
-		Option<string?> queryOption,
-		Option<string?> outputOption,
+		Option<string[]> inputOption,
+		Option<string[]> queryOption,
+		Option<string[]> outputOption,
 		Option<int> connectionTimeoutOption,
 		Option<int> queryTimeoutOption,
 		Option<int> batchSizeOption,
 		Option<bool> unsafeQueryOption,
+		Option<bool> noStatsOption,
 		Option<int> limitOption,
 		Option<double> samplingRateOption,
 		Option<int?> samplingSeedOption,
@@ -39,7 +42,8 @@ public static class RawJobBuilder
 		Option<bool?> strictSchemaOption,
 		Option<bool?> noSchemaValidationOption,
 		Option<string?> metricsPathOption,
-		Option<bool?> autoMigrateOption)
+		Option<bool?> autoMigrateOption,
+		Option<string[]> xstreamerOption)
 	{
 		var jobFile = parseResult.GetValue(jobOption);
 		JobDefinition job;
@@ -130,9 +134,9 @@ public static class RawJobBuilder
 		}
 		else
 		{
-			var query = parseResult.GetValue(queryOption);
-			var output = parseResult.GetValue(outputOption);
-			var input = parseResult.GetValue(inputOption);
+			var query = parseResult.GetValue(queryOption)?.LastOrDefault();
+			var output = parseResult.GetValue(outputOption)?.LastOrDefault();
+			var input = parseResult.GetValue(inputOption)?.LastOrDefault();
 
 			// Validation (Required args)
 			if (string.IsNullOrWhiteSpace(output))
@@ -141,15 +145,22 @@ public static class RawJobBuilder
 				return (new JobDefinition { Input = "", Query = "", Output = "" }, 1);
 			}
 
-			if (string.IsNullOrWhiteSpace(input))
+			var xstreamer = parseResult.GetValue(xstreamerOption)?.LastOrDefault();
+			if (string.IsNullOrWhiteSpace(input) && string.IsNullOrWhiteSpace(xstreamer))
 			{
-				Console.Error.WriteLine("Error: --input is required.");
+				Console.Error.WriteLine("Error: --input or --xstreamer is required.");
 				return (new JobDefinition { Input = "", Query = "", Output = "" }, 1);
+			}
+
+			// If xstreamer is provided, bypass input by faking it for downstream resolution if needed
+			if (!string.IsNullOrWhiteSpace(xstreamer) && string.IsNullOrWhiteSpace(input))
+			{
+				input = $"{xstreamer}:";
 			}
 
 			job = new JobDefinition
 			{
-				Input = input,
+				Input = input ?? "",
 				Query = query,
 				Output = output,
 				ConnectionTimeout = parseResult.GetValue(connectionTimeoutOption),
@@ -226,7 +237,7 @@ public static class RawJobBuilder
 				{
 					configs.Add(new TransformerConfig
 					{
-						Type = currentFactory.TransformerType,
+						Type = currentFactory.ComponentName,
 						Mappings = currentMappings.Count > 0 ? new Dictionary<string, string>(currentMappings) : null,
 						Options = currentOptions.Count > 0 ? new Dictionary<string, string>(currentOptions) : null
 					});
@@ -255,7 +266,7 @@ public static class RawJobBuilder
 				if (value != null)
 				{
 					var optionName = arg.TrimStart('-');
-					var factoryType = factory.TransformerType;
+					var factoryType = factory.ComponentName;
 
 					if (optionName.Equals(factoryType, StringComparison.OrdinalIgnoreCase))
 					{
@@ -290,7 +301,7 @@ public static class RawJobBuilder
 		{
 			configs.Add(new TransformerConfig
 			{
-				Type = currentFactory.TransformerType,
+				Type = currentFactory.ComponentName,
 				Mappings = currentMappings.Count > 0 ? new Dictionary<string, string>(currentMappings) : null,
 				Options = currentOptions.Count > 0 ? new Dictionary<string, string>(currentOptions) : null
 			});

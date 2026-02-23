@@ -1,8 +1,11 @@
 ﻿using DtPipe.Cli;
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Core.Options;
-using DtPipe.Core.Services;
+using DtPipe.Core.Pipelines.Dag;
+using DtPipe.XStreamers.Native;
+using DtPipe.Transformers.Services;
 using DtPipe.Observers;
 using DtPipe.Transformers.Expand;
 using DtPipe.Transformers.Fake;
@@ -87,7 +90,12 @@ class Program
 		var readerDescType = typeof(IProviderDescriptor<IStreamReader>);
 		var writerDescType = typeof(IProviderDescriptor<IDataWriter>);
 
-		var assemblies = new[] { typeof(Program).Assembly };
+		var assemblies = new[]
+		{
+			typeof(Program).Assembly,
+			typeof(DtPipe.Adapters.MemoryChannel.MemoryChannelDataWriter).Assembly,
+			typeof(DtPipe.XStreamers.Native.NativeJoinXStreamer).Assembly
+		};
 
 		var registerReaderMethod = typeof(Program).GetMethod(nameof(RegisterReader), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
 		var registerWriterMethod = typeof(Program).GetMethod(nameof(RegisterWriter), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
@@ -111,16 +119,16 @@ class Program
 		}
 
 		// Transformer Factories
-		services.AddSingleton<IDataTransformerFactory, NullDataTransformerFactory>();
-		services.AddSingleton<IDataTransformerFactory, OverwriteDataTransformerFactory>();
-		services.AddSingleton<IDataTransformerFactory, FakeDataTransformerFactory>();
-		services.AddSingleton<IDataTransformerFactory, FormatDataTransformerFactory>();
-		services.AddSingleton<IDataTransformerFactory, MaskDataTransformerFactory>();
-		services.AddSingleton<IDataTransformerFactory, ComputeDataTransformerFactory>();
-		services.AddSingleton<IDataTransformerFactory, FilterDataTransformerFactory>();
-		services.AddSingleton<IDataTransformerFactory, ExpandDataTransformerFactory>();
-		services.AddSingleton<IDataTransformerFactory, ProjectDataTransformerFactory>();
-		services.AddSingleton<IDataTransformerFactory, WindowDataTransformerFactory>();
+		RegisterTransformer<NullDataTransformerFactory>(services);
+		RegisterTransformer<OverwriteDataTransformerFactory>(services);
+		RegisterTransformer<FakeDataTransformerFactory>(services);
+		RegisterTransformer<FormatDataTransformerFactory>(services);
+		RegisterTransformer<MaskDataTransformerFactory>(services);
+		RegisterTransformer<ComputeDataTransformerFactory>(services);
+		RegisterTransformer<FilterDataTransformerFactory>(services);
+		RegisterTransformer<ExpandDataTransformerFactory>(services);
+		RegisterTransformer<ProjectDataTransformerFactory>(services);
+		RegisterTransformer<WindowDataTransformerFactory>(services);
 
 		// Services
 		services.AddSingleton<IJsEngineProvider, JsEngineProvider>();
@@ -128,6 +136,13 @@ class Program
 		// Export Service
 		services.AddSingleton<IExportObserver, SpectreConsoleObserver>();
 		services.AddSingleton<ExportService>();
+
+		// DAG Orchestrator & Memory Channels
+		services.AddSingleton<IMemoryChannelRegistry, MemoryChannelRegistry>();
+		services.AddTransient<IDagOrchestrator, DagOrchestrator>();
+
+		// XStreamers are now auto-discovered as readers, no custom factory needed
+
 	}
 
 	private static void RegisterWriter<TDesc>(IServiceCollection services) where TDesc : class, IProviderDescriptor<IDataWriter>, new()
@@ -146,5 +161,14 @@ class Program
 			sp.GetRequiredService<OptionsRegistry>(),
 			sp
 		));
+	}
+
+	private static void RegisterTransformer<TFac>(IServiceCollection services) where TFac : class, IDataTransformerFactory
+	{
+		services.AddSingleton<IDataTransformerFactory>(sp =>
+		{
+			var inner = ActivatorUtilities.CreateInstance<TFac>(sp);
+			return new CliDataTransformerFactory(inner);
+		});
 	}
 }

@@ -21,6 +21,7 @@ public sealed class ChecksumDataWriter : IDataWriter, IRequiresOptions<ChecksumW
 	public ChecksumDataWriter(string connectionString, ChecksumWriterOptions options, ILogger<ChecksumDataWriter> logger)
 	{
 		_options = options;
+		_options.OutputPath = connectionString;
 		_logger = logger;
 	}
 

@@ -1,5 +1,5 @@
 using DtPipe.Core.Models;
-using DtPipe.Core.Services;
+using DtPipe.Transformers.Services;
 using DtPipe.Transformers.Script;
 using FluentAssertions;
 using Jint.Runtime;
@@ -13,7 +13,7 @@ public class ComputeResolutionTests : IDisposable
 
 	public ComputeResolutionTests()
 	{
-		_jsEngineProvider = new DtPipe.Core.Services.JsEngineProvider();
+		_jsEngineProvider = new DtPipe.Transformers.Services.JsEngineProvider();
 	}
 
 	public void Dispose()
@@ -58,7 +58,7 @@ public class ComputeResolutionTests : IDisposable
 		var columns = new List<PipeColumnInfo> { new("HACK", typeof(string), true) };
 
 		// Act & Assert
-		// Initialize compiles the script and executes it immediately if it's registration script? 
+		// Initialize compiles the script and executes it immediately if it's registration script?
 		// No, ComputeDataTransformer executes row transformation on Transform.
 		// Initialize compiles the script
 		await transformer.InitializeAsync(columns);

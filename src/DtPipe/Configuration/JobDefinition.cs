@@ -23,6 +23,7 @@ public record JobDefinition
 	public bool UnsafeQuery { get; init; } = false;
 	public bool StrictSchema { get; init; } = false;
 	public bool NoSchemaValidation { get; init; } = false;
+	public bool NoStats { get; init; } = false;
 
 	public int ConnectionTimeout { get; init; } = 10;
 	public int QueryTimeout { get; init; } = 0;

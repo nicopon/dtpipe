@@ -17,7 +17,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Apache.Arrow" Version="19.0.0" />
+    <PackageReference Include="Apache.Arrow" Version="22.1.0" />
     <PackageReference Include="Bogus" Version="35.6.5" />
     <PackageReference Include="CsvHelper" Version="33.1.0" />
     <PackageReference Include="DuckDB.NativeBinaries" Version="1.4.2" />

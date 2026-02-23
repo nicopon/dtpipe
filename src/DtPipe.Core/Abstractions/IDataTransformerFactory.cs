@@ -6,11 +6,6 @@ namespace DtPipe.Core.Abstractions;
 
 public interface IDataTransformerFactory : IDataFactory
 {
-	/// <summary>
-	/// Transformer type identifier for YAML matching and CLI prefix.
-	/// Example: "fake" matches YAML type and --fake-* options.
-	/// </summary>
-	string TransformerType { get; }
 
 	// Create(DumpOptions) removed as legacy
 

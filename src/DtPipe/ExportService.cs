@@ -103,7 +103,7 @@ public class ExportService
 			return;
 		}
 
-		string writerName = writerFactory.ProviderName;
+		string writerName = writerFactory.ComponentName;
 		_observer.ShowTarget(writerName, outputPath);
 
 		var exportableSchema = currentSchema;
