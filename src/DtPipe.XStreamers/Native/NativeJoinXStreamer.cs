@@ -7,6 +7,16 @@ using Microsoft.Extensions.Logging;
 
 namespace DtPipe.XStreamers.Native;
 
+/// <summary>
+/// Implements a hash join between two memory channels.
+/// </summary>
+/// <remarks>
+/// <b>Limitation:</b> Only single-column join keys are supported via <c>--on MainCol=RefCol</c>.
+/// Composite key joins are not supported in this version.
+/// The reference stream (<c>--ref</c>) is fully materialized into a Dictionary in RAM (hash build phase).
+/// It is recommended to use the smallest dataset as the reference.
+/// A warning is emitted if the reference exceeds 50,000 rows.
+/// </remarks>
 public class NativeJoinXStreamer : IStreamReader
 {
     private readonly IMemoryChannelRegistry _registry;
@@ -50,9 +60,13 @@ public class NativeJoinXStreamer : IStreamReader
         _logger = logger;
 
         var parts = onClause.Split('=', StringSplitOptions.TrimEntries);
-        if (parts.Length != 2)
+        if (parts.Length != 2 || parts[0].Contains(',') || parts[1].Contains(','))
         {
-            throw new ArgumentException($"Invalid '--on' clause format: {onClause}. Must be 'MainColumn=RefColumn'.", nameof(onClause));
+            throw new ArgumentException(
+                $"Invalid '--on' clause: '{onClause}'. " +
+                "Only single-column joins are supported (format: 'MainColumn=RefColumn'). " +
+                "Composite key joins are not supported in this version.",
+                nameof(onClause));
         }
 
         _mainKeyCol = parts[0];
@@ -114,6 +128,16 @@ public class NativeJoinXStreamer : IStreamReader
             }
         }
         _logger.LogInformation("Hash Map built with {Count} indexed rows from '{RefAlias}'.", _refMap.Count, _refAlias);
+
+        // Warning if the reference is large
+        if (_refMap.Count > 50_000)
+        {
+            _logger.LogWarning(
+                "The reference stream '{RefAlias}' contains {Count} rows fully loaded in RAM. " +
+                "For best performance, '--ref' should point to the smaller side of the join. " +
+                "Consider pre-filtering the reference dataset.",
+                _refAlias, _refMap.Count);
+        }
     }
 
     public async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(int batchSize, [EnumeratorCancellation] CancellationToken ct = default)

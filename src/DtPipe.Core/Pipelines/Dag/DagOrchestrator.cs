@@ -132,6 +132,9 @@ public class DagOrchestrator : IDagOrchestrator
                 argsList.Add("-o");
                 argsList.Add($"memory:{branch.Alias}");
 
+                _logger.LogInformation("Branch '{Alias}' output redirected to in-memory channel (DAG intermediate).", branch.Alias);
+                OnLogEvent?.Invoke($"  [grey]↳ Branch '{branch.Alias}' → [italic]memory channel[/] (intermediate DAG buffer)[/]");
+
                 // Disable stats for internal memory-bound branches to prevent Spectre.Console concurrency deadlocks
                 if (!argsList.Contains("--no-stats", StringComparer.OrdinalIgnoreCase))
                 {

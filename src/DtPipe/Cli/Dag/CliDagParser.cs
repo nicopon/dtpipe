@@ -21,12 +21,12 @@ public static class CliDagParser
     {
         if (args == null || args.Length == 0)
         {
-            return new JobDagDefinition { Branches = Array.Empty<BranchDefinition>(), GlobalArguments = Array.Empty<string>() };
+            return new JobDagDefinition { Branches = Array.Empty<BranchDefinition>() };
         }
 
         var branches = new List<BranchDefinition>();
         var currentBranchArgs = new List<string>();
-        var globalArgs = new List<string>(); // Future use: distinguish true global args vs first branch args
+
 
         bool isCurrentBranchXStreamer = false;
         bool hasSeenInputInCurrentBranch = false;
@@ -80,9 +80,7 @@ public static class CliDagParser
 
         return new JobDagDefinition
         {
-            Branches = branches,
-            // For now, everything before the first -x is considered branch 0's args. We don't have strictly "global" args parsed out yet.
-            GlobalArguments = Array.Empty<string>()
+            Branches = branches
         };
     }
 
@@ -117,5 +115,53 @@ public static class CliDagParser
             }
         }
         return null;
+    }
+
+    /// <summary>
+    /// Validates the DAG topology. Returns a list of error messages. Empty = valid.
+    /// </summary>
+    public static IReadOnlyList<string> Validate(JobDagDefinition dag)
+    {
+        var errors = new List<string>();
+        var registeredAliases = new HashSet<string>(dag.Branches.Select(b => b.Alias), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var branch in dag.Branches.Where(b => b.IsXStreamer))
+        {
+            // Extract --main value from branch.Arguments
+            var mainAlias = ExtractArgValue(branch.Arguments, "--main");
+            if (string.IsNullOrEmpty(mainAlias))
+            {
+                errors.Add($"XStreamer branch '{branch.Alias}' is missing the '--main' argument.");
+            }
+            else if (!registeredAliases.Contains(mainAlias))
+            {
+                errors.Add($"XStreamer branch '{branch.Alias}' references unknown alias '--main {mainAlias}'. Known aliases: {string.Join(", ", registeredAliases)}.");
+            }
+
+            // Extract all --ref values
+            var refAliases = ExtractAllArgValues(branch.Arguments, "--ref");
+            foreach (var refAlias in refAliases)
+            {
+                if (!registeredAliases.Contains(refAlias))
+                {
+                    errors.Add($"XStreamer branch '{branch.Alias}' references unknown alias '--ref {refAlias}'. Known aliases: {string.Join(", ", registeredAliases)}.");
+                }
+            }
+        }
+
+        return errors;
+    }
+
+    private static string? ExtractArgValue(string[] args, string flag)
+    {
+        for (int i = 0; i < args.Length - 1; i++)
+            if (args[i].Equals(flag, StringComparison.OrdinalIgnoreCase)) return args[i + 1];
+        return null;
+    }
+
+    private static IEnumerable<string> ExtractAllArgValues(string[] args, string flag)
+    {
+        for (int i = 0; i < args.Length - 1; i++)
+            if (args[i].Equals(flag, StringComparison.OrdinalIgnoreCase)) yield return args[i + 1];
     }
 }

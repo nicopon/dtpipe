@@ -17,10 +17,4 @@ public record JobDagDefinition
     /// (i.e., it contains more than one branch or an explicit XStreamer).
     /// </summary>
     public bool IsDag => Branches.Count > 1 || Branches.Any(b => b.IsXStreamer);
-
-    /// <summary>
-    /// Global arguments that apply to the entire job (e.g., logging, timeout options)
-    /// that were not tied to a specific branch.
-    /// </summary>
-    public string[] GlobalArguments { get; init; } = Array.Empty<string>();
 }

@@ -3,8 +3,6 @@ using System.CommandLine;
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Cli.Commands;
 using DtPipe.Cli.Dag;
-using System.CommandLine;
-using System.CommandLine.Parsing;
 using DtPipe.Cli.Security;
 using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
@@ -411,6 +409,14 @@ public class JobService
 
 			if (dagDefinition.IsDag)
 			{
+				var topologyErrors = CliDagParser.Validate(dagDefinition);
+				if (topologyErrors.Count > 0)
+				{
+					foreach (var err in topologyErrors)
+						_console.MarkupLine($"[red]DAG topology error:[/] {err}");
+					return 1;
+				}
+
 				try
 				{
 					var orchestrator = _serviceProvider.GetRequiredService<IDagOrchestrator>();

@@ -20,18 +20,30 @@ public static class CliOptionBuilder
 		var prefix = T.Prefix;
 		var defaultInstance = new T(); // Used to get default values
 
+		IReadOnlyDictionary<string, string>? cliMetadata = null;
+		if (defaultInstance is ICliOptionMetadata meta)
+		{
+			cliMetadata = meta.PropertyToFlag;
+		}
+
 		foreach (var property in typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance))
 		{
 			var cliOptionAttr = property.GetCustomAttribute<ComponentOptionAttribute>();
 			var descriptionAttr = property.GetCustomAttribute<DescriptionAttribute>();
 
-			// Skip properties without [Description] OR [ComponentOption] attribute
-			if (cliOptionAttr is null && descriptionAttr is null)
+			string? metadataFlag = null;
+			if (cliMetadata != null && cliMetadata.TryGetValue(property.Name, out var mappedFlag))
+			{
+				metadataFlag = mappedFlag;
+			}
+
+			// Skip properties without [Description] OR [ComponentOption] attribute OR ICliOptionMetadata mapping
+			if (cliOptionAttr is null && descriptionAttr is null && metadataFlag is null)
 			{
 				continue;
 			}
 
-			var flagName = cliOptionAttr?.Name;
+			var flagName = metadataFlag ?? cliOptionAttr?.Name;
 			if (string.IsNullOrEmpty(flagName))
 			{
 				var kebabProp = property.Name.ToKebabCase();
@@ -108,6 +120,11 @@ public static class CliOptionBuilder
 			{
 				option.Description = "[HIDDEN] " + (option.Description ?? "");
 			}
+			// Hide options that originate from ICliOptionMetadata
+			else if (metadataFlag != null)
+			{
+				option.Description = "[HIDDEN] " + (option.Description ?? "");
+			}
 
 			options.Add(option);
 		}
@@ -127,17 +144,29 @@ public static class CliOptionBuilder
 		var prefix = T.Prefix;
 		var defaultInstance = new T();
 
+		IReadOnlyDictionary<string, string>? cliMetadata = null;
+		if (defaultInstance is ICliOptionMetadata meta)
+		{
+			cliMetadata = meta.PropertyToFlag;
+		}
+
 		foreach (var property in typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance))
 		{
 			var cliOptionAttr = property.GetCustomAttribute<ComponentOptionAttribute>();
 			var descriptionAttr = property.GetCustomAttribute<DescriptionAttribute>();
 
-			if (cliOptionAttr is null && descriptionAttr is null)
+			string? metadataFlag = null;
+			if (cliMetadata != null && cliMetadata.TryGetValue(property.Name, out var mappedFlag))
+			{
+				metadataFlag = mappedFlag;
+			}
+
+			if (cliOptionAttr is null && descriptionAttr is null && metadataFlag is null)
 			{
 				continue;
 			}
 
-			var flagName = cliOptionAttr?.Name;
+			var flagName = metadataFlag ?? cliOptionAttr?.Name;
 			if (string.IsNullOrEmpty(flagName))
 			{
 				var kebabProp = property.Name.ToKebabCase();
@@ -195,6 +224,11 @@ public static class CliOptionBuilder
 
 			// Set Hidden status (workaround for older System.CommandLine)
 			if (cliOptionAttr?.Hidden == true)
+			{
+				option.Description = "[HIDDEN] " + (option.Description ?? "");
+			}
+			// Hide options that originate from ICliOptionMetadata
+			else if (metadataFlag != null)
 			{
 				option.Description = "[HIDDEN] " + (option.Description ?? "");
 			}

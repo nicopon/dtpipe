@@ -2,6 +2,7 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using System.Threading.Channels;
 using DtPipe.Core.Abstractions.Dag;
+using Microsoft.Extensions.Logging;
 
 namespace DtPipe.Adapters.MemoryChannel;
 
@@ -14,17 +15,20 @@ public class MemoryChannelDataWriter : IDataWriter
     private readonly ChannelWriter<IReadOnlyList<object?[]>> _writer;
     private readonly IMemoryChannelRegistry _registry;
     private readonly string _alias;
+    private readonly ILogger<MemoryChannelDataWriter> _logger;
     private bool _isDisposed;
 
-    public MemoryChannelDataWriter(ChannelWriter<IReadOnlyList<object?[]>> writer, IMemoryChannelRegistry registry, string alias)
+    public MemoryChannelDataWriter(ChannelWriter<IReadOnlyList<object?[]>> writer, IMemoryChannelRegistry registry, string alias, ILogger<MemoryChannelDataWriter> logger)
     {
         _writer = writer;
         _registry = registry;
         _alias = alias;
+        _logger = logger;
     }
 
     public async ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
     {
+        _logger.LogDebug("MemoryChannelDataWriter '{Alias}' initialized with {ColumnCount} columns. Data buffered in RAM.", _alias, columns.Count);
         // Metadata is registered upfront by the orchestrator (empty), but now we dynamically update it.
         _registry.UpdateChannelColumns(_alias, columns);
         await Task.CompletedTask;
@@ -56,9 +60,8 @@ public class MemoryChannelDataWriter : IDataWriter
         return ValueTask.CompletedTask;
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
-        CompleteAsync().AsTask().Wait();
-        return ValueTask.CompletedTask;
+        await CompleteAsync();
     }
 }
