@@ -2,6 +2,7 @@ using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Core.Models;
 using System.Collections.Concurrent;
 using System.Threading.Channels;
+using Apache.Arrow;
 
 namespace DtPipe.Core.Pipelines.Dag;
 
@@ -14,6 +15,12 @@ public class MemoryChannelRegistry : IMemoryChannelRegistry
         = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly ConcurrentDictionary<string, TaskCompletionSource<IReadOnlyList<PipeColumnInfo>>> _columnTcs
+        = new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly ConcurrentDictionary<string, (Channel<RecordBatch> Channel, Schema Schema)> _arrowChannels
+        = new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly ConcurrentDictionary<string, TaskCompletionSource<Schema>> _arrowSchemaTcs
         = new(StringComparer.OrdinalIgnoreCase);
 
     public void RegisterChannel(string branchAlias, Channel<IReadOnlyList<object?[]>> channel, IReadOnlyList<PipeColumnInfo> columns)
@@ -62,6 +69,50 @@ public class MemoryChannelRegistry : IMemoryChannelRegistry
 
     public bool ContainsChannel(string branchAlias)
     {
-        return _channels.ContainsKey(branchAlias);
+        return _channels.ContainsKey(branchAlias) || _arrowChannels.ContainsKey(branchAlias);
+    }
+
+    public void RegisterArrowChannel(string branchAlias, Channel<RecordBatch> channel, Schema schema)
+    {
+        _arrowSchemaTcs.TryAdd(branchAlias, new TaskCompletionSource<Schema>(TaskCreationOptions.RunContinuationsAsynchronously));
+        if (!_arrowChannels.TryAdd(branchAlias, (channel, schema)))
+        {
+            throw new InvalidOperationException($"An Arrow channel with the alias '{branchAlias}' is already registered.");
+        }
+    }
+
+    public void UpdateArrowChannelSchema(string branchAlias, Schema schema)
+    {
+        if (_arrowChannels.TryGetValue(branchAlias, out var channelData))
+        {
+            _arrowChannels[branchAlias] = (channelData.Channel, schema);
+            if (_arrowSchemaTcs.TryGetValue(branchAlias, out var tcs))
+            {
+                tcs.TrySetResult(schema);
+            }
+        }
+        else
+        {
+            throw new InvalidOperationException($"Cannot update Arrow schema: channel '{branchAlias}' is not registered.");
+        }
+    }
+
+    public (Channel<RecordBatch> Channel, Schema Schema)? GetArrowChannel(string branchAlias)
+    {
+        if (_arrowChannels.TryGetValue(branchAlias, out var channelData))
+        {
+            return channelData;
+        }
+        return null;
+    }
+
+    public async Task<Schema> WaitForArrowChannelSchemaAsync(string branchAlias, CancellationToken ct = default)
+    {
+        if (_arrowSchemaTcs.TryGetValue(branchAlias, out var tcs))
+        {
+            using var reg = ct.Register(() => tcs.TrySetCanceled(ct));
+            return await tcs.Task;
+        }
+        throw new InvalidOperationException($"An Arrow channel with the alias '{branchAlias}' is not registered.");
     }
 }

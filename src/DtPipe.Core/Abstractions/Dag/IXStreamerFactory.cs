@@ -7,11 +7,12 @@ namespace DtPipe.Core.Abstractions.Dag;
 /// A factory for creating XStreamers. An XStreamer is a component capable
 /// of mixing multiple input data streams into a single output stream.
 /// </summary>
-public interface IXStreamerFactory : IDataFactory
+public interface IXStreamerFactory : IProviderDescriptor<IStreamReader>
 {
     /// <summary>
-    /// Creates a new instance of a stream reader that acts as the XStreamer.
-    /// It configures itself by reading upstream channels from the registry.
+    /// Declares the channel protocol this XStreamer requires for its upstream input branches.
+    /// The orchestrator uses this to register the correct type of memory channel (native object[]
+    /// or Arrow RecordBatch) without any CLI flag inspection.
     /// </summary>
-    IStreamReader CreateXStreamer(IMemoryChannelRegistry registry, BranchDefinition config);
+    XStreamerChannelMode ChannelMode { get; }
 }

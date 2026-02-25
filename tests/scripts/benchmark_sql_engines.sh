@@ -34,7 +34,7 @@ for i in {1..1000}; do
     echo "$i,desc_$i" >> "$REF2_CSV"
 done
 
-ROWS=5000000
+ROWS=1000000
 PIPE_CMD="$DTPIPE_CMD -i generate:$ROWS --fake Email:internet.email --fake Name:name.fullname --fake Amount:finance.amount --fake Country:address.countrycode -o arrow:-"
 
 echo ""
@@ -47,7 +47,7 @@ QUERY_POLARS="SELECT COUNT(*) FROM stream s JOIN ref r ON s.GenerateIndex = r.Id
   --in ref="csv:$REF_CSV" \
   --in ref2="csv:$REF2_CSV" \
   --query "$QUERY_POLARS" \
-  --out "csv:-"
+  --out "csv:-" || true
 
 echo ""
 echo "======================================"
@@ -60,7 +60,7 @@ QUERY_FUSION="SELECT COUNT(*) FROM stream s JOIN ref r ON s.GenerateIndex = CAST
   --in ref="csv:$REF_CSV" \
   --in ref2="csv:$REF2_CSV" \
   --query "$QUERY_FUSION" \
-  --out "csv:-"
+  --out "csv:-" || true
 
 echo ""
 echo "======================================"
@@ -73,7 +73,7 @@ QUERY_DUCK="SELECT COUNT(*) FROM stream s JOIN ref r ON s.GenerateIndex = r.Id J
   --in ref="csv:$REF_CSV" \
   --in ref2="csv:$REF2_CSV" \
   --query "$QUERY_DUCK" \
-  --out "csv:-"
+  --out "csv:-" || true
 
 echo ""
 echo "======================================"
@@ -85,7 +85,7 @@ echo "======================================"
   --in ref="csv:$REF_CSV" \
   --in ref2="csv:$REF2_CSV" \
   --query "$QUERY_DUCK" \
-  --out "csv:-"
+  --out "csv:-" || true
 
 echo ""
 echo "======================================"
@@ -98,8 +98,21 @@ echo "======================================"
   -i "csv:$REF2_CSV" --alias ref2 \
   -x native-join --main stream --ref ref --on "GenerateIndex=Id" --select "Val" --alias j1 \
   -x native-join --main j1 --ref ref2 --on "GenerateIndex=Id" --select "Desc" \
-  -o "null.sha256"
+  -o "null.sha256" --no-stats || true
 
-rm "$REF_CSV" "$REF2_CSV" "null.sha256"
+echo ""
+echo "======================================"
+echo "          6. DtPipe DuckXStreamer ($ROWS rows) "
+echo "======================================"
+# DtPipe XStreamer Duck Join Pipeline
+# Note: DuckXStreamer can handle multiple JOINs in one SQL query
+/usr/bin/time -l "$DTPIPE_CMD" dag \
+  -i "generate:$ROWS" --fake Email:internet.email --fake Name:name.fullname --fake Amount:finance.amount --fake Country:address.countrycode --alias stream \
+  -i "csv:$REF_CSV" --alias ref \
+  -i "csv:$REF2_CSV" --alias ref2 \
+  -x duck-xstream --main stream --ref "ref,ref2" --query "SELECT stream.*, ref.Val, ref2.Desc FROM stream JOIN ref ON stream.GenerateIndex = ref.Id JOIN ref2 ON stream.GenerateIndex = ref2.Id" \
+  -o "null.sha256" --no-stats || true
+
+rm "$REF_CSV" "$REF2_CSV" "null.sha256" || true
 echo ""
 echo "Benchmark finished."

@@ -1,5 +1,6 @@
 using DtPipe.Core.Models;
 using System.Threading.Channels;
+using Apache.Arrow;
 
 namespace DtPipe.Core.Abstractions.Dag;
 
@@ -37,4 +38,16 @@ public interface IMemoryChannelRegistry
     /// Checks if a channel exists for the given alias.
     /// </summary>
     bool ContainsChannel(string branchAlias);
+
+    /// <summary>Registers an Arrow RecordBatch channel for a branch alias.</summary>
+    void RegisterArrowChannel(string branchAlias, Channel<RecordBatch> channel, Schema schema);
+
+    /// <summary>Updates the schema of an Arrow channel once known at runtime.</summary>
+    void UpdateArrowChannelSchema(string branchAlias, Schema schema);
+
+    /// <summary>Retrieves the Arrow channel and its schema for a given alias. Returns null if not found.</summary>
+    (Channel<RecordBatch> Channel, Schema Schema)? GetArrowChannel(string branchAlias);
+
+    /// <summary>Waits asynchronously for the Arrow channel schema to be set, then returns it.</summary>
+    Task<Schema> WaitForArrowChannelSchemaAsync(string branchAlias, CancellationToken ct = default);
 }

@@ -18,20 +18,22 @@ public partial class GenerateReader : IStreamReader, IRequiresOptions<GenerateRe
 			? config["generate:".Length..]
 			: config;
 
-		var parts = countStr.Split(';', StringSplitOptions.RemoveEmptyEntries);
-		if (parts.Length > 0 && long.TryParse(parts[0], out var count))
+		var parts = countStr.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+		foreach (var part in parts)
 		{
-			_options.RowCount = count;
-		}
-
-		foreach (var part in parts.Skip(1))
-		{
-			if (part.StartsWith("rate=", StringComparison.OrdinalIgnoreCase))
+			if (part.StartsWith("count=", StringComparison.OrdinalIgnoreCase))
+			{
+				if (long.TryParse(part["count=".Length..], out var count))
+					_options.RowCount = count;
+			}
+			else if (part.StartsWith("rate=", StringComparison.OrdinalIgnoreCase))
 			{
 				if (int.TryParse(part["rate=".Length..], out var rate))
-				{
 					_options.RowsPerSecond = rate;
-				}
+			}
+			else if (long.TryParse(part, out var rawCount))
+			{
+				_options.RowCount = rawCount;
 			}
 		}
 	}

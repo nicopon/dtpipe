@@ -145,6 +145,15 @@ public class JobService
 		{
 			// 1. Check if we have a DAG
 			var rawArgs = Environment.GetCommandLineArgs().Skip(1).ToArray(); // Skip executable path
+
+			if (parseResult.Errors.Count > 0)
+			{
+				foreach (var error in parseResult.Errors)
+				{
+					Console.Error.WriteLine($"CLI Error: {error.Message}");
+				}
+			}
+
 			var dagDefinition = CliDagParser.Parse(rawArgs);
 
 			Func<ParseResult, CancellationToken, string[], Task<int>> executePipeline = async (pr, token, currentRawArgs) =>

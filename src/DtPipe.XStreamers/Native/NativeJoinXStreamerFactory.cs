@@ -8,7 +8,7 @@ using System.Linq;
 
 namespace DtPipe.XStreamers.Native;
 
-public class NativeJoinXStreamerFactory : IProviderDescriptor<IStreamReader>
+public class NativeJoinXStreamerFactory : IXStreamerFactory
 {
     public NativeJoinXStreamerFactory()
     {
@@ -17,6 +17,7 @@ public class NativeJoinXStreamerFactory : IProviderDescriptor<IStreamReader>
     public string ComponentName => "native-join";
     public string Category => "XStreamers";
     public Type OptionsType => typeof(NativeJoinOptions);
+    public XStreamerChannelMode ChannelMode => XStreamerChannelMode.Native;
     public bool RequiresQuery => false;
 
     public bool CanHandle(string connectionString) => false;

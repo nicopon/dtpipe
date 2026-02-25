@@ -120,11 +120,6 @@ public static class CliOptionBuilder
 			{
 				option.Description = "[HIDDEN] " + (option.Description ?? "");
 			}
-			// Hide options that originate from ICliOptionMetadata
-			else if (metadataFlag != null)
-			{
-				option.Description = "[HIDDEN] " + (option.Description ?? "");
-			}
 
 			options.Add(option);
 		}
@@ -227,11 +222,6 @@ public static class CliOptionBuilder
 			{
 				option.Description = "[HIDDEN] " + (option.Description ?? "");
 			}
-			// Hide options that originate from ICliOptionMetadata
-			else if (metadataFlag != null)
-			{
-				option.Description = "[HIDDEN] " + (option.Description ?? "");
-			}
 
 			options.Add(option);
 
@@ -325,10 +315,23 @@ public static class CliOptionBuilder
 			}
 		}
 
+		IReadOnlyDictionary<string, string>? cliMetadata = null;
+		if (instance is ICliOptionMetadata meta)
+		{
+			cliMetadata = meta.PropertyToFlag;
+		}
+
 		foreach (var property in typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance))
 		{
 			var cliOptionAttr = property.GetCustomAttribute<ComponentOptionAttribute>();
-			var flagName = cliOptionAttr?.Name;
+
+			string? metadataFlag = null;
+			if (cliMetadata != null && cliMetadata.TryGetValue(property.Name, out var mappedFlag))
+			{
+				metadataFlag = mappedFlag;
+			}
+
+			var flagName = metadataFlag ?? cliOptionAttr?.Name;
 			if (string.IsNullOrEmpty(flagName))
 			{
 				var kebabProp = property.Name.ToKebabCase();

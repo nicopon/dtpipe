@@ -54,7 +54,11 @@ class Program
 
 		try
 		{
-			return await rootCommand.Parse(args).InvokeAsync();
+			var effectiveArgs = args.Length > 0 && args[0].Equals("dag", StringComparison.OrdinalIgnoreCase)
+				? args.Skip(1).ToArray()
+				: args;
+
+			return await rootCommand.Parse(effectiveArgs).InvokeAsync();
 		}
 		finally
 		{
@@ -109,6 +113,11 @@ class Program
 					if (readerDescType.IsAssignableFrom(type))
 					{
 						registerReaderMethod.MakeGenericMethod(type).Invoke(null, new object[] { services });
+
+						if (typeof(IXStreamerFactory).IsAssignableFrom(type))
+						{
+							services.AddSingleton(typeof(IXStreamerFactory), type);
+						}
 					}
 					if (writerDescType.IsAssignableFrom(type))
 					{
@@ -142,6 +151,9 @@ class Program
 		services.AddTransient<IDagOrchestrator, DagOrchestrator>();
 
 		// XStreamers are now auto-discovered as readers, no custom factory needed
+
+		// Columnar Bridges
+		services.AddSingleton<IRowToColumnarBridgeFactory, DtPipe.Adapters.Infrastructure.Arrow.ArrowRowToColumnarBridgeFactory>();
 
 	}
 

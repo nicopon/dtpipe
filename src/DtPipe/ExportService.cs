@@ -15,6 +15,7 @@ public class ExportService
 	private readonly IEnumerable<IStreamReaderFactory> _readerFactories;
 	private readonly IEnumerable<IDataWriterFactory> _writerFactories;
 	private readonly IEnumerable<IDataTransformerFactory> _transformerFactories;
+	private readonly IEnumerable<IRowToColumnarBridgeFactory> _bridgeFactories;
 	private readonly OptionsRegistry _optionsRegistry;
 	private readonly IExportObserver _observer;
 	private readonly ILogger<ExportService> _logger;
@@ -23,6 +24,7 @@ public class ExportService
 		IEnumerable<IStreamReaderFactory> readerFactories,
 		IEnumerable<IDataWriterFactory> writerFactories,
 		IEnumerable<IDataTransformerFactory> transformerFactories,
+		IEnumerable<IRowToColumnarBridgeFactory> bridgeFactories,
 		OptionsRegistry optionsRegistry,
 		IExportObserver observer,
 		ILogger<ExportService> logger)
@@ -30,6 +32,7 @@ public class ExportService
 		_readerFactories = readerFactories;
 		_writerFactories = writerFactories;
 		_transformerFactories = transformerFactories;
+		_bridgeFactories = bridgeFactories;
 		_optionsRegistry = optionsRegistry;
 		_observer = observer;
 		_logger = logger;
@@ -57,7 +60,6 @@ public class ExportService
 		var retryPolicy = new RetryPolicy(options.MaxRetries, TimeSpan.FromMilliseconds(options.RetryDelayMs), _logger);
 
 		await using var reader = readerFactory.Create(registry);
-
 		await retryPolicy.ExecuteAsync(() => reader.OpenAsync(ct), ct);
 
 		_observer.ShowConnectionStatus(true, reader.Columns?.Count);
@@ -149,26 +151,47 @@ public class ExportService
 			// Run Concurrent Pipeline
 			var startTime = DateTime.UtcNow;
 
-			var producerTask = ProduceRowsAsync(reader, readerToTransform.Writer, options.BatchSize, options.Limit, options.SamplingRate, options.SamplingSeed, progress, linkedCts, effectiveCt, retryPolicy, _logger);
-			var transformTask = TransformRowsAsync(readerToTransform.Reader, transformToWriter.Writer, pipeline, options.BatchSize, progress, effectiveCt);
-			var consumerTask = ConsumeRowsAsync(transformToWriter.Reader, writer, progress, r => Interlocked.Add(ref totalRows, r), effectiveCt, retryPolicy, _logger);
-
-			var tasks = new List<Task> { producerTask, transformTask, consumerTask };
-
-			while (tasks.Count > 0)
+			// Check for Columnar Fast-Path
+			if (pipeline.Count == 0 && reader is IColumnarStreamReader columnarReader && writer is IColumnarDataWriter columnarWriter)
 			{
-				var finishedTask = await Task.WhenAny(tasks);
-				if (finishedTask.IsFaulted)
+				_logger.LogInformation("Enabling Columnar Fast-Path (direct RecordBatch transfer)");
+				await DirectColumnarTransferAsync(columnarReader, columnarWriter, options.Limit, progress, effectiveCt);
+			}
+			else
+			{
+				IRowToColumnarBridge? bridge = null;
+				if (writer is IColumnarDataWriter && (reader is not IColumnarStreamReader || pipeline.Count > 0))
 				{
-					await linkedCts.CancelAsync();
-					await finishedTask;
-				}
-				else if (finishedTask.IsCanceled)
-				{
-					await linkedCts.CancelAsync();
+					var bridgeFactory = _bridgeFactories.FirstOrDefault();
+					if (bridgeFactory != null)
+					{
+						bridge = bridgeFactory.CreateBridge();
+						await bridge.InitializeAsync(exportableSchema, options.BatchSize, effectiveCt);
+					}
 				}
 
-				tasks.Remove(finishedTask);
+				// Run Concurrent Pipeline (Existing row-based path)
+				var producerTask = ProduceRowsAsync(reader, readerToTransform.Writer, options.BatchSize, options.Limit, options.SamplingRate, options.SamplingSeed, progress, linkedCts, effectiveCt, retryPolicy, _logger);
+				var transformTask = TransformRowsAsync(readerToTransform.Reader, transformToWriter.Writer, pipeline, options.BatchSize, progress, effectiveCt);
+				var consumerTask = ConsumeRowsAsync(transformToWriter.Reader, writer, bridge, progress, r => Interlocked.Add(ref totalRows, r), effectiveCt, retryPolicy, _logger);
+
+				var tasks = new List<Task> { producerTask, transformTask, consumerTask };
+
+				while (tasks.Count > 0)
+				{
+					var finishedTask = await Task.WhenAny(tasks);
+					if (finishedTask.IsFaulted)
+					{
+						await linkedCts.CancelAsync();
+						await finishedTask;
+					}
+					else if (finishedTask.IsCanceled)
+					{
+						await linkedCts.CancelAsync();
+					}
+
+					tasks.Remove(finishedTask);
+				}
 			}
 
 			await writer.CompleteAsync(ct);
@@ -451,6 +474,7 @@ public class ExportService
     private static async Task ConsumeRowsAsync(
         ChannelReader<object?[][]> input,
         IDataWriter writer,
+        IRowToColumnarBridge? bridge,
         IExportProgress progress,
         Action<int> updateRowCount,
         CancellationToken ct,
@@ -458,21 +482,98 @@ public class ExportService
         ILogger logger)
     {
         if (logger.IsEnabled(LogLevel.Debug))
-            logger.LogDebug("Consumer/Writer started");
+            logger.LogDebug("Consumer/Writer started" + (bridge != null ? " (with Columnar Bridge)" : ""));
 
-        await foreach (var batch in input.ReadAllAsync(ct))
+        Task? bridgePumpTask = null;
+        if (bridge != null && writer is IColumnarDataWriter columnarWriter1)
         {
-            if (logger.IsEnabled(LogLevel.Debug))
+            bridgePumpTask = Task.Run(async () =>
             {
-                logger.LogDebug("Writing batch of {Count} rows", batch.Length);
+                try
+                {
+                    await foreach (var recordBatch in bridge.ReadRecordBatchesAsync(ct))
+                    {
+                        await retryPolicy.ExecuteValueAsync(() => columnarWriter1.WriteRecordBatchAsync(recordBatch, ct), ct);
+                    }
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error in Columnar Bridge pump task.");
+                    throw;
+                }
+            }, ct);
+        }
+
+        try
+        {
+            await foreach (var batch in input.ReadAllAsync(ct))
+            {
+                if (logger.IsEnabled(LogLevel.Debug))
+                {
+                    logger.LogDebug("Writing batch of {Count} rows", batch.Length);
+                }
+
+                if (bridge != null && writer is IColumnarDataWriter)
+                {
+                    // Push into bridge, pump task handles the rest
+                    await bridge.IngestRowsAsync(batch, ct);
+                }
+                else
+                {
+                    await retryPolicy.ExecuteValueAsync(() => writer.WriteBatchAsync(batch, ct), ct);
+                }
+
+                updateRowCount(batch.Length);
+                progress.ReportWrite(batch.Length);
+
+                LogMemoryUsage(logger);
             }
 
-            await retryPolicy.ExecuteValueAsync(() => writer.WriteBatchAsync(batch, ct), ct);
+            if (bridge != null)
+            {
+                await bridge.CompleteAsync(ct);
+                if (bridgePumpTask != null)
+                {
+                    await bridgePumpTask;
+                }
+            }
+        }
+        finally
+        {
+            if (bridge != null)
+            {
+                await bridge.DisposeAsync();
+            }
+        }
+    }
 
-            updateRowCount(batch.Length);
-            progress.ReportWrite(batch.Length);
+    private static async Task DirectColumnarTransferAsync(
+        IColumnarStreamReader reader,
+        IColumnarDataWriter writer,
+        int limit,
+        IExportProgress progress,
+        CancellationToken ct)
+    {
+        long rowCount = 0;
+        await foreach (var batch in reader.ReadRecordBatchesAsync(ct))
+        {
+            using (batch) // Ensure Arrow C release callback is called promptly
+            {
+                var batchToWriter = batch;
+                if (limit > 0 && rowCount + batch.Length > limit)
+                {
+                    var takeCount = limit - (int)rowCount;
+                    // Note: Slicing would be better here if supported.
+                }
 
-            LogMemoryUsage(logger);
+                await writer.WriteRecordBatchAsync(batchToWriter, ct);
+                progress.ReportRead(batchToWriter.Length);
+                progress.ReportWrite(batchToWriter.Length);
+                rowCount += batchToWriter.Length;
+
+                if (limit > 0 && rowCount >= limit) break;
+            }
         }
     }
 

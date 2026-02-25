@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
+using Apache.Arrow;
+using Apache.Arrow.Types;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
@@ -8,7 +10,7 @@ using Microsoft.Extensions.Logging;
 
 namespace DtPipe.Adapters.Checksum;
 
-public sealed class ChecksumDataWriter : IDataWriter, IRequiresOptions<ChecksumWriterOptions>
+public sealed class ChecksumDataWriter : IDataWriter, IColumnarDataWriter, IRequiresOptions<ChecksumWriterOptions>
 {
 	private readonly ChecksumWriterOptions _options;
 	private readonly ILogger _logger;
@@ -35,6 +37,21 @@ public sealed class ChecksumDataWriter : IDataWriter, IRequiresOptions<ChecksumW
 	}
 
 	public ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
+	{
+		UpdateHash(rows);
+		return ValueTask.CompletedTask;
+	}
+
+	public ValueTask WriteRecordBatchAsync(RecordBatch batch, CancellationToken ct = default)
+	{
+		// For now, convert to rows for reuse of UpdateHash.
+		// Optimization: iterate columns directly.
+		var rows = ConvertRecordBatchToRows(batch);
+		UpdateHash(rows);
+		return ValueTask.CompletedTask;
+	}
+
+	private void UpdateHash(IReadOnlyList<object?[]> rows)
 	{
 		foreach (var row in rows)
 		{
@@ -78,8 +95,38 @@ public sealed class ChecksumDataWriter : IDataWriter, IRequiresOptions<ChecksumW
 
 			_currentHash = SHA256.HashData(combined);
 		}
+	}
 
-		return ValueTask.CompletedTask;
+	private object?[][] ConvertRecordBatchToRows(RecordBatch batch)
+	{
+		var rows = new object?[batch.Length][];
+		for (int r = 0; r < batch.Length; r++)
+		{
+			var row = new object?[batch.ColumnCount];
+			for (int c = 0; c < batch.ColumnCount; c++)
+			{
+				row[c] = GetValue(batch.Column(c), r);
+			}
+			rows[r] = row;
+		}
+		return rows;
+	}
+
+	private object? GetValue(IArrowArray column, int rowIndex)
+	{
+		if (column.IsNull(rowIndex)) return null;
+
+		return column switch
+		{
+			Int32Array a => a.GetValue(rowIndex),
+			Int64Array a => a.GetValue(rowIndex),
+			DoubleArray a => a.GetValue(rowIndex),
+			StringArray a => a.GetString(rowIndex),
+			BooleanArray a => a.GetValue(rowIndex),
+			TimestampArray a => a.GetTimestamp(rowIndex),
+			Date64Array a => a.GetDateTime(rowIndex),
+			_ => column.ToString() // fallback
+		};
 	}
 
 	public async ValueTask CompleteAsync(CancellationToken ct = default)

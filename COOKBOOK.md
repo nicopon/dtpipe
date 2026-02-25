@@ -7,6 +7,7 @@ This document contains recipes and examples for using DtPipe to solve common dat
 - [Anonymization (The "Fakers")](#anonymization-the-fakers)
 - [Common Transformations](#common-transformations)
 - [Advanced Pipelines](#advanced-pipelines)
+- [Zero-Copy & Columnar Fast-Path](#zero-copy--columnar-fast-path)
 - [Standard Streams & Linux Pipes](#standard-streams--linux-pipes)
 - [Database Import & Migration](#database-import--migration)
 - [Production Automation (YAML)](#production-automation-yaml)
@@ -259,8 +260,34 @@ Keep your CLI clean by moving complex logic into `.js` files.
 ```
 
 ---
-
-## Standard Streams & Linux Pipes
+ 
+ ## Zero-Copy & Columnar Fast-Path
+ 
+ DtPipe uses a high-performance **Zero-Copy Bridge** (C# Span/Memory) when transferring data between columnar formats like Parquet, Apache Arrow, and DuckDB.
+ 
+ ### 1. High-Performance Joins with DuckXStreamer
+ When you need to join multiple sources (Parquet, CSV, or DB) with maximum speed, use the `duck:` prefix to leverage the in-memory **DuckXStreamer**.
+ 
+ ```bash
+ # Join 10M rows from Parquet with 1M rows from CSV in memory
+ dtpipe \
+   -i "parquet:main_data.parquet" \
+   -o "parquet:enriched.parquet" \
+   --duck-join "ref:csv:metadata.csv ON main.id = ref.id" \
+   --duck-join "stats:parquet:daily_stats.parquet ON main.id = stats.id"
+ ```
+ 
+ ### 2. Columnar Fast-Path (direct transfer)
+ If no row-based transformations (like JS scripts or fakers) are present, DtPipe automatically enables the **Columnar Fast-Path**, transferring raw memory buffers directly without unboxing.
+ 
+ ```bash
+ # Parquet to Arrow (Direct Buffer Transfer)
+ dtpipe -i data.parquet -o data.arrow
+ ```
+ 
+ ---
+ 
+ ## Standard Streams & Linux Pipes
 
 Integrate DtPipe with standard Unix tools using `stdin`/`stdout`.
 

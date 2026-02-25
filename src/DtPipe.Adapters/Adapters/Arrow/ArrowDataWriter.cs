@@ -7,28 +7,38 @@ using DtPipe.Core.Options;
 
 namespace DtPipe.Adapters.Arrow;
 
-public sealed class ArrowAdapterDataWriter : IDataWriter, IRequiresOptions<ArrowWriterOptions>, ISchemaInspector
+/// <summary>
+/// Writes data to Arrow IPC format.
+/// This writer is now purely columnar and relies on the engine to provide RecordBatches.
+/// </summary>
+public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptions<ArrowWriterOptions>, ISchemaInspector
 {
-	private readonly string _path;
-	private readonly ArrowWriterOptions _options;
+    private readonly string _path;
+    private readonly ArrowWriterOptions _options;
 
-	private Stream? _outputStream;
-	private ArrowStreamWriter? _arrowStreamWriter;
+    private Stream? _outputStream;
+    private ArrowStreamWriter? _arrowStreamWriter;
     private ArrowFileWriter? _arrowFileWriter;
     private bool _isIpcFile;
-	private Schema? _schema;
-	private List<IArrowArrayBuilder>? _builders;
-	private int _rowsInBuffer;
+    private Schema? _schema;
 
-	public ArrowAdapterDataWriter(string path) : this(path, new ArrowWriterOptions())
-	{
-	}
+    public ArrowAdapterDataWriter(string path) : this(path, new ArrowWriterOptions())
+    {
+    }
 
-	public ArrowAdapterDataWriter(string path, ArrowWriterOptions options)
-	{
-		_path = path;
-		_options = options;
-	}
+    public ArrowAdapterDataWriter(string path, ArrowWriterOptions options)
+    {
+        _path = path;
+        _options = options;
+    }
+
+    public async ValueTask WriteRecordBatchAsync(RecordBatch batch, CancellationToken ct = default)
+    {
+        if (_isIpcFile)
+            await _arrowFileWriter!.WriteRecordBatchAsync(batch, ct);
+        else
+            await _arrowStreamWriter!.WriteRecordBatchAsync(batch, ct);
+    }
 
 	public Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
 	{
@@ -60,7 +70,6 @@ public sealed class ArrowAdapterDataWriter : IDataWriter, IRequiresOptions<Arrow
 		}
 
 		_schema = BuildSchema(columns);
-		_builders = CreateBuilders(_schema);
 
         if (_isIpcFile)
             _arrowFileWriter = new ArrowFileWriter(_outputStream, _schema, leaveOpen: true);
@@ -98,95 +107,13 @@ public sealed class ArrowAdapterDataWriter : IDataWriter, IRequiresOptions<Arrow
 		return StringType.Default;
 	}
 
-	private List<IArrowArrayBuilder> CreateBuilders(Schema schema)
+	public ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
 	{
-		var builders = new List<IArrowArrayBuilder>();
-		foreach (var field in schema.FieldsList)
-		{
-			builders.Add(CreateBuilder(field.DataType));
-		}
-		return builders;
-	}
-
-	private IArrowArrayBuilder CreateBuilder(IArrowType type)
-	{
-		return type.TypeId switch
-		{
-			ArrowTypeId.Boolean => new BooleanArray.Builder(),
-			ArrowTypeId.Int32 => new Int32Array.Builder(),
-			ArrowTypeId.Int64 => new Int64Array.Builder(),
-			ArrowTypeId.Double => new DoubleArray.Builder(),
-			ArrowTypeId.Float => new FloatArray.Builder(),
-			ArrowTypeId.String => new StringArray.Builder(),
-			ArrowTypeId.Timestamp => new TimestampArray.Builder(),
-			ArrowTypeId.Date64 => new Date64Array.Builder(),
-			ArrowTypeId.Binary => new BinaryArray.Builder(),
-			_ => new StringArray.Builder()
-		};
-	}
-
-	public async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
-	{
-		if (_builders == null || (_arrowStreamWriter == null && _arrowFileWriter == null))
-			throw new InvalidOperationException("Call InitializeAsync first.");
-
-		foreach (var row in rows)
-		{
-			for (int i = 0; i < row.Length; i++)
-			{
-				AppendValue(_builders[i], row[i]);
-			}
-			_rowsInBuffer++;
-
-			if (_rowsInBuffer >= _options.BatchSize)
-			{
-				await FlushCurrentBatchAsync(ct);
-			}
-		}
-	}
-
-	private void AppendValue(IArrowArrayBuilder builder, object? value)
-	{
-		if (value == null)
-		{
-            ((dynamic)builder).AppendNull();
-			return;
-		}
-
-        if (builder is StringArray.Builder stringBuilder)
-        {
-            stringBuilder.Append(value.ToString() ?? string.Empty);
-            return;
-        }
-
-        if (builder is DoubleArray.Builder doubleBuilder && value is decimal dec)
-        {
-            doubleBuilder.Append((double)dec);
-            return;
-        }
-
-        ((dynamic)builder).Append((dynamic)value);
-	}
-
-	private async Task FlushCurrentBatchAsync(CancellationToken ct)
-	{
-		if (_builders == null || (_arrowStreamWriter == null && _arrowFileWriter == null) || _rowsInBuffer == 0) return;
-
-		var arrays = _builders.Select(b => (IArrowArray)((dynamic)b).Build(null)).ToList();
-		var batch = new RecordBatch(_schema, arrays, _rowsInBuffer);
-
-        if (_isIpcFile)
-            await _arrowFileWriter!.WriteRecordBatchAsync(batch, ct);
-        else
-		    await _arrowStreamWriter!.WriteRecordBatchAsync(batch, ct);
-
-        _builders = CreateBuilders(_schema!);
-		_rowsInBuffer = 0;
+        throw new NotSupportedException("ArrowAdapterDataWriter is purely columnar. Use IColumnarDataWriter.WriteRecordBatchAsync instead.");
 	}
 
 	public async ValueTask CompleteAsync(CancellationToken ct = default)
 	{
-		await FlushCurrentBatchAsync(ct);
 		if (_arrowStreamWriter != null)
 		{
 			await _arrowStreamWriter.WriteEndAsync(ct);

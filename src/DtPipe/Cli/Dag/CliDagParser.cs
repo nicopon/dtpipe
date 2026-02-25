@@ -27,12 +27,17 @@ public static class CliDagParser
         var branches = new List<BranchDefinition>();
         var currentBranchArgs = new List<string>();
 
+        int startAt = 0;
+        if (args.Length > 0 && args[0].Equals("dag", StringComparison.OrdinalIgnoreCase))
+        {
+            startAt = 1;
+        }
 
         bool isCurrentBranchXStreamer = false;
         bool hasSeenInputInCurrentBranch = false;
         int branchCounter = 0;
 
-        for (int i = 0; i < args.Length; i++)
+        for (int i = startAt; i < args.Length; i++)
         {
             var arg = args[i];
 
@@ -139,12 +144,16 @@ public static class CliDagParser
             }
 
             // Extract all --ref values
-            var refAliases = ExtractAllArgValues(branch.Arguments, "--ref");
-            foreach (var refAlias in refAliases)
+            var rawRefAliases = ExtractAllArgValues(branch.Arguments, "--ref");
+            foreach (var rawRef in rawRefAliases)
             {
-                if (!registeredAliases.Contains(refAlias))
+                var refAliases = rawRef.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                foreach (var refAlias in refAliases)
                 {
-                    errors.Add($"XStreamer branch '{branch.Alias}' references unknown alias '--ref {refAlias}'. Known aliases: {string.Join(", ", registeredAliases)}.");
+                    if (!registeredAliases.Contains(refAlias))
+                    {
+                        errors.Add($"XStreamer branch '{branch.Alias}' references unknown alias '--ref {refAlias}'. Known aliases: {string.Join(", ", registeredAliases)}.");
+                    }
                 }
             }
         }

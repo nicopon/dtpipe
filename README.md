@@ -13,12 +13,12 @@ DtPipe streams data from any source (SQL, CSV, Parquet) to any destination, appl
 
 ## Capabilities
 
-- **Streaming Architecture**: Handles millions of rows with constant, low memory usage.
+- **Modular Architecture**: Clean separation between `Core` engine, `Adapters`, and `XStreamers`.
+- **Zero-Copy Streaming**: Direct memory mapping (Zero-Copy) for columnar formats (Arrow, Parquet, DuckDB) via the **DuckXStreamer** bridge.
+- **Micro-Performance**: Handles millions of rows with optimized batching and constant, low memory usage.
 - **Multi-Provider**: Native support for **Oracle**, **SQL Server**, **PostgreSQL**, **DuckDB**, **SQLite**, **Parquet**, and **CSV**.
-- **Zero Dependencies**: Single static binary. No drivers to install.
 - **Anonymization Engine**: Built-in **Bogus** integration to fake Names, Emails, IBANs, and more.
-- **Pipeline Transformation**: Mask, Nullify, Format, or Script (JS) data during export.
-- **Production Ready**: YAML job configuration, Environment variable support, and robust logging.
+- **Production Ready**: YAML job configuration, execution hooks, and robust instrumentation.
 
 ## Installation
 
@@ -44,8 +44,8 @@ dtpipe --help
 Binary created at: `./dist/release/dtpipe`
 
 > **Note:** The pre-compiled binaries in [GitHub Releases](https://github.com/nicopon/DtPipe/releases) are **self-contained**. You do NOT need to install .NET to run them.
-
-> **Developers:** Want to use DtPipe programmatically via NuGet packages? Check out the **[src/DtPipe.Sample](./src/DtPipe.Sample)** project for a hands-on API example.
+>
+> **Performance Tip:** For high-speed SQL lookups and joins, check out the **[Zero-Copy XStreamers](./COOKBOOK.md#high-performance-joins-with-duckxstreamer)** in the cookbook.
 
 ## Quick Reference
 
