@@ -1,5 +1,6 @@
 using Apache.Arrow;
 using Apache.Arrow.C;
+using Apache.Arrow.Ipc;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Core.Models;
@@ -19,22 +20,20 @@ public class DuckXStreamer : IColumnarStreamReader, IColumnarDataWriter
     private readonly string _mainAlias;
     private readonly string[] _refAliases;
     private readonly string _query;
-    private readonly ILogger _logger;
+    private readonly ILogger<DuckXStreamer> _logger;
 
     private Schema? _mainSchema;
     private IReadOnlyList<PipeColumnInfo>? _outputColumns;
     private DuckDBConnection? _connection;
 
-    // Reflection cache for zero-copy DuckDB extraction
     private FieldInfo? _vectorReadersField;
-    private PropertyInfo? _dataPointerProp;
 
     public DuckXStreamer(
         IMemoryChannelRegistry registry,
         string mainAlias,
         string[] refAliases,
         string query,
-        ILogger logger)
+        ILogger<DuckXStreamer> logger)
     {
         _registry = registry;
         _mainAlias = mainAlias;
@@ -52,13 +51,9 @@ public class DuckXStreamer : IColumnarStreamReader, IColumnarDataWriter
 
     public async Task OpenAsync(CancellationToken ct = default)
     {
-        _logger.LogInformation("Opening DuckXStreamer for main alias '{Main}' and {RefCount} references.", _mainAlias, _refAliases.Length);
-
-        // 1. Wait for Main Arrow channel schema
         _mainSchema = await _registry.WaitForArrowChannelSchemaAsync(_mainAlias, ct);
         var mainEntry = _registry.GetArrowChannel(_mainAlias) ?? throw new InvalidOperationException($"Main branch '{_mainAlias}' not found.");
 
-        // 2. Open in-memory DuckDB connection
         _connection = new DuckDBConnection("DataSource=:memory:");
         _connection.Open();
 
@@ -84,7 +79,7 @@ public class DuckXStreamer : IColumnarStreamReader, IColumnarDataWriter
     //
     private async Task LoadArrowToTableAsync(string tableName, Schema schema, ChannelReader<RecordBatch> reader, CancellationToken ct)
     {
-        _logger.LogInformation("Loading table '{Table}' into DuckDB (Appender)...", tableName);
+        _logger.LogInformation("Loading Arrow data to DuckDB table '{Table}' via DuckDBAppender...", tableName);
 
         // 1. Create table
         var columns = new List<string>();
@@ -99,56 +94,36 @@ public class DuckXStreamer : IColumnarStreamReader, IColumnarDataWriter
             cmd.ExecuteNonQuery();
         }
 
-        // 2. We use DuckDBAppender for inserting data since the Arrow SCAN C-API bindings were fragile on macOS
+        // 2. We use DuckDBAppender
         using var appender = _connection.CreateAppender(tableName);
 
         long totalRows = 0;
-        int batchCount = 0;
-        await foreach (var batch in reader.ReadAllAsync(ct))
+        try
         {
-            batchCount++;
-            var rows = ConvertRecordBatchToRows(batch);
-
-            for (int r = 0; r < rows.Length; r++)
+            await foreach (var batch in reader.ReadAllAsync(ct))
             {
-                var row = appender.CreateRow();
-                for (int c = 0; c < batch.ColumnCount; c++)
+                var rows = ConvertRecordBatchToRows(batch);
+                foreach (var rowValues in rows)
                 {
-                    AppendValue(row, rows[r][c]);
+                    var row = appender.CreateRow();
+                    for (int c = 0; c < rowValues.Length; c++)
+                    {
+                        AppendValue(row, rowValues[c]);
+                    }
+                    row.EndRow();
                 }
-                row.EndRow();
-            }
-
-            totalRows += batch.Length;
-
-            if (totalRows % 1000000 == 0)
-            {
-                _logger.LogInformation("  > '{Table}' progress: {Count} rows loaded ({Batches} batches)...", tableName, totalRows, batchCount);
+                totalRows += batch.Length;
+                batch.Dispose();
             }
         }
-
-        appender.Close();
-
-        _logger.LogInformation("Table '{Table}' loaded with {Count} rows across {Batches} batches.", tableName, totalRows, batchCount);
-    }
-
-    private void AppendValue(IDuckDBAppenderRow row, object? value)
-    {
-        if (value == null) { row.AppendNullValue(); return; }
-
-        // C# type matching on boxed values
-        switch (value)
+        catch (Exception ex)
         {
-            case int v: row.AppendValue(v); break;
-            case long v: row.AppendValue(v); break;
-            case short v: row.AppendValue(v); break;
-            case float v: row.AppendValue(v); break;
-            case double v: row.AppendValue(v); break;
-            case bool v: row.AppendValue(v); break;
-            case string v: row.AppendValue(v); break;
-            case DateTime v: row.AppendValue(v); break;
-            default: row.AppendValue(value.ToString()); break;
+            _logger.LogError(ex, "Fatal error reading batches for '{TableName}'.", tableName);
+            throw;
         }
+
+        _logger.LogInformation("Finished loading '{Table}'. Total rows: {TotalRows}", tableName, totalRows);
+        appender.Close();
     }
 
     private string MapArrowToDuckDbType(Apache.Arrow.Types.IArrowType type)
@@ -168,6 +143,47 @@ public class DuckXStreamer : IColumnarStreamReader, IColumnarDataWriter
         };
     }
 
+    private object? GetValue(IArrowArray array, int index)
+    {
+        if (array.IsNull(index))
+        {
+            return null;
+        }
+
+        return array.Data.DataType.TypeId switch
+        {
+            Apache.Arrow.Types.ArrowTypeId.Int16 => ((Int16Array)array).GetValue(index),
+            Apache.Arrow.Types.ArrowTypeId.Int32 => ((Int32Array)array).GetValue(index),
+            Apache.Arrow.Types.ArrowTypeId.Int64 => ((Int64Array)array).GetValue(index),
+            Apache.Arrow.Types.ArrowTypeId.Double => ((DoubleArray)array).GetValue(index),
+            Apache.Arrow.Types.ArrowTypeId.Float => ((FloatArray)array).GetValue(index),
+            Apache.Arrow.Types.ArrowTypeId.Boolean => ((BooleanArray)array).GetValue(index),
+            Apache.Arrow.Types.ArrowTypeId.Timestamp => ((TimestampArray)array).GetTimestamp(index),
+            Apache.Arrow.Types.ArrowTypeId.Date64 => ((Date64Array)array).GetDateTime(index),
+            Apache.Arrow.Types.ArrowTypeId.String => ((StringArray)array).GetString(index),
+            _ => throw new NotSupportedException($"Unsupported Arrow type for GetValue: {array.Data.DataType.TypeId}")
+        };
+    }
+
+    private void AppendValue(IDuckDBAppenderRow row, object? value)
+    {
+        if (value == null) { row.AppendNullValue(); return; }
+
+        switch (value)
+        {
+            case int v: row.AppendValue(v); break;
+            case long v: row.AppendValue(v); break;
+            case short v: row.AppendValue(v); break;
+            case float v: row.AppendValue(v); break;
+            case double v: row.AppendValue(v); break;
+            case bool v: row.AppendValue(v); break;
+            case string v: row.AppendValue(v); break;
+            case DateTime v: row.AppendValue(v); break;
+            case DateTimeOffset v: row.AppendValue(v.DateTime); break;
+            default: row.AppendValue(value.ToString()); break;
+        }
+    }
+
     //
     // =========================================================================================
     // EXTRACTION (DuckDB -> RecordBatch) via Zero-Copy Span Mapping using Reflection
@@ -175,11 +191,12 @@ public class DuckXStreamer : IColumnarStreamReader, IColumnarDataWriter
     //
     public async IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync([EnumeratorCancellation] CancellationToken ct = default)
     {
-        if (_connection == null) throw new InvalidOperationException("Call OpenAsync first.");
+        if (_connection == null) throw new InvalidOperationException("Call OpenAsync first (Connection is null).");
+        if (_outputColumns == null) throw new InvalidOperationException("Columns not initialized. Call OpenAsync or InitializeAsync first.");
 
         _logger.LogInformation("Executing query for direct columnar span extraction: {Sql}", _query);
 
-        Schema arrowSchema = BuildArrowSchema(_outputColumns!);
+        Schema arrowSchema = BuildArrowSchema(_outputColumns);
 
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = _query;
@@ -196,38 +213,39 @@ public class DuckXStreamer : IColumnarStreamReader, IColumnarDataWriter
         // The DuckDBDataReader reads chunks internally via reader.Read()
         while (await reader.ReadAsync(ct))
         {
-            // DuckDB Data chunks are up to 2048 elements. We must extract the actual length of the valid chunk.
             long countInChunk = GetChunkLength(reader);
-
+            Console.WriteLine($"[DEBUG] DuckXStreamer: Processing chunk of {countInChunk} rows");
             if (countInChunk <= 0) continue;
 
-            var internalReaders = (object[])_vectorReadersField.GetValue(reader)!;
+            var readerType = reader.GetType();
+            Console.WriteLine($"[DEBUG] DuckXStreamer: Reader type: {readerType.FullName}");
 
+            var vectorReadersObj = _vectorReadersField.GetValue(reader);
+            if (vectorReadersObj == null)
+            {
+                Console.WriteLine("[ERROR] DuckXStreamer: vectorReaders field is null!");
+                throw new InvalidOperationException("vectorReaders field is null");
+            }
+
+            var internalReaders = (object[])vectorReadersObj;
+            Console.WriteLine($"[DEBUG] DuckXStreamer: Internal readers count: {internalReaders.Length}");
             IArrowArray[] blockColumns = new IArrowArray[arrowSchema.FieldsList.Count];
 
             for (int colIndex = 0; colIndex < arrowSchema.FieldsList.Count; colIndex++)
             {
-                var vr = internalReaders[colIndex]; // VectorDataReaderBase
-                var field = arrowSchema.FieldsList[colIndex];
-
-                _dataPointerProp ??= vr.GetType().GetProperty("DataPointer", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-
-                unsafe
+                var vr = internalReaders[colIndex];
+                if (vr == null)
                 {
-                    void* dataPtr = System.Reflection.Pointer.Unbox(_dataPointerProp!.GetValue(vr)!);
-                    blockColumns[colIndex] = BuildPrimitiveArrayFromPointer(dataPtr, (int)countInChunk, field, vr);
+                    Console.WriteLine($"[ERROR] DuckXStreamer: Vector reader at index {colIndex} is null");
+                    throw new InvalidOperationException($"Vector reader at index {colIndex} is null");
                 }
+                var field = arrowSchema.FieldsList[colIndex];
+                blockColumns[colIndex] = BuildRowByRowFallbackArray((int)countInChunk, field, vr);
             }
 
             var batch = new RecordBatch(arrowSchema, blockColumns, (int)countInChunk);
             yield return batch;
 
-            chunkCount++;
-            totalRowsYielded += (ulong)countInChunk;
-
-            // Advance reader to force the next chunk evaluation.
-            // (DuckDBDataReader buffers 1 chunk at a time. Read() iterates row by row over the chunk.
-            // We want to skip iterating row-by-row and instantly jump to the next chunk.)
             AdvanceDuckDBDataReaderToNextChunk(reader, countInChunk);
         }
 
@@ -330,6 +348,7 @@ public class DuckXStreamer : IColumnarStreamReader, IColumnarDataWriter
         var fields = new List<Field>();
         foreach (var col in columns)
         {
+            if (col == null) continue;
             Apache.Arrow.Types.IArrowType arrowType = col.ClrType switch
             {
                 Type t when t == typeof(long) => Apache.Arrow.Types.Int64Type.Default,
@@ -383,28 +402,9 @@ public class DuckXStreamer : IColumnarStreamReader, IColumnarDataWriter
         return rows;
     }
 
-    private object? GetValue(IArrowArray column, int rowIndex)
+    public ValueTask WriteRecordBatchAsync(RecordBatch batch, CancellationToken ct = default)
     {
-        if (column.IsNull(rowIndex)) return null;
-
-        return column switch
-        {
-            Int64Array a => a.GetValue(rowIndex),
-            Int32Array a => a.GetValue(rowIndex),
-            DoubleArray a => a.GetValue(rowIndex),
-            FloatArray a => a.GetValue(rowIndex),
-            BooleanArray a => a.GetValue(rowIndex),
-            StringArray a => a.GetString(rowIndex),
-            Date64Array a => a.GetDateTime(rowIndex),
-            TimestampArray a => a.GetTimestamp(rowIndex),
-            _ => column.ToString()
-        };
-    }
-
-    public async ValueTask WriteRecordBatchAsync(RecordBatch batch, CancellationToken ct = default)
-    {
-        var rows = ConvertRecordBatchToRows(batch);
-        await WriteBatchAsync(rows, ct);
+        throw new NotSupportedException("DuckXStreamer does not support direct RecordBatch streaming as a destination writer yet.");
     }
 
     public ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)

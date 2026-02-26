@@ -1,6 +1,6 @@
 using DtPipe.Core.Models;
 using DtPipe.Transformers.Services;
-using DtPipe.Transformers.Expand;
+using DtPipe.Transformers.Row.Expand;
 using Moq;
 using Xunit;
 

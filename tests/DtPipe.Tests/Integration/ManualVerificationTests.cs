@@ -6,7 +6,7 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
-using DtPipe.Transformers.Fake;
+using DtPipe.Transformers.Hybrid.Fake;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;

@@ -7,6 +7,7 @@ using DtPipe.Core.Resilience;
 using DtPipe.Core.Validation;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
+using Apache.Arrow;
 
 namespace DtPipe;
 
@@ -151,11 +152,21 @@ public class ExportService
 			// Run Concurrent Pipeline
 			var startTime = DateTime.UtcNow;
 
-			// Check for Columnar Fast-Path
-			if (pipeline.Count == 0 && reader is IColumnarStreamReader columnarReader && writer is IColumnarDataWriter columnarWriter)
+			var columnarPipeline = pipeline.OfType<IColumnarTransformer>().ToList();
+			bool allColumnar = columnarPipeline.Count == pipeline.Count;
+
+			if (allColumnar && writer is IColumnarDataWriter columnarWriter)
 			{
-				_logger.LogInformation("Enabling Columnar Fast-Path (direct RecordBatch transfer)");
-				await DirectColumnarTransferAsync(columnarReader, columnarWriter, options.Limit, progress, effectiveCt);
+				if (reader is IColumnarStreamReader columnarReader)
+				{
+					_logger.LogInformation("Enabling Full Columnar Fast-Path (RecordsBatches through pipeline)");
+					await ColumnarPipelineTransferAsync(columnarReader, columnarWriter, columnarPipeline, options.Limit, progress, effectiveCt);
+				}
+				else
+				{
+					_logger.LogInformation("Enabling Hybrid Columnar Path (Bridge + Columnar Pipeline)");
+					await HybridColumnarTransferAsync(reader, columnarWriter, columnarPipeline, options.BatchSize, options.Limit, progress, effectiveCt);
+				}
 			}
 			else
 			{
@@ -546,6 +557,108 @@ public class ExportService
                 await bridge.DisposeAsync();
             }
         }
+    }
+
+    private async Task ColumnarPipelineTransferAsync(
+        IColumnarStreamReader reader,
+        IColumnarDataWriter writer,
+        IReadOnlyList<IColumnarTransformer> pipeline,
+        int limit,
+        IExportProgress progress,
+        CancellationToken ct)
+    {
+        long rowCount = 0;
+        await foreach (var batch in reader.ReadRecordBatchesAsync(ct))
+        {
+            using (batch)
+            {
+                RecordBatch? currentBatch = batch;
+                foreach (var transformer in pipeline)
+                {
+                    if (currentBatch == null) break;
+                    currentBatch = await transformer.TransformBatchAsync(currentBatch, ct);
+                    progress.ReportTransform(transformer.GetType().Name, batch.Length);
+                }
+
+                if (currentBatch != null)
+                {
+                    await writer.WriteRecordBatchAsync(currentBatch, ct);
+                    progress.ReportRead(batch.Length);
+                    progress.ReportWrite(currentBatch.Length);
+                    rowCount += currentBatch.Length;
+                }
+
+                if (limit > 0 && rowCount >= limit) break;
+            }
+        }
+    }
+
+    private async Task HybridColumnarTransferAsync(
+        IStreamReader reader,
+        IColumnarDataWriter writer,
+        IReadOnlyList<IColumnarTransformer> pipeline,
+        int batchSize,
+        int limit,
+        IExportProgress progress,
+        CancellationToken ct)
+    {
+        var bridgeFactory = _bridgeFactories.FirstOrDefault();
+        if (bridgeFactory == null)
+            throw new InvalidOperationException("No Columnar Bridge factory registered.");
+
+        await using var bridge = bridgeFactory.CreateBridge();
+        // Since we are in the pipeline, currentSchema is already initialized by transformers if needed
+        // but here we use the latest schema known.
+        // Wait, InitializeAsync should have been called on all transformers.
+
+        // We need to re-fetch the column schema after potential row-based initialization
+        // but before columnar processing.
+        // Actually currentSchema was calculated in RunExportAsync.
+
+        // Find a way to get the schema at the point of bridge injection.
+        // If all transformers are columnar, the bridge happens BEFORE them.
+        // So the bridge schema is the READER schema.
+        await bridge.InitializeAsync(reader.Columns!, batchSize, ct);
+
+        long rowCount = 0;
+
+        // Pump task for bridge to writer
+        var pumpTask = Task.Run(async () =>
+        {
+            await foreach (var batch in bridge.ReadRecordBatchesAsync(ct))
+            {
+                using (batch)
+                {
+                    RecordBatch? currentBatch = batch;
+                    foreach (var transformer in pipeline)
+                    {
+                        if (currentBatch == null) break;
+                        currentBatch = await transformer.TransformBatchAsync(currentBatch, ct);
+                        progress.ReportTransform(transformer.GetType().Name, batch.Length);
+                    }
+
+                    if (currentBatch != null)
+                    {
+                        await writer.WriteRecordBatchAsync(currentBatch, ct);
+                        progress.ReportWrite(currentBatch.Length);
+                        rowCount += currentBatch.Length;
+                    }
+                }
+            }
+        }, ct);
+
+        try
+        {
+            await foreach (var rows in reader.ReadBatchesAsync(batchSize, ct))
+            {
+                await bridge.IngestRowsAsync(rows, ct);
+                progress.ReportRead(rows.Length);
+                if (limit > 0 && rowCount >= limit) break;
+            }
+            await bridge.CompleteAsync(ct);
+            await pumpTask;
+        }
+        catch (OperationCanceledException) { }
     }
 
     private static async Task DirectColumnarTransferAsync(

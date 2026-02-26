@@ -20,6 +20,7 @@ public sealed class ArrowRowToColumnarBridge : IRowToColumnarBridge
 
     private Schema? _schema;
     private List<IArrowArrayBuilder>? _builders;
+    private Action<object?>[]? _appenders;
     private int _batchSize;
     private int _rowsInBuffer;
     private bool _isComplete;
@@ -41,6 +42,7 @@ public sealed class ArrowRowToColumnarBridge : IRowToColumnarBridge
         _batchSize = batchSize;
         _schema = BuildSchema(columns);
         _builders = CreateBuilders(_schema);
+        _appenders = CreateAppenders(_builders);
         _rowsInBuffer = 0;
 
         _logger.LogDebug("Arrow Bridge initialized with {Count} columns, batch size {BatchSize}", columns.Count, batchSize);
@@ -49,21 +51,39 @@ public sealed class ArrowRowToColumnarBridge : IRowToColumnarBridge
 
     public async ValueTask IngestRowsAsync(ReadOnlyMemory<object?[]> rows, CancellationToken ct = default)
     {
-        if (_builders == null || _schema == null)
+        if (_appenders == null || _schema == null)
             throw new InvalidOperationException("Call InitializeAsync first.");
 
-        for (int i = 0; i < rows.Length; i++)
+        var appenders = _appenders;
+        int i = 0;
+        int totalRows = rows.Length;
+
+        while (i < totalRows)
         {
-            var row = rows.Span[i];
-            for (int colIdx = 0; colIdx < row.Length; colIdx++)
-            {
-                AppendValue(_builders[colIdx], row[colIdx]);
-            }
-            _rowsInBuffer++;
+            int spaceInBatch = _batchSize - _rowsInBuffer;
+            int toProcess = Math.Min(totalRows - i, spaceInBatch);
+
+            // Process a chunk without await
+            ProcessChunk(rows.Slice(i, toProcess).Span, appenders);
+
+            _rowsInBuffer += toProcess;
+            i += toProcess;
 
             if (_rowsInBuffer >= _batchSize)
             {
                 await FlushCurrentBatchAsync(ct);
+            }
+        }
+    }
+
+    private void ProcessChunk(ReadOnlySpan<object?[]> chunk, Action<object?>[] appenders)
+    {
+        for (int j = 0; j < chunk.Length; j++)
+        {
+            var row = chunk[j];
+            for (int colIdx = 0; colIdx < row.Length; colIdx++)
+            {
+                appenders[colIdx](row[colIdx]);
             }
         }
     }
@@ -90,16 +110,20 @@ public sealed class ArrowRowToColumnarBridge : IRowToColumnarBridge
         if (_builders == null || _schema == null || _rowsInBuffer == 0) return;
 
         var arrays = new List<IArrowArray>();
-        foreach (var b in _builders)
+        for (int i = 0; i < _builders.Count; i++)
         {
-            // Use dynamic or explicit casting to build
-            arrays.Add(BuildArray(b));
+            var arr = BuildArray(_builders[i]);
+            Console.WriteLine($"[DEBUG] Bridge: Built array {i} for field '{_schema.FieldsList[i].Name}', Type={arr.GetType().Name}, Length={arr.Length}");
+            arrays.Add(arr);
         }
 
         var batch = new RecordBatch(_schema, arrays, _rowsInBuffer);
+        Console.WriteLine($"[DEBUG] Bridge: Writing batch to channel (Length={_rowsInBuffer})");
         await _outputChannel.Writer.WriteAsync(batch, ct);
 
+        // Re-initialize for next batch
         _builders = CreateBuilders(_schema);
+        _appenders = CreateAppenders(_builders);
         _rowsInBuffer = 0;
     }
 
@@ -175,37 +199,67 @@ public sealed class ArrowRowToColumnarBridge : IRowToColumnarBridge
         };
     }
 
-    private void AppendValue(IArrowArrayBuilder builder, object? value)
+    private Action<object?>[] CreateAppenders(List<IArrowArrayBuilder> builders)
     {
-        if (value == null)
+        var appenders = new Action<object?>[builders.Count];
+        for (int i = 0; i < builders.Count; i++)
         {
-            if (builder is BooleanArray.Builder boolB) boolB.AppendNull();
-            else if (builder is Int32Array.Builder i32B) i32B.AppendNull();
-            else if (builder is Int64Array.Builder i64B) i64B.AppendNull();
-            else if (builder is DoubleArray.Builder dblB) dblB.AppendNull();
-            else if (builder is FloatArray.Builder fltB) fltB.AppendNull();
-            else if (builder is StringArray.Builder strB) strB.AppendNull();
-            else if (builder is Date64Array.Builder d64B) d64B.AppendNull();
-            else if (builder is TimestampArray.Builder tsB) tsB.AppendNull();
-            else if (builder is BinaryArray.Builder binB) binB.AppendNull();
-            return;
+            appenders[i] = CreateAppender(builders[i]);
         }
+        return appenders;
+    }
 
-        if (builder is StringArray.Builder strB2) strB2.Append(value.ToString() ?? "");
-        else if (builder is Int64Array.Builder i64B2 && value is long l) i64B2.Append(l);
-        else if (builder is Int32Array.Builder i32B2 && value is int i) i32B2.Append(i);
-        else if (builder is DoubleArray.Builder dblB2 && value is double d) dblB2.Append(d);
-        else if (builder is DoubleArray.Builder dblB3 && value is float f) dblB3.Append(f);
-        else if (builder is DoubleArray.Builder dblB4 && value is decimal dec) dblB4.Append((double)dec);
-        else if (builder is FloatArray.Builder fltB2 && value is float f2) fltB2.Append(f2);
-        else if (builder is BooleanArray.Builder boolB2 && value is bool b) boolB2.Append(b);
-        else if (builder is Date64Array.Builder d64B2 && value is DateTime dt) d64B2.Append(dt);
-        else if (builder is TimestampArray.Builder tsB2 && value is DateTimeOffset dto) tsB2.Append(dto);
-        else if (builder is BinaryArray.Builder binB2 && value is byte[] bytes) binB2.Append((IEnumerable<byte>)bytes);
-        else
+    private Action<object?> CreateAppender(IArrowArrayBuilder builder)
+    {
+        return builder switch
         {
-            if (builder is StringArray.Builder strB3) strB3.Append(value.ToString() ?? "");
-        }
+            BooleanArray.Builder b => val => { if (val is bool v) b.Append(v); else b.AppendNull(); },
+            Int32Array.Builder b => val => {
+                if (val is int v) b.Append(v);
+                else if (val is long l) b.Append((int)l);
+                else b.AppendNull();
+            },
+            Int64Array.Builder b => val => {
+                if (val is long v) b.Append(v);
+                else if (val is int i) b.Append(i);
+                else b.AppendNull();
+            },
+            DoubleArray.Builder b => val => {
+                if (val is double v) b.Append(v);
+                else if (val is float f) b.Append(f);
+                else if (val is decimal d) b.Append((double)d);
+                else b.AppendNull();
+            },
+            FloatArray.Builder b => val => {
+                if (val is float v) b.Append(v);
+                else if (val is double d) b.Append((float)d);
+                else b.AppendNull();
+            },
+            StringArray.Builder b => val => {
+                if (val is null) b.AppendNull();
+                else b.Append(val.ToString());
+            },
+            Date64Array.Builder b => val => {
+                if (val is DateTime dt) b.Append(dt);
+                else b.AppendNull();
+            },
+            TimestampArray.Builder b => val => {
+                if (val is DateTimeOffset dto) b.Append(dto);
+                else if (val is DateTime dt) b.Append(new DateTimeOffset(dt));
+                else b.AppendNull();
+            },
+            BinaryArray.Builder b => val => {
+                if (val is byte[] bytes) b.Append((System.Collections.Generic.IEnumerable<byte>)bytes);
+                else b.AppendNull();
+            },
+            _ => val => {
+                if (builder is StringArray.Builder s)
+                {
+                    if (val is null) s.AppendNull();
+                    else s.Append(val.ToString());
+                }
+            }
+        };
     }
 
     public async ValueTask DisposeAsync()

@@ -1,6 +1,6 @@
 using DtPipe.Core.Models;
 using DtPipe.Transformers.Services;
-using DtPipe.Transformers.Filter;
+using DtPipe.Transformers.Row.Filter;
 using Xunit;
 
 namespace DtPipe.Tests.Transformers;

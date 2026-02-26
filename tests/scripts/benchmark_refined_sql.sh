@@ -11,7 +11,7 @@ DTPOLARS_CMD="$ROOT_DIR/dist/dtpolars"
 DTFUSION_CMD="$ROOT_DIR/dist/dtfusion"
 DTDUCK_CMD="$ROOT_DIR/dist/dtduck"
 DTDUCKSHARP_CMD="$ROOT_DIR/dist/dtducksharp"
-DTPIPE_CMD="$ROOT_DIR/src/DtPipe/bin/Release/net10.0/dtpipe"
+DTPIPE_CMD="$ROOT_DIR/dist/release/dtpipe"
 
 MAIN_PQ="$ARTIFACTS_DIR/main.parquet"
 REF1_PQ="$ARTIFACTS_DIR/ref1.parquet"

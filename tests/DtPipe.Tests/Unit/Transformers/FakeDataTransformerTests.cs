@@ -1,5 +1,5 @@
 using DtPipe.Core.Models;
-using DtPipe.Transformers.Fake;
+using DtPipe.Transformers.Hybrid.Fake;
 using FluentAssertions;
 using Xunit;
 
@@ -163,7 +163,7 @@ public class FakeDataTransformerTests
 	public void Constructor_ShouldThrowException_WhenDatasetValidButMethodInvalid()
 	{
 		// Arrange
-		// "name" is a valid dataset, but "invalidmethod" is not a method. 
+		// "name" is a valid dataset, but "invalidmethod" is not a method.
 		// Should throw InvalidOperationException to stop the export.
 		var options = new FakeOptions { Fake = new[] { "NAME:name.invalidmethod" }, Seed = 123 };
 

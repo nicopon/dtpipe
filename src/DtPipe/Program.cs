@@ -7,16 +7,16 @@ using DtPipe.Core.Pipelines.Dag;
 using DtPipe.XStreamers.Native;
 using DtPipe.Transformers.Services;
 using DtPipe.Observers;
-using DtPipe.Transformers.Expand;
-using DtPipe.Transformers.Fake;
-using DtPipe.Transformers.Filter;
-using DtPipe.Transformers.Format;
-using DtPipe.Transformers.Mask;
-using DtPipe.Transformers.Null;
-using DtPipe.Transformers.Overwrite;
-using DtPipe.Transformers.Project;
-using DtPipe.Transformers.Script;
-using DtPipe.Transformers.Window;
+using DtPipe.Transformers.Row.Expand;
+using DtPipe.Transformers.Hybrid.Fake;
+using DtPipe.Transformers.Row.Filter;
+using DtPipe.Transformers.Row.Format;
+using DtPipe.Transformers.Row.Mask;
+using DtPipe.Transformers.Row.Null;
+using DtPipe.Transformers.Row.Overwrite;
+using DtPipe.Transformers.Row.Project;
+using DtPipe.Transformers.Row.Compute;
+using DtPipe.Transformers.Row.Window;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Serilog;
@@ -35,9 +35,10 @@ class Program
 		ConfigureServices(services);
 		var serviceProvider = services.BuildServiceProvider();
 
-		// Initialize Serilog with default console logger (or no-op if we prefer only explicit file log)
+		// Initialize Serilog with default console logger
 		Log.Logger = new LoggerConfiguration()
 			.MinimumLevel.Debug()
+			.WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
 			.CreateLogger();
 
 		var jobService = serviceProvider.GetRequiredService<JobService>();
@@ -74,6 +75,7 @@ class Program
 		services.AddLogging(logging =>
 		{
 			logging.ClearProviders();
+			logging.AddSerilog(Log.Logger);
 			logging.SetMinimumLevel(LogLevel.Debug);
 		});
 
@@ -113,11 +115,11 @@ class Program
 					if (readerDescType.IsAssignableFrom(type))
 					{
 						registerReaderMethod.MakeGenericMethod(type).Invoke(null, new object[] { services });
+					}
 
-						if (typeof(IXStreamerFactory).IsAssignableFrom(type))
-						{
-							services.AddSingleton(typeof(IXStreamerFactory), type);
-						}
+					if (typeof(IXStreamerFactory).IsAssignableFrom(type))
+					{
+						services.AddSingleton(typeof(IXStreamerFactory), type);
 					}
 					if (writerDescType.IsAssignableFrom(type))
 					{

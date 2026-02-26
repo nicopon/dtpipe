@@ -1,6 +1,6 @@
 using DtPipe.Core.Models;
 using DtPipe.Transformers.Services;
-using DtPipe.Transformers.Window;
+using DtPipe.Transformers.Row.Window;
 using FluentAssertions;
 using Xunit;
 

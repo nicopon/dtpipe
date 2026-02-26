@@ -1,7 +1,7 @@
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
-using DtPipe.Transformers.Format;
+using DtPipe.Transformers.Row.Format;
 using FluentAssertions;
 using Xunit;
 

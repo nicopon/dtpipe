@@ -4,16 +4,16 @@ set -eo pipefail
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 ROOT_DIR="$DIR/../.."
 ARTIFACTS_DIR="$DIR/artifacts"
-DTPIPE_CMD="$ROOT_DIR/src/DtPipe/bin/Release/net10.0/dtpipe"
+DTPIPE_CMD="$ROOT_DIR/dist/release/dtpipe"
 
 mkdir -p "$ARTIFACTS_DIR"
 
-echo "--- Generating 20M rows benchmark dataset (Parquet) ---"
+echo "--- Generating 1M rows benchmark dataset (Parquet) ---"
 
-# 1. Main Stream (20M rows)
+# 1. Main Stream (1M rows)
 # We generate a large dataset with IDs and some dummy data
-echo "Generating main.parquet (20,000,000 rows)..."
-"$DTPIPE_CMD" -i "generate:20000000" \
+echo "Generating main.parquet (1,000,000 rows)..."
+"$DTPIPE_CMD" -i "generate:1000000" \
   --fake Email:internet.email \
   --fake Name:name.fullname \
   --fake Amount:finance.amount \

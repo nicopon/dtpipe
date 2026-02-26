@@ -35,6 +35,7 @@ public class ExportServiceTests
 			readerFactoryList,
 			writerFactoryList,
 			new List<IDataTransformerFactory>(), // transformers
+			new List<IRowToColumnarBridgeFactory>(), // bridge factories
 			new OptionsRegistry(), // options registry
 			_mockObserver.Object,
 			_mockLogger.Object

@@ -142,7 +142,7 @@ public class DagOrchestrator : IDagOrchestrator
                 if (mode == XStreamerChannelMode.Arrow)
                 {
                     var arrowChannel = Channel.CreateUnbounded<Apache.Arrow.RecordBatch>();
-                    _channelRegistry.RegisterArrowChannel(branch.Alias, arrowChannel, new Schema.Builder().Build());
+                    _channelRegistry.RegisterArrowChannel(branch.Alias, arrowChannel, new Schema(System.Array.Empty<Field>(), null));
                     argsList.Add("-o");
                     argsList.Add($"arrow-memory:{branch.Alias}");
                     _logger.LogInformation("Branch '{Alias}' → Arrow memory channel (DuckXStreamer consumer).", branch.Alias);

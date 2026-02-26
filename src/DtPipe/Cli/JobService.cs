@@ -131,12 +131,22 @@ public class JobService
 		{
 			foreach (var opt in contributor.GetCliOptions())
 			{
-				if (!rootCommand.Options.Any(o => o.Name == opt.Name))
+				if (!rootCommand.Options.Any(o => o.Name == opt.Name || o.Aliases.Contains(opt.Name)))
 				{
 					rootCommand.Options.Add(opt);
 				}
 			}
 		}
+
+        if (Environment.GetEnvironmentVariable("DEBUG") == "1")
+        {
+            Console.WriteLine("--- Registered CLI Options ---");
+            foreach (var opt in rootCommand.Options)
+            {
+                Console.WriteLine($"Option: {opt.Name} (Aliases: {string.Join(", ", opt.Aliases)})");
+            }
+            Console.WriteLine("------------------------------");
+        }
 
 		// Add Secret Command
 		rootCommand.Subcommands.Add(new SecretCommand());

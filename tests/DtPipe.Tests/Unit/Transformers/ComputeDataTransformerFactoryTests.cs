@@ -1,5 +1,5 @@
 using DtPipe.Transformers.Services;
-using DtPipe.Transformers.Script;
+using DtPipe.Transformers.Row.Compute;
 using FluentAssertions;
 using Xunit;
 

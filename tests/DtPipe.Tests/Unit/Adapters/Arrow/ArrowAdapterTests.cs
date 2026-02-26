@@ -1,4 +1,5 @@
 using DtPipe.Adapters.Arrow;
+using DtPipe.Adapters.Infrastructure.Arrow;
 using DtPipe.Core.Models;
 using FluentAssertions;
 using Xunit;
@@ -42,7 +43,23 @@ public class ArrowAdapterTests : IAsyncLifetime
 		// Act 1: Write
 		var writer = new ArrowAdapterDataWriter(_testArrowPath, new ArrowWriterOptions { BatchSize = 10 });
 		await writer.InitializeAsync(columns);
-		await writer.WriteBatchAsync(rows);
+
+		// ArrowAdapterDataWriter is now purely columnar, we must use the bridge or write RecordBatches directly.
+		var bridge = new ArrowRowToColumnarBridge();
+		await bridge.InitializeAsync(columns, 10);
+
+		var writeTask = Task.Run(async () =>
+		{
+			await foreach (var batch in bridge.ReadRecordBatchesAsync())
+			{
+				await writer.WriteRecordBatchAsync(batch);
+			}
+		});
+
+		await bridge.IngestRowsAsync(rows.ToArray());
+		await bridge.CompleteAsync();
+		await writeTask;
+
 		await writer.CompleteAsync();
 		await writer.DisposeAsync();
 

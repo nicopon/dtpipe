@@ -1,7 +1,7 @@
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
-using DtPipe.Transformers.Mask;
+using DtPipe.Transformers.Row.Mask;
 using FluentAssertions;
 using Xunit;
 
@@ -48,8 +48,8 @@ public class MaskDataTransformerTests
 	public async Task Transform_ShouldMaskData_WithComplexPattern()
 	{
 		// Arrange
-		// Pattern length matches input length roughly. 
-		// Logic is 1:1 replacement. 
+		// Pattern length matches input length roughly.
+		// Logic is 1:1 replacement.
 		// Input: 0612345678 (10 chars)
 		// Pattern: ##******## (10 chars) -> Keep first 2, mask middle 6, keep last 2
 		var options = new MaskOptions { Mask = new[] { "PHONE:##******##" } };
