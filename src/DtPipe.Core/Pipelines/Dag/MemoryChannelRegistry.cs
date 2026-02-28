@@ -3,6 +3,7 @@ using DtPipe.Core.Models;
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 using Apache.Arrow;
+using Apache.Arrow.Types;
 
 namespace DtPipe.Core.Pipelines.Dag;
 
@@ -34,6 +35,7 @@ public class MemoryChannelRegistry : IMemoryChannelRegistry
 
     public void UpdateChannelColumns(string branchAlias, IReadOnlyList<PipeColumnInfo> columns)
     {
+        bool found = false;
         if (_channels.TryGetValue(branchAlias, out var channelData))
         {
             _channels[branchAlias] = (channelData.Channel, columns);
@@ -41,11 +43,52 @@ public class MemoryChannelRegistry : IMemoryChannelRegistry
             {
                 tcs.TrySetResult(columns);
             }
+            found = true;
         }
-        else
+
+        if (_arrowChannels.TryGetValue(branchAlias, out var arrowData))
+        {
+            var schema = BuildArrowSchema(columns);
+            _arrowChannels[branchAlias] = (arrowData.Channel, schema);
+            if (_arrowSchemaTcs.TryGetValue(branchAlias, out var tcs))
+            {
+                tcs.TrySetResult(schema);
+            }
+            found = true;
+        }
+
+        if (!found)
         {
             throw new InvalidOperationException($"Cannot update columns: channel '{branchAlias}' is not registered.");
         }
+    }
+
+    private Schema BuildArrowSchema(IReadOnlyList<PipeColumnInfo> columns)
+    {
+        var builder = new Schema.Builder();
+        foreach (var col in columns)
+        {
+            builder.Field(new Field(col.Name, GetArrowType(col.ClrType), col.IsNullable));
+        }
+        return builder.Build();
+    }
+
+    private IArrowType GetArrowType(Type type)
+    {
+        var baseType = Nullable.GetUnderlyingType(type) ?? type;
+
+        if (baseType == typeof(string)) return StringType.Default;
+        if (baseType == typeof(bool)) return BooleanType.Default;
+        if (baseType == typeof(int)) return Int32Type.Default;
+        if (baseType == typeof(long)) return Int64Type.Default;
+        if (baseType == typeof(float)) return FloatType.Default;
+        if (baseType == typeof(double)) return DoubleType.Default;
+        if (baseType == typeof(decimal)) return DoubleType.Default;
+        if (baseType == typeof(DateTime)) return Date64Type.Default;
+        if (baseType == typeof(DateTimeOffset)) return TimestampType.Default;
+        if (baseType == typeof(byte[])) return BinaryType.Default;
+
+        return StringType.Default;
     }
 
     public async Task<IReadOnlyList<PipeColumnInfo>> WaitForChannelColumnsAsync(string branchAlias, CancellationToken ct = default)

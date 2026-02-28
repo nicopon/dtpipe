@@ -67,19 +67,18 @@ echo "======================================"
   --query "$QUERY" \
   --out "csv:-" || true
 
-# 5. DuckXStreamer
+# 5. DuckDB Engine (Process-based DAG)
 echo ""
 echo "======================================"
-echo "          5. DuckXStreamer (DAG)      "
+echo "          5. DuckDB Engine (DAG)      "
 echo "======================================"
-# DuckXStreamer is a DAG that reads Parquet files and joins them.
-# We use -i parquet:PATH --alias X to feed the XStreamer.
+# Current dtpipe uses -x duck-engine for the ProcessXStreamer orchestrator.
 /usr/bin/time -l "$DTPIPE_CMD" dag \
   -i "parquet:$MAIN_PQ" --alias main \
   -i "parquet:$REF1_PQ" --alias ref1 \
   -i "parquet:$REF2_PQ" --alias ref2 \
-  -x duck-xstream --main main --ref "ref1,ref2" --query "$QUERY" \
-  -o "null:-" || true
+  -x duck-engine --main main --ref "ref1,ref2" --query "$QUERY" \
+  -o "null:-" --no-stats || true
 
 echo ""
 echo "Benchmark finished."

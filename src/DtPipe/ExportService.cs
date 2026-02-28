@@ -8,6 +8,7 @@ using DtPipe.Core.Validation;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using Apache.Arrow;
+using DtPipe.Core.Abstractions.Dag;
 
 namespace DtPipe;
 
@@ -19,6 +20,7 @@ public class ExportService
 	private readonly IEnumerable<IRowToColumnarBridgeFactory> _bridgeFactories;
 	private readonly OptionsRegistry _optionsRegistry;
 	private readonly IExportObserver _observer;
+	private readonly IMemoryChannelRegistry? _channelRegistry;
 	private readonly ILogger<ExportService> _logger;
 
 	public ExportService(
@@ -28,7 +30,8 @@ public class ExportService
 		IEnumerable<IRowToColumnarBridgeFactory> bridgeFactories,
 		OptionsRegistry optionsRegistry,
 		IExportObserver observer,
-		ILogger<ExportService> logger)
+		ILogger<ExportService> logger,
+		IMemoryChannelRegistry? channelRegistry = null)
 	{
 		_readerFactories = readerFactories;
 		_writerFactories = writerFactories;
@@ -37,6 +40,7 @@ public class ExportService
 		_optionsRegistry = optionsRegistry;
 		_observer = observer;
 		_logger = logger;
+		_channelRegistry = channelRegistry;
 	}
 
 	public async Task RunExportAsync(
@@ -47,7 +51,8 @@ public class ExportService
 		List<IDataTransformer> pipeline,
 		IStreamReaderFactory readerFactory,
 		IDataWriterFactory writerFactory,
-		OptionsRegistry registry)
+		OptionsRegistry registry,
+		string? alias = null)
 	{
 		if (_logger.IsEnabled(LogLevel.Information))
 			_logger.LogInformation("Starting export from {Provider} to {OutputPath}", providerName, ConnectionStringSanitizer.Sanitize(outputPath));
@@ -82,6 +87,12 @@ public class ExportService
 			{
 				currentSchema = await t.InitializeAsync(currentSchema, ct);
 			}
+		}
+
+		// Update DAG registry if we are a branch
+		if (!string.IsNullOrEmpty(alias) && _channelRegistry != null)
+		{
+			_channelRegistry.UpdateChannelColumns(alias, currentSchema ?? System.Array.Empty<PipeColumnInfo>());
 		}
 
 		// Dry-run mode
@@ -570,7 +581,7 @@ public class ExportService
         long rowCount = 0;
         await foreach (var batch in reader.ReadRecordBatchesAsync(ct))
         {
-            using (batch)
+            if (writer.PrefersOwnershipTransfer)
             {
                 RecordBatch? currentBatch = batch;
                 foreach (var transformer in pipeline)
@@ -587,8 +598,29 @@ public class ExportService
                     progress.ReportWrite(currentBatch.Length);
                     rowCount += currentBatch.Length;
                 }
+            }
+            else
+            {
+                using (batch)
+                {
+                    RecordBatch? currentBatch = batch;
+                    foreach (var transformer in pipeline)
+                    {
+                        if (currentBatch == null) break;
+                        currentBatch = await transformer.TransformBatchAsync(currentBatch, ct);
+                        progress.ReportTransform(transformer.GetType().Name, batch.Length);
+                    }
 
-                if (limit > 0 && rowCount >= limit) break;
+                    if (currentBatch != null)
+                    {
+                        await writer.WriteRecordBatchAsync(currentBatch, ct);
+                        progress.ReportRead(batch.Length);
+                        progress.ReportWrite(currentBatch.Length);
+                        rowCount += currentBatch.Length;
+                    }
+
+                    if (limit > 0 && rowCount >= limit) break;
+                }
             }
         }
     }
@@ -627,7 +659,7 @@ public class ExportService
         {
             await foreach (var batch in bridge.ReadRecordBatchesAsync(ct))
             {
-                using (batch)
+                if (writer.PrefersOwnershipTransfer)
                 {
                     RecordBatch? currentBatch = batch;
                     foreach (var transformer in pipeline)
@@ -642,6 +674,26 @@ public class ExportService
                         await writer.WriteRecordBatchAsync(currentBatch, ct);
                         progress.ReportWrite(currentBatch.Length);
                         rowCount += currentBatch.Length;
+                    }
+                }
+                else
+                {
+                    using (batch)
+                    {
+                        RecordBatch? currentBatch = batch;
+                        foreach (var transformer in pipeline)
+                        {
+                            if (currentBatch == null) break;
+                            currentBatch = await transformer.TransformBatchAsync(currentBatch, ct);
+                            progress.ReportTransform(transformer.GetType().Name, batch.Length);
+                        }
+
+                        if (currentBatch != null)
+                        {
+                            await writer.WriteRecordBatchAsync(currentBatch, ct);
+                            progress.ReportWrite(currentBatch.Length);
+                            rowCount += currentBatch.Length;
+                        }
                     }
                 }
             }
@@ -671,21 +723,32 @@ public class ExportService
         long rowCount = 0;
         await foreach (var batch in reader.ReadRecordBatchesAsync(ct))
         {
-            using (batch) // Ensure Arrow C release callback is called promptly
+            if (writer.PrefersOwnershipTransfer)
             {
                 var batchToWriter = batch;
-                if (limit > 0 && rowCount + batch.Length > limit)
-                {
-                    var takeCount = limit - (int)rowCount;
-                    // Note: Slicing would be better here if supported.
-                }
-
                 await writer.WriteRecordBatchAsync(batchToWriter, ct);
                 progress.ReportRead(batchToWriter.Length);
                 progress.ReportWrite(batchToWriter.Length);
                 rowCount += batchToWriter.Length;
+            }
+            else
+            {
+                using (batch) // Ensure Arrow C release callback is called promptly
+                {
+                    var batchToWriter = batch;
+                    if (limit > 0 && rowCount + batch.Length > limit)
+                    {
+                        var takeCount = limit - (int)rowCount;
+                        // Note: Slicing would be better here if supported.
+                    }
 
-                if (limit > 0 && rowCount >= limit) break;
+                    await writer.WriteRecordBatchAsync(batchToWriter, ct);
+                    progress.ReportRead(batchToWriter.Length);
+                    progress.ReportWrite(batchToWriter.Length);
+                    rowCount += batchToWriter.Length;
+
+                    if (limit > 0 && rowCount >= limit) break;
+                }
             }
         }
     }

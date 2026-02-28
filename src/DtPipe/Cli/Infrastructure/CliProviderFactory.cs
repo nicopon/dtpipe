@@ -4,6 +4,9 @@ using DtPipe.Cli.Infrastructure;
 using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Options;
+using DtPipe.Core.Abstractions.Dag;
+using DtPipe.Core.Pipelines.Dag;
+
 
 namespace DtPipe.Cli.Infrastructure;
 
@@ -190,3 +193,24 @@ public class CliStreamReaderFactory : CliProviderFactory<IStreamReader>, IStream
 
 	public bool RequiresQuery => _descriptor.RequiresQuery;
 }
+
+public class CliXStreamerFactory : CliProviderFactory<IStreamReader>, IXStreamerFactory
+{
+    private readonly IXStreamerFactory _xStreamerDescriptor;
+
+    public CliXStreamerFactory(IXStreamerFactory descriptor, OptionsRegistry registry, IServiceProvider serviceProvider)
+        : base(descriptor, registry, serviceProvider)
+    {
+        _xStreamerDescriptor = descriptor;
+    }
+
+    public XStreamerChannelMode ChannelMode => _xStreamerDescriptor.ChannelMode;
+
+    public bool RequiresQuery => _xStreamerDescriptor.RequiresQuery;
+
+    public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
+    {
+        return _xStreamerDescriptor.Create(connectionString, options, serviceProvider);
+    }
+}
+

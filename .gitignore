@@ -48,3 +48,10 @@ tests/DtPipe.Tests/Data/Target/*
 tests/scripts/artifacts/
 !tests/scripts/artifacts/.gitkeep
 tests/scripts/sandbox/
+
+# Debug and Temp
+*.log
+*.arrow
+*.arrows
+*.output
+test_*.yaml

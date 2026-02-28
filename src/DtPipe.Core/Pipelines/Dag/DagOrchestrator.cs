@@ -121,18 +121,6 @@ public class DagOrchestrator : IDagOrchestrator
             // If it doesn't specify an explicit output (e.g., `-o file.csv`),
             // the Orchestrator forces it into a MemoryChannel.
 
-            // Channel Configuration
-            var channel = Channel.CreateBounded<IReadOnlyList<object?[]>>(new BoundedChannelOptions(100)
-            {
-                SingleWriter = true,
-                SingleReader = true, // XStreamers usually join 1-to-1 or N-to-N, but each source is read once.
-                FullMode = BoundedChannelFullMode.Wait
-            });
-
-            // Register it so downstream branches can find it
-            // Null for columns for now until we properly extract schema detection logic
-            _channelRegistry.RegisterChannel(branch.Alias, channel, System.Array.Empty<PipeColumnInfo>());
-
             // Inject memory channel output if the branch doesn't explicitly define one
             var argsList = branch.Arguments.ToList();
             if (!argsList.Contains("-o", StringComparer.OrdinalIgnoreCase) && !argsList.Contains("--output", StringComparer.OrdinalIgnoreCase))
@@ -150,12 +138,18 @@ public class DagOrchestrator : IDagOrchestrator
                 }
                 else
                 {
-                    // Comportement actuel inchangé — Intermediate DAG buffer
-                    _channelRegistry.RegisterChannel(branch.Alias, Channel.CreateUnbounded<IReadOnlyList<object?[]>>(), []);
+                    var channel = Channel.CreateBounded<IReadOnlyList<object?[]>>(new BoundedChannelOptions(100)
+                    {
+                        SingleWriter = true,
+                        SingleReader = true,
+                        FullMode = BoundedChannelFullMode.Wait
+                    });
+
+                    _channelRegistry.RegisterChannel(branch.Alias, channel, System.Array.Empty<PipeColumnInfo>());
                     argsList.Add("-o");
                     argsList.Add($"memory:{branch.Alias}");
-                    _logger.LogInformation("Branch '{Alias}' → Native memory channel (intermediate DAG buffer).", branch.Alias);
-                    OnLogEvent?.Invoke($"  [grey]↳ Branch '{branch.Alias}' → [italic]memory channel[/] (intermediate DAG buffer)[/]");
+                    _logger.LogInformation("Branch '{Alias}' → Native memory channel.", branch.Alias);
+                    OnLogEvent?.Invoke($"  [grey]↳ Branch '{branch.Alias}' → [italic]memory channel[/][/]");
                 }
 
                 // Disable stats for internal memory-bound branches to prevent Spectre.Console concurrency deadlocks
@@ -176,19 +170,26 @@ public class DagOrchestrator : IDagOrchestrator
                 {
                     _logger.LogError("Branch '{Alias}' failed with exit code {ExitCode}.", branch.Alias, exitCode);
                     OnLogEvent?.Invoke($"  [red]✖[/] Branch '{branch.Alias}' failed with exit code {exitCode}.");
-                    channel.Writer.TryComplete(new Exception($"Branch failed with exit code {exitCode}"));
+
+                    // Mark channels as broken
+                    _channelRegistry.GetChannel(branch.Alias)?.Channel.Writer.TryComplete(new Exception($"Branch failed with exit code {exitCode}"));
+                    _channelRegistry.GetArrowChannel(branch.Alias)?.Channel.Writer.TryComplete(new Exception($"Branch failed with exit code {exitCode}"));
+
                     return exitCode;
                 }
 
                 // Successfully finished processing
-                channel.Writer.TryComplete();
+                _channelRegistry.GetChannel(branch.Alias)?.Channel.Writer.TryComplete();
+                _channelRegistry.GetArrowChannel(branch.Alias)?.Channel.Writer.TryComplete();
+
                 _logger.LogInformation("Branch '{Alias}' completed.", branch.Alias);
                 OnLogEvent?.Invoke($"  [green]✓[/] Branch '{branch.Alias}' completed.");
                 return 0;
             }
             catch (Exception ex)
             {
-                channel.Writer.TryComplete(ex);
+                _channelRegistry.GetChannel(branch.Alias)?.Channel.Writer.TryComplete(ex);
+                _channelRegistry.GetArrowChannel(branch.Alias)?.Channel.Writer.TryComplete(ex);
                 throw;
             }
         }

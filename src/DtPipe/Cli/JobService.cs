@@ -31,7 +31,8 @@ public class JobService
 		ILoggerFactory loggerFactory,
 		IEnumerable<IStreamReaderFactory> readerFactories,
 		IEnumerable<IDataTransformerFactory> transformerFactories,
-		IEnumerable<IDataWriterFactory> writerFactories)
+		IEnumerable<IDataWriterFactory> writerFactories,
+		IEnumerable<IXStreamerFactory> xstreamerFactories)
 	{
 		_serviceProvider = serviceProvider;
 		_console = console;
@@ -42,6 +43,7 @@ public class JobService
 		list.AddRange(readerFactories.OfType<ICliContributor>());
 		list.AddRange(transformerFactories.OfType<ICliContributor>());
 		list.AddRange(writerFactories.OfType<ICliContributor>());
+		list.AddRange(xstreamerFactories.OfType<ICliContributor>());
 		_contributors = list;
 	}
 
@@ -150,6 +152,7 @@ public class JobService
 
 		// Add Secret Command
 		rootCommand.Subcommands.Add(new SecretCommand());
+		rootCommand.Subcommands.Add(new EngineDuckDbCommand());
 
 		rootCommand.SetAction(async (ParseResult parseResult, CancellationToken ct) =>
 		{
@@ -404,7 +407,7 @@ public class JobService
 						NoStats        = options.NoStats,
 						MetricsPath    = options.MetricsPath,
 					};
-					await exportService.RunExportAsync(pipelineOptions, options.Provider, options.OutputPath, token, pipeline, readerFactory, writerFactory, registry);
+					await exportService.RunExportAsync(pipelineOptions, options.Provider, options.OutputPath, token, pipeline, readerFactory, writerFactory, registry, localAlias);
 					return 0;
 				}
 				catch (Exception ex)

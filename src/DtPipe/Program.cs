@@ -100,7 +100,7 @@ class Program
 		{
 			typeof(Program).Assembly,
 			typeof(DtPipe.Adapters.MemoryChannel.MemoryChannelDataWriter).Assembly,
-			typeof(DtPipe.XStreamers.Native.NativeJoinXStreamer).Assembly
+			typeof(DtPipe.XStreamers.Native.ProcessXStreamer).Assembly
 		};
 
 		var registerReaderMethod = typeof(Program).GetMethod(nameof(RegisterReader), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
@@ -112,16 +112,19 @@ class Program
 			{
 				if (!type.IsAbstract && !type.IsInterface)
 				{
-					if (readerDescType.IsAssignableFrom(type))
+					// Only register types that satisfy the new() constraint (parameterless ctor required by RegisterReader/RegisterWriter)
+					var hasDefaultCtor = type.GetConstructor(Type.EmptyTypes) != null;
+
+					if (readerDescType.IsAssignableFrom(type) && hasDefaultCtor)
 					{
 						registerReaderMethod.MakeGenericMethod(type).Invoke(null, new object[] { services });
 					}
 
-					if (typeof(IXStreamerFactory).IsAssignableFrom(type))
+					if (typeof(IXStreamerFactory).IsAssignableFrom(type) && type.Assembly != typeof(Program).Assembly)
 					{
 						services.AddSingleton(typeof(IXStreamerFactory), type);
 					}
-					if (writerDescType.IsAssignableFrom(type))
+					if (writerDescType.IsAssignableFrom(type) && hasDefaultCtor)
 					{
 						registerWriterMethod.MakeGenericMethod(type).Invoke(null, new object[] { services });
 					}

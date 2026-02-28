@@ -1,6 +1,6 @@
 using DtPipe.Adapters.Arrow;
-using DtPipe.Adapters.Infrastructure.Arrow;
 using DtPipe.Core.Models;
+using DtPipe.Core.Infrastructure.Arrow;
 using FluentAssertions;
 using Xunit;
 

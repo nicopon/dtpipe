@@ -1,9 +1,7 @@
 using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Running;
-using DtPipe.Core;
 using DtPipe.Core.Models;
-using DtPipe.Core.Options;
-using DtPipe.Transformers.Format;
+using DtPipe.Transformers.Row.Format;
+
 namespace DtPipe.Benchmarks;
 
 [MemoryDiagnoser]

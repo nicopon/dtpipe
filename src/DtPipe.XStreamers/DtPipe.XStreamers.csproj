@@ -5,6 +5,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\datafusion-sharp\src\DataFusionSharp\DataFusionSharp.csproj" />
     <PackageReference Include="Apache.Arrow" Version="22.1.0" />
     <PackageReference Include="Apache.Arrow.Adbc" Version="0.17.0" />
     <PackageReference Include="DuckDB.NET.Bindings" Version="1.4.4" />
