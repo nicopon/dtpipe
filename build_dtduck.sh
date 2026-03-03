@@ -4,7 +4,7 @@ set -eo pipefail
 echo "Building DtDuck (Rust/DuckDB) in Release mode..."
 
 # Navigate to the project directory
-cd "$(dirname "$0")/src/DtDuck"
+cd "$(dirname "$0")/experiments/DtDuck"
 
 # Build the project
 cargo build --release

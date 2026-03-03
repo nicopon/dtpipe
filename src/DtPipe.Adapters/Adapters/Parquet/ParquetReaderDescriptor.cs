@@ -7,10 +7,11 @@ namespace DtPipe.Adapters.Parquet;
 
 public class ParquetReaderDescriptor : IProviderDescriptor<IStreamReader>
 {
-    public string ComponentName => "parquet";
+    public string ComponentName => ParquetMetadata.ComponentName;
     public string Category => "Reader Options";
     public Type OptionsType => typeof(ParquetReaderOptions);
-    public bool CanHandle(string connectionString) => connectionString.EndsWith(".parquet", StringComparison.OrdinalIgnoreCase);
+    public bool CanHandle(string connectionString) => ParquetMetadata.CanHandle(connectionString);
+    public bool SupportsStdio => ParquetMetadata.SupportsStdio;
     public bool RequiresQuery => false;
 
     public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)

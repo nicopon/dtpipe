@@ -7,10 +7,11 @@ namespace DtPipe.Adapters.DuckDB;
 
 public class DuckDbWriterDescriptor : IProviderDescriptor<IDataWriter>
 {
-    public string ComponentName => "duck";
+    public string ComponentName => DuckDbMetadata.ComponentName;
     public string Category => "Writer Options";
     public Type OptionsType => typeof(DuckDbWriterOptions);
-    public bool CanHandle(string connectionString) => connectionString.Contains(".duckdb", StringComparison.OrdinalIgnoreCase);
+    public bool CanHandle(string connectionString) => DuckDbMetadata.CanHandle(connectionString);
+    public bool SupportsStdio => DuckDbMetadata.SupportsStdio;
     public bool RequiresQuery => true;
 
     public IDataWriter Create(string connectionString, object options, IServiceProvider serviceProvider)

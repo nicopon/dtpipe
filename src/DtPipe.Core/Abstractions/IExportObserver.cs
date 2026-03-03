@@ -1,5 +1,5 @@
 namespace DtPipe.Core.Abstractions;
-
+using DtPipe.Core.Models;
 public interface IExportObserver
 {
 	// Lifecycle / Info
@@ -20,5 +20,5 @@ public interface IExportObserver
 	IExportProgress CreateProgressReporter(bool isInteractive, IEnumerable<string> transformerNames);
 
 	// Dry Run
-	Task RunDryRunAsync(IStreamReader reader, IReadOnlyList<IDataTransformer> pipeline, int count, IDataWriter? inspectionWriter, CancellationToken ct);
+	Task RunDryRunAsync(IStreamReader reader, IReadOnlyList<IDataTransformer> pipeline, int count, IDataWriter? inspectionWriter, IReadOnlyDictionary<IDataTransformer, (IReadOnlyList<PipeColumnInfo> In, IReadOnlyList<PipeColumnInfo> Out)>? precomputedSchemas = null, CancellationToken ct = default);
 }

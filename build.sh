@@ -48,8 +48,11 @@ case "$OS" in
         fi
         ;;
     MINGW*|CYGWIN*|MSYS*)
-        # Default to x64 for Windows bash unless explicitly arm64
-        RID="win-x64" 
+        if [[ "$ARCH" == "arm64" || "$ARCH" == "aarch64" ]]; then
+            RID="win-arm64"
+        else
+            RID="win-x64"
+        fi
         EXT=".exe"
         ;;
     *)

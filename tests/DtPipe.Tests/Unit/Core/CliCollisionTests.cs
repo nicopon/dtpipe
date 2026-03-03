@@ -15,7 +15,7 @@ public class CliCollisionTests
 		var assembly = typeof(ICliContributor).Assembly;
 		var contributorTypes = assembly.GetTypes()
 			.Where(t => typeof(ICliContributor).IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract && !t.ContainsGenericParameters)
-			.Where(t => t.Name != "CliDataWriterFactory" && t.Name != "CliStreamReaderFactory") // Skip infra wrappers requiring complex deps
+			.Where(t => t.Name != "CliDataWriterFactory" && t.Name != "CliStreamReaderFactory" && t.Name != "CliDataTransformerFactory" && t.Name != "CliXStreamerFactory") // Skip infra wrappers requiring complex deps
 			.ToList();
 
 		var optionsRegistry = new OptionsRegistry();
@@ -141,7 +141,7 @@ public class CliCollisionTests
 
 		// 4. Trace collisions
 		// We only care if the list of sources has > 1 DISTINCT elements.
-		// (A source defining the same option name twice is also weird but System.CommandLine might handle it, 
+		// (A source defining the same option name twice is also weird but System.CommandLine might handle it,
 		//  but sharing between different sources is a collision)
 		var collisions = definedAliases
 								.Where(kv => kv.Value.Distinct().Count() > 1)

@@ -7,10 +7,12 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
-using DtPipe.Transformers.Hybrid.Fake;
-using DtPipe.Transformers.Row.Format;
-using DtPipe.Transformers.Row.Null;
-using DtPipe.Transformers.Row.Overwrite;
+using DtPipe.Transformers.Columnar.Fake;
+using DtPipe.Transformers.Columnar.Format;
+using DtPipe.Transformers.Columnar.Null;
+using DtPipe.Transformers.Columnar.Overwrite;
+using DtPipe.Adapters.Infrastructure.Arrow;
+using DtPipe.Core.Infrastructure.Arrow;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
@@ -91,9 +93,12 @@ public class PipelineStressTests : IAsyncLifetime
 		services.AddSingleton<IDataTransformerFactory, OverwriteDataTransformerFactory>();
 		services.AddSingleton<IDataTransformerFactory, FakeDataTransformerFactory>();
 		services.AddSingleton<IDataTransformerFactory, FormatDataTransformerFactory>();
+		services.AddSingleton<IRowToColumnarBridgeFactory, ArrowRowToColumnarBridgeFactory>();
+		services.AddSingleton<IColumnarToRowBridgeFactory, ArrowColumnarToRowBridgeFactory>();
 		services.AddSingleton<ExportService>();
 
 		var mockProgress = new Mock<IExportProgress>();
+		mockProgress.Setup(p => p.GetMetrics()).Returns(new ExportMetrics(DateTime.UtcNow, DateTime.UtcNow, 0, 0, 0, 0, new Dictionary<string, long>()));
 		var mockObserver = new Mock<IExportObserver>();
 		mockObserver.Setup(o => o.CreateProgressReporter(It.IsAny<bool>(), It.IsAny<IEnumerable<string>>()))
 					.Returns(mockProgress.Object);
@@ -103,7 +108,7 @@ public class PipelineStressTests : IAsyncLifetime
 		var serviceProvider = services.BuildServiceProvider();
 		var exportService = serviceProvider.GetRequiredService<ExportService>();
 
-		var options = new DumpOptions
+		var options = new PipelineOptions
 		{
 			Provider = "duckdb",
 			ConnectionString = _connectionString,

@@ -1,14 +1,17 @@
 using System.Data;
 using System.Text;
+using Apache.Arrow;
+using Apache.Arrow.Types;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Helpers;
+using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
 using DuckDB.NET.Data;
 using Microsoft.Extensions.Logging;
 
 namespace DtPipe.Adapters.DuckDB;
 
-public sealed class DuckDbDataWriter : BaseSqlDataWriter
+public sealed class DuckDbDataWriter : BaseSqlDataWriter, IColumnarDataWriter
 {
 	private readonly DuckDbWriterOptions _options;
 	private readonly ILogger<DuckDbDataWriter> _logger;
@@ -50,7 +53,7 @@ public sealed class DuckDbDataWriter : BaseSqlDataWriter
 		return Task.FromResult((string.Empty, _options.Table));
 	}
 
-	protected override async Task ApplyWriteStrategyAsync(string resolvedSchema, string resolvedTable, CancellationToken ct)
+	protected override async Task<TargetSchemaInfo?> ApplyWriteStrategyAsync(string resolvedSchema, string resolvedTable, CancellationToken ct)
 	{
 		_unquotedSchema = resolvedSchema;
 		_unquotedTable = resolvedTable;
@@ -131,6 +134,8 @@ public sealed class DuckDbDataWriter : BaseSqlDataWriter
 		{
 			await SetupUpsertStagingAsync(ct);
 		}
+
+		return null;
 	}
 
 	private async Task<bool> TableExistsAsync(CancellationToken ct)
@@ -278,6 +283,90 @@ public sealed class DuckDbDataWriter : BaseSqlDataWriter
 		}
 	}
 
+	public async ValueTask WriteRecordBatchAsync(RecordBatch batch, CancellationToken ct = default)
+	{
+		if (_appender is null || _columnMapping is null) throw new InvalidOperationException("Not initialized");
+
+		try
+		{
+			await Task.Run(() =>
+			{
+				var appender = (DuckDBAppender)_appender;
+				var rowCount = batch.Length;
+
+				for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+				{
+					var row = appender.CreateRow();
+
+					for (int i = 0; i < _columnMapping.Length; i++)
+					{
+						var sourceIndex = _columnMapping[i];
+
+						if (sourceIndex == -1)
+						{
+							row.AppendNullValue();
+						}
+						else
+						{
+							var arrowColumn = batch.Column(sourceIndex);
+							var targetType = _targetTypes![i];
+
+							if (arrowColumn.IsNull(rowIndex))
+							{
+								row.AppendNullValue();
+							}
+							else
+							{
+								// Using a fast path for common types
+								AppendArrowValue(row, arrowColumn, rowIndex, targetType);
+							}
+						}
+					}
+					row.EndRow();
+				}
+			}, ct);
+		}
+		catch (Exception ex)
+		{
+			_logger.LogError(ex, "DuckDB Arrow Appender Failed: {Message}", ex.Message);
+			throw;
+		}
+	}
+
+	private void AppendArrowValue(IDuckDBAppenderRow row, IArrowArray column, int rowIndex, Type targetType)
+	{
+		var val = ArrowTypeMapper.GetValue(column, rowIndex);
+		if (val == null)
+		{
+			row.AppendNullValue();
+			return;
+		}
+
+		switch (val)
+		{
+			case bool b: row.AppendValue(b); break;
+			case sbyte sb: row.AppendValue(sb); break;
+			case short s: row.AppendValue(s); break;
+			case int i: row.AppendValue(i); break;
+			case long l: row.AppendValue(l); break;
+			case byte b: row.AppendValue(b); break;
+			case ushort us: row.AppendValue(us); break;
+			case uint ui: row.AppendValue(ui); break;
+			case ulong ul: row.AppendValue(ul); break;
+			case float f: row.AppendValue(f); break;
+			case double d: row.AppendValue(d); break;
+			case decimal dec: row.AppendValue(dec); break;
+			case string str: row.AppendValue(str); break;
+			case DateTime dt: row.AppendValue(dt); break;
+			case DateTimeOffset dto: row.AppendValue(dto.DateTime); break;
+			case byte[] bytes: row.AppendValue((System.Collections.Generic.IEnumerable<byte>)bytes); break;
+			case Guid g: row.AppendValue(g); break;
+			default:
+				row.AppendValue(val.ToString() ?? string.Empty);
+				break;
+		}
+	}
+
 	private void AppendValue(IDuckDBAppenderRow row, object val, Type type)
 	{
 		var underlying = Nullable.GetUnderlyingType(type) ?? type;
@@ -318,6 +407,8 @@ public sealed class DuckDbDataWriter : BaseSqlDataWriter
 		cmd.CommandText = command;
 		await cmd.ExecuteNonQueryAsync(ct);
 	}
+
+
 
 	public override async ValueTask CompleteAsync(CancellationToken ct = default)
 	{
@@ -375,8 +466,15 @@ public sealed class DuckDbDataWriter : BaseSqlDataWriter
 
 	protected override ValueTask DisposeResourcesAsync()
 	{
-		_appender?.Dispose();
-		_appender = null;
+		try
+		{
+			_appender?.Dispose();
+			_appender = null;
+		}
+		catch (Exception ex)
+		{
+			_logger.LogError(ex, "Failed to dispose DuckDB appender");
+		}
 		return ValueTask.CompletedTask;
 	}
 

@@ -7,10 +7,11 @@ namespace DtPipe.Adapters.PostgreSQL;
 
 public class PostgreSqlWriterDescriptor : IProviderDescriptor<IDataWriter>
 {
-    public string ComponentName => "pg";
+    public string ComponentName => PostgreSqlMetadata.ComponentName;
     public string Category => "Writer Options";
     public Type OptionsType => typeof(PostgreSqlWriterOptions);
-    public bool CanHandle(string connectionString) => connectionString.StartsWith("postgres:", StringComparison.OrdinalIgnoreCase) || connectionString.StartsWith("postgresql:", StringComparison.OrdinalIgnoreCase) || connectionString.Contains("Host=", StringComparison.OrdinalIgnoreCase);
+    public bool CanHandle(string connectionString) => PostgreSqlMetadata.CanHandle(connectionString);
+    public bool SupportsStdio => PostgreSqlMetadata.SupportsStdio;
     public bool RequiresQuery => true;
 
     public IDataWriter Create(string connectionString, object options, IServiceProvider serviceProvider)

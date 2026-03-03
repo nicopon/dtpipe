@@ -6,11 +6,10 @@ using Apache.Arrow;
 namespace DtPipe.XStreamers.DataFusion;
 
 /// <summary>
-/// Matérialise un Arrow memory channel dtpipe dans un fichier CSV temporaire
-/// pour que DataFusion puisse le lire via RegisterCsvAsync.
-/// On utilise CSV au lieu d'Arrow IPC car les RecordBatch du bridge Row→Arrow
-/// ont des buffers natifs partiellement initialisés qui provoquent des NullRef
-/// dans Apache.Arrow.Ipc.ArrowStreamWriter.
+/// Materializes a DtPipe Arrow memory channel into a temporary CSV file
+/// so that DataFusion can read it via RegisterCsvAsync.
+/// CSV is used instead of Arrow IPC because RecordBatches from the Row→Arrow bridge
+/// have partially initialized native buffers that cause NullRef in Apache.Arrow.Ipc.ArrowStreamWriter.
 /// </summary>
 internal static class ArrowChannelMaterializer
 {

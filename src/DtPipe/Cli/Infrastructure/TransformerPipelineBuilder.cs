@@ -27,15 +27,16 @@ public class TransformerPipelineBuilder
         var optionMap = new Dictionary<string, (IDataTransformerFactory Factory, Option Option)>(StringComparer.OrdinalIgnoreCase);
         foreach (var factory in transformerFactories)
         {
-            if (factory is ICliContributor contributor)
+            var options = (factory is ICliContributor contributor)
+                ? contributor.GetCliOptions()
+                : CliOptionBuilder.GenerateOptionsForType(factory.OptionsType);
+
+            foreach (var option in options)
             {
-                foreach (var option in contributor.GetCliOptions())
-                {
-                    if (!string.IsNullOrEmpty(option.Name))
-                        optionMap[option.Name] = (factory, option);
-                    foreach (var alias in option.Aliases)
-                        optionMap[alias] = (factory, option);
-                }
+                if (!string.IsNullOrEmpty(option.Name))
+                    optionMap[option.Name] = (factory, option);
+                foreach (var alias in option.Aliases)
+                    optionMap[alias] = (factory, option);
             }
         }
 
@@ -86,17 +87,12 @@ public class TransformerPipelineBuilder
                     if (optionName.Equals(componentName, StringComparison.OrdinalIgnoreCase))
                     {
                         // It's the primary mapping option (e.g. --fake "NAME:faker")
-                        currentOptions.Add((componentName, value));
+                        currentOptions.Add((arg, value));
                     }
                     else
                     {
                         // It's a specific option (e.g. --fake-locale "fr")
-                        var optionKey = optionName;
-                        if (optionKey.StartsWith(componentName + "-", StringComparison.OrdinalIgnoreCase))
-                        {
-                            optionKey = optionKey[(componentName.Length + 1)..];
-                        }
-                        currentOptions.Add((optionKey, value));
+                        currentOptions.Add((arg, value));
                     }
                 }
             }

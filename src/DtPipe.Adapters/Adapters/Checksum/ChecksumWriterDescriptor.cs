@@ -7,10 +7,11 @@ namespace DtPipe.Adapters.Checksum;
 
 public class ChecksumWriterDescriptor : IProviderDescriptor<IDataWriter>
 {
-    public string ComponentName => "checksum";
+    public string ComponentName => ChecksumMetadata.ComponentName;
     public string Category => "Writer Options";
     public Type OptionsType => typeof(ChecksumWriterOptions);
-    public bool CanHandle(string connectionString) => connectionString.Equals("checksum:", StringComparison.OrdinalIgnoreCase) || connectionString.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase);
+    public bool CanHandle(string connectionString) => ChecksumMetadata.CanHandle(connectionString);
+    public bool SupportsStdio => ChecksumMetadata.SupportsStdio;
     public bool RequiresQuery => false;
 
     public IDataWriter Create(string connectionString, object options, IServiceProvider serviceProvider)

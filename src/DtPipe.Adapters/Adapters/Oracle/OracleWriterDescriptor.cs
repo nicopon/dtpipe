@@ -7,10 +7,11 @@ namespace DtPipe.Adapters.Oracle;
 
 public class OracleWriterDescriptor : IProviderDescriptor<IDataWriter>
 {
-    public string ComponentName => "ora";
+    public string ComponentName => OracleMetadata.ComponentName;
     public string Category => "Writer Options";
     public Type OptionsType => typeof(OracleWriterOptions);
-    public bool CanHandle(string connectionString) => connectionString.StartsWith("oracle:", StringComparison.OrdinalIgnoreCase) || connectionString.Contains("User Id=", StringComparison.OrdinalIgnoreCase);
+    public bool CanHandle(string connectionString) => OracleMetadata.CanHandle(connectionString);
+    public bool SupportsStdio => OracleMetadata.SupportsStdio;
     public bool RequiresQuery => true;
 
     public IDataWriter Create(string connectionString, object options, IServiceProvider serviceProvider)

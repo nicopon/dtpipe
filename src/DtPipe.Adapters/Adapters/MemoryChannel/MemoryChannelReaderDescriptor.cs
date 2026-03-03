@@ -6,11 +6,11 @@ namespace DtPipe.Adapters.MemoryChannel;
 
 public class MemoryChannelReaderDescriptor : IProviderDescriptor<IStreamReader>
 {
-    public string ComponentName => "memory";
+    public string ComponentName => MemoryChannelMetadata.ComponentName;
+    public string Category => "Reader Options";
     public Type OptionsType => typeof(MemoryChannelOptions);
-    public string Category => "Readers";
-
-    public bool CanHandle(string connectionString) => false;
+    public bool CanHandle(string connectionString) => MemoryChannelMetadata.CanHandle(connectionString);
+    public bool SupportsStdio => MemoryChannelMetadata.SupportsStdio;
     public bool RequiresQuery => false;
 
     public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)

@@ -25,6 +25,11 @@ public interface IRowToColumnarBridge : IAsyncDisposable
     IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync(CancellationToken ct = default);
 
     /// <summary>
+    /// Faults the stream, sending the exception to consumers.
+    /// </summary>
+    void Fault(Exception exception);
+
+    /// <summary>
     /// Flushes any partial buffer and marks as complete.
     /// </summary>
     ValueTask CompleteAsync(CancellationToken ct = default);

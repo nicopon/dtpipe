@@ -91,6 +91,35 @@ public class ParquetReaderTests : IAsyncLifetime
 	}
 
 	[Fact]
+	public async Task ParquetReader_ShouldReadRecordBatches()
+	{
+		// Arrange
+		var reader = new ParquetStreamReader(_testParquetPath);
+
+		// Act
+		await reader.OpenAsync();
+		var batches = new List<Apache.Arrow.RecordBatch>();
+		await foreach (var batch in reader.ReadRecordBatchesAsync())
+		{
+			batches.Add(batch);
+		}
+		await reader.DisposeAsync();
+
+		// Assert
+		batches.Should().HaveCount(1); // One row group
+		var firstBatch = batches[0];
+		firstBatch.Length.Should().Be(3);
+		firstBatch.ColumnCount.Should().Be(3);
+
+		var idCol = firstBatch.Column(0) as Apache.Arrow.Int32Array;
+		idCol!.GetValue(0).Should().Be(1);
+		idCol.GetValue(1).Should().Be(2);
+
+		var nameCol = firstBatch.Column(1) as Apache.Arrow.StringArray;
+		nameCol!.GetString(0).Should().Be("Alice");
+	}
+
+	[Fact]
 	public void ParquetReaderFactory_ShouldDetectParquetFiles()
 	{
 		var registry = new OptionsRegistry();

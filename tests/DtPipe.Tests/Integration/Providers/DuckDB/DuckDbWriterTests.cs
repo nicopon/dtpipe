@@ -5,6 +5,7 @@ using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DuckDB.NET.Data;
 using FluentAssertions;
+using DtPipe.Core.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -52,7 +53,7 @@ public class DuckDbWriterTests : IAsyncLifetime
 	public async Task Write_CreatesTable_And_InsertsData()
 	{
 		// Arrange
-		var options = new DumpOptions
+		var options = new PipelineOptions
 		{
 			OutputPath = _outputPath,
 			ConnectionString = "fake_connection",
@@ -110,6 +111,54 @@ public class DuckDbWriterTests : IAsyncLifetime
 
 		reader.Read().Should().BeFalse();
 	}
+
+	[Fact]
+	public async Task Write_RecordBatch_InsertsData()
+	{
+		// Arrange
+		var options = new PipelineOptions { OutputPath = _outputPath, ConnectionString = "fake", Query = "SELECT 1" };
+		_registry.Register(options);
+		var writer = _factory.Create(_registry) as IColumnarDataWriter;
+		writer.Should().NotBeNull();
+
+		var columns = new List<PipeColumnInfo>
+		{
+			new("Id", typeof(int), false),
+			new("Name", typeof(string), true)
+		};
+
+		await writer!.InitializeAsync(columns, CancellationToken.None);
+
+		// Create Arrow RecordBatch
+		var schema = new Apache.Arrow.Schema.Builder()
+			.Field(f => f.Name("Id").DataType(Apache.Arrow.Types.Int32Type.Default).Nullable(false))
+			.Field(f => f.Name("Name").DataType(Apache.Arrow.Types.StringType.Default).Nullable(true))
+			.Build();
+
+		var idArray = new Apache.Arrow.Int32Array.Builder().Append(10).Append(20).Build();
+		var nameArray = new Apache.Arrow.StringArray.Builder().Append("X").AppendNull().Build();
+		var batch = new Apache.Arrow.RecordBatch(schema, new Apache.Arrow.IArrowArray[] { idArray, nameArray }, 2);
+
+		// Act
+		await writer.WriteRecordBatchAsync(batch, CancellationToken.None);
+		await writer.CompleteAsync(CancellationToken.None);
+		await writer.DisposeAsync();
+
+		// Assert
+		using var connection = new DuckDBConnection($"Data Source={_outputPath}");
+		await connection.OpenAsync();
+		using var cmd = connection.CreateCommand();
+		cmd.CommandText = "SELECT * FROM Export ORDER BY Id";
+		using var reader = await cmd.ExecuteReaderAsync();
+
+		reader.Read().Should().BeTrue();
+		reader.GetInt32(0).Should().Be(10);
+		reader.GetString(1).Should().Be("X");
+
+		reader.Read().Should().BeTrue();
+		reader.GetInt32(0).Should().Be(20);
+		reader.IsDBNull(1).Should().BeTrue();
+	}
 	[Fact]
 	public async Task Write_Append_WithDifferentColumnOrder_MapsCorrectly()
 	{
@@ -128,7 +177,7 @@ public class DuckDbWriterTests : IAsyncLifetime
 		var duckOptions = new DuckDbWriterOptions { Strategy = DuckDbWriteStrategy.Append, Table = "Export" };
 		_registry.Register(duckOptions);
 
-		var options = new DumpOptions
+		var options = new PipelineOptions
 		{
 			OutputPath = _outputPath,
 			Provider = "duckdb",
@@ -195,7 +244,7 @@ public class DuckDbWriterTests : IAsyncLifetime
 		var duckOptions = new DuckDbWriterOptions { Strategy = DuckDbWriteStrategy.Append, Table = "Export" };
 		_registry.Register(duckOptions);
 
-		var options = new DumpOptions
+		var options = new PipelineOptions
 		{
 			OutputPath = _outputPath,
 			Provider = "duckdb",
@@ -245,7 +294,7 @@ public class DuckDbWriterTests : IAsyncLifetime
 		var duckOptions = new DuckDbWriterOptions { Strategy = DuckDbWriteStrategy.Truncate, Table = "Export" };
 		_registry.Register(duckOptions);
 
-		var options = new DumpOptions { OutputPath = _outputPath, Provider = "duckdb", Query = "SELECT 1", ConnectionString = "dummy" };
+		var options = new PipelineOptions { OutputPath = _outputPath, Provider = "duckdb", Query = "SELECT 1", ConnectionString = "dummy" };
 		_registry.Register(options);
 		var writer = _factory.Create(_registry);
 
@@ -292,7 +341,7 @@ public class DuckDbWriterTests : IAsyncLifetime
 		var duckOptions = new DuckDbWriterOptions { Strategy = DuckDbWriteStrategy.DeleteThenInsert, Table = "Export" };
 		_registry.Register(duckOptions);
 
-		var options = new DumpOptions { OutputPath = _outputPath, Provider = "duckdb", Query = "SELECT 1", ConnectionString = "dummy" };
+		var options = new PipelineOptions { OutputPath = _outputPath, Provider = "duckdb", Query = "SELECT 1", ConnectionString = "dummy" };
 		_registry.Register(options);
 		var writer = _factory.Create(_registry);
 

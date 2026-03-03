@@ -8,34 +8,34 @@ using Microsoft.Extensions.Logging;
 namespace DtPipe.XStreamers.DataFusion;
 
 /// <summary>
-/// Options CLI pour le composant fusion-engine.
-/// Deux modes :
-///   A) Sources locales : --src-main et --src-ref passent le chemin, DataFusion lit directement.
-///   B) Sources upstream DAG : --main et --ref lisent depuis les Arrow memory channels.
+/// CLI options for the fusion-engine component.
+/// Two modes:
+///   A) Local sources: --src-main and --src-ref pass the path, DataFusion reads directly.
+///   B) Upstream DAG sources: --main and --ref read from Arrow memory channels.
 /// </summary>
 public class DataFusionXStreamerOptions : IOptionSet, ICliOptionMetadata
 {
     public static string Prefix => "fusion-engine";
     public static string DisplayName => "DataFusion In-Process SQL Engine";
 
-    /// <summary>Requête SQL à exécuter.</summary>
+    /// <summary>SQL query to execute.</summary>
     public string[] Query { get; set; } = Array.Empty<string>();
 
-    /// <summary>Alias de la branche main dans le DAG upstream (mode memory channel).</summary>
+    /// <summary>Alias of the main branch in the upstream DAG (memory channel mode).</summary>
     public string[] MainAlias { get; set; } = Array.Empty<string>();
 
-    /// <summary>Alias des branches ref dans le DAG upstream (mode memory channel).</summary>
+    /// <summary>Alias of the ref branches in the upstream DAG (memory channel mode).</summary>
     public string[] RefAlias { get; set; } = Array.Empty<string>();
 
     /// <summary>
-    /// Source directe pour le flux main (ex: parquet:/path/main.parquet ou csv:/path/main.csv).
-    /// Si présent, DataFusion lit directement le fichier — bypasse le memory channel.
+    /// Direct source for the main stream (e.g., parquet:/path/main.parquet or csv:/path/main.csv).
+    /// If present, DataFusion reads the file directly — bypassing the memory channel.
     /// </summary>
     public string[] SrcMain { get; set; } = Array.Empty<string>();
 
     /// <summary>
-    /// Source(s) directe(s) pour les flux ref (ex: csv:/path/ref.csv).
-    /// Chaque entrée correspond à un alias ref (dans l'ordre de RefAlias).
+    /// Direct source(s) for the ref streams (e.g., csv:/path/ref.csv).
+    /// Each entry corresponds to a ref alias (in the order of RefAlias).
     /// </summary>
     public string[] SrcRef { get; set; } = Array.Empty<string>();
 
@@ -57,7 +57,7 @@ public class DataFusionXStreamerFactory : IXStreamerFactory
     public bool RequiresQuery => true;
     public bool CanHandle(string connectionString) => false;
 
-    // Requiert des Arrow RecordBatch channels upstream (comme duck-engine)
+    // Requires upstream Arrow RecordBatch channels (like duck-engine)
     public XStreamerChannelMode ChannelMode => XStreamerChannelMode.Arrow;
 
     public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)

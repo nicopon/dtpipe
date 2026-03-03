@@ -1,6 +1,6 @@
 using BenchmarkDotNet.Attributes;
 using DtPipe.Core.Models;
-using DtPipe.Transformers.Row.Format;
+using DtPipe.Transformers.Columnar.Format;
 
 namespace DtPipe.Benchmarks;
 

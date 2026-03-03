@@ -1,13 +1,16 @@
 using System.Runtime.CompilerServices;
+using Apache.Arrow;
+using Apache.Arrow.Types;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 
 namespace DtPipe.Adapters.Generate;
 
-public partial class GenerateReader : IStreamReader, IRequiresOptions<GenerateReaderOptions>
+public partial class GenerateReader : IStreamReader, IColumnarStreamReader, IRequiresOptions<GenerateReaderOptions>
 {
 	private readonly GenerateReaderOptions _options;
+	private Schema? _arrowSchema;
 
 	public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
 
@@ -44,7 +47,38 @@ public partial class GenerateReader : IStreamReader, IRequiresOptions<GenerateRe
 		{
 			new("GenerateIndex", typeof(long), false)
 		};
+		_arrowSchema = new Schema.Builder()
+			.Field(f => f.Name("GenerateIndex").DataType(Int64Type.Default).Nullable(false))
+			.Build();
 		return Task.CompletedTask;
+	}
+
+	public async IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync([EnumeratorCancellation] CancellationToken ct = default)
+	{
+		const int batchSize = 1000000;
+		long totalRows = _options.RowCount;
+		long produced = 0;
+		int? rowsPerSecond = _options.RowsPerSecond;
+		var sw = rowsPerSecond.HasValue ? System.Diagnostics.Stopwatch.StartNew() : null;
+
+		while (produced < totalRows)
+		{
+			ct.ThrowIfCancellationRequested();
+
+			int currentBatchLimit = (int)Math.Min(batchSize, totalRows - produced);
+			var builder = new Int64Array.Builder();
+
+			for (int i = 0; i < currentBatchLimit; i++)
+			{
+				builder.Append(produced + i);
+			}
+
+			var batch = new RecordBatch(_arrowSchema!, new IArrowArray[] { builder.Build() }, currentBatchLimit);
+			yield return batch;
+
+			produced += currentBatchLimit;
+			await ThrottleAsync(produced, rowsPerSecond, sw, ct);
+		}
 	}
 
 	public async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(

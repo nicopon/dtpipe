@@ -7,12 +7,13 @@ namespace DtPipe.Adapters.MemoryChannel;
 
 public class ArrowMemoryChannelWriterDescriptor : IProviderDescriptor<IDataWriter>
 {
-    public string ComponentName => "arrow-memory";
+    public string ComponentName => ArrowMemoryChannelMetadata.ComponentName;
     public string Category => "MemoryChannel";
     public Type OptionsType => typeof(ArrowMemoryChannelOptions);
     public bool RequiresQuery => false;
 
-    public bool CanHandle(string connectionString) => false;
+    public bool CanHandle(string connectionString) => ArrowMemoryChannelMetadata.CanHandle(connectionString);
+    public bool SupportsStdio => ArrowMemoryChannelMetadata.SupportsStdio;
 
     public IDataWriter Create(string connectionString, object options, IServiceProvider serviceProvider)
     {

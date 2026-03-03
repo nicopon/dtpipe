@@ -28,6 +28,7 @@ public class DryRunCliController
 		List<IDataTransformer> pipeline,
 		int sampleCount,
 		IDataWriter? writer = null,
+		IReadOnlyDictionary<IDataTransformer, (IReadOnlyList<PipeColumnInfo> In, IReadOnlyList<PipeColumnInfo> Out)>? precomputedSchemas = null,
 		CancellationToken ct = default)
 	{
 		// 1. User Feedback for Analysis
@@ -53,7 +54,7 @@ public class DryRunCliController
 		DryRunResult result;
 		try
 		{
-			result = await analyzer.AnalyzeAsync(reader, pipeline, sampleCount, inspector, ct);
+			result = await analyzer.AnalyzeAsync(reader, pipeline, sampleCount, inspector, precomputedSchemas, ct);
 		}
 		catch (Exception ex)
 		{

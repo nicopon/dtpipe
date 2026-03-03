@@ -1,4 +1,5 @@
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Infrastructure.Arrow;
 using Microsoft.Extensions.Logging;
 
 namespace DtPipe.Adapters.Infrastructure.Arrow;

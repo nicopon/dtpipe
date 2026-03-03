@@ -58,7 +58,11 @@ public abstract class BaseSqlDataWriter : IDataWriter, ISchemaInspector, IKeyVal
 		var (resolvedSchema, resolvedTable) = await ResolveTargetTableAsync(ct);
 		_quotedTargetTableName = BuildQuotedTableName(resolvedSchema, resolvedTable);
 
-		await ApplyWriteStrategyAsync(resolvedSchema, resolvedTable, ct);
+		var postStrategySchema = await ApplyWriteStrategyAsync(resolvedSchema, resolvedTable, ct);
+		if (postStrategySchema != null)
+		{
+			_cachedSchema = postStrategySchema;
+		}
 
 		await OnInitializedAsync(ct);
 	}
@@ -159,7 +163,7 @@ public abstract class BaseSqlDataWriter : IDataWriter, ISchemaInspector, IKeyVal
 		return string.IsNullOrEmpty(safeSchema) ? safeTable : $"{safeSchema}.{safeTable}";
 	}
 
-	protected abstract Task ApplyWriteStrategyAsync(string resolvedSchema, string resolvedTable, CancellationToken ct);
+	protected abstract Task<TargetSchemaInfo?> ApplyWriteStrategyAsync(string resolvedSchema, string resolvedTable, CancellationToken ct);
 
 	/// <summary>
 	/// Hook for post-initialization logic (e.g. creating specific commands, bulk copy instances).

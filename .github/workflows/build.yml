@@ -21,6 +21,12 @@ jobs:
         with:
           dotnet-version: '10.0.103'
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build DataFusion Bridge
+        run: ./build_datafusion_bridge.sh
+
       - name: Restore dependencies
         run: dotnet restore
 
@@ -30,33 +36,39 @@ jobs:
   build:
     name: Build ${{ matrix.platform }}
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: linux-x64
             rid: linux-x64
+            runner: ubuntu-latest
             artifact: dtpipe-linux-x64
           
           - platform: linux-arm64
             rid: linux-arm64
+            runner: ubuntu-24.04-arm
             artifact: dtpipe-linux-arm64
           
           - platform: macos-x64
             rid: osx-x64
+            runner: macos-13
             artifact: dtpipe-macos-x64
           
           - platform: macos-arm64
             rid: osx-arm64
+            runner: macos-latest
             artifact: dtpipe-macos-arm64
           
           - platform: windows-x64
             rid: win-x64
+            runner: windows-latest
             artifact: dtpipe-windows-x64.exe
           
           - platform: windows-arm64
             rid: win-arm64
+            runner: windows-latest
             artifact: dtpipe-windows-arm64.exe
 
     steps:
@@ -67,6 +79,23 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.103'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-pc-windows-msvc
+
+      - name: Build DataFusion Bridge (Unix)
+        if: "!contains(matrix.platform, 'windows')"
+        run: ./build_datafusion_bridge.sh
+
+      - name: Build DataFusion Bridge (Windows)
+        if: contains(matrix.platform, 'windows')
+        run: |
+          if ("${{ matrix.platform }}" -eq "windows-arm64") {
+              $env:RUST_TARGET="aarch64-pc-windows-msvc"
+          }
+          ./build_datafusion_bridge.ps1
 
       - name: Restore dependencies
         run: dotnet restore

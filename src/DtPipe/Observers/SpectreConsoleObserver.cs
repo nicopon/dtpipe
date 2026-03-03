@@ -1,4 +1,5 @@
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Models;
 using DtPipe.Feedback;
 using Spectre.Console;
 
@@ -36,15 +37,16 @@ public class SpectreConsoleObserver : IExportObserver
 
 	public void ShowPipeline(IEnumerable<string> transformerNames)
 	{
+		var namesList = transformerNames.ToList();
+		if (namesList.Count == 0) return;
+
 		_console.WriteLine();
-		_console.Write(new Rule("[yellow]Pipeline[/]").LeftJustified());
-		var grid = new Grid();
-		grid.AddColumn();
-		foreach (var name in transformerNames)
+		var tree = new Tree("[yellow]⚙️ Transformations[/]");
+		foreach (var name in namesList)
 		{
-			grid.AddRow($"[yellow]↓[/] [cyan]{name}[/]");
+			tree.AddNode($"[cyan]{name}[/]");
 		}
-		_console.Write(grid);
+		_console.Write(tree);
 	}
 
 	public void ShowTarget(string provider, string output)
@@ -89,12 +91,12 @@ public class SpectreConsoleObserver : IExportObserver
 		return new ProgressReporter(_console, isInteractive, transformerNames);
 	}
 
-	public async Task RunDryRunAsync(IStreamReader reader, IReadOnlyList<IDataTransformer> pipeline, int count, IDataWriter? inspectionWriter, CancellationToken ct)
+	public async Task RunDryRunAsync(IStreamReader reader, IReadOnlyList<IDataTransformer> pipeline, int count, IDataWriter? inspectionWriter, IReadOnlyDictionary<IDataTransformer, (IReadOnlyList<PipeColumnInfo> In, IReadOnlyList<PipeColumnInfo> Out)>? precomputedSchemas = null, CancellationToken ct = default)
 	{
 		// Explicitly using the CLI controller here
 		var controller = new DtPipe.Cli.DryRun.DryRunCliController(_console);
 		// Controller expects List<IDataTransformer>, so we convert.
-		await controller.RunAsync(reader, pipeline.ToList(), count, inspectionWriter, ct);
+		await controller.RunAsync(reader, pipeline.ToList(), count, inspectionWriter, precomputedSchemas, ct);
 	}
 
 	public void ShowSchemaInfo(int columnCount)

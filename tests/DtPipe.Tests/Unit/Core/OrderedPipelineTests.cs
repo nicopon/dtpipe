@@ -4,10 +4,10 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
-using DtPipe.Transformers.Hybrid.Fake;
-using DtPipe.Transformers.Row.Format;
-using DtPipe.Transformers.Row.Null;
-using DtPipe.Transformers.Row.Overwrite;
+using DtPipe.Transformers.Columnar.Fake;
+using DtPipe.Transformers.Columnar.Format;
+using DtPipe.Transformers.Columnar.Null;
+using DtPipe.Transformers.Columnar.Overwrite;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
@@ -52,6 +52,7 @@ public class OrderedPipelineTests
 
 		// Mock the intersection of IDataTransformerFactory and ICliContributor.
 		// Moq's As<TInterface>() allows adding an interface implementation to the mock.
+		mock.Setup(f => f.ComponentName).Returns(mainAlias.TrimStart('-'));
 
 		mock.As<ICliContributor>().Setup(f => f.GetCliOptions()).Returns(new List<Option> { option });
 	}

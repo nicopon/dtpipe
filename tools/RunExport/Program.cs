@@ -58,7 +58,7 @@ class Program
             var sp = services.BuildServiceProvider();
             var exportService = sp.GetRequiredService<ExportService>();
 
-            var options = new DtPipe.Configuration.DumpOptions
+            var options = new DtPipe.Configuration.PipelineOptions
             {
                 Provider = "duckdb",
                 ConnectionString = connStr,

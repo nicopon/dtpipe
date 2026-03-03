@@ -18,6 +18,8 @@ public class DagOrchestrator : IDagOrchestrator
     private readonly ILogger<DagOrchestrator> _logger;
     private readonly IMemoryChannelRegistry _channelRegistry;
     private readonly List<IXStreamerFactory> _xstreamerFactories;
+    private static readonly object _schemaLock = new();
+    private static readonly Schema _emptySchema = new Schema(System.Array.Empty<Field>(), null);
 
     public Action<string>? OnLogEvent { get; set; }
 
@@ -52,12 +54,16 @@ public class DagOrchestrator : IDagOrchestrator
             foreach (var branch in dag.Branches)
             {
                 // In a real execution environment, each branch would need its own DI scope
-                // and a full reconstruction of the `DumpOptions` from `branch.Arguments`.
+                // and a full reconstruction of the `PipelineOptions` from `branch.Arguments`.
                 // For now, we simulate the orchestration structure.
 
                 tasks.Add(ExecuteBranchAsync(dag, branch, branchExecutor, effectiveCt));
+
+                // Stagger starts to avoid race conditions in native library loading or CLI parsing
+                await Task.Delay(50, effectiveCt);
             }
 
+            _logger.LogInformation("DEBUG: All branches started, waiting for completion...");
             // Wait for all branches to finish or for any one to fail early.
             while (tasks.Count > 0)
             {
@@ -129,8 +135,11 @@ public class DagOrchestrator : IDagOrchestrator
 
                 if (mode == XStreamerChannelMode.Arrow)
                 {
-                    var arrowChannel = Channel.CreateUnbounded<Apache.Arrow.RecordBatch>();
-                    _channelRegistry.RegisterArrowChannel(branch.Alias, arrowChannel, new Schema(System.Array.Empty<Field>(), null));
+                    var arrowChannel = Channel.CreateBounded<Apache.Arrow.RecordBatch>(new BoundedChannelOptions(64)
+                    {
+                        FullMode = BoundedChannelFullMode.Wait
+                    });
+                    _channelRegistry.RegisterArrowChannel(branch.Alias, arrowChannel, _emptySchema);
                     argsList.Add("-o");
                     argsList.Add($"arrow-memory:{branch.Alias}");
                     _logger.LogInformation("Branch '{Alias}' → Arrow memory channel (DuckXStreamer consumer).", branch.Alias);

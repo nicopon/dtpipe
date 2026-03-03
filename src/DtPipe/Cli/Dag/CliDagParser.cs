@@ -28,10 +28,6 @@ public static class CliDagParser
         var currentBranchArgs = new List<string>();
 
         int startAt = 0;
-        if (args.Length > 0 && args[0].Equals("dag", StringComparison.OrdinalIgnoreCase))
-        {
-            startAt = 1;
-        }
 
         bool isCurrentBranchXStreamer = false;
         bool hasSeenInputInCurrentBranch = false;
@@ -43,8 +39,8 @@ public static class CliDagParser
 
             if (XStreamerFlags.Contains(arg, StringComparer.OrdinalIgnoreCase))
             {
-                // We've hit an XStreamer boundary. Finish the current branch (if any arguments exist).
-                if (currentBranchArgs.Count > 0 || branches.Count == 0) // Allow empty first branch if started directly with -x
+                // We've hit an XStreamer boundary. Finish the current branch.
+                if (currentBranchArgs.Count > 0)
                 {
                     branches.Add(CreateBranch(currentBranchArgs, isCurrentBranchXStreamer, ref branchCounter));
                     currentBranchArgs.Clear();
@@ -53,21 +49,22 @@ public static class CliDagParser
                 // Start a new XStreamer branch
                 isCurrentBranchXStreamer = true;
                 hasSeenInputInCurrentBranch = false;
-                currentBranchArgs.Add(arg); // Include the -x flag in the branch arguments so the child parser can identify the provider
+                currentBranchArgs.Add(arg);
             }
             else if (InputFlags.Contains(arg, StringComparer.OrdinalIgnoreCase))
             {
-                // If we've already seen an input flag in this branch, it means we're dealing with a new linear branch implicitly
-                if (hasSeenInputInCurrentBranch)
+                // Split if we've already seen an input (linear sequence)
+                // OR if we are switching from an XStreamer branch to a linear branch.
+                if (hasSeenInputInCurrentBranch || isCurrentBranchXStreamer)
                 {
                     if (currentBranchArgs.Count > 0)
                     {
                         branches.Add(CreateBranch(currentBranchArgs, isCurrentBranchXStreamer, ref branchCounter));
                         currentBranchArgs.Clear();
                     }
-                    isCurrentBranchXStreamer = false;
                 }
 
+                isCurrentBranchXStreamer = false; // New branch started with -i is linear
                 hasSeenInputInCurrentBranch = true;
                 currentBranchArgs.Add(arg);
             }

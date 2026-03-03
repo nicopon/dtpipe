@@ -40,7 +40,7 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter
 		return Task.FromResult((string.Empty, _options.Table));
 	}
 
-	protected override async Task ApplyWriteStrategyAsync(string resolvedSchema, string resolvedTable, CancellationToken ct)
+	protected override async Task<TargetSchemaInfo?> ApplyWriteStrategyAsync(string resolvedSchema, string resolvedTable, CancellationToken ct)
 	{
 		if (_options.Strategy == SqliteWriteStrategy.Recreate)
 		{
@@ -65,6 +65,11 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter
 				await ExecuteNonQueryAsync(createTableSql, ct);
 			}
 			if (_logger.IsEnabled(LogLevel.Information)) _logger.LogInformation("Created table {Table}", _quotedTargetTableName);
+
+			// Init Keys
+			await InitKeysAsync(ct);
+			InvalidateSchemaCache();
+			return null;
 		}
 		else if (_options.Strategy == SqliteWriteStrategy.DeleteThenInsert)
 		{
@@ -85,11 +90,21 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter
 			{
 				await ExecuteNonQueryAsync(GetTruncateTableSql(_quotedTargetTableName), ct);
 				if (_logger.IsEnabled(LogLevel.Information)) _logger.LogInformation("Truncated table {Table}", _quotedTargetTableName);
+
+				await InitKeysAsync(ct);
+				var previous = await InspectTargetAsync(ct);
+				if (previous != null) return previous with { RowCount = 0 };
+				InvalidateSchemaCache();
+				return null;
 			}
 			else
 			{
 				var createTableSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
 				await ExecuteNonQueryAsync(createTableSql, ct);
+
+				await InitKeysAsync(ct);
+				InvalidateSchemaCache();
+				return null;
 			}
 		}
 		else // Append
@@ -99,9 +114,19 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter
 				var createTableSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
 				await ExecuteNonQueryAsync(createTableSql, ct);
 				if (_logger.IsEnabled(LogLevel.Information)) _logger.LogInformation("Created table {Table} (Append strategy)", _quotedTargetTableName);
+
+				await InitKeysAsync(ct);
+				InvalidateSchemaCache();
+				return null;
 			}
 		}
 
+		await InitKeysAsync(ct);
+		return null;
+	}
+
+	private async Task InitKeysAsync(CancellationToken ct)
+	{
 		// Initialize Keys for Upsert/Ignore
 		if (_options.Strategy == SqliteWriteStrategy.Upsert || _options.Strategy == SqliteWriteStrategy.Ignore)
 		{

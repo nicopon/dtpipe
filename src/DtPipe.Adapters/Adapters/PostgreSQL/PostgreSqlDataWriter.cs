@@ -56,7 +56,7 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		return ParseTableName(_options.Table);
 	}
 
-	protected override async Task ApplyWriteStrategyAsync(string resolvedSchema, string resolvedTable, CancellationToken ct)
+	protected override async Task<TargetSchemaInfo?> ApplyWriteStrategyAsync(string resolvedSchema, string resolvedTable, CancellationToken ct)
 	{
 		if (_options.Strategy == PostgreSqlWriteStrategy.Recreate)
 		{
@@ -87,6 +87,8 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 			}
 
 			await ExecuteNonQueryAsync(createSql, ct);
+			InvalidateSchemaCache();
+			return null;
 		}
 		else if (_options.Strategy == PostgreSqlWriteStrategy.DeleteThenInsert)
 		{
@@ -97,13 +99,27 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		{
 			await EnsureTableExistsAsync(ct);
 			await ExecuteNonQueryAsync($"TRUNCATE TABLE {_quotedTargetTableName}", ct);
+
+			var previous = await InspectTargetAsync(ct);
+			if (previous != null) return previous with { RowCount = 0 };
+			InvalidateSchemaCache();
+			return null;
 		}
 		else
 		{
+			// Append, Upsert, Ignore
 			await EnsureTableExistsAsync(ct);
+
+			var exists = await InspectTargetAsync(ct);
+			if (exists?.Exists == false)
+			{
+				InvalidateSchemaCache();
+				return null;
+			}
 		}
 
 		// Key resolution is now deferred to EnsureMetaDataInitializedAsync
+		return null;
 	}
 
 	private async Task EnsureMetaDataInitializedAsync(CancellationToken ct)

@@ -1,3 +1,4 @@
+using Apache.Arrow;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
@@ -11,7 +12,7 @@ namespace DtPipe.Adapters.Parquet;
 /// Writes data to Parquet format with row group streaming.
 /// Supports safe dry-run inspection.
 /// </summary>
-public sealed class ParquetDataWriter(string outputPath) : IDataWriter, IRequiresOptions<ParquetWriterOptions>, ISchemaInspector
+public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, IRequiresOptions<ParquetWriterOptions>, ISchemaInspector
 {
 	private readonly string _outputPath = outputPath;
 	private Stream? _outputStream;
@@ -23,10 +24,15 @@ public sealed class ParquetDataWriter(string outputPath) : IDataWriter, IRequire
 
 	public async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
 	{
-		if (string.IsNullOrEmpty(_outputPath) || _outputPath == "-")
+		if (_outputPath == "-")
 		{
 			return new TargetSchemaInfo([], false, null, null, null);
 		}
+
+        if (string.IsNullOrEmpty(_outputPath))
+        {
+             throw new InvalidOperationException("Output path is required. Use '-' for standard output.");
+        }
 
 		if (!File.Exists(_outputPath))
 		{
@@ -76,7 +82,7 @@ public sealed class ParquetDataWriter(string outputPath) : IDataWriter, IRequire
 
 	public async ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
 	{
-		if (string.IsNullOrEmpty(_outputPath) || _outputPath == "-")
+		if (_outputPath == "-")
 		{
 			if (!Console.IsOutputRedirected)
 			{
@@ -94,7 +100,7 @@ public sealed class ParquetDataWriter(string outputPath) : IDataWriter, IRequire
 		_dataFields = BuildDataFields(columns);
 		_schema = new ParquetSchema(_dataFields);
 		_writer = await ParquetWriter.CreateAsync(_schema, _outputStream, cancellationToken: ct);
-		_writer.CompressionMethod = CompressionMethod.Snappy;
+		// _writer.CompressionMethod = CompressionMethod.Snappy;
 	}
 
 	public async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
@@ -112,6 +118,23 @@ public sealed class ParquetDataWriter(string outputPath) : IDataWriter, IRequire
 			var column = _columns[colIndex];
 			var dataField = _dataFields[colIndex];
 			var dataColumn = CreateDataColumn(dataField, column, rows, colIndex);
+			await rowGroup.WriteColumnAsync(dataColumn, ct);
+		}
+	}
+
+	public async ValueTask WriteRecordBatchAsync(RecordBatch batch, CancellationToken ct = default)
+	{
+		if (_writer is null || _dataFields is null)
+			throw new InvalidOperationException("Call InitializeAsync first.");
+
+		// Create row group for this batch
+		using var rowGroup = _writer.CreateRowGroup();
+
+		for (int i = 0; i < batch.ColumnCount; i++)
+		{
+			var arrowArray = batch.Column(i);
+			var dataField = _dataFields[i];
+			var dataColumn = ArrowToParquetConverter.Convert(arrowArray, dataField);
 			await rowGroup.WriteColumnAsync(dataColumn, ct);
 		}
 	}

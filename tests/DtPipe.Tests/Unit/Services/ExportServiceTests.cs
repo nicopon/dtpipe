@@ -1,5 +1,6 @@
 using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using Microsoft.Extensions.Logging;
@@ -31,11 +32,15 @@ public class ExportServiceTests
 		_mockObserver.Setup(x => x.CreateProgressReporter(It.IsAny<bool>(), It.IsAny<IEnumerable<string>>()))
 					 .Returns(_mockProgress.Object);
 
+		_mockProgress.Setup(p => p.GetMetrics())
+					 .Returns(new ExportMetrics(DateTime.UtcNow, DateTime.UtcNow, 1, 1, 0, 0, new Dictionary<string, long>()));
+
 		_service = new ExportService(
 			readerFactoryList,
 			writerFactoryList,
 			new List<IDataTransformerFactory>(), // transformers
-			new List<IRowToColumnarBridgeFactory>(), // bridge factories
+			new List<IRowToColumnarBridgeFactory>(), // row-to-col bridge factories
+			new List<IColumnarToRowBridgeFactory>(), // col-to-row bridge factories
 			new OptionsRegistry(), // options registry
 			_mockObserver.Object,
 			_mockLogger.Object
@@ -46,7 +51,7 @@ public class ExportServiceTests
 	public async Task RunExportAsync_CallsObserverMethods()
 	{
 		// Arrange
-		var options = new DumpOptions
+		var options = new PipelineOptions
 		{
 			Provider = "test-source",
 			ConnectionString = "source-conn",

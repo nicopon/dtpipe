@@ -6,7 +6,7 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
-using DtPipe.Transformers.Hybrid.Fake;
+using DtPipe.Transformers.Columnar.Fake;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
@@ -92,6 +92,7 @@ public class ManualVerificationTests : IAsyncLifetime
 		services.AddSingleton<ExportService>();
 
 		var mockProgress = new Mock<IExportProgress>();
+		mockProgress.Setup(p => p.GetMetrics()).Returns(new ExportMetrics(DateTime.UtcNow, DateTime.UtcNow, 0, 0, 0, 0, new Dictionary<string, long>()));
 		var mockObserver = new Mock<IExportObserver>();
 		mockObserver.Setup(o => o.CreateProgressReporter(It.IsAny<bool>(), It.IsAny<IEnumerable<string>>()))
 					.Returns(mockProgress.Object);
@@ -101,7 +102,7 @@ public class ManualVerificationTests : IAsyncLifetime
 		var exportService = serviceProvider.GetRequiredService<ExportService>();
 
 		// 3. Define Run Options
-		var options = new DumpOptions
+		var options = new PipelineOptions
 		{
 			Provider = "duckdb",
 			ConnectionString = _connectionString,

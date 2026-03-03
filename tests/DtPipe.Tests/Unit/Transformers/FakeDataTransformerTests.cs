@@ -1,5 +1,5 @@
 using DtPipe.Core.Models;
-using DtPipe.Transformers.Hybrid.Fake;
+using DtPipe.Transformers.Columnar.Fake;
 using FluentAssertions;
 using Xunit;
 

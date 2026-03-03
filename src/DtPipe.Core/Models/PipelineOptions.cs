@@ -1,11 +1,16 @@
+using DtPipe.Core.Options;
+
 namespace DtPipe.Core.Models;
 
 /// <summary>
 /// Pipeline execution configuration — CLI-neutral.
 /// Can be constructed directly by any application, without depending on DtPipe CLI types.
 /// </summary>
-public sealed record PipelineOptions
+public sealed record PipelineOptions : IOptionSet
 {
+	public static string Prefix => "global";
+	public static string DisplayName => "Global Options";
+
 	// --- Execution ---
 
 	/// <summary>Number of rows per read/write batch. Default: 50 000.</summary>
@@ -65,4 +70,22 @@ public sealed record PipelineOptions
 
 	/// <summary>Path to save structured metrics as JSON. Null = skip.</summary>
 	public string? MetricsPath { get; init; }
+
+	// --- General Options (Merged from DumpOptions) ---
+	public string Provider { get; init; } = "";
+	public string ConnectionString { get; init; } = "";
+	public string? Query { get; init; } = "";
+	public string OutputPath { get; init; } = "";
+
+	// --- Generic Write Options ---
+	public string? Strategy { get; init; }
+	public string? InsertMode { get; init; }
+	public string? Table { get; init; }
+	public string? Key { get; init; }
+
+	// --- Execution Options ---
+	public int ConnectionTimeout { get; init; } = 10; // seconds
+	public int QueryTimeout { get; init; } = 0; // 0 = no timeout
+	public bool UnsafeQuery { get; init; } = false;
+	public string? LogPath { get; init; }
 }

@@ -345,4 +345,60 @@ public class SqlServerIntegrationTests : IAsyncLifetime
 			}
 		}
 	}
+
+	[Fact]
+	public async Task SqlServerDataWriter_Recreate_InvalidatesSchemaCache()
+	{
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+
+		var connectionString = _connectionString;
+		var tableNameRaw = $"TestCache_{Guid.NewGuid():N}".Substring(0, 25);
+
+		// 1. Manually create table to ensure it exists
+		await using (var connection = new SqlConnection(connectionString))
+		{
+			await connection.OpenAsync();
+			using var cmd = connection.CreateCommand();
+			cmd.CommandText = $"CREATE TABLE {tableNameRaw} (OldCol INT)";
+			await cmd.ExecuteNonQueryAsync();
+		}
+
+		var writerOptions = new SqlServerWriterOptions
+		{
+			Table = tableNameRaw,
+			Strategy = SqlServerWriteStrategy.Recreate
+		};
+
+		var columns = new List<DtPipe.Core.Models.PipeColumnInfo>
+		{
+			new("NewCol1", typeof(int), false),
+			new("NewCol2", typeof(string), true)
+		};
+
+		// Act: InitializeAsync will drop, recreate, and invalidate cache
+		await using var writer = new SqlServerDataWriter(connectionString, writerOptions, NullLogger<SqlServerDataWriter>.Instance, SqlServerTypeConverter.Instance);
+		try
+		{
+			await writer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+
+			// Assert: InspectTargetAsync should fetch fresh columns, not return fake empty list
+			var schema = await writer.InspectTargetAsync(TestContext.Current.CancellationToken);
+
+			Assert.NotNull(schema);
+			Assert.True(schema!.Exists);
+			Assert.Single(schema.Columns);
+			Assert.Equal("OldCol", schema.Columns[0].Name);
+		}
+		finally
+		{
+			// Cleanup
+			await using (var connection = new SqlConnection(connectionString))
+			{
+				await connection.OpenAsync();
+				using var cmd = connection.CreateCommand();
+				cmd.CommandText = $"IF OBJECT_ID('{tableNameRaw}', 'U') IS NOT NULL DROP TABLE {tableNameRaw}";
+				await cmd.ExecuteNonQueryAsync();
+			}
+		}
+	}
 }

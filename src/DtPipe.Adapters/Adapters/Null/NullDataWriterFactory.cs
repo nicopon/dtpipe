@@ -6,13 +6,12 @@ namespace DtPipe.Adapters.Null;
 
 public class NullDataWriterFactory : IProviderDescriptor<IDataWriter>
 {
-    public string ComponentName => "null";
+    public string ComponentName => NullMetadata.ComponentName;
     public string Category => "Writers";
     public Type OptionsType => typeof(NullDataWriterOptions);
 
-    public bool CanHandle(string connectionString) =>
-        connectionString.StartsWith("null:", StringComparison.OrdinalIgnoreCase) ||
-        connectionString == "-";
+    public bool CanHandle(string connectionString) => NullMetadata.CanHandle(connectionString);
+    public bool SupportsStdio => NullMetadata.SupportsStdio;
 
     public bool RequiresQuery => false;
 

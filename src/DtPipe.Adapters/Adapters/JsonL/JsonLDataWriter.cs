@@ -31,10 +31,15 @@ public sealed class JsonLDataWriter : IDataWriter, IRequiresOptions<JsonLWriterO
 
 	public Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
 	{
-		if (string.IsNullOrEmpty(_outputPath) || _outputPath == "-")
+		if (_outputPath == "-")
 		{
 			return Task.FromResult<TargetSchemaInfo?>(new TargetSchemaInfo([], false, null, null, null));
 		}
+
+        if (string.IsNullOrEmpty(_outputPath))
+        {
+             throw new InvalidOperationException("Output path is required. Use '-' for standard output.");
+        }
 
 		if (!File.Exists(_outputPath))
 		{
@@ -48,7 +53,7 @@ public sealed class JsonLDataWriter : IDataWriter, IRequiresOptions<JsonLWriterO
 
 	public ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
 	{
-		if (string.IsNullOrEmpty(_outputPath) || _outputPath == "-")
+		if (_outputPath == "-")
 		{
 			_outputStream = Console.OpenStandardOutput();
 		}

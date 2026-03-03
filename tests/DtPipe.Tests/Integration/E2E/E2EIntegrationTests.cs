@@ -7,10 +7,10 @@ using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
 using DtPipe.Tests.Helpers;
-using DtPipe.Transformers.Hybrid.Fake;
-using DtPipe.Transformers.Row.Format;
-using DtPipe.Transformers.Row.Null;
-using DtPipe.Transformers.Row.Overwrite;
+using DtPipe.Transformers.Columnar.Fake;
+using DtPipe.Transformers.Columnar.Format;
+using DtPipe.Transformers.Columnar.Null;
+using DtPipe.Transformers.Columnar.Overwrite;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
@@ -88,10 +88,15 @@ public class E2EIntegrationTests : IAsyncLifetime
 		// Transformer Factories
 		services.AddSingleton<IDataTransformerFactory, FakeDataTransformerFactory>();
 
+		// Bridge Factories
+		services.AddSingleton<IRowToColumnarBridgeFactory, DtPipe.Adapters.Infrastructure.Arrow.ArrowRowToColumnarBridgeFactory>();
+		services.AddSingleton<IColumnarToRowBridgeFactory, DtPipe.Adapters.Infrastructure.Arrow.ArrowColumnarToRowBridgeFactory>();
+
 
 		services.AddSingleton<ExportService>();
 
 		var mockProgress = new Mock<IExportProgress>();
+		mockProgress.Setup(p => p.GetMetrics()).Returns(new ExportMetrics(DateTime.UtcNow, DateTime.UtcNow, 0, 0, 0, 0, new Dictionary<string, long>()));
 		var mockObserver = new Mock<IExportObserver>();
 		mockObserver.Setup(o => o.CreateProgressReporter(It.IsAny<bool>(), It.IsAny<IEnumerable<string>>()))
 					.Returns(mockProgress.Object);
@@ -101,7 +106,7 @@ public class E2EIntegrationTests : IAsyncLifetime
 		var exportService = serviceProvider.GetRequiredService<ExportService>();
 
 		// 3. Define Run Options
-		var options = new DumpOptions
+		var options = new PipelineOptions
 		{
 			Provider = "duckdb",
 			ConnectionString = _connectionString,
@@ -200,9 +205,14 @@ public class E2EIntegrationTests : IAsyncLifetime
 		services.AddSingleton<IDataTransformerFactory, FakeDataTransformerFactory>();
 		services.AddSingleton<IDataTransformerFactory, FormatDataTransformerFactory>();
 
+		// Bridge Factories
+		services.AddSingleton<IRowToColumnarBridgeFactory, DtPipe.Adapters.Infrastructure.Arrow.ArrowRowToColumnarBridgeFactory>();
+		services.AddSingleton<IColumnarToRowBridgeFactory, DtPipe.Adapters.Infrastructure.Arrow.ArrowColumnarToRowBridgeFactory>();
+
 		services.AddSingleton<ExportService>();
 
 		var mockProgress = new Mock<IExportProgress>();
+		mockProgress.Setup(p => p.GetMetrics()).Returns(new ExportMetrics(DateTime.UtcNow, DateTime.UtcNow, 0, 0, 0, 0, new Dictionary<string, long>()));
 		var mockObserver = new Mock<IExportObserver>();
 		mockObserver.Setup(o => o.CreateProgressReporter(It.IsAny<bool>(), It.IsAny<IEnumerable<string>>()))
 					.Returns(mockProgress.Object);
@@ -211,7 +221,7 @@ public class E2EIntegrationTests : IAsyncLifetime
 		var serviceProvider = services.BuildServiceProvider();
 		var exportService = serviceProvider.GetRequiredService<ExportService>();
 
-		var options = new DumpOptions
+		var options = new PipelineOptions
 		{
 			Provider = "duckdb",
 			ConnectionString = _connectionString,
@@ -307,9 +317,14 @@ public class E2EIntegrationTests : IAsyncLifetime
 		services.AddSingleton<IDataTransformerFactory, FakeDataTransformerFactory>();
 		services.AddSingleton<IDataTransformerFactory, FormatDataTransformerFactory>();
 
+		// Bridge Factories
+		services.AddSingleton<IRowToColumnarBridgeFactory, DtPipe.Adapters.Infrastructure.Arrow.ArrowRowToColumnarBridgeFactory>();
+		services.AddSingleton<IColumnarToRowBridgeFactory, DtPipe.Adapters.Infrastructure.Arrow.ArrowColumnarToRowBridgeFactory>();
+
 		services.AddSingleton<ExportService>();
 
 		var mockProgress = new Mock<IExportProgress>();
+		mockProgress.Setup(p => p.GetMetrics()).Returns(new ExportMetrics(DateTime.UtcNow, DateTime.UtcNow, 0, 0, 0, 0, new Dictionary<string, long>()));
 		var mockObserver = new Mock<IExportObserver>();
 		mockObserver.Setup(o => o.CreateProgressReporter(It.IsAny<bool>(), It.IsAny<IEnumerable<string>>()))
 					.Returns(mockProgress.Object);
@@ -318,7 +333,7 @@ public class E2EIntegrationTests : IAsyncLifetime
 		var serviceProvider = services.BuildServiceProvider();
 		var exportService = serviceProvider.GetRequiredService<ExportService>();
 
-		var options = new DumpOptions
+		var options = new PipelineOptions
 		{
 			Provider = "duckdb",
 			ConnectionString = _connectionString,

@@ -7,10 +7,11 @@ namespace DtPipe.Adapters.Parquet;
 
 public class ParquetWriterDescriptor : IProviderDescriptor<IDataWriter>
 {
-    public string ComponentName => "parquet";
+    public string ComponentName => ParquetMetadata.ComponentName;
     public string Category => "Writer Options";
     public Type OptionsType => typeof(ParquetWriterOptions);
-    public bool CanHandle(string connectionString) => connectionString.EndsWith(".parquet", StringComparison.OrdinalIgnoreCase);
+    public bool CanHandle(string connectionString) => ParquetMetadata.CanHandle(connectionString);
+    public bool SupportsStdio => ParquetMetadata.SupportsStdio;
     public bool RequiresQuery => false;
 
     public IDataWriter Create(string connectionString, object options, IServiceProvider serviceProvider)

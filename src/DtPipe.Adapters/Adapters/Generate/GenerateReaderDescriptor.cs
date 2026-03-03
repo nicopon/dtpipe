@@ -7,10 +7,11 @@ namespace DtPipe.Adapters.Generate;
 
 public class GenerateReaderDescriptor : IProviderDescriptor<IStreamReader>
 {
-    public string ComponentName => "generate";
+    public string ComponentName => GenerateMetadata.ComponentName;
     public string Category => "Reader Options";
     public Type OptionsType => typeof(GenerateReaderOptions);
-    public bool CanHandle(string connectionString) => connectionString.StartsWith("generate:", StringComparison.OrdinalIgnoreCase);
+    public bool CanHandle(string connectionString) => GenerateMetadata.CanHandle(connectionString);
+    public bool SupportsStdio => GenerateMetadata.SupportsStdio;
     public bool RequiresQuery => false;
 
     public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)

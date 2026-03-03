@@ -1,0 +1,21 @@
+[package]
+name = "dtpipe-xstreamers-datafusion"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "dtpipe_xstreamers_datafusion"
+crate-type = ["cdylib"]
+
+[dependencies]
+datafusion = { version = "52.1.0", features = ["parquet", "sql"] }
+arrow-array = { version = "57.3.0", features = ["ffi"] }
+arrow-ipc = { version = "57.3.0" }
+arrow-schema = { version = "57.3.0" }
+tokio = { version = "1.49.0", features = ["rt-multi-thread"] }
+futures = "0.3.31"
+
+[profile.release]
+lto = true
+opt-level = 3
+strip = true

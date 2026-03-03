@@ -37,7 +37,7 @@ $EXE \
     --limit 2 \
     --sqlite-table "target_table" \
     --sqlite-strategy "Recreate" \
-    --pre-exec "$PRE_EXEC_SQL" \
+    --pre-exec "@$PRE_EXEC_SQL" \
     --post-exec "INSERT INTO hook_logs (message) VALUES ('Post-Exec Run')" \
     --finally-exec "INSERT INTO hook_logs (message) VALUES ('Finally-Exec Run')"
 

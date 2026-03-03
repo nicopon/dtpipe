@@ -58,7 +58,7 @@ dtpipe --input [SOURCE] --query [SQL] --output [DEST] [OPTIONS]
 
 ### 1. Connection Strings (Input & Output)
 
-DtPipe auto-detects providers from file extensions (`.csv`, `.parquet`, `.duckdb`, `.sqlite`) or explicit prefixes.
+DtPipe auto-detects providers from file extensions (`.csv`, `.parquet`, `.duckdb`, `.sqlite`) or explicit prefixes. **Using an explicit prefix is recommended** to avoid ambiguity and improve performance.
 
 | Provider | Prefix / Format | Example |
 |:---|:---|:---|
@@ -73,7 +73,11 @@ DtPipe auto-detects providers from file extensions (`.csv`, `.parquet`, `.duckdb
 | **Parquet** | `parquet:` / `.parquet`| `data.parquet` |
 | **Data Gen** | `generate:` | `generate:1000000` (generates `GenerateIndex` column) |
 | **Keyring** | `keyring://` | `keyring://my-prod-db` |
-| **STDIN/OUT** | `csv`, `jsonl`, `arrow` or `parquet` | `csv` (no file path) |
+| **STDIN/OUT** | `-` / `{CP}:-` | `csv` (shorthand for `csv:-`, streams CSV to stdout) |
+
+> [!IMPORTANT]
+> **Explicit use of `-` is required for standard input/output.**
+> Using a shorthand like `csv` is equivalent to `csv:-`. If a provider does not support pipes (like `pg:`), using its name without a connection string will throw an error to prevent accidental data swallowing.
 
 ### 2. Anonymization & Fakers
 
@@ -182,6 +186,41 @@ dtpipe -i keyring://prod-db -q "SELECT * FROM users" -o users.parquet
 
 ---
 
+
+## 🔀 Multi-Stream Pipelines (DAG)
+
+DtPipe supports chaining multiple data sources and XStreamers in a single command to build complex, high-performance pipelines.
+
+### How it works
+
+A pipeline with multiple branches is automatically detected when you provide:
+- Multiple `--input` flags (sequential branches)
+- One or more `--xstreamer` / `-x` flags (SQL joins on in-memory streams)
+
+Each branch can be given an `--alias` name so that XStreamers can reference it.
+
+### Example: In-Memory Join
+
+```bash
+# 1. Load customers into memory as "customers"
+# 2. Load orders into memory as "orders"
+# 3. Join them via DuckDB XStreamer and write to Parquet
+dtpipe \
+  -i customers.parquet --alias customers \
+  -i orders.csv --alias orders \
+  -x duck --main orders --ref customers \
+  -q "SELECT o.*, c.name FROM orders o JOIN customers c ON o.customer_id = c.id" \
+  -o result.parquet
+```
+
+| Option | Description |
+|:---|:---|
+| `--alias [NAME]` | Name this branch for use in joins |
+| `-x`, `--xstreamer` | Start an XStreamer branch (e.g. `duck`) |
+| `--main [ALIAS]` | Primary stream the XStreamer consumes |
+| `--ref [ALIAS]` | Reference stream(s) for lookup/join |
+
+---
 
 ## Contributing
 Want to add a new database adapter or a custom transformer? Check out the [Developer Guide](./EXTENDING.md).

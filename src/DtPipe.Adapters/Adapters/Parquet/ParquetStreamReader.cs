@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+using Apache.Arrow;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using Microsoft.Extensions.Logging;
@@ -7,7 +9,7 @@ using Parquet.Schema;
 
 namespace DtPipe.Adapters.Parquet;
 
-public class ParquetStreamReader : IStreamReader
+public class ParquetStreamReader : IColumnarStreamReader
 {
 	private readonly string _filePath;
 	private readonly ILogger _logger;
@@ -82,6 +84,50 @@ public class ParquetStreamReader : IStreamReader
 		}
 
 		Columns = columns;
+	}
+
+	public async IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync([EnumeratorCancellation] CancellationToken ct = default)
+	{
+		if (_reader is null || Columns is null)
+			throw new InvalidOperationException("Call OpenAsync first.");
+
+		await _semaphore.WaitAsync(ct);
+		try
+		{
+			if (_isReading)
+				throw new InvalidOperationException("Concurrent reads from the same ParquetStreamReader are not supported.");
+			_isReading = true;
+		}
+		finally
+		{
+			_semaphore.Release();
+		}
+
+		try
+		{
+			var schema = DtPipe.Core.Infrastructure.Arrow.ArrowSchemaFactory.Create(Columns);
+
+			for (int rowGroupIndex = 0; rowGroupIndex < _reader.RowGroupCount; rowGroupIndex++)
+			{
+				ct.ThrowIfCancellationRequested();
+
+				using var rowGroupReader = _reader.OpenRowGroupReader(rowGroupIndex);
+				var rowCount = (int)rowGroupReader.RowCount;
+				var arrays = new List<IArrowArray>();
+
+				foreach (var field in _reader.Schema.DataFields)
+				{
+					var column = await rowGroupReader.ReadColumnAsync(field, ct);
+					arrays.Add(DtPipe.Core.Infrastructure.Arrow.ArrowArrayFactory.Create(column.Data, field.ClrType, field.IsNullable));
+				}
+
+				yield return new RecordBatch(schema, arrays, rowCount);
+			}
+		}
+		finally
+		{
+			_isReading = false;
+		}
 	}
 
 	public async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(

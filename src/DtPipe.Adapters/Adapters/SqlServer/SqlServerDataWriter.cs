@@ -139,7 +139,7 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 		}
 	}
 
-	protected override async Task ApplyWriteStrategyAsync(string resolvedSchema, string resolvedTable, CancellationToken ct)
+	protected override async Task<TargetSchemaInfo?> ApplyWriteStrategyAsync(string resolvedSchema, string resolvedTable, CancellationToken ct)
 	{
 
 		if (_options.Strategy == SqlServerWriteStrategy.Recreate)
@@ -192,12 +192,36 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 				await ExecuteNonQueryAsync(createSql, ct);
 			}
 
+			// Key Analysis for Upsert/Ignore (needed if strategy changes)
+			if (_options.Strategy == SqlServerWriteStrategy.Upsert || _options.Strategy == SqlServerWriteStrategy.Ignore)
+			{
+				await AnalyzeKeysAsync(ct);
+			}
+
 			InvalidateSchemaCache();
+			return null;
 		}
 		else if (_options.Strategy == SqlServerWriteStrategy.Truncate)
 		{
 			await ExecuteNonQueryAsync(GetTruncateTableSql(_quotedTargetTableName), ct);
+
+			// Key Analysis for Upsert/Ignore
+			if (_options.Strategy == SqlServerWriteStrategy.Upsert || _options.Strategy == SqlServerWriteStrategy.Ignore)
+			{
+				await AnalyzeKeysAsync(ct);
+			}
+
+			// For Truncate, columns stay the same, just row count is 0.
+			// Let's force a fresh inspect if needed, or better, we just clear the cache to be safe
+			// Wait, the requirement says "avoid redundant calls... when cache is invalidated".
+			// Let's just return a new empty reflection that has 0 rows.
+			var previous = await InspectTargetAsync(ct);
+			if (previous != null)
+			{
+				return previous with { RowCount = 0 };
+			}
 			InvalidateSchemaCache();
+			return null;
 		}
 		else if (_options.Strategy == SqlServerWriteStrategy.DeleteThenInsert)
 		{
@@ -208,7 +232,8 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 			// Append/Upsert/Ignore
 			// Create if not exists
 			// Check existence via InspectTargetAsync or try create.
-			var exists = (await InspectTargetAsync(ct))?.Exists ?? false;
+			var existing = await InspectTargetAsync(ct);
+			var exists = existing?.Exists ?? false;
 
 			if (!exists)
 			{
@@ -216,7 +241,15 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 				try
 				{
 					await ExecuteNonQueryAsync(createSql, ct);
+
+					// Key Analysis for Upsert/Ignore
+					if (_options.Strategy == SqlServerWriteStrategy.Upsert || _options.Strategy == SqlServerWriteStrategy.Ignore)
+					{
+						await AnalyzeKeysAsync(ct);
+					}
+
 					InvalidateSchemaCache();
+					return null;
 				}
 				catch (SqlException ex) when (ex.Number == 2714) { /* Ignore race */ }
 			}
@@ -227,6 +260,8 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 		{
 			await AnalyzeKeysAsync(ct);
 		}
+
+		return null;
 	}
 
 	private List<string> _keyColumns = new();

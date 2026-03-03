@@ -31,7 +31,9 @@ echo -e "\n3. Reading from Arrow (Stream) and converting to Arrow (File format).
 $DTPIPE -i "arrow:$ARTIFACTS_DIR/data.arrowstream" -o "arrow:$ARTIFACTS_DIR/data.arrow"
 echo "Arrow File created (data.arrow)"
 
-echo -e "\n4. Verifying Arrow File by reading it and showing first 5 rows as CSV..."
-$DTPIPE -i "arrow:$ARTIFACTS_DIR/data.arrow" -o "csv" --limit 5
+echo -e "\n4. Verifying Arrow File by reading it and saving first 5 rows to CSV artifact..."
+$DTPIPE -i "arrow:$ARTIFACTS_DIR/data.arrow" -o "csv:$ARTIFACTS_DIR/verify_output.csv" --limit 5
+echo "--- verify_output.csv ---"
+cat "$ARTIFACTS_DIR/verify_output.csv"
 
 echo -e "\nValidation completed successfully!"

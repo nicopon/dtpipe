@@ -1,17 +1,22 @@
 using System.Data;
+using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
+using Apache.Arrow;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DuckDB.NET.Data;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace DtPipe.Adapters.DuckDB;
 
-public sealed partial class DuckDataSourceReader : IStreamReader, IRequiresOptions<DuckDbReaderOptions>
+public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequiresOptions<DuckDbReaderOptions>
 {
 	private readonly DuckDBConnection _connection;
 	private readonly DuckDBCommand _command;
 	private readonly string _query;
+	private readonly ILogger _logger;
 	private DuckDBDataReader? _reader;
 	private readonly SemaphoreSlim _semaphore = new(1, 1);
 
@@ -29,11 +34,12 @@ public sealed partial class DuckDataSourceReader : IStreamReader, IRequiresOptio
 	[GeneratedRegex(@"^\s*(\w+)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
 	private static partial Regex FirstWordRegex();
 
-	public DuckDataSourceReader(string connectionString, string query, DuckDbReaderOptions options, int queryTimeout = 0)
+	public DuckDataSourceReader(string connectionString, string query, DuckDbReaderOptions options, ILogger? logger = null, int queryTimeout = 0)
 	{
 		ValidateQueryIsSafeSelect(query);
 
 		_query = query;
+		_logger = logger ?? NullLogger.Instance;
 		_connection = new DuckDBConnection(connectionString);
 		_command = new DuckDBCommand(query, _connection)
 		{
@@ -74,8 +80,71 @@ public sealed partial class DuckDataSourceReader : IStreamReader, IRequiresOptio
 	public async Task OpenAsync(CancellationToken ct = default)
 	{
 		await _connection.OpenAsync(ct);
-		_reader = (DuckDBDataReader)await _command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct);
+
+		// Cap memory to prevent Jetsam overcommit kills when multiple branches run concurrently
+		using (var limitCmd = _connection.CreateCommand())
+		{
+			limitCmd.CommandText = "PRAGMA memory_limit='2GB'; PRAGMA threads=2;";
+			await limitCmd.ExecuteNonQueryAsync(ct);
+		}
+
+		_reader = (DuckDBDataReader)await _command.ExecuteReaderAsync(ct);
 		Columns = ExtractColumns(_reader);
+	}
+
+	public async IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync([EnumeratorCancellation] CancellationToken ct = default)
+	{
+		if (_reader is null)
+			throw new InvalidOperationException("Call OpenAsync first.");
+
+		// Lock to ensure we don't dispose while reading
+		await _semaphore.WaitAsync(ct);
+		try
+		{
+			if (Columns == null) throw new InvalidOperationException("Reader not opened.");
+
+			// Using ArrowRowToColumnarBridge to efficiently produce RecordBatches from the DataReader.
+			var bridge = new DtPipe.Core.Infrastructure.Arrow.ArrowRowToColumnarBridge(_logger);
+			await bridge.InitializeAsync(Columns, 1024, ct);
+
+			// Yield batches as they are produced by the bridge
+			// Synchronous feeder loop to avoid Task.Run overhead and potential deadlocks in simple scenarios
+			// For larger datasets, this could be returned to a Task.Run if needed for concurrency
+			var ingestionTask = Task.Run(async () =>
+			{
+				try
+				{
+					var colCount = Columns.Count;
+					var row = new object[colCount];
+
+					while (await _reader.ReadAsync(ct))
+					{
+						_reader.GetValues(row);
+						var rowCopy = new object?[colCount];
+						System.Array.Copy(row, rowCopy, colCount);
+						await bridge.IngestRowsAsync(new[] { rowCopy }, ct);
+					}
+
+					await bridge.CompleteAsync(ct);
+				}
+				catch (Exception ex)
+				{
+					_logger.LogError(ex, "Error during DuckDB to Arrow ingestion");
+					throw;
+				}
+			}, ct);
+
+			await foreach (var batch in bridge.ReadRecordBatchesAsync(ct))
+			{
+				yield return batch;
+			}
+
+			await ingestionTask;
+		}
+		finally
+		{
+			_semaphore.Release();
+		}
 	}
 
 	public async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(

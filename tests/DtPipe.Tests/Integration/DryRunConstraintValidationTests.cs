@@ -17,7 +17,7 @@ public class DryRunConstraintValidationTests
 		public ISqlDialect Dialect { get; set; } = new DtPipe.Core.Dialects.PostgreSqlDialect(); // Default to PG
 		public List<TargetColumnInfo> TargetColumns { get; set; } = new();
 		public List<string>? TargetPKs { get; set; } = null;
-		public List<string>? TargetUniqueCols { get; set; } = null; // Phase 3: Unique Columns
+		public List<string>? TargetUniqueCols { get; set; } = null;
 		public bool Exists { get; set; } = true;
 
 		public Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)

@@ -2,6 +2,8 @@ using DtPipe.Adapters.DuckDB;
 using DtPipe.Tests.Helpers;
 using DuckDB.NET.Data;
 using FluentAssertions;
+using DtPipe.Core.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -68,6 +70,46 @@ public class DuckDBIntegrationTests : IAsyncLifetime
 
 		batches[1][0].Should().Be(2);
 		batches[1][1].Should().Be("Bob");
+	}
+
+	[Fact]
+	public async Task CanReadRecordBatchesFromDuckDB()
+	{
+		// 1. setup
+		using (var connection = new DuckDBConnection(_connectionString))
+		{
+			await connection.OpenAsync(TestContext.Current.CancellationToken);
+			using var command = connection.CreateCommand();
+			command.CommandText = "CREATE TABLE records (id INTEGER, val DOUBLE)";
+			await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+			command.CommandText = "INSERT INTO records VALUES (100, 1.23), (200, 4.56)";
+			await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+		}
+
+		// 2. Read with Reader
+		await using var reader = new DuckDataSourceReader(
+			_connectionString,
+			"SELECT * FROM records ORDER BY id",
+			new DuckDbReaderOptions());
+		await reader.OpenAsync(TestContext.Current.CancellationToken);
+
+		// 3. Verify Data retrieval via RecordBatches
+		var batches = new List<Apache.Arrow.RecordBatch>();
+		await foreach (var batch in reader.ReadRecordBatchesAsync(TestContext.Current.CancellationToken))
+		{
+			batches.Add(batch);
+		}
+
+		batches.Should().HaveCount(1);
+		batches[0].Length.Should().Be(2);
+
+		var idCol = batches[0].Column(0) as Apache.Arrow.Int32Array;
+		idCol!.GetValue(0).Should().Be(100);
+		idCol.GetValue(1).Should().Be(200);
+
+		var valCol = batches[0].Column(1) as Apache.Arrow.DoubleArray;
+		valCol!.GetValue(0).Should().Be(1.23);
+		valCol.GetValue(1).Should().Be(4.56);
 	}
 
 	[Fact]

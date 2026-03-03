@@ -46,11 +46,16 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvWriterOptio
 
 	public async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
 	{
-		if (string.IsNullOrEmpty(_outputPath) || _outputPath == "-")
+		if (_outputPath == "-")
 		{
 			// For stdout, we assume new/overwrite.
 			return new TargetSchemaInfo([], false, null, null, null);
 		}
+
+        if (string.IsNullOrEmpty(_outputPath))
+        {
+             throw new InvalidOperationException("Output path is required. Use '-' for standard output.");
+        }
 
 		if (!File.Exists(_outputPath))
 		{
@@ -106,7 +111,7 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvWriterOptio
 
 	public ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
 	{
-		if (string.IsNullOrEmpty(_outputPath) || _outputPath == "-")
+		if (_outputPath == "-")
 		{
 			_outputStream = Console.OpenStandardOutput();
 		}

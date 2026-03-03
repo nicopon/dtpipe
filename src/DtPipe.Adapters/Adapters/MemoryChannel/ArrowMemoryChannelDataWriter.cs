@@ -2,6 +2,7 @@ using Apache.Arrow;
 using Apache.Arrow.Types;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Abstractions.Dag;
+using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
 using Microsoft.Extensions.Logging;
 using System.Threading.Channels;
@@ -83,26 +84,10 @@ public sealed class ArrowMemoryChannelDataWriter : IColumnarDataWriter
         var builder = new Schema.Builder();
         foreach (var col in columns)
         {
-            builder.Field(new Field(col.Name, GetArrowType(col.ClrType), col.IsNullable));
+            builder.Field(new Field(col.Name, ArrowTypeMapper.GetArrowType(col.ClrType), col.IsNullable));
         }
         return builder.Build();
     }
 
-    private IArrowType GetArrowType(Type type)
-    {
-        var baseType = Nullable.GetUnderlyingType(type) ?? type;
-
-        if (baseType == typeof(string)) return StringType.Default;
-        if (baseType == typeof(bool)) return BooleanType.Default;
-        if (baseType == typeof(int)) return Int32Type.Default;
-        if (baseType == typeof(long)) return Int64Type.Default;
-        if (baseType == typeof(float)) return FloatType.Default;
-        if (baseType == typeof(double)) return DoubleType.Default;
-        if (baseType == typeof(decimal)) return DoubleType.Default;
-        if (baseType == typeof(DateTime)) return Date64Type.Default;
-        if (baseType == typeof(DateTimeOffset)) return TimestampType.Default;
-        if (baseType == typeof(byte[])) return BinaryType.Default;
-
-        return StringType.Default;
-    }
+    private IArrowType GetArrowType(Type type) => ArrowTypeMapper.GetArrowType(type);
 }

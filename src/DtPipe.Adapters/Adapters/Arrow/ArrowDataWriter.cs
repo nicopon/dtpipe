@@ -2,6 +2,7 @@ using Apache.Arrow;
 using Apache.Arrow.Ipc;
 using Apache.Arrow.Types;
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 
@@ -42,10 +43,15 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
 
 	public Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
 	{
-		if (string.IsNullOrEmpty(_path) || _path == "-")
+		if (_path == "-")
 		{
 			return Task.FromResult<TargetSchemaInfo?>(new TargetSchemaInfo([], false, null, null, null));
 		}
+
+        if (string.IsNullOrEmpty(_path))
+        {
+             throw new InvalidOperationException("Output path is required. Use '-' for standard output.");
+        }
 
 		if (!File.Exists(_path))
 		{
@@ -57,7 +63,7 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
 
 	public ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
 	{
-		if (string.IsNullOrEmpty(_path) || _path == "-")
+		if (_path == "-")
 		{
 			_outputStream = Console.OpenStandardOutput();
             _isIpcFile = false;
@@ -84,28 +90,12 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
 		var builder = new Schema.Builder();
 		foreach (var col in columns)
 		{
-			builder.Field(new Field(col.Name, GetArrowType(col.ClrType), col.IsNullable));
+			builder.Field(new Field(col.Name, ArrowTypeMapper.GetArrowType(col.ClrType), col.IsNullable));
 		}
 		return builder.Build();
 	}
 
-	private IArrowType GetArrowType(Type type)
-	{
-		var baseType = Nullable.GetUnderlyingType(type) ?? type;
-
-		if (baseType == typeof(string)) return StringType.Default;
-		if (baseType == typeof(bool)) return BooleanType.Default;
-		if (baseType == typeof(int)) return Int32Type.Default;
-		if (baseType == typeof(long)) return Int64Type.Default;
-		if (baseType == typeof(float)) return FloatType.Default;
-		if (baseType == typeof(double)) return DoubleType.Default;
-		if (baseType == typeof(decimal)) return DoubleType.Default;
-		if (baseType == typeof(DateTime)) return Date64Type.Default;
-		if (baseType == typeof(DateTimeOffset)) return TimestampType.Default;
-		if (baseType == typeof(byte[])) return BinaryType.Default;
-
-		return StringType.Default;
-	}
+	private IArrowType GetArrowType(Type type) => ArrowTypeMapper.GetArrowType(type);
 
 	public ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
 	{

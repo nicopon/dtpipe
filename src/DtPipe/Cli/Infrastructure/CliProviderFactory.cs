@@ -6,6 +6,7 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Options;
 using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Core.Pipelines.Dag;
+using DtPipe.Core.Models;
 
 
 namespace DtPipe.Cli.Infrastructure;
@@ -85,19 +86,19 @@ public class CliDataWriterFactory : CliProviderFactory<IDataWriter>, IDataWriter
 		// To follow Option 3, 'Output' string should be in the registry or passed another way.
 		// Let's assume for now we look it up from the registry's global options or a specific key.
 		// Actually, JobService will populate the registry.
-		var dumpOptions = registry.Get<DumpOptions>();
+		var pipelineOptions = registry.Get<PipelineOptions>();
 
 		// 1. Resolve Strategy
-		ResolveGenericOption(specificOptions, "Strategy", dumpOptions.Strategy, _descriptor.ComponentName);
+		ResolveGenericOption(specificOptions, "Strategy", pipelineOptions.Strategy, _descriptor.ComponentName);
 
 		// 2. Resolve InsertMode
-		ResolveGenericOption(specificOptions, "InsertMode", dumpOptions.InsertMode, _descriptor.ComponentName);
+		ResolveGenericOption(specificOptions, "InsertMode", pipelineOptions.InsertMode, _descriptor.ComponentName);
 
 		// 3. Resolve Table
-		ResolveGenericOption(specificOptions, "Table", dumpOptions.Table, _descriptor.ComponentName);
+		ResolveGenericOption(specificOptions, "Table", pipelineOptions.Table, _descriptor.ComponentName);
 
 		// Use the descriptor to create.
-		return _descriptor.Create(dumpOptions.OutputPath, specificOptions, _serviceProvider);
+		return _descriptor.Create(pipelineOptions.OutputPath, specificOptions, _serviceProvider);
 	}
 
 	private void ResolveGenericOption(object specificOptions, string propertyName, string? genericValue, string providerName)
@@ -176,14 +177,14 @@ public class CliStreamReaderFactory : CliProviderFactory<IStreamReader>, IStream
 	public IStreamReader Create(OptionsRegistry registry)
 	{
 		var specificOptions = registry.Get(_descriptor.OptionsType);
-		var dumpOptions = registry.Get<DumpOptions>();
+		var pipelineOptions = registry.Get<PipelineOptions>();
 
-		if (specificOptions is IQueryAwareOptions queryAware && !string.IsNullOrWhiteSpace(dumpOptions.Query))
+		if (specificOptions is IQueryAwareOptions queryAware && !string.IsNullOrWhiteSpace(pipelineOptions.Query))
 		{
-			queryAware.Query = dumpOptions.Query;
+			queryAware.Query = pipelineOptions.Query;
 		}
 
-		return _descriptor.Create(dumpOptions.ConnectionString, specificOptions!, _serviceProvider);
+		return _descriptor.Create(pipelineOptions.ConnectionString, specificOptions!, _serviceProvider);
 	}
 
 	public IEnumerable<Type> GetSupportedOptionTypes()
@@ -194,7 +195,7 @@ public class CliStreamReaderFactory : CliProviderFactory<IStreamReader>, IStream
 	public bool RequiresQuery => _descriptor.RequiresQuery;
 }
 
-public class CliXStreamerFactory : CliProviderFactory<IStreamReader>, IXStreamerFactory
+public class CliXStreamerFactory : CliProviderFactory<IStreamReader>, IXStreamerFactory, IStreamReaderFactory
 {
     private readonly IXStreamerFactory _xStreamerDescriptor;
 
@@ -208,9 +209,22 @@ public class CliXStreamerFactory : CliProviderFactory<IStreamReader>, IXStreamer
 
     public bool RequiresQuery => _xStreamerDescriptor.RequiresQuery;
 
+    public IStreamReader Create(OptionsRegistry registry)
+    {
+        var specificOptions = registry.Get(_descriptor.OptionsType);
+        var pipelineOptions = registry.Get<PipelineOptions>();
+
+        return _xStreamerDescriptor.Create(pipelineOptions.ConnectionString, specificOptions!, _serviceProvider);
+    }
+
     public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
     {
         return _xStreamerDescriptor.Create(connectionString, options, serviceProvider);
+    }
+
+    public IEnumerable<Type> GetSupportedOptionTypes()
+    {
+        yield return _descriptor.OptionsType;
     }
 }
 

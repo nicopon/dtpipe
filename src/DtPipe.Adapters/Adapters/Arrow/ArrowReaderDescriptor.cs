@@ -7,10 +7,11 @@ namespace DtPipe.Adapters.Arrow;
 
 public class ArrowReaderDescriptor : IProviderDescriptor<IStreamReader>
 {
-    public string ComponentName => "arrow";
+    public string ComponentName => ArrowMetadata.ComponentName;
     public string Category => "Reader Options";
     public Type OptionsType => typeof(ArrowReaderOptions);
-    public bool CanHandle(string connectionString) => connectionString.EndsWith(".arrow", StringComparison.OrdinalIgnoreCase) || connectionString.EndsWith(".ipc", StringComparison.OrdinalIgnoreCase);
+    public bool CanHandle(string connectionString) => ArrowMetadata.CanHandle(connectionString);
+    public bool SupportsStdio => ArrowMetadata.SupportsStdio;
     public bool RequiresQuery => false;
 
     public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)

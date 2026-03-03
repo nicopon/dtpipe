@@ -69,7 +69,7 @@ All SQL writer options implement `IKeyAwareOptions` — the CLI propagates `--ke
 ```csharp
 public record PostgreSqlReaderOptions : IProviderOptions, IQueryAwareOptions
 {
-    public static string Prefix => "pg";
+    public static string Prefix => PostgreSqlMetadata.ComponentName;
     public static string DisplayName => "PostgreSQL Reader";
     public string? Query { get; set; }  // set by CliStreamReaderFactory
 }
@@ -95,10 +95,27 @@ All SQL writers support the same 6 standardized strategies via `--strategy`:
 ## Adding a New Adapter
 
 1. Add a new folder under `src/DtPipe.Adapters/Adapters/MyProvider/`
-2. Implement `MyProviderStreamReader : IStreamReader` and/or `MyProviderDataWriter : IDataWriter`
-3. Create `MyProviderReaderOptions : IProviderOptions, IQueryAwareOptions` (if SQL-based)
-4. Add a `MyProviderReaderDescriptor : IProviderDescriptor<IStreamReader>` in `src/DtPipe/Adapters/MyProvider/`
-5. Register in DI in `src/DtPipe/Program.cs`
+2. Create `MyProviderMetadata.cs` to hold `ComponentName`, `CanHandle`, and `SupportsStdio`.
+
+### Standard I/O Support (`SupportsStdio`)
+
+Providers explicitly declare if they support standard input/output pipes via the `SupportsStdio` metadata property.
+
+- **Supported**: CSV, Parquet, Arrow, JsonL, Null.
+- **Unsupported**: PostgreSql, SqlServer, Oracle, DuckDB (DataSource), etc.
+
+To use standard I/O, you **must** use the `-` character in the connection string:
+- `csv:-` (Explicit)
+- `csv` (Shorthand for `csv:-`)
+
+If you attempt to use `-` with an unsupported provider (e.g., `pg:-`), DtPipe will throw an error early.
+3. Implement `MyProviderStreamReader : IStreamReader` and/or `MyProviderDataWriter : IDataWriter`.
+4. Create `MyProviderReaderOptions : IProviderOptions, IQueryAwareOptions` (if SQL-based).
+5. Add a `MyProviderReaderDescriptor : IProviderDescriptor<IStreamReader>` in `src/DtPipe.Adapters/Adapters/MyProvider/`.
+6. Register in DI in `src/DtPipe/Program.cs`.
+
+> [!TIP]
+> Always prefer using the explicit `{ComponentName}:` prefix in connection strings to avoid ambiguity.
 
 See [EXTENDING.md](../../EXTENDING.md) for a full walkthrough.
 

@@ -7,10 +7,11 @@ namespace DtPipe.Adapters.SqlServer;
 
 public class SqlServerWriterDescriptor : IProviderDescriptor<IDataWriter>
 {
-    public string ComponentName => "mssql";
+    public string ComponentName => SqlServerMetadata.ComponentName;
     public string Category => "Writer Options";
     public Type OptionsType => typeof(SqlServerWriterOptions);
-    public bool CanHandle(string connectionString) => connectionString.StartsWith("sqlserver:", StringComparison.OrdinalIgnoreCase) || connectionString.Contains("Data Source=", StringComparison.OrdinalIgnoreCase);
+    public bool CanHandle(string connectionString) => SqlServerMetadata.CanHandle(connectionString);
+    public bool SupportsStdio => SqlServerMetadata.SupportsStdio;
     public bool RequiresQuery => true;
 
     public IDataWriter Create(string connectionString, object options, IServiceProvider serviceProvider)

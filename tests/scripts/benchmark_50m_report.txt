@@ -1,0 +1,101 @@
+=== DtPipe High-Volume Columnar Benchmark (50M Rows) ===
+Date: Tue Mar  3 18:11:15 CET 2026
+OS: Darwin MBP-JP6WH65M7K 25.3.0 Darwin Kernel Version 25.3.0: Wed Jan 28 20:48:41 PST 2026; root:xnu-12377.81.4~5/RELEASE_ARM64_T6041 arm64
+
+-----------------------------------------------
+Auto-detected input source: generate
+[38;5;8mSource[0m [38;5;12mgenerate[0m
+   [38;5;8mConnecting...[0m
+   [38;5;8mConnected. Schema: [0m[38;5;2m1[0m[38;5;8m columns.[0m
+
+[38;5;11m⚙️ Transformations[0m
+└── [38;5;14mFake[0m
+[38;5;8mTarget[0m [38;5;12mnull[0m
+[38;5;2m✓ Export completed successfully.[0m
+        7.19 real         6.87 user         0.26 sys
+           553975808  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              129669  page reclaims
+                 227  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   2  signals received
+                  60  voluntary context switches
+                2119  involuntary context switches
+        145846652119  instructions retired
+         31084982765  cycles elapsed
+           528204808  peak memory footprint
+
+------------------------------------------------------------
+Auto-detected input source: generate
+[38;5;8mSource[0m [38;5;12mgenerate[0m
+   [38;5;8mConnecting...[0m
+   [38;5;8mConnected. Schema: [0m[38;5;2m1[0m[38;5;8m columns.[0m
+
+[38;5;11m⚙️ Transformations[0m
+└── [38;5;14mFake[0m
+[38;5;8mTarget[0m [38;5;12mparquet[0m ([38;5;8m/Users/REDACTED/Source/dtpipe/tests/scripts/artifacts/bench_50m.parquet[0m)
+Verifying target schema compatibility...
+[38;5;2m✓ Export completed successfully.[0m
+       40.16 real        40.51 user         1.08 sys
+          1161641984  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              551595  page reclaims
+                  51  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                  18  signals received
+                 110  voluntary context switches
+                7449  involuntary context switches
+        786341399758  instructions retired
+        179696142885  cycles elapsed
+          1135117872  peak memory footprint
+Parquet File Size: 626M	/Users/REDACTED/Source/dtpipe/tests/scripts/artifacts/bench_50m.parquet
+
+-----------------------------------------------------------
+Auto-detected input source: generate
+[38;5;8mSource[0m [38;5;12mgenerate[0m
+   [38;5;8mConnecting...[0m
+   [38;5;8mConnected. Schema: [0m[38;5;2m1[0m[38;5;8m columns.[0m
+
+[38;5;11m⚙️ Transformations[0m
+└── [38;5;14mFake[0m
+[38;5;8mTarget[0m [38;5;12mduck[0m ([38;5;8m/Users/REDACTED/Source/dtpipe/tests/scripts/artifacts/bench_50m.duckdb[0m)
+Verifying target schema compatibility...
+[38;5;2m✓ Export completed successfully.[0m
+       63.17 real        64.37 user         1.55 sys
+          1883078656  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              484551  page reclaims
+                 999  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                  19  signals received
+                1643  voluntary context switches
+               10946  involuntary context switches
+       1407978090512  instructions retired
+        276620101818  cycles elapsed
+          1842087952  peak memory footprint
+DuckDB File Size: 1.1G	/Users/REDACTED/Source/dtpipe/tests/scripts/artifacts/bench_50m.duckdb
+
+--------------------------------------------
+Auto-detected input source: duck
+[38;5;8mSource[0m [38;5;12mduck[0m
+   [38;5;8mConnecting...[0m
+
+[38;5;9mError: Format of the initialization string does not conform to specification starting at index 0.[0m

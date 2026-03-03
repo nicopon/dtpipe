@@ -64,18 +64,28 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
         }
     }
 
-    protected override async Task ApplyWriteStrategyAsync(string resolvedSchema, string resolvedTable, CancellationToken ct)
+    protected override async Task<TargetSchemaInfo?> ApplyWriteStrategyAsync(string resolvedSchema, string resolvedTable, CancellationToken ct)
     {
         switch (_options.Strategy)
         {
             case OracleWriteStrategy.Recreate:
                 await ApplyRecreateStrategyAsync(resolvedSchema, resolvedTable, ct);
-                break;
+                InvalidateSchemaCache();
+                return null;
             case OracleWriteStrategy.Truncate:
                 await ApplyTruncateStrategyAsync(ct);
-                break;
+                var prev1 = await InspectTargetAsync(ct);
+                if (prev1 != null) return prev1 with { RowCount = 0 };
+                InvalidateSchemaCache();
+                return null;
             case OracleWriteStrategy.Append:
                 await ApplyAppendStrategyAsync(ct);
+                var prev2 = await InspectTargetAsync(ct);
+                if (prev2?.Exists == false)
+                {
+                    InvalidateSchemaCache();
+                    return null;
+                }
                 break;
             case OracleWriteStrategy.DeleteThenInsert:
                 await ApplyDeleteThenInsertStrategyAsync(ct);
@@ -85,6 +95,7 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
                 await ApplyUpsertIgnoreStrategyAsync(ct);
                 break;
         }
+        return null;
     }
 
     protected override async ValueTask OnInitializedAsync(CancellationToken ct)

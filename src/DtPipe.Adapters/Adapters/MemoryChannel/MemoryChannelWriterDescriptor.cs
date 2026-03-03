@@ -7,11 +7,11 @@ namespace DtPipe.Adapters.MemoryChannel;
 
 public class MemoryChannelWriterDescriptor : IProviderDescriptor<IDataWriter>
 {
-    public string ComponentName => "memory";
+    public string ComponentName => MemoryChannelMetadata.ComponentName;
+    public string Category => "Writer Options";
     public Type OptionsType => typeof(MemoryChannelOptions);
-    public string Category => "Writers";
-
-    public bool CanHandle(string connectionString) => false;
+    public bool CanHandle(string connectionString) => MemoryChannelMetadata.CanHandle(connectionString);
+    public bool SupportsStdio => MemoryChannelMetadata.SupportsStdio;
     public bool RequiresQuery => false;
 
     public IDataWriter Create(string connectionString, object options, IServiceProvider serviceProvider)

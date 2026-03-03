@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Validation;
@@ -27,6 +28,7 @@ public class DryRunAnalyzer
 		List<IDataTransformer> pipeline,
 		int sampleCount,
 		ISchemaInspector? inspector = null,
+		IReadOnlyDictionary<IDataTransformer, (IReadOnlyList<PipeColumnInfo> In, IReadOnlyList<PipeColumnInfo> Out)>? precomputedSchemas = null,
 		CancellationToken ct = default)
 	{
 		// 1. Initialize schema evolution trace
@@ -38,7 +40,14 @@ public class DryRunAnalyzer
 
 		foreach (var t in pipeline)
 		{
-			simSchema = await t.InitializeAsync(simSchema, ct);
+			if (precomputedSchemas != null && precomputedSchemas.TryGetValue(t, out var schemas))
+			{
+				simSchema = schemas.Out;
+			}
+			else
+			{
+				simSchema = await t.InitializeAsync(simSchema, ct);
+			}
 			traceSchemas.Add(simSchema);
 			stepNames.Add(t.GetType().Name.Replace("DataTransformer", ""));
 		}

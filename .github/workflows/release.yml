@@ -46,6 +46,23 @@ jobs:
         with:
           dotnet-version: '10.0.103'
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-pc-windows-msvc
+
+      - name: Build DataFusion Bridge (Unix)
+        if: "!contains(matrix.platform, 'windows')"
+        run: ./build_datafusion_bridge.sh
+
+      - name: Build DataFusion Bridge (Windows)
+        if: contains(matrix.platform, 'windows')
+        run: |
+          if ("${{ matrix.platform }}" -eq "windows-arm64") {
+              $env:RUST_TARGET="aarch64-pc-windows-msvc"
+          }
+          ./build_datafusion_bridge.ps1
+
       - name: Restore dependencies
         run: dotnet restore
 
@@ -145,7 +162,13 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.103'
-      
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build DataFusion Bridge
+        run: ./build_datafusion_bridge.sh
+
       - name: Pack All Projects
         run: dotnet pack DtPipe.sln -c Release
       

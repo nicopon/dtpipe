@@ -7,10 +7,11 @@ namespace DtPipe.Adapters.Oracle;
 
 public class OracleReaderDescriptor : IProviderDescriptor<IStreamReader>
 {
-    public string ComponentName => "ora";
+    public string ComponentName => OracleMetadata.ComponentName;
     public string Category => "Reader Options";
     public Type OptionsType => typeof(OracleReaderOptions);
-    public bool CanHandle(string connectionString) => connectionString.StartsWith("oracle:", StringComparison.OrdinalIgnoreCase) || connectionString.Contains("User Id=", StringComparison.OrdinalIgnoreCase);
+    public bool CanHandle(string connectionString) => OracleMetadata.CanHandle(connectionString);
+    public bool SupportsStdio => OracleMetadata.SupportsStdio;
     public bool RequiresQuery => true;
 
     public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
