@@ -49,81 +49,8 @@ public class JobService
 
 	public (RootCommand, Action) Build()
 	{
-		var inputOption = new Option<string?>("--input") { Description = "Input connection string, file path, or '-' for stdin" };
-		inputOption.Aliases.Add("-i");
-
-		var queryOption = new Option<string?>("--query") { Description = "SQL query to execute (SELECT only)" };
-		queryOption.Aliases.Add("-q");
-
-		var outputOption = new Option<string?>("--output") { Description = "Output connection string, file path, or '-' for stdout" };
-		outputOption.Aliases.Add("-o");
-
-		var connectionTimeoutOption = new Option<int>("--connection-timeout") { Description = "Connection timeout in seconds" };
-		connectionTimeoutOption.DefaultValueFactory = _ => 10;
-
-		var queryTimeoutOption = new Option<int>("--query-timeout") { Description = "Query timeout in seconds (0 = no timeout)" };
-		queryTimeoutOption.DefaultValueFactory = _ => 0;
-
-		var batchSizeOption = new Option<int>("--batch-size") { Description = "Rows per output batch" };
-		batchSizeOption.DefaultValueFactory = _ => 50_000;
-		batchSizeOption.Aliases.Add("-b");
-
-		var unsafeQueryOption = new Option<bool>("--unsafe-query") { Description = "Bypass SQL validation" };
-		unsafeQueryOption.DefaultValueFactory = _ => false;
-
-		var dryRunOption = new Option<int>("--dry-run") { Description = "Dry-run mode (N rows)", Arity = ArgumentArity.ZeroOrOne };
-		dryRunOption.DefaultValueFactory = _ => 0;
-
-		var noStatsOption = new Option<bool>("--no-stats") { Description = "Disable progress bars and stats" };
-		noStatsOption.DefaultValueFactory = _ => false;
-
-		var limitOption = new Option<int>("--limit") { Description = "Max rows (0 = unlimited)" };
-		limitOption.DefaultValueFactory = _ => 0;
-
-		var samplingRateOption = new Option<double>("--sampling-rate") { Description = "Sampling probability (0.0-1.0)" };
-		samplingRateOption.DefaultValueFactory = _ => 1.0;
-		samplingRateOption.Aliases.Add("--sample-rate"); // Hidden alias support for backward compatibility
-
-		var samplingSeedOption = new Option<int?>("--sampling-seed") { Description = "Seed for sampling (for reproducibility)" };
-		samplingSeedOption.Aliases.Add("--sample-seed");
-		var jobOption = new Option<string?>("--job") { Description = "Path to YAML job file" };
-		var exportJobOption = new Option<string?>("--export-job") { Description = "Export config to YAML" };
-		var logOption = new Option<string?>("--log") { Description = "Path to log file" };
-		var keyOption = new Option<string?>("--key") { Description = "Primary Key columns" };
-
-		// Lifecycle Hooks Options
-		var preExecOption = new Option<string?>("--pre-exec") { Description = "SQL/Command BEFORE transfer" };
-		var postExecOption = new Option<string?>("--post-exec") { Description = "SQL/Command AFTER transfer" };
-		var onErrorExecOption = new Option<string?>("--on-error-exec") { Description = "SQL/Command ON ERROR" };
-		var finallyExecOption = new Option<string?>("--finally-exec") { Description = "SQL/Command ALWAYS" };
-
-		var strategyOption = new Option<string?>("--strategy") { Description = "Write strategy (Append, Truncate, Recreate, Upsert, Ignore)" };
-		strategyOption.Aliases.Add("-s");
-
-		var insertModeOption = new Option<string?>("--insert-mode") { Description = "Insert mode (Standard, Bulk)" };
-		var tableOption = new Option<string?>("--table") { Description = "Target table name" };
-		tableOption.Aliases.Add("-t");
-
-		var strictSchemaOption = new Option<bool?>("--strict-schema") { Description = "Abort if schema errors found" };
-		var noSchemaValidationOption = new Option<bool?>("--no-schema-validation") { Description = "Disable schema check" };
-
-		var metricsPathOption = new Option<string?>("--metrics-path") { Description = "Path to structured metrics JSON output" };
-		var autoMigrateOption = new Option<bool?>("--auto-migrate") { Description = "Automatically add missing columns to target table" };
-
-		var maxRetriesOption = new Option<int>("--max-retries") { Description = "Max retries for transient errors" };
-		maxRetriesOption.DefaultValueFactory = _ => 3;
-
-		var retryDelayMsOption = new Option<int>("--retry-delay-ms") { Description = "Initial retry delay in ms" };
-		retryDelayMsOption.DefaultValueFactory = _ => 1000;
-
-		// DAG Options
-		var xstreamerOption = new Option<string[]>("--xstreamer") { Description = "XStreamer provider (e.g. duck)" };
-		xstreamerOption.Aliases.Add("-x");
-
-		var aliasOption = new Option<string[]>("--alias") { Description = "Alias(es) for the current DAG branch or streams" };
-
-		// Core Help Options
-		var coreOptions = new List<Option> { inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption, unsafeQueryOption, dryRunOption, noStatsOption, limitOption, samplingRateOption, samplingSeedOption, keyOption, jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption, finallyExecOption, strategyOption, insertModeOption, tableOption, maxRetriesOption, retryDelayMsOption, strictSchemaOption, noSchemaValidationOption, metricsPathOption, autoMigrateOption, xstreamerOption, aliasOption };
+		var opts = CoreOptionsBuilder.Build();
+		var coreOptions = opts.AllOptions;
 
 		var rootCommand = new RootCommand("A simple, self-contained CLI for performance-focused data streaming & anonymization");
 		foreach (var opt in coreOptions) rootCommand.Add(opt);
@@ -177,8 +104,8 @@ public class JobService
 			Func<ParseResult, CancellationToken, string[], Task<int>> executePipeline = async (pr, token, currentRawArgs) =>
 			{
 				// 1. Recover Scalar Value for branch context
-				var localInput = pr.GetValue(inputOption)?.FirstOrDefault();
-				var localAlias = pr.GetValue(aliasOption)?.FirstOrDefault();
+				var localInput = pr.GetValue(opts.Input)?.FirstOrDefault();
+				var localAlias = pr.GetValue(opts.Alias)?.FirstOrDefault();
 
 				// Perform preliminary contributor actions
 				foreach (var contributor in _contributors)
@@ -193,34 +120,34 @@ public class JobService
 				// Build Job Definition
 				var cliJobOptions = new DtPipe.Cli.Infrastructure.CliJobOptions
 				{
-					Job = jobOption,
-					Input = inputOption,
-					Query = queryOption,
-					Output = outputOption,
-					ConnectionTimeout = connectionTimeoutOption,
-					QueryTimeout = queryTimeoutOption,
-					BatchSize = batchSizeOption,
-					UnsafeQuery = unsafeQueryOption,
-					NoStats = noStatsOption,
-					Limit = limitOption,
-					SamplingRate = samplingRateOption,
-					SamplingSeed = samplingSeedOption,
-					Log = logOption,
-					Key = keyOption,
-					PreExec = preExecOption,
-					PostExec = postExecOption,
-					OnErrorExec = onErrorExecOption,
-					FinallyExec = finallyExecOption,
-					Strategy = strategyOption,
-					InsertMode = insertModeOption,
-					Table = tableOption,
-					MaxRetries = maxRetriesOption,
-					RetryDelayMs = retryDelayMsOption,
-					StrictSchema = strictSchemaOption,
-					NoSchemaValidation = noSchemaValidationOption,
-					MetricsPath = metricsPathOption,
-					AutoMigrate = autoMigrateOption,
-					Xstreamer = xstreamerOption
+					Job = opts.Job,
+					Input = opts.Input,
+					Query = opts.Query,
+					Output = opts.Output,
+					ConnectionTimeout = opts.ConnectionTimeout,
+					QueryTimeout = opts.QueryTimeout,
+					BatchSize = opts.BatchSize,
+					UnsafeQuery = opts.UnsafeQuery,
+					NoStats = opts.NoStats,
+					Limit = opts.Limit,
+					SamplingRate = opts.SamplingRate,
+					SamplingSeed = opts.SamplingSeed,
+					Log = opts.Log,
+					Key = opts.Key,
+					PreExec = opts.PreExec,
+					PostExec = opts.PostExec,
+					OnErrorExec = opts.OnErrorExec,
+					FinallyExec = opts.FinallyExec,
+					Strategy = opts.Strategy,
+					InsertMode = opts.InsertMode,
+					Table = opts.Table,
+					MaxRetries = opts.MaxRetries,
+					RetryDelayMs = opts.RetryDelayMs,
+					StrictSchema = opts.StrictSchema,
+					NoSchemaValidation = opts.NoSchemaValidation,
+					MetricsPath = opts.MetricsPath,
+					AutoMigrate = opts.AutoMigrate,
+					Xstreamer = opts.Xstreamer
 				};
 
 				var (job, jobExitCode) = RawJobBuilder.Build(pr, cliJobOptions);
@@ -234,7 +161,7 @@ public class JobService
 				};
 
 				// Export job
-				var exportJobPath = pr.GetValue(exportJobOption);
+				var exportJobPath = pr.GetValue(opts.ExportJob);
 				if (!string.IsNullOrWhiteSpace(exportJobPath))
 				{
 					var factoryList = _contributors.OfType<IDataTransformerFactory>().ToList();
@@ -257,7 +184,7 @@ public class JobService
 				return await linearPipelineService.ExecuteAsync(job, currentRawArgs, token, localAlias, dagDefinition.IsDag);
 			};
 			// Initialize logging early for DAG execution
-			var logPath = parseResult.GetValue(logOption);
+			var logPath = parseResult.GetValue(opts.Log);
 			if (!string.IsNullOrEmpty(logPath))
 			{
 				Serilog.Log.Logger = new Serilog.LoggerConfiguration()
