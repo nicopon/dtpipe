@@ -179,22 +179,20 @@ public class MaskDataTransformer : IColumnarTransformer, IRequiresOptions<DtPipe
 			return input;
 		}
 
-		var sb = new StringBuilder(input.Length);
-
-		for (var i = 0; i < input.Length; i++)
+		return string.Create(input.Length, (input, pattern), (span, state) =>
 		{
-			if (i < pattern.Length)
+			var (inp, pat) = state;
+			for (var i = 0; i < span.Length; i++)
 			{
-				// Pattern character available: apply mask logic
-				sb.Append(pattern[i] == KeepChar ? input[i] : pattern[i]);
+				if (i < pat.Length)
+				{
+					span[i] = pat[i] == KeepChar ? inp[i] : pat[i];
+				}
+				else
+				{
+					span[i] = inp[i];
+				}
 			}
-			else
-			{
-				// Pattern exhausted: keep remaining characters unmasked
-				sb.Append(input[i]);
-			}
-		}
-
-		return sb.ToString();
+		});
 	}
 }

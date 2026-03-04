@@ -1,10 +1,12 @@
-﻿using DtPipe.Cli;
+﻿using System.Runtime.CompilerServices;
+using DtPipe.Cli;
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines.Dag;
 using DtPipe.Core.Infrastructure.Arrow;
+using DtPipe.Core.Validation;
 using DtPipe.XStreamers.DuckDB;
 using DtPipe.Transformers.Services;
 using DtPipe.Observers;
@@ -21,6 +23,9 @@ using DtPipe.Transformers.Row.Window;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Serilog;
+
+[assembly: InternalsVisibleTo("DtPipe.Tests")]
+[assembly: InternalsVisibleTo("DynamicProxyGenAssembly2")]
 
 namespace DtPipe;
 

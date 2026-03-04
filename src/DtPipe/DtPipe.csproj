@@ -16,6 +16,10 @@
     <!-- Release optimizations -->
     <TieredCompilation>true</TieredCompilation>
   </PropertyGroup>
+  
+  <ItemGroup>
+    <InternalsVisibleTo Include="DtPipe.Tests" />
+  </ItemGroup>
 
   <!-- Include README for NuGet package -->
   <ItemGroup>
