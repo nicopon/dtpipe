@@ -36,6 +36,11 @@ internal sealed class SchemaValidationService
         foreach (var warning in report.Warnings) _observer.LogWarning(warning);
         foreach (var error in report.Errors) _observer.LogError(new Exception(error));
 
+        if (report.IsCompatible)
+        {
+            _observer.LogMessage("Target schema compatible.");
+        }
+
         // Auto-migrate if needed
         var missingCount = report.Columns.Count(c => c.Status == CompatibilityStatus.MissingInTarget);
         if (missingCount > 0 && options.AutoMigrate && writer is ISchemaMigrator migrator)
