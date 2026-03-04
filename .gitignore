@@ -55,3 +55,8 @@ tests/scripts/sandbox/
 *.arrows
 *.output
 test_*.yaml
+
+# Native bridges (built by CI, not tracked in source)
+src/DtPipe.XStreamers/DataFusion/*.dylib
+src/DtPipe.XStreamers/DataFusion/*.so
+src/DtPipe.XStreamers/DataFusion/*.dll
