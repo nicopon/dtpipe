@@ -309,29 +309,6 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter
 		return null;
 	}
 
-	protected override string GetCreateTableSql(string tableName, IEnumerable<PipeColumnInfo> columns)
-	{
-		var sb = new StringBuilder();
-		sb.Append($"CREATE TABLE {tableName} (");
-
-		var cols = columns.ToList();
-		for (int i = 0; i < cols.Count; i++)
-		{
-			if (i > 0) sb.Append(", ");
-			var col = cols[i];
-			sb.Append($"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, col)} {_typeMapper.MapToProviderType(col.ClrType)}");
-		}
-
-		if (!string.IsNullOrEmpty(_options.Key))
-		{
-			var resolvedKeys = ColumnHelper.ResolveKeyColumns(_options.Key, cols);
-			var keys = resolvedKeys.Select(keyName => SqlIdentifierHelper.GetSafeIdentifier(_dialect, cols.First(c => c.Name == keyName)));
-			sb.Append($", PRIMARY KEY ({string.Join(", ", keys)})");
-		}
-		sb.Append(')');
-		return sb.ToString();
-	}
-
 	protected override string GetTruncateTableSql(string tableName) => $"DELETE FROM {tableName}"; // VACUUM is handled outside usually
 
 	protected override string GetDropTableSql(string tableName) => $"DROP TABLE {tableName}";
@@ -343,8 +320,6 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter
 		var nullability = column.IsNullable ? "" : " NOT NULL";
 		return $"ALTER TABLE {tableName} ADD COLUMN {safeName} {type}{nullability}";
 	}
-
-
 
 	// IKeyValidator Override
 	public override string? GetWriteStrategy() => _options.Strategy.ToString();

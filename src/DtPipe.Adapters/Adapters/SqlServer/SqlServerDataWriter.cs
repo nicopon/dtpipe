@@ -302,23 +302,6 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 		return ValueTask.CompletedTask;
 	}
 
-	protected override string GetCreateTableSql(string tableName, IEnumerable<PipeColumnInfo> columns)
-	{
-		// Use tableName directly as it's already quoted by Base
-		var sb = new StringBuilder();
-		sb.Append($"CREATE TABLE {tableName} (");
-
-		var cols = new List<string>();
-		foreach (var col in columns)
-		{
-			string type = _typeMapper.MapToProviderType(col.ClrType);
-			cols.Add($"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, col)} {type} NULL");
-		}
-		sb.Append(string.Join(", ", cols));
-		sb.Append(")");
-		return sb.ToString();
-	}
-
 	protected override string GetTruncateTableSql(string tableName) => $"TRUNCATE TABLE {tableName}";
 	protected override string GetDropTableSql(string tableName) => $"DROP TABLE {tableName}";
 

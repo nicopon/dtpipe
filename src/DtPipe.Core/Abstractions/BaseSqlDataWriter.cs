@@ -1,5 +1,7 @@
 using System.Data;
 using DtPipe.Core.Models;
+using DtPipe.Core.Helpers;
+using System.Text;
 
 namespace DtPipe.Core.Abstractions;
 
@@ -200,7 +202,38 @@ public abstract class BaseSqlDataWriter : IDataWriter, ISchemaInspector, IKeyVal
 	protected abstract ValueTask DisposeResourcesAsync();
 
 	// Abstract SQL Generators
-	protected abstract string GetCreateTableSql(string tableName, IEnumerable<PipeColumnInfo> columns);
+	// SQL Generators (GetCreateTableSql is now implemented here, derived classes can override if needed)
+	protected virtual string GetCreateTableSql(string tableName, IEnumerable<PipeColumnInfo> columns)
+	{
+		var colList = columns.ToList();
+		var sb = new StringBuilder();
+		sb.Append($"CREATE TABLE {tableName} (");
+
+		for (int i = 0; i < colList.Count; i++)
+		{
+			if (i > 0) sb.Append(", ");
+			var col = colList[i];
+			var safeName = SqlIdentifierHelper.GetSafeIdentifier(Dialect, col);
+			var nativeType = GetTypeMapper().MapToProviderType(col.ClrType);
+			sb.Append($"{safeName} {nativeType}");
+		}
+
+		var requestedKeys = GetRequestedPrimaryKeys();
+		if (requestedKeys != null && requestedKeys.Count > 0)
+		{
+			var resolvedKeys = ColumnHelper.ResolveKeyColumns(string.Join(",", requestedKeys), colList);
+			var safeKeys = resolvedKeys.Select(keyName =>
+			{
+				var col = colList.First(c => c.Name == keyName);
+				return SqlIdentifierHelper.GetSafeIdentifier(Dialect, col);
+			});
+			sb.Append($", PRIMARY KEY ({string.Join(", ", safeKeys)})");
+		}
+
+		sb.Append(")");
+		return sb.ToString();
+	}
+
 	protected abstract string GetTruncateTableSql(string tableName);
 	protected abstract string GetDropTableSql(string tableName);
 	protected abstract string GetAddColumnSql(string tableName, PipeColumnInfo column);
@@ -253,32 +286,31 @@ public abstract class BaseSqlDataWriter : IDataWriter, ISchemaInspector, IKeyVal
 	/// </summary>
 	protected virtual string BuildCreateTableFromIntrospection(string tableName, TargetSchemaInfo schema)
 	{
-		var sb = new System.Text.StringBuilder();
-		sb.AppendLine($"CREATE TABLE {tableName} (");
+		var sb = new StringBuilder();
+		sb.Append($"CREATE TABLE {tableName} (");
 
 		var columns = schema.Columns;
 		for (int i = 0; i < columns.Count; i++)
 		{
+			if (i > 0) sb.Append(", ");
 			var col = columns[i];
-			var quotedName = Dialect.NeedsQuoting(col.Name) ? Dialect.Quote(col.Name) : col.Name;
+			var safeName = SqlIdentifierHelper.GetSafeIdentifier(Dialect, col.Name);
 			var nativeType = GetTypeMapper().BuildNativeType(
 				col.NativeType, col.MaxLength, col.Precision, col.Scale, col.MaxLength);
 			var nullable = col.IsNullable ? "" : " NOT NULL";
 
-			sb.Append($"    {quotedName} {nativeType}{nullable}");
-			if (i < columns.Count - 1) sb.AppendLine(",");
-			else sb.AppendLine();
+			sb.Append($"{safeName} {nativeType}{nullable}");
 		}
 
 		// Primary Key constraint
 		if (schema.PrimaryKeyColumns?.Count > 0)
 		{
 			var pkCols = string.Join(", ", schema.PrimaryKeyColumns.Select(
-				pk => Dialect.NeedsQuoting(pk) ? Dialect.Quote(pk) : pk));
-			sb.AppendLine($"    , PRIMARY KEY ({pkCols})");
+				pk => SqlIdentifierHelper.GetSafeIdentifier(Dialect, pk)));
+			sb.Append($", PRIMARY KEY ({pkCols})");
 		}
 
-		sb.AppendLine(")");
+		sb.Append(")");
 		return sb.ToString();
 	}
 

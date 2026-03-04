@@ -83,7 +83,7 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 			}
 			else
 			{
-				createSql = BuildCreateTableSql(_quotedTargetTableName, _columns!);
+				createSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
 			}
 
 			await ExecuteNonQueryAsync(createSql, ct);
@@ -155,8 +155,14 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 
 	private async Task EnsureTableExistsAsync(CancellationToken ct)
 	{
-		// Try CREATE TABLE IF NOT EXISTS
-		var createSql = BuildCreateTableSql(_quotedTargetTableName, _columns!);
+		var (schema, table) = await ResolveTargetTableAsync(ct);
+		if (await TableExistsAsync(_quotedTargetTableName, ct))
+		{
+			return;
+		}
+
+		// Try CREATE TABLE
+		var createSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
 		await ExecuteNonQueryAsync(createSql, ct);
 	}
 
@@ -361,8 +367,6 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 
 	#region Helpers (Parsing, Native Resolution, SQL Building)
 
-	protected override string GetCreateTableSql(string tableName, IEnumerable<PipeColumnInfo> columns)
-		=> BuildCreateTableSql(tableName, columns.ToList());
 	protected override string GetTruncateTableSql(string tableName) => $"TRUNCATE TABLE {tableName}";
 	protected override string GetDropTableSql(string tableName) => $"DROP TABLE {tableName}";
 
@@ -407,28 +411,7 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 
 	private string NormalizeIdentifier(string id) => id.Trim('"');
 
-	private string BuildCreateTableSql(string quotedTableName, IReadOnlyList<PipeColumnInfo> columns)
-	{
-		var sb = new StringBuilder();
-		sb.Append($"CREATE TABLE IF NOT EXISTS {quotedTableName} (");
 
-		for (int i = 0; i < columns.Count; i++)
-		{
-			if (i > 0) sb.Append(", ");
-			var col = columns[i];
-			var safeName = SqlIdentifierHelper.GetSafeIdentifier(_dialect, col);
-			sb.Append($"{safeName} {_typeMapper.MapToProviderType(col.ClrType)}");
-		}
-
-		if (!string.IsNullOrEmpty(_options.Key))
-		{
-			var resolvedKeys = ColumnHelper.ResolveKeyColumns(_options.Key, columns.ToList());
-			var safeKeys = resolvedKeys.Select(keyName => SqlIdentifierHelper.GetSafeIdentifier(_dialect, columns.First(c => c.Name == keyName))).ToList();
-			sb.Append($", PRIMARY KEY ({string.Join(", ", safeKeys)})");
-		}
-		sb.Append(")");
-		return sb.ToString();
-	}
 
 
 

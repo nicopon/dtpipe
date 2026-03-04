@@ -274,10 +274,7 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
         }
     }
 
-    protected override string GetCreateTableSql(string tableName, IEnumerable<PipeColumnInfo> columns)
-        => BuildCreateTableSql(tableName, columns.ToList());
-
-    protected override string GetTruncateTableSql(string tableName)
+	protected override string GetTruncateTableSql(string tableName)
         => $"TRUNCATE TABLE {tableName}";
 
     protected override string GetDropTableSql(string tableName)
@@ -497,34 +494,7 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
             OracleWriteStrategy.Ignore;
     }
 
-    /// <summary>
-    /// Builds CREATE TABLE DDL from source column info.
-    /// </summary>
-    private string BuildCreateTableSql(string tableName, IReadOnlyList<PipeColumnInfo> columns)
-    {
-        var sb = new StringBuilder();
-        sb.Append($"CREATE TABLE {tableName} (");
 
-        for (int i = 0; i < columns.Count; i++)
-        {
-            if (i > 0) sb.Append(", ");
-            sb.Append($"{SqlIdentifierHelper.GetSafeIdentifier(Dialect, columns[i])} {_typeMapper.MapToProviderType(columns[i].ClrType)}");
-        }
-
-        if (!string.IsNullOrEmpty(_options.Key))
-        {
-             var resolvedKeys = ColumnHelper.ResolveKeyColumns(_options.Key, columns.ToList());
-             var safeKeys = resolvedKeys.Select(keyName =>
-             {
-                 var col = columns.First(c => c.Name == keyName);
-                 return SqlIdentifierHelper.GetSafeIdentifier(Dialect, col);
-             }).ToList();
-             sb.Append($", PRIMARY KEY ({string.Join(", ", safeKeys)})");
-        }
-
-        sb.Append(")");
-        return sb.ToString();
-    }
 
     private void InitializeCommands()
     {
@@ -636,8 +606,5 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
 
     #endregion
 
-    protected override string BuildCreateTableFromIntrospection(string tableName, TargetSchemaInfo schema)
-    {
-        return OracleSqlBuilder.BuildCreateTableFromIntrospection(tableName, schema, Dialect);
-    }
+
 }

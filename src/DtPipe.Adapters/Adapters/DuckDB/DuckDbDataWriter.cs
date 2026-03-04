@@ -555,30 +555,6 @@ public sealed class DuckDbDataWriter : BaseSqlDataWriter, IColumnarDataWriter
 		);
 	}
 
-	protected override string GetCreateTableSql(string tableName, IEnumerable<PipeColumnInfo> columns)
-	{
-		var sb = new StringBuilder();
-		// Do not use IF NOT EXISTS here because Base logic might control it,
-		// BUT for standard Create strategy it relies on this returning the CREATE statement.
-		sb.Append($"CREATE TABLE {tableName} (");
-
-		var colsList = columns.ToList();
-		for (int i = 0; i < colsList.Count; i++)
-		{
-			if (i > 0) sb.Append(", ");
-			sb.Append($"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, colsList[i])} {_typeMapper.MapToProviderType(colsList[i].ClrType)}");
-		}
-
-		if (!string.IsNullOrEmpty(_options.Key))
-		{
-			var keys = _options.Key.Split(',').Select(k => SqlIdentifierHelper.GetSafeIdentifier(_dialect, k.Trim()));
-			sb.Append($", PRIMARY KEY ({string.Join(", ", keys)})");
-		}
-
-		sb.Append(")");
-		return sb.ToString();
-	}
-
 	protected override string GetTruncateTableSql(string tableName) => $"TRUNCATE TABLE {tableName}";
 	protected override string GetDropTableSql(string tableName) => $"DROP TABLE {tableName}";
 
