@@ -11,29 +11,29 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Oracle.ManagedDataAccess.Client;
-using Testcontainers.MsSql;
-using Testcontainers.Oracle;
-using Testcontainers.PostgreSql;
 using Xunit;
 
 namespace DtPipe.Tests.Integration;
 
+[Trait("Category", "Integration")]
+[Collection("Docker Integration Tests")]
 public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 {
 	private readonly string _dbPath;
 	private readonly string _connectionString;
+	private readonly DtPipe.Tests.Fixtures.GlobalDatabaseFixture _fixture;
 
-	public IncrementalLoadingIntegrationTests()
+	public IncrementalLoadingIntegrationTests(DtPipe.Tests.Fixtures.GlobalDatabaseFixture fixture)
 	{
 		_dbPath = Path.Combine(Path.GetTempPath(), $"inc_test_{Guid.NewGuid()}.duckdb");
 		_connectionString = $"Data Source={_dbPath}";
+		_fixture = fixture;
 	}
 
 	public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 	public ValueTask DisposeAsync()
 	{
 		try { File.Delete(_dbPath); } catch { }
-		GC.SuppressFinalize(this);
 		return ValueTask.CompletedTask;
 	}
 
@@ -147,14 +147,8 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task SqlServer_Upsert_UpdatesExisting_InsertsNew()
 	{
-		if (!DockerHelper.IsAvailable()) return;
-
-		var cs = await DockerHelper.GetSqlServerConnectionString(async () =>
-		{
-			var container = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest").Build();
-			await container.StartAsync();
-			return container.GetConnectionString();
-		});
+		if (!DockerHelper.IsAvailable() || _fixture.SqlServerConnectionString == null) return;
+		var cs = _fixture.SqlServerConnectionString;
 
 		// 1. Setup
 		await using (var conn = new SqlConnection(cs))
@@ -200,14 +194,8 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task SqlServer_Ignore_SkipsExisting_InsertsNew()
 	{
-		if (!DockerHelper.IsAvailable()) return;
-
-		var cs = await DockerHelper.GetSqlServerConnectionString(async () =>
-		{
-			var container = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest").Build();
-			await container.StartAsync();
-			return container.GetConnectionString();
-		});
+		if (!DockerHelper.IsAvailable() || _fixture.SqlServerConnectionString == null) return;
+		var cs = _fixture.SqlServerConnectionString;
 
 		// 1. Setup
 		await using (var conn = new SqlConnection(cs))
@@ -253,14 +241,8 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task PostgreSql_Upsert_UpdatesExisting_InsertsNew()
 	{
-		if (!DockerHelper.IsAvailable()) return;
-
-		var cs = await DockerHelper.GetPostgreSqlConnectionString(async () =>
-		{
-			var container = new PostgreSqlBuilder("postgres:15-alpine").Build();
-			await container.StartAsync();
-			return container.GetConnectionString();
-		});
+		if (!DockerHelper.IsAvailable() || _fixture.PostgresConnectionString == null) return;
+		var cs = _fixture.PostgresConnectionString;
 
 		// 1. Setup
 		await using (var conn = new NpgsqlConnection(cs))
@@ -306,14 +288,8 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task PostgreSql_Ignore_SkipsExisting_InsertsNew()
 	{
-		if (!DockerHelper.IsAvailable()) return;
-
-		var cs = await DockerHelper.GetPostgreSqlConnectionString(async () =>
-		{
-			var container = new PostgreSqlBuilder("postgres:15-alpine").Build();
-			await container.StartAsync();
-			return container.GetConnectionString();
-		});
+		if (!DockerHelper.IsAvailable() || _fixture.PostgresConnectionString == null) return;
+		var cs = _fixture.PostgresConnectionString;
 
 		// 1. Setup
 		await using (var conn = new NpgsqlConnection(cs))
@@ -417,15 +393,8 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task Oracle_Upsert_UpdatesExisting_InsertsNew()
 	{
-		if (!DockerHelper.IsAvailable()) return;
-
-		// Use cached/reused image if possible or standard one
-		var cs = await DockerHelper.GetOracleConnectionString(async () =>
-		{
-			var container = new OracleBuilder("gvenzl/oracle-xe:21-slim-faststart").Build();
-			await container.StartAsync();
-			return container.GetConnectionString();
-		});
+		if (!DockerHelper.IsAvailable() || _fixture.OracleConnectionString == null) return;
+		var cs = _fixture.OracleConnectionString;
 
 		// 1. Setup
 		await using (var conn = new OracleConnection(cs))
@@ -515,13 +484,8 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task SqlServer_Upsert_CompositeKey_UpdatesExisting_InsertsNew()
 	{
-		if (!DockerHelper.IsAvailable()) return;
-		var cs = await DockerHelper.GetSqlServerConnectionString(async () =>
-		{
-			var container = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest").Build();
-			await container.StartAsync();
-			return container.GetConnectionString();
-		});
+		if (!DockerHelper.IsAvailable() || _fixture.SqlServerConnectionString == null) return;
+		var cs = _fixture.SqlServerConnectionString;
 
 		await using (var conn = new SqlConnection(cs))
 		{
@@ -558,13 +522,8 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task PostgreSql_Upsert_CompositeKey_UpdatesExisting_InsertsNew()
 	{
-		if (!DockerHelper.IsAvailable()) return;
-		var cs = await DockerHelper.GetPostgreSqlConnectionString(async () =>
-		{
-			var container = new PostgreSqlBuilder("postgres:15-alpine").Build();
-			await container.StartAsync();
-			return container.GetConnectionString();
-		});
+		if (!DockerHelper.IsAvailable() || _fixture.PostgresConnectionString == null) return;
+		var cs = _fixture.PostgresConnectionString;
 
 		await using (var conn = new NpgsqlConnection(cs))
 		{
@@ -601,13 +560,8 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task Oracle_Upsert_CompositeKey_UpdatesExisting_InsertsNew()
 	{
-		if (!DockerHelper.IsAvailable()) return;
-		var cs = await DockerHelper.GetOracleConnectionString(async () =>
-		{
-			var container = new OracleBuilder("gvenzl/oracle-xe:21-slim-faststart").Build();
-			await container.StartAsync();
-			return container.GetConnectionString();
-		});
+		if (!DockerHelper.IsAvailable() || _fixture.OracleConnectionString == null) return;
+		var cs = _fixture.OracleConnectionString;
 
 		await using (var conn = new OracleConnection(cs))
 		{
@@ -754,14 +708,8 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 	[Fact]
 	public async Task Oracle_Ignore_SkipsExisting_InsertsNew()
 	{
-		if (!DockerHelper.IsAvailable()) return;
-
-		var cs = await DockerHelper.GetOracleConnectionString(async () =>
-		{
-			var container = new OracleBuilder("gvenzl/oracle-xe:21-slim-faststart").Build();
-			await container.StartAsync();
-			return container.GetConnectionString();
-		});
+		if (!DockerHelper.IsAvailable() || _fixture.OracleConnectionString == null) return;
+		var cs = _fixture.OracleConnectionString;
 
 		// 1. Setup
 		await using (var conn = new OracleConnection(cs))

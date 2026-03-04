@@ -8,8 +8,6 @@ DTPIPE_CMD="$ROOT_DIR/dist/release/dtpipe"
 
 mkdir -p "$ARTIFACTS_DIR"
 
-echo "--- Generating 1M rows benchmark dataset (Parquet) ---"
-
 rm -f "$ARTIFACTS_DIR/main.parquet"
 rm -f "$ARTIFACTS_DIR/ref1_10m.csv"
 rm -f "$ARTIFACTS_DIR/ref2_10m.csv"
