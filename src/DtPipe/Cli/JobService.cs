@@ -153,6 +153,8 @@ public class JobService
 		// Add Inspect Command
 		rootCommand.Subcommands.Add(new InspectCommand(_serviceProvider));
 
+		rootCommand.Subcommands.Add(new ProvidersCommand(_serviceProvider));
+
 		// Add Secret Command
 		rootCommand.Subcommands.Add(new SecretCommand());
 		rootCommand.Subcommands.Add(new EngineDuckDbCommand());
