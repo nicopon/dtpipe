@@ -150,6 +150,9 @@ public class JobService
             Console.WriteLine("------------------------------");
         }
 
+		// Add Inspect Command
+		rootCommand.Subcommands.Add(new InspectCommand(_serviceProvider));
+
 		// Add Secret Command
 		rootCommand.Subcommands.Add(new SecretCommand());
 		rootCommand.Subcommands.Add(new EngineDuckDbCommand());
