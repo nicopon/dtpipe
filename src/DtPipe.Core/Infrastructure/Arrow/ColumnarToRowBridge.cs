@@ -33,13 +33,13 @@ public class ArrowColumnarToRowBridge : IColumnarToRowBridge
         return array switch
         {
             StringArray a => a.GetString(index),
-            Int32Array a => (long)a.GetValue(index)!,
+            Int32Array a => a.GetValue(index),
             Int64Array a => a.GetValue(index),
             DoubleArray a => a.GetValue(index),
-            FloatArray a => (double)a.GetValue(index)!,
+            FloatArray a => a.GetValue(index),
             BooleanArray a => a.GetValue(index),
             Date64Array a => a.GetDateTime(index),
-            TimestampArray a => a.GetTimestamp(index),
+            TimestampArray a => a.GetTimestamp(index)?.DateTime,
             _ => null
         };
     }

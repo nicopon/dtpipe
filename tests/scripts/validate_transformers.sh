@@ -28,12 +28,15 @@ if [ ! -f "$DTPIPE" ]; then
     exit 1
 fi
 
-# Cleanup
+# Cleanup function to prevent test pollution
 cleanup() {
     rm -f "$ARTIFACTS_DIR/ref_trans.csv" "$ARTIFACTS_DIR/test_overwrite.csv" "$ARTIFACTS_DIR/test_null.csv" "$ARTIFACTS_DIR/test_mask.csv"
 }
 trap cleanup EXIT
 
+# Proactive cleanup at startup to ensure idempotence and 
+# bypass any .NET file locks from orphaned dtpipe child processes.
+cleanup
 echo "----------------------------------------"
 echo "Step 0: Generate Reference Source"
 echo "----------------------------------------"

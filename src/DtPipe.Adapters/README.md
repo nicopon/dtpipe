@@ -27,6 +27,7 @@ All built-in provider adapters (readers and writers) for DtPipe. Depends only on
 | **Apache Arrow** | ✅ | ✅ | `arrow:` / `.arrow` |
 | **Parquet** | ✅ | ✅ | `parquet:` / `.parquet` |
 | **Generate** | ✅ | — | `generate:N` |
+| **Null** | — | ✅ | `null:` |
 | **Checksum** | — | ✅ | `checksum:` |
 
 ---

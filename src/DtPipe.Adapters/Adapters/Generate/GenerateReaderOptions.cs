@@ -9,4 +9,5 @@ public record GenerateReaderOptions : IProviderOptions
 
 	public long RowCount { get; set; } = 100;
 	public int? RowsPerSecond { get; set; }
+	public int ArrowBatchSize { get; set; } = 100_000;
 }

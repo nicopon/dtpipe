@@ -35,6 +35,7 @@ public class CliProviderFactory<TService> : ICliContributor, IDataFactory
 	// IDataFactory Implementation
 	public string ComponentName => _descriptor.ComponentName;
 	public bool CanHandle(string connectionString) => _descriptor.CanHandle(connectionString);
+	public bool SupportsStdio => _descriptor.SupportsStdio;
 	public Type OptionsType => _descriptor.OptionsType;
 
 	// ICliContributor Implementation

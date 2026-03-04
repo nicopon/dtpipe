@@ -122,7 +122,9 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvWriterOptio
 
 		// Use RecyclableMemoryStream as intermediate buffer
 		_memoryStream = (RecyclableMemoryStream)MemoryStreamManager.GetStream("CsvDataWriter");
-		_streamWriter = new StreamWriter(_memoryStream, Encoding.UTF8, bufferSize: 65536, leaveOpen: true);
+		// Avoid writing UTF-8 BOM as it can interfere with some readers (like our own CsvStreamReader when detection is off)
+		var encoding = new UTF8Encoding(false);
+		_streamWriter = new StreamWriter(_memoryStream, encoding, bufferSize: 65536, leaveOpen: true);
 
 		// DuckDB-compatible CSV configuration
 		var config = new CsvConfiguration(CultureInfo.InvariantCulture)

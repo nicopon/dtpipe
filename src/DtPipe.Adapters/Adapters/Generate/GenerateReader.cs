@@ -55,7 +55,7 @@ public partial class GenerateReader : IStreamReader, IColumnarStreamReader, IReq
 
 	public async IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync([EnumeratorCancellation] CancellationToken ct = default)
 	{
-		const int batchSize = 1000000;
+		int batchSize = _options.ArrowBatchSize;
 		long totalRows = _options.RowCount;
 		long produced = 0;
 		int? rowsPerSecond = _options.RowsPerSecond;

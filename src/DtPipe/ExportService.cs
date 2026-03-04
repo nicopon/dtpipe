@@ -300,20 +300,20 @@ public class ExportService
 
 
     private static async Task DirectColumnarTransferAsync(
-        IColumnarStreamReader reader,
+        IAsyncEnumerable<RecordBatch> source,
         IColumnarDataWriter writer,
         int limit,
         IExportProgress progress,
         CancellationToken ct)
     {
         long rowCount = 0;
-        await foreach (var batch in reader.ReadRecordBatchesAsync(ct))
+        await foreach (var batch in source)
         {
             if (writer.PrefersOwnershipTransfer)
             {
                 var batchToWriter = batch;
-                await writer.WriteRecordBatchAsync(batchToWriter, ct);
                 progress.ReportRead(batchToWriter.Length);
+                await writer.WriteRecordBatchAsync(batchToWriter, ct);
                 progress.ReportWrite(batchToWriter.Length);
                 rowCount += batchToWriter.Length;
             }
@@ -328,8 +328,8 @@ public class ExportService
                         // Note: Slicing would be better here if supported.
                     }
 
-                    await writer.WriteRecordBatchAsync(batchToWriter, ct);
                     progress.ReportRead(batchToWriter.Length);
+                    await writer.WriteRecordBatchAsync(batchToWriter, ct);
                     progress.ReportWrite(batchToWriter.Length);
                     rowCount += batchToWriter.Length;
 
@@ -438,7 +438,15 @@ public class ExportService
         if (segments.Count == 0)
         {
             if (reader is IColumnarStreamReader cr && writer is IColumnarDataWriter cw)
-                await DirectColumnarTransferAsync(cr, cw, options.Limit, progress, ct);
+            {
+                var source = cr.ReadRecordBatchesAsync(ct);
+                if (options.SamplingRate > 0 && options.SamplingRate < 1.0)
+                {
+                    var sampler = options.SamplingSeed.HasValue ? new Random(options.SamplingSeed.Value) : Random.Shared;
+                    source = ApplySamplingAsync(source, options.SamplingRate, sampler, ct);
+                }
+                await DirectColumnarTransferAsync(source, cw, options.Limit, progress, ct);
+            }
             else if (reader is not IColumnarStreamReader && writer is not IColumnarDataWriter)
                 await DirectRowTransferAsync(reader, writer, options.BatchSize, options.Limit, options.SamplingRate, options.SamplingSeed, progress, retryPolicy, ct);
             else
@@ -463,11 +471,20 @@ public class ExportService
         if (reader is IColumnarStreamReader columnarReader)
         {
             currentColumnarSource = columnarReader.ReadRecordBatchesAsync(ct);
+            if (options.SamplingRate > 0 && options.SamplingRate < 1.0)
+            {
+                var sampler = options.SamplingSeed.HasValue ? new Random(options.SamplingSeed.Value) : Random.Shared;
+                currentColumnarSource = ApplySamplingAsync(currentColumnarSource, options.SamplingRate, sampler, ct);
+            }
+
+            // Apply reporting wrapper for the source
+            currentColumnarSource = ReportColumnarReadAsync(currentColumnarSource, progress, ct);
+
             isCurrentColumnar = true;
         }
         else
         {
-            currentRowSource = ProduceRowStreamAsync(reader, options.Limit, options.SamplingRate, options.SamplingSeed, progress, ct);
+            currentRowSource = ProduceRowStreamAsync(reader, options.BatchSize, options.Limit, options.SamplingRate, options.SamplingSeed, progress, ct);
             isCurrentColumnar = false;
         }
 
@@ -516,11 +533,11 @@ public class ExportService
     }
     }
 
-    private async IAsyncEnumerable<object?[]> ProduceRowStreamAsync(IStreamReader reader, int limit, double samplingRate, int? samplingSeed, IExportProgress progress, [EnumeratorCancellation] CancellationToken ct)
+    private async IAsyncEnumerable<object?[]> ProduceRowStreamAsync(IStreamReader reader, int batchSize, int limit, double samplingRate, int? samplingSeed, IExportProgress progress, [EnumeratorCancellation] CancellationToken ct)
     {
         Random? sampler = samplingRate > 0 && samplingRate < 1.0 ? (samplingSeed.HasValue ? new Random(samplingSeed.Value) : Random.Shared) : null;
         long rowCount = 0;
-        await foreach (var batch in reader.ReadBatchesAsync(1000, ct))
+        await foreach (var batch in reader.ReadBatchesAsync(batchSize, ct))
         {
             for (int i = 0; i < batch.Length; i++)
             {
@@ -739,5 +756,64 @@ public class ExportService
             }
             if (limit > 0 && rowCount >= limit) break;
         }
+    }
+
+    private async IAsyncEnumerable<RecordBatch> ApplySamplingAsync(IAsyncEnumerable<RecordBatch> source, double rate, Random sampler, [EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (var batch in source.WithCancellation(ct))
+        {
+            var sampled = SampleBatch(batch, rate, sampler);
+            if (sampled.Length > 0)
+            {
+                yield return sampled;
+            }
+        }
+    }
+
+    private async IAsyncEnumerable<RecordBatch> ReportColumnarReadAsync(IAsyncEnumerable<RecordBatch> source, IExportProgress progress, [EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (var batch in source.WithCancellation(ct))
+        {
+            progress.ReportRead(batch.Length);
+            yield return batch;
+        }
+    }
+
+    private RecordBatch SampleBatch(RecordBatch batch, double rate, Random sampler)
+    {
+        var selectionVector = new bool[batch.Length];
+        int sampledCount = 0;
+        for (int i = 0; i < batch.Length; i++)
+        {
+            if (sampler.NextDouble() <= rate)
+            {
+                selectionVector[i] = true;
+                sampledCount++;
+            }
+        }
+
+        if (sampledCount == 0)
+            return new RecordBatch(batch.Schema, System.Array.Empty<IArrowArray>(), 0);
+
+        if (sampledCount == batch.Length)
+            return batch;
+
+        var arrays = new IArrowArray[batch.Schema.FieldsList.Count];
+        for (int colIdx = 0; colIdx < batch.Schema.FieldsList.Count; colIdx++)
+        {
+            var originalArray = batch.Column(colIdx);
+            var builder = ArrowTypeMapper.CreateBuilder(originalArray.Data.DataType);
+
+            for (int i = 0; i < originalArray.Length; i++)
+            {
+                if (selectionVector[i])
+                {
+                    ArrowTypeMapper.AppendArrayValue(builder, originalArray, i);
+                }
+            }
+            arrays[colIdx] = ArrowTypeMapper.BuildArray(builder);
+        }
+
+        return new RecordBatch(batch.Schema, arrays, sampledCount);
     }
 }

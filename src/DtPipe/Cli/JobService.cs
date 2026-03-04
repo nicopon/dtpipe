@@ -49,13 +49,13 @@ public class JobService
 
 	public (RootCommand, Action) Build()
 	{
-		var inputOption = new Option<string[]>("--input") { Description = "Input connection string, file path, or '-' for stdin" };
+		var inputOption = new Option<string?>("--input") { Description = "Input connection string, file path, or '-' for stdin" };
 		inputOption.Aliases.Add("-i");
 
-		var queryOption = new Option<string[]>("--query") { Description = "SQL query to execute (SELECT only)" };
+		var queryOption = new Option<string?>("--query") { Description = "SQL query to execute (SELECT only)" };
 		queryOption.Aliases.Add("-q");
 
-		var outputOption = new Option<string[]>("--output") { Description = "Output connection string, file path, or '-' for stdout" };
+		var outputOption = new Option<string?>("--output") { Description = "Output connection string, file path, or '-' for stdout" };
 		outputOption.Aliases.Add("-o");
 
 		var connectionTimeoutOption = new Option<int>("--connection-timeout") { Description = "Connection timeout in seconds" };
@@ -126,7 +126,7 @@ public class JobService
 		var coreOptions = new List<Option> { inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption, unsafeQueryOption, dryRunOption, noStatsOption, limitOption, samplingRateOption, samplingSeedOption, keyOption, jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption, finallyExecOption, strategyOption, insertModeOption, tableOption, maxRetriesOption, retryDelayMsOption, strictSchemaOption, noSchemaValidationOption, metricsPathOption, autoMigrateOption, xstreamerOption, aliasOption };
 
 		var rootCommand = new RootCommand("A simple, self-contained CLI for performance-focused data streaming & anonymization");
-		foreach (var opt in coreOptions) rootCommand.Options.Add(opt);
+		foreach (var opt in coreOptions) rootCommand.Add(opt);
 
 		// Add Contributor Options
 		foreach (var contributor in _contributors)
@@ -135,7 +135,7 @@ public class JobService
 			{
 				if (!rootCommand.Options.Any(o => o.Name == opt.Name || o.Aliases.Contains(opt.Name)))
 				{
-					rootCommand.Options.Add(opt);
+					rootCommand.Add(opt);
 				}
 			}
 		}

@@ -4,7 +4,8 @@ set -e
 # Find project root
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 ROOT_DIR="$( cd "$SCRIPT_DIR/../.." &> /dev/null && pwd )"
-ARTIFACTS_DIR="/Users/REDACTED/.gemini/antigravity/brain/66bdd720-b9da-4a69-9644-72c7513823fd"
+ARTIFACTS_DIR="$SCRIPT_DIR/artifacts"
+mkdir -p "$ARTIFACTS_DIR"
 
 cd "$ROOT_DIR"
 

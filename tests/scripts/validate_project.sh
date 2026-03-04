@@ -26,11 +26,14 @@ if [ ! -f "$DTPIPE" ]; then
     exit 1
 fi
 
-# Cleanup
+# Cleanup function to prevent test pollution
 cleanup() {
-    rm -f "$OUTPUT_DIR/ref_project.csv" "$OUTPUT_DIR/test_drop.csv" "$OUTPUT_DIR/test_select.csv"
+    rm -f "$OUTPUT_DIR/ref_project.csv" "$OUTPUT_DIR/test_drop.csv" "$OUTPUT_DIR/test_select.csv" "$OUTPUT_DIR/test_combined.csv"
 }
 trap cleanup EXIT
+
+# Proactive cleanup at startup to ensure idempotence
+cleanup
 
 echo "----------------------------------------"
 echo "Step 0: Generate Reference Source"

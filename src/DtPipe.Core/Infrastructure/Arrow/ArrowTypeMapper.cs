@@ -179,4 +179,42 @@ public static class ArrowTypeMapper
                 break;
         }
     }
+
+    public static void AppendArrayValue(IArrowArrayBuilder builder, IArrowArray array, int index)
+    {
+        if (array.IsNull(index))
+        {
+            AppendNull(builder);
+            return;
+        }
+
+        switch (array)
+        {
+            case BooleanArray a: ((BooleanArray.Builder)builder).Append(a.GetValue(index)!.Value); break;
+            case Int8Array a: ((Int8Array.Builder)builder).Append(a.GetValue(index)!.Value); break;
+            case Int16Array a: ((Int16Array.Builder)builder).Append(a.GetValue(index)!.Value); break;
+            case Int32Array a: ((Int32Array.Builder)builder).Append(a.GetValue(index)!.Value); break;
+            case Int64Array a: ((Int64Array.Builder)builder).Append(a.GetValue(index)!.Value); break;
+            case UInt8Array a: ((UInt8Array.Builder)builder).Append(a.GetValue(index)!.Value); break;
+            case UInt16Array a: ((UInt16Array.Builder)builder).Append(a.GetValue(index)!.Value); break;
+            case UInt32Array a: ((UInt32Array.Builder)builder).Append(a.GetValue(index)!.Value); break;
+            case UInt64Array a: ((UInt64Array.Builder)builder).Append(a.GetValue(index)!.Value); break;
+            case FloatArray a: ((FloatArray.Builder)builder).Append(a.GetValue(index)!.Value); break;
+            case DoubleArray a: ((DoubleArray.Builder)builder).Append(a.GetValue(index)!.Value); break;
+            case StringArray a: ((StringArray.Builder)builder).Append(a.GetString(index)); break;
+            case BinaryArray a: ((BinaryArray.Builder)builder).Append(a.GetBytes(index)); break;
+            case Decimal128Array a: ((Decimal128Array.Builder)builder).Append(a.GetValue(index)!.Value); break;
+            case Decimal256Array a: ((Decimal256Array.Builder)builder).Append(a.GetValue(index)!.Value); break;
+            case Date32Array a: ((Date32Array.Builder)builder).Append(a.GetDateTime(index)!.Value); break;
+            case Date64Array a: ((Date64Array.Builder)builder).Append(a.GetDateTime(index)!.Value); break;
+            case TimestampArray a: ((TimestampArray.Builder)builder).Append(a.GetTimestamp(index)!.Value); break;
+            case DurationArray a: ((DurationArray.Builder)builder).Append(a.GetValue(index)!.Value); break;
+            case Time32Array a: ((Time32Array.Builder)builder).Append(a.GetValue(index)!.Value); break;
+            case Time64Array a: ((Time64Array.Builder)builder).Append(a.GetValue(index)!.Value); break;
+            default:
+                // Boxed fallback for any missed types
+                AppendValue(builder, GetValue(array, index));
+                break;
+        }
+    }
 }

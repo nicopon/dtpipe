@@ -56,7 +56,8 @@ class Program
 
 		try
 		{
-			var effectiveArgs = args;
+			// Pre-process args to escape leading '@' to avoid response file expansion in System.CommandLine
+			var effectiveArgs = args.Select(arg => arg.StartsWith("@") ? " " + arg : arg).ToArray();
 
 			return await rootCommand.Parse(effectiveArgs).InvokeAsync();
 		}
@@ -95,7 +96,6 @@ class Program
 		// Explicitly Register Readers (Adapters)
 		RegisterReader<DtPipe.Adapters.Arrow.ArrowReaderDescriptor>(services);
 		RegisterReader<DtPipe.Adapters.Csv.CsvReaderDescriptor>(services);
-		RegisterReader<DtPipe.Adapters.DuckDB.DuckDataSourceReaderDescriptor>(services);
 		RegisterReader<DtPipe.Adapters.DuckDB.DuckDbReaderDescriptor>(services);
 		RegisterReader<DtPipe.Adapters.Generate.GenerateReaderDescriptor>(services);
 		RegisterReader<DtPipe.Adapters.JsonL.JsonLReaderDescriptor>(services);

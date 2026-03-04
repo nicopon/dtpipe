@@ -89,7 +89,7 @@ public class CsvStreamReader : IStreamReader
 				_logger.LogDebug("Opening CSV file: {FilePath}", _filePath);
 
 			_fileStream = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.Asynchronous);
-			_streamReader = new StreamReader(_fileStream, encoding, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
+			_streamReader = new StreamReader(_fileStream, encoding, detectEncodingFromByteOrderMarks: true, leaveOpen: true);
 		}
 
 		var config = new CsvConfiguration(CultureInfo.InvariantCulture)

@@ -9,9 +9,9 @@ namespace DtPipe.Cli.Infrastructure;
 public sealed class CliJobOptions
 {
     public required Option<string?> Job { get; init; }
-    public required Option<string[]> Input { get; init; }
-    public required Option<string[]> Query { get; init; }
-    public required Option<string[]> Output { get; init; }
+    public required Option<string?> Input { get; init; }
+    public required Option<string?> Query { get; init; }
+    public required Option<string?> Output { get; init; }
     public required Option<int> ConnectionTimeout { get; init; }
     public required Option<int> QueryTimeout { get; init; }
     public required Option<int> BatchSize { get; init; }

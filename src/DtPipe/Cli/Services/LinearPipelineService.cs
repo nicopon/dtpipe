@@ -194,6 +194,7 @@ public class LinearPipelineService
     private static string? LoadOrReadContent(string? input, Spectre.Console.IAnsiConsole console, string label)
     {
         if (string.IsNullOrWhiteSpace(input)) return input;
+        input = input.Trim();
 
         string? filename = null;
         if (input.StartsWith("@"))

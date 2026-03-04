@@ -12,14 +12,14 @@ The solution is split into three layers:
 | Project | Role |
 |---|---|
 | `DtPipe.Core` | Interfaces, models, pipeline engine — **no external deps** |
-| `DtPipe.Adapters` | All provider implementations (readers/writers) |
-| `DtPipe` | CLI, DI wiring, Descriptors, Transformers |
+| `DtPipe.Adapters` | All provider implementations (readers/writers) and their **CLI Descriptors** |
+| `DtPipe` | CLI main entry point, DI wiring, and standard Transformers |
 
 ### Where to put new code
 
 | What | Implementation | Descriptor / Registration |
 |---|---|---|
-| **New reader/writer** | `src/DtPipe.Adapters/Adapters/<Provider>/` | `src/DtPipe/Adapters/<Provider>/` |
+| **New reader/writer** | `src/DtPipe.Adapters/Adapters/<Provider>/` | `src/DtPipe.Adapters/Adapters/<Provider>/` |
 | **New transformer** | `src/DtPipe/Transformers/<Name>/` | `src/DtPipe/Program.cs` |
 
 ---

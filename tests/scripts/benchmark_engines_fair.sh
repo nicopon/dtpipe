@@ -19,8 +19,14 @@ DTPIPE_CMD="$ROOT_DIR/dist/release/dtpipe"
 MAIN_PARQUET="$ARTIFACTS_DIR/main.parquet"
 
 # Reference CSVs (pre-created in benchmark_100m.sh)
-REF_CSV="$ARTIFACTS_DIR/ref1_100m.csv"
-REF2_CSV="$ARTIFACTS_DIR/ref2_100m.csv"
+REF_CSV="$ARTIFACTS_DIR/ref1_10m.csv"
+REF2_CSV="$ARTIFACTS_DIR/ref2_10m.csv"
+
+# Ensure datasets are present
+if [ ! -f "$MAIN_PARQUET" ] || [ ! -f "$REF_CSV" ] || [ ! -f "$REF2_CSV" ]; then
+  echo "🔧 Some benchmark datasets are missing. Generating them..."
+  "$DIR/generate_benchmark_datasets.sh"
+fi
 
 ROWS=100000000
 QUERY='SELECT COUNT(*) FROM main m JOIN ref r ON m.GenerateIndex = CAST(r.Id AS BIGINT) JOIN ref2 r2 ON m.GenerateIndex = CAST(r2.Id AS BIGINT)'

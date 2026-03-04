@@ -11,12 +11,10 @@ DtPipe streams data from any source (SQL, CSV, Parquet) to any destination, appl
 
 ---
 
-## Capabilities
-
 - **Modular Architecture**: Clean separation between `Core` engine, `Adapters`, and `XStreamers`.
-- **Zero-Copy Streaming**: Direct memory mapping (Zero-Copy) for columnar formats (Arrow, Parquet, DuckDB) via the **DuckXStreamer** bridge.
+- **Zero-Copy Streaming**: Direct memory mapping (Zero-Copy) for columnar formats (Arrow, Parquet, DuckDB, DataFusion) via the **DuckXStreamer** and **DataFusionXStreamer** bridges.
 - **Micro-Performance**: Handles millions of rows with optimized batching and constant, low memory usage.
-- **Multi-Provider**: Native support for **Oracle**, **SQL Server**, **PostgreSQL**, **DuckDB**, **SQLite**, **Parquet**, and **CSV**.
+- **Multi-Provider**: Native support for **Oracle**, **SQL Server**, **PostgreSQL**, **DuckDB**, **SQLite**, **Parquet**, **CSV**, and **JsonL**.
 - **Anonymization Engine**: Built-in **Bogus** integration to fake Names, Emails, IBANs, and more.
 - **Production Ready**: YAML job configuration, execution hooks, and robust instrumentation.
 
@@ -26,7 +24,7 @@ DtPipe streams data from any source (SQL, CSV, Parquet) to any destination, appl
 You can install DtPipe as a global tool if you have the .NET SDK installed.
 
 ```bash
-dotnet tool install -g dtpipe --prerelease
+dotnet tool install -g dtpipe
 dtpipe --help
 ```
 
@@ -60,20 +58,24 @@ dtpipe --input [SOURCE] --query [SQL] --output [DEST] [OPTIONS]
 
 DtPipe auto-detects providers from file extensions (`.csv`, `.parquet`, `.duckdb`, `.sqlite`) or explicit prefixes. **Using an explicit prefix is recommended** to avoid ambiguity and improve performance.
 
-| Provider | Prefix / Format | Example |
-|:---|:---|:---|
-| **DuckDB** | `duck:` | `duck:my.duckdb` |
-| **SQLite** | `sqlite:` | `sqlite:data.sqlite` |
-| **PostgreSQL**| `pg:` | `pg:Host=localhost;Database=mydb` |
-| **Oracle** | `ora:` | `ora:Data Source=PROD;User Id=scott` |
-| **SQL Server**| `mssql:` | `mssql:Server=.;Database=mydb` |
-| **CSV** | `csv:` / `.csv` | `data.csv` |
-| **JsonL** | `jsonl:` / `.jsonl`| `data.jsonl` |
-| **Apache Arrow** | `arrow:` / `.arrow`| `data.arrow` |
-| **Parquet** | `parquet:` / `.parquet`| `data.parquet` |
-| **Data Gen** | `generate:` | `generate:1000000` (generates `GenerateIndex` column) |
-| **Keyring** | `keyring://` | `keyring://my-prod-db` |
-| **STDIN/OUT** | `-` / `{CP}:-` | `csv` (shorthand for `csv:-`, streams CSV to stdout) |
+| Provider | Input | Output | Prefix / Format | Example |
+|:---|:---:|:---:|:---|:---|
+| **DuckDB** | ✅ | ✅ | `duck:` | `duck:my.duckdb` |
+| **SQLite** | ✅ | ✅ | `sqlite:` | `sqlite:data.sqlite` |
+| **PostgreSQL**| ✅ | ✅ | `pg:` | `pg:Host=localhost;Database=mydb` |
+| **Oracle** | ✅ | ✅ | `ora:` | `ora:Data Source=PROD;User Id=scott` |
+| **SQL Server**| ✅ | ✅ | `mssql:` | `mssql:Server=.;Database=mydb` |
+| **CSV** | ✅ | ✅ | `csv:` / `.csv` | `data.csv` |
+| **JsonL** | ✅ | ✅ | `jsonl:` / `.jsonl`| `data.jsonl` |
+| **Apache Arrow** | ✅ | ✅ | `arrow:` / `.arrow`| `data.arrow` |
+| **Parquet** | ✅ | ✅ | `parquet:` / `.parquet`| `data.parquet` |
+| **Data Gen** | ✅ | — | `generate:` | `generate:1000k` |
+| **Null** | — | ✅ | `null:` | `null:` |
+| **STDIN/OUT** | ✅ | ✅ | `-` / `{CP}:-` | `csv` (for `csv:-`) |
+
+> [!TIP]
+> **Secure your Connection Strings:** Instead of typing passwords in plain text, use **[Secret Management](#-secret-management)**. 
+> Use the prefix `keyring://my-alias` anywhere a connection string is required. DtPipe will automatically resolve it from your OS keychain.
 
 > [!IMPORTANT]
 > **Explicit use of `-` is required for standard input/output.**
@@ -128,6 +130,7 @@ dtpipe -i input.csv --csv-separator "," -o output.csv --csv-separator ";"
 | `--job [FILE]` | Execute a YAML job file. |
 | `--export-job` | Save current CLI args as a YAML job. |
 | `--log [FILE]` | Write execution statistics to file (Optional). |
+| `--metrics-path`| Path to structured metrics JSON output. |
 
 #### Transformation Pipeline
 | Flag | Description |
@@ -157,13 +160,17 @@ dtpipe -i input.csv --csv-separator "," -o output.csv --csv-separator ";"
 | `--strategy` | `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`, `Upsert`, `Ignore`. Works for all providers. |
 | `--insert-mode` | `Standard`, `Bulk`. Works for supported providers (SqlSever, Oracle, PostgreSQL). |
 | `--table` | Target table name. Overrides default 'export'. |
+| `--auto-migrate` | Automatically add missing columns to target table. |
+| `--strict-schema`| Abort if schema errors are found. |
 | `--unsafe-query` | Allow non-SELECT queries (use with caution). |
 
 ---
-
+ 
 ## 🔒 Secret Management
-
+ 
 DtPipe includes a built-in secret manager that uses your **Operating System's Keyring** (Windows Credential Manager, macOS Keychain, or Linux Secret Service) to store connection strings securely.
+
+This allows you to share scripts and YAML jobs without exposing production credentials. A secret can store a complete connection string, including its provider prefix (e.g., `pg:Host=...`).
 
 ### 1. Store a Secret
 ```bash

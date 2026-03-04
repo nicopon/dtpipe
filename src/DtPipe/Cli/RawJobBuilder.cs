@@ -110,9 +110,9 @@ public static class RawJobBuilder
 		}
 		else
 		{
-			var query = parseResult.GetValue(opts.Query)?.LastOrDefault();
-			var output = parseResult.GetValue(opts.Output)?.LastOrDefault();
-			var input = parseResult.GetValue(opts.Input)?.LastOrDefault();
+			var query = parseResult.GetValue(opts.Query);
+			var output = parseResult.GetValue(opts.Output);
+			var input = parseResult.GetValue(opts.Input);
 
 			// Validation (Required args)
 			if (string.IsNullOrWhiteSpace(output))

@@ -15,15 +15,15 @@ echo "--- Benchmarking SQL Engines (100M rows + 2 JOINs) ---"
 echo "Dataset: $MAIN_PARQUET"
 echo ""
 
-# Setup reference data 1 (10,000 rows)
-REF_CSV="$ARTIFACTS_DIR/ref1_100m.csv"
-echo "Id,Val" > "$REF_CSV"
-for i in {1..10000}; do echo "$i,val_$i"; done >> "$REF_CSV"
+# Setup reference data
+REF_CSV="$ARTIFACTS_DIR/ref1_10m.csv"
+REF2_CSV="$ARTIFACTS_DIR/ref2_10m.csv"
 
-# Setup reference data 2 (1,000 rows)
-REF2_CSV="$ARTIFACTS_DIR/ref2_100m.csv"
-echo "Id,Desc" > "$REF2_CSV"
-for i in {1..1000}; do echo "$i,desc_$i"; done >> "$REF2_CSV"
+# Ensure datasets are present
+if [ ! -f "$MAIN_PARQUET" ] || [ ! -f "$REF_CSV" ] || [ ! -f "$REF2_CSV" ]; then
+  echo "🔧 Some benchmark datasets are missing. Generating them..."
+  "$DIR/generate_benchmark_datasets.sh"
+fi
 
 ROWS=100000000
 QUERY="SELECT COUNT(*) FROM main m JOIN ref r ON m.GenerateIndex = r.Id JOIN ref2 r2 ON m.GenerateIndex = r2.Id"

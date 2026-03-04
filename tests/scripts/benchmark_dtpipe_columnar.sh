@@ -7,7 +7,7 @@ DTPIPE_CMD="$ROOT_DIR/src/DtPipe/bin/Release/net10.0/dtpipe"
 ARTIFACTS_DIR="$DIR/artifacts"
 mkdir -p "$ARTIFACTS_DIR"
 
-OUTPUT_REPORT="$DIR/benchmark_50m_report.txt"
+OUTPUT_REPORT="$ARTIFACTS_DIR/benchmark_50m_report.txt"
 echo "=== DtPipe High-Volume Columnar Benchmark (50M Rows) ===" > "$OUTPUT_REPORT"
 echo "Date: $(date)" >> "$OUTPUT_REPORT"
 echo "OS: $(uname -a)" >> "$OUTPUT_REPORT"
