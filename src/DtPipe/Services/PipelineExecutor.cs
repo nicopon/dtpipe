@@ -179,7 +179,7 @@ internal sealed class PipelineExecutor
         }
     }
 
-    private async IAsyncEnumerable<object?[]> ProduceRowStreamAsync(
+    internal async IAsyncEnumerable<object?[]> ProduceRowStreamAsync(
         IStreamReader reader,
         int batchSize,
         int limit,
@@ -265,7 +265,7 @@ internal sealed class PipelineExecutor
         }
     }
 
-    private async IAsyncEnumerable<RecordBatch> ApplyColumnarSegmentAsync(
+    internal async IAsyncEnumerable<RecordBatch> ApplyColumnarSegmentAsync(
         IAsyncEnumerable<RecordBatch> source,
         List<IDataTransformer> transformers,
         IExportProgress progress,
@@ -340,7 +340,7 @@ internal sealed class PipelineExecutor
         }
     }
 
-    private List<object?[]> ProcessRowThroughTransformers(
+    internal List<object?[]> ProcessRowThroughTransformers(
         object?[] row,
         List<IDataTransformer> p,
         IExportProgress progress,
@@ -385,7 +385,7 @@ internal sealed class PipelineExecutor
         }
     }
 
-    private async Task ConsumeRowStreamAsync(
+    internal async Task ConsumeRowStreamAsync(
         IAsyncEnumerable<object?[]> source,
         IDataWriter writer,
         int batchSize,
