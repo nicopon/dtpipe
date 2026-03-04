@@ -16,6 +16,7 @@ public class ExportServiceTests
 	private readonly Mock<IExportObserver> _mockObserver;
 	private readonly Mock<IExportProgress> _mockProgress;
 	private readonly Mock<ILogger<ExportService>> _mockLogger;
+	private readonly Mock<ILoggerFactory> _mockLoggerFactory;
 	private readonly ExportService _service;
 
 	public ExportServiceTests()
@@ -25,6 +26,10 @@ public class ExportServiceTests
 		_mockObserver = new Mock<IExportObserver>();
 		_mockProgress = new Mock<IExportProgress>();
 		_mockLogger = new Mock<ILogger<ExportService>>();
+		_mockLoggerFactory = new Mock<ILoggerFactory>();
+
+		_mockLoggerFactory.Setup(f => f.CreateLogger(It.IsAny<string>()))
+						  .Returns(new Mock<ILogger>().Object);
 
 		var readerFactoryList = new List<IStreamReaderFactory> { _mockReaderFactory.Object };
 		var writerFactoryList = new List<IDataWriterFactory> { _mockWriterFactory.Object };
@@ -43,7 +48,8 @@ public class ExportServiceTests
 			new List<IColumnarToRowBridgeFactory>(), // col-to-row bridge factories
 			new OptionsRegistry(), // options registry
 			_mockObserver.Object,
-			_mockLogger.Object
+			_mockLogger.Object,
+			_mockLoggerFactory.Object
 		);
 	}
 

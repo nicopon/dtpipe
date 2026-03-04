@@ -12,6 +12,7 @@ using System.Runtime.CompilerServices;
 using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Pipelines;
+using DtPipe.Services;
 
 namespace DtPipe;
 
@@ -26,6 +27,9 @@ public class ExportService
 	private readonly IExportObserver _observer;
 	private readonly IMemoryChannelRegistry? _channelRegistry;
 	private readonly ILogger<ExportService> _logger;
+	private readonly HookExecutor _hookExecutor;
+	private readonly MetricsService _metricsService;
+	private readonly SchemaValidationService _schemaValidator;
 
 	public ExportService(
 		IEnumerable<IStreamReaderFactory> readerFactories,
@@ -36,6 +40,7 @@ public class ExportService
 		OptionsRegistry optionsRegistry,
 		IExportObserver observer,
 		ILogger<ExportService> logger,
+		ILoggerFactory loggerFactory,
 		IMemoryChannelRegistry? channelRegistry = null)
 	{
 		_readerFactories = readerFactories;
@@ -47,6 +52,9 @@ public class ExportService
 		_observer = observer;
 		_logger = logger;
 		_channelRegistry = channelRegistry;
+		_hookExecutor = new HookExecutor(observer, loggerFactory.CreateLogger<HookExecutor>());
+		_metricsService = new MetricsService(observer, loggerFactory.CreateLogger<MetricsService>());
+		_schemaValidator = new SchemaValidationService(observer, loggerFactory.CreateLogger<SchemaValidationService>());
 	}
 
 	public async Task RunExportAsync(
@@ -100,7 +108,7 @@ public class ExportService
 		}
 
 		// Now that transformers are initialized, we can segment correctly based on IsColumnar
-		var segments = GetPipelineSegments(pipeline);
+		var segments = PipelineSegmenter.GetSegments(pipeline);
 		if (pipeline.Count > 0)
 		{
 			// Fill segment schemas for bridging
@@ -154,12 +162,12 @@ public class ExportService
 		await using var writer = writerFactory.Create(registry);
 
 		// Execute Pre-Hook
-		await ExecuteHookAsync(writer, "Pre-Hook", options.PreExec, ct);
+		await _hookExecutor.ExecuteAsync(writer, "Pre-Hook", options.PreExec, ct);
 
 		await retryPolicy.ExecuteValueAsync(() => writer.InitializeAsync(exportableSchema, ct), ct);
 
 		// Schema Validation
-		await retryPolicy.ExecuteAsync(() => ValidateAndMigrateSchemaAsync(writer, exportableSchema, options, ct), ct);
+		await retryPolicy.ExecuteAsync(() => _schemaValidator.ValidateAndMigrateAsync(writer, exportableSchema, options, ct), ct);
 
 		// Use Observer to create Progress
 		var transformerNamesList = pipeline.Select(t => t.GetType().Name.Replace("DataTransformer", ""));
@@ -184,11 +192,11 @@ public class ExportService
 				_logger.LogInformation("Export completed in {Elapsed}. Written {Rows} rows ({Speed:F1} rows/s).", elapsed, progress.GetMetrics().WriteCount, rowsPerSecond);
 
 			// --- POST-EXEC HOOK ---
-			await ExecuteHookAsync(writer, "Post-Hook", options.PostExec, ct);
+			await _hookExecutor.ExecuteAsync(writer, "Post-Hook", options.PostExec, ct);
 
 			_observer.LogMessage($"[green]✓ Export completed successfully.[/]");
 
-			await SaveMetricsAsync(progress, options.MetricsPath, ct);
+			await _metricsService.SaveMetricsAsync(progress, options.MetricsPath, ct);
 		}
 		catch (Exception ex)
 		{
@@ -198,7 +206,7 @@ public class ExportService
 			// --- ON-ERROR HOOK ---
 			try
 			{
-				await ExecuteHookAsync(writer, "On-Error Hook", options.OnErrorExec, CancellationToken.None, TimeSpan.FromSeconds(30));
+				await _hookExecutor.ExecuteAsync(writer, "On-Error Hook", options.OnErrorExec, CancellationToken.None, TimeSpan.FromSeconds(30));
 			}
 			catch (Exception hookEx)
 			{
@@ -213,7 +221,7 @@ public class ExportService
 			// --- FINALLY HOOK ---
 			try
 			{
-				await ExecuteHookAsync(writer, "Finally Hook", options.FinallyExec, CancellationToken.None, TimeSpan.FromSeconds(30));
+				await _hookExecutor.ExecuteAsync(writer, "Finally Hook", options.FinallyExec, CancellationToken.None, TimeSpan.FromSeconds(30));
 			}
 			catch (Exception hookEx)
 			{
@@ -226,78 +234,11 @@ public class ExportService
 	/// <summary>
 	/// Validates schema compatibility and performs auto-migration if enabled.
 	/// </summary>
-	private async Task ValidateAndMigrateSchemaAsync(
-		IDataWriter writer,
-		IReadOnlyList<PipeColumnInfo> exportableSchema,
-		PipelineOptions options,
-		CancellationToken ct)
-	{
-		if (options.NoSchemaValidation || writer is not ISchemaInspector inspector) return;
 
-		_observer.LogMessage("Verifying target schema compatibility...");
-		var targetSchema = await inspector.InspectTargetAsync(ct);
-		var dialect = (writer as IHasSqlDialect)?.Dialect;
-		var report = SchemaCompatibilityAnalyzer.Analyze(exportableSchema, targetSchema, dialect);
 
-		foreach (var warning in report.Warnings) _observer.LogWarning(warning);
-		foreach (var error in report.Errors) _observer.LogError(new Exception(error));
 
-		// Auto-migrate if needed
-		var missingCount = report.Columns.Count(c => c.Status == CompatibilityStatus.MissingInTarget);
-		if (missingCount > 0 && options.AutoMigrate && writer is ISchemaMigrator migrator)
-		{
-			_observer.LogMessage($"[yellow]Auto-migrating schema: Adding {missingCount} missing columns...[/]");
-			await migrator.MigrateSchemaAsync(report, ct);
 
-			// Re-validate after migration
-			targetSchema = await inspector.InspectTargetAsync(ct);
-			report = SchemaCompatibilityAnalyzer.Analyze(exportableSchema, targetSchema, dialect);
 
-			if (!report.IsCompatible && options.StrictSchema)
-				throw new InvalidOperationException("Export aborted: Schema migration failed to resolve all incompatibilities in Strict Mode.");
-
-			_observer.LogMessage("[green]Schema migration successful. Continuing export.[/]");
-		}
-		else if (!report.IsCompatible && options.StrictSchema)
-		{
-			throw new InvalidOperationException("Export aborted due to schema incompatibilities (Strict Mode).");
-		}
-	}
-
-	private async Task ExecuteHookAsync(IDataWriter writer, string hookName, string? command, CancellationToken ct, TimeSpan? timeout = null)
-	{
-		if (string.IsNullOrWhiteSpace(command)) return;
-
-		_observer.OnHookExecuting(hookName, command);
-
-		if (timeout.HasValue)
-		{
-			using var hookCts = new CancellationTokenSource(timeout.Value);
-			await writer.ExecuteCommandAsync(command, hookCts.Token);
-		}
-		else
-		{
-			await writer.ExecuteCommandAsync(command, ct);
-		}
-	}
-
-	private async Task SaveMetricsAsync(IExportProgress progress, string? metricsPath, CancellationToken ct)
-	{
-		if (string.IsNullOrEmpty(metricsPath)) return;
-
-		var metrics = progress.GetMetrics();
-		try
-		{
-			var json = System.Text.Json.JsonSerializer.Serialize(metrics,
-				new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
-			await File.WriteAllTextAsync(metricsPath, json, ct);
-			_observer.LogMessage($"   [grey]Metrics saved to: {metricsPath}[/]");
-		}
-		catch (Exception ex)
-		{
-			_observer.LogWarning($"Failed to save metrics: {ex.Message}");
-		}
-	}
 
 
     private static async Task DirectColumnarTransferAsync(
@@ -340,54 +281,18 @@ public class ExportService
         }
     }
 
-    private static void LogMemoryUsage(ILogger logger)
-    {
-        if (!logger.IsEnabled(LogLevel.Debug)) return;
 
-        var managedMemory = GC.GetTotalMemory(false) / 1024 / 1024;
-        using var process = System.Diagnostics.Process.GetCurrentProcess();
-        var totalMemory = process.WorkingSet64 / 1024 / 1024;
-
-        logger.LogDebug("Memory Stats: Managed={Managed}MB, WorkingSet={Total}MB", managedMemory, totalMemory);
-    }
 
     /// <summary>
     /// Helper to group individual rows into batches before sending to a channel.
     /// </summary>
 
 
-    private class PipelineSegment
-    {
-        public bool IsColumnar { get; }
-        public List<IDataTransformer> Transformers { get; }
-        public IReadOnlyList<PipeColumnInfo> InputSchema { get; set; } = System.Array.Empty<PipeColumnInfo>();
-        public IReadOnlyList<PipeColumnInfo> OutputSchema { get; set; } = System.Array.Empty<PipeColumnInfo>();
 
-        public PipelineSegment(bool isColumnar, List<IDataTransformer> transformers)
-        {
-            IsColumnar = isColumnar;
-            Transformers = transformers;
-        }
-    }
 
-    private List<PipelineSegment> GetPipelineSegments(List<IDataTransformer> pipeline)
-    {
-        var segments = new List<PipelineSegment>();
-        if (pipeline.Count == 0) return segments;
 
-        PipelineSegment? current = null;
-        foreach (var t in pipeline)
-        {
-            bool isCol = t is IColumnarTransformer ct && ct.CanProcessColumnar;
-            if (current == null || current.IsColumnar != isCol)
-            {
-                current = new PipelineSegment(isCol, new List<IDataTransformer>());
-                segments.Add(current);
-            }
-            current.Transformers.Add(t);
-        }
-        return segments;
-    }
+
+
 
     private async Task ExecuteSegmentedPipelineAsync(
         IStreamReader reader,
