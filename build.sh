@@ -106,6 +106,18 @@ echo -e "${GREEN}Build complete!${NC}"
 echo ""
 echo "Release (single-file):"
 ls -lh "$RELEASE_DIR/dtpipe$EXT"
+
+# ── Write dev env file ────────────────────────────────────────────
+printf 'export DTPIPE_BIN="%s"\n' "$SCRIPT_DIR/dist/release/dtpipe$EXT" > "$RELEASE_DIR/.env"
+
+echo ""
+echo -e "${YELLOW}Dev tip (autocompletion):${NC}"
+echo "  1. export DTPIPE_BIN=\"$SCRIPT_DIR/dist/release/dtpipe$EXT\""
+echo "  2. \$DTPIPE_BIN completion --install"
+echo "  3. source ~/.zshrc  (or restart your terminal)"
+echo ""
+echo -e "   (Settings saved in dist/release/.env for reference)"
+
 echo ""
 echo -e "${YELLOW}Usage:${NC}"
 echo "  ./dist/release/dtpipe$EXT --help"

@@ -118,6 +118,19 @@ Write-Host "Build complete!" -ForegroundColor Green
 Write-Host ""
 Write-Host "Release (single-file):"
 Get-ChildItem "$ReleaseDir\dtpipe$Ext" | Format-Table Name, Length
+
+# ── Write dev env file ────────────────────────────────────────────
+$DtpipeBinPath = Join-Path $ReleaseDir "dtpipe$Ext"
+Set-Content -Path (Join-Path $ReleaseDir ".env") -Value "`$env:DTPIPE_BIN = '$DtpipeBinPath'"
+
+Write-Host ""
+Write-Host "Dev tip (autocompletion):" -ForegroundColor Yellow
+Write-Host "  1. `$env:DTPIPE_BIN = '$DtpipeBinPath'"
+Write-Host "  2. & `$env:DTPIPE_BIN completion --install"
+Write-Host "  3. Restart your terminal (or reload your PowerShell profile)"
+Write-Host ""
+Write-Host "   (Settings saved in dist/release/.env for reference)"
+
 Write-Host ""
 Write-Host "Usage:" -ForegroundColor Yellow
 Write-Host "  .\dist\release\dtpipe$Ext --help"

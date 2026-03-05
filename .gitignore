@@ -60,3 +60,4 @@ test_*.yaml
 src/DtPipe.XStreamers/DataFusion/*.dylib
 src/DtPipe.XStreamers/DataFusion/*.so
 src/DtPipe.XStreamers/DataFusion/*.dll
+dist/release/.env
