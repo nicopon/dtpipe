@@ -14,6 +14,7 @@ internal static class CoreOptionsBuilder
         IEnumerable<IStreamReaderFactory>? readerFactories = null,
         IEnumerable<IDataWriterFactory>? writerFactories = null)
     {
+        var inputOption = new Option<string?>("--input") { Description = "Input connection string, file path, or '-' for stdin" };
         inputOption.Aliases.Add("-i");
         inputOption.CompletionSources.Add(ctx => GetInputSuggestions(ctx, readerFactories));
 
@@ -110,6 +111,9 @@ internal static class CoreOptionsBuilder
 
     private static IEnumerable<CompletionItem> GetInputSuggestions(CompletionContext context, IEnumerable<IStreamReaderFactory>? factories)
     {
+        if (Environment.GetEnvironmentVariable("DEBUG") == "1")
+            Console.Error.WriteLine($"[DEBUG] GetInputSuggestions called. Factories: {factories?.Count() ?? 0}");
+
         var suggestions = new List<CompletionItem>();
         if (factories != null)
         {

@@ -1,14 +1,13 @@
-# DtPipe Cookbook 🍳
+# DtPipe Cookbook
 
-This document contains recipes and examples for using DtPipe to solve common data export and transformation problems.
+Recipes and examples for common data export and transformation tasks.
 
 **Table of Contents**
 - [Basic Usage](#basic-usage)
 - [Anonymization (The "Fakers")](#anonymization-the-fakers)
 - [Common Transformations](#common-transformations)
 - [Advanced Pipelines](#advanced-pipelines)
-- [Zero-Copy & Columnar Fast-Path](#zero-copy--columnar-fast-path)
-- [High-Performance Joins (XStreamers)](#high-performance-joins-xstreamers)
+- [Columnar Transfers & XStreamers](#columnar-transfers--xstreamers)
 - [Standard Streams & Linux Pipes](#standard-streams--linux-pipes)
 - [Database Import & Migration](#database-import--migration)
 - [Production Automation (YAML)](#production-automation-yaml)
@@ -19,22 +18,22 @@ This document contains recipes and examples for using DtPipe to solve common dat
 ## Basic Usage
 
 ### Simple Database Export
-Export a table from a database (detects `duck`, `sqlite`, `pg`, `ora`, `mssql`) to a Parquet file.
+Export a table from a database to a Parquet file.
 
 ```bash
-# Export from PostgreSQL to Parquet
+# PostgreSQL → Parquet
 dtpipe -i "pg:Host=localhost;Database=prod;Username=postgres" -q "SELECT * FROM users" -o users.parquet
 ```
 
 ### Export to CSV
-Simply change the output extension to `.csv`.
+Use any supported output extension.
 
 ```bash
 dtpipe -i "pg:Host=localhost;Database=prod;Username=postgres" -q "SELECT * FROM users" -o users.csv
 ```
 
 ### Dry Run (Preview)
-Use `--dry-run [LIMIT]` to preview data without writing a full file.
+Preview data without writing. Validates schema compatibility.
 
 ```bash
 dtpipe -i "pg:Host=localhost;Database=prod;Username=postgres" -q "SELECT * FROM users" --dry-run 100
@@ -43,19 +42,18 @@ dtpipe -i "pg:Host=localhost;Database=prod;Username=postgres" -q "SELECT * FROM 
 ---
 
 ## Anonymization (The "Fakers")
- 
-DtPipe maps your configuration directly to [Bogus Datasets](https://github.com/bchavez/Bogus?tab=readme-ov-file#locales).
- 
+
+DtPipe maps `--fake` arguments to [Bogus Datasets](https://github.com/bchavez/Bogus).
+
 **Resources:**
 - [Available Locales](https://github.com/bchavez/Bogus?tab=readme-ov-file#locales)
 - [API Inventory (Datasets)](https://github.com/bchavez/Bogus?tab=readme-ov-file#locales)
- 
+
 ### 1. General Usage
-The syntax is `--fake "{Column}:{Dataset}.{Method}"`, where `Dataset.Method` corresponds exactly to the Bogus API.
+The syntax is `--fake "{Column}:{Dataset}.{Method}"`.
 
 #### Personal Information
-Replace names and emails with culturally appropriate fake data.
- 
+
 ```bash
 dtpipe ... \
   --fake "FirstName:name.firstName" \
@@ -63,24 +61,22 @@ dtpipe ... \
   --fake "Email:internet.email" \
   --fake-locale fr
 ```
- 
+
 #### Dates and Numbers
-Generate other types of data using the same mechanism.
- 
+
 ```bash
 dtpipe ... \
   --fake "BirthDate:date.past" \
   --fake "Score:random.number"
 ```
- 
+
 ### 2. Deterministic Faking
-DtPipe provides a special **Deterministic Mode** that guarantees referential integrity across tables.
- 
-Unlike standard seeding (which restarts the sequence), this mode uses a **stable hash** of a specific column (e.g., `UserId`) to generate the fake value.
- 
-- If `UserId=123` becomes "Alice", it will **always** become "Alice", even if the row order changes or if you run the export again next month.
-- This allows you to anonymize `Users` and `Orders` tables separately while maintaining the foreign key relationships (provided they both use the same fake seed).
- 
+Use `--fake-seed-column` to guarantee referential integrity across tables.
+
+Instead of a random seed that restarts on each run, this mode hashes a specific column value (e.g. `UserId`) to derive the fake value. The same input value always produces the same output — even across separate runs or if row order changes.
+
+This lets you anonymize `Users` and `Orders` separately while preserving foreign key relationships, as long as both use the same seed column.
+
 ```bash
 dtpipe ... \
   --fake "Name:name.fullName" \
@@ -91,14 +87,12 @@ dtpipe ... \
 
 ## Common Transformations
 
-Simple, high-performance transformers for cleaning and shaping data.
-
 ### 1. Masking Sensitive Strings
-Partially hide data instead of fully replacing it.
+Partially hide data.
 
 ```bash
-# Turns "555-0199" into "555-****"
-./dist/release/dtpipe ... --mask "Phone:###-****"
+# "555-0199" → "555-****"
+dtpipe ... --mask "Phone:###-****"
 
 # Masking patterns:
 # # - Keep original character
@@ -106,20 +100,18 @@ Partially hide data instead of fully replacing it.
 ```
 
 ### 2. Overwriting & Nullifying
-Hardcode values or erase sensitive columns.
+Hardcode values or erase columns.
 
 ```bash
-# Force "Status" to "Archived" and "Notes" to NULL
 dtpipe ... \
   --overwrite "Status:Archived" \
   --null "Notes"
 ```
 
 ### 3. Formatting Strings
-Combine columns using [.NET Composite Formatting](https://learn.microsoft.com/en-us/dotnet/standard/base-types/composite-formatting) syntax.
+Combine columns using [.NET Composite Formatting](https://learn.microsoft.com/en-us/dotnet/standard/base-types/composite-formatting).
 
 ```bash
-# Create "DisplayName" from First and Last names
 dtpipe ... --format "DisplayName:{FirstName} {LastName}"
 ```
 
@@ -127,198 +119,176 @@ dtpipe ... --format "DisplayName:{FirstName} {LastName}"
 
 ## Advanced Pipelines
 
-Chain multiple transformers to clean and shape your data.
-
 ### Pipeline Construction
-DtPipe builds the pipeline by scanning your CLI arguments from left to right.
-Crucially, **consecutive** arguments of the same type (e.g., multiple `--fake` flags) are grouped into a single transformation step.
+DtPipe builds the transformation pipeline by scanning CLI arguments left to right. Consecutive arguments of the same type are grouped into a single step.
 
-```mermaid
-graph LR
-    Args[CLI Arguments] -->|Parsing| List[Instruction List]
-    List -->|Grouping| Steps[Pipeline Steps]
+```
+--fake A --fake B --format C --fake D
 ```
 
-**Example:**
-`--fake A --fake B --format C --fake D`
-
-**Resulting Pipeline:**
+Resulting pipeline:
 
 ```mermaid
 graph TB
-    S1["1. FakeTransformer<br/>(A, B)"]
-    S2["2. FormatTransformer<br/>(C)"]
-    S3["3. FakeTransformer<br/>(D)"]
-    
+    S1["1. FakeTransformer (A, B)"]
+    S2["2. FormatTransformer (C)"]
+    S3["3. FakeTransformer (D)"]
     S1 --> S2 --> S3
 ```
 
-This means:
-- `--fake "A" --fake "B"` creates **one** Faker step (efficient).
-- `--fake "A" --format "C" --fake "B"` creates **three** steps (A -> Format -> B).
+- `--fake "A" --fake "B"` → one Faker step.
+- `--fake "A" --format "C" --fake "B"` → three steps (A → Format → B).
 
 ### Execution Order
-**Crucial:** The pipeline is executed in the **exact order** of these groups.
+The pipeline executes in the exact left-to-right order of those groups.
 
 ```bash
-# 1. First, anonymize the Name
-# 2. Then, use the NEW (anonymized) name to format the greeting
+# Anonymize first, then format using the anonymized value
 dtpipe ... \
   --fake "Name:name.fullName" \
   --format "Greeting:Hello, {Name}!"
 ```
 
-If you swap the order, the `Greeting` would contain the *original* name, because formatting would happen before faking.
+Swapping the order would format with the *original* name.
 
-### Javascript Scripting
-Use `--compute` for complex logic.
+### JavaScript Scripting
+Use `--compute` for arbitrary row logic.
 
-**Syntax Rules:**
-1.  **Implicit Return**: If your script is a single expression without a semicolon, it is automatically returned.
-    *   `row.Age > 18` -> Becomes `return row.Age > 18;`
-2.  **Explicit Return**: If you use statements or semicolons, you **MUST** use the `return` keyword.
-    *   `row.Age > 18;` -> Returns `undefined` (Use `return`!)
-    *   `if (row.Age > 18) return 'Yes';` -> Works.
+**Syntax rules:**
+1. **Implicit return**: A single expression without a semicolon is returned automatically.
+   - `row.Age > 18` → `return row.Age > 18;`
+2. **Explicit return**: Use `return` if your script uses statements or semicolons.
+   - `row.Age > 18;` → returns `undefined` (use `return`!)
+   - `if (row.Age > 18) return 'Yes';` → works.
 
 ```bash
-# Simple Expression (Implicit Return)
-./dtpipe ... --compute "IsAdult:row.Age > 18"
+# Simple expression
+dtpipe ... --compute "IsAdult:row.Age > 18"
 
-# Complex Logic (Explicit Return)
-./dtpipe ... \
+# Complex logic
+dtpipe ... \
    --compute "Category:if (row.Age < 18) return 'Minor'; else return 'Adult';"
 
-# Create a NEW column (virtual column)
-./dtpipe ... --compute "FullName:row.FirstName + ' ' + row.LastName"
+# Create a new virtual column
+dtpipe ... --compute "FullName:row.FirstName + ' ' + row.LastName"
 ```
 
-> **Tip:** If the column name doesn't exist in the input, `--compute` creates it as a new virtual column. Use `--compute-types "Col:type"` to set its CLR type (default: `string`).
+> **Tip:** If the column doesn't exist in the input, `--compute` creates it as a virtual column. Use `--compute-types "Col:type"` to set its CLR type (default: `string`).
 
-### 4. Generating Test Data
-Use the `generate:<count>` provider to generate rows on-the-fly. By default, it only generates a `GenerateIndex` column (useful for seeding). Combine it with `--fake` for rich datasets.
+### Generating Test Data
+The `generate:<count>` provider generates rows with a `GenerateIndex` column. Combine it with `--fake` for complete datasets.
 
 ```bash
-# Generate 1M rows of fake users
-./dtpipe -i "generate:1000000" \
+# 1M rows of fake users
+dtpipe -i "generate:1000000" \
   --fake "Id:random.number" \
   --fake "Name:name.fullName" \
   --fake "Email:internet.email" \
   --drop "GenerateIndex" \
   -o users.csv
 ```
-> **Tip:** Use `--drop "GenerateIndex"` if you don't want the sequence index in your final output.
 
-### 5. Random Sampling
-Use `--sampling-rate [0-1]` to export only a subset of your data. This works with any provider.
+### Random Sampling
+Use `--sampling-rate` to export a subset of rows.
 
 ```bash
-# Export only 10% of a large database table
+# Export 10% of a large table
 dtpipe -i "ora:..." -q "SELECT * FROM LargeTable" --sampling-rate 0.1 -o subset.parquet
 ```
 
-#### Deterministic Sampling (Seed)
-By default, sampling is random. Use `--sampling-seed [N]` to initialize the random generator with a specific value.
-This ensures that the **same subset of rows** is selected for the same input data, which is essential for **reproducibility** in tests or debugging.
+Use `--sampling-seed` to make the selection deterministic (same subset every run).
 
 ```bash
-# Always get the same 10% subset
 dtpipe ... --sampling-rate 0.1 --sampling-seed 12345 ...
-
 ```
 
-### Filtering Data
-Use `--filter` to drop rows that don't match a JavaScript condition.
+### Filtering Rows
+Drop rows that don't match a JavaScript condition.
 
 ```bash
-# Only keep active users over 18
-./dtpipe ... --filter "row.IsActive && row.Age >= 18"
+dtpipe ... --filter "row.IsActive && row.Age >= 18"
 ```
 
 ### Row Expansion
-Use `--expand` to turn a single input row into multiple output rows. The expression must return an array.
+Turn a single input row into multiple output rows.
 
 ```bash
-# If 'Tags' is "A,B,C", this creates 3 rows, one for each tag
-./dtpipe ... --expand "row.Tags.split(',').map(t => ({ ...row, Tag: t }))"
+# If 'Tags' is "A,B,C", this produces 3 rows
+dtpipe ... --expand "row.Tags.split(',').map(t => ({ ...row, Tag: t }))"
 ```
 
 ### Window Aggregations (Stateful)
-Accumulate rows and process them as a batch using `--window-count` and `--window-script`.
+Accumulate rows and process them as a batch.
 
 ```bash
-# Calculate a rolling average for 5 rows
-./dtpipe ... \
+# Rolling average over 5 rows
+dtpipe ... \
   --window-count 5 \
   --window-script "rows.map(r => ({ ...r, Avg: rows.reduce((s, x) => s + x.Val, 0) / rows.length }))"
 ```
 
 ### External Script Files
-Keep your CLI clean by moving complex logic into `.js` files.
+Move complex logic to `.js` files to keep your commands readable.
 
 ```bash
-# Explicit file loading (recommended)
-./dtpipe ... --compute "Category:@scripts/categorize_age.js"
+dtpipe ... --compute "Category:@scripts/categorize_age.js"
 ```
 
 ---
- 
-  DtPipe uses a high-performance **Zero-Copy Bridge** (C# Span/Memory) when transferring data between columnar formats like Parquet, Apache Arrow, and DuckDB.
-  
-  ### High-Performance Joins (XStreamers)
-  
-  When you need to join multiple sources (Parquet, CSV, or DB) with maximum speed, use **XStreamers** to leverage in-memory processing.
-  
-  #### 1. DuckDB XStreamer (DuckXStreamer)
-  
-  Ideal for complex SQL joins and aggregations on in-memory streams.
-  
-  ```bash
-  # Join 10M rows from Parquet with 1M rows from CSV in memory using DuckDB
-  dtpipe \
-    -i "main_data.parquet" --alias main \
-    -i "metadata.csv" --alias ref \
-    -x duck --main main --ref ref \
-    -q "SELECT main.*, ref.name FROM main JOIN ref ON main.id = ref.id" \
-    -o "enriched.parquet"
-  ```
-  
-  #### 2. DataFusion XStreamer (FusionXStreamer)
-  
-  Leverages the Rust-based DataFusion engine for ultra-fast columnar joins and processing.
-  
-  ```bash
-  # Similar join using DataFusion for maximum performance
-  dtpipe \
-    -i "main_data.parquet" --alias main \
-    -i "metadata.csv" --alias ref \
-    -x fusion --main main --ref ref \
-    -q "SELECT main.*, ref.name FROM main JOIN ref ON main.id = ref.id" \
-    -o "enriched.parquet"
-  ```
-  
-  ### 3. Columnar Fast-Path (direct transfer)
-  If no row-based transformations (like JS scripts or fakers) are present, DtPipe automatically enables the **Columnar Fast-Path**, transferring raw memory buffers directly without unboxing.
- 
- ```bash
- # Parquet to Arrow (Direct Buffer Transfer)
- dtpipe -i data.parquet -o data.arrow
- ```
- 
- ---
- 
- ## Standard Streams & Linux Pipes
 
-Integrate DtPipe with standard Unix tools using `stdin`/`stdout`.
+## Columnar Transfers & XStreamers
 
-### Zipped Parquet Output
-Read a CSV natively and compress the output on-the-fly using `gzip`.
+### Columnar Fast-Path
+When no row-based transformations (JS scripts, fakers) are in the pipeline, DtPipe transfers raw memory buffers directly between columnar formats (Parquet, Arrow, DuckDB) without deserializing rows.
+
+```bash
+# Parquet → Arrow (direct buffer transfer)
+dtpipe -i data.parquet -o data.arrow
+```
+
+### High-Performance Joins (XStreamers)
+
+Use XStreamers to join multiple sources in memory without intermediate files.
+
+#### DuckDB XStreamer
+SQL joins and aggregations on in-memory Arrow streams, powered by DuckDB.
+
+```bash
+dtpipe \
+  -i "main_data.parquet" --alias main \
+  -i "metadata.csv" --alias ref \
+  -x duck --main main --ref ref \
+  -q "SELECT main.*, ref.name FROM main JOIN ref ON main.id = ref.id" \
+  -o "enriched.parquet"
+```
+
+#### DataFusion XStreamer
+Rust-based DataFusion engine as an alternative for columnar processing.
+
+```bash
+dtpipe \
+  -i "main_data.parquet" --alias main \
+  -i "metadata.csv" --alias ref \
+  -x fusion --main main --ref ref \
+  -q "SELECT main.*, ref.name FROM main JOIN ref ON main.id = ref.id" \
+  -o "enriched.parquet"
+```
+
+---
+
+## Standard Streams & Linux Pipes
+
+DtPipe reads from `stdin` and writes to `stdout`, letting you compose it with standard Unix tools.
+
+> **Note:** When using pipes, explicitly specify the format (e.g. `-i csv` or `-o csv`) — there's no file extension to detect.
+
+### Compressed Parquet Output
 
 ```bash
 dtpipe -i "csv:large_data.csv" -o parquet | gzip > large_data.parquet.gz
 ```
 
-### Filter and Anonymize in a Pipe
-Use another tool (like DuckDB or `jq`) to filter, then DtPipe to anonymize.
+### Filter with an External Tool, then Anonymize
 
 ```bash
 duckdb -csv -c "SELECT * FROM 'source.csv' WHERE active=true" | \
@@ -328,96 +298,85 @@ duckdb -csv -c "SELECT * FROM 'source.csv' WHERE active=true" | \
 ```
 
 ### Streaming JSON Lines to Apache Arrow
-Process a continuous or large stream of JSON logs, anonymizing data on-the-fly, and outputting to a highly optimized Apache Arrow file.
 
 ```bash
 cat server_logs.jsonl | \
   dtpipe -i jsonl \
-  --mask "IPAddress:***.***.*.*" \
+  --mask "IPAddress:***.***.*.* " \
   -o "arrow:secure_logs.arrow"
 ```
 
-> **Note**: When using pipes, you MUST explicitly specify the format (e.g. `-i csv` or `-o csv`) because there is no file extension to detect.
+---
+
+## Database Import & Migration
+
+DtPipe writes to DuckDB, SQLite, PostgreSQL, Oracle, and SQL Server using six standardized strategies.
+
+### Write Strategies
+
+| Strategy | Behavior | Use Case |
+|:--- |:--- |:--- |
+| **Append** (Default) | Inserts rows into the existing table. | Log shipping, daily increments. |
+| **Truncate** | Empties the table via `TRUNCATE TABLE`. *(Not available for SQLite)* | Full refresh — preserves schema & indexes. |
+| **DeleteThenInsert** | `DELETE FROM` then insert. | When TRUNCATE is unavailable or restricted. |
+| **Recreate** | Drops and recreates the table. | Full refresh including schema changes. |
+| **Upsert** | Updates existing rows (by PK), inserts new ones. | Syncing where the source is the source of truth. |
+| **Ignore** | Inserts new rows, skips existing ones (by PK). | Loading only missing data. |
+
+> **Note for Upsert/Ignore:** Requires a primary key. DtPipe auto-detects it from the target, or you can set it explicitly with `--key "Col1,Col2"`.
+
+### Examples
+
+#### Load Parquet into PostgreSQL (Recreate)
+
+```bash
+dtpipe \
+  -i data.parquet \
+  -o "pg:Host=localhost;Database=prod" \
+  --table "public.imported_data" \
+  --strategy Recreate
+```
+
+#### Append to Oracle
+
+```bash
+dtpipe \
+  -i "new_sales.csv" \
+  -o "ora:Data Source=PROD;..." \
+  --table "SALES_DATA" \
+  --strategy Append
+```
+
+#### Upsert with Explicit Key
+
+```bash
+dtpipe \
+  -i "orders_update.csv" \
+  -o "mssql:Server=.;Database=mydb" \
+  --table "Orders" \
+  --strategy Upsert \
+  --key "OrderId"
+```
 
 ---
 
----
- 
- ## Database Import & Migration
- 
- DtPipe can write to DuckDB, SQLite, PostgreSQL, Oracle, and SQL Server using 6 standardized strategies.
- 
- ### Write Strategies
- 
- Control how DtPipe handles existing tables using the `--strategy` flag.
- 
- | Strategy | Behavior | Use Case |
- |:--- |:--- |:--- |
- | **Append** (Default) | Inserts rows into the existing table. | Log shipping, daily increments. |
- | **Truncate** | Empties the table via native `TRUNCATE TABLE`. *(Not available for SQLite)* | Prudent refresh (preserves schema & indexes). |
- | **DeleteThenInsert** | Deletes rows (via `DELETE FROM`) then inserts. | Use when TRUNCATE is unavailable/restricted. |
- | **Recreate** | Drops the table (`DROP IF EXISTS`) and recreates it. | Full refresh including schema updates. |
- | **Upsert** | Updates existing rows (by PK), inserts new ones. | Syncing data where source is source-of-truth. |
- | **Ignore** | Inserts new rows, ignores existing ones (by PK). | Loading "missing" data only. |
+## Production Automation (YAML)
 
- > **Note for Upsert/Ignore**: These strategies require a Primary Key. DtPipe attempts to auto-detect it, but you can force it via `--key "Col1,Col2"`.
- 
- ### Examples
- 
- #### 1. Load Parquet into PostgreSQL (Recreate)
- Good for full reloads where the schema might have changed.
- 
- ```bash
- dtpipe \
-   -i data.parquet \
-   -o "pg:Host=localhost;Database=prod" \
-   --table "public.imported_data" \
-   --strategy Recreate
- ```
- 
- #### 2. Append to Oracle Table
- Efficiently adds new rows to an existing table.
- 
- ```bash
- dtpipe \
-   -i "new_sales.csv" \
-   -o "ora:Data Source=PROD;..." \
-   --table "SALES_DATA" \
-   --strategy Append
- ```
- 
- #### 3. Upsert with Explicit Key
- Syncs data from CSV to SQL Server, updating existing records based on `OrderId`.
- 
- ```bash
- dtpipe \
-   -i "orders_update.csv" \
-   -o "mssql:Server=.;Database=mydb" \
-   --table "Orders" \
-   --strategy Upsert \
-   --key "OrderId"
- ```
- 
- ---
- 
- ## Production Automation (YAML)
-
-For repeated tasks, define your job in a YAML file.
+For repeated tasks, define your pipeline in a YAML job file.
 
 ### 1. Generate a Job File
-Configure your export in the CLI once, then save it.
 
 ```bash
 dtpipe -i "ora:..." -q "SELECT..." --fake "..." --export-job nightly_export.yaml
 ```
 
 ### 2. Run the Job
+
 ```bash
 dtpipe --job nightly_export.yaml
 ```
 
 ### 3. Override at Runtime
-You can override specific settings from the YAML file via CLI flags (e.g., for ad-hoc limits).
 
 ```bash
 dtpipe --job nightly_export.yaml --limit 50
@@ -438,26 +397,28 @@ transformers:
       options:
         locale: fr
         seed-column: id
+```
 
-### 3. Provider Configurations (Reader vs Writer)
-To supply specific configurations for specific adapters (like CSV formatting), use `provider-options` mapped by their provider prefix. 
-To differentiate between input and output scoping, append `-writer` to override the output stream defaults.
+### Provider Configurations (Reader vs Writer)
+
+Use `provider-options` to supply adapter-specific settings. Append `-writer` to target the output stream specifically.
 
 ```yaml
 input: input_data.csv
 output: export_data.csv
 
 provider-options:
-  csv:                 # Applied to the reader (Global Default)
-    separator: ","     
+  csv:                 # Applied to the reader (global default)
+    separator: ","
     has-header: true
-  csv-writer:          # Applied explicitly to the writer
-    separator: ";"     
+  csv-writer:          # Applied to the writer
+    separator: ";"
     quote: "'"
 ```
 
-### Example 2: File-to-File (No Query)
-When transforming from CSV or Parquet, the `query` field is optional.
+### File-to-File (No Query)
+
+When transforming from CSV or Parquet, `query` is optional.
 
 ```yaml
 input: raw_data.csv
@@ -465,7 +426,6 @@ output: clean_data.parquet
 
 transformers:
   - script:
-      # Use @ to load script from file
       category: "@scripts/categorize.js"
 ```
 
@@ -473,38 +433,32 @@ transformers:
 
 ## Security & Secrets
 
-Never hardcode passwords in scripts or YAML files. DtPipe provides multiple ways to handle credentials safely.
-
-### 1. Using Environment Variables
-The most common approach for CI/CD. The shell expands variables before passing them to DtPipe.
+### 1. Environment Variables
+Standard approach for CI/CD — the shell expands variables before passing them to DtPipe.
 
 ```bash
-# Set your connection string
 export MY_CONN="ora:Data Source=PROD;User Id=scott;Password=tiger"
-
-# Use it in the CLI
 dtpipe -i "$MY_CONN" -q "SELECT * FROM users" -o users.parquet
 ```
 
-### 2. Using the OS Keyring (Zero-Exposure)
-For local development or secure servers, store secrets in the system keyring (macOS Keychain, Windows Credential Manager, Linux Secret Service).
+### 2. OS Keyring
+For local or secure-server use, store credentials in the system keyring (macOS Keychain, Windows Credential Manager, Linux Secret Service). The password never appears in shell history or `ps` output.
 
-**Step 1: Store the secret once**
+**Store the secret once:**
 ```bash
 dtpipe secret set oracle-prod "ora:Data Source=PROD;User Id=scott;Password=tiger"
 ```
 
-**Step 2: Reference it by alias**
-The password never appears in your shell history or `ps` output.
+**Reference it by alias:**
 ```bash
 dtpipe -i keyring://oracle-prod -q "SELECT * FROM users" -o users.parquet
 ```
 
-### 3. Loading Queries from Files
-Avoid exposing complex or sensitive SQL queries in your command line or job files.
+### 3. Queries from Files
+Keep complex or sensitive SQL out of the command line.
 
 ```bash
-# Store your SQL in a file
 dtpipe -i keyring://prod-db -q "@queries/extract_users.sql" -o users.parquet
 ```
-DtPipe automatically detects if `-q` points to a file and loads its content. Using the `@` prefix is recommended to be explicit.
+
+DtPipe loads the file automatically when `-q` starts with `@` or points to an existing path.

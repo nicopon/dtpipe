@@ -123,13 +123,23 @@ Get-ChildItem "$ReleaseDir\dtpipe$Ext" | Format-Table Name, Length
 $DtpipeBinPath = Join-Path $ReleaseDir "dtpipe$Ext"
 Set-Content -Path (Join-Path $ReleaseDir ".env") -Value "`$env:DTPIPE_BIN = '$DtpipeBinPath'"
 
+# ── Profile Detection ───────────────────────────────────────────
+$ProfilePath = $PROFILE
+if (-not $ProfilePath) {
+    if ($IsWindows) {
+        $ProfilePath = Join-Path $env:USERPROFILE "Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1"
+    } else {
+        $ProfilePath = Join-Path $home ".config\powershell\Microsoft.PowerShell_profile.ps1"
+    }
+}
+
 Write-Host ""
 Write-Host "Dev tip (autocompletion):" -ForegroundColor Yellow
-Write-Host "  1. `$env:DTPIPE_BIN = '$DtpipeBinPath'"
-Write-Host "  2. & `$env:DTPIPE_BIN completion --install"
-Write-Host "  3. Restart your terminal (or reload your PowerShell profile)"
+Write-Host "  1. " -ForegroundColor Green -NoNewline; Write-Host "Run: `$env:DTPIPE_BIN = '$DtpipeBinPath'"
+Write-Host "  2. " -ForegroundColor Green -NoNewline; Write-Host "Run: & `$env:DTPIPE_BIN completion --install"
+Write-Host "  3. " -ForegroundColor Green -NoNewline; Write-Host "Run: . $ProfilePath"
 Write-Host ""
-Write-Host "   (Settings saved in dist/release/.env for reference)"
+Write-Host "   (Restart your terminal for changes to take effect if not reloaded)"
 
 Write-Host ""
 Write-Host "Usage:" -ForegroundColor Yellow

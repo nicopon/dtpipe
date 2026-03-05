@@ -107,14 +107,24 @@ echo ""
 echo "Release (single-file):"
 ls -lh "$RELEASE_DIR/dtpipe$EXT"
 
-# ── Write dev env file ────────────────────────────────────────────
-printf 'export DTPIPE_BIN="%s"\n' "$SCRIPT_DIR/dist/release/dtpipe$EXT" > "$RELEASE_DIR/.env"
+# ── Shell Detection ───────────────────────────────────────────
+CURRENT_SHELL=$(basename "$SHELL")
+RC_FILE=".${CURRENT_SHELL}rc"
+if [[ "$CURRENT_SHELL" == "zsh" ]]; then
+    RC_FILE="~/.zshrc"
+elif [[ "$CURRENT_SHELL" == "bash" ]]; then
+    RC_FILE="~/.bashrc"
+else
+    RC_FILE="your shell profile"
+fi
 
 echo ""
 echo -e "${YELLOW}Dev tip (autocompletion):${NC}"
-echo "  1. export DTPIPE_BIN=\"$SCRIPT_DIR/dist/release/dtpipe$EXT\""
-echo "  2. \$DTPIPE_BIN completion --install"
-echo "  3. source ~/.zshrc  (or restart your terminal)"
+echo -e "  ${GREEN}1.${NC} Run: export DTPIPE_BIN=\"$SCRIPT_DIR/dist/release/dtpipe$EXT\""
+echo -e "  ${GREEN}2.${NC} Run: \$DTPIPE_BIN completion --install"
+echo -e "  ${GREEN}3.${NC} Run: source $RC_FILE"
+echo ""
+echo -e "   (Restart your terminal for changes to take effect if not sourced)"
 echo ""
 echo -e "   (Settings saved in dist/release/.env for reference)"
 

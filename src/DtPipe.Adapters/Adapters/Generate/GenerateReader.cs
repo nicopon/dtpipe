@@ -26,19 +26,47 @@ public partial class GenerateReader : IStreamReader, IColumnarStreamReader, IReq
 		{
 			if (part.StartsWith("count=", StringComparison.OrdinalIgnoreCase))
 			{
-				if (long.TryParse(part["count=".Length..], out var count))
+				if (TryParseWithSuffix(part["count=".Length..], out var count))
 					_options.RowCount = count;
 			}
 			else if (part.StartsWith("rate=", StringComparison.OrdinalIgnoreCase))
 			{
-				if (int.TryParse(part["rate=".Length..], out var rate))
-					_options.RowsPerSecond = rate;
+				if (TryParseWithSuffix(part["rate=".Length..], out var rate))
+					_options.RowsPerSecond = (int)rate;
 			}
-			else if (long.TryParse(part, out var rawCount))
+			else if (TryParseWithSuffix(part, out var rawCount))
 			{
 				_options.RowCount = rawCount;
 			}
 		}
+	}
+
+	private static bool TryParseWithSuffix(string input, out long result)
+	{
+		result = 0;
+		if (string.IsNullOrWhiteSpace(input)) return false;
+
+		input = input.Trim().ToLowerInvariant();
+		long multiplier = 1;
+
+		if (input.EndsWith("k"))
+		{
+			multiplier = 1000;
+			input = input[..^1];
+		}
+		else if (input.EndsWith("m"))
+		{
+			multiplier = 1000000;
+			input = input[..^1];
+		}
+
+		if (double.TryParse(input, out var val))
+		{
+			result = (long)(val * multiplier);
+			return true;
+		}
+
+		return false;
 	}
 
 	public Task OpenAsync(CancellationToken ct = default)

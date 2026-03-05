@@ -1,4 +1,6 @@
 ﻿using System.Runtime.CompilerServices;
+using System.CommandLine;
+using System.CommandLine.Parsing;
 using DtPipe.Cli;
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Core.Abstractions;
@@ -50,12 +52,6 @@ class Program
 		var jobService = serviceProvider.GetRequiredService<JobService>();
 		var (rootCommand, printHelp) = jobService.Build();
 
-		if (args.Length == 0 || args.Any(a => a == "--help" || a == "-h" || a == "-?"))
-		{
-			printHelp();
-			return 0;
-		}
-
 		// Ensure cursor is restored on Ctrl+C
 		Console.CancelKeyPress += (_, _) => Console.CursorVisible = true;
 
@@ -63,6 +59,28 @@ class Program
 		{
 			// Pre-process args to escape leading '@' to avoid response file expansion in System.CommandLine
 			var effectiveArgs = args.Select(arg => arg.StartsWith("@") ? " " + arg : arg).ToArray();
+
+            // Manual Autocompletion Support ([suggest] directive might be missing in 2.0.3 default Pipeline)
+            if (effectiveArgs.Length > 1 && effectiveArgs[0].Equals("[suggest]", StringComparison.OrdinalIgnoreCase))
+            {
+                if (int.TryParse(effectiveArgs[1], out var pos))
+                {
+                    var rawWords = effectiveArgs.Skip(2).ToArray();
+                    var wordsList = new List<string> { "dtpipe" };
+                    wordsList.AddRange(rawWords);
+
+                    if (pos >= wordsList.Count) wordsList.Add("");
+
+                    var suggestPR = rootCommand.Parse(wordsList.ToArray());
+                    var completions = suggestPR.GetCompletions(pos);
+
+                    foreach (var c in completions)
+                    {
+                        Console.WriteLine(c.Label);
+                    }
+                    return 0;
+                }
+            }
 
 			return await rootCommand.Parse(effectiveArgs).InvokeAsync();
 		}

@@ -51,21 +51,20 @@ public class CompletionCommand : Command
 
     // ── Shell Detection ────────────────────────────────────────────────
 
-    /// <summary>
-    /// Detects the current shell from environment variables.
-    /// Unix: reads $SHELL. PowerShell (cross-platform): $PSModulePath is always set.
-    /// </summary>
     internal static string? DetectShell()
     {
+        // PowerShell Core and Windows PowerShell both set $PSModulePath.
+        // We check this first because on macOS/Linux, $SHELL often persists
+        // even when running inside a pwsh subshell.
+        if (Environment.GetEnvironmentVariable("PSModulePath") != null)
+            return "powershell";
+
         var unixShell = Environment.GetEnvironmentVariable("SHELL");
         if (!string.IsNullOrEmpty(unixShell))
         {
             if (unixShell.Contains("zsh",  StringComparison.OrdinalIgnoreCase)) return "zsh";
             if (unixShell.Contains("bash", StringComparison.OrdinalIgnoreCase)) return "bash";
         }
-        // PowerShell Core and Windows PowerShell both set $PSModulePath
-        if (Environment.GetEnvironmentVariable("PSModulePath") != null)
-            return "powershell";
 
         return null;
     }
@@ -96,14 +95,14 @@ public class CompletionCommand : Command
                 $"if command -v \"${{DTPIPE_BIN:-dtpipe}}\" &>/dev/null; then\n" +
                 $"{IndentLines(script, "  ")}\n" +
                 $"else\n" +
-                $"  echo \"⚠  dtpipe not found — reinstall: 'dotnet tool install -g dtpipe' or cleanup: 'dtpipe completion --uninstall'\"\n" +
+                $"  echo \"[!] dtpipe not found. Reinstall: 'dotnet tool install -g dtpipe' or cleanup: 'dtpipe completion --uninstall'\"\n" +
                 $"fi",
             "powershell" =>
                 $"$dtpipeBin = if ($env:DTPIPE_BIN) {{ $env:DTPIPE_BIN }} else {{ 'dtpipe' }}\n" +
                 $"if (Get-Command $dtpipeBin -ErrorAction SilentlyContinue) {{\n" +
                 $"{IndentLines(script, "  ")}\n" +
                 $"}} else {{\n" +
-                $"  Write-Host \"⚠  dtpipe not found — reinstall: 'dotnet tool install -g dtpipe' or cleanup: 'dtpipe completion --uninstall'\" -ForegroundColor Yellow\n" +
+                $"  Write-Host \"[!] dtpipe not found — reinstall: 'dotnet tool install -g dtpipe' or cleanup: 'dtpipe completion --uninstall'\" -ForegroundColor Yellow\n" +
                 $"}}",
             _ => null
         };
@@ -117,16 +116,20 @@ public class CompletionCommand : Command
         string.Join('\n', text.Split('\n').Select(l => indent + l));
 
     private static string GenerateZshScript() => """
-        #compdef dtpipe
         _dtpipe() {
           local -a completions
-          local dtpipe_bin="${DTPIPE_BIN:-dtpipe}"
-          local pos=$((CURRENT - 1))
-          completions=("${(@f)$($dtpipe_bin [suggest] $pos ${words[2,-1]} 2>/dev/null)}")
+          # Split by newline (f flag), handle empty ($words[2,-1]).
+          completions=( "${(@f)$($words[1] "[suggest]" $((CURRENT - 1)) "${words[@]:1}" 2>/dev/null)}" )
           compadd -a completions
         }
-        compdef _dtpipe dtpipe
-        """;
+        if (( ! $+functions[compdef] )); then
+          autoload -Uz compinit && compinit
+        fi
+        if (( $+functions[compdef] )); then
+          compdef _dtpipe dtpipe
+          [[ -n "$DTPIPE_BIN" ]] && compdef _dtpipe "$DTPIPE_BIN"
+        fi
+        """.Replace("\r", "");
 
     private static string GenerateBashScript() => """
         _dtpipe_completion() {
@@ -135,7 +138,7 @@ public class CompletionCommand : Command
           COMPREPLY=( $($dtpipe_bin [suggest] $COMP_CWORD "${COMP_WORDS[@]:1}" 2>/dev/null) )
         }
         complete -F _dtpipe_completion dtpipe
-        """;
+        """.Replace("\r", "");
 
     private static string GeneratePowerShellScript() => """
         Register-ArgumentCompleter -Native -CommandName dtpipe -ScriptBlock {
@@ -146,7 +149,7 @@ public class CompletionCommand : Command
           & $bin [suggest] $pos @args 2>$null |
             ForEach-Object { [System.Management.Automation.CompletionResult]::new($_) }
         }
-        """;
+        """.Replace("\r", "");
 
     // ── Lifecycle Sub-Commands ─────────────────────────────────────────
 
@@ -180,9 +183,24 @@ public class CompletionCommand : Command
                 return Task.FromResult(0);
             }
 
-            File.AppendAllText(profile, $"\n{block}\n");
+            if (!string.IsNullOrEmpty(profile))
+            {
+                var dir = Path.GetDirectoryName(profile);
+                if (!string.IsNullOrEmpty(dir))
+                {
+                    if (!Directory.Exists(dir))
+                    {
+                        Console.Error.WriteLine($"Creating directory: {dir}");
+                        Directory.CreateDirectory(dir);
+                    }
+                }
+            }
+
+            Console.Error.WriteLine($"Installing completion script to: {profile}");
+            File.AppendAllText(profile!, $"\n{block}\n");
             Console.Error.WriteLine($"✅ Completion installed in {profile}");
-            Console.Error.WriteLine($"   Restart your terminal or run: source {profile}");
+            string sourceCmd = (shell?.ToLowerInvariant() == "powershell") ? ". " : "source ";
+            Console.Error.WriteLine($"   To activate now, run: {sourceCmd}{profile}");
             return Task.FromResult(0);
         });
 
@@ -243,10 +261,23 @@ public class CompletionCommand : Command
 
     private static string GetPowerShellProfilePath()
     {
-        // Prefer PowerShell Core profile (cross-platform), fall back to Documents/WindowsPowerShell
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var psCore = Path.Combine(home, ".config", "powershell", "Microsoft.PowerShell_profile.ps1");
-        return psCore;
+
+        if (OperatingSystem.IsWindows())
+        {
+            // Windows: PowerShell Core
+            var psCore = Path.Combine(home, "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1");
+            if (File.Exists(psCore)) return psCore;
+
+            // Windows: Windows PowerShell 5.1
+            var psLegacy = Path.Combine(home, "Documents", "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1");
+            if (File.Exists(psLegacy)) return psLegacy;
+
+            return psCore; // Default to Core
+        }
+
+        // Linux/macOS
+        return Path.Combine(home, ".config", "powershell", "Microsoft.PowerShell_profile.ps1");
     }
 
     private static string RemoveBlock(string content)

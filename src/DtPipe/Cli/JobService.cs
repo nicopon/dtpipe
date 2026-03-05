@@ -1,5 +1,7 @@
 
 using System.CommandLine;
+using System.CommandLine.Parsing;
+using System.CommandLine.Completions;
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Cli.Commands;
 using DtPipe.Cli.Dag;
@@ -47,7 +49,7 @@ public class JobService
 		_contributors = list;
 	}
 
-	public (RootCommand, Action) Build()
+	public (RootCommand Command, Action PrintHelp) Build()
 	{
 		var readerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>();
 		var writerFactories = _serviceProvider.GetRequiredService<IEnumerable<IDataWriterFactory>>();
@@ -56,6 +58,7 @@ public class JobService
 
 		var rootCommand = new RootCommand("A simple, self-contained CLI for performance-focused data streaming & anonymization");
 		foreach (var opt in coreOptions) rootCommand.Add(opt);
+
 
 		// Add Contributor Options
 		foreach (var contributor in _contributors)
@@ -68,16 +71,6 @@ public class JobService
 				}
 			}
 		}
-
-        if (Environment.GetEnvironmentVariable("DEBUG") == "1")
-        {
-            Console.WriteLine("--- Registered CLI Options ---");
-            foreach (var opt in rootCommand.Options)
-            {
-                Console.WriteLine($"Option: {opt.Name} (Aliases: {string.Join(", ", opt.Aliases)})");
-            }
-            Console.WriteLine("------------------------------");
-        }
 
 		// Add Inspect Command
 		rootCommand.Subcommands.Add(new InspectCommand(_serviceProvider));
@@ -95,12 +88,15 @@ public class JobService
 			// 1. Check if we have a DAG
 			var rawArgs = Environment.GetCommandLineArgs().Skip(1).ToArray(); // Skip executable path
 
+            // Execution logic
+
 			if (parseResult.Errors.Count > 0)
 			{
 				foreach (var error in parseResult.Errors)
 				{
 					Console.Error.WriteLine($"CLI Error: {error.Message}");
 				}
+                return; // Exit if there are parsing errors
 			}
 
 			var dagDefinition = CliDagParser.Parse(rawArgs);
@@ -205,7 +201,7 @@ public class JobService
 				{
 					foreach (var err in topologyErrors)
 						_console.MarkupLine($"[red]DAG topology error:[/] {err}");
-					return 1;
+					return;
 				}
 
 				_console.WriteLine();
@@ -238,7 +234,7 @@ public class JobService
 						return await executePipeline(branchPr, token, branchArgs);
 					};
 
-					return await orchestrator.ExecuteAsync(dagDefinition, branchExecutor, ct);
+					await orchestrator.ExecuteAsync(dagDefinition, branchExecutor, ct);
 				}
 				catch (Exception ex)
 				{
@@ -247,12 +243,12 @@ public class JobService
 					{
 						_console.WriteException(ex);
 					}
-					return 1;
+					return;
 				}
 			}
 
 			// Execution for non-DAG
-			return await executePipeline(parseResult, ct, rawArgs);
+			await executePipeline(parseResult, ct, rawArgs);
 		});
 
 		Action printHelp = () => PrintGroupedHelp(rootCommand, coreOptions, _contributors, _console);
