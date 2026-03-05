@@ -49,7 +49,9 @@ public class JobService
 
 	public (RootCommand, Action) Build()
 	{
-		var opts = CoreOptionsBuilder.Build();
+		var readerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>();
+		var writerFactories = _serviceProvider.GetRequiredService<IEnumerable<IDataWriterFactory>>();
+		var opts = CoreOptionsBuilder.Build(readerFactories, writerFactories);
 		var coreOptions = opts.AllOptions;
 
 		var rootCommand = new RootCommand("A simple, self-contained CLI for performance-focused data streaming & anonymization");

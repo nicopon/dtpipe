@@ -1,20 +1,28 @@
+using System;
 using System.Collections.Generic;
 using System.CommandLine;
+using System.CommandLine.Completions;
+using System.Linq;
+using DtPipe.Cli.Security;
+using DtPipe.Core.Abstractions;
 
 namespace DtPipe.Cli;
 
 internal static class CoreOptionsBuilder
 {
-    public static CoreCliOptions Build()
+    public static CoreCliOptions Build(
+        IEnumerable<IStreamReaderFactory>? readerFactories = null,
+        IEnumerable<IDataWriterFactory>? writerFactories = null)
     {
-        var inputOption = new Option<string?>("--input") { Description = "Input connection string, file path, or '-' for stdin" };
         inputOption.Aliases.Add("-i");
+        inputOption.CompletionSources.Add(ctx => GetInputSuggestions(ctx, readerFactories));
 
         var queryOption = new Option<string?>("--query") { Description = "SQL query to execute (SELECT only)" };
         queryOption.Aliases.Add("-q");
 
         var outputOption = new Option<string?>("--output") { Description = "Output connection string, file path, or '-' for stdout" };
         outputOption.Aliases.Add("-o");
+        outputOption.CompletionSources.Add(ctx => GetOutputSuggestions(ctx, writerFactories));
 
         var connectionTimeoutOption = new Option<int>("--connection-timeout") { Description = "Connection timeout in seconds" };
         connectionTimeoutOption.DefaultValueFactory = _ => 10;
@@ -57,8 +65,10 @@ internal static class CoreOptionsBuilder
 
         var strategyOption = new Option<string?>("--strategy") { Description = "Write strategy (Append, Truncate, Recreate, Upsert, Ignore)" };
         strategyOption.Aliases.Add("-s");
+        strategyOption.CompletionSources.Add("Append", "Truncate", "Recreate", "Upsert", "Ignore");
 
         var insertModeOption = new Option<string?>("--insert-mode") { Description = "Insert mode (Standard, Bulk)" };
+        insertModeOption.CompletionSources.Add("Standard", "Bulk");
         var tableOption = new Option<string?>("--table") { Description = "Target table name" };
         tableOption.Aliases.Add("-t");
 
@@ -96,6 +106,34 @@ internal static class CoreOptionsBuilder
             finallyExecOption, strategyOption, insertModeOption, tableOption, maxRetriesOption, retryDelayMsOption,
             strictSchemaOption, noSchemaValidationOption, metricsPathOption, autoMigrateOption, xstreamerOption,
             aliasOption, allList);
+    }
+
+    private static IEnumerable<CompletionItem> GetInputSuggestions(CompletionContext context, IEnumerable<IStreamReaderFactory>? factories)
+    {
+        var suggestions = new List<CompletionItem>();
+        if (factories != null)
+        {
+            foreach (var f in factories) suggestions.Add(new CompletionItem(f.ComponentName + ":"));
+        }
+
+        try
+        {
+            var secrets = new SecretsManager().ListSecrets();
+            foreach (var alias in secrets.Keys) suggestions.Add(new CompletionItem($"keyring://{alias}"));
+        }
+        catch { /* Best effort */ }
+
+        return suggestions;
+    }
+
+    private static IEnumerable<CompletionItem> GetOutputSuggestions(CompletionContext context, IEnumerable<IDataWriterFactory>? factories)
+    {
+        var suggestions = new List<CompletionItem>();
+        if (factories != null)
+        {
+            foreach (var f in factories) suggestions.Add(new CompletionItem(f.ComponentName + ":"));
+        }
+        return suggestions;
     }
 }
 
