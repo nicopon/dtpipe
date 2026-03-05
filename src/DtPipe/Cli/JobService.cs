@@ -82,6 +82,8 @@ public class JobService
 
 		rootCommand.Subcommands.Add(new ProvidersCommand(_serviceProvider));
 
+		rootCommand.Subcommands.Add(new CompletionCommand());
+
 		// Add Secret Command
 		rootCommand.Subcommands.Add(new SecretCommand());
 		rootCommand.Subcommands.Add(new EngineDuckDbCommand());
