@@ -11,7 +11,7 @@
 # 
 # Note: For efficiency, we might want to ONLY run via YAML to save time if the goal is testing logic + yaml.
 # But keeping the direct run ensures CLI parsing isn't broken.
-# However, the user request "production des yaml via la ligne de commande puis deuxième run avec le yaml" implies doing both or at least the chain.
+# However, the user request "generating yaml via command line then a second run with the yaml" implies doing both or at least the chain.
 # To match the user request exactly: "export yaml via CLI args -> run with yaml". 
 # So we can skip the direct run if we want to be strict about "using yaml for the run", allows testing that export works.
 # But for now let's be safe: If we replace $DTPIPE with this, previous tests expected $DTPIPE to execute the action.

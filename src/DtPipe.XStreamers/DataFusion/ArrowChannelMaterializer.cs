@@ -14,8 +14,8 @@ namespace DtPipe.XStreamers.DataFusion;
 internal static class ArrowChannelMaterializer
 {
     /// <summary>
-    /// Consomme le channel Arrow jusqu'à completion et écrit les batches en CSV.
-    /// Retourne le chemin du fichier CSV.
+    /// Consumes the Arrow channel until completion and writes batches to CSV.
+    /// Returns the path to the CSV file.
     /// </summary>
     public static async Task<string> MaterializeToTempFileAsync(
         Channel<RecordBatch> channel,

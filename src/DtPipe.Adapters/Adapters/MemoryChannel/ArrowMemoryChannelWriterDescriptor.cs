@@ -8,7 +8,7 @@ namespace DtPipe.Adapters.MemoryChannel;
 public class ArrowMemoryChannelWriterDescriptor : IProviderDescriptor<IDataWriter>
 {
     public string ComponentName => ArrowMemoryChannelMetadata.ComponentName;
-    public string Category => "MemoryChannel";
+    public string Category => "Writer Options";
     public Type OptionsType => typeof(ArrowMemoryChannelOptions);
     public bool RequiresQuery => false;
 

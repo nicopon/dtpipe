@@ -49,11 +49,12 @@ public class JobService
 		_contributors = list;
 	}
 
-	public (RootCommand Command, Action PrintHelp) Build()
+	public (RootCommand Command, Action PrintHelp, CoreCliOptions CoreOptions) Build()
 	{
 		var readerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>();
 		var writerFactories = _serviceProvider.GetRequiredService<IEnumerable<IDataWriterFactory>>();
-		var opts = CoreOptionsBuilder.Build(readerFactories, writerFactories);
+		var xstreamerFactories = _serviceProvider.GetRequiredService<IEnumerable<IXStreamerFactory>>();
+		var opts = CoreOptionsBuilder.Build(readerFactories, writerFactories, xstreamerFactories);
 		var coreOptions = opts.AllOptions;
 
 		var rootCommand = new RootCommand("A simple, self-contained CLI for performance-focused data streaming & anonymization");
@@ -65,9 +66,12 @@ public class JobService
 		{
 			foreach (var opt in contributor.GetCliOptions())
 			{
+				if (opt.Description?.StartsWith("[HIDDEN]", StringComparison.OrdinalIgnoreCase) == true) opt.Hidden = true;
+
 				if (!rootCommand.Options.Any(o => o.Name == opt.Name || o.Aliases.Contains(opt.Name)))
 				{
 					rootCommand.Add(opt);
+					opts.AllOptions.Add(opt); // Ensure AllOptions includes contributor-provided flags
 				}
 			}
 		}
@@ -79,14 +83,14 @@ public class JobService
 
 		rootCommand.Subcommands.Add(new CompletionCommand());
 
-		// Add Secret Command
 		rootCommand.Subcommands.Add(new SecretCommand());
-		rootCommand.Subcommands.Add(new EngineDuckDbCommand());
 
 		rootCommand.SetAction(async (ParseResult parseResult, CancellationToken ct) =>
 		{
 			// 1. Check if we have a DAG
 			var rawArgs = Environment.GetCommandLineArgs().Skip(1).ToArray(); // Skip executable path
+
+			if (rawArgs.Length == 0) return; // Should already be handled in Program.cs, but just in case.
 
             // Execution logic
 
@@ -100,6 +104,19 @@ public class JobService
 			}
 
 			var dagDefinition = CliDagParser.Parse(rawArgs);
+
+			// 2. Enforce --job XOR manual pipeline
+			bool hasJob = rawArgs.Any(a => a.Equals("--job", StringComparison.OrdinalIgnoreCase));
+			bool hasManual = rawArgs.Any(a => a.Equals("-i", StringComparison.OrdinalIgnoreCase) ||
+			                             a.Equals("--input", StringComparison.OrdinalIgnoreCase) ||
+			                             a.Equals("-x", StringComparison.OrdinalIgnoreCase) ||
+			                             a.Equals("--xstreamer", StringComparison.OrdinalIgnoreCase));
+
+			if (hasJob && hasManual)
+			{
+				_console.MarkupLine("[red]Error:[/] The [yellow]--job[/] option cannot be combined with manual pipeline definition flags ([yellow]--input[/] or [yellow]--xstreamer[/]).");
+				return;
+			}
 
 			Func<ParseResult, CancellationToken, string[], Task<int>> executePipeline = async (pr, token, currentRawArgs) =>
 			{
@@ -194,27 +211,40 @@ public class JobService
 				_loggerFactory.AddSerilog();
 			}
 
+			// 3. Validate Semantic Constraints (Singleton flags, DAG topology, etc.)
+			var validationErrors = CliDagParser.Validate(dagDefinition);
+			if (validationErrors.Count > 0)
+			{
+				foreach (var err in validationErrors)
+					_console.MarkupLine($"[red]CLI Validation Error:[/] {err}");
+				return;
+			}
+
 			if (dagDefinition.IsDag)
 			{
-				var topologyErrors = CliDagParser.Validate(dagDefinition);
-				if (topologyErrors.Count > 0)
-				{
-					foreach (var err in topologyErrors)
-						_console.MarkupLine($"[red]DAG topology error:[/] {err}");
-					return;
-				}
-
 				_console.WriteLine();
 				var tree = new Tree("[yellow]🔀 Pipeline DAG Topology[/]");
 				foreach (var branch in dagDefinition.Branches)
 				{
 					if (branch.IsXStreamer)
-						tree.AddNode($"[magenta]⚙ XStreamer:[/] {branch.Alias}");
+					{
+						var junction = $"[magenta]⚙ XStreamer:[/] [white]{branch.Alias}[/] (Main: [cyan]{branch.MainAlias}[/]";
+						if (branch.RefAliases.Any()) junction += $", Refs: [cyan]{string.Join(", ", branch.RefAliases)}[/]";
+						junction += ")";
+						tree.AddNode(junction);
+					}
 					else
-						tree.AddNode($"[blue]📄 Source:[/] {branch.Alias}");
+					{
+						var source = $"[blue]📄 Source:[/] [white]{branch.Alias}[/]";
+						if (!string.IsNullOrEmpty(branch.Input)) source += $" ([grey]{branch.Input}[/])";
+						tree.AddNode(source);
+					}
 				}
 				_console.Write(tree);
 				_console.WriteLine();
+
+                _console.MarkupLine("[bold green]🚀 Initializing Pipeline Execution...[/]");
+                _console.WriteLine();
 
 				try
 				{
@@ -252,7 +282,7 @@ public class JobService
 		});
 
 		Action printHelp = () => PrintGroupedHelp(rootCommand, coreOptions, _contributors, _console);
-		return (rootCommand, printHelp);
+		return (rootCommand, printHelp, opts);
 	}
 
 	private static void PrintGroupedHelp(RootCommand rootCommand, List<Option> coreOptions, IEnumerable<ICliContributor> contributors, IAnsiConsole console)
@@ -265,32 +295,56 @@ public class JobService
 		console.WriteLine();
 
 		console.WriteLine("Core Options:");
-		foreach (var opt in coreOptions) PrintOption(opt, console);
+		var basicCoreFlags = new HashSet<string> {
+			"--input", "-i", "--output", "-o", "--query", "-q", "--job", "--xstreamer", "-x", "--alias",
+			"--dry-run", "--limit", "--batch-size", "-b", "--no-stats", "--log"
+		};
+		foreach (var opt in coreOptions.Where(o => basicCoreFlags.Contains(o.Name)))
+		{
+			PrintOption(opt, console);
+		}
 		console.WriteLine();
 
 		var groups = contributors.GroupBy(c => c.Category).OrderBy(g => g.Key);
 
 		foreach (var group in groups)
 		{
-			console.WriteLine($"{group.Key}:");
 			// Collect all options for this group
 			var optionsPrinted = new HashSet<string>();
+			var groupOptions = new List<Option>();
+
 			foreach (var contributor in group)
 			{
 				foreach (var opt in contributor.GetCliOptions())
 				{
-					if (optionsPrinted.Add(opt.Name))
+					if (optionsPrinted.Add(opt.Name) && (opt.Description == null || !opt.Description.StartsWith("[HIDDEN]")))
 					{
-						PrintOption(opt, console);
+						groupOptions.Add(opt);
 					}
 				}
 			}
-			console.WriteLine();
+
+			if (groupOptions.Any())
+			{
+				console.WriteLine($"{group.Key}:");
+				foreach (var opt in groupOptions)
+				{
+					PrintOption(opt, console);
+				}
+				console.WriteLine();
+			}
 		}
 
 		console.WriteLine("Other Options:");
 		console.WriteLine("  -?, -h, --help                           Show this help");
 		console.WriteLine("  --version                                Show version");
+		console.WriteLine();
+
+		console.WriteLine("Commands:");
+		console.WriteLine("  inspect                                  Inspect the schema of a data source");
+		console.WriteLine("  providers                                List all available data providers");
+		console.WriteLine("  completion                               Generate or manage shell completion");
+		console.WriteLine("  secret                                   Manage secure connection strings in OS Keyring");
 		console.WriteLine();
 	}
 

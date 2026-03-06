@@ -5,6 +5,7 @@ using System.CommandLine.Completions;
 using System.Linq;
 using DtPipe.Cli.Security;
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Abstractions.Dag;
 
 namespace DtPipe.Cli;
 
@@ -12,16 +13,25 @@ internal static class CoreOptionsBuilder
 {
     public static CoreCliOptions Build(
         IEnumerable<IStreamReaderFactory>? readerFactories = null,
-        IEnumerable<IDataWriterFactory>? writerFactories = null)
+        IEnumerable<IDataWriterFactory>? writerFactories = null,
+        IEnumerable<IXStreamerFactory>? xstreamerFactories = null)
     {
-        var inputOption = new Option<string?>("--input") { Description = "Input connection string, file path, or '-' for stdin" };
+        var inputOption = new Option<string[]>("--input")
+        {
+            Description = "Input connection string, file path, or '-' for stdin",
+            Arity = ArgumentArity.OneOrMore
+        };
         inputOption.Aliases.Add("-i");
         inputOption.CompletionSources.Add(ctx => GetInputSuggestions(ctx, readerFactories));
 
-        var queryOption = new Option<string?>("--query") { Description = "SQL query to execute (SELECT only)" };
+        var queryOption = new Option<string>("--query") { Description = "SQL query to execute (SELECT only)" };
         queryOption.Aliases.Add("-q");
 
-        var outputOption = new Option<string?>("--output") { Description = "Output connection string, file path, or '-' for stdout" };
+        var outputOption = new Option<string[]>("--output")
+        {
+            Description = "Output connection string, file path, or '-' for stdout",
+            Arity = ArgumentArity.OneOrMore
+        };
         outputOption.Aliases.Add("-o");
         outputOption.CompletionSources.Add(ctx => GetOutputSuggestions(ctx, writerFactories));
 
@@ -53,24 +63,25 @@ internal static class CoreOptionsBuilder
 
         var samplingSeedOption = new Option<int?>("--sampling-seed") { Description = "Seed for sampling (for reproducibility)" };
         samplingSeedOption.Aliases.Add("--sample-seed");
+
         var jobOption = new Option<string?>("--job") { Description = "Path to YAML job file" };
         var exportJobOption = new Option<string?>("--export-job") { Description = "Export config to YAML" };
         var logOption = new Option<string?>("--log") { Description = "Path to log file" };
-        var keyOption = new Option<string?>("--key") { Description = "Primary Key columns" };
+        var keyOption = new Option<string>("--key") { Description = "Primary Key columns" };
 
         // Lifecycle Hooks Options
-        var preExecOption = new Option<string?>("--pre-exec") { Description = "SQL/Command BEFORE transfer" };
-        var postExecOption = new Option<string?>("--post-exec") { Description = "SQL/Command AFTER transfer" };
-        var onErrorExecOption = new Option<string?>("--on-error-exec") { Description = "SQL/Command ON ERROR" };
-        var finallyExecOption = new Option<string?>("--finally-exec") { Description = "SQL/Command ALWAYS" };
+        var preExecOption = new Option<string>("--pre-exec") { Description = "SQL/Command BEFORE transfer" };
+        var postExecOption = new Option<string>("--post-exec") { Description = "SQL/Command AFTER transfer" };
+        var onErrorExecOption = new Option<string>("--on-error-exec") { Description = "SQL/Command ON ERROR" };
+        var finallyExecOption = new Option<string>("--finally-exec") { Description = "SQL/Command ALWAYS" };
 
-        var strategyOption = new Option<string?>("--strategy") { Description = "Write strategy (Append, Truncate, Recreate, Upsert, Ignore)" };
+        var strategyOption = new Option<string>("--strategy") { Description = "Write strategy (Append, Truncate, Recreate, Upsert, Ignore)" };
         strategyOption.Aliases.Add("-s");
         strategyOption.CompletionSources.Add("Append", "Truncate", "Recreate", "Upsert", "Ignore");
 
-        var insertModeOption = new Option<string?>("--insert-mode") { Description = "Insert mode (Standard, Bulk)" };
+        var insertModeOption = new Option<string>("--insert-mode") { Description = "Insert mode (Standard, Bulk)" };
         insertModeOption.CompletionSources.Add("Standard", "Bulk");
-        var tableOption = new Option<string?>("--table") { Description = "Target table name" };
+        var tableOption = new Option<string>("--table") { Description = "Target table name" };
         tableOption.Aliases.Add("-t");
 
         var strictSchemaOption = new Option<bool?>("--strict-schema") { Description = "Abort if schema errors found" };
@@ -88,6 +99,7 @@ internal static class CoreOptionsBuilder
         // DAG Options
         var xstreamerOption = new Option<string[]>("--xstreamer") { Description = "XStreamer provider (e.g. duck)" };
         xstreamerOption.Aliases.Add("-x");
+        xstreamerOption.CompletionSources.Add(ctx => GetXStreamerSuggestions(ctx, xstreamerFactories));
 
         var aliasOption = new Option<string[]>("--alias") { Description = "Alias(es) for the current DAG branch or streams" };
 
@@ -99,6 +111,12 @@ internal static class CoreOptionsBuilder
             strategyOption, insertModeOption, tableOption, maxRetriesOption, retryDelayMsOption, strictSchemaOption,
             noSchemaValidationOption, metricsPathOption, autoMigrateOption, xstreamerOption, aliasOption
         };
+
+        foreach (var opt in allList)
+        {
+            if (opt.Description?.StartsWith("[HIDDEN]", StringComparison.OrdinalIgnoreCase) == true)
+                opt.Hidden = true;
+        }
 
         return new CoreCliOptions(
             inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption,
@@ -117,13 +135,35 @@ internal static class CoreOptionsBuilder
         var suggestions = new List<CompletionItem>();
         if (factories != null)
         {
-            foreach (var f in factories) suggestions.Add(new CompletionItem(f.ComponentName + ":"));
+            foreach (var f in factories) suggestions.Add(new CompletionItem(f.ComponentName + ":[NOSUSP]"));
         }
 
         try
         {
-            var secrets = new SecretsManager().ListSecrets();
-            foreach (var alias in secrets.Keys) suggestions.Add(new CompletionItem($"keyring://{alias}"));
+            bool isTestRun = AppDomain.CurrentDomain.GetAssemblies().Any(a => a.FullName?.Contains("xunit") == true);
+            if (!isTestRun && context.ParseResult != null)
+            {
+                // Only query the keychain if the user is actually typing something that looks like 'keyring://'
+                // or if they are explicitly autocompleting the value of the 'input' option.
+                // This prevents the keychain prompt from appearing during generic root-level autocompletion.
+                string word = context.WordToComplete?.ToLowerInvariant() ?? "";
+                bool looksLikeKeyring = word.StartsWith("k");
+
+                // Also check if the previous token was -i or --input
+                bool isInputOptionValue = false;
+                var tokens = context.ParseResult.Tokens;
+                if (tokens.Count > 0)
+                {
+                    var lastToken = tokens.Last().Value;
+                    if (lastToken == "-i" || lastToken == "--input") isInputOptionValue = true;
+                }
+
+                if (looksLikeKeyring || isInputOptionValue)
+                {
+                    var secrets = new SecretsManager().ListSecrets();
+                    foreach (var alias in secrets.Keys) suggestions.Add(new CompletionItem($"keyring://{alias}"));
+                }
+            }
         }
         catch { /* Best effort */ }
 
@@ -135,16 +175,26 @@ internal static class CoreOptionsBuilder
         var suggestions = new List<CompletionItem>();
         if (factories != null)
         {
-            foreach (var f in factories) suggestions.Add(new CompletionItem(f.ComponentName + ":"));
+            foreach (var f in factories) suggestions.Add(new CompletionItem(f.ComponentName + ":[NOSUSP]"));
+        }
+        return suggestions;
+    }
+
+    private static IEnumerable<CompletionItem> GetXStreamerSuggestions(CompletionContext context, IEnumerable<IXStreamerFactory>? factories)
+    {
+        var suggestions = new List<CompletionItem>();
+        if (factories != null)
+        {
+            foreach (var f in factories) suggestions.Add(new CompletionItem(f.ComponentName + ":[NOSUSP]"));
         }
         return suggestions;
     }
 }
 
-internal record CoreCliOptions(
-    Option<string?> Input,
-    Option<string?> Query,
-    Option<string?> Output,
+public record CoreCliOptions(
+    Option<string[]> Input,
+    Option<string> Query,
+    Option<string[]> Output,
     Option<int> ConnectionTimeout,
     Option<int> QueryTimeout,
     Option<int> BatchSize,
@@ -154,17 +204,17 @@ internal record CoreCliOptions(
     Option<int> Limit,
     Option<double> SamplingRate,
     Option<int?> SamplingSeed,
-    Option<string?> Key,
+    Option<string> Key,
     Option<string?> Job,
     Option<string?> ExportJob,
     Option<string?> Log,
-    Option<string?> PreExec,
-    Option<string?> PostExec,
-    Option<string?> OnErrorExec,
-    Option<string?> FinallyExec,
-    Option<string?> Strategy,
-    Option<string?> InsertMode,
-    Option<string?> Table,
+    Option<string> PreExec,
+    Option<string> PostExec,
+    Option<string> OnErrorExec,
+    Option<string> FinallyExec,
+    Option<string> Strategy,
+    Option<string> InsertMode,
+    Option<string> Table,
     Option<int> MaxRetries,
     Option<int> RetryDelayMs,
     Option<bool?> StrictSchema,

@@ -1,3 +1,4 @@
+using DtPipe.Cli.Validation;
 using DtPipe.Core.Pipelines.Dag;
 
 namespace DtPipe.Cli.Dag;
@@ -8,9 +9,10 @@ namespace DtPipe.Cli.Dag;
 /// </summary>
 public static class CliDagParser
 {
-    private static readonly string[] XStreamerFlags = { "-x", "--xstreamer" };
-    private static readonly string[] AliasFlags = { "--alias" };
-    private static readonly string[] InputFlags = { "-i", "--input" };
+    // Use flags from CliPipelineRules
+    // private static readonly string[] XStreamerFlags = { "-x", "--xstreamer" };
+    // private static readonly string[] AliasFlags = { "--alias" };
+    // private static readonly string[] InputFlags = { "-i", "--input" };
 
     /// <summary>
     /// Parses the raw command line arguments into a JobDagDefinition.
@@ -37,7 +39,7 @@ public static class CliDagParser
         {
             var arg = args[i];
 
-            if (XStreamerFlags.Contains(arg, StringComparer.OrdinalIgnoreCase))
+            if (CliPipelineRules.XStreamerFlags.Contains(arg))
             {
                 // We've hit an XStreamer boundary. Finish the current branch.
                 if (currentBranchArgs.Count > 0)
@@ -51,7 +53,7 @@ public static class CliDagParser
                 hasSeenInputInCurrentBranch = false;
                 currentBranchArgs.Add(arg);
             }
-            else if (InputFlags.Contains(arg, StringComparer.OrdinalIgnoreCase))
+            else if (CliPipelineRules.InputFlags.Contains(arg))
             {
                 // Split if we've already seen an input (linear sequence)
                 // OR if we are switching from an XStreamer branch to a linear branch.
@@ -88,7 +90,7 @@ public static class CliDagParser
 
     private static BranchDefinition CreateBranch(List<string> args, bool isXStreamer, ref int branchCounter)
     {
-        string? alias = ExtractAlias(args);
+        string? alias = ExtractArgValue(args.ToArray(), "--alias");
 
         if (string.IsNullOrEmpty(alias))
         {
@@ -97,60 +99,45 @@ public static class CliDagParser
 
         branchCounter++;
 
+        var argsArray = args.ToArray();
         return new BranchDefinition
         {
             Alias = alias,
-            Arguments = args.ToArray(),
-            IsXStreamer = isXStreamer
+            Arguments = argsArray,
+            IsXStreamer = isXStreamer,
+            Input = ExtractArgValue(argsArray, "-i") ?? ExtractArgValue(argsArray, "--input"),
+            Output = ExtractArgValue(argsArray, "-o") ?? ExtractArgValue(argsArray, "--output"),
+            MainAlias = ExtractArgValue(argsArray, "--main"),
+            RefAliases = ExtractAllArgValues(argsArray, "--ref")
+                .SelectMany(r => r.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                .ToList()
         };
     }
 
-    private static string? ExtractAlias(List<string> args)
-    {
-        for (int i = 0; i < args.Count; i++)
-        {
-            if (AliasFlags.Contains(args[i], StringComparer.OrdinalIgnoreCase) && i + 1 < args.Count)
-            {
-                // Note: We might want to remove the --alias flag from the args list if it's strictly a DAG-level concept,
-                // but for now we leave it so the underlying System.CommandLine doesn't fail if we define it as an option.
-                return args[i + 1];
-            }
-        }
-        return null;
-    }
-
     /// <summary>
-    /// Validates the DAG topology. Returns a list of error messages. Empty = valid.
+    /// Validates the DAG semantics.
+    /// Combines CLI-specific rules (singletons) with core structural rules.
     /// </summary>
     public static IReadOnlyList<string> Validate(JobDagDefinition dag)
     {
         var errors = new List<string>();
-        var registeredAliases = new HashSet<string>(dag.Branches.Select(b => b.Alias), StringComparer.OrdinalIgnoreCase);
 
-        foreach (var branch in dag.Branches.Where(b => b.IsXStreamer))
+        // 1. Structural Validation (Core)
+        errors.AddRange(DtPipe.Core.Validation.DagValidator.Validate(dag));
+
+        // 2. CLI-Specific Validation (Singleton flags)
+        foreach (var branch in dag.Branches)
         {
-            // Extract --main value from branch.Arguments
-            var mainAlias = ExtractArgValue(branch.Arguments, "--main");
-            if (string.IsNullOrEmpty(mainAlias))
+            var seenSingletons = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var arg in branch.Arguments)
             {
-                errors.Add($"XStreamer branch '{branch.Alias}' is missing the '--main' argument.");
-            }
-            else if (!registeredAliases.Contains(mainAlias))
-            {
-                errors.Add($"XStreamer branch '{branch.Alias}' references unknown alias '--main {mainAlias}'. Known aliases: {string.Join(", ", registeredAliases)}.");
-            }
-
-            // Extract all --ref values
-            var rawRefAliases = ExtractAllArgValues(branch.Arguments, "--ref");
-            foreach (var rawRef in rawRefAliases)
-            {
-                var refAliases = rawRef.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                foreach (var refAlias in refAliases)
+                if (CliPipelineRules.IsSingleton(arg))
                 {
-                    if (!registeredAliases.Contains(refAlias))
+                    if (seenSingletons.Contains(arg))
                     {
-                        errors.Add($"XStreamer branch '{branch.Alias}' references unknown alias '--ref {refAlias}'. Known aliases: {string.Join(", ", registeredAliases)}.");
+                        errors.Add($"Branch '{branch.Alias}' contains multiple instances of singleton flag '{arg}'. Only one is allowed.");
                     }
+                    seenSingletons.Add(arg);
                 }
             }
         }

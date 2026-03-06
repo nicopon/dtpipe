@@ -15,6 +15,7 @@ public class CompletionCommand : Command
 
     public CompletionCommand() : base("completion", "Generate or manage shell completion")
     {
+        // Hidden = true; // No longer hidden, user wants to use it explicitly
         // Shell argument is OPTIONAL — auto-detected if omitted
         var shellArg = new Argument<string>("shell")
         {
@@ -118,9 +119,23 @@ public class CompletionCommand : Command
     private static string GenerateZshScript() => """
         _dtpipe() {
           local -a completions
-          # Split by newline (f flag), handle empty ($words[2,-1]).
-          completions=( "${(@f)$($words[1] "[suggest]" $((CURRENT - 1)) "${words[@]:1}" 2>/dev/null)}" )
-          compadd -a completions
+          local -a filtered
+          local bin="${DTPIPE_BIN:-$words[1]}"
+          local nospace=0
+          completions=( "${(@f)$($bin "[suggest]" $((CURRENT - 1)) "${words[@]:1}" 2>/dev/null)}" )
+          for c in $completions; do
+            if [[ "$c" == *"[NOSUSP]" ]]; then
+              nospace=1
+              filtered+=("${c%\[NOSUSP\]}")
+            else
+              filtered+=("$c")
+            fi
+          done
+          if [[ $nospace -eq 1 ]]; then
+            compadd -S "" -a filtered
+          else
+            compadd -a filtered
+          fi
         }
         if (( ! $+functions[compdef] )); then
           autoload -Uz compinit && compinit
@@ -135,7 +150,13 @@ public class CompletionCommand : Command
         _dtpipe_completion() {
           local cur="${COMP_WORDS[COMP_CWORD]}"
           local dtpipe_bin="${DTPIPE_BIN:-dtpipe}"
-          COMPREPLY=( $($dtpipe_bin [suggest] $COMP_CWORD "${COMP_WORDS[@]:1}" 2>/dev/null) )
+          local completions=$($dtpipe_bin [suggest] $COMP_CWORD "${COMP_WORDS[@]:1}" 2>/dev/null)
+          if [[ "$completions" == *"[NOSUSP]"* ]]; then
+            compopt -o nospace
+            COMPREPLY=( $(echo "$completions" | sed 's/\[NOSUSP\]//g') )
+          else
+            COMPREPLY=( $completions )
+          fi
         }
         complete -F _dtpipe_completion dtpipe
         """.Replace("\r", "");
@@ -146,8 +167,15 @@ public class CompletionCommand : Command
           $bin = if ($env:DTPIPE_BIN) { $env:DTPIPE_BIN } else { 'dtpipe' }
           $pos = $commandAst.CommandElements.Count - 1
           $args = $commandAst.CommandElements | Select-Object -Skip 1 | ForEach-Object { $_.ToString() }
-          & $bin [suggest] $pos @args 2>$null |
-            ForEach-Object { [System.Management.Automation.CompletionResult]::new($_) }
+          & $bin [suggest] $pos @args 2>$null | ForEach-Object {
+            $c = $_
+            $type = [System.Management.Automation.CompletionResultType]::ParameterValue
+            if ($c.EndsWith("[NOSUSP]")) {
+              $c = $c.Substring(0, $c.Length - 8)
+              $type = [System.Management.Automation.CompletionResultType]::IncompleteInput
+            }
+            [System.Management.Automation.CompletionResult]::new($c, $c, $type, $c)
+          }
         }
         """.Replace("\r", "");
 

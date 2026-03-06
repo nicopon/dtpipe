@@ -338,7 +338,7 @@ public sealed class DataFusionXStreamer : IStreamReader
         if (groups.Any())
         {
             var duplicates = string.Join(", ", groups.Select(g => $"'{string.Join("' vs '", g)}'"));
-            throw new InvalidOperationException($"Ambiguïté de casse détectée dans les alias de flux : {duplicates}");
+            throw new InvalidOperationException($"Case ambiguity detected in stream aliases: {duplicates}");
         }
     }
 
@@ -352,7 +352,7 @@ public sealed class DataFusionXStreamer : IStreamReader
         if (groups.Any())
         {
             var duplicates = string.Join(", ", groups.Select(g => $"'{string.Join("' vs '", g)}'"));
-            throw new InvalidOperationException($"Ambiguïté de casse détectée dans les colonnes du flux '{alias}' : {duplicates}");
+            throw new InvalidOperationException($"Case ambiguity detected in columns for stream '{alias}': {duplicates}");
         }
     }
 

@@ -57,8 +57,8 @@ public class InspectCommand : Command
         var registry = sp.GetRequiredService<OptionsRegistry>();
         var readerFactories = sp.GetRequiredService<IEnumerable<IStreamReaderFactory>>().ToList();
 
-        // 1. Résoudre le reader via le même mécanisme que l'export
-        //    (parser le prefix, trouver la factory via ComponentName ou CanHandle)
+        // 1. Resolve the reader using the same mechanism as export
+        //    (parse the prefix, find the factory via ComponentName or CanHandle)
         IStreamReaderFactory? factory = null;
         foreach (var f in readerFactories)
         {

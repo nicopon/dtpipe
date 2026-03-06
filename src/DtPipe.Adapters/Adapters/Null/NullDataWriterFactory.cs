@@ -7,7 +7,7 @@ namespace DtPipe.Adapters.Null;
 public class NullDataWriterFactory : IProviderDescriptor<IDataWriter>
 {
     public string ComponentName => NullMetadata.ComponentName;
-    public string Category => "Writers";
+    public string Category => "Writer Options";
     public Type OptionsType => typeof(NullDataWriterOptions);
 
     public bool CanHandle(string connectionString) => NullMetadata.CanHandle(connectionString);

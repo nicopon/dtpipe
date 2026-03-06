@@ -1,15 +1,10 @@
 ﻿using System.Runtime.CompilerServices;
-using System.CommandLine;
-using System.CommandLine.Parsing;
 using DtPipe.Cli;
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines.Dag;
-using DtPipe.Core.Infrastructure.Arrow;
-using DtPipe.Core.Validation;
-using DtPipe.XStreamers.DuckDB;
 using DtPipe.Transformers.Services;
 using DtPipe.Observers;
 using DtPipe.Transformers.Row.Expand;
@@ -50,7 +45,7 @@ class Program
 			.CreateLogger();
 
 		var jobService = serviceProvider.GetRequiredService<JobService>();
-		var (rootCommand, printHelp) = jobService.Build();
+		var (rootCommand, printHelp, coreOptions) = jobService.Build();
 
 		// Ensure cursor is restored on Ctrl+C
 		Console.CancelKeyPress += (_, _) => Console.CursorVisible = true;
@@ -65,21 +60,28 @@ class Program
             {
                 if (int.TryParse(effectiveArgs[1], out var pos))
                 {
-                    var rawWords = effectiveArgs.Skip(2).ToArray();
-                    var wordsList = new List<string> { "dtpipe" };
-                    wordsList.AddRange(rawWords);
+                    var rawWords = new[] { "dtpipe" }.Concat(effectiveArgs.Skip(2)).ToArray();
+                    if (pos >= rawWords.Length) Array.Resize(ref rawWords, pos + 1); // pad with ""
 
-                    if (pos >= wordsList.Count) wordsList.Add("");
-
-                    var suggestPR = rootCommand.Parse(wordsList.ToArray());
-                    var completions = suggestPR.GetCompletions(pos);
+                    var completions = ContextualCompletionProvider.GetCompletions(
+                        rootCommand,
+                        rawWords,
+                        pos,
+                        coreOptions.AllOptions);
 
                     foreach (var c in completions)
-                    {
-                        Console.WriteLine(c.Label);
-                    }
+                        Console.WriteLine(c);
+
                     return 0;
                 }
+            }
+
+            // Custom Help Interception
+            bool isSuggest = effectiveArgs.Length > 0 && effectiveArgs[0] == "[suggest]";
+            if (!isSuggest && (effectiveArgs.Length == 0 || effectiveArgs.Any(a => a == "--help" || a == "-h" || a == "-?" || a == "/?" || a == "/h")))
+            {
+                printHelp();
+                return 0;
             }
 
 			return await rootCommand.Parse(effectiveArgs).InvokeAsync();
@@ -145,7 +147,6 @@ class Program
 		RegisterWriter<DtPipe.Adapters.SqlServer.SqlServerWriterDescriptor>(services);
 
 		// Explicitly Register XStreamers
-		RegisterXStreamer<DtPipe.XStreamers.DuckDB.DuckDBXStreamerFactory>(services);
 		RegisterXStreamer<DtPipe.XStreamers.DataFusion.DataFusionXStreamerFactory>(services);
 
 		// Transformer Factories

@@ -129,7 +129,7 @@ public class DagOrchestrator : IDagOrchestrator
 
             // Inject memory channel output if the branch doesn't explicitly define one
             var argsList = branch.Arguments.ToList();
-            if (!argsList.Contains("-o", StringComparer.OrdinalIgnoreCase) && !argsList.Contains("--output", StringComparer.OrdinalIgnoreCase))
+            if (string.IsNullOrEmpty(branch.Output))
             {
                 var mode = GetRequiredChannelMode(dag, branch.Alias);
 
@@ -223,13 +223,13 @@ public class DagOrchestrator : IDagOrchestrator
         foreach (var branch in dag.Branches.Where(b => b.IsXStreamer))
         {
             bool isConsumer =
-                ExtractArgValue(branch.Arguments, "--main") == alias ||
-                ExtractAllArgValues(branch.Arguments, "--ref").Contains(alias);
+                branch.MainAlias == alias ||
+                branch.RefAliases.Contains(alias);
 
             if (!isConsumer) continue;
 
-            // Identifier la factory via -x <componentName> or --xstreamer <componentName>
-            var xFlag = ExtractArgValue(branch.Arguments, "-x") ?? ExtractArgValue(branch.Arguments, "--xstreamer");
+            // Identify the factory via the xstreamer input
+            var xFlag = branch.Input;
             if (xFlag == null) continue;
 
             var factory = _xstreamerFactories
