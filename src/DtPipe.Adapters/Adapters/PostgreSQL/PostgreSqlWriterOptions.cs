@@ -10,8 +10,8 @@ public class PostgreSqlWriterOptions : IWriterOptions, IKeyAwareOptions
 	public string? Key { get; set; }
 
 	// Writer Options
-	[ComponentOption(Description = "Target table name", Hidden = true)]
-	public string Table { get; set; } = "export";
+	[ComponentOption(Description = "Target table name", Required = true)]
+	public string Table { get; set; } = string.Empty;
 
 	[ComponentOption(Description = "Write strategy: Append, Truncate, or DeleteThenInsert", Hidden = true)]
 	public PostgreSqlWriteStrategy? Strategy { get; set; }

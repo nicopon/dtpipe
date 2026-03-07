@@ -41,7 +41,6 @@ public class LinearPipelineService
         string? localAlias,
         bool isDag)
     {
-        if (isDag) _console.MarkupLine($"[grey]DEBUG: LinearPipelineService.ExecuteAsync started for alias '{localAlias}'[/]");
         var exportService = _serviceProvider.GetRequiredService<ExportService>();
 
         var readerFactories = _contributors.OfType<IStreamReaderFactory>().ToList();

@@ -18,8 +18,8 @@ public record DuckDbWriterOptions : IProviderOptions, IKeyAwareOptions
 	public static string Prefix => DuckDbConstants.ProviderName;
 	public static string DisplayName => "DuckDB Writer Options";
 
-	[ComponentOption(Description = "Target table name", Hidden = true)]
-	public string Table { get; set; } = "export";
+	[ComponentOption(Description = "Target table name", Required = true)]
+	public string Table { get; set; } = string.Empty;
 
 	[ComponentOption(Description = "Data write strategy (Append, Truncate, or Recreate)", Hidden = true)]
 	public DuckDbWriteStrategy? Strategy { get; set; }

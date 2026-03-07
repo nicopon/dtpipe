@@ -19,10 +19,10 @@ public class DataFusionXStreamerOptions : IOptionSet, ICliOptionMetadata
     public static string DisplayName => "DataFusion In-Process SQL Engine";
 
     /// <summary>SQL query to execute.</summary>
-    public string[] Query { get; set; } = Array.Empty<string>();
+    public string? Query { get; set; }
 
     /// <summary>Alias of the main branch in the upstream DAG (memory channel mode).</summary>
-    public string[] MainAlias { get; set; } = Array.Empty<string>();
+    public string? MainAlias { get; set; }
 
     /// <summary>Alias of the ref branches in the upstream DAG (memory channel mode).</summary>
     public string[] RefAlias { get; set; } = Array.Empty<string>();
@@ -31,7 +31,7 @@ public class DataFusionXStreamerOptions : IOptionSet, ICliOptionMetadata
     /// Direct source for the main stream (e.g., parquet:/path/main.parquet or csv:/path/main.csv).
     /// If present, DataFusion reads the file directly — bypassing the memory channel.
     /// </summary>
-    public string[] SrcMain { get; set; } = Array.Empty<string>();
+    public string? SrcMain { get; set; }
 
     /// <summary>
     /// Direct source(s) for the ref streams (e.g., csv:/path/ref.csv).
@@ -68,10 +68,10 @@ public class DataFusionXStreamerFactory : IXStreamerFactory
 
         return new DataFusionXStreamer(
             registry: registry,
-            query: opts.Query?.LastOrDefault() ?? throw new ArgumentException("--query is required"),
-            mainAlias: opts.MainAlias?.LastOrDefault() ?? "",
+            query: opts.Query ?? throw new ArgumentException("--query is required"),
+            mainAlias: opts.MainAlias ?? "",
             refAliases: opts.RefAlias ?? Array.Empty<string>(),
-            srcMain: opts.SrcMain?.LastOrDefault() ?? "",
+            srcMain: opts.SrcMain ?? "",
             srcRefs: opts.SrcRef ?? Array.Empty<string>(),
             logger: loggerFactory.CreateLogger<DataFusionXStreamer>()
         );

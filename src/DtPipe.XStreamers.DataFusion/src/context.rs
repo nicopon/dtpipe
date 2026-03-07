@@ -26,14 +26,21 @@ pub struct DtfbContext {
 pub unsafe extern "C" fn dtfb_context_new(runtime_ptr: *mut DtfbRuntime) -> *mut DtfbContext {
     let rt = crate::ffi_ref_null!(runtime_ptr);
     let mut config = SessionConfig::new();
-    // Disable identifier normalization to preserve column name case (e.g. GenerateIndex)
-    // and match behavior in experiments/DtFusion
-    config.options_mut().sql_parser.enable_ident_normalization = false;
+    // Enable identifier normalization (default behavior) to support case-insensitive SQL matching
+    config.options_mut().sql_parser.enable_ident_normalization = true;
         
     Box::into_raw(Box::new(DtfbContext {
         runtime: Arc::clone(&rt.inner),
         ctx: Arc::new(SessionContext::new_with_config(config)),
     }))
+}
+
+fn lowercase_schema(schema: SchemaRef) -> SchemaRef {
+    let fields: Vec<_> = schema.fields().iter().map(|f| {
+        let name = f.name().to_lowercase();
+        f.as_ref().clone().with_name(name)
+    }).collect();
+    Arc::new(arrow_schema::Schema::new(fields))
 }
 
 #[unsafe(no_mangle)]
@@ -126,7 +133,9 @@ pub unsafe extern "C" fn dtfb_register_stream(
         Err(_) => return ErrorCode::Error,
     };
 
-    let schema = reader.schema();
+    let original_schema = reader.schema();
+    let schema = lowercase_schema(original_schema);
+
     let partition_stream = Arc::new(FfiPartitionStream {
         schema: schema.clone(),
         reader: Arc::new(Mutex::new(Some(reader))),
@@ -213,10 +222,11 @@ pub unsafe extern "C" fn dtfb_register_batches(
     let name = crate::ffi_cstr!(name_ptr).to_string();
 
     let ffi_schema = unsafe { &*ffi_schema_ptr };
-    let schema = match arrow_schema::Schema::try_from(ffi_schema) {
+    let original_schema = match arrow_schema::Schema::try_from(ffi_schema) {
         Ok(s) => Arc::new(s),
         Err(_) => return ErrorCode::Error,
     };
+    let schema = lowercase_schema(original_schema);
 
     let mut batches = Vec::with_capacity(num_batches);
     for i in 0..num_batches {

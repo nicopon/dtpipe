@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.CommandLine;
 using System.CommandLine.Parsing;
 using System.Linq;
+using System.Linq;
+using DtPipe.Cli.Infrastructure;
 using DtPipe.Cli.Validation;
 
 namespace DtPipe.Cli;
@@ -13,23 +15,83 @@ public static class ContextualCompletionProvider
         RootCommand rootCommand,
         string[] rawWords,
         int cursorPos,
-        IReadOnlyList<Option> allOptions)
+        IReadOnlyList<Option> allOptions,
+        IReadOnlyDictionary<string, CliPipelinePhase> flagPhases,
+        IReadOnlyList<ICliContributor> contributors)
     {
         try
         {
             // 1. Extract tokensBeforeCursor
             string[] tokensBeforeCursor = Array.Empty<string>();
-            if (cursorPos > 1)
+            if (cursorPos > 0)
             {
-                tokensBeforeCursor = rawWords.Skip(1).Take(cursorPos - 1).ToArray();
+                tokensBeforeCursor = rawWords.Take(cursorPos).ToArray();
             }
 
             // 2. Analyze context
             var context = CliContextAnalyzer.Analyze(tokensBeforeCursor, allOptions);
 
-            // 3. Get base completions
+            if (Environment.GetEnvironmentVariable("DEBUG") == "1")
+            {
+                Console.Error.WriteLine($"[DEBUG-CORE] Analyzer CurrentBranchIndex: {context.CurrentBranchIndex}, LastCompletedFlag: {context.LastCompletedFlag}");
+                Console.Error.WriteLine($"[DEBUG-CORE] UsedFlagsInCurrentBranch: {string.Join(", ", context.UsedFlagsInCurrentBranch)}");
+            }
+
+            // 3. Calculate Text Offset for System.CommandLine
+            int textOffset = 0;
+            if (cursorPos < rawWords.Length)
+            {
+                textOffset = string.Join(" ", rawWords.Take(cursorPos + 1)).Length;
+            }
+            else
+            {
+                textOffset = string.Join(" ", rawWords).Length;
+            }
+
             var suggestPR = rootCommand.Parse(rawWords);
-            var baseCompletions = suggestPR.GetCompletions(cursorPos).Select(c => c.Label).ToList();
+            if (Environment.GetEnvironmentVariable("DEBUG") == "1")
+            {
+                var inputOpt = allOptions.FirstOrDefault(o => o.Name == "input" || o.Aliases.Contains("--input"));
+                if (inputOpt == null) Console.Error.WriteLine("[DEBUG-COMPLETION-TOKENS] --input option not found in allOptions!");
+                else Console.Error.WriteLine($"[DEBUG-COMPLETION-TOKENS] --input option found. Has default completions? (can't easily check without reflection, but we found it: {inputOpt.Name})");
+
+                if (suggestPR.Errors.Any())
+                {
+                    Console.Error.WriteLine($"[DEBUG-COMPLETION-PR-ERROR] {suggestPR.Errors.Count} errors found:");
+                    foreach(var e in suggestPR.Errors) Console.Error.WriteLine(e.Message);
+                }
+                Console.Error.WriteLine($"[DEBUG-COMPLETION-TOKENS] Parsed token count: {suggestPR.Tokens.Count}");
+                foreach(var t in suggestPR.Tokens)
+                {
+                    Console.Error.WriteLine($"  - {t.Value} ({t.Type})");
+                }
+            }
+            var baseCompletions = suggestPR.GetCompletions(textOffset).Select(c => c.Label).ToList();
+
+            string currentWord = cursorPos < rawWords.Length ? rawWords[cursorPos] : "";
+            string prevWord = cursorPos > 0 ? rawWords[cursorPos - 1] : "";
+
+            bool isAfterValueRequiringFlag = prevWord == "-i" || prevWord == "--input" ||
+                                             prevWord == "-o" || prevWord == "--output" ||
+                                             prevWord == "-s" || prevWord == "--strategy" ||
+                                             prevWord == "--alias" || prevWord == "-t" || prevWord == "--table";
+
+            if (isAfterValueRequiringFlag)
+            {
+                // We are completing a value for a specific option.
+                // System.CommandLine's text-offset lexer is notoriously bugged when options have Arity=ZeroOrMore
+                // earlier in the pipeline (it aggressively swallows trailing text thinking it's still their argument).
+                // To guarantee we trigger the correct Option's CompletionSources,
+                // we parse a minimalist command and ask for its completions perfectly isolated.
+
+                var minimalWords = new string[] { prevWord, currentWord };
+                var minimalOffset = string.Join(" ", minimalWords).Length;
+
+                var minimalPR = rootCommand.Parse(minimalWords);
+                var targetedCompletions = minimalPR.GetCompletions(minimalOffset).Select(c => c.Label).ToList();
+
+                return targetedCompletions;
+            }
 
             // 3.1. General Junk Filtering (decluttering for subcommands and root)
             bool isFirstArg = tokensBeforeCursor.Length == 0;
@@ -54,14 +116,20 @@ public static class ContextualCompletionProvider
                 return generalFiltered;
             }
 
+            // 3.3. Phase Filtering
+            var phaseFiltered = generalFiltered.Where(label => IsVisibleInPhase(label, context, flagPhases, contributors)).ToList();
+
             // --- Pipeline-Specific Logic (RootCommand only) ---
-            var baseFiltered = generalFiltered;
+            var baseFiltered = phaseFiltered;
 
             // 4. Force-inject root options if the user is typing a new flag or at a space.
-            string currentWord = cursorPos < rawWords.Length ? rawWords[cursorPos] : "";
             if (string.IsNullOrEmpty(currentWord) || currentWord.StartsWith("-"))
             {
-                var inject = allOptions.Select(o => o.Name).Where(name => !name.StartsWith("-") || name.StartsWith("--"));
+                var inject = allOptions
+                    .Select(o => o.Aliases.FirstOrDefault(a => a.StartsWith("--")) ?? (o.Name.StartsWith("-") ? o.Name : $"--{o.Name}"))
+                    .Where(label => IsVisibleInPhase(label, context, flagPhases, contributors))
+                    .ToList();
+
                 baseFiltered.AddRange(inject);
                 baseFiltered = baseFiltered.Distinct().ToList();
             }
@@ -98,10 +166,15 @@ public static class ContextualCompletionProvider
 
             var pipelineFiltered = baseFiltered.Where(label => !blockedLabels.Contains(label));
 
-            return ApplyLinearGuide(pipelineFiltered, context);
+            var result = ApplyLinearGuide(pipelineFiltered, context).ToList();
+            return result;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            if (Environment.GetEnvironmentVariable("DEBUG") == "1")
+            {
+                Console.Error.WriteLine($"[DEBUG-COMPLETION-ERROR] {ex}");
+            }
             return Enumerable.Empty<string>();
         }
     }
@@ -172,5 +245,59 @@ public static class ContextualCompletionProvider
         var rest = filtered.Where(s => !highPriority.Contains(s, StringComparer.OrdinalIgnoreCase)).ToList();
 
         return prioritized.Concat(rest);
+    }
+
+    private static bool IsVisibleInPhase(
+        string label,
+        CliCompletionContext context,
+        IReadOnlyDictionary<string, CliPipelinePhase> flagPhases,
+        IReadOnlyList<ICliContributor> contributors)
+    {
+        // Evaluate contextual dependencies
+        foreach (var c in contributors)
+        {
+            if (c.FlagDependencies.TryGetValue(label, out var requiredFlag))
+            {
+                if (!context.UsedFlagsInCurrentBranch.Contains(requiredFlag))
+                {
+                    return false;
+                }
+            }
+        }
+
+        if (!flagPhases.TryGetValue(label, out var phase))
+        {
+            return true; // Unknown flag: show by default (safe fallback)
+        }
+
+        return phase switch
+        {
+            CliPipelinePhase.Global => true,
+
+            CliPipelinePhase.Reader =>
+                // Show global Reader options (like --query) or component-specific Reader options
+                EvaluateReaderPhase(label, flagPhases, contributors, context),
+
+            CliPipelinePhase.Transformer =>
+                // Transformers visible only in Phase 1 (source defined, no output yet)
+                context.ActivePhase == CliPipelinePhase.Transformer,
+
+            CliPipelinePhase.Writer =>
+                // Writers visible only after --output is defined
+                context.HasOutput || context.ActivePhase == CliPipelinePhase.Writer,
+
+            CliPipelinePhase.XStreamer =>
+                // XStreamer options visible only in XStreamer branches
+                context.IsXStreamerBranch,
+
+            _ => true
+        };
+    }
+
+    private static bool EvaluateReaderPhase(string label, IReadOnlyDictionary<string, CliPipelinePhase> flagPhases, IReadOnlyList<ICliContributor> contributors, CliCompletionContext context)
+    {
+        bool isCoreReaderOption = Validation.CliPipelineRules.InputRules.Contains(label);
+        bool isComponent = contributors.Any(c => c.BoundComponentName != null && context.CurrentInputPrefix == c.BoundComponentName + ":" && c.FlagPhases.ContainsKey(label));
+        return isCoreReaderOption || isComponent;
     }
 }

@@ -47,6 +47,38 @@ public class CliProviderFactory<TService> : ICliContributor, IDataFactory
 		return _cliOptions ??= CliOptionBuilder.GenerateOptionsForType(_descriptor.OptionsType).ToList();
 	}
 
+	public string? BoundComponentName => _descriptor.ComponentName;
+
+	protected virtual CliPipelinePhase DerivePhase()
+	{
+		if (typeof(TService) == typeof(IStreamReader)) return CliPipelinePhase.Reader;
+		if (typeof(TService) == typeof(IDataWriter)) return CliPipelinePhase.Writer;
+		return CliPipelinePhase.Global;
+	}
+
+	private IReadOnlyDictionary<string, CliPipelinePhase>? _flagPhases;
+	public IReadOnlyDictionary<string, CliPipelinePhase> FlagPhases
+	{
+		get
+		{
+			if (_flagPhases == null)
+			{
+				var phases = new Dictionary<string, CliPipelinePhase>(StringComparer.OrdinalIgnoreCase);
+				var phase = DerivePhase();
+				foreach (var opt in GetCliOptions())
+				{
+					phases[opt.Name] = phase;
+					foreach (var alias in opt.Aliases)
+					{
+						phases[alias] = phase;
+					}
+				}
+				_flagPhases = phases;
+			}
+			return _flagPhases;
+		}
+	}
+
 	public void BindOptions(ParseResult parseResult, OptionsRegistry registry)
 	{
 		var options = GetCliOptions();
@@ -97,6 +129,16 @@ public class CliDataWriterFactory : CliProviderFactory<IDataWriter>, IDataWriter
 
 		// 3. Resolve Table
 		ResolveGenericOption(specificOptions, "Table", pipelineOptions.Table, _descriptor.ComponentName);
+
+		var tableProp = specificOptions.GetType().GetProperty("Table");
+		if (tableProp != null)
+		{
+			var tableValue = tableProp.GetValue(specificOptions) as string;
+			if (string.IsNullOrWhiteSpace(tableValue))
+			{
+				throw new InvalidOperationException($"A target table is required for provider '{_descriptor.ComponentName}'. Use --table \"[name]\"");
+			}
+		}
 
 		// Use the descriptor to create.
 		return _descriptor.Create(pipelineOptions.OutputPath, specificOptions, _serviceProvider);
@@ -209,6 +251,8 @@ public class CliXStreamerFactory : CliProviderFactory<IStreamReader>, IXStreamer
     public XStreamerChannelMode ChannelMode => _xStreamerDescriptor.ChannelMode;
 
     public bool RequiresQuery => _xStreamerDescriptor.RequiresQuery;
+
+    protected override CliPipelinePhase DerivePhase() => CliPipelinePhase.XStreamer;
 
     public IStreamReader Create(OptionsRegistry registry)
     {

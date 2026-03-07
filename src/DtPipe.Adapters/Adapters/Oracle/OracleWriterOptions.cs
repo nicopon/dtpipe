@@ -35,8 +35,8 @@ public record OracleWriterOptions : IProviderOptions, IKeyAwareOptions
 	[ComponentOption(Description = "Mapping for DateTime columns (Date, Timestamp)", Hidden = true)]
 	public OracleDateTimeMapping DateTimeMapping { get; init; } = OracleDateTimeMapping.Date;
 
-	[ComponentOption(Description = "Target table name", Hidden = true)]
-	public string Table { get; set; } = "export";
+	[ComponentOption(Description = "Target table name", Required = true)]
+	public string Table { get; set; } = string.Empty;
 
 	[ComponentOption(Description = "Data write strategy (Append, Truncate, DeleteThenInsert)", Hidden = true)]
 	public OracleWriteStrategy? Strategy { get; set; }

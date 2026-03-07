@@ -50,7 +50,6 @@ public static class CliPipelineRules
     /// </summary>
     public static readonly HashSet<string> SingletonFlags = new(StringComparer.OrdinalIgnoreCase)
     {
-        "-i", "--input",
         "-o", "--output",
         "-q", "--query",
         "--alias",
@@ -61,7 +60,8 @@ public static class CliPipelineRules
         "--strategy", "-s",
         "--insert-mode",
         "--table", "-t",
-        "--job"
+        "--job",
+        "--main"
     };
 
     /// <summary>

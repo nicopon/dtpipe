@@ -9,6 +9,7 @@ public class ComponentOptionAttribute : Attribute
 	public string? Description { get; set; }
 	public string[]? Aliases { get; set; }
 	public bool Hidden { get; set; }
+	public bool Required { get; set; }
 
 	public ComponentOptionAttribute() { }
 

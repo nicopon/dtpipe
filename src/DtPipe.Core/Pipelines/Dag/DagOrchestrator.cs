@@ -129,6 +129,27 @@ public class DagOrchestrator : IDagOrchestrator
 
             // Inject memory channel output if the branch doesn't explicitly define one
             var argsList = branch.Arguments.ToList();
+
+            if (branch.IsXStreamer)
+            {
+                // Ensure the XStreamer engine is explicitly present in the args for the branch executor
+                // if it was omitted by the user (shorthand -x or --xstreamer without value).
+                var engineInArgs = ExtractArgValue(argsList, "-x") ?? ExtractArgValue(argsList, "--xstreamer");
+                if (string.IsNullOrEmpty(engineInArgs) && !string.IsNullOrEmpty(branch.Input))
+                {
+                    // Find the flag and insert the engine after it
+                    var xFlags = new[] { "-x", "--xstreamer" };
+                    for (int i = 0; i < argsList.Count; i++)
+                    {
+                        if (xFlags.Contains(argsList[i], StringComparer.OrdinalIgnoreCase))
+                        {
+                            argsList.Insert(i + 1, branch.Input);
+                            break;
+                        }
+                    }
+                }
+            }
+
             if (string.IsNullOrEmpty(branch.Output))
             {
                 var mode = GetRequiredChannelMode(dag, branch.Alias);
@@ -248,7 +269,9 @@ public class DagOrchestrator : IDagOrchestrator
         int idx = list.FindIndex(a => a.Equals(argName, StringComparison.OrdinalIgnoreCase));
         if (idx >= 0 && idx + 1 < list.Count)
         {
-            return list[idx + 1];
+            var val = list[idx + 1];
+            if (val.StartsWith('-')) return null; // Looks like another flag
+            return val;
         }
         return null;
     }

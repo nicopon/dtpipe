@@ -45,7 +45,7 @@ class Program
 			.CreateLogger();
 
 		var jobService = serviceProvider.GetRequiredService<JobService>();
-		var (rootCommand, printHelp, coreOptions) = jobService.Build();
+		var (rootCommand, printHelp, coreOptions, flagPhases, contributors) = jobService.Build();
 
 		// Ensure cursor is restored on Ctrl+C
 		Console.CancelKeyPress += (_, _) => Console.CursorVisible = true;
@@ -58,16 +58,32 @@ class Program
             // Manual Autocompletion Support ([suggest] directive might be missing in 2.0.3 default Pipeline)
             if (effectiveArgs.Length > 1 && effectiveArgs[0].Equals("[suggest]", StringComparison.OrdinalIgnoreCase))
             {
-                if (int.TryParse(effectiveArgs[1], out var pos))
+                if (int.TryParse(effectiveArgs[1], out var rawPos))
                 {
-                    var rawWords = new[] { "dtpipe" }.Concat(effectiveArgs.Skip(2)).ToArray();
-                    if (pos >= rawWords.Length) Array.Resize(ref rawWords, pos + 1); // pad with ""
+                    // The shell scripts pass the command words starting with the executable name.
+                    // e.g. [suggest] <pos> dtpipe --input ... (wait, no. The shells pass the arguments AFTER the executable!).
+                    // Shell script: dtpipe [suggest] $pos "${args[@]:1}"
+                    // Since args[@]:1 strips the executable name, the array is shifted by 1.
+                    // But $pos still includes the executable index count!
+                    // We must deduct 1 from pos to match our effective array skipping the executable.
+                    int pos = Math.Max(0, rawPos - 1);
+
+                    var rawWords = effectiveArgs.Skip(2).ToArray();
+                    if (pos >= rawWords.Length)
+                    {
+                        var newWords = new string[pos + 1];
+                        Array.Copy(rawWords, newWords, rawWords.Length);
+                        for (int i = rawWords.Length; i < newWords.Length; i++) newWords[i] = "";
+                        rawWords = newWords;
+                    }
 
                     var completions = ContextualCompletionProvider.GetCompletions(
                         rootCommand,
                         rawWords,
                         pos,
-                        coreOptions.AllOptions);
+                        coreOptions.AllOptions,
+                        flagPhases,
+                        contributors);
 
                     foreach (var c in completions)
                         Console.WriteLine(c);
@@ -84,7 +100,17 @@ class Program
                 return 0;
             }
 
-			return await rootCommand.Parse(effectiveArgs).InvokeAsync();
+            var parseResult = rootCommand.Parse(effectiveArgs);
+            if (parseResult.Errors.Any())
+            {
+                foreach (var error in parseResult.Errors)
+                {
+                    Console.Error.WriteLine(error.Message);
+                }
+                return 1;
+            }
+
+			return await parseResult.InvokeAsync();
 		}
 		finally
 		{

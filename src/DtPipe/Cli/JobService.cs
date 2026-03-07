@@ -49,7 +49,7 @@ public class JobService
 		_contributors = list;
 	}
 
-	public (RootCommand Command, Action PrintHelp, CoreCliOptions CoreOptions) Build()
+	public (RootCommand Command, Action PrintHelp, CoreCliOptions CoreOptions, IReadOnlyDictionary<string, CliPipelinePhase> FlagPhases, IReadOnlyList<ICliContributor> Contributors) Build()
 	{
 		var readerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>();
 		var writerFactories = _serviceProvider.GetRequiredService<IEnumerable<IDataWriterFactory>>();
@@ -61,9 +61,22 @@ public class JobService
 		foreach (var opt in coreOptions) rootCommand.Add(opt);
 
 
+		var allFlagPhases = new Dictionary<string, CliPipelinePhase>(StringComparer.OrdinalIgnoreCase);
+
+		// 1. Core flag phases
+		foreach (var kv in CoreOptionsBuilder.CoreFlagPhases)
+			allFlagPhases.TryAdd(kv.Key, kv.Value);
+
 		// Add Contributor Options
 		foreach (var contributor in _contributors)
 		{
+			// Add specific contributor phase mappings
+			if (contributor.FlagPhases != null)
+			{
+				foreach (var kv in contributor.FlagPhases)
+					allFlagPhases.TryAdd(kv.Key, kv.Value);
+			}
+
 			foreach (var opt in contributor.GetCliOptions())
 			{
 				if (opt.Description?.StartsWith("[HIDDEN]", StringComparison.OrdinalIgnoreCase) == true) opt.Hidden = true;
@@ -103,7 +116,10 @@ public class JobService
                 return; // Exit if there are parsing errors
 			}
 
-			var dagDefinition = CliDagParser.Parse(rawArgs);
+			var xstreamerFactories = _serviceProvider.GetRequiredService<IEnumerable<IXStreamerFactory>>();
+			string? defaultXStreamer = xstreamerFactories.Count() == 1 ? xstreamerFactories.First().ComponentName : null;
+
+			var dagDefinition = CliDagParser.Parse(rawArgs, defaultXStreamer);
 
 			// 2. Enforce --job XOR manual pipeline
 			bool hasJob = rawArgs.Any(a => a.Equals("--job", StringComparison.OrdinalIgnoreCase));
@@ -265,6 +281,7 @@ public class JobService
 					};
 
 					await orchestrator.ExecuteAsync(dagDefinition, branchExecutor, ct);
+					return;
 				}
 				catch (Exception ex)
 				{
@@ -281,8 +298,8 @@ public class JobService
 			await executePipeline(parseResult, ct, rawArgs);
 		});
 
-		Action printHelp = () => PrintGroupedHelp(rootCommand, coreOptions, _contributors, _console);
-		return (rootCommand, printHelp, opts);
+		Action PrintHelpAction = () => PrintGroupedHelp(rootCommand, coreOptions, _contributors, _console);
+		return (rootCommand, PrintHelpAction, opts, allFlagPhases, _contributors.ToList());
 	}
 
 	private static void PrintGroupedHelp(RootCommand rootCommand, List<Option> coreOptions, IEnumerable<ICliContributor> contributors, IAnsiConsole console)

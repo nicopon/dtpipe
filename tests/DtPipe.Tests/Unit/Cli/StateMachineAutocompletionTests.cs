@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.CommandLine;
 using System.Linq;
 using DtPipe.Cli;
+using DtPipe.Cli.Infrastructure;
 using Xunit;
 
 namespace DtPipe.Tests.Unit.Cli;
@@ -34,10 +35,10 @@ public class StateMachineAutocompletionTests
     public void Phase0_Start_ShowsOnlyStartRules()
     {
         var root = BuildTestRootCommand(out var allOptions);
-        var rawWords = new[] { "dtpipe", "" };
-        int cursorPos = 1;
+        var rawWords = new[] { "" };
+        int cursorPos = 0;
 
-        var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions).ToList();
+        var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions, new Dictionary<string, CliPipelinePhase>(), Array.Empty<ICliContributor>()).ToList();
 
         Assert.Contains("--input", completions);
         Assert.Contains("--job", completions);
@@ -55,10 +56,10 @@ public class StateMachineAutocompletionTests
     public void Phase1_Input_HidesJobAndHelp_ShowsTransformersAndOutput()
     {
         var root = BuildTestRootCommand(out var allOptions);
-        var rawWords = new[] { "dtpipe", "--input", "gen:10", "" };
-        int cursorPos = 3;
+        var rawWords = new[] { "--input", "gen:10", "" };
+        int cursorPos = 2;
 
-        var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions).ToList();
+        var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions, new Dictionary<string, CliPipelinePhase>(), Array.Empty<ICliContributor>()).ToList();
 
         // Should contain Output (Priority) and Transformers
         Assert.Contains("--output", completions);
@@ -81,7 +82,7 @@ public class StateMachineAutocompletionTests
         var rawWords = new[] { "dtpipe", "--input", "gen:10", "--output", "csv:out", "" };
         int cursorPos = 5;
 
-        var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions).ToList();
+        var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions, new Dictionary<string, CliPipelinePhase>(), Array.Empty<ICliContributor>()).ToList();
 
         // Should contain OutputRules
         Assert.Contains("--strategy", completions);
@@ -109,10 +110,10 @@ public class StateMachineAutocompletionTests
     public void Phase1_XStreamer_PrioritizesMainAndRef()
     {
         var root = BuildTestRootCommand(out var allOptions);
-        var rawWords = new[] { "dtpipe", "--xstreamer", "duck", "" };
-        int cursorPos = 3;
+        var rawWords = new[] { "--xstreamer", "duck", "" };
+        int cursorPos = 2;
 
-        var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions).ToList();
+        var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions, new Dictionary<string, CliPipelinePhase>(), Array.Empty<ICliContributor>()).ToList();
 
         // Should prioritize --main and --ref
         Assert.True(completions.IndexOf("--main") < 4);
@@ -126,7 +127,7 @@ public class StateMachineAutocompletionTests
         var rawWords = new[] { "dtpipe", "--input", "gen:10", "--alias", "br1", "" };
         int cursorPos = 5;
 
-        var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions).ToList();
+        var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions, new Dictionary<string, CliPipelinePhase>(), Array.Empty<ICliContributor>()).ToList();
 
         // After --alias, we should be in Phase 2 (Global options, new branches)
         Assert.Contains("--dry-run", completions); // Global
@@ -145,7 +146,7 @@ public class StateMachineAutocompletionTests
         var rawWords = new[] { "dtpipe", "--input", "gen:10", "--mask", "x", "--main", "br1", "" };
         int cursorPos = 7;
 
-        var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions).ToList();
+        var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions, new Dictionary<string, CliPipelinePhase>(), Array.Empty<ICliContributor>()).ToList();
 
         // Branch 1 (after --main) is back to Phase 1 (Input/Transform)
         // because hasSeenSourceInCurrentBranch is TRUE but no terminator yet.

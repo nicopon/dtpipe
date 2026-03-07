@@ -20,6 +20,59 @@ public class CliDataTransformerFactory : IDataTransformerFactory, ICliContributo
 
 	public string ComponentName => _inner.ComponentName;
 	public string Category => _inner.Category;
+
+	public string? BoundComponentName => null; // Global transformers
+
+	private IReadOnlyDictionary<string, CliPipelinePhase>? _flagPhases;
+	public IReadOnlyDictionary<string, CliPipelinePhase> FlagPhases
+	{
+		get
+		{
+			if (_flagPhases == null)
+			{
+				var phases = new Dictionary<string, CliPipelinePhase>(StringComparer.OrdinalIgnoreCase);
+				foreach (var opt in GetCliOptions())
+				{
+					phases[opt.Name] = CliPipelinePhase.Transformer;
+					foreach (var alias in opt.Aliases)
+					{
+						phases[alias] = CliPipelinePhase.Transformer;
+					}
+				}
+				_flagPhases = phases;
+			}
+			return _flagPhases;
+		}
+	}
+
+	private IReadOnlyDictionary<string, string>? _flagDependencies;
+	public IReadOnlyDictionary<string, string> FlagDependencies
+	{
+		get
+		{
+			if (_flagDependencies == null)
+			{
+				var deps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+				var primaryFlagName = ComponentName.ToLowerInvariant();
+				string requiredFlag = $"--{primaryFlagName}";
+
+				foreach (var opt in GetCliOptions())
+				{
+					// If the option is NOT the primary flag itself
+					if (!opt.Name.Equals(requiredFlag, StringComparison.OrdinalIgnoreCase))
+					{
+						deps[opt.Name] = requiredFlag;
+						foreach (var alias in opt.Aliases)
+						{
+							deps[alias] = requiredFlag;
+						}
+					}
+				}
+				_flagDependencies = deps;
+			}
+			return _flagDependencies;
+		}
+	}
 	public Type OptionsType => _inner.OptionsType;
 
 	public bool CanHandle(string connectionString) => _inner.CanHandle(connectionString);

@@ -39,7 +39,7 @@ public static class DagValidator
             {
                 if (string.IsNullOrEmpty(branch.MainAlias))
                 {
-                    errors.Add($"XStreamer branch '{branch.Alias}' is missing its main source alias.");
+                    errors.Add($"XStreamer branch '{branch.Alias}' is missing its main source alias. Please specify it using '--main <alias>'.");
                 }
                 else if (!registeredAliases.Contains(branch.MainAlias))
                 {

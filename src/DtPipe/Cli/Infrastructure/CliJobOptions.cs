@@ -35,5 +35,5 @@ public sealed class CliJobOptions
     public required Option<bool?> NoSchemaValidation { get; init; }
     public required Option<string?> MetricsPath { get; init; }
     public required Option<bool?> AutoMigrate { get; init; }
-    public required Option<string[]> Xstreamer { get; init; }
+    public required Option<string> Xstreamer { get; init; }
 }

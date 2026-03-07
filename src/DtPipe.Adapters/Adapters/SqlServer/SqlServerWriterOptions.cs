@@ -15,8 +15,8 @@ public record SqlServerWriterOptions : IProviderOptions, IKeyAwareOptions
 	public static string DisplayName => "SQL Server Writer Options";
 	public string? Key { get; set; }
 
-	[ComponentOption(Description = "Target table name", Hidden = true)]
-	public string Table { get; set; } = "export";
+	[ComponentOption(Description = "Target table name", Required = true)]
+	public string Table { get; set; } = string.Empty;
 
 	[ComponentOption(Description = "Data write strategy (Append, Truncate, DeleteThenInsert)", Hidden = true)]
 	public SqlServerWriteStrategy? Strategy { get; set; }

@@ -32,4 +32,10 @@ public sealed record CliCompletionContext
 
     /// <summary>All available source flags (long names) for re-injection in Phase 2.</summary>
     public IReadOnlyList<string> AllSourceFlags { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// Active pipeline phase at the cursor position.
+    /// Derived from HasOutput, CurrentInputPrefix, and IsXStreamerBranch.
+    /// </summary>
+    public CliPipelinePhase ActivePhase { get; init; }
 }

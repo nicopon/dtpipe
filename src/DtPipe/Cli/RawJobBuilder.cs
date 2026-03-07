@@ -121,7 +121,7 @@ public static class RawJobBuilder
 				return (new JobDefinition { Input = "", Query = "", Output = "" }, 1);
 			}
 
-			var xstreamer = parseResult.GetValue(opts.Xstreamer)?.LastOrDefault();
+			var xstreamer = parseResult.GetValue(opts.Xstreamer);
 			if (string.IsNullOrWhiteSpace(input) && string.IsNullOrWhiteSpace(xstreamer))
 			{
 				Console.Error.WriteLine("Error: --input or --xstreamer is required.");

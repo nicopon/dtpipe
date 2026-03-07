@@ -25,7 +25,8 @@ public static class CliContextAnalyzer
         var optionMapper = new Dictionary<string, (string LongName, int MaxArity)>(StringComparer.OrdinalIgnoreCase);
         foreach (var opt in knownOptions)
         {
-            var entry = (opt.Name, opt.Arity.MaximumNumberOfValues);
+            string canonicalName = opt.Aliases.FirstOrDefault(a => a.StartsWith("--")) ?? (opt.Name.StartsWith("-") ? opt.Name : $"--{opt.Name}");
+            var entry = (canonicalName, opt.Arity.MaximumNumberOfValues);
             optionMapper[opt.Name] = entry;
             foreach (var alias in opt.Aliases)
             {
@@ -104,6 +105,17 @@ public static class CliContextAnalyzer
             }
         }
 
+        var activePhase = CliPipelinePhase.Global;
+        if (!hasSeenSourceInCurrentBranch)
+            activePhase = CliPipelinePhase.Global;
+        else if (!hasTerminator)
+            activePhase = CliPipelinePhase.Transformer;
+        else
+            activePhase = CliPipelinePhase.Writer;
+
+        if (isXStreamer && !hasTerminator)
+            activePhase = CliPipelinePhase.XStreamer;
+
         return new CliCompletionContext
         {
             CurrentBranchIndex = branchIndex,
@@ -114,6 +126,7 @@ public static class CliContextAnalyzer
             CurrentInputPrefix = currentInputPrefix,
             IsExpectingFlagValue = lastFlagExpectsValue,
             HasOutput = hasTerminator,
+            ActivePhase = activePhase,
             AllSourceFlags = knownOptions
                 .Where(o => CliPipelineRules.SourceFlags.Contains(o.Name))
                 .Select(o => o.Name)

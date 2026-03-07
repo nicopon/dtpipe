@@ -105,6 +105,12 @@ public class InspectCommand : Command
         }
 
         // 2. Set query if provided
+        if (factory.RequiresQuery && string.IsNullOrWhiteSpace(query))
+        {
+            console.MarkupLine($"[red]Error:[/] A query is required for provider '{factory.ComponentName}'. Use --query \"SELECT...\"");
+            return;
+        }
+
         if (!string.IsNullOrEmpty(query))
         {
             var optionsType = factory.GetSupportedOptionTypes().FirstOrDefault();

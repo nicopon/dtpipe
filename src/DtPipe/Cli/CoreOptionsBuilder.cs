@@ -11,6 +11,46 @@ namespace DtPipe.Cli;
 
 internal static class CoreOptionsBuilder
 {
+    public static IReadOnlyDictionary<string, CliPipelinePhase> CoreFlagPhases { get; } = new Dictionary<string, CliPipelinePhase>
+    {
+        { "--input",              CliPipelinePhase.Global },
+        { "--output",             CliPipelinePhase.Global },
+        { "--query",              CliPipelinePhase.Reader },
+        { "--alias",              CliPipelinePhase.Global },
+        { "--xstreamer",          CliPipelinePhase.Global },
+        { "--strategy",           CliPipelinePhase.Writer },
+        { "--insert-mode",        CliPipelinePhase.Writer },
+        { "--table",              CliPipelinePhase.Writer },
+        { "--pre-exec",           CliPipelinePhase.Writer },
+        { "--post-exec",          CliPipelinePhase.Writer },
+        { "--on-error-exec",      CliPipelinePhase.Writer },
+        { "--finally-exec",       CliPipelinePhase.Writer },
+        { "--strict-schema",      CliPipelinePhase.Writer },
+        { "--no-schema-validation", CliPipelinePhase.Writer },
+        { "--auto-migrate",       CliPipelinePhase.Writer },
+        { "--connection-timeout", CliPipelinePhase.Reader },
+        { "--query-timeout",      CliPipelinePhase.Reader },
+        { "--unsafe-query",       CliPipelinePhase.Reader },
+        { "--batch-size",         CliPipelinePhase.Global },
+        { "--limit",              CliPipelinePhase.Global },
+        { "--no-stats",           CliPipelinePhase.Global },
+        { "--dry-run",            CliPipelinePhase.Global },
+        { "--log",                CliPipelinePhase.Global },
+        { "--key",                CliPipelinePhase.Global },
+        { "--max-retries",        CliPipelinePhase.Global },
+        { "--retry-delay-ms",     CliPipelinePhase.Global },
+        { "--sampling-rate",      CliPipelinePhase.Global },
+        { "--sampling-seed",      CliPipelinePhase.Global },
+        { "--job",                CliPipelinePhase.Global },
+        { "--export-job",         CliPipelinePhase.Global },
+        { "--metrics-path",       CliPipelinePhase.Global },
+        // DAG
+        { "--main",               CliPipelinePhase.XStreamer },
+        { "--ref",                CliPipelinePhase.XStreamer },
+        { "--src-main",           CliPipelinePhase.XStreamer },
+        { "--src-ref",            CliPipelinePhase.XStreamer },
+    };
+
     public static CoreCliOptions Build(
         IEnumerable<IStreamReaderFactory>? readerFactories = null,
         IEnumerable<IDataWriterFactory>? writerFactories = null,
@@ -97,11 +137,20 @@ internal static class CoreOptionsBuilder
         retryDelayMsOption.DefaultValueFactory = _ => 1000;
 
         // DAG Options
-        var xstreamerOption = new Option<string[]>("--xstreamer") { Description = "XStreamer provider (e.g. duck)" };
+        var xstreamerOption = new Option<string>("--xstreamer")
+        {
+            Description = "XStreamer provider (e.g. fusion-engine)",
+            Arity = ArgumentArity.ZeroOrOne
+        };
         xstreamerOption.Aliases.Add("-x");
         xstreamerOption.CompletionSources.Add(ctx => GetXStreamerSuggestions(ctx, xstreamerFactories));
 
         var aliasOption = new Option<string[]>("--alias") { Description = "Alias(es) for the current DAG branch or streams" };
+
+        var mainOption = new Option<string>("--main") { Description = "Main source alias for XStreamer" };
+        var refOption = new Option<string[]>("--ref") { Description = "Secondary source alias(es) for XStreamer" };
+        var srcMainOption = new Option<string>("--src-main") { Description = "Source-main alias for DAG orchestration" };
+        var srcRefOption = new Option<string[]>("--src-ref") { Description = "Source-ref alias(es) for DAG orchestration" };
 
         var allList = new List<Option>
         {
@@ -109,7 +158,8 @@ internal static class CoreOptionsBuilder
             unsafeQueryOption, dryRunOption, noStatsOption, limitOption, samplingRateOption, samplingSeedOption, keyOption,
             jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption, finallyExecOption,
             strategyOption, insertModeOption, tableOption, maxRetriesOption, retryDelayMsOption, strictSchemaOption,
-            noSchemaValidationOption, metricsPathOption, autoMigrateOption, xstreamerOption, aliasOption
+            noSchemaValidationOption, metricsPathOption, autoMigrateOption, xstreamerOption, aliasOption,
+            mainOption, refOption, srcMainOption, srcRefOption
         };
 
         foreach (var opt in allList)
@@ -124,15 +174,40 @@ internal static class CoreOptionsBuilder
             keyOption, jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption,
             finallyExecOption, strategyOption, insertModeOption, tableOption, maxRetriesOption, retryDelayMsOption,
             strictSchemaOption, noSchemaValidationOption, metricsPathOption, autoMigrateOption, xstreamerOption,
-            aliasOption, allList);
+            aliasOption, mainOption, refOption, srcMainOption, srcRefOption, allList);
     }
 
     private static IEnumerable<CompletionItem> GetInputSuggestions(CompletionContext context, IEnumerable<IStreamReaderFactory>? factories)
     {
-        if (Environment.GetEnvironmentVariable("DEBUG") == "1")
-            Console.Error.WriteLine($"[DEBUG] GetInputSuggestions called. Factories: {factories?.Count() ?? 0}");
-
         var suggestions = new List<CompletionItem>();
+
+        // We only want to suggest providers (and keyrings) if we are IMMEDIATELY after the flag.
+        // E.g. "dtpipe --input [TAB]" should suggest. "dtpipe --input generate:10 [TAB]" should NOT suggest.
+        bool isImmediatelyAfterFlag = false;
+        try
+        {
+            var tokens = context.ParseResult?.Tokens.Where(t => !string.IsNullOrEmpty(t.Value)).ToList();
+            if (tokens != null && tokens.Count > 0)
+            {
+                string wordToComplete = context.WordToComplete ?? "";
+                string? relevantToken = null;
+
+                if (string.IsNullOrEmpty(wordToComplete))
+                {
+                    relevantToken = tokens.Last().Value;
+                }
+                else if (tokens.Count > 1)
+                {
+                    relevantToken = tokens[tokens.Count - 2].Value;
+                }
+
+                if (relevantToken == "-i" || relevantToken == "--input") isImmediatelyAfterFlag = true;
+            }
+        }
+        catch { /* Best effort */ }
+
+        if (!isImmediatelyAfterFlag) return suggestions; // Empty
+
         if (factories != null)
         {
             foreach (var f in factories) suggestions.Add(new CompletionItem(f.ComponentName + ":[NOSUSP]"));
@@ -143,22 +218,10 @@ internal static class CoreOptionsBuilder
             bool isTestRun = AppDomain.CurrentDomain.GetAssemblies().Any(a => a.FullName?.Contains("xunit") == true);
             if (!isTestRun && context.ParseResult != null)
             {
-                // Only query the keychain if the user is actually typing something that looks like 'keyring://'
-                // or if they are explicitly autocompleting the value of the 'input' option.
-                // This prevents the keychain prompt from appearing during generic root-level autocompletion.
                 string word = context.WordToComplete?.ToLowerInvariant() ?? "";
                 bool looksLikeKeyring = word.StartsWith("k");
 
-                // Also check if the previous token was -i or --input
-                bool isInputOptionValue = false;
-                var tokens = context.ParseResult.Tokens;
-                if (tokens.Count > 0)
-                {
-                    var lastToken = tokens.Last().Value;
-                    if (lastToken == "-i" || lastToken == "--input") isInputOptionValue = true;
-                }
-
-                if (looksLikeKeyring || isInputOptionValue)
+                if (looksLikeKeyring)
                 {
                     var secrets = new SecretsManager().ListSecrets();
                     foreach (var alias in secrets.Keys) suggestions.Add(new CompletionItem($"keyring://{alias}"));
@@ -173,6 +236,32 @@ internal static class CoreOptionsBuilder
     private static IEnumerable<CompletionItem> GetOutputSuggestions(CompletionContext context, IEnumerable<IDataWriterFactory>? factories)
     {
         var suggestions = new List<CompletionItem>();
+
+        bool isImmediatelyAfterFlag = false;
+        try
+        {
+            var tokens = context.ParseResult?.Tokens.Where(t => !string.IsNullOrEmpty(t.Value)).ToList();
+            if (tokens != null && tokens.Count > 0)
+            {
+                string wordToComplete = context.WordToComplete ?? "";
+                string? relevantToken = null;
+
+                if (string.IsNullOrEmpty(wordToComplete))
+                {
+                    relevantToken = tokens.Last().Value;
+                }
+                else if (tokens.Count > 1)
+                {
+                    relevantToken = tokens[tokens.Count - 2].Value;
+                }
+
+                if (relevantToken == "-o" || relevantToken == "--output") isImmediatelyAfterFlag = true;
+            }
+        }
+        catch { /* Best effort */ }
+
+        if (!isImmediatelyAfterFlag) return suggestions;
+
         if (factories != null)
         {
             foreach (var f in factories) suggestions.Add(new CompletionItem(f.ComponentName + ":[NOSUSP]"));
@@ -221,7 +310,11 @@ public record CoreCliOptions(
     Option<bool?> NoSchemaValidation,
     Option<string?> MetricsPath,
     Option<bool?> AutoMigrate,
-    Option<string[]> Xstreamer,
+    Option<string> Xstreamer,
     Option<string[]> Alias,
+    Option<string> Main,
+    Option<string[]> Ref,
+    Option<string> SrcMain,
+    Option<string[]> SrcRef,
     List<Option> AllOptions
 );

@@ -1,5 +1,6 @@
 using System.CommandLine;
 using DtPipe.Cli;
+using DtPipe.Cli.Infrastructure;
 using Xunit;
 
 namespace DtPipe.Tests.Unit.Cli;
@@ -22,7 +23,7 @@ public class ContextualCompletionProviderTests
         var rawWords = new[] { "dtpipe", "--input", "pg:A", "--alias", "brA", "-x", "duck", "--main", "" };
         int cursorPos = 8; // index of the empty string
 
-        var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions);
+        var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions, new Dictionary<string, CliPipelinePhase>(), Array.Empty<ICliContributor>());
 
         Assert.Single(completions);
         Assert.Equal("brA", completions.First());
@@ -36,7 +37,7 @@ public class ContextualCompletionProviderTests
         var rawWords = new[] { "dtpipe", "--strategy", "Append", "--stra" };
         int cursorPos = 3;
 
-        var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions).ToList();
+        var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions, new Dictionary<string, CliPipelinePhase>(), Array.Empty<ICliContributor>()).ToList();
 
         Assert.DoesNotContain("--strategy", completions);
         Assert.DoesNotContain("-s", completions);
@@ -49,7 +50,7 @@ public class ContextualCompletionProviderTests
         var rawWords = new[] { "dtpipe", "-x", "duck", "--main", "" };
         int cursorPos = 4;
 
-        var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions);
+        var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions, new Dictionary<string, CliPipelinePhase>(), Array.Empty<ICliContributor>());
 
         Assert.Empty(completions);
     }
@@ -62,7 +63,7 @@ public class ContextualCompletionProviderTests
         var rawWords = new[] { "dtpipe", "--input", "pg:orders", "" };
         int cursorPos = 3;
 
-        var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions).ToList();
+        var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions, new Dictionary<string, CliPipelinePhase>(), Array.Empty<ICliContributor>()).ToList();
 
         // --output should be in the first 2 slots
         Assert.True(completions.IndexOf("--output") < 2);
@@ -76,7 +77,7 @@ public class ContextualCompletionProviderTests
         var rawWords = new[] { "dtpipe", "" };
         int cursorPos = 1;
 
-        var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions).ToList();
+        var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions, new Dictionary<string, CliPipelinePhase>(), Array.Empty<ICliContributor>()).ToList();
 
         // Should contain input
         Assert.Contains("--input", completions);
@@ -99,7 +100,7 @@ public class ContextualCompletionProviderTests
         var rawWords = new[] { "dtpipe", "--input", "pg:orders", "--output", "csv:out.csv", "" };
         int cursorPos = 5;
 
-        var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions).ToList();
+        var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions, new Dictionary<string, CliPipelinePhase>(), Array.Empty<ICliContributor>()).ToList();
 
         // Should NOT contain transformers
         Assert.DoesNotContain("--format", completions);

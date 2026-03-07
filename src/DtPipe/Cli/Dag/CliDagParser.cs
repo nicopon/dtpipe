@@ -18,8 +18,9 @@ public static class CliDagParser
     /// Parses the raw command line arguments into a JobDagDefinition.
     /// </summary>
     /// <param name="args">The raw args from Environment.GetCommandLineArgs() (excluding the executable path).</param>
+    /// <param name="defaultXStreamer">Optional default XStreamer if unspecified.</param>
     /// <returns>A parsed DAG definition containing global arguments and specific branches.</returns>
-    public static JobDagDefinition Parse(string[] args)
+    public static JobDagDefinition Parse(string[] args, string? defaultXStreamer = null)
     {
         if (args == null || args.Length == 0)
         {
@@ -29,13 +30,11 @@ public static class CliDagParser
         var branches = new List<BranchDefinition>();
         var currentBranchArgs = new List<string>();
 
-        int startAt = 0;
-
         bool isCurrentBranchXStreamer = false;
         bool hasSeenInputInCurrentBranch = false;
         int branchCounter = 0;
 
-        for (int i = startAt; i < args.Length; i++)
+        for (int i = 0; i < args.Length; i++)
         {
             var arg = args[i];
 
@@ -44,7 +43,7 @@ public static class CliDagParser
                 // We've hit an XStreamer boundary. Finish the current branch.
                 if (currentBranchArgs.Count > 0)
                 {
-                    branches.Add(CreateBranch(currentBranchArgs, isCurrentBranchXStreamer, ref branchCounter));
+                    branches.Add(CreateBranch(currentBranchArgs, isCurrentBranchXStreamer, ref branchCounter, defaultXStreamer));
                     currentBranchArgs.Clear();
                 }
 
@@ -61,7 +60,7 @@ public static class CliDagParser
                 {
                     if (currentBranchArgs.Count > 0)
                     {
-                        branches.Add(CreateBranch(currentBranchArgs, isCurrentBranchXStreamer, ref branchCounter));
+                        branches.Add(CreateBranch(currentBranchArgs, isCurrentBranchXStreamer, ref branchCounter, defaultXStreamer));
                         currentBranchArgs.Clear();
                     }
                 }
@@ -79,7 +78,7 @@ public static class CliDagParser
         // Add the last branch
         if (currentBranchArgs.Count > 0)
         {
-            branches.Add(CreateBranch(currentBranchArgs, isCurrentBranchXStreamer, ref branchCounter));
+            branches.Add(CreateBranch(currentBranchArgs, isCurrentBranchXStreamer, ref branchCounter, defaultXStreamer));
         }
 
         return new JobDagDefinition
@@ -88,7 +87,7 @@ public static class CliDagParser
         };
     }
 
-    private static BranchDefinition CreateBranch(List<string> args, bool isXStreamer, ref int branchCounter)
+    private static BranchDefinition CreateBranch(List<string> args, bool isXStreamer, ref int branchCounter, string? defaultXStreamer = null)
     {
         string? alias = ExtractArgValue(args.ToArray(), "--alias");
 
@@ -100,12 +99,19 @@ public static class CliDagParser
         branchCounter++;
 
         var argsArray = args.ToArray();
+        var input = ExtractArgValue(argsArray, "-i") ?? ExtractArgValue(argsArray, "--input");
+
+        if (input == null && isXStreamer)
+        {
+            input = ExtractArgValue(argsArray, "--xstreamer") ?? ExtractArgValue(argsArray, "-x") ?? defaultXStreamer;
+        }
+
         return new BranchDefinition
         {
             Alias = alias,
             Arguments = argsArray,
             IsXStreamer = isXStreamer,
-            Input = ExtractArgValue(argsArray, "-i") ?? ExtractArgValue(argsArray, "--input"),
+            Input = input,
             Output = ExtractArgValue(argsArray, "-o") ?? ExtractArgValue(argsArray, "--output"),
             MainAlias = ExtractArgValue(argsArray, "--main"),
             RefAliases = ExtractAllArgValues(argsArray, "--ref")
@@ -148,7 +154,14 @@ public static class CliDagParser
     private static string? ExtractArgValue(string[] args, string flag)
     {
         for (int i = 0; i < args.Length - 1; i++)
-            if (args[i].Equals(flag, StringComparison.OrdinalIgnoreCase)) return args[i + 1];
+        {
+            if (args[i].Equals(flag, StringComparison.OrdinalIgnoreCase))
+            {
+                var val = args[i + 1];
+                if (val.StartsWith('-')) return null; // Looks like another flag
+                return val;
+            }
+        }
         return null;
     }
 
