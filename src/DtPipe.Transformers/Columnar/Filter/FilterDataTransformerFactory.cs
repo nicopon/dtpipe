@@ -56,7 +56,10 @@ public class FilterDataTransformerFactory : IDataTransformerFactory
 			// But usually it's healthier to use config.Mappings if it's a dict
 			foreach (var kvp in config.Mappings)
 			{
-				filters.Add($"{kvp.Key}:{kvp.Value}");
+				if (string.IsNullOrEmpty(kvp.Value))
+					filters.Add(kvp.Key);
+				else
+					filters.Add($"{kvp.Key}:{kvp.Value}");
 			}
 		}
 

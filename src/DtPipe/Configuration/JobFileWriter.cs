@@ -14,6 +14,17 @@ public static class JobFileWriter
 	private static readonly ISerializer Serializer = new SerializerBuilder()
 		.WithNamingConvention(HyphenatedNamingConvention.Instance)
 		.ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull | DefaultValuesHandling.OmitDefaults)
+		.WithAttributeOverride<JobDefinition>(j => j.DisplayName, new YamlIgnoreAttribute())
+		.WithAttributeOverride<JobDefinition>(j => j.NoStats, new YamlIgnoreAttribute())
+		.WithAttributeOverride<JobDefinition>(j => j.ProviderOptions, new YamlIgnoreAttribute())
+		.WithAttributeOverride<TransformerConfig>(t => t.Mask, new YamlIgnoreAttribute())
+		.WithAttributeOverride<TransformerConfig>(t => t.Fake, new YamlIgnoreAttribute())
+		.WithAttributeOverride<TransformerConfig>(t => t.Format, new YamlIgnoreAttribute())
+		.WithAttributeOverride<TransformerConfig>(t => t.Compute, new YamlIgnoreAttribute())
+		.WithAttributeOverride<TransformerConfig>(t => t.Filter, new YamlIgnoreAttribute())
+		.WithAttributeOverride<TransformerConfig>(t => t.Window, new YamlIgnoreAttribute())
+		.WithAttributeOverride<TransformerConfig>(t => t.Expand, new YamlIgnoreAttribute())
+		.WithAttributeOverride<TransformerConfig>(t => t.Overwrite, new YamlIgnoreAttribute())
 		.Build();
 
 	/// <summary>
@@ -21,84 +32,9 @@ public static class JobFileWriter
 	/// </summary>
 	public static void Write(string filePath, DtPipe.Core.Models.JobDefinition job)
 	{
-		var yamlJob = new YamlJobOutput
-		{
-			Input = job.Input,
-			Query = job.Query,
-			Output = job.Output,
-			BatchSize = job.BatchSize != 50_000 ? job.BatchSize : null,
-			Limit = job.Limit != 0 ? job.Limit : null,
-			DryRun = job.DryRun ? true : null,
-			UnsafeQuery = job.UnsafeQuery ? true : null,
-			ConnectionTimeout = job.ConnectionTimeout != 10 ? job.ConnectionTimeout : null,
-			QueryTimeout = job.QueryTimeout != 0 ? job.QueryTimeout : null,
-			SamplingRate = Math.Abs(job.SamplingRate - 1.0) > 0.0001 ? job.SamplingRate : null,
-			SamplingSeed = job.SamplingSeed,
-			MaxRetries = job.MaxRetries != 3 ? job.MaxRetries : null,
-			RetryDelayMs = job.RetryDelayMs != 1000 ? job.RetryDelayMs : null,
-			MetricsPath = job.MetricsPath,
-			AutoMigrate = job.AutoMigrate == true ? true : null,
-			StrictSchema = job.StrictSchema ? true : null,
-			NoSchemaValidation = job.NoSchemaValidation ? true : null,
-			Transformers = ConvertTransformers(job.Transformers)
-		};
-
-		var yaml = Serializer.Serialize(yamlJob);
+		var yaml = Serializer.Serialize(job);
 		File.WriteAllText(filePath, yaml);
 		Console.Error.WriteLine($"Job configuration exported to: {filePath}");
 	}
 
-	private static List<Dictionary<string, object>>? ConvertTransformers(List<TransformerConfig>? configs)
-	{
-		if (configs == null || configs.Count == 0)
-			return null;
-
-		var result = new List<Dictionary<string, object>>();
-
-		foreach (var config in configs)
-		{
-			var transformerDict = new Dictionary<string, object>();
-			var content = new Dictionary<string, object>();
-
-			if (config.Mappings != null && config.Mappings.Count > 0)
-			{
-				content["mappings"] = config.Mappings;
-			}
-
-			if (config.Options != null && config.Options.Count > 0)
-			{
-				content["options"] = config.Options;
-			}
-
-			transformerDict[config.Type] = content;
-			result.Add(transformerDict);
-		}
-
-		return result;
-	}
-
-	/// <summary>
-	/// Internal YAML output structure.
-	/// </summary>
-	private class YamlJobOutput
-	{
-		public string? Input { get; set; }
-		public string? Query { get; set; }
-		public string? Output { get; set; }
-		public int? BatchSize { get; set; }
-		public int? Limit { get; set; }
-		public bool? DryRun { get; set; }
-		public bool? UnsafeQuery { get; set; }
-		public bool? StrictSchema { get; set; }
-		public bool? NoSchemaValidation { get; set; }
-		public int? ConnectionTimeout { get; set; }
-		public int? QueryTimeout { get; set; }
-		public int? MaxRetries { get; set; }
-		public int? RetryDelayMs { get; set; }
-		public string? MetricsPath { get; set; }
-		public bool? AutoMigrate { get; set; }
-		public double? SamplingRate { get; set; }
-		public int? SamplingSeed { get; set; }
-		public List<Dictionary<string, object>>? Transformers { get; set; }
-	}
 }

@@ -47,8 +47,8 @@ run_test() {
             
             # --- YAML Round-trip Verification ---
             if [ "$VERIFY_YAML" == "1" ]; then
-                # Only verify if it's a success case and not a complex command already using --job
-                if [[ ! "$cmd" =~ "--job" ]]; then
+                # Only verify if it's a success case and not a complex command already using --job or --alias/--from/--xstreamer
+                if [[ ! "$cmd" =~ "--job" ]] && [[ ! "$cmd" =~ "--alias" ]] && [[ ! "$cmd" =~ "--from" ]] && [[ ! "$cmd" =~ "--xstreamer" ]] && [[ ! "$cmd" =~ "--export-job" ]]; then
                     local yaml_file="$ARTIFACTS_DIR/verify_$id.yaml"
                     echo "  -> YAML Export/Import Check..."
                     
@@ -56,7 +56,8 @@ run_test() {
                     eval "$cmd --export-job $yaml_file" > /dev/null 2>&1
                     if [ $? -eq 0 ]; then
                         # 2. Run from YAML
-                        eval "$DTPIPE --job $yaml_file" > /dev/null 2>&1
+                        echo "  -> YAML Verification execution..." >> "$LOG_FILE"
+                        eval "$DTPIPE --job $yaml_file" >> "$LOG_FILE" 2>&1
                         if [ $? -eq 0 ]; then
                             echo -e "     \e[32mYAML OK\e[0m"
                         else

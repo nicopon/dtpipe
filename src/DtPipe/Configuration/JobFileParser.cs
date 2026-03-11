@@ -37,33 +37,18 @@ public static partial class JobFileParser
 		// Interpolate environment variables
 		content = InterpolateEnvVars(content);
 
-		var yamlJob = Deserializer.Deserialize<YamlJobFile>(content);
+		// 1. Primary hydration (Scalars and simple collections)
+		var job = Deserializer.Deserialize<DtPipe.Core.Models.JobDefinition>(content);
 
-		// Validate required fields (Relaxed for export/partial jobs - T40)
-		// if (string.IsNullOrWhiteSpace(yamlJob.Input))
-		// 	throw new InvalidOperationException("Job file missing required field: input");
-
-		// if (string.IsNullOrWhiteSpace(yamlJob.Output))
-		// 	throw new InvalidOperationException("Job file missing required field: output");
-
-		return new DtPipe.Core.Models.JobDefinition
+		// 2. Specialized hydration for Transformers (due to flexible structure handled by ParseTransformers)
+		var rawMap = Deserializer.Deserialize<Dictionary<string, object>>(content);
+		if (rawMap.TryGetValue("transformers", out var transObj) && transObj is List<object> transList)
 		{
-			Input = yamlJob.Input,
-			Query = yamlJob.Query,
-			Output = yamlJob.Output,
-			BatchSize = yamlJob.BatchSize ?? 50_000,
-			Limit = yamlJob.Limit ?? 0,
-			DryRun = yamlJob.DryRun ?? false,
-			UnsafeQuery = yamlJob.UnsafeQuery ?? false,
-			ConnectionTimeout = yamlJob.ConnectionTimeout ?? 10,
-			QueryTimeout = yamlJob.QueryTimeout ?? 0,
-			Strategy = yamlJob.Strategy,
-			InsertMode = yamlJob.InsertMode,
-			SamplingRate = yamlJob.SamplingRate ?? 1.0,
-			SamplingSeed = yamlJob.SamplingSeed,
-			Transformers = ParseTransformers(yamlJob.Transformers),
-			ProviderOptions = yamlJob.ProviderOptions
-		};
+			var yamlTransformers = transList.OfType<Dictionary<object, object>>().ToList();
+			job = job with { Transformers = ParseTransformers(yamlTransformers) };
+		}
+
+		return job;
 	}
 
 	/// <summary>
@@ -95,6 +80,23 @@ public static partial class JobFileParser
 
 		foreach (var transformerDict in transformers)
 		{
+			// Support new "sane" format: - type: fake, mappings: { ... }
+			if (transformerDict.TryGetValue("type", out var typeObj))
+			{
+				var type = typeObj?.ToString() ?? string.Empty;
+				var config = new TransformerConfig { Type = type };
+				
+				if (transformerDict.TryGetValue("mappings", out var m) && m is Dictionary<object, object> mDict)
+					config = config with { Mappings = ParseStringDictionary(mDict) };
+				
+				if (transformerDict.TryGetValue("options", out var o) && o is Dictionary<object, object> oDict)
+					config = config with { Options = ParseStringDictionary(oDict) };
+					
+				result.Add(config);
+				continue;
+			}
+
+			// Support legacy "shortcut" format: - fake: { ... }
 			foreach (var kvp in transformerDict)
 			{
 				var type = kvp.Key?.ToString() ?? string.Empty;
@@ -110,10 +112,6 @@ public static partial class JobFileParser
 				if (value is Dictionary<object, object> dict)
 				{
 					// Check if this is a complex structure with explicit 'mappings' or 'options' keys
-					// Example:
-					// - type: complex-transformer
-					//   mappings: { ... }
-					//   options: { ... }
 					object? mappingsObj = null;
 					object? optionsObj = null;
 
@@ -137,9 +135,6 @@ public static partial class JobFileParser
 					else
 					{
 						// Simple structure: the dictionary itself is the mappings
-						// Example:
-						// - type: simple-transformer
-						//   col1: upper(col1)
 						config = config with { Mappings = ParseStringDictionary(dict) };
 					}
 				}
@@ -167,22 +162,4 @@ public static partial class JobFileParser
 	/// <summary>
 	/// Internal YAML structure for flexible parsing.
 	/// </summary>
-	private class YamlJobFile
-	{
-		public string? Input { get; set; }
-		public string? Query { get; set; }
-		public string? Output { get; set; }
-		public int? BatchSize { get; set; }
-		public int? Limit { get; set; }
-		public bool? DryRun { get; set; }
-		public bool? UnsafeQuery { get; set; }
-		public string? Strategy { get; set; }
-		public string? InsertMode { get; set; }
-		public int? ConnectionTimeout { get; set; }
-		public int? QueryTimeout { get; set; }
-		public double? SamplingRate { get; set; }
-		public int? SamplingSeed { get; set; }
-		public List<Dictionary<object, object>>? Transformers { get; set; }
-		public Dictionary<string, Dictionary<string, object>>? ProviderOptions { get; set; }
-	}
 }

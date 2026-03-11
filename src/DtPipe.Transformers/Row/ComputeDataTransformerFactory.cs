@@ -66,7 +66,13 @@ public class ComputeDataTransformerFactory : IDataTransformerFactory
 
 		if (config.Compute != null && config.Compute.Any())
 		{
-			mappings.AddRange(config.Compute.Select(kvp => $"{kvp.Key}:{ResolveScriptContent(kvp.Value)}"));
+			foreach (var kvp in config.Compute)
+			{
+				if (string.IsNullOrEmpty(kvp.Value))
+					mappings.Add(kvp.Key);
+				else
+					mappings.Add($"{kvp.Key}:{ResolveScriptContent(kvp.Value)}");
+			}
 		}
 
 		if (!mappings.Any()) return null;
