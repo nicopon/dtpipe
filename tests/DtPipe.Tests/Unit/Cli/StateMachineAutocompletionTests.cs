@@ -1,8 +1,11 @@
 using System.Collections.Generic;
 using System.CommandLine;
 using System.Linq;
+using FluentAssertions;
 using DtPipe.Cli;
 using DtPipe.Cli.Infrastructure;
+using DtPipe.Core.Abstractions;
+using DtPipe.Core.Models;
 using Xunit;
 
 namespace DtPipe.Tests.Unit.Cli;
@@ -121,7 +124,7 @@ public class StateMachineAutocompletionTests
     }
 
     [Fact]
-    public void Alias_ActsAsTerminator_EntersPhase2()
+    public void Alias_NoLongerTerminator_StaysInTransformerPhase()
     {
         var root = BuildTestRootCommand(out var allOptions);
         var rawWords = new[] { "dtpipe", "--input", "gen:10", "--alias", "br1", "" };
@@ -129,12 +132,12 @@ public class StateMachineAutocompletionTests
 
         var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions, new Dictionary<string, CliPipelinePhase>(), Array.Empty<ICliContributor>()).ToList();
 
-        // After --alias, we should be in Phase 2 (Global options, new branches)
-        Assert.Contains("--dry-run", completions); // Global
-        Assert.Contains("--input", completions);   // New brand start
+        // After --alias, we should still be in Phase 1 (Transformers allowed, Global options hidden to guide pipeline)
+        Assert.DoesNotContain("--dry-run", completions); // Global is hidden in Phase 1
+        Assert.Contains("--input", completions);   // New branch start is always allowed
 
-        // Should NOT contain Transformers (they are forbidden after a Sink/Alias)
-        Assert.DoesNotContain("--mask", completions);
+        // Transformers should STILL be available because --alias is not a terminator
+        Assert.Contains("--mask", completions);
     }
 
     [Fact]

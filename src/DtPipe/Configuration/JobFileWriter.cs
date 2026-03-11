@@ -1,4 +1,5 @@
 using DtPipe.Core.Pipelines;
+using DtPipe.Core.Models;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
@@ -18,7 +19,7 @@ public static class JobFileWriter
 	/// <summary>
 	/// Writes a JobDefinition to a YAML file.
 	/// </summary>
-	public static void Write(string filePath, JobDefinition job)
+	public static void Write(string filePath, DtPipe.Core.Models.JobDefinition job)
 	{
 		var yamlJob = new YamlJobOutput
 		{

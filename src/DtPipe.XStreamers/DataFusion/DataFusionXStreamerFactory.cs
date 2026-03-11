@@ -1,7 +1,7 @@
-using DtPipe.Core.Options;
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Models;
+using DtPipe.Core.Options;
 using DtPipe.Core.Abstractions.Dag;
-using DtPipe.Core.Pipelines.Dag;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -51,6 +51,11 @@ public class DataFusionXStreamerOptions : IOptionSet, ICliOptionMetadata
 
 public class DataFusionXStreamerFactory : IXStreamerFactory
 {
+    private readonly OptionsRegistry? _registry;
+
+    public DataFusionXStreamerFactory() { }
+    public DataFusionXStreamerFactory(OptionsRegistry registry) { _registry = registry; }
+
     public string ComponentName => "fusion-engine";
     public string Category => "XStreamers";
     public Type OptionsType => typeof(DataFusionXStreamerOptions);

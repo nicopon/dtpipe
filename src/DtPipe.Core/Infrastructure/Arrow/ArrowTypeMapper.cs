@@ -149,7 +149,7 @@ public static class ArrowTypeMapper
 
     public static void AppendValue(IArrowArrayBuilder builder, object? value)
     {
-        if (value == null)
+        if (value == null || value == DBNull.Value)
         {
             AppendNull(builder);
             return;
@@ -166,6 +166,7 @@ public static class ArrowTypeMapper
             case Decimal128Array.Builder b: b.Append(Convert.ToDecimal(value)); break;
             case BinaryArray.Builder b:
                 if (value is byte[] bytes) b.Append((System.Collections.Generic.IEnumerable<byte>)bytes);
+                else if (value is Guid guid) b.Append((System.Collections.Generic.IEnumerable<byte>)guid.ToByteArray());
                 else b.AppendNull();
                 break;
             case Date64Array.Builder b: b.Append(Convert.ToDateTime(value)); break;

@@ -1,13 +1,12 @@
-
 using System.CommandLine;
+using System.CommandLine.Parsing;
 using DtPipe.Cli.Infrastructure;
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Core.Pipelines.Dag;
-using DtPipe.Core.Models;
-
+using Microsoft.Extensions.DependencyInjection;
 
 namespace DtPipe.Cli.Infrastructure;
 
@@ -39,7 +38,6 @@ public class CliProviderFactory<TService> : ICliContributor, IDataFactory
 	public Type OptionsType => _descriptor.OptionsType;
 
 	// ICliContributor Implementation
-	// Determine category based on TService type
 	public string Category => _descriptor.Category;
 
 	public IEnumerable<Option> GetCliOptions()
@@ -96,8 +94,6 @@ public class CliProviderFactory<TService> : ICliContributor, IDataFactory
 		// Register/Update
 		registry.RegisterByType(_descriptor.OptionsType, existingOptions);
 	}
-
-	// Factory method to actually produce the service
 }
 
 public class CliDataWriterFactory : CliProviderFactory<IDataWriter>, IDataWriterFactory
@@ -109,16 +105,7 @@ public class CliDataWriterFactory : CliProviderFactory<IDataWriter>, IDataWriter
 
 	public IDataWriter Create(OptionsRegistry registry)
 	{
-		// Resolve the specific options object from registry
 		var specificOptions = registry.Get(_descriptor.OptionsType);
-
-		// For now, it's globally in DumpOptions, but we want to move away.
-		// CliProviderFactory depends on Cli, so it's okay to know about DumpOptions for a transition,
-		// but IDataWriterFactory (the interface) must NOT.
-
-		// To follow Option 3, 'Output' string should be in the registry or passed another way.
-		// Let's assume for now we look it up from the registry's global options or a specific key.
-		// Actually, JobService will populate the registry.
 		var pipelineOptions = registry.Get<PipelineOptions>();
 
 		// 1. Resolve Strategy
@@ -140,35 +127,29 @@ public class CliDataWriterFactory : CliProviderFactory<IDataWriter>, IDataWriter
 			}
 		}
 
-		// Use the descriptor to create.
 		return _descriptor.Create(pipelineOptions.OutputPath, specificOptions, _serviceProvider);
 	}
 
 	private void ResolveGenericOption(object specificOptions, string propertyName, string? genericValue, string providerName)
 	{
 		var prop = specificOptions.GetType().GetProperty(propertyName);
-		if (prop == null) return; // This provider doesn't support this option (e.g. SQLite has no InsertMode)
+		if (prop == null) return;
 
-		// Check if specific option is already set to a non-default value
 		var currentValue = prop.GetValue(specificOptions);
 
 		try
 		{
 			var defaultInstance = Activator.CreateInstance(specificOptions.GetType());
 			var defaultValue = prop.GetValue(defaultInstance);
-
-			// If current value differs from default, assume user set it specifically -> Precedence to specific
 			if (!Equals(currentValue, defaultValue)) return;
 		}
 		catch
 		{
-			// Ignore error creates default, just proceed if standard checks fail
 			if (currentValue != null) return;
 		}
 
 		var enumType = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
 
-		// If generic option is provided, try to parse and set it
 		if (!string.IsNullOrEmpty(genericValue))
 		{
 			if (enumType == typeof(string))
@@ -193,17 +174,14 @@ public class CliDataWriterFactory : CliProviderFactory<IDataWriter>, IDataWriter
 		}
 		else
 		{
-			// If still null, set to default (0-value of enum).
 			if (prop.GetValue(specificOptions) == null && enumType.IsValueType)
 			{
-				// Instantiate default value (usually 0 = Append / Standard)
 				var defaultValue = Activator.CreateInstance(enumType);
 				prop.SetValue(specificOptions, defaultValue);
 			}
 		}
 	}
 
-	// IEnumerable<Type> IDataWriterFactory.GetSupportedOptionTypes()
 	public IEnumerable<Type> GetSupportedOptionTypes()
 	{
 		yield return _descriptor.OptionsType;
@@ -236,6 +214,8 @@ public class CliStreamReaderFactory : CliProviderFactory<IStreamReader>, IStream
 	}
 
 	public bool RequiresQuery => _descriptor.RequiresQuery;
+
+	public bool YieldsColumnarOutput => _descriptor.YieldsColumnarOutput;
 }
 
 public class CliXStreamerFactory : CliProviderFactory<IStreamReader>, IXStreamerFactory, IStreamReaderFactory
@@ -272,4 +252,3 @@ public class CliXStreamerFactory : CliProviderFactory<IStreamReader>, IXStreamer
         yield return _descriptor.OptionsType;
     }
 }
-

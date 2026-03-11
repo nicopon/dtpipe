@@ -35,12 +35,17 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
 	private static partial Regex FirstWordRegex();
 
 	public DuckDataSourceReader(string connectionString, string query, DuckDbReaderOptions options, ILogger? logger = null, int queryTimeout = 0)
+		: this(new DuckDBConnection(connectionString), query, options, logger, queryTimeout)
+	{
+	}
+
+	public DuckDataSourceReader(DuckDBConnection connection, string query, DuckDbReaderOptions options, ILogger? logger = null, int queryTimeout = 0)
 	{
 		ValidateQueryIsSafeSelect(query);
 
 		_query = query;
 		_logger = logger ?? NullLogger.Instance;
-		_connection = new DuckDBConnection(connectionString);
+		_connection = connection;
 		_command = new DuckDBCommand(query, _connection)
 		{
 			CommandTimeout = queryTimeout

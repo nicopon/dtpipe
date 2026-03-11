@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.CommandLine;
 using System.Linq;
 using DtPipe.Cli.Validation;
+using DtPipe.Cli;
 
 namespace DtPipe.Cli;
 
@@ -74,7 +75,7 @@ public static class CliContextAnalyzer
                     lastFlag = longName;
                     lastFlagExpectsValue = match.MaxArity > 0;
                 }
-                else if (token.Equals("--main", StringComparison.OrdinalIgnoreCase) || token.Equals("--ref", StringComparison.OrdinalIgnoreCase))
+                else if (token.Equals("--main", StringComparison.OrdinalIgnoreCase) || token.Equals("--ref", StringComparison.OrdinalIgnoreCase) || token.Equals("--from", StringComparison.OrdinalIgnoreCase))
                 {
                     // Special intrinsic DAG flags (Sources)
                     currentFlags.Add(token.ToLowerInvariant());

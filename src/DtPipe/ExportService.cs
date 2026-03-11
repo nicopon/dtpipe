@@ -127,7 +127,7 @@ public class ExportService
 		}
 
 		// Update DAG registry if we are a branch
-		if (!string.IsNullOrEmpty(alias) && _channelRegistry != null)
+		if (!string.IsNullOrEmpty(alias) && _channelRegistry != null && _channelRegistry.ContainsChannel(alias))
 		{
 			_channelRegistry.UpdateChannelColumns(alias, currentSchema ?? System.Array.Empty<PipeColumnInfo>());
 		}

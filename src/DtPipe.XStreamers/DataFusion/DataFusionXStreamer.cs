@@ -1,15 +1,15 @@
-using System.Text;
 using System.Runtime.InteropServices;
 using Apache.Arrow;
 using Apache.Arrow.C;
+using Apache.Arrow.Ipc;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Abstractions.Dag;
+using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
 using Microsoft.Extensions.Logging;
-using System.Threading.Channels;
-using Apache.Arrow.Ipc;
 using System.IO;
 using System.IO.Pipes;
+using System.Threading.Channels;
 
 namespace DtPipe.XStreamers.DataFusion;
 
@@ -274,35 +274,20 @@ public sealed class DataFusionXStreamer : IStreamReader
         }
     }
 
-    private static ReadOnlyMemory<object?[]> ConvertBatchToRows(RecordBatch batch)
-    {
-        var rows = new object?[batch.Length][];
-        for (int r = 0; r < batch.Length; r++)
-        {
-            rows[r] = new object?[batch.ColumnCount];
-            for (int c = 0; c < batch.ColumnCount; c++)
-            {
-                var col = batch.Column(c);
-                rows[r][c] = col == null ? null : GetValue(col, r);
-            }
-        }
-        return rows;
-    }
-
-    private static object? GetValue(IArrowArray col, int idx) => col switch
-    {
-        Int64Array a  => a.GetValue(idx),
-        Int32Array a  => a.GetValue(idx),
-        Int16Array a  => a.GetValue(idx),
-        Int8Array a   => a.GetValue(idx),
-        DoubleArray a => a.GetValue(idx),
-        FloatArray a  => a.GetValue(idx),
-        BooleanArray a => a.GetValue(idx),
-        StringArray a => a.GetString(idx),
-        Date32Array a => a.GetDateTimeOffset(idx),
-        TimestampArray a => a.GetTimestamp(idx),
-        _ => col.ToString()
-    };
+	private static ReadOnlyMemory<object?[]> ConvertBatchToRows(RecordBatch batch)
+	{
+		var rows = new object?[batch.Length][];
+		for (int r = 0; r < batch.Length; r++)
+		{
+			rows[r] = new object?[batch.ColumnCount];
+			for (int c = 0; c < batch.ColumnCount; c++)
+			{
+				var col = batch.Column(c);
+				rows[r][c] = col == null ? null : ArrowTypeMapper.GetValue(col, r);
+			}
+		}
+		return rows;
+	}
 
     private static Type MapArrowType(Apache.Arrow.Types.IArrowType t) => t.TypeId switch
     {

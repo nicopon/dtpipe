@@ -1,8 +1,8 @@
 using System.Security.Cryptography;
 using System.Text;
 using Apache.Arrow;
-using Apache.Arrow.Types;
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Core.Security;
@@ -97,7 +97,7 @@ public sealed class ChecksumDataWriter : IDataWriter, IColumnarDataWriter, IRequ
 		}
 	}
 
-	private object?[][] ConvertRecordBatchToRows(RecordBatch batch)
+	private static object?[][] ConvertRecordBatchToRows(RecordBatch batch)
 	{
 		var rows = new object?[batch.Length][];
 		for (int r = 0; r < batch.Length; r++)
@@ -105,28 +105,11 @@ public sealed class ChecksumDataWriter : IDataWriter, IColumnarDataWriter, IRequ
 			var row = new object?[batch.ColumnCount];
 			for (int c = 0; c < batch.ColumnCount; c++)
 			{
-				row[c] = GetValue(batch.Column(c), r);
+				row[c] = ArrowTypeMapper.GetValue(batch.Column(c), r);
 			}
 			rows[r] = row;
 		}
 		return rows;
-	}
-
-	private object? GetValue(IArrowArray column, int rowIndex)
-	{
-		if (column.IsNull(rowIndex)) return null;
-
-		return column switch
-		{
-			Int32Array a => a.GetValue(rowIndex),
-			Int64Array a => a.GetValue(rowIndex),
-			DoubleArray a => a.GetValue(rowIndex),
-			StringArray a => a.GetString(rowIndex),
-			BooleanArray a => a.GetValue(rowIndex),
-			TimestampArray a => a.GetTimestamp(rowIndex),
-			Date64Array a => a.GetDateTime(rowIndex),
-			_ => column.ToString() // fallback
-		};
 	}
 
 	public async ValueTask CompleteAsync(CancellationToken ct = default)

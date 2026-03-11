@@ -1,7 +1,7 @@
 using System.Text;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Helpers;
 using DtPipe.Core.Models;
+using DtPipe.Core.Helpers;
 using Oracle.ManagedDataAccess.Client;
 
 namespace DtPipe.Adapters.Oracle;

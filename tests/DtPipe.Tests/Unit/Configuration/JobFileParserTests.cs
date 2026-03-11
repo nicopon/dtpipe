@@ -33,9 +33,9 @@ output: dummy.parquet
 	}
 
 	[Fact]
-	public void Parse_ShouldThrow_WhenInputIsMissing()
+	public void Parse_ShouldSucceed_EvenWhenInputIsMissing()
 	{
-		// Arrange
+		// Arrange: Partial job (template)
 		var yaml = @"
 output: dummy.parquet
 ";
@@ -45,11 +45,11 @@ output: dummy.parquet
 		try
 		{
 			// Act
-			Action act = () => JobFileParser.Parse(tempFile);
+			var job = JobFileParser.Parse(tempFile);
 
 			// Assert
-			act.Should().Throw<InvalidOperationException>()
-			   .WithMessage("*missing required field: input*");
+			job.Input.Should().BeNull();
+			job.Output.Should().Be("dummy.parquet");
 		}
 		finally
 		{

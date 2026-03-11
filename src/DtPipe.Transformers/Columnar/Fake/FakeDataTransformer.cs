@@ -213,7 +213,21 @@ public sealed partial class FakeDataTransformer : IColumnarTransformer, IRequire
 		var generator = _fakerRegistry.GetGenerator(basePath);
 		if (generator is not null) return generator;
 
-		// Fallback: treat as hardcoded string
+		// If the dataset prefix is a known Bogus dataset (e.g. "name", "address") but the full path
+		// wasn't found, it's a genuine configuration error (typo in method name).
+		// Otherwise, treat as a hardcoded literal string.
+		var dotIndex = basePath.IndexOf('.');
+		if (dotIndex > 0)
+		{
+			var datasetName = basePath[..dotIndex];
+			if (_fakerRegistry.HasDataset(datasetName))
+			{
+				throw new ArgumentException($"Unknown fake provider: '{basePath}' for column '{colName}'. " +
+					$"Dataset '{datasetName}' exists but method '{basePath[(dotIndex + 1)..]}' was not found.");
+			}
+		}
+
+		// Fallback: treat as hardcoded literal string
 		return _ => fakerPath;
 	}
 

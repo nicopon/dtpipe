@@ -91,12 +91,18 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<DtPi
 		var engine = _jsEngineProvider.GetEngine();
 		EnsureFunctionsCompiled(engine);
 
-		// Build JS Context (Same as Filter/Compute - should refactor!)
-		var jsRow = new JsObject(engine);
+		// Build JS Context with Proxy for missing column detection
+		var jsSource = new JsObject(engine);
 		for (int i = 0; i < row.Length; i++)
 		{
-			jsRow.Set(_columnNames[i], JsValue.FromObject(engine, row[i]));
+			var val = row[i];
+			if (val == DBNull.Value) val = null;
+			jsSource.Set(_columnNames[i], JsValue.FromObject(engine, val));
 		}
+
+        // Wrap in Proxy
+        engine.SetValue("__source", jsSource);
+        var jsRow = engine.Evaluate("new Proxy(__source, { get: (target, prop) => { if (typeof prop === 'string' && !(prop in target)) throw new ReferenceError(`Column '${prop}' not found in schema`); return target[prop]; } })");
 
 		// Helper to process a list of rows through a specific expand function
 		IEnumerable<object?[]> currentRows = new[] { row };
@@ -115,11 +121,15 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<DtPi
 				else
 				{
 					// Rebuild for intermediate rows
-					currentJsRow = new JsObject(engine);
+					var intermediateSource = new JsObject(engine);
 					for (int k = 0; k < r.Length; k++)
 					{
-						currentJsRow.AsObject().Set(_columnNames[k], JsValue.FromObject(engine, r[k]));
+						var val = r[k];
+						if (val == DBNull.Value) val = null;
+						intermediateSource.Set(_columnNames[k], JsValue.FromObject(engine, val));
 					}
+                    engine.SetValue("__intermediate", intermediateSource);
+					currentJsRow = engine.Evaluate("new Proxy(__intermediate, { get: (target, prop) => { if (typeof prop === 'string' && !(prop in target)) throw new ReferenceError(`Column '${prop}' not found in schema`); return target[prop]; } })");
 				}
 
 				// Set 'row' in global scope for Evaluate Call

@@ -1,14 +1,16 @@
+using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
 
-namespace DtPipe.Configuration;
+namespace DtPipe.Core.Models;
 /// <summary>
 /// Central job definition for export configuration, hydrated from CLI or YAML.
 /// </summary>
 public record JobDefinition
 {
-	public required string Input { get; init; }
+	public string? DisplayName => null;
+	public string? Input { get; init; }
 	public string? Query { get; init; }
-	public required string Output { get; init; }
+	public string? Output { get; init; }
 	public int BatchSize { get; init; } = 50_000;
 
 	/// <summary>Append, Truncate, Recreate, etc.</summary>
@@ -32,6 +34,8 @@ public record JobDefinition
 	public int RetryDelayMs { get; init; } = 1000;
 	public string? MetricsPath { get; init; }
     public bool? AutoMigrate { get; set; }
+    public int Throttle { get; init; } = 0;
+    public bool IgnoreNulls { get; init; } = false;
 
 	public List<TransformerConfig>? Transformers { get; init; }
 	public string? LogPath { get; init; }
@@ -40,12 +44,16 @@ public record JobDefinition
 	public double SamplingRate { get; init; } = 1.0;
 	public int? SamplingSeed { get; init; }
 
+    public string[] Drop { get; init; } = Array.Empty<string>();
+    public string[] Rename { get; init; } = Array.Empty<string>();
+
 	// Lifecycle Hooks
 	public string? PreExec { get; init; }
 	public string? PostExec { get; init; }
 	public string? OnErrorExec { get; init; }
 	public string? FinallyExec { get; init; }
 
+    public string? Prefix { get; init; }
 	/// <summary>Provider-specific options. Keyed by provider name (e.g. 'oracle-writer').</summary>
 	public Dictionary<string, Dictionary<string, object>>? ProviderOptions { get; init; }
 }

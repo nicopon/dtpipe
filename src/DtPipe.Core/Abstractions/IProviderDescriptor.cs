@@ -22,4 +22,11 @@ public interface IProviderDescriptor<out TService> : IDataFactory
 	/// <param name="options">The bound options object (of type OptionsType).</param>
 	/// <param name="serviceProvider">Service provider for resolving dependencies (logger, etc).</param>
 	TService Create(string connectionString, object options, IServiceProvider serviceProvider);
+
+	/// <summary>
+	/// Must return true if the TService created is an IColumnarStreamReader.
+	/// Used by CliStreamReaderFactory to forward YieldsColumnarOutput.
+	/// Default is false.
+	/// </summary>
+	bool YieldsColumnarOutput => false;
 }

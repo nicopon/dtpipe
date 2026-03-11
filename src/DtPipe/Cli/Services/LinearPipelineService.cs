@@ -3,6 +3,7 @@ using DtPipe.Cli.Infrastructure;
 using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
+using DtPipe.Cli;
 using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
 using DtPipe.Core.Validation;
@@ -39,19 +40,45 @@ public class LinearPipelineService
         string[] currentRawArgs,
         CancellationToken token,
         string? localAlias,
-        bool isDag)
+        bool isDag,
+        bool isXStreamer = false)
     {
         var exportService = _serviceProvider.GetRequiredService<ExportService>();
 
-        var readerFactories = _contributors.OfType<IStreamReaderFactory>().ToList();
-        var (readerFactory, cleanedInput) = ResolveFactory(readerFactories, job.Input, "reader");
+        IStreamReaderFactory readerFactory;
+        string cleanedInput;
+
+        if (isXStreamer)
+        {
+            var xFactories = _serviceProvider.GetRequiredService<IEnumerable<IXStreamerFactory>>();
+            var (xFactory, xCleaned) = ResolveFactory(xFactories, job.Input ?? "", "XStreamer");
+            cleanedInput = xCleaned;
+
+            // XStreamer needs to be wrapped in a IStreamReaderFactory for ExportService
+            readerFactory = new XStreamerReaderFactoryAdapter(xFactory, _serviceProvider, cleanedInput);
+        }
+        else
+        {
+            var readerFactories = _contributors.OfType<IStreamReaderFactory>().ToList();
+            (readerFactory, cleanedInput) = ResolveFactory(readerFactories, job.Input ?? "", "reader");
+        }
+
         job = job with { Input = cleanedInput };
 
         if (!isDag) _console.WriteLine($"Auto-detected input source: {readerFactory.ComponentName}");
 
         var writerFactories = _contributors.OfType<IDataWriterFactory>().ToList();
-        var (writerFactory, cleanedOutput) = ResolveFactory(writerFactories, job.Output, "writer");
-        job = job with { Output = cleanedOutput };
+        IDataWriterFactory? writerFactory = null;
+        string? cleanedOutput = null;
+
+        if (!isDag || !string.IsNullOrWhiteSpace(job.Output))
+        {
+            if (!string.IsNullOrWhiteSpace(job.Output))
+            {
+                (writerFactory, cleanedOutput) = ResolveFactory(writerFactories, job.Output, "writer");
+                job = job with { Output = cleanedOutput };
+            }
+        }
 
         job = job with
         {
@@ -66,9 +93,18 @@ public class LinearPipelineService
         {
             if (string.IsNullOrWhiteSpace(job.Query))
             {
-                _console.Write(new Spectre.Console.Markup($"[red]Error: A query is required for provider '{readerFactory.ComponentName}'. Use --query \"SELECT...\"[/]{Environment.NewLine}"));
-                return 1;
+                // Auto-generate query from table if possible for SQL providers
+                if (!string.IsNullOrWhiteSpace(job.Table))
+                {
+                    job = job with { Query = $"SELECT * FROM {job.Table}" };
+                }
+                else
+                {
+                    _console.Write(new Spectre.Console.Markup($"[red]Error: A query is required for provider '{readerFactory.ComponentName}'. Use --query \"SELECT...\"[/]{Environment.NewLine}"));
+                    return 1;
+                }
             }
+
             try { SqlQueryValidator.Validate(job.Query, job.UnsafeQuery); }
             catch (InvalidOperationException ex)
             {
@@ -126,10 +162,23 @@ public class LinearPipelineService
 
         try
         {
-            if (isDag) _console.MarkupLine($"[grey]DEBUG: Calling RunExportAsync for alias '{localAlias}'[/]");
-            await exportService.RunExportAsync(pipelineOptions, pipelineOptions.Provider, pipelineOptions.OutputPath, token, pipeline, readerFactory, writerFactory, _registry, localAlias);
-            if (isDag) _console.MarkupLine($"[grey]DEBUG: RunExportAsync completed for alias '{localAlias}'[/]");
-            return 0;
+        // 6. Final Export Execution
+        if (writerFactory == null)
+        {
+            if (isDag || string.IsNullOrWhiteSpace(job.Output))
+            {
+                if (isDag) return 0; // Upstream branch to memory channel handled elsewhere
+
+                // Linear job - just validation/dry run
+                _console.Write(new Spectre.Console.Markup($"[yellow]Warning: No output specified. Running in validation mode.[/]{Environment.NewLine}"));
+                return 0;
+            }
+            throw new InvalidOperationException($"No writer factory resolved for output '{job.Output}'");
+        }
+
+        if (string.IsNullOrEmpty(job.Output)) throw new InvalidOperationException("No output destination specified.");
+        await exportService.RunExportAsync(pipelineOptions, readerFactory.ComponentName, job.Output, token, pipeline, readerFactory, writerFactory, _registry, isDag ? localAlias : null);
+        return 0;
         }
         catch (Exception ex)
         {
@@ -185,6 +234,13 @@ public class LinearPipelineService
         {
             var names = string.Join(", ", matchingFactories.Select(f => f.ComponentName));
             throw new InvalidOperationException($"Ambiguous {typeName} string '{rawString}'. Matches: {names}. Use explicit prefix (e.g. '{matchingFactories[0].ComponentName}:...') to disambiguate.");
+        }
+
+        if (matchingFactories.Count == 0 && typeName == "writer" && !rawString.Contains(":") && (rawString.EndsWith("/") || rawString.EndsWith("\\") || !rawString.Contains(".")))
+        {
+            // Directory or extensionless path - fallback to Parquet (common for split/prefix - T66)
+            var parquet = factories.FirstOrDefault(f => f.ComponentName.Equals("parquet", StringComparison.OrdinalIgnoreCase));
+            if (parquet != null) return (parquet, rawString);
         }
 
         throw new InvalidOperationException($"No compatible {typeName} found for connection string '{rawString}'.");
@@ -245,5 +301,34 @@ public class LinearPipelineService
             }
         }
         return pipeline;
+    }
+
+    private sealed class XStreamerReaderFactoryAdapter : IStreamReaderFactory
+    {
+        private readonly IXStreamerFactory _inner;
+        private readonly IServiceProvider _sp;
+        private readonly string _connectionString;
+
+        public XStreamerReaderFactoryAdapter(IXStreamerFactory inner, IServiceProvider sp, string connectionString)
+        {
+            _inner = inner;
+            _sp = sp;
+            _connectionString = connectionString;
+        }
+
+        public string ComponentName => _inner.ComponentName;
+        public string Category => _inner.Category;
+        public Type OptionsType => _inner.OptionsType;
+        public bool SupportsStdio => false;
+        public IStreamReader Create(OptionsRegistry registry)
+        {
+            var options = registry.Get(_inner.OptionsType);
+            return _inner.Create(_connectionString, options, _sp);
+        }
+
+        public IEnumerable<Type> GetSupportedOptionTypes() => new[] { _inner.OptionsType };
+        public bool RequiresQuery => _inner.RequiresQuery;
+
+        public bool CanHandle(string connectionString) => _inner.CanHandle(connectionString);
     }
 }

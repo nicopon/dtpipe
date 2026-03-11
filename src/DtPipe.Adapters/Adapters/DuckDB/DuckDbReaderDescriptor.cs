@@ -13,6 +13,7 @@ public class DuckDbReaderDescriptor : IProviderDescriptor<IStreamReader>
     public bool CanHandle(string connectionString) => DuckDbMetadata.CanHandle(connectionString);
     public bool SupportsStdio => DuckDbMetadata.SupportsStdio;
     public bool RequiresQuery => true;
+    public bool YieldsColumnarOutput => true;
 
     public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
     {

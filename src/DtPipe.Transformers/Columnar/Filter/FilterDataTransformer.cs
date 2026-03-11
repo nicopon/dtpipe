@@ -282,30 +282,38 @@ public partial class FilterDataTransformer : IColumnarTransformer, IRequiresOpti
 		var engine = _jsEngineProvider.GetEngine();
 		EnsureFiltersCompiled(engine);
 
-		// Build JS Context
-		var jsRow = new JsObject(engine);
+		// Build JS Context with Proxy for missing column detection
+		var jsSource = new JsObject(engine);
 		for (int i = 0; i < row.Length; i++)
 		{
-			jsRow.Set(_columnNames[i], JsValue.FromObject(engine, row[i]));
+			var val = row[i];
+			if (val == DBNull.Value) val = null;
+			jsSource.Set(_columnNames[i], JsValue.FromObject(engine, val));
 		}
+
+        // Create Proxy using Jint Engine API for robust schema validation
+        engine.SetValue("__source", jsSource);
+        var jsRow = engine.Evaluate("new Proxy(__source, { get: (target, prop) => { if (typeof prop === 'string' && !(prop in target)) throw new ReferenceError(`Column '${prop}' not found in schema`); return target[prop]; } })");
 
 		// Set 'row' in global scope for Evaluate Call
 		engine.SetValue("row", jsRow);
 
 		foreach (var funcName in _compiledFilters)
 		{
-			// Direct evaluation of function call
 			try
 			{
 				var result = engine.Evaluate($"{funcName}(row)");
-				if (!result.AsBoolean())
+				if (!result.IsBoolean() || !result.AsBoolean())
 				{
-					return null; // Drop row
+					return null; // Drop row if result is false or not boolean
 				}
 			}
 			catch (Exception ex)
 			{
-				throw new InvalidOperationException($"Error evaluating filter '{funcName}': {ex.Message}", ex);
+                // If it's a ReferenceError (column missing), rethrow to fail the process if strict.
+                // Otherwise, treat property access on null as 'false' (permissive mode for existing columns).
+                if (ex.Message.Contains("ReferenceError")) throw;
+				return null;
 			}
 		}
 

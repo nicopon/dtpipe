@@ -21,9 +21,21 @@ public static class ArrowToParquetConverter
             Decimal256Array a => new DataColumn(dataField, ExtractDecimalValues<Decimal256Array>(a)),
             Date64Array a => new DataColumn(dataField, ExtractDate64Values(a)),
             TimestampArray a => new DataColumn(dataField, ExtractTimestampValues(a)),
-            BinaryArray a => new DataColumn(dataField, ExtractBinaryValues(a)),
+            BinaryArray a => (dataField.ClrNullableIfHasNullsType == typeof(Guid) || dataField.ClrNullableIfHasNullsType == typeof(Guid?)) ? new DataColumn(dataField, ExtractGuidValues(a)) : new DataColumn(dataField, ExtractBinaryValues(a)),
             _ => throw new NotSupportedException($"Arrow array type {arrowArray.GetType().Name} is not supported for Parquet conversion yet.")
         };
+    }
+
+    private static Guid?[] ExtractGuidValues(BinaryArray array)
+    {
+        var result = new Guid?[array.Length];
+        for (int i = 0; i < array.Length; i++)
+        {
+            if (array.IsNull(i)) { result[i] = null; continue; }
+            var bytes = array.GetBytes(i).ToArray();
+            result[i] = bytes.Length == 16 ? new Guid(bytes) : null;
+        }
+        return result;
     }
 
     private static T?[] ExtractPrimitiveValues<T, TArray>(TArray array)

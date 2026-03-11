@@ -5,6 +5,7 @@ using DtPipe.Core.Options;
 using Parquet;
 using Parquet.Data;
 using Parquet.Schema;
+using System.IO;
 
 namespace DtPipe.Adapters.Parquet;
 
@@ -14,7 +15,7 @@ namespace DtPipe.Adapters.Parquet;
 /// </summary>
 public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, IRequiresOptions<ParquetWriterOptions>, ISchemaInspector
 {
-	private readonly string _outputPath = outputPath;
+	private string _outputPath = outputPath;
 	private Stream? _outputStream;
 
 	private ParquetSchema? _schema;
@@ -80,19 +81,33 @@ public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, 
 		}
 	}
 
-	public async ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
-	{
-		if (_outputPath == "-")
-		{
-			if (!Console.IsOutputRedirected)
-			{
-				throw new InvalidOperationException("Refusing to write binary Parquet data to the console. Redirect output with > or use a file path.");
-			}
-			_outputStream = Console.OpenStandardOutput();
-		}
+    public async ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
+    {
+        if (_outputPath == "-")
+        {
+            if (!Console.IsOutputRedirected)
+            {
+                throw new InvalidOperationException("Refusing to write binary Parquet data to the console. Redirect output with > or use a file path.");
+            }
+            _outputStream = Console.OpenStandardOutput();
+        }
 		else
 		{
-			// Defer file creation until here to avoid overwriting during dry-run
+			// T64/T66: If it's a directory, append export.parquet
+			if (Directory.Exists(_outputPath) || _outputPath.EndsWith("/") || _outputPath.EndsWith("\\"))
+			{
+				_outputPath = Path.Combine(_outputPath, "export.parquet");
+			}
+			else if (!Path.HasExtension(_outputPath))
+			{
+				// File without extension
+				_outputPath += ".parquet";
+			}
+
+			var directory = Path.GetDirectoryName(_outputPath);
+			if (!string.IsNullOrEmpty(directory))
+				Directory.CreateDirectory(directory); // no-op if already exists
+
 			_outputStream = new FileStream(_outputPath, FileMode.Create, FileAccess.Write, FileShare.None);
 		}
 
@@ -202,9 +217,22 @@ public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, 
 	private static DataColumn CreateTypedColumn<T>(DataField dataField, IReadOnlyList<object?[]> rows, int colIndex)
 	{
 		var values = new T[rows.Count];
+		var targetType = typeof(T);
 		for (var i = 0; i < rows.Count; i++)
 		{
-			values[i] = rows[i][colIndex] is T val ? val : default!;
+			var val = rows[i][colIndex];
+			if (val is null || val == DBNull.Value)
+			{
+				values[i] = default!;
+			}
+			else if (val is T typedVal)
+			{
+				values[i] = typedVal;
+			}
+			else
+			{
+				values[i] = (T)DtPipe.Core.Helpers.ValueConverter.ConvertValue(val, targetType)!;
+			}
 		}
 		return new DataColumn(dataField, values);
 	}
@@ -214,7 +242,19 @@ public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, 
 		var values = new byte[]?[rows.Count];
 		for (var i = 0; i < rows.Count; i++)
 		{
-			values[i] = rows[i][colIndex] as byte[];
+			var val = rows[i][colIndex];
+			if (val is null || val == DBNull.Value)
+			{
+				values[i] = null;
+			}
+			else if (val is byte[] bytes)
+			{
+				values[i] = bytes;
+			}
+			else
+			{
+				values[i] = (byte[]?)DtPipe.Core.Helpers.ValueConverter.ConvertValue(val, typeof(byte[]));
+			}
 		}
 		return new DataColumn(dataField, values);
 	}

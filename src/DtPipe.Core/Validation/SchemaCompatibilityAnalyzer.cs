@@ -62,13 +62,10 @@ public static class SchemaCompatibilityAnalyzer
 					c => c.Name,
 					dialect);
 			}
-			else
+			// Fallback: Robust Fuzzy match (Always try this as a safety net - T45/T98)
+			if (tgtCol == null)
 			{
-				// Fallback: Case Insensitive match when no dialect available
-				tgtCol = Core.Helpers.ColumnMatcher.FindMatchingColumnCaseInsensitive(
-					srcCol.Name,
-					remainingTargetCols,
-					c => c.Name);
+				tgtCol = remainingTargetCols.FirstOrDefault(c => IsFuzzyMatch(srcCol.Name, c.Name));
 			}
 
 			if (tgtCol != null)
@@ -95,8 +92,11 @@ public static class SchemaCompatibilityAnalyzer
 					srcCol,
 					null,
 					CompatibilityStatus.MissingInTarget,
-					"Column does not exist in target - data will be lost"));
-				errors.Add($"Column '{srcCol.Name}': Missing in target schema (Checked as '{(dialect != null ? (srcCol.IsCaseSensitive || dialect.NeedsQuoting(srcCol.Name) ? srcCol.Name : dialect.Normalize(srcCol.Name)) : srcCol.Name)}') - data will be lost unless table is recreated");
+					"Column does not exist in target - data for this column will be skipped"));
+
+				var msg = $"Column '{srcCol.Name}': Missing in target schema (Checked as '{(dialect != null ? (srcCol.IsCaseSensitive || dialect.NeedsQuoting(srcCol.Name) ? srcCol.Name : dialect.Normalize(srcCol.Name)) : srcCol.Name)}') - data for this column will be skipped";
+				warnings.Add(msg);
+				errors.Add(msg); // Treat missing columns as errors for StrictSchema enforcement
 			}
 		}
 
@@ -162,6 +162,23 @@ public static class SchemaCompatibilityAnalyzer
 				return (CompatibilityStatus.Compatible, null);
 			}
 
+			// String to Guid compatibility (common for CSV/String sources to DB UUIDs)
+			if ((srcType == typeof(string) && tgtType == typeof(Guid)) ||
+			    (srcType == typeof(Guid) && tgtType == typeof(string)))
+			{
+				return (CompatibilityStatus.Compatible, null);
+			}
+
+			// Guid <-> byte[] (16) compatibility (common for Oracle RAW(16) or others)
+			if ((srcType == typeof(Guid) && tgtType == typeof(byte[])) ||
+			    (srcType == typeof(byte[]) && tgtType == typeof(Guid)))
+			{
+				if (target.MaxLength == 16 || !target.MaxLength.HasValue)
+				{
+					return (CompatibilityStatus.Compatible, null);
+				}
+			}
+
 			// String to smaller string (truncation risk)
 			if (srcType == typeof(string) && tgtType == typeof(string) && target.MaxLength.HasValue)
 			{
@@ -199,6 +216,14 @@ public static class SchemaCompatibilityAnalyzer
 		}
 
 		return false;
+	}
+
+	private static bool IsFuzzyMatch(string name1, string name2)
+	{
+		if (string.Equals(name1, name2, StringComparison.OrdinalIgnoreCase)) return true;
+
+		string Normalize(string s) => s.Replace("_", "").Replace(" ", "").ToLowerInvariant();
+		return string.Equals(Normalize(name1), Normalize(name2), StringComparison.Ordinal);
 	}
 
 	private static string FormatSize(long bytes)

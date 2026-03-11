@@ -41,7 +41,7 @@ public class ProjectDataTransformerTests
 	public async Task InitializeAsync_Project_SelectsColumnsAndReorders()
 	{
 		// Arrange
-		var options = new ProjectOptions { Project = "C, A" }; // Reorder
+		var options = new ProjectOptions { Project = new[] { "C", "A" } }; // Reorder
 		var transformer = new ProjectDataTransformer(options);
 
 		// Act
@@ -66,7 +66,7 @@ public class ProjectDataTransformerTests
 	public async Task InitializeAsync_Drop_RemovesColumns()
 	{
 		// Arrange
-		var options = new ProjectOptions { Drop = "B, D" };
+		var options = new ProjectOptions { Drop = new[] { "B", "D" } };
 		var transformer = new ProjectDataTransformer(options);
 
 		// Act
@@ -90,7 +90,7 @@ public class ProjectDataTransformerTests
 	public async Task InitializeAsync_DropAndProject_DropTakesPrecedence()
 	{
 		// Arrange: "A" is in both Drop and Project. It should be DROPPED.
-		var options = new ProjectOptions { Drop = "A", Project = "A, C" };
+		var options = new ProjectOptions { Drop = new[] { "A" }, Project = new[] { "A", "C" } };
 		var transformer = new ProjectDataTransformer(options);
 
 		// Act
@@ -114,7 +114,7 @@ public class ProjectDataTransformerTests
 	public async Task Transform_HandlesNullSafety()
 	{
 		// Arrange
-		var options = new ProjectOptions { Project = "A" };
+		var options = new ProjectOptions { Project = new[] { "A" } };
 		var transformer = new ProjectDataTransformer(options);
 		await transformer.InitializeAsync(_sourceSchema);
 

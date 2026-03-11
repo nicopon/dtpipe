@@ -13,6 +13,7 @@ public class ArrowReaderDescriptor : IProviderDescriptor<IStreamReader>
     public bool CanHandle(string connectionString) => ArrowMetadata.CanHandle(connectionString);
     public bool SupportsStdio => ArrowMetadata.SupportsStdio;
     public bool RequiresQuery => false;
+    public bool YieldsColumnarOutput => true;
 
     public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
     {

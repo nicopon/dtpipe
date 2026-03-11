@@ -4,9 +4,12 @@ using System.CommandLine;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using DtPipe.Cli.Infrastructure;
+using DtPipe.Cli;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
+using DtPipe.Core.Pipelines;
 using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console;
 
@@ -59,19 +62,20 @@ public class InspectCommand : Command
 
         // 1. Resolve the reader using the same mechanism as export
         //    (parse the prefix, find the factory via ComponentName or CanHandle)
+        string effectiveConnectionString = input;
         IStreamReaderFactory? factory = null;
         foreach (var f in readerFactories)
         {
             if (input.StartsWith(f.ComponentName + ":", StringComparison.OrdinalIgnoreCase))
             {
-                // Strip prefix, set connection string in registry
-                var connStr = input.Substring(f.ComponentName.Length + 1);
+                // Strip prefix, set connection string
+                effectiveConnectionString = input.Substring(f.ComponentName.Length + 1);
 
                 var optionsType = f.GetSupportedOptionTypes().FirstOrDefault();
                 if (optionsType != null)
                 {
                     var instance = registry.Get(optionsType);
-                    optionsType.GetProperty("Input")?.SetValue(instance, connStr);
+                    optionsType.GetProperty("Input")?.SetValue(instance, effectiveConnectionString);
                     registry.RegisterByType(optionsType, instance);
                 }
 
@@ -103,6 +107,11 @@ public class InspectCommand : Command
             console.MarkupLine("[red]Error:[/] No provider found for the given input.");
             return;
         }
+
+        // Register the connection string into PipelineOptions so the factory can pick it up
+        var pipelineOpts = registry.Get<PipelineOptions>();
+        var updatedPipelineOpts = pipelineOpts with { ConnectionString = effectiveConnectionString, Query = query };
+        registry.RegisterByType(typeof(PipelineOptions), updatedPipelineOpts);
 
         // 2. Set query if provided
         if (factory.RequiresQuery && string.IsNullOrWhiteSpace(query))

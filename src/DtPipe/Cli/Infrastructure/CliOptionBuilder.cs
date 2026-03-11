@@ -440,8 +440,21 @@ public static class CliOptionBuilder
 	{
 		try
 		{
-			if (fallbackResult != null) return fallbackResult.GetValueOrDefault<T>();
-			return result.GetValue((Option<T>)option);
+			var res = fallbackResult ?? result.GetResult(option);
+			if (res == null) return default;
+
+			object? val = null;
+			if (res.Tokens.Any())
+			{
+				val = res.Tokens.Last().Value;
+			}
+			else
+			{
+				try { val = res.GetValueOrDefault<object>(); } catch { }
+			}
+
+			if (val is null) return default;
+			return (T)DtPipe.Core.Helpers.ValueConverter.ConvertValue(val, typeof(T));
 		}
 		catch (Exception ex)
 		{

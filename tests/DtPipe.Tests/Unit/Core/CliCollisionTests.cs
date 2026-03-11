@@ -1,10 +1,12 @@
 using System.CommandLine;
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Core.Options;
+using DtPipe.Core.Abstractions;
+using DtPipe.Core.Models;
 using FluentAssertions;
 using Xunit;
 
-namespace DtPipe.Tests;
+namespace DtPipe.Tests.Unit.Core;
 
 public class CliCollisionTests
 {

@@ -22,12 +22,24 @@ public class ProjectDataTransformerFactory(OptionsRegistry registry) : IDataTran
 
 	public IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration)
 	{
-		var configDict = configuration.ToDictionary(k => k.Option, v => v.Value, StringComparer.OrdinalIgnoreCase);
-
-		// Handle config dictionary to options
 		var options = new ProjectOptions();
-		if (configDict.TryGetValue("project", out var project1) || configDict.TryGetValue("--project", out project1)) options.Project = project1;
-		if (configDict.TryGetValue("drop", out var drop1) || configDict.TryGetValue("--drop", out drop1)) options.Drop = drop1;
+        var projects = new List<string>();
+        var drops = new List<string>();
+        var renames = new List<string>();
+
+        foreach (var (opt, val) in configuration)
+        {
+            if (opt.Equals("project", StringComparison.OrdinalIgnoreCase) || opt.Equals("--project", StringComparison.OrdinalIgnoreCase))
+                projects.Add(val);
+            else if (opt.Equals("drop", StringComparison.OrdinalIgnoreCase) || opt.Equals("--drop", StringComparison.OrdinalIgnoreCase))
+                drops.Add(val);
+            else if (opt.Equals("rename", StringComparison.OrdinalIgnoreCase) || opt.Equals("--rename", StringComparison.OrdinalIgnoreCase))
+                renames.Add(val);
+        }
+
+        options.Project = projects;
+        options.Drop = drops;
+        options.Rename = renames;
 
 		return new ProjectDataTransformer(options);
 	}
@@ -37,24 +49,28 @@ public class ProjectDataTransformerFactory(OptionsRegistry registry) : IDataTran
 		var options = new ProjectOptions();
 
 		// Handle "project" (whitelist)
-		// Mappings keys are columns to keep
 		if (config.Mappings != null && config.Mappings.Count > 0)
 		{
-			options.Project = string.Join(",", config.Mappings.Keys);
+			options.Project = config.Mappings.Keys;
 		}
 		else if (config.Options != null && config.Options.TryGetValue("project", out var projectVal))
 		{
-			// Alternative: --project defined as option in yaml manually
-			options.Project = projectVal;
+			options.Project = new[] { projectVal };
 		}
 
 		// Handle "drop" (blacklist)
 		if (config.Options != null && config.Options.TryGetValue("drop", out var dropVal))
 		{
-			options.Drop = dropVal;
+			options.Drop = new[] { dropVal };
 		}
 
-		if (string.IsNullOrWhiteSpace(options.Project) && string.IsNullOrWhiteSpace(options.Drop))
+        // Handle "rename"
+        if (config.Options != null && config.Options.TryGetValue("rename", out var renameVal))
+        {
+            options.Rename = new[] { renameVal };
+        }
+
+		if (!options.Project.Any() && !options.Drop.Any() && !options.Rename.Any())
 			return null;
 
 		return new ProjectDataTransformer(options);

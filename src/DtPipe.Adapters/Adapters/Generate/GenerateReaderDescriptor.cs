@@ -13,6 +13,7 @@ public class GenerateReaderDescriptor : IProviderDescriptor<IStreamReader>
     public bool CanHandle(string connectionString) => GenerateMetadata.CanHandle(connectionString);
     public bool SupportsStdio => GenerateMetadata.SupportsStdio;
     public bool RequiresQuery => false;
+    public bool YieldsColumnarOutput => true;
 
     public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
     {

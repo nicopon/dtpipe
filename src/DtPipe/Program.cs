@@ -1,4 +1,4 @@
-﻿using System.Runtime.CompilerServices;
+using System.Runtime.CompilerServices;
 using DtPipe.Cli;
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Core.Abstractions;
@@ -109,8 +109,8 @@ class Program
                 }
                 return 1;
             }
-
-			return await parseResult.InvokeAsync();
+			var result = await parseResult.InvokeAsync();
+			return Environment.ExitCode != 0 ? Environment.ExitCode : result;
 		}
 		finally
 		{

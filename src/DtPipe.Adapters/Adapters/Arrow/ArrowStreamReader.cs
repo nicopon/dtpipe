@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace DtPipe.Adapters.Arrow;
 
-public class ArrowAdapterStreamReader : IStreamReader
+public class ArrowAdapterStreamReader : IColumnarStreamReader
 {
 	private readonly string _path;
 	private readonly ArrowReaderOptions _options;
@@ -62,6 +62,31 @@ public class ArrowAdapterStreamReader : IStreamReader
             Columns = MapSchema(schema);
         }
 	}
+
+    public async IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        if (Columns is null) throw new InvalidOperationException("Call OpenAsync first.");
+
+        if (_isIpcFile && _arrowFileReader != null)
+        {
+            for (int i = 0; ; i++)
+            {
+                RecordBatch? batch = null;
+                try { batch = await _arrowFileReader.ReadRecordBatchAsync(i, ct); } catch { break; }
+                if (batch == null) break;
+                yield return batch;
+            }
+        }
+        else if (_arrowReader != null)
+        {
+            while (true)
+            {
+                var batch = await _arrowReader.ReadNextRecordBatchAsync(ct);
+                if (batch == null) break;
+                yield return batch;
+            }
+        }
+    }
 
     private List<PipeColumnInfo> MapSchema(Schema schema)
     {
@@ -177,6 +202,7 @@ public class ArrowAdapterStreamReader : IStreamReader
             FloatArray f => f.GetValue(index),
             TimestampArray t => t.GetTimestamp(index),
             Date32Array d32 => d32.GetDateTime(index),
+            Date64Array d64 => d64.GetDateTime(index),
             BinaryArray bin => bin.GetBytes(index).ToArray(),
             _ => array.GetValue(index) // Fallback for other simple types
         };

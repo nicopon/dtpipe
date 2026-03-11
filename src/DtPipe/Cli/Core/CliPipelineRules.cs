@@ -15,7 +15,7 @@ public static class CliPipelineRules
     public static readonly HashSet<string> StartRules = new(StringComparer.OrdinalIgnoreCase)
     {
         "--job", "--help", "--version", "inspect", "providers", "completion", "secret",
-        "-i", "--input", "-x", "--xstreamer"
+        "-i", "--input", "-x", "--xstreamer", "--from"
     };
 
     /// <summary>
@@ -69,7 +69,7 @@ public static class CliPipelineRules
     /// </summary>
     public static readonly HashSet<string> PrimarySourceFlags = new(StringComparer.OrdinalIgnoreCase)
     {
-        "-i", "--input", "-x", "--xstreamer"
+        "-i", "--input", "-x", "--xstreamer", "--from"
     };
 
     /// <summary>
@@ -85,7 +85,7 @@ public static class CliPipelineRules
     /// </summary>
     public static readonly HashSet<string> SourceFlags = new(StringComparer.OrdinalIgnoreCase)
     {
-        "-i", "--input", "-x", "--xstreamer", "--main", "--ref"
+        "-i", "--input", "-x", "--xstreamer", "--main", "--ref", "--from"
     };
 
     /// <summary>
@@ -94,7 +94,7 @@ public static class CliPipelineRules
     /// </summary>
     public static readonly HashSet<string> TerminatorFlags = new(StringComparer.OrdinalIgnoreCase)
     {
-        "-o", "--output", "--alias"
+        "-o", "--output"
     };
 
     /// <summary>

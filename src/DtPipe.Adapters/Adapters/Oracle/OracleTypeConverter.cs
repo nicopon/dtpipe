@@ -1,4 +1,5 @@
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Models;
 using Oracle.ManagedDataAccess.Client;
 
 namespace DtPipe.Adapters.Oracle;

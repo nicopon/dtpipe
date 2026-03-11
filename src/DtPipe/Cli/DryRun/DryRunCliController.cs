@@ -1,5 +1,7 @@
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
+using DtPipe.Cli.Infrastructure;
+using DtPipe.Cli;
 using DtPipe.Core.Validation;
 using DtPipe.DryRun;
 using Spectre.Console;
@@ -80,16 +82,14 @@ public class DryRunCliController
 			if (result.CompatibilityReport.Warnings.Count > 0 || result.CompatibilityReport.Errors.Count > 0)
 			{
 				_console.WriteLine();
-				_console.MarkupLine("[dim]Press any key to continue to trace analysis...[/]");
-				Console.ReadKey(true);
+                WaitIfInteractive("to continue to trace analysis...");
 			}
 		}
 		else if (result.SchemaInspectionError != null)
 		{
 			_console.MarkupLine($"[yellow]⚠ Could not inspect target schema: {Markup.Escape(result.SchemaInspectionError)}[/]");
 			_console.WriteLine();
-			_console.MarkupLine("[dim]Press any key to continue to trace analysis...[/]");
-			Console.ReadKey(true);
+            WaitIfInteractive("to continue to trace analysis...");
 		}
 
 		// 3.5. Render Primary Key Validation
@@ -100,8 +100,7 @@ public class DryRunCliController
 			// If there's an error, pause before continuing
 			if (!result.KeyValidation.IsValid && result.KeyValidation.IsRequired)
 			{
-				_console.MarkupLine("[dim]Press any key to continue to trace analysis...[/]");
-				Console.ReadKey(true);
+				WaitIfInteractive("to continue to trace analysis...");
 			}
 		}
 
@@ -113,8 +112,7 @@ public class DryRunCliController
 			// If there's an error, pause before continuing
 			if (result.ConstraintValidation.Errors != null && result.ConstraintValidation.Errors.Count > 0)
 			{
-				_console.MarkupLine("[dim]Press any key to continue to trace analysis...[/]");
-				Console.ReadKey(true);
+				WaitIfInteractive("to continue to trace analysis...");
 			}
 		}
 
@@ -145,9 +143,29 @@ public class DryRunCliController
 			_console.MarkupLine($"[yellow]Auto-focusing on first record with errors (Record {initialIndex + 1}/{result.Samples.Count}) - Found {errorIndices.Count} problematic records.[/]");
 		}
 
-		var navigator = new DryRunNavigator(renderer, _console);
-		navigator.Navigate(result.Samples, result.StepNames, columnWidths, result.SchemaInspectionError, targetInfo, initialIndex, errorIndices);
+        if (_console.Profile.Capabilities.Interactive && !Console.IsInputRedirected && !Console.IsOutputRedirected)
+        {
+            var navigator = new DryRunNavigator(renderer, _console);
+            navigator.Navigate(result.Samples, result.StepNames, columnWidths, result.SchemaInspectionError, targetInfo, initialIndex, errorIndices);
+        }
+        else
+        {
+            _console.MarkupLine("[grey]Non-interactive mode: rendering first sample trace only.[/]");
+            _console.Write(renderer.BuildTraceTable(0, result.Samples.Count, result.Samples[0], result.StepNames, columnWidths, result.SchemaInspectionError, targetInfo));
+            _console.WriteLine();
+            _console.MarkupLine("[green]Dry-run complete. No data exported.[/]");
+        }
 	}
+
+    private void WaitIfInteractive(string message)
+    {
+        if (_console.Profile.Capabilities.Interactive && !Console.IsInputRedirected && !Console.IsOutputRedirected)
+        {
+            _console.MarkupLine($"[dim]Press any key {message}[/]");
+            Console.ReadKey(true);
+        }
+    }
+
 
 	private List<int> FindErrorIndices(List<SampleTrace> samples, TargetSchemaInfo? targetInfo, ISqlDialect? dialect)
 	{

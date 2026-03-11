@@ -63,6 +63,6 @@ public class CliDagParserTests
         var dag = CliDagParser.Parse(args);
         var errors = CliDagParser.Validate(dag);
 
-        Assert.Contains(errors, e => e.Contains("used as an input for an XStreamer and cannot have its own '--output'"));
+        Assert.Contains(errors, e => e.Contains("used as an input for a downstream branch and cannot have its own '--output'"));
     }
 }

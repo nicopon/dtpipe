@@ -43,7 +43,8 @@ public static class CliDagParser
                 // We've hit an XStreamer boundary. Finish the current branch.
                 if (currentBranchArgs.Count > 0)
                 {
-                    branches.Add(CreateBranch(currentBranchArgs, isCurrentBranchXStreamer, ref branchCounter, defaultXStreamer));
+                    var branch = CreateBranch(currentBranchArgs, isCurrentBranchXStreamer, ref branchCounter, defaultXStreamer, branches.LastOrDefault()?.Alias);
+                    branches.Add(branch);
                     currentBranchArgs.Clear();
                 }
 
@@ -52,20 +53,21 @@ public static class CliDagParser
                 hasSeenInputInCurrentBranch = false;
                 currentBranchArgs.Add(arg);
             }
-            else if (CliPipelineRules.InputFlags.Contains(arg))
+            else if (CliPipelineRules.InputFlags.Contains(arg) || arg.Equals("--from", StringComparison.OrdinalIgnoreCase))
             {
-                // Split if we've already seen an input (linear sequence)
-                // OR if we are switching from an XStreamer branch to a linear branch.
+                // Split if we've already seen an input in the current branch OR if switching away from an XStreamer branch.
+                // Note: --main and --ref no longer trigger branch splits here; they are XStreamer-only flags.
                 if (hasSeenInputInCurrentBranch || isCurrentBranchXStreamer)
                 {
                     if (currentBranchArgs.Count > 0)
                     {
-                        branches.Add(CreateBranch(currentBranchArgs, isCurrentBranchXStreamer, ref branchCounter, defaultXStreamer));
+                        var branch = CreateBranch(currentBranchArgs, isCurrentBranchXStreamer, ref branchCounter, defaultXStreamer, branches.LastOrDefault()?.Alias);
+                        branches.Add(branch);
                         currentBranchArgs.Clear();
                     }
                 }
 
-                isCurrentBranchXStreamer = false; // New branch started with -i is linear
+                isCurrentBranchXStreamer = false; // New branch started with -i or --from is always linear
                 hasSeenInputInCurrentBranch = true;
                 currentBranchArgs.Add(arg);
             }
@@ -78,7 +80,7 @@ public static class CliDagParser
         // Add the last branch
         if (currentBranchArgs.Count > 0)
         {
-            branches.Add(CreateBranch(currentBranchArgs, isCurrentBranchXStreamer, ref branchCounter, defaultXStreamer));
+            branches.Add(CreateBranch(currentBranchArgs, isCurrentBranchXStreamer, ref branchCounter, defaultXStreamer, branches.LastOrDefault()?.Alias));
         }
 
         return new JobDagDefinition
@@ -87,7 +89,7 @@ public static class CliDagParser
         };
     }
 
-    private static BranchDefinition CreateBranch(List<string> args, bool isXStreamer, ref int branchCounter, string? defaultXStreamer = null)
+    private static BranchDefinition CreateBranch(List<string> args, bool isXStreamer, ref int branchCounter, string? defaultXStreamer = null, string? previousAlias = null)
     {
         string? alias = ExtractArgValue(args.ToArray(), "--alias");
 
@@ -106,6 +108,16 @@ public static class CliDagParser
             input = ExtractArgValue(argsArray, "--xstreamer") ?? ExtractArgValue(argsArray, "-x") ?? defaultXStreamer;
         }
 
+        var mainAlias = ExtractArgValue(argsArray, "--main");
+        if (isXStreamer && string.IsNullOrEmpty(mainAlias) && !string.IsNullOrEmpty(previousAlias))
+        {
+            mainAlias = previousAlias;
+        }
+
+        // Extract the --from alias for fan-out (tee) branches.
+        // This is mutually exclusive with having an explicit -i input.
+        var fromAlias = ExtractArgValue(argsArray, "--from");
+
         return new BranchDefinition
         {
             Alias = alias,
@@ -113,7 +125,8 @@ public static class CliDagParser
             IsXStreamer = isXStreamer,
             Input = input,
             Output = ExtractArgValue(argsArray, "-o") ?? ExtractArgValue(argsArray, "--output"),
-            MainAlias = ExtractArgValue(argsArray, "--main"),
+            MainAlias = mainAlias,
+            FromAlias = fromAlias,
             RefAliases = ExtractAllArgValues(argsArray, "--ref")
                 .SelectMany(r => r.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
                 .ToList()

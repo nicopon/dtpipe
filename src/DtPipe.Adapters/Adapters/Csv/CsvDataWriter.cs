@@ -117,6 +117,9 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvWriterOptio
 		}
 		else
 		{
+			var directory = Path.GetDirectoryName(_outputPath);
+			if (!string.IsNullOrEmpty(directory))
+				Directory.CreateDirectory(directory); // no-op if already exists
 			_outputStream = new FileStream(_outputPath, FileMode.Create, FileAccess.Write, FileShare.None);
 		}
 

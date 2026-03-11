@@ -3,8 +3,8 @@ using System.Data;
 using System.Data.Common;
 using System.Text;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Helpers;
 using DtPipe.Core.Models;
+using DtPipe.Core.Helpers;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 
@@ -13,14 +13,16 @@ namespace DtPipe.Adapters.PostgreSQL;
 public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 {
 	private readonly PostgreSqlWriterOptions _options;
-	// _writer is removed as it is now per-batch
-	// _stagingTable is removed as it is now per-batch
 	private readonly List<string> _keyColumns = new();
 	private Type[]? _targetTypes;
+	private string[]? _targetNames;
 	private NpgsqlTypes.NpgsqlDbType[]? _columnTypes;
 	private readonly ILogger<PostgreSqlDataWriter> _logger;
 	private readonly ITypeMapper _typeMapper;
 	private bool _metaDataInitialized;
+
+    // Stable mapping: Metadata Index -> Source Index
+    private int[]? _targetToSourceMap;
 
 	private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.PostgreSqlDialect();
 	public override ISqlDialect Dialect => _dialect;
@@ -42,7 +44,6 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 
 	protected override async Task<(string Schema, string Table)> ResolveTargetTableAsync(CancellationToken ct)
 	{
-		// Use native PG to_regclass to resolve table name (handles search path and existence)
 		if (_connection is NpgsqlConnection pgConn)
 		{
 			var resolved = await ResolveTableNativeAsync(pgConn, _options.Table, ct);
@@ -52,7 +53,6 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 			}
 		}
 
-		// Fallback for tables that don't exist yet (e.g. Recreate strategy)
 		return ParseTableName(_options.Table);
 	}
 
@@ -60,20 +60,14 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 	{
 		if (_options.Strategy == PostgreSqlWriteStrategy.Recreate)
 		{
-			// Introspect before Drop to preserve native types
 			TargetSchemaInfo? existingSchema = null;
-			bool tableExists = !string.IsNullOrEmpty(resolvedSchema) || await TableExistsAsync(resolvedTable, ct);
-
-			if (tableExists)
+			try
 			{
-				try
-				{
-					existingSchema = await InspectTargetAsync(ct);
-				}
-				catch { /* Ignore introspection errors during recreate */ }
-
-				await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS {_quotedTargetTableName}", ct);
+				existingSchema = await InspectTargetAsync(ct);
 			}
+			catch { }
+
+			await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS {_quotedTargetTableName}", ct);
 
 			string createSql;
 			if (existingSchema != null && existingSchema.Exists)
@@ -107,9 +101,7 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		}
 		else
 		{
-			// Append, Upsert, Ignore
 			await EnsureTableExistsAsync(ct);
-
 			var exists = await InspectTargetAsync(ct);
 			if (exists?.Exists == false)
 			{
@@ -118,7 +110,6 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 			}
 		}
 
-		// Key resolution is now deferred to EnsureMetaDataInitializedAsync
 		return null;
 	}
 
@@ -127,41 +118,64 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		if (_metaDataInitialized) return;
 		await EnsureConnectionOpenAsync(ct);
 
-		// 1. Resolve Keys if needed for Upsert/Ignore
 		if (_options.Strategy == PostgreSqlWriteStrategy.Upsert || _options.Strategy == PostgreSqlWriteStrategy.Ignore)
 		{
 			await ResolveKeysAsync(ct);
 		}
 
-		// 2. Prepare conversion types from target schema
+		// Robust Column Mapping
 		var targetInfo = await InspectTargetAsync(ct);
-		_targetTypes = new Type[_columns!.Count];
-		_columnTypes = new NpgsqlTypes.NpgsqlDbType[_columns.Count];
+		var map = new List<int>();
+		var tTypes = new List<Type>();
+		var tNames = new List<string>();
+		var cTypes = new List<NpgsqlTypes.NpgsqlDbType>();
 
-		for (int i = 0; i < _columns.Count; i++)
-		{
-			var sourceCol = _columns[i];
-			var targetCol = targetInfo?.Columns.FirstOrDefault(c => c.Name.Equals(sourceCol.Name, StringComparison.OrdinalIgnoreCase));
+        if (targetInfo == null || !targetInfo.Exists)
+        {
+             // Fallback to source columns if target doesn't exist (e.g. Recreate)
+             // This keeps the writer stable.
+             for(int i=0; i<_columns!.Count; i++) {
+                 map.Add(i);
+                 tTypes.Add(_columns[i].ClrType);
+                 tNames.Add(_columns[i].Name);
+                 cTypes.Add(PostgreSqlTypeConverter.Instance.MapToNpgsqlDbType(_columns[i].ClrType));
+             }
+        }
+        else
+        {
+            for (int i = 0; i < _columns!.Count; i++)
+            {
+                var sourceCol = _columns[i];
+                var targetCol = targetInfo.Columns.FirstOrDefault(c => IsFuzzyMatch(sourceCol.Name, c.Name));
 
-			// Use target type if available, otherwise source type
-			var effectiveType = targetCol?.InferredClrType ?? sourceCol.ClrType;
-			_targetTypes[i] = effectiveType;
-			_columnTypes[i] = PostgreSqlTypeConverter.Instance.MapToNpgsqlDbType(effectiveType);
-		}
+                if (targetCol == null)
+                {
+                    _logger.LogWarning("Column {ColumnName} not found in target table. Skipping.", sourceCol.Name);
+                    continue;
+                }
+
+                map.Add(i);
+                tTypes.Add(targetCol.InferredClrType ?? sourceCol.ClrType);
+                tNames.Add(targetCol.Name);
+                cTypes.Add(PostgreSqlTypeConverter.Instance.MapToNpgsqlDbType(targetCol.InferredClrType ?? sourceCol.ClrType));
+            }
+        }
+
+		_targetToSourceMap = map.ToArray();
+		_targetTypes = tTypes.ToArray();
+		_targetNames = tNames.ToArray();
+		_columnTypes = cTypes.ToArray();
 
 		_metaDataInitialized = true;
 	}
 
-
 	private async Task EnsureTableExistsAsync(CancellationToken ct)
 	{
-		var (schema, table) = await ResolveTargetTableAsync(ct);
 		if (await TableExistsAsync(_quotedTargetTableName, ct))
 		{
 			return;
 		}
 
-		// Try CREATE TABLE
 		var createSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
 		await ExecuteNonQueryAsync(createSql, ct);
 	}
@@ -202,8 +216,6 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		await EnsureConnectionOpenAsync(ct);
 		await EnsureMetaDataInitializedAsync(ct);
 
-		if (_columns is null) throw new InvalidOperationException("Columns not initialized");
-
 		try
 		{
 			if (_options.Strategy is PostgreSqlWriteStrategy.Upsert or PostgreSqlWriteStrategy.Ignore)
@@ -217,16 +229,13 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		}
 		catch (Exception ex)
 		{
-			// On failure, dispose connection to force a fresh one on retry.
-			// No explicit rollback needed for simple COPY as we didn't Complete() it (for direct)
-			// or we dropped/rollback txn (for staging).
 			if (_connection != null)
 			{
 				try { _connection.Dispose(); } catch { }
 				_connection = null;
 			}
 
-			var analysis = await BatchFailureAnalyzer.AnalyzeAsync(this, rows, _columns, ct);
+			var analysis = await BatchFailureAnalyzer.AnalyzeAsync(this, rows, _columns!, ct);
 			if (!string.IsNullOrEmpty(analysis))
 			{
 				throw new InvalidOperationException($"PostgreSQL Binary Import Failed with detailed analysis:\n{analysis}", ex);
@@ -237,28 +246,22 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 
 	private async Task WriteBatchDirectAsync(IReadOnlyList<object?[]> rows, CancellationToken ct)
 	{
-		var copySql = BuildCopySql(_quotedTargetTableName, _columns!);
+		var copySql = BuildCopySql(_quotedTargetTableName);
+        _logger.LogDebug("Executing PostgreSQL Binary Import: {Sql}", copySql);
 		await using var writer = await ((NpgsqlConnection)_connection!).BeginBinaryImportAsync(copySql, ct);
 
 		await WriteRowsToCopyAsync(writer, rows, ct);
-
-		// Atomic Commit for this batch
 		await writer.CompleteAsync(ct);
 	}
 
 	private async Task WriteBatchViaStagingAsync(IReadOnlyList<object?[]> rows, CancellationToken ct)
 	{
-		// Create unique staging table for this batch
 		var stagingTable = $"tmp_batch_{Guid.NewGuid():N}";
-
-		// Typically TEMP tables are visible only to the session.
-		// ON COMMIT DROP is useful if we were inside a transaction block,
-		// but here we manage lifecycle manually for clarity.
 		await ExecuteNonQueryAsync($"CREATE TEMP TABLE {stagingTable} (LIKE {_quotedTargetTableName} INCLUDING DEFAULTS)", ct);
 
 		try
 		{
-			var copySql = BuildCopySql(stagingTable, _columns!);
+			var copySql = BuildCopySql(stagingTable);
 			await using (var writer = await ((NpgsqlConnection)_connection!).BeginBinaryImportAsync(copySql, ct))
 			{
 				await WriteRowsToCopyAsync(writer, rows, ct);
@@ -269,7 +272,6 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		}
 		finally
 		{
-			// Cleanup staging table
 			try
 			{
 				await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS {stagingTable}", ct);
@@ -286,23 +288,34 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		foreach (var row in rows)
 		{
 			await writer.StartRowAsync(ct);
-			for (int i = 0; i < row.Length; i++)
+			for (int j = 0; j < _targetToSourceMap!.Length; j++)
 			{
-				var val = row[i];
-				if (val is null)
+				int sourceIdx = _targetToSourceMap[j];
+				var val = row[sourceIdx];
+				var targetType = _targetTypes![j];
+
+				if (targetType == typeof(Guid) && val is string s && string.IsNullOrWhiteSpace(s))
+				{
+					val = null;
+				}
+
+				if (val is null || val == DBNull.Value)
 				{
 					await writer.WriteNullAsync(ct);
 				}
 				else
 				{
-					// Use strict types and convert value if needed
-					var targetType = _targetTypes![i];
 					var convertedVal = ValueConverter.ConvertValue(val, targetType);
 
-					// Normalize DateTime for Npgsql 6.0+ strictness based on column type
+					if (convertedVal is null || convertedVal == DBNull.Value)
+					{
+						await writer.WriteNullAsync(ct);
+						continue;
+					}
+
 					if (convertedVal is DateTime dt)
 					{
-						var dbType = _columnTypes![i];
+						var dbType = _columnTypes![j];
 						if (dbType == NpgsqlTypes.NpgsqlDbType.Timestamp && dt.Kind != DateTimeKind.Unspecified)
 						{
 							convertedVal = DateTime.SpecifyKind(dt, DateTimeKind.Unspecified);
@@ -313,7 +326,7 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 						}
 					}
 
-					await writer.WriteAsync(convertedVal, _columnTypes![i], ct);
+					await writer.WriteAsync(convertedVal, _columnTypes![j], ct);
 				}
 			}
 		}
@@ -321,22 +334,20 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 
 	public override async ValueTask CompleteAsync(CancellationToken ct = default)
 	{
-		// No global cleanup needed with Transactional Batches
 		await ValueTask.CompletedTask;
 	}
 
 	private async Task MergeStagingBatchAsync(string stagingTable, CancellationToken ct)
 	{
-		var cols = _columns!.Select(c => SqlIdentifierHelper.GetSafeIdentifier(_dialect, c)).ToList();
+		var cols = _targetNames!.Select(n => _dialect.Quote(n)).ToList();
 		var conflictTarget = string.Join(", ", _keyColumns.Select(c => _dialect.Quote(c)));
 		var quotedStaging = _dialect.Quote(stagingTable);
 
 		var updateSet = string.Join(", ",
-			_columns!.Where(c => !_keyColumns.Contains(c.Name, StringComparer.OrdinalIgnoreCase))
-						.Select(c => $"{SqlIdentifierHelper.GetSafeIdentifier(_dialect, c)} = EXCLUDED.{SqlIdentifierHelper.GetSafeIdentifier(_dialect, c)}"));
+			_targetNames!.Where(n => !_keyColumns.Contains(n, StringComparer.OrdinalIgnoreCase))
+						.Select(n => $"{_dialect.Quote(n)} = EXCLUDED.{_dialect.Quote(n)}"));
 
 		var sb = new StringBuilder();
-
 		sb.Append($"INSERT INTO {_quotedTargetTableName} ({string.Join(", ", cols)}) SELECT {string.Join(", ", cols)} FROM {quotedStaging} ");
 
 		if (_options.Strategy == PostgreSqlWriteStrategy.Ignore)
@@ -354,7 +365,6 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 	public override async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
 	{
 		await EnsureConnectionOpenAsync(ct);
-
 		using var cmd = (NpgsqlCommand)_connection!.CreateCommand();
 		cmd.CommandText = command;
 		await cmd.ExecuteNonQueryAsync(ct);
@@ -365,7 +375,7 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		return ValueTask.CompletedTask;
 	}
 
-	#region Helpers (Parsing, Native Resolution, SQL Building)
+	#region Helpers
 
 	protected override string GetTruncateTableSql(string tableName) => $"TRUNCATE TABLE {tableName}";
 	protected override string GetDropTableSql(string tableName) => $"DROP TABLE {tableName}";
@@ -380,21 +390,12 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 
 	private static async Task<(string Schema, string Table)?> ResolveTableNativeAsync(NpgsqlConnection connection, string inputName, CancellationToken ct)
 	{
-		var sql = @"
-            SELECT n.nspname, c.relname
-            FROM pg_class c
-            JOIN pg_namespace n ON n.oid = c.relnamespace
-            WHERE c.oid = to_regclass(@input)::oid";
-
+		var sql = "SELECT n.nspname, c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.oid = to_regclass(@input)::oid";
 		await using var cmd = connection.CreateCommand();
 		cmd.CommandText = sql;
 		cmd.Parameters.AddWithValue("input", inputName);
-
 		await using var reader = await cmd.ExecuteReaderAsync(ct);
-		if (await reader.ReadAsync(ct))
-		{
-			return (reader.GetString(0), reader.GetString(1));
-		}
+		if (await reader.ReadAsync(ct)) return (reader.GetString(0), reader.GetString(1));
 		return null;
 	}
 
@@ -402,27 +403,27 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 	{
 		if (string.IsNullOrWhiteSpace(tableName)) return ("", tableName);
 		string[] parts = tableName.Split('.');
-		if (parts.Length == 2)
-		{
-			return (NormalizeIdentifier(parts[0]), NormalizeIdentifier(parts[1]));
-		}
+		if (parts.Length == 2) return (NormalizeIdentifier(parts[0]), NormalizeIdentifier(parts[1]));
 		return ("", NormalizeIdentifier(tableName));
 	}
 
 	private string NormalizeIdentifier(string id) => id.Trim('"');
 
+    private static bool IsFuzzyMatch(string name1, string name2)
+    {
+        if (string.Equals(name1, name2, StringComparison.OrdinalIgnoreCase)) return true;
+        string Normalize(string s) => s.Replace("_", "").Replace(" ", "").ToLowerInvariant();
+        return string.Equals(Normalize(name1), Normalize(name2), StringComparison.Ordinal);
+    }
 
-
-
-
-	private string BuildCopySql(string tableName, IReadOnlyList<PipeColumnInfo> columns)
+	private string BuildCopySql(string tableName)
 	{
 		var sb = new StringBuilder();
 		sb.Append($"COPY {tableName} (");
-		for (int i = 0; i < columns.Count; i++)
+		for (int i = 0; i < _targetNames!.Length; i++)
 		{
 			if (i > 0) sb.Append(", ");
-			sb.Append(SqlIdentifierHelper.GetSafeIdentifier(_dialect, columns[i]));
+			sb.Append(_dialect.Quote(_targetNames[i]));
 		}
 		sb.Append(") FROM STDIN (FORMAT BINARY)");
 		return sb.ToString();
@@ -452,28 +453,16 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		await using var connection = new NpgsqlConnection(_connectionString);
 		await connection.OpenAsync(ct);
 
+        // Use native resolution directly to avoid recursion
 		var resolved = await ResolveTableNativeAsync(connection, _options.Table, ct);
 		if (resolved == null) return new TargetSchemaInfo([], false, null, null, null);
-
 		var (schemaName, tableName) = resolved.Value;
-
-		var columnsSql = @"
-            SELECT column_name, data_type, udt_name, is_nullable, character_maximum_length, numeric_precision, numeric_scale
-            FROM information_schema.columns
-            WHERE table_schema = @schema AND table_name = @table ORDER BY ordinal_position";
-
+		var columnsSql = "SELECT column_name, data_type, udt_name, is_nullable, character_maximum_length, numeric_precision, numeric_scale FROM information_schema.columns WHERE table_schema = @schema AND table_name = @table ORDER BY ordinal_position";
 		await using var columnsCmd = new NpgsqlCommand(columnsSql, connection);
 		columnsCmd.Parameters.AddWithValue("schema", schemaName);
 		columnsCmd.Parameters.AddWithValue("table", tableName);
-
 		var pkColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-		var pkSql = @"
-            SELECT a.attname
-            FROM pg_constraint c
-            JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
-            WHERE c.contype = 'p'
-              AND c.conrelid = (SELECT oid FROM pg_class WHERE relname = @table AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = @schema))";
-
+		var pkSql = "SELECT a.attname FROM pg_constraint c JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey) WHERE c.contype = 'p' AND c.conrelid = (SELECT oid FROM pg_class WHERE relname = @table AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = @schema))";
 		await using (var pkCmd = new NpgsqlCommand(pkSql, connection))
 		{
 			pkCmd.Parameters.AddWithValue("schema", schemaName);
@@ -481,15 +470,8 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 			await using var r = await pkCmd.ExecuteReaderAsync(ct);
 			while (await r.ReadAsync(ct)) pkColumns.Add(r.GetString(0));
 		}
-
 		var uniqueColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-		var uSql = @"
-            SELECT a.attname
-            FROM pg_constraint c
-            JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
-            WHERE c.contype = 'u'
-              AND c.conrelid = (SELECT oid FROM pg_class WHERE relname = @table AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = @schema))";
-
+		var uSql = "SELECT a.attname FROM pg_constraint c JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey) WHERE c.contype = 'u' AND c.conrelid = (SELECT oid FROM pg_class WHERE relname = @table AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = @schema))";
 		await using (var uCmd = new NpgsqlCommand(uSql, connection))
 		{
 			uCmd.Parameters.AddWithValue("schema", schemaName);
@@ -497,14 +479,9 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 			await using var r = await uCmd.ExecuteReaderAsync(ct);
 			while (await r.ReadAsync(ct)) uniqueColumns.Add(r.GetString(0));
 		}
-
 		long? rowCount = null;
 		long? sizeBytes = null;
-		var sSql = @"
-            SELECT
-                (SELECT reltuples::bigint FROM pg_class WHERE relname = @table AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = @schema)),
-                (SELECT pg_total_relation_size((quote_ident(@schema) || '.' || quote_ident(@table))::regclass))";
-
+		var sSql = "SELECT (SELECT reltuples::bigint FROM pg_class WHERE relname = @table AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = @schema)), (SELECT pg_total_relation_size((quote_ident(@schema) || '.' || quote_ident(@table))::regclass))";
 		await using (var sCmd = new NpgsqlCommand(sSql, connection))
 		{
 			sCmd.Parameters.AddWithValue("schema", schemaName);
@@ -516,21 +493,20 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 				sizeBytes = r.IsDBNull(1) ? null : r.GetInt64(1);
 			}
 		}
-
 		var columns = new List<TargetColumnInfo>();
-		await using var colReader = await columnsCmd.ExecuteReaderAsync(ct);
-		while (await colReader.ReadAsync(ct))
+		await using (var colReader = await columnsCmd.ExecuteReaderAsync(ct))
 		{
-			var colName = colReader.GetString(0);
-			var dataType = colReader.GetString(1);
-			var udtName = colReader.GetString(2);
-			var isNullable = colReader.GetString(3) == "YES";
-			var maxLength = colReader.IsDBNull(4) ? (int?)null : colReader.GetInt32(4);
-			var nativeType = BuildNativeType(dataType, udtName, maxLength, colReader.IsDBNull(5) ? null : colReader.GetInt32(5), colReader.IsDBNull(6) ? null : colReader.GetInt32(6));
-
-			columns.Add(new TargetColumnInfo(colName, nativeType, _typeMapper.MapFromProviderType(udtName), isNullable, pkColumns.Contains(colName), uniqueColumns.Contains(colName), maxLength, Precision: colReader.IsDBNull(5) ? null : colReader.GetInt32(5), Scale: colReader.IsDBNull(6) ? null : colReader.GetInt32(6), IsCaseSensitive: colName != colName.ToLowerInvariant()));
+			while (await colReader.ReadAsync(ct))
+			{
+				var colName = colReader.GetString(0);
+				var dataType = colReader.GetString(1);
+				var udtName = colReader.GetString(2);
+				var isNullable = colReader.GetString(3) == "YES";
+				var maxLength = colReader.IsDBNull(4) ? (int?)null : colReader.GetInt32(4);
+				var nativeType = BuildNativeType(dataType, udtName, maxLength, colReader.IsDBNull(5) ? null : colReader.GetInt32(5), colReader.IsDBNull(6) ? null : colReader.GetInt32(6));
+				columns.Add(new TargetColumnInfo(colName, nativeType, _typeMapper.MapFromProviderType(udtName), isNullable, pkColumns.Contains(colName), uniqueColumns.Contains(colName), maxLength, Precision: colReader.IsDBNull(5) ? null : colReader.GetInt32(5), Scale: colReader.IsDBNull(6) ? null : colReader.GetInt32(6), IsCaseSensitive: colName != colName.ToLowerInvariant()));
+			}
 		}
-
 		return new TargetSchemaInfo(columns, true, rowCount >= 0 ? rowCount : null, sizeBytes, pkColumns.Count > 0 ? pkColumns.ToList() : null, uniqueColumns.Count > 0 ? uniqueColumns.ToList() : null, IsRowCountEstimate: true);
 	}
 	#endregion

@@ -359,7 +359,10 @@ public sealed class DuckDbDataWriter : BaseSqlDataWriter, IColumnarDataWriter
 			case string str: row.AppendValue(str); break;
 			case DateTime dt: row.AppendValue(dt); break;
 			case DateTimeOffset dto: row.AppendValue(dto.DateTime); break;
-			case byte[] bytes: row.AppendValue((System.Collections.Generic.IEnumerable<byte>)bytes); break;
+			case byte[] bytes:
+				if (targetType == typeof(Guid) && bytes.Length == 16) row.AppendValue(new Guid(bytes));
+				else row.AppendValue((System.Collections.Generic.IEnumerable<byte>)bytes);
+				break;
 			case Guid g: row.AppendValue(g); break;
 			default:
 				row.AppendValue(val.ToString() ?? string.Empty);

@@ -118,16 +118,20 @@ public class WindowDataTransformer : IMultiRowTransformer, IRequiresOptions<DtPi
 		var engine = _jsEngineProvider.GetEngine();
 		EnsureFunctionCompiled(engine);
 
-		// Convert buffer to JS array of objects
+		// Convert buffer to JS array of objects with Proxy protection
 		var jsRows = new Jint.Native.JsArray(engine);
 		foreach (var r in _buffer)
 		{
-			var jsObj = new JsObject(engine);
+			var jsSource = new JsObject(engine);
 			for (int i = 0; i < r.Length; i++)
 			{
-				jsObj.Set(_columnNames![i], JsValue.FromObject(engine, r[i]));
+				var val = r[i];
+				if (val == DBNull.Value) val = null;
+				jsSource.Set(_columnNames![i], JsValue.FromObject(engine, val));
 			}
-			jsRows.Push(jsObj);
+            engine.SetValue("__source", jsSource);
+            var jsRowWithProxy = engine.Evaluate("new Proxy(__source, { get: (target, prop) => { if (typeof prop === 'string' && !(prop in target)) throw new ReferenceError(`Column '${prop}' not found in schema`); return target[prop]; } })");
+			jsRows.Push(jsRowWithProxy);
 		}
 
 		// Set 'rows' in global scope for Evaluate Call

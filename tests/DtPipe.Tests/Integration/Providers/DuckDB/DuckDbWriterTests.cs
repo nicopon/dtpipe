@@ -57,7 +57,8 @@ public class DuckDbWriterTests : IAsyncLifetime
 		{
 			OutputPath = _outputPath,
 			ConnectionString = "fake_connection",
-			Query = "SELECT 1"
+			Query = "SELECT 1",
+			Table = "Export"
 		};
 		_registry.Register(options);
 		var writer = _factory.Create(_registry);
@@ -116,7 +117,7 @@ public class DuckDbWriterTests : IAsyncLifetime
 	public async Task Write_RecordBatch_InsertsData()
 	{
 		// Arrange
-		var options = new PipelineOptions { OutputPath = _outputPath, ConnectionString = "fake", Query = "SELECT 1" };
+		var options = new PipelineOptions { OutputPath = _outputPath, ConnectionString = "fake", Query = "SELECT 1", Table = "Export" };
 		_registry.Register(options);
 		var writer = _factory.Create(_registry) as IColumnarDataWriter;
 		writer.Should().NotBeNull();

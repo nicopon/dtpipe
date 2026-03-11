@@ -129,11 +129,15 @@ public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<
 		}
 
 		// Build a JS object representing the input row (input columns only)
-		var jsRow = new JsObject(engine);
+		var jsSource = new JsObject(engine);
 		for (int i = 0; i < _inputColumnCount && i < _columnNames.Length; i++)
 		{
-			jsRow.Set(_columnNames[i], JsValue.FromObject(engine, row[i]));
+			jsSource.Set(_columnNames[i], JsValue.FromObject(engine, row[i]));
 		}
+
+        // Create Proxy using Jint Engine API for robust schema validation
+        engine.SetValue("__source", jsSource);
+        var jsRow = engine.Evaluate("new Proxy(__source, { get: (target, prop) => { if (typeof prop === 'string' && !(prop in target)) throw new ReferenceError(`Column '${prop}' not found in schema`); return target[prop]; } })");
 
 		engine.SetValue("row", jsRow);
 
@@ -149,6 +153,11 @@ public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<
 				row[processor.ColumnIndex] = (result.IsUndefined() || result.IsNull())
 					? null
 					: result.ToObject();
+
+                if (row[processor.ColumnIndex] is double d && (double.IsInfinity(d) || double.IsNaN(d)))
+                {
+                     throw new InvalidOperationException($"Compute script for column '{_columnNames[processor.ColumnIndex]}' resulted in {d} (possible division by zero).");
+                }
 			}
 			catch (Exception ex)
 			{

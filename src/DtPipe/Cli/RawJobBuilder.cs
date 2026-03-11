@@ -1,9 +1,11 @@
 
 using System.CommandLine;
 using System.CommandLine.Parsing;
-using DtPipe.Cli.Infrastructure;
 using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Models;
+using DtPipe.Cli.Infrastructure;
+using DtPipe.Cli;
 using DtPipe.Core.Pipelines;
 
 namespace DtPipe.Cli;
@@ -101,6 +103,21 @@ public static class RawJobBuilder
 
 				var metricsPathOverride = parseResult.GetValue(opts.MetricsPath);
 				if (!string.IsNullOrEmpty(metricsPathOverride)) job = job with { MetricsPath = metricsPathOverride };
+
+				var prefixOverride = parseResult.GetValue(opts.Prefix);
+				if (!string.IsNullOrEmpty(prefixOverride)) job = job with { Prefix = prefixOverride };
+
+				var throttleOverride = parseResult.GetValue(opts.Throttle);
+				if (throttleOverride > 0) job = job with { Throttle = throttleOverride };
+
+				var ignoreNullsOverride = parseResult.GetValue(opts.IgnoreNulls);
+				if (ignoreNullsOverride) job = job with { IgnoreNulls = true };
+
+				var dropOverride = parseResult.GetValue(opts.Drop);
+				if (dropOverride?.Any() == true) job = job with { Drop = dropOverride };
+
+				var renameOverride = parseResult.GetValue(opts.Rename);
+				if (renameOverride?.Any() == true) job = job with { Rename = renameOverride };
 			}
 			catch (Exception ex)
 			{
@@ -115,30 +132,28 @@ public static class RawJobBuilder
 			var input = parseResult.GetValue(opts.Input)?.FirstOrDefault();
 
 			// Validation (Required args)
-			if (string.IsNullOrWhiteSpace(output))
+			bool isDag = parseResult.Tokens.Any(t => t.Value == "-x" || t.Value == "--xstreamer" || t.Value == "--alias");
+			var exportJobResult = parseResult.GetValue(opts.ExportJob);
+			if (string.IsNullOrWhiteSpace(output) && !isDag && string.IsNullOrWhiteSpace(exportJobResult))
 			{
 				Console.Error.WriteLine("Error: Option '--output' is required (or use --job).");
 				return (new JobDefinition { Input = "", Query = "", Output = "" }, 1);
 			}
 
-			var xstreamer = parseResult.GetValue(opts.Xstreamer);
+			var xstreamer = parseResult.GetValue(opts.Xstreamer)?.FirstOrDefault();
 			if (string.IsNullOrWhiteSpace(input) && string.IsNullOrWhiteSpace(xstreamer))
 			{
 				Console.Error.WriteLine("Error: --input or --xstreamer is required.");
 				return (new JobDefinition { Input = "", Query = "", Output = "" }, 1);
 			}
 
-			// If xstreamer is provided, bypass input by faking it for downstream resolution if needed
-			if (!string.IsNullOrWhiteSpace(xstreamer) && string.IsNullOrWhiteSpace(input))
-			{
-				input = $"{xstreamer}:";
-			}
+
 
 			job = new JobDefinition
 			{
 				Input = input ?? "",
 				Query = query,
-				Output = output,
+				Output = output ?? "",
 				ConnectionTimeout = parseResult.GetValue(opts.ConnectionTimeout),
 				QueryTimeout = parseResult.GetValue(opts.QueryTimeout),
 				BatchSize = parseResult.GetValue(opts.BatchSize),
@@ -161,8 +176,19 @@ public static class RawJobBuilder
 				StrictSchema = parseResult.GetValue(opts.StrictSchema) ?? false,
 				NoSchemaValidation = parseResult.GetValue(opts.NoSchemaValidation) ?? false,
 				MetricsPath = parseResult.GetValue(opts.MetricsPath),
-				AutoMigrate = parseResult.GetValue(opts.AutoMigrate) ?? false
+				AutoMigrate = parseResult.GetValue(opts.AutoMigrate) ?? false,
+				Throttle = parseResult.GetValue(opts.Throttle),
+				IgnoreNulls = parseResult.GetValue(opts.IgnoreNulls),
+				Prefix = parseResult.GetValue(opts.Prefix),
+				Drop = parseResult.GetValue(opts.Drop) ?? Array.Empty<string>(),
+				Rename = parseResult.GetValue(opts.Rename) ?? Array.Empty<string>()
 			};
+
+			if (job.Limit < 0)
+			{
+				Console.Error.WriteLine("CLI Error: Limit cannot be negative.");
+				return (new JobDefinition { Input = "", Query = "", Output = "" }, 1);
+			}
 		}
 
 		return (job, 0);

@@ -37,12 +37,20 @@ public record BranchDefinition
     public string? Output { get; init; }
 
     /// <summary>
-    /// For XStreamer branches, the alias of the primary source branch.
+    /// For XStreamer branches, the alias of the primary source branch (streaming side of a JOIN).
     /// </summary>
     public string? MainAlias { get; init; }
 
     /// <summary>
-    /// For XStreamer branches, the aliases of secondary source branches.
+    /// For fan-out branches, the alias of the upstream branch to read from (via broadcast).
+    /// Semantically equivalent to Unix <c>tee</c>: this branch receives a full copy of the upstream data.
+    /// Unlike <see cref="MainAlias"/>, which is reserved for XStreamer JOIN routing, <c>FromAlias</c>
+    /// simply declares "start a new linear branch that reads a duplicated copy of the named upstream channel".
+    /// </summary>
+    public string? FromAlias { get; init; }
+
+    /// <summary>
+    /// For XStreamer branches, the aliases of secondary source branches (fully preloaded into memory before query execution).
     /// </summary>
     public IReadOnlyList<string> RefAliases { get; init; } = Array.Empty<string>();
 }

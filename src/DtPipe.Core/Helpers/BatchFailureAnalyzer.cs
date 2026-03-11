@@ -22,15 +22,12 @@ public static class BatchFailureAnalyzer
 				return "Could not retrieve target schema definition from database. Cannot perform deep analysis.";
 			}
 
-			// 2. Build Mapping: Source Index -> Target Column Info (By Name)
-			// Assume name-based mapping is the standard for safety.
+			// 2. Build Mapping: Source Index -> Target Column Info (By Fuzzy Name)
 			var columnMap = new TargetColumnInfo?[sourceColumns.Count];
 			for (int i = 0; i < sourceColumns.Count; i++)
 			{
 				var srcCol = sourceColumns[i];
-				// Find target column with same name (Case Insensitive)
-				columnMap[i] = targetSchema.Columns.FirstOrDefault(tc =>
-					string.Equals(tc.Name, srcCol.Name, StringComparison.OrdinalIgnoreCase));
+				columnMap[i] = targetSchema.Columns.FirstOrDefault(tc => IsFuzzyMatch(srcCol.Name, tc.Name));
 			}
 
 			for (int r = 0; r < rows.Count; r++)
@@ -44,7 +41,7 @@ public static class BatchFailureAnalyzer
 
 					if (targetCol == null)
 					{
-						// Column exists in source but not in target. 
+						// Column exists in source but not in target.
 						// Usually handled by ignoring or erroring depending on provider.
 						// Skip analysis.
 						continue;
@@ -57,42 +54,8 @@ public static class BatchFailureAnalyzer
 						var rawTargetType = targetCol.InferredClrType ?? typeof(object);
 						var targetType = Nullable.GetUnderlyingType(rawTargetType) ?? rawTargetType;
 
-						// Check 1: Is this a String trying to go into a non-String column?
-						if (val is string s)
-						{
-							if (targetType != typeof(string) && targetType != typeof(object))
-							{
-								// Strict check: Try parsing
-								if (targetType == typeof(decimal) || targetType == typeof(double) || targetType == typeof(float) ||
-									targetType == typeof(int) || targetType == typeof(long))
-								{
-									Convert.ChangeType(val, targetType, CultureInfo.InvariantCulture);
-								}
-								else if (targetType == typeof(DateTime) || targetType == typeof(DateTimeOffset))
-								{
-									DateTime.Parse(s, CultureInfo.InvariantCulture);
-								}
-								else if (targetType == typeof(Guid))
-								{
-									Guid.Parse(s);
-								}
-								else
-								{
-									Convert.ChangeType(val, targetType);
-								}
-							}
-						}
-						else
-						{
-							// Check 2: Value is not null, not string. Type Compatibility?
-							if (val.GetType() != targetType && !targetType.IsAssignableFrom(val.GetType()))
-							{
-								if (val is IConvertible)
-								{
-									Convert.ChangeType(val, targetType);
-								}
-							}
-						}
+                        // Use same converter as the writer for consistent analysis
+                        ValueConverter.ConvertValue(val, targetType);
 					}
 					catch (Exception ex)
 					{
@@ -127,5 +90,12 @@ public static class BatchFailureAnalyzer
 		}
 
 		return null;
+	}
+
+	private static bool IsFuzzyMatch(string name1, string name2)
+	{
+		if (string.Equals(name1, name2, StringComparison.OrdinalIgnoreCase)) return true;
+		string Normalize(string s) => s.Replace("_", "").Replace(" ", "").ToLowerInvariant();
+		return string.Equals(Normalize(name1), Normalize(name2), StringComparison.Ordinal);
 	}
 }

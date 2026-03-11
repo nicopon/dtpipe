@@ -1,4 +1,5 @@
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -13,6 +14,7 @@ public class ParquetReaderDescriptor : IProviderDescriptor<IStreamReader>
     public bool CanHandle(string connectionString) => ParquetMetadata.CanHandle(connectionString);
     public bool SupportsStdio => ParquetMetadata.SupportsStdio;
     public bool RequiresQuery => false;
+    public bool YieldsColumnarOutput => true;
 
     public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
     {

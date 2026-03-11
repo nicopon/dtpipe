@@ -2,10 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.CommandLine;
 using System.CommandLine.Completions;
+using System.CommandLine.Parsing;
 using System.Linq;
 using DtPipe.Cli.Security;
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Models;
 using DtPipe.Core.Abstractions.Dag;
+using DtPipe.Cli.Infrastructure;
 
 namespace DtPipe.Cli;
 
@@ -49,6 +52,8 @@ internal static class CoreOptionsBuilder
         { "--ref",                CliPipelinePhase.XStreamer },
         { "--src-main",           CliPipelinePhase.XStreamer },
         { "--src-ref",            CliPipelinePhase.XStreamer },
+        { "--from",               CliPipelinePhase.Global },
+        { "--prefix",             CliPipelinePhase.Global },
     };
 
     public static CoreCliOptions Build(
@@ -69,8 +74,8 @@ internal static class CoreOptionsBuilder
 
         var outputOption = new Option<string[]>("--output")
         {
-            Description = "Output connection string, file path, or '-' for stdout",
-            Arity = ArgumentArity.OneOrMore
+            Description = "Output connection string (e.g., file path, db connection or '-' for stdout)",
+            Arity = ArgumentArity.ZeroOrMore
         };
         outputOption.Aliases.Add("-o");
         outputOption.CompletionSources.Add(ctx => GetOutputSuggestions(ctx, writerFactories));
@@ -137,20 +142,35 @@ internal static class CoreOptionsBuilder
         retryDelayMsOption.DefaultValueFactory = _ => 1000;
 
         // DAG Options
-        var xstreamerOption = new Option<string>("--xstreamer")
+        var xstreamerOption = new Option<string[]>("--xstreamer")
         {
             Description = "XStreamer provider (e.g. fusion-engine)",
-            Arity = ArgumentArity.ZeroOrOne
+            Arity = ArgumentArity.ZeroOrMore,
+            AllowMultipleArgumentsPerToken = true
         };
         xstreamerOption.Aliases.Add("-x");
         xstreamerOption.CompletionSources.Add(ctx => GetXStreamerSuggestions(ctx, xstreamerFactories));
 
         var aliasOption = new Option<string[]>("--alias") { Description = "Alias(es) for the current DAG branch or streams" };
 
-        var mainOption = new Option<string>("--main") { Description = "Main source alias for XStreamer" };
-        var refOption = new Option<string[]>("--ref") { Description = "Secondary source alias(es) for XStreamer" };
-        var srcMainOption = new Option<string>("--src-main") { Description = "Source-main alias for DAG orchestration" };
+        var renameOption = new Option<string[]>("--rename") { Description = "Rename columns (Old:New). repeatable.", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
+        var dropOption = new Option<string[]>("--drop") { Description = "Drop columns. repeatable.", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
+        var throttleOption = new Option<int>("--throttle") { Description = "Throttle speed (rows/sec)" };
+        var ignoreNullsOption = new Option<bool>("--ignore-nulls") { Description = "Skip null values in specific transformations" };
+
+        var mainOption = new Option<string[]>("--main") { Description = "Main source alias for XStreamer (streaming side of JOIN)", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
+        var refOption = new Option<string[]>("--ref") { Description = "Secondary source alias(es) for XStreamer (preloaded into memory)" };
+        var srcMainOption = new Option<string[]>("--src-main") { Description = "Source-main alias for DAG orchestration", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
         var srcRefOption = new Option<string[]>("--src-ref") { Description = "Source-ref alias(es) for DAG orchestration" };
+        var fromOption = new Option<string[]>("--from")
+        {
+            Description = "Read from an upstream branch alias (fan-out / tee). Starts a new linear branch that receives a broadcast copy of the named upstream channel. Analogous to Unix 'tee'.",
+            Arity = ArgumentArity.ZeroOrMore,
+            AllowMultipleArgumentsPerToken = true
+        };
+        fromOption.CompletionSources.Add(ctx => GetAliasSuggestions(ctx));
+        var prefixOption = new Option<string?>("--prefix") { Description = "Prefix for split files" };
+        prefixOption.Aliases.Add("-p");
 
         var allList = new List<Option>
         {
@@ -159,7 +179,8 @@ internal static class CoreOptionsBuilder
             jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption, finallyExecOption,
             strategyOption, insertModeOption, tableOption, maxRetriesOption, retryDelayMsOption, strictSchemaOption,
             noSchemaValidationOption, metricsPathOption, autoMigrateOption, xstreamerOption, aliasOption,
-            mainOption, refOption, srcMainOption, srcRefOption
+            renameOption, dropOption, throttleOption, ignoreNullsOption,
+            mainOption, refOption, srcMainOption, srcRefOption, fromOption, prefixOption
         };
 
         foreach (var opt in allList)
@@ -174,7 +195,8 @@ internal static class CoreOptionsBuilder
             keyOption, jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption,
             finallyExecOption, strategyOption, insertModeOption, tableOption, maxRetriesOption, retryDelayMsOption,
             strictSchemaOption, noSchemaValidationOption, metricsPathOption, autoMigrateOption, xstreamerOption,
-            aliasOption, mainOption, refOption, srcMainOption, srcRefOption, allList);
+            aliasOption, renameOption, dropOption, throttleOption, ignoreNullsOption,
+            mainOption, refOption, srcMainOption, srcRefOption, fromOption, prefixOption, allList);
     }
 
     private static IEnumerable<CompletionItem> GetInputSuggestions(CompletionContext context, IEnumerable<IStreamReaderFactory>? factories)
@@ -269,6 +291,12 @@ internal static class CoreOptionsBuilder
         return suggestions;
     }
 
+    private static IEnumerable<CompletionItem> GetAliasSuggestions(CompletionContext context)
+    {
+        // Best effort: return empty (aliases are only known at runtime, not at completion time)
+        return Enumerable.Empty<CompletionItem>();
+    }
+
     private static IEnumerable<CompletionItem> GetXStreamerSuggestions(CompletionContext context, IEnumerable<IXStreamerFactory>? factories)
     {
         var suggestions = new List<CompletionItem>();
@@ -310,11 +338,17 @@ public record CoreCliOptions(
     Option<bool?> NoSchemaValidation,
     Option<string?> MetricsPath,
     Option<bool?> AutoMigrate,
-    Option<string> Xstreamer,
+    Option<string[]> Xstreamer,
     Option<string[]> Alias,
-    Option<string> Main,
+    Option<string[]> Rename,
+    Option<string[]> Drop,
+    Option<int> Throttle,
+    Option<bool> IgnoreNulls,
+    Option<string[]> Main,
     Option<string[]> Ref,
-    Option<string> SrcMain,
+    Option<string[]> SrcMain,
     Option<string[]> SrcRef,
+    Option<string[]> From,
+    Option<string?> Prefix,
     List<Option> AllOptions
 );

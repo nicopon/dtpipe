@@ -20,4 +20,12 @@ public interface IStreamReaderFactory : IDataFactory
 	/// Indicates if this factory requires a SQL query to create a reader.
 	/// </summary>
 	bool RequiresQuery { get; }
+
+	/// <summary>
+	/// If true, the reader created by this factory implements IColumnarStreamReader
+	/// and can produce Apache Arrow RecordBatches natively.
+	/// When true, the DagOrchestrator will use 'arrow-memory' for this branch's output alias.
+	/// Default is false.
+	/// </summary>
+	bool YieldsColumnarOutput => false;
 }

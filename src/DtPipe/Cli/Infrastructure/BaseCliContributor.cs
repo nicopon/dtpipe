@@ -2,6 +2,8 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
 using DtPipe.Core.Options;
+using DtPipe.Cli.Infrastructure;
+using DtPipe.Cli;
 
 namespace DtPipe.Cli.Infrastructure;
 

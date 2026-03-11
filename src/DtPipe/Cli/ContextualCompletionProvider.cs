@@ -3,9 +3,11 @@ using System.Collections.Generic;
 using System.CommandLine;
 using System.CommandLine.Parsing;
 using System.Linq;
-using System.Linq;
+using DtPipe.Core.Abstractions;
+using DtPipe.Core.Models;
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Cli.Validation;
+using DtPipe.Cli;
 
 namespace DtPipe.Cli;
 
@@ -135,7 +137,7 @@ public static class ContextualCompletionProvider
             }
 
             // 5. DAG-aware rule
-            if (context.LastCompletedFlag == "--main" || context.LastCompletedFlag == "--ref")
+            if (context.LastCompletedFlag == "--main" || context.LastCompletedFlag == "--ref" || context.LastCompletedFlag == "--from")
             {
                 if (context.KnownAliases.Any())
                 {

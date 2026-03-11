@@ -10,6 +10,7 @@ using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Core.Models;
+using DtPipe.Cli;
 using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
 using DtPipe.Core.Validation;
@@ -113,6 +114,7 @@ public class JobService
 				{
 					Console.Error.WriteLine($"CLI Error: {error.Message}");
 				}
+                Environment.ExitCode = 1;
                 return; // Exit if there are parsing errors
 			}
 
@@ -131,6 +133,7 @@ public class JobService
 			if (hasJob && hasManual)
 			{
 				_console.MarkupLine("[red]Error:[/] The [yellow]--job[/] option cannot be combined with manual pipeline definition flags ([yellow]--input[/] or [yellow]--xstreamer[/]).");
+				Environment.ExitCode = 1;
 				return;
 			}
 
@@ -180,7 +183,13 @@ public class JobService
 					NoSchemaValidation = opts.NoSchemaValidation,
 					MetricsPath = opts.MetricsPath,
 					AutoMigrate = opts.AutoMigrate,
-					Xstreamer = opts.Xstreamer
+					Xstreamer = opts.Xstreamer,
+					Prefix = opts.Prefix,
+					ExportJob = opts.ExportJob,
+					Rename = opts.Rename,
+					Drop = opts.Drop,
+					Throttle = opts.Throttle,
+					IgnoreNulls = opts.IgnoreNulls
 				};
 
 				var (job, jobExitCode) = RawJobBuilder.Build(pr, cliJobOptions);
@@ -249,6 +258,16 @@ public class JobService
 						junction += ")";
 						tree.AddNode(junction);
 					}
+					else if (!string.IsNullOrEmpty(branch.FromAlias))
+					{
+						var tee = $"[cyan]🔀 Fan-out:[/] [white]{branch.Alias}[/] ← [italic grey](tee from '{branch.FromAlias}')[/]";
+						tree.AddNode(tee);
+					}
+					else if (!string.IsNullOrEmpty(branch.MainAlias))
+					{
+						var mem = $"[cyan]🔗 Memory Channel:[/] [white]{branch.Alias}[/] ← [italic grey](consume from '{branch.MainAlias}')[/]";
+						tree.AddNode(mem);
+					}
 					else
 					{
 						var source = $"[blue]📄 Source:[/] [white]{branch.Alias}[/]";
@@ -267,9 +286,9 @@ public class JobService
 					var orchestrator = _serviceProvider.GetRequiredService<IDagOrchestrator>();
 					orchestrator.OnLogEvent = msg => _console.MarkupLine(msg);
 
-					Func<string[], CancellationToken, Task<int>> branchExecutor = async (branchArgs, token) =>
+					Func<DtPipe.Core.Pipelines.Dag.BranchDefinition, CancellationToken, Task<int>> branchExecutor = async (branch, token) =>
 					{
-						var branchPr = rootCommand.Parse(branchArgs);
+						var branchPr = rootCommand.Parse(branch.Arguments);
 						if (branchPr.Errors.Count > 0)
 						{
 							_console.Write(new Spectre.Console.Markup($"[red]Error parsing branch arguments:[/]{Environment.NewLine}"));
@@ -277,7 +296,7 @@ public class JobService
 							return 1;
 						}
 						// Suppress log file setup on branches, they will inherit global settings or orchestrator will capture
-						return await executePipeline(branchPr, token, branchArgs);
+						return await executePipeline(branchPr, token, branch.Arguments);
 					};
 
 					await orchestrator.ExecuteAsync(dagDefinition, branchExecutor, ct);
@@ -290,12 +309,17 @@ public class JobService
 					{
 						_console.WriteException(ex);
 					}
+					Environment.ExitCode = 1;
 					return;
 				}
 			}
 
 			// Execution for non-DAG
-			await executePipeline(parseResult, ct, rawArgs);
+			var exitCode = await executePipeline(parseResult, ct, rawArgs);
+            if (exitCode != 0)
+            {
+                Environment.ExitCode = exitCode;
+            }
 		});
 
 		Action PrintHelpAction = () => PrintGroupedHelp(rootCommand, coreOptions, _contributors, _console);

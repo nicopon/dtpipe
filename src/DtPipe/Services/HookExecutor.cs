@@ -1,4 +1,5 @@
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Models;
 using Microsoft.Extensions.Logging;
 
 namespace DtPipe.Services;

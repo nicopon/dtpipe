@@ -27,7 +27,10 @@ public static class ValueConverter
         if (val is string s)
         {
             if (underlyingTarget == typeof(Guid))
+            {
+                if (string.IsNullOrWhiteSpace(s)) return DBNull.Value;
                 return Guid.TryParse(s, out var g) ? g : Guid.Parse(s);
+            }
             if (underlyingTarget == typeof(DateTime))
             {
                 if (DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dt))
@@ -50,9 +53,43 @@ public static class ValueConverter
             return Convert.ChangeType(s, underlyingTarget, CultureInfo.InvariantCulture);
         }
 
+        if (val is byte[] bArr)
+        {
+            if (underlyingTarget == typeof(Guid))
+            {
+                if (bArr.Length == 16) return new Guid(bArr);
+            }
+        }
+
+        if (val is Guid gVal)
+        {
+            if (underlyingTarget == typeof(byte[])) return gVal.ToByteArray();
+            if (underlyingTarget == typeof(string)) return gVal.ToString();
+        }
+
         if (val is DateTime dtVal && underlyingTarget == typeof(DateTimeOffset))
         {
             return new DateTimeOffset(dtVal);
+        }
+
+        if (val is long longVal)
+        {
+            if (underlyingTarget == typeof(DateTime))
+            {
+                // Heuristic: if > 1e12, assume milliseconds, else assume seconds
+                if (longVal > 1_000_000_000_000) return DateTimeOffset.FromUnixTimeMilliseconds(longVal).UtcDateTime;
+                return DateTimeOffset.FromUnixTimeSeconds(longVal).UtcDateTime;
+            }
+            if (underlyingTarget == typeof(DateTimeOffset))
+            {
+                if (longVal > 1_000_000_000_000) return DateTimeOffset.FromUnixTimeMilliseconds(longVal);
+                return DateTimeOffset.FromUnixTimeSeconds(longVal);
+            }
+        }
+
+        if (underlyingTarget.IsEnum && val is string enumStr)
+        {
+            return Enum.Parse(underlyingTarget, enumStr, true);
         }
 
         return Convert.ChangeType(val, underlyingTarget, CultureInfo.InvariantCulture);

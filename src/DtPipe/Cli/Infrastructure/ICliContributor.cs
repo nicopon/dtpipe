@@ -2,6 +2,7 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
 using DtPipe.Core.Options;
+using DtPipe.Cli;
 using System.Collections.Generic;
 
 namespace DtPipe.Cli.Infrastructure;

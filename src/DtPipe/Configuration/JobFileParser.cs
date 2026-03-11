@@ -25,7 +25,7 @@ public static partial class JobFileParser
 	/// </summary>
 	/// <param name="filePath">Path to the YAML file.</param>
 	/// <returns>Parsed JobDefinition.</returns>
-	public static JobDefinition Parse(string filePath)
+	public static DtPipe.Core.Models.JobDefinition Parse(string filePath)
 	{
 		if (!File.Exists(filePath))
 		{
@@ -39,14 +39,14 @@ public static partial class JobFileParser
 
 		var yamlJob = Deserializer.Deserialize<YamlJobFile>(content);
 
-		// Validate required fields
-		if (string.IsNullOrWhiteSpace(yamlJob.Input))
-			throw new InvalidOperationException("Job file missing required field: input");
+		// Validate required fields (Relaxed for export/partial jobs - T40)
+		// if (string.IsNullOrWhiteSpace(yamlJob.Input))
+		// 	throw new InvalidOperationException("Job file missing required field: input");
 
-		if (string.IsNullOrWhiteSpace(yamlJob.Output))
-			throw new InvalidOperationException("Job file missing required field: output");
+		// if (string.IsNullOrWhiteSpace(yamlJob.Output))
+		// 	throw new InvalidOperationException("Job file missing required field: output");
 
-		return new JobDefinition
+		return new DtPipe.Core.Models.JobDefinition
 		{
 			Input = yamlJob.Input,
 			Query = yamlJob.Query,
