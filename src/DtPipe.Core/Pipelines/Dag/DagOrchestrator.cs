@@ -24,6 +24,11 @@ public class DagOrchestrator : IDagOrchestrator
     private readonly List<IStreamReaderFactory> _readerFactories;
     private static readonly object _schemaLock = new();
     private static readonly Schema _emptySchema = new Schema(System.Array.Empty<Field>(), null);
+    
+    // Constants for DAG execution
+    private const int DefaultNativeChannelCapacity = 100;
+    private const int DefaultArrowChannelCapacity = 64;
+    private const int TaskLaunchDelayMs = 50;
 
     public Action<string>? OnLogEvent { get; set; }
 
@@ -39,6 +44,14 @@ public class DagOrchestrator : IDagOrchestrator
         _readerFactories = readerFactories.ToList();
     }
 
+    private sealed record BranchTaskMetadata(
+        string Id,
+        List<string> Consumes,
+        List<string> Produces,
+        CancellationTokenSource Cts,
+        bool IsTerminal
+    );
+
     public async Task<int> ExecuteAsync(JobDagDefinition dag, Func<BranchDefinition, CancellationToken, Task<int>> branchExecutor, CancellationToken cancellationToken = default)
     {
         if (dag.Branches.Count == 0)
@@ -51,46 +64,63 @@ public class DagOrchestrator : IDagOrchestrator
         var effectiveCt = linkedCts.Token;
 
         // ──────────────────────────────────────────────────────────────────
-        // Pre-scan: count how many branches consume each alias via --from.
-        // Aliases with more than 1 consumer require a Broadcast channel split.
+        // 1. Dependency Analysis & Lifecycle Tracking
         // ──────────────────────────────────────────────────────────────────
+        
+        var branchCts = new Dictionary<string, CancellationTokenSource>(StringComparer.OrdinalIgnoreCase);
+        var activeConsumerCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var producerToAlias = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        var taskToMetadata = new Dictionary<Task, BranchTaskMetadata>();
+        
+        // Tracking broadcast tasks separately as they are also producers/consumers
+        var broadcastSubAliases = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         var fromConsumerCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var branch in dag.Branches)
         {
             if (!string.IsNullOrEmpty(branch.FromAlias))
                 fromConsumerCounts[branch.FromAlias] = fromConsumerCounts.GetValueOrDefault(branch.FromAlias) + 1;
         }
 
-        // For each alias consumed by N > 1 --from branches, track the sub-aliases in order
-        // so each consumer gets a distinct sub-channel (alias__fan_0, alias__fan_1, …).
-        var broadcastSubAliases = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var (alias, count) in fromConsumerCounts.Where(kv => kv.Value > 1))
         {
             var subs = new List<string>(count);
             for (int i = 0; i < count; i++)
                 subs.Add($"{alias}__fan_{i}");
             broadcastSubAliases[alias] = subs;
-            _logger.LogInformation("Broadcast fan-out detected for alias '{Alias}': {Count} consumers → sub-channels {Subs}",
-                alias, count, string.Join(", ", subs));
-            OnLogEvent?.Invoke($"  [grey]🔀 Broadcast '{alias}' → {count} sub-channels[/]");
         }
 
-        // For aliases with exactly 1 consumer, no sub-channel is needed; the consumer reads directly.
-        // Track assignment cursors for broadcast aliases.
+        // Initialize active consumer counts for all registry channels
+        foreach (var branch in dag.Branches)
+        {
+            var inputs = new List<string>();
+            if (!string.IsNullOrEmpty(branch.FromAlias)) inputs.Add(branch.FromAlias);
+            if (!string.IsNullOrEmpty(branch.MainAlias)) inputs.Add(branch.MainAlias);
+            foreach (var r in branch.RefAliases) inputs.Add(r);
+
+            foreach (var input in inputs)
+            {
+                activeConsumerCounts[input] = activeConsumerCounts.GetValueOrDefault(input) + 1;
+            }
+        }
+
+        // ──────────────────────────────────────────────────────────────────
+        // 2. Launching Tasks
+        // ──────────────────────────────────────────────────────────────────
+
+        var tasks = new List<Task<int>>();
         var broadcastAssignmentCursor = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var alias in broadcastSubAliases.Keys)
             broadcastAssignmentCursor[alias] = 0;
-
-        var tasks = new List<Task<int>>();
 
         _logger.LogInformation("Orchestrating DAG execution with {BranchCount} branches.", dag.Branches.Count);
         OnLogEvent?.Invoke($"[bold blue]Orchestrating DAG execution with {dag.Branches.Count} branches...[/]");
 
         try
         {
+            // Start all branches
             foreach (var branch in dag.Branches)
             {
-                // Resolve the effective alias for --from branches that require a broadcast sub-channel
                 string? resolvedFromAlias = null;
                 if (!string.IsNullOrEmpty(branch.FromAlias))
                 {
@@ -102,47 +132,141 @@ public class DagOrchestrator : IDagOrchestrator
                     }
                     else
                     {
-                        // Single consumer: read directly from the source channel
                         resolvedFromAlias = branch.FromAlias;
                     }
                 }
 
-                tasks.Add(ExecuteBranchAsync(dag, branch, resolvedFromAlias, broadcastSubAliases, branchExecutor, effectiveCt));
+                var bCts = CancellationTokenSource.CreateLinkedTokenSource(effectiveCt);
+                branchCts[branch.Alias] = bCts;
 
-                // Stagger starts to avoid race conditions in native library loading or CLI parsing
-                await Task.Delay(50, effectiveCt);
+                // Identify producers/consumers for this branch
+                var consumes = new List<string>();
+                if (!string.IsNullOrEmpty(branch.FromAlias)) consumes.Add(branch.FromAlias);
+                if (!string.IsNullOrEmpty(branch.MainAlias)) consumes.Add(branch.MainAlias);
+                consumes.AddRange(branch.RefAliases);
+
+                var produces = new List<string>();
+                if (string.IsNullOrEmpty(branch.Output)) produces.Add(branch.Alias);
+
+                var metadata = new BranchTaskMetadata(
+                    Id: $"branch:{branch.Alias}",
+                    Consumes: consumes,
+                    Produces: produces,
+                    Cts: bCts,
+                    IsTerminal: !string.IsNullOrEmpty(branch.Output)
+                );
+
+                var task = ExecuteBranchAsync(dag, branch, resolvedFromAlias, broadcastSubAliases, branchExecutor, bCts.Token);
+                taskToMetadata[task] = metadata;
+                tasks.Add(task);
+
+                await Task.Delay(TaskLaunchDelayMs, effectiveCt);
             }
 
-            _logger.LogInformation("DEBUG: All branches started, waiting for completion...");
-            // Wait for all branches to finish or for any one to fail early.
+            // Start Broadcast Tasks
+            foreach (var (sourceAlias, subs) in broadcastSubAliases)
+            {
+                var bCts = CancellationTokenSource.CreateLinkedTokenSource(effectiveCt);
+                Task broadcastTask;
+                
+                if (GetRequiredChannelMode(dag, sourceAlias) == XStreamerChannelMode.Arrow)
+                    broadcastTask = StartArrowBroadcastAsync(sourceAlias, subs, bCts.Token);
+                else
+                    broadcastTask = StartNativeBroadcastAsync(sourceAlias, subs, bCts.Token);
+
+                // Broadcast task consumes sourceAlias and produces all sub-aliases
+                var metadata = new BranchTaskMetadata(
+                    Id: $"broadcast:{sourceAlias}",
+                    Consumes: new List<string> { sourceAlias },
+                    Produces: new List<string>(subs),
+                    Cts: bCts,
+                    IsTerminal: false
+                );
+
+                // For simplicity, we want broadcast tasks to be in the same 'tasks' list.
+                // We wrap it to match the Func<Task<int>> signature.
+                var wrappedTask = broadcastTask.ContinueWith(t => {
+                    if (t.IsFaulted) throw t.Exception!;
+                    return 0; 
+                }, effectiveCt);
+
+                taskToMetadata[wrappedTask] = metadata;
+                tasks.Add(wrappedTask);
+
+                // Also, broadcast produces sub-aliases, and branches consume them.
+                // We need to initialize consumer counts for sub-aliases.
+                foreach (var sub in subs)
+                {
+                    // Each sub-alias is produced by the broadcast task
+                    // and consumed by exactly 1 branch (as resolved during branch start)
+                    activeConsumerCounts[sub] = 1;
+                }
+            }
+
+            // ──────────────────────────────────────────────────────────────────
+            // 3. Monitor Loop with Selective Termination
+            // ──────────────────────────────────────────────────────────────────
+
+            _logger.LogInformation("All tasks started, waiting for completion...");
             while (tasks.Count > 0)
             {
                 var finishedTask = await Task.WhenAny(tasks);
+                tasks.Remove(finishedTask);
 
                 if (finishedTask.IsFaulted)
                 {
-                    _logger.LogError(finishedTask.Exception, "A branch failed. Cancelling the entire DAG.");
+                    _logger.LogError(finishedTask.Exception, "A task failed. Cancelling the entire DAG.");
                     await linkedCts.CancelAsync();
                     return 1;
                 }
 
                 if (finishedTask.IsCanceled)
                 {
-                    _logger.LogWarning("A branch was canceled.");
-                    await linkedCts.CancelAsync();
-                    return 1;
+                    // Regular cancellation is handled by catching OperationCanceledException
+                    // but we should check if it was an unexpected cancellation.
+                    continue;
                 }
 
-                // If a branch explicitly returns a non-zero exit code (like a validation error)
                 var exitCode = await finishedTask;
                 if (exitCode != 0)
                 {
-                    _logger.LogError("Branch returned exit code {ExitCode}. Cancelling DAG.", exitCode);
+                    _logger.LogError("Task {Id} returned exit code {ExitCode}. Cancelling DAG.", taskToMetadata[finishedTask].Id, exitCode);
                     await linkedCts.CancelAsync();
                     return exitCode;
                 }
 
-                tasks.Remove(finishedTask);
+                // Normal completion: Update consumer counts and terminate orphaned producers
+                var finishedMeta = taskToMetadata[finishedTask];
+                _logger.LogDebug("Task {Id} finished. Updating dependencies...", finishedMeta.Id);
+
+                foreach (var inputAlias in finishedMeta.Consumes)
+                {
+                    if (activeConsumerCounts.ContainsKey(inputAlias))
+                    {
+                        activeConsumerCounts[inputAlias]--;
+                        if (activeConsumerCounts[inputAlias] <= 0)
+                        {
+                            _logger.LogInformation("Alias '{Alias}' has no more consumers. Triggering producer termination check.", inputAlias);
+                            
+                            // Find the producer for this alias and check if it can stop
+                            foreach (var meta in taskToMetadata.Values)
+                            {
+                                if (meta.Produces.Contains(inputAlias, StringComparer.OrdinalIgnoreCase))
+                                {
+                                    // Check if ALL aliases produced by this producer are now orphaned
+                                    bool allOrphaned = meta.Produces.All(p => activeConsumerCounts.GetValueOrDefault(p) <= 0);
+                                    if (allOrphaned && !meta.IsTerminal)
+                                    {
+                                        _logger.LogInformation("Producer {Id} is now orphaned (all produced aliases [{Aliases}] have no consumers). Cancelling.", 
+                                            meta.Id, string.Join(", ", meta.Produces));
+                                        await meta.Cts.CancelAsync();
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             _logger.LogInformation("DAG execution completed successfully.");
@@ -171,7 +295,6 @@ public class DagOrchestrator : IDagOrchestrator
         Func<BranchDefinition, CancellationToken, Task<int>> branchExecutor,
         CancellationToken ct)
     {
-        // CRITICAL: Ensure we yield immediately to allow the orchestration loop to start other branches
         await Task.Yield();
         _logger.LogInformation("Starting branch '{Alias}' [IsXStreamer={IsXStreamer}, FromAlias={FromAlias}]",
             branch.Alias, branch.IsXStreamer, branch.FromAlias ?? "(none)");
@@ -185,7 +308,6 @@ public class DagOrchestrator : IDagOrchestrator
         {
             var argsList = branch.Arguments.ToList();
 
-            // ── XStreamer: ensure engine name is injected ──────────────────
             if (branch.IsXStreamer)
             {
                 var engineInArgs = ExtractArgValue(argsList, "-x") ?? ExtractArgValue(argsList, "--xstreamer");
@@ -203,109 +325,78 @@ public class DagOrchestrator : IDagOrchestrator
                 }
             }
 
-            // ── Linear branch without explicit -i: implicit input injection ──
-            // Covers two cases:
-            //   (a) --from branches (fan-out / tee) → inject broadcast sub-channel
-            //   (b) legacy: non-XStreamer branches with MainAlias (kept for YAML compat)
             if (!branch.IsXStreamer && string.IsNullOrEmpty(branch.Input))
             {
                 if (!string.IsNullOrEmpty(resolvedFromAlias))
                 {
-                    // Fan-out branch: inject the resolved broadcast sub-channel as -i
                     var prefix = GetRequiredChannelMode(dag, branch.FromAlias!) == XStreamerChannelMode.Arrow
                         ? "arrow-memory"
                         : "mem";
                     argsList.Insert(0, $"{prefix}:{resolvedFromAlias}");
                     argsList.Insert(0, "-i");
-                    _logger.LogInformation(
-                        "Fan-out branch '{BranchAlias}': injected '-i {Prefix}:{ChannelAlias}' (broadcast from '{FromAlias}')",
-                        branch.Alias, prefix, resolvedFromAlias, branch.FromAlias);
                 }
                 else if (!string.IsNullOrEmpty(branch.MainAlias))
                 {
-                    // Legacy / YAML-compat: non-XStreamer branch with MainAlias
                     var prefix = GetRequiredChannelMode(dag, branch.MainAlias) == XStreamerChannelMode.Arrow
                         ? "arrow-memory"
                         : "mem";
                     argsList.Insert(0, $"{prefix}:{branch.MainAlias}");
                     argsList.Insert(0, "-i");
-                    _logger.LogInformation(
-                        "Injected implicit input channel '{Prefix}:{Alias}' for branch '{BranchAlias}'",
-                        prefix, branch.MainAlias, branch.Alias);
                 }
             }
 
-            // ── Output channel: must go to memory if the alias is consumed downstream ──
             if (string.IsNullOrEmpty(branch.Output))
             {
                 var mode = GetRequiredChannelMode(dag, branch.Alias);
 
                 if (mode == XStreamerChannelMode.Arrow)
                 {
-                    var arrowChannel = Channel.CreateBounded<Apache.Arrow.RecordBatch>(new BoundedChannelOptions(64)
+                    var arrowChannel = Channel.CreateBounded<Apache.Arrow.RecordBatch>(new BoundedChannelOptions(DefaultArrowChannelCapacity)
                     {
                         FullMode = BoundedChannelFullMode.Wait
                     });
                     _channelRegistry.RegisterArrowChannel(branch.Alias, arrowChannel, _emptySchema);
                     argsList.Add("-o");
                     argsList.Add($"arrow-memory:{branch.Alias}");
-                    _logger.LogInformation("Branch '{Alias}' → Arrow memory channel.", branch.Alias);
                     OnLogEvent?.Invoke($"  [grey]↳ Branch '{branch.Alias}' → [italic]Arrow memory channel[/][/]");
 
-                    if (broadcastSubAliases.TryGetValue(branch.Alias, out var subs))
-                    {
-                        _ = StartArrowBroadcastAsync(branch.Alias, subs, ct);
-                    }
+                    // Broadcast tasks are now started by ExecuteAsync, not here.
                 }
                 else
                 {
-                    var channel = Channel.CreateBounded<IReadOnlyList<object?[]>>(new BoundedChannelOptions(100)
+                    var channel = Channel.CreateBounded<IReadOnlyList<object?[]>>(new BoundedChannelOptions(DefaultNativeChannelCapacity)
                     {
                         SingleWriter = true,
-                        SingleReader = true, // We will use multiple readers ONLY via broadcast sub-channels
+                        SingleReader = true,
                         FullMode = BoundedChannelFullMode.Wait
                     });
 
                     _channelRegistry.RegisterChannel(branch.Alias, channel, System.Array.Empty<PipeColumnInfo>());
                     argsList.Add("-o");
                     argsList.Add($"mem:{branch.Alias}");
-                    _logger.LogInformation("Branch '{Alias}' → Native memory channel.", branch.Alias);
                     OnLogEvent?.Invoke($"  [grey]↳ Branch '{branch.Alias}' → [italic]memory channel[/][/]");
 
-                    // If this alias is consumed by multiple --from branches, start the broadcast multiplexer task.
-                    if (broadcastSubAliases.TryGetValue(branch.Alias, out var subs))
-                    {
-                        _ = StartNativeBroadcastAsync(branch.Alias, subs, ct);
-                    }
+                    // Broadcast tasks are now started by ExecuteAsync, not here.
                 }
 
-                // Disable stats for internal memory-bound branches to prevent Spectre.Console concurrency deadlocks
                 if (!argsList.Contains("--no-stats", StringComparer.OrdinalIgnoreCase))
                 {
                     argsList.Add("--no-stats");
                 }
             }
 
-            // Execute the actual pipeline dynamically using the provided callback
-            var branchCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-
             try
             {
                 var updatedBranch = branch with { Arguments = argsList.ToArray() };
-                int exitCode = await branchExecutor(updatedBranch, branchCts.Token);
+                int exitCode = await branchExecutor(updatedBranch, ct);
 
                 if (exitCode != 0)
                 {
                     _logger.LogError("Branch '{Alias}' failed with exit code {ExitCode}.", branch.Alias, exitCode);
                     OnLogEvent?.Invoke($"  [red]✖[/] Branch '{branch.Alias}' failed with exit code {exitCode}.");
-
-                    _channelRegistry.GetChannel(branch.Alias)?.Channel.Writer.TryComplete(new Exception($"Branch failed with exit code {exitCode}"));
-                    _channelRegistry.GetArrowChannel(branch.Alias)?.Channel.Writer.TryComplete(new Exception($"Branch failed with exit code {exitCode}"));
-
                     return exitCode;
                 }
 
-                // Successfully finished processing
                 _channelRegistry.GetChannel(branch.Alias)?.Channel.Writer.TryComplete();
                 _channelRegistry.GetArrowChannel(branch.Alias)?.Channel.Writer.TryComplete();
 
@@ -313,36 +404,26 @@ public class DagOrchestrator : IDagOrchestrator
                 OnLogEvent?.Invoke($"  [green]✓[/] Branch '{branch.Alias}' completed.");
                 return 0;
             }
-            catch (Exception ex)
+            catch (OperationCanceledException)
             {
-                _channelRegistry.GetChannel(branch.Alias)?.Channel.Writer.TryComplete(ex);
-                _channelRegistry.GetArrowChannel(branch.Alias)?.Channel.Writer.TryComplete(ex);
-                throw;
+                // Graceful termination when all consumers are done
+                _channelRegistry.GetChannel(branch.Alias)?.Channel.Writer.TryComplete();
+                _channelRegistry.GetArrowChannel(branch.Alias)?.Channel.Writer.TryComplete();
+                _logger.LogInformation("Branch '{Alias}' terminated due to cancellation (orphaned producer).", branch.Alias);
+                OnLogEvent?.Invoke($"  [grey]✓[/] Branch '{branch.Alias}' stopped (no more consumers).");
+                return 0;
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Branch '{Alias}' encountered a fatal error.", branch.Alias);
-
-            var storedChannel = _channelRegistry.GetChannel(branch.Alias);
-            storedChannel?.Channel.Writer.TryComplete(ex);
-
-            var arrowChannel = _channelRegistry.GetArrowChannel(branch.Alias);
-            arrowChannel?.Channel.Writer.TryComplete(ex);
-
+            _channelRegistry.GetChannel(branch.Alias)?.Channel.Writer.TryComplete(ex);
+            _channelRegistry.GetArrowChannel(branch.Alias)?.Channel.Writer.TryComplete(ex);
             throw;
         }
     }
 
-    /// <summary>
-    /// Creates N sub-channels for a broadcast alias and launches a background task that reads from
-    /// the source channel and fans out each item to all N sub-channels. Call this after the source
-    /// branch channel is registered but before the consumer branches start reading.
-    /// </summary>
-    private Task StartNativeBroadcastAsync(
-        string sourceAlias,
-        IReadOnlyList<string> subAliases,
-        CancellationToken ct)
+    private Task StartNativeBroadcastAsync(string sourceAlias, IReadOnlyList<string> subAliases, CancellationToken ct)
     {
         var sourceTuple = _channelRegistry.GetChannel(sourceAlias)
             ?? throw new InvalidOperationException($"Broadcast: source channel '{sourceAlias}' not found in registry.");
@@ -350,7 +431,7 @@ public class DagOrchestrator : IDagOrchestrator
         var subChannels = new List<Channel<IReadOnlyList<object?[]>>>(subAliases.Count);
         foreach (var subAlias in subAliases)
         {
-            var sub = Channel.CreateBounded<IReadOnlyList<object?[]>>(new BoundedChannelOptions(100)
+            var sub = Channel.CreateBounded<IReadOnlyList<object?[]>>(new BoundedChannelOptions(DefaultNativeChannelCapacity)
             {
                 SingleWriter = true,
                 SingleReader = true,
@@ -367,8 +448,6 @@ public class DagOrchestrator : IDagOrchestrator
         {
             try
             {
-                // Wait for schema to be available (upstream branch populates it after first batch)
-                // We need to propagate column info to all sub-channels once available.
                 await foreach (var batch in sourceTuple.Channel.Reader.ReadAllAsync(ct))
                 {
                     foreach (var sub in subChannels)
@@ -377,25 +456,16 @@ public class DagOrchestrator : IDagOrchestrator
                     }
                 }
             }
-            catch (Exception ex)
+            finally
             {
-                _logger.LogError(ex, "Broadcast multiplexer for '{SourceAlias}' failed.", sourceAlias);
                 foreach (var sub in subChannels)
-                    sub.Writer.TryComplete(ex);
-                return;
+                    sub.Writer.TryComplete();
+                _logger.LogInformation("Broadcast multiplexer for '{SourceAlias}' completed.", sourceAlias);
             }
-
-            foreach (var sub in subChannels)
-                sub.Writer.TryComplete();
-
-            _logger.LogInformation("Broadcast multiplexer for '{SourceAlias}' completed.", sourceAlias);
         }, ct);
     }
 
-    private Task StartArrowBroadcastAsync(
-        string sourceAlias,
-        IReadOnlyList<string> subAliases,
-        CancellationToken ct)
+    private Task StartArrowBroadcastAsync(string sourceAlias, IReadOnlyList<string> subAliases, CancellationToken ct)
     {
         var sourceTuple = _channelRegistry.GetArrowChannel(sourceAlias)
             ?? throw new InvalidOperationException($"Arrow Broadcast: source channel '{sourceAlias}' not found in registry.");
@@ -403,7 +473,7 @@ public class DagOrchestrator : IDagOrchestrator
         var subChannels = new List<Channel<Apache.Arrow.RecordBatch>>(subAliases.Count);
         foreach (var subAlias in subAliases)
         {
-            var sub = Channel.CreateBounded<Apache.Arrow.RecordBatch>(new BoundedChannelOptions(64)
+            var sub = Channel.CreateBounded<Apache.Arrow.RecordBatch>(new BoundedChannelOptions(DefaultArrowChannelCapacity)
             {
                 SingleWriter = true,
                 SingleReader = true,
@@ -422,31 +492,19 @@ public class DagOrchestrator : IDagOrchestrator
             {
                 await foreach (var batch in sourceTuple.Channel.Reader.ReadAllAsync(ct))
                 {
-                    // For Arrow RecordBatches, we should technically clone the batch to ensure thread safety
-                    // since multiple consumers might eventually drop memory references concurrently if
-                    // using unmanaged memory. For dtpipe's managed arrow arrays this is safe enough.
                     foreach (var sub in subChannels)
                     {
-                        // Note: To be perfectly safe across native DataFusion bounds,
-                        // each consumer needs its own reference count or independent clone.
-                        // Assuming .Clone() or just passing the reference (managed memory).
                         await sub.Writer.WriteAsync(batch.Clone(), ct);
                     }
-                    batch.Dispose(); // The source reader disposes the original batch, subs took cloned references
+                    batch.Dispose();
                 }
             }
-            catch (Exception ex)
+            finally
             {
-                _logger.LogError(ex, "Arrow Broadcast multiplexer for '{SourceAlias}' failed.", sourceAlias);
                 foreach (var sub in subChannels)
-                    sub.Writer.TryComplete(ex);
-                return;
+                    sub.Writer.TryComplete();
+                _logger.LogInformation("Arrow Broadcast multiplexer for '{SourceAlias}' completed.", sourceAlias);
             }
-
-            foreach (var sub in subChannels)
-                sub.Writer.TryComplete();
-
-            _logger.LogInformation("Arrow Broadcast multiplexer for '{SourceAlias}' completed.", sourceAlias);
         }, ct);
     }
 
@@ -454,9 +512,8 @@ public class DagOrchestrator : IDagOrchestrator
     {
         foreach (var branch in dag.Branches.Where(b => b.IsXStreamer))
         {
-            bool isConsumer =
-                branch.MainAlias == alias ||
-                branch.RefAliases.Contains(alias);
+            bool isConsumer = (branch.MainAlias != null && branch.MainAlias.Equals(alias, StringComparison.OrdinalIgnoreCase)) ||
+                              branch.RefAliases.Contains(alias, StringComparer.OrdinalIgnoreCase);
 
             if (!isConsumer) continue;
 
@@ -470,28 +527,21 @@ public class DagOrchestrator : IDagOrchestrator
                 return factory.ChannelMode;
         }
 
-        // New: detect if the producing branch has a columnar reader
         var producerBranch = dag.Branches.FirstOrDefault(b =>
             b.Alias.Equals(alias, StringComparison.OrdinalIgnoreCase) && !b.IsXStreamer);
 
         if (producerBranch != null && !string.IsNullOrEmpty(producerBranch.Input))
         {
-            // Look for a reader factory that handles this input.
             var readerFactory = _readerFactories.FirstOrDefault(f =>
                 producerBranch.Input.StartsWith(f.ComponentName + ":", StringComparison.OrdinalIgnoreCase) ||
                 producerBranch.Input.Equals(f.ComponentName, StringComparison.OrdinalIgnoreCase) ||
                 f.CanHandle(producerBranch.Input));
 
             if (readerFactory?.YieldsColumnarOutput == true)
-            {
-                _logger.LogInformation(
-                    "Branch '{Alias}' uses columnar reader '{Reader}': switching to arrow-memory channel.",
-                    alias, readerFactory.ComponentName);
                 return XStreamerChannelMode.Arrow;
-            }
         }
 
-        return XStreamerChannelMode.Native; // default if not found
+        return XStreamerChannelMode.Native;
     }
 
     private string? ExtractArgValue(IEnumerable<string> args, string argName)
@@ -501,7 +551,7 @@ public class DagOrchestrator : IDagOrchestrator
         if (idx >= 0 && idx + 1 < list.Count)
         {
             var val = list[idx + 1];
-            if (val.StartsWith('-')) return null; // Looks like another flag
+            if (val.StartsWith('-')) return null;
             return val;
         }
         return null;

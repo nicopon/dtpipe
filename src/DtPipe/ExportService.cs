@@ -31,6 +31,7 @@ public class ExportService
 	private readonly MetricsService _metricsService;
 	private readonly SchemaValidationService _schemaValidator;
 	private readonly PipelineExecutor _pipelineExecutor;
+	private const int HookTimeoutSeconds = 30;
 
 	public ExportService(
 		IEnumerable<IStreamReaderFactory> readerFactories,
@@ -200,15 +201,20 @@ public class ExportService
 
 			await _metricsService.SaveMetricsAsync(progress, options.MetricsPath, ct);
 		}
+		catch (OperationCanceledException)
+		{
+			// Graceful termination for orphaned producers or cancellation
+			progress.Complete();
+			_observer.LogMessage($"[grey]✓ Export stopped (no more consumers).[/]");
+		}
 		catch (Exception ex)
 		{
 			_logger.LogError(ex, "Export failed");
 			_observer.LogError(ex);
 
-			// --- ON-ERROR HOOK ---
 			try
 			{
-				await _hookExecutor.ExecuteAsync(writer, "On-Error Hook", options.OnErrorExec, CancellationToken.None, TimeSpan.FromSeconds(30));
+				await _hookExecutor.ExecuteAsync(writer, "On-Error Hook", options.OnErrorExec, CancellationToken.None, TimeSpan.FromSeconds(HookTimeoutSeconds));
 			}
 			catch (Exception hookEx)
 			{
@@ -220,10 +226,9 @@ public class ExportService
 		}
 		finally
 		{
-			// --- FINALLY HOOK ---
 			try
 			{
-				await _hookExecutor.ExecuteAsync(writer, "Finally Hook", options.FinallyExec, CancellationToken.None, TimeSpan.FromSeconds(30));
+				await _hookExecutor.ExecuteAsync(writer, "Finally Hook", options.FinallyExec, CancellationToken.None, TimeSpan.FromSeconds(HookTimeoutSeconds));
 			}
 			catch (Exception hookEx)
 			{

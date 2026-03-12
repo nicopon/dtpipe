@@ -11,6 +11,7 @@ namespace DtPipe.Configuration;
 /// </summary>
 public static class JobFileWriter
 {
+#pragma warning disable CS8603
 	private static readonly ISerializer Serializer = new SerializerBuilder()
 		.WithNamingConvention(HyphenatedNamingConvention.Instance)
 		.ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull | DefaultValuesHandling.OmitDefaults)
@@ -26,6 +27,7 @@ public static class JobFileWriter
 		.WithAttributeOverride<TransformerConfig>(t => t.Expand, new YamlIgnoreAttribute())
 		.WithAttributeOverride<TransformerConfig>(t => t.Overwrite, new YamlIgnoreAttribute())
 		.Build();
+#pragma warning restore CS8603
 
 	/// <summary>
 	/// Writes a JobDefinition to a YAML file.

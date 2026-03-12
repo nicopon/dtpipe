@@ -52,7 +52,7 @@ public sealed class DataFusionXStreamer : IStreamReader
 
     public async Task OpenAsync(CancellationToken ct = default)
     {
-        _logger.LogInformation("DataFusionXStreamer: OpenAsync — query=" + _query);
+        _logger.LogDebug("DataFusionXStreamer: OpenAsync — query={Query}", _query);
         try
         {
             _runtime = DataFusionBridge.RuntimeNew();
@@ -71,22 +71,19 @@ public sealed class DataFusionXStreamer : IStreamReader
             }
             else
             {
-                // Materialize reference tables explicitly to allow DataFusion's planner
-                // to know their exact exact size and correctly choose them for the HashJoin build-side.
-                for (int i = 0; i < _refAliases.Length; i++)
+                if (_refAliases.Length > 0)
                 {
-                    _logger.LogInformation("DataFusionXStreamer: Registering streaming ref [" + _refAliases[i] + "]...");
-                    await RegisterStreamingChannelSourceAsync(_refAliases[i], _refAliases[i], ct);
+                    var materializationTasks = _refAliases.Select(alias => RegisterChannelSourceAsync(alias, alias, ct)).ToList();
+                    await Task.WhenAll(materializationTasks);
                 }
 
                 if (!string.IsNullOrEmpty(_mainAlias))
                 {
-                    _logger.LogInformation("DataFusionXStreamer: Registering main [" + _mainAlias + "]...");
                     await RegisterStreamingChannelSourceAsync(_mainAlias, _mainAlias, ct);
                 }
             }
 
-            _logger.LogInformation("DataFusionXStreamer: All sources registered. Inspecting schema...");
+            _logger.LogDebug("DataFusionXStreamer: All sources registered. Inspecting schema...");
             InspectSchema();
 
             _columns = _resultSchema!.FieldsList
@@ -95,7 +92,7 @@ public sealed class DataFusionXStreamer : IStreamReader
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "DataFusionXStreamer: OpenAsync FAILED: " + ex.Message);
+            _logger.LogError(ex, "DataFusionXStreamer: OpenAsync FAILED: {Message}", ex.Message);
             throw;
         }
     }

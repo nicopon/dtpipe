@@ -51,24 +51,16 @@ public class LinearPipelineService
         if (isXStreamer)
         {
             var xFactories = _serviceProvider.GetRequiredService<IEnumerable<IXStreamerFactory>>();
-            _console.WriteLine($"DEBUG: Found {xFactories.Count()} XStreamer factories.");
-            foreach(var f in xFactories) _console.WriteLine($"  - {f.ComponentName}");
-
             var factoryString = !string.IsNullOrEmpty(job.Xstreamer) ? job.Xstreamer : (job.Input ?? "");
-            _console.WriteLine($"DEBUG: Resolving XStreamer for '{factoryString}'...");
             var (xFactory, xCleaned) = ResolveFactory(xFactories, factoryString, "XStreamer");
             cleanedInput = xCleaned;
 
-            _console.WriteLine($"DEBUG: Resolved XStreamer: {xFactory.ComponentName}");
             // XStreamer needs to be wrapped in a IStreamReaderFactory for ExportService
             readerFactory = new XStreamerReaderFactoryAdapter(xFactory, _serviceProvider, cleanedInput);
         }
         else
         {
             var readerFactories = _contributors.OfType<IStreamReaderFactory>().ToList();
-            _console.WriteLine($"DEBUG: Found {readerFactories.Count} reader factories.");
-            foreach(var f in readerFactories) _console.WriteLine($"  - {f.ComponentName}");
-
             (readerFactory, cleanedInput) = ResolveFactory(readerFactories, job.Input ?? "", "reader");
         }
 
@@ -77,8 +69,6 @@ public class LinearPipelineService
         if (!isDag) _console.WriteLine($"Auto-detected input source: {readerFactory.ComponentName}");
 
         var writerFactories = _contributors.OfType<IDataWriterFactory>().ToList();
-        _console.WriteLine($"DEBUG: Found {writerFactories.Count} writer factories.");
-        foreach(var f in writerFactories) _console.WriteLine($"  - {f.ComponentName}");
 
         IDataWriterFactory? writerFactory = null;
         string? cleanedOutput = null;
@@ -192,10 +182,15 @@ public class LinearPipelineService
         await exportService.RunExportAsync(pipelineOptions, readerFactory.ComponentName, job.Output, token, pipeline, readerFactory, writerFactory, _registry, isDag ? localAlias : null);
         return 0;
         }
+        catch (OperationCanceledException)
+        {
+            // Graceful termination (e.g. producer stopped because consumers are done)
+            return 0;
+        }
         catch (Exception ex)
         {
             _console.Write(new Spectre.Console.Markup($"{Environment.NewLine}[red]Error: {Markup.Escape(ex.Message)}[/]{Environment.NewLine}"));
-            if (pipelineOptions.Provider == "duckdb" || Environment.GetEnvironmentVariable("DEBUG") == "1")
+            if (Environment.GetEnvironmentVariable("DEBUG") == "1")
                 _console.WriteLine(ex.StackTrace ?? "");
             return 1;
         }

@@ -110,8 +110,17 @@ impl PartitionStream for FfiPartitionStream {
         };
         
         let schema = self.schema.clone();
-        let stream = futures::stream::iter(reader).map(|r| {
-            r.map_err(|e| datafusion::error::DataFusionError::ArrowError(Box::new(e), None))
+        let schema_for_stream = schema.clone();
+        let stream = futures::stream::iter(reader).map(move |r| {
+            match r {
+                Ok(rb) => {
+                    // Force the lowercased schema onto the batch. 
+                    // try_new validates types/count but not names, which is what we want.
+                    arrow_array::RecordBatch::try_new(schema_for_stream.clone(), rb.columns().to_vec())
+                        .map_err(|e| datafusion::error::DataFusionError::ArrowError(Box::new(e), None))
+                }
+                Err(e) => Err(datafusion::error::DataFusionError::ArrowError(Box::new(e), None))
+            }
         });
         
         Box::pin(RecordBatchStreamAdapter::new(schema, stream))
@@ -231,6 +240,7 @@ pub unsafe extern "C" fn dtfb_register_batches(
     let mut batches = Vec::with_capacity(num_batches);
     for i in 0..num_batches {
         let array_ptr = unsafe { *ffi_batches_ptr.add(i) };
+        if array_ptr.is_null() { return ErrorCode::Error; }
         let ffi_array = unsafe { std::ptr::read(array_ptr) };
         
         let array_data = match unsafe { arrow_array::ffi::from_ffi(ffi_array, ffi_schema) } {
@@ -239,7 +249,14 @@ pub unsafe extern "C" fn dtfb_register_batches(
         };
         
         let struct_array = arrow_array::StructArray::from(array_data);
-        batches.push(arrow_array::RecordBatch::from(struct_array));
+        let columns = struct_array.columns().to_vec();
+        
+        // Force the lowercased schema onto the batch
+        let rb = match arrow_array::RecordBatch::try_new(Arc::clone(&schema), columns) {
+            Ok(r) => r,
+            Err(_) => return ErrorCode::Error,
+        };
+        batches.push(rb);
     }
 
     let ctx = Arc::clone(&dtfb.ctx);

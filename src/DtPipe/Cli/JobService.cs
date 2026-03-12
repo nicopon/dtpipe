@@ -10,11 +10,9 @@ using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Core.Models;
-using DtPipe.Cli;
 using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
 using DtPipe.Core.Pipelines.Dag;
-using DtPipe.Core.Models;
 using DtPipe.Core.Validation;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -201,7 +199,7 @@ public class JobService
 			}
 			else
 			{
-				dagDefinition = CliDagParser.Parse(rawArgs, defaultXStreamer);
+				dagDefinition = CliDagParser.Parse(rawArgs, defaultXStreamer)!;
 				if (dagDefinition.IsDag)
 				{
 					jobs = new Dictionary<string, JobDefinition>();
@@ -216,7 +214,7 @@ public class JobService
 						
 						bj = bj with { 
 							Main = branch.MainAlias, 
-							Ref = branch.RefAliases?.ToArray(), 
+							Ref = branch.RefAliases?.ToArray() ?? Array.Empty<string>(), 
 							From = branch.FromAlias,
 							Xstreamer = branch.IsXStreamer ? branch.Input : null,
 							Transformers = RawJobBuilder.BuildTransformerConfigsFromCli(branch.Arguments, factoryList, _contributors)
