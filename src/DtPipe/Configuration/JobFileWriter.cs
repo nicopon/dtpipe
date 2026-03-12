@@ -37,4 +37,13 @@ public static class JobFileWriter
 		Console.Error.WriteLine($"Job configuration exported to: {filePath}");
 	}
 
+	/// <summary>
+	/// Writes a dictionary of JobDefinitions (DAG) to a YAML file.
+	/// </summary>
+	public static void Write(string filePath, Dictionary<string, DtPipe.Core.Models.JobDefinition> jobs)
+	{
+		var yaml = Serializer.Serialize(jobs);
+		File.WriteAllText(filePath, yaml);
+		Console.Error.WriteLine($"DAG configuration exported to: {filePath}");
+	}
 }

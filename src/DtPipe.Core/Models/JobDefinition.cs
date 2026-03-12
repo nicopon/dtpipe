@@ -54,6 +54,13 @@ public record JobDefinition
 	public string? FinallyExec { get; init; }
 
     public string? Prefix { get; init; }
+    
+    // Routing/DAG Properties
+    public string? Xstreamer { get; init; }
+    public string? Main { get; init; }
+    public string[] Ref { get; init; } = Array.Empty<string>();
+    public string? From { get; set; }
+
 	/// <summary>Provider-specific options. Keyed by provider name (e.g. 'oracle-writer').</summary>
 	public Dictionary<string, Dictionary<string, object>>? ProviderOptions { get; init; }
 }

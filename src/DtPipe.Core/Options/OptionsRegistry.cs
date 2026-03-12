@@ -38,9 +38,6 @@ public class OptionsRegistry
 	}
 
 	/// <summary>
-	/// Registers an options instance.
-	/// </summary>
-	/// <summary>
 	/// Registers an options instance and returns it.
 	/// </summary>
 	public T Register<T>(T options) where T : class, IOptionSet

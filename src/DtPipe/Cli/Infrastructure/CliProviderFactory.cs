@@ -244,6 +244,12 @@ public class CliXStreamerFactory : CliProviderFactory<IStreamReader>, IXStreamer
 
     public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
     {
+        // If 'options' is PipelineOptions (global), we MUST resolve the specific options
+        // from the registry to get the mapped YAML properties or CLI overrides.
+        if (options is PipelineOptions)
+        {
+            options = _registry.Get(_descriptor.OptionsType);
+        }
         return _xStreamerDescriptor.Create(connectionString, options, serviceProvider);
     }
 

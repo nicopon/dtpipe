@@ -38,10 +38,12 @@ class Program
 		ConfigureServices(services);
 		var serviceProvider = services.BuildServiceProvider();
 
-		// Initialize Serilog with default console logger
+		// Initialize Serilog with default console logger (pointing to STDERR)
 		Log.Logger = new LoggerConfiguration()
 			.MinimumLevel.Debug()
-			.WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
+			.WriteTo.Console(
+				outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}",
+				standardErrorFromLevel: Serilog.Events.LogEventLevel.Verbose)
 			.CreateLogger();
 
 		var jobService = serviceProvider.GetRequiredService<JobService>();
@@ -207,29 +209,41 @@ class Program
 
 	private static void RegisterXStreamer<TDesc>(IServiceCollection services) where TDesc : class, IXStreamerFactory, new()
 	{
-		services.AddSingleton<IXStreamerFactory>(sp => new CliXStreamerFactory(
-			new TDesc(),
-			sp.GetRequiredService<OptionsRegistry>(),
-			sp
-		));
+		services.AddSingleton<IXStreamerFactory>(sp => {
+			var factory = new CliXStreamerFactory(
+				new TDesc(),
+				sp.GetRequiredService<OptionsRegistry>(),
+				sp
+			);
+			return factory;
+		});
+		services.AddSingleton<ICliContributor>(sp => (ICliContributor)sp.GetRequiredService<IXStreamerFactory>());
 	}
 
 	private static void RegisterWriter<TDesc>(IServiceCollection services) where TDesc : class, IProviderDescriptor<IDataWriter>, new()
 	{
-		services.AddSingleton<IDataWriterFactory>(sp => new CliDataWriterFactory(
-			new TDesc(),
-			sp.GetRequiredService<OptionsRegistry>(),
-			sp
-		));
+		services.AddSingleton<IDataWriterFactory>(sp => {
+			var factory = new CliDataWriterFactory(
+				new TDesc(),
+				sp.GetRequiredService<OptionsRegistry>(),
+				sp
+			);
+			return factory;
+		});
+		services.AddSingleton<ICliContributor>(sp => (ICliContributor)sp.GetRequiredService<IDataWriterFactory>());
 	}
 
 	private static void RegisterReader<TDesc>(IServiceCollection services) where TDesc : class, IProviderDescriptor<IStreamReader>, new()
 	{
-		services.AddSingleton<IStreamReaderFactory>(sp => new CliStreamReaderFactory(
-			new TDesc(),
-			sp.GetRequiredService<OptionsRegistry>(),
-			sp
-		));
+		services.AddSingleton<IStreamReaderFactory>(sp => {
+			var factory = new CliStreamReaderFactory(
+				new TDesc(),
+				sp.GetRequiredService<OptionsRegistry>(),
+				sp
+			);
+			return factory;
+		});
+		services.AddSingleton<ICliContributor>(sp => (ICliContributor)sp.GetRequiredService<IStreamReaderFactory>());
 	}
 
 	private static void RegisterTransformer<TFac>(IServiceCollection services) where TFac : class, IDataTransformerFactory

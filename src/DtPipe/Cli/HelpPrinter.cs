@@ -17,12 +17,12 @@ public static class HelpPrinter
 		Option nullOption,
 		Option fakeListOption)
 	{
-		Console.WriteLine("Description:");
-		Console.WriteLine($"  {rootCommand.Description}");
-		Console.WriteLine();
-		Console.WriteLine("Usage:");
-		Console.WriteLine("  dtpipe [options]");
-		Console.WriteLine();
+		Console.Error.WriteLine("Description:");
+		Console.Error.WriteLine($"  {rootCommand.Description}");
+		Console.Error.WriteLine();
+		Console.Error.WriteLine("Usage:");
+		Console.Error.WriteLine("  dtpipe [options]");
+		Console.Error.WriteLine();
 
 		// Core Options
 		PrintSection("Core Options", coreOptions);
@@ -73,10 +73,10 @@ public static class HelpPrinter
 		PrintSection("Anonymization Options", anonOptions);
 
 		// Standard options
-		Console.WriteLine("Other Options:");
-		Console.WriteLine("  -?, -h, --help     Show help and usage information");
-		Console.WriteLine("  --version          Show version information");
-		Console.WriteLine();
+		Console.Error.WriteLine("Other Options:");
+		Console.Error.WriteLine("  -?, -h, --help     Show help and usage information");
+		Console.Error.WriteLine("  --version          Show version information");
+		Console.Error.WriteLine();
 	}
 
 	private static void PrintSection(string title, IEnumerable<Option> options)
@@ -84,7 +84,7 @@ public static class HelpPrinter
 		var optionList = options.ToList();
 		if (optionList.Count == 0) return;
 
-		Console.WriteLine($"{title}:");
+		Console.Error.WriteLine($"{title}:");
 		foreach (var opt in optionList)
 		{
 			var aliases = string.Join(", ", opt.Aliases.OrderBy(a => a.Length));
@@ -96,9 +96,9 @@ public static class HelpPrinter
 				desc += $" [default: {defaultVal}]";
 			}
 
-			Console.WriteLine($"  {aliases,-40} {desc}");
+			Console.Error.WriteLine($"  {aliases,-40} {desc}");
 		}
-		Console.WriteLine();
+		Console.Error.WriteLine();
 	}
 
 	private static string GetDisplayName(Type optionType)

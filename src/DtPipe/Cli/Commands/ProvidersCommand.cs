@@ -13,12 +13,15 @@ namespace DtPipe.Cli.Commands;
 
 public class ProvidersCommand : Command
 {
+    private readonly IAnsiConsole _console;
+
     public ProvidersCommand(IServiceProvider serviceProvider)
         : base("providers", "List all available data providers")
     {
+        _console = serviceProvider.GetRequiredService<IAnsiConsole>();
+
         this.SetAction((parseResult, ct) =>
         {
-            var console = serviceProvider.GetRequiredService<IAnsiConsole>();
             var readers = serviceProvider.GetServices<IStreamReaderFactory>();
             var writers = serviceProvider.GetServices<IDataWriterFactory>();
             var xstreamers = serviceProvider.GetServices<IXStreamerFactory>();
@@ -80,9 +83,9 @@ public class ProvidersCommand : Command
                     Markup.Escape(category));
             }
 
-            console.MarkupLine("[bold]📦 Registered Providers[/]");
-            console.WriteLine();
-            console.Write(table);
+            _console.MarkupLine("[bold]📦 Registered Providers[/]");
+            _console.WriteLine();
+            _console.Write(table);
 
             return Task.CompletedTask;
         });

@@ -32,9 +32,7 @@ public class FormatDataTransformerFactory(OptionsRegistry registry) : IFormatDat
 			Format = configuration.Select(x => x.Value),
 			SkipNull = registryOptions.SkipNull
 		};
-		// Debugging: verify config
 		var configStr = string.Join(" | ", configuration.Select(x => $"{x.Option}={x.Value}"));
-		// Console.WriteLine($"[FormatFactoryDebug] Config: {configStr}");
 
 		return new FormatDataTransformer(options);
 	}

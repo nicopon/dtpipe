@@ -6,8 +6,11 @@ namespace DtPipe.Cli.Commands;
 
 public class SecretCommand : Command
 {
-	public SecretCommand() : base("secret", "Manage secure connection strings in OS Keyring")
+	private readonly IAnsiConsole _console;
+
+	public SecretCommand(IAnsiConsole console) : base("secret", "Manage secure connection strings in OS Keyring")
 	{
+		_console = console;
 		Subcommands.Add(CreateSetCommand());
 		Subcommands.Add(CreateGetCommand());
 		Subcommands.Add(CreateListCommand());
@@ -34,11 +37,11 @@ public class SecretCommand : Command
 			{
 				var mgr = new SecretsManager();
 				mgr.SetSecret(alias, value);
-				AnsiConsole.MarkupLine($"[green]Secret '{alias}' stored successfully.[/]");
+				_console.MarkupLine($"[green]Secret '{alias}' stored successfully.[/]");
 			}
 			catch (Exception ex)
 			{
-				AnsiConsole.WriteException(ex);
+				_console.WriteException(ex);
 			}
 		});
 
@@ -61,13 +64,17 @@ public class SecretCommand : Command
 				var mgr = new SecretsManager();
 				var secret = mgr.GetSecret(alias);
 				if (secret == null)
-					AnsiConsole.MarkupLine($"[red]Secret '{alias}' not found.[/]");
+					_console.MarkupLine($"[red]Secret '{alias}' not found.[/]");
 				else
-					Console.WriteLine(secret);
+					_console.WriteLine(secret); // Secret content can be written to STDERR or STDOUT?
+					// Wait, if it's 'get', maybe user wants it on STDOUT to pipe it?
+					// But dtpipe secrets are usually for internal use.
+					// User's request: "garantir que cette manipulation de la console est paramétrée pour écrire sur STDERR"
+					// I'll stick to _console (STDERR).
 			}
 			catch (Exception ex)
 			{
-				AnsiConsole.WriteException(ex);
+				_console.WriteException(ex);
 			}
 		});
 
@@ -85,7 +92,7 @@ public class SecretCommand : Command
 				var secrets = mgr.ListSecrets();
 				if (secrets.Count == 0)
 				{
-					AnsiConsole.MarkupLine("[yellow]No secrets found in keyring.[/]");
+					_console.MarkupLine("[yellow]No secrets found in keyring.[/]");
 					return;
 				}
 
@@ -99,11 +106,11 @@ public class SecretCommand : Command
 					table.AddRow(kvp.Key, $"[grey]{preview}[/]");
 				}
 
-				AnsiConsole.Write(table);
+				_console.Write(table);
 			}
 			catch (Exception ex)
 			{
-				AnsiConsole.WriteException(ex);
+				_console.WriteException(ex);
 			}
 		});
 		return cmd;
@@ -124,11 +131,11 @@ public class SecretCommand : Command
 			{
 				var mgr = new SecretsManager();
 				mgr.DeleteSecret(alias);
-				AnsiConsole.MarkupLine($"[green]Secret '{alias}' deleted (if it existed).[/]");
+				_console.MarkupLine($"[green]Secret '{alias}' deleted (if it existed).[/]");
 			}
 			catch (Exception ex)
 			{
-				AnsiConsole.WriteException(ex);
+				_console.WriteException(ex);
 			}
 		});
 		return cmd;
@@ -139,16 +146,16 @@ public class SecretCommand : Command
 		var cmd = new Command("nuke", "Delete ALL secrets (removes container)");
 		cmd.SetAction((parseResult) =>
 		{
-			if (!AnsiConsole.Confirm("Are you sure you want to delete ALL secrets?", false)) return;
+			if (!_console.Confirm("Are you sure you want to delete ALL secrets?", false)) return;
 			try
 			{
 				var mgr = new SecretsManager();
 				mgr.Nuke();
-				AnsiConsole.MarkupLine("[green]All secrets nuked.[/]");
+				_console.MarkupLine("[green]All secrets nuked.[/]");
 			}
 			catch (Exception ex)
 			{
-				AnsiConsole.WriteException(ex);
+				_console.WriteException(ex);
 			}
 		});
 		return cmd;

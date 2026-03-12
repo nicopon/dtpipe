@@ -75,8 +75,8 @@ public sealed class DataFusionXStreamer : IStreamReader
                 // to know their exact exact size and correctly choose them for the HashJoin build-side.
                 for (int i = 0; i < _refAliases.Length; i++)
                 {
-                    _logger.LogInformation("DataFusionXStreamer: Registering materialized ref [" + _refAliases[i] + "]...");
-                    await RegisterChannelSourceAsync(_refAliases[i], _refAliases[i], ct);
+                    _logger.LogInformation("DataFusionXStreamer: Registering streaming ref [" + _refAliases[i] + "]...");
+                    await RegisterStreamingChannelSourceAsync(_refAliases[i], _refAliases[i], ct);
                 }
 
                 if (!string.IsNullOrEmpty(_mainAlias))
@@ -135,7 +135,7 @@ public sealed class DataFusionXStreamer : IStreamReader
         var schema = await _registry.WaitForArrowChannelSchemaAsync(channelAlias, ct);
         ValidateSchema(channelAlias, schema);
         var channelTuple = _registry.GetArrowChannel(channelAlias) ?? throw new Exception("Canal introuvable");
-        var streamAdapter = new ChannelArrowStream(schema, channelTuple.Channel.Reader, ct);
+        var streamAdapter = new ChannelArrowStream(schema, channelTuple.Channel.Reader, _logger, ct);
 
         _activeStreams.Add(streamAdapter);
         ExportAndRegisterStream(alias, streamAdapter);
@@ -345,9 +345,16 @@ public sealed class DataFusionXStreamer : IStreamReader
     {
         private readonly Schema _schema;
         private readonly ChannelReader<RecordBatch> _reader;
+        private readonly ILogger _logger;
         private readonly CancellationToken _ct;
 
-        public ChannelArrowStream(Schema schema, ChannelReader<RecordBatch> reader, CancellationToken ct) { _schema = schema; _reader = reader; _ct = ct; }
+        public ChannelArrowStream(Schema schema, ChannelReader<RecordBatch> reader, ILogger logger, CancellationToken ct) 
+        { 
+            _schema = schema; 
+            _reader = reader; 
+            _logger = logger;
+            _ct = ct; 
+        }
         public Schema Schema => _schema;
 
         public async ValueTask<RecordBatch?> ReadNextRecordBatchAsync(CancellationToken cancellationToken = default)
@@ -361,7 +368,7 @@ public sealed class DataFusionXStreamer : IStreamReader
                 }
             }
             catch (OperationCanceledException) { }
-            catch (Exception ex) { Console.WriteLine("[ERROR] ChannelArrowStream: " + ex.Message); throw; }
+            catch (Exception ex) { _logger.LogError(ex, "ChannelArrowStream Error: {Message}", ex.Message); throw; }
             return null;
         }
 

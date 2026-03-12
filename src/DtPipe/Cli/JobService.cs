@@ -13,6 +13,8 @@ using DtPipe.Core.Models;
 using DtPipe.Cli;
 using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
+using DtPipe.Core.Pipelines.Dag;
+using DtPipe.Core.Models;
 using DtPipe.Core.Validation;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -97,7 +99,7 @@ public class JobService
 
 		rootCommand.Subcommands.Add(new CompletionCommand());
 
-		rootCommand.Subcommands.Add(new SecretCommand());
+		rootCommand.Subcommands.Add(new SecretCommand(_console));
 
 		rootCommand.SetAction(async (ParseResult parseResult, CancellationToken ct) =>
 		{
@@ -106,43 +108,152 @@ public class JobService
 
 			if (rawArgs.Length == 0) return; // Should already be handled in Program.cs, but just in case.
 
-            // Execution logic
-
-			if (parseResult.Errors.Count > 0)
-			{
-				foreach (var error in parseResult.Errors)
-				{
-					Console.Error.WriteLine($"CLI Error: {error.Message}");
-				}
-                Environment.ExitCode = 1;
-                return; // Exit if there are parsing errors
-			}
+             // Note: We don't check for global parseResult.Errors here because 
+             // for multi-branch DAGs, the full command line contains repeated options
+             // that System.CommandLine considers errors at the root level.
+             // Branch-level validation happens inside the executor.
 
 			var xstreamerFactories = _serviceProvider.GetRequiredService<IEnumerable<IXStreamerFactory>>();
 			string? defaultXStreamer = xstreamerFactories.Count() == 1 ? xstreamerFactories.First().ComponentName : null;
 
-			var dagDefinition = CliDagParser.Parse(rawArgs, defaultXStreamer);
-
-			// 2. Enforce --job XOR manual pipeline
-			bool hasJob = rawArgs.Any(a => a.Equals("--job", StringComparison.OrdinalIgnoreCase));
-			bool hasManual = rawArgs.Any(a => a.Equals("-i", StringComparison.OrdinalIgnoreCase) ||
-			                             a.Equals("--input", StringComparison.OrdinalIgnoreCase) ||
-			                             a.Equals("-x", StringComparison.OrdinalIgnoreCase) ||
-			                             a.Equals("--xstreamer", StringComparison.OrdinalIgnoreCase));
-
-			if (hasJob && hasManual)
+			// 2. Build Initial Job(s) and detect DAG vs Linear
+			var cliJobOptions = new DtPipe.Cli.Infrastructure.CliJobOptions
 			{
-				_console.MarkupLine("[red]Error:[/] The [yellow]--job[/] option cannot be combined with manual pipeline definition flags ([yellow]--input[/] or [yellow]--xstreamer[/]).");
-				Environment.ExitCode = 1;
+				Job = opts.Job,
+				Input = opts.Input,
+				Query = opts.Query,
+				Output = opts.Output,
+				ConnectionTimeout = opts.ConnectionTimeout,
+				QueryTimeout = opts.QueryTimeout,
+				BatchSize = opts.BatchSize,
+				UnsafeQuery = opts.UnsafeQuery,
+				NoStats = opts.NoStats,
+				Limit = opts.Limit,
+				SamplingRate = opts.SamplingRate,
+				SamplingSeed = opts.SamplingSeed,
+				Log = opts.Log,
+				Key = opts.Key,
+				PreExec = opts.PreExec,
+				PostExec = opts.PostExec,
+				OnErrorExec = opts.OnErrorExec,
+				FinallyExec = opts.FinallyExec,
+				Strategy = opts.Strategy,
+				InsertMode = opts.InsertMode,
+				Table = opts.Table,
+				MaxRetries = opts.MaxRetries,
+				RetryDelayMs = opts.RetryDelayMs,
+				StrictSchema = opts.StrictSchema,
+				NoSchemaValidation = opts.NoSchemaValidation,
+				MetricsPath = opts.MetricsPath,
+				AutoMigrate = opts.AutoMigrate,
+				Xstreamer = opts.Xstreamer,
+				Prefix = opts.Prefix,
+				ExportJob = opts.ExportJob,
+				Rename = opts.Rename,
+				Drop = opts.Drop,
+				Throttle = opts.Throttle,
+				IgnoreNulls = opts.IgnoreNulls
+			};
+
+			Dictionary<string, JobDefinition> jobs;
+			bool isDagYaml = false;
+			JobDagDefinition dagDefinition;
+
+			var jobFilePath = parseResult.GetValue(opts.Job);
+			if (!string.IsNullOrEmpty(jobFilePath))
+			{
+				var (j, jec) = RawJobBuilder.Build(parseResult, cliJobOptions);
+				if (jec != 0) { Environment.ExitCode = jec; return; }
+				jobs = j;
+				isDagYaml = jobs.Count > 1 || jobs.Values.Any(j => !string.IsNullOrEmpty(j.Xstreamer) || !string.IsNullOrEmpty(j.From));
+				
+				var branches = new List<BranchDefinition>();
+				foreach (var kvp in jobs)
+				{
+						var args = new List<string> { "--alias", kvp.Key };
+						if (!string.IsNullOrEmpty(kvp.Value.Input)) { args.Add("--input"); args.Add(kvp.Value.Input); }
+						if (!string.IsNullOrEmpty(kvp.Value.Output)) { args.Add("--output"); args.Add(kvp.Value.Output); }
+						if (!string.IsNullOrEmpty(kvp.Value.Query)) { args.Add("--query"); args.Add(kvp.Value.Query); }
+						if (!string.IsNullOrEmpty(kvp.Value.Table)) { args.Add("--table"); args.Add(kvp.Value.Table); }
+						if (!string.IsNullOrEmpty(kvp.Value.Xstreamer))
+						{
+							args.Add("--xstreamer");
+							args.Add(kvp.Value.Xstreamer ?? "");
+						}
+						if (!string.IsNullOrEmpty(kvp.Value.Main)) { args.Add("--main"); args.Add(kvp.Value.Main); }
+						foreach (var r in kvp.Value.Ref ?? Array.Empty<string>()) { args.Add("--ref"); args.Add(r); }
+						if (!string.IsNullOrEmpty(kvp.Value.From)) { args.Add("--from"); args.Add(kvp.Value.From); }
+
+						branches.Add(new BranchDefinition
+						{
+							Alias = kvp.Key,
+							Input = !string.IsNullOrEmpty(kvp.Value.Input) ? kvp.Value.Input : kvp.Value.Xstreamer,
+							Output = kvp.Value.Output,
+							IsXStreamer = !string.IsNullOrEmpty(kvp.Value.Xstreamer),
+							MainAlias = kvp.Value.Main,
+							FromAlias = kvp.Value.From,
+							RefAliases = (kvp.Value.Ref ?? Array.Empty<string>()).ToList(),
+							PreParsedJob = kvp.Value,
+							Arguments = args.ToArray()
+						});
+				}
+				dagDefinition = new JobDagDefinition { Branches = branches };
+			}
+			else
+			{
+				dagDefinition = CliDagParser.Parse(rawArgs, defaultXStreamer);
+				if (dagDefinition.IsDag)
+				{
+					jobs = new Dictionary<string, JobDefinition>();
+					var factoryList = _contributors.OfType<IDataTransformerFactory>().ToList();
+
+					foreach (var branch in dagDefinition.Branches)
+					{
+						var branchPr = rootCommand.Parse(branch.Arguments);
+						var (branchJobs, branchJec) = RawJobBuilder.Build(branchPr, cliJobOptions);
+						if (branchJec != 0) { Environment.ExitCode = branchJec; return; }
+						var bj = branchJobs.Values.First();
+						
+						bj = bj with { 
+							Main = branch.MainAlias, 
+							Ref = branch.RefAliases?.ToArray(), 
+							From = branch.FromAlias,
+							Xstreamer = branch.IsXStreamer ? branch.Input : null,
+							Transformers = RawJobBuilder.BuildTransformerConfigsFromCli(branch.Arguments, factoryList, _contributors)
+						};
+						jobs[branch.Alias] = bj;
+						branch.PreParsedJob = bj;
+					}
+				}
+				else
+				{
+					var (j, jec) = RawJobBuilder.Build(parseResult, cliJobOptions);
+					if (jec != 0) { Environment.ExitCode = jec; return; }
+					jobs = j;
+					
+					// Populate transformers for linear case if we might export
+					var factoryList = _contributors.OfType<IDataTransformerFactory>().ToList();
+					var mainJob = jobs.Values.First();
+					jobs["main"] = mainJob with { 
+						Transformers = RawJobBuilder.BuildTransformerConfigsFromCli(rawArgs, factoryList, _contributors)
+					};
+				}
+			}
+
+			// 3. Export job if requested
+			var exportJobPath = parseResult.GetValue(opts.ExportJob);
+			if (!string.IsNullOrWhiteSpace(exportJobPath))
+			{
+				if (jobs.Count > 1 || isDagYaml)
+					JobFileWriter.Write(exportJobPath, jobs);
+				else
+					JobFileWriter.Write(exportJobPath, jobs.Values.First());
+					
 				return;
 			}
 
-			Func<ParseResult, CancellationToken, string[], Task<int>> executePipeline = async (pr, token, currentRawArgs) =>
+			Func<ParseResult, CancellationToken, string[], JobDefinition?, string?, Task<int>> executePipeline = async (pr, token, currentRawArgs, preParsedJob, localAlias) =>
 			{
-				// 1. Recover Scalar Value for branch context
-				var localInput = pr.GetValue(opts.Input)?.FirstOrDefault();
-				var localAlias = pr.GetValue(opts.Alias)?.FirstOrDefault();
-
 				// Perform preliminary contributor actions
 				foreach (var contributor in _contributors)
 				{
@@ -153,48 +264,26 @@ public class JobService
 				// Check for deprecated options/prefixes
 				CheckDeprecations(pr, _console, currentRawArgs);
 
-				// Build Job Definition
-				var cliJobOptions = new DtPipe.Cli.Infrastructure.CliJobOptions
+				JobDefinition job;
+				if (preParsedJob != null)
 				{
-					Job = opts.Job,
-					Input = opts.Input,
-					Query = opts.Query,
-					Output = opts.Output,
-					ConnectionTimeout = opts.ConnectionTimeout,
-					QueryTimeout = opts.QueryTimeout,
-					BatchSize = opts.BatchSize,
-					UnsafeQuery = opts.UnsafeQuery,
-					NoStats = opts.NoStats,
-					Limit = opts.Limit,
-					SamplingRate = opts.SamplingRate,
-					SamplingSeed = opts.SamplingSeed,
-					Log = opts.Log,
-					Key = opts.Key,
-					PreExec = opts.PreExec,
-					PostExec = opts.PostExec,
-					OnErrorExec = opts.OnErrorExec,
-					FinallyExec = opts.FinallyExec,
-					Strategy = opts.Strategy,
-					InsertMode = opts.InsertMode,
-					Table = opts.Table,
-					MaxRetries = opts.MaxRetries,
-					RetryDelayMs = opts.RetryDelayMs,
-					StrictSchema = opts.StrictSchema,
-					NoSchemaValidation = opts.NoSchemaValidation,
-					MetricsPath = opts.MetricsPath,
-					AutoMigrate = opts.AutoMigrate,
-					Xstreamer = opts.Xstreamer,
-					Prefix = opts.Prefix,
-					ExportJob = opts.ExportJob,
-					Rename = opts.Rename,
-					Drop = opts.Drop,
-					Throttle = opts.Throttle,
-					IgnoreNulls = opts.IgnoreNulls
-				};
-
-				var (job, jobExitCode) = RawJobBuilder.Build(pr, cliJobOptions);
-
-				if (jobExitCode != 0) return jobExitCode;
+					job = preParsedJob;
+					// For DAG branches, the orchestrator might have injected -i and -o.
+					// We must merge these into the pre-parsed job.
+					var (argJobDict, _) = RawJobBuilder.Build(pr, cliJobOptions);
+					var argJob = argJobDict.Values.First();
+					job = job with { 
+						Input = argJob.Input, 
+						Output = argJob.Output,
+						Query = !string.IsNullOrEmpty(argJob.Query) ? argJob.Query : job.Query
+					};
+				}
+				else
+				{
+					var (jobsDict, jec) = RawJobBuilder.Build(pr, cliJobOptions);
+					if (jec != 0) return jec;
+					job = jobsDict.Values.First();
+				}
 
 				job = job with
 				{
@@ -202,28 +291,14 @@ public class JobService
 					Output = ResolveKeyring(job.Output, _console) ?? job.Output
 				};
 
-				// Export job
-				var exportJobPath = pr.GetValue(opts.ExportJob);
-				if (!string.IsNullOrWhiteSpace(exportJobPath))
-				{
-					var factoryList = _contributors.OfType<IDataTransformerFactory>().ToList();
-					var configs = RawJobBuilder.BuildTransformerConfigsFromCli(
-						currentRawArgs,
-						factoryList,
-						_contributors);
-
-					job = job with { Transformers = configs };
-					JobFileWriter.Write(exportJobPath, job);
-					return 0;
-				}
-
 				var registry = _serviceProvider.GetRequiredService<OptionsRegistry>();
 
 				var providerConfigService = new DtPipe.Cli.Services.ProviderConfigurationService(_contributors, registry);
 				providerConfigService.BindOptions(job, pr);
 
 				var linearPipelineService = new DtPipe.Cli.Services.LinearPipelineService(_contributors, _serviceProvider, registry, _console);
-				return await linearPipelineService.ExecuteAsync(job, currentRawArgs, token, localAlias, dagDefinition.IsDag);
+				var isXStreamer = !string.IsNullOrEmpty(job.Xstreamer);
+				return await linearPipelineService.ExecuteAsync(job, currentRawArgs, token, localAlias, dagDefinition.IsDag, isXStreamer);
 			};
 			// Initialize logging early for DAG execution
 			var logPath = parseResult.GetValue(opts.Log);
@@ -242,6 +317,7 @@ public class JobService
 			{
 				foreach (var err in validationErrors)
 					_console.MarkupLine($"[red]CLI Validation Error:[/] {err}");
+				Environment.ExitCode = 1;
 				return;
 			}
 
@@ -296,7 +372,7 @@ public class JobService
 							return 1;
 						}
 						// Suppress log file setup on branches, they will inherit global settings or orchestrator will capture
-						return await executePipeline(branchPr, token, branch.Arguments);
+						return await executePipeline(branchPr, token, branch.Arguments, branch.PreParsedJob, branch.Alias);
 					};
 
 					await orchestrator.ExecuteAsync(dagDefinition, branchExecutor, ct);
@@ -315,11 +391,8 @@ public class JobService
 			}
 
 			// Execution for non-DAG
-			var exitCode = await executePipeline(parseResult, ct, rawArgs);
-            if (exitCode != 0)
-            {
-                Environment.ExitCode = exitCode;
-            }
+			var finalExitCode = await executePipeline(parseResult, ct, rawArgs, jobs.Values.First(), null);
+			if (finalExitCode != 0) Environment.ExitCode = finalExitCode;
 		});
 
 		Action PrintHelpAction = () => PrintGroupedHelp(rootCommand, coreOptions, _contributors, _console);

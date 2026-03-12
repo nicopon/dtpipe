@@ -21,11 +21,12 @@ public static partial class JobFileParser
 		.Build();
 
 	/// <summary>
-	/// Parses a YAML job file into a JobDefinition.
+	/// Parses a YAML job file into a dictionary of JobDefinitions (DAG).
+	/// Single-job files are automatically wrapped in a dictionary with key "main".
 	/// </summary>
 	/// <param name="filePath">Path to the YAML file.</param>
-	/// <returns>Parsed JobDefinition.</returns>
-	public static DtPipe.Core.Models.JobDefinition Parse(string filePath)
+	/// <returns>Dictionary of JobDefinitions keyed by branch alias.</returns>
+	public static Dictionary<string, DtPipe.Core.Models.JobDefinition> Parse(string filePath)
 	{
 		if (!File.Exists(filePath))
 		{
@@ -37,18 +38,41 @@ public static partial class JobFileParser
 		// Interpolate environment variables
 		content = InterpolateEnvVars(content);
 
-		// 1. Primary hydration (Scalars and simple collections)
-		var job = Deserializer.Deserialize<DtPipe.Core.Models.JobDefinition>(content);
-
-		// 2. Specialized hydration for Transformers (due to flexible structure handled by ParseTransformers)
-		var rawMap = Deserializer.Deserialize<Dictionary<string, object>>(content);
-		if (rawMap.TryGetValue("transformers", out var transObj) && transObj is List<object> transList)
+		// 1. Try to deserialize as a dictionary (DAG)
+		try
 		{
-			var yamlTransformers = transList.OfType<Dictionary<object, object>>().ToList();
+			var branches = Deserializer.Deserialize<Dictionary<string, DtPipe.Core.Models.JobDefinition>>(content);
+			// Validate if it's really a DAG by checking if ANY branch has an input, xstreamer or from
+			if (branches != null && branches.Count > 0 && branches.Values.Any(v => !string.IsNullOrEmpty(v.Input) || !string.IsNullOrEmpty(v.Xstreamer) || !string.IsNullOrEmpty(v.From)))
+			{
+				// Successfully loaded as a DAG. Now handle transformers for each branch.
+				var rootMap = Deserializer.Deserialize<Dictionary<string, object>>(content);
+				foreach (var alias in branches.Keys)
+				{
+					if (rootMap != null && rootMap.TryGetValue(alias, out var branchObj) && branchObj is Dictionary<object, object> branchData)
+					{
+						if (branchData.TryGetValue("transformers", out var transObj) && transObj is List<object> transList)
+						{
+							var yamlTransformers = transList.OfType<Dictionary<object, object>>().ToList();
+							branches[alias] = branches[alias] with { Transformers = ParseTransformers(yamlTransformers) };
+						}
+					}
+				}
+				return branches;
+			}
+		}
+		catch { /* Fallback to single job */ }
+
+		// 2. Fallback: Parse as a single JobDefinition (Standard)
+		var job = Deserializer.Deserialize<DtPipe.Core.Models.JobDefinition>(content);
+		var rawMap = Deserializer.Deserialize<Dictionary<string, object>>(content);
+		if (rawMap != null && rawMap.TryGetValue("transformers", out var scalarTransObj) && scalarTransObj is List<object> scalarTransList)
+		{
+			var yamlTransformers = scalarTransList.OfType<Dictionary<object, object>>().ToList();
 			job = job with { Transformers = ParseTransformers(yamlTransformers) };
 		}
 
-		return job;
+		return new Dictionary<string, DtPipe.Core.Models.JobDefinition> { { "main", job } };
 	}
 
 	/// <summary>

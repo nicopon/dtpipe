@@ -17,8 +17,12 @@ namespace DtPipe.Cli.Commands;
 
 public class InspectCommand : Command
 {
+    private readonly IAnsiConsole _console;
+
     public InspectCommand(IServiceProvider serviceProvider) : base("inspect", "Inspect the schema of a data source")
     {
+        _console = serviceProvider.GetRequiredService<IAnsiConsole>();
+
         var inputOption = new Option<string>("--input") { Description = "Connection string or file path" };
         inputOption.Aliases.Add("-i");
 
@@ -37,26 +41,25 @@ public class InspectCommand : Command
             var input = parseResult.GetValue(inputOption);
             if (string.IsNullOrWhiteSpace(input))
             {
-                var console = serviceProvider.GetRequiredService<IAnsiConsole>();
-                console.MarkupLine("[red]Error:[/] --input is required.");
+                _console.MarkupLine("[red]Error:[/] --input is required.");
                 return;
             }
 
             var query = parseResult.GetValue(queryOption);
             var format = parseResult.GetValue(formatOption) ?? "table";
 
-            await ExecuteAsync(serviceProvider, input, query, format, ct);
+            await ExecuteAsync(serviceProvider, _console, input, query, format, ct);
         });
     }
 
     private static async Task ExecuteAsync(
         IServiceProvider sp,
+        IAnsiConsole console,
         string input,
         string? query,
         string format,
         CancellationToken ct)
     {
-        var console = sp.GetRequiredService<IAnsiConsole>();
         var registry = sp.GetRequiredService<OptionsRegistry>();
         var readerFactories = sp.GetRequiredService<IEnumerable<IStreamReaderFactory>>().ToList();
 
@@ -151,6 +154,10 @@ public class InspectCommand : Command
                     c.IsNullable
                 }),
                 new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            
+            // Note: JSON output from 'inspect' is considered Primary Data for THIS command,
+            // so we keep it on STDOUT. But for technical consistency, one might argue it should go to console.Error
+            // if we want to pipe STDOUT to another dtpipe. However, 'inspect' isn't usually piped to 'dtpipe'.
             Console.WriteLine(json);
         }
         else

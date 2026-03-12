@@ -53,4 +53,10 @@ public record BranchDefinition
     /// For XStreamer branches, the aliases of secondary source branches (fully preloaded into memory before query execution).
     /// </summary>
     public IReadOnlyList<string> RefAliases { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// Optional pre-parsed job definition if loaded from YAML.
+    /// If present, this overrides the logic otherwise derived from <see cref="Arguments"/>.
+    /// </summary>
+    public Models.JobDefinition? PreParsedJob { get; set; }
 }

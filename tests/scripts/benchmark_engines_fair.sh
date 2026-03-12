@@ -19,8 +19,8 @@ DTPIPE_CMD="$ROOT_DIR/dist/release/dtpipe"
 MAIN_PARQUET="$ARTIFACTS_DIR/main.parquet"
 
 # Reference CSVs (pre-created in benchmark_100m.sh)
-REF_CSV="$ARTIFACTS_DIR/ref1_10m.csv"
-REF2_CSV="$ARTIFACTS_DIR/ref2_10m.csv"
+REF_CSV="$ARTIFACTS_DIR/ref1_10k.csv"
+REF2_CSV="$ARTIFACTS_DIR/ref2_10k.csv"
 
 # Ensure datasets are present
 if [ ! -f "$MAIN_PARQUET" ] || [ ! -f "$REF_CSV" ] || [ ! -f "$REF2_CSV" ]; then
