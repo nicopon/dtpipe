@@ -87,13 +87,13 @@ public class ProviderConfigurationService
 
                         // Also map top-level JobDefinition properties if they aren't already set
                         // This ensures YAML-defined properties (like Query, Main, Ref) reach the options object
-                        MapXStreamerProperties(job, instance);
+                        MapProcessorProperties(job, instance);
                     }
                 }
             }
-            // This new block handles CLI binding and then XStreamer property mapping for all IDataFactory types
-            // including IXStreamerFactory, IDataWriterFactory, and IStreamReaderFactory.
-            // It replaces the old `else if (contributor is IXStreamerFactory xFactory)` block.
+            // This new block handles CLI binding and then Processor property mapping for all IDataFactory types
+            // including IProcessorFactory, IDataWriterFactory, and IStreamReaderFactory.
+            // It replaces the old `else if (contributor is IProcessorFactory xFactory)` block.
             if (contributor is IDataFactory descriptor)
             {
                 var options = contributor.GetCliOptions();
@@ -105,8 +105,8 @@ public class ProviderConfigurationService
 
                 CliOptionBuilder.BindForType(descriptor.OptionsType, existingOptions, pr, options, isReaderScope);
 
-                // Map XStreamer specific properties AFTER CLI binding to ensure they take precedence
-                MapXStreamerProperties(job, existingOptions);
+                // Map Processor specific properties AFTER CLI binding to ensure they take precedence
+                MapProcessorProperties(job, existingOptions);
 
                 _registry.RegisterByType(descriptor.OptionsType, existingOptions);
             }
@@ -135,7 +135,7 @@ public class ProviderConfigurationService
         }
     }
 
-    private void MapXStreamerProperties(JobDefinition job, object options)
+    private void MapProcessorProperties(JobDefinition job, object options)
     {
         var type = options.GetType();
 

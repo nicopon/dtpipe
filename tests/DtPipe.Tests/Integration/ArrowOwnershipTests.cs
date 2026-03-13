@@ -68,9 +68,14 @@ public class ArrowOwnershipTests
         await project.InitializeAsync(columns);
 
         // Run the chain
-        var batch1 = await filter.TransformBatchAsync(batch); // batch is disposed here
-        var batch2 = await project.TransformBatchAsync(batch1!); // batch1 is disposed here
-        var batch3 = await spy.TransformBatchAsync(batch2!); // batch2 is disposed here
+        var batch1 = await filter.TransformBatchAsync(batch); 
+        batch.Dispose(); // Manual disposal required in direct unit test calls
+        
+        var batch2 = await project.TransformBatchAsync(batch1!); 
+        batch1?.Dispose(); // Manual disposal required in direct unit test calls
+        
+        var batch3 = await spy.TransformBatchAsync(batch2!); 
+        batch2?.Dispose(); // Manual disposal required in direct unit test calls
 
         // Final Dispose (Simulating Writer)
         batch3?.Dispose();

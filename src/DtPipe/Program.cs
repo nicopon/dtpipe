@@ -174,8 +174,8 @@ class Program
 		RegisterWriter<DtPipe.Adapters.Sqlite.SqliteWriterDescriptor>(services);
 		RegisterWriter<DtPipe.Adapters.SqlServer.SqlServerWriterDescriptor>(services);
 
-		// Explicitly Register XStreamers
-		RegisterXStreamer<DtPipe.XStreamers.DataFusion.DataFusionXStreamerFactory>(services);
+		// Explicitly Register Processors
+		RegisterProcessor<DtPipe.XStreamers.DataFusion.DataFusionProcessorFactory>(services);
 
 		// Transformer Factories
 		RegisterTransformer<NullDataTransformerFactory>(services);
@@ -207,9 +207,9 @@ class Program
 		services.AddSingleton<IColumnarToRowBridgeFactory, DtPipe.Adapters.Infrastructure.Arrow.ArrowColumnarToRowBridgeFactory>();
 	}
 
-	private static void RegisterXStreamer<TDesc>(IServiceCollection services) where TDesc : class, IXStreamerFactory, new()
+	private static void RegisterProcessor<TDesc>(IServiceCollection services) where TDesc : class, IProcessorFactory, new()
 	{
-		services.AddSingleton<IXStreamerFactory>(sp => {
+		services.AddSingleton<IProcessorFactory>(sp => {
 			var factory = new CliProcessorFactory(
 				new TDesc(),
 				sp.GetRequiredService<OptionsRegistry>(),
@@ -217,7 +217,7 @@ class Program
 			);
 			return factory;
 		});
-		services.AddSingleton<ICliContributor>(sp => (ICliContributor)sp.GetRequiredService<IXStreamerFactory>());
+		services.AddSingleton<ICliContributor>(sp => (ICliContributor)sp.GetRequiredService<IProcessorFactory>());
 	}
 
 	private static void RegisterWriter<TDesc>(IServiceCollection services) where TDesc : class, IProviderDescriptor<IDataWriter>, new()

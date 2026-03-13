@@ -13,7 +13,7 @@ namespace DtPipe.XStreamers.DataFusion;
 ///   A) Local sources: --src-main and --src-ref pass the path, DataFusion reads directly.
 ///   B) Upstream DAG sources: --main and --ref read from Arrow memory channels.
 /// </summary>
-public class DataFusionXStreamerOptions : IOptionSet, ICliOptionMetadata
+public class DataFusionProcessorOptions : IOptionSet, ICliOptionMetadata
 {
     public static string Prefix => "fusion-engine";
     public static string DisplayName => "DataFusion In-Process SQL Engine";
@@ -49,16 +49,16 @@ public class DataFusionXStreamerOptions : IOptionSet, ICliOptionMetadata
     };
 }
 
-public class DataFusionXStreamerFactory : IXStreamerFactory
+public class DataFusionProcessorFactory : IProcessorFactory
 {
     private readonly OptionsRegistry? _registry;
 
-    public DataFusionXStreamerFactory() { }
-    public DataFusionXStreamerFactory(OptionsRegistry registry) { _registry = registry; }
+    public DataFusionProcessorFactory() { }
+    public DataFusionProcessorFactory(OptionsRegistry registry) { _registry = registry; }
 
     public string ComponentName => "fusion-engine";
-    public string Category => "XStreamers";
-    public Type OptionsType => typeof(DataFusionXStreamerOptions);
+    public string Category => "Processors";
+    public Type OptionsType => typeof(DataFusionProcessorOptions);
     public bool RequiresQuery => true;
     public bool CanHandle(string connectionString) => false;
 
@@ -67,18 +67,18 @@ public class DataFusionXStreamerFactory : IXStreamerFactory
 
     public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
     {
-        var opts = (DataFusionXStreamerOptions)options;
+        var opts = (DataFusionProcessorOptions)options;
         var registry = serviceProvider.GetRequiredService<IMemoryChannelRegistry>();
         var loggerFactory = serviceProvider.GetRequiredService<ILoggerFactory>();
 
-        return new DataFusionXStreamer(
+        return new DataFusionProcessor(
             registry: registry,
             query: opts.Query ?? throw new ArgumentException("--query is required"),
             mainAlias: opts.MainAlias ?? "",
             refAliases: opts.RefAlias ?? Array.Empty<string>(),
             srcMain: opts.SrcMain ?? "",
             srcRefs: opts.SrcRef ?? Array.Empty<string>(),
-            logger: loggerFactory.CreateLogger<DataFusionXStreamer>()
+            logger: loggerFactory.CreateLogger<DataFusionProcessor>()
         );
     }
 }

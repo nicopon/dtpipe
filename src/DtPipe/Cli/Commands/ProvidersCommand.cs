@@ -24,7 +24,7 @@ public class ProvidersCommand : Command
         {
             var readers = serviceProvider.GetServices<IStreamReaderFactory>();
             var writers = serviceProvider.GetServices<IDataWriterFactory>();
-            var xstreamers = serviceProvider.GetServices<IXStreamerFactory>();
+            var processors = serviceProvider.GetServices<IProcessorFactory>();
 
             var table = new Table()
                 .AddColumn("Provider")
@@ -66,19 +66,19 @@ public class ProvidersCommand : Command
                     Markup.Escape(category));
             }
 
-            foreach (var x in xstreamers.OrderBy(x => x.ComponentName))
+            foreach (var p in processors.OrderBy(p => p.ComponentName))
             {
                 bool supportsStdio = false;
-                string category = "XStreamer";
-                if (x is IDataFactory df)
+                string category = "Processor";
+                if (p is IDataFactory df)
                 {
                     supportsStdio = df.SupportsStdio;
                     category = df.Category;
                 }
 
                 table.AddRow(
-                    $"[magenta]{Markup.Escape(x.ComponentName)}[/]",
-                    "[magenta]XStreamer[/]",
+                    $"[magenta]{Markup.Escape(p.ComponentName)}[/]",
+                    "[magenta]Processor[/]",
                     supportsStdio ? "✓" : "",
                     Markup.Escape(category));
             }

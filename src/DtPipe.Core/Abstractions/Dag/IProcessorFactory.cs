@@ -4,10 +4,10 @@ using DtPipe.Core.Pipelines.Dag;
 namespace DtPipe.Core.Abstractions.Dag;
 
 /// <summary>
-/// A factory for creating XStreamers. An XStreamer is a component capable
+/// A factory for creating processors. A processor is a component capable
 /// of mixing multiple input data streams into a single output stream.
 /// </summary>
-public interface IXStreamerFactory : IProviderDescriptor<IStreamReader>
+public interface IProcessorFactory : IProviderDescriptor<IStreamReader>
 {
     /// <summary>
     /// Declares the channel protocol this processor requires for its upstream input branches.

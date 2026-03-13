@@ -59,7 +59,7 @@ internal static class CoreOptionsBuilder
     public static CoreCliOptions Build(
         IEnumerable<IStreamReaderFactory>? readerFactories = null,
         IEnumerable<IDataWriterFactory>? writerFactories = null,
-        IEnumerable<IXStreamerFactory>? processorFactories = null)
+        IEnumerable<IProcessorFactory>? processorFactories = null)
     {
         var inputOption = new Option<string[]>("--input")
         {
@@ -150,8 +150,8 @@ internal static class CoreOptionsBuilder
         var throttleOption = new Option<int[]>("--throttle") { Description = "Throttle speed (rows/sec)", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
         var ignoreNullsOption = new Option<bool>("--ignore-nulls") { Description = "Skip null values in specific transformations" };
 
-        var mainOption = new Option<string[]>("--main") { Description = "Main source alias for XStreamer (streaming side of JOIN)", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
-        var refOption = new Option<string[]>("--ref") { Description = "Secondary source alias(es) for XStreamer (preloaded into memory)" };
+        var mainOption = new Option<string[]>("--main") { Description = "Main source alias for Processor (streaming side of JOIN)", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
+        var refOption = new Option<string[]>("--ref") { Description = "Secondary source alias(es) for Processor (preloaded into memory)" };
         var srcMainOption = new Option<string[]>("--src-main") { Description = "Source-main alias for DAG orchestration", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
         var srcRefOption = new Option<string[]>("--src-ref") { Description = "Source-ref alias(es) for DAG orchestration" };
         var fromOption = new Option<string[]>("--from")
@@ -289,7 +289,7 @@ internal static class CoreOptionsBuilder
         return Enumerable.Empty<CompletionItem>();
     }
 
-    private static IEnumerable<CompletionItem> GetProcessorSuggestions(CompletionContext context, IEnumerable<IXStreamerFactory>? factories)
+    private static IEnumerable<CompletionItem> GetProcessorSuggestions(CompletionContext context, IEnumerable<IProcessorFactory>? factories)
     {
         var suggestions = new List<CompletionItem>();
         if (factories != null)

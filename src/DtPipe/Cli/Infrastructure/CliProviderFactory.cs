@@ -218,11 +218,11 @@ public class CliStreamReaderFactory : CliProviderFactory<IStreamReader>, IStream
 	public bool YieldsColumnarOutput => _descriptor.YieldsColumnarOutput;
 }
 
-public class CliProcessorFactory : CliProviderFactory<IStreamReader>, IXStreamerFactory, IStreamReaderFactory
+public class CliProcessorFactory : CliProviderFactory<IStreamReader>, IProcessorFactory, IStreamReaderFactory
 {
-    private readonly IXStreamerFactory _processorDescriptor;
+    private readonly IProcessorFactory _processorDescriptor;
 
-    public CliProcessorFactory(IXStreamerFactory descriptor, OptionsRegistry registry, IServiceProvider serviceProvider)
+    public CliProcessorFactory(IProcessorFactory descriptor, OptionsRegistry registry, IServiceProvider serviceProvider)
         : base(descriptor, registry, serviceProvider)
     {
         _processorDescriptor = descriptor;

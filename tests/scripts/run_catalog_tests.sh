@@ -48,7 +48,7 @@ run_test() {
             # --- YAML Round-trip Verification ---
             if [ "$VERIFY_YAML" == "1" ]; then
                 # Only verify if it's a success case and not a complex command already using --job or --alias/--from/--xstreamer
-                if [[ ! "$cmd" =~ "--job" ]] && [[ ! "$cmd" =~ "--alias" ]] && [[ ! "$cmd" =~ "--from" ]] && [[ ! "$cmd" =~ "--xstreamer" ]] && [[ ! "$cmd" =~ "--export-job" ]]; then
+                if [[ ! "$cmd" =~ "--job" ]] && [[ ! "$cmd" =~ "--alias" ]] && [[ ! "$cmd" =~ "--from" ]] && [[ ! "$cmd" =~ "--sql" ]] && [[ ! "$cmd" =~ "--export-job" ]]; then
                     local yaml_file="$ARTIFACTS_DIR/verify_$id.yaml"
                     echo "  -> YAML Export/Import Check..."
                     
@@ -132,17 +132,17 @@ run_test "T20" "$DTPIPE -i artifacts/test_data.csv --limit 0 -o artifacts/output
 
 # 2. Advanced Pipelines & XStreamers
 # T21: DataFusion JOIN between Parquet and CSV on shared Id column
-run_test "T21" "$DTPIPE -i artifacts/test_data.parquet --alias p -i artifacts/test_data.csv --alias c -x fusion-engine --main p -q \"SELECT p.*, c.Email FROM p JOIN c ON p.Id = c.Id\" -o artifacts/output_t21.parquet"
+run_test "T21" "$DTPIPE -i artifacts/test_data.parquet --alias p -i artifacts/test_data.csv --alias c --from p --sql --ref c -q \"SELECT p.*, c.Email FROM p JOIN c ON p.Id = c.Id\" -o artifacts/output_t21.parquet"
 # T22: DataFusion aggregation: count(*) and avg() from PostgreSQL
-run_test "T22" "$DTPIPE -i \"$PG\" --alias db -x fusion-engine --main db -q \"SELECT count(*) as total, avg(length(username)) FROM db\" -o artifacts/output_t22.csv"
+run_test "T22" "$DTPIPE -i \"$PG\" --alias db --from db --sql -q \"SELECT count(*) as total, avg(length(username)) FROM db\" -o artifacts/output_t22.csv"
 # T23: DataFusion SQL filter on big Parquet (server-side pushdown)
-run_test "T23" "$DTPIPE -i artifacts/test_data_big.parquet --alias b -x fusion --main b -q \"SELECT * FROM b WHERE Value > 50000 LIMIT 10\" -o artifacts/output_t23.arrow"
+run_test "T23" "$DTPIPE -i artifacts/test_data_big.parquet --alias b --from b --sql -q \"SELECT * FROM b WHERE Value > 50000 LIMIT 10\" -o artifacts/output_t23.arrow"
 # T24: Chained transformers: fake regenerates Email, mask immediately masks it
 run_test "T24" "$DTPIPE -i artifacts/test_data.csv --fake \"Email:internet.email\" --mask \"Email:####@####.##\" -o artifacts/output_t24.csv"
 # T25: Window transformer: compute a per-window running average of Score
 run_test "T25" "$DTPIPE -i artifacts/test_data.csv --window-count 100 --window-script \"rows.map(r => ({ ...r, AvgScore: rows.reduce((acc, curr) => acc + curr.Score, 0)/100 }))\" -o artifacts/output_t25.csv"
 # T26: DataFusion CROSS JOIN between two generated sources
-run_test "T26" "$DTPIPE --main \"generate:100\" --alias g1 --ref \"generate:50\" --alias g2 -x fusion-engine -q \"SELECT g1.* FROM g1 CROSS JOIN g2\" -o artifacts/output_t26.parquet"
+run_test "T26" "$DTPIPE -i \"generate:100\" --alias g1 -i \"generate:50\" --alias g2 --from g1 --sql --ref g2 -q \"SELECT g1.* FROM g1 CROSS JOIN g2\" -o artifacts/output_t26.parquet"
 # T27: Compute ternary with explicit output type annotation via --compute-types
 run_test "T27" "$DTPIPE -i artifacts/test_data.csv --compute \"Type:row.Score > 500 ? 'H' : 'L'\" --compute-types \"Type:string\" -o artifacts/output_t27.parquet"
 # T28: Fake generation seeded by a stable column to ensure reproducibility
@@ -156,11 +156,11 @@ run_test "T30" "$DTPIPE -i artifacts/test_data.csv --alias src --from src -o art
 # T31: Compute serializes the entire row as a JSON object into a new column
 run_test "T31" "$DTPIPE -i artifacts/test_data.csv --compute \"Data:row\" -o artifacts/output_t31.csv"
 # T32: DataFusion heterogeneous JOIN: PostgreSQL × SQL Server via XStreamer
-run_test "T32" "$DTPIPE -i \"$PG\" --alias p -i \"$MSSQL\" --alias m -x fusion-engine --main p -q \"SELECT p.*, m.credit_card FROM p JOIN m ON p.id = m.id\" -o artifacts/output_t32.csv"
+run_test "T32" "$DTPIPE -i \"$PG\" --alias p -i \"$MSSQL\" --alias m --from p --sql --ref m -q \"SELECT p.*, m.credit_card FROM p JOIN m ON p.id = m.id\" -o artifacts/output_t32.csv"
 # T33: DataFusion SQL predicate filter on Parquet with string equality
-run_test "T33" "$DTPIPE -i artifacts/test_data.parquet --alias main -x fusion-engine --main main -q \"SELECT * FROM main WHERE Category = 'Electronics'\" -o artifacts/output_t33.parquet"
+run_test "T33" "$DTPIPE -i artifacts/test_data.parquet --alias main --from main --sql -q \"SELECT * FROM main WHERE Category = 'Electronics'\" -o artifacts/output_t33.parquet"
 # T34: DataFusion with upstream sampling applied before SQL execution
-run_test "T34" "$DTPIPE -i artifacts/test_data_big.parquet --alias main --sampling-rate 0.01 -x fusion-engine --main main -q \"SELECT * FROM main ORDER BY Value DESC\" -o artifacts/output_t34.csv"
+run_test "T34" "$DTPIPE -i artifacts/test_data_big.parquet --alias main --sampling-rate 0.01 --from main --sql -q \"SELECT * FROM main ORDER BY Value DESC\" -o artifacts/output_t34.csv"
 # T35: Fake clone: source one column value into a new column via fake literal
 run_test "T35" "$DTPIPE -i artifacts/test_data.csv --fake \"Id:random.uuid\" --fake \"IdClone:Id\" -o artifacts/output_t35.csv"
 # T36: Compute with string functions on Arrow data (force string conversion)
@@ -174,17 +174,17 @@ run_test "T39" "$DTPIPE -i artifacts/test_data.csv --limit 10 --export-job artif
 # T40: Reload and execute the exported job file produced by T39
 run_test "T40" "$DTPIPE --job artifacts/output_t39.yaml"
 # T41: DataFusion JOIN between CSV and DuckDB table on shared Id
-run_test "T41" "$DTPIPE -i artifacts/test_data.csv --alias c -i artifacts/test_data.duckdb --table \"geography\" --alias g -x fusion-engine -q \"SELECT c.*, g.City FROM c JOIN g ON c.Id = g.Id\" -o artifacts/output_t41.parquet"
+run_test "T41" "$DTPIPE -i artifacts/test_data.csv --alias c -i artifacts/test_data.duckdb --table \"geography\" --alias g --from c --sql --ref g -q \"SELECT c.*, g.City FROM c JOIN g ON c.Id = g.Id\" -o artifacts/output_t41.parquet"
 # T42: Compute with Math.min to clamp Score at 500
 run_test "T42" "$DTPIPE -i artifacts/test_data.csv --compute \"Score:Math.min(row.Score, 500)\" -o artifacts/output_t42.csv"
 # T43: DataFusion window function: count(*) over() applied to a PG result
-run_test "T43" "$DTPIPE -i \"$PG\" --alias p -x fusion-engine -q \"SELECT username, count(*) over() as total FROM p\" -o artifacts/output_t43.csv"
+run_test "T43" "$DTPIPE -i \"$PG\" --alias p --from p --sql -q \"SELECT username, count(*) over() as total FROM p\" -o artifacts/output_t43.csv"
 # T44: Fake with JS Date.now() to inject a synthetic metadata column
 run_test "T44" "$DTPIPE -i artifacts/test_data.parquet --fake \"Meta:{\\\"source\\\": \\\"parquet\\\", \\\"time\\\": Date.now()}\" -o artifacts/output_t44.csv"
 # T45: Write to Postgres with --ignore-nulls: null cells are skipped on insert
 run_test "T45" "$DTPIPE -i artifacts/test_data.csv --ignore-nulls -o \"$PG\" --table \"users_test\" --strategy Append"
 # T46: DataFusion passthrough on big dataset (with upstream limit)
-run_test "T46" "$DTPIPE -i artifacts/test_data_big.parquet --limit 1000 --alias b -x fusion-engine -q \"SELECT * FROM b\" -o artifacts/output_t46.arrow"
+run_test "T46" "$DTPIPE -i artifacts/test_data_big.parquet --limit 1000 --alias b --from b --sql -q \"SELECT * FROM b\" -o artifacts/output_t46.arrow"
 # T47: Compute boolean column by comparing BirthDate to a threshold date
 run_test "T47" "$DTPIPE -i artifacts/test_data.csv --compute \"IsOld:new Date(row.BirthDate) < new Date('2000-01-01')\" -o artifacts/output_t47.parquet"
 # T48: Overwrite with JS expression: inflate Price column by 20%
@@ -206,7 +206,7 @@ run_test "T54" "$DTPIPE -i \"$PG\" --table \"output_t52\" -o artifacts/output_t5
 # T55: JS compute on big dataset to null (measures row-engine throughput)
 run_test "T55" "$DTPIPE -i artifacts/test_data_big.parquet --compute \"V:row.Value * 1.5\" -o null"
 # T56: DataFusion aggregation on big Parquet: count(*) + max(Value)
-run_test "T56" "$DTPIPE -i artifacts/test_data_big.parquet --alias main -x fusion-engine --main main -q \"SELECT count(*), max(Value) FROM main\" -o artifacts/output_t56.csv"
+run_test "T56" "$DTPIPE -i artifacts/test_data_big.parquet --alias main --from main --sql -q \"SELECT count(*), max(Value) FROM main\" -o artifacts/output_t56.csv"
 # T57: Big Parquet → SQL Server with large batch size (50k rows/batch)
 run_test "T57" "$DTPIPE -i artifacts/test_data_big.parquet -o \"$MSSQL\" --table \"output_t57\" --strategy Recreate --batch-size 50000"
 # T58: Random 10% sampling on big dataset → Parquet
@@ -230,7 +230,7 @@ run_test "T66" "$DTPIPE -i artifacts/test_data_big.parquet -o artifacts/split/ -
 # T67: Generate 1M rows with UUID fake column (generator + fake throughput)
 run_test "T67" "$DTPIPE -i \"generate:1M\" --fake \"uuid:random.uuid\" -o artifacts/big_uuids.csv"
 # T68: DataFusion passthrough on big Parquet to null (XStreamer overhead baseline)
-run_test "T68" "$DTPIPE -i artifacts/test_data_big.parquet --alias main -x fusion --main main -q \"SELECT * FROM main\" -o null"
+run_test "T68" "$DTPIPE -i artifacts/test_data_big.parquet --alias main --from main --sql -q \"SELECT * FROM main\" -o null"
 # T69: PostgreSQL big table → CSV (measures PG read + CSV write throughput)
 run_test "T69" "$DTPIPE -i \"$PG\" -q \"SELECT * FROM output_t52\" -o artifacts/output_t69.csv"
 # T70: Big CSV → PostgreSQL (measures CSV read + PG bulk insert throughput)
@@ -284,7 +284,7 @@ run_test "T105" "$DTPIPE -i artifacts/test_data.csv --drop \"Email\" --filter \"
 # T91: Filter + fake anonymize + mask: GDPR-style 3-stage hardening pipeline
 run_test "T91" "$DTPIPE -i artifacts/test_data.csv --filter \"row.Score > 700\" --fake \"LastName:name.lastName\" --mask \"Email:####@####.com\" -o artifacts/output_t91.parquet"
 # T92: LEFT JOIN anti-join: find Parquet rows absent from Postgres
-run_test "T92" "$DTPIPE -i artifacts/test_data.parquet --alias p -i \"$PG\" --alias db --xstreamer fusion-engine --main p -q \"SELECT p.* FROM p LEFT JOIN db ON p.Id = db.id WHERE db.id IS NULL\" -o artifacts/output_t92.csv"
+run_test "T92" "$DTPIPE -i artifacts/test_data.parquet --alias p -i \"$PG\" --alias db --from p --sql --ref db -q \"SELECT p.* FROM p LEFT JOIN db ON p.Id = db.id WHERE db.id IS NULL\" -o artifacts/output_t92.csv"
 # T93: DAG split by filtering: high and low scores to separate files
 run_test "T93" "$DTPIPE -i artifacts/test_data.csv --alias s --from s --filter 'row.Score > 500' -o artifacts/output_t93_a.arrow --from s --filter 'row.Score <= 500' -o artifacts/output_t93_b.arrow"
 # T94: Cross-DB sync: Postgres → rename → fake → SQL Server (multi-step real ETL)
@@ -294,7 +294,7 @@ run_test "T95" "$DTPIPE -i artifacts/test_data.csv --compute \"FullName:row.Firs
 # T96: Compute + filter + limit chain on big dataset → SQL Server (realistic ETL)
 run_test "T96" "$DTPIPE -i artifacts/test_data_big.parquet --compute \"X:row.Value * 1.5\" --filter \"row.Value > 100\" --limit 1000 -o \"$MSSQL\" --table \"output_t96\" --strategy Recreate"
 # T97: DataFusion GROUP BY aggregation: first-letter distribution of FirstName
-run_test "T97" "$DTPIPE -i artifacts/test_data.csv --alias c -x fusion-engine --main c -q \"SELECT upper(FirstName), count(*) FROM c GROUP BY 1\" -o artifacts/output_t97.csv"
+run_test "T97" "$DTPIPE -i artifacts/test_data.csv --alias c --from c --sql -q \"SELECT upper(FirstName), count(*) FROM c GROUP BY 1\" -o artifacts/output_t97.csv"
 # T98: DuckDB read with --query on geography table → Arrow export
 run_test "T98" "$DTPIPE -i artifacts/test_data.duckdb --table \"geography\" -q \"SELECT * FROM geography\" -o artifacts/output_t98.arrow"
 # T100: Sampling rate 1.0 keeps all rows (boundary condition: no data loss)
@@ -379,7 +379,7 @@ echo -e "\n### Advanced Fan-out and Routing Tests ###"
 run_test "T136" "$DTPIPE -i artifacts/test_data.csv --alias src \
   --from src --filter 'row.Score > 500' --alias high \
   --from src --filter 'row.Score <= 500' --alias low \
-  -x fusion-engine --main high --ref low -q \"SELECT 'high' as segment, count(*) as n FROM high UNION ALL SELECT 'low', count(*) FROM low\" \
+  --from high --sql --ref low -q \"SELECT 'high' as segment, count(*) as n FROM high UNION ALL SELECT 'low', count(*) FROM low\" \
   -o artifacts/output_t136.csv"
 
 # T137: Triple fan-out (3 consumers of same source)
@@ -392,7 +392,7 @@ run_test "T137" "$DTPIPE -i artifacts/test_data.csv --alias src \
 run_test "T138" "$DTPIPE \
   -i artifacts/test_data.parquet --alias p \
   -i artifacts/test_data.csv --alias c \
-  -x fusion-engine --main p --ref c -q \"SELECT p.*, c.Email FROM p JOIN c ON p.Id = c.Id\" --alias joined \
+  --from p --sql --ref c -q \"SELECT p.*, c.Email FROM p JOIN c ON p.Id = c.Id\" --alias joined \
   --from joined -o artifacts/output_t138_a.csv \
   --from joined -o artifacts/output_t138_b.parquet"
 

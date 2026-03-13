@@ -20,7 +20,7 @@ public class DagOrchestrator : IDagOrchestrator
 {
     private readonly ILogger<DagOrchestrator> _logger;
     private readonly IMemoryChannelRegistry _channelRegistry;
-    private readonly List<IXStreamerFactory> _xstreamerFactories;
+    private readonly List<IProcessorFactory> _processorFactories;
     private readonly List<IStreamReaderFactory> _readerFactories;
     private static readonly object _schemaLock = new();
     private static readonly Schema _emptySchema = new Schema(System.Array.Empty<Field>(), null);
@@ -35,12 +35,12 @@ public class DagOrchestrator : IDagOrchestrator
     public DagOrchestrator(
         ILogger<DagOrchestrator> logger,
         IMemoryChannelRegistry channelRegistry,
-        IEnumerable<IXStreamerFactory> xstreamerFactories,
+        IEnumerable<IProcessorFactory> processorFactories,
         IEnumerable<IStreamReaderFactory> readerFactories)
     {
         _logger = logger;
         _channelRegistry = channelRegistry;
-        _xstreamerFactories = xstreamerFactories.ToList();
+        _processorFactories = processorFactories.ToList();
         _readerFactories = readerFactories.ToList();
     }
 
@@ -338,6 +338,7 @@ public class DagOrchestrator : IDagOrchestrator
         }
     }
 
+
     private async Task<int> ExecuteBranchAsync(
         JobDagDefinition dag,
         BranchDefinition branch,
@@ -359,19 +360,46 @@ public class DagOrchestrator : IDagOrchestrator
         {
             var argsList = branch.Arguments.ToList();
 
-            if (branch.IsProcessor)
+            if (branch.Processor == ProcessorKind.Sql)
             {
-                var engineInArgs = ExtractArgValue(argsList, "-x") ?? ExtractArgValue(argsList, "--xstreamer");
-                if (string.IsNullOrEmpty(engineInArgs) && !string.IsNullOrEmpty(branch.Input))
+                // Ensure --sql is in args with the correct engine if it was implicit
+                var sqlEngine = ExtractArgValue(argsList, "--sql");
+                if (string.IsNullOrEmpty(sqlEngine) && !string.IsNullOrEmpty(branch.Input))
                 {
-                    var xFlags = new[] { "-x", "--xstreamer" };
-                    for (int i = 0; i < argsList.Count; i++)
+                    // If --sql was present without value or implicitly mapped from Input (provider name)
+                    // We need to make sure the args reflect the processor choice.
+                    // For now, if Input is provided (e.g. "fusion-engine"), we inject it.
+                    int sqlIdx = argsList.FindIndex(a => a.Equals("--sql", StringComparison.OrdinalIgnoreCase));
+                    if (sqlIdx >= 0 && sqlIdx + 1 < argsList.Count && argsList[sqlIdx+1].StartsWith("-"))
                     {
-                        if (xFlags.Contains(argsList[i], StringComparer.OrdinalIgnoreCase))
-                        {
-                            argsList.Insert(i + 1, branch.Input);
-                            break;
-                        }
+                         argsList.Insert(sqlIdx + 1, branch.Input);
+                    }
+                    else if (sqlIdx < 0)
+                    {
+                         argsList.Insert(0, branch.Input);
+                         argsList.Insert(0, "--sql");
+                    }
+                }
+            }
+
+            if (branch.Processor == ProcessorKind.Sql)
+            {
+                // Ensure --sql is in args with the correct engine if it was implicit
+                var sqlEngine = ExtractArgValue(argsList, "--sql");
+                if (string.IsNullOrEmpty(sqlEngine) && !string.IsNullOrEmpty(branch.Input))
+                {
+                    // If --sql was present without value or implicitly mapped from Input (provider name)
+                    // We need to make sure the args reflect the processor choice.
+                    // For now, if Input is provided (e.g. "fusion-engine"), we inject it.
+                    int sqlIdx = argsList.FindIndex(a => a.Equals("--sql", StringComparison.OrdinalIgnoreCase));
+                    if (sqlIdx >= 0 && sqlIdx + 1 < argsList.Count && argsList[sqlIdx+1].StartsWith("-"))
+                    {
+                         argsList.Insert(sqlIdx + 1, branch.Input);
+                    }
+                    else if (sqlIdx < 0)
+                    {
+                         argsList.Insert(0, branch.Input);
+                         argsList.Insert(0, "--sql");
                     }
                 }
             }
@@ -539,7 +567,7 @@ public class DagOrchestrator : IDagOrchestrator
             var xFlag = branch.Input;
             if (xFlag == null) continue;
 
-            var factory = _xstreamerFactories
+            var factory = _processorFactories
                 .FirstOrDefault(f => f.ComponentName.Equals(xFlag, StringComparison.OrdinalIgnoreCase));
 
             if (factory != null)

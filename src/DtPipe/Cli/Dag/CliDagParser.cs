@@ -5,7 +5,7 @@ namespace DtPipe.Cli.Dag;
 
 /// <summary>
 /// Pre-parses the raw application arguments to detect and split the pipeline into a Directed Acyclic Graph (DAG)
-/// consisting of multiple branches separated by the '-x' or '--xstreamer' flags.
+/// consisting of multiple branches separated by the '--sql', '-x' or '--processor' flags.
 /// </summary>
 public static class CliDagParser
 {
@@ -18,9 +18,9 @@ public static class CliDagParser
     /// Parses the raw command line arguments into a JobDagDefinition.
     /// </summary>
     /// <param name="args">The raw args from Environment.GetCommandLineArgs() (excluding the executable path).</param>
-    /// <param name="defaultXStreamer">Optional default XStreamer if unspecified.</param>
+    /// <param name="defaultProcessor">Optional default processor if unspecified.</param>
     /// <returns>A parsed DAG definition containing global arguments and specific branches.</returns>
-    public static JobDagDefinition Parse(string[] args, string? defaultXStreamer = null)
+    public static JobDagDefinition Parse(string[] args, string? defaultProcessor = null)
     {
         if (args == null || args.Length == 0)
         {
@@ -30,7 +30,7 @@ public static class CliDagParser
         var branches = new List<BranchDefinition>();
         var currentBranchArgs = new List<string>();
 
-        bool isCurrentBranchXStreamer = false;
+        bool isCurrentBranchProcessor = false;
         bool hasSeenInputInCurrentBranch = false;
         int branchCounter = 0;
 
@@ -40,53 +40,54 @@ public static class CliDagParser
 
             if (CliPipelineRules.ProcessorFlags.Contains(arg))
             {
-                // We've hit an XStreamer boundary. Finish the current branch.
-                if (currentBranchArgs.Count > 0)
+                // Split if we already have a processor OR an input in the current branch
+                if (isCurrentBranchProcessor || hasSeenInputInCurrentBranch)
                 {
-                    var branch = CreateBranch(currentBranchArgs, isCurrentBranchXStreamer, ref branchCounter, defaultXStreamer, branches.LastOrDefault()?.Alias);
-                    branches.Add(branch);
-                    currentBranchArgs.Clear();
+                    if (currentBranchArgs.Count > 0)
+                    {
+                        var branch = CreateBranch(currentBranchArgs, isCurrentBranchProcessor, ref branchCounter, defaultProcessor, branches.LastOrDefault()?.Alias);
+                        branches.Add(branch);
+                        currentBranchArgs.Clear();
+                    }
+                    hasSeenInputInCurrentBranch = false;
                 }
 
-                // Start a new XStreamer branch
-                isCurrentBranchXStreamer = true;
-                hasSeenInputInCurrentBranch = false;
+                isCurrentBranchProcessor = true;
                 currentBranchArgs.Add(arg);
             }
             else if (CliPipelineRules.InputFlags.Contains(arg) || arg.Equals("--from", StringComparison.OrdinalIgnoreCase))
             {
-                // Split if we've already seen an input in the current branch OR if switching away from an XStreamer branch.
-                // Note: --main and --ref no longer trigger branch splits here; they are XStreamer-only flags.
-                if (hasSeenInputInCurrentBranch || isCurrentBranchXStreamer)
+                // Split if we've already seen an input in the current branch.
+                if (hasSeenInputInCurrentBranch)
                 {
                     if (currentBranchArgs.Count > 0)
                     {
-                        var branch = CreateBranch(currentBranchArgs, isCurrentBranchXStreamer, ref branchCounter, defaultXStreamer, branches.LastOrDefault()?.Alias);
+                        var branch = CreateBranch(currentBranchArgs, isCurrentBranchProcessor, ref branchCounter, defaultProcessor, branches.LastOrDefault()?.Alias);
                         branches.Add(branch);
                         currentBranchArgs.Clear();
                     }
+                    isCurrentBranchProcessor = false;
                 }
 
-                isCurrentBranchXStreamer = false; // New branch started with -i or --from is always linear
                 hasSeenInputInCurrentBranch = true;
                 currentBranchArgs.Add(arg);
             }
             else if (arg.Equals("--main", StringComparison.OrdinalIgnoreCase) || arg.Equals("--ref", StringComparison.OrdinalIgnoreCase))
             {
-                // Split on --main/--ref ONLY IF we haven't seen an XStreamer flag (-x) yet.
-                // If we have seen -x, these are just options for the current xstreamer branch.
-                if (!isCurrentBranchXStreamer && hasSeenInputInCurrentBranch)
+                // Split on --main/--ref ONLY IF we are NOT in a processor branch AND already have an input.
+                // If we ARE in a processor branch, these are just options.
+                if (!isCurrentBranchProcessor && hasSeenInputInCurrentBranch)
                 {
                     if (currentBranchArgs.Count > 0)
                     {
-                        var branch = CreateBranch(currentBranchArgs, isCurrentBranchXStreamer, ref branchCounter, defaultXStreamer, branches.LastOrDefault()?.Alias);
+                        var branch = CreateBranch(currentBranchArgs, isCurrentBranchProcessor, ref branchCounter, defaultProcessor, branches.LastOrDefault()?.Alias);
                         branches.Add(branch);
                         currentBranchArgs.Clear();
                     }
-                    hasSeenInputInCurrentBranch = false; // Reset as this is a new branch
+                    hasSeenInputInCurrentBranch = false; 
                 }
                 
-                if (!isCurrentBranchXStreamer) hasSeenInputInCurrentBranch = true;
+                if (!isCurrentBranchProcessor) hasSeenInputInCurrentBranch = true;
                 currentBranchArgs.Add(arg);
             }
             else
@@ -98,7 +99,7 @@ public static class CliDagParser
         // Add the last branch
         if (currentBranchArgs.Count > 0)
         {
-            branches.Add(CreateBranch(currentBranchArgs, isCurrentBranchXStreamer, ref branchCounter, defaultXStreamer, branches.LastOrDefault()?.Alias));
+            branches.Add(CreateBranch(currentBranchArgs, isCurrentBranchProcessor, ref branchCounter, defaultProcessor, branches.LastOrDefault()?.Alias));
         }
 
         return new JobDagDefinition
@@ -107,7 +108,7 @@ public static class CliDagParser
         };
     }
 
-    private static BranchDefinition CreateBranch(List<string> args, bool isXStreamer, ref int branchCounter, string? defaultXStreamer = null, string? previousAlias = null)
+    private static BranchDefinition CreateBranch(List<string> args, bool isProcessor, ref int branchCounter, string? defaultProcessor = null, string? previousAlias = null)
     {
         string? alias = ExtractArgValue(args.ToArray(), "--alias");
 
@@ -121,13 +122,13 @@ public static class CliDagParser
         var argsArray = args.ToArray();
         var input = ExtractArgValue(argsArray, "-i") ?? ExtractArgValue(argsArray, "--input");
 
-        if (input == null && isXStreamer)
+        if (input == null && isProcessor)
         {
-            input = ExtractArgValue(argsArray, "--xstreamer") ?? ExtractArgValue(argsArray, "-x") ?? defaultXStreamer;
+            input = ExtractArgValue(argsArray, "--sql") ?? ExtractArgValue(argsArray, "--xstreamer") ?? ExtractArgValue(argsArray, "-x") ?? defaultProcessor;
         }
 
         var mainAlias = ExtractArgValue(argsArray, "--main");
-        if (isXStreamer && string.IsNullOrEmpty(mainAlias) && !string.IsNullOrEmpty(previousAlias))
+        if (isProcessor && string.IsNullOrEmpty(mainAlias) && !string.IsNullOrEmpty(previousAlias))
         {
             mainAlias = previousAlias;
         }
@@ -140,7 +141,7 @@ public static class CliDagParser
         {
             Alias = alias,
             Arguments = argsArray,
-            Processor = isXStreamer ? ProcessorKind.Sql : ProcessorKind.None,
+            Processor = isProcessor ? ProcessorKind.Sql : ProcessorKind.None,
             Input = input,
             Output = ExtractArgValue(argsArray, "-o") ?? ExtractArgValue(argsArray, "--output"),
             MainAlias = mainAlias,
@@ -177,6 +178,13 @@ public static class CliDagParser
                     seenSingletons.Add(arg);
                 }
             }
+
+            // 3. Range Validation (e.g. --limit)
+            var limit = ExtractArgValue(branch.Arguments, "--limit");
+            if (!string.IsNullOrEmpty(limit) && int.TryParse(limit, out int l) && l < 0)
+            {
+                errors.Add($"Branch '{branch.Alias}' has an invalid --limit value: {limit}. Must be non-negative.");
+            }
         }
 
         return errors;
@@ -189,7 +197,7 @@ public static class CliDagParser
             if (args[i].Equals(flag, StringComparison.OrdinalIgnoreCase))
             {
                 var val = args[i + 1];
-                if (val.StartsWith('-')) return null; // Looks like another flag
+                if (val.StartsWith('-') && val.Length > 1 && !char.IsDigit(val[1])) return null; // Looks like another flag
                 return val;
             }
         }

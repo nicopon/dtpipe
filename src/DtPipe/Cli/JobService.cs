@@ -35,7 +35,7 @@ public class JobService
 		IEnumerable<IStreamReaderFactory> readerFactories,
 		IEnumerable<IDataTransformerFactory> transformerFactories,
 		IEnumerable<IDataWriterFactory> writerFactories,
-		IEnumerable<IXStreamerFactory> xstreamerFactories)
+		IEnumerable<IProcessorFactory> processorFactories)
 	{
 		_serviceProvider = serviceProvider;
 		_console = console;
@@ -46,7 +46,7 @@ public class JobService
 		list.AddRange(readerFactories.OfType<ICliContributor>());
 		list.AddRange(transformerFactories.OfType<ICliContributor>());
 		list.AddRange(writerFactories.OfType<ICliContributor>());
-		list.AddRange(xstreamerFactories.OfType<ICliContributor>());
+		list.AddRange(processorFactories.OfType<ICliContributor>());
 		_contributors = list;
 	}
 
@@ -54,8 +54,8 @@ public class JobService
 	{
 		var readerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>();
 		var writerFactories = _serviceProvider.GetRequiredService<IEnumerable<IDataWriterFactory>>();
-		var xstreamerFactories = _serviceProvider.GetRequiredService<IEnumerable<IXStreamerFactory>>();
-		var opts = CoreOptionsBuilder.Build(readerFactories, writerFactories, xstreamerFactories);
+		var processorFactories = _serviceProvider.GetRequiredService<IEnumerable<IProcessorFactory>>();
+		var opts = CoreOptionsBuilder.Build(readerFactories, writerFactories, processorFactories);
 		var coreOptions = opts.AllOptions;
 
 		var rootCommand = new RootCommand("A simple, self-contained CLI for performance-focused data streaming & anonymization");
@@ -111,8 +111,8 @@ public class JobService
              // that System.CommandLine considers errors at the root level.
              // Branch-level validation happens inside the executor.
 
-			var xstreamerFactories = _serviceProvider.GetRequiredService<IEnumerable<IXStreamerFactory>>();
-			string? defaultXStreamer = xstreamerFactories.Count() == 1 ? xstreamerFactories.First().ComponentName : null;
+			var processorFactories = _serviceProvider.GetRequiredService<IEnumerable<IProcessorFactory>>();
+			string? defaultProcessor = processorFactories.Count() == 1 ? processorFactories.First().ComponentName : null;
 
 			// 2. Build Initial Job(s) and detect DAG vs Linear
 			var cliJobOptions = new DtPipe.Cli.Infrastructure.CliJobOptions
@@ -204,7 +204,7 @@ public class JobService
 			}
 			else
 			{
-				dagDefinition = CliDagParser.Parse(rawArgs, defaultXStreamer)!;
+				dagDefinition = CliDagParser.Parse(rawArgs, defaultProcessor)!;
 				if (dagDefinition.IsDag)
 				{
 					if (Environment.GetEnvironmentVariable("DEBUG") == "1")
@@ -338,7 +338,7 @@ public class JobService
 				{
 					if (branch.IsProcessor)
 					{
-						var junction = $"[magenta]⚙ XStreamer:[/] [white]{branch.Alias}[/] (Main: [cyan]{branch.MainAlias}[/]";
+						var junction = $"[magenta]⚙ Processor:[/] [white]{branch.Alias}[/] (Main: [cyan]{branch.MainAlias}[/]";
 						if (branch.RefAliases.Any()) junction += $", Refs: [cyan]{string.Join(", ", branch.RefAliases)}[/]";
 						junction += ")";
 						tree.AddNode(junction);
@@ -419,7 +419,7 @@ public class JobService
 
 		console.WriteLine("Core Options:");
 		var basicCoreFlags = new HashSet<string> {
-			"--input", "-i", "--output", "-o", "--query", "-q", "--job", "--xstreamer", "-x", "--alias",
+			"--input", "-i", "--output", "-o", "--query", "-q", "--job", "--processor", "--sql", "-x", "--alias",
 			"--dry-run", "--limit", "--batch-size", "-b", "--no-stats", "--log"
 		};
 		foreach (var opt in coreOptions.Where(o => basicCoreFlags.Contains(o.Name)))

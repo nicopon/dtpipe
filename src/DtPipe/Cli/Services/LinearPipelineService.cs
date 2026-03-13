@@ -50,7 +50,7 @@ public class LinearPipelineService
 
         if (isProcessor)
         {
-            var xFactories = _serviceProvider.GetRequiredService<IEnumerable<IXStreamerFactory>>();
+            var xFactories = _serviceProvider.GetRequiredService<IEnumerable<IProcessorFactory>>();
             var factoryString = !string.IsNullOrEmpty(job.Sql) ? job.Sql : (job.Input ?? "");
             var (xFactory, xCleaned) = ResolveFactory(xFactories, factoryString, "Processor");
             cleanedInput = xCleaned;
@@ -216,18 +216,12 @@ public class LinearPipelineService
 
             if (rawString.Equals(factory.ComponentName, StringComparison.OrdinalIgnoreCase))
             {
-                // If it's a known component name, it might be STDIN or just the component selection.
-                // XStreamers and Multi-branch sources don't use STDIN by default when named.
-                if (typeName == "XStreamer" || typeName == "branch")
+                if (typeName == "Processor" || typeName == "branch")
                 {
                     return (factory, "");
                 }
 
                 // For standard readers/writers, name-only implies STDIN/OUT (-)
-                if (!factory.SupportsStdio)
-                {
-                    throw new InvalidOperationException($"The provider '{factory.ComponentName}' does not support standard input/output pipes (-).");
-                }
                 return (factory, "-");
             }
         }
@@ -319,11 +313,11 @@ public class LinearPipelineService
 
     private sealed class ProcessorReaderFactoryAdapter : IStreamReaderFactory
     {
-        private readonly IXStreamerFactory _inner;
+        private readonly IProcessorFactory _inner;
         private readonly IServiceProvider _sp;
         private readonly string _connectionString;
 
-        public ProcessorReaderFactoryAdapter(IXStreamerFactory inner, IServiceProvider sp, string connectionString)
+        public ProcessorReaderFactoryAdapter(IProcessorFactory inner, IServiceProvider sp, string connectionString)
         {
             _inner = inner;
             _sp = sp;

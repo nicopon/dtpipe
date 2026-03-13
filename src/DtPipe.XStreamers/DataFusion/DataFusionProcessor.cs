@@ -13,7 +13,7 @@ using System.Threading.Channels;
 
 namespace DtPipe.XStreamers.DataFusion;
 
-public sealed class DataFusionXStreamer : IColumnarStreamReader
+public sealed class DataFusionProcessor : IColumnarStreamReader
 {
     private readonly IMemoryChannelRegistry _registry;
     private readonly string _query;
@@ -21,7 +21,7 @@ public sealed class DataFusionXStreamer : IColumnarStreamReader
     private readonly string[] _refAliases;
     private readonly string _srcMain;
     private readonly string[] _srcRefs;
-    private readonly ILogger<DataFusionXStreamer> _logger;
+    private readonly ILogger<DataFusionProcessor> _logger;
 
     private nint _runtime = nint.Zero;
     private nint _ctx = nint.Zero;
@@ -33,14 +33,14 @@ public sealed class DataFusionXStreamer : IColumnarStreamReader
     public IReadOnlyList<PipeColumnInfo>? Columns => _columns;
     public Schema? Schema => _resultSchema;
 
-    public DataFusionXStreamer(
+    public DataFusionProcessor(
         IMemoryChannelRegistry registry,
         string query,
         string mainAlias,
         string[] refAliases,
         string srcMain,
         string[] srcRefs,
-        ILogger<DataFusionXStreamer> logger)
+        ILogger<DataFusionProcessor> logger)
     {
         _registry = registry;
         _query = query;
@@ -53,7 +53,7 @@ public sealed class DataFusionXStreamer : IColumnarStreamReader
 
     public async Task OpenAsync(CancellationToken ct = default)
     {
-        _logger.LogDebug("DataFusionXStreamer: OpenAsync — query={Query}", _query);
+        _logger.LogDebug("DataFusionProcessor: OpenAsync — query={Query}", _query);
         try
         {
             _runtime = DataFusionBridge.RuntimeNew();
@@ -84,7 +84,7 @@ public sealed class DataFusionXStreamer : IColumnarStreamReader
                 }
             }
 
-            _logger.LogDebug("DataFusionXStreamer: All sources registered. Inspecting schema...");
+            _logger.LogDebug("DataFusionProcessor: All sources registered. Inspecting schema...");
             InspectSchema();
 
             _columns = _resultSchema!.FieldsList
@@ -93,7 +93,7 @@ public sealed class DataFusionXStreamer : IColumnarStreamReader
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "DataFusionXStreamer: OpenAsync FAILED: {Message}", ex.Message);
+            _logger.LogError(ex, "DataFusionProcessor: OpenAsync FAILED: {Message}", ex.Message);
             throw;
         }
     }
