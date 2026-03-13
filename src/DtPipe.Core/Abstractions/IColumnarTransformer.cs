@@ -19,6 +19,9 @@ public interface IColumnarTransformer : IDataTransformer
 
     /// <summary>
     /// Transforms a RecordBatch. Returns the transformed batch, or null if the entire batch is dropped.
+    /// The transformer takes exclusive ownership of the input RecordBatch.
+    /// It MUST Dispose() the input batch if it returns a different batch or null.
+    /// If it returns the input batch unchanged, ownership is transferred back to the caller.
     /// </summary>
     ValueTask<RecordBatch?> TransformBatchAsync(RecordBatch batch, CancellationToken ct = default);
 

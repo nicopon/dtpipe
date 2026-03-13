@@ -29,6 +29,7 @@ public class SchemaValidationServiceTests
         // Arrange
         var options = new PipelineOptions { NoSchemaValidation = true };
         var mockWriter = new Mock<IDataWriter>();
+        mockWriter.As<ISchemaInspector>().Setup(i => i.RequiresTargetInspection).Returns(true);
         mockWriter.As<ISchemaInspector>().Setup(i => i.InspectTargetAsync(It.IsAny<CancellationToken>()))
                    .ReturnsAsync(new TargetSchemaInfo(new List<TargetColumnInfo>(), false, null, null, null));
         var schema = new List<PipeColumnInfo>();
@@ -64,6 +65,7 @@ public class SchemaValidationServiceTests
 
         var mockWriter = new Mock<IDataWriter>();
         var mockInspector = mockWriter.As<ISchemaInspector>();
+        mockInspector.Setup(i => i.RequiresTargetInspection).Returns(true);
         mockInspector.Setup(i => i.InspectTargetAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new TargetSchemaInfo(
             new List<TargetColumnInfo> { new TargetColumnInfo("ID", "INTEGER", typeof(int), false, true, false) },
             true, null, null, new List<string> { "ID" }));
@@ -84,6 +86,7 @@ public class SchemaValidationServiceTests
 
         var mockWriter = new Mock<IDataWriter>();
         var mockInspector = mockWriter.As<ISchemaInspector>();
+        mockInspector.Setup(i => i.RequiresTargetInspection).Returns(true);
         mockInspector.Setup(i => i.InspectTargetAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new TargetSchemaInfo(
             new List<TargetColumnInfo>(), true, null, null, null));
 
@@ -101,6 +104,7 @@ public class SchemaValidationServiceTests
 
         var mockWriter = new Mock<IDataWriter>();
         var mockInspector = mockWriter.As<ISchemaInspector>();
+        mockInspector.Setup(i => i.RequiresTargetInspection).Returns(true);
         mockInspector.Setup(i => i.InspectTargetAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new TargetSchemaInfo(
             new List<TargetColumnInfo>(), true, null, null, null));
 

@@ -20,6 +20,8 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter
 	private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.SqliteDialect();
 	public override ISqlDialect Dialect => _dialect;
 
+	public override bool RequiresTargetInspection => _options.Strategy != SqliteWriteStrategy.Recreate;
+
 	protected override ITypeMapper GetTypeMapper() => _typeMapper;
 
 	public SqliteDataWriter(string connectionString, SqliteWriterOptions options, ILogger<SqliteDataWriter> logger, ITypeMapper typeMapper) : base(connectionString)

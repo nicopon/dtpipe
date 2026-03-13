@@ -9,12 +9,8 @@ public interface IColumnarDataWriter : IDataWriter
 {
     /// <summary>
     /// Writes an Arrow RecordBatch to the target.
+    /// The writer takes exclusive ownership of the RecordBatch and is responsible for its disposal.
+    /// The pipeline orchestrator will NOT dispose of the batch after calling this method.
     /// </summary>
     ValueTask WriteRecordBatchAsync(RecordBatch batch, CancellationToken ct = default);
-
-    /// <summary>
-    /// If true, the writer takes ownership of the RecordBatch and is responsible for its disposal.
-    /// The pipeline orchestrator should NOT dispose of the batch after calling WriteRecordBatchAsync.
-    /// </summary>
-    bool PrefersOwnershipTransfer => false;
 }

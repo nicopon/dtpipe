@@ -28,6 +28,12 @@ internal sealed class SchemaValidationService
     {
         if (options.NoSchemaValidation || writer is not ISchemaInspector inspector) return;
 
+        if (!inspector.RequiresTargetInspection)
+        {
+            _logger.LogDebug("Target inspection skipped for {WriterType} (not required by current strategy).", writer.GetType().Name);
+            return;
+        }
+
         _observer.LogMessage("Verifying target schema compatibility...");
         var targetSchema = await inspector.InspectTargetAsync(ct);
         var dialect = (writer as IHasSqlDialect)?.Dialect;

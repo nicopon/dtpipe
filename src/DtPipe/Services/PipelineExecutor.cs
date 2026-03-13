@@ -40,32 +40,13 @@ internal sealed class PipelineExecutor
         long rowCount = 0;
         await foreach (var batch in source.WithCancellation(ct))
         {
-            if (writer.PrefersOwnershipTransfer)
-            {
-                var batchToWriter = batch;
-                progress.ReportRead(batchToWriter.Length);
-                await writer.WriteRecordBatchAsync(batchToWriter, ct);
-                progress.ReportWrite(batchToWriter.Length);
-                rowCount += batchToWriter.Length;
-            }
-            else
-            {
-                using (batch) // Ensure Arrow C release callback is called promptly
-                {
-                    var batchToWriter = batch;
-                    if (limit > 0 && rowCount + batch.Length > limit)
-                    {
-                        // Note: Slicing would be better here if supported.
-                    }
+            var batchToWriter = batch;
+            progress.ReportRead(batchToWriter.Length);
+            await writer.WriteRecordBatchAsync(batchToWriter, ct);
+            progress.ReportWrite(batchToWriter.Length);
+            rowCount += batchToWriter.Length;
 
-                    progress.ReportRead(batchToWriter.Length);
-                    await writer.WriteRecordBatchAsync(batchToWriter, ct);
-                    progress.ReportWrite(batchToWriter.Length);
-                    rowCount += batchToWriter.Length;
-
-                    if (limit > 0 && rowCount >= limit) break;
-                }
-            }
+            if (limit > 0 && rowCount >= limit) break;
         }
     }
 
@@ -258,9 +239,12 @@ internal sealed class PipelineExecutor
         var bridge = factory.CreateBridge();
         await foreach (var batch in batches.WithCancellation(ct))
         {
-            await foreach (var row in bridge.ConvertBatchToRowsAsync(batch, ct))
+            using (batch)
             {
-                yield return row;
+                await foreach (var row in bridge.ConvertBatchToRowsAsync(batch, ct))
+                {
+                    yield return row;
+                }
             }
         }
     }
@@ -284,8 +268,16 @@ internal sealed class PipelineExecutor
                     progress.ReportTransform(t.GetType().Name.Replace("DataTransformer", ""), res.Length);
                     currentBatch = res;
                 }
+                else
+                {
+                    currentBatch = null;
+                    break;
+                }
             }
-            yield return currentBatch;
+            if (currentBatch != null)
+            {
+                yield return currentBatch;
+            }
         }
 
         // Process final flush from stateful transformers

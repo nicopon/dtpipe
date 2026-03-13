@@ -19,6 +19,8 @@ public sealed class OracleSchemaInspector : ISchemaInspector
 		_logger = logger;
 	}
 
+	public bool RequiresTargetInspection => true;
+
 	public async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
 	{
 		if (_logger.IsEnabled(LogLevel.Debug)) _logger.LogDebug("Starting target schema inspection for table {Table}", _tableName);

@@ -45,12 +45,12 @@ public static class RawJobBuilder
 		}
 		else
 		{
-			var query = parseResult.GetValue(opts.Query);
+			var query = parseResult.GetValue(opts.Query)?.FirstOrDefault();
 			var output = parseResult.GetValue(opts.Output)?.FirstOrDefault();
 			var input = parseResult.GetValue(opts.Input)?.FirstOrDefault();
 
 			// Validation (Required args)
-			bool isDag = parseResult.Tokens.Any(t => t.Value == "-x" || t.Value == "--xstreamer" || t.Value == "--alias" || t.Value == "--from");
+			bool isDag = parseResult.Tokens.Any(t => t.Value == "-x" || t.Value == "--xstreamer" || t.Value == "--alias" || t.Value == "--from" || t.Value == "--main" || t.Value == "--ref" || t.Value == "--src-main" || t.Value == "--src-ref");
 			var exportJobResult = parseResult.GetValue(opts.ExportJob);
 			if (string.IsNullOrWhiteSpace(output) && !isDag && string.IsNullOrWhiteSpace(exportJobResult))
 			{
@@ -59,9 +59,23 @@ public static class RawJobBuilder
 			}
 
 			var xstreamer = parseResult.GetValue(opts.Xstreamer)?.FirstOrDefault();
-			if (string.IsNullOrWhiteSpace(input) && string.IsNullOrWhiteSpace(xstreamer))
+			var fromAliases = parseResult.GetValue(opts.From);
+			var mainAliases = parseResult.GetValue(opts.Main);
+			var refAliases = parseResult.GetValue(opts.Ref);
+			
+			// DEBUG
+			if (Environment.GetEnvironmentVariable("DEBUG") == "1")
 			{
-				Console.Error.WriteLine("Error: --input or --xstreamer is required.");
+				Console.Error.WriteLine($"[DEBUG] input: {input}, xstreamer: {xstreamer}, from: {fromAliases?.Length ?? 0}, main: {mainAliases?.Length ?? 0}, ref: {refAliases?.Length ?? 0}");
+			}
+
+			bool hasSource = (fromAliases != null && fromAliases.Length > 0) || 
+							 (mainAliases != null && mainAliases.Length > 0) ||
+							 (refAliases != null && refAliases.Length > 0);
+			
+			if (string.IsNullOrWhiteSpace(input) && string.IsNullOrWhiteSpace(xstreamer) && !hasSource)
+			{
+				Console.Error.WriteLine($"Error: --input or --xstreamer is required for branch focus. (Tokens: {string.Join(" ", parseResult.Tokens.Select(t => t.Value))})");
 				return (new Dictionary<string, JobDefinition>(), 1);
 			}
 
@@ -70,29 +84,29 @@ public static class RawJobBuilder
 				Input = input ?? "",
 				Query = query,
 				Output = output ?? "",
-				ConnectionTimeout = parseResult.GetValue(opts.ConnectionTimeout),
-				QueryTimeout = parseResult.GetValue(opts.QueryTimeout),
-				BatchSize = parseResult.GetValue(opts.BatchSize),
+				ConnectionTimeout = (parseResult.GetValue(opts.ConnectionTimeout) is { Length: > 0 } ct ? ct[0] : 10),
+				QueryTimeout = (parseResult.GetValue(opts.QueryTimeout) is { Length: > 0 } qt ? qt[0] : 0),
+				BatchSize = (parseResult.GetValue(opts.BatchSize) is { Length: > 0 } bs ? bs[0] : 50_000),
 				UnsafeQuery = parseResult.GetValue(opts.UnsafeQuery),
 				DryRun = false, // Handled later for options
-				Limit = parseResult.GetValue(opts.Limit),
-				SamplingSeed = parseResult.GetValue(opts.SamplingSeed),
+				Limit = (parseResult.GetValue(opts.Limit) is { Length: > 0 } lim ? lim[0] : 0),
+				SamplingSeed = (parseResult.GetValue(opts.SamplingSeed) is { Length: > 0 } ss ? ss[0] : null),
 				LogPath = parseResult.GetValue(opts.Log),
 				Key = parseResult.GetValue(opts.Key),
 				PreExec = parseResult.GetValue(opts.PreExec),
 				PostExec = parseResult.GetValue(opts.PostExec),
 				OnErrorExec = parseResult.GetValue(opts.OnErrorExec),
 				FinallyExec = parseResult.GetValue(opts.FinallyExec),
-				Strategy = parseResult.GetValue(opts.Strategy),
-				InsertMode = parseResult.GetValue(opts.InsertMode),
-				Table = parseResult.GetValue(opts.Table),
-				MaxRetries = parseResult.GetValue(opts.MaxRetries),
-				RetryDelayMs = parseResult.GetValue(opts.RetryDelayMs),
-				StrictSchema = parseResult.GetValue(opts.StrictSchema) ?? false,
-				NoSchemaValidation = parseResult.GetValue(opts.NoSchemaValidation) ?? false,
-				MetricsPath = parseResult.GetValue(opts.MetricsPath),
-				AutoMigrate = parseResult.GetValue(opts.AutoMigrate) ?? false,
-				Throttle = parseResult.GetValue(opts.Throttle),
+				Strategy = parseResult.GetValue(opts.Strategy)?.FirstOrDefault(),
+				InsertMode = parseResult.GetValue(opts.InsertMode)?.FirstOrDefault(),
+				Table = parseResult.GetValue(opts.Table)?.FirstOrDefault(),
+				MaxRetries = (parseResult.GetValue(opts.MaxRetries) is { Length: > 0 } mr ? mr[0] : 3),
+				RetryDelayMs = (parseResult.GetValue(opts.RetryDelayMs) is { Length: > 0 } rd ? rd[0] : 1000),
+				StrictSchema = (parseResult.GetValue(opts.StrictSchema) is { Length: > 0 } sso ? sso[0] : null) ?? false,
+				NoSchemaValidation = (parseResult.GetValue(opts.NoSchemaValidation) is { Length: > 0 } nsvo ? nsvo[0] : null) ?? false,
+				MetricsPath = parseResult.GetValue(opts.MetricsPath)?.FirstOrDefault(),
+				AutoMigrate = (parseResult.GetValue(opts.AutoMigrate) is { Length: > 0 } amvo ? amvo[0] : null) ?? false,
+				Throttle = (parseResult.GetValue(opts.Throttle) is { Length: > 0 } th ? th[0] : 0),
 				IgnoreNulls = parseResult.GetValue(opts.IgnoreNulls),
 				Prefix = parseResult.GetValue(opts.Prefix),
 				Drop = parseResult.GetValue(opts.Drop) ?? Array.Empty<string>(),
@@ -110,19 +124,19 @@ public static class RawJobBuilder
 	public static JobDefinition ApplyCliOverrides(JobDefinition job, ParseResult parseResult, CliJobOptions opts)
 	{
 		// Apply CLI Overrides (Execution-time parameters only)
-		var limitOverride = parseResult.GetValue(opts.Limit);
+		var limitOverride = parseResult.GetValue(opts.Limit)?.FirstOrDefault();
 		if (limitOverride > 0)
 		{
-			job = job with { Limit = limitOverride };
+			job = job with { Limit = limitOverride.Value };
 		}
 
-		var samplingRateOverride = parseResult.GetValue(opts.SamplingRate);
+		var samplingRateOverride = parseResult.GetValue(opts.SamplingRate)?.FirstOrDefault();
 		if (samplingRateOverride is > 0 and < 1.0)
 		{
-			job = job with { SamplingRate = samplingRateOverride };
+			job = job with { SamplingRate = samplingRateOverride.Value };
 		}
 
-		var samplingSeedOverride = parseResult.GetValue(opts.SamplingSeed);
+		var samplingSeedOverride = parseResult.GetValue(opts.SamplingSeed) is { Length: > 0 } seedArr ? seedArr[0] : null;
 		if (samplingSeedOverride.HasValue)
 		{
 			job = job with { SamplingSeed = samplingSeedOverride };
@@ -159,35 +173,35 @@ public static class RawJobBuilder
 		var finallyExecOverride = parseResult.GetValue(opts.FinallyExec);
 		if (!string.IsNullOrEmpty(finallyExecOverride)) job = job with { FinallyExec = finallyExecOverride };
 
-		var strategyOverride = parseResult.GetValue(opts.Strategy);
+		var strategyOverride = parseResult.GetValue(opts.Strategy)?.FirstOrDefault();
 		if (!string.IsNullOrEmpty(strategyOverride)) job = job with { Strategy = strategyOverride };
 
-		var insertModeOverride = parseResult.GetValue(opts.InsertMode);
+		var insertModeOverride = parseResult.GetValue(opts.InsertMode)?.FirstOrDefault();
 		if (!string.IsNullOrEmpty(insertModeOverride)) job = job with { InsertMode = insertModeOverride };
 
-		var tableOverride = parseResult.GetValue(opts.Table);
+		var tableOverride = parseResult.GetValue(opts.Table)?.FirstOrDefault();
 		if (!string.IsNullOrEmpty(tableOverride)) job = job with { Table = tableOverride };
 
 		var maxRetriesOverride = parseResult.GetValue(opts.MaxRetries);
-		if (maxRetriesOverride > 0) job = job with { MaxRetries = maxRetriesOverride };
+		if (maxRetriesOverride is { Length: > 0 } mrvo && mrvo[0] > 0) job = job with { MaxRetries = mrvo[0] };
 
-		var sso = parseResult.GetValue(opts.StrictSchema);
-		if (sso.HasValue) job = job with { StrictSchema = sso.Value };
+		var ssoOrig = parseResult.GetValue(opts.StrictSchema);
+		if (ssoOrig is { Length: > 0 } ssov && ssov[0].HasValue) job = job with { StrictSchema = ssov[0].Value };
+ 
+		var nsvoOrig = parseResult.GetValue(opts.NoSchemaValidation);
+		if (nsvoOrig is { Length: > 0 } nsvov && nsvov[0].HasValue) job = job with { NoSchemaValidation = nsvov[0].Value };
+ 
+		var amvoOrig = parseResult.GetValue(opts.AutoMigrate);
+		if (amvoOrig is { Length: > 0 } amvov && amvov[0].HasValue) job = job with { AutoMigrate = amvov[0].Value };
 
-		var nsvo = parseResult.GetValue(opts.NoSchemaValidation);
-		if (nsvo.HasValue) job = job with { NoSchemaValidation = nsvo.Value };
-
-		var amvo = parseResult.GetValue(opts.AutoMigrate);
-		if (amvo.HasValue) job = job with { AutoMigrate = amvo.Value };
-
-		var metricsPathOverride = parseResult.GetValue(opts.MetricsPath);
+		var metricsPathOverride = parseResult.GetValue(opts.MetricsPath)?.FirstOrDefault();
 		if (!string.IsNullOrEmpty(metricsPathOverride)) job = job with { MetricsPath = metricsPathOverride };
 
 		var prefixOverride = parseResult.GetValue(opts.Prefix);
 		if (!string.IsNullOrEmpty(prefixOverride)) job = job with { Prefix = prefixOverride };
 
 		var throttleOverride = parseResult.GetValue(opts.Throttle);
-		if (throttleOverride > 0) job = job with { Throttle = throttleOverride };
+		if (throttleOverride is { Length: > 0 } thov && thov[0] > 0) job = job with { Throttle = thov[0] };
 
 		var ignoreNullsOverride = parseResult.GetValue(opts.IgnoreNulls);
 		if (ignoreNullsOverride) job = job with { IgnoreNulls = true };

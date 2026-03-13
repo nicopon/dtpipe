@@ -9,7 +9,7 @@ namespace DtPipe.Transformers.Columnar.Overwrite;
 /// <summary>
 /// Overwrites specified columns with static values. Priority: 20.
 /// </summary>
-public class OverwriteDataTransformer : IColumnarTransformer, IRequiresOptions<DtPipe.Transformers.Columnar.Overwrite.OverwriteOptions>
+public class OverwriteDataTransformer : BaseColumnarTransformer, IRequiresOptions<DtPipe.Transformers.Columnar.Overwrite.OverwriteOptions>
 {
 	private readonly Dictionary<string, string> _staticMappings = new(StringComparer.OrdinalIgnoreCase);
 	private readonly bool _skipNull;
@@ -17,7 +17,7 @@ public class OverwriteDataTransformer : IColumnarTransformer, IRequiresOptions<D
 
 	public bool HasOverwrite => _staticMappings.Count > 0;
 
-	public bool CanProcessColumnar => true;
+	public override bool CanProcessColumnar => true;
 
 	public OverwriteDataTransformer(DtPipe.Transformers.Columnar.Overwrite.OverwriteOptions options)
 	{
@@ -32,7 +32,7 @@ public class OverwriteDataTransformer : IColumnarTransformer, IRequiresOptions<D
 		}
 	}
 
-	public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
+	public override ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
 	{
 		if (!HasOverwrite)
 		{
@@ -80,7 +80,7 @@ public class OverwriteDataTransformer : IColumnarTransformer, IRequiresOptions<D
 		return new ValueTask<IReadOnlyList<PipeColumnInfo>>(outputColumns);
 	}
 
-	public object?[]? Transform(object?[] row)
+	public override object?[]? Transform(object?[] row)
 	{
 		if (_columnValues == null)
 		{
@@ -102,7 +102,7 @@ public class OverwriteDataTransformer : IColumnarTransformer, IRequiresOptions<D
 		return row;
 	}
 
-	public ValueTask<RecordBatch?> TransformBatchAsync(RecordBatch batch, CancellationToken ct = default)
+	protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)
 	{
 		if (_columnValues == null) return new ValueTask<RecordBatch?>(batch);
 

@@ -19,6 +19,7 @@ public class DryRunConstraintValidationTests
 		public List<string>? TargetPKs { get; set; } = null;
 		public List<string>? TargetUniqueCols { get; set; } = null;
 		public bool Exists { get; set; } = true;
+		public bool RequiresTargetInspection => true;
 
 		public Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
 		{

@@ -27,6 +27,8 @@ public sealed class DuckDbDataWriter : BaseSqlDataWriter, IColumnarDataWriter
 	private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.DuckDbDialect();
 	public override ISqlDialect Dialect => _dialect;
 
+	public override bool RequiresTargetInspection => _options.Strategy != DuckDbWriteStrategy.Recreate;
+
 	protected override ITypeMapper GetTypeMapper() => _typeMapper;
 
 	public DuckDbDataWriter(string connectionString, DuckDbWriterOptions options, ILogger<DuckDbDataWriter> logger, ITypeMapper typeMapper) : base(connectionString)
@@ -289,42 +291,45 @@ public sealed class DuckDbDataWriter : BaseSqlDataWriter, IColumnarDataWriter
 
 		try
 		{
-			await Task.Run(() =>
+			using (batch)
 			{
-				var appender = (DuckDBAppender)_appender;
-				var rowCount = batch.Length;
-
-				for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+				await Task.Run(() =>
 				{
-					var row = appender.CreateRow();
+					var appender = (DuckDBAppender)_appender;
+					var rowCount = batch.Length;
 
-					for (int i = 0; i < _columnMapping.Length; i++)
+					for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
 					{
-						var sourceIndex = _columnMapping[i];
+						var row = appender.CreateRow();
 
-						if (sourceIndex == -1)
+						for (int i = 0; i < _columnMapping.Length; i++)
 						{
-							row.AppendNullValue();
-						}
-						else
-						{
-							var arrowColumn = batch.Column(sourceIndex);
-							var targetType = _targetTypes![i];
+							var sourceIndex = _columnMapping[i];
 
-							if (arrowColumn.IsNull(rowIndex))
+							if (sourceIndex == -1)
 							{
 								row.AppendNullValue();
 							}
 							else
 							{
-								// Using a fast path for common types
-								AppendArrowValue(row, arrowColumn, rowIndex, targetType);
+								var arrowColumn = batch.Column(sourceIndex);
+								var targetType = _targetTypes![i];
+
+								if (arrowColumn.IsNull(rowIndex))
+								{
+									row.AppendNullValue();
+								}
+								else
+								{
+									// Using a fast path for common types
+									AppendArrowValue(row, arrowColumn, rowIndex, targetType);
+								}
 							}
 						}
+						row.EndRow();
 					}
-					row.EndRow();
-				}
-			}, ct);
+				}, ct);
+			}
 		}
 		catch (Exception ex)
 		{

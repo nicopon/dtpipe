@@ -8,7 +8,7 @@ namespace DtPipe.Transformers.Columnar.Project;
 /// <summary>
 /// Selects (Project) or Drops specific columns.
 /// </summary>
-public class ProjectDataTransformer : IColumnarTransformer, IRequiresOptions<ProjectOptions>
+public class ProjectDataTransformer : BaseColumnarTransformer, IRequiresOptions<ProjectOptions>
 {
 	private readonly List<string>? _projectColumns; // Ordered list for projection
 	private readonly HashSet<string>? _dropColumns;  // Set for blacklist
@@ -19,7 +19,7 @@ public class ProjectDataTransformer : IColumnarTransformer, IRequiresOptions<Pro
 	private int[]? _outputToSourceIndex;
 	private string[]? _outputNames;
 
-	public bool CanProcessColumnar => true;
+	public override bool CanProcessColumnar => true;
 
 	public ProjectDataTransformer(ProjectOptions options)
 	{
@@ -49,7 +49,7 @@ public class ProjectDataTransformer : IColumnarTransformer, IRequiresOptions<Pro
 		}
 	}
 
-	public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
+	public override ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
 	{
 		// Build rename map from raw strings (validated here, not in constructor)
 		if (_rawRenames != null)
@@ -159,7 +159,7 @@ public class ProjectDataTransformer : IColumnarTransformer, IRequiresOptions<Pro
 		return new ValueTask<IReadOnlyList<PipeColumnInfo>>(newColumns);
 	}
 
-	public object?[]? Transform(object?[] row)
+	public override object?[]? Transform(object?[] row)
 	{
 		if (_outputToSourceIndex == null) return row;
 
@@ -179,7 +179,7 @@ public class ProjectDataTransformer : IColumnarTransformer, IRequiresOptions<Pro
 		return newRow;
 	}
 
-	public ValueTask<RecordBatch?> TransformBatchAsync(RecordBatch batch, CancellationToken ct = default)
+	protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)
 	{
 		if (_outputToSourceIndex == null) return new ValueTask<RecordBatch?>(batch);
 
@@ -188,13 +188,13 @@ public class ProjectDataTransformer : IColumnarTransformer, IRequiresOptions<Pro
 
 		for (int i = 0; i < _outputToSourceIndex.Length; i++)
 		{
-            var srcIndex = _outputToSourceIndex[i];
-            var oldField = batch.Schema.FieldsList[srcIndex];
-            var newField = oldField;
-            if (_outputNames != null)
-            {
-               newField = new Field(_outputNames[i], oldField.DataType, oldField.IsNullable, oldField.Metadata);
-            }
+			var srcIndex = _outputToSourceIndex[i];
+			var oldField = batch.Schema.FieldsList[srcIndex];
+			var newField = oldField;
+			if (_outputNames != null)
+			{
+				newField = new Field(_outputNames[i], oldField.DataType, oldField.IsNullable, oldField.Metadata);
+			}
 			fields.Add(newField);
 			arrays.Add(batch.Column(srcIndex));
 		}

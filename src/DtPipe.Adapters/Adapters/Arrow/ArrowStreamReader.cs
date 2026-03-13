@@ -4,6 +4,7 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using DtPipe.Core.Infrastructure.Arrow;
 
 namespace DtPipe.Adapters.Arrow;
 
@@ -19,6 +20,7 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
     private bool _isIpcFile;
 
 	public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
+	public Schema? Schema => _isIpcFile ? _arrowFileReader?.Schema : _arrowReader?.Schema;
 
 	public ArrowAdapterStreamReader(string path, ArrowReaderOptions options, ILogger? logger = null)
 	{
@@ -92,34 +94,11 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
     {
         return schema.FieldsList.Select(f => new PipeColumnInfo(
             f.Name,
-            MapType(f.DataType),
+            ArrowTypeMapper.GetClrType(f.DataType),
             f.IsNullable
         )).ToList();
     }
 
-    private Type MapType(Apache.Arrow.Types.IArrowType type)
-    {
-        return type.TypeId switch
-        {
-            Apache.Arrow.Types.ArrowTypeId.Boolean => typeof(bool),
-            Apache.Arrow.Types.ArrowTypeId.Int8 => typeof(sbyte),
-            Apache.Arrow.Types.ArrowTypeId.UInt8 => typeof(byte),
-            Apache.Arrow.Types.ArrowTypeId.Int16 => typeof(short),
-            Apache.Arrow.Types.ArrowTypeId.UInt16 => typeof(ushort),
-            Apache.Arrow.Types.ArrowTypeId.Int32 => typeof(int),
-            Apache.Arrow.Types.ArrowTypeId.UInt32 => typeof(uint),
-            Apache.Arrow.Types.ArrowTypeId.Int64 => typeof(long),
-            Apache.Arrow.Types.ArrowTypeId.UInt64 => typeof(ulong),
-            Apache.Arrow.Types.ArrowTypeId.Float => typeof(float),
-            Apache.Arrow.Types.ArrowTypeId.Double => typeof(double),
-            Apache.Arrow.Types.ArrowTypeId.String => typeof(string),
-            Apache.Arrow.Types.ArrowTypeId.Binary => typeof(byte[]),
-            Apache.Arrow.Types.ArrowTypeId.Timestamp => typeof(DateTimeOffset),
-            Apache.Arrow.Types.ArrowTypeId.Date32 => typeof(DateTime),
-            Apache.Arrow.Types.ArrowTypeId.Date64 => typeof(DateTime),
-            _ => typeof(string)
-        };
-    }
 
 	public async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(
 		int batchSize,
@@ -169,7 +148,7 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
             for (int colIdx = 0; colIdx < colCount; colIdx++)
             {
                 var column = batch.Column(colIdx);
-                row[colIdx] = GetValue(column, rowIdx);
+                row[colIdx] = ArrowTypeMapper.GetValue(column, rowIdx);
             }
 
             flatBatch[currentIndex++] = row;
@@ -188,25 +167,6 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
         }
     }
 
-    private object? GetValue(IArrowArray array, int index)
-    {
-        if (array.IsNull(index)) return null;
-
-        return array switch
-        {
-            StringArray s => s.GetString(index),
-            Int32Array i => i.GetValue(index),
-            Int64Array l => l.GetValue(index),
-            DoubleArray d => d.GetValue(index),
-            BooleanArray b => b.GetValue(index),
-            FloatArray f => f.GetValue(index),
-            TimestampArray t => t.GetTimestamp(index),
-            Date32Array d32 => d32.GetDateTime(index),
-            Date64Array d64 => d64.GetDateTime(index),
-            BinaryArray bin => bin.GetBytes(index).ToArray(),
-            _ => array.GetValue(index) // Fallback for other simple types
-        };
-    }
 
 	public async ValueTask DisposeAsync()
 	{
@@ -216,15 +176,4 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
 			_inputStream = null;
 		}
 	}
-}
-
-internal static class ArrowExtensions
-{
-    // Basic helper to get value from array if not handled explicitly
-    public static object? GetValue(this IArrowArray array, int index)
-    {
-         // This is a simplified fallback. Real implementation might need more depth.
-         var value = array.GetType().GetMethod("GetValue")?.Invoke(array, [index]);
-         return value;
-    }
 }

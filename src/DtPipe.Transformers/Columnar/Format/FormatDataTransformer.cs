@@ -8,7 +8,7 @@ using DtPipe.Core.Infrastructure.Arrow; // Added for ArrowTypeMapper
 
 namespace DtPipe.Transformers.Columnar.Format;
 
-public sealed partial class FormatDataTransformer : IColumnarTransformer, IRequiresOptions<DtPipe.Transformers.Columnar.Format.FormatOptions>
+public sealed partial class FormatDataTransformer : BaseColumnarTransformer, IRequiresOptions<DtPipe.Transformers.Columnar.Format.FormatOptions>
 {
 	private readonly Dictionary<string, string> _mappings = new(StringComparer.OrdinalIgnoreCase);
 	private readonly bool _skipNull;
@@ -17,7 +17,7 @@ public sealed partial class FormatDataTransformer : IColumnarTransformer, IRequi
 	private Dictionary<string, int>? _columnNameToIndex;
 	private int _realColumnCount;
 
-	public bool CanProcessColumnar { get; private set; }
+	public override bool CanProcessColumnar { get; protected set; }
 
 	// Unified pattern for {COLUMN} or {COLUMN:format}
 	[GeneratedRegex(@"\{([^{}:]+)(?::([^{}]+))?\}", RegexOptions.Compiled)]
@@ -40,7 +40,7 @@ public sealed partial class FormatDataTransformer : IColumnarTransformer, IRequi
 
 	public bool HasFormat => _mappings.Count > 0;
 
-	public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
+	public override ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
 	{
 		if (!HasFormat)
 		{
@@ -139,7 +139,7 @@ public sealed partial class FormatDataTransformer : IColumnarTransformer, IRequi
 
 	private Schema? _outputSchema;
 
-	public ValueTask<RecordBatch?> TransformBatchAsync(RecordBatch batch, CancellationToken ct = default)
+	protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)
 	{
 		if (!CanProcessColumnar || _processors == null || _outputSchema == null)
 			return new ValueTask<RecordBatch?>(batch);
@@ -224,7 +224,7 @@ public sealed partial class FormatDataTransformer : IColumnarTransformer, IRequi
 
 	private static IArrowType GetArrowType(Type type) => ArrowTypeMapper.GetArrowType(type);
 
-	public object?[]? Transform(object?[] row)
+	public override object?[]? Transform(object?[] row)
 	{
 		if (_generationOrder == null)
 		{

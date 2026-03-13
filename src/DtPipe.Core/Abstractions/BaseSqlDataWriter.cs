@@ -23,6 +23,8 @@ public abstract class BaseSqlDataWriter : IDataWriter, ISchemaInspector, IKeyVal
 		_connectionString = connectionString;
 	}
 
+	public abstract bool RequiresTargetInspection { get; }
+
 	#region ISchemaInspector Implementation
 	private TargetSchemaInfo? _cachedSchema;
 

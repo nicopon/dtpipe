@@ -83,8 +83,7 @@ dotnet publish src/DtPipe/DtPipe.csproj -c Release \
     -r "$RID" \
     --self-contained true \
     -p:PublishSingleFile=true \
-    -p:IncludeNativeLibrariesForSelfExtract=true \
-    -p:EnableCompressionInSingleFile=true \
+    -p:PublishSingleFile=true \
     -p:DebugType=none \
     -p:DebugSymbols=false \
     -o "$RELEASE_DIR"

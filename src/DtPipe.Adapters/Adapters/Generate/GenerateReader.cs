@@ -13,6 +13,7 @@ public partial class GenerateReader : IStreamReader, IColumnarStreamReader, IReq
 	private Schema? _arrowSchema;
 
 	public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
+	public Schema? Schema => _arrowSchema;
 
 	public GenerateReader(string config, string query, GenerateReaderOptions options)
 	{

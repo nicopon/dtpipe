@@ -21,7 +21,6 @@ public sealed class ArrowMemoryChannelDataWriter : IColumnarDataWriter
     private readonly string _alias;
     private readonly ILogger<ArrowMemoryChannelDataWriter> _logger;
 
-    public bool PrefersOwnershipTransfer => true;
 
     public ArrowMemoryChannelDataWriter(
         ChannelWriter<RecordBatch> writer,

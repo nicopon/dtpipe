@@ -35,11 +35,16 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
 
     public async ValueTask WriteRecordBatchAsync(RecordBatch batch, CancellationToken ct = default)
     {
-        if (_isIpcFile)
-            await _arrowFileWriter!.WriteRecordBatchAsync(batch, ct);
-        else
-            await _arrowStreamWriter!.WriteRecordBatchAsync(batch, ct);
+        using (batch)
+        {
+            if (_isIpcFile)
+                await _arrowFileWriter!.WriteRecordBatchAsync(batch, ct);
+            else
+                await _arrowStreamWriter!.WriteRecordBatchAsync(batch, ct);
+        }
     }
+
+    public bool RequiresTargetInspection => false;
 
 	public Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
 	{
@@ -58,7 +63,50 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
 			return Task.FromResult<TargetSchemaInfo?>(new TargetSchemaInfo([], false, null, null, null));
 		}
 
-		return Task.FromResult<TargetSchemaInfo?>(new TargetSchemaInfo([], true, null, new FileInfo(_path).Length, null));
+		try
+		{
+			using var fs = File.OpenRead(_path);
+
+			// Try reading as file first (IPC file format)
+			if (_path.EndsWith(".arrow", StringComparison.OrdinalIgnoreCase) || _path.EndsWith(".arrowfile", StringComparison.OrdinalIgnoreCase))
+			{
+				try
+				{
+					using var reader = new ArrowFileReader(fs);
+					var schema = reader.Schema;
+					var columns = MapArrowSchema(schema);
+					return Task.FromResult<TargetSchemaInfo?>(new TargetSchemaInfo(columns, true, null, fs.Length, null));
+				}
+				catch { /* Fallback to stream */ }
+			}
+
+			// Try as stream (IPC stream format)
+			fs.Position = 0;
+			using var streamReader = new ArrowStreamReader(fs);
+			var streamSchema = streamReader.Schema;
+			var streamColumns = MapArrowSchema(streamSchema);
+			return Task.FromResult<TargetSchemaInfo?>(new TargetSchemaInfo(streamColumns, true, null, fs.Length, null));
+		}
+		catch
+		{
+			return Task.FromResult<TargetSchemaInfo?>(new TargetSchemaInfo([], true, null, new FileInfo(_path).Length, null));
+		}
+	}
+
+	private IReadOnlyList<TargetColumnInfo> MapArrowSchema(Schema schema)
+	{
+		var columns = new List<TargetColumnInfo>();
+		foreach (var field in schema.FieldsList)
+		{
+			var clrType = ArrowTypeMapper.GetClrType(field.DataType);
+			columns.Add(new TargetColumnInfo(
+				field.Name,
+				field.DataType.Name,
+				clrType,
+				field.IsNullable,
+				false, false, null, null, null));
+		}
+		return columns;
 	}
 
 	public ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)

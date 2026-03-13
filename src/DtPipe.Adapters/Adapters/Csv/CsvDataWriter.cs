@@ -44,6 +44,8 @@ public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvWriterOptio
 		_options = options;
 	}
 
+	public bool RequiresTargetInspection => false;
+
 	public async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
 	{
 		if (_outputPath == "-")

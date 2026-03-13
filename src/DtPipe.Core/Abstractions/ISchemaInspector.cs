@@ -9,6 +9,12 @@ using DtPipe.Core.Models;
 public interface ISchemaInspector
 {
 	/// <summary>
+	/// Gets a value indicating whether the target schema should be inspected.
+	/// Typically true for database appends/merges, false for file overwrites.
+	/// </summary>
+	bool RequiresTargetInspection { get; }
+
+	/// <summary>
 	/// Inspects the target schema (table, file).
 	/// Returns null if the target does not exist yet.
 	/// </summary>

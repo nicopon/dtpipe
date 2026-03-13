@@ -9,7 +9,7 @@ namespace DtPipe.Transformers.Columnar.Mask;
 /// <summary>
 /// Masks specified columns using a pattern. # = keep original, any other char = replacement.
 /// </summary>
-public class MaskDataTransformer : IColumnarTransformer, IRequiresOptions<DtPipe.Transformers.Columnar.Mask.MaskOptions>
+public class MaskDataTransformer : BaseColumnarTransformer, IRequiresOptions<DtPipe.Transformers.Columnar.Mask.MaskOptions>
 {
 	private const char KeepChar = '#';
 
@@ -17,7 +17,7 @@ public class MaskDataTransformer : IColumnarTransformer, IRequiresOptions<DtPipe
 	private readonly bool _skipNull;
 	private Dictionary<int, string>? _indexPatterns;
 
-	public bool CanProcessColumnar => true;
+	public override bool CanProcessColumnar => true;
 
 	public MaskDataTransformer(DtPipe.Transformers.Columnar.Mask.MaskOptions options)
 	{
@@ -45,7 +45,7 @@ public class MaskDataTransformer : IColumnarTransformer, IRequiresOptions<DtPipe
 		}
 	}
 
-	public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
+	public override ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
 	{
 		if (_columnPatterns.Count == 0)
 		{
@@ -71,7 +71,7 @@ public class MaskDataTransformer : IColumnarTransformer, IRequiresOptions<DtPipe
 		return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
 	}
 
-	public object?[]? Transform(object?[] row)
+	public override object?[]? Transform(object?[] row)
 	{
 		if (_indexPatterns == null)
 		{
@@ -102,7 +102,7 @@ public class MaskDataTransformer : IColumnarTransformer, IRequiresOptions<DtPipe
 		return row;
 	}
 
-	public ValueTask<RecordBatch?> TransformBatchAsync(RecordBatch batch, CancellationToken ct = default)
+	protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)
 	{
 		if (_indexPatterns == null) return new ValueTask<RecordBatch?>(batch);
 

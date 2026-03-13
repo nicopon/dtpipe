@@ -9,6 +9,33 @@ namespace DtPipe.Core.Infrastructure.Arrow;
 /// </summary>
 public static class ArrowTypeMapper
 {
+    public static Type GetClrType(IArrowType type)
+    {
+        return type.TypeId switch
+        {
+            ArrowTypeId.Boolean => typeof(bool),
+            ArrowTypeId.Int8 => typeof(sbyte),
+            ArrowTypeId.UInt8 => typeof(byte),
+            ArrowTypeId.Int16 => typeof(short),
+            ArrowTypeId.UInt16 => typeof(ushort),
+            ArrowTypeId.Int32 => typeof(int),
+            ArrowTypeId.UInt32 => typeof(uint),
+            ArrowTypeId.Int64 => typeof(long),
+            ArrowTypeId.UInt64 => typeof(ulong),
+            ArrowTypeId.Float => typeof(float),
+            ArrowTypeId.Double => typeof(double),
+            ArrowTypeId.String => typeof(string),
+            ArrowTypeId.Binary => typeof(byte[]),
+            ArrowTypeId.Timestamp => typeof(DateTimeOffset),
+            ArrowTypeId.Date32 => typeof(DateTime),
+            ArrowTypeId.Date64 => typeof(DateTime),
+            ArrowTypeId.Decimal128 => typeof(decimal),
+            ArrowTypeId.Decimal256 => typeof(decimal),
+            ArrowTypeId.Duration => typeof(TimeSpan),
+            _ => typeof(string)
+        };
+    }
+
     public static IArrowType GetArrowType(Type clrType)
     {
         var underlyingType = Nullable.GetUnderlyingType(clrType) ?? clrType;

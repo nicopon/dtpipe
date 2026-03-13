@@ -29,6 +29,8 @@ public sealed class JsonLDataWriter : IDataWriter, IRequiresOptions<JsonLWriterO
 		_options = options;
 	}
 
+	public bool RequiresTargetInspection => false;
+
 	public Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
 	{
 		if (_outputPath == "-")
@@ -46,9 +48,50 @@ public sealed class JsonLDataWriter : IDataWriter, IRequiresOptions<JsonLWriterO
 			return Task.FromResult<TargetSchemaInfo?>(new TargetSchemaInfo([], false, null, null, null));
 		}
 
-		// For JsonL, we could try to infer from existing file if appending,
-		// but usually we just overwrite or recreate.
-		return Task.FromResult<TargetSchemaInfo?>(new TargetSchemaInfo([], true, null, new FileInfo(_outputPath).Length, null));
+		try
+		{
+			using var fs = File.OpenRead(_outputPath);
+			using var reader = new StreamReader(fs);
+			var firstLine = reader.ReadLine();
+
+			if (string.IsNullOrWhiteSpace(firstLine))
+			{
+				return Task.FromResult<TargetSchemaInfo?>(new TargetSchemaInfo([], true, 0, fs.Length, null));
+			}
+
+			// Try to parse the first line as a JSON object to get keys
+			var json = JsonDocument.Parse(firstLine);
+			var columns = new List<TargetColumnInfo>();
+
+			if (json.RootElement.ValueKind == JsonValueKind.Object)
+			{
+				foreach (var prop in json.RootElement.EnumerateObject())
+				{
+					// Infer type from the first row's value
+					var clrType = prop.Value.ValueKind switch
+					{
+						JsonValueKind.Number => typeof(double),
+						JsonValueKind.True => typeof(bool),
+						JsonValueKind.False => typeof(bool),
+						JsonValueKind.String => typeof(string),
+						_ => typeof(string)
+					};
+
+					columns.Add(new TargetColumnInfo(
+						prop.Name,
+						prop.Value.ValueKind.ToString().ToUpperInvariant(),
+						clrType,
+						true,
+						false, false, null, null, null));
+				}
+			}
+
+			return Task.FromResult<TargetSchemaInfo?>(new TargetSchemaInfo(columns, true, null, fs.Length, null));
+		}
+		catch
+		{
+			return Task.FromResult<TargetSchemaInfo?>(new TargetSchemaInfo([], true, null, new FileInfo(_outputPath).Length, null));
+		}
 	}
 
 	public ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)

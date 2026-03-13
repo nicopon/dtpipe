@@ -15,6 +15,7 @@ public class DryRunKeyValidationTests
 		public ISqlDialect Dialect { get; set; } = null!;
 		public List<PipeColumnInfo> TargetColumns { get; set; } = new();
 		public List<string>? TargetPKs { get; set; } = null;
+		public bool RequiresTargetInspection => true;
 
 		public Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
 		{

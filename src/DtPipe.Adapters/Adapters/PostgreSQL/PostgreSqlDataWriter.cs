@@ -27,6 +27,8 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 	private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.PostgreSqlDialect();
 	public override ISqlDialect Dialect => _dialect;
 
+	public override bool RequiresTargetInspection => _options.Strategy != PostgreSqlWriteStrategy.Recreate;
+
 	protected override ITypeMapper GetTypeMapper() => _typeMapper;
 
 	public PostgreSqlDataWriter(string connectionString, PostgreSqlWriterOptions options, ILogger<PostgreSqlDataWriter> logger, ITypeMapper typeMapper)

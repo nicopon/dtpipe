@@ -21,6 +21,7 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
 	private readonly SemaphoreSlim _semaphore = new(1, 1);
 
 	public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
+	public Schema? Schema => Columns != null ? DtPipe.Core.Infrastructure.Arrow.ArrowSchemaFactory.Create(Columns) : null;
 
 	// DDL/DML keywords to reject
 	// Block destructive commands.

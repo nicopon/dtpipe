@@ -23,6 +23,8 @@ public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, 
 	private IReadOnlyList<PipeColumnInfo>? _columns;
 	private DataField[]? _dataFields;
 
+	public bool RequiresTargetInspection => false;
+
 	public async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
 	{
 		if (_outputPath == "-")
@@ -142,15 +144,18 @@ public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, 
 		if (_writer is null || _dataFields is null)
 			throw new InvalidOperationException("Call InitializeAsync first.");
 
-		// Create row group for this batch
-		using var rowGroup = _writer.CreateRowGroup();
-
-		for (int i = 0; i < batch.ColumnCount; i++)
+		using (batch)
 		{
-			var arrowArray = batch.Column(i);
-			var dataField = _dataFields[i];
-			var dataColumn = ArrowToParquetConverter.Convert(arrowArray, dataField);
-			await rowGroup.WriteColumnAsync(dataColumn, ct);
+			// Create row group for this batch
+			using var rowGroup = _writer.CreateRowGroup();
+
+			for (int i = 0; i < batch.ColumnCount; i++)
+			{
+				var arrowArray = batch.Column(i);
+				var dataField = _dataFields[i];
+				var dataColumn = ArrowToParquetConverter.Convert(arrowArray, dataField);
+				await rowGroup.WriteColumnAsync(dataColumn, ct);
+			}
 		}
 	}
 

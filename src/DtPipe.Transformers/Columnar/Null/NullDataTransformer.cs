@@ -9,19 +9,19 @@ namespace DtPipe.Transformers.Columnar.Null;
 /// <summary>
 /// Sets specified columns to null. Priority: 10 (First).
 /// </summary>
-public class NullDataTransformer : IColumnarTransformer, IRequiresOptions<DtPipe.Transformers.Columnar.Null.NullOptions>
+public class NullDataTransformer : BaseColumnarTransformer, IRequiresOptions<DtPipe.Transformers.Columnar.Null.NullOptions>
 {
 	private readonly HashSet<string> _nullColumns;
 	private int[]? _targetIndices;
 
-	public bool CanProcessColumnar => true;
+	public override bool CanProcessColumnar => true;
 
 	public NullDataTransformer(DtPipe.Transformers.Columnar.Null.NullOptions options)
 	{
 		_nullColumns = new HashSet<string>(options.Columns.Select(c => c.Trim()), StringComparer.OrdinalIgnoreCase);
 	}
 
-	public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
+	public override ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
 	{
 		if (_nullColumns.Count == 0)
 		{
@@ -42,7 +42,7 @@ public class NullDataTransformer : IColumnarTransformer, IRequiresOptions<DtPipe
 		return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
 	}
 
-	public object?[]? Transform(object?[] row)
+	public override object?[]? Transform(object?[] row)
 	{
 		if (_targetIndices == null)
 		{
@@ -57,7 +57,7 @@ public class NullDataTransformer : IColumnarTransformer, IRequiresOptions<DtPipe
 		return row;
 	}
 
-	public ValueTask<RecordBatch?> TransformBatchAsync(RecordBatch batch, CancellationToken ct = default)
+	protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)
 	{
 		if (_targetIndices == null) return new ValueTask<RecordBatch?>(batch);
 

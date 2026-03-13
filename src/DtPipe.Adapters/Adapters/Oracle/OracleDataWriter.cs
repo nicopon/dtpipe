@@ -29,6 +29,8 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
 
     public override ISqlDialect Dialect => new DtPipe.Core.Dialects.OracleDialect();
 
+	public override bool RequiresTargetInspection => _options.Strategy != OracleWriteStrategy.Recreate;
+
 	protected override ITypeMapper GetTypeMapper() => _typeMapper;
 
     public OracleDataWriter(string connectionString, OracleWriterOptions options, ILogger<OracleDataWriter> logger, ITypeMapper typeMapper)

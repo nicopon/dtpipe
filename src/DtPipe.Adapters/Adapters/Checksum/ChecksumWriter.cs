@@ -44,10 +44,13 @@ public sealed class ChecksumDataWriter : IDataWriter, IColumnarDataWriter, IRequ
 
 	public ValueTask WriteRecordBatchAsync(RecordBatch batch, CancellationToken ct = default)
 	{
-		// For now, convert to rows for reuse of UpdateHash.
-		// Optimization: iterate columns directly.
-		var rows = ConvertRecordBatchToRows(batch);
-		UpdateHash(rows);
+		using (batch)
+		{
+			// For now, convert to rows for reuse of UpdateHash.
+			// Optimization: iterate columns directly.
+			var rows = ConvertRecordBatchToRows(batch);
+			UpdateHash(rows);
+		}
 		return ValueTask.CompletedTask;
 	}
 

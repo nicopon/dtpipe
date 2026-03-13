@@ -71,6 +71,24 @@ public static class CliDagParser
                 hasSeenInputInCurrentBranch = true;
                 currentBranchArgs.Add(arg);
             }
+            else if (arg.Equals("--main", StringComparison.OrdinalIgnoreCase) || arg.Equals("--ref", StringComparison.OrdinalIgnoreCase))
+            {
+                // Split on --main/--ref ONLY IF we haven't seen an XStreamer flag (-x) yet.
+                // If we have seen -x, these are just options for the current xstreamer branch.
+                if (!isCurrentBranchXStreamer && hasSeenInputInCurrentBranch)
+                {
+                    if (currentBranchArgs.Count > 0)
+                    {
+                        var branch = CreateBranch(currentBranchArgs, isCurrentBranchXStreamer, ref branchCounter, defaultXStreamer, branches.LastOrDefault()?.Alias);
+                        branches.Add(branch);
+                        currentBranchArgs.Clear();
+                    }
+                    hasSeenInputInCurrentBranch = false; // Reset as this is a new branch
+                }
+                
+                if (!isCurrentBranchXStreamer) hasSeenInputInCurrentBranch = true;
+                currentBranchArgs.Add(arg);
+            }
             else
             {
                 currentBranchArgs.Add(arg);

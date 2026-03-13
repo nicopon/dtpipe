@@ -59,6 +59,28 @@ public class MemoryChannelRegistry : IMemoryChannelRegistry
             found = true;
         }
 
+        // Propagate to fan-out sub-channels
+        var fanPrefix = branchAlias + "__fan_";
+        foreach (var key in _channels.Keys)
+        {
+            if (key.StartsWith(fanPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                var fanData = _channels[key];
+                _channels[key] = (fanData.Channel, columns);
+                if (_columnTcs.TryGetValue(key, out var tcs)) tcs.TrySetResult(columns);
+            }
+        }
+        foreach (var key in _arrowChannels.Keys)
+        {
+            if (key.StartsWith(fanPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                var fanData = _arrowChannels[key];
+                var schema = BuildArrowSchema(columns);
+                _arrowChannels[key] = (fanData.Channel, schema);
+                if (_arrowSchemaTcs.TryGetValue(key, out var tcs)) tcs.TrySetResult(schema);
+            }
+        }
+
         if (!found)
         {
             throw new InvalidOperationException($"Cannot update columns: channel '{branchAlias}' is not registered.");
@@ -115,6 +137,7 @@ public class MemoryChannelRegistry : IMemoryChannelRegistry
 
     public void UpdateArrowChannelSchema(string branchAlias, Schema schema)
     {
+        bool found = false;
         if (_arrowChannels.TryGetValue(branchAlias, out var channelData))
         {
             _arrowChannels[branchAlias] = (channelData.Channel, schema);
@@ -122,8 +145,22 @@ public class MemoryChannelRegistry : IMemoryChannelRegistry
             {
                 tcs.TrySetResult(schema);
             }
+            found = true;
         }
-        else
+        
+        // Propagate to fan-out sub-channels
+        var fanPrefix = branchAlias + "__fan_";
+        foreach (var key in _arrowChannels.Keys)
+        {
+            if (key.StartsWith(fanPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                var fanData = _arrowChannels[key];
+                _arrowChannels[key] = (fanData.Channel, schema);
+                if (_arrowSchemaTcs.TryGetValue(key, out var tcs)) tcs.TrySetResult(schema);
+            }
+        }
+
+        if (!found)
         {
             throw new InvalidOperationException($"Cannot update Arrow schema: channel '{branchAlias}' is not registered.");
         }

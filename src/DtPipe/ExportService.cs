@@ -141,6 +141,19 @@ public class ExportService
 			{
 				try
 				{
+					if (!string.IsNullOrEmpty(alias) && _channelRegistry != null && _channelRegistry.ContainsChannel(alias))
+					{
+						// Update registry with real schema and column info
+						if (currentSchema != null)
+						{
+							_channelRegistry.UpdateChannelColumns(alias, currentSchema);
+						}
+						
+						if (reader is IColumnarStreamReader cr && cr.Schema != null)
+						{
+							_channelRegistry.UpdateArrowChannelSchema(alias, cr.Schema);
+						}
+					}
 					writerForInspection = writerFactory.Create(registry);
 				}
 				catch (Exception ex)
@@ -164,13 +177,13 @@ public class ExportService
 		var exportableSchema = currentSchema ?? throw new InvalidOperationException("Exportable schema is null.");
 		await using var writer = writerFactory.Create(registry);
 
+		// Schema Validation
+		await retryPolicy.ExecuteAsync(() => _schemaValidator.ValidateAndMigrateAsync(writer, exportableSchema, options, ct), ct);
+
 		// Execute Pre-Hook
 		await _hookExecutor.ExecuteAsync(writer, "Pre-Hook", options.PreExec, ct);
 
 		await retryPolicy.ExecuteValueAsync(() => writer.InitializeAsync(exportableSchema, ct), ct);
-
-		// Schema Validation
-		await retryPolicy.ExecuteAsync(() => _schemaValidator.ValidateAndMigrateAsync(writer, exportableSchema, options, ct), ct);
 
 		// Use Observer to create Progress
 		var transformerNamesList = pipeline.Select(t => t.GetType().Name.Replace("DataTransformer", ""));

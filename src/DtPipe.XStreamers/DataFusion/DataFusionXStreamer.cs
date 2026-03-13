@@ -13,7 +13,7 @@ using System.Threading.Channels;
 
 namespace DtPipe.XStreamers.DataFusion;
 
-public sealed class DataFusionXStreamer : IStreamReader
+public sealed class DataFusionXStreamer : IColumnarStreamReader
 {
     private readonly IMemoryChannelRegistry _registry;
     private readonly string _query;
@@ -31,6 +31,7 @@ public sealed class DataFusionXStreamer : IStreamReader
     private readonly List<IArrowArrayStream> _activeStreams = new();
 
     public IReadOnlyList<PipeColumnInfo>? Columns => _columns;
+    public Schema? Schema => _resultSchema;
 
     public DataFusionXStreamer(
         IMemoryChannelRegistry registry,
@@ -87,7 +88,7 @@ public sealed class DataFusionXStreamer : IStreamReader
             InspectSchema();
 
             _columns = _resultSchema!.FieldsList
-                .Select(f => new PipeColumnInfo(f.Name, MapArrowType(f.DataType), f.IsNullable))
+                .Select(f => new PipeColumnInfo(f.Name, ArrowTypeMapper.GetClrType(f.DataType), f.IsNullable))
                 .ToList();
         }
         catch (Exception ex)
@@ -201,7 +202,7 @@ public sealed class DataFusionXStreamer : IStreamReader
         }
     }
 
-    public async IAsyncEnumerable<RecordBatch> ReadColumnarBatchesAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    public async IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
         if (_ctx == nint.Zero) yield break;
 
@@ -262,7 +263,7 @@ public sealed class DataFusionXStreamer : IStreamReader
     public async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(
         int batchSize, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
-        await foreach (var recordBatch in ReadColumnarBatchesAsync(ct))
+        await foreach (var recordBatch in ReadRecordBatchesAsync(ct))
         {
             using (recordBatch)
             {
@@ -285,18 +286,6 @@ public sealed class DataFusionXStreamer : IStreamReader
 		}
 		return rows;
 	}
-
-    private static Type MapArrowType(Apache.Arrow.Types.IArrowType t) => t.TypeId switch
-    {
-        Apache.Arrow.Types.ArrowTypeId.Int64   => typeof(long),
-        Apache.Arrow.Types.ArrowTypeId.Int32   => typeof(int),
-        Apache.Arrow.Types.ArrowTypeId.Int16   => typeof(short),
-        Apache.Arrow.Types.ArrowTypeId.Double  => typeof(double),
-        Apache.Arrow.Types.ArrowTypeId.Float   => typeof(float),
-        Apache.Arrow.Types.ArrowTypeId.Boolean => typeof(bool),
-        Apache.Arrow.Types.ArrowTypeId.String  => typeof(string),
-        _                                      => typeof(string)
-    };
 
     public async ValueTask DisposeAsync()
     {

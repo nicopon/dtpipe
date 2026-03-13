@@ -19,6 +19,8 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 	// Explicit backing field for dialect to implement abstract property
 	private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.SqlServerDialect();
 	public override ISqlDialect Dialect => _dialect;
+
+	public override bool RequiresTargetInspection => _options.Strategy != SqlServerWriteStrategy.Recreate;
 	private Type[]? _targetTypes;
 	private string[]? _targetColumnNames;
 

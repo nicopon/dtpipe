@@ -19,6 +19,7 @@ public class ParquetStreamReader : IColumnarStreamReader
 	private bool _isReading;
 
 	public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
+	public Schema? Schema { get; private set; }
 
 	public ParquetStreamReader(string filePath, ILogger? logger = null)
 	{

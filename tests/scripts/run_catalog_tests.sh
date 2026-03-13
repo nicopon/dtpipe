@@ -3,8 +3,8 @@
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ARTIFACTS_DIR="$SCRIPT_DIR/artifacts"
-DTPIPE="dotnet run --project $SCRIPT_DIR/../../src/DtPipe/DtPipe.csproj --"
-LOG_FILE="$SCRIPT_DIR/test_run.log"
+DTPIPE="$SCRIPT_DIR/../../dist/release/dtpipe"
+LOG_FILE="$ARTIFACTS_DIR/run_catalog_tests.log"
 
 # Cleanup previous logs
 rm -f "$LOG_FILE"

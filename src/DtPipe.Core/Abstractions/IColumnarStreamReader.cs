@@ -11,4 +11,9 @@ public interface IColumnarStreamReader : IStreamReader
     /// Reads data as a stream of Arrow RecordBatches.
     /// </summary>
     IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets the Arrow schema of the stream.
+    /// </summary>
+    Schema? Schema { get; }
 }

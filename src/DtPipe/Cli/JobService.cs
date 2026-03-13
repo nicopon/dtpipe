@@ -150,7 +150,12 @@ public class JobService
 				Rename = opts.Rename,
 				Drop = opts.Drop,
 				Throttle = opts.Throttle,
-				IgnoreNulls = opts.IgnoreNulls
+				IgnoreNulls = opts.IgnoreNulls,
+				From = opts.From,
+				Main = opts.Main,
+				Ref = opts.Ref,
+				SrcMain = opts.SrcMain,
+				SrcRef = opts.SrcRef
 			};
 
 			Dictionary<string, JobDefinition> jobs;
@@ -202,11 +207,17 @@ public class JobService
 				dagDefinition = CliDagParser.Parse(rawArgs, defaultXStreamer)!;
 				if (dagDefinition.IsDag)
 				{
+					if (Environment.GetEnvironmentVariable("DEBUG") == "1")
+						Console.Error.WriteLine($"[DEBUG] Detected DAG with {dagDefinition.Branches.Count} branches");
+
 					jobs = new Dictionary<string, JobDefinition>();
 					var factoryList = _contributors.OfType<IDataTransformerFactory>().ToList();
 
 					foreach (var branch in dagDefinition.Branches)
 					{
+						if (Environment.GetEnvironmentVariable("DEBUG") == "1")
+							Console.Error.WriteLine($"[DEBUG] Parsing branch '{branch.Alias}' with args: {string.Join(" ", branch.Arguments)}");
+
 						var branchPr = rootCommand.Parse(branch.Arguments);
 						var (branchJobs, branchJec) = RawJobBuilder.Build(branchPr, cliJobOptions);
 						if (branchJec != 0) { Environment.ExitCode = branchJec; return; }

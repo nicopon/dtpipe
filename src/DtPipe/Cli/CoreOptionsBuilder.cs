@@ -69,7 +69,7 @@ internal static class CoreOptionsBuilder
         inputOption.Aliases.Add("-i");
         inputOption.CompletionSources.Add(ctx => GetInputSuggestions(ctx, readerFactories));
 
-        var queryOption = new Option<string>("--query") { Description = "SQL query to execute (SELECT only)" };
+        var queryOption = new Option<string[]>("--query") { Description = "SQL query to execute (SELECT only)", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
         queryOption.Aliases.Add("-q");
 
         var outputOption = new Option<string[]>("--output")
@@ -80,14 +80,11 @@ internal static class CoreOptionsBuilder
         outputOption.Aliases.Add("-o");
         outputOption.CompletionSources.Add(ctx => GetOutputSuggestions(ctx, writerFactories));
 
-        var connectionTimeoutOption = new Option<int>("--connection-timeout") { Description = "Connection timeout in seconds" };
-        connectionTimeoutOption.DefaultValueFactory = _ => 10;
+        var connectionTimeoutOption = new Option<int[]>("--connection-timeout") { Description = "Connection timeout in seconds", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
 
-        var queryTimeoutOption = new Option<int>("--query-timeout") { Description = "Query timeout in seconds (0 = no timeout)" };
-        queryTimeoutOption.DefaultValueFactory = _ => 0;
+        var queryTimeoutOption = new Option<int[]>("--query-timeout") { Description = "Query timeout in seconds (0 = no timeout)", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
 
-        var batchSizeOption = new Option<int>("--batch-size") { Description = "Rows per output batch" };
-        batchSizeOption.DefaultValueFactory = _ => 50_000;
+        var batchSizeOption = new Option<int[]>("--batch-size") { Description = "Rows per output batch", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
         batchSizeOption.Aliases.Add("-b");
 
         var unsafeQueryOption = new Option<bool>("--unsafe-query") { Description = "Bypass SQL validation" };
@@ -99,14 +96,12 @@ internal static class CoreOptionsBuilder
         var noStatsOption = new Option<bool>("--no-stats") { Description = "Disable progress bars and stats" };
         noStatsOption.DefaultValueFactory = _ => false;
 
-        var limitOption = new Option<int>("--limit") { Description = "Max rows (0 = unlimited)" };
-        limitOption.DefaultValueFactory = _ => 0;
+        var limitOption = new Option<int[]>("--limit") { Description = "Max rows (0 = unlimited)", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
 
-        var samplingRateOption = new Option<double>("--sampling-rate") { Description = "Sampling probability (0.0-1.0)" };
-        samplingRateOption.DefaultValueFactory = _ => 1.0;
+        var samplingRateOption = new Option<double[]>("--sampling-rate") { Description = "Sampling probability (0.0-1.0)", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
         samplingRateOption.Aliases.Add("--sample-rate"); // Hidden alias support for backward compatibility
 
-        var samplingSeedOption = new Option<int?>("--sampling-seed") { Description = "Seed for sampling (for reproducibility)" };
+        var samplingSeedOption = new Option<int?[]>("--sampling-seed") { Description = "Seed for sampling (for reproducibility)", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
         samplingSeedOption.Aliases.Add("--sample-seed");
 
         var jobOption = new Option<string?>("--job") { Description = "Path to YAML job file" };
@@ -120,26 +115,24 @@ internal static class CoreOptionsBuilder
         var onErrorExecOption = new Option<string>("--on-error-exec") { Description = "SQL/Command ON ERROR" };
         var finallyExecOption = new Option<string>("--finally-exec") { Description = "SQL/Command ALWAYS" };
 
-        var strategyOption = new Option<string>("--strategy") { Description = "Write strategy (Append, Truncate, Recreate, Upsert, Ignore)" };
+        var strategyOption = new Option<string[]>("--strategy") { Description = "Write strategy (Append, Truncate, Recreate, Upsert, Ignore)", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
         strategyOption.Aliases.Add("-s");
         strategyOption.CompletionSources.Add("Append", "Truncate", "Recreate", "Upsert", "Ignore");
 
-        var insertModeOption = new Option<string>("--insert-mode") { Description = "Insert mode (Standard, Bulk)" };
+        var insertModeOption = new Option<string[]>("--insert-mode") { Description = "Insert mode (Standard, Bulk)", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
         insertModeOption.CompletionSources.Add("Standard", "Bulk");
-        var tableOption = new Option<string>("--table") { Description = "Target table name" };
+        var tableOption = new Option<string[]>("--table") { Description = "Target table name", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
         tableOption.Aliases.Add("-t");
 
-        var strictSchemaOption = new Option<bool?>("--strict-schema") { Description = "Abort if schema errors found" };
-        var noSchemaValidationOption = new Option<bool?>("--no-schema-validation") { Description = "Disable schema check" };
+        var strictSchemaOption = new Option<bool?[]>("--strict-schema") { Description = "Abort if schema errors found", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
+        var noSchemaValidationOption = new Option<bool?[]>("--no-schema-validation") { Description = "Disable schema check", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
 
-        var metricsPathOption = new Option<string?>("--metrics-path") { Description = "Path to structured metrics JSON output" };
-        var autoMigrateOption = new Option<bool?>("--auto-migrate") { Description = "Automatically add missing columns to target table" };
+        var metricsPathOption = new Option<string[]>("--metrics-path") { Description = "Path to structured metrics JSON output", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
+        var autoMigrateOption = new Option<bool?[]>("--auto-migrate") { Description = "Automatically add missing columns to target table", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
 
-        var maxRetriesOption = new Option<int>("--max-retries") { Description = "Max retries for transient errors" };
-        maxRetriesOption.DefaultValueFactory = _ => 3;
+        var maxRetriesOption = new Option<int[]>("--max-retries") { Description = "Max retries for transient errors", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
 
-        var retryDelayMsOption = new Option<int>("--retry-delay-ms") { Description = "Initial retry delay in ms" };
-        retryDelayMsOption.DefaultValueFactory = _ => 1000;
+        var retryDelayMsOption = new Option<int[]>("--retry-delay-ms") { Description = "Initial retry delay in ms", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
 
         // DAG Options
         var xstreamerOption = new Option<string[]>("--xstreamer")
@@ -155,7 +148,7 @@ internal static class CoreOptionsBuilder
 
         var renameOption = new Option<string[]>("--rename") { Description = "Rename columns (Old:New). repeatable.", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
         var dropOption = new Option<string[]>("--drop") { Description = "Drop columns. repeatable.", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
-        var throttleOption = new Option<int>("--throttle") { Description = "Throttle speed (rows/sec)" };
+        var throttleOption = new Option<int[]>("--throttle") { Description = "Throttle speed (rows/sec)", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
         var ignoreNullsOption = new Option<bool>("--ignore-nulls") { Description = "Skip null values in specific transformations" };
 
         var mainOption = new Option<string[]>("--main") { Description = "Main source alias for XStreamer (streaming side of JOIN)", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
@@ -310,17 +303,17 @@ internal static class CoreOptionsBuilder
 
 public record CoreCliOptions(
     Option<string[]> Input,
-    Option<string> Query,
+    Option<string[]> Query,
     Option<string[]> Output,
-    Option<int> ConnectionTimeout,
-    Option<int> QueryTimeout,
-    Option<int> BatchSize,
+    Option<int[]> ConnectionTimeout,
+    Option<int[]> QueryTimeout,
+    Option<int[]> BatchSize,
     Option<bool> UnsafeQuery,
     Option<int> DryRun,
     Option<bool> NoStats,
-    Option<int> Limit,
-    Option<double> SamplingRate,
-    Option<int?> SamplingSeed,
+    Option<int[]> Limit,
+    Option<double[]> SamplingRate,
+    Option<int?[]> SamplingSeed,
     Option<string> Key,
     Option<string?> Job,
     Option<string?> ExportJob,
@@ -329,20 +322,20 @@ public record CoreCliOptions(
     Option<string> PostExec,
     Option<string> OnErrorExec,
     Option<string> FinallyExec,
-    Option<string> Strategy,
-    Option<string> InsertMode,
-    Option<string> Table,
-    Option<int> MaxRetries,
-    Option<int> RetryDelayMs,
-    Option<bool?> StrictSchema,
-    Option<bool?> NoSchemaValidation,
-    Option<string?> MetricsPath,
-    Option<bool?> AutoMigrate,
+    Option<string[]> Strategy,
+    Option<string[]> InsertMode,
+    Option<string[]> Table,
+    Option<int[]> MaxRetries,
+    Option<int[]> RetryDelayMs,
+    Option<bool?[]> StrictSchema,
+    Option<bool?[]> NoSchemaValidation,
+    Option<string[]> MetricsPath,
+    Option<bool?[]> AutoMigrate,
     Option<string[]> Xstreamer,
     Option<string[]> Alias,
     Option<string[]> Rename,
     Option<string[]> Drop,
-    Option<int> Throttle,
+    Option<int[]> Throttle,
     Option<bool> IgnoreNulls,
     Option<string[]> Main,
     Option<string[]> Ref,

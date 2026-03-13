@@ -78,8 +78,15 @@ public class DagOrchestrator : IDagOrchestrator
 
         foreach (var branch in dag.Branches)
         {
-            if (!string.IsNullOrEmpty(branch.FromAlias))
-                fromConsumerCounts[branch.FromAlias] = fromConsumerCounts.GetValueOrDefault(branch.FromAlias) + 1;
+            var inputs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrEmpty(branch.FromAlias)) inputs.Add(branch.FromAlias);
+            if (!string.IsNullOrEmpty(branch.MainAlias)) inputs.Add(branch.MainAlias);
+            foreach (var r in branch.RefAliases) inputs.Add(r);
+
+            foreach (var input in inputs)
+            {
+                fromConsumerCounts[input] = fromConsumerCounts.GetValueOrDefault(input) + 1;
+            }
         }
 
         foreach (var (alias, count) in fromConsumerCounts.Where(kv => kv.Value > 1))
@@ -118,23 +125,67 @@ public class DagOrchestrator : IDagOrchestrator
 
         try
         {
+            // 2.a Pre-register all output channels and fan-out buffers
+            foreach (var branch in dag.Branches)
+            {
+                if (string.IsNullOrEmpty(branch.Output))
+                {
+                    var mode = GetRequiredChannelMode(dag, branch.Alias);
+                    if (mode == XStreamerChannelMode.Arrow)
+                    {
+                        var arrowChannel = Channel.CreateBounded<Apache.Arrow.RecordBatch>(new BoundedChannelOptions(DefaultArrowChannelCapacity) { FullMode = BoundedChannelFullMode.Wait });
+                        _channelRegistry.RegisterArrowChannel(branch.Alias, arrowChannel, _emptySchema);
+                    }
+                    else
+                    {
+                        var channel = Channel.CreateBounded<IReadOnlyList<object?[]>>(new BoundedChannelOptions(DefaultNativeChannelCapacity) { SingleWriter = true, SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
+                        _channelRegistry.RegisterChannel(branch.Alias, channel, System.Array.Empty<PipeColumnInfo>());
+                    }
+                }
+            }
+
+            foreach (var (sourceAlias, subs) in broadcastSubAliases)
+            {
+                var mode = GetRequiredChannelMode(dag, sourceAlias);
+                foreach (var subAlias in subs)
+                {
+                    if (mode == XStreamerChannelMode.Arrow)
+                    {
+                        var sub = Channel.CreateBounded<Apache.Arrow.RecordBatch>(new BoundedChannelOptions(DefaultArrowChannelCapacity) { SingleWriter = true, SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
+                        _channelRegistry.RegisterArrowChannel(subAlias, sub, _emptySchema);
+                    }
+                    else
+                    {
+                        var sub = Channel.CreateBounded<IReadOnlyList<object?[]>>(new BoundedChannelOptions(DefaultNativeChannelCapacity) { SingleWriter = true, SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
+                        _channelRegistry.RegisterChannel(subAlias, sub, System.Array.Empty<PipeColumnInfo>());
+                    }
+                }
+            }
+
             // Start all branches
             foreach (var branch in dag.Branches)
             {
                 string? resolvedFromAlias = null;
                 if (!string.IsNullOrEmpty(branch.FromAlias))
                 {
-                    if (broadcastSubAliases.TryGetValue(branch.FromAlias, out var subs))
-                    {
-                        var idx = broadcastAssignmentCursor[branch.FromAlias];
-                        resolvedFromAlias = subs[idx];
-                        broadcastAssignmentCursor[branch.FromAlias] = idx + 1;
-                    }
-                    else
-                    {
-                        resolvedFromAlias = branch.FromAlias;
-                    }
+                    resolvedFromAlias = ResolveInputAlias(branch.FromAlias, broadcastSubAliases, broadcastAssignmentCursor);
                 }
+
+                // Also need to resolve MainAlias and RefAliases for the branch itself
+                var actualMainAlias = branch.MainAlias != null 
+                    ? ResolveInputAlias(branch.MainAlias, broadcastSubAliases, broadcastAssignmentCursor) 
+                    : null;
+                
+                var actualRefAliases = branch.RefAliases
+                    .Select(a => ResolveInputAlias(a, broadcastSubAliases, broadcastAssignmentCursor))
+                    .ToArray();
+
+                // If they were resolved to something else (fan-out), we MUST update the branch definition 
+                // temporarily or pass them to ExecuteBranchAsync
+                var updatedBranch = branch with { 
+                    MainAlias = actualMainAlias,
+                    RefAliases = actualRefAliases
+                };
 
                 var bCts = CancellationTokenSource.CreateLinkedTokenSource(effectiveCt);
                 branchCts[branch.Alias] = bCts;
@@ -337,47 +388,31 @@ public class DagOrchestrator : IDagOrchestrator
                 }
                 else if (!string.IsNullOrEmpty(branch.MainAlias))
                 {
-                    var prefix = GetRequiredChannelMode(dag, branch.MainAlias) == XStreamerChannelMode.Arrow
-                        ? "arrow-memory"
-                        : "mem";
-                    argsList.Insert(0, $"{prefix}:{branch.MainAlias}");
-                    argsList.Insert(0, "-i");
+                    // Check if MainAlias is a branch alias or a provider
+                    var isBranchAlias = dag.Branches.Any(b => b.Alias.Equals(branch.MainAlias, StringComparison.OrdinalIgnoreCase));
+                    if (isBranchAlias)
+                    {
+                        var prefix = GetRequiredChannelMode(dag, branch.MainAlias) == XStreamerChannelMode.Arrow
+                            ? "arrow-memory"
+                            : "mem";
+                        argsList.Insert(0, $"{prefix}:{branch.MainAlias}");
+                        argsList.Insert(0, "-i");
+                    }
+                    else
+                    {
+                        // It's likely a provider name (e.g. generate:100)
+                        argsList.Insert(0, branch.MainAlias);
+                        argsList.Insert(0, "-i");
+                    }
                 }
             }
 
             if (string.IsNullOrEmpty(branch.Output))
             {
                 var mode = GetRequiredChannelMode(dag, branch.Alias);
-
-                if (mode == XStreamerChannelMode.Arrow)
-                {
-                    var arrowChannel = Channel.CreateBounded<Apache.Arrow.RecordBatch>(new BoundedChannelOptions(DefaultArrowChannelCapacity)
-                    {
-                        FullMode = BoundedChannelFullMode.Wait
-                    });
-                    _channelRegistry.RegisterArrowChannel(branch.Alias, arrowChannel, _emptySchema);
-                    argsList.Add("-o");
-                    argsList.Add($"arrow-memory:{branch.Alias}");
-                    OnLogEvent?.Invoke($"  [grey]↳ Branch '{branch.Alias}' → [italic]Arrow memory channel[/][/]");
-
-                    // Broadcast tasks are now started by ExecuteAsync, not here.
-                }
-                else
-                {
-                    var channel = Channel.CreateBounded<IReadOnlyList<object?[]>>(new BoundedChannelOptions(DefaultNativeChannelCapacity)
-                    {
-                        SingleWriter = true,
-                        SingleReader = true,
-                        FullMode = BoundedChannelFullMode.Wait
-                    });
-
-                    _channelRegistry.RegisterChannel(branch.Alias, channel, System.Array.Empty<PipeColumnInfo>());
-                    argsList.Add("-o");
-                    argsList.Add($"mem:{branch.Alias}");
-                    OnLogEvent?.Invoke($"  [grey]↳ Branch '{branch.Alias}' → [italic]memory channel[/][/]");
-
-                    // Broadcast tasks are now started by ExecuteAsync, not here.
-                }
+                argsList.Add("-o");
+                argsList.Add($"{(mode == XStreamerChannelMode.Arrow ? "arrow-memory" : "mem")}:{branch.Alias}");
+                OnLogEvent?.Invoke($"  [grey]↳ Branch '{branch.Alias}' → [italic]{(mode == XStreamerChannelMode.Arrow ? "Arrow memory channel" : "memory channel")}[/][/]");
 
                 if (!argsList.Contains("--no-stats", StringComparer.OrdinalIgnoreCase))
                 {
@@ -428,18 +463,9 @@ public class DagOrchestrator : IDagOrchestrator
         var sourceTuple = _channelRegistry.GetChannel(sourceAlias)
             ?? throw new InvalidOperationException($"Broadcast: source channel '{sourceAlias}' not found in registry.");
 
-        var subChannels = new List<Channel<IReadOnlyList<object?[]>>>(subAliases.Count);
-        foreach (var subAlias in subAliases)
-        {
-            var sub = Channel.CreateBounded<IReadOnlyList<object?[]>>(new BoundedChannelOptions(DefaultNativeChannelCapacity)
-            {
-                SingleWriter = true,
-                SingleReader = true,
-                FullMode = BoundedChannelFullMode.Wait
-            });
-            _channelRegistry.RegisterChannel(subAlias, sub, sourceTuple.Columns);
-            subChannels.Add(sub);
-        }
+        var subChannels = subAliases
+            .Select(subAlias => _channelRegistry.GetChannel(subAlias)?.Channel ?? throw new InvalidOperationException($"Broadcast: sub channel '{subAlias}' not found."))
+            .ToList();
 
         _logger.LogInformation("Starting broadcast multiplexer for '{SourceAlias}' → [{Subs}]",
             sourceAlias, string.Join(", ", subAliases));
@@ -470,18 +496,9 @@ public class DagOrchestrator : IDagOrchestrator
         var sourceTuple = _channelRegistry.GetArrowChannel(sourceAlias)
             ?? throw new InvalidOperationException($"Arrow Broadcast: source channel '{sourceAlias}' not found in registry.");
 
-        var subChannels = new List<Channel<Apache.Arrow.RecordBatch>>(subAliases.Count);
-        foreach (var subAlias in subAliases)
-        {
-            var sub = Channel.CreateBounded<Apache.Arrow.RecordBatch>(new BoundedChannelOptions(DefaultArrowChannelCapacity)
-            {
-                SingleWriter = true,
-                SingleReader = true,
-                FullMode = BoundedChannelFullMode.Wait
-            });
-            _channelRegistry.RegisterArrowChannel(subAlias, sub, sourceTuple.Schema);
-            subChannels.Add(sub);
-        }
+        var subChannels = subAliases
+            .Select(subAlias => _channelRegistry.GetArrowChannel(subAlias)?.Channel ?? throw new InvalidOperationException($"Arrow Broadcast: sub channel '{subAlias}' not found."))
+            .ToList();
 
         _logger.LogInformation("Starting Arrow broadcast multiplexer for '{SourceAlias}' → [{Subs}]",
             sourceAlias, string.Join(", ", subAliases));
@@ -496,7 +513,9 @@ public class DagOrchestrator : IDagOrchestrator
                     {
                         await sub.Writer.WriteAsync(batch.Clone(), ct);
                     }
-                    batch.Dispose();
+                    // We must NOT Dispose(batch) here because Arrow .NET clones share the SAME Column objects.
+                    // Disposing the original would invalidate all clones being processed in parallel branches.
+                    // The native memory will be freed when the final clones are disposed in their respective branches.
                 }
             }
             finally
@@ -542,6 +561,18 @@ public class DagOrchestrator : IDagOrchestrator
         }
 
         return XStreamerChannelMode.Native;
+    }
+
+    private string ResolveInputAlias(string alias, Dictionary<string, List<string>> broadcastSubAliases, Dictionary<string, int> broadcastAssignmentCursor)
+    {
+        if (broadcastSubAliases.TryGetValue(alias, out var subs))
+        {
+            var idx = broadcastAssignmentCursor[alias];
+            var resolved = subs[idx];
+            broadcastAssignmentCursor[alias] = idx + 1;
+            return resolved;
+        }
+        return alias;
     }
 
     private string? ExtractArgValue(IEnumerable<string> args, string argName)

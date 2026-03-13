@@ -7,10 +7,11 @@ using DtPipe.Core.Options;
 using DtPipe.Transformers.Services;
 using Jint;
 using Jint.Native;
+using DtPipe.Core.Infrastructure.Arrow;
 
 namespace DtPipe.Transformers.Columnar.Filter;
 
-public partial class FilterDataTransformer : IColumnarTransformer, IRequiresOptions<DtPipe.Transformers.Columnar.Filter.FilterTransformerOptions>
+public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresOptions<DtPipe.Transformers.Columnar.Filter.FilterTransformerOptions>
 {
 	private readonly DtPipe.Transformers.Columnar.Filter.FilterTransformerOptions _options;
 	private readonly IJsEngineProvider _jsEngineProvider;
@@ -19,7 +20,7 @@ public partial class FilterDataTransformer : IColumnarTransformer, IRequiresOpti
 	[GeneratedRegex(@"^(\w+)\s*(==|!=|>|<|>=|<=)\s*(.+)$", RegexOptions.Compiled)]
 	private static partial Regex SimpleFilterPattern();
 
-	public bool CanProcessColumnar { get; private set; }
+	public override bool CanProcessColumnar { get; protected set; }
 
 	public FilterDataTransformer(DtPipe.Transformers.Columnar.Filter.FilterTransformerOptions options, IJsEngineProvider jsEngineProvider)
 	{
@@ -32,7 +33,7 @@ public partial class FilterDataTransformer : IColumnarTransformer, IRequiresOpti
 	// Cache wrapped scripts for fast re-compilation
 	private readonly List<string> _wrappedScripts = new();
 
-	public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> sourceColumns, CancellationToken cancellationToken = default)
+	public override ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> sourceColumns, CancellationToken cancellationToken = default)
 	{
 		if (_options.Filters == null || _options.Filters.Length == 0)
 		{
@@ -104,14 +105,11 @@ public partial class FilterDataTransformer : IColumnarTransformer, IRequiresOpti
 
 	private record SimpleFilterInfo(int ColumnIndex, string Operator, string RawValue);
 
-	public ValueTask<RecordBatch?> TransformBatchAsync(RecordBatch batch, CancellationToken ct = default)
+	protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)
 	{
 		if (!CanProcessColumnar || _compiledFilters.Count == 0) return new ValueTask<RecordBatch?>(batch);
 
 		// Vectorized filtering logic
-		// To keep it simple for now, we'll evaluate rows in a loop but avoiding Jint overhead
-		// A truly vectorized implementation would use Arrow.Compute or specialized buffer loops.
-
 		var selectionMask = new bool[batch.Length];
 		for (int i = 0; i < batch.Length; i++) selectionMask[i] = true;
 
@@ -121,7 +119,7 @@ public partial class FilterDataTransformer : IColumnarTransformer, IRequiresOpti
 			for (int i = 0; i < batch.Length; i++)
 			{
 				if (!selectionMask[i]) continue;
-				var val = GetValueFromArrow(column, i);
+				var val = ArrowTypeMapper.GetValue(column, i);
 				selectionMask[i] = EvaluateSimple(val, filter.Operator, filter.RawValue);
 			}
 		}
@@ -184,98 +182,19 @@ public partial class FilterDataTransformer : IColumnarTransformer, IRequiresOpti
 	private IArrowArray CompactArray(IArrowArray original, bool[] mask, int count)
 	{
 		// Fallback: build manually via builder
-		var builder = CreateBuilder(original.Data.DataType);
+		var builder = ArrowTypeMapper.CreateBuilder(original.Data.DataType);
 		for (int i = 0; i < mask.Length; i++)
 		{
 			if (mask[i])
 			{
-				AppendValueToBuilder(builder, GetValueFromArrow(original, i));
+				ArrowTypeMapper.AppendValue(builder, ArrowTypeMapper.GetValue(original, i));
 			}
 		}
-		return BuildArray(builder);
+		return ArrowTypeMapper.BuildArray(builder);
 	}
 
-	private static object? GetValueFromArrow(IArrowArray array, int index)
-	{
-		if (array.IsNull(index)) return null;
 
-		return array switch {
-			StringArray a => a.GetString(index),
-			Int32Array a => a.GetValue(index),
-			Int64Array a => a.GetValue(index),
-			DoubleArray a => a.GetValue(index),
-			FloatArray a => a.GetValue(index),
-			BooleanArray a => a.GetValue(index),
-			Date64Array a => a.GetDateTime(index),
-			TimestampArray a => a.GetTimestamp(index),
-			_ => null
-		};
-	}
-
-	private static IArrowArrayBuilder CreateBuilder(IArrowType type)
-	{
-		return type.TypeId switch
-		{
-			ArrowTypeId.Boolean => new BooleanArray.Builder(),
-			ArrowTypeId.Int32 => new Int32Array.Builder(),
-			ArrowTypeId.Int64 => new Int64Array.Builder(),
-			ArrowTypeId.Double => new DoubleArray.Builder(),
-			ArrowTypeId.Float => new FloatArray.Builder(),
-			ArrowTypeId.String => new StringArray.Builder(),
-			ArrowTypeId.Timestamp => new TimestampArray.Builder(),
-			ArrowTypeId.Date64 => new Date64Array.Builder(),
-			_ => new StringArray.Builder()
-		};
-	}
-
-	private static void AppendValueToBuilder(IArrowArrayBuilder builder, object? value)
-	{
-		if (value == null) { AppendNull(builder); return; }
-
-		if (builder is StringArray.Builder s) s.Append(value.ToString() ?? "");
-		else if (builder is Int32Array.Builder i32) i32.Append(Convert.ToInt32(value));
-		else if (builder is Int64Array.Builder i64) i64.Append(Convert.ToInt64(value));
-		else if (builder is DoubleArray.Builder dbl) dbl.Append(Convert.ToDouble(value));
-		else if (builder is FloatArray.Builder flt) flt.Append(Convert.ToSingle(value));
-		else if (builder is BooleanArray.Builder b && value is bool bv) b.Append(bv);
-		else if (builder is Date64Array.Builder d64 && value is DateTime dt) d64.Append(dt);
-		else if (builder is TimestampArray.Builder ts && value is DateTimeOffset dto) ts.Append(dto);
-		else AppendNull(builder);
-	}
-
-	private static void AppendNull(IArrowArrayBuilder builder)
-	{
-		switch (builder)
-		{
-			case BooleanArray.Builder b: b.AppendNull(); break;
-			case Int32Array.Builder b: b.AppendNull(); break;
-			case Int64Array.Builder b: b.AppendNull(); break;
-			case DoubleArray.Builder b: b.AppendNull(); break;
-			case FloatArray.Builder b: b.AppendNull(); break;
-			case StringArray.Builder b: b.AppendNull(); break;
-			case TimestampArray.Builder b: b.AppendNull(); break;
-			case Date64Array.Builder b: b.AppendNull(); break;
-			default: if (builder is StringArray.Builder s) s.AppendNull(); break;
-		}
-	}
-
-	private static IArrowArray BuildArray(IArrowArrayBuilder builder)
-	{
-		return builder switch
-		{
-			BooleanArray.Builder b => b.Build(),
-			Int32Array.Builder b => b.Build(),
-			Int64Array.Builder b => b.Build(),
-			DoubleArray.Builder b => b.Build(),
-			FloatArray.Builder b => b.Build(),
-			StringArray.Builder b => b.Build(),
-			TimestampArray.Builder b => b.Build(),
-			Date64Array.Builder b => b.Build(),
-			_ => throw new NotSupportedException($"Unsupported builder type for BuildArray: {builder.GetType().Name}")
-		};
-	}
-
-	public object?[]? Transform(object?[] row)
+	public override object?[]? Transform(object?[] row)
 	{
 		if (_compiledFilters.Count == 0 || _columnNames == null) return row;
 
