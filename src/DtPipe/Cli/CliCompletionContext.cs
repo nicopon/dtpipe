@@ -12,8 +12,8 @@ public sealed record CliCompletionContext
     /// <summary>Index of the current branch (0-based).</summary>
     public int CurrentBranchIndex { get; init; }
 
-    /// <summary>Was the current branch initiated by -x/--xstreamer?</summary>
-    public bool IsXStreamerBranch { get; init; }
+    /// <summary>Was the current branch initiated by --sql?</summary>
+    public bool IsProcessorBranch { get; init; }
 
     /// <summary>Last complete flag typed that was expecting a value. Ex: "--main", "--ref".</summary>
     public string? LastCompletedFlag { get; init; }

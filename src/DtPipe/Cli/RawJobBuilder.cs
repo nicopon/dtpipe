@@ -50,7 +50,7 @@ public static class RawJobBuilder
 			var input = parseResult.GetValue(opts.Input)?.FirstOrDefault();
 
 			// Validation (Required args)
-			bool isDag = parseResult.Tokens.Any(t => t.Value == "-x" || t.Value == "--xstreamer" || t.Value == "--alias" || t.Value == "--from" || t.Value == "--main" || t.Value == "--ref" || t.Value == "--src-main" || t.Value == "--src-ref");
+			bool isDag = parseResult.Tokens.Any(t => t.Value == "--sql" || t.Value == "--alias" || t.Value == "--from" || t.Value == "--main" || t.Value == "--ref" || t.Value == "--src-main" || t.Value == "--src-ref");
 			var exportJobResult = parseResult.GetValue(opts.ExportJob);
 			if (string.IsNullOrWhiteSpace(output) && !isDag && string.IsNullOrWhiteSpace(exportJobResult))
 			{
@@ -58,7 +58,7 @@ public static class RawJobBuilder
 				return (new Dictionary<string, JobDefinition>(), 1);
 			}
 
-			var xstreamer = parseResult.GetValue(opts.Xstreamer)?.FirstOrDefault();
+			var sql = parseResult.GetValue(opts.Sql)?.FirstOrDefault();
 			var fromAliases = parseResult.GetValue(opts.From);
 			var mainAliases = parseResult.GetValue(opts.Main);
 			var refAliases = parseResult.GetValue(opts.Ref);
@@ -66,16 +66,16 @@ public static class RawJobBuilder
 			// DEBUG
 			if (Environment.GetEnvironmentVariable("DEBUG") == "1")
 			{
-				Console.Error.WriteLine($"[DEBUG] input: {input}, xstreamer: {xstreamer}, from: {fromAliases?.Length ?? 0}, main: {mainAliases?.Length ?? 0}, ref: {refAliases?.Length ?? 0}");
+				Console.Error.WriteLine($"[DEBUG] input: {input}, sql: {sql}, from: {fromAliases?.Length ?? 0}, main: {mainAliases?.Length ?? 0}, ref: {refAliases?.Length ?? 0}");
 			}
 
 			bool hasSource = (fromAliases != null && fromAliases.Length > 0) || 
 							 (mainAliases != null && mainAliases.Length > 0) ||
 							 (refAliases != null && refAliases.Length > 0);
 			
-			if (string.IsNullOrWhiteSpace(input) && string.IsNullOrWhiteSpace(xstreamer) && !hasSource)
+			if (string.IsNullOrWhiteSpace(input) && string.IsNullOrWhiteSpace(sql) && !hasSource)
 			{
-				Console.Error.WriteLine($"Error: --input or --xstreamer is required for branch focus. (Tokens: {string.Join(" ", parseResult.Tokens.Select(t => t.Value))})");
+				Console.Error.WriteLine($"Error: --input or --sql is required for branch focus. (Tokens: {string.Join(" ", parseResult.Tokens.Select(t => t.Value))})");
 				return (new Dictionary<string, JobDefinition>(), 1);
 			}
 
@@ -111,7 +111,7 @@ public static class RawJobBuilder
 				Prefix = parseResult.GetValue(opts.Prefix),
 				Drop = parseResult.GetValue(opts.Drop) ?? Array.Empty<string>(),
 				Rename = parseResult.GetValue(opts.Rename) ?? Array.Empty<string>(),
-				Xstreamer = xstreamer,
+				Sql = sql,
 				NoStats = parseResult.GetValue(opts.NoStats)
 			};
 
@@ -186,13 +186,13 @@ public static class RawJobBuilder
 		if (maxRetriesOverride is { Length: > 0 } mrvo && mrvo[0] > 0) job = job with { MaxRetries = mrvo[0] };
 
 		var ssoOrig = parseResult.GetValue(opts.StrictSchema);
-		if (ssoOrig is { Length: > 0 } ssov && ssov[0].HasValue) job = job with { StrictSchema = ssov[0].Value };
+		if (ssoOrig is { Length: > 0 } ssov && ssov[0] is bool ssValue) job = job with { StrictSchema = ssValue };
  
 		var nsvoOrig = parseResult.GetValue(opts.NoSchemaValidation);
-		if (nsvoOrig is { Length: > 0 } nsvov && nsvov[0].HasValue) job = job with { NoSchemaValidation = nsvov[0].Value };
+		if (nsvoOrig is { Length: > 0 } nsvov && nsvov[0] is bool nsvValue) job = job with { NoSchemaValidation = nsvValue };
  
 		var amvoOrig = parseResult.GetValue(opts.AutoMigrate);
-		if (amvoOrig is { Length: > 0 } amvov && amvov[0].HasValue) job = job with { AutoMigrate = amvov[0].Value };
+		if (amvoOrig is { Length: > 0 } amvov && amvov[0] is bool amValue) job = job with { AutoMigrate = amValue };
 
 		var metricsPathOverride = parseResult.GetValue(opts.MetricsPath)?.FirstOrDefault();
 		if (!string.IsNullOrEmpty(metricsPathOverride)) job = job with { MetricsPath = metricsPathOverride };

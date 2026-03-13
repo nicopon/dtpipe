@@ -20,7 +20,7 @@ internal static class CoreOptionsBuilder
         { "--output",             CliPipelinePhase.Global },
         { "--query",              CliPipelinePhase.Reader },
         { "--alias",              CliPipelinePhase.Global },
-        { "--xstreamer",          CliPipelinePhase.Global },
+        { "--sql",                CliPipelinePhase.Global },
         { "--strategy",           CliPipelinePhase.Writer },
         { "--insert-mode",        CliPipelinePhase.Writer },
         { "--table",              CliPipelinePhase.Writer },
@@ -47,11 +47,11 @@ internal static class CoreOptionsBuilder
         { "--job",                CliPipelinePhase.Global },
         { "--export-job",         CliPipelinePhase.Global },
         { "--metrics-path",       CliPipelinePhase.Global },
-        // DAG
-        { "--main",               CliPipelinePhase.XStreamer },
-        { "--ref",                CliPipelinePhase.XStreamer },
-        { "--src-main",           CliPipelinePhase.XStreamer },
-        { "--src-ref",            CliPipelinePhase.XStreamer },
+        // Processor Engine (replaces XStreamer)
+        { "--main",               CliPipelinePhase.Processor },
+        { "--ref",                CliPipelinePhase.Processor },
+        { "--src-main",           CliPipelinePhase.Processor },
+        { "--src-ref",            CliPipelinePhase.Processor },
         { "--from",               CliPipelinePhase.Global },
         { "--prefix",             CliPipelinePhase.Global },
     };
@@ -59,7 +59,7 @@ internal static class CoreOptionsBuilder
     public static CoreCliOptions Build(
         IEnumerable<IStreamReaderFactory>? readerFactories = null,
         IEnumerable<IDataWriterFactory>? writerFactories = null,
-        IEnumerable<IXStreamerFactory>? xstreamerFactories = null)
+        IEnumerable<IXStreamerFactory>? processorFactories = null)
     {
         var inputOption = new Option<string[]>("--input")
         {
@@ -134,15 +134,14 @@ internal static class CoreOptionsBuilder
 
         var retryDelayMsOption = new Option<int[]>("--retry-delay-ms") { Description = "Initial retry delay in ms", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
 
-        // DAG Options
-        var xstreamerOption = new Option<string[]>("--xstreamer")
+        // Processor Options (Unified --sql syntax)
+        var sqlOption = new Option<string[]>("--sql")
         {
-            Description = "XStreamer provider (e.g. fusion-engine)",
+            Description = "Engine logic or SQL query (replaces --xstreamer)",
             Arity = ArgumentArity.ZeroOrMore,
             AllowMultipleArgumentsPerToken = true
         };
-        xstreamerOption.Aliases.Add("-x");
-        xstreamerOption.CompletionSources.Add(ctx => GetXStreamerSuggestions(ctx, xstreamerFactories));
+        sqlOption.CompletionSources.Add(ctx => GetProcessorSuggestions(ctx, processorFactories));
 
         var aliasOption = new Option<string[]>("--alias") { Description = "Alias(es) for the current DAG branch or streams" };
 
@@ -171,7 +170,7 @@ internal static class CoreOptionsBuilder
             unsafeQueryOption, dryRunOption, noStatsOption, limitOption, samplingRateOption, samplingSeedOption, keyOption,
             jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption, finallyExecOption,
             strategyOption, insertModeOption, tableOption, maxRetriesOption, retryDelayMsOption, strictSchemaOption,
-            noSchemaValidationOption, metricsPathOption, autoMigrateOption, xstreamerOption, aliasOption,
+            noSchemaValidationOption, metricsPathOption, autoMigrateOption, sqlOption, aliasOption,
             renameOption, dropOption, throttleOption, ignoreNullsOption,
             mainOption, refOption, srcMainOption, srcRefOption, fromOption, prefixOption
         };
@@ -187,7 +186,7 @@ internal static class CoreOptionsBuilder
             unsafeQueryOption, dryRunOption, noStatsOption, limitOption, samplingRateOption, samplingSeedOption,
             keyOption, jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption,
             finallyExecOption, strategyOption, insertModeOption, tableOption, maxRetriesOption, retryDelayMsOption,
-            strictSchemaOption, noSchemaValidationOption, metricsPathOption, autoMigrateOption, xstreamerOption,
+            strictSchemaOption, noSchemaValidationOption, metricsPathOption, autoMigrateOption, sqlOption,
             aliasOption, renameOption, dropOption, throttleOption, ignoreNullsOption,
             mainOption, refOption, srcMainOption, srcRefOption, fromOption, prefixOption, allList);
     }
@@ -290,7 +289,7 @@ internal static class CoreOptionsBuilder
         return Enumerable.Empty<CompletionItem>();
     }
 
-    private static IEnumerable<CompletionItem> GetXStreamerSuggestions(CompletionContext context, IEnumerable<IXStreamerFactory>? factories)
+    private static IEnumerable<CompletionItem> GetProcessorSuggestions(CompletionContext context, IEnumerable<IXStreamerFactory>? factories)
     {
         var suggestions = new List<CompletionItem>();
         if (factories != null)
@@ -331,7 +330,7 @@ public record CoreCliOptions(
     Option<bool?[]> NoSchemaValidation,
     Option<string[]> MetricsPath,
     Option<bool?[]> AutoMigrate,
-    Option<string[]> Xstreamer,
+    Option<string[]> Sql,
     Option<string[]> Alias,
     Option<string[]> Rename,
     Option<string[]> Drop,

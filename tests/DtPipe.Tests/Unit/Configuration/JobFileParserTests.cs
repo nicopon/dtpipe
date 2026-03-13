@@ -69,7 +69,7 @@ p:
 c:
   input: data.csv
 joined:
-  xstreamer: fusion-engine
+  sql: fusion-engine
   main: p
   ref: [c]
   query: SELECT * FROM p JOIN c ON p.id = c.id
@@ -85,7 +85,7 @@ joined:
 			// Assert
 			jobs.Should().HaveCount(3);
 			jobs["p"].Input.Should().Be("data.parquet");
-			jobs["joined"].Xstreamer.Should().Be("fusion-engine");
+			jobs["joined"].Sql.Should().Be("fusion-engine");
 			jobs["joined"].Main.Should().Be("p");
 			jobs["joined"].Ref.Should().Contain("c");
 		}

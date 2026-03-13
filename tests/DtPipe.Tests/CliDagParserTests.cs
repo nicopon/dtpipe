@@ -14,7 +14,7 @@ public class CliDagParserTests
         Assert.Single(dag.Branches);
         Assert.False(dag.IsDag);
         Assert.Equal("stream0", dag.Branches[0].Alias);
-        Assert.False(dag.Branches[0].IsXStreamer);
+        Assert.False(dag.Branches[0].IsProcessor);
         Assert.Equal(args, dag.Branches[0].Arguments);
     }
 
@@ -23,7 +23,7 @@ public class CliDagParserTests
     {
         var args = new[] {
             "-i", "data1.csv", "--alias", "input_one",
-            "-x", "duck", "-q", "SELECT * FROM input_one", "-o", "out.csv"
+            "--sql", "duck", "-q", "SELECT * FROM input_one", "-o", "out.csv"
         };
 
         var dag = CliDagParser.Parse(args);
@@ -33,13 +33,13 @@ public class CliDagParserTests
 
         var branch1 = dag.Branches[0];
         Assert.Equal("input_one", branch1.Alias);
-        Assert.False(branch1.IsXStreamer);
+        Assert.False(branch1.IsProcessor);
         Assert.Equal(new[] { "-i", "data1.csv", "--alias", "input_one" }, branch1.Arguments);
 
         var branch2 = dag.Branches[1];
         Assert.Equal("stream1", branch2.Alias); // Default alias
-        Assert.True(branch2.IsXStreamer);
-        Assert.Equal(new[] { "-x", "duck", "-q", "SELECT * FROM input_one", "-o", "out.csv" }, branch2.Arguments);
+        Assert.True(branch2.IsProcessor);
+        Assert.Equal(new[] { "--sql", "duck", "-q", "SELECT * FROM input_one", "-o", "out.csv" }, branch2.Arguments);
     }
 
     [Fact]
@@ -57,7 +57,7 @@ public class CliDagParserTests
     {
         var args = new[] {
             "-i", "data1.csv", "--alias", "input_one", "-o", "wrong.csv",
-            "-x", "duck", "--main", "input_one", "-o", "out.csv"
+            "--sql", "duck", "--main", "input_one", "-o", "out.csv"
         };
 
         var dag = CliDagParser.Parse(args);

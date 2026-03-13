@@ -43,7 +43,7 @@ public static partial class JobFileParser
 		{
 			var branches = Deserializer.Deserialize<Dictionary<string, DtPipe.Core.Models.JobDefinition>>(content);
 			// Validate if it's really a DAG by checking if ANY branch has an input, xstreamer or from
-			if (branches != null && branches.Count > 0 && branches.Values.Any(v => !string.IsNullOrEmpty(v.Input) || !string.IsNullOrEmpty(v.Xstreamer) || !string.IsNullOrEmpty(v.From)))
+			if (branches != null && branches.Count > 0 && branches.Values.Any(v => !string.IsNullOrEmpty(v.Input) || !string.IsNullOrEmpty(v.Sql) || !string.IsNullOrEmpty(v.From)))
 			{
 				// Successfully loaded as a DAG. Now handle transformers for each branch.
 				var rootMap = Deserializer.Deserialize<Dictionary<string, object>>(content);

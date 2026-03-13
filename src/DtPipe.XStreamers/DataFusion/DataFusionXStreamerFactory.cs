@@ -63,7 +63,7 @@ public class DataFusionXStreamerFactory : IXStreamerFactory
     public bool CanHandle(string connectionString) => false;
 
     // Requires upstream Arrow RecordBatch channels (like duck-engine)
-    public XStreamerChannelMode ChannelMode => XStreamerChannelMode.Arrow;
+    public ChannelMode ChannelMode => ChannelMode.Arrow;
 
     public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
     {

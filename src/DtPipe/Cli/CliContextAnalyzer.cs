@@ -14,7 +14,7 @@ public static class CliContextAnalyzer
         var currentFlags = new HashSet<string>();
         var currentAliases = new List<string>();
         var allPreviousAliases = new List<string>();
-        bool isXStreamer = false;
+        bool isProcessor = false;
         bool hasSeenSourceInCurrentBranch = false;
         string? lastFlag = null;
         bool lastFlagExpectsValue = false;
@@ -52,8 +52,8 @@ public static class CliContextAnalyzer
                 currentInputPrefix = null;
                 hasTerminator = false;
 
-                // Determine if this new branch starts as XStreamer
-                isXStreamer = CliPipelineRules.XStreamerFlags.Contains(token);
+                // Determine if this new branch starts as Processor
+                isProcessor = CliPipelineRules.ProcessorFlags.Contains(token);
                 hasSeenSourceInCurrentBranch = true;
             }
 
@@ -70,7 +70,7 @@ public static class CliContextAnalyzer
                     if (CliPipelineRules.IsTerminator(longName))
                         hasTerminator = true;
 
-                    if (longName == "--xstreamer") isXStreamer = true;
+                    if (longName == "--sql") isProcessor = true;
 
                     lastFlag = longName;
                     lastFlagExpectsValue = match.MaxArity > 0;
@@ -114,13 +114,13 @@ public static class CliContextAnalyzer
         else
             activePhase = CliPipelinePhase.Writer;
 
-        if (isXStreamer && !hasTerminator)
-            activePhase = CliPipelinePhase.XStreamer;
+        if (isProcessor && !hasTerminator)
+            activePhase = CliPipelinePhase.Processor;
 
         return new CliCompletionContext
         {
             CurrentBranchIndex = branchIndex,
-            IsXStreamerBranch = isXStreamer,
+            IsProcessorBranch = isProcessor,
             LastCompletedFlag = lastFlagExpectsValue ? lastFlag : null,
             UsedFlagsInCurrentBranch = new HashSet<string>(currentFlags),
             KnownAliases = allPreviousAliases.ToArray(),

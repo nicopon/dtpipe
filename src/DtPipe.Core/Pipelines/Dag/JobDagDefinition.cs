@@ -16,5 +16,5 @@ public record JobDagDefinition
     /// Gets a value indicating whether this job requires DAG orchestration
     /// (i.e., it contains more than one branch or an explicit XStreamer).
     /// </summary>
-    public bool IsDag => Branches.Count > 1 || Branches.Any(b => b.IsXStreamer);
+    public bool IsDag => Branches.Count > 1 || Branches.Any(b => b.IsProcessor);
 }

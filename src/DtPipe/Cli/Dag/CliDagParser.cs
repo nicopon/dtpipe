@@ -38,7 +38,7 @@ public static class CliDagParser
         {
             var arg = args[i];
 
-            if (CliPipelineRules.XStreamerFlags.Contains(arg))
+            if (CliPipelineRules.ProcessorFlags.Contains(arg))
             {
                 // We've hit an XStreamer boundary. Finish the current branch.
                 if (currentBranchArgs.Count > 0)
@@ -140,7 +140,7 @@ public static class CliDagParser
         {
             Alias = alias,
             Arguments = argsArray,
-            IsXStreamer = isXStreamer,
+            Processor = isXStreamer ? ProcessorKind.Sql : ProcessorKind.None,
             Input = input,
             Output = ExtractArgValue(argsArray, "-o") ?? ExtractArgValue(argsArray, "--output"),
             MainAlias = mainAlias,

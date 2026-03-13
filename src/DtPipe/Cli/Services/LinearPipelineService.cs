@@ -41,22 +41,22 @@ public class LinearPipelineService
         CancellationToken token,
         string? localAlias,
         bool isDag,
-        bool isXStreamer = false)
+        bool isProcessor = false)
     {
         var exportService = _serviceProvider.GetRequiredService<ExportService>();
 
         IStreamReaderFactory readerFactory;
         string cleanedInput;
 
-        if (isXStreamer)
+        if (isProcessor)
         {
             var xFactories = _serviceProvider.GetRequiredService<IEnumerable<IXStreamerFactory>>();
-            var factoryString = !string.IsNullOrEmpty(job.Xstreamer) ? job.Xstreamer : (job.Input ?? "");
-            var (xFactory, xCleaned) = ResolveFactory(xFactories, factoryString, "XStreamer");
+            var factoryString = !string.IsNullOrEmpty(job.Sql) ? job.Sql : (job.Input ?? "");
+            var (xFactory, xCleaned) = ResolveFactory(xFactories, factoryString, "Processor");
             cleanedInput = xCleaned;
 
-            // XStreamer needs to be wrapped in a IStreamReaderFactory for ExportService
-            readerFactory = new XStreamerReaderFactoryAdapter(xFactory, _serviceProvider, cleanedInput);
+            // Processor needs to be wrapped in a IStreamReaderFactory for ExportService
+            readerFactory = new ProcessorReaderFactoryAdapter(xFactory, _serviceProvider, cleanedInput);
         }
         else
         {
@@ -317,13 +317,13 @@ public class LinearPipelineService
         return pipeline;
     }
 
-    private sealed class XStreamerReaderFactoryAdapter : IStreamReaderFactory
+    private sealed class ProcessorReaderFactoryAdapter : IStreamReaderFactory
     {
         private readonly IXStreamerFactory _inner;
         private readonly IServiceProvider _sp;
         private readonly string _connectionString;
 
-        public XStreamerReaderFactoryAdapter(IXStreamerFactory inner, IServiceProvider sp, string connectionString)
+        public ProcessorReaderFactoryAdapter(IXStreamerFactory inner, IServiceProvider sp, string connectionString)
         {
             _inner = inner;
             _sp = sp;

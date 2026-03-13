@@ -10,9 +10,9 @@ namespace DtPipe.Core.Abstractions.Dag;
 public interface IXStreamerFactory : IProviderDescriptor<IStreamReader>
 {
     /// <summary>
-    /// Declares the channel protocol this XStreamer requires for its upstream input branches.
+    /// Declares the channel protocol this processor requires for its upstream input branches.
     /// The orchestrator uses this to register the correct type of memory channel (native object[]
-    /// or Arrow RecordBatch) without any CLI flag inspection.
+    /// or Arrow RecordBatch).
     /// </summary>
-    XStreamerChannelMode ChannelMode { get; }
+    ChannelMode ChannelMode { get; }
 }

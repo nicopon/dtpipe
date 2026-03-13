@@ -19,11 +19,14 @@ public record BranchDefinition
     public string[] Arguments { get; init; } = Array.Empty<string>();
 
     /// <summary>
-    /// Indicates whether this branch represents an XStreamer node.
-    /// XStreamer branches typically have multiple inputs (reads from other branches)
-    /// and a single output.
+    /// Defines the type of processor applied to this branch confluence (e.g., Sql).
     /// </summary>
-    public bool IsXStreamer { get; init; }
+    public ProcessorKind Processor { get; init; } = ProcessorKind.None;
+
+    /// <summary>
+    /// Indicates whether this branch represents a processor node (multi-input confluence).
+    /// </summary>
+    public bool IsProcessor => Processor != ProcessorKind.None;
 
     /// <summary>
     /// The input source for this branch (e.g. "csv:file.csv" or "pg:query").
@@ -53,6 +56,11 @@ public record BranchDefinition
     /// For XStreamer branches, the aliases of secondary source branches (fully preloaded into memory before query execution).
     /// </summary>
     public IReadOnlyList<string> RefAliases { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// For processor branches (e.g. SQL), the transformation logic to apply.
+    /// </summary>
+    public string? SqlQuery { get; init; }
 
     /// <summary>
     /// Optional pre-parsed job definition if loaded from YAML.

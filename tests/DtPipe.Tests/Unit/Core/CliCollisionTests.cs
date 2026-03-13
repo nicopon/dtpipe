@@ -17,7 +17,7 @@ public class CliCollisionTests
 		var assembly = typeof(ICliContributor).Assembly;
 		var contributorTypes = assembly.GetTypes()
 			.Where(t => typeof(ICliContributor).IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract && !t.ContainsGenericParameters)
-			.Where(t => t.Name != "CliDataWriterFactory" && t.Name != "CliStreamReaderFactory" && t.Name != "CliDataTransformerFactory" && t.Name != "CliXStreamerFactory") // Skip infra wrappers requiring complex deps
+			.Where(t => t.Name != "CliDataWriterFactory" && t.Name != "CliStreamReaderFactory" && t.Name != "CliDataTransformerFactory" && t.Name != "CliProcessorFactory") // Skip infra wrappers requiring complex deps
 			.ToList();
 
 		var optionsRegistry = new OptionsRegistry();

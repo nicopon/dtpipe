@@ -210,7 +210,7 @@ class Program
 	private static void RegisterXStreamer<TDesc>(IServiceCollection services) where TDesc : class, IXStreamerFactory, new()
 	{
 		services.AddSingleton<IXStreamerFactory>(sp => {
-			var factory = new CliXStreamerFactory(
+			var factory = new CliProcessorFactory(
 				new TDesc(),
 				sp.GetRequiredService<OptionsRegistry>(),
 				sp

@@ -13,16 +13,16 @@ public static class DagValidator
         var errors = new List<string>();
         var registeredAliases = new HashSet<string>(dag.Branches.Select(b => b.Alias), StringComparer.OrdinalIgnoreCase);
 
-        // 1. Identify aliases fed into XStreamers or Fan-outs
-        var fedIntoXStreamer = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // 1. Identify aliases fed into Processors or Fan-outs
+        var fedIntoProcessor = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var fedIntoFrom = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var branch in dag.Branches)
         {
-            if (branch.IsXStreamer)
+            if (branch.IsProcessor)
             {
-                if (!string.IsNullOrEmpty(branch.MainAlias)) fedIntoXStreamer.Add(branch.MainAlias);
-                foreach (var ra in branch.RefAliases) fedIntoXStreamer.Add(ra);
+                if (!string.IsNullOrEmpty(branch.MainAlias)) fedIntoProcessor.Add(branch.MainAlias);
+                foreach (var ra in branch.RefAliases) fedIntoProcessor.Add(ra);
             }
             else if (!string.IsNullOrEmpty(branch.FromAlias))
             {
@@ -33,28 +33,28 @@ public static class DagValidator
         foreach (var branch in dag.Branches)
         {
             // 2. Prohibit explicit output in branches fed into downstream nodes (orchestrator will use memory channel)
-            if ((fedIntoXStreamer.Contains(branch.Alias) || fedIntoFrom.Contains(branch.Alias)) && !string.IsNullOrEmpty(branch.Output))
+            if ((fedIntoProcessor.Contains(branch.Alias) || fedIntoFrom.Contains(branch.Alias)) && !string.IsNullOrEmpty(branch.Output))
             {
                 errors.Add($"Branch '{branch.Alias}' is used as an input for a downstream branch and cannot have its own '--output'.");
             }
 
-            // 3. Topology validation for XStreamer branches
-            if (branch.IsXStreamer)
+            // 3. Topology validation for Processor branches
+            if (branch.IsProcessor)
             {
                 if (string.IsNullOrEmpty(branch.MainAlias))
                 {
-                    errors.Add($"XStreamer branch '{branch.Alias}' is missing its main source alias. Please specify it using '--main <alias>'.");
+                    errors.Add($"Processor branch '{branch.Alias}' is missing its main source alias. Please specify it using '--from <alias>'.");
                 }
                 else if (!registeredAliases.Contains(branch.MainAlias))
                 {
-                    errors.Add($"XStreamer branch '{branch.Alias}' references unknown main alias '{branch.MainAlias}'.");
+                    errors.Add($"Processor branch '{branch.Alias}' references unknown main alias '{branch.MainAlias}'.");
                 }
 
                 foreach (var refAlias in branch.RefAliases)
                 {
                     if (!registeredAliases.Contains(refAlias))
                     {
-                        errors.Add($"XStreamer branch '{branch.Alias}' references unknown secondary alias '{refAlias}'.");
+                        errors.Add($"Processor branch '{branch.Alias}' references unknown secondary alias '{refAlias}'.");
                     }
                 }
             }

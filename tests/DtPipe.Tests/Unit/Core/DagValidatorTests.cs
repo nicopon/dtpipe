@@ -34,7 +34,7 @@ public class DagValidatorTests
                 new BranchDefinition
                 {
                     Alias = "join",
-                    IsXStreamer = true,
+                    Processor = ProcessorKind.Sql,
                     MainAlias = "src1",
                     RefAliases = new[] { "src2" },
                     Output = "csv:-"
@@ -57,7 +57,7 @@ public class DagValidatorTests
                 new BranchDefinition
                 {
                     Alias = "loop",
-                    IsXStreamer = true,
+                    Processor = ProcessorKind.Sql,
                     MainAlias = "loop"
                 }
             }
@@ -75,8 +75,8 @@ public class DagValidatorTests
         {
             Branches = new[]
             {
-                new BranchDefinition { Alias = "A", IsXStreamer = true, MainAlias = "B" },
-                new BranchDefinition { Alias = "B", IsXStreamer = true, MainAlias = "A" }
+                new BranchDefinition { Alias = "A", Processor = ProcessorKind.Sql, MainAlias = "B" },
+                new BranchDefinition { Alias = "B", Processor = ProcessorKind.Sql, MainAlias = "A" }
             }
         };
 
@@ -92,7 +92,7 @@ public class DagValidatorTests
         {
             Branches = new[]
             {
-                new BranchDefinition { Alias = "XS", IsXStreamer = true }
+                new BranchDefinition { Alias = "XS", Processor = ProcessorKind.Sql }
             }
         };
 
@@ -108,7 +108,7 @@ public class DagValidatorTests
         {
             Branches = new[]
             {
-                new BranchDefinition { Alias = "XS", IsXStreamer = true, MainAlias = "ghost" }
+                new BranchDefinition { Alias = "XS", Processor = ProcessorKind.Sql, MainAlias = "ghost" }
             }
         };
 
@@ -125,7 +125,7 @@ public class DagValidatorTests
             Branches = new[]
             {
                 new BranchDefinition { Alias = "src1", Input = "gen:", Output = "csv:leak.csv" },
-                new BranchDefinition { Alias = "XS", IsXStreamer = true, MainAlias = "src1", Output = "csv:-" }
+                new BranchDefinition { Alias = "XS", Processor = ProcessorKind.Sql, MainAlias = "src1", Output = "csv:-" }
             }
         };
 

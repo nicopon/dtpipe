@@ -22,7 +22,7 @@ public class CliContextAnalyzerTests
         Assert.Equal(0, context.CurrentBranchIndex);
         Assert.Empty(context.UsedFlagsInCurrentBranch);
         Assert.Empty(context.KnownAliases);
-        Assert.False(context.IsXStreamerBranch);
+        Assert.False(context.IsProcessorBranch);
     }
 
     [Fact]
@@ -40,14 +40,14 @@ public class CliContextAnalyzerTests
     }
 
     [Fact]
-    public void DagWithXStreamer_KnownAliases()
+    public void DagWithProcessor_KnownAliases()
     {
-        var tokens = new[] { "--input", "pg:A", "--alias", "a1", "-x", "duck", "--main" };
+        var tokens = new[] { "--input", "pg:A", "--alias", "a1", "--sql", "duck", "--main" };
         var context = CliContextAnalyzer.Analyze(tokens, _options);
 
         Assert.Single(context.KnownAliases);
         Assert.Equal("a1", context.KnownAliases[0]);
-        Assert.True(context.IsXStreamerBranch);
+        Assert.True(context.IsProcessorBranch);
         Assert.Equal("--main", context.LastCompletedFlag);
         Assert.True(context.IsExpectingFlagValue);
     }
@@ -59,7 +59,7 @@ public class CliContextAnalyzerTests
         var context = CliContextAnalyzer.Analyze(tokens, _options);
 
         Assert.Equal(1, context.CurrentBranchIndex);
-        Assert.False(context.IsXStreamerBranch);
+        Assert.False(context.IsProcessorBranch);
     }
 
     [Fact]
@@ -75,7 +75,7 @@ public class CliContextAnalyzerTests
     [Fact]
     public void MainAndRef_LastFlagIsRef()
     {
-        var tokens = new[] { "--input", "pg:A", "--alias", "a1", "-x", "duck", "--main", "a1", "--ref" };
+        var tokens = new[] { "--input", "pg:A", "--alias", "a1", "--sql", "duck", "--main", "a1", "--ref" };
         var context = CliContextAnalyzer.Analyze(tokens, _options);
 
         Assert.Equal("--ref", context.LastCompletedFlag);

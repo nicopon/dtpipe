@@ -131,7 +131,7 @@ public class DagOrchestrator : IDagOrchestrator
                 if (string.IsNullOrEmpty(branch.Output))
                 {
                     var mode = GetRequiredChannelMode(dag, branch.Alias);
-                    if (mode == XStreamerChannelMode.Arrow)
+                    if (mode == ChannelMode.Arrow)
                     {
                         var arrowChannel = Channel.CreateBounded<Apache.Arrow.RecordBatch>(new BoundedChannelOptions(DefaultArrowChannelCapacity) { FullMode = BoundedChannelFullMode.Wait });
                         _channelRegistry.RegisterArrowChannel(branch.Alias, arrowChannel, _emptySchema);
@@ -149,7 +149,7 @@ public class DagOrchestrator : IDagOrchestrator
                 var mode = GetRequiredChannelMode(dag, sourceAlias);
                 foreach (var subAlias in subs)
                 {
-                    if (mode == XStreamerChannelMode.Arrow)
+                    if (mode == ChannelMode.Arrow)
                     {
                         var sub = Channel.CreateBounded<Apache.Arrow.RecordBatch>(new BoundedChannelOptions(DefaultArrowChannelCapacity) { SingleWriter = true, SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
                         _channelRegistry.RegisterArrowChannel(subAlias, sub, _emptySchema);
@@ -220,7 +220,7 @@ public class DagOrchestrator : IDagOrchestrator
                 var bCts = CancellationTokenSource.CreateLinkedTokenSource(effectiveCt);
                 Task broadcastTask;
                 
-                if (GetRequiredChannelMode(dag, sourceAlias) == XStreamerChannelMode.Arrow)
+                if (GetRequiredChannelMode(dag, sourceAlias) == ChannelMode.Arrow)
                     broadcastTask = StartArrowBroadcastAsync(sourceAlias, subs, bCts.Token);
                 else
                     broadcastTask = StartNativeBroadcastAsync(sourceAlias, subs, bCts.Token);
@@ -347,10 +347,10 @@ public class DagOrchestrator : IDagOrchestrator
         CancellationToken ct)
     {
         await Task.Yield();
-        _logger.LogInformation("Starting branch '{Alias}' [IsXStreamer={IsXStreamer}, FromAlias={FromAlias}]",
-            branch.Alias, branch.IsXStreamer, branch.FromAlias ?? "(none)");
+        _logger.LogInformation("Starting branch '{Alias}' [IsProcessor={IsProcessor}, FromAlias={FromAlias}]",
+            branch.Alias, branch.IsProcessor, branch.FromAlias ?? "(none)");
 
-        string role = branch.IsXStreamer ? "[magenta]XStreamer[/]"
+        string role = branch.IsProcessor ? "[magenta]Processor[/]"
                     : !string.IsNullOrEmpty(branch.FromAlias) ? "[cyan]Fan-out (tee)[/]"
                     : "[blue]Linear Branch[/]";
         OnLogEvent?.Invoke($"  [grey]>[/] Starting {role} '{branch.Alias}'");
@@ -359,7 +359,7 @@ public class DagOrchestrator : IDagOrchestrator
         {
             var argsList = branch.Arguments.ToList();
 
-            if (branch.IsXStreamer)
+            if (branch.IsProcessor)
             {
                 var engineInArgs = ExtractArgValue(argsList, "-x") ?? ExtractArgValue(argsList, "--xstreamer");
                 if (string.IsNullOrEmpty(engineInArgs) && !string.IsNullOrEmpty(branch.Input))
@@ -376,11 +376,11 @@ public class DagOrchestrator : IDagOrchestrator
                 }
             }
 
-            if (!branch.IsXStreamer && string.IsNullOrEmpty(branch.Input))
+            if (!branch.IsProcessor && string.IsNullOrEmpty(branch.Input))
             {
                 if (!string.IsNullOrEmpty(resolvedFromAlias))
                 {
-                    var prefix = GetRequiredChannelMode(dag, branch.FromAlias!) == XStreamerChannelMode.Arrow
+                    var prefix = GetRequiredChannelMode(dag, branch.FromAlias!) == ChannelMode.Arrow
                         ? "arrow-memory"
                         : "mem";
                     argsList.Insert(0, $"{prefix}:{resolvedFromAlias}");
@@ -392,7 +392,7 @@ public class DagOrchestrator : IDagOrchestrator
                     var isBranchAlias = dag.Branches.Any(b => b.Alias.Equals(branch.MainAlias, StringComparison.OrdinalIgnoreCase));
                     if (isBranchAlias)
                     {
-                        var prefix = GetRequiredChannelMode(dag, branch.MainAlias) == XStreamerChannelMode.Arrow
+                        var prefix = GetRequiredChannelMode(dag, branch.MainAlias) == ChannelMode.Arrow
                             ? "arrow-memory"
                             : "mem";
                         argsList.Insert(0, $"{prefix}:{branch.MainAlias}");
@@ -411,8 +411,8 @@ public class DagOrchestrator : IDagOrchestrator
             {
                 var mode = GetRequiredChannelMode(dag, branch.Alias);
                 argsList.Add("-o");
-                argsList.Add($"{(mode == XStreamerChannelMode.Arrow ? "arrow-memory" : "mem")}:{branch.Alias}");
-                OnLogEvent?.Invoke($"  [grey]↳ Branch '{branch.Alias}' → [italic]{(mode == XStreamerChannelMode.Arrow ? "Arrow memory channel" : "memory channel")}[/][/]");
+                argsList.Add($"{(mode == ChannelMode.Arrow ? "arrow-memory" : "mem")}:{branch.Alias}");
+                OnLogEvent?.Invoke($"  [grey]↳ Branch '{branch.Alias}' → [italic]{(mode == ChannelMode.Arrow ? "Arrow memory channel" : "memory channel")}[/][/]");
 
                 if (!argsList.Contains("--no-stats", StringComparer.OrdinalIgnoreCase))
                 {
@@ -527,9 +527,9 @@ public class DagOrchestrator : IDagOrchestrator
         }, ct);
     }
 
-    private XStreamerChannelMode GetRequiredChannelMode(JobDagDefinition dag, string alias)
+    private ChannelMode GetRequiredChannelMode(JobDagDefinition dag, string alias)
     {
-        foreach (var branch in dag.Branches.Where(b => b.IsXStreamer))
+        foreach (var branch in dag.Branches.Where(b => b.IsProcessor))
         {
             bool isConsumer = (branch.MainAlias != null && branch.MainAlias.Equals(alias, StringComparison.OrdinalIgnoreCase)) ||
                               branch.RefAliases.Contains(alias, StringComparer.OrdinalIgnoreCase);
@@ -547,7 +547,7 @@ public class DagOrchestrator : IDagOrchestrator
         }
 
         var producerBranch = dag.Branches.FirstOrDefault(b =>
-            b.Alias.Equals(alias, StringComparison.OrdinalIgnoreCase) && !b.IsXStreamer);
+            b.Alias.Equals(alias, StringComparison.OrdinalIgnoreCase) && !b.IsProcessor);
 
         if (producerBranch != null && !string.IsNullOrEmpty(producerBranch.Input))
         {
@@ -557,10 +557,10 @@ public class DagOrchestrator : IDagOrchestrator
                 f.CanHandle(producerBranch.Input));
 
             if (readerFactory?.YieldsColumnarOutput == true)
-                return XStreamerChannelMode.Arrow;
+                return ChannelMode.Arrow;
         }
 
-        return XStreamerChannelMode.Native;
+        return ChannelMode.Native;
     }
 
     private string ResolveInputAlias(string alias, Dictionary<string, List<string>> broadcastSubAliases, Dictionary<string, int> broadcastAssignmentCursor)

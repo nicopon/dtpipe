@@ -189,7 +189,7 @@ public static class ContextualCompletionProvider
 
         bool hasTerminator = context.HasOutput; // context.HasOutput tracks IsTerminator(f) from analyzer
 
-        // Phase 0 (Start): No source (Input/XStreamer/Main/Ref) defined yet
+        // Phase 0 (Start): No source (Input/Processor/Main/Ref) defined yet
         if (!hasSource)
         {
             return suggestions.Where(s => CliPipelineRules.StartRules.Contains(s));
@@ -232,8 +232,8 @@ public static class ContextualCompletionProvider
         // Priority logic
         var highPriority = new List<string>();
 
-        // If we are in an XStreamer branch, we MUST provide sources (--main, --ref)
-        if (context.IsXStreamerBranch)
+        // If we are in a Processor branch, we MUST provide sources (--main, --ref)
+        if (context.IsProcessorBranch)
         {
             highPriority.Add("--main");
             highPriority.Add("--ref");
@@ -288,9 +288,9 @@ public static class ContextualCompletionProvider
                 // Writers visible only after --output is defined
                 context.HasOutput || context.ActivePhase == CliPipelinePhase.Writer,
 
-            CliPipelinePhase.XStreamer =>
-                // XStreamer options visible only in XStreamer branches
-                context.IsXStreamerBranch,
+            CliPipelinePhase.Processor =>
+                // Processor options visible only in Processor branches
+                context.IsProcessorBranch,
 
             _ => true
         };

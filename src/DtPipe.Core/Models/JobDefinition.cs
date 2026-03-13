@@ -13,6 +13,11 @@ public record JobDefinition
 	public string? Output { get; init; }
 	public int BatchSize { get; init; } = 50_000;
 
+    /// <summary>
+    /// The transformation logic to apply if using a processor engine (e.g. DataFusion SQL).
+    /// </summary>
+    public string? Sql { get; init; }
+
 	/// <summary>Append, Truncate, Recreate, etc.</summary>
 	public string? Strategy { get; init; }
 
@@ -54,9 +59,8 @@ public record JobDefinition
 	public string? FinallyExec { get; init; }
 
     public string? Prefix { get; init; }
-    
+
     // Routing/DAG Properties
-    public string? Xstreamer { get; init; }
     public string? Main { get; init; }
     public string[] Ref { get; init; } = Array.Empty<string>();
     public string? From { get; set; }

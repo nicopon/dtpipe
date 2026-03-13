@@ -218,28 +218,28 @@ public class CliStreamReaderFactory : CliProviderFactory<IStreamReader>, IStream
 	public bool YieldsColumnarOutput => _descriptor.YieldsColumnarOutput;
 }
 
-public class CliXStreamerFactory : CliProviderFactory<IStreamReader>, IXStreamerFactory, IStreamReaderFactory
+public class CliProcessorFactory : CliProviderFactory<IStreamReader>, IXStreamerFactory, IStreamReaderFactory
 {
-    private readonly IXStreamerFactory _xStreamerDescriptor;
+    private readonly IXStreamerFactory _processorDescriptor;
 
-    public CliXStreamerFactory(IXStreamerFactory descriptor, OptionsRegistry registry, IServiceProvider serviceProvider)
+    public CliProcessorFactory(IXStreamerFactory descriptor, OptionsRegistry registry, IServiceProvider serviceProvider)
         : base(descriptor, registry, serviceProvider)
     {
-        _xStreamerDescriptor = descriptor;
+        _processorDescriptor = descriptor;
     }
 
-    public XStreamerChannelMode ChannelMode => _xStreamerDescriptor.ChannelMode;
+    public ChannelMode ChannelMode => _processorDescriptor.ChannelMode;
 
-    public bool RequiresQuery => _xStreamerDescriptor.RequiresQuery;
+    public bool RequiresQuery => _processorDescriptor.RequiresQuery;
 
-    protected override CliPipelinePhase DerivePhase() => CliPipelinePhase.XStreamer;
+    protected override CliPipelinePhase DerivePhase() => CliPipelinePhase.Processor;
 
     public IStreamReader Create(OptionsRegistry registry)
     {
         var specificOptions = registry.Get(_descriptor.OptionsType);
         var pipelineOptions = registry.Get<PipelineOptions>();
 
-        return _xStreamerDescriptor.Create(pipelineOptions.ConnectionString, specificOptions!, _serviceProvider);
+        return _processorDescriptor.Create(pipelineOptions.ConnectionString, specificOptions!, _serviceProvider);
     }
 
     public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
@@ -250,7 +250,7 @@ public class CliXStreamerFactory : CliProviderFactory<IStreamReader>, IXStreamer
         {
             options = _registry.Get(_descriptor.OptionsType);
         }
-        return _xStreamerDescriptor.Create(connectionString, options, serviceProvider);
+        return _processorDescriptor.Create(connectionString, options, serviceProvider);
     }
 
     public IEnumerable<Type> GetSupportedOptionTypes()

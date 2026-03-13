@@ -144,7 +144,7 @@ public class JobService
 				NoSchemaValidation = opts.NoSchemaValidation,
 				MetricsPath = opts.MetricsPath,
 				AutoMigrate = opts.AutoMigrate,
-				Xstreamer = opts.Xstreamer,
+				Sql = opts.Sql,
 				Prefix = opts.Prefix,
 				ExportJob = opts.ExportJob,
 				Rename = opts.Rename,
@@ -168,7 +168,7 @@ public class JobService
 				var (j, jec) = RawJobBuilder.Build(parseResult, cliJobOptions);
 				if (jec != 0) { Environment.ExitCode = jec; return; }
 				jobs = j;
-				isDagYaml = jobs.Count > 1 || jobs.Values.Any(j => !string.IsNullOrEmpty(j.Xstreamer) || !string.IsNullOrEmpty(j.From));
+				isDagYaml = jobs.Count > 1 || jobs.Values.Any(j => !string.IsNullOrEmpty(j.Sql) || !string.IsNullOrEmpty(j.From));
 				
 				var branches = new List<BranchDefinition>();
 				foreach (var kvp in jobs)
@@ -178,10 +178,10 @@ public class JobService
 						if (!string.IsNullOrEmpty(kvp.Value.Output)) { args.Add("--output"); args.Add(kvp.Value.Output); }
 						if (!string.IsNullOrEmpty(kvp.Value.Query)) { args.Add("--query"); args.Add(kvp.Value.Query); }
 						if (!string.IsNullOrEmpty(kvp.Value.Table)) { args.Add("--table"); args.Add(kvp.Value.Table); }
-						if (!string.IsNullOrEmpty(kvp.Value.Xstreamer))
+						if (!string.IsNullOrEmpty(kvp.Value.Sql))
 						{
-							args.Add("--xstreamer");
-							args.Add(kvp.Value.Xstreamer ?? "");
+							args.Add("--sql");
+							args.Add(kvp.Value.Sql ?? "");
 						}
 						if (!string.IsNullOrEmpty(kvp.Value.Main)) { args.Add("--main"); args.Add(kvp.Value.Main); }
 						foreach (var r in kvp.Value.Ref ?? Array.Empty<string>()) { args.Add("--ref"); args.Add(r); }
@@ -190,9 +190,9 @@ public class JobService
 						branches.Add(new BranchDefinition
 						{
 							Alias = kvp.Key,
-							Input = !string.IsNullOrEmpty(kvp.Value.Input) ? kvp.Value.Input : kvp.Value.Xstreamer,
+							Input = !string.IsNullOrEmpty(kvp.Value.Input) ? kvp.Value.Input : kvp.Value.Sql,
 							Output = kvp.Value.Output,
-							IsXStreamer = !string.IsNullOrEmpty(kvp.Value.Xstreamer),
+							Processor = !string.IsNullOrEmpty(kvp.Value.Sql) ? ProcessorKind.Sql : ProcessorKind.None,
 							MainAlias = kvp.Value.Main,
 							FromAlias = kvp.Value.From,
 							RefAliases = (kvp.Value.Ref ?? Array.Empty<string>()).ToList(),
@@ -227,7 +227,7 @@ public class JobService
 							Main = branch.MainAlias, 
 							Ref = branch.RefAliases?.ToArray() ?? Array.Empty<string>(), 
 							From = branch.FromAlias,
-							Xstreamer = branch.IsXStreamer ? branch.Input : null,
+							Sql = branch.IsProcessor ? branch.Input : null,
 							Transformers = RawJobBuilder.BuildTransformerConfigsFromCli(branch.Arguments, factoryList, _contributors)
 						};
 						jobs[branch.Alias] = bj;
@@ -306,8 +306,8 @@ public class JobService
 				providerConfigService.BindOptions(job, pr);
 
 				var linearPipelineService = new DtPipe.Cli.Services.LinearPipelineService(_contributors, _serviceProvider, registry, _console);
-				var isXStreamer = !string.IsNullOrEmpty(job.Xstreamer);
-				return await linearPipelineService.ExecuteAsync(job, currentRawArgs, token, localAlias, dagDefinition.IsDag, isXStreamer);
+				var isProcessor = !string.IsNullOrEmpty(job.Sql);
+				return await linearPipelineService.ExecuteAsync(job, currentRawArgs, token, localAlias, dagDefinition.IsDag, isProcessor);
 			};
 			// Initialize logging early for DAG execution
 			var logPath = parseResult.GetValue(opts.Log);
@@ -336,7 +336,7 @@ public class JobService
 				var tree = new Tree("[yellow]🔀 Pipeline DAG Topology[/]");
 				foreach (var branch in dagDefinition.Branches)
 				{
-					if (branch.IsXStreamer)
+					if (branch.IsProcessor)
 					{
 						var junction = $"[magenta]⚙ XStreamer:[/] [white]{branch.Alias}[/] (Main: [cyan]{branch.MainAlias}[/]";
 						if (branch.RefAliases.Any()) junction += $", Refs: [cyan]{string.Join(", ", branch.RefAliases)}[/]";

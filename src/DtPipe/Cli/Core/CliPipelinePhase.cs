@@ -21,6 +21,6 @@ public enum CliPipelinePhase
     /// <summary>Visible only after --output has been specified in the current branch.</summary>
     Writer = 4,
 
-    /// <summary>Visible only in an XStreamer branch (initiated by --xstreamer).</summary>
-    XStreamer = 8,
+    /// <summary>Visible only in a Processor branch (initiated by --sql).</summary>
+    Processor = 8,
 }

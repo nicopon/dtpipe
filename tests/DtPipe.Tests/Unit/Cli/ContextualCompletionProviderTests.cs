@@ -20,7 +20,7 @@ public class ContextualCompletionProviderTests
     public void AfterMainFlag_ReturnsOnlyKnownAliases()
     {
         var root = BuildTestRootCommand(out var allOptions);
-        var rawWords = new[] { "dtpipe", "--input", "pg:A", "--alias", "brA", "-x", "fusion-engine", "--main", "" };
+        var rawWords = new[] { "dtpipe", "--input", "pg:A", "--alias", "brA", "--sql", "fusion-engine", "--main", "" };
         int cursorPos = 8; // index of the empty string
 
         var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions, new Dictionary<string, CliPipelinePhase>(), Array.Empty<ICliContributor>());
@@ -47,7 +47,7 @@ public class ContextualCompletionProviderTests
     public void NoAlias_AfterMain_ReturnsEmpty()
     {
         var root = BuildTestRootCommand(out var allOptions);
-        var rawWords = new[] { "dtpipe", "-x", "fusion-engine", "--main", "" };
+        var rawWords = new[] { "dtpipe", "--sql", "fusion-engine", "--main", "" };
         int cursorPos = 4;
 
         var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions, new Dictionary<string, CliPipelinePhase>(), Array.Empty<ICliContributor>());
@@ -88,7 +88,7 @@ public class ContextualCompletionProviderTests
         Assert.DoesNotContain("--format", completions);
         Assert.DoesNotContain("--strategy", completions);
         Assert.DoesNotContain("--filter", completions);
-        Assert.DoesNotContain("-x", completions);
+        Assert.Contains("--sql", completions);
         Assert.DoesNotContain("fusion-engine", completions);
     }
 
