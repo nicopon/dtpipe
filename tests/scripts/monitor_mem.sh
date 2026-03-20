@@ -1,5 +1,5 @@
 #!/bin/bash
-ROOT_DIR="/Users/REDACTED/Source/dtpipe"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DTPIPE_CMD="$ROOT_DIR/dist/release/dtpipe"
 
 # Start the benchmark

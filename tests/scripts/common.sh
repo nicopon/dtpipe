@@ -2,23 +2,8 @@
 
 # Shared helper functions for DtPipe integration tests
 
-# Run dtpipe with automatic YAML export/import verification
+# Run dtpipe via YAML round-trip: export CLI args to a job file, then execute from it.
 # Usage: run_via_yaml [args...]
-# This function will:
-# 1. Run the command directly (to verify CLI args work)
-# 2. Export the config to YAML
-# 3. Run the command using the YAML config (to verify YAML support)
-# 
-# Note: For efficiency, we might want to ONLY run via YAML to save time if the goal is testing logic + yaml.
-# But keeping the direct run ensures CLI parsing isn't broken.
-# However, the user request "generating yaml via command line then a second run with the yaml" implies doing both or at least the chain.
-# To match the user request exactly: "export yaml via CLI args -> run with yaml". 
-# So we can skip the direct run if we want to be strict about "using yaml for the run", allows testing that export works.
-# But for now let's be safe: If we replace $DTPIPE with this, previous tests expected $DTPIPE to execute the action.
-# So we should probably do:
-# 1. Export to YAML
-# 2. Run from YAML
-# IF we skip direct run, we rely 100% on YAML path. This is good for "YAML integration tests".
 
 run_via_yaml() {
     local yaml_file="$OUTPUT_DIR/temp_config_$$.yaml"

@@ -8,7 +8,7 @@ DTPIPE_BIN="$DIST_DIR/dtpipe"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 INFRA_DIR="$PROJECT_ROOT/tests/infra"
-ARTIFACTS_DIR="$PROJECT_ROOT/tests/scripts/artifacts"
+ARTIFACTS_DIR="$PROJECT_ROOT/tests/artifacts"
 
 
 echo "--- DtPipe Smoke Test ---"

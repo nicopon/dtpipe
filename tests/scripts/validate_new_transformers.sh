@@ -4,7 +4,7 @@ set -e
 # Setup
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DTPIPE="$ROOT_DIR/dist/release/dtpipe"
-ARTIFACTS_DIR="$ROOT_DIR/tests/scripts/artifacts"
+ARTIFACTS_DIR="$ROOT_DIR/tests/artifacts"
 mkdir -p "$ARTIFACTS_DIR"
 
 cleanup() {

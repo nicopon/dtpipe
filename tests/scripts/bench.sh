@@ -1,6 +1,6 @@
-ROOT_DIR="/Users/REDACTED/Source/dtpipe"
-DIR="$ROOT_DIR/tests/scripts"
-ARTIFACTS_DIR="$DIR/artifacts"
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$DIR/../.." && pwd)"
+ARTIFACTS_DIR="$DIR/../artifacts"
 DTPIPE_CMD="$ROOT_DIR/dist/release/dtpipe"
 
 MAIN_PARQUET="$ARTIFACTS_DIR/main.parquet"

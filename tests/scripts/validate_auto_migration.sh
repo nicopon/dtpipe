@@ -5,7 +5,7 @@ SCRIPT_DIR="$(dirname "$0")"
 PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 DIST_DIR="$PROJECT_ROOT/dist/release"
 DTPIPE_BIN="$DIST_DIR/dtpipe"
-ARTIFACTS_DIR="tests/scripts/artifacts"
+ARTIFACTS_DIR="$PROJECT_ROOT/tests/artifacts"
 mkdir -p "$ARTIFACTS_DIR"
 
 # Colors

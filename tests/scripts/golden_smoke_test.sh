@@ -4,7 +4,7 @@ set -e
 # Configuration
 DIST_DIR="./dist/release"
 DTPIPE_BIN="$DIST_DIR/dtpipe"
-INPUT_DIR="tests/scripts/artifacts"
+INPUT_DIR="tests/artifacts"
 mkdir -p "$INPUT_DIR"
 
 PG_CONTAINER="dtpipe-golden-pg"

@@ -6,9 +6,9 @@ This directory contains a suite of Bash scripts used to validate the DtPipe func
 
 DtPipe uses a centralized Docker infrastructure for all integration tests.
 
-- **Shared Infrastructure**: All database containers (Postgres, MSSQL, Oracle) are defined in [tests/infra/docker-compose.yml](file:///Users/REDACTED/Source/dtpipe/tests/infra/docker-compose.yml).
-- **Startup & Health**: Scripts call [start_infra.sh](file:///Users/REDACTED/Source/dtpipe/tests/infra/start_infra.sh) which ensures all services are not just running, but fully ready for SQL connections.
-- **Persistence**: To accelerate development, containers **persist** after scripts finish. Use [stop_infra.sh](file:///Users/REDACTED/Source/dtpipe/tests/infra/stop_infra.sh) if you need a full cleanup.
+- **Shared Infrastructure**: All database containers (Postgres, MSSQL, Oracle) are defined in [tests/infra/docker-compose.yml](../infra/docker-compose.yml).
+- **Startup & Health**: Scripts call [start_infra.sh](../infra/start_infra.sh) which ensures all services are not just running, but fully ready for SQL connections.
+- **Persistence**: To accelerate development, containers **persist** after scripts finish. Use [stop_infra.sh](../infra/stop_infra.sh) if you need a full cleanup.
 
 ## Scripts Index
 
@@ -76,4 +76,4 @@ All scripts should be executed from the project root. They automatically build t
 Most scripts use the `run_via_yaml` function (defined in `common.sh`). This validates that CLI arguments correctly translate to YAML job definitions.
 
 ### Artifacts
-Temporary files are generated in `tests/scripts/artifacts/`. Successful runs clean up their specific files, while failed runs preserve them for debugging.
+Temporary files are generated in `tests/artifacts/`. Successful runs clean up their specific files, while failed runs preserve them for debugging.
