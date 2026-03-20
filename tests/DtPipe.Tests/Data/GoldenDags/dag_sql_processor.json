@@ -1,0 +1,23 @@
+{
+  "branches": [
+    {
+      "alias": "src",
+      "arguments": [],
+      "processor": 0,
+      "isProcessor": false,
+      "input": "generate:100",
+      "refAliases": []
+    },
+    {
+      "alias": "processed",
+      "arguments": [],
+      "processor": 1,
+      "isProcessor": true,
+      "input": "fusion-engine",
+      "output": "csv:/tmp/processed.csv",
+      "fromAlias": "src",
+      "refAliases": [],
+      "sqlQuery": "SELECT * FROM src LIMIT 10"
+    }
+  ]
+}

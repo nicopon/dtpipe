@@ -1,0 +1,33 @@
+{
+  "branches": [
+    {
+      "alias": "main_stream",
+      "arguments": [],
+      "processor": 0,
+      "isProcessor": false,
+      "input": "generate:100",
+      "refAliases": []
+    },
+    {
+      "alias": "ref_data",
+      "arguments": [],
+      "processor": 0,
+      "isProcessor": false,
+      "input": "generate:10",
+      "refAliases": []
+    },
+    {
+      "alias": "result",
+      "arguments": [],
+      "processor": 1,
+      "isProcessor": true,
+      "input": "fusion-engine",
+      "output": "csv:/tmp/result.csv",
+      "fromAlias": "main_stream",
+      "refAliases": [
+        "ref_data"
+      ],
+      "sqlQuery": "SELECT m.* FROM main_stream m JOIN ref_data r ON m.id = r.id"
+    }
+  ]
+}

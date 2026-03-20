@@ -1,0 +1,30 @@
+{
+  "branches": [
+    {
+      "alias": "src",
+      "arguments": [],
+      "processor": 0,
+      "isProcessor": false,
+      "input": "generate:50",
+      "refAliases": []
+    },
+    {
+      "alias": "consumer_a",
+      "arguments": [],
+      "processor": 0,
+      "isProcessor": false,
+      "output": "csv:/tmp/consumer_a.csv",
+      "fromAlias": "src",
+      "refAliases": []
+    },
+    {
+      "alias": "consumer_b",
+      "arguments": [],
+      "processor": 0,
+      "isProcessor": false,
+      "output": "csv:/tmp/consumer_b.csv",
+      "fromAlias": "src",
+      "refAliases": []
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "branches": [
+    {
+      "alias": "main",
+      "arguments": [],
+      "processor": 0,
+      "isProcessor": false,
+      "input": "generate:10",
+      "output": "csv:/tmp/out.csv",
+      "refAliases": []
+    }
+  ]
+}
