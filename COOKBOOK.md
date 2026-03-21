@@ -236,7 +236,7 @@ dtpipe ... --compute "Category:@scripts/categorize_age.js"
 
 ---
 
-## Columnar Transfers & XStreamers
+## Columnar Transfers & SQL Processors
 
 ### Columnar Fast-Path
 When no row-based transformations (JS scripts, fakers) are in the pipeline, DtPipe transfers raw memory buffers directly between columnar formats (Parquet, Arrow, DuckDB) without deserializing rows.
@@ -246,31 +246,20 @@ When no row-based transformations (JS scripts, fakers) are in the pipeline, DtPi
 dtpipe -i data.parquet -o data.arrow
 ```
 
-### High-Performance Joins (XStreamers)
+### High-Performance Joins (SQL Processors)
 
-Use XStreamers to join multiple sources in memory without intermediate files.
+Use `--from` + `--sql` to join multiple sources in memory without intermediate files.
+The `--from` source is streamed; `--ref` sources are fully preloaded into memory to enable DataFusion's cost-based query planning.
 
-#### DuckDB XStreamer
-SQL joins and aggregations on in-memory Arrow streams, powered by DuckDB.
-
-```bash
-dtpipe \
-  -i "main_data.parquet" --alias main \
-  -i "metadata.csv" --alias ref \
-  -x duck --main main --ref ref \
-  -q "SELECT main.*, ref.name FROM main JOIN ref ON main.id = ref.id" \
-  -o "enriched.parquet"
-```
-
-#### DataFusion XStreamer
-Rust-based DataFusion engine as an alternative for columnar processing.
+#### DataFusion Processor
+Rust-based DataFusion engine for high-performance columnar SQL processing.
 
 ```bash
 dtpipe \
   -i "main_data.parquet" --alias main \
   -i "metadata.csv" --alias ref \
-  -x fusion --main main --ref ref \
-  -q "SELECT main.*, ref.name FROM main JOIN ref ON main.id = ref.id" \
+  --from main --ref ref \
+  --sql "SELECT main.*, ref.name FROM main JOIN ref ON main.id = ref.id" \
   -o "enriched.parquet"
 ```
 

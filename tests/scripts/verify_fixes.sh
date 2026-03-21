@@ -25,8 +25,8 @@ run_test "T4" "$DTPIPE -i artifacts/test_data.csv --mask 'Email:####@####.com' -
 # T7: Overwrite & Null (Reproduction of NRE)
 run_test "T7" "$DTPIPE -i artifacts/test_data.parquet --null 'Category' --overwrite 'Price:0.0' -o artifacts/output_t7_verify.csv"
 
-# T21 (DAG-ified): Using multiple global flags (-i, -x, -q, --main) to verify arity fix
-run_test "T21" "$DTPIPE -i artifacts/test_data.csv --alias c -x fusion-engine --main c -q 'SELECT id FROM c' --alias stream1 -x fusion-engine --main c --ref stream1 -q 'SELECT * FROM c JOIN stream1 ON c.id = stream1.id' -o artifacts/output_t21_verify.csv"
+# T21 (DAG-ified): Using multiple global flags (-i, --sql, -q, --main) to verify arity fix
+run_test "T21" "$DTPIPE -i artifacts/test_data.csv --alias c --sql fusion-engine --main c -q 'SELECT id FROM c' --alias stream1 --sql fusion-engine --main c --ref stream1 -q 'SELECT * FROM c JOIN stream1 ON c.id = stream1.id' -o artifacts/output_t21_verify.csv"
 
 # T26: CROSS JOIN DAG
 run_test "T26" "$DTPIPE --main 'generate:100' --alias g1 --ref 'generate:50' --alias g2 -x fusion-engine -q 'SELECT g1.* FROM g1 CROSS JOIN g2' -o artifacts/output_t26_verify.parquet"

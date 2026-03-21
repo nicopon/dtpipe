@@ -7,7 +7,7 @@ namespace DtPipe.Services;
 /// <summary>
 /// Handles metrics saving and memory logging.
 /// </summary>
-internal sealed class MetricsService
+public sealed class MetricsService
 {
     private readonly IExportObserver _observer;
     private readonly ILogger<MetricsService> _logger;

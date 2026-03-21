@@ -7,7 +7,7 @@ namespace DtPipe.Services;
 /// <summary>
 /// Executes pre/post/error/finally hooks on a writer.
 /// </summary>
-internal sealed class HookExecutor
+public sealed class HookExecutor
 {
     private readonly IExportObserver _observer;
     private readonly ILogger<HookExecutor> _logger;

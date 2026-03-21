@@ -47,7 +47,7 @@ internal static class CoreOptionsBuilder
         { "--job",                CliPipelinePhase.Global },
         { "--export-job",         CliPipelinePhase.Global },
         { "--metrics-path",       CliPipelinePhase.Global },
-        // Processor Engine (replaces XStreamer)
+        // Processor options
         { "--main",               CliPipelinePhase.Processor },
         { "--ref",                CliPipelinePhase.Processor },
         { "--src-main",           CliPipelinePhase.Processor },
@@ -134,10 +134,10 @@ internal static class CoreOptionsBuilder
 
         var retryDelayMsOption = new Option<int[]>("--retry-delay-ms") { Description = "Initial retry delay in ms", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
 
-        // Processor Options (Unified --sql syntax)
+        // Processor Options
         var sqlOption = new Option<string[]>("--sql")
         {
-            Description = "Engine logic or SQL query (replaces --xstreamer)",
+            Description = "Start a processor branch: specify the engine name (e.g. fusion-engine) followed by --query, --main, --ref",
             Arity = ArgumentArity.ZeroOrMore,
             AllowMultipleArgumentsPerToken = true
         };

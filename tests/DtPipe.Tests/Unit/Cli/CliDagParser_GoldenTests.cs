@@ -23,6 +23,7 @@ public class CliDagParser_GoldenTests
     [Fact]
     public void Parse_SqlProcessorArgs_MatchesGoldenSqlProcessor()
     {
+        // New syntax: --from <alias> --sql "<query>"
         var args = new[]
         {
             "-i", "generate:100", "--alias", "src",
@@ -33,8 +34,7 @@ public class CliDagParser_GoldenTests
         var golden = GoldenDagDefinitions.Dag_SourcePlusSqlProcessor;
 
         Assert.Equal(2, dag.Branches.Count);
-        Assert.Equal(golden.Branches[1].FromAlias, dag.Branches[1].FromAlias);
-        Assert.Equal(golden.Branches[1].SqlQuery, dag.Branches[1].SqlQuery);
+        Assert.Equal(golden.Branches[1].MainAlias, dag.Branches[1].MainAlias);
         Assert.True(dag.Branches[1].IsProcessor);
     }
 
@@ -53,5 +53,53 @@ public class CliDagParser_GoldenTests
         Assert.Equal(3, dag.Branches.Count);
         Assert.Equal(golden.Branches[1].FromAlias, dag.Branches[1].FromAlias);
         Assert.Equal(golden.Branches[2].FromAlias, dag.Branches[2].FromAlias);
+    }
+
+    [Fact]
+    public void Parse_FanOut_WithSqlProcessor_MatchesGolden()
+    {
+        // src is consumed by sink_a (fan-out) and by result (processor via --from).
+        var args = new[]
+        {
+            "-i", "generate:50", "--alias", "src",
+            "--from", "src", "--alias", "sink_a", "-o", "csv:/tmp/sink_a.csv",
+            "--from", "src", "--alias", "result", "--sql", "SELECT * FROM src", "-o", "csv:/tmp/result.csv"
+        };
+        var dag = CliDagParser.Parse(args);
+        var golden = GoldenDagDefinitions.Dag_FanOut_WithSqlProcessor;
+
+        Assert.Equal(3, dag.Branches.Count);
+
+        Assert.Equal(golden.Branches[0].Alias, dag.Branches[0].Alias);
+        Assert.False(dag.Branches[0].IsProcessor);
+
+        Assert.Equal(golden.Branches[1].Alias,    dag.Branches[1].Alias);
+        Assert.Equal(golden.Branches[1].FromAlias, dag.Branches[1].FromAlias);
+        Assert.False(dag.Branches[1].IsProcessor);
+
+        Assert.Equal(golden.Branches[2].Alias,     dag.Branches[2].Alias);
+        Assert.Equal(golden.Branches[2].MainAlias,  dag.Branches[2].MainAlias);
+        Assert.True(dag.Branches[2].IsProcessor);
+    }
+
+    [Fact]
+    public void Parse_SqlProcessorWithRef_MatchesGolden()
+    {
+        // --from = main streaming source, --ref = materialized reference.
+        var args = new[]
+        {
+            "-i", "generate:100", "--alias", "main_stream",
+            "-i", "generate:10",  "--alias", "ref_data",
+            "--from", "main_stream", "--ref", "ref_data",
+            "--sql", "SELECT m.* FROM main_stream m JOIN ref_data r ON m.id = r.id",
+            "--alias", "result", "-o", "csv:/tmp/result.csv"
+        };
+        var dag = CliDagParser.Parse(args);
+        var golden = GoldenDagDefinitions.Dag_SqlProcessor_WithRef;
+
+        Assert.Equal(3, dag.Branches.Count);
+        Assert.Equal(golden.Branches[2].MainAlias,  dag.Branches[2].MainAlias);
+        Assert.Equal(golden.Branches[2].RefAliases, dag.Branches[2].RefAliases);
+        Assert.True(dag.Branches[2].IsProcessor);
     }
 }

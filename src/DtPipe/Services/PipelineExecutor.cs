@@ -14,7 +14,7 @@ using Microsoft.Extensions.Logging;
 
 namespace DtPipe.Services;
 
-internal sealed class PipelineExecutor
+public sealed class PipelineExecutor
 {
     private readonly IEnumerable<IRowToColumnarBridgeFactory> _bridgeFactories;
     private readonly IEnumerable<IColumnarToRowBridgeFactory> _columnarToRowBridgeFactories;

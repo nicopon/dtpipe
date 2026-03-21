@@ -21,8 +21,6 @@ public class ExportService
 	private readonly IEnumerable<IStreamReaderFactory> _readerFactories;
 	private readonly IEnumerable<IDataWriterFactory> _writerFactories;
 	private readonly IEnumerable<IDataTransformerFactory> _transformerFactories;
-	private readonly IEnumerable<IRowToColumnarBridgeFactory> _bridgeFactories;
-	private readonly IEnumerable<IColumnarToRowBridgeFactory> _columnarToRowBridgeFactories;
 	private readonly OptionsRegistry _optionsRegistry;
 	private readonly IExportObserver _observer;
 	private readonly IMemoryChannelRegistry? _channelRegistry;
@@ -37,27 +35,26 @@ public class ExportService
 		IEnumerable<IStreamReaderFactory> readerFactories,
 		IEnumerable<IDataWriterFactory> writerFactories,
 		IEnumerable<IDataTransformerFactory> transformerFactories,
-		IEnumerable<IRowToColumnarBridgeFactory> bridgeFactories,
-		IEnumerable<IColumnarToRowBridgeFactory> columnarToRowBridgeFactories,
 		OptionsRegistry optionsRegistry,
 		IExportObserver observer,
 		ILogger<ExportService> logger,
-		ILoggerFactory loggerFactory,
+		HookExecutor hookExecutor,
+		MetricsService metricsService,
+		SchemaValidationService schemaValidator,
+		PipelineExecutor pipelineExecutor,
 		IMemoryChannelRegistry? channelRegistry = null)
 	{
 		_readerFactories = readerFactories;
 		_writerFactories = writerFactories;
 		_transformerFactories = transformerFactories;
-		_bridgeFactories = bridgeFactories;
-		_columnarToRowBridgeFactories = columnarToRowBridgeFactories;
 		_optionsRegistry = optionsRegistry;
 		_observer = observer;
 		_logger = logger;
 		_channelRegistry = channelRegistry;
-		_hookExecutor = new HookExecutor(observer, loggerFactory.CreateLogger<HookExecutor>());
-		_metricsService = new MetricsService(observer, loggerFactory.CreateLogger<MetricsService>());
-		_schemaValidator = new SchemaValidationService(observer, loggerFactory.CreateLogger<SchemaValidationService>());
-		_pipelineExecutor = new PipelineExecutor(_bridgeFactories, _columnarToRowBridgeFactories, loggerFactory.CreateLogger<PipelineExecutor>());
+		_hookExecutor = hookExecutor;
+		_metricsService = metricsService;
+		_schemaValidator = schemaValidator;
+		_pipelineExecutor = pipelineExecutor;
 	}
 
 	public async Task RunExportAsync(

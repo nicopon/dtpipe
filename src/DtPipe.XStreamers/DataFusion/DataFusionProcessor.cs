@@ -15,7 +15,7 @@ namespace DtPipe.XStreamers.DataFusion;
 
 public sealed class DataFusionProcessor : IColumnarStreamReader
 {
-    private readonly IMemoryChannelRegistry _registry;
+    private readonly IArrowChannelRegistry _registry;
     private readonly string _query;
     private readonly string _mainAlias;
     private readonly string[] _refAliases;
@@ -34,7 +34,7 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
     public Schema? Schema => _resultSchema;
 
     public DataFusionProcessor(
-        IMemoryChannelRegistry registry,
+        IArrowChannelRegistry registry,
         string query,
         string mainAlias,
         string[] refAliases,
@@ -171,8 +171,8 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
             batches.Add(batch);
         }
 
-        if (batches.Count == 0) return;
-
+        // Always register the table even when empty so the SQL query can reference it.
+        // Skipping registration on 0 batches would cause "table not found" errors in DataFusion.
         RegisterBatchesSafe(alias, schema, batches);
     }
 

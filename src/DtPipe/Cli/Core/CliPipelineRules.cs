@@ -98,7 +98,7 @@ public static class CliPipelineRules
     };
 
     /// <summary>
-    /// Flags that define a new branch or a Processor junction.
+    /// Identifies a branch as a SQL processor. Note: does NOT trigger a branch split — --from opens the new branch.
     /// </summary>
     public static readonly HashSet<string> ProcessorFlags = new(StringComparer.OrdinalIgnoreCase) { "--sql" };
     public static readonly HashSet<string> InputFlags = new(StringComparer.OrdinalIgnoreCase) { "-i", "--input" };

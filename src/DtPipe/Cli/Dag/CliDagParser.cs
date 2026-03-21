@@ -5,32 +5,29 @@ namespace DtPipe.Cli.Dag;
 
 /// <summary>
 /// Pre-parses the raw application arguments to detect and split the pipeline into a Directed Acyclic Graph (DAG)
-/// consisting of multiple branches separated by the '--sql', '-x' or '--processor' flags.
+/// consisting of multiple branches.
+///
+/// Split triggers (start a new branch):
+///   - <c>-i</c> / <c>--input</c>  when a previous input was already seen in the current branch
+///   - <c>--from</c>               always (fan-out consumer or processor main source)
+///
+/// A branch containing <c>--sql</c> is identified as a SQL processor:
+///   - <c>--from &lt;alias&gt;</c> declares the main streaming source.
+///   - <c>--ref &lt;alias&gt;</c>  declares materialized reference sources.
+///   - <c>--sql "&lt;query&gt;"</c> carries the SQL query inline.
 /// </summary>
 public static class CliDagParser
 {
-    // Use flags from CliPipelineRules
-    // private static readonly string[] XStreamerFlags = { "-x", "--xstreamer" };
-    // private static readonly string[] AliasFlags = { "--alias" };
-    // private static readonly string[] InputFlags = { "-i", "--input" };
-
     /// <summary>
     /// Parses the raw command line arguments into a JobDagDefinition.
     /// </summary>
-    /// <param name="args">The raw args from Environment.GetCommandLineArgs() (excluding the executable path).</param>
-    /// <param name="defaultProcessor">Optional default processor if unspecified.</param>
-    /// <returns>A parsed DAG definition containing global arguments and specific branches.</returns>
     public static JobDagDefinition Parse(string[] args, string? defaultProcessor = null)
     {
         if (args == null || args.Length == 0)
-        {
             return new JobDagDefinition { Branches = Array.Empty<BranchDefinition>() };
-        }
 
         var branches = new List<BranchDefinition>();
         var currentBranchArgs = new List<string>();
-
-        bool isCurrentBranchProcessor = false;
         bool hasSeenInputInCurrentBranch = false;
         int branchCounter = 0;
 
@@ -38,56 +35,29 @@ public static class CliDagParser
         {
             var arg = args[i];
 
-            if (CliPipelineRules.ProcessorFlags.Contains(arg))
+            if (CliPipelineRules.InputFlags.Contains(arg))
             {
-                // Split if we already have a processor OR an input in the current branch
-                if (isCurrentBranchProcessor || hasSeenInputInCurrentBranch)
+                // Split only if we already have an input in the current branch.
+                if (hasSeenInputInCurrentBranch && currentBranchArgs.Count > 0)
                 {
-                    if (currentBranchArgs.Count > 0)
-                    {
-                        var branch = CreateBranch(currentBranchArgs, isCurrentBranchProcessor, ref branchCounter, defaultProcessor, branches.LastOrDefault()?.Alias);
-                        branches.Add(branch);
-                        currentBranchArgs.Clear();
-                    }
+                    branches.Add(CreateBranch(currentBranchArgs, ref branchCounter, defaultProcessor));
+                    currentBranchArgs.Clear();
                     hasSeenInputInCurrentBranch = false;
-                }
-
-                isCurrentBranchProcessor = true;
-                currentBranchArgs.Add(arg);
-            }
-            else if (CliPipelineRules.InputFlags.Contains(arg) || arg.Equals("--from", StringComparison.OrdinalIgnoreCase))
-            {
-                // Split if we've already seen an input in the current branch.
-                if (hasSeenInputInCurrentBranch)
-                {
-                    if (currentBranchArgs.Count > 0)
-                    {
-                        var branch = CreateBranch(currentBranchArgs, isCurrentBranchProcessor, ref branchCounter, defaultProcessor, branches.LastOrDefault()?.Alias);
-                        branches.Add(branch);
-                        currentBranchArgs.Clear();
-                    }
-                    isCurrentBranchProcessor = false;
                 }
 
                 hasSeenInputInCurrentBranch = true;
                 currentBranchArgs.Add(arg);
             }
-            else if (arg.Equals("--main", StringComparison.OrdinalIgnoreCase) || arg.Equals("--ref", StringComparison.OrdinalIgnoreCase))
+            else if (arg.Equals("--from", StringComparison.OrdinalIgnoreCase))
             {
-                // Split on --main/--ref ONLY IF we are NOT in a processor branch AND already have an input.
-                // If we ARE in a processor branch, these are just options.
-                if (!isCurrentBranchProcessor && hasSeenInputInCurrentBranch)
+                // --from always starts a new branch (fan-out consumer or processor main source).
+                if (currentBranchArgs.Count > 0)
                 {
-                    if (currentBranchArgs.Count > 0)
-                    {
-                        var branch = CreateBranch(currentBranchArgs, isCurrentBranchProcessor, ref branchCounter, defaultProcessor, branches.LastOrDefault()?.Alias);
-                        branches.Add(branch);
-                        currentBranchArgs.Clear();
-                    }
-                    hasSeenInputInCurrentBranch = false; 
+                    branches.Add(CreateBranch(currentBranchArgs, ref branchCounter, defaultProcessor));
+                    currentBranchArgs.Clear();
                 }
-                
-                if (!isCurrentBranchProcessor) hasSeenInputInCurrentBranch = true;
+
+                hasSeenInputInCurrentBranch = false;
                 currentBranchArgs.Add(arg);
             }
             else
@@ -96,60 +66,123 @@ public static class CliDagParser
             }
         }
 
-        // Add the last branch
         if (currentBranchArgs.Count > 0)
-        {
-            branches.Add(CreateBranch(currentBranchArgs, isCurrentBranchProcessor, ref branchCounter, defaultProcessor, branches.LastOrDefault()?.Alias));
-        }
+            branches.Add(CreateBranch(currentBranchArgs, ref branchCounter, defaultProcessor));
 
-        return new JobDagDefinition
-        {
-            Branches = branches
-        };
+        return new JobDagDefinition { Branches = branches };
     }
 
-    private static BranchDefinition CreateBranch(List<string> args, bool isProcessor, ref int branchCounter, string? defaultProcessor = null, string? previousAlias = null)
+    private static BranchDefinition CreateBranch(List<string> args, ref int branchCounter, string? defaultProcessor = null)
     {
-        string? alias = ExtractArgValue(args.ToArray(), "--alias");
+        var argsArray = args.ToArray();
 
+        string? alias = ExtractArgValue(argsArray, "--alias");
         if (string.IsNullOrEmpty(alias))
-        {
             alias = $"stream{branchCounter}";
-        }
-
         branchCounter++;
 
-        var argsArray = args.ToArray();
-        var input = ExtractArgValue(argsArray, "-i") ?? ExtractArgValue(argsArray, "--input");
+        var sqlQuery = ExtractSqlQuery(argsArray);
+        bool isProcessor = sqlQuery != null;
 
-        if (input == null && isProcessor)
+        var fromValue = ExtractArgValue(argsArray, "--from");
+
+        var refAliases = ExtractAllArgValues(argsArray, "--ref")
+            .SelectMany(r => r.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .ToList();
+
+        string? mainAlias = null;
+        string? fromAlias = null;
+        string? input;
+        string[] normalizedArgs;
+
+        if (isProcessor)
         {
-            input = ExtractArgValue(argsArray, "--sql") ?? ExtractArgValue(argsArray, "--xstreamer") ?? ExtractArgValue(argsArray, "-x") ?? defaultProcessor;
+            mainAlias = fromValue;
+            input = defaultProcessor ?? "fusion-engine";
+            // Normalize: --from <alias> → --main <alias>; --sql "<query>" → -q "<query>"
+            // The orchestrator injects --sql <engine> when --sql is absent from the args.
+            normalizedArgs = NormalizeProcessorArgs(argsArray, mainAlias);
         }
-
-        var mainAlias = ExtractArgValue(argsArray, "--main");
-        if (isProcessor && string.IsNullOrEmpty(mainAlias) && !string.IsNullOrEmpty(previousAlias))
+        else
         {
-            mainAlias = previousAlias;
+            input = ExtractArgValue(argsArray, "-i") ?? ExtractArgValue(argsArray, "--input");
+            fromAlias = fromValue;
+            normalizedArgs = argsArray;
         }
-
-        // Extract the --from alias for fan-out (tee) branches.
-        // This is mutually exclusive with having an explicit -i input.
-        var fromAlias = ExtractArgValue(argsArray, "--from");
 
         return new BranchDefinition
         {
             Alias = alias,
-            Arguments = argsArray,
+            Arguments = normalizedArgs,
             Processor = isProcessor ? ProcessorKind.Sql : ProcessorKind.None,
             Input = input,
             Output = ExtractArgValue(argsArray, "-o") ?? ExtractArgValue(argsArray, "--output"),
             MainAlias = mainAlias,
             FromAlias = fromAlias,
-            RefAliases = ExtractAllArgValues(argsArray, "--ref")
-                .SelectMany(r => r.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                .ToList()
+            RefAliases = refAliases,
+            SqlQuery = sqlQuery
         };
+    }
+
+    /// <summary>
+    /// Extracts the SQL query from <c>--sql "&lt;query&gt;"</c>.
+    /// Returns null if no <c>--sql</c> flag is present (branch is not a processor).
+    /// </summary>
+    private static string? ExtractSqlQuery(string[] args)
+    {
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (!args[i].Equals("--sql", StringComparison.OrdinalIgnoreCase)) continue;
+
+            if (i + 1 >= args.Length) return null;
+
+            var val = args[i + 1];
+            // Next token is another flag → no value.
+            if (val.StartsWith('-') && val.Length > 1 && !char.IsDigit(val[1])) return null;
+
+            return val;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Normalizes the raw args of a processor branch for System.CommandLine / DataFusionProcessorFactory:
+    /// <list type="bullet">
+    ///   <item><c>--from &lt;alias&gt;</c> → <c>--main &lt;alias&gt;</c></item>
+    ///   <item><c>--sql "&lt;query&gt;"</c> → <c>-q "&lt;query&gt;"</c>
+    ///         (the orchestrator injects <c>--sql fusion-engine</c> when the flag is absent)</item>
+    /// </list>
+    /// </summary>
+    private static string[] NormalizeProcessorArgs(string[] args, string? mainAlias)
+    {
+        var result = new List<string>(args.Length);
+        int i = 0;
+
+        while (i < args.Length)
+        {
+            var arg = args[i];
+
+            if (arg.Equals("--from", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                result.Add("--main");
+                result.Add(args[i + 1]);
+                i += 2;
+            }
+            else if (arg.Equals("--sql", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                // --sql "<query>" → -q "<query>"; orchestrator will inject --sql <engine>.
+                result.Add("-q");
+                result.Add(args[i + 1]);
+                i += 2;
+            }
+            else
+            {
+                result.Add(arg);
+                i++;
+            }
+        }
+
+        return result.ToArray();
     }
 
     /// <summary>
@@ -172,9 +205,7 @@ public static class CliDagParser
                 if (CliPipelineRules.IsSingleton(arg))
                 {
                     if (seenSingletons.Contains(arg))
-                    {
                         errors.Add($"Branch '{branch.Alias}' contains multiple instances of singleton flag '{arg}'. Only one is allowed.");
-                    }
                     seenSingletons.Add(arg);
                 }
             }
@@ -182,9 +213,7 @@ public static class CliDagParser
             // 3. Range Validation (e.g. --limit)
             var limit = ExtractArgValue(branch.Arguments, "--limit");
             if (!string.IsNullOrEmpty(limit) && int.TryParse(limit, out int l) && l < 0)
-            {
                 errors.Add($"Branch '{branch.Alias}' has an invalid --limit value: {limit}. Must be non-negative.");
-            }
         }
 
         return errors;
@@ -197,7 +226,7 @@ public static class CliDagParser
             if (args[i].Equals(flag, StringComparison.OrdinalIgnoreCase))
             {
                 var val = args[i + 1];
-                if (val.StartsWith('-') && val.Length > 1 && !char.IsDigit(val[1])) return null; // Looks like another flag
+                if (val.StartsWith('-') && val.Length > 1 && !char.IsDigit(val[1])) return null;
                 return val;
             }
         }

@@ -1,21 +1,31 @@
 {
-  "branches": [
+  "Branches": [
     {
-      "alias": "source1",
-      "arguments": [],
-      "processor": 0,
-      "isProcessor": false,
-      "input": "generate:5",
-      "refAliases": []
+      "Alias": "source1",
+      "Arguments": [],
+      "Processor": "None",
+      "IsProcessor": false,
+      "Input": "generate:5",
+      "Output": null,
+      "MainAlias": null,
+      "FromAlias": null,
+      "RefAliases": [],
+      "SqlQuery": null,
+      "PreParsedJob": null
     },
     {
-      "alias": "output1",
-      "arguments": [],
-      "processor": 0,
-      "isProcessor": false,
-      "input": "generate:5",
-      "output": "csv:/tmp/out.csv",
-      "refAliases": []
+      "Alias": "output1",
+      "Arguments": [],
+      "Processor": "None",
+      "IsProcessor": false,
+      "Input": "generate:5",
+      "Output": "csv:/tmp/out.csv",
+      "MainAlias": null,
+      "FromAlias": null,
+      "RefAliases": [],
+      "SqlQuery": null,
+      "PreParsedJob": null
     }
-  ]
+  ],
+  "IsDag": true
 }

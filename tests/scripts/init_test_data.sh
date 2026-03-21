@@ -9,7 +9,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ARTIFACTS_DIR="$SCRIPT_DIR/artifacts"
 INFRA_START="$PROJECT_ROOT/tests/infra/start_infra.sh"
 # During initialization, we use --no-schema-validation because we are CREATING the schema.
-DTPIPE="dotnet run --project $PROJECT_ROOT/src/DtPipe/DtPipe.csproj -- --no-schema-validation"
+DTPIPE="$PROJECT_ROOT/dist/release/dtpipe --no-schema-validation"
 
 # Colors
 GREEN='\033[0;32m'

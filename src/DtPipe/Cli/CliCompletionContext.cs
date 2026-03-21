@@ -38,7 +38,7 @@ public sealed record CliCompletionContext
 
     /// <summary>
     /// Active pipeline phase at the cursor position.
-    /// Derived from HasOutput, CurrentInputPrefix, and IsXStreamerBranch.
+    /// Derived from HasOutput, CurrentInputPrefix, and IsProcessorBranch.
     /// </summary>
     public CliPipelinePhase ActivePhase { get; init; }
 }

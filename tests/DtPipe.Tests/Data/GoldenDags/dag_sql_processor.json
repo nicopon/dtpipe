@@ -1,23 +1,31 @@
 {
-  "branches": [
+  "Branches": [
     {
-      "alias": "src",
-      "arguments": [],
-      "processor": 0,
-      "isProcessor": false,
-      "input": "generate:100",
-      "refAliases": []
+      "Alias": "src",
+      "Arguments": [],
+      "Processor": "None",
+      "IsProcessor": false,
+      "Input": "generate:100",
+      "Output": null,
+      "MainAlias": null,
+      "FromAlias": null,
+      "RefAliases": [],
+      "SqlQuery": null,
+      "PreParsedJob": null
     },
     {
-      "alias": "processed",
-      "arguments": [],
-      "processor": 1,
-      "isProcessor": true,
-      "input": "fusion-engine",
-      "output": "csv:/tmp/processed.csv",
-      "fromAlias": "src",
-      "refAliases": [],
-      "sqlQuery": "SELECT * FROM src LIMIT 10"
+      "Alias": "processed",
+      "Arguments": [],
+      "Processor": "Sql",
+      "IsProcessor": true,
+      "Input": "fusion-engine",
+      "Output": "csv:/tmp/processed.csv",
+      "MainAlias": "src",
+      "FromAlias": null,
+      "RefAliases": [],
+      "SqlQuery": "SELECT * FROM src LIMIT 10",
+      "PreParsedJob": null
     }
-  ]
+  ],
+  "IsDag": true
 }

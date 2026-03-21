@@ -1,13 +1,18 @@
 {
-  "branches": [
+  "Branches": [
     {
-      "alias": "main",
-      "arguments": [],
-      "processor": 0,
-      "isProcessor": false,
-      "input": "generate:10",
-      "output": "csv:/tmp/out.csv",
-      "refAliases": []
+      "Alias": "main",
+      "Arguments": [],
+      "Processor": "None",
+      "IsProcessor": false,
+      "Input": "generate:10",
+      "Output": "csv:/tmp/out.csv",
+      "MainAlias": null,
+      "FromAlias": null,
+      "RefAliases": [],
+      "SqlQuery": null,
+      "PreParsedJob": null
     }
-  ]
+  ],
+  "IsDag": false
 }

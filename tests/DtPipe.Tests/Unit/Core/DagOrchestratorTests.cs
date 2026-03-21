@@ -14,7 +14,7 @@ public class DagOrchestratorTests
 {
     private static DagOrchestrator BuildOrchestrator() => new(
         NullLogger<DagOrchestrator>.Instance,
-        new GlobalMemoryChannelRegistry(),
+        new MemoryChannelRegistry(),
         processorFactories: [],
         readerFactories: []);
 

@@ -1,33 +1,46 @@
 {
-  "branches": [
+  "Branches": [
     {
-      "alias": "main_stream",
-      "arguments": [],
-      "processor": 0,
-      "isProcessor": false,
-      "input": "generate:100",
-      "refAliases": []
+      "Alias": "main_stream",
+      "Arguments": [],
+      "Processor": "None",
+      "IsProcessor": false,
+      "Input": "generate:100",
+      "Output": null,
+      "MainAlias": null,
+      "FromAlias": null,
+      "RefAliases": [],
+      "SqlQuery": null,
+      "PreParsedJob": null
     },
     {
-      "alias": "ref_data",
-      "arguments": [],
-      "processor": 0,
-      "isProcessor": false,
-      "input": "generate:10",
-      "refAliases": []
+      "Alias": "ref_data",
+      "Arguments": [],
+      "Processor": "None",
+      "IsProcessor": false,
+      "Input": "generate:10",
+      "Output": null,
+      "MainAlias": null,
+      "FromAlias": null,
+      "RefAliases": [],
+      "SqlQuery": null,
+      "PreParsedJob": null
     },
     {
-      "alias": "result",
-      "arguments": [],
-      "processor": 1,
-      "isProcessor": true,
-      "input": "fusion-engine",
-      "output": "csv:/tmp/result.csv",
-      "fromAlias": "main_stream",
-      "refAliases": [
+      "Alias": "result",
+      "Arguments": [],
+      "Processor": "Sql",
+      "IsProcessor": true,
+      "Input": "fusion-engine",
+      "Output": "csv:/tmp/result.csv",
+      "MainAlias": "main_stream",
+      "FromAlias": null,
+      "RefAliases": [
         "ref_data"
       ],
-      "sqlQuery": "SELECT m.* FROM main_stream m JOIN ref_data r ON m.id = r.id"
+      "SqlQuery": "SELECT m.* FROM main_stream m JOIN ref_data r ON m.id = r.id",
+      "PreParsedJob": null
     }
-  ]
+  ],
+  "IsDag": true
 }

@@ -57,7 +57,7 @@ public static class GoldenDagDefinitions
             {
                 Alias = "processed",
                 Input = "fusion-engine",
-                FromAlias = "src",
+                MainAlias = "src",
                 SqlQuery = "SELECT * FROM src LIMIT 10",
                 Processor = ProcessorKind.Sql,
                 Output = "csv:/tmp/processed.csv",
@@ -106,9 +106,43 @@ public static class GoldenDagDefinitions
             {
                 Alias = "result",
                 Input = "fusion-engine",
-                FromAlias = "main_stream",
+                MainAlias = "main_stream",
                 RefAliases = new[] { "ref_data" },
                 SqlQuery = "SELECT m.* FROM main_stream m JOIN ref_data r ON m.id = r.id",
+                Processor = ProcessorKind.Sql,
+                Output = "csv:/tmp/result.csv",
+                Arguments = Array.Empty<string>()
+            }
+        }
+    };
+
+    // Cas 6 : Fan-out + SQL processor consommant la même source (teste la résolution des alias fan-out)
+    // `src` est consommé à la fois par `sink_a` (via --from) et par `result` (via --main).
+    // L'orchestrateur doit créer un canal broadcast et résoudre les alias en sous-canaux distincts.
+    public static JobDagDefinition Dag_FanOut_WithSqlProcessor => new()
+    {
+        Branches = new[]
+        {
+            new BranchDefinition
+            {
+                Alias = "src",
+                Input = "generate:50",
+                Output = null,
+                Arguments = Array.Empty<string>()
+            },
+            new BranchDefinition
+            {
+                Alias = "sink_a",
+                FromAlias = "src",
+                Output = "csv:/tmp/sink_a.csv",
+                Arguments = Array.Empty<string>()
+            },
+            new BranchDefinition
+            {
+                Alias = "result",
+                Input = "fusion-engine",
+                MainAlias = "src",
+                SqlQuery = "SELECT * FROM src",
                 Processor = ProcessorKind.Sql,
                 Output = "csv:/tmp/result.csv",
                 Arguments = Array.Empty<string>()

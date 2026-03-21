@@ -9,7 +9,7 @@ namespace DtPipe.Services;
 /// <summary>
 /// Validates schema compatibility and performs auto-migration if enabled.
 /// </summary>
-internal sealed class SchemaValidationService
+public sealed class SchemaValidationService
 {
     private readonly IExportObserver _observer;
     private readonly ILogger<SchemaValidationService> _logger;

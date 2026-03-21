@@ -13,9 +13,9 @@ namespace DtPipe.Core.Pipelines.Dag;
 /// </summary>
 public class MappedMemoryChannelRegistry : IMemoryChannelRegistry
 {
-    private readonly IGlobalMemoryChannelRegistry _inner;
+    private readonly IMemoryChannelRegistry _inner;
     private readonly BranchExecutionContext _context;
-    public MappedMemoryChannelRegistry(IGlobalMemoryChannelRegistry inner, BranchExecutionContext context)
+    public MappedMemoryChannelRegistry(IMemoryChannelRegistry inner, BranchExecutionContext context)
     {
         _inner = inner;
         _context = context;

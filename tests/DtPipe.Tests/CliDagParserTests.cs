@@ -19,11 +19,12 @@ public class CliDagParserTests
     }
 
     [Fact]
-    public void Parse_DagWithTwoBranches_AssignsAliasesAndXStreamerFlag()
+    public void Parse_SqlProcessor_TwoBranches()
     {
-        var args = new[] {
+        var args = new[]
+        {
             "-i", "data1.csv", "--alias", "input_one",
-            "--sql", "duck", "-q", "SELECT * FROM input_one", "-o", "out.csv"
+            "--from", "input_one", "--sql", "SELECT * FROM input_one", "-o", "out.csv"
         };
 
         var dag = CliDagParser.Parse(args);
@@ -31,15 +32,33 @@ public class CliDagParserTests
         Assert.True(dag.IsDag);
         Assert.Equal(2, dag.Branches.Count);
 
-        var branch1 = dag.Branches[0];
-        Assert.Equal("input_one", branch1.Alias);
-        Assert.False(branch1.IsProcessor);
-        Assert.Equal(new[] { "-i", "data1.csv", "--alias", "input_one" }, branch1.Arguments);
+        var branch0 = dag.Branches[0];
+        Assert.Equal("input_one", branch0.Alias);
+        Assert.False(branch0.IsProcessor);
 
-        var branch2 = dag.Branches[1];
-        Assert.Equal("stream1", branch2.Alias); // Default alias
-        Assert.True(branch2.IsProcessor);
-        Assert.Equal(new[] { "--sql", "duck", "-q", "SELECT * FROM input_one", "-o", "out.csv" }, branch2.Arguments);
+        var branch1 = dag.Branches[1];
+        Assert.True(branch1.IsProcessor);
+        Assert.Equal("input_one", branch1.MainAlias);
+        Assert.Equal("SELECT * FROM input_one", branch1.SqlQuery);
+        Assert.Contains("--main", branch1.Arguments);
+        Assert.Contains("-q", branch1.Arguments);
+        Assert.DoesNotContain("--from", branch1.Arguments);
+        Assert.DoesNotContain("--sql", branch1.Arguments);
+    }
+
+    [Fact]
+    public void Parse_SqlProcessor_DoesNotSplitOnSqlFlag()
+    {
+        // --sql within a --from branch must NOT create an extra branch.
+        var args = new[]
+        {
+            "-i", "data.csv", "--alias", "src",
+            "--from", "src", "--sql", "SELECT * FROM src", "-o", "out.csv"
+        };
+
+        var dag = CliDagParser.Parse(args);
+
+        Assert.Equal(2, dag.Branches.Count);
     }
 
     [Fact]
@@ -53,11 +72,12 @@ public class CliDagParserTests
     }
 
     [Fact]
-    public void Validate_SourceBranchWithOutputFedIntoXStreamer_ReturnsError()
+    public void Validate_SourceBranchWithOutputFedIntoProcessor_ReturnsError()
     {
-        var args = new[] {
+        var args = new[]
+        {
             "-i", "data1.csv", "--alias", "input_one", "-o", "wrong.csv",
-            "--sql", "duck", "--main", "input_one", "-o", "out.csv"
+            "--from", "input_one", "--sql", "SELECT * FROM input_one", "-o", "out.csv"
         };
 
         var dag = CliDagParser.Parse(args);

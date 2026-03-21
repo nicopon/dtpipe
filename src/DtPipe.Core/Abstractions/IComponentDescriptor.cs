@@ -3,7 +3,7 @@ using System;
 namespace DtPipe.Core.Abstractions;
 
 /// <summary>
-/// A generic descriptor for any pipeline component (Adapter, Transformer, XStreamer),
+/// A generic descriptor for any pipeline component (Adapter, Transformer, Processor),
 /// providing its identity and configuration shape decoupled from the invocation medium (CLI/YAML).
 /// </summary>
 public interface IComponentDescriptor

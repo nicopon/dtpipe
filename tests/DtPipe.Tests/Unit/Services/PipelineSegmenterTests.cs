@@ -1,6 +1,6 @@
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
-using DtPipe.Services;
+using DtPipe.Core.Pipelines;
 using Moq;
 using Xunit;
 

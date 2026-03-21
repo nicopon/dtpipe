@@ -194,13 +194,15 @@ class Program
 
 		// Export Service
 		services.AddSingleton<IExportObserver, SpectreConsoleObserver>();
+		services.AddSingleton<DtPipe.Services.HookExecutor>();
+		services.AddSingleton<DtPipe.Services.MetricsService>();
+		services.AddSingleton<DtPipe.Services.SchemaValidationService>();
+		services.AddSingleton<DtPipe.Services.PipelineExecutor>();
 		services.AddSingleton<ExportService>();
 
 		// DAG Orchestrator & Memory Channels
 		services.AddSingleton<IMemoryChannelRegistry, MemoryChannelRegistry>();
 		services.AddTransient<IDagOrchestrator, DagOrchestrator>();
-
-		// XStreamers are now auto-discovered as readers, no custom factory needed
 
 		// Columnar Bridges
 		services.AddSingleton<IRowToColumnarBridgeFactory, DtPipe.Adapters.Infrastructure.Arrow.ArrowRowToColumnarBridgeFactory>();

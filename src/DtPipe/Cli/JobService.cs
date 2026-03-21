@@ -371,7 +371,7 @@ public class JobService
 					var orchestrator = _serviceProvider.GetRequiredService<IDagOrchestrator>();
 					orchestrator.OnLogEvent = msg => _console.MarkupLine(msg);
 
-					Func<DtPipe.Core.Pipelines.Dag.BranchDefinition, CancellationToken, Task<int>> branchExecutor = async (branch, token) =>
+					Func<DtPipe.Core.Pipelines.Dag.BranchDefinition, DtPipe.Core.Pipelines.Dag.BranchChannelContext, CancellationToken, Task<int>> branchExecutor = async (branch, _, token) =>
 					{
 						var branchPr = rootCommand.Parse(branch.Arguments);
 						if (branchPr.Errors.Count > 0)
@@ -419,7 +419,7 @@ public class JobService
 
 		console.WriteLine("Core Options:");
 		var basicCoreFlags = new HashSet<string> {
-			"--input", "-i", "--output", "-o", "--query", "-q", "--job", "--processor", "--sql", "-x", "--alias",
+			"--input", "-i", "--output", "-o", "--query", "-q", "--job", "--sql", "--alias",
 			"--dry-run", "--limit", "--batch-size", "-b", "--no-stats", "--log"
 		};
 		foreach (var opt in coreOptions.Where(o => basicCoreFlags.Contains(o.Name)))

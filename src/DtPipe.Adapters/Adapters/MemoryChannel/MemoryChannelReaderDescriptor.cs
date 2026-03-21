@@ -19,6 +19,8 @@ public class MemoryChannelReaderDescriptor : IProviderDescriptor<IStreamReader>
         var entry = registry.GetChannel(connectionString);
         if (entry == null) throw new InvalidOperationException($"Memory channel '{connectionString}' not found in registry.");
 
-        return new MemoryChannelStreamReader(entry.Value.Channel.Reader, entry.Value.Columns);
+        // Pass registry + alias so that OpenAsync can wait for the schema to be published
+        // by the producing branch (needed for fan-out sub-channels registered with empty schema).
+        return new MemoryChannelStreamReader(entry.Value.Channel.Reader, registry, connectionString);
     }
 }

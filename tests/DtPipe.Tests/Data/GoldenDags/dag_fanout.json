@@ -1,30 +1,44 @@
 {
-  "branches": [
+  "Branches": [
     {
-      "alias": "src",
-      "arguments": [],
-      "processor": 0,
-      "isProcessor": false,
-      "input": "generate:50",
-      "refAliases": []
+      "Alias": "src",
+      "Arguments": [],
+      "Processor": "None",
+      "IsProcessor": false,
+      "Input": "generate:50",
+      "Output": null,
+      "MainAlias": null,
+      "FromAlias": null,
+      "RefAliases": [],
+      "SqlQuery": null,
+      "PreParsedJob": null
     },
     {
-      "alias": "consumer_a",
-      "arguments": [],
-      "processor": 0,
-      "isProcessor": false,
-      "output": "csv:/tmp/consumer_a.csv",
-      "fromAlias": "src",
-      "refAliases": []
+      "Alias": "consumer_a",
+      "Arguments": [],
+      "Processor": "None",
+      "IsProcessor": false,
+      "Input": null,
+      "Output": "csv:/tmp/consumer_a.csv",
+      "MainAlias": null,
+      "FromAlias": "src",
+      "RefAliases": [],
+      "SqlQuery": null,
+      "PreParsedJob": null
     },
     {
-      "alias": "consumer_b",
-      "arguments": [],
-      "processor": 0,
-      "isProcessor": false,
-      "output": "csv:/tmp/consumer_b.csv",
-      "fromAlias": "src",
-      "refAliases": []
+      "Alias": "consumer_b",
+      "Arguments": [],
+      "Processor": "None",
+      "IsProcessor": false,
+      "Input": null,
+      "Output": "csv:/tmp/consumer_b.csv",
+      "MainAlias": null,
+      "FromAlias": "src",
+      "RefAliases": [],
+      "SqlQuery": null,
+      "PreParsedJob": null
     }
-  ]
+  ],
+  "IsDag": true
 }

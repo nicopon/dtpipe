@@ -28,7 +28,6 @@ public class DagOrchestrator : IDagOrchestrator
     // Constants for DAG execution
     private const int DefaultNativeChannelCapacity = 100;
     private const int DefaultArrowChannelCapacity = 64;
-    private const int TaskLaunchDelayMs = 50;
 
     public Action<string>? OnLogEvent { get; set; }
 
@@ -52,7 +51,7 @@ public class DagOrchestrator : IDagOrchestrator
         bool IsTerminal
     );
 
-    public async Task<int> ExecuteAsync(JobDagDefinition dag, Func<BranchDefinition, CancellationToken, Task<int>> branchExecutor, CancellationToken cancellationToken = default)
+    public async Task<int> ExecuteAsync(JobDagDefinition dag, Func<BranchDefinition, BranchChannelContext, CancellationToken, Task<int>> branchExecutor, CancellationToken cancellationToken = default)
     {
         if (dag.Branches.Count == 0)
         {
@@ -171,20 +170,25 @@ public class DagOrchestrator : IDagOrchestrator
                     resolvedFromAlias = ResolveInputAlias(branch.FromAlias, broadcastSubAliases, broadcastAssignmentCursor);
                 }
 
-                // Also need to resolve MainAlias and RefAliases for the branch itself
-                var actualMainAlias = branch.MainAlias != null 
-                    ? ResolveInputAlias(branch.MainAlias, broadcastSubAliases, broadcastAssignmentCursor) 
+                // Resolve MainAlias and RefAliases to their fan-out sub-aliases when applicable.
+                // Also patch the Arguments array so that --main/--ref flags carry the resolved names
+                // (DataFusionProcessorFactory reads MainAlias/RefAliases from parsed CLI args).
+                var actualMainAlias = branch.MainAlias != null
+                    ? ResolveInputAlias(branch.MainAlias, broadcastSubAliases, broadcastAssignmentCursor)
                     : null;
-                
+
                 var actualRefAliases = branch.RefAliases
                     .Select(a => ResolveInputAlias(a, broadcastSubAliases, broadcastAssignmentCursor))
                     .ToArray();
 
-                // If they were resolved to something else (fan-out), we MUST update the branch definition 
-                // temporarily or pass them to ExecuteBranchAsync
-                var updatedBranch = branch with { 
+                var resolvedArgs = ReplaceAliasesInArgs(
+                    branch.Arguments, branch.MainAlias, actualMainAlias,
+                    branch.RefAliases, actualRefAliases);
+
+                var updatedBranch = branch with {
                     MainAlias = actualMainAlias,
-                    RefAliases = actualRefAliases
+                    RefAliases = actualRefAliases,
+                    Arguments = resolvedArgs
                 };
 
                 var bCts = CancellationTokenSource.CreateLinkedTokenSource(effectiveCt);
@@ -207,11 +211,9 @@ public class DagOrchestrator : IDagOrchestrator
                     IsTerminal: !string.IsNullOrEmpty(branch.Output)
                 );
 
-                var task = ExecuteBranchAsync(dag, branch, resolvedFromAlias, broadcastSubAliases, branchExecutor, bCts.Token);
+                var task = ExecuteBranchAsync(dag, updatedBranch, resolvedFromAlias, broadcastSubAliases, branchExecutor, bCts.Token);
                 taskToMetadata[task] = metadata;
                 tasks.Add(task);
-
-                await Task.Delay(TaskLaunchDelayMs, effectiveCt);
             }
 
             // Start Broadcast Tasks
@@ -344,7 +346,7 @@ public class DagOrchestrator : IDagOrchestrator
         BranchDefinition branch,
         string? resolvedFromAlias,
         Dictionary<string, List<string>> broadcastSubAliases,
-        Func<BranchDefinition, CancellationToken, Task<int>> branchExecutor,
+        Func<BranchDefinition, BranchChannelContext, CancellationToken, Task<int>> branchExecutor,
         CancellationToken ct)
     {
         await Task.Yield();
@@ -366,31 +368,6 @@ public class DagOrchestrator : IDagOrchestrator
                 var sqlEngine = ExtractArgValue(argsList, "--sql");
                 if (string.IsNullOrEmpty(sqlEngine) && !string.IsNullOrEmpty(branch.Input))
                 {
-                    // If --sql was present without value or implicitly mapped from Input (provider name)
-                    // We need to make sure the args reflect the processor choice.
-                    // For now, if Input is provided (e.g. "fusion-engine"), we inject it.
-                    int sqlIdx = argsList.FindIndex(a => a.Equals("--sql", StringComparison.OrdinalIgnoreCase));
-                    if (sqlIdx >= 0 && sqlIdx + 1 < argsList.Count && argsList[sqlIdx+1].StartsWith("-"))
-                    {
-                         argsList.Insert(sqlIdx + 1, branch.Input);
-                    }
-                    else if (sqlIdx < 0)
-                    {
-                         argsList.Insert(0, branch.Input);
-                         argsList.Insert(0, "--sql");
-                    }
-                }
-            }
-
-            if (branch.Processor == ProcessorKind.Sql)
-            {
-                // Ensure --sql is in args with the correct engine if it was implicit
-                var sqlEngine = ExtractArgValue(argsList, "--sql");
-                if (string.IsNullOrEmpty(sqlEngine) && !string.IsNullOrEmpty(branch.Input))
-                {
-                    // If --sql was present without value or implicitly mapped from Input (provider name)
-                    // We need to make sure the args reflect the processor choice.
-                    // For now, if Input is provided (e.g. "fusion-engine"), we inject it.
                     int sqlIdx = argsList.FindIndex(a => a.Equals("--sql", StringComparison.OrdinalIgnoreCase));
                     if (sqlIdx >= 0 && sqlIdx + 1 < argsList.Count && argsList[sqlIdx+1].StartsWith("-"))
                     {
@@ -451,7 +428,39 @@ public class DagOrchestrator : IDagOrchestrator
             try
             {
                 var updatedBranch = branch with { Arguments = argsList.ToArray() };
-                int exitCode = await branchExecutor(updatedBranch, ct);
+
+                // Build the channel context describing how this branch is wired
+                var aliasMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (!string.IsNullOrEmpty(branch.FromAlias) && resolvedFromAlias != null
+                    && !string.Equals(branch.FromAlias, resolvedFromAlias, StringComparison.OrdinalIgnoreCase))
+                {
+                    aliasMap[branch.FromAlias] = resolvedFromAlias;
+                }
+                if (branch.MainAlias != null && updatedBranch.MainAlias != null
+                    && !string.Equals(branch.MainAlias, updatedBranch.MainAlias, StringComparison.OrdinalIgnoreCase))
+                {
+                    aliasMap[branch.MainAlias] = updatedBranch.MainAlias;
+                }
+
+                string? inputAlias = resolvedFromAlias
+                    ?? (branch.IsProcessor ? updatedBranch.MainAlias : null);
+                ChannelMode? inputMode = inputAlias != null
+                    ? (branch.IsProcessor ? ChannelMode.Arrow : GetRequiredChannelMode(dag, branch.FromAlias!))
+                    : null;
+
+                string? outputAlias = string.IsNullOrEmpty(branch.Output) ? branch.Alias : null;
+                var outputMode = outputAlias != null ? GetRequiredChannelMode(dag, branch.Alias) : ChannelMode.Native;
+
+                var ctx = new BranchChannelContext
+                {
+                    InputChannelAlias = inputAlias,
+                    InputChannelMode = inputMode,
+                    OutputChannelAlias = outputAlias,
+                    OutputChannelMode = outputMode,
+                    AliasMap = aliasMap
+                };
+
+                int exitCode = await branchExecutor(updatedBranch, ctx, ct);
 
                 if (exitCode != 0)
                 {
@@ -614,5 +623,48 @@ public class DagOrchestrator : IDagOrchestrator
             return val;
         }
         return null;
+    }
+
+    /// <summary>
+    /// Returns a copy of <paramref name="args"/> where <c>--main</c> and <c>--ref</c> values
+    /// are replaced with their fan-out sub-aliases when the source alias was broadcast.
+    /// This ensures processor factories (e.g. DataFusionProcessorFactory) receive the correct
+    /// channel names that are actually registered in IMemoryChannelRegistry.
+    /// </summary>
+    private static string[] ReplaceAliasesInArgs(
+        string[] args,
+        string? oldMainAlias, string? newMainAlias,
+        IReadOnlyList<string> oldRefAliases, string[] newRefAliases)
+    {
+        bool mainChanged = !string.IsNullOrEmpty(oldMainAlias)
+            && !string.IsNullOrEmpty(newMainAlias)
+            && !string.Equals(oldMainAlias, newMainAlias, StringComparison.OrdinalIgnoreCase);
+
+        bool refsChanged = oldRefAliases.Count > 0
+            && !oldRefAliases.SequenceEqual(newRefAliases, StringComparer.OrdinalIgnoreCase);
+
+        if (!mainChanged && !refsChanged) return args;
+
+        var result = args.ToList();
+        int refIdx = 0;
+
+        for (int i = 0; i < result.Count - 1; i++)
+        {
+            if (mainChanged && result[i].Equals("--main", StringComparison.OrdinalIgnoreCase)
+                && result[i + 1].Equals(oldMainAlias, StringComparison.OrdinalIgnoreCase))
+            {
+                result[i + 1] = newMainAlias!;
+                mainChanged = false;
+            }
+            else if (refsChanged && result[i].Equals("--ref", StringComparison.OrdinalIgnoreCase)
+                && refIdx < oldRefAliases.Count
+                && result[i + 1].Equals(oldRefAliases[refIdx], StringComparison.OrdinalIgnoreCase))
+            {
+                result[i + 1] = newRefAliases[refIdx];
+                refIdx++;
+            }
+        }
+
+        return result.ToArray();
     }
 }

@@ -196,9 +196,9 @@ dtpipe -i keyring://prod-db -q "SELECT * FROM users" -o users.parquet
 
 ## 🔀 Multi-Stream Pipelines (DAG)
 
-You can run multiple branches in a single command using `--input` flags and XStreamers. Each branch can be named with `--alias` so that downstream steps can reference it.
+You can run multiple branches in a single command using `--input` flags and `--sql` processors. Each branch can be named with `--alias` so that downstream steps can reference it.
 
-A pipeline with multiple inputs or XStreamers is assembled as a DAG and executed concurrently.
+A pipeline with multiple inputs or processors is assembled as a DAG and executed concurrently.
 
 ### Example: In-Memory Join
 
@@ -206,17 +206,17 @@ A pipeline with multiple inputs or XStreamers is assembled as a DAG and executed
 dtpipe \
   -i customers.parquet --alias customers \
   -i orders.csv --alias orders \
-  -x duck --main orders --ref customers \
-  -q "SELECT o.*, c.name FROM orders o JOIN customers c ON o.customer_id = c.id" \
+  --from orders --ref customers \
+  --sql "SELECT o.*, c.name FROM orders o JOIN customers c ON o.customer_id = c.id" \
   -o result.parquet
 ```
 
 | Option | Description |
 |:---|:---|
-| `--alias [NAME]` | Name this branch for use in joins |
-| `-x`, `--xstreamer` | Start an XStreamer branch (e.g. `duck`, `fusion`) |
-| `--main [ALIAS]` | Primary stream the XStreamer consumes |
-| `--ref [ALIAS]` | Reference stream(s) for lookup/join |
+| `--alias [NAME]` | Name this branch for downstream reference |
+| `--from [ALIAS]` | Start a processor or fan-out branch; in a processor context, declares the primary streaming source |
+| `--ref [ALIAS]` | Reference stream(s) for lookup/join (preloaded into memory before query execution) |
+| `--sql "[QUERY]"` | SQL query to execute on the upstream sources |
 
 ---
 

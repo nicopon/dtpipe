@@ -30,7 +30,7 @@ public record BranchDefinition
 
     /// <summary>
     /// The input source for this branch (e.g. "csv:file.csv" or "pg:query").
-    /// For XStreamer branches, this might be null or represent the provider.
+    /// For processor branches, this might be null or represent the provider name (e.g. "fusion-engine").
     /// </summary>
     public string? Input { get; init; }
 
@@ -40,20 +40,20 @@ public record BranchDefinition
     public string? Output { get; init; }
 
     /// <summary>
-    /// For XStreamer branches, the alias of the primary source branch (streaming side of a JOIN).
+    /// For processor branches, the alias of the primary source branch (streaming side of a JOIN).
     /// </summary>
     public string? MainAlias { get; init; }
 
     /// <summary>
     /// For fan-out branches, the alias of the upstream branch to read from (via broadcast).
     /// Semantically equivalent to Unix <c>tee</c>: this branch receives a full copy of the upstream data.
-    /// Unlike <see cref="MainAlias"/>, which is reserved for XStreamer JOIN routing, <c>FromAlias</c>
-    /// simply declares "start a new linear branch that reads a duplicated copy of the named upstream channel".
+    /// Unlike <see cref="MainAlias"/>, which is used by processor JOIN routing, <c>FromAlias</c>
+    /// declares "start a new linear branch that reads a broadcast copy of the named upstream channel".
     /// </summary>
     public string? FromAlias { get; init; }
 
     /// <summary>
-    /// For XStreamer branches, the aliases of secondary source branches (fully preloaded into memory before query execution).
+    /// For processor branches, the aliases of secondary source branches (fully preloaded into memory before query execution).
     /// </summary>
     public IReadOnlyList<string> RefAliases { get; init; } = Array.Empty<string>();
 

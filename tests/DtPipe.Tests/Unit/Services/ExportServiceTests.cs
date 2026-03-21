@@ -1,8 +1,8 @@
 using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
+using DtPipe.Services;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -16,7 +16,6 @@ public class ExportServiceTests
 	private readonly Mock<IExportObserver> _mockObserver;
 	private readonly Mock<IExportProgress> _mockProgress;
 	private readonly Mock<ILogger<ExportService>> _mockLogger;
-	private readonly Mock<ILoggerFactory> _mockLoggerFactory;
 	private readonly ExportService _service;
 
 	public ExportServiceTests()
@@ -26,10 +25,6 @@ public class ExportServiceTests
 		_mockObserver = new Mock<IExportObserver>();
 		_mockProgress = new Mock<IExportProgress>();
 		_mockLogger = new Mock<ILogger<ExportService>>();
-		_mockLoggerFactory = new Mock<ILoggerFactory>();
-
-		_mockLoggerFactory.Setup(f => f.CreateLogger(It.IsAny<string>()))
-						  .Returns(new Mock<ILogger>().Object);
 
 		var readerFactoryList = new List<IStreamReaderFactory> { _mockReaderFactory.Object };
 		var writerFactoryList = new List<IDataWriterFactory> { _mockWriterFactory.Object };
@@ -40,16 +35,25 @@ public class ExportServiceTests
 		_mockProgress.Setup(p => p.GetMetrics())
 					 .Returns(new ExportMetrics(DateTime.UtcNow, DateTime.UtcNow, 1, 1, 0, 0, new Dictionary<string, long>()));
 
+		var hookExecutor = new HookExecutor(_mockObserver.Object, new Mock<ILogger<HookExecutor>>().Object);
+		var metricsService = new MetricsService(_mockObserver.Object, new Mock<ILogger<MetricsService>>().Object);
+		var schemaValidator = new SchemaValidationService(_mockObserver.Object, new Mock<ILogger<SchemaValidationService>>().Object);
+		var pipelineExecutor = new PipelineExecutor(
+			new List<IRowToColumnarBridgeFactory>(),
+			new List<IColumnarToRowBridgeFactory>(),
+			new Mock<ILogger<PipelineExecutor>>().Object);
+
 		_service = new ExportService(
 			readerFactoryList,
 			writerFactoryList,
-			new List<IDataTransformerFactory>(), // transformers
-			new List<IRowToColumnarBridgeFactory>(), // row-to-col bridge factories
-			new List<IColumnarToRowBridgeFactory>(), // col-to-row bridge factories
-			new OptionsRegistry(), // options registry
+			new List<IDataTransformerFactory>(),
+			new OptionsRegistry(),
 			_mockObserver.Object,
 			_mockLogger.Object,
-			_mockLoggerFactory.Object
+			hookExecutor,
+			metricsService,
+			schemaValidator,
+			pipelineExecutor
 		);
 	}
 
