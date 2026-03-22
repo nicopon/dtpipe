@@ -15,7 +15,6 @@ public class DagOrchestratorTests
     private static DagOrchestrator BuildOrchestrator() => new(
         NullLogger<DagOrchestrator>.Instance,
         new MemoryChannelRegistry(),
-        processorFactories: [],
         readerFactories: []);
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -40,7 +39,7 @@ public class DagOrchestratorTests
     }
 
     [Fact]
-    public async Task Execute_SingleBranch_ContextHasNoInputOrOutputChannel()
+    public async Task Execute_SingleBranch_ContextHasEmptyAliasMap()
     {
         var dag = GoldenDagDefinitions.Linear_SingleBranch;
         var orchestrator = BuildOrchestrator();
@@ -53,8 +52,7 @@ public class DagOrchestratorTests
         });
 
         Assert.NotNull(captured);
-        Assert.Null(captured!.InputChannelAlias);
-        Assert.Null(captured.OutputChannelAlias); // Output = "csv:/tmp/out.csv" → pas de canal mémoire
+        Assert.Empty(captured!.AliasMap);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -81,42 +79,43 @@ public class DagOrchestratorTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Cas 3 : DAG avec processor SQL
+    // Cas 3 : DAG avec SQL stream transformer
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task Execute_SqlProcessor_ProcessorBranchReceivesInputChannelAlias()
+    public async Task Execute_SqlProcessor_AllBranchesCalled()
     {
         var dag = GoldenDagDefinitions.Dag_SourcePlusSqlProcessor;
         var orchestrator = BuildOrchestrator();
-        BranchChannelContext? processorCtx = null;
+        var called = new ConcurrentBag<string>();
 
         await orchestrator.ExecuteAsync(dag, (b, ctx, _) =>
         {
-            if (b.IsProcessor) processorCtx = ctx;
+            called.Add(b.Alias);
             return Task.FromResult(0);
         });
 
-        Assert.NotNull(processorCtx);
-        Assert.Equal("src", processorCtx!.InputChannelAlias);
+        Assert.Equal(2, called.Count);
+        Assert.Contains("src", called);
+        Assert.Contains("processed", called);
     }
 
     [Fact]
-    public async Task Execute_SqlProcessor_SourceBranchHasOutputChannelAlias()
+    public async Task Execute_SqlProcessor_StreamTransformerBranchHasNoAliasRemap()
     {
         var dag = GoldenDagDefinitions.Dag_SourcePlusSqlProcessor;
         var orchestrator = BuildOrchestrator();
-        BranchChannelContext? sourceCtx = null;
+        BranchChannelContext? transformerCtx = null;
 
         await orchestrator.ExecuteAsync(dag, (b, ctx, _) =>
         {
-            if (!b.IsProcessor) sourceCtx = ctx;
+            if (b.HasStreamTransformer) transformerCtx = ctx;
             return Task.FromResult(0);
         });
 
-        Assert.NotNull(sourceCtx);
-        // Source has no external output → canal mémoire automatiquement alloué
-        Assert.Equal("src", sourceCtx!.OutputChannelAlias);
+        Assert.NotNull(transformerCtx);
+        // No fan-out on a single consumer — AliasMap should be empty
+        Assert.Empty(transformerCtx!.AliasMap);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -144,27 +143,33 @@ public class DagOrchestratorTests
     }
 
     [Fact]
-    public async Task Execute_FanOut_ConsumersReceiveDistinctPhysicalInputAliases()
+    public async Task Execute_FanOut_ConsumersReceiveDistinctPhysicalAliasesViaAliasMap()
     {
         var dag = GoldenDagDefinitions.Dag_FanOut_OneSourceTwoConsumers;
         var orchestrator = BuildOrchestrator();
-        var inputAliases = new ConcurrentDictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        var aliasMaps = new ConcurrentDictionary<string, IReadOnlyDictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
 
         await orchestrator.ExecuteAsync(dag, (b, ctx, _) =>
         {
-            inputAliases[b.Alias] = ctx.InputChannelAlias;
+            aliasMaps[b.Alias] = ctx.AliasMap;
             return Task.FromResult(0);
         });
 
-        // La source n'a pas de canal amont
-        Assert.Null(inputAliases.GetValueOrDefault("src"));
+        // Source: no remapping
+        Assert.Empty(aliasMaps["src"]);
 
-        // Les deux consommateurs ont un canal d'entrée distinct (sous-canaux broadcast)
-        var aliasA = inputAliases.GetValueOrDefault("consumer_a");
-        var aliasB = inputAliases.GetValueOrDefault("consumer_b");
-        Assert.NotNull(aliasA);
-        Assert.NotNull(aliasB);
-        Assert.NotEqual(aliasA, aliasB);
+        // Consumers: each has a distinct physical sub-channel alias
+        var mapA = aliasMaps.GetValueOrDefault("consumer_a");
+        var mapB = aliasMaps.GetValueOrDefault("consumer_b");
+        Assert.NotNull(mapA);
+        Assert.NotNull(mapB);
+        Assert.NotEmpty(mapA!);
+        Assert.NotEmpty(mapB!);
+
+        // The mapped values (physical aliases) must differ
+        var physicalA = mapA!.Values.First();
+        var physicalB = mapB!.Values.First();
+        Assert.NotEqual(physicalA, physicalB);
     }
 
     [Fact]

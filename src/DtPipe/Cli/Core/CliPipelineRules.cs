@@ -60,8 +60,7 @@ public static class CliPipelineRules
         "--strategy", "-s",
         "--insert-mode",
         "--table", "-t",
-        "--job",
-        "--main"
+        "--job"
     };
 
     /// <summary>
@@ -73,11 +72,11 @@ public static class CliPipelineRules
     };
 
     /// <summary>
-    /// Flags that are sources but typically used within a Processor branch.
+    /// Flags that are sources but typically used within a stream-transformer branch.
     /// </summary>
     public static readonly HashSet<string> JunctionSourceFlags = new(StringComparer.OrdinalIgnoreCase)
     {
-        "--main", "--ref"
+        "--ref", "--merge"
     };
 
     /// <summary>
@@ -85,7 +84,7 @@ public static class CliPipelineRules
     /// </summary>
     public static readonly HashSet<string> SourceFlags = new(StringComparer.OrdinalIgnoreCase)
     {
-        "-i", "--input", "--sql", "--main", "--ref", "--from"
+        "-i", "--input", "--sql", "--ref", "--merge", "--from"
     };
 
     /// <summary>

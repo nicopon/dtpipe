@@ -1,4 +1,5 @@
 using System.CommandLine;
+using Apache.Arrow;
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
@@ -8,6 +9,7 @@ using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
 using DtPipe.Core.Validation;
 using DtPipe.Core.Abstractions.Dag;
+using DtPipe.Core.Pipelines.Dag;
 using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console;
 
@@ -41,22 +43,22 @@ public class LinearPipelineService
         CancellationToken token,
         string? localAlias,
         bool isDag,
-        bool isProcessor = false)
+        BranchChannelContext? ctx = null)
     {
         var exportService = _serviceProvider.GetRequiredService<ExportService>();
 
         IStreamReaderFactory readerFactory;
         string cleanedInput;
 
-        if (isProcessor)
-        {
-            var xFactories = _serviceProvider.GetRequiredService<IEnumerable<IProcessorFactory>>();
-            var factoryString = !string.IsNullOrEmpty(job.Sql) ? job.Sql : (job.Input ?? "");
-            var (xFactory, xCleaned) = ResolveFactory(xFactories, factoryString, "Processor");
-            cleanedInput = xCleaned;
+        // Detect stream transformers (SQL/merge) from branch args
+        var streamTransformerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamTransformerFactory>>();
+        var applicableFactory = streamTransformerFactories.FirstOrDefault(f => f.IsApplicable(currentRawArgs));
 
-            // Processor needs to be wrapped in a IStreamReaderFactory for ExportService
-            readerFactory = new ProcessorReaderFactoryAdapter(xFactory, _serviceProvider, cleanedInput);
+        if (applicableFactory != null)
+        {
+            var transformer = applicableFactory.Create(currentRawArgs, ctx ?? new BranchChannelContext(), _serviceProvider);
+            readerFactory = new StreamTransformerReaderAdapter(transformer);
+            cleanedInput = "";
         }
         else
         {
@@ -95,7 +97,6 @@ public class LinearPipelineService
         {
             if (string.IsNullOrWhiteSpace(job.Query))
             {
-                // Auto-generate query from table if possible for SQL providers
                 if (!string.IsNullOrWhiteSpace(job.Table))
                 {
                     job = job with { Query = $"SELECT * FROM {job.Table}" };
@@ -164,27 +165,26 @@ public class LinearPipelineService
 
         try
         {
-        // 6. Final Export Execution
-        if (writerFactory == null)
-        {
-            if (isDag || string.IsNullOrWhiteSpace(job.Output))
+            // 6. Final Export Execution
+            if (writerFactory == null)
             {
-                if (isDag) return 0; // Upstream branch to memory channel handled elsewhere
+                if (isDag || string.IsNullOrWhiteSpace(job.Output))
+                {
+                    if (isDag) return 0; // Upstream branch to memory channel handled elsewhere
 
-                // Linear job - just validation/dry run
-                _console.Write(new Spectre.Console.Markup($"[yellow]Warning: No output specified. Running in validation mode.[/]{Environment.NewLine}"));
-                return 0;
+                    // Linear job - just validation/dry run
+                    _console.Write(new Spectre.Console.Markup($"[yellow]Warning: No output specified. Running in validation mode.[/]{Environment.NewLine}"));
+                    return 0;
+                }
+                throw new InvalidOperationException($"No writer factory resolved for output '{job.Output}'");
             }
-            throw new InvalidOperationException($"No writer factory resolved for output '{job.Output}'");
-        }
 
-        if (string.IsNullOrEmpty(job.Output)) throw new InvalidOperationException("No output destination specified.");
-        await exportService.RunExportAsync(pipelineOptions, readerFactory.ComponentName, job.Output, token, pipeline, readerFactory, writerFactory, _registry, isDag ? localAlias : null);
-        return 0;
+            if (string.IsNullOrEmpty(job.Output)) throw new InvalidOperationException("No output destination specified.");
+            await exportService.RunExportAsync(pipelineOptions, readerFactory.ComponentName, job.Output, token, pipeline, readerFactory, writerFactory, _registry, isDag ? localAlias : null);
+            return 0;
         }
         catch (OperationCanceledException)
         {
-            // Graceful termination (e.g. producer stopped because consumers are done)
             return 0;
         }
         catch (Exception ex)
@@ -200,7 +200,6 @@ public class LinearPipelineService
     {
         rawString = rawString.Trim();
 
-        // 1. Deterministic Prefix Check
         foreach (var factory in factories)
         {
             var prefix = factory.ComponentName + ":";
@@ -208,33 +207,24 @@ public class LinearPipelineService
             {
                 var cleaned = rawString.Substring(prefix.Length).Trim();
                 if (cleaned == "-" && !factory.SupportsStdio)
-                {
                     throw new InvalidOperationException($"The provider '{factory.ComponentName}' does not support standard input/output pipes (-).");
-                }
                 return (factory, cleaned);
             }
 
             if (rawString.Equals(factory.ComponentName, StringComparison.OrdinalIgnoreCase))
             {
-                if (typeName == "Processor" || typeName == "branch")
-                {
+                if (typeName == "branch")
                     return (factory, "");
-                }
-
-                // For standard readers/writers, name-only implies STDIN/OUT (-)
                 return (factory, "-");
             }
         }
 
-        // 2. Fallback to CanHandle() rules
         var matchingFactories = factories.Where(f => f.CanHandle(rawString)).ToList();
         if (matchingFactories.Count == 1)
         {
             var factory = matchingFactories[0];
             if (rawString == "-" && !factory.SupportsStdio)
-            {
                 throw new InvalidOperationException($"The provider '{factory.ComponentName}' does not support standard input/output pipes (-).");
-            }
             return (factory, rawString);
         }
 
@@ -246,7 +236,6 @@ public class LinearPipelineService
 
         if (matchingFactories.Count == 0 && typeName == "writer" && !rawString.Contains(":") && (rawString.EndsWith("/") || rawString.EndsWith("\\") || !rawString.Contains(".")))
         {
-            // Directory or extensionless path - fallback to Parquet (common for split/prefix - T66)
             var parquet = factories.FirstOrDefault(f => f.ComponentName.Equals("parquet", StringComparison.OrdinalIgnoreCase));
             if (parquet != null) return (parquet, rawString);
         }
@@ -261,14 +250,9 @@ public class LinearPipelineService
 
         string? filename = null;
         if (input.StartsWith("@"))
-        {
             filename = input.Substring(1).Trim();
-        }
         else if (File.Exists(input) && (input.EndsWith(".sql", StringComparison.OrdinalIgnoreCase) || input.EndsWith(".txt", StringComparison.OrdinalIgnoreCase) || input.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase) || input.EndsWith(".yml", StringComparison.OrdinalIgnoreCase)))
-        {
-            // Auto-detect file path if it exists and has a common extension
             filename = input;
-        }
 
         if (filename != null)
         {
@@ -278,9 +262,7 @@ public class LinearPipelineService
                 return File.ReadAllText(filename).Trim();
             }
             else if (input.StartsWith("@"))
-            {
                 throw new InvalidOperationException($"File not found for {label}: {filename}");
-            }
         }
         return input;
     }
@@ -304,39 +286,56 @@ public class LinearPipelineService
 
             var transformer = factory.CreateFromYamlConfig(config);
             if (transformer != null)
-            {
                 pipeline.Add(transformer);
-            }
         }
         return pipeline;
     }
 
-    private sealed class ProcessorReaderFactoryAdapter : IStreamReaderFactory
+    /// <summary>
+    /// Wraps an <see cref="IStreamTransformer"/> as an <see cref="IStreamReaderFactory"/> so that
+    /// <see cref="ExportService"/> can treat it like a regular reader.
+    /// </summary>
+    private sealed class StreamTransformerReaderAdapter : IStreamReaderFactory
     {
-        private readonly IProcessorFactory _inner;
-        private readonly IServiceProvider _sp;
-        private readonly string _connectionString;
+        private readonly IStreamTransformer _transformer;
 
-        public ProcessorReaderFactoryAdapter(IProcessorFactory inner, IServiceProvider sp, string connectionString)
-        {
-            _inner = inner;
-            _sp = sp;
-            _connectionString = connectionString;
-        }
+        public StreamTransformerReaderAdapter(IStreamTransformer transformer)
+            => _transformer = transformer;
 
-        public string ComponentName => _inner.ComponentName;
-        public string Category => _inner.Category;
-        public Type OptionsType => _inner.OptionsType;
+        public string ComponentName => "stream-transformer";
+        public string Category => "Stream Transformers";
+        public Type OptionsType => typeof(object);
         public bool SupportsStdio => false;
+        public bool RequiresQuery => false;
+        public bool YieldsColumnarOutput => true;
+        public bool CanHandle(string s) => false;
+
         public IStreamReader Create(OptionsRegistry registry)
-        {
-            var options = registry.Get(_inner.OptionsType);
-            return _inner.Create(_connectionString, options, _sp);
-        }
+            => new StreamTransformerReader(_transformer);
 
-        public IEnumerable<Type> GetSupportedOptionTypes() => new[] { _inner.OptionsType };
-        public bool RequiresQuery => _inner.RequiresQuery;
+        public IEnumerable<Type> GetSupportedOptionTypes() => System.Array.Empty<Type>();
+    }
 
-        public bool CanHandle(string connectionString) => _inner.CanHandle(connectionString);
+    private sealed class StreamTransformerReader : IColumnarStreamReader
+    {
+        private readonly IStreamTransformer _transformer;
+
+        public StreamTransformerReader(IStreamTransformer transformer)
+            => _transformer = transformer;
+
+        public IReadOnlyList<PipeColumnInfo>? Columns => _transformer.Columns;
+        public Apache.Arrow.Schema? Schema => null;
+
+        public Task OpenAsync(CancellationToken ct) => _transformer.OpenAsync(ct);
+
+        public IAsyncEnumerable<Apache.Arrow.RecordBatch> ReadRecordBatchesAsync(CancellationToken ct)
+            => _transformer.ReadResultsAsync(null, ct);
+
+        public IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(
+            int batchSize,
+            CancellationToken ct)
+            => throw new NotSupportedException("StreamTransformerReader only supports columnar (Arrow) mode.");
+
+        public ValueTask DisposeAsync() => _transformer.DisposeAsync();
     }
 }

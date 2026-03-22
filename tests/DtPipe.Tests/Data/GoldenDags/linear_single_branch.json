@@ -3,14 +3,13 @@
     {
       "Alias": "main",
       "Arguments": [],
-      "Processor": "None",
-      "IsProcessor": false,
       "Input": "generate:10",
       "Output": "csv:/tmp/out.csv",
-      "MainAlias": null,
       "FromAlias": null,
       "RefAliases": [],
+      "MergeAliases": [],
       "SqlQuery": null,
+      "HasStreamTransformer": false,
       "PreParsedJob": null
     }
   ],

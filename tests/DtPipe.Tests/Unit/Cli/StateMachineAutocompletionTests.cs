@@ -110,17 +110,17 @@ public class StateMachineAutocompletionTests
     }
 
     [Fact]
-    public void Phase1_XStreamer_PrioritizesMainAndRef()
+    public void Phase1_SqlProcessor_PrioritizesFromAndRef()
     {
         var root = BuildTestRootCommand(out var allOptions);
-        var rawWords = new[] { "--xstreamer", "duck", "" };
+        var rawWords = new[] { "--sql", "SELECT 1", "" };
         int cursorPos = 2;
 
         var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions, new Dictionary<string, CliPipelinePhase>(), Array.Empty<ICliContributor>()).ToList();
 
-        // Should prioritize --main and --ref
-        Assert.True(completions.IndexOf("--main") < 4);
-        Assert.True(completions.IndexOf("--ref") < 4);
+        // Processor branch should prioritize --from and --ref (in top 5 high-priority slots)
+        Assert.Contains("--from", completions.Take(5));
+        Assert.Contains("--ref", completions.Take(5));
     }
 
     [Fact]
@@ -145,13 +145,13 @@ public class StateMachineAutocompletionTests
     {
         var root = BuildTestRootCommand(out var allOptions);
         // Branch 0: input + transform
-        // Branch 1: starts with --main (cursor after --main)
-        var rawWords = new[] { "dtpipe", "--input", "gen:10", "--mask", "x", "--main", "br1", "" };
+        // Branch 1: starts with --from (fan-out consumer, cursor after value)
+        var rawWords = new[] { "dtpipe", "--input", "gen:10", "--mask", "x", "--from", "br1", "" };
         int cursorPos = 7;
 
         var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions, new Dictionary<string, CliPipelinePhase>(), Array.Empty<ICliContributor>()).ToList();
 
-        // Branch 1 (after --main) is back to Phase 1 (Input/Transform)
+        // Branch 1 (after --from br1) is back to Phase 1 (Input/Transform)
         // because hasSeenSourceInCurrentBranch is TRUE but no terminator yet.
         Assert.Contains("--output", completions);
         Assert.Contains("--mask", completions);

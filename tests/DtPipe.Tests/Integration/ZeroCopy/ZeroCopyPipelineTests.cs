@@ -6,6 +6,7 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Transformers.Columnar.Filter;
+using DtPipe.Services;
 using DtPipe.Transformers.Services;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -82,6 +83,10 @@ public class ZeroCopyPipelineTests : IAsyncLifetime
         services.AddSingleton(mockJs.Object);
 
         services.AddSingleton<ExportService>();
+        services.AddSingleton<HookExecutor>();
+        services.AddSingleton<MetricsService>();
+        services.AddSingleton<SchemaValidationService>();
+        services.AddSingleton<PipelineExecutor>();
         var serviceProvider = services.BuildServiceProvider();
         var exportService = serviceProvider.GetRequiredService<ExportService>();
 

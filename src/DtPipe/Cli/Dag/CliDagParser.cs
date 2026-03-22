@@ -9,12 +9,13 @@ namespace DtPipe.Cli.Dag;
 ///
 /// Split triggers (start a new branch):
 ///   - <c>-i</c> / <c>--input</c>  when a previous input was already seen in the current branch
-///   - <c>--from</c>               always (fan-out consumer or processor main source)
+///   - <c>--from</c>               always (fan-out consumer or stream transformer main source)
 ///
-/// A branch containing <c>--sql</c> is identified as a SQL processor:
-///   - <c>--from &lt;alias&gt;</c> declares the main streaming source.
-///   - <c>--ref &lt;alias&gt;</c>  declares materialized reference sources.
-///   - <c>--sql "&lt;query&gt;"</c> carries the SQL query inline.
+/// Stream transformer branches:
+///   - A branch containing <c>--sql "&lt;query&gt;"</c> activates the SQL transformer (DataFusion).
+///   - A branch containing <c>--merge &lt;alias&gt;</c> activates the merge transformer.
+///   - <c>--from &lt;alias&gt;</c> declares the primary upstream channel for the transformer.
+///   - <c>--ref &lt;alias&gt;</c>  declares materialized reference sources (SQL only).
 /// </summary>
 public static class CliDagParser
 {
@@ -40,7 +41,7 @@ public static class CliDagParser
                 // Split only if we already have an input in the current branch.
                 if (hasSeenInputInCurrentBranch && currentBranchArgs.Count > 0)
                 {
-                    branches.Add(CreateBranch(currentBranchArgs, ref branchCounter, defaultProcessor));
+                    branches.Add(CreateBranch(currentBranchArgs, ref branchCounter));
                     currentBranchArgs.Clear();
                     hasSeenInputInCurrentBranch = false;
                 }
@@ -50,10 +51,10 @@ public static class CliDagParser
             }
             else if (arg.Equals("--from", StringComparison.OrdinalIgnoreCase))
             {
-                // --from always starts a new branch (fan-out consumer or processor main source).
+                // --from always starts a new branch (fan-out or stream-transformer main source).
                 if (currentBranchArgs.Count > 0)
                 {
-                    branches.Add(CreateBranch(currentBranchArgs, ref branchCounter, defaultProcessor));
+                    branches.Add(CreateBranch(currentBranchArgs, ref branchCounter));
                     currentBranchArgs.Clear();
                 }
 
@@ -67,12 +68,12 @@ public static class CliDagParser
         }
 
         if (currentBranchArgs.Count > 0)
-            branches.Add(CreateBranch(currentBranchArgs, ref branchCounter, defaultProcessor));
+            branches.Add(CreateBranch(currentBranchArgs, ref branchCounter));
 
         return new JobDagDefinition { Branches = branches };
     }
 
-    private static BranchDefinition CreateBranch(List<string> args, ref int branchCounter, string? defaultProcessor = null)
+    private static BranchDefinition CreateBranch(List<string> args, ref int branchCounter)
     {
         var argsArray = args.ToArray();
 
@@ -82,51 +83,36 @@ public static class CliDagParser
         branchCounter++;
 
         var sqlQuery = ExtractSqlQuery(argsArray);
-        bool isProcessor = sqlQuery != null;
-
         var fromValue = ExtractArgValue(argsArray, "--from");
 
         var refAliases = ExtractAllArgValues(argsArray, "--ref")
             .SelectMany(r => r.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             .ToList();
 
-        string? mainAlias = null;
-        string? fromAlias = null;
-        string? input;
-        string[] normalizedArgs;
+        var mergeAliases = ExtractAllArgValues(argsArray, "--merge")
+            .SelectMany(m => m.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .ToList();
 
-        if (isProcessor)
-        {
-            mainAlias = fromValue;
-            input = defaultProcessor ?? "fusion-engine";
-            // Normalize: --from <alias> → --main <alias>; --sql "<query>" → -q "<query>"
-            // The orchestrator injects --sql <engine> when --sql is absent from the args.
-            normalizedArgs = NormalizeProcessorArgs(argsArray, mainAlias);
-        }
-        else
-        {
-            input = ExtractArgValue(argsArray, "-i") ?? ExtractArgValue(argsArray, "--input");
-            fromAlias = fromValue;
-            normalizedArgs = argsArray;
-        }
+        // Input: for stream-transformer branches there is no injected -i.
+        // For regular branches, extract the explicit -i / --input value.
+        string? input = ExtractArgValue(argsArray, "-i") ?? ExtractArgValue(argsArray, "--input");
 
         return new BranchDefinition
         {
             Alias = alias,
-            Arguments = normalizedArgs,
-            Processor = isProcessor ? ProcessorKind.Sql : ProcessorKind.None,
+            Arguments = argsArray,
             Input = input,
             Output = ExtractArgValue(argsArray, "-o") ?? ExtractArgValue(argsArray, "--output"),
-            MainAlias = mainAlias,
-            FromAlias = fromAlias,
+            FromAlias = fromValue,
             RefAliases = refAliases,
+            MergeAliases = mergeAliases,
             SqlQuery = sqlQuery
         };
     }
 
     /// <summary>
     /// Extracts the SQL query from <c>--sql "&lt;query&gt;"</c>.
-    /// Returns null if no <c>--sql</c> flag is present (branch is not a processor).
+    /// Returns null if no <c>--sql</c> flag is present (branch is not a SQL transformer).
     /// </summary>
     private static string? ExtractSqlQuery(string[] args)
     {
@@ -143,46 +129,6 @@ public static class CliDagParser
             return val;
         }
         return null;
-    }
-
-    /// <summary>
-    /// Normalizes the raw args of a processor branch for System.CommandLine / DataFusionProcessorFactory:
-    /// <list type="bullet">
-    ///   <item><c>--from &lt;alias&gt;</c> → <c>--main &lt;alias&gt;</c></item>
-    ///   <item><c>--sql "&lt;query&gt;"</c> → <c>-q "&lt;query&gt;"</c>
-    ///         (the orchestrator injects <c>--sql fusion-engine</c> when the flag is absent)</item>
-    /// </list>
-    /// </summary>
-    private static string[] NormalizeProcessorArgs(string[] args, string? mainAlias)
-    {
-        var result = new List<string>(args.Length);
-        int i = 0;
-
-        while (i < args.Length)
-        {
-            var arg = args[i];
-
-            if (arg.Equals("--from", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
-            {
-                result.Add("--main");
-                result.Add(args[i + 1]);
-                i += 2;
-            }
-            else if (arg.Equals("--sql", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
-            {
-                // --sql "<query>" → -q "<query>"; orchestrator will inject --sql <engine>.
-                result.Add("-q");
-                result.Add(args[i + 1]);
-                i += 2;
-            }
-            else
-            {
-                result.Add(arg);
-                i++;
-            }
-        }
-
-        return result.ToArray();
     }
 
     /// <summary>

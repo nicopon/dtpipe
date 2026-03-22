@@ -91,9 +91,8 @@ public class ProviderConfigurationService
                     }
                 }
             }
-            // This new block handles CLI binding and then Processor property mapping for all IDataFactory types
-            // including IProcessorFactory, IDataWriterFactory, and IStreamReaderFactory.
-            // It replaces the old `else if (contributor is IProcessorFactory xFactory)` block.
+            // This block handles CLI binding for all IDataFactory types
+            // including IStreamTransformerFactory, IDataWriterFactory, and IStreamReaderFactory.
             if (contributor is IDataFactory descriptor)
             {
                 var options = contributor.GetCliOptions();
@@ -147,17 +146,6 @@ public class ProviderConfigurationService
             {
                 var current = prop.GetValue(options) as string;
                 if (string.IsNullOrEmpty(current)) prop.SetValue(options, job.Query);
-            }
-        }
-
-        // Map MainAlias
-        if (!string.IsNullOrEmpty(job.Main))
-        {
-            var prop = type.GetProperty("MainAlias");
-            if (prop != null && prop.PropertyType == typeof(string) && prop.CanWrite)
-            {
-                var current = prop.GetValue(options) as string;
-                if (string.IsNullOrEmpty(current)) prop.SetValue(options, job.Main);
             }
         }
 

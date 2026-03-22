@@ -7,7 +7,6 @@ using System.Linq;
 using DtPipe.Cli.Security;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
-using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Cli.Infrastructure;
 
 namespace DtPipe.Cli;
@@ -47,8 +46,8 @@ internal static class CoreOptionsBuilder
         { "--job",                CliPipelinePhase.Global },
         { "--export-job",         CliPipelinePhase.Global },
         { "--metrics-path",       CliPipelinePhase.Global },
-        // Processor options
-        { "--main",               CliPipelinePhase.Processor },
+        // Stream-transformer options
+        { "--merge",              CliPipelinePhase.Processor },
         { "--ref",                CliPipelinePhase.Processor },
         { "--src-main",           CliPipelinePhase.Processor },
         { "--src-ref",            CliPipelinePhase.Processor },
@@ -58,8 +57,7 @@ internal static class CoreOptionsBuilder
 
     public static CoreCliOptions Build(
         IEnumerable<IStreamReaderFactory>? readerFactories = null,
-        IEnumerable<IDataWriterFactory>? writerFactories = null,
-        IEnumerable<IProcessorFactory>? processorFactories = null)
+        IEnumerable<IDataWriterFactory>? writerFactories = null)
     {
         var inputOption = new Option<string[]>("--input")
         {
@@ -124,24 +122,23 @@ internal static class CoreOptionsBuilder
         var tableOption = new Option<string[]>("--table") { Description = "Target table name", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
         tableOption.Aliases.Add("-t");
 
-        var strictSchemaOption = new Option<bool?[]>("--strict-schema") { Description = "Abort if schema errors found", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
-        var noSchemaValidationOption = new Option<bool?[]>("--no-schema-validation") { Description = "Disable schema check", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
+        var strictSchemaOption = new Option<bool>("--strict-schema") { Description = "Abort if schema errors found" };
+        var noSchemaValidationOption = new Option<bool>("--no-schema-validation") { Description = "Disable schema check" };
 
         var metricsPathOption = new Option<string[]>("--metrics-path") { Description = "Path to structured metrics JSON output", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
-        var autoMigrateOption = new Option<bool?[]>("--auto-migrate") { Description = "Automatically add missing columns to target table", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
+        var autoMigrateOption = new Option<bool>("--auto-migrate") { Description = "Automatically add missing columns to target table" };
 
         var maxRetriesOption = new Option<int[]>("--max-retries") { Description = "Max retries for transient errors", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
 
         var retryDelayMsOption = new Option<int[]>("--retry-delay-ms") { Description = "Initial retry delay in ms", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
 
-        // Processor Options
+        // Stream Transformer Options
         var sqlOption = new Option<string[]>("--sql")
         {
-            Description = "Start a processor branch: specify the engine name (e.g. fusion-engine) followed by --query, --main, --ref",
+            Description = "Start a SQL stream-transformer branch. Use --from for the main source, --ref for secondary (preloaded) sources.",
             Arity = ArgumentArity.ZeroOrMore,
             AllowMultipleArgumentsPerToken = true
         };
-        sqlOption.CompletionSources.Add(ctx => GetProcessorSuggestions(ctx, processorFactories));
 
         var aliasOption = new Option<string[]>("--alias") { Description = "Alias(es) for the current DAG branch or streams" };
 
@@ -150,8 +147,8 @@ internal static class CoreOptionsBuilder
         var throttleOption = new Option<int[]>("--throttle") { Description = "Throttle speed (rows/sec)", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
         var ignoreNullsOption = new Option<bool>("--ignore-nulls") { Description = "Skip null values in specific transformations" };
 
-        var mainOption = new Option<string[]>("--main") { Description = "Main source alias for Processor (streaming side of JOIN)", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
-        var refOption = new Option<string[]>("--ref") { Description = "Secondary source alias(es) for Processor (preloaded into memory)" };
+        var mergeOption = new Option<string[]>("--merge") { Description = "Concatenate an upstream channel alias into this stream-transformer branch", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
+        var refOption = new Option<string[]>("--ref") { Description = "Secondary source alias(es) for SQL transformer (preloaded into memory)" };
         var srcMainOption = new Option<string[]>("--src-main") { Description = "Source-main alias for DAG orchestration", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
         var srcRefOption = new Option<string[]>("--src-ref") { Description = "Source-ref alias(es) for DAG orchestration" };
         var fromOption = new Option<string[]>("--from")
@@ -172,7 +169,7 @@ internal static class CoreOptionsBuilder
             strategyOption, insertModeOption, tableOption, maxRetriesOption, retryDelayMsOption, strictSchemaOption,
             noSchemaValidationOption, metricsPathOption, autoMigrateOption, sqlOption, aliasOption,
             renameOption, dropOption, throttleOption, ignoreNullsOption,
-            mainOption, refOption, srcMainOption, srcRefOption, fromOption, prefixOption
+            mergeOption, refOption, srcMainOption, srcRefOption, fromOption, prefixOption
         };
 
         foreach (var opt in allList)
@@ -188,7 +185,7 @@ internal static class CoreOptionsBuilder
             finallyExecOption, strategyOption, insertModeOption, tableOption, maxRetriesOption, retryDelayMsOption,
             strictSchemaOption, noSchemaValidationOption, metricsPathOption, autoMigrateOption, sqlOption,
             aliasOption, renameOption, dropOption, throttleOption, ignoreNullsOption,
-            mainOption, refOption, srcMainOption, srcRefOption, fromOption, prefixOption, allList);
+            mergeOption, refOption, srcMainOption, srcRefOption, fromOption, prefixOption, allList);
     }
 
     private static IEnumerable<CompletionItem> GetInputSuggestions(CompletionContext context, IEnumerable<IStreamReaderFactory>? factories)
@@ -289,15 +286,6 @@ internal static class CoreOptionsBuilder
         return Enumerable.Empty<CompletionItem>();
     }
 
-    private static IEnumerable<CompletionItem> GetProcessorSuggestions(CompletionContext context, IEnumerable<IProcessorFactory>? factories)
-    {
-        var suggestions = new List<CompletionItem>();
-        if (factories != null)
-        {
-            foreach (var f in factories) suggestions.Add(new CompletionItem(f.ComponentName + ":[NOSUSP]"));
-        }
-        return suggestions;
-    }
 }
 
 public record CoreCliOptions(
@@ -326,17 +314,17 @@ public record CoreCliOptions(
     Option<string[]> Table,
     Option<int[]> MaxRetries,
     Option<int[]> RetryDelayMs,
-    Option<bool?[]> StrictSchema,
-    Option<bool?[]> NoSchemaValidation,
+    Option<bool> StrictSchema,
+    Option<bool> NoSchemaValidation,
     Option<string[]> MetricsPath,
-    Option<bool?[]> AutoMigrate,
+    Option<bool> AutoMigrate,
     Option<string[]> Sql,
     Option<string[]> Alias,
     Option<string[]> Rename,
     Option<string[]> Drop,
     Option<int[]> Throttle,
     Option<bool> IgnoreNulls,
-    Option<string[]> Main,
+    Option<string[]> Merge,
     Option<string[]> Ref,
     Option<string[]> SrcMain,
     Option<string[]> SrcRef,

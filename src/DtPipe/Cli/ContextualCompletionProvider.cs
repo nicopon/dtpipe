@@ -137,7 +137,7 @@ public static class ContextualCompletionProvider
             }
 
             // 5. DAG-aware rule
-            if (context.LastCompletedFlag == "--main" || context.LastCompletedFlag == "--ref" || context.LastCompletedFlag == "--from")
+            if (context.LastCompletedFlag == "--merge" || context.LastCompletedFlag == "--ref" || context.LastCompletedFlag == "--from")
             {
                 if (context.KnownAliases.Any())
                 {
@@ -232,11 +232,12 @@ public static class ContextualCompletionProvider
         // Priority logic
         var highPriority = new List<string>();
 
-        // If we are in a Processor branch, we MUST provide sources (--main, --ref)
+        // If we are in a Processor branch, guide towards providing sources
         if (context.IsProcessorBranch)
         {
-            highPriority.Add("--main");
+            highPriority.Add("--from");
             highPriority.Add("--ref");
+            highPriority.Add("--merge");
         }
 
         // Guide towards completion

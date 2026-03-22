@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-echo "Building DtPipe.XStreamers.DataFusion (Rust Native Bridge) in Release mode..."
+echo "Building DtPipe.Processors.DataFusion (Rust Native Bridge) in Release mode..."
 
 RUST_TARGET="${RUST_TARGET:-}"
 TARGET_ARGS=""
@@ -14,27 +14,27 @@ if [ -n "$RUST_TARGET" ]; then
 fi
 
 # Build the Rust crate
-cd src/DtPipe.XStreamers.DataFusion
+cd src/DtPipe.Processors.DataFusion
 cargo build --release $TARGET_ARGS
 
-echo "Copying compiled native libraries to DtPipe.XStreamers/DataFusion/..."
+echo "Copying compiled native libraries to DtPipe.Processors/DataFusion/..."
 cd ../..
 
 # Ensure destination directory exists
-mkdir -p src/DtPipe.XStreamers/DataFusion
+mkdir -p src/DtPipe.Processors/DataFusion
 
 # Copy Unix shared libraries if they exist
-if [ -f "src/DtPipe.XStreamers.DataFusion/target/$TARGET_DIR/libdtpipe_xstreamers_datafusion.dylib" ]; then
-    cp "src/DtPipe.XStreamers.DataFusion/target/$TARGET_DIR/libdtpipe_xstreamers_datafusion.dylib" src/DtPipe.XStreamers/DataFusion/
+if [ -f "src/DtPipe.Processors.DataFusion/target/$TARGET_DIR/libdtpipe_datafusion.dylib" ]; then
+    cp "src/DtPipe.Processors.DataFusion/target/$TARGET_DIR/libdtpipe_datafusion.dylib" src/DtPipe.Processors/DataFusion/
 fi
 
-if [ -f "src/DtPipe.XStreamers.DataFusion/target/$TARGET_DIR/libdtpipe_xstreamers_datafusion.so" ]; then
-    cp "src/DtPipe.XStreamers.DataFusion/target/$TARGET_DIR/libdtpipe_xstreamers_datafusion.so" src/DtPipe.XStreamers/DataFusion/
+if [ -f "src/DtPipe.Processors.DataFusion/target/$TARGET_DIR/libdtpipe_datafusion.so" ]; then
+    cp "src/DtPipe.Processors.DataFusion/target/$TARGET_DIR/libdtpipe_datafusion.so" src/DtPipe.Processors/DataFusion/
 fi
 
 # Copy Windows DLL if it exists
-if [ -f "src/DtPipe.XStreamers.DataFusion/target/$TARGET_DIR/dtpipe_xstreamers_datafusion.dll" ]; then
-    cp "src/DtPipe.XStreamers.DataFusion/target/$TARGET_DIR/dtpipe_xstreamers_datafusion.dll" src/DtPipe.XStreamers/DataFusion/
+if [ -f "src/DtPipe.Processors.DataFusion/target/$TARGET_DIR/dtpipe_datafusion.dll" ]; then
+    cp "src/DtPipe.Processors.DataFusion/target/$TARGET_DIR/dtpipe_datafusion.dll" src/DtPipe.Processors/DataFusion/
 fi
 
 echo "DataFusion Bridge built and copied successfully."

@@ -15,16 +15,19 @@ namespace DtPipe.Core.Pipelines.Dag;
 /// Multiplexer: if N branches consume the same upstream alias, the orchestrator creates N
 /// distinct sub-channels and a background <c>BroadcastTask</c> that reads the source channel
 /// once and clones each message into all N sub-channels. This is analogous to Unix <c>tee</c>.
+///
+/// Stream-transformer branches (<c>--sql</c> / <c>--merge</c>) read from Arrow channels directly
+/// via their <see cref="IStreamTransformerFactory"/>. The orchestrator does NOT inject <c>-i</c>
+/// for these branches; instead it registers their upstream channels as Arrow channels.
 /// </summary>
 public class DagOrchestrator : IDagOrchestrator
 {
     private readonly ILogger<DagOrchestrator> _logger;
     private readonly IMemoryChannelRegistry _channelRegistry;
-    private readonly List<IProcessorFactory> _processorFactories;
     private readonly List<IStreamReaderFactory> _readerFactories;
     private static readonly object _schemaLock = new();
     private static readonly Schema _emptySchema = new Schema(System.Array.Empty<Field>(), null);
-    
+
     // Constants for DAG execution
     private const int DefaultNativeChannelCapacity = 100;
     private const int DefaultArrowChannelCapacity = 64;
@@ -34,12 +37,10 @@ public class DagOrchestrator : IDagOrchestrator
     public DagOrchestrator(
         ILogger<DagOrchestrator> logger,
         IMemoryChannelRegistry channelRegistry,
-        IEnumerable<IProcessorFactory> processorFactories,
         IEnumerable<IStreamReaderFactory> readerFactories)
     {
         _logger = logger;
         _channelRegistry = channelRegistry;
-        _processorFactories = processorFactories.ToList();
         _readerFactories = readerFactories.ToList();
     }
 
@@ -65,12 +66,11 @@ public class DagOrchestrator : IDagOrchestrator
         // ──────────────────────────────────────────────────────────────────
         // 1. Dependency Analysis & Lifecycle Tracking
         // ──────────────────────────────────────────────────────────────────
-        
+
         var branchCts = new Dictionary<string, CancellationTokenSource>(StringComparer.OrdinalIgnoreCase);
         var activeConsumerCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var producerToAlias = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         var taskToMetadata = new Dictionary<Task, BranchTaskMetadata>();
-        
+
         // Tracking broadcast tasks separately as they are also producers/consumers
         var broadcastSubAliases = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         var fromConsumerCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -79,13 +79,11 @@ public class DagOrchestrator : IDagOrchestrator
         {
             var inputs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (!string.IsNullOrEmpty(branch.FromAlias)) inputs.Add(branch.FromAlias);
-            if (!string.IsNullOrEmpty(branch.MainAlias)) inputs.Add(branch.MainAlias);
             foreach (var r in branch.RefAliases) inputs.Add(r);
+            foreach (var m in branch.MergeAliases) inputs.Add(m);
 
             foreach (var input in inputs)
-            {
                 fromConsumerCounts[input] = fromConsumerCounts.GetValueOrDefault(input) + 1;
-            }
         }
 
         foreach (var (alias, count) in fromConsumerCounts.Where(kv => kv.Value > 1))
@@ -101,13 +99,11 @@ public class DagOrchestrator : IDagOrchestrator
         {
             var inputs = new List<string>();
             if (!string.IsNullOrEmpty(branch.FromAlias)) inputs.Add(branch.FromAlias);
-            if (!string.IsNullOrEmpty(branch.MainAlias)) inputs.Add(branch.MainAlias);
             foreach (var r in branch.RefAliases) inputs.Add(r);
+            foreach (var m in branch.MergeAliases) inputs.Add(m);
 
             foreach (var input in inputs)
-            {
                 activeConsumerCounts[input] = activeConsumerCounts.GetValueOrDefault(input) + 1;
-            }
         }
 
         // ──────────────────────────────────────────────────────────────────
@@ -164,41 +160,62 @@ public class DagOrchestrator : IDagOrchestrator
             // Start all branches
             foreach (var branch in dag.Branches)
             {
-                string? resolvedFromAlias = null;
-                if (!string.IsNullOrEmpty(branch.FromAlias))
-                {
-                    resolvedFromAlias = ResolveInputAlias(branch.FromAlias, broadcastSubAliases, broadcastAssignmentCursor);
-                }
-
-                // Resolve MainAlias and RefAliases to their fan-out sub-aliases when applicable.
-                // Also patch the Arguments array so that --main/--ref flags carry the resolved names
-                // (DataFusionProcessorFactory reads MainAlias/RefAliases from parsed CLI args).
-                var actualMainAlias = branch.MainAlias != null
-                    ? ResolveInputAlias(branch.MainAlias, broadcastSubAliases, broadcastAssignmentCursor)
+                // Resolve from/ref/merge aliases to their fan-out sub-aliases when applicable.
+                var actualFromAlias = !string.IsNullOrEmpty(branch.FromAlias)
+                    ? ResolveInputAlias(branch.FromAlias, broadcastSubAliases, broadcastAssignmentCursor)
                     : null;
 
                 var actualRefAliases = branch.RefAliases
                     .Select(a => ResolveInputAlias(a, broadcastSubAliases, broadcastAssignmentCursor))
                     .ToArray();
 
-                var resolvedArgs = ReplaceAliasesInArgs(
-                    branch.Arguments, branch.MainAlias, actualMainAlias,
-                    branch.RefAliases, actualRefAliases);
+                var actualMergeAliases = branch.MergeAliases
+                    .Select(a => ResolveInputAlias(a, broadcastSubAliases, broadcastAssignmentCursor))
+                    .ToArray();
 
-                var updatedBranch = branch with {
-                    MainAlias = actualMainAlias,
+                // Build the logical→physical alias map for this branch.
+                // SQL branches keep logical aliases in their args (for SQL table names);
+                // the physical channel alias is resolved at factory time via this map.
+                // Merge/native branches have their args rewritten to physical aliases directly.
+                var aliasMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (!string.IsNullOrEmpty(branch.FromAlias) && actualFromAlias != null
+                    && !string.Equals(branch.FromAlias, actualFromAlias, StringComparison.OrdinalIgnoreCase))
+                    aliasMap[branch.FromAlias] = actualFromAlias;
+                for (int i = 0; i < branch.RefAliases.Count && i < actualRefAliases.Length; i++)
+                    if (!string.Equals(branch.RefAliases[i], actualRefAliases[i], StringComparison.OrdinalIgnoreCase))
+                        aliasMap[branch.RefAliases[i]] = actualRefAliases[i];
+                for (int i = 0; i < branch.MergeAliases.Count && i < actualMergeAliases.Length; i++)
+                    if (!string.Equals(branch.MergeAliases[i], actualMergeAliases[i], StringComparison.OrdinalIgnoreCase))
+                        aliasMap[branch.MergeAliases[i]] = actualMergeAliases[i];
+                var branchCtx = new BranchChannelContext { AliasMap = aliasMap };
+
+                // For SQL branches: preserve logical aliases in args so the SQL query table names
+                // remain correct. Physical channel lookup happens via branchCtx.AliasMap.
+                // For merge/native branches: rewrite --from/--ref/--merge to physical aliases.
+                string[] resolvedArgs;
+                if (branch.SqlQuery != null)
+                    resolvedArgs = branch.Arguments;
+                else
+                    resolvedArgs = ReplaceAliasesInArgs(
+                        branch.Arguments,
+                        branch.FromAlias, actualFromAlias,
+                        branch.RefAliases, actualRefAliases,
+                        branch.MergeAliases, actualMergeAliases);
+
+                var updatedBranch = branch with
+                {
                     RefAliases = actualRefAliases,
+                    MergeAliases = actualMergeAliases,
                     Arguments = resolvedArgs
                 };
 
                 var bCts = CancellationTokenSource.CreateLinkedTokenSource(effectiveCt);
                 branchCts[branch.Alias] = bCts;
 
-                // Identify producers/consumers for this branch
                 var consumes = new List<string>();
                 if (!string.IsNullOrEmpty(branch.FromAlias)) consumes.Add(branch.FromAlias);
-                if (!string.IsNullOrEmpty(branch.MainAlias)) consumes.Add(branch.MainAlias);
                 consumes.AddRange(branch.RefAliases);
+                consumes.AddRange(branch.MergeAliases);
 
                 var produces = new List<string>();
                 if (string.IsNullOrEmpty(branch.Output)) produces.Add(branch.Alias);
@@ -211,7 +228,7 @@ public class DagOrchestrator : IDagOrchestrator
                     IsTerminal: !string.IsNullOrEmpty(branch.Output)
                 );
 
-                var task = ExecuteBranchAsync(dag, updatedBranch, resolvedFromAlias, broadcastSubAliases, branchExecutor, bCts.Token);
+                var task = ExecuteBranchAsync(dag, updatedBranch, actualFromAlias, broadcastSubAliases, branchExecutor, bCts.Token, branchCtx);
                 taskToMetadata[task] = metadata;
                 tasks.Add(task);
             }
@@ -221,13 +238,12 @@ public class DagOrchestrator : IDagOrchestrator
             {
                 var bCts = CancellationTokenSource.CreateLinkedTokenSource(effectiveCt);
                 Task broadcastTask;
-                
+
                 if (GetRequiredChannelMode(dag, sourceAlias) == ChannelMode.Arrow)
                     broadcastTask = StartArrowBroadcastAsync(sourceAlias, subs, bCts.Token);
                 else
                     broadcastTask = StartNativeBroadcastAsync(sourceAlias, subs, bCts.Token);
 
-                // Broadcast task consumes sourceAlias and produces all sub-aliases
                 var metadata = new BranchTaskMetadata(
                     Id: $"broadcast:{sourceAlias}",
                     Consumes: new List<string> { sourceAlias },
@@ -236,24 +252,17 @@ public class DagOrchestrator : IDagOrchestrator
                     IsTerminal: false
                 );
 
-                // For simplicity, we want broadcast tasks to be in the same 'tasks' list.
-                // We wrap it to match the Func<Task<int>> signature.
-                var wrappedTask = broadcastTask.ContinueWith(t => {
+                var wrappedTask = broadcastTask.ContinueWith(t =>
+                {
                     if (t.IsFaulted) throw t.Exception!;
-                    return 0; 
+                    return 0;
                 }, effectiveCt);
 
                 taskToMetadata[wrappedTask] = metadata;
                 tasks.Add(wrappedTask);
 
-                // Also, broadcast produces sub-aliases, and branches consume them.
-                // We need to initialize consumer counts for sub-aliases.
                 foreach (var sub in subs)
-                {
-                    // Each sub-alias is produced by the broadcast task
-                    // and consumed by exactly 1 branch (as resolved during branch start)
                     activeConsumerCounts[sub] = 1;
-                }
             }
 
             // ──────────────────────────────────────────────────────────────────
@@ -274,11 +283,7 @@ public class DagOrchestrator : IDagOrchestrator
                 }
 
                 if (finishedTask.IsCanceled)
-                {
-                    // Regular cancellation is handled by catching OperationCanceledException
-                    // but we should check if it was an unexpected cancellation.
                     continue;
-                }
 
                 var exitCode = await finishedTask;
                 if (exitCode != 0)
@@ -288,7 +293,6 @@ public class DagOrchestrator : IDagOrchestrator
                     return exitCode;
                 }
 
-                // Normal completion: Update consumer counts and terminate orphaned producers
                 var finishedMeta = taskToMetadata[finishedTask];
                 _logger.LogDebug("Task {Id} finished. Updating dependencies...", finishedMeta.Id);
 
@@ -300,18 +304,15 @@ public class DagOrchestrator : IDagOrchestrator
                         if (activeConsumerCounts[inputAlias] <= 0)
                         {
                             _logger.LogInformation("Alias '{Alias}' has no more consumers. Triggering producer termination check.", inputAlias);
-                            
-                            // Find the producer for this alias and check if it can stop
+
                             foreach (var meta in taskToMetadata.Values)
                             {
                                 if (meta.Produces.Contains(inputAlias, StringComparer.OrdinalIgnoreCase))
                                 {
-                                    // Check if ALL aliases produced by this producer are now orphaned
                                     bool allOrphaned = meta.Produces.All(p => activeConsumerCounts.GetValueOrDefault(p) <= 0);
                                     if (allOrphaned && !meta.IsTerminal)
                                     {
-                                        _logger.LogInformation("Producer {Id} is now orphaned (all produced aliases [{Aliases}] have no consumers). Cancelling.", 
-                                            meta.Id, string.Join(", ", meta.Produces));
+                                        _logger.LogInformation("Producer {Id} is now orphaned. Cancelling.", meta.Id);
                                         await meta.Cts.CancelAsync();
                                     }
                                     break;
@@ -347,69 +348,31 @@ public class DagOrchestrator : IDagOrchestrator
         string? resolvedFromAlias,
         Dictionary<string, List<string>> broadcastSubAliases,
         Func<BranchDefinition, BranchChannelContext, CancellationToken, Task<int>> branchExecutor,
-        CancellationToken ct)
+        CancellationToken ct,
+        BranchChannelContext ctx)
     {
         await Task.Yield();
-        _logger.LogInformation("Starting branch '{Alias}' [IsProcessor={IsProcessor}, FromAlias={FromAlias}]",
-            branch.Alias, branch.IsProcessor, branch.FromAlias ?? "(none)");
 
-        string role = branch.IsProcessor ? "[magenta]Processor[/]"
+        string role = branch.HasStreamTransformer ? "[magenta]Stream Transformer[/]"
                     : !string.IsNullOrEmpty(branch.FromAlias) ? "[cyan]Fan-out (tee)[/]"
                     : "[blue]Linear Branch[/]";
+
+        _logger.LogInformation("Starting branch '{Alias}' [HasStreamTransformer={HasST}, FromAlias={FromAlias}]",
+            branch.Alias, branch.HasStreamTransformer, branch.FromAlias ?? "(none)");
         OnLogEvent?.Invoke($"  [grey]>[/] Starting {role} '{branch.Alias}'");
 
         try
         {
             var argsList = branch.Arguments.ToList();
 
-            if (branch.Processor == ProcessorKind.Sql)
+            // For fan-out branches (not stream transformers): inject -i to route input from the channel.
+            if (!branch.HasStreamTransformer && string.IsNullOrEmpty(branch.Input) && !string.IsNullOrEmpty(resolvedFromAlias))
             {
-                // Ensure --sql is in args with the correct engine if it was implicit
-                var sqlEngine = ExtractArgValue(argsList, "--sql");
-                if (string.IsNullOrEmpty(sqlEngine) && !string.IsNullOrEmpty(branch.Input))
-                {
-                    int sqlIdx = argsList.FindIndex(a => a.Equals("--sql", StringComparison.OrdinalIgnoreCase));
-                    if (sqlIdx >= 0 && sqlIdx + 1 < argsList.Count && argsList[sqlIdx+1].StartsWith("-"))
-                    {
-                         argsList.Insert(sqlIdx + 1, branch.Input);
-                    }
-                    else if (sqlIdx < 0)
-                    {
-                         argsList.Insert(0, branch.Input);
-                         argsList.Insert(0, "--sql");
-                    }
-                }
-            }
-
-            if (!branch.IsProcessor && string.IsNullOrEmpty(branch.Input))
-            {
-                if (!string.IsNullOrEmpty(resolvedFromAlias))
-                {
-                    var prefix = GetRequiredChannelMode(dag, branch.FromAlias!) == ChannelMode.Arrow
-                        ? "arrow-memory"
-                        : "mem";
-                    argsList.Insert(0, $"{prefix}:{resolvedFromAlias}");
-                    argsList.Insert(0, "-i");
-                }
-                else if (!string.IsNullOrEmpty(branch.MainAlias))
-                {
-                    // Check if MainAlias is a branch alias or a provider
-                    var isBranchAlias = dag.Branches.Any(b => b.Alias.Equals(branch.MainAlias, StringComparison.OrdinalIgnoreCase));
-                    if (isBranchAlias)
-                    {
-                        var prefix = GetRequiredChannelMode(dag, branch.MainAlias) == ChannelMode.Arrow
-                            ? "arrow-memory"
-                            : "mem";
-                        argsList.Insert(0, $"{prefix}:{branch.MainAlias}");
-                        argsList.Insert(0, "-i");
-                    }
-                    else
-                    {
-                        // It's likely a provider name (e.g. generate:100)
-                        argsList.Insert(0, branch.MainAlias);
-                        argsList.Insert(0, "-i");
-                    }
-                }
+                var prefix = GetRequiredChannelMode(dag, branch.FromAlias!) == ChannelMode.Arrow
+                    ? "arrow-memory"
+                    : "mem";
+                argsList.Insert(0, $"{prefix}:{resolvedFromAlias}");
+                argsList.Insert(0, "-i");
             }
 
             if (string.IsNullOrEmpty(branch.Output))
@@ -420,46 +383,13 @@ public class DagOrchestrator : IDagOrchestrator
                 OnLogEvent?.Invoke($"  [grey]↳ Branch '{branch.Alias}' → [italic]{(mode == ChannelMode.Arrow ? "Arrow memory channel" : "memory channel")}[/][/]");
 
                 if (!argsList.Contains("--no-stats", StringComparer.OrdinalIgnoreCase))
-                {
                     argsList.Add("--no-stats");
-                }
             }
+
+            var updatedBranch = branch with { Arguments = argsList.ToArray() };
 
             try
             {
-                var updatedBranch = branch with { Arguments = argsList.ToArray() };
-
-                // Build the channel context describing how this branch is wired
-                var aliasMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                if (!string.IsNullOrEmpty(branch.FromAlias) && resolvedFromAlias != null
-                    && !string.Equals(branch.FromAlias, resolvedFromAlias, StringComparison.OrdinalIgnoreCase))
-                {
-                    aliasMap[branch.FromAlias] = resolvedFromAlias;
-                }
-                if (branch.MainAlias != null && updatedBranch.MainAlias != null
-                    && !string.Equals(branch.MainAlias, updatedBranch.MainAlias, StringComparison.OrdinalIgnoreCase))
-                {
-                    aliasMap[branch.MainAlias] = updatedBranch.MainAlias;
-                }
-
-                string? inputAlias = resolvedFromAlias
-                    ?? (branch.IsProcessor ? updatedBranch.MainAlias : null);
-                ChannelMode? inputMode = inputAlias != null
-                    ? (branch.IsProcessor ? ChannelMode.Arrow : GetRequiredChannelMode(dag, branch.FromAlias!))
-                    : null;
-
-                string? outputAlias = string.IsNullOrEmpty(branch.Output) ? branch.Alias : null;
-                var outputMode = outputAlias != null ? GetRequiredChannelMode(dag, branch.Alias) : ChannelMode.Native;
-
-                var ctx = new BranchChannelContext
-                {
-                    InputChannelAlias = inputAlias,
-                    InputChannelMode = inputMode,
-                    OutputChannelAlias = outputAlias,
-                    OutputChannelMode = outputMode,
-                    AliasMap = aliasMap
-                };
-
                 int exitCode = await branchExecutor(updatedBranch, ctx, ct);
 
                 if (exitCode != 0)
@@ -478,7 +408,6 @@ public class DagOrchestrator : IDagOrchestrator
             }
             catch (OperationCanceledException)
             {
-                // Graceful termination when all consumers are done
                 _channelRegistry.GetChannel(branch.Alias)?.Channel.Writer.TryComplete();
                 _channelRegistry.GetArrowChannel(branch.Alias)?.Channel.Writer.TryComplete();
                 _logger.LogInformation("Branch '{Alias}' terminated due to cancellation (orphaned producer).", branch.Alias);
@@ -501,7 +430,7 @@ public class DagOrchestrator : IDagOrchestrator
             ?? throw new InvalidOperationException($"Broadcast: source channel '{sourceAlias}' not found in registry.");
 
         var subChannels = subAliases
-            .Select(subAlias => _channelRegistry.GetChannel(subAlias)?.Channel ?? throw new InvalidOperationException($"Broadcast: sub channel '{subAlias}' not found."))
+            .Select(s => _channelRegistry.GetChannel(s)?.Channel ?? throw new InvalidOperationException($"Broadcast: sub channel '{s}' not found."))
             .ToList();
 
         _logger.LogInformation("Starting broadcast multiplexer for '{SourceAlias}' → [{Subs}]",
@@ -512,17 +441,12 @@ public class DagOrchestrator : IDagOrchestrator
             try
             {
                 await foreach (var batch in sourceTuple.Channel.Reader.ReadAllAsync(ct))
-                {
                     foreach (var sub in subChannels)
-                    {
                         await sub.Writer.WriteAsync(batch, ct);
-                    }
-                }
             }
             finally
             {
-                foreach (var sub in subChannels)
-                    sub.Writer.TryComplete();
+                foreach (var sub in subChannels) sub.Writer.TryComplete();
                 _logger.LogInformation("Broadcast multiplexer for '{SourceAlias}' completed.", sourceAlias);
             }
         }, ct);
@@ -534,7 +458,7 @@ public class DagOrchestrator : IDagOrchestrator
             ?? throw new InvalidOperationException($"Arrow Broadcast: source channel '{sourceAlias}' not found in registry.");
 
         var subChannels = subAliases
-            .Select(subAlias => _channelRegistry.GetArrowChannel(subAlias)?.Channel ?? throw new InvalidOperationException($"Arrow Broadcast: sub channel '{subAlias}' not found."))
+            .Select(s => _channelRegistry.GetArrowChannel(s)?.Channel ?? throw new InvalidOperationException($"Arrow Broadcast: sub channel '{s}' not found."))
             .ToList();
 
         _logger.LogInformation("Starting Arrow broadcast multiplexer for '{SourceAlias}' → [{Subs}]",
@@ -545,46 +469,38 @@ public class DagOrchestrator : IDagOrchestrator
             try
             {
                 await foreach (var batch in sourceTuple.Channel.Reader.ReadAllAsync(ct))
-                {
                     foreach (var sub in subChannels)
-                    {
                         await sub.Writer.WriteAsync(batch.Clone(), ct);
-                    }
-                    // We must NOT Dispose(batch) here because Arrow .NET clones share the SAME Column objects.
-                    // Disposing the original would invalidate all clones being processed in parallel branches.
-                    // The native memory will be freed when the final clones are disposed in their respective branches.
-                }
             }
             finally
             {
-                foreach (var sub in subChannels)
-                    sub.Writer.TryComplete();
+                foreach (var sub in subChannels) sub.Writer.TryComplete();
                 _logger.LogInformation("Arrow Broadcast multiplexer for '{SourceAlias}' completed.", sourceAlias);
             }
         }, ct);
     }
 
+    /// <summary>
+    /// Determines whether a branch's output channel must use Arrow (RecordBatch) or Native (object[]) protocol.
+    /// Arrow is required when the channel is consumed by a stream-transformer branch.
+    /// Arrow is also used when the producer branch has a reader that yields columnar output natively.
+    /// </summary>
     private ChannelMode GetRequiredChannelMode(JobDagDefinition dag, string alias)
     {
-        foreach (var branch in dag.Branches.Where(b => b.IsProcessor))
+        // Check if alias is consumed by any stream-transformer branch (SQL, merge, etc.)
+        foreach (var branch in dag.Branches.Where(b => b.HasStreamTransformer))
         {
-            bool isConsumer = (branch.MainAlias != null && branch.MainAlias.Equals(alias, StringComparison.OrdinalIgnoreCase)) ||
-                              branch.RefAliases.Contains(alias, StringComparer.OrdinalIgnoreCase);
+            bool isConsumed =
+                (branch.FromAlias != null && branch.FromAlias.Equals(alias, StringComparison.OrdinalIgnoreCase)) ||
+                branch.RefAliases.Contains(alias, StringComparer.OrdinalIgnoreCase) ||
+                branch.MergeAliases.Contains(alias, StringComparer.OrdinalIgnoreCase);
 
-            if (!isConsumer) continue;
-
-            var xFlag = branch.Input;
-            if (xFlag == null) continue;
-
-            var factory = _processorFactories
-                .FirstOrDefault(f => f.ComponentName.Equals(xFlag, StringComparison.OrdinalIgnoreCase));
-
-            if (factory != null)
-                return factory.ChannelMode;
+            if (isConsumed) return ChannelMode.Arrow;
         }
 
+        // Check if the producer branch has a reader that yields columnar output
         var producerBranch = dag.Branches.FirstOrDefault(b =>
-            b.Alias.Equals(alias, StringComparison.OrdinalIgnoreCase) && !b.IsProcessor);
+            b.Alias.Equals(alias, StringComparison.OrdinalIgnoreCase) && !b.HasStreamTransformer);
 
         if (producerBranch != null && !string.IsNullOrEmpty(producerBranch.Input))
         {
@@ -612,49 +528,39 @@ public class DagOrchestrator : IDagOrchestrator
         return alias;
     }
 
-    private string? ExtractArgValue(IEnumerable<string> args, string argName)
-    {
-        var list = args.ToList();
-        int idx = list.FindIndex(a => a.Equals(argName, StringComparison.OrdinalIgnoreCase));
-        if (idx >= 0 && idx + 1 < list.Count)
-        {
-            var val = list[idx + 1];
-            if (val.StartsWith('-')) return null;
-            return val;
-        }
-        return null;
-    }
-
     /// <summary>
-    /// Returns a copy of <paramref name="args"/> where <c>--main</c> and <c>--ref</c> values
-    /// are replaced with their fan-out sub-aliases when the source alias was broadcast.
-    /// This ensures processor factories (e.g. DataFusionProcessorFactory) receive the correct
-    /// channel names that are actually registered in IMemoryChannelRegistry.
+    /// Returns a copy of <paramref name="args"/> where <c>--from</c>, <c>--ref</c>, and <c>--merge</c>
+    /// values are replaced with their fan-out sub-aliases when the source alias was broadcast.
     /// </summary>
     private static string[] ReplaceAliasesInArgs(
         string[] args,
-        string? oldMainAlias, string? newMainAlias,
-        IReadOnlyList<string> oldRefAliases, string[] newRefAliases)
+        string? oldFromAlias, string? newFromAlias,
+        IReadOnlyList<string> oldRefAliases, string[] newRefAliases,
+        IReadOnlyList<string> oldMergeAliases, string[] newMergeAliases)
     {
-        bool mainChanged = !string.IsNullOrEmpty(oldMainAlias)
-            && !string.IsNullOrEmpty(newMainAlias)
-            && !string.Equals(oldMainAlias, newMainAlias, StringComparison.OrdinalIgnoreCase);
+        bool fromChanged = !string.IsNullOrEmpty(oldFromAlias)
+            && !string.IsNullOrEmpty(newFromAlias)
+            && !string.Equals(oldFromAlias, newFromAlias, StringComparison.OrdinalIgnoreCase);
 
         bool refsChanged = oldRefAliases.Count > 0
             && !oldRefAliases.SequenceEqual(newRefAliases, StringComparer.OrdinalIgnoreCase);
 
-        if (!mainChanged && !refsChanged) return args;
+        bool mergesChanged = oldMergeAliases.Count > 0
+            && !oldMergeAliases.SequenceEqual(newMergeAliases, StringComparer.OrdinalIgnoreCase);
+
+        if (!fromChanged && !refsChanged && !mergesChanged) return args;
 
         var result = args.ToList();
-        int refIdx = 0;
+        int refIdx = 0, mergeIdx = 0;
+        bool fromDone = !fromChanged;
 
         for (int i = 0; i < result.Count - 1; i++)
         {
-            if (mainChanged && result[i].Equals("--main", StringComparison.OrdinalIgnoreCase)
-                && result[i + 1].Equals(oldMainAlias, StringComparison.OrdinalIgnoreCase))
+            if (!fromDone && result[i].Equals("--from", StringComparison.OrdinalIgnoreCase)
+                && result[i + 1].Equals(oldFromAlias, StringComparison.OrdinalIgnoreCase))
             {
-                result[i + 1] = newMainAlias!;
-                mainChanged = false;
+                result[i + 1] = newFromAlias!;
+                fromDone = true;
             }
             else if (refsChanged && result[i].Equals("--ref", StringComparison.OrdinalIgnoreCase)
                 && refIdx < oldRefAliases.Count
@@ -662,6 +568,13 @@ public class DagOrchestrator : IDagOrchestrator
             {
                 result[i + 1] = newRefAliases[refIdx];
                 refIdx++;
+            }
+            else if (mergesChanged && result[i].Equals("--merge", StringComparison.OrdinalIgnoreCase)
+                && mergeIdx < oldMergeAliases.Count
+                && result[i + 1].Equals(oldMergeAliases[mergeIdx], StringComparison.OrdinalIgnoreCase))
+            {
+                result[i + 1] = newMergeAliases[mergeIdx];
+                mergeIdx++;
             }
         }
 

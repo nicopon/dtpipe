@@ -42,13 +42,13 @@ public class CliContextAnalyzerTests
     [Fact]
     public void DagWithProcessor_KnownAliases()
     {
-        var tokens = new[] { "--input", "pg:A", "--alias", "a1", "--sql", "duck", "--main" };
+        var tokens = new[] { "--input", "pg:A", "--alias", "a1", "--from", "a1", "--sql", "SELECT 1", "--merge" };
         var context = CliContextAnalyzer.Analyze(tokens, _options);
 
         Assert.Single(context.KnownAliases);
         Assert.Equal("a1", context.KnownAliases[0]);
         Assert.True(context.IsProcessorBranch);
-        Assert.Equal("--main", context.LastCompletedFlag);
+        Assert.Equal("--merge", context.LastCompletedFlag);
         Assert.True(context.IsExpectingFlagValue);
     }
 
@@ -73,9 +73,9 @@ public class CliContextAnalyzerTests
     }
 
     [Fact]
-    public void MainAndRef_LastFlagIsRef()
+    public void FromAndRef_LastFlagIsRef()
     {
-        var tokens = new[] { "--input", "pg:A", "--alias", "a1", "--sql", "duck", "--main", "a1", "--ref" };
+        var tokens = new[] { "--input", "pg:A", "--alias", "a1", "--sql", "SELECT 1", "--from", "a1", "--ref" };
         var context = CliContextAnalyzer.Analyze(tokens, _options);
 
         Assert.Equal("--ref", context.LastCompletedFlag);

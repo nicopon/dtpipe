@@ -23,7 +23,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DtPipe.Sample", "src\DtPipe
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "experiments", "experiments", "{6D2F4B3C-9E86-4989-AFD9-4F34C182094G}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DtPipe.XStreamers", "src\DtPipe.XStreamers\DtPipe.XStreamers.csproj", "{669C6CDE-7E86-4989-AFD9-4F34C182094F}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DtPipe.Processors", "src\DtPipe.Processors\DtPipe.Processors.csproj", "{669C6CDE-7E86-4989-AFD9-4F34C182094F}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

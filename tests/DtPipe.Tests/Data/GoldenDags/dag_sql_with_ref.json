@@ -3,42 +3,39 @@
     {
       "Alias": "main_stream",
       "Arguments": [],
-      "Processor": "None",
-      "IsProcessor": false,
       "Input": "generate:100",
       "Output": null,
-      "MainAlias": null,
       "FromAlias": null,
       "RefAliases": [],
+      "MergeAliases": [],
       "SqlQuery": null,
+      "HasStreamTransformer": false,
       "PreParsedJob": null
     },
     {
       "Alias": "ref_data",
       "Arguments": [],
-      "Processor": "None",
-      "IsProcessor": false,
       "Input": "generate:10",
       "Output": null,
-      "MainAlias": null,
       "FromAlias": null,
       "RefAliases": [],
+      "MergeAliases": [],
       "SqlQuery": null,
+      "HasStreamTransformer": false,
       "PreParsedJob": null
     },
     {
       "Alias": "result",
       "Arguments": [],
-      "Processor": "Sql",
-      "IsProcessor": true,
-      "Input": "fusion-engine",
+      "Input": null,
       "Output": "csv:/tmp/result.csv",
-      "MainAlias": "main_stream",
-      "FromAlias": null,
+      "FromAlias": "main_stream",
       "RefAliases": [
         "ref_data"
       ],
+      "MergeAliases": [],
       "SqlQuery": "SELECT m.* FROM main_stream m JOIN ref_data r ON m.id = r.id",
+      "HasStreamTransformer": true,
       "PreParsedJob": null
     }
   ],

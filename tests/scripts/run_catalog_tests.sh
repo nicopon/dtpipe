@@ -47,7 +47,7 @@ run_test() {
             
             # --- YAML Round-trip Verification ---
             if [ "$VERIFY_YAML" == "1" ]; then
-                # Only verify if it's a success case and not a complex command already using --job or --alias/--from/--xstreamer
+                # Only verify if it's a success case and not a complex command already using --job or --alias/--from/--sql
                 if [[ ! "$cmd" =~ "--job" ]] && [[ ! "$cmd" =~ "--alias" ]] && [[ ! "$cmd" =~ "--from" ]] && [[ ! "$cmd" =~ "--sql" ]] && [[ ! "$cmd" =~ "--export-job" ]]; then
                     local yaml_file="$ARTIFACTS_DIR/verify_$id.yaml"
                     echo "  -> YAML Export/Import Check..."
@@ -130,7 +130,7 @@ run_test "T19" "$DTPIPE -i artifacts/test_data.arrow -o \"$PG\" --table \"output
 # T20: Limit 0 produces an empty output file (boundary edge case)
 run_test "T20" "$DTPIPE -i artifacts/test_data.csv --limit 0 -o artifacts/output_t20.csv"
 
-# 2. Advanced Pipelines & XStreamers
+# 2. Advanced Pipelines & SQL Processors
 # T21: DataFusion JOIN between Parquet and CSV on shared Id column
 run_test "T21" "$DTPIPE -i artifacts/test_data.parquet --alias p -i artifacts/test_data.csv --alias c --from p --ref c --sql \"SELECT p.*, c.email FROM p JOIN c ON p.id = c.id\" -o artifacts/output_t21.parquet"
 # T22: DataFusion aggregation: count(*) and avg() from PostgreSQL
@@ -155,7 +155,7 @@ echo -e "\n### DAG & Fan-out Tests ###"
 run_test "T30" "$DTPIPE -i artifacts/test_data.csv --alias src --from src -o artifacts/output_t30_a.parquet --from src -o artifacts/output_t30_b.csv"
 # T31: Compute serializes the entire row as a JSON object into a new column
 run_test "T31" "$DTPIPE -i artifacts/test_data.csv --compute \"Data:row\" -o artifacts/output_t31.csv"
-# T32: DataFusion heterogeneous JOIN: PostgreSQL × SQL Server via XStreamer
+# T32: DataFusion heterogeneous JOIN: PostgreSQL × SQL Server 
 run_test "T32" "$DTPIPE -i \"$PG\" --alias p -i \"$MSSQL\" --alias m --from p --ref m --sql \"SELECT p.*, m.credit_card FROM p JOIN m ON p.id = m.id\" -o artifacts/output_t32.csv"
 # T33: DataFusion SQL predicate filter on Parquet with string equality
 run_test "T33" "$DTPIPE -i artifacts/test_data.parquet --alias main --from main --sql \"SELECT * FROM main WHERE category = 'Electronics'\" -o artifacts/output_t33.parquet"
@@ -229,7 +229,7 @@ run_test "T65" "$DTPIPE -i artifacts/test_data_big.parquet --compute \"Val:parse
 run_test "T66" "$DTPIPE -i artifacts/test_data_big.parquet -o artifacts/split/ -p \"prefix_{batch}.parquet\""
 # T67: Generate 1M rows with UUID fake column (generator + fake throughput)
 run_test "T67" "$DTPIPE -i \"generate:1M\" --fake \"uuid:random.uuid\" -o artifacts/big_uuids.csv"
-# T68: DataFusion passthrough on big Parquet to null (XStreamer overhead baseline)
+# T68: DataFusion passthrough on big Parquet to null (SQL processor overhead baseline)
 run_test "T68" "$DTPIPE -i artifacts/test_data_big.parquet --alias main --from main --sql \"SELECT * FROM main\" -o null"
 # T69: PostgreSQL big table → CSV (measures PG read + CSV write throughput)
 run_test "T69" "$DTPIPE -i \"$PG\" -q \"SELECT * FROM output_t52\" -o artifacts/output_t69.csv"
@@ -373,7 +373,7 @@ run_test "T135" "$DTPIPE -i artifacts/test_data.duckdb --query \"SELECT * FROM g
 
 echo -e "\n### Advanced Fan-out and Routing Tests ###"
 
-# T136: Diamond pattern (fan-out -> filter -> join via XStreamer)
+# T136: Diamond pattern (fan-out -> filter -> join )
 run_test "T136" "$DTPIPE -i artifacts/test_data.csv --alias src \
   --from src --filter 'row.Score > 500' --alias high \
   --from src --filter 'row.Score <= 500' --alias low \
@@ -386,7 +386,7 @@ run_test "T137" "$DTPIPE -i artifacts/test_data.csv --alias src \
   --from src -o artifacts/output_t137_b.parquet \
   --from src --limit 10 -o artifacts/output_t137_c.arrow"
 
-# T138: Fan-out after XStreamer (join -> tee)
+# T138: Fan-out after SQL processor (join -> tee)
 run_test "T138" "$DTPIPE \
   -i artifacts/test_data.parquet --alias p \
   -i artifacts/test_data.csv --alias c \

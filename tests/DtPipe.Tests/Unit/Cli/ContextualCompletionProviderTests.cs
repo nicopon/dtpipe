@@ -17,10 +17,10 @@ public class ContextualCompletionProviderTests
     }
 
     [Fact]
-    public void AfterMainFlag_ReturnsOnlyKnownAliases()
+    public void AfterMergeFlag_ReturnsOnlyKnownAliases()
     {
         var root = BuildTestRootCommand(out var allOptions);
-        var rawWords = new[] { "dtpipe", "--input", "pg:A", "--alias", "brA", "--sql", "fusion-engine", "--main", "" };
+        var rawWords = new[] { "dtpipe", "--input", "pg:A", "--alias", "brA", "--sql", "SELECT 1", "--merge", "" };
         int cursorPos = 8; // index of the empty string
 
         var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions, new Dictionary<string, CliPipelinePhase>(), Array.Empty<ICliContributor>());
@@ -44,11 +44,11 @@ public class ContextualCompletionProviderTests
     }
 
     [Fact]
-    public void NoAlias_AfterMain_ReturnsEmpty()
+    public void NoAlias_AfterMerge_ReturnsEmpty()
     {
         var root = BuildTestRootCommand(out var allOptions);
-        var rawWords = new[] { "dtpipe", "--sql", "fusion-engine", "--main", "" };
-        int cursorPos = 4;
+        var rawWords = new[] { "dtpipe", "--from", "src", "--sql", "SELECT 1", "--merge", "" };
+        int cursorPos = 6;
 
         var completions = ContextualCompletionProvider.GetCompletions(root, rawWords, cursorPos, allOptions, new Dictionary<string, CliPipelinePhase>(), Array.Empty<ICliContributor>());
 

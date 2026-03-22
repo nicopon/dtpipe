@@ -40,7 +40,7 @@
     <ProjectReference Include="..\..\src\DtPipe.Core\DtPipe.Core.csproj" />
     <ProjectReference Include="..\..\src\DtPipe.Adapters\DtPipe.Adapters.csproj" />
     <ProjectReference Include="..\..\src\DtPipe.Transformers\DtPipe.Transformers.csproj" />
-    <ProjectReference Include="..\..\src\DtPipe.XStreamers\DtPipe.XStreamers.csproj" />
+    <ProjectReference Include="..\..\src\DtPipe.Processors\DtPipe.Processors.csproj" />
   </ItemGroup>
 
 </Project>

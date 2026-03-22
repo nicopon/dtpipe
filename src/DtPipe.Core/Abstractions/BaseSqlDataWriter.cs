@@ -249,6 +249,15 @@ public abstract class BaseSqlDataWriter : IDataWriter, ISchemaInspector, IKeyVal
 
 		if (missingColumns.Count == 0) return;
 
+		// Ensure connection is open and table name is resolved before running DDL.
+		// MigrateSchemaAsync may be called before InitializeAsync (schema validation phase).
+		await EnsureConnectionOpenAsync(ct);
+		if (string.IsNullOrEmpty(_quotedTargetTableName))
+		{
+			var (schema, table) = await ResolveTargetTableAsync(ct);
+			_quotedTargetTableName = BuildQuotedTableName(schema, table);
+		}
+
 		foreach (var col in missingColumns)
 		{
 			var sql = GetAddColumnSql(_quotedTargetTableName, col);

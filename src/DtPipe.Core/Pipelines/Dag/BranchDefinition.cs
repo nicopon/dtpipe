@@ -19,18 +19,8 @@ public record BranchDefinition
     public string[] Arguments { get; init; } = Array.Empty<string>();
 
     /// <summary>
-    /// Defines the type of processor applied to this branch confluence (e.g., Sql).
-    /// </summary>
-    public ProcessorKind Processor { get; init; } = ProcessorKind.None;
-
-    /// <summary>
-    /// Indicates whether this branch represents a processor node (multi-input confluence).
-    /// </summary>
-    public bool IsProcessor => Processor != ProcessorKind.None;
-
-    /// <summary>
     /// The input source for this branch (e.g. "csv:file.csv" or "pg:query").
-    /// For processor branches, this might be null or represent the provider name (e.g. "fusion-engine").
+    /// Null for stream-transformer branches (they read directly from Arrow channels).
     /// </summary>
     public string? Input { get; init; }
 
@@ -40,27 +30,36 @@ public record BranchDefinition
     public string? Output { get; init; }
 
     /// <summary>
-    /// For processor branches, the alias of the primary source branch (streaming side of a JOIN).
-    /// </summary>
-    public string? MainAlias { get; init; }
-
-    /// <summary>
-    /// For fan-out branches, the alias of the upstream branch to read from (via broadcast).
-    /// Semantically equivalent to Unix <c>tee</c>: this branch receives a full copy of the upstream data.
-    /// Unlike <see cref="MainAlias"/>, which is used by processor JOIN routing, <c>FromAlias</c>
-    /// declares "start a new linear branch that reads a broadcast copy of the named upstream channel".
+    /// For fan-out branches and stream-transformer branches, the alias of the upstream
+    /// branch declared via <c>--from</c>. This triggers a new branch split.
+    /// Fan-out: orchestrator injects <c>-i arrow-memory:&lt;alias&gt;</c>.
+    /// Stream transformer (SQL/merge): transformer reads directly from the channel.
     /// </summary>
     public string? FromAlias { get; init; }
 
     /// <summary>
-    /// For processor branches, the aliases of secondary source branches (fully preloaded into memory before query execution).
+    /// For SQL transformer branches, the aliases of secondary source branches that are
+    /// fully preloaded into memory before query execution (declared via <c>--ref</c>).
     /// </summary>
     public IReadOnlyList<string> RefAliases { get; init; } = Array.Empty<string>();
 
     /// <summary>
-    /// For processor branches (e.g. SQL), the transformation logic to apply.
+    /// For merge transformer branches, the alias of the secondary channel to append
+    /// after the main stream (declared via <c>--merge</c>).
+    /// </summary>
+    public IReadOnlyList<string> MergeAliases { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// For SQL transformer branches, the inline SQL query (from <c>--sql "&lt;query&gt;"</c>).
     /// </summary>
     public string? SqlQuery { get; init; }
+
+    /// <summary>
+    /// <c>true</c> when this branch activates a stream transformer (<c>--sql</c> or <c>--merge</c>).
+    /// Stream transformer branches do not receive an injected <c>-i</c> reader — the transformer
+    /// reads directly from the upstream Arrow channels.
+    /// </summary>
+    public bool HasStreamTransformer => SqlQuery != null || MergeAliases.Count > 0;
 
     /// <summary>
     /// Optional pre-parsed job definition if loaded from YAML.

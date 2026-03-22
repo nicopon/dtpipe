@@ -41,7 +41,7 @@ public static class GoldenDagDefinitions
         }
     };
 
-    // Cas 3 : DAG avec processor SQL (--sql)
+    // Cas 3 : DAG avec SQL stream transformer (--sql + --from)
     public static JobDagDefinition Dag_SourcePlusSqlProcessor => new()
     {
         Branches = new[]
@@ -56,10 +56,8 @@ public static class GoldenDagDefinitions
             new BranchDefinition
             {
                 Alias = "processed",
-                Input = "fusion-engine",
-                MainAlias = "src",
+                FromAlias = "src",
                 SqlQuery = "SELECT * FROM src LIMIT 10",
-                Processor = ProcessorKind.Sql,
                 Output = "csv:/tmp/processed.csv",
                 Arguments = Array.Empty<string>()
             }
@@ -95,7 +93,7 @@ public static class GoldenDagDefinitions
         }
     };
 
-    // Cas 5 : Processor SQL avec ref (JOIN sémantique)
+    // Cas 5 : SQL stream transformer avec ref (JOIN sémantique)
     public static JobDagDefinition Dag_SqlProcessor_WithRef => new()
     {
         Branches = new[]
@@ -105,20 +103,16 @@ public static class GoldenDagDefinitions
             new BranchDefinition
             {
                 Alias = "result",
-                Input = "fusion-engine",
-                MainAlias = "main_stream",
+                FromAlias = "main_stream",
                 RefAliases = new[] { "ref_data" },
                 SqlQuery = "SELECT m.* FROM main_stream m JOIN ref_data r ON m.id = r.id",
-                Processor = ProcessorKind.Sql,
                 Output = "csv:/tmp/result.csv",
                 Arguments = Array.Empty<string>()
             }
         }
     };
 
-    // Cas 6 : Fan-out + SQL processor consommant la même source (teste la résolution des alias fan-out)
-    // `src` est consommé à la fois par `sink_a` (via --from) et par `result` (via --main).
-    // L'orchestrateur doit créer un canal broadcast et résoudre les alias en sous-canaux distincts.
+    // Cas 6 : Fan-out + SQL transformer consommant la même source (teste la résolution des alias fan-out)
     public static JobDagDefinition Dag_FanOut_WithSqlProcessor => new()
     {
         Branches = new[]
@@ -140,10 +134,8 @@ public static class GoldenDagDefinitions
             new BranchDefinition
             {
                 Alias = "result",
-                Input = "fusion-engine",
-                MainAlias = "src",
+                FromAlias = "src",
                 SqlQuery = "SELECT * FROM src",
-                Processor = ProcessorKind.Sql,
                 Output = "csv:/tmp/result.csv",
                 Arguments = Array.Empty<string>()
             }

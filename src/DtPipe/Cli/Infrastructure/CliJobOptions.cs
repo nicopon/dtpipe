@@ -31,11 +31,11 @@ public sealed class CliJobOptions
     public required Option<string[]> Table { get; init; }
     public required Option<int[]> MaxRetries { get; init; }
     public required Option<int[]> RetryDelayMs { get; init; }
-    public required Option<bool?[]> StrictSchema { get; init; }
-    public required Option<bool?[]> NoSchemaValidation { get; init; }
+    public required Option<bool> StrictSchema { get; init; }
+    public required Option<bool> NoSchemaValidation { get; init; }
     public required Option<string[]> MetricsPath { get; init; }
     public required Option<string?> Prefix { get; init; }
-    public required Option<bool?[]> AutoMigrate { get; init; }
+    public required Option<bool> AutoMigrate { get; init; }
     public required Option<string[]> Sql { get; init; }
     public required Option<string?> ExportJob { get; init; }
     public required Option<string[]> Rename { get; init; }
@@ -43,7 +43,7 @@ public sealed class CliJobOptions
     public required Option<int[]> Throttle { get; init; }
     public required Option<bool> IgnoreNulls { get; init; }
     public required Option<string[]> From { get; init; }
-    public required Option<string[]> Main { get; init; }
+    public required Option<string[]> Merge { get; init; }
     public required Option<string[]> Ref { get; init; }
     public required Option<string[]> SrcMain { get; init; }
     public required Option<string[]> SrcRef { get; init; }

@@ -3,7 +3,7 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = $PSScriptRoot
 Set-Location $ScriptDir
 
-Write-Host "Building DtPipe.XStreamers.DataFusion (Rust Native Bridge) in Release mode..." -ForegroundColor Green
+Write-Host "Building DtPipe.Processors.DataFusion (Rust Native Bridge) in Release mode..." -ForegroundColor Green
 
 $TargetArgs = @()
 $TargetDir = "release"
@@ -13,7 +13,7 @@ if ($env:RUST_TARGET) {
 }
 
 # Build the Rust crate
-Set-Location "src\DtPipe.XStreamers.DataFusion"
+Set-Location "src\DtPipe.Processors.DataFusion"
 & cargo build --release @TargetArgs
 
 if ($LASTEXITCODE -ne 0) {
@@ -21,22 +21,22 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-Write-Host "Copying compiled native libraries to DtPipe.XStreamers\DataFusion\..." -ForegroundColor Green
+Write-Host "Copying compiled native libraries to DtPipe.Processors\DataFusion\..." -ForegroundColor Green
 Set-Location $ScriptDir
 
 # Ensure destination directory exists
-$DestDir = "src\DtPipe.XStreamers\DataFusion"
+$DestDir = "src\DtPipe.Processors\DataFusion"
 if (!(Test-Path $DestDir)) {
     New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
 }
 
-$SourceDir = "src\DtPipe.XStreamers.DataFusion\target\$TargetDir"
+$SourceDir = "src\DtPipe.Processors.DataFusion\target\$TargetDir"
 
 # Copy output libraries if they exist
 $FilesToCopy = @(
-    "dtpipe_xstreamers_datafusion.dll",
-    "libdtpipe_xstreamers_datafusion.so",
-    "libdtpipe_xstreamers_datafusion.dylib"
+    "dtpipe_datafusion.dll",
+    "libdtpipe_datafusion.so",
+    "libdtpipe_datafusion.dylib"
 )
 
 foreach ($File in $FilesToCopy) {

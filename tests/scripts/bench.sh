@@ -1,21 +1,175 @@
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "$DIR/../.." && pwd)"
-ARTIFACTS_DIR="$DIR/../artifacts"
-DTPIPE_CMD="$ROOT_DIR/dist/release/dtpipe"
+#!/bin/bash
 
-MAIN_PARQUET="$ARTIFACTS_DIR/main.parquet"
-REF_CSV="$ARTIFACTS_DIR/ref1_10k.csv"
-REF2_CSV="$ARTIFACTS_DIR/ref2_10k.csv"
+# bench.sh
+# Performance benchmarks for DtPipe.
+# Usage:
+#   ./bench.sh                  # standard pipeline benchmarks
+#   ./bench.sh --sql            # SQL JOIN benchmarks (DataFusion, requires datasets)
+#   ./bench.sh --direct         # direct-file SQL JOIN (--src-main/--src-ref)
+#   ./bench.sh --all            # all benchmarks
 
-QUERY_FUSION='SELECT m.*, r.Id as ref1_id, r2.Id as ref2_id FROM main m LEFT JOIN ref r ON m.GenerateIndex = CAST(r.Id AS BIGINT) LEFT JOIN ref2 r2 ON m.GenerateIndex = CAST(r2.Id AS BIGINT)'
-#QUERY_FUSION='SELECT count(*) FROM main m LEFT JOIN ref r ON m.GenerateIndex = CAST(r.Id AS BIGINT) LEFT JOIN ref2 r2 ON m.GenerateIndex = CAST(r2.Id AS BIGINT) LIMIT 10000000'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ARTIFACTS_DIR="$SCRIPT_DIR/artifacts"
+mkdir -p "$ARTIFACTS_DIR"
 
-"$DTPIPE_CMD" \
-  --input "parquet:$MAIN_PARQUET" --alias main \
-  --input "csv:$REF_CSV"          --alias ref \
-  --input "csv:$REF2_CSV"         --alias ref2 \
-  --xstreamer fusion-engine \
-  --main main --ref ref --ref ref2 \
-  --query "$QUERY_FUSION" \
-  --output "arrow:$ARTIFACTS_DIR/bench_output.arrow"
-#  --output null
+DTPIPE="$ROOT_DIR/dist/release/dtpipe"
+export DTPIPE_NO_TUI=1
+
+if [ ! -f "$DTPIPE" ]; then
+    echo "Error: $DTPIPE not found. Run ./build.sh first."
+    exit 1
+fi
+
+RUN_SQL=0
+RUN_DIRECT=0
+for arg in "$@"; do
+    case "$arg" in
+        --sql)    RUN_SQL=1 ;;
+        --direct) RUN_DIRECT=1 ;;
+        --all)    RUN_SQL=1; RUN_DIRECT=1 ;;
+    esac
+done
+
+timeit() {
+    local label="$1"
+    shift
+    echo "  [$label] Running..."
+    local start end duration
+    start=$(date +%s%N)
+    "$@"
+    end=$(date +%s%N)
+    duration=$(( (end - start) / 1000000 ))
+    echo "  [$label] Done in ${duration}ms"
+}
+
+echo "======================================"
+echo "  DtPipe Benchmark Suite"
+echo "======================================"
+
+# ----------------------------------------
+# 1. Linear pipeline: generate → CSV
+# ----------------------------------------
+echo ""
+echo "[1] Linear pipeline: generate:100k → CSV"
+timeit "generate:100k→csv" "$DTPIPE" \
+  -i "generate:100000" \
+  --fake "Id:random.uuid" \
+  --fake "Name:name.fullName" \
+  --fake "Email:internet.email" \
+  --drop "GenerateIndex" \
+  -o "$ARTIFACTS_DIR/bench_linear.csv" --no-stats
+ROWS=$(wc -l < "$ARTIFACTS_DIR/bench_linear.csv" | tr -d ' ')
+echo "  Rows: $ROWS"
+
+# ----------------------------------------
+# 2. CSV → Parquet
+# ----------------------------------------
+echo ""
+echo "[2] CSV → Parquet (100k rows)"
+timeit "csv→parquet" "$DTPIPE" \
+  -i "$ARTIFACTS_DIR/bench_linear.csv" \
+  -o "$ARTIFACTS_DIR/bench_linear.parquet" --no-stats
+
+# ----------------------------------------
+# 3. Parquet → CSV with transformations
+# ----------------------------------------
+echo ""
+echo "[3] Parquet → CSV with fake+overwrite+format (100k rows)"
+timeit "parquet→csv+transforms" "$DTPIPE" \
+  -i "$ARTIFACTS_DIR/bench_linear.parquet" \
+  --fake "Name:name.firstName" \
+  --overwrite "Email:anonymized@example.com" \
+  --format "Display:{Name} <{Email}>" \
+  -o "$ARTIFACTS_DIR/bench_transformed.csv" --no-stats
+
+# ----------------------------------------
+# 4. DuckDB integration (if available)
+# ----------------------------------------
+echo ""
+echo "[4] generate:1M → DuckDB → Parquet"
+DUCKDB_PATH="$ARTIFACTS_DIR/bench.duckdb"
+rm -f "$DUCKDB_PATH"
+
+timeit "generate:1M→duckdb" "$DTPIPE" \
+  -i "generate:1000000" \
+  --fake "Id:random.uuid" \
+  --fake "Val:random.number" \
+  --drop "GenerateIndex" \
+  -o "duck:$DUCKDB_PATH" --table "bench_data" --strategy Recreate --no-stats
+
+timeit "duckdb→parquet" "$DTPIPE" \
+  -i "duck:$DUCKDB_PATH" \
+  --query "SELECT * FROM bench_data" \
+  -o "$ARTIFACTS_DIR/bench_from_duckdb.parquet" --no-stats
+
+ROWS=$(python3 -c "import struct,sys; f=open('$ARTIFACTS_DIR/bench_from_duckdb.parquet','rb'); f.seek(-8,2); print(struct.unpack('<q',f.read(4))[0])" 2>/dev/null || echo "?")
+echo "  Parquet rows: $ROWS"
+
+# ----------------------------------------
+# 5. SQL JOIN benchmarks (DataFusion)
+# ----------------------------------------
+if [ $RUN_SQL -eq 1 ]; then
+    echo ""
+    echo "[5] SQL JOIN benchmark (DataFusion, streaming join)"
+
+    MAIN_PARQUET="$ARTIFACTS_DIR/main.parquet"
+    REF_CSV="$ARTIFACTS_DIR/ref1_10k.csv"
+    REF2_CSV="$ARTIFACTS_DIR/ref2_10k.csv"
+
+    if [ ! -f "$MAIN_PARQUET" ] || [ ! -f "$REF_CSV" ] || [ ! -f "$REF2_CSV" ]; then
+        echo "  Generating benchmark datasets..."
+        "$SCRIPT_DIR/generate_benchmark_datasets.sh"
+    fi
+
+    QUERY_FUSION='SELECT COUNT(*) FROM main m JOIN ref r ON m.GenerateIndex = CAST(r.Id AS BIGINT) JOIN ref2 r2 ON m.GenerateIndex = CAST(r2.Id AS BIGINT)'
+
+    echo "  DAG mode (--input + --from + --ref + --sql)..."
+    timeit "datafusion-dag" "$DTPIPE" \
+      -i "parquet:$MAIN_PARQUET" --alias main \
+      -i "csv:$REF_CSV"          --alias ref \
+      -i "csv:$REF2_CSV"         --alias ref2 \
+      --from main --ref ref --ref ref2 \
+      --sql "$QUERY_FUSION" \
+      -o null --no-stats
+fi
+
+# ----------------------------------------
+# 6. Direct file SQL JOIN (--src-main/--src-ref)
+# ----------------------------------------
+if [ $RUN_DIRECT -eq 1 ]; then
+    echo ""
+    echo "[6] Direct file SQL JOIN (--src-main/--src-ref)"
+
+    MAIN_PARQUET="$ARTIFACTS_DIR/main.parquet"
+    REF_CSV="$ARTIFACTS_DIR/ref1_10k.csv"
+    REF2_CSV="$ARTIFACTS_DIR/ref2_10k.csv"
+
+    if [ ! -f "$MAIN_PARQUET" ] || [ ! -f "$REF_CSV" ] || [ ! -f "$REF2_CSV" ]; then
+        echo "  Generating benchmark datasets..."
+        "$SCRIPT_DIR/generate_benchmark_datasets.sh"
+    fi
+
+    QUERY_DIRECT='SELECT COUNT(*) FROM main m JOIN ref r ON m.GenerateIndex = CAST(r.Id AS BIGINT) JOIN ref2 r2 ON m.GenerateIndex = CAST(r2.Id AS BIGINT)'
+
+    timeit "datafusion-direct" "$DTPIPE" \
+      --src-main "parquet:$MAIN_PARQUET" --from main \
+      --src-ref  "csv:$REF_CSV"          --ref ref \
+      --src-ref  "csv:$REF2_CSV"         --ref ref2 \
+      --sql "$QUERY_DIRECT" \
+      -o null --no-stats
+fi
+
+# ----------------------------------------
+# Cleanup temp files
+# ----------------------------------------
+rm -f "$ARTIFACTS_DIR/bench_linear.csv" \
+      "$ARTIFACTS_DIR/bench_linear.parquet" \
+      "$ARTIFACTS_DIR/bench_transformed.csv" \
+      "$ARTIFACTS_DIR/bench_from_duckdb.parquet" \
+      "$ARTIFACTS_DIR/bench.duckdb"
+
+echo ""
+echo "======================================"
+echo "  Benchmark complete."
+echo "======================================"

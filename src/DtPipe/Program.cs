@@ -152,6 +152,7 @@ class Program
 		RegisterReader<DtPipe.Adapters.DuckDB.DuckDbReaderDescriptor>(services);
 		RegisterReader<DtPipe.Adapters.Generate.GenerateReaderDescriptor>(services);
 		RegisterReader<DtPipe.Adapters.JsonL.JsonLReaderDescriptor>(services);
+		RegisterReader<DtPipe.Adapters.MemoryChannel.ArrowMemoryChannelReaderDescriptor>(services);
 		RegisterReader<DtPipe.Adapters.MemoryChannel.MemoryChannelReaderDescriptor>(services);
 		RegisterReader<DtPipe.Adapters.Oracle.OracleReaderDescriptor>(services);
 		RegisterReader<DtPipe.Adapters.Parquet.ParquetReaderDescriptor>(services);
@@ -174,8 +175,9 @@ class Program
 		RegisterWriter<DtPipe.Adapters.Sqlite.SqliteWriterDescriptor>(services);
 		RegisterWriter<DtPipe.Adapters.SqlServer.SqlServerWriterDescriptor>(services);
 
-		// Explicitly Register Processors
-		RegisterProcessor<DtPipe.XStreamers.DataFusion.DataFusionProcessorFactory>(services);
+		// Register Stream Transformers
+		RegisterStreamTransformer<DtPipe.Processors.DataFusion.SqlTransformerFactory>(services);
+		RegisterStreamTransformer<DtPipe.Core.Pipelines.Dag.MergeTransformerFactory>(services);
 
 		// Transformer Factories
 		RegisterTransformer<NullDataTransformerFactory>(services);
@@ -209,17 +211,10 @@ class Program
 		services.AddSingleton<IColumnarToRowBridgeFactory, DtPipe.Adapters.Infrastructure.Arrow.ArrowColumnarToRowBridgeFactory>();
 	}
 
-	private static void RegisterProcessor<TDesc>(IServiceCollection services) where TDesc : class, IProcessorFactory, new()
+	private static void RegisterStreamTransformer<TFac>(IServiceCollection services) where TFac : class, IStreamTransformerFactory
 	{
-		services.AddSingleton<IProcessorFactory>(sp => {
-			var factory = new CliProcessorFactory(
-				new TDesc(),
-				sp.GetRequiredService<OptionsRegistry>(),
-				sp
-			);
-			return factory;
-		});
-		services.AddSingleton<ICliContributor>(sp => (ICliContributor)sp.GetRequiredService<IProcessorFactory>());
+		services.AddSingleton<IStreamTransformerFactory>(sp =>
+			ActivatorUtilities.CreateInstance<TFac>(sp));
 	}
 
 	private static void RegisterWriter<TDesc>(IServiceCollection services) where TDesc : class, IProviderDescriptor<IDataWriter>, new()

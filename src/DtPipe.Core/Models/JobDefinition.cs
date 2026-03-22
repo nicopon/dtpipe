@@ -61,7 +61,6 @@ public record JobDefinition
     public string? Prefix { get; init; }
 
     // Routing/DAG Properties
-    public string? Main { get; init; }
     public string[] Ref { get; init; } = Array.Empty<string>();
     public string? From { get; set; }
 

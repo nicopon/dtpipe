@@ -75,7 +75,7 @@ public static class CliContextAnalyzer
                     lastFlag = longName;
                     lastFlagExpectsValue = match.MaxArity > 0;
                 }
-                else if (token.Equals("--main", StringComparison.OrdinalIgnoreCase) || token.Equals("--ref", StringComparison.OrdinalIgnoreCase) || token.Equals("--from", StringComparison.OrdinalIgnoreCase))
+                else if (token.Equals("--merge", StringComparison.OrdinalIgnoreCase) || token.Equals("--ref", StringComparison.OrdinalIgnoreCase) || token.Equals("--from", StringComparison.OrdinalIgnoreCase))
                 {
                     // Special intrinsic DAG flags (Sources)
                     currentFlags.Add(token.ToLowerInvariant());

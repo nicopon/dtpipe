@@ -3,27 +3,25 @@
     {
       "Alias": "src",
       "Arguments": [],
-      "Processor": "None",
-      "IsProcessor": false,
       "Input": "generate:100",
       "Output": null,
-      "MainAlias": null,
       "FromAlias": null,
       "RefAliases": [],
+      "MergeAliases": [],
       "SqlQuery": null,
+      "HasStreamTransformer": false,
       "PreParsedJob": null
     },
     {
       "Alias": "processed",
       "Arguments": [],
-      "Processor": "Sql",
-      "IsProcessor": true,
-      "Input": "fusion-engine",
+      "Input": null,
       "Output": "csv:/tmp/processed.csv",
-      "MainAlias": "src",
-      "FromAlias": null,
+      "FromAlias": "src",
       "RefAliases": [],
+      "MergeAliases": [],
       "SqlQuery": "SELECT * FROM src LIMIT 10",
+      "HasStreamTransformer": true,
       "PreParsedJob": null
     }
   ],

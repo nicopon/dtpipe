@@ -6,6 +6,7 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
+using DtPipe.Services;
 using DtPipe.Transformers.Columnar.Fake;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -90,6 +91,10 @@ public class ManualVerificationTests : IAsyncLifetime
 		services.AddSingleton<IDataTransformerFactory, FakeDataTransformerFactory>();
 
 		services.AddSingleton<ExportService>();
+		services.AddSingleton<HookExecutor>();
+		services.AddSingleton<MetricsService>();
+		services.AddSingleton<SchemaValidationService>();
+		services.AddSingleton<PipelineExecutor>();
 
 		var mockProgress = new Mock<IExportProgress>();
 		mockProgress.Setup(p => p.GetMetrics()).Returns(new ExportMetrics(DateTime.UtcNow, DateTime.UtcNow, 0, 0, 0, 0, new Dictionary<string, long>()));

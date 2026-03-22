@@ -3,27 +3,25 @@
     {
       "Alias": "source1",
       "Arguments": [],
-      "Processor": "None",
-      "IsProcessor": false,
       "Input": "generate:5",
       "Output": null,
-      "MainAlias": null,
       "FromAlias": null,
       "RefAliases": [],
+      "MergeAliases": [],
       "SqlQuery": null,
+      "HasStreamTransformer": false,
       "PreParsedJob": null
     },
     {
       "Alias": "output1",
       "Arguments": [],
-      "Processor": "None",
-      "IsProcessor": false,
       "Input": "generate:5",
       "Output": "csv:/tmp/out.csv",
-      "MainAlias": null,
       "FromAlias": null,
       "RefAliases": [],
+      "MergeAliases": [],
       "SqlQuery": null,
+      "HasStreamTransformer": false,
       "PreParsedJob": null
     }
   ],

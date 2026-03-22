@@ -10,6 +10,7 @@ using DtPipe.Tests.Helpers;
 using DtPipe.Transformers.Columnar.Fake;
 using DtPipe.Transformers.Columnar.Format;
 using DtPipe.Transformers.Columnar.Null;
+using DtPipe.Services;
 using DtPipe.Transformers.Columnar.Overwrite;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -94,6 +95,10 @@ public class E2EIntegrationTests : IAsyncLifetime
 
 
 		services.AddSingleton<ExportService>();
+		services.AddSingleton<HookExecutor>();
+		services.AddSingleton<MetricsService>();
+		services.AddSingleton<SchemaValidationService>();
+		services.AddSingleton<PipelineExecutor>();
 
 		var mockProgress = new Mock<IExportProgress>();
 		mockProgress.Setup(p => p.GetMetrics()).Returns(new ExportMetrics(DateTime.UtcNow, DateTime.UtcNow, 0, 0, 0, 0, new Dictionary<string, long>()));
@@ -210,6 +215,10 @@ public class E2EIntegrationTests : IAsyncLifetime
 		services.AddSingleton<IColumnarToRowBridgeFactory, DtPipe.Adapters.Infrastructure.Arrow.ArrowColumnarToRowBridgeFactory>();
 
 		services.AddSingleton<ExportService>();
+		services.AddSingleton<HookExecutor>();
+		services.AddSingleton<MetricsService>();
+		services.AddSingleton<SchemaValidationService>();
+		services.AddSingleton<PipelineExecutor>();
 
 		var mockProgress = new Mock<IExportProgress>();
 		mockProgress.Setup(p => p.GetMetrics()).Returns(new ExportMetrics(DateTime.UtcNow, DateTime.UtcNow, 0, 0, 0, 0, new Dictionary<string, long>()));
@@ -322,6 +331,10 @@ public class E2EIntegrationTests : IAsyncLifetime
 		services.AddSingleton<IColumnarToRowBridgeFactory, DtPipe.Adapters.Infrastructure.Arrow.ArrowColumnarToRowBridgeFactory>();
 
 		services.AddSingleton<ExportService>();
+		services.AddSingleton<HookExecutor>();
+		services.AddSingleton<MetricsService>();
+		services.AddSingleton<SchemaValidationService>();
+		services.AddSingleton<PipelineExecutor>();
 
 		var mockProgress = new Mock<IExportProgress>();
 		mockProgress.Setup(p => p.GetMetrics()).Returns(new ExportMetrics(DateTime.UtcNow, DateTime.UtcNow, 0, 0, 0, 0, new Dictionary<string, long>()));

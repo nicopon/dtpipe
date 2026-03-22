@@ -34,8 +34,8 @@ public class DagValidatorTests
                 new BranchDefinition
                 {
                     Alias = "join",
-                    Processor = ProcessorKind.Sql,
-                    MainAlias = "src1",
+                    SqlQuery = "SELECT * FROM src1 JOIN src2 ON src1.id = src2.id",
+                    FromAlias = "src1",
                     RefAliases = new[] { "src2" },
                     Output = "csv:-"
                 }
@@ -57,8 +57,8 @@ public class DagValidatorTests
                 new BranchDefinition
                 {
                     Alias = "loop",
-                    Processor = ProcessorKind.Sql,
-                    MainAlias = "loop"
+                    SqlQuery = "SELECT 1",
+                    FromAlias = "loop"
                 }
             }
         };
@@ -75,8 +75,8 @@ public class DagValidatorTests
         {
             Branches = new[]
             {
-                new BranchDefinition { Alias = "A", Processor = ProcessorKind.Sql, MainAlias = "B" },
-                new BranchDefinition { Alias = "B", Processor = ProcessorKind.Sql, MainAlias = "A" }
+                new BranchDefinition { Alias = "A", SqlQuery = "SELECT 1", FromAlias = "B" },
+                new BranchDefinition { Alias = "B", SqlQuery = "SELECT 1", FromAlias = "A" }
             }
         };
 
@@ -86,13 +86,13 @@ public class DagValidatorTests
     }
 
     [Fact]
-    public void MissingMainAlias_Detected()
+    public void MissingFromAlias_Detected()
     {
         var dag = new JobDagDefinition
         {
             Branches = new[]
             {
-                new BranchDefinition { Alias = "XS", Processor = ProcessorKind.Sql }
+                new BranchDefinition { Alias = "XS", SqlQuery = "SELECT 1" }
             }
         };
 
@@ -108,7 +108,7 @@ public class DagValidatorTests
         {
             Branches = new[]
             {
-                new BranchDefinition { Alias = "XS", Processor = ProcessorKind.Sql, MainAlias = "ghost" }
+                new BranchDefinition { Alias = "XS", SqlQuery = "SELECT 1", FromAlias = "ghost" }
             }
         };
 
@@ -125,7 +125,7 @@ public class DagValidatorTests
             Branches = new[]
             {
                 new BranchDefinition { Alias = "src1", Input = "gen:", Output = "csv:leak.csv" },
-                new BranchDefinition { Alias = "XS", Processor = ProcessorKind.Sql, MainAlias = "src1", Output = "csv:-" }
+                new BranchDefinition { Alias = "XS", SqlQuery = "SELECT 1", FromAlias = "src1", Output = "csv:-" }
             }
         };
 

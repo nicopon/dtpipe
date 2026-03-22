@@ -34,8 +34,7 @@ public class JobService
 		ILoggerFactory loggerFactory,
 		IEnumerable<IStreamReaderFactory> readerFactories,
 		IEnumerable<IDataTransformerFactory> transformerFactories,
-		IEnumerable<IDataWriterFactory> writerFactories,
-		IEnumerable<IProcessorFactory> processorFactories)
+		IEnumerable<IDataWriterFactory> writerFactories)
 	{
 		_serviceProvider = serviceProvider;
 		_console = console;
@@ -46,7 +45,6 @@ public class JobService
 		list.AddRange(readerFactories.OfType<ICliContributor>());
 		list.AddRange(transformerFactories.OfType<ICliContributor>());
 		list.AddRange(writerFactories.OfType<ICliContributor>());
-		list.AddRange(processorFactories.OfType<ICliContributor>());
 		_contributors = list;
 	}
 
@@ -54,8 +52,7 @@ public class JobService
 	{
 		var readerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>();
 		var writerFactories = _serviceProvider.GetRequiredService<IEnumerable<IDataWriterFactory>>();
-		var processorFactories = _serviceProvider.GetRequiredService<IEnumerable<IProcessorFactory>>();
-		var opts = CoreOptionsBuilder.Build(readerFactories, writerFactories, processorFactories);
+		var opts = CoreOptionsBuilder.Build(readerFactories, writerFactories);
 		var coreOptions = opts.AllOptions;
 
 		var rootCommand = new RootCommand("A simple, self-contained CLI for performance-focused data streaming & anonymization");
@@ -111,10 +108,7 @@ public class JobService
              // that System.CommandLine considers errors at the root level.
              // Branch-level validation happens inside the executor.
 
-			var processorFactories = _serviceProvider.GetRequiredService<IEnumerable<IProcessorFactory>>();
-			string? defaultProcessor = processorFactories.Count() == 1 ? processorFactories.First().ComponentName : null;
-
-			// 2. Build Initial Job(s) and detect DAG vs Linear
+				// 2. Build Initial Job(s) and detect DAG vs Linear
 			var cliJobOptions = new DtPipe.Cli.Infrastructure.CliJobOptions
 			{
 				Job = opts.Job,
@@ -152,7 +146,7 @@ public class JobService
 				Throttle = opts.Throttle,
 				IgnoreNulls = opts.IgnoreNulls,
 				From = opts.From,
-				Main = opts.Main,
+				Merge = opts.Merge,
 				Ref = opts.Ref,
 				SrcMain = opts.SrcMain,
 				SrcRef = opts.SrcRef
@@ -183,17 +177,15 @@ public class JobService
 							args.Add("--sql");
 							args.Add(kvp.Value.Sql ?? "");
 						}
-						if (!string.IsNullOrEmpty(kvp.Value.Main)) { args.Add("--main"); args.Add(kvp.Value.Main); }
 						foreach (var r in kvp.Value.Ref ?? Array.Empty<string>()) { args.Add("--ref"); args.Add(r); }
 						if (!string.IsNullOrEmpty(kvp.Value.From)) { args.Add("--from"); args.Add(kvp.Value.From); }
 
 						branches.Add(new BranchDefinition
 						{
 							Alias = kvp.Key,
-							Input = !string.IsNullOrEmpty(kvp.Value.Input) ? kvp.Value.Input : kvp.Value.Sql,
+							Input = kvp.Value.Input,
 							Output = kvp.Value.Output,
-							Processor = !string.IsNullOrEmpty(kvp.Value.Sql) ? ProcessorKind.Sql : ProcessorKind.None,
-							MainAlias = kvp.Value.Main,
+							SqlQuery = !string.IsNullOrEmpty(kvp.Value.Sql) ? kvp.Value.Sql : null,
 							FromAlias = kvp.Value.From,
 							RefAliases = (kvp.Value.Ref ?? Array.Empty<string>()).ToList(),
 							PreParsedJob = kvp.Value,
@@ -204,7 +196,7 @@ public class JobService
 			}
 			else
 			{
-				dagDefinition = CliDagParser.Parse(rawArgs, defaultProcessor)!;
+				dagDefinition = CliDagParser.Parse(rawArgs);
 				if (dagDefinition.IsDag)
 				{
 					if (Environment.GetEnvironmentVariable("DEBUG") == "1")
@@ -223,11 +215,10 @@ public class JobService
 						if (branchJec != 0) { Environment.ExitCode = branchJec; return; }
 						var bj = branchJobs.Values.First();
 						
-						bj = bj with { 
-							Main = branch.MainAlias, 
-							Ref = branch.RefAliases?.ToArray() ?? Array.Empty<string>(), 
+						bj = bj with {
+							Ref = branch.RefAliases?.ToArray() ?? Array.Empty<string>(),
 							From = branch.FromAlias,
-							Sql = branch.IsProcessor ? branch.Input : null,
+							Sql = branch.SqlQuery,
 							Transformers = RawJobBuilder.BuildTransformerConfigsFromCli(branch.Arguments, factoryList, _contributors)
 						};
 						jobs[branch.Alias] = bj;
@@ -261,7 +252,7 @@ public class JobService
 				return;
 			}
 
-			Func<ParseResult, CancellationToken, string[], JobDefinition?, string?, Task<int>> executePipeline = async (pr, token, currentRawArgs, preParsedJob, localAlias) =>
+			Func<ParseResult, CancellationToken, string[], JobDefinition?, string?, DtPipe.Core.Pipelines.Dag.BranchChannelContext?, Task<int>> executePipeline = async (pr, token, currentRawArgs, preParsedJob, localAlias, ctx) =>
 			{
 				// Perform preliminary contributor actions
 				foreach (var contributor in _contributors)
@@ -306,8 +297,7 @@ public class JobService
 				providerConfigService.BindOptions(job, pr);
 
 				var linearPipelineService = new DtPipe.Cli.Services.LinearPipelineService(_contributors, _serviceProvider, registry, _console);
-				var isProcessor = !string.IsNullOrEmpty(job.Sql);
-				return await linearPipelineService.ExecuteAsync(job, currentRawArgs, token, localAlias, dagDefinition.IsDag, isProcessor);
+				return await linearPipelineService.ExecuteAsync(job, currentRawArgs, token, localAlias, dagDefinition.IsDag, ctx);
 			};
 			// Initialize logging early for DAG execution
 			var logPath = parseResult.GetValue(opts.Log);
@@ -336,10 +326,11 @@ public class JobService
 				var tree = new Tree("[yellow]🔀 Pipeline DAG Topology[/]");
 				foreach (var branch in dagDefinition.Branches)
 				{
-					if (branch.IsProcessor)
+					if (branch.HasStreamTransformer)
 					{
-						var junction = $"[magenta]⚙ Processor:[/] [white]{branch.Alias}[/] (Main: [cyan]{branch.MainAlias}[/]";
+						var junction = $"[magenta]⚙ Stream Transformer:[/] [white]{branch.Alias}[/] (← [cyan]{branch.FromAlias}[/]";
 						if (branch.RefAliases.Any()) junction += $", Refs: [cyan]{string.Join(", ", branch.RefAliases)}[/]";
+						if (branch.MergeAliases.Any()) junction += $", Merge: [cyan]{string.Join(", ", branch.MergeAliases)}[/]";
 						junction += ")";
 						tree.AddNode(junction);
 					}
@@ -347,11 +338,6 @@ public class JobService
 					{
 						var tee = $"[cyan]🔀 Fan-out:[/] [white]{branch.Alias}[/] ← [italic grey](tee from '{branch.FromAlias}')[/]";
 						tree.AddNode(tee);
-					}
-					else if (!string.IsNullOrEmpty(branch.MainAlias))
-					{
-						var mem = $"[cyan]🔗 Memory Channel:[/] [white]{branch.Alias}[/] ← [italic grey](consume from '{branch.MainAlias}')[/]";
-						tree.AddNode(mem);
 					}
 					else
 					{
@@ -371,7 +357,7 @@ public class JobService
 					var orchestrator = _serviceProvider.GetRequiredService<IDagOrchestrator>();
 					orchestrator.OnLogEvent = msg => _console.MarkupLine(msg);
 
-					Func<DtPipe.Core.Pipelines.Dag.BranchDefinition, DtPipe.Core.Pipelines.Dag.BranchChannelContext, CancellationToken, Task<int>> branchExecutor = async (branch, _, token) =>
+					Func<DtPipe.Core.Pipelines.Dag.BranchDefinition, DtPipe.Core.Pipelines.Dag.BranchChannelContext, CancellationToken, Task<int>> branchExecutor = async (branch, ctx, token) =>
 					{
 						var branchPr = rootCommand.Parse(branch.Arguments);
 						if (branchPr.Errors.Count > 0)
@@ -381,7 +367,7 @@ public class JobService
 							return 1;
 						}
 						// Suppress log file setup on branches, they will inherit global settings or orchestrator will capture
-						return await executePipeline(branchPr, token, branch.Arguments, branch.PreParsedJob, branch.Alias);
+						return await executePipeline(branchPr, token, branch.Arguments, branch.PreParsedJob, branch.Alias, ctx);
 					};
 
 					await orchestrator.ExecuteAsync(dagDefinition, branchExecutor, ct);
@@ -400,7 +386,7 @@ public class JobService
 			}
 
 			// Execution for non-DAG
-			var finalExitCode = await executePipeline(parseResult, ct, rawArgs, jobs.Values.First(), null);
+			var finalExitCode = await executePipeline(parseResult, ct, rawArgs, jobs.Values.First(), null, null);
 			if (finalExitCode != 0) Environment.ExitCode = finalExitCode;
 		});
 

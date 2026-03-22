@@ -15,7 +15,7 @@ public sealed record CliCompletionContext
     /// <summary>Was the current branch initiated by --sql?</summary>
     public bool IsProcessorBranch { get; init; }
 
-    /// <summary>Last complete flag typed that was expecting a value. Ex: "--main", "--ref".</summary>
+    /// <summary>Last complete flag typed that was expecting a value. Ex: "--from", "--ref", "--merge".</summary>
     public string? LastCompletedFlag { get; init; }
 
     /// <summary>Flags already used in the current branch (long names, e.g. "--input").</summary>

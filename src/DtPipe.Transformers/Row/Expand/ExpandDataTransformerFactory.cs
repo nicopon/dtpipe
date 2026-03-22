@@ -59,9 +59,17 @@ public class ExpandDataTransformerFactory : IDataTransformerFactory
 	{
 		var expands = new List<string>();
 
-		if (config.Compute != null)
+		if (config.Expand != null)
 		{
-			expands.AddRange(config.Compute.Values);
+			foreach (var kvp in config.Expand)
+			{
+				// BuildTransformerConfigsFromCli splits the expression on the first ':' into a key:value mapping.
+				// Reconstruct the original expression by joining with ':' (same pattern as FilterDataTransformerFactory).
+				if (string.IsNullOrEmpty(kvp.Value))
+					expands.Add(kvp.Key);
+				else
+					expands.Add($"{kvp.Key}:{kvp.Value}");
+			}
 		}
 
 		if (expands.Count == 0) return null;

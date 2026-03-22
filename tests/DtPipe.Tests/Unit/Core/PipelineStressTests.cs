@@ -13,6 +13,7 @@ using DtPipe.Transformers.Columnar.Null;
 using DtPipe.Transformers.Columnar.Overwrite;
 using DtPipe.Adapters.Infrastructure.Arrow;
 using DtPipe.Core.Infrastructure.Arrow;
+using DtPipe.Services;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
@@ -96,6 +97,10 @@ public class PipelineStressTests : IAsyncLifetime
 		services.AddSingleton<IRowToColumnarBridgeFactory, ArrowRowToColumnarBridgeFactory>();
 		services.AddSingleton<IColumnarToRowBridgeFactory, ArrowColumnarToRowBridgeFactory>();
 		services.AddSingleton<ExportService>();
+		services.AddSingleton<HookExecutor>();
+		services.AddSingleton<MetricsService>();
+		services.AddSingleton<SchemaValidationService>();
+		services.AddSingleton<PipelineExecutor>();
 
 		var mockProgress = new Mock<IExportProgress>();
 		mockProgress.Setup(p => p.GetMetrics()).Returns(new ExportMetrics(DateTime.UtcNow, DateTime.UtcNow, 0, 0, 0, 0, new Dictionary<string, long>()));

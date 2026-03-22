@@ -69,10 +69,9 @@ p:
 c:
   input: data.csv
 joined:
-  sql: fusion-engine
-  main: p
+  sql: SELECT * FROM p JOIN c ON p.id = c.id
+  from: p
   ref: [c]
-  query: SELECT * FROM p JOIN c ON p.id = c.id
 ";
 		var tempFile = Path.GetTempFileName();
 		File.WriteAllText(tempFile, yaml);
@@ -85,8 +84,8 @@ joined:
 			// Assert
 			jobs.Should().HaveCount(3);
 			jobs["p"].Input.Should().Be("data.parquet");
-			jobs["joined"].Sql.Should().Be("fusion-engine");
-			jobs["joined"].Main.Should().Be("p");
+			jobs["joined"].Sql.Should().NotBeNullOrEmpty();
+			jobs["joined"].From.Should().Be("p");
 			jobs["joined"].Ref.Should().Contain("c");
 		}
 		finally

@@ -14,7 +14,7 @@ public class CliDagParserTests
         Assert.Single(dag.Branches);
         Assert.False(dag.IsDag);
         Assert.Equal("stream0", dag.Branches[0].Alias);
-        Assert.False(dag.Branches[0].IsProcessor);
+        Assert.False(dag.Branches[0].HasStreamTransformer);
         Assert.Equal(args, dag.Branches[0].Arguments);
     }
 
@@ -34,16 +34,14 @@ public class CliDagParserTests
 
         var branch0 = dag.Branches[0];
         Assert.Equal("input_one", branch0.Alias);
-        Assert.False(branch0.IsProcessor);
+        Assert.False(branch0.HasStreamTransformer);
 
         var branch1 = dag.Branches[1];
-        Assert.True(branch1.IsProcessor);
-        Assert.Equal("input_one", branch1.MainAlias);
+        Assert.True(branch1.HasStreamTransformer);
+        Assert.Equal("input_one", branch1.FromAlias);
         Assert.Equal("SELECT * FROM input_one", branch1.SqlQuery);
-        Assert.Contains("--main", branch1.Arguments);
-        Assert.Contains("-q", branch1.Arguments);
-        Assert.DoesNotContain("--from", branch1.Arguments);
-        Assert.DoesNotContain("--sql", branch1.Arguments);
+        Assert.Contains("--from", branch1.Arguments);
+        Assert.Contains("--sql", branch1.Arguments);
     }
 
     [Fact]

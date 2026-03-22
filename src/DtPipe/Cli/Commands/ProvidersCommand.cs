@@ -4,7 +4,6 @@ using System.Threading.Tasks;
 using System.CommandLine;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
-using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Cli.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console;
@@ -24,7 +23,6 @@ public class ProvidersCommand : Command
         {
             var readers = serviceProvider.GetServices<IStreamReaderFactory>();
             var writers = serviceProvider.GetServices<IDataWriterFactory>();
-            var processors = serviceProvider.GetServices<IProcessorFactory>();
 
             var table = new Table()
                 .AddColumn("Provider")
@@ -62,23 +60,6 @@ public class ProvidersCommand : Command
                 table.AddRow(
                     $"[yellow]{Markup.Escape(w.ComponentName)}[/]",
                     "[blue]Writer[/]",
-                    supportsStdio ? "✓" : "",
-                    Markup.Escape(category));
-            }
-
-            foreach (var p in processors.OrderBy(p => p.ComponentName))
-            {
-                bool supportsStdio = false;
-                string category = "Processor";
-                if (p is IDataFactory df)
-                {
-                    supportsStdio = df.SupportsStdio;
-                    category = df.Category;
-                }
-
-                table.AddRow(
-                    $"[magenta]{Markup.Escape(p.ComponentName)}[/]",
-                    "[magenta]Processor[/]",
                     supportsStdio ? "✓" : "",
                     Markup.Escape(category));
             }

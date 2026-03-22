@@ -7,7 +7,7 @@ Recipes and examples for common data export and transformation tasks.
 - [Anonymization (The "Fakers")](#anonymization-the-fakers)
 - [Common Transformations](#common-transformations)
 - [Advanced Pipelines](#advanced-pipelines)
-- [Columnar Transfers & XStreamers](#columnar-transfers--xstreamers)
+- [Columnar Transfers & SQL Processors](#columnar-transfers--sql-processors)
 - [Standard Streams & Linux Pipes](#standard-streams--linux-pipes)
 - [Database Import & Migration](#database-import--migration)
 - [Production Automation (YAML)](#production-automation-yaml)

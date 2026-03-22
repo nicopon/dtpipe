@@ -8,6 +8,7 @@ using DtPipe.Transformers.Columnar;
 using DtPipe.Transformers.Columnar.Filter;
 using DtPipe.Transformers.Columnar.Format;
 using DtPipe.Transformers.Row.Compute;
+using DtPipe.Services;
 using DtPipe.Transformers.Services;
 using Apache.Arrow.Types;
 using FluentAssertions;
@@ -37,6 +38,10 @@ public class ExportServiceIntegrationTests
         mockObserver.Setup(o => o.CreateProgressReporter(It.IsAny<bool>(), It.IsAny<IEnumerable<string>>()))
                     .Returns(mockProgress.Object);
         services.AddSingleton(mockObserver.Object);
+        services.AddSingleton<HookExecutor>();
+        services.AddSingleton<MetricsService>();
+        services.AddSingleton<SchemaValidationService>();
+        services.AddSingleton<PipelineExecutor>();
 
         services.AddSingleton<ExportService>();
 

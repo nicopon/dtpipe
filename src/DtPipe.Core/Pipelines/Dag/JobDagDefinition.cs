@@ -19,7 +19,7 @@ public record JobDagDefinition
     /// Gets a value indicating whether this job requires DAG orchestration
     /// (i.e., it contains more than one branch or an explicit processor).
     /// </summary>
-    public bool IsDag => Branches.Count > 1 || Branches.Any(b => b.IsProcessor);
+    public bool IsDag => Branches.Count > 1 || Branches.Any(b => b.HasStreamTransformer);
 
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {

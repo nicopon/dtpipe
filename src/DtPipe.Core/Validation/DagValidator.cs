@@ -13,16 +13,17 @@ public static class DagValidator
         var errors = new List<string>();
         var registeredAliases = new HashSet<string>(dag.Branches.Select(b => b.Alias), StringComparer.OrdinalIgnoreCase);
 
-        // 1. Identify aliases fed into Processors or Fan-outs
-        var fedIntoProcessor = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // 1. Identify aliases fed into stream transformers or fan-outs
+        var fedIntoTransformer = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var fedIntoFrom = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var branch in dag.Branches)
         {
-            if (branch.IsProcessor)
+            if (branch.HasStreamTransformer)
             {
-                if (!string.IsNullOrEmpty(branch.MainAlias)) fedIntoProcessor.Add(branch.MainAlias);
-                foreach (var ra in branch.RefAliases) fedIntoProcessor.Add(ra);
+                if (!string.IsNullOrEmpty(branch.FromAlias)) fedIntoTransformer.Add(branch.FromAlias);
+                foreach (var ra in branch.RefAliases) fedIntoTransformer.Add(ra);
+                foreach (var ma in branch.MergeAliases) fedIntoTransformer.Add(ma);
             }
             else if (!string.IsNullOrEmpty(branch.FromAlias))
             {
@@ -32,39 +33,42 @@ public static class DagValidator
 
         foreach (var branch in dag.Branches)
         {
-            // 2. Prohibit explicit output in branches fed into downstream nodes (orchestrator will use memory channel)
-            if ((fedIntoProcessor.Contains(branch.Alias) || fedIntoFrom.Contains(branch.Alias)) && !string.IsNullOrEmpty(branch.Output))
+            // 2. Prohibit explicit output in branches fed into downstream nodes
+            if ((fedIntoTransformer.Contains(branch.Alias) || fedIntoFrom.Contains(branch.Alias))
+                && !string.IsNullOrEmpty(branch.Output))
             {
                 errors.Add($"Branch '{branch.Alias}' is used as an input for a downstream branch and cannot have its own '--output'.");
             }
 
-            // 3. Topology validation for Processor branches
-            if (branch.IsProcessor)
+            // 3. Topology validation for stream-transformer branches
+            if (branch.HasStreamTransformer)
             {
-                if (string.IsNullOrEmpty(branch.MainAlias))
+                if (string.IsNullOrEmpty(branch.FromAlias))
                 {
-                    errors.Add($"Processor branch '{branch.Alias}' is missing its main source alias. Please specify it using '--from <alias>'.");
+                    errors.Add($"Stream-transformer branch '{branch.Alias}' is missing its main source alias. Please specify it using '--from <alias>'.");
                 }
-                else if (!registeredAliases.Contains(branch.MainAlias))
+                else if (!registeredAliases.Contains(branch.FromAlias))
                 {
-                    errors.Add($"Processor branch '{branch.Alias}' references unknown main alias '{branch.MainAlias}'.");
+                    errors.Add($"Stream-transformer branch '{branch.Alias}' references unknown main alias '{branch.FromAlias}'.");
                 }
 
                 foreach (var refAlias in branch.RefAliases)
                 {
                     if (!registeredAliases.Contains(refAlias))
-                    {
-                        errors.Add($"Processor branch '{branch.Alias}' references unknown secondary alias '{refAlias}'.");
-                    }
+                        errors.Add($"Stream-transformer branch '{branch.Alias}' references unknown secondary alias '{refAlias}'.");
+                }
+
+                foreach (var mergeAlias in branch.MergeAliases)
+                {
+                    if (!registeredAliases.Contains(mergeAlias))
+                        errors.Add($"Stream-transformer branch '{branch.Alias}' references unknown merge alias '{mergeAlias}'.");
                 }
             }
-            // Topology validation for Fan-out branches
+            // Topology validation for fan-out branches
             else if (!string.IsNullOrEmpty(branch.FromAlias))
             {
                 if (!registeredAliases.Contains(branch.FromAlias))
-                {
                     errors.Add($"Branch '{branch.Alias}' references unknown upstream alias '{branch.FromAlias}' via '--from'.");
-                }
             }
         }
 
@@ -76,7 +80,7 @@ public static class DagValidator
             if (HasCycle(branch.Alias, dag.Branches, visited, stack))
             {
                 errors.Add($"Circular dependency detected involving branch '{branch.Alias}'. The pipeline must be a Directed Acyclic Graph (DAG).");
-                break; // Stop at first cycle found
+                break;
             }
         }
 
@@ -95,9 +99,9 @@ public static class DagValidator
         if (currentBranch != null)
         {
             var dependencies = new List<string>();
-            if (!string.IsNullOrEmpty(currentBranch.MainAlias)) dependencies.Add(currentBranch.MainAlias);
             if (!string.IsNullOrEmpty(currentBranch.FromAlias)) dependencies.Add(currentBranch.FromAlias);
             dependencies.AddRange(currentBranch.RefAliases);
+            dependencies.AddRange(currentBranch.MergeAliases);
 
             foreach (var dep in dependencies)
             {
