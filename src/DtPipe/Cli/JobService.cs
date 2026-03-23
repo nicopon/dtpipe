@@ -323,34 +323,9 @@ public class JobService
 			if (dagDefinition.IsDag)
 			{
 				_console.WriteLine();
-				var tree = new Tree("[yellow]🔀 Pipeline DAG Topology[/]");
-				foreach (var branch in dagDefinition.Branches)
-				{
-					if (branch.HasStreamTransformer)
-					{
-						var junction = $"[magenta]⚙ Stream Transformer:[/] [white]{branch.Alias}[/] (← [cyan]{branch.FromAlias}[/]";
-						if (branch.RefAliases.Any()) junction += $", Refs: [cyan]{string.Join(", ", branch.RefAliases)}[/]";
-						if (branch.MergeAliases.Any()) junction += $", Merge: [cyan]{string.Join(", ", branch.MergeAliases)}[/]";
-						junction += ")";
-						tree.AddNode(junction);
-					}
-					else if (!string.IsNullOrEmpty(branch.FromAlias))
-					{
-						var tee = $"[cyan]🔀 Fan-out:[/] [white]{branch.Alias}[/] ← [italic grey](tee from '{branch.FromAlias}')[/]";
-						tree.AddNode(tee);
-					}
-					else
-					{
-						var source = $"[blue]📄 Source:[/] [white]{branch.Alias}[/]";
-						if (!string.IsNullOrEmpty(branch.Input)) source += $" ([grey]{branch.Input}[/])";
-						tree.AddNode(source);
-					}
-				}
-				_console.Write(tree);
+				var readerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>();
+				_console.Write(BuildTopologyPanel(dagDefinition, readerFactories));
 				_console.WriteLine();
-
-                _console.MarkupLine("[bold green]🚀 Initializing Pipeline Execution...[/]");
-                _console.WriteLine();
 
 				try
 				{
@@ -509,6 +484,133 @@ public class JobService
 
 		return input;
 	}
+
+	// ─── DAG Topology Renderer ───────────────────────────────────────────────
+
+	private static Panel BuildTopologyPanel(JobDagDefinition dag, IEnumerable<IStreamReaderFactory> readerFactories)
+	{
+		// Count how many branches consume each alias via --from
+		var fromConsumerCount = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+		var fromConsumerSeen  = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+		foreach (var b in dag.Branches)
+			if (!string.IsNullOrEmpty(b.FromAlias) && !b.HasStreamTransformer)
+				fromConsumerCount[b.FromAlias] = fromConsumerCount.GetValueOrDefault(b.FromAlias) + 1;
+		var readerFactoryList = readerFactories.ToList();
+
+		var lines = new System.Text.StringBuilder();
+
+		foreach (var branch in dag.Branches)
+		{
+			if (branch.HasStreamTransformer)
+			{
+				lines.AppendLine("  [grey]▼[/]");
+
+				string processorLabel;
+				if (branch.SqlQuery != null)
+				{
+					var sql = branch.SqlQuery.Trim().Replace('\n', ' ').Replace('\r', ' ');
+					while (sql.Contains("  ")) sql = sql.Replace("  ", " ");
+					if (sql.Length > 55) sql = sql[..52] + "...";
+					processorLabel = $"[cyan]SQL[/] [grey]›[/] [italic]{Markup.Escape(sql)}[/]";
+				}
+				else
+				{
+					processorLabel = "[cyan]merge[/]";
+				}
+
+				lines.Append($"  [cyan]⚡[/] [white][[{Markup.Escape(branch.Alias)}]][/]  {processorLabel}");
+
+				if (branch.RefAliases.Any())
+					lines.Append($"  [grey]+refs [[{Markup.Escape(string.Join(", ", branch.RefAliases))}]] (materialized)[/]");
+				if (branch.MergeAliases.Any())
+					lines.Append($"  [grey]+merge [[{Markup.Escape(string.Join(", ", branch.MergeAliases))}]][/]");
+				lines.AppendLine();
+
+				AppendTransformers(lines, branch, "      ");
+
+				if (!string.IsNullOrEmpty(branch.Output))
+					lines.AppendLine($"      [grey]──▶[/]  [blue]{Markup.Escape(branch.Output)}[/]");
+			}
+			else if (!string.IsNullOrEmpty(branch.FromAlias))
+			{
+				// Fan-out consumer
+				int total = fromConsumerCount.GetValueOrDefault(branch.FromAlias, 1);
+				fromConsumerSeen.TryGetValue(branch.FromAlias, out int seen);
+				bool isLast = seen + 1 >= total;
+				fromConsumerSeen[branch.FromAlias] = seen + 1;
+
+				string connector = total > 1
+					? (isLast ? "   [grey]╰──▶[/]" : "   [grey]├──▶[/]")
+					: "   [grey]▼[/]\n  ";
+
+				lines.AppendLine($"{connector} [white][[{Markup.Escape(branch.Alias)}]][/]");
+				AppendTransformers(lines, branch, "         ");
+				if (!string.IsNullOrEmpty(branch.Output))
+					lines.AppendLine($"         [grey]──▶[/]  [blue]{Markup.Escape(branch.Output)}[/]");
+			}
+			else
+			{
+				// Source branch
+				bool isArrow = TopologyIsArrowChannel(dag, branch.Alias, readerFactoryList);
+				int fanOut = fromConsumerCount.GetValueOrDefault(branch.Alias);
+				bool feedsChannel = string.IsNullOrEmpty(branch.Output);
+
+				string modeLabel = feedsChannel
+					? (isArrow
+						? (fanOut > 1 ? $"  [cyan]◈ Arrow (fan-out ×{fanOut})[/]" : "  [cyan]◈ Arrow[/]")
+						: (fanOut > 1 ? $"  [yellow]● row (fan-out ×{fanOut})[/]" : "  [yellow]● row[/]"))
+					: string.Empty;
+
+				string inputLabel = !string.IsNullOrEmpty(branch.Input)
+					? $"  [grey]{Markup.Escape(branch.Input)}[/]"
+					: string.Empty;
+
+				lines.AppendLine($"  [green]◉[/] [white][[{Markup.Escape(branch.Alias)}]][/]{inputLabel}{modeLabel}");
+				AppendTransformers(lines, branch, "      ");
+				if (!string.IsNullOrEmpty(branch.Output))
+					lines.AppendLine($"      [grey]──▶[/]  [blue]{Markup.Escape(branch.Output)}[/]");
+			}
+		}
+
+		var content = lines.ToString().TrimEnd();
+		return new Panel(new Markup(content))
+			.Header("[yellow] Pipeline [/]")
+			.Border(BoxBorder.Rounded)
+			.Padding(1, 0);
+	}
+
+	private static bool TopologyIsArrowChannel(JobDagDefinition dag, string alias, List<IStreamReaderFactory> readerFactories)
+	{
+		// Arrow if consumed by a stream-transformer branch
+		if (dag.Branches.Any(b => b.HasStreamTransformer && (
+			(b.FromAlias != null && b.FromAlias.Equals(alias, StringComparison.OrdinalIgnoreCase)) ||
+			b.RefAliases.Contains(alias, StringComparer.OrdinalIgnoreCase) ||
+			b.MergeAliases.Contains(alias, StringComparer.OrdinalIgnoreCase))))
+			return true;
+
+		// Arrow if the producer reader yields columnar output (e.g. generate, parquet, Arrow)
+		var producer = dag.Branches.FirstOrDefault(b =>
+			b.Alias.Equals(alias, StringComparison.OrdinalIgnoreCase) && !b.HasStreamTransformer);
+		if (producer != null && !string.IsNullOrEmpty(producer.Input))
+		{
+			var factory = readerFactories.FirstOrDefault(f =>
+				producer.Input.StartsWith(f.ComponentName + ":", StringComparison.OrdinalIgnoreCase) ||
+				producer.Input.Equals(f.ComponentName, StringComparison.OrdinalIgnoreCase) ||
+				f.CanHandle(producer.Input));
+			if (factory?.YieldsColumnarOutput == true) return true;
+		}
+		return false;
+	}
+
+	private static void AppendTransformers(System.Text.StringBuilder sb, BranchDefinition branch, string indent)
+	{
+		var transformers = branch.PreParsedJob?.Transformers;
+		if (transformers?.Any() != true) return;
+		foreach (var t in transformers)
+			sb.AppendLine($"{indent}[grey]→ {Markup.Escape(t.Type)}[/]");
+	}
+
+	// ─────────────────────────────────────────────────────────────────────────
 
 	private static void CheckDeprecations(ParseResult parseResult, IAnsiConsole console, string[] args)
 	{

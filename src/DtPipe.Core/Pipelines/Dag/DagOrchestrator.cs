@@ -116,7 +116,6 @@ public class DagOrchestrator : IDagOrchestrator
             broadcastAssignmentCursor[alias] = 0;
 
         _logger.LogInformation("Orchestrating DAG execution with {BranchCount} branches.", dag.Branches.Count);
-        OnLogEvent?.Invoke($"[bold blue]Orchestrating DAG execution with {dag.Branches.Count} branches...[/]");
 
         try
         {
@@ -359,7 +358,6 @@ public class DagOrchestrator : IDagOrchestrator
 
         _logger.LogInformation("Starting branch '{Alias}' [HasStreamTransformer={HasST}, FromAlias={FromAlias}]",
             branch.Alias, branch.HasStreamTransformer, branch.FromAlias ?? "(none)");
-        OnLogEvent?.Invoke($"  [grey]>[/] Starting {role} '{branch.Alias}'");
 
         try
         {
@@ -380,7 +378,6 @@ public class DagOrchestrator : IDagOrchestrator
                 var mode = GetRequiredChannelMode(dag, branch.Alias);
                 argsList.Add("-o");
                 argsList.Add($"{(mode == ChannelMode.Arrow ? "arrow-memory" : "mem")}:{branch.Alias}");
-                OnLogEvent?.Invoke($"  [grey]↳ Branch '{branch.Alias}' → [italic]{(mode == ChannelMode.Arrow ? "Arrow memory channel" : "memory channel")}[/][/]");
 
                 if (!argsList.Contains("--no-stats", StringComparer.OrdinalIgnoreCase))
                     argsList.Add("--no-stats");
@@ -403,7 +400,6 @@ public class DagOrchestrator : IDagOrchestrator
                 _channelRegistry.GetArrowChannel(branch.Alias)?.Channel.Writer.TryComplete();
 
                 _logger.LogInformation("Branch '{Alias}' completed.", branch.Alias);
-                OnLogEvent?.Invoke($"  [green]✓[/] Branch '{branch.Alias}' completed.");
                 return 0;
             }
             catch (OperationCanceledException)
@@ -411,7 +407,6 @@ public class DagOrchestrator : IDagOrchestrator
                 _channelRegistry.GetChannel(branch.Alias)?.Channel.Writer.TryComplete();
                 _channelRegistry.GetArrowChannel(branch.Alias)?.Channel.Writer.TryComplete();
                 _logger.LogInformation("Branch '{Alias}' terminated due to cancellation (orphaned producer).", branch.Alias);
-                OnLogEvent?.Invoke($"  [grey]✓[/] Branch '{branch.Alias}' stopped (no more consumers).");
                 return 0;
             }
         }

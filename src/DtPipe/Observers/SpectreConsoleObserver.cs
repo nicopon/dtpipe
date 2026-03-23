@@ -75,9 +75,9 @@ public class SpectreConsoleObserver : IExportObserver
 		_console.MarkupLine($"   [yellow]Executing {hookName}: {Markup.Escape(command)}[/]");
 	}
 
-	public IExportProgress CreateProgressReporter(bool isInteractive, IEnumerable<string> transformerNames, bool suppressLiveTui = false)
+	public IExportProgress CreateProgressReporter(bool isInteractive, IReadOnlyList<(string Name, bool IsColumnar)> transformerModes, bool suppressLiveTui = false, string? branchName = null)
 	{
-		return new ProgressReporter(_console, isInteractive, transformerNames, suppressLiveTui);
+		return new ProgressReporter(_console, isInteractive, transformerModes, suppressLiveTui, branchName);
 	}
 
 	public async Task RunDryRunAsync(IStreamReader reader, IReadOnlyList<IDataTransformer> pipeline, int count, IDataWriter? inspectionWriter, IReadOnlyDictionary<IDataTransformer, (IReadOnlyList<PipeColumnInfo> In, IReadOnlyList<PipeColumnInfo> Out)>? precomputedSchemas = null, CancellationToken ct = default)

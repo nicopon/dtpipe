@@ -190,10 +190,14 @@ public class ExportService
 		await retryPolicy.ExecuteValueAsync(() => writer.InitializeAsync(exportableSchema, ct), ct);
 
 		// Use Observer to create Progress
-		var transformerNamesList = pipeline.Select(t => t.GetType().Name.Replace("DataTransformer", ""));
+		var transformerModes = segments
+			.SelectMany(s => s.Transformers.Select(t => (
+				Name: t.GetType().Name.Replace("DataTransformer", ""),
+				IsColumnar: s.IsColumnar)))
+			.ToList();
 		using var progress = silenceInternal
 			? (IExportProgress)new DtPipe.Feedback.NullExportProgress()
-			: _observer.CreateProgressReporter(!options.NoStats, transformerNamesList, suppressLiveTui: outputIsStdio);
+			: _observer.CreateProgressReporter(!options.NoStats, transformerModes, suppressLiveTui: outputIsStdio, branchName: alias);
 
 		using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 		var effectiveCt = linkedCts.Token;
@@ -216,7 +220,6 @@ public class ExportService
 			// --- POST-EXEC HOOK ---
 			await _hookExecutor.ExecuteAsync(writer, "Post-Hook", options.PostExec, ct);
 
-			_observer.LogMessage($"[green]✓ Export completed successfully.[/]");
 
 			await _metricsService.SaveMetricsAsync(progress, options.MetricsPath, ct);
 		}
@@ -224,7 +227,7 @@ public class ExportService
 		{
 			// Graceful termination for orphaned producers or cancellation
 			progress.Complete();
-			_observer.LogMessage($"[grey]✓ Export stopped (no more consumers).[/]");
+			if (!silenceInternal) _observer.LogMessage($"[grey]✓ Export stopped (no more consumers).[/]");
 		}
 		catch (Exception ex)
 		{

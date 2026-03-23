@@ -21,7 +21,7 @@ public class ProgressReporterTests
 
 			try
 			{
-				using var reporter = new ProgressReporter(new Mock<IAnsiConsole>().Object, enabled: true, transformerNames: null);
+				using var reporter = new ProgressReporter(new Mock<IAnsiConsole>().Object, enabled: true, transformerModes: null);
 				// perform some activity reports
 				reporter.ReportRead(1);
 				reporter.ReportWrite(1);
@@ -46,7 +46,7 @@ public class ProgressReporterTests
 	public void GetMetrics_ReturnsCorrectData()
 	{
 		var console = new Mock<IAnsiConsole>();
-		var reporter = new ProgressReporter(console.Object, enabled: true, transformerNames: new[] { "TestTr" });
+		var reporter = new ProgressReporter(console.Object, enabled: true, transformerModes: new[] { (Name: "TestTr", IsColumnar: false) });
 
 		reporter.ReportRead(10);
 		reporter.ReportTransform("TestTr", 5);

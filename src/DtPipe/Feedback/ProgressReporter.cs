@@ -11,6 +11,7 @@ public sealed class ProgressReporter : IExportProgress
 	private readonly bool _enabled;
 	private readonly bool _uiEnabled;
 	private readonly bool _suppressLiveTui;
+	private readonly string? _branchName;
 	private bool _disposed;
 
 	// Stats
@@ -21,25 +22,26 @@ public sealed class ProgressReporter : IExportProgress
 
 	// Transformers stats
 	private readonly Dictionary<string, long> _transformerStats = new();
-	private readonly List<string> _transformerNames = new();
+	private readonly List<(string Name, bool IsColumnar)> _transformerModes = new();
 
 	// UI Task
 	private Task? _uiTask;
 
-	public ProgressReporter(IAnsiConsole console, bool enabled = true, IEnumerable<string>? transformerNames = null, bool suppressLiveTui = false)
+	public ProgressReporter(IAnsiConsole console, bool enabled = true, IReadOnlyList<(string Name, bool IsColumnar)>? transformerModes = null, bool suppressLiveTui = false, string? branchName = null)
 	{
 		_console = console;
 		_enabled = enabled;
 		_suppressLiveTui = suppressLiveTui;
+		_branchName = branchName;
 		_stopwatch = Stopwatch.StartNew();
 		_startTime = DateTime.UtcNow;
 
-		if (transformerNames != null)
+		if (transformerModes != null)
 		{
-			foreach (var name in transformerNames)
+			foreach (var mode in transformerModes)
 			{
-				_transformerNames.Add(name);
-				_transformerStats[name] = 0;
+				_transformerModes.Add(mode);
+				_transformerStats[mode.Name] = 0;
 			}
 		}
 
@@ -90,12 +92,12 @@ public sealed class ProgressReporter : IExportProgress
 
 	public void ReportTransform(string transformerName, int count)
 	{
+		// Normalize name to match the key registered at construction (strips "DataTransformer" suffix)
+		var key = transformerName.Replace("DataTransformer", "");
 		lock (_transformerStats)
 		{
-			if (_transformerStats.ContainsKey(transformerName))
-			{
-				_transformerStats[transformerName] += count;
-			}
+			if (_transformerStats.ContainsKey(key))
+				_transformerStats[key] += count;
 		}
 	}
 
@@ -107,30 +109,43 @@ public sealed class ProgressReporter : IExportProgress
 	private Table CreateLayout()
 	{
 		var elapsed = _stopwatch.Elapsed.TotalSeconds;
+		bool hasMode = _transformerModes.Count > 0;
 
 		var table = new Table().Border(TableBorder.Rounded);
-		table.AddColumn("Stage");
-		table.AddColumn("Rows");
-		table.AddColumn("Speed");
+		if (_branchName != null)
+			table.Title = new TableTitle($"[grey]{Markup.Escape(_branchName)}[/]");
+
+		table.AddColumn(new TableColumn("Stage"));
+		table.AddColumn(new TableColumn("Rows").RightAligned());
+		table.AddColumn(new TableColumn("Speed").RightAligned());
+		if (hasMode)
+			table.AddColumn(new TableColumn("Mode"));
 
 		// Reading
 		var readSpeed = elapsed > 0 ? _readCount / elapsed : 0;
-		table.AddRow("Reading", $"{_readCount:N0}", FormatSpeed(readSpeed));
+		if (hasMode)
+			table.AddRow("[grey]▸ Reading[/]", $"[white]{_readCount:N0}[/]", $"[grey]{FormatSpeed(readSpeed)}[/]", "");
+		else
+			table.AddRow("[grey]▸ Reading[/]", $"[white]{_readCount:N0}[/]", $"[grey]{FormatSpeed(readSpeed)}[/]");
 
 		// Transformers
 		lock (_transformerStats)
 		{
-			foreach (var name in _transformerNames)
+			foreach (var (name, isColumnar) in _transformerModes)
 			{
 				var count = _transformerStats[name];
 				var speed = elapsed > 0 ? count / elapsed : 0;
-				table.AddRow($"→ {name}", $"{count:N0}", FormatSpeed(speed));
+				var modeLabel = isColumnar ? "[cyan]◈ columnar[/]" : "[yellow]● row[/]";
+				table.AddRow($"[grey]▸ → {Markup.Escape(name)}[/]", $"[white]{count:N0}[/]", $"[grey]{FormatSpeed(speed)}[/]", modeLabel);
 			}
 		}
 
 		// Writing
 		var writeSpeed = elapsed > 0 ? _writeCount / elapsed : 0;
-		table.AddRow("Writing", $"{_writeCount:N0}", FormatSpeed(writeSpeed));
+		if (hasMode)
+			table.AddRow("[grey]▸ Writing[/]", $"[white]{_writeCount:N0}[/]", $"[grey]{FormatSpeed(writeSpeed)}[/]", "");
+		else
+			table.AddRow("[grey]▸ Writing[/]", $"[white]{_writeCount:N0}[/]", $"[grey]{FormatSpeed(writeSpeed)}[/]");
 
 		return table;
 	}
@@ -155,15 +170,18 @@ public sealed class ProgressReporter : IExportProgress
 			try { _uiTask.Wait(1000); } catch { /* ignore UI task failures/timeouts */ }
 		}
 
+		UpdatePeakMemory();
+
+		var completionLine = $"[green]✓[/] [white]{_writeCount:N0} rows[/] [grey]· {_stopwatch.Elapsed.TotalSeconds:F1}s · peak {_peakMemoryMb:F0} MB[/]";
 		if (_uiEnabled)
 		{
-			_console.MarkupLine($"[green]✓ Completed in {_stopwatch.Elapsed.TotalSeconds:F1}s | {_writeCount:N0} rows[/]");
+			_console.MarkupLine(completionLine);
 		}
 		else if (_enabled && _suppressLiveTui)
 		{
 			// TUI was suppressed (stdout output) but stats are enabled → print final summary to STDERR
 			_console.Write(CreateLayout());
-			_console.MarkupLine($"[green]✓ Completed in {_stopwatch.Elapsed.TotalSeconds:F1}s | {_writeCount:N0} rows[/]");
+			_console.MarkupLine(completionLine);
 		}
 	}
 
@@ -197,9 +215,7 @@ public sealed class ProgressReporter : IExportProgress
 		lock (_transformerStats)
 		{
 			foreach (var kvp in _transformerStats)
-			{
 				transformerStats[kvp.Key] = kvp.Value;
-			}
 		}
 
 		var elapsed = _stopwatch.Elapsed.TotalSeconds;
