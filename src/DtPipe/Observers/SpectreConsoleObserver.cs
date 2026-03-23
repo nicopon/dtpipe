@@ -16,11 +16,7 @@ public class SpectreConsoleObserver : IExportObserver
 
 	public void ShowIntro(string provider, string output)
 	{
-		var table = new Table();
-		table.Border(TableBorder.None);
-		table.AddColumn(new TableColumn("[grey]Source[/]").RightAligned());
-		table.AddColumn(new TableColumn($"[blue]{provider}[/]"));
-		_console.Write(table);
+		_console.MarkupLine($"[grey]Source[/]  [blue]{Markup.Escape(provider)}[/]");
 	}
 
 	public void ShowConnectionStatus(bool connected, int? columnCount)
@@ -51,17 +47,10 @@ public class SpectreConsoleObserver : IExportObserver
 
 	public void ShowTarget(string provider, string output)
 	{
-		var targetTable = new Table();
-		targetTable.Border(TableBorder.None);
-		targetTable.AddColumn(new TableColumn("[grey]Target[/]").RightAligned());
-		targetTable.AddColumn(new TableColumn($"[blue]{provider}[/]"));
-
 		if (!string.IsNullOrEmpty(output))
-		{
-			targetTable.AddColumn(new TableColumn($"([grey]{output}[/])"));
-		}
-
-		_console.Write(targetTable);
+			_console.MarkupLine($"[grey]Target[/]  [blue]{Markup.Escape(provider)}[/] [grey]({Markup.Escape(output)})[/]");
+		else
+			_console.MarkupLine($"[grey]Target[/]  [blue]{Markup.Escape(provider)}[/]");
 	}
 
 	public void LogMessage(string message)
@@ -86,9 +75,9 @@ public class SpectreConsoleObserver : IExportObserver
 		_console.MarkupLine($"   [yellow]Executing {hookName}: {Markup.Escape(command)}[/]");
 	}
 
-	public IExportProgress CreateProgressReporter(bool isInteractive, IEnumerable<string> transformerNames)
+	public IExportProgress CreateProgressReporter(bool isInteractive, IEnumerable<string> transformerNames, bool suppressLiveTui = false)
 	{
-		return new ProgressReporter(_console, isInteractive, transformerNames);
+		return new ProgressReporter(_console, isInteractive, transformerNames, suppressLiveTui);
 	}
 
 	public async Task RunDryRunAsync(IStreamReader reader, IReadOnlyList<IDataTransformer> pipeline, int count, IDataWriter? inspectionWriter, IReadOnlyDictionary<IDataTransformer, (IReadOnlyList<PipeColumnInfo> In, IReadOnlyList<PipeColumnInfo> Out)>? precomputedSchemas = null, CancellationToken ct = default)

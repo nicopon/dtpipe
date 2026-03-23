@@ -71,10 +71,16 @@ public class ExportService
 		if (_logger.IsEnabled(LogLevel.Information))
 			_logger.LogInformation("Starting export from {Provider} to {OutputPath}", providerName, ConnectionStringSanitizer.Sanitize(outputPath));
 
-		// Display Source Info
-		_observer.ShowIntro(providerName, outputPath);
+		// Silence internal DAG plumbing branches (arrow-memory / memory-channel) unless DEBUG=1
+		bool isInternalChannel = writerFactory.ComponentName is "arrow-memory" or "memory-channel";
+		bool silenceInternal = isInternalChannel && Environment.GetEnvironmentVariable("DEBUG") != "1";
+		bool outputIsStdio = string.Equals(outputPath, "-", StringComparison.Ordinal);
 
-		_observer.ShowConnectionStatus(false, null);
+		if (!silenceInternal)
+		{
+			_observer.ShowIntro(providerName, outputPath);
+			_observer.ShowConnectionStatus(false, null);
+		}
 
 		// Initialize RetryPolicy early to cover setup phase
 		var retryPolicy = new RetryPolicy(options.MaxRetries, TimeSpan.FromMilliseconds(options.RetryDelayMs), _logger);
@@ -82,11 +88,12 @@ public class ExportService
 		await using var reader = readerFactory.Create(registry);
 		await retryPolicy.ExecuteAsync(() => reader.OpenAsync(ct), ct);
 
-		_observer.ShowConnectionStatus(true, reader.Columns?.Count);
+		if (!silenceInternal)
+			_observer.ShowConnectionStatus(true, reader.Columns?.Count);
 
 		if (reader.Columns is null || reader.Columns.Count == 0)
 		{
-			_observer.LogWarning("No columns returned by query.");
+			if (!silenceInternal) _observer.LogWarning("No columns returned by query.");
 			return;
 		}
 
@@ -97,7 +104,7 @@ public class ExportService
 		if (pipeline.Count > 0)
 		{
 			var transformerNames = pipeline.Select(t => t.GetType().Name.Replace("DataTransformer", ""));
-			_observer.ShowPipeline(transformerNames);
+			if (!silenceInternal) _observer.ShowPipeline(transformerNames);
 
 			foreach (var t in pipeline)
 			{
@@ -169,7 +176,7 @@ public class ExportService
 		}
 
 		string writerName = writerFactory.ComponentName;
-		_observer.ShowTarget(writerName, outputPath);
+		if (!silenceInternal) _observer.ShowTarget(writerName, outputPath);
 
 		var exportableSchema = currentSchema ?? throw new InvalidOperationException("Exportable schema is null.");
 		await using var writer = writerFactory.Create(registry);
@@ -184,7 +191,9 @@ public class ExportService
 
 		// Use Observer to create Progress
 		var transformerNamesList = pipeline.Select(t => t.GetType().Name.Replace("DataTransformer", ""));
-		using var progress = _observer.CreateProgressReporter(!options.NoStats, transformerNamesList);
+		using var progress = silenceInternal
+			? (IExportProgress)new DtPipe.Feedback.NullExportProgress()
+			: _observer.CreateProgressReporter(!options.NoStats, transformerNamesList, suppressLiveTui: outputIsStdio);
 
 		using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 		var effectiveCt = linkedCts.Token;

@@ -10,6 +10,7 @@ public sealed class ProgressReporter : IExportProgress
 	private readonly IAnsiConsole _console;
 	private readonly bool _enabled;
 	private readonly bool _uiEnabled;
+	private readonly bool _suppressLiveTui;
 	private bool _disposed;
 
 	// Stats
@@ -25,10 +26,11 @@ public sealed class ProgressReporter : IExportProgress
 	// UI Task
 	private Task? _uiTask;
 
-	public ProgressReporter(IAnsiConsole console, bool enabled = true, IEnumerable<string>? transformerNames = null)
+	public ProgressReporter(IAnsiConsole console, bool enabled = true, IEnumerable<string>? transformerNames = null, bool suppressLiveTui = false)
 	{
 		_console = console;
 		_enabled = enabled;
+		_suppressLiveTui = suppressLiveTui;
 		_stopwatch = Stopwatch.StartNew();
 		_startTime = DateTime.UtcNow;
 
@@ -42,8 +44,8 @@ public sealed class ProgressReporter : IExportProgress
 		}
 
 		// Compute whether a live TUI should be started. Disable when output is
-		// redirected or when a CI/non-interactive environment is detected.
-		_uiEnabled = _enabled && !IsNonInteractiveEnvironment();
+		// redirected, when stdout output is active, or in CI/non-interactive environments.
+		_uiEnabled = _enabled && !_suppressLiveTui && !IsNonInteractiveEnvironment();
 
 		if (_uiEnabled)
 		{
@@ -155,6 +157,12 @@ public sealed class ProgressReporter : IExportProgress
 
 		if (_uiEnabled)
 		{
+			_console.MarkupLine($"[green]✓ Completed in {_stopwatch.Elapsed.TotalSeconds:F1}s | {_writeCount:N0} rows[/]");
+		}
+		else if (_enabled && _suppressLiveTui)
+		{
+			// TUI was suppressed (stdout output) but stats are enabled → print final summary to STDERR
+			_console.Write(CreateLayout());
 			_console.MarkupLine($"[green]✓ Completed in {_stopwatch.Elapsed.TotalSeconds:F1}s | {_writeCount:N0} rows[/]");
 		}
 	}
