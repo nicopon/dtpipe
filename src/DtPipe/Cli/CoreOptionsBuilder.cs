@@ -47,8 +47,8 @@ internal static class CoreOptionsBuilder
         { "--export-job",         CliPipelinePhase.Global },
         { "--metrics-path",       CliPipelinePhase.Global },
         // Stream-transformer options
-        { "--merge",              CliPipelinePhase.Processor },
-        { "--ref",                CliPipelinePhase.Processor },
+        { "--merge",              CliPipelinePhase.Transformer | CliPipelinePhase.Processor },
+        { "--ref",                CliPipelinePhase.Transformer | CliPipelinePhase.Processor },
         { "--src-main",           CliPipelinePhase.Processor },
         { "--src-ref",            CliPipelinePhase.Processor },
         { "--from",               CliPipelinePhase.Global },
