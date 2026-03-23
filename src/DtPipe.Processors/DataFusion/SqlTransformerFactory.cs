@@ -16,6 +16,7 @@ namespace DtPipe.Processors.DataFusion;
 public class SqlTransformerFactory : IStreamTransformerFactory
 {
     public string ComponentName => "sql";
+    public string Category => "Stream Processors";
     public bool RequiresArrowChannels => true;
 
     public bool IsApplicable(string[] branchArgs)

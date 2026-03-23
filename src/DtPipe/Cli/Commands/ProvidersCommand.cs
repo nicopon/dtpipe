@@ -23,6 +23,7 @@ public class ProvidersCommand : Command
         {
             var readers = serviceProvider.GetServices<IStreamReaderFactory>();
             var writers = serviceProvider.GetServices<IDataWriterFactory>();
+            var streamTransformers = serviceProvider.GetServices<IStreamTransformerFactory>();
 
             var table = new Table()
                 .AddColumn("Provider")
@@ -62,6 +63,15 @@ public class ProvidersCommand : Command
                     "[blue]Writer[/]",
                     supportsStdio ? "✓" : "",
                     Markup.Escape(category));
+            }
+
+            foreach (var st in streamTransformers.OrderBy(st => st.ComponentName))
+            {
+                table.AddRow(
+                    $"[magenta]{Markup.Escape(st.ComponentName)}[/]",
+                    "[magenta]Stream Processor[/]",
+                    "",
+                    Markup.Escape(st.Category));
             }
 
             _console.MarkupLine("[bold]📦 Registered Providers[/]");

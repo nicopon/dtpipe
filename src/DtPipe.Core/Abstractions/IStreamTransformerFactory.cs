@@ -12,6 +12,9 @@ public interface IStreamTransformerFactory
     /// <summary>Human-readable name, e.g. "sql" or "merge".</summary>
     string ComponentName { get; }
 
+    /// <summary>Display category shown in <c>dtpipe providers</c>, e.g. "Stream Processors".</summary>
+    string Category { get; }
+
     /// <summary>
     /// When <c>true</c>, upstream branches that feed into this transformer must use
     /// Arrow memory channels (RecordBatch) rather than native object[] channels.

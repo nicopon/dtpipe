@@ -5,7 +5,7 @@ using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
 
-namespace DtPipe.Core.Pipelines.Dag;
+namespace DtPipe.Processors.Merge;
 
 /// <summary>
 /// An <see cref="IStreamTransformer"/> that concatenates the output of two upstream Arrow channels.

@@ -1,8 +1,9 @@
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Abstractions.Dag;
+using DtPipe.Core.Pipelines.Dag;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace DtPipe.Core.Pipelines.Dag;
+namespace DtPipe.Processors.Merge;
 
 /// <summary>
 /// Factory for <see cref="MergeTransformer"/>.
@@ -12,6 +13,7 @@ namespace DtPipe.Core.Pipelines.Dag;
 public class MergeTransformerFactory : IStreamTransformerFactory
 {
     public string ComponentName => "merge";
+    public string Category => "Stream Processors";
     public bool RequiresArrowChannels => true;
 
     public bool IsApplicable(string[] branchArgs)

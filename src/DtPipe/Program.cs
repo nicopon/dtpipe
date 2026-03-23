@@ -177,7 +177,7 @@ class Program
 
 		// Register Stream Transformers
 		RegisterStreamTransformer<DtPipe.Processors.DataFusion.SqlTransformerFactory>(services);
-		RegisterStreamTransformer<DtPipe.Core.Pipelines.Dag.MergeTransformerFactory>(services);
+		RegisterStreamTransformer<DtPipe.Processors.Merge.MergeTransformerFactory>(services);
 
 		// Transformer Factories
 		RegisterTransformer<NullDataTransformerFactory>(services);

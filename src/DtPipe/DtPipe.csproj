@@ -13,6 +13,10 @@
     <PackageTags>etl;data;data-masking;pipeline;cli;automation;javascript;sql;parquet;duckdb;postgres;sqlserver;oracle;sqlite</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
 
+    <!-- Single-file: embed native libraries (.dylib/.so/.dll) inside the bundle -->
+    <!-- They are extracted to a temp dir at startup and resolved via DllImport -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+
     <!-- Release optimizations -->
     <TieredCompilation>true</TieredCompilation>
   </PropertyGroup>
