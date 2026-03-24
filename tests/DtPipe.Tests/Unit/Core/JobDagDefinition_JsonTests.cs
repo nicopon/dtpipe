@@ -52,8 +52,8 @@ public class JobDagDefinition_JsonTests
             Assert.Equal(original.Branches[i].Alias, deserialized.Branches[i].Alias);
             Assert.Equal(original.Branches[i].Input, deserialized.Branches[i].Input);
             Assert.Equal(original.Branches[i].Output, deserialized.Branches[i].Output);
-            Assert.Equal(original.Branches[i].FromAlias, deserialized.Branches[i].FromAlias);
-            Assert.Equal(original.Branches[i].SqlQuery, deserialized.Branches[i].SqlQuery);
+            Assert.Equal(original.Branches[i].StreamingAliases, deserialized.Branches[i].StreamingAliases);
+            Assert.Equal(original.Branches[i].ProcessorName, deserialized.Branches[i].ProcessorName);
             Assert.Equal(original.Branches[i].HasStreamTransformer, deserialized.Branches[i].HasStreamTransformer);
         }
     }

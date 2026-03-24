@@ -34,8 +34,8 @@ public class DagValidatorTests
                 new BranchDefinition
                 {
                     Alias = "join",
-                    SqlQuery = "SELECT * FROM src1 JOIN src2 ON src1.id = src2.id",
-                    FromAlias = "src1",
+                    ProcessorName = "sql",
+                    StreamingAliases = new[] { "src1" },
                     RefAliases = new[] { "src2" },
                     Output = "csv:-"
                 }
@@ -57,8 +57,8 @@ public class DagValidatorTests
                 new BranchDefinition
                 {
                     Alias = "loop",
-                    SqlQuery = "SELECT 1",
-                    FromAlias = "loop"
+                    ProcessorName = "sql",
+                    StreamingAliases = new[] { "loop" }
                 }
             }
         };
@@ -75,8 +75,8 @@ public class DagValidatorTests
         {
             Branches = new[]
             {
-                new BranchDefinition { Alias = "A", SqlQuery = "SELECT 1", FromAlias = "B" },
-                new BranchDefinition { Alias = "B", SqlQuery = "SELECT 1", FromAlias = "A" }
+                new BranchDefinition { Alias = "A", ProcessorName = "sql", StreamingAliases = new[] { "B" } },
+                new BranchDefinition { Alias = "B", ProcessorName = "sql", StreamingAliases = new[] { "A" } }
             }
         };
 
@@ -92,7 +92,7 @@ public class DagValidatorTests
         {
             Branches = new[]
             {
-                new BranchDefinition { Alias = "XS", SqlQuery = "SELECT 1" }
+                new BranchDefinition { Alias = "XS", ProcessorName = "sql" }
             }
         };
 
@@ -108,13 +108,13 @@ public class DagValidatorTests
         {
             Branches = new[]
             {
-                new BranchDefinition { Alias = "XS", SqlQuery = "SELECT 1", FromAlias = "ghost" }
+                new BranchDefinition { Alias = "XS", ProcessorName = "sql", StreamingAliases = new[] { "ghost" } }
             }
         };
 
         var errors = DagValidator.Validate(dag);
 
-        Assert.Contains(errors, e => e.Contains("references unknown main alias 'ghost'"));
+        Assert.Contains(errors, e => e.Contains("references unknown streaming alias 'ghost'"));
     }
 
     [Fact]
@@ -125,12 +125,63 @@ public class DagValidatorTests
             Branches = new[]
             {
                 new BranchDefinition { Alias = "src1", Input = "gen:", Output = "csv:leak.csv" },
-                new BranchDefinition { Alias = "XS", SqlQuery = "SELECT 1", FromAlias = "src1", Output = "csv:-" }
+                new BranchDefinition { Alias = "XS", ProcessorName = "sql", StreamingAliases = new[] { "src1" }, Output = "csv:-" }
             }
         };
 
         var errors = DagValidator.Validate(dag);
 
         Assert.Contains(errors, e => e.Contains("cannot have its own '--output'"));
+    }
+
+    [Fact]
+    public void MergeProcessor_ValidWith2Sources_HasNoErrors()
+    {
+        var dag = new JobDagDefinition
+        {
+            Branches = new[]
+            {
+                new BranchDefinition { Alias = "a", Input = "gen:5" },
+                new BranchDefinition { Alias = "b", Input = "gen:5" },
+                new BranchDefinition
+                {
+                    Alias = "merged",
+                    StreamingAliases = new[] { "a", "b" },
+                    ProcessorName = "merge",
+                    Arguments = new[] { "--from", "a,b", "--merge" },
+                    Output = "csv:-"
+                }
+            }
+        };
+
+        var factories = new[] { new DtPipe.Processors.Merge.MergeTransformerFactory() };
+        var errors = DagValidator.Validate(dag, factories);
+
+        Assert.Empty(errors);
+    }
+
+    [Fact]
+    public void MergeProcessor_With1Source_ReportsCapabilityError()
+    {
+        var dag = new JobDagDefinition
+        {
+            Branches = new[]
+            {
+                new BranchDefinition { Alias = "a", Input = "gen:5" },
+                new BranchDefinition
+                {
+                    Alias = "merged",
+                    StreamingAliases = new[] { "a" },
+                    ProcessorName = "merge",
+                    Arguments = new[] { "--from", "a", "--merge" },
+                    Output = "csv:-"
+                }
+            }
+        };
+
+        var factories = new[] { new DtPipe.Processors.Merge.MergeTransformerFactory() };
+        var errors = DagValidator.Validate(dag, factories);
+
+        Assert.Contains(errors, e => e.Contains("requires at least 2 streaming source"));
     }
 }

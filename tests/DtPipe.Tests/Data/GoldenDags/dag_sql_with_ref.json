@@ -5,10 +5,9 @@
       "Arguments": [],
       "Input": "generate:100",
       "Output": null,
-      "FromAlias": null,
+      "StreamingAliases": [],
       "RefAliases": [],
-      "MergeAliases": [],
-      "SqlQuery": null,
+      "ProcessorName": null,
       "HasStreamTransformer": false,
       "PreParsedJob": null
     },
@@ -17,10 +16,9 @@
       "Arguments": [],
       "Input": "generate:10",
       "Output": null,
-      "FromAlias": null,
+      "StreamingAliases": [],
       "RefAliases": [],
-      "MergeAliases": [],
-      "SqlQuery": null,
+      "ProcessorName": null,
       "HasStreamTransformer": false,
       "PreParsedJob": null
     },
@@ -29,12 +27,13 @@
       "Arguments": [],
       "Input": null,
       "Output": "csv:/tmp/result.csv",
-      "FromAlias": "main_stream",
+      "StreamingAliases": [
+        "main_stream"
+      ],
       "RefAliases": [
         "ref_data"
       ],
-      "MergeAliases": [],
-      "SqlQuery": "SELECT m.* FROM main_stream m JOIN ref_data r ON m.id = r.id",
+      "ProcessorName": "sql",
       "HasStreamTransformer": true,
       "PreParsedJob": null
     }

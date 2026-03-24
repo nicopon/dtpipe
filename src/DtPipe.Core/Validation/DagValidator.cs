@@ -1,3 +1,4 @@
+using DtPipe.Core.Abstractions;
 using DtPipe.Core.Pipelines.Dag;
 
 namespace DtPipe.Core.Validation;
@@ -5,13 +6,16 @@ namespace DtPipe.Core.Validation;
 /// <summary>
 /// Validates Directed Acyclic Graph (DAG) structures independently of the input source (CLI or YAML).
 /// Handles alias resolution, cycle detection, and structural constraints like output usage.
+/// Pass processor factories to <see cref="Validate"/> to also validate stream/lookup capacity constraints.
 /// </summary>
 public static class DagValidator
 {
-    public static IReadOnlyList<string> Validate(JobDagDefinition dag)
+    public static IReadOnlyList<string> Validate(JobDagDefinition dag,
+        IEnumerable<IStreamTransformerFactory>? processorFactories = null)
     {
         var errors = new List<string>();
         var registeredAliases = new HashSet<string>(dag.Branches.Select(b => b.Alias), StringComparer.OrdinalIgnoreCase);
+        var factories = processorFactories?.ToList();
 
         // 1. Identify aliases fed into stream transformers or fan-outs
         var fedIntoTransformer = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -21,13 +25,12 @@ public static class DagValidator
         {
             if (branch.HasStreamTransformer)
             {
-                if (!string.IsNullOrEmpty(branch.FromAlias)) fedIntoTransformer.Add(branch.FromAlias);
+                foreach (var a in branch.StreamingAliases) fedIntoTransformer.Add(a);
                 foreach (var ra in branch.RefAliases) fedIntoTransformer.Add(ra);
-                foreach (var ma in branch.MergeAliases) fedIntoTransformer.Add(ma);
             }
-            else if (!string.IsNullOrEmpty(branch.FromAlias))
+            else if (branch.StreamingAliases.Count > 0)
             {
-                fedIntoFrom.Add(branch.FromAlias);
+                fedIntoFrom.Add(branch.StreamingAliases[0]);
             }
         }
 
@@ -43,13 +46,17 @@ public static class DagValidator
             // 3. Topology validation for stream-transformer branches
             if (branch.HasStreamTransformer)
             {
-                if (string.IsNullOrEmpty(branch.FromAlias))
+                if (branch.StreamingAliases.Count == 0)
                 {
                     errors.Add($"Stream-transformer branch '{branch.Alias}' is missing its main source alias. Please specify it using '--from <alias>'.");
                 }
-                else if (!registeredAliases.Contains(branch.FromAlias))
+                else
                 {
-                    errors.Add($"Stream-transformer branch '{branch.Alias}' references unknown main alias '{branch.FromAlias}'.");
+                    foreach (var streamAlias in branch.StreamingAliases)
+                    {
+                        if (!registeredAliases.Contains(streamAlias))
+                            errors.Add($"Stream-transformer branch '{branch.Alias}' references unknown streaming alias '{streamAlias}'.");
+                    }
                 }
 
                 foreach (var refAlias in branch.RefAliases)
@@ -58,21 +65,35 @@ public static class DagValidator
                         errors.Add($"Stream-transformer branch '{branch.Alias}' references unknown secondary alias '{refAlias}'.");
                 }
 
-                foreach (var mergeAlias in branch.MergeAliases)
+                // 4. Processor capability validation (if factories provided)
+                if (factories != null)
                 {
-                    if (!registeredAliases.Contains(mergeAlias))
-                        errors.Add($"Stream-transformer branch '{branch.Alias}' references unknown merge alias '{mergeAlias}'.");
+                    var factory = factories.FirstOrDefault(f => f.IsApplicable(branch.Arguments));
+                    if (factory != null)
+                    {
+                        int streams = branch.StreamingAliases.Count;
+                        int lookups = branch.RefAliases.Count;
+
+                        if (streams < factory.MinStreams)
+                            errors.Add($"Processor '{factory.ComponentName}' on branch '{branch.Alias}' requires at least {factory.MinStreams} streaming source(s) via '--from', but got {streams}.");
+                        if (factory.MaxStreams >= 0 && streams > factory.MaxStreams)
+                            errors.Add($"Processor '{factory.ComponentName}' on branch '{branch.Alias}' accepts at most {factory.MaxStreams} streaming source(s) via '--from', but got {streams}.");
+                        if (lookups < factory.MinLookups)
+                            errors.Add($"Processor '{factory.ComponentName}' on branch '{branch.Alias}' requires at least {factory.MinLookups} materialized lookup(s) via '--ref', but got {lookups}.");
+                        if (factory.MaxLookups >= 0 && lookups > factory.MaxLookups)
+                            errors.Add($"Processor '{factory.ComponentName}' on branch '{branch.Alias}' accepts at most {factory.MaxLookups} materialized lookup(s) via '--ref', but got {lookups}.");
+                    }
                 }
             }
             // Topology validation for fan-out branches
-            else if (!string.IsNullOrEmpty(branch.FromAlias))
+            else if (branch.StreamingAliases.Count > 0)
             {
-                if (!registeredAliases.Contains(branch.FromAlias))
-                    errors.Add($"Branch '{branch.Alias}' references unknown upstream alias '{branch.FromAlias}' via '--from'.");
+                if (!registeredAliases.Contains(branch.StreamingAliases[0]))
+                    errors.Add($"Branch '{branch.Alias}' references unknown upstream alias '{branch.StreamingAliases[0]}' via '--from'.");
             }
         }
 
-        // 4. Cycle Detection (DFS)
+        // 5. Cycle Detection (DFS)
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var stack = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var branch in dag.Branches)
@@ -98,10 +119,8 @@ public static class DagValidator
         var currentBranch = branches.FirstOrDefault(b => b.Alias.Equals(currentAlias, StringComparison.OrdinalIgnoreCase));
         if (currentBranch != null)
         {
-            var dependencies = new List<string>();
-            if (!string.IsNullOrEmpty(currentBranch.FromAlias)) dependencies.Add(currentBranch.FromAlias);
+            var dependencies = new List<string>(currentBranch.StreamingAliases);
             dependencies.AddRange(currentBranch.RefAliases);
-            dependencies.AddRange(currentBranch.MergeAliases);
 
             foreach (var dep in dependencies)
             {

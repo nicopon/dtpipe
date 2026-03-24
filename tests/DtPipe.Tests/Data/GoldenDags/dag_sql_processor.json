@@ -5,10 +5,9 @@
       "Arguments": [],
       "Input": "generate:100",
       "Output": null,
-      "FromAlias": null,
+      "StreamingAliases": [],
       "RefAliases": [],
-      "MergeAliases": [],
-      "SqlQuery": null,
+      "ProcessorName": null,
       "HasStreamTransformer": false,
       "PreParsedJob": null
     },
@@ -17,10 +16,11 @@
       "Arguments": [],
       "Input": null,
       "Output": "csv:/tmp/processed.csv",
-      "FromAlias": "src",
+      "StreamingAliases": [
+        "src"
+      ],
       "RefAliases": [],
-      "MergeAliases": [],
-      "SqlQuery": "SELECT * FROM src LIMIT 10",
+      "ProcessorName": "sql",
       "HasStreamTransformer": true,
       "PreParsedJob": null
     }

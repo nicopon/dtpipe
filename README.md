@@ -125,6 +125,9 @@ dtpipe -i input.csv --csv-separator "," -o output.csv --csv-separator ";"
 | `--key` | Comma-separated primary keys for Upsert/Ignore. Auto-detected from target if omitted. |
 | `--sampling-rate` | Probability 0.0–1.0 to include a row (default: 1.0). |
 | `--sampling-seed` | Seed for sampling (ensures reproducibility). |
+| `--connection-timeout` | Connection timeout in seconds. |
+| `--query-timeout` | Query timeout in seconds (0 = no timeout). |
+| `--no-stats` | Disable progress bars and statistics output. |
 
 #### Automation
 | Flag | Description |
@@ -147,6 +150,7 @@ dtpipe -i input.csv --csv-separator "," -o output.csv --csv-separator ";"
 | `--expand "[JS]"` | Multi-row expansion. JS expression returning an array. |
 | `--window-count [N]` | Accumulate rows in a window of size N. |
 | `--window-script "[JS]"` | Script to execute on window `rows` (must return array). |
+| `--rename "[Old]:[New]"` | Rename a column. |
 | `--project`, `--drop` | Whitelist or blacklist columns. |
 
 #### Pipeline Modifiers
@@ -155,6 +159,7 @@ dtpipe -i input.csv --csv-separator "," -o output.csv --csv-separator ";"
 | `--fake-locale [LOC]` | Locale for fakers (e.g. `fr`, `en_US`). |
 | `--fake-seed-column [COL]`| Make faking deterministic based on a column value. |
 | `--[type]-skip-null` | Skip transformation if value is NULL. |
+| `--throttle [N]` | Limit throughput to N rows/sec. |
 
 #### Database Writer Options
 | Flag | Description |
@@ -164,6 +169,13 @@ dtpipe -i input.csv --csv-separator "," -o output.csv --csv-separator ";"
 | `--table` | Target table name. Overrides default `export`. |
 | `--auto-migrate` | Automatically add missing columns to target table. |
 | `--strict-schema`| Abort if schema errors are found. |
+| `--no-schema-validation` | Disable schema check entirely. |
+| `--max-retries` | Max retries on transient errors. |
+| `--retry-delay-ms` | Initial retry delay in ms (exponential backoff). |
+| `--pre-exec` | SQL or command to run before the transfer. |
+| `--post-exec` | SQL or command to run after a successful transfer. |
+| `--on-error-exec` | SQL or command to run on error. |
+| `--finally-exec` | SQL or command to always run (success or failure). |
 | `--unsafe-query` | Allow non-SELECT queries (use with caution). |
 
 ---
@@ -214,9 +226,10 @@ dtpipe \
 | Option | Description |
 |:---|:---|
 | `--alias [NAME]` | Name this branch for downstream reference |
-| `--from [ALIAS]` | Start a processor or fan-out branch; in a processor context, declares the primary streaming source |
-| `--ref [ALIAS]` | Reference stream(s) for lookup/join (preloaded into memory before query execution) |
-| `--sql "[QUERY]"` | SQL query to execute on the upstream sources |
+| `--from [ALIAS[,ALIAS...]]` | Start a processor or fan-out branch. Accepts one or more comma-separated streaming aliases. Fan-out consumers use a single alias; multi-stream processors use multiple. |
+| `--ref [ALIAS[,ALIAS...]]` | Materialized reference sources for lookup/join (preloaded into memory, comma-separated). Used with `--sql` for JOIN queries. |
+| `--sql "[QUERY]"` | SQL query to execute on the upstream sources via DataFusion |
+| `--merge` | UNION ALL processor: concatenates all `--from` streams in order. Requires at least 2 streaming sources. |
 
 ---
 

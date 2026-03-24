@@ -45,6 +45,4 @@ public sealed class CliJobOptions
     public required Option<string[]> From { get; init; }
     public required Option<string[]> Merge { get; init; }
     public required Option<string[]> Ref { get; init; }
-    public required Option<string[]> SrcMain { get; init; }
-    public required Option<string[]> SrcRef { get; init; }
 }

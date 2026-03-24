@@ -147,9 +147,7 @@ public class JobService
 				IgnoreNulls = opts.IgnoreNulls,
 				From = opts.From,
 				Merge = opts.Merge,
-				Ref = opts.Ref,
-				SrcMain = opts.SrcMain,
-				SrcRef = opts.SrcRef
+				Ref = opts.Ref
 			};
 
 			Dictionary<string, JobDefinition> jobs;
@@ -185,8 +183,8 @@ public class JobService
 							Alias = kvp.Key,
 							Input = kvp.Value.Input,
 							Output = kvp.Value.Output,
-							SqlQuery = !string.IsNullOrEmpty(kvp.Value.Sql) ? kvp.Value.Sql : null,
-							FromAlias = kvp.Value.From,
+							ProcessorName = !string.IsNullOrEmpty(kvp.Value.Sql) ? "sql" : null,
+							StreamingAliases = !string.IsNullOrEmpty(kvp.Value.From) ? new[] { kvp.Value.From } : Array.Empty<string>(),
 							RefAliases = (kvp.Value.Ref ?? Array.Empty<string>()).ToList(),
 							PreParsedJob = kvp.Value,
 							Arguments = args.ToArray()
@@ -217,8 +215,8 @@ public class JobService
 						
 						bj = bj with {
 							Ref = branch.RefAliases?.ToArray() ?? Array.Empty<string>(),
-							From = branch.FromAlias,
-							Sql = branch.SqlQuery,
+							From = branch.StreamingAliases.FirstOrDefault(),
+							Sql = DtPipe.Cli.Dag.CliDagParser.ExtractArgValue(branch.Arguments, "--sql"),
 							Transformers = RawJobBuilder.BuildTransformerConfigsFromCli(branch.Arguments, factoryList, _contributors)
 						};
 						jobs[branch.Alias] = bj;
@@ -313,7 +311,8 @@ public class JobService
 			}
 
 			// 3. Validate Semantic Constraints (Singleton flags, DAG topology, etc.)
-			var validationErrors = CliDagParser.Validate(dagDefinition);
+			var processorFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamTransformerFactory>>();
+			var validationErrors = CliDagParser.Validate(dagDefinition, processorFactories);
 			if (validationErrors.Count > 0)
 			{
 				foreach (var err in validationErrors)
@@ -653,29 +652,29 @@ public class JobService
 			if (branch.HasStreamTransformer)
 			{
 				// Processor branch: header shows alias + main source + refs side by side
-				var fromPart = branch.FromAlias != null
-					? $"  [grey]← [[{Markup.Escape(branch.FromAlias)}]][/]"
+				var fromPart = branch.StreamingAliases.Count > 0
+					? $"  [grey]← [[{Markup.Escape(branch.StreamingAliases[0])}]][/]"
 					: string.Empty;
 				var refPart = branch.RefAliases.Any()
 					? $"  [grey]+ref {string.Join(", ", branch.RefAliases.Select(r => $"[[{Markup.Escape(r)}]]"))}[/]"
 					: string.Empty;
-				var mergePart = branch.MergeAliases.Any()
-					? $"  [grey]+merge {string.Join(", ", branch.MergeAliases.Select(m => $"[[{Markup.Escape(m)}]]"))}[/]"
+				var extraStreamsPart = branch.StreamingAliases.Count > 1
+					? $"  [grey]+from {string.Join(", ", branch.StreamingAliases.Skip(1).Select(m => $"[[{Markup.Escape(m)}]]"))}[/]"
 					: string.Empty;
 
-				lines.AppendLine($" [cyan]⚡[/] [white][[{Markup.Escape(branch.Alias)}]][/]{fromPart}{refPart}{mergePart}");
+				lines.AppendLine($" [cyan]⚡[/] [white][[{Markup.Escape(branch.Alias)}]][/]{fromPart}{refPart}{extraStreamsPart}");
 
 				// SQL/merge step
-				if (branch.SqlQuery != null)
+				if (branch.ProcessorName == "sql")
 				{
-					var sql = branch.SqlQuery.Trim().Replace('\n', ' ').Replace('\r', ' ');
+					var sql = (DtPipe.Cli.Dag.CliDagParser.ExtractArgValue(branch.Arguments, "--sql") ?? string.Empty).Trim().Replace('\n', ' ').Replace('\r', ' ');
 					while (sql.Contains("  ")) sql = sql.Replace("  ", " ");
 					if (sql.Length > 60) sql = sql[..57] + "...";
 					lines.AppendLine($"      [grey]SQL › {Markup.Escape(sql)}[/]");
 				}
 				else
 				{
-					lines.AppendLine($"      [grey]merge[/]");
+					lines.AppendLine($"      [grey]{branch.ProcessorName}[/]");
 				}
 
 				AppendTransformers(lines, branch, "      ");
@@ -683,10 +682,10 @@ public class JobService
 				if (!string.IsNullOrEmpty(branch.Output))
 					lines.AppendLine($"      [grey]──▶[/]  [blue]{Markup.Escape(branch.Output)}[/]");
 			}
-			else if (!string.IsNullOrEmpty(branch.FromAlias))
+			else if (branch.StreamingAliases.Count > 0)
 			{
 				// Fan-out consumer: header shows relationship, steps follow
-				lines.AppendLine($"  [green]◉[/] [white][[{Markup.Escape(branch.Alias)}]][/]  [grey]← [[{Markup.Escape(branch.FromAlias)}]][/]");
+				lines.AppendLine($"  [green]◉[/] [white][[{Markup.Escape(branch.Alias)}]][/]  [grey]← [[{Markup.Escape(branch.StreamingAliases[0])}]][/]");
 				AppendTransformers(lines, branch, "      ");
 				if (!string.IsNullOrEmpty(branch.Output))
 					lines.AppendLine($"      [grey]──▶[/]  [blue]{Markup.Escape(branch.Output)}[/]");
@@ -700,9 +699,8 @@ public class JobService
 				// Downstream consumers (fan-out targets and SQL/merge processors consuming this alias)
 				var consumers = dag.Branches
 					.Where(b => b != branch && (
-						(b.FromAlias != null && b.FromAlias.Equals(branch.Alias, StringComparison.OrdinalIgnoreCase)) ||
 						b.RefAliases.Contains(branch.Alias, StringComparer.OrdinalIgnoreCase) ||
-						b.MergeAliases.Contains(branch.Alias, StringComparer.OrdinalIgnoreCase)))
+						b.StreamingAliases.Contains(branch.Alias, StringComparer.OrdinalIgnoreCase)))
 					.Select(b => $"[[{Markup.Escape(b.Alias)}]]")
 					.ToList();
 
@@ -738,9 +736,8 @@ public class JobService
 	{
 		// Arrow if consumed by a stream-transformer branch
 		if (dag.Branches.Any(b => b.HasStreamTransformer && (
-			(b.FromAlias != null && b.FromAlias.Equals(alias, StringComparison.OrdinalIgnoreCase)) ||
 			b.RefAliases.Contains(alias, StringComparer.OrdinalIgnoreCase) ||
-			b.MergeAliases.Contains(alias, StringComparer.OrdinalIgnoreCase))))
+			b.StreamingAliases.Contains(alias, StringComparer.OrdinalIgnoreCase))))
 			return true;
 
 		// Arrow if the producer reader yields columnar output (e.g. generate, parquet, Arrow)

@@ -5,7 +5,6 @@
 # Usage:
 #   ./bench.sh                  # standard pipeline benchmarks
 #   ./bench.sh --sql            # SQL JOIN benchmarks (DataFusion, requires datasets)
-#   ./bench.sh --direct         # direct-file SQL JOIN (--src-main/--src-ref)
 #   ./bench.sh --all            # all benchmarks
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,12 +21,10 @@ if [ ! -f "$DTPIPE" ]; then
 fi
 
 RUN_SQL=0
-RUN_DIRECT=0
 for arg in "$@"; do
     case "$arg" in
-        --sql)    RUN_SQL=1 ;;
-        --direct) RUN_DIRECT=1 ;;
-        --all)    RUN_SQL=1; RUN_DIRECT=1 ;;
+        --sql) RUN_SQL=1 ;;
+        --all) RUN_SQL=1 ;;
     esac
 done
 
@@ -131,32 +128,6 @@ if [ $RUN_SQL -eq 1 ]; then
       -i "csv:$REF2_CSV"         --alias ref2 \
       --from main --ref ref --ref ref2 \
       --sql "$QUERY_FUSION" \
-      -o null --no-stats
-fi
-
-# ----------------------------------------
-# 6. Direct file SQL JOIN (--src-main/--src-ref)
-# ----------------------------------------
-if [ $RUN_DIRECT -eq 1 ]; then
-    echo ""
-    echo "[6] Direct file SQL JOIN (--src-main/--src-ref)"
-
-    MAIN_PARQUET="$ARTIFACTS_DIR/main.parquet"
-    REF_CSV="$ARTIFACTS_DIR/ref1_10k.csv"
-    REF2_CSV="$ARTIFACTS_DIR/ref2_10k.csv"
-
-    if [ ! -f "$MAIN_PARQUET" ] || [ ! -f "$REF_CSV" ] || [ ! -f "$REF2_CSV" ]; then
-        echo "  Generating benchmark datasets..."
-        "$SCRIPT_DIR/generate_benchmark_datasets.sh"
-    fi
-
-    QUERY_DIRECT='SELECT COUNT(*) FROM main m JOIN ref r ON m.GenerateIndex = CAST(r.Id AS BIGINT) JOIN ref2 r2 ON m.GenerateIndex = CAST(r2.Id AS BIGINT)'
-
-    timeit "datafusion-direct" "$DTPIPE" \
-      --src-main "parquet:$MAIN_PARQUET" --from main \
-      --src-ref  "csv:$REF_CSV"          --ref ref \
-      --src-ref  "csv:$REF2_CSV"         --ref ref2 \
-      --sql "$QUERY_DIRECT" \
       -o null --no-stats
 fi
 

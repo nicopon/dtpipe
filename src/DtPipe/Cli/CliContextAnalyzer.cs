@@ -53,7 +53,7 @@ public static class CliContextAnalyzer
                 hasTerminator = false;
 
                 // Determine if this new branch starts as Processor
-                isProcessor = CliPipelineRules.ProcessorFlags.Contains(token);
+                isProcessor = CliPipelineRules.ValueProcessorFlags.Contains(token) || CliPipelineRules.BooleanProcessorFlags.Contains(token);
                 hasSeenSourceInCurrentBranch = true;
             }
 

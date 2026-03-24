@@ -50,7 +50,7 @@ public static class RawJobBuilder
 			var input = parseResult.GetValue(opts.Input)?.FirstOrDefault();
 
 			// Validation (Required args)
-			bool isDag = parseResult.Tokens.Any(t => t.Value == "--sql" || t.Value == "--alias" || t.Value == "--from" || t.Value == "--merge" || t.Value == "--ref" || t.Value == "--src-main" || t.Value == "--src-ref");
+			bool isDag = parseResult.Tokens.Any(t => t.Value == "--sql" || t.Value == "--alias" || t.Value == "--from" || t.Value == "--merge" || t.Value == "--ref" );
 			var exportJobResult = parseResult.GetValue(opts.ExportJob);
 			if (string.IsNullOrWhiteSpace(output) && !isDag && string.IsNullOrWhiteSpace(exportJobResult))
 			{

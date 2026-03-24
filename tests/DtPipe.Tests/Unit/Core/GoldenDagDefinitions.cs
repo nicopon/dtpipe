@@ -56,8 +56,8 @@ public static class GoldenDagDefinitions
             new BranchDefinition
             {
                 Alias = "processed",
-                FromAlias = "src",
-                SqlQuery = "SELECT * FROM src LIMIT 10",
+                StreamingAliases = new[] { "src" },
+                ProcessorName = "sql",
                 Output = "csv:/tmp/processed.csv",
                 Arguments = Array.Empty<string>()
             }
@@ -79,14 +79,14 @@ public static class GoldenDagDefinitions
             new BranchDefinition
             {
                 Alias = "consumer_a",
-                FromAlias = "src",
+                StreamingAliases = new[] { "src" },
                 Output = "csv:/tmp/consumer_a.csv",
                 Arguments = Array.Empty<string>()
             },
             new BranchDefinition
             {
                 Alias = "consumer_b",
-                FromAlias = "src",
+                StreamingAliases = new[] { "src" },
                 Output = "csv:/tmp/consumer_b.csv",
                 Arguments = Array.Empty<string>()
             }
@@ -103,9 +103,9 @@ public static class GoldenDagDefinitions
             new BranchDefinition
             {
                 Alias = "result",
-                FromAlias = "main_stream",
+                StreamingAliases = new[] { "main_stream" },
                 RefAliases = new[] { "ref_data" },
-                SqlQuery = "SELECT m.* FROM main_stream m JOIN ref_data r ON m.id = r.id",
+                ProcessorName = "sql",
                 Output = "csv:/tmp/result.csv",
                 Arguments = Array.Empty<string>()
             }
@@ -127,16 +127,34 @@ public static class GoldenDagDefinitions
             new BranchDefinition
             {
                 Alias = "sink_a",
-                FromAlias = "src",
+                StreamingAliases = new[] { "src" },
                 Output = "csv:/tmp/sink_a.csv",
                 Arguments = Array.Empty<string>()
             },
             new BranchDefinition
             {
                 Alias = "result",
-                FromAlias = "src",
-                SqlQuery = "SELECT * FROM src",
+                StreamingAliases = new[] { "src" },
+                ProcessorName = "sql",
                 Output = "csv:/tmp/result.csv",
+                Arguments = Array.Empty<string>()
+            }
+        }
+    };
+
+    // Cas 7 : Merge (UNION ALL) — deux sources streamées via --from a,b --merge
+    public static JobDagDefinition Dag_Merge_TwoSources => new()
+    {
+        Branches = new[]
+        {
+            new BranchDefinition { Alias = "stream_a", Input = "generate:5", Output = null, Arguments = Array.Empty<string>() },
+            new BranchDefinition { Alias = "stream_b", Input = "generate:5", Output = null, Arguments = Array.Empty<string>() },
+            new BranchDefinition
+            {
+                Alias = "merged",
+                StreamingAliases = new[] { "stream_a", "stream_b" },
+                ProcessorName = "merge",
+                Output = "csv:/tmp/merged.csv",
                 Arguments = Array.Empty<string>()
             }
         }

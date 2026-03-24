@@ -38,8 +38,9 @@ public class CliDagParserTests
 
         var branch1 = dag.Branches[1];
         Assert.True(branch1.HasStreamTransformer);
-        Assert.Equal("input_one", branch1.FromAlias);
-        Assert.Equal("SELECT * FROM input_one", branch1.SqlQuery);
+        Assert.Equal("input_one", branch1.StreamingAliases[0]);
+        Assert.Equal("sql", branch1.ProcessorName);
+        Assert.Equal("SELECT * FROM input_one", DtPipe.Cli.Dag.CliDagParser.ExtractArgValue(branch1.Arguments, "--sql"));
         Assert.Contains("--from", branch1.Arguments);
         Assert.Contains("--sql", branch1.Arguments);
     }

@@ -34,4 +34,16 @@ public interface IStreamTransformerFactory
     /// for registry lookup without needing to know the internal <c>__fan_N</c> convention.
     /// </summary>
     IStreamTransformer Create(string[] branchArgs, BranchChannelContext ctx, IServiceProvider serviceProvider);
+
+    /// <summary>Minimum number of streaming sources required (declared via <c>--from</c>).</summary>
+    int MinStreams { get; }
+
+    /// <summary>Maximum number of streaming sources allowed (-1 = unlimited).</summary>
+    int MaxStreams { get; }
+
+    /// <summary>Minimum number of materialized lookups required (declared via <c>--ref</c>).</summary>
+    int MinLookups { get; }
+
+    /// <summary>Maximum number of materialized lookups allowed (-1 = unlimited).</summary>
+    int MaxLookups { get; }
 }

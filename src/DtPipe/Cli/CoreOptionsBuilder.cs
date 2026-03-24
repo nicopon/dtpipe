@@ -49,8 +49,6 @@ internal static class CoreOptionsBuilder
         // Stream-transformer options
         { "--merge",              CliPipelinePhase.Transformer | CliPipelinePhase.Processor },
         { "--ref",                CliPipelinePhase.Transformer | CliPipelinePhase.Processor },
-        { "--src-main",           CliPipelinePhase.Processor },
-        { "--src-ref",            CliPipelinePhase.Processor },
         { "--from",               CliPipelinePhase.Global },
         { "--prefix",             CliPipelinePhase.Global },
     };
@@ -149,8 +147,6 @@ internal static class CoreOptionsBuilder
 
         var mergeOption = new Option<string[]>("--merge") { Description = "Concatenate an upstream channel alias into this stream-transformer branch", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
         var refOption = new Option<string[]>("--ref") { Description = "Secondary source alias(es) for SQL transformer (preloaded into memory)" };
-        var srcMainOption = new Option<string[]>("--src-main") { Description = "Source-main alias for DAG orchestration", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
-        var srcRefOption = new Option<string[]>("--src-ref") { Description = "Source-ref alias(es) for DAG orchestration" };
         var fromOption = new Option<string[]>("--from")
         {
             Description = "Read from an upstream branch alias (fan-out / tee). Starts a new linear branch that receives a broadcast copy of the named upstream channel. Analogous to Unix 'tee'.",
@@ -169,7 +165,7 @@ internal static class CoreOptionsBuilder
             strategyOption, insertModeOption, tableOption, maxRetriesOption, retryDelayMsOption, strictSchemaOption,
             noSchemaValidationOption, metricsPathOption, autoMigrateOption, sqlOption, aliasOption,
             renameOption, dropOption, throttleOption, ignoreNullsOption,
-            mergeOption, refOption, srcMainOption, srcRefOption, fromOption, prefixOption
+            mergeOption, refOption, fromOption, prefixOption
         };
 
         foreach (var opt in allList)
@@ -185,7 +181,7 @@ internal static class CoreOptionsBuilder
             finallyExecOption, strategyOption, insertModeOption, tableOption, maxRetriesOption, retryDelayMsOption,
             strictSchemaOption, noSchemaValidationOption, metricsPathOption, autoMigrateOption, sqlOption,
             aliasOption, renameOption, dropOption, throttleOption, ignoreNullsOption,
-            mergeOption, refOption, srcMainOption, srcRefOption, fromOption, prefixOption, allList);
+            mergeOption, refOption, fromOption, prefixOption, allList);
     }
 
     private static IEnumerable<CompletionItem> GetInputSuggestions(CompletionContext context, IEnumerable<IStreamReaderFactory>? factories)
@@ -326,8 +322,6 @@ public record CoreCliOptions(
     Option<bool> IgnoreNulls,
     Option<string[]> Merge,
     Option<string[]> Ref,
-    Option<string[]> SrcMain,
-    Option<string[]> SrcRef,
     Option<string[]> From,
     Option<string?> Prefix,
     List<Option> AllOptions

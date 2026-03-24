@@ -5,10 +5,9 @@
       "Arguments": [],
       "Input": "generate:50",
       "Output": null,
-      "FromAlias": null,
+      "StreamingAliases": [],
       "RefAliases": [],
-      "MergeAliases": [],
-      "SqlQuery": null,
+      "ProcessorName": null,
       "HasStreamTransformer": false,
       "PreParsedJob": null
     },
@@ -17,10 +16,11 @@
       "Arguments": [],
       "Input": null,
       "Output": "csv:/tmp/consumer_a.csv",
-      "FromAlias": "src",
+      "StreamingAliases": [
+        "src"
+      ],
       "RefAliases": [],
-      "MergeAliases": [],
-      "SqlQuery": null,
+      "ProcessorName": null,
       "HasStreamTransformer": false,
       "PreParsedJob": null
     },
@@ -29,10 +29,11 @@
       "Arguments": [],
       "Input": null,
       "Output": "csv:/tmp/consumer_b.csv",
-      "FromAlias": "src",
+      "StreamingAliases": [
+        "src"
+      ],
       "RefAliases": [],
-      "MergeAliases": [],
-      "SqlQuery": null,
+      "ProcessorName": null,
       "HasStreamTransformer": false,
       "PreParsedJob": null
     }

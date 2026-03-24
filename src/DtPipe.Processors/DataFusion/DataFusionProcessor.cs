@@ -21,8 +21,6 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
     private readonly string _mainChannelAlias; // physical channel alias for registry lookup
     private readonly string[] _refAliases;        // logical SQL table names
     private readonly string[] _refChannelAliases; // physical channel aliases for registry lookup
-    private readonly string _srcMain;
-    private readonly string[] _srcRefs;
     private readonly ILogger<DataFusionProcessor> _logger;
 
     private nint _runtime = nint.Zero;
@@ -42,8 +40,6 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
         string mainChannelAlias,
         string[] refAliases,
         string[] refChannelAliases,
-        string srcMain,
-        string[] srcRefs,
         ILogger<DataFusionProcessor> logger)
     {
         _registry = registry;
@@ -52,8 +48,6 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
         _mainChannelAlias = mainChannelAlias;
         _refAliases = refAliases;
         _refChannelAliases = refChannelAliases;
-        _srcMain = srcMain;
-        _srcRefs = srcRefs;
         _logger = logger;
     }
 
@@ -70,28 +64,19 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
             _ctx = DataFusionBridge.ContextNew(_runtime);
             if (_ctx == nint.Zero) throw new Exception("Failed to create DataFusion context");
 
-            if (!string.IsNullOrEmpty(_srcMain))
+            if (_refAliases.Length > 0)
             {
-                RegisterFileSource("main", _srcMain);
-                for (int i = 0; i < _refAliases.Length && i < _srcRefs.Length; i++)
-                    RegisterFileSource(_refAliases[i], _srcRefs[i]);
+                // _refAliases[i] = logical SQL table name; _refChannelAliases[i] = physical channel alias.
+                var materializationTasks = _refAliases
+                    .Select((alias, i) => RegisterChannelSourceAsync(alias, _refChannelAliases[i], ct))
+                    .ToList();
+                await Task.WhenAll(materializationTasks);
             }
-            else
-            {
-                if (_refAliases.Length > 0)
-                {
-                    // _refAliases[i] = logical SQL table name; _refChannelAliases[i] = physical channel alias.
-                    var materializationTasks = _refAliases
-                        .Select((alias, i) => RegisterChannelSourceAsync(alias, _refChannelAliases[i], ct))
-                        .ToList();
-                    await Task.WhenAll(materializationTasks);
-                }
 
-                if (!string.IsNullOrEmpty(_mainAlias))
-                {
-                    // _mainAlias = logical SQL table name; _mainChannelAlias = physical channel alias.
-                    await RegisterStreamingChannelSourceAsync(_mainAlias, _mainChannelAlias, ct);
-                }
+            if (!string.IsNullOrEmpty(_mainAlias))
+            {
+                // _mainAlias = logical SQL table name; _mainChannelAlias = physical channel alias.
+                await RegisterStreamingChannelSourceAsync(_mainAlias, _mainChannelAlias, ct);
             }
 
             _logger.LogDebug("DataFusionProcessor: All sources registered. Inspecting schema...");
@@ -115,27 +100,6 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
             throw new Exception("Failed to get query schema from DataFusion");
 
         _resultSchema = CArrowSchemaImporter.ImportSchema(&ffiSchema);
-    }
-
-    private void RegisterFileSource(string alias, string srcSpec)
-    {
-        var colonIdx = srcSpec.IndexOf(':');
-        if (colonIdx < 0) throw new ArgumentException("Source spec invalide: " + srcSpec);
-        var provider = srcSpec[..colonIdx].ToLowerInvariant();
-        var path = srcSpec[(colonIdx + 1)..];
-
-        switch (provider)
-        {
-            case "parquet":
-                if (DataFusionBridge.RegisterParquet(_ctx, alias, path) != 0)
-                    throw new Exception($"Failed to register parquet table {alias}");
-                break;
-            case "csv":
-                if (DataFusionBridge.RegisterCsv(_ctx, alias, path) != 0)
-                    throw new Exception($"Failed to register csv table {alias}");
-                break;
-            default: throw new NotSupportedException("Provider non supporté (bridged mode): " + provider);
-        }
     }
 
     private async Task RegisterStreamingChannelSourceAsync(string alias, string channelAlias, CancellationToken ct)

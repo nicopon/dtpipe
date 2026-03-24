@@ -5,10 +5,9 @@
       "Arguments": [],
       "Input": "generate:10",
       "Output": "csv:/tmp/out.csv",
-      "FromAlias": null,
+      "StreamingAliases": [],
       "RefAliases": [],
-      "MergeAliases": [],
-      "SqlQuery": null,
+      "ProcessorName": null,
       "HasStreamTransformer": false,
       "PreParsedJob": null
     }

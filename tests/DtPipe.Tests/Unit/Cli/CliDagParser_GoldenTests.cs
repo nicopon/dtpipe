@@ -34,7 +34,7 @@ public class CliDagParser_GoldenTests
         var golden = GoldenDagDefinitions.Dag_SourcePlusSqlProcessor;
 
         Assert.Equal(2, dag.Branches.Count);
-        Assert.Equal(golden.Branches[1].FromAlias, dag.Branches[1].FromAlias);
+        Assert.Equal(golden.Branches[1].StreamingAliases, dag.Branches[1].StreamingAliases);
         Assert.True(dag.Branches[1].HasStreamTransformer);
     }
 
@@ -51,8 +51,8 @@ public class CliDagParser_GoldenTests
         var golden = GoldenDagDefinitions.Dag_FanOut_OneSourceTwoConsumers;
 
         Assert.Equal(3, dag.Branches.Count);
-        Assert.Equal(golden.Branches[1].FromAlias, dag.Branches[1].FromAlias);
-        Assert.Equal(golden.Branches[2].FromAlias, dag.Branches[2].FromAlias);
+        Assert.Equal(golden.Branches[1].StreamingAliases[0], dag.Branches[1].StreamingAliases[0]);
+        Assert.Equal(golden.Branches[2].StreamingAliases[0], dag.Branches[2].StreamingAliases[0]);
     }
 
     [Fact]
@@ -73,12 +73,12 @@ public class CliDagParser_GoldenTests
         Assert.Equal(golden.Branches[0].Alias, dag.Branches[0].Alias);
         Assert.False(dag.Branches[0].HasStreamTransformer);
 
-        Assert.Equal(golden.Branches[1].Alias,    dag.Branches[1].Alias);
-        Assert.Equal(golden.Branches[1].FromAlias, dag.Branches[1].FromAlias);
+        Assert.Equal(golden.Branches[1].Alias,        dag.Branches[1].Alias);
+        Assert.Equal(golden.Branches[1].StreamingAliases[0], dag.Branches[1].StreamingAliases[0]);
         Assert.False(dag.Branches[1].HasStreamTransformer);
 
-        Assert.Equal(golden.Branches[2].Alias,     dag.Branches[2].Alias);
-        Assert.Equal(golden.Branches[2].FromAlias,  dag.Branches[2].FromAlias);
+        Assert.Equal(golden.Branches[2].Alias,         dag.Branches[2].Alias);
+        Assert.Equal(golden.Branches[2].StreamingAliases[0], dag.Branches[2].StreamingAliases[0]);
         Assert.True(dag.Branches[2].HasStreamTransformer);
     }
 
@@ -98,8 +98,30 @@ public class CliDagParser_GoldenTests
         var golden = GoldenDagDefinitions.Dag_SqlProcessor_WithRef;
 
         Assert.Equal(3, dag.Branches.Count);
-        Assert.Equal(golden.Branches[2].FromAlias,  dag.Branches[2].FromAlias);
-        Assert.Equal(golden.Branches[2].RefAliases, dag.Branches[2].RefAliases);
+        Assert.Equal(golden.Branches[2].StreamingAliases, dag.Branches[2].StreamingAliases);
+        Assert.Equal(golden.Branches[2].RefAliases,       dag.Branches[2].RefAliases);
         Assert.True(dag.Branches[2].HasStreamTransformer);
+    }
+
+    [Fact]
+    public void Parse_MergeProcessor_MatchesGoldenMerge()
+    {
+        // --from a,b --merge declares a UNION ALL merge processor.
+        var args = new[]
+        {
+            "-i", "generate:5", "--alias", "stream_a",
+            "-i", "generate:5", "--alias", "stream_b",
+            "--from", "stream_a,stream_b", "--merge",
+            "--alias", "merged", "-o", "csv:/tmp/merged.csv"
+        };
+        var dag = CliDagParser.Parse(args);
+        var golden = GoldenDagDefinitions.Dag_Merge_TwoSources;
+
+        Assert.Equal(3, dag.Branches.Count);
+
+        var mergeBranch = dag.Branches[2];
+        Assert.Equal(golden.Branches[2].StreamingAliases, mergeBranch.StreamingAliases);
+        Assert.Equal("merge", mergeBranch.ProcessorName);
+        Assert.True(mergeBranch.HasStreamTransformer);
     }
 }

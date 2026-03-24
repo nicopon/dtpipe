@@ -10,14 +10,18 @@ namespace DtPipe.Processors.DataFusion;
 /// Factory for <see cref="SqlTransformer"/>.
 /// Activated when branch arguments contain <c>--sql &lt;query&gt;</c>.
 /// Reads <c>--from</c> (main streaming alias), <c>--ref</c> (materialized aliases),
-/// <c>--sql</c> (inline SQL query), and optionally <c>--src-main</c> / <c>--src-ref</c>
-/// (direct file sources bypassing memory channels).
+/// and <c>--sql</c> (inline SQL query).
 /// </summary>
 public class SqlTransformerFactory : IStreamTransformerFactory
 {
     public string ComponentName => "sql";
     public string Category => "Stream Processors";
     public bool RequiresArrowChannels => true;
+
+    public int MinStreams => 1;
+    public int MaxStreams => 1;
+    public int MinLookups => 0;
+    public int MaxLookups => -1;
 
     public bool IsApplicable(string[] branchArgs)
         => ExtractSqlQuery(branchArgs) != null;
@@ -40,9 +44,6 @@ public class SqlTransformerFactory : IStreamTransformerFactory
             .Select(a => ctx.AliasMap.GetValueOrDefault(a, a))
             .ToArray();
 
-        var srcMain = ExtractArgValue(branchArgs, "--src-main") ?? "";
-        var srcRefs = ExtractAllArgValues(branchArgs, "--src-ref").ToArray();
-
         var registry = serviceProvider.GetRequiredService<IMemoryChannelRegistry>();
         var loggerFactory = serviceProvider.GetRequiredService<ILoggerFactory>();
 
@@ -53,8 +54,6 @@ public class SqlTransformerFactory : IStreamTransformerFactory
             mainChannelAlias: mainChannelAlias,
             refAliases: refAliases,
             refChannelAliases: refChannelAliases,
-            srcMain: srcMain,
-            srcRefs: srcRefs,
             logger: loggerFactory.CreateLogger<DataFusionProcessor>());
 
         return new SqlTransformer(processor);

@@ -76,7 +76,7 @@ public static class CliPipelineRules
     /// </summary>
     public static readonly HashSet<string> JunctionSourceFlags = new(StringComparer.OrdinalIgnoreCase)
     {
-        "--ref", "--merge"
+        "--ref"
     };
 
     /// <summary>
@@ -84,7 +84,7 @@ public static class CliPipelineRules
     /// </summary>
     public static readonly HashSet<string> SourceFlags = new(StringComparer.OrdinalIgnoreCase)
     {
-        "-i", "--input", "--sql", "--ref", "--merge", "--from"
+        "-i", "--input", "--sql", "--ref", "--from"
     };
 
     /// <summary>
@@ -97,9 +97,17 @@ public static class CliPipelineRules
     };
 
     /// <summary>
-    /// Identifies a branch as a SQL processor. Note: does NOT trigger a branch split — --from opens the new branch.
+    /// Value-bearing processor mode flags. Presence of one of these flags in branch args identifies
+    /// the processor type; the following token is the processor's primary argument
+    /// (e.g. <c>--sql "&lt;query&gt;"</c> activates the SQL/DataFusion processor).
     /// </summary>
-    public static readonly HashSet<string> ProcessorFlags = new(StringComparer.OrdinalIgnoreCase) { "--sql" };
+    public static readonly HashSet<string> ValueProcessorFlags = new(StringComparer.OrdinalIgnoreCase) { "--sql" };
+
+    /// <summary>
+    /// Boolean processor mode flags (no value). Presence of one of these flags in branch args
+    /// identifies the processor type (e.g. <c>--merge</c> activates the MergeTransformer).
+    /// </summary>
+    public static readonly HashSet<string> BooleanProcessorFlags = new(StringComparer.OrdinalIgnoreCase) { "--merge" };
     public static readonly HashSet<string> InputFlags = new(StringComparer.OrdinalIgnoreCase) { "-i", "--input" };
 
     /// <summary>

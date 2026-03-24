@@ -12,10 +12,10 @@ namespace DtPipe.Cli.Dag;
 ///   - <c>--from</c>               always (fan-out consumer or stream transformer main source)
 ///
 /// Stream transformer branches:
-///   - A branch containing <c>--sql "&lt;query&gt;"</c> activates the SQL transformer (DataFusion).
-///   - A branch containing <c>--merge &lt;alias&gt;</c> activates the merge transformer.
-///   - <c>--from &lt;alias&gt;</c> declares the primary upstream channel for the transformer.
-///   - <c>--ref &lt;alias&gt;</c>  declares materialized reference sources (SQL only).
+///   - A branch containing <c>--sql "&lt;query&gt;"</c> (value processor flag) activates the SQL/DataFusion processor.
+///   - A branch containing <c>--merge</c> (boolean processor flag, no value) activates the merge processor.
+///   - <c>--from a,b,c</c> declares streaming upstream sources (comma-separated for multiple).
+///   - <c>--ref a,b</c>    declares materialized reference sources (comma-separated, lookup/join).
 /// </summary>
 public static class CliDagParser
 {
@@ -82,16 +82,21 @@ public static class CliDagParser
             alias = $"stream{branchCounter}";
         branchCounter++;
 
-        var sqlQuery = ExtractSqlQuery(argsArray);
+        // --from accepts comma-separated aliases: --from a,b,c
         var fromValue = ExtractArgValue(argsArray, "--from");
+        var streamingAliases = fromValue != null
+            ? fromValue.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            : Array.Empty<string>();
 
+        // --ref accepts comma-separated aliases: --ref a,b
         var refAliases = ExtractAllArgValues(argsArray, "--ref")
             .SelectMany(r => r.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             .ToList();
 
-        var mergeAliases = ExtractAllArgValues(argsArray, "--merge")
-            .SelectMany(m => m.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            .ToList();
+        // Processor detection: boolean flags (e.g. --merge) take precedence, then value flags (e.g. --sql).
+        var processorName =
+            argsArray.FirstOrDefault(a => CliPipelineRules.BooleanProcessorFlags.Contains(a))?.TrimStart('-') ??
+            argsArray.FirstOrDefault(a => CliPipelineRules.ValueProcessorFlags.Contains(a))?.TrimStart('-');
 
         // Input: for stream-transformer branches there is no injected -i.
         // For regular branches, extract the explicit -i / --input value.
@@ -103,44 +108,25 @@ public static class CliDagParser
             Arguments = argsArray,
             Input = input,
             Output = ExtractArgValue(argsArray, "-o") ?? ExtractArgValue(argsArray, "--output"),
-            FromAlias = fromValue,
+            StreamingAliases = streamingAliases,
             RefAliases = refAliases,
-            MergeAliases = mergeAliases,
-            SqlQuery = sqlQuery
+            ProcessorName = processorName
         };
-    }
-
-    /// <summary>
-    /// Extracts the SQL query from <c>--sql "&lt;query&gt;"</c>.
-    /// Returns null if no <c>--sql</c> flag is present (branch is not a SQL transformer).
-    /// </summary>
-    private static string? ExtractSqlQuery(string[] args)
-    {
-        for (int i = 0; i < args.Length; i++)
-        {
-            if (!args[i].Equals("--sql", StringComparison.OrdinalIgnoreCase)) continue;
-
-            if (i + 1 >= args.Length) return null;
-
-            var val = args[i + 1];
-            // Next token is another flag → no value.
-            if (val.StartsWith('-') && val.Length > 1 && !char.IsDigit(val[1])) return null;
-
-            return val;
-        }
-        return null;
     }
 
     /// <summary>
     /// Validates the DAG semantics.
     /// Combines CLI-specific rules (singletons) with core structural rules.
+    /// Pass <paramref name="processorFactories"/> to enable processor capability validation
+    /// (stream/lookup count constraints).
     /// </summary>
-    public static IReadOnlyList<string> Validate(JobDagDefinition dag)
+    public static IReadOnlyList<string> Validate(JobDagDefinition dag,
+        IEnumerable<DtPipe.Core.Abstractions.IStreamTransformerFactory>? processorFactories = null)
     {
         var errors = new List<string>();
 
         // 1. Structural Validation (Core)
-        errors.AddRange(DtPipe.Core.Validation.DagValidator.Validate(dag));
+        errors.AddRange(DtPipe.Core.Validation.DagValidator.Validate(dag, processorFactories));
 
         // 2. CLI-Specific Validation (Singleton flags)
         foreach (var branch in dag.Branches)
@@ -165,7 +151,7 @@ public static class CliDagParser
         return errors;
     }
 
-    private static string? ExtractArgValue(string[] args, string flag)
+    public static string? ExtractArgValue(string[] args, string flag)
     {
         for (int i = 0; i < args.Length - 1; i++)
         {

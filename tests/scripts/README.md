@@ -73,7 +73,7 @@ DtPipe uses a centralized Docker infrastructure for all integration tests.
 ### 📊 Benchmarks
 | Script | Target |
 |:---|:---|
-| **`bench.sh`** | Linear pipeline throughput (100k→CSV, CSV→Parquet, Parquet+transforms), DuckDB 1M rows, DataFusion SQL JOIN (DAG mode + direct `--src-main`/`--src-ref`). |
+| **`bench.sh`** | Linear pipeline throughput (100k→CSV, CSV→Parquet, Parquet+transforms), DuckDB 1M rows, DataFusion SQL JOIN (DAG mode). |
 | **`benchmark_dtpipe_columnar.sh`** | Zero-copy columnar path performance. |
 | **`generate_benchmark_datasets.sh`** | Generates large Parquet/CSV datasets for JOIN benchmarks. |
 

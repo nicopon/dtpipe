@@ -7,8 +7,8 @@ namespace DtPipe.Processors.Merge;
 
 /// <summary>
 /// Factory for <see cref="MergeTransformer"/>.
-/// Activated when branch arguments contain <c>--merge &lt;alias&gt;</c>.
-/// The main channel is taken from <c>--from &lt;alias&gt;</c>.
+/// Activated when branch arguments contain the boolean flag <c>--merge</c> (no value).
+/// Streaming sources are declared via <c>--from a,b,c</c> (comma-separated).
 /// </summary>
 public class MergeTransformerFactory : IStreamTransformerFactory
 {
@@ -16,20 +16,30 @@ public class MergeTransformerFactory : IStreamTransformerFactory
     public string Category => "Stream Processors";
     public bool RequiresArrowChannels => true;
 
+    public int MinStreams => 2;
+    public int MaxStreams => -1;
+    public int MinLookups => 0;
+    public int MaxLookups => 0;
+
     public bool IsApplicable(string[] branchArgs)
-        => ExtractArgValue(branchArgs, "--merge") != null;
+        => branchArgs.Any(a => a.Equals("--merge", StringComparison.OrdinalIgnoreCase));
 
     public IStreamTransformer Create(string[] branchArgs, BranchChannelContext ctx, IServiceProvider serviceProvider)
     {
-        // For merge branches the orchestrator rewrites --from/--merge to physical aliases directly,
-        // so the values read here are already the correct physical channel aliases.
-        var mainAlias = ExtractArgValue(branchArgs, "--from")
-            ?? throw new ArgumentException("--from <alias> is required for MergeTransformer");
-        var mergeAlias = ExtractArgValue(branchArgs, "--merge")
-            ?? throw new ArgumentException("--merge <alias> is required for MergeTransformer");
+        var fromValue = ExtractArgValue(branchArgs, "--from")
+            ?? throw new ArgumentException("--from <aliases> is required for MergeTransformer");
+
+        // Parse comma-separated streaming aliases and resolve logical→physical via AliasMap.
+        var aliases = fromValue
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(a => ctx.AliasMap.GetValueOrDefault(a, a))
+            .ToList();
+
+        if (aliases.Count < 2)
+            throw new ArgumentException($"MergeTransformer requires at least 2 streaming sources via '--from a,b,...', got: {fromValue}");
 
         var registry = serviceProvider.GetRequiredService<IArrowChannelRegistry>();
-        return new MergeTransformer(registry, mainAlias, mergeAlias);
+        return new MergeTransformer(registry, aliases);
     }
 
     private static string? ExtractArgValue(string[] args, string flag)
