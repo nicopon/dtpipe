@@ -11,6 +11,7 @@ public sealed class ProgressReporter : IExportProgress
 	private readonly bool _enabled;
 	private readonly bool _uiEnabled;
 	private readonly bool _suppressLiveTui;
+	private readonly bool _suppressCompletionOutput;
 	private readonly string? _branchName;
 	private bool _disposed;
 
@@ -23,15 +24,19 @@ public sealed class ProgressReporter : IExportProgress
 	// Transformers stats
 	private readonly Dictionary<string, long> _transformerStats = new();
 	private readonly List<(string Name, bool IsColumnar)> _transformerModes = new();
+	private long[] _transformerCountsByIndex = System.Array.Empty<long>();
+	private readonly Dictionary<string, List<int>> _transformerNameIndices = new();
+	private readonly Dictionary<string, int> _transformerCursors = new();
 
 	// UI Task
 	private Task? _uiTask;
 
-	public ProgressReporter(IAnsiConsole console, bool enabled = true, IReadOnlyList<(string Name, bool IsColumnar)>? transformerModes = null, bool suppressLiveTui = false, string? branchName = null)
+	public ProgressReporter(IAnsiConsole console, bool enabled = true, IReadOnlyList<(string Name, bool IsColumnar)>? transformerModes = null, bool suppressLiveTui = false, string? branchName = null, bool suppressCompletionOutput = false)
 	{
 		_console = console;
 		_enabled = enabled;
 		_suppressLiveTui = suppressLiveTui;
+		_suppressCompletionOutput = suppressCompletionOutput;
 		_branchName = branchName;
 		_stopwatch = Stopwatch.StartNew();
 		_startTime = DateTime.UtcNow;
@@ -43,11 +48,22 @@ public sealed class ProgressReporter : IExportProgress
 				_transformerModes.Add(mode);
 				_transformerStats[mode.Name] = 0;
 			}
+			_transformerCountsByIndex = new long[_transformerModes.Count];
+			for (int i = 0; i < _transformerModes.Count; i++)
+			{
+				var name = _transformerModes[i].Name;
+				if (!_transformerNameIndices.ContainsKey(name))
+				{
+					_transformerNameIndices[name] = new List<int>();
+					_transformerCursors[name] = 0;
+				}
+				_transformerNameIndices[name].Add(i);
+			}
 		}
 
 		// Compute whether a live TUI should be started. Disable when output is
 		// redirected, when stdout output is active, or in CI/non-interactive environments.
-		_uiEnabled = _enabled && !_suppressLiveTui && !IsNonInteractiveEnvironment();
+		_uiEnabled = _enabled && !_suppressLiveTui && !IsNonInteractiveEnvironment() && !_suppressCompletionOutput;
 
 		if (_uiEnabled)
 		{
@@ -92,12 +108,20 @@ public sealed class ProgressReporter : IExportProgress
 
 	public void ReportTransform(string transformerName, int count)
 	{
-		// Normalize name to match the key registered at construction (strips "DataTransformer" suffix)
 		var key = transformerName.Replace("DataTransformer", "");
 		lock (_transformerStats)
 		{
 			if (_transformerStats.ContainsKey(key))
 				_transformerStats[key] += count;
+
+			// Per-index tracking: use a round-robin cursor so duplicate-named transformers
+			// accumulate into separate slots rather than the same aggregated counter.
+			if (_transformerNameIndices.TryGetValue(key, out var indices) && indices.Count > 0)
+			{
+				var cursor = _transformerCursors[key];
+				Interlocked.Add(ref _transformerCountsByIndex[indices[cursor]], count);
+				_transformerCursors[key] = (cursor + 1) % indices.Count;
+			}
 		}
 	}
 
@@ -131,9 +155,10 @@ public sealed class ProgressReporter : IExportProgress
 		// Transformers
 		lock (_transformerStats)
 		{
-			foreach (var (name, isColumnar) in _transformerModes)
+			for (int i = 0; i < _transformerModes.Count; i++)
 			{
-				var count = _transformerStats[name];
+				var (name, isColumnar) = _transformerModes[i];
+				var count = _transformerCountsByIndex.Length > i ? _transformerCountsByIndex[i] : _transformerStats.GetValueOrDefault(name);
 				var speed = elapsed > 0 ? count / elapsed : 0;
 				var modeLabel = isColumnar ? "[cyan]◈ columnar[/]" : "[yellow]● row[/]";
 				table.AddRow($"[grey]▸ → {Markup.Escape(name)}[/]", $"[white]{count:N0}[/]", $"[grey]{FormatSpeed(speed)}[/]", modeLabel);
@@ -169,6 +194,9 @@ public sealed class ProgressReporter : IExportProgress
 		{
 			try { _uiTask.Wait(1000); } catch { /* ignore UI task failures/timeouts */ }
 		}
+
+		// When a unified results table is printed externally, suppress per-branch output
+		if (_suppressCompletionOutput) return;
 
 		UpdatePeakMemory();
 
@@ -228,7 +256,8 @@ public sealed class ProgressReporter : IExportProgress
 			_writeCount,
 			overallThroughput,
 			_peakMemoryMb,
-			transformerStats
+			transformerStats,
+			_transformerCountsByIndex.Length > 0 ? (IReadOnlyList<long>)_transformerCountsByIndex.ToList() : null
 		);
 	}
 

@@ -43,7 +43,9 @@ public class LinearPipelineService
         CancellationToken token,
         string? localAlias,
         bool isDag,
-        BranchChannelContext? ctx = null)
+        BranchChannelContext? ctx = null,
+        System.Collections.Concurrent.ConcurrentQueue<DtPipe.Feedback.BranchSummary>? resultsCollector = null,
+        bool showStatusMessages = false)
     {
         var exportService = _serviceProvider.GetRequiredService<ExportService>();
 
@@ -68,7 +70,7 @@ public class LinearPipelineService
 
         job = job with { Input = cleanedInput };
 
-        if (!isDag) _console.WriteLine($"Auto-detected input source: {readerFactory.ComponentName}");
+        if (showStatusMessages) _console.WriteLine($"Auto-detected input source: {readerFactory.ComponentName}");
 
         var writerFactories = _contributors.OfType<IDataWriterFactory>().ToList();
 
@@ -180,7 +182,7 @@ public class LinearPipelineService
             }
 
             if (string.IsNullOrEmpty(job.Output)) throw new InvalidOperationException("No output destination specified.");
-            await exportService.RunExportAsync(pipelineOptions, readerFactory.ComponentName, job.Output, token, pipeline, readerFactory, writerFactory, _registry, isDag ? localAlias : null);
+            await exportService.RunExportAsync(pipelineOptions, readerFactory.ComponentName, job.Output, token, pipeline, readerFactory, writerFactory, _registry, isDag ? localAlias : null, resultsCollector, showStatusMessages);
             return 0;
         }
         catch (OperationCanceledException)

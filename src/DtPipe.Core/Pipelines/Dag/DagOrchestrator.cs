@@ -323,7 +323,6 @@ public class DagOrchestrator : IDagOrchestrator
             }
 
             _logger.LogInformation("DAG execution completed successfully.");
-            OnLogEvent?.Invoke("[bold green]✓ DAG execution completed successfully.[/]");
             return 0;
         }
         catch (OperationCanceledException)

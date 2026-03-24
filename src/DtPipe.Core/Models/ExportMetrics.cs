@@ -10,7 +10,8 @@ public sealed record ExportMetrics(
     long WriteCount,
     double OverallThroughputRowsPerSec,
     double PeakMemoryWorkingSetMb,
-    IReadOnlyDictionary<string, long> TransformerStats
+    IReadOnlyDictionary<string, long> TransformerStats,
+    IReadOnlyList<long>? TransformerCountsByIndex = null
 )
 {
     public TimeSpan Duration => EndTime - StartTime;

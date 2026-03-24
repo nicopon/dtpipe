@@ -95,7 +95,7 @@ public class ExportServiceTests
 		_mockWriterFactory.Setup(f => f.Create(It.IsAny<OptionsRegistry>())).Returns(mockWriter.Object);
 
 		// Act
-		await _service.RunExportAsync(new PipelineOptions { NoStats = options.NoStats }, options.Provider, options.OutputPath, cts.Token, pipeline, _mockReaderFactory.Object, _mockWriterFactory.Object, new OptionsRegistry());
+		await _service.RunExportAsync(new PipelineOptions { NoStats = options.NoStats }, options.Provider, options.OutputPath, cts.Token, pipeline, _mockReaderFactory.Object, _mockWriterFactory.Object, new OptionsRegistry(), showStatusMessages: true);
 
 		// Assert
 		_mockObserver.Verify(o => o.ShowIntro("test-source", "target-path"), Times.Once);

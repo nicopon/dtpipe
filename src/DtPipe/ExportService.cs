@@ -66,7 +66,9 @@ public class ExportService
 		IStreamReaderFactory readerFactory,
 		IDataWriterFactory writerFactory,
 		OptionsRegistry registry,
-		string? alias = null)
+		string? alias = null,
+		System.Collections.Concurrent.ConcurrentQueue<DtPipe.Feedback.BranchSummary>? resultsCollector = null,
+		bool showStatusMessages = false)
 	{
 		if (_logger.IsEnabled(LogLevel.Information))
 			_logger.LogInformation("Starting export from {Provider} to {OutputPath}", providerName, ConnectionStringSanitizer.Sanitize(outputPath));
@@ -76,7 +78,7 @@ public class ExportService
 		bool silenceInternal = isInternalChannel && Environment.GetEnvironmentVariable("DEBUG") != "1";
 		bool outputIsStdio = string.Equals(outputPath, "-", StringComparison.Ordinal);
 
-		if (!silenceInternal)
+		if (showStatusMessages && !silenceInternal)
 		{
 			_observer.ShowIntro(providerName, outputPath);
 			_observer.ShowConnectionStatus(false, null);
@@ -88,7 +90,7 @@ public class ExportService
 		await using var reader = readerFactory.Create(registry);
 		await retryPolicy.ExecuteAsync(() => reader.OpenAsync(ct), ct);
 
-		if (!silenceInternal)
+		if (showStatusMessages && !silenceInternal)
 			_observer.ShowConnectionStatus(true, reader.Columns?.Count);
 
 		if (reader.Columns is null || reader.Columns.Count == 0)
@@ -104,7 +106,7 @@ public class ExportService
 		if (pipeline.Count > 0)
 		{
 			var transformerNames = pipeline.Select(t => t.GetType().Name.Replace("DataTransformer", ""));
-			if (!silenceInternal) _observer.ShowPipeline(transformerNames);
+			if (showStatusMessages && !silenceInternal) _observer.ShowPipeline(transformerNames);
 
 			foreach (var t in pipeline)
 			{
@@ -176,7 +178,7 @@ public class ExportService
 		}
 
 		string writerName = writerFactory.ComponentName;
-		if (!silenceInternal) _observer.ShowTarget(writerName, outputPath);
+		if (showStatusMessages && !silenceInternal) _observer.ShowTarget(writerName, outputPath);
 
 		var exportableSchema = currentSchema ?? throw new InvalidOperationException("Exportable schema is null.");
 		await using var writer = writerFactory.Create(registry);
@@ -195,9 +197,14 @@ public class ExportService
 				Name: t.GetType().Name.Replace("DataTransformer", ""),
 				IsColumnar: s.IsColumnar)))
 			.ToList();
-		using var progress = silenceInternal
+		using var progress = (silenceInternal && resultsCollector == null)
 			? (IExportProgress)new DtPipe.Feedback.NullExportProgress()
-			: _observer.CreateProgressReporter(!options.NoStats, transformerModes, suppressLiveTui: outputIsStdio, branchName: alias);
+			: _observer.CreateProgressReporter(
+				!options.NoStats && !silenceInternal,
+				transformerModes,
+				suppressLiveTui: outputIsStdio || silenceInternal,
+				branchName: alias,
+				suppressCompletionOutput: resultsCollector != null);
 
 		using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 		var effectiveCt = linkedCts.Token;
@@ -211,6 +218,12 @@ public class ExportService
 
 			await writer.CompleteAsync(ct);
 			progress.Complete();
+
+			resultsCollector?.Enqueue(new DtPipe.Feedback.BranchSummary(
+				alias,
+				progress.GetMetrics(),
+				reader is DtPipe.Core.Abstractions.IColumnarStreamReader,
+				transformerModes));
 
 			var elapsed = DateTime.UtcNow - startTime;
 			var rowsPerSecond = elapsed.TotalSeconds > 0 ? progress.GetMetrics().ReadCount / elapsed.TotalSeconds : 0;
