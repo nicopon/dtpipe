@@ -3,7 +3,7 @@ set -eo pipefail
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 ROOT_DIR="$DIR/../.."
-DTPIPE_CMD="$ROOT_DIR/src/DtPipe/bin/Release/net10.0/dtpipe"
+DTPIPE_CMD="$ROOT_DIR/dist/release/dtpipe"
 ARTIFACTS_DIR="$DIR/artifacts"
 mkdir -p "$ARTIFACTS_DIR"
 
@@ -18,7 +18,7 @@ FAKE_OPTS="--fake Email:internet.email --fake Name:name.fullname --fake Amount:f
 
 echo "Step 1: Baseline (Generate 10M -> Fake -> Null)"
 echo "-----------------------------------------------" | tee -a "$OUTPUT_REPORT"
-/usr/bin/time -l "$DTPIPE_CMD" --input "generate:10000000" $FAKE_OPTS --output "null:" --no-stats --batch-size 65536 2>&1 | tee -a "$OUTPUT_REPORT"
+/usr/bin/time -l "$DTPIPE_CMD" --input "generate:10000000" $FAKE_OPTS --output "null" --no-stats --batch-size 65536 2>&1 | tee -a "$OUTPUT_REPORT"
 
 echo "" | tee -a "$OUTPUT_REPORT"
 echo "Step 2: Parquet Persistence (Generate 50M -> Fake -> Parquet)"
@@ -39,7 +39,7 @@ echo "DuckDB File Size: $(du -sh "$DUCKDB_FILE")" >> "$OUTPUT_REPORT"
 echo "" | tee -a "$OUTPUT_REPORT"
 echo "Step 4: Verification (Read back from DuckDB)"
 echo "--------------------------------------------" | tee -a "$OUTPUT_REPORT"
-"$DTPIPE_CMD" --input "duck:$DUCKDB_FILE" --query "SELECT COUNT(*), AVG(Amount) FROM Benchmark50M" --output "null:" --no-stats 2>&1 | tee -a "$OUTPUT_REPORT"
+"$DTPIPE_CMD" --input "duck:$DUCKDB_FILE" --query "SELECT COUNT(*), AVG(Amount) FROM Benchmark50M" --output "null" --no-stats 2>&1 | tee -a "$OUTPUT_REPORT"
 
 echo "" >> "$OUTPUT_REPORT"
 echo "Benchmark completed." >> "$OUTPUT_REPORT"
