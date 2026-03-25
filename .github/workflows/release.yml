@@ -67,6 +67,7 @@ jobs:
         run: dotnet restore
 
       - name: Build Release
+        shell: bash
         run: |
           dotnet publish src/DtPipe/DtPipe.csproj -c Release \
             -r ${{ matrix.rid }} \
@@ -86,6 +87,7 @@ jobs:
 
       - name: Prepare artifact (Windows)
         if: contains(matrix.platform, 'windows')
+        shell: bash
         run: |
           if [ -f "./dist/release/DtPipe.exe" ]; then mv ./dist/release/DtPipe.exe ./dist/release/dtpipe.exe; fi
 
@@ -97,6 +99,7 @@ jobs:
 
       - name: Create archive (Windows)
         if: contains(matrix.platform, 'windows')
+        shell: bash
         run: |
           cd ./dist/release
           zip ${{ matrix.artifact }}.zip dtpipe.exe
