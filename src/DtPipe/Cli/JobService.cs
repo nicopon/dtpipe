@@ -344,9 +344,15 @@ public class JobService
 						return await executePipeline(branchPr, token, branch.Arguments, branch.PreParsedJob, branch.Alias, ctx);
 					};
 
-					await orchestrator.ExecuteAsync(dagDefinition, branchExecutor, ct);
+					var exitCode = await orchestrator.ExecuteAsync(dagDefinition, branchExecutor, ct);
 					_console.WriteLine();
 					DagRenderer.PrintUnifiedResultsTable(resultsCollector.ToList(), dagDefinition, isDag: true, _console);
+					
+					if (exitCode != 0)
+					{
+						Environment.ExitCode = exitCode;
+					}
+					
 					return;
 				}
 				catch (Exception ex)

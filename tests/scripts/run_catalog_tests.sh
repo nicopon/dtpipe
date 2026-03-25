@@ -134,7 +134,7 @@ run_test "T20" "$DTPIPE -i artifacts/test_data.csv --limit 0 -o artifacts/output
 # T21: DataFusion JOIN between Parquet and CSV on shared Id column
 run_test "T21" "$DTPIPE -i artifacts/test_data.parquet --alias p -i artifacts/test_data.csv --alias c --from p --ref c --sql \"SELECT p.*, c.email FROM p JOIN c ON p.id = c.id\" -o artifacts/output_t21.parquet"
 # T22: DataFusion aggregation: count(*) and avg() from PostgreSQL
-run_test "T22" "$DTPIPE -i \"$PG\" --alias db --from db --sql \"SELECT count(*) as total, avg(length(username)) FROM db\" -o artifacts/output_t22.csv"
+run_test "T22" "$DTPIPE -i \"$PG\" -q \"SELECT * FROM users_test\" --alias db --from db --sql \"SELECT count(*) as total, avg(length(username)) FROM db\" -o artifacts/output_t22.csv"
 # T23: DataFusion SQL filter on big Parquet (server-side pushdown)
 run_test "T23" "$DTPIPE -i artifacts/test_data_big.parquet --alias b --from b --sql \"SELECT * FROM b WHERE value > 50000 LIMIT 10\" -o artifacts/output_t23.arrow"
 # T24: Chained transformers: fake regenerates Email, mask immediately masks it
@@ -156,7 +156,7 @@ run_test "T30" "$DTPIPE -i artifacts/test_data.csv --alias src --from src -o art
 # T31: Compute serializes the entire row as a JSON object into a new column
 run_test "T31" "$DTPIPE -i artifacts/test_data.csv --compute \"Data:row\" -o artifacts/output_t31.csv"
 # T32: DataFusion heterogeneous JOIN: PostgreSQL × SQL Server 
-run_test "T32" "$DTPIPE -i \"$PG\" --alias p -i \"$MSSQL\" --alias m --from p --ref m --sql \"SELECT p.*, m.credit_card FROM p JOIN m ON p.id = m.id\" -o artifacts/output_t32.csv"
+run_test "T32" "$DTPIPE -i \"$PG\" -q \"SELECT * FROM users_test\" --alias p -i \"$MSSQL\" -q \"SELECT * FROM users_test\" --alias m --from p --ref m --sql \"SELECT p.*, m.credit_card FROM p JOIN m ON p.id = m.id\" -o artifacts/output_t32.csv"
 # T33: DataFusion SQL predicate filter on Parquet with string equality
 run_test "T33" "$DTPIPE -i artifacts/test_data.parquet --alias main --from main --sql \"SELECT * FROM main WHERE category = 'Electronics'\" -o artifacts/output_t33.parquet"
 # T34: DataFusion with upstream sampling applied before SQL execution
@@ -178,7 +178,7 @@ run_test "T41" "$DTPIPE -i artifacts/test_data.csv --alias c -i artifacts/test_d
 # T42: Compute with Math.min to clamp Score at 500
 run_test "T42" "$DTPIPE -i artifacts/test_data.csv --compute \"Score:Math.min(row.Score, 500)\" -o artifacts/output_t42.csv"
 # T43: DataFusion window function: count(*) over() applied to a PG result
-run_test "T43" "$DTPIPE -i \"$PG\" --alias p --from p --sql \"SELECT username, count(*) over() as total FROM p\" -o artifacts/output_t43.csv"
+run_test "T43" "$DTPIPE -i \"$PG\" -q \"SELECT * FROM users_test\" --alias p --from p --sql \"SELECT username, count(*) over() as total FROM p\" -o artifacts/output_t43.csv"
 # T44: Fake with JS Date.now() to inject a synthetic metadata column
 run_test "T44" "$DTPIPE -i artifacts/test_data.parquet --fake \"Meta:{\\\"source\\\": \\\"parquet\\\", \\\"time\\\": Date.now()}\" -o artifacts/output_t44.csv"
 # T45: Write to Postgres with --ignore-nulls: null cells are skipped on insert
@@ -284,7 +284,7 @@ run_test "T105" "$DTPIPE -i artifacts/test_data.csv --drop \"Email\" --filter \"
 # T91: Filter + fake anonymize + mask: GDPR-style 3-stage hardening pipeline
 run_test "T91" "$DTPIPE -i artifacts/test_data.csv --filter \"row.Score > 700\" --fake \"LastName:name.lastName\" --mask \"Email:####@####.com\" -o artifacts/output_t91.parquet"
 # T92: LEFT JOIN anti-join: find Parquet rows absent from Postgres
-run_test "T92" "$DTPIPE -i artifacts/test_data.parquet --alias p -i \"$PG\" --alias db --from p --ref db --sql \"SELECT p.* FROM p LEFT JOIN db ON p.id = db.id WHERE db.id IS NULL\" -o artifacts/output_t92.csv"
+run_test "T92" "$DTPIPE -i artifacts/test_data.parquet --alias p -i \"$PG\" -q \"SELECT * FROM users_test\" --alias db --from p --ref db --sql \"SELECT p.* FROM p LEFT JOIN db ON p.id = db.id WHERE db.id IS NULL\" -o artifacts/output_t92.csv"
 # T93: DAG split by filtering: high and low scores to separate files
 run_test "T93" "$DTPIPE -i artifacts/test_data.csv --alias s --from s --filter 'row.Score > 500' -o artifacts/output_t93_a.arrow --from s --filter 'row.Score <= 500' -o artifacts/output_t93_b.arrow"
 # T94: Cross-DB sync: Postgres → rename → fake → SQL Server (multi-step real ETL)
