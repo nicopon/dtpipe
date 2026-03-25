@@ -1,5 +1,6 @@
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
+using DtPipe.Core.Pipelines;
 using DtPipe.Feedback;
 using Spectre.Console;
 
@@ -80,12 +81,10 @@ public class SpectreConsoleObserver : IExportObserver
 		return new ProgressReporter(_console, isInteractive, transformerModes, suppressLiveTui, branchName, suppressCompletionOutput);
 	}
 
-	public async Task RunDryRunAsync(IStreamReader reader, IReadOnlyList<IDataTransformer> pipeline, int count, IDataWriter? inspectionWriter, IReadOnlyDictionary<IDataTransformer, (IReadOnlyList<PipeColumnInfo> In, IReadOnlyList<PipeColumnInfo> Out)>? precomputedSchemas = null, CancellationToken ct = default)
+	public async Task RunDryRunAsync(IStreamReader reader, IReadOnlyList<IDataTransformer> pipeline, int count, IDataWriter? inspectionWriter, IReadOnlyDictionary<IDataTransformer, (IReadOnlyList<PipeColumnInfo> In, IReadOnlyList<PipeColumnInfo> Out)>? precomputedSchemas = null, PipelineExecutionPlan? executionPlan = null, CancellationToken ct = default)
 	{
-		// Explicitly using the CLI controller here
 		var controller = new DtPipe.Cli.DryRun.DryRunCliController(_console);
-		// Controller expects List<IDataTransformer>, so we convert.
-		await controller.RunAsync(reader, pipeline.ToList(), count, inspectionWriter, precomputedSchemas, ct);
+		await controller.RunAsync(reader, pipeline.ToList(), count, inspectionWriter, precomputedSchemas, executionPlan, ct);
 	}
 
 	public void ShowSchemaInfo(int columnCount)

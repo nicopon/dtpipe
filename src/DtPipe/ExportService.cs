@@ -168,7 +168,8 @@ public class ExportService
 				}
 			}
 
-			await _observer.RunDryRunAsync(reader, pipeline, options.DryRunCount, writerForInspection, transformerSchemas, ct);
+			var executionPlan = BuildExecutionPlan(providerName, reader, writerFactory.ComponentName, writerForInspection, pipeline, segments);
+		await _observer.RunDryRunAsync(reader, pipeline, options.DryRunCount, writerForInspection, transformerSchemas, executionPlan, ct);
 
 			if (writerForInspection != null)
 			{
@@ -271,5 +272,43 @@ public class ExportService
 				_observer.LogError(hookEx);
 			}
 		}
+	}
+
+	private static PipelineExecutionPlan BuildExecutionPlan(
+		string readerName,
+		IStreamReader reader,
+		string writerName,
+		IDataWriter? writer,
+		List<IDataTransformer> pipeline,
+		List<PipelineSegment> segments)
+	{
+		bool readerIsColumnar = reader is IColumnarStreamReader;
+		bool writerIsColumnar = writer is IColumnarDataWriter;
+		bool rowModePreferred = !writerIsColumnar;
+
+		var steps = new List<PipelineExecutionStep>(pipeline.Count);
+		foreach (var segment in segments)
+		{
+			bool willRunColumnar = segment.IsColumnar && !rowModePreferred;
+			foreach (var t in segment.Transformers)
+			{
+				steps.Add(new PipelineExecutionStep(
+					t.GetType().Name.Replace("DataTransformer", ""),
+					segment.IsColumnar,
+					willRunColumnar));
+			}
+		}
+
+		// Count mode-transition bridges
+		int bridges = 0;
+		bool current = readerIsColumnar && !rowModePreferred;
+		foreach (var segment in segments)
+		{
+			bool useColumnar = segment.IsColumnar && !rowModePreferred;
+			if (useColumnar != current) { bridges++; current = useColumnar; }
+		}
+		if (writerIsColumnar != current) bridges++;
+
+		return new PipelineExecutionPlan(readerName, readerIsColumnar, writerName, writerIsColumnar, rowModePreferred, steps, bridges);
 	}
 }

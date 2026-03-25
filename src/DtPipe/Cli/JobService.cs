@@ -321,6 +321,14 @@ public class JobService
 
 			if (dagDefinition.IsDag)
 			{
+				// Guard: --dry-run is not supported for multi-branch DAG pipelines
+				if (RawJobBuilder.ParseDryRunFromArgs(rawArgs) > 0)
+				{
+					_console.MarkupLine("[yellow]⚠ --dry-run is not supported for multi-branch DAG pipelines.[/]");
+					_console.MarkupLine("[dim]Tip: test each source individually with --dry-run on a single-branch command.[/]");
+					return;
+				}
+
 				_console.WriteLine();
 				var readerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>();
 				_console.Write(DagRenderer.BuildTopologyPanel(dagDefinition, readerFactories));

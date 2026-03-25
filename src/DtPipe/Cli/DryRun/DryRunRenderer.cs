@@ -1,6 +1,7 @@
 using System.Text;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
+using DtPipe.Core.Pipelines;
 using DtPipe.Cli;
 using DtPipe.Core.Validation;
 using DtPipe.DryRun;
@@ -421,6 +422,49 @@ public class DryRunRenderer
 			Border = BoxBorder.Rounded,
 			Padding = new Padding(1, 0),
 			Header = new PanelHeader(panelHeader)
+		};
+
+		console.Write(panel);
+		console.WriteLine();
+	}
+
+	public void RenderExecutionPlan(PipelineExecutionPlan plan, IAnsiConsole console)
+	{
+		var sb = new StringBuilder();
+
+		// Reader row
+		var readerMode = plan.ReaderIsColumnar ? "[blue]▲ columnar[/]" : "[dim]▼ row[/]";
+		sb.AppendLine($"  [dim]Reader [/] {Markup.Escape(plan.ReaderName),-20} {readerMode}");
+
+		// Transformer steps
+		foreach (var step in plan.Steps)
+		{
+			string modeMarkup;
+			if (step.IsColumnarCapable && step.WillRunColumnar)
+				modeMarkup = "[blue]▲ columnar[/]";
+			else if (step.IsColumnarCapable && !step.WillRunColumnar)
+				modeMarkup = "[blue]▲[/] [yellow]→ row mode[/]";
+			else
+				modeMarkup = "[dim]▼ row-only[/]";
+
+			sb.AppendLine($"  [dim]Step   [/] {Markup.Escape(step.Name),-20} {modeMarkup}");
+		}
+
+		// Writer row
+		var writerMode = plan.WriterIsColumnar ? "[blue]▲ columnar sink[/]" : "[dim]▼ row-mode sink[/]";
+		sb.AppendLine($"  [dim]Sink   [/] {Markup.Escape(plan.WriterName),-20} {writerMode}");
+
+		sb.AppendLine();
+
+		var strategyLabel = plan.RowModePreferred ? "[dim]Row-preferred[/]" : "[blue]Columnar[/]";
+		var bridgeColor = plan.BridgeCount == 0 ? "green" : "yellow";
+		sb.Append($"  Strategy: {strategyLabel} · [{bridgeColor}]{plan.BridgeCount} bridge{(plan.BridgeCount == 1 ? "" : "s")}[/]");
+
+		var panel = new Panel(new Markup(sb.ToString().TrimEnd()))
+		{
+			Border = BoxBorder.Rounded,
+			Padding = new Padding(0, 0),
+			Header = new PanelHeader("[blue]Pipeline Execution Plan[/]")
 		};
 
 		console.Write(panel);

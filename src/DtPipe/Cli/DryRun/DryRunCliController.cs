@@ -1,5 +1,6 @@
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
+using DtPipe.Core.Pipelines;
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Cli;
 using DtPipe.Core.Validation;
@@ -31,6 +32,7 @@ public class DryRunCliController
 		int sampleCount,
 		IDataWriter? writer = null,
 		IReadOnlyDictionary<IDataTransformer, (IReadOnlyList<PipeColumnInfo> In, IReadOnlyList<PipeColumnInfo> Out)>? precomputedSchemas = null,
+		PipelineExecutionPlan? executionPlan = null,
 		CancellationToken ct = default)
 	{
 		// 1. User Feedback for Analysis
@@ -72,9 +74,15 @@ public class DryRunCliController
 
 		_console.MarkupLine($"[grey]Collected {result.Samples.Count} sample(s).[/]");
 
-		// 3. Render Compatibility Report if exists
+		// 3. Render Execution Plan
 		var renderer = new DryRunRenderer();
 
+		if (executionPlan != null)
+		{
+			renderer.RenderExecutionPlan(executionPlan, _console);
+		}
+
+		// 3.5. Render Compatibility Report if exists
 		if (result.CompatibilityReport != null)
 		{
 			renderer.RenderCompatibilityReport(result.CompatibilityReport, _console);
