@@ -13,10 +13,11 @@ public class SqliteReaderDescriptor : IProviderDescriptor<IStreamReader>
     public bool CanHandle(string connectionString) => SqliteMetadata.CanHandle(connectionString);
     public bool SupportsStdio => SqliteMetadata.SupportsStdio;
     public bool RequiresQuery => true;
+    public bool YieldsColumnarOutput => true;
 
     public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
     {
         var opt = (SqliteReaderOptions)options;
-        return new SqliteStreamReader(SqliteConnectionHelper.ToDataSourceConnectionString(connectionString), opt.Query ?? "SELECT 1", 0);
+        return new SqliteColumnarReader(SqliteConnectionHelper.ToDataSourceConnectionString(connectionString), opt.Query ?? "SELECT 1", 0);
     }
 }

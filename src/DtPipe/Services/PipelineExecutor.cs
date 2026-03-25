@@ -61,10 +61,16 @@ public sealed class PipelineExecutor
         CancellationTokenSource linkedCts,
         CancellationToken ct)
     {
+        // Row-sink optimization: if the writer cannot consume Arrow natively, there is no benefit
+        // in producing RecordBatches — running the full pipeline in row mode avoids all bridges.
+        // All transformers implement Transform(row), so row mode is always a valid fallback.
+        bool rowModePreferred = writer is not IColumnarDataWriter;
+
         if (segments.Count == 0)
         {
             if (reader is IColumnarStreamReader cr && writer is IColumnarDataWriter cw)
             {
+                // Both columnar: direct zero-copy transfer
                 var source = cr.ReadRecordBatchesAsync(ct);
                 if (options.SamplingRate > 0 && options.SamplingRate < 1.0)
                 {
@@ -73,15 +79,16 @@ public sealed class PipelineExecutor
                 }
                 await DirectColumnarTransferAsync(source, cw, options.Limit, progress, ct);
             }
-            else if (reader is not IColumnarStreamReader && writer is not IColumnarDataWriter)
+            else if (writer is not IColumnarDataWriter)
             {
+                // Row-mode sink: use reader's row path directly, even if it is also columnar-capable.
+                // Avoids a RecordBatch→rows bridge that would otherwise be inserted for no gain.
                 await DirectRowTransferAsync(reader, writer, options.BatchSize, options.Limit, options.SamplingRate, options.SamplingSeed, progress, retryPolicy, ct);
             }
             else
             {
-                // Mismatch between Reader and Writer with no transformers
-                // Create a dummy segment to force the bridging logic below
-                segments.Add(new PipelineSegment(writer is IColumnarDataWriter, new List<IDataTransformer>())
+                // Row reader + columnar writer with no transformers: bridge rows→Arrow via dummy segment
+                segments.Add(new PipelineSegment(true, new List<IDataTransformer>())
                 {
                     InputSchema = columns,
                     OutputSchema = columns
@@ -95,29 +102,30 @@ public sealed class PipelineExecutor
             IAsyncEnumerable<object?[]> currentRowSource = null!;
             bool isCurrentColumnar = false;
 
-            if (reader is IColumnarStreamReader columnarReader)
+            if (reader is IColumnarStreamReader columnarReader && !rowModePreferred)
             {
+                // Columnar sink: start in Arrow mode to maximise the columnar fast-path
                 currentColumnarSource = columnarReader.ReadRecordBatchesAsync(ct);
                 if (options.SamplingRate > 0 && options.SamplingRate < 1.0)
                 {
                     var sampler = options.SamplingSeed.HasValue ? new Random(options.SamplingSeed.Value) : Random.Shared;
                     currentColumnarSource = ApplySamplingAsync(currentColumnarSource, options.SamplingRate, sampler, ct);
                 }
-
-                // Apply reporting wrapper for the source
                 currentColumnarSource = ReportColumnarReadAsync(currentColumnarSource, progress, ct);
-
                 isCurrentColumnar = true;
             }
             else
             {
+                // Row-mode sink (or row-only reader): start in row mode — zero bridges needed
                 currentRowSource = ProduceRowStreamAsync(reader, options.BatchSize, options.Limit, options.SamplingRate, options.SamplingSeed, progress, ct);
                 isCurrentColumnar = false;
             }
 
             foreach (var segment in segments)
             {
-                if (segment.IsColumnar)
+                // When rowModePreferred: run all segments in row mode regardless of IsColumnar.
+                // Every transformer (including columnar-capable ones) implements Transform(row).
+                if (segment.IsColumnar && !rowModePreferred)
                 {
                     if (!isCurrentColumnar)
                     {

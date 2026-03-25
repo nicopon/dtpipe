@@ -14,10 +14,11 @@ public class PostgreSqlReaderDescriptor : IProviderDescriptor<IStreamReader>
     public bool CanHandle(string connectionString) => PostgreSqlMetadata.CanHandle(connectionString);
     public bool SupportsStdio => PostgreSqlMetadata.SupportsStdio;
     public bool RequiresQuery => true;
+    public bool YieldsColumnarOutput => true;
 
     public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
     {
         var opt = (PostgreSqlReaderOptions)options;
-        return new PostgreSqlReader(connectionString, opt.Query ?? "SELECT 1", 0);
+        return new PostgreSqlColumnarReader(connectionString, opt.Query ?? "SELECT 1", 0);
     }
 }

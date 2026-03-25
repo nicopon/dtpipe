@@ -13,10 +13,11 @@ public class SqlServerReaderDescriptor : IProviderDescriptor<IStreamReader>
     public bool CanHandle(string connectionString) => SqlServerMetadata.CanHandle(connectionString);
     public bool SupportsStdio => SqlServerMetadata.SupportsStdio;
     public bool RequiresQuery => true;
+    public bool YieldsColumnarOutput => true;
 
     public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
     {
         var opt = (SqlServerReaderOptions)options;
-        return new SqlServerStreamReader(connectionString, opt.Query ?? "SELECT 1", opt, 0);
+        return new SqlServerColumnarReader(connectionString, opt.Query ?? "SELECT 1", opt, 0);
     }
 }

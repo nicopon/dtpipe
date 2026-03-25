@@ -14,10 +14,11 @@ public class OracleReaderDescriptor : IProviderDescriptor<IStreamReader>
     public bool CanHandle(string connectionString) => OracleMetadata.CanHandle(connectionString);
     public bool SupportsStdio => OracleMetadata.SupportsStdio;
     public bool RequiresQuery => true;
+    public bool YieldsColumnarOutput => true;
 
     public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
     {
         var opt = (OracleReaderOptions)options;
-        return new OracleStreamReader(connectionString, opt.Query ?? "SELECT 1", opt, 0);
+        return new OracleColumnarReader(connectionString, opt.Query ?? "SELECT 1", opt, 0);
     }
 }

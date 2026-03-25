@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>Apache.Arrow.Ado</PackageId>
+    <Description>ADO.NET to Apache Arrow adapter — converts DbDataReader to Arrow RecordBatches via typed column consumers. Equivalent of arrow-jdbc for .NET.</Description>
+    <PackageTags>apache-arrow;ado.net;dbreader;etl;data;columnar</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Apache.Arrow" Version="22.1.0" />
+  </ItemGroup>
+
+</Project>
