@@ -66,11 +66,7 @@ public class SecretCommand : Command
 				if (secret == null)
 					_console.MarkupLine($"[red]Secret '{alias}' not found.[/]");
 				else
-					_console.WriteLine(secret); // Secret content can be written to STDERR or STDOUT?
-					// Wait, if it's 'get', maybe user wants it on STDOUT to pipe it?
-					// But dtpipe secrets are usually for internal use.
-					// User's request: "garantir que cette manipulation de la console est paramétrée pour écrire sur STDERR"
-					// I'll stick to _console (STDERR).
+					_console.WriteLine(secret);
 			}
 			catch (Exception ex)
 			{

@@ -162,7 +162,7 @@ run_test "T33" "$DTPIPE -i artifacts/test_data.parquet --alias main --from main 
 # T34: DataFusion with upstream sampling applied before SQL execution
 run_test "T34" "$DTPIPE -i artifacts/test_data_big.parquet --alias main --sampling-rate 0.01 --from main --sql \"SELECT * FROM main ORDER BY value DESC\" -o artifacts/output_t34.csv"
 # T35: Fake clone: source one column value into a new column via fake literal
-run_test "T35" "$DTPIPE -i artifacts/test_data.csv --fake \"Id:random.uuid\" --fake \"IdClone:Id\" -o artifacts/output_t35.csv"
+run_test "T35" "$DTPIPE -i artifacts/test_data.csv --fake \"Id:random.guid\" --fake \"IdClone:Id\" -o artifacts/output_t35.csv"
 # T36: Compute with string functions on Arrow data (force string conversion)
 run_test "T36" "$DTPIPE -i artifacts/test_data.arrow --compute \"ShortId:String(row.Id).substring(0,8).toUpperCase()\" -o artifacts/output_t36.csv"
 # T37: Filter with modulo: keep only rows where Score is even
@@ -182,7 +182,7 @@ run_test "T43" "$DTPIPE -i \"$PG\" --alias p --from p --sql \"SELECT username, c
 # T44: Fake with JS Date.now() to inject a synthetic metadata column
 run_test "T44" "$DTPIPE -i artifacts/test_data.parquet --fake \"Meta:{\\\"source\\\": \\\"parquet\\\", \\\"time\\\": Date.now()}\" -o artifacts/output_t44.csv"
 # T45: Write to Postgres with --ignore-nulls: null cells are skipped on insert
-run_test "T45" "$DTPIPE -i artifacts/test_data.csv --ignore-nulls -o \"$PG\" --table \"users_test\" --strategy Append"
+run_test "T45" "$DTPIPE -i artifacts/test_data.csv --null \"Id\" --ignore-nulls --no-schema-validation -o \"$PG\" --table \"users_test\" --strategy Append"
 # T46: DataFusion passthrough on big dataset (with upstream limit)
 run_test "T46" "$DTPIPE -i artifacts/test_data_big.parquet --limit 1000 --alias b --from b --sql \"SELECT * FROM b\" -o artifacts/output_t46.arrow"
 # T47: Compute boolean column by comparing BirthDate to a threshold date
@@ -212,7 +212,7 @@ run_test "T57" "$DTPIPE -i artifacts/test_data_big.parquet -o \"$MSSQL\" --table
 # T58: Random 10% sampling on big dataset → Parquet
 run_test "T58" "$DTPIPE -i artifacts/test_data_big.parquet --sampling-rate 0.1 -o artifacts/output_t58.parquet"
 # T59: Big Parquet → Oracle with Recreate (large Oracle bulk write)
-run_test "T59" "$DTPIPE -i artifacts/test_data_big.parquet -o \"$ORA\" --table \"OUTPUT_T59\" --strategy Recreate"
+run_test "T59" "$DTPIPE -i artifacts/test_data_big.parquet -o \"$ORA\" --table \"OUTPUT_T59\" --strategy Recreate --insert-mode Bulk"
 # T60: Generate 5M rows in-memory → null sink (measures generator throughput)
 run_test "T60" "$DTPIPE -i \"generate:5000000\" -o null --batch-size 100000"
 # T61: Mask transformer on big dataset (measures masking throughput)
@@ -228,7 +228,7 @@ run_test "T65" "$DTPIPE -i artifacts/test_data_big.parquet --compute \"Val:parse
 # T66: Output split across multiple files using --prefix pattern
 run_test "T66" "$DTPIPE -i artifacts/test_data_big.parquet -o artifacts/split/ -p \"prefix_{batch}.parquet\""
 # T67: Generate 1M rows with UUID fake column (generator + fake throughput)
-run_test "T67" "$DTPIPE -i \"generate:1M\" --fake \"uuid:random.uuid\" -o artifacts/big_uuids.csv"
+run_test "T67" "$DTPIPE -i \"generate:1M\" --fake \"uuid:random.guid\" -o artifacts/big_uuids.csv"
 # T68: DataFusion passthrough on big Parquet to null (SQL processor overhead baseline)
 run_test "T68" "$DTPIPE -i artifacts/test_data_big.parquet --alias main --from main --sql \"SELECT * FROM main\" -o null"
 # T69: PostgreSQL big table → CSV (measures PG read + CSV write throughput)
@@ -346,7 +346,7 @@ run_test "T118" "$DTPIPE -i artifacts/test_data.csv --compute \"X:row.Score * 2\
 # T119: --post-exec SQL: verify hook runs a SQL statement against the Postgres target
 run_test "T119" "$DTPIPE -i artifacts/test_data.csv -o \"$PG\" --table \"output_t119\" --strategy Recreate --post-exec \"ANALYZE output_t119\""
 # T120: --auto-migrate: add a new column to a Postgres table that already exists
-run_test "T120" "$DTPIPE -i \"generate:10\" --fake \"Id:random.uuid\" -o \"$PG\" --table \"output_t120\" --strategy Recreate --no-schema-validation && $DTPIPE -i \"generate:5\" --fake \"Id:random.uuid\" --fake \"NewCol:name.firstName\" -o \"$PG\" --table \"output_t120\" --auto-migrate --no-schema-validation"
+run_test "T120" "$DTPIPE -i \"generate:10\" --fake \"Id:random.guid\" -o \"$PG\" --table \"output_t120\" --strategy Recreate --no-schema-validation && $DTPIPE -i \"generate:5\" --fake \"Id:random.guid\" --fake \"NewCol:name.firstName\" -o \"$PG\" --table \"output_t120\" --auto-migrate --no-schema-validation"
 
 # 11. CLI Subcommands
 # T121: 'inspect' subcommand: inspect schema and stats of a Parquet file

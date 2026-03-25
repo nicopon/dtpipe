@@ -145,7 +145,7 @@ internal static class CoreOptionsBuilder
         var throttleOption = new Option<int[]>("--throttle") { Description = "Throttle speed (rows/sec)", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
         var ignoreNullsOption = new Option<bool>("--ignore-nulls") { Description = "Skip null values in specific transformations" };
 
-        var mergeOption = new Option<string[]>("--merge") { Description = "Concatenate an upstream channel alias into this stream-transformer branch", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
+        var mergeOption = new Option<bool>("--merge") { Description = "Declare a UNION ALL merge processor for the upstream channel aliases listed in --from" };
         var refOption = new Option<string[]>("--ref") { Description = "Secondary source alias(es) for SQL transformer (preloaded into memory)" };
         var fromOption = new Option<string[]>("--from")
         {
@@ -320,7 +320,7 @@ public record CoreCliOptions(
     Option<string[]> Drop,
     Option<int[]> Throttle,
     Option<bool> IgnoreNulls,
-    Option<string[]> Merge,
+    Option<bool> Merge,
     Option<string[]> Ref,
     Option<string[]> From,
     Option<string?> Prefix,

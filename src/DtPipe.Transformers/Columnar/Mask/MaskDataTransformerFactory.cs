@@ -5,9 +5,7 @@ using DtPipe.Core.Pipelines;
 
 namespace DtPipe.Transformers.Columnar.Mask;
 
-public interface IMaskDataTransformerFactory : IDataTransformerFactory { }
-
-public class MaskDataTransformerFactory(OptionsRegistry registry) : IMaskDataTransformerFactory
+public class MaskDataTransformerFactory(OptionsRegistry registry) : IDataTransformerFactory
 {
 	private readonly OptionsRegistry _registry = registry;
 

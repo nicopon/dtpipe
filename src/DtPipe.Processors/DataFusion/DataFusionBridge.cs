@@ -19,12 +19,6 @@ internal static partial class DataFusionBridge
     [LibraryImport(LibName, EntryPoint = "dtfb_context_destroy")]
     internal static partial void ContextDestroy(nint ctx);
 
-    [LibraryImport(LibName, EntryPoint = "dtfb_register_parquet")]
-    internal static partial int RegisterParquet(nint ctx, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, [MarshalAs(UnmanagedType.LPUTF8Str)] string path);
-
-    [LibraryImport(LibName, EntryPoint = "dtfb_register_csv")]
-    internal static partial int RegisterCsv(nint ctx, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, [MarshalAs(UnmanagedType.LPUTF8Str)] string path);
-
     [LibraryImport(LibName, EntryPoint = "dtfb_register_stream")]
     internal static unsafe partial int RegisterStream(nint ctx, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, CArrowArrayStream* stream);
 

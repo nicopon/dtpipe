@@ -111,22 +111,18 @@ public class ProviderConfigurationService
             }
         }
 
-        // This second loop handles general CLI binding for all contributors and KeyAwareOptions
-        foreach (var contributor in _contributors)
+        // Propagate the --key option to all writer factories after CLI binding is complete
+        if (!string.IsNullOrEmpty(job.Key))
         {
-            // This call is redundant if the new IDataFactory block above covers all contributors
-            // that have CLI options. However, keeping it for now as per original structure.
-            contributor.BindOptions(pr, _registry);
-
-            if (!string.IsNullOrEmpty(job.Key) && contributor is IDataWriterFactory wFactory)
+            foreach (var contributor in _contributors.OfType<IDataWriterFactory>())
             {
-                var optionsType = wFactory.GetSupportedOptionTypes().FirstOrDefault();
+                var optionsType = contributor.GetSupportedOptionTypes().FirstOrDefault();
                 if (optionsType != null)
                 {
                     var instance = _registry.Get(optionsType);
-                    if (instance is IKeyAwareOptions keyAware2)
+                    if (instance is IKeyAwareOptions keyAware)
                     {
-                        keyAware2.Key = job.Key;
+                        keyAware.Key = job.Key;
                         _registry.RegisterByType(optionsType, instance);
                     }
                 }

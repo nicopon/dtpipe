@@ -7,7 +7,6 @@ namespace DtPipe.Core.Models;
 /// </summary>
 public record JobDefinition
 {
-	public string? DisplayName => null;
 	public string? Input { get; init; }
 	public string? Query { get; init; }
 	public string? Output { get; init; }

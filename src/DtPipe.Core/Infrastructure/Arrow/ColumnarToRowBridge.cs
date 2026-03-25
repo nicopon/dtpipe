@@ -6,6 +6,7 @@ namespace DtPipe.Core.Infrastructure.Arrow;
 
 public class ArrowColumnarToRowBridge : IColumnarToRowBridge
 {
+#pragma warning disable CS1998 // Async method lacks 'await' — required for IAsyncEnumerable iterator
     public async IAsyncEnumerable<object?[]> ConvertBatchToRowsAsync(RecordBatch batch, [EnumeratorCancellation] CancellationToken ct = default)
     {
         int rowCount = batch.Length;
@@ -17,30 +18,13 @@ public class ArrowColumnarToRowBridge : IColumnarToRowBridge
 
             var row = new object?[colCount];
             for (int j = 0; j < colCount; j++)
-            {
                 row[j] = GetValue(batch.Column(j), i);
-            }
+
             yield return row;
         }
-
-        await Task.CompletedTask;
     }
+#pragma warning restore CS1998
 
     public static object? GetValue(IArrowArray array, int index)
-    {
-        if (array.IsNull(index)) return null;
-
-        return array switch
-        {
-            StringArray a => a.GetString(index),
-            Int32Array a => a.GetValue(index),
-            Int64Array a => a.GetValue(index),
-            DoubleArray a => a.GetValue(index),
-            FloatArray a => a.GetValue(index),
-            BooleanArray a => a.GetValue(index),
-            Date64Array a => a.GetDateTime(index),
-            TimestampArray a => a.GetTimestamp(index)?.DateTime,
-            _ => null
-        };
-    }
+        => ArrowTypeMapper.GetValue(array, index);
 }

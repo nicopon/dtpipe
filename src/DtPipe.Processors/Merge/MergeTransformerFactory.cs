@@ -26,7 +26,7 @@ public class MergeTransformerFactory : IStreamTransformerFactory
 
     public IStreamTransformer Create(string[] branchArgs, BranchChannelContext ctx, IServiceProvider serviceProvider)
     {
-        var fromValue = ExtractArgValue(branchArgs, "--from")
+        var fromValue = BranchArgParser.ExtractValue(branchArgs, "--from")
             ?? throw new ArgumentException("--from <aliases> is required for MergeTransformer");
 
         // Parse comma-separated streaming aliases and resolve logical→physical via AliasMap.
@@ -40,17 +40,5 @@ public class MergeTransformerFactory : IStreamTransformerFactory
 
         var registry = serviceProvider.GetRequiredService<IArrowChannelRegistry>();
         return new MergeTransformer(registry, aliases);
-    }
-
-    private static string? ExtractArgValue(string[] args, string flag)
-    {
-        for (int i = 0; i < args.Length - 1; i++)
-        {
-            if (!args[i].Equals(flag, StringComparison.OrdinalIgnoreCase)) continue;
-            var val = args[i + 1];
-            if (val.StartsWith('-') && val.Length > 1 && !char.IsDigit(val[1])) return null;
-            return val;
-        }
-        return null;
     }
 }

@@ -50,7 +50,7 @@ public class MemoryChannelRegistry : IMemoryChannelRegistry
 
         if (_arrowChannels.TryGetValue(branchAlias, out var arrowData))
         {
-            var schema = BuildArrowSchema(columns);
+            var schema = ArrowSchemaFactory.Create(columns);
             _arrowChannels[branchAlias] = (arrowData.Channel, schema);
             if (_arrowSchemaTcs.TryGetValue(branchAlias, out var tcs))
             {
@@ -70,16 +70,7 @@ public class MemoryChannelRegistry : IMemoryChannelRegistry
                 if (_columnTcs.TryGetValue(key, out var tcs)) tcs.TrySetResult(columns);
             }
         }
-        foreach (var key in _arrowChannels.Keys)
-        {
-            if (key.StartsWith(fanPrefix, StringComparison.OrdinalIgnoreCase))
-            {
-                var fanData = _arrowChannels[key];
-                var schema = BuildArrowSchema(columns);
-                _arrowChannels[key] = (fanData.Channel, schema);
-                if (_arrowSchemaTcs.TryGetValue(key, out var tcs)) tcs.TrySetResult(schema);
-            }
-        }
+        PropagateArrowSchemaToFanOut(fanPrefix, ArrowSchemaFactory.Create(columns));
 
         if (!found)
         {
@@ -87,20 +78,16 @@ public class MemoryChannelRegistry : IMemoryChannelRegistry
         }
     }
 
-    private Schema BuildArrowSchema(IReadOnlyList<PipeColumnInfo> columns)
+    private void PropagateArrowSchemaToFanOut(string fanPrefix, Schema schema)
     {
-        lock (_schemaLock)
+        foreach (var key in _arrowChannels.Keys)
         {
-            var builder = new Schema.Builder();
-            foreach (var col in columns)
-            {
-                builder.Field(new Field(col.Name, ArrowTypeMapper.GetArrowType(col.ClrType), col.IsNullable));
-            }
-            return builder.Build();
+            if (!key.StartsWith(fanPrefix, StringComparison.OrdinalIgnoreCase)) continue;
+            var fanData = _arrowChannels[key];
+            _arrowChannels[key] = (fanData.Channel, schema);
+            if (_arrowSchemaTcs.TryGetValue(key, out var tcs)) tcs.TrySetResult(schema);
         }
     }
-
-    private static IArrowType GetArrowType(Type type) => ArrowTypeMapper.GetArrowType(type);
 
     public async Task<IReadOnlyList<PipeColumnInfo>> WaitForChannelColumnsAsync(string branchAlias, CancellationToken ct = default)
     {
@@ -149,16 +136,7 @@ public class MemoryChannelRegistry : IMemoryChannelRegistry
         }
         
         // Propagate to fan-out sub-channels
-        var fanPrefix = branchAlias + "__fan_";
-        foreach (var key in _arrowChannels.Keys)
-        {
-            if (key.StartsWith(fanPrefix, StringComparison.OrdinalIgnoreCase))
-            {
-                var fanData = _arrowChannels[key];
-                _arrowChannels[key] = (fanData.Channel, schema);
-                if (_arrowSchemaTcs.TryGetValue(key, out var tcs)) tcs.TrySetResult(schema);
-            }
-        }
+        PropagateArrowSchemaToFanOut(branchAlias + "__fan_", schema);
 
         if (!found)
         {

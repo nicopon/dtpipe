@@ -4,7 +4,7 @@ namespace DtPipe.Tests.Unit.Core;
 
 public static class GoldenDagDefinitions
 {
-    // Cas 1 : Pipeline linéaire simple (1 seule branche, non-DAG)
+    // Case 1: Simple linear pipeline (single branch, non-DAG)
     public static JobDagDefinition Linear_SingleBranch => new()
     {
         Branches = new[]
@@ -19,7 +19,7 @@ public static class GoldenDagDefinitions
         }
     };
 
-    // Cas 2 : DAG 2 branches, source → terminal
+    // Case 2: DAG with 2 branches, source → terminal
     public static JobDagDefinition Dag_TwoInputs_OneOutput => new()
     {
         Branches = new[]
@@ -41,7 +41,7 @@ public static class GoldenDagDefinitions
         }
     };
 
-    // Cas 3 : DAG avec SQL stream transformer (--sql + --from)
+    // Case 3: DAG with SQL stream transformer (--sql + --from)
     public static JobDagDefinition Dag_SourcePlusSqlProcessor => new()
     {
         Branches = new[]
@@ -64,7 +64,7 @@ public static class GoldenDagDefinitions
         }
     };
 
-    // Cas 4 : Fan-out (tee) — une source, deux consommateurs
+    // Case 4: Fan-out (tee) — one source, two consumers
     public static JobDagDefinition Dag_FanOut_OneSourceTwoConsumers => new()
     {
         Branches = new[]
@@ -93,7 +93,7 @@ public static class GoldenDagDefinitions
         }
     };
 
-    // Cas 5 : SQL stream transformer avec ref (JOIN sémantique)
+    // Case 5: SQL stream transformer with ref (semantic JOIN)
     public static JobDagDefinition Dag_SqlProcessor_WithRef => new()
     {
         Branches = new[]
@@ -112,7 +112,7 @@ public static class GoldenDagDefinitions
         }
     };
 
-    // Cas 6 : Fan-out + SQL transformer consommant la même source (teste la résolution des alias fan-out)
+    // Case 6: Fan-out + SQL transformer consuming the same source (tests fan-out alias resolution)
     public static JobDagDefinition Dag_FanOut_WithSqlProcessor => new()
     {
         Branches = new[]
@@ -142,7 +142,7 @@ public static class GoldenDagDefinitions
         }
     };
 
-    // Cas 7 : Merge (UNION ALL) — deux sources streamées via --from a,b --merge
+    // Case 7: Merge (UNION ALL) — two sources streamed via --from a,b --merge
     public static JobDagDefinition Dag_Merge_TwoSources => new()
     {
         Branches = new[]

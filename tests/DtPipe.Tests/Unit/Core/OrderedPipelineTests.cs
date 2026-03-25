@@ -4,10 +4,6 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
-using DtPipe.Transformers.Columnar.Fake;
-using DtPipe.Transformers.Columnar.Format;
-using DtPipe.Transformers.Columnar.Null;
-using DtPipe.Transformers.Columnar.Overwrite;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
@@ -17,24 +13,24 @@ namespace DtPipe.Tests;
 
 public class OrderedPipelineTests
 {
-	private readonly Mock<IFakeDataTransformerFactory> _fakeFactory;
-	private readonly Mock<INullDataTransformerFactory> _nullFactory;
-	private readonly Mock<IFormatDataTransformerFactory> _formatFactory;
-	private readonly Mock<IOverwriteDataTransformerFactory> _staticFactory;
+	private readonly Mock<IDataTransformerFactory> _fakeFactory;
+	private readonly Mock<IDataTransformerFactory> _nullFactory;
+	private readonly Mock<IDataTransformerFactory> _formatFactory;
+	private readonly Mock<IDataTransformerFactory> _staticFactory;
 	private readonly List<IDataTransformerFactory> _factories;
 
 	public OrderedPipelineTests()
 	{
-		_fakeFactory = new Mock<IFakeDataTransformerFactory>();
+		_fakeFactory = new Mock<IDataTransformerFactory>();
 		SetupFactory(_fakeFactory, "--fake", "-f");
 
-		_nullFactory = new Mock<INullDataTransformerFactory>();
+		_nullFactory = new Mock<IDataTransformerFactory>();
 		SetupFactory(_nullFactory, "--null");
 
-		_formatFactory = new Mock<IFormatDataTransformerFactory>();
+		_formatFactory = new Mock<IDataTransformerFactory>();
 		SetupFactory(_formatFactory, "--format");
 
-		_staticFactory = new Mock<IOverwriteDataTransformerFactory>();
+		_staticFactory = new Mock<IDataTransformerFactory>();
 		SetupFactory(_staticFactory, "--overwrite");
 
 		_factories = new List<IDataTransformerFactory>

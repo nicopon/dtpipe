@@ -8,7 +8,7 @@ namespace DtPipe.Core.Options;
 public interface ICliOptionMetadata
 {
     /// <summary>
-    /// Maps property name → CLI flag (e.g., "FromAlias" → "--from")
+    /// Maps property name → CLI flag (e.g., "Alias" → "--alias")
     /// </summary>
     IReadOnlyDictionary<string, string> PropertyToFlag { get; }
 }

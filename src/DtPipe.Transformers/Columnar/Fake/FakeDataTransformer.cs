@@ -191,18 +191,8 @@ public sealed partial class FakeDataTransformer : BaseColumnarTransformer, IRequ
 			outputColumns.Add(new PipeColumnInfo(virtualColName, colType, true));
 		}
 
-		_outputSchema = BuildArrowSchema(outputColumns);
+		_outputSchema = ArrowSchemaFactory.Create(outputColumns);
 		return new ValueTask<IReadOnlyList<PipeColumnInfo>>(outputColumns);
-	}
-
-	private Schema BuildArrowSchema(IReadOnlyList<PipeColumnInfo> columns)
-	{
-		var builder = new Schema.Builder();
-		foreach (var col in columns)
-		{
-			builder.Field(new Field(col.Name, ArrowTypeMapper.GetArrowType(col.ClrType), true));
-		}
-		return builder.Build();
 	}
 
 	private Func<Faker, object?> BuildGenerator(string fakerPath, string colName)

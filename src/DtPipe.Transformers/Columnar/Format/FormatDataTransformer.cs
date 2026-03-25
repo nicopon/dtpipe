@@ -133,7 +133,7 @@ public sealed partial class FormatDataTransformer : BaseColumnarTransformer, IRe
 			newColumns.Add(new PipeColumnInfo(name, typeof(string), true));
 		}
 
-		_outputSchema = BuildArrowSchema(newColumns);
+		_outputSchema = ArrowSchemaFactory.Create(newColumns);
 		return new ValueTask<IReadOnlyList<PipeColumnInfo>>(newColumns);
 	}
 
@@ -211,18 +211,6 @@ public sealed partial class FormatDataTransformer : BaseColumnarTransformer, IRe
 
 		return new ValueTask<RecordBatch?>(new RecordBatch(_outputSchema, resultArrays, rowCount));
 	}
-
-	private Schema BuildArrowSchema(IReadOnlyList<PipeColumnInfo> columns)
-	{
-		var builder = new Schema.Builder();
-		foreach (var col in columns)
-		{
-			builder.Field(new Field(col.Name, ArrowTypeMapper.GetArrowType(col.ClrType), col.IsNullable));
-		}
-		return builder.Build();
-	}
-
-	private static IArrowType GetArrowType(Type type) => ArrowTypeMapper.GetArrowType(type);
 
 	public override object?[]? Transform(object?[] row)
 	{

@@ -42,6 +42,12 @@ public static class ArrowTypeMapper
 
         if (underlyingType == typeof(int)) return Int32Type.Default;
         if (underlyingType == typeof(long)) return Int64Type.Default;
+        if (underlyingType == typeof(sbyte)) return Int8Type.Default;
+        if (underlyingType == typeof(short)) return Int16Type.Default;
+        if (underlyingType == typeof(byte)) return UInt8Type.Default;
+        if (underlyingType == typeof(ushort)) return UInt16Type.Default;
+        if (underlyingType == typeof(uint)) return UInt32Type.Default;
+        if (underlyingType == typeof(ulong)) return UInt64Type.Default;
         if (underlyingType == typeof(double)) return DoubleType.Default;
         if (underlyingType == typeof(float)) return FloatType.Default;
         if (underlyingType == typeof(bool)) return BooleanType.Default;
@@ -185,17 +191,25 @@ public static class ArrowTypeMapper
         switch (builder)
         {
             case StringArray.Builder b: b.Append(value.ToString()); break;
+            case Int8Array.Builder b: b.Append(Convert.ToSByte(value)); break;
+            case Int16Array.Builder b: b.Append(Convert.ToInt16(value)); break;
             case Int32Array.Builder b: b.Append(Convert.ToInt32(value)); break;
             case Int64Array.Builder b: b.Append(Convert.ToInt64(value)); break;
+            case UInt8Array.Builder b: b.Append(Convert.ToByte(value)); break;
+            case UInt16Array.Builder b: b.Append(Convert.ToUInt16(value)); break;
+            case UInt32Array.Builder b: b.Append(Convert.ToUInt32(value)); break;
+            case UInt64Array.Builder b: b.Append(Convert.ToUInt64(value)); break;
             case DoubleArray.Builder b: b.Append(Convert.ToDouble(value)); break;
             case FloatArray.Builder b: b.Append(Convert.ToSingle(value)); break;
             case BooleanArray.Builder b: b.Append(Convert.ToBoolean(value)); break;
             case Decimal128Array.Builder b: b.Append(Convert.ToDecimal(value)); break;
+            case Decimal256Array.Builder b: b.Append(Convert.ToDecimal(value)); break;
             case BinaryArray.Builder b:
                 if (value is byte[] bytes) b.Append((System.Collections.Generic.IEnumerable<byte>)bytes);
                 else if (value is Guid guid) b.Append((System.Collections.Generic.IEnumerable<byte>)guid.ToByteArray());
                 else b.AppendNull();
                 break;
+            case Date32Array.Builder b: b.Append(Convert.ToDateTime(value)); break;
             case Date64Array.Builder b: b.Append(Convert.ToDateTime(value)); break;
             case TimestampArray.Builder b:
                 if (value is DateTimeOffset dto) b.Append(dto);

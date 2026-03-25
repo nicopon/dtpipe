@@ -25,7 +25,7 @@ public class DagOrchestrator : IDagOrchestrator
     private readonly ILogger<DagOrchestrator> _logger;
     private readonly IMemoryChannelRegistry _channelRegistry;
     private readonly List<IStreamReaderFactory> _readerFactories;
-    private static readonly object _schemaLock = new();
+    private readonly object _schemaLock = new();
     private static readonly Schema _emptySchema = new Schema(System.Array.Empty<Field>(), null);
 
     // Constants for DAG execution
@@ -317,13 +317,13 @@ public class DagOrchestrator : IDagOrchestrator
         catch (OperationCanceledException)
         {
             _logger.LogWarning("DAG execution was canceled.");
-            OnLogEvent?.Invoke("[bold yellow]⚠ DAG execution was canceled.[/]");
+            OnLogEvent?.Invoke("⚠ DAG execution was canceled.");
             return 1;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Unexpected error during DAG orchestration.");
-            OnLogEvent?.Invoke($"[bold red]✖ Unexpected error during DAG orchestration: {ex.Message.Replace("[", "[[").Replace("]", "]]")}[/]");
+            OnLogEvent?.Invoke($"✖ Unexpected error during DAG orchestration: {ex.Message}");
             return 1;
         }
     }
@@ -349,39 +349,37 @@ public class DagOrchestrator : IDagOrchestrator
 
         try
         {
-            var argsList = branch.Arguments.ToList();
-
-            // For fan-out branches (not stream transformers): inject -i to route input from the channel.
+            // Build the channel injection plan — communicate routing to the CLI layer without
+            // embedding CLI flag syntax (-i, -o, mem:, arrow-memory:, --no-stats) in Core.
+            (ChannelMode Mode, string Alias)? inputChannel = null;
             if (!branch.HasStreamTransformer && string.IsNullOrEmpty(branch.Input) && !string.IsNullOrEmpty(resolvedFromAlias))
             {
                 var logicalAlias = branch.StreamingAliases.Count > 0 ? branch.StreamingAliases[0] : resolvedFromAlias;
-                var prefix = GetRequiredChannelMode(dag, logicalAlias) == ChannelMode.Arrow
-                    ? "arrow-memory"
-                    : "mem";
-                argsList.Insert(0, $"{prefix}:{resolvedFromAlias}");
-                argsList.Insert(0, "-i");
+                inputChannel = (GetRequiredChannelMode(dag, logicalAlias), resolvedFromAlias);
             }
 
+            (ChannelMode Mode, string Alias)? outputChannel = null;
+            bool suppressStats = false;
             if (string.IsNullOrEmpty(branch.Output))
             {
-                var mode = GetRequiredChannelMode(dag, branch.Alias);
-                argsList.Add("-o");
-                argsList.Add($"{(mode == ChannelMode.Arrow ? "arrow-memory" : "mem")}:{branch.Alias}");
-
-                if (!argsList.Contains("--no-stats", StringComparer.OrdinalIgnoreCase))
-                    argsList.Add("--no-stats");
+                outputChannel = (GetRequiredChannelMode(dag, branch.Alias), branch.Alias);
+                suppressStats = true;
             }
 
-            var updatedBranch = branch with { Arguments = argsList.ToArray() };
+            var plan = (inputChannel.HasValue || outputChannel.HasValue)
+                ? new ChannelInjectionPlan { InputChannel = inputChannel, OutputChannel = outputChannel, SuppressStats = suppressStats }
+                : null;
+
+            var enrichedCtx = plan != null ? ctx with { ChannelInjection = plan } : ctx;
 
             try
             {
-                int exitCode = await branchExecutor(updatedBranch, ctx, ct);
+                int exitCode = await branchExecutor(branch, enrichedCtx, ct);
 
                 if (exitCode != 0)
                 {
                     _logger.LogError("Branch '{Alias}' failed with exit code {ExitCode}.", branch.Alias, exitCode);
-                    OnLogEvent?.Invoke($"  [red]✖[/] Branch '{branch.Alias}' failed with exit code {exitCode}.");
+                    OnLogEvent?.Invoke($"  ✖ Branch '{branch.Alias}' failed with exit code {exitCode}.");
                     return exitCode;
                 }
 
@@ -410,59 +408,52 @@ public class DagOrchestrator : IDagOrchestrator
 
     private Task StartNativeBroadcastAsync(string sourceAlias, IReadOnlyList<string> subAliases, CancellationToken ct)
     {
-        var sourceTuple = _channelRegistry.GetChannel(sourceAlias)
-            ?? throw new InvalidOperationException($"Broadcast: source channel '{sourceAlias}' not found in registry.");
-
-        var subChannels = subAliases
-            .Select(s => _channelRegistry.GetChannel(s)?.Channel ?? throw new InvalidOperationException($"Broadcast: sub channel '{s}' not found."))
+        var source = (_channelRegistry.GetChannel(sourceAlias)
+            ?? throw new InvalidOperationException($"Broadcast: source channel '{sourceAlias}' not found in registry.")).Channel.Reader;
+        var targets = subAliases
+            .Select(s => (_channelRegistry.GetChannel(s)?.Channel ?? throw new InvalidOperationException($"Broadcast: sub channel '{s}' not found.")).Writer)
             .ToList();
-
         _logger.LogInformation("Starting broadcast multiplexer for '{SourceAlias}' → [{Subs}]",
             sourceAlias, string.Join(", ", subAliases));
-
-        return Task.Run(async () =>
-        {
-            try
-            {
-                await foreach (var batch in sourceTuple.Channel.Reader.ReadAllAsync(ct))
-                    foreach (var sub in subChannels)
-                        await sub.Writer.WriteAsync(batch, ct);
-            }
-            finally
-            {
-                foreach (var sub in subChannels) sub.Writer.TryComplete();
-                _logger.LogInformation("Broadcast multiplexer for '{SourceAlias}' completed.", sourceAlias);
-            }
-        }, ct);
+        return BroadcastAsync(source, targets, transform: null, sourceAlias, _logger, ct);
     }
 
     private Task StartArrowBroadcastAsync(string sourceAlias, IReadOnlyList<string> subAliases, CancellationToken ct)
     {
-        var sourceTuple = _channelRegistry.GetArrowChannel(sourceAlias)
-            ?? throw new InvalidOperationException($"Arrow Broadcast: source channel '{sourceAlias}' not found in registry.");
-
-        var subChannels = subAliases
-            .Select(s => _channelRegistry.GetArrowChannel(s)?.Channel ?? throw new InvalidOperationException($"Arrow Broadcast: sub channel '{s}' not found."))
+        var source = (_channelRegistry.GetArrowChannel(sourceAlias)
+            ?? throw new InvalidOperationException($"Arrow Broadcast: source channel '{sourceAlias}' not found in registry.")).Channel.Reader;
+        var targets = subAliases
+            .Select(s => (_channelRegistry.GetArrowChannel(s)?.Channel ?? throw new InvalidOperationException($"Arrow Broadcast: sub channel '{s}' not found.")).Writer)
             .ToList();
-
-        _logger.LogInformation("Starting Arrow broadcast multiplexer for '{SourceAlias}' → [{Subs}]",
+        _logger.LogInformation("Starting broadcast multiplexer for '{SourceAlias}' → [{Subs}]",
             sourceAlias, string.Join(", ", subAliases));
+        return BroadcastAsync(source, targets, transform: b => b.Clone(), sourceAlias, _logger, ct);
+    }
 
-        return Task.Run(async () =>
+    private static Task BroadcastAsync<T>(
+        ChannelReader<T> source,
+        IReadOnlyList<ChannelWriter<T>> targets,
+        Func<T, T>? transform,
+        string sourceAlias,
+        ILogger logger,
+        CancellationToken ct)
+        => Task.Run(async () =>
         {
             try
             {
-                await foreach (var batch in sourceTuple.Channel.Reader.ReadAllAsync(ct))
-                    foreach (var sub in subChannels)
-                        await sub.Writer.WriteAsync(batch.Clone(), ct);
+                await foreach (var item in source.ReadAllAsync(ct))
+                {
+                    var toWrite = transform != null ? transform(item) : item;
+                    foreach (var t in targets)
+                        await t.WriteAsync(toWrite, ct);
+                }
             }
             finally
             {
-                foreach (var sub in subChannels) sub.Writer.TryComplete();
-                _logger.LogInformation("Arrow Broadcast multiplexer for '{SourceAlias}' completed.", sourceAlias);
+                foreach (var t in targets) t.TryComplete();
+                logger.LogInformation("Broadcast multiplexer for '{Alias}' completed.", sourceAlias);
             }
         }, ct);
-    }
 
     /// <summary>
     /// Determines whether a branch's output channel must use Arrow (RecordBatch) or Native (object[]) protocol.

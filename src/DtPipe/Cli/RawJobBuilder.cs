@@ -60,17 +60,17 @@ public static class RawJobBuilder
 
 			var sql = parseResult.GetValue(opts.Sql)?.FirstOrDefault();
 			var fromAliases = parseResult.GetValue(opts.From);
-			var mergeAliases = parseResult.GetValue(opts.Merge);
+			bool hasMerge = parseResult.GetValue(opts.Merge);
 			var refAliases = parseResult.GetValue(opts.Ref);
 
 			// DEBUG
 			if (Environment.GetEnvironmentVariable("DEBUG") == "1")
 			{
-				Console.Error.WriteLine($"[DEBUG] input: {input}, sql: {sql}, from: {fromAliases?.Length ?? 0}, merge: {mergeAliases?.Length ?? 0}, ref: {refAliases?.Length ?? 0}");
+				Console.Error.WriteLine($"[DEBUG] input: {input}, sql: {sql}, from: {fromAliases?.Length ?? 0}, merge: {(hasMerge ? 1 : 0)}, ref: {refAliases?.Length ?? 0}");
 			}
 
 			bool hasSource = (fromAliases != null && fromAliases.Length > 0) ||
-							 (mergeAliases != null && mergeAliases.Length > 0) ||
+							 hasMerge ||
 							 (refAliases != null && refAliases.Length > 0);
 			
 			if (string.IsNullOrWhiteSpace(input) && string.IsNullOrWhiteSpace(sql) && !hasSource)

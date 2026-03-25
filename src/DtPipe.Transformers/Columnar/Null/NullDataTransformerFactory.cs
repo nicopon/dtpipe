@@ -5,9 +5,7 @@ using DtPipe.Core.Pipelines;
 
 namespace DtPipe.Transformers.Columnar.Null;
 
-public interface INullDataTransformerFactory : IDataTransformerFactory { }
-
-public class NullDataTransformerFactory : INullDataTransformerFactory
+public class NullDataTransformerFactory : IDataTransformerFactory
 {
 	private readonly OptionsRegistry _registry;
 

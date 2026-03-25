@@ -33,7 +33,7 @@ echo -e "${YELLOW}Step 3: Initializing file-based sources (skipping existing fil
 if [ ! -f "$ARTIFACTS_DIR/test_data.csv" ]; then
     echo "Generating test_data.csv..."
     $DTPIPE -i "generate:1000" \
-      --fake "Id:random.uuid" \
+      --fake "Id:random.guid" \
       --fake "FirstName:name.firstName" \
       --fake "LastName:name.lastName" \
       --fake "Email:internet.email" \
@@ -50,7 +50,7 @@ fi
 if [ ! -f "$ARTIFACTS_DIR/test_data.parquet" ]; then
     echo "Generating test_data.parquet..."
     $DTPIPE -i "generate:1000" \
-      --fake "Id:random.uuid" \
+      --fake "Id:random.guid" \
       --fake "Name:name.fullName" \
       --fake "Category:commerce.department" \
       --fake "Price:commerce.price" \
@@ -64,7 +64,7 @@ fi
 if [ ! -f "$ARTIFACTS_DIR/test_data_big.parquet" ]; then
     echo "Generating test_data_big.parquet (1,000,000 rows)..."
     $DTPIPE -i "generate:1000000" \
-      --fake "Id:random.uuid" \
+      --fake "Id:random.guid" \
       --fake "Timestamp:date.past" \
       --fake "Value:random.number" \
       --drop "GenerateIndex" \
@@ -77,7 +77,7 @@ fi
 if [ ! -f "$ARTIFACTS_DIR/test_data.arrow" ]; then
     echo "Generating test_data.arrow..."
     $DTPIPE -i "generate:1000" \
-      --fake "Id:random.uuid" \
+      --fake "Id:random.guid" \
       --fake "Timestamp:date.recent" \
       --fake "Level:lorem.word" \
       --fake "Message:lorem.sentence" \
@@ -93,7 +93,7 @@ echo -e "${YELLOW}Step 4: Initializing database sources...${NC}"
 if [ ! -f "$ARTIFACTS_DIR/test_data.duckdb" ]; then
     echo "Generating test_data.duckdb..."
     $DTPIPE -i "generate:1000" \
-      --fake "Id:random.uuid" \
+      --fake "Id:random.guid" \
       --fake "City:address.city" \
       --fake "Country:address.country" \
       --drop "GenerateIndex" \
@@ -105,7 +105,7 @@ fi
 # 5. PostgreSQL (always runs: Recreate is idempotent, no local file to check)
 echo "Initializing PostgreSQL users_test..."
 $DTPIPE -i "generate:1000" \
-  --fake "id:random.uuid" \
+  --fake "id:random.guid" \
   --fake "username:internet.userName" \
   --fake "last_login:date.past" \
   --drop "GenerateIndex" \
@@ -115,7 +115,7 @@ $DTPIPE -i "generate:1000" \
 # 6. SQL Server (always runs)
 echo "Initializing SQL Server users_test..."
 $DTPIPE -i "generate:1000" \
-  --fake "id:random.uuid" \
+  --fake "id:random.guid" \
   --fake "display_name:name.fullName" \
   --fake "credit_card:finance.creditCardNumber" \
   --drop "GenerateIndex" \
@@ -125,7 +125,7 @@ $DTPIPE -i "generate:1000" \
 # 7. Oracle (always runs)
 echo "Initializing Oracle USERS_TEST_DATA..."
 $DTPIPE -i "generate:1000" \
-  --fake "ID:random.uuid" \
+  --fake "ID:random.guid" \
   --fake "FULL_NAME:name.fullName" \
   --fake "JOB_TITLE:name.jobTitle" \
   --drop "GenerateIndex" \

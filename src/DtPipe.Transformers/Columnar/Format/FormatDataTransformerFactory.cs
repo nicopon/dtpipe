@@ -4,9 +4,7 @@ using DtPipe.Core.Pipelines;
 
 namespace DtPipe.Transformers.Columnar.Format;
 
-public interface IFormatDataTransformerFactory : IDataTransformerFactory { }
-
-public class FormatDataTransformerFactory(OptionsRegistry registry) : IFormatDataTransformerFactory
+public class FormatDataTransformerFactory(OptionsRegistry registry) : IDataTransformerFactory
 {
 	private readonly OptionsRegistry _registry = registry;
 

@@ -4,14 +4,7 @@ using DtPipe.Core.Pipelines;
 
 namespace DtPipe.Transformers.Columnar.Fake;
 
-/// <summary>
-/// Factory for creating fake data transformers.
-/// </summary>
-public interface IFakeDataTransformerFactory : IDataTransformerFactory
-{
-}
-
-public class FakeDataTransformerFactory : IFakeDataTransformerFactory
+public class FakeDataTransformerFactory : IDataTransformerFactory
 {
 	private readonly OptionsRegistry _registry;
 

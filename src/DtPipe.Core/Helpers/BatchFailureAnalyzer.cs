@@ -93,9 +93,5 @@ public static class BatchFailureAnalyzer
 	}
 
 	private static bool IsFuzzyMatch(string name1, string name2)
-	{
-		if (string.Equals(name1, name2, StringComparison.OrdinalIgnoreCase)) return true;
-		string Normalize(string s) => s.Replace("_", "").Replace(" ", "").ToLowerInvariant();
-		return string.Equals(Normalize(name1), Normalize(name2), StringComparison.Ordinal);
-	}
+		=> ColumnHelper.IsFuzzyMatch(name1, name2);
 }

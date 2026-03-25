@@ -15,7 +15,6 @@ public static class JobFileWriter
 	private static readonly ISerializer Serializer = new SerializerBuilder()
 		.WithNamingConvention(HyphenatedNamingConvention.Instance)
 		.ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull | DefaultValuesHandling.OmitDefaults)
-		.WithAttributeOverride<JobDefinition>(j => j.DisplayName, new YamlIgnoreAttribute())
 		.WithAttributeOverride<JobDefinition>(j => j.NoStats, new YamlIgnoreAttribute())
 		.WithAttributeOverride<JobDefinition>(j => j.ProviderOptions, new YamlIgnoreAttribute())
 		.WithAttributeOverride<TransformerConfig>(t => t.Mask, new YamlIgnoreAttribute())

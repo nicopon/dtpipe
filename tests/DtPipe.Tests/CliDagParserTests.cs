@@ -1,7 +1,7 @@
 using DtPipe.Cli.Dag;
 using Xunit;
 
-namespace DtPipe.Tests;
+namespace DtPipe.Tests.Unit.Cli;
 
 public class CliDagParserTests
 {

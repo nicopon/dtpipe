@@ -49,6 +49,16 @@ public class LinearPipelineService
     {
         var exportService = _serviceProvider.GetRequiredService<ExportService>();
 
+        // Consume channel routing provided by DagOrchestrator
+        if (ctx?.ChannelInjection is { } plan)
+        {
+            job = job with {
+                Input   = plan.InputChannel.HasValue  ? ToChannelSpec(plan.InputChannel.Value)  : job.Input,
+                Output  = plan.OutputChannel.HasValue ? ToChannelSpec(plan.OutputChannel.Value) : job.Output,
+                NoStats = job.NoStats || plan.SuppressStats
+            };
+        }
+
         IStreamReaderFactory readerFactory;
         string cleanedInput;
 
@@ -197,6 +207,9 @@ public class LinearPipelineService
             return 1;
         }
     }
+
+    private static string ToChannelSpec((DtPipe.Core.Abstractions.Dag.ChannelMode Mode, string Alias) channel)
+        => $"{(channel.Mode == DtPipe.Core.Abstractions.Dag.ChannelMode.Arrow ? "arrow-memory" : "mem")}:{channel.Alias}";
 
     private static (T Factory, string CleanedString) ResolveFactory<T>(IEnumerable<T> factories, string rawString, string typeName) where T : IDataFactory
     {

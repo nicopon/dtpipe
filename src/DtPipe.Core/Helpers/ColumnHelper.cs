@@ -7,6 +7,16 @@ namespace DtPipe.Core.Helpers;
 /// </summary>
 public static class ColumnHelper
 {
+    /// <summary>
+    /// Returns <see langword="true"/> if two column names are equal ignoring case, underscores, and spaces.
+    /// </summary>
+    public static bool IsFuzzyMatch(string name1, string name2)
+    {
+        if (string.Equals(name1, name2, StringComparison.OrdinalIgnoreCase)) return true;
+        static string Normalize(string s) => s.Replace("_", "").Replace(" ", "").ToLowerInvariant();
+        return string.Equals(Normalize(name1), Normalize(name2), StringComparison.Ordinal);
+    }
+
 	/// <summary>
 	/// Resolves a key column name case-insensitively against available columns.
 	/// </summary>

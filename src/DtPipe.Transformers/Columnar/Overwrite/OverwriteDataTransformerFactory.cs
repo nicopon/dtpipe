@@ -4,9 +4,7 @@ using DtPipe.Core.Pipelines;
 
 namespace DtPipe.Transformers.Columnar.Overwrite;
 
-public interface IOverwriteDataTransformerFactory : IDataTransformerFactory { }
-
-public class OverwriteDataTransformerFactory : IOverwriteDataTransformerFactory
+public class OverwriteDataTransformerFactory : IDataTransformerFactory
 {
 	private readonly OptionsRegistry _registry;
 

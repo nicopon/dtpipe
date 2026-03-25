@@ -43,6 +43,6 @@ public sealed class CliJobOptions
     public required Option<int[]> Throttle { get; init; }
     public required Option<bool> IgnoreNulls { get; init; }
     public required Option<string[]> From { get; init; }
-    public required Option<string[]> Merge { get; init; }
+    public required Option<bool> Merge { get; init; }
     public required Option<string[]> Ref { get; init; }
 }
