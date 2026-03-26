@@ -321,11 +321,43 @@ public class JobService
 
 			if (dagDefinition.IsDag)
 			{
-				// Guard: --dry-run is not supported for multi-branch DAG pipelines
+				// --dry-run on a DAG: run on a user-selected source branch
 				if (RawJobBuilder.ParseDryRunFromArgs(rawArgs) > 0)
 				{
-					_console.MarkupLine("[yellow]⚠ --dry-run is not supported for multi-branch DAG pipelines.[/]");
-					_console.MarkupLine("[dim]Tip: test each source individually with --dry-run on a single-branch command.[/]");
+					var sourceBranches = dagDefinition.Branches
+						.Where(b => !string.IsNullOrEmpty(b.Input))
+						.ToList();
+
+					if (sourceBranches.Count == 0)
+					{
+						_console.MarkupLine("[yellow]⚠ No source branches available for dry-run.[/]");
+						return;
+					}
+
+					DtPipe.Core.Pipelines.Dag.BranchDefinition selected;
+					if (sourceBranches.Count == 1 || !_console.Profile.Capabilities.Interactive || Console.IsInputRedirected)
+					{
+						selected = sourceBranches[0];
+						_console.MarkupLine($"[grey]Running dry-run on branch '[cyan]{selected.Alias}[/]'...[/]");
+					}
+					else
+					{
+						selected = _console.Prompt(
+							new SelectionPrompt<DtPipe.Core.Pipelines.Dag.BranchDefinition>()
+								.Title("[grey]Select a branch to dry-run:[/]")
+								.UseConverter(b =>
+								{
+									var input = b.Input ?? "";
+									var colonIdx = input.IndexOf(':');
+									var provider = colonIdx > 0 ? input[..colonIdx] : input;
+									return $"[cyan]{Markup.Escape(b.Alias)}[/]  [dim]({Markup.Escape(provider)})[/]";
+								})
+								.AddChoices(sourceBranches));
+					}
+
+					var branchPr = rootCommand.Parse(selected.Arguments);
+					var dryRunExitCode = await executePipeline(branchPr, ct, selected.Arguments, selected.PreParsedJob, selected.Alias, null);
+					if (dryRunExitCode != 0) Environment.ExitCode = dryRunExitCode;
 					return;
 				}
 
