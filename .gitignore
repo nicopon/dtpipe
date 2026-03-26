@@ -65,3 +65,4 @@ dist/release/.env
 
 # Experiments
 experiments/*
+.claude/
