@@ -24,6 +24,11 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/DtPipe.Processors.DataFusion
+
       - name: Build DataFusion Bridge
         run: ./build_datafusion_bridge.sh
 
@@ -53,7 +58,8 @@ jobs:
           
           - platform: macos-x64
             rid: osx-x64
-            runner: macos-13
+            runner: macos-latest
+            rust_target: x86_64-apple-darwin
             artifact: dtpipe-macos-x64
           
           - platform: macos-arm64
@@ -69,6 +75,7 @@ jobs:
           - platform: windows-arm64
             rid: win-arm64
             runner: windows-latest
+            rust_target: aarch64-pc-windows-msvc
             artifact: dtpipe-windows-arm64.exe
 
     steps:
@@ -83,17 +90,24 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-pc-windows-msvc
+          targets: ${{ matrix.rust_target || '' }}
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/DtPipe.Processors.DataFusion
 
       - name: Build DataFusion Bridge (Unix)
         if: "!contains(matrix.platform, 'windows')"
+        env:
+          RUST_TARGET: ${{ matrix.rust_target || '' }}
         run: ./build_datafusion_bridge.sh
 
       - name: Build DataFusion Bridge (Windows)
         if: contains(matrix.platform, 'windows')
         run: |
-          if ("${{ matrix.platform }}" -eq "windows-arm64") {
-              $env:RUST_TARGET="aarch64-pc-windows-msvc"
+          if ("${{ matrix.rust_target }}" -ne "") {
+              $env:RUST_TARGET="${{ matrix.rust_target }}"
           }
           ./build_datafusion_bridge.ps1
 

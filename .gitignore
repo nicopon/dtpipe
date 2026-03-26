@@ -62,3 +62,6 @@ src/DtPipe.Processors/DataFusion/*.so
 src/DtPipe.Processors/DataFusion/*.dll
 src/DtPipe.Processors/DataFusion/*.dSYM/
 dist/release/.env
+
+# Experiments
+experiments/*

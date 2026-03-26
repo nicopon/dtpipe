@@ -51,6 +51,11 @@ jobs:
         with:
           targets: aarch64-pc-windows-msvc
 
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/DtPipe.Processors.DataFusion
+
       - name: Build DataFusion Bridge (Unix)
         if: "!contains(matrix.platform, 'windows')"
         run: ./build_datafusion_bridge.sh
@@ -168,6 +173,11 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/DtPipe.Processors.DataFusion
 
       - name: Build DataFusion Bridge
         run: ./build_datafusion_bridge.sh
