@@ -7,6 +7,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   test:
     name: Run Tests
@@ -123,19 +126,6 @@ jobs:
             -p:DebugType=none \
             -p:DebugSymbols=false \
             -o ./dist/release
-
-      - name: Copy DataFusion native lib (Unix)
-        if: "!contains(matrix.platform, 'windows')"
-        run: |
-          for lib in src/DtPipe.Processors/DataFusion/libdtpipe_datafusion.dylib src/DtPipe.Processors/DataFusion/libdtpipe_datafusion.so; do
-            [ -f "$lib" ] && cp "$lib" ./dist/release/ || true
-          done
-
-      - name: Copy DataFusion native lib (Windows)
-        if: contains(matrix.platform, 'windows')
-        shell: bash
-        run: |
-          [ -f "src/DtPipe.Processors/DataFusion/dtpipe_datafusion.dll" ] && cp "src/DtPipe.Processors/DataFusion/dtpipe_datafusion.dll" ./dist/release/ || true
 
       - name: Prepare artifact (Unix)
         if: "!contains(matrix.platform, 'windows')"
