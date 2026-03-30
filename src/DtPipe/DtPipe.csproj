@@ -16,6 +16,8 @@
     <!-- Single-file: embed native libraries (.dylib/.so/.dll) inside the bundle -->
     <!-- They are extracted to a temp dir at startup and resolved via DllImport -->
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!-- Suppress XML documentation files from publish output (only needed for NuGet, not the CLI binary) -->
+    <PublishDocumentationFiles>false</PublishDocumentationFiles>
 
     <!-- Release optimizations -->
     <TieredCompilation>true</TieredCompilation>
