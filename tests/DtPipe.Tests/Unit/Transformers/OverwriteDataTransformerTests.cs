@@ -1,5 +1,5 @@
 using DtPipe.Core.Models;
-using DtPipe.Transformers.Columnar.Overwrite;
+using DtPipe.Transformers.Arrow.Overwrite;
 using FluentAssertions;
 using Xunit;
 

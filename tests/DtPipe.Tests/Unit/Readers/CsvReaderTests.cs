@@ -102,6 +102,81 @@ public class CsvReaderTests : IAsyncLifetime
 	}
 
 	[Fact]
+	public async Task CsvReader_ColumnTypes_ShouldParseUuidAndInt()
+	{
+		// Arrange: CSV with UUID-formatted Id and numeric Score
+		var uuidPath = Path.Combine(Path.GetTempPath(), $"test_uuid_{Guid.NewGuid()}.csv");
+		var guid1 = Guid.NewGuid();
+		var guid2 = Guid.NewGuid();
+		await File.WriteAllTextAsync(uuidPath, $"Id,Name,Score\n{guid1},Alice,42\n{guid2},Bob,99");
+
+		try
+		{
+			var options = new CsvReaderOptions
+			{
+				Separator = ",",
+				HasHeader = true,
+				ColumnTypes = "Id:uuid,Score:int32"
+			};
+			var reader = new CsvStreamReader(uuidPath, options);
+
+			// Act
+			await reader.OpenAsync();
+			var columns = reader.Columns!;
+			var rows = new List<object?[]>();
+			await foreach (var batch in reader.ReadBatchesAsync(100))
+				foreach (var row in batch.ToArray())
+					rows.Add(row);
+			await reader.DisposeAsync();
+
+			// Assert: schema reflects declared types
+			columns.Should().HaveCount(3);
+			columns[0].ClrType.Should().Be(typeof(Guid));
+			columns[1].ClrType.Should().Be(typeof(string));
+			columns[2].ClrType.Should().Be(typeof(int));
+
+			// Assert: row values are parsed
+			rows.Should().HaveCount(2);
+			rows[0][0].Should().BeOfType<Guid>().Which.Should().Be(guid1);
+			rows[0][2].Should().BeOfType<int>().Which.Should().Be(42);
+			rows[1][0].Should().BeOfType<Guid>().Which.Should().Be(guid2);
+			rows[1][2].Should().BeOfType<int>().Which.Should().Be(99);
+		}
+		finally
+		{
+			if (File.Exists(uuidPath)) File.Delete(uuidPath);
+		}
+	}
+
+	[Fact]
+	public async Task CsvReader_InferColumnTypes_ShouldSuggestUuid()
+	{
+		// Arrange: CSV with standard UUID strings
+		var uuidPath = Path.Combine(Path.GetTempPath(), $"test_infer_{Guid.NewGuid()}.csv");
+		var lines = Enumerable.Range(0, 10).Select(i => $"{Guid.NewGuid()},value{i}");
+		await File.WriteAllTextAsync(uuidPath, "Id,Name\n" + string.Join("\n", lines));
+
+		try
+		{
+			var options = new CsvReaderOptions { Separator = ",", HasHeader = true };
+			var reader = new CsvStreamReader(uuidPath, options);
+			await reader.OpenAsync();
+
+			// Act
+			var suggestions = await reader.InferColumnTypesAsync(10);
+			await reader.DisposeAsync();
+
+			// Assert
+			suggestions.Should().ContainKey("Id");
+			suggestions["Id"].Should().Be("uuid");
+		}
+		finally
+		{
+			if (File.Exists(uuidPath)) File.Delete(uuidPath);
+		}
+	}
+
+	[Fact]
 	public void CsvReaderFactory_ShouldDetectCsvFiles()
 	{
 		var registry = new OptionsRegistry();

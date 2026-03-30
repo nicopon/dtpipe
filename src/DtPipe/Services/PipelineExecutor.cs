@@ -9,7 +9,6 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
-using DtPipe.Core.Resilience;
 using Microsoft.Extensions.Logging;
 
 namespace DtPipe.Services;
@@ -57,7 +56,6 @@ public sealed class PipelineExecutor
         IReadOnlyList<PipeColumnInfo> columns,
         PipelineOptions options,
         IExportProgress progress,
-        RetryPolicy retryPolicy,
         CancellationTokenSource linkedCts,
         CancellationToken ct)
     {
@@ -79,11 +77,19 @@ public sealed class PipelineExecutor
                 }
                 await DirectColumnarTransferAsync(source, cw, options.Limit, progress, ct);
             }
+            else if (reader is IColumnarStreamReader crForRows && writer is not IColumnarDataWriter)
+            {
+                // Columnar reader → row-mode writer: bridge via existing infrastructure.
+                // Do NOT call ReadBatchesAsync — route through ReadRecordBatchesAsync + bridge.
+                var bridgeFac = _columnarToRowBridgeFactories.FirstOrDefault()
+                    ?? throw new InvalidOperationException("No ColumnarToRowBridgeFactory");
+                var rowSource = BridgeColumnarToRowsAsync(crForRows.ReadRecordBatchesAsync(ct), bridgeFac, ct);
+                await DirectRowTransferFromRowsAsync(rowSource, writer, options.BatchSize, options.Limit, options.SamplingRate, options.SamplingSeed, progress, ct);
+            }
             else if (writer is not IColumnarDataWriter)
             {
-                // Row-mode sink: use reader's row path directly, even if it is also columnar-capable.
-                // Avoids a RecordBatch→rows bridge that would otherwise be inserted for no gain.
-                await DirectRowTransferAsync(reader, writer, options.BatchSize, options.Limit, options.SamplingRate, options.SamplingSeed, progress, retryPolicy, ct);
+                // Row-only reader → row-mode writer: existing direct path.
+                await DirectRowTransferAsync(reader, writer, options.BatchSize, options.Limit, options.SamplingRate, options.SamplingSeed, progress, ct);
             }
             else
             {
@@ -154,7 +160,7 @@ public sealed class PipelineExecutor
                     var bridgeFac = _bridgeFactories.FirstOrDefault() ?? throw new InvalidOperationException("No RowToColumnarBridgeFactory");
                     currentColumnarSource = BridgeRowsToColumnarAsync(currentRowSource, bridgeFac, columns, options.BatchSize, ct);
                 }
-                await ConsumeColumnarStreamAsync(currentColumnarSource, columnarWriter, progress, retryPolicy, ct);
+                await ConsumeColumnarStreamAsync(currentColumnarSource, columnarWriter, progress, ct);
             }
             else
             {
@@ -163,7 +169,7 @@ public sealed class PipelineExecutor
                     var bridgeFac = _columnarToRowBridgeFactories.FirstOrDefault() ?? throw new InvalidOperationException("No ColumnarToRowBridgeFactory");
                     currentRowSource = BridgeColumnarToRowsAsync(currentColumnarSource, bridgeFac, ct);
                 }
-                await ConsumeRowStreamAsync(currentRowSource, writer, options.BatchSize, progress, retryPolicy, ct);
+                await ConsumeRowStreamAsync(currentRowSource, writer, options.BatchSize, progress, ct);
             }
         }
     }
@@ -375,12 +381,11 @@ public sealed class PipelineExecutor
         IAsyncEnumerable<RecordBatch> source,
         IColumnarDataWriter writer,
         IExportProgress progress,
-        RetryPolicy retry,
         CancellationToken ct)
     {
         await foreach (var batch in source.WithCancellation(ct))
         {
-            await retry.ExecuteValueAsync(() => writer.WriteRecordBatchAsync(batch, ct), ct);
+            await writer.WriteRecordBatchAsync(batch, ct);
             progress.ReportWrite(batch.Length);
         }
     }
@@ -390,7 +395,6 @@ public sealed class PipelineExecutor
         IDataWriter writer,
         int batchSize,
         IExportProgress progress,
-        RetryPolicy retry,
         CancellationToken ct)
     {
         var buffer = new List<object?[]>(batchSize);
@@ -400,7 +404,7 @@ public sealed class PipelineExecutor
             if (buffer.Count >= batchSize)
             {
                 var batch = buffer.ToArray();
-                await retry.ExecuteValueAsync(() => writer.WriteBatchAsync(batch, ct), ct);
+                await writer.WriteBatchAsync(batch, ct);
                 progress.ReportWrite(batch.Length);
                 buffer.Clear();
             }
@@ -408,7 +412,7 @@ public sealed class PipelineExecutor
         if (buffer.Count > 0)
         {
             var batch = buffer.ToArray();
-            await retry.ExecuteValueAsync(() => writer.WriteBatchAsync(batch, ct), ct);
+            await writer.WriteBatchAsync(batch, ct);
             progress.ReportWrite(batch.Length);
         }
     }
@@ -421,7 +425,6 @@ public sealed class PipelineExecutor
         double samplingRate,
         int? samplingSeed,
         IExportProgress progress,
-        RetryPolicy retry,
         CancellationToken ct)
     {
         long rowCount = 0;
@@ -439,11 +442,52 @@ public sealed class PipelineExecutor
 
             if (rowsToWrite.Count > 0)
             {
-                await retry.ExecuteValueAsync(() => writer.WriteBatchAsync(rowsToWrite.ToArray(), ct), ct);
+                await writer.WriteBatchAsync(rowsToWrite.ToArray(), ct);
                 progress.ReportRead(rowsToWrite.Count);
                 progress.ReportWrite(rowsToWrite.Count);
             }
             if (limit > 0 && rowCount >= limit) break;
+        }
+    }
+
+    private async Task DirectRowTransferFromRowsAsync(
+        IAsyncEnumerable<object?[]> rows,
+        IDataWriter writer,
+        int batchSize,
+        int limit,
+        double samplingRate,
+        int? samplingSeed,
+        IExportProgress progress,
+        CancellationToken ct)
+    {
+        long rowCount = 0;
+        Random? sampler = samplingRate > 0 && samplingRate < 1.0 ? (samplingSeed.HasValue ? new Random(samplingSeed.Value) : Random.Shared) : null;
+        var buffer = new List<object?[]>(batchSize);
+
+        await foreach (var row in rows.WithCancellation(ct))
+        {
+            if (sampler != null && sampler.NextDouble() > samplingRate) continue;
+            buffer.Add(row);
+            bool limitReached = limit > 0 && ++rowCount >= limit;
+
+            if (buffer.Count >= batchSize || limitReached)
+            {
+                var batch = buffer.ToArray();
+                await writer.WriteBatchAsync(batch, ct);
+                progress.ReportRead(batch.Length);
+                progress.ReportWrite(batch.Length);
+                buffer.Clear();
+            }
+
+            if (limitReached) break;
+        }
+
+        if (buffer.Count > 0)
+        {
+            var batch = buffer.ToArray();
+            await writer.WriteBatchAsync(batch, ct);
+            progress.ReportRead(batch.Length);
+            progress.ReportWrite(batch.Length);
         }
     }
 

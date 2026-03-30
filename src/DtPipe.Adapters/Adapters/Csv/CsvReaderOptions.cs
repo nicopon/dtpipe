@@ -16,4 +16,7 @@ public class CsvReaderOptions : IOptionSet
 
 	[Description("File encoding (e.g., UTF-8, ISO-8859-1)")]
 	public string Encoding { get; set; } = "UTF-8";
+
+	[Description("Explicit column types, e.g. \"Id:uuid,Qty:int32,Price:double\". Supported: uuid, string, int32, int64, double, decimal, bool, datetime, datetimeoffset")]
+	public string ColumnTypes { get; set; } = "";
 }

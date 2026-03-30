@@ -4,8 +4,8 @@ using Apache.Arrow.Types;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Tests.Helpers;
-using DtPipe.Transformers.Columnar.Filter;
-using DtPipe.Transformers.Columnar.Project;
+using DtPipe.Transformers.Arrow.Filter;
+using DtPipe.Transformers.Arrow.Project;
 using DtPipe.Transformers.Services;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -48,7 +48,7 @@ public class ArrowOwnershipTests
         mockJs.Setup(j => j.GetEngine()).Returns(new Jint.Engine());
 
         // Transformer 1: Filter (Columnar) -> Will return NEW batch (clone) and dispose INPUT
-        var filter = new FilterDataTransformer(new FilterTransformerOptions 
+        var filter = new FilterDataTransformer(new FilterOptions 
         { 
             Filters = new[] { "id > 50" },
         }, mockJs.Object);

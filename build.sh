@@ -92,6 +92,17 @@ if [ -f "$RELEASE_DIR/DtPipe$EXT" ]; then
     mv "$RELEASE_DIR/DtPipe$EXT" "$RELEASE_DIR/dtpipe$EXT"
 fi
 
+# Copy DataFusion native lib alongside the binary if it was built
+# (CopyToPublishDirectory does not propagate transitively from referenced projects)
+for _lib in \
+    "src/DtPipe.Processors/DataFusion/libdtpipe_datafusion.dylib" \
+    "src/DtPipe.Processors/DataFusion/libdtpipe_datafusion.so" \
+    "src/DtPipe.Processors/DataFusion/dtpipe_datafusion.dll"; do
+    if [ -f "$_lib" ]; then
+        cp "$_lib" "$RELEASE_DIR/"
+    fi
+done
+
 echo ""
 echo -e "${YELLOW}Building Sample Project...${NC}"
 dotnet build src/DtPipe.Sample/DtPipe.Sample.csproj -c Release

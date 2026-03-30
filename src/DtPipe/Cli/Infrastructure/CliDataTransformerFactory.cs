@@ -6,7 +6,7 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Pipelines;
 using DtPipe.Core.Options;
-using DtPipe.Transformers.Columnar.Fake;
+using DtPipe.Transformers.Arrow.Fake;
 
 namespace DtPipe.Cli.Infrastructure;
 public class CliDataTransformerFactory : IDataTransformerFactory, ICliContributor

@@ -101,8 +101,6 @@ public static class RawJobBuilder
 				Strategy = parseResult.GetValue(opts.Strategy)?.FirstOrDefault(),
 				InsertMode = parseResult.GetValue(opts.InsertMode)?.FirstOrDefault(),
 				Table = parseResult.GetValue(opts.Table)?.FirstOrDefault(),
-				MaxRetries = (parseResult.GetValue(opts.MaxRetries) is { Length: > 0 } mr ? mr[0] : 3),
-				RetryDelayMs = (parseResult.GetValue(opts.RetryDelayMs) is { Length: > 0 } rd ? rd[0] : 1000),
 				StrictSchema = parseResult.GetValue(opts.StrictSchema),
 				NoSchemaValidation = parseResult.GetValue(opts.NoSchemaValidation),
 				MetricsPath = parseResult.GetValue(opts.MetricsPath)?.FirstOrDefault(),
@@ -182,9 +180,6 @@ public static class RawJobBuilder
 
 		var tableOverride = parseResult.GetValue(opts.Table)?.FirstOrDefault();
 		if (!string.IsNullOrEmpty(tableOverride)) job = job with { Table = tableOverride };
-
-		var maxRetriesOverride = parseResult.GetValue(opts.MaxRetries);
-		if (maxRetriesOverride is { Length: > 0 } mrvo && mrvo[0] > 0) job = job with { MaxRetries = mrvo[0] };
 
 		if (parseResult.GetValue(opts.StrictSchema)) job = job with { StrictSchema = true };
 

@@ -3,12 +3,13 @@ using System.Data.Common;
 using Apache.Arrow;
 using Apache.Arrow.Types;
 using Apache.Arrow.Ado;
+using DtPipe.Core.Infrastructure.Arrow;
 
 namespace DtPipe.Adapters.Common;
 
 /// <summary>
 /// Consumer for database columns that expose <see cref="Guid"/> values (e.g. UUID/UNIQUEIDENTIFIER)
-/// when the target Arrow type is <see cref="BinaryType"/> (16-byte binary representation).
+/// when the target Arrow type is <see cref="BinaryType"/> (16-byte RFC 4122 big-endian binary).
 /// Standard BinaryConsumer expects byte[] from the reader; this handles Guid-returning providers
 /// such as Npgsql (PostgreSQL uuid) and SqlClient (SQL Server uniqueidentifier).
 /// </summary>
@@ -34,9 +35,9 @@ internal sealed class GuidAsBytesConsumer : IAdoConsumer
 
         var obj = reader.GetValue(_columnIndex);
         if (obj is Guid guid)
-            _builder.Append(guid.ToByteArray());
-        else if (obj is byte[] bytes)
-            _builder.Append(bytes);
+            _builder.Append(ArrowTypeMapper.ToArrowUuidBytes(guid));
+        else if (obj is byte[] bytes && bytes.Length == 16)
+            _builder.Append(bytes); // assume already RFC 4122 from the DB driver
         else
             _builder.AppendNull();
     }

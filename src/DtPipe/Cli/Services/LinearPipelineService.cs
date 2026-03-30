@@ -151,8 +151,6 @@ public class LinearPipelineService
             Strategy = job.Strategy,
             InsertMode = job.InsertMode,
             Table = job.Table,
-            MaxRetries = job.MaxRetries,
-            RetryDelayMs = job.RetryDelayMs,
             StrictSchema = job.StrictSchema,
             NoSchemaValidation = job.NoSchemaValidation,
             NoStats = job.NoStats,
@@ -346,10 +344,10 @@ public class LinearPipelineService
         public IAsyncEnumerable<Apache.Arrow.RecordBatch> ReadRecordBatchesAsync(CancellationToken ct)
             => _transformer.ReadResultsAsync(null, ct);
 
-        public IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(
-            int batchSize,
-            CancellationToken ct)
-            => throw new NotSupportedException("StreamTransformerReader only supports columnar (Arrow) mode.");
+        public IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(int batchSize, CancellationToken ct)
+            => throw new NotSupportedException(
+                "StreamTransformerReader is columnar-only. The pipeline executor must route " +
+                "through ReadRecordBatchesAsync + BridgeColumnarToRowsAsync for row-mode sinks.");
 
         public ValueTask DisposeAsync() => _transformer.DisposeAsync();
     }

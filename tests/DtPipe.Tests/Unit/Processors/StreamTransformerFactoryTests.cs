@@ -1,5 +1,5 @@
 using DtPipe.Processors;
-using DtPipe.Processors.DataFusion;
+using DtPipe.Processors.DuckDB;
 using DtPipe.Processors.Merge;
 using Xunit;
 
@@ -7,7 +7,7 @@ namespace DtPipe.Tests.Unit.Processors;
 
 public class SqlTransformerFactoryTests
 {
-    private readonly SqlTransformerFactory _factory = new();
+    private readonly DuckDBSqlTransformerFactory _factory = new();
 
     [Fact]
     public void IsApplicable_WithSqlFlag_ReturnsTrue()

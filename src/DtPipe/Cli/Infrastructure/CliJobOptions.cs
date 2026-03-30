@@ -29,8 +29,6 @@ public sealed class CliJobOptions
     public required Option<string[]> Strategy { get; init; }
     public required Option<string[]> InsertMode { get; init; }
     public required Option<string[]> Table { get; init; }
-    public required Option<int[]> MaxRetries { get; init; }
-    public required Option<int[]> RetryDelayMs { get; init; }
     public required Option<bool> StrictSchema { get; init; }
     public required Option<bool> NoSchemaValidation { get; init; }
     public required Option<string[]> MetricsPath { get; init; }

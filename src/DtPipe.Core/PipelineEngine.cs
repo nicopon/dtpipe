@@ -1,6 +1,5 @@
 using System.Threading.Channels;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Resilience;
 using DtPipe.Core.Pipelines;
 using Microsoft.Extensions.Logging;
 
@@ -29,8 +28,6 @@ public class PipelineEngine
     /// <param name="limit">Max rows to process. 0 = unlimited.</param>
     /// <param name="samplingRate">Row sampling probability 0.0–1.0. 1.0 = all rows.</param>
     /// <param name="samplingSeed">Optional seed for reproducible sampling.</param>
-    /// <param name="maxRetries">Number of retries on transient write errors. Default: 3.</param>
-    /// <param name="retryDelayMs">Initial delay between retries in ms (doubles each attempt). Default: 1000.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Total number of rows written.</returns>
     public async Task<long> RunAsync(
@@ -41,12 +38,9 @@ public class PipelineEngine
         int limit = 0,
         double samplingRate = 1.0,
         int? samplingSeed = null,
-        int maxRetries = 3,
-        int retryDelayMs = 1000,
         CancellationToken ct = default)
     {
         pipeline ??= Array.Empty<IDataTransformer>();
-        var retryPolicy = new RetryPolicy(maxRetries, TimeSpan.FromMilliseconds(retryDelayMs), _logger);
 
         var readerToTransform = Channel.CreateBounded<object?[]>(new BoundedChannelOptions(1000)
         {
@@ -62,9 +56,9 @@ public class PipelineEngine
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var effectiveCt = linkedCts.Token;
 
-        var producerTask = ProduceRowsAsync(reader, readerToTransform.Writer, batchSize, limit, samplingRate, samplingSeed, linkedCts, effectiveCt, retryPolicy, _logger);
+        var producerTask = ProduceRowsAsync(reader, readerToTransform.Writer, batchSize, limit, samplingRate, samplingSeed, linkedCts, effectiveCt);
         var transformTask = TransformRowsAsync(readerToTransform.Reader, transformToWriter.Writer, pipeline, batchSize, effectiveCt);
-        var consumerTask = ConsumeRowsAsync(transformToWriter.Reader, writer, r => Interlocked.Add(ref totalRows, r), effectiveCt, retryPolicy, _logger);
+        var consumerTask = ConsumeRowsAsync(transformToWriter.Reader, writer, r => Interlocked.Add(ref totalRows, r), effectiveCt);
 
         var tasks = new List<Task> { producerTask, transformTask, consumerTask };
         while (tasks.Count > 0)
@@ -94,9 +88,7 @@ public class PipelineEngine
         double samplingRate,
         int? samplingSeed,
         CancellationTokenSource linkedCts,
-        CancellationToken ct,
-        RetryPolicy retryPolicy,
-        ILogger logger)
+        CancellationToken ct)
     {
         Random? sampler = null;
         if (samplingRate > 0 && samplingRate < 1.0)
@@ -174,13 +166,11 @@ public class PipelineEngine
         ChannelReader<object?[][]> input,
         IDataWriter writer,
         Action<int> updateRowCount,
-        CancellationToken ct,
-        RetryPolicy retryPolicy,
-        ILogger logger)
+        CancellationToken ct)
     {
         await foreach (var batch in input.ReadAllAsync(ct))
         {
-            await retryPolicy.ExecuteValueAsync(() => writer.WriteBatchAsync(batch, ct), ct);
+            await writer.WriteBatchAsync(batch, ct);
             updateRowCount(batch.Length);
         }
     }

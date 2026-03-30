@@ -13,7 +13,7 @@ public class CliDagParserTests
 
         Assert.Single(dag.Branches);
         Assert.False(dag.IsDag);
-        Assert.Equal("stream0", dag.Branches[0].Alias);
+        Assert.Equal("stream1", dag.Branches[0].Alias);
         Assert.False(dag.Branches[0].HasStreamTransformer);
         Assert.Equal(args, dag.Branches[0].Arguments);
     }

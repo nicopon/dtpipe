@@ -104,6 +104,35 @@ public class CliDagParser_GoldenTests
     }
 
     [Fact]
+    public void Parse_SqlJoin_AutoAliasDoesNotCollideWithExplicitStreamNAliases()
+    {
+        // Regression: branch counter used to start at 0 and increment for every branch
+        // (including those with explicit --alias), causing the SQL branch to receive
+        // alias "stream2" which collided with the explicit alias of the second source branch.
+        var args = new[]
+        {
+            "--input", "generate:10", "--alias", "stream1",
+            "--input", "generate:20", "--alias", "stream2",
+            "--from", "stream1", "--ref", "stream2",
+            "--sql", "SELECT * FROM stream1 JOIN stream2 ON id",
+            "-o", "csv:/tmp/result.csv"
+        };
+        var dag = CliDagParser.Parse(args);
+
+        Assert.Equal(3, dag.Branches.Count);
+        Assert.Equal("stream1", dag.Branches[0].Alias);
+        Assert.Equal("stream2", dag.Branches[1].Alias);
+
+        // The SQL branch must NOT be aliased "stream2" (collision with branch[1]).
+        var sqlBranch = dag.Branches[2];
+        Assert.NotEqual("stream1", sqlBranch.Alias);
+        Assert.NotEqual("stream2", sqlBranch.Alias);
+        Assert.True(sqlBranch.HasStreamTransformer);
+        Assert.Equal("stream1", sqlBranch.StreamingAliases[0]);
+        Assert.Equal("stream2", sqlBranch.RefAliases[0]);
+    }
+
+    [Fact]
     public void Parse_MergeProcessor_MatchesGoldenMerge()
     {
         // --from a,b --merge declares a UNION ALL merge processor.

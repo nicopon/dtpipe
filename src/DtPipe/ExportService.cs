@@ -3,7 +3,6 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Core.Security;
-using DtPipe.Core.Resilience;
 using DtPipe.Core.Validation;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
@@ -84,11 +83,8 @@ public class ExportService
 			_observer.ShowConnectionStatus(false, null);
 		}
 
-		// Initialize RetryPolicy early to cover setup phase
-		var retryPolicy = new RetryPolicy(options.MaxRetries, TimeSpan.FromMilliseconds(options.RetryDelayMs), _logger);
-
 		await using var reader = readerFactory.Create(registry);
-		await retryPolicy.ExecuteAsync(() => reader.OpenAsync(ct), ct);
+		await reader.OpenAsync(ct);
 
 		if (showStatusMessages && !silenceInternal)
 			_observer.ShowConnectionStatus(true, reader.Columns?.Count);
@@ -139,6 +135,18 @@ public class ExportService
 			_channelRegistry.UpdateChannelColumns(alias, currentSchema ?? System.Array.Empty<PipeColumnInfo>());
 		}
 
+		// Column type inference advisory (dry-run only, for text sources like CSV)
+		if (options.DryRunCount > 0 && reader is IColumnTypeInferenceCapable inferCapable)
+		{
+			try
+			{
+				var suggested = await inferCapable.InferColumnTypesAsync(Math.Max(options.DryRunCount, 100), ct);
+				if (suggested.Count > 0 && !silenceInternal)
+					_observer.ShowColumnTypeInferenceSuggestion(suggested);
+			}
+			catch { /* inference is best-effort, never fail the dry-run */ }
+		}
+
 		// Dry-run mode
 		if (options.DryRunCount > 0)
 		{
@@ -185,12 +193,12 @@ public class ExportService
 		await using var writer = writerFactory.Create(registry);
 
 		// Schema Validation
-		await retryPolicy.ExecuteAsync(() => _schemaValidator.ValidateAndMigrateAsync(writer, exportableSchema, options, ct), ct);
+		await _schemaValidator.ValidateAndMigrateAsync(writer, exportableSchema, options, ct);
 
 		// Execute Pre-Hook
 		await _hookExecutor.ExecuteAsync(writer, "Pre-Hook", options.PreExec, ct);
 
-		await retryPolicy.ExecuteValueAsync(() => writer.InitializeAsync(exportableSchema, ct), ct);
+		await writer.InitializeAsync(exportableSchema, ct);
 
 		// Use Observer to create Progress
 		var transformerModes = segments
@@ -215,7 +223,7 @@ public class ExportService
 			var startTime = DateTime.UtcNow;
 
 			// Execute Unified Pipeline
-			await _pipelineExecutor.ExecuteSegmentedPipelineAsync(reader, writer, segments, exportableSchema, options, progress, retryPolicy, linkedCts, effectiveCt);
+			await _pipelineExecutor.ExecuteSegmentedPipelineAsync(reader, writer, segments, exportableSchema, options, progress, linkedCts, effectiveCt);
 
 			await writer.CompleteAsync(ct);
 			progress.Complete();

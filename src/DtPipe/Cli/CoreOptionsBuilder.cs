@@ -39,8 +39,6 @@ internal static class CoreOptionsBuilder
         { "--dry-run",            CliPipelinePhase.Global },
         { "--log",                CliPipelinePhase.Global },
         { "--key",                CliPipelinePhase.Global },
-        { "--max-retries",        CliPipelinePhase.Global },
-        { "--retry-delay-ms",     CliPipelinePhase.Global },
         { "--sampling-rate",      CliPipelinePhase.Global },
         { "--sampling-seed",      CliPipelinePhase.Global },
         { "--job",                CliPipelinePhase.Global },
@@ -126,10 +124,6 @@ internal static class CoreOptionsBuilder
         var metricsPathOption = new Option<string[]>("--metrics-path") { Description = "Path to structured metrics JSON output", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
         var autoMigrateOption = new Option<bool>("--auto-migrate") { Description = "Automatically add missing columns to target table" };
 
-        var maxRetriesOption = new Option<int[]>("--max-retries") { Description = "Max retries for transient errors", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
-
-        var retryDelayMsOption = new Option<int[]>("--retry-delay-ms") { Description = "Initial retry delay in ms", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
-
         // Stream Transformer Options
         var sqlOption = new Option<string[]>("--sql")
         {
@@ -162,7 +156,7 @@ internal static class CoreOptionsBuilder
             inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption,
             unsafeQueryOption, dryRunOption, noStatsOption, limitOption, samplingRateOption, samplingSeedOption, keyOption,
             jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption, finallyExecOption,
-            strategyOption, insertModeOption, tableOption, maxRetriesOption, retryDelayMsOption, strictSchemaOption,
+            strategyOption, insertModeOption, tableOption, strictSchemaOption,
             noSchemaValidationOption, metricsPathOption, autoMigrateOption, sqlOption, aliasOption,
             renameOption, dropOption, throttleOption, ignoreNullsOption,
             mergeOption, refOption, fromOption, prefixOption
@@ -178,7 +172,7 @@ internal static class CoreOptionsBuilder
             inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption,
             unsafeQueryOption, dryRunOption, noStatsOption, limitOption, samplingRateOption, samplingSeedOption,
             keyOption, jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption,
-            finallyExecOption, strategyOption, insertModeOption, tableOption, maxRetriesOption, retryDelayMsOption,
+            finallyExecOption, strategyOption, insertModeOption, tableOption,
             strictSchemaOption, noSchemaValidationOption, metricsPathOption, autoMigrateOption, sqlOption,
             aliasOption, renameOption, dropOption, throttleOption, ignoreNullsOption,
             mergeOption, refOption, fromOption, prefixOption, allList);
@@ -308,8 +302,6 @@ public record CoreCliOptions(
     Option<string[]> Strategy,
     Option<string[]> InsertMode,
     Option<string[]> Table,
-    Option<int[]> MaxRetries,
-    Option<int[]> RetryDelayMs,
     Option<bool> StrictSchema,
     Option<bool> NoSchemaValidation,
     Option<string[]> MetricsPath,

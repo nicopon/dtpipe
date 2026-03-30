@@ -34,8 +34,6 @@ public record JobDefinition
 	public int ConnectionTimeout { get; init; } = 10;
 	public int QueryTimeout { get; init; } = 0;
 
-	public int MaxRetries { get; init; } = 3;
-	public int RetryDelayMs { get; init; } = 1000;
 	public string? MetricsPath { get; init; }
     public bool? AutoMigrate { get; set; }
     public int Throttle { get; init; } = 0;

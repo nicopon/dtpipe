@@ -116,7 +116,6 @@ if [ $MODE_TEST -eq 1 ] || [ $MODE_TEST_DOCKER -eq 1 ]; then
     run_script "Options"        "$SCRIPT_DIR/validate_options.sh"
     run_script "Docs"           "$SCRIPT_DIR/validate_docs.sh"
     run_script "Hooks"          "$SCRIPT_DIR/validate_hooks.sh"
-    run_script "Resilience"     "$SCRIPT_DIR/validate_resilience.sh"
 fi
 
 if [ $MODE_DAG -eq 1 ] || [ $MODE_TEST -eq 1 ] || [ $MODE_TEST_DOCKER -eq 1 ]; then

@@ -7,7 +7,6 @@ using Apache.Arrow;
 using Apache.Arrow.Types;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
-using DtPipe.Core.Resilience;
 using DtPipe.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -79,9 +78,8 @@ public class PipelineExecutorTests
         var source = new[] { new object?[] { 1 }, new object?[] { 2 }, new object?[] { 3 } }.ToAsyncEnumerable();
         var mockWriter = new Mock<IDataWriter>();
         var mockProgress = new Mock<IExportProgress>();
-        var retry = new RetryPolicy(0, TimeSpan.Zero, NullLogger<RetryPolicy>.Instance);
 
-        await _executor.ConsumeRowStreamAsync(source, mockWriter.Object, 2, mockProgress.Object, retry, default);
+        await _executor.ConsumeRowStreamAsync(source, mockWriter.Object, 2, mockProgress.Object, default);
 
         mockWriter.Verify(w => w.WriteBatchAsync(It.Is<object?[][]>(b => b.Length == 2), It.IsAny<CancellationToken>()), Times.Once);
         mockWriter.Verify(w => w.WriteBatchAsync(It.Is<object?[][]>(b => b.Length == 1), It.IsAny<CancellationToken>()), Times.Once);

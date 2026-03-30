@@ -8,34 +8,46 @@ on:
 jobs:
   build:
     name: Build ${{ matrix.platform }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: linux-x64
             rid: linux-x64
+            runner: ubuntu-latest
             artifact: dtpipe-linux-x64
-          
+            rust_target: ""
+
           - platform: linux-arm64
             rid: linux-arm64
+            runner: ubuntu-24.04-arm
             artifact: dtpipe-linux-arm64
-          
+            rust_target: ""
+
           - platform: macos-x64
             rid: osx-x64
+            runner: macos-latest
             artifact: dtpipe-macos-x64
-          
+            rust_target: x86_64-apple-darwin
+
           - platform: macos-arm64
             rid: osx-arm64
+            runner: macos-latest
             artifact: dtpipe-macos-arm64
-          
+            rust_target: ""
+
           - platform: windows-x64
             rid: win-x64
+            runner: windows-latest
             artifact: dtpipe-windows-x64.exe
-          
+            rust_target: ""
+
           - platform: windows-arm64
             rid: win-arm64
+            runner: windows-latest
             artifact: dtpipe-windows-arm64.exe
+            rust_target: aarch64-pc-windows-msvc
 
     steps:
       - name: Checkout
@@ -49,22 +61,28 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-pc-windows-msvc
+          targets: ${{ matrix.rust_target }}
 
-      - name: Cache Rust build
+      - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src/DtPipe.Processors.DataFusion
+          shared-key: datafusion-${{ matrix.rid }}
 
       - name: Build DataFusion Bridge (Unix)
         if: "!contains(matrix.platform, 'windows')"
+        env:
+          RUST_TARGET: ${{ matrix.rust_target }}
+          CARGO_BUILD_PROFILE: release-ci
         run: ./build_datafusion_bridge.sh
 
       - name: Build DataFusion Bridge (Windows)
         if: contains(matrix.platform, 'windows')
+        env:
+          CARGO_BUILD_PROFILE: release-ci
         run: |
-          if ("${{ matrix.platform }}" -eq "windows-arm64") {
-              $env:RUST_TARGET="aarch64-pc-windows-msvc"
+          if ("${{ matrix.rust_target }}" -ne "") {
+              $env:RUST_TARGET="${{ matrix.rust_target }}"
           }
           ./build_datafusion_bridge.ps1
 
@@ -83,6 +101,19 @@ jobs:
             -p:DebugType=none \
             -p:DebugSymbols=false \
             -o ./dist/release
+
+      - name: Copy DataFusion native lib (Unix)
+        if: "!contains(matrix.platform, 'windows')"
+        run: |
+          for lib in src/DtPipe.Processors/DataFusion/libdtpipe_datafusion.dylib src/DtPipe.Processors/DataFusion/libdtpipe_datafusion.so; do
+            [ -f "$lib" ] && cp "$lib" ./dist/release/ || true
+          done
+
+      - name: Copy DataFusion native lib (Windows)
+        if: contains(matrix.platform, 'windows')
+        shell: bash
+        run: |
+          [ -f "src/DtPipe.Processors/DataFusion/dtpipe_datafusion.dll" ] && cp "src/DtPipe.Processors/DataFusion/dtpipe_datafusion.dll" ./dist/release/ || true
 
       - name: Prepare artifact (Unix)
         if: "!contains(matrix.platform, 'windows')"
@@ -124,7 +155,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -165,7 +196,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
@@ -174,17 +205,12 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src/DtPipe.Processors.DataFusion
-
       - name: Build DataFusion Bridge
         run: ./build_datafusion_bridge.sh
 
       - name: Pack All Projects
         run: dotnet pack DtPipe.sln -c Release
-      
+
       - name: Push to NuGet
         # Push all generated nupkg files, continuing on error if any single package fails (e.g. duplicate)
         run: dotnet nuget push "**/*.nupkg" --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate

@@ -5,7 +5,7 @@ using DtPipe.Adapters.Parquet;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
-using DtPipe.Transformers.Columnar.Filter;
+using DtPipe.Transformers.Arrow.Filter;
 using DtPipe.Services;
 using DtPipe.Transformers.Services;
 using FluentAssertions;
@@ -104,7 +104,7 @@ public class ZeroCopyPipelineTests : IAsyncLifetime
         var writerFactory = new ParquetWriterDescriptor();
 
         // Pipeline: Filter (Columnar)
-        var filter = new FilterDataTransformer(new FilterTransformerOptions { Filters = new[] { "val > 15" } }, mockJs.Object);
+        var filter = new FilterDataTransformer(new FilterOptions { Filters = new[] { "val > 15" } }, mockJs.Object);
         var pipeline = new List<IDataTransformer> { filter };
 
         // Act

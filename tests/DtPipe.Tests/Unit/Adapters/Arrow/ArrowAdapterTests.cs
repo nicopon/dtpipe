@@ -23,6 +23,47 @@ public class ArrowAdapterTests : IAsyncLifetime
 	}
 
 	[Fact]
+	public void ArrowTypeMapper_UuidRoundTrip_ShouldPreserveGuidValue()
+	{
+		// RFC 4122 bytes → .NET Guid → RFC 4122 bytes must round-trip exactly
+		var original = Guid.Parse("550e8400-e29b-41d4-a716-446655440000");
+
+		var arrowBytes = ArrowTypeMapper.ToArrowUuidBytes(original);
+		var recovered = ArrowTypeMapper.FromArrowUuidBytes(arrowBytes);
+
+		recovered.Should().Be(original);
+
+		// Bytes should be RFC 4122 big-endian: first 4 bytes big-endian A component
+		// 0x550e8400 → bytes: 55 0e 84 00
+		arrowBytes[0].Should().Be(0x55);
+		arrowBytes[1].Should().Be(0x0e);
+		arrowBytes[2].Should().Be(0x84);
+		arrowBytes[3].Should().Be(0x00);
+	}
+
+	[Fact]
+	public void ArrowTypeMapper_GetArrowType_GuidReturnsBinaryType()
+	{
+		var arrowType = ArrowTypeMapper.GetArrowType(typeof(Guid));
+		arrowType.Should().BeOfType<Apache.Arrow.Types.BinaryType>();
+	}
+
+	[Fact]
+	public void ArrowTypeMapper_AppendValue_GuidProducesRfc4122Bytes()
+	{
+		var guid = Guid.Parse("550e8400-e29b-41d4-a716-446655440000");
+		var builder = new Apache.Arrow.BinaryArray.Builder();
+		ArrowTypeMapper.AppendValue(builder, guid);
+		var array = (Apache.Arrow.BinaryArray)ArrowTypeMapper.BuildArray(builder);
+
+		var bytes = array.GetBytes(0).ToArray();
+		// First byte of RFC 4122 for "550e8400-..." must be 0x55
+		bytes.Should().HaveCount(16);
+		bytes[0].Should().Be(0x55);
+		ArrowTypeMapper.FromArrowUuidBytes(bytes).Should().Be(guid);
+	}
+
+	[Fact]
 	public async Task ArrowAdapter_ShouldWriteAndReadData()
 	{
 		// Arrange

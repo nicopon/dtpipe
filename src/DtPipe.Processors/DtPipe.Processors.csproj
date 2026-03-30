@@ -1,12 +1,24 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\Apache.Arrow.Ado\Apache.Arrow.Ado.csproj" />
     <ProjectReference Include="..\DtPipe.Core\DtPipe.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="DataFusion\libdtpipe_datafusion.dylib" Link="libdtpipe_datafusion.dylib"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest"
+          Condition="$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::OSX))) AND Exists('DataFusion\libdtpipe_datafusion.dylib')" />
+    <None Include="DataFusion\dtpipe_datafusion.dll" Link="dtpipe_datafusion.dll"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest"
+          Condition="$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::Windows))) AND Exists('DataFusion\dtpipe_datafusion.dll')" />
+    <None Include="DataFusion\libdtpipe_datafusion.so" Link="libdtpipe_datafusion.so"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest"
+          Condition="$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::Linux))) AND Exists('DataFusion\libdtpipe_datafusion.so')" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Apache.Arrow" Version="22.1.0" />
-    <PackageReference Include="Apache.Arrow.Adbc" Version="0.17.0" />
     <PackageReference Include="DuckDB.NET.Bindings" Version="1.4.4" />
     <PackageReference Include="DuckDB.NET.Data" Version="1.4.4" />
   </ItemGroup>
@@ -17,11 +29,5 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
-
-  <ItemGroup>
-    <None Include="DataFusion\libdtpipe_datafusion.dylib" Link="libdtpipe_datafusion.dylib" CopyToOutputDirectory="PreserveNewest" Condition="$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::OSX)))" />
-    <None Include="DataFusion\dtpipe_datafusion.dll" Link="dtpipe_datafusion.dll" CopyToOutputDirectory="PreserveNewest" Condition="$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::Windows)))" />
-    <None Include="DataFusion\libdtpipe_datafusion.so" Link="libdtpipe_datafusion.so" CopyToOutputDirectory="PreserveNewest" Condition="$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::Linux)))" />
-  </ItemGroup>
 
 </Project>

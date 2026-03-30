@@ -1,5 +1,5 @@
 using DtPipe.Core.Models;
-using DtPipe.Transformers.Columnar.Project;
+using DtPipe.Transformers.Arrow.Project;
 using Xunit;
 
 namespace DtPipe.Tests.Unit.Transformers;

@@ -266,6 +266,10 @@ public class DagOrchestrator : IDagOrchestrator
                 if (finishedTask.IsFaulted)
                 {
                     _logger.LogError(finishedTask.Exception, "A task failed. Cancelling the entire DAG.");
+                    var innerMsg = finishedTask.Exception?.InnerException?.Message
+                        ?? finishedTask.Exception?.Message
+                        ?? "Unknown error";
+                    OnLogEvent?.Invoke($"✖ {innerMsg}");
                     await linkedCts.CancelAsync();
                     return 1;
                 }

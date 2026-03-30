@@ -170,8 +170,6 @@ dtpipe -i input.csv --csv-separator "," -o output.csv --csv-separator ";"
 | `--auto-migrate` | Automatically add missing columns to target table. |
 | `--strict-schema`| Abort if schema errors are found. |
 | `--no-schema-validation` | Disable schema check entirely. |
-| `--max-retries` | Max retries on transient errors. |
-| `--retry-delay-ms` | Initial retry delay in ms (exponential backoff). |
 | `--pre-exec` | SQL or command to run before the transfer. |
 | `--post-exec` | SQL or command to run after a successful transfer. |
 | `--on-error-exec` | SQL or command to run on error. |

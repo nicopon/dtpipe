@@ -54,6 +54,7 @@ public class JobService
 		var writerFactories = _serviceProvider.GetRequiredService<IEnumerable<IDataWriterFactory>>();
 		var opts = CoreOptionsBuilder.Build(readerFactories, writerFactories);
 		var coreOptions = opts.AllOptions;
+		var coreCoreOptions = coreOptions.ToList(); // Snapshot before contributors are added
 
 		var rootCommand = new RootCommand("A simple, self-contained CLI for performance-focused data streaming & anonymization");
 		foreach (var opt in coreOptions) rootCommand.Add(opt);
@@ -132,8 +133,6 @@ public class JobService
 				Strategy = opts.Strategy,
 				InsertMode = opts.InsertMode,
 				Table = opts.Table,
-				MaxRetries = opts.MaxRetries,
-				RetryDelayMs = opts.RetryDelayMs,
 				StrictSchema = opts.StrictSchema,
 				NoSchemaValidation = opts.NoSchemaValidation,
 				MetricsPath = opts.MetricsPath,
@@ -425,7 +424,7 @@ public class JobService
 			}
 		});
 
-		Action PrintHelpAction = () => PrintGroupedHelp(rootCommand, coreOptions, _contributors, _console);
+		Action PrintHelpAction = () => PrintGroupedHelp(rootCommand, coreCoreOptions, _contributors, _console);
 		return (rootCommand, PrintHelpAction, opts, allFlagPhases, _contributors.ToList());
 	}
 
@@ -438,45 +437,46 @@ public class JobService
 		console.WriteLine("  dtpipe [options]");
 		console.WriteLine();
 
-		console.WriteLine("Core Options:");
-		var basicCoreFlags = new HashSet<string> {
-			"--input", "-i", "--output", "-o", "--query", "-q", "--job", "--sql", "--alias",
-			"--dry-run", "--limit", "--batch-size", "-b", "--no-stats", "--log"
-		};
-		foreach (var opt in coreOptions.Where(o => basicCoreFlags.Contains(o.Name)))
+		// Group core options by phase, using CoreFlagPhases as the authority.
+		// Options with no phase entry (--drop, --rename, --throttle, etc.) fall to "Column Transformers".
+		var phases = CoreOptionsBuilder.CoreFlagPhases;
+
+		var globalOpts    = coreOptions.Where(o => phases.TryGetValue(o.Name, out var p) && p == CliPipelinePhase.Global).ToList();
+		var readerOpts    = coreOptions.Where(o => phases.TryGetValue(o.Name, out var p) && p == CliPipelinePhase.Reader).ToList();
+		var writerOpts    = coreOptions.Where(o => phases.TryGetValue(o.Name, out var p) && p == CliPipelinePhase.Writer).ToList();
+		var transformerOpts = coreOptions.Where(o =>
 		{
-			PrintOption(opt, console);
-		}
-		console.WriteLine();
+			if (!phases.TryGetValue(o.Name, out var p)) return true; // No phase entry → catch-all
+			return p != CliPipelinePhase.Global && p != CliPipelinePhase.Reader && p != CliPipelinePhase.Writer;
+		}).ToList();
 
+		PrintSection("Global Pipeline Options", globalOpts, console);
+		PrintSection("Data Operations", readerOpts, console);
+		PrintSection("Column Transformers", transformerOpts, console);
+		PrintSection("Target / Schema Options", writerOpts, console);
+
+		// Track names already shown in core sections so contributors don't duplicate them
+		var alreadyPrinted = new HashSet<string>(
+			globalOpts.Concat(readerOpts).Concat(writerOpts).Concat(transformerOpts).Select(o => o.Name),
+			StringComparer.OrdinalIgnoreCase);
+
+		// Contributor options grouped by category
 		var groups = contributors.GroupBy(c => c.Category).OrderBy(g => g.Key);
-
 		foreach (var group in groups)
 		{
-			// Collect all options for this group
-			var optionsPrinted = new HashSet<string>();
+			var optionsPrinted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 			var groupOptions = new List<Option>();
-
 			foreach (var contributor in group)
 			{
 				foreach (var opt in contributor.GetCliOptions())
 				{
-					if (optionsPrinted.Add(opt.Name) && (opt.Description == null || !opt.Description.StartsWith("[HIDDEN]")))
-					{
+					if (!alreadyPrinted.Contains(opt.Name) &&
+					    optionsPrinted.Add(opt.Name) &&
+					    (opt.Description == null || !opt.Description.StartsWith("[HIDDEN]")))
 						groupOptions.Add(opt);
-					}
 				}
 			}
-
-			if (groupOptions.Any())
-			{
-				console.WriteLine($"{group.Key}:");
-				foreach (var opt in groupOptions)
-				{
-					PrintOption(opt, console);
-				}
-				console.WriteLine();
-			}
+			PrintSection(group.Key, groupOptions, console);
 		}
 
 		console.WriteLine("Other Options:");
@@ -489,6 +489,15 @@ public class JobService
 		console.WriteLine("  providers                                List all available data providers");
 		console.WriteLine("  completion                               Generate or manage shell completion");
 		console.WriteLine("  secret                                   Manage secure connection strings in OS Keyring");
+		console.WriteLine();
+	}
+
+	private static void PrintSection(string title, List<Option> options, IAnsiConsole console)
+	{
+		if (options.Count == 0) return;
+		console.WriteLine($"{title}:");
+		foreach (var opt in options)
+			PrintOption(opt, console);
 		console.WriteLine();
 	}
 

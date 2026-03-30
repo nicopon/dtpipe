@@ -28,7 +28,7 @@ pub unsafe extern "C" fn dtfb_context_new(runtime_ptr: *mut DtfbRuntime) -> *mut
     let mut config = SessionConfig::new();
     // Enable identifier normalization (default behavior) to support case-insensitive SQL matching
     config.options_mut().sql_parser.enable_ident_normalization = true;
-        
+
     Box::into_raw(Box::new(DtfbContext {
         runtime: Arc::clone(&rt.inner),
         ctx: Arc::new(SessionContext::new_with_config(config)),
@@ -48,28 +48,6 @@ pub unsafe extern "C" fn dtfb_context_destroy(ptr: *mut DtfbContext) {
     if !ptr.is_null() {
         unsafe { drop(Box::from_raw(ptr)) };
     }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn dtfb_register_parquet(
-    ctx_ptr: *mut DtfbContext,
-    name_ptr: *const std::ffi::c_char,
-    path_ptr: *const std::ffi::c_char,
-) -> ErrorCode {
-    let dtfb = crate::ffi_ref!(ctx_ptr);
-    let name = crate::ffi_cstr!(name_ptr);
-    let path = crate::ffi_cstr!(path_ptr);
-
-    let ctx: Arc<SessionContext> = Arc::clone(&dtfb.ctx);
-    let name = name.to_string();
-    let path = path.to_string();
-
-    dtfb.runtime.block_on(async move {
-        match ctx.register_parquet(&name, &path, ParquetReadOptions::default()).await {
-            Ok(_) => ErrorCode::Ok,
-            Err(_) => ErrorCode::Error,
-        }
-    })
 }
 
 struct FfiPartitionStream {
@@ -108,13 +86,13 @@ impl PartitionStream for FfiPartitionStream {
                 return Box::pin(RecordBatchStreamAdapter::new(self.schema.clone(), err_stream));
             }
         };
-        
+
         let schema = self.schema.clone();
         let schema_for_stream = schema.clone();
         let stream = futures::stream::iter(reader).map(move |r| {
             match r {
                 Ok(rb) => {
-                    // Force the lowercased schema onto the batch. 
+                    // Force the lowercased schema onto the batch.
                     // try_new validates types/count but not names, which is what we want.
                     arrow_array::RecordBatch::try_new(schema_for_stream.clone(), rb.columns().to_vec())
                         .map_err(|e| datafusion::error::DataFusionError::ArrowError(Box::new(e), None))
@@ -122,7 +100,7 @@ impl PartitionStream for FfiPartitionStream {
                 Err(e) => Err(datafusion::error::DataFusionError::ArrowError(Box::new(e), None))
             }
         });
-        
+
         Box::pin(RecordBatchStreamAdapter::new(schema, stream))
     }
 }
@@ -135,7 +113,7 @@ pub unsafe extern "C" fn dtfb_register_stream(
 ) -> ErrorCode {
     let dtfb = crate::ffi_ref!(ctx_ptr);
     let name = crate::ffi_cstr!(name_ptr);
-    
+
     let ffi_stream = unsafe { std::ptr::read(stream_ptr) };
     let reader = match ArrowArrayStreamReader::try_new(ffi_stream) {
         Ok(r) => r,
@@ -183,7 +161,7 @@ pub unsafe extern "C" fn dtfb_get_schema(
         };
 
         let arrow_schema = df.schema().as_arrow().as_ref().clone();
-        
+
         match arrow_array::ffi::FFI_ArrowSchema::try_from(&arrow_schema) {
             Ok(ffi_schema) => {
                 unsafe { std::ptr::write(ffi_schema_ptr, ffi_schema) };
@@ -193,28 +171,6 @@ pub unsafe extern "C" fn dtfb_get_schema(
                 eprintln!("[dtfusion-bridge] FFI schema error: {:?}", e);
                 ErrorCode::Error
             }
-        }
-    })
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn dtfb_register_csv(
-    ctx_ptr: *mut DtfbContext,
-    name_ptr: *const std::ffi::c_char,
-    path_ptr: *const std::ffi::c_char,
-) -> ErrorCode {
-    let dtfb = crate::ffi_ref!(ctx_ptr);
-    let name = crate::ffi_cstr!(name_ptr);
-    let path = crate::ffi_cstr!(path_ptr);
-
-    let ctx = Arc::clone(&dtfb.ctx);
-    let name = name.to_string();
-    let path = path.to_string();
-
-    dtfb.runtime.block_on(async move {
-        match ctx.register_csv(&name, &path, datafusion::prelude::CsvReadOptions::default()).await {
-            Ok(_) => ErrorCode::Ok,
-            Err(_) => ErrorCode::Error,
         }
     })
 }
@@ -242,15 +198,15 @@ pub unsafe extern "C" fn dtfb_register_batches(
         let array_ptr = unsafe { *ffi_batches_ptr.add(i) };
         if array_ptr.is_null() { return ErrorCode::Error; }
         let ffi_array = unsafe { std::ptr::read(array_ptr) };
-        
+
         let array_data = match unsafe { arrow_array::ffi::from_ffi(ffi_array, ffi_schema) } {
             Ok(a) => a,
             Err(_) => return ErrorCode::Error,
         };
-        
+
         let struct_array = arrow_array::StructArray::from(array_data);
         let columns = struct_array.columns().to_vec();
-        
+
         // Force the lowercased schema onto the batch
         let rb = match arrow_array::RecordBatch::try_new(Arc::clone(&schema), columns) {
             Ok(r) => r,
@@ -303,9 +259,9 @@ pub unsafe extern "C" fn dtfb_execute_to_fd(
         };
 
         let schema = stream.schema();
-        
+
         let handle_val = handle as usize;
-        
+
         // Blocking I/O section
         let result = runtime.spawn_blocking(move || {
             let handle = handle_val as *mut std::ffi::c_void;

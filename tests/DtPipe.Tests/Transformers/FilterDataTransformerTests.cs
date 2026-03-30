@@ -1,6 +1,6 @@
 using DtPipe.Core.Models;
 using DtPipe.Transformers.Services;
-using DtPipe.Transformers.Columnar.Filter;
+using DtPipe.Transformers.Arrow.Filter;
 using Xunit;
 
 namespace DtPipe.Tests.Transformers;
@@ -18,7 +18,7 @@ public class FilterDataTransformerTests
 	public async Task Transform_ShouldKeepRow_WhenConditionIsTrue()
 	{
 		// Arrange
-		var options = new FilterTransformerOptions { Filters = new[] { "return row.Age > 18;" } };
+		var options = new FilterOptions { Filters = new[] { "return row.Age > 18;" } };
 		var transformer = new FilterDataTransformer(options, _realJsProvider);
 
 		var columns = new List<PipeColumnInfo> { new("Name", typeof(string), true), new("Age", typeof(int), false) };
@@ -38,7 +38,7 @@ public class FilterDataTransformerTests
 	public async Task Transform_ShouldDropRow_WhenConditionIsFalse()
 	{
 		// Arrange
-		var options = new FilterTransformerOptions { Filters = new[] { "return row.Age > 18;" } };
+		var options = new FilterOptions { Filters = new[] { "return row.Age > 18;" } };
 		var transformer = new FilterDataTransformer(options, _realJsProvider);
 
 		var columns = new List<PipeColumnInfo> { new("Name", typeof(string), true), new("Age", typeof(int), false) };
@@ -57,7 +57,7 @@ public class FilterDataTransformerTests
 	public async Task Transform_ShouldApplyMultipleFilters()
 	{
 		// Arrange
-		var options = new FilterTransformerOptions { Filters = new[] { "row.A > 0", "row.B < 100" } };
+		var options = new FilterOptions { Filters = new[] { "row.A > 0", "row.B < 100" } };
 		var transformer = new FilterDataTransformer(options, _realJsProvider);
 
 		var columns = new List<PipeColumnInfo> { new("A", typeof(int), false), new("B", typeof(int), false) };

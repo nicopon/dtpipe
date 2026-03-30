@@ -30,7 +30,15 @@ public static class CliDagParser
         var branches = new List<BranchDefinition>();
         var currentBranchArgs = new List<string>();
         bool hasSeenInputInCurrentBranch = false;
-        int branchCounter = 0;
+        int branchCounter = 1;
+
+        // Pre-collect all explicit --alias values so the auto-counter never collides with them.
+        var explicitAliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (args[i].Equals("--alias", StringComparison.OrdinalIgnoreCase))
+                explicitAliases.Add(args[i + 1]);
+        }
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -41,7 +49,7 @@ public static class CliDagParser
                 // Split only if we already have an input in the current branch.
                 if (hasSeenInputInCurrentBranch && currentBranchArgs.Count > 0)
                 {
-                    branches.Add(CreateBranch(currentBranchArgs, ref branchCounter));
+                    branches.Add(CreateBranch(currentBranchArgs, ref branchCounter, explicitAliases));
                     currentBranchArgs.Clear();
                     hasSeenInputInCurrentBranch = false;
                 }
@@ -54,7 +62,7 @@ public static class CliDagParser
                 // --from always starts a new branch (fan-out or stream-transformer main source).
                 if (currentBranchArgs.Count > 0)
                 {
-                    branches.Add(CreateBranch(currentBranchArgs, ref branchCounter));
+                    branches.Add(CreateBranch(currentBranchArgs, ref branchCounter, explicitAliases));
                     currentBranchArgs.Clear();
                 }
 
@@ -68,18 +76,23 @@ public static class CliDagParser
         }
 
         if (currentBranchArgs.Count > 0)
-            branches.Add(CreateBranch(currentBranchArgs, ref branchCounter));
+            branches.Add(CreateBranch(currentBranchArgs, ref branchCounter, explicitAliases));
 
         return new JobDagDefinition { Branches = branches };
     }
 
-    private static BranchDefinition CreateBranch(List<string> args, ref int branchCounter)
+    private static BranchDefinition CreateBranch(List<string> args, ref int branchCounter, HashSet<string> explicitAliases)
     {
         var argsArray = args.ToArray();
 
         string? alias = ExtractArgValue(argsArray, "--alias");
         if (string.IsNullOrEmpty(alias))
+        {
+            // Skip counter values that collide with explicit --alias names defined elsewhere in the DAG.
+            while (explicitAliases.Contains($"stream{branchCounter}"))
+                branchCounter++;
             alias = $"stream{branchCounter}";
+        }
         branchCounter++;
 
         // --from accepts comma-separated aliases: --from a,b,c

@@ -22,4 +22,7 @@ public interface IExportObserver
 
 	// Dry Run
 	Task RunDryRunAsync(IStreamReader reader, IReadOnlyList<IDataTransformer> pipeline, int count, IDataWriter? inspectionWriter, IReadOnlyDictionary<IDataTransformer, (IReadOnlyList<PipeColumnInfo> In, IReadOnlyList<PipeColumnInfo> Out)>? precomputedSchemas = null, PipelineExecutionPlan? executionPlan = null, CancellationToken ct = default);
+
+	// Column type inference suggestion (shown during --dry-run for text sources like CSV)
+	void ShowColumnTypeInferenceSuggestion(IReadOnlyDictionary<string, string> suggestions);
 }

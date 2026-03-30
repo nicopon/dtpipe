@@ -89,7 +89,7 @@ EOF
 
 "$DTPIPE" -i "$ARTIFACTS_DIR/drv_v1.csv" -o "$PG_CONN" --table "drv_upsert" --strategy Recreate --key "Id" --no-stats
 "$DTPIPE" -i "$ARTIFACTS_DIR/drv_v2.csv" -o "$PG_CONN" --table "drv_upsert" --strategy Upsert   --key "Id" --no-stats
-"$DTPIPE" -i "$PG_CONN" --query "SELECT * FROM drv_upsert ORDER BY \"Id\"" -o "$ARTIFACTS_DIR/drv_upsert_out.csv" --no-stats
+"$DTPIPE" -i "$PG_CONN" --query "SELECT * FROM drv_upsert ORDER BY id" -o "$ARTIFACTS_DIR/drv_upsert_out.csv" --no-stats
 
 grep -q "Alice_Updated" "$ARTIFACTS_DIR/drv_upsert_out.csv" \
   && grep -q "200" "$ARTIFACTS_DIR/drv_upsert_out.csv" \
@@ -98,7 +98,7 @@ grep -q "Alice_Updated" "$ARTIFACTS_DIR/drv_upsert_out.csv" \
 
 "$DTPIPE" -i "$ARTIFACTS_DIR/drv_v1.csv" -o "$PG_CONN" --table "drv_ignore" --strategy Recreate --key "Id" --no-stats
 "$DTPIPE" -i "$ARTIFACTS_DIR/drv_v2.csv" -o "$PG_CONN" --table "drv_ignore" --strategy Ignore   --key "Id" --no-stats
-"$DTPIPE" -i "$PG_CONN" --query "SELECT * FROM drv_ignore ORDER BY \"Id\"" -o "$ARTIFACTS_DIR/drv_ignore_out.csv" --no-stats
+"$DTPIPE" -i "$PG_CONN" --query "SELECT * FROM drv_ignore ORDER BY id" -o "$ARTIFACTS_DIR/drv_ignore_out.csv" --no-stats
 
 grep -q "Alice," "$ARTIFACTS_DIR/drv_ignore_out.csv" \
   && grep -q "200" "$ARTIFACTS_DIR/drv_ignore_out.csv" \

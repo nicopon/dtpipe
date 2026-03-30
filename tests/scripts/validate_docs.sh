@@ -36,7 +36,7 @@ DOC_FILES=("$PROJECT_ROOT/README.md" "$PROJECT_ROOT/COOKBOOK.md")
 "$DTPIPE" --help > "$TMP_DIR/help.tmp" 2>&1
 
 # Flags valid but not enumerated in --help (dynamic provider options, subcommands, dotnet-tool flags)
-ALLOW_LIST="--project --version --help --fake-list --secrets --columnar-fast-path --compute-types --linux-pipes --migration --install --table --strategy --key --sampling-rate --sampling-seed --export-job --auto-migrate --strict-schema --metrics-path --unsafe-query --insert-mode --sql-processors --no-schema-validation --pre-exec --post-exec --finally-exec --from --ref --alias --max-retries --retry-delay-ms"
+ALLOW_LIST="--project --version --help --fake-list --secrets --columnar-fast-path --compute-types --linux-pipes --migration --install --table --strategy --key --sampling-rate --sampling-seed --export-job --auto-migrate --strict-schema --metrics-path --unsafe-query --insert-mode --sql-processors --no-schema-validation --pre-exec --post-exec --finally-exec --from --ref --alias"
 FAILED=0
 
 for doc in "${DOC_FILES[@]}"; do

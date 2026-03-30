@@ -6,8 +6,8 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
+using DtPipe.Processors.Sql;
 using Microsoft.Extensions.Logging;
-using System.IO;
 using System.IO.Pipes;
 using System.Threading.Channels;
 
@@ -27,7 +27,6 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
     private nint _ctx = nint.Zero;
     private Schema? _resultSchema;
     private IReadOnlyList<PipeColumnInfo>? _columns;
-    private readonly List<string> _tempFiles = new();
     private readonly List<IArrowArrayStream> _activeStreams = new();
 
     public IReadOnlyList<PipeColumnInfo>? Columns => _columns;
@@ -106,7 +105,7 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
     {
         var schema = await _registry.WaitForArrowChannelSchemaAsync(channelAlias, ct);
         ValidateSchema(channelAlias, schema);
-        var channelTuple = _registry.GetArrowChannel(channelAlias) ?? throw new Exception("Canal introuvable");
+        var channelTuple = _registry.GetArrowChannel(channelAlias) ?? throw new Exception("Channel not found");
         var streamAdapter = new ChannelArrowStream(schema, channelTuple.Channel.Reader, _logger, ct);
 
         _activeStreams.Add(streamAdapter);
@@ -137,7 +136,7 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
     {
         var schema = await _registry.WaitForArrowChannelSchemaAsync(channelAlias, ct);
         ValidateSchema(channelAlias, schema);
-        var channelTuple = _registry.GetArrowChannel(channelAlias) ?? throw new Exception("Canal introuvable");
+        var channelTuple = _registry.GetArrowChannel(channelAlias) ?? throw new Exception("Channel not found");
 
         var batches = new List<RecordBatch>();
         await foreach (var batch in channelTuple.Channel.Reader.ReadAllAsync(ct))
@@ -246,60 +245,21 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
         }
     }
 
-	private static ReadOnlyMemory<object?[]> ConvertBatchToRows(RecordBatch batch)
-	{
-		var rows = new object?[batch.Length][];
-		for (int r = 0; r < batch.Length; r++)
-		{
-			rows[r] = new object?[batch.ColumnCount];
-			for (int c = 0; c < batch.ColumnCount; c++)
-			{
-				var col = batch.Column(c);
-				rows[r][c] = col == null ? null : ArrowTypeMapper.GetValue(col, r);
-			}
-		}
-		return rows;
-	}
+    private static ReadOnlyMemory<object?[]> ConvertBatchToRows(RecordBatch batch)
+        => SqlProcessorHelpers.ConvertBatchToRows(batch);
 
     public async ValueTask DisposeAsync()
     {
         if (_ctx != nint.Zero) { DataFusionBridge.ContextDestroy(_ctx); _ctx = nint.Zero; }
         if (_runtime != nint.Zero) { DataFusionBridge.RuntimeDestroy(_runtime); _runtime = nint.Zero; }
-        foreach (var f in _tempFiles) try { File.Delete(f); } catch { }
         await Task.CompletedTask;
     }
 
     private void ValidateAliases()
-    {
-        // Validate physical channel aliases for uniqueness (these are the actual registry keys).
-        var aliases = new List<string>();
-        if (!string.IsNullOrEmpty(_mainChannelAlias)) aliases.Add(_mainChannelAlias);
-        aliases.AddRange(_refChannelAliases);
+        => SqlProcessorHelpers.ValidateAliases(_mainChannelAlias, _refChannelAliases);
 
-        var groups = aliases.GroupBy(a => a.ToLowerInvariant())
-                            .Where(g => g.Count() > 1)
-                            .ToList();
-
-        if (groups.Any())
-        {
-            var duplicates = string.Join(", ", groups.Select(g => $"'{string.Join("' vs '", g)}'"));
-            throw new InvalidOperationException($"Case ambiguity detected in stream aliases: {duplicates}");
-        }
-    }
-
-    private void ValidateSchema(string alias, Schema schema)
-    {
-
-        var groups = schema.FieldsList.GroupBy(f => f.Name.ToLowerInvariant())
-                                     .Where(g => g.Count() > 1)
-                                     .ToList();
-
-        if (groups.Any())
-        {
-            var duplicates = string.Join(", ", groups.Select(g => $"'{string.Join("' vs '", g)}'"));
-            throw new InvalidOperationException($"Case ambiguity detected in columns for stream '{alias}': {duplicates}");
-        }
-    }
+    private static void ValidateSchema(string alias, Schema schema)
+        => SqlProcessorHelpers.ValidateSchema(alias, schema);
 
     private sealed class ChannelArrowStream : IArrowArrayStream
     {
@@ -308,12 +268,12 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
         private readonly ILogger _logger;
         private readonly CancellationToken _ct;
 
-        public ChannelArrowStream(Schema schema, ChannelReader<RecordBatch> reader, ILogger logger, CancellationToken ct) 
-        { 
-            _schema = schema; 
-            _reader = reader; 
+        public ChannelArrowStream(Schema schema, ChannelReader<RecordBatch> reader, ILogger logger, CancellationToken ct)
+        {
+            _schema = schema;
+            _reader = reader;
             _logger = logger;
-            _ct = ct; 
+            _ct = ct;
         }
         public Schema Schema => _schema;
 

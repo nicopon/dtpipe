@@ -257,8 +257,6 @@ When consuming DtPipe as a library (without the CLI), drive the pipeline through
 var pipelineOptions = new PipelineOptions
 {
     BatchSize    = 10_000,
-    MaxRetries   = 3,
-    RetryDelayMs = 1000,
     // Schema options, sampling, dry-run, hooks — all optional
 };
 

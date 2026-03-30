@@ -19,12 +19,6 @@ public sealed record PipelineOptions : IOptionSet
 	/// <summary>Maximum rows to process. 0 = unlimited.</summary>
 	public int Limit { get; init; } = 0;
 
-	/// <summary>Maximum number of retries on transient write errors. Default: 3.</summary>
-	public int MaxRetries { get; init; } = 3;
-
-	/// <summary>Initial delay in ms between retries (doubles each attempt). Default: 1000.</summary>
-	public int RetryDelayMs { get; init; } = 1000;
-
 	// --- Sampling ---
 
 	/// <summary>Probability 0.0–1.0 to include a row. 1.0 = all rows (default).</summary>

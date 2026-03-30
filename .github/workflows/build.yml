@@ -21,17 +21,6 @@ jobs:
         with:
           dotnet-version: '10.0.103'
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src/DtPipe.Processors.DataFusion
-
-      - name: Build DataFusion Bridge
-        run: ./build_datafusion_bridge.sh
-
       - name: Restore dependencies
         run: dotnet restore
 
@@ -50,33 +39,37 @@ jobs:
             rid: linux-x64
             runner: ubuntu-latest
             artifact: dtpipe-linux-x64
-          
+            rust_target: ""
+
           - platform: linux-arm64
             rid: linux-arm64
             runner: ubuntu-24.04-arm
             artifact: dtpipe-linux-arm64
-          
+            rust_target: ""
+
           - platform: macos-x64
             rid: osx-x64
             runner: macos-latest
-            rust_target: x86_64-apple-darwin
             artifact: dtpipe-macos-x64
-          
+            rust_target: x86_64-apple-darwin
+
           - platform: macos-arm64
             rid: osx-arm64
             runner: macos-latest
             artifact: dtpipe-macos-arm64
-          
+            rust_target: ""
+
           - platform: windows-x64
             rid: win-x64
             runner: windows-latest
             artifact: dtpipe-windows-x64.exe
-          
+            rust_target: ""
+
           - platform: windows-arm64
             rid: win-arm64
             runner: windows-latest
-            rust_target: aarch64-pc-windows-msvc
             artifact: dtpipe-windows-arm64.exe
+            rust_target: aarch64-pc-windows-msvc
 
     steps:
       - name: Checkout
@@ -90,21 +83,25 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.rust_target || '' }}
+          targets: ${{ matrix.rust_target }}
 
-      - name: Cache Rust build
+      - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src/DtPipe.Processors.DataFusion
+          shared-key: datafusion-${{ matrix.rid }}
 
       - name: Build DataFusion Bridge (Unix)
         if: "!contains(matrix.platform, 'windows')"
         env:
-          RUST_TARGET: ${{ matrix.rust_target || '' }}
+          RUST_TARGET: ${{ matrix.rust_target }}
+          CARGO_BUILD_PROFILE: release-ci
         run: ./build_datafusion_bridge.sh
 
       - name: Build DataFusion Bridge (Windows)
         if: contains(matrix.platform, 'windows')
+        env:
+          CARGO_BUILD_PROFILE: release-ci
         run: |
           if ("${{ matrix.rust_target }}" -ne "") {
               $env:RUST_TARGET="${{ matrix.rust_target }}"
@@ -127,25 +124,36 @@ jobs:
             -p:DebugSymbols=false \
             -o ./dist/release
 
+      - name: Copy DataFusion native lib (Unix)
+        if: "!contains(matrix.platform, 'windows')"
+        run: |
+          for lib in src/DtPipe.Processors/DataFusion/libdtpipe_datafusion.dylib src/DtPipe.Processors/DataFusion/libdtpipe_datafusion.so; do
+            [ -f "$lib" ] && cp "$lib" ./dist/release/ || true
+          done
+
+      - name: Copy DataFusion native lib (Windows)
+        if: contains(matrix.platform, 'windows')
+        shell: bash
+        run: |
+          [ -f "src/DtPipe.Processors/DataFusion/dtpipe_datafusion.dll" ] && cp "src/DtPipe.Processors/DataFusion/dtpipe_datafusion.dll" ./dist/release/ || true
+
       - name: Prepare artifact (Unix)
         if: "!contains(matrix.platform, 'windows')"
         run: |
           if [ -f "./dist/release/DtPipe" ]; then mv ./dist/release/DtPipe ./dist/release/dtpipe; fi
-          mv ./dist/release/dtpipe ./dist/release/${{ matrix.artifact }}
-          chmod +x ./dist/release/${{ matrix.artifact }}
+          chmod +x ./dist/release/dtpipe
 
       - name: Prepare artifact (Windows)
         if: contains(matrix.platform, 'windows')
         shell: bash
         run: |
           if [ -f "./dist/release/DtPipe.exe" ]; then mv ./dist/release/DtPipe.exe ./dist/release/dtpipe.exe; fi
-          mv ./dist/release/dtpipe.exe ./dist/release/${{ matrix.artifact }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: ./dist/release/${{ matrix.artifact }}
+          path: ./dist/release/
           if-no-files-found: error
 
   release:
@@ -153,7 +161,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    
+
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4

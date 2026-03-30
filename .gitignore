@@ -6,6 +6,7 @@
 .nuget_scratch/
 .notes/
 .scripts/
+.tmp/
 
 testScripts/
 exports/

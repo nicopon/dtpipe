@@ -4,7 +4,7 @@ using DtPipe.Adapters.DuckDB;
 using DtPipe.Adapters.Parquet;
 using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
-using DtPipe.Transformers.Columnar.Fake;
+using DtPipe.Transformers.Arrow.Fake;
 using DuckDB.NET.Data;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;

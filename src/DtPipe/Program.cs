@@ -8,13 +8,13 @@ using DtPipe.Core.Pipelines.Dag;
 using DtPipe.Transformers.Services;
 using DtPipe.Observers;
 using DtPipe.Transformers.Row.Expand;
-using DtPipe.Transformers.Columnar.Fake;
-using DtPipe.Transformers.Columnar.Filter;
-using DtPipe.Transformers.Columnar.Format;
-using DtPipe.Transformers.Columnar.Mask;
-using DtPipe.Transformers.Columnar.Null;
-using DtPipe.Transformers.Columnar.Overwrite;
-using DtPipe.Transformers.Columnar.Project;
+using DtPipe.Transformers.Arrow.Fake;
+using DtPipe.Transformers.Arrow.Filter;
+using DtPipe.Transformers.Arrow.Format;
+using DtPipe.Transformers.Arrow.Mask;
+using DtPipe.Transformers.Arrow.Null;
+using DtPipe.Transformers.Arrow.Overwrite;
+using DtPipe.Transformers.Arrow.Project;
 using DtPipe.Transformers.Row.Compute;
 using DtPipe.Transformers.Row.Window;
 using Microsoft.Extensions.DependencyInjection;
@@ -176,7 +176,7 @@ class Program
 		RegisterWriter<DtPipe.Adapters.SqlServer.SqlServerWriterDescriptor>(services);
 
 		// Register Stream Transformers
-		RegisterStreamTransformer<DtPipe.Processors.DataFusion.SqlTransformerFactory>(services);
+		RegisterStreamTransformer<DtPipe.Processors.Sql.CompositeSqlTransformerFactory>(services);
 		RegisterStreamTransformer<DtPipe.Processors.Merge.MergeTransformerFactory>(services);
 
 		// Transformer Factories

@@ -7,7 +7,7 @@ using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
 using DtPipe.Services;
-using DtPipe.Transformers.Columnar.Fake;
+using DtPipe.Transformers.Arrow.Fake;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;

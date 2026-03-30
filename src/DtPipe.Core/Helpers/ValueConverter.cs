@@ -1,4 +1,5 @@
 using System.Globalization;
+using DtPipe.Core.Infrastructure.Arrow;
 
 namespace DtPipe.Core.Helpers;
 
@@ -57,13 +58,15 @@ public static class ValueConverter
         {
             if (underlyingTarget == typeof(Guid))
             {
-                if (bArr.Length == 16) return new Guid(bArr);
+                // Arrow bytes are RFC 4122 big-endian; convert to .NET Guid
+                if (bArr.Length == 16) return ArrowTypeMapper.FromArrowUuidBytes(bArr);
             }
         }
 
         if (val is Guid gVal)
         {
-            if (underlyingTarget == typeof(byte[])) return gVal.ToByteArray();
+            // Produce RFC 4122 big-endian bytes for Arrow FixedSizeBinary(16) columns
+            if (underlyingTarget == typeof(byte[])) return ArrowTypeMapper.ToArrowUuidBytes(gVal);
             if (underlyingTarget == typeof(string)) return gVal.ToString();
         }
 

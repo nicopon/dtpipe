@@ -3,19 +3,20 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-echo "Building DtPipe.Processors.DataFusion (Rust Native Bridge) in Release mode..."
+PROFILE="${CARGO_BUILD_PROFILE:-release}"
+
+echo "Building DtPipe.Processors.DataFusion (Rust Native Bridge) with profile=${PROFILE}..."
 
 RUST_TARGET="${RUST_TARGET:-}"
 TARGET_ARGS=""
-TARGET_DIR="release"
+TARGET_DIR="${RUST_TARGET:+${RUST_TARGET}/}${PROFILE}"
 if [ -n "$RUST_TARGET" ]; then
     TARGET_ARGS="--target $RUST_TARGET"
-    TARGET_DIR="$RUST_TARGET/release"
 fi
 
 # Build the Rust crate
 cd src/DtPipe.Processors.DataFusion
-cargo build --release $TARGET_ARGS
+cargo build --profile "$PROFILE" $TARGET_ARGS
 
 echo "Copying compiled native libraries to DtPipe.Processors/DataFusion/..."
 cd ../..

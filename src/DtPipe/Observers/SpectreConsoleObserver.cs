@@ -87,6 +87,13 @@ public class SpectreConsoleObserver : IExportObserver
 		await controller.RunAsync(reader, pipeline.ToList(), count, inspectionWriter, precomputedSchemas, executionPlan, ct);
 	}
 
+	public void ShowColumnTypeInferenceSuggestion(IReadOnlyDictionary<string, string> suggestions)
+	{
+		if (suggestions.Count == 0) return;
+		var spec = string.Join(",", suggestions.Select(kv => $"{kv.Key}:{kv.Value}"));
+		_console.MarkupLine($"[grey]Suggested --column-types: \"[yellow]{Markup.Escape(spec)}[/]\"[/]");
+	}
+
 	public void ShowSchemaInfo(int columnCount)
 	{
 		// Consolidated into ShowConnectionStatus or separate?

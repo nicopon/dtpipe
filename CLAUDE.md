@@ -62,7 +62,7 @@ The golden DAG fixtures in `GoldenDagDefinitions.cs` are the canonical reference
 | `src/DtPipe.Core` | Abstractions, DAG engine, pipeline models, helpers |
 | `src/DtPipe.Adapters` | Readers and writers for all data sources/targets |
 | `src/DtPipe.Transformers` | Row and columnar data transformers |
-| `src/DtPipe.Processors` | C# side of SQL stream processors (P/Invoke wrappers, factories) |
+| `src/DtPipe.Processors` | C# side of SQL stream processors (DuckDB.NET + DataFusion P/Invoke wrappers, factories) |
 | `src/DtPipe.Processors.DataFusion` | Rust/Cargo native library — DataFusion engine, Arrow IPC bridge |
 | `tests/DtPipe.Tests` | xunit.v3 unit and integration tests |
 
@@ -100,7 +100,7 @@ Neither `--sql` nor boolean processor flags (e.g. `--merge`) trigger a split. Th
 
 - `--from a,b,c` declares one or more streaming main sources (comma-separated). Fan-out consumers use a single alias; multi-stream processors (e.g. merge) use multiple aliases.
 - `--ref a,b` declares materialized reference sources (preloaded before query execution, comma-separated). Used by SQL JOIN branches.
-- `--sql "<query>"` runs an inline SQL query via the DataFusion processor.
+- `--sql "<query>"` runs an inline SQL query. Default engine: DataFusion (native Rust, fast analytics). Use `--sql-engine duckdb` (or `DTPIPE_SQL_ENGINE=duckdb`) to switch to the DuckDB engine.
 - `--merge` (and future boolean flags) declares the processor explicitly by name. Each processor is registered as a `BooleanProcessorFlag` in `CliPipelineRules`.
 
 Branches communicate via `IMemoryChannelRegistry` (either native `Channel<IReadOnlyList<object?[]>>` or Arrow `Channel<RecordBatch>`). The `MappedMemoryChannelRegistry` handles logical-to-physical alias resolution for fan-out (broadcast/tee) scenarios. A `BranchChannelContext` injected per branch carries an `AliasMap` that translates logical aliases (as written in CLI args) to physical channel names (including fan-out sub-channels like `s__fan_0`). This mapping is populated by `DagOrchestrator` and is transparent to all downstream components including processors.
@@ -121,15 +121,22 @@ In the patterns below, `{reader:cfg}` represents any reader and its full provide
 | **Diamond (fan-out → filter → join)** | `-i {reader:cfg} --alias s  --from s --filter '...' --alias hi  --from s --filter '...' --alias lo  --from hi --ref lo --sql "SELECT * FROM hi JOIN lo ON ..."` | 4 |
 | **Join → fan-out** | `... --from m --ref r --sql "SELECT ..." --alias joined  --from joined -o {writerA:cfg}  --from joined -o {writerB:cfg}` | 5 |
 
-### DataFusion Processor
+### SQL Processors
 
-`DataFusionProcessor` (in `DtPipe.Processors`) is a two-layer component:
-- **C# layer** (`DtPipe.Processors`): `SqlTransformerFactory` / `DataFusionProcessor` implement `IStreamTransformerFactory` / `IColumnarStreamReader` and call into the native library via P/Invoke (`DataFusionBridge`).
+`CompositeSqlTransformerFactory` is the entry point registered in DI; it selects the engine based on `--sql-engine` (or `DTPIPE_SQL_ENGINE`). Two engines are available:
+
+**DataFusion (default)** — `DataFusionSqlTransformerFactory` / `DataFusionProcessor`:
+- **C# layer** (`DtPipe.Processors`): `DataFusionSqlTransformerFactory` / `DataFusionProcessor` implement `IStreamTransformerFactory` / `IColumnarStreamReader` and call into the native library via P/Invoke (`DataFusionBridge`).
 - **Rust layer** (`DtPipe.Processors.DataFusion`): Cargo library (`libdatafusion_bridge`) hosting a Tokio runtime and a DataFusion session context. Receives Arrow data via the C Data Interface and streams results back through an anonymous pipe using Arrow IPC.
+
+**DuckDB (alternative, `--sql-engine duckdb`)** — `DuckDBSqlTransformerFactory` / `DuckDBSqlProcessor`:
+- Pure C# using DuckDB.NET. No native bridge build required.
+- Streaming input (`--from`): `RegisterTableFunction` + `CREATE VIEW alias AS SELECT * FROM __dtpipe_stream_alias()`.
+- Materialized input (`--ref`): `CREATE TABLE alias (...)` + `DuckDBAppender` row by row.
 
 Logical SQL table names come from the branch args (`--from`/`--ref`). Physical channel aliases are resolved by `DagOrchestrator` before the processor is created, via `BranchChannelContext.AliasMap` — processors never need to know about fan-out sub-channel naming (`__fan_N` suffixes).
 
-**`--ref` materialization is intentional.** Secondary sources declared via `--ref` are fully read into memory before query execution (`RegisterChannelSourceAsync` collects all `RecordBatch`es). This is required for DataFusion to build a cost-based execution plan — streaming both main and reference tables simultaneously prevents join optimization. Only the source declared via `--from` (the main) uses a true streaming path (`ChannelArrowStream`). Keep `--ref` tables at manageable size; for large lookups, pre-filter upstream.
+**`--ref` materialization is intentional.** Secondary sources declared via `--ref` are fully read into memory before query execution. This is required for both engines to build a cost-based execution plan — streaming both main and reference tables simultaneously prevents join optimization. Only the source declared via `--from` (the main) uses a true streaming path. Keep `--ref` tables at manageable size; for large lookups, pre-filter upstream.
 
 ### Transformer Pipeline
 
@@ -151,6 +158,27 @@ Set `DEBUG=1` to enable verbose branch-level logging to stderr:
 ```bash
 DEBUG=1 dtpipe --input pg:"..." --output csv:out.csv
 ```
+
+## Pipeline Design Principles
+
+### No magic conversions in the engine core
+
+The DtPipe engine (Core, Processors, DAG orchestrator) must **never** perform implicit type conversions to work around limitations or specificities of a particular adapter (reader or writer). Adapter-specific behavior belongs in the adapter, not the engine.
+
+When a type mismatch arises between two pipeline stages (e.g. a CSV source produces a generic `string` column for what is logically a UUID, while a downstream SQL step joining it with a Parquet or database source expects a typed UUID column), the correct remediation is one of the following — in order of preference:
+
+1. **Adapter parameterization** — Add configuration to the source adapter that allows the user to declare the logical type of one or more columns and apply explicit parsing at read time. Example: a `--column-type "Id:uuid"` option on the CSV reader that parses Base64 or UUID-formatted strings into `byte[16]` during ingestion.
+
+2. **Pipeline transformer** — Insert an existing or new DtPipe transformer between the source and the SQL step to convert the column to the expected format. Example: a `--compute` expression that parses a string column into a typed UUID representation.
+
+3. **SQL processor capabilities** — Use the SQL engine's native casting and formatting functions directly in the query. Example: `CAST(base64_decode(id) AS UUID)` in the `--sql` expression.
+
+What is explicitly **forbidden**:
+- Detecting a specific source format (e.g. "this string looks like a Base64-encoded UUID") and silently converting it inside a consumer, type mapper, or schema factory.
+- Changing the Arrow schema or type mapping in `AdoToArrow`, `ArrowTypeMapper`, or `PipeColumnInfo` to compensate for a specific adapter's output format.
+- Inserting conditional branches in `ExportService`, `PipelineExecutor`, or `DagOrchestrator` based on adapter identity.
+
+The canonical Arrow representation of a UUID in DtPipe is `BinaryType` with `.NET Guid.ToByteArray()` byte order. Any adapter that produces UUID values must emit them in this format, or the user must insert an explicit conversion step.
 
 ## Adding a New Adapter
 

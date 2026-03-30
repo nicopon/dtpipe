@@ -3,7 +3,7 @@ using DtPipe.Core.Options;
 
 namespace DtPipe.Transformers.Row.Expand;
 
-public class ExpandOptions : IOptionSet
+public class ExpandOptions : ITransformerOptions
 {
 	public static string Prefix => "expand";
 	public static string DisplayName => "Expand Options";

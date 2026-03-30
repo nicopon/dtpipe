@@ -32,12 +32,18 @@ timeit() {
     local label="$1"
     shift
     echo "  [$label] Running..."
-    local start end duration
+    local start end duration ec
     start=$(date +%s%N)
     "$@"
+    ec=$?
     end=$(date +%s%N)
     duration=$(( (end - start) / 1000000 ))
-    echo "  [$label] Done in ${duration}ms"
+    if [ $ec -eq 0 ]; then
+        echo "  [$label] Done in ${duration}ms"
+    else
+        echo "  [$label] FAILED (exit code $ec) in ${duration}ms" >&2
+    fi
+    return $ec
 }
 
 echo "======================================"
@@ -108,7 +114,7 @@ echo "  Parquet rows: $ROWS"
 # ----------------------------------------
 if [ $RUN_SQL -eq 1 ]; then
     echo ""
-    echo "[5] SQL JOIN benchmark (DataFusion, streaming join)"
+    echo "[5] SQL JOIN benchmark (dual engine: DataFusion vs DuckDB)"
 
     MAIN_PARQUET="$ARTIFACTS_DIR/main.parquet"
     REF_CSV="$ARTIFACTS_DIR/ref1_10k.csv"
@@ -121,14 +127,36 @@ if [ $RUN_SQL -eq 1 ]; then
 
     QUERY_FUSION='SELECT COUNT(*) FROM main m JOIN ref r ON m.GenerateIndex = CAST(r.Id AS BIGINT) JOIN ref2 r2 ON m.GenerateIndex = CAST(r2.Id AS BIGINT)'
 
-    echo "  DAG mode (--input + --from + --ref + --sql)..."
-    timeit "datafusion-dag" "$DTPIPE" \
+    DTPIPE_DIR="$(dirname "$DTPIPE")"
+    DATAFUSION_AVAILABLE=0
+    if [ -f "$DTPIPE_DIR/libdtpipe_datafusion.dylib" ] || \
+       [ -f "$DTPIPE_DIR/libdtpipe_datafusion.so" ] || \
+       [ -f "$DTPIPE_DIR/dtpipe_datafusion.dll" ]; then
+        DATAFUSION_AVAILABLE=1
+    fi
+
+    if [ $DATAFUSION_AVAILABLE -eq 1 ]; then
+        echo "  DataFusion engine..."
+        timeit "datafusion-dag" "$DTPIPE" \
+          -i "parquet:$MAIN_PARQUET" --alias main \
+          -i "csv:$REF_CSV"          --alias ref \
+          -i "csv:$REF2_CSV"         --alias ref2 \
+          --from main --ref ref --ref ref2 \
+          --sql "$QUERY_FUSION" --sql-engine datafusion \
+          -o null --no-stats
+    else
+        echo "  DataFusion engine: SKIPPED (native lib not found — run ./build_datafusion_bridge.sh first)"
+    fi
+
+    echo "  DuckDB engine..."
+    timeit "duckdb-dag" "$DTPIPE" \
       -i "parquet:$MAIN_PARQUET" --alias main \
       -i "csv:$REF_CSV"          --alias ref \
       -i "csv:$REF2_CSV"         --alias ref2 \
       --from main --ref ref --ref ref2 \
-      --sql "$QUERY_FUSION" \
+      --sql "$QUERY_FUSION" --sql-engine duckdb \
       -o null --no-stats
+      
 fi
 
 # ----------------------------------------

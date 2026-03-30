@@ -4,9 +4,9 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
-using DtPipe.Transformers.Columnar;
-using DtPipe.Transformers.Columnar.Filter;
-using DtPipe.Transformers.Columnar.Format;
+using DtPipe.Transformers.Arrow;
+using DtPipe.Transformers.Arrow.Filter;
+using DtPipe.Transformers.Arrow.Format;
 using DtPipe.Transformers.Row.Compute;
 using DtPipe.Services;
 using DtPipe.Transformers.Services;
@@ -91,7 +91,7 @@ public class ExportServiceIntegrationTests
         // Pipeline:
         // 1. Filter (Columnar): Val > 15 (Drops Id 1)
         var jsProvider = _serviceProvider.GetRequiredService<IJsEngineProvider>();
-        var filter = new FilterDataTransformer(new FilterTransformerOptions { Filters = new[] { "Val > 15" } }, jsProvider);
+        var filter = new FilterDataTransformer(new FilterOptions { Filters = new[] { "Val > 15" } }, jsProvider);
         await filter.InitializeAsync(columns);
 
         // 2. Compute (Row): NewVal = Val * 2
