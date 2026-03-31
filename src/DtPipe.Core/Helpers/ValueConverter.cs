@@ -51,6 +51,9 @@ public static class ValueConverter
             if (underlyingTarget == typeof(bool))
                 return bool.TryParse(s, out var b) ? b : bool.Parse(s);
 
+            if (underlyingTarget.IsEnum)
+                return Enum.Parse(underlyingTarget, s, true);
+
             return Convert.ChangeType(s, underlyingTarget, CultureInfo.InvariantCulture);
         }
 
@@ -88,11 +91,6 @@ public static class ValueConverter
                 if (longVal > 1_000_000_000_000) return DateTimeOffset.FromUnixTimeMilliseconds(longVal);
                 return DateTimeOffset.FromUnixTimeSeconds(longVal);
             }
-        }
-
-        if (underlyingTarget.IsEnum && val is string enumStr)
-        {
-            return Enum.Parse(underlyingTarget, enumStr, true);
         }
 
         return Convert.ChangeType(val, underlyingTarget, CultureInfo.InvariantCulture);

@@ -35,6 +35,7 @@ public sealed class CliJobOptions
     public required Option<string?> Prefix { get; init; }
     public required Option<bool> AutoMigrate { get; init; }
     public required Option<string[]> Sql { get; init; }
+    public required Option<string[]> SqlEngine { get; init; }
     public required Option<string?> ExportJob { get; init; }
     public required Option<string[]> Rename { get; init; }
     public required Option<string[]> Drop { get; init; }

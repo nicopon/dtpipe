@@ -20,6 +20,7 @@ internal static class CoreOptionsBuilder
         { "--query",              CliPipelinePhase.Reader },
         { "--alias",              CliPipelinePhase.Global },
         { "--sql",                CliPipelinePhase.Global },
+        { "--sql-engine",         CliPipelinePhase.Global },
         { "--strategy",           CliPipelinePhase.Writer },
         { "--insert-mode",        CliPipelinePhase.Writer },
         { "--table",              CliPipelinePhase.Writer },
@@ -134,6 +135,8 @@ internal static class CoreOptionsBuilder
 
         var aliasOption = new Option<string[]>("--alias") { Description = "Alias(es) for the current DAG branch or streams" };
 
+        var sqlEngineOption = new Option<string[]>("--sql-engine") { Description = "SQL Engine (datafusion|duckdb)", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
+
         var renameOption = new Option<string[]>("--rename") { Description = "Rename columns (Old:New). repeatable.", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
         var dropOption = new Option<string[]>("--drop") { Description = "Drop columns. repeatable.", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
         var throttleOption = new Option<int[]>("--throttle") { Description = "Throttle speed (rows/sec)", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
@@ -157,7 +160,7 @@ internal static class CoreOptionsBuilder
             unsafeQueryOption, dryRunOption, noStatsOption, limitOption, samplingRateOption, samplingSeedOption, keyOption,
             jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption, finallyExecOption,
             strategyOption, insertModeOption, tableOption, strictSchemaOption,
-            noSchemaValidationOption, metricsPathOption, autoMigrateOption, sqlOption, aliasOption,
+            noSchemaValidationOption, metricsPathOption, autoMigrateOption, sqlOption, aliasOption, sqlEngineOption,
             renameOption, dropOption, throttleOption, ignoreNullsOption,
             mergeOption, refOption, fromOption, prefixOption
         };
@@ -174,7 +177,7 @@ internal static class CoreOptionsBuilder
             keyOption, jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption,
             finallyExecOption, strategyOption, insertModeOption, tableOption,
             strictSchemaOption, noSchemaValidationOption, metricsPathOption, autoMigrateOption, sqlOption,
-            aliasOption, renameOption, dropOption, throttleOption, ignoreNullsOption,
+            aliasOption, sqlEngineOption, renameOption, dropOption, throttleOption, ignoreNullsOption,
             mergeOption, refOption, fromOption, prefixOption, allList);
     }
 
@@ -308,6 +311,7 @@ public record CoreCliOptions(
     Option<bool> AutoMigrate,
     Option<string[]> Sql,
     Option<string[]> Alias,
+    Option<string[]> SqlEngine,
     Option<string[]> Rename,
     Option<string[]> Drop,
     Option<int[]> Throttle,

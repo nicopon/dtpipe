@@ -125,10 +125,10 @@ jobs:
 
       - name: Create archive (Windows)
         if: contains(matrix.platform, 'windows')
-        shell: bash
+        shell: pwsh
         run: |
           cd ./dist/release
-          zip ${{ matrix.artifact }}.zip dtpipe.exe
+          Compress-Archive -Path dtpipe.exe -DestinationPath ${{ matrix.artifact }}.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -202,5 +202,8 @@ jobs:
         run: dotnet pack DtPipe.sln -c Release
 
       - name: Push to NuGet
-        # Push all generated nupkg files, continuing on error if any single package fails (e.g. duplicate)
-        run: dotnet nuget push "**/*.nupkg" --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+        # Push only DtPipe.* or dtpipe.* packages, skipping duplicate versions.
+        run: |
+          find . -name "*.nupkg" \
+            -iname "dtpipe*" \
+            -exec dotnet nuget push {} --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate \;

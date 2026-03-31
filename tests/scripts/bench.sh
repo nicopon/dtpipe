@@ -127,26 +127,14 @@ if [ $RUN_SQL -eq 1 ]; then
 
     QUERY_FUSION='SELECT COUNT(*) FROM main m JOIN ref r ON m.GenerateIndex = CAST(r.Id AS BIGINT) JOIN ref2 r2 ON m.GenerateIndex = CAST(r2.Id AS BIGINT)'
 
-    DTPIPE_DIR="$(dirname "$DTPIPE")"
-    DATAFUSION_AVAILABLE=0
-    if [ -f "$DTPIPE_DIR/libdtpipe_datafusion.dylib" ] || \
-       [ -f "$DTPIPE_DIR/libdtpipe_datafusion.so" ] || \
-       [ -f "$DTPIPE_DIR/dtpipe_datafusion.dll" ]; then
-        DATAFUSION_AVAILABLE=1
-    fi
-
-    if [ $DATAFUSION_AVAILABLE -eq 1 ]; then
-        echo "  DataFusion engine..."
-        timeit "datafusion-dag" "$DTPIPE" \
-          -i "parquet:$MAIN_PARQUET" --alias main \
-          -i "csv:$REF_CSV"          --alias ref \
-          -i "csv:$REF2_CSV"         --alias ref2 \
-          --from main --ref ref --ref ref2 \
-          --sql "$QUERY_FUSION" --sql-engine datafusion \
-          -o null --no-stats
-    else
-        echo "  DataFusion engine: SKIPPED (native lib not found — run ./build_datafusion_bridge.sh first)"
-    fi
+    echo "  DataFusion engine..."
+    timeit "datafusion-dag" "$DTPIPE" \
+      -i "parquet:$MAIN_PARQUET" --alias main \
+      -i "csv:$REF_CSV"          --alias ref \
+      -i "csv:$REF2_CSV"         --alias ref2 \
+      --from main --ref ref --ref ref2 \
+      --sql "$QUERY_FUSION" --sql-engine datafusion \
+      -o null --no-stats
 
     echo "  DuckDB engine..."
     timeit "duckdb-dag" "$DTPIPE" \

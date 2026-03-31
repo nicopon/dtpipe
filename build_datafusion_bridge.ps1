@@ -3,18 +3,21 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = $PSScriptRoot
 Set-Location $ScriptDir
 
-Write-Host "Building DtPipe.Processors.DataFusion (Rust Native Bridge) in Release mode..." -ForegroundColor Green
+$ProfileName = $env:CARGO_BUILD_PROFILE
+if (!$ProfileName) { $ProfileName = "release" }
+
+Write-Host "Building DtPipe.Processors.DataFusion (Rust Native Bridge) with profile=$ProfileName..." -ForegroundColor Green
 
 $TargetArgs = @()
-$TargetDir = "release"
+$TargetDir = "$ProfileName"
 if ($env:RUST_TARGET) {
     $TargetArgs += "--target", $env:RUST_TARGET
-    $TargetDir = "$env:RUST_TARGET\release"
+    $TargetDir = "$env:RUST_TARGET\$ProfileName"
 }
 
 # Build the Rust crate
 Set-Location "src\DtPipe.Processors.DataFusion"
-& cargo build --release @TargetArgs
+& cargo build --profile "$ProfileName" @TargetArgs
 
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Cargo build failed"

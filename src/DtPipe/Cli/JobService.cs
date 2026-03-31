@@ -138,6 +138,7 @@ public class JobService
 				MetricsPath = opts.MetricsPath,
 				AutoMigrate = opts.AutoMigrate,
 				Sql = opts.Sql,
+				SqlEngine = opts.SqlEngine,
 				Prefix = opts.Prefix,
 				ExportJob = opts.ExportJob,
 				Rename = opts.Rename,
