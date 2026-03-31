@@ -109,7 +109,8 @@ public class JsonLAdapterTests : IAsyncLifetime
             {
                 rows.AddRange(batch.ToArray());
             }
-
+			await reader.DisposeAsync();
+			
             // Act 2: Write
             var writer = new JsonLDataWriter(finalPath, new JsonLWriterOptions());
             await writer.InitializeAsync(columns);
