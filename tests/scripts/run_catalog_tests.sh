@@ -132,7 +132,9 @@ run_test "T20" "$DTPIPE -i artifacts/test_data.csv --limit 0 -o artifacts/output
 
 # 2. Advanced Pipelines & SQL Processors
 # T21: DataFusion JOIN between Parquet and CSV on shared Id column
-run_test "T21" "$DTPIPE -i artifacts/test_data.parquet --alias p -i artifacts/test_data.csv --alias c --from p --ref c --sql \"SELECT p.*, c.email FROM p JOIN c ON p.id = c.id\" -o artifacts/output_t21.parquet"
+# --csv-column-types "id:uuid" on the CSV source ensures both sides of the JOIN are FixedSizeBinary(16)+arrow.uuid
+# (identical types → no DataFusion type coercion needed → no hang)
+run_test "T21" "$DTPIPE -i artifacts/test_data.parquet --alias p -i artifacts/test_data.csv --csv-column-types \"id:uuid\" --alias c --from p --ref c --sql \"SELECT p.*, c.email FROM p JOIN c ON p.id = c.id\" -o artifacts/output_t21.parquet"
 # T22: DataFusion aggregation: count(*) and avg() from PostgreSQL
 run_test "T22" "$DTPIPE -i \"$PG\" -q \"SELECT * FROM users_test\" --alias db --from db --sql \"SELECT count(*) as total, avg(length(username)) FROM db\" -o artifacts/output_t22.csv"
 # T23: DataFusion SQL filter on big Parquet (server-side pushdown)
@@ -174,7 +176,8 @@ run_test "T39" "$DTPIPE -i artifacts/test_data.csv --limit 10 --export-job artif
 # T40: Reload and execute the exported job file produced by T39
 run_test "T40" "$DTPIPE --job artifacts/output_t39.yaml"
 # T41: DataFusion JOIN between CSV and DuckDB table on shared Id
-run_test "T41" "$DTPIPE -i artifacts/test_data.csv --alias c -i artifacts/test_data.duckdb --table \"geography\" --alias g --from c --ref g --sql \"SELECT c.*, g.city FROM c JOIN g ON c.id = g.id\" -o artifacts/output_t41.parquet"
+# --csv-column-types "id:uuid" on the CSV source ensures both sides of the JOIN are FixedSizeBinary(16)+arrow.uuid
+run_test "T41" "$DTPIPE -i artifacts/test_data.csv --csv-column-types \"id:uuid\" --alias c -i artifacts/test_data.duckdb --table \"geography\" --alias g --from c --ref g --sql \"SELECT c.*, g.city FROM c JOIN g ON c.id = g.id\" -o artifacts/output_t41.parquet"
 # T42: Compute with Math.min to clamp Score at 500
 run_test "T42" "$DTPIPE -i artifacts/test_data.csv --compute \"Score:Math.min(row.Score, 500)\" -o artifacts/output_t42.csv"
 # T43: DataFusion window function: count(*) over() applied to a PG result
@@ -387,9 +390,10 @@ run_test "T137" "$DTPIPE -i artifacts/test_data.csv --alias src \
   --from src --limit 10 -o artifacts/output_t137_c.arrow"
 
 # T138: Fan-out after SQL processor (join -> tee)
+# --csv-column-types "id:uuid" on the CSV source: same as T21
 run_test "T138" "$DTPIPE \
   -i artifacts/test_data.parquet --alias p \
-  -i artifacts/test_data.csv --alias c \
+  -i artifacts/test_data.csv --csv-column-types \"id:uuid\" --alias c \
   --from p --ref c --sql \"SELECT p.*, c.email FROM p JOIN c ON p.id = c.id\" --alias joined \
   --from joined -o artifacts/output_t138_a.csv \
   --from joined -o artifacts/output_t138_b.parquet"

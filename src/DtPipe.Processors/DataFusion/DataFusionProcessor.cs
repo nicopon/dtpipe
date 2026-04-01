@@ -82,7 +82,7 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
             InspectSchema();
 
             _columns = _resultSchema!.FieldsList
-                .Select(f => new PipeColumnInfo(f.Name, ArrowTypeMapper.GetClrType(f.DataType), f.IsNullable))
+                .Select(f => new PipeColumnInfo(f.Name, ArrowTypeMapper.GetClrTypeFromField(f), f.IsNullable))
                 .ToList();
         }
         catch (Exception ex)
@@ -203,6 +203,14 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
             {
                 _logger.LogError(ex, "Exception in bridge execution: {Message}", ex.Message);
                 return false;
+            }
+            finally
+            {
+                // Always close the write end of the pipe after Rust returns (success or error).
+                // If Rust returned an error without writing an IPC EOS marker, the read side
+                // (ArrowStreamReader) would block forever. Disposing the client handle here
+                // signals EOF to the reader, unblocking ReadNextRecordBatchAsync.
+                try { pipeServer.ClientSafePipeHandle.Dispose(); } catch { }
             }
         });
 

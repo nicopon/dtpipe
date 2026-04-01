@@ -1,6 +1,7 @@
+using Apache.Arrow.Arrays;
 using DtPipe.Adapters.Arrow;
-using DtPipe.Core.Models;
 using DtPipe.Core.Infrastructure.Arrow;
+using DtPipe.Core.Models;
 using FluentAssertions;
 using Xunit;
 
@@ -42,19 +43,22 @@ public class ArrowAdapterTests : IAsyncLifetime
 	}
 
 	[Fact]
-	public void ArrowTypeMapper_GetArrowType_GuidReturnsBinaryType()
+	public void ArrowTypeMapper_GetArrowType_GuidReturnsFixedSizeBinary16()
 	{
+		// Guid uses FixedSizeBinaryType(16) + arrow.uuid metadata (Arrow canonical extension)
 		var arrowType = ArrowTypeMapper.GetArrowType(typeof(Guid));
-		arrowType.Should().BeOfType<Apache.Arrow.Types.BinaryType>();
+		arrowType.Should().BeOfType<Apache.Arrow.Types.FixedSizeBinaryType>();
+		((Apache.Arrow.Types.FixedSizeBinaryType)arrowType).ByteWidth.Should().Be(16);
 	}
 
 	[Fact]
 	public void ArrowTypeMapper_AppendValue_GuidProducesRfc4122Bytes()
 	{
 		var guid = Guid.Parse("550e8400-e29b-41d4-a716-446655440000");
-		var builder = new Apache.Arrow.BinaryArray.Builder();
+		// Guid uses UuidArrayBuilder → FixedSizeBinaryArray (arrow.uuid canonical extension)
+		var builder = new UuidArrayBuilder();
 		ArrowTypeMapper.AppendValue(builder, guid);
-		var array = (Apache.Arrow.BinaryArray)ArrowTypeMapper.BuildArray(builder);
+		var array = (Apache.Arrow.Arrays.FixedSizeBinaryArray)ArrowTypeMapper.BuildArray(builder);
 
 		var bytes = array.GetBytes(0).ToArray();
 		// First byte of RFC 4122 for "550e8400-..." must be 0x55

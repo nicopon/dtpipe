@@ -172,7 +172,7 @@ public sealed partial class FormatDataTransformer : BaseColumnarTransformer, IRe
 				if (_skipNull && proc.ReferencedIndices.Length > 0)
 				{
 					// Since it's self-referencing, check the exact row in the batch
-					var val = ArrowTypeMapper.GetValue(batch.Column(proc.ReferencedIndices[0]), i);
+					var val = ArrowTypeMapper.GetValueForField(batch.Column(proc.ReferencedIndices[0]), batch.Schema.GetFieldByIndex(proc.ReferencedIndices[0]), i);
 					if (val == null) shouldSkip = true;
 				}
 
@@ -192,7 +192,7 @@ public sealed partial class FormatDataTransformer : BaseColumnarTransformer, IRe
 					else
 					{
 						// It's a self-reference (refIdx == colIdx)
-						var val = ArrowTypeMapper.GetValue(batch.Column(segment.ColumnIndex), i);
+						var val = ArrowTypeMapper.GetValueForField(batch.Column(segment.ColumnIndex), batch.Schema.GetFieldByIndex(segment.ColumnIndex), i);
 						if (val != null)
 						{
 							if (segment.Format != null)

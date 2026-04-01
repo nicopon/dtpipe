@@ -120,8 +120,32 @@ public class CsvStreamReader : IStreamReader, IColumnTypeInferenceCapable
 			}
 		}
 
-		// Build column parsers from --column-types option
+		// Build column parsers from --column-types option (or auto-inferred types)
 		var typeOverrides = ParseColumnTypesOption(_options.ColumnTypes);
+
+		// Auto-infer types when --auto-column-types is set and no explicit --column-types given
+		if (_options.AutoColumnTypes && string.IsNullOrWhiteSpace(_options.ColumnTypes)
+		    && !string.IsNullOrEmpty(_filePath) && _filePath != "-")
+		{
+			try
+			{
+				const int autoSampleCount = 100;
+				var inferred = await InferColumnTypesAsync(autoSampleCount, default);
+				if (inferred.Count > 0)
+				{
+					_autoAppliedTypes = inferred;
+					typeOverrides = inferred
+						.Select(kv => (kv.Key, Type: ResolveHintToClrType(kv.Value)))
+						.Where(x => x.Type != null)
+						.ToDictionary(x => x.Key, x => x.Type!, StringComparer.OrdinalIgnoreCase);
+				}
+			}
+			catch (Exception ex)
+			{
+				_logger.LogWarning(ex, "Auto column-type inference failed, falling back to string columns.");
+			}
+		}
+
 		_columnParsers = BuildColumnParsers(_headers, typeOverrides);
 
 		// Derive column schema: use declared type when available, otherwise string
@@ -131,6 +155,9 @@ public class CsvStreamReader : IStreamReader, IColumnTypeInferenceCapable
 			return new PipeColumnInfo(h, clrType, true);
 		}).ToList();
 	}
+
+	private IReadOnlyDictionary<string, string>? _autoAppliedTypes;
+	public IReadOnlyDictionary<string, string>? AutoAppliedTypes => _autoAppliedTypes;
 
 	private readonly SemaphoreSlim _lock = new(1, 1);
 	private bool _isDisposed;
@@ -328,7 +355,7 @@ public class CsvStreamReader : IStreamReader, IColumnTypeInferenceCapable
 		"long" or "int64" => typeof(long),
 		"double" or "float64" => typeof(double),
 		"float" or "float32" or "single" => typeof(float),
-		"decimal" => typeof(decimal),
+		"decimal" or "numeric" or "money" => typeof(decimal),
 		"bool" or "boolean" => typeof(bool),
 		"datetime" or "date" => typeof(DateTime),
 		"datetimeoffset" or "timestamp" => typeof(DateTimeOffset),
@@ -422,6 +449,21 @@ public class CsvStreamReader : IStreamReader, IColumnTypeInferenceCapable
 			// Prefer int32 when all values fit
 			return samples.All(s => int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
 				? "int32" : "int64";
+		}
+
+		if (allMatch(s => decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out _)
+		                  && s.Contains('.')))
+		{
+			// Suggest decimal when values have a decimal point and exceed double precision
+			// (any value with > 15 significant digits, or explicit decimal notation)
+			bool needsDecimalPrecision = samples.Any(s =>
+			{
+				if (!decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out var d)) return false;
+				if (!double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var dbl)) return true;
+				// Check if round-tripping through double loses precision
+				return d != (decimal)dbl;
+			});
+			return needsDecimalPrecision ? "decimal" : "double";
 		}
 
 		if (allMatch(s => double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out _)))

@@ -2,7 +2,10 @@ using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
 using System.Text;
+using Apache.Arrow;
+using Apache.Arrow.Arrays;
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
 using DtPipe.Core.Helpers;
 using Microsoft.Extensions.Logging;
@@ -10,7 +13,7 @@ using Npgsql;
 
 namespace DtPipe.Adapters.PostgreSQL;
 
-public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
+public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter, IColumnarDataWriter
 {
 	private readonly PostgreSqlWriterOptions _options;
 	private readonly List<string> _keyColumns = new();
@@ -23,6 +26,11 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 
     // Stable mapping: Metadata Index -> Source Index
     private int[]? _targetToSourceMap;
+    // Per-column converters — built once in EnsureMetaDataInitializedAsync (row-mode path)
+    private Func<object?, object?>[]? _converters;
+    // Per-column typed writers — built once in EnsureMetaDataInitializedAsync (columnar path)
+    // Action<array, rowIndex, importer> — sync Npgsql Write<T>(), zero boxing, zero Task allocation
+    private Action<IArrowArray, int, NpgsqlBinaryImporter>[]? _arrowColumnWriters;
 
 	private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.PostgreSqlDialect();
 	public override ISqlDialect Dialect => _dialect;
@@ -168,6 +176,21 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		_targetNames = tNames.ToArray();
 		_columnTypes = cTypes.ToArray();
 
+		// Build per-column converters once — eliminates per-cell ConvertValue dispatch (row-mode)
+		_converters = new Func<object?, object?>[_targetToSourceMap.Length];
+		for (int k = 0; k < _targetToSourceMap.Length; k++)
+		{
+			var sourceClrType = _columns![_targetToSourceMap[k]].ClrType;
+			_converters[k] = ColumnConverterFactory.Build(sourceClrType, _targetTypes[k]);
+		}
+
+		// Build per-column Arrow writers — sync Npgsql Write<T>(), zero boxing (columnar path)
+		_arrowColumnWriters = new Action<IArrowArray, int, NpgsqlBinaryImporter>[_targetToSourceMap.Length];
+		for (int k = 0; k < _targetToSourceMap.Length; k++)
+		{
+			_arrowColumnWriters[k] = BuildNpgsqlColumnWriter(_columnTypes[k]);
+		}
+
 		_metaDataInitialized = true;
 	}
 
@@ -246,6 +269,176 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 		}
 	}
 
+	/// <summary>
+	/// Columnar write path: receives an Arrow RecordBatch and feeds it directly into
+	/// NpgsqlBinaryImporter without materializing an intermediate object?[] row buffer.
+	/// Activated automatically by PipelineExecutor when the upstream source is columnar
+	/// (Parquet, PostgreSQL, DuckDB SQL output).
+	/// </summary>
+	public async ValueTask WriteRecordBatchAsync(RecordBatch batch, CancellationToken ct = default)
+	{
+		if (batch.Length == 0) return;
+
+		await EnsureConnectionOpenAsync(ct);
+		await EnsureMetaDataInitializedAsync(ct);
+
+		using (batch)
+		{
+			if (_options.Strategy is PostgreSqlWriteStrategy.Upsert or PostgreSqlWriteStrategy.Ignore)
+			{
+				await WriteRecordBatchViaStagingAsync(batch, ct);
+			}
+			else
+			{
+				await WriteRecordBatchDirectAsync(batch, ct);
+			}
+		}
+	}
+
+	private async Task WriteRecordBatchDirectAsync(RecordBatch batch, CancellationToken ct)
+	{
+		var copySql = BuildCopySql(_quotedTargetTableName);
+		await using var writer = await ((NpgsqlConnection)_connection!).BeginBinaryImportAsync(copySql, ct);
+		await WriteColumnarToCopyAsync(writer, batch, ct);
+		await writer.CompleteAsync(ct);
+	}
+
+	private async Task WriteRecordBatchViaStagingAsync(RecordBatch batch, CancellationToken ct)
+	{
+		var stagingTable = $"tmp_batch_{Guid.NewGuid():N}";
+		await ExecuteNonQueryAsync($"CREATE TEMP TABLE {stagingTable} (LIKE {_quotedTargetTableName} INCLUDING DEFAULTS)", ct);
+
+		try
+		{
+			var copySql = BuildCopySql(stagingTable);
+			await using (var writer = await ((NpgsqlConnection)_connection!).BeginBinaryImportAsync(copySql, ct))
+			{
+				await WriteColumnarToCopyAsync(writer, batch, ct);
+				await writer.CompleteAsync(ct);
+			}
+
+			await MergeStagingBatchAsync(stagingTable, ct);
+		}
+		finally
+		{
+			try { await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS {stagingTable}", ct); } catch { }
+		}
+	}
+
+	private async Task WriteColumnarToCopyAsync(NpgsqlBinaryImporter writer, RecordBatch batch, CancellationToken ct)
+	{
+		for (int row = 0; row < batch.Length; row++)
+		{
+			await writer.StartRowAsync(ct);
+			for (int j = 0; j < _targetToSourceMap!.Length; j++)
+			{
+				var array = batch.Column(_targetToSourceMap[j]);
+				if (array.IsNull(row))
+					writer.WriteNull();  // sync, no allocation
+				else
+					_arrowColumnWriters![j](array, row, writer);  // sync, zero-boxing
+			}
+		}
+	}
+
+	/// <summary>
+	/// Builds a per-column sync writer delegate based on the target Npgsql type.
+	/// Each delegate reads directly from a typed Arrow array and calls the generic
+	/// <c>NpgsqlBinaryImporter.Write&lt;T&gt;</c> — zero boxing, zero Task allocation.
+	/// </summary>
+	private static Action<IArrowArray, int, NpgsqlBinaryImporter> BuildNpgsqlColumnWriter(
+		NpgsqlTypes.NpgsqlDbType npgsqlType) => npgsqlType switch
+	{
+		NpgsqlTypes.NpgsqlDbType.Boolean =>
+			static (arr, row, w) => w.Write(((BooleanArray)arr).GetValue(row)!.Value, NpgsqlTypes.NpgsqlDbType.Boolean),
+
+		NpgsqlTypes.NpgsqlDbType.Smallint =>
+			static (arr, row, w) => w.Write(((Int16Array)arr).GetValue(row)!.Value, NpgsqlTypes.NpgsqlDbType.Smallint),
+
+		NpgsqlTypes.NpgsqlDbType.Integer =>
+			static (arr, row, w) => w.Write(((Int32Array)arr).GetValue(row)!.Value, NpgsqlTypes.NpgsqlDbType.Integer),
+
+		NpgsqlTypes.NpgsqlDbType.Bigint =>
+			static (arr, row, w) => w.Write(((Int64Array)arr).GetValue(row)!.Value, NpgsqlTypes.NpgsqlDbType.Bigint),
+
+		NpgsqlTypes.NpgsqlDbType.Real =>
+			static (arr, row, w) => w.Write(((FloatArray)arr).GetValue(row)!.Value, NpgsqlTypes.NpgsqlDbType.Real),
+
+		NpgsqlTypes.NpgsqlDbType.Double =>
+			static (arr, row, w) => w.Write(((DoubleArray)arr).GetValue(row)!.Value, NpgsqlTypes.NpgsqlDbType.Double),
+
+		NpgsqlTypes.NpgsqlDbType.Numeric =>
+			static (arr, row, w) => w.Write(((Decimal128Array)arr).GetValue(row)!.Value, NpgsqlTypes.NpgsqlDbType.Numeric),
+
+		NpgsqlTypes.NpgsqlDbType.Text or NpgsqlTypes.NpgsqlDbType.Varchar
+		    or NpgsqlTypes.NpgsqlDbType.Char or NpgsqlTypes.NpgsqlDbType.Name =>
+			(arr, row, w) => w.Write(((StringArray)arr).GetString(row)!, npgsqlType),
+
+		NpgsqlTypes.NpgsqlDbType.Bytea =>
+			static (arr, row, w) => w.Write(arr switch {
+				BinaryArray b          => b.GetBytes(row).ToArray(),
+				FixedSizeBinaryArray f => f.GetBytes(row).ToArray(),
+				_                      => System.Array.Empty<byte>()
+			}, NpgsqlTypes.NpgsqlDbType.Bytea),
+
+		// DtPipe UUID convention: Binary(16) = RFC 4122 big-endian bytes
+		// UUID: arrow.uuid extension uses FixedSizeBinaryType(16)
+		NpgsqlTypes.NpgsqlDbType.Uuid =>
+			static (arr, row, w) =>
+				w.Write(ArrowTypeMapper.FromArrowUuidBytes(((FixedSizeBinaryArray)arr).GetBytes(row)),
+					NpgsqlTypes.NpgsqlDbType.Uuid),
+
+		NpgsqlTypes.NpgsqlDbType.Date =>
+			static (arr, row, w) =>
+			{
+				var dt = arr switch
+				{
+					Date32Array d32 => d32.GetDateTime(row),
+					Date64Array d64 => d64.GetDateTime(row),
+					_ => ArrowTypeMapper.GetValue(arr, row) as DateTime? ?? default
+				};
+				w.Write(dt, NpgsqlTypes.NpgsqlDbType.Date);
+			},
+
+		// Fix T19/T52: also handle Date64Array/Date32Array for Timestamp columns
+		NpgsqlTypes.NpgsqlDbType.Timestamp =>
+			static (arr, row, w) =>
+			{
+				var dt = arr switch
+				{
+					TimestampArray ts => ts.GetTimestamp(row)?.DateTime ?? default,
+					Date64Array d64   => d64.GetDateTime(row) ?? default,
+					Date32Array d32   => d32.GetDateTime(row) ?? default,
+					_ => ArrowTypeMapper.GetValue(arr, row) as DateTime? ?? default
+				};
+				w.Write(DateTime.SpecifyKind(dt, DateTimeKind.Unspecified), NpgsqlTypes.NpgsqlDbType.Timestamp);
+			},
+
+		NpgsqlTypes.NpgsqlDbType.TimestampTz =>
+			static (arr, row, w) =>
+			{
+				var dt = arr switch
+				{
+					TimestampArray ts => ts.GetTimestamp(row)?.DateTime ?? default,
+					Date64Array d64   => d64.GetDateTime(row) ?? default,
+					Date32Array d32   => d32.GetDateTime(row) ?? default,
+					_ => ArrowTypeMapper.GetValue(arr, row) as DateTime? ?? default
+				};
+				var utc = dt.Kind == DateTimeKind.Unspecified
+					? DateTime.SpecifyKind(dt, DateTimeKind.Utc)
+					: dt;
+				w.Write(utc, NpgsqlTypes.NpgsqlDbType.TimestampTz);
+			},
+
+		// Fallback: box through object (covers InternalChar, Oid, Money, etc.)
+		_ => (arr, row, w) =>
+		{
+			var val = ArrowTypeMapper.GetValue(arr, row);
+			if (val is null) w.WriteNull();
+			else w.Write(val, npgsqlType);
+		}
+	};
+
 	private async Task WriteBatchDirectAsync(IReadOnlyList<object?[]> rows, CancellationToken ct)
 	{
 		var copySql = BuildCopySql(_quotedTargetTableName);
@@ -293,43 +486,24 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter
 			for (int j = 0; j < _targetToSourceMap!.Length; j++)
 			{
 				int sourceIdx = _targetToSourceMap[j];
-				var val = row[sourceIdx];
-				var targetType = _targetTypes![j];
-
-				if (targetType == typeof(Guid) && val is string s && string.IsNullOrWhiteSpace(s))
-				{
-					val = null;
-				}
+				var val = _converters![j](row[sourceIdx]);
 
 				if (val is null || val == DBNull.Value)
 				{
 					await writer.WriteNullAsync(ct);
+					continue;
 				}
-				else
+
+				if (val is DateTime dt)
 				{
-					var convertedVal = ValueConverter.ConvertValue(val, targetType);
-
-					if (convertedVal is null || convertedVal == DBNull.Value)
-					{
-						await writer.WriteNullAsync(ct);
-						continue;
-					}
-
-					if (convertedVal is DateTime dt)
-					{
-						var dbType = _columnTypes![j];
-						if (dbType == NpgsqlTypes.NpgsqlDbType.Timestamp && dt.Kind != DateTimeKind.Unspecified)
-						{
-							convertedVal = DateTime.SpecifyKind(dt, DateTimeKind.Unspecified);
-						}
-						else if (dbType == NpgsqlTypes.NpgsqlDbType.TimestampTz && dt.Kind == DateTimeKind.Unspecified)
-						{
-							convertedVal = DateTime.SpecifyKind(dt, DateTimeKind.Utc);
-						}
-					}
-
-					await writer.WriteAsync(convertedVal, _columnTypes![j], ct);
+					var dbType = _columnTypes![j];
+					if (dbType == NpgsqlTypes.NpgsqlDbType.Timestamp && dt.Kind != DateTimeKind.Unspecified)
+						val = DateTime.SpecifyKind(dt, DateTimeKind.Unspecified);
+					else if (dbType == NpgsqlTypes.NpgsqlDbType.TimestampTz && dt.Kind == DateTimeKind.Unspecified)
+						val = DateTime.SpecifyKind(dt, DateTimeKind.Utc);
 				}
+
+				await writer.WriteAsync(val, _columnTypes![j], ct);
 			}
 		}
 	}

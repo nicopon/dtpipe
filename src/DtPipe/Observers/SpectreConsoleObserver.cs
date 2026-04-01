@@ -87,11 +87,23 @@ public class SpectreConsoleObserver : IExportObserver
 		await controller.RunAsync(reader, pipeline.ToList(), count, inspectionWriter, precomputedSchemas, executionPlan, ct);
 	}
 
-	public void ShowColumnTypeInferenceSuggestion(IReadOnlyDictionary<string, string> suggestions)
+	public void ShowColumnTypeInferenceSuggestion(IReadOnlyDictionary<string, string> suggestions, int sampleCount, bool applied = false)
 	{
 		if (suggestions.Count == 0) return;
 		var spec = string.Join(",", suggestions.Select(kv => $"{kv.Key}:{kv.Value}"));
-		_console.MarkupLine($"[grey]Suggested --column-types: \"[yellow]{Markup.Escape(spec)}[/]\"[/]");
+		string body = applied
+			? $"Applied: [yellow]--column-types \"{Markup.Escape(spec)}\"[/]"
+			: $"Add to your command: [yellow]--column-types \"{Markup.Escape(spec)}\"[/]";
+		string header = applied
+			? $" [green]Column types auto-applied[/] [grey](sampled {sampleCount} rows)[/] "
+			: $" [yellow]Type inference suggestion[/] [grey](sampled {sampleCount} rows)[/] ";
+		var panel = new Panel(body)
+		{
+			Header = new PanelHeader(header),
+			Border = BoxBorder.Rounded,
+			Padding = new Padding(1, 0)
+		};
+		_console.Write(panel);
 	}
 
 	public void ShowSchemaInfo(int columnCount)

@@ -222,7 +222,8 @@ public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, 
 	private static DataColumn CreateTypedColumn<T>(DataField dataField, IReadOnlyList<object?[]> rows, int colIndex)
 	{
 		var values = new T[rows.Count];
-		var targetType = typeof(T);
+		// Build a per-column delegate on first call (one-time cost, amortised over all rows)
+		var converter = DtPipe.Core.Helpers.ColumnConverterFactory.Build(null, typeof(T));
 		for (var i = 0; i < rows.Count; i++)
 		{
 			var val = rows[i][colIndex];
@@ -232,11 +233,13 @@ public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, 
 			}
 			else if (val is T typedVal)
 			{
-				values[i] = typedVal;
+				values[i] = typedVal; // fast path: no conversion needed
 			}
 			else
 			{
-				values[i] = (T)DtPipe.Core.Helpers.ValueConverter.ConvertValue(val, targetType)!;
+				var converted = converter(val);
+				if (converted is T t) values[i] = t;
+				// else: leave default (null equivalent) — bad source data
 			}
 		}
 		return new DataColumn(dataField, values);

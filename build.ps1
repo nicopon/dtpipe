@@ -82,6 +82,28 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host ""
+Write-Host "Staging DataFusion native library..." -ForegroundColor Yellow
+
+$DataFusionSrc = $null
+$DataFusionDst = $null
+if ($FullMac) {
+    $DataFusionSrc = Join-Path $ScriptDir "src\DtPipe.Processors.DataFusion\target\release\libdtpipe_datafusion.dylib"
+    $DataFusionDst = Join-Path $ScriptDir "src\DtPipe.Processors\DataFusion\libdtpipe_datafusion.dylib"
+} elseif ($FullLinux) {
+    $DataFusionSrc = Join-Path $ScriptDir "src\DtPipe.Processors.DataFusion\target\release\libdtpipe_datafusion.so"
+    $DataFusionDst = Join-Path $ScriptDir "src\DtPipe.Processors\DataFusion\libdtpipe_datafusion.so"
+} else {
+    $DataFusionSrc = Join-Path $ScriptDir "src\DtPipe.Processors.DataFusion\target\release\dtpipe_datafusion.dll"
+    $DataFusionDst = Join-Path $ScriptDir "src\DtPipe.Processors\DataFusion\dtpipe_datafusion.dll"
+}
+if (Test-Path $DataFusionSrc) {
+    Copy-Item -Path $DataFusionSrc -Destination $DataFusionDst -Force
+    Write-Host "  Copied: $DataFusionSrc -> $DataFusionDst"
+} else {
+    Write-Host "  Skipped (not found): $DataFusionSrc — DataFusion SQL engine will not be available" -ForegroundColor DarkYellow
+}
+
+Write-Host ""
 Write-Host "Building Release (single-file)..." -ForegroundColor Yellow
 
 dotnet publish "src\DtPipe\DtPipe.csproj" -c Release `

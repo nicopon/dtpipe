@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 #[cfg(unix)]
 use std::os::unix::io::FromRawFd;
 #[cfg(windows)]
@@ -16,6 +17,8 @@ use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use arrow_ipc::writer::StreamWriter;
 
 use crate::{ErrorCode, DtfbRuntime};
+
+const PLAN_TIMEOUT_SECS: u64 = 30;
 
 pub struct DtfbContext {
     pub runtime: Arc<tokio::runtime::Runtime>,
@@ -117,7 +120,10 @@ pub unsafe extern "C" fn dtfb_register_stream(
     let ffi_stream = unsafe { std::ptr::read(stream_ptr) };
     let reader = match ArrowArrayStreamReader::try_new(ffi_stream) {
         Ok(r) => r,
-        Err(_) => return ErrorCode::Error,
+        Err(e) => {
+            eprintln!("[dtfusion-bridge] register_stream: failed to create FFI stream reader: {:?}", e);
+            return ErrorCode::Error;
+        }
     };
 
     let original_schema = reader.schema();
@@ -132,10 +138,16 @@ pub unsafe extern "C" fn dtfb_register_stream(
         Ok(table) => {
             match dtfb.ctx.register_table(name, Arc::new(table)) {
                 Ok(_) => ErrorCode::Ok,
-                Err(_) => ErrorCode::Error,
+                Err(e) => {
+                    eprintln!("[dtfusion-bridge] register_stream: failed to register table '{}': {:?}", name, e);
+                    ErrorCode::Error
+                }
             }
         },
-        Err(_) => ErrorCode::Error,
+        Err(e) => {
+            eprintln!("[dtfusion-bridge] register_stream: StreamingTable::try_new failed: {:?}", e);
+            ErrorCode::Error
+        }
     }
 }
 
@@ -151,28 +163,60 @@ pub unsafe extern "C" fn dtfb_get_schema(
     let ctx = Arc::clone(&dtfb.ctx);
     let sql = sql.to_string();
 
-    dtfb.runtime.block_on(async move {
-        let df = match ctx.sql(&sql).await {
-            Ok(df) => df,
-            Err(e) => {
-                eprintln!("[dtfusion-bridge] SQL error in get_schema: {:?}", e);
-                return ErrorCode::Error;
-            }
-        };
+    // Run planning on a dedicated OS thread so that even a CPU-bound infinite loop
+    // (e.g. DataFusion's TypeCoercion hang on arrow.uuid + Utf8 JOIN) does not block
+    // the calling thread beyond PLAN_TIMEOUT_SECS.
+    // tokio::time::timeout cannot help here: DataFusion's loop never yields, so the
+    // Tokio timer never gets polled. An OS-level mpsc::recv_timeout is the only reliable
+    // mechanism to interrupt a non-yielding future.
+    let runtime = Arc::clone(&dtfb.runtime);
+    type PlanResult = Result<arrow_schema::Schema, String>;
+    let (tx, rx) = std::sync::mpsc::sync_channel::<PlanResult>(1);
 
-        let arrow_schema = df.schema().as_arrow().as_ref().clone();
+    std::thread::spawn(move || {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            runtime.block_on(async move {
+                match ctx.sql(&sql).await {
+                    Ok(df) => Ok(df.schema().as_arrow().as_ref().clone()),
+                    Err(e) => Err(format!("{:?}", e)),
+                }
+            })
+        }));
+        let _ = tx.send(match result {
+            Ok(r) => r,
+            Err(_) => Err("panic during SQL planning".to_string()),
+        });
+    });
 
-        match arrow_array::ffi::FFI_ArrowSchema::try_from(&arrow_schema) {
-            Ok(ffi_schema) => {
-                unsafe { std::ptr::write(ffi_schema_ptr, ffi_schema) };
-                ErrorCode::Ok
-            }
-            Err(e) => {
-                eprintln!("[dtfusion-bridge] FFI schema error: {:?}", e);
-                ErrorCode::Error
-            }
+    let schema = match rx.recv_timeout(Duration::from_secs(PLAN_TIMEOUT_SECS)) {
+        Ok(Ok(s)) => s,
+        Ok(Err(msg)) => {
+            eprintln!("[dtfusion-bridge] SQL error in get_schema: {}", msg);
+            return ErrorCode::Error;
         }
-    })
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            eprintln!(
+                "[dtfusion-bridge] SQL planning timed out (>{}s) — incompatible column types in a JOIN condition (e.g. FixedSizeBinary+arrow.uuid vs Utf8). Use --column-types to declare UUID columns on text sources, or use --sql-engine duckdb.",
+                PLAN_TIMEOUT_SECS
+            );
+            return ErrorCode::Error;
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            eprintln!("[dtfusion-bridge] SQL planning thread panicked unexpectedly");
+            return ErrorCode::Error;
+        }
+    };
+
+    match arrow_array::ffi::FFI_ArrowSchema::try_from(&schema) {
+        Ok(ffi_schema) => {
+            unsafe { std::ptr::write(ffi_schema_ptr, ffi_schema) };
+            ErrorCode::Ok
+        }
+        Err(e) => {
+            eprintln!("[dtfusion-bridge] FFI schema export error in get_schema: {:?}", e);
+            ErrorCode::Error
+        }
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -189,7 +233,10 @@ pub unsafe extern "C" fn dtfb_register_batches(
     let ffi_schema = unsafe { &*ffi_schema_ptr };
     let original_schema = match arrow_schema::Schema::try_from(ffi_schema) {
         Ok(s) => Arc::new(s),
-        Err(_) => return ErrorCode::Error,
+        Err(e) => {
+            eprintln!("[dtfusion-bridge] register_batches: failed to import FFI schema: {:?}", e);
+            return ErrorCode::Error;
+        }
     };
     let schema = lowercase_schema(original_schema);
 
@@ -201,7 +248,10 @@ pub unsafe extern "C" fn dtfb_register_batches(
 
         let array_data = match unsafe { arrow_array::ffi::from_ffi(ffi_array, ffi_schema) } {
             Ok(a) => a,
-            Err(_) => return ErrorCode::Error,
+            Err(e) => {
+                eprintln!("[dtfusion-bridge] register_batches: failed to import FFI array at index {}: {:?}", i, e);
+                return ErrorCode::Error;
+            }
         };
 
         let struct_array = arrow_array::StructArray::from(array_data);
@@ -210,7 +260,10 @@ pub unsafe extern "C" fn dtfb_register_batches(
         // Force the lowercased schema onto the batch
         let rb = match arrow_array::RecordBatch::try_new(Arc::clone(&schema), columns) {
             Ok(r) => r,
-            Err(_) => return ErrorCode::Error,
+            Err(e) => {
+                eprintln!("[dtfusion-bridge] register_batches: RecordBatch::try_new failed at index {}: {:?}", i, e);
+                return ErrorCode::Error;
+            }
         };
         batches.push(rb);
     }
@@ -218,13 +271,19 @@ pub unsafe extern "C" fn dtfb_register_batches(
     let ctx = Arc::clone(&dtfb.ctx);
     let table = match datafusion::datasource::MemTable::try_new(Arc::clone(&schema), vec![batches]) {
         Ok(t) => Arc::new(t),
-        Err(_) => return ErrorCode::Error,
+        Err(e) => {
+            eprintln!("[dtfusion-bridge] register_batches: MemTable::try_new failed for '{}': {:?}", name, e);
+            return ErrorCode::Error;
+        }
     };
 
     dtfb.runtime.block_on(async move {
         match ctx.register_table(&name, table) {
             Ok(_) => ErrorCode::Ok,
-            Err(_) => ErrorCode::Error,
+            Err(e) => {
+                eprintln!("[dtfusion-bridge] register_batches: failed to register table '{}': {:?}", name, e);
+                ErrorCode::Error
+            }
         }
     })
 }
@@ -242,73 +301,119 @@ pub unsafe extern "C" fn dtfb_execute_to_fd(
     let sql = sql.to_string();
     let runtime: Arc<tokio::runtime::Runtime> = Arc::clone(&dtfb.runtime);
 
-    dtfb.runtime.block_on(async move {
-        let df = match ctx.sql(&sql).await {
-            Ok(df) => df,
-            Err(e) => {
-                eprintln!("[dtfusion-bridge] SQL error in execute_to_fd: {:?}", e);
-                return ErrorCode::Error;
-            }
-        };
+    // Phase 1: SQL planning with OS-level timeout (same rationale as dtfb_get_schema).
+    // DataFusion's TypeCoercion rule can infinite-loop on type mismatches; tokio::time::timeout
+    // cannot interrupt it because the loop never yields. Use std::thread + mpsc::recv_timeout.
+    let runtime_for_plan = Arc::clone(&runtime);
+    let ctx_for_plan = Arc::clone(&ctx);
+    let sql_for_plan = sql.clone();
+    type PlanResult = Result<datafusion::dataframe::DataFrame, String>;
+    let (plan_tx, plan_rx) = std::sync::mpsc::sync_channel::<PlanResult>(1);
 
-        let mut stream = match df.execute_stream().await {
-            Ok(s) => s,
-            Err(_) => {
-                return ErrorCode::Error;
-            }
-        };
+    std::thread::spawn(move || {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            runtime_for_plan.block_on(async move {
+                match ctx_for_plan.sql(&sql_for_plan).await {
+                    Ok(df) => Ok(df),
+                    Err(e) => Err(format!("{:?}", e)),
+                }
+            })
+        }));
+        let _ = plan_tx.send(match result {
+            Ok(r) => r,
+            Err(_) => Err("panic during SQL planning".to_string()),
+        });
+    });
 
-        let schema = stream.schema();
+    let df = match plan_rx.recv_timeout(Duration::from_secs(PLAN_TIMEOUT_SECS)) {
+        Ok(Ok(df)) => df,
+        Ok(Err(msg)) => {
+            eprintln!("[dtfusion-bridge] SQL error in execute_to_fd: {}", msg);
+            return ErrorCode::Error;
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            eprintln!(
+                "[dtfusion-bridge] SQL planning timed out (>{}s) — incompatible column types in a JOIN condition (e.g. FixedSizeBinary+arrow.uuid vs Utf8). Use --column-types to declare UUID columns on text sources, or use --sql-engine duckdb.",
+                PLAN_TIMEOUT_SECS
+            );
+            return ErrorCode::Error;
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            eprintln!("[dtfusion-bridge] SQL planning thread panicked unexpectedly");
+            return ErrorCode::Error;
+        }
+    };
 
-        let handle_val = handle as usize;
-
-        // Blocking I/O section
-        let result = runtime.spawn_blocking(move || {
-            let handle = handle_val as *mut std::ffi::c_void;
-            #[cfg(unix)]
-            let mut file = std::mem::ManuallyDrop::new(unsafe { std::fs::File::from_raw_fd(handle as i32) });
-            #[cfg(windows)]
-            let mut file = std::mem::ManuallyDrop::new(unsafe { std::fs::File::from_raw_handle(handle) });
-
-            // writer takes &mut *file which implements Write without owning
-            let mut writer = match StreamWriter::try_new(&mut *file, &schema) {
-                Ok(w) => w,
+    // Phase 2: execution (stream + IPC write). No planning timeout here; stream execution
+    // takes as long as needed to process all data.
+    let runtime_for_exec = Arc::clone(&runtime);
+    let exec_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        runtime.block_on(async move {
+            let mut stream = match df.execute_stream().await {
+                Ok(s) => s,
                 Err(e) => {
-                    eprintln!("[dtfusion-bridge] IPC StreamWriter error: {:?}", e);
-                    return Err(());
+                    eprintln!("[dtfusion-bridge] execute_stream error: {:?}", e);
+                    return ErrorCode::Error;
                 }
             };
 
-            while let Some(batch_result) = futures::executor::block_on(stream.next()) {
-                match batch_result {
-                    Ok(batch) => {
-                        if let Err(e) = writer.write(&batch) {
-                            eprintln!("[dtfusion-bridge] IPC write error: {:?}", e);
+            let schema = stream.schema();
+            let handle_val = handle as usize;
+
+            // Blocking I/O section
+            let result = runtime_for_exec.spawn_blocking(move || {
+                let handle = handle_val as *mut std::ffi::c_void;
+                #[cfg(unix)]
+                let mut file = std::mem::ManuallyDrop::new(unsafe { std::fs::File::from_raw_fd(handle as i32) });
+                #[cfg(windows)]
+                let mut file = std::mem::ManuallyDrop::new(unsafe { std::fs::File::from_raw_handle(handle) });
+
+                let mut writer = match StreamWriter::try_new(&mut *file, &schema) {
+                    Ok(w) => w,
+                    Err(e) => {
+                        eprintln!("[dtfusion-bridge] IPC StreamWriter error: {:?}", e);
+                        return Err(());
+                    }
+                };
+
+                while let Some(batch_result) = futures::executor::block_on(stream.next()) {
+                    match batch_result {
+                        Ok(batch) => {
+                            if let Err(e) = writer.write(&batch) {
+                                eprintln!("[dtfusion-bridge] IPC write error: {:?}", e);
+                                return Err(());
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("[dtfusion-bridge] IPC stream next error: {:?}", e);
                             return Err(());
                         }
                     }
-                    Err(e) => {
-                        eprintln!("[dtfusion-bridge] IPC stream next error: {:?}", e);
-                        return Err(());
-                    }
+                }
+
+                if let Err(e) = writer.finish() {
+                    eprintln!("[dtfusion-bridge] IPC writer finish error: {:?}", e);
+                    return Err(());
+                }
+
+                Ok(())
+            }).await;
+
+            match result {
+                Ok(Ok(())) => ErrorCode::Ok,
+                Ok(Err(_)) => ErrorCode::Error,
+                Err(e) => {
+                    eprintln!("[dtfusion-bridge] Blocking spawn error: {:?}", e);
+                    ErrorCode::Error
                 }
             }
-
-            if let Err(e) = writer.finish() {
-                eprintln!("[dtfusion-bridge] IPC writer finish error: {:?}", e);
-                return Err(());
-            }
-
-            Ok(())
-        }).await;
-
-        match result {
-            Ok(Ok(())) => ErrorCode::Ok,
-            Ok(Err(_)) => ErrorCode::Error,
-            Err(e) => {
-                eprintln!("[dtfusion-bridge] Blocking spawn error: {:?}", e);
-                ErrorCode::Error
-            }
+        })
+    }));
+    match exec_result {
+        Ok(code) => code,
+        Err(_) => {
+            eprintln!("[dtfusion-bridge] Panic in execute_to_fd");
+            ErrorCode::Error
         }
-    })
+    }
 }

@@ -1,5 +1,6 @@
 using System.Data;
 using System.Text;
+using Apache.Arrow;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Helpers;
 using DtPipe.Core.Models;
@@ -8,7 +9,7 @@ using Microsoft.Extensions.Logging;
 
 namespace DtPipe.Adapters.SqlServer;
 
-public class SqlServerDataWriter : BaseSqlDataWriter
+public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter
 {
 	private readonly SqlServerWriterOptions _options;
 	private SqlBulkCopy? _bulkCopy;
@@ -23,6 +24,8 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 	public override bool RequiresTargetInspection => _options.Strategy != SqlServerWriteStrategy.Recreate;
 	private Type[]? _targetTypes;
 	private string[]? _targetColumnNames;
+	private int[]? _sourceIndices;       // pre-computed target-col → source-col index mapping
+	private Func<object?, object?>[]? _converters; // per-column delegates
 
 	protected override ITypeMapper GetTypeMapper() => _typeMapper;
 
@@ -125,6 +128,27 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 				var underlying = Nullable.GetUnderlyingType(col.ClrType) ?? col.ClrType;
 				_bufferTable.Columns.Add(col.Name, underlying);
 			}
+		}
+
+		// Pre-compute source index mapping and per-column converters
+		_sourceIndices = new int[colCount];
+		_converters = new Func<object?, object?>[colCount];
+		for (int i = 0; i < colCount; i++)
+		{
+			var colName = _bufferTable.Columns[i].ColumnName;
+			int srcIdx = -1;
+			Type srcClrType = typeof(object);
+			for (int s = 0; s < _columns!.Count; s++)
+			{
+				if (string.Equals(_columns[s].Name, colName, StringComparison.OrdinalIgnoreCase))
+				{
+					srcIdx = s;
+					srcClrType = _columns[s].ClrType;
+					break;
+				}
+			}
+			_sourceIndices[i] = srcIdx;
+			_converters[i] = ColumnConverterFactory.Build(srcClrType, _targetTypes[i]);
 		}
 
 		_bulkCopy = new SqlBulkCopy((SqlConnection)_connection!, SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.UseInternalTransaction, null)
@@ -320,6 +344,72 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 		await DetectDatabaseCollationAsync(ct);
 	}
 
+	/// <summary>
+	/// Columnar write path: receives an Arrow RecordBatch, extracts values via
+	/// <c>ArrowTypeMapper.GetValueForField</c> (resolving arrow.uuid extension metadata
+	/// to Guid), applies <c>_converters[]</c> for target type coercion, and feeds the DataTable
+	/// into SqlBulkCopy. This ensures DtPipe type conventions are applied correctly.
+	/// </summary>
+	public async ValueTask WriteRecordBatchAsync(RecordBatch batch, CancellationToken ct = default)
+	{
+		if (batch.Length == 0) return;
+
+		await EnsureBulkCopyInitializedAsync(ct);
+
+		using (batch)
+		{
+			_bufferTable!.Clear();
+			for (int row = 0; row < batch.Length; row++)
+			{
+				var dataRow = _bufferTable.NewRow();
+				for (int i = 0; i < _converters!.Length; i++)
+				{
+					int srcIdx = _sourceIndices![i];
+					if (srcIdx < 0) { dataRow[i] = DBNull.Value; continue; }
+					var col = batch.Column(srcIdx);
+					var field = batch.Schema.GetFieldByIndex(srcIdx);
+					var arrowVal = DtPipe.Core.Infrastructure.Arrow.ArrowTypeMapper.GetValueForField(col, field, row);
+					dataRow[i] = arrowVal is null ? DBNull.Value : _converters[i](arrowVal);
+				}
+				_bufferTable.Rows.Add(dataRow);
+			}
+
+			if (_options.Strategy is SqlServerWriteStrategy.Upsert or SqlServerWriteStrategy.Ignore)
+				await ExecuteMergeFromTableAsync(ct);
+			else
+				await _bulkCopy!.WriteToServerAsync(_bufferTable, ct);
+		}
+	}
+
+	private async Task ExecuteMergeFromTableAsync(CancellationToken ct)
+	{
+		var stageTable = $"#Stage_{Guid.NewGuid():N}";
+		await ExecuteNonQueryAsync($"SELECT TOP 0 * INTO [{stageTable}] FROM {_quotedTargetTableName}", ct);
+
+		try
+		{
+			using var stageBulk = new SqlBulkCopy(
+				(SqlConnection)_connection!,
+				SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.UseInternalTransaction,
+				null)
+			{
+				DestinationTableName = stageTable,
+				BatchSize = 0,
+				BulkCopyTimeout = 0
+			};
+
+			foreach (DataColumn dc in _bufferTable!.Columns)
+				stageBulk.ColumnMappings.Add(dc.ColumnName, dc.ColumnName);
+
+			await stageBulk.WriteToServerAsync(_bufferTable, ct);
+			await MergeFromStagingAsync(stageTable, ct);
+		}
+		finally
+		{
+			try { await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS [{stageTable}]", ct); } catch { }
+		}
+	}
+
 	public override async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
 	{
 		if (rows.Count == 0) return;
@@ -343,31 +433,10 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 		foreach (var row in rows)
 		{
 			var dataRow = _bufferTable.NewRow();
-			for (int i = 0; i < _bufferTable.Columns.Count; i++)
+			for (int i = 0; i < _converters!.Length; i++)
 			{
-				var colName = _bufferTable.Columns[i].ColumnName;
-				var targetType = _targetTypes![i];
-
-				// Find source index for this target column
-				int sourceIndex = -1;
-				for (int s = 0; s < _columns!.Count; s++)
-				{
-					if (string.Equals(_columns[s].Name, colName, StringComparison.OrdinalIgnoreCase))
-					{
-						sourceIndex = s;
-						break;
-					}
-				}
-
-				if (sourceIndex != -1)
-				{
-					var val = row[sourceIndex];
-					dataRow[i] = (val == null || val == DBNull.Value) ? DBNull.Value : ValueConverter.ConvertValue(val, targetType);
-				}
-				else
-				{
-					dataRow[i] = DBNull.Value;
-				}
+				int srcIdx = _sourceIndices![i];
+				dataRow[i] = srcIdx >= 0 ? _converters[i](row[srcIdx]) : DBNull.Value;
 			}
 			_bufferTable.Rows.Add(dataRow);
 		}
@@ -403,81 +472,66 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 			foreach (var row in rows)
 			{
 				var dataRow = _bufferTable.NewRow();
-				for (int i = 0; i < _bufferTable.Columns.Count; i++)
+				for (int i = 0; i < _converters!.Length; i++)
 				{
-					var colName = _bufferTable.Columns[i].ColumnName;
-					var targetType = _targetTypes![i];
-
-					int sourceIndex = -1;
-					for (int s = 0; s < _columns!.Count; s++)
-					{
-						if (string.Equals(_columns[s].Name, colName, StringComparison.OrdinalIgnoreCase))
-						{
-							sourceIndex = s;
-							break;
-						}
-					}
-
-					if (sourceIndex != -1)
-					{
-						var val = row[sourceIndex];
-						dataRow[i] = (val == null || val == DBNull.Value) ? DBNull.Value : ValueConverter.ConvertValue(val, targetType);
-					}
-					else
-					{
-						dataRow[i] = DBNull.Value;
-					}
+					int srcIdx = _sourceIndices![i];
+					dataRow[i] = srcIdx >= 0 ? _converters[i](row[srcIdx]) : DBNull.Value;
 				}
 				_bufferTable.Rows.Add(dataRow);
 			}
 			await stageBulk.WriteToServerAsync(_bufferTable, ct);
 
 			// 3. Perform Merge
-			var sb = new StringBuilder();
-			sb.Append($"MERGE {_quotedTargetTableName} AS T ");
-			sb.Append($"USING [{stageTable}] AS S ON (");
-
-			for (int i = 0; i < _keyColumns.Count; i++)
-			{
-				if (i > 0) sb.Append(" AND ");
-				var keyCol = _columns!.FirstOrDefault(c => c.Name.Equals(_keyColumns[i], StringComparison.OrdinalIgnoreCase));
-				var safeKey = keyCol != null ? SqlIdentifierHelper.GetSafeIdentifier(_dialect, keyCol) : _dialect.Quote(_keyColumns[i]);
-				sb.Append($"T.{safeKey} = S.[{_keyColumns[i]}]");
-			}
-			sb.Append(") ");
-
-			if (_options.Strategy == SqlServerWriteStrategy.Upsert)
-			{
-				sb.Append("WHEN MATCHED THEN UPDATE SET ");
-				var nonKeys = _columns!.Where(c => !_keyColumns.Contains(c.Name, StringComparer.OrdinalIgnoreCase)).ToList();
-				for (int i = 0; i < nonKeys.Count; i++)
-				{
-					if (i > 0) sb.Append(", ");
-					var safeName = SqlIdentifierHelper.GetSafeIdentifier(_dialect, nonKeys[i]);
-					sb.Append($"T.{safeName} = S.[{nonKeys[i].Name}]");
-				}
-			}
-
-			sb.Append(" WHEN NOT MATCHED THEN INSERT (");
-			for (int i = 0; i < _columns!.Count; i++)
-			{
-				if (i > 0) sb.Append(", ");
-				sb.Append(SqlIdentifierHelper.GetSafeIdentifier(_dialect, _columns[i]));
-			}
-			sb.Append(") VALUES (");
-			for (int i = 0; i < _columns.Count; i++)
-			{
-				if (i > 0) sb.Append(", ");
-				sb.Append($"S.[{_columns[i].Name}]");
-			}
-			sb.Append(");");
-
-			await ExecuteNonQueryAsync(sb.ToString(), ct);
+			await MergeFromStagingAsync(stageTable, ct);
 		}
 		finally
 		{
 			await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS [{stageTable}]", ct);
 		}
+	}
+
+	private async Task MergeFromStagingAsync(string stagingTable, CancellationToken ct)
+	{
+		var sb = new StringBuilder();
+		sb.Append($"MERGE {_quotedTargetTableName} AS T ");
+		sb.Append($"USING [{stagingTable}] AS S ON (");
+
+		for (int i = 0; i < _keyColumns.Count; i++)
+		{
+			if (i > 0) sb.Append(" AND ");
+			var keyCol = _columns!.FirstOrDefault(c => c.Name.Equals(_keyColumns[i], StringComparison.OrdinalIgnoreCase));
+			var safeKey = keyCol != null ? SqlIdentifierHelper.GetSafeIdentifier(_dialect, keyCol) : _dialect.Quote(_keyColumns[i]);
+			sb.Append($"T.{safeKey} = S.[{_keyColumns[i]}]");
+		}
+		sb.Append(") ");
+
+		if (_options.Strategy == SqlServerWriteStrategy.Upsert)
+		{
+			sb.Append("WHEN MATCHED THEN UPDATE SET ");
+			var nonKeys = _columns!.Where(c => !_keyColumns.Contains(c.Name, StringComparer.OrdinalIgnoreCase)).ToList();
+			for (int i = 0; i < nonKeys.Count; i++)
+			{
+				if (i > 0) sb.Append(", ");
+				var safeName = SqlIdentifierHelper.GetSafeIdentifier(_dialect, nonKeys[i]);
+				sb.Append($"T.{safeName} = S.[{nonKeys[i].Name}]");
+			}
+		}
+
+		sb.Append(" WHEN NOT MATCHED THEN INSERT (");
+		for (int i = 0; i < _columns!.Count; i++)
+		{
+			if (i > 0) sb.Append(", ");
+			sb.Append(SqlIdentifierHelper.GetSafeIdentifier(_dialect, _columns[i]));
+		}
+		sb.Append(") VALUES (");
+		for (int i = 0; i < _columns.Count; i++)
+		{
+			if (i > 0) sb.Append(", ");
+			sb.Append($"S.[{_columns[i].Name}]");
+		}
+		sb.Append(");");
+
+		await ExecuteNonQueryAsync(sb.ToString(), ct);
 	}
 
 
@@ -618,6 +672,48 @@ public class SqlServerDataWriter : BaseSqlDataWriter
 
 
 	#endregion
+
+	/// <summary>
+	/// SQL Server does not allow NVARCHAR(MAX) as a PRIMARY KEY / index key column (900-byte limit).
+	/// For key columns, substitute NVARCHAR(450) — the largest NVARCHAR length that fits in an index.
+	/// Non-key string columns keep NVARCHAR(MAX).
+	/// </summary>
+	protected override string GetCreateTableSql(string tableName, IEnumerable<PipeColumnInfo> columns)
+	{
+		var requestedKeys = GetRequestedPrimaryKeys();
+		var keySet = requestedKeys != null
+			? new HashSet<string>(requestedKeys, StringComparer.OrdinalIgnoreCase)
+			: new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+		var colList = columns.ToList();
+		var sb = new StringBuilder();
+		sb.Append($"CREATE TABLE {tableName} (");
+
+		for (int i = 0; i < colList.Count; i++)
+		{
+			if (i > 0) sb.Append(", ");
+			var col = colList[i];
+			var safeName = SqlIdentifierHelper.GetSafeIdentifier(Dialect, col);
+			var nativeType = GetTypeMapper().MapToProviderType(col.ClrType);
+			if (keySet.Contains(col.Name) && nativeType.Equals("NVARCHAR(MAX)", StringComparison.OrdinalIgnoreCase))
+				nativeType = "NVARCHAR(450)";
+			sb.Append($"{safeName} {nativeType}");
+		}
+
+		if (requestedKeys != null && requestedKeys.Count > 0)
+		{
+			var resolvedKeys = ColumnHelper.ResolveKeyColumns(string.Join(",", requestedKeys), colList);
+			var safeKeys = resolvedKeys.Select(keyName =>
+			{
+				var col = colList.First(c => c.Name == keyName);
+				return SqlIdentifierHelper.GetSafeIdentifier(Dialect, col);
+			});
+			sb.Append($", PRIMARY KEY ({string.Join(", ", safeKeys)})");
+		}
+
+		sb.Append(")");
+		return sb.ToString();
+	}
 
 	// IKeyValidator methods
 	public override string? GetWriteStrategy() => _options.Strategy.ToString();

@@ -34,7 +34,7 @@ public sealed class ArrowMemoryChannelStreamReader : IStreamReader
     {
         var schema = await _registry.WaitForArrowChannelSchemaAsync(_alias, ct);
         _columns = schema.FieldsList
-            .Select(f => new PipeColumnInfo(f.Name, ArrowTypeMapper.GetClrType(f.DataType), f.IsNullable))
+            .Select(f => new PipeColumnInfo(f.Name, ArrowTypeMapper.GetClrTypeFromField(f), f.IsNullable))
             .ToList();
     }
 
@@ -47,7 +47,7 @@ public sealed class ArrowMemoryChannelStreamReader : IStreamReader
             {
                 var row = new object?[batch.Schema.FieldsList.Count];
                 for (int j = 0; j < row.Length; j++)
-                    row[j] = ArrowColumnarToRowBridge.GetValue(batch.Column(j), i);
+                    row[j] = ArrowTypeMapper.GetValueForField(batch.Column(j), batch.Schema.GetFieldByIndex(j), i);
                 rows[i] = row;
             }
             yield return new ReadOnlyMemory<object?[]>(rows);

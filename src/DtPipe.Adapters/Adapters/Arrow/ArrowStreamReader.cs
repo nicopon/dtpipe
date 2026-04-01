@@ -94,7 +94,7 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
     {
         return schema.FieldsList.Select(f => new PipeColumnInfo(
             f.Name,
-            ArrowTypeMapper.GetClrType(f.DataType),
+            ArrowTypeMapper.GetClrTypeFromField(f),
             f.IsNullable
         )).ToList();
     }
@@ -148,7 +148,7 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
             for (int colIdx = 0; colIdx < colCount; colIdx++)
             {
                 var column = batch.Column(colIdx);
-                row[colIdx] = ArrowTypeMapper.GetValue(column, rowIdx);
+                row[colIdx] = ArrowTypeMapper.GetValueForField(column, batch.Schema.GetFieldByIndex(colIdx), rowIdx);
             }
 
             flatBatch[currentIndex++] = row;

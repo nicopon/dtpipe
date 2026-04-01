@@ -119,7 +119,7 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
 			for (int i = 0; i < batch.Length; i++)
 			{
 				if (!selectionMask[i]) continue;
-				var val = ArrowTypeMapper.GetValue(column, i);
+				var val = ArrowTypeMapper.GetValueForField(column, batch.Schema.GetFieldByIndex(filter.ColumnIndex), i);
 				selectionMask[i] = EvaluateSimple(val, filter.Operator, filter.RawValue);
 			}
 		}

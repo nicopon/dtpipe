@@ -18,7 +18,7 @@ internal static class SqlProcessorHelpers
             for (int c = 0; c < batch.ColumnCount; c++)
             {
                 var col = batch.Column(c);
-                rows[r][c] = col == null ? null : ArrowTypeMapper.GetValue(col, r);
+                rows[r][c] = col == null ? null : ArrowTypeMapper.GetValueForField(col, batch.Schema.GetFieldByIndex(c), r);
             }
         }
         return rows;

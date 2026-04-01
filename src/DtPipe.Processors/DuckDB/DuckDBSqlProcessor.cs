@@ -74,7 +74,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader
             _logger.LogDebug("DuckDBSqlProcessor: All sources registered. Inspecting schema...");
             _resultSchema = await InspectSchemaAsync(ct);
             _columns = _resultSchema.FieldsList
-                .Select(f => new PipeColumnInfo(f.Name, ArrowTypeMapper.GetClrType(f.DataType), f.IsNullable))
+                .Select(f => new PipeColumnInfo(f.Name, ArrowTypeMapper.GetClrTypeFromField(f), f.IsNullable))
                 .ToList();
         }
         catch (Exception ex)
@@ -133,7 +133,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader
         var columns = schema.FieldsList
             .Select(f => new global::DuckDB.NET.Data.ColumnInfo(
                 f.Name.ToLowerInvariant(),
-                ToDuckDBCompatibleType(ArrowTypeMapper.GetClrType(f.DataType))))
+                ToDuckDBCompatibleType(ArrowTypeMapper.GetClrTypeFromField(f))))
             .ToArray();
 
         // DuckDB table functions are called as tablefn(), not tablefn — use a hidden name and
@@ -190,12 +190,13 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader
         return AdoToArrowUtils.CreateSchema(reader, config);
     }
 
-    // DtPipe convention: Guid (DuckDB UUID) → BinaryType = 16-byte RFC 4122 binary,
-    // consistent with ArrowTypeMapper.GetArrowType(typeof(Guid)) = BinaryType.
+    // DtPipe UUID convention: Guid (DuckDB UUID) → FixedSizeBinaryType(16) with arrow.uuid metadata.
+    // The arrow.uuid metadata is attached at the Field level by ArrowSchemaFactory; the type alone
+    // is FixedSizeBinaryType(16), consistent with ArrowTypeMapper.GetArrowType(typeof(Guid)).
     private static IArrowType DtPipeTypeResolver(System.Data.Common.DbColumn col)
     {
         var clrType = col.DataType ?? typeof(string);
-        if (clrType == typeof(Guid)) return BinaryType.Default;
+        if (clrType == typeof(Guid)) return new FixedSizeBinaryType(16);
         return AdoToArrowUtils.GetArrowTypeFromDbColumn(col);
     }
 
@@ -214,11 +215,11 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader
             .SetTypeResolver(DtPipeTypeResolver)
             .Build();
 
-        // DuckDB returns Guid for UUID columns. DtPipeTypeResolver maps them to BinaryType.
+        // DuckDB returns Guid for UUID columns. DtPipeTypeResolver maps them to FixedSizeBinaryType(16).
         // GuidToBinaryConsumer reads Guid via GetGuid() and writes as RFC 4122 bytes (16 bytes).
         Apache.Arrow.Ado.IAdoConsumer factory(IArrowType arrowType, int colIdx)
         {
-            if (arrowType is BinaryType && reader.GetFieldType(colIdx) == typeof(Guid))
+            if (arrowType is FixedSizeBinaryType && reader.GetFieldType(colIdx) == typeof(Guid))
                 return new GuidToBinaryConsumer(colIdx);
             return Apache.Arrow.Ado.AdoConsumerFactory.Create(arrowType, colIdx);
         }
@@ -266,6 +267,8 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader
     private static string ArrowTypeToDuckDbSql(IArrowType type) => type switch
     {
         Decimal128Type d => $"DECIMAL({d.Precision},{d.Scale})",
+        // FixedSizeBinary(16) = arrow.uuid canonical extension — DtPipe internal UUID format
+        FixedSizeBinaryType fst when fst.ByteWidth == 16 => "UUID",
         _ => type.TypeId switch
         {
             ArrowTypeId.Boolean => "BOOLEAN",
@@ -280,7 +283,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader
             ArrowTypeId.Float => "FLOAT",
             ArrowTypeId.Double => "DOUBLE",
             ArrowTypeId.String => "VARCHAR",
-            ArrowTypeId.Binary => "UUID",   // Binary = 16-byte RFC 4122 UUID in DtPipe
+            ArrowTypeId.Binary => "UUID",   // keep for external legacy Arrow sources without arrow.uuid metadata
             ArrowTypeId.Date32 => "DATE",
             ArrowTypeId.Date64 => "TIMESTAMP",
             ArrowTypeId.Timestamp => "TIMESTAMP",
@@ -355,16 +358,16 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader
     private static void ValidateSchema(string alias, Schema schema)
         => SqlProcessorHelpers.ValidateSchema(alias, schema);
 
-    // Reads a DuckDB UUID column returned as System.Guid, converts to 16-byte RFC 4122 binary
-    // and writes to a BinaryArray Arrow builder for type-consistent pipeline output.
+    // Reads a DuckDB UUID column returned as System.Guid, stores as FixedSizeBinary(16) RFC 4122.
+    // The arrow.uuid Field metadata is attached at schema creation time (ArrowSchemaFactory).
     private sealed class GuidToBinaryConsumer : Apache.Arrow.Ado.IAdoConsumer
     {
         private readonly int _colIdx;
-        private readonly BinaryArray.Builder _builder = new();
+        private readonly DtPipe.Core.Infrastructure.Arrow.UuidArrayBuilder _builder = new();
 
         public GuidToBinaryConsumer(int colIdx) { _colIdx = colIdx; }
 
-        public IArrowType ArrowType => BinaryType.Default;
+        public IArrowType ArrowType => new FixedSizeBinaryType(16);
 
         public void Consume(System.Data.Common.DbDataReader reader)
         {
@@ -374,7 +377,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader
                 _builder.Append(ArrowTypeMapper.ToArrowUuidBytes(((DuckDBDataReader)reader).GetGuid(_colIdx)));
         }
 
-        public IArrowArray BuildArray() => _builder.Build(default);
+        public IArrowArray BuildArray() => _builder.Build();
         public void Reset() => _builder.Clear();
         public void Dispose() { }
     }

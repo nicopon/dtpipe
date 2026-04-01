@@ -318,7 +318,7 @@ public sealed partial class FakeDataTransformer : BaseColumnarTransformer, IRequ
 			// 1. Extract real columns from incoming batch into rowBuffer
 			for (int colIdx = 0; colIdx < _realColumnCount; colIdx++)
 			{
-				rowBuffer[colIdx] = ArrowTypeMapper.GetValue(batch.Column(colIdx), i);
+				rowBuffer[colIdx] = ArrowTypeMapper.GetValueForField(batch.Column(colIdx), batch.Schema.GetFieldByIndex(colIdx), i);
 			}
 			// Initialize virtual columns if any
 			for (int colIdx = _realColumnCount; colIdx < totalColumns; colIdx++)

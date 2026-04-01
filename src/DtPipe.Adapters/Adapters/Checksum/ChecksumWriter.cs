@@ -108,7 +108,7 @@ public sealed class ChecksumDataWriter : IDataWriter, IColumnarDataWriter, IRequ
 			var row = new object?[batch.ColumnCount];
 			for (int c = 0; c < batch.ColumnCount; c++)
 			{
-				row[c] = ArrowTypeMapper.GetValue(batch.Column(c), r);
+				row[c] = ArrowTypeMapper.GetValueForField(batch.Column(c), batch.Schema.GetFieldByIndex(c), r);
 			}
 			rows[r] = row;
 		}

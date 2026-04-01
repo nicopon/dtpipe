@@ -18,7 +18,8 @@ public class ArrowColumnarToRowBridge : IColumnarToRowBridge
 
             var row = new object?[colCount];
             for (int j = 0; j < colCount; j++)
-                row[j] = GetValue(batch.Column(j), i);
+                row[j] = ArrowTypeMapper.GetValueForField(
+                    batch.Column(j), batch.Schema.GetFieldByIndex(j), i);
 
             yield return row;
         }

@@ -86,6 +86,11 @@ public class ExportService
 		await using var reader = readerFactory.Create(registry);
 		await reader.OpenAsync(ct);
 
+		// Show auto-applied types panel when --auto-column-types was set
+		if (!silenceInternal && reader is IColumnTypeInferenceCapable autoCapable
+		    && autoCapable.AutoAppliedTypes?.Count > 0)
+			_observer.ShowColumnTypeInferenceSuggestion(autoCapable.AutoAppliedTypes, 100, applied: true);
+
 		if (showStatusMessages && !silenceInternal)
 			_observer.ShowConnectionStatus(true, reader.Columns?.Count);
 
@@ -140,9 +145,10 @@ public class ExportService
 		{
 			try
 			{
-				var suggested = await inferCapable.InferColumnTypesAsync(Math.Max(options.DryRunCount, 100), ct);
+				var sampleCount = Math.Max(options.DryRunCount, 100);
+				var suggested = await inferCapable.InferColumnTypesAsync(sampleCount, ct);
 				if (suggested.Count > 0 && !silenceInternal)
-					_observer.ShowColumnTypeInferenceSuggestion(suggested);
+					_observer.ShowColumnTypeInferenceSuggestion(suggested, sampleCount);
 			}
 			catch { /* inference is best-effort, never fail the dry-run */ }
 		}

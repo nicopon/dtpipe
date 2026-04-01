@@ -98,7 +98,7 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
 		var columns = new List<TargetColumnInfo>();
 		foreach (var field in schema.FieldsList)
 		{
-			var clrType = ArrowTypeMapper.GetClrType(field.DataType);
+			var clrType = ArrowTypeMapper.GetClrTypeFromField(field);
 			columns.Add(new TargetColumnInfo(
 				field.Name,
 				field.DataType.Name,
@@ -133,17 +133,8 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
 		return ValueTask.CompletedTask;
 	}
 
-	private Schema BuildSchema(IReadOnlyList<PipeColumnInfo> columns)
-	{
-		var builder = new Schema.Builder();
-		foreach (var col in columns)
-		{
-			builder.Field(new Field(col.Name, ArrowTypeMapper.GetArrowType(col.ClrType), col.IsNullable));
-		}
-		return builder.Build();
-	}
-
-	private IArrowType GetArrowType(Type type) => ArrowTypeMapper.GetArrowType(type);
+	private static Schema BuildSchema(IReadOnlyList<PipeColumnInfo> columns)
+		=> ArrowSchemaFactory.Create(columns);
 
 	public ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
 	{

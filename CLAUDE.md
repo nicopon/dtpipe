@@ -186,3 +186,61 @@ The canonical Arrow representation of a UUID in DtPipe is `BinaryType` with `.NE
 2. Define an options class implementing `IOptionSet` with `[ComponentOption]` attributes.
 3. Register in `Program.cs` with `RegisterReader<YourDescriptor>()` or `RegisterWriter<YourDescriptor>()`.
 4. The CLI options are auto-generated from the options type — no manual `System.CommandLine` wiring needed.
+
+### Type Handling in Adapters
+
+#### Row-mode writers (`IDataWriter`)
+Row-mode writers receive `object?[]` rows. The CLR type at each cell is declared in `PipeColumnInfo.ClrType`.
+Writers must NOT assume source and target types match. Use `ColumnConverterFactory.Build(sourceClrType, targetClrType)` (`DtPipe.Core.Helpers`) to compile a typed converter **once per column** during initialization, then invoke it in the write loop:
+
+```csharp
+// During initialization — build once
+_converters = columns.Select(col =>
+    ColumnConverterFactory.Build(col.ClrType, targetType)).ToArray();
+
+// In write loop — invoke per cell
+var convertedVal = _converters[i](row[i]);
+```
+
+Do **not** call `ValueConverter.ConvertValue()` per-cell directly — it performs reflection-based dispatch on every call.
+
+`SqliteDataWriter` is exempt: `SqliteParameter` accepts `object` and coerces natively.
+
+#### Columnar writers (`IColumnarDataWriter`)
+Columnar writers receive `RecordBatch` directly (zero intermediate `object?[]`). When a Field context is available, extract values using `ArrowTypeMapper.GetValueForField(array, field, rowIndex)` (resolves extension types such as `arrow.uuid` → `Guid`). Without Field context, `ArrowTypeMapper.GetValue(array, rowIndex)` returns raw storage values (e.g. `byte[]` for `FixedSizeBinaryArray`). No `ValueConverter` call needed. This is the preferred path for all new DB writers.
+
+Implementing `IColumnarDataWriter` enables `PipelineExecutor` to route columnar sources (Parquet, PostgreSQL, DuckDB output) directly to the writer without any row-level bridging.
+
+#### Text sources (CSV, JSON, etc.)
+Text readers emit `string` for every column by default. Downstream writers will hit the conversion path in `ColumnConverterFactory`. Two remediation options in order of preference:
+1. User declares `--column-types "Col:type"` — reader emits typed values directly (zero conversion downstream).
+2. `--auto-column-types` — inference runs automatically on the first 100 rows and applies types before the main pipeline opens.
+
+When implementing a new text reader, implement `IColumnTypeInferenceCapable` so the dry-run suggestion and `--auto-column-types` work automatically.
+
+#### Arrow ↔ CLR mapping: no heuristics
+
+The conversion between Arrow types and CLR types is limited to direct, unambiguous mappings
+defined in `ArrowTypeMapper`. For Arrow types whose CLR semantics depend on context
+(e.g. `FixedSizeBinary(n)` which could be a UUID, a hash, a key, etc.), the mapping to a
+specific CLR type must be driven by an **Arrow extension type** (Field metadata), not by a
+heuristic on the data structure (size, pattern, etc.).
+
+**Firm rule: `ArrowTypeMapper.GetClrType(IArrowType)` never infers a semantic CLR type from
+the storage type alone.** If the Arrow type is ambiguous (e.g. `FixedSizeBinary`), it maps to
+the most generic CLR type (`byte[]`). Semantic resolution requires `ArrowTypeMapper.GetClrTypeFromField(Field)`.
+
+Use `ArrowTypeMapper.GetClrTypeFromField(field)` wherever a `Field` is available (reading schemas
+from Arrow IPC, Parquet, channel schemas). Use `ArrowTypeMapper.GetValueForField(array, field, i)`
+for value extraction when the Field is available.
+
+If an external source omits Arrow extension metadata, users must insert an explicit transform/cast
+step in the pipeline. DtPipe does not infer semantic types from data shape.
+
+**Example — UUID columns:**
+- Storage: `FixedSizeBinaryType(16)` + Field metadata `ARROW:extension:name = arrow.uuid`
+- Emitted by `ArrowSchemaFactory.Create()` for `typeof(Guid)` columns
+- `GetClrType(FixedSizeBinaryType(16))` → `typeof(byte[])` (generic, no inference)
+- `GetClrTypeFromField(field with arrow.uuid)` → `typeof(Guid)` (explicit via metadata)
+- `GetValueForField(array, field with arrow.uuid, i)` → `Guid`; without metadata → `byte[]`
+- `ToArrowUuidBytes(guid)` / `FromArrowUuidBytes(span)` remain for byte-level conversion

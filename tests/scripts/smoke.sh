@@ -36,6 +36,16 @@ cleanup() {
           "$INPUT_DIR"/vicious_inc.csv \
           "$INPUT_DIR"/composite.db \
           "$INPUT_DIR"/composite.duckdb
+    # Drop typed tables from previous runs: Recreate preserves existing schema, so a stale
+    # table with old column types must be purged when column types change across runs.
+    docker exec dtpipe-integ-postgres psql -U postgres -d integration \
+        -c "DROP TABLE IF EXISTS voldata, comp_users" 2>/dev/null || true
+    docker exec dtpipe-integ-mssql-tools /opt/mssql-tools/bin/sqlcmd \
+        -S localhost -U sa -P 'Password123!' \
+        -Q "IF OBJECT_ID('VolData') IS NOT NULL DROP TABLE VolData; IF OBJECT_ID('CompUsers') IS NOT NULL DROP TABLE CompUsers;" \
+        2>/dev/null || true
+    printf 'DROP TABLE VOL_DATA PURGE;\nDROP TABLE COMP_USERS PURGE;\nEXIT\n' | \
+        docker exec -i dtpipe-integ-oracle sqlplus -s system/password@FREEPDB1 2>/dev/null || true
 }
 cleanup
 
@@ -73,7 +83,9 @@ echo "Id,Guid,Number" > "$INPUT_DIR/high_volume.csv"
 awk 'BEGIN { for(i=1; i<=1000000; i++) print i ",uuid-" i "," rand() }' >> "$INPUT_DIR/high_volume.csv"
 
 echo "      Converting CSV → Parquet..."
-"$DTPIPE" -i "$INPUT_DIR/high_volume.csv" -o "parquet:$INPUT_DIR/high_volume.parquet" --no-stats > /dev/null
+"$DTPIPE" -i "$INPUT_DIR/high_volume.csv" \
+  --csv-column-types "Id:int64" \
+  -o "parquet:$INPUT_DIR/high_volume.parquet" --no-stats > /dev/null
 
 "$DTPIPE" -i "parquet:$INPUT_DIR/high_volume.parquet" -o "$INPUT_DIR/result_vol.csv" --no-stats > /dev/null
 VOL_LINES=$(wc -l < "$INPUT_DIR/result_vol.csv" | tr -d ' ')
@@ -257,9 +269,11 @@ verify_composite() {
 }
 
 echo "      DuckDB..."
-"$DTPIPE" -i "$INPUT_DIR/composite_source.csv" -o "duck:$INPUT_DIR/composite.duckdb" \
+"$DTPIPE" -i "$INPUT_DIR/composite_source.csv" --csv-column-types "Target:int32" \
+  -o "duck:$INPUT_DIR/composite.duckdb" \
   --table "comp_users" --strategy Recreate --key "Region,Branch" --no-stats > /dev/null
-"$DTPIPE" -i "$INPUT_DIR/composite_inc.csv"   -o "duck:$INPUT_DIR/composite.duckdb" \
+"$DTPIPE" -i "$INPUT_DIR/composite_inc.csv" --csv-column-types "Target:int32" \
+  -o "duck:$INPUT_DIR/composite.duckdb" \
   --table "comp_users" --strategy Upsert   --key "Region,Branch" --no-stats > /dev/null
 "$DTPIPE" -i "duck:$INPUT_DIR/composite.duckdb" \
   --query "SELECT * FROM comp_users ORDER BY Region, Branch" \
@@ -267,9 +281,11 @@ echo "      DuckDB..."
 verify_composite "$INPUT_DIR/comp_duck.csv" "DuckDB"
 
 echo "      SQLite..."
-"$DTPIPE" -i "$INPUT_DIR/composite_source.csv" -o "sqlite:$INPUT_DIR/composite.db" \
+"$DTPIPE" -i "$INPUT_DIR/composite_source.csv" --csv-column-types "Target:int32" \
+  -o "sqlite:$INPUT_DIR/composite.db" \
   --table "comp_users" --strategy Recreate --key "Region,Branch" --no-stats > /dev/null
-"$DTPIPE" -i "$INPUT_DIR/composite_inc.csv"   -o "sqlite:$INPUT_DIR/composite.db" \
+"$DTPIPE" -i "$INPUT_DIR/composite_inc.csv" --csv-column-types "Target:int32" \
+  -o "sqlite:$INPUT_DIR/composite.db" \
   --table "comp_users" --strategy Upsert   --key "Region,Branch" --no-stats > /dev/null
 "$DTPIPE" -i "sqlite:$INPUT_DIR/composite.db" \
   --query "SELECT * FROM comp_users ORDER BY Region, Branch" \
@@ -277,9 +293,11 @@ echo "      SQLite..."
 verify_composite "$INPUT_DIR/comp_sqlite.csv" "SQLite"
 
 echo "      Postgres..."
-"$DTPIPE" -i "$INPUT_DIR/composite_source.csv" -o "$PG_CONN" \
+"$DTPIPE" -i "$INPUT_DIR/composite_source.csv" --csv-column-types "Target:int32" \
+  -o "$PG_CONN" \
   --table "comp_users" --strategy Recreate --key "Region,Branch" --no-stats > /dev/null
-"$DTPIPE" -i "$INPUT_DIR/composite_inc.csv"   -o "$PG_CONN" \
+"$DTPIPE" -i "$INPUT_DIR/composite_inc.csv" --csv-column-types "Target:int32" \
+  -o "$PG_CONN" \
   --table "comp_users" --strategy Upsert   --key "Region,Branch" --no-stats > /dev/null
 "$DTPIPE" -i "$PG_CONN" \
   --query "SELECT * FROM comp_users ORDER BY region, branch" \
@@ -287,9 +305,11 @@ echo "      Postgres..."
 verify_composite "$INPUT_DIR/comp_pg.csv" "Postgres"
 
 echo "      MSSQL..."
-"$DTPIPE" -i "$INPUT_DIR/composite_source.csv" -o "$MSSQL_CONN" \
+"$DTPIPE" -i "$INPUT_DIR/composite_source.csv" --csv-column-types "Target:int32" \
+  -o "$MSSQL_CONN" \
   --table "CompUsers" --strategy Recreate --key "Region,Branch" --no-stats > /dev/null
-"$DTPIPE" -i "$INPUT_DIR/composite_inc.csv"   -o "$MSSQL_CONN" \
+"$DTPIPE" -i "$INPUT_DIR/composite_inc.csv" --csv-column-types "Target:int32" \
+  -o "$MSSQL_CONN" \
   --table "CompUsers" --strategy Upsert   --key "Region,Branch" --no-stats > /dev/null
 "$DTPIPE" -i "$MSSQL_CONN" \
   --query "SELECT * FROM CompUsers ORDER BY Region, Branch" \
@@ -297,9 +317,11 @@ echo "      MSSQL..."
 verify_composite "$INPUT_DIR/comp_mssql.csv" "MSSQL"
 
 echo "      Oracle..."
-"$DTPIPE" -i "$INPUT_DIR/composite_source.csv" -o "$ORA_CONN" \
+"$DTPIPE" -i "$INPUT_DIR/composite_source.csv" --csv-column-types "Target:int32" \
+  -o "$ORA_CONN" \
   --table "COMP_USERS" --strategy Recreate --key "Region,Branch" --no-stats > /dev/null
-"$DTPIPE" -i "$INPUT_DIR/composite_inc.csv"   -o "$ORA_CONN" \
+"$DTPIPE" -i "$INPUT_DIR/composite_inc.csv" --csv-column-types "Target:int32" \
+  -o "$ORA_CONN" \
   --table "COMP_USERS" --strategy Upsert   --key "Region,Branch" --no-stats > /dev/null
 "$DTPIPE" -i "$ORA_CONN" \
   --query "SELECT * FROM COMP_USERS ORDER BY Region, Branch" \

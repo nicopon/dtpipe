@@ -143,15 +143,10 @@ public sealed class ArrowRowToColumnarBridge : IRowToColumnarBridge
 
     private IArrowArray BuildArray(IArrowArrayBuilder builder) => ArrowTypeMapper.BuildArray(builder);
 
-    private Schema BuildSchema(IReadOnlyList<PipeColumnInfo> columns)
-    {
-        var builder = new Schema.Builder();
-        foreach (var col in columns)
-        {
-            builder.Field(new Field(col.Name, ArrowTypeMapper.GetArrowType(col.ClrType), col.IsNullable));
-        }
-        return builder.Build();
-    }
+    private static Schema BuildSchema(IReadOnlyList<PipeColumnInfo> columns)
+        // Use ArrowSchemaFactory so Fields include extension metadata (e.g. arrow.uuid for Guid columns).
+        // Without the metadata, GetValueForField cannot resolve semantic types and returns raw bytes.
+        => ArrowSchemaFactory.Create(columns);
 
     private IArrowType GetArrowType(Type type) => ArrowTypeMapper.GetArrowType(type);
 

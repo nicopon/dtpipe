@@ -8,22 +8,23 @@ using DtPipe.Core.Infrastructure.Arrow;
 namespace DtPipe.Adapters.Common;
 
 /// <summary>
-/// Consumer for database columns that expose <see cref="Guid"/> values (e.g. UUID/UNIQUEIDENTIFIER)
-/// when the target Arrow type is <see cref="BinaryType"/> (16-byte RFC 4122 big-endian binary).
-/// Standard BinaryConsumer expects byte[] from the reader; this handles Guid-returning providers
-/// such as Npgsql (PostgreSQL uuid) and SqlClient (SQL Server uniqueidentifier).
+/// Consumer for database columns that expose <see cref="Guid"/> values (e.g. UUID/UNIQUEIDENTIFIER).
+/// Produces a <c>FixedSizeBinaryArray</c> of 16-byte RFC 4122 values.
+/// The Arrow field for this column will carry the <c>arrow.uuid</c> extension metadata
+/// (set by <see cref="DtPipe.Core.Infrastructure.Arrow.ArrowSchemaFactory"/>).
+/// Handles Guid-returning providers such as Npgsql (PostgreSQL uuid) and SqlClient (SQL Server uniqueidentifier).
 /// </summary>
 internal sealed class GuidAsBytesConsumer : IAdoConsumer
 {
     private readonly int _columnIndex;
-    private readonly BinaryArray.Builder _builder = new();
+    private readonly DtPipe.Core.Infrastructure.Arrow.UuidArrayBuilder _builder = new();
 
     public GuidAsBytesConsumer(int columnIndex)
     {
         _columnIndex = columnIndex;
     }
 
-    public IArrowType ArrowType => BinaryType.Default;
+    public IArrowType ArrowType => new FixedSizeBinaryType(16);
 
     public void Consume(DbDataReader reader)
     {
@@ -37,7 +38,7 @@ internal sealed class GuidAsBytesConsumer : IAdoConsumer
         if (obj is Guid guid)
             _builder.Append(ArrowTypeMapper.ToArrowUuidBytes(guid));
         else if (obj is byte[] bytes && bytes.Length == 16)
-            _builder.Append(bytes); // assume already RFC 4122 from the DB driver
+            _builder.Append(bytes.AsSpan()); // assume already RFC 4122 from the DB driver
         else
             _builder.AppendNull();
     }
