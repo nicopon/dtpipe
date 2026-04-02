@@ -8,13 +8,8 @@ namespace DtPipe.Core.Infrastructure.Arrow;
 /// Centralized mapper for CLR to Arrow types and vice-versa.
 /// Provides unified logic for schema generation, builder creation, and value extraction.
 ///
-/// UUID representation:
-///   Arrow canonical (RFC 4122 big-endian) ↔ .NET Guid (little-endian first 3 components)
-///   Use <see cref="ToArrowUuidBytes"/> / <see cref="FromArrowUuidBytes"/> for byte conversion.
-///   Pipeline storage type: FixedSizeBinaryType(16) with Field metadata arrow.uuid.
-///   <see cref="GetClrTypeFromField"/> is the preferred entry point when a Field is available;
-///   it checks the arrow.uuid extension metadata. <see cref="GetClrType(IArrowType)"/> alone
-///   never infers Guid from FixedSizeBinaryType — that would be an heuristic.
+/// Extensions (like arrow.uuid) are processed strictly via explicit metadata.
+/// There are no heuristics or default Guid-inference logic.
 ///
 /// IMPORTANT – inheritance order in switches:
 ///   Decimal128Type/Decimal256Type inherit from FixedSizeBinaryType.
@@ -175,9 +170,8 @@ public static class ArrowTypeMapper
             // Decimal types BEFORE FixedSizeBinaryType (inheritance order)
             Decimal128Type t => new Decimal128Array.Builder(t),
             Decimal256Type t => new Decimal256Array.Builder(t),
-            // FixedSizeBinary(16) = UUID array builder; other widths fall back to BinaryArray
-            FixedSizeBinaryType fst when fst.ByteWidth == 16 => new UuidArrayBuilder(),
-            FixedSizeBinaryType => new BinaryArray.Builder(),
+            // FixedSizeBinary maps to the generic builder
+            FixedSizeBinaryType fst => new FixedSizeBinaryArrayBuilder(fst.ByteWidth),
             Date32Type => new Date32Array.Builder(),
             Date64Type => new Date64Array.Builder(),
             TimestampType t => new TimestampArray.Builder(t),
@@ -241,7 +235,7 @@ public static class ArrowTypeMapper
             case DoubleArray.Builder b: b.AppendNull(); break;
             case StringArray.Builder b: b.AppendNull(); break;
             case BinaryArray.Builder b: b.AppendNull(); break;
-            case UuidArrayBuilder b: b.AppendNull(); break;
+            case FixedSizeBinaryArrayBuilder b: b.AppendNull(); break;
             case Decimal128Array.Builder b: b.AppendNull(); break;
             case Decimal256Array.Builder b: b.AppendNull(); break;
             case Date32Array.Builder b: b.AppendNull(); break;
@@ -270,7 +264,7 @@ public static class ArrowTypeMapper
             DoubleArray.Builder b => b.Build(),
             StringArray.Builder b => b.Build(),
             BinaryArray.Builder b => b.Build(),
-            UuidArrayBuilder b => b.Build(),
+            FixedSizeBinaryArrayBuilder b => b.Build(),
             Decimal128Array.Builder b => b.Build(),
             Decimal256Array.Builder b => b.Build(),
             Date32Array.Builder b => b.Build(),
@@ -307,15 +301,14 @@ public static class ArrowTypeMapper
             case BooleanArray.Builder b: b.Append(Convert.ToBoolean(value)); break;
             case Decimal128Array.Builder b: b.Append(Convert.ToDecimal(value)); break;
             case Decimal256Array.Builder b: b.Append(Convert.ToDecimal(value)); break;
-            case UuidArrayBuilder b:
-                // UUID builder: Guid → RFC 4122 bytes; pre-encoded byte[16] passed through as-is
+            case FixedSizeBinaryArrayBuilder b:
                 if (value is Guid guid) b.Append(ToArrowUuidBytes(guid));
-                else if (value is byte[] uuidBytes && uuidBytes.Length == 16) b.Append(uuidBytes);
+                else if (value is byte[] fixedBytes && fixedBytes.Length == b.ByteWidth) b.Append(fixedBytes);
                 else b.AppendNull();
                 break;
             case BinaryArray.Builder b:
                 // Generic binary builder: byte[] passed through as-is
-                if (value is byte[] bytes) b.Append((System.Collections.Generic.IEnumerable<byte>)bytes);
+                if (value is byte[] binBytes) b.Append((System.Collections.Generic.IEnumerable<byte>)binBytes);
                 else b.AppendNull();
                 break;
             case Date32Array.Builder b: b.Append(Convert.ToDateTime(value)); break;
@@ -357,9 +350,9 @@ public static class ArrowTypeMapper
             // Decimal arrays BEFORE FixedSizeBinaryArray (inheritance order)
             case Decimal128Array a: ((Decimal128Array.Builder)builder).Append(a.GetValue(index)!.Value); break;
             case Decimal256Array a: ((Decimal256Array.Builder)builder).Append(a.GetValue(index)!.Value); break;
-            // FixedSizeBinaryArray: route to UuidArrayBuilder if available, else BinaryArray.Builder
-            case FixedSizeBinaryArray a when builder is UuidArrayBuilder ub:
-                ub.Append(a.GetBytes(index)); break;
+            // FixedSizeBinaryArray: route to FixedSizeBinaryArrayBuilder if available, else BinaryArray.Builder
+            case FixedSizeBinaryArray a when builder is FixedSizeBinaryArrayBuilder fb:
+                fb.Append(a.GetBytes(index)); break;
             case FixedSizeBinaryArray a:
                 ((BinaryArray.Builder)builder).Append(a.GetBytes(index)); break;
             case Date32Array a: ((Date32Array.Builder)builder).Append(a.GetDateTime(index)!.Value); break;

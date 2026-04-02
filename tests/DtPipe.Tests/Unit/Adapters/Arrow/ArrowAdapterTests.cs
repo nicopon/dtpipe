@@ -55,10 +55,10 @@ public class ArrowAdapterTests : IAsyncLifetime
 	public void ArrowTypeMapper_AppendValue_GuidProducesRfc4122Bytes()
 	{
 		var guid = Guid.Parse("550e8400-e29b-41d4-a716-446655440000");
-		// Guid uses UuidArrayBuilder → FixedSizeBinaryArray (arrow.uuid canonical extension)
-		var builder = new UuidArrayBuilder();
+		// Guid uses FixedSizeBinaryArrayBuilder → FixedSizeBinaryArray (arrow.uuid canonical extension)
+		var builder = new FixedSizeBinaryArrayBuilder(16);
 		ArrowTypeMapper.AppendValue(builder, guid);
-		var array = (Apache.Arrow.Arrays.FixedSizeBinaryArray)ArrowTypeMapper.BuildArray(builder);
+		var array = (Apache.Arrow.Arrays.FixedSizeBinaryArray)builder.Build();
 
 		var bytes = array.GetBytes(0).ToArray();
 		// First byte of RFC 4122 for "550e8400-..." must be 0x55

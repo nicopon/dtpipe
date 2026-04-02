@@ -5,29 +5,32 @@ using Apache.Arrow.Types;
 namespace DtPipe.Core.Infrastructure.Arrow;
 
 /// <summary>
-/// Builds a <see cref="FixedSizeBinaryArray"/> containing 16-byte RFC 4122 UUID values.
-/// Used as the Arrow array builder for <see cref="System.Guid"/> columns.
+/// Builds a <see cref="FixedSizeBinaryArray"/> of arbitrary byte width.
 ///
 /// <see cref="Apache.Arrow"/> C# 22.x has no public <c>FixedSizeBinaryArray.Builder</c>,
 /// so this class builds the underlying validity bitmap and data buffer manually.
-///
-/// The produced array carries storage type <see cref="FixedSizeBinaryType"/>(16).
-/// The <c>arrow.uuid</c> extension metadata is attached at the <see cref="Field"/> level
-/// (via <see cref="ArrowSchemaFactory"/>), not at the array level.
 /// </summary>
-public sealed class UuidArrayBuilder : IArrowArrayBuilder
+public sealed class FixedSizeBinaryArrayBuilder : IArrowArrayBuilder
 {
-    private const int ByteWidth = 16;
+    public int ByteWidth { get; }
 
     private readonly List<byte[]> _values = new();
     private readonly List<bool> _valid = new();
     private int _nullCount;
 
-    /// <summary>Appends a 16-byte RFC 4122 UUID value.</summary>
-    public void Append(ReadOnlySpan<byte> rfcBytes)
+    public FixedSizeBinaryArrayBuilder(int byteWidth)
+    {
+        if (byteWidth <= 0)
+            throw new ArgumentOutOfRangeException(nameof(byteWidth), "ByteWidth must be strictly positive.");
+        
+        ByteWidth = byteWidth;
+    }
+
+    /// <summary>Appends a fixed-size byte array value.</summary>
+    public void Append(ReadOnlySpan<byte> bytes)
     {
         var arr = new byte[ByteWidth];
-        rfcBytes.Slice(0, Math.Min(rfcBytes.Length, ByteWidth)).CopyTo(arr);
+        bytes.Slice(0, Math.Min(bytes.Length, ByteWidth)).CopyTo(arr);
         _values.Add(arr);
         _valid.Add(true);
     }
@@ -69,6 +72,7 @@ public sealed class UuidArrayBuilder : IArrowArrayBuilder
         var validBuf = new byte[(n + 7) / 8];
         for (int i = 0; i < n; i++)
             if (_valid[i]) validBuf[i / 8] |= (byte)(1 << (i % 8));
+        
         var validBuilder = new ArrowBuffer.Builder<byte>((n + 7) / 8);
         validBuilder.AppendRange(validBuf);
 

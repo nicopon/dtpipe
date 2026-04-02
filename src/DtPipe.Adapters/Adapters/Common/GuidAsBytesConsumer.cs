@@ -17,7 +17,7 @@ namespace DtPipe.Adapters.Common;
 internal sealed class GuidAsBytesConsumer : IAdoConsumer
 {
     private readonly int _columnIndex;
-    private readonly DtPipe.Core.Infrastructure.Arrow.UuidArrayBuilder _builder = new();
+    private readonly DtPipe.Core.Infrastructure.Arrow.FixedSizeBinaryArrayBuilder _builder = new(16);
 
     public GuidAsBytesConsumer(int columnIndex)
     {

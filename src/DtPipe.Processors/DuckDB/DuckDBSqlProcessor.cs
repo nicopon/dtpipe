@@ -255,43 +255,46 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader
         => clrType == typeof(byte[]) ? typeof(Guid) : clrType;
 
     // Builds a CREATE TABLE statement from an Arrow schema for --ref materialization.
-    // Binary columns are mapped to UUID to match the streaming source's UUID columns,
-    // ensuring JOIN compatibility between --from (streaming) and --ref (materialized) tables.
     private static string BuildCreateTableSql(string tableName, Schema schema)
     {
         var cols = schema.FieldsList.Select(f =>
-            $"\"{f.Name.ToLowerInvariant()}\" {ArrowTypeToDuckDbSql(f.DataType)}{(f.IsNullable ? "" : " NOT NULL")}");
+            $"\"{f.Name.ToLowerInvariant()}\" {ArrowTypeToDuckDbSql(f)}{(f.IsNullable ? "" : " NOT NULL")}");
         return $"CREATE TABLE \"{tableName}\" ({string.Join(", ", cols)})";
     }
 
-    private static string ArrowTypeToDuckDbSql(IArrowType type) => type switch
+    private static string ArrowTypeToDuckDbSql(Field field) 
     {
-        Decimal128Type d => $"DECIMAL({d.Precision},{d.Scale})",
-        // FixedSizeBinary(16) = arrow.uuid canonical extension — DtPipe internal UUID format
-        FixedSizeBinaryType fst when fst.ByteWidth == 16 => "UUID",
-        _ => type.TypeId switch
+        if (ArrowTypeMapper.GetClrTypeFromField(field) == typeof(Guid))
+            return "UUID";
+
+        return field.DataType switch
         {
-            ArrowTypeId.Boolean => "BOOLEAN",
-            ArrowTypeId.Int8 => "TINYINT",
-            ArrowTypeId.UInt8 => "UTINYINT",
-            ArrowTypeId.Int16 => "SMALLINT",
-            ArrowTypeId.UInt16 => "USMALLINT",
-            ArrowTypeId.Int32 => "INTEGER",
-            ArrowTypeId.UInt32 => "UINTEGER",
-            ArrowTypeId.Int64 => "BIGINT",
-            ArrowTypeId.UInt64 => "UBIGINT",
-            ArrowTypeId.Float => "FLOAT",
-            ArrowTypeId.Double => "DOUBLE",
-            ArrowTypeId.String => "VARCHAR",
-            ArrowTypeId.Binary => "UUID",   // keep for external legacy Arrow sources without arrow.uuid metadata
-            ArrowTypeId.Date32 => "DATE",
-            ArrowTypeId.Date64 => "TIMESTAMP",
-            ArrowTypeId.Timestamp => "TIMESTAMP",
-            ArrowTypeId.Duration => "BIGINT",
-            ArrowTypeId.Decimal256 => "DOUBLE",
-            _ => "VARCHAR",
-        }
-    };
+            Decimal128Type d => $"DECIMAL({d.Precision},{d.Scale})",
+            FixedSizeBinaryType => "BLOB",
+            _ => field.DataType.TypeId switch
+            {
+                ArrowTypeId.Boolean => "BOOLEAN",
+                ArrowTypeId.Int8 => "TINYINT",
+                ArrowTypeId.UInt8 => "UTINYINT",
+                ArrowTypeId.Int16 => "SMALLINT",
+                ArrowTypeId.UInt16 => "USMALLINT",
+                ArrowTypeId.Int32 => "INTEGER",
+                ArrowTypeId.UInt32 => "UINTEGER",
+                ArrowTypeId.Int64 => "BIGINT",
+                ArrowTypeId.UInt64 => "UBIGINT",
+                ArrowTypeId.Float => "FLOAT",
+                ArrowTypeId.Double => "DOUBLE",
+                ArrowTypeId.String => "VARCHAR",
+                ArrowTypeId.Binary => "BLOB",  // No legacy UUID mapping here mapping here either without arrow.uuid metadata
+                ArrowTypeId.Date32 => "DATE",
+                ArrowTypeId.Date64 => "TIMESTAMP",
+                ArrowTypeId.Timestamp => "TIMESTAMP",
+                ArrowTypeId.Duration => "BIGINT",
+                ArrowTypeId.Decimal256 => "DOUBLE",
+                _ => "VARCHAR",
+            }
+        };
+    }
 
     // Writes an Arrow array value to a DuckDB appender row for --ref table insertion.
     private static void AppendArrowValue(IDuckDBAppenderRow row, IArrowArray column, int rowIndex)
@@ -317,7 +320,6 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader
             case DateTimeOffset dto: row.AppendValue(dto.DateTime); break;
             case TimeSpan ts: row.AppendValue(ts); break;
             case Guid g: row.AppendValue(g); break;
-            case byte[] bytes when bytes.Length == 16: row.AppendValue(ArrowTypeMapper.FromArrowUuidBytes(bytes)); break;
             case byte[] bytes: row.AppendValue((IEnumerable<byte>)bytes); break;
             default: row.AppendValue(val.ToString() ?? string.Empty); break;
         }
@@ -346,8 +348,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader
             case DateTimeOffset dto: writer.WriteValue(dto.DateTime, rowIndex); break;
             case TimeSpan ts: writer.WriteValue(ts, rowIndex); break;
             case Guid g: writer.WriteValue(g, rowIndex); break;
-            case byte[] bytes when bytes.Length == 16: writer.WriteValue(ArrowTypeMapper.FromArrowUuidBytes(bytes), rowIndex); break;
-            case byte[] bytes: writer.WriteValue(Convert.ToBase64String(bytes), rowIndex); break;
+            case byte[] bytes: writer.WriteValue(bytes, rowIndex); break;
             default: writer.WriteValue(val.ToString() ?? string.Empty, rowIndex); break;
         }
     }
@@ -363,7 +364,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader
     private sealed class GuidToBinaryConsumer : Apache.Arrow.Ado.IAdoConsumer
     {
         private readonly int _colIdx;
-        private readonly DtPipe.Core.Infrastructure.Arrow.UuidArrayBuilder _builder = new();
+        private readonly DtPipe.Core.Infrastructure.Arrow.FixedSizeBinaryArrayBuilder _builder = new(16);
 
         public GuidToBinaryConsumer(int colIdx) { _colIdx = colIdx; }
 
