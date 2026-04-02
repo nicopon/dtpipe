@@ -91,7 +91,7 @@ public sealed partial class SqlServerColumnarReader : IColumnarStreamReader, IRe
                      .Select(x => x.i));
 
         _config = new AdoToArrowConfigBuilder()
-            .SetTypeResolver(col => ArrowTypeMapper.GetArrowType(
+            .SetTypeResolver(col => ArrowTypeMapper.GetLogicalType(
                 Nullable.GetUnderlyingType(col.DataType ?? typeof(string)) ?? col.DataType ?? typeof(string)))
             .Build();
 

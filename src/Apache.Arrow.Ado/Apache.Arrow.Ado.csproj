@@ -8,6 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Apache.Arrow.Serialization\Apache.Arrow.Serialization.csproj" />
     <PackageReference Include="Apache.Arrow" Version="22.1.0" />
   </ItemGroup>
 

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>Apache.Arrow.Serialization</PackageId>
+    <Description>High-level object serialization for Apache Arrow in .NET.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Apache.Arrow" Version="22.1.0" />
+
+  </ItemGroup>
+
+</Project>

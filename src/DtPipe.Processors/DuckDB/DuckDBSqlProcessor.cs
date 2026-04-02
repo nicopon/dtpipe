@@ -186,19 +186,11 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader
         using var cmd = _conn!.CreateCommand();
         cmd.CommandText = $"SELECT * FROM ({_query}) __schema_probe LIMIT 0";
         using var reader = (DuckDBDataReader)await cmd.ExecuteReaderAsync(ct);
-        var config = new AdoToArrowConfigBuilder().SetTypeResolver(DtPipeTypeResolver).Build();
+        var config = new AdoToArrowConfigBuilder().Build();
         return AdoToArrowUtils.CreateSchema(reader, config);
     }
 
-    // DtPipe UUID convention: Guid (DuckDB UUID) → FixedSizeBinaryType(16) with arrow.uuid metadata.
-    // The arrow.uuid metadata is attached at the Field level by ArrowSchemaFactory; the type alone
-    // is FixedSizeBinaryType(16), consistent with ArrowTypeMapper.GetArrowType(typeof(Guid)).
-    private static IArrowType DtPipeTypeResolver(System.Data.Common.DbColumn col)
-    {
-        var clrType = col.DataType ?? typeof(string);
-        if (clrType == typeof(Guid)) return new FixedSizeBinaryType(16);
-        return AdoToArrowUtils.GetArrowTypeFromDbColumn(col);
-    }
+    // DtPipe UUID convention for Guid is natively handled by the centralized ArrowTypeMap via AdoToArrowUtils.
 
     public async IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync(
         [EnumeratorCancellation] CancellationToken ct = default)
@@ -212,7 +204,6 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader
 
         var config = new AdoToArrowConfigBuilder()
             .SetTargetBatchSize(65536)
-            .SetTypeResolver(DtPipeTypeResolver)
             .Build();
 
         // DuckDB returns Guid for UUID columns. DtPipeTypeResolver maps them to FixedSizeBinaryType(16).

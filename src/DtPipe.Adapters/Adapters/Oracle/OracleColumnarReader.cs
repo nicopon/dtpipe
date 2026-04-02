@@ -76,7 +76,7 @@ public sealed partial class OracleColumnarReader : IColumnarStreamReader, IRequi
 
         // Oracle maps RAW(16) to byte[], not Guid — no GuidAsBytesConsumer needed
         _config = new AdoToArrowConfigBuilder()
-            .SetTypeResolver(col => ArrowTypeMapper.GetArrowType(
+            .SetTypeResolver(col => ArrowTypeMapper.GetLogicalType(
                 Nullable.GetUnderlyingType(col.DataType ?? typeof(string)) ?? col.DataType ?? typeof(string)))
             .Build();
     }

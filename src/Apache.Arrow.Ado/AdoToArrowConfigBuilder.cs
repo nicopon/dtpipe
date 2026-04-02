@@ -11,7 +11,7 @@ public sealed class AdoToArrowConfigBuilder
 {
     private int _targetBatchSize = AdoToArrowConfig.DefaultTargetBatchSize;
     private bool _includeMetadata = false;
-    private Func<DbColumn, IArrowType>? _typeResolver;
+    private Func<DbColumn, Apache.Arrow.Serialization.Mapping.ArrowTypeResult>? _typeResolver;
 
     /// <summary>
     /// Sets the target number of rows per Arrow RecordBatch.
@@ -39,7 +39,7 @@ public sealed class AdoToArrowConfigBuilder
     /// (e.g. DtPipe.Core's ArrowTypeMapper) without creating a dependency on it.
     /// If not set, <see cref="AdoToArrowUtils.GetArrowTypeFromDbColumn"/> is used.
     /// </summary>
-    public AdoToArrowConfigBuilder SetTypeResolver(Func<DbColumn, IArrowType> typeResolver)
+    public AdoToArrowConfigBuilder SetTypeResolver(Func<DbColumn, Apache.Arrow.Serialization.Mapping.ArrowTypeResult> typeResolver)
     {
         _typeResolver = typeResolver ?? throw new ArgumentNullException(nameof(typeResolver));
         return this;
@@ -50,7 +50,7 @@ public sealed class AdoToArrowConfigBuilder
     /// </summary>
     public AdoToArrowConfig Build()
     {
-        var resolver = _typeResolver ?? AdoToArrowUtils.GetArrowTypeFromDbColumn;
+        var resolver = _typeResolver ?? AdoToArrowUtils.GetLogicalTypeFromDbColumn;
         return new AdoToArrowConfig(_targetBatchSize, _includeMetadata, resolver);
     }
 }

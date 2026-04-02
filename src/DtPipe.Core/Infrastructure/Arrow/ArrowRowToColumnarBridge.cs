@@ -148,7 +148,7 @@ public sealed class ArrowRowToColumnarBridge : IRowToColumnarBridge
         // Without the metadata, GetValueForField cannot resolve semantic types and returns raw bytes.
         => ArrowSchemaFactory.Create(columns);
 
-    private IArrowType GetArrowType(Type type) => ArrowTypeMapper.GetArrowType(type);
+    private IArrowType GetArrowType(Type type) => ArrowTypeMapper.GetLogicalType(type).ArrowType;
 
     private List<IArrowArrayBuilder> CreateBuilders(Schema schema)
     {

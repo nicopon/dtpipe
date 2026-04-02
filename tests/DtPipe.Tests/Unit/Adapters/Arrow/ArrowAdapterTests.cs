@@ -46,7 +46,7 @@ public class ArrowAdapterTests : IAsyncLifetime
 	public void ArrowTypeMapper_GetArrowType_GuidReturnsFixedSizeBinary16()
 	{
 		// Guid uses FixedSizeBinaryType(16) + arrow.uuid metadata (Arrow canonical extension)
-		var arrowType = ArrowTypeMapper.GetArrowType(typeof(Guid));
+		var arrowType = ArrowTypeMapper.GetLogicalType(typeof(Guid)).ArrowType;
 		arrowType.Should().BeOfType<Apache.Arrow.Types.FixedSizeBinaryType>();
 		((Apache.Arrow.Types.FixedSizeBinaryType)arrowType).ByteWidth.Should().Be(16);
 	}

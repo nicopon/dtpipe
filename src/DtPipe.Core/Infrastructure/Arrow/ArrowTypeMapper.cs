@@ -24,27 +24,12 @@ public static class ArrowTypeMapper
     /// Converts a .NET Guid (little-endian first 3 components) to RFC 4122 big-endian bytes
     /// suitable for canonical Arrow UUID storage.
     /// </summary>
-    public static byte[] ToArrowUuidBytes(Guid guid)
-    {
-        var bytes = guid.ToByteArray();
-        System.Array.Reverse(bytes, 0, 4); // component A: little → big
-        System.Array.Reverse(bytes, 4, 2); // component B: little → big
-        System.Array.Reverse(bytes, 6, 2); // component C: little → big
-        // components D-E (bytes 8-15) are already big-endian in .NET
-        return bytes;
-    }
+    public static byte[] ToArrowUuidBytes(Guid guid) => Apache.Arrow.Serialization.Mapping.ArrowTypeMap.ToArrowUuidBytes(guid);
 
     /// <summary>
     /// Converts RFC 4122 big-endian UUID bytes (from an Arrow binary column) back to a .NET Guid.
     /// </summary>
-    public static Guid FromArrowUuidBytes(ReadOnlySpan<byte> b)
-    {
-        var copy = b.ToArray();
-        System.Array.Reverse(copy, 0, 4);
-        System.Array.Reverse(copy, 4, 2);
-        System.Array.Reverse(copy, 6, 2);
-        return new Guid(copy);
-    }
+    public static Guid FromArrowUuidBytes(ReadOnlySpan<byte> b) => Apache.Arrow.Serialization.Mapping.ArrowTypeMap.FromArrowUuidBytes(b);
 
     // ── Type mappings ────────────────────────────────────────────────────────
 
@@ -54,39 +39,7 @@ public static class ArrowTypeMapper
     /// <see cref="FixedSizeBinaryType"/> always maps to <c>typeof(byte[])</c> regardless of byte width;
     /// use <see cref="GetClrTypeFromField"/> to resolve semantic types via extension metadata (e.g. arrow.uuid → Guid).
     /// </summary>
-    public static Type GetClrType(IArrowType type)
-    {
-        // Decimal types inherit from FixedSizeBinaryType — check them before the FixedSizeBinary guard
-        if (type is Decimal128Type) return typeof(decimal);
-        if (type is Decimal256Type) return typeof(decimal);
-
-        // FixedSizeBinary of any width = generic byte[] — no heuristic inference of Guid or other types
-        if (type is FixedSizeBinaryType) return typeof(byte[]);
-
-        return type.TypeId switch
-        {
-            ArrowTypeId.Boolean => typeof(bool),
-            ArrowTypeId.Int8 => typeof(sbyte),
-            ArrowTypeId.UInt8 => typeof(byte),
-            ArrowTypeId.Int16 => typeof(short),
-            ArrowTypeId.UInt16 => typeof(ushort),
-            ArrowTypeId.Int32 => typeof(int),
-            ArrowTypeId.UInt32 => typeof(uint),
-            ArrowTypeId.Int64 => typeof(long),
-            ArrowTypeId.UInt64 => typeof(ulong),
-            ArrowTypeId.Float => typeof(float),
-            ArrowTypeId.Double => typeof(double),
-            ArrowTypeId.String => typeof(string),
-            ArrowTypeId.Binary => typeof(byte[]),
-            ArrowTypeId.Timestamp => typeof(DateTimeOffset),
-            ArrowTypeId.Date32 => typeof(DateTime),
-            ArrowTypeId.Date64 => typeof(DateTime),
-            ArrowTypeId.Decimal128 => typeof(decimal),
-            ArrowTypeId.Decimal256 => typeof(decimal),
-            ArrowTypeId.Duration => typeof(TimeSpan),
-            _ => typeof(string)
-        };
-    }
+    public static Type GetClrType(IArrowType type) => Apache.Arrow.Serialization.Mapping.ArrowTypeMap.GetClrType(type);
 
     /// <summary>
     /// Returns the CLR type for a given Arrow <see cref="Field"/>, checking extension metadata first.
@@ -95,14 +48,7 @@ public static class ArrowTypeMapper
     /// <c>ARROW:extension:name = arrow.uuid</c> returns <c>typeof(Guid)</c>.
     /// Falls through to <see cref="GetClrType(IArrowType)"/> for all other types.
     /// </summary>
-    public static Type GetClrTypeFromField(Field field)
-    {
-        if (field.HasMetadata &&
-            field.Metadata.TryGetValue("ARROW:extension:name", out var ext) &&
-            string.Equals(ext, "arrow.uuid", StringComparison.OrdinalIgnoreCase))
-            return typeof(Guid);
-        return GetClrType(field.DataType);
-    }
+    public static Type GetClrTypeFromField(Field field) => Apache.Arrow.Serialization.Mapping.ArrowTypeMap.GetClrTypeFromField(field);
 
     /// <summary>
     /// Extracts the value at <paramref name="index"/> from <paramref name="array"/>,
@@ -122,33 +68,11 @@ public static class ArrowTypeMapper
         return GetValue(array, index);
     }
 
-    public static IArrowType GetArrowType(Type clrType)
-    {
-        var underlyingType = Nullable.GetUnderlyingType(clrType) ?? clrType;
+    public static Apache.Arrow.Serialization.Mapping.ArrowTypeResult GetLogicalType(Type clrType) => Apache.Arrow.Serialization.Mapping.ArrowTypeMap.GetLogicalType(clrType);
 
-        if (underlyingType == typeof(int)) return Int32Type.Default;
-        if (underlyingType == typeof(long)) return Int64Type.Default;
-        if (underlyingType == typeof(sbyte)) return Int8Type.Default;
-        if (underlyingType == typeof(short)) return Int16Type.Default;
-        if (underlyingType == typeof(byte)) return UInt8Type.Default;
-        if (underlyingType == typeof(ushort)) return UInt16Type.Default;
-        if (underlyingType == typeof(uint)) return UInt32Type.Default;
-        if (underlyingType == typeof(ulong)) return UInt64Type.Default;
-        if (underlyingType == typeof(double)) return DoubleType.Default;
-        if (underlyingType == typeof(float)) return FloatType.Default;
-        if (underlyingType == typeof(bool)) return BooleanType.Default;
-        if (underlyingType == typeof(string)) return StringType.Default;
-        if (underlyingType == typeof(decimal)) return new Decimal128Type(38, 18);
-        if (underlyingType == typeof(DateTime)) return Date64Type.Default;
-        if (underlyingType == typeof(DateTimeOffset)) return TimestampType.Default;
-        if (underlyingType == typeof(byte[])) return BinaryType.Default;
-        // Guid → FixedSizeBinary(16) with arrow.uuid extension metadata (set by ArrowSchemaFactory)
-        if (underlyingType == typeof(Guid)) return new FixedSizeBinaryType(16);
-        if (underlyingType == typeof(TimeSpan)) return DurationType.Millisecond;
+    public static Apache.Arrow.Field GetField(string name, Type clrType, bool isNullable = true) => 
+        Apache.Arrow.Serialization.Mapping.ArrowTypeMap.GetField(name, GetLogicalType(clrType), isNullable);
 
-        // Fallback
-        return StringType.Default;
-    }
 
     public static IArrowArrayBuilder CreateBuilder(IArrowType type)
     {

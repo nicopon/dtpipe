@@ -7,8 +7,8 @@ public static class ArrowArrayFactory
 {
     public static IArrowArray Create(System.Array data, Type clrType, bool isNullable)
     {
-        var arrowType = ArrowTypeMapper.GetArrowType(clrType);
-        var builder = ArrowTypeMapper.CreateBuilder(arrowType);
+        var logicalResult = ArrowTypeMapper.GetLogicalType(clrType);
+        var builder = ArrowTypeMapper.CreateBuilder(logicalResult.ArrowType);
 
         foreach (var val in data)
         {

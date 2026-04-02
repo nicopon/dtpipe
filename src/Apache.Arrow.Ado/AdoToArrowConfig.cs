@@ -28,9 +28,9 @@ public sealed class AdoToArrowConfig
     /// Inject a custom resolver to align the Arrow schema with your type system
     /// (e.g. to use ArrowTypeMapper from DtPipe.Core for pipeline consistency).
     /// </summary>
-    public Func<DbColumn, IArrowType> TypeResolver { get; }
+    public Func<DbColumn, Apache.Arrow.Serialization.Mapping.ArrowTypeResult> TypeResolver { get; }
 
-    internal AdoToArrowConfig(int targetBatchSize, bool includeMetadata, Func<DbColumn, IArrowType> typeResolver)
+    internal AdoToArrowConfig(int targetBatchSize, bool includeMetadata, Func<DbColumn, Apache.Arrow.Serialization.Mapping.ArrowTypeResult> typeResolver)
     {
         TargetBatchSize = targetBatchSize;
         IncludeMetadata = includeMetadata;
