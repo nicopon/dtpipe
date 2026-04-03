@@ -120,25 +120,6 @@ public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, 
 		// _writer.CompressionMethod = CompressionMethod.Snappy;
 	}
 
-	public async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
-	{
-		if (_writer is null || _columns is null || _dataFields is null)
-			throw new InvalidOperationException("Call InitializeAsync first.");
-
-		if (rows.Count == 0) return;
-
-		// Create row group for this batch
-		using var rowGroup = _writer.CreateRowGroup();
-
-		for (var colIndex = 0; colIndex < _columns.Count; colIndex++)
-		{
-			var column = _columns[colIndex];
-			var dataField = _dataFields[colIndex];
-			var dataColumn = CreateDataColumn(dataField, column, rows, colIndex);
-			await rowGroup.WriteColumnAsync(dataColumn, ct);
-		}
-	}
-
 	public async ValueTask WriteRecordBatchAsync(RecordBatch batch, CancellationToken ct = default)
 	{
 		if (_writer is null || _dataFields is null)
@@ -193,88 +174,6 @@ public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, 
 			Type t when t == typeof(byte[]) => new DataField<byte[]>(col.Name),
 			_ => new DataField<string?>(col.Name)
 		};
-	}
-
-	private static DataColumn CreateDataColumn(DataField dataField, PipeColumnInfo col, IReadOnlyList<object?[]> rows, int colIndex)
-	{
-		var baseType = Nullable.GetUnderlyingType(col.ClrType) ?? col.ClrType;
-
-		return baseType switch
-		{
-			Type t when t == typeof(bool) => CreateTypedColumn<bool?>(dataField, rows, colIndex),
-			Type t when t == typeof(byte) => CreateTypedColumn<byte?>(dataField, rows, colIndex),
-			Type t when t == typeof(sbyte) => CreateTypedColumn<sbyte?>(dataField, rows, colIndex),
-			Type t when t == typeof(short) => CreateTypedColumn<short?>(dataField, rows, colIndex),
-			Type t when t == typeof(int) => CreateTypedColumn<int?>(dataField, rows, colIndex),
-			Type t when t == typeof(long) => CreateTypedColumn<long?>(dataField, rows, colIndex),
-			Type t when t == typeof(float) => CreateTypedColumn<float?>(dataField, rows, colIndex),
-			Type t when t == typeof(double) => CreateTypedColumn<double?>(dataField, rows, colIndex),
-			Type t when t == typeof(decimal) => CreateTypedColumn<decimal?>(dataField, rows, colIndex),
-			Type t when t == typeof(DateTime) => CreateTypedColumn<DateTime?>(dataField, rows, colIndex),
-			Type t when t == typeof(DateTimeOffset) => CreateTypedColumn<DateTimeOffset?>(dataField, rows, colIndex),
-			Type t when t == typeof(TimeSpan) => CreateTypedColumn<TimeSpan?>(dataField, rows, colIndex),
-			Type t when t == typeof(Guid) => CreateTypedColumn<Guid?>(dataField, rows, colIndex),
-			Type t when t == typeof(byte[]) => CreateByteArrayColumn(dataField, rows, colIndex),
-			_ => CreateStringColumn(dataField, rows, colIndex)
-		};
-	}
-
-	private static DataColumn CreateTypedColumn<T>(DataField dataField, IReadOnlyList<object?[]> rows, int colIndex)
-	{
-		var values = new T[rows.Count];
-		// Build a per-column delegate on first call (one-time cost, amortised over all rows)
-		var converter = DtPipe.Core.Helpers.ColumnConverterFactory.Build(null, typeof(T));
-		for (var i = 0; i < rows.Count; i++)
-		{
-			var val = rows[i][colIndex];
-			if (val is null || val == DBNull.Value)
-			{
-				values[i] = default!;
-			}
-			else if (val is T typedVal)
-			{
-				values[i] = typedVal; // fast path: no conversion needed
-			}
-			else
-			{
-				var converted = converter(val);
-				if (converted is T t) values[i] = t;
-				// else: leave default (null equivalent) — bad source data
-			}
-		}
-		return new DataColumn(dataField, values);
-	}
-
-	private static DataColumn CreateByteArrayColumn(DataField dataField, IReadOnlyList<object?[]> rows, int colIndex)
-	{
-		var values = new byte[]?[rows.Count];
-		for (var i = 0; i < rows.Count; i++)
-		{
-			var val = rows[i][colIndex];
-			if (val is null || val == DBNull.Value)
-			{
-				values[i] = null;
-			}
-			else if (val is byte[] bytes)
-			{
-				values[i] = bytes;
-			}
-			else
-			{
-				values[i] = (byte[]?)DtPipe.Core.Helpers.ValueConverter.ConvertValue(val, typeof(byte[]));
-			}
-		}
-		return new DataColumn(dataField, values);
-	}
-
-	private static DataColumn CreateStringColumn(DataField dataField, IReadOnlyList<object?[]> rows, int colIndex)
-	{
-		var values = new string?[rows.Count];
-		for (var i = 0; i < rows.Count; i++)
-		{
-			values[i] = rows[i][colIndex]?.ToString();
-		}
-		return new DataColumn(dataField, values);
 	}
 
 	public ValueTask CompleteAsync(CancellationToken ct = default)

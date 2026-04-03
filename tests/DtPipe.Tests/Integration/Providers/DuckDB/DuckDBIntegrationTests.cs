@@ -175,7 +175,7 @@ public class DuckDBIntegrationTests : IAsyncLifetime
 			// Act
 			await using var writer = new DuckDbDataWriter(connectionString, writerOptions, NullLogger<DuckDbDataWriter>.Instance, DuckDbTypeConverter.Instance);
 			await writer.InitializeAsync(columns);
-			await writer.WriteBatchAsync(batch);
+			await writer.WriteRecordBatchAsync(batch.ToRecordBatch(columns));
 			await writer.CompleteAsync();
 
 			// Assert

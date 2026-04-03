@@ -9,7 +9,7 @@ namespace DtPipe.Core.Abstractions;
 /// Abstract base class for SQL-based DataWriters that share common lifecycle logic:
 /// Connection management, Table resolution, Strategy handling (Recreate/Truncate/etc.), and Schema introspection.
 /// </summary>
-public abstract class BaseSqlDataWriter : IDataWriter, ISchemaInspector, IKeyValidator, ISchemaMigrator
+public abstract class BaseSqlDataWriter : IRowDataWriter, ISchemaInspector, IKeyValidator, ISchemaMigrator
 {
 	protected readonly string _connectionString;
 	protected IDbConnection? _connection;

@@ -4,6 +4,7 @@ using Apache.Arrow;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Helpers;
 using DtPipe.Core.Models;
+using Apache.Arrow.Ado;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
 
@@ -356,32 +357,16 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter
 
 		await EnsureBulkCopyInitializedAsync(ct);
 
-		using (batch)
+		using (var reader = new RecordBatchDataReader(batch))
 		{
-			_bufferTable!.Clear();
-			for (int row = 0; row < batch.Length; row++)
-			{
-				var dataRow = _bufferTable.NewRow();
-				for (int i = 0; i < _converters!.Length; i++)
-				{
-					int srcIdx = _sourceIndices![i];
-					if (srcIdx < 0) { dataRow[i] = DBNull.Value; continue; }
-					var col = batch.Column(srcIdx);
-					var field = batch.Schema.GetFieldByIndex(srcIdx);
-					var arrowVal = DtPipe.Core.Infrastructure.Arrow.ArrowTypeMapper.GetValueForField(col, field, row);
-					dataRow[i] = arrowVal is null ? DBNull.Value : _converters[i](arrowVal);
-				}
-				_bufferTable.Rows.Add(dataRow);
-			}
-
 			if (_options.Strategy is SqlServerWriteStrategy.Upsert or SqlServerWriteStrategy.Ignore)
-				await ExecuteMergeFromTableAsync(ct);
+				await ExecuteMergeFromReaderAsync(reader, ct);
 			else
-				await _bulkCopy!.WriteToServerAsync(_bufferTable, ct);
+				await _bulkCopy!.WriteToServerAsync(reader, ct);
 		}
 	}
 
-	private async Task ExecuteMergeFromTableAsync(CancellationToken ct)
+	private async Task ExecuteMergeFromReaderAsync(IDataReader reader, CancellationToken ct)
 	{
 		var stageTable = $"#Stage_{Guid.NewGuid():N}";
 		await ExecuteNonQueryAsync($"SELECT TOP 0 * INTO [{stageTable}] FROM {_quotedTargetTableName}", ct);
@@ -398,10 +383,10 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter
 				BulkCopyTimeout = 0
 			};
 
-			foreach (DataColumn dc in _bufferTable!.Columns)
-				stageBulk.ColumnMappings.Add(dc.ColumnName, dc.ColumnName);
+			foreach (var col in _targetColumnNames!)
+				stageBulk.ColumnMappings.Add(col, col);
 
-			await stageBulk.WriteToServerAsync(_bufferTable, ct);
+			await stageBulk.WriteToServerAsync(reader, ct);
 			await MergeFromStagingAsync(stageTable, ct);
 		}
 		finally

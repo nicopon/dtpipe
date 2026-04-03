@@ -77,19 +77,19 @@ public sealed class PipelineExecutor
                 }
                 await DirectColumnarTransferAsync(source, cw, options.Limit, progress, ct);
             }
-            else if (reader is IColumnarStreamReader crForRows && writer is not IColumnarDataWriter)
+            else if (reader is IColumnarStreamReader crForRows && writer is IRowDataWriter rw)
             {
                 // Columnar reader → row-mode writer: bridge via existing infrastructure.
                 // Do NOT call ReadBatchesAsync — route through ReadRecordBatchesAsync + bridge.
                 var bridgeFac = _columnarToRowBridgeFactories.FirstOrDefault()
                     ?? throw new InvalidOperationException("No ColumnarToRowBridgeFactory");
                 var rowSource = BridgeColumnarToRowsAsync(crForRows.ReadRecordBatchesAsync(ct), bridgeFac, ct);
-                await DirectRowTransferFromRowsAsync(rowSource, writer, options.BatchSize, options.Limit, options.SamplingRate, options.SamplingSeed, progress, ct);
+                await DirectRowTransferFromRowsAsync(rowSource, rw, options.BatchSize, options.Limit, options.SamplingRate, options.SamplingSeed, progress, ct);
             }
-            else if (writer is not IColumnarDataWriter)
+            else if (writer is IRowDataWriter rw2)
             {
                 // Row-only reader → row-mode writer: existing direct path.
-                await DirectRowTransferAsync(reader, writer, options.BatchSize, options.Limit, options.SamplingRate, options.SamplingSeed, progress, ct);
+                await DirectRowTransferAsync(reader, rw2, options.BatchSize, options.Limit, options.SamplingRate, options.SamplingSeed, progress, ct);
             }
             else
             {
@@ -162,14 +162,18 @@ public sealed class PipelineExecutor
                 }
                 await ConsumeColumnarStreamAsync(currentColumnarSource, columnarWriter, progress, ct);
             }
-            else
+            else if (writer is IRowDataWriter rowWriter)
             {
                 if (isCurrentColumnar)
                 {
                     var bridgeFac = _columnarToRowBridgeFactories.FirstOrDefault() ?? throw new InvalidOperationException("No ColumnarToRowBridgeFactory");
                     currentRowSource = BridgeColumnarToRowsAsync(currentColumnarSource, bridgeFac, ct);
                 }
-                await ConsumeRowStreamAsync(currentRowSource, writer, options.BatchSize, progress, ct);
+                await ConsumeRowStreamAsync(currentRowSource, rowWriter, options.BatchSize, progress, ct);
+            }
+            else
+            {
+                 throw new InvalidOperationException($"Writer '{writer.GetType().Name}' supports neither IRowDataWriter nor IColumnarDataWriter.");
             }
         }
     }
@@ -392,7 +396,7 @@ public sealed class PipelineExecutor
 
     internal async Task ConsumeRowStreamAsync(
         IAsyncEnumerable<object?[]> source,
-        IDataWriter writer,
+        IRowDataWriter writer,
         int batchSize,
         IExportProgress progress,
         CancellationToken ct)
@@ -419,7 +423,7 @@ public sealed class PipelineExecutor
 
     private async Task DirectRowTransferAsync(
         IStreamReader reader,
-        IDataWriter writer,
+        IRowDataWriter writer,
         int batchSize,
         int limit,
         double samplingRate,
@@ -452,7 +456,7 @@ public sealed class PipelineExecutor
 
     private async Task DirectRowTransferFromRowsAsync(
         IAsyncEnumerable<object?[]> rows,
-        IDataWriter writer,
+        IRowDataWriter writer,
         int batchSize,
         int limit,
         double samplingRate,

@@ -2,6 +2,7 @@ using Apache.Arrow;
 using Apache.Arrow.Arrays;
 using Apache.Arrow.Types;
 using Apache.Arrow.Serialization.Reflection;
+using Apache.Arrow.Serialization.Mapping;
 
 namespace DtPipe.Core.Infrastructure.Arrow;
 
@@ -25,12 +26,12 @@ public static class ArrowTypeMapper
     /// Converts a .NET Guid (little-endian first 3 components) to RFC 4122 big-endian bytes
     /// suitable for canonical Arrow UUID storage.
     /// </summary>
-    public static byte[] ToArrowUuidBytes(Guid guid) => Apache.Arrow.Serialization.Mapping.ArrowTypeMap.ToArrowUuidBytes(guid);
+    public static byte[] ToArrowUuidBytes(Guid guid) => ArrowTypeMap.ToArrowUuidBytes(guid);
 
     /// <summary>
     /// Converts RFC 4122 big-endian UUID bytes (from an Arrow binary column) back to a .NET Guid.
     /// </summary>
-    public static Guid FromArrowUuidBytes(ReadOnlySpan<byte> b) => Apache.Arrow.Serialization.Mapping.ArrowTypeMap.FromArrowUuidBytes(b);
+    public static Guid FromArrowUuidBytes(ReadOnlySpan<byte> b) => ArrowTypeMap.FromArrowUuidBytes(b);
 
     // ── Type mappings ────────────────────────────────────────────────────────
 
@@ -59,20 +60,7 @@ public static class ArrowTypeMapper
     /// Falls through to <see cref="GetValue(IArrowArray,int)"/> for all other cases.
     /// </summary>
     public static object? GetValueForField(IArrowArray array, Field field, int index)
-    {
-        if (array.IsNull(index)) return null;
-        if (array is FixedSizeBinaryArray fsba &&
-            field.HasMetadata &&
-            field.Metadata.TryGetValue("ARROW:extension:name", out var ext) &&
-            string.Equals(ext, "arrow.uuid", StringComparison.OrdinalIgnoreCase))
-            return FromArrowUuidBytes(fsba.GetBytes(index));
-        var val = GetValue(array, index);
-        // Timestamp(tz=null) fields declare DateTime semantics. GetValue always returns DateTimeOffset
-        // for TimestampArray, so coerce to DateTime to match the schema's declared CLR type.
-        if (val is DateTimeOffset dto && field.DataType is TimestampType ts && string.IsNullOrEmpty(ts.Timezone))
-            return dto.DateTime;
-        return val;
-    }
+        => ArrowTypeMap.GetValue(array, index, field);
 
     public static Apache.Arrow.Serialization.Mapping.ArrowTypeResult GetLogicalType(Type clrType) => Apache.Arrow.Serialization.Mapping.ArrowTypeMap.GetLogicalType(clrType);
 
@@ -113,40 +101,7 @@ public static class ArrowTypeMapper
     }
 
     public static object? GetValue(IArrowArray array, int index)
-    {
-        if (array.IsNull(index)) return null;
-
-        return array switch
-        {
-            BooleanArray a => a.GetValue(index),
-            Int8Array a => a.GetValue(index),
-            Int16Array a => a.GetValue(index),
-            Int32Array a => a.GetValue(index),
-            Int64Array a => a.GetValue(index),
-            UInt8Array a => a.GetValue(index),
-            UInt16Array a => a.GetValue(index),
-            UInt32Array a => a.GetValue(index),
-            UInt64Array a => a.GetValue(index),
-            FloatArray a => a.GetValue(index),
-            DoubleArray a => a.GetValue(index),
-            StringArray a => a.GetString(index),
-            BinaryArray a => a.GetBytes(index).ToArray(),
-            // Decimal arrays BEFORE FixedSizeBinaryArray (inheritance order)
-            Decimal128Array a => a.GetValue(index),
-            Decimal256Array a => a.GetValue(index),
-            // FixedSizeBinaryArray: always return byte[] — no heuristic inference of Guid.
-            // Use GetValueForField(array, field, index) when the Field context is available
-            // to resolve arrow.uuid extension metadata into a Guid.
-            FixedSizeBinaryArray a => a.GetBytes(index).ToArray(),
-            Date32Array a => a.GetDateTime(index),
-            Date64Array a => a.GetDateTime(index),
-            TimestampArray a => a.GetTimestamp(index),
-            DurationArray a => a.GetValue(index),
-            Time32Array a => a.GetValue(index),
-            Time64Array a => a.GetValue(index),
-            _ => throw new NotSupportedException($"Unsupported Arrow array type for value extraction: {array.GetType().Name}")
-        };
-    }
+        => ArrowTypeMap.GetValue(array, index);
 
     public static void AppendNull(IArrowArrayBuilder builder)
     {

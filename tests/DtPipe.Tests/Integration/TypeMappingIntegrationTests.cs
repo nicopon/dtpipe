@@ -4,6 +4,7 @@ using DtPipe.Core.Models;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 using Microsoft.Data.Sqlite;
+using DtPipe.Tests.Helpers;
 using DuckDB.NET.Data;
 
 namespace DtPipe.Tests.Integration;
@@ -37,7 +38,7 @@ public class TypeMappingIntegrationTests
         4.5678,
         1234.56m,
         "Hello World",
-        new DateTime(2025, 1, 1, 12, 0, 0),
+        new DateTime(2025, 1, 1, 12, 0, 0, DateTimeKind.Utc),
         Guid.Parse("f47ac10b-58cc-4372-a567-0e02b2c3d479"),
         new byte[] { 0xDE, 0xAD, 0xBE, 0xEF }
     };
@@ -101,7 +102,7 @@ public class TypeMappingIntegrationTests
             await writer.InitializeAsync(_fullTypeSchema, CancellationToken.None);
 
             var row = GetSampleRow();
-            await writer.WriteBatchAsync(new List<object?[]> { row }, CancellationToken.None);
+            await writer.WriteRecordBatchAsync(new List<object?[]> { row }.ToRecordBatch(_fullTypeSchema), CancellationToken.None);
             await writer.CompleteAsync(CancellationToken.None);
 
             // Verify

@@ -105,7 +105,7 @@ public class OracleIntegrationTests : IAsyncLifetime
 				batch.Add(row);
 			}
 
-			await writer.WriteBatchAsync(batch, TestContext.Current.CancellationToken);
+			await writer.WriteRecordBatchAsync(ArrowTestHelper.ToRecordBatch(batch, reader.Columns!), TestContext.Current.CancellationToken);
 			await writer.CompleteAsync(TestContext.Current.CancellationToken);
 
 			// Assert

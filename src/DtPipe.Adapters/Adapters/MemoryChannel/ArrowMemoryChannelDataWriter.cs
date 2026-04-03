@@ -59,11 +59,6 @@ public sealed class ArrowMemoryChannelDataWriter : IColumnarDataWriter
         await _writer.WriteAsync(batch, ct);
     }
 
-    public ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
-    {
-        throw new NotSupportedException("ArrowMemoryChannelDataWriter is purely columnar. Use IColumnarDataWriter.WriteRecordBatchAsync instead.");
-    }
-
     public ValueTask CompleteAsync(CancellationToken ct = default)
     {
         _writer.TryComplete();

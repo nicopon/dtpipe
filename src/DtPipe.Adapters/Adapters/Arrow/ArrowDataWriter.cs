@@ -136,11 +136,6 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
 	private static Schema BuildSchema(IReadOnlyList<PipeColumnInfo> columns)
 		=> ArrowSchemaFactory.Create(columns);
 
-	public ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
-	{
-        throw new NotSupportedException("ArrowAdapterDataWriter is purely columnar. Use IColumnarDataWriter.WriteRecordBatchAsync instead.");
-	}
-
 	public async ValueTask CompleteAsync(CancellationToken ct = default)
 	{
 		if (_arrowStreamWriter != null)

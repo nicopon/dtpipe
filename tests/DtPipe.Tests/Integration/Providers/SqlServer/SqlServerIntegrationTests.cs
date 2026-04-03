@@ -111,7 +111,7 @@ public class SqlServerIntegrationTests : IAsyncLifetime
 				}
 			}
 
-			await writer.WriteBatchAsync(rows, TestContext.Current.CancellationToken);
+			await writer.WriteRecordBatchAsync(ArrowTestHelper.ToRecordBatch(rows, reader.Columns!), TestContext.Current.CancellationToken);
 			await writer.CompleteAsync(TestContext.Current.CancellationToken);
 
 			// Assert

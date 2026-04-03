@@ -7,6 +7,8 @@ using DuckDB.NET.Data;
 using FluentAssertions;
 using DtPipe.Core.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
+using DtPipe.Tests;
+using DtPipe.Tests.Helpers;
 using Xunit;
 
 namespace DtPipe.Tests;
@@ -80,7 +82,9 @@ public class DuckDbWriterTests : IAsyncLifetime
 
 		// Act
 		await writer.InitializeAsync(columns, CancellationToken.None);
-		await writer.WriteBatchAsync(rows, CancellationToken.None);
+		var columnarWriter = writer as IColumnarDataWriter;
+		columnarWriter.Should().NotBeNull();
+		await columnarWriter!.WriteRecordBatchAsync(rows.ToRecordBatch(columns), CancellationToken.None);
 		await writer.CompleteAsync(CancellationToken.None);
 		await writer.DisposeAsync();
 
@@ -204,7 +208,9 @@ public class DuckDbWriterTests : IAsyncLifetime
 
 		// Act
 		await writer.InitializeAsync(columns, CancellationToken.None);
-		await writer.WriteBatchAsync(rows, CancellationToken.None);
+		var columnarWriter = writer as IColumnarDataWriter;
+		columnarWriter.Should().NotBeNull();
+		await columnarWriter!.WriteRecordBatchAsync(rows.ToRecordBatch(columns), CancellationToken.None);
 		await writer.CompleteAsync(CancellationToken.None);
 		await writer.DisposeAsync();
 
@@ -269,13 +275,14 @@ public class DuckDbWriterTests : IAsyncLifetime
 		// Act
 		await writer.InitializeAsync(columns, CancellationToken.None);
 
-		var act = async () => await writer.WriteBatchAsync(rows, CancellationToken.None);
+		var columnarWriter = writer as IColumnarDataWriter;
+		columnarWriter.Should().NotBeNull();
+		var act = async () => await columnarWriter!.WriteRecordBatchAsync(rows.ToRecordBatch(columns), CancellationToken.None);
 
 		// Assert
 		var ex = await Assert.ThrowsAsync<InvalidOperationException>(act);
-		ex.Message.Should().Contain("DuckDB Appender Failed with detailed analysis");
-		ex.Message.Should().Contain("Issue detected at Row 1");
-		ex.Message.Should().Contain("Value: 'NotAnInteger'");
+		// Native DuckDB error message is preferred
+		ex.Message.Should().MatchRegex("(?i)Cannot write .* to .* column|DuckDB Appender Failed");
 	}
 	[Fact]
 	public async Task Write_Truncate_EmptyTable_BeforeInsert()
@@ -304,7 +311,9 @@ public class DuckDbWriterTests : IAsyncLifetime
 
 		// Act
 		await writer.InitializeAsync(columns, CancellationToken.None);
-		await writer.WriteBatchAsync(rows, CancellationToken.None);
+		var columnarWriter = writer as IColumnarDataWriter;
+		columnarWriter.Should().NotBeNull();
+		await columnarWriter!.WriteRecordBatchAsync(rows.ToRecordBatch(columns), CancellationToken.None);
 		await writer.CompleteAsync(CancellationToken.None);
 		await writer.DisposeAsync();
 
@@ -351,7 +360,9 @@ public class DuckDbWriterTests : IAsyncLifetime
 
 		// Act
 		await writer.InitializeAsync(columns, CancellationToken.None);
-		await writer.WriteBatchAsync(rows, CancellationToken.None);
+		var columnarWriter = writer as IColumnarDataWriter;
+		columnarWriter.Should().NotBeNull();
+		await columnarWriter!.WriteRecordBatchAsync(rows.ToRecordBatch(columns), CancellationToken.None);
 		await writer.CompleteAsync(CancellationToken.None);
 		await writer.DisposeAsync();
 

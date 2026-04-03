@@ -84,7 +84,7 @@ public class ExportServiceTests
 		_mockReaderFactory.Setup(f => f.Create(It.IsAny<OptionsRegistry>())).Returns(mockReader.Object);
 
 		// Mock Writer
-		var mockWriter = new Mock<IDataWriter>();
+		var mockWriter = new Mock<IRowDataWriter>();
 		mockWriter.Setup(w => w.InitializeAsync(It.IsAny<IReadOnlyList<PipeColumnInfo>>(), It.IsAny<CancellationToken>())).Returns(ValueTask.CompletedTask);
 		// Correctly match IReadOnlyList<object?[]>
 		mockWriter.Setup(w => w.WriteBatchAsync(It.IsAny<IReadOnlyList<object?[]>>(), It.IsAny<CancellationToken>())).Returns(ValueTask.CompletedTask);

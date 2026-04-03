@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using Apache.Arrow.Types;
+using Apache.Arrow;
+using Apache.Arrow.Arrays;
+using System.Linq;
 
 namespace Apache.Arrow.Serialization.Mapping;
 
@@ -167,5 +170,60 @@ public static class ArrowTypeMap
             string.Equals(ext, "arrow.uuid", StringComparison.OrdinalIgnoreCase))
             return typeof(Guid);
         return GetClrType(field.DataType);
+    }
+
+    /// <summary>
+    /// Extracts the CLR value from an Arrow array at the specified index, respecting logical type
+    /// metadata (e.g. UUID) if a <see cref="Field"/> is provided.
+    /// </summary>
+    public static object? GetValue(IArrowArray array, int index, Field? field = null)
+    {
+        if (array.IsNull(index)) return null;
+
+        // 1. Handle Extension Types (UUID)
+        if (field != null && array is FixedSizeBinaryArray fsba &&
+            field.HasMetadata &&
+            field.Metadata.TryGetValue("ARROW:extension:name", out var ext) &&
+            string.Equals(ext, "arrow.uuid", StringComparison.OrdinalIgnoreCase))
+        {
+            return FromArrowUuidBytes(fsba.GetBytes(index));
+        }
+
+        // 2. Standard Types
+        object? val = array switch
+        {
+            BooleanArray a => (object?)a.GetValue(index),
+            Int8Array a => a.GetValue(index),
+            Int16Array a => a.GetValue(index),
+            Int32Array a => a.GetValue(index),
+            Int64Array a => a.GetValue(index),
+            UInt8Array a => a.GetValue(index),
+            UInt16Array a => a.GetValue(index),
+            UInt32Array a => a.GetValue(index),
+            UInt64Array a => a.GetValue(index),
+            FloatArray a => a.GetValue(index),
+            DoubleArray a => a.GetValue(index),
+            StringArray a => a.GetString(index),
+            BinaryArray a => a.GetBytes(index).ToArray(),
+            Decimal128Array a => a.GetValue(index),
+            Decimal256Array a => a.GetValue(index),
+            FixedSizeBinaryArray a => a.GetBytes(index).ToArray(),
+            Date32Array a => a.GetDateTime(index),
+            Date64Array a => a.GetDateTime(index),
+            TimestampArray a => a.GetTimestamp(index),
+            DurationArray a => a.GetValue(index),
+            Time32Array a => a.GetValue(index),
+            Time64Array a => a.GetValue(index),
+            _ => throw new NotSupportedException($"Unsupported Arrow array type for value extraction: {array.GetType().Name}")
+        };
+
+        // 3. Post-processing Coercion
+        // If field metadata indicates a timezone-less Timestamp, coerce DateTimeOffset to DateTime.
+        if (field != null && val is DateTimeOffset dto && field.DataType is TimestampType ts && string.IsNullOrEmpty(ts.Timezone))
+        {
+            return dto.DateTime;
+        }
+
+        return val;
     }
 }

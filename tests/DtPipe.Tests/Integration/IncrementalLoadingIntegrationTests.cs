@@ -71,7 +71,7 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 			new object[] { 1, "Alice V2" },
 			new object[] { 3, "Charlie" }
 		};
-		await writer.WriteBatchAsync(batch);
+		await writer.WriteRecordBatchAsync(batch.ToRecordBatch(columns));
 		await writer.CompleteAsync();
 
 		// 4. Verify
@@ -116,7 +116,7 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 			new object[] { 1, "Alice V2" }, // Should be ignored
             new object[] { 3, "Charlie" }
 		};
-		await writer.WriteBatchAsync(batch);
+		await writer.WriteRecordBatchAsync(batch.ToRecordBatch(columns));
 		await writer.CompleteAsync();
 
 		// 4. Verify
@@ -467,7 +467,7 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 			new object[] { "EU", "Paris", 150 }, // Update
             new object[] { "EU", "Madrid", 300 }  // Insert
         };
-		await writer.WriteBatchAsync(batch);
+		await writer.WriteRecordBatchAsync(batch.ToRecordBatch(columns));
 		await writer.CompleteAsync();
 
 		// 3. Verify

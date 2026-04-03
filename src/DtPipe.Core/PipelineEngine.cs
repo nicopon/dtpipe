@@ -32,7 +32,7 @@ public class PipelineEngine
     /// <returns>Total number of rows written.</returns>
     public async Task<long> RunAsync(
         IStreamReader reader,
-        IDataWriter writer,
+        IRowDataWriter writer,
         IReadOnlyList<IDataTransformer>? pipeline = null,
         int batchSize = 50_000,
         int limit = 0,
@@ -164,7 +164,7 @@ public class PipelineEngine
 
     private static async Task ConsumeRowsAsync(
         ChannelReader<object?[][]> input,
-        IDataWriter writer,
+        IRowDataWriter writer,
         Action<int> updateRowCount,
         CancellationToken ct)
     {

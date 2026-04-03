@@ -76,7 +76,7 @@ public class PipelineExecutorTests
     public async Task ConsumeRowStreamAsync_BuffersByBatch()
     {
         var source = new[] { new object?[] { 1 }, new object?[] { 2 }, new object?[] { 3 } }.ToAsyncEnumerable();
-        var mockWriter = new Mock<IDataWriter>();
+        var mockWriter = new Mock<IRowDataWriter>();
         var mockProgress = new Mock<IExportProgress>();
 
         await _executor.ConsumeRowStreamAsync(source, mockWriter.Object, 2, mockProgress.Object, default);

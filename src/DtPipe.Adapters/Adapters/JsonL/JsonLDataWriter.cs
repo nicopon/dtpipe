@@ -6,7 +6,7 @@ using Microsoft.IO;
 
 namespace DtPipe.Adapters.JsonL;
 
-public sealed class JsonLDataWriter : IDataWriter, IRequiresOptions<JsonLWriterOptions>, ISchemaInspector
+public sealed class JsonLDataWriter : IRowDataWriter, IRequiresOptions<JsonLWriterOptions>, ISchemaInspector
 {
 	private static readonly RecyclableMemoryStreamManager MemoryStreamManager = new();
 

@@ -9,7 +9,7 @@ using Microsoft.IO;
 
 namespace DtPipe.Adapters.Csv;
 
-public sealed class CsvDataWriter : IDataWriter, IRequiresOptions<CsvWriterOptions>, ISchemaInspector
+public sealed class CsvDataWriter : IRowDataWriter, IRequiresOptions<CsvWriterOptions>, ISchemaInspector
 {
 	// Shared RecyclableMemoryStreamManager for all instances
 	private static readonly RecyclableMemoryStreamManager MemoryStreamManager = new(

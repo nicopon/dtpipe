@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging;
 
 namespace DtPipe.Adapters.Checksum;
 
-public sealed class ChecksumDataWriter : IDataWriter, IColumnarDataWriter, IRequiresOptions<ChecksumWriterOptions>
+public sealed class ChecksumDataWriter : IRowDataWriter, IColumnarDataWriter, IRequiresOptions<ChecksumWriterOptions>
 {
 	private readonly ChecksumWriterOptions _options;
 	private readonly ILogger _logger;

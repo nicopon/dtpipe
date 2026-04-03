@@ -3,7 +3,7 @@ using DtPipe.Core.Models;
 
 namespace DtPipe.Adapters.Null;
 
-public class NullDataWriter : IDataWriter
+public class NullDataWriter : IRowDataWriter
 {
     public string ComponentName => "null";
     public ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default) => ValueTask.CompletedTask;

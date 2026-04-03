@@ -10,7 +10,7 @@ namespace DtPipe.Adapters.MemoryChannel;
 /// A specialized data writer that pushes batches of rows into an in-memory channel.
 /// Used for orchestrating DAG branches where the output of one branch is the input of another.
 /// </summary>
-public class MemoryChannelDataWriter : IDataWriter
+public class MemoryChannelDataWriter : IRowDataWriter
 {
     private readonly ChannelWriter<IReadOnlyList<object?[]>> _writer;
     private readonly IMemoryChannelRegistry _registry;

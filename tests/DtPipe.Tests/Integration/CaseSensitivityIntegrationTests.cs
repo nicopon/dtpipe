@@ -1,4 +1,5 @@
 using DtPipe.Adapters.DuckDB;
+using DtPipe.Tests.Helpers;
 using DuckDB.NET.Data;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -59,7 +60,7 @@ public class CaseSensitivityIntegrationTests : IAsyncLifetime
 		var batch = new List<object?[]> {
 			new object[] { 1, "Data" }
 		};
-		await writer.WriteBatchAsync(batch);
+		await writer.WriteRecordBatchAsync(batch.ToRecordBatch(columns));
 		await writer.CompleteAsync();
 
 		// 5. Verify
@@ -98,7 +99,7 @@ public class CaseSensitivityIntegrationTests : IAsyncLifetime
 		var batch = new List<object?[]> {
 			new object[] { 1, "Test" }
 		};
-		await writer.WriteBatchAsync(batch);
+		await writer.WriteRecordBatchAsync(batch.ToRecordBatch(columns));
 		await writer.CompleteAsync();
 
 		var result = await QueryAll("SELECT id, val FROM simple_table");
@@ -135,7 +136,7 @@ public class CaseSensitivityIntegrationTests : IAsyncLifetime
 		var batch = new List<object?[]> {
 			new object[] { 1, "Upserted" }
 		};
-		await writer.WriteBatchAsync(batch);
+		await writer.WriteRecordBatchAsync(batch.ToRecordBatch(columns));
 
 		// This fails if ON CONFLICT (Id) is generated instead of ON CONFLICT ("Id")
 		await writer.CompleteAsync();
