@@ -264,6 +264,8 @@ public class SerializationTests
         result.Should().BeEquivalentTo(data, options => options
             .Using<DateTimeOffset>(ctx => ctx.Subject.Should().BeCloseTo(ctx.Expectation, TimeSpan.FromMilliseconds(1)))
             .WhenTypeIs<DateTimeOffset>());
+        // TimeSpan must round-trip exactly (DurationType.Microsecond is precise enough for .NET TimeSpan resolution)
+        result[0].SessionTimeout.Should().Be(data[0].SessionTimeout);
     }
 
     [Fact]

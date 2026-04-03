@@ -64,6 +64,8 @@ The golden DAG fixtures in `GoldenDagDefinitions.cs` are the canonical reference
 | `src/DtPipe.Transformers` | Row and columnar data transformers |
 | `src/DtPipe.Processors` | C# side of SQL stream processors (DuckDB.NET + DataFusion P/Invoke wrappers, factories) |
 | `src/DtPipe.Processors.DataFusion` | Rust/Cargo native library — DataFusion engine, Arrow IPC bridge |
+| `src/Apache.Arrow.Ado` | Standalone ADO.NET → Arrow library; zero DtPipe deps (depends on `Apache.Arrow.Serialization` only) |
+| `src/Apache.Arrow.Serialization` | Standalone CLR↔Arrow type map + POCO serializer; zero DtPipe deps, no external deps beyond `Apache.Arrow` |
 | `tests/DtPipe.Tests` | xunit.v3 unit and integration tests |
 
 #### File placement conventions
@@ -180,6 +182,54 @@ What is explicitly **forbidden**:
 
 The canonical Arrow representation of a UUID in DtPipe is `BinaryType` with `.NET Guid.ToByteArray()` byte order. Any adapter that produces UUID values must emit them in this format, or the user must insert an explicit conversion step.
 
+## Apache.Arrow.Serialization
+
+`src/Apache.Arrow.Serialization/` is a **standalone library** with no DtPipe dependencies (only `Apache.Arrow`). It provides:
+
+### Dependency graph
+
+```
+Apache.Arrow.Serialization   ← standalone, no DtPipe deps
+       ↑
+Apache.Arrow.Ado             ← uses ArrowTypeResult
+       ↑
+DtPipe.Core                  ← ArrowTypeMapper is a facade over ArrowTypeMap
+       ↑
+DtPipe.Adapters, DtPipe.Processors, …
+```
+
+### ArrowTypeMap (`Mapping/ArrowTypeMap.cs`)
+Canonical CLR↔Arrow mapping. All mapping logic lives here; `ArrowTypeMapper` in `DtPipe.Core` is a pure facade that delegates to it.
+
+`ArrowTypeResult` is a struct carrying both the Arrow type and any required Field metadata:
+```csharp
+public readonly struct ArrowTypeResult
+{
+    public IArrowType ArrowType { get; }
+    public IReadOnlyDictionary<string, string>? Metadata { get; }
+}
+```
+`GetLogicalType(Type)` returns `ArrowTypeResult` — callers that only need the `IArrowType` access `.ArrowType`.
+`TryGetLogicalType(Type, out ArrowTypeResult)` is the exception-free variant for contexts with a string fallback.
+
+### ArrowSerializer / ArrowDeserializer
+Reflection-based round-trip for strongly-typed POCOs and dynamic types (`ExpandoObject`, `JsonObject`):
+```csharp
+RecordBatch batch = await ArrowSerializer.SerializeAsync(myList);
+IEnumerable<MyPoco> items = ArrowDeserializer.Deserialize<MyPoco>(batch);
+```
+Supports: primitives, `Guid`, `DateTime`, `DateTimeOffset`, `TimeSpan`, `decimal`, `byte[]`, nullable wrappers, enums, collections (`List<T>`, arrays), dictionaries, nested structs.
+Schema is inferred from property types via `ArrowReflectionEngine`; compiled expression delegates are cached per type.
+
+### ArrowReflectionEngine (`Reflection/ArrowReflectionEngine.cs`)
+Derives an Arrow `Schema` from a .NET `Type` or a runtime `IDictionary` (dynamic/ExpandoObject).
+Calls `ArrowTypeMap.TryGetLogicalType` for scalars and handles complex types (List → `ListType`, Dictionary → `MapType`, nested objects → `StructType`).
+
+### FixedSizeBinaryArrayBuilder (`Reflection/FixedSizeBinaryArrayBuilder.cs`)
+Builds a `FixedSizeBinaryArray` of arbitrary byte width. An intentional copy of the same class in `DtPipe.Core` — kept separate to avoid a circular dependency. **Keep both files in sync** when changing build logic.
+
+---
+
 ## Adding a New Adapter
 
 1. Create a descriptor class implementing `IProviderDescriptor<IStreamReader>` (or `IDataWriter`).
@@ -221,26 +271,36 @@ When implementing a new text reader, implement `IColumnTypeInferenceCapable` so 
 #### Arrow ↔ CLR mapping: no heuristics
 
 The conversion between Arrow types and CLR types is limited to direct, unambiguous mappings
-defined in `ArrowTypeMapper`. For Arrow types whose CLR semantics depend on context
-(e.g. `FixedSizeBinary(n)` which could be a UUID, a hash, a key, etc.), the mapping to a
-specific CLR type must be driven by an **Arrow extension type** (Field metadata), not by a
-heuristic on the data structure (size, pattern, etc.).
+defined in `Apache.Arrow.Serialization.Mapping.ArrowTypeMap` (the canonical source) and
+exposed via the `ArrowTypeMapper` facade in `DtPipe.Core`.
+
+For Arrow types whose CLR semantics depend on context (e.g. `FixedSizeBinary(n)` which could be
+a UUID, a hash, a key, etc.), the mapping to a specific CLR type must be driven by an
+**Arrow extension type** (Field metadata), not by a heuristic on the data structure.
 
 **Firm rule: `ArrowTypeMapper.GetClrType(IArrowType)` never infers a semantic CLR type from
 the storage type alone.** If the Arrow type is ambiguous (e.g. `FixedSizeBinary`), it maps to
 the most generic CLR type (`byte[]`). Semantic resolution requires `ArrowTypeMapper.GetClrTypeFromField(Field)`.
 
-Use `ArrowTypeMapper.GetClrTypeFromField(field)` wherever a `Field` is available (reading schemas
-from Arrow IPC, Parquet, channel schemas). Use `ArrowTypeMapper.GetValueForField(array, field, i)`
-for value extraction when the Field is available.
+**Key APIs** (`ArrowTypeMapper` wraps all of these):
+- `GetLogicalType(Type clrType)` → `ArrowTypeResult` — preferred way to get the Arrow type + any required metadata for a CLR type. Returns a struct with `.ArrowType` and `.Metadata`.
+- `GetField(string name, Type clrType, bool isNullable)` → `Field` — creates an Arrow Field with metadata embedded. Use this instead of `new Field(...)` to guarantee metadata is always present.
+- `GetClrTypeFromField(Field)` → `Type` — checks extension metadata before falling through to storage type.
+- `GetClrType(IArrowType)` → `Type` — storage-type-only mapping, no metadata, returns `byte[]` for `FixedSizeBinary`.
+- `GetValueForField(array, field, i)` → `object?` — respects extension metadata (e.g. `arrow.uuid` → `Guid`).
+- `ToArrowUuidBytes(guid)` / `FromArrowUuidBytes(span)` — byte-level RFC 4122 conversion helpers.
+
+Use `GetClrTypeFromField(field)` wherever a `Field` is available (reading schemas from Arrow IPC,
+Parquet, channel schemas). Use `GetValueForField(array, field, i)` for value extraction when the
+Field is available. `GetClrType(IArrowType)` and `GetValue(array, i)` are for contexts without Field.
 
 If an external source omits Arrow extension metadata, users must insert an explicit transform/cast
 step in the pipeline. DtPipe does not infer semantic types from data shape.
 
 **Example — UUID columns:**
 - Storage: `FixedSizeBinaryType(16)` + Field metadata `ARROW:extension:name = arrow.uuid`
-- Emitted by `ArrowSchemaFactory.Create()` for `typeof(Guid)` columns
+- `ArrowSchemaFactory.Create()` emits this automatically for `typeof(Guid)` columns via `GetField()`
+- `GetLogicalType(typeof(Guid))` → `ArrowTypeResult { ArrowType = FixedSizeBinaryType(16), Metadata = { "ARROW:extension:name": "arrow.uuid" } }`
 - `GetClrType(FixedSizeBinaryType(16))` → `typeof(byte[])` (generic, no inference)
 - `GetClrTypeFromField(field with arrow.uuid)` → `typeof(Guid)` (explicit via metadata)
 - `GetValueForField(array, field with arrow.uuid, i)` → `Guid`; without metadata → `byte[]`
-- `ToArrowUuidBytes(guid)` / `FromArrowUuidBytes(span)` remain for byte-level conversion

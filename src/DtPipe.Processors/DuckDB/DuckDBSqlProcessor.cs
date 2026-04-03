@@ -355,7 +355,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader
     private sealed class GuidToBinaryConsumer : Apache.Arrow.Ado.IAdoConsumer
     {
         private readonly int _colIdx;
-        private readonly DtPipe.Core.Infrastructure.Arrow.FixedSizeBinaryArrayBuilder _builder = new(16);
+        private readonly Apache.Arrow.Serialization.Reflection.FixedSizeBinaryArrayBuilder _builder = new(16);
 
         public GuidToBinaryConsumer(int colIdx) { _colIdx = colIdx; }
 

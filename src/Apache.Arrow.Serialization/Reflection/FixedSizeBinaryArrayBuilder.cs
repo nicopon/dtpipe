@@ -6,9 +6,11 @@ namespace Apache.Arrow.Serialization.Reflection;
 
 /// <summary>
 /// Builds a <see cref="FixedSizeBinaryArray"/> of arbitrary byte width.
-/// Cloned from DtPipe.Core to provide standalone serialization support.
+///
+/// <see cref="Apache.Arrow"/> C# 22.x has no public <c>FixedSizeBinaryArray.Builder</c>,
+/// so this class builds the underlying validity bitmap and data buffer manually.
 /// </summary>
-internal sealed class FixedSizeBinaryArrayBuilder : IArrowArrayBuilder
+public sealed class FixedSizeBinaryArrayBuilder : IArrowArrayBuilder
 {
     public int ByteWidth { get; }
 

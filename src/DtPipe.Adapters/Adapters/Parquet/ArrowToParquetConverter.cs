@@ -23,6 +23,9 @@ public static class ArrowToParquetConverter
             Decimal128Array a => new DataColumn(dataField, ExtractDecimalValues<Decimal128Array>(a)),
             Decimal256Array a => new DataColumn(dataField, ExtractDecimalValues<Decimal256Array>(a)),
             Date64Array a => new DataColumn(dataField, ExtractDate64Values(a)),
+            // Timestamp: no-timezone fields are typed as DateTime — coerce DateTimeOffset to DateTime
+            TimestampArray a when (Nullable.GetUnderlyingType(dataField.ClrNullableIfHasNullsType) ?? dataField.ClrNullableIfHasNullsType) == typeof(DateTime) =>
+                new DataColumn(dataField, ExtractTimestampAsDateTimeValues(a)),
             TimestampArray a => new DataColumn(dataField, ExtractTimestampValues(a)),
             // FixedSizeBinaryArray(16) with arrow.uuid → DtPipe internal UUID format
             FixedSizeBinaryArray a when isGuidField => new DataColumn(dataField, ExtractGuidValuesFromFixed(a)),
@@ -115,6 +118,18 @@ public static class ArrowToParquetConverter
         for (int i = 0; i < array.Length; i++)
         {
             result[i] = array.IsNull(i) ? null : array.GetDateTime(i);
+        }
+        return result;
+    }
+
+    private static DateTime?[] ExtractTimestampAsDateTimeValues(TimestampArray array)
+    {
+        var result = new DateTime?[array.Length];
+        for (int i = 0; i < array.Length; i++)
+        {
+            if (array.IsNull(i)) { result[i] = null; continue; }
+            var dto = array.GetTimestamp(i);
+            result[i] = dto?.DateTime;
         }
         return result;
     }

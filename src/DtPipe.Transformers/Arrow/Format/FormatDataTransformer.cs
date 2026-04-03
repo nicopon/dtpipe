@@ -4,7 +4,7 @@ using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using Apache.Arrow;
 using Apache.Arrow.Types;
-using DtPipe.Core.Infrastructure.Arrow; // Added for ArrowTypeMapper
+using DtPipe.Core.Infrastructure.Arrow;
 
 namespace DtPipe.Transformers.Arrow.Format;
 

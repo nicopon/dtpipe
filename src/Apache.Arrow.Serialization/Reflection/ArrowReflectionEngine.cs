@@ -55,14 +55,8 @@ public static class ArrowReflectionEngine
     public static ArrowTypeResult GetLogicalType(Type type)
     {
         // Try resolving via the central map first for primitives/scalars
-        try
-        {
-            return ArrowTypeMap.GetLogicalType(type);
-        }
-        catch (NotSupportedException)
-        {
-            // It's a complex type, continue below
-        }
+        if (ArrowTypeMap.TryGetLogicalType(type, out var scalar))
+            return scalar;
 
         if (type.IsEnum) return new ArrowTypeResult(Int32Type.Default);
         var underlyingType = Nullable.GetUnderlyingType(type);

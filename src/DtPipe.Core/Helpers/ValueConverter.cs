@@ -78,6 +78,11 @@ public static class ValueConverter
             return new DateTimeOffset(dtVal);
         }
 
+        if (val is DateTimeOffset dtoVal && underlyingTarget == typeof(DateTime))
+        {
+            return dtoVal.UtcDateTime;
+        }
+
         if (val is long longVal)
         {
             if (underlyingTarget == typeof(DateTime))

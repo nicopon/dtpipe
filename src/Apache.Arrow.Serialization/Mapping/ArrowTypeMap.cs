@@ -71,7 +71,9 @@ public static class ArrowTypeMap
         if (type == typeof(uint) || type == typeof(uint?)) return new ArrowTypeResult(UInt32Type.Default);
         if (type == typeof(ulong) || type == typeof(ulong?)) return new ArrowTypeResult(UInt64Type.Default);
         if (type == typeof(decimal) || type == typeof(decimal?)) return new ArrowTypeResult(new Decimal128Type(38, 18));
+        // DateTime → Timestamp(null tz) — round-trips correctly via GetClrType(Timestamp(null)) → DateTime
         if (type == typeof(DateTime) || type == typeof(DateTime?)) return new ArrowTypeResult(new TimestampType(TimeUnit.Microsecond, (string?)null));
+        // DateTimeOffset → Timestamp with UTC timezone — round-trips correctly via GetClrType(Timestamp) → DateTimeOffset
         if (type == typeof(DateTimeOffset) || type == typeof(DateTimeOffset?)) return new ArrowTypeResult(new TimestampType(TimeUnit.Microsecond, "UTC"));
         if (type == typeof(TimeSpan) || type == typeof(TimeSpan?)) return new ArrowTypeResult(DurationType.Microsecond);
         if (type == typeof(DateOnly) || type == typeof(DateOnly?)) return new ArrowTypeResult(Date32Type.Default);
@@ -87,6 +89,25 @@ public static class ArrowTypeMap
         if (underlyingType?.IsEnum == true) return new ArrowTypeResult(Int32Type.Default);
 
         throw new NotSupportedException($"Type {type.FullName} is not a valid scalar type supported by ArrowTypeMap.");
+    }
+
+    /// <summary>
+    /// Attempts to get the logical Arrow type for a CLR type without throwing.
+    /// Returns false for complex, unsupported, or unknown types — use <see cref="GetLogicalType"/> variants in
+    /// <see cref="Apache.Arrow.Serialization.Reflection.ArrowReflectionEngine"/> for those.
+    /// </summary>
+    public static bool TryGetLogicalType(Type type, out ArrowTypeResult result)
+    {
+        try
+        {
+            result = GetLogicalType(type);
+            return true;
+        }
+        catch (NotSupportedException)
+        {
+            result = default;
+            return false;
+        }
     }
 
     /// <summary>
@@ -107,6 +128,9 @@ public static class ArrowTypeMap
         if (type is Decimal128Type) return typeof(decimal);
         if (type is Decimal256Type) return typeof(decimal);
         if (type is FixedSizeBinaryType) return typeof(byte[]);
+        // TimestampType: no-timezone → DateTime (local/unspecified); with timezone → DateTimeOffset
+        if (type is TimestampType ts)
+            return string.IsNullOrEmpty(ts.Timezone) ? typeof(DateTime) : typeof(DateTimeOffset);
 
         return type.TypeId switch
         {
@@ -123,7 +147,7 @@ public static class ArrowTypeMap
             ArrowTypeId.Double => typeof(double),
             ArrowTypeId.String => typeof(string),
             ArrowTypeId.Binary => typeof(byte[]),
-            ArrowTypeId.Timestamp => typeof(DateTimeOffset),
+            ArrowTypeId.Timestamp => typeof(DateTimeOffset), // fallback, covered by TimestampType check above
             ArrowTypeId.Date32 => typeof(DateTime),
             ArrowTypeId.Date64 => typeof(DateTime),
             ArrowTypeId.Decimal128 => typeof(decimal),

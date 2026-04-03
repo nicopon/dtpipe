@@ -18,6 +18,7 @@ public class SqlServerTypeConverter : ITypeMapper
         if (type == typeof(byte)) return "TINYINT";
         if (type == typeof(string)) return "NVARCHAR(MAX)";
         if (type == typeof(DateTime)) return "DATETIME2";
+        if (type == typeof(DateTimeOffset)) return "DATETIMEOFFSET";
         if (type == typeof(bool)) return "BIT";
         if (type == typeof(double)) return "FLOAT";
         if (type == typeof(decimal)) return "DECIMAL(18,2)";
@@ -41,6 +42,7 @@ public class SqlServerTypeConverter : ITypeMapper
             "float" => typeof(double),
             "real" => typeof(float),
             "datetime" or "datetime2" or "date" => typeof(DateTime),
+            "datetimeoffset" => typeof(DateTimeOffset),
             "uniqueidentifier" => typeof(Guid),
             "nvarchar" or "varchar" or "text" or "ntext" or "char" or "nchar" => typeof(string),
             "binary" or "varbinary" or "image" => typeof(byte[]),

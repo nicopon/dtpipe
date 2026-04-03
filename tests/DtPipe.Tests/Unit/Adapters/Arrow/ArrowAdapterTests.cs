@@ -1,7 +1,8 @@
 using Apache.Arrow.Arrays;
-using DtPipe.Adapters.Arrow;
+using Apache.Arrow.Serialization.Reflection;
 using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
+using DtPipe.Adapters.Arrow;
 using FluentAssertions;
 using Xunit;
 
@@ -126,5 +127,25 @@ public class ArrowAdapterTests : IAsyncLifetime
 		readRows[0][1].Should().Be("Alice");
 		readRows[0][2].Should().Be(1.5);
 		readRows[2][1].Should().BeNull();
+	}
+
+	[Fact]
+	public void ValueConverter_DateTimeOffset_To_DateTime_ShouldReturnUtcDateTime()
+	{
+		var dto = new DateTimeOffset(2025, 11, 8, 23, 0, 0, TimeSpan.Zero);
+		object boxed = dto;
+		var result = DtPipe.Core.Helpers.ValueConverter.ConvertValue(boxed, typeof(DateTime));
+		result.Should().BeOfType<DateTime>();
+		((DateTime)result).Should().Be(dto.UtcDateTime);
+	}
+
+	[Fact]
+	public void ColumnConverterFactory_DateTimeOffset_To_DateTime_ShouldWork()
+	{
+		var dto = new DateTimeOffset(2025, 11, 8, 23, 0, 0, TimeSpan.Zero);
+		var converter = DtPipe.Core.Helpers.ColumnConverterFactory.Build(typeof(DateTimeOffset), typeof(DateTime));
+		var result = converter((object)dto);
+		result.Should().BeOfType<DateTime>();
+		((DateTime)result).Should().Be(dto.UtcDateTime);
 	}
 }

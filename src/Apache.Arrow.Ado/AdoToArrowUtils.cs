@@ -48,14 +48,10 @@ public static class AdoToArrowUtils
         }
 
         // Fallback to central mapping for primitives (int, GUID with its UUID metadata, etc.)
-        try
-        {
-            return Apache.Arrow.Serialization.Mapping.ArrowTypeMap.GetLogicalType(underlyingType);
-        }
-        catch (NotSupportedException)
-        {
-            return new Apache.Arrow.Serialization.Mapping.ArrowTypeResult(StringType.Default);
-        }
+        if (Apache.Arrow.Serialization.Mapping.ArrowTypeMap.TryGetLogicalType(underlyingType, out var mapped))
+            return mapped;
+
+        return new Apache.Arrow.Serialization.Mapping.ArrowTypeResult(StringType.Default);
     }
 
     /// <summary>

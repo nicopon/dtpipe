@@ -1,6 +1,7 @@
 using Apache.Arrow;
 using Apache.Arrow.Arrays;
 using Apache.Arrow.Types;
+using Apache.Arrow.Serialization.Reflection;
 
 namespace DtPipe.Core.Infrastructure.Arrow;
 
@@ -65,7 +66,12 @@ public static class ArrowTypeMapper
             field.Metadata.TryGetValue("ARROW:extension:name", out var ext) &&
             string.Equals(ext, "arrow.uuid", StringComparison.OrdinalIgnoreCase))
             return FromArrowUuidBytes(fsba.GetBytes(index));
-        return GetValue(array, index);
+        var val = GetValue(array, index);
+        // Timestamp(tz=null) fields declare DateTime semantics. GetValue always returns DateTimeOffset
+        // for TimestampArray, so coerce to DateTime to match the schema's declared CLR type.
+        if (val is DateTimeOffset dto && field.DataType is TimestampType ts && string.IsNullOrEmpty(ts.Timezone))
+            return dto.DateTime;
+        return val;
     }
 
     public static Apache.Arrow.Serialization.Mapping.ArrowTypeResult GetLogicalType(Type clrType) => Apache.Arrow.Serialization.Mapping.ArrowTypeMap.GetLogicalType(clrType);
