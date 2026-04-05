@@ -20,6 +20,33 @@ namespace DtPipe.Core.Infrastructure.Arrow;
 /// </summary>
 public static class ArrowTypeMapper
 {
+    private static readonly List<IArrowTypeHandler> _handlers = new()
+    {
+        new Handlers.BooleanHandler(),
+        new Handlers.Int8Handler(),
+        new Handlers.Int16Handler(),
+        new Handlers.Int32Handler(),
+        new Handlers.Int64Handler(),
+        new Handlers.UInt8Handler(),
+        new Handlers.UInt16Handler(),
+        new Handlers.UInt32Handler(),
+        new Handlers.UInt64Handler(),
+        new Handlers.FloatHandler(),
+        new Handlers.DoubleHandler(),
+        new Handlers.StringHandler(),
+        new Handlers.BinaryHandler(),
+        new Handlers.Decimal128Handler(),
+        new Handlers.Decimal256Handler(),
+        new Handlers.FixedSizeBinaryHandler(),
+        new Handlers.Date32Handler(),
+        new Handlers.Date64Handler(),
+        new Handlers.TimestampHandler(),
+        new Handlers.DurationHandler(),
+        new Handlers.Time32Handler(),
+        new Handlers.Time64Handler(),
+        new Handlers.StructHandler(),
+        new Handlers.ListHandler()
+    };
     // ── UUID byte-order helpers ──────────────────────────────────────────────
 
     /// <summary>
@@ -70,6 +97,10 @@ public static class ArrowTypeMapper
 
     public static IArrowArrayBuilder CreateBuilder(IArrowType type)
     {
+        var handler = _handlers.FirstOrDefault(h => h.CanHandle(type));
+        if (handler != null) return handler.CreateBuilder(type);
+
+        // TODO: remove after all handlers migrated
         return type switch
         {
             BooleanType => new BooleanArray.Builder(),
@@ -107,6 +138,14 @@ public static class ArrowTypeMapper
 
     public static void AppendNull(IArrowArrayBuilder builder)
     {
+        var handler = _handlers.FirstOrDefault(h => h.CanHandle(builder));
+        if (handler != null)
+        {
+            handler.AppendNull(builder);
+            return;
+        }
+
+        // TODO: remove after all handlers migrated
         switch (builder)
         {
             case BooleanArray.Builder b: b.AppendNull(); break;
@@ -138,6 +177,10 @@ public static class ArrowTypeMapper
 
     public static IArrowArray BuildArray(IArrowArrayBuilder builder)
     {
+        var handler = _handlers.FirstOrDefault(h => h.CanHandle(builder));
+        if (handler != null) return handler.Build(builder);
+
+        // TODO: remove after all handlers migrated
         return builder switch
         {
             BooleanArray.Builder b => b.Build(),
@@ -170,6 +213,14 @@ public static class ArrowTypeMapper
 
     public static void AppendValue(IArrowArrayBuilder builder, object? value)
     {
+        var handler = _handlers.FirstOrDefault(h => h.CanHandle(builder));
+        if (handler != null)
+        {
+            handler.AppendValue(builder, value);
+            return;
+        }
+
+        // TODO: remove after all handlers migrated
         if (value == null || value == DBNull.Value)
         {
             AppendNull(builder);
@@ -264,130 +315,5 @@ public static class ArrowTypeMapper
                 AppendValue(builder, GetValue(array, index));
                 break;
         }
-    }
-
-    // ── Manual Builders for Nested Types ─────────────────────────────────────
-
-    internal class StructArrayManualBuilder : IArrowArrayBuilder
-    {
-        private readonly StructType _type;
-        private readonly List<IArrowArrayBuilder> _builders;
-        private readonly List<bool> _validity = new();
-        private int _nullCount;
-
-        public StructArrayManualBuilder(StructType type)
-        {
-            _type = type;
-            _builders = new List<IArrowArrayBuilder>(type.Fields.Count);
-            foreach (var field in type.Fields)
-            {
-                _builders.Add(CreateBuilder(field.DataType));
-            }
-        }
-
-        public void AppendValue(object? value)
-        {
-            if (value == null) { AppendNull(); }
-            else
-            {
-                _validity.Add(true);
-                if (value is System.Collections.IDictionary dict)
-                {
-                    for (int i = 0; i < _type.Fields.Count; i++)
-                    {
-                        var field = _type.Fields[i];
-                        var childValue = dict.Contains(field.Name) ? dict[field.Name] : null;
-                        ArrowTypeMapper.AppendValue(_builders[i], childValue);
-                    }
-                }
-                else
-                {
-                    var props = value.GetType().GetProperties();
-                    for (int i = 0; i < _type.Fields.Count; i++)
-                    {
-                        var field = _type.Fields[i];
-                        var prop = props.FirstOrDefault(p => string.Equals(p.Name, field.Name, StringComparison.OrdinalIgnoreCase));
-                        var childValue = prop?.GetValue(value);
-                        ArrowTypeMapper.AppendValue(_builders[i], childValue);
-                    }
-                }
-            }
-        }
-
-        public void AppendNull()
-        {
-            _validity.Add(false);
-            _nullCount++;
-            for (int i = 0; i < _builders.Count; i++) ArrowTypeMapper.AppendNull(_builders[i]);
-        }
-
-        public IArrowArray Build()
-        {
-            int length = _validity.Count;
-            var children = _builders.Select(b => BuildArray(b)).ToList();
-            var validBuf = new byte[(length + 7) / 8];
-            for (int i = 0; i < length; i++) if (_validity[i]) validBuf[i / 8] |= (byte)(1 << (i % 8));
-            var validBuilder = new ArrowBuffer.Builder<byte>((length + 7) / 8).AppendRange(validBuf);
-            return new StructArray(_type, length, children, validBuilder.Build(), _nullCount);
-        }
-
-        public void Clear() { _validity.Clear(); _nullCount = 0; foreach(var b in _builders) { /* Clear not in interface, skip */ } }
-        public int Length => _validity.Count;
-    }
-
-    internal class ListArrayManualBuilder : IArrowArrayBuilder
-    {
-        private readonly ListType _type;
-        private readonly IArrowArrayBuilder _valueBuilder;
-        private readonly List<int> _offsets = new();
-        private readonly List<bool> _validity = new();
-        private int _nullCount;
-
-        public ListArrayManualBuilder(ListType type)
-        {
-            _type = type;
-            _valueBuilder = CreateBuilder(type.ValueDataType);
-            _offsets.Add(0);
-        }
-
-        public void AppendValue(object? value)
-        {
-            if (value == null || value is not System.Collections.IEnumerable enumerable)
-            {
-                AppendNull();
-            }
-            else
-            {
-                int count = 0;
-                foreach (var item in enumerable)
-                {
-                    ArrowTypeMapper.AppendValue(_valueBuilder, item);
-                    count++;
-                }
-                _offsets.Add(_offsets.Last() + count);
-                _validity.Add(true);
-            }
-        }
-
-        public void AppendNull()
-        {
-            _validity.Add(false);
-            _nullCount++;
-            _offsets.Add(_offsets.Last());
-        }
-
-        public IArrowArray Build()
-        {
-            int length = _validity.Count;
-            var values = BuildArray(_valueBuilder);
-            var offsetBuf = new ArrowBuffer.Builder<int>(_offsets.Count).AppendRange(_offsets).Build();
-            var validBuf = new byte[(length + 7) / 8];
-            for (int i = 0; i < length; i++) if (_validity[i]) validBuf[i / 8] |= (byte)(1 << (i % 8));
-            var validBuilder = new ArrowBuffer.Builder<byte>((length + 7) / 8).AppendRange(validBuf);
-            return new ListArray(_type, length, offsetBuf, values, validBuilder.Build(), _nullCount);
-        }
-
-        public void Clear() { _validity.Clear(); _offsets.Clear(); _offsets.Add(0); _nullCount = 0; /* Clear not in interface */ }
-        public int Length => _validity.Count;
     }
 }

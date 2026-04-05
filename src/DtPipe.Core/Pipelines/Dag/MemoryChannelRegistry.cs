@@ -54,7 +54,7 @@ public class MemoryChannelRegistry : IMemoryChannelRegistry
             // the factory would create from row columns (Map typeof(object) to String),
             // then we should PRESERVE the existing schema.
             var rowBasedSchema = ArrowSchemaFactory.Create(columns);
-            bool existingIsRicher = arrowData.Schema.FieldsList.Any(f => f.DataType is StructType or ListType or MapType);
+            bool existingIsRicher = ArrowSchemaFactory.IsRichSchema(arrowData.Schema);
             
             if (!existingIsRicher)
             {
@@ -136,8 +136,8 @@ public class MemoryChannelRegistry : IMemoryChannelRegistry
         if (_arrowChannels.TryGetValue(branchAlias, out var arrowData))
         {
             // Protection: if existing schema is richer than the new one, preserve it.
-            bool existingIsRicher = arrowData.Schema.FieldsList.Any(f => f.DataType is StructType or ListType or MapType);
-            bool newIsRicher = schema.FieldsList.Any(f => f.DataType is StructType or ListType or MapType);
+            bool existingIsRicher = ArrowSchemaFactory.IsRichSchema(arrowData.Schema);
+            bool newIsRicher = ArrowSchemaFactory.IsRichSchema(schema);
             
             if (newIsRicher || !existingIsRicher || arrowData.Schema.FieldsList.Count == 0)
             {

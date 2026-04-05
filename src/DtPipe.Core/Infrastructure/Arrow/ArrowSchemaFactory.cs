@@ -1,6 +1,7 @@
 using Apache.Arrow;
 using Apache.Arrow.Types;
 using DtPipe.Core.Models;
+using System.Linq;
 
 namespace DtPipe.Core.Infrastructure.Arrow;
 
@@ -16,4 +17,10 @@ public static class ArrowSchemaFactory
         }
         return builder.Build();
     }
+
+    /// <summary>
+    /// Returns true if the schema contains rich types (Struct, List, or Map).
+    /// </summary>
+    public static bool IsRichSchema(Schema schema)
+        => schema.FieldsList.Any(f => f.DataType is StructType or ListType or MapType);
 }

@@ -43,8 +43,7 @@ public sealed class ArrowMemoryChannelDataWriter : IColumnarDataWriter
         // schema first would resolve the channel's TaskCompletionSource with the wrong schema, which
         // downstream consumers cannot undo even if the reader publishes the rich schema later.
         var existing = _registry.GetArrowChannel(_alias);
-        bool existingIsRicher = existing?.Schema.FieldsList.Any(
-            f => f.DataType is StructType or ListType or MapType) == true;
+        bool existingIsRicher = existing != null && ArrowSchemaFactory.IsRichSchema(existing.Value.Schema);
 
         if (!existingIsRicher)
         {
@@ -84,5 +83,4 @@ public sealed class ArrowMemoryChannelDataWriter : IColumnarDataWriter
         return builder.Build();
     }
 
-    private IArrowType GetArrowType(Type type) => ArrowTypeMapper.GetLogicalType(type).ArrowType;
 }
