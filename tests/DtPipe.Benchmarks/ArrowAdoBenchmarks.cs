@@ -1,13 +1,8 @@
 using Apache.Arrow;
 using Apache.Arrow.Ado;
 using Apache.Arrow.Ado.Binder;
-using Apache.Arrow.Ado.Consumer;
 using Apache.Arrow.Types;
 using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Configs;
-using BenchmarkDotNet.Jobs;
-using BenchmarkDotNet.Toolchains.InProcess.Emit;
-using DtPipe.Core.Helpers;
 using Microsoft.Data.Sqlite;
 using System.Data.Common;
 
@@ -15,7 +10,7 @@ namespace DtPipe.Benchmarks;
 
 /// <summary>
 /// Benchmarks for the Apache.Arrow.Ado adapter — read side (AdoToArrow) and write side
-/// (IArrowBinder, RecordBatchDataReader) — plus a ColumnConverterFactory regression check.
+/// (IArrowBinder, RecordBatchDataReader) — plus config builder allocation cost.
 ///
 /// Mirrors the structure of JdbcAdapterBenchmarks.java in the Apache Arrow Java project
 /// (performance/src/main/java/org/apache/arrow/adapter/jdbc/JdbcAdapterBenchmarks.java).
@@ -23,51 +18,39 @@ namespace DtPipe.Benchmarks;
 ///
 /// Run (release mode required for meaningful numbers):
 ///   dotnet run -c Release --project tests/DtPipe.Benchmarks -- --filter "*ArrowAdo*"
-///   dotnet run -c Release --project tests/DtPipe.Benchmarks -- --filter "*"
-///   NOTE: do not use --job Dry — it adds a standard toolchain job that scans the full
-///   solution directory and hits the permission-restricted tests/artifacts/restricted fixture.
-///
-/// Key metric: Allocated bytes/op (reported by [MemoryDiagnoser]).
-/// A zero or near-zero allocation confirms the zero-boxing paths are working.
-///
-/// InProcessEmitToolchain is used to avoid BenchmarkDotNet's directory scan hitting
-/// the tests/artifacts/restricted fixture (d---------). Results are equivalent to
-/// the default out-of-process toolchain for these micro-benchmarks.
 /// </summary>
 [MemoryDiagnoser]
-[Config(typeof(InProcessConfig))]
 public class ArrowAdoBenchmarks
 {
     private const int RowCount = 3000;
 
-    // Shared SQLite connection — kept open for the trial
     private SqliteConnection _conn = null!;
 
-    // Pre-built RecordBatch for the write-side benchmarks
-    private RecordBatch _recordBatch = null!;
+    // Pre-built configs — initialized once in GlobalSetup, not per iteration.
+    private AdoToArrowConfig _config = null!;
+    private AdoToArrowConfig _configNoOverrides = null!;
 
-    // Int32Array extracted from the batch — used in isolated binder benchmark
+    // Pre-built RecordBatch for write-side benchmarks.
+    private RecordBatch _recordBatch = null!;
     private Int32Array _int32Array = null!;
 
-    // Reusable output parameter for the binder benchmark (avoids parameter-creation noise)
     private SqliteParameter _param = null!;
-
-    // Reusable consumer for the isolated column-consume benchmark
-    private Int32Consumer _int32Consumer = null!;
-
-    // Reusable binder for the isolated column-bind benchmark
     private Int32Binder _int32Binder = null!;
-
-    // Pre-compiled converter delegate for the ColumnConverter comparison
-    private Func<object?, object?> _int32ConverterDelegate = null!;
 
     // ── Setup / Teardown ─────────────────────────────────────────────────────
 
     [GlobalSetup]
     public async Task Setup()
     {
-        // ── SQLite in-memory database with RowCount rows ──
-        // Schema mirrors Java: (int, long, string, bool) → f0, f1, f2, f3
+        // Build configs once — the anti-pattern (building per call) is benchmarked separately.
+        _config = new AdoToArrowConfigBuilder().SetTargetBatchSize(1024).Build();
+        _configNoOverrides = new AdoToArrowConfigBuilder()
+            .ClearDataTypeNameOverrides()
+            .SetTargetBatchSize(1024)
+            .Build();
+
+        // SQLite in-memory database with RowCount rows.
+        // Schema mirrors Java: (int, long, string, bool) → f0, f1, f2, f3.
         _conn = new SqliteConnection("Data Source=:memory:");
         await _conn.OpenAsync();
 
@@ -99,7 +82,7 @@ public class ArrowAdoBenchmarks
         }
         await tx.CommitAsync();
 
-        // ── Pre-built RecordBatch for write-side benchmarks ──
+        // Pre-built RecordBatch for write-side benchmarks.
         var int32Builder  = new Int32Array.Builder();
         var int64Builder  = new Int64Array.Builder();
         var stringBuilder = new StringArray.Builder();
@@ -130,12 +113,8 @@ public class ArrowAdoBenchmarks
         ], RowCount);
 
         _int32Array = (Int32Array)_recordBatch.Column(0);
-
-        // ── Reusable per-benchmark objects ──
-        _param               = new SqliteParameter();
-        _int32Consumer       = new Int32Consumer(0);
-        _int32Binder         = new Int32Binder();
-        _int32ConverterDelegate = ColumnConverterFactory.Build(typeof(string), typeof(int));
+        _param      = new SqliteParameter();
+        _int32Binder = new Int32Binder();
     }
 
     [GlobalCleanup]
@@ -149,7 +128,8 @@ public class ArrowAdoBenchmarks
 
     /// <summary>
     /// E2E: open a SQLite reader and convert all rows to Arrow RecordBatches.
-    /// Mirrors Java testJdbcToArrow() — measures full IAdoConsumer pipeline overhead.
+    /// Config is pre-built (see GlobalSetup) — measures pure pipeline overhead.
+    /// Mirrors Java testJdbcToArrow().
     /// </summary>
     [Benchmark]
     public async Task<int> ReadToArrowBatches()
@@ -158,9 +138,8 @@ public class ArrowAdoBenchmarks
         cmd.CommandText = "SELECT f0, f1, f2, f3 FROM bench";
         using var reader = (DbDataReader)await cmd.ExecuteReaderAsync();
 
-        var config = new AdoToArrowConfigBuilder().SetTargetBatchSize(1024).Build();
         int rowCount = 0;
-        await foreach (var batch in AdoToArrow.ReadToArrowBatchesAsync(reader, config))
+        await foreach (var batch in AdoToArrow.ReadToArrowBatchesAsync(reader, _config))
         {
             rowCount += batch.Length;
             batch.Dispose();
@@ -169,35 +148,40 @@ public class ArrowAdoBenchmarks
     }
 
     /// <summary>
-    /// Isolated: Int32Consumer.Consume() per row — measures single-consumer overhead.
-    /// Mirrors Java consumeBenchmark() (single-column variant).
-    /// Expected allocation: only the final IArrowArray build (not per-row).
+    /// Same as ReadToArrowBatches but with DataTypeNameOverrides cleared.
+    /// Compares the overhead of the override dictionary TryGetValue calls (one per column
+    /// per schema build) against the direct base-resolver path.
     /// </summary>
     [Benchmark]
-    public async Task<IArrowArray> ConsumeInt32Column()
+    public async Task<int> ReadToArrowBatchesNoOverrides()
     {
         using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "SELECT f0 FROM bench";
+        cmd.CommandText = "SELECT f0, f1, f2, f3 FROM bench";
         using var reader = (DbDataReader)await cmd.ExecuteReaderAsync();
 
-        _int32Consumer.Reset();
-        while (await reader.ReadAsync())
-            _int32Consumer.Consume(reader);
-
-        return _int32Consumer.BuildArray();
+        int rowCount = 0;
+        await foreach (var batch in AdoToArrow.ReadToArrowBatchesAsync(reader, _configNoOverrides))
+        {
+            rowCount += batch.Length;
+            batch.Dispose();
+        }
+        return rowCount;
     }
 
-    // ── Write side — no Java equivalent ──────────────────────────────────────
+    // ── Write side ───────────────────────────────────────────────────────────
 
     /// <summary>
     /// E2E write side: iterate a pre-built RecordBatch through RecordBatchDataReader.
     /// Validates the IDataReader adapter layer used by SqlBulkCopy.
-    /// Key metric: allocations/op — should be near zero (no intermediate DataTable).
+    ///
+    /// Note: GetValue() boxes per cell — this matches SqlBulkCopy's actual call pattern
+    /// and is intentional. The key metric is the absence of an intermediate DataTable
+    /// (which would allocate one DataRow per row, one object[] per row, and box every cell).
     /// </summary>
     [Benchmark]
     public int RecordBatchReaderIterate()
     {
-        // RecordBatchDataReader does NOT own or dispose the batch
+        // RecordBatchDataReader does NOT own or dispose the batch.
         using var reader = new RecordBatchDataReader(_recordBatch);
         int sum = 0;
         while (reader.Read())
@@ -210,8 +194,7 @@ public class ArrowAdoBenchmarks
 
     /// <summary>
     /// Isolated: Int32Binder.Bind() per row — measures single-binder overhead.
-    /// Key metric: 0 bytes allocated (reads int from Arrow, assigns int to DbParameter.Value,
-    /// which boxes — one allocation per call — but no intermediate objects).
+    /// Mirrors Java consumeBenchmark() (write direction, single-column variant).
     /// </summary>
     [Benchmark]
     public void BindInt32Column()
@@ -220,46 +203,24 @@ public class ArrowAdoBenchmarks
             _int32Binder.Bind(_int32Array, i, _param);
     }
 
-    // ── ColumnConverter regression ────────────────────────────────────────────
+    // ── Config builder allocation cost ───────────────────────────────────────
 
     /// <summary>
-    /// Baseline: ValueConverter.ConvertValue() — the original per-cell slow path.
-    /// Involves: Nullable.GetUnderlyingType() + IsInstanceOfType() + if/else cascade + boxing.
-    /// </summary>
-    [Benchmark(Baseline = true)]
-    public object? ConvertValueDirectCall()
-    {
-        object? last = null;
-        for (int i = 0; i < RowCount; i++)
-            last = ValueConverter.ConvertValue("42", typeof(int));
-        return last;
-    }
-
-    /// <summary>
-    /// Optimized: pre-built ColumnConverterFactory delegate — the Phase 2 replacement.
-    /// The type-specific parse lambda was compiled once at writer initialization.
-    /// Expected: measurably lower overhead than the baseline (no reflection per call).
+    /// Cost of AdoToArrowConfigBuilder.Build() with default DataTypeNameOverrides:
+    /// copies the 3-entry override dictionary + allocates a resolver closure.
+    /// This is the allocation paid when config is constructed per pipeline call
+    /// instead of once at initialization — the anti-pattern fixed in ReadToArrowBatches.
     /// </summary>
     [Benchmark]
-    public object? ColumnConverterDelegate()
-    {
-        object? last = null;
-        for (int i = 0; i < RowCount; i++)
-            last = _int32ConverterDelegate("42");
-        return last;
-    }
-}
+    public AdoToArrowConfig BuildConfigDefault()
+        => new AdoToArrowConfigBuilder().SetTargetBatchSize(1024).Build();
 
-/// <summary>
-/// BenchmarkDotNet config that uses InProcessEmitToolchain.
-/// Avoids the directory scanner hitting permission-restricted test fixtures
-/// (tests/artifacts/restricted). Results are equivalent to the default out-of-process
-/// toolchain for micro-benchmarks that do not measure startup time.
-/// </summary>
-internal class InProcessConfig : ManualConfig
-{
-    public InProcessConfig()
-    {
-        AddJob(Job.MediumRun.WithToolchain(InProcessEmitToolchain.Instance));
-    }
+    /// <summary>
+    /// Cost of AdoToArrowConfigBuilder.Build() with no DataTypeNameOverrides:
+    /// no dictionary copy, no closure — uses the base resolver function directly.
+    /// Provides the lower bound for config construction cost.
+    /// </summary>
+    [Benchmark]
+    public AdoToArrowConfig BuildConfigNoOverrides()
+        => new AdoToArrowConfigBuilder().ClearDataTypeNameOverrides().SetTargetBatchSize(1024).Build();
 }

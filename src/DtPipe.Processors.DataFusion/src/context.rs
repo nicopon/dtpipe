@@ -8,13 +8,13 @@ use tokio::sync::Mutex;
 use futures::StreamExt;
 use datafusion::prelude::*;
 
-use arrow_array::ffi_stream::{ArrowArrayStreamReader, FFI_ArrowArrayStream};
-use arrow_array::RecordBatchReader;
-use arrow_schema::SchemaRef;
+use arrow::ffi_stream::{ArrowArrayStreamReader, FFI_ArrowArrayStream};
+use arrow::array::RecordBatchReader;
+use arrow::datatypes::SchemaRef;
+use arrow::ipc::writer::StreamWriter;
 use datafusion::catalog::streaming::StreamingTable;
 use datafusion::physical_plan::streaming::PartitionStream;
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
-use arrow_ipc::writer::StreamWriter;
 
 use crate::{ErrorCode, DtfbRuntime};
 
@@ -43,7 +43,7 @@ fn lowercase_schema(schema: SchemaRef) -> SchemaRef {
         let name = f.name().to_lowercase();
         f.as_ref().clone().with_name(name)
     }).collect();
-    Arc::new(arrow_schema::Schema::new(fields))
+    Arc::new(arrow::datatypes::Schema::new(fields))
 }
 
 #[unsafe(no_mangle)]
@@ -97,7 +97,7 @@ impl PartitionStream for FfiPartitionStream {
                 Ok(rb) => {
                     // Force the lowercased schema onto the batch.
                     // try_new validates types/count but not names, which is what we want.
-                    arrow_array::RecordBatch::try_new(schema_for_stream.clone(), rb.columns().to_vec())
+                    arrow::array::RecordBatch::try_new(schema_for_stream.clone(), rb.columns().to_vec())
                         .map_err(|e| datafusion::error::DataFusionError::ArrowError(Box::new(e), None))
                 }
                 Err(e) => Err(datafusion::error::DataFusionError::ArrowError(Box::new(e), None))
@@ -155,7 +155,7 @@ pub unsafe extern "C" fn dtfb_register_stream(
 pub unsafe extern "C" fn dtfb_get_schema(
     ctx_ptr: *mut DtfbContext,
     sql_ptr: *const std::ffi::c_char,
-    ffi_schema_ptr: *mut arrow_array::ffi::FFI_ArrowSchema,
+    ffi_schema_ptr: *mut arrow::ffi::FFI_ArrowSchema,
 ) -> ErrorCode {
     let dtfb = crate::ffi_ref!(ctx_ptr);
     let sql = crate::ffi_cstr!(sql_ptr);
@@ -170,7 +170,7 @@ pub unsafe extern "C" fn dtfb_get_schema(
     // Tokio timer never gets polled. An OS-level mpsc::recv_timeout is the only reliable
     // mechanism to interrupt a non-yielding future.
     let runtime = Arc::clone(&dtfb.runtime);
-    type PlanResult = Result<arrow_schema::Schema, String>;
+    type PlanResult = Result<arrow::datatypes::Schema, String>;
     let (tx, rx) = std::sync::mpsc::sync_channel::<PlanResult>(1);
 
     std::thread::spawn(move || {
@@ -207,7 +207,7 @@ pub unsafe extern "C" fn dtfb_get_schema(
         }
     };
 
-    match arrow_array::ffi::FFI_ArrowSchema::try_from(&schema) {
+    match arrow::ffi::FFI_ArrowSchema::try_from(&schema) {
         Ok(ffi_schema) => {
             unsafe { std::ptr::write(ffi_schema_ptr, ffi_schema) };
             ErrorCode::Ok
@@ -223,15 +223,15 @@ pub unsafe extern "C" fn dtfb_get_schema(
 pub unsafe extern "C" fn dtfb_register_batches(
     ctx_ptr: *mut DtfbContext,
     name_ptr: *const std::ffi::c_char,
-    ffi_schema_ptr: *mut arrow_array::ffi::FFI_ArrowSchema,
-    ffi_batches_ptr: *mut *mut arrow_array::ffi::FFI_ArrowArray,
+    ffi_schema_ptr: *mut arrow::ffi::FFI_ArrowSchema,
+    ffi_batches_ptr: *mut *mut arrow::ffi::FFI_ArrowArray,
     num_batches: usize,
 ) -> ErrorCode {
     let dtfb = crate::ffi_ref!(ctx_ptr);
     let name = crate::ffi_cstr!(name_ptr).to_string();
 
     let ffi_schema = unsafe { &*ffi_schema_ptr };
-    let original_schema = match arrow_schema::Schema::try_from(ffi_schema) {
+    let original_schema = match arrow::datatypes::Schema::try_from(ffi_schema) {
         Ok(s) => Arc::new(s),
         Err(e) => {
             eprintln!("[dtfusion-bridge] register_batches: failed to import FFI schema: {:?}", e);
@@ -246,7 +246,7 @@ pub unsafe extern "C" fn dtfb_register_batches(
         if array_ptr.is_null() { return ErrorCode::Error; }
         let ffi_array = unsafe { std::ptr::read(array_ptr) };
 
-        let array_data = match unsafe { arrow_array::ffi::from_ffi(ffi_array, ffi_schema) } {
+        let array_data = match unsafe { arrow::ffi::from_ffi(ffi_array, ffi_schema) } {
             Ok(a) => a,
             Err(e) => {
                 eprintln!("[dtfusion-bridge] register_batches: failed to import FFI array at index {}: {:?}", i, e);
@@ -254,11 +254,11 @@ pub unsafe extern "C" fn dtfb_register_batches(
             }
         };
 
-        let struct_array = arrow_array::StructArray::from(array_data);
+        let struct_array = arrow::array::StructArray::from(array_data);
         let columns = struct_array.columns().to_vec();
 
         // Force the lowercased schema onto the batch
-        let rb = match arrow_array::RecordBatch::try_new(Arc::clone(&schema), columns) {
+        let rb = match arrow::array::RecordBatch::try_new(Arc::clone(&schema), columns) {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("[dtfusion-bridge] register_batches: RecordBatch::try_new failed at index {}: {:?}", i, e);

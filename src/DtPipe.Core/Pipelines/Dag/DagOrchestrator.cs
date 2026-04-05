@@ -447,9 +447,15 @@ public class DagOrchestrator : IDagOrchestrator
             {
                 await foreach (var item in source.ReadAllAsync(ct))
                 {
-                    var toWrite = transform != null ? transform(item) : item;
+                    // Each target needs its own independent copy when a transform is supplied.
+                    // A single transformed copy shared across all targets would be disposed
+                    // by the first consumer that uses `using (batch)`, corrupting the data
+                    // for subsequent consumers (e.g. row-bridge disposes Arrow RecordBatches).
                     foreach (var t in targets)
+                    {
+                        var toWrite = transform != null ? transform(item) : item;
                         await t.WriteAsync(toWrite, ct);
+                    }
                 }
             }
             finally
@@ -477,18 +483,25 @@ public class DagOrchestrator : IDagOrchestrator
         }
 
         // Check if the producer branch has a reader that yields columnar output
+        // OR if it has a stream transformer (SQL/merge always produce Arrow)
         var producerBranch = dag.Branches.FirstOrDefault(b =>
-            b.Alias.Equals(alias, StringComparison.OrdinalIgnoreCase) && !b.HasStreamTransformer);
+            b.Alias.Equals(alias, StringComparison.OrdinalIgnoreCase));
 
-        if (producerBranch != null && !string.IsNullOrEmpty(producerBranch.Input))
+        if (producerBranch != null)
         {
-            var readerFactory = _readerFactories.FirstOrDefault(f =>
-                producerBranch.Input.StartsWith(f.ComponentName + ":", StringComparison.OrdinalIgnoreCase) ||
-                producerBranch.Input.Equals(f.ComponentName, StringComparison.OrdinalIgnoreCase) ||
-                f.CanHandle(producerBranch.Input));
-
-            if (readerFactory?.YieldsColumnarOutput == true)
+            if (producerBranch.HasStreamTransformer)
                 return ChannelMode.Arrow;
+
+            if (!string.IsNullOrEmpty(producerBranch.Input))
+            {
+                var readerFactory = _readerFactories.FirstOrDefault(f =>
+                    producerBranch.Input.StartsWith(f.ComponentName + ":", StringComparison.OrdinalIgnoreCase) ||
+                    producerBranch.Input.Equals(f.ComponentName, StringComparison.OrdinalIgnoreCase) ||
+                    f.CanHandle(producerBranch.Input));
+
+                if (readerFactory?.YieldsColumnarOutput == true)
+                    return ChannelMode.Arrow;
+            }
         }
 
         return ChannelMode.Native;

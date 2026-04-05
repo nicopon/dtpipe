@@ -195,5 +195,24 @@ COUNT_B=$(csv_rows "$A/t8_outB.csv")
 [ "$COUNT_A" -ge 1 ] && pass "Join+fan-out: output A has $COUNT_A rows" || fail "Join+fan-out: output A empty"
 [ "$COUNT_B" -ge 1 ] && pass "Join+fan-out: output B has $COUNT_B rows" || fail "Join+fan-out: output B empty"
 
+# ----------------------------------------
+# Topology 9: Nested data through DAG
+# ----------------------------------------
+echo "--- [9] Nested data through DAG ---"
+# Create nested JSONL source
+cat > "$A/t9_src.jsonl" <<'EOF'
+{"id": "row1", "user": {"name": "Alice", "points": 1000}}
+{"id": "row2", "user": {"name": "Bob", "points": 2000}}
+EOF
+
+"$DTPIPE" \
+  -i "$A/t9_src.jsonl" --fake "id:random.uuid" --alias nested_src \
+  --from nested_src --sql "SELECT count(*) as cnt, sum(user['points']) as total FROM nested_src" \
+  -o "$A/t9_out.csv" --no-stats
+
+COUNT=$(csv_rows "$A/t9_out.csv")
+[ "$COUNT" -ge 1 ] && pass "Nested DAG: result produced" || fail "Nested DAG: no output"
+cat "$A/t9_out.csv" | grep -q "3000" && pass "Nested DAG: summation correct" || fail "Nested DAG: wrong result"
+
 echo ""
 echo -e "${GREEN}All DAG topology tests passed!${NC}"

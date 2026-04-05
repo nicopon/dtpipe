@@ -13,6 +13,7 @@ public class JsonLReaderDescriptor : IProviderDescriptor<IStreamReader>
     public bool CanHandle(string connectionString) => JsonLMetadata.CanHandle(connectionString);
     public bool SupportsStdio => JsonLMetadata.SupportsStdio;
     public bool RequiresQuery => false;
+    public bool YieldsColumnarOutput => true;
 
     public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
     {

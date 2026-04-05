@@ -14,14 +14,14 @@ namespace DtPipe.Adapters.MemoryChannel;
 /// Enables native fan-out branches (e.g. CSV passthru) to consume Arrow channels
 /// produced by columnar sources (parquet, Arrow files, DuckDB, generate, etc.).
 /// </summary>
-public sealed class ArrowMemoryChannelStreamReader : IStreamReader
+public sealed class ArrowMemoryChannelStreamReader : IStreamReader, IColumnarStreamReader
 {
     private readonly ChannelReader<RecordBatch> _reader;
-    private readonly IArrowChannelRegistry _registry;
+    private readonly IMemoryChannelRegistry _registry;
     private readonly string _alias;
     private IReadOnlyList<PipeColumnInfo>? _columns;
 
-    public ArrowMemoryChannelStreamReader(ChannelReader<RecordBatch> reader, IArrowChannelRegistry registry, string alias)
+    public ArrowMemoryChannelStreamReader(ChannelReader<RecordBatch> reader, IMemoryChannelRegistry registry, string alias)
     {
         _reader = reader;
         _registry = registry;
@@ -29,13 +29,22 @@ public sealed class ArrowMemoryChannelStreamReader : IStreamReader
     }
 
     public IReadOnlyList<PipeColumnInfo>? Columns => _columns;
+    public Schema? Schema { get; private set; }
 
     public async Task OpenAsync(CancellationToken ct = default)
     {
-        var schema = await _registry.WaitForArrowChannelSchemaAsync(_alias, ct);
-        _columns = schema.FieldsList
+        Schema = await _registry.WaitForArrowChannelSchemaAsync(_alias, ct);
+        _columns = Schema.FieldsList
             .Select(f => new PipeColumnInfo(f.Name, ArrowTypeMapper.GetClrTypeFromField(f), f.IsNullable))
             .ToList();
+    }
+
+    public async IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync([EnumeratorCancellation] CancellationToken ct = default)
+    {
+        await foreach (var batch in _reader.ReadAllAsync(ct))
+        {
+            yield return batch;
+        }
     }
 
     public async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(int batchSize, [EnumeratorCancellation] CancellationToken ct = default)

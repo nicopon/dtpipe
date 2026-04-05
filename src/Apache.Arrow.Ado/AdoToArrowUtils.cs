@@ -20,14 +20,15 @@ public static class AdoToArrowUtils
         var dataType = column.DataType ?? typeof(string);
         var underlyingType = Nullable.GetUnderlyingType(dataType) ?? dataType;
 
-        // Dates and Times — use DataTypeName for DATE vs DATETIME distinction
+        // Dates and Times — use DataTypeName for DATE / TIMESTAMP distinction.
+        // Timezone-aware variants (e.g. timestamptz, timestamp with time zone) are handled via
+        // AdoToArrowConfig.DataTypeNameOverrides before this resolver is called.
         if (underlyingType == typeof(DateTime))
         {
             if (string.Equals(column.DataTypeName, "DATE", StringComparison.OrdinalIgnoreCase))
-            {
                 return new Apache.Arrow.Serialization.Mapping.ArrowTypeResult(Date32Type.Default);
-            }
-            return new Apache.Arrow.Serialization.Mapping.ArrowTypeResult(Date64Type.Default);
+            // All other datetime columns → local/unspecified timestamp (aligns with ArrowTypeMap.GetLogicalType(typeof(DateTime)))
+            return new Apache.Arrow.Serialization.Mapping.ArrowTypeResult(new TimestampType(TimeUnit.Microsecond, (string?)null));
         }
 
         if (underlyingType == typeof(TimeSpan) && string.Equals(column.DataTypeName, "TIME", StringComparison.OrdinalIgnoreCase))

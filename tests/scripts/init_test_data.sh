@@ -143,4 +143,16 @@ else
     echo "  Skipping restricted/ (already exists)"
 fi
 
+# 8. Complex JSONL (Nested Structures)
+if [ ! -f "$ARTIFACTS_DIR/complex_data.jsonl" ]; then
+    echo "Generating complex_data.jsonl..."
+    cat <<EOF > "$ARTIFACTS_DIR/complex_data.jsonl"
+{"id": 1, "user": {"name": "Alice", "points": 100}, "items": [{"id": "A1", "price": 10.5}, {"id": "A2", "price": 5.0}]}
+{"id": 2, "user": {"name": "Bob", "points": 200}, "items": [{"id": "B1", "price": 20.0}]}
+{"id": 3, "user": {"name": "Charlie", "points": 300}, "items": []}
+EOF
+else
+    echo "  Skipping complex_data.jsonl (already exists)"
+fi
+
 echo -e "${GREEN}All sources initialized successfully!${NC}"

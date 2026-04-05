@@ -75,7 +75,8 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
             if (!string.IsNullOrEmpty(_mainAlias))
             {
                 // _mainAlias = logical SQL table name; _mainChannelAlias = physical channel alias.
-                await RegisterStreamingChannelSourceAsync(_mainAlias, _mainChannelAlias, ct);
+                // TODO: Revert to streaming once FFI stream supports Structs in dtfusion
+                await RegisterChannelSourceAsync(_mainAlias, _mainChannelAlias, ct);
             }
 
             _logger.LogDebug("DataFusionProcessor: All sources registered. Inspecting schema...");
@@ -138,41 +139,20 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
         ValidateSchema(channelAlias, schema);
         var channelTuple = _registry.GetArrowChannel(channelAlias) ?? throw new Exception("Channel not found");
 
+        // Drain the channel upfront so all data is available before DataFusion plans the query.
+        // This is required for struct/list columns whose schema must be known at registration time.
         var batches = new List<RecordBatch>();
         await foreach (var batch in channelTuple.Channel.Reader.ReadAllAsync(ct))
-        {
             batches.Add(batch);
-        }
 
-        // Always register the table even when empty so the SQL query can reference it.
-        // Skipping registration on 0 batches would cause "table not found" errors in DataFusion.
-        RegisterBatchesSafe(alias, schema, batches);
-    }
-
-    private unsafe void RegisterBatchesSafe(string alias, Schema schema, List<RecordBatch> batches)
-    {
-        var ffiSchema = new CArrowSchema();
-        CArrowSchemaExporter.ExportSchema(schema, &ffiSchema);
-
-        var ffiArrays = new CArrowArray[batches.Count];
-        var ffiBatchPtrs = new CArrowArray*[batches.Count];
-
-        fixed (CArrowArray* pArrays = ffiArrays)
-        {
-            for (int i = 0; i < batches.Count; i++)
-            {
-                CArrowArrayExporter.ExportRecordBatch(batches[i], &pArrays[i]);
-                ffiBatchPtrs[i] = &pArrays[i];
-            }
-
-            fixed (CArrowArray** ppBatches = ffiBatchPtrs)
-            {
-                if (DataFusionBridge.RegisterBatches(_ctx, alias, &ffiSchema, ppBatches, (nuint)batches.Count) != 0)
-                {
-                    throw new Exception($"Failed to register batches for {alias}");
-                }
-            }
-        }
+        // Use the streaming FFI path (dtfb_register_stream) rather than dtfb_register_batches.
+        // CArrowArrayExporter.ExportRecordBatch fails on dictionary-encoded columns (e.g. Parquet
+        // string columns read back as DictionaryArray<Int32, String>) — buffer #1 (data/indices)
+        // is treated as null by the exporter for those types. The stream path uses
+        // CArrowArrayStreamExporter which handles all Arrow types correctly.
+        var streamAdapter = new BatchListArrowStream(schema, batches);
+        _activeStreams.Add(streamAdapter); // prevent GC until DataFusion releases the stream
+        ExportAndRegisterStream(alias, streamAdapter);
     }
 
     public async IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
@@ -268,6 +248,31 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
 
     private static void ValidateSchema(string alias, Schema schema)
         => SqlProcessorHelpers.ValidateSchema(alias, schema);
+
+    /// <summary>
+    /// Wraps a pre-drained list of RecordBatches as an IArrowArrayStream.
+    /// Allows using the stream FFI path (dtfb_register_stream) for materialized data,
+    /// avoiding CArrowArrayExporter limitations with dictionary-encoded columns.
+    /// </summary>
+    private sealed class BatchListArrowStream : IArrowArrayStream
+    {
+        private readonly Schema _schema;
+        private readonly List<RecordBatch> _batches;
+        private int _index;
+
+        public BatchListArrowStream(Schema schema, List<RecordBatch> batches)
+        {
+            _schema = schema;
+            _batches = batches;
+        }
+
+        public Schema Schema => _schema;
+
+        public ValueTask<RecordBatch?> ReadNextRecordBatchAsync(CancellationToken cancellationToken = default)
+            => new(_index < _batches.Count ? _batches[_index++] : null);
+
+        public void Dispose() { }
+    }
 
     private sealed class ChannelArrowStream : IArrowArrayStream
     {

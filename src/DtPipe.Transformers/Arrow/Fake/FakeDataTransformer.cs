@@ -303,28 +303,53 @@ public sealed partial class FakeDataTransformer : BaseColumnarTransformer, IRequ
 
 		int rowCount = batch.Length;
 		int totalColumns = _processors.Count;
-		var builders = CreateBuilders(_outputSchema, rowCount);
 
-		// Row buffer for Bogus and Templates
+		// Non-fake real columns are passed through directly (preserving their original Arrow type,
+		// including complex types like StructType or ListType that PipeColumnInfo.ClrType cannot round-trip).
+		// Only fake columns and virtual columns go through the row-value-builder path.
+		// A column is "fake" if it has a generator or template (FakeColumnProcessor is a struct; default = no-op).
+		var hasFakeForCol = new bool[totalColumns];
+		for (int i = 0; i < totalColumns; i++)
+			hasFakeForCol[i] = _processors[i].Generator is not null || _processors[i].IsTemplate;
+
+		// Build schema: preserve input field types for non-fake real columns.
+		var outputFields = new List<Field>(totalColumns);
+		for (int i = 0; i < _realColumnCount; i++)
+			outputFields.Add(hasFakeForCol[i] ? _outputSchema.GetFieldByIndex(i) : batch.Schema.GetFieldByIndex(i));
+		for (int i = _realColumnCount; i < totalColumns; i++)
+			outputFields.Add(_outputSchema.GetFieldByIndex(i));
+		var batchSchema = new Schema(outputFields, null);
+
+		// Pre-fill output arrays: non-fake real columns copied directly.
+		var resultArrays = new Apache.Arrow.IArrowArray[totalColumns];
+		for (int i = 0; i < _realColumnCount; i++)
+		{
+			if (!hasFakeForCol[i])
+				resultArrays[i] = batch.Column(i);
+		}
+
+		// Builders for fake columns and virtual columns only.
+		IArrowArrayBuilder?[] builders = new IArrowArrayBuilder?[totalColumns];
+		for (int i = 0; i < totalColumns; i++)
+		{
+			if (hasFakeForCol[i])
+				builders[i] = ArrowTypeMapper.CreateBuilder(outputFields[i].DataType);
+		}
+
+		// Row buffer for template substitution (needs real column values even for non-fake cols).
 		var rowBuffer = new object?[totalColumns];
-
-		// Appenders for efficient batching (reusing bridge logic or similar)
-		// To simplify, we'll use a direct loop.
 
 		for (int i = 0; i < rowCount; i++)
 		{
 			_rowCounter++;
 
-			// 1. Extract real columns from incoming batch into rowBuffer
+			// 1. Extract values for template interpolation (all real columns).
 			for (int colIdx = 0; colIdx < _realColumnCount; colIdx++)
 			{
 				rowBuffer[colIdx] = ArrowTypeMapper.GetValueForField(batch.Column(colIdx), batch.Schema.GetFieldByIndex(colIdx), i);
 			}
-			// Initialize virtual columns if any
 			for (int colIdx = _realColumnCount; colIdx < totalColumns; colIdx++)
-			{
 				rowBuffer[colIdx] = null;
-			}
 
 			// 2. Deterministic Row Seed
 			int? rowSeed = null;
@@ -336,18 +361,14 @@ public sealed partial class FakeDataTransformer : BaseColumnarTransformer, IRequ
 			{
 				var seedVal = rowBuffer[_seedColumnIndex];
 				if (seedVal is not null)
-				{
 					rowSeed = (int)(DtPipe.Transformers.Arrow.Fake.StableHash.Compute(seedVal) & 0x7FFFFFFF);
-				}
 			}
 
-			// 3. Process Generation Order
+			// 3. Process Generation Order (fake columns only)
 			foreach (var idx in _generationOrder)
 			{
 				if (_skipNull && idx < _realColumnCount && rowBuffer[idx] is null)
-				{
 					continue;
-				}
 
 				var proc = _processors[idx];
 				if (proc.IsTemplate)
@@ -357,26 +378,28 @@ public sealed partial class FakeDataTransformer : BaseColumnarTransformer, IRequ
 				else if (proc.Generator is not null)
 				{
 					if (rowSeed.HasValue && _pagedCaches!.TryGetValue(idx, out var cache))
-					{
 						rowBuffer[idx] = cache.GetValue(rowSeed.Value);
-					}
 					else
-					{
 						rowBuffer[idx] = proc.Generator(_faker);
-					}
 				}
 			}
 
-			// 4. Append row to builders
+			// 4. Append to fake column builders only
 			for (int colIdx = 0; colIdx < totalColumns; colIdx++)
 			{
-				ArrowTypeMapper.AppendValue(builders[colIdx], rowBuffer[colIdx]);
+				if (builders[colIdx] is not null)
+					ArrowTypeMapper.AppendValue(builders[colIdx]!, rowBuffer[colIdx]);
 			}
 		}
 
-		// 5. Build final result batch
-		var resultArrays = builders.Select(b => ArrowTypeMapper.BuildArray(b)).ToList();
-		return new ValueTask<RecordBatch?>(new RecordBatch(_outputSchema, resultArrays, rowCount));
+		// 5. Build fake column arrays
+		for (int i = 0; i < totalColumns; i++)
+		{
+			if (builders[i] is not null)
+				resultArrays[i] = ArrowTypeMapper.BuildArray(builders[i]!);
+		}
+
+		return new ValueTask<RecordBatch?>(new RecordBatch(batchSchema, resultArrays, rowCount));
 	}
 
 	private static IArrowArrayBuilder[] CreateBuilders(Schema schema, int capacity)

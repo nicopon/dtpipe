@@ -23,6 +23,7 @@ public sealed class SqlStreamTransformer : IStreamTransformer
 
     /// <inheritdoc/>
     public IReadOnlyList<PipeColumnInfo>? Columns => _inner.Columns;
+    public Schema? Schema => _inner.Schema;
 
     /// <inheritdoc/>
     public async Task OpenAsync(CancellationToken ct = default)

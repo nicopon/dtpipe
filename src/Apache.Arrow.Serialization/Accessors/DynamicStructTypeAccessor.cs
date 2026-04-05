@@ -13,12 +13,14 @@ internal class DynamicStructTypeAccessor : ArrowSerializer.StructTypeAccessorBas
     private readonly List<string> _fieldNames;
     public override List<ArrowSerializer.TypeAccessor> ChildAccessors { get; }
     private readonly Dictionary<string, int> _fieldMapping;
+    private readonly StructType _structType;
 
     public DynamicStructTypeAccessor(Schema schema)
     {
         _fieldNames = schema.FieldsList.Select(f => f.Name).ToList();
         _fieldMapping = _fieldNames.Select((name, index) => (name, index)).ToDictionary(x => x.name, x => x.index);
         ChildAccessors = schema.FieldsList.Select(f => ArrowSerializer.TypeAccessor.CreateFromArrowType(f.DataType)).ToList();
+        _structType = new StructType(schema.FieldsList);
     }
 
     public DynamicStructTypeAccessor(StructType structType)
@@ -26,6 +28,7 @@ internal class DynamicStructTypeAccessor : ArrowSerializer.StructTypeAccessorBas
         _fieldNames = structType.Fields.Select(f => f.Name).ToList();
         _fieldMapping = _fieldNames.Select((name, index) => (name, index)).ToDictionary(x => x.name, x => x.index);
         ChildAccessors = structType.Fields.Select(f => ArrowSerializer.TypeAccessor.CreateFromArrowType(f.DataType)).ToList();
+        _structType = structType;
     }
 
     public override IArrowArrayBuilder CreateBuilder(MemoryAllocator? allocator, ArrowSerializer.CapacityInfo? capacity)
@@ -38,7 +41,7 @@ internal class DynamicStructTypeAccessor : ArrowSerializer.StructTypeAccessorBas
             capacity?.Children.TryGetValue(name, out childCap);
             builders.Add(ChildAccessors[i].CreateBuilder(allocator, childCap));
         }
-        return new ArrowSerializer.StructArrayManualBuilder(new StructType(_fieldNames.Select((n, i) => new Field(n, ChildAccessors[i].Build(ChildAccessors[i].CreateBuilder(null, null)).Data.DataType, true)).ToList()), ChildAccessors, builders, null!, capacity?.Count ?? 0);
+        return new ArrowSerializer.StructArrayManualBuilder(_structType, ChildAccessors, builders, this, capacity?.Count ?? 0);
     }
 
     public override List<IArrowArrayBuilder> CreateChildBuilders(MemoryAllocator? allocator, ArrowSerializer.CapacityInfo? capacity)

@@ -25,7 +25,8 @@ public sealed class Date64Consumer : BaseAdoConsumer<Date64Array.Builder, Date64
 
 public sealed class TimestampConsumer : BaseAdoConsumer<TimestampArray.Builder, TimestampArray, TimestampType>
 {
-    public TimestampConsumer(int columnIndex) : base(columnIndex, TimestampType.Default, new TimestampArray.Builder(TimestampType.Default)) { }
+    public TimestampConsumer(int columnIndex, TimestampType type)
+        : base(columnIndex, type, new TimestampArray.Builder(type)) { }
     protected override void ConsumeValue(DbDataReader reader)
     {
         var obj = reader.GetValue(ColumnIndex);

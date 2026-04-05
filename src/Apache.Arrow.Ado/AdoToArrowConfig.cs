@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Data.Common;
 using Apache.Arrow.Types;
 
@@ -24,16 +25,28 @@ public sealed class AdoToArrowConfig
 
     /// <summary>
     /// Gets the function that maps a <see cref="DbColumn"/> to an Arrow type.
-    /// Defaults to <see cref="AdoToArrowUtils.GetArrowTypeFromDbColumn"/>.
+    /// Defaults to <see cref="AdoToArrowUtils.GetLogicalTypeFromDbColumn"/>.
     /// Inject a custom resolver to align the Arrow schema with your type system
     /// (e.g. to use ArrowTypeMapper from DtPipe.Core for pipeline consistency).
     /// </summary>
     public Func<DbColumn, Apache.Arrow.Serialization.Mapping.ArrowTypeResult> TypeResolver { get; }
 
-    internal AdoToArrowConfig(int targetBatchSize, bool includeMetadata, Func<DbColumn, Apache.Arrow.Serialization.Mapping.ArrowTypeResult> typeResolver)
+    /// <summary>
+    /// Gets the exact-match, case-insensitive overrides applied before <see cref="TypeResolver"/>.
+    /// Keyed on <see cref="System.Data.Common.DbColumn.DataTypeName"/>. Built from
+    /// <see cref="AdoToArrowConfigBuilder.AddDataTypeNameOverride"/>.
+    /// </summary>
+    public IReadOnlyDictionary<string, Apache.Arrow.Serialization.Mapping.ArrowTypeResult> DataTypeNameOverrides { get; }
+
+    internal AdoToArrowConfig(
+        int targetBatchSize,
+        bool includeMetadata,
+        Func<DbColumn, Apache.Arrow.Serialization.Mapping.ArrowTypeResult> typeResolver,
+        IReadOnlyDictionary<string, Apache.Arrow.Serialization.Mapping.ArrowTypeResult> dataTypeNameOverrides)
     {
         TargetBatchSize = targetBatchSize;
         IncludeMetadata = includeMetadata;
         TypeResolver = typeResolver;
+        DataTypeNameOverrides = dataTypeNameOverrides;
     }
 }

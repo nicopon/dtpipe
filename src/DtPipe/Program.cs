@@ -219,28 +219,28 @@ class Program
 
 	private static void RegisterWriter<TDesc>(IServiceCollection services) where TDesc : class, IProviderDescriptor<IDataWriter>, new()
 	{
+		var descriptor = new TDesc();
 		services.AddSingleton<IDataWriterFactory>(sp => {
-			var factory = new CliDataWriterFactory(
-				new TDesc(),
+			return new CliDataWriterFactory(
+				descriptor,
 				sp.GetRequiredService<OptionsRegistry>(),
 				sp
 			);
-			return factory;
 		});
-		services.AddSingleton<ICliContributor>(sp => (ICliContributor)sp.GetRequiredService<IDataWriterFactory>());
+		services.AddSingleton<ICliContributor>(sp => (ICliContributor)sp.GetServices<IDataWriterFactory>().First(f => f.ComponentName == descriptor.ComponentName));
 	}
 
 	private static void RegisterReader<TDesc>(IServiceCollection services) where TDesc : class, IProviderDescriptor<IStreamReader>, new()
 	{
+		var descriptor = new TDesc();
 		services.AddSingleton<IStreamReaderFactory>(sp => {
-			var factory = new CliStreamReaderFactory(
-				new TDesc(),
+			return new CliStreamReaderFactory(
+				descriptor,
 				sp.GetRequiredService<OptionsRegistry>(),
 				sp
 			);
-			return factory;
 		});
-		services.AddSingleton<ICliContributor>(sp => (ICliContributor)sp.GetRequiredService<IStreamReaderFactory>());
+		services.AddSingleton<ICliContributor>(sp => (ICliContributor)sp.GetServices<IStreamReaderFactory>().First(f => f.ComponentName == descriptor.ComponentName));
 	}
 
 	private static void RegisterTransformer<TFac>(IServiceCollection services) where TFac : class, IDataTransformerFactory

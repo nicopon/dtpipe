@@ -1,0 +1,4 @@
+{"id": 1, "user": {"name": "Alice", "points": 100}, "items": [{"id": "A1", "price": 10.5}, {"id": "A2", "price": 5.0}]}
+{"id": 2, "user": {"name": "Bob", "points": 200}, "items": [{"id": "B1", "price": 20.0}]}
+{"id": 3, "user": {"name": "Charlie", "points": 150}, "items": [{"id": "C1", "price": 12.0}, {"id": "C2", "price": 8.0}]}
+{"id": 4, "user": {"name": "Alice", "points": 50}, "items": [{"id": "A3", "price": 15.0}]}

@@ -28,6 +28,12 @@ public static class ArrowSerializer
         return await Task.Run(() => serializer.Serialize(data, allocator));
     }
 
+    public static async Task<RecordBatch> SerializeAsync<T>(IEnumerable<T> data, Schema schema, MemoryAllocator? allocator = null)
+    {
+        var s = new TypedSerializer<T>(schema);
+        return await Task.Run(() => s.Serialize(data, allocator));
+    }
+
     internal class CapacityInfo
     {
         public int Count { get; set; } = 0;
@@ -42,12 +48,25 @@ public static class ArrowSerializer
 
         public TypedSerializer()
         {
-            _isDynamic = typeof(T) == typeof(object) || typeof(T).Name == "JsonObject";
+            _isDynamic = typeof(T) == typeof(object) || 
+                         typeof(T).Name == "JsonObject" || 
+                         typeof(IDictionary).IsAssignableFrom(typeof(T));
             if (!_isDynamic)
             {
                 _schema = ArrowReflectionEngine.GetSchema(typeof(T));
                 _rootAccessor = TypeAccessor.Create(typeof(T));
             }
+        }
+
+        public TypedSerializer(Schema schema)
+        {
+            _isDynamic = typeof(T) == typeof(object) || 
+                         typeof(T).Name == "JsonObject" || 
+                         typeof(IDictionary).IsAssignableFrom(typeof(T));
+            _schema = schema;
+            _rootAccessor = _isDynamic 
+                ? (TypeAccessor)new DynamicStructTypeAccessor(schema) 
+                : TypeAccessor.Create(typeof(T));
         }
 
         public RecordBatch Serialize(IEnumerable<T> data, MemoryAllocator? allocator = null)
@@ -537,8 +556,7 @@ public static class ArrowSerializer
         {
             _type = type;
             _listType = listType;
-            var elementType = type.IsArray ? type.GetElementType()! : type.GetGenericArguments()[0];
-            _elementAccessor = TypeAccessor.Create(elementType);
+            _elementAccessor = TypeAccessor.CreateFromArrowType(listType.ValueDataType);
         }
 
         public override void CollectCapacity(object? value, CapacityInfo info)
@@ -590,15 +608,8 @@ public static class ArrowSerializer
         {
             _type = type;
             _mapType = mapType;
-            var dictInterface = type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IDictionary<,>) 
-                ? type 
-                : type.GetInterfaces().First(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IDictionary<,>));
-            
-            var keyType = dictInterface.GetGenericArguments()[0];
-            var valueType = dictInterface.GetGenericArguments()[1];
-            
-            _keyAccessor = TypeAccessor.Create(keyType);
-            _valueAccessor = TypeAccessor.Create(valueType);
+            _keyAccessor = TypeAccessor.CreateFromArrowType(mapType.KeyField.DataType);
+            _valueAccessor = TypeAccessor.CreateFromArrowType(mapType.ValueField.DataType);
         }
 
         public override void CollectCapacity(object? value, CapacityInfo info)

@@ -137,6 +137,18 @@ public class ExportService
 		// Update DAG registry if we are a branch
 		if (!string.IsNullOrEmpty(alias) && _channelRegistry != null && _channelRegistry.ContainsChannel(alias))
 		{
+			// Register the Arrow channel once schema known
+			if (!string.IsNullOrEmpty(alias))
+			{
+				Schema? sourceSchema = (reader as IStreamTransformer)?.Schema ?? (reader as IColumnarStreamReader)?.Schema;
+				if (sourceSchema != null)
+				{
+					var evolvedSchema = EvolveSchema(sourceSchema, currentSchema);
+					_channelRegistry.UpdateArrowChannelSchema(alias, evolvedSchema);
+				}
+			}
+
+			// 2. Update row-based columns
 			_channelRegistry.UpdateChannelColumns(alias, currentSchema ?? System.Array.Empty<PipeColumnInfo>());
 		}
 
@@ -224,6 +236,16 @@ public class ExportService
 		using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 		var effectiveCt = linkedCts.Token;
 
+		// Propagate richSourceSchema for Arrow-capable readers (e.g. JsonL with StructType columns).
+		// InputSchema and OutputSchema are already populated per-segment by ExportService above
+		// (using the transformer input/output schema chain). Only set InputSchemaArrow here to pass
+		// the native Arrow schema to the row→columnar bridge so it can preserve complex types.
+		Schema? richSourceSchema = (reader as IStreamTransformer)?.Schema ?? (reader as IColumnarStreamReader)?.Schema;
+		foreach (var segment in segments)
+		{
+			segment.InputSchemaArrow = richSourceSchema;
+		}
+
 		try
 		{
 			var startTime = DateTime.UtcNow;
@@ -286,6 +308,27 @@ public class ExportService
 				_observer.LogError(hookEx);
 			}
 		}
+	}
+
+	private static Schema EvolveSchema(Schema original, IReadOnlyList<PipeColumnInfo> transformed)
+	{
+		var fields = new List<Field>(transformed.Count);
+		foreach (var col in transformed)
+		{
+			// Try to find matching field in original schema to preserve nested types
+			var originalField = original.FieldsList.FirstOrDefault(f => string.Equals(f.Name, col.Name, StringComparison.OrdinalIgnoreCase));
+			if (originalField != null)
+			{
+				fields.Add(originalField);
+			}
+			else
+			{
+				// New field (e.g. from --fake), map from CLR type
+				var arrowType = DtPipe.Core.Infrastructure.Arrow.ArrowTypeMapper.GetLogicalType(col.ClrType).ArrowType;
+				fields.Add(new Field(col.Name, arrowType, col.IsNullable));
+			}
+		}
+		return new Schema(fields, null);
 	}
 
 	private static PipelineExecutionPlan BuildExecutionPlan(

@@ -37,7 +37,7 @@ public static class AdoConsumerFactory
             BinaryType => new BinaryConsumer(columnIndex),
             Date32Type => new Date32Consumer(columnIndex),
             Date64Type => new Date64Consumer(columnIndex),
-            TimestampType => new TimestampConsumer(columnIndex),
+            TimestampType t => new TimestampConsumer(columnIndex, t),
             DurationType => new DurationConsumer(columnIndex),
             Time32Type => new Time32Consumer(columnIndex),
             Decimal128Type t => new Decimal128Consumer(columnIndex, t),

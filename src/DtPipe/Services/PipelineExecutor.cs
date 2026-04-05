@@ -136,7 +136,7 @@ public sealed class PipelineExecutor
                     if (!isCurrentColumnar)
                     {
                         var bridgeFac = _bridgeFactories.FirstOrDefault() ?? throw new InvalidOperationException("No RowToColumnarBridgeFactory");
-                        currentColumnarSource = BridgeRowsToColumnarAsync(currentRowSource, bridgeFac, segment.InputSchema, options.BatchSize, ct);
+                        currentColumnarSource = BridgeRowsToColumnarAsync(currentRowSource, bridgeFac, segment.InputSchema, options.BatchSize, ct, segment.InputSchemaArrow);
                         isCurrentColumnar = true;
                     }
                     currentColumnarSource = ApplyColumnarSegmentAsync(currentColumnarSource, segment.Transformers, progress, ct);
@@ -158,7 +158,14 @@ public sealed class PipelineExecutor
                 if (!isCurrentColumnar)
                 {
                     var bridgeFac = _bridgeFactories.FirstOrDefault() ?? throw new InvalidOperationException("No RowToColumnarBridgeFactory");
-                    currentColumnarSource = BridgeRowsToColumnarAsync(currentRowSource, bridgeFac, columns, options.BatchSize, ct);
+                    // Use the reader's native Arrow schema as an override only when no transformers
+                    // changed the schema (i.e. the final column set matches the reader's schema).
+                    // If transformers added/removed/renamed columns, the reader schema is stale and
+                    // using it as an override would cause an appender count mismatch (IndexOutOfRange).
+                    var readerSchema = (reader as IColumnarStreamReader)?.Schema;
+                    bool schemaUnchanged = readerSchema != null && readerSchema.FieldsList.Count == columns.Count;
+                    var richSchema = schemaUnchanged ? readerSchema : null;
+                    currentColumnarSource = BridgeRowsToColumnarAsync(currentRowSource, bridgeFac, columns, options.BatchSize, ct, richSchema);
                 }
                 await ConsumeColumnarStreamAsync(currentColumnarSource, columnarWriter, progress, ct);
             }
@@ -206,10 +213,11 @@ public sealed class PipelineExecutor
         IRowToColumnarBridgeFactory factory,
         IReadOnlyList<PipeColumnInfo> columns,
         int batchSize,
-        [EnumeratorCancellation] CancellationToken ct)
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct,
+        Schema? richSchema = null)
     {
         await using var bridge = factory.CreateBridge();
-        await bridge.InitializeAsync(columns, batchSize, ct);
+        await bridge.InitializeAsync(columns, batchSize, richSchema, ct);
 
         // Feed ingestion in background
         var ingestionTask = Task.Run(async () =>

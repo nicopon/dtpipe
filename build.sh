@@ -103,6 +103,11 @@ else
 fi
 
 echo ""
+echo -e "${YELLOW}Performing a clean full rebuild...${NC}"
+dotnet clean DtPipe.sln -c Release
+dotnet build DtPipe.sln -c Release
+
+echo ""
 echo -e "${YELLOW}Building Release (single-file)...${NC}"
 dotnet publish src/DtPipe/DtPipe.csproj -c Release \
     -r "$RID" \
@@ -116,8 +121,15 @@ dotnet publish src/DtPipe/DtPipe.csproj -c Release \
 if [ -f "$RELEASE_DIR/DtPipe$EXT" ]; then
     mv "$RELEASE_DIR/DtPipe$EXT" "$RELEASE_DIR/dtpipe$EXT"
 fi
+chmod +x "$RELEASE_DIR/dtpipe$EXT"
 
-echo ""
+echo "----------------------------------------"
+echo "  Verifying binary integrity..."
+echo "----------------------------------------"
+"$RELEASE_DIR/dtpipe$EXT" --help > /dev/null
+[ $? -eq 0 ] && echo "  OK: Binary is healthy." || { echo "  FAILED: Binary sanity check failed."; exit 1; }
+
+echo "----------------------------------------"
 echo -e "${YELLOW}Building Sample Project...${NC}"
 dotnet build src/DtPipe.Sample/DtPipe.Sample.csproj -c Release
 

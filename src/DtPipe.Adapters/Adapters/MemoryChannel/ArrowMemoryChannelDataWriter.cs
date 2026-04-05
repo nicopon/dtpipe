@@ -37,18 +37,19 @@ public sealed class ArrowMemoryChannelDataWriter : IColumnarDataWriter
 
     public ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
     {
-        // We still need to notify the registry about the schema,
-        // but we don't need builders anymore.
-        // We can't build the Schema easily without the GetArrowType mapping,
-        // which we moved to the Bridge.
-        // However, DuckDB needs the schema to be known in advance for WaitForArrowChannelSchemaAsync.
+        // Only publish the schema if the registry doesn't already have a richer one.
+        // Columnar readers (e.g. JsonLStreamReader) publish the correct Arrow schema — including
+        // StructType / ListType fields — during OpenAsync. Publishing a flat PipeColumnInfo-derived
+        // schema first would resolve the channel's TaskCompletionSource with the wrong schema, which
+        // downstream consumers cannot undo even if the reader publishes the rich schema later.
+        var existing = _registry.GetArrowChannel(_alias);
+        bool existingIsRicher = existing?.Schema.FieldsList.Any(
+            f => f.DataType is StructType or ListType or MapType) == true;
 
-        // Let's keep a simplified BuildSchema here for registry notification,
-        // OR we could make ArrowRowToColumnarBridge responsible for this if it's aware of the registry.
-        // But the writer is the one usually owning the registration.
-
-        var schema = BuildSchema(columns);
-        _registry.UpdateArrowChannelSchema(_alias, schema);
+        if (!existingIsRicher)
+        {
+            _registry.UpdateArrowChannelSchema(_alias, BuildSchema(columns));
+        }
 
         _logger.LogInformation("Arrow channel '{Alias}' initialized (Pure Columnar).", _alias);
         return ValueTask.CompletedTask;

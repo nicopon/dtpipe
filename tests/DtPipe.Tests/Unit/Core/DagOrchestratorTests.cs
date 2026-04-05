@@ -328,6 +328,35 @@ public class DagOrchestratorTests
         Assert.NotEqual(planA.InputChannel!.Value.Alias, planB.InputChannel!.Value.Alias);
     }
 
+    [Fact]
+    public async Task Execute_SqlProcessorFeedingRowSink_ChannelInjectionUsesArrowMode()
+    {
+        // A SQL branch feeding into a row-mode sink (like a CSV file) MUST use
+        // an Arrow channel because SQL branches only produce columnar output.
+        // This was the root cause of the crash in DAG Test [8].
+        var dag = new JobDagDefinition
+        {
+            Branches = new[]
+            {
+                new BranchDefinition { Alias = "joined", ProcessorName = "sql", Arguments = new[] { "--alias", "joined" } },
+                new BranchDefinition { Alias = "sink", StreamingAliases = new List<string> { "joined" }, Arguments = new[] { "-o", "out.csv", "--from", "joined" }, Output = "out.csv" }
+            }
+        };
+
+        var orchestrator = BuildOrchestrator();
+        ChannelInjectionPlan? joinedPlan = null;
+
+        await orchestrator.ExecuteAsync(dag, (b, ctx, _) =>
+        {
+            if (b.Alias == "joined") joinedPlan = ctx.ChannelInjection;
+            return Task.FromResult(0);
+        });
+
+        Assert.NotNull(joinedPlan);
+        Assert.True(joinedPlan!.OutputChannel.HasValue);
+        Assert.Equal(ChannelMode.Arrow, joinedPlan.OutputChannel!.Value.Mode);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Case 5: Merge (UNION ALL) — two sources, one processor
     // ─────────────────────────────────────────────────────────────────────────

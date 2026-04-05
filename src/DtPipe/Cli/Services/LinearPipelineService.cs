@@ -337,7 +337,7 @@ public class LinearPipelineService
             => _transformer = transformer;
 
         public IReadOnlyList<PipeColumnInfo>? Columns => _transformer.Columns;
-        public Apache.Arrow.Schema? Schema => null;
+        public Apache.Arrow.Schema? Schema => _transformer.Schema;
 
         public Task OpenAsync(CancellationToken ct) => _transformer.OpenAsync(ct);
 

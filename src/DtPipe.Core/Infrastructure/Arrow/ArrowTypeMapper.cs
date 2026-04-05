@@ -96,6 +96,8 @@ public static class ArrowTypeMapper
             DurationType t => new DurationArray.Builder(t),
             Time32Type t => new Time32Array.Builder(t),
             Time64Type t => new Time64Array.Builder(t),
+            StructType st => new StructArrayManualBuilder(st),
+            ListType lt => new ListArrayManualBuilder(lt),
             _ => throw new NotSupportedException($"Unsupported Arrow type for builder: {type.Name}")
         };
     }
@@ -129,6 +131,8 @@ public static class ArrowTypeMapper
             case DurationArray.Builder b: b.AppendNull(); break;
             case Time32Array.Builder b: b.AppendNull(); break;
             case Time64Array.Builder b: b.AppendNull(); break;
+            case StructArrayManualBuilder b: b.AppendNull(); break;
+            case ListArrayManualBuilder b: b.AppendNull(); break;
         }
     }
 
@@ -158,6 +162,8 @@ public static class ArrowTypeMapper
             DurationArray.Builder b => b.Build(),
             Time32Array.Builder b => b.Build(),
             Time64Array.Builder b => b.Build(),
+            StructArrayManualBuilder b => b.Build(),
+            ListArrayManualBuilder b => b.Build(),
             _ => throw new NotSupportedException($"Unsupported builder type for BuildArray: {builder.GetType().Name}")
         };
     }
@@ -203,11 +209,18 @@ public static class ArrowTypeMapper
                 else if (value is DateTime dt) b.Append(dt);
                 else b.Append(Convert.ToDateTime(value));
                 break;
+            case StructArrayManualBuilder b:
+                b.AppendValue(value);
+                break;
+            case ListArrayManualBuilder b:
+                b.AppendValue(value);
+                break;
             default:
                 AppendNull(builder);
                 break;
         }
     }
+
 
     public static void AppendArrayValue(IArrowArrayBuilder builder, IArrowArray array, int index)
     {
@@ -251,5 +264,130 @@ public static class ArrowTypeMapper
                 AppendValue(builder, GetValue(array, index));
                 break;
         }
+    }
+
+    // ── Manual Builders for Nested Types ─────────────────────────────────────
+
+    internal class StructArrayManualBuilder : IArrowArrayBuilder
+    {
+        private readonly StructType _type;
+        private readonly List<IArrowArrayBuilder> _builders;
+        private readonly List<bool> _validity = new();
+        private int _nullCount;
+
+        public StructArrayManualBuilder(StructType type)
+        {
+            _type = type;
+            _builders = new List<IArrowArrayBuilder>(type.Fields.Count);
+            foreach (var field in type.Fields)
+            {
+                _builders.Add(CreateBuilder(field.DataType));
+            }
+        }
+
+        public void AppendValue(object? value)
+        {
+            if (value == null) { AppendNull(); }
+            else
+            {
+                _validity.Add(true);
+                if (value is System.Collections.IDictionary dict)
+                {
+                    for (int i = 0; i < _type.Fields.Count; i++)
+                    {
+                        var field = _type.Fields[i];
+                        var childValue = dict.Contains(field.Name) ? dict[field.Name] : null;
+                        ArrowTypeMapper.AppendValue(_builders[i], childValue);
+                    }
+                }
+                else
+                {
+                    var props = value.GetType().GetProperties();
+                    for (int i = 0; i < _type.Fields.Count; i++)
+                    {
+                        var field = _type.Fields[i];
+                        var prop = props.FirstOrDefault(p => string.Equals(p.Name, field.Name, StringComparison.OrdinalIgnoreCase));
+                        var childValue = prop?.GetValue(value);
+                        ArrowTypeMapper.AppendValue(_builders[i], childValue);
+                    }
+                }
+            }
+        }
+
+        public void AppendNull()
+        {
+            _validity.Add(false);
+            _nullCount++;
+            for (int i = 0; i < _builders.Count; i++) ArrowTypeMapper.AppendNull(_builders[i]);
+        }
+
+        public IArrowArray Build()
+        {
+            int length = _validity.Count;
+            var children = _builders.Select(b => BuildArray(b)).ToList();
+            var validBuf = new byte[(length + 7) / 8];
+            for (int i = 0; i < length; i++) if (_validity[i]) validBuf[i / 8] |= (byte)(1 << (i % 8));
+            var validBuilder = new ArrowBuffer.Builder<byte>((length + 7) / 8).AppendRange(validBuf);
+            return new StructArray(_type, length, children, validBuilder.Build(), _nullCount);
+        }
+
+        public void Clear() { _validity.Clear(); _nullCount = 0; foreach(var b in _builders) { /* Clear not in interface, skip */ } }
+        public int Length => _validity.Count;
+    }
+
+    internal class ListArrayManualBuilder : IArrowArrayBuilder
+    {
+        private readonly ListType _type;
+        private readonly IArrowArrayBuilder _valueBuilder;
+        private readonly List<int> _offsets = new();
+        private readonly List<bool> _validity = new();
+        private int _nullCount;
+
+        public ListArrayManualBuilder(ListType type)
+        {
+            _type = type;
+            _valueBuilder = CreateBuilder(type.ValueDataType);
+            _offsets.Add(0);
+        }
+
+        public void AppendValue(object? value)
+        {
+            if (value == null || value is not System.Collections.IEnumerable enumerable)
+            {
+                AppendNull();
+            }
+            else
+            {
+                int count = 0;
+                foreach (var item in enumerable)
+                {
+                    ArrowTypeMapper.AppendValue(_valueBuilder, item);
+                    count++;
+                }
+                _offsets.Add(_offsets.Last() + count);
+                _validity.Add(true);
+            }
+        }
+
+        public void AppendNull()
+        {
+            _validity.Add(false);
+            _nullCount++;
+            _offsets.Add(_offsets.Last());
+        }
+
+        public IArrowArray Build()
+        {
+            int length = _validity.Count;
+            var values = BuildArray(_valueBuilder);
+            var offsetBuf = new ArrowBuffer.Builder<int>(_offsets.Count).AppendRange(_offsets).Build();
+            var validBuf = new byte[(length + 7) / 8];
+            for (int i = 0; i < length; i++) if (_validity[i]) validBuf[i / 8] |= (byte)(1 << (i % 8));
+            var validBuilder = new ArrowBuffer.Builder<byte>((length + 7) / 8).AppendRange(validBuf);
+            return new ListArray(_type, length, offsetBuf, values, validBuilder.Build(), _nullCount);
+        }
+
+        public void Clear() { _validity.Clear(); _offsets.Clear(); _offsets.Add(0); _nullCount = 0; /* Clear not in interface */ }
+        public int Length => _validity.Count;
     }
 }

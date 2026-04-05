@@ -39,10 +39,10 @@ public sealed class ArrowRowToColumnarBridge : IRowToColumnarBridge
 
     public Schema? Schema => _schema;
 
-    public ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, int batchSize, CancellationToken ct = default)
+    public ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, int batchSize, Schema? overrideSchema = null, CancellationToken ct = default)
     {
         _batchSize = batchSize;
-        _schema = BuildSchema(columns);
+        _schema = overrideSchema ?? BuildSchema(columns);
         _builders = CreateBuilders(_schema);
         _appenders = CreateAppenders(_builders);
         _rowsInBuffer = 0;

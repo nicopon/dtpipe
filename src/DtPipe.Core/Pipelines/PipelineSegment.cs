@@ -12,6 +12,7 @@ public sealed class PipelineSegment
     public bool IsColumnar { get; }
     public List<IDataTransformer> Transformers { get; }
     public IReadOnlyList<PipeColumnInfo> InputSchema { get; set; } = Array.Empty<PipeColumnInfo>();
+    public Apache.Arrow.Schema? InputSchemaArrow { get; set; }
     public IReadOnlyList<PipeColumnInfo> OutputSchema { get; set; } = Array.Empty<PipeColumnInfo>();
 
     public PipelineSegment(bool isColumnar, List<IDataTransformer> transformers)

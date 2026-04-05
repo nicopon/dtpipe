@@ -85,6 +85,7 @@ public static class ArrowTypeMap
 #endif
         if (type == typeof(Guid) || type == typeof(Guid?)) return new ArrowTypeResult(new FixedSizeBinaryType(16), new Dictionary<string, string> { { "ARROW:extension:name", "arrow.uuid" } });
         if (type == typeof(byte[])) return new ArrowTypeResult(BinaryType.Default);
+        if (type == typeof(object)) return new ArrowTypeResult(StringType.Default); // Placeholder for dynamic/complex types
 
         // Enums mapping to Int32
         if (type.IsEnum) return new ArrowTypeResult(Int32Type.Default);
@@ -156,6 +157,9 @@ public static class ArrowTypeMap
             ArrowTypeId.Decimal128 => typeof(decimal),
             ArrowTypeId.Decimal256 => typeof(decimal),
             ArrowTypeId.Duration => typeof(TimeSpan),
+            ArrowTypeId.Struct => typeof(Dictionary<string, object?>),
+            ArrowTypeId.List or ArrowTypeId.LargeList => typeof(List<object?>),
+            ArrowTypeId.Map => typeof(Dictionary<object, object?>),
             _ => typeof(string)
         };
     }
@@ -214,6 +218,8 @@ public static class ArrowTypeMap
             DurationArray a => a.GetValue(index),
             Time32Array a => a.GetValue(index),
             Time64Array a => a.GetValue(index),
+            StructArray a => GetStructValue(a, index),
+            ListArray a => GetListValue(a, index),
             _ => throw new NotSupportedException($"Unsupported Arrow array type for value extraction: {array.GetType().Name}")
         };
 
@@ -225,5 +231,37 @@ public static class ArrowTypeMap
         }
 
         return val;
+    }
+
+    private static object? GetStructValue(StructArray array, int index)
+    {
+        if (array.IsNull(index)) return null;
+        var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        var type = (StructType)array.Data.DataType;
+
+        for (int i = 0; i < type.Fields.Count; i++)
+        {
+            var field = type.Fields[i];
+            var childArray = array.Fields[i];
+            dict[field.Name] = GetValue(childArray, index, field);
+        }
+
+        return dict;
+    }
+
+    private static object? GetListValue(ListArray array, int index)
+    {
+        if (array.IsNull(index)) return null;
+        var list = new List<object?>();
+        var valueArray = array.Values;
+        int start = array.ValueOffsets[index];
+        int end = array.ValueOffsets[index + 1];
+
+        for (int i = start; i < end; i++)
+        {
+            list.Add(GetValue(valueArray, i));
+        }
+
+        return list;
     }
 }

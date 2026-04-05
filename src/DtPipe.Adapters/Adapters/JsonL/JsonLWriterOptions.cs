@@ -8,6 +8,9 @@ public class JsonLWriterOptions : IOptionSet
 	public static string Prefix => JsonLConstants.ProviderName;
 	public static string DisplayName => "JsonL Writer";
 
+	[Description("JSONL file path (use '-' for stdout)")]
+	public string Jsonl { get; set; } = "";
+
 	[Description("File encoding (e.g., UTF-8)")]
 	public string Encoding { get; set; } = "UTF-8";
 

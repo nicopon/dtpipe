@@ -111,7 +111,7 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
 
 			// Using ArrowRowToColumnarBridge to efficiently produce RecordBatches from the DataReader.
 			var bridge = new DtPipe.Core.Infrastructure.Arrow.ArrowRowToColumnarBridge(_logger);
-			await bridge.InitializeAsync(Columns, 1024, ct);
+			await bridge.InitializeAsync(Columns, 1024, ct: ct);
 
 			// Yield batches as they are produced by the bridge
 			// Synchronous feeder loop to avoid Task.Run overhead and potential deadlocks in simple scenarios

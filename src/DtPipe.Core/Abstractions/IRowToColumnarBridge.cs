@@ -10,9 +10,13 @@ namespace DtPipe.Core.Abstractions;
 public interface IRowToColumnarBridge : IAsyncDisposable
 {
     /// <summary>
-    /// Initializes the bridge with the expected schema and batch size.
+    /// Initializes the bridge with column definitions and target batch size.
     /// </summary>
-    ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, int batchSize, CancellationToken ct = default);
+    /// <param name="columns">Column definitions (logical types).</param>
+    /// <param name="batchSize">Target RecordBatch size.</param>
+    /// <param name="overrideSchema">Optional rich Arrow schema to override the flat inference from columns.</param>
+    /// <param name="ct">Cancellation token.</param>
+    ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, int batchSize, Schema? overrideSchema = null, CancellationToken ct = default);
 
     /// <summary>
     /// Ingests a batch of rows.

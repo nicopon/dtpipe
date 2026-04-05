@@ -398,6 +398,10 @@ run_test "T138" "$DTPIPE \
   --from joined -o artifacts/output_t138_a.csv \
   --from joined -o artifacts/output_t138_b.parquet"
 
+# T139: DataFusion SQL manipulation of complex structures (nested JSON objects)
+# Summing customer loyalty points from a nested 'user' object.
+run_test "T139" "$DTPIPE -i artifacts/complex_data.jsonl --alias orders --from orders --sql \"SELECT count(*) as cnt, sum(user['points']) as total_points FROM orders\" -o artifacts/output_t139.csv"
+
 echo "----------------------------------------"
 
 echo ""

@@ -20,8 +20,10 @@ public sealed class MergeTransformer : IStreamTransformer
     private readonly IArrowChannelRegistry _registry;
     private readonly IReadOnlyList<string> _aliases;
     private IReadOnlyList<PipeColumnInfo>? _columns;
+    private Schema? _schema;
 
     public IReadOnlyList<PipeColumnInfo>? Columns => _columns;
+    public Schema? Schema => _schema;
 
     public MergeTransformer(IArrowChannelRegistry registry, IReadOnlyList<string> aliases)
     {
@@ -37,8 +39,8 @@ public sealed class MergeTransformer : IStreamTransformer
         foreach (var alias in _aliases)
             await _registry.WaitForArrowChannelSchemaAsync(alias, ct);
 
-        var firstSchema = await _registry.WaitForArrowChannelSchemaAsync(_aliases[0], ct);
-        _columns = firstSchema.FieldsList
+        _schema = await _registry.WaitForArrowChannelSchemaAsync(_aliases[0], ct);
+        _columns = _schema.FieldsList
             .Select(f => new PipeColumnInfo(f.Name, ArrowTypeMapper.GetClrTypeFromField(f), f.IsNullable))
             .ToList();
     }

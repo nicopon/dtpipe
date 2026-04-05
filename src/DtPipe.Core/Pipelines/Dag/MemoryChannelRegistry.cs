@@ -50,11 +50,19 @@ public class MemoryChannelRegistry : IMemoryChannelRegistry
 
         if (_arrowChannels.TryGetValue(branchAlias, out var arrowData))
         {
-            var schema = ArrowSchemaFactory.Create(columns);
-            _arrowChannels[branchAlias] = (arrowData.Channel, schema);
-            if (_arrowSchemaTcs.TryGetValue(branchAlias, out var tcs))
+            // If the existing Arrow schema is "richer" (has Structs/Lists) than the one
+            // the factory would create from row columns (Map typeof(object) to String),
+            // then we should PRESERVE the existing schema.
+            var rowBasedSchema = ArrowSchemaFactory.Create(columns);
+            bool existingIsRicher = arrowData.Schema.FieldsList.Any(f => f.DataType is StructType or ListType or MapType);
+            
+            if (!existingIsRicher)
             {
-                tcs.TrySetResult(schema);
+                _arrowChannels[branchAlias] = (arrowData.Channel, rowBasedSchema);
+                if (_arrowSchemaTcs.TryGetValue(branchAlias, out var tcs))
+                {
+                    tcs.TrySetResult(rowBasedSchema);
+                }
             }
             found = true;
         }
@@ -125,12 +133,19 @@ public class MemoryChannelRegistry : IMemoryChannelRegistry
     public void UpdateArrowChannelSchema(string branchAlias, Schema schema)
     {
         bool found = false;
-        if (_arrowChannels.TryGetValue(branchAlias, out var channelData))
+        if (_arrowChannels.TryGetValue(branchAlias, out var arrowData))
         {
-            _arrowChannels[branchAlias] = (channelData.Channel, schema);
-            if (_arrowSchemaTcs.TryGetValue(branchAlias, out var tcs))
+            // Protection: if existing schema is richer than the new one, preserve it.
+            bool existingIsRicher = arrowData.Schema.FieldsList.Any(f => f.DataType is StructType or ListType or MapType);
+            bool newIsRicher = schema.FieldsList.Any(f => f.DataType is StructType or ListType or MapType);
+            
+            if (newIsRicher || !existingIsRicher || arrowData.Schema.FieldsList.Count == 0)
             {
-                tcs.TrySetResult(schema);
+                _arrowChannels[branchAlias] = (arrowData.Channel, schema);
+                if (_arrowSchemaTcs.TryGetValue(branchAlias, out var tcs))
+                {
+                    tcs.TrySetResult(schema);
+                }
             }
             found = true;
         }
@@ -144,11 +159,11 @@ public class MemoryChannelRegistry : IMemoryChannelRegistry
         }
     }
 
-    public (Channel<RecordBatch> Channel, Schema Schema)? GetArrowChannel(string branchAlias)
+    public (Channel<RecordBatch> Channel, Schema Schema)? GetArrowChannel(string alias)
     {
-        if (_arrowChannels.TryGetValue(branchAlias, out var channelData))
+        if (_arrowChannels.TryGetValue(alias, out var tuple))
         {
-            return channelData;
+            return tuple;
         }
         return null;
     }

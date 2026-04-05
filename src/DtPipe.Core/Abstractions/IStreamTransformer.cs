@@ -24,6 +24,11 @@ public interface IStreamTransformer : IAsyncDisposable
     IReadOnlyList<PipeColumnInfo>? Columns { get; }
 
     /// <summary>
+    /// The native Arrow schema. Available after <see cref="OpenAsync"/> completes.
+    /// </summary>
+    Apache.Arrow.Schema? Schema { get; }
+
+    /// <summary>
     /// Streams the transformer's output as Arrow RecordBatches.
     /// May read directly from registered upstream channels (e.g. DataFusion)
     /// rather than consuming the <paramref name="inputStream"/>.

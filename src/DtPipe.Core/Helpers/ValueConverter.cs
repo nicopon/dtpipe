@@ -98,6 +98,11 @@ public static class ValueConverter
             }
         }
 
-        return Convert.ChangeType(val, underlyingTarget, CultureInfo.InvariantCulture);
+        if (val is IConvertible)
+        {
+            return Convert.ChangeType(val, underlyingTarget, CultureInfo.InvariantCulture);
+        }
+
+        return val;
     }
 }

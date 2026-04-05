@@ -84,6 +84,8 @@ The fundamental pipeline: `IStreamReader` → `IDataTransformer[]` → `IDataWri
 3. For linear pipelines, `LinearPipelineService` drives execution through `ExportService.RunExportAsync()`.
 4. For DAG pipelines, `DagOrchestrator` spawns concurrent `Task`s per branch, wiring them via in-memory `Channel<T>` for zero-copy data flow.
 
+`PipelineEngine` (`DtPipe.Core`) is a headless, CLI-free engine for programmatic use. It accepts `IStreamReader + IRowDataWriter + IDataTransformer[]` and drives the full pipeline without DI or CLI dependencies.
+
 ### Provider Pattern
 
 Every adapter implements `IProviderDescriptor<TService>` and is registered in `Program.cs` via `RegisterReader<T>()` / `RegisterWriter<T>()` / `RegisterStreamTransformer<T>()`. The `CliProviderFactory<T>` wraps descriptors into CLI contributors that auto-generate `System.CommandLine` options from the descriptor's `OptionsType` (a class decorated with `[ComponentOption]` attributes). Provider-specific options are stored in `OptionsRegistry` (keyed by type) and scoped per DI scope.
@@ -147,7 +149,8 @@ Transformers implement `IDataTransformer` with three methods: `InitializeAsync` 
 ### Key Interfaces
 
 - `IStreamReader` / `IColumnarStreamReader` — open + stream batches
-- `IDataWriter` — initialize schema + write batches + complete
+- `IDataWriter` — initialize schema + complete (base contract for all writers)
+- `IRowDataWriter` — extends `IDataWriter`; adds `WriteBatchAsync` for row-based output
 - `IDataTransformer` / `IDataTransformerFactory` — transform rows; factory creates from CLI config or YAML
 - `IStreamTransformerFactory` — factory for multi-input stream processors (SQL joins, merges); `Create(branchArgs, ctx, serviceProvider)` receives `BranchChannelContext` for alias resolution
 - `ICliContributor` — contributes CLI options and can intercept command handling
@@ -260,6 +263,8 @@ Do **not** call `ValueConverter.ConvertValue()` per-cell directly — it perform
 Columnar writers receive `RecordBatch` directly (zero intermediate `object?[]`). When a Field context is available, extract values using `ArrowTypeMapper.GetValueForField(array, field, rowIndex)` (resolves extension types such as `arrow.uuid` → `Guid`). Without Field context, `ArrowTypeMapper.GetValue(array, rowIndex)` returns raw storage values (e.g. `byte[]` for `FixedSizeBinaryArray`). No `ValueConverter` call needed. This is the preferred path for all new DB writers.
 
 Implementing `IColumnarDataWriter` enables `PipelineExecutor` to route columnar sources (Parquet, PostgreSQL, DuckDB output) directly to the writer without any row-level bridging.
+
+`DuckDbDataWriter` and `ParquetDataWriter` implement only `IColumnarDataWriter` — they have no row-mode fallback. When the pipeline source is row-based, `PipelineExecutor` bridges rows→Arrow automatically via `BridgeRowsToColumnarAsync`.
 
 #### Text sources (CSV, JSON, etc.)
 Text readers emit `string` for every column by default. Downstream writers will hit the conversion path in `ColumnConverterFactory`. Two remediation options in order of preference:

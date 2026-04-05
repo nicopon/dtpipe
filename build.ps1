@@ -20,19 +20,10 @@ New-Item -ItemType Directory -Force -Path $env:NUGET_SCRATCH | Out-Null
 Write-Host "DtPipe Build Script (Windows)" -ForegroundColor Green
 Write-Host "========================"
 
-# Detect Platform and Architecture
-$FullMac = $false
-$FullLinux = $false
-$FullWindows = $false
-
 if ($PSVersionTable.PSVersion.Major -ge 6) {
     # PowerShell Core
     if ($IsMacOS) { $FullMac = $true }
     if ($IsLinux) { $FullLinux = $true }
-    if ($IsWindows) { $FullWindows = $true }
-} else {
-    # Windows PowerShell (Desktop)
-    $FullWindows = $true
 }
 
 $Arch = $env:PROCESSOR_ARCHITECTURE
@@ -104,6 +95,11 @@ if (Test-Path $DataFusionSrc) {
 }
 
 Write-Host ""
+Write-Host "Performing a clean full rebuild..." -ForegroundColor Yellow
+dotnet clean "DtPipe.sln" -c Release
+dotnet build "DtPipe.sln" -c Release
+
+Write-Host ""
 Write-Host "Building Release (single-file)..." -ForegroundColor Yellow
 
 dotnet publish "src\DtPipe\DtPipe.csproj" -c Release `
@@ -126,10 +122,20 @@ if ($LASTEXITCODE -ne 0) {
 # Visual Studio / dotnet usually produces "DtPipe.exe" (or no ext on unix). To match "dtpipe" preference:
 
 $ExePath = Join-Path $ReleaseDir ("DtPipe" + $Ext)
-$TargetExePath = Join-Path $ReleaseDir ("dtpipe" + $Ext)
 
 if (Test-Path $ExePath) {
     Rename-Item -Path $ExePath -NewName ("dtpipe" + $Ext) -Force
+}
+
+Write-Host "----------------------------------------" -ForegroundColor Cyan
+Write-Host "  Verifying binary integrity..." -ForegroundColor Cyan
+Write-Host "----------------------------------------" -ForegroundColor Cyan
+& (Join-Path $ReleaseDir ("dtpipe" + $Ext)) --help | Out-Null
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "  OK: Binary is healthy." -ForegroundColor Green
+} else {
+    Write-Error "  FAILED: Binary sanity check failed."
+    exit 1
 }
 
 # ============================================================
