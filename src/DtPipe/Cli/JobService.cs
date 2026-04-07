@@ -271,8 +271,8 @@ public class JobService
 					var (argJobDict, _) = RawJobBuilder.Build(pr, cliJobOptions);
 					var argJob = argJobDict.Values.First();
 					job = job with {
-						Input  = ctx?.ChannelInjection?.InputChannel.HasValue  == true ? ToChannelSpec(ctx.ChannelInjection.InputChannel.Value)  : argJob.Input,
-						Output = ctx?.ChannelInjection?.OutputChannel.HasValue == true ? ToChannelSpec(ctx.ChannelInjection.OutputChannel.Value) : argJob.Output,
+						Input  = ctx?.ChannelInjection?.InputChannelAlias != null ? ToChannelSpec(ctx.ChannelInjection.InputChannelAlias) : argJob.Input,
+						Output = ctx?.ChannelInjection?.OutputChannelAlias != null ? ToChannelSpec(ctx.ChannelInjection.OutputChannelAlias) : argJob.Output,
 						Query  = !string.IsNullOrEmpty(argJob.Query) ? argJob.Query : job.Query
 					};
 				}
@@ -523,8 +523,8 @@ public class JobService
 		console.WriteLine($"  {name,-40} {desc}");
 	}
 
-	private static string ToChannelSpec((DtPipe.Core.Abstractions.Dag.ChannelMode Mode, string Alias) channel)
-		=> $"{(channel.Mode == DtPipe.Core.Abstractions.Dag.ChannelMode.Arrow ? "arrow-memory" : "mem")}:{channel.Alias}";
+	private static string ToChannelSpec(string alias)
+		=> $"arrow-memory:{alias}";
 
 	private static string? ResolveKeyring(string? input, IAnsiConsole console)
 	{

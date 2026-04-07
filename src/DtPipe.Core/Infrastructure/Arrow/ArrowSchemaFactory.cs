@@ -23,4 +23,13 @@ public static class ArrowSchemaFactory
     /// </summary>
     public static bool IsRichSchema(Schema schema)
         => schema.FieldsList.Any(f => f.DataType is StructType or ListType or MapType);
+
+    public static IReadOnlyList<PipeColumnInfo> ToPipeColumns(Schema schema)
+    {
+        return schema.FieldsList.Select(f => new PipeColumnInfo(
+            f.Name,
+            ArrowTypeMapper.GetClrTypeFromField(f),
+            f.IsNullable
+        )).ToList();
+    }
 }

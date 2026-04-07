@@ -38,7 +38,7 @@ public class MergeTransformerFactory : IStreamTransformerFactory
         if (aliases.Count < 2)
             throw new ArgumentException($"MergeTransformer requires at least 2 streaming sources via '--from a,b,...', got: {fromValue}");
 
-        var registry = serviceProvider.GetRequiredService<IArrowChannelRegistry>();
+        var registry = serviceProvider.GetRequiredService<IMemoryChannelRegistry>();
         return new MergeTransformer(registry, aliases);
     }
 }

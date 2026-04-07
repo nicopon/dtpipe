@@ -268,9 +268,9 @@ public class DagOrchestratorTests
 
         var plan = sourceCtx?.ChannelInjection;
         Assert.NotNull(plan);
-        Assert.True(plan!.OutputChannel.HasValue);  // source writes to a memory channel
-        Assert.False(plan.InputChannel.HasValue);   // source reads its normal -i
-        Assert.True(plan.SuppressStats);            // non-terminal → stats suppressed
+        Assert.NotNull(plan!.OutputChannelAlias);  // source writes to a memory channel
+        Assert.Null(plan.InputChannelAlias);       // source reads its normal -i
+        Assert.True(plan.SuppressStats);           // non-terminal → stats suppressed
     }
 
     [Fact]
@@ -289,8 +289,7 @@ public class DagOrchestratorTests
             return Task.FromResult(0);
         });
 
-        Assert.True(sourceCtx?.ChannelInjection?.OutputChannel.HasValue);
-        Assert.Equal(ChannelMode.Arrow, sourceCtx!.ChannelInjection!.OutputChannel!.Value.Mode);
+        Assert.NotNull(sourceCtx?.ChannelInjection?.OutputChannelAlias);
     }
 
     [Fact]
@@ -310,22 +309,22 @@ public class DagOrchestratorTests
 
         // Source → OutputChannel (to memory channel), no InputChannel
         var srcPlan = plans["src"];
-        Assert.True(srcPlan?.OutputChannel.HasValue);
-        Assert.False(srcPlan!.InputChannel.HasValue);
+        Assert.NotNull(srcPlan?.OutputChannelAlias);
+        Assert.Null(srcPlan!.InputChannelAlias);
         Assert.True(srcPlan.SuppressStats);
 
         // Consumers → InputChannel (from fan-out sub-channel), no OutputChannel
         var planA = plans["consumer_a"];
         var planB = plans["consumer_b"];
-        Assert.True(planA?.InputChannel.HasValue);
-        Assert.True(planB?.InputChannel.HasValue);
-        Assert.False(planA!.OutputChannel.HasValue);
-        Assert.False(planB!.OutputChannel.HasValue);
+        Assert.NotNull(planA?.InputChannelAlias);
+        Assert.NotNull(planB?.InputChannelAlias);
+        Assert.Null(planA!.OutputChannelAlias);
+        Assert.Null(planB!.OutputChannelAlias);
         Assert.False(planA.SuppressStats);
         Assert.False(planB.SuppressStats);
 
         // The two physical sub-channels (aliases) are distinct
-        Assert.NotEqual(planA.InputChannel!.Value.Alias, planB.InputChannel!.Value.Alias);
+        Assert.NotEqual(planA.InputChannelAlias, planB.InputChannelAlias);
     }
 
     [Fact]
@@ -353,8 +352,7 @@ public class DagOrchestratorTests
         });
 
         Assert.NotNull(joinedPlan);
-        Assert.True(joinedPlan!.OutputChannel.HasValue);
-        Assert.Equal(ChannelMode.Arrow, joinedPlan.OutputChannel!.Value.Mode);
+        Assert.NotNull(joinedPlan!.OutputChannelAlias);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -397,8 +395,8 @@ public class DagOrchestratorTests
         });
 
         // Both sources feed a stream-transformer → Arrow
-        Assert.Equal(ChannelMode.Arrow, plans["stream_a"]?.OutputChannel?.Mode);
-        Assert.Equal(ChannelMode.Arrow, plans["stream_b"]?.OutputChannel?.Mode);
+        Assert.NotNull(plans["stream_a"]?.OutputChannelAlias);
+        Assert.NotNull(plans["stream_b"]?.OutputChannelAlias);
 
         // The merge processor has an explicit -o → no injection
         Assert.Null(plans["merged"]);

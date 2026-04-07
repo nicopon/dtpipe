@@ -17,7 +17,7 @@ namespace DtPipe.Processors.Merge;
 /// </summary>
 public sealed class MergeTransformer : IStreamTransformer
 {
-    private readonly IArrowChannelRegistry _registry;
+    private readonly IMemoryChannelRegistry _registry;
     private readonly IReadOnlyList<string> _aliases;
     private IReadOnlyList<PipeColumnInfo>? _columns;
     private Schema? _schema;
@@ -25,7 +25,7 @@ public sealed class MergeTransformer : IStreamTransformer
     public IReadOnlyList<PipeColumnInfo>? Columns => _columns;
     public Schema? Schema => _schema;
 
-    public MergeTransformer(IArrowChannelRegistry registry, IReadOnlyList<string> aliases)
+    public MergeTransformer(IMemoryChannelRegistry registry, IReadOnlyList<string> aliases)
     {
         if (aliases.Count < 2)
             throw new ArgumentException("MergeTransformer requires at least 2 channel aliases.", nameof(aliases));

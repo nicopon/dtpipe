@@ -53,8 +53,8 @@ public class LinearPipelineService
         if (ctx?.ChannelInjection is { } plan)
         {
             job = job with {
-                Input   = plan.InputChannel.HasValue  ? ToChannelSpec(plan.InputChannel.Value)  : job.Input,
-                Output  = plan.OutputChannel.HasValue ? ToChannelSpec(plan.OutputChannel.Value) : job.Output,
+                Input   = plan.InputChannelAlias != null  ? ToChannelSpec(plan.InputChannelAlias)  : job.Input,
+                Output  = plan.OutputChannelAlias != null ? ToChannelSpec(plan.OutputChannelAlias) : job.Output,
                 NoStats = job.NoStats || plan.SuppressStats
             };
         }
@@ -206,8 +206,8 @@ public class LinearPipelineService
         }
     }
 
-    private static string ToChannelSpec((DtPipe.Core.Abstractions.Dag.ChannelMode Mode, string Alias) channel)
-        => $"{(channel.Mode == DtPipe.Core.Abstractions.Dag.ChannelMode.Arrow ? "arrow-memory" : "mem")}:{channel.Alias}";
+    private static string ToChannelSpec(string alias)
+        => $"arrow-memory:{alias}";
 
     private static (T Factory, string CleanedString) ResolveFactory<T>(IEnumerable<T> factories, string rawString, string typeName) where T : IDataFactory
     {

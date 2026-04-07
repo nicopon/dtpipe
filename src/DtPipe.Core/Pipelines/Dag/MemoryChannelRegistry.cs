@@ -10,15 +10,11 @@ namespace DtPipe.Core.Pipelines.Dag;
 
 /// <summary>
 /// A thread-safe registry for sharing in-memory channels between pipeline branches.
+/// Standardized on Apache Arrow IPC for all inter-branch communication.
 /// </summary>
 public class MemoryChannelRegistry : IMemoryChannelRegistry
 {
-    private readonly ConcurrentDictionary<string, (Channel<IReadOnlyList<object?[]>> Channel, IReadOnlyList<PipeColumnInfo> Columns)> _channels
-        = new(StringComparer.OrdinalIgnoreCase);
     private static readonly object _schemaLock = new();
-
-    private readonly ConcurrentDictionary<string, TaskCompletionSource<IReadOnlyList<PipeColumnInfo>>> _columnTcs
-        = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly ConcurrentDictionary<string, (Channel<RecordBatch> Channel, Schema Schema)> _arrowChannels
         = new(StringComparer.OrdinalIgnoreCase);
@@ -26,64 +22,19 @@ public class MemoryChannelRegistry : IMemoryChannelRegistry
     private readonly ConcurrentDictionary<string, TaskCompletionSource<Schema>> _arrowSchemaTcs
         = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Legacy row-based registration. Now effectively deprecated and throws 
+    /// as all orchestration should use RegisterArrowChannel.
+    /// </summary>
     public void RegisterChannel(string branchAlias, Channel<IReadOnlyList<object?[]>> channel, IReadOnlyList<PipeColumnInfo> columns)
     {
-        _columnTcs.TryAdd(branchAlias, new TaskCompletionSource<IReadOnlyList<PipeColumnInfo>>(TaskCreationOptions.RunContinuationsAsynchronously));
-        if (!_channels.TryAdd(branchAlias, (channel, columns)))
-        {
-            throw new InvalidOperationException($"A channel with the alias '{branchAlias}' is already registered.");
-        }
+        throw new NotSupportedException("Native row-based channels are no longer supported. Use RegisterArrowChannel.");
     }
 
     public void UpdateChannelColumns(string branchAlias, IReadOnlyList<PipeColumnInfo> columns)
     {
-        bool found = false;
-        if (_channels.TryGetValue(branchAlias, out var channelData))
-        {
-            _channels[branchAlias] = (channelData.Channel, columns);
-            if (_columnTcs.TryGetValue(branchAlias, out var tcs))
-            {
-                tcs.TrySetResult(columns);
-            }
-            found = true;
-        }
-
-        if (_arrowChannels.TryGetValue(branchAlias, out var arrowData))
-        {
-            // If the existing Arrow schema is "richer" (has Structs/Lists) than the one
-            // the factory would create from row columns (Map typeof(object) to String),
-            // then we should PRESERVE the existing schema.
-            var rowBasedSchema = ArrowSchemaFactory.Create(columns);
-            bool existingIsRicher = ArrowSchemaFactory.IsRichSchema(arrowData.Schema);
-            
-            if (!existingIsRicher)
-            {
-                _arrowChannels[branchAlias] = (arrowData.Channel, rowBasedSchema);
-                if (_arrowSchemaTcs.TryGetValue(branchAlias, out var tcs))
-                {
-                    tcs.TrySetResult(rowBasedSchema);
-                }
-            }
-            found = true;
-        }
-
-        // Propagate to fan-out sub-channels
-        var fanPrefix = branchAlias + "__fan_";
-        foreach (var key in _channels.Keys)
-        {
-            if (key.StartsWith(fanPrefix, StringComparison.OrdinalIgnoreCase))
-            {
-                var fanData = _channels[key];
-                _channels[key] = (fanData.Channel, columns);
-                if (_columnTcs.TryGetValue(key, out var tcs)) tcs.TrySetResult(columns);
-            }
-        }
-        PropagateArrowSchemaToFanOut(fanPrefix, ArrowSchemaFactory.Create(columns));
-
-        if (!found)
-        {
-            throw new InvalidOperationException($"Cannot update columns: channel '{branchAlias}' is not registered.");
-        }
+        // Forward row-based column updates to the Arrow schema storage
+        UpdateArrowChannelSchema(branchAlias, ArrowSchemaFactory.Create(columns));
     }
 
     private void PropagateArrowSchemaToFanOut(string fanPrefix, Schema schema)
@@ -99,26 +50,20 @@ public class MemoryChannelRegistry : IMemoryChannelRegistry
 
     public async Task<IReadOnlyList<PipeColumnInfo>> WaitForChannelColumnsAsync(string branchAlias, CancellationToken ct = default)
     {
-        if (_columnTcs.TryGetValue(branchAlias, out var tcs))
-        {
-            using var reg = ct.Register(() => tcs.TrySetCanceled(ct));
-            return await tcs.Task;
-        }
-        throw new InvalidOperationException($"A channel with the alias '{branchAlias}' is not registered.");
+        // Map the Arrow schema back to row-based PipeColumnInfo for legacy components
+        var schema = await WaitForArrowChannelSchemaAsync(branchAlias, ct);
+        return ArrowSchemaFactory.ToPipeColumns(schema);
     }
 
     public (Channel<IReadOnlyList<object?[]>> Channel, IReadOnlyList<PipeColumnInfo> Columns)? GetChannel(string branchAlias)
     {
-        if (_channels.TryGetValue(branchAlias, out var channelData))
-        {
-            return channelData;
-        }
+        // No longer providing native row-based channel access
         return null;
     }
 
     public bool ContainsChannel(string branchAlias)
     {
-        return _channels.ContainsKey(branchAlias) || _arrowChannels.ContainsKey(branchAlias);
+        return _arrowChannels.ContainsKey(branchAlias);
     }
 
     public void RegisterArrowChannel(string branchAlias, Channel<RecordBatch> channel, Schema schema)
@@ -136,8 +81,8 @@ public class MemoryChannelRegistry : IMemoryChannelRegistry
         if (_arrowChannels.TryGetValue(branchAlias, out var arrowData))
         {
             // Protection: if existing schema is richer than the new one, preserve it.
-            bool existingIsRicher = ArrowSchemaFactory.IsRichSchema(arrowData.Schema);
-            bool newIsRicher = ArrowSchemaFactory.IsRichSchema(schema);
+            bool existingIsRicher = DtPipe.Core.Infrastructure.Arrow.ArrowSchemaFactory.IsRichSchema(arrowData.Schema);
+            bool newIsRicher = DtPipe.Core.Infrastructure.Arrow.ArrowSchemaFactory.IsRichSchema(schema);
             
             if (newIsRicher || !existingIsRicher || arrowData.Schema.FieldsList.Count == 0)
             {

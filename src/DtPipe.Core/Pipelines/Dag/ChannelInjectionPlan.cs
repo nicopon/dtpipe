@@ -10,16 +10,16 @@ namespace DtPipe.Core.Pipelines.Dag;
 public record ChannelInjectionPlan
 {
     /// <summary>
-    /// Channel to inject as the branch input (mode + alias).
+    /// Alias of the branch to use as input.
     /// <see langword="null"/> means the branch has an explicit <c>-i</c>.
     /// </summary>
-    public (ChannelMode Mode, string Alias)? InputChannel { get; init; }
+    public string? InputChannelAlias { get; init; }
 
     /// <summary>
-    /// Channel to inject as the branch output (mode + alias).
+    /// Alias of the branch to use as output.
     /// <see langword="null"/> means the branch has an explicit <c>-o</c>.
     /// </summary>
-    public (ChannelMode Mode, string Alias)? OutputChannel { get; init; }
+    public string? OutputChannelAlias { get; init; }
 
     /// <summary>
     /// When <see langword="true"/>, the branch is an intermediate (non-terminal) node and

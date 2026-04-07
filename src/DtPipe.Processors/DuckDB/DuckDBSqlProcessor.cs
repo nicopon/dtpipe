@@ -17,7 +17,7 @@ namespace DtPipe.Processors.DuckDB;
 
 public sealed class DuckDBSqlProcessor : IColumnarStreamReader
 {
-    private readonly IArrowChannelRegistry _registry;
+    private readonly IMemoryChannelRegistry _registry;
     private readonly string _query;
     private readonly string _mainAlias;
     private readonly string _mainChannelAlias;
@@ -33,7 +33,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader
     public Schema? Schema => _resultSchema;
 
     public DuckDBSqlProcessor(
-        IArrowChannelRegistry registry,
+        IMemoryChannelRegistry registry,
         string query,
         string mainAlias,
         string mainChannelAlias,

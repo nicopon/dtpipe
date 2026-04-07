@@ -3,6 +3,8 @@ using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Core.Models;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
+using Apache.Arrow;
+using DtPipe.Core.Infrastructure.Arrow;
 
 namespace DtPipe.Adapters.MemoryChannel;
 
@@ -15,12 +17,12 @@ namespace DtPipe.Adapters.MemoryChannel;
 /// </summary>
 public class MemoryChannelStreamReader : IStreamReader
 {
-    private readonly ChannelReader<IReadOnlyList<object?[]>> _reader;
-    private readonly INativeChannelRegistry _registry;
+    private readonly ChannelReader<RecordBatch> _reader;
+    private readonly IMemoryChannelRegistry _registry;
     private readonly string _alias;
     private IReadOnlyList<PipeColumnInfo>? _columns;
 
-    public MemoryChannelStreamReader(ChannelReader<IReadOnlyList<object?[]>> reader, INativeChannelRegistry registry, string alias)
+    public MemoryChannelStreamReader(ChannelReader<RecordBatch> reader, IMemoryChannelRegistry registry, string alias)
     {
         _reader = reader;
         _registry = registry;
@@ -40,11 +42,27 @@ public class MemoryChannelStreamReader : IStreamReader
 
     public async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(int batchSize, [EnumeratorCancellation] CancellationToken ct = default)
     {
-        // Iterate through all batches pushed into the channel until it's completed
+        var bridge = new ArrowColumnarToRowBridge();
+        var buffer = new List<object?[]>(batchSize);
+
+        // Iterate through all Arrow batches pushed into the channel until it's completed
         await foreach (var batch in _reader.ReadAllAsync(ct))
         {
-            // The pipeline expects ReadOnlyMemory<object?[]>
-            yield return new ReadOnlyMemory<object?[]>(batch.ToArray());
+            // Convert each Arrow batch back to row-based format using the bridge
+            await foreach (var row in bridge.ConvertBatchToRowsAsync(batch, ct))
+            {
+                buffer.Add(row);
+                if (buffer.Count >= batchSize)
+                {
+                    yield return new ReadOnlyMemory<object?[]>(buffer.ToArray());
+                    buffer.Clear();
+                }
+            }
+        }
+
+        if (buffer.Count > 0)
+        {
+            yield return new ReadOnlyMemory<object?[]>(buffer.ToArray());
         }
     }
 

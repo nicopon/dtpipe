@@ -122,35 +122,17 @@ public class DagOrchestrator : IDagOrchestrator
             {
                 if (string.IsNullOrEmpty(branch.Output))
                 {
-                    var mode = GetRequiredChannelMode(dag, branch.Alias);
-                    if (mode == ChannelMode.Arrow)
-                    {
-                        var arrowChannel = Channel.CreateBounded<Apache.Arrow.RecordBatch>(new BoundedChannelOptions(DefaultArrowChannelCapacity) { FullMode = BoundedChannelFullMode.Wait });
-                        _channelRegistry.RegisterArrowChannel(branch.Alias, arrowChannel, _emptySchema);
-                    }
-                    else
-                    {
-                        var channel = Channel.CreateBounded<IReadOnlyList<object?[]>>(new BoundedChannelOptions(DefaultNativeChannelCapacity) { SingleWriter = true, SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
-                        _channelRegistry.RegisterChannel(branch.Alias, channel, System.Array.Empty<PipeColumnInfo>());
-                    }
+                    var arrowChannel = Channel.CreateBounded<Apache.Arrow.RecordBatch>(new BoundedChannelOptions(DefaultArrowChannelCapacity) { FullMode = BoundedChannelFullMode.Wait });
+                    _channelRegistry.RegisterArrowChannel(branch.Alias, arrowChannel, _emptySchema);
                 }
             }
 
             foreach (var (sourceAlias, subs) in broadcastSubAliases)
             {
-                var mode = GetRequiredChannelMode(dag, sourceAlias);
                 foreach (var subAlias in subs)
                 {
-                    if (mode == ChannelMode.Arrow)
-                    {
-                        var sub = Channel.CreateBounded<Apache.Arrow.RecordBatch>(new BoundedChannelOptions(DefaultArrowChannelCapacity) { SingleWriter = true, SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
-                        _channelRegistry.RegisterArrowChannel(subAlias, sub, _emptySchema);
-                    }
-                    else
-                    {
-                        var sub = Channel.CreateBounded<IReadOnlyList<object?[]>>(new BoundedChannelOptions(DefaultNativeChannelCapacity) { SingleWriter = true, SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
-                        _channelRegistry.RegisterChannel(subAlias, sub, System.Array.Empty<PipeColumnInfo>());
-                    }
+                    var subArrow = Channel.CreateBounded<Apache.Arrow.RecordBatch>(new BoundedChannelOptions(DefaultArrowChannelCapacity) { SingleWriter = true, SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
+                    _channelRegistry.RegisterArrowChannel(subAlias, subArrow, _emptySchema);
                 }
             }
 
@@ -225,12 +207,7 @@ public class DagOrchestrator : IDagOrchestrator
             foreach (var (sourceAlias, subs) in broadcastSubAliases)
             {
                 var bCts = CancellationTokenSource.CreateLinkedTokenSource(effectiveCt);
-                Task broadcastTask;
-
-                if (GetRequiredChannelMode(dag, sourceAlias) == ChannelMode.Arrow)
-                    broadcastTask = StartArrowBroadcastAsync(sourceAlias, subs, bCts.Token);
-                else
-                    broadcastTask = StartNativeBroadcastAsync(sourceAlias, subs, bCts.Token);
+                Task broadcastTask = StartArrowBroadcastAsync(sourceAlias, subs, bCts.Token);
 
                 var metadata = new BranchTaskMetadata(
                     Id: $"broadcast:{sourceAlias}",
@@ -355,23 +332,22 @@ public class DagOrchestrator : IDagOrchestrator
         {
             // Build the channel injection plan — communicate routing to the CLI layer without
             // embedding CLI flag syntax (-i, -o, mem:, arrow-memory:, --no-stats) in Core.
-            (ChannelMode Mode, string Alias)? inputChannel = null;
+            string? inputAlias = null;
             if (!branch.HasStreamTransformer && string.IsNullOrEmpty(branch.Input) && !string.IsNullOrEmpty(resolvedFromAlias))
             {
-                var logicalAlias = branch.StreamingAliases.Count > 0 ? branch.StreamingAliases[0] : resolvedFromAlias;
-                inputChannel = (GetRequiredChannelMode(dag, logicalAlias), resolvedFromAlias);
+                inputAlias = resolvedFromAlias;
             }
 
-            (ChannelMode Mode, string Alias)? outputChannel = null;
+            string? outputAlias = null;
             bool suppressStats = false;
             if (string.IsNullOrEmpty(branch.Output))
             {
-                outputChannel = (GetRequiredChannelMode(dag, branch.Alias), branch.Alias);
+                outputAlias = branch.Alias;
                 suppressStats = true;
             }
 
-            var plan = (inputChannel.HasValue || outputChannel.HasValue)
-                ? new ChannelInjectionPlan { InputChannel = inputChannel, OutputChannel = outputChannel, SuppressStats = suppressStats }
+            var plan = (inputAlias != null || outputAlias != null)
+                ? new ChannelInjectionPlan { InputChannelAlias = inputAlias, OutputChannelAlias = outputAlias, SuppressStats = suppressStats }
                 : null;
 
             var enrichedCtx = plan != null ? ctx with { ChannelInjection = plan } : ctx;
@@ -387,7 +363,6 @@ public class DagOrchestrator : IDagOrchestrator
                     return exitCode;
                 }
 
-                _channelRegistry.GetChannel(branch.Alias)?.Channel.Writer.TryComplete();
                 _channelRegistry.GetArrowChannel(branch.Alias)?.Channel.Writer.TryComplete();
 
                 _logger.LogInformation("Branch '{Alias}' completed.", branch.Alias);
@@ -395,7 +370,6 @@ public class DagOrchestrator : IDagOrchestrator
             }
             catch (OperationCanceledException)
             {
-                _channelRegistry.GetChannel(branch.Alias)?.Channel.Writer.TryComplete();
                 _channelRegistry.GetArrowChannel(branch.Alias)?.Channel.Writer.TryComplete();
                 _logger.LogInformation("Branch '{Alias}' terminated due to cancellation (orphaned producer).", branch.Alias);
                 return 0;
@@ -404,22 +378,9 @@ public class DagOrchestrator : IDagOrchestrator
         catch (Exception ex)
         {
             _logger.LogError(ex, "Branch '{Alias}' encountered a fatal error.", branch.Alias);
-            _channelRegistry.GetChannel(branch.Alias)?.Channel.Writer.TryComplete(ex);
             _channelRegistry.GetArrowChannel(branch.Alias)?.Channel.Writer.TryComplete(ex);
             throw;
         }
-    }
-
-    private Task StartNativeBroadcastAsync(string sourceAlias, IReadOnlyList<string> subAliases, CancellationToken ct)
-    {
-        var source = (_channelRegistry.GetChannel(sourceAlias)
-            ?? throw new InvalidOperationException($"Broadcast: source channel '{sourceAlias}' not found in registry.")).Channel.Reader;
-        var targets = subAliases
-            .Select(s => (_channelRegistry.GetChannel(s)?.Channel ?? throw new InvalidOperationException($"Broadcast: sub channel '{s}' not found.")).Writer)
-            .ToList();
-        _logger.LogInformation("Starting broadcast multiplexer for '{SourceAlias}' → [{Subs}]",
-            sourceAlias, string.Join(", ", subAliases));
-        return BroadcastAsync(source, targets, transform: null, sourceAlias, _logger, ct);
     }
 
     private Task StartArrowBroadcastAsync(string sourceAlias, IReadOnlyList<string> subAliases, CancellationToken ct)
@@ -464,48 +425,6 @@ public class DagOrchestrator : IDagOrchestrator
                 logger.LogInformation("Broadcast multiplexer for '{Alias}' completed.", sourceAlias);
             }
         }, ct);
-
-    /// <summary>
-    /// Determines whether a branch's output channel must use Arrow (RecordBatch) or Native (object[]) protocol.
-    /// Arrow is required when the channel is consumed by a stream-transformer branch.
-    /// Arrow is also used when the producer branch has a reader that yields columnar output natively.
-    /// </summary>
-    private ChannelMode GetRequiredChannelMode(JobDagDefinition dag, string alias)
-    {
-        // Check if alias is consumed by any stream-transformer branch (SQL, merge, etc.)
-        foreach (var branch in dag.Branches.Where(b => b.HasStreamTransformer))
-        {
-            bool isConsumed =
-                branch.StreamingAliases.Contains(alias, StringComparer.OrdinalIgnoreCase) ||
-                branch.RefAliases.Contains(alias, StringComparer.OrdinalIgnoreCase);
-
-            if (isConsumed) return ChannelMode.Arrow;
-        }
-
-        // Check if the producer branch has a reader that yields columnar output
-        // OR if it has a stream transformer (SQL/merge always produce Arrow)
-        var producerBranch = dag.Branches.FirstOrDefault(b =>
-            b.Alias.Equals(alias, StringComparison.OrdinalIgnoreCase));
-
-        if (producerBranch != null)
-        {
-            if (producerBranch.HasStreamTransformer)
-                return ChannelMode.Arrow;
-
-            if (!string.IsNullOrEmpty(producerBranch.Input))
-            {
-                var readerFactory = _readerFactories.FirstOrDefault(f =>
-                    producerBranch.Input.StartsWith(f.ComponentName + ":", StringComparison.OrdinalIgnoreCase) ||
-                    producerBranch.Input.Equals(f.ComponentName, StringComparison.OrdinalIgnoreCase) ||
-                    f.CanHandle(producerBranch.Input));
-
-                if (readerFactory?.YieldsColumnarOutput == true)
-                    return ChannelMode.Arrow;
-            }
-        }
-
-        return ChannelMode.Native;
-    }
 
     private string ResolveInputAlias(string alias, Dictionary<string, List<string>> broadcastSubAliases, Dictionary<string, int> broadcastAssignmentCursor)
     {

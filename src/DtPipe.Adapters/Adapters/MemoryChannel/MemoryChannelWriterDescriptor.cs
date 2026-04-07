@@ -2,6 +2,8 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Abstractions.Dag;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System.Threading.Channels;
+using Apache.Arrow;
 
 namespace DtPipe.Adapters.MemoryChannel;
 
@@ -17,8 +19,8 @@ public class MemoryChannelWriterDescriptor : IProviderDescriptor<IDataWriter>
     public IDataWriter Create(string connectionString, object options, IServiceProvider serviceProvider)
     {
         var registry = serviceProvider.GetRequiredService<IMemoryChannelRegistry>();
-        var entry = registry.GetChannel(connectionString);
-        if (entry == null) throw new InvalidOperationException($"Memory channel '{connectionString}' not found in registry.");
+        var entry = registry.GetArrowChannel(connectionString);
+        if (entry == null) throw new InvalidOperationException($"Arrow Memory channel '{connectionString}' not found in registry.");
 
         var logger = serviceProvider.GetRequiredService<ILogger<MemoryChannelDataWriter>>();
         return new MemoryChannelDataWriter(entry.Value.Channel.Writer, registry, connectionString, logger);

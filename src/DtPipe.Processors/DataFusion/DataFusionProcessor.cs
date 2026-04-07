@@ -15,7 +15,7 @@ namespace DtPipe.Processors.DataFusion;
 
 public sealed class DataFusionProcessor : IColumnarStreamReader
 {
-    private readonly IArrowChannelRegistry _registry;
+    private readonly IMemoryChannelRegistry _registry;
     private readonly string _query;
     private readonly string _mainAlias;        // logical SQL table name
     private readonly string _mainChannelAlias; // physical channel alias for registry lookup
@@ -33,7 +33,7 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
     public Schema? Schema => _resultSchema;
 
     public DataFusionProcessor(
-        IArrowChannelRegistry registry,
+        IMemoryChannelRegistry registry,
         string query,
         string mainAlias,
         string mainChannelAlias,
