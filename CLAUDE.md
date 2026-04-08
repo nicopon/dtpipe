@@ -71,7 +71,7 @@ The golden DAG fixtures in `GoldenDagDefinitions.cs` are the canonical reference
 #### File placement conventions
 
 - `DtPipe.Core` contains **only** abstractions, models, and the generic DAG/pipeline engine — no concrete implementations.
-- Each concrete transformer in `DtPipe.Transformers` lives in its own subdirectory (`Row/Expand/`, `Columnar/Filter/`…) with a matching sub-namespace (`DtPipe.Transformers.Row`, `DtPipe.Transformers.Columnar`…).
+- Each concrete transformer in `DtPipe.Transformers` lives in its own subdirectory (`Row/Expand/`, `Arrow/Filter/`…) with a matching sub-namespace (`DtPipe.Transformers.Row`, `DtPipe.Transformers.Arrow`…).
 - Each concrete stream processor in `DtPipe.Processors` follows the same pattern: one subdirectory per processor (`DataFusion/`, `Merge/`…) with a matching sub-namespace (`DtPipe.Processors.DataFusion`, `DtPipe.Processors.Merge`…).
 - Readers and writers in `DtPipe.Adapters` are grouped by technology under `Adapters/<Name>/`.
 
@@ -183,7 +183,7 @@ What is explicitly **forbidden**:
 - Changing the Arrow schema or type mapping in `AdoToArrow`, `ArrowTypeMapper`, or `PipeColumnInfo` to compensate for a specific adapter's output format.
 - Inserting conditional branches in `ExportService`, `PipelineExecutor`, or `DagOrchestrator` based on adapter identity.
 
-The canonical Arrow representation of a UUID in DtPipe is `BinaryType` with `.NET Guid.ToByteArray()` byte order. Any adapter that produces UUID values must emit them in this format, or the user must insert an explicit conversion step.
+The canonical Arrow representation of a UUID in DtPipe is `FixedSizeBinaryType(16)` with Field metadata `ARROW:extension:name = arrow.uuid` and RFC 4122 big-endian byte order (use `ArrowTypeMapper.ToArrowUuidBytes` / `FromArrowUuidBytes`). Any adapter that produces UUID values must emit them in this format, or the user must insert an explicit conversion step.
 
 ## Apache.Arrow.Serialization
 

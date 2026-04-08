@@ -18,16 +18,19 @@ The core pipeline engine for DtPipe. Contains all abstractions, models, and pipe
 
 ```
 DtPipe.Core/
-├── Abstractions/       # Core interfaces
-├── Models/             # Shared data models (PipeColumnInfo, etc.)
-├── Options/            # IOptionSet, IQueryAwareOptions, IKeyAwareOptions, OptionsRegistry
-├── Attributes/         # [CliOption] attribute
+├── Abstractions/       # Core interfaces (row and columnar)
+├── Attributes/         # [ComponentOption] attribute
 ├── Dialects/           # ISqlDialect, SQL generation helpers
 ├── Helpers/            # Shared utility helpers
-├── Pipelines/          # TransformerPipelineBuilder
-├── Resilience/         # Retry policy
+├── Infrastructure/     # Arrow type mapping, schema factory, row↔columnar bridges
+│   └── Arrow/
+├── Models/             # Shared data models (PipeColumnInfo, etc.)
+├── Options/            # IOptionSet, IQueryAwareOptions, IKeyAwareOptions, OptionsRegistry
+├── Pipelines/          # PipelineExecutionPlan, PipelineSegment, DAG orchestration
+│   └── Dag/
 ├── Security/           # SQL query validator
-└── PipelineEngine.cs   # Main export orchestration engine
+├── Validation/         # Schema and constraint validators
+└── PipelineEngine.cs   # Headless pipeline engine for library use
 ```
 
 ---
@@ -38,15 +41,20 @@ DtPipe.Core/
 |---|---|
 | `IStreamReader` | Reads rows as async batches from a source |
 | `IStreamReaderFactory` | Creates `IStreamReader` instances |
-| `IDataWriter` | Writes rows to a destination |
+| `IColumnarStreamReader` | Reads Apache Arrow `RecordBatch` streams (zero-copy columnar path) |
+| `IDataWriter` | Base contract for all writers |
+| `IRowDataWriter` | Writes `object?[]` rows to a destination |
+| `IColumnarDataWriter` | Writes Arrow `RecordBatch` directly (no row conversion) |
 | `IDataWriterFactory` | Creates `IDataWriter` instances |
 | `IDataTransformer` | Transforms a batch of rows in the pipeline |
 | `IDataTransformerFactory` | Creates `IDataTransformer` instances |
+| `IColumnarTransformer` | Columnar (Arrow-level) variant of `IDataTransformer` |
+| `IMultiRowTransformer` | Transformer that may produce multiple rows per input row |
+| `IColumnTypeInferenceCapable` | Reader that supports `--auto-column-types` inference |
 | `IProviderDescriptor<T>` | Describes a provider: name, options type, factory method |
 | `ISchemaInspector` | Introspects target schema |
 | `ISchemaMigrator` | Applies schema migrations (auto-migrate) |
 | `ISqlDialect` | Generates provider-specific DDL/DML SQL |
-| `ITypeMapper` | Maps CLR types to provider-specific column types |
 
 ## Key Options Interfaces
 
@@ -95,8 +103,13 @@ public class MyReaderDescriptor : IProviderDescriptor<IStreamReader>
 ## Running the Pipeline Directly
 
 ```csharp
-var engine = new PipelineEngine(loggerFactory);
-await engine.RunExportAsync(options, ct, transformers, readerFactory, writerFactory, registry);
+var engine = new PipelineEngine(logger);
+long rowsWritten = await engine.RunAsync(
+    reader,
+    writer,
+    pipeline: transformers,   // optional
+    batchSize: 50_000,
+    ct: cancellationToken);
 ```
 
 ---

@@ -1,4 +1,5 @@
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using Apache.Arrow;
@@ -42,21 +43,6 @@ public class NullDataTransformer : BaseColumnarTransformer, IRequiresOptions<DtP
 		return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
 	}
 
-	public override object?[]? Transform(object?[] row)
-	{
-		if (_targetIndices == null)
-		{
-			return row;
-		}
-
-		foreach (var idx in _targetIndices)
-		{
-			row[idx] = null;
-		}
-
-		return row;
-	}
-
 	protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)
 	{
 		if (_targetIndices == null) return new ValueTask<RecordBatch?>(batch);
@@ -78,18 +64,9 @@ public class NullDataTransformer : BaseColumnarTransformer, IRequiresOptions<DtP
 
 	private static IArrowArray CreateNullArray(IArrowType type, int length)
 	{
-		if (type is StringType) { var b = new StringArray.Builder(); for (int i = 0; i < length; i++) b.AppendNull(); return b.Build(); }
-		if (type is Int32Type) { var b = new Int32Array.Builder(); for (int i = 0; i < length; i++) b.AppendNull(); return b.Build(); }
-		if (type is Int64Type) { var b = new Int64Array.Builder(); for (int i = 0; i < length; i++) b.AppendNull(); return b.Build(); }
-		if (type is DoubleType) { var b = new DoubleArray.Builder(); for (int i = 0; i < length; i++) b.AppendNull(); return b.Build(); }
-		if (type is FloatType) { var b = new FloatArray.Builder(); for (int i = 0; i < length; i++) b.AppendNull(); return b.Build(); }
-		if (type is BooleanType) { var b = new BooleanArray.Builder(); for (int i = 0; i < length; i++) b.AppendNull(); return b.Build(); }
-		if (type is Date64Type) { var b = new Date64Array.Builder(); for (int i = 0; i < length; i++) b.AppendNull(); return b.Build(); }
-		if (type is TimestampType) { var b = new TimestampArray.Builder(); for (int i = 0; i < length; i++) b.AppendNull(); return b.Build(); }
-
-		// Fallback to string
-		var fb = new StringArray.Builder();
-		for (int i = 0; i < length; i++) fb.AppendNull();
-		return fb.Build();
+		var builder = ArrowTypeMapper.CreateBuilder(type);
+		for (int i = 0; i < length; i++)
+			ArrowTypeMapper.AppendNull(builder);
+		return ArrowTypeMapper.BuildArray(builder);
 	}
 }

@@ -159,26 +159,6 @@ public class ProjectDataTransformer : BaseColumnarTransformer, IRequiresOptions<
 		return new ValueTask<IReadOnlyList<PipeColumnInfo>>(newColumns);
 	}
 
-	public override object?[]? Transform(object?[] row)
-	{
-		if (_outputToSourceIndex == null) return row;
-
-		var newRow = new object?[_outputToSourceIndex.Length];
-
-		for (int i = 0; i < _outputToSourceIndex.Length; i++)
-		{
-			var srcIndex = _outputToSourceIndex[i];
-
-			if (srcIndex >= 0 && srcIndex < row.Length)
-			{
-				newRow[i] = row[srcIndex];
-			}
-			// else: leave null (safeguard against row size mismatch)
-		}
-
-		return newRow;
-	}
-
 	protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)
 	{
 		if (_outputToSourceIndex == null) return new ValueTask<RecordBatch?>(batch);

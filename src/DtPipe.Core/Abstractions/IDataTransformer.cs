@@ -16,11 +16,10 @@ public interface IDataTransformer
 	ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default);
 
 	/// <summary>
-	/// Transforms a single row. Returns the transformed row (may be the same instance, mutated).
+	/// Transforms a single row. Returns the transformed row (usually a physical object?[]).
 	/// Returns null to drop the row from the pipeline.
-	/// For pure streaming, each row is processed independently.
 	/// </summary>
-	object?[]? Transform(object?[] row);
+	object?[]? Transform(IReadOnlyList<object?> row);
 
 	/// <summary>
 	/// Flushes any buffered rows at the end of the stream.

@@ -37,11 +37,12 @@ DtPipe uses a centralized Docker infrastructure for all integration tests.
 | Flag | What runs | Docker? |
 |:---|:---|:---|
 | `--smoke` | Golden smoke test: edge cases, 1M rows, all DB drivers | Yes |
-| `--test` | Transformers, schema, options, hooks, docs, resilience, DAG | No |
+| `--test` | Transformers, schema, options, hooks, docs, DAG | No |
 | `--test-docker` | All `--test` suites + driver chain (upsert/ignore/cross-DB) | Yes |
 | `--catalog` | 135-command catalog (requires `init_test_data.sh` first) | Yes |
 | `--dag` | DAG topology validation only | No |
-| `--bench` | Performance benchmarks (linear, DuckDB, DataFusion SQL JOIN) | No |
+| `--bench` | Performance benchmarks (linear pipeline, DuckDB) | No |
+| `--bench --sql` | Benchmarks + DataFusion vs DuckDB SQL JOIN | No |
 | `--full` | All of the above | Yes |
 
 ## Scripts Index
@@ -60,8 +61,7 @@ DtPipe uses a centralized Docker infrastructure for all integration tests.
 | **`validate_options.sh`** | Provider option scoping (global/writer/YAML), sampling rate + seed + determinism, YAML `provider-options`, `--metrics-path`. |
 | **`validate_hooks.sh`** | `--pre-exec` (inline + file), `--post-exec`, `--finally-exec` lifecycle hooks via SQLite. |
 | **`validate_docs.sh`** | All `--flags` in README/COOKBOOK are present in `--help`; representative README examples execute correctly. |
-| **`validate_resilience.sh`** | YAML retry-options round-trip, SQLite lock retry, network interruption via Toxiproxy (Append + Upsert). |
-| **`validate_dag.sh`** | All 8 canonical DAG topologies: Linear, Two-source, SQL, SQL JOIN, Fan-out, Fan-out+SQL, Diamond, Join→fan-out. |
+| **`validate_dag.sh`** | All 9 canonical DAG topologies: Linear, Two-source, SQL, SQL JOIN, Fan-out, Fan-out+SQL, Diamond, Join→fan-out, Nested data. |
 
 ### 📋 Catalog Suite
 | Script | Description | Docker? |
@@ -73,7 +73,7 @@ DtPipe uses a centralized Docker infrastructure for all integration tests.
 ### 📊 Benchmarks
 | Script | Target |
 |:---|:---|
-| **`bench.sh`** | Linear pipeline throughput (100k→CSV, CSV→Parquet, Parquet+transforms), DuckDB 1M rows, DataFusion SQL JOIN (DAG mode). |
+| **`bench.sh`** | Linear pipeline throughput (100k→CSV, CSV→Parquet, Parquet+transforms), DuckDB 1M rows. Pass `--sql` to also run DataFusion vs DuckDB SQL JOIN benchmarks (requires pre-generated datasets). |
 | **`benchmark_dtpipe_columnar.sh`** | Zero-copy columnar path performance. |
 | **`generate_benchmark_datasets.sh`** | Generates large Parquet/CSV datasets for JOIN benchmarks. |
 

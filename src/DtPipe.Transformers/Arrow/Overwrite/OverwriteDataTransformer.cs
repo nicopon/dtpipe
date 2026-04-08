@@ -80,28 +80,6 @@ public class OverwriteDataTransformer : BaseColumnarTransformer, IRequiresOption
 		return new ValueTask<IReadOnlyList<PipeColumnInfo>>(outputColumns);
 	}
 
-	public override object?[]? Transform(object?[] row)
-	{
-		if (_columnValues == null)
-		{
-			return row;
-		}
-
-		for (var i = 0; i < row.Length; i++)
-		{
-			if (_columnValues[i] != null)
-			{
-		 		if (_skipNull && row[i] is null)
-				{
-					continue;
-				}
-				row[i] = _columnValues[i];
-			}
-		}
-
-		return row;
-	}
-
 	protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)
 	{
 		if (_columnValues == null) return new ValueTask<RecordBatch?>(batch);

@@ -51,7 +51,7 @@ public class MemoryChannelStreamReader : IStreamReader
             // Convert each Arrow batch back to row-based format using the bridge
             await foreach (var row in bridge.ConvertBatchToRowsAsync(batch, ct))
             {
-                buffer.Add(row);
+                buffer.Add(row as object?[] ?? row.ToArray());
                 if (buffer.Count >= batchSize)
                 {
                     yield return new ReadOnlyMemory<object?[]>(buffer.ToArray());

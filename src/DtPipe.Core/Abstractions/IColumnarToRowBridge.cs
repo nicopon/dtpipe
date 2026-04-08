@@ -11,5 +11,5 @@ public interface IColumnarToRowBridge
     /// <summary>
     /// Converts a RecordBatch into an asynchronous stream of rows.
     /// </summary>
-    IAsyncEnumerable<object?[]> ConvertBatchToRowsAsync(RecordBatch batch, CancellationToken ct = default);
+    IAsyncEnumerable<IReadOnlyList<object?>> ConvertBatchToRowsAsync(RecordBatch batch, CancellationToken ct = default);
 }

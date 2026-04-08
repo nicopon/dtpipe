@@ -212,19 +212,21 @@ public sealed partial class FormatDataTransformer : BaseColumnarTransformer, IRe
 		return new ValueTask<RecordBatch?>(new RecordBatch(_outputSchema, resultArrays, rowCount));
 	}
 
-	public override object?[]? Transform(object?[] row)
+	public override object?[]? Transform(IReadOnlyList<object?> row)
 	{
+		var result = row as object?[] ?? row.ToArray();
 		if (_generationOrder == null)
 		{
-			return row;
+			return result;
 		}
+        
+		var workingRow = result;
 
 		// Handle resizing for virtual columns
 		if (_virtualColumnCount > 0)
 		{
-			var newRow = new object?[row.Length + _virtualColumnCount];
-			System.Array.Copy(row, newRow, row.Length);
-			row = newRow;
+			workingRow = new object?[row.Count + _virtualColumnCount];
+			for (int i = 0; i < row.Count; i++) workingRow[i] = row[i];
 		}
 
 		var sb = new System.Text.StringBuilder(128); // Small allocation
@@ -241,7 +243,7 @@ public sealed partial class FormatDataTransformer : BaseColumnarTransformer, IRe
 				foreach (var refIdx in proc.ReferencedIndices)
 				{
 					// If ANY referenced column is NOT null, we do NOT skip
-					if (row[refIdx] is not null)
+					if (workingRow[refIdx] is not null)
 					{
 						shouldSkip = false;
 						break;
@@ -251,7 +253,7 @@ public sealed partial class FormatDataTransformer : BaseColumnarTransformer, IRe
 
 			if (shouldSkip)
 			{
-				row[idx] = null;
+				workingRow[idx] = null;
 				continue;
 			}
 			sb.Clear();
@@ -266,9 +268,9 @@ public sealed partial class FormatDataTransformer : BaseColumnarTransformer, IRe
 				{
 					// Column Reference
 					// Ensure we don't access out of bounds if bad config
-					if (segment.ColumnIndex < row.Length)
+					if (segment.ColumnIndex < workingRow.Length)
 					{
-						var val = row[segment.ColumnIndex];
+						var val = workingRow[segment.ColumnIndex];
 						if (val != null)
 						{
 							if (segment.Format != null)
@@ -290,10 +292,10 @@ public sealed partial class FormatDataTransformer : BaseColumnarTransformer, IRe
 					}
 				}
 			}
-			row[idx] = sb.ToString();
+			workingRow[idx] = sb.ToString();
 		}
 
-		return row;
+		return workingRow;
 	}
 
 	private TemplateSegment[] ParseTemplate(string template)

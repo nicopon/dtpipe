@@ -1,5 +1,6 @@
 using System.Text;
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using Apache.Arrow;
@@ -55,51 +56,31 @@ public class MaskDataTransformer : BaseColumnarTransformer, IRequiresOptions<DtP
 
 		_indexPatterns = new Dictionary<int, string>();
 
+		var outputColumns = new PipeColumnInfo[columns.Count];
+		bool anyMasked = false;
+
 		for (var i = 0; i < columns.Count; i++)
 		{
 			if (_columnPatterns.TryGetValue(columns[i].Name, out var pattern))
 			{
 				_indexPatterns[i] = pattern;
+				// MaskArray always produces StringArray regardless of the original column type.
+				outputColumns[i] = columns[i] with { ClrType = typeof(string) };
+				anyMasked = true;
+			}
+			else
+			{
+				outputColumns[i] = columns[i];
 			}
 		}
 
-		if (_indexPatterns.Count == 0)
+		if (!anyMasked)
 		{
 			_indexPatterns = null;
+			return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
 		}
 
-		return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
-	}
-
-	public override object?[]? Transform(object?[] row)
-	{
-		if (_indexPatterns == null)
-		{
-			return row;
-		}
-
-		foreach (var (idx, pattern) in _indexPatterns)
-		{
-			var value = row[idx];
-
-			// Skip if source is null and SkipNull is enabled
-			if (_skipNull && value is null)
-			{
-				continue;
-			}
-
-			if (value is string str)
-			{
-				row[idx] = ApplyMask(str, pattern);
-			}
-			else if (value != null)
-			{
-				// Convert to string, mask, keep as string
-				row[idx] = ApplyMask(value.ToString() ?? "", pattern);
-			}
-		}
-
-		return row;
+		return new ValueTask<IReadOnlyList<PipeColumnInfo>>(outputColumns);
 	}
 
 	protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)
@@ -107,69 +88,45 @@ public class MaskDataTransformer : BaseColumnarTransformer, IRequiresOptions<DtP
 		if (_indexPatterns == null) return new ValueTask<RecordBatch?>(batch);
 
 		var arrays = new IArrowArray[batch.Schema.FieldsList.Count];
+		var outputFields = new List<Field>(batch.Schema.FieldsList.Count);
+
 		for (int i = 0; i < arrays.Length; i++)
 		{
+			var field = batch.Schema.FieldsList[i];
 			if (_indexPatterns.TryGetValue(i, out var pattern))
 			{
-				var originalArray = batch.Column(i);
-				arrays[i] = MaskArray(originalArray, pattern, batch.Length);
+				arrays[i] = MaskArray(batch.Column(i), field, pattern, batch.Length);
+				outputFields.Add(new Field(field.Name, Apache.Arrow.Types.StringType.Default, field.IsNullable));
 			}
 			else
 			{
 				arrays[i] = batch.Column(i);
+				outputFields.Add(field);
 			}
 		}
 
-		return new ValueTask<RecordBatch?>(new RecordBatch(batch.Schema, arrays, batch.Length));
+		var newSchema = new Schema(outputFields, batch.Schema.Metadata);
+		return new ValueTask<RecordBatch?>(new RecordBatch(newSchema, arrays, batch.Length));
 	}
 
-	private IArrowArray MaskArray(IArrowArray original, string pattern, int length)
+	private IArrowArray MaskArray(IArrowArray original, Field field, string pattern, int length)
 	{
 		var builder = new StringArray.Builder();
 
 		for (int i = 0; i < length; i++)
 		{
-			var val = GetStringFromArrow(original, i);
-			if (val == null)
+			if (original.IsNull(i))
 			{
 				builder.AppendNull();
 			}
 			else
 			{
+				var val = ArrowTypeMapper.GetValueForField(original, field, i)?.ToString() ?? "";
 				builder.Append(ApplyMask(val, pattern));
 			}
 		}
 
 		return builder.Build();
-	}
-
-	private string? GetStringFromArrow(IArrowArray array, int index)
-	{
-		if (array.IsNull(index)) return null;
-
-		return array switch
-		{
-			StringArray s => s.GetString(index),
-			_ => GetValueFromArrow(array, index)?.ToString()
-		};
-	}
-
-	private static object? GetValueFromArrow(IArrowArray array, int index)
-	{
-		if (array.IsNull(index)) return null;
-
-		return array switch
-		{
-			StringArray a => a.GetString(index),
-			Int32Array a => a.GetValue(index),
-			Int64Array a => a.GetValue(index),
-			DoubleArray a => a.GetValue(index),
-			FloatArray a => a.GetValue(index),
-			BooleanArray a => a.GetValue(index),
-			Date64Array a => a.GetDateTime(index),
-			TimestampArray a => a.GetTimestamp(index),
-			_ => null
-		};
 	}
 
 	private static string ApplyMask(string input, string pattern)

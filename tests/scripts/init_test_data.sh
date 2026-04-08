@@ -102,23 +102,25 @@ else
     echo "  Skipping test_data.duckdb (already exists)"
 fi
 
-# 5. PostgreSQL (always runs: Recreate is idempotent, no local file to check)
+# 5. PostgreSQL (always runs: --pre-exec drops any stale table so Recreate always uses source schema)
 echo "Initializing PostgreSQL users_test..."
 $DTPIPE -i "generate:1000" \
   --fake "id:random.guid" \
   --fake "username:internet.userName" \
   --fake "last_login:date.past" \
   --drop "GenerateIndex" \
+  --pre-exec "DROP TABLE IF EXISTS users_test CASCADE" \
   -o "pg:Host=localhost;Port=5440;Database=integration;Username=postgres;Password=password" \
   --table "users_test" --strategy Recreate || exit 1
 
-# 6. SQL Server (always runs)
+# 6. SQL Server (always runs: --pre-exec drops any stale table so Recreate always uses source schema)
 echo "Initializing SQL Server users_test..."
 $DTPIPE -i "generate:1000" \
   --fake "id:random.guid" \
   --fake "display_name:name.fullName" \
   --fake "credit_card:finance.creditCardNumber" \
   --drop "GenerateIndex" \
+  --pre-exec "IF OBJECT_ID('users_test', 'U') IS NOT NULL DROP TABLE users_test" \
   -o "mssql:Server=localhost,1434;Database=master;User Id=sa;Password=Password123!;Encrypt=False" \
   --table "users_test" --strategy Recreate || exit 1
 
@@ -134,6 +136,21 @@ $DTPIPE -i "generate:1000" \
   --strategy Recreate \
   --pre-exec "BEGIN EXECUTE IMMEDIATE 'DROP TABLE USERS_TEST_DATA'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;" || exit 1
 
+# 8. PostgreSQL wrong_schema (always runs: intentionally incompatible types for T80/T140 tests)
+# test_data.parquet has (Id:uuid, Name:text, Category:text, Price:text).
+# wrong_schema must have columns with incompatible types so --strict-schema (T80) and
+# Recreate incompatibility detection (T140) both reject the write.
+echo "Initializing PostgreSQL wrong_schema (incompatible types for T80/T140)..."
+$DTPIPE -i "generate:1" \
+  --fake "id:random.number" \
+  --fake "name:random.number" \
+  --fake "category:random.number" \
+  --fake "price:random.number" \
+  --drop "GenerateIndex" \
+  --pre-exec "DROP TABLE IF EXISTS wrong_schema CASCADE" \
+  -o "pg:Host=localhost;Port=5440;Database=integration;Username=postgres;Password=password" \
+  --table "wrong_schema" --strategy Recreate || exit 1
+
 # Restricted directory for T77 (chmod 000 = no read/write/execute)
 if [ ! -d "$ARTIFACTS_DIR/restricted" ]; then
     mkdir -p "$ARTIFACTS_DIR/restricted"
@@ -141,6 +158,16 @@ if [ ! -d "$ARTIFACTS_DIR/restricted" ]; then
     echo "Created restricted/ directory (chmod 000) for T77 access-denied tests."
 else
     echo "  Skipping restricted/ (already exists)"
+fi
+
+# 9. JS script file for T50 (--compute "@file" test)
+if [ ! -f "$ARTIFACTS_DIR/my_script.js" ]; then
+    echo "Generating my_script.js..."
+    cat <<'EOF' > "$ARTIFACTS_DIR/my_script.js"
+row.FirstName + ' ' + row.LastName
+EOF
+else
+    echo "  Skipping my_script.js (already exists)"
 fi
 
 # 8. Complex JSONL (Nested Structures)

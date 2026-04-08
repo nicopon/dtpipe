@@ -16,6 +16,12 @@ echo "===================================================="
 echo "Starting at $(date)"
 echo ""
 
+# Ensure test data is initialized (idempotent: skips file sources that already exist,
+# always recreates DB sources to guarantee a clean known state).
+echo "--- Initializing test data ---"
+"$SCRIPT_DIR/init_test_data.sh" || { echo "init_test_data.sh failed — aborting catalog."; exit 1; }
+echo ""
+
 # Helper to run a test.
 # Tests listed in the EXPECTED_ERROR regex should return a non-zero exit code.
 # Any test NOT in the regex is expected to succeed (exit 0).
@@ -33,7 +39,7 @@ run_test() {
     local status=$?
 
     # Tests in this list are EXPECTED to fail (non-zero exit code = PASS)
-    if [[ "$id" =~ ^T(76|77|78|79|80|81|82|83|84|85|86|87|88|89|90|129|130|131|132|133|134|135)$ ]]; then
+    if [[ "$id" =~ ^T(76|77|78|79|80|81|82|83|84|85|86|87|88|89|90|129|130|131|132|133|134|135|140)$ ]]; then
         if [ $status -eq 0 ]; then
             echo -e "\e[31mFAILED (Expected error but got success)\e[0m"
             return 1
@@ -195,7 +201,7 @@ run_test "T48" "$DTPIPE -i artifacts/test_data.parquet --overwrite \"Price:row.P
 # T49: DAG split by predicate: high-score and low-score rows to separate files
 run_test "T49" "$DTPIPE -i artifacts/test_data.csv --alias s --from s --filter 'row.Score>500' -o artifacts/output_t49_high.csv --from s --filter 'row.Score<=500' -o artifacts/output_t49_low.csv"
 # T50: Compute from an external JS script file (tests @ file-path injection)
-run_test "T50" "$DTPIPE -i artifacts/test_data.csv --compute \"@artifacts/my_script.js\" -o artifacts/T50_ext.parquet"
+run_test "T50" "$DTPIPE -i artifacts/test_data.csv --compute \"FullName:@artifacts/my_script.js\" -o artifacts/T50_ext.parquet"
 
 # 3. Performance & Volumetric
 # T51: Full CSV dump of big Parquet (large sequential file I/O)
@@ -401,6 +407,11 @@ run_test "T138" "$DTPIPE \
 # T139: DataFusion SQL manipulation of complex structures (nested JSON objects)
 # Summing customer loyalty points from a nested 'user' object.
 run_test "T139" "$DTPIPE -i artifacts/complex_data.jsonl --alias orders --from orders --sql \"SELECT count(*) as cnt, sum(user['points']) as total_points FROM orders\" -o artifacts/output_t139.csv"
+
+# T140: [ERROR] Recreate into table with incompatible column types (Guid source vs integer target)
+# wrong_schema has numeric columns (id INTEGER, name INTEGER, ...); test_data.parquet has Id:uuid.
+# ValidateRecreateCompatibility must detect the Guid vs Int32 mismatch and fail with a clear error.
+run_test "T140" "$DTPIPE -i artifacts/test_data.parquet -o \"$PG\" --table \"wrong_schema\" --strategy Recreate"
 
 echo "----------------------------------------"
 

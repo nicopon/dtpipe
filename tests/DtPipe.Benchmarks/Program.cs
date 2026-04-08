@@ -1,5 +1,7 @@
+using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Jobs;
+using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Toolchains.InProcess.Emit;
 using DtPipe.Benchmarks;
@@ -22,6 +24,8 @@ internal sealed class InProcessConfig : ManualConfig
 {
     public InProcessConfig()
     {
-        AddJob(Job.MediumRun.WithToolchain(InProcessEmitToolchain.Instance));
+        AddJob(Job.ShortRun.WithToolchain(InProcessEmitToolchain.Instance));
+        AddLogger(ConsoleLogger.Default);
+        AddColumnProvider(DefaultColumnProviders.Instance);
     }
 }

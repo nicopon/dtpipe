@@ -194,16 +194,16 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
 	}
 
 
-	public override object?[]? Transform(object?[] row)
+	public override object?[]? Transform(IReadOnlyList<object?> row)
 	{
-		if (_compiledFilters.Count == 0 || _columnNames == null) return row;
+		if (_compiledFilters.Count == 0 || _columnNames == null) return row as object?[] ?? row.ToArray();
 
 		var engine = _jsEngineProvider.GetEngine();
 		EnsureFiltersCompiled(engine);
 
 		// Build JS Context with Proxy for missing column detection
 		var jsSource = new JsObject(engine);
-		for (int i = 0; i < row.Length; i++)
+		for (int i = 0; i < row.Count; i++)
 		{
 			var val = row[i];
 			if (val == DBNull.Value) val = null;
@@ -237,7 +237,7 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
 		}
 
 
-		return row;
+		return row as object?[] ?? row.ToArray();
 	}
 
 	private void EnsureFiltersCompiled(Engine engine)

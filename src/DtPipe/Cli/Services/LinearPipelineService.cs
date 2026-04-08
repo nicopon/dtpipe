@@ -1,5 +1,6 @@
 using System.CommandLine;
 using Apache.Arrow;
+using DtPipe.Cli.Helpers;
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
@@ -53,8 +54,8 @@ public class LinearPipelineService
         if (ctx?.ChannelInjection is { } plan)
         {
             job = job with {
-                Input   = plan.InputChannelAlias != null  ? ToChannelSpec(plan.InputChannelAlias)  : job.Input,
-                Output  = plan.OutputChannelAlias != null ? ToChannelSpec(plan.OutputChannelAlias) : job.Output,
+                Input   = plan.InputChannelAlias != null  ? ChannelSpecHelper.ArrowMemory(plan.InputChannelAlias)  : job.Input,
+                Output  = plan.OutputChannelAlias != null ? ChannelSpecHelper.ArrowMemory(plan.OutputChannelAlias) : job.Output,
                 NoStats = job.NoStats || plan.SuppressStats
             };
         }
@@ -205,9 +206,6 @@ public class LinearPipelineService
             return 1;
         }
     }
-
-    private static string ToChannelSpec(string alias)
-        => $"arrow-memory:{alias}";
 
     private static (T Factory, string CleanedString) ResolveFactory<T>(IEnumerable<T> factories, string rawString, string typeName) where T : IDataFactory
     {

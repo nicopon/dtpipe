@@ -100,9 +100,6 @@ public static class ArrowReflectionEngine
                 if (args.Length > 1) valueType = args[1];
             }
 
-            if (keyType == typeof(string))
-                return new ArrowTypeResult(new StructType(new List<Field>()));
-
             return new ArrowTypeResult(new MapType(
                 ArrowTypeMap.GetField("key", GetLogicalType(keyType), false),
                 ArrowTypeMap.GetField("value", GetLogicalType(valueType), true),

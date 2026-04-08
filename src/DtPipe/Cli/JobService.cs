@@ -2,6 +2,7 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
 using System.CommandLine.Completions;
+using DtPipe.Cli.Helpers;
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Cli.Commands;
 using DtPipe.Cli.Dag;
@@ -271,8 +272,8 @@ public class JobService
 					var (argJobDict, _) = RawJobBuilder.Build(pr, cliJobOptions);
 					var argJob = argJobDict.Values.First();
 					job = job with {
-						Input  = ctx?.ChannelInjection?.InputChannelAlias != null ? ToChannelSpec(ctx.ChannelInjection.InputChannelAlias) : argJob.Input,
-						Output = ctx?.ChannelInjection?.OutputChannelAlias != null ? ToChannelSpec(ctx.ChannelInjection.OutputChannelAlias) : argJob.Output,
+						Input  = ctx?.ChannelInjection?.InputChannelAlias != null ? ChannelSpecHelper.ArrowMemory(ctx.ChannelInjection.InputChannelAlias) : argJob.Input,
+						Output = ctx?.ChannelInjection?.OutputChannelAlias != null ? ChannelSpecHelper.ArrowMemory(ctx.ChannelInjection.OutputChannelAlias) : argJob.Output,
 						Query  = !string.IsNullOrEmpty(argJob.Query) ? argJob.Query : job.Query
 					};
 				}
@@ -522,9 +523,6 @@ public class JobService
 		var desc = opt.Description ?? "";
 		console.WriteLine($"  {name,-40} {desc}");
 	}
-
-	private static string ToChannelSpec(string alias)
-		=> $"arrow-memory:{alias}";
 
 	private static string? ResolveKeyring(string? input, IAnsiConsole console)
 	{

@@ -59,10 +59,10 @@ public sealed class PipelineExecutor
         CancellationTokenSource linkedCts,
         CancellationToken ct)
     {
-        // Row-sink optimization: if the writer cannot consume Arrow natively, there is no benefit
-        // in producing RecordBatches — running the full pipeline in row mode avoids all bridges.
-        // All transformers implement Transform(row), so row mode is always a valid fallback.
-        bool rowModePreferred = writer is not IColumnarDataWriter;
+        // Determine whether any segment is columnar. When there are columnar segments, the pipeline
+        // must enter Arrow mode at some point regardless of the writer type — columnar transformers
+        // only implement TransformBatchAsync and must not be called via Transform(row).
+        bool hasColumnarSegments = segments.Any(s => s.IsColumnar);
 
         if (segments.Count == 0)
         {
@@ -105,12 +105,13 @@ public sealed class PipelineExecutor
         if (segments.Count > 0)
         {
             IAsyncEnumerable<RecordBatch> currentColumnarSource = null!;
-            IAsyncEnumerable<object?[]> currentRowSource = null!;
+            IAsyncEnumerable<IReadOnlyList<object?>> currentRowSource = null!;
             bool isCurrentColumnar = false;
 
-            if (reader is IColumnarStreamReader columnarReader && !rowModePreferred)
+            if (reader is IColumnarStreamReader columnarReader && (writer is IColumnarDataWriter || hasColumnarSegments))
             {
-                // Columnar sink: start in Arrow mode to maximise the columnar fast-path
+                // Start in Arrow mode when the writer is columnar or when columnar segments are present.
+                // This avoids materialising object?[] rows for data that will be processed as RecordBatches.
                 currentColumnarSource = columnarReader.ReadRecordBatchesAsync(ct);
                 if (options.SamplingRate > 0 && options.SamplingRate < 1.0)
                 {
@@ -129,9 +130,7 @@ public sealed class PipelineExecutor
 
             foreach (var segment in segments)
             {
-                // When rowModePreferred: run all segments in row mode regardless of IsColumnar.
-                // Every transformer (including columnar-capable ones) implements Transform(row).
-                if (segment.IsColumnar && !rowModePreferred)
+                if (segment.IsColumnar)
                 {
                     if (!isCurrentColumnar)
                     {
@@ -185,7 +184,7 @@ public sealed class PipelineExecutor
         }
     }
 
-    internal async IAsyncEnumerable<object?[]> ProduceRowStreamAsync(
+    internal async IAsyncEnumerable<IReadOnlyList<object?>> ProduceRowStreamAsync(
         IStreamReader reader,
         int batchSize,
         int limit,
@@ -209,7 +208,7 @@ public sealed class PipelineExecutor
     }
 
     private async IAsyncEnumerable<RecordBatch> BridgeRowsToColumnarAsync(
-        IAsyncEnumerable<object?[]> rows,
+        IAsyncEnumerable<IReadOnlyList<object?>> rows,
         IRowToColumnarBridgeFactory factory,
         IReadOnlyList<PipeColumnInfo> columns,
         int batchSize,
@@ -227,7 +226,7 @@ public sealed class PipelineExecutor
                 var buffer = new List<object?[]>(batchSize);
                 await foreach (var row in rows.WithCancellation(ct))
                 {
-                    buffer.Add(row);
+                    buffer.Add(row as object?[] ?? row.ToArray());
                     if (buffer.Count >= batchSize)
                     {
                         await bridge.IngestRowsAsync(buffer.ToArray(), ct);
@@ -257,7 +256,7 @@ public sealed class PipelineExecutor
         await ingestionTask;
     }
 
-    private async IAsyncEnumerable<object?[]> BridgeColumnarToRowsAsync(
+    private async IAsyncEnumerable<IReadOnlyList<object?>> BridgeColumnarToRowsAsync(
         IAsyncEnumerable<RecordBatch> batches,
         IColumnarToRowBridgeFactory factory,
         [EnumeratorCancellation] CancellationToken ct)
@@ -329,8 +328,8 @@ public sealed class PipelineExecutor
         }
     }
 
-    private async IAsyncEnumerable<object?[]> ApplyRowSegmentAsync(
-        IAsyncEnumerable<object?[]> source,
+    private async IAsyncEnumerable<IReadOnlyList<object?>> ApplyRowSegmentAsync(
+        IAsyncEnumerable<IReadOnlyList<object?>> source,
         List<IDataTransformer> transformers,
         IExportProgress progress,
         [EnumeratorCancellation] CancellationToken ct)
@@ -358,16 +357,16 @@ public sealed class PipelineExecutor
         }
     }
 
-    internal List<object?[]> ProcessRowThroughTransformers(
-        object?[] row,
+    internal List<IReadOnlyList<object?>> ProcessRowThroughTransformers(
+        IReadOnlyList<object?> row,
         List<IDataTransformer> p,
         IExportProgress progress,
         CancellationToken ct)
     {
-        var currentRows = new List<object?[]> { row };
+        var currentRows = new List<IReadOnlyList<object?>> { row };
         foreach (var transformer in p)
         {
-            var nextRows = new List<object?[]>();
+            var nextRows = new List<IReadOnlyList<object?>>();
             foreach (var r in currentRows)
             {
                 if (transformer is IMultiRowTransformer multi)
@@ -403,7 +402,7 @@ public sealed class PipelineExecutor
     }
 
     internal async Task ConsumeRowStreamAsync(
-        IAsyncEnumerable<object?[]> source,
+        IAsyncEnumerable<IReadOnlyList<object?>> source,
         IRowDataWriter writer,
         int batchSize,
         IExportProgress progress,
@@ -412,7 +411,10 @@ public sealed class PipelineExecutor
         var buffer = new List<object?[]>(batchSize);
         await foreach (var row in source.WithCancellation(ct))
         {
-            buffer.Add(row);
+            // If row is a virtual view (ArrowRowView), it must be materialized 
+            // before being buffered for the batch writer, as ArrowRowView is ephemeral.
+            var rowArray = row as object?[] ?? row.ToArray();
+            buffer.Add(rowArray);
             if (buffer.Count >= batchSize)
             {
                 var batch = buffer.ToArray();
@@ -463,7 +465,7 @@ public sealed class PipelineExecutor
     }
 
     private async Task DirectRowTransferFromRowsAsync(
-        IAsyncEnumerable<object?[]> rows,
+        IAsyncEnumerable<IReadOnlyList<object?>> rows,
         IRowDataWriter writer,
         int batchSize,
         int limit,
@@ -479,7 +481,7 @@ public sealed class PipelineExecutor
         await foreach (var row in rows.WithCancellation(ct))
         {
             if (sampler != null && sampler.NextDouble() > samplingRate) continue;
-            buffer.Add(row);
+            buffer.Add(row as object?[] ?? row.ToArray());
             bool limitReached = limit > 0 && ++rowCount >= limit;
 
             if (buffer.Count >= batchSize || limitReached)

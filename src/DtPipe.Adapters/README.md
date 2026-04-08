@@ -39,6 +39,7 @@ Each adapter family lives in its own folder under `Adapters/`:
 ```
 DtPipe.Adapters/
 └── Adapters/
+    ├── Common/          Shared helpers (GuidAsBytesConsumer, …)
     ├── DuckDB/          DuckDbReaderOptions, DuckDbWriterOptions, DuckDbStreamReader, DuckDbDataWriter, ...
     ├── Sqlite/          SqliteReaderOptions, SqliteWriterOptions, SqliteStreamReader, SqliteDataWriter, ...
     ├── PostgreSQL/      PostgreSqlReaderOptions, PostgreSqlWriterOptions, PostgreSqlReader, PostgreSqlDataWriter, ...
@@ -49,7 +50,9 @@ DtPipe.Adapters/
     ├── Arrow/           ArrowStreamReader, ArrowDataWriter, ...
     ├── Parquet/         ParquetStreamReader, ParquetDataWriter, ...
     ├── Generate/        GenerateStreamReader (synthetic data)
-    └── Checksum/        ChecksumDataWriter
+    ├── Null/            NullDataWriter
+    ├── Checksum/        ChecksumDataWriter
+    └── MemoryChannel/   In-process channels for DAG branch wiring (row and Arrow modes)
 ```
 
 ---

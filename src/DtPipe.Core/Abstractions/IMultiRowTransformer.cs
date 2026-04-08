@@ -11,5 +11,5 @@ public interface IMultiRowTransformer : IDataTransformer
 	/// </summary>
 	/// <param name="row">The input row.</param>
 	/// <returns>An enumerable of output rows.</returns>
-	IEnumerable<object?[]> TransformMany(object?[] row);
+	IEnumerable<object?[]> TransformMany(IReadOnlyList<object?> row);
 }

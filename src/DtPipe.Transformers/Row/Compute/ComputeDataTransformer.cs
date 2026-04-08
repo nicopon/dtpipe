@@ -112,27 +112,33 @@ public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<
 		return new ValueTask<IReadOnlyList<PipeColumnInfo>>(outputColumns);
 	}
 
-	public object?[]? Transform(object?[] row)
+	public object?[]? Transform(IReadOnlyList<object?> row)
 	{
-		if (_processors == null || _processors.Length == 0 || _columnNames == null) return row;
+		if (_processors == null || _processors.Length == 0 || _columnNames == null)
+            return row as object?[] ?? row.ToArray();
 
 		var engine = _jsEngineProvider.GetEngine();
 		EnsureFunctionsCompiled(engine);
 
 		// Expand the row if new virtual columns were added during InitializeAsync
 		var outputLength = _columnNames.Length;
-		if (outputLength > row.Length)
+        object?[] rowArray;
+
+		if (outputLength > row.Count)
 		{
-			var expanded = new object?[outputLength];
-			Array.Copy(row, expanded, row.Length);
-			row = expanded;
+			rowArray = new object?[outputLength];
+            for (int i = 0; i < row.Count; i++) rowArray[i] = row[i];
 		}
+        else
+        {
+            rowArray = row as object?[] ?? row.ToArray();
+        }
 
 		// Build a JS object representing the input row (input columns only)
 		var jsSource = new JsObject(engine);
 		for (int i = 0; i < _inputColumnCount && i < _columnNames.Length; i++)
 		{
-			jsSource.Set(_columnNames[i], JsValue.FromObject(engine, row[i]));
+			jsSource.Set(_columnNames[i], JsValue.FromObject(engine, rowArray[i]));
 		}
 
         // Create Proxy using Jint Engine API for robust schema validation
@@ -143,18 +149,18 @@ public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<
 
 		foreach (var processor in _processors)
 		{
-			if (_skipNull && processor.ColumnIndex < _inputColumnCount && row[processor.ColumnIndex] is null)
+			if (_skipNull && processor.ColumnIndex < _inputColumnCount && rowArray[processor.ColumnIndex] is null)
 				continue;
 
 			try
 			{
 				var result = engine.Evaluate($"{processor.FunctionName}(row)");
 
-				row[processor.ColumnIndex] = (result.IsUndefined() || result.IsNull())
+				rowArray[processor.ColumnIndex] = (result.IsUndefined() || result.IsNull())
 					? null
 					: result.ToObject();
 
-                if (row[processor.ColumnIndex] is double d && (double.IsInfinity(d) || double.IsNaN(d)))
+                if (rowArray[processor.ColumnIndex] is double d && (double.IsInfinity(d) || double.IsNaN(d)))
                 {
                      throw new InvalidOperationException($"Compute script for column '{_columnNames[processor.ColumnIndex]}' resulted in {d} (possible division by zero).");
                 }
@@ -165,7 +171,7 @@ public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<
 			}
 		}
 
-		return row;
+		return rowArray;
 	}
 
 	// Dispose handled by DI scope? No, provider is singleton/scoped.

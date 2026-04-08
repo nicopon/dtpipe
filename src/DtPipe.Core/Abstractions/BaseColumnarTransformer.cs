@@ -41,7 +41,15 @@ public abstract class BaseColumnarTransformer : IColumnarTransformer
         yield break;
     }
 
-    public abstract object?[]? Transform(object?[] row);
+    /// <summary>
+    /// Row-mode transform. Transformers with <c>CanProcessColumnar = true</c> are always routed
+    /// through <see cref="TransformBatchAsync"/> by the pipeline executor and never need to
+    /// override this. Only override when <c>CanProcessColumnar</c> can be <c>false</c>
+    /// (e.g. Filter with complex expressions, Format with cross-column dependencies).
+    /// </summary>
+    public virtual object?[]? Transform(IReadOnlyList<object?> row)
+        => throw new NotSupportedException(
+               $"{GetType().Name} is columnar-only. Ensure CanProcessColumnar=true or override Transform(row).");
 
     public virtual IEnumerable<object?[]> Flush()
     {

@@ -87,7 +87,7 @@ public class ArrowOwnershipTests
     private class SpyTransformer : BaseColumnarTransformer
     {
         public override bool CanProcessColumnar { get; protected set; } = true;
-        public override object?[]? Transform(object?[] row) => row;
+        public override object?[]? Transform(IReadOnlyList<object?> row) => row as object?[] ?? row.ToArray();
         protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)
         {
             // Just pass through

@@ -77,6 +77,15 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter, IColumnarD
 			}
 			catch { }
 
+			// Fail fast with a clear message if source/target types are incompatible.
+			// Recreate preserves the existing table DDL (no silent mutations), so a type
+			// mismatch (e.g. source Guid vs existing TEXT) must be surfaced before any DDL
+			// rather than causing a cryptic InvalidCastException in the Arrow write path.
+			if (existingSchema != null && existingSchema.Exists)
+			{
+				ValidateRecreateCompatibility(_columns!, existingSchema);
+			}
+
 			await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS {_quotedTargetTableName}", ct);
 
 			string createSql;
@@ -337,6 +346,35 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter, IColumnarD
 					writer.WriteNull();  // sync, no allocation
 				else
 					_arrowColumnWriters![j](array, row, writer);  // sync, zero-boxing
+			}
+		}
+	}
+
+	/// <summary>
+	/// Checks that every source column has a CLR type compatible with the existing target column.
+	/// Throws <see cref="InvalidOperationException"/> with a descriptive message on the first
+	/// mismatch found, preventing a cryptic <see cref="InvalidCastException"/> later in the
+	/// Arrow write path.
+	/// </summary>
+	private static void ValidateRecreateCompatibility(
+		IReadOnlyList<PipeColumnInfo> sourceColumns,
+		TargetSchemaInfo existingTarget)
+	{
+		foreach (var sourceCol in sourceColumns)
+		{
+			var targetCol = existingTarget.Columns
+				.FirstOrDefault(c => c.Name.Equals(sourceCol.Name, StringComparison.OrdinalIgnoreCase));
+			if (targetCol?.InferredClrType == null) continue;
+
+			var srcBase = Nullable.GetUnderlyingType(sourceCol.ClrType) ?? sourceCol.ClrType;
+			var tgtBase = Nullable.GetUnderlyingType(targetCol.InferredClrType) ?? targetCol.InferredClrType;
+
+			if (srcBase != tgtBase)
+			{
+				throw new InvalidOperationException(
+					$"Recreate strategy: column '{sourceCol.Name}' has incompatible types — " +
+					$"source is '{srcBase.Name}' but existing table column is '{tgtBase.Name}' ({targetCol.NativeType}). " +
+					$"Drop the table manually before rerunning, or add --pre-exec \"DROP TABLE IF EXISTS <table> CASCADE\".");
 			}
 		}
 	}

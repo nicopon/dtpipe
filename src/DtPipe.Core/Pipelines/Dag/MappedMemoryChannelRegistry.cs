@@ -24,17 +24,11 @@ public class MappedMemoryChannelRegistry : IMemoryChannelRegistry
     private string Resolve(string alias) 
         => _context.AliasMap.TryGetValue(alias, out var physical) ? physical : alias;
 
-    public void RegisterChannel(string branchAlias, Channel<IReadOnlyList<object?[]>> channel, IReadOnlyList<PipeColumnInfo> columns)
-        => _inner.RegisterChannel(Resolve(branchAlias), channel, columns);
-
     public void UpdateChannelColumns(string branchAlias, IReadOnlyList<PipeColumnInfo> columns)
         => _inner.UpdateChannelColumns(Resolve(branchAlias), columns);
 
     public Task<IReadOnlyList<PipeColumnInfo>> WaitForChannelColumnsAsync(string branchAlias, CancellationToken ct = default)
         => _inner.WaitForChannelColumnsAsync(Resolve(branchAlias), ct);
-
-    public (Channel<IReadOnlyList<object?[]>> Channel, IReadOnlyList<PipeColumnInfo> Columns)? GetChannel(string branchAlias)
-        => _inner.GetChannel(Resolve(branchAlias));
 
     public bool ContainsChannel(string branchAlias)
         => _inner.ContainsChannel(Resolve(branchAlias));

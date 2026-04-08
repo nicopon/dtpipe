@@ -42,7 +42,7 @@ public sealed class ArrowRowToColumnarBridge : IRowToColumnarBridge
     public ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, int batchSize, Schema? overrideSchema = null, CancellationToken ct = default)
     {
         _batchSize = batchSize;
-        _schema = overrideSchema ?? BuildSchema(columns);
+        _schema = BuildAndEnrichSchema(columns, overrideSchema);
         _builders = CreateBuilders(_schema);
         _appenders = CreateAppenders(_builders);
         _rowsInBuffer = 0;
@@ -50,6 +50,11 @@ public sealed class ArrowRowToColumnarBridge : IRowToColumnarBridge
         _logger.LogDebug("Arrow Bridge initialized with {Count} columns, batch size {BatchSize}", columns.Count, batchSize);
         return ValueTask.CompletedTask;
     }
+
+    private static Schema BuildAndEnrichSchema(IReadOnlyList<PipeColumnInfo> columns, Schema? overrideSchema)
+        => overrideSchema != null
+            ? ArrowSchemaFactory.CreateEnriched(columns, overrideSchema)
+            : ArrowSchemaFactory.Create(columns);
 
     public async ValueTask IngestRowsAsync(ReadOnlyMemory<object?[]> rows, CancellationToken ct = default)
     {

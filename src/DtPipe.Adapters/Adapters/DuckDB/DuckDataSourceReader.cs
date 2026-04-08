@@ -136,6 +136,7 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
 				catch (Exception ex)
 				{
 					_logger.LogError(ex, "Error during DuckDB to Arrow ingestion");
+					bridge.Fault(ex);
 					throw;
 				}
 			}, ct);

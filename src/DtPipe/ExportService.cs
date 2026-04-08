@@ -236,14 +236,18 @@ public class ExportService
 		using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 		var effectiveCt = linkedCts.Token;
 
-		// Propagate richSourceSchema for Arrow-capable readers (e.g. JsonL with StructType columns).
-		// InputSchema and OutputSchema are already populated per-segment by ExportService above
-		// (using the transformer input/output schema chain). Only set InputSchemaArrow here to pass
-		// the native Arrow schema to the row→columnar bridge so it can preserve complex types.
-		Schema? richSourceSchema = (reader as IStreamTransformer)?.Schema ?? (reader as IColumnarStreamReader)?.Schema;
+		// Propagate InputSchemaArrow for each segment so the row→columnar bridge can preserve complex
+		// Arrow type metadata (Timestamp timezone, Decimal precision/scale, arrow.uuid annotations).
+		// Each segment derives its Arrow schema from its own InputSchema (PipeColumnInfo) via
+		// ArrowSchemaFactory, which is authoritative after the InitializeAsync chain. The reader's
+		// native schema is merged in for field-level metadata enrichment only — never to override a
+		// column type that a transformer has mutated (e.g. Overwrite: Int64 → StringType).
+		Schema? readerArrowSchema = (reader as IStreamTransformer)?.Schema ?? (reader as IColumnarStreamReader)?.Schema;
 		foreach (var segment in segments)
 		{
-			segment.InputSchemaArrow = richSourceSchema;
+			segment.InputSchemaArrow = readerArrowSchema != null
+				? ArrowSchemaFactory.CreateEnriched(segment.InputSchema, readerArrowSchema)
+				: ArrowSchemaFactory.Create(segment.InputSchema);
 		}
 
 		try

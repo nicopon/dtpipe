@@ -64,7 +64,7 @@ public class WindowDataTransformer : IMultiRowTransformer, IRequiresOptions<DtPi
 		return ValueTask.FromResult(sourceColumns);
 	}
 
-	public object?[]? Transform(object?[] row)
+	public object?[]? Transform(IReadOnlyList<object?> row)
 	{
 		// Fallback or explicit single-row usage not supported well here.
 		// Return null or first row of window?
@@ -75,7 +75,7 @@ public class WindowDataTransformer : IMultiRowTransformer, IRequiresOptions<DtPi
 		return null;
 	}
 
-	public IEnumerable<object?[]> TransformMany(object?[] row)
+	public IEnumerable<object?[]> TransformMany(IReadOnlyList<object?> row)
 	{
 		bool flush = false;
 
@@ -97,8 +97,8 @@ public class WindowDataTransformer : IMultiRowTransformer, IRequiresOptions<DtPi
 			foreach (var r in ProcessBuffer()) yield return r;
 		}
 
-		// Add current row
-		_buffer.Add(row);
+		// Add current row (MUST materialize because ArrowRowView is ephemeral)
+		_buffer.Add(row as object?[] ?? row.ToArray());
 
 		// Check Count
 		if (_buffer.Count >= _options.Count)

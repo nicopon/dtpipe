@@ -253,12 +253,23 @@ public static class ArrowTypeMapper
                 if (value is byte[] binBytes) b.Append((System.Collections.Generic.IEnumerable<byte>)binBytes);
                 else b.AppendNull();
                 break;
-            case Date32Array.Builder b: b.Append(Convert.ToDateTime(value)); break;
-            case Date64Array.Builder b: b.Append(Convert.ToDateTime(value)); break;
+            case Date32Array.Builder b: 
+                if (value is DateOnly d32) b.Append(d32.ToDateTime(TimeOnly.MinValue));
+                else b.Append(Convert.ToDateTime(value)); 
+                break;
+            case Date64Array.Builder b: 
+                if (value is DateOnly d64) b.Append(d64.ToDateTime(TimeOnly.MinValue));
+                else b.Append(Convert.ToDateTime(value)); 
+                break;
             case TimestampArray.Builder b:
                 if (value is DateTimeOffset dto) b.Append(dto);
                 else if (value is DateTime dt) b.Append(dt);
+                else if (value is DateOnly d) b.Append(d.ToDateTime(TimeOnly.MinValue));
                 else b.Append(Convert.ToDateTime(value));
+                break;
+            case Time64Array.Builder b64:
+                if (value is TimeOnly t) b64.Append(t.ToTimeSpan().Ticks * 100); 
+                else b64.Append(Convert.ToInt64(value));
                 break;
             case StructArrayManualBuilder b:
                 b.AppendValue(value);

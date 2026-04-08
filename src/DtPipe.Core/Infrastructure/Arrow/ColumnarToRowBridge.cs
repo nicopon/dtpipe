@@ -7,21 +7,25 @@ namespace DtPipe.Core.Infrastructure.Arrow;
 public class ArrowColumnarToRowBridge : IColumnarToRowBridge
 {
 #pragma warning disable CS1998 // Async method lacks 'await' — required for IAsyncEnumerable iterator
-    public async IAsyncEnumerable<object?[]> ConvertBatchToRowsAsync(RecordBatch batch, [EnumeratorCancellation] CancellationToken ct = default)
+    private Schema? _lastSchema;
+    private Dictionary<string, int>? _nameToIndex;
+
+    public async IAsyncEnumerable<IReadOnlyList<object?>> ConvertBatchToRowsAsync(RecordBatch batch, [EnumeratorCancellation] CancellationToken ct = default)
     {
+        if (_lastSchema != batch.Schema)
+        {
+            _lastSchema = batch.Schema;
+            _nameToIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < batch.Schema.FieldsList.Count; i++)
+                _nameToIndex[batch.Schema.GetFieldByIndex(i).Name] = i;
+        }
+
         int rowCount = batch.Length;
-        int colCount = batch.Schema.FieldsList.Count;
 
         for (int i = 0; i < rowCount; i++)
         {
             if (ct.IsCancellationRequested) break;
-
-            var row = new object?[colCount];
-            for (int j = 0; j < colCount; j++)
-                row[j] = ArrowTypeMapper.GetValueForField(
-                    batch.Column(j), batch.Schema.GetFieldByIndex(j), i);
-
-            yield return row;
+            yield return new ArrowRowView(batch, i, _nameToIndex!);
         }
     }
 #pragma warning restore CS1998

@@ -22,15 +22,6 @@ public class MemoryChannelRegistry : IMemoryChannelRegistry
     private readonly ConcurrentDictionary<string, TaskCompletionSource<Schema>> _arrowSchemaTcs
         = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// Legacy row-based registration. Now effectively deprecated and throws 
-    /// as all orchestration should use RegisterArrowChannel.
-    /// </summary>
-    public void RegisterChannel(string branchAlias, Channel<IReadOnlyList<object?[]>> channel, IReadOnlyList<PipeColumnInfo> columns)
-    {
-        throw new NotSupportedException("Native row-based channels are no longer supported. Use RegisterArrowChannel.");
-    }
-
     public void UpdateChannelColumns(string branchAlias, IReadOnlyList<PipeColumnInfo> columns)
     {
         // Forward row-based column updates to the Arrow schema storage
@@ -55,12 +46,6 @@ public class MemoryChannelRegistry : IMemoryChannelRegistry
         return ArrowSchemaFactory.ToPipeColumns(schema);
     }
 
-    public (Channel<IReadOnlyList<object?[]>> Channel, IReadOnlyList<PipeColumnInfo> Columns)? GetChannel(string branchAlias)
-    {
-        // No longer providing native row-based channel access
-        return null;
-    }
-
     public bool ContainsChannel(string branchAlias)
     {
         return _arrowChannels.ContainsKey(branchAlias);
@@ -81,8 +66,8 @@ public class MemoryChannelRegistry : IMemoryChannelRegistry
         if (_arrowChannels.TryGetValue(branchAlias, out var arrowData))
         {
             // Protection: if existing schema is richer than the new one, preserve it.
-            bool existingIsRicher = DtPipe.Core.Infrastructure.Arrow.ArrowSchemaFactory.IsRichSchema(arrowData.Schema);
-            bool newIsRicher = DtPipe.Core.Infrastructure.Arrow.ArrowSchemaFactory.IsRichSchema(schema);
+            bool existingIsRicher = ArrowSchemaFactory.IsRichSchema(arrowData.Schema);
+            bool newIsRicher = ArrowSchemaFactory.IsRichSchema(schema);
             
             if (newIsRicher || !existingIsRicher || arrowData.Schema.FieldsList.Count == 0)
             {

@@ -191,7 +191,11 @@ internal class Date32Handler : ScalarArrowHandler<Date32Type, Date32Array, Date3
     public override IArrowArrayBuilder CreateBuilder(IArrowType type) => new Date32Array.Builder();
     protected override void AppendNullTyped(Date32Array.Builder b) => b.AppendNull();
     protected override IArrowArray BuildTyped(Date32Array.Builder b) => b.Build();
-    protected override void AppendValueTyped(Date32Array.Builder b, object v) => b.Append(Convert.ToDateTime(v));
+    protected override void AppendValueTyped(Date32Array.Builder b, object v)
+    {
+        if (v is DateOnly d) b.Append(d.ToDateTime(TimeOnly.MinValue));
+        else b.Append(Convert.ToDateTime(v));
+    }
 }
 
 internal class Date64Handler : ScalarArrowHandler<Date64Type, Date64Array, Date64Array.Builder>
@@ -199,7 +203,11 @@ internal class Date64Handler : ScalarArrowHandler<Date64Type, Date64Array, Date6
     public override IArrowArrayBuilder CreateBuilder(IArrowType type) => new Date64Array.Builder();
     protected override void AppendNullTyped(Date64Array.Builder b) => b.AppendNull();
     protected override IArrowArray BuildTyped(Date64Array.Builder b) => b.Build();
-    protected override void AppendValueTyped(Date64Array.Builder b, object v) => b.Append(Convert.ToDateTime(v));
+    protected override void AppendValueTyped(Date64Array.Builder b, object v)
+    {
+        if (v is DateOnly d) b.Append(d.ToDateTime(TimeOnly.MinValue));
+        else b.Append(Convert.ToDateTime(v));
+    }
 }
 
 internal class TimestampHandler : ScalarArrowHandler<TimestampType, TimestampArray, TimestampArray.Builder>
@@ -211,6 +219,7 @@ internal class TimestampHandler : ScalarArrowHandler<TimestampType, TimestampArr
     {
         if (v is DateTimeOffset dto) b.Append(dto);
         else if (v is DateTime dt) b.Append(dt);
+        else if (v is DateOnly d) b.Append(d.ToDateTime(TimeOnly.MinValue));
         else b.Append(Convert.ToDateTime(v));
     }
 }
@@ -236,5 +245,9 @@ internal class Time64Handler : ScalarArrowHandler<Time64Type, Time64Array, Time6
     public override IArrowArrayBuilder CreateBuilder(IArrowType type) => new Time64Array.Builder((Time64Type)type);
     protected override void AppendNullTyped(Time64Array.Builder b) => b.AppendNull();
     protected override IArrowArray BuildTyped(Time64Array.Builder b) => b.Build();
-    protected override void AppendValueTyped(Time64Array.Builder b, object v) => b.Append(Convert.ToInt64(v));
+    protected override void AppendValueTyped(Time64Array.Builder b, object v)
+    {
+        if (v is TimeOnly t) b.Append(t.ToTimeSpan().Ticks * 100);
+        else b.Append(Convert.ToInt64(v));
+    }
 }

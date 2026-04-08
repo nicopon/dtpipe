@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -252,14 +252,15 @@ class Program
             return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
         }
 
-        public object?[]? Transform(object?[] row)
+        public object?[]? Transform(IReadOnlyList<object?> row)
         {
+            var result = row as object?[] ?? row.ToArray();
             // Simple robust transformation using pure C# (compiled natively, very fast)
-            if (row.Length > 0 && row[0] is long id)
+            if (result.Length > 0 && result[0] is long id)
             {
-                row[0] = $"Hello {id}"; // Boxing the new string into the object array
+                result[0] = $"Hello {id}"; // Boxing the new string into the object array
             }
-            return row; // Return the mutated array to yield it downstream
+            return result; // Return the mutated array to yield it downstream
         }
     }
 

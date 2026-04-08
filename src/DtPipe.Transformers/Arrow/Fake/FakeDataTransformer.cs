@@ -221,68 +221,6 @@ public sealed partial class FakeDataTransformer : BaseColumnarTransformer, IRequ
 		return _ => fakerPath;
 	}
 
-	public override object?[]? Transform(object?[] row)
-	{
-		_rowCounter++;
-
-		if (_processors is null || _generationOrder is null) return row;
-
-		var totalColumns = _realColumnCount + _virtualColumns.Count;
-		var resultRow = new object?[totalColumns];
-		System.Array.Copy(row, resultRow, _realColumnCount);
-
-		// Initialize virtual columns with null for safety
-		for (int i = 0; i < _virtualColumns.Count; i++)
-		{
-			resultRow[_realColumnCount + i] = null;
-		}
-
-		// Row-level seed for deterministic mode
-		int? rowSeed = null;
-		if (_deterministic)
-		{
-			rowSeed = (int)(_rowCounter & 0x7FFFFFFF);
-		}
-		else if (_seedColumnIndex >= 0)
-		{
-			var seedVal = resultRow[_seedColumnIndex];
-			if (seedVal is not null)
-			{
-				rowSeed = (int)(DtPipe.Transformers.Arrow.Fake.StableHash.Compute(seedVal) & 0x7FFFFFFF);
-			}
-		}
-
-		foreach (var idx in _generationOrder)
-		{
-			// Skip if source is null and SkipNull is enabled (for real columns only)
-			if (_skipNull && idx < _realColumnCount && resultRow[idx] is null)
-			{
-				continue;
-			}
-
-			var proc = _processors[idx];
-			if (proc.IsTemplate)
-			{
-				resultRow[idx] = ProcessTemplate(resultRow, proc.Template!, proc.ReferencedColumns!);
-			}
-			else if (proc.Generator is not null)
-			{
-				if (rowSeed.HasValue && _pagedCaches!.TryGetValue(idx, out var cache))
-				{
-					// Use paged cache for deterministic/seedcolumn mode
-					resultRow[idx] = cache.GetValue(rowSeed.Value);
-				}
-				else
-				{
-					// Normal random mode
-					resultRow[idx] = proc.Generator(_faker);
-				}
-			}
-		}
-
-		return resultRow;
-	}
-
 	private object? ProcessTemplate(object?[] row, string template, HashSet<string> refCols)
 	{
 		return TemplatePattern().Replace(template, match =>

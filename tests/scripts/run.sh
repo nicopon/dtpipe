@@ -43,7 +43,6 @@ show_help() {
     echo "Individual scripts can be run directly:"
     echo "  $SCRIPT_DIR/validate_transformers.sh"
     echo "  $SCRIPT_DIR/validate_schema.sh"
-    echo "  $SCRIPT_DIR/validate_resilience.sh"
     echo "  $SCRIPT_DIR/validate_drivers.sh"
     echo "  $SCRIPT_DIR/validate_docs.sh"
     echo "  $SCRIPT_DIR/validate_options.sh"

@@ -74,17 +74,17 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<DtPi
 	}
 
 	// Required by IDataTransformer (base interface)
-	public object?[]? Transform(object?[] row)
+	public object?[]? Transform(IReadOnlyList<object?> row)
 	{
 		var results = TransformMany(row);
 		return results.FirstOrDefault();
 	}
 
-	public IEnumerable<object?[]> TransformMany(object?[] row)
+	public IEnumerable<object?[]> TransformMany(IReadOnlyList<object?> row)
 	{
 		if (_compiledExpands.Count == 0 || _columnNames == null)
 		{
-			yield return row;
+			yield return row as object?[] ?? row.ToArray();
 			yield break;
 		}
 
@@ -93,7 +93,7 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<DtPi
 
 		// Build JS Context with Proxy for missing column detection
 		var jsSource = new JsObject(engine);
-		for (int i = 0; i < row.Length; i++)
+		for (int i = 0; i < row.Count; i++)
 		{
 			var val = row[i];
 			if (val == DBNull.Value) val = null;
@@ -105,7 +105,7 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<DtPi
         var jsRow = engine.Evaluate("new Proxy(__source, { get: (target, prop) => { if (typeof prop === 'string' && !(prop in target)) throw new ReferenceError(`Column '${prop}' not found in schema`); return target[prop]; } })");
 
 		// Helper to process a list of rows through a specific expand function
-		IEnumerable<object?[]> currentRows = new[] { row };
+		IEnumerable<object?[]> currentRows = new[] { row as object?[] ?? row.ToArray() };
 
 		foreach (var funcName in _compiledExpands)
 		{

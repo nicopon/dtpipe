@@ -1,5 +1,4 @@
-using DtPipe.Cli.Infrastructure;
-using DtPipe.Core.Abstractions;
+using Apache.Arrow.Types;
 using DtPipe.Core.Models;
 using DtPipe.Transformers.Arrow.Mask;
 using FluentAssertions;
@@ -12,94 +11,108 @@ public class MaskDataTransformerTests
 	[Fact]
 	public async Task Transform_ShouldMaskData_UsingPattern()
 	{
-		// Arrange
+		// Pattern "###****": keep 3 chars, replace 4 with '*', rest kept
+		// Input "test@example.com" (16 chars): "tes" + "****" + "ample.com"
 		var options = new MaskOptions { Mask = new[] { "EMAIL:###****" } };
 		var transformer = new MaskDataTransformer(options);
 		var columns = new List<PipeColumnInfo> { new("EMAIL", typeof(string), true) };
-		var rows = new List<object?[]> { new object?[] { "test@example.com" } };
 
-		// Act
 		await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-		var result = rows.Select(r => transformer.Transform(r)).ToList();
+		var batch = TestBatchBuilder.FromRows(columns, new object?[] { "test@example.com" });
+		var result = await transformer.TransformBatchAsync(batch);
 
-		// Assert
-		// "tes" kept (#), "****" replaced, "ample.com" unmatched kept
-		result[0]![0].Should().Be("tes****ample.com");
+		TestBatchBuilder.GetVal(result!, 0, 0).Should().Be("tes****ample.com");
 	}
 
 	[Fact]
 	public async Task Transform_ShouldMaskData_FullReplacement()
 	{
-		// Arrange
 		var options = new MaskOptions { Mask = new[] { "PIN:****" } };
 		var transformer = new MaskDataTransformer(options);
 		var columns = new List<PipeColumnInfo> { new("PIN", typeof(string), true) };
-		var rows = new List<object?[]> { new object?[] { "1234" } };
 
-		// Act
 		await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-		var result = rows.Select(r => transformer.Transform(r)).ToList();
+		var batch = TestBatchBuilder.FromRows(columns, new object?[] { "1234" });
+		var result = await transformer.TransformBatchAsync(batch);
 
-		// Assert
-		result[0]![0].Should().Be("****");
+		TestBatchBuilder.GetVal(result!, 0, 0).Should().Be("****");
 	}
 
 	[Fact]
 	public async Task Transform_ShouldMaskData_WithComplexPattern()
 	{
-		// Arrange
-		// Pattern length matches input length roughly.
-		// Logic is 1:1 replacement.
-		// Input: 0612345678 (10 chars)
-		// Pattern: ##******## (10 chars) -> Keep first 2, mask middle 6, keep last 2
+		// Input: 0612345678 (10 chars), Pattern: ##******## -> Keep first 2, mask 6, keep last 2
 		var options = new MaskOptions { Mask = new[] { "PHONE:##******##" } };
 		var transformer = new MaskDataTransformer(options);
 		var columns = new List<PipeColumnInfo> { new("PHONE", typeof(string), true) };
-		var rows = new List<object?[]> { new object?[] { "0612345678" } };
 
-		// Act
 		await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-		var result = rows.Select(r => transformer.Transform(r)).ToList();
+		var batch = TestBatchBuilder.FromRows(columns, new object?[] { "0612345678" });
+		var result = await transformer.TransformBatchAsync(batch);
 
-		// Assert
-		result[0]![0].Should().Be("06******78");
+		TestBatchBuilder.GetVal(result!, 0, 0).Should().Be("06******78");
 	}
 
 	[Fact]
 	public async Task Transform_ShouldHandleNullValues_ByDefault()
 	{
-		// Arrange - Default behavior (replace with pattern chars if pattern length allows, or keep null?)
-		// Mask logic: if value is null, result is null unless specific handling
-		// Let's check implementation: Transform checks "if (value is string str)"
-		// So non-string or null values are preserved by default logic.
-
 		var options = new MaskOptions { Mask = new[] { "COL:***" } };
 		var transformer = new MaskDataTransformer(options);
 		var columns = new List<PipeColumnInfo> { new("COL", typeof(string), true) };
-		var rows = new List<object?[]> { new object?[] { null } };
 
-		// Act
 		await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-		var result = rows.Select(r => transformer.Transform(r)).ToList();
+		var batch = TestBatchBuilder.FromRows(columns, new object?[] { null });
+		var result = await transformer.TransformBatchAsync(batch);
 
-		// Assert
-		result[0]![0].Should().BeNull("Mask works on strings, so nulls should pass through naturally unless SkipNull changes pipeline behavior");
+		TestBatchBuilder.GetVal(result!, 0, 0).Should().BeNull("Nulls pass through the mask unchanged");
 	}
 
 	[Fact]
 	public async Task Transform_ShouldSkipFormatting_WhenSkipNullEnabled_AndValueNull()
 	{
-		// Arrange
 		var options = new MaskOptions { Mask = new[] { "COL:***" }, SkipNull = true };
 		var transformer = new MaskDataTransformer(options);
 		var columns = new List<PipeColumnInfo> { new("COL", typeof(string), true) };
-		var rows = new List<object?[]> { new object?[] { null } };
 
-		// Act
 		await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-		var result = rows.Select(r => transformer.Transform(r)).ToList();
+		var batch = TestBatchBuilder.FromRows(columns, new object?[] { null });
+		var result = await transformer.TransformBatchAsync(batch);
 
-		// Assert
-		result[0]![0].Should().BeNull();
+		TestBatchBuilder.GetVal(result!, 0, 0).Should().BeNull();
+	}
+
+	[Fact]
+	public async Task InitializeAsync_ShouldDeclareStringType_ForNonStringColumn()
+	{
+		// MaskArray always produces a StringArray regardless of source type.
+		// InitializeAsync must update ClrType to typeof(string) so downstream PipeColumnInfo
+		// consumers (bridges, writers) don't expect the original numeric type.
+		var options = new MaskOptions { Mask = new[] { "Amount:###*" } };
+		var transformer = new MaskDataTransformer(options);
+		var columns = new List<PipeColumnInfo> { new("Amount", typeof(long), false) };
+
+		var outputSchema = await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+
+		outputSchema[0].ClrType.Should().Be(typeof(string),
+			"MaskArray always produces StringArray — ClrType must match to avoid bridge type mismatches");
+	}
+
+	[Fact]
+	public async Task TransformBatch_ShouldProduceStringTypeInSchema_ForNonStringColumn()
+	{
+		// The output RecordBatch schema must carry StringType for the masked column so that
+		// ArrowColumnarToRowBridge reads values correctly and downstream bridges don't create
+		// wrong-type builders.
+		var options = new MaskOptions { Mask = new[] { "Amount:###*" } };
+		var transformer = new MaskDataTransformer(options);
+		var columns = new List<PipeColumnInfo> { new("Amount", typeof(long), false) };
+
+		await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+		var batch = TestBatchBuilder.FromRows(columns, new object?[] { 1234L });
+		var result = await transformer.TransformBatchAsync(batch);
+
+		result!.Schema.GetFieldByIndex(0).DataType.Should().BeOfType<StringType>(
+			"output batch schema must reflect StringType after masking a non-string column");
+		TestBatchBuilder.GetVal(result, 0, 0).Should().Be("123*");
 	}
 }
