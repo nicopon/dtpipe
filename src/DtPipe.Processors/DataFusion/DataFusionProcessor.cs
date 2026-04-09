@@ -75,7 +75,20 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
             if (!string.IsNullOrEmpty(_mainAlias))
             {
                 // _mainAlias = logical SQL table name; _mainChannelAlias = physical channel alias.
-                await RegisterStreamingChannelSourceAsync(_mainAlias, _mainChannelAlias, ct);
+                // Fallback to materialization if the schema contains nested structures.
+                // DataFusion FFI string stream has difficulties passing structs on initial registration
+                // before full row evaluations (or the crate has a CData limitation).
+                var schema = await _registry.WaitForArrowChannelSchemaAsync(_mainChannelAlias, ct);
+                bool hasComplexTypes = schema.FieldsList.Any(f => f.DataType.TypeId == Apache.Arrow.Types.ArrowTypeId.Struct || f.DataType.TypeId == Apache.Arrow.Types.ArrowTypeId.List);
+                
+                if (hasComplexTypes)
+                {
+                    await RegisterChannelSourceAsync(_mainAlias, _mainChannelAlias, ct);
+                }
+                else
+                {
+                    await RegisterStreamingChannelSourceAsync(_mainAlias, _mainChannelAlias, ct);
+                }
             }
 
             _logger.LogDebug("DataFusionProcessor: All sources registered. Inspecting schema...");
@@ -158,65 +171,47 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
     {
         if (_ctx == nint.Zero) yield break;
 
-        using var pipeServer = new AnonymousPipeServerStream(PipeDirection.In, HandleInheritability.None);
-
-#if NET
-        int writeFd = (int)pipeServer.ClientSafePipeHandle.DangerousGetHandle();
-#else
-        int writeFd = (int)pipeServer.SafePipeHandle.DangerousGetHandle();
-#endif
-
-        var sql = _query;
-        var ctx = _ctx;
-        var writeTask = Task.Run(() => {
-            try
-            {
-                if (DataFusionBridge.ExecuteToFd(ctx, sql, writeFd) != 0)
-                {
-                    _logger.LogError("Bridge execution failed for query: {Query}", sql);
-                    return false;
-                }
-                return true;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Exception in bridge execution: {Message}", ex.Message);
-                return false;
-            }
-            finally
-            {
-                // Always close the write end of the pipe after Rust returns (success or error).
-                // If Rust returned an error without writing an IPC EOS marker, the read side
-                // (ArrowStreamReader) would block forever. Disposing the client handle here
-                // signals EOF to the reader, unblocking ReadNextRecordBatchAsync.
-                try { pipeServer.ClientSafePipeHandle.Dispose(); } catch { }
-            }
-        });
-
-        using (var reader = new ArrowStreamReader(pipeServer))
+        nint ffiStreamPtr = System.Runtime.InteropServices.Marshal.AllocHGlobal(System.Runtime.InteropServices.Marshal.SizeOf<Apache.Arrow.C.CArrowArrayStream>());
+        try
         {
-            while (true)
+            unsafe 
             {
-                RecordBatch? batch;
-                try
+                if (DataFusionBridge.ExecuteStream(_ctx, _query, (Apache.Arrow.C.CArrowArrayStream*)ffiStreamPtr) != 0)
                 {
-                    batch = await reader.ReadNextRecordBatchAsync(ct);
+                    throw new Exception("DataFusion native execution failed. Check logs for details.");
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error reading from IPC pipe: {Message}", ex.Message);
-                    break;
-                }
+            }
 
-                if (batch == null) break;
-                yield return batch;
+            IArrowArrayStream arrowStream;
+            unsafe
+            {
+                arrowStream = Apache.Arrow.C.CArrowArrayStreamImporter.ImportArrayStream((Apache.Arrow.C.CArrowArrayStream*)ffiStreamPtr);
+            }
+
+            using (arrowStream as IDisposable)
+            {
+                while (true)
+                {
+                    RecordBatch? batch;
+                    try
+                    {
+                        // Block the execution on a separate Task to avoid deadlocks on the ThreadPool from the synchronous C-API blocking loop inside Tokio Rust
+                        batch = await Task.Run(async () => await arrowStream.ReadNextRecordBatchAsync(ct), ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error reading from Zero-Copy FFI stream: {Message}", ex.Message);
+                        break;
+                    }
+
+                    if (batch == null) break;
+                    yield return batch;
+                }
             }
         }
-
-        var success = await writeTask;
-        if (!success)
+        finally
         {
-            throw new Exception("DataFusion native execution failed. Check logs for details.");
+            System.Runtime.InteropServices.Marshal.FreeHGlobal(ffiStreamPtr);
         }
     }
 

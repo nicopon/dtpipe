@@ -1,9 +1,5 @@
 use std::sync::Arc;
 use std::time::Duration;
-#[cfg(unix)]
-use std::os::unix::io::FromRawFd;
-#[cfg(windows)]
-use std::os::windows::io::FromRawHandle;
 use tokio::sync::Mutex;
 use futures::StreamExt;
 use datafusion::prelude::*;
@@ -11,7 +7,6 @@ use datafusion::prelude::*;
 use arrow::ffi_stream::{ArrowArrayStreamReader, FFI_ArrowArrayStream};
 use arrow::array::RecordBatchReader;
 use arrow::datatypes::SchemaRef;
-use arrow::ipc::writer::StreamWriter;
 use datafusion::catalog::streaming::StreamingTable;
 use datafusion::physical_plan::streaming::PartitionStream;
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
@@ -288,11 +283,38 @@ pub unsafe extern "C" fn dtfb_register_batches(
     })
 }
 
+struct FfiStreamExporter {
+    schema: SchemaRef,
+    // Box pin helps keep the async stream safely referenced
+    stream: std::pin::Pin<Box<datafusion::execution::SendableRecordBatchStream>>,
+    runtime: Arc<tokio::runtime::Runtime>,
+}
+
+impl Iterator for FfiStreamExporter {
+    type Item = Result<arrow::array::RecordBatch, arrow::error::ArrowError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.runtime.block_on(async {
+            match futures::StreamExt::next(&mut self.stream).await {
+                Some(Ok(batch)) => Some(Ok(batch)),
+                Some(Err(e)) => Some(Err(arrow::error::ArrowError::ExternalError(Box::new(e)))),
+                None => None,
+            }
+        })
+    }
+}
+
+impl arrow::array::RecordBatchReader for FfiStreamExporter {
+    fn schema(&self) -> SchemaRef {
+        self.schema.clone()
+    }
+}
+
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn dtfb_execute_to_fd(
+pub unsafe extern "C" fn dtfb_execute_stream(
     ctx_ptr: *mut DtfbContext,
     sql_ptr: *const std::ffi::c_char,
-    handle: *mut std::ffi::c_void,
+    out_stream_ptr: *mut FFI_ArrowArrayStream,
 ) -> ErrorCode {
     let dtfb = crate::ffi_ref!(ctx_ptr);
     let sql = crate::ffi_cstr!(sql_ptr);
@@ -301,9 +323,7 @@ pub unsafe extern "C" fn dtfb_execute_to_fd(
     let sql = sql.to_string();
     let runtime: Arc<tokio::runtime::Runtime> = Arc::clone(&dtfb.runtime);
 
-    // Phase 1: SQL planning with OS-level timeout (same rationale as dtfb_get_schema).
-    // DataFusion's TypeCoercion rule can infinite-loop on type mismatches; tokio::time::timeout
-    // cannot interrupt it because the loop never yields. Use std::thread + mpsc::recv_timeout.
+    // Phase 1: SQL planning with OS-level timeout
     let runtime_for_plan = Arc::clone(&runtime);
     let ctx_for_plan = Arc::clone(&ctx);
     let sql_for_plan = sql.clone();
@@ -328,12 +348,12 @@ pub unsafe extern "C" fn dtfb_execute_to_fd(
     let df = match plan_rx.recv_timeout(Duration::from_secs(PLAN_TIMEOUT_SECS)) {
         Ok(Ok(df)) => df,
         Ok(Err(msg)) => {
-            eprintln!("[dtfusion-bridge] SQL error in execute_to_fd: {}", msg);
+            eprintln!("[dtfusion-bridge] SQL error in execute_stream: {}", msg);
             return ErrorCode::Error;
         }
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
             eprintln!(
-                "[dtfusion-bridge] SQL planning timed out (>{}s) — incompatible column types in a JOIN condition (e.g. FixedSizeBinary+arrow.uuid vs Utf8). Use --column-types to declare UUID columns on text sources, or use --sql-engine duckdb.",
+                "[dtfusion-bridge] SQL planning timed out (>{}s)",
                 PLAN_TIMEOUT_SECS
             );
             return ErrorCode::Error;
@@ -344,76 +364,38 @@ pub unsafe extern "C" fn dtfb_execute_to_fd(
         }
     };
 
-    // Phase 2: execution (stream + IPC write). No planning timeout here; stream execution
-    // takes as long as needed to process all data.
-    let runtime_for_exec = Arc::clone(&runtime);
+    // Phase 2: Execution stream setup
     let exec_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         runtime.block_on(async move {
-            let mut stream = match df.execute_stream().await {
-                Ok(s) => s,
+            match df.execute_stream().await {
+                Ok(s) => Ok(s),
                 Err(e) => {
                     eprintln!("[dtfusion-bridge] execute_stream error: {:?}", e);
-                    return ErrorCode::Error;
-                }
-            };
-
-            let schema = stream.schema();
-            let handle_val = handle as usize;
-
-            // Blocking I/O section
-            let result = runtime_for_exec.spawn_blocking(move || {
-                let handle = handle_val as *mut std::ffi::c_void;
-                #[cfg(unix)]
-                let mut file = std::mem::ManuallyDrop::new(unsafe { std::fs::File::from_raw_fd(handle as i32) });
-                #[cfg(windows)]
-                let mut file = std::mem::ManuallyDrop::new(unsafe { std::fs::File::from_raw_handle(handle) });
-
-                let mut writer = match StreamWriter::try_new(&mut *file, &schema) {
-                    Ok(w) => w,
-                    Err(e) => {
-                        eprintln!("[dtfusion-bridge] IPC StreamWriter error: {:?}", e);
-                        return Err(());
-                    }
-                };
-
-                while let Some(batch_result) = futures::executor::block_on(stream.next()) {
-                    match batch_result {
-                        Ok(batch) => {
-                            if let Err(e) = writer.write(&batch) {
-                                eprintln!("[dtfusion-bridge] IPC write error: {:?}", e);
-                                return Err(());
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("[dtfusion-bridge] IPC stream next error: {:?}", e);
-                            return Err(());
-                        }
-                    }
-                }
-
-                if let Err(e) = writer.finish() {
-                    eprintln!("[dtfusion-bridge] IPC writer finish error: {:?}", e);
-                    return Err(());
-                }
-
-                Ok(())
-            }).await;
-
-            match result {
-                Ok(Ok(())) => ErrorCode::Ok,
-                Ok(Err(_)) => ErrorCode::Error,
-                Err(e) => {
-                    eprintln!("[dtfusion-bridge] Blocking spawn error: {:?}", e);
-                    ErrorCode::Error
+                    Err(())
                 }
             }
         })
     }));
-    match exec_result {
-        Ok(code) => code,
+
+    let stream = match exec_result {
+        Ok(Ok(s)) => s,
+        Ok(Err(_)) => return ErrorCode::Error,
         Err(_) => {
-            eprintln!("[dtfusion-bridge] Panic in execute_to_fd");
-            ErrorCode::Error
+            eprintln!("[dtfusion-bridge] Panic during stream setup");
+            return ErrorCode::Error;
         }
-    }
+    };
+
+    let schema = stream.schema();
+
+    let exporter = FfiStreamExporter {
+        schema,
+        stream: Box::pin(stream),
+        runtime,
+    };
+
+    let ffi_stream = FFI_ArrowArrayStream::new(Box::new(exporter));
+
+    unsafe { std::ptr::write(out_stream_ptr, ffi_stream) };
+    ErrorCode::Ok
 }

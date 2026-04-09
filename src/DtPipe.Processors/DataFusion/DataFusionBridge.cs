@@ -28,6 +28,6 @@ internal static partial class DataFusionBridge
     [LibraryImport(LibName, EntryPoint = "dtfb_get_schema")]
     internal static unsafe partial int GetSchema(nint ctx, [MarshalAs(UnmanagedType.LPUTF8Str)] string sql, CArrowSchema* schema);
 
-    [LibraryImport(LibName, EntryPoint = "dtfb_execute_to_fd")]
-    internal static partial int ExecuteToFd(nint ctx, [MarshalAs(UnmanagedType.LPUTF8Str)] string sql, nint handle);
+    [LibraryImport(LibName, EntryPoint = "dtfb_execute_stream")]
+    internal static unsafe partial int ExecuteStream(nint ctx, [MarshalAs(UnmanagedType.LPUTF8Str)] string sql, CArrowArrayStream* outStream);
 }
