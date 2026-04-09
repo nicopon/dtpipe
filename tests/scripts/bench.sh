@@ -125,7 +125,7 @@ if [ $RUN_SQL -eq 1 ]; then
         "$SCRIPT_DIR/generate_benchmark_datasets.sh"
     fi
 
-    QUERY_FUSION='SELECT COUNT(*) FROM main m JOIN ref r ON m.GenerateIndex = CAST(r.Id AS BIGINT) JOIN ref2 r2 ON m.GenerateIndex = CAST(r2.Id AS BIGINT)'
+    QUERY_FUSION='SELECT m.*, r.Id as ref1_id, r2.Id as ref2_id FROM main m LEFT JOIN ref r ON m.GenerateIndex = CAST(r.Id AS BIGINT) LEFT JOIN ref2 r2 ON m.GenerateIndex = CAST(r2.Id AS BIGINT)'
 
     echo "  DataFusion engine..."
     timeit "datafusion-dag" "$DTPIPE" \

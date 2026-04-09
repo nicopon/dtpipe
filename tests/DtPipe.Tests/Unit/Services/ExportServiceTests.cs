@@ -29,7 +29,7 @@ public class ExportServiceTests
 		var readerFactoryList = new List<IStreamReaderFactory> { _mockReaderFactory.Object };
 		var writerFactoryList = new List<IDataWriterFactory> { _mockWriterFactory.Object };
 
-		_mockObserver.Setup(x => x.CreateProgressReporter(It.IsAny<bool>(), It.IsAny<IReadOnlyList<(string Name, bool IsColumnar)>>()))
+		_mockObserver.Setup(x => x.CreateProgressReporter(It.IsAny<bool>(), It.IsAny<IReadOnlyList<(string Name, bool IsColumnar)>>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<bool>()))
 					 .Returns(_mockProgress.Object);
 
 		_mockProgress.Setup(p => p.GetMetrics())
@@ -102,7 +102,7 @@ public class ExportServiceTests
 		_mockObserver.Verify(o => o.ShowConnectionStatus(false, null), Times.Once); // Connecting...
 		_mockObserver.Verify(o => o.ShowConnectionStatus(true, 1), Times.Once); // Connected
 		_mockObserver.Verify(o => o.ShowTarget("test-target", "target-path"), Times.Once);
-		_mockObserver.Verify(o => o.CreateProgressReporter(false, It.IsAny<IReadOnlyList<(string Name, bool IsColumnar)>>()), Times.Once);
+		_mockObserver.Verify(o => o.CreateProgressReporter(false, It.IsAny<IReadOnlyList<(string Name, bool IsColumnar)>>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<bool>()), Times.Once);
 
 		_mockProgress.Verify(p => p.ReportRead(1), Times.AtLeastOnce);
 		_mockProgress.Verify(p => p.ReportWrite(1), Times.AtLeastOnce);

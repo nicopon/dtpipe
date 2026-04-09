@@ -135,7 +135,7 @@ public sealed class BinaryConsumer : BaseAdoConsumer<BinaryArray.Builder, Binary
     {
         var obj = reader.GetValue(ColumnIndex);
         if (obj is byte[] bytes)
-            Builder.Append(bytes);
+            Builder.Append((ReadOnlySpan<byte>)bytes);
         else
             Builder.AppendNull();
     }

@@ -75,8 +75,7 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
             if (!string.IsNullOrEmpty(_mainAlias))
             {
                 // _mainAlias = logical SQL table name; _mainChannelAlias = physical channel alias.
-                // TODO: Revert to streaming once FFI stream supports Structs in dtfusion
-                await RegisterChannelSourceAsync(_mainAlias, _mainChannelAlias, ct);
+                await RegisterStreamingChannelSourceAsync(_mainAlias, _mainChannelAlias, ct);
             }
 
             _logger.LogDebug("DataFusionProcessor: All sources registered. Inspecting schema...");

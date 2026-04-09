@@ -105,7 +105,7 @@ public class PipelineStressTests : IAsyncLifetime
 		var mockProgress = new Mock<IExportProgress>();
 		mockProgress.Setup(p => p.GetMetrics()).Returns(new ExportMetrics(DateTime.UtcNow, DateTime.UtcNow, 0, 0, 0, 0, new Dictionary<string, long>()));
 		var mockObserver = new Mock<IExportObserver>();
-		mockObserver.Setup(o => o.CreateProgressReporter(It.IsAny<bool>(), It.IsAny<IReadOnlyList<(string Name, bool IsColumnar)>>()))
+		mockObserver.Setup(o => o.CreateProgressReporter(It.IsAny<bool>(), It.IsAny<IReadOnlyList<(string Name, bool IsColumnar)>>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<bool>()))
 					.Returns(mockProgress.Object);
 		services.AddSingleton(mockObserver.Object);
 
