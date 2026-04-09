@@ -11,11 +11,13 @@ using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
 using DtPipe.Processors.Sql;
 using DuckDB.NET.Data;
+using DuckDB.NET.Native;
 using Microsoft.Extensions.Logging;
+using System.Runtime.InteropServices;
 
 namespace DtPipe.Processors.DuckDB;
 
-public sealed class DuckDBSqlProcessor : IColumnarStreamReader
+public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
 {
     private readonly IMemoryChannelRegistry _registry;
     private readonly string _query;
@@ -24,6 +26,9 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader
     private readonly string[] _refAliases;
     private readonly string[] _refChannelAliases;
     private readonly ILogger<DuckDBSqlProcessor> _logger;
+
+    private readonly List<IDisposable> _activeStreams = new();
+    private readonly List<IntPtr> _allocatedPointers = new();
 
     private DuckDBConnection? _conn;
     private Schema? _resultSchema;
@@ -120,6 +125,8 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader
     // then exposes it as a plain VIEW so user SQL can reference it as a regular table name
     // (without parentheses). DuckDB pulls rows lazily through the IEnumerable —
     // the channel is never fully buffered.
+    // Registers the --from source as an Arrow stream scan in DuckDB.
+    // This allows true zero-copy data transfer from the memory channel to DuckDB.
     private async Task RegisterStreamingTableAsync(string alias, string channelAlias, CancellationToken ct)
     {
         var schema = await _registry.WaitForArrowChannelSchemaAsync(channelAlias, ct);
@@ -127,57 +134,22 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader
         var channelTuple = _registry.GetArrowChannel(channelAlias)
             ?? throw new Exception($"Arrow channel '{channelAlias}' not found");
 
-        var channelReader = channelTuple.Channel.Reader;
-        var columnCount = schema.FieldsList.Count;
+        var stream = new ChannelArrowStream(schema, channelTuple.Channel.Reader, _logger, ct);
+        _activeStreams.Add(stream);
 
-        var columns = schema.FieldsList
-            .Select(f => new global::DuckDB.NET.Data.ColumnInfo(
-                f.Name.ToLowerInvariant(),
-                ToDuckDBCompatibleType(ArrowTypeMapper.GetClrTypeFromField(f))))
-            .ToArray();
-
-        // DuckDB table functions are called as tablefn(), not tablefn — use a hidden name and
-        // expose a VIEW with the logical alias so user SQL can write "FROM alias" normally.
-        var fnName = $"__dtpipe_stream_{alias}";
-
-        _conn!.RegisterTableFunction(
-            fnName,
-            () => new global::DuckDB.NET.Data.TableFunction(columns, LazyChannelRows(channelReader, ct)),
-            (item, writers, rowInChunk) =>
-            {
-                var (batch, rowIndex) = ((RecordBatch, int))item!;
-                for (int c = 0; c < columnCount; c++)
-                {
-                    var col = batch.Column(c);
-                    if (col.IsNull(rowIndex))
-                        writers[c].WriteNull(rowInChunk);
-                    else
-                        WriteTypedValue(writers[c], ArrowTypeMapper.GetValue(col, rowIndex), rowInChunk);
-                }
-            });
-
-        using var viewCmd = _conn.CreateCommand();
-        viewCmd.CommandText = $"CREATE VIEW \"{alias}\" AS SELECT * FROM \"{fnName}\"()";
-        await viewCmd.ExecuteNonQueryAsync(ct);
-    }
-
-    // Lazy enumerator: yields (batch, rowIndex) pairs from the Arrow channel without materialising anything.
-    // Called synchronously from DuckDB's execution thread — WaitToReadAsync is synchronously awaited.
-    private static IEnumerable<(RecordBatch Batch, int RowIndex)> LazyChannelRows(
-        ChannelReader<RecordBatch> reader, CancellationToken ct)
-    {
-        while (true)
+        unsafe
         {
-            if (!reader.TryRead(out var batch))
-            {
-                var hasMore = reader.WaitToReadAsync(ct).AsTask().GetAwaiter().GetResult();
-                if (!hasMore) yield break;
-                if (!reader.TryRead(out batch)) continue;
-            }
+            var ffiStreamPtr = (Apache.Arrow.C.CArrowArrayStream*)Marshal.AllocHGlobal(Marshal.SizeOf<Apache.Arrow.C.CArrowArrayStream>());
+            _allocatedPointers.Add((IntPtr)ffiStreamPtr);
+            Apache.Arrow.C.CArrowArrayStreamExporter.ExportArrayStream(stream, ffiStreamPtr);
 
-            if (batch is null) continue;
-            for (int r = 0; r < batch.Length; r++)
-                yield return (batch, r);
+            if (DuckDBArrowNativeMethods.DuckDBArrowScan(_conn!.NativeConnection, alias, ffiStreamPtr) != DuckDBState.Success)
+            {
+                Apache.Arrow.C.CArrowArrayStreamImporter.ImportArrayStream(ffiStreamPtr).Dispose();
+                _allocatedPointers.Remove((IntPtr)ffiStreamPtr);
+                Marshal.FreeHGlobal((IntPtr)ffiStreamPtr);
+                throw new Exception($"Failed to register Arrow stream scan for '{alias}'");
+            }
         }
     }
 
@@ -197,26 +169,97 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader
     {
         if (_conn is null) yield break;
 
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = _query;
-        cmd.UseStreamingMode = true;
-        using var reader = (DuckDBDataReader)await cmd.ExecuteReaderAsync(ct);
-
-        var config = new AdoToArrowConfigBuilder()
-            .SetTargetBatchSize(65536)
-            .Build();
-
-        // DuckDB returns Guid for UUID columns. DtPipeTypeResolver maps them to FixedSizeBinaryType(16).
-        // GuidToBinaryConsumer reads Guid via GetGuid() and writes as RFC 4122 bytes (16 bytes).
-        Apache.Arrow.Ado.IAdoConsumer factory(IArrowType arrowType, int colIdx)
+        DuckDBArrowNativeMethods.DuckDBArrow arrowResult;
+        unsafe 
         {
-            if (arrowType is FixedSizeBinaryType && reader.GetFieldType(colIdx) == typeof(Guid))
-                return new GuidToBinaryConsumer(colIdx);
-            return Apache.Arrow.Ado.AdoConsumerFactory.Create(arrowType, colIdx);
+            if (DuckDBArrowNativeMethods.DuckDBQueryArrow(_conn.NativeConnection, _query, out arrowResult) != DuckDBState.Success)
+            {
+                throw new Exception("DuckDB query_arrow execution failed.");
+            }
         }
 
-        await foreach (var batch in AdoToArrow.ReadToArrowBatchesAsync(reader, config, factory, ct))
+        try
+        {
+            await foreach (var batch in ReadRecordBatchesFromArrowResultAsync(arrowResult, ct))
+                yield return batch;
+        }
+        finally
+        {
+            unsafe 
+            {
+                nint ptr = arrowResult.InternalPtr;
+                DuckDBArrowNativeMethods.DuckDBDestroyArrow(ref ptr);
+            }
+        }
+    }
+
+    private async IAsyncEnumerable<RecordBatch> ReadRecordBatchesFromArrowResultAsync(
+        DuckDBArrowNativeMethods.DuckDBArrow result, [EnumeratorCancellation] CancellationToken ct)
+    {
+        Schema? arrowSchema = GetSchemaFromResult(result);
+        if (arrowSchema == null) yield break;
+
+        while (true)
+        {
+            RecordBatch? batch = FetchNextBatch(result, arrowSchema);
+            if (batch == null) break;
             yield return batch;
+        }
+    }
+
+    private unsafe Schema? GetSchemaFromResult(DuckDBArrowNativeMethods.DuckDBArrow result)
+    {
+        Apache.Arrow.C.CArrowSchema ffiSchema = default;
+        Apache.Arrow.C.CArrowSchema* pSchema = &ffiSchema;
+        // DuckDB fills the struct pointed to by pSchema
+        if (DuckDBArrowNativeMethods.DuckDBQueryArrowSchema(result, (nint*)&pSchema) == DuckDBState.Success)
+        {
+            // The importer will throw if release is null, so we just try to import.
+            try
+            {
+                return Apache.Arrow.C.CArrowSchemaImporter.ImportSchema(&ffiSchema);
+            }
+            catch (ArgumentException)
+            {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private unsafe RecordBatch? FetchNextBatch(DuckDBArrowNativeMethods.DuckDBArrow result, Schema schema)
+    {
+        Apache.Arrow.C.CArrowArray ffiArray = default;
+        Apache.Arrow.C.CArrowArray* pArray = &ffiArray;
+
+        if (DuckDBArrowNativeMethods.DuckDBQueryArrowArray(result, (nint*)&pArray) != DuckDBState.Success) return null;
+
+        // Note: Field 'release' is internal, but the importer checks it.
+        try
+        {
+            return Apache.Arrow.C.CArrowArrayImporter.ImportRecordBatch(&ffiArray, schema);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    public void Dispose()
+    {
+        foreach (var ptr in _allocatedPointers)
+        {
+            Marshal.FreeHGlobal(ptr);
+        }
+        _allocatedPointers.Clear();
+
+        foreach (var stream in _activeStreams)
+        {
+            stream.Dispose();
+        }
+        _activeStreams.Clear();
+
+        _conn?.Dispose();
     }
 
     public async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(
@@ -239,13 +282,9 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader
     private static ReadOnlyMemory<object?[]> ConvertBatchToRows(RecordBatch batch)
         => SqlProcessorHelpers.ConvertBatchToRows(batch);
 
-    // Maps CLR types that DuckDB.NET's RegisterTableFunction doesn't support (e.g. byte[])
-    // to the closest supported equivalent. byte[] (Arrow Binary) represents UUIDs in practice;
-    // map to Guid so DuckDB stores the column as UUID for proper JOIN compatibility.
     private static Type ToDuckDBCompatibleType(Type clrType)
         => clrType == typeof(byte[]) ? typeof(Guid) : clrType;
 
-    // Builds a CREATE TABLE statement from an Arrow schema for --ref materialization.
     private static string BuildCreateTableSql(string tableName, Schema schema)
     {
         var cols = schema.FieldsList.Select(f =>
@@ -276,7 +315,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader
                 ArrowTypeId.Float => "FLOAT",
                 ArrowTypeId.Double => "DOUBLE",
                 ArrowTypeId.String => "VARCHAR",
-                ArrowTypeId.Binary => "BLOB",  // No legacy UUID mapping here mapping here either without arrow.uuid metadata
+                ArrowTypeId.Binary => "BLOB",
                 ArrowTypeId.Date32 => "DATE",
                 ArrowTypeId.Date64 => "TIMESTAMP",
                 ArrowTypeId.Timestamp => "TIMESTAMP",
@@ -287,7 +326,6 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader
         };
     }
 
-    // Writes an Arrow array value to a DuckDB appender row for --ref table insertion.
     private static void AppendArrowValue(IDuckDBAppenderRow row, IArrowArray column, int rowIndex)
     {
         var val = ArrowTypeMapper.GetValue(column, rowIndex);
@@ -316,42 +354,12 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader
         }
     }
 
-    // Writes a value to a DuckDB table-function writer (used for the streaming --from source).
-    private static void WriteTypedValue(global::DuckDB.NET.Data.DataChunk.Writer.IDuckDBDataWriter writer, object? val, ulong rowIndex)
-    {
-        switch (val)
-        {
-            case null: writer.WriteNull(rowIndex); break;
-            case bool b: writer.WriteValue(b, rowIndex); break;
-            case sbyte sb: writer.WriteValue(sb, rowIndex); break;
-            case byte by: writer.WriteValue(by, rowIndex); break;
-            case short s: writer.WriteValue(s, rowIndex); break;
-            case ushort us: writer.WriteValue(us, rowIndex); break;
-            case int i: writer.WriteValue(i, rowIndex); break;
-            case uint ui: writer.WriteValue(ui, rowIndex); break;
-            case long l: writer.WriteValue(l, rowIndex); break;
-            case ulong ul: writer.WriteValue(ul, rowIndex); break;
-            case float f: writer.WriteValue(f, rowIndex); break;
-            case double d: writer.WriteValue(d, rowIndex); break;
-            case decimal dec: writer.WriteValue(dec, rowIndex); break;
-            case string str: writer.WriteValue(str, rowIndex); break;
-            case DateTime dt: writer.WriteValue(dt, rowIndex); break;
-            case DateTimeOffset dto: writer.WriteValue(dto.DateTime, rowIndex); break;
-            case TimeSpan ts: writer.WriteValue(ts, rowIndex); break;
-            case Guid g: writer.WriteValue(g, rowIndex); break;
-            case byte[] bytes: writer.WriteValue(bytes, rowIndex); break;
-            default: writer.WriteValue(val.ToString() ?? string.Empty, rowIndex); break;
-        }
-    }
-
     private void ValidateAliases()
         => SqlProcessorHelpers.ValidateAliases(_mainChannelAlias, _refChannelAliases);
 
     private static void ValidateSchema(string alias, Schema schema)
         => SqlProcessorHelpers.ValidateSchema(alias, schema);
 
-    // Reads a DuckDB UUID column returned as System.Guid, stores as FixedSizeBinary(16) RFC 4122.
-    // The arrow.uuid Field metadata is attached at schema creation time (ArrowSchemaFactory).
     private sealed class GuidToBinaryConsumer : Apache.Arrow.Ado.IAdoConsumer
     {
         private readonly int _colIdx;
