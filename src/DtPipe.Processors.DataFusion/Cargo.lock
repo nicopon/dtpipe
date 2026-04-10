@@ -1328,8 +1328,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "dtpipe-datafusion"
-version = "0.1.0"
+name = "dtpipe_datafusion"
+version = "1.2.2"
 dependencies = [
  "arrow",
  "datafusion",
