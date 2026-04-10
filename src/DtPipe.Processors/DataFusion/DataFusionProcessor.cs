@@ -75,20 +75,8 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
             if (!string.IsNullOrEmpty(_mainAlias))
             {
                 // _mainAlias = logical SQL table name; _mainChannelAlias = physical channel alias.
-                // Fallback to materialization if the schema contains nested structures.
-                // DataFusion FFI string stream has difficulties passing structs on initial registration
-                // before full row evaluations (or the crate has a CData limitation).
-                var schema = await _registry.WaitForArrowChannelSchemaAsync(_mainChannelAlias, ct);
-                bool hasComplexTypes = schema.FieldsList.Any(f => f.DataType.TypeId == Apache.Arrow.Types.ArrowTypeId.Struct || f.DataType.TypeId == Apache.Arrow.Types.ArrowTypeId.List);
-                
-                if (hasComplexTypes)
-                {
-                    await RegisterChannelSourceAsync(_mainAlias, _mainChannelAlias, ct);
-                }
-                else
-                {
-                    await RegisterStreamingChannelSourceAsync(_mainAlias, _mainChannelAlias, ct);
-                }
+                // We always use streaming FFI path for the main source to enable zero-copy processing.
+                await RegisterStreamingChannelSourceAsync(_mainAlias, _mainChannelAlias, ct);
             }
 
             _logger.LogDebug("DataFusionProcessor: All sources registered. Inspecting schema...");
@@ -152,19 +140,48 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
         var channelTuple = _registry.GetArrowChannel(channelAlias) ?? throw new Exception("Channel not found");
 
         // Drain the channel upfront so all data is available before DataFusion plans the query.
-        // This is required for struct/list columns whose schema must be known at registration time.
+        // This allows DataFusion to see the data as a MemTable with statistics, enabling better optimization (e.g., Broadcast Joins).
         var batches = new List<RecordBatch>();
         await foreach (var batch in channelTuple.Channel.Reader.ReadAllAsync(ct))
             batches.Add(batch);
 
-        // Use the streaming FFI path (dtfb_register_stream) rather than dtfb_register_batches.
-        // CArrowArrayExporter.ExportRecordBatch fails on dictionary-encoded columns (e.g. Parquet
-        // string columns read back as DictionaryArray<Int32, String>) — buffer #1 (data/indices)
-        // is treated as null by the exporter for those types. The stream path uses
-        // CArrowArrayStreamExporter which handles all Arrow types correctly.
-        var streamAdapter = new BatchListArrowStream(schema, batches);
-        _activeStreams.Add(streamAdapter); // prevent GC until DataFusion releases the stream
-        ExportAndRegisterStream(alias, streamAdapter);
+        RegisterBatchesSafe(alias, schema, batches);
+    }
+
+    private unsafe void RegisterBatchesSafe(string alias, Schema schema, List<RecordBatch> batches)
+    {
+        var ffiSchema = new CArrowSchema();
+        CArrowSchemaExporter.ExportSchema(schema, &ffiSchema);
+
+        var numBatches = (nuint)batches.Count;
+        var ffiBatchPointers = (CArrowArray**)Marshal.AllocHGlobal(IntPtr.Size * batches.Count);
+        var allocatedArrays = new List<IntPtr>();
+
+        try
+        {
+            for (int i = 0; i < batches.Count; i++)
+            {
+                var ffiArrayPtr = (CArrowArray*)Marshal.AllocHGlobal(Marshal.SizeOf<CArrowArray>());
+                CArrowArrayExporter.ExportRecordBatch(batches[i], ffiArrayPtr);
+                ffiBatchPointers[i] = ffiArrayPtr;
+                allocatedArrays.Add((IntPtr)ffiArrayPtr);
+            }
+
+            if (DataFusionBridge.RegisterBatches(_ctx, alias, &ffiSchema, ffiBatchPointers, numBatches) != 0)
+            {
+                throw new Exception($"Failed to register materialized table {alias}");
+            }
+        }
+        finally
+        {
+            // Note: Rust side reads the structs from the pointers and takes ownership of the contents (release callbacks).
+            // We only free the memory used to hold the pointers and the structs themselves.
+            foreach (var ptr in allocatedArrays)
+            {
+                Marshal.FreeHGlobal(ptr);
+            }
+            Marshal.FreeHGlobal((IntPtr)ffiBatchPointers);
+        }
     }
 
     public async IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
@@ -174,7 +191,7 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
         nint ffiStreamPtr = System.Runtime.InteropServices.Marshal.AllocHGlobal(System.Runtime.InteropServices.Marshal.SizeOf<Apache.Arrow.C.CArrowArrayStream>());
         try
         {
-            unsafe 
+            unsafe
             {
                 if (DataFusionBridge.ExecuteStream(_ctx, _query, (Apache.Arrow.C.CArrowArrayStream*)ffiStreamPtr) != 0)
                 {
