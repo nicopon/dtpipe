@@ -2,7 +2,7 @@
 
 A self-contained CLI for streaming and anonymizing data across databases and file formats.
 
-DtPipe reads from a source, applies transformations row by row (or in columnar batches when possible), and writes to a destination — with no intermediate staging required. It targets automation and CI/CD scenarios where you need repeatable, low-overhead data movement.
+**DtPipe** is an **Arrow-native, Zero-Copy** data pipeline. It reads from a source, applies transformations in columnar batches, and writes to a destination — with no intermediate staging and minimal memory overhead. It targets automation and CI/CD scenarios where you need repeatable, high-performance data movement.
 
 ---
 
@@ -226,7 +226,8 @@ dtpipe \
 | `--alias [NAME]` | Name this branch for downstream reference |
 | `--from [ALIAS[,ALIAS...]]` | Start a processor or fan-out branch. Accepts one or more comma-separated streaming aliases. Fan-out consumers use a single alias; multi-stream processors use multiple. |
 | `--ref [ALIAS[,ALIAS...]]` | Materialized reference sources for lookup/join (preloaded into memory, comma-separated). Used with `--sql` for JOIN queries. |
-| `--sql "[QUERY]"` | SQL query to execute on the upstream sources via DataFusion |
+| `--sql "[QUERY]"` | SQL query to execute on the upstream sources via DataFusion (default) or DuckDB |
+| `--sql-engine [ENGINE]` | Choose engine for `--sql`: `datafusion` (optimized for streaming) or `duckdb` (rich SQL dialect and native file access). |
 | `--merge` | UNION ALL processor: concatenates all `--from` streams in order. Requires at least 2 streaming sources. |
 
 ---

@@ -12,7 +12,9 @@ The solution is split into three layers:
 | Project | Role |
 |---|---|
 | `DtPipe.Core` | Interfaces, models, pipeline engine — **no external deps** |
-| `DtPipe.Adapters` | All provider implementations (readers/writers) and their **CLI Descriptors** |
+| `DtPipe.Adapters` | All row-based and columnar provider implementations |
+| `DtPipe.Processors` | C# side of SQL stream processors (DuckDB, Shared FFI) |
+| `DtPipe.Processors.DataFusion` | Native Rust bridge for the DataFusion engine |
 | `DtPipe` | CLI main entry point, DI wiring, and standard Transformers |
 
 ### Where to put new code
@@ -246,6 +248,20 @@ dotnet test DtPipe.sln
 - Factory **must** implement `ICliContributor` or its options will be silently ignored.
 - Respect the batching model (`ReadBatchesAsync`) to keep memory usage constant.
 - Add tests and a minimal usage example.
+
+---
+
+## Native Engine Integration (FFI)
+
+DtPipe targets **Zero-Copy** performance when using SQL processors like DataFusion or DuckDB. This is achieved via the **Arrow C Data Interface**.
+
+### IColumnarStreamReader
+Processors that can handle raw Arrow streams should implement `IColumnarStreamReader`. Unlike `IStreamReader` (which is row-based), this interface yields `RecordBatch` objects directly. For high-performance adapters, consider implementing this interface to provide direct Arrow access.
+
+### The FFI Bridge Pattern
+1.  **C# Side**: Exports an `IArrowArrayStream` to a `CArrowArrayStream` (unmanaged struct).
+2.  **Native Side (C/C++/Rust)**: Consumes the `CArrowArrayStream` using the standard Arrow C headers.
+3.  **Result**: Data flows between .NET and the native engine without any serialization or memory copying.
 
 ---
 

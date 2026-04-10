@@ -263,6 +263,29 @@ dtpipe \
   -o "enriched.parquet"
 ```
 
+#### Choosing a SQL Engine
+
+By default, DtPipe uses **DataFusion** for `--sql` processing. You can switch to **DuckDB** using the `--sql-engine duckdb` flag or the `DTPIPE_SQL_ENGINE` environment variable.
+
+| Feature | **DataFusion (Default)** | **DuckDB** |
+| :--- | :--- | :--- |
+| **Profile** | Analytical query engine. Optimized for pipeline performance. | Full-featured database. "The SQLite for Analytics". |
+| **Pipelining** | **Stream-first**: Built to process massive volumes with minimal memory. | **Rich SQL**: Highly compatible with PostgreSQL syntax. |
+| **Joins** | **Optimized**: Analyzes reference tables to choose the fastest join strategy. | **Latency**: Extremely fast startup/ingestion for simple lookups. |
+| **File Access** | Supports reading Parquet, CSV, JSON directly in SQL. | **Native Support**: Excellent at joining pipeline streams with external files. |
+| **Standard** | Specialized for the DtPipe ecosystem. | **Universal**: Queries work 1:1 in DuckDB CLI or any BI tool. |
+
+```bash
+# Force DuckDB for a specific branch
+dtpipe \
+  -i customers.parquet --alias customers \
+  -i orders.csv --alias orders \
+  --from orders --ref customers \
+  --sql-engine duckdb \
+  --sql "SELECT o.*, c.name FROM orders o JOIN customers c ON o.customer_id = c.id" \
+  -o result.parquet
+```
+
 ---
 
 ## Standard Streams & Linux Pipes
