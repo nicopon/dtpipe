@@ -6,7 +6,7 @@ on:
       - 'v*'
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # General environment variables can go here
 
 jobs:
   build:
