@@ -28,7 +28,6 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
     private readonly string[] _refChannelAliases;
     private readonly ILogger<DuckDBSqlProcessor> _logger;
 
-    private readonly List<IDisposable> _activeStreams = new();
     private readonly List<IntPtr> _allocatedPointers = new();
 
     private DuckDBConnection? _conn;
@@ -123,10 +122,8 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
         await RegisterArrowStreamAsync(alias, stream);
     }
 
-    private async Task RegisterArrowStreamAsync(string alias, IArrowArrayStream stream)
+    private Task RegisterArrowStreamAsync(string alias, IArrowArrayStream stream)
     {
-        _activeStreams.Add(stream);
-
         unsafe
         {
             var ffiStreamPtr = (Apache.Arrow.C.CArrowArrayStream*)Marshal.AllocHGlobal(Marshal.SizeOf<Apache.Arrow.C.CArrowArrayStream>());
@@ -141,7 +138,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
                 throw new Exception($"Failed to register Arrow stream scan for '{alias}'");
             }
         }
-        await Task.CompletedTask;
+        return Task.CompletedTask;
     }
 
     private async Task<Schema> InspectSchemaAsync(CancellationToken ct)
@@ -259,6 +256,9 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
 
     public async ValueTask DisposeAsync()
     {
+        foreach (var ptr in _allocatedPointers)
+            Marshal.FreeHGlobal(ptr);
+        _allocatedPointers.Clear();
         if (_conn is not null) { await _conn.DisposeAsync(); _conn = null; }
     }
 
@@ -272,26 +272,4 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
 
     private static void ValidateSchema(string alias, Schema schema)
         => SqlProcessorHelpers.ValidateSchema(alias, schema);
-
-    private sealed class GuidToBinaryConsumer : Apache.Arrow.Ado.IAdoConsumer
-    {
-        private readonly int _colIdx;
-        private readonly Apache.Arrow.Serialization.Reflection.FixedSizeBinaryArrayBuilder _builder = new(16);
-
-        public GuidToBinaryConsumer(int colIdx) { _colIdx = colIdx; }
-
-        public IArrowType ArrowType => new FixedSizeBinaryType(16);
-
-        public void Consume(System.Data.Common.DbDataReader reader)
-        {
-            if (reader.IsDBNull(_colIdx))
-                _builder.AppendNull();
-            else
-                _builder.Append(ArrowTypeMapper.ToArrowUuidBytes(((DuckDBDataReader)reader).GetGuid(_colIdx)));
-        }
-
-        public IArrowArray BuildArray() => _builder.Build();
-        public void Reset() => _builder.Clear();
-        public void Dispose() { }
-    }
 }
