@@ -47,3 +47,34 @@ internal sealed class ChannelArrowStream : IArrowArrayStream
 
     public void Dispose() { }
 }
+
+/// <summary>
+/// Wraps a pre-drained list of RecordBatches as an IArrowArrayStream.
+/// This is used for reference tables that need to be zero-copy while remaining repeatable
+/// (by using a new stream instance for each scan).
+/// </summary>
+internal sealed class StaticArrowStream : IArrowArrayStream
+{
+    private readonly Schema _schema;
+    private readonly IReadOnlyList<RecordBatch> _batches;
+    private int _currentIndex = 0;
+
+    public StaticArrowStream(Schema schema, IReadOnlyList<RecordBatch> batches)
+    {
+        _schema = schema;
+        _batches = batches;
+    }
+
+    public Schema Schema => _schema;
+
+    public ValueTask<RecordBatch?> ReadNextRecordBatchAsync(CancellationToken cancellationToken = default)
+    {
+        if (_currentIndex < _batches.Count)
+        {
+            return new ValueTask<RecordBatch?>(_batches[_currentIndex++]);
+        }
+        return new ValueTask<RecordBatch?>(default(RecordBatch));
+    }
+
+    public void Dispose() { }
+}

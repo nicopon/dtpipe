@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using Apache.Arrow;
 using Apache.Arrow.Ado;
+using Apache.Arrow.Ipc;
 using Apache.Arrow.Types;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Abstractions.Dag;
@@ -89,7 +90,9 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
         }
     }
 
-    // Materialises a --ref source fully into an in-memory DuckDB table before query execution.
+    // Materialises a --ref source fully into an in-memory list of RecordBatches,
+    // then registers it as a zero-copy Arrow scan in DuckDB.
+    // Draining is required because ref tables are often joined multiple times.
     private async Task RegisterRefTableAsync(string alias, string channelAlias, CancellationToken ct)
     {
         var schema = await _registry.WaitForArrowChannelSchemaAsync(channelAlias, ct);
@@ -97,35 +100,17 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
         var channelTuple = _registry.GetArrowChannel(channelAlias)
             ?? throw new Exception($"Arrow channel '{channelAlias}' not found");
 
-        using var createCmd = _conn!.CreateCommand();
-        createCmd.CommandText = BuildCreateTableSql(alias, schema);
-        await createCmd.ExecuteNonQueryAsync(ct);
-
-        using var appender = _conn.CreateAppender(alias);
+        var batches = new List<RecordBatch>();
         await foreach (var batch in channelTuple.Channel.Reader.ReadAllAsync(ct))
         {
-            for (int row = 0; row < batch.Length; row++)
-            {
-                var appenderRow = appender.CreateRow();
-                for (int col = 0; col < batch.ColumnCount; col++)
-                {
-                    var column = batch.Column(col);
-                    if (column.IsNull(row))
-                        appenderRow.AppendNullValue();
-                    else
-                        AppendArrowValue(appenderRow, column, row);
-                }
-                appenderRow.EndRow();
-            }
+            batches.Add(batch);
         }
-        appender.Close();
+
+        var stream = new StaticArrowStream(schema, batches);
+        await RegisterArrowStreamAsync(alias, stream);
     }
 
-    // Registers the --from source as a DuckDB table function backed by the Arrow channel,
-    // then exposes it as a plain VIEW so user SQL can reference it as a regular table name
-    // (without parentheses). DuckDB pulls rows lazily through the IEnumerable —
-    // the channel is never fully buffered.
-    // Registers the --from source as an Arrow stream scan in DuckDB.
+    // Registers the source as an Arrow stream scan in DuckDB.
     // This allows true zero-copy data transfer from the memory channel to DuckDB.
     private async Task RegisterStreamingTableAsync(string alias, string channelAlias, CancellationToken ct)
     {
@@ -135,6 +120,11 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
             ?? throw new Exception($"Arrow channel '{channelAlias}' not found");
 
         var stream = new ChannelArrowStream(schema, channelTuple.Channel.Reader, _logger, ct);
+        await RegisterArrowStreamAsync(alias, stream);
+    }
+
+    private async Task RegisterArrowStreamAsync(string alias, IArrowArrayStream stream)
+    {
         _activeStreams.Add(stream);
 
         unsafe
@@ -151,6 +141,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
                 throw new Exception($"Failed to register Arrow stream scan for '{alias}'");
             }
         }
+        await Task.CompletedTask;
     }
 
     private async Task<Schema> InspectSchemaAsync(CancellationToken ct)
@@ -253,12 +244,6 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
         }
         _allocatedPointers.Clear();
 
-        foreach (var stream in _activeStreams)
-        {
-            stream.Dispose();
-        }
-        _activeStreams.Clear();
-
         _conn?.Dispose();
     }
 
@@ -281,78 +266,6 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
 
     private static ReadOnlyMemory<object?[]> ConvertBatchToRows(RecordBatch batch)
         => SqlProcessorHelpers.ConvertBatchToRows(batch);
-
-    private static Type ToDuckDBCompatibleType(Type clrType)
-        => clrType == typeof(byte[]) ? typeof(Guid) : clrType;
-
-    private static string BuildCreateTableSql(string tableName, Schema schema)
-    {
-        var cols = schema.FieldsList.Select(f =>
-            $"\"{f.Name.ToLowerInvariant()}\" {ArrowTypeToDuckDbSql(f)}{(f.IsNullable ? "" : " NOT NULL")}");
-        return $"CREATE TABLE \"{tableName}\" ({string.Join(", ", cols)})";
-    }
-
-    private static string ArrowTypeToDuckDbSql(Field field) 
-    {
-        if (ArrowTypeMapper.GetClrTypeFromField(field) == typeof(Guid))
-            return "UUID";
-
-        return field.DataType switch
-        {
-            Decimal128Type d => $"DECIMAL({d.Precision},{d.Scale})",
-            FixedSizeBinaryType => "BLOB",
-            _ => field.DataType.TypeId switch
-            {
-                ArrowTypeId.Boolean => "BOOLEAN",
-                ArrowTypeId.Int8 => "TINYINT",
-                ArrowTypeId.UInt8 => "UTINYINT",
-                ArrowTypeId.Int16 => "SMALLINT",
-                ArrowTypeId.UInt16 => "USMALLINT",
-                ArrowTypeId.Int32 => "INTEGER",
-                ArrowTypeId.UInt32 => "UINTEGER",
-                ArrowTypeId.Int64 => "BIGINT",
-                ArrowTypeId.UInt64 => "UBIGINT",
-                ArrowTypeId.Float => "FLOAT",
-                ArrowTypeId.Double => "DOUBLE",
-                ArrowTypeId.String => "VARCHAR",
-                ArrowTypeId.Binary => "BLOB",
-                ArrowTypeId.Date32 => "DATE",
-                ArrowTypeId.Date64 => "TIMESTAMP",
-                ArrowTypeId.Timestamp => "TIMESTAMP",
-                ArrowTypeId.Duration => "BIGINT",
-                ArrowTypeId.Decimal256 => "DOUBLE",
-                _ => "VARCHAR",
-            }
-        };
-    }
-
-    private static void AppendArrowValue(IDuckDBAppenderRow row, IArrowArray column, int rowIndex)
-    {
-        var val = ArrowTypeMapper.GetValue(column, rowIndex);
-        switch (val)
-        {
-            case null: row.AppendNullValue(); break;
-            case bool b: row.AppendValue(b); break;
-            case sbyte sb: row.AppendValue(sb); break;
-            case byte by: row.AppendValue(by); break;
-            case short s: row.AppendValue(s); break;
-            case ushort us: row.AppendValue(us); break;
-            case int i: row.AppendValue(i); break;
-            case uint ui: row.AppendValue(ui); break;
-            case long l: row.AppendValue(l); break;
-            case ulong ul: row.AppendValue(ul); break;
-            case float f: row.AppendValue(f); break;
-            case double d: row.AppendValue(d); break;
-            case decimal dec: row.AppendValue(dec); break;
-            case string str: row.AppendValue(str); break;
-            case DateTime dt: row.AppendValue(dt); break;
-            case DateTimeOffset dto: row.AppendValue(dto.DateTime); break;
-            case TimeSpan ts: row.AppendValue(ts); break;
-            case Guid g: row.AppendValue(g); break;
-            case byte[] bytes: row.AppendValue((IEnumerable<byte>)bytes); break;
-            default: row.AppendValue(val.ToString() ?? string.Empty); break;
-        }
-    }
 
     private void ValidateAliases()
         => SqlProcessorHelpers.ValidateAliases(_mainChannelAlias, _refChannelAliases);
