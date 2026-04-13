@@ -5,16 +5,12 @@
     <ProjectReference Include="..\DtPipe.Core\DtPipe.Core.csproj" />
   </ItemGroup>
 
+  <!-- Native runtime libraries for cross-platform distribution -->
   <ItemGroup>
-    <None Include="DataFusion\libdtpipe_datafusion.dylib" Link="libdtpipe_datafusion.dylib"
-          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest"
-          Condition="$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::OSX))) AND Exists('DataFusion\libdtpipe_datafusion.dylib')" />
-    <None Include="DataFusion\dtpipe_datafusion.dll" Link="dtpipe_datafusion.dll"
-          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest"
-          Condition="$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::Windows))) AND Exists('DataFusion\dtpipe_datafusion.dll')" />
-    <None Include="DataFusion\libdtpipe_datafusion.so" Link="libdtpipe_datafusion.so"
-          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest"
-          Condition="$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::Linux))) AND Exists('DataFusion\libdtpipe_datafusion.so')" />
+    <None Include="runtimes\**\native\*"
+          Link="runtimes\%(RecursiveDir)%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

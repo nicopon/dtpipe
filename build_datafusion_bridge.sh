@@ -14,28 +14,70 @@ if [ -n "$RUST_TARGET" ]; then
     TARGET_ARGS="--target $RUST_TARGET"
 fi
 
-# Build the Rust crate
-cd src/DtPipe.Processors.DataFusion
-cargo build --profile "$PROFILE" $TARGET_ARGS
-
-echo "Copying compiled native libraries to DtPipe.Processors/DataFusion/..."
-cd ../..
-
-# Ensure destination directory exists
-mkdir -p src/DtPipe.Processors/DataFusion
-
-# Copy Unix shared libraries if they exist
-if [ -f "src/DtPipe.Processors.DataFusion/target/$TARGET_DIR/libdtpipe_datafusion.dylib" ]; then
-    cp "src/DtPipe.Processors.DataFusion/target/$TARGET_DIR/libdtpipe_datafusion.dylib" src/DtPipe.Processors/DataFusion/
+# Ensure cargo is available if we need to build
+if ! command -v cargo &> /dev/null; then
+    echo "Error: cargo is not installed. Native bridge cannot be built."
+    # Check if binaries already exist
+    if [ -f "src/DtPipe.Processors.DataFusion/target/$TARGET_DIR/libdtpipe_datafusion.dylib" ] || \
+       [ -f "src/DtPipe.Processors.DataFusion/target/$TARGET_DIR/libdtpipe_datafusion.so" ] || \
+       [ -f "src/DtPipe.Processors.DataFusion/target/$TARGET_DIR/dtpipe_datafusion.dll" ]; then
+        echo "Found existing binaries, proceeding with staging only..."
+    else
+        exit 1
+    fi
+else
+    # Build the Rust crate
+    cd src/DtPipe.Processors.DataFusion
+    cargo build --profile "$PROFILE" $TARGET_ARGS
+    cd ../..
 fi
 
-if [ -f "src/DtPipe.Processors.DataFusion/target/$TARGET_DIR/libdtpipe_datafusion.so" ]; then
-    cp "src/DtPipe.Processors.DataFusion/target/$TARGET_DIR/libdtpipe_datafusion.so" src/DtPipe.Processors/DataFusion/
+echo "Detecting Runtime Identifier (RID)..."
+OS="$(uname -s)"
+ARCH="$(uname -m)"
+RID=""
+
+case "$OS" in
+    Darwin)
+        if [[ "$ARCH" == "arm64" ]]; then RID="osx-arm64"; else RID="osx-x64"; fi
+        ;;
+    Linux)
+        if [[ "$ARCH" == "aarch64" ]]; then RID="linux-arm64"; else RID="linux-x64"; fi
+        ;;
+    MINGW*|CYGWIN*|MSYS*)
+        if [[ "$ARCH" == "arm64" || "$ARCH" == "aarch64" ]]; then RID="win-arm64"; else RID="win-x64"; fi
+        ;;
+    *)
+        echo "Unsupported platform: $OS"
+        exit 1
+        ;;
+esac
+
+echo "Target RID: $RID"
+DEST_DIR="src/DtPipe.Processors/runtimes/$RID/native"
+
+# Clean destination directory to ensure no stale binaries
+if [ -d "$DEST_DIR" ]; then
+    echo "Cleaning destination directory $DEST_DIR..."
+    rm -f "$DEST_DIR"/*
+fi
+mkdir -p "$DEST_DIR"
+
+# Copy libraries
+echo "Copying compiled native libraries to $DEST_DIR..."
+
+SOURCE_DIR="src/DtPipe.Processors.DataFusion/target/$TARGET_DIR"
+
+if [ -f "$SOURCE_DIR/libdtpipe_datafusion.dylib" ]; then
+    cp "$SOURCE_DIR/libdtpipe_datafusion.dylib" "$DEST_DIR/"
 fi
 
-# Copy Windows DLL if it exists
-if [ -f "src/DtPipe.Processors.DataFusion/target/$TARGET_DIR/dtpipe_datafusion.dll" ]; then
-    cp "src/DtPipe.Processors.DataFusion/target/$TARGET_DIR/dtpipe_datafusion.dll" src/DtPipe.Processors/DataFusion/
+if [ -f "$SOURCE_DIR/libdtpipe_datafusion.so" ]; then
+    cp "$SOURCE_DIR/libdtpipe_datafusion.so" "$DEST_DIR/"
 fi
 
-echo "DataFusion Bridge built and copied successfully."
+if [ -f "$SOURCE_DIR/dtpipe_datafusion.dll" ]; then
+    cp "$SOURCE_DIR/dtpipe_datafusion.dll" "$DEST_DIR/"
+fi
+
+echo "DataFusion Bridge built and copied to $DEST_DIR successfully."

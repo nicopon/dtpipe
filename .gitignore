@@ -62,6 +62,7 @@ src/DtPipe.Processors/DataFusion/*.dylib
 src/DtPipe.Processors/DataFusion/*.so
 src/DtPipe.Processors/DataFusion/*.dll
 src/DtPipe.Processors/DataFusion/*.dSYM/
+src/DtPipe.Processors/runtimes/*
 dist/release/.env
 
 # Experiments

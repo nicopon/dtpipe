@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -37,18 +37,15 @@
        CopyToPublishDirectory on None items in referenced projects does not propagate
        transitively, so we redeclare them in the publishing project. -->
   <ItemGroup>
-    <None Include="$(MSBuildThisFileDirectory)../DtPipe.Processors/DataFusion/libdtpipe_datafusion.dylib"
-          Link="libdtpipe_datafusion.dylib"
+    <None Include="$(MSBuildThisFileDirectory)../DtPipe.Processors/runtimes/$(RID)/native/*"
+          Link="%(Filename)%(Extension)"
           CopyToPublishDirectory="PreserveNewest"
-          Condition="$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::OSX))) AND Exists('$(MSBuildThisFileDirectory)../DtPipe.Processors/DataFusion/libdtpipe_datafusion.dylib')" />
-    <None Include="$(MSBuildThisFileDirectory)../DtPipe.Processors/DataFusion/libdtpipe_datafusion.so"
-          Link="libdtpipe_datafusion.so"
+          Condition="'$(RID)' != ''" />
+    <!-- Fallback to including all if RID is not specified (e.g. for IDE support/NuGet packing) -->
+    <None Include="$(MSBuildThisFileDirectory)../DtPipe.Processors/runtimes/**/native/*"
+          Link="runtimes/%(RecursiveDir)%(Filename)%(Extension)"
           CopyToPublishDirectory="PreserveNewest"
-          Condition="$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::Linux))) AND Exists('$(MSBuildThisFileDirectory)../DtPipe.Processors/DataFusion/libdtpipe_datafusion.so')" />
-    <None Include="$(MSBuildThisFileDirectory)../DtPipe.Processors/DataFusion/dtpipe_datafusion.dll"
-          Link="dtpipe_datafusion.dll"
-          CopyToPublishDirectory="PreserveNewest"
-          Condition="$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::Windows))) AND Exists('$(MSBuildThisFileDirectory)../DtPipe.Processors/DataFusion/dtpipe_datafusion.dll')" />
+          Condition="'$(RID)' == ''" />
   </ItemGroup>
 
   <ItemGroup>

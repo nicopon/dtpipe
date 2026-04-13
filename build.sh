@@ -78,29 +78,9 @@ echo -e "${YELLOW}Running Tests...${NC}"
 dotnet test tests/DtPipe.Tests/DtPipe.Tests.csproj -c Release --filter "FullyQualifiedName~.Unit."
 
 echo ""
-echo -e "${YELLOW}Staging DataFusion native library...${NC}"
-DATAFUSION_SRC=""
-DATAFUSION_DST=""
-case "$OS" in
-    Darwin)
-        DATAFUSION_SRC="src/DtPipe.Processors.DataFusion/target/release/libdtpipe_datafusion.dylib"
-        DATAFUSION_DST="src/DtPipe.Processors/DataFusion/libdtpipe_datafusion.dylib"
-        ;;
-    Linux)
-        DATAFUSION_SRC="src/DtPipe.Processors.DataFusion/target/release/libdtpipe_datafusion.so"
-        DATAFUSION_DST="src/DtPipe.Processors/DataFusion/libdtpipe_datafusion.so"
-        ;;
-    MINGW*|CYGWIN*|MSYS*)
-        DATAFUSION_SRC="src/DtPipe.Processors.DataFusion/target/release/dtpipe_datafusion.dll"
-        DATAFUSION_DST="src/DtPipe.Processors/DataFusion/dtpipe_datafusion.dll"
-        ;;
-esac
-if [ -n "$DATAFUSION_SRC" ] && [ -f "$DATAFUSION_SRC" ]; then
-    cp "$DATAFUSION_SRC" "$DATAFUSION_DST"
-    echo "  Copied: $DATAFUSION_SRC → $DATAFUSION_DST"
-else
-    echo "  Skipped (not found): $DATAFUSION_SRC — DataFusion SQL engine will not be available"
-fi
+echo -e "${YELLOW}Building DataFusion native bridge...${NC}"
+export CARGO_BUILD_PROFILE="release"
+./build_datafusion_bridge.sh || { echo -e "${RED}DataFusion bridge build failed.${NC}"; exit 1; }
 
 echo ""
 echo -e "${YELLOW}Performing a clean full rebuild...${NC}"
