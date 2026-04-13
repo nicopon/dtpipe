@@ -107,7 +107,7 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
         var schema = await _registry.WaitForArrowChannelSchemaAsync(channelAlias, ct);
         ValidateSchema(channelAlias, schema);
         var channelTuple = _registry.GetArrowChannel(channelAlias) ?? throw new Exception("Channel not found");
-        var streamAdapter = new ChannelArrowStream(StripUnsupportedExtensions(schema), channelTuple.Channel.Reader, _logger, ct);
+        var streamAdapter = new ChannelArrowStream(schema, channelTuple.Channel.Reader, _logger, ct);
 
         _activeStreams.Add(streamAdapter);
         ExportAndRegisterStream(alias, streamAdapter);
@@ -150,9 +150,8 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
 
     private unsafe void RegisterBatchesSafe(string alias, Schema schema, List<RecordBatch> batches)
     {
-        var exportSchema = ArrowFfiWorkaround.ReorderSchema(StripUnsupportedExtensions(schema));
         var ffiSchema = new CArrowSchema();
-        CArrowSchemaExporter.ExportSchema(exportSchema, &ffiSchema);
+        CArrowSchemaExporter.ExportSchema(schema, &ffiSchema);
 
         var numBatches = (nuint)batches.Count;
         var ffiBatchPointers = (CArrowArray**)Marshal.AllocHGlobal(IntPtr.Size * batches.Count);
@@ -163,7 +162,7 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
             for (int i = 0; i < batches.Count; i++)
             {
                 var ffiArrayPtr = (CArrowArray*)Marshal.AllocHGlobal(Marshal.SizeOf<CArrowArray>());
-                CArrowArrayExporter.ExportRecordBatch(ArrowFfiWorkaround.ReorderBatch(batches[i], exportSchema), ffiArrayPtr);
+                CArrowArrayExporter.ExportRecordBatch(batches[i], ffiArrayPtr);
                 ffiBatchPointers[i] = ffiArrayPtr;
                 allocatedArrays.Add((IntPtr)ffiArrayPtr);
             }
@@ -261,33 +260,5 @@ public sealed class DataFusionProcessor : IColumnarStreamReader
     private static void ValidateSchema(string alias, Schema schema)
         => SqlProcessorHelpers.ValidateSchema(alias, schema);
 
-    // DataFusion 53.x does not handle Arrow extension types (e.g. arrow.uuid on FixedSizeBinary(16)):
-    // it either crashes during execution or converts the column to Utf8.
-    // Strip extension metadata so DataFusion sees plain storage types (e.g. FixedSizeBinary(16)).
-    // The raw bytes are preserved unchanged; only the semantic annotation is removed.
-    private static Schema StripUnsupportedExtensions(Schema schema)
-    {
-        bool anyStripped = false;
-        var newFields = new List<Apache.Arrow.Field>(schema.FieldsList.Count);
-        foreach (var field in schema.FieldsList)
-        {
-            if (field.Metadata != null &&
-                (field.Metadata.ContainsKey("ARROW:extension:name") ||
-                 field.Metadata.ContainsKey("ARROW:extension:metadata")))
-            {
-                var stripped = field.Metadata
-                    .Where(kv => kv.Key != "ARROW:extension:name" && kv.Key != "ARROW:extension:metadata")
-                    .ToDictionary(kv => kv.Key, kv => kv.Value);
-                newFields.Add(new Apache.Arrow.Field(field.Name, field.DataType, field.IsNullable,
-                    stripped.Count > 0 ? stripped : null));
-                anyStripped = true;
-            }
-            else
-            {
-                newFields.Add(field);
-            }
-        }
-        return anyStripped ? new Schema(newFields, schema.Metadata) : schema;
-    }
 
 }
