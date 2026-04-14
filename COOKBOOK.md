@@ -286,6 +286,30 @@ dtpipe \
   -o result.parquet
 ```
 
+#### SQL Dialect Differences (Nested Data)
+
+When working with nested structures (Structs in Arrow, Objects in JSONL), the engines use different syntax for field access:
+
+| Feature | **DataFusion (Default)** | **DuckDB** |
+| :--- | :--- | :--- |
+| **Field Access** | `column['field']` | `column.field` |
+| **Nested Access** | `col['nested']['field']` | `col.nested.field` |
+| **Quoting** | Optional for common names | Highly recommended for all identifiers |
+
+**Example (JSONL / Nested Structs):**
+
+```bash
+# DataFusion Syntax
+dtpipe -i data.jsonl --alias m \
+  --sql "SELECT m.user['id'], m.meta['details']['code'] FROM m"
+
+# DuckDB Syntax
+dtpipe -i data.jsonl --alias m --sql-engine duckdb \
+  --sql "SELECT m.user.id, m.meta.details.code FROM m"
+```
+
+> **Tip:** If a column name is a reserved SQL keyword (like `group`, `order`), always wrap it in double quotes: `"group".name` or `"group"['id']`.
+
 ---
 
 ## Standard Streams & Linux Pipes

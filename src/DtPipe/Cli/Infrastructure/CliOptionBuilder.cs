@@ -87,7 +87,7 @@ public static class CliOptionBuilder
 				var underlyingType = GetUnderlyingType(propType);
 
 				// Create generic option dynamically
-				var optionType = typeof(Option<>).MakeGenericType(underlyingType);
+				var optionType = underlyingType == typeof(bool) ? typeof(Option<bool>) : typeof(Option<>).MakeGenericType(underlyingType.MakeArrayType());
 				option = (Option)Activator.CreateInstance(optionType, new object[] { flagName })!;
 
 				// Set description
@@ -98,11 +98,22 @@ public static class CliOptionBuilder
 				{
 					option.Arity = ArgumentArity.Zero;
 				}
+				else
+				{
+					option.Arity = ArgumentArity.ZeroOrMore;
+					option.AllowMultipleArgumentsPerToken = true;
+				}
 
 				// Set default value if not null using DefaultValueFactory
 				if (defaultValue != null)
 				{
-					SetDefaultValue(option, optionType, underlyingType, defaultValue);
+					var valToSet = underlyingType == typeof(bool) ? defaultValue : Array.CreateInstance(underlyingType, 1);
+					if (underlyingType != typeof(bool))
+					{
+						((Array)valToSet!).SetValue(defaultValue, 0);
+					}
+					var typeToSet = underlyingType == typeof(bool) ? typeof(bool) : underlyingType.MakeArrayType();
+					SetDefaultValue(option, optionType, typeToSet, valToSet!);
 				}
 			}
 
@@ -192,7 +203,8 @@ public static class CliOptionBuilder
 			{
 				var defaultValue = property.GetValue(defaultInstance);
 				var underlyingType = GetUnderlyingType(propType);
-				var optionType = typeof(Option<>).MakeGenericType(underlyingType);
+				// Create generic option dynamically
+				var optionType = underlyingType == typeof(bool) ? typeof(Option<bool>) : typeof(Option<>).MakeGenericType(underlyingType.MakeArrayType());
 				option = (Option)Activator.CreateInstance(optionType, new object[] { flagName })!;
 				option.Description = description;
 
@@ -201,10 +213,21 @@ public static class CliOptionBuilder
 				{
 					option.Arity = ArgumentArity.Zero;
 				}
+				else
+				{
+					option.Arity = ArgumentArity.ZeroOrMore;
+					option.AllowMultipleArgumentsPerToken = true;
+				}
 
 				if (defaultValue != null)
 				{
-					SetDefaultValue(option, optionType, underlyingType, defaultValue);
+					var valToSet = underlyingType == typeof(bool) ? defaultValue : Array.CreateInstance(underlyingType, 1);
+					if (underlyingType != typeof(bool))
+					{
+						((Array)valToSet!).SetValue(defaultValue, 0);
+					}
+					var typeToSet = underlyingType == typeof(bool) ? typeof(bool) : underlyingType.MakeArrayType();
+					SetDefaultValue(option, optionType, typeToSet, valToSet!);
 				}
 			}
 
@@ -451,6 +474,14 @@ public static class CliOptionBuilder
 			else
 			{
 				try { val = res.GetValueOrDefault<object>(); } catch { }
+			}
+
+			if (val is null) return default;
+
+			// If val is an array (from Option<T[]>), take the last element
+			if (val is Array array && array.Length > 0 && !typeof(T).IsArray)
+			{
+				val = array.GetValue(array.Length - 1);
 			}
 
 			if (val is null) return default;

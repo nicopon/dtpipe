@@ -291,6 +291,7 @@ public class JobService
 				};
 
 				var registry = _serviceProvider.GetRequiredService<OptionsRegistry>();
+				registry.BeginScope();
 
 				var providerConfigService = new DtPipe.Cli.Services.ProviderConfigurationService(_contributors, registry);
 				providerConfigService.BindOptions(job, pr);

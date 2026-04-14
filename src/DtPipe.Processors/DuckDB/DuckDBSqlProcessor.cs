@@ -1,9 +1,6 @@
-#pragma warning disable DuckDBNET001 // RegisterTableFunction and IDuckDBDataWriter are experimental in DuckDB.NET
-using System.Data;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using Apache.Arrow;
-using Apache.Arrow.Ado;
 using Apache.Arrow.Ipc;
 using Apache.Arrow.Types;
 using DtPipe.Core.Abstractions;
@@ -63,6 +60,14 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
             _conn = new DuckDBConnection("DataSource=:memory:");
             await _conn.OpenAsync(ct);
 
+            // Export Arrow extension types faithfully (e.g. UUID → FixedSizeBinary(16)+arrow.uuid
+            // instead of the default lossy Utf8). Requires DuckDB >= v1.2.0; bundled v1.5.0.
+            using (var cmd = _conn.CreateCommand())
+            {
+                cmd.CommandText = "SET arrow_lossless_conversion = true";
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
+
             ValidateAliases();
 
             if (_refAliases.Length > 0)
@@ -77,7 +82,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
                 await RegisterStreamingTableAsync(_mainAlias, _mainChannelAlias, ct);
 
             _logger.LogDebug("DuckDBSqlProcessor: All sources registered. Inspecting schema...");
-            _resultSchema = await InspectSchemaAsync(ct);
+            _resultSchema = InspectSchemaViaArrow();
             _columns = _resultSchema.FieldsList
                 .Select(f => new PipeColumnInfo(f.Name, ArrowTypeMapper.GetClrTypeFromField(f), f.IsNullable))
                 .ToList();
@@ -141,16 +146,25 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
         return Task.CompletedTask;
     }
 
-    private async Task<Schema> InspectSchemaAsync(CancellationToken ct)
+    // Uses the same Arrow C Data Interface path as ReadRecordBatchesAsync so that _resultSchema
+    // is always consistent with the actual RecordBatch schema DuckDB produces.
+    // Note: DuckDB exports UUID columns as Utf8 (StringType), not FixedSizeBinary+arrow.uuid.
+    private unsafe Schema InspectSchemaViaArrow()
     {
-        using var cmd = _conn!.CreateCommand();
-        cmd.CommandText = $"SELECT * FROM ({_query}) __schema_probe LIMIT 0";
-        using var reader = (DuckDBDataReader)await cmd.ExecuteReaderAsync(ct);
-        var config = new AdoToArrowConfigBuilder().Build();
-        return AdoToArrowUtils.CreateSchema(reader, config);
+        var probeQuery = $"SELECT * FROM ({_query}) __schema_probe LIMIT 0";
+        if (DuckDBArrowNativeMethods.DuckDBQueryArrow(_conn!.NativeConnection, probeQuery, out var arrowResult) != DuckDBState.Success)
+            throw new Exception($"DuckDB schema probe failed for query: {_query}");
+        try
+        {
+            return GetSchemaFromResult(arrowResult)
+                ?? throw new Exception("DuckDB returned an empty schema for the query.");
+        }
+        finally
+        {
+            nint ptr = arrowResult.InternalPtr;
+            DuckDBArrowNativeMethods.DuckDBDestroyArrow(ref ptr);
+        }
     }
-
-    // DtPipe UUID convention for Guid is natively handled by the centralized ArrowTypeMap via AdoToArrowUtils.
 
     public async IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync(
         [EnumeratorCancellation] CancellationToken ct = default)
