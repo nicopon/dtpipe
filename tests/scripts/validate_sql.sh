@@ -50,7 +50,17 @@ fi
 A="$ARTIFACTS_DIR"
 csv_rows() { tail -n +2 "$1" | wc -l | tr -d ' '; }
 
-# Helper: run a query on both engines, call check_func with (output_csv, engine).
+# Detect DataFusion via the runtime itself — platform-independent and uses the same
+# probe as CompositeSqlTransformerFactory (NativeLibrary.TryLoad).
+if "$DTPIPE" sql-engines datafusion 2>/dev/null; then
+    SQL_ENGINES=("datafusion" "duckdb")
+else
+    SQL_ENGINES=("duckdb")
+    echo -e "  ${YELLOW}Note: DataFusion bridge not built — SQL tests run on DuckDB only.${NC}"
+    echo -e "  ${YELLOW}Build with DTPIPE_EXPERIMENTAL=1 ./build.sh to include DataFusion.${NC}"
+fi
+
+# Helper: run a query on available engines, call check_func with (output_csv, engine).
 # Does NOT exit on failure — all tests run regardless of individual failures.
 both_engines() {
     local name="$1"
@@ -58,7 +68,7 @@ both_engines() {
     local sql="$3"
     local check_func="$4"
 
-    for engine in "datafusion" "duckdb"; do
+    for engine in "${SQL_ENGINES[@]}"; do
         echo "  [SQL Engine: $engine] $name..."
         rm -f "$A/out.csv"
         if eval "\"$DTPIPE\" $source_args --from src --sql-engine \"$engine\" --sql \"$sql\" -o \"$A/out.csv\" --no-stats" 2>/dev/null; then

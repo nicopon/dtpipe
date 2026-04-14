@@ -5,7 +5,15 @@ using DtPipe.Core.Pipelines.Dag;
 
 /// <summary>
 /// Selects DuckDB or DataFusion as the SQL engine.
-/// Priority: --sql-engine (branch arg) > DTPIPE_SQL_ENGINE (env var) > datafusion (default).
+/// Priority: --sql-engine (branch arg) > DTPIPE_SQL_ENGINE (env var) > duckdb (default).
+///
+/// DuckDB (default): standard SQL, richer function library, no build step, queries testable
+/// outside DtPipe. Recommended for all typical ETL/transformation use cases.
+///
+/// DataFusion (--sql-engine datafusion): Arrow-native zero-copy output, no DataChunk→Arrow
+/// conversion on the output path. Consider for high-throughput pipelines (>10M rows) or
+/// when the Rust native library is already present in the distribution.
+/// Requires ./build_datafusion_bridge.sh — not available in standard distributions.
 /// </summary>
 public class CompositeSqlTransformerFactory : IStreamTransformerFactory
 {
@@ -24,7 +32,7 @@ public class CompositeSqlTransformerFactory : IStreamTransformerFactory
     {
         var engine = BranchArgParser.ExtractValue(branchArgs, "--sql-engine")
                      ?? Environment.GetEnvironmentVariable("DTPIPE_SQL_ENGINE")
-                     ?? "datafusion";
+                     ?? "duckdb";
 
         if (engine.Equals("datafusion", StringComparison.OrdinalIgnoreCase))
         {
@@ -39,6 +47,20 @@ public class CompositeSqlTransformerFactory : IStreamTransformerFactory
 
     // Probe once at class load time — native library presence does not change during a run.
     private static readonly bool _dataFusionAvailable = ProbeDataFusion();
+
+    /// <summary>
+    /// Returns the list of SQL engines with their availability status.
+    /// Used by <c>dtpipe sql-engines</c> to report what is compiled into this distribution.
+    /// </summary>
+    public static IReadOnlyList<SqlEngineInfo> GetEngines() =>
+    [
+        new("duckdb",      Available: true,                 IsDefault: true,
+            "Standard SQL · no build step · queries testable with DuckDB CLI"),
+        new("datafusion",  Available: _dataFusionAvailable, IsDefault: false,
+            "Experimental · Arrow-native zero-copy output · requires Rust bridge (DTPIPE_EXPERIMENTAL=1)"),
+    ];
+
+    public sealed record SqlEngineInfo(string Name, bool Available, bool IsDefault, string Description);
 
     private static bool ProbeDataFusion()
     {

@@ -249,10 +249,10 @@ dtpipe -i data.parquet -o data.arrow
 ### High-Performance Joins (SQL Processors)
 
 Use `--from` + `--sql` to join multiple sources in memory without intermediate files.
-The `--from` source is streamed; `--ref` sources are fully preloaded into memory to enable DataFusion's cost-based query planning.
+The `--from` source is streamed; `--ref` sources are fully preloaded into memory to enable cost-based query planning in both engines.
 
-#### DataFusion Processor
-Rust-based DataFusion engine for high-performance columnar SQL processing.
+#### SQL Processor (DuckDB — default)
+DuckDB is the default SQL engine. No build step required.
 
 ```bash
 dtpipe \
@@ -265,32 +265,34 @@ dtpipe \
 
 #### Choosing a SQL Engine
 
-By default, DtPipe uses **DataFusion** for `--sql` processing. You can switch to **DuckDB** using the `--sql-engine duckdb` flag or the `DTPIPE_SQL_ENGINE` environment variable.
+By default, DtPipe uses **DuckDB** for `--sql` processing. Use `--sql-engine datafusion` or `DTPIPE_SQL_ENGINE=datafusion` to switch to DataFusion (experimental).
 
-| Feature | **DataFusion (Default)** | **DuckDB** |
+| Feature | **DuckDB (Default)** | **DataFusion (Experimental)** |
 | :--- | :--- | :--- |
-| **Profile** | Analytical query engine. Optimized for pipeline performance. | Full-featured database. "The SQLite for Analytics". |
-| **Pipelining** | **Stream-first**: Built to process massive volumes with minimal memory. | **Rich SQL**: Highly compatible with PostgreSQL syntax. |
-| **Joins** | **Optimized**: Analyzes reference tables to choose the fastest join strategy. | **Latency**: Extremely fast startup/ingestion for simple lookups. |
-| **File Access** | Supports reading Parquet, CSV, JSON directly in SQL. | **Native Support**: Excellent at joining pipeline streams with external files. |
-| **Standard** | Specialized for the DtPipe ecosystem. | **Universal**: Queries work 1:1 in DuckDB CLI or any BI tool. |
+| **Availability** | Always available — no build step. | Requires `./build_experimental.sh` (Rust toolchain needed). |
+| **SQL dialect** | Standard SQL, PostgreSQL-compatible, rich function library. | Good coverage, some limitations (e.g. window functions in subqueries). |
+| **Testability** | Queries work 1:1 in DuckDB CLI or any BI tool. | Engine-specific — only testable inside DtPipe. |
+| **Output path** | DataChunk → Arrow conversion on output (copy). | Arrow-native end-to-end (zero-copy output). |
+| **Best for** | All typical ETL/transformation workloads. | High-throughput pipelines (>10M rows) where zero-copy output matters. |
 
 ```bash
-# Force DuckDB for a specific branch
+# Use DataFusion for a specific branch (requires experimental build)
 dtpipe \
   -i customers.parquet --alias customers \
   -i orders.csv --alias orders \
   --from orders --ref customers \
-  --sql-engine duckdb \
+  --sql-engine datafusion \
   --sql "SELECT o.*, c.name FROM orders o JOIN customers c ON o.customer_id = c.id" \
   -o result.parquet
 ```
+
+> **Note:** To verify which engines are available in your build: `dtpipe sql-engines`
 
 #### SQL Dialect Differences (Nested Data)
 
 When working with nested structures (Structs in Arrow, Objects in JSONL), the engines use different syntax for field access:
 
-| Feature | **DataFusion (Default)** | **DuckDB** |
+| Feature | **DataFusion** | **DuckDB** |
 | :--- | :--- | :--- |
 | **Field Access** | `column['field']` | `column.field` |
 | **Nested Access** | `col['nested']['field']` | `col.nested.field` |

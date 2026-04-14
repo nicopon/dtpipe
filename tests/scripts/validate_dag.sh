@@ -34,17 +34,27 @@ A="$ARTIFACTS_DIR"
 # Helper: count CSV data rows (excluding header)
 csv_rows() { tail -n +2 "$1" | wc -l | tr -d ' '; }
 
-# Helper: run a SQL test against BOTH engines
+# Detect DataFusion via the runtime itself — platform-independent and uses the same
+# probe as CompositeSqlTransformerFactory (NativeLibrary.TryLoad).
+if "$DTPIPE" sql-engines datafusion 2>/dev/null; then
+    SQL_ENGINES=("datafusion" "duckdb")
+else
+    SQL_ENGINES=("duckdb")
+    echo -e "  ${YELLOW}Note: DataFusion bridge not built — SQL tests run on DuckDB only.${NC}"
+    echo -e "  ${YELLOW}Build with DTPIPE_EXPERIMENTAL=1 ./build.sh to include DataFusion.${NC}"
+fi
+
+# Helper: run a SQL test against available engines
 run_sql_test() {
     local name="$1"
     local args="$2"
     local check_func="$3"
-    
-    for engine in "datafusion" "duckdb"; do
+
+    for engine in "${SQL_ENGINES[@]}"; do
         echo "  [SQL Engine: $engine] $name..."
-    local sql="SELECT * FROM src"
-    eval "\"$DTPIPE\" $args --sql-engine $engine --sql \"$sql\" -o \"$A/sql_out.csv\" --no-stats"
-    $check_func "$A/sql_out.csv" "$engine"
+        local sql="SELECT * FROM src"
+        eval "\"$DTPIPE\" $args --sql-engine $engine --sql \"$sql\" -o \"$A/sql_out.csv\" --no-stats"
+        $check_func "$A/sql_out.csv" "$engine"
     done
 }
 
@@ -147,7 +157,7 @@ check_t6() {
 "$DTPIPE" -i "generate:200" --fake "Id:random.number" --fake "Cat:lorem.word" --drop "GenerateIndex" -o "$A/t6_src.parquet" --strategy Recreate --no-stats
 
 # We run this one manually because it has multiple branches, but we can still force the engine
-for engine in "datafusion" "duckdb"; do
+for engine in "${SQL_ENGINES[@]}"; do
     echo "  [SQL Engine: $engine] T6: Fan-out + SQL..."
     rm -f "$A/t6_passthru.csv" "$A/t6_sql.csv"
     "$DTPIPE" \
@@ -181,7 +191,7 @@ echo "--- [8] Join → fan-out (joined result broadcast to two outputs) ---"
 "$DTPIPE" -i "generate:50" --fake "Id:random.number" --fake "Val:lorem.word" --drop "GenerateIndex" -o "$A/t8_main.parquet" --strategy Recreate --no-stats
 "$DTPIPE" -i "generate:10" --fake "Id:random.number" --fake "Extra:lorem.word" --drop "GenerateIndex" -o "$A/t8_ref.csv" --no-stats
 
-for engine in "datafusion" "duckdb"; do
+for engine in "${SQL_ENGINES[@]}"; do
     echo "  [SQL Engine: $engine] T8: Join -> Fan-out..."
     rm -f "$A/t8_outA.csv" "$A/t8_outB.csv"
     "$DTPIPE" \
@@ -250,7 +260,7 @@ run_sql_test "T10: FFI Reordering" \
 # DuckDB:     UUID exported as Utf8 (StringType) — type changes, but values stay valid.
 # ----------------------------------------
 echo "--- [11] UUID round-trip: SQL → Parquet ---"
-for engine in "datafusion" "duckdb"; do
+for engine in "${SQL_ENGINES[@]}"; do
     echo "  [SQL Engine: $engine] T11: UUID → Parquet..."
     rm -f "$A/t11_uuid.parquet" "$A/t11_uuid_verify.csv"
 
@@ -305,7 +315,7 @@ check_t12_all() {
     check_t12 "$A/t12_out.csv" "$eng"
 }
 
-for engine in "datafusion" "duckdb"; do
+for engine in "${SQL_ENGINES[@]}"; do
     echo "  [SQL Engine: $engine] T12: Nested JOINs..."
     check_t12_all "dummy" "$engine"
 done
@@ -330,7 +340,7 @@ run_sql_test "T13: Large Data" \
 echo "--- [14] UUID value fidelity through SQL ---"
 KNOWN_UUID="550e8400-e29b-41d4-a716-446655440000"
 
-for engine in "datafusion" "duckdb"; do
+for engine in "${SQL_ENGINES[@]}"; do
     echo "  [SQL Engine: $engine] T14: UUID value fidelity..."
     rm -f "$A/t14_src.csv" "$A/t14_out.parquet" "$A/t14_verify.csv"
 

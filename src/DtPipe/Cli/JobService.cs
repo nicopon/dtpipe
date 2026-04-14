@@ -93,6 +93,7 @@ public class JobService
 		rootCommand.Subcommands.Add(new InspectCommand(_serviceProvider));
 
 		rootCommand.Subcommands.Add(new ProvidersCommand(_serviceProvider));
+		rootCommand.Subcommands.Add(new SqlEnginesCommand(_serviceProvider));
 
 		rootCommand.Subcommands.Add(new CompletionCommand());
 

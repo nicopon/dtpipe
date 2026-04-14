@@ -110,11 +110,10 @@ ROWS=$(python3 -c "import struct,sys; f=open('$ARTIFACTS_DIR/bench_from_duckdb.p
 echo "  Parquet rows: $ROWS"
 
 # ----------------------------------------
-# 5. SQL JOIN benchmarks (DataFusion)
+# 5. SQL JOIN benchmarks (DuckDB + DataFusion if available)
 # ----------------------------------------
 if [ $RUN_SQL -eq 1 ]; then
     echo ""
-    echo "[5] SQL JOIN benchmark (dual engine: DataFusion vs DuckDB)"
 
     MAIN_PARQUET="$ARTIFACTS_DIR/main.parquet"
     REF_CSV="$ARTIFACTS_DIR/ref1_10k.csv"
@@ -125,16 +124,22 @@ if [ $RUN_SQL -eq 1 ]; then
         "$SCRIPT_DIR/generate_benchmark_datasets.sh"
     fi
 
-    QUERY_FUSION='SELECT m.*, r.Id as ref1_id, r2.Id as ref2_id FROM main m LEFT JOIN ref r ON m.GenerateIndex = CAST(r.Id AS BIGINT) LEFT JOIN ref2 r2 ON m.GenerateIndex = CAST(r2.Id AS BIGINT)'
+    QUERY_JOIN='SELECT m.*, r.Id as ref1_id, r2.Id as ref2_id FROM main m LEFT JOIN ref r ON m.GenerateIndex = CAST(r.Id AS BIGINT) LEFT JOIN ref2 r2 ON m.GenerateIndex = CAST(r2.Id AS BIGINT)'
 
-    echo "  DataFusion engine..."
-    timeit "datafusion-dag" "$DTPIPE" \
-      -i "parquet:$MAIN_PARQUET" --alias main \
-      -i "csv:$REF_CSV"          --alias ref \
-      -i "csv:$REF2_CSV"         --alias ref2 \
-      --from main --ref ref --ref ref2 \
-      --sql "$QUERY_FUSION" --sql-engine datafusion \
-      -o null --no-stats
+    # DataFusion is an experimental feature — only benchmarked when the bridge is built.
+    if "$DTPIPE" sql-engines datafusion 2>/dev/null; then
+        echo "[5] SQL JOIN benchmark (dual engine: DataFusion vs DuckDB)"
+        echo "  DataFusion engine..."
+        timeit "datafusion-dag" "$DTPIPE" \
+          -i "parquet:$MAIN_PARQUET" --alias main \
+          -i "csv:$REF_CSV"          --alias ref \
+          -i "csv:$REF2_CSV"         --alias ref2 \
+          --from main --ref ref --ref ref2 \
+          --sql "$QUERY_JOIN" --sql-engine datafusion \
+          -o null --no-stats
+    else
+        echo "[5] SQL JOIN benchmark (DuckDB only — build with DTPIPE_EXPERIMENTAL=1 to include DataFusion)"
+    fi
 
     echo "  DuckDB engine..."
     timeit "duckdb-dag" "$DTPIPE" \
@@ -142,9 +147,9 @@ if [ $RUN_SQL -eq 1 ]; then
       -i "csv:$REF_CSV"          --alias ref \
       -i "csv:$REF2_CSV"         --alias ref2 \
       --from main --ref ref --ref ref2 \
-      --sql "$QUERY_FUSION" --sql-engine duckdb \
+      --sql "$QUERY_JOIN" --sql-engine duckdb \
       -o null --no-stats
-      
+
 fi
 
 # ----------------------------------------

@@ -144,4 +144,46 @@ public class DuckDBSqlProcessorTests
         var cntField = processor.Schema!.FieldsList.Single(f => f.Name == "cnt");
         Assert.NotNull(cntField);
     }
+
+    /// <summary>
+    /// Sentinel test: verifies that duckdb_execute_prepared_streaming is available in the
+    /// bundled DuckDB native library and that the full streaming pipeline works end-to-end.
+    ///
+    /// If this test fails with EntryPointNotFoundException, the DuckDB native library was
+    /// upgraded to a version that removed this deprecated function.
+    ///
+    /// ACTION REQUIRED — do NOT add a silent fallback to materialized execution:
+    ///   1. Find the new non-deprecated streaming API that DuckDB introduced.
+    ///   2. Migrate DuckDBSqlProcessor.ExecuteStreamingQuery and DuckDBArrowNativeMethods
+    ///      to use it — single code path, no parallel logic.
+    ///   3. If no streaming API is available yet, revert DuckDB.NET.Data.Full to the last
+    ///      working version until one is available.
+    /// </summary>
+    [Fact]
+    public async Task DuckDB_StreamingAPI_IsAvailable()
+    {
+        var field = new Field("n", Int32Type.Default, nullable: false);
+        var schema = new Schema(new[] { field }, null);
+        var arr = new Int32Array.Builder().AppendRange(Enumerable.Range(1, 10)).Build();
+        var batch = new RecordBatch(schema, new IArrowArray[] { arr }, 10);
+
+        const string alias = "src";
+        var registry = BuildRegistry(alias, schema, new[] { batch });
+
+        var processor = new DuckDBSqlProcessor(
+            registry, "SELECT n FROM src", alias, alias,
+            refAliases: [], refChannelAliases: [],
+            NullLogger<DuckDBSqlProcessor>.Instance);
+
+        // EntryPointNotFoundException here = duckdb_execute_prepared_streaming was removed.
+        // See the ACTION REQUIRED comment above — do not catch this exception.
+        await processor.OpenAsync();
+        var batches = new List<RecordBatch>();
+        await foreach (var b in processor.ReadRecordBatchesAsync())
+            batches.Add(b);
+        await processor.DisposeAsync();
+
+        Assert.NotEmpty(batches);
+        Assert.Equal(10, batches.Sum(b => b.Length));
+    }
 }

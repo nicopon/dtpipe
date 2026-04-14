@@ -16,7 +16,7 @@ public static class CliPipelineRules
     /// </summary>
     public static readonly HashSet<string> StartRules = new(StringComparer.OrdinalIgnoreCase)
     {
-        "--job", "--help", "--version", "inspect", "providers", "completion", "secret",
+        "--job", "--help", "--version", "inspect", "providers", "sql-engines", "completion", "secret",
         "-i", "--input", "--sql", "--from"
     };
 

@@ -77,10 +77,16 @@ echo ""
 echo -e "${YELLOW}Running Tests...${NC}"
 dotnet test tests/DtPipe.Tests/DtPipe.Tests.csproj -c Release --filter "FullyQualifiedName~.Unit."
 
-echo ""
-echo -e "${YELLOW}Building DataFusion native bridge...${NC}"
-export CARGO_BUILD_PROFILE="release"
-./build_datafusion_bridge.sh || { echo -e "${RED}DataFusion bridge build failed.${NC}"; exit 1; }
+if [ "${DTPIPE_EXPERIMENTAL:-0}" = "1" ]; then
+    echo ""
+    echo -e "${YELLOW}Building DataFusion native bridge (DTPIPE_EXPERIMENTAL=1)...${NC}"
+    export CARGO_BUILD_PROFILE="release"
+    ./build_datafusion_bridge.sh || { echo -e "${RED}DataFusion bridge build failed.${NC}"; exit 1; }
+else
+    echo ""
+    echo -e "${YELLOW}Skipping DataFusion native bridge (experimental feature).${NC}"
+    echo -e "  Set DTPIPE_EXPERIMENTAL=1 to build it: DTPIPE_EXPERIMENTAL=1 ./build.sh"
+fi
 
 echo ""
 echo -e "${YELLOW}Performing a clean full rebuild...${NC}"

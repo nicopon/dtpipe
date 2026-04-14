@@ -84,9 +84,13 @@ internal static partial class DuckDBArrowNativeMethods
     // DllImport used instead of LibraryImport: the source generator (SYSLIB1051) cannot
     // marshal DuckDBResult (struct with private fields in another assembly).
 
-    // duckdb_execute_prepared_streaming is scheduled for removal but is the only C API
-    // that produces a truly lazy (non-materialized) duckdb_result.
-    // duckdb_fetch_chunk and duckdb_data_chunk_to_arrow (used below) are non-deprecated.
+    // SOLE PATH TO LAZY STREAMING IN DUCKDB C API v1.5.
+    // Deprecated and scheduled for removal — but duckdb_pending_prepared (non-deprecated)
+    // forces full materialisation (allow_streaming=false → PhysicalMaterializedCollector).
+    // There is no non-deprecated equivalent in v1.5. When DuckDB introduces one, migrate here.
+    // The sentinel test DuckDB_StreamingAPI_IsAvailable in DuckDBSqlProcessorTests.cs will
+    // fail with EntryPointNotFoundException if a DuckDB upgrade removes this function,
+    // forcing a conscious decision. Do NOT add a silent fallback to materialized execution.
     [DllImport(DuckDbLibrary, EntryPoint = "duckdb_execute_prepared_streaming")]
     internal static extern DuckDBState DuckDBExecutePreparedStreaming(
         DuckDBPreparedStatement stmt, out DuckDBResult result);
