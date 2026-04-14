@@ -1,6 +1,8 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Apache.Arrow;
+using Apache.Arrow.C;
 using Apache.Arrow.Ipc;
 using Apache.Arrow.Types;
 using DtPipe.Core.Abstractions;
@@ -11,7 +13,6 @@ using DtPipe.Processors.Sql;
 using DuckDB.NET.Data;
 using DuckDB.NET.Native;
 using Microsoft.Extensions.Logging;
-using System.Runtime.InteropServices;
 
 namespace DtPipe.Processors.DuckDB;
 
@@ -25,9 +26,12 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
     private readonly string[] _refChannelAliases;
     private readonly ILogger<DuckDBSqlProcessor> _logger;
 
+    // Input-side: CArrowArrayStream structs allocated on the unmanaged heap for DuckDB to hold.
     private readonly List<IntPtr> _allocatedPointers = new();
 
     private DuckDBConnection? _conn;
+    private DuckDBPreparedStatement? _stmt;
+    private IntPtr _arrowOpts = IntPtr.Zero;
     private Schema? _resultSchema;
     private IReadOnlyList<PipeColumnInfo>? _columns;
 
@@ -60,7 +64,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
             _conn = new DuckDBConnection("DataSource=:memory:");
             await _conn.OpenAsync(ct);
 
-            // Export Arrow extension types faithfully (e.g. UUID → FixedSizeBinary(16)+arrow.uuid
+            // Export Arrow extension types faithfully (UUID → FixedSizeBinary(16)+arrow.uuid
             // instead of the default lossy Utf8). Requires DuckDB >= v1.2.0; bundled v1.5.0.
             using (var cmd = _conn.CreateCommand())
             {
@@ -81,8 +85,15 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
             if (!string.IsNullOrEmpty(_mainAlias))
                 await RegisterStreamingTableAsync(_mainAlias, _mainChannelAlias, ct);
 
-            _logger.LogDebug("DuckDBSqlProcessor: All sources registered. Inspecting schema...");
-            _resultSchema = InspectSchemaViaArrow();
+            _logger.LogDebug("DuckDBSqlProcessor: Sources registered. Preparing statement...");
+            PrepareStatement();
+
+            // Arrow options carry the arrow_lossless_conversion flag and are used for both
+            // schema construction (duckdb_to_arrow_schema) and chunk conversion (duckdb_data_chunk_to_arrow).
+            DuckDBArrowNativeMethods.DuckDBConnectionGetArrowOptions(_conn.NativeConnection, out _arrowOpts);
+
+            _logger.LogDebug("DuckDBSqlProcessor: Inspecting schema from prepared statement...");
+            _resultSchema = InspectSchemaFromStatement();
             _columns = _resultSchema.FieldsList
                 .Select(f => new PipeColumnInfo(f.Name, ArrowTypeMapper.GetClrTypeFromField(f), f.IsNullable))
                 .ToList();
@@ -93,6 +104,8 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
             throw;
         }
     }
+
+    // ── Input registration ───────────────────────────────────────────────────────────
 
     // Materialises a --ref source fully into an in-memory list of RecordBatches,
     // then registers it as a zero-copy Arrow scan in DuckDB.
@@ -106,16 +119,13 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
 
         var batches = new List<RecordBatch>();
         await foreach (var batch in channelTuple.Channel.Reader.ReadAllAsync(ct))
-        {
             batches.Add(batch);
-        }
 
         var stream = new StaticArrowStream(schema, batches);
-        await RegisterArrowStreamAsync(alias, stream);
+        RegisterArrowStream(alias, stream);
     }
 
-    // Registers the source as an Arrow stream scan in DuckDB.
-    // This allows true zero-copy data transfer from the memory channel to DuckDB.
+    // Registers the main source as a streaming Arrow scan in DuckDB (zero-copy).
     private async Task RegisterStreamingTableAsync(string alias, string channelAlias, CancellationToken ct)
     {
         var schema = await _registry.WaitForArrowChannelSchemaAsync(channelAlias, ct);
@@ -124,139 +134,163 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
             ?? throw new Exception($"Arrow channel '{channelAlias}' not found");
 
         var stream = new ChannelArrowStream(schema, channelTuple.Channel.Reader, _logger, ct);
-        await RegisterArrowStreamAsync(alias, stream);
+        RegisterArrowStream(alias, stream);
     }
 
-    private Task RegisterArrowStreamAsync(string alias, IArrowArrayStream stream)
+    private void RegisterArrowStream(string alias, IArrowArrayStream stream)
     {
         unsafe
         {
-            var ffiStreamPtr = (Apache.Arrow.C.CArrowArrayStream*)Marshal.AllocHGlobal(Marshal.SizeOf<Apache.Arrow.C.CArrowArrayStream>());
+            var ffiStreamPtr = (CArrowArrayStream*)Marshal.AllocHGlobal(Marshal.SizeOf<CArrowArrayStream>());
             _allocatedPointers.Add((IntPtr)ffiStreamPtr);
-            Apache.Arrow.C.CArrowArrayStreamExporter.ExportArrayStream(stream, ffiStreamPtr);
+            CArrowArrayStreamExporter.ExportArrayStream(stream, ffiStreamPtr);
 
             if (DuckDBArrowNativeMethods.DuckDBArrowScan(_conn!.NativeConnection, alias, ffiStreamPtr) != DuckDBState.Success)
             {
-                Apache.Arrow.C.CArrowArrayStreamImporter.ImportArrayStream(ffiStreamPtr).Dispose();
+                CArrowArrayStreamImporter.ImportArrayStream(ffiStreamPtr).Dispose();
                 _allocatedPointers.Remove((IntPtr)ffiStreamPtr);
                 Marshal.FreeHGlobal((IntPtr)ffiStreamPtr);
                 throw new Exception($"Failed to register Arrow stream scan for '{alias}'");
             }
         }
-        return Task.CompletedTask;
     }
 
-    // Uses the same Arrow C Data Interface path as ReadRecordBatchesAsync so that _resultSchema
-    // is always consistent with the actual RecordBatch schema DuckDB produces.
-    // Note: DuckDB exports UUID columns as Utf8 (StringType), not FixedSizeBinary+arrow.uuid.
-    private unsafe Schema InspectSchemaViaArrow()
+    // ── Schema inspection from prepared statement ────────────────────────────────────
+
+    // Prepares the query statement. The prepared statement is reused across
+    // OpenAsync (schema) and ReadRecordBatchesAsync (streaming execution).
+    private void PrepareStatement()
     {
-        var probeQuery = $"SELECT * FROM ({_query}) __schema_probe LIMIT 0";
-        if (DuckDBArrowNativeMethods.DuckDBQueryArrow(_conn!.NativeConnection, probeQuery, out var arrowResult) != DuckDBState.Success)
-            throw new Exception($"DuckDB schema probe failed for query: {_query}");
+        if (DuckDBArrowNativeMethods.DuckDBPrepare(_conn!.NativeConnection, _query, out var stmt) != DuckDBState.Success)
+        {
+            stmt.Dispose();
+            throw new Exception($"DuckDB prepare failed for query: {_query}");
+        }
+        _stmt = stmt;
+    }
+
+    // Builds the Arrow schema directly from the prepared statement — no LIMIT 0 probe query.
+    // Uses duckdb_prepared_statement_column_* to get DuckDB logical types, then
+    // duckdb_to_arrow_schema (with arrow_lossless_conversion = true) to produce the Arrow schema.
+    private unsafe Schema InspectSchemaFromStatement()
+    {
+        var count = DuckDBArrowNativeMethods.DuckDBPreparedStatementColumnCount(_stmt!);
+        if (count == 0)
+            throw new Exception($"Prepared statement returned 0 columns for query: {_query}");
+
+        var logicalTypes = new DuckDBLogicalType[count];
+        var namePointers = new IntPtr[count];
+
         try
         {
-            return GetSchemaFromResult(arrowResult)
-                ?? throw new Exception("DuckDB returned an empty schema for the query.");
+            for (ulong i = 0; i < count; i++)
+            {
+                logicalTypes[i] = DuckDBArrowNativeMethods.DuckDBPreparedStatementColumnLogicalType(_stmt!, i);
+                namePointers[i] = DuckDBArrowNativeMethods.DuckDBPreparedStatementColumnName(_stmt!, i);
+            }
+
+            // Build raw pointer arrays for the C API call.
+            // DangerousGetHandle() is safe here: handles outlive the fixed block.
+            var rawTypes = System.Array.ConvertAll(logicalTypes, t => t.DangerousGetHandle());
+
+            CArrowSchema ffiSchema = default;
+            fixed (IntPtr* pTypes = rawTypes)
+            fixed (IntPtr* pNames = namePointers)
+            {
+                var errData = DuckDBArrowNativeMethods.DuckDBToArrowSchema(
+                    _arrowOpts, pTypes, (byte**)pNames, count, &ffiSchema);
+
+                if (errData != IntPtr.Zero)
+                {
+                    var msg = Marshal.PtrToStringUTF8(DuckDBArrowNativeMethods.DuckDBErrorMessage(errData))
+                        ?? "unknown error";
+                    DuckDBArrowNativeMethods.DuckDBDestroyErrorData(ref errData);
+                    throw new Exception($"duckdb_to_arrow_schema failed: {msg}");
+                }
+            }
+
+            return CArrowSchemaImporter.ImportSchema(&ffiSchema);
         }
         finally
         {
-            nint ptr = arrowResult.InternalPtr;
-            DuckDBArrowNativeMethods.DuckDBDestroyArrow(ref ptr);
+            foreach (var namePtr in namePointers)
+                if (namePtr != IntPtr.Zero) DuckDBArrowNativeMethods.DuckDBFree(namePtr);
+
+            foreach (var lt in logicalTypes)
+                lt?.Dispose();
         }
     }
+
+    // ── Streaming output ─────────────────────────────────────────────────────────────
 
     public async IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync(
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        if (_conn is null) yield break;
+        if (_conn is null || _stmt is null) yield break;
 
-        DuckDBArrowNativeMethods.DuckDBArrow arrowResult;
-        unsafe 
-        {
-            if (DuckDBArrowNativeMethods.DuckDBQueryArrow(_conn.NativeConnection, _query, out arrowResult) != DuckDBState.Success)
-            {
-                throw new Exception("DuckDB query_arrow execution failed.");
-            }
-        }
-
+        var result = ExecuteStreamingQuery();
         try
         {
-            await foreach (var batch in ReadRecordBatchesFromArrowResultAsync(arrowResult, ct))
+            while (!ct.IsCancellationRequested)
+            {
+                // FetchAndConvertChunk is extracted as a non-async unsafe method because
+                // async iterators cannot take the address of local variables (&ffiArray).
+                var batch = FetchAndConvertChunk(result);
+                if (batch == null) yield break;
                 yield return batch;
+            }
         }
         finally
         {
-            unsafe 
-            {
-                nint ptr = arrowResult.InternalPtr;
-                DuckDBArrowNativeMethods.DuckDBDestroyArrow(ref ptr);
-            }
+            DuckDBArrowNativeMethods.DuckDBDestroyResult(ref result);
         }
     }
 
-    private async IAsyncEnumerable<RecordBatch> ReadRecordBatchesFromArrowResultAsync(
-        DuckDBArrowNativeMethods.DuckDBArrow result, [EnumeratorCancellation] CancellationToken ct)
+    // Executes the prepared statement as a lazy streaming result.
+    // duckdb_execute_prepared_streaming is deprecated (scheduled for removal) but is the
+    // only C API path that avoids full result materialisation. duckdb_fetch_chunk (used
+    // in FetchAndConvertChunk) and duckdb_data_chunk_to_arrow are both non-deprecated.
+    private DuckDBResult ExecuteStreamingQuery()
     {
-        Schema? arrowSchema = GetSchemaFromResult(result);
-        if (arrowSchema == null) yield break;
-
-        while (true)
+        if (DuckDBArrowNativeMethods.DuckDBExecutePreparedStreaming(_stmt!, out var result) != DuckDBState.Success)
         {
-            RecordBatch? batch = FetchNextBatch(result, arrowSchema);
-            if (batch == null) break;
-            yield return batch;
+            var errPtr = DuckDBArrowNativeMethods.DuckDBResultError(ref result);
+            var msg = errPtr != IntPtr.Zero ? Marshal.PtrToStringUTF8(errPtr) : "unknown error";
+            DuckDBArrowNativeMethods.DuckDBDestroyResult(ref result);
+            throw new Exception($"DuckDB streaming execute failed: {msg}");
         }
+
+        if (!DuckDBArrowNativeMethods.DuckDBResultIsStreaming(result))
+            _logger.LogDebug(
+                "DuckDBSqlProcessor: optimizer chose materialized execution (non-streaming). " +
+                "Result is correct but fully buffered in DuckDB memory before first batch.");
+
+        return result;
     }
 
-    private unsafe Schema? GetSchemaFromResult(DuckDBArrowNativeMethods.DuckDBArrow result)
+    // Fetches the next chunk from the streaming result and converts it to a RecordBatch.
+    // Extracted from ReadRecordBatchesAsync to allow taking addresses of local structs
+    // (not permitted in async methods). Returns null when the stream is exhausted.
+    // duckdb_data_chunk_to_arrow copies buffer data — the chunk can be disposed immediately.
+    private unsafe RecordBatch? FetchAndConvertChunk(DuckDBResult result)
     {
-        Apache.Arrow.C.CArrowSchema ffiSchema = default;
-        Apache.Arrow.C.CArrowSchema* pSchema = &ffiSchema;
-        // DuckDB fills the struct pointed to by pSchema
-        if (DuckDBArrowNativeMethods.DuckDBQueryArrowSchema(result, (nint*)&pSchema) == DuckDBState.Success)
+        using var chunk = DuckDBArrowNativeMethods.DuckDBFetchChunk(result);
+        if (chunk.IsInvalid) return null;
+
+        CArrowArray ffiArray = default;
+        var errData = DuckDBArrowNativeMethods.DuckDBDataChunkToArrow(_arrowOpts, chunk, &ffiArray);
+        if (errData != IntPtr.Zero)
         {
-            // The importer will throw if release is null, so we just try to import.
-            try
-            {
-                return Apache.Arrow.C.CArrowSchemaImporter.ImportSchema(&ffiSchema);
-            }
-            catch (ArgumentException)
-            {
-                return null;
-            }
+            var msg = Marshal.PtrToStringUTF8(DuckDBArrowNativeMethods.DuckDBErrorMessage(errData))
+                ?? "unknown error";
+            DuckDBArrowNativeMethods.DuckDBDestroyErrorData(ref errData);
+            throw new Exception($"duckdb_data_chunk_to_arrow failed: {msg}");
         }
-        return null;
+
+        return CArrowArrayImporter.ImportRecordBatch(&ffiArray, _resultSchema!);
     }
 
-    private unsafe RecordBatch? FetchNextBatch(DuckDBArrowNativeMethods.DuckDBArrow result, Schema schema)
-    {
-        Apache.Arrow.C.CArrowArray ffiArray = default;
-        Apache.Arrow.C.CArrowArray* pArray = &ffiArray;
-
-        if (DuckDBArrowNativeMethods.DuckDBQueryArrowArray(result, (nint*)&pArray) != DuckDBState.Success) return null;
-
-        // Note: Field 'release' is internal, but the importer checks it.
-        try
-        {
-            return Apache.Arrow.C.CArrowArrayImporter.ImportRecordBatch(&ffiArray, schema);
-        }
-        catch (ArgumentException)
-        {
-            return null;
-        }
-    }
-
-    public void Dispose()
-    {
-        foreach (var ptr in _allocatedPointers)
-        {
-            Marshal.FreeHGlobal(ptr);
-        }
-        _allocatedPointers.Clear();
-
-        _conn?.Dispose();
-    }
+    // ── Row-mode fallback ─────────────────────────────────────────────────────────────
 
     public async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(
         int batchSize, [EnumeratorCancellation] CancellationToken ct = default)
@@ -268,15 +302,35 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
         }
     }
 
-    public async ValueTask DisposeAsync()
+    // ── Disposal ──────────────────────────────────────────────────────────────────────
+
+    public void Dispose()
     {
+        if (_arrowOpts != IntPtr.Zero) { DuckDBArrowNativeMethods.DuckDBDestroyArrowOptions(ref _arrowOpts); }
+        _stmt?.Dispose();
+        _stmt = null;
+
         foreach (var ptr in _allocatedPointers)
             Marshal.FreeHGlobal(ptr);
         _allocatedPointers.Clear();
+
+        _conn?.Dispose();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_arrowOpts != IntPtr.Zero) { DuckDBArrowNativeMethods.DuckDBDestroyArrowOptions(ref _arrowOpts); }
+        _stmt?.Dispose();
+        _stmt = null;
+
+        foreach (var ptr in _allocatedPointers)
+            Marshal.FreeHGlobal(ptr);
+        _allocatedPointers.Clear();
+
         if (_conn is not null) { await _conn.DisposeAsync(); _conn = null; }
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
+    // ── Helpers ───────────────────────────────────────────────────────────────────────
 
     private static ReadOnlyMemory<object?[]> ConvertBatchToRows(RecordBatch batch)
         => SqlProcessorHelpers.ConvertBatchToRows(batch);

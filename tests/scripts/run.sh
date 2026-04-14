@@ -9,6 +9,7 @@ set -e
 #   ./run.sh --catalog       135-command catalog test suite (requires init_test_data.sh + Docker)
 #   ./run.sh --bench         Performance benchmarks
 #   ./run.sh --bench --sql   Benchmarks including SQL JOIN
+#   ./run.sh --sql-features  SQL window functions + time-bucketing on both engines
 #   ./run.sh --full          Everything: smoke + test-docker + catalog + bench + sql
 #   ./run.sh --dag           DAG topology validation only
 #   ./run.sh --help          Show this help
@@ -37,7 +38,8 @@ show_help() {
     echo "  --catalog        135-command catalog suite (requires init_test_data.sh + Docker)"
     echo "  --bench          Performance benchmarks (linear pipeline, DuckDB)"
     echo "  --bench --sql    Benchmarks + DataFusion SQL JOIN"
-    echo "  --full           smoke + test-docker + catalog + bench + sql"
+    echo "  --sql-features   SQL window functions + time-bucketing on both engines (no Docker)"
+    echo "  --full           smoke + test-docker + catalog + bench + sql + sql-features"
     echo "  --dag            DAG topology validation only"
     echo ""
     echo "Individual scripts can be run directly:"
@@ -47,6 +49,7 @@ show_help() {
     echo "  $SCRIPT_DIR/validate_docs.sh"
     echo "  $SCRIPT_DIR/validate_options.sh"
     echo "  $SCRIPT_DIR/validate_dag.sh"
+    echo "  $SCRIPT_DIR/validate_sql.sh"
     echo "  $SCRIPT_DIR/validate_hooks.sh"
     echo "  $SCRIPT_DIR/smoke.sh"
     echo "  $SCRIPT_DIR/bench.sh [--sql] [--direct]"
@@ -75,6 +78,7 @@ MODE_CATALOG=0
 MODE_BENCH=0
 MODE_BENCH_SQL=0
 MODE_DAG=0
+MODE_SQL_FEATURES=0
 MODE_FULL=0
 
 if [ $# -eq 0 ]; then
@@ -89,6 +93,7 @@ for arg in "$@"; do
         --catalog)      MODE_CATALOG=1 ;;
         --bench)        MODE_BENCH=1 ;;
         --sql)          MODE_BENCH_SQL=1 ;;
+        --sql-features) MODE_SQL_FEATURES=1 ;;
         --dag)          MODE_DAG=1 ;;
         --full)         MODE_FULL=1 ;;
         --help|-h)      show_help ;;
@@ -97,7 +102,7 @@ for arg in "$@"; do
 done
 
 if [ $MODE_FULL -eq 1 ]; then
-    MODE_SMOKE=1; MODE_TEST=1; MODE_TEST_DOCKER=1; MODE_CATALOG=1; MODE_BENCH=1; MODE_BENCH_SQL=1; MODE_DAG=1
+    MODE_SMOKE=1; MODE_TEST=1; MODE_TEST_DOCKER=1; MODE_CATALOG=1; MODE_BENCH=1; MODE_BENCH_SQL=1; MODE_DAG=1; MODE_SQL_FEATURES=1
 fi
 
 echo -e "${BOLD}DtPipe Test Runner${NC}"
@@ -107,6 +112,10 @@ echo ""
 
 if [ $MODE_SMOKE -eq 1 ]; then
     run_script "Golden smoke test" "$SCRIPT_DIR/smoke.sh"
+fi
+
+if [ $MODE_SQL_FEATURES -eq 1 ] || [ $MODE_TEST -eq 1 ] || [ $MODE_TEST_DOCKER -eq 1 ]; then
+    run_script "SQL features"  "$SCRIPT_DIR/validate_sql.sh"
 fi
 
 if [ $MODE_TEST -eq 1 ] || [ $MODE_TEST_DOCKER -eq 1 ]; then
