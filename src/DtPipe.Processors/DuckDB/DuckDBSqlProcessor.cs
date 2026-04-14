@@ -64,11 +64,23 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
             _conn = new DuckDBConnection("DataSource=:memory:");
             await _conn.OpenAsync(ct);
 
-            // Export Arrow extension types faithfully (UUID → FixedSizeBinary(16)+arrow.uuid
-            // instead of the default lossy Utf8). Requires DuckDB >= v1.2.0; bundled v1.5.0.
             using (var cmd = _conn.CreateCommand())
             {
+                // Export Arrow extension types faithfully (UUID → FixedSizeBinary(16)+arrow.uuid
+                // instead of the default lossy Utf8). Requires DuckDB >= v1.2.0; bundled v1.5.0.
                 cmd.CommandText = "SET arrow_lossless_conversion = true";
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
+
+            using (var cmd = _conn.CreateCommand())
+            {
+                // duckdb_arrow_scan (used to register CDI streaming sources) declares filter_pushdown=true,
+                // which causes DuckDB's optimizer to remove Filter operators from the plan trusting that
+                // the scan will apply them. But the C API wrapper (FactoryGetNext) ignores ArrowStreamParameters
+                // entirely — the filter is never applied and all rows are returned regardless of WHERE clauses.
+                // Disabling filter_pushdown forces DuckDB to keep Filter operators in the plan where they
+                // are correctly executed after the scan. This is the right behaviour for opaque CDI streams.
+                cmd.CommandText = "SET disabled_optimizers='filter_pushdown'";
                 await cmd.ExecuteNonQueryAsync(ct);
             }
 

@@ -7,8 +7,8 @@ All built-in provider adapters (readers and writers) for DtPipe. Depends only on
 ## Package
 
 ```xml
-<PackageReference Include="DtPipe.Core" Version="1.2.3" />
-<PackageReference Include="DtPipe.Adapters" Version="1.2.3" />
+<PackageReference Include="DtPipe.Core" Version="1.2.4" />
+<PackageReference Include="DtPipe.Adapters" Version="1.2.4" />
 ```
 
 ---

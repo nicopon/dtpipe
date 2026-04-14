@@ -71,6 +71,41 @@ public class DuckDBSqlProcessorTests
         Assert.Equal("val", processor.Schema.FieldsList[0].Name);
     }
 
+    /// <summary>
+    /// Regression test: WHERE clauses on CDI streaming sources (duckdb_arrow_scan) must be applied.
+    ///
+    /// Root cause: duckdb_arrow_scan declares filter_pushdown=true. DuckDB removes the Filter
+    /// operator from the plan assuming the scan will apply it. But the C API wrapper (FactoryGetNext)
+    /// ignores ArrowStreamParameters — the filter was silently dropped, returning all rows.
+    /// Fix: SET disabled_optimizers='filter_pushdown' forces DuckDB to keep Filter operators.
+    /// </summary>
+    [Fact]
+    public async Task OpenAsync_AndReadRecordBatches_WhereFilter_FiltersRowsCorrectly()
+    {
+        var field = new Field("n", Int32Type.Default, nullable: false);
+        var schema = new Schema(new[] { field }, null);
+        // 10 rows: 0..9
+        var arr = new Int32Array.Builder().AppendRange(Enumerable.Range(0, 10)).Build();
+        var batch = new RecordBatch(schema, new IArrowArray[] { arr }, 10);
+
+        const string alias = "src";
+        var registry = BuildRegistry(alias, schema, new[] { batch });
+
+        var processor = new DuckDBSqlProcessor(
+            registry, "SELECT n FROM src WHERE n < 5", alias, alias,
+            refAliases: [], refChannelAliases: [],
+            NullLogger<DuckDBSqlProcessor>.Instance);
+
+        await processor.OpenAsync();
+        var batches = new List<RecordBatch>();
+        await foreach (var b in processor.ReadRecordBatchesAsync())
+            batches.Add(b);
+        await processor.DisposeAsync();
+
+        // Must be 5 rows (0,1,2,3,4), not 10
+        Assert.Equal(5, batches.Sum(b => b.Length));
+    }
+
     [Fact]
     public async Task OpenAsync_AndReadRecordBatches_UuidColumn_PreservesArrowUuidExtension()
     {
