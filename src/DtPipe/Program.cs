@@ -159,6 +159,7 @@ class Program
 		RegisterReader<DtPipe.Adapters.PostgreSQL.PostgreSqlReaderDescriptor>(services);
 		RegisterReader<DtPipe.Adapters.Sqlite.SqliteReaderDescriptor>(services);
 		RegisterReader<DtPipe.Adapters.SqlServer.SqlServerReaderDescriptor>(services);
+		RegisterReader<DtPipe.Adapters.Xml.XmlReaderDescriptor>(services);
 
 		// Explicitly Register Writers (Adapters)
 		RegisterWriter<DtPipe.Adapters.Arrow.ArrowWriterDescriptor>(services);

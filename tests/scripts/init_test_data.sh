@@ -182,4 +182,12 @@ else
     echo "  Skipping complex_data.jsonl (already exists)"
 fi
 
+# 9. Massive XML (for XML streaming validation)
+if [ ! -f "$ARTIFACTS_DIR/test_data_massive.xml" ]; then
+    echo "Generating test_data_massive.xml (2GB)..."
+    bash "$SCRIPT_DIR/generate_massive_xml.sh" "$ARTIFACTS_DIR/test_data_massive.xml" 2 || exit 1
+else
+    echo "  Skipping test_data_massive.xml (already exists)"
+fi
+
 echo -e "${GREEN}All sources initialized successfully!${NC}"

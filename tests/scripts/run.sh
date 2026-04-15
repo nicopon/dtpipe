@@ -41,6 +41,7 @@ show_help() {
     echo "  --sql-features   SQL window functions + time-bucketing on both engines (no Docker)"
     echo "  --full           smoke + test-docker + catalog + bench + sql + sql-features"
     echo "  --dag            DAG topology validation only"
+    echo "  --xml            Streaming XML validation (2GB massive volume)"
     echo ""
     echo "Individual scripts can be run directly:"
     echo "  $SCRIPT_DIR/validate_transformers.sh"
@@ -51,6 +52,7 @@ show_help() {
     echo "  $SCRIPT_DIR/validate_dag.sh"
     echo "  $SCRIPT_DIR/validate_sql.sh"
     echo "  $SCRIPT_DIR/validate_hooks.sh"
+    echo "  $SCRIPT_DIR/validate_xml.sh"
     echo "  $SCRIPT_DIR/smoke.sh"
     echo "  $SCRIPT_DIR/bench.sh [--sql] [--direct]"
     echo "  $SCRIPT_DIR/run_catalog_tests.sh  (after init_test_data.sh)"
@@ -79,6 +81,7 @@ MODE_BENCH=0
 MODE_BENCH_SQL=0
 MODE_DAG=0
 MODE_SQL_FEATURES=0
+MODE_XML=0
 MODE_FULL=0
 
 if [ $# -eq 0 ]; then
@@ -95,6 +98,7 @@ for arg in "$@"; do
         --sql)          MODE_BENCH_SQL=1 ;;
         --sql-features) MODE_SQL_FEATURES=1 ;;
         --dag)          MODE_DAG=1 ;;
+        --xml)          MODE_XML=1 ;;
         --full)         MODE_FULL=1 ;;
         --help|-h)      show_help ;;
         *)              echo "Unknown option: $arg"; show_help ;;
@@ -102,7 +106,7 @@ for arg in "$@"; do
 done
 
 if [ $MODE_FULL -eq 1 ]; then
-    MODE_SMOKE=1; MODE_TEST=1; MODE_TEST_DOCKER=1; MODE_CATALOG=1; MODE_BENCH=1; MODE_BENCH_SQL=1; MODE_DAG=1; MODE_SQL_FEATURES=1
+    MODE_SMOKE=1; MODE_TEST=1; MODE_TEST_DOCKER=1; MODE_CATALOG=1; MODE_BENCH=1; MODE_BENCH_SQL=1; MODE_DAG=1; MODE_SQL_FEATURES=1; MODE_XML=1
 fi
 
 echo -e "${BOLD}DtPipe Test Runner${NC}"
@@ -124,10 +128,15 @@ if [ $MODE_TEST -eq 1 ] || [ $MODE_TEST_DOCKER -eq 1 ]; then
     run_script "Options"        "$SCRIPT_DIR/validate_options.sh"
     run_script "Docs"           "$SCRIPT_DIR/validate_docs.sh"
     run_script "Hooks"          "$SCRIPT_DIR/validate_hooks.sh"
+    run_script "XML Massive"    "$SCRIPT_DIR/validate_xml.sh"
 fi
 
 if [ $MODE_DAG -eq 1 ] || [ $MODE_TEST -eq 1 ] || [ $MODE_TEST_DOCKER -eq 1 ]; then
     run_script "DAG topologies" "$SCRIPT_DIR/validate_dag.sh"
+fi
+
+if [ $MODE_XML -eq 1 ]; then
+    run_script "XML Massive"    "$SCRIPT_DIR/validate_xml.sh"
 fi
 
 if [ $MODE_TEST_DOCKER -eq 1 ]; then
