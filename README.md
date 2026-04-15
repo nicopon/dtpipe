@@ -135,8 +135,8 @@ Adjust how DtPipe pulls data from the source.
 | `--query-timeout` | `0` | Timeout in seconds (0 = no timeout). |
 | `--unsafe-query` | | Allow non-SELECT queries (e.g. EXEC stored procs). |
 | **CSV** | `--csv-separator ","` | Set separator, header usage, or [explicit typing](#1-connection-strings). |
-| **XML** | `--xml-path "//Item"`| Set record selector (XPath-like) and [namespaces/types](./COOKBOOK.md#parsing-large-xml-files-streaming). |
-| **JSONL**| `--jsonl-indented` | Handle structured JSON lines encoding or formatting. |
+| **XML** | `--xml-path "//Item"`| Set record selector and [hierarchical typing](./COOKBOOK.md#parsing-large-xml-files-streaming). |
+| **JSONL**| `--jsonl-encoding` | Handle [structured JSON objects](./COOKBOOK.md#streaming-json-lines-to-apache-arrow) and encoding. |
 
 #### 🧪 Data Transformation (Mutations)
 Modify the content of your rows.

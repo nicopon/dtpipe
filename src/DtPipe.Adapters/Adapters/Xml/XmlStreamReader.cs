@@ -163,7 +163,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 				{
 					using var subReader = _xmlReader.ReadSubtree();
 					subReader.Read(); 
-					yield return ParseElement(subReader);
+					yield return ParseElement(subReader, "");
 
 					// When ReadSubtree is disposed, the original reader is positioned on the EndElement
 					// (or the empty element itself). The next Read() will advance past it, skipping the EndElement.
@@ -205,29 +205,32 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 		var fields = new List<Field>();
 		var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-		// 1. Add columns from the first record
+		// 1. Add columns from the top-level keys of the first record
 		if (_firstNodeDict != null)
 		{
-			var flattenedFirst = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-			FlattenDictionary(_firstNodeDict, "", flattenedFirst);
-			
-			foreach (var path in flattenedFirst.Keys)
+			foreach (var kvp in _firstNodeDict)
 			{
-				var clrType = _typeOverrides?.TryGetValue(path, out var t) == true ? t : typeof(string);
-				var arrowType = InferArrowTypeFromPath(path, flattenedFirst[path].FirstOrDefault());
+				var name = kvp.Key;
+				var sampleValue = kvp.Value;
+
+				// Root columns are derived from the first node's children/attributes
+				// We don't flatten the entire tree into top-level columns anymore.
+				var (clrType, arrowType) = InferTypes(sampleValue, name);
 				
-				columns.Add(new PipeColumnInfo(path, clrType, true));
-				fields.Add(new Field(path, arrowType, true));
-				seenPaths.Add(path);
+				columns.Add(new PipeColumnInfo(name, clrType, true));
+				fields.Add(new Field(name, arrowType, true));
+				seenPaths.Add(name);
 			}
 		}
 
-		// 2. Add columns from auto-inference that weren't in the first record
+		// 2. Add columns from auto-inference that were discovered during sampling
+		// (Only include TOP-LEVEL keys gathered from other nodes to handle sparse schemas)
 		if (_autoAppliedTypes != null)
 		{
 			foreach (var kvp in _autoAppliedTypes)
 			{
-				if (!seenPaths.Contains(kvp.Key))
+				// If it's a top-level key (no dots) and hasn't been seen yet, add it
+				if (!kvp.Key.Contains('.') && !seenPaths.Contains(kvp.Key))
 				{
 					var clrType = ResolveHintToClrType(kvp.Value) ?? typeof(string);
 					var arrowType = ResolveHintToArrowType(kvp.Value);
@@ -248,7 +251,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 
 		Columns = columns;
 		Schema = new Schema(fields, null);
-		_logger.LogInformation("XmlStreamReader: Inferred schema with {Count} columns (including auto-types).", columns.Count);
+		_logger.LogInformation("XmlStreamReader: Inferred hierarchical schema with {Count} top-level columns.", columns.Count);
 	}
 
 	private IArrowType InferArrowTypeFromPath(string path, object? sampleValue)
@@ -257,7 +260,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 		{
 			return ResolveHintToArrowType(hint);
 		}
-		var (_, arrowType) = InferTypes(sampleValue);
+		var (_, arrowType) = InferTypes(sampleValue, path);
 		return arrowType;
 	}
 
@@ -615,6 +618,20 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 		return result;
 	}
 
+	private static IArrowType ClrToArrowType(Type clrType)
+	{
+		if (clrType == typeof(int)) return Int32Type.Default;
+		if (clrType == typeof(long)) return Int64Type.Default;
+		if (clrType == typeof(double)) return DoubleType.Default;
+		if (clrType == typeof(float)) return FloatType.Default;
+		if (clrType == typeof(decimal)) return new Decimal128Type(38, 18);
+		if (clrType == typeof(bool)) return BooleanType.Default;
+		if (clrType == typeof(DateTime)) return TimestampType.Default;
+		if (clrType == typeof(DateTimeOffset)) return TimestampType.Default;
+		if (clrType == typeof(Guid)) return StringType.Default;
+		return StringType.Default;
+	}
+
 	private static Type? ResolveHintToClrType(string hint) => hint.ToLowerInvariant() switch
 	{
 		"uuid" or "guid" => typeof(Guid),
@@ -709,37 +726,50 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 		return null;
 	}
 
-	private (Type ClrType, IArrowType ArrowType) InferTypes(object? value)
+	private (Type ClrType, IArrowType ArrowType) InferTypes(object? value, string currentPath = "")
 	{
+		// Check for overrides first
+		if (_typeOverrides != null && _typeOverrides.TryGetValue(currentPath, out var overridenType))
+		{
+			return (overridenType, ClrToArrowType(overridenType));
+		}
+
+		if (_autoAppliedTypes != null && _autoAppliedTypes.TryGetValue(currentPath, out var hint))
+		{
+			return (ResolveHintToClrType(hint) ?? typeof(string), ResolveHintToArrowType(hint));
+		}
+
 		return value switch
 		{
 			bool => (typeof(bool), BooleanType.Default),
 			double => (typeof(double), DoubleType.Default),
 			long => (typeof(long), Int64Type.Default),
 			int => (typeof(int), Int32Type.Default),
-			Dictionary<string, object?> => (typeof(object), InferStructType((Dictionary<string, object?>)value)),
-			List<object?> => (typeof(object), InferListType((List<object?>)value)),
+			Dictionary<string, object?> d => (typeof(object), InferStructType(d, currentPath)),
+			List<object?> l => (typeof(object), InferListType(l, currentPath)),
 			_ => (typeof(string), StringType.Default)
 		};
 	}
 
-	private IArrowType InferStructType(Dictionary<string, object?> dict)
+	private IArrowType InferStructType(Dictionary<string, object?> dict, string currentPath)
 	{
 		var fields = new List<Field>();
 		foreach (var kvp in dict)
 		{
-			var (_, arrowType) = InferTypes(kvp.Value);
+			var childPath = string.IsNullOrEmpty(currentPath) ? kvp.Key : $"{currentPath}.{kvp.Key}";
+			var (_, arrowType) = InferTypes(kvp.Value, childPath);
 			fields.Add(new Field(kvp.Key, arrowType, true));
 		}
 		return new StructType(fields);
 	}
 
-	private IArrowType InferListType(List<object?> list)
+	private IArrowType InferListType(List<object?> list, string currentPath)
 	{
 		if (list.Any())
 		{
 			var first = list.First();
-			var (_, itemArrowType) = InferTypes(first);
+			// For lists, the path context stays the same as the element path
+			var (_, itemArrowType) = InferTypes(first, currentPath);
 			return new ListType(itemArrowType);
 		}
 		return new ListType(StringType.Default);

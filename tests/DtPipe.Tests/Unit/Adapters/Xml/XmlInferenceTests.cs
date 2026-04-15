@@ -61,16 +61,24 @@ public class XmlInferenceTests : IAsyncLifetime
 
         // Assert
         var cols = reader.Columns!.ToList();
-        cols.First(c => c.Name == "Id").ClrType.Should().Be(typeof(int));
-        cols.First(c => c.Name == "Meta.Price").ClrType.Should().Be(typeof(double));
-        cols.First(c => c.Name == "Meta.IsActive").ClrType.Should().Be(typeof(bool));
+        cols.Should().Contain(c => c.Name == "Id");
+        cols.Should().Contain(c => c.Name == "Meta");
+        
+        var idCol = cols.First(c => c.Name == "Id");
+        idCol.ClrType.Should().Be(typeof(int));
+
+        var metaCol = cols.First(c => c.Name == "Meta");
+        metaCol.ClrType.Should().Be(typeof(object));
 
         batches.Should().HaveCount(1);
         var row = batches[0];
         
         row[cols.FindIndex(c => c.Name == "Id")].Should().Be(101);
-        row[cols.FindIndex(c => c.Name == "Meta.Price")].Should().Be(19.99);
-        row[cols.FindIndex(c => c.Name == "Meta.IsActive")].Should().Be(true);
+        
+        var metaDict = row[cols.FindIndex(c => c.Name == "Meta")] as Dictionary<string, object?>;
+        metaDict.Should().NotBeNull();
+        metaDict!["Price"].Should().Be(19.99);
+        metaDict!["IsActive"].Should().Be(true);
     }
 
     [Fact]

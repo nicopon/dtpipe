@@ -357,15 +357,42 @@ cat catalog.xml | \
   --table "Products" --strategy Upsert
 ```
 
-#### Explicit Typing (Dot-Notation)
-For hierarchical XML, use dot-notation to target specific nested tags or attributes for typing.
+#### 🏗️ Object Structure & Path Relativity
+
+By default, **DtPipe preserves the document hierarchy**. Unlike CSVs, nested XML or JSON elements are not automatically flattened into the top-level schema. They are instead represented as structured Arrow `StructType` or `ListType` columns.
+
+##### 1. Relative vs Absolute Paths
+When using `--xml-column-types`, all paths are **relative to the record node** matched by your `--xml-path`.
+
+```xml
+<!-- data.xml -->
+<Records>
+  <User>
+    <Id>123</Id>
+    <Profile>
+      <Email>a@b.com</Email>
+    </Profile>
+  </User>
+</Records>
+```
+
+If you use `--xml-path "//User"`, then:
+- Valid path: `Id:int32`
+- Valid path: `Profile.Email:string`
+- ❌ Invalid path: `User.Id` (redundant)
+
+##### 2. How to Flatten for SQL/CSV
+If your target destination (like a CSV file or a standard SQL table) requires a flat structure, you must explicitly "pull" the fields to the top level using a SQL transformer:
 
 ```bash
-dtpipe -i data.xml \
-  --xml-path "//User" \
-  --xml-column-types "Id:int64,Profile.Bio:string,Meta._version:int32" \
-  -o result.parquet
+dtpipe -i data.xml --xml-path "//User" \
+  --sql "SELECT Id, Profile.Email AS Email FROM row" \
+  -o flat_users.csv
 ```
+
+> [!NOTE]
+> This "Object" behavior is identical for both **JSONL** and **XML** readers, ensuring consistency when moving between document formats.
+
 
 ---
 
