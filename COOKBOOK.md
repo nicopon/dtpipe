@@ -345,15 +345,26 @@ cat server_logs.jsonl | \
 ```
 
 ### Parsing Large XML Files (Streaming)
-You can parse massive XML files using an XPath-like selector without loading the entire document into memory.
+You can parse massive XML files using an XPath-like selector without loading the entire document into memory. Use `--xml-auto-column-types` to automatically discover all fields and types in a sparse XML.
 
 ```bash
+# Auto-discover schema and types, then export to PG
 cat catalog.xml | \
   dtpipe -i xml \
   --xml-path "//Product" \
-  --rename "_id:ProductId" \
+  --xml-auto-column-types \
   -o "pg:Host=localhost;Database=prod" \
   --table "Products" --strategy Upsert
+```
+
+#### Explicit Typing (Dot-Notation)
+For hierarchical XML, use dot-notation to target specific nested tags or attributes for typing.
+
+```bash
+dtpipe -i data.xml \
+  --xml-path "//User" \
+  --xml-column-types "Id:int64,Profile.Bio:string,Meta._version:int32" \
+  -o result.parquet
 ```
 
 ---

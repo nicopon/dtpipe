@@ -114,68 +114,80 @@ dtpipe -i input.csv --csv-separator "," -o output.csv --csv-separator ";"
 
 ### 4. CLI Options Reference
 
-#### Core
-| Flag | Description |
-|:---|:---|
-| `-i`, `--input` | **Required**. Source connection string or file path. |
-| `-q`, `--query` | **Required** (for queryable sources). SQL statement. |
-| `-o`, `--output`| **Required**. Target connection string or file path. |
-| `--limit` | Stop after N rows. |
-| `--batch-size` | Rows per buffer (default: 50,000). |
-| `--dry-run` | Preview data, validate constraints, and check schema compatibility. |
-| `--key` | Comma-separated primary keys for Upsert/Ignore. Auto-detected from target if omitted. |
-| `--sampling-rate` | Probability 0.0–1.0 to include a row (default: 1.0). |
-| `--sampling-seed` | Seed for sampling (ensures reproducibility). |
-| `--connection-timeout` | Connection timeout in seconds. |
-| `--query-timeout` | Query timeout in seconds (0 = no timeout). |
-| `--no-stats` | Disable progress bars and statistics output. |
+#### 🔵 Core Essentials
+The mandatory flags to define your pipeline.
 
-#### Automation
-| Flag | Description |
-|:---|:---|
-| `--job [FILE]` | Execute a YAML job file. |
-| `--export-job` | Save current CLI args as a YAML job. |
-| `--log [FILE]` | Write execution statistics to file (optional). |
-| `--metrics-path`| Path to structured metrics JSON output. |
+| Flag | Example / Syntax | Description |
+|:---|:---|:---|
+| `-i`, `--input` | `-i data.csv` | **Required**. Source connection string or file path. |
+| `-q`, `--query` | `-q "SELECT *..."` | **Required** (for SQL sources). The query to execute. |
+| `-o`, `--output` | `-o target.parquet`| **Required**. Target connection string or file path. |
+| `--dry-run` | `--dry-run 10` | Preview N rows in the terminal without writing. |
 
-#### Transformation Pipeline
-| Flag | Description |
-|:---|:---|
-| `--fake "[Col]:[Method]"` | Generate fake data using Bogus. |
-| `--mask "[Col]:[Pattern]"` | Mask chars (`#` keeps char, others replace). |
-| `--null "[Col]"` | Force column to NULL. |
-| `--overwrite "[Col]:[Val]"`| Set column to fixed value. |
-| `--format "[Col]:[Fmt]"` | Apply .NET format string. |
-| `--compute "[Col]:[JS]"` | Apply JavaScript logic on the `row` object. Creates a new virtual column if `[Col]` doesn't exist. Supports inline code or file paths (`@file.js`). Example: `TITLE:row.TITLE.substring(0,5)` |
-| `--filter "[JS]"` | Drop rows based on JS logic (must return true/false). |
-| `--expand "[JS]"` | Multi-row expansion. JS expression returning an array. |
-| `--window-count [N]` | Accumulate rows in a window of size N. |
-| `--window-script "[JS]"` | Script to execute on window `rows` (must return array). |
-| `--rename "[Old]:[New]"` | Rename a column. |
-| `--project`, `--drop` | Whitelist or blacklist columns. |
+> **Example**: `dtpipe -i orders.csv -o orders.parquet`
 
-#### Pipeline Modifiers
-| Flag | Description |
-|:---|:---|
-| `--fake-locale [LOC]` | Locale for fakers (e.g. `fr`, `en_US`). |
-| `--fake-seed-column [COL]`| Make faking deterministic based on a column value. |
-| `--[type]-skip-null` | Skip transformation if value is NULL. |
-| `--throttle [N]` | Limit throughput to N rows/sec. |
+#### 📥 Source (Reader) Configuration
+Adjust how DtPipe pulls data from the source.
 
-#### Database Writer Options
-| Flag | Description |
-|:---|:---|
-| `--strategy` | `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`, `Upsert`, `Ignore`. Works for all providers. |
-| `--insert-mode` | `Standard`, `Bulk`. Supported for SQL Server, Oracle, PostgreSQL. |
-| `--table` | Target table name. Overrides default `export`. |
-| `--auto-migrate` | Automatically add missing columns to target table. |
-| `--strict-schema`| Abort if schema errors are found. |
-| `--no-schema-validation` | Disable schema check entirely. |
-| `--pre-exec` | SQL or command to run before the transfer. |
-| `--post-exec` | SQL or command to run after a successful transfer. |
-| `--on-error-exec` | SQL or command to run on error. |
-| `--finally-exec` | SQL or command to always run (success or failure). |
-| `--unsafe-query` | Allow non-SELECT queries (use with caution). |
+| Flag | Example / Syntax | Description |
+|:---|:---|:---|
+| `--connection-timeout`| `30` | Connection timeout in seconds. |
+| `--query-timeout` | `0` | Timeout in seconds (0 = no timeout). |
+| `--unsafe-query` | | Allow non-SELECT queries (e.g. EXEC stored procs). |
+| **CSV** | `--csv-separator ","` | Set separator, header usage, or [explicit typing](#1-connection-strings). |
+| **XML** | `--xml-path "//Item"`| Set record selector (XPath-like) and [namespaces/types](./COOKBOOK.md#parsing-large-xml-files-streaming). |
+| **JSONL**| `--jsonl-indented` | Handle structured JSON lines encoding or formatting. |
+
+#### 🧪 Data Transformation (Mutations)
+Modify the content of your rows.
+
+| Flag | Example / Syntax | Description |
+|:---|:---|:---|
+| `--fake` | `"Email:internet.email"`| Generate fake data. Syntax: `COL:Dataset.Method`. [See Full Dataset List](./COOKBOOK.md#anonymization-the-fakers). |
+| `--mask` | `"Phone:###-****"` | Partial masking (`#` keeps, other replaces). |
+| `--null` | `--null "Secret"` | Force a column value to NULL. |
+| `--overwrite` | `"Status:Active"` | Set a static value for every row in a column. |
+| `--format` | `"{First} {Last}"` | [.NET Composite Format](https://learn.microsoft.com/en-us/dotnet/standard/base-types/composite-formatting) using source column names. |
+| `--compute` | `"row.Age > 18"` | Arbitrary JS logic. Returns the last expression or explicit `return`. |
+| `--filter` | `"row.Val > 100"` | Drop rows where the JS expression returns `false`. |
+| `--expand` | `"row.Items.map..."`| Multi-row expansion via JS (must return an array). |
+| `--window-script` | | Stateful batch processing on `rows` array. See [Windowing Aggregations](./COOKBOOK.md#window-aggregations-stateful). |
+| `--ignore-nulls` | | Global flag to skip transformations if input is NULL. |
+
+#### 📐 Schema & Projection
+Modify the structure of the output table.
+
+| Flag | Example / Syntax | Description |
+|:---|:---|:---|
+| `--rename` | `"Old:New"` | Rename a column before writing. |
+| `--project` | `"Id,Name"` | Keep ONLY these columns (Whitelist). |
+| `--drop` | `"OldId"` | Remove specific columns (Blacklist). |
+
+#### 📤 Target (Writer) Configuration
+Control how data is persisted to the destination.
+
+| Flag | Example / Syntax | Description |
+|:---|:---|:---|
+| `--strategy` | `Upsert` | `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`, `Upsert`, `Ignore`. |
+| `--table` | `--table "users"` | Override target table name (default is `export`). |
+| `--key` | `"Id,Code"` | PKs for Upsert/Ignore. Auto-detected from DB if omitted. |
+| `--insert-mode` | `Bulk` | `Standard` or `Bulk` (high-speed insert for PG/Ora/MSSQL). |
+| `--auto-migrate` | | Automatically `ALTER TABLE` to add missing columns. |
+| `--pre-exec` | `"TRUNCATE..."` | SQL script to run **before** the pipe starts (Database writers only). |
+| `--post-exec` | `"ANALYZE..."` | SQL script to run **after** a successful transfer (Database writers only). |
+
+#### ⚙️ Execution & Statistics
+Performance tuning and automation.
+
+| Flag | Example / Syntax | Description |
+|:---|:---|:---|
+| `--limit` | `--limit 1000` | Stop once N rows have been processed. |
+| `--throttle` | `--throttle 500` | Limit throughput to N rows/sec (e.g. for API safety). |
+| `--sampling-rate` | `0.1` | Probability (0.0 to 1.0) to include a row. |
+| `--batch-size` | `10000` | Buffer size for columnar batching (default: 50,000). |
+| `--no-stats` | | Hide progress bars and transfer statistics. |
+| `--job` | `--job my.yaml` | Run a pipeline from a YAML configuration file. |
+| `--metrics-path` | `metrics.json` | Write structured execution results to a JSON file. |
 
 ---
  

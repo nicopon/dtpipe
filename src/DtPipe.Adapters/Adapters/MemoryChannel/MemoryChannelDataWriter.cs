@@ -97,7 +97,7 @@ public class MemoryChannelDataWriter : IRowDataWriter
 
     public ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
     {
-        return ValueTask.CompletedTask;
+        throw new NotSupportedException("Executing raw commands is not supported for memory channels.");
     }
 
     public async ValueTask DisposeAsync()
