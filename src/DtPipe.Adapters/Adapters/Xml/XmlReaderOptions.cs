@@ -25,4 +25,10 @@ public class XmlReaderOptions : IOptionSet
 
 	[Description("File read buffer size in bytes")]
 	public int BufferSize { get; set; } = 1024 * 1024;
+
+	[Description("Explicit column types, e.g. \"Id:int32,Meta.Id:uuid\". Supported: uuid, string, int32, int64, double, decimal, bool, datetime, datetimeoffset")]
+	public string ColumnTypes { get; set; } = "";
+
+	[Description("Automatically infer and apply column types from the first 100 rows (no --dry-run required)")]
+	public bool AutoColumnTypes { get; set; } = false;
 }

@@ -8,10 +8,11 @@ using DtPipe.Core.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Threading.Channels;
+using System.Globalization;
 
 namespace DtPipe.Adapters.Xml;
 
-public class XmlStreamReader : IStreamReader, IColumnarStreamReader
+public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnTypeInferenceCapable
 {
 	private readonly string _filePath;
 	private readonly XmlReaderOptions _options;
@@ -24,6 +25,10 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader
 	private string[]? _targetPathParts;
 	private string? _lastPathPart;
 	private bool _isRecursiveSearch;
+
+	private Dictionary<string, Func<string, object?>>? _columnParsers;
+	private Dictionary<string, Type>? _typeOverrides;
+	private IReadOnlyDictionary<string, string>? _autoAppliedTypes;
 
 	public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
 	public Schema? Schema { get; private set; }
@@ -66,6 +71,37 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader
 		_xmlReader = XmlReader.Create(_stream, settings);
 
 		InitializePathMatcher();
+
+		// Build column parsers from --xml-column-types option
+		_typeOverrides = ParseColumnTypesOption(_options.ColumnTypes);
+
+		// Auto-infer types when --xml-auto-column-types is set
+		if (_options.AutoColumnTypes && !string.IsNullOrEmpty(_filePath) && _filePath != "-")
+		{
+			try
+			{
+				const int autoSampleCount = 100;
+				var inferred = await InferColumnTypesAsync(autoSampleCount, ct);
+				if (inferred.Count > 0)
+				{
+					_autoAppliedTypes = inferred;
+					foreach (var kv in inferred)
+					{
+						var clrType = ResolveHintToClrType(kv.Value);
+						if (clrType != null && !_typeOverrides.ContainsKey(kv.Key))
+						{
+							_typeOverrides[kv.Key] = clrType;
+						}
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				_logger.LogWarning(ex, "Auto column-type inference failed, falling back to string columns.");
+			}
+		}
+
+		_columnParsers = BuildColumnParsers(_typeOverrides);
 
 		// Infer schema from the first matching node
 		await InferSchemaAsync(ct);
@@ -165,27 +201,81 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader
 
 	private void UpdateSchemaFromFirstNode()
 	{
-		if (_firstNodeDict == null)
+		var columns = new List<PipeColumnInfo>();
+		var fields = new List<Field>();
+		var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+		// 1. Add columns from the first record
+		if (_firstNodeDict != null)
+		{
+			var flattenedFirst = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+			FlattenDictionary(_firstNodeDict, "", flattenedFirst);
+			
+			foreach (var path in flattenedFirst.Keys)
+			{
+				var clrType = _typeOverrides?.TryGetValue(path, out var t) == true ? t : typeof(string);
+				var arrowType = InferArrowTypeFromPath(path, flattenedFirst[path].FirstOrDefault());
+				
+				columns.Add(new PipeColumnInfo(path, clrType, true));
+				fields.Add(new Field(path, arrowType, true));
+				seenPaths.Add(path);
+			}
+		}
+
+		// 2. Add columns from auto-inference that weren't in the first record
+		if (_autoAppliedTypes != null)
+		{
+			foreach (var kvp in _autoAppliedTypes)
+			{
+				if (!seenPaths.Contains(kvp.Key))
+				{
+					var clrType = ResolveHintToClrType(kvp.Value) ?? typeof(string);
+					var arrowType = ResolveHintToArrowType(kvp.Value);
+					
+					columns.Add(new PipeColumnInfo(kvp.Key, clrType, true));
+					fields.Add(new Field(kvp.Key, arrowType, true));
+					seenPaths.Add(kvp.Key);
+				}
+			}
+		}
+
+		if (columns.Count == 0)
 		{
 			Columns = System.Array.Empty<PipeColumnInfo>();
 			Schema = new Schema(Enumerable.Empty<Field>(), null);
 			return;
 		}
 
-		var columns = new List<PipeColumnInfo>();
-		var fields = new List<Field>();
-
-		foreach (var kvp in _firstNodeDict)
-		{
-			var (type, arrowType) = InferTypes(kvp.Value);
-			columns.Add(new PipeColumnInfo(kvp.Key, type, true));
-			fields.Add(new Field(kvp.Key, arrowType, true));
-		}
-
 		Columns = columns;
 		Schema = new Schema(fields, null);
-		_logger.LogInformation("XmlStreamReader: Inferred schema with {Count} columns.", columns.Count);
+		_logger.LogInformation("XmlStreamReader: Inferred schema with {Count} columns (including auto-types).", columns.Count);
 	}
+
+	private IArrowType InferArrowTypeFromPath(string path, object? sampleValue)
+	{
+		if (_autoAppliedTypes != null && _autoAppliedTypes.TryGetValue(path, out var hint))
+		{
+			return ResolveHintToArrowType(hint);
+		}
+		var (_, arrowType) = InferTypes(sampleValue);
+		return arrowType;
+	}
+
+	private static IArrowType ResolveHintToArrowType(string hint) => hint.ToLowerInvariant() switch
+	{
+		"uuid" or "guid" => new FixedSizeBinaryType(16),
+		"int32" => Int32Type.Default,
+		"int64" => Int64Type.Default,
+		"double" => DoubleType.Default,
+		"float" => FloatType.Default,
+		"decimal" => new Decimal128Type(38, 18),
+		"bool" or "boolean" => BooleanType.Default,
+		"datetime" => TimestampType.Default,
+		"datetimeoffset" => TimestampType.Default,
+		_ => StringType.Default
+	};
+
+	public IReadOnlyDictionary<string, string>? AutoAppliedTypes => _autoAppliedTypes;
 
 	private Dictionary<string, object?>? _firstNodeDict;
 
@@ -267,6 +357,90 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader
 		}
 	}
 
+	public async Task<IReadOnlyDictionary<string, string>> InferColumnTypesAsync(int sampleRows, CancellationToken ct = default)
+	{
+		if (string.IsNullOrEmpty(_filePath) || _filePath == "-")
+			return new Dictionary<string, string>();
+
+		var encoding = Encoding.GetEncoding(_options.Encoding);
+		var settings = new XmlReaderSettings
+		{
+			Async = false,
+			IgnoreComments = true,
+			IgnoreProcessingInstructions = true,
+			IgnoreWhitespace = true
+		};
+
+		using var fs = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.Read, _options.BufferSize, FileOptions.Asynchronous);
+		using var xmlReader = XmlReader.Create(fs, settings);
+		
+		// Temporary instance to scan
+		var tempReader = new XmlStreamReader(_filePath, _options, NullLogger.Instance);
+		tempReader._xmlReader = xmlReader;
+		tempReader.InitializePathMatcher();
+
+		var sampleData = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+		int rowCount = 0;
+
+		foreach (var record in tempReader.EnumerateRawRecords(ct))
+		{
+			if (record is Dictionary<string, object?> dict)
+			{
+				FlattenDictionary(dict, "", sampleData);
+			}
+			else if (record != null)
+			{
+				if (!sampleData.ContainsKey("_value")) sampleData["_value"] = new List<string>();
+				sampleData["_value"].Add(record.ToString() ?? "");
+			}
+
+			rowCount++;
+			if (rowCount >= sampleRows) break;
+		}
+
+		var suggestions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+		foreach (var kvp in sampleData)
+		{
+			var hint = InferTypeHint(kvp.Value) ?? "string";
+			suggestions[kvp.Key] = hint;
+		}
+
+		return suggestions;
+	}
+
+	private void FlattenDictionary(Dictionary<string, object?> dict, string prefix, Dictionary<string, List<string>> samples)
+	{
+		foreach (var kvp in dict)
+		{
+			var key = string.IsNullOrEmpty(prefix) ? kvp.Key : $"{prefix}.{kvp.Key}";
+			if (kvp.Value is Dictionary<string, object?> nested)
+			{
+				FlattenDictionary(nested, key, samples);
+			}
+			else if (kvp.Value is List<object?> list)
+			{
+				// For inference, we just take the first scalar if it exists or flatten first object
+				foreach (var item in list)
+				{
+					if (item is Dictionary<string, object?> nestedInList)
+					{
+						FlattenDictionary(nestedInList, key, samples);
+					}
+					else if (item != null)
+					{
+						if (!samples.ContainsKey(key)) samples[key] = new List<string>();
+						samples[key].Add(item.ToString() ?? "");
+					}
+				}
+			}
+			else if (kvp.Value != null)
+			{
+				if (!samples.ContainsKey(key)) samples[key] = new List<string>();
+				samples[key].Add(kvp.Value.ToString() ?? "");
+			}
+		}
+	}
+
 	private void RunRowBatchSyncLoop(ChannelWriter<ReadOnlyMemory<object?[]>> writer, int batchSize, CancellationToken ct)
 	{
 		try
@@ -314,13 +488,30 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader
 		for (int i = 0; i < Columns.Count; i++)
 		{
 			var colName = Columns[i].Name;
-			row[i] = dict.GetValueOrDefault(colName);
+			row[i] = GetValueFromFlattenedDict(dict, colName);
 		}
 
 		return row;
 	}
 
-	private object? ParseElement(XmlReader reader)
+	private object? GetValueFromFlattenedDict(Dictionary<string, object?> dict, string dotPath)
+	{
+		if (dotPath.IndexOf('.') == -1) return dict.GetValueOrDefault(dotPath);
+
+		var parts = dotPath.Split('.');
+		object? current = dict;
+		for (int i = 0; i < parts.Length; i++)
+		{
+			if (current is Dictionary<string, object?> d)
+			{
+				if (!d.TryGetValue(parts[i], out current)) return null;
+			}
+			else return null;
+		}
+		return current;
+	}
+
+	private object? ParseElement(XmlReader reader, string currentKeyPath = "")
 	{
 		Dictionary<string, object?>? dict = null;
 
@@ -330,7 +521,11 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader
 			for (int i = 0; i < reader.AttributeCount; i++)
 			{
 				reader.MoveToAttribute(i);
-				dict[_options.AttributePrefix + reader.LocalName] = reader.Value;
+				var attrLocalName = reader.LocalName;
+				var attrKey = _options.AttributePrefix + attrLocalName;
+				var fullPath = string.IsNullOrEmpty(currentKeyPath) ? attrKey : $"{currentKeyPath}.{attrKey}";
+				
+				dict[attrKey] = ApplyParser(fullPath, reader.Value);
 			}
 			reader.MoveToElement();
 		}
@@ -348,7 +543,8 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader
 					hasChildElements = true;
 					dict ??= new Dictionary<string, object?>(StringComparer.Ordinal);
 					var name = reader.LocalName;
-					var value = ParseElement(reader);
+					var childPath = string.IsNullOrEmpty(currentKeyPath) ? name : $"{currentKeyPath}.{name}";
+					var value = ParseElement(reader, childPath);
 
 					if (dict.TryGetValue(name, out var existing))
 					{
@@ -377,17 +573,140 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader
 
 		if (!hasChildElements)
 		{
-			if (dict == null) return textValue ?? "";
-			if (textValue != null) dict["_value"] = textValue;
+			if (dict == null) return ApplyParser(currentKeyPath, textValue ?? "");
+			if (textValue != null) dict["_value"] = ApplyParser(string.IsNullOrEmpty(currentKeyPath) ? "_value" : $"{currentKeyPath}._value", textValue);
 			return dict;
 		}
 
 		if (textValue != null && dict != null)
 		{
-			dict["_value"] = textValue;
+			dict["_value"] = ApplyParser(string.IsNullOrEmpty(currentKeyPath) ? "_value" : $"{currentKeyPath}._value", textValue);
 		}
 
 		return dict ?? (object?)new Dictionary<string, object?>(StringComparer.Ordinal);
+	}
+
+	private object? ApplyParser(string fullPath, string? value)
+	{
+		if (value == null) return null;
+		if (_columnParsers != null && _columnParsers.TryGetValue(fullPath, out var parser))
+		{
+			return parser(value);
+		}
+		return value;
+	}
+
+	// ── Helpers ───────────────────────────────────────────────────────────────
+
+	private static Dictionary<string, Type> ParseColumnTypesOption(string spec)
+	{
+		var result = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
+		if (string.IsNullOrWhiteSpace(spec)) return result;
+
+		foreach (var entry in spec.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+		{
+			var idx = entry.IndexOf(':');
+			if (idx <= 0) continue;
+			var name = entry[..idx].Trim();
+			var typeName = entry[(idx + 1)..].Trim();
+			var clrType = ResolveHintToClrType(typeName);
+			if (clrType != null) result[name] = clrType;
+		}
+		return result;
+	}
+
+	private static Type? ResolveHintToClrType(string hint) => hint.ToLowerInvariant() switch
+	{
+		"uuid" or "guid" => typeof(Guid),
+		"string" or "str" => typeof(string),
+		"int" or "int32" => typeof(int),
+		"long" or "int64" => typeof(long),
+		"double" or "float64" => typeof(double),
+		"float" or "float32" or "single" => typeof(float),
+		"decimal" or "numeric" or "money" => typeof(decimal),
+		"bool" or "boolean" => typeof(bool),
+		"datetime" or "date" => typeof(DateTime),
+		"datetimeoffset" or "timestamp" => typeof(DateTimeOffset),
+		_ => null
+	};
+
+	private static Dictionary<string, Func<string, object?>> BuildColumnParsers(Dictionary<string, Type> overrides)
+	{
+		var result = new Dictionary<string, Func<string, object?>>(StringComparer.OrdinalIgnoreCase);
+		foreach (var kvp in overrides)
+		{
+			result[kvp.Key] = BuildParser(kvp.Value);
+		}
+		return result;
+	}
+
+	private static Func<string, object?> BuildParser(Type clrType)
+	{
+		if (clrType == typeof(Guid))
+			return static s => Guid.TryParse(s, out var g) ? g : (object?)null;
+
+		if (clrType == typeof(int))
+			return static s => int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? v : (object?)null;
+
+		if (clrType == typeof(long))
+			return static s => long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? v : (object?)null;
+
+		if (clrType == typeof(double))
+			return static s => double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : (object?)null;
+
+		if (clrType == typeof(float))
+			return static s => float.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : (object?)null;
+
+		if (clrType == typeof(decimal))
+			return static s => decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out var v) ? v : (object?)null;
+
+		if (clrType == typeof(bool))
+			return static s =>
+			{
+				if (bool.TryParse(s, out var b)) return b;
+				return s.ToLowerInvariant() switch { "1" or "yes" or "true" => true, "0" or "no" or "false" => false, _ => (object?)null };
+			};
+
+		if (clrType == typeof(DateTime))
+			return static s => DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var v) ? v : (object?)null;
+
+		if (clrType == typeof(DateTimeOffset))
+			return static s => DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var v) ? v : (object?)null;
+
+		return static s => s;
+	}
+
+	private static string? InferTypeHint(List<string> samples)
+	{
+		if (samples.Count == 0) return null;
+
+		bool allMatch(Func<string, bool> test) => samples.All(test);
+
+		if (allMatch(s => Guid.TryParse(s, out _))) return "uuid";
+
+		if (allMatch(s => long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out _)))
+		{
+			return samples.All(s => int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out _)) ? "int32" : "int64";
+		}
+
+		if (allMatch(s => decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out _) && s.Contains('.')))
+		{
+			bool needsDecimalPrecision = samples.Any(s =>
+			{
+				if (!decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out var d)) return false;
+				if (!double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var dbl)) return true;
+				return d != (decimal)dbl;
+			});
+			return needsDecimalPrecision ? "decimal" : "double";
+		}
+
+		if (allMatch(s => double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out _))) return "double";
+
+		if (allMatch(s => bool.TryParse(s, out _) || s.ToLowerInvariant() is "0" or "1" or "yes" or "no" or "true" or "false")) return "bool";
+
+		if (allMatch(s => DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out _))) return "datetime";
+
+		return null;
 	}
 
 	private (Type ClrType, IArrowType ArrowType) InferTypes(object? value)
