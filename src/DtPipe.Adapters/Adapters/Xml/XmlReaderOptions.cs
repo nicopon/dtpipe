@@ -25,7 +25,4 @@ public class XmlReaderOptions : IOptionSet
 
 	[Description("File read buffer size in bytes")]
 	public int BufferSize { get; set; } = 1024 * 1024;
-
-	[Description("Use high-performance synchronous parsing on a background thread")]
-	public bool FastMode { get; set; } = true;
 }

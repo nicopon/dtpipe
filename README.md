@@ -72,6 +72,7 @@ DtPipe detects providers from file extensions (`.csv`, `.parquet`, `.duckdb`, `.
 | **SQL Server**| ✅ | ✅ | `mssql:` | `mssql:Server=.;Database=mydb` |
 | **CSV** | ✅ | ✅ | `csv:` / `.csv` | `data.csv` |
 | **JsonL** | ✅ | ✅ | `jsonl:` / `.jsonl`| `data.jsonl` |
+| **XML** | ✅ | — | `xml:` / `.xml` | `data.xml` |
 | **Apache Arrow** | ✅ | ✅ | `arrow:` / `.arrow`| `data.arrow` |
 | **Parquet** | ✅ | ✅ | `parquet:` / `.parquet`| `data.parquet` |
 | **Data Gen** | ✅ | — | `generate:` | `generate:1M` |

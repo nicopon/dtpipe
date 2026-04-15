@@ -344,6 +344,18 @@ cat server_logs.jsonl | \
   -o "arrow:secure_logs.arrow"
 ```
 
+### Parsing Large XML Files (Streaming)
+You can parse massive XML files using an XPath-like selector without loading the entire document into memory.
+
+```bash
+cat catalog.xml | \
+  dtpipe -i xml \
+  --xml-path "//Product" \
+  --rename "_id:ProductId" \
+  -o "pg:Host=localhost;Database=prod" \
+  --table "Products" --strategy Upsert
+```
+
 ---
 
 ## Database Import & Migration

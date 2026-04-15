@@ -210,4 +210,128 @@ public class XmlAdapterTests : IAsyncLifetime
 		dict["Child"].Should().Be("Value");
 		dict["_id"].Should().Be("1");
 	}
+
+	[Fact]
+	public async Task XmlStreamReader_ShouldMatchAbsolutePath()
+	{
+		// Arrange
+		var content = """
+            <Root>
+              <NotHere>
+                <Item id="1" />
+              </NotHere>
+              <Here>
+                <Items>
+                  <Item id="2" />
+                </Items>
+              </Here>
+            </Root>
+            """;
+		await File.WriteAllTextAsync(_testXmlPath, content);
+
+		var options = new XmlReaderOptions { Path = "Root/Here/Items/Item" };
+		var reader = new XmlStreamReader(_testXmlPath, options);
+
+		// Act
+		await reader.OpenAsync();
+		var rows = new List<object?[]>();
+		await foreach (var batch in reader.ReadBatchesAsync(100))
+		{
+			foreach (var row in batch.ToArray()) rows.Add(row);
+		}
+		await reader.DisposeAsync();
+
+		// Assert
+		rows.Should().HaveCount(1);
+		
+		var idIdx = reader.Columns!.ToList().FindIndex(c => c.Name == "_id");
+		rows[0][idIdx].Should().Be("2"); // Only id=2 matches the strict path
+	}
+
+	[Fact]
+	public async Task XmlStreamReader_ShouldHandleListOfComplexObjects()
+	{
+		// Arrange
+		var content = """
+            <Root>
+              <Record>
+                <Employees>
+                  <Employee id="1"><Name>Alice</Name></Employee>
+                  <Employee id="2"><Name>Bob</Name></Employee>
+                </Employees>
+              </Record>
+            </Root>
+            """;
+		await File.WriteAllTextAsync(_testXmlPath, content);
+
+		var options = new XmlReaderOptions { Path = "//Record" };
+		var reader = new XmlStreamReader(_testXmlPath, options);
+
+		// Act
+		await reader.OpenAsync();
+		var rows = new List<object?[]>();
+		await foreach (var batch in reader.ReadBatchesAsync(100))
+		{
+			foreach (var row in batch.ToArray()) rows.Add(row);
+		}
+		await reader.DisposeAsync();
+
+		// Assert
+		rows.Should().HaveCount(1);
+		
+		var cols = reader.Columns!.ToList();
+		var empIdx = cols.FindIndex(c => c.Name == "Employees");
+		
+		var wrapper = rows[0][empIdx] as Dictionary<string, object?>;
+		wrapper.Should().NotBeNull();
+		
+		var list = wrapper!["Employee"] as List<object?>;
+		list.Should().NotBeNull();
+		list.Should().HaveCount(2);
+
+		var firstEmp = list![0] as Dictionary<string, object?>;
+		firstEmp!["_id"].Should().Be("1");
+		firstEmp!["Name"].Should().Be("Alice");
+	}
+
+	[Fact]
+	public async Task XmlStreamReader_ShouldHandleNamespacesAndPrefixesGracefully()
+	{
+		// Arrange
+		var content = """
+            <ns1:Root xmlns:ns1="http://example.com/ns1" xmlns:ns2="http://example.com/ns2">
+              <ns1:Item ns2:id="1">
+                <ns2:Value>Hello</ns2:Value>
+              </ns1:Item>
+            </ns1:Root>
+            """;
+		await File.WriteAllTextAsync(_testXmlPath, content);
+
+		// Current implementation simplifies matching to LocalName, so we look for "Item"
+		var options = new XmlReaderOptions { Path = "//Item" };
+		var reader = new XmlStreamReader(_testXmlPath, options);
+
+		// Act
+		await reader.OpenAsync();
+		var rows = new List<object?[]>();
+		await foreach (var batch in reader.ReadBatchesAsync(100))
+		{
+			foreach (var row in batch.ToArray()) rows.Add(row);
+		}
+		await reader.DisposeAsync();
+
+		// Assert
+		rows.Should().HaveCount(1);
+		
+		var cols = reader.Columns!.Select(c => c.Name).ToList();
+		// It should find Value (local name) and _id (attribute local name)
+		cols.Should().Contain("Value");
+		cols.Should().Contain("_id");
+
+		var valIdx = cols.IndexOf("Value");
+		var idIdx = cols.IndexOf("_id");
+
+		rows[0][valIdx].Should().Be("Hello");
+		rows[0][idIdx].Should().Be("1");
+	}
 }

@@ -19,7 +19,8 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader
 
 	private Stream? _stream;
 	private XmlReader? _xmlReader;
-	private readonly Stack<string> _pathStack = new();
+	private readonly string[] _path = new string[256];
+	private int _depth = 0;
 	private string[]? _targetPathParts;
 	private string? _lastPathPart;
 	private bool _isRecursiveSearch;
@@ -98,13 +99,51 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader
 		else
 		{
 			// Strict path from root
-			if (_pathStack.Count != _targetPathParts.Length) return false;
-			var i = 0;
-			foreach (var part in _pathStack.Reverse())
+			if (_depth != _targetPathParts.Length) return false;
+			for (int i = 0; i < _depth; i++)
 			{
-				if (part != _targetPathParts[i++]) return false;
+				if (_path[i] != _targetPathParts[i]) return false;
 			}
 			return true;
+		}
+	}
+
+	private IEnumerable<object?> EnumerateRawRecords(CancellationToken ct)
+	{
+		if (_xmlReader == null) yield break;
+
+		while (_xmlReader.Read())
+		{
+			if (ct.IsCancellationRequested) yield break;
+
+			if (_xmlReader.NodeType == XmlNodeType.Element)
+			{
+				if (_depth < _path.Length) _path[_depth] = _xmlReader.LocalName;
+				_depth++;
+
+				bool isEmptyElement = _xmlReader.IsEmptyElement;
+
+				if (IsMatch())
+				{
+					using var subReader = _xmlReader.ReadSubtree();
+					subReader.Read(); 
+					yield return ParseElement(subReader);
+
+					// When ReadSubtree is disposed, the original reader is positioned on the EndElement
+					// (or the empty element itself). The next Read() will advance past it, skipping the EndElement.
+					// So we decrement the depth manually here.
+					_depth--;
+				}
+				else if (isEmptyElement)
+				{
+					// If it's an empty element and not matched, no EndElement will be yielded by the reader.
+					_depth--;
+				}
+			}
+			else if (_xmlReader.NodeType == XmlNodeType.EndElement)
+			{
+				if (_depth > 0) _depth--;
+			}
 		}
 	}
 
@@ -114,25 +153,10 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader
 
 		await Task.Run(() =>
 		{
-			while (_xmlReader.Read())
+			foreach (var record in EnumerateRawRecords(ct))
 			{
-				if (_xmlReader.NodeType == XmlNodeType.Element)
-				{
-					_pathStack.Push(_xmlReader.LocalName);
-
-					if (IsMatch())
-					{
-						using var subReader = _xmlReader.ReadSubtree();
-						subReader.Read(); 
-						var record = ParseElement(subReader);
-						_firstNodeDict = record as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["_value"] = record };
-						break;
-					}
-				}
-				else if (_xmlReader.NodeType == XmlNodeType.EndElement)
-				{
-					if (_pathStack.Count > 0) _pathStack.Pop();
-				}
+				_firstNodeDict = record as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["_value"] = record };
+				break;
 			}
 		}, ct);
 
@@ -196,32 +220,15 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader
 				_firstNodeDict = null;
 			}
 
-			while (_xmlReader!.Read())
+			foreach (var record in EnumerateRawRecords(ct))
 			{
-				if (ct.IsCancellationRequested) break;
+				batch.Add(record as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["_value"] = record });
 
-				if (_xmlReader.NodeType == XmlNodeType.Element)
+				if (batch.Count >= batchSize)
 				{
-					_pathStack.Push(_xmlReader.LocalName);
-
-					if (IsMatch())
-					{
-						using var subReader = _xmlReader.ReadSubtree();
-						subReader.Read(); 
-						var record = ParseElement(subReader);
-						batch.Add(record as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["_value"] = record });
-
-						if (batch.Count >= batchSize)
-						{
-							var recordBatch = Apache.Arrow.Serialization.ArrowSerializer.SerializeAsync(batch, Schema!).GetAwaiter().GetResult();
-							writer.TryWrite(recordBatch);
-							batch.Clear();
-						}
-					}
-				}
-				else if (_xmlReader.NodeType == XmlNodeType.EndElement)
-				{
-					if (_pathStack.Count > 0) _pathStack.Pop();
+					var recordBatch = Apache.Arrow.Serialization.ArrowSerializer.SerializeAsync(batch, Schema!).GetAwaiter().GetResult();
+					writer.TryWrite(recordBatch);
+					batch.Clear();
 				}
 			}
 
@@ -273,32 +280,15 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader
 				_firstNodeDict = null;
 			}
 
-			while (_xmlReader!.Read())
+			foreach (var record in EnumerateRawRecords(ct))
 			{
-				if (ct.IsCancellationRequested) break;
+				batchData[index++] = MapDictToRow(record as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["_value"] = record });
 
-				if (_xmlReader.NodeType == XmlNodeType.Element)
+				if (index >= batchSize)
 				{
-					_pathStack.Push(_xmlReader.LocalName);
-
-					if (IsMatch())
-					{
-						using var subReader = _xmlReader.ReadSubtree();
-						subReader.Read(); 
-						var record = ParseElement(subReader);
-						batchData[index++] = MapDictToRow(record as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["_value"] = record });
-
-						if (index >= batchSize)
-						{
-							writer.TryWrite(new ReadOnlyMemory<object?[]>(batchData, 0, index));
-							batchData = new object?[batchSize][];
-							index = 0;
-						}
-					}
-				}
-				else if (_xmlReader.NodeType == XmlNodeType.EndElement)
-				{
-					if (_pathStack.Count > 0) _pathStack.Pop();
+					writer.TryWrite(new ReadOnlyMemory<object?[]>(batchData, 0, index));
+					batchData = new object?[batchSize][];
+					index = 0;
 				}
 			}
 
@@ -336,7 +326,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader
 
 		if (reader.HasAttributes)
 		{
-			dict = new Dictionary<string, object?>(reader.AttributeCount);
+			dict = new Dictionary<string, object?>(reader.AttributeCount + 4, StringComparer.Ordinal);
 			for (int i = 0; i < reader.AttributeCount; i++)
 			{
 				reader.MoveToAttribute(i);
@@ -345,9 +335,9 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader
 			reader.MoveToElement();
 		}
 
-		if (reader.IsEmptyElement) return dict ?? (object?)new Dictionary<string, object?>();
+		if (reader.IsEmptyElement) return dict ?? (object?)new Dictionary<string, object?>(StringComparer.Ordinal);
 
-		string? textValue = null;
+		StringBuilder? textBuilder = null;
 		bool hasChildElements = false;
 
 		while (reader.Read())
@@ -356,7 +346,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader
 			{
 				case XmlNodeType.Element:
 					hasChildElements = true;
-					dict ??= new Dictionary<string, object?>();
+					dict ??= new Dictionary<string, object?>(StringComparer.Ordinal);
 					var name = reader.LocalName;
 					var value = ParseElement(reader);
 
@@ -373,7 +363,8 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader
 
 				case XmlNodeType.Text:
 				case XmlNodeType.CDATA:
-					textValue = textValue == null ? reader.Value : textValue + reader.Value;
+					textBuilder ??= new StringBuilder();
+					textBuilder.Append(reader.Value);
 					break;
 
 				case XmlNodeType.EndElement:
@@ -382,6 +373,8 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader
 		}
 
 	Done:
+		string? textValue = textBuilder?.ToString();
+
 		if (!hasChildElements)
 		{
 			if (dict == null) return textValue ?? "";
@@ -394,7 +387,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader
 			dict["_value"] = textValue;
 		}
 
-		return dict ?? (object?)new Dictionary<string, object?>();
+		return dict ?? (object?)new Dictionary<string, object?>(StringComparer.Ordinal);
 	}
 
 	private (Type ClrType, IArrowType ArrowType) InferTypes(object? value)
