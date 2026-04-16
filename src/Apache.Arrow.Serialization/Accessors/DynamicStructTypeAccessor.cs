@@ -79,7 +79,9 @@ internal class DynamicStructTypeAccessor : ArrowSerializer.StructTypeAccessorBas
             }
             else
             {
-                throw new InvalidOperationException($"Dynamic object contains unknown key '{key}' not present in the first item's schema.");
+                // Gracefully skip unknown keys not present in the initial schema 
+                // to prevent crashing on sparse/heterogeneous data.
+                continue;
             }
         }
 
