@@ -18,6 +18,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 	private readonly XmlReaderOptions _options;
 	private readonly ILogger _logger;
 
+	private readonly XmlReaderSettings _xmlReaderSettings;
 	private Stream? _stream;
 	private XmlReader? _xmlReader;
 	private readonly string[] _path = new string[256];
@@ -26,6 +27,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 	private string? _lastPathPart;
 	private bool _isRecursiveSearch;
 
+	private bool _isResetSupported;
 	private Dictionary<string, Func<string, object?>>? _columnParsers;
 	private Dictionary<string, Type>? _typeOverrides;
 	private IReadOnlyDictionary<string, string>? _autoAppliedTypes;
@@ -38,6 +40,14 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 		_filePath = filePath;
 		_options = options;
 		_logger = logger ?? NullLogger.Instance;
+		_xmlReaderSettings = new XmlReaderSettings 
+		{ 
+			Async = true, 
+			IgnoreWhitespace = true,
+			IgnoreComments = true,
+			IgnoreProcessingInstructions = true,
+			ConformanceLevel = ConformanceLevel.Fragment
+		};
 	}
 
 	public async Task OpenAsync(CancellationToken ct = default)
@@ -57,54 +67,82 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 			if (!File.Exists(_filePath))
 				throw new FileNotFoundException($"XML file not found: {_filePath}", _filePath);
 
-			_stream = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.Read, _options.BufferSize, FileOptions.Asynchronous);
+			_stream = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.Read, _options.BufferSize, FileOptions.None);
 		}
+
+		InitializePathMatcher();
+		_stream = new FragmentXmlStream(_stream);
 
 		var settings = new XmlReaderSettings
 		{
 			Async = false,
 			IgnoreComments = true,
 			IgnoreProcessingInstructions = true,
-			IgnoreWhitespace = true
+			IgnoreWhitespace = true,
+			ConformanceLevel = ConformanceLevel.Fragment
 		};
 
 		_xmlReader = XmlReader.Create(_stream, settings);
 
 		InitializePathMatcher();
 
-		// Build column parsers from --xml-column-types option
 		_typeOverrides = ParseColumnTypesOption(_options.ColumnTypes);
-
-		// Auto-infer types when --xml-auto-column-types is set
-		if (_options.AutoColumnTypes && !string.IsNullOrEmpty(_filePath) && _filePath != "-")
+		_columnParsers = BuildColumnParsers(_typeOverrides);
+		_isResetSupported = !string.IsNullOrEmpty(_filePath) && _filePath != "-";
+		await ResetReaderAsync(ct);
+		
+		// 1. Auto-discover types (Pass 1)
+		if (_options.AutoColumnTypes)
 		{
-			try
-			{
-				const int autoSampleCount = 100;
-				var inferred = await InferColumnTypesAsync(autoSampleCount, ct);
-				if (inferred.Count > 0)
-				{
-					_autoAppliedTypes = inferred;
-					foreach (var kv in inferred)
-					{
-						var clrType = ResolveHintToClrType(kv.Value);
-						if (clrType != null && !_typeOverrides.ContainsKey(kv.Key))
-						{
-							_typeOverrides[kv.Key] = clrType;
-						}
-					}
-				}
-			}
-			catch (Exception ex)
-			{
-				_logger.LogWarning(ex, "Auto column-type inference failed, falling back to string columns.");
-			}
+			var autoSampleCount = 100;
+			var inferred = await InferColumnTypesAsync(autoSampleCount, ct);
+			_autoAppliedTypes = inferred;
+			
+			// Reset for next pass
+			await ResetReaderAsync(ct);
 		}
 
-		_columnParsers = BuildColumnParsers(_typeOverrides);
-
-		// Infer schema from the first matching node
+		// 2. Infer schema (Pass 2)
 		await InferSchemaAsync(ct);
+		
+		// 3. Reset for final data extraction (Pass 3)
+		await ResetReaderAsync(ct);
+	}
+
+	private async Task ResetReaderAsync(CancellationToken ct)
+	{
+		_depth = 0;
+		if (!_isResetSupported)
+		{
+			// STDIN: We cannot reset. We must have already opened it in OpenAsync
+			if (_xmlReader == null)
+			{
+				var standardInput = Console.OpenStandardInput();
+				var fragmentStream = new FragmentXmlStream(standardInput);
+				_xmlReader = XmlReader.Create(fragmentStream, _xmlReaderSettings);
+			}
+			return;
+		}
+
+		// File-based: Close and re-open to ensure fresh start
+		if (_xmlReader != null)
+		{
+			_xmlReader.Dispose();
+			_xmlReader = null;
+		}
+
+		if (_stream != null)
+		{
+			await _stream.DisposeAsync();
+			_stream = null;
+		}
+
+		if (!File.Exists(_filePath))
+			throw new FileNotFoundException($"XML file not found: {_filePath}", _filePath);
+
+		_stream = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.Read, _options.BufferSize, FileOptions.None);
+		var fragStream = new FragmentXmlStream(_stream);
+		_xmlReader = XmlReader.Create(fragStream, _xmlReaderSettings);
 	}
 
 	private void InitializePathMatcher()
@@ -144,35 +182,39 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 		}
 	}
 
-	private IEnumerable<object?> EnumerateRawRecords(CancellationToken ct)
+	private async IAsyncEnumerable<object?> EnumerateRawRecordsAsync(CancellationToken ct)
 	{
 		if (_xmlReader == null) yield break;
 
-		while (_xmlReader.Read())
+		while (await _xmlReader.ReadAsync())
 		{
 			if (ct.IsCancellationRequested) yield break;
 
 			if (_xmlReader.NodeType == XmlNodeType.Element)
 			{
-				if (_depth < _path.Length) _path[_depth] = _xmlReader.LocalName;
+				var name = _xmlReader.LocalName;
+				if (_depth < _path.Length) _path[_depth] = name;
 				_depth++;
 
 				bool isEmptyElement = _xmlReader.IsEmptyElement;
 
 				if (IsMatch())
 				{
-					using var subReader = _xmlReader.ReadSubtree();
-					subReader.Read(); 
-					yield return ParseElement(subReader, "");
-
-					// When ReadSubtree is disposed, the original reader is positioned on the EndElement
-					// (or the empty element itself). The next Read() will advance past it, skipping the EndElement.
-					// So we decrement the depth manually here.
+					// For matched elements, we consume them entirely with ReadSubtree
+					using (var subReader = _xmlReader.ReadSubtree())
+					{
+						// subReader itself is unfortunately not fully async for all operations in some .NET versions
+						// but its base reader is.
+						subReader.Read(); // Must be called once to position on the element
+						object? record = ParseElement(subReader, "");
+						if (record != null) yield return record;
+					}
+					
+					// After ReadSubtree, decrement depth since we're done with the matched element
 					_depth--;
 				}
 				else if (isEmptyElement)
 				{
-					// If it's an empty element and not matched, no EndElement will be yielded by the reader.
 					_depth--;
 				}
 			}
@@ -187,21 +229,51 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 	{
 		if (_xmlReader == null) throw new InvalidOperationException("XmlReader is null.");
 
-		await Task.Run(() =>
-		{
-			foreach (var record in EnumerateRawRecords(ct))
-			{
-				_firstNodeDict = record as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["_value"] = record };
-				break;
-			}
-		}, ct);
+		Dictionary<string, object?>? merged = null;
+		int count = 0;
+		int maxSample = 1000;
 
+		await foreach (var record in EnumerateRawRecordsAsync(ct))
+		{
+			var current = record as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["_value"] = record };
+			if (merged == null)
+			{
+				merged = new Dictionary<string, object?>(current, StringComparer.OrdinalIgnoreCase);
+			}
+			else
+			{
+				DeepMergeSchemas(merged, current);
+			}
+
+			count++;
+			if (count >= maxSample) break;
+		}
+
+		_firstNodeDict = merged;
 		UpdateSchemaFromFirstNode();
+	}
+
+	private void DeepMergeSchemas(Dictionary<string, object?> target, Dictionary<string, object?> source)
+	{
+		foreach (var kvp in source)
+		{
+			if (!target.TryGetValue(kvp.Key, out var existing))
+			{
+				target[kvp.Key] = kvp.Value;
+			}
+			else if (existing is Dictionary<string, object?> targetDict && kvp.Value is Dictionary<string, object?> sourceDict)
+			{
+				DeepMergeSchemas(targetDict, sourceDict);
+			}
+			else if (existing == null && kvp.Value != null)
+			{
+				target[kvp.Key] = kvp.Value;
+			}
+		}
 	}
 
 	private void UpdateSchemaFromFirstNode()
 	{
-		var columns = new List<PipeColumnInfo>();
 		var fields = new List<Field>();
 		var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -213,11 +285,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 				var name = kvp.Key;
 				var sampleValue = kvp.Value;
 
-				// Root columns are derived from the first node's children/attributes
-				// We don't flatten the entire tree into top-level columns anymore.
 				var (clrType, arrowType) = InferTypes(sampleValue, name);
-				
-				columns.Add(new PipeColumnInfo(name, clrType, true));
 				fields.Add(new Field(name, arrowType, true));
 				seenPaths.Add(name);
 			}
@@ -232,26 +300,34 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 				// If it's a top-level key (no dots) and hasn't been seen yet, add it
 				if (!kvp.Key.Contains('.') && !seenPaths.Contains(kvp.Key))
 				{
-					var clrType = ResolveHintToClrType(kvp.Value) ?? typeof(string);
 					var arrowType = ResolveHintToArrowType(kvp.Value);
-					
-					columns.Add(new PipeColumnInfo(kvp.Key, clrType, true));
 					fields.Add(new Field(kvp.Key, arrowType, true));
 					seenPaths.Add(kvp.Key);
 				}
 			}
 		}
 
-		if (columns.Count == 0)
+		if (fields.Count == 0)
 		{
 			Columns = System.Array.Empty<PipeColumnInfo>();
 			Schema = new Schema(Enumerable.Empty<Field>(), null);
 			return;
 		}
 
-		Columns = columns;
+		// Columns property is used for UI and SQL/transformers mapping
+		Columns = fields.Select(f => {
+			var clrType = typeof(object);
+			if (f.DataType is StringType) clrType = typeof(string);
+			else if (f.DataType is Int32Type) clrType = typeof(int);
+			else if (f.DataType is Int64Type) clrType = typeof(long);
+			else if (f.DataType is DoubleType) clrType = typeof(double);
+			else if (f.DataType is BooleanType) clrType = typeof(bool);
+			else if (f.DataType is Decimal128Type) clrType = typeof(decimal);
+			else if (f.DataType is TimestampType) clrType = typeof(DateTime);
+			return new PipeColumnInfo(f.Name, clrType, true);
+		}).ToList();
 		Schema = new Schema(fields, null);
-		_logger.LogInformation("XmlStreamReader: Inferred hierarchical schema with {Count} top-level columns.", columns.Count);
+		_logger.LogInformation("XmlStreamReader: Inferred hierarchical schema with {Count} top-level columns.", fields.Count);
 	}
 
 	private IArrowType InferArrowTypeFromPath(string path, object? sampleValue)
@@ -285,107 +361,83 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 	public async IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync(
 		[System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
 	{
-		var channel = Channel.CreateBounded<RecordBatch>(new BoundedChannelOptions(2) 
-		{ 
-			FullMode = BoundedChannelFullMode.Wait,
-			SingleReader = true,
-			SingleWriter = true
-		});
+		int batchSize = 10000;
+		var batch = new List<Dictionary<string, object?>>(batchSize);
 
-		_ = Task.Run(() => RunRecordBatchSyncLoop(channel.Writer, ct), ct);
-
-		await foreach (var batch in channel.Reader.ReadAllAsync(ct))
+		// Only yield _firstNodeDict if we are NOT at the beginning of the stream (e.g. STDIN)
+		if (!_isResetSupported && _firstNodeDict != null)
 		{
-			yield return batch;
+			var dict = _firstNodeDict as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["_value"] = _firstNodeDict };
+			batch.Add(dict);
+			_firstNodeDict = null;
+		}
+		else
+		{
+			_firstNodeDict = null; // Re-read from beginning in loop
+		}
+
+		await foreach (var record in EnumerateRawRecordsAsync(ct))
+		{
+			var dict = record as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["_value"] = record };
+			batch.Add(dict);
+
+			if (batch.Count >= batchSize)
+			{
+				yield return await Apache.Arrow.Serialization.ArrowSerializer.SerializeAsync(batch, Schema!);
+				batch.Clear();
+			}
+		}
+
+		if (batch.Count > 0)
+		{
+			yield return await Apache.Arrow.Serialization.ArrowSerializer.SerializeAsync(batch, Schema!);
+			batch.Clear();
 		}
 	}
 
-	private void RunRecordBatchSyncLoop(ChannelWriter<RecordBatch> writer, CancellationToken ct)
-	{
-		try
-		{
-			int batchSize = 10000;
-			var batch = new List<Dictionary<string, object?>>(batchSize);
-
-			if (_firstNodeDict != null)
-			{
-				batch.Add(_firstNodeDict);
-				_firstNodeDict = null;
-			}
-
-			foreach (var record in EnumerateRawRecords(ct))
-			{
-				batch.Add(record as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["_value"] = record });
-
-				if (batch.Count >= batchSize)
-				{
-					var recordBatch = Apache.Arrow.Serialization.ArrowSerializer.SerializeAsync(batch, Schema!).GetAwaiter().GetResult();
-					writer.TryWrite(recordBatch);
-					batch.Clear();
-				}
-			}
-
-			if (batch.Count > 0)
-			{
-				var recordBatch = Apache.Arrow.Serialization.ArrowSerializer.SerializeAsync(batch, Schema!).GetAwaiter().GetResult();
-				writer.TryWrite(recordBatch);
-			}
-		}
-		catch (Exception ex)
-		{
-			_logger.LogError(ex, "Error in XML sync parsing loop.");
-		}
-		finally
-		{
-			writer.TryComplete();
-		}
-	}
 
 	public async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(
 		int batchSize,
 		[System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
 	{
-		var channel = Channel.CreateBounded<ReadOnlyMemory<object?[]>>(new BoundedChannelOptions(2) 
-		{ 
-			FullMode = BoundedChannelFullMode.Wait,
-			SingleReader = true,
-			SingleWriter = true
-		});
+		var batchData = new object?[batchSize][];
+		var index = 0;
 
-		_ = Task.Run(() => RunRowBatchSyncLoop(channel.Writer, batchSize, ct), ct);
-
-		await foreach (var batch in channel.Reader.ReadAllAsync(ct))
+		// Only yield _firstNodeDict if we are NOT at the beginning of the stream
+		if (!_isResetSupported && _firstNodeDict != null)
 		{
-			yield return batch;
+			batchData[index++] = MapDictToRow(_firstNodeDict);
+			_firstNodeDict = null;
+		}
+		else
+		{
+			_firstNodeDict = null; 
+		}
+
+		await foreach (var record in EnumerateRawRecordsAsync(ct))
+		{
+			batchData[index++] = MapDictToRow(record as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["_value"] = record });
+
+			if (index >= batchSize)
+			{
+				yield return new ReadOnlyMemory<object?[]>(batchData, 0, index);
+				batchData = new object?[batchSize][];
+				index = 0;
+			}
+		}
+
+		if (index > 0)
+		{
+			yield return new ReadOnlyMemory<object?[]>(batchData, 0, index);
 		}
 	}
 
 	public async Task<IReadOnlyDictionary<string, string>> InferColumnTypesAsync(int sampleRows, CancellationToken ct = default)
 	{
-		if (string.IsNullOrEmpty(_filePath) || _filePath == "-")
-			return new Dictionary<string, string>();
-
-		var encoding = Encoding.GetEncoding(_options.Encoding);
-		var settings = new XmlReaderSettings
-		{
-			Async = false,
-			IgnoreComments = true,
-			IgnoreProcessingInstructions = true,
-			IgnoreWhitespace = true
-		};
-
-		using var fs = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.Read, _options.BufferSize, FileOptions.Asynchronous);
-		using var xmlReader = XmlReader.Create(fs, settings);
-		
-		// Temporary instance to scan
-		var tempReader = new XmlStreamReader(_filePath, _options, NullLogger.Instance);
-		tempReader._xmlReader = xmlReader;
-		tempReader.InitializePathMatcher();
-
 		var sampleData = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
 		int rowCount = 0;
 
-		foreach (var record in tempReader.EnumerateRawRecords(ct))
+		await foreach (var record in EnumerateRawRecordsAsync(ct))
 		{
 			if (record is Dictionary<string, object?> dict)
 			{
@@ -444,45 +496,6 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 		}
 	}
 
-	private void RunRowBatchSyncLoop(ChannelWriter<ReadOnlyMemory<object?[]>> writer, int batchSize, CancellationToken ct)
-	{
-		try
-		{
-			var batchData = new object?[batchSize][];
-			var index = 0;
-
-			if (_firstNodeDict != null)
-			{
-				batchData[index++] = MapDictToRow(_firstNodeDict);
-				_firstNodeDict = null;
-			}
-
-			foreach (var record in EnumerateRawRecords(ct))
-			{
-				batchData[index++] = MapDictToRow(record as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["_value"] = record });
-
-				if (index >= batchSize)
-				{
-					writer.TryWrite(new ReadOnlyMemory<object?[]>(batchData, 0, index));
-					batchData = new object?[batchSize][];
-					index = 0;
-				}
-			}
-
-			if (index > 0)
-			{
-				writer.TryWrite(new ReadOnlyMemory<object?[]>(batchData, 0, index));
-			}
-		}
-		catch (Exception ex)
-		{
-			_logger.LogError(ex, "Error in XML sync row parsing loop.");
-		}
-		finally
-		{
-			writer.TryComplete();
-		}
-	}
 
 	private object?[] MapDictToRow(Dictionary<string, object?> dict)
 	{
@@ -787,6 +800,76 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 		{
 			await _stream.DisposeAsync();
 			_stream = null;
+		}
+	}
+
+	// ── Fragment Support ───────────────────────────────────────────────────
+
+	private class FragmentXmlStream : Stream
+	{
+		private readonly Stream _inner;
+		private bool _firstDeclarationFound = false;
+		private int _state = 0; // 0: Searching for <, 1: <, 2: <?, 3: <?x, 4: <?xm, 5: <?xml, 6: Neutralizing
+
+		public FragmentXmlStream(Stream inner) => _inner = inner;
+
+		public override bool CanRead => _inner.CanRead;
+		public override bool CanSeek => _inner.CanSeek;
+		public override bool CanWrite => false;
+		public override long Length => _inner.Length;
+		public override long Position { get => _inner.Position; set => _inner.Position = value; }
+
+		public override void Flush() => _inner.Flush();
+		public override long Seek(long offset, SeekOrigin origin) => _inner.Seek(offset, origin);
+		public override void SetLength(long value) => throw new NotSupportedException();
+		public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+		public override int Read(byte[] buffer, int offset, int count)
+		{
+			int bytesRead = _inner.Read(buffer, offset, count);
+			if (bytesRead <= 0) return bytesRead;
+
+			for (int i = offset; i < offset + bytesRead; i++)
+			{
+				byte b = buffer[i];
+
+				if (_state == 6) // Neutralizing mode: replace with spaces until '>'
+				{
+					buffer[i] = (byte)' ';
+					if (b == (byte)'>') _state = 0;
+					continue;
+				}
+
+				if (b == (byte)'<') _state = 1;
+				else if (b == (byte)'?' && _state == 1) _state = 2;
+				else if (b == (byte)'x' && _state == 2) _state = 3;
+				else if (b == (byte)'m' && _state == 3) _state = 4;
+				else if (b == (byte)'l' && _state == 4) 
+				{
+					if (!_firstDeclarationFound)
+					{
+						_firstDeclarationFound = true;
+						_state = 0;
+					}
+					else
+					{
+						_state = 6; // Start neutralizing remaining of declaration
+						for (int k = 0; k < 5; k++)
+						{
+							if (i - k >= offset) buffer[i - k] = (byte)' ';
+						}
+					}
+				}
+				else _state = 0;
+			}
+
+			return bytesRead;
+		}
+
+		protected override void Dispose(bool disposing)
+		{
+			if (disposing) _inner.Dispose();
+			base.Dispose(disposing);
 		}
 	}
 }
