@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Threading.Channels;
 using System.Globalization;
+using DtPipe.Core.Infrastructure.Discovery;
 
 namespace DtPipe.Adapters.Xml;
 
@@ -242,7 +243,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 			}
 			else
 			{
-				DeepMergeSchemas(merged, current);
+				SchemaDiscoveryHelper.DeepMergeSchemas(merged, current);
 			}
 
 			count++;
@@ -253,24 +254,6 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 		UpdateSchemaFromFirstNode();
 	}
 
-	private void DeepMergeSchemas(Dictionary<string, object?> target, Dictionary<string, object?> source)
-	{
-		foreach (var kvp in source)
-		{
-			if (!target.TryGetValue(kvp.Key, out var existing))
-			{
-				target[kvp.Key] = kvp.Value;
-			}
-			else if (existing is Dictionary<string, object?> targetDict && kvp.Value is Dictionary<string, object?> sourceDict)
-			{
-				DeepMergeSchemas(targetDict, sourceDict);
-			}
-			else if (existing == null && kvp.Value != null)
-			{
-				target[kvp.Key] = kvp.Value;
-			}
-		}
-	}
 
 	private void UpdateSchemaFromFirstNode()
 	{

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Collections;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
@@ -167,7 +168,26 @@ public sealed class JsonLDataWriter : IRowDataWriter, IRequiresOptions<JsonLWrit
 			case float f: writer.WriteNumberValue(f); break;
 			case DateTime dt: writer.WriteStringValue(dt.ToString("O")); break;
 			case DateTimeOffset dto: writer.WriteStringValue(dto.ToString("O")); break;
-			default: writer.WriteStringValue(val.ToString()); break;
+			case IDictionary dict:
+				writer.WriteStartObject();
+				foreach (DictionaryEntry entry in dict)
+				{
+					writer.WritePropertyName(entry.Key.ToString() ?? string.Empty);
+					WriteValue(writer, entry.Value);
+				}
+				writer.WriteEndObject();
+				break;
+			case IEnumerable enumerable:
+				writer.WriteStartArray();
+				foreach (var item in enumerable)
+				{
+					WriteValue(writer, item);
+				}
+				writer.WriteEndArray();
+				break;
+			default:
+				writer.WriteStringValue(val.ToString());
+				break;
 		}
 	}
 

@@ -8,6 +8,8 @@ using DtPipe.Core.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Linq;
+using System.Collections;
+using DtPipe.Core.Infrastructure.Discovery;
 
 namespace DtPipe.Adapters.JsonL;
 
@@ -30,109 +32,199 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader
 		_logger = logger ?? NullLogger.Instance;
 	}
 
+	private bool _isResetSupported;
+	private Dictionary<string, object?>? _cachedFirstBatch;
+
 	public async Task OpenAsync(CancellationToken ct = default)
 	{
-		var encoding = Encoding.GetEncoding(_options.Encoding);
+		_isResetSupported = !string.IsNullOrEmpty(_filePath) && _filePath != "-";
 
-		if (string.IsNullOrEmpty(_filePath) || _filePath == "-")
-		{
-			if (!Console.IsInputRedirected)
-			{
-				throw new InvalidOperationException("Structure input (STDIN) is not redirected. To read from STDIN, pipe data into dtpipe (e.g. 'cat file.jsonl | dtpipe ...').");
-			}
+		await ResetReaderAsync();
 
-			_streamReader = new StreamReader(Console.OpenStandardInput(), encoding);
-		}
-		else
-		{
-			if (!File.Exists(_filePath))
-				throw new FileNotFoundException($"JsonL file not found: {_filePath}", _filePath);
-
-			_fileStream = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.Asynchronous);
-			_streamReader = new StreamReader(_fileStream, encoding, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
-		}
-
-		// Infer schema from the first line
+		// Infer schema by sampling multiple records
 		await InferSchemaAsync(ct);
+
+		// Reset for final data extraction
+		await ResetReaderAsync();
+	}
+
+	private async Task ResetReaderAsync()
+	{
+		if (!_isResetSupported)
+		{
+			// STDIN: We cannot reset. If we already have a stream, we keep it.
+			if (_streamReader == null)
+			{
+				var encoding = Encoding.GetEncoding(_options.Encoding);
+				_streamReader = new StreamReader(Console.OpenStandardInput(), encoding);
+			}
+			return;
+		}
+
+		// File-based: Close and re-open to ensure fresh start
+		if (_streamReader != null)
+		{
+			_streamReader.Dispose();
+			_streamReader = null;
+		}
+
+		if (_fileStream != null)
+		{
+			await _fileStream.DisposeAsync();
+			_fileStream = null;
+		}
+
+		var encoding2 = Encoding.GetEncoding(_options.Encoding);
+		_fileStream = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.Asynchronous);
+		_streamReader = new StreamReader(_fileStream, encoding2, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
 	}
 
 	private async Task InferSchemaAsync(CancellationToken ct)
 	{
 		if (_streamReader == null) throw new InvalidOperationException("StreamReader is null.");
 		
-		_firstLine = await _streamReader.ReadLineAsync(ct);
-		if (string.IsNullOrEmpty(_firstLine))
+		Dictionary<string, object?>? merged = null;
+		int count = 0;
+
+		// If we are on a non-resetable stream (STDIN), we must cache what we read during discovery
+		if (!_isResetSupported)
+		{
+			_cachedFirstBatch = new Dictionary<string, object?>();
+		}
+
+		await foreach (var record in EnumerateRawRecordsAsync(ct))
+		{
+			if (record is Dictionary<string, object?> current)
+			{
+				if (merged == null)
+				{
+					merged = new Dictionary<string, object?>(current, StringComparer.OrdinalIgnoreCase);
+				}
+				else
+				{
+					SchemaDiscoveryHelper.DeepMergeSchemas(merged, current);
+				}
+			}
+
+			count++;
+			if (count >= _options.MaxSample) break;
+		}
+
+		if (merged == null)
 		{
 			Columns = System.Array.Empty<PipeColumnInfo>();
 			Schema = new Schema(Enumerable.Empty<Field>(), null);
 			return;
 		}
 
-		try
+		var columns = new List<PipeColumnInfo>();
+		var fields = new List<Field>();
+
+		foreach (var kvp in merged)
 		{
-			using var doc = JsonDocument.Parse(_firstLine);
-			var root = doc.RootElement;
+			var (type, arrowType) = InferTypes(kvp.Key, kvp.Value);
+			columns.Add(new PipeColumnInfo(kvp.Key, type, true));
+			fields.Add(new Field(kvp.Key, arrowType, true));
+		}
 
-			if (root.ValueKind != JsonValueKind.Object)
-				throw new InvalidOperationException("First line of JsonL is not a JSON object.");
+		Columns = columns;
+		Schema = new Schema(fields, null);
+		_logger.LogInformation("JsonLStreamReader: Inferred schema with {Count} columns. Path: {Path}", columns.Count, _options.Path ?? "(root)");
+	}
 
-			var columns = new List<PipeColumnInfo>();
-			var fields = new List<Field>();
+	private async IAsyncEnumerable<object?> EnumerateRawRecordsAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+	{
+		if (_streamReader == null) yield break;
 
-			foreach (var property in root.EnumerateObject())
+		if (string.IsNullOrEmpty(_options.Path))
+		{
+			// Classic JSONL: 1 line = 1 record
+			while (!ct.IsCancellationRequested)
 			{
-				var (type, arrowType) = InferTypes(property.Value);
-				columns.Add(new PipeColumnInfo(property.Name, type, true));
-				fields.Add(new Field(property.Name, arrowType, true));
+				var line = await _streamReader.ReadLineAsync(ct);
+				if (line == null) break;
+				if (string.IsNullOrWhiteSpace(line)) continue;
+
+				yield return ParseLineToDictionary(line);
+			}
+		}
+		else
+		{
+			// Hierarchical JSON: Stream from Path
+			// For simplicity and to avoid complex JSONPath parser, we use a basic property navigator
+			var fullJson = await _streamReader.ReadToEndAsync(ct);
+			if (string.IsNullOrEmpty(fullJson)) yield break;
+
+			using var doc = JsonDocument.Parse(fullJson);
+			var root = doc.RootElement;
+			
+			// Navigate to path (supporting simple dot notation for now)
+			var current = root;
+			var parts = _options.Path.Split('.', StringSplitOptions.RemoveEmptyEntries);
+			bool found = true;
+			foreach (var part in parts)
+			{
+				if (current.TryGetProperty(part, out var next))
+				{
+					current = next;
+				}
+				else
+				{
+					found = false;
+					break;
+				}
 			}
 
-			Columns = columns;
-			Schema = new Schema(fields, null);
-			_logger.LogInformation("JsonLStreamReader: Inferred schema with {Count} columns. Schema: {Schema}", columns.Count, Schema.ToString());
-		}
-		catch (JsonException ex)
-		{
-			throw new InvalidOperationException($"Failed to parse first line of JsonL as JSON: {ex.Message}", ex);
+			if (found)
+			{
+				if (current.ValueKind == JsonValueKind.Array)
+				{
+					foreach (var item in current.EnumerateArray())
+					{
+						yield return ToValue(item);
+					}
+				}
+				else
+				{
+					yield return ToValue(current);
+				}
+			}
 		}
 	}
 
-	private (Type ClrType, IArrowType ArrowType) InferTypes(JsonElement element)
+	private (Type ClrType, IArrowType ArrowType) InferTypes(string key, object? value)
 	{
-		return element.ValueKind switch
+		return value switch
 		{
-			JsonValueKind.Number => (typeof(double), DoubleType.Default),
-			JsonValueKind.True or JsonValueKind.False => (typeof(bool), BooleanType.Default),
-			JsonValueKind.Object => (typeof(object), InferStructType(element)),
-			JsonValueKind.Array => (typeof(object), InferListType(element)),
+			double => (typeof(double), DoubleType.Default),
+			bool => (typeof(bool), BooleanType.Default),
+			Dictionary<string, object?> d => (typeof(object), InferStructType(d)),
+			List<object?> l => (typeof(object), InferListType(l)),
 			_ => (typeof(string), StringType.Default)
 		};
 	}
 
-	private IArrowType InferStructType(JsonElement element)
+	private IArrowType InferStructType(Dictionary<string, object?> dict)
 	{
 		var fields = new List<Field>();
-		foreach (var prop in element.EnumerateObject())
+		foreach (var prop in dict)
 		{
-			var (_, arrowType) = InferTypes(prop.Value);
-			fields.Add(new Field(prop.Name, arrowType, true));
+			var (_, arrowType) = InferTypes(prop.Key, prop.Value);
+			fields.Add(new Field(prop.Key, arrowType, true));
 		}
 		return new StructType(fields);
 	}
 
-	private IArrowType InferListType(JsonElement element)
+	private IArrowType InferListType(List<object?> list)
 	{
-		var array = element.EnumerateArray();
-		if (array.Any())
+		if (list.Any())
 		{
-			var first = array.First();
-			var (_, itemArrowType) = InferTypes(first);
+			var first = list.First();
+			var (_, itemArrowType) = InferTypes("", first);
 			return new ListType(itemArrowType);
 		}
-		// Default to list of strings if empty
 		return new ListType(StringType.Default);
 	}
-
-	private string? _firstLine;
 
 	public async IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync(
 		[System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
@@ -143,20 +235,10 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader
 
 		var batch = new List<Dictionary<string, object?>>(batchSize);
 
-		if (_firstLine != null)
+		await foreach (var record in EnumerateRawRecordsAsync(ct))
 		{
-			batch.Add(ParseLineToDictionary(_firstLine));
-			_firstLine = null;
-		}
-
-		while (true)
-		{
-			ct.ThrowIfCancellationRequested();
-			var line = await _streamReader.ReadLineAsync(ct);
-			if (line == null) break;
-			if (string.IsNullOrWhiteSpace(line)) continue;
-
-			batch.Add(ParseLineToDictionary(line));
+			var dict = record as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["value"] = record };
+			batch.Add(dict);
 
 			if (batch.Count >= batchSize)
 			{
@@ -181,20 +263,9 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader
 		var batch = new object?[batchSize][];
 		var index = 0;
 
-		if (_firstLine != null)
+		await foreach (var record in EnumerateRawRecordsAsync(ct))
 		{
-			batch[index++] = ParseLine(_firstLine);
-			_firstLine = null;
-		}
-
-		while (true)
-		{
-			ct.ThrowIfCancellationRequested();
-			var line = await _streamReader.ReadLineAsync(ct);
-			if (line == null) break;
-			if (string.IsNullOrWhiteSpace(line)) continue;
-
-			batch[index++] = ParseLine(line);
+			batch[index++] = MapDictToRow(record as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["value"] = record });
 
 			if (index >= batchSize)
 			{
@@ -210,26 +281,34 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader
 		}
 	}
 
-	private object?[] ParseLine(string line)
+	private object?[] MapDictToRow(Dictionary<string, object?> dict)
 	{
-		using var doc = JsonDocument.Parse(line);
-		var root = doc.RootElement;
 		var row = new object?[Columns!.Count];
 
 		for (int i = 0; i < Columns.Count; i++)
 		{
 			var colName = Columns[i].Name;
-			if (root.TryGetProperty(colName, out var prop))
-			{
-				row[i] = ToValue(prop);
-			}
-			else
-			{
-				row[i] = null;
-			}
+			row[i] = GetValueFromFlattenedDict(dict, colName);
 		}
 
 		return row;
+	}
+
+	private object? GetValueFromFlattenedDict(Dictionary<string, object?> dict, string dotPath)
+	{
+		if (dotPath.IndexOf('.') == -1) return dict.GetValueOrDefault(dotPath);
+
+		var parts = dotPath.Split('.');
+		object? current = dict;
+		for (int i = 0; i < parts.Length; i++)
+		{
+			if (current is Dictionary<string, object?> d)
+			{
+				if (!d.TryGetValue(parts[i], out current)) return null;
+			}
+			else return null;
+		}
+		return current;
 	}
 
 	private Dictionary<string, object?> ParseLineToDictionary(string line)
