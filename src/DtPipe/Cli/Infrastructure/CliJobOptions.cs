@@ -44,4 +44,6 @@ public sealed class CliJobOptions
     public required Option<string[]> From { get; init; }
     public required Option<bool> Merge { get; init; }
     public required Option<string[]> Ref { get; init; }
+    public required Option<string?> SchemaSave { get; init; }
+    public required Option<string?> SchemaLoad { get; init; }
 }

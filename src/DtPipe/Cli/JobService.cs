@@ -149,7 +149,9 @@ public class JobService
 				IgnoreNulls = opts.IgnoreNulls,
 				From = opts.From,
 				Merge = opts.Merge,
-				Ref = opts.Ref
+				Ref = opts.Ref,
+				SchemaSave = opts.SchemaSave,
+				SchemaLoad = opts.SchemaLoad
 			};
 
 			Dictionary<string, JobDefinition> jobs;
@@ -244,11 +246,17 @@ public class JobService
 			var exportJobPath = parseResult.GetValue(opts.ExportJob);
 			if (!string.IsNullOrWhiteSpace(exportJobPath))
 			{
+				// Enrich each reader branch with its inferred schema (ProviderOptions.ColumnTypes).
+				// This allows --job to skip inference on subsequent runs.
+				var readerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>();
+				var optionsRegistry = _serviceProvider.GetRequiredService<OptionsRegistry>();
+				jobs = await EnrichJobsWithSchemaAsync(jobs, dagDefinition, rootCommand, readerFactories, optionsRegistry, ct);
+
 				if (jobs.Count > 1 || isDagYaml)
 					JobFileWriter.Write(exportJobPath, jobs);
 				else
 					JobFileWriter.Write(exportJobPath, jobs.Values.First());
-					
+
 				return;
 			}
 
@@ -586,5 +594,98 @@ public class JobService
 				}
 			}
 		}
+	}
+
+	/// <summary>
+	/// For each branch that has a file-based reader implementing <see cref="IColumnTypeInferenceCapable"/>,
+	/// runs schema inference and embeds the result in <see cref="JobDefinition.ProviderOptions"/>.
+	/// This enables <c>--job</c> to load the YAML and skip inference on subsequent runs.
+	/// </summary>
+	private static async Task<Dictionary<string, JobDefinition>> EnrichJobsWithSchemaAsync(
+		Dictionary<string, JobDefinition> jobs,
+		JobDagDefinition dagDefinition,
+		RootCommand rootCommand,
+		IEnumerable<IStreamReaderFactory> readerFactories,
+		OptionsRegistry optionsRegistry,
+		CancellationToken ct)
+	{
+		var result = new Dictionary<string, JobDefinition>(jobs);
+
+		foreach (var branch in dagDefinition.Branches)
+		{
+			if (!jobs.TryGetValue(branch.Alias, out var job)) continue;
+			if (string.IsNullOrEmpty(job.Input)) continue;
+
+			var factory = readerFactories.FirstOrDefault(
+				f => job.Input.StartsWith(f.ComponentName + ":", StringComparison.OrdinalIgnoreCase));
+			if (factory == null) continue;
+
+			try
+			{
+				// Re-parse branch args so per-branch options (e.g. --json-path) are correctly bound.
+				var branchPr = rootCommand.Parse(branch.Arguments);
+				var optType = factory.GetSupportedOptionTypes().FirstOrDefault();
+				if (optType != null)
+				{
+					var instance = optionsRegistry.Get(optType);
+					var cliOptions = (factory as ICliContributor)?.GetCliOptions() ?? System.Array.Empty<Option>();
+					DtPipe.Cli.Infrastructure.CliOptionBuilder.BindForType(optType, instance, branchPr,
+						cliOptions, isReaderScope: true);
+					optionsRegistry.RegisterByType(optType, instance);
+				}
+
+				// Strip the provider prefix so factory.Create() resolves the correct file path.
+				var cleanedInput = job.Input.StartsWith(factory.ComponentName + ":", StringComparison.OrdinalIgnoreCase)
+					? job.Input.Substring(factory.ComponentName.Length + 1)
+					: job.Input;
+				optionsRegistry.Register(new PipelineOptions { ConnectionString = cleanedInput });
+
+				// Open the reader to run inference and capture the full Arrow schema.
+				// This is safe for file-based readers (IColumnTypeInferenceCapable guard above).
+				await using var reader = factory.Create(optionsRegistry);
+				if (reader is not IColumnTypeInferenceCapable) continue;
+				await reader.OpenAsync(ct);
+
+				// Capture the complete Arrow schema (includes nested StructType, ListType, metadata).
+				var arrowSchema = (reader as IColumnarStreamReader)?.Schema;
+				if (arrowSchema is not { FieldsList: { Count: > 0 } }) continue;
+
+				var schemaJson = DtPipe.Core.Infrastructure.Arrow.ArrowSchemaSerializer.SerializeCompact(arrowSchema);
+
+				// Build provider-options dict: non-default reader options + full SchemaJson.
+				// Embedding all non-default options (e.g. Path) means --job needs no extra CLI flags.
+				var readerOptsDict = new Dictionary<string, object>();
+				if (optType != null)
+				{
+					var optInst = optionsRegistry.Get(optType);
+					object? defaultOptInst = null;
+					try { defaultOptInst = System.Activator.CreateInstance(optType); } catch { }
+
+					// Skip connection-string properties already captured in job.Input.
+					var skipProps = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+						{ "Jsonl", "Xml", "Csv", "File", "ConnectionString",
+						  "ColumnTypes", "SchemaJson" }; // will be set explicitly below
+
+					foreach (var prop in optType.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
+						.Where(p => p.CanRead && p.CanWrite && !skipProps.Contains(p.Name)))
+					{
+						var val = prop.GetValue(optInst);
+						var defaultVal = defaultOptInst != null ? prop.GetValue(defaultOptInst) : null;
+						if (val != null && !string.IsNullOrEmpty(val?.ToString()) && !Equals(val, defaultVal))
+							readerOptsDict[prop.Name] = val;
+					}
+				}
+				// Embed full Arrow schema — supersedes ColumnTypes for JSON/XML readers.
+				readerOptsDict["SchemaJson"] = schemaJson;
+
+				var providerOptions = new Dictionary<string, Dictionary<string, object>>(
+					job.ProviderOptions ?? new());
+				providerOptions[factory.ComponentName] = readerOptsDict;
+				result[branch.Alias] = job with { ProviderOptions = providerOptions };
+			}
+			catch { /* best-effort: never block the export */ }
+		}
+
+		return result;
 	}
 }

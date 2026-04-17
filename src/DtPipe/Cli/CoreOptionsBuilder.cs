@@ -50,6 +50,8 @@ internal static class CoreOptionsBuilder
         { "--ref",                CliPipelinePhase.Transformer | CliPipelinePhase.Processor },
         { "--from",               CliPipelinePhase.Global },
         { "--prefix",             CliPipelinePhase.Global },
+        { "--schema-save",        CliPipelinePhase.Global },
+        { "--schema-load",        CliPipelinePhase.Global },
     };
 
     public static CoreCliOptions Build(
@@ -154,6 +156,15 @@ internal static class CoreOptionsBuilder
         var prefixOption = new Option<string?>("--prefix") { Description = "Prefix for split files" };
         prefixOption.Aliases.Add("-p");
 
+        var schemaSaveOption = new Option<string?>("--schema-save")
+        {
+            Description = "Save discovered schema to a named .dtschema file (e.g. --schema-save erp-areas). Subsequent runs can use --schema-load to skip inference."
+        };
+        var schemaLoadOption = new Option<string?>("--schema-load")
+        {
+            Description = "Load column types from a named .dtschema file instead of running inference (e.g. --schema-load erp-areas)."
+        };
+
         var allList = new List<Option>
         {
             inputOption, queryOption, outputOption, connectionTimeoutOption, queryTimeoutOption, batchSizeOption,
@@ -162,7 +173,8 @@ internal static class CoreOptionsBuilder
             strategyOption, insertModeOption, tableOption, strictSchemaOption,
             noSchemaValidationOption, metricsPathOption, autoMigrateOption, sqlOption, aliasOption, sqlEngineOption,
             renameOption, dropOption, throttleOption, ignoreNullsOption,
-            mergeOption, refOption, fromOption, prefixOption
+            mergeOption, refOption, fromOption, prefixOption,
+            schemaSaveOption, schemaLoadOption
         };
 
         foreach (var opt in allList)
@@ -178,7 +190,7 @@ internal static class CoreOptionsBuilder
             finallyExecOption, strategyOption, insertModeOption, tableOption,
             strictSchemaOption, noSchemaValidationOption, metricsPathOption, autoMigrateOption, sqlOption,
             aliasOption, sqlEngineOption, renameOption, dropOption, throttleOption, ignoreNullsOption,
-            mergeOption, refOption, fromOption, prefixOption, allList);
+            mergeOption, refOption, fromOption, prefixOption, schemaSaveOption, schemaLoadOption, allList);
     }
 
     private static IEnumerable<CompletionItem> GetInputSuggestions(CompletionContext context, IEnumerable<IStreamReaderFactory>? factories)
@@ -320,5 +332,7 @@ public record CoreCliOptions(
     Option<string[]> Ref,
     Option<string[]> From,
     Option<string?> Prefix,
+    Option<string?> SchemaSave,
+    Option<string?> SchemaLoad,
     List<Option> AllOptions
 );

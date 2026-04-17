@@ -111,7 +111,9 @@ public static class RawJobBuilder
 				Drop = parseResult.GetValue(opts.Drop) ?? Array.Empty<string>(),
 				Rename = parseResult.GetValue(opts.Rename) ?? Array.Empty<string>(),
 				Sql = sql,
-				NoStats = parseResult.GetValue(opts.NoStats)
+				NoStats = parseResult.GetValue(opts.NoStats),
+				SchemaSave = parseResult.GetValue(opts.SchemaSave),
+				SchemaLoad = parseResult.GetValue(opts.SchemaLoad)
 			};
 
 			if (ParseDryRunFromArgs(Environment.GetCommandLineArgs()) > 0) job = job with { DryRun = true };

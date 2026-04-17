@@ -63,6 +63,12 @@ public record JobDefinition
 
 	/// <summary>Provider-specific options. Keyed by provider name (e.g. 'oracle-writer').</summary>
 	public Dictionary<string, Dictionary<string, object>>? ProviderOptions { get; init; }
+
+	/// <summary>Save discovered schema to a named .dtschema file after OpenAsync.</summary>
+	public string? SchemaSave { get; init; }
+
+	/// <summary>Load ColumnTypes from a named .dtschema file, bypassing schema inference.</summary>
+	public string? SchemaLoad { get; init; }
 }
 
 

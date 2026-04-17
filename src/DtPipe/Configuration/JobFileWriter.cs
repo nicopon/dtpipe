@@ -16,7 +16,6 @@ public static class JobFileWriter
 		.WithNamingConvention(HyphenatedNamingConvention.Instance)
 		.ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull | DefaultValuesHandling.OmitDefaults)
 		.WithAttributeOverride<JobDefinition>(j => j.NoStats, new YamlIgnoreAttribute())
-		.WithAttributeOverride<JobDefinition>(j => j.ProviderOptions, new YamlIgnoreAttribute())
 		.WithAttributeOverride<TransformerConfig>(t => t.Mask, new YamlIgnoreAttribute())
 		.WithAttributeOverride<TransformerConfig>(t => t.Fake, new YamlIgnoreAttribute())
 		.WithAttributeOverride<TransformerConfig>(t => t.Format, new YamlIgnoreAttribute())

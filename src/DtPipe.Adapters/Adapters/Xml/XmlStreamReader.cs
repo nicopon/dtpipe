@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using System.Threading.Channels;
 using System.Globalization;
 using DtPipe.Core.Infrastructure.Discovery;
+using DtPipe.Core.Infrastructure.Arrow;
 
 namespace DtPipe.Adapters.Xml;
 
@@ -19,7 +20,14 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 	private readonly XmlReaderOptions _options;
 	private readonly ILogger _logger;
 
-	private readonly XmlReaderSettings _xmlReaderSettings;
+	private static readonly XmlReaderSettings _xmlReaderSettings = new XmlReaderSettings
+	{
+		Async = true,
+		IgnoreComments = true,
+		IgnoreProcessingInstructions = true,
+		IgnoreWhitespace = true,
+		ConformanceLevel = ConformanceLevel.Fragment
+	};
 	private Stream? _stream;
 	private XmlReader? _xmlReader;
 	private readonly string[] _path = new string[256];
@@ -41,14 +49,6 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 		_filePath = filePath;
 		_options = options;
 		_logger = logger ?? NullLogger.Instance;
-		_xmlReaderSettings = new XmlReaderSettings 
-		{ 
-			Async = true, 
-			IgnoreWhitespace = true,
-			IgnoreComments = true,
-			IgnoreProcessingInstructions = true,
-			ConformanceLevel = ConformanceLevel.Fragment
-		};
 	}
 
 	public async Task OpenAsync(CancellationToken ct = default)
@@ -74,16 +74,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 		InitializePathMatcher();
 		_stream = new FragmentXmlStream(_stream);
 
-		var settings = new XmlReaderSettings
-		{
-			Async = false,
-			IgnoreComments = true,
-			IgnoreProcessingInstructions = true,
-			IgnoreWhitespace = true,
-			ConformanceLevel = ConformanceLevel.Fragment
-		};
-
-		_xmlReader = XmlReader.Create(_stream, settings);
+		_xmlReader = XmlReader.Create(_stream, _xmlReaderSettings);
 
 		InitializePathMatcher();
 
@@ -92,22 +83,66 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 		_isResetSupported = !string.IsNullOrEmpty(_filePath) && _filePath != "-";
 		await ResetReaderAsync(ct);
 		
-		// 1. Auto-discover types (Pass 1)
+		// Pass 1 (optional): auto-discover types from sample
 		if (_options.AutoColumnTypes)
 		{
-			var autoSampleCount = 100;
-			var inferred = await InferColumnTypesAsync(autoSampleCount, ct);
+			var inferred = await InferColumnTypesAsync(100, ct);
 			_autoAppliedTypes = inferred;
-			
-			// Reset for next pass
 			await ResetReaderAsync(ct);
 		}
 
-		// 2. Infer schema (Pass 2)
-		await InferSchemaAsync(ct);
-		
-		// 3. Reset for final data extraction (Pass 3)
-		await ResetReaderAsync(ct);
+		// Pass 2: build schema — priority: SchemaJson > TypeOverrides > inference
+		if (!string.IsNullOrWhiteSpace(_options.SchemaJson))
+		{
+			BuildSchemaFromArrowJson(_options.SchemaJson);
+			// reader is already positioned at 0 — no extra pass needed
+		}
+		else if (CanBuildSchemaFromTypeOverrides())
+		{
+			BuildSchemaFromTypeOverrides();
+		}
+		else
+		{
+			await InferSchemaAsync(ct);
+			await ResetReaderAsync(ct);
+		}
+	}
+
+	private void BuildSchemaFromArrowJson(string schemaJson)
+	{
+		var arrowSchema = DtPipe.Core.Infrastructure.Arrow.ArrowSchemaSerializer.Deserialize(schemaJson);
+		Schema  = arrowSchema;
+		// Map complex types to typeof(object) to match inference path — avoids ArrowSchemaFactory failures.
+		Columns = arrowSchema.FieldsList
+			.Select(f => new PipeColumnInfo(f.Name, GetSimplifiedClrType(f), f.IsNullable))
+			.ToList();
+		_logger.LogInformation("XmlStreamReader: Schema loaded from JSON ({Count} fields). Path: {Path}",
+			arrowSchema.FieldsList.Count, _options.Path);
+	}
+
+	/// <summary>
+	/// Returns true when the schema can be built directly from the declared column types,
+	/// skipping the file-scan inference pass. Requires all declared columns to be top-level
+	/// (no dot-path notation) so that the struct shape is fully known without reading the file.
+	/// </summary>
+	private bool CanBuildSchemaFromTypeOverrides()
+	{
+		return !_options.AutoColumnTypes
+			&& _typeOverrides != null
+			&& _typeOverrides.Count > 0
+			&& _typeOverrides.Keys.All(k => !k.Contains('.'));
+	}
+
+	private void BuildSchemaFromTypeOverrides()
+	{
+		var fields = new List<Field>();
+		foreach (var kvp in _typeOverrides!)
+		{
+			fields.Add(new Field(kvp.Key, ClrToArrowType(kvp.Value), true));
+		}
+		Columns = fields.Select(f => new PipeColumnInfo(f.Name, _typeOverrides[f.Name], true)).ToList();
+		Schema = new Schema(fields, null);
+		_logger.LogInformation("XmlStreamReader: Built schema from explicit column types ({Count} columns, single-pass mode).", fields.Count);
 	}
 
 	private async Task ResetReaderAsync(CancellationToken ct)
@@ -183,7 +218,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 		}
 	}
 
-	private async IAsyncEnumerable<object?> EnumerateRawRecordsAsync(CancellationToken ct)
+	private async IAsyncEnumerable<object?> EnumerateRawRecordsAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
 	{
 		if (_xmlReader == null) yield break;
 
@@ -232,38 +267,40 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 
 		Dictionary<string, object?>? merged = null;
 		int count = 0;
-		int maxSample = 1000;
+		const int maxSample = 1000;
+
+		// For STDIN we cannot reset after inference — buffer records so they can be replayed during data extraction.
+		if (!_isResetSupported)
+			_stdinBuffer = new List<Dictionary<string, object?>>(maxSample);
 
 		await foreach (var record in EnumerateRawRecordsAsync(ct))
 		{
 			var current = record as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["_value"] = record };
 			if (merged == null)
-			{
 				merged = new Dictionary<string, object?>(current, StringComparer.OrdinalIgnoreCase);
-			}
 			else
-			{
 				SchemaDiscoveryHelper.DeepMergeSchemas(merged, current);
-			}
+
+			_stdinBuffer?.Add(current);
 
 			count++;
 			if (count >= maxSample) break;
 		}
 
-		_firstNodeDict = merged;
-		UpdateSchemaFromFirstNode();
+		_mergedSchemaDict = merged;
+		UpdateSchemaFromMerged();
 	}
 
 
-	private void UpdateSchemaFromFirstNode()
+	private void UpdateSchemaFromMerged()
 	{
 		var fields = new List<Field>();
 		var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-		// 1. Add columns from the top-level keys of the first record
-		if (_firstNodeDict != null)
+		// 1. Add columns from the top-level keys of the merged schema record
+		if (_mergedSchemaDict != null)
 		{
-			foreach (var kvp in _firstNodeDict)
+			foreach (var kvp in _mergedSchemaDict)
 			{
 				var name = kvp.Key;
 				var sampleValue = kvp.Value;
@@ -323,9 +360,18 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 		return arrowType;
 	}
 
+	private static Type GetSimplifiedClrType(Field f)
+	{
+		return f.DataType switch
+		{
+			ListType or LargeListType or StructType or MapType => typeof(object),
+			_ => ArrowTypeMapper.GetClrTypeFromField(f)
+		};
+	}
+
 	private static IArrowType ResolveHintToArrowType(string hint) => hint.ToLowerInvariant() switch
 	{
-		"uuid" or "guid" => new FixedSizeBinaryType(16),
+		"uuid" or "guid" => ArrowTypeMapper.GetLogicalType(typeof(Guid)).ArrowType,
 		"int32" => Int32Type.Default,
 		"int64" => Int64Type.Default,
 		"double" => DoubleType.Default,
@@ -339,7 +385,9 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 
 	public IReadOnlyDictionary<string, string>? AutoAppliedTypes => _autoAppliedTypes;
 
-	private Dictionary<string, object?>? _firstNodeDict;
+	// For STDIN: records consumed during schema inference are buffered here and replayed during data extraction.
+	private List<Dictionary<string, object?>>? _stdinBuffer;
+	private Dictionary<string, object?>? _mergedSchemaDict;
 
 	public async IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync(
 		[System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
@@ -347,16 +395,19 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 		int batchSize = 10000;
 		var batch = new List<Dictionary<string, object?>>(batchSize);
 
-		// Only yield _firstNodeDict if we are NOT at the beginning of the stream (e.g. STDIN)
-		if (!_isResetSupported && _firstNodeDict != null)
+		// Drain STDIN buffer (records consumed during schema inference)
+		if (_stdinBuffer != null)
 		{
-			var dict = _firstNodeDict as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["_value"] = _firstNodeDict };
-			batch.Add(dict);
-			_firstNodeDict = null;
-		}
-		else
-		{
-			_firstNodeDict = null; // Re-read from beginning in loop
+			foreach (var buffered in _stdinBuffer)
+			{
+				batch.Add(buffered);
+				if (batch.Count >= batchSize)
+				{
+					yield return await Apache.Arrow.Serialization.ArrowSerializer.SerializeAsync(batch, Schema!);
+					batch.Clear();
+				}
+			}
+			_stdinBuffer = null;
 		}
 
 		await foreach (var record in EnumerateRawRecordsAsync(ct))
@@ -374,10 +425,8 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 		if (batch.Count > 0)
 		{
 			yield return await Apache.Arrow.Serialization.ArrowSerializer.SerializeAsync(batch, Schema!);
-			batch.Clear();
 		}
 	}
-
 
 	public async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(
 		int batchSize,
@@ -386,15 +435,20 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 		var batchData = new object?[batchSize][];
 		var index = 0;
 
-		// Only yield _firstNodeDict if we are NOT at the beginning of the stream
-		if (!_isResetSupported && _firstNodeDict != null)
+		// Drain STDIN buffer (records consumed during schema inference)
+		if (_stdinBuffer != null)
 		{
-			batchData[index++] = MapDictToRow(_firstNodeDict);
-			_firstNodeDict = null;
-		}
-		else
-		{
-			_firstNodeDict = null; 
+			foreach (var buffered in _stdinBuffer)
+			{
+				batchData[index++] = MapDictToRow(buffered);
+				if (index >= batchSize)
+				{
+					yield return new ReadOnlyMemory<object?[]>(batchData, 0, index);
+					batchData = new object?[batchSize][];
+					index = 0;
+				}
+			}
+			_stdinBuffer = null;
 		}
 
 		await foreach (var record in EnumerateRawRecordsAsync(ct))
@@ -624,7 +678,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 		if (clrType == typeof(bool)) return BooleanType.Default;
 		if (clrType == typeof(DateTime)) return TimestampType.Default;
 		if (clrType == typeof(DateTimeOffset)) return TimestampType.Default;
-		if (clrType == typeof(Guid)) return StringType.Default;
+		if (clrType == typeof(Guid)) return ArrowTypeMapper.GetLogicalType(typeof(Guid)).ArrowType;
 		return StringType.Default;
 	}
 

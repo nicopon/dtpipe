@@ -82,4 +82,18 @@ public sealed record PipelineOptions : IOptionSet
 	public int QueryTimeout { get; init; } = 0; // 0 = no timeout
 	public bool UnsafeQuery { get; init; } = false;
 	public string? LogPath { get; init; }
+
+	// --- Schema Persistence ---
+
+	/// <summary>
+	/// If set, saves the discovered schema to a named .dtschema file after OpenAsync.
+	/// Subsequent runs can use SchemaLoad to skip inference entirely.
+	/// </summary>
+	public string? SchemaSave { get; init; }
+
+	/// <summary>
+	/// If set, loads ColumnTypes from the named .dtschema file and injects them into
+	/// the reader's options before OpenAsync, bypassing schema inference.
+	/// </summary>
+	public string? SchemaLoad { get; init; }
 }

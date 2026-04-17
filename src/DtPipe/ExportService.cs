@@ -11,6 +11,9 @@ using System.Runtime.CompilerServices;
 using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Pipelines;
+using DtPipe.Configuration;
+using DtPipe.Core.Infrastructure.Arrow;
+using Apache.Arrow.Types;
 using DtPipe.Services;
 
 namespace DtPipe;
@@ -83,8 +86,39 @@ public class ExportService
 			_observer.ShowConnectionStatus(false, null);
 		}
 
+		// Load full Arrow schema from .dtschema file and inject into reader options (skips inference).
+		if (!string.IsNullOrEmpty(options.SchemaLoad))
+		{
+			var loadedSchema = SchemaStore.Load(options.SchemaLoad);
+			if (loadedSchema != null)
+				InjectSchemaJson(readerFactory, registry, ArrowSchemaSerializer.SerializeCompact(loadedSchema));
+			else
+				_logger.LogWarning("Schema file '{Name}' not found — falling back to inference.", options.SchemaLoad);
+		}
+
 		await using var reader = readerFactory.Create(registry);
 		await reader.OpenAsync(ct);
+
+		// Persist the full Arrow schema to a .dtschema file for future runs.
+		if (!string.IsNullOrEmpty(options.SchemaSave))
+		{
+			var schema = (reader as IColumnarStreamReader)?.Schema;
+			if (schema is { FieldsList: { Count: > 0 } })
+			{
+				SchemaStore.Save(options.SchemaSave, providerName, schema);
+				_logger.LogInformation("Schema saved: {Name}.dtschema ({Count} fields)", options.SchemaSave, schema.FieldsList.Count);
+			}
+			else if (reader.Columns is { Count: > 0 })
+			{
+				// Row-based reader (CSV): build an Arrow schema from PipeColumnInfo and save.
+				var fields = reader.Columns
+					.Select(c => ArrowTypeMapper.GetField(c.Name, c.ClrType, c.IsNullable))
+					.ToList();
+				var rowSchema = new Apache.Arrow.Schema(fields, null);
+				SchemaStore.Save(options.SchemaSave, providerName, rowSchema);
+				_logger.LogInformation("Schema saved: {Name}.dtschema ({Count} fields)", options.SchemaSave, fields.Count);
+			}
+		}
 
 		// Show auto-applied types panel when --auto-column-types was set
 		if (!silenceInternal && reader is IColumnTypeInferenceCapable autoCapable
@@ -312,6 +346,71 @@ public class ExportService
 				_observer.LogError(hookEx);
 			}
 		}
+	}
+
+	/// <summary>
+	/// Injects a compact Arrow schema JSON string into the reader's registered options
+	/// via <c>SchemaJson</c> (preferred) or falls back to <c>ColumnTypes</c> for CSV readers.
+	/// </summary>
+	private static void InjectSchemaJson(IStreamReaderFactory readerFactory, OptionsRegistry registry, string schemaJson)
+	{
+		var optType = readerFactory.GetSupportedOptionTypes().FirstOrDefault();
+		if (optType == null) return;
+		var opts = registry.Get(optType);
+
+		// Try SchemaJson first (JSON/XML readers with full structure support).
+		var schemaJsonProp = optType.GetProperty("SchemaJson");
+		if (schemaJsonProp != null && schemaJsonProp.CanWrite
+			&& string.IsNullOrEmpty(schemaJsonProp.GetValue(opts) as string))
+		{
+			schemaJsonProp.SetValue(opts, schemaJson);
+			registry.RegisterByType(optType, opts);
+			return;
+		}
+
+		// Fallback for CSV (flat, row-based): extract scalar ColumnTypes from the schema.
+		var columnTypesProp = optType.GetProperty("ColumnTypes");
+		if (columnTypesProp != null && columnTypesProp.CanWrite
+			&& string.IsNullOrEmpty(columnTypesProp.GetValue(opts) as string))
+		{
+			try
+			{
+				var schema = ArrowSchemaSerializer.Deserialize(schemaJson);
+				var hints = schema.FieldsList
+					.Select(f => (f.Name, Hint: ArrowTypeToColumnTypeHint(f)))
+					.Where(x => !string.IsNullOrEmpty(x.Hint))
+					.Select(x => $"{x.Name}:{x.Hint}");
+				var columnTypes = string.Join(",", hints);
+				if (!string.IsNullOrEmpty(columnTypes))
+				{
+					columnTypesProp.SetValue(opts, columnTypes);
+					registry.RegisterByType(optType, opts);
+				}
+			}
+			catch { /* best-effort */ }
+		}
+	}
+
+	/// <summary>Extracts a --column-types hint string for a field (scalars only; null for complex types).</summary>
+	private static string? ArrowTypeToColumnTypeHint(Field field)
+	{
+		// Check arrow.uuid metadata first
+		if (field.Metadata?.TryGetValue("ARROW:extension:name", out var ext) == true && ext == "arrow.uuid")
+			return "uuid";
+		return field.DataType switch
+		{
+			StringType     => "string",
+			Int32Type      => "int32",
+			Int64Type      => "int64",
+			FloatType      => "float32",
+			DoubleType     => "float64",
+			Decimal128Type => "decimal",
+			BooleanType    => "bool",
+			Date32Type     => "date32",
+			Date64Type     => "datetime",
+			TimestampType  => "datetimeoffset",
+			_              => null
+		};
 	}
 
 	private static Schema EvolveSchema(Schema original, IReadOnlyList<PipeColumnInfo> transformed)

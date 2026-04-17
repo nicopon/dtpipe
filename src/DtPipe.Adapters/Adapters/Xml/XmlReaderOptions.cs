@@ -31,4 +31,8 @@ public class XmlReaderOptions : IOptionSet
 
 	[Description("Automatically infer and apply column types from the first 100 rows (no --dry-run required)")]
 	public bool AutoColumnTypes { get; set; } = false;
+
+	/// <summary>Full Arrow schema as compact JSON (set by --schema-load or --export-job; bypasses all inference).</summary>
+	[Description("Full Arrow schema as compact JSON — set automatically by --schema-load or --export-job.")]
+	public string SchemaJson { get; set; } = "";
 }

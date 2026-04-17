@@ -306,6 +306,24 @@ public static class ArrowSerializer
                 return (val, builder) => ((DurationArray.Builder)builder).Append((TimeSpan)val);
             }
 
+            // Numeric types: use Convert.ToXxx to safely coerce across numeric widths/kinds
+            // (e.g. long→double, int→long) without the InvalidCastException that unbox-then-cast
+            // throws when the boxed type differs from the target type.
+            if (underlyingType == typeof(double))
+                return (val, builder) => ((DoubleArray.Builder)builder).Append(Convert.ToDouble(val));
+            if (underlyingType == typeof(float))
+                return (val, builder) => ((FloatArray.Builder)builder).Append(Convert.ToSingle(val));
+            if (underlyingType == typeof(long))
+                return (val, builder) => ((Int64Array.Builder)builder).Append(Convert.ToInt64(val));
+            if (underlyingType == typeof(int))
+                return (val, builder) => ((Int32Array.Builder)builder).Append(Convert.ToInt32(val));
+            if (underlyingType == typeof(short))
+                return (val, builder) => ((Int16Array.Builder)builder).Append(Convert.ToInt16(val));
+            if (underlyingType == typeof(byte))
+                return (val, builder) => ((UInt8Array.Builder)builder).Append(Convert.ToByte(val));
+            if (underlyingType == typeof(sbyte))
+                return (val, builder) => ((Int8Array.Builder)builder).Append(Convert.ToSByte(val));
+
             var builderType = GetBuilderType(_arrowType);
             if (builderType == null) throw new NotSupportedException($"No builder found for {_arrowType.GetType().Name}");
 

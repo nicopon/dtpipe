@@ -156,7 +156,9 @@ public class LinearPipelineService
             NoSchemaValidation = job.NoSchemaValidation,
             NoStats = job.NoStats,
             MetricsPath = job.MetricsPath,
-            AutoMigrate = job.AutoMigrate ?? false
+            AutoMigrate = job.AutoMigrate ?? false,
+            SchemaSave = job.SchemaSave,
+            SchemaLoad = job.SchemaLoad
         };
 
         _registry.Register(pipelineOptions);
