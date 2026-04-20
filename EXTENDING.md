@@ -13,8 +13,7 @@ The solution is split into three layers:
 |---|---|
 | `DtPipe.Core` | Interfaces, models, pipeline engine — **no external deps** |
 | `DtPipe.Adapters` | All row-based and columnar provider implementations |
-| `DtPipe.Processors` | C# side of SQL stream processors (DuckDB, Shared FFI) |
-| `DtPipe.Processors.DataFusion` | Native Rust bridge for the DataFusion engine |
+| `DtPipe.Processors` | C# side of SQL stream processors (DuckDB) |
 | `DtPipe` | CLI main entry point, DI wiring, and standard Transformers |
 
 ### Where to put new code
@@ -251,9 +250,7 @@ dotnet test DtPipe.sln
 
 ---
 
-## Native Engine Integration (FFI)
-
-DtPipe targets **Zero-Copy** performance when using SQL processors like DataFusion or DuckDB. This is achieved via the **Arrow C Data Interface**.
+DtPipe targets **Zero-Copy** performance when using SQL processors like DuckDB. This is achieved via the **Arrow C Data Interface**.
 
 ### IColumnarStreamReader
 Processors that can handle raw Arrow streams should implement `IColumnarStreamReader`. Unlike `IStreamReader` (which is row-based), this interface yields `RecordBatch` objects directly. For high-performance adapters, consider implementing this interface to provide direct Arrow access.

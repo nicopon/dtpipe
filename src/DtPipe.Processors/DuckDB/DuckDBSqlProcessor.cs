@@ -27,6 +27,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
     private readonly ILogger<DuckDBSqlProcessor> _logger;
 
     // Input-side: CArrowArrayStream structs allocated on the unmanaged heap for DuckDB to hold.
+    private readonly List<IArrowArrayStream> _activeStreams = new();
     private readonly List<IntPtr> _allocatedPointers = new();
 
     private DuckDBConnection? _conn;
@@ -66,14 +67,6 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
 
             using (var cmd = _conn.CreateCommand())
             {
-                // Export Arrow extension types faithfully (UUID → FixedSizeBinary(16)+arrow.uuid
-                // instead of the default lossy Utf8). Requires DuckDB >= v1.2.0; bundled v1.5.0.
-                cmd.CommandText = "SET arrow_lossless_conversion = true";
-                await cmd.ExecuteNonQueryAsync(ct);
-            }
-
-            using (var cmd = _conn.CreateCommand())
-            {
                 // duckdb_arrow_scan (used to register CDI streaming sources) declares filter_pushdown=true,
                 // which causes DuckDB's optimizer to remove Filter operators from the plan trusting that
                 // the scan will apply them. But the C API wrapper (FactoryGetNext) ignores ArrowStreamParameters
@@ -81,6 +74,10 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
                 // Disabling filter_pushdown forces DuckDB to keep Filter operators in the plan where they
                 // are correctly executed after the scan. This is the right behaviour for opaque CDI streams.
                 cmd.CommandText = "SET disabled_optimizers='filter_pushdown'";
+                await cmd.ExecuteNonQueryAsync(ct);
+
+                // Export Arrow extension types faithfully (UUID -> FixedSizeBinary(16)+arrow.uuid)
+                cmd.CommandText = "SET arrow_lossless_conversion = true";
                 await cmd.ExecuteNonQueryAsync(ct);
             }
 
@@ -106,6 +103,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
 
             _logger.LogDebug("DuckDBSqlProcessor: Inspecting schema from prepared statement...");
             _resultSchema = InspectSchemaFromStatement();
+
             _columns = _resultSchema.FieldsList
                 .Select(f => new PipeColumnInfo(f.Name, ArrowTypeMapper.GetClrTypeFromField(f), f.IsNullable))
                 .ToList();
@@ -134,7 +132,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
             batches.Add(batch);
 
         var stream = new StaticArrowStream(schema, batches);
-        RegisterArrowStream(alias, stream);
+        await RegisterArrowStreamAsync(alias, stream, schema, ct);
     }
 
     // Registers the main source as a streaming Arrow scan in DuckDB (zero-copy).
@@ -146,24 +144,74 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
             ?? throw new Exception($"Arrow channel '{channelAlias}' not found");
 
         var stream = new ChannelArrowStream(schema, channelTuple.Channel.Reader, _logger, ct);
-        RegisterArrowStream(alias, stream);
+        await RegisterArrowStreamAsync(alias, stream, schema, ct);
     }
 
-    private void RegisterArrowStream(string alias, IArrowArrayStream stream)
+    private static string? GetDuckDBCastForExtension(string extensionName)
     {
+        return extensionName switch
+        {
+            "arrow.uuid" => "UUID",
+            "arrow.json" => "JSON",
+            "arrow.bool8" => "BOOLEAN",
+            _ => null
+        };
+    }
+
+    private async Task RegisterArrowStreamAsync(string alias, IArrowArrayStream stream, Schema schema, CancellationToken ct)
+    {
+        var needsView = false;
+        foreach (var f in schema.FieldsList)
+        {
+            if (f.HasMetadata && f.Metadata.TryGetValue("ARROW:extension:name", out var ext))
+            {
+                if (GetDuckDBCastForExtension(ext) != null)
+                {
+                    needsView = true;
+                }
+                else if (ext != "arrow.opaque" && ext != "arrow.parquet.variant")
+                {
+                    _logger.LogWarning("DuckDBSqlProcessor: Unhandled canonical Arrow extension '{Extension}' on field '{Field}'. Falling back to physical type.", ext, f.Name);
+                }
+            }
+        }
+
+        string scanAlias = needsView ? $"{alias}__raw_cdi" : alias;
+
         unsafe
         {
+            _activeStreams.Add(stream);
             var ffiStreamPtr = (CArrowArrayStream*)Marshal.AllocHGlobal(Marshal.SizeOf<CArrowArrayStream>());
             _allocatedPointers.Add((IntPtr)ffiStreamPtr);
             CArrowArrayStreamExporter.ExportArrayStream(stream, ffiStreamPtr);
 
-            if (DuckDBArrowNativeMethods.DuckDBArrowScan(_conn!.NativeConnection, alias, ffiStreamPtr) != DuckDBState.Success)
+            if (DuckDBArrowNativeMethods.DuckDBArrowScan(_conn!.NativeConnection, scanAlias, ffiStreamPtr) != DuckDBState.Success)
             {
+                _activeStreams.Remove(stream);
                 CArrowArrayStreamImporter.ImportArrayStream(ffiStreamPtr).Dispose();
                 _allocatedPointers.Remove((IntPtr)ffiStreamPtr);
                 Marshal.FreeHGlobal((IntPtr)ffiStreamPtr);
                 throw new Exception($"Failed to register Arrow stream scan for '{alias}'");
             }
+        }
+
+        if (needsView)
+        {
+            var columns = schema.FieldsList.Select(f => {
+                if (f.HasMetadata && f.Metadata.TryGetValue("ARROW:extension:name", out var ext))
+                {
+                    var castType = GetDuckDBCastForExtension(ext);
+                    if (castType != null)
+                        return $"CAST(\"{f.Name}\" AS {castType}) AS \"{f.Name}\"";
+                }
+                return $"\"{f.Name}\"";
+            });
+            var viewSql = $"CREATE VIEW \"{alias}\" AS SELECT {string.Join(", ", columns)} FROM \"{scanAlias}\"";
+            
+            _logger.LogDebug("DuckDBSqlProcessor: Restoring Arrow extension semantics via semantic view '{Alias}'", alias);
+            using var cmd = _conn!.CreateCommand();
+            cmd.CommandText = viewSql;
+            await cmd.ExecuteNonQueryAsync(ct);
         }
     }
 
@@ -175,8 +223,10 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
     {
         if (DuckDBArrowNativeMethods.DuckDBPrepare(_conn!.NativeConnection, _query, out var stmt) != DuckDBState.Success)
         {
+            var errPtr = DuckDBArrowNativeMethods.DuckDBPrepareError(stmt);
+            var msg = errPtr != IntPtr.Zero ? Marshal.PtrToStringUTF8(errPtr) : "unknown error";
             stmt.Dispose();
-            throw new Exception($"DuckDB prepare failed for query: {_query}");
+            throw new Exception($"DuckDB prepare failed for query: {_query}. Error: {msg}");
         }
         _stmt = stmt;
     }
@@ -324,7 +374,12 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
 
         foreach (var ptr in _allocatedPointers)
             Marshal.FreeHGlobal(ptr);
+
+        foreach (var stream in _activeStreams)
+            stream.Dispose();
+
         _allocatedPointers.Clear();
+        _activeStreams.Clear();
 
         _conn?.Dispose();
     }
@@ -337,7 +392,12 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
 
         foreach (var ptr in _allocatedPointers)
             Marshal.FreeHGlobal(ptr);
+
+        foreach (var stream in _activeStreams)
+            stream.Dispose();
+
         _allocatedPointers.Clear();
+        _activeStreams.Clear();
 
         if (_conn is not null) { await _conn.DisposeAsync(); _conn = null; }
     }

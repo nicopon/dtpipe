@@ -72,21 +72,6 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-if ($env:DTPIPE_EXPERIMENTAL -eq "1") {
-    Write-Host ""
-    Write-Host "Building DataFusion native bridge (DTPIPE_EXPERIMENTAL=1)..." -ForegroundColor Yellow
-    $env:CARGO_BUILD_PROFILE = "release"
-    & "$ScriptDir\build_datafusion_bridge.ps1"
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "DataFusion bridge build failed."
-        exit $LASTEXITCODE
-    }
-} else {
-    Write-Host ""
-    Write-Host "Skipping DataFusion native bridge (experimental feature)." -ForegroundColor Yellow
-    Write-Host "  Set `$env:DTPIPE_EXPERIMENTAL = '1' then run build.ps1 to enable it."
-}
-
 Write-Host ""
 Write-Host "Performing a clean full rebuild..." -ForegroundColor Yellow
 dotnet clean "DtPipe.sln" -c Release

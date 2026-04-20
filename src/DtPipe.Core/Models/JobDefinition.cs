@@ -13,7 +13,7 @@ public record JobDefinition
 	public int BatchSize { get; init; } = 50_000;
 
     /// <summary>
-    /// The transformation logic to apply if using a processor engine (e.g. DataFusion SQL).
+    /// The transformation logic to apply if using a processor engine (e.g. DuckDB SQL).
     /// </summary>
     public string? Sql { get; init; }
 
@@ -69,6 +69,29 @@ public record JobDefinition
 
 	/// <summary>Load ColumnTypes from a named .dtschema file, bypassing schema inference.</summary>
 	public string? SchemaLoad { get; init; }
+
+	// --- Universal Reader Options (per-branch, apply to the branch's reader) ---
+
+	/// <summary>Navigation path in the source: dot-path for JSON (e.g. "items.data"), XPath for XML (e.g. "//Record").</summary>
+	public string? Path { get; init; }
+
+	/// <summary>Explicit column types, e.g. "Id:uuid,Count:int64,Active:bool".</summary>
+	public string? ColumnTypes { get; init; }
+
+	/// <summary>Automatically infer and apply column types from the first sample rows.</summary>
+	public bool AutoColumnTypes { get; init; } = false;
+
+	/// <summary>Maximum rows to sample for schema inference (0 = reader default).</summary>
+	public int MaxSample { get; init; } = 0;
+
+	/// <summary>File encoding (e.g., UTF-8, ISO-8859-1). Defaults to UTF-8.</summary>
+	public string? Encoding { get; init; }
+
+	/// <summary>
+	/// Full Arrow schema as compact JSON. Set by --export-job; consumed by --job to skip inference.
+	/// Not a CLI flag — managed exclusively via --schema-save / --schema-load / --export-job.
+	/// </summary>
+	public string? Schema { get; init; }
 }
 
 

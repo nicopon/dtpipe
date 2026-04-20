@@ -96,4 +96,21 @@ public sealed record PipelineOptions : IOptionSet
 	/// the reader's options before OpenAsync, bypassing schema inference.
 	/// </summary>
 	public string? SchemaLoad { get; init; }
+
+	// --- Universal Reader Options (per-branch) ---
+
+	/// <summary>Navigation path in the source (dot-path for JSON, XPath for XML).</summary>
+	public string? Path { get; init; }
+
+	/// <summary>Explicit column types, e.g. "Id:uuid,Count:int64".</summary>
+	public string? ColumnTypes { get; init; }
+
+	/// <summary>Automatically infer and apply column types from the first sample rows.</summary>
+	public bool AutoColumnTypes { get; init; } = false;
+
+	/// <summary>Maximum rows to sample for schema inference (0 = reader default).</summary>
+	public int MaxSample { get; init; } = 0;
+
+	/// <summary>File encoding (e.g., UTF-8, ISO-8859-1).</summary>
+	public string? Encoding { get; init; }
 }

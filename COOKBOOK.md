@@ -263,54 +263,24 @@ dtpipe \
   -o "enriched.parquet"
 ```
 
-#### Choosing a SQL Engine
+#### SQL Dialect (DuckDB)
 
-By default, DtPipe uses **DuckDB** for `--sql` processing. Use `--sql-engine datafusion` or `DTPIPE_SQL_ENGINE=datafusion` to switch to DataFusion (experimental).
+DuckDB uses standard SQL syntax. For nested data structures (Structs in Arrow, Objects in JSONL), use dot notation:
 
-| Feature | **DuckDB (Default)** | **DataFusion (Experimental)** |
-| :--- | :--- | :--- |
-| **Availability** | Always available — no build step. | Requires `./build_experimental.sh` (Rust toolchain needed). |
-| **SQL dialect** | Standard SQL, PostgreSQL-compatible, rich function library. | Good coverage, some limitations (e.g. window functions in subqueries). |
-| **Testability** | Queries work 1:1 in DuckDB CLI or any BI tool. | Engine-specific — only testable inside DtPipe. |
-| **Output path** | DataChunk → Arrow conversion on output (copy). | Arrow-native end-to-end (zero-copy output). |
-| **Best for** | All typical ETL/transformation workloads. | High-throughput pipelines (>10M rows) where zero-copy output matters. |
-
-```bash
-# Use DataFusion for a specific branch (requires experimental build)
-dtpipe \
-  -i customers.parquet --alias customers \
-  -i orders.csv --alias orders \
-  --from orders --ref customers \
-  --sql-engine datafusion \
-  --sql "SELECT o.*, c.name FROM orders o JOIN customers c ON o.customer_id = c.id" \
-  -o result.parquet
-```
-
-> **Note:** To verify which engines are available in your build: `dtpipe sql-engines`
-
-#### SQL Dialect Differences (Nested Data)
-
-When working with nested structures (Structs in Arrow, Objects in JSONL), the engines use different syntax for field access:
-
-| Feature | **DataFusion** | **DuckDB** |
-| :--- | :--- | :--- |
-| **Field Access** | `column['field']` | `column.field` |
-| **Nested Access** | `col['nested']['field']` | `col.nested.field` |
-| **Quoting** | Optional for common names | Highly recommended for all identifiers |
+| Feature | **DuckDB Syntax** |
+| :--- | :--- |
+| **Field Access** | `column.field` |
+| **Nested Access** | `col.nested.field` |
+| **Quoting** | Highly recommended for all identifiers |
 
 **Example (JSONL / Nested Structs):**
 
 ```bash
-# DataFusion Syntax
 dtpipe -i data.jsonl --alias m \
-  --sql "SELECT m.user['id'], m.meta['details']['code'] FROM m"
-
-# DuckDB Syntax
-dtpipe -i data.jsonl --alias m --sql-engine duckdb \
   --sql "SELECT m.user.id, m.meta.details.code FROM m"
 ```
 
-> **Tip:** If a column name is a reserved SQL keyword (like `group`, `order`), always wrap it in double quotes: `"group".name` or `"group"['id']`.
+> **Tip:** If a column name is a reserved SQL keyword (like `group`, `order`), always wrap it in double quotes: `"group".name`.
 
 ---
 
@@ -345,14 +315,14 @@ cat server_logs.jsonl | \
 ```
 
 ### Parsing Large XML Files (Streaming)
-You can parse massive XML files using an XPath-like selector without loading the entire document into memory. Use `--xml-auto-column-types` to automatically discover all fields and types in a sparse XML.
+You can parse massive XML files using an XPath-like selector without loading the entire document into memory. Use `--auto-column-types` to automatically discover all fields and types in a sparse XML.
 
 ```bash
 # Auto-discover schema and types, then export to PG
 cat catalog.xml | \
   dtpipe -i xml \
-  --xml-path "//Product" \
-  --xml-auto-column-types \
+  --path "//Product" \
+  --auto-column-types \
   -o "pg:Host=localhost;Database=prod" \
   --table "Products" --strategy Upsert
 ```
@@ -362,7 +332,7 @@ cat catalog.xml | \
 By default, **DtPipe preserves the document hierarchy**. Unlike CSVs, nested XML or JSON elements are not automatically flattened into the top-level schema. They are instead represented as structured Arrow `StructType` or `ListType` columns.
 
 ##### 1. Relative vs Absolute Paths
-When using `--xml-column-types`, all paths are **relative to the record node** matched by your `--xml-path`.
+When using `--column-types`, all paths are **relative to the record node** matched by your `--path`.
 
 ```xml
 <!-- data.xml -->
@@ -376,7 +346,7 @@ When using `--xml-column-types`, all paths are **relative to the record node** m
 </Records>
 ```
 
-If you use `--xml-path "//User"`, then:
+If you use `--path "//User"`, then:
 - Valid path: `Id:int32`
 - Valid path: `Profile.Email:string`
 - ❌ Invalid path: `User.Id` (redundant)
@@ -385,7 +355,7 @@ If you use `--xml-path "//User"`, then:
 If your target destination (like a CSV file or a standard SQL table) requires a flat structure, you must explicitly "pull" the fields to the top level using a SQL transformer:
 
 ```bash
-dtpipe -i data.xml --xml-path "//User" \
+dtpipe -i data.xml --path "//User" \
   --sql "SELECT Id, Profile.Email AS Email FROM row" \
   -o flat_users.csv
 ```

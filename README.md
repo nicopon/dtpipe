@@ -134,9 +134,9 @@ Adjust how DtPipe pulls data from the source.
 | `--connection-timeout`| `30` | Connection timeout in seconds. |
 | `--query-timeout` | `0` | Timeout in seconds (0 = no timeout). |
 | `--unsafe-query` | | Allow non-SELECT queries (e.g. EXEC stored procs). |
-| **CSV** | `--csv-separator ","` | Set separator, header usage, or [explicit typing](#1-connection-strings). |
-| **XML** | `--xml-path "//Item"`| Set record selector and [hierarchical typing](./COOKBOOK.md#parsing-large-xml-files-streaming). |
-| **JSONL**| `--jsonl-encoding` | Handle [structured JSON objects](./COOKBOOK.md#streaming-json-lines-to-apache-arrow) and encoding. |
+| **CSV** | `--csv-separator ","` | Set separator and header usage. |
+| **XML** | `--path "//Item"` | Set record selector. See [hierarchical typing](./COOKBOOK.md#parsing-large-xml-files-streaming). |
+| **JSONL/CSV/XML** | `--encoding ISO-8859-1`, `--column-types "Id:uuid"`, `--path items` | Universal text-reader options (encoding, explicit types, navigation path). |
 
 #### 🧪 Data Transformation (Mutations)
 Modify the content of your rows.
@@ -240,7 +240,6 @@ dtpipe \
 | `--from [ALIAS[,ALIAS...]]` | Start a processor or fan-out branch. Accepts one or more comma-separated streaming aliases. Fan-out consumers use a single alias; multi-stream processors use multiple. |
 | `--ref [ALIAS[,ALIAS...]]` | Materialized reference sources for lookup/join (preloaded into memory, comma-separated). Used with `--sql` for JOIN queries. |
 | `--sql "[QUERY]"` | SQL query to execute on the upstream sources. Default engine: DuckDB. |
-| `--sql-engine [ENGINE]` | Choose engine for `--sql`: `duckdb` (default — standard SQL, no build step) or `datafusion` (experimental — zero-copy Arrow output, requires `./build_experimental.sh`). |
 | `--merge` | UNION ALL processor: concatenates all `--from` streams in order. Requires at least 2 streaming sources. |
 
 ---

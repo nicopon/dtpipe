@@ -16,7 +16,7 @@ public static class CliPipelineRules
     /// </summary>
     public static readonly HashSet<string> StartRules = new(StringComparer.OrdinalIgnoreCase)
     {
-        "--job", "--help", "--version", "inspect", "providers", "sql-engines", "completion", "secret",
+        "--job", "--help", "--version", "inspect", "providers", "completion", "secret",
         "-i", "--input", "--sql", "--from"
     };
 
@@ -107,7 +107,7 @@ public static class CliPipelineRules
     /// <summary>
     /// Value-bearing processor mode flags. Presence of one of these flags in branch args identifies
     /// the processor type; the following token is the processor's primary argument
-    /// (e.g. <c>--sql "&lt;query&gt;"</c> activates the SQL/DataFusion processor).
+    /// (e.g. <c>--sql "&lt;query&gt;"</c> activates the SQL processor).
     /// </summary>
     public static readonly HashSet<string> ValueProcessorFlags = new(StringComparer.OrdinalIgnoreCase) { "--sql" };
 

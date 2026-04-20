@@ -24,6 +24,9 @@ internal static partial class DuckDBArrowNativeMethods
     internal static partial DuckDBState DuckDBPrepare(
         DuckDBNativeConnection conn, string query, out DuckDBPreparedStatement stmt);
 
+    [LibraryImport(DuckDbLibrary, EntryPoint = "duckdb_prepare_error")]
+    internal static partial IntPtr DuckDBPrepareError(DuckDBPreparedStatement stmt);
+
     // ── SCHEMA FROM PREPARED STATEMENT (before any execution) ────────────────────────
 
     [LibraryImport(DuckDbLibrary, EntryPoint = "duckdb_prepared_statement_column_count")]

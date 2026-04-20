@@ -32,16 +32,6 @@
     <None Include="../../README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
-  <!-- Native DataFusion bridge: declared here (not only in DtPipe.Processors) so that
-       PublishSingleFile + IncludeNativeLibrariesForSelfExtract can embed them.
-       CopyToPublishDirectory on None items in referenced projects does not propagate
-       transitively, so we redeclare them in the publishing project. -->
-  <ItemGroup>
-    <None Include="$(MSBuildThisFileDirectory)../DtPipe.Processors/runtimes/$(RuntimeIdentifier)/native/*" Link="%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" Condition="'$(RuntimeIdentifier)' != ''" />
-    <!-- Fallback to including all if RID is not specified (e.g. for IDE support/NuGet packing) -->
-    <None Include="$(MSBuildThisFileDirectory)../DtPipe.Processors/runtimes/**/native/*" Link="runtimes/%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" Condition="'$(RuntimeIdentifier)' == ''" />
-  </ItemGroup>
-
   <ItemGroup>
     <ProjectReference Include="../DtPipe.Core/DtPipe.Core.csproj" />
     <ProjectReference Include="../DtPipe.Adapters/DtPipe.Adapters.csproj" />

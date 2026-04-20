@@ -112,8 +112,13 @@ public static class RawJobBuilder
 				Rename = parseResult.GetValue(opts.Rename) ?? Array.Empty<string>(),
 				Sql = sql,
 				NoStats = parseResult.GetValue(opts.NoStats),
-				SchemaSave = parseResult.GetValue(opts.SchemaSave),
-				SchemaLoad = parseResult.GetValue(opts.SchemaLoad)
+				SchemaSave = parseResult.GetValue(opts.SchemaSave)?.FirstOrDefault(),
+				SchemaLoad = parseResult.GetValue(opts.SchemaLoad)?.FirstOrDefault(),
+				Path = parseResult.GetValue(opts.Path)?.FirstOrDefault(),
+				ColumnTypes = parseResult.GetValue(opts.ColumnTypes)?.FirstOrDefault(),
+				AutoColumnTypes = parseResult.GetValue(opts.AutoColumnTypes),
+				MaxSample = parseResult.GetValue(opts.MaxSample) is { Length: > 0 } ms ? ms[0] : 0,
+				Encoding = parseResult.GetValue(opts.Encoding)?.FirstOrDefault()
 			};
 
 			if (ParseDryRunFromArgs(Environment.GetCommandLineArgs()) > 0) job = job with { DryRun = true };

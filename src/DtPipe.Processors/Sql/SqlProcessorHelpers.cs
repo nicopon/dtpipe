@@ -4,8 +4,8 @@ using DtPipe.Core.Infrastructure.Arrow;
 namespace DtPipe.Processors.Sql;
 
 /// <summary>
-/// Shared helpers used by both <see cref="DataFusion.DataFusionProcessor"/> and
-/// <see cref="DuckDB.DuckDBSqlProcessor"/> to avoid code duplication.
+/// Shared helpers used by <see cref="DuckDB.DuckDBSqlProcessor"/>
+/// to avoid code duplication.
 /// </summary>
 internal static class SqlProcessorHelpers
 {

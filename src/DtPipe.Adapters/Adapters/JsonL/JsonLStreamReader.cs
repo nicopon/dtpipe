@@ -44,11 +44,11 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 
 	public async Task OpenAsync(CancellationToken ct = default)
 	{
-		if (!string.IsNullOrWhiteSpace(_options.SchemaJson))
+		if (!string.IsNullOrWhiteSpace(_options.Schema))
 		{
 			// Highest priority: full Arrow schema provided (from --schema-load or --export-job YAML).
 			// Captures complete structure including nested StructType / ListType.
-			BuildSchemaFromArrowJson(_options.SchemaJson);
+			BuildSchemaFromArrowJson(_options.Schema);
 			await ResetReaderAsync();
 		}
 		else if (!string.IsNullOrWhiteSpace(_options.ColumnTypes))
@@ -145,14 +145,19 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 
 		var columns = new List<PipeColumnInfo>();
 		var fields = new List<Field>();
+		var autoApplied = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
 		foreach (var kvp in merged)
 		{
 			var (type, arrowType) = InferTypes(kvp.Key, kvp.Value);
 			columns.Add(new PipeColumnInfo(kvp.Key, type, true));
 			fields.Add(new Field(kvp.Key, arrowType, true));
+
+			var hint = ClrTypeToHint(type);
+			if (hint != null) autoApplied[kvp.Key] = hint;
 		}
 
+		_autoAppliedTypes = autoApplied;
 		Columns = columns;
 		Schema = new Schema(fields, null);
 		_logger.LogInformation("JsonLStreamReader: Inferred schema with {Count} columns. Path: {Path}", columns.Count, _options.Path ?? "(root)");

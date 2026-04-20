@@ -84,7 +84,7 @@ awk 'BEGIN { for(i=1; i<=1000000; i++) print i ",uuid-" i "," rand() }' >> "$INP
 
 echo "      Converting CSV → Parquet..."
 "$DTPIPE" -i "$INPUT_DIR/high_volume.csv" \
-  --csv-column-types "Id:int64" \
+  --column-types "Id:int64" \
   -o "parquet:$INPUT_DIR/high_volume.parquet" --no-stats > /dev/null
 
 "$DTPIPE" -i "parquet:$INPUT_DIR/high_volume.parquet" -o "$INPUT_DIR/result_vol.csv" --no-stats > /dev/null
@@ -269,10 +269,10 @@ verify_composite() {
 }
 
 echo "      DuckDB..."
-"$DTPIPE" -i "$INPUT_DIR/composite_source.csv" --csv-column-types "Target:int32" \
+"$DTPIPE" -i "$INPUT_DIR/composite_source.csv" --column-types "Target:int32" \
   -o "duck:$INPUT_DIR/composite.duckdb" \
   --table "comp_users" --strategy Recreate --key "Region,Branch" --no-stats > /dev/null
-"$DTPIPE" -i "$INPUT_DIR/composite_inc.csv" --csv-column-types "Target:int32" \
+"$DTPIPE" -i "$INPUT_DIR/composite_inc.csv" --column-types "Target:int32" \
   -o "duck:$INPUT_DIR/composite.duckdb" \
   --table "comp_users" --strategy Upsert   --key "Region,Branch" --no-stats > /dev/null
 "$DTPIPE" -i "duck:$INPUT_DIR/composite.duckdb" \
@@ -281,10 +281,10 @@ echo "      DuckDB..."
 verify_composite "$INPUT_DIR/comp_duck.csv" "DuckDB"
 
 echo "      SQLite..."
-"$DTPIPE" -i "$INPUT_DIR/composite_source.csv" --csv-column-types "Target:int32" \
+"$DTPIPE" -i "$INPUT_DIR/composite_source.csv" --column-types "Target:int32" \
   -o "sqlite:$INPUT_DIR/composite.db" \
   --table "comp_users" --strategy Recreate --key "Region,Branch" --no-stats > /dev/null
-"$DTPIPE" -i "$INPUT_DIR/composite_inc.csv" --csv-column-types "Target:int32" \
+"$DTPIPE" -i "$INPUT_DIR/composite_inc.csv" --column-types "Target:int32" \
   -o "sqlite:$INPUT_DIR/composite.db" \
   --table "comp_users" --strategy Upsert   --key "Region,Branch" --no-stats > /dev/null
 "$DTPIPE" -i "sqlite:$INPUT_DIR/composite.db" \
@@ -293,10 +293,10 @@ echo "      SQLite..."
 verify_composite "$INPUT_DIR/comp_sqlite.csv" "SQLite"
 
 echo "      Postgres..."
-"$DTPIPE" -i "$INPUT_DIR/composite_source.csv" --csv-column-types "Target:int32" \
+"$DTPIPE" -i "$INPUT_DIR/composite_source.csv" --column-types "Target:int32" \
   -o "$PG_CONN" \
   --table "comp_users" --strategy Recreate --key "Region,Branch" --no-stats > /dev/null
-"$DTPIPE" -i "$INPUT_DIR/composite_inc.csv" --csv-column-types "Target:int32" \
+"$DTPIPE" -i "$INPUT_DIR/composite_inc.csv" --column-types "Target:int32" \
   -o "$PG_CONN" \
   --table "comp_users" --strategy Upsert   --key "Region,Branch" --no-stats > /dev/null
 "$DTPIPE" -i "$PG_CONN" \
@@ -305,10 +305,10 @@ echo "      Postgres..."
 verify_composite "$INPUT_DIR/comp_pg.csv" "Postgres"
 
 echo "      MSSQL..."
-"$DTPIPE" -i "$INPUT_DIR/composite_source.csv" --csv-column-types "Target:int32" \
+"$DTPIPE" -i "$INPUT_DIR/composite_source.csv" --column-types "Target:int32" \
   -o "$MSSQL_CONN" \
   --table "CompUsers" --strategy Recreate --key "Region,Branch" --no-stats > /dev/null
-"$DTPIPE" -i "$INPUT_DIR/composite_inc.csv" --csv-column-types "Target:int32" \
+"$DTPIPE" -i "$INPUT_DIR/composite_inc.csv" --column-types "Target:int32" \
   -o "$MSSQL_CONN" \
   --table "CompUsers" --strategy Upsert   --key "Region,Branch" --no-stats > /dev/null
 "$DTPIPE" -i "$MSSQL_CONN" \
@@ -317,10 +317,10 @@ echo "      MSSQL..."
 verify_composite "$INPUT_DIR/comp_mssql.csv" "MSSQL"
 
 echo "      Oracle..."
-"$DTPIPE" -i "$INPUT_DIR/composite_source.csv" --csv-column-types "Target:int32" \
+"$DTPIPE" -i "$INPUT_DIR/composite_source.csv" --column-types "Target:int32" \
   -o "$ORA_CONN" \
   --table "COMP_USERS" --strategy Recreate --key "Region,Branch" --no-stats > /dev/null
-"$DTPIPE" -i "$INPUT_DIR/composite_inc.csv" --csv-column-types "Target:int32" \
+"$DTPIPE" -i "$INPUT_DIR/composite_inc.csv" --column-types "Target:int32" \
   -o "$ORA_CONN" \
   --table "COMP_USERS" --strategy Upsert   --key "Region,Branch" --no-stats > /dev/null
 "$DTPIPE" -i "$ORA_CONN" \

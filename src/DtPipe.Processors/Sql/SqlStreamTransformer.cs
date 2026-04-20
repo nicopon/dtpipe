@@ -6,7 +6,7 @@ namespace DtPipe.Processors.Sql;
 
 /// <summary>
 /// An <see cref="IStreamTransformer"/> that adapts an <see cref="IColumnarStreamReader"/> to the
-/// stream transformer contract. Engine-agnostic: works with any SQL processor (DuckDB, DataFusion…).
+/// stream transformer contract. Engine-agnostic: works with any SQL processor (DuckDB…).
 ///
 /// The transformer reads directly from the upstream Arrow memory channels (registered during
 /// <see cref="OpenAsync"/>), so the <c>inputStream</c> parameter of <see cref="ReadResultsAsync"/>

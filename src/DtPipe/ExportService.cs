@@ -12,7 +12,6 @@ using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Pipelines;
 using DtPipe.Configuration;
-using DtPipe.Core.Infrastructure.Arrow;
 using Apache.Arrow.Types;
 using DtPipe.Services;
 
@@ -91,7 +90,7 @@ public class ExportService
 		{
 			var loadedSchema = SchemaStore.Load(options.SchemaLoad);
 			if (loadedSchema != null)
-				InjectSchemaJson(readerFactory, registry, ArrowSchemaSerializer.SerializeCompact(loadedSchema));
+				InjectSchema(readerFactory, registry, ArrowSchemaSerializer.SerializeCompact(loadedSchema));
 			else
 				_logger.LogWarning("Schema file '{Name}' not found — falling back to inference.", options.SchemaLoad);
 		}
@@ -350,20 +349,17 @@ public class ExportService
 
 	/// <summary>
 	/// Injects a compact Arrow schema JSON string into the reader's registered options
-	/// via <c>SchemaJson</c> (preferred) or falls back to <c>ColumnTypes</c> for CSV readers.
+	/// via <c>Schema</c> (preferred) or falls back to <c>ColumnTypes</c> for CSV readers.
 	/// </summary>
-	private static void InjectSchemaJson(IStreamReaderFactory readerFactory, OptionsRegistry registry, string schemaJson)
+	private static void InjectSchema(IStreamReaderFactory readerFactory, OptionsRegistry registry, string schemaJson)
 	{
 		var optType = readerFactory.GetSupportedOptionTypes().FirstOrDefault();
 		if (optType == null) return;
 		var opts = registry.Get(optType);
 
-		// Try SchemaJson first (JSON/XML readers with full structure support).
-		var schemaJsonProp = optType.GetProperty("SchemaJson");
-		if (schemaJsonProp != null && schemaJsonProp.CanWrite
-			&& string.IsNullOrEmpty(schemaJsonProp.GetValue(opts) as string))
+		if (opts is IHasSchemaOverride schemaOverride && string.IsNullOrEmpty(schemaOverride.Schema))
 		{
-			schemaJsonProp.SetValue(opts, schemaJson);
+			schemaOverride.Schema = schemaJson;
 			registry.RegisterByType(optType, opts);
 			return;
 		}

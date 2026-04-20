@@ -8,18 +8,16 @@ public class CsvReaderOptions : IOptionSet
 	public static string Prefix => "csv";
 	public static string DisplayName => "CSV Reader";
 
+	// Provider-specific options — keep their CLI flags.
 	[Description("CSV field separator")]
 	public string Separator { get; set; } = ",";
 
 	[Description("Whether the CSV file has a header row")]
 	public bool HasHeader { get; set; } = true;
 
-	[Description("File encoding (e.g., UTF-8, ISO-8859-1)")]
-	public string Encoding { get; set; } = "UTF-8";
-
-	[Description("Explicit column types, e.g. \"Id:uuid,Qty:int32,Price:double\". Supported: uuid, string, int32, int64, double, decimal, bool, datetime, datetimeoffset")]
+	// Universal options — populated via JobDefinition, not direct CLI flags.
+	// Use --column-types, --auto-column-types, --encoding at the branch level.
 	public string ColumnTypes { get; set; } = "";
-
-	[Description("Automatically infer and apply column types from the first 100 rows (no --dry-run required). Prints the applied types.")]
 	public bool AutoColumnTypes { get; set; } = false;
+	public string Encoding { get; set; } = "UTF-8";
 }

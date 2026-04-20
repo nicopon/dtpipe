@@ -134,7 +134,7 @@ public class ProviderConfigurationService
     {
         var type = options.GetType();
 
-        // Map Query
+        // Map Query (DB sources — only if not already set)
         if (!string.IsNullOrEmpty(job.Query))
         {
             var prop = type.GetProperty("Query");
@@ -145,7 +145,7 @@ public class ProviderConfigurationService
             }
         }
 
-        // Map RefAlias
+        // Map RefAlias (SQL processors)
         if (job.Ref != null && job.Ref.Length > 0)
         {
             var prop = type.GetProperty("RefAlias");
@@ -155,5 +155,40 @@ public class ProviderConfigurationService
                 if (current == null || current.Length == 0) prop.SetValue(options, job.Ref);
             }
         }
+
+        // Map universal reader options — always override (JobDefinition is authoritative)
+        MapString(type, options, "Path",        job.Path);
+        MapString(type, options, "ColumnTypes", job.ColumnTypes);
+        MapString(type, options, "Encoding",    job.Encoding);
+        MapString(type, options, "Schema",      job.Schema);
+
+        if (job.AutoColumnTypes)
+            MapBool(type, options, "AutoColumnTypes", true);
+
+        if (job.MaxSample > 0)
+            MapInt(type, options, "MaxSample", job.MaxSample);
+    }
+
+    private static void MapString(Type type, object options, string propName, string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return;
+        var prop = type.GetProperty(propName);
+        if (prop != null && prop.CanWrite && prop.PropertyType == typeof(string))
+            prop.SetValue(options, value);
+    }
+
+    private static void MapBool(Type type, object options, string propName, bool value)
+    {
+        var prop = type.GetProperty(propName);
+        if (prop != null && prop.CanWrite && prop.PropertyType == typeof(bool))
+            prop.SetValue(options, value);
+    }
+
+    private static void MapInt(Type type, object options, string propName, int value)
+    {
+        var prop = type.GetProperty(propName);
+        if (prop != null && prop.CanWrite && prop.PropertyType == typeof(int))
+            prop.SetValue(options, value);
     }
 }
+

@@ -4,7 +4,7 @@
 # Performance benchmarks for DtPipe.
 # Usage:
 #   ./bench.sh                  # standard pipeline benchmarks
-#   ./bench.sh --sql            # SQL JOIN benchmarks (DataFusion, requires datasets)
+#   ./bench.sh --sql            # SQL JOIN benchmarks (DuckDB, 100M rows)
 #   ./bench.sh --all            # all benchmarks
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -110,7 +110,7 @@ ROWS=$(python3 -c "import struct,sys; f=open('$ARTIFACTS_DIR/bench_from_duckdb.p
 echo "  Parquet rows: $ROWS"
 
 # ----------------------------------------
-# 5. SQL JOIN benchmarks (DuckDB + DataFusion if available)
+# 5. SQL JOIN benchmarks (DuckDB)
 # ----------------------------------------
 if [ $RUN_SQL -eq 1 ]; then
     echo ""
@@ -126,30 +126,14 @@ if [ $RUN_SQL -eq 1 ]; then
 
     QUERY_JOIN='SELECT m.*, r.Id as ref1_id, r2.Id as ref2_id FROM main m LEFT JOIN ref r ON m.GenerateIndex = CAST(r.Id AS BIGINT) LEFT JOIN ref2 r2 ON m.GenerateIndex = CAST(r2.Id AS BIGINT)'
 
-    # DataFusion is an experimental feature — only benchmarked when the bridge is built.
-    if "$DTPIPE" sql-engines datafusion 2>/dev/null; then
-        echo "[5] SQL JOIN benchmark (dual engine: DataFusion vs DuckDB)"
-        echo "  DataFusion engine..."
-        timeit "datafusion-dag" "$DTPIPE" \
-          -i "parquet:$MAIN_PARQUET" --alias main \
-          -i "csv:$REF_CSV"          --alias ref \
-          -i "csv:$REF2_CSV"         --alias ref2 \
-          --from main --ref ref --ref ref2 \
-          --sql "$QUERY_JOIN" --sql-engine datafusion \
-          -o null --no-stats
-    else
-        echo "[5] SQL JOIN benchmark (DuckDB only — build with DTPIPE_EXPERIMENTAL=1 to include DataFusion)"
-    fi
-
-    echo "  DuckDB engine..."
+    echo "[5] SQL JOIN benchmark (DuckDB)"
     timeit "duckdb-dag" "$DTPIPE" \
       -i "parquet:$MAIN_PARQUET" --alias main \
       -i "csv:$REF_CSV"          --alias ref \
       -i "csv:$REF2_CSV"         --alias ref2 \
       --from main --ref ref --ref ref2 \
-      --sql "$QUERY_JOIN" --sql-engine duckdb \
+      --sql "$QUERY_JOIN" \
       -o null --no-stats
-
 fi
 
 # ----------------------------------------

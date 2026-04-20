@@ -31,24 +31,26 @@ public static class AdoToArrow
         config ??= new AdoToArrowConfigBuilder().Build();
 
         var schema = AdoToArrowUtils.CreateSchema(reader, config);
-        using var compositeConsumer = new CompositeAdoConsumer(reader, schema, consumerFactory);
-
         int rowsInBuffer = 0;
+        CompositeAdoConsumer? compositeConsumer = null;
 
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
+            if (compositeConsumer == null)
+                compositeConsumer = new CompositeAdoConsumer(reader, schema, consumerFactory);
+
             compositeConsumer.ConsumeRow(reader);
             rowsInBuffer++;
 
             if (rowsInBuffer >= config.TargetBatchSize)
             {
                 yield return compositeConsumer.BuildBatch(rowsInBuffer);
-                compositeConsumer.Reset();
+                compositeConsumer = null; // Fresh consumer for next batch to avoid buffer reuse
                 rowsInBuffer = 0;
             }
         }
 
-        if (rowsInBuffer > 0)
+        if (rowsInBuffer > 0 && compositeConsumer != null)
         {
             yield return compositeConsumer.BuildBatch(rowsInBuffer);
         }
@@ -67,24 +69,27 @@ public static class AdoToArrow
         config ??= new AdoToArrowConfigBuilder().Build();
 
         var schema = AdoToArrowUtils.CreateSchema(reader, config);
-        using var compositeConsumer = new CompositeAdoConsumer(reader, schema, consumerFactory);
-
+        
         int rowsInBuffer = 0;
+        CompositeAdoConsumer? compositeConsumer = null;
 
         while (reader.Read())
         {
+            if (compositeConsumer == null)
+                compositeConsumer = new CompositeAdoConsumer(reader, schema, consumerFactory);
+
             compositeConsumer.ConsumeRow(reader);
             rowsInBuffer++;
 
             if (rowsInBuffer >= config.TargetBatchSize)
             {
                 yield return compositeConsumer.BuildBatch(rowsInBuffer);
-                compositeConsumer.Reset();
+                compositeConsumer = null; // Fresh consumer
                 rowsInBuffer = 0;
             }
         }
 
-        if (rowsInBuffer > 0)
+        if (rowsInBuffer > 0 && compositeConsumer != null)
         {
             yield return compositeConsumer.BuildBatch(rowsInBuffer);
         }

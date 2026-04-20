@@ -158,7 +158,12 @@ public class LinearPipelineService
             MetricsPath = job.MetricsPath,
             AutoMigrate = job.AutoMigrate ?? false,
             SchemaSave = job.SchemaSave,
-            SchemaLoad = job.SchemaLoad
+            SchemaLoad = job.SchemaLoad,
+            Path = job.Path,
+            ColumnTypes = job.ColumnTypes,
+            AutoColumnTypes = job.AutoColumnTypes,
+            MaxSample = job.MaxSample,
+            Encoding = job.Encoding
         };
 
         _registry.Register(pipelineOptions);

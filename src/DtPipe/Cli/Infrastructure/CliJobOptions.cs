@@ -35,7 +35,6 @@ public sealed class CliJobOptions
     public required Option<string?> Prefix { get; init; }
     public required Option<bool> AutoMigrate { get; init; }
     public required Option<string[]> Sql { get; init; }
-    public required Option<string[]> SqlEngine { get; init; }
     public required Option<string?> ExportJob { get; init; }
     public required Option<string[]> Rename { get; init; }
     public required Option<string[]> Drop { get; init; }
@@ -44,6 +43,11 @@ public sealed class CliJobOptions
     public required Option<string[]> From { get; init; }
     public required Option<bool> Merge { get; init; }
     public required Option<string[]> Ref { get; init; }
-    public required Option<string?> SchemaSave { get; init; }
-    public required Option<string?> SchemaLoad { get; init; }
+    public required Option<string[]> SchemaSave { get; init; }
+    public required Option<string[]> SchemaLoad { get; init; }
+    public required Option<string[]> Path { get; init; }
+    public required Option<string[]> ColumnTypes { get; init; }
+    public required Option<bool> AutoColumnTypes { get; init; }
+    public required Option<int[]> MaxSample { get; init; }
+    public required Option<string[]> Encoding { get; init; }
 }

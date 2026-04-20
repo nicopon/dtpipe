@@ -20,7 +20,6 @@ internal static class CoreOptionsBuilder
         { "--query",              CliPipelinePhase.Reader },
         { "--alias",              CliPipelinePhase.Global },
         { "--sql",                CliPipelinePhase.Global },
-        { "--sql-engine",         CliPipelinePhase.Global },
         { "--strategy",           CliPipelinePhase.Writer },
         { "--insert-mode",        CliPipelinePhase.Writer },
         { "--table",              CliPipelinePhase.Writer },
@@ -50,8 +49,15 @@ internal static class CoreOptionsBuilder
         { "--ref",                CliPipelinePhase.Transformer | CliPipelinePhase.Processor },
         { "--from",               CliPipelinePhase.Global },
         { "--prefix",             CliPipelinePhase.Global },
-        { "--schema-save",        CliPipelinePhase.Global },
-        { "--schema-load",        CliPipelinePhase.Global },
+        // Schema persistence — Reader phase so they're per-branch in DAGs
+        { "--schema-save",        CliPipelinePhase.Reader },
+        { "--schema-load",        CliPipelinePhase.Reader },
+        // Universal reader options — scoped to the branch's reader
+        { "--path",               CliPipelinePhase.Reader },
+        { "--column-types",       CliPipelinePhase.Reader },
+        { "--auto-column-types",  CliPipelinePhase.Reader },
+        { "--max-sample",         CliPipelinePhase.Reader },
+        { "--encoding",           CliPipelinePhase.Reader },
     };
 
     public static CoreCliOptions Build(
@@ -137,8 +143,6 @@ internal static class CoreOptionsBuilder
 
         var aliasOption = new Option<string[]>("--alias") { Description = "Alias(es) for the current DAG branch or streams" };
 
-        var sqlEngineOption = new Option<string[]>("--sql-engine") { Description = "SQL Engine (datafusion|duckdb)", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
-
         var renameOption = new Option<string[]>("--rename") { Description = "Rename columns (Old:New). repeatable.", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
         var dropOption = new Option<string[]>("--drop") { Description = "Drop columns. repeatable.", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
         var throttleOption = new Option<int[]>("--throttle") { Description = "Throttle speed (rows/sec)", Arity = ArgumentArity.ZeroOrMore, AllowMultipleArgumentsPerToken = true };
@@ -156,13 +160,42 @@ internal static class CoreOptionsBuilder
         var prefixOption = new Option<string?>("--prefix") { Description = "Prefix for split files" };
         prefixOption.Aliases.Add("-p");
 
-        var schemaSaveOption = new Option<string?>("--schema-save")
+        var schemaSaveOption = new Option<string[]>("--schema-save")
         {
-            Description = "Save discovered schema to a named .dtschema file (e.g. --schema-save erp-areas). Subsequent runs can use --schema-load to skip inference."
+            Description = "Save discovered schema to a named .dtschema file (e.g. --schema-save erp-areas). Subsequent runs can use --schema-load to skip inference.",
+            Arity = ArgumentArity.ZeroOrMore
         };
-        var schemaLoadOption = new Option<string?>("--schema-load")
+        var schemaLoadOption = new Option<string[]>("--schema-load")
         {
-            Description = "Load column types from a named .dtschema file instead of running inference (e.g. --schema-load erp-areas)."
+            Description = "Load column types from a named .dtschema file instead of running inference (e.g. --schema-load erp-areas).",
+            Arity = ArgumentArity.ZeroOrMore
+        };
+
+        var pathOption = new Option<string[]>("--path")
+        {
+            Description = "Navigation path in the source: dot-path for JSON (e.g. 'items.data'), XPath for XML (e.g. '//Record').",
+            Arity = ArgumentArity.ZeroOrMore
+        };
+        var columnTypesOption = new Option<string[]>("--column-types")
+        {
+            Description = "Explicit column types, e.g. \"Id:uuid,Count:int64,Active:bool\". Supported: uuid, string, int32, int64, double, decimal, bool, datetime, datetimeoffset.",
+            Arity = ArgumentArity.ZeroOrMore
+        };
+        var autoColumnTypesOption = new Option<bool>("--auto-column-types")
+        {
+            Description = "Automatically infer and apply column types from the first sample rows (no --dry-run required)."
+        };
+        autoColumnTypesOption.DefaultValueFactory = _ => false;
+        var maxSampleOption = new Option<int[]>("--max-sample")
+        {
+            Description = "Maximum rows to sample for schema inference (default: reader-defined). Arity = ZeroOrMore.",
+            Arity = ArgumentArity.ZeroOrMore,
+            AllowMultipleArgumentsPerToken = true
+        };
+        var encodingOption = new Option<string[]>("--encoding")
+        {
+            Description = "File encoding (e.g., UTF-8, ISO-8859-1). Defaults to UTF-8.",
+            Arity = ArgumentArity.ZeroOrMore
         };
 
         var allList = new List<Option>
@@ -171,10 +204,11 @@ internal static class CoreOptionsBuilder
             unsafeQueryOption, dryRunOption, noStatsOption, limitOption, samplingRateOption, samplingSeedOption, keyOption,
             jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption, finallyExecOption,
             strategyOption, insertModeOption, tableOption, strictSchemaOption,
-            noSchemaValidationOption, metricsPathOption, autoMigrateOption, sqlOption, aliasOption, sqlEngineOption,
+            noSchemaValidationOption, metricsPathOption, autoMigrateOption, sqlOption, aliasOption,
             renameOption, dropOption, throttleOption, ignoreNullsOption,
             mergeOption, refOption, fromOption, prefixOption,
-            schemaSaveOption, schemaLoadOption
+            schemaSaveOption, schemaLoadOption,
+            pathOption, columnTypesOption, autoColumnTypesOption, maxSampleOption, encodingOption
         };
 
         foreach (var opt in allList)
@@ -189,8 +223,9 @@ internal static class CoreOptionsBuilder
             keyOption, jobOption, exportJobOption, logOption, preExecOption, postExecOption, onErrorExecOption,
             finallyExecOption, strategyOption, insertModeOption, tableOption,
             strictSchemaOption, noSchemaValidationOption, metricsPathOption, autoMigrateOption, sqlOption,
-            aliasOption, sqlEngineOption, renameOption, dropOption, throttleOption, ignoreNullsOption,
-            mergeOption, refOption, fromOption, prefixOption, schemaSaveOption, schemaLoadOption, allList);
+            aliasOption, renameOption, dropOption, throttleOption, ignoreNullsOption,
+            mergeOption, refOption, fromOption, prefixOption, schemaSaveOption, schemaLoadOption,
+            pathOption, columnTypesOption, autoColumnTypesOption, maxSampleOption, encodingOption, allList);
     }
 
     private static IEnumerable<CompletionItem> GetInputSuggestions(CompletionContext context, IEnumerable<IStreamReaderFactory>? factories)
@@ -323,7 +358,6 @@ public record CoreCliOptions(
     Option<bool> AutoMigrate,
     Option<string[]> Sql,
     Option<string[]> Alias,
-    Option<string[]> SqlEngine,
     Option<string[]> Rename,
     Option<string[]> Drop,
     Option<int[]> Throttle,
@@ -332,7 +366,12 @@ public record CoreCliOptions(
     Option<string[]> Ref,
     Option<string[]> From,
     Option<string?> Prefix,
-    Option<string?> SchemaSave,
-    Option<string?> SchemaLoad,
+    Option<string[]> SchemaSave,
+    Option<string[]> SchemaLoad,
+    Option<string[]> Path,
+    Option<string[]> ColumnTypes,
+    Option<bool> AutoColumnTypes,
+    Option<int[]> MaxSample,
+    Option<string[]> Encoding,
     List<Option> AllOptions
 );

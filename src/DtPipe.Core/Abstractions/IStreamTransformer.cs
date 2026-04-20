@@ -8,7 +8,7 @@ namespace DtPipe.Core.Abstractions;
 /// produces a new RecordBatch stream. Unlike row/batch transformers, a stream transformer
 /// replaces (or supplements) the entire input stream rather than processing it row by row.
 ///
-/// Examples: SQL engine (DataFusion), stream merge (concatenate two channels).
+/// Examples: SQL engine (DuckDB), stream merge (concatenate two channels).
 /// </summary>
 public interface IStreamTransformer : IAsyncDisposable
 {
@@ -30,7 +30,7 @@ public interface IStreamTransformer : IAsyncDisposable
 
     /// <summary>
     /// Streams the transformer's output as Arrow RecordBatches.
-    /// May read directly from registered upstream channels (e.g. DataFusion)
+    /// May read directly from registered upstream channels (e.g. SQL engine)
     /// rather than consuming the <paramref name="inputStream"/>.
     /// </summary>
     /// <param name="inputStream">

@@ -1,25 +1,19 @@
-#!/bin/bash
-
 # validate_sql.sh
-# Validates advanced SQL capabilities on both DataFusion and DuckDB engines.
+# Validates advanced SQL capabilities on the DuckDB engine.
 # Focuses on window functions, rolling aggregates, and time-based bucketing.
 #
 # NOTE on "streamed aggregates":
-# DataFusion and DuckDB are batch SQL engines. They operate on a fixed snapshot —
-# they do NOT support continuous/incremental processing over a live stream
+# DuckDB is a batch SQL engine. It operates on a fixed snapshot —
+# it does NOT support continuous/incremental processing over a live stream
 # (that would require Flink, Kafka Streams, etc.).
 #
 # Window functions CAN emit results row-by-row (streaming output) because they
 # do not collapse rows. This differs from GROUP BY which must see all rows first.
-# Both engines can therefore produce window function results lazily, chunk by chunk.
+# DuckDB can therefore produce window function results lazily, chunk by chunk.
 #
 # For time-based windowing, the timestamp must come FROM THE DATA (event time).
 # "Every X seconds based on sysdate" must be handled by DtPipe splitting the
 # pipeline into time slices — not by the SQL engine itself.
-#
-# DataFusion 53.x known limitations vs DuckDB (documented by test failures):
-#   - Window function in a subquery combined with outer GROUP BY → use CTE instead
-#   - LAG/LEAD 3rd argument must be a literal, not a column → use COALESCE(LAG(...), col)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -50,33 +44,21 @@ fi
 A="$ARTIFACTS_DIR"
 csv_rows() { tail -n +2 "$1" | wc -l | tr -d ' '; }
 
-# Detect DataFusion via the runtime itself — platform-independent and uses the same
-# probe as CompositeSqlTransformerFactory (NativeLibrary.TryLoad).
-if "$DTPIPE" sql-engines datafusion 2>/dev/null; then
-    SQL_ENGINES=("datafusion" "duckdb")
-else
-    SQL_ENGINES=("duckdb")
-    echo -e "  ${YELLOW}Note: DataFusion bridge not built — SQL tests run on DuckDB only.${NC}"
-    echo -e "  ${YELLOW}Build with DTPIPE_EXPERIMENTAL=1 ./build.sh to include DataFusion.${NC}"
-fi
-
-# Helper: run a query on available engines, call check_func with (output_csv, engine).
+# Helper: run a query on DuckDB, call check_func with (output_csv, engine).
 # Does NOT exit on failure — all tests run regardless of individual failures.
-both_engines() {
+validate_engine() {
     local name="$1"
     local source_args="$2"   # -i ... --alias src
     local sql="$3"
     local check_func="$4"
 
-    for engine in "${SQL_ENGINES[@]}"; do
-        echo "  [SQL Engine: $engine] $name..."
-        rm -f "$A/out.csv"
-        if eval "\"$DTPIPE\" $source_args --from src --sql-engine \"$engine\" --sql \"$sql\" -o \"$A/out.csv\" --no-stats" 2>/dev/null; then
-            $check_func "$A/out.csv" "$engine"
-        else
-            fail "$name ($engine): pipeline failed"
-        fi
-    done
+    echo "  [SQL Engine: DuckDB] $name..."
+    rm -f "$A/out.csv"
+    if eval "\"$DTPIPE\" $source_args --from src --sql \"$sql\" -o \"$A/out.csv\" --no-stats" 2>/dev/null; then
+        $check_func "$A/out.csv" "duckdb"
+    else
+        fail "$name (duckdb): pipeline failed"
+    fi
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -100,8 +82,6 @@ both_engines "T1: ROW_NUMBER" \
 # ─────────────────────────────────────────────────────────────────────────────
 # T2: N-record batching via ROW_NUMBER
 # Simulates "paquets de N enregistrements" by grouping consecutive rows.
-# Uses a CTE (not a subquery) for DataFusion compatibility: DataFusion 53.x cannot
-# plan a GROUP BY over a derived table that contains a window function.
 # ─────────────────────────────────────────────────────────────────────────────
 echo "--- [T2] Batching by N records (CTE + FLOOR + ROW_NUMBER) ---"
 BATCH_SIZE=10
@@ -114,7 +94,7 @@ check_t2() {
     grep -q "batch_id" "$1" && pass "Batch-N ($2): column 'batch_id' present" \
         || fail "Batch-N ($2): column 'batch_id' missing"
 }
-both_engines "T2: Batching by N records" \
+validate_engine "T2: Batching by N records" \
     "-i \"generate:$TOTAL_ROWS\" --fake \"Val:random.number\" --drop \"GenerateIndex\" --alias src" \
     "WITH numbered AS (SELECT Val, ROW_NUMBER() OVER (ORDER BY Val) AS rn FROM src) SELECT FLOOR(CAST(rn - 1 AS DOUBLE) / $BATCH_SIZE) AS batch_id, COUNT(*) AS cnt, SUM(Val) AS total FROM numbered GROUP BY batch_id ORDER BY batch_id" \
     check_t2
@@ -132,7 +112,7 @@ check_t3() {
         && pass "Running SUM ($2): column 'running_total' present" \
         || fail "Running SUM ($2): column missing"
 }
-both_engines "T3: Running SUM" \
+validate_engine "T3: Running SUM" \
     "-i \"generate:20\" --fake \"Val:random.number\" --drop \"GenerateIndex\" --alias src" \
     "SELECT Val, SUM(Val) OVER (ORDER BY Val ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_total FROM src" \
     check_t3
@@ -149,7 +129,7 @@ check_t4() {
     grep -q "moving_avg" "$1" && pass "Moving avg ($2): column present" \
         || fail "Moving avg ($2): column missing"
 }
-both_engines "T4: Moving average" \
+validate_engine "T4: Moving average" \
     "-i \"generate:30\" --fake \"Val:random.number\" --drop \"GenerateIndex\" --alias src" \
     "SELECT Val, AVG(Val) OVER (ORDER BY Val ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) AS moving_avg FROM src" \
     check_t4
@@ -168,7 +148,7 @@ check_t5() {
     [ "$buckets" -eq 4 ] && pass "NTILE ($2): 4 distinct buckets" \
         || fail "NTILE ($2): expected 4 buckets, got $buckets"
 }
-both_engines "T5: NTILE(4)" \
+validate_engine "T5: NTILE(4)" \
     "-i \"generate:100\" --fake \"Val:random.number\" --drop \"GenerateIndex\" --alias src" \
     "SELECT Val, NTILE(4) OVER (ORDER BY Val) AS quartile FROM src" \
     check_t5
@@ -184,7 +164,7 @@ check_t6() {
     grep -q "rnk" "$1" && pass "RANK ($2): column 'rnk' present" \
         || fail "RANK ($2): column missing"
 }
-both_engines "T6: RANK" \
+validate_engine "T6: RANK" \
     "-i \"generate:20\" --fake \"Val:random.number\" --drop \"GenerateIndex\" --alias src" \
     "SELECT Val, RANK() OVER (ORDER BY Val) AS rnk, DENSE_RANK() OVER (ORDER BY Val) AS dense_rnk FROM src" \
     check_t6
@@ -223,8 +203,8 @@ check_t7() {
     grep -q "total" "$1" && pass "Time-bucket ($2): column 'total' present" \
         || fail "Time-bucket ($2): column missing"
 }
-both_engines "T7: Time-bucket (10s windows)" \
-    "-i \"$A/t7_events.csv\" --csv-column-types \"ts_epoch:double,val:double\" --alias src" \
+validate_engine "T7: Time-bucket (10s windows)" \
+    "-i \"$A/t7_events.csv\" --column-types \"ts_epoch:double,val:double\" --alias src" \
     "SELECT FLOOR(ts_epoch / 10) * 10 AS bucket, COUNT(*) AS cnt, SUM(val) AS total FROM src GROUP BY bucket ORDER BY bucket" \
     check_t7
 
@@ -232,7 +212,6 @@ both_engines "T7: Time-bucket (10s windows)" \
 # T8: LAG / LEAD — access previous/next row value
 # Useful for delta calculations (row-over-row difference).
 # Portable form: COALESCE(LAG(Val,1) OVER (...), Val) instead of LAG(Val,1,Val).
-# DataFusion 53.x only supports literals as the LAG/LEAD default argument.
 # ─────────────────────────────────────────────────────────────────────────────
 echo "--- [T8] LAG / LEAD (delta between consecutive rows) ---"
 check_t8() {
@@ -242,7 +221,7 @@ check_t8() {
     grep -q "delta" "$1" && pass "LAG/LEAD ($2): column 'delta' present" \
         || fail "LAG/LEAD ($2): column missing"
 }
-both_engines "T8: LAG/LEAD delta" \
+validate_engine "T8: LAG/LEAD delta" \
     "-i \"generate:10\" --fake \"Val:random.number\" --drop \"GenerateIndex\" --alias src" \
     "SELECT Val, Val - COALESCE(LAG(Val, 1) OVER (ORDER BY Val), Val) AS delta FROM src ORDER BY Val" \
     check_t8
@@ -269,8 +248,8 @@ check_t9() {
     grep -q "grp_rank" "$1" && pass "PARTITION BY ($2): column 'grp_rank' present" \
         || fail "PARTITION BY ($2): column missing"
 }
-both_engines "T9: PARTITION BY" \
-    "-i \"$A/t9_groups.csv\" --csv-column-types \"grp:string,val:double\" --alias src" \
+validate_engine "T9: PARTITION BY" \
+    "-i \"$A/t9_groups.csv\" --column-types \"grp:string,val:double\" --alias src" \
     "SELECT grp, val, RANK() OVER (PARTITION BY grp ORDER BY val DESC) AS grp_rank FROM src" \
     check_t9
 

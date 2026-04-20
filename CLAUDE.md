@@ -14,14 +14,6 @@ Prefer `./build.sh` for a full build (runs unit tests + produces a self-containe
 ./build.sh
 ```
 
-To include the experimental DataFusion engine (requires Rust toolchain):
-
-```bash
-./build_experimental.sh        # Unix
-./build_experimental.ps1       # Windows
-# equivalent to: DTPIPE_EXPERIMENTAL=1 ./build.sh
-```
-
 For targeted builds during development:
 
 ```bash
@@ -29,11 +21,8 @@ dotnet build DtPipe.sln
 dotnet run --project src/DtPipe -- --help
 ```
 
-To check which SQL engines are available in a given binary:
-
 ```bash
-dtpipe sql-engines                  # human-readable table
-dtpipe sql-engines datafusion       # exit 0 if available, exit 1 if not (for scripts)
+dtpipe --help
 ```
 
 ## Testing
@@ -77,8 +66,7 @@ The golden DAG fixtures in `GoldenDagDefinitions.cs` are the canonical reference
 | `src/DtPipe.Core` | Abstractions, DAG engine, pipeline models, helpers |
 | `src/DtPipe.Adapters` | Readers and writers for all data sources/targets |
 | `src/DtPipe.Transformers` | Row and columnar data transformers |
-| `src/DtPipe.Processors` | C# side of SQL stream processors (DuckDB.NET + DataFusion P/Invoke wrappers, factories) |
-| `src/DtPipe.Processors.DataFusion` | Rust/Cargo native library — DataFusion engine, Arrow IPC bridge |
+| `src/DtPipe.Processors` | C# side of SQL stream processors (DuckDB, factories) |
 | `src/Apache.Arrow.Ado` | Standalone ADO.NET → Arrow library; zero DtPipe deps (depends on `Apache.Arrow.Serialization` only) |
 | `src/Apache.Arrow.Serialization` | Standalone CLR↔Arrow type map + POCO serializer; zero DtPipe deps, no external deps beyond `Apache.Arrow` |
 | `tests/DtPipe.Tests` | xunit.v3 unit and integration tests |
@@ -87,7 +75,7 @@ The golden DAG fixtures in `GoldenDagDefinitions.cs` are the canonical reference
 
 - `DtPipe.Core` contains **only** abstractions, models, and the generic DAG/pipeline engine — no concrete implementations.
 - Each concrete transformer in `DtPipe.Transformers` lives in its own subdirectory (`Row/Expand/`, `Arrow/Filter/`…) with a matching sub-namespace (`DtPipe.Transformers.Row`, `DtPipe.Transformers.Arrow`…).
-- Each concrete stream processor in `DtPipe.Processors` follows the same pattern: one subdirectory per processor (`DataFusion/`, `Merge/`…) with a matching sub-namespace (`DtPipe.Processors.DataFusion`, `DtPipe.Processors.Merge`…).
+- Each concrete stream processor in `DtPipe.Processors` follows the same pattern: one subdirectory per processor (`DuckDB/`, `Merge/`…) with a matching sub-namespace (`DtPipe.Processors.DuckDB`, `DtPipe.Processors.Merge`…).
 - Readers and writers in `DtPipe.Adapters` are grouped by technology under `Adapters/<Name>/`.
 
 ### Core Data Flow
@@ -119,7 +107,7 @@ Neither `--sql` nor boolean processor flags (e.g. `--merge`) trigger a split. Th
 
 - `--from a,b,c` declares one or more streaming main sources (comma-separated). Fan-out consumers use a single alias; multi-stream processors (e.g. merge) use multiple aliases.
 - `--ref a,b` declares materialized reference sources (preloaded before query execution, comma-separated). Used by SQL JOIN branches.
-- `--sql "<query>"` runs an inline SQL query. Default engine: DuckDB (standard SQL, no build step). Use `--sql-engine datafusion` (or `DTPIPE_SQL_ENGINE=datafusion`) to switch to the DataFusion engine.
+- `--sql "<query>"` runs an inline SQL query. Default engine: DuckDB (standard SQL, no build step).
 - `--merge` (and future boolean flags) declares the processor explicitly by name. Each processor is registered as a `BooleanProcessorFlag` in `CliPipelineRules`.
 
 Branches communicate via `IMemoryChannelRegistry` (either native `Channel<IReadOnlyList<object?[]>>` or Arrow `Channel<RecordBatch>`). The `MappedMemoryChannelRegistry` handles logical-to-physical alias resolution for fan-out (broadcast/tee) scenarios. A `BranchChannelContext` injected per branch carries an `AliasMap` that translates logical aliases (as written in CLI args) to physical channel names (including fan-out sub-channels like `s__fan_0`). This mapping is populated by `DagOrchestrator` and is transparent to all downstream components including processors.
@@ -142,7 +130,7 @@ In the patterns below, `{reader:cfg}` represents any reader and its full provide
 
 ### SQL Processors
 
-`CompositeSqlTransformerFactory` is the entry point registered in DI; it selects the engine based on `--sql-engine` (or `DTPIPE_SQL_ENGINE`). Two engines are available:
+`CompositeSqlTransformerFactory` is the entry point registered in DI. The primary engine is:
 
 **DuckDB (default)** — `DuckDBSqlTransformerFactory` / `DuckDBSqlProcessor`:
 - Pure C# via DuckDB.NET. No native bridge build required.
@@ -150,14 +138,6 @@ In the patterns below, `{reader:cfg}` represents any reader and its full provide
 - Output: lazy streaming via `duckdb_execute_prepared_streaming` + `duckdb_fetch_chunk` + `duckdb_data_chunk_to_arrow`. Arrow extension types (UUID, etc.) preserved via `arrow_lossless_conversion = true`.
 - Schema inferred from prepared statement before execution — no extra query round-trip.
 - Standard SQL dialect, rich function library (window functions, CTEs, JSON, etc.). Queries testable externally with the DuckDB CLI.
-
-**DataFusion (`--sql-engine datafusion`) — EXPERIMENTAL** — `DataFusionSqlTransformerFactory` / `DataFusionProcessor`:
-- **C# layer** (`DtPipe.Processors`): P/Invoke bridge to the Rust native library (`DataFusionBridge`).
-- **Rust layer** (`DtPipe.Processors.DataFusion`): Cargo library (`libdatafusion_bridge`) hosting a Tokio runtime and a DataFusion session context. Receives Arrow data via the C Data Interface and streams results back through the Arrow C Data Interface.
-- **Not bundled in standard distributions.** Requires `./build_experimental.sh` (or `DTPIPE_EXPERIMENTAL=1 ./build.sh`). The Rust toolchain must be installed.
-- The native library (`libdtpipe_datafusion.{dylib,so,dll}`) is gitignored — it must be built locally or in a dedicated CI pipeline with `DTPIPE_EXPERIMENTAL=1`.
-- **When to prefer DataFusion**: truly zero-copy end-to-end output (no `DataChunk→Arrow` conversion on the output path), suited for high-throughput pipelines (>10M rows) or when the native library is already built and the Rust build complexity is acceptable.
-- **Availability check**: `dtpipe sql-engines datafusion` exits 0 if the native bridge is present, 1 otherwise.
 
 Logical SQL table names come from the branch args (`--from`/`--ref`). Physical channel aliases are resolved by `DagOrchestrator` before the processor is created, via `BranchChannelContext.AliasMap` — processors never need to know about fan-out sub-channel naming (`__fan_N` suffixes).
 

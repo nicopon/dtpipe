@@ -137,19 +137,19 @@ run_test "T19" "$DTPIPE -i artifacts/test_data.arrow -o \"$PG\" --table \"output
 run_test "T20" "$DTPIPE -i artifacts/test_data.csv --limit 0 -o artifacts/output_t20.csv"
 
 # 2. Advanced Pipelines & SQL Processors
-# T21: DataFusion JOIN between Parquet and CSV on shared Id column
-# --csv-column-types "id:uuid" on the CSV source ensures both sides of the JOIN are FixedSizeBinary(16)+arrow.uuid
-# (identical types → no DataFusion type coercion needed → no hang)
-run_test "T21" "$DTPIPE -i artifacts/test_data.parquet --alias p -i artifacts/test_data.csv --csv-column-types \"id:uuid\" --alias c --from p --ref c --sql \"SELECT p.*, c.email FROM p JOIN c ON p.id = c.id\" -o artifacts/output_t21.parquet"
-# T22: DataFusion aggregation: count(*) and avg() from PostgreSQL
+# T21: DuckDB JOIN between Parquet and CSV on shared Id column
+# --column-types "id:uuid" on the CSV source ensures both sides of the JOIN are FixedSizeBinary(16)+arrow.uuid
+# (identical types → no DuckDB type coercion needed → no hang)
+run_test "T21" "$DTPIPE -i artifacts/test_data.parquet --alias p -i artifacts/test_data.csv --column-types \"id:uuid\" --alias c --from p --ref c --sql \"SELECT p.*, c.email FROM p JOIN c ON p.id = c.id\" -o artifacts/output_t21.parquet"
+# T22: DuckDB aggregation: count(*) and avg() from PostgreSQL
 run_test "T22" "$DTPIPE -i \"$PG\" -q \"SELECT * FROM users_test\" --alias db --from db --sql \"SELECT count(*) as total, avg(length(username)) FROM db\" -o artifacts/output_t22.csv"
-# T23: DataFusion SQL filter on big Parquet (server-side pushdown)
+# T23: DuckDB SQL filter on big Parquet (server-side pushdown)
 run_test "T23" "$DTPIPE -i artifacts/test_data_big.parquet --alias b --from b --sql \"SELECT * FROM b WHERE value > 50000 LIMIT 10\" -o artifacts/output_t23.arrow"
 # T24: Chained transformers: fake regenerates Email, mask immediately masks it
 run_test "T24" "$DTPIPE -i artifacts/test_data.csv --fake \"Email:internet.email\" --mask \"Email:####@####.##\" -o artifacts/output_t24.csv"
 # T25: Window transformer: compute a per-window running average of Score
 run_test "T25" "$DTPIPE -i artifacts/test_data.csv --window-count 100 --window-script \"rows.map(r => ({ ...r, AvgScore: rows.reduce((acc, curr) => acc + curr.Score, 0)/100 }))\" -o artifacts/output_t25.csv"
-# T26: DataFusion CROSS JOIN between two generated sources
+# T26: DuckDB CROSS JOIN between two generated sources
 run_test "T26" "$DTPIPE -i \"generate:100\" --alias g1 -i \"generate:50\" --alias g2 --from g1 --ref g2 --sql \"SELECT g1.* FROM g1 CROSS JOIN g2\" -o artifacts/output_t26.parquet"
 # T27: Compute ternary with explicit output type annotation via --compute-types
 run_test "T27" "$DTPIPE -i artifacts/test_data.csv --compute \"Type:row.Score > 500 ? 'H' : 'L'\" --compute-types \"Type:string\" -o artifacts/output_t27.parquet"
@@ -163,11 +163,11 @@ echo -e "\n### DAG & Fan-out Tests ###"
 run_test "T30" "$DTPIPE -i artifacts/test_data.csv --alias src --from src -o artifacts/output_t30_a.parquet --from src -o artifacts/output_t30_b.csv"
 # T31: Compute serializes the entire row as a JSON object into a new column
 run_test "T31" "$DTPIPE -i artifacts/test_data.csv --compute \"Data:row\" -o artifacts/output_t31.csv"
-# T32: DataFusion heterogeneous JOIN: PostgreSQL × SQL Server 
+# T32: DuckDB heterogeneous JOIN: PostgreSQL × SQL Server 
 run_test "T32" "$DTPIPE -i \"$PG\" -q \"SELECT * FROM users_test\" --alias p -i \"$MSSQL\" -q \"SELECT * FROM users_test\" --alias m --from p --ref m --sql \"SELECT p.*, m.credit_card FROM p JOIN m ON p.id = m.id\" -o artifacts/output_t32.csv"
-# T33: DataFusion SQL predicate filter on Parquet with string equality
+# T33: DuckDB SQL predicate filter on Parquet with string equality
 run_test "T33" "$DTPIPE -i artifacts/test_data.parquet --alias main --from main --sql \"SELECT * FROM main WHERE category = 'Electronics'\" -o artifacts/output_t33.parquet"
-# T34: DataFusion with upstream sampling applied before SQL execution
+# T34: DuckDB with upstream sampling applied before SQL execution
 run_test "T34" "$DTPIPE -i artifacts/test_data_big.parquet --alias main --sampling-rate 0.01 --from main --sql \"SELECT * FROM main ORDER BY value DESC\" -o artifacts/output_t34.csv"
 # T35: Fake clone: source one column value into a new column via fake literal
 run_test "T35" "$DTPIPE -i artifacts/test_data.csv --fake \"Id:random.guid\" --fake \"IdClone:Id\" -o artifacts/output_t35.csv"
@@ -181,18 +181,18 @@ run_test "T38" "$DTPIPE -i artifacts/test_data.parquet --compute \"Label:row.Cat
 run_test "T39" "$DTPIPE -i artifacts/test_data.csv --limit 10 --export-job artifacts/output_t39.yaml"
 # T40: Reload and execute the exported job file produced by T39
 run_test "T40" "$DTPIPE --job artifacts/output_t39.yaml"
-# T41: DataFusion JOIN between CSV and DuckDB table on shared Id
-# --csv-column-types "id:uuid" on the CSV source ensures both sides of the JOIN are FixedSizeBinary(16)+arrow.uuid
-run_test "T41" "$DTPIPE -i artifacts/test_data.csv --csv-column-types \"id:uuid\" --alias c -i artifacts/test_data.duckdb --table \"geography\" --alias g --from c --ref g --sql \"SELECT c.*, g.city FROM c JOIN g ON c.id = g.id\" -o artifacts/output_t41.parquet"
+# T41: DuckDB JOIN between CSV and DuckDB table on shared Id
+# --column-types "id:uuid" on the CSV source ensures both sides of the JOIN are FixedSizeBinary(16)+arrow.uuid
+run_test "T41" "$DTPIPE -i artifacts/test_data.csv --column-types \"id:uuid\" --alias c -i artifacts/test_data.duckdb --table \"geography\" --alias g --from c --ref g --sql \"SELECT c.*, g.city FROM c JOIN g ON c.id = g.id\" -o artifacts/output_t41.parquet"
 # T42: Compute with Math.min to clamp Score at 500
 run_test "T42" "$DTPIPE -i artifacts/test_data.csv --compute \"Score:Math.min(row.Score, 500)\" -o artifacts/output_t42.csv"
-# T43: DataFusion window function: count(*) over() applied to a PG result
-run_test "T43" "$DTPIPE -i \"$PG\" -q \"SELECT * FROM users_test\" --alias p --from p --sql \"SELECT username, count(*) over() as total FROM p\" -o artifacts/output_t43.csv"
+# T43: DuckDB window function: count(*) over() applied to a PG result
+run_test "T43" "$DTPIPE -i \"$PG\" -q \"SELECT * FROM users_test\" --alias p --from p --sql \"SELECT id, count(*) over() as total FROM p\" -o artifacts/output_t43.csv"
 # T44: Fake with JS Date.now() to inject a synthetic metadata column
 run_test "T44" "$DTPIPE -i artifacts/test_data.parquet --fake \"Meta:{\\\"source\\\": \\\"parquet\\\", \\\"time\\\": Date.now()}\" -o artifacts/output_t44.csv"
 # T45: Write to Postgres with --ignore-nulls: null cells are skipped on insert
 run_test "T45" "$DTPIPE -i artifacts/test_data.csv --null \"Id\" --ignore-nulls --no-schema-validation -o \"$PG\" --table \"users_test\" --strategy Append"
-# T46: DataFusion passthrough on big dataset (with upstream limit)
+# T46: DuckDB passthrough on big dataset (with upstream limit)
 run_test "T46" "$DTPIPE -i artifacts/test_data_big.parquet --limit 1000 --alias b --from b --sql \"SELECT * FROM b\" -o artifacts/output_t46.arrow"
 # T47: Compute boolean column by comparing BirthDate to a threshold date
 run_test "T47" "$DTPIPE -i artifacts/test_data.csv --compute \"IsOld:new Date(row.BirthDate) < new Date('2000-01-01')\" -o artifacts/output_t47.parquet"
@@ -214,7 +214,7 @@ run_test "T53" "$DTPIPE -i artifacts/test_data_big.parquet -o artifacts/output_t
 run_test "T54" "$DTPIPE -i \"$PG\" --table \"output_t52\" -o artifacts/output_t54.parquet"
 # T55: JS compute on big dataset to null (measures row-engine throughput)
 run_test "T55" "$DTPIPE -i artifacts/test_data_big.parquet --compute \"V:row.Value * 1.5\" -o null"
-# T56: DataFusion aggregation on big Parquet: count(*) + max(Value)
+# T56: DuckDB aggregation on big Parquet: count(*) + max(Value)
 run_test "T56" "$DTPIPE -i artifacts/test_data_big.parquet --alias main --from main --sql \"SELECT count(*), max(value) FROM main\" -o artifacts/output_t56.csv"
 # T57: Big Parquet → SQL Server with large batch size (50k rows/batch)
 run_test "T57" "$DTPIPE -i artifacts/test_data_big.parquet -o \"$MSSQL\" --table \"output_t57\" --strategy Recreate --batch-size 50000"
@@ -238,7 +238,7 @@ run_test "T65" "$DTPIPE -i artifacts/test_data_big.parquet --compute \"Val:parse
 run_test "T66" "$DTPIPE -i artifacts/test_data_big.parquet -o artifacts/split/ -p \"prefix_{batch}.parquet\""
 # T67: Generate 1M rows with UUID fake column (generator + fake throughput)
 run_test "T67" "$DTPIPE -i \"generate:1M\" --fake \"uuid:random.guid\" -o artifacts/big_uuids.csv"
-# T68: DataFusion passthrough on big Parquet to null (SQL processor overhead baseline)
+# T68: DuckDB passthrough on big Parquet to null (SQL processor overhead baseline)
 run_test "T68" "$DTPIPE -i artifacts/test_data_big.parquet --alias main --from main --sql \"SELECT * FROM main\" -o null"
 # T69: PostgreSQL big table → CSV (measures PG read + CSV write throughput)
 run_test "T69" "$DTPIPE -i \"$PG\" -q \"SELECT * FROM output_t52\" -o artifacts/output_t69.csv"
@@ -302,7 +302,7 @@ run_test "T94" "$DTPIPE -i \"$PG\" -q \"SELECT * FROM users_test\" --rename \"us
 run_test "T95" "$DTPIPE -i artifacts/test_data.csv --compute \"FullName:row.FirstName + ' ' + row.LastName\" -o artifacts/output_t95.csv"
 # T96: Compute + filter + limit chain on big dataset → SQL Server (realistic ETL)
 run_test "T96" "$DTPIPE -i artifacts/test_data_big.parquet --compute \"X:row.Value * 1.5\" --filter \"row.Value > 100\" --limit 1000 -o \"$MSSQL\" --table \"output_t96\" --strategy Recreate"
-# T97: DataFusion GROUP BY aggregation: first-letter distribution of FirstName
+# T97: DuckDB GROUP BY aggregation: first-letter distribution of FirstName
 run_test "T97" "$DTPIPE -i artifacts/test_data.csv --alias c --from c --sql \"SELECT upper(firstname), count(*) FROM c GROUP BY 1\" -o artifacts/output_t97.csv"
 # T98: DuckDB read with --query on geography table → Arrow export
 run_test "T98" "$DTPIPE -i artifacts/test_data.duckdb --table \"geography\" -q \"SELECT * FROM geography\" -o artifacts/output_t98.arrow"
@@ -396,15 +396,15 @@ run_test "T137" "$DTPIPE -i artifacts/test_data.csv --alias src \
   --from src --limit 10 -o artifacts/output_t137_c.arrow"
 
 # T138: Fan-out after SQL processor (join -> tee)
-# --csv-column-types "id:uuid" on the CSV source: same as T21
+# --column-types "id:uuid" on the CSV source: same as T21
 run_test "T138" "$DTPIPE \
   -i artifacts/test_data.parquet --alias p \
-  -i artifacts/test_data.csv --csv-column-types \"id:uuid\" --alias c \
+  -i artifacts/test_data.csv --column-types \"id:uuid\" --alias c \
   --from p --ref c --sql \"SELECT p.*, c.email FROM p JOIN c ON p.id = c.id\" --alias joined \
   --from joined -o artifacts/output_t138_a.csv \
   --from joined -o artifacts/output_t138_b.parquet"
 
-# T139: DataFusion SQL manipulation of complex structures (nested JSON objects)
+# T139: DuckDB SQL manipulation of complex structures (nested JSON objects)
 # Summing customer loyalty points from a nested 'user' object.
 run_test "T139" "$DTPIPE -i artifacts/complex_data.jsonl --alias orders --from orders --sql \"SELECT count(*) as cnt, sum(user['points']) as total_points FROM orders\" -o artifacts/output_t139.csv"
 

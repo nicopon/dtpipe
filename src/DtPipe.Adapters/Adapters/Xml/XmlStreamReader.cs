@@ -91,10 +91,10 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 			await ResetReaderAsync(ct);
 		}
 
-		// Pass 2: build schema — priority: SchemaJson > TypeOverrides > inference
-		if (!string.IsNullOrWhiteSpace(_options.SchemaJson))
+		// Pass 2: build schema — priority: Schema (Arrow JSON) > TypeOverrides > inference
+		if (!string.IsNullOrWhiteSpace(_options.Schema))
 		{
-			BuildSchemaFromArrowJson(_options.SchemaJson);
+			BuildSchemaFromArrowJson(_options.Schema);
 			// reader is already positioned at 0 — no extra pass needed
 		}
 		else if (CanBuildSchemaFromTypeOverrides())

@@ -93,10 +93,7 @@ public class JobService
 		rootCommand.Subcommands.Add(new InspectCommand(_serviceProvider));
 
 		rootCommand.Subcommands.Add(new ProvidersCommand(_serviceProvider));
-		rootCommand.Subcommands.Add(new SqlEnginesCommand(_serviceProvider));
-
 		rootCommand.Subcommands.Add(new CompletionCommand());
-
 		rootCommand.Subcommands.Add(new SecretCommand(_console));
 
 		rootCommand.SetAction(async (ParseResult parseResult, CancellationToken ct) =>
@@ -140,7 +137,6 @@ public class JobService
 				MetricsPath = opts.MetricsPath,
 				AutoMigrate = opts.AutoMigrate,
 				Sql = opts.Sql,
-				SqlEngine = opts.SqlEngine,
 				Prefix = opts.Prefix,
 				ExportJob = opts.ExportJob,
 				Rename = opts.Rename,
@@ -151,7 +147,12 @@ public class JobService
 				Merge = opts.Merge,
 				Ref = opts.Ref,
 				SchemaSave = opts.SchemaSave,
-				SchemaLoad = opts.SchemaLoad
+				SchemaLoad = opts.SchemaLoad,
+				Path = opts.Path,
+				ColumnTypes = opts.ColumnTypes,
+				AutoColumnTypes = opts.AutoColumnTypes,
+				MaxSample = opts.MaxSample,
+				Encoding = opts.Encoding
 			};
 
 			Dictionary<string, JobDefinition> jobs;
@@ -596,6 +597,23 @@ public class JobService
 		}
 	}
 
+	private static void InjectStringProp(object obj, string propName, string? value)
+	{
+		if (string.IsNullOrEmpty(value)) return;
+		var prop = obj.GetType().GetProperty(propName);
+		if (prop != null && prop.CanWrite && prop.PropertyType == typeof(string)) prop.SetValue(obj, value);
+	}
+	private static void InjectBoolProp(object obj, string propName, bool value)
+	{
+		var prop = obj.GetType().GetProperty(propName);
+		if (prop != null && prop.CanWrite && prop.PropertyType == typeof(bool)) prop.SetValue(obj, value);
+	}
+	private static void InjectIntProp(object obj, string propName, int value)
+	{
+		var prop = obj.GetType().GetProperty(propName);
+		if (prop != null && prop.CanWrite && prop.PropertyType == typeof(int)) prop.SetValue(obj, value);
+	}
+
 	/// <summary>
 	/// For each branch that has a file-based reader implementing <see cref="IColumnTypeInferenceCapable"/>,
 	/// runs schema inference and embeds the result in <see cref="JobDefinition.ProviderOptions"/>.
@@ -640,6 +658,20 @@ public class JobService
 					: job.Input;
 				optionsRegistry.Register(new PipelineOptions { ConnectionString = cleanedInput });
 
+				// Inject universal reader options (path, column-types, encoding, …) from JobDefinition.
+				// These are core options — not in the reader's own CLI options — so BindForType above
+				// did not set them. MapProcessorProperties handles this injection by property name.
+				if (optType != null)
+				{
+					var inst = optionsRegistry.Get(optType);
+					InjectStringProp(inst, "Path",        job.Path);
+					InjectStringProp(inst, "ColumnTypes", job.ColumnTypes);
+					InjectStringProp(inst, "Encoding",    job.Encoding);
+					if (job.AutoColumnTypes) InjectBoolProp(inst, "AutoColumnTypes", true);
+					if (job.MaxSample > 0)   InjectIntProp(inst, "MaxSample", job.MaxSample);
+					optionsRegistry.RegisterByType(optType, inst);
+				}
+
 				// Open the reader to run inference and capture the full Arrow schema.
 				// This is safe for file-based readers (IColumnTypeInferenceCapable guard above).
 				await using var reader = factory.Create(optionsRegistry);
@@ -652,36 +684,10 @@ public class JobService
 
 				var schemaJson = DtPipe.Core.Infrastructure.Arrow.ArrowSchemaSerializer.SerializeCompact(arrowSchema);
 
-				// Build provider-options dict: non-default reader options + full SchemaJson.
-				// Embedding all non-default options (e.g. Path) means --job needs no extra CLI flags.
-				var readerOptsDict = new Dictionary<string, object>();
-				if (optType != null)
-				{
-					var optInst = optionsRegistry.Get(optType);
-					object? defaultOptInst = null;
-					try { defaultOptInst = System.Activator.CreateInstance(optType); } catch { }
-
-					// Skip connection-string properties already captured in job.Input.
-					var skipProps = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-						{ "Jsonl", "Xml", "Csv", "File", "ConnectionString",
-						  "ColumnTypes", "SchemaJson" }; // will be set explicitly below
-
-					foreach (var prop in optType.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
-						.Where(p => p.CanRead && p.CanWrite && !skipProps.Contains(p.Name)))
-					{
-						var val = prop.GetValue(optInst);
-						var defaultVal = defaultOptInst != null ? prop.GetValue(defaultOptInst) : null;
-						if (val != null && !string.IsNullOrEmpty(val?.ToString()) && !Equals(val, defaultVal))
-							readerOptsDict[prop.Name] = val;
-					}
-				}
-				// Embed full Arrow schema — supersedes ColumnTypes for JSON/XML readers.
-				readerOptsDict["SchemaJson"] = schemaJson;
-
-				var providerOptions = new Dictionary<string, Dictionary<string, object>>(
-					job.ProviderOptions ?? new());
-				providerOptions[factory.ComponentName] = readerOptsDict;
-				result[branch.Alias] = job with { ProviderOptions = providerOptions };
+				// Embed full Arrow schema directly in JobDefinition.Schema (per-branch).
+				// Path is already in job.Path from branch arg parsing.
+				// ProviderOptions keeps only genuinely provider-specific options (namespaces, separator, …).
+				result[branch.Alias] = job with { Schema = schemaJson };
 			}
 			catch { /* best-effort: never block the export */ }
 		}

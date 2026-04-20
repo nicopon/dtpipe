@@ -37,7 +37,7 @@ echo "Running functional validation (XML -> JSONL)..."
 START_TIME=$(date +%s)
 
 # Use dtpipe to count rows by outputting to jsonl and using wc
-ROW_COUNT=$($DTPIPE -i xml:"$XML_FILE" --xml-path //Record -o jsonl:- | wc -l)
+ROW_COUNT=$($DTPIPE -i xml:"$XML_FILE" --path //Record -o jsonl:- | wc -l)
 
 END_TIME=$(date +%s)
 DURATION=$((END_TIME - START_TIME))
@@ -54,11 +54,11 @@ fi
 
 echo ""
 echo "Running pure ingestion benchmark (XML -> Null)..."
-$DTPIPE -i xml:"$XML_FILE" --xml-path //Record -o null:-
+$DTPIPE -i xml:"$XML_FILE" --path //Record -o null:-
 
 echo ""
 echo "Verifying first record structure..."
-FIRST_RECORD=$($DTPIPE -i xml:"$XML_FILE" --xml-path //Record -o jsonl:- --limit 1)
+FIRST_RECORD=$($DTPIPE -i xml:"$XML_FILE" --path //Record -o jsonl:- --limit 1)
 echo "$FIRST_RECORD"
 if echo "$FIRST_RECORD" | grep -q "\"_id\""; then
     echo "✅ Attribute prefix verification passed (_id found)."

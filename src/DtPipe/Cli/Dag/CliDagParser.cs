@@ -12,7 +12,7 @@ namespace DtPipe.Cli.Dag;
 ///   - <c>--from</c>               always (fan-out consumer or stream transformer main source)
 ///
 /// Stream transformer branches:
-///   - A branch containing <c>--sql "&lt;query&gt;"</c> (value processor flag) activates the SQL/DataFusion processor.
+///   - A branch containing <c>--sql "&lt;query&gt;"</c> (value processor flag) activates the SQL processor.
 ///   - A branch containing <c>--merge</c> (boolean processor flag, no value) activates the merge processor.
 ///   - <c>--from a,b,c</c> declares streaming upstream sources (comma-separated for multiple).
 ///   - <c>--ref a,b</c>    declares materialized reference sources (comma-separated, lookup/join).

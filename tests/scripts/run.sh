@@ -7,10 +7,10 @@ set -e
 #   ./run.sh --test          All unit-style validation scripts (no Docker)
 #   ./run.sh --test-docker   All validation scripts including Docker-based drivers
 #   ./run.sh --catalog       135-command catalog test suite (requires init_test_data.sh + Docker)
-#   ./run.sh --bench         Performance benchmarks
-#   ./run.sh --bench --sql   Benchmarks including SQL JOIN
-#   ./run.sh --sql-features  SQL window functions + time-bucketing on both engines
-#   ./run.sh --full          Everything: smoke + test-docker + catalog + bench + sql
+#   ./run.sh --bench         Performance benchmarks (linear)
+#   ./run.sh --sql           Performance benchmarks (SQL JOIN 100M rows)
+#   ./run.sh --sql-features  SQL window functions + time-bucketing
+#   ./run.sh --full          Everything: smoke + test-docker + catalog + bench + sql-features
 #   ./run.sh --dag           DAG topology validation only
 #   ./run.sh --help          Show this help
 
@@ -37,9 +37,9 @@ show_help() {
     echo "  --test-docker    All --test scripts + drivers (Docker required)"
     echo "  --catalog        135-command catalog suite (requires init_test_data.sh + Docker)"
     echo "  --bench          Performance benchmarks (linear pipeline, DuckDB)"
-    echo "  --bench --sql    Benchmarks + DataFusion SQL JOIN"
-    echo "  --sql-features   SQL window functions + time-bucketing on both engines (no Docker)"
-    echo "  --full           smoke + test-docker + catalog + bench + sql + sql-features"
+    echo "  --sql            High-scale SQL JOIN benchmarks (100M rows)"
+    echo "  --sql-features   SQL window functions + time-bucketing (no Docker)"
+    echo "  --full           smoke + test-docker + catalog + bench + sql-features"
     echo "  --dag            DAG topology validation only"
     echo "  --xml            Streaming XML validation (2GB massive volume)"
     echo ""
@@ -150,9 +150,11 @@ if [ $MODE_CATALOG -eq 1 ]; then
 fi
 
 if [ $MODE_BENCH -eq 1 ]; then
-    BENCH_ARGS=()
-    [ $MODE_BENCH_SQL -eq 1 ] && BENCH_ARGS+=(--sql --direct)
-    run_script "Benchmarks"     "$SCRIPT_DIR/bench.sh" "${BENCH_ARGS[@]}"
+    run_script "Benchmarks"     "$SCRIPT_DIR/bench.sh"
+fi
+
+if [ $MODE_BENCH_SQL -eq 1 ]; then
+    run_script "Benchmarks (SQL)" "$SCRIPT_DIR/bench.sh" --sql
 fi
 
 # ----------------------------------------
