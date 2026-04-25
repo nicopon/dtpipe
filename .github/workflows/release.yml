@@ -18,37 +18,31 @@ jobs:
             rid: linux-x64
             runner: ubuntu-latest
             artifact: dtpipe-linux-x64
-            rust_target: ""
 
           - platform: linux-arm64
             rid: linux-arm64
             runner: ubuntu-24.04-arm
             artifact: dtpipe-linux-arm64
-            rust_target: ""
 
           - platform: macos-x64
             rid: osx-x64
             runner: macos-latest
             artifact: dtpipe-macos-x64
-            rust_target: x86_64-apple-darwin
 
           - platform: macos-arm64
             rid: osx-arm64
             runner: macos-latest
             artifact: dtpipe-macos-arm64
-            rust_target: ""
 
           - platform: windows-x64
             rid: win-x64
             runner: windows-latest
             artifact: dtpipe-windows-x64.exe
-            rust_target: ""
 
           - platform: windows-arm64
             rid: win-arm64
             runner: windows-latest
             artifact: dtpipe-windows-arm64.exe
-            rust_target: aarch64-pc-windows-msvc
 
     steps:
       - name: Checkout
@@ -58,34 +52,6 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.202'
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust_target }}
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src/DtPipe.Processors.DataFusion
-          shared-key: datafusion-${{ matrix.rid }}
-
-      - name: Build DataFusion Bridge (Unix)
-        if: "!contains(matrix.platform, 'windows')"
-        env:
-          RUST_TARGET: ${{ matrix.rust_target }}
-          CARGO_BUILD_PROFILE: release-ci
-        run: ./build_datafusion_bridge.sh
-
-      - name: Build DataFusion Bridge (Windows)
-        if: contains(matrix.platform, 'windows')
-        env:
-          CARGO_BUILD_PROFILE: release-ci
-        run: |
-          if ("${{ matrix.rust_target }}" -ne "") {
-              $env:RUST_TARGET="${{ matrix.rust_target }}"
-          }
-          ./build_datafusion_bridge.ps1
 
       - name: Restore dependencies
         run: dotnet restore
@@ -189,12 +155,6 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.202'
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build DataFusion Bridge
-        run: ./build_datafusion_bridge.sh
 
       - name: Pack All Projects
         run: dotnet pack DtPipe.sln -c Release
