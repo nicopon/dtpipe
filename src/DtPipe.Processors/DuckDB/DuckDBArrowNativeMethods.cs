@@ -104,8 +104,6 @@ internal static partial class DuckDBArrowNativeMethods
 
     // ── LAZY ITERATION (non-deprecated) ──────────────────────────────────────────────
 
-    // duckdb_result passed by value: internal_data heap pointer is shared across copies,
-    // so successive calls on value-copies correctly advance the same streaming cursor.
     [DllImport(DuckDbLibrary, EntryPoint = "duckdb_fetch_chunk")]
     internal static extern DuckDBDataChunk DuckDBFetchChunk(DuckDBResult result);
 

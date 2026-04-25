@@ -24,11 +24,12 @@ public class DecimalPersistenceTests : IAsyncDisposable
         _parquetPath = Path.Combine(Path.GetTempPath(), $"decimal_test_{Guid.NewGuid():N}.parquet");
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         try { if (File.Exists(_duckDbPath)) File.Delete(_duckDbPath); } catch { }
         try { if (File.Exists(_parquetPath)) File.Delete(_parquetPath); } catch { }
         GC.SuppressFinalize(this);
+        return ValueTask.CompletedTask;
     }
 
     [Fact]

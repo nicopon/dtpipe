@@ -31,11 +31,14 @@ internal sealed class ChannelArrowStream : IArrowArrayStream
     {
         try
         {
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_ct, cancellationToken);
-            if (await _reader.WaitToReadAsync(linkedCts.Token).ConfigureAwait(false) && _reader.TryRead(out var batch))
+            if (await _reader.WaitToReadAsync(cancellationToken))
             {
-                return batch;
+                if (_reader.TryRead(out var batch))
+                {
+                    return batch;
+                }
             }
+            return null;
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -46,7 +49,9 @@ internal sealed class ChannelArrowStream : IArrowArrayStream
         return null;
     }
 
-    public void Dispose() { }
+    public void Dispose()
+    {
+    }
 }
 
 /// <summary>
@@ -79,4 +84,3 @@ internal sealed class StaticArrowStream : IArrowArrayStream
 
     public void Dispose() { }
 }
-

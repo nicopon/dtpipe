@@ -9,7 +9,7 @@ namespace DtPipe.Tests.Unit.Core;
 public class MemoryChannelRegistryTests
 {
     [Fact]
-    public async Task UpdateChannelColumns_ShouldNotDowngradeRichArrowSchema()
+    public void UpdateChannelColumns_ShouldNotDowngradeRichArrowSchema()
     {
         // Arrange
         var registry = new MemoryChannelRegistry();

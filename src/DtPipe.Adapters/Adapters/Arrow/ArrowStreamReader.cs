@@ -29,7 +29,7 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
 		_logger = logger ?? NullLogger.Instance;
 	}
 
-	public async Task OpenAsync(CancellationToken ct = default)
+	public Task OpenAsync(CancellationToken ct = default)
 	{
 		if (string.IsNullOrEmpty(_path) || _path == "-")
 		{
@@ -63,6 +63,8 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
             var schema = _arrowReader.Schema;
             Columns = MapSchema(schema);
         }
+
+        return Task.CompletedTask;
 	}
 
     public async IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)

@@ -15,7 +15,7 @@
 
   <ItemGroup>
     <PackageReference Include="Apache.Arrow" Version="22.1.0" />
-    <PackageReference Include="DuckDB.NET.Data.Full" Version="1.5.0" />
+    <PackageReference Include="DuckDB.NET.Data.Full" Version="1.5.2" />
   </ItemGroup>
 
   <PropertyGroup>

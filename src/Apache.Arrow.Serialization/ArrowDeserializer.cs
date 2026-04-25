@@ -26,6 +26,7 @@ public static class ArrowDeserializer
 
     public static async IAsyncEnumerable<T> DeserializeAsync<T>(RecordBatch recordBatch) where T : new()
     {
+        await Task.Yield();
         foreach (var item in Deserialize<T>(recordBatch))
         {
             yield return item;

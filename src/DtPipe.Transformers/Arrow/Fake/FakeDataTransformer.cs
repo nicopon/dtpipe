@@ -188,6 +188,8 @@ public sealed partial class FakeDataTransformer : BaseColumnarTransformer, IRequ
 				colType = _fakerRegistry.GetReturnType(basePath) ?? typeof(string);
 			}
 
+
+
 			outputColumns.Add(new PipeColumnInfo(virtualColName, colType, true));
 		}
 

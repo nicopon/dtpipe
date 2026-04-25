@@ -38,6 +38,7 @@ public abstract class BaseColumnarTransformer : IColumnarTransformer
 
     public virtual async IAsyncEnumerable<RecordBatch> FlushBatchAsync([EnumeratorCancellation] CancellationToken ct = default)
     {
+        await Task.CompletedTask;
         yield break;
     }
 
