@@ -143,6 +143,9 @@ run_test "T20" "$DTPIPE -i artifacts/test_data.csv --limit 0 -o artifacts/output
 run_test "T21" "$DTPIPE -i artifacts/test_data.parquet --alias p -i artifacts/test_data.csv --column-types \"id:uuid\" --alias c --from p --ref c --sql \"SELECT p.*, c.email FROM p JOIN c ON p.id = c.id\" -o artifacts/output_t21.parquet"
 # T22: DuckDB aggregation: count(*) and avg() from PostgreSQL
 run_test "T22" "$DTPIPE -i \"$PG\" -q \"SELECT * FROM users_test\" --alias db --from db --sql \"SELECT count(*) as total, avg(length(username)) FROM db\" -o artifacts/output_t22.csv"
+# T22bis: DuckDB aggregation: count(*) and avg() from Parquet (identical types to T22)
+$DTPIPE -i "generate:1000" --fake "id:random.guid" --fake "username:internet.userName" --fake "last_login:date.past" --drop "GenerateIndex" -o artifacts/users_test.parquet
+run_test "T22bis" "$DTPIPE -i artifacts/users_test.parquet --alias db --from db --sql \"SELECT count(*) as total, avg(length(username)) FROM db\" -o artifacts/output_t22bis.csv"
 # T23: DuckDB SQL filter on big Parquet (server-side pushdown)
 run_test "T23" "$DTPIPE -i artifacts/test_data_big.parquet --alias b --from b --sql \"SELECT * FROM b WHERE value > 50000 LIMIT 10\" -o artifacts/output_t23.arrow"
 # T24: Chained transformers: fake regenerates Email, mask immediately masks it

@@ -218,9 +218,9 @@ run_sql_test "T9: Wide Schema" \
   check_t9
 
 # ----------------------------------------
-# Topology 10: Vicious - FFI Column Reordering (String-Int Trap)
+# Topology 10: FFI Mixed Schema Layout Stability (Strings and Numbers)
 # ----------------------------------------
-echo "--- [10] Vicious: FFI Column Reordering (String before Numeric) ---"
+echo "--- [10] FFI Mixed Schema Layout Stability (Alternating Types) ---"
 cat > "$A/t10_src.csv" <<'EOF'
 Label,Value,Comment,Score
 ABC,100,First,10.5
@@ -229,11 +229,11 @@ GHI,300,Third,30.5
 EOF
 
 check_t10() {
-    grep -q "ABC,100,First,10.5" "$1" && pass "FFI Reordering ($2): correct values" || fail "FFI Reordering ($2): corrupt data"
-    grep -q "GHI,300,Third,30.5" "$1" && pass "FFI Reordering ($2): last row OK" || fail "FFI Reordering ($2): corrupt data"
+    grep -q "ABC,100,First,10.5" "$1" && pass "FFI Layout ($2): correct values" || fail "FFI Layout ($2): corrupt data"
+    grep -q "GHI,300,Third,30.5" "$1" && pass "FFI Layout ($2): last row OK" || fail "FFI Layout ($2): corrupt data"
 }
 
-run_sql_test "T10: FFI Reordering" \
+run_sql_test "T10: FFI Layout Stability" \
   "-i \"$A/t10_src.csv\" --column-types \"Label:string,Value:int32,Comment:string,Score:double\" --alias src --from src --sql \"SELECT * FROM src\"" \
   check_t10
 

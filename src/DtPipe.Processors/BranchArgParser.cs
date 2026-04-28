@@ -30,4 +30,35 @@ public static class BranchArgParser
             if (args[i].Equals(flag, StringComparison.OrdinalIgnoreCase))
                 yield return args[i + 1];
     }
+
+    /// <summary>
+    /// Returns the first positional argument (not a flag and not a value for a flag).
+    /// </summary>
+    public static string? GetPositionalQuery(string[] args)
+    {
+        for (int i = 0; i < args.Length; i++)
+        {
+            var arg = args[i];
+            if (arg.StartsWith('-'))
+            {
+                // Simple heuristic: skip the next arg if this flag usually takes a value.
+                // We check if it's one of the common value-bearing flags.
+                if (IsValueFlag(arg) && i + 1 < args.Length)
+                {
+                    i++;
+                }
+                continue;
+            }
+
+            // This is a positional argument
+            return arg;
+        }
+        return null;
+    }
+
+    private static bool IsValueFlag(string flag)
+    {
+        var f = flag.ToLowerInvariant();
+        return f is "--from" or "--alias" or "--output" or "-o" or "--sql" or "--ref" or "--input" or "-i" or "--query" or "-q" or "--table" or "-t" or "--limit" or "--batch-size" or "-b";
+    }
 }

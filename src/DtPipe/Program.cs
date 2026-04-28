@@ -28,7 +28,7 @@ namespace DtPipe;
 
 class Program
 {
-	static async Task<int> Main(string[] args)
+	internal static async Task<int> Main(string[] args)
 	{
 		System.Globalization.CultureInfo.DefaultThreadCurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
 		System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = System.Globalization.CultureInfo.InvariantCulture;
@@ -56,6 +56,7 @@ class Program
 		{
 			// Pre-process args to escape leading '@' to avoid response file expansion in System.CommandLine
 			var effectiveArgs = args.Select(arg => arg.StartsWith("@") ? " " + arg : arg).ToArray();
+			jobService.RawArgs = effectiveArgs;
 
             // Manual Autocompletion Support ([suggest] directive might be missing in 2.0.3 default Pipeline)
             if (effectiveArgs.Length > 1 && effectiveArgs[0].Equals("[suggest]", StringComparison.OrdinalIgnoreCase))

@@ -49,16 +49,9 @@ internal sealed class ChannelArrowStream : IArrowArrayStream
         return null;
     }
 
-    public void Dispose()
-    {
-    }
+    public void Dispose() { }
 }
 
-/// <summary>
-/// Wraps a pre-drained list of RecordBatches as an IArrowArrayStream.
-/// This is used for reference tables that need to be zero-copy while remaining repeatable
-/// (by using a new stream instance for each scan).
-/// </summary>
 internal sealed class StaticArrowStream : IArrowArrayStream
 {
     private readonly Schema _schema;

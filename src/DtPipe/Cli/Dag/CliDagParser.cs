@@ -94,31 +94,44 @@ public static class CliDagParser
             alias = $"stream{branchCounter}";
         }
         branchCounter++;
+        explicitAliases.Add(alias);
 
-        // --from accepts comma-separated aliases: --from a,b,c
         var fromValue = ExtractArgValue(argsArray, "--from");
         var streamingAliases = fromValue != null
             ? fromValue.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             : Array.Empty<string>();
 
-        // --ref accepts comma-separated aliases: --ref a,b
         var refAliases = ExtractAllArgValues(argsArray, "--ref")
             .SelectMany(r => r.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             .ToList();
 
-        // Processor detection: boolean flags (e.g. --merge) take precedence, then value flags (e.g. --sql).
+        string? input = ExtractArgValue(argsArray, "-i") ?? ExtractArgValue(argsArray, "--input");
+
         var processorName =
             argsArray.FirstOrDefault(a => CliPipelineRules.BooleanProcessorFlags.Contains(a))?.TrimStart('-') ??
             argsArray.FirstOrDefault(a => CliPipelineRules.ValueProcessorFlags.Contains(a))?.TrimStart('-');
 
-        // Input: for stream-transformer branches there is no injected -i.
-        // For regular branches, extract the explicit -i / --input value.
-        string? input = ExtractArgValue(argsArray, "-i") ?? ExtractArgValue(argsArray, "--input");
+        // Positional SQL detection and injection
+        if (processorName == null && streamingAliases.Length > 0 && string.IsNullOrEmpty(input))
+        {
+            for (int i = 0; i < args.Count; i++)
+            {
+                if (!args[i].StartsWith('-') && !IsValueForKnownFlag(args[i], argsArray))
+                {
+                    // Found a positional argument in a transformer branch. 
+                    // Inject --sql to make it explicit for System.CommandLine and avoid greediness issues.
+                    args.Insert(i, "--sql");
+                    argsArray = args.ToArray(); // Update array for subsequent extractions
+                    processorName = "sql";
+                    break;
+                }
+            }
+        }
 
         return new BranchDefinition
         {
             Alias = alias,
-            Arguments = argsArray,
+            Arguments = args.ToArray(),
             Input = input,
             Output = ExtractArgValue(argsArray, "-o") ?? ExtractArgValue(argsArray, "--output"),
             StreamingAliases = streamingAliases,
@@ -182,5 +195,18 @@ public static class CliDagParser
     {
         for (int i = 0; i < args.Length - 1; i++)
             if (args[i].Equals(flag, StringComparison.OrdinalIgnoreCase)) yield return args[i + 1];
+    }
+
+    private static bool IsValueForKnownFlag(string val, string[] args)
+    {
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (args[i].StartsWith('-') && args[i + 1] == val)
+            {
+                // This is a bit simplistic but works for common flags like --from, --alias, --output
+                return true;
+            }
+        }
+        return false;
     }
 }

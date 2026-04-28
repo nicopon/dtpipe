@@ -24,12 +24,14 @@ public class DuckDBSqlTransformerFactory : IStreamTransformerFactory
     public int MaxLookups => -1;
 
     public bool IsApplicable(string[] branchArgs)
-        => BranchArgParser.ExtractValue(branchArgs, "--sql") != null;
+        => BranchArgParser.ExtractValue(branchArgs, "--sql") != null ||
+           (BranchArgParser.ExtractValue(branchArgs, "--from") != null && BranchArgParser.GetPositionalQuery(branchArgs) != null);
 
     public IStreamTransformer Create(string[] branchArgs, BranchChannelContext ctx, IServiceProvider serviceProvider)
     {
         var query = BranchArgParser.ExtractValue(branchArgs, "--sql")
-            ?? throw new ArgumentException("--sql <query> is required for DuckDBSqlTransformer");
+            ?? BranchArgParser.GetPositionalQuery(branchArgs)
+            ?? throw new ArgumentException("--sql <query> or a positional SQL query is required for DuckDBSqlTransformer");
 
         var mainAlias = BranchArgParser.ExtractValue(branchArgs, "--from") ?? "";
         var mainChannelAlias = ctx.AliasMap.GetValueOrDefault(mainAlias, mainAlias);

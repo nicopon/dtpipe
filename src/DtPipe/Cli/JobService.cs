@@ -29,6 +29,8 @@ public class JobService
 	private readonly IAnsiConsole _console;
 	private readonly ILoggerFactory _loggerFactory;
 
+	public string[]? RawArgs { get; set; }
+
 	public JobService(
 		IServiceProvider serviceProvider,
 		IAnsiConsole console,
@@ -99,7 +101,7 @@ public class JobService
 		rootCommand.SetAction(async (ParseResult parseResult, CancellationToken ct) =>
 		{
 			// 1. Check if we have a DAG
-			var rawArgs = Environment.GetCommandLineArgs().Skip(1).ToArray(); // Skip executable path
+			var rawArgs = RawArgs ?? Environment.GetCommandLineArgs().Skip(1).ToArray(); // Skip executable path
 
 			if (rawArgs.Length == 0) return; // Should already be handled in Program.cs, but just in case.
 
@@ -219,9 +221,11 @@ public class JobService
 						var bj = branchJobs.Values.First();
 						
 						bj = bj with {
+							Input = branch.Input,
+							Output = branch.Output,
 							Ref = branch.RefAliases?.ToArray() ?? Array.Empty<string>(),
 							From = branch.StreamingAliases.FirstOrDefault(),
-							Sql = DtPipe.Cli.Dag.CliDagParser.ExtractArgValue(branch.Arguments, "--sql"),
+							Sql = DtPipe.Cli.Dag.CliDagParser.ExtractArgValue(branch.Arguments, "--sql") ?? DtPipe.Processors.BranchArgParser.GetPositionalQuery(branch.Arguments),
 							Transformers = RawJobBuilder.BuildTransformerConfigsFromCli(branch.Arguments, factoryList, _contributors)
 						};
 						jobs[branch.Alias] = bj;

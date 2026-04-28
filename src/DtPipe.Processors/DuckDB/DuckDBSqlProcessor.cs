@@ -132,7 +132,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
             batches.Add(batch);
 
         var stream = new StaticArrowStream(schema, batches);
-        await RegisterArrowStreamAsync(alias, stream, schema, ct);
+        await RegisterArrowStreamAsync(alias, stream, ct);
     }
 
     // Registers the main source as a streaming Arrow scan in DuckDB (zero-copy).
@@ -144,7 +144,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
             ?? throw new Exception($"Arrow channel '{channelAlias}' not found");
 
         var stream = new ChannelArrowStream(schema, channelTuple.Channel.Reader, _logger, ct);
-        await RegisterArrowStreamAsync(alias, stream, schema, ct);
+        await RegisterArrowStreamAsync(alias, stream, ct);
     }
 
     private static string? GetDuckDBCastForExtension(string extensionName)
@@ -158,8 +158,9 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
         };
     }
 
-    private async Task RegisterArrowStreamAsync(string alias, IArrowArrayStream stream, Schema schema, CancellationToken ct)
+    private async Task RegisterArrowStreamAsync(string alias, IArrowArrayStream stream, CancellationToken ct)
     {
+        var schema = stream.Schema;
         var needsView = false;
         foreach (var f in schema.FieldsList)
         {
