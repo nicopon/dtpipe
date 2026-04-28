@@ -29,7 +29,17 @@ if ! docker info &> /dev/null; then
     exit 1
 fi
 
+# Determine the correct docker compose command
+if command -v docker-compose &> /dev/null; then
+    COMPOSE_CMD="docker-compose"
+elif docker compose version &> /dev/null 2>&1; then
+    COMPOSE_CMD="docker compose"
+else
+    echo -e "${RED}Error: Neither docker-compose nor docker compose is available${NC}"
+    exit 1
+fi
+
 echo -e "${YELLOW}Stopping Docker infrastructure...${NC}"
-docker compose -f "$COMPOSE_FILE" down
+$COMPOSE_CMD -f "$COMPOSE_FILE" down
 
 echo -e "${GREEN}✓ Infrastructure stopped${NC}"

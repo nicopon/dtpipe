@@ -30,6 +30,16 @@ if ! docker info &> /dev/null; then
     exit 1
 fi
 
+# Determine the correct docker compose command
+if command -v docker-compose &> /dev/null; then
+    COMPOSE_CMD="docker-compose"
+elif docker compose version &> /dev/null 2>&1; then
+    COMPOSE_CMD="docker compose"
+else
+    echo -e "${RED}Error: Neither docker-compose nor docker compose is available${NC}"
+    exit 1
+fi
+
 # Function to check if a container is running and healthy
 is_container_healthy() {
     local container_name=$1
@@ -109,7 +119,7 @@ fi
 
 # Start containers
 echo -e "${YELLOW}Starting Docker infrastructure...${NC}"
-docker compose -f "$COMPOSE_FILE" up -d
+$COMPOSE_CMD -f "$COMPOSE_FILE" up -d
 
 # Wait for containers to be healthy
 echo -e "${YELLOW}Waiting for containers to be healthy and databases to be ready...${NC}"
