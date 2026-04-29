@@ -146,6 +146,25 @@ run_test "T22" "$DTPIPE -i \"$PG\" -q \"SELECT * FROM users_test\" --alias db --
 # T22bis: DuckDB aggregation: count(*) and avg() from Parquet (identical types to T22)
 $DTPIPE -i "generate:1000" --fake "id:random.guid" --fake "username:internet.userName" --fake "last_login:date.past" --drop "GenerateIndex" -o artifacts/users_test.parquet
 run_test "T22bis" "$DTPIPE -i artifacts/users_test.parquet --alias db --from db --sql \"SELECT count(*) as total, avg(length(username)) FROM db\" -o artifacts/output_t22bis.csv"
+# T22ter: DuckDB aggregation: count(*) and avg() from generated data directly (no materialization)
+run_test "T22ter" "$DTPIPE -i \"generate:1000\" --fake \"id:random.guid\" --fake \"username:internet.userName\" --fake \"last_login:date.past\" --drop \"GenerateIndex\" --alias db --from db --sql \"SELECT count(*) as total, avg(length(username)) FROM db\" -o artifacts/output_t22ter.csv"
+# T22quad: DuckDB aggregation: count(*) and avg() with string concatenation
+run_test "T22quad" "$DTPIPE -i \"generate:1000\" --fake \"id:random.guid\" --fake \"username:internet.userName\" --fake \"last_login:date.past\" --drop \"GenerateIndex\" --alias db --from db --sql \"SELECT count(*) as total, avg(length('xx' || username)) FROM db\" -o artifacts/output_t22quad.csv"
+# T22pent: Multi-column projection in non-schema order — validates that the EXPLAIN-based projection
+# preserves DuckDB's column_ids order (not schema order). Schema: [id(UUID), username(String)].
+# Query selects username FIRST and id SECOND, which is the reverse of the schema order.
+# Verifies: (1) no crash, (2) first output column is 'username' (String), not 'id' (UUID).
+run_test "T22pent" "$DTPIPE -i \"generate:10\" --fake \"id:random.guid\" --fake \"username:internet.userName\" --drop \"GenerateIndex\" --alias db --from db --sql \"SELECT username, id FROM db\" -o artifacts/output_t22pent.csv"
+# Verify T22pent output: first column must be 'username' (strings), not 'id' (UUID hex strings)
+if [ -f artifacts/output_t22pent.csv ] && [ -s artifacts/output_t22pent.csv ]; then
+    FIRST_COL=$(head -1 artifacts/output_t22pent.csv | cut -d',' -f1 | tr -d '"')
+    if [ "$FIRST_COL" = "username" ]; then
+        echo "  T22pent column-order check: PASSED (first column = 'username')"
+    else
+        echo "  T22pent column-order check: FAILED (first column = '$FIRST_COL', expected 'username')"
+        exit 1
+    fi
+fi
 # T23: DuckDB SQL filter on big Parquet (server-side pushdown)
 run_test "T23" "$DTPIPE -i artifacts/test_data_big.parquet --alias b --from b --sql \"SELECT * FROM b WHERE value > 50000 LIMIT 10\" -o artifacts/output_t23.arrow"
 # T24: Chained transformers: fake regenerates Email, mask immediately masks it

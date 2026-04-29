@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using System.Threading.Channels;
 using Apache.Arrow;
 using Apache.Arrow.C;
@@ -29,6 +30,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
     // Input-side: CArrowArrayStream structs allocated on the unmanaged heap for DuckDB to hold.
     private readonly List<IArrowArrayStream> _activeStreams = new();
     private readonly List<IntPtr> _allocatedPointers = new();
+    private readonly Dictionary<string, IProjectableArrowStream> _streamProjections = new();
 
     private DuckDBConnection? _conn;
     private DuckDBPreparedStatement? _stmt;
@@ -96,6 +98,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
 
             _logger.LogDebug("DuckDBSqlProcessor: Sources registered. Preparing statement...");
             PrepareStatement();
+            await ApplyProjectionsFromExplainAsync(ct);
 
             // Arrow options carry the arrow_lossless_conversion flag and are used for both
             // schema construction (duckdb_to_arrow_schema) and chunk conversion (duckdb_data_chunk_to_arrow).
@@ -158,8 +161,11 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
         };
     }
 
-    private async Task RegisterArrowStreamAsync(string alias, IArrowArrayStream stream, CancellationToken ct)
+    private async Task RegisterArrowStreamAsync(string alias, IArrowArrayStream underlyingStream, CancellationToken ct)
     {
+        var stream = new ProjectedArrowStream(underlyingStream);
+        _streamProjections[alias] = stream;
+        
         var schema = stream.Schema;
         var needsView = false;
         foreach (var f in schema.FieldsList)
@@ -230,6 +236,109 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
             throw new Exception($"DuckDB prepare failed for query: {_query}. Error: {msg}");
         }
         _stmt = stmt;
+    }
+
+    private async Task ApplyProjectionsFromExplainAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var cmd = _conn!.CreateCommand();
+            cmd.CommandText = $"EXPLAIN (FORMAT JSON) {_query}";
+
+            using var reader = await cmd.ExecuteReaderAsync(ct);
+            if (!await reader.ReadAsync(ct)) return;
+
+            var json = reader.GetString(1); // col 0 = explain_key, col 1 = explain_value
+
+            // Parse projections as an ORDERED list. The EXPLAIN JSON lists ARROW_SCAN projections
+            // in the same order as DuckDB's internal column_ids vector, which determines the
+            // expected children[] position in each CDI batch (arrow_scan_is_projected = true
+            // hardcoded). Losing this order (e.g. by using a HashSet) would map children[idx]
+            // to the wrong column for any multi-column projection where query order ≠ schema order.
+            var projectedColumnsOrdered = new List<string>();
+            ParseProjectionsFromJson(json, projectedColumnsOrdered);
+
+            foreach (var kvp in _streamProjections)
+            {
+                var alias = kvp.Key;
+                var stream = kvp.Value;
+
+                // Build a fast-lookup set of this stream's column names for the membership test,
+                // but iterate the EXPLAIN-ordered list to build the final projection — preserving
+                // the order DuckDB expects in the CDI batch.
+                var streamColSet = new HashSet<string>(
+                    stream.Schema.FieldsList.Select(f => f.Name),
+                    StringComparer.OrdinalIgnoreCase);
+
+                var projectedForStream = projectedColumnsOrdered
+                    .Where(c => streamColSet.Contains(c))
+                    .ToList();
+
+                if (projectedForStream.Count > 0)
+                {
+                    _logger.LogDebug("DuckDBSqlProcessor: Setting projection for '{Alias}': [{Cols}]", alias, string.Join(", ", projectedForStream));
+                    stream.SetProjectedColumns(projectedForStream);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            throw new Exception(
+                "DuckDBSqlProcessor: Pre-flight EXPLAIN failed. Aborting query to prevent potential data corruption or native crashes due to DuckDB projection pushdown bugs.", ex);
+        }
+    }
+
+    // Parses ARROW_SCAN projection lists from a DuckDB EXPLAIN (FORMAT JSON) result.
+    // Projections are appended to `ordered` in the order they appear in the JSON, which
+    // matches DuckDB's column_ids order and therefore the expected CDI children[] position.
+    private void ParseProjectionsFromJson(string json, List<string> ordered)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.ValueKind == JsonValueKind.Array)
+                foreach (var item in root.EnumerateArray())
+                    TraversePlanForProjections(item, ordered);
+            else if (root.ValueKind == JsonValueKind.Object)
+                TraversePlanForProjections(root, ordered);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "DuckDBSqlProcessor: Failed to parse EXPLAIN JSON");
+        }
+    }
+
+    private static void TraversePlanForProjections(JsonElement element, List<string> ordered)
+    {
+        if (element.TryGetProperty("name", out var nameProp) &&
+            nameProp.GetString() == "ARROW_SCAN" &&
+            element.TryGetProperty("extra_info", out var extraInfo) &&
+            extraInfo.TryGetProperty("Projections", out var projProp))
+        {
+            if (projProp.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var p in projProp.EnumerateArray())
+                {
+                    var col = p.GetString();
+                    if (!string.IsNullOrEmpty(col) &&
+                        !ordered.Contains(col, StringComparer.OrdinalIgnoreCase))
+                        ordered.Add(col);
+                }
+            }
+            else if (projProp.ValueKind == JsonValueKind.String)
+            {
+                var col = projProp.GetString();
+                if (!string.IsNullOrEmpty(col) &&
+                    !ordered.Contains(col, StringComparer.OrdinalIgnoreCase))
+                    ordered.Add(col);
+            }
+        }
+
+        if (element.TryGetProperty("children", out var children) &&
+            children.ValueKind == JsonValueKind.Array)
+            foreach (var child in children.EnumerateArray())
+                TraversePlanForProjections(child, ordered);
     }
 
     // Builds the Arrow schema directly from the prepared statement — no LIMIT 0 probe query.
