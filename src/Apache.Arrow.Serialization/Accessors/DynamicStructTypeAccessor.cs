@@ -65,7 +65,22 @@ internal class DynamicStructTypeAccessor : ArrowSerializer.StructTypeAccessorBas
             else if (value is IDictionary<string, object?> gd) dict = new DictionaryWrapper(gd);
         }
 
-        if (dict == null) return;
+        if (dict == null)
+        {
+            // Struct promotion: if the schema expects a struct but we got a scalar,
+            // and the struct contains a '_value' field (commonly used for XML mixed content),
+            // promote the scalar to a dictionary with that key.
+            if (_fieldMapping.ContainsKey("_value"))
+            {
+                var promotedDict = new Dictionary<string, object?>(1, StringComparer.Ordinal);
+                promotedDict["_value"] = value;
+                dict = promotedDict;
+            }
+            else
+            {
+                return;
+            }
+        }
 
         var processedIndices = new HashSet<int>();
 

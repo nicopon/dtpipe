@@ -40,6 +40,18 @@ public static class SchemaDiscoveryHelper
             {
                 target[kvp.Key] = kvp.Value;
             }
+            // Heterogeneous promotion: Scalar vs Dictionary
+            else if (existing is not Dictionary<string, object?> && kvp.Value is Dictionary<string, object?> sourceDictPromo)
+            {
+                var promotedTarget = new Dictionary<string, object?>(StringComparer.Ordinal) { ["_value"] = existing };
+                DeepMergeSchemas(promotedTarget, sourceDictPromo);
+                target[kvp.Key] = promotedTarget;
+            }
+            else if (existing is Dictionary<string, object?> targetDictPromo && kvp.Value is not Dictionary<string, object?> && kvp.Value != null)
+            {
+                var promotedSource = new Dictionary<string, object?>(StringComparer.Ordinal) { ["_value"] = kvp.Value };
+                DeepMergeSchemas(targetDictPromo, promotedSource);
+            }
         }
     }
 }

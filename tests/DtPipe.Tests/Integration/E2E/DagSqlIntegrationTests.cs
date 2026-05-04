@@ -123,4 +123,33 @@ public class DagSqlIntegrationTests : IAsyncLifetime
         lines[0].Should().Be("c");
         lines[1].Should().Be("15");
     }
+
+    [Fact]
+    public async Task DagPipeline_ShouldSupportProjectionPushdown_ForComplexArrowStructs()
+    {
+        var inputJsonPath = GetTempPath().Replace(".csv", ".jsonl");
+        var outputPath = GetTempPath();
+
+        var jsonContent = @"{ ""Id"": 1, ""Product"": { ""Name"": ""Laptop"", ""Metadata"": { ""Price"": 1200.5 } } }
+{ ""Id"": 2, ""Product"": { ""Name"": ""Mouse"", ""Metadata"": { ""Price"": 25.5 } } }";
+        await File.WriteAllTextAsync(inputJsonPath, jsonContent);
+
+        var args = new[]
+        {
+            "--input", $"jsonl:{inputJsonPath}", "--alias", "src",
+            "--from", "src", 
+            "SELECT Product.Metadata.Price FROM src ORDER BY Id", 
+            "--output", $"csv:{outputPath}"
+        };
+
+        var exitCode = await DtPipe.Program.Main(args);
+        exitCode.Should().Be(0, "the pipeline should execute without segfaults or binder errors");
+
+        var lines = await File.ReadAllLinesAsync(outputPath);
+        lines.Should().HaveCount(3, "1 header + 2 data rows");
+        
+        lines[0].Should().Be("Price");
+        lines[1].Should().Be("1200.5");
+        lines[2].Should().Be("25.5");
+    }
 }

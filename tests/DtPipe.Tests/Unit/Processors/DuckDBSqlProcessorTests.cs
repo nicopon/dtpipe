@@ -430,4 +430,58 @@ public class DuckDBSqlProcessorTests
         Assert.NotEmpty(batches);
         Assert.Equal(10, batches.Sum(b => b.Length));
     }
+
+    /// <summary>
+    /// Verifies that DuckDB's projection pushdown correctly handles nested Arrow Struct fields.
+    /// When querying a sub-property like `User.Role`, the processor should pass the entire `User`
+    /// root column to DuckDB to prevent native crashes, and the output should contain only `Role`.
+    /// </summary>
+    [Fact]
+    public async Task OpenAsync_AndReadRecordBatches_NestedStructProjection_ReturnsNativeExtraction()
+    {
+        // Schema: User = Struct { Id: Int32, Role: String }
+        var idField = new Field("Id", Int32Type.Default, nullable: false);
+        var roleField = new Field("Role", StringType.Default, nullable: false);
+        var userStructType = new StructType(new[] { idField, roleField });
+        
+        var userField = new Field("User", userStructType, nullable: false);
+        var schema = new Schema(new[] { userField }, null);
+
+        // Data arrays
+        var idArr = new Int32Array.Builder().AppendRange(new[] { 1, 2 }).Build();
+        var roleArr = new StringArray.Builder().AppendRange(new[] { "Admin", "Guest" }).Build();
+
+        // Valid buffer for the struct array (2 items, both valid)
+        var validBuf = new ArrowBuffer.Builder<byte>(1).Append(0xFF).Build();
+        var structArr = new StructArray(userStructType, 2, new IArrowArray[] { idArr, roleArr }, validBuf, 0);
+
+        var batch = new RecordBatch(schema, new IArrowArray[] { structArr }, 2);
+
+        const string alias = "src";
+        var registry = BuildRegistry(alias, schema, new[] { batch });
+
+        var processor = new DuckDBSqlProcessor(
+            registry, "SELECT User.Role FROM src ORDER BY User.Id", alias, alias,
+            refAliases: [], refChannelAliases: [],
+            NullLogger<DuckDBSqlProcessor>.Instance);
+
+        await processor.OpenAsync();
+        var resultBatches = new List<RecordBatch>();
+        await foreach (var b in processor.ReadRecordBatchesAsync())
+            resultBatches.Add(b);
+        await processor.DisposeAsync();
+
+        // Output schema must only have 'Role'
+        Assert.Single(processor.Schema!.FieldsList);
+        Assert.Equal("Role", processor.Schema.FieldsList[0].Name);
+
+        // Data verification
+        Assert.Single(resultBatches);
+        var firstBatch = resultBatches[0];
+        Assert.Equal(2, firstBatch.Length);
+        
+        var roleColumn = Assert.IsType<StringArray>(firstBatch.Column(0));
+        Assert.Equal("Admin", roleColumn.GetString(0));
+        Assert.Equal("Guest", roleColumn.GetString(1));
+    }
 }

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using CsvHelper;
 using CsvHelper.Configuration;
 using DtPipe.Core.Abstractions;
@@ -223,6 +224,9 @@ public sealed class CsvDataWriter : IRowDataWriter, IRequiresOptions<CsvWriterOp
 
 			// Boolean as true/false (DuckDB native format)
 			bool b => b ? "true" : "false",
+
+			// Complex structures (e.g. from Arrow StructType) as JSON
+			System.Collections.IDictionary dict => JsonSerializer.Serialize(dict),
 
 			// Everything else as string
 			_ => Convert.ToString(value, CultureInfo.InvariantCulture)

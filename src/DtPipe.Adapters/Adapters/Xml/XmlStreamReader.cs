@@ -623,20 +623,28 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 
 	Done:
 		string? textValue = textBuilder?.ToString();
+		object? result;
 
 		if (!hasChildElements)
 		{
-			if (dict == null) return ApplyParser(currentKeyPath, textValue ?? "");
-			if (textValue != null) dict["_value"] = ApplyParser(string.IsNullOrEmpty(currentKeyPath) ? "_value" : $"{currentKeyPath}._value", textValue);
-			return dict;
+			if (dict == null) result = ApplyParser(currentKeyPath, textValue ?? "");
+			else 
+			{
+				if (textValue != null) dict["_value"] = ApplyParser(string.IsNullOrEmpty(currentKeyPath) ? "_value" : $"{currentKeyPath}._value", textValue);
+				result = dict;
+			}
 		}
-
-		if (textValue != null && dict != null)
+		else
 		{
-			dict["_value"] = ApplyParser(string.IsNullOrEmpty(currentKeyPath) ? "_value" : $"{currentKeyPath}._value", textValue);
+			if (textValue != null && dict != null)
+			{
+				dict["_value"] = ApplyParser(string.IsNullOrEmpty(currentKeyPath) ? "_value" : $"{currentKeyPath}._value", textValue);
+			}
+			result = dict ?? (object?)new Dictionary<string, object?>(StringComparer.Ordinal);
 		}
 
-		return dict ?? (object?)new Dictionary<string, object?>(StringComparer.Ordinal);
+
+		return result;
 	}
 
 	private object? ApplyParser(string fullPath, string? value)
@@ -789,7 +797,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 			return (ResolveHintToClrType(hint) ?? typeof(string), ResolveHintToArrowType(hint));
 		}
 
-		return value switch
+		var result = value switch
 		{
 			bool => (typeof(bool), BooleanType.Default),
 			double => (typeof(double), DoubleType.Default),
@@ -799,6 +807,8 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 			List<object?> l => (typeof(object), InferListType(l, currentPath)),
 			_ => (typeof(string), StringType.Default)
 		};
+
+		return result;
 	}
 
 	private IArrowType InferStructType(Dictionary<string, object?> dict, string currentPath)

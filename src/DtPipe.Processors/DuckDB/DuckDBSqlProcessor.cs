@@ -165,7 +165,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
     {
         var stream = new ProjectedArrowStream(underlyingStream);
         _streamProjections[alias] = stream;
-        
+
         var schema = stream.Schema;
         var needsView = false;
         foreach (var f in schema.FieldsList)
@@ -214,7 +214,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
                 return $"\"{f.Name}\"";
             });
             var viewSql = $"CREATE VIEW \"{alias}\" AS SELECT {string.Join(", ", columns)} FROM \"{scanAlias}\"";
-            
+
             _logger.LogDebug("DuckDBSqlProcessor: Restoring Arrow extension semantics via semantic view '{Alias}'", alias);
             using var cmd = _conn!.CreateCommand();
             cmd.CommandText = viewSql;
@@ -270,9 +270,28 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
                     stream.Schema.FieldsList.Select(f => f.Name),
                     StringComparer.OrdinalIgnoreCase);
 
-                var projectedForStream = projectedColumnsOrdered
-                    .Where(c => streamColSet.Contains(c))
-                    .ToList();
+                var projectedForStream = new List<string>();
+                foreach (var c in projectedColumnsOrdered)
+                {
+                    if (streamColSet.Contains(c))
+                    {
+                        if (!projectedForStream.Contains(c)) projectedForStream.Add(c);
+                    }
+                    else
+                    {
+                        // Handle DuckDB pushing down nested struct projections (e.g., "ComplexObject._value")
+                        // by projecting the root column ("ComplexObject") to pass the full struct.
+                        var dotIndex = c.IndexOf('.');
+                        if (dotIndex > 0)
+                        {
+                            var rootCol = c.Substring(0, dotIndex);
+                            if (streamColSet.Contains(rootCol))
+                            {
+                                if (!projectedForStream.Contains(rootCol)) projectedForStream.Add(rootCol);
+                            }
+                        }
+                    }
+                }
 
                 if (projectedForStream.Count > 0)
                 {
