@@ -1,5 +1,4 @@
 using System.CommandLine;
-using System.CommandLine.Parsing;
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
@@ -54,55 +53,6 @@ public class CliProviderFactory<TService> : ICliContributor, IDataFactory
 		return CliOptionBuilder.GenerateFlagDefsForType(_descriptor.OptionsType);
 	}
 
-	public string? BoundComponentName => _descriptor.ComponentName;
-
-	protected virtual CliPipelinePhase DerivePhase()
-	{
-		if (typeof(TService) == typeof(IStreamReader)) return CliPipelinePhase.Reader;
-		if (typeof(TService) == typeof(IDataWriter)) return CliPipelinePhase.Writer;
-		return CliPipelinePhase.Global;
-	}
-
-	private IReadOnlyDictionary<string, CliPipelinePhase>? _flagPhases;
-	public IReadOnlyDictionary<string, CliPipelinePhase> FlagPhases
-	{
-		get
-		{
-			if (_flagPhases == null)
-			{
-				var phases = new Dictionary<string, CliPipelinePhase>(StringComparer.OrdinalIgnoreCase);
-				var phase = DerivePhase();
-				foreach (var opt in GetCliOptions())
-				{
-					phases[opt.Name] = phase;
-					foreach (var alias in opt.Aliases)
-					{
-						phases[alias] = phase;
-					}
-				}
-				_flagPhases = phases;
-			}
-			return _flagPhases;
-		}
-	}
-
-	public void BindOptions(ParseResult parseResult, OptionsRegistry registry)
-	{
-		var options = GetCliOptions();
-
-		// Get existing options (from YAML default or generic default)
-		var existingOptions = registry.Get(_descriptor.OptionsType);
-
-		bool? isReaderScope = null;
-		if (typeof(TService) == typeof(IStreamReader)) isReaderScope = true;
-		else if (typeof(TService) == typeof(IDataWriter)) isReaderScope = false;
-
-		// Apply CLI overrides on top
-		CliOptionBuilder.BindForType(_descriptor.OptionsType, existingOptions, parseResult, options, isReaderScope);
-
-		// Register/Update
-		registry.RegisterByType(_descriptor.OptionsType, existingOptions);
-	}
 }
 
 public class CliDataWriterFactory : CliProviderFactory<IDataWriter>, IDataWriterFactory

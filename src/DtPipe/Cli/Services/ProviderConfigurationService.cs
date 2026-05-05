@@ -1,4 +1,3 @@
-using System.CommandLine;
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
@@ -69,24 +68,6 @@ public class ProviderConfigurationService
             }
         }
 
-        PropagateKey(job.Key);
-    }
-
-    public void BindOptions(JobDefinition job, ParseResult pr)
-    {
-        // Keep existing for back-compat during transition if needed
-        foreach (var contributor in _contributors)
-        {
-            if (contributor is IDataFactory descriptor)
-            {
-                var options = contributor.GetCliOptions();
-                var existingOptions = _registry.Get(descriptor.OptionsType);
-                bool? isReaderScope = descriptor is IStreamReaderFactory ? true : (descriptor is IDataWriterFactory ? false : (bool?)null);
-                CliOptionBuilder.BindForType(descriptor.OptionsType, existingOptions, pr, options, isReaderScope);
-                MapProcessorProperties(job, existingOptions);
-                _registry.RegisterByType(descriptor.OptionsType, existingOptions);
-            }
-        }
         PropagateKey(job.Key);
     }
 

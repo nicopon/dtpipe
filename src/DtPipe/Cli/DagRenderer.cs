@@ -171,7 +171,7 @@ internal static class DagRenderer
 
 				if (branch.ProcessorName == "sql")
 				{
-					var sql = (DtPipe.Cli.Dag.CliDagParser.ExtractArgValue(branch.Arguments, "--sql") ?? string.Empty).Trim().Replace('\n', ' ').Replace('\r', ' ');
+					var sql = ExtractArgValue(branch.Arguments, "--sql").Trim().Replace('\n', ' ').Replace('\r', ' ');
 					while (sql.Contains("  ")) sql = sql.Replace("  ", " ");
 					if (sql.Length > 60) sql = sql[..57] + "...";
 					lines.AppendLine($"      [grey]SQL › {Markup.Escape(sql)}[/]");
@@ -259,5 +259,14 @@ internal static class DagRenderer
 		if (transformers?.Any() != true) return;
 		foreach (var t in transformers)
 			sb.AppendLine($"{indent}[grey]→ {Markup.Escape(t.Type)}[/]");
+	}
+
+	private static string ExtractArgValue(string[]? args, string flag)
+	{
+		if (args == null) return string.Empty;
+		for (int i = 0; i < args.Length - 1; i++)
+			if (string.Equals(args[i], flag, StringComparison.OrdinalIgnoreCase))
+				return args[i + 1];
+		return string.Empty;
 	}
 }
