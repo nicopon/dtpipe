@@ -128,7 +128,7 @@ public class ManualVerificationTests : IAsyncLifetime
 		{
 			var readerFactory = serviceProvider.GetRequiredService<IStreamReaderFactory>();
 			var writerFactory = serviceProvider.GetRequiredService<IDataWriterFactory>();
-			await exportService.RunExportAsync(new PipelineOptions { BatchSize = options.BatchSize }, options.Provider, options.OutputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
+			await exportService.RunExportAsync(options, options.Provider, options.OutputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
 		}
 		catch (Exception ex)
 		{

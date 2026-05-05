@@ -88,7 +88,6 @@ public static class RawJobBuilder
 				QueryTimeout = (parseResult.GetValue(opts.QueryTimeout) is { Length: > 0 } qt ? qt[0] : 0),
 				BatchSize = (parseResult.GetValue(opts.BatchSize) is { Length: > 0 } bs ? bs[0] : 50_000),
 				UnsafeQuery = parseResult.GetValue(opts.UnsafeQuery),
-				DryRun = false, // Handled later for options
 				Limit = (parseResult.GetValue(opts.Limit) is { Length: > 0 } lim ? lim[0] : 0),
 				SamplingRate = (parseResult.GetValue(opts.SamplingRate) is { Length: > 0 } sr && sr[0] > 0 && sr[0] < 1.0 ? sr[0] : 1.0),
 				SamplingSeed = (parseResult.GetValue(opts.SamplingSeed) is { Length: > 0 } ss ? ss[0] : null),
@@ -105,11 +104,7 @@ public static class RawJobBuilder
 				NoSchemaValidation = parseResult.GetValue(opts.NoSchemaValidation),
 				MetricsPath = parseResult.GetValue(opts.MetricsPath)?.FirstOrDefault(),
 				AutoMigrate = parseResult.GetValue(opts.AutoMigrate),
-				Throttle = (parseResult.GetValue(opts.Throttle) is { Length: > 0 } th ? th[0] : 0),
-				IgnoreNulls = parseResult.GetValue(opts.IgnoreNulls),
 				Prefix = parseResult.GetValue(opts.Prefix),
-				Drop = parseResult.GetValue(opts.Drop) ?? Array.Empty<string>(),
-				Rename = parseResult.GetValue(opts.Rename) ?? Array.Empty<string>(),
 				Sql = sql,
 				NoStats = parseResult.GetValue(opts.NoStats),
 				SchemaSave = parseResult.GetValue(opts.SchemaSave)?.FirstOrDefault(),
@@ -120,8 +115,6 @@ public static class RawJobBuilder
 				MaxSample = parseResult.GetValue(opts.MaxSample) is { Length: > 0 } ms ? ms[0] : 0,
 				Encoding = parseResult.GetValue(opts.Encoding)?.FirstOrDefault()
 			};
-
-			if (ParseDryRunFromArgs(Environment.GetCommandLineArgs()) > 0) job = job with { DryRun = true };
 
 			return (new Dictionary<string, JobDefinition> { { "main", job } }, 0);
 		}
@@ -148,12 +141,7 @@ public static class RawJobBuilder
 			job = job with { SamplingSeed = samplingSeedOverride };
 		}
 
-		// Parse --dry-run (special handling for flag/value)
-		var dryRunVal = ParseDryRunFromArgs(Environment.GetCommandLineArgs());
-		if (dryRunVal > 0)
-		{
-			job = job with { DryRun = true };
-		}
+
 
 		var logPathOverride = parseResult.GetValue(opts.Log);
 		if (!string.IsNullOrEmpty(logPathOverride))
@@ -199,18 +187,6 @@ public static class RawJobBuilder
 
 		var prefixOverride = parseResult.GetValue(opts.Prefix);
 		if (!string.IsNullOrEmpty(prefixOverride)) job = job with { Prefix = prefixOverride };
-
-		var throttleOverride = parseResult.GetValue(opts.Throttle);
-		if (throttleOverride is { Length: > 0 } thov && thov[0] > 0) job = job with { Throttle = thov[0] };
-
-		var ignoreNullsOverride = parseResult.GetValue(opts.IgnoreNulls);
-		if (ignoreNullsOverride) job = job with { IgnoreNulls = true };
-
-		var dropOverride = parseResult.GetValue(opts.Drop);
-		if (dropOverride?.Any() == true) job = job with { Drop = dropOverride };
-
-		var renameOverride = parseResult.GetValue(opts.Rename);
-		if (renameOverride?.Any() == true) job = job with { Rename = renameOverride };
 
 		return job;
 	}

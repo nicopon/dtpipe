@@ -24,107 +24,85 @@ public class ProviderConfigurationService
         _registry = registry;
     }
 
-    public void BindOptions(JobDefinition job, ParseResult pr)
+    public void BindOptions(JobDefinition job)
     {
         foreach (var contributor in _contributors)
         {
-            if (contributor is IDataFactory factory && factory is IDataWriterFactory or IStreamReaderFactory)
+            if (contributor is IDataFactory factory)
             {
-                string providerName = factory.ComponentName;
-                if (contributor is IDataWriterFactory wFactory)
+                var optionsType = factory.OptionsType;
+                var instance = _registry.Get(optionsType);
+                
+                // 1. Bind from ProviderOptions (YAML/Globals)
+                if (job.ProviderOptions != null)
                 {
-                    var optionsType = wFactory.GetSupportedOptionTypes().FirstOrDefault();
-                    if (optionsType != null)
-                    {
-                        var instance = _registry.Get(optionsType);
-                        bool hasUpdates = false;
-
-                        if (job.ProviderOptions != null)
-                        {
-                            if (job.ProviderOptions.TryGetValue(providerName, out var globalOpts))
-                            {
-                                ConfigurationBinder.Bind(instance, globalOpts);
-                                hasUpdates = true;
-                            }
-                            if (job.ProviderOptions.TryGetValue($"{providerName}-writer", out var writerOpts))
-                            {
-                                ConfigurationBinder.Bind(instance, writerOpts);
-                                hasUpdates = true;
-                            }
-                        }
-
-                        if (hasUpdates)
-                        {
-                            if (!string.IsNullOrEmpty(job.Key) && instance is IKeyAwareOptions keyAware1)
-                                keyAware1.Key = job.Key;
-                            _registry.RegisterByType(optionsType, instance);
-                        }
-                    }
+                    if (job.ProviderOptions.TryGetValue(factory.ComponentName, out var opts))
+                        ConfigurationBinder.Bind(instance, opts);
+                    
+                    var suffix = (factory is IStreamReaderFactory) ? "-reader" : "-writer";
+                    if (job.ProviderOptions.TryGetValue(factory.ComponentName + suffix, out var specificOpts))
+                        ConfigurationBinder.Bind(instance, specificOpts);
                 }
-                else if (contributor is IStreamReaderFactory rFactory)
+
+                // 2. Bind from RawArgs (CLI specific to this branch)
+                // Reader contributors only receive args that appear BEFORE the first -o/--output
+                // (positional scoping: flags after -o are writer-only).
+                if (job.Arguments != null && job.Arguments.Length > 0)
                 {
-                    var optionsType = rFactory.GetSupportedOptionTypes().FirstOrDefault();
-                    if (optionsType != null)
+                    var argsToUse = job.Arguments;
+                    if (factory is IStreamReaderFactory)
                     {
-                        var instance = _registry.Get(optionsType);
-                        bool hasUpdates = false;
-
-                        if (job.ProviderOptions != null)
-                        {
-                            if (job.ProviderOptions.TryGetValue(providerName, out var globalOpts))
-                            {
-                                ConfigurationBinder.Bind(instance, globalOpts);
-                                hasUpdates = true;
-                            }
-                            if (job.ProviderOptions.TryGetValue($"{providerName}-reader", out var readerOpts))
-                            {
-                                ConfigurationBinder.Bind(instance, readerOpts);
-                                hasUpdates = true;
-                            }
-                        }
-
-                        if (hasUpdates) _registry.RegisterByType(optionsType, instance);
-
-                        // Also map top-level JobDefinition properties if they aren't already set
-                        // This ensures YAML-defined properties (like Query, Main, Ref) reach the options object
-                        MapProcessorProperties(job, instance);
+                        int outIdx = Array.FindIndex(job.Arguments, a =>
+                            string.Equals(a, "-o", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(a, "--output", StringComparison.OrdinalIgnoreCase));
+                        if (outIdx > 0) argsToUse = job.Arguments[..outIdx];
                     }
+                    var tempRegistry = new Pipeline.FlagRegistry();
+                    foreach (var f in contributor.GetFlagDefs()) tempRegistry.Register(f);
+                    Pipeline.FlagBinder.Bind(instance, argsToUse, tempRegistry, factory.ComponentName);
                 }
+
+                // 3. Map universal properties (Path, Query, etc.)
+                MapProcessorProperties(job, instance);
+
+                _registry.RegisterByType(optionsType, instance);
             }
-            // This block handles CLI binding for all IDataFactory types
-            // including IStreamTransformerFactory, IDataWriterFactory, and IStreamReaderFactory.
+        }
+
+        PropagateKey(job.Key);
+    }
+
+    public void BindOptions(JobDefinition job, ParseResult pr)
+    {
+        // Keep existing for back-compat during transition if needed
+        foreach (var contributor in _contributors)
+        {
             if (contributor is IDataFactory descriptor)
             {
                 var options = contributor.GetCliOptions();
                 var existingOptions = _registry.Get(descriptor.OptionsType);
-
-                bool? isReaderScope = null;
-                if (descriptor is IStreamReaderFactory) isReaderScope = true;
-                else if (descriptor is IDataWriterFactory) isReaderScope = false;
-
+                bool? isReaderScope = descriptor is IStreamReaderFactory ? true : (descriptor is IDataWriterFactory ? false : (bool?)null);
                 CliOptionBuilder.BindForType(descriptor.OptionsType, existingOptions, pr, options, isReaderScope);
-
-                // Map Processor specific properties AFTER CLI binding to ensure they take precedence
                 MapProcessorProperties(job, existingOptions);
-
                 _registry.RegisterByType(descriptor.OptionsType, existingOptions);
             }
         }
+        PropagateKey(job.Key);
+    }
 
-        // Propagate the --key option to all writer factories after CLI binding is complete
-        if (!string.IsNullOrEmpty(job.Key))
+    private void PropagateKey(string? key)
+    {
+        if (string.IsNullOrEmpty(key)) return;
+        foreach (var contributor in _contributors.OfType<IDataWriterFactory>())
         {
-            foreach (var contributor in _contributors.OfType<IDataWriterFactory>())
+            var optionsType = contributor.GetSupportedOptionTypes().FirstOrDefault();
+            if (optionsType != null)
             {
-                var optionsType = contributor.GetSupportedOptionTypes().FirstOrDefault();
-                if (optionsType != null)
+                var instance = _registry.Get(optionsType);
+                if (instance is IKeyAwareOptions keyAware)
                 {
-                    var instance = _registry.Get(optionsType);
-                    if (instance is IKeyAwareOptions keyAware)
-                    {
-                        keyAware.Key = job.Key;
-                        _registry.RegisterByType(optionsType, instance);
-                    }
+                    keyAware.Key = key;
+                    _registry.RegisterByType(optionsType, instance);
                 }
             }
         }
@@ -156,8 +134,11 @@ public class ProviderConfigurationService
             }
         }
 
-        // Map universal reader options — always override (JobDefinition is authoritative)
+        // Map universal reader/writer options — always override (JobDefinition is authoritative)
         MapString(type, options, "Path",        job.Path);
+        MapString(type, options, "Table",       job.Table);
+        MapString(type, options, "Strategy",    job.Strategy);
+        MapString(type, options, "InsertMode",  job.InsertMode);
         MapString(type, options, "ColumnTypes", job.ColumnTypes);
         MapString(type, options, "Encoding",    job.Encoding);
         MapString(type, options, "Schema",      job.Schema);

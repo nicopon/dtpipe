@@ -14,5 +14,6 @@ public record ComputeOptions : ITransformerOptions
 	[ComponentOption(Description = "Skip script execution when input value is null")]
 	public bool SkipNull { get; init; } = false;
 
+	[ComponentOption("--compute-types", Description = "Explicit output type for computed columns (e.g. Col:int32). Repeatable.")]
 	public Dictionary<string, string> ComputeTypes { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 }

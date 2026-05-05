@@ -131,7 +131,7 @@ public class E2EIntegrationTests : IAsyncLifetime
 		registry.Register(options);
 		registry.Register(new DuckDbReaderOptions { Query = options.Query });
 
-		await exportService.RunExportAsync(new PipelineOptions { BatchSize = options.BatchSize }, options.Provider, options.OutputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
+		await exportService.RunExportAsync(options, options.Provider, options.OutputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
 
 		// 5. Verify Output
 		File.Exists(_outputPath).Should().BeTrue();
@@ -256,7 +256,7 @@ public class E2EIntegrationTests : IAsyncLifetime
 		registry.Register(options);
 		registry.Register(new DuckDbReaderOptions { Query = options.Query });
 
-		await exportService.RunExportAsync(new PipelineOptions { BatchSize = options.BatchSize }, options.Provider, options.OutputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
+		await exportService.RunExportAsync(options, options.Provider, options.OutputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
 
 		// 4. Verify
 		File.Exists(_outputPath).Should().BeTrue();
@@ -380,7 +380,7 @@ public class E2EIntegrationTests : IAsyncLifetime
 		registry.Register(options);
 		registry.Register(new DuckDbReaderOptions { Query = options.Query });
 
-		await exportService.RunExportAsync(new PipelineOptions { BatchSize = options.BatchSize }, options.Provider, options.OutputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
+		await exportService.RunExportAsync(options, options.Provider, options.OutputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
 
 		// 5. Verify Output
 		var lines = await File.ReadAllLinesAsync(_outputPath, TestContext.Current.CancellationToken);

@@ -56,7 +56,7 @@ public sealed record PipelineOptions : IOptionSet
 
 	/// <summary>SQL / command to execute always (finally).</summary>
 	public string? FinallyExec { get; init; }
-
+	
 	// --- Observability ---
 
 	/// <summary>Disable live progress statistics (useful for CI).</summary>

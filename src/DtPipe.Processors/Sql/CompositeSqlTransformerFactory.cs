@@ -18,6 +18,8 @@ public class CompositeSqlTransformerFactory : IStreamTransformerFactory
     public int MinLookups => 0;
     public int MaxLookups => -1;
 
+    public IReadOnlyList<(string Flag, bool IsBoolean)> CliTriggerFlags => [("--sql", false)];
+
     public bool IsApplicable(string[] branchArgs)
         => BranchArgParser.ExtractValue(branchArgs, "--sql") != null;
 

@@ -33,7 +33,11 @@ public class CliProviderFactory<TService> : ICliContributor, IDataFactory
 
 	// IDataFactory Implementation
 	public string ComponentName => _descriptor.ComponentName;
-	public bool CanHandle(string connectionString) => _descriptor.CanHandle(connectionString);
+	public bool CanHandle(string connectionString)
+	{
+		if (connectionString.StartsWith(_descriptor.ComponentName + ":", StringComparison.OrdinalIgnoreCase)) return true;
+		return _descriptor.CanHandle(connectionString);
+	}
 	public bool SupportsStdio => _descriptor.SupportsStdio;
 	public Type OptionsType => _descriptor.OptionsType;
 
@@ -43,6 +47,11 @@ public class CliProviderFactory<TService> : ICliContributor, IDataFactory
 	public IEnumerable<Option> GetCliOptions()
 	{
 		return _cliOptions ??= CliOptionBuilder.GenerateOptionsForType(_descriptor.OptionsType).ToList();
+	}
+
+	public IEnumerable<Pipeline.FlagDef> GetFlagDefs()
+	{
+		return CliOptionBuilder.GenerateFlagDefsForType(_descriptor.OptionsType);
 	}
 
 	public string? BoundComponentName => _descriptor.ComponentName;

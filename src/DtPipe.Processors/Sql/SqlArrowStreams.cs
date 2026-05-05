@@ -109,15 +109,13 @@ internal sealed class ProjectedArrowStream : IProjectableArrowStream
         var fields = new List<Field>();
         foreach (var name in _projections)
         {
-            var field = _underlying.Schema.GetFieldByName(name);
-            if (field != null)
-            {
-                fields.Add(field);
-            }
-            else
-            {
-                fields.Add(new Field(name, StringType.Default, true));
-            }
+            // Case-sensitive lookup first; fall back to case-insensitive (DuckDB EXPLAIN
+            // returns lowercase names for unquoted identifiers in the query).
+            var field = _underlying.Schema.GetFieldByName(name)
+                ?? _underlying.Schema.FieldsList.FirstOrDefault(
+                    f => string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase));
+
+            fields.Add(field ?? new Field(name, StringType.Default, true));
         }
         _projectedSchema = new Schema(fields, _underlying.Schema.HasMetadata ? _underlying.Schema.Metadata : null);
     }
@@ -133,14 +131,37 @@ internal sealed class ProjectedArrowStream : IProjectableArrowStream
         var columns = new List<IArrowArray>();
         foreach (var name in _projections)
         {
+            // Primary lookup: case-sensitive (fast path, column names match exactly).
             var index = _underlying.Schema.GetFieldIndex(name);
+
+            // Fallback: case-insensitive. DuckDB EXPLAIN normalises unquoted identifiers to
+            // lowercase, so "Id" in the Arrow schema may appear as "id" in the projection list.
+            if (index < 0)
+            {
+                for (int fi = 0; fi < _underlying.Schema.FieldsList.Count; fi++)
+                {
+                    if (string.Equals(_underlying.Schema.FieldsList[fi].Name, name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        index = fi;
+                        break;
+                    }
+                }
+            }
+
             if (index >= 0)
             {
                 columns.Add(batch.Column(index));
             }
             else
             {
-                columns.Add(new StringArray.Builder().Build());
+                // Column is not in the Arrow source schema at all (e.g. a DuckDB-internal
+                // column injected by a specific query plan). Return a null array of the
+                // correct length — a zero-length array would cause DuckDB to raise
+                // "arrow_scan: array length mismatch".
+                var nullArray = new Apache.Arrow.StringArray.Builder()
+                    .AppendRange(Enumerable.Repeat<string?>(null, batch.Length))
+                    .Build();
+                columns.Add(nullArray);
             }
         }
 

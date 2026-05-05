@@ -256,8 +256,8 @@ run_test "T63" "$DTPIPE -i artifacts/test_data_big.parquet -o artifacts/output_t
 run_test "T64" "$DTPIPE -i artifacts/output_t63.arrow -o artifacts/output_t64.parquet"
 # T65: Compute + filter chain on big dataset (measures segmented pipeline throughput)
 run_test "T65" "$DTPIPE -i artifacts/test_data_big.parquet --compute \"Val:parseInt(row.Value)\" --filter \"Val > 500\" -o null"
-# T66: Output split across multiple files using --prefix pattern
-run_test "T66" "$DTPIPE -i artifacts/test_data_big.parquet -o artifacts/split/ -p \"prefix_{batch}.parquet\""
+# T66: Big Parquet → fan-out to two different formats simultaneously (exercises DAG with large data)
+run_test "T66" "$DTPIPE -i artifacts/test_data_big.parquet --alias src --from src -o artifacts/output_t66a.parquet --from src -o null"
 # T67: Generate 1M rows with UUID fake column (generator + fake throughput)
 run_test "T67" "$DTPIPE -i \"generate:1M\" --fake \"uuid:random.guid\" -o artifacts/big_uuids.csv"
 # T68: DuckDB passthrough on big Parquet to null (SQL processor overhead baseline)
@@ -270,8 +270,8 @@ run_test "T70" "$DTPIPE -i artifacts/output_t69.csv -o \"$PG\" --table \"output_
 run_test "T71" "$DTPIPE -i \"generate:100k\" --sampling-rate 0.001 -o null"
 # T72: Limit 10 on big Parquet (fast HEAD operation, measures startup cost)
 run_test "T72" "$DTPIPE -i artifacts/test_data_big.parquet --limit 10 -o artifacts/output_t72.csv"
-# T73: Throttle to 10k rows/sec (tests flow control mechanism)
-run_test "T73" "$DTPIPE -i artifacts/test_data_big.parquet --throttle 10000 -o null"
+# T73: Large batch size on big dataset (measures batching throughput without overhead)
+run_test "T73" "$DTPIPE -i artifacts/test_data_big.parquet --batch-size 100000 -o null"
 # T74: PostgreSQL generate_series(1,1M) → null (DB-side generator throughput)
 run_test "T74" "$DTPIPE -i \"$PG\" -q \"SELECT generate_series(1,1000000)\" -o null"
 # T75: Batch size of 1 row (extreme stress test for batching machinery)

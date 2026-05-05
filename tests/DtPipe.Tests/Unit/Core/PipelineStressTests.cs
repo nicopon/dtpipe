@@ -145,7 +145,7 @@ public class PipelineStressTests : IAsyncLifetime
 		var pipeline = pipelineBuilder.Build(args);
 		var readerFactory = serviceProvider.GetRequiredService<IStreamReaderFactory>();
 		var writerFactory = serviceProvider.GetRequiredService<IDataWriterFactory>();
-		await exportService.RunExportAsync(new PipelineOptions { BatchSize = options.BatchSize }, options.Provider, options.OutputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
+		await exportService.RunExportAsync(options, options.Provider, options.OutputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
 
 		sw.Stop();
 		_output.WriteLine($"Export took {sw.ElapsedMilliseconds}ms ({sw.Elapsed.TotalSeconds:N2}s)");

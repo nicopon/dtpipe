@@ -71,6 +71,8 @@ public class ExportService
 		System.Collections.Concurrent.ConcurrentQueue<DtPipe.Feedback.BranchSummary>? resultsCollector = null,
 		bool showStatusMessages = false)
 	{
+		// Ensure the registry has the correct pipeline options for this run
+		registry.Register(options);
 		if (_logger.IsEnabled(LogLevel.Information))
 			_logger.LogInformation("Starting export from {Provider} to {OutputPath}", providerName, ConnectionStringSanitizer.Sanitize(outputPath));
 
@@ -99,7 +101,7 @@ public class ExportService
 		await reader.OpenAsync(ct);
 
 		// Persist the full Arrow schema to a .dtschema file for future runs.
-		if (!string.IsNullOrEmpty(options.SchemaSave))
+		if (!string.IsNullOrEmpty(options.SchemaSave) && providerName != "stream-transformer")
 		{
 			var schema = (reader as IColumnarStreamReader)?.Schema;
 			if (schema is { FieldsList: { Count: > 0 } })

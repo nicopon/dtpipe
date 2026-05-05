@@ -46,4 +46,11 @@ public interface IStreamTransformerFactory
 
     /// <summary>Maximum number of materialized lookups allowed (-1 = unlimited).</summary>
     int MaxLookups { get; }
+
+    /// <summary>
+    /// CLI flags that activate this processor, with their arity.
+    /// Tuple: (flagName, isBoolean). Example: [("--sql", false)], [("--merge", true)].
+    /// Used by the CLI layer to register the correct arity in FlagRegistry — no CLI types here.
+    /// </summary>
+    IReadOnlyList<(string Flag, bool IsBoolean)> CliTriggerFlags { get; }
 }

@@ -2,13 +2,14 @@ using System.CommandLine;
 using System.CommandLine.Completions;
 using System.CommandLine.Parsing;
 using DtPipe.Cli.Infrastructure;
+using DtPipe.Cli.Pipeline;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Pipelines;
 using DtPipe.Core.Options;
 using DtPipe.Transformers.Arrow.Fake;
-
 namespace DtPipe.Cli.Infrastructure;
+
 public class CliDataTransformerFactory : IDataTransformerFactory, ICliContributor
 {
 	private readonly IDataTransformerFactory _inner;
@@ -102,6 +103,11 @@ public class CliDataTransformerFactory : IDataTransformerFactory, ICliContributo
 		}
 
 		return options;
+	}
+
+	public IEnumerable<FlagDef> GetFlagDefs()
+	{
+		return CliOptionBuilder.GenerateFlagDefsForType(OptionsType);
 	}
 
 	private IEnumerable<CompletionItem> SuggestFakers(CompletionContext context)

@@ -21,6 +21,8 @@ public class MergeTransformerFactory : IStreamTransformerFactory
     public int MinLookups => 0;
     public int MaxLookups => 0;
 
+    public IReadOnlyList<(string Flag, bool IsBoolean)> CliTriggerFlags => [("--merge", true)];
+
     public bool IsApplicable(string[] branchArgs)
         => branchArgs.Any(a => a.Equals("--merge", StringComparison.OrdinalIgnoreCase));
 

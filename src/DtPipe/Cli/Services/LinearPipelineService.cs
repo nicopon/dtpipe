@@ -1,69 +1,79 @@
-using System.CommandLine;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Apache.Arrow;
-using DtPipe.Cli.Helpers;
-using DtPipe.Cli.Infrastructure;
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Models;
-using DtPipe.Cli;
-using DtPipe.Core.Options;
-using DtPipe.Core.Pipelines;
-using DtPipe.Core.Validation;
 using DtPipe.Core.Abstractions.Dag;
+using DtPipe.Core.Models;
+using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines.Dag;
+using DtPipe.Core.Pipelines;
+using DtPipe.Cli.Pipeline;
+using DtPipe.Cli.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console;
 
 namespace DtPipe.Cli.Services;
 
-/// <summary>
-/// Responsible for orchestrating linear (single-branch) pipeline execution.
-/// </summary>
 public class LinearPipelineService
 {
     private readonly IEnumerable<ICliContributor> _contributors;
     private readonly IServiceProvider _serviceProvider;
-    private readonly OptionsRegistry _registry;
+    private readonly IMemoryChannelRegistry _channelRegistry;
+    private readonly OptionsRegistry _optionsRegistry;
     private readonly IAnsiConsole _console;
+    private readonly IEnumerable<IDataWriterFactory> _writerFactories;
+    private readonly IEnumerable<IStreamReaderFactory> _readerFactories;
 
     public LinearPipelineService(
         IEnumerable<ICliContributor> contributors,
         IServiceProvider serviceProvider,
-        OptionsRegistry registry,
+        IMemoryChannelRegistry channelRegistry,
+        OptionsRegistry optionsRegistry,
         IAnsiConsole console)
     {
         _contributors = contributors;
         _serviceProvider = serviceProvider;
-        _registry = registry;
+        _channelRegistry = channelRegistry;
+        _optionsRegistry = optionsRegistry;
         _console = console;
+        _writerFactories = _serviceProvider.GetRequiredService<IEnumerable<IDataWriterFactory>>();
+        _readerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>();
     }
 
     public async Task<int> ExecuteAsync(
         JobDefinition job,
-        string[] currentRawArgs,
+        string[] args,
         CancellationToken token,
-        string? localAlias,
-        bool isDag,
-        BranchChannelContext? ctx = null,
         System.Collections.Concurrent.ConcurrentQueue<DtPipe.Feedback.BranchSummary>? resultsCollector = null,
+        bool isDag = false,
+        string? localAlias = null,
+        BranchChannelContext? ctx = null,
         bool showStatusMessages = false)
     {
         var exportService = _serviceProvider.GetRequiredService<ExportService>();
+        var currentRawArgs = job.Arguments ?? args;
 
-        // Consume channel routing provided by DagOrchestrator
+        if (job.Limit < 0)
+            throw new ArgumentException($"--limit value must be >= 0 (got {job.Limit}).");
+
+        // Apply channel routing provided by DagOrchestrator (memory channels between DAG branches)
         if (ctx?.ChannelInjection is { } plan)
         {
-            job = job with {
-                Input   = plan.InputChannelAlias != null  ? ChannelSpecHelper.ArrowMemory(plan.InputChannelAlias)  : job.Input,
-                Output  = plan.OutputChannelAlias != null ? ChannelSpecHelper.ArrowMemory(plan.OutputChannelAlias) : job.Output,
+            job = job with
+            {
+                Input = plan.InputChannelAlias != null ? DtPipe.Cli.Helpers.ChannelSpecHelper.ArrowMemory(plan.InputChannelAlias) : job.Input,
+                Output = plan.OutputChannelAlias != null ? DtPipe.Cli.Helpers.ChannelSpecHelper.ArrowMemory(plan.OutputChannelAlias) : job.Output,
                 NoStats = job.NoStats || plan.SuppressStats
             };
         }
 
-        IStreamReaderFactory readerFactory;
-        string cleanedInput;
+        // 1. Resolve Reader (strips "componentName:" prefix, e.g. "arrow-memory:src" → "src")
+        var (readerFactory, cleanedInput) = ResolveFactory<IStreamReaderFactory>(job.Input ?? "", _readerFactories);
 
-        // Detect stream transformers (SQL/merge) from branch args
+        // 2. Resolve Stream Transformer (SQL/Merge) if any
         var streamTransformerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamTransformerFactory>>();
         var applicableFactory = streamTransformerFactories.FirstOrDefault(f => f.IsApplicable(currentRawArgs));
 
@@ -73,30 +83,23 @@ public class LinearPipelineService
             readerFactory = new StreamTransformerReaderAdapter(transformer);
             cleanedInput = "";
         }
-        else
+
+        if (readerFactory == null)
         {
-            var readerFactories = _contributors.OfType<IStreamReaderFactory>().ToList();
-            (readerFactory, cleanedInput) = ResolveFactory(readerFactories, job.Input ?? "", "reader");
+            if (string.IsNullOrEmpty(cleanedInput))
+                throw new InvalidOperationException("No input source specified and no stream transformer detected.");
+            throw new InvalidOperationException($"No reader factory resolved for input '{job.Input}'");
         }
 
-        job = job with { Input = cleanedInput };
-
-        if (showStatusMessages) _console.WriteLine($"Auto-detected input source: {readerFactory.ComponentName}");
-
-        var writerFactories = _contributors.OfType<IDataWriterFactory>().ToList();
-
+        // 3. Resolve Writer (also strips prefix)
         IDataWriterFactory? writerFactory = null;
-        string? cleanedOutput = null;
-
-        if (!isDag || !string.IsNullOrWhiteSpace(job.Output))
+        string cleanedOutput = job.Output ?? "";
+        if (!string.IsNullOrEmpty(job.Output))
         {
-            if (!string.IsNullOrWhiteSpace(job.Output))
-            {
-                (writerFactory, cleanedOutput) = ResolveFactory(writerFactories, job.Output, "writer");
-                job = job with { Output = cleanedOutput };
-            }
+            (writerFactory, cleanedOutput) = ResolveFactory<IDataWriterFactory>(job.Output, _writerFactories);
         }
 
+        // 3b. Load query/hook content from files if the value is a file path (e.g. --query my.sql)
         job = job with
         {
             Query = LoadOrReadContent(job.Query, _console, "query"),
@@ -106,79 +109,70 @@ public class LinearPipelineService
             FinallyExec = LoadOrReadContent(job.FinallyExec, _console, "Finally-Exec")
         };
 
-        if (readerFactory.RequiresQuery)
+        // 3c. Auto-build query from --table for readers that require a query (e.g. DuckDB, PG, Oracle)
+        if (readerFactory.RequiresQuery && string.IsNullOrWhiteSpace(job.Query))
         {
-            if (string.IsNullOrWhiteSpace(job.Query))
-            {
-                if (!string.IsNullOrWhiteSpace(job.Table))
-                {
-                    job = job with { Query = $"SELECT * FROM {job.Table}" };
-                }
-                else
-                {
-                    _console.Write(new Spectre.Console.Markup($"[red]Error: A query is required for provider '{readerFactory.ComponentName}'. Use --query \"SELECT...\"[/]{Environment.NewLine}"));
-                    return 1;
-                }
-            }
-
-            try { SqlQueryValidator.Validate(job.Query, job.UnsafeQuery); }
-            catch (InvalidOperationException ex)
-            {
-                _console.Write(new Spectre.Console.Markup($"[red]Error: {ex.Message}[/]{Environment.NewLine}"));
-                return 1;
-            }
+            if (!string.IsNullOrWhiteSpace(job.Table))
+                job = job with { Query = $"SELECT * FROM \"{job.Table}\"" };
         }
 
+        // 4. Global Options (from job definition)
         var pipelineOptions = new PipelineOptions
         {
-            Provider = readerFactory.ComponentName,
-            ConnectionString = job.Input,
-            Query = job.Query,
-            OutputPath = job.Output ?? "",
-            ConnectionTimeout = job.ConnectionTimeout,
-            QueryTimeout = job.QueryTimeout,
-            BatchSize = job.BatchSize,
-            UnsafeQuery = job.UnsafeQuery,
-            DryRunCount = RawJobBuilder.ParseDryRunFromArgs(currentRawArgs),
+            Key = job.Key,
+            LogPath = job.LogPath,
+            MetricsPath = job.MetricsPath,
+            Strategy = job.Strategy,
+            InsertMode = job.InsertMode,
             Limit = job.Limit,
             SamplingRate = job.SamplingRate,
             SamplingSeed = job.SamplingSeed,
-            LogPath = job.LogPath,
-            Key = job.Key,
+            BatchSize = job.BatchSize,
+            ConnectionTimeout = job.ConnectionTimeout,
+            QueryTimeout = job.QueryTimeout,
+            UnsafeQuery = job.UnsafeQuery,
+            DryRunCount = job.DryRunCount,
+            StrictSchema = job.StrictSchema,
+            NoSchemaValidation = job.NoSchemaValidation,
+            AutoMigrate = job.AutoMigrate ?? false,
             PreExec = job.PreExec,
             PostExec = job.PostExec,
             OnErrorExec = job.OnErrorExec,
             FinallyExec = job.FinallyExec,
-            Strategy = job.Strategy,
-            InsertMode = job.InsertMode,
-            Table = job.Table,
-            StrictSchema = job.StrictSchema,
-            NoSchemaValidation = job.NoSchemaValidation,
-            NoStats = job.NoStats,
-            MetricsPath = job.MetricsPath,
-            AutoMigrate = job.AutoMigrate ?? false,
-            SchemaSave = job.SchemaSave,
-            SchemaLoad = job.SchemaLoad,
             Path = job.Path,
             ColumnTypes = job.ColumnTypes,
             AutoColumnTypes = job.AutoColumnTypes,
             MaxSample = job.MaxSample,
-            Encoding = job.Encoding
+            Encoding = job.Encoding,
+            Table = job.Table,
+            NoStats = job.NoStats,
+            SchemaSave = job.SchemaSave,
+            SchemaLoad = job.SchemaLoad,
+            OutputPath = cleanedOutput,
+            ConnectionString = cleanedInput,
+            Query = job.Query
         };
 
-        _registry.Register(pipelineOptions);
-
+        // 5. Build Pipeline (Transformers)
+        // For CLI-originated branches (have raw args), always use TransformerPipelineBuilder
+        // which calls CreateFromConfiguration — the correct format for CLI flags.
+        // BuildPipelineFromYaml is reserved for YAML-only jobs (no raw args) because
+        // TransformerConfig.Mappings format doesn't match CLI syntax for expression transformers (--filter).
         var tFactories = _contributors.OfType<IDataTransformerFactory>().ToList();
         List<IDataTransformer> pipeline;
 
-        if (job.Transformers != null && job.Transformers.Count > 0)
-        {
-            pipeline = BuildPipelineFromYaml(job.Transformers, tFactories, _console);
-        }
-        else
+        if (currentRawArgs.Length > 0)
         {
             var pipelineBuilder = new TransformerPipelineBuilder(tFactories);
             pipeline = pipelineBuilder.Build(currentRawArgs);
+        }
+        else if (job.Transformers != null && job.Transformers.Count > 0)
+        {
+            pipeline = BuildPipelineFromYaml(job, tFactories, _console);
+        }
+        else
+        {
+            pipeline = new List<IDataTransformer>();
         }
 
         try
@@ -186,19 +180,29 @@ public class LinearPipelineService
             // 6. Final Export Execution
             if (writerFactory == null)
             {
-                if (isDag || string.IsNullOrWhiteSpace(job.Output))
+                if (string.IsNullOrEmpty(job.Output))
                 {
-                    if (isDag) return 0; // Upstream branch to memory channel handled elsewhere
-
-                    // Linear job - just validation/dry run
-                    _console.Write(new Spectre.Console.Markup($"[yellow]Warning: No output specified. Running in validation mode.[/]{Environment.NewLine}"));
-                    return 0;
+                    if (isDag)
+                    {
+                        if (pipelineOptions.DryRunCount <= 0)
+                            return 0; // Upstream branch to memory channel handled elsewhere
+                    }
+                    else
+                    {
+                        // Linear job with no output — validation mode only
+                        _console.Write(new Spectre.Console.Markup($"[yellow]Warning: No output specified. Running in validation mode.[/]{Environment.NewLine}"));
+                    }
+                    
+                    (writerFactory, _) = ResolveFactory<IDataWriterFactory>("null:", _writerFactories);
                 }
-                throw new InvalidOperationException($"No writer factory resolved for output '{job.Output}'");
+
+                if (writerFactory == null)
+                {
+                    throw new InvalidOperationException($"No writer factory resolved for output '{job.Output ?? "null:"}'");
+                }
             }
 
-            if (string.IsNullOrEmpty(job.Output)) throw new InvalidOperationException("No output destination specified.");
-            await exportService.RunExportAsync(pipelineOptions, readerFactory.ComponentName, job.Output, token, pipeline, readerFactory, writerFactory, _registry, isDag ? localAlias : null, resultsCollector, showStatusMessages);
+            await exportService.RunExportAsync(pipelineOptions, readerFactory.ComponentName, cleanedOutput, token, pipeline, readerFactory, writerFactory, _optionsRegistry, isDag ? localAlias : null, resultsCollector, showStatusMessages);
             return 0;
         }
         catch (OperationCanceledException)
@@ -214,54 +218,23 @@ public class LinearPipelineService
         }
     }
 
-    private static (T Factory, string CleanedString) ResolveFactory<T>(IEnumerable<T> factories, string rawString, string typeName) where T : IDataFactory
+    private static (T? Factory, string Cleaned) ResolveFactory<T>(string raw, IEnumerable<T> factories) where T : class, IDataFactory
     {
-        rawString = rawString.Trim();
-
+        raw = raw.Trim();
         foreach (var factory in factories)
         {
             var prefix = factory.ComponentName + ":";
-            if (rawString.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                var cleaned = rawString.Substring(prefix.Length).Trim();
-                if (cleaned == "-" && !factory.SupportsStdio)
-                    throw new InvalidOperationException($"The provider '{factory.ComponentName}' does not support standard input/output pipes (-).");
-                return (factory, cleaned);
-            }
-
-            if (rawString.Equals(factory.ComponentName, StringComparison.OrdinalIgnoreCase))
-            {
-                if (typeName == "branch")
-                    return (factory, "");
+            if (raw.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                return (factory, raw[prefix.Length..].Trim());
+            // Bare component name (e.g. "-o csv") → maps to stdio "-"
+            if (string.Equals(raw, factory.ComponentName, StringComparison.OrdinalIgnoreCase))
                 return (factory, "-");
-            }
         }
-
-        var matchingFactories = factories.Where(f => f.CanHandle(rawString)).ToList();
-        if (matchingFactories.Count == 1)
-        {
-            var factory = matchingFactories[0];
-            if (rawString == "-" && !factory.SupportsStdio)
-                throw new InvalidOperationException($"The provider '{factory.ComponentName}' does not support standard input/output pipes (-).");
-            return (factory, rawString);
-        }
-
-        if (matchingFactories.Count > 1)
-        {
-            var names = string.Join(", ", matchingFactories.Select(f => f.ComponentName));
-            throw new InvalidOperationException($"Ambiguous {typeName} string '{rawString}'. Matches: {names}. Use explicit prefix (e.g. '{matchingFactories[0].ComponentName}:...') to disambiguate.");
-        }
-
-        if (matchingFactories.Count == 0 && typeName == "writer" && !rawString.Contains(":") && (rawString.EndsWith("/") || rawString.EndsWith("\\") || !rawString.Contains(".")))
-        {
-            var parquet = factories.FirstOrDefault(f => f.ComponentName.Equals("parquet", StringComparison.OrdinalIgnoreCase));
-            if (parquet != null) return (parquet, rawString);
-        }
-
-        throw new InvalidOperationException($"No compatible {typeName} found for connection string '{rawString}'.");
+        var match = factories.FirstOrDefault(f => f.CanHandle(raw));
+        return (match, raw);
     }
 
-    private static string? LoadOrReadContent(string? input, Spectre.Console.IAnsiConsole console, string label)
+    private static string? LoadOrReadContent(string? input, IAnsiConsole console, string label)
     {
         if (string.IsNullOrWhiteSpace(input)) return input;
         input = input.Trim();
@@ -269,14 +242,18 @@ public class LinearPipelineService
         string? filename = null;
         if (input.StartsWith("@"))
             filename = input.Substring(1).Trim();
-        else if (File.Exists(input) && (input.EndsWith(".sql", StringComparison.OrdinalIgnoreCase) || input.EndsWith(".txt", StringComparison.OrdinalIgnoreCase) || input.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase) || input.EndsWith(".yml", StringComparison.OrdinalIgnoreCase)))
+        else if (File.Exists(input) &&
+                 (input.EndsWith(".sql", StringComparison.OrdinalIgnoreCase) ||
+                  input.EndsWith(".txt", StringComparison.OrdinalIgnoreCase) ||
+                  input.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase) ||
+                  input.EndsWith(".yml", StringComparison.OrdinalIgnoreCase)))
             filename = input;
 
         if (filename != null)
         {
             if (File.Exists(filename))
             {
-                console.WriteLine($"Loaded {label} from File: {filename}");
+                console.WriteLine($"Loaded {label} from file: {filename}");
                 return File.ReadAllText(filename).Trim();
             }
             else if (input.StartsWith("@"))
@@ -285,75 +262,57 @@ public class LinearPipelineService
         return input;
     }
 
-    private static List<IDataTransformer> BuildPipelineFromYaml(
-        List<TransformerConfig> configs,
-        List<IDataTransformerFactory> factories,
-        IAnsiConsole console)
+    private List<IDataTransformer> BuildPipelineFromYaml(JobDefinition job, List<IDataTransformerFactory> factories, IAnsiConsole console)
     {
         var pipeline = new List<IDataTransformer>();
+        var configs = job.Transformers ?? new List<TransformerConfig>();
         foreach (var config in configs)
         {
-            var factory = factories.FirstOrDefault(f =>
-                f.ComponentName.Equals(config.Type, StringComparison.OrdinalIgnoreCase));
-
-            if (factory == null)
-            {
-                console.Write(new Markup($"[yellow]Warning: Unknown transformer type '{config.Type}' in job file. Skipping.[/]{Environment.NewLine}"));
-                continue;
-            }
-
+            var factory = factories.FirstOrDefault(f => f.ComponentName.Equals(config.Type, StringComparison.OrdinalIgnoreCase));
+            if (factory == null) throw new InvalidOperationException($"Transformer factory '{config.Type}' not found.");
             var transformer = factory.CreateFromYamlConfig(config);
-            if (transformer != null)
-                pipeline.Add(transformer);
+            if (transformer != null) pipeline.Add(transformer);
         }
+
+        if (Environment.GetEnvironmentVariable("DEBUG") == "1")
+        {
+            Console.Error.WriteLine($"[DEBUG] BuildPipelineFromYaml count: {pipeline.Count}");
+            foreach (var t in pipeline) Console.Error.WriteLine($"[DEBUG] Transformer: {t.GetType().Name}");
+        }
+
         return pipeline;
     }
+}
 
-    /// <summary>
-    /// Wraps an <see cref="IStreamTransformer"/> as an <see cref="IStreamReaderFactory"/> so that
-    /// <see cref="ExportService"/> can treat it like a regular reader.
-    /// </summary>
-    private sealed class StreamTransformerReaderAdapter : IStreamReaderFactory
+internal class StreamTransformerReaderAdapter : IStreamReaderFactory
+{
+    private readonly IStreamTransformer _transformer;
+
+    public StreamTransformerReaderAdapter(IStreamTransformer transformer)
     {
-        private readonly IStreamTransformer _transformer;
-
-        public StreamTransformerReaderAdapter(IStreamTransformer transformer)
-            => _transformer = transformer;
-
-        public string ComponentName => "stream-transformer";
-        public string Category => "Stream Transformers";
-        public Type OptionsType => typeof(object);
-        public bool SupportsStdio => false;
-        public bool RequiresQuery => false;
-        public bool YieldsColumnarOutput => true;
-        public bool CanHandle(string s) => false;
-
-        public IStreamReader Create(OptionsRegistry registry)
-            => new StreamTransformerReader(_transformer);
-
-        public IEnumerable<Type> GetSupportedOptionTypes() => System.Array.Empty<Type>();
+        _transformer = transformer;
     }
 
-    private sealed class StreamTransformerReader : IColumnarStreamReader
+    public string ComponentName => "stream-adapter";
+    public string Category => "Processors";
+    public bool CanHandle(string connectionString) => false;
+    public Type OptionsType => typeof(PipelineOptions);
+    public bool RequiresQuery => false;
+    public bool YieldsColumnarOutput => true;
+
+    public IStreamReader Create(OptionsRegistry registry) => new WrappedStreamReader(_transformer);
+    public IEnumerable<Type> GetSupportedOptionTypes() => Enumerable.Empty<Type>();
+
+    private class WrappedStreamReader : IColumnarStreamReader
     {
         private readonly IStreamTransformer _transformer;
-
-        public StreamTransformerReader(IStreamTransformer transformer)
-            => _transformer = transformer;
-
+        public WrappedStreamReader(IStreamTransformer transformer) => _transformer = transformer;
         public IReadOnlyList<PipeColumnInfo>? Columns => _transformer.Columns;
-        public Apache.Arrow.Schema? Schema => _transformer.Schema;
-
-        public Task OpenAsync(CancellationToken ct) => _transformer.OpenAsync(ct);
-
-        public IAsyncEnumerable<Apache.Arrow.RecordBatch> ReadRecordBatchesAsync(CancellationToken ct)
-            => _transformer.ReadResultsAsync(null, ct);
-
-        public IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(int batchSize, CancellationToken ct)
-            => throw new NotSupportedException(
-                "StreamTransformerReader is columnar-only. The pipeline executor must route " +
-                "through ReadRecordBatchesAsync + BridgeColumnarToRowsAsync for row-mode sinks.");
-
+        public Schema? Schema => _transformer.Schema;
+        public Task OpenAsync(CancellationToken ct = default) => _transformer.OpenAsync(ct);
+        public IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync(CancellationToken ct = default) => _transformer.ReadResultsAsync(null, ct);
+        public IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(int batchSize, CancellationToken ct = default) 
+            => throw new NotSupportedException("StreamTransformerReaderAdapter only supports columnar mode.");
         public ValueTask DisposeAsync() => _transformer.DisposeAsync();
     }
 }

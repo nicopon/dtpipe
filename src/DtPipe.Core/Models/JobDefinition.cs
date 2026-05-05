@@ -25,19 +25,17 @@ public record JobDefinition
 
 	public string? Table { get; init; }
 	public int Limit { get; init; } = 0;
-	public bool DryRun { get; init; } = false;
 	public bool UnsafeQuery { get; init; } = false;
 	public bool StrictSchema { get; init; } = false;
 	public bool NoSchemaValidation { get; init; } = false;
 	public bool NoStats { get; init; } = false;
+	public int DryRunCount { get; init; } = 0;
 
 	public int ConnectionTimeout { get; init; } = 10;
 	public int QueryTimeout { get; init; } = 0;
 
 	public string? MetricsPath { get; init; }
     public bool? AutoMigrate { get; set; }
-    public int Throttle { get; init; } = 0;
-    public bool IgnoreNulls { get; init; } = false;
 
 	public List<TransformerConfig>? Transformers { get; init; }
 	public string? LogPath { get; init; }
@@ -45,9 +43,6 @@ public record JobDefinition
 
 	public double SamplingRate { get; init; } = 1.0;
 	public int? SamplingSeed { get; init; }
-
-    public string[] Drop { get; init; } = Array.Empty<string>();
-    public string[] Rename { get; init; } = Array.Empty<string>();
 
 	// Lifecycle Hooks
 	public string? PreExec { get; init; }
@@ -92,6 +87,9 @@ public record JobDefinition
 	/// Not a CLI flag — managed exclusively via --schema-save / --schema-load / --export-job.
 	/// </summary>
 	public string? Schema { get; init; }
+
+	/// <summary>Raw CLI arguments for this branch (captured during sequential parsing).</summary>
+	public string[]? Arguments { get; set; }
 }
 
 

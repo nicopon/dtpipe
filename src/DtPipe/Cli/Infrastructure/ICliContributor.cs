@@ -13,6 +13,7 @@ public interface ICliContributor
 	/// Generates the System.CommandLine Options associated with this contributor.
 	/// </summary>
 	IEnumerable<Option> GetCliOptions();
+	IEnumerable<Pipeline.FlagDef> GetFlagDefs() => System.Linq.Enumerable.Empty<Pipeline.FlagDef>();
 
 	/// <summary>
 	/// Returns the pipeline phase associated with each flag name exposed by this contributor.
