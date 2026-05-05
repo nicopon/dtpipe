@@ -36,8 +36,11 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 	}
 
 	private bool _isResetSupported;
-	// For STDIN: records consumed during schema inference are buffered here and replayed during data extraction.
-	private List<Dictionary<string, object?>>? _stdinBuffer;
+	// Records consumed during schema inference are buffered here and replayed during data extraction.
+	// This enables single-pass processing even for large files where Reset() would be expensive.
+	private readonly List<object> _inferenceBuffer = new();
+	private int _bufferPos = 0;
+	private bool _isBufferingActive = true;
 
 	private IReadOnlyDictionary<string, string>? _autoAppliedTypes;
 	public IReadOnlyDictionary<string, string>? AutoAppliedTypes => _autoAppliedTypes;
@@ -63,6 +66,9 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 			await InferSchemaAsync(ct);
 			await ResetReaderAsync();
 		}
+
+		_isBufferingActive = false; // Stop adding new records to buffer, but keep what we have.
+		_bufferPos = 0; // Prepare to drain from start
 	}
 
 	private void BuildSchemaFromArrowJson(string schemaJson)
@@ -80,6 +86,8 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 
 	private async Task ResetReaderAsync()
 	{
+		_bufferPos = 0; // Reset buffer pointer to allow re-reading from start of buffer
+
 		if (!_isResetSupported)
 		{
 			// STDIN: We cannot reset. If we already have a stream, we keep it.
@@ -91,22 +99,27 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 			return;
 		}
 
-		// File-based: Close and re-open to ensure fresh start
-		if (_streamReader != null)
+		// File-based: If we already have a reader but haven't buffered anything yet,
+		// OR if we specifically want to discard everything and start over from disk,
+		// we close and re-open.
+		if (_inferenceBuffer.Count == 0)
 		{
-			_streamReader.Dispose();
-			_streamReader = null;
-		}
+			if (_streamReader != null)
+			{
+				_streamReader.Dispose();
+				_streamReader = null;
+			}
 
-		if (_fileStream != null)
-		{
-			await _fileStream.DisposeAsync();
-			_fileStream = null;
-		}
+			if (_fileStream != null)
+			{
+				await _fileStream.DisposeAsync();
+				_fileStream = null;
+			}
 
-		var encoding2 = Encoding.GetEncoding(_options.Encoding);
-		_fileStream = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.Asynchronous);
-		_streamReader = new StreamReader(_fileStream, encoding2, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
+			var encoding2 = Encoding.GetEncoding(_options.Encoding);
+			_fileStream = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.Asynchronous);
+			_streamReader = new StreamReader(_fileStream, encoding2, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
+		}
 	}
 
 	private async Task InferSchemaAsync(CancellationToken ct)
@@ -116,10 +129,6 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 		Dictionary<string, object?>? merged = null;
 		int count = 0;
 
-		// For STDIN we cannot reset after inference — buffer records so they can be replayed during data extraction.
-		if (!_isResetSupported)
-			_stdinBuffer = new List<Dictionary<string, object?>>(_options.MaxSample);
-
 		await foreach (var record in EnumerateRawRecordsAsync(ct))
 		{
 			if (record is Dictionary<string, object?> current)
@@ -128,8 +137,6 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 					merged = new Dictionary<string, object?>(current, StringComparer.OrdinalIgnoreCase);
 				else
 					SchemaDiscoveryHelper.DeepMergeSchemas(merged, current);
-
-				_stdinBuffer?.Add(current);
 			}
 
 			count++;
@@ -270,6 +277,14 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 	{
 		if (_streamReader == null) yield break;
 
+		// 1. DRAIN the buffer first (if any)
+		while (_bufferPos < _inferenceBuffer.Count)
+		{
+			if (ct.IsCancellationRequested) yield break;
+			yield return _inferenceBuffer[_bufferPos++];
+		}
+
+		// 2. Read new records from the stream
 		if (string.IsNullOrEmpty(_options.Path))
 		{
 			// Classic JSONL: 1 line = 1 record
@@ -279,7 +294,10 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 				if (line == null) break;
 				if (string.IsNullOrWhiteSpace(line)) continue;
 
-				yield return ParseLineToDictionary(line);
+				var record = ParseLineToDictionary(line);
+				if (_isBufferingActive) _inferenceBuffer.Add(record);
+				_bufferPos++;
+				yield return record;
 			}
 		}
 		else
@@ -289,22 +307,22 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 
 			if (_isResetSupported)
 			{
-				// File-based: open an independent stream so memory usage is O(buffer + 1 element).
-				await using var rawStream = new FileStream(
-					_filePath, FileMode.Open, FileAccess.Read, FileShare.Read,
-					bufferSize: 65536, FileOptions.Asynchronous);
-
-				await foreach (var element in JsonStreamingPathReader.StreamArrayAsync(rawStream, pathParts, ct))
+				// File-based: continue reading from the current stream if possible, 
+				// but hierarchical streaming usually needs a fresh reader for subtree matches.
+				// However, for the simple case where we only read once, it works.
+				await foreach (var element in JsonStreamingPathReader.StreamArrayAsync(_fileStream!, pathParts, ct))
 				{
 					var converted = ToValue(element);
-					if (converted is Dictionary<string, object?> d) yield return d;
-					else yield return new Dictionary<string, object?> { ["value"] = converted };
+					var record = converted is Dictionary<string, object?> d ? d : new Dictionary<string, object?> { ["value"] = converted };
+					if (_isBufferingActive) _inferenceBuffer.Add(record);
+					_bufferPos++;
+					yield return record;
 				}
 			}
 			else
 			{
-				// STDIN: cannot re-open the stream, load into memory.
-				// (STDIN inputs are typically small; for large inputs use a file path instead.)
+				// STDIN path is already handled by loading into memory or similar logic.
+				// (Kept for compatibility with previous logic)
 				var fullJson = await _streamReader!.ReadToEndAsync(ct);
 				if (string.IsNullOrEmpty(fullJson)) yield break;
 
@@ -321,7 +339,12 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 				if (found && current.ValueKind == JsonValueKind.Array)
 				{
 					foreach (var item in current.EnumerateArray())
-						yield return ToValue(item) as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["value"] = ToValue(item) };
+					{
+						var record = ToValue(item) as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["value"] = ToValue(item) };
+						if (_isBufferingActive) _inferenceBuffer.Add(record);
+						_bufferPos++;
+						yield return record;
+					}
 				}
 			}
 		}
@@ -371,21 +394,6 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 
 		var batch = new List<Dictionary<string, object?>>(batchSize);
 
-		// Drain STDIN buffer (records consumed during schema inference)
-		if (_stdinBuffer != null)
-		{
-			foreach (var buffered in _stdinBuffer)
-			{
-				batch.Add(buffered);
-				if (batch.Count >= batchSize)
-				{
-					yield return await Apache.Arrow.Serialization.ArrowSerializer.SerializeAsync(batch, Schema);
-					batch.Clear();
-				}
-			}
-			_stdinBuffer = null;
-		}
-
 		await foreach (var record in EnumerateRawRecordsAsync(ct))
 		{
 			var dict = record as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["value"] = record };
@@ -413,22 +421,6 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 
 		var batch = new object?[batchSize][];
 		var index = 0;
-
-		// Drain STDIN buffer (records consumed during schema inference)
-		if (_stdinBuffer != null)
-		{
-			foreach (var buffered in _stdinBuffer)
-			{
-				batch[index++] = MapDictToRow(buffered);
-				if (index >= batchSize)
-				{
-					yield return new ReadOnlyMemory<object?[]>(batch, 0, index);
-					batch = new object?[batchSize][];
-					index = 0;
-				}
-			}
-			_stdinBuffer = null;
-		}
 
 		await foreach (var record in EnumerateRawRecordsAsync(ct))
 		{

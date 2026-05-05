@@ -30,4 +30,7 @@ public class XmlReaderOptions : IOptionSet, IHasSchemaOverride
 
 	[Description("File read buffer size in bytes")]
 	public int BufferSize { get; set; } = 1024 * 1024;
+
+	/// <summary>Maximum rows to sample for schema inference (0 = use default 100).</summary>
+	public int MaxSample { get; set; } = 0;
 }
