@@ -1,4 +1,5 @@
 using DtPipe.Cli.Infrastructure;
+using DtPipe.Cli.Pipeline;
 using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Abstractions.Dag;
@@ -9,8 +10,14 @@ using DtPipe.Core.Options;
 namespace DtPipe.Cli.Services;
 
 /// <summary>
-/// Responsible for merging and binding Job YAML settings and CLI arguments
+/// Responsible for merging and binding Job settings and CLI arguments
 /// into the Options objects registered in the OptionsRegistry.
+///
+/// Two binding paths:
+/// - CLI path: FlagBinder reads adapter-specific flags directly from RawArgs (--query, --table,
+///   --strict-schema, --key, --pre-exec, etc.). JobDefinition fields are null/default.
+/// - YAML path: MapProcessorProperties copies non-null JobDefinition fields to adapter options.
+///   FlagBinder has no RawArgs to process (job.Arguments is empty).
 /// </summary>
 public class ProviderConfigurationService
 {
@@ -23,7 +30,7 @@ public class ProviderConfigurationService
         _registry = registry;
     }
 
-    public void BindOptions(JobDefinition job)
+    public void BindOptions(JobDefinition job, GlobalOptions? globals = null)
     {
         foreach (var contributor in _contributors)
         {
@@ -31,44 +38,43 @@ public class ProviderConfigurationService
             {
                 var optionsType = factory.OptionsType;
                 var instance = _registry.Get(optionsType);
-                
+                bool isWriter = factory is IDataWriterFactory;
+
                 // 1. Bind from ProviderOptions (YAML/Globals)
                 if (job.ProviderOptions != null)
                 {
                     if (job.ProviderOptions.TryGetValue(factory.ComponentName, out var opts))
                         ConfigurationBinder.Bind(instance, opts);
-                    
-                    var suffix = (factory is IStreamReaderFactory) ? "-reader" : "-writer";
+
+                    var suffix = isWriter ? "-writer" : "-reader";
                     if (job.ProviderOptions.TryGetValue(factory.ComponentName + suffix, out var specificOpts))
                         ConfigurationBinder.Bind(instance, specificOpts);
                 }
 
-                // 2. Bind from RawArgs (CLI specific to this branch)
-                // Reader contributors only receive args that appear BEFORE the first -o/--output
-                // (positional scoping: flags after -o are writer-only).
-                if (job.Arguments != null && job.Arguments.Length > 0)
+                // 2. Bind from stage-scoped args (CLI path).
+                // Reader uses ReaderArgs (flags before first transformer trigger or -o).
+                // Writer uses WriterArgs (flags after -o).
+                // Falls back to trimmed Arguments for legacy/YAML jobs that don't have stage args.
+                var stageArgs = isWriter
+                    ? (job.WriterArguments ?? FallbackTrimWriterArgs(job.Arguments))
+                    : (job.ReaderArguments ?? FallbackTrimReaderArgs(job.Arguments));
+
+                if (stageArgs != null && stageArgs.Length > 0)
                 {
-                    var argsToUse = job.Arguments;
-                    if (factory is IStreamReaderFactory)
-                    {
-                        int outIdx = Array.FindIndex(job.Arguments, a =>
-                            string.Equals(a, "-o", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(a, "--output", StringComparison.OrdinalIgnoreCase));
-                        if (outIdx > 0) argsToUse = job.Arguments[..outIdx];
-                    }
                     var tempRegistry = new Pipeline.FlagRegistry();
                     foreach (var f in contributor.GetFlagDefs()) tempRegistry.Register(f);
-                    Pipeline.FlagBinder.Bind(instance, argsToUse, tempRegistry, factory.ComponentName);
+                    Pipeline.FlagBinder.Bind(instance, stageArgs, tempRegistry, factory.ComponentName);
                 }
 
-                // 3. Map universal properties (Path, Query, etc.)
-                MapProcessorProperties(job, instance);
+                // 3. YAML path: map non-null JobDefinition fields to adapter options
+                MapProcessorProperties(job, instance, isWriter);
 
                 _registry.RegisterByType(optionsType, instance);
             }
         }
 
-        PropagateKey(job.Key);
+        // Propagate global --key default to any writer that did not receive a per-branch key
+        PropagateKey(globals?.Key);
     }
 
     private void PropagateKey(string? key)
@@ -80,7 +86,7 @@ public class ProviderConfigurationService
             if (optionsType != null)
             {
                 var instance = _registry.Get(optionsType);
-                if (instance is IKeyAwareOptions keyAware)
+                if (instance is IKeyAwareOptions keyAware && string.IsNullOrEmpty(keyAware.Key))
                 {
                     keyAware.Key = key;
                     _registry.RegisterByType(optionsType, instance);
@@ -89,23 +95,16 @@ public class ProviderConfigurationService
         }
     }
 
-    private void MapProcessorProperties(JobDefinition job, object options)
+    private void MapProcessorProperties(JobDefinition job, object options, bool isWriter)
     {
         var type = options.GetType();
 
-        // Map Query (DB sources — only if not already set)
-        if (!string.IsNullOrEmpty(job.Query))
-        {
-            var prop = type.GetProperty("Query");
-            if (prop != null && prop.PropertyType == typeof(string) && prop.CanWrite)
-            {
-                var current = prop.GetValue(options) as string;
-                if (string.IsNullOrEmpty(current)) prop.SetValue(options, job.Query);
-            }
-        }
+        // For readers: propagate SQL query (YAML path — CLI path handled by FlagBinder via QueryableReaderOptions.Query)
+        if (!isWriter && !string.IsNullOrEmpty(job.Query))
+            MapStringIfEmpty(type, options, "Query", job.Query);
 
-        // Map RefAlias (SQL processors)
-        if (job.Ref != null && job.Ref.Length > 0)
+        // For readers: RefAlias (SQL processors — from YAML or job routing)
+        if (!isWriter && job.Ref != null && job.Ref.Length > 0)
         {
             var prop = type.GetProperty("RefAlias");
             if (prop != null && prop.PropertyType == typeof(string[]) && prop.CanWrite)
@@ -115,21 +114,38 @@ public class ProviderConfigurationService
             }
         }
 
-        // Map universal reader/writer options — always override (JobDefinition is authoritative)
-        MapString(type, options, "Path",        job.Path);
-        MapString(type, options, "Table",       job.Table);
-        MapString(type, options, "Strategy",    job.Strategy);
-        MapString(type, options, "InsertMode",  job.InsertMode);
-        MapString(type, options, "ColumnTypes", job.ColumnTypes);
-        MapString(type, options, "Encoding",    job.Encoding);
-        MapString(type, options, "Schema",      job.Schema);
+        // For writers: write options (YAML path — CLI path handled by FlagBinder via DbWriterOptions)
+        if (isWriter)
+        {
+            MapString(type, options, "Table",      job.Table);
+            MapString(type, options, "Strategy",   job.Strategy);
+            MapString(type, options, "InsertMode", job.InsertMode);
+            MapString(type, options, "Key",        job.Key);
+            if (job.StrictSchema)           MapBool(type, options, "StrictSchema", true);
+            if (job.AutoMigrate ?? false)   MapBool(type, options, "AutoMigrate", true);
+            if (job.NoSchemaValidation)     MapBool(type, options, "NoSchemaValidation", true);
+            MapString(type, options, "PreExec",     job.PreExec);
+            MapString(type, options, "PostExec",    job.PostExec);
+            MapString(type, options, "OnErrorExec", job.OnErrorExec);
+            MapString(type, options, "FinallyExec", job.FinallyExec);
+        }
 
-        if (job.AutoColumnTypes)
-            MapBool(type, options, "AutoColumnTypes", true);
-
-        if (job.MaxSample > 0)
-            MapInt(type, options, "MaxSample", job.MaxSample);
+        // For all: Arrow schema injection (--export-job / --job YAML)
+        MapString(type, options, "Schema", job.Schema);
     }
+
+    // Fallbacks for legacy/YAML jobs that don't have stage-scoped args.
+    // Replicates the old -o trimming behaviour.
+    private static string[]? FallbackTrimReaderArgs(string[]? args)
+    {
+        if (args == null || args.Length == 0) return args;
+        int outIdx = Array.FindIndex(args, a =>
+            string.Equals(a, "-o", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(a, "--output", StringComparison.OrdinalIgnoreCase));
+        return outIdx > 0 ? args[..outIdx] : args;
+    }
+
+    private static string[]? FallbackTrimWriterArgs(string[]? args) => args;
 
     private static void MapString(Type type, object options, string propName, string? value)
     {
@@ -139,18 +155,19 @@ public class ProviderConfigurationService
             prop.SetValue(options, value);
     }
 
+    private static void MapStringIfEmpty(Type type, object options, string propName, string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return;
+        var prop = type.GetProperty(propName);
+        if (prop == null || !prop.CanWrite || prop.PropertyType != typeof(string)) return;
+        var current = prop.GetValue(options) as string;
+        if (string.IsNullOrEmpty(current)) prop.SetValue(options, value);
+    }
+
     private static void MapBool(Type type, object options, string propName, bool value)
     {
         var prop = type.GetProperty(propName);
         if (prop != null && prop.CanWrite && prop.PropertyType == typeof(bool))
             prop.SetValue(options, value);
     }
-
-    private static void MapInt(Type type, object options, string propName, int value)
-    {
-        var prop = type.GetProperty(propName);
-        if (prop != null && prop.CanWrite && prop.PropertyType == typeof(int))
-            prop.SetValue(options, value);
-    }
 }
-

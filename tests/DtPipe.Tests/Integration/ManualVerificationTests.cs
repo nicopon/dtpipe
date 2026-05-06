@@ -107,14 +107,8 @@ public class ManualVerificationTests : IAsyncLifetime
 		var exportService = serviceProvider.GetRequiredService<ExportService>();
 
 		// 3. Define Run Options
-		var options = new PipelineOptions
-		{
-			Provider = "duckdb",
-			ConnectionString = _connectionString,
-			Query = "SELECT * FROM users",
-			OutputPath = _outputPath,
-			BatchSize = 100
-		};
+		registry.Register(new DtPipe.Cli.Infrastructure.ConnectionRoute(_connectionString, _outputPath));
+		var options = new PipelineOptions { BatchSize = 100 };
 		registry.Register(options);
 
 		// 4. Build Pipeline
@@ -128,7 +122,7 @@ public class ManualVerificationTests : IAsyncLifetime
 		{
 			var readerFactory = serviceProvider.GetRequiredService<IStreamReaderFactory>();
 			var writerFactory = serviceProvider.GetRequiredService<IDataWriterFactory>();
-			await exportService.RunExportAsync(options, options.Provider, options.OutputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
+			await exportService.RunExportAsync(options, "duckdb", _outputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
 		}
 		catch (Exception ex)
 		{

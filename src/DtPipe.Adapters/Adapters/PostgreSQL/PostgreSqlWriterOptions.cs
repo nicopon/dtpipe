@@ -1,22 +1,21 @@
+using DtPipe.Adapters.Common;
 using DtPipe.Core.Attributes;
 using DtPipe.Core.Options;
 
 namespace DtPipe.Adapters.PostgreSQL;
 
-public class PostgreSqlWriterOptions : IWriterOptions, IKeyAwareOptions
+public class PostgreSqlWriterOptions : DbWriterOptions, IWriterOptions
 {
 	public static string Prefix => PostgreSqlConstants.ProviderName;
 	public static string DisplayName => "PostgreSQL Writer Options";
-	public string? Key { get; set; }
 
-	// Writer Options
-	[ComponentOption(Description = "Target table name", Required = true)]
+	[ComponentOption("--table", Aliases = new[] { "-t" }, Description = "Target table name", Required = true)]
 	public string Table { get; set; } = string.Empty;
 
-	[ComponentOption(Description = "Write strategy: Append, Truncate, or DeleteThenInsert", Hidden = true)]
+	[ComponentOption("--strategy", Aliases = new[] { "-s" }, Description = "Write strategy: Append, Truncate, or DeleteThenInsert", Hidden = true)]
 	public PostgreSqlWriteStrategy? Strategy { get; set; }
 
-	[ComponentOption(Description = "Data insert mode (Standard, Bulk)", Hidden = true)]
+	[ComponentOption("--insert-mode", Description = "Data insert mode (Standard, Bulk)", Hidden = true)]
 	public PostgreSqlInsertMode? InsertMode { get; set; }
 }
 

@@ -14,7 +14,7 @@ public record GlobalOptions
     public string? ExportJobFile { get; init; }
     public string? MetricsPath { get; init; }
 
-    // Overridable defaults propagated to all branches
+    // Overridable engine defaults propagated to all branches
     public string? Key { get; init; }
     public int Limit { get; init; }
     public int BatchSize { get; init; }
@@ -25,37 +25,22 @@ public record GlobalOptions
     public IReadOnlyDictionary<string, object?> AllFlags { get; init; } = new Dictionary<string, object?>(System.StringComparer.OrdinalIgnoreCase);
 }
 
+/// <summary>
+/// Per-branch data extracted by PipelineLexer.
+/// Contains only DAG-routing fields and universal engine controls (batch-size, limit, sampling).
+/// All adapter-specific flags (--query, --table, --key, --strict-schema, --pre-exec, etc.)
+/// flow exclusively through RawArgs → FlagBinder → adapter options.
+/// </summary>
 public record BranchSpec
 {
+    // DAG routing (structural — lexer splitting logic depends on these)
     public string? Alias { get; init; }
     public string? Input { get; init; }
     public string? Output { get; init; }
-    public string? Query { get; init; }
-    public string? Table { get; init; }
     public List<string> From { get; init; } = new();
     public List<string> Ref { get; init; } = new();
-    public string? Strategy { get; init; }
-    public string? InsertMode { get; init; }
-    public string? SchemaSave { get; init; }
-    public string? SchemaLoad { get; init; }
-    public string? Path { get; init; }
-    public string? ColumnTypes { get; init; }
-    public bool AutoColumnTypes { get; init; }
-    public int MaxSample { get; init; }
-    public string? Encoding { get; init; }
-    public int ConnectionTimeout { get; init; }
-    public int QueryTimeout { get; init; }
-    public bool UnsafeQuery { get; init; }
-    public bool StrictSchema { get; init; }
-    public bool NoSchemaValidation { get; init; }
-    public bool AutoMigrate { get; init; }
-    public string? PreExec { get; init; }
-    public string? PostExec { get; init; }
-    public string? OnErrorExec { get; init; }
-    public string? FinallyExec { get; init; }
 
-    // Overrides
-    public string? Key { get; init; }
+    // Universal engine controls (have meaningful global defaults)
     public int Limit { get; init; }
     public int BatchSize { get; init; }
     public double SamplingRate { get; init; } = 1.0;
@@ -64,6 +49,15 @@ public record BranchSpec
     public string? LogPath { get; init; }
     public string? MetricsPath { get; init; }
 
+    // Stage-scoped args — set by PipelineLexer, used by ProviderConfigurationService
+    // ReaderArgs   : flags from start up to first Pipeline-stage trigger or -o
+    // PipelineArgs : flags from first Pipeline-stage trigger to -o (transformer scope)
+    // WriterArgs   : flags from -o to end
+    public string[] ReaderArgs   { get; init; } = System.Array.Empty<string>();
+    public string[] PipelineArgs { get; init; } = System.Array.Empty<string>();
+    public string[] WriterArgs   { get; init; } = System.Array.Empty<string>();
+
+    // Full flat args (union of the three above — kept for components that iterate all tokens)
     public string[] RawArgs { get; init; } = System.Array.Empty<string>();
     public IReadOnlyDictionary<string, List<string>> Flags { get; init; } = new Dictionary<string, List<string>>(System.StringComparer.OrdinalIgnoreCase);
 }

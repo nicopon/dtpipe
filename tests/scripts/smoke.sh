@@ -140,11 +140,12 @@ rm -f "$INPUT_DIR"/high_volume.* "$INPUT_DIR"/result_vol_*.csv
 # 4. Pipeline 1: CSV → Parquet (anonymize + mask)
 # ----------------------------------------
 echo "[4/9] Pipeline 1: CSV → Parquet (Anonymize & Mask)..."
-"$DTPIPE" -i "$INPUT_DIR/vicious_source.csv" -o "parquet:$INPUT_DIR/vicious.parquet" \
+"$DTPIPE" -i "$INPUT_DIR/vicious_source.csv" \
   --fake "Email:internet.email" \
   --fake-seed-column "Id" \
   --null "Details" \
   --mask "Name:?************" \
+  -o "parquet:$INPUT_DIR/vicious.parquet" \
   --no-stats > /dev/null
 
 "$DTPIPE" -i "parquet:$INPUT_DIR/vicious.parquet" -o "$INPUT_DIR/result_step1.csv" --no-stats > /dev/null

@@ -54,6 +54,10 @@ class Program
 
 		try
 		{
+            // 0. Shell completion — intercept [suggest] before any other dispatch
+            if (args.Length > 0 && args[0] == "[suggest]")
+                return HandleSuggest(args, serviceProvider);
+
             // 1. Detect Subcommand vs Pipeline
             if (args.Length > 0 && IsSubcommand(args[0]))
             {
@@ -73,27 +77,39 @@ class Program
             var registry = new FlagRegistry();
             CoreFlagRegistry.RegisterCoreFlags(registry);
             var contributors = new List<ICliContributor>();
+            // PipelineOptionsCliContributor is registered first so pipeline-engine flags are always available
+            contributors.Add(new DtPipe.Cli.Infrastructure.PipelineOptionsCliContributor());
             contributors.AddRange(serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>().OfType<ICliContributor>());
             contributors.AddRange(serviceProvider.GetRequiredService<IEnumerable<IDataTransformerFactory>>().OfType<ICliContributor>());
             contributors.AddRange(serviceProvider.GetRequiredService<IEnumerable<IDataWriterFactory>>().OfType<ICliContributor>());
 
             foreach (var contributor in contributors)
             {
+                // Derive stage from contributor type so the lexer can enforce stage constraints.
+                var stage = contributor switch
+                {
+                    IStreamReaderFactory    => FlagStage.Reader,
+                    IDataWriterFactory      => FlagStage.Writer,
+                    IDataTransformerFactory => FlagStage.Pipeline,
+                    _                       => FlagStage.All   // PipelineOptionsCliContributor, etc.
+                };
                 foreach (var def in contributor.GetFlagDefs())
                 {
-                    registry.Register(def);
-                    if (Environment.GetEnvironmentVariable("DEBUG") == "1") Console.Error.WriteLine($"[DEBUG] Registered flag: {def.Name} (Arity: {def.Arity})");
+                    // Merge-on-register in FlagRegistry combines stages when the same flag
+                    // is contributed by both a reader and a writer (e.g. --table → Any = Reader|Writer).
+                    registry.Register(def with { Stage = stage });
+                    if (Environment.GetEnvironmentVariable("DEBUG") == "1") Console.Error.WriteLine($"[DEBUG] Registered flag: {def.Name} (Arity: {def.Arity}, Stage: {stage})");
                 }
             }
 
-            // Register CLI trigger flags from stream processor factories
+            // Register CLI trigger flags from stream processor factories — always FlagStage.Pipeline.
             var streamTransformerFactories = serviceProvider.GetRequiredService<IEnumerable<IStreamTransformerFactory>>();
             foreach (var stf in streamTransformerFactories)
             {
                 foreach (var (flag, isBoolean) in stf.CliTriggerFlags)
                 {
                     var arity = isBoolean ? FlagArity.Boolean : FlagArity.Scalar;
-                    registry.Register(new FlagDef(flag, Array.Empty<string>(), arity, FlagScope.PerBranch, stf.ComponentName));
+                    registry.Register(new FlagDef(flag, Array.Empty<string>(), arity, FlagScope.PerBranch, stf.ComponentName, FlagStage.Pipeline));
                     if (Environment.GetEnvironmentVariable("DEBUG") == "1") Console.Error.WriteLine($"[DEBUG] Registered processor flag: {flag} (Arity: {arity}, Processor: {stf.ComponentName})");
                 }
             }
@@ -121,6 +137,159 @@ class Program
     {
         var subs = new[] { "inspect", "providers", "completion", "secret" };
         return subs.Contains(arg.ToLowerInvariant());
+    }
+
+    /// <summary>
+    /// Stage-aware shell completion handler.
+    /// Protocol: dtpipe [suggest] &lt;cursor_word_index&gt; &lt;word1&gt; &lt;word2&gt; ...
+    /// Emits one completion candidate per line (with [NOSUSP] suffix to suppress space for prefix values).
+    /// </summary>
+    private static int HandleSuggest(string[] args, IServiceProvider sp)
+    {
+        // args = ["[suggest]", "<cursor_pos>", "<word1>", ...]
+        if (args.Length < 2 || !int.TryParse(args[1], out var cursorPos)) return 0;
+        var words = args.Skip(2).ToArray();          // words typed so far (excluding dtpipe itself)
+        var partial = cursorPos <= words.Length       // word currently being typed (may be incomplete)
+            ? words.ElementAtOrDefault(cursorPos - 1) ?? ""
+            : "";
+        var precedingWords = words.Take(Math.Max(0, cursorPos - 1)).ToArray();
+
+        // Build a full FlagRegistry so we can determine the current stage
+        var registry = new FlagRegistry();
+        CoreFlagRegistry.RegisterCoreFlags(registry);
+        var readerFactories    = sp.GetRequiredService<IEnumerable<IStreamReaderFactory>>().ToList();
+        var writerFactories    = sp.GetRequiredService<IEnumerable<IDataWriterFactory>>().ToList();
+        var transformerFactories = sp.GetRequiredService<IEnumerable<IDataTransformerFactory>>().ToList();
+        var processorFactories = sp.GetRequiredService<IEnumerable<IStreamTransformerFactory>>().ToList();
+
+        void RegisterWithStage(IEnumerable<FlagDef> defs, FlagStage stage)
+        {
+            foreach (var def in defs) registry.Register(def with { Stage = stage });
+        }
+        new PipelineOptionsCliContributor().GetFlagDefs().ToList().ForEach(d => registry.Register(d with { Stage = FlagStage.All }));
+        foreach (var c in readerFactories.OfType<ICliContributor>())      RegisterWithStage(c.GetFlagDefs(), FlagStage.Reader);
+        foreach (var c in writerFactories.OfType<ICliContributor>())       RegisterWithStage(c.GetFlagDefs(), FlagStage.Writer);
+        foreach (var c in transformerFactories.OfType<ICliContributor>())  RegisterWithStage(c.GetFlagDefs(), FlagStage.Pipeline);
+        foreach (var stf in processorFactories)
+            foreach (var (flag, isBoolean) in stf.CliTriggerFlags)
+                registry.Register(new FlagDef(flag, Array.Empty<string>(), isBoolean ? FlagArity.Boolean : FlagArity.Scalar, FlagScope.PerBranch, stf.ComponentName, FlagStage.Pipeline));
+
+        // Determine current stage by scanning preceding words.
+        // Stage transitions: Reader (default) → Pipeline (on first transformer trigger) → Writer (on -o).
+        var currentStage = FlagStage.Reader;
+        string? activeReaderProvider = null;
+        string? activeWriterProvider = null;
+        string? lastPipelineTrigger  = null;
+        bool valuePending = false; // true when the next word is a flag value (not a flag)
+
+        for (int i = 0; i < precedingWords.Length; i++)
+        {
+            var w = precedingWords[i];
+            if (valuePending) { valuePending = false; continue; } // skip flag values
+
+            if (w == "-i" || w == "--input")
+            {
+                currentStage         = FlagStage.Reader;
+                activeReaderProvider = precedingWords.ElementAtOrDefault(i + 1);
+                valuePending      = true;
+            }
+            else if (w == "-o" || w == "--output")
+            {
+                currentStage         = FlagStage.Writer;
+                activeWriterProvider = precedingWords.ElementAtOrDefault(i + 1);
+                valuePending      = true;
+            }
+            else
+            {
+                var def = registry.Lookup(w);
+                if (def?.Stage == FlagStage.Pipeline && currentStage == FlagStage.Reader)
+                {
+                    currentStage        = FlagStage.Pipeline;
+                    lastPipelineTrigger = w;
+                }
+                if (def != null && def.Arity != FlagArity.Boolean) valuePending = true;
+            }
+        }
+
+        // Resolve the active provider prefix (e.g. "pg" from "pg:host=...")
+        static string? ExtractProviderPrefix(string? connStr) =>
+            connStr != null && connStr.Contains(':') ? connStr.Split(':')[0].ToLowerInvariant() : null;
+
+        var readerPrefix = ExtractProviderPrefix(activeReaderProvider);
+        var writerPrefix = ExtractProviderPrefix(activeWriterProvider);
+
+        // Collect candidates for the current stage
+        var candidates = new List<string>();
+
+        if (currentStage == FlagStage.Reader)
+        {
+            // Global/structural flags always available
+            foreach (var def in registry.GetAll().Where(d => d.Stage == FlagStage.All && d.Name.StartsWith("--")))
+                candidates.Add(def.Name);
+
+            // Reader flags for the active provider (or all readers if no provider yet)
+            IEnumerable<ICliContributor> activeReaders = readerPrefix != null
+                ? readerFactories.Where(f => f.ComponentName == readerPrefix).OfType<ICliContributor>()
+                : readerFactories.OfType<ICliContributor>();
+            foreach (var c in activeReaders)
+                foreach (var def in c.GetFlagDefs()) candidates.Add(def.Name);
+
+            // Transformer triggers (to transition to Pipeline stage)
+            foreach (var def in registry.GetAll().Where(d => d.Stage == FlagStage.Pipeline))
+                candidates.Add(def.Name);
+
+            // -o to transition to Writer stage
+            candidates.Add("-o");
+
+            // Provider prefixes when partial doesn't look like a flag
+            if (partial == "" || !partial.StartsWith("-"))
+                foreach (var f in readerFactories) candidates.Add(f.ComponentName + ":[NOSUSP]");
+        }
+        else if (currentStage == FlagStage.Pipeline)
+        {
+            // Flags for the active transformer
+            var triggerDef = lastPipelineTrigger != null ? registry.Lookup(lastPipelineTrigger) : null;
+            var activeTFactory = transformerFactories
+                .FirstOrDefault(c => c.ComponentName == triggerDef?.Description)
+                as ICliContributor;
+            if (activeTFactory != null)
+                foreach (var def in activeTFactory.GetFlagDefs()) candidates.Add(def.Name);
+
+            // Additional pipeline triggers
+            foreach (var def in registry.GetAll().Where(d => d.Stage == FlagStage.Pipeline))
+                candidates.Add(def.Name);
+
+            // -o to end pipeline
+            candidates.Add("-o");
+        }
+        else // Writer
+        {
+            // Writer flags for the active provider (or all writers if no provider yet)
+            IEnumerable<ICliContributor> activeWriters = writerPrefix != null
+                ? writerFactories.Where(f => f.ComponentName == writerPrefix).OfType<ICliContributor>()
+                : writerFactories.OfType<ICliContributor>();
+            foreach (var c in activeWriters)
+                foreach (var def in c.GetFlagDefs()) candidates.Add(def.Name);
+
+            // Global flags
+            foreach (var def in registry.GetAll().Where(d => d.Stage == FlagStage.All && d.Name.StartsWith("--")))
+                candidates.Add(def.Name);
+
+            // Provider prefixes after -o
+            if (partial == "" || !partial.StartsWith("-"))
+                foreach (var f in writerFactories) candidates.Add(f.ComponentName + ":[NOSUSP]");
+        }
+
+        // Filter to prefix match and deduplicate, then emit
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in candidates)
+        {
+            var bare = c.Replace("[NOSUSP]", "");
+            if (!seen.Add(bare)) continue;
+            if (!string.IsNullOrEmpty(partial) && !bare.StartsWith(partial, StringComparison.OrdinalIgnoreCase)) continue;
+            Console.WriteLine(c);
+        }
+        return 0;
     }
 
 	private static void ConfigureServices(IServiceCollection services)

@@ -16,6 +16,14 @@ public class SchemaValidationServiceTests
     private readonly Mock<ILogger<SchemaValidationService>> _mockLogger;
     private readonly SchemaValidationService _service;
 
+    // Local test helper implementing ISchemaValidationAware
+    private class SchemaSettings : ISchemaValidationAware
+    {
+        public bool StrictSchema { get; set; }
+        public bool NoSchemaValidation { get; set; }
+        public bool AutoMigrate { get; set; }
+    }
+
     public SchemaValidationServiceTests()
     {
         _mockObserver = new Mock<IExportObserver>();
@@ -27,7 +35,7 @@ public class SchemaValidationServiceTests
     public async Task ValidateAndMigrateAsync_WhenNoSchemaValidation_ReturnsImmediately()
     {
         // Arrange
-        var options = new PipelineOptions { NoSchemaValidation = true };
+        var options = new SchemaSettings { NoSchemaValidation = true };
         var mockWriter = new Mock<IDataWriter>();
         mockWriter.As<ISchemaInspector>().Setup(i => i.RequiresTargetInspection).Returns(true);
         mockWriter.As<ISchemaInspector>().Setup(i => i.InspectTargetAsync(It.IsAny<CancellationToken>()))
@@ -45,7 +53,7 @@ public class SchemaValidationServiceTests
     public async Task ValidateAndMigrateAsync_WhenWriterDoesNotImplementInspector_ReturnsImmediately()
     {
         // Arrange
-        var options = new PipelineOptions { NoSchemaValidation = false };
+        var options = new SchemaSettings { NoSchemaValidation = false };
         var mockWriter = new Mock<IDataWriter>(); // Only IDataWriter, not ISchemaInspector
         var schema = new List<PipeColumnInfo> { new("col1", typeof(int), true) };
 
@@ -60,7 +68,7 @@ public class SchemaValidationServiceTests
     public async Task ValidateAndMigrateAsync_WhenCompatible_LogsSuccess()
     {
         // Arrange
-        var options = new PipelineOptions();
+        var options = new SchemaSettings();
         var schema = new List<PipeColumnInfo> { new("ID", typeof(int), false) };
 
         var mockWriter = new Mock<IDataWriter>();
@@ -81,7 +89,7 @@ public class SchemaValidationServiceTests
     public async Task ValidateAndMigrateAsync_WhenMissingColAndStrict_ThrowsException()
     {
         // Arrange
-        var options = new PipelineOptions { StrictSchema = true };
+        var options = new SchemaSettings { StrictSchema = true };
         var schema = new List<PipeColumnInfo> { new("NEW_COL", typeof(string), true) };
 
         var mockWriter = new Mock<IDataWriter>();
@@ -99,7 +107,7 @@ public class SchemaValidationServiceTests
     public async Task ValidateAndMigrateAsync_WhenMissingColAndAutoMigrate_CallsMigrate()
     {
         // Arrange
-        var options = new PipelineOptions { AutoMigrate = true };
+        var options = new SchemaSettings { AutoMigrate = true };
         var schema = new List<PipeColumnInfo> { new("NEW_COL", typeof(string), true) };
 
         var mockWriter = new Mock<IDataWriter>();

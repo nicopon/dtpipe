@@ -46,15 +46,14 @@ public class CliCollisionTests
 		helpOpt.Aliases.Add("-h");
 		helpOpt.Aliases.Add("-?");
 
+		// Only include options that are NOT contributed by any ICliContributor.
+		// --query/-q, --batch-size/-b are now contributed by PipelineOptionsCliContributor.
+		// --connection-timeout, --query-timeout are now contributed by adapter contributors.
 		var coreOptions = new List<Option>
 		{
 			connOpt,
 			provOpt,
-			queryOpt,
 			outputOpt,
-			new Option<int>("--connection-timeout"),
-			new Option<int>("--query-timeout"),
-			batchOpt,
 			helpOpt,
 			new Option<bool>("--version")
 		};

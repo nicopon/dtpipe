@@ -1,15 +1,14 @@
 using System.ComponentModel;
+using DtPipe.Adapters.Common;
 using DtPipe.Core.Options;
 
 namespace DtPipe.Adapters.Oracle;
 
-public record OracleReaderOptions : IProviderOptions, IQueryAwareOptions
+public class OracleReaderOptions : QueryableReaderOptions, IProviderOptions
 {
 	public static string Prefix => OracleConstants.ProviderName;
 	public static string DisplayName => "Oracle Reader Options";
 
 	[Description("Fetch size in bytes (Oracle only)")]
-	public int FetchSize { get; init; } = 1_048_576; // 1MB
-
-	public string? Query { get; set; }
+	public int FetchSize { get; set; } = 1_048_576;
 }

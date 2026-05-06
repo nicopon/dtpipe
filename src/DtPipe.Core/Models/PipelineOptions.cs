@@ -1,116 +1,33 @@
+using DtPipe.Core.Attributes;
 using DtPipe.Core.Options;
 
 namespace DtPipe.Core.Models;
 
 /// <summary>
-/// Pipeline execution configuration — CLI-neutral.
-/// Can be constructed directly by any application, without depending on DtPipe CLI types.
+/// Universal pipeline execution controls — independent of any specific adapter.
+/// Adapter-specific flags (schema validation, hooks, query, key, table, strategy, schema persistence)
+/// live in their respective options classes and are accessed via ISchemaValidationAware, IHookAware,
+/// ISchemaPersistenceAware, IQueryAwareOptions, IKeyAwareOptions.
 /// </summary>
 public sealed record PipelineOptions : IOptionSet
 {
 	public static string Prefix => "global";
 	public static string DisplayName => "Global Options";
 
-	// --- Execution ---
-
-	/// <summary>Number of rows per read/write batch. Default: 50 000.</summary>
+	[ComponentOption("--batch-size", Aliases = new[] { "-b" }, Description = "Batch size for processing")]
 	public int BatchSize { get; init; } = 50_000;
 
-	/// <summary>Maximum rows to process. 0 = unlimited.</summary>
+	[ComponentOption("--limit", Description = "Max total rows to process (0 = unlimited)")]
 	public int Limit { get; init; } = 0;
 
-	// --- Sampling ---
-
-	/// <summary>Probability 0.0–1.0 to include a row. 1.0 = all rows (default).</summary>
+	[ComponentOption("--sampling-rate", Aliases = new[] { "--sample-rate" }, Description = "Sampling rate (0.0–1.0, 1.0 = all rows)")]
 	public double SamplingRate { get; init; } = 1.0;
 
-	/// <summary>Seed for reproducible sampling. Null = random.</summary>
+	[ComponentOption("--sampling-seed", Aliases = new[] { "--sample-seed" }, Description = "Seed for deterministic sampling")]
 	public int? SamplingSeed { get; init; }
 
-	// --- Schema Validation ---
-
-	/// <summary>Abort if schema incompatibilities are detected (strict mode).</summary>
-	public bool StrictSchema { get; init; } = false;
-
-	/// <summary>Disable pre-write schema compatibility validation.</summary>
-	public bool NoSchemaValidation { get; init; } = false;
-
-	/// <summary>Automatically add missing columns to target table.</summary>
-	public bool AutoMigrate { get; init; } = false;
-
-	// --- Dry Run ---
-
-	/// <summary>Number of rows to preview without writing. 0 = disabled.</summary>
-	public int DryRunCount { get; init; } = 0;
-
-	// --- Lifecycle Hooks ---
-
-	/// <summary>SQL / command to execute before data transfer.</summary>
-	public string? PreExec { get; init; }
-
-	/// <summary>SQL / command to execute after successful data transfer.</summary>
-	public string? PostExec { get; init; }
-
-	/// <summary>SQL / command to execute if an error occurs.</summary>
-	public string? OnErrorExec { get; init; }
-
-	/// <summary>SQL / command to execute always (finally).</summary>
-	public string? FinallyExec { get; init; }
-	
-	// --- Observability ---
-
-	/// <summary>Disable live progress statistics (useful for CI).</summary>
-	public bool NoStats { get; init; } = false;
-
-	/// <summary>Path to save structured metrics as JSON. Null = skip.</summary>
+	// --- Execution controls (not CLI flags; set by LinearPipelineService from JobDefinition) ---
 	public string? MetricsPath { get; init; }
-
-	// --- General Options (Merged from DumpOptions) ---
-	public string Provider { get; init; } = "";
-	public string ConnectionString { get; init; } = "";
-	public string? Query { get; init; } = "";
-	public string OutputPath { get; init; } = "";
-
-	// --- Generic Write Options ---
-	public string? Strategy { get; init; }
-	public string? InsertMode { get; init; }
-	public string? Table { get; init; }
-	public string? Key { get; init; }
-
-	// --- Execution Options ---
-	public int ConnectionTimeout { get; init; } = 10; // seconds
-	public int QueryTimeout { get; init; } = 0; // 0 = no timeout
-	public bool UnsafeQuery { get; init; } = false;
-	public string? LogPath { get; init; }
-
-	// --- Schema Persistence ---
-
-	/// <summary>
-	/// If set, saves the discovered schema to a named .dtschema file after OpenAsync.
-	/// Subsequent runs can use SchemaLoad to skip inference entirely.
-	/// </summary>
-	public string? SchemaSave { get; init; }
-
-	/// <summary>
-	/// If set, loads ColumnTypes from the named .dtschema file and injects them into
-	/// the reader's options before OpenAsync, bypassing schema inference.
-	/// </summary>
-	public string? SchemaLoad { get; init; }
-
-	// --- Universal Reader Options (per-branch) ---
-
-	/// <summary>Navigation path in the source (dot-path for JSON, XPath for XML).</summary>
-	public string? Path { get; init; }
-
-	/// <summary>Explicit column types, e.g. "Id:uuid,Count:int64".</summary>
-	public string? ColumnTypes { get; init; }
-
-	/// <summary>Automatically infer and apply column types from the first sample rows.</summary>
-	public bool AutoColumnTypes { get; init; } = false;
-
-	/// <summary>Maximum rows to sample for schema inference (0 = reader default).</summary>
-	public int MaxSample { get; init; } = 0;
-
-	/// <summary>File encoding (e.g., UTF-8, ISO-8859-1).</summary>
-	public string? Encoding { get; init; }
+	public bool NoStats { get; init; } = false;
+	public int DryRunCount { get; init; } = 0;
 }

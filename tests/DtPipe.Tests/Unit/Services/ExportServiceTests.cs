@@ -63,10 +63,6 @@ public class ExportServiceTests
 		// Arrange
 		var options = new PipelineOptions
 		{
-			Provider = "test-source",
-			ConnectionString = "source-conn",
-			Query = "SELECT * FROM table",
-			OutputPath = "target-path",
 			NoStats = true
 		};
 
@@ -81,6 +77,7 @@ public class ExportServiceTests
 				  .Returns(ToAsyncEnumerable(new[] { new object?[] { 1 } }));
 		mockReader.Setup(r => r.DisposeAsync()).Returns(ValueTask.CompletedTask);
 
+		_mockReaderFactory.Setup(f => f.OptionsType).Returns(typeof(EmptyOptions));
 		_mockReaderFactory.Setup(f => f.Create(It.IsAny<OptionsRegistry>())).Returns(mockReader.Object);
 
 		// Mock Writer
@@ -92,10 +89,11 @@ public class ExportServiceTests
 		mockWriter.Setup(w => w.DisposeAsync()).Returns(ValueTask.CompletedTask);
 
 		_mockWriterFactory.Setup(f => f.ComponentName).Returns("test-target");
+		_mockWriterFactory.Setup(f => f.OptionsType).Returns(typeof(EmptyOptions));
 		_mockWriterFactory.Setup(f => f.Create(It.IsAny<OptionsRegistry>())).Returns(mockWriter.Object);
 
 		// Act
-		await _service.RunExportAsync(new PipelineOptions { NoStats = options.NoStats }, options.Provider, options.OutputPath, cts.Token, pipeline, _mockReaderFactory.Object, _mockWriterFactory.Object, new OptionsRegistry(), showStatusMessages: true);
+		await _service.RunExportAsync(new PipelineOptions { NoStats = options.NoStats }, "test-source", "target-path", cts.Token, pipeline, _mockReaderFactory.Object, _mockWriterFactory.Object, new OptionsRegistry(), showStatusMessages: true);
 
 		// Assert
 		_mockObserver.Verify(o => o.ShowIntro("test-source", "target-path"), Times.Once);

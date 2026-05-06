@@ -113,15 +113,8 @@ public class PipelineStressTests : IAsyncLifetime
 		var serviceProvider = services.BuildServiceProvider();
 		var exportService = serviceProvider.GetRequiredService<ExportService>();
 
-		var options = new PipelineOptions
-		{
-			Provider = "duckdb",
-			ConnectionString = _connectionString,
-			// Updated Query: SELECT Id, Name, Category, Temp, '' as Greeting, '' as Ref, '' as FinalStatus FROM large_data
-			Query = "SELECT Id, Name, Category, Temp, '' as Greeting, '' as Ref, '' as FinalStatus FROM large_data",
-			OutputPath = _outputPath,
-			BatchSize = 10000 // Large batch for performance
-		};
+		registry.Register(new DtPipe.Cli.Infrastructure.ConnectionRoute(_connectionString, _outputPath));
+		var options = new PipelineOptions { BatchSize = 10000 };
 		registry.Register(options);
 
 		// 3. Define Pipeline Args
@@ -145,7 +138,7 @@ public class PipelineStressTests : IAsyncLifetime
 		var pipeline = pipelineBuilder.Build(args);
 		var readerFactory = serviceProvider.GetRequiredService<IStreamReaderFactory>();
 		var writerFactory = serviceProvider.GetRequiredService<IDataWriterFactory>();
-		await exportService.RunExportAsync(options, options.Provider, options.OutputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
+		await exportService.RunExportAsync(options, "duckdb", _outputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
 
 		sw.Stop();
 		_output.WriteLine($"Export took {sw.ElapsedMilliseconds}ms ({sw.Elapsed.TotalSeconds:N2}s)");

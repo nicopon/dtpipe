@@ -52,7 +52,6 @@ public class CliProviderFactory<TService> : ICliContributor, IDataFactory
 	{
 		return CliOptionBuilder.GenerateFlagDefsForType(_descriptor.OptionsType);
 	}
-
 }
 
 public class CliDataWriterFactory : CliProviderFactory<IDataWriter>, IDataWriterFactory
@@ -65,17 +64,9 @@ public class CliDataWriterFactory : CliProviderFactory<IDataWriter>, IDataWriter
 	public IDataWriter Create(OptionsRegistry registry)
 	{
 		var specificOptions = registry.Get(_descriptor.OptionsType);
-		var pipelineOptions = registry.Get<PipelineOptions>();
+		var route = registry.Get<ConnectionRoute>();
 
-		// 1. Resolve Strategy
-		ResolveGenericOption(specificOptions, "Strategy", pipelineOptions.Strategy, _descriptor.ComponentName);
-
-		// 2. Resolve InsertMode
-		ResolveGenericOption(specificOptions, "InsertMode", pipelineOptions.InsertMode, _descriptor.ComponentName);
-
-		// 3. Resolve Table
-		ResolveGenericOption(specificOptions, "Table", pipelineOptions.Table, _descriptor.ComponentName);
-
+		// Validate that a target table was provided (FlagBinder set it from --table; YAML path via MapProcessorProperties)
 		var tableProp = specificOptions.GetType().GetProperty("Table");
 		if (tableProp != null)
 		{
@@ -86,59 +77,7 @@ public class CliDataWriterFactory : CliProviderFactory<IDataWriter>, IDataWriter
 			}
 		}
 
-		return _descriptor.Create(pipelineOptions.OutputPath, specificOptions, _serviceProvider);
-	}
-
-	private void ResolveGenericOption(object specificOptions, string propertyName, string? genericValue, string providerName)
-	{
-		var prop = specificOptions.GetType().GetProperty(propertyName);
-		if (prop == null) return;
-
-		var currentValue = prop.GetValue(specificOptions);
-
-		try
-		{
-			var defaultInstance = Activator.CreateInstance(specificOptions.GetType());
-			var defaultValue = prop.GetValue(defaultInstance);
-			if (!Equals(currentValue, defaultValue)) return;
-		}
-		catch
-		{
-			if (currentValue != null) return;
-		}
-
-		var enumType = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
-
-		if (!string.IsNullOrEmpty(genericValue))
-		{
-			if (enumType == typeof(string))
-			{
-				prop.SetValue(specificOptions, genericValue);
-				return;
-			}
-
-			if (enumType.IsEnum)
-			{
-				try
-				{
-					var parsedValue = Enum.Parse(enumType, genericValue, ignoreCase: true);
-					prop.SetValue(specificOptions, parsedValue);
-				}
-				catch (ArgumentException)
-				{
-					var allowed = string.Join(", ", Enum.GetNames(enumType));
-					throw new InvalidOperationException($"Invalid {propertyName} '{genericValue}' for provider '{providerName}'. Allowed values: {allowed}");
-				}
-			}
-		}
-		else
-		{
-			if (prop.GetValue(specificOptions) == null && enumType.IsValueType)
-			{
-				var defaultValue = Activator.CreateInstance(enumType);
-				prop.SetValue(specificOptions, defaultValue);
-			}
-		}
+		return _descriptor.Create(route?.Output ?? "", specificOptions, _serviceProvider);
 	}
 
 	public IEnumerable<Type> GetSupportedOptionTypes()
@@ -157,14 +96,11 @@ public class CliStreamReaderFactory : CliProviderFactory<IStreamReader>, IStream
 	public IStreamReader Create(OptionsRegistry registry)
 	{
 		var specificOptions = registry.Get(_descriptor.OptionsType);
-		var pipelineOptions = registry.Get<PipelineOptions>();
+		var route = registry.Get<ConnectionRoute>();
 
-		if (specificOptions is IQueryAwareOptions queryAware && !string.IsNullOrWhiteSpace(pipelineOptions.Query))
-		{
-			queryAware.Query = pipelineOptions.Query;
-		}
-
-		return _descriptor.Create(pipelineOptions.ConnectionString, specificOptions!, _serviceProvider);
+		// Connection string is set by LinearPipelineService into ConnectionRoute after stripping the
+		// component-name prefix. Query is set by FlagBinder (CLI path) or MapProcessorProperties (YAML path).
+		return _descriptor.Create(route?.Input ?? "", specificOptions!, _serviceProvider);
 	}
 
 	public IEnumerable<Type> GetSupportedOptionTypes()

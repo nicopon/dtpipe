@@ -43,28 +43,26 @@ public class PipelineToJobConverterTests
     [Fact]
     public void Convert_InheritsGlobals()
     {
-        var globals = new GlobalOptions { Key = "Id", Limit = 100 };
+        var globals = new GlobalOptions { Limit = 100 };
         var b1 = new BranchSpec { Input = "in1.csv" };
         var parsed = new ParsedPipeline(globals, new[] { b1 });
 
         var (jobs, _) = PipelineToJobConverter.Convert(parsed);
 
         var job = jobs.Values.First();
-        Assert.Equal("Id", job.Key);
         Assert.Equal(100, job.Limit);
     }
 
     [Fact]
     public void Convert_BranchOverridesGlobal()
     {
-        var globals = new GlobalOptions { Key = "GlobalId", Limit = 100 };
-        var b1 = new BranchSpec { Input = "in1.csv", Key = "BranchId", Limit = 50 };
+        var globals = new GlobalOptions { Limit = 100 };
+        var b1 = new BranchSpec { Input = "in1.csv", Limit = 50 };
         var parsed = new ParsedPipeline(globals, new[] { b1 });
 
         var (jobs, _) = PipelineToJobConverter.Convert(parsed);
 
         var job = jobs.Values.First();
-        Assert.Equal("BranchId", job.Key);
         Assert.Equal(50, job.Limit);
     }
 

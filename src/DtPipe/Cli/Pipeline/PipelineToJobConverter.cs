@@ -103,44 +103,30 @@ public static class PipelineToJobConverter
     {
         return new JobDefinition
         {
-            Input = branch.Input,
+            Input  = branch.Input,
             Output = branch.Output,
-            Query = branch.Query,
-            Table = branch.Table,
-            BatchSize = branch.BatchSize != 0 ? branch.BatchSize : (globals.BatchSize != 0 ? globals.BatchSize : 50000),
-            DryRunCount = globals.DryRunCount,
-            Sql = null,
-            Strategy = branch.Strategy,
-            InsertMode = branch.InsertMode,
-            Limit = branch.Limit != 0 ? branch.Limit : globals.Limit,
-            Key = branch.Key ?? globals.Key,
+            // Adapter-specific fields (Query, Table, Key, Strategy, InsertMode, StrictSchema, hooks,
+            // SchemaSave, SchemaLoad, etc.) are intentionally left null/default for CLI paths.
+            // FlagBinder sets them directly on adapter options from RawArgs.
+            // For YAML paths, MapProcessorProperties in ProviderConfigurationService handles them.
+            BatchSize    = branch.BatchSize != 0 ? branch.BatchSize : (globals.BatchSize != 0 ? globals.BatchSize : 50000),
+            DryRunCount  = globals.DryRunCount,
+            Sql          = null,
+            Limit        = branch.Limit != 0 ? branch.Limit : globals.Limit,
             SamplingRate = branch.SamplingRate != 1.0 ? branch.SamplingRate : globals.SamplingRate,
             SamplingSeed = branch.SamplingSeed ?? globals.SamplingSeed,
-            LogPath = branch.LogPath ?? globals.LogPath,
-            MetricsPath = branch.MetricsPath ?? globals.MetricsPath,
-            Prefix = branch.Prefix ?? globals.Prefix,
+            LogPath      = branch.LogPath ?? globals.LogPath,
+            MetricsPath  = branch.MetricsPath ?? globals.MetricsPath,
+            Prefix       = branch.Prefix ?? globals.Prefix,
 
-            Path = branch.Path,
-            ColumnTypes = branch.ColumnTypes,
-            AutoColumnTypes = branch.AutoColumnTypes,
-            MaxSample = branch.MaxSample,
-            Encoding = branch.Encoding,
-            ConnectionTimeout = branch.ConnectionTimeout,
-            QueryTimeout = branch.QueryTimeout,
-            UnsafeQuery = branch.UnsafeQuery,
-            StrictSchema = branch.StrictSchema,
-            NoSchemaValidation = branch.NoSchemaValidation,
-            AutoMigrate = branch.AutoMigrate,
-            PreExec = branch.PreExec,
-            PostExec = branch.PostExec,
-            OnErrorExec = branch.OnErrorExec,
-            FinallyExec = branch.FinallyExec,
+            From     = branch.From.FirstOrDefault(),
+            Ref      = branch.Ref.ToArray(),
+            Arguments         = branch.RawArgs,
+            ReaderArguments   = branch.ReaderArgs,
+            PipelineArguments = branch.PipelineArgs,
+            WriterArguments   = branch.WriterArgs,
 
-            From = branch.From.FirstOrDefault(),
-            Ref = branch.Ref.ToArray(),
-            Arguments = branch.RawArgs,
-
-            Transformers = new List<TransformerConfig>(),
+            Transformers    = new List<TransformerConfig>(),
             ProviderOptions = new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase)
         };
     }

@@ -120,7 +120,7 @@ run_test "T11" "$DTPIPE -i artifacts/test_data.csv --rename \"FirstName:Prenom\"
 # T12: Format transformer: inject Id into a string template
 run_test "T12" "$DTPIPE -i artifacts/test_data.parquet --format \"Id:USR-{Id}\" -o artifacts/output_t12.csv"
 # T13: Strict schema validation: PG → Parquet (must pass compatibility check)
-run_test "T13" "$DTPIPE -i \"$PG\" -q \"SELECT * FROM users_test\" --strict-schema -o artifacts/output_t13.parquet"
+run_test "T13" "$DTPIPE -i \"$PG\" -q \"SELECT * FROM users_test\" -o artifacts/output_t13.parquet --strict-schema"
 # T14: Small batch size (10) to exercise the batching infrastructure
 run_test "T14" "$DTPIPE -i artifacts/test_data.csv --batch-size 10 -o artifacts/output_t14.parquet"
 # T15: Compute with parseInt for explicit numeric type coercion
@@ -213,7 +213,7 @@ run_test "T43" "$DTPIPE -i \"$PG\" -q \"SELECT * FROM users_test\" --alias p --f
 # T44: Fake with JS Date.now() to inject a synthetic metadata column
 run_test "T44" "$DTPIPE -i artifacts/test_data.parquet --fake \"Meta:{\\\"source\\\": \\\"parquet\\\", \\\"time\\\": Date.now()}\" -o artifacts/output_t44.csv"
 # T45: Write to Postgres with --ignore-nulls: null cells are skipped on insert
-run_test "T45" "$DTPIPE -i artifacts/test_data.csv --null \"Id\" --ignore-nulls --no-schema-validation -o \"$PG\" --table \"users_test\" --strategy Append"
+run_test "T45" "$DTPIPE -i artifacts/test_data.csv --null \"Id\" --ignore-nulls -o \"$PG\" --table \"users_test\" --no-schema-validation --strategy Append"
 # T46: DuckDB passthrough on big dataset (with upstream limit)
 run_test "T46" "$DTPIPE -i artifacts/test_data_big.parquet --limit 1000 --alias b --from b --sql \"SELECT * FROM b\" -o artifacts/output_t46.arrow"
 # T47: Compute boolean column by comparing BirthDate to a threshold date
@@ -287,7 +287,7 @@ run_test "T78" "$DTPIPE -i \"pg:Host=badhost\" -o null"
 # T79: Compute accesses a property on undefined/null: must fail with JS error
 run_test "T79" "$DTPIPE -i artifacts/test_data.csv --compute \"Err:row.Missing.Prop\" -o null"
 # T80: Strict schema rejects incompatible column types on existing PG table
-run_test "T80" "$DTPIPE -i artifacts/test_data.parquet --strict-schema -o \"$PG\" --table \"wrong_schema\""
+run_test "T80" "$DTPIPE -i artifacts/test_data.parquet -o \"$PG\" --table \"wrong_schema\" --strict-schema"
 # T81: Same file used as both source and target: must fail (conflict)
 run_test "T81" "$DTPIPE -i artifacts/test_data.csv -o artifacts/test_data.csv"
 # T82: Negative --limit value: must fail with validation error

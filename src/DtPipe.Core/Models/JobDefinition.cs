@@ -2,6 +2,7 @@ using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
 
 namespace DtPipe.Core.Models;
+
 /// <summary>
 /// Central job definition for export configuration, hydrated from CLI or YAML.
 /// </summary>
@@ -25,14 +26,10 @@ public record JobDefinition
 
 	public string? Table { get; init; }
 	public int Limit { get; init; } = 0;
-	public bool UnsafeQuery { get; init; } = false;
 	public bool StrictSchema { get; init; } = false;
 	public bool NoSchemaValidation { get; init; } = false;
 	public bool NoStats { get; init; } = false;
 	public int DryRunCount { get; init; } = 0;
-
-	public int ConnectionTimeout { get; init; } = 10;
-	public int QueryTimeout { get; init; } = 0;
 
 	public string? MetricsPath { get; init; }
     public bool? AutoMigrate { get; set; }
@@ -65,32 +62,21 @@ public record JobDefinition
 	/// <summary>Load ColumnTypes from a named .dtschema file, bypassing schema inference.</summary>
 	public string? SchemaLoad { get; init; }
 
-	// --- Universal Reader Options (per-branch, apply to the branch's reader) ---
-
-	/// <summary>Navigation path in the source: dot-path for JSON (e.g. "items.data"), XPath for XML (e.g. "//Record").</summary>
-	public string? Path { get; init; }
-
-	/// <summary>Explicit column types, e.g. "Id:uuid,Count:int64,Active:bool".</summary>
-	public string? ColumnTypes { get; init; }
-
-	/// <summary>Automatically infer and apply column types from the first sample rows.</summary>
-	public bool AutoColumnTypes { get; init; } = false;
-
-	/// <summary>Maximum rows to sample for schema inference (0 = reader default).</summary>
-	public int MaxSample { get; init; } = 0;
-
-	/// <summary>File encoding (e.g., UTF-8, ISO-8859-1). Defaults to UTF-8.</summary>
-	public string? Encoding { get; init; }
-
 	/// <summary>
 	/// Full Arrow schema as compact JSON. Set by --export-job; consumed by --job to skip inference.
 	/// Not a CLI flag — managed exclusively via --schema-save / --schema-load / --export-job.
 	/// </summary>
 	public string? Schema { get; init; }
 
-	/// <summary>Raw CLI arguments for this branch (captured during sequential parsing).</summary>
+	/// <summary>Raw CLI arguments for this branch (full flat list — union of the three below).</summary>
 	public string[]? Arguments { get; set; }
+
+	/// <summary>Flags in the reader scope: from start to first transformer trigger or -o.</summary>
+	public string[]? ReaderArguments { get; set; }
+
+	/// <summary>Flags in the transformer scope: from first transformer trigger to -o.</summary>
+	public string[]? PipelineArguments { get; set; }
+
+	/// <summary>Flags in the writer scope: from -o to end.</summary>
+	public string[]? WriterArguments { get; set; }
 }
-
-
-

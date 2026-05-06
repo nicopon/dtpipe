@@ -1,11 +1,10 @@
+using DtPipe.Adapters.Common;
 using DtPipe.Core.Options;
 
 namespace DtPipe.Adapters.DuckDB;
 
-public record DuckDbReaderOptions : IProviderOptions, IQueryAwareOptions
+public class DuckDbReaderOptions : QueryableReaderOptions, IProviderOptions
 {
 	public static string Prefix => DuckDbConstants.ProviderName;
 	public static string DisplayName => "DuckDB Reader";
-
-	public string? Query { get; set; }
 }

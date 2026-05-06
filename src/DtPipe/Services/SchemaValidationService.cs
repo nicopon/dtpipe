@@ -23,10 +23,10 @@ public sealed class SchemaValidationService
     public async Task ValidateAndMigrateAsync(
         IDataWriter writer,
         IReadOnlyList<PipeColumnInfo> exportableSchema,
-        PipelineOptions options,
+        ISchemaValidationAware? settings,
         CancellationToken ct)
     {
-        if (options.NoSchemaValidation || writer is not ISchemaInspector inspector) return;
+        if (settings?.NoSchemaValidation == true || writer is not ISchemaInspector inspector) return;
 
         if (!inspector.RequiresTargetInspection)
         {
@@ -47,23 +47,21 @@ public sealed class SchemaValidationService
             _observer.LogMessage("Target schema compatible.");
         }
 
-        // Auto-migrate if needed
         var missingCount = report.Columns.Count(c => c.Status == CompatibilityStatus.MissingInTarget);
-        if (missingCount > 0 && options.AutoMigrate && writer is ISchemaMigrator migrator)
+        if (missingCount > 0 && settings?.AutoMigrate == true && writer is ISchemaMigrator migrator)
         {
             _observer.LogMessage($"[yellow]Auto-migrating schema: Adding {missingCount} missing columns...[/]");
             await migrator.MigrateSchemaAsync(report, ct);
 
-            // Re-validate after migration
             targetSchema = await inspector.InspectTargetAsync(ct);
             report = SchemaCompatibilityAnalyzer.Analyze(exportableSchema, targetSchema, dialect);
 
-            if (!report.IsCompatible && options.StrictSchema)
+            if (!report.IsCompatible && settings?.StrictSchema == true)
                 throw new InvalidOperationException("Export aborted: Schema migration failed to resolve all incompatibilities in Strict Mode.");
 
             _observer.LogMessage("[green]Schema migration successful. Continuing export.[/]");
         }
-        else if (!report.IsCompatible && options.StrictSchema)
+        else if (!report.IsCompatible && settings?.StrictSchema == true)
         {
             throw new InvalidOperationException("Export aborted due to schema incompatibilities (Strict Mode).");
         }

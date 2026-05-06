@@ -99,58 +99,77 @@ public class LinearPipelineService
             (writerFactory, cleanedOutput) = ResolveFactory<IDataWriterFactory>(job.Output, _writerFactories);
         }
 
-        // 3b. Load query/hook content from files if the value is a file path (e.g. --query my.sql)
+        // 3b. YAML path: load query content from file (job.Query set by MapProcessorProperties from YAML).
         job = job with
         {
             Query = LoadOrReadContent(job.Query, _console, "query"),
-            PreExec = LoadOrReadContent(job.PreExec, _console, "Pre-Exec"),
-            PostExec = LoadOrReadContent(job.PostExec, _console, "Post-Exec"),
-            OnErrorExec = LoadOrReadContent(job.OnErrorExec, _console, "On-Error-Exec"),
-            FinallyExec = LoadOrReadContent(job.FinallyExec, _console, "Finally-Exec")
         };
 
-        // 3c. Auto-build query from --table for readers that require a query (e.g. DuckDB, PG, Oracle)
-        if (readerFactory.RequiresQuery && string.IsNullOrWhiteSpace(job.Query))
+        // 3b2. CLI path: FlagBinder set readerOpts.Query directly from --query flag — resolve file refs here.
+        // This is separate from 3b because job.Query is null for CLI branches.
         {
-            if (!string.IsNullOrWhiteSpace(job.Table))
-                job = job with { Query = $"SELECT * FROM \"{job.Table}\"" };
+            var readerOptsForLoad = _optionsRegistry.Get(readerFactory.OptionsType) as DtPipe.Core.Options.IQueryAwareOptions;
+            if (readerOptsForLoad != null && !string.IsNullOrWhiteSpace(readerOptsForLoad.Query))
+            {
+                var resolved = LoadOrReadContent(readerOptsForLoad.Query, _console, "query");
+                if (resolved != readerOptsForLoad.Query)
+                    readerOptsForLoad.Query = resolved;
+            }
         }
 
-        // 4. Global Options (from job definition)
+        // 3c. Load hook content from files for YAML-path jobs (hooks from RawArgs are already in adapter options).
+        if (!string.IsNullOrEmpty(job.PreExec) || !string.IsNullOrEmpty(job.PostExec)
+            || !string.IsNullOrEmpty(job.OnErrorExec) || !string.IsNullOrEmpty(job.FinallyExec))
+        {
+            job = job with
+            {
+                PreExec     = LoadOrReadContent(job.PreExec, _console, "Pre-Exec"),
+                PostExec    = LoadOrReadContent(job.PostExec, _console, "Post-Exec"),
+                OnErrorExec = LoadOrReadContent(job.OnErrorExec, _console, "On-Error-Exec"),
+                FinallyExec = LoadOrReadContent(job.FinallyExec, _console, "Finally-Exec")
+            };
+        }
+
+        // 3d. RequiresQuery auto-build: if the reader needs a SQL query and none was provided,
+        // check (in order): reader's own --table, writer's --table, YAML job.Query.
+        if (readerFactory.RequiresQuery)
+        {
+            var readerOpts = _optionsRegistry.Get(readerFactory.OptionsType) as DtPipe.Core.Options.IQueryAwareOptions;
+            if (readerOpts != null && string.IsNullOrWhiteSpace(readerOpts.Query))
+            {
+                // 1. Reader's own --table (e.g. DuckDB reader: --table source_table)
+                var readerTable = readerOpts.GetType().GetProperty("Table")?.GetValue(readerOpts) as string;
+                if (!string.IsNullOrWhiteSpace(readerTable))
+                {
+                    readerOpts.Query = $"SELECT * FROM \"{readerTable}\"";
+                }
+                else
+                {
+                    // 2. Writer's --table (same-name read/write, e.g. -i pg:... --table t -o pg:... --table t)
+                    var writerOpts = writerFactory != null ? _optionsRegistry.Get(writerFactory.OptionsType) : null;
+                    var tableVal = writerOpts?.GetType().GetProperty("Table")?.GetValue(writerOpts) as string;
+                    if (!string.IsNullOrWhiteSpace(tableVal))
+                        readerOpts.Query = $"SELECT * FROM \"{tableVal}\"";
+                    // 3. YAML path fallback
+                    else if (!string.IsNullOrWhiteSpace(job.Query))
+                        readerOpts.Query = job.Query;
+                }
+            }
+        }
+
+        // 4. Register routing so factory Create() methods can resolve adapter connection strings.
+        _optionsRegistry.Register(new DtPipe.Cli.Infrastructure.ConnectionRoute(cleanedInput, cleanedOutput));
+
+        // Universal pipeline options (engine controls only; adapter options are in the registry)
         var pipelineOptions = new PipelineOptions
         {
-            Key = job.Key,
-            LogPath = job.LogPath,
-            MetricsPath = job.MetricsPath,
-            Strategy = job.Strategy,
-            InsertMode = job.InsertMode,
-            Limit = job.Limit,
+            MetricsPath  = job.MetricsPath,
+            Limit        = job.Limit,
             SamplingRate = job.SamplingRate,
             SamplingSeed = job.SamplingSeed,
-            BatchSize = job.BatchSize,
-            ConnectionTimeout = job.ConnectionTimeout,
-            QueryTimeout = job.QueryTimeout,
-            UnsafeQuery = job.UnsafeQuery,
-            DryRunCount = job.DryRunCount,
-            StrictSchema = job.StrictSchema,
-            NoSchemaValidation = job.NoSchemaValidation,
-            AutoMigrate = job.AutoMigrate ?? false,
-            PreExec = job.PreExec,
-            PostExec = job.PostExec,
-            OnErrorExec = job.OnErrorExec,
-            FinallyExec = job.FinallyExec,
-            Path = job.Path,
-            ColumnTypes = job.ColumnTypes,
-            AutoColumnTypes = job.AutoColumnTypes,
-            MaxSample = job.MaxSample,
-            Encoding = job.Encoding,
-            Table = job.Table,
-            NoStats = job.NoStats,
-            SchemaSave = job.SchemaSave,
-            SchemaLoad = job.SchemaLoad,
-            OutputPath = cleanedOutput,
-            ConnectionString = cleanedInput,
-            Query = job.Query
+            BatchSize    = job.BatchSize,
+            DryRunCount  = job.DryRunCount,
+            NoStats      = job.NoStats,
         };
 
         // 5. Build Pipeline (Transformers)
@@ -161,10 +180,15 @@ public class LinearPipelineService
         var tFactories = _contributors.OfType<IDataTransformerFactory>().ToList();
         List<IDataTransformer> pipeline;
 
-        if (currentRawArgs.Length > 0)
+        // Use PipelineArguments (transformer scope only) when available; fall back to full RawArgs.
+        var transformerArgs = job.PipelineArguments is { Length: > 0 }
+            ? job.PipelineArguments
+            : currentRawArgs;
+
+        if (transformerArgs.Length > 0)
         {
             var pipelineBuilder = new TransformerPipelineBuilder(tFactories);
-            pipeline = pipelineBuilder.Build(currentRawArgs);
+            pipeline = pipelineBuilder.Build(transformerArgs);
         }
         else if (job.Transformers != null && job.Transformers.Count > 0)
         {

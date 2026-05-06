@@ -111,10 +111,12 @@ public class InspectCommand : Command
             return;
         }
 
-        // Register the connection string into PipelineOptions so the factory can pick it up
-        var pipelineOpts = registry.Get<PipelineOptions>();
-        var updatedPipelineOpts = pipelineOpts with { ConnectionString = effectiveConnectionString, Query = query };
-        registry.RegisterByType(typeof(PipelineOptions), updatedPipelineOpts);
+        // Register routing so CliStreamReaderFactory.Create() can resolve the connection string
+        registry.Register(new DtPipe.Cli.Infrastructure.ConnectionRoute(effectiveConnectionString, string.Empty));
+        // Inject query directly into reader options
+        var readerOpts = registry.Get(factory.OptionsType) as DtPipe.Core.Options.IQueryAwareOptions;
+        if (readerOpts != null && !string.IsNullOrWhiteSpace(query))
+            readerOpts.Query = query;
 
         // 2. Set query if provided
         if (factory.RequiresQuery && string.IsNullOrWhiteSpace(query))

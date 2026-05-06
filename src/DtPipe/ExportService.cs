@@ -87,27 +87,32 @@ public class ExportService
 			_observer.ShowConnectionStatus(false, null);
 		}
 
+		// Read schema persistence settings from reader options (ISchemaPersistenceAware — text readers only).
+		var readerSchemaPersist = registry.Get(readerFactory.OptionsType) as DtPipe.Core.Options.ISchemaPersistenceAware;
+
 		// Load full Arrow schema from .dtschema file and inject into reader options (skips inference).
-		if (!string.IsNullOrEmpty(options.SchemaLoad))
+		var schemaLoadName = readerSchemaPersist?.SchemaLoad;
+		if (!string.IsNullOrEmpty(schemaLoadName))
 		{
-			var loadedSchema = SchemaStore.Load(options.SchemaLoad);
+			var loadedSchema = SchemaStore.Load(schemaLoadName);
 			if (loadedSchema != null)
 				InjectSchema(readerFactory, registry, ArrowSchemaSerializer.SerializeCompact(loadedSchema));
 			else
-				_logger.LogWarning("Schema file '{Name}' not found — falling back to inference.", options.SchemaLoad);
+				_logger.LogWarning("Schema file '{Name}' not found — falling back to inference.", schemaLoadName);
 		}
 
 		await using var reader = readerFactory.Create(registry);
 		await reader.OpenAsync(ct);
 
 		// Persist the full Arrow schema to a .dtschema file for future runs.
-		if (!string.IsNullOrEmpty(options.SchemaSave) && providerName != "stream-transformer")
+		var schemaSaveName = readerSchemaPersist?.SchemaSave;
+		if (!string.IsNullOrEmpty(schemaSaveName) && providerName != "stream-transformer")
 		{
 			var schema = (reader as IColumnarStreamReader)?.Schema;
 			if (schema is { FieldsList: { Count: > 0 } })
 			{
-				SchemaStore.Save(options.SchemaSave, providerName, schema);
-				_logger.LogInformation("Schema saved: {Name}.dtschema ({Count} fields)", options.SchemaSave, schema.FieldsList.Count);
+				SchemaStore.Save(schemaSaveName, providerName, schema);
+				_logger.LogInformation("Schema saved: {Name}.dtschema ({Count} fields)", schemaSaveName, schema.FieldsList.Count);
 			}
 			else if (reader.Columns is { Count: > 0 })
 			{
@@ -116,8 +121,8 @@ public class ExportService
 					.Select(c => ArrowTypeMapper.GetField(c.Name, c.ClrType, c.IsNullable))
 					.ToList();
 				var rowSchema = new Apache.Arrow.Schema(fields, null);
-				SchemaStore.Save(options.SchemaSave, providerName, rowSchema);
-				_logger.LogInformation("Schema saved: {Name}.dtschema ({Count} fields)", options.SchemaSave, fields.Count);
+				SchemaStore.Save(schemaSaveName, providerName, rowSchema);
+				_logger.LogInformation("Schema saved: {Name}.dtschema ({Count} fields)", schemaSaveName, fields.Count);
 			}
 		}
 
@@ -245,11 +250,15 @@ public class ExportService
 		var exportableSchema = currentSchema ?? throw new InvalidOperationException("Exportable schema is null.");
 		await using var writer = writerFactory.Create(registry);
 
-		// Schema Validation
-		await _schemaValidator.ValidateAndMigrateAsync(writer, exportableSchema, options, ct);
+		// Read schema validation and hook settings from writer options
+		var writerSchemaSettings = registry.Get(writerFactory.OptionsType) as DtPipe.Core.Options.ISchemaValidationAware;
+		var writerHooks = registry.Get(writerFactory.OptionsType) as DtPipe.Core.Options.IHookAware;
 
-		// Execute Pre-Hook
-		await _hookExecutor.ExecuteAsync(writer, "Pre-Hook", options.PreExec, ct);
+		// Schema Validation
+		await _schemaValidator.ValidateAndMigrateAsync(writer, exportableSchema, writerSchemaSettings, ct);
+
+		// Execute Pre-Hook (from writer options)
+		await _hookExecutor.ExecuteAsync(writer, "Pre-Hook", writerHooks?.PreExec, ct);
 
 		await writer.InitializeAsync(exportableSchema, ct);
 
@@ -307,7 +316,7 @@ public class ExportService
 				_logger.LogInformation("Export completed in {Elapsed}. Written {Rows} rows ({Speed:F1} rows/s).", elapsed, progress.GetMetrics().WriteCount, rowsPerSecond);
 
 			// --- POST-EXEC HOOK ---
-			await _hookExecutor.ExecuteAsync(writer, "Post-Hook", options.PostExec, ct);
+			await _hookExecutor.ExecuteAsync(writer, "Post-Hook", writerHooks?.PostExec, ct);
 
 
 			await _metricsService.SaveMetricsAsync(progress, options.MetricsPath, ct);
@@ -325,7 +334,7 @@ public class ExportService
 
 			try
 			{
-				await _hookExecutor.ExecuteAsync(writer, "On-Error Hook", options.OnErrorExec, CancellationToken.None, TimeSpan.FromSeconds(HookTimeoutSeconds));
+				await _hookExecutor.ExecuteAsync(writer, "On-Error Hook", writerHooks?.OnErrorExec, CancellationToken.None, TimeSpan.FromSeconds(HookTimeoutSeconds));
 			}
 			catch (Exception hookEx)
 			{
@@ -339,7 +348,7 @@ public class ExportService
 		{
 			try
 			{
-				await _hookExecutor.ExecuteAsync(writer, "Finally Hook", options.FinallyExec, CancellationToken.None, TimeSpan.FromSeconds(HookTimeoutSeconds));
+				await _hookExecutor.ExecuteAsync(writer, "Finally Hook", writerHooks?.FinallyExec, CancellationToken.None, TimeSpan.FromSeconds(HookTimeoutSeconds));
 			}
 			catch (Exception hookEx)
 			{

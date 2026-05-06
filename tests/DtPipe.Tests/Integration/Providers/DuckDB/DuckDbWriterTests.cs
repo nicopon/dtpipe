@@ -55,14 +55,9 @@ public class DuckDbWriterTests : IAsyncLifetime
 	public async Task Write_CreatesTable_And_InsertsData()
 	{
 		// Arrange
-		var options = new PipelineOptions
-		{
-			OutputPath = _outputPath,
-			ConnectionString = "fake_connection",
-			Query = "SELECT 1",
-			Table = "Export"
-		};
-		_registry.Register(options);
+		_registry.Register(new DtPipe.Cli.Infrastructure.ConnectionRoute(string.Empty, _outputPath));
+		_registry.Register(new PipelineOptions());
+		_registry.Register(new DuckDbWriterOptions { Table = "Export" });
 		var writer = _factory.Create(_registry);
 
 		var columns = new List<PipeColumnInfo>
@@ -121,8 +116,9 @@ public class DuckDbWriterTests : IAsyncLifetime
 	public async Task Write_RecordBatch_InsertsData()
 	{
 		// Arrange
-		var options = new PipelineOptions { OutputPath = _outputPath, ConnectionString = "fake", Query = "SELECT 1", Table = "Export" };
-		_registry.Register(options);
+		_registry.Register(new DtPipe.Cli.Infrastructure.ConnectionRoute(string.Empty, _outputPath));
+		_registry.Register(new PipelineOptions());
+		_registry.Register(new DuckDbWriterOptions { Table = "Export" });
 		var writer = _factory.Create(_registry) as IColumnarDataWriter;
 		writer.Should().NotBeNull();
 
@@ -181,15 +177,8 @@ public class DuckDbWriterTests : IAsyncLifetime
 		// 2. Configure options: Append strategy
 		var duckOptions = new DuckDbWriterOptions { Strategy = DuckDbWriteStrategy.Append, Table = "Export" };
 		_registry.Register(duckOptions);
-
-		var options = new PipelineOptions
-		{
-			OutputPath = _outputPath,
-			Provider = "duckdb",
-			Query = "SELECT 1", // Dummy
-			ConnectionString = "dummy"
-		};
-		_registry.Register(options);
+		_registry.Register(new DtPipe.Cli.Infrastructure.ConnectionRoute(string.Empty, _outputPath));
+		_registry.Register(new PipelineOptions());
 		var writer = _factory.Create(_registry);
 
 		var columns = new List<PipeColumnInfo>
@@ -250,15 +239,8 @@ public class DuckDbWriterTests : IAsyncLifetime
 
 		var duckOptions = new DuckDbWriterOptions { Strategy = DuckDbWriteStrategy.Append, Table = "Export" };
 		_registry.Register(duckOptions);
-
-		var options = new PipelineOptions
-		{
-			OutputPath = _outputPath,
-			Provider = "duckdb",
-			Query = "SELECT 1",
-			ConnectionString = "dummy"
-		};
-		_registry.Register(options);
+		_registry.Register(new DtPipe.Cli.Infrastructure.ConnectionRoute(string.Empty, _outputPath));
+		_registry.Register(new PipelineOptions());
 		var writer = _factory.Create(_registry);
 
 		// Source says ID is String, but Target is Integer
@@ -302,8 +284,8 @@ public class DuckDbWriterTests : IAsyncLifetime
 		var duckOptions = new DuckDbWriterOptions { Strategy = DuckDbWriteStrategy.Truncate, Table = "Export" };
 		_registry.Register(duckOptions);
 
-		var options = new PipelineOptions { OutputPath = _outputPath, Provider = "duckdb", Query = "SELECT 1", ConnectionString = "dummy" };
-		_registry.Register(options);
+		_registry.Register(new DtPipe.Cli.Infrastructure.ConnectionRoute(string.Empty, _outputPath));
+		_registry.Register(new PipelineOptions());
 		var writer = _factory.Create(_registry);
 
 		var columns = new List<PipeColumnInfo> { new("Id", typeof(int), false), new("Name", typeof(string), true) };
@@ -351,8 +333,8 @@ public class DuckDbWriterTests : IAsyncLifetime
 		var duckOptions = new DuckDbWriterOptions { Strategy = DuckDbWriteStrategy.DeleteThenInsert, Table = "Export" };
 		_registry.Register(duckOptions);
 
-		var options = new PipelineOptions { OutputPath = _outputPath, Provider = "duckdb", Query = "SELECT 1", ConnectionString = "dummy" };
-		_registry.Register(options);
+		_registry.Register(new DtPipe.Cli.Infrastructure.ConnectionRoute(string.Empty, _outputPath));
+		_registry.Register(new PipelineOptions());
 		var writer = _factory.Create(_registry);
 
 		var columns = new List<PipeColumnInfo> { new("Id", typeof(int), false), new("Name", typeof(string), true) };

@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ARTIFACTS_DIR="$SCRIPT_DIR/artifacts"
 INFRA_START="$PROJECT_ROOT/tests/infra/start_infra.sh"
-DTPIPE="$PROJECT_ROOT/dist/release/dtpipe --no-schema-validation"
+DTPIPE="$PROJECT_ROOT/dist/release/dtpipe"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -55,7 +55,7 @@ if [ ! -f "$ARTIFACTS_DIR/test_data.parquet" ]; then
       --fake "Category:commerce.department" \
       --fake "Price:commerce.price" \
       --drop "GenerateIndex" \
-      -o "$ARTIFACTS_DIR/test_data.parquet" --strategy Recreate || exit 1
+      -o "$ARTIFACTS_DIR/test_data.parquet" --no-schema-validation --strategy Recreate || exit 1
 else
     echo "  Skipping test_data.parquet (already exists)"
 fi
@@ -68,7 +68,7 @@ if [ ! -f "$ARTIFACTS_DIR/test_data_big.parquet" ]; then
       --fake "Timestamp:date.past" \
       --fake "Value:random.number" \
       --drop "GenerateIndex" \
-      -o "$ARTIFACTS_DIR/test_data_big.parquet" --strategy Recreate || exit 1
+      -o "$ARTIFACTS_DIR/test_data_big.parquet" --no-schema-validation --strategy Recreate || exit 1
 else
     echo "  Skipping test_data_big.parquet (already exists)"
 fi
@@ -82,7 +82,7 @@ if [ ! -f "$ARTIFACTS_DIR/test_data.arrow" ]; then
       --fake "Level:lorem.word" \
       --fake "Message:lorem.sentence" \
       --drop "GenerateIndex" \
-      -o "$ARTIFACTS_DIR/test_data.arrow" --strategy Recreate || exit 1
+      -o "$ARTIFACTS_DIR/test_data.arrow" --no-schema-validation --strategy Recreate || exit 1
 else
     echo "  Skipping test_data.arrow (already exists)"
 fi
@@ -97,7 +97,7 @@ if [ ! -f "$ARTIFACTS_DIR/test_data.duckdb" ]; then
       --fake "City:address.city" \
       --fake "Country:address.country" \
       --drop "GenerateIndex" \
-      -o "$ARTIFACTS_DIR/test_data.duckdb" --table "geography" --strategy Recreate || exit 1
+      -o "$ARTIFACTS_DIR/test_data.duckdb" --table "geography" --no-schema-validation --strategy Recreate || exit 1
 else
     echo "  Skipping test_data.duckdb (already exists)"
 fi
@@ -109,9 +109,9 @@ $DTPIPE -i "generate:1000" \
   --fake "username:internet.userName" \
   --fake "last_login:date.past" \
   --drop "GenerateIndex" \
-  --pre-exec "DROP TABLE IF EXISTS users_test CASCADE" \
   -o "pg:Host=localhost;Port=5440;Database=integration;Username=postgres;Password=password" \
-  --table "users_test" --strategy Recreate || exit 1
+  --pre-exec "DROP TABLE IF EXISTS users_test CASCADE" \
+  --table "users_test" --no-schema-validation --strategy Recreate || exit 1
 
 # 6. SQL Server (always runs: --pre-exec drops any stale table so Recreate always uses source schema)
 echo "Initializing SQL Server users_test..."
@@ -120,9 +120,9 @@ $DTPIPE -i "generate:1000" \
   --fake "display_name:name.fullName" \
   --fake "credit_card:finance.creditCardNumber" \
   --drop "GenerateIndex" \
-  --pre-exec "IF OBJECT_ID('users_test', 'U') IS NOT NULL DROP TABLE users_test" \
   -o "mssql:Server=localhost,1434;Database=master;User Id=sa;Password=Password123!;Encrypt=False" \
-  --table "users_test" --strategy Recreate || exit 1
+  --pre-exec "IF OBJECT_ID('users_test', 'U') IS NOT NULL DROP TABLE users_test" \
+  --table "users_test" --no-schema-validation --strategy Recreate || exit 1
 
 # 7. Oracle (always runs)
 echo "Initializing Oracle USERS_TEST_DATA..."
@@ -133,6 +133,7 @@ $DTPIPE -i "generate:1000" \
   --drop "GenerateIndex" \
   -o "ora:Data Source=localhost:1522/FREEPDB1;User Id=testuser;Password=password" \
   --table "USERS_TEST_DATA" \
+  --no-schema-validation \
   --strategy Recreate \
   --pre-exec "BEGIN EXECUTE IMMEDIATE 'DROP TABLE USERS_TEST_DATA'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;" || exit 1
 
@@ -147,9 +148,9 @@ $DTPIPE -i "generate:1" \
   --fake "category:random.number" \
   --fake "price:random.number" \
   --drop "GenerateIndex" \
-  --pre-exec "DROP TABLE IF EXISTS wrong_schema CASCADE" \
   -o "pg:Host=localhost;Port=5440;Database=integration;Username=postgres;Password=password" \
-  --table "wrong_schema" --strategy Recreate || exit 1
+  --pre-exec "DROP TABLE IF EXISTS wrong_schema CASCADE" \
+  --table "wrong_schema" --no-schema-validation --strategy Recreate || exit 1
 
 # Restricted directory for T77 (chmod 000 = no read/write/execute)
 if [ ! -d "$ARTIFACTS_DIR/restricted" ]; then

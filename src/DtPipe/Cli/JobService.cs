@@ -97,7 +97,7 @@ public class JobService
 			Func<BranchDefinition, BranchChannelContext, CancellationToken, Task<int>> branchExecutor = async (branch, ctx, token) =>
 			{
 				var job = jobs[branch.Alias];
-				return await RunSingleJobAsync(job, branch.Arguments, branch.Alias, true, ctx, resultsCollector, token);
+				return await RunSingleJobAsync(job, branch.Arguments, branch.Alias, true, ctx, resultsCollector, token, globals);
 			};
 
 			var exitCode = await orchestrator.ExecuteAsync(dag, branchExecutor, ct);
@@ -113,25 +113,26 @@ public class JobService
 			_console.Write(DagRenderer.BuildLinearTopologyPanel(mainJob, readerFactories));
 			_console.WriteLine();
 
-			return await RunSingleJobAsync(mainJob, Array.Empty<string>(), null, false, null, resultsCollector, ct);
+			return await RunSingleJobAsync(mainJob, Array.Empty<string>(), null, false, null, resultsCollector, ct, globals);
 		}
 	}
 
 	private async Task<int> RunSingleJobAsync(
-		JobDefinition job, 
-		string[] args, 
-		string? alias, 
-		bool isDag, 
-		BranchChannelContext? ctx, 
+		JobDefinition job,
+		string[] args,
+		string? alias,
+		bool isDag,
+		BranchChannelContext? ctx,
 		System.Collections.Concurrent.ConcurrentQueue<DtPipe.Feedback.BranchSummary> resultsCollector,
-		CancellationToken ct)
+		CancellationToken ct,
+		Pipeline.GlobalOptions? globals = null)
 	{
 		var registry = _serviceProvider.GetRequiredService<OptionsRegistry>();
 		registry.BeginScope();
 
 		// Bind options from JobDefinition to the registry (for providers/transformers)
 		var providerConfigService = new DtPipe.Cli.Services.ProviderConfigurationService(_contributors, registry);
-		providerConfigService.BindOptions(job);
+		providerConfigService.BindOptions(job, globals);
 
 		var channelRegistry = _serviceProvider.GetRequiredService<IMemoryChannelRegistry>();
 		var linearPipelineService = new DtPipe.Cli.Services.LinearPipelineService(_contributors, _serviceProvider, channelRegistry, registry, _console);

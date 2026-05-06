@@ -1,7 +1,26 @@
+using DtPipe.Adapters.Common;
 using DtPipe.Core.Attributes;
 using DtPipe.Core.Options;
 
 namespace DtPipe.Adapters.Oracle;
+
+public class OracleWriterOptions : DbWriterOptions, IProviderOptions
+{
+	public static string Prefix => OracleConstants.ProviderName;
+	public static string DisplayName => "Oracle Writer Options";
+
+	[ComponentOption(Description = "Mapping for DateTime columns (Date, Timestamp)", Hidden = true)]
+	public OracleDateTimeMapping DateTimeMapping { get; set; } = OracleDateTimeMapping.Date;
+
+	[ComponentOption("--table", Aliases = new[] { "-t" }, Description = "Target table name", Required = true)]
+	public string Table { get; set; } = string.Empty;
+
+	[ComponentOption("--strategy", Aliases = new[] { "-s" }, Description = "Data write strategy (Append, Truncate, DeleteThenInsert)", Hidden = true)]
+	public OracleWriteStrategy? Strategy { get; set; }
+
+	[ComponentOption("--insert-mode", Description = "Data insert mode (Standard, Bulk, Append)", Hidden = true)]
+	public OracleInsertMode? InsertMode { get; set; }
+}
 
 public enum OracleWriteStrategy
 {
@@ -24,25 +43,4 @@ public enum OracleDateTimeMapping
 {
 	Date,
 	Timestamp
-}
-
-public record OracleWriterOptions : IProviderOptions, IKeyAwareOptions
-{
-	public static string Prefix => OracleConstants.ProviderName;
-	public static string DisplayName => "Oracle Writer Options";
-	public string? Key { get; set; }
-
-	[ComponentOption(Description = "Mapping for DateTime columns (Date, Timestamp)", Hidden = true)]
-	public OracleDateTimeMapping DateTimeMapping { get; init; } = OracleDateTimeMapping.Date;
-
-	[ComponentOption(Description = "Target table name", Required = true)]
-	public string Table { get; set; } = string.Empty;
-
-	[ComponentOption(Description = "Data write strategy (Append, Truncate, DeleteThenInsert)", Hidden = true)]
-	public OracleWriteStrategy? Strategy { get; set; }
-
-	[ComponentOption(Description = "Data insert mode (Standard, Bulk, Append)", Hidden = true)]
-	public OracleInsertMode? InsertMode { get; set; }
-
-
 }

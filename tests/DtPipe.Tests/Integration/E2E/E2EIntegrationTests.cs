@@ -111,14 +111,7 @@ public class E2EIntegrationTests : IAsyncLifetime
 		var exportService = serviceProvider.GetRequiredService<ExportService>();
 
 		// 3. Define Run Options
-		var options = new PipelineOptions
-		{
-			Provider = "duckdb",
-			ConnectionString = _connectionString,
-			Query = "SELECT * FROM users ORDER BY Id",
-			OutputPath = _outputPath,
-			BatchSize = 100
-		};
+		var options = new PipelineOptions { BatchSize = 100 };
 
 		// 4. Run Export using TransformerPipelineBuilder
 		var args = new[] { "dtpipe", "--fake", "Name:name.firstname" };
@@ -128,10 +121,11 @@ public class E2EIntegrationTests : IAsyncLifetime
 		var readerFactory = serviceProvider.GetRequiredService<IStreamReaderFactory>();
 		var writerFactory = serviceProvider.GetRequiredService<IDataWriterFactory>();
 
+		registry.Register(new DtPipe.Cli.Infrastructure.ConnectionRoute(_connectionString, _outputPath));
 		registry.Register(options);
-		registry.Register(new DuckDbReaderOptions { Query = options.Query });
+		registry.Register(new DuckDbReaderOptions { Query = "SELECT * FROM users ORDER BY Id" });
 
-		await exportService.RunExportAsync(options, options.Provider, options.OutputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
+		await exportService.RunExportAsync(options, "duckdb", _outputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
 
 		// 5. Verify Output
 		File.Exists(_outputPath).Should().BeTrue();
@@ -230,14 +224,7 @@ public class E2EIntegrationTests : IAsyncLifetime
 		var serviceProvider = services.BuildServiceProvider();
 		var exportService = serviceProvider.GetRequiredService<ExportService>();
 
-		var options = new PipelineOptions
-		{
-			Provider = "duckdb",
-			ConnectionString = _connectionString,
-			Query = "SELECT Id, Name, Age, Name as CopiedName FROM users ORDER BY Id",
-			OutputPath = _outputPath,
-			BatchSize = 100
-		};
+		var options = new PipelineOptions { BatchSize = 100 };
 
 		// 3. Run Export
 		var args = new[]
@@ -253,10 +240,11 @@ public class E2EIntegrationTests : IAsyncLifetime
 		var readerFactory = serviceProvider.GetRequiredService<IStreamReaderFactory>();
 		var writerFactory = serviceProvider.GetRequiredService<IDataWriterFactory>();
 
+		registry.Register(new DtPipe.Cli.Infrastructure.ConnectionRoute(_connectionString, _outputPath));
 		registry.Register(options);
-		registry.Register(new DuckDbReaderOptions { Query = options.Query });
+		registry.Register(new DuckDbReaderOptions { Query = "SELECT Id, Name, Age, Name as CopiedName FROM users ORDER BY Id" });
 
-		await exportService.RunExportAsync(options, options.Provider, options.OutputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
+		await exportService.RunExportAsync(options, "duckdb", _outputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
 
 		// 4. Verify
 		File.Exists(_outputPath).Should().BeTrue();
@@ -346,13 +334,7 @@ public class E2EIntegrationTests : IAsyncLifetime
 		var serviceProvider = services.BuildServiceProvider();
 		var exportService = serviceProvider.GetRequiredService<ExportService>();
 
-		var options = new PipelineOptions
-		{
-			Provider = "duckdb",
-			ConnectionString = _connectionString,
-			Query = "SELECT A, B, C FROM test",
-			OutputPath = _outputPath
-		};
+		var options = new PipelineOptions();
 
 		// 3. Simulate CLI Args for Ordered Pipeline
 		// Sequence:
@@ -377,10 +359,11 @@ public class E2EIntegrationTests : IAsyncLifetime
 		var readerFactory = serviceProvider.GetRequiredService<IStreamReaderFactory>();
 		var writerFactory = serviceProvider.GetRequiredService<IDataWriterFactory>();
 
+		registry.Register(new DtPipe.Cli.Infrastructure.ConnectionRoute(_connectionString, _outputPath));
 		registry.Register(options);
-		registry.Register(new DuckDbReaderOptions { Query = options.Query });
+		registry.Register(new DuckDbReaderOptions { Query = "SELECT A, B, C FROM test" });
 
-		await exportService.RunExportAsync(options, options.Provider, options.OutputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
+		await exportService.RunExportAsync(options, "duckdb", _outputPath, TestContext.Current.CancellationToken, pipeline, readerFactory, writerFactory, registry);
 
 		// 5. Verify Output
 		var lines = await File.ReadAllLinesAsync(_outputPath, TestContext.Current.CancellationToken);
