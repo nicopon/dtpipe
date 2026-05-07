@@ -70,17 +70,22 @@ public static class PipelineToJobConverter
     private static (Dictionary<string, JobDefinition> Jobs, JobDagDefinition Dag) ConvertFromJobFile(ParsedPipeline parsed)
     {
         var jobs = JobFileParser.Parse(parsed.Globals.JobFile!);
+        var flags = parsed.Globals.AllFlags;
 
         // Apply CLI overrides to all loaded jobs
+        int? limitOverride = GetInt(flags, "--limit");
+        int? batchOverride = GetInt(flags, "--batch-size", "-b");
+        string? logOverride = GetString(flags, "--log");
+        string? metricsOverride = GetString(flags, "--metrics-path");
+
         foreach (var alias in jobs.Keys.ToList())
         {
             var job = jobs[alias];
             if (parsed.Globals.DryRunCount > 0) job = job with { DryRunCount = parsed.Globals.DryRunCount };
-            if (parsed.Globals.Limit > 0) job = job with { Limit = parsed.Globals.Limit };
-            if (parsed.Globals.BatchSize > 0) job = job with { BatchSize = parsed.Globals.BatchSize };
-            if (!string.IsNullOrEmpty(parsed.Globals.Key)) job = job with { Key = parsed.Globals.Key };
-            if (!string.IsNullOrEmpty(parsed.Globals.LogPath)) job = job with { LogPath = parsed.Globals.LogPath };
-            if (!string.IsNullOrEmpty(parsed.Globals.MetricsPath)) job = job with { MetricsPath = parsed.Globals.MetricsPath };
+            if (limitOverride is > 0)           job = job with { Limit = limitOverride.Value };
+            if (batchOverride is > 0)           job = job with { BatchSize = batchOverride.Value };
+            if (!string.IsNullOrEmpty(logOverride))     job = job with { LogPath = logOverride };
+            if (!string.IsNullOrEmpty(metricsOverride)) job = job with { MetricsPath = metricsOverride };
             if (!string.IsNullOrEmpty(parsed.Globals.ExportJobFile)) job = job with { Arguments = Array.Empty<string>() };
             jobs[alias] = job;
         }
@@ -93,7 +98,8 @@ public static class PipelineToJobConverter
             StreamingAliases = kv.Value.From != null ? new[] { kv.Value.From } : Array.Empty<string>(),
             RefAliases = kv.Value.Ref ?? Array.Empty<string>(),
             Arguments = Array.Empty<string>(),
-            ProcessorName = kv.Value.Sql != null ? "sql" : null
+            // ProcessorName detection: check ProviderOptions for sql-related keys
+            ProcessorName = kv.Value.ProviderOptions?.ContainsKey("sql") == true ? "sql" : null
         }).ToList();
 
         return (jobs, new JobDagDefinition { Branches = branches });
@@ -101,23 +107,38 @@ public static class PipelineToJobConverter
 
     private static JobDefinition MapToJobDefinition(GlobalOptions globals, BranchSpec branch)
     {
+        // Engine-control values are extracted from AllFlags (global) and Flags (branch-local).
+        // Branch-local values take precedence over global defaults.
+        int batchSize = GetInt(branch.Flags, "--batch-size", "-b")
+                     ?? GetInt(globals.AllFlags, "--batch-size", "-b")
+                     ?? 50_000;
+        int limit = GetInt(branch.Flags, "--limit")
+                 ?? GetInt(globals.AllFlags, "--limit")
+                 ?? 0;
+        double samplingRate = GetDouble(branch.Flags, "--sampling-rate", "--sample-rate")
+                           ?? GetDouble(globals.AllFlags, "--sampling-rate", "--sample-rate")
+                           ?? 1.0;
+        int? samplingSeed = GetNullableInt(branch.Flags, "--sampling-seed", "--sample-seed")
+                        ?? GetNullableInt(globals.AllFlags, "--sampling-seed", "--sample-seed");
+        string? logPath = GetString(branch.Flags, "--log") ?? globals.LogPath;
+        string? metricsPath = GetString(branch.Flags, "--metrics-path")
+                           ?? GetString(globals.AllFlags, "--metrics-path");
+        string? prefix = GetString(branch.Flags, "--prefix", "-p")
+                      ?? GetString(globals.AllFlags, "--prefix", "-p");
+
         return new JobDefinition
         {
             Input  = branch.Input,
             Output = branch.Output,
-            // Adapter-specific fields (Query, Table, Key, Strategy, InsertMode, StrictSchema, hooks,
-            // SchemaSave, SchemaLoad, etc.) are intentionally left null/default for CLI paths.
-            // FlagBinder sets them directly on adapter options from RawArgs.
-            // For YAML paths, MapProcessorProperties in ProviderConfigurationService handles them.
-            BatchSize    = branch.BatchSize != 0 ? branch.BatchSize : (globals.BatchSize != 0 ? globals.BatchSize : 50000),
+            BatchSize    = batchSize,
             DryRunCount  = globals.DryRunCount,
-            Sql          = null,
-            Limit        = branch.Limit != 0 ? branch.Limit : globals.Limit,
-            SamplingRate = branch.SamplingRate != 1.0 ? branch.SamplingRate : globals.SamplingRate,
-            SamplingSeed = branch.SamplingSeed ?? globals.SamplingSeed,
-            LogPath      = branch.LogPath ?? globals.LogPath,
-            MetricsPath  = branch.MetricsPath ?? globals.MetricsPath,
-            Prefix       = branch.Prefix ?? globals.Prefix,
+            Limit        = limit,
+            SamplingRate = samplingRate,
+            SamplingSeed = samplingSeed,
+            LogPath      = logPath,
+            MetricsPath  = metricsPath,
+            Prefix       = prefix,
+            NoStats      = globals.NoStats,
 
             From     = branch.From.FirstOrDefault(),
             Ref      = branch.Ref.ToArray(),
@@ -129,5 +150,51 @@ public static class PipelineToJobConverter
             Transformers    = new List<TransformerConfig>(),
             ProviderOptions = new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase)
         };
+    }
+
+    // ── Helpers to extract typed values from flag dictionaries ──────────────
+
+    private static string? GetString(IReadOnlyDictionary<string, List<string>> flags, params string[] keys)
+    {
+        foreach (var k in keys)
+            if (flags.TryGetValue(k, out var list) && list.Count > 0) return list.Last();
+        return null;
+    }
+
+    private static string? GetString(IReadOnlyDictionary<string, object?> flags, params string[] keys)
+    {
+        foreach (var k in keys)
+            if (flags.TryGetValue(k, out var val)) return val?.ToString();
+        return null;
+    }
+
+    private static int? GetInt(IReadOnlyDictionary<string, List<string>> flags, params string[] keys)
+    {
+        var s = GetString(flags, keys);
+        return s != null && int.TryParse(s, out var v) ? v : null;
+    }
+
+    private static int? GetInt(IReadOnlyDictionary<string, object?> flags, params string[] keys)
+    {
+        var s = GetString(flags, keys);
+        return s != null && int.TryParse(s, out var v) ? v : null;
+    }
+
+    private static int? GetNullableInt(IReadOnlyDictionary<string, List<string>> flags, params string[] keys)
+        => GetInt(flags, keys);
+
+    private static int? GetNullableInt(IReadOnlyDictionary<string, object?> flags, params string[] keys)
+        => GetInt(flags, keys);
+
+    private static double? GetDouble(IReadOnlyDictionary<string, List<string>> flags, params string[] keys)
+    {
+        var s = GetString(flags, keys);
+        return s != null && double.TryParse(s, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : null;
+    }
+
+    private static double? GetDouble(IReadOnlyDictionary<string, object?> flags, params string[] keys)
+    {
+        var s = GetString(flags, keys);
+        return s != null && double.TryParse(s, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : null;
     }
 }

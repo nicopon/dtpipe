@@ -74,7 +74,7 @@ check_t1() {
     grep -q "rn" "$1" && pass "ROW_NUMBER ($2): column 'rn' present" \
         || fail "ROW_NUMBER ($2): column 'rn' missing"
 }
-both_engines "T1: ROW_NUMBER" \
+validate_engine "T1: ROW_NUMBER" \
     "-i \"generate:50\" --fake \"Val:random.number\" --drop \"GenerateIndex\" --alias src" \
     "SELECT Val, ROW_NUMBER() OVER (ORDER BY Val) AS rn FROM src" \
     check_t1

@@ -210,7 +210,7 @@ for MODE in Standard Append Bulk; do
       -o "$ORA_SYS_CONN" \
       --table "PerfTest" \
       --strategy Truncate \
-      --ora-insert-mode "$MODE" \
+      --insert-mode "$MODE" \
       --batch-size 1000 --no-stats
 
     COUNT=$(docker exec -i dtpipe-integ-oracle sqlplus -s system/password@localhost:1521/FREEPDB1 <<'EOF' | tr -d ' \n'

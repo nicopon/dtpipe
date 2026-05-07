@@ -112,32 +112,16 @@ public class PipelineLexer
 
     private GlobalOptions MapGlobals(Dictionary<string, object?> dict)
     {
-        T? Get<T>(string key, T? @default = default)
-        {
-            if (!dict.TryGetValue(key, out var val)) return @default;
-            try {
-                if (typeof(T) == typeof(int)) return (T)(object)int.Parse(val?.ToString() ?? "0");
-                if (typeof(T) == typeof(double)) return (T)(object)double.Parse(val?.ToString() ?? "0", System.Globalization.CultureInfo.InvariantCulture);
-                if (typeof(T) == typeof(bool)) return (T)(object)true;
-                return (T?)val;
-            } catch { return @default; }
-        }
-
         return new GlobalOptions
         {
-            BatchSize    = Get<int>("--batch-size", 50_000),
-            Limit        = Get<int>("--limit", 0),
-            Key          = Get<string>("--key") ?? Get<string>("-k"),
-            SamplingRate = Get<double>("--sampling-rate", 1.0),
-            SamplingSeed = dict.ContainsKey("--sampling-seed") ? Get<int>("--sampling-seed") : (int?)null,
-            NoStats      = dict.ContainsKey("--no-stats"),
-            DryRunCount  = GetDryRun(dict),
-            JobFile      = Get<string>("--job") ?? Get<string>("-j"),
-            ExportJobFile = Get<string>("--export-job"),
-            LogPath      = Get<string>("--log"),
-            MetricsPath  = Get<string>("--metrics-path"),
-            Prefix       = Get<string>("--prefix"),
-            AllFlags     = dict
+            DryRunCount   = GetDryRun(dict),
+            NoStats       = dict.ContainsKey("--no-stats"),
+            LogPath       = dict.TryGetValue("--log", out var logVal) ? logVal?.ToString() : null,
+            JobFile       = dict.TryGetValue("--job", out var jobVal) ? jobVal?.ToString()
+                          : dict.TryGetValue("-j", out var jVal) ? jVal?.ToString() : null,
+            ExportJobFile = dict.TryGetValue("--export-job", out var ejVal) ? ejVal?.ToString() : null,
+            IgnoreNulls   = dict.ContainsKey("--ignore-nulls"),
+            AllFlags      = dict
         };
     }
 
@@ -209,14 +193,6 @@ public class PipelineLexer
             Alias  = GetSingle("--alias"),
             From   = GetList("--from").SelectMany(s => s.Split(',')).Select(s => s.Trim()).ToList(),
             Ref    = GetList("--ref").SelectMany(s => s.Split(',')).Select(s => s.Trim()).ToList(),
-
-            BatchSize    = int.TryParse(GetSingle("--batch-size", "-b"), out var bs) ? bs : 0,
-            Limit        = int.TryParse(GetSingle("--limit"), out var lim) ? lim : 0,
-            LogPath      = GetSingle("--log"),
-            MetricsPath  = GetSingle("--metrics-path"),
-            SamplingRate = double.TryParse(GetSingle("--sampling-rate", "--sample-rate"), System.Globalization.CultureInfo.InvariantCulture, out var sr) ? sr : 1.0,
-            SamplingSeed = int.TryParse(GetSingle("--sampling-seed", "--sample-seed"), out var ss) ? (int?)ss : null,
-            Prefix       = GetSingle("--prefix", "-p"),
 
             ReaderArgs   = readerArgs,
             PipelineArgs = pipelineArgs,

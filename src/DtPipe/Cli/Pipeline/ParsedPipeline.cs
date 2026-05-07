@@ -6,30 +6,22 @@ public record ParsedPipeline(GlobalOptions Globals, IReadOnlyList<BranchSpec> Br
 
 public record GlobalOptions
 {
-    // Strictly global flags
+    // Strictly global flags (structural — read by PipelineLexer/Converter only)
     public int DryRunCount { get; init; }
     public bool NoStats { get; init; }
     public string? LogPath { get; init; }
     public string? JobFile { get; init; }
     public string? ExportJobFile { get; init; }
-    public string? MetricsPath { get; init; }
+    public bool IgnoreNulls { get; init; }
 
-    // Overridable engine defaults propagated to all branches
-    public string? Key { get; init; }
-    public int Limit { get; init; }
-    public int BatchSize { get; init; }
-    public double SamplingRate { get; init; } = 1.0;
-    public int? SamplingSeed { get; init; }
-    public string? Prefix { get; init; }
-
+    /// <summary>All raw flag values (key→value) for passthrough to PipelineToJobConverter.</summary>
     public IReadOnlyDictionary<string, object?> AllFlags { get; init; } = new Dictionary<string, object?>(System.StringComparer.OrdinalIgnoreCase);
 }
 
 /// <summary>
 /// Per-branch data extracted by PipelineLexer.
-/// Contains only DAG-routing fields and universal engine controls (batch-size, limit, sampling).
-/// All adapter-specific flags (--query, --table, --key, --strict-schema, --pre-exec, etc.)
-/// flow exclusively through RawArgs → FlagBinder → adapter options.
+/// Contains only DAG-routing fields and stage-scoped raw args.
+/// All adapter/engine flags flow exclusively through RawArgs → FlagBinder → adapter options.
 /// </summary>
 public record BranchSpec
 {
@@ -39,15 +31,6 @@ public record BranchSpec
     public string? Output { get; init; }
     public List<string> From { get; init; } = new();
     public List<string> Ref { get; init; } = new();
-
-    // Universal engine controls (have meaningful global defaults)
-    public int Limit { get; init; }
-    public int BatchSize { get; init; }
-    public double SamplingRate { get; init; } = 1.0;
-    public int? SamplingSeed { get; init; }
-    public string? Prefix { get; init; }
-    public string? LogPath { get; init; }
-    public string? MetricsPath { get; init; }
 
     // Stage-scoped args — set by PipelineLexer, used by ProviderConfigurationService
     // ReaderArgs   : flags from start up to first Pipeline-stage trigger or -o
@@ -61,3 +44,4 @@ public record BranchSpec
     public string[] RawArgs { get; init; } = System.Array.Empty<string>();
     public IReadOnlyDictionary<string, List<string>> Flags { get; init; } = new Dictionary<string, List<string>>(System.StringComparer.OrdinalIgnoreCase);
 }
+

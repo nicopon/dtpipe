@@ -10,7 +10,7 @@ public class PipelineToJobConverterTests
     [Fact]
     public void Convert_LinearSimple_ReturnsOneJob()
     {
-        var globals = new GlobalOptions { BatchSize = 1000 };
+        var globals = new GlobalOptions { AllFlags = new Dictionary<string, object?>(System.StringComparer.OrdinalIgnoreCase) { { "--batch-size", "1000" } } };
         var branch = new BranchSpec { Input = "gen:10", Output = "out.csv" };
         var parsed = new ParsedPipeline(globals, new[] { branch });
 
@@ -43,7 +43,7 @@ public class PipelineToJobConverterTests
     [Fact]
     public void Convert_InheritsGlobals()
     {
-        var globals = new GlobalOptions { Limit = 100 };
+        var globals = new GlobalOptions { AllFlags = new Dictionary<string, object?>(System.StringComparer.OrdinalIgnoreCase) { { "--limit", "100" } } };
         var b1 = new BranchSpec { Input = "in1.csv" };
         var parsed = new ParsedPipeline(globals, new[] { b1 });
 
@@ -56,8 +56,9 @@ public class PipelineToJobConverterTests
     [Fact]
     public void Convert_BranchOverridesGlobal()
     {
-        var globals = new GlobalOptions { Limit = 100 };
-        var b1 = new BranchSpec { Input = "in1.csv", Limit = 50 };
+        var globals = new GlobalOptions { AllFlags = new Dictionary<string, object?>(System.StringComparer.OrdinalIgnoreCase) { { "--limit", "100" } } };
+        var branchFlags = new Dictionary<string, List<string>>(System.StringComparer.OrdinalIgnoreCase) { { "--limit", new List<string> { "50" } } };
+        var b1 = new BranchSpec { Input = "in1.csv", Flags = branchFlags };
         var parsed = new ParsedPipeline(globals, new[] { b1 });
 
         var (jobs, _) = PipelineToJobConverter.Convert(parsed);

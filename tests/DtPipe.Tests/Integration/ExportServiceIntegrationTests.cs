@@ -109,9 +109,16 @@ public class ExportServiceIntegrationTests
 
         var readerFactory = new Mock<IStreamReaderFactory>();
         readerFactory.Setup(f => f.Create(It.IsAny<OptionsRegistry>())).Returns(readerMock.Object);
+        readerFactory.Setup(f => f.OptionsType).Returns(typeof(DummyReaderOptions));
+        readerFactory.Setup(f => f.GetSupportedOptionTypes()).Returns(new[] { typeof(DummyReaderOptions) });
+        registry.RegisterByType(typeof(DummyReaderOptions), new DummyReaderOptions());
 
         var writerFactory = new Mock<IDataWriterFactory>();
         writerFactory.Setup(f => f.Create(It.IsAny<OptionsRegistry>())).Returns(writerMock.Object);
+        writerFactory.Setup(f => f.OptionsType).Returns(typeof(DummyWriterOptions));
+        writerFactory.Setup(f => f.GetSupportedOptionTypes()).Returns(new[] { typeof(DummyWriterOptions) });
+        writerFactory.Setup(f => f.ComponentName).Returns("mock-writer");
+        registry.RegisterByType(typeof(DummyWriterOptions), new DummyWriterOptions());
 
         // Act
         await _exportService.RunExportAsync(options, "mock", "out", CancellationToken.None, pipeline, readerFactory.Object, writerFactory.Object, registry);
@@ -167,3 +174,6 @@ public class ExportServiceIntegrationTests
         await Task.Yield(); // Just to make it async
     }
 }
+
+internal class DummyReaderOptions { }
+internal class DummyWriterOptions { }

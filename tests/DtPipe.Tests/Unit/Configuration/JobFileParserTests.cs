@@ -24,7 +24,6 @@ output: dummy.parquet
 			var job = jobs["main"];
 
 			// Assert
-			job.Query.Should().BeNull();
 			job.Input.Should().Be("dummy.csv");
 		}
 		finally
@@ -84,7 +83,6 @@ joined:
 			// Assert
 			jobs.Should().HaveCount(3);
 			jobs["p"].Input.Should().Be("data.parquet");
-			jobs["joined"].Sql.Should().NotBeNullOrEmpty();
 			jobs["joined"].From.Should().Be("p");
 			jobs["joined"].Ref.Should().Contain("c");
 		}

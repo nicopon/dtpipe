@@ -146,18 +146,21 @@ public class ManualVerificationTests : IAsyncLifetime
 		// Read back Parquet using Parquet.Net to verify validity
 		using (var stream = File.OpenRead(_outputPath))
 		{
-			using (var reader = await Parquet.ParquetReader.CreateAsync(stream))
-			{
-				reader.RowGroupCount.Should().BeGreaterThan(0);
-				var group = reader.OpenRowGroupReader(0);
-				var idCol = await group.ReadColumnAsync(reader.Schema.GetDataFields()[0]);
-				var nameCol = await group.ReadColumnAsync(reader.Schema.GetDataFields()[1]);
-				var emailCol = await group.ReadColumnAsync(reader.Schema.GetDataFields()[2]);
+		await using (var reader = await Parquet.ParquetReader.CreateAsync(stream))
+		{
+			reader.RowGroupCount.Should().BeGreaterThan(0);
+			var group = reader.OpenRowGroupReader(0);
+			var idCol = new int[3];
+			await group.ReadAsync(reader.Schema.DataFields[0], idCol.AsMemory());
+			var nameCol = new string[3];
+			await group.ReadAsync(reader.Schema.DataFields[1], nameCol.AsMemory());
+			var emailCol = new string[3];
+			await group.ReadAsync(reader.Schema.DataFields[2], emailCol.AsMemory());
 
-				idCol.Data.GetValue(0).Should().Be(1);
-				nameCol.Data.GetValue(0).Should().NotBe("Sensitive Name");
-				emailCol.Data.GetValue(0).Should().Be("sensitive@example.com");
-			}
+			idCol[0].Should().Be(1);
+			nameCol[0].Should().NotBe("Sensitive Name");
+			emailCol[0].Should().Be("sensitive@example.com");
+		}
 		}
 	}
 }

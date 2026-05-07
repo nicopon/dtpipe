@@ -11,7 +11,7 @@ public static class FlagBinder
     {
         var type = target.GetType();
         var props = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-        
+
         for (int i = 0; i < args.Length; i++)
         {
             var token = args[i];
@@ -54,7 +54,7 @@ public static class FlagBinder
             names.Add($"--{prefix.ToLowerInvariant()}-{kebab}");
             if (kebab == prefix.ToLowerInvariant()) names.Add($"--{prefix.ToLowerInvariant()}");
         }
-        
+
         return names.Any(n => n.Equals(flagName, StringComparison.OrdinalIgnoreCase)) ||
                aliases.Any(a => names.Any(n => n.Equals(a, StringComparison.OrdinalIgnoreCase)));
     }

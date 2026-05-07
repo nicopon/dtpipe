@@ -118,8 +118,8 @@ public class ParquetStreamReader : IColumnarStreamReader
 
 				foreach (var field in _reader.Schema.DataFields)
 				{
-					var column = await rowGroupReader.ReadColumnAsync(field, ct);
-					arrays.Add(DtPipe.Core.Infrastructure.Arrow.ArrowArrayFactory.Create(column.Data, field.ClrType, field.IsNullable));
+					var columnData = await ReadColumnDataAsArrayAsync(rowGroupReader, field, ct);
+					arrays.Add(DtPipe.Core.Infrastructure.Arrow.ArrowArrayFactory.Create(columnData, field.ClrType, field.IsNullable));
 				}
 
 				yield return new RecordBatch(schema, arrays, rowCount);
@@ -176,13 +176,11 @@ public class ParquetStreamReader : IColumnarStreamReader
 				var rowCount = (int)rowGroupReader.RowCount;
 
 				// Read all columns for this row group
-				var columnData = new object?[Columns.Count][];
+				var columnDataArrays = new System.Array[Columns.Count];
 				for (int colIndex = 0; colIndex < Columns.Count; colIndex++)
 				{
 					var dataField = _reader.Schema.DataFields[colIndex];
-					var dataColumn = await rowGroupReader.ReadColumnAsync(dataField, ct);
-					// Convert DataColumn.Data to array
-					columnData[colIndex] = dataColumn.Data.Cast<object?>().ToArray();
+					columnDataArrays[colIndex] = await ReadColumnDataAsArrayAsync(rowGroupReader, dataField, ct);
 				}
 
 				// Yield rows
@@ -193,7 +191,7 @@ public class ParquetStreamReader : IColumnarStreamReader
 					var row = new object?[Columns.Count];
 					for (int colIndex = 0; colIndex < Columns.Count; colIndex++)
 					{
-						row[colIndex] = columnData[colIndex]?[rowIndex];
+						row[colIndex] = columnDataArrays[colIndex].GetValue(rowIndex);
 					}
 
 					batch[index++] = row;
@@ -218,13 +216,66 @@ public class ParquetStreamReader : IColumnarStreamReader
 		}
 	}
 
+	private static async Task<System.Array> ReadColumnDataAsArrayAsync(ParquetRowGroupReader rowGroupReader, DataField field, CancellationToken ct)
+	{
+		int rowCount = (int)rowGroupReader.RowCount;
+		Type baseType = Nullable.GetUnderlyingType(field.ClrType) ?? field.ClrType;
+
+		if (baseType == typeof(string))
+		{
+			var data = new string[rowCount];
+			await rowGroupReader.ReadAsync(field, data.AsMemory(), null, ct);
+			return data;
+		}
+		if (baseType == typeof(byte[]))
+		{
+			var data = new ReadOnlyMemory<byte>?[rowCount];
+			await rowGroupReader.ReadAsync<ReadOnlyMemory<byte>>(field, data.AsMemory(), null, ct);
+			var result = new byte[rowCount][];
+			for (int i = 0; i < rowCount; i++)
+				result[i] = data[i]?.ToArray()!;
+			return result;
+		}
+
+		// Other types use the generic ReadAsync<T>(..., Memory<T?>, ...)
+		return baseType switch
+		{
+			_ when baseType == typeof(bool) => await ReadTypedAsync<bool>(rowGroupReader, field, rowCount, ct),
+			_ when baseType == typeof(byte) => await ReadTypedAsync<byte>(rowGroupReader, field, rowCount, ct),
+			_ when baseType == typeof(sbyte) => await ReadTypedAsync<sbyte>(rowGroupReader, field, rowCount, ct),
+			_ when baseType == typeof(short) => await ReadTypedAsync<short>(rowGroupReader, field, rowCount, ct),
+			_ when baseType == typeof(int) => await ReadTypedAsync<int>(rowGroupReader, field, rowCount, ct),
+			_ when baseType == typeof(long) => await ReadTypedAsync<long>(rowGroupReader, field, rowCount, ct),
+			_ when baseType == typeof(float) => await ReadTypedAsync<float>(rowGroupReader, field, rowCount, ct),
+			_ when baseType == typeof(double) => await ReadTypedAsync<double>(rowGroupReader, field, rowCount, ct),
+			_ when baseType == typeof(decimal) => await ReadTypedAsync<decimal>(rowGroupReader, field, rowCount, ct),
+			_ when baseType == typeof(DateTime) => await ReadTypedAsync<DateTime>(rowGroupReader, field, rowCount, ct),
+			_ when baseType == typeof(DateTimeOffset) => await ReadTypedAsync<DateTimeOffset>(rowGroupReader, field, rowCount, ct),
+			_ when baseType == typeof(TimeSpan) => await ReadTypedAsync<TimeSpan>(rowGroupReader, field, rowCount, ct),
+			_ when baseType == typeof(Guid) => await ReadTypedAsync<Guid>(rowGroupReader, field, rowCount, ct),
+			_ => throw new NotSupportedException($"Unsupported Parquet type: {baseType.Name}")
+		};
+	}
+
+
+	private static async Task<T?[]> ReadTypedAsync<T>(ParquetRowGroupReader rowGroupReader, DataField field, int rowCount, CancellationToken ct)
+		where T : struct
+	{
+		var data = new T?[rowCount];
+		await rowGroupReader.ReadAsync<T>(field, data, cancellationToken: ct);
+		return data;
+	}
+
 	public async ValueTask DisposeAsync()
 	{
 		await _semaphore.WaitAsync();
 		try
 		{
-			_reader?.Dispose();
-			_reader = null;
+			if (_reader != null)
+			{
+				await _reader.DisposeAsync();
+				_reader = null;
+			}
 			if (_fileStream != null)
 			{
 				await _fileStream.DisposeAsync();

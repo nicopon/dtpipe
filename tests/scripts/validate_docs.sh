@@ -98,8 +98,8 @@ run_test "Dry-run with sampling" \
     "$DTPIPE" -i "duck::memory:" --query "SELECT 1 AS id" -o "$TMP_DIR/out.csv" --sampling-rate 0.5 --dry-run --no-stats
 
 run_test "Export with YAML job file" \
-    "$DTPIPE" -i "duck::memory:" --query "SELECT 1 AS id" -o "$TMP_DIR/out.csv" \
-    --fake "FIRSTNAME:name.firstName" --export-job "$TMP_DIR/job.yaml" --no-stats
+    "$DTPIPE" -i "duck::memory:" --query "SELECT 1 AS id" \
+    --fake "FIRSTNAME:name.firstName" -o "$TMP_DIR/out.csv" --export-job "$TMP_DIR/job.yaml" --no-stats
 
 run_transformer_test "Null transformer"       --null "INTERNAL_ID"
 run_transformer_test "Overwrite transformer"  --overwrite "STATUS:anonymized"
@@ -115,8 +115,10 @@ run_transformer_test "Drop column"            --drop "INTERNAL_ID"
 # YAML job file test
 cat > "$TMP_DIR/readme_job.yaml" <<EOF
 input: "duck::memory:"
-query: "SELECT 'Alice' AS name, 'test@example.com' AS email, '0612345678' AS phone, 1 AS id"
 output: "$TMP_DIR/readme_out.parquet"
+provider-options:
+  duck:
+    query: "SELECT 'Alice' AS name, 'test@example.com' AS email, '0612345678' AS phone, 1 AS id"
 transformers:
   - null:
       mappings:

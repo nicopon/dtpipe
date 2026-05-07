@@ -99,13 +99,8 @@ public class LinearPipelineService
             (writerFactory, cleanedOutput) = ResolveFactory<IDataWriterFactory>(job.Output, _writerFactories);
         }
 
-        // 3b. YAML path: load query content from file (job.Query set by MapProcessorProperties from YAML).
-        job = job with
-        {
-            Query = LoadOrReadContent(job.Query, _console, "query"),
-        };
-
-        // 3b2. CLI path: FlagBinder set readerOpts.Query directly from --query flag — resolve file refs here.
+        // 3b. Query file resolution: FlagBinder or ConfigurationBinder set readerOpts.Query
+        // from --query flag or YAML — resolve file refs here.
         // This is separate from 3b because job.Query is null for CLI branches.
         {
             var readerOptsForLoad = _optionsRegistry.Get(readerFactory.OptionsType) as DtPipe.Core.Options.IQueryAwareOptions;
@@ -117,17 +112,21 @@ public class LinearPipelineService
             }
         }
 
-        // 3c. Load hook content from files for YAML-path jobs (hooks from RawArgs are already in adapter options).
-        if (!string.IsNullOrEmpty(job.PreExec) || !string.IsNullOrEmpty(job.PostExec)
-            || !string.IsNullOrEmpty(job.OnErrorExec) || !string.IsNullOrEmpty(job.FinallyExec))
+        // 3c. Load hook content from files for adapter options (CLI path: already bound by FlagBinder)
+        if (writerFactory != null)
         {
-            job = job with
+            var writerHookOpts = _optionsRegistry.Get(writerFactory.OptionsType) as DtPipe.Core.Options.IHookAware;
+            if (writerHookOpts != null)
             {
-                PreExec     = LoadOrReadContent(job.PreExec, _console, "Pre-Exec"),
-                PostExec    = LoadOrReadContent(job.PostExec, _console, "Post-Exec"),
-                OnErrorExec = LoadOrReadContent(job.OnErrorExec, _console, "On-Error-Exec"),
-                FinallyExec = LoadOrReadContent(job.FinallyExec, _console, "Finally-Exec")
-            };
+                if (!string.IsNullOrEmpty(writerHookOpts.PreExec))
+                    writerHookOpts.PreExec = LoadOrReadContent(writerHookOpts.PreExec, _console, "Pre-Exec");
+                if (!string.IsNullOrEmpty(writerHookOpts.PostExec))
+                    writerHookOpts.PostExec = LoadOrReadContent(writerHookOpts.PostExec, _console, "Post-Exec");
+                if (!string.IsNullOrEmpty(writerHookOpts.OnErrorExec))
+                    writerHookOpts.OnErrorExec = LoadOrReadContent(writerHookOpts.OnErrorExec, _console, "On-Error-Exec");
+                if (!string.IsNullOrEmpty(writerHookOpts.FinallyExec))
+                    writerHookOpts.FinallyExec = LoadOrReadContent(writerHookOpts.FinallyExec, _console, "Finally-Exec");
+            }
         }
 
         // 3d. RequiresQuery auto-build: if the reader needs a SQL query and none was provided,
@@ -145,14 +144,11 @@ public class LinearPipelineService
                 }
                 else
                 {
-                    // 2. Writer's --table (same-name read/write, e.g. -i pg:... --table t -o pg:... --table t)
+                    // 2. Writer's --table (same-name read/write)
                     var writerOpts = writerFactory != null ? _optionsRegistry.Get(writerFactory.OptionsType) : null;
                     var tableVal = writerOpts?.GetType().GetProperty("Table")?.GetValue(writerOpts) as string;
                     if (!string.IsNullOrWhiteSpace(tableVal))
                         readerOpts.Query = $"SELECT * FROM \"{tableVal}\"";
-                    // 3. YAML path fallback
-                    else if (!string.IsNullOrWhiteSpace(job.Query))
-                        readerOpts.Query = job.Query;
                 }
             }
         }
@@ -216,7 +212,7 @@ public class LinearPipelineService
                         // Linear job with no output — validation mode only
                         _console.Write(new Spectre.Console.Markup($"[yellow]Warning: No output specified. Running in validation mode.[/]{Environment.NewLine}"));
                     }
-                    
+
                     (writerFactory, _) = ResolveFactory<IDataWriterFactory>("null:", _writerFactories);
                 }
 
@@ -335,7 +331,7 @@ internal class StreamTransformerReaderAdapter : IStreamReaderFactory
         public Schema? Schema => _transformer.Schema;
         public Task OpenAsync(CancellationToken ct = default) => _transformer.OpenAsync(ct);
         public IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync(CancellationToken ct = default) => _transformer.ReadResultsAsync(null, ct);
-        public IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(int batchSize, CancellationToken ct = default) 
+        public IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(int batchSize, CancellationToken ct = default)
             => throw new NotSupportedException("StreamTransformerReaderAdapter only supports columnar mode.");
         public ValueTask DisposeAsync() => _transformer.DisposeAsync();
     }

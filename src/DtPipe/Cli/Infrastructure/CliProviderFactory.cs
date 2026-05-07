@@ -1,4 +1,4 @@
-using System.CommandLine;
+
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
@@ -18,7 +18,7 @@ public class CliProviderFactory<TService> : ICliContributor, IDataFactory
 	protected readonly IProviderDescriptor<TService> _descriptor;
 	protected readonly OptionsRegistry _registry;
 	protected readonly IServiceProvider _serviceProvider;
-	private IEnumerable<Option>? _cliOptions;
+
 
 	public CliProviderFactory(
 		IProviderDescriptor<TService> descriptor,
@@ -43,10 +43,7 @@ public class CliProviderFactory<TService> : ICliContributor, IDataFactory
 	// ICliContributor Implementation
 	public string Category => _descriptor.Category;
 
-	public IEnumerable<Option> GetCliOptions()
-	{
-		return _cliOptions ??= CliOptionBuilder.GenerateOptionsForType(_descriptor.OptionsType).ToList();
-	}
+
 
 	public IEnumerable<Pipeline.FlagDef> GetFlagDefs()
 	{

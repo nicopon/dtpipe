@@ -44,17 +44,19 @@ id.val.score
 EOF
 
 # ----------------------------------------
-# 1. Global option scoping (flag BEFORE -o → applies to both reader and writer)
+# 1. Strict option scoping (flag must be repeated for reader and writer if needed)
 # ----------------------------------------
-echo "--- [1] Global option scoping (--csv-separator before -o) ---"
+echo "--- [1] Strict option scoping (--csv-separator for reader and writer) ---"
 "$DTPIPE" \
-  --csv-separator . \
   -i "$ARTIFACTS_DIR/in_pipe.csv" \
-  -o "csv:$ARTIFACTS_DIR/out_global.csv" --no-stats
+  --csv-separator . \
+  -o "csv:$ARTIFACTS_DIR/out_global.csv" \
+  --csv-separator . \
+  --no-stats
 
 grep -q "\." "$ARTIFACTS_DIR/out_global.csv" \
-  && pass "Global separator '.' applied to writer" \
-  || fail "Global separator not applied to writer"
+  && pass "Strict separator '.' applied to writer" \
+  || fail "Strict separator not applied to writer"
 
 # ----------------------------------------
 # 2. Writer-only scoping (flag AFTER -o → applies only to writer)
@@ -136,9 +138,10 @@ COUNT_B=$(wc -l < "$ARTIFACTS_DIR/sampling_b.csv" | tr -d ' ')
 echo "--- [6] YAML provider-options (sqlite writer) ---"
 cat > "$ARTIFACTS_DIR/job_provider.yaml" <<EOF
 input: "duck::memory:"
-query: "SELECT 1 as id, 'Test' as name"
 output: "sqlite:$ARTIFACTS_DIR/provider_opts.db"
 provider-options:
+  duck:
+    query: "SELECT 1 as id, 'Test' as name"
   sqlite:
     table: "CustomTable"
     strategy: "Recreate"

@@ -104,8 +104,8 @@ public class PipelineLexerTests
         var args = new[] { "--batch-size", "1000", "--limit", "5000", "-i", "gen:10", "-o", "out.csv" };
         var pipeline = _lexer.Parse(args);
 
-        Assert.Equal(1000, pipeline.Globals.BatchSize);
-        Assert.Equal(5000, pipeline.Globals.Limit);
+        Assert.Equal("1000", pipeline.Globals.AllFlags["--batch-size"]?.ToString());
+        Assert.Equal("5000", pipeline.Globals.AllFlags["--limit"]?.ToString());
     }
 
     // ── Stage validation (strict) ──────────────────────────────────────

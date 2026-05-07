@@ -14,10 +14,9 @@ namespace DtPipe.Cli.Services;
 /// into the Options objects registered in the OptionsRegistry.
 ///
 /// Two binding paths:
-/// - CLI path: FlagBinder reads adapter-specific flags directly from RawArgs (--query, --table,
-///   --strict-schema, --key, --pre-exec, etc.). JobDefinition fields are null/default.
-/// - YAML path: MapProcessorProperties copies non-null JobDefinition fields to adapter options.
-///   FlagBinder has no RawArgs to process (job.Arguments is empty).
+/// - CLI path: FlagBinder reads adapter-specific flags directly from stage-scoped args
+///   (ReaderArgs, WriterArgs). All adapter flags are declared via [ComponentOption].
+/// - YAML path: ConfigurationBinder reads from ProviderOptions dictionaries.
 /// </summary>
 public class ProviderConfigurationService
 {
@@ -66,15 +65,17 @@ public class ProviderConfigurationService
                     Pipeline.FlagBinder.Bind(instance, stageArgs, tempRegistry, factory.ComponentName);
                 }
 
-                // 3. YAML path: map non-null JobDefinition fields to adapter options
-                MapProcessorProperties(job, instance, isWriter);
-
                 _registry.RegisterByType(optionsType, instance);
             }
         }
 
         // Propagate global --key default to any writer that did not receive a per-branch key
-        PropagateKey(globals?.Key);
+        string? globalKey = null;
+        if (globals?.AllFlags.TryGetValue("--key", out var keyVal) == true)
+            globalKey = keyVal?.ToString();
+        else if (globals?.AllFlags.TryGetValue("-k", out var kVal) == true)
+            globalKey = kVal?.ToString();
+        PropagateKey(globalKey);
     }
 
     private void PropagateKey(string? key)
@@ -95,45 +96,6 @@ public class ProviderConfigurationService
         }
     }
 
-    private void MapProcessorProperties(JobDefinition job, object options, bool isWriter)
-    {
-        var type = options.GetType();
-
-        // For readers: propagate SQL query (YAML path — CLI path handled by FlagBinder via QueryableReaderOptions.Query)
-        if (!isWriter && !string.IsNullOrEmpty(job.Query))
-            MapStringIfEmpty(type, options, "Query", job.Query);
-
-        // For readers: RefAlias (SQL processors — from YAML or job routing)
-        if (!isWriter && job.Ref != null && job.Ref.Length > 0)
-        {
-            var prop = type.GetProperty("RefAlias");
-            if (prop != null && prop.PropertyType == typeof(string[]) && prop.CanWrite)
-            {
-                var current = prop.GetValue(options) as string[];
-                if (current == null || current.Length == 0) prop.SetValue(options, job.Ref);
-            }
-        }
-
-        // For writers: write options (YAML path — CLI path handled by FlagBinder via DbWriterOptions)
-        if (isWriter)
-        {
-            MapString(type, options, "Table",      job.Table);
-            MapString(type, options, "Strategy",   job.Strategy);
-            MapString(type, options, "InsertMode", job.InsertMode);
-            MapString(type, options, "Key",        job.Key);
-            if (job.StrictSchema)           MapBool(type, options, "StrictSchema", true);
-            if (job.AutoMigrate ?? false)   MapBool(type, options, "AutoMigrate", true);
-            if (job.NoSchemaValidation)     MapBool(type, options, "NoSchemaValidation", true);
-            MapString(type, options, "PreExec",     job.PreExec);
-            MapString(type, options, "PostExec",    job.PostExec);
-            MapString(type, options, "OnErrorExec", job.OnErrorExec);
-            MapString(type, options, "FinallyExec", job.FinallyExec);
-        }
-
-        // For all: Arrow schema injection (--export-job / --job YAML)
-        MapString(type, options, "Schema", job.Schema);
-    }
-
     // Fallbacks for legacy/YAML jobs that don't have stage-scoped args.
     // Replicates the old -o trimming behaviour.
     private static string[]? FallbackTrimReaderArgs(string[]? args)
@@ -146,28 +108,5 @@ public class ProviderConfigurationService
     }
 
     private static string[]? FallbackTrimWriterArgs(string[]? args) => args;
-
-    private static void MapString(Type type, object options, string propName, string? value)
-    {
-        if (string.IsNullOrEmpty(value)) return;
-        var prop = type.GetProperty(propName);
-        if (prop != null && prop.CanWrite && prop.PropertyType == typeof(string))
-            prop.SetValue(options, value);
-    }
-
-    private static void MapStringIfEmpty(Type type, object options, string propName, string? value)
-    {
-        if (string.IsNullOrEmpty(value)) return;
-        var prop = type.GetProperty(propName);
-        if (prop == null || !prop.CanWrite || prop.PropertyType != typeof(string)) return;
-        var current = prop.GetValue(options) as string;
-        if (string.IsNullOrEmpty(current)) prop.SetValue(options, value);
-    }
-
-    private static void MapBool(Type type, object options, string propName, bool value)
-    {
-        var prop = type.GetProperty(propName);
-        if (prop != null && prop.CanWrite && prop.PropertyType == typeof(bool))
-            prop.SetValue(options, value);
-    }
 }
+

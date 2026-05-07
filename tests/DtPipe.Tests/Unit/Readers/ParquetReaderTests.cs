@@ -24,16 +24,16 @@ public class ParquetReaderTests : IAsyncLifetime
 			new DataField<double>("Score")
 		);
 
-		var idColumn = new DataColumn(schema.DataFields[0], new int[] { 1, 2, 3 });
-		var nameColumn = new DataColumn(schema.DataFields[1], new string[] { "Alice", "Bob", "Charlie" });
-		var scoreColumn = new DataColumn(schema.DataFields[2], new double[] { 95.5, 87.3, 92.0 });
+		var idColumn = new int[] { 1, 2, 3 };
+		var nameColumn = new string[] { "Alice", "Bob", "Charlie" };
+		var scoreColumn = new double[] { 95.5, 87.3, 92.0 };
 
 		await using var stream = File.OpenWrite(_testParquetPath);
 		await using var writer = await ParquetWriter.CreateAsync(schema, stream);
 		using var rowGroup = writer.CreateRowGroup();
-		await rowGroup.WriteColumnAsync(idColumn);
-		await rowGroup.WriteColumnAsync(nameColumn);
-		await rowGroup.WriteColumnAsync(scoreColumn);
+		await rowGroup.WriteAsync<int>(schema.DataFields[0], idColumn);
+		await rowGroup.WriteAsync(schema.DataFields[1], (IReadOnlyCollection<string>)nameColumn);
+		await rowGroup.WriteAsync<double>(schema.DataFields[2], scoreColumn);
 	}
 
 	public ValueTask DisposeAsync()

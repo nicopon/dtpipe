@@ -68,51 +68,13 @@ class Program
             // 2. Help Interception
             if (args.Length == 0 || args.Any(a => a == "--help" || a == "-h" || a == "-?"))
             {
-                var (_, printHelp, _, _, _) = jobService.Build();
-                printHelp();
+                HelpRenderer.Print(serviceProvider);
                 return 0;
             }
 
             // 3. Pipeline Execution (New Parser)
-            var registry = new FlagRegistry();
-            CoreFlagRegistry.RegisterCoreFlags(registry);
-            var contributors = new List<ICliContributor>();
-            // PipelineOptionsCliContributor is registered first so pipeline-engine flags are always available
-            contributors.Add(new DtPipe.Cli.Infrastructure.PipelineOptionsCliContributor());
-            contributors.AddRange(serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>().OfType<ICliContributor>());
-            contributors.AddRange(serviceProvider.GetRequiredService<IEnumerable<IDataTransformerFactory>>().OfType<ICliContributor>());
-            contributors.AddRange(serviceProvider.GetRequiredService<IEnumerable<IDataWriterFactory>>().OfType<ICliContributor>());
-
-            foreach (var contributor in contributors)
-            {
-                // Derive stage from contributor type so the lexer can enforce stage constraints.
-                var stage = contributor switch
-                {
-                    IStreamReaderFactory    => FlagStage.Reader,
-                    IDataWriterFactory      => FlagStage.Writer,
-                    IDataTransformerFactory => FlagStage.Pipeline,
-                    _                       => FlagStage.All   // PipelineOptionsCliContributor, etc.
-                };
-                foreach (var def in contributor.GetFlagDefs())
-                {
-                    // Merge-on-register in FlagRegistry combines stages when the same flag
-                    // is contributed by both a reader and a writer (e.g. --table → Any = Reader|Writer).
-                    registry.Register(def with { Stage = stage });
-                    if (Environment.GetEnvironmentVariable("DEBUG") == "1") Console.Error.WriteLine($"[DEBUG] Registered flag: {def.Name} (Arity: {def.Arity}, Stage: {stage})");
-                }
-            }
-
-            // Register CLI trigger flags from stream processor factories — always FlagStage.Pipeline.
+            var registry = FlagRegistryFactory.Build(serviceProvider);
             var streamTransformerFactories = serviceProvider.GetRequiredService<IEnumerable<IStreamTransformerFactory>>();
-            foreach (var stf in streamTransformerFactories)
-            {
-                foreach (var (flag, isBoolean) in stf.CliTriggerFlags)
-                {
-                    var arity = isBoolean ? FlagArity.Boolean : FlagArity.Scalar;
-                    registry.Register(new FlagDef(flag, Array.Empty<string>(), arity, FlagScope.PerBranch, stf.ComponentName, FlagStage.Pipeline));
-                    if (Environment.GetEnvironmentVariable("DEBUG") == "1") Console.Error.WriteLine($"[DEBUG] Registered processor flag: {flag} (Arity: {arity}, Processor: {stf.ComponentName})");
-                }
-            }
 
             var lexer = new PipelineLexer(registry);
             var parsedPipeline = lexer.Parse(args);
@@ -154,25 +116,11 @@ class Program
             : "";
         var precedingWords = words.Take(Math.Max(0, cursorPos - 1)).ToArray();
 
-        // Build a full FlagRegistry so we can determine the current stage
-        var registry = new FlagRegistry();
-        CoreFlagRegistry.RegisterCoreFlags(registry);
+        // Build the unified FlagRegistry (shared with Main pipeline execution)
+        var registry = FlagRegistryFactory.Build(sp);
         var readerFactories    = sp.GetRequiredService<IEnumerable<IStreamReaderFactory>>().ToList();
         var writerFactories    = sp.GetRequiredService<IEnumerable<IDataWriterFactory>>().ToList();
         var transformerFactories = sp.GetRequiredService<IEnumerable<IDataTransformerFactory>>().ToList();
-        var processorFactories = sp.GetRequiredService<IEnumerable<IStreamTransformerFactory>>().ToList();
-
-        void RegisterWithStage(IEnumerable<FlagDef> defs, FlagStage stage)
-        {
-            foreach (var def in defs) registry.Register(def with { Stage = stage });
-        }
-        new PipelineOptionsCliContributor().GetFlagDefs().ToList().ForEach(d => registry.Register(d with { Stage = FlagStage.All }));
-        foreach (var c in readerFactories.OfType<ICliContributor>())      RegisterWithStage(c.GetFlagDefs(), FlagStage.Reader);
-        foreach (var c in writerFactories.OfType<ICliContributor>())       RegisterWithStage(c.GetFlagDefs(), FlagStage.Writer);
-        foreach (var c in transformerFactories.OfType<ICliContributor>())  RegisterWithStage(c.GetFlagDefs(), FlagStage.Pipeline);
-        foreach (var stf in processorFactories)
-            foreach (var (flag, isBoolean) in stf.CliTriggerFlags)
-                registry.Register(new FlagDef(flag, Array.Empty<string>(), isBoolean ? FlagArity.Boolean : FlagArity.Scalar, FlagScope.PerBranch, stf.ComponentName, FlagStage.Pipeline));
 
         // Determine current stage by scanning preceding words.
         // Stage transitions: Reader (default) → Pipeline (on first transformer trigger) → Writer (on -o).

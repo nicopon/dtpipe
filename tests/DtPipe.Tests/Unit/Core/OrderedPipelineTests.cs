@@ -1,5 +1,5 @@
-using System.CommandLine;
 using DtPipe.Cli.Infrastructure;
+using DtPipe.Cli.Pipeline;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
@@ -22,16 +22,16 @@ public class OrderedPipelineTests
 	public OrderedPipelineTests()
 	{
 		_fakeFactory = new Mock<IDataTransformerFactory>();
-		SetupFactory(_fakeFactory, "--fake", "-f");
+		SetupFactory(_fakeFactory, "--fake", FlagArity.Scalar, "-f");
 
 		_nullFactory = new Mock<IDataTransformerFactory>();
-		SetupFactory(_nullFactory, "--null");
+		SetupFactory(_nullFactory, "--null", FlagArity.Scalar);
 
 		_formatFactory = new Mock<IDataTransformerFactory>();
-		SetupFactory(_formatFactory, "--format");
+		SetupFactory(_formatFactory, "--format", FlagArity.Scalar);
 
 		_staticFactory = new Mock<IDataTransformerFactory>();
-		SetupFactory(_staticFactory, "--overwrite");
+		SetupFactory(_staticFactory, "--overwrite", FlagArity.Scalar);
 
 		_factories = new List<IDataTransformerFactory>
 		{
@@ -42,15 +42,12 @@ public class OrderedPipelineTests
 		};
 	}
 
-	private void SetupFactory<T>(Mock<T> mock, string mainAlias, params string[] aliases) where T : class, IDataTransformerFactory
+	private void SetupFactory<T>(Mock<T> mock, string mainAlias, FlagArity arity, params string[] aliases) where T : class, IDataTransformerFactory
 	{
-		var option = new Option<string>(mainAlias);
+		var flagDef = new FlagDef(mainAlias, aliases, arity, FlagScope.PerBranch, mainAlias.TrimStart('-'));
 
-		// Mock the intersection of IDataTransformerFactory and ICliContributor.
-		// Moq's As<TInterface>() allows adding an interface implementation to the mock.
 		mock.Setup(f => f.ComponentName).Returns(mainAlias.TrimStart('-'));
-
-		mock.As<ICliContributor>().Setup(f => f.GetCliOptions()).Returns(new List<Option> { option });
+		mock.As<ICliContributor>().Setup(f => f.GetFlagDefs()).Returns(new List<FlagDef> { flagDef });
 	}
 
 	[Fact]
@@ -70,12 +67,6 @@ public class OrderedPipelineTests
 		var fakeT2 = new Mock<IDataTransformer>();
 		var nullT = new Mock<IDataTransformer>();
 		var formatT = new Mock<IDataTransformer>();
-
-		// We expect:
-		// 1. Fake (NAME)
-		// 2. Null (Observed)
-		// 3. Fake (EMAIL)
-		// 4. Format (DISPLAY)
 
 		_fakeFactory.Setup(f => f.CreateFromConfiguration(It.Is<IEnumerable<(string, string)>>(v => v.Any(x => x.Item2 == "NAME:name.fullName"))))
 			.Returns(fakeT1.Object);
@@ -134,7 +125,6 @@ public class OrderedPipelineTests
 		pipeline[0].Should().Be(fakeGroup1.Object); // Fake [A, B]
 		pipeline[1].Should().Be(nullGroup.Object);  // Null [C]
 		pipeline[2].Should().Be(fakeGroup2.Object); // Fake [D]
-		pipeline[2].Should().Be(fakeGroup2.Object); // Fake [D]
 	}
 
 	[Fact]
@@ -143,12 +133,11 @@ public class OrderedPipelineTests
 		// Arrange
 		var builder = new TransformerPipelineBuilder(_factories);
 
-		// Setup --skip-null as a FLAG (Arity 0) for Fake factory
+		// Setup --skip-null as a FLAG (Boolean arity) for Fake factory
+		var skipNullFlag = new FlagDef("--skip-null", Array.Empty<string>(), FlagArity.Boolean, FlagScope.PerBranch, "fake");
+		var fakeFlag = new FlagDef("--fake", Array.Empty<string>(), FlagArity.Scalar, FlagScope.PerBranch, "fake");
 
-		var skipNullOption = new Option<bool>("--skip-null") { Arity = ArgumentArity.Zero };
-		var fakeOption = new Option<string>("--fake");
-
-		_fakeFactory.As<ICliContributor>().Setup(f => f.GetCliOptions()).Returns(new List<Option> { fakeOption, skipNullOption });
+		_fakeFactory.As<ICliContributor>().Setup(f => f.GetFlagDefs()).Returns(new List<FlagDef> { fakeFlag, skipNullFlag });
 
 		var args = new[]
 		{

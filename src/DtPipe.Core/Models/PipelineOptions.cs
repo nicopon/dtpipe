@@ -26,6 +26,9 @@ public sealed record PipelineOptions : IOptionSet
 	[ComponentOption("--sampling-seed", Aliases = new[] { "--sample-seed" }, Description = "Seed for deterministic sampling")]
 	public int? SamplingSeed { get; init; }
 
+	[ComponentOption("--ignore-nulls", Description = "Skip null values in processing")]
+	public bool IgnoreNulls { get; init; }
+
 	// --- Execution controls (not CLI flags; set by LinearPipelineService from JobDefinition) ---
 	public string? MetricsPath { get; init; }
 	public bool NoStats { get; init; } = false;

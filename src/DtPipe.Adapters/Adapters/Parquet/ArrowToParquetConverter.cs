@@ -1,50 +1,47 @@
 using Apache.Arrow;
 using Apache.Arrow.Arrays;
 using DtPipe.Core.Infrastructure.Arrow;
+using Parquet;
 using Parquet.Data;
 using Parquet.Schema;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace DtPipe.Adapters.Parquet;
 
 public static class ArrowToParquetConverter
 {
-    public static DataColumn Convert(IArrowArray arrowArray, DataField dataField)
+    public static Task WriteColumnAsync(ParquetRowGroupWriter writer, IArrowArray arrowArray, DataField dataField, CancellationToken ct = default)
     {
         bool isGuidField = dataField.ClrNullableIfHasNullsType == typeof(Guid)
                         || dataField.ClrNullableIfHasNullsType == typeof(Guid?);
         return arrowArray switch
         {
-            Int32Array a => new DataColumn(dataField, ExtractPrimitiveValues<int, Int32Array>(a)),
-            Int64Array a => new DataColumn(dataField, ExtractPrimitiveValues<long, Int64Array>(a)),
-            DoubleArray a => new DataColumn(dataField, ExtractPrimitiveValues<double, DoubleArray>(a)),
-            FloatArray a => new DataColumn(dataField, ExtractPrimitiveValues<float, FloatArray>(a)),
-            BooleanArray a => new DataColumn(dataField, ExtractBooleanValues(a)),
-            StringArray a => new DataColumn(dataField, ExtractStringValues(a)),
-            Decimal128Array a => new DataColumn(dataField, ExtractDecimalValues<Decimal128Array>(a)),
-            Decimal256Array a => new DataColumn(dataField, ExtractDecimalValues<Decimal256Array>(a)),
-            Date64Array a => new DataColumn(dataField, ExtractDate64Values(a)),
+            Int32Array a => writer.WriteAsync<int>(dataField, ExtractPrimitiveValues<int, Int32Array>(a).AsMemory(), cancellationToken: ct),
+            Int64Array a => writer.WriteAsync<long>(dataField, ExtractPrimitiveValues<long, Int64Array>(a).AsMemory(), cancellationToken: ct),
+            DoubleArray a => writer.WriteAsync<double>(dataField, ExtractPrimitiveValues<double, DoubleArray>(a).AsMemory(), cancellationToken: ct),
+            FloatArray a => writer.WriteAsync<float>(dataField, ExtractPrimitiveValues<float, FloatArray>(a).AsMemory(), cancellationToken: ct),
+            BooleanArray a => writer.WriteAsync<bool>(dataField, ExtractBooleanValues(a).AsMemory(), cancellationToken: ct),
+            StringArray a => writer.WriteAsync(dataField, (IReadOnlyCollection<string?>)ExtractStringValues(a)),
+            Decimal128Array a => writer.WriteAsync<decimal>(dataField, ExtractDecimalValues<Decimal128Array>(a).AsMemory(), cancellationToken: ct),
+            Decimal256Array a => writer.WriteAsync<decimal>(dataField, ExtractDecimalValues<Decimal256Array>(a).AsMemory(), cancellationToken: ct),
+            Date64Array a => writer.WriteAsync<DateTime>(dataField, ExtractDate64Values(a).AsMemory(), cancellationToken: ct),
             // Timestamp: no-timezone fields are typed as DateTime — coerce DateTimeOffset to DateTime
             TimestampArray a when (Nullable.GetUnderlyingType(dataField.ClrNullableIfHasNullsType) ?? dataField.ClrNullableIfHasNullsType) == typeof(DateTime) =>
-                new DataColumn(dataField, ExtractTimestampAsDateTimeValues(a)),
-            TimestampArray a => new DataColumn(dataField, ExtractTimestampValues(a)),
+                writer.WriteAsync<DateTime>(dataField, ExtractTimestampAsDateTimeValues(a).AsMemory(), cancellationToken: ct),
+            TimestampArray a => writer.WriteAsync<DateTimeOffset>(dataField, ExtractTimestampValues(a).AsMemory(), cancellationToken: ct),
             // FixedSizeBinaryArray(16) with arrow.uuid → DtPipe internal UUID format
-            FixedSizeBinaryArray a when isGuidField => new DataColumn(dataField, ExtractGuidValuesFromFixed(a)),
+            FixedSizeBinaryArray a when isGuidField => writer.WriteAsync<Guid>(dataField, ExtractGuidValuesFromFixed(a).AsMemory(), cancellationToken: ct),
             // BinaryArray legacy: kept for sources that still emit BinaryType for UUID
-            BinaryArray a when isGuidField => new DataColumn(dataField, ExtractGuidValues(a)),
-            BinaryArray a => new DataColumn(dataField, ExtractBinaryValues(a)),
+            BinaryArray a when isGuidField => writer.WriteAsync<Guid>(dataField, ExtractGuidValues(a).AsMemory(), cancellationToken: ct),
+            BinaryArray a => writer.WriteAsync(dataField, (IReadOnlyCollection<byte[]?>)ExtractBinaryValues(a)),
             // FixedSizeBinaryArray without Guid field → generic binary bytes
-            FixedSizeBinaryArray a => new DataColumn(dataField, ExtractFixedBinaryValues(a)),
+            FixedSizeBinaryArray a => writer.WriteAsync(dataField, (IReadOnlyCollection<byte[]?>)ExtractFixedBinaryValues(a)),
             _ => throw new NotSupportedException($"Arrow array type {arrowArray.GetType().Name} is not supported for Parquet conversion yet.")
         };
     }
 
-    private static byte[]?[] ExtractFixedBinaryValues(FixedSizeBinaryArray array)
-    {
-        var result = new byte[]?[array.Length];
-        for (int i = 0; i < array.Length; i++)
-            result[i] = array.IsNull(i) ? null : array.GetBytes(i).ToArray();
-        return result;
-    }
 
     private static Guid?[] ExtractGuidValuesFromFixed(FixedSizeBinaryArray array)
     {
@@ -145,6 +142,16 @@ public static class ArrowToParquetConverter
     }
 
     private static byte[][] ExtractBinaryValues(BinaryArray array)
+    {
+        var result = new byte[array.Length][];
+        for (int i = 0; i < array.Length; i++)
+        {
+            result[i] = array.IsNull(i) ? [] : array.GetBytes(i).ToArray();
+        }
+        return result;
+    }
+
+    private static byte[][] ExtractFixedBinaryValues(FixedSizeBinaryArray array)
     {
         var result = new byte[array.Length][];
         for (int i = 0; i < array.Length; i++)

@@ -1,4 +1,3 @@
-using System.CommandLine;
 using DtPipe.Cli.Pipeline;
 using DtPipe.Core.Models;
 
@@ -13,9 +12,6 @@ namespace DtPipe.Cli.Infrastructure;
 public class PipelineOptionsCliContributor : ICliContributor
 {
     public string Category => "Pipeline Options";
-
-    public IEnumerable<Option> GetCliOptions()
-        => CliOptionBuilder.GenerateOptionsForType(typeof(PipelineOptions));
 
     public IEnumerable<FlagDef> GetFlagDefs()
     {

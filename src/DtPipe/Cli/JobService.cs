@@ -138,25 +138,4 @@ public class JobService
 		var linearPipelineService = new DtPipe.Cli.Services.LinearPipelineService(_contributors, _serviceProvider, channelRegistry, registry, _console);
 		return await linearPipelineService.ExecuteAsync(job, args, ct, resultsCollector, isDag, alias, ctx, showStatusMessages: false);
 	}
-
-    // Legacy method for back-compat or help, to be cleaned up later
-	public (RootCommand Command, Action PrintHelp, CoreCliOptions CoreOptions, IReadOnlyDictionary<string, CliPipelinePhase> FlagPhases, IReadOnlyList<ICliContributor> Contributors) Build()
-	{
-        // This is the old Build() used by Program.cs and Help
-        // For now I'll keep a minimal version or just use it for Help.
-        var readerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>();
-        var writerFactories = _serviceProvider.GetRequiredService<IEnumerable<IDataWriterFactory>>();
-        var opts = CoreOptionsBuilder.Build(readerFactories, writerFactories);
-        var rootCommand = BuildSubcommands();
-        
-        // Add options to root command just for help generation
-        foreach (var opt in opts.AllOptions) rootCommand.Add(opt);
-        foreach (var c in _contributors) foreach(var o in c.GetCliOptions()) if (!rootCommand.Options.Any(x => x.Name == o.Name)) rootCommand.Add(o);
-
-        Action PrintHelpAction = () => {
-            rootCommand.Parse(new[] { "--help" }).Invoke();
-        };
-        
-        return (rootCommand, PrintHelpAction, opts, CoreOptionsBuilder.CoreFlagPhases, _contributors.ToList());
-	}
 }

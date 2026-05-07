@@ -37,7 +37,8 @@ public record FlagDef(
     FlagArity Arity,
     FlagScope Scope,
     string? Description = null,
-    FlagStage Stage = FlagStage.All);
+    FlagStage Stage = FlagStage.All,
+    string? ComponentName = null);
 
 public class FlagRegistry
 {
@@ -69,4 +70,60 @@ public class FlagRegistry
     }
 
     public IEnumerable<FlagDef> GetAll() => _flags.Values.Distinct();
+
+    /// <summary>
+    /// Performs post-registration quality control to detect collisions and inconsistencies.
+    /// Throws InvalidOperationException if issues are found.
+    /// </summary>
+    public void Validate()
+    {
+        var allFlags = new Dictionary<string, List<FlagDef>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var def in GetAll())
+        {
+            AddToMap(allFlags, def.Name, def);
+            foreach (var alias in def.Aliases) AddToMap(allFlags, alias, def);
+        }
+
+        foreach (var kvp in allFlags)
+        {
+            var flagName = kvp.Key;
+            var defs = kvp.Value;
+
+            if (defs.Count <= 1) continue;
+
+            // 1. Check for overlapping stages between different components
+            for (int i = 0; i < defs.Count; i++)
+            {
+                for (int j = i + 1; j < defs.Count; j++)
+                {
+                    var a = defs[i];
+                    var b = defs[j];
+
+                    if (a.ComponentName == b.ComponentName) continue;
+
+                    // Detect overlap in stages
+                    var overlap = a.Stage & b.Stage;
+                    if (overlap != 0)
+                    {
+                        throw new InvalidOperationException(
+                            $"CLI Flag Collision: Flag '{flagName}' is registered by multiple components ({a.ComponentName}, {b.ComponentName}) " +
+                            $"for overlapping stages ({overlap}). Flags must be unique within a stage (especially in the Pipeline/Transformer stage).");
+                    }
+
+                    // 2. Check for Arity inconsistencies if shared across stages (e.g. Reader/Writer)
+                    if (a.Arity != b.Arity)
+                    {
+                        throw new InvalidOperationException(
+                            $"CLI Arity Mismatch: Flag '{flagName}' has inconsistent arity between components ({a.ComponentName}: {a.Arity}, {b.ComponentName}: {b.Arity}).");
+                    }
+                }
+            }
+        }
+    }
+
+    private static void AddToMap(Dictionary<string, List<FlagDef>> map, string flag, FlagDef def)
+    {
+        if (!map.ContainsKey(flag)) map[flag] = new List<FlagDef>();
+        map[flag].Add(def);
+    }
 }

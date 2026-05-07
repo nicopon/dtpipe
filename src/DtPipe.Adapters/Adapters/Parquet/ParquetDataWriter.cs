@@ -45,7 +45,7 @@ public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, 
 		try
 		{
 			using var fileStream = new FileStream(_outputPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-			using var reader = await ParquetReader.CreateAsync(fileStream, cancellationToken: ct);
+			await using var reader = await ParquetReader.CreateAsync(fileStream, cancellationToken: ct);
 
 			var schema = reader.Schema;
 			var columns = new List<TargetColumnInfo>();
@@ -134,8 +134,7 @@ public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, 
 			{
 				var arrowArray = batch.Column(i);
 				var dataField = _dataFields[i];
-				var dataColumn = ArrowToParquetConverter.Convert(arrowArray, dataField);
-				await rowGroup.WriteColumnAsync(dataColumn, ct);
+				await ArrowToParquetConverter.WriteColumnAsync(rowGroup, arrowArray, dataField, ct);
 			}
 		}
 	}
@@ -191,7 +190,7 @@ public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, 
 	{
 		if (_writer != null)
 		{
-			_writer.Dispose();
+			await _writer.DisposeAsync();
 		}
 
 		if (_outputStream != null)
