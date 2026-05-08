@@ -21,6 +21,9 @@ public class NullDataTransformerFactory : IDataTransformerFactory
 	public string Category => "Transformers";
 	public Type OptionsType => typeof(DtPipe.Transformers.Arrow.Null.NullOptions);
 
+	public IDataTransformer? CreateFromOptions(object options) =>
+		options is NullOptions o ? CreateFromOptions(o) : null;
+
 	public IDataTransformer CreateFromOptions(DtPipe.Transformers.Arrow.Null.NullOptions options)
 	{
 		return new NullDataTransformer(options);

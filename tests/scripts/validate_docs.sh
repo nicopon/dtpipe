@@ -114,22 +114,23 @@ run_transformer_test "Drop column"            --drop "INTERNAL_ID"
 
 # YAML job file test
 cat > "$TMP_DIR/readme_job.yaml" <<EOF
-input: "duck::memory:"
-output: "$TMP_DIR/readme_out.parquet"
-provider-options:
-  duck:
-    query: "SELECT 'Alice' AS name, 'test@example.com' AS email, '0612345678' AS phone, 1 AS id"
-transformers:
-  - null:
-      mappings:
-        phone: ~
-  - fake:
-      mappings:
-        name: name.fullName
-        email: internet.email
-      options:
-        locale: fr
-        seed-column: id
+main:
+  input: "duck::memory:"
+  output: "$TMP_DIR/readme_out.parquet"
+  provider-options:
+    duck:
+      query: "SELECT 'Alice' AS name, 'test@example.com' AS email, '0612345678' AS phone, 1 AS id"
+  transformers:
+    - null:
+        mappings:
+          phone: ~
+    - fake:
+        mappings:
+          name: name.fullName
+          email: internet.email
+        options:
+          locale: fr
+          seed-column: id
 EOF
 
 run_test "YAML job file execution (dry-run)" \

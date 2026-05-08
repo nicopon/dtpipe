@@ -15,6 +15,9 @@ public class ProjectDataTransformerFactory(OptionsRegistry registry) : IDataTran
 	public string Category => "Transformers";
 	public Type OptionsType => typeof(DtPipe.Transformers.Arrow.Project.ProjectOptions);
 
+	public IDataTransformer? CreateFromOptions(object options) =>
+		options is ProjectOptions o ? CreateFromOptions(o) : null;
+
 	public IDataTransformer CreateFromOptions(DtPipe.Transformers.Arrow.Project.ProjectOptions options)
 	{
 		return new ProjectDataTransformer(options);

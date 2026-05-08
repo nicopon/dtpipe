@@ -15,6 +15,9 @@ public class FormatDataTransformerFactory(OptionsRegistry registry) : IDataTrans
 	public string Category => "Transformers";
 	public Type OptionsType => typeof(DtPipe.Transformers.Arrow.Format.FormatOptions);
 
+	public IDataTransformer? CreateFromOptions(object options) =>
+		options is FormatOptions o ? CreateFromOptions(o) : null;
+
 	public IDataTransformer CreateFromOptions(DtPipe.Transformers.Arrow.Format.FormatOptions options)
 	{
 		return new FormatDataTransformer(options);

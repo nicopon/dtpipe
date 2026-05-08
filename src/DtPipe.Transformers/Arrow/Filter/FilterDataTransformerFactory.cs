@@ -22,6 +22,9 @@ public class FilterDataTransformerFactory : IDataTransformerFactory
 
 	public bool CanHandle(string connectionString) => false;
 
+	public IDataTransformer? CreateFromOptions(object options) =>
+		options is FilterOptions o ? CreateFromOptions(o) : null;
+
 	public IDataTransformer CreateFromOptions(DtPipe.Transformers.Arrow.Filter.FilterOptions options)
 	{
 		return new FilterDataTransformer(options, _jsEngineProvider);

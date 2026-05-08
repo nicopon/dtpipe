@@ -55,23 +55,35 @@ public class ComputeDataTransformerFactory : IDataTransformerFactory
 		}, _jsEngineProvider);
 	}
 
+	public IDataTransformer? CreateFromOptions(object options) =>
+		options is ComputeOptions o ? CreateFromOptions(o) : null;
+
 	public IDataTransformer CreateFromOptions(DtPipe.Transformers.Row.Compute.ComputeOptions options)
 	{
-		return new ComputeDataTransformer(options, _jsEngineProvider);
+		// Resolve @file references in Compute entries (single resolution point for both CLI and YAML paths)
+		var resolved = options.Compute.Select(c =>
+		{
+			var sep = c.IndexOf(':');
+			return sep > 0
+				? c[..sep] + ":" + ResolveScriptContent(c[(sep + 1)..])
+				: ResolveScriptContent(c);
+		}).ToList();
+		return new ComputeDataTransformer(options with { Compute = resolved }, _jsEngineProvider);
 	}
 
 	public IDataTransformer? CreateFromYamlConfig(TransformerConfig config)
 	{
 		var mappings = new List<string>();
 
-		if (config.Compute != null && config.Compute.Any())
+		if (config.Mappings != null && config.Mappings.Any())
 		{
-			foreach (var kvp in config.Compute)
+			foreach (var kvp in config.Mappings)
 			{
+				// Raw values; @file resolution happens in CreateFromOptions
 				if (string.IsNullOrEmpty(kvp.Value))
 					mappings.Add(kvp.Key);
 				else
-					mappings.Add($"{kvp.Key}:{ResolveScriptContent(kvp.Value)}");
+					mappings.Add($"{kvp.Key}:{kvp.Value}");
 			}
 		}
 
@@ -79,11 +91,9 @@ public class ComputeDataTransformerFactory : IDataTransformerFactory
 
 		bool skipNull = false;
 		if (config.Options != null && config.Options.TryGetValue("skip-null", out var snStr))
-		{
 			bool.TryParse(snStr, out skipNull);
-		}
 
-		return new ComputeDataTransformer(new ComputeOptions { Compute = mappings, SkipNull = skipNull }, _jsEngineProvider);
+		return CreateFromOptions(new ComputeOptions { Compute = mappings, SkipNull = skipNull });
 	}
 
 	private static string ResolveScriptContent(string script)

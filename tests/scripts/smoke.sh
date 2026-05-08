@@ -99,7 +99,7 @@ echo "      SQLite 1M..."
   --table "vol_data" --strategy Recreate --no-stats > /dev/null
 "$DTPIPE" -i "sqlite:$INPUT_DIR/high_volume.db" --query "SELECT COUNT(*) FROM vol_data" \
   -o csv --no-stats > "$INPUT_DIR/result_vol_sqlite.csv"
-COUNT=$(tail -n 1 "$INPUT_DIR/result_vol_sqlite.csv" | tr -d '\r')
+COUNT=$(tail -n 1 "$INPUT_DIR/result_vol_sqlite.csv" | tr -d '\r' | sed 's/\.0*$//')
 [ "$COUNT" = "1000000" ] && echo "✅ SQLite 1M Load Verified." \
   || { echo "❌ FAILED: SQLite Volume Mismatch ($COUNT)"; exit 1; }
 
@@ -109,7 +109,7 @@ echo "      Postgres 1M..."
   --table "voldata" --strategy Recreate --no-stats > /dev/null
 "$DTPIPE" -i "$PG_CONN" --query "SELECT COUNT(*) FROM voldata" \
   -o csv --no-stats > "$INPUT_DIR/result_vol_pg.csv"
-COUNT=$(tail -n 1 "$INPUT_DIR/result_vol_pg.csv" | tr -d '\r')
+COUNT=$(tail -n 1 "$INPUT_DIR/result_vol_pg.csv" | tr -d '\r' | sed 's/\.0*$//')
 [ "$COUNT" = "1000000" ] && echo "✅ Postgres 1M Load Verified." \
   || { echo "❌ FAILED: PG Volume Mismatch ($COUNT)"; exit 1; }
 
@@ -120,7 +120,7 @@ MSSQL_CONN_EXT="mssql:Server=localhost,1434;Database=master;User Id=sa;Password=
   --table "VolData" --strategy Recreate --no-stats > /dev/null
 "$DTPIPE" -i "$MSSQL_CONN" --query "SELECT COUNT(*) FROM VolData" \
   -o csv --no-stats > "$INPUT_DIR/result_vol_mssql.csv"
-COUNT=$(tail -n 1 "$INPUT_DIR/result_vol_mssql.csv" | tr -d '\r')
+COUNT=$(tail -n 1 "$INPUT_DIR/result_vol_mssql.csv" | tr -d '\r' | sed 's/\.0*$//')
 [ "$COUNT" = "1000000" ] && echo "✅ MSSQL 1M Load Verified." \
   || { echo "❌ FAILED: MSSQL Volume Mismatch ($COUNT)"; exit 1; }
 
@@ -130,7 +130,7 @@ echo "      Oracle 1M..."
   --table "VOL_DATA" --strategy Recreate --no-stats > /dev/null
 "$DTPIPE" -i "$ORA_CONN" --query "SELECT COUNT(*) FROM VOL_DATA" \
   -o csv --no-stats > "$INPUT_DIR/result_vol_ora.csv"
-COUNT=$(tail -n 1 "$INPUT_DIR/result_vol_ora.csv" | tr -d '\r')
+COUNT=$(tail -n 1 "$INPUT_DIR/result_vol_ora.csv" | tr -d '\r' | sed 's/\.0*$//')
 [ "$COUNT" = "1000000" ] && echo "✅ Oracle 1M Load Verified." \
   || { echo "❌ FAILED: Oracle Volume Mismatch ($COUNT)"; exit 1; }
 
@@ -163,7 +163,7 @@ echo "[5/9] Pipeline 2: Parquet → SQLite..."
   --table "users" --strategy Recreate --no-stats > /dev/null
 "$DTPIPE" -i "sqlite:$INPUT_DIR/vicious.db" --query "SELECT COUNT(*) FROM users" \
   -o csv --no-stats > "$INPUT_DIR/result_count.csv"
-COUNT=$(tail -n 1 "$INPUT_DIR/result_count.csv" | tr -d '\r')
+COUNT=$(tail -n 1 "$INPUT_DIR/result_count.csv" | tr -d '\r' | sed 's/\.0*$//')
 [ "$COUNT" = "7" ] || { echo "❌ FAILED: SQLite Count Mismatch ($COUNT)"; exit 1; }
 echo "✅ SQLite Count Verified."
 rm "$INPUT_DIR"/result_count.csv
@@ -209,7 +209,7 @@ echo "[8/9] Testing SQL Server..."
   --table "ViciousUsers" --strategy Recreate --no-stats > /dev/null
 "$DTPIPE" -i "$MSSQL_CONN" --query "SELECT COUNT(*) FROM ViciousUsers" \
   -o csv --no-stats > "$INPUT_DIR/result_mssql.csv"
-COUNT=$(tail -n 1 "$INPUT_DIR/result_mssql.csv" | tr -d '\r')
+COUNT=$(tail -n 1 "$INPUT_DIR/result_mssql.csv" | tr -d '\r' | sed 's/\.0*$//')
 [ "$COUNT" = "7" ] || { echo "❌ FAILED: MSSQL Count Mismatch (Expected 7, Got $COUNT)"; exit 1; }
 echo "✅ SQL Server Initial Load Verified."
 
@@ -229,7 +229,7 @@ echo "[9/9] Testing Oracle..."
   --table "VICIOUS_USERS" --strategy Recreate --no-stats > /dev/null
 "$DTPIPE" -i "$ORA_CONN" --query "SELECT COUNT(*) FROM VICIOUS_USERS" \
   -o csv --no-stats > "$INPUT_DIR/result_ora.csv"
-COUNT=$(tail -n 1 "$INPUT_DIR/result_ora.csv" | tr -d '\r')
+COUNT=$(tail -n 1 "$INPUT_DIR/result_ora.csv" | tr -d '\r' | sed 's/\.0*$//')
 [ "$COUNT" = "7" ] || { echo "❌ FAILED: Oracle Count Mismatch (Expected 7, Got $COUNT)"; exit 1; }
 echo "✅ Oracle Initial Load Verified."
 

@@ -78,9 +78,15 @@ class Program
 
             var lexer = new PipelineLexer(registry);
             var parsedPipeline = lexer.Parse(args);
-            var (jobs, dag) = PipelineToJobConverter.Convert(parsedPipeline, streamTransformerFactories);
+            var (jobs, dag, contexts) = PipelineToJobConverter.Convert(parsedPipeline, streamTransformerFactories);
 
-            return await jobService.ExecutePipelineAsync(jobs, dag, parsedPipeline.Globals, CancellationToken.None);
+            if (!string.IsNullOrEmpty(parsedPipeline.Globals.ExportJobFile))
+            {
+                DtPipe.Configuration.JobFileWriter.Write(parsedPipeline.Globals.ExportJobFile, jobs);
+                return 0;
+            }
+
+            return await jobService.ExecutePipelineAsync(jobs, dag, contexts, parsedPipeline.Globals, CancellationToken.None);
 		}
 		catch (Exception ex)
 		{

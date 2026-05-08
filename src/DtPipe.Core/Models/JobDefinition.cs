@@ -33,17 +33,5 @@ public record JobDefinition
 
 	/// <summary>Provider-specific options. Keyed by provider name (e.g. 'oracle-writer').</summary>
 	public Dictionary<string, Dictionary<string, object>>? ProviderOptions { get; init; }
-
-	/// <summary>Raw CLI arguments for this branch (full flat list — union of the three below).</summary>
-	public string[]? Arguments { get; set; }
-
-	/// <summary>Flags in the reader scope: from start to first transformer trigger or -o.</summary>
-	public string[]? ReaderArguments { get; set; }
-
-	/// <summary>Flags in the transformer scope: from first transformer trigger to -o.</summary>
-	public string[]? PipelineArguments { get; set; }
-
-	/// <summary>Flags in the writer scope: from -o to end.</summary>
-	public string[]? WriterArguments { get; set; }
 }
 

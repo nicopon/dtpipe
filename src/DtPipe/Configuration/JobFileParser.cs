@@ -38,41 +38,31 @@ public static partial class JobFileParser
 		// Interpolate environment variables
 		content = InterpolateEnvVars(content);
 
-		// 1. Try to deserialize as a dictionary (DAG)
-		try
+		// 1. Deserialize as a dictionary (DAG)
+		var branches = Deserializer.Deserialize<Dictionary<string, DtPipe.Core.Models.JobDefinition>>(content);
+		if (branches == null || branches.Count == 0)
 		{
-			var branches = Deserializer.Deserialize<Dictionary<string, DtPipe.Core.Models.JobDefinition>>(content);
-			// Validate if it's really a DAG by checking if ANY branch has an input or from alias
-			if (branches != null && branches.Count > 0 && branches.Values.Any(v => !string.IsNullOrEmpty(v.Input) || !string.IsNullOrEmpty(v.From)))
+			throw new InvalidOperationException("The job file is empty or invalid. A job file must define at least one named branch (DAG format).");
+		}
+
+		// Successfully loaded as a DAG. Now handle transformers for each branch.
+		var rootMap = Deserializer.Deserialize<Dictionary<string, object>>(content);
+		foreach (var alias in branches.Keys)
+		{
+			if (rootMap != null && rootMap.TryGetValue(alias, out var branchObj) && branchObj is System.Collections.IDictionary branchData)
 			{
-				// Successfully loaded as a DAG. Now handle transformers for each branch.
-				var rootMap = Deserializer.Deserialize<Dictionary<string, object>>(content);
-				foreach (var alias in branches.Keys)
+				if (branchData.Contains("transformers") && branchData["transformers"] is System.Collections.IEnumerable transList)
 				{
-					if (rootMap != null && rootMap.TryGetValue(alias, out var branchObj) && branchObj is Dictionary<object, object> branchData)
-					{
-						if (branchData.TryGetValue("transformers", out var transObj) && transObj is List<object> transList)
-						{
-							var yamlTransformers = transList.OfType<Dictionary<object, object>>().ToList();
-							branches[alias] = branches[alias] with { Transformers = ParseTransformers(yamlTransformers) };
-						}
-					}
+					var yamlTransformers = transList.Cast<object>()
+						.Select(t => t as System.Collections.IDictionary)
+						.Where(t => t != null)
+						.Cast<System.Collections.IDictionary>()
+						.ToList();
+					branches[alias] = branches[alias] with { Transformers = ParseTransformers(yamlTransformers) };
 				}
-				return branches;
 			}
 		}
-		catch { /* Fallback to single job */ }
-
-		// 2. Fallback: Parse as a single JobDefinition (Standard)
-		var job = Deserializer.Deserialize<DtPipe.Core.Models.JobDefinition>(content);
-		var rawMap = Deserializer.Deserialize<Dictionary<string, object>>(content);
-		if (rawMap != null && rawMap.TryGetValue("transformers", out var scalarTransObj) && scalarTransObj is List<object> scalarTransList)
-		{
-			var yamlTransformers = scalarTransList.OfType<Dictionary<object, object>>().ToList();
-			job = job with { Transformers = ParseTransformers(yamlTransformers) };
-		}
-
-		return new Dictionary<string, DtPipe.Core.Models.JobDefinition> { { "main", job } };
+		return branches;
 	}
 
 	/// <summary>
@@ -95,87 +85,43 @@ public static partial class JobFileParser
 		});
 	}
 
-	private static List<TransformerConfig>? ParseTransformers(List<Dictionary<object, object>>? transformers)
+	private static List<TransformerConfig>? ParseTransformers(List<System.Collections.IDictionary>? transformers)
 	{
 		if (transformers is null || transformers.Count == 0)
 			return null;
 
 		var result = new List<TransformerConfig>();
 
-		foreach (var transformerDict in transformers)
+		foreach (var dict in transformers)
 		{
-			// Support new "sane" format: - type: fake, mappings: { ... }
-			if (transformerDict.TryGetValue("type", out var typeObj))
+			if (dict.Contains("type"))
 			{
-				var type = typeObj?.ToString() ?? string.Empty;
-				var config = new TransformerConfig { Type = type };
+				var typeObj = dict["type"];
+				var config = new TransformerConfig { Type = typeObj?.ToString() ?? string.Empty };
 				
-				if (transformerDict.TryGetValue("mappings", out var m) && m is Dictionary<object, object> mDict)
+				if (dict.Contains("mappings") && dict["mappings"] is System.Collections.IDictionary mDict)
 					config = config with { Mappings = ParseStringDictionary(mDict) };
 				
-				if (transformerDict.TryGetValue("options", out var o) && o is Dictionary<object, object> oDict)
+				if (dict.Contains("options") && dict["options"] is System.Collections.IDictionary oDict)
 					config = config with { Options = ParseStringDictionary(oDict) };
 					
 				result.Add(config);
-				continue;
 			}
-
-			// Support legacy "shortcut" format: - fake: { ... }
-			foreach (var kvp in transformerDict)
+			else
 			{
-				var type = kvp.Key?.ToString() ?? string.Empty;
-				if (string.IsNullOrWhiteSpace(type))
-				{
-					throw new InvalidOperationException($"Transformer type cannot be null or empty.");
-				}
-
-				var value = kvp.Value;
-
-				var config = new TransformerConfig { Type = type };
-
-				if (value is Dictionary<object, object> dict)
-				{
-					// Check if this is a complex structure with explicit 'mappings' or 'options' keys
-					object? mappingsObj = null;
-					object? optionsObj = null;
-
-					foreach (var subKvp in dict)
-					{
-						var keyStr = subKvp.Key.ToString() ?? string.Empty;
-						if (string.Equals(keyStr, "mappings", StringComparison.OrdinalIgnoreCase))
-							mappingsObj = subKvp.Value;
-						else if (string.Equals(keyStr, "options", StringComparison.OrdinalIgnoreCase))
-							optionsObj = subKvp.Value;
-					}
-
-					if (mappingsObj != null || optionsObj != null)
-					{
-						if (mappingsObj is Dictionary<object, object> mappingsDict)
-							config = config with { Mappings = ParseStringDictionary(mappingsDict) };
-
-						if (optionsObj is Dictionary<object, object> optionsDict)
-							config = config with { Options = ParseStringDictionary(optionsDict) };
-					}
-					else
-					{
-						// Simple structure: the dictionary itself is the mappings
-						config = config with { Mappings = ParseStringDictionary(dict) };
-					}
-				}
-
-				result.Add(config);
+				Console.Error.WriteLine("Warning: Skipping transformer without 'type' property. The legacy 'shortcut' format is no longer supported.");
 			}
 		}
 
 		return result;
 	}
 
-	private static Dictionary<string, string>? ParseStringDictionary(Dictionary<object, object>? dict)
+	private static Dictionary<string, string>? ParseStringDictionary(System.Collections.IDictionary? dict)
 	{
 		if (dict is null) return null;
 
 		var result = new Dictionary<string, string>();
-		foreach (var kvp in dict)
+		foreach (System.Collections.DictionaryEntry kvp in dict)
 		{
 			if (kvp.Key != null)
 				result[kvp.Key.ToString()!] = kvp.Value?.ToString() ?? string.Empty;

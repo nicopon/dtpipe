@@ -22,4 +22,10 @@ public interface IDataTransformerFactory : IDataFactory
 	/// </summary>
 	/// <param name="config">The YAML transformer configuration with Mappings and Options dictionaries.</param>
 	IDataTransformer? CreateFromYamlConfig(TransformerConfig config);
+
+	/// <summary>
+	/// Creates a transformer from a pre-bound options object (typically populated by TransformerArgsBinder).
+	/// The options type must match the factory's OptionsType.
+	/// </summary>
+	IDataTransformer? CreateFromOptions(object options);
 }

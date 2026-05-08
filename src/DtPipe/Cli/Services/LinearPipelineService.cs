@@ -45,7 +45,7 @@ public class LinearPipelineService
 
     public async Task<int> ExecuteAsync(
         JobDefinition job,
-        string[] args,
+        CliJobContext? context,
         CancellationToken token,
         System.Collections.Concurrent.ConcurrentQueue<DtPipe.Feedback.BranchSummary>? resultsCollector = null,
         bool isDag = false,
@@ -54,7 +54,7 @@ public class LinearPipelineService
         bool showStatusMessages = false)
     {
         var exportService = _serviceProvider.GetRequiredService<ExportService>();
-        var currentRawArgs = job.Arguments ?? args;
+        var currentRawArgs = context?.Arguments ?? System.Array.Empty<string>();
 
         if (job.Limit < 0)
             throw new ArgumentException($"--limit value must be >= 0 (got {job.Limit}).");
@@ -177,8 +177,8 @@ public class LinearPipelineService
         List<IDataTransformer> pipeline;
 
         // Use PipelineArguments (transformer scope only) when available; fall back to full RawArgs.
-        var transformerArgs = job.PipelineArguments is { Length: > 0 }
-            ? job.PipelineArguments
+        var transformerArgs = context?.PipelineArguments is { Length: > 0 }
+            ? context.PipelineArguments
             : currentRawArgs;
 
         if (transformerArgs.Length > 0)

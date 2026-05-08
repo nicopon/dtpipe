@@ -20,6 +20,15 @@ public static class ConfigurationBinder
 	}
 
 	/// <summary>
+	/// Binds a string-value dictionary (e.g. from YAML TransformerConfig.Options) to an existing instance.
+	/// </summary>
+	public static void Bind<T>(T instance, Dictionary<string, string> config)
+	{
+		if (config == null || config.Count == 0 || instance == null) return;
+		Bind(instance, config.ToDictionary(kvp => kvp.Key, kvp => (object)kvp.Value));
+	}
+
+	/// <summary>
 	/// Binds a dictionary to an existing instance.
 	/// </summary>
 	public static void Bind<T>(T instance, Dictionary<string, object> config)

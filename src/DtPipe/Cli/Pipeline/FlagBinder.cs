@@ -70,7 +70,10 @@ public static class FlagBinder
             else if (type == typeof(double)) prop.SetValue(target, double.Parse(value));
             else if (type.IsEnum) prop.SetValue(target, Enum.Parse(type, value, true));
         }
-        catch { /* skip errors */ }
+        catch (Exception ex) when (ex is FormatException or InvalidCastException or OverflowException or ArgumentException)
+        {
+            Console.Error.WriteLine($"Warning: FlagBinder could not bind '{prop.Name}': {ex.Message}");
+        }
     }
 }
 

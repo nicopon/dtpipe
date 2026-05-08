@@ -1,522 +1,504 @@
 # DtPipe Cookbook
 
-Recipes and examples for common data export and transformation tasks.
+Recipes and end-to-end scenarios. For the full option reference, see [REFERENCE.md](./REFERENCE.md).
 
 **Table of Contents**
-- [Basic Usage](#basic-usage)
-- [Anonymization (The "Fakers")](#anonymization-the-fakers)
-- [Common Transformations](#common-transformations)
-- [Advanced Pipelines](#advanced-pipelines)
-- [Columnar Transfers & SQL Processors](#columnar-transfers--sql-processors)
-- [Standard Streams & Linux Pipes](#standard-streams--linux-pipes)
+- [Basic Transfers](#basic-transfers)
+- [Anonymization Before Export](#anonymization-before-export)
+- [Schema Transformations](#schema-transformations)
 - [Database Import & Migration](#database-import--migration)
-- [Production Automation (YAML)](#production-automation-yaml)
-- [Security & Secrets](#security--secrets)
+- [SQL Processors and Joins](#sql-processors-and-joins)
+- [DAG Pipelines (Multi-Source)](#dag-pipelines-multi-source)
+- [Standard Streams and Automation](#standard-streams-and-automation)
 
 ---
 
-## Basic Usage
+## Basic Transfers
 
-### Simple Database Export
-Export a table from a database to a Parquet file.
+### Database to file
 
 ```bash
 # PostgreSQL → Parquet
-dtpipe -i "pg:Host=localhost;Database=prod;Username=postgres" -q "SELECT * FROM users" -o users.parquet
+dtpipe -i "pg:Host=localhost;Database=prod;Username=postgres" \
+       --query "SELECT * FROM users" \
+       -o users.parquet
+
+# PostgreSQL → CSV
+dtpipe -i "pg:Host=localhost;Database=prod;Username=postgres" \
+       --query "SELECT * FROM orders WHERE created > '2024-01-01'" \
+       -o orders.csv
 ```
 
-### Export to CSV
-Use any supported output extension.
+### File format conversion
 
 ```bash
-dtpipe -i "pg:Host=localhost;Database=prod;Username=postgres" -q "SELECT * FROM users" -o users.csv
-```
+# CSV → Parquet (columnar fast-path: no row conversion)
+dtpipe -i data.csv -o data.parquet
 
-### Dry Run (Preview)
-Preview data without writing. Validates schema compatibility.
-
-```bash
-dtpipe -i "pg:Host=localhost;Database=prod;Username=postgres" -q "SELECT * FROM users" --dry-run 100
-```
-
----
-
-## Anonymization (The "Fakers")
-
-DtPipe maps `--fake` arguments to [Bogus Datasets](https://github.com/bchavez/Bogus).
-
-**Resources:**
-- [Available Locales](https://github.com/bchavez/Bogus?tab=readme-ov-file#locales)
-- [API Inventory (Datasets)](https://github.com/bchavez/Bogus?tab=readme-ov-file#locales)
-
-### 1. General Usage
-The syntax is `--fake "{Column}:{Dataset}.{Method}"`.
-
-#### Personal Information
-
-```bash
-dtpipe ... \
-  --fake "FirstName:name.firstName" \
-  --fake "LastName:name.lastName" \
-  --fake "Email:internet.email" \
-  --fake-locale fr
-```
-
-#### Dates and Numbers
-
-```bash
-dtpipe ... \
-  --fake "BirthDate:date.past" \
-  --fake "Score:random.number"
-```
-
-### 2. Deterministic Faking
-Use `--fake-seed-column` to guarantee referential integrity across tables.
-
-Instead of a random seed that restarts on each run, this mode hashes a specific column value (e.g. `UserId`) to derive the fake value. The same input value always produces the same output — even across separate runs or if row order changes.
-
-This lets you anonymize `Users` and `Orders` separately while preserving foreign key relationships, as long as both use the same seed column.
-
-```bash
-dtpipe ... \
-  --fake "Name:name.fullName" \
-  --fake-seed-column "UserId"
-```
-
----
-
-## Common Transformations
-
-### 1. Masking Sensitive Strings
-Partially hide data.
-
-```bash
-# "555-0199" → "555-****"
-dtpipe ... --mask "Phone:###-****"
-
-# Masking patterns:
-# # - Keep original character
-# * - Replace with literal '*' (or any other char)
-```
-
-### 2. Overwriting & Nullifying
-Hardcode values or erase columns.
-
-```bash
-dtpipe ... \
-  --overwrite "Status:Archived" \
-  --null "Notes"
-```
-
-### 3. Formatting Strings
-Combine columns using [.NET Composite Formatting](https://learn.microsoft.com/en-us/dotnet/standard/base-types/composite-formatting).
-
-```bash
-dtpipe ... --format "DisplayName:{FirstName} {LastName}"
-```
-
----
-
-## Advanced Pipelines
-
-### Pipeline Construction
-DtPipe builds the transformation pipeline by scanning CLI arguments left to right. Consecutive arguments of the same type are grouped into a single step.
-
-```
---fake A --fake B --format C --fake D
-```
-
-Resulting pipeline:
-
-```mermaid
-graph TB
-    S1["1. FakeTransformer (A, B)"]
-    S2["2. FormatTransformer (C)"]
-    S3["3. FakeTransformer (D)"]
-    S1 --> S2 --> S3
-```
-
-- `--fake "A" --fake "B"` → one Faker step.
-- `--fake "A" --format "C" --fake "B"` → three steps (A → Format → B).
-
-### Execution Order
-The pipeline executes in the exact left-to-right order of those groups.
-
-```bash
-# Anonymize first, then format using the anonymized value
-dtpipe ... \
-  --fake "Name:name.fullName" \
-  --format "Greeting:Hello, {Name}!"
-```
-
-Swapping the order would format with the *original* name.
-
-### JavaScript Scripting
-Use `--compute` for arbitrary row logic.
-
-**Syntax rules:**
-1. **Implicit return**: A single expression without a semicolon is returned automatically.
-   - `row.Age > 18` → `return row.Age > 18;`
-2. **Explicit return**: Use `return` if your script uses statements or semicolons.
-   - `row.Age > 18;` → returns `undefined` (use `return`!)
-   - `if (row.Age > 18) return 'Yes';` → works.
-
-```bash
-# Simple expression
-dtpipe ... --compute "IsAdult:row.Age > 18"
-
-# Complex logic
-dtpipe ... \
-   --compute "Category:if (row.Age < 18) return 'Minor'; else return 'Adult';"
-
-# Create a new virtual column
-dtpipe ... --compute "FullName:row.FirstName + ' ' + row.LastName"
-```
-
-> **Tip:** If the column doesn't exist in the input, `--compute` creates it as a virtual column. Use `--compute-types "Col:type"` to set its CLR type (default: `string`).
-
-### Generating Test Data
-The `generate:<count>` provider generates rows with a `GenerateIndex` column. Combine it with `--fake` for complete datasets.
-
-```bash
-# 1M rows of fake users
-dtpipe -i "generate:1000000" \
-  --fake "Id:random.number" \
-  --fake "Name:name.fullName" \
-  --fake "Email:internet.email" \
-  --drop "GenerateIndex" \
-  -o users.csv
-```
-
-### Random Sampling
-Use `--sampling-rate` to export a subset of rows.
-
-```bash
-# Export 10% of a large table
-dtpipe -i "ora:..." -q "SELECT * FROM LargeTable" --sampling-rate 0.1 -o subset.parquet
-```
-
-Use `--sampling-seed` to make the selection deterministic (same subset every run).
-
-```bash
-dtpipe ... --sampling-rate 0.1 --sampling-seed 12345 ...
-```
-
-### Filtering Rows
-Drop rows that don't match a JavaScript condition.
-
-```bash
-dtpipe ... --filter "row.IsActive && row.Age >= 18"
-```
-
-### Row Expansion
-Turn a single input row into multiple output rows.
-
-```bash
-# If 'Tags' is "A,B,C", this produces 3 rows
-dtpipe ... --expand "row.Tags.split(',').map(t => ({ ...row, Tag: t }))"
-```
-
-### Window Aggregations (Stateful)
-Accumulate rows and process them as a batch.
-
-```bash
-# Rolling average over 5 rows
-dtpipe ... \
-  --window-count 5 \
-  --window-script "rows.map(r => ({ ...r, Avg: rows.reduce((s, x) => s + x.Val, 0) / rows.length }))"
-```
-
-### External Script Files
-Move complex logic to `.js` files to keep your commands readable.
-
-```bash
-dtpipe ... --compute "Category:@scripts/categorize_age.js"
-```
-
----
-
-## Columnar Transfers & SQL Processors
-
-### Columnar Fast-Path
-When no row-based transformations (JS scripts, fakers) are in the pipeline, DtPipe transfers raw memory buffers directly between columnar formats (Parquet, Arrow, DuckDB) without deserializing rows.
-
-```bash
-# Parquet → Arrow (direct buffer transfer)
+# Parquet → Arrow
 dtpipe -i data.parquet -o data.arrow
 ```
 
-### High-Performance Joins (SQL Processors)
-
-Use `--from` + `--sql` to join multiple sources in memory without intermediate files.
-The `--from` source is streamed; `--ref` sources are fully preloaded into memory to enable cost-based query planning in both engines.
-
-#### SQL Processor (DuckDB — default)
-DuckDB is the default SQL engine. No build step required.
+### Dry run — validate schema without writing
 
 ```bash
-dtpipe \
-  -i "main_data.parquet" --alias main \
-  -i "metadata.csv" --alias ref \
-  --from main --ref ref \
-  --sql "SELECT main.*, ref.name FROM main JOIN ref ON main.id = ref.id" \
-  -o "enriched.parquet"
+dtpipe -i "pg:Host=localhost;Database=prod" \
+       --query "SELECT * FROM users" \
+       --dry-run 20
 ```
-
-#### SQL Dialect (DuckDB)
-
-DuckDB uses standard SQL syntax. For nested data structures (Structs in Arrow, Objects in JSONL), use dot notation:
-
-| Feature | **DuckDB Syntax** |
-| :--- | :--- |
-| **Field Access** | `column.field` |
-| **Nested Access** | `col.nested.field` |
-| **Quoting** | Highly recommended for all identifiers |
-
-**Example (JSONL / Nested Structs):**
-
-```bash
-dtpipe -i data.jsonl --alias m \
-  --sql "SELECT m.user.id, m.meta.details.code FROM m"
-```
-
-> **Tip:** If a column name is a reserved SQL keyword (like `group`, `order`), always wrap it in double quotes: `"group".name`.
 
 ---
 
-## Standard Streams & Linux Pipes
+## Anonymization Before Export
 
-DtPipe reads from `stdin` and writes to `stdout`, letting you compose it with standard Unix tools.
-
-> **Note:** When using pipes, explicitly specify the format (e.g. `-i csv` or `-o csv`) — there's no file extension to detect.
-
-### Compressed Parquet Output
+### Scenario: anonymize a production table before handing it to a third party
 
 ```bash
-dtpipe -i "csv:large_data.csv" -o parquet | gzip > large_data.parquet.gz
+dtpipe \
+  -i "pg:Host=localhost;Database=prod;Username=postgres" \
+  --query "SELECT id, name, email, phone, birth_date, address FROM users" \
+  \
+  --fake "name:name.fullName" \
+  --fake "email:internet.email" \
+  --fake "phone:phone.phoneNumber" \
+  --fake "address:address.fullAddress" \
+  --fake "birth_date:date.past" \
+  --null "ssn" \
+  \
+  -o anonymized_users.parquet
 ```
 
-### Filter with an External Tool, then Anonymize
+### Deterministic faking (preserve referential integrity across tables)
+
+Use `--fake-seed-column` to guarantee that the same input value always produces the same
+anonymized output — even across separate runs or tables.
 
 ```bash
-duckdb -csv -c "SELECT * FROM 'source.csv' WHERE active=true" | \
-  dtpipe -i csv \
-  --fake "Name:name.fullName" \
-  -o parquet:clean_data.parquet
+# Users table
+dtpipe -i "pg:..." --query "SELECT id, name, email FROM users" \
+       --fake "name:name.fullName" --fake-seed-column id \
+       -o anonymized_users.parquet
+
+# Orders table — same seed → same anonymized names
+dtpipe -i "pg:..." --query "SELECT order_id, user_id, name FROM orders" \
+       --fake "name:name.fullName" --fake-seed-column user_id \
+       -o anonymized_orders.parquet
 ```
 
-### Streaming JSON Lines to Apache Arrow
+### French locale
 
 ```bash
-cat server_logs.jsonl | \
-  dtpipe -i jsonl \
-  --mask "IPAddress:***.***.*.* " \
-  -o "arrow:secure_logs.arrow"
+dtpipe ... \
+  --fake "name:name.fullName" \
+  --fake "address:address.fullAddress" \
+  --fake-locale fr
 ```
 
-### Parsing Large XML Files (Streaming)
-You can parse massive XML files using an XPath-like selector without loading the entire document into memory. Use `--auto-column-types` to automatically discover all fields and types in a sparse XML.
+### Masking (partial replacement)
 
 ```bash
-# Auto-discover schema and types, then export to PG
-cat catalog.xml | \
-  dtpipe -i xml \
-  --path "//Product" \
-  --auto-column-types \
-  -o "pg:Host=localhost;Database=prod" \
-  --table "Products" --strategy Upsert
+# "555-0199" → "555-****"
+# "#" keeps the original char; any other char replaces it
+dtpipe ... --mask "phone:###-****"
+
+# IBAN: keep country code + bank code, mask the rest
+dtpipe ... --mask "iban:####-####-****-****-****"
 ```
 
-#### 🏗️ Object Structure & Path Relativity
-
-By default, **DtPipe preserves the document hierarchy**. Unlike CSVs, nested XML or JSON elements are not automatically flattened into the top-level schema. They are instead represented as structured Arrow `StructType` or `ListType` columns.
-
-##### 1. Relative vs Absolute Paths
-When using `--column-types`, all paths are **relative to the record node** matched by your `--path`.
-
-```xml
-<!-- data.xml -->
-<Records>
-  <User>
-    <Id>123</Id>
-    <Profile>
-      <Email>a@b.com</Email>
-    </Profile>
-  </User>
-</Records>
-```
-
-If you use `--path "//User"`, then:
-- Valid path: `Id:int32`
-- Valid path: `Profile.Email:string`
-- ❌ Invalid path: `User.Id` (redundant)
-
-##### 2. How to Flatten for SQL/CSV
-If your target destination (like a CSV file or a standard SQL table) requires a flat structure, you must explicitly "pull" the fields to the top level using a SQL transformer:
+### Export as a reusable YAML job
 
 ```bash
-dtpipe -i data.xml --path "//User" \
-  --sql "SELECT Id, Profile.Email AS Email FROM row" \
-  -o flat_users.csv
+# Generate once
+dtpipe -i "pg:..." --query "SELECT * FROM users" \
+  --fake "email:internet.email" \
+  --fake "name:name.fullName" \
+  --null "ssn" \
+  -o anonymized.parquet \
+  --export-job anonymize_users.yaml
+
+# Run nightly
+dtpipe --job anonymize_users.yaml
 ```
 
-> [!NOTE]
-> This "Object" behavior is identical for both **JSONL** and **XML** readers, ensuring consistency when moving between document formats.
+### Anonymization faker reference
 
+DtPipe uses [Bogus](https://github.com/bchavez/Bogus). Syntax: `--fake "Column:Dataset.Method"`.
+
+| Category | Generators |
+|:---|:---|
+| **Identity** | `name.fullName`, `name.firstName`, `name.lastName`, `internet.email`, `internet.userName` |
+| **Address** | `address.fullAddress`, `address.streetAddress`, `address.city`, `address.zipCode`, `address.country` |
+| **Finance** | `finance.iban`, `finance.creditCardNumber`, `finance.amount` |
+| **Phone** | `phone.phoneNumber` |
+| **Dates** | `date.past`, `date.future`, `date.recent`, `date.birthdate` |
+| **System** | `random.uuid`, `random.number`, `random.boolean`, `lorem.word`, `lorem.sentence` |
+
+---
+
+## Schema Transformations
+
+### Rename, project, drop
+
+```bash
+# Rename a column, keep only specific ones
+dtpipe -i source.parquet \
+  --rename "user_id:UserId" \
+  --rename "created_at:CreatedAt" \
+  --project "UserId,Name,Email,CreatedAt" \
+  -o clean.parquet
+
+# Remove a column (blacklist approach)
+dtpipe -i source.csv \
+  --drop "internal_hash" \
+  --drop "legacy_field" \
+  -o output.csv
+```
+
+### Compute — derived columns
+
+```bash
+# Simple expression (implicit return)
+dtpipe ... --compute "IsAdult:row.age > 18"
+
+# Multiple column derivations
+dtpipe ... \
+  --compute "FullName:row.first_name + ' ' + row.last_name" \
+  --compute "Revenue:row.qty * row.unit_price"
+
+# Conditional logic (explicit return needed with statements)
+dtpipe ... --compute "Category:if (row.age < 18) return 'Minor'; if (row.age < 65) return 'Adult'; return 'Senior';"
+```
+
+> If the column doesn't exist, `--compute` creates it as a new virtual column.
+> Use `--compute-types "Col:type"` to control its CLR type (default: `string`).
+
+### Filter rows
+
+```bash
+dtpipe ... --filter "row.is_active && row.score >= 50"
+```
+
+### Row expansion
+
+```bash
+# If 'tags' is "a,b,c", this produces 3 output rows
+dtpipe ... --expand "row.tags.split(',').map(t => ({ ...row, tag: t.trim() }))"
+```
+
+### Stateful windowing
+
+```bash
+# Compute a rolling average over 5 rows
+dtpipe ... \
+  --window-count 5 \
+  --window-script "rows.map(r => ({ ...r, rolling_avg: rows.reduce((s, x) => s + x.val, 0) / rows.length }))"
+```
+
+### Chaining transformers
+
+Transformers execute left-to-right. The output of each step is the input to the next.
+
+```bash
+# Anonymize first, then format using the anonymized values
+dtpipe ... \
+  --fake "first_name:name.firstName" \
+  --fake "last_name:name.lastName" \
+  --format "display_name:{first_name} {last_name}" \
+  --project "id,display_name,email"
+```
+
+### Load scripts from files
+
+For complex or multi-line logic, put the script in a `.js` file:
+
+```bash
+dtpipe ... --compute "category:@scripts/categorize.js"
+```
 
 ---
 
 ## Database Import & Migration
 
-DtPipe writes to DuckDB, SQLite, PostgreSQL, Oracle, and SQL Server using six standardized strategies.
+### Write strategies
 
-### Write Strategies
-
-| Strategy | Behavior | Use Case |
-|:--- |:--- |:--- |
-| **Append** (Default) | Inserts rows into the existing table. | Log shipping, daily increments. |
-| **Truncate** | Empties the table via `TRUNCATE TABLE`. *(Not available for SQLite)* | Full refresh — preserves schema & indexes. |
-| **DeleteThenInsert** | `DELETE FROM` then insert. | When TRUNCATE is unavailable or restricted. |
-| **Recreate** | Drops and recreates the table. | Full refresh including schema changes. |
-| **Upsert** | Updates existing rows (by PK), inserts new ones. | Syncing where the source is the source of truth. |
-| **Ignore** | Inserts new rows, skips existing ones (by PK). | Loading only missing data. |
-
-> **Note for Upsert/Ignore:** Requires a primary key. DtPipe auto-detects it from the target, or you can set it explicitly with `--key "Col1,Col2"`.
+| Strategy | Behaviour | Typical use |
+|:---|:---|:---|
+| **Append** (default) | Insert rows into the existing table | Daily increments, log shipping |
+| **Truncate** | `TRUNCATE` + insert | Full refresh, preserves schema & indexes |
+| **DeleteThenInsert** | `DELETE` + insert | When TRUNCATE is unavailable |
+| **Recreate** | Drop + create + insert | Full refresh including schema changes |
+| **Upsert** | Update existing rows (by PK), insert new ones | Syncing from a source of truth |
+| **Ignore** | Insert only missing rows (by PK) | Loading only new data |
 
 ### Examples
 
-#### Load Parquet into PostgreSQL (Recreate)
-
 ```bash
+# Parquet → PostgreSQL (recreate table)
 dtpipe \
   -i data.parquet \
   -o "pg:Host=localhost;Database=prod" \
   --table "public.imported_data" \
   --strategy Recreate
-```
 
-#### Append to Oracle
-
-```bash
+# CSV upsert with explicit key
 dtpipe \
-  -i "new_sales.csv" \
-  -o "ora:Data Source=PROD;..." \
-  --table "SALES_DATA" \
-  --strategy Append
-```
-
-#### Upsert with Explicit Key
-
-```bash
-dtpipe \
-  -i "orders_update.csv" \
+  -i orders_update.csv \
   -o "mssql:Server=.;Database=mydb" \
   --table "Orders" \
   --strategy Upsert \
   --key "OrderId"
+
+# High-speed bulk insert (PG / Oracle / MSSQL)
+dtpipe \
+  -i large_export.parquet \
+  -o "pg:Host=localhost;Database=prod" \
+  --table "staging" \
+  --strategy Truncate \
+  --insert-mode Bulk
+
+# Auto-migrate: add missing columns without dropping the table
+dtpipe \
+  -i new_data.parquet \
+  -o "pg:Host=localhost;Database=prod" \
+  --table "users" \
+  --auto-migrate
+```
+
+### Pre/post execution hooks
+
+```bash
+# Run SQL before and after the pipeline
+dtpipe -i data.parquet \
+  -o "sqlite:app.db" --table "users" \
+  --pre-exec "DELETE FROM users WHERE is_temp = 1" \
+  --post-exec "UPDATE users SET synced_at = CURRENT_TIMESTAMP"
+
+# Load SQL from a file
+dtpipe ... --pre-exec "@scripts/pre_migration.sql"
 ```
 
 ---
 
-## Production Automation (YAML)
+## SQL Processors and Joins
+
+### In-memory SQL join (DuckDB)
+
+DuckDB is the default SQL engine. The `--from` source streams; `--ref` sources are preloaded
+into memory before query execution (required for cost-based join planning).
+
+```bash
+dtpipe \
+  -i "pg:..." --query "SELECT * FROM orders" --alias orders \
+  -i "metadata.csv" --alias meta \
+  --from orders --ref meta \
+  --sql "SELECT o.*, m.category FROM orders o JOIN meta m ON o.product_id = m.id" \
+  -o "enriched.parquet"
+```
+
+### Multi-ref JOIN
+
+```bash
+dtpipe \
+  -i events.parquet --alias ev \
+  -i users.csv --alias users \
+  -i products.csv --alias products \
+  --from ev --ref users --ref products \
+  --sql "
+    SELECT e.ts, u.name, p.title
+    FROM ev e
+    JOIN users u ON e.user_id = u.id
+    JOIN products p ON e.product_id = p.id
+  " \
+  -o enriched_events.parquet
+```
+
+### DuckDB SQL features
+
+DuckDB supports standard SQL plus window functions, CTEs, JSON accessors, and more.
+
+```bash
+# Window function
+dtpipe -i sales.parquet --alias s \
+  --from s \
+  --sql "SELECT *, SUM(amount) OVER (PARTITION BY region ORDER BY date) AS running_total FROM s" \
+  -o enriched.parquet
+
+# JSON field access (from JSONL source)
+dtpipe -i data.jsonl --alias m \
+  --from m \
+  --sql "SELECT m.user.id, m.meta.details.code FROM m"
+
+# Identifiers that are SQL keywords must be quoted
+dtpipe -i orders.parquet --alias o \
+  --from o \
+  --sql 'SELECT "order".id, "order".amount FROM o AS "order"'
+```
+
+> **Tip:** DuckDB queries can be developed and tested externally with the DuckDB CLI before use in DtPipe.
+
+### UNION ALL (merge processor)
+
+```bash
+dtpipe \
+  -i archive_2023.parquet --alias a \
+  -i archive_2024.parquet --alias b \
+  --from a,b --merge \
+  -o combined.parquet
+```
+
+---
+
+## DAG Pipelines (Multi-Source)
+
+### Fan-out (tee): write one source to multiple destinations
+
+```bash
+dtpipe \
+  -i "pg:..." --query "SELECT * FROM events" --alias src \
+  --from src -o archive.parquet \
+  --from src --fake "user_id:random.uuid" -o anonymized.parquet
+```
+
+### Diamond: split → transform → rejoin
+
+```bash
+dtpipe \
+  -i transactions.parquet --alias all \
+  --from all --filter "row.amount > 1000" --alias high \
+  --from all --filter "row.amount <= 1000" --alias low \
+  --from high --ref low \
+  --sql "SELECT h.*, l.count AS low_count FROM high h JOIN low l ON h.category = l.category" \
+  -o enriched.parquet
+```
+
+### SQL output fed to multiple consumers
+
+```bash
+dtpipe \
+  -i "pg:..." --query "SELECT * FROM orders" --alias raw \
+  -i "pg:..." --query "SELECT * FROM customers" --alias cust \
+  --from raw --ref cust \
+  --sql "SELECT o.*, c.segment FROM raw o JOIN cust c ON o.cid = c.id" --alias joined \
+  --from joined -o joined.parquet \
+  --from joined --fake "email:internet.email" -o anonymized.parquet
+```
+
+---
+
+## Standard Streams and Automation
+
+### Standard input/output
+
+```bash
+# Read from stdin, write to stdout
+cat data.csv | dtpipe -i csv --fake "name:name.fullName" -o parquet | gzip > out.parquet.gz
+
+# Compose with other tools
+duckdb -csv -c "SELECT * FROM 'source.csv' WHERE active = true" | \
+  dtpipe -i csv --fake "name:name.fullName" -o parquet:clean.parquet
+```
+
+### Large XML files (streaming)
+
+```bash
+# Auto-discover schema, then export
+cat catalog.xml | \
+  dtpipe -i xml \
+  --path "//Product" \
+  --auto-column-types \
+  -o "pg:Host=localhost;Database=prod" \
+  --table "products" --strategy Upsert
+```
+
+XML and JSONL sources preserve nested objects as Arrow `StructType` columns. To flatten for SQL
+or CSV, apply a `--sql` step:
+
+```bash
+dtpipe -i data.xml --path "//User" --alias u \
+  --from u \
+  --sql "SELECT u.id, u.profile.email AS email FROM u" \
+  -o flat_users.csv
+```
+
+### Production YAML automation
 
 For repeated tasks, define your pipeline in a YAML job file.
 
-### 1. Generate a Job File
-
 ```bash
-dtpipe -i "ora:..." -q "SELECT..." --fake "..." --export-job nightly_export.yaml
+# 1. Generate from CLI
+dtpipe -i "pg:..." --query "SELECT * FROM users" \
+  --fake "email:internet.email" -o clean_users.parquet \
+  --export-job nightly.yaml
+
+# 2. Run (with optional runtime overrides)
+dtpipe --job nightly.yaml
+dtpipe --job nightly.yaml --limit 1000 --dry-run
 ```
 
-### 2. Run the Job
-
-```bash
-dtpipe --job nightly_export.yaml
-```
-
-### 3. Override at Runtime
-
-```bash
-dtpipe --job nightly_export.yaml --limit 50
-```
-
-### Example YAML
+#### Multi-branch YAML (DAG)
 
 ```yaml
-input: ora:Data Source=PROD;User Id=...
-query: SELECT * FROM sensitive_table
-output: clean_data.parquet
+# nightly_pipeline.yaml
+users:
+  input: "pg:Host=prod;Database=app;Username=postgres"
+  output: "clean_users.parquet"
+  provider-options:
+    pg:
+      query: "SELECT * FROM users"
+  transformers:
+    - fake:
+        mappings:
+          email: internet.email
+          name: name.fullName
+        options:
+          locale: fr
+          seed-column: id
 
-transformers:
-  - fake:
-      mappings:
-        name: name.fullName
-        email: internet.email
-      options:
-        locale: fr
-        seed-column: id
+orders:
+  input: "pg:Host=prod;Database=app;Username=postgres"
+  output: "orders.parquet"
+  provider-options:
+    pg:
+      query: "SELECT * FROM orders"
 ```
-
-### Provider Configurations (Reader vs Writer)
-
-Use `provider-options` to supply adapter-specific settings. Append `-writer` to target the output stream specifically.
-
-```yaml
-input: input_data.csv
-output: export_data.csv
-
-provider-options:
-  csv:                 # Applied to the reader (global default)
-    separator: ","
-    has-header: true
-  csv-writer:          # Applied to the writer
-    separator: ";"
-    quote: "'"
-```
-
-### File-to-File (No Query)
-
-When transforming from CSV or Parquet, `query` is optional.
-
-```yaml
-input: raw_data.csv
-output: clean_data.parquet
-
-transformers:
-  - script:
-      category: "@scripts/categorize.js"
-```
-
----
-
-## Security & Secrets
-
-### 1. Environment Variables
-Standard approach for CI/CD — the shell expands variables before passing them to DtPipe.
 
 ```bash
-export MY_CONN="ora:Data Source=PROD;User Id=scott;Password=tiger"
-dtpipe -i "$MY_CONN" -q "SELECT * FROM users" -o users.parquet
+dtpipe --job nightly_pipeline.yaml
 ```
 
-### 2. OS Keyring
-For local or secure-server use, store credentials in the system keyring (macOS Keychain, Windows Credential Manager, Linux Secret Service). The password never appears in shell history or `ps` output.
+#### Provider-specific options in YAML
 
-**Store the secret once:**
+```yaml
+main:
+  input: input_data.csv
+  output: export_data.csv
+  provider-options:
+    csv:           # applied to the reader
+      separator: ","
+      has-header: true
+    csv-writer:    # applied to the writer
+      separator: ";"
+      quote: "'"
+```
+
+### Security & secrets
+
 ```bash
+# Store once
 dtpipe secret set oracle-prod "ora:Data Source=PROD;User Id=scott;Password=tiger"
+
+# Use by alias — password never in shell history or ps output
+dtpipe -i keyring://oracle-prod --query "SELECT * FROM users" -o users.parquet
 ```
 
-**Reference it by alias:**
-```bash
-dtpipe -i keyring://oracle-prod -q "SELECT * FROM users" -o users.parquet
-```
-
-### 3. Queries from Files
-Keep complex or sensitive SQL out of the command line.
+### Sampling for testing or CI
 
 ```bash
-dtpipe -i keyring://prod-db -q "@queries/extract_users.sql" -o users.parquet
-```
+# 10% random sample
+dtpipe -i "pg:..." --query "SELECT * FROM large_table" \
+       --sampling-rate 0.1 -o sample.parquet
 
-DtPipe loads the file automatically when `-q` starts with `@` or points to an existing path.
+# Reproducible sample (same subset every run)
+dtpipe -i "pg:..." --query "SELECT * FROM large_table" \
+       --sampling-rate 0.1 --sampling-seed 12345 -o sample.parquet
+```

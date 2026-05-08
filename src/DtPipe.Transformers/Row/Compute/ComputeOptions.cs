@@ -11,7 +11,7 @@ public record ComputeOptions : ITransformerOptions
 	[ComponentOption(Description = "Column:script mapping (e.g. TITLE:row.TITLE.substring(0,5))")]
 	public IReadOnlyList<string> Compute { get; init; } = [];
 
-	[ComponentOption(Description = "Skip script execution when input value is null")]
+	[ComponentOption("--skip-null", Description = "Skip script execution when input value is null")]
 	public bool SkipNull { get; init; } = false;
 
 	[ComponentOption("--compute-types", Description = "Explicit output type for computed columns (e.g. Col:int32). Repeatable.")]

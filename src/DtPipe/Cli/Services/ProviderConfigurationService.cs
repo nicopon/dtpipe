@@ -29,7 +29,7 @@ public class ProviderConfigurationService
         _registry = registry;
     }
 
-    public void BindOptions(JobDefinition job, GlobalOptions? globals = null)
+    public void BindOptions(JobDefinition job, Pipeline.CliJobContext? context = null, GlobalOptions? globals = null)
     {
         foreach (var contributor in _contributors)
         {
@@ -39,7 +39,7 @@ public class ProviderConfigurationService
                 var instance = _registry.Get(optionsType);
                 bool isWriter = factory is IDataWriterFactory;
 
-                // 1. Bind from ProviderOptions (YAML/Globals)
+                // 1. Bind from ProviderOptions (YAML path)
                 if (job.ProviderOptions != null)
                 {
                     if (job.ProviderOptions.TryGetValue(factory.ComponentName, out var opts))
@@ -51,12 +51,8 @@ public class ProviderConfigurationService
                 }
 
                 // 2. Bind from stage-scoped args (CLI path).
-                // Reader uses ReaderArgs (flags before first transformer trigger or -o).
-                // Writer uses WriterArgs (flags after -o).
-                // Falls back to trimmed Arguments for legacy/YAML jobs that don't have stage args.
-                var stageArgs = isWriter
-                    ? (job.WriterArguments ?? FallbackTrimWriterArgs(job.Arguments))
-                    : (job.ReaderArguments ?? FallbackTrimReaderArgs(job.Arguments));
+                // Reader uses ReaderArgs; writer uses WriterArgs. Null for YAML jobs.
+                var stageArgs = isWriter ? context?.WriterArguments : context?.ReaderArguments;
 
                 if (stageArgs != null && stageArgs.Length > 0)
                 {
@@ -96,17 +92,5 @@ public class ProviderConfigurationService
         }
     }
 
-    // Fallbacks for legacy/YAML jobs that don't have stage-scoped args.
-    // Replicates the old -o trimming behaviour.
-    private static string[]? FallbackTrimReaderArgs(string[]? args)
-    {
-        if (args == null || args.Length == 0) return args;
-        int outIdx = Array.FindIndex(args, a =>
-            string.Equals(a, "-o", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(a, "--output", StringComparison.OrdinalIgnoreCase));
-        return outIdx > 0 ? args[..outIdx] : args;
-    }
-
-    private static string[]? FallbackTrimWriterArgs(string[]? args) => args;
 }
 

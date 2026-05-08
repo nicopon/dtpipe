@@ -54,6 +54,9 @@ public class FakeDataTransformerFactory : IDataTransformerFactory
 		return new FakeDataTransformer(options);
 	}
 
+	public IDataTransformer? CreateFromOptions(object options) =>
+		options is FakeOptions o ? CreateFromOptions(o) : null;
+
 	public IDataTransformer CreateFromOptions(DtPipe.Transformers.Arrow.Fake.FakeOptions options)
 	{
 		return new FakeDataTransformer(options);

@@ -10,9 +10,9 @@ public class JobFileParserTests
 	public void Parse_ShouldSucceed_WhenQueryIsMissing()
 	{
 		// Arrange
-		var yaml = @"
-input: dummy.csv
-output: dummy.parquet
+		var yaml = @"main:
+  input: dummy.csv
+  output: dummy.parquet
 ";
 		var tempFile = Path.GetTempFileName();
 		File.WriteAllText(tempFile, yaml);
@@ -36,8 +36,8 @@ output: dummy.parquet
 	public void Parse_ShouldSucceed_EvenWhenInputIsMissing()
 	{
 		// Arrange: Partial job (template)
-		var yaml = @"
-output: dummy.parquet
+		var yaml = @"main:
+  output: dummy.parquet
 ";
 		var tempFile = Path.GetTempFileName();
 		File.WriteAllText(tempFile, yaml);

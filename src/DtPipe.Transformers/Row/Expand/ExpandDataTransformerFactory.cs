@@ -22,6 +22,21 @@ public class ExpandDataTransformerFactory : IDataTransformerFactory
 
 	public bool CanHandle(string connectionString) => false;
 
+	public IDataTransformer? CreateFromOptions(object options) =>
+		options is ExpandOptions o ? CreateFromOptions(o) : null;
+
+	public IDataTransformer CreateFromOptions(DtPipe.Transformers.Row.Expand.ExpandOptions options)
+	{
+		// Resolve @file references in Expand entries
+		var resolved = options.Expand?.Select(e =>
+		{
+			if (!e.StartsWith("@")) return e;
+			var path = e[1..];
+			return File.Exists(path) ? File.ReadAllText(path) : e;
+		}).ToArray();
+		return new ExpandDataTransformer(new ExpandOptions { Expand = resolved }, _jsEngineProvider);
+	}
+
 	public IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration)
 	{
 		var expands = new List<string>();
@@ -59,9 +74,9 @@ public class ExpandDataTransformerFactory : IDataTransformerFactory
 	{
 		var expands = new List<string>();
 
-		if (config.Expand != null)
+		if (config.Mappings != null)
 		{
-			foreach (var kvp in config.Expand)
+			foreach (var kvp in config.Mappings)
 			{
 				// BuildTransformerConfigsFromCli splits the expression on the first ':' into a key:value mapping.
 				// Reconstruct the original expression by joining with ':' (same pattern as FilterDataTransformerFactory).

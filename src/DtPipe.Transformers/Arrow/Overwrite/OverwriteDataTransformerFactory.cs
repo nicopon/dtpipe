@@ -21,6 +21,14 @@ public class OverwriteDataTransformerFactory : IDataTransformerFactory
 	public Type OptionsType => typeof(DtPipe.Transformers.Arrow.Overwrite.OverwriteOptions);
 
 
+	public IDataTransformer? CreateFromOptions(object options) =>
+		options is OverwriteOptions o ? CreateFromOptions(o) : null;
+
+	public IDataTransformer CreateFromOptions(DtPipe.Transformers.Arrow.Overwrite.OverwriteOptions options)
+	{
+		return new OverwriteDataTransformer(options);
+	}
+
 	public IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration)
 	{
 		// Get config options (like SkipNull) from registry-bound options

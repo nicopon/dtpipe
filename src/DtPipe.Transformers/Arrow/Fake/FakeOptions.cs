@@ -24,6 +24,6 @@ public record FakeOptions : ITransformerOptions
 	[Description("Row-index based deterministic mode (row N always gets same values)")]
 	public bool Deterministic { get; init; } = false;
 
-	[Description("Skip fake generation when source value is null")]
+	[ComponentOption("--skip-null", Description = "Skip fake generation when source value is null")]
 	public bool SkipNull { get; init; } = false;
 }

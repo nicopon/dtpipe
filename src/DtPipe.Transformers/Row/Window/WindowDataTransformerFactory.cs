@@ -19,6 +19,9 @@ public class WindowDataTransformerFactory : IDataTransformerFactory
 	public string ComponentName => "window";
 	public Type OptionsType => typeof(DtPipe.Transformers.Row.Window.WindowOptions);
 
+	public IDataTransformer? CreateFromOptions(object options) =>
+		options is WindowOptions o ? CreateFromOptions(o) : null;
+
 	public IDataTransformer CreateFromOptions(DtPipe.Transformers.Row.Window.WindowOptions options)
 	{
 		return new WindowDataTransformer(options, _jsEngineProvider);
@@ -62,16 +65,16 @@ public class WindowDataTransformerFactory : IDataTransformerFactory
 			options.Key = keyVal;
 		}
 
-		// YAML Script might be the main property?
-		// Or specific 'script' option.
-		if (config.Compute != null)
-		{
-			// Join lines? Or take first? Window script should be single string.
-			options.Script = string.Join("\n", config.Compute);
-		}
-		else if (config.Options != null && config.Options.TryGetValue("script", out var scriptVal))
+		if (config.Options != null && config.Options.TryGetValue("script", out var scriptVal))
 		{
 			options.Script = scriptVal;
+		}
+		else if (config.Mappings != null && config.Mappings.Any())
+		{
+			// If provided in mappings, we treat values as script lines.
+			// Reconstruct the script by joining values (ignoring keys which are irrelevant for window).
+			options.Script = string.Join("\n", config.Mappings.Select(kvp => 
+				string.IsNullOrEmpty(kvp.Value) ? kvp.Key : kvp.Value));
 		}
 
 		return new WindowDataTransformer(options, _jsEngineProvider);

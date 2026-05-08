@@ -63,25 +63,4 @@ public static class CliOptionBuilder
 		return Nullable.GetUnderlyingType(type) ?? type;
 	}
 
-	public static string ToKebabCase(this string value)
-	{
-		if (string.IsNullOrEmpty(value))
-			return value;
-
-		var result = new System.Text.StringBuilder();
-		for (var i = 0; i < value.Length; i++)
-		{
-			var c = value[i];
-			if (char.IsUpper(c))
-			{
-				if (i > 0) result.Append('-');
-				result.Append(char.ToLowerInvariant(c));
-			}
-			else
-			{
-				result.Append(c);
-			}
-		}
-		return result.ToString();
-	}
 }

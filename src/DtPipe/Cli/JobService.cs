@@ -58,7 +58,7 @@ public class JobService
 		return rootCommand;
 	}
 
-	public async Task<int> ExecutePipelineAsync(Dictionary<string, JobDefinition> jobs, JobDagDefinition dag, Pipeline.GlobalOptions globals, CancellationToken ct)
+	public async Task<int> ExecutePipelineAsync(Dictionary<string, JobDefinition> jobs, JobDagDefinition dag, Dictionary<string, Pipeline.CliJobContext> contexts, Pipeline.GlobalOptions globals, CancellationToken ct)
 	{
 		var resultsCollector = new System.Collections.Concurrent.ConcurrentQueue<DtPipe.Feedback.BranchSummary>();
 		
@@ -97,7 +97,8 @@ public class JobService
 			Func<BranchDefinition, BranchChannelContext, CancellationToken, Task<int>> branchExecutor = async (branch, ctx, token) =>
 			{
 				var job = jobs[branch.Alias];
-				return await RunSingleJobAsync(job, branch.Arguments, branch.Alias, true, ctx, resultsCollector, token, globals);
+				contexts.TryGetValue(branch.Alias, out var branchCtx);
+				return await RunSingleJobAsync(job, branchCtx, branch.Alias, true, ctx, resultsCollector, token, globals);
 			};
 
 			var exitCode = await orchestrator.ExecuteAsync(dag, branchExecutor, ct);
@@ -113,13 +114,14 @@ public class JobService
 			_console.Write(DagRenderer.BuildLinearTopologyPanel(mainJob, readerFactories));
 			_console.WriteLine();
 
-			return await RunSingleJobAsync(mainJob, Array.Empty<string>(), null, false, null, resultsCollector, ct, globals);
+			var mainContext = contexts.Values.FirstOrDefault();
+			return await RunSingleJobAsync(mainJob, mainContext, null, false, null, resultsCollector, ct, globals);
 		}
 	}
 
 	private async Task<int> RunSingleJobAsync(
 		JobDefinition job,
-		string[] args,
+		Pipeline.CliJobContext? context,
 		string? alias,
 		bool isDag,
 		BranchChannelContext? ctx,
@@ -132,10 +134,10 @@ public class JobService
 
 		// Bind options from JobDefinition to the registry (for providers/transformers)
 		var providerConfigService = new DtPipe.Cli.Services.ProviderConfigurationService(_contributors, registry);
-		providerConfigService.BindOptions(job, globals);
+		providerConfigService.BindOptions(job, context, globals);
 
 		var channelRegistry = _serviceProvider.GetRequiredService<IMemoryChannelRegistry>();
 		var linearPipelineService = new DtPipe.Cli.Services.LinearPipelineService(_contributors, _serviceProvider, channelRegistry, registry, _console);
-		return await linearPipelineService.ExecuteAsync(job, args, ct, resultsCollector, isDag, alias, ctx, showStatusMessages: false);
+		return await linearPipelineService.ExecuteAsync(job, context, ct, resultsCollector, isDag, alias, ctx, showStatusMessages: false);
 	}
 }

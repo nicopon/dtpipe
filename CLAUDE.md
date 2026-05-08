@@ -67,6 +67,7 @@ The golden DAG fixtures in `GoldenDagDefinitions.cs` are the canonical reference
 | `src/DtPipe.Adapters` | Readers and writers for all data sources/targets |
 | `src/DtPipe.Transformers` | Row and columnar data transformers |
 | `src/DtPipe.Processors` | C# side of SQL stream processors (DuckDB, factories) |
+| `src/DtPipe.Sample` | Minimal sample project demonstrating programmatic use |
 | `src/Apache.Arrow.Ado` | Standalone ADO.NET → Arrow library; zero DtPipe deps (depends on `Apache.Arrow.Serialization` only) |
 | `src/Apache.Arrow.Serialization` | Standalone CLR↔Arrow type map + POCO serializer; zero DtPipe deps, no external deps beyond `Apache.Arrow` |
 | `tests/DtPipe.Tests` | xunit.v3 unit and integration tests |
@@ -75,15 +76,15 @@ The golden DAG fixtures in `GoldenDagDefinitions.cs` are the canonical reference
 
 - `DtPipe.Core` contains **only** abstractions, models, and the generic DAG/pipeline engine — no concrete implementations.
 - Each concrete transformer in `DtPipe.Transformers` lives in its own subdirectory (`Row/Expand/`, `Arrow/Filter/`…) with a matching sub-namespace (`DtPipe.Transformers.Row`, `DtPipe.Transformers.Arrow`…).
-- Each concrete stream processor in `DtPipe.Processors` follows the same pattern: one subdirectory per processor (`DuckDB/`, `Merge/`…) with a matching sub-namespace (`DtPipe.Processors.DuckDB`, `DtPipe.Processors.Merge`…).
+- Each concrete stream processor in `DtPipe.Processors` follows the same pattern: one subdirectory per processor (`DuckDB/`, `Merge/`, `Sql/`…) with a matching sub-namespace (`DtPipe.Processors.DuckDB`, `DtPipe.Processors.Merge`, `DtPipe.Processors.Sql`…).
 - Readers and writers in `DtPipe.Adapters` are grouped by technology under `Adapters/<Name>/`.
 
 ### Core Data Flow
 
 The fundamental pipeline: `IStreamReader` → `IDataTransformer[]` → `IDataWriter`.
 
-1. `JobService.Build()` constructs the `System.CommandLine` root command and wires all providers as CLI contributors.
-2. On execution, `CliDagParser.Parse()` inspects raw args to detect multi-branch DAG syntax (multiple `--input` / `--from` flags).
+1. `JobService.BuildSubcommands()` registers named subcommands (`inspect`, `providers`, `completion`, `secret`) into the `System.CommandLine` root command. Named subcommands are dispatched before pipeline parsing.
+2. On pipeline execution, `FlagRegistryFactory.Build(serviceProvider)` assembles a `FlagRegistry` from all registered providers (via `[ComponentOption]` attributes) and stream processor trigger flags. `PipelineLexer.Parse(args)` then splits raw args into a `ParsedPipeline` (a list of `BranchSpec` records). `PipelineToJobConverter.Convert(parsed, streamTransformerFactories)` maps that to a `(Dictionary<string, JobDefinition>, JobDagDefinition)` pair.
 3. For linear pipelines, `LinearPipelineService` drives execution through `ExportService.RunExportAsync()`.
 4. For DAG pipelines, `DagOrchestrator` spawns concurrent `Task`s per branch, wiring them via in-memory `Channel<T>` for zero-copy data flow.
 
@@ -91,15 +92,16 @@ The fundamental pipeline: `IStreamReader` → `IDataTransformer[]` → `IDataWri
 
 ### Provider Pattern
 
-Every adapter implements `IProviderDescriptor<TService>` and is registered in `Program.cs` via `RegisterReader<T>()` / `RegisterWriter<T>()` / `RegisterStreamTransformer<T>()`. The `CliProviderFactory<T>` wraps descriptors into CLI contributors that auto-generate `System.CommandLine` options from the descriptor's `OptionsType` (a class decorated with `[ComponentOption]` attributes). Provider-specific options are stored in `OptionsRegistry` (keyed by type) and scoped per DI scope.
+Every adapter implements `IProviderDescriptor<TService>` and is registered in `Program.cs` via `RegisterReader<T>()` / `RegisterWriter<T>()` / `RegisterStreamTransformer<T>()`. The `CliProviderFactory<T>` wraps descriptors into CLI contributors: `CliOptionBuilder.GenerateFlagDefsForType(OptionsType)` reflects on `[ComponentOption]` attributes and produces `FlagDef` entries for the `FlagRegistry`. At execution time, `FlagBinder.Bind(optionsInstance, args, registry)` maps the raw CLI args to the options object. Provider-specific options are stored in `OptionsRegistry` (keyed by type) and scoped per DI scope.
 
 ### DAG Pipeline
 
-`CliDagParser` splits args into `BranchDefinition` records. Only two tokens trigger a split:
-- `-i` / `--input` — when an input was already seen in the current branch (new data source)
-- `--from <alias[,alias...]>` — always (fan-out consumer **or** processor main source)
+`PipelineLexer` (`DtPipe.Cli.Pipeline`) tokenises raw args into a `ParsedPipeline` whose `Branches` list contains `BranchSpec` records (each carrying stage-scoped arg slices: `ReaderArgs`, `PipelineArgs`, `WriterArgs`). `PipelineToJobConverter` then maps each `BranchSpec` to a `BranchDefinition` (the core DAG model). Three tokens trigger an implicit branch split:
+- `-i` / `--input` — when an input or a job file was already seen in the current branch (new data source)
+- `--from <alias[,alias...]>` — when a `--from`, `--input`, or `--job` was already seen in the current branch. The first `--from` in a completely fresh branch (no prior input) stays in the current branch.
+- `--job` / `-j <file>` — when a job file or an input was already seen in the current branch (new YAML job)
 
-Neither `--sql` nor boolean processor flags (e.g. `--merge`) trigger a split. The canonical processor syntax is:
+Neither `--sql` nor boolean processor flags (e.g. `--merge`) trigger a split. Each stream processor registers its trigger flags via `IStreamTransformerFactory.CliTriggerFlags`, which `FlagRegistryFactory` uses to populate the `FlagRegistry`. The canonical processor syntax is:
 
 ```
 --from <alias[,alias...]> [--ref <alias[,alias...]>] (--sql "<query>" | --<processor>) [--alias <name>] [-o <dest>]
@@ -108,7 +110,9 @@ Neither `--sql` nor boolean processor flags (e.g. `--merge`) trigger a split. Th
 - `--from a,b,c` declares one or more streaming main sources (comma-separated). Fan-out consumers use a single alias; multi-stream processors (e.g. merge) use multiple aliases.
 - `--ref a,b` declares materialized reference sources (preloaded before query execution, comma-separated). Used by SQL JOIN branches.
 - `--sql "<query>"` runs an inline SQL query. Default engine: DuckDB (standard SQL, no build step).
-- `--merge` (and future boolean flags) declares the processor explicitly by name. Each processor is registered as a `BooleanProcessorFlag` in `CliPipelineRules`.
+- `--merge` (and future boolean flags) declares the processor explicitly by name.
+- `--job <file>` / `-j <file>` loads a YAML pipeline job file; `PipelineToJobConverter` reads it and applies any additional CLI flags as overrides.
+- `--export-job <file>` serialises the current CLI pipeline to a YAML job file via `JobFileWriter` and exits without running the pipeline.
 
 Branches communicate via `IMemoryChannelRegistry` (either native `Channel<IReadOnlyList<object?[]>>` or Arrow `Channel<RecordBatch>`). The `MappedMemoryChannelRegistry` handles logical-to-physical alias resolution for fan-out (broadcast/tee) scenarios. A `BranchChannelContext` injected per branch carries an `AliasMap` that translates logical aliases (as written in CLI args) to physical channel names (including fan-out sub-channels like `s__fan_0`). This mapping is populated by `DagOrchestrator` and is transparent to all downstream components including processors.
 
@@ -153,7 +157,7 @@ Transformers implement `IDataTransformer` with three methods: `InitializeAsync` 
 - `IDataWriter` — initialize schema + complete (base contract for all writers)
 - `IRowDataWriter` — extends `IDataWriter`; adds `WriteBatchAsync` for row-based output
 - `IDataTransformer` / `IDataTransformerFactory` — transform rows; factory creates from CLI config or YAML
-- `IStreamTransformerFactory` — factory for multi-input stream processors (SQL joins, merges); `Create(branchArgs, ctx, serviceProvider)` receives `BranchChannelContext` for alias resolution
+- `IStreamTransformerFactory` — factory for multi-input stream processors (SQL joins, merges); `Create(branchArgs, ctx, serviceProvider)` receives `BranchChannelContext` for alias resolution; declares `MinStreams`/`MaxStreams` (streaming source bounds), `MinLookups`/`MaxLookups` (ref source bounds), and `CliTriggerFlags` (`IReadOnlyList<(string Flag, bool IsBoolean)>`) used by `FlagRegistryFactory` to register processor trigger flags
 - `ICliContributor` — contributes CLI options and can intercept command handling
 - `OptionsRegistry` — scoped key-value store for provider-specific parsed options
 

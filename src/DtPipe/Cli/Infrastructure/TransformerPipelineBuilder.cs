@@ -74,8 +74,7 @@ public class TransformerPipelineBuilder
                 if (isTrigger && currentOptions.Any(o => string.Equals(o.Key, arg, StringComparison.OrdinalIgnoreCase)))
                 {
                     // Force flush to start new instance of the same factory
-                    var transformer = currentFactory.CreateFromConfiguration(currentOptions);
-                    if (transformer != null) pipeline.Add(transformer);
+                    Flush(currentFactory, currentOptions, pipeline);
                     currentOptions.Clear();
                 }
                 
@@ -94,8 +93,7 @@ public class TransformerPipelineBuilder
 
                 if (factory != currentFactory && currentFactory != null && currentOptions.Count > 0)
                 {
-                    var transformer = currentFactory.CreateFromConfiguration(currentOptions);
-                    if (transformer != null) pipeline.Add(transformer);
+                    Flush(currentFactory, currentOptions, pipeline);
                     currentOptions.Clear();
                 }
 
@@ -130,11 +128,19 @@ public class TransformerPipelineBuilder
 
         // Flush last
         if (currentFactory != null && currentOptions.Count > 0)
-        {
-            var transformer = currentFactory.CreateFromConfiguration(currentOptions);
-            if (transformer != null) pipeline.Add(transformer);
-        }
+            Flush(currentFactory, currentOptions, pipeline);
 
         return pipeline;
+    }
+
+    private static void Flush(
+        IDataTransformerFactory factory,
+        List<(string Key, string Value)> options,
+        List<IDataTransformer> pipeline)
+    {
+        var instance = Activator.CreateInstance(factory.OptionsType)!;
+        TransformerArgsBinder.Bind(instance, options);
+        var transformer = factory.CreateFromOptions(instance);
+        if (transformer != null) pipeline.Add(transformer);
     }
 }

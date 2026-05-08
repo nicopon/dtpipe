@@ -16,6 +16,9 @@ public class MaskDataTransformerFactory(OptionsRegistry registry) : IDataTransfo
 	public string Category => "Transformers";
 	public Type OptionsType => typeof(DtPipe.Transformers.Arrow.Mask.MaskOptions);
 
+	public IDataTransformer? CreateFromOptions(object options) =>
+		options is MaskOptions o ? CreateFromOptions(o) : null;
+
 	public IDataTransformer CreateFromOptions(DtPipe.Transformers.Arrow.Mask.MaskOptions options)
 	{
 		return new MaskDataTransformer(options);

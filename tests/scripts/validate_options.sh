@@ -80,11 +80,12 @@ grep -q "100" "$ARTIFACTS_DIR/out_scoped.csv" \
 # ----------------------------------------
 echo "--- [3] YAML provider-options scoping ---"
 cat > "$ARTIFACTS_DIR/job_config.yaml" <<EOF
-input: "$ARTIFACTS_DIR/in_comma.csv"
-output: "csv:$ARTIFACTS_DIR/out_yaml.csv"
-provider-options:
-  csv-writer:
-    separator: ";"
+main:
+  input: "$ARTIFACTS_DIR/in_comma.csv"
+  output: "csv:$ARTIFACTS_DIR/out_yaml.csv"
+  provider-options:
+    csv-writer:
+      separator: ";"
 EOF
 
 "$DTPIPE" --job "$ARTIFACTS_DIR/job_config.yaml" --no-stats
@@ -137,14 +138,15 @@ COUNT_B=$(wc -l < "$ARTIFACTS_DIR/sampling_b.csv" | tr -d ' ')
 # ----------------------------------------
 echo "--- [6] YAML provider-options (sqlite writer) ---"
 cat > "$ARTIFACTS_DIR/job_provider.yaml" <<EOF
-input: "duck::memory:"
-output: "sqlite:$ARTIFACTS_DIR/provider_opts.db"
-provider-options:
-  duck:
-    query: "SELECT 1 as id, 'Test' as name"
-  sqlite:
-    table: "CustomTable"
-    strategy: "Recreate"
+main:
+  input: "duck::memory:"
+  output: "sqlite:$ARTIFACTS_DIR/provider_opts.db"
+  provider-options:
+    duck:
+      query: "SELECT 1 as id, 'Test' as name"
+    sqlite:
+      table: "CustomTable"
+      strategy: "Recreate"
 EOF
 
 "$DTPIPE" --job "$ARTIFACTS_DIR/job_provider.yaml" --no-stats

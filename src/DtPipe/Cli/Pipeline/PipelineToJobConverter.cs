@@ -11,15 +11,16 @@ namespace DtPipe.Cli.Pipeline;
 
 public static class PipelineToJobConverter
 {
-    public static (Dictionary<string, JobDefinition> Jobs, JobDagDefinition Dag) Convert(
+    public static (Dictionary<string, JobDefinition> Jobs, JobDagDefinition Dag, Dictionary<string, CliJobContext> Contexts) Convert(
         ParsedPipeline parsed,
         IEnumerable<IStreamTransformerFactory>? streamTransformerFactories = null)
     {
         // --job mode: load from YAML file and apply CLI overrides
         if (!string.IsNullOrEmpty(parsed.Globals.JobFile))
-            return ConvertFromJobFile(parsed);
+            return ConvertFromJobFile(parsed, streamTransformerFactories);
 
         var jobs = new Dictionary<string, JobDefinition>(StringComparer.OrdinalIgnoreCase);
+        var contexts = new Dictionary<string, CliJobContext>(StringComparer.OrdinalIgnoreCase);
         var branches = new List<BranchDefinition>();
 
         // Pass 1: Collect explicit aliases to avoid collisions
@@ -38,10 +39,17 @@ public static class PipelineToJobConverter
             var alias = branchSpec.Alias;
             if (string.IsNullOrEmpty(alias))
             {
-                while (explicitAliases.Contains($"stream{branchCounter}"))
+                if (parsed.Branches.Count == 1)
+                {
+                    alias = "main";
+                }
+                else
+                {
+                    while (explicitAliases.Contains($"stream{branchCounter}"))
+                        branchCounter++;
+                    alias = $"stream{branchCounter}";
                     branchCounter++;
-                alias = $"stream{branchCounter}";
-                branchCounter++;
+                }
             }
 
             var job = MapToJobDefinition(parsed.Globals, branchSpec);
@@ -51,6 +59,7 @@ public static class PipelineToJobConverter
                 ?.ComponentName;
 
             jobs[alias] = job;
+            contexts[alias] = new CliJobContext(branchSpec.ReaderArgs, branchSpec.PipelineArgs, branchSpec.WriterArgs, branchSpec.RawArgs);
             branches.Add(new BranchDefinition
             {
                 Alias = alias,
@@ -64,10 +73,12 @@ public static class PipelineToJobConverter
         }
 
         var dag = new JobDagDefinition { Branches = branches };
-        return (jobs, dag);
+        return (jobs, dag, contexts);
     }
 
-    private static (Dictionary<string, JobDefinition> Jobs, JobDagDefinition Dag) ConvertFromJobFile(ParsedPipeline parsed)
+    private static (Dictionary<string, JobDefinition> Jobs, JobDagDefinition Dag, Dictionary<string, CliJobContext> Contexts) ConvertFromJobFile(
+        ParsedPipeline parsed,
+        IEnumerable<IStreamTransformerFactory>? streamTransformerFactories)
     {
         var jobs = JobFileParser.Parse(parsed.Globals.JobFile!);
         var flags = parsed.Globals.AllFlags;
@@ -86,7 +97,6 @@ public static class PipelineToJobConverter
             if (batchOverride is > 0)           job = job with { BatchSize = batchOverride.Value };
             if (!string.IsNullOrEmpty(logOverride))     job = job with { LogPath = logOverride };
             if (!string.IsNullOrEmpty(metricsOverride)) job = job with { MetricsPath = metricsOverride };
-            if (!string.IsNullOrEmpty(parsed.Globals.ExportJobFile)) job = job with { Arguments = Array.Empty<string>() };
             jobs[alias] = job;
         }
 
@@ -98,11 +108,12 @@ public static class PipelineToJobConverter
             StreamingAliases = kv.Value.From != null ? new[] { kv.Value.From } : Array.Empty<string>(),
             RefAliases = kv.Value.Ref ?? Array.Empty<string>(),
             Arguments = Array.Empty<string>(),
-            // ProcessorName detection: check ProviderOptions for sql-related keys
-            ProcessorName = kv.Value.ProviderOptions?.ContainsKey("sql") == true ? "sql" : null
+            ProcessorName = streamTransformerFactories?
+                .FirstOrDefault(f => kv.Value.ProviderOptions?.ContainsKey(f.ComponentName) == true)
+                ?.ComponentName
         }).ToList();
 
-        return (jobs, new JobDagDefinition { Branches = branches });
+        return (jobs, new JobDagDefinition { Branches = branches }, new Dictionary<string, CliJobContext>(StringComparer.OrdinalIgnoreCase));
     }
 
     private static JobDefinition MapToJobDefinition(GlobalOptions globals, BranchSpec branch)
@@ -142,10 +153,6 @@ public static class PipelineToJobConverter
 
             From     = branch.From.FirstOrDefault(),
             Ref      = branch.Ref.ToArray(),
-            Arguments         = branch.RawArgs,
-            ReaderArguments   = branch.ReaderArgs,
-            PipelineArguments = branch.PipelineArgs,
-            WriterArguments   = branch.WriterArgs,
 
             Transformers    = new List<TransformerConfig>(),
             ProviderOptions = new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase)

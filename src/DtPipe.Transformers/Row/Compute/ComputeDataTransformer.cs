@@ -12,6 +12,7 @@ namespace DtPipe.Transformers.Row.Compute;
 /// </summary>
 public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<DtPipe.Transformers.Row.Compute.ComputeOptions>
 {
+	private readonly ComputeOptions _options;
 	private readonly IJsEngineProvider _jsEngineProvider;
 	private readonly List<string> _initializationScripts = new();
 	private readonly Dictionary<string, string> _mappings;
@@ -27,6 +28,7 @@ public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<
 
 	public ComputeDataTransformer(ComputeOptions options, IJsEngineProvider jsEngineProvider)
 	{
+		_options = options;
 		_jsEngineProvider = jsEngineProvider;
 		_mappings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 		_typeHints = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);

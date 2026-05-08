@@ -40,6 +40,12 @@ public class OrderedPipelineTests
 			_formatFactory.Object,
 			_staticFactory.Object
 		};
+
+		// Setup OptionsType for each factory to prevent Activator.CreateInstance failure
+		_fakeFactory.Setup(f => f.OptionsType).Returns(typeof(DtPipe.Transformers.Arrow.Fake.FakeOptions));
+		_nullFactory.Setup(f => f.OptionsType).Returns(typeof(DtPipe.Transformers.Arrow.Null.NullOptions));
+		_formatFactory.Setup(f => f.OptionsType).Returns(typeof(DtPipe.Transformers.Arrow.Format.FormatOptions));
+		_staticFactory.Setup(f => f.OptionsType).Returns(typeof(DtPipe.Transformers.Arrow.Overwrite.OverwriteOptions));
 	}
 
 	private void SetupFactory<T>(Mock<T> mock, string mainAlias, FlagArity arity, params string[] aliases) where T : class, IDataTransformerFactory
@@ -68,16 +74,16 @@ public class OrderedPipelineTests
 		var nullT = new Mock<IDataTransformer>();
 		var formatT = new Mock<IDataTransformer>();
 
-		_fakeFactory.Setup(f => f.CreateFromConfiguration(It.Is<IEnumerable<(string, string)>>(v => v.Any(x => x.Item2 == "NAME:name.fullName"))))
+		_fakeFactory.Setup(f => f.CreateFromOptions(It.Is<DtPipe.Transformers.Arrow.Fake.FakeOptions>(o => o.Fake.Contains("NAME:name.fullName"))))
 			.Returns(fakeT1.Object);
 
-		_nullFactory.Setup(f => f.CreateFromConfiguration(It.IsAny<IEnumerable<(string, string)>>()))
+		_nullFactory.Setup(f => f.CreateFromOptions(It.IsAny<DtPipe.Transformers.Arrow.Null.NullOptions>()))
 			.Returns(nullT.Object);
 
-		_fakeFactory.Setup(f => f.CreateFromConfiguration(It.Is<IEnumerable<(string, string)>>(v => v.Any(x => x.Item2 == "EMAIL:internet.email"))))
+		_fakeFactory.Setup(f => f.CreateFromOptions(It.Is<DtPipe.Transformers.Arrow.Fake.FakeOptions>(o => o.Fake.Contains("EMAIL:internet.email"))))
 			.Returns(fakeT2.Object);
 
-		_formatFactory.Setup(f => f.CreateFromConfiguration(It.IsAny<IEnumerable<(string, string)>>()))
+		_formatFactory.Setup(f => f.CreateFromOptions(It.IsAny<DtPipe.Transformers.Arrow.Format.FormatOptions>()))
 			.Returns(formatT.Object);
 
 		// Act
@@ -105,26 +111,32 @@ public class OrderedPipelineTests
         };
 
 		var fakeGroup1 = new Mock<IDataTransformer>();
+		var fakeGroup1bis = new Mock<IDataTransformer>();
 		var fakeGroup2 = new Mock<IDataTransformer>();
 		var nullGroup = new Mock<IDataTransformer>();
 
-		_fakeFactory.Setup(f => f.CreateFromConfiguration(It.Is<IEnumerable<(string, string)>>(v => v.Count() == 2 && v.Any(x => x.Item2 == "A:a") && v.Any(x => x.Item2 == "B:b"))))
+		// Expected behavior: every --fake is a trigger and creates a new instance if --fake was already seen in current group
+		_fakeFactory.Setup(f => f.CreateFromOptions(It.Is<DtPipe.Transformers.Arrow.Fake.FakeOptions>(o => o.Fake.Count == 1 && o.Fake.Contains("A:a"))))
 			.Returns(fakeGroup1.Object);
 
-		_nullFactory.Setup(f => f.CreateFromConfiguration(It.Is<IEnumerable<(string, string)>>(v => v.Any(x => x.Item2 == "C"))))
+		_fakeFactory.Setup(f => f.CreateFromOptions(It.Is<DtPipe.Transformers.Arrow.Fake.FakeOptions>(o => o.Fake.Count == 1 && o.Fake.Contains("B:b"))))
+			.Returns(fakeGroup1bis.Object);
+
+		_nullFactory.Setup(f => f.CreateFromOptions(It.Is<DtPipe.Transformers.Arrow.Null.NullOptions>(o => o.Columns.Contains("C"))))
 			.Returns(nullGroup.Object);
 
-		_fakeFactory.Setup(f => f.CreateFromConfiguration(It.Is<IEnumerable<(string, string)>>(v => v.Count() == 1 && v.Any(x => x.Item2 == "D:d"))))
+		_fakeFactory.Setup(f => f.CreateFromOptions(It.Is<DtPipe.Transformers.Arrow.Fake.FakeOptions>(o => o.Fake.Count == 1 && o.Fake.Contains("D:d"))))
 			.Returns(fakeGroup2.Object);
 
 		// Act
 		var pipeline = builder.Build(args);
 
 		// Assert
-		pipeline.Should().HaveCount(3);
-		pipeline[0].Should().Be(fakeGroup1.Object); // Fake [A, B]
-		pipeline[1].Should().Be(nullGroup.Object);  // Null [C]
-		pipeline[2].Should().Be(fakeGroup2.Object); // Fake [D]
+		pipeline.Should().HaveCount(4);
+		pipeline[0].Should().Be(fakeGroup1.Object);    // Fake [A]
+		pipeline[1].Should().Be(fakeGroup1bis.Object); // Fake [B]
+		pipeline[2].Should().Be(nullGroup.Object);     // Null [C]
+		pipeline[3].Should().Be(fakeGroup2.Object);    // Fake [D]
 	}
 
 	[Fact]
@@ -147,10 +159,10 @@ public class OrderedPipelineTests
 
 		var fakeT = new Mock<IDataTransformer>();
 
-		// Expectation: CreateFromConfiguration called with SkipNull=true and Fake=Value in the same group (same factory)
-		_fakeFactory.Setup(f => f.CreateFromConfiguration(It.Is<IEnumerable<(string, string)>>(v =>
-			v.Any(x => x.Item1 == "--skip-null" && x.Item2 == "true") &&
-			v.Any(x => x.Item1 == "--fake" && x.Item2 == "Value"))))
+		// Expectation: CreateFromOptions called with SkipNull=true and Fake=Value in the same group (same factory)
+		_fakeFactory.Setup(f => f.CreateFromOptions(It.Is<DtPipe.Transformers.Arrow.Fake.FakeOptions>(o =>
+			o.SkipNull == true &&
+			o.Fake.Contains("Value"))))
 			.Returns(fakeT.Object);
 
 		// Act

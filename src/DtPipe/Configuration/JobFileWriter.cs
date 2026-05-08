@@ -16,25 +16,15 @@ public static class JobFileWriter
 		.WithNamingConvention(HyphenatedNamingConvention.Instance)
 		.ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull | DefaultValuesHandling.OmitDefaults)
 		.WithAttributeOverride<JobDefinition>(j => j.NoStats, new YamlIgnoreAttribute())
-		.WithAttributeOverride<TransformerConfig>(t => t.Mask, new YamlIgnoreAttribute())
-		.WithAttributeOverride<TransformerConfig>(t => t.Fake, new YamlIgnoreAttribute())
-		.WithAttributeOverride<TransformerConfig>(t => t.Format, new YamlIgnoreAttribute())
-		.WithAttributeOverride<TransformerConfig>(t => t.Compute, new YamlIgnoreAttribute())
-		.WithAttributeOverride<TransformerConfig>(t => t.Filter, new YamlIgnoreAttribute())
-		.WithAttributeOverride<TransformerConfig>(t => t.Window, new YamlIgnoreAttribute())
-		.WithAttributeOverride<TransformerConfig>(t => t.Expand, new YamlIgnoreAttribute())
-		.WithAttributeOverride<TransformerConfig>(t => t.Overwrite, new YamlIgnoreAttribute())
 		.Build();
 #pragma warning restore CS8603
 
 	/// <summary>
-	/// Writes a JobDefinition to a YAML file.
+	/// Writes a JobDefinition to a YAML file as a DAG with a 'main' branch.
 	/// </summary>
 	public static void Write(string filePath, DtPipe.Core.Models.JobDefinition job)
 	{
-		var yaml = Serializer.Serialize(job);
-		File.WriteAllText(filePath, yaml);
-		Console.Error.WriteLine($"Job configuration exported to: {filePath}");
+		Write(filePath, new Dictionary<string, JobDefinition> { { "main", job } });
 	}
 
 	/// <summary>
