@@ -33,14 +33,6 @@ dtpipe --help
 
 Binary created at: `./dist/release/dtpipe`
 
-### Shell Autocompletion
-
-```bash
-dtpipe completion --install
-```
-
-Restart your terminal (or `source ~/.zshrc`) to activate.
-
 ---
 
 ## Quick Start
@@ -132,6 +124,16 @@ Explicit prefixes are recommended to avoid ambiguity.
 | [REFERENCE.md](./REFERENCE.md) | Full CLI option tables, YAML job schema, DAG topology reference, secret management |
 | [COOKBOOK.md](./COOKBOOK.md) | End-to-end scenarios: anonymization, schema transforms, SQL joins, DAG pipelines, YAML automation |
 | [EXTENDING.md](./EXTENDING.md) | Adding adapters (readers/writers) and transformers |
+
+---
+
+### Shell Autocompletion (experimental)
+
+```bash
+dtpipe completion --install
+```
+
+Restart your terminal (or `source ~/.zshrc`) to activate.
 
 ---
 
