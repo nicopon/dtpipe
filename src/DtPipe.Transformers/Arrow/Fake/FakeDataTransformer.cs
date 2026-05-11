@@ -71,13 +71,14 @@ public sealed partial class FakeDataTransformer : BaseColumnarTransformer, IRequ
 	public bool HasFake => _mappingParser.HasMappings;
 	public DtPipe.Transformers.Arrow.Fake.FakerRegistry Registry => _fakerRegistry;
 
-	public override ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
+	public override async ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
 	{
+		await base.InitializeAsync(columns, ct);
 		if (!HasFake)
 		{
 			_processors = null;
 			_generationOrder = null;
-			return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
+			return columns;
 		}
 
 		// Build column name to index map
@@ -194,7 +195,7 @@ public sealed partial class FakeDataTransformer : BaseColumnarTransformer, IRequ
 		}
 
 		_outputSchema = ArrowSchemaFactory.Create(outputColumns);
-		return new ValueTask<IReadOnlyList<PipeColumnInfo>>(outputColumns);
+		return outputColumns;
 	}
 
 	private Func<Faker, object?> BuildGenerator(string fakerPath, string colName)

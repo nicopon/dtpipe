@@ -33,12 +33,13 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
 	// Cache wrapped scripts for fast re-compilation
 	private readonly List<string> _wrappedScripts = new();
 
-	public override ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> sourceColumns, CancellationToken cancellationToken = default)
+	public override async ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> sourceColumns, CancellationToken cancellationToken = default)
 	{
+		await base.InitializeAsync(sourceColumns, cancellationToken);
 		if (_options.Filters == null || _options.Filters.Length == 0)
 		{
 			CanProcessColumnar = true;
-			return ValueTask.FromResult(sourceColumns);
+			return sourceColumns;
 		}
 
 		_columnNames = sourceColumns.Select(c => c.Name).ToArray();
@@ -98,7 +99,7 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
 			_simpleFilters = simpleFilters;
 		}
 
-		return ValueTask.FromResult(sourceColumns);
+		return sourceColumns;
 	}
 
 	private List<SimpleFilterInfo>? _simpleFilters;

@@ -46,12 +46,13 @@ public class MaskDataTransformer : BaseColumnarTransformer, IRequiresOptions<DtP
 		}
 	}
 
-	public override ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
+	public override async ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
 	{
+		await base.InitializeAsync(columns, ct);
 		if (_columnPatterns.Count == 0)
 		{
 			_indexPatterns = null;
-			return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
+			return columns;
 		}
 
 		_indexPatterns = new Dictionary<int, string>();
@@ -77,10 +78,10 @@ public class MaskDataTransformer : BaseColumnarTransformer, IRequiresOptions<DtP
 		if (!anyMasked)
 		{
 			_indexPatterns = null;
-			return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
+			return columns;
 		}
 
-		return new ValueTask<IReadOnlyList<PipeColumnInfo>>(outputColumns);
+		return outputColumns;
 	}
 
 	protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)

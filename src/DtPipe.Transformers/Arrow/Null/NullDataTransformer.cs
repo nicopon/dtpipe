@@ -22,12 +22,13 @@ public class NullDataTransformer : BaseColumnarTransformer, IRequiresOptions<DtP
 		_nullColumns = new HashSet<string>(options.Columns.Select(c => c.Trim()), StringComparer.OrdinalIgnoreCase);
 	}
 
-	public override ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
+	public override async ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
 	{
+		await base.InitializeAsync(columns, ct);
 		if (_nullColumns.Count == 0)
 		{
 			_targetIndices = null;
-			return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
+			return columns;
 		}
 
 		var indices = new List<int>();
@@ -40,7 +41,7 @@ public class NullDataTransformer : BaseColumnarTransformer, IRequiresOptions<DtP
 		}
 
 		_targetIndices = indices.Count > 0 ? indices.ToArray() : null;
-		return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
+		return columns;
 	}
 
 	protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)

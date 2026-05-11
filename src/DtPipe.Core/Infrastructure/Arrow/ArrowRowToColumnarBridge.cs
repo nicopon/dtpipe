@@ -122,13 +122,8 @@ public sealed class ArrowRowToColumnarBridge : IRowToColumnarBridge
     {
         if (_builders == null || _schema == null || _rowsInBuffer == 0) return;
 
-        var arrays = new List<IArrowArray>();
-        for (int i = 0; i < _builders.Count; i++)
-        {
-            arrays.Add(BuildArray(_builders[i]));
-        }
+        var batch = ArrowRowConverter.BuildBatch(_schema, _builders, _rowsInBuffer);
 
-        var batch = new RecordBatch(_schema, arrays, _rowsInBuffer);
 
         if (_isComplete)
         {

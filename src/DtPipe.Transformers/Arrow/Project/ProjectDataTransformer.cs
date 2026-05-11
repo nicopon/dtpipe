@@ -49,8 +49,9 @@ public class ProjectDataTransformer : BaseColumnarTransformer, IRequiresOptions<
 		}
 	}
 
-	public override ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
+	public override async ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
 	{
+		await base.InitializeAsync(columns, ct);
 		// Build rename map from raw strings (validated here, not in constructor)
 		if (_rawRenames != null)
 		{
@@ -68,7 +69,7 @@ public class ProjectDataTransformer : BaseColumnarTransformer, IRequiresOptions<
 		if (_projectColumns == null && _dropColumns == null && _renameMap == null)
 		{
 			_outputToSourceIndex = null;
-			return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
+			return columns;
 		}
 
 		var sourceIndices = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -156,7 +157,7 @@ public class ProjectDataTransformer : BaseColumnarTransformer, IRequiresOptions<
 
 		_outputToSourceIndex = indexMap.ToArray();
         _outputNames = names.ToArray();
-		return new ValueTask<IReadOnlyList<PipeColumnInfo>>(newColumns);
+		return newColumns;
 	}
 
 	protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)

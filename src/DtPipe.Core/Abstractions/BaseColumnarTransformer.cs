@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Apache.Arrow;
 using DtPipe.Core.Models;
+using DtPipe.Core.Infrastructure.Arrow;
 
 namespace DtPipe.Core.Abstractions;
 
@@ -11,6 +12,7 @@ namespace DtPipe.Core.Abstractions;
 public abstract class BaseColumnarTransformer : IColumnarTransformer
 {
     public virtual bool CanProcessColumnar { get; protected set; }
+    protected Schema? InputSchema { get; private set; }
 
     /// <summary>
     /// Implementation of IColumnarTransformer.TransformBatchAsync that enforces Consume-and-Own semantics.
@@ -49,8 +51,25 @@ public abstract class BaseColumnarTransformer : IColumnarTransformer
     /// (e.g. Filter with complex expressions, Format with cross-column dependencies).
     /// </summary>
     public virtual object?[]? Transform(IReadOnlyList<object?> row)
-        => throw new NotSupportedException(
-               $"{GetType().Name} is columnar-only. Ensure CanProcessColumnar=true or override Transform(row).");
+    {
+        if (!CanProcessColumnar)
+            throw new NotSupportedException($"{GetType().Name} does not support row mode.");
+
+        if (InputSchema == null)
+            throw new InvalidOperationException($"{GetType().Name} must be initialized before calling Transform(row).");
+
+        // Use standard converter to create a 1-row batch
+        using var batch = ArrowRowConverter.ToRecordBatch(InputSchema, new[] { row }, 1);
+        
+        // Execute transformation (synchronous wait is acceptable for row-mode fallback/dry-run)
+        using var resultBatch = TransformBatchAsync(batch).GetAwaiter().GetResult();
+
+        if (resultBatch == null || resultBatch.Length == 0)
+            return null;
+
+        // Use standard converter to extract the row
+        return ArrowRowConverter.ToRow(resultBatch, 0);
+    }
 
     public virtual IEnumerable<object?[]> Flush()
     {
@@ -59,6 +78,7 @@ public abstract class BaseColumnarTransformer : IColumnarTransformer
 
     public virtual ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
     {
+        InputSchema = ArrowSchemaFactory.Create(columns);
         return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
     }
 

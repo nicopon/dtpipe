@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Validation;
@@ -221,6 +220,7 @@ public class DryRunAnalyzer
 		{
 			var transformer = pipeline[i];
 			var schema = traceSchemas[i + 1];
+			
 			currentRow = transformer.Transform(currentRow);
 
 			if (currentRow == null)

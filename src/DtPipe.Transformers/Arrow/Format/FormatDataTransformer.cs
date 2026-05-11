@@ -40,11 +40,12 @@ public sealed partial class FormatDataTransformer : BaseColumnarTransformer, IRe
 
 	public bool HasFormat => _mappings.Count > 0;
 
-	public override ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
+	public override async ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
 	{
+		await base.InitializeAsync(columns, ct);
 		if (!HasFormat)
 		{
-			return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
+			return columns;
 		}
 
 		var inputNames = columns.Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -134,7 +135,7 @@ public sealed partial class FormatDataTransformer : BaseColumnarTransformer, IRe
 		}
 
 		_outputSchema = ArrowSchemaFactory.Create(newColumns);
-		return new ValueTask<IReadOnlyList<PipeColumnInfo>>(newColumns);
+		return newColumns;
 	}
 
 	private Schema? _outputSchema;

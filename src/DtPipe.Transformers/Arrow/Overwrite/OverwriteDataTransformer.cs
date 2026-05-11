@@ -32,12 +32,13 @@ public class OverwriteDataTransformer : BaseColumnarTransformer, IRequiresOption
 		}
 	}
 
-	public override ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
+	public override async ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
 	{
+		await base.InitializeAsync(columns, ct);
 		if (!HasOverwrite)
 		{
 			_columnValues = null;
-			return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
+			return columns;
 		}
 
 		bool hasMappingForColumns = false;
@@ -59,7 +60,7 @@ public class OverwriteDataTransformer : BaseColumnarTransformer, IRequiresOption
 		if (!hasMappingForColumns)
 		{
 			_columnValues = null;
-			return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
+			return columns;
 		}
 
 		_columnValues = values;
@@ -77,7 +78,7 @@ public class OverwriteDataTransformer : BaseColumnarTransformer, IRequiresOption
 			}
 		}
 
-		return new ValueTask<IReadOnlyList<PipeColumnInfo>>(outputColumns);
+		return outputColumns;
 	}
 
 	protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)
