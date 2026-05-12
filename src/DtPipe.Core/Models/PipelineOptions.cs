@@ -33,4 +33,5 @@ public sealed record PipelineOptions : IOptionSet
 	public string? MetricsPath { get; init; }
 	public bool NoStats { get; init; } = false;
 	public int DryRunCount { get; init; } = 0;
+	public string? DryRunInteractiveBranch { get; init; }
 }

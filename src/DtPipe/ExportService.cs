@@ -235,7 +235,8 @@ public class ExportService
 			}
 
 			var executionPlan = BuildExecutionPlan(providerName, reader, writerFactory.ComponentName, writerForInspection, pipeline, segments);
-		await _observer.RunDryRunAsync(reader, pipeline, options.DryRunCount, writerForInspection, transformerSchemas, executionPlan, ct);
+			bool isInteractive = string.IsNullOrEmpty(options.DryRunInteractiveBranch) || string.Equals(alias, options.DryRunInteractiveBranch, StringComparison.OrdinalIgnoreCase);
+			await _observer.RunDryRunAsync(reader, pipeline, options.DryRunCount, writerForInspection, transformerSchemas, executionPlan, isInteractive, ct);
 
 			if (writerForInspection != null)
 			{

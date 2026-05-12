@@ -33,8 +33,17 @@ public class DryRunCliController
 		IDataWriter? writer = null,
 		IReadOnlyDictionary<IDataTransformer, (IReadOnlyList<PipeColumnInfo> In, IReadOnlyList<PipeColumnInfo> Out)>? precomputedSchemas = null,
 		PipelineExecutionPlan? executionPlan = null,
+		bool isInteractive = true,
 		CancellationToken ct = default)
 	{
+		if (!isInteractive)
+		{
+			// Silent execution to feed downstream branches
+			var analyzer = new DryRunAnalyzer();
+			try { await analyzer.AnalyzeAsync(reader, pipeline, sampleCount, writer as ISchemaInspector, precomputedSchemas, ct); } catch { }
+			return;
+		}
+
 		// 1. User Feedback for Analysis
 		if (sampleCount > SoftLimit)
 		{
@@ -45,7 +54,7 @@ public class DryRunCliController
 		_console.MarkupLine($"[grey]Fetching {sampleCount} sample row(s) for trace analysis...[/]");
 
 		// 2. Run Core Analysis
-		var analyzer = new DryRunAnalyzer();
+		var interactiveAnalyzer = new DryRunAnalyzer();
 		ISchemaInspector? inspector = writer as ISchemaInspector;
 
 		// Notify user about inspection
@@ -58,7 +67,7 @@ public class DryRunCliController
 		DryRunResult result;
 		try
 		{
-			result = await analyzer.AnalyzeAsync(reader, pipeline, sampleCount, inspector, precomputedSchemas, ct);
+			result = await interactiveAnalyzer.AnalyzeAsync(reader, pipeline, sampleCount, inspector, precomputedSchemas, ct);
 		}
 		catch (Exception ex)
 		{

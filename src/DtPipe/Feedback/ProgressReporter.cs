@@ -21,6 +21,17 @@ public sealed class ProgressReporter : IExportProgress
 	private double _peakMemoryMb;
 	private readonly DateTime _startTime;
 
+	// Public Accessors for Unified Monitoring
+	public string? BranchName => _branchName;
+	public long ReadCount => Volatile.Read(ref _readCount);
+	public long WriteCount => Volatile.Read(ref _writeCount);
+	public double PeakMemoryMb => _peakMemoryMb;
+	public TimeSpan Elapsed => _stopwatch.Elapsed;
+	public DateTime StartTime => _startTime;
+	public IReadOnlyList<(string Name, bool IsColumnar)> TransformerModes => _transformerModes;
+	public long[] TransformerCountsByIndex => _transformerCountsByIndex;
+	public Dictionary<string, long> TransformerStats => _transformerStats;
+
 	// Transformers stats
 	private readonly Dictionary<string, long> _transformerStats = new();
 	private readonly List<(string Name, bool IsColumnar)> _transformerModes = new();

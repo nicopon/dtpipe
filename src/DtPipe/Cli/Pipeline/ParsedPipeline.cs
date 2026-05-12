@@ -13,6 +13,7 @@ public record GlobalOptions
     public string? JobFile { get; init; }
     public string? ExportJobFile { get; init; }
     public bool IgnoreNulls { get; init; }
+    public string? DryRunInteractiveBranch { get; set; }
 
     /// <summary>All raw flag values (key→value) for passthrough to PipelineToJobConverter.</summary>
     public IReadOnlyDictionary<string, object?> AllFlags { get; init; } = new Dictionary<string, object?>(System.StringComparer.OrdinalIgnoreCase);

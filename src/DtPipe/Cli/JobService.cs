@@ -84,8 +84,23 @@ public class JobService
 
 		if (dag.IsDag)
 		{
-			// Dry-run selection logic if needed (skipped for now as per minimal Strategy D)
-			// But let's implement the core execution
+			// Dry-run selection logic
+			if (globals.DryRunCount > 0 && dag.Branches.Count > 1)
+			{
+				if (_console.Profile.Capabilities.Interactive && !Console.IsOutputRedirected && !Console.IsInputRedirected)
+				{
+					var prompt = new SelectionPrompt<string>()
+						.Title("Select branch to inspect for dry-run:")
+						.AddChoices(dag.Branches.Select(b => b.Alias));
+					globals.DryRunInteractiveBranch = _console.Prompt(prompt);
+				}
+				else
+				{
+					// Fallback to the last branch if not interactive
+					globals.DryRunInteractiveBranch = dag.Branches.Last().Alias;
+				}
+			}
+
 			_console.WriteLine();
 			var readerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>();
 			_console.Write(DagRenderer.BuildTopologyPanel(dag, readerFactories));
@@ -101,7 +116,19 @@ public class JobService
 				return await RunSingleJobAsync(job, branchCtx, branch.Alias, true, ctx, resultsCollector, token, globals);
 			};
 
-			var exitCode = await orchestrator.ExecuteAsync(dag, branchExecutor, ct);
+			int exitCode;
+			bool isInteractiveLive = !globals.NoStats && globals.DryRunCount == 0 && _console.Profile.Capabilities.Interactive && !Console.IsOutputRedirected && !Console.IsInputRedirected;
+			var observer = _serviceProvider.GetRequiredService<IExportObserver>() as DtPipe.Observers.SpectreConsoleObserver;
+			
+			if (isInteractiveLive && observer != null)
+			{
+				exitCode = await observer.StartUnifiedLiveDisplayAsync(dag, () => orchestrator.ExecuteAsync(dag, branchExecutor, ct), ct);
+			}
+			else
+			{
+				exitCode = await orchestrator.ExecuteAsync(dag, branchExecutor, ct);
+			}
+
 			_console.WriteLine();
 			DagRenderer.PrintUnifiedResultsTable(resultsCollector.ToList(), dag, isDag: true, _console);
 			return exitCode;
@@ -115,7 +142,7 @@ public class JobService
 			_console.WriteLine();
 
 			var mainContext = contexts.Values.FirstOrDefault();
-			return await RunSingleJobAsync(mainJob, mainContext, null, false, null, resultsCollector, ct, globals);
+			return await RunSingleJobAsync(mainJob, mainContext, null, false, null, null, ct, globals);
 		}
 	}
 
@@ -138,6 +165,6 @@ public class JobService
 
 		var channelRegistry = _serviceProvider.GetRequiredService<IMemoryChannelRegistry>();
 		var linearPipelineService = new DtPipe.Cli.Services.LinearPipelineService(_contributors, _serviceProvider, channelRegistry, registry, _console);
-		return await linearPipelineService.ExecuteAsync(job, context, ct, resultsCollector, isDag, alias, ctx, showStatusMessages: false);
+		return await linearPipelineService.ExecuteAsync(job, context, ct, resultsCollector, isDag, alias, ctx, showStatusMessages: false, dryRunInteractiveBranch: globals?.DryRunInteractiveBranch);
 	}
 }

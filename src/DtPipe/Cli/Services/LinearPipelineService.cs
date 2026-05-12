@@ -51,7 +51,8 @@ public class LinearPipelineService
         bool isDag = false,
         string? localAlias = null,
         BranchChannelContext? ctx = null,
-        bool showStatusMessages = false)
+        bool showStatusMessages = false,
+        string? dryRunInteractiveBranch = null)
     {
         var exportService = _serviceProvider.GetRequiredService<ExportService>();
         var currentRawArgs = context?.Arguments ?? System.Array.Empty<string>();
@@ -166,6 +167,7 @@ public class LinearPipelineService
             BatchSize    = job.BatchSize,
             DryRunCount  = job.DryRunCount,
             NoStats      = job.NoStats,
+            DryRunInteractiveBranch = dryRunInteractiveBranch
         };
 
         // 5. Build Pipeline (Transformers)
