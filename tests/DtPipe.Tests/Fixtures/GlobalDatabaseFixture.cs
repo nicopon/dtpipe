@@ -15,17 +15,29 @@ public class GlobalDatabaseFixture : IAsyncLifetime
     public string? PostgresConnectionString { get; private set; }
     public string? SqlServerConnectionString { get; private set; }
     public string? OracleConnectionString { get; private set; }
+    // Only set in REUSE_INFRA mode: Testcontainers containers start fresh, no reset needed.
+    public string? OracleAdminConnectionString { get; private set; }
 
     public async ValueTask InitializeAsync()
     {
         if (!DockerHelper.IsAvailable()) return;
+
+        if (DockerHelper.ShouldReuseInfrastructure())
+        {
+            PostgresConnectionString = DockerHelper.LocalPostgreSqlConnectionString;
+            SqlServerConnectionString = DockerHelper.LocalSqlServerConnectionString;
+            OracleConnectionString = DockerHelper.LocalOracleConnectionString;
+            OracleAdminConnectionString = DockerHelper.LocalOracleAdminConnectionString;
+            await OracleSchemaHelper.ResetSchemaAsync(OracleAdminConnectionString);
+            return;
+        }
 
         var tasks = new List<Task>();
 
         // Postgres
         tasks.Add(Task.Run(async () =>
         {
-            _postgres = new PostgreSqlBuilder("postgres:15-alpine")
+            _postgres = new PostgreSqlBuilder("postgres:18-alpine")
                 .Build();
             await _postgres.StartAsync();
             PostgresConnectionString = _postgres.GetConnectionString();

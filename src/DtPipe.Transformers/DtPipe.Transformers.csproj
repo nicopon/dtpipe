@@ -1,12 +1,18 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
+  <PropertyGroup>
+    <PackageId>DtPipe.Transformers</PackageId>
+    <Description>Row and columnar data transformers for DtPipe pipelines (expand, filter, compute, anonymize, fake data generation).</Description>
+    <PackageTags>etl;data;pipeline;transformer;anonymization;faker;javascript</PackageTags>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\DtPipe.Core\DtPipe.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Bogus" Version="35.6.5" />
-    <PackageReference Include="Jint" Version="4.5.0" />
+    <PackageReference Include="Jint" Version="4.9.3" />
   </ItemGroup>
 
   <PropertyGroup>

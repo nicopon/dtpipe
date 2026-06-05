@@ -47,6 +47,7 @@ public static class DockerHelper
 	public const string LocalPostgreSqlConnectionString = "host=localhost;port=5440;database=integration;username=postgres;password=password";
 	public const string LocalSqlServerConnectionString = "Server=localhost,1434;Database=master;User Id=sa;Password=Password123!;Encrypt=False;TrustServerCertificate=True;";
 	public const string LocalOracleConnectionString = "Data Source=localhost:1522/FREEPDB1;User Id=testuser;Password=password";
+	public const string LocalOracleAdminConnectionString = "Data Source=localhost:1522/FREEPDB1;User Id=SYSTEM;Password=password";
 
 	public static async Task<string> GetPostgreSqlConnectionString(Func<Task<string>> containerStartFunc)
 	{

@@ -29,14 +29,13 @@ public class OracleIntegrationTests : IAsyncLifetime
 	{
 		_connectionString = _fixture.OracleConnectionString;
 
-		if (_connectionString == null) return;
+		if (_connectionString is null) return;
 
 		await using var connection = new OracleConnection(_connectionString);
 		await connection.OpenAsync();
 
-		// Use Seeder for DDL and Data
 		await using var cmd = connection.CreateCommand();
-		cmd.CommandText = "BEGIN EXECUTE IMMEDIATE 'DROP TABLE test_data'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
+		cmd.CommandText = "BEGIN EXECUTE IMMEDIATE 'DROP TABLE test_data PURGE'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
 		await cmd.ExecuteNonQueryAsync();
 		cmd.CommandText = TestDataSeeder.GenerateTableDDL(connection, "test_data");
 		await cmd.ExecuteNonQueryAsync();

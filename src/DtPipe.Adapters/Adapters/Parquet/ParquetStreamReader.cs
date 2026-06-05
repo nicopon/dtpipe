@@ -223,7 +223,7 @@ public class ParquetStreamReader : IColumnarStreamReader
 
 		if (baseType == typeof(string))
 		{
-			var data = new string[rowCount];
+			var data = new string?[rowCount];
 			await rowGroupReader.ReadAsync(field, data.AsMemory(), null, ct);
 			return data;
 		}

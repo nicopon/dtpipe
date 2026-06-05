@@ -21,25 +21,17 @@ public class OracleSchemaInspectorTests : IAsyncLifetime
 		_fixture = fixture;
 	}
 
-	public async ValueTask InitializeAsync()
+	public ValueTask InitializeAsync()
 	{
 		_connectionString = _fixture.OracleConnectionString;
-		await Task.CompletedTask;
-	}
-
-	public ValueTask DisposeAsync()
-	{
 		return ValueTask.CompletedTask;
 	}
 
-	private string GetConnectionString()
-	{
-		return _connectionString!;
-	}
+	public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
 	private async Task ExecuteSql(string sql)
 	{
-		await using var connection = new OracleConnection(GetConnectionString());
+		await using var connection = new OracleConnection(_connectionString!);
 		await connection.OpenAsync();
 		await using var cmd = connection.CreateCommand();
 		cmd.CommandText = sql;
@@ -55,7 +47,7 @@ public class OracleSchemaInspectorTests : IAsyncLifetime
 
 		var options = new OracleWriterOptions { Table = "NON_EXISTENT" };
 
-		await using var writer = new OracleDataWriter(GetConnectionString(), options, NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
+		await using var writer = new OracleDataWriter(_connectionString, options, NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
 		var inspector = writer as ISchemaInspector;
 
 		Assert.NotNull(inspector);
@@ -72,7 +64,6 @@ public class OracleSchemaInspectorTests : IAsyncLifetime
 	{
 		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		// Oracle creates tables in UPPERCASE by default unless quoted
 		await ExecuteSql(@"
             CREATE TABLE TYPE_TEST (
                 ID NUMBER(10) PRIMARY KEY,
@@ -83,7 +74,7 @@ public class OracleSchemaInspectorTests : IAsyncLifetime
 
 		var options = new OracleWriterOptions { Table = "TYPE_TEST" };
 
-		await using var writer = new OracleDataWriter(GetConnectionString(), options, NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
+		await using var writer = new OracleDataWriter(_connectionString, options, NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var result = await inspector.InspectTargetAsync();
@@ -92,10 +83,9 @@ public class OracleSchemaInspectorTests : IAsyncLifetime
 		Assert.True(result.Exists);
 		Assert.Equal(4, result.Columns.Count);
 
-		// Oracle returns column names in uppercase usually
 		var idCol = result.Columns.First(c => c.Name == "ID");
 		Assert.True(idCol.IsPrimaryKey);
-		Assert.Equal(typeof(decimal), idCol.InferredClrType); // NUMBER usually maps to decimal
+		Assert.Equal(typeof(decimal), idCol.InferredClrType);
 
 		var nameCol = result.Columns.First(c => c.Name == "NAME");
 		Assert.False(nameCol.IsNullable);
@@ -123,13 +113,13 @@ public class OracleSchemaInspectorTests : IAsyncLifetime
 
 		var sourceSchema = new List<PipeColumnInfo>
 		{
-			new("ID", typeof(decimal), false), // Match number
-            new("NAME", typeof(string), true)
+			new("ID", typeof(decimal), false),
+			new("NAME", typeof(string), true)
 		};
 
 		var options = new OracleWriterOptions { Table = "COMPAT_TEST" };
 
-		await using var writer = new OracleDataWriter(GetConnectionString(), options, NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
+		await using var writer = new OracleDataWriter(_connectionString, options, NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var targetSchema = await inspector.InspectTargetAsync();
@@ -149,12 +139,12 @@ public class OracleSchemaInspectorTests : IAsyncLifetime
 		var sourceSchema = new List<PipeColumnInfo>
 		{
 			new("ID", typeof(decimal), false),
-			new("EXTRA_COLUMN", typeof(string), true) // Not in target
-        };
+			new("EXTRA_COLUMN", typeof(string), true)
+		};
 
 		var options = new OracleWriterOptions { Table = "MISSING_TEST" };
 
-		await using var writer = new OracleDataWriter(GetConnectionString(), options, NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
+		await using var writer = new OracleDataWriter(_connectionString, options, NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
 		var inspector = (ISchemaInspector)writer;
 
 		var targetSchema = await inspector.InspectTargetAsync();

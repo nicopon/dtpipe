@@ -153,9 +153,9 @@ public class ManualVerificationTests : IAsyncLifetime
 			var rowCount = (int)group.RowCount;
 			var idCol = new int?[rowCount];
 			await group.ReadAsync(reader.Schema.DataFields[0], idCol.AsMemory());
-			var nameCol = new string[rowCount];
+			var nameCol = new string?[rowCount];
 			await group.ReadAsync(reader.Schema.DataFields[1], nameCol.AsMemory());
-			var emailCol = new string[rowCount];
+			var emailCol = new string?[rowCount];
 			await group.ReadAsync(reader.Schema.DataFields[2], emailCol.AsMemory());
 
 			idCol[0].Should().Be(1);

@@ -152,7 +152,7 @@ public class JobService
 		string? alias,
 		bool isDag,
 		BranchChannelContext? ctx,
-		System.Collections.Concurrent.ConcurrentQueue<DtPipe.Feedback.BranchSummary> resultsCollector,
+		System.Collections.Concurrent.ConcurrentQueue<DtPipe.Feedback.BranchSummary>? resultsCollector,
 		CancellationToken ct,
 		Pipeline.GlobalOptions? globals = null)
 	{
