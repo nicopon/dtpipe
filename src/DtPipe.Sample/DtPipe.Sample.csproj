@@ -1,9 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <PackageReference Include="DtPipe.Adapters" Version="1.3.0" />
-    <PackageReference Include="DtPipe.Transformers" Version="1.3.0" />
-    <PackageReference Include="DtPipe.Processors" Version="1.3.0" />
+    <ProjectReference Include="../DtPipe.Adapters/DtPipe.Adapters.csproj" />
+    <ProjectReference Include="../DtPipe.Transformers/DtPipe.Transformers.csproj" />
+    <ProjectReference Include="../DtPipe.Processors/DtPipe.Processors.csproj" />
   </ItemGroup>
 
   <ItemGroup>
