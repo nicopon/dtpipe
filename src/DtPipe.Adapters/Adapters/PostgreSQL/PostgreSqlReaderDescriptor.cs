@@ -19,6 +19,6 @@ public class PostgreSqlReaderDescriptor : IProviderDescriptor<IStreamReader>
     public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
     {
         var opt = (PostgreSqlReaderOptions)options;
-        return new PostgreSqlColumnarReader(connectionString, opt.Query ?? "SELECT 1", 0);
+        return new PostgreSqlReader(connectionString, opt.Query ?? "SELECT 1", 0);
     }
 }

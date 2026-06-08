@@ -19,6 +19,6 @@ public class OracleReaderDescriptor : IProviderDescriptor<IStreamReader>
     public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
     {
         var opt = (OracleReaderOptions)options;
-        return new OracleColumnarReader(connectionString, opt.Query ?? "SELECT 1", opt, 0);
+        return new OracleReader(connectionString, opt.Query ?? "SELECT 1", opt, 0);
     }
 }

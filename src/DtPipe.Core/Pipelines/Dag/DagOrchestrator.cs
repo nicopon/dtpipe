@@ -30,7 +30,7 @@ public class DagOrchestrator : IDagOrchestrator
 
     // Constants for DAG execution
     private const int DefaultNativeChannelCapacity = 100;
-    private const int DefaultArrowChannelCapacity = 64;
+    private const int DefaultArrowChannelCapacity = 8;
 
     public Action<string>? OnLogEvent { get; set; }
 

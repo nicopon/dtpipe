@@ -215,45 +215,24 @@ public sealed class PipelineExecutor
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct,
         Schema? richSchema = null)
     {
-        await using var bridge = factory.CreateBridge();
-        await bridge.InitializeAsync(columns, batchSize, richSchema, ct);
+        var schema = richSchema != null
+            ? ArrowSchemaFactory.CreateEnriched(columns, richSchema)
+            : ArrowSchemaFactory.Create(columns);
 
-        // Feed ingestion in background
-        var ingestionTask = Task.Run(async () =>
+        var buffer = new List<IReadOnlyList<object?>>(batchSize);
+        await foreach (var row in rows.WithCancellation(ct))
         {
-            try
+            buffer.Add(row);
+            if (buffer.Count >= batchSize)
             {
-                var buffer = new List<object?[]>(batchSize);
-                await foreach (var row in rows.WithCancellation(ct))
-                {
-                    buffer.Add(row as object?[] ?? row.ToArray());
-                    if (buffer.Count >= batchSize)
-                    {
-                        await bridge.IngestRowsAsync(buffer.ToArray(), ct);
-                        buffer.Clear();
-                    }
-                }
-                if (buffer.Count > 0)
-                {
-                    await bridge.IngestRowsAsync(buffer.ToArray(), ct);
-                }
-                await bridge.CompleteAsync(ct);
+                yield return ArrowRowConverter.ToRecordBatch(schema, buffer, buffer.Count);
+                buffer.Clear();
             }
-            catch (OperationCanceledException) { }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error during row ingestion in bridge");
-                bridge.Fault(ex);
-            }
-        }, ct);
-
-        // Stream batches as they arrive
-        await foreach (var batch in bridge.ReadRecordBatchesAsync(ct))
-        {
-            yield return batch;
         }
-
-        await ingestionTask;
+        if (buffer.Count > 0)
+        {
+            yield return ArrowRowConverter.ToRecordBatch(schema, buffer, buffer.Count);
+        }
     }
 
     private async IAsyncEnumerable<IReadOnlyList<object?>> BridgeColumnarToRowsAsync(

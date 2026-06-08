@@ -79,7 +79,6 @@ DtPipe uses a centralized Docker infrastructure for all integration tests.
 ### 🛠️ Utilities
 | Script | Description |
 |:---|:---|
-| **`validate_sample.sh`** | Validates the `DtPipe.Sample` programmatic API project (standalone, not in `run.sh`). |
 | **`monitor_mem.sh`** | Memory usage monitoring helper. |
 
 ---

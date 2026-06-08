@@ -100,37 +100,7 @@ public static class ArrowTypeMapper
         var handler = _handlers.FirstOrDefault(h => h.CanHandle(type));
         if (handler != null) return handler.CreateBuilder(type);
 
-        // TODO: remove after all handlers migrated
-        return type switch
-        {
-            BooleanType => new BooleanArray.Builder(),
-            Int8Type => new Int8Array.Builder(),
-            Int16Type => new Int16Array.Builder(),
-            Int32Type => new Int32Array.Builder(),
-            Int64Type => new Int64Array.Builder(),
-            UInt8Type => new UInt8Array.Builder(),
-            UInt16Type => new UInt16Array.Builder(),
-            UInt32Type => new UInt32Array.Builder(),
-            UInt64Type => new UInt64Array.Builder(),
-            FloatType => new FloatArray.Builder(),
-            DoubleType => new DoubleArray.Builder(),
-            StringType => new StringArray.Builder(),
-            BinaryType => new BinaryArray.Builder(),
-            // Decimal types BEFORE FixedSizeBinaryType (inheritance order)
-            Decimal128Type t => new Decimal128Array.Builder(t),
-            Decimal256Type t => new Decimal256Array.Builder(t),
-            // FixedSizeBinary maps to the generic builder
-            FixedSizeBinaryType fst => new FixedSizeBinaryArrayBuilder(fst.ByteWidth),
-            Date32Type => new Date32Array.Builder(),
-            Date64Type => new Date64Array.Builder(),
-            TimestampType t => new TimestampArray.Builder(t),
-            DurationType t => new DurationArray.Builder(t),
-            Time32Type t => new Time32Array.Builder(t),
-            Time64Type t => new Time64Array.Builder(t),
-            StructType st => new StructArrayManualBuilder(st),
-            ListType lt => new ListArrayManualBuilder(lt),
-            _ => throw new NotSupportedException($"Unsupported Arrow type for builder: {type.Name}")
-        };
+        throw new NotSupportedException($"Unsupported Arrow type for builder: {type.Name}");
     }
 
     public static object? GetValue(IArrowArray array, int index)
@@ -145,34 +115,7 @@ public static class ArrowTypeMapper
             return;
         }
 
-        // TODO: remove after all handlers migrated
-        switch (builder)
-        {
-            case BooleanArray.Builder b: b.AppendNull(); break;
-            case Int8Array.Builder b: b.AppendNull(); break;
-            case Int16Array.Builder b: b.AppendNull(); break;
-            case Int32Array.Builder b: b.AppendNull(); break;
-            case Int64Array.Builder b: b.AppendNull(); break;
-            case UInt8Array.Builder b: b.AppendNull(); break;
-            case UInt16Array.Builder b: b.AppendNull(); break;
-            case UInt32Array.Builder b: b.AppendNull(); break;
-            case UInt64Array.Builder b: b.AppendNull(); break;
-            case FloatArray.Builder b: b.AppendNull(); break;
-            case DoubleArray.Builder b: b.AppendNull(); break;
-            case StringArray.Builder b: b.AppendNull(); break;
-            case BinaryArray.Builder b: b.AppendNull(); break;
-            case FixedSizeBinaryArrayBuilder b: b.AppendNull(); break;
-            case Decimal128Array.Builder b: b.AppendNull(); break;
-            case Decimal256Array.Builder b: b.AppendNull(); break;
-            case Date32Array.Builder b: b.AppendNull(); break;
-            case Date64Array.Builder b: b.AppendNull(); break;
-            case TimestampArray.Builder b: b.AppendNull(); break;
-            case DurationArray.Builder b: b.AppendNull(); break;
-            case Time32Array.Builder b: b.AppendNull(); break;
-            case Time64Array.Builder b: b.AppendNull(); break;
-            case StructArrayManualBuilder b: b.AppendNull(); break;
-            case ListArrayManualBuilder b: b.AppendNull(); break;
-        }
+        throw new NotSupportedException($"Unsupported builder type for AppendNull: {builder.GetType().Name}");
     }
 
     public static IArrowArray BuildArray(IArrowArrayBuilder builder)
@@ -180,35 +123,7 @@ public static class ArrowTypeMapper
         var handler = _handlers.FirstOrDefault(h => h.CanHandle(builder));
         if (handler != null) return handler.Build(builder);
 
-        // TODO: remove after all handlers migrated
-        return builder switch
-        {
-            BooleanArray.Builder b => b.Build(),
-            Int8Array.Builder b => b.Build(),
-            Int16Array.Builder b => b.Build(),
-            Int32Array.Builder b => b.Build(),
-            Int64Array.Builder b => b.Build(),
-            UInt8Array.Builder b => b.Build(),
-            UInt16Array.Builder b => b.Build(),
-            UInt32Array.Builder b => b.Build(),
-            UInt64Array.Builder b => b.Build(),
-            FloatArray.Builder b => b.Build(),
-            DoubleArray.Builder b => b.Build(),
-            StringArray.Builder b => b.Build(),
-            BinaryArray.Builder b => b.Build(),
-            FixedSizeBinaryArrayBuilder b => b.Build(),
-            Decimal128Array.Builder b => b.Build(),
-            Decimal256Array.Builder b => b.Build(),
-            Date32Array.Builder b => b.Build(),
-            Date64Array.Builder b => b.Build(),
-            TimestampArray.Builder b => b.Build(),
-            DurationArray.Builder b => b.Build(),
-            Time32Array.Builder b => b.Build(),
-            Time64Array.Builder b => b.Build(),
-            StructArrayManualBuilder b => b.Build(),
-            ListArrayManualBuilder b => b.Build(),
-            _ => throw new NotSupportedException($"Unsupported builder type for BuildArray: {builder.GetType().Name}")
-        };
+        throw new NotSupportedException($"Unsupported builder type for BuildArray: {builder.GetType().Name}");
     }
 
     public static void AppendValue(IArrowArrayBuilder builder, object? value)
@@ -220,67 +135,7 @@ public static class ArrowTypeMapper
             return;
         }
 
-        // TODO: remove after all handlers migrated
-        if (value == null || value == DBNull.Value)
-        {
-            AppendNull(builder);
-            return;
-        }
-
-        switch (builder)
-        {
-            case StringArray.Builder b: b.Append(value.ToString()); break;
-            case Int8Array.Builder b: b.Append(Convert.ToSByte(value)); break;
-            case Int16Array.Builder b: b.Append(Convert.ToInt16(value)); break;
-            case Int32Array.Builder b: b.Append(Convert.ToInt32(value)); break;
-            case Int64Array.Builder b: b.Append(Convert.ToInt64(value)); break;
-            case UInt8Array.Builder b: b.Append(Convert.ToByte(value)); break;
-            case UInt16Array.Builder b: b.Append(Convert.ToUInt16(value)); break;
-            case UInt32Array.Builder b: b.Append(Convert.ToUInt32(value)); break;
-            case UInt64Array.Builder b: b.Append(Convert.ToUInt64(value)); break;
-            case DoubleArray.Builder b: b.Append(Convert.ToDouble(value)); break;
-            case FloatArray.Builder b: b.Append(Convert.ToSingle(value)); break;
-            case BooleanArray.Builder b: b.Append(Convert.ToBoolean(value)); break;
-            case Decimal128Array.Builder b: b.Append(Convert.ToDecimal(value)); break;
-            case Decimal256Array.Builder b: b.Append(Convert.ToDecimal(value)); break;
-            case FixedSizeBinaryArrayBuilder b:
-                if (value is Guid guid) b.Append(ToArrowUuidBytes(guid));
-                else if (value is byte[] fixedBytes && fixedBytes.Length == b.ByteWidth) b.Append(fixedBytes);
-                else b.AppendNull();
-                break;
-            case BinaryArray.Builder b:
-                // Generic binary builder: byte[] passed through as-is
-                if (value is byte[] binBytes) b.Append((System.Collections.Generic.IEnumerable<byte>)binBytes);
-                else b.AppendNull();
-                break;
-            case Date32Array.Builder b: 
-                if (value is DateOnly d32) b.Append(d32.ToDateTime(TimeOnly.MinValue));
-                else b.Append(Convert.ToDateTime(value)); 
-                break;
-            case Date64Array.Builder b: 
-                if (value is DateOnly d64) b.Append(d64.ToDateTime(TimeOnly.MinValue));
-                else b.Append(Convert.ToDateTime(value)); 
-                break;
-            case TimestampArray.Builder b:
-                if (value is DateTimeOffset dto) b.Append(dto);
-                else if (value is DateTime dt) b.Append(dt);
-                else if (value is DateOnly d) b.Append(d.ToDateTime(TimeOnly.MinValue));
-                else b.Append(Convert.ToDateTime(value));
-                break;
-            case Time64Array.Builder b64:
-                if (value is TimeOnly t) b64.Append(t.ToTimeSpan().Ticks * 100); 
-                else b64.Append(Convert.ToInt64(value));
-                break;
-            case StructArrayManualBuilder b:
-                b.AppendValue(value);
-                break;
-            case ListArrayManualBuilder b:
-                b.AppendValue(value);
-                break;
-            default:
-                AppendNull(builder);
-                break;
-        }
+        throw new NotSupportedException($"Unsupported builder type for AppendValue: {builder.GetType().Name}");
     }
 
 

@@ -18,6 +18,6 @@ public class SqliteReaderDescriptor : IProviderDescriptor<IStreamReader>
     public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
     {
         var opt = (SqliteReaderOptions)options;
-        return new SqliteColumnarReader(SqliteConnectionHelper.ToDataSourceConnectionString(connectionString), opt.Query ?? "SELECT 1", 0);
+        return new SqliteReader(SqliteConnectionHelper.ToDataSourceConnectionString(connectionString), opt.Query ?? "SELECT 1", 0);
     }
 }

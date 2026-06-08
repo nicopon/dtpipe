@@ -40,12 +40,12 @@ public class AdoBinaryIntegrationTests : IAsyncLifetime
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     [Fact]
-    public async Task PostgreSqlColumnarReader_ReadsBinaryDataCorrectly()
+    public async Task PostgreSqlReader_ReadsBinaryDataCorrectly()
     {
         if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
         // Arrange
-        var reader = new PostgreSqlColumnarReader(_connectionString, "SELECT id, data FROM binary_test ORDER BY id");
+        var reader = new PostgreSqlReader(_connectionString, "SELECT id, data FROM binary_test ORDER BY id");
 
         // Act
         await reader.OpenAsync();

@@ -68,3 +68,4 @@ dist/release/.env
 # Experiments
 experiments/*
 .claude/
+tests/DtPipe.Tests/TestResults/*

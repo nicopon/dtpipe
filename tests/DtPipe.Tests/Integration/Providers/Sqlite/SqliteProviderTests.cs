@@ -46,7 +46,7 @@ public class SqliteProviderTests : IAsyncLifetime
 		}
 
 		// Act
-		var reader = new SqliteStreamReader(_connectionString, "SELECT * FROM Users");
+		var reader = new SqliteReader(_connectionString, "SELECT * FROM Users");
 		await reader.OpenAsync();
 		var columns = reader.Columns;
 		var rows = new List<object?[]>();
@@ -124,7 +124,7 @@ public class SqliteProviderTests : IAsyncLifetime
 		registry.Register(new SqliteWriterOptions { Table = "Target", Strategy = SqliteWriteStrategy.Recreate });
 
 		// Act: Read from source
-		var reader = new SqliteStreamReader(_connectionString, "SELECT * FROM Source");
+		var reader = new SqliteReader(_connectionString, "SELECT * FROM Source");
 		await reader.OpenAsync();
 		var columns = reader.Columns!;
 

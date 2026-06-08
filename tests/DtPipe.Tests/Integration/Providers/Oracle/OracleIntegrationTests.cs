@@ -49,7 +49,7 @@ public class OracleIntegrationTests : IAsyncLifetime
 	}
 
 	[Fact]
-	public async Task OracleStreamReader_ReadsAllRows()
+	public async Task OracleReader_ReadsAllRows()
 	{
 		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
@@ -57,7 +57,7 @@ public class OracleIntegrationTests : IAsyncLifetime
 		var connectionString = _connectionString;
 
 		// Act
-		await using var reader = new OracleStreamReader(
+		await using var reader = new OracleReader(
 			connectionString,
 			"SELECT id, name FROM test_data ORDER BY id",
 			new OracleReaderOptions { FetchSize = 65536 });
@@ -65,9 +65,12 @@ public class OracleIntegrationTests : IAsyncLifetime
 		await reader.OpenAsync(TestContext.Current.CancellationToken);
 
 		var rows = new List<object?[]>();
-		await foreach (var row in reader.ReadRowsAsync(TestContext.Current.CancellationToken))
+		await foreach (var batch in reader.ReadBatchesAsync(100, TestContext.Current.CancellationToken))
 		{
-			rows.Add(row);
+			for (int i = 0; i < batch.Length; i++)
+			{
+				rows.Add(batch.Span[i]);
+			}
 		}
 
 		// Assert
@@ -88,7 +91,7 @@ public class OracleIntegrationTests : IAsyncLifetime
 		try
 		{
 			// Act
-			await using var reader = new OracleStreamReader(
+			await using var reader = new OracleReader(
 				connectionString,
 				"SELECT id, name FROM test_data ORDER BY id",
 				new OracleReaderOptions { FetchSize = 65536 });
@@ -99,9 +102,12 @@ public class OracleIntegrationTests : IAsyncLifetime
 			await writer.InitializeAsync(reader.Columns!, TestContext.Current.CancellationToken);
 
 			var batch = new List<object?[]>();
-			await foreach (var row in reader.ReadRowsAsync(TestContext.Current.CancellationToken))
+			await foreach (var batchChunk in reader.ReadBatchesAsync(100, TestContext.Current.CancellationToken))
 			{
-				batch.Add(row);
+				for (int i = 0; i < batchChunk.Length; i++)
+				{
+					batch.Add(batchChunk.Span[i]);
+				}
 			}
 
 			await writer.WriteRecordBatchAsync(ArrowTestHelper.ToRecordBatch(batch, reader.Columns!), TestContext.Current.CancellationToken);
@@ -130,7 +136,7 @@ public class OracleIntegrationTests : IAsyncLifetime
 		try
 		{
 			// Act - write data
-			await using (var reader = new OracleStreamReader(
+			await using (var reader = new OracleReader(
 				connectionString,
 				"SELECT id, name FROM test_data ORDER BY id",
 				new OracleReaderOptions { FetchSize = 65536 }))
@@ -142,9 +148,12 @@ public class OracleIntegrationTests : IAsyncLifetime
 					await writer.InitializeAsync(reader.Columns!, TestContext.Current.CancellationToken);
 
 					var batch = new List<object?[]>();
-					await foreach (var row in reader.ReadRowsAsync(TestContext.Current.CancellationToken))
+					await foreach (var batchChunk in reader.ReadBatchesAsync(100, TestContext.Current.CancellationToken))
 					{
-						batch.Add(row);
+						for (int i = 0; i < batchChunk.Length; i++)
+						{
+							batch.Add(batchChunk.Span[i]);
+						}
 					}
 
 					await writer.WriteBatchAsync(batch, TestContext.Current.CancellationToken);

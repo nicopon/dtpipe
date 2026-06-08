@@ -46,7 +46,7 @@ public class SqlServerIntegrationTests : IAsyncLifetime
 	}
 
 	[Fact]
-	public async Task SqlServerStreamReader_ReadsAllRows()
+	public async Task SqlServerReader_ReadsAllRows()
 	{
 		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
@@ -54,7 +54,7 @@ public class SqlServerIntegrationTests : IAsyncLifetime
 		var connectionString = _connectionString;
 
 		// Act
-		await using var reader = new SqlServerStreamReader(
+		await using var reader = new SqlServerReader(
 			connectionString,
 			"SELECT id, name FROM test_data ORDER BY id",
 			new SqlServerReaderOptions());
@@ -92,7 +92,7 @@ public class SqlServerIntegrationTests : IAsyncLifetime
 		try
 		{
 			// Act
-			await using var reader = new SqlServerStreamReader(
+			await using var reader = new SqlServerReader(
 				connectionString,
 				"SELECT * FROM test_data ORDER BY Id",
 				new SqlServerReaderOptions());

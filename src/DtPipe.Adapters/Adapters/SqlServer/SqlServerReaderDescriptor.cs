@@ -18,6 +18,6 @@ public class SqlServerReaderDescriptor : IProviderDescriptor<IStreamReader>
     public IStreamReader Create(string connectionString, object options, IServiceProvider serviceProvider)
     {
         var opt = (SqlServerReaderOptions)options;
-        return new SqlServerColumnarReader(connectionString, opt.Query ?? "SELECT 1", opt, 0);
+        return new SqlServerReader(connectionString, opt.Query ?? "SELECT 1", opt, 0);
     }
 }

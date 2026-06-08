@@ -67,7 +67,6 @@ The golden DAG fixtures in `GoldenDagDefinitions.cs` are the canonical reference
 | `src/DtPipe.Adapters` | Readers and writers for all data sources/targets |
 | `src/DtPipe.Transformers` | Row and columnar data transformers |
 | `src/DtPipe.Processors` | C# side of SQL stream processors (DuckDB, factories) |
-| `src/DtPipe.Sample` | Minimal sample project demonstrating programmatic use |
 | `src/Apache.Arrow.Ado` | Standalone ADO.NET → Arrow library; zero DtPipe deps (depends on `Apache.Arrow.Serialization` only) |
 | `src/Apache.Arrow.Serialization` | Standalone CLR↔Arrow type map + POCO serializer; zero DtPipe deps, no external deps beyond `Apache.Arrow` |
 | `tests/DtPipe.Tests` | xunit.v3 unit and integration tests |

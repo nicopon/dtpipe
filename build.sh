@@ -104,9 +104,6 @@ echo "----------------------------------------"
 "$RELEASE_DIR/dtpipe$EXT" --help > /dev/null
 [ $? -eq 0 ] && echo "  OK: Binary is healthy." || { echo "  FAILED: Binary sanity check failed."; exit 1; }
 
-echo "----------------------------------------"
-echo -e "${YELLOW}Building Sample Project...${NC}"
-dotnet build src/DtPipe.Sample/DtPipe.Sample.csproj -c Release
 
 # ============================================================
 # Summary
