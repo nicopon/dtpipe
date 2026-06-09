@@ -115,21 +115,7 @@ Neither `--sql` nor boolean processor flags (e.g. `--merge`) trigger a split. Ea
 
 Branches communicate via `IMemoryChannelRegistry` (either native `Channel<IReadOnlyList<object?[]>>` or Arrow `Channel<RecordBatch>`). The `MappedMemoryChannelRegistry` handles logical-to-physical alias resolution for fan-out (broadcast/tee) scenarios. A `BranchChannelContext` injected per branch carries an `AliasMap` that translates logical aliases (as written in CLI args) to physical channel names (including fan-out sub-channels like `s__fan_0`). This mapping is populated by `DagOrchestrator` and is transparent to all downstream components including processors.
 
-#### Canonical DAG topologies
-
-In the patterns below, `{reader:cfg}` represents any reader and its full provider configuration (e.g. `pg:"host=...;Database=mydb" --query "SELECT ..."` or `parquet:data.parquet`). Similarly, `{writer:cfg}` represents any writer configuration (e.g. `pg:"..." --table t` or `csv:out.csv`).
-
-| Topology | CLI pattern | Branches |
-|---|---|---|
-| **Linear** | `-i {reader:cfg} -o {writer:cfg}` | 1 |
-| **Two independent sources** | `-i {reader1:cfg} -o {writer1:cfg}  -i {reader2:cfg} -o {writer2:cfg}` | 2 |
-| **SQL (single source)** | `-i {reader:cfg} --alias a  --from a --sql "SELECT * FROM a"` | 2 |
-| **SQL JOIN (main + ref)** | `-i {main:cfg} --alias m  -i {ref:cfg} --alias r  --from m --ref r --sql "SELECT * FROM m JOIN r ON ..."` | 3 |
-| **Merge (UNION ALL)** | `-i {readerA:cfg} --alias a  -i {readerB:cfg} --alias b  --from a,b --merge -o {writer:cfg}` | 3 |
-| **Fan-out (tee)** | `-i {reader:cfg} --alias s  --from s -o {writerA:cfg}  --from s -o {writerB:cfg}` | 3 |
-| **Fan-out + SQL** | `-i {reader:cfg} --alias s  --from s -o {writerA:cfg}  --from s --sql "SELECT ..."` | 3 |
-| **Diamond (fan-out → filter → join)** | `-i {reader:cfg} --alias s  --from s --filter '...' --alias hi  --from s --filter '...' --alias lo  --from hi --ref lo --sql "SELECT * FROM hi JOIN lo ON ..."` | 4 |
-| **Join → fan-out** | `... --from m --ref r --sql "SELECT ..." --alias joined  --from joined -o {writerA:cfg}  --from joined -o {writerB:cfg}` | 5 |
+Canonical topologies (Linear, SQL, JOIN, Merge, Fan-out, Diamond, Join→fan-out) are documented with full CLI patterns in `REFERENCE.md`.
 
 ### SQL Processors
 
@@ -141,6 +127,11 @@ In the patterns below, `{reader:cfg}` represents any reader and its full provide
 - Output: lazy streaming via `duckdb_execute_prepared_streaming` + `duckdb_fetch_chunk` + `duckdb_data_chunk_to_arrow`. Arrow extension types (UUID, etc.) preserved via `arrow_lossless_conversion = true`.
 - Schema inferred from prepared statement before execution — no extra query round-trip.
 - Standard SQL dialect, rich function library (window functions, CTEs, JSON, etc.). Queries testable externally with the DuckDB CLI.
+- `--duck-init "SQL"` (optional): runs on the in-memory connection after the two hardcoded `SET` statements and before Arrow stream registration. Use to load extensions (`LOAD httpfs`), set session variables (S3/Azure credentials), or define macros/views that the query depends on. Extracted from `branchArgs` by `DuckDBSqlTransformerFactory` and passed as the `initSql` optional parameter of `DuckDBSqlProcessor`.
+
+The same `--duck-init` option is available on `DuckDataSourceReader` (runs after `PRAGMA memory_limit/threads`) and `DuckDbDataWriter` (runs once after connection open, guarded by `_initSqlApplied`). Each DuckDB component has its own connection — `--duck-init` must be specified separately on each branch that needs it. The helper logic is in `DuckInitSqlHelper` (Adapters) and a private static `RunInitSqlAsync` (Processor).
+
+**`--duck-init` value resolution** is handled by `IStringContentResolver` (`DtPipe.Core.Security`). The CLI uses `CliStringContentResolver` (`DtPipe/Cli/Security/`); headless contexts use `DefaultStringContentResolver`. Resolution order: (1) `@file` or `keyring://` replaces the whole value, then (2) `${{ENV_VAR}}` and `${{keyring://alias}}` are substituted inline. Steps are composable. This resolver is also used by `--compute` and `--expand` (via `DefaultStringContentResolver.Instance`, env vars + `@file` only). Full syntax documented in `REFERENCE.md`.
 
 Logical SQL table names come from the branch args (`--from`/`--ref`). Physical channel aliases are resolved by `DagOrchestrator` before the processor is created, via `BranchChannelContext.AliasMap` — processors never need to know about fan-out sub-channel naming (`__fan_N` suffixes).
 
@@ -153,10 +144,9 @@ Transformers implement `IDataTransformer` with three methods: `InitializeAsync` 
 ### Key Interfaces
 
 - `IStreamReader` / `IColumnarStreamReader` — open + stream batches
-- `IDataWriter` — initialize schema + complete (base contract for all writers)
-- `IRowDataWriter` — extends `IDataWriter`; adds `WriteBatchAsync` for row-based output
+- `IDataWriter` / `IRowDataWriter` / `IColumnarDataWriter` — write contracts (row-based and columnar)
 - `IDataTransformer` / `IDataTransformerFactory` — transform rows; factory creates from CLI config or YAML
-- `IStreamTransformerFactory` — factory for multi-input stream processors (SQL joins, merges); `Create(branchArgs, ctx, serviceProvider)` receives `BranchChannelContext` for alias resolution; declares `MinStreams`/`MaxStreams` (streaming source bounds), `MinLookups`/`MaxLookups` (ref source bounds), and `CliTriggerFlags` (`IReadOnlyList<(string Flag, bool IsBoolean)>`) used by `FlagRegistryFactory` to register processor trigger flags
+- `IStreamTransformerFactory` — multi-input stream processors; declares `MinStreams`/`MaxStreams`, `MinLookups`/`MaxLookups`, and `CliTriggerFlags` (used by `FlagRegistryFactory`); `Create(branchArgs, ctx, serviceProvider)` receives `BranchChannelContext` for alias resolution
 - `ICliContributor` — contributes CLI options and can intercept command handling
 - `OptionsRegistry` — scoped key-value store for provider-specific parsed options
 
@@ -191,9 +181,7 @@ The canonical Arrow representation of a UUID in DtPipe is `FixedSizeBinaryType(1
 
 ## Apache.Arrow.Serialization
 
-`src/Apache.Arrow.Serialization/` is a **standalone library** with no DtPipe dependencies (only `Apache.Arrow`). It provides:
-
-### Dependency graph
+`src/Apache.Arrow.Serialization/` is a **standalone library** with no DtPipe dependencies (only `Apache.Arrow`). Dependency graph:
 
 ```
 Apache.Arrow.Serialization   ← standalone, no DtPipe deps
@@ -205,111 +193,31 @@ DtPipe.Core                  ← ArrowTypeMapper is a facade over ArrowTypeMap
 DtPipe.Adapters, DtPipe.Processors, …
 ```
 
-### ArrowTypeMap (`Mapping/ArrowTypeMap.cs`)
-Canonical CLR↔Arrow mapping. All mapping logic lives here; `ArrowTypeMapper` in `DtPipe.Core` is a pure facade that delegates to it.
+`ArrowTypeMap` (`Mapping/ArrowTypeMap.cs`) is the canonical CLR↔Arrow mapping; `ArrowTypeMapper` in `DtPipe.Core` is a pure facade.
 
-`ArrowTypeResult` is a struct carrying both the Arrow type and any required Field metadata:
-```csharp
-public readonly struct ArrowTypeResult
-{
-    public IArrowType ArrowType { get; }
-    public IReadOnlyDictionary<string, string>? Metadata { get; }
-}
-```
-`GetLogicalType(Type)` returns `ArrowTypeResult` — callers that only need the `IArrowType` access `.ArrowType`.
-`TryGetLogicalType(Type, out ArrowTypeResult)` is the exception-free variant for contexts with a string fallback.
+`FixedSizeBinaryArrayBuilder` (`Reflection/FixedSizeBinaryArrayBuilder.cs`) is an intentional copy of the same class in `DtPipe.Core` — kept separate to avoid a circular dependency. **Keep both files in sync.**
 
-### ArrowSerializer / ArrowDeserializer
-Reflection-based round-trip for strongly-typed POCOs and dynamic types (`ExpandoObject`, `JsonObject`):
-```csharp
-RecordBatch batch = await ArrowSerializer.SerializeAsync(myList);
-IEnumerable<MyPoco> items = ArrowDeserializer.Deserialize<MyPoco>(batch);
-```
-Supports: primitives, `Guid`, `DateTime`, `DateTimeOffset`, `TimeSpan`, `decimal`, `byte[]`, nullable wrappers, enums, collections (`List<T>`, arrays), dictionaries, nested structs.
-Schema is inferred from property types via `ArrowReflectionEngine`; compiled expression delegates are cached per type.
-
-### ArrowReflectionEngine (`Reflection/ArrowReflectionEngine.cs`)
-Derives an Arrow `Schema` from a .NET `Type` or a runtime `IDictionary` (dynamic/ExpandoObject).
-Calls `ArrowTypeMap.TryGetLogicalType` for scalars and handles complex types (List → `ListType`, Dictionary → `MapType`, nested objects → `StructType`).
-
-### FixedSizeBinaryArrayBuilder (`Reflection/FixedSizeBinaryArrayBuilder.cs`)
-Builds a `FixedSizeBinaryArray` of arbitrary byte width. An intentional copy of the same class in `DtPipe.Core` — kept separate to avoid a circular dependency. **Keep both files in sync** when changing build logic.
+See `EXTENDING.md` for `ArrowSerializer`, `ArrowDeserializer`, and `ArrowReflectionEngine` usage.
 
 ---
 
 ## Adding a New Adapter
 
-1. Create a descriptor class implementing `IProviderDescriptor<IStreamReader>` (or `IDataWriter`).
-2. Define an options class implementing `IOptionSet` with `[ComponentOption]` attributes.
-3. Register in `Program.cs` with `RegisterReader<YourDescriptor>()` or `RegisterWriter<YourDescriptor>()`.
-4. The CLI options are auto-generated from the options type — no manual `System.CommandLine` wiring needed.
+See `EXTENDING.md` for the full adapter and transformer patterns. Key rules:
 
-### Type Handling in Adapters
+- **Row writers**: use `ColumnConverterFactory.Build(sourceClrType, targetClrType)` once per column during init; never call `ValueConverter.ConvertValue()` per-cell.
+- **Columnar writers**: implement `IColumnarDataWriter`; use `ArrowTypeMapper.GetValueForField(array, field, i)` when a `Field` is available.
+- **Text readers**: implement `IColumnTypeInferenceCapable` so `--auto-column-types` works automatically.
 
-#### Row-mode writers (`IDataWriter`)
-Row-mode writers receive `object?[]` rows. The CLR type at each cell is declared in `PipeColumnInfo.ClrType`.
-Writers must NOT assume source and target types match. Use `ColumnConverterFactory.Build(sourceClrType, targetClrType)` (`DtPipe.Core.Helpers`) to compile a typed converter **once per column** during initialization, then invoke it in the write loop:
+### Arrow ↔ CLR mapping: no heuristics
 
-```csharp
-// During initialization — build once
-_converters = columns.Select(col =>
-    ColumnConverterFactory.Build(col.ClrType, targetType)).ToArray();
+**Firm rule: `ArrowTypeMapper.GetClrType(IArrowType)` never infers a semantic CLR type from the storage type alone.** Ambiguous types (e.g. `FixedSizeBinary`) map to the most generic CLR type (`byte[]`). Semantic resolution requires `ArrowTypeMapper.GetClrTypeFromField(Field)` (checks extension metadata).
 
-// In write loop — invoke per cell
-var convertedVal = _converters[i](row[i]);
-```
+Key APIs:
+- `GetLogicalType(Type)` → `ArrowTypeResult` (`.ArrowType` + `.Metadata`)
+- `GetField(name, clrType, nullable)` → `Field` with metadata embedded — use instead of `new Field(...)`
+- `GetClrTypeFromField(Field)` → `Type` — use wherever a `Field` is available
+- `GetValueForField(array, field, i)` → `object?` — respects extension metadata (e.g. `arrow.uuid` → `Guid`)
+- `GetClrType(IArrowType)` / `GetValue(array, i)` — storage-only, no metadata
 
-Do **not** call `ValueConverter.ConvertValue()` per-cell directly — it performs reflection-based dispatch on every call.
-
-`SqliteDataWriter` is exempt: `SqliteParameter` accepts `object` and coerces natively.
-
-#### Columnar writers (`IColumnarDataWriter`)
-Columnar writers receive `RecordBatch` directly (zero intermediate `object?[]`). When a Field context is available, extract values using `ArrowTypeMapper.GetValueForField(array, field, rowIndex)` (resolves extension types such as `arrow.uuid` → `Guid`). Without Field context, `ArrowTypeMapper.GetValue(array, rowIndex)` returns raw storage values (e.g. `byte[]` for `FixedSizeBinaryArray`). No `ValueConverter` call needed. This is the preferred path for all new DB writers.
-
-Implementing `IColumnarDataWriter` enables `PipelineExecutor` to route columnar sources (Parquet, PostgreSQL, DuckDB output) directly to the writer without any row-level bridging.
-
-`DuckDbDataWriter` and `ParquetDataWriter` implement only `IColumnarDataWriter` — they have no row-mode fallback. When the pipeline source is row-based, `PipelineExecutor` bridges rows→Arrow automatically via `BridgeRowsToColumnarAsync`.
-
-#### Text sources (CSV, JSON, etc.)
-Text readers emit `string` for every column by default. Downstream writers will hit the conversion path in `ColumnConverterFactory`. Two remediation options in order of preference:
-1. User declares `--column-types "Col:type"` — reader emits typed values directly (zero conversion downstream).
-2. `--auto-column-types` — inference runs automatically on the first 100 rows and applies types before the main pipeline opens.
-
-When implementing a new text reader, implement `IColumnTypeInferenceCapable` so the dry-run suggestion and `--auto-column-types` work automatically.
-
-#### Arrow ↔ CLR mapping: no heuristics
-
-The conversion between Arrow types and CLR types is limited to direct, unambiguous mappings
-defined in `Apache.Arrow.Serialization.Mapping.ArrowTypeMap` (the canonical source) and
-exposed via the `ArrowTypeMapper` facade in `DtPipe.Core`.
-
-For Arrow types whose CLR semantics depend on context (e.g. `FixedSizeBinary(n)` which could be
-a UUID, a hash, a key, etc.), the mapping to a specific CLR type must be driven by an
-**Arrow extension type** (Field metadata), not by a heuristic on the data structure.
-
-**Firm rule: `ArrowTypeMapper.GetClrType(IArrowType)` never infers a semantic CLR type from
-the storage type alone.** If the Arrow type is ambiguous (e.g. `FixedSizeBinary`), it maps to
-the most generic CLR type (`byte[]`). Semantic resolution requires `ArrowTypeMapper.GetClrTypeFromField(Field)`.
-
-**Key APIs** (`ArrowTypeMapper` wraps all of these):
-- `GetLogicalType(Type clrType)` → `ArrowTypeResult` — preferred way to get the Arrow type + any required metadata for a CLR type. Returns a struct with `.ArrowType` and `.Metadata`.
-- `GetField(string name, Type clrType, bool isNullable)` → `Field` — creates an Arrow Field with metadata embedded. Use this instead of `new Field(...)` to guarantee metadata is always present.
-- `GetClrTypeFromField(Field)` → `Type` — checks extension metadata before falling through to storage type.
-- `GetClrType(IArrowType)` → `Type` — storage-type-only mapping, no metadata, returns `byte[]` for `FixedSizeBinary`.
-- `GetValueForField(array, field, i)` → `object?` — respects extension metadata (e.g. `arrow.uuid` → `Guid`).
-- `ToArrowUuidBytes(guid)` / `FromArrowUuidBytes(span)` — byte-level RFC 4122 conversion helpers.
-
-Use `GetClrTypeFromField(field)` wherever a `Field` is available (reading schemas from Arrow IPC,
-Parquet, channel schemas). Use `GetValueForField(array, field, i)` for value extraction when the
-Field is available. `GetClrType(IArrowType)` and `GetValue(array, i)` are for contexts without Field.
-
-If an external source omits Arrow extension metadata, users must insert an explicit transform/cast
-step in the pipeline. DtPipe does not infer semantic types from data shape.
-
-**Example — UUID columns:**
-- Storage: `FixedSizeBinaryType(16)` + Field metadata `ARROW:extension:name = arrow.uuid`
-- `ArrowSchemaFactory.Create()` emits this automatically for `typeof(Guid)` columns via `GetField()`
-- `GetLogicalType(typeof(Guid))` → `ArrowTypeResult { ArrowType = FixedSizeBinaryType(16), Metadata = { "ARROW:extension:name": "arrow.uuid" } }`
-- `GetClrType(FixedSizeBinaryType(16))` → `typeof(byte[])` (generic, no inference)
-- `GetClrTypeFromField(field with arrow.uuid)` → `typeof(Guid)` (explicit via metadata)
-- `GetValueForField(array, field with arrow.uuid, i)` → `Guid`; without metadata → `byte[]`
+UUID canonical representation: `FixedSizeBinaryType(16)` + Field metadata `ARROW:extension:name = arrow.uuid`, RFC 4122 big-endian. Use `ArrowTypeMapper.ToArrowUuidBytes` / `FromArrowUuidBytes`.

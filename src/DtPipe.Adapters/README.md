@@ -81,6 +81,25 @@ public record PostgreSqlReaderOptions : IProviderOptions, IQueryAwareOptions
 
 ---
 
+## DuckDB-specific Options
+
+The DuckDB reader and writer both support `--duck-init`, which runs SQL on the connection immediately after it opens — before any query execution or schema initialization.
+
+```bash
+# Reader: load an extension before querying
+dtpipe -i "duck:warehouse.duckdb" --query "SELECT * FROM tbl" \
+       --duck-init "LOAD spatial" -o result.parquet
+
+# Writer: load credentials from a file
+dtpipe -i data.parquet \
+       -o "duck:output.duckdb" --table t \
+       --duck-init "@/secret/azure_init.sql"
+```
+
+`--duck-init` accepts inline SQL or a file path prefixed with `@`. See [REFERENCE.md](../../REFERENCE.md#duckdb-options) for details.
+
+---
+
 ## Write Strategies
 
 All SQL writers support the same 6 standardized strategies via `--strategy`:

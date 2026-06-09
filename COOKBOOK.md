@@ -8,6 +8,7 @@ Recipes and end-to-end scenarios. For the full option reference, see [REFERENCE.
 - [Schema Transformations](#schema-transformations)
 - [Database Import & Migration](#database-import--migration)
 - [SQL Processors and Joins](#sql-processors-and-joins)
+- [DuckDB Extensions and Cloud Storage](#duckdb-extensions-and-cloud-storage)
 - [DAG Pipelines (Multi-Source)](#dag-pipelines-multi-source)
 - [Standard Streams and Automation](#standard-streams-and-automation)
 
@@ -120,18 +121,7 @@ dtpipe -i "pg:..." --query "SELECT * FROM users" \
 dtpipe --job anonymize_users.yaml
 ```
 
-### Anonymization faker reference
-
-DtPipe uses [Bogus](https://github.com/bchavez/Bogus). Syntax: `--fake "Column:Dataset.Method"`.
-
-| Category | Generators |
-|:---|:---|
-| **Identity** | `name.fullName`, `name.firstName`, `name.lastName`, `internet.email`, `internet.userName` |
-| **Address** | `address.fullAddress`, `address.streetAddress`, `address.city`, `address.zipCode`, `address.country` |
-| **Finance** | `finance.iban`, `finance.creditCardNumber`, `finance.amount` |
-| **Phone** | `phone.phoneNumber` |
-| **Dates** | `date.past`, `date.future`, `date.recent`, `date.birthdate` |
-| **System** | `random.uuid`, `random.number`, `random.boolean`, `lorem.word`, `lorem.sentence` |
+DtPipe uses [Bogus](https://github.com/bchavez/Bogus) for fake data generation. Syntax: `--fake "Column:Dataset.Method"` (e.g. `name.fullName`, `internet.email`, `finance.iban`, `date.past`, `random.uuid`). See the [Bogus documentation](https://github.com/bchavez/Bogus) for the full dataset/method reference.
 
 ---
 
@@ -345,6 +335,113 @@ dtpipe \
   --from a,b --merge \
   -o combined.parquet
 ```
+
+---
+
+## DuckDB Extensions and Cloud Storage
+
+DtPipe's native provider list is intentionally focused. Rather than shipping adapters
+for every cloud store or SaaS format, DtPipe delegates to DuckDB's extension ecosystem —
+making DuckDB an on-demand connector for sources and destinations it can't reach natively.
+Load an extension with `--duck-init` on any DuckDB branch (reader, writer, or `--sql` processor)
+to read remote files directly in a query, write to a DuckDB-supported target, or join local
+data with remote sources. The examples below cover S3, Azure Blob, and local DuckDB files.
+`--duck-init` value forms: `keyring://alias`, `${{keyring://alias}}`, `${{ENV_VAR}}`,
+`@/path/file.sql` — composable, full syntax in [REFERENCE.md](./REFERENCE.md#duckdb-options).
+
+### Recommended: credentials in the OS keyring
+
+```bash
+# Store once — never appears in shell history again
+dtpipe secret set s3-init "INSTALL httpfs; LOAD httpfs; SET s3_region='eu-west-1'; SET s3_access_key_id='AKIA...'; SET s3_secret_access_key='...';"
+
+# Use by alias
+dtpipe \
+  -i events.parquet --alias ev \
+  --from ev \
+  --duck-init "keyring://s3-init" \
+  --sql "SELECT * FROM ev JOIN read_parquet('s3://bucket/meta.parquet') m ON ev.id = m.id" \
+  -o result.parquet
+```
+
+### Inline keyring secrets (mix multiple credentials)
+
+```bash
+# Store individual values
+dtpipe secret set s3-region "eu-west-1"
+dtpipe secret set s3-key "AKIAIOSFODNN7EXAMPLE"
+dtpipe secret set s3-secret "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+
+# Reference them inline
+dtpipe \
+  -i orders.parquet --alias local \
+  --from local \
+  --duck-init "INSTALL httpfs; LOAD httpfs; SET s3_region='${{keyring://s3-region}}'; SET s3_access_key_id='${{keyring://s3-key}}'; SET s3_secret_access_key='${{keyring://s3-secret}}';" \
+  --sql "SELECT l.*, r.category FROM local l JOIN read_parquet('s3://bucket/reference.parquet') r ON l.product_id = r.id" \
+  -o enriched.parquet
+```
+
+### Credentials from environment variables (CI/CD)
+
+```bash
+# Typically set by your CI/CD system (GitHub Actions, GitLab CI, etc.)
+export AWS_REGION="eu-west-1"
+export AWS_ACCESS_KEY_ID="AKIA..."
+export AWS_SECRET_ACCESS_KEY="..."
+
+dtpipe \
+  -i data.parquet --alias src \
+  --from src \
+  --duck-init 'INSTALL httpfs; LOAD httpfs; SET s3_region="${{AWS_REGION}}"; SET s3_access_key_id="${{AWS_ACCESS_KEY_ID}}"; SET s3_secret_access_key="${{AWS_SECRET_ACCESS_KEY}}";' \
+  --sql "SELECT * FROM src" \
+  -o result.parquet
+```
+
+### Azure Blob Storage
+
+```bash
+dtpipe secret set azure-init "INSTALL azure; LOAD azure; SET azure_storage_connection_string='DefaultEndpointsProtocol=https;...';"
+
+dtpipe \
+  -i data.parquet --alias src \
+  --from src \
+  --duck-init "keyring://azure-init" \
+  --sql "SELECT * FROM src JOIN read_parquet('azure://container/ref.parquet') r ON src.id = r.id" \
+  -o result.parquet
+```
+
+### Write a DuckDB file with cloud credentials pre-loaded
+
+```bash
+dtpipe \
+  -i "pg:Host=prod;Database=app" --query "SELECT * FROM orders" \
+  -o "duck:output.duckdb" --table orders \
+  --duck-init "keyring://azure-init"
+```
+
+### Read from a DuckDB file with an extension
+
+```bash
+dtpipe \
+  -i "duck:warehouse.duckdb" --query "SELECT * FROM spatial_data" \
+  --duck-init "LOAD spatial" \
+  -o result.parquet
+```
+
+### YAML job with duck-init
+
+```yaml
+enrich:
+  input: "events.parquet"
+  from: "ev"
+  sql: "SELECT * FROM ev JOIN read_parquet('s3://bucket/ref.parquet') r ON ev.id = r.id"
+  output: "result.parquet"
+  provider-options:
+    duck:                         # applies to --sql processor
+      duck-init: "keyring://s3-init"
+```
+
+> `--duck-init` is scoped to a single DuckDB connection. In a DAG with both a DuckDB reader/writer and a `--sql` branch, each uses its own connection — specify `--duck-init` on each branch that needs it.
 
 ---
 

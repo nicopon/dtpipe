@@ -102,18 +102,23 @@ Explicit prefixes are recommended to avoid ambiguity.
 | **Parquet** | ✅ | ✅ | `parquet:` / `.parquet` |
 | **Data Gen** | ✅ | — | `generate:N` |
 | **Null** | — | ✅ | `null:` |
+| **Checksum** | — | ✅ | `checksum:` |
 
 > Use `keyring://alias` anywhere a connection string is expected. DtPipe resolves it from the OS keychain at runtime. Run `dtpipe secret set prod-db "pg:..."` to store a secret.
+
+> DtPipe's native providers cover common sources and destinations. For everything
+> else — object storage (S3, GCS, Azure Blob), Iceberg, MySQL/MariaDB, HTTP APIs,
+> spatial formats — DuckDB's extension ecosystem serves as a connector multiplier.
+> Load an extension with `--duck-init` on a DuckDB reader, writer, or `--sql` branch
+> to reach any source or destination DuckDB supports natively. No additional adapters required.
 
 ---
 
 ## Key Concepts
 
-- **Arrow-native pipeline** — transformations run on columnar Arrow batches; when source and destination are both columnar (Parquet, DuckDB, Arrow), data passes through without row conversion.
-- **Transformer pipeline** — `--fake`, `--mask`, `--compute`, `--filter`, and others chain in left-to-right order. Each flag group forms one pipeline step.
-- **DAG execution** — multiple `--input` sources with `--from`, `--sql`, or `--merge` assemble an in-memory directed acyclic graph, executed concurrently.
-- **YAML jobs** — any CLI command can be exported to a YAML job file with `--export-job` and replayed with `--job`. CLI flags override YAML values at runtime.
-- **Secret management** — connection strings can be stored in the OS keyring and referenced as `keyring://alias`, keeping credentials out of scripts and command history.
+Transformers (`--fake`, `--mask`, `--compute`, `--filter`, …) chain left-to-right. When source and destination are both columnar (Parquet, DuckDB, Arrow), data flows through without row conversion. Multiple `--input` sources with `--from`, `--sql`, or `--merge` form a DAG executed concurrently. Any CLI command can be saved to a YAML job file with `--export-job` and replayed with `--job`.
+
+**DuckDB is a remarkable engine** — fast, self-contained, with a rich SQL dialect and a thriving extension ecosystem. DtPipe uses it as a first-class component precisely because of that quality. When DuckDB alone covers your use case, use it directly. DtPipe adds value in the scenarios it wasn't designed for: anonymizing or masking data in transit, routing one source to multiple destinations concurrently, writing to target databases with strategies like upsert, auto-migrate, or bulk insert, reading from Oracle, SQL Server, or XML streams, and packaging pipelines as repeatable YAML jobs with integrated secret management. DtPipe contributes the pipeline layer; DuckDB contributes the SQL engine.
 
 ---
 

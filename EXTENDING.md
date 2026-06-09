@@ -7,14 +7,13 @@ This guide explains where and how to add a new *adapter* (reader/writer) or a *t
 
 ## Architecture Overview
 
-The solution is split into three layers:
-
 | Project | Role |
 |---|---|
 | `DtPipe.Core` | Interfaces, models, pipeline engine — **no external deps** |
 | `DtPipe.Adapters` | All row-based and columnar provider implementations |
+| `DtPipe.Transformers` | Row and columnar data transformers |
 | `DtPipe.Processors` | C# side of SQL stream processors (DuckDB) |
-| `DtPipe` | CLI main entry point, DI wiring, and standard Transformers |
+| `DtPipe` | CLI entry point, DI wiring |
 
 ### Where to put new code
 
@@ -314,6 +313,8 @@ transformers:
 - Add tests and a minimal usage example.
 
 ---
+
+## Advanced
 
 DtPipe uses the **Arrow C Data Interface** for zero-copy data exchange between pipeline stages.
 

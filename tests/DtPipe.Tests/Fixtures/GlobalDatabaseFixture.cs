@@ -46,7 +46,7 @@ public class GlobalDatabaseFixture : IAsyncLifetime
         // SQL Server
         tasks.Add(Task.Run(async () =>
         {
-            _sqlServer = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest")
+            _sqlServer = new MsSqlBuilder("mcr.microsoft.com/azure-sql-edge:latest")
                 .Build();
             await _sqlServer.StartAsync();
             SqlServerConnectionString = _sqlServer.GetConnectionString();

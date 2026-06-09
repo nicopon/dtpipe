@@ -37,6 +37,7 @@ dtpipe --job FILE [OVERRIDES]
 | `--column-types` | `"Id:uuid,Qty:int32"` | Explicit column type declarations for text readers |
 | `--auto-column-types` | | Infer column types from the first 100 rows |
 | `--path` | `"//Product"` | XPath / JSON path for record selection (XML, JsonL) |
+| `--duck-init` | `"LOAD httpfs"` | **(DuckDB only)** SQL executed after connection open. Supports `@file`, `keyring://alias`, `${{ENV_VAR}}`, `${{keyring://alias}}` |
 
 ---
 
@@ -95,8 +96,10 @@ into one step; a different flag type starts a new step.
 | `--on-error-exec` | `"..."` | SQL script to run on pipeline error |
 | `--finally-exec` | `"..."` | SQL script to run regardless of outcome |
 | `--prefix` | `"staging_"` | Table name prefix applied to all DB writers |
+| `--duck-init` | `"LOAD azure"` | **(DuckDB only)** SQL executed after connection open. Supports `@file`, `keyring://alias`, `${{ENV_VAR}}`, `${{keyring://alias}}` |
 
 > `--pre-exec`, `--post-exec` etc. accept inline SQL or a file path (`@scripts/pre.sql` or a `.sql` file path).
+> `--duck-init` runs on the DuckDB connection before reads or writes (unlike `--pre-exec` which runs on the target DB after connection).
 
 ---
 
@@ -116,9 +119,9 @@ into one step; a different flag type starts a new step.
 
 ## Providers
 
-| Provider | Input | Output | Prefix | Requires query | Stdin/Stdout |
-|:---|:---:|:---:|:---|:---:|:---:|
-| **DuckDB** | ✅ | ✅ | `duck:` | ✅ | — |
+| Provider | Input | Output | Prefix | Requires query | Stdin/Stdout | Notes |
+|:---|:---:|:---:|:---|:---:|:---:|:---|
+| **DuckDB** | ✅ | ✅ | `duck:` | ✅ | — | `--duck-init` supported |
 | **SQLite** | ✅ | ✅ | `sqlite:` | ✅ | — |
 | **PostgreSQL** | ✅ | ✅ | `pg:` | ✅ | — |
 | **Oracle** | ✅ | ✅ | `ora:` | ✅ | — |
@@ -136,6 +139,75 @@ into one step; a different flag type starts a new step.
 
 ---
 
+## DuckDB Options
+
+`--duck-init` runs SQL immediately after the DuckDB connection opens, before any query execution. It applies to all three DuckDB integration points:
+
+| Component | Flag | When it runs |
+|:---|:---|:---|
+| Reader (`duck:`) | `--duck-init` | After connection open, before query |
+| Writer (`duck:`) | `--duck-init` | After connection open, before schema initialization |
+| SQL processor (`--sql`) | `--duck-init` | After connection open and built-in `SET` statements, before Arrow stream registration |
+
+### Value resolution
+
+The `--duck-init` value is resolved through a sequential pipeline before execution:
+
+| Syntax | Resolution |
+|:---|:---|
+| `@/path/to/init.sql` | Load file content (replaces the full value) |
+| `keyring://alias` | Load full block from OS keyring (replaces the full value) |
+| `${{ENV_VAR}}` | Substitute environment variable inline |
+| `${{keyring://alias}}` | Substitute OS keyring secret inline |
+
+`@file` and `keyring://` (standalone) are mutually exclusive — the first match wins. Environment variable and inline keyring substitutions are applied to the result afterwards, so a keyring value can itself contain `${{VAR}}` placeholders.
+
+```bash
+# Inline SQL
+--duck-init "INSTALL httpfs; LOAD httpfs; SET s3_region='eu-west-1';"
+
+# From a file
+--duck-init "@/path/to/init.sql"
+
+# Full block from the OS keyring (credentials never appear in shell history)
+dtpipe secret set s3-init "LOAD httpfs; SET s3_region='eu-west-1'; SET s3_access_key_id='AKIA...';"
+--duck-init "keyring://s3-init"
+
+# Inline keyring secrets (mix multiple secrets in one string)
+--duck-init "LOAD httpfs; SET s3_region='${{keyring://s3-region}}'; SET s3_access_key_id='${{keyring://s3-key}}';"
+
+# Environment variables
+--duck-init "LOAD httpfs; SET s3_region='${{AWS_REGION}}'; SET s3_access_key_id='${{AWS_ACCESS_KEY_ID}}';"
+
+# Composable: keyring value that itself contains env var placeholders
+dtpipe secret set s3-init "LOAD httpfs; SET s3_region='${{AWS_REGION}}';"
+--duck-init "keyring://s3-init"   # → loads block, then substitutes ${{AWS_REGION}}
+```
+
+> `--pre-exec` / `--post-exec` run SQL **on the target database after writes**; `--duck-init` runs **on the DuckDB connection before reads or queries**. They serve different purposes and can be combined.
+
+In YAML job files, use the `provider-options` block keyed by component name:
+
+```yaml
+provider-options:
+  duck:           # reader
+    duck-init: "LOAD httpfs; SET s3_region='eu-west-1';"
+  duck-writer:    # writer
+    duck-init: "keyring://azure-init"
+```
+
+For a `--sql` branch, pass `--duck-init` alongside `--from` and `--sql` on the same branch:
+
+```bash
+dtpipe -i events.parquet --alias ev \
+  --from ev \
+  --duck-init "LOAD httpfs; SET s3_region='${{keyring://s3-region}}';" \
+  --sql "SELECT * FROM ev JOIN read_parquet('s3://bucket/ref.parquet') r ON ev.id = r.id" \
+  -o result.parquet
+```
+
+---
+
 ## DAG Syntax
 
 ### Options
@@ -146,6 +218,7 @@ into one step; a different flag type starts a new step.
 | `--from ALIAS[,ALIAS...]` | Streaming source(s). Fan-out uses a single alias; multi-stream processors use comma-separated aliases |
 | `--ref ALIAS[,ALIAS...]` | Materialized reference source(s) — fully preloaded before query execution. Use for JOIN lookups |
 | `--sql "QUERY"` | Inline SQL (DuckDB dialect: standard SQL, window functions, CTEs, JSON) |
+| `--duck-init "SQL"` | SQL to run on the DuckDB SQL processor connection after open (e.g. `LOAD httpfs`). `@path` reads from a file |
 | `--merge` | UNION ALL of all `--from` sources. Requires at least 2 streaming sources |
 
 > **`--ref` is intentionally materialized.** Secondary sources declared via `--ref` are read fully
