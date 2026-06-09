@@ -20,6 +20,7 @@ dtpipe --job FILE [OVERRIDES]
 | `--job FILE`, `-j FILE` | Load a pipeline from a YAML job file |
 | `--export-job FILE` | Serialize the current CLI pipeline to YAML and exit |
 | `--alias NAME` | Name the current branch for DAG references |
+| `--version` | Print version and exit |
 
 ---
 

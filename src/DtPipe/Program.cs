@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using DtPipe.Cli;
 using DtPipe.Cli.Infrastructure;
@@ -41,11 +42,11 @@ class Program
 		var serviceProvider = services.BuildServiceProvider();
 
 		Log.Logger = new LoggerConfiguration()
-			.MinimumLevel.Debug()
-			.WriteTo.Console(
+				.MinimumLevel.Debug()
+				.WriteTo.Console(
 				outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}",
 				standardErrorFromLevel: Serilog.Events.LogEventLevel.Verbose)
-			.CreateLogger();
+				.CreateLogger();
 
 		var jobService = serviceProvider.GetRequiredService<JobService>();
 
@@ -54,44 +55,55 @@ class Program
 
 		try
 		{
-            // 0. Shell completion — intercept [suggest] before any other dispatch
-            if (args.Length > 0 && args[0] == "[suggest]")
-                return HandleSuggest(args, serviceProvider);
+			// 0. Version check
+			if (args.Length > 0 && args[0] == "--version")
+			{
+				var assembly = Assembly.GetExecutingAssembly();
+				var version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+					?? assembly.GetName().Version?.ToString()
+					?? "unknown";
+				Console.WriteLine($"dtpipe {version}");
+				return 0;
+			}
 
-            // 1. Detect Subcommand vs Pipeline
-            if (args.Length > 0 && IsSubcommand(args[0]))
-            {
-                var rootCommand = jobService.BuildSubcommands();
-                return await rootCommand.Parse(args).InvokeAsync();
-            }
+			// 1. Shell completion — intercept [suggest] before any other dispatch
+			if (args.Length > 0 && args[0] == "[suggest]")
+				return HandleSuggest(args, serviceProvider);
 
-            // 2. Help Interception
-            if (args.Length == 0 || args.Any(a => a == "--help" || a == "-h" || a == "-?"))
-            {
-                HelpRenderer.Print(serviceProvider);
-                return 0;
-            }
+			// 2. Detect Subcommand vs Pipeline
+			if (args.Length > 0 && IsSubcommand(args[0]))
+			{
+				var rootCommand = jobService.BuildSubcommands();
+				return await rootCommand.Parse(args).InvokeAsync();
+			}
 
-            // 3. Pipeline Execution (New Parser)
-            var registry = FlagRegistryFactory.Build(serviceProvider);
-            var streamTransformerFactories = serviceProvider.GetRequiredService<IEnumerable<IStreamTransformerFactory>>();
+			// 3. Help Interception
+			if (args.Length == 0 || args.Any(a => a == "--help" || a == "-h" || a == "-?"))
+			{
+				HelpRenderer.Print(serviceProvider);
+				return 0;
+			}
 
-            var lexer = new PipelineLexer(registry);
-            var parsedPipeline = lexer.Parse(args);
-            var (jobs, dag, contexts) = PipelineToJobConverter.Convert(parsedPipeline, streamTransformerFactories);
+			// 4. Pipeline Execution (New Parser)
+			var registry = FlagRegistryFactory.Build(serviceProvider);
+			var streamTransformerFactories = serviceProvider.GetRequiredService<IEnumerable<IStreamTransformerFactory>>();
 
-            if (!string.IsNullOrEmpty(parsedPipeline.Globals.ExportJobFile))
-            {
-                DtPipe.Configuration.JobFileWriter.Write(parsedPipeline.Globals.ExportJobFile, jobs);
-                return 0;
-            }
+			var lexer = new PipelineLexer(registry);
+			var parsedPipeline = lexer.Parse(args);
+			var (jobs, dag, contexts) = PipelineToJobConverter.Convert(parsedPipeline, streamTransformerFactories);
 
-            return await jobService.ExecutePipelineAsync(jobs, dag, contexts, parsedPipeline.Globals, CancellationToken.None);
+			if (!string.IsNullOrEmpty(parsedPipeline.Globals.ExportJobFile))
+			{
+				DtPipe.Configuration.JobFileWriter.Write(parsedPipeline.Globals.ExportJobFile, jobs);
+				return 0;
+			}
+
+			return await jobService.ExecutePipelineAsync(jobs, dag, contexts, parsedPipeline.Globals, CancellationToken.None);
 		}
 		catch (Exception ex)
 		{
-            Console.Error.WriteLine($"[ERROR] {ex.Message}");
-            if (Environment.GetEnvironmentVariable("DEBUG") == "1") Console.Error.WriteLine(ex.StackTrace);
+			Console.Error.WriteLine($"[ERROR] {ex.Message}");
+			if (Environment.GetEnvironmentVariable("DEBUG") == "1") Console.Error.WriteLine(ex.StackTrace);
 			return 1;
 		}
 		finally
@@ -101,150 +113,150 @@ class Program
 		}
 	}
 
-    private static bool IsSubcommand(string arg)
-    {
-        var subs = new[] { "inspect", "providers", "completion", "secret" };
-        return subs.Contains(arg.ToLowerInvariant());
-    }
+	private static bool IsSubcommand(string arg)
+	{
+		var subs = new[] { "inspect", "providers", "completion", "secret" };
+		return subs.Contains(arg.ToLowerInvariant());
+	}
 
-    /// <summary>
-    /// Stage-aware shell completion handler.
-    /// Protocol: dtpipe [suggest] &lt;cursor_word_index&gt; &lt;word1&gt; &lt;word2&gt; ...
-    /// Emits one completion candidate per line (with [NOSUSP] suffix to suppress space for prefix values).
-    /// </summary>
-    private static int HandleSuggest(string[] args, IServiceProvider sp)
-    {
-        // args = ["[suggest]", "<cursor_pos>", "<word1>", ...]
-        if (args.Length < 2 || !int.TryParse(args[1], out var cursorPos)) return 0;
-        var words = args.Skip(2).ToArray();          // words typed so far (excluding dtpipe itself)
-        var partial = cursorPos <= words.Length       // word currently being typed (may be incomplete)
-            ? words.ElementAtOrDefault(cursorPos - 1) ?? ""
-            : "";
-        var precedingWords = words.Take(Math.Max(0, cursorPos - 1)).ToArray();
+	/// <summary>
+	/// Stage-aware shell completion handler.
+	/// Protocol: dtpipe [suggest] &lt;cursor_word_index&gt; &lt;word1&gt; &lt;word2&gt; ...
+	/// Emits one completion candidate per line (with [NOSUSP] suffix to suppress space for prefix values).
+	/// </summary>
+	private static int HandleSuggest(string[] args, IServiceProvider sp)
+	{
+		// args = ["[suggest]", "<cursor_pos>", "<word1>", ...]
+		if (args.Length < 2 || !int.TryParse(args[1], out var cursorPos)) return 0;
+		var words = args.Skip(2).ToArray();          // words typed so far (excluding dtpipe itself)
+		var partial = cursorPos <= words.Length       // word currently being typed (may be incomplete)
+			 ? words.ElementAtOrDefault(cursorPos - 1) ?? ""
+			 : "";
+		var precedingWords = words.Take(Math.Max(0, cursorPos - 1)).ToArray();
 
-        // Build the unified FlagRegistry (shared with Main pipeline execution)
-        var registry = FlagRegistryFactory.Build(sp);
-        var readerFactories    = sp.GetRequiredService<IEnumerable<IStreamReaderFactory>>().ToList();
-        var writerFactories    = sp.GetRequiredService<IEnumerable<IDataWriterFactory>>().ToList();
-        var transformerFactories = sp.GetRequiredService<IEnumerable<IDataTransformerFactory>>().ToList();
+		// Build the unified FlagRegistry (shared with Main pipeline execution)
+		var registry = FlagRegistryFactory.Build(sp);
+		var readerFactories    = sp.GetRequiredService<IEnumerable<IStreamReaderFactory>>().ToList();
+		var writerFactories    = sp.GetRequiredService<IEnumerable<IDataWriterFactory>>().ToList();
+		var transformerFactories = sp.GetRequiredService<IEnumerable<IDataTransformerFactory>>().ToList();
 
-        // Determine current stage by scanning preceding words.
-        // Stage transitions: Reader (default) → Pipeline (on first transformer trigger) → Writer (on -o).
-        var currentStage = FlagStage.Reader;
-        string? activeReaderProvider = null;
-        string? activeWriterProvider = null;
-        string? lastPipelineTrigger  = null;
-        bool valuePending = false; // true when the next word is a flag value (not a flag)
+		// Determine current stage by scanning preceding words.
+		// Stage transitions: Reader (default) → Pipeline (on first transformer trigger) → Writer (on -o).
+		var currentStage = FlagStage.Reader;
+		string? activeReaderProvider = null;
+		string? activeWriterProvider = null;
+		string? lastPipelineTrigger  = null;
+		bool valuePending = false; // true when the next word is a flag value (not a flag)
 
-        for (int i = 0; i < precedingWords.Length; i++)
-        {
-            var w = precedingWords[i];
-            if (valuePending) { valuePending = false; continue; } // skip flag values
+		for (int i = 0; i < precedingWords.Length; i++)
+		{
+			var w = precedingWords[i];
+			if (valuePending) { valuePending = false; continue; } // skip flag values
 
-            if (w == "-i" || w == "--input")
-            {
-                currentStage         = FlagStage.Reader;
-                activeReaderProvider = precedingWords.ElementAtOrDefault(i + 1);
-                valuePending      = true;
-            }
-            else if (w == "-o" || w == "--output")
-            {
-                currentStage         = FlagStage.Writer;
-                activeWriterProvider = precedingWords.ElementAtOrDefault(i + 1);
-                valuePending      = true;
-            }
-            else
-            {
-                var def = registry.Lookup(w);
-                if (def?.Stage == FlagStage.Pipeline && currentStage == FlagStage.Reader)
-                {
-                    currentStage        = FlagStage.Pipeline;
-                    lastPipelineTrigger = w;
-                }
-                if (def != null && def.Arity != FlagArity.Boolean) valuePending = true;
-            }
-        }
+			if (w == "-i" || w == "--input")
+			{
+				currentStage         = FlagStage.Reader;
+				activeReaderProvider = precedingWords.ElementAtOrDefault(i + 1);
+				valuePending      = true;
+			}
+			else if (w == "-o" || w == "--output")
+			{
+				currentStage         = FlagStage.Writer;
+				activeWriterProvider = precedingWords.ElementAtOrDefault(i + 1);
+				valuePending      = true;
+			}
+			else
+			{
+				var def = registry.Lookup(w);
+				if (def?.Stage == FlagStage.Pipeline && currentStage == FlagStage.Reader)
+				{
+					currentStage        = FlagStage.Pipeline;
+					lastPipelineTrigger = w;
+				}
+				if (def != null && def.Arity != FlagArity.Boolean) valuePending = true;
+			}
+		}
 
-        // Resolve the active provider prefix (e.g. "pg" from "pg:host=...")
-        static string? ExtractProviderPrefix(string? connStr) =>
-            connStr != null && connStr.Contains(':') ? connStr.Split(':')[0].ToLowerInvariant() : null;
+		// Resolve the active provider prefix (e.g. "pg" from "pg:host=...")
+		static string? ExtractProviderPrefix(string? connStr) =>
+			connStr != null && connStr.Contains(':') ? connStr.Split(':')[0].ToLowerInvariant() : null;
 
-        var readerPrefix = ExtractProviderPrefix(activeReaderProvider);
-        var writerPrefix = ExtractProviderPrefix(activeWriterProvider);
+		var readerPrefix = ExtractProviderPrefix(activeReaderProvider);
+		var writerPrefix = ExtractProviderPrefix(activeWriterProvider);
 
-        // Collect candidates for the current stage
-        var candidates = new List<string>();
+		// Collect candidates for the current stage
+		var candidates = new List<string>();
 
-        if (currentStage == FlagStage.Reader)
-        {
-            // Global/structural flags always available
-            foreach (var def in registry.GetAll().Where(d => d.Stage == FlagStage.All && d.Name.StartsWith("--")))
-                candidates.Add(def.Name);
+		if (currentStage == FlagStage.Reader)
+		{
+			// Global/structural flags always available
+			foreach (var def in registry.GetAll().Where(d => d.Stage == FlagStage.All && d.Name.StartsWith("--")))
+				candidates.Add(def.Name);
 
-            // Reader flags for the active provider (or all readers if no provider yet)
-            IEnumerable<ICliContributor> activeReaders = readerPrefix != null
-                ? readerFactories.Where(f => f.ComponentName == readerPrefix).OfType<ICliContributor>()
-                : readerFactories.OfType<ICliContributor>();
-            foreach (var c in activeReaders)
-                foreach (var def in c.GetFlagDefs()) candidates.Add(def.Name);
+			// Reader flags for the active provider (or all readers if no provider yet)
+			IEnumerable<ICliContributor> activeReaders = readerPrefix != null
+				 ? readerFactories.Where(f => f.ComponentName == readerPrefix).OfType<ICliContributor>()
+				 : readerFactories.OfType<ICliContributor>();
+			foreach (var c in activeReaders)
+				foreach (var def in c.GetFlagDefs()) candidates.Add(def.Name);
 
-            // Transformer triggers (to transition to Pipeline stage)
-            foreach (var def in registry.GetAll().Where(d => d.Stage == FlagStage.Pipeline))
-                candidates.Add(def.Name);
+			// Transformer triggers (to transition to Pipeline stage)
+			foreach (var def in registry.GetAll().Where(d => d.Stage == FlagStage.Pipeline))
+				candidates.Add(def.Name);
 
-            // -o to transition to Writer stage
-            candidates.Add("-o");
+			// -o to transition to Writer stage
+			candidates.Add("-o");
 
-            // Provider prefixes when partial doesn't look like a flag
-            if (partial == "" || !partial.StartsWith("-"))
-                foreach (var f in readerFactories) candidates.Add(f.ComponentName + ":[NOSUSP]");
-        }
-        else if (currentStage == FlagStage.Pipeline)
-        {
-            // Flags for the active transformer
-            var triggerDef = lastPipelineTrigger != null ? registry.Lookup(lastPipelineTrigger) : null;
-            var activeTFactory = transformerFactories
-                .FirstOrDefault(c => c.ComponentName == triggerDef?.Description)
-                as ICliContributor;
-            if (activeTFactory != null)
-                foreach (var def in activeTFactory.GetFlagDefs()) candidates.Add(def.Name);
+			// Provider prefixes when partial doesn't look like a flag
+			if (partial == "" || !partial.StartsWith("-"))
+				foreach (var f in readerFactories) candidates.Add(f.ComponentName + ":[NOSUSP]");
+		}
+		else if (currentStage == FlagStage.Pipeline)
+		{
+			// Flags for the active transformer
+			var triggerDef = lastPipelineTrigger != null ? registry.Lookup(lastPipelineTrigger) : null;
+			var activeTFactory = transformerFactories
+				 .FirstOrDefault(c => c.ComponentName == triggerDef?.Description)
+				as ICliContributor;
+			if (activeTFactory != null)
+				foreach (var def in activeTFactory.GetFlagDefs()) candidates.Add(def.Name);
 
-            // Additional pipeline triggers
-            foreach (var def in registry.GetAll().Where(d => d.Stage == FlagStage.Pipeline))
-                candidates.Add(def.Name);
+			// Additional pipeline triggers
+			foreach (var def in registry.GetAll().Where(d => d.Stage == FlagStage.Pipeline))
+				candidates.Add(def.Name);
 
-            // -o to end pipeline
-            candidates.Add("-o");
-        }
-        else // Writer
-        {
-            // Writer flags for the active provider (or all writers if no provider yet)
-            IEnumerable<ICliContributor> activeWriters = writerPrefix != null
-                ? writerFactories.Where(f => f.ComponentName == writerPrefix).OfType<ICliContributor>()
-                : writerFactories.OfType<ICliContributor>();
-            foreach (var c in activeWriters)
-                foreach (var def in c.GetFlagDefs()) candidates.Add(def.Name);
+			// -o to end pipeline
+			candidates.Add("-o");
+		}
+		else // Writer
+		{
+			// Writer flags for the active provider (or all writers if no provider yet)
+			IEnumerable<ICliContributor> activeWriters = writerPrefix != null
+				 ? writerFactories.Where(f => f.ComponentName == writerPrefix).OfType<ICliContributor>()
+				 : writerFactories.OfType<ICliContributor>();
+			foreach (var c in activeWriters)
+				foreach (var def in c.GetFlagDefs()) candidates.Add(def.Name);
 
-            // Global flags
-            foreach (var def in registry.GetAll().Where(d => d.Stage == FlagStage.All && d.Name.StartsWith("--")))
-                candidates.Add(def.Name);
+			// Global flags
+			foreach (var def in registry.GetAll().Where(d => d.Stage == FlagStage.All && d.Name.StartsWith("--")))
+				candidates.Add(def.Name);
 
-            // Provider prefixes after -o
-            if (partial == "" || !partial.StartsWith("-"))
-                foreach (var f in writerFactories) candidates.Add(f.ComponentName + ":[NOSUSP]");
-        }
+			// Provider prefixes after -o
+			if (partial == "" || !partial.StartsWith("-"))
+				foreach (var f in writerFactories) candidates.Add(f.ComponentName + ":[NOSUSP]");
+		}
 
-        // Filter to prefix match and deduplicate, then emit
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var c in candidates)
-        {
-            var bare = c.Replace("[NOSUSP]", "");
-            if (!seen.Add(bare)) continue;
-            if (!string.IsNullOrEmpty(partial) && !bare.StartsWith(partial, StringComparison.OrdinalIgnoreCase)) continue;
-            Console.WriteLine(c);
-        }
-        return 0;
-    }
+		// Filter to prefix match and deduplicate, then emit
+		var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		foreach (var c in candidates)
+		{
+			var bare = c.Replace("[NOSUSP]", "");
+			if (!seen.Add(bare)) continue;
+			if (!string.IsNullOrEmpty(partial) && !bare.StartsWith(partial, StringComparison.OrdinalIgnoreCase)) continue;
+			Console.WriteLine(c);
+		}
+		return 0;
+	}
 
 	private static void ConfigureServices(IServiceCollection services)
 	{
@@ -327,7 +339,7 @@ class Program
 		services.AddSingleton<ICliContributor>(sp => (ICliContributor)sp.GetServices<IStreamReaderFactory>().First(f => f.ComponentName == descriptor.ComponentName));
 	}
 	private static void RegisterTransformer<TFac>(IServiceCollection services) where TFac : class, IDataTransformerFactory 
-    {
-        services.AddSingleton<IDataTransformerFactory>(sp => new CliDataTransformerFactory(ActivatorUtilities.CreateInstance<TFac>(sp)));
-    }
+	{
+		services.AddSingleton<IDataTransformerFactory>(sp => new CliDataTransformerFactory(ActivatorUtilities.CreateInstance<TFac>(sp)));
+	}
 }

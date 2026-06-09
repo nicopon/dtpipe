@@ -46,6 +46,7 @@ public static class HelpRenderer
         WriteFlag(console, "--log <path>",            "Log file path");
         WriteFlag(console, "--export-job <file>",     "Export current CLI as YAML job file");
         WriteFlag(console, "--metrics-path <path>",   "Path to save JSON metrics");
+        WriteFlag(console, "--version",                "Print version and exit");
         console.WriteLine();
 
         // Component-contributed flags, grouped by category
