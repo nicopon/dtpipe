@@ -1,6 +1,6 @@
 #!/bin/bash
-# Start Docker infrastructure for integration tests
-# This script checks if containers are already running and healthy before starting them.
+# Start container infrastructure for integration tests
+# This script supports both Docker and Podman.
 
 set -e
 
@@ -13,56 +13,51 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-# Check if docker-compose.yml exists
-if [ ! -f "$COMPOSE_FILE" ]; then
-    echo -e "${RED}Error: docker-compose.yml not found at $COMPOSE_FILE${NC}"
+# Detect container engine: docker or podman
+if command -v docker &> /dev/null && docker info &> /dev/null; then
+    ENGINE_CMD="docker"
+elif command -v podman &> /dev/null && podman info &> /dev/null; then
+    ENGINE_CMD="podman"
+else
+    echo -e "${RED}Error: Neither Docker nor Podman is installed or running${NC}"
     exit 1
 fi
 
-# Check if Docker is available
-if ! command -v docker &> /dev/null; then
-    echo -e "${RED}Error: Docker is not installed${NC}"
-    exit 1
-fi
-
-if ! docker info &> /dev/null; then
-    echo -e "${RED}Error: Docker is not running or permission denied${NC}"
-    exit 1
-fi
-
-# Determine the correct docker compose command
+# Detect compose tool: docker-compose, docker compose, or podman-compose
 if command -v docker-compose &> /dev/null; then
     COMPOSE_CMD="docker-compose"
-elif docker compose version &> /dev/null 2>&1; then
-    COMPOSE_CMD="docker compose"
+elif $ENGINE_CMD compose version &> /dev/null 2>&1; then
+    COMPOSE_CMD="$ENGINE_CMD compose"
+elif command -v podman-compose &> /dev/null; then
+    COMPOSE_CMD="podman-compose"
 else
-    echo -e "${RED}Error: Neither docker-compose nor docker compose is available${NC}"
+    echo -e "${RED}Error: Neither docker-compose, docker compose, nor podman-compose is available${NC}"
     exit 1
 fi
 
 # Function to check if a container is running and healthy
 is_container_healthy() {
     local container_name=$1
-    
-    # Check if container exists and is running
-    local state=$(docker inspect --format='{{.State.Status}}' "$container_name" 2>/dev/null || echo "not-found")
-    
+
+     # Check if container exists and is running
+    local state=$($ENGINE_CMD inspect --format='{{.State.Status}}' "$container_name" 2>/dev/null || echo "not-found")
+
     if [ "$state" != "running" ]; then
         return 1
     fi
-    
-    # Check health status (if healthcheck is defined)
-    local health_status=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container_name" 2>/dev/null || echo "none")
-    
+
+     # Check health status (if healthcheck is defined)
+    local health_status=$($ENGINE_CMD inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container_name" 2>/dev/null || echo "none")
+
     if [ "$health_status" = "healthy" ]; then
         return 0
     fi
 
     if [ "$health_status" = "none" ]; then
-        # If no healthcheck is defined, we rely on the container being 'running'
+         # If no healthcheck is defined, we rely on the container being 'running'
         return 0
     fi
-    
+
     return 1
 }
 
@@ -70,28 +65,28 @@ is_container_healthy() {
 is_db_ready() {
     local container=$1
     case "$container" in
-        "dtpipe-integ-postgres")
-            docker exec "$container" pg_isready -U postgres >/dev/null 2>&1
+         "dtpipe-integ-postgres")
+            $ENGINE_CMD exec "$container" pg_isready -U postgres >/dev/null 2>&1
             return $?
-            ;;
-        "dtpipe-integ-mssql")
-            # Using sqlcmd inside the tools sidecar (shares networking via docker-compose)
-            docker exec "dtpipe-integ-mssql-tools" /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'Password123!' -Q "SELECT 1" >/dev/null 2>&1
+             ;;
+         "dtpipe-integ-mssql")
+             # Using sqlcmd inside the tools sidecar (shares networking via docker-compose)
+            $ENGINE_CMD exec "dtpipe-integ-mssql-tools" /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'Password123!' -Q "SELECT 1" >/dev/null 2>&1
             return $?
-            ;;
-        "dtpipe-integ-oracle")
-            # Oracle free has a healthcheck script or we can use sqlplus
-            if docker exec "$container" bash -c "ls /usr/local/bin/healthcheck.sh" >/dev/null 2>&1; then
-                docker exec "$container" /usr/local/bin/healthcheck.sh >/dev/null 2>&1
+             ;;
+         "dtpipe-integ-oracle")
+             # Oracle free has a healthcheck script or we can use sqlplus
+            if $ENGINE_CMD exec "$container" bash -c "ls /usr/local/bin/healthcheck.sh" >/dev/null 2>&1; then
+                $ENGINE_CMD exec "$container" /usr/local/bin/healthcheck.sh >/dev/null 2>&1
                 return $?
             else
-                docker exec "$container" sqlplus -L -S / as sysdba <<< "SELECT 1 FROM DUAL;" >/dev/null 2>&1
+                $ENGINE_CMD exec "$container" sqlplus -L -S / as sysdba <<< "SELECT 1 FROM DUAL;" >/dev/null 2>&1
                 return $?
             fi
-            ;;
-        *)
+             ;;
+         *)
             return 0 # Default to success for others
-            ;;
+             ;;
     esac
 }
 
@@ -103,7 +98,7 @@ check_all_ready() {
         if ! is_container_healthy "$container"; then
             return 1
         fi
-        # Deeper check for databases
+         # Deeper check for databases
         if ! is_db_ready "$container"; then
             return 1
         fi
@@ -118,7 +113,7 @@ if check_all_ready; then
 fi
 
 # Start containers
-echo -e "${YELLOW}Starting Docker infrastructure...${NC}"
+echo -e "${YELLOW}Starting container infrastructure with $ENGINE_CMD...${NC}"
 $COMPOSE_CMD -f "$COMPOSE_FILE" up -d
 
 # Wait for containers to be healthy
@@ -131,12 +126,12 @@ while [ $elapsed -lt $max_wait ]; do
         echo -e "\n${GREEN}✓ All containers are running and healthy${NC}"
         exit 0
     fi
-    
+
     sleep 3
     elapsed=$((elapsed + 3))
     echo -n "."
 done
 
 echo -e "\n${RED}Error: Infrastructure failed to become healthy within ${max_wait}s${NC}"
-docker ps
+$ENGINE_CMD ps
 exit 1
