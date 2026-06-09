@@ -10,6 +10,7 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
+using DtPipe.Core.Security;
 using DtPipe.Processors.Sql;
 using DuckDB.NET.Data;
 using DuckDB.NET.Native;
@@ -21,6 +22,8 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
 {
     private readonly IMemoryChannelRegistry _registry;
     private readonly string _query;
+    private readonly string? _initSql;
+    private readonly IStringContentResolver? _resolver;
     private readonly string _mainAlias;
     private readonly string _mainChannelAlias;
     private readonly string[] _refAliases;
@@ -48,10 +51,14 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
         string mainChannelAlias,
         string[] refAliases,
         string[] refChannelAliases,
-        ILogger<DuckDBSqlProcessor> logger)
+        ILogger<DuckDBSqlProcessor> logger,
+        string? initSql = null,
+        IStringContentResolver? resolver = null)
     {
         _registry = registry;
         _query = query;
+        _initSql = initSql;
+        _resolver = resolver;
         _mainAlias = mainAlias;
         _mainChannelAlias = mainChannelAlias;
         _refAliases = refAliases;
@@ -82,6 +89,8 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
                 cmd.CommandText = "SET arrow_lossless_conversion = true";
                 await cmd.ExecuteNonQueryAsync(ct);
             }
+
+            await RunInitSqlAsync(_conn, _initSql, _resolver, ct);
 
             ValidateAliases();
 
@@ -532,6 +541,18 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────────────
+
+    private static async Task RunInitSqlAsync(DuckDBConnection conn, string? initSql, IStringContentResolver? resolver, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(initSql)) return;
+
+        var sql = await (resolver ?? DefaultStringContentResolver.Instance).ResolveAsync(initSql, ct);
+        if (string.IsNullOrWhiteSpace(sql)) return;
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
 
     private static ReadOnlyMemory<object?[]> ConvertBatchToRows(RecordBatch batch)
         => SqlProcessorHelpers.ConvertBatchToRows(batch);

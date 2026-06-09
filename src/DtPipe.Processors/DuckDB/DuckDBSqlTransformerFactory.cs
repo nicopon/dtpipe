@@ -1,6 +1,7 @@
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Core.Pipelines.Dag;
+using DtPipe.Core.Security;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -48,6 +49,9 @@ public class DuckDBSqlTransformerFactory : IStreamTransformerFactory
         var registry = serviceProvider.GetRequiredService<IMemoryChannelRegistry>();
         var loggerFactory = serviceProvider.GetRequiredService<ILoggerFactory>();
 
+        var initSql = BranchArgParser.ExtractValue(branchArgs, "--duck-init");
+        var resolver = serviceProvider.GetService<IStringContentResolver>();
+
         var processor = new DuckDBSqlProcessor(
             registry: registry,
             query: query,
@@ -55,7 +59,9 @@ public class DuckDBSqlTransformerFactory : IStreamTransformerFactory
             mainChannelAlias: mainChannelAlias,
             refAliases: refAliases,
             refChannelAliases: refChannelAliases,
-            logger: loggerFactory.CreateLogger<DuckDBSqlProcessor>());
+            logger: loggerFactory.CreateLogger<DuckDBSqlProcessor>(),
+            initSql: initSql,
+            resolver: resolver);
 
         return new Sql.SqlStreamTransformer(processor);
     }

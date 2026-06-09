@@ -5,6 +5,7 @@ using Apache.Arrow;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
+using DtPipe.Core.Security;
 using DuckDB.NET.Data;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -16,6 +17,8 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
 	private readonly DuckDBConnection _connection;
 	private readonly DuckDBCommand _command;
 	private readonly string _query;
+	private readonly string? _initSql;
+	private readonly IStringContentResolver? _resolver;
 	private readonly ILogger _logger;
 	private DuckDBDataReader? _reader;
 	private readonly SemaphoreSlim _semaphore = new(1, 1);
@@ -35,16 +38,18 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
 	[GeneratedRegex(@"^\s*(\w+)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
 	private static partial Regex FirstWordRegex();
 
-	public DuckDataSourceReader(string connectionString, string query, DuckDbReaderOptions options, ILogger? logger = null, int queryTimeout = 0)
-		: this(new DuckDBConnection(connectionString), query, options, logger, queryTimeout)
+	public DuckDataSourceReader(string connectionString, string query, DuckDbReaderOptions options, ILogger? logger = null, int queryTimeout = 0, IStringContentResolver? resolver = null)
+		: this(new DuckDBConnection(connectionString), query, options, logger, queryTimeout, resolver)
 	{
 	}
 
-	public DuckDataSourceReader(DuckDBConnection connection, string query, DuckDbReaderOptions options, ILogger? logger = null, int queryTimeout = 0)
+	public DuckDataSourceReader(DuckDBConnection connection, string query, DuckDbReaderOptions options, ILogger? logger = null, int queryTimeout = 0, IStringContentResolver? resolver = null)
 	{
 		ValidateQueryIsSafeSelect(query);
 
 		_query = query;
+		_initSql = options.InitSql;
+		_resolver = resolver;
 		_logger = logger ?? NullLogger.Instance;
 		_connection = connection;
 		_command = new DuckDBCommand(query, _connection)
@@ -93,6 +98,8 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
 			limitCmd.CommandText = "PRAGMA memory_limit='2GB'; PRAGMA threads=2;";
 			await limitCmd.ExecuteNonQueryAsync(ct);
 		}
+
+		await DuckInitSqlHelper.RunAsync(_connection, _initSql, _resolver, ct);
 
 		_reader = (DuckDBDataReader)await _command.ExecuteReaderAsync(ct);
 		Columns = ExtractColumns(_reader);

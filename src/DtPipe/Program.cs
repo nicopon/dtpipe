@@ -269,6 +269,7 @@ class Program
 		services.AddSingleton<OptionsRegistry>();
 		services.AddSingleton<Spectre.Console.IAnsiConsole>(sp => Spectre.Console.AnsiConsole.Create(new Spectre.Console.AnsiConsoleSettings { Out = new Spectre.Console.AnsiConsoleOutput(Console.Error) }));
 		services.AddSingleton<JobService>();
+		services.AddSingleton<DtPipe.Core.Security.IStringContentResolver, DtPipe.Cli.Security.CliStringContentResolver>();
 
 		RegisterReader<DtPipe.Adapters.Arrow.ArrowReaderDescriptor>(services);
 		RegisterReader<DtPipe.Adapters.Csv.CsvReaderDescriptor>(services);

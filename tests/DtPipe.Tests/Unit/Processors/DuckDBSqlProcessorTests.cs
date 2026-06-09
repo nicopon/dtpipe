@@ -431,6 +431,166 @@ public class DuckDBSqlProcessorTests
         Assert.Equal(10, batches.Sum(b => b.Length));
     }
 
+    // ── --duck-init Tests ──────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that initSql runs before the main query on the same in-memory connection.
+    /// Creates a TEMP TABLE in initSql and SELECTs from it in the main query — if initSql
+    /// did not run, the query would fail with "table not found".
+    /// No streaming source is required: the query is a plain table scan.
+    /// </summary>
+    [Fact]
+    public async Task InitSql_CreatesObject_ObjectIsVisibleInQuery()
+    {
+        var emptyRegistry = new Mock<IMemoryChannelRegistry>().Object;
+
+        var processor = new DuckDBSqlProcessor(
+            emptyRegistry,
+            "SELECT val FROM _init_check",
+            mainAlias: "", mainChannelAlias: "",
+            refAliases: [], refChannelAliases: [],
+            NullLogger<DuckDBSqlProcessor>.Instance,
+            initSql: "CREATE TEMP TABLE _init_check (val VARCHAR); INSERT INTO _init_check VALUES ('duck_init_test')");
+
+        await processor.OpenAsync();
+        var batches = new List<RecordBatch>();
+        await foreach (var b in processor.ReadRecordBatchesAsync())
+            batches.Add(b);
+        processor.Dispose();
+
+        Assert.Equal(1, batches.Sum(b => b.Length));
+        var col = Assert.IsType<Apache.Arrow.StringArray>(batches[0].Column(0));
+        Assert.Equal("duck_init_test", col.GetString(0));
+    }
+
+    /// <summary>
+    /// Verifies that a macro defined in initSql is callable in the main query.
+    /// Uses only built-in DuckDB SQL — no extension download required.
+    /// </summary>
+    [Fact]
+    public async Task InitSql_CreateMacro_MacroIsUsableInQuery()
+    {
+        var field = new Field("val", Apache.Arrow.Types.Int32Type.Default, nullable: false);
+        var schema = new Schema(new[] { field }, null);
+        var arr = new Int32Array.Builder().AppendRange(new[] { 1, 2, 3 }).Build();
+        var batch = new RecordBatch(schema, new IArrowArray[] { arr }, 3);
+
+        const string alias = "src";
+        var registry = BuildRegistry(alias, schema, new[] { batch });
+
+        var processor = new DuckDBSqlProcessor(
+            registry,
+            "SELECT triple(val) AS result FROM src ORDER BY val",
+            alias, alias,
+            refAliases: [], refChannelAliases: [],
+            NullLogger<DuckDBSqlProcessor>.Instance,
+            initSql: "CREATE MACRO triple(x) AS x * 3");
+
+        await processor.OpenAsync();
+        var batches = new List<RecordBatch>();
+        await foreach (var b in processor.ReadRecordBatchesAsync())
+            batches.Add(b);
+        processor.Dispose();
+
+        Assert.Equal(3, batches.Sum(b => b.Length));
+        var resultCol = Assert.IsType<Int32Array>(batches[0].Column(0));
+        Assert.Equal(3, resultCol.GetValue(0));
+        Assert.Equal(6, resultCol.GetValue(1));
+        Assert.Equal(9, resultCol.GetValue(2));
+    }
+
+    /// <summary>
+    /// Verifies that LOAD json (bundled in DuckDB.NET.Data.Full — no network required)
+    /// via initSql enables JSON functions in the subsequent query.
+    /// json is auto-loaded in DuckDB 1.5.x, so LOAD json is a no-op if already active;
+    /// this test confirms it does not break normal processor operation.
+    /// </summary>
+    [Fact]
+    public async Task InitSql_LoadJsonExtension_JsonFunctionsWorkInQuery()
+    {
+        var emptyRegistry = new Mock<IMemoryChannelRegistry>().Object;
+
+        var processor = new DuckDBSqlProcessor(
+            emptyRegistry,
+            "SELECT json_array_length('[10, 20, 30]') AS cnt",
+            mainAlias: "", mainChannelAlias: "",
+            refAliases: [], refChannelAliases: [],
+            NullLogger<DuckDBSqlProcessor>.Instance,
+            initSql: "LOAD json");
+
+        await processor.OpenAsync();
+        var batches = new List<RecordBatch>();
+        await foreach (var b in processor.ReadRecordBatchesAsync())
+            batches.Add(b);
+        processor.Dispose();
+
+        Assert.Equal(1, batches.Sum(b => b.Length));
+        // json_array_length returns UBIGINT in DuckDB → UInt64Array in Arrow
+        var col = batches[0].Column(0);
+        Assert.NotNull(col);
+        Assert.Equal(1, col.Length);
+    }
+
+    /// <summary>
+    /// Verifies that the @file prefix causes initSql to be read from disk, not
+    /// interpreted as inline SQL. The file creates a temp table; the query
+    /// selects from it to confirm the file content was executed.
+    /// </summary>
+    [Fact]
+    public async Task InitSql_AtFilePrefix_LoadsSqlFromFile()
+    {
+        var tempFile = Path.GetTempFileName();
+        try
+        {
+            await File.WriteAllTextAsync(tempFile,
+                "CREATE TEMP TABLE _file_check (val VARCHAR); INSERT INTO _file_check VALUES ('from_file_test')");
+
+            var emptyRegistry = new Mock<IMemoryChannelRegistry>().Object;
+            var processor = new DuckDBSqlProcessor(
+                emptyRegistry,
+                "SELECT val FROM _file_check",
+                mainAlias: "", mainChannelAlias: "",
+                refAliases: [], refChannelAliases: [],
+                NullLogger<DuckDBSqlProcessor>.Instance,
+                initSql: $"@{tempFile}");
+
+            await processor.OpenAsync();
+            var batches = new List<RecordBatch>();
+            await foreach (var b in processor.ReadRecordBatchesAsync())
+                batches.Add(b);
+            processor.Dispose();
+
+            Assert.Equal(1, batches.Sum(b => b.Length));
+            var col = Assert.IsType<Apache.Arrow.StringArray>(batches[0].Column(0));
+            Assert.Equal("from_file_test", col.GetString(0));
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
+    }
+
+    /// <summary>
+    /// Verifies that a syntax error in initSql causes OpenAsync to throw before any
+    /// query execution — the error must propagate and not be silently swallowed.
+    /// </summary>
+    [Fact]
+    public async Task InitSql_InvalidSql_ThrowsOnOpenAsync()
+    {
+        var emptyRegistry = new Mock<IMemoryChannelRegistry>().Object;
+
+        var processor = new DuckDBSqlProcessor(
+            emptyRegistry,
+            "SELECT 1 AS n",
+            mainAlias: "", mainChannelAlias: "",
+            refAliases: [], refChannelAliases: [],
+            NullLogger<DuckDBSqlProcessor>.Instance,
+            initSql: "THIS IS NOT VALID SQL");
+
+        await Assert.ThrowsAnyAsync<Exception>(() => processor.OpenAsync());
+        processor.Dispose();
+    }
+
     /// <summary>
     /// Verifies that DuckDB's projection pushdown correctly handles nested Arrow Struct fields.
     /// When querying a sub-property like `User.Role`, the processor should pass the entire `User`

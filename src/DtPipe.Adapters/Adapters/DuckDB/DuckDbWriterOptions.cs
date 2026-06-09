@@ -14,6 +14,9 @@ public class DuckDbWriterOptions : DbWriterOptions, IProviderOptions
 
 	[ComponentOption("--strategy", Aliases = new[] { "-s" }, Description = "Data write strategy (Append, Truncate, or Recreate)", Hidden = true)]
 	public DuckDbWriteStrategy? Strategy { get; set; }
+
+	[ComponentOption("--duck-init", Description = "SQL executed after connection open (e.g. LOAD azure; SET azure_storage_connection_string='...'). Prefix with @ to load from a file.")]
+	public string? InitSql { get; set; }
 }
 
 public enum DuckDbWriteStrategy

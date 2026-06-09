@@ -6,6 +6,7 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Helpers;
 using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
+using DtPipe.Core.Security;
 using DuckDB.NET.Data;
 using Microsoft.Extensions.Logging;
 
@@ -26,6 +27,7 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
     public bool RequiresTargetInspection => _options.Strategy != DuckDbWriteStrategy.Recreate;
 
     private IDbConnection? _connection;
+    private bool _initSqlApplied;
     private string? _quotedTargetTableName;
     private string? _stagingTable;
     private string? _unquotedSchema;
@@ -40,12 +42,15 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
     private int[]? _columnMapping;
     private Type[]? _targetTypes;
 
-    public DuckDbDataWriter(string connectionString, DuckDbWriterOptions options, ILogger<DuckDbDataWriter> logger, ITypeMapper typeMapper)
+    private readonly IStringContentResolver? _resolver;
+
+    public DuckDbDataWriter(string connectionString, DuckDbWriterOptions options, ILogger<DuckDbDataWriter> logger, ITypeMapper typeMapper, IStringContentResolver? resolver = null)
     {
         _connectionString = connectionString;
         _options = options;
         _logger = logger;
         _typeMapper = typeMapper;
+        _resolver = resolver;
     }
 
     public async ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
@@ -242,6 +247,12 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
         {
             if (_connection is System.Data.Common.DbConnection dbConn) await dbConn.OpenAsync(ct);
             else _connection.Open();
+
+            if (!_initSqlApplied)
+            {
+                _initSqlApplied = true;
+                await DuckInitSqlHelper.RunAsync((DuckDBConnection)_connection, _options.InitSql, _resolver, ct);
+            }
         }
     }
 

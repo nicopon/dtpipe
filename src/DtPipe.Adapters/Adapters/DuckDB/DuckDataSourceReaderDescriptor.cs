@@ -1,5 +1,6 @@
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Options;
+using DtPipe.Core.Security;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -18,6 +19,7 @@ public class DuckDataSourceReaderDescriptor : IProviderDescriptor<IStreamReader>
     {
         var opt = (DuckDbReaderOptions)options;
         var logger = serviceProvider.GetService<ILogger<DuckDataSourceReader>>();
-        return new DuckDataSourceReader(connectionString, opt.Query ?? "SELECT 1", opt, logger);
+        var resolver = serviceProvider.GetService<IStringContentResolver>();
+        return new DuckDataSourceReader(connectionString, opt.Query ?? "SELECT 1", opt, logger, resolver: resolver);
     }
 }
