@@ -52,9 +52,14 @@ public class ProviderConfigurationService
 
                 // 2. Bind from stage-scoped args (CLI path).
                 // Reader uses ReaderArgs; writer uses WriterArgs. Null for YAML jobs.
+                // Only bind args for the contributor that actually handles the active connection,
+                // to avoid spurious warnings when a flag value is valid for one provider's enum
+                // but not another's (e.g. OracleInsertMode.Append vs PostgreSqlInsertMode).
                 var stageArgs = isWriter ? context?.WriterArguments : context?.ReaderArguments;
+                var activeConnection = isWriter ? job.Output : job.Input;
 
-                if (stageArgs != null && stageArgs.Length > 0)
+                if (stageArgs != null && stageArgs.Length > 0
+                    && (string.IsNullOrEmpty(activeConnection) || factory.CanHandle(activeConnection)))
                 {
                     var tempRegistry = new Pipeline.FlagRegistry();
                     foreach (var f in contributor.GetFlagDefs()) tempRegistry.Register(f);
