@@ -1,6 +1,6 @@
-
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Options;
+using DtPipe.Core.Security;
 using DtPipe.Transformers.Services;
 using DtPipe.Core.Pipelines;
 
@@ -99,13 +99,6 @@ public class ComputeDataTransformerFactory : IDataTransformerFactory
 	private static string ResolveScriptContent(string script)
 	{
 		if (string.IsNullOrWhiteSpace(script)) return script;
-		if (script.StartsWith("@"))
-		{
-			var path = script.Substring(1);
-			if (File.Exists(path)) return File.ReadAllText(path);
-			return script;
-		}
-		if (File.Exists(script)) return File.ReadAllText(script);
-		return script;
+		return DefaultStringContentResolver.Instance.ResolveAsync(script).GetAwaiter().GetResult() ?? script;
 	}
 }

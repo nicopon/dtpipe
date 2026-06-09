@@ -1,5 +1,6 @@
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Options;
+using DtPipe.Core.Security;
 using DtPipe.Transformers.Services;
 using DtPipe.Core.Pipelines;
 
@@ -27,13 +28,9 @@ public class ExpandDataTransformerFactory : IDataTransformerFactory
 
 	public IDataTransformer CreateFromOptions(DtPipe.Transformers.Row.Expand.ExpandOptions options)
 	{
-		// Resolve @file references in Expand entries
 		var resolved = options.Expand?.Select(e =>
-		{
-			if (!e.StartsWith("@")) return e;
-			var path = e[1..];
-			return File.Exists(path) ? File.ReadAllText(path) : e;
-		}).ToArray();
+			DefaultStringContentResolver.Instance.ResolveAsync(e).GetAwaiter().GetResult() ?? e
+		).ToArray();
 		return new ExpandDataTransformer(new ExpandOptions { Expand = resolved }, _jsEngineProvider);
 	}
 
@@ -46,22 +43,8 @@ public class ExpandDataTransformerFactory : IDataTransformerFactory
 			if (string.Equals(option, "expand", StringComparison.OrdinalIgnoreCase) ||
 				string.Equals(option, "--expand", StringComparison.OrdinalIgnoreCase))
 			{
-				if (value.StartsWith("@"))
-				{
-					var filePath = value.Substring(1);
-					if (File.Exists(filePath))
-					{
-						expands.Add(File.ReadAllText(filePath));
-					}
-					else
-					{
-						expands.Add(value);
-					}
-				}
-				else
-				{
-					expands.Add(value);
-				}
+				expands.Add(
+					DefaultStringContentResolver.Instance.ResolveAsync(value).GetAwaiter().GetResult() ?? value);
 			}
 		}
 

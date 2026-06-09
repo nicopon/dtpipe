@@ -1,0 +1,37 @@
+using System.Text.RegularExpressions;
+using DtPipe.Core.Security;
+
+namespace DtPipe.Cli.Security;
+
+/// <summary>
+/// Resolves string values through a sequential pipeline:
+/// 1. @file → load file content (mutually exclusive with keyring://)
+///    keyring://alias → load full value from OS keyring
+/// 2. ${{ENV_VAR}} → substitute environment variables
+///    ${{keyring://alias}} → substitute inline keyring secret
+/// Steps are composable: a keyring value may itself contain ${{...}} placeholders.
+/// </summary>
+public sealed class CliStringContentResolver : DtPipe.Core.Security.IStringContentResolver
+{
+    private static readonly Regex InterpolationPattern =
+        new(@"\$\{\{([^}]+)\}\}", RegexOptions.Compiled);
+
+    public async Task<string?> ResolveAsync(string? value, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return value;
+        var s = value.Trim();
+
+        if (s.TrimStart().StartsWith('@'))
+            s = await File.ReadAllTextAsync(s.TrimStart()[1..], ct);
+        else if (s.StartsWith("keyring://", StringComparison.OrdinalIgnoreCase))
+            s = new SecretsManager().GetSecret(s["keyring://".Length..]) ?? s;
+
+        return InterpolationPattern.Replace(s, m =>
+        {
+            var expr = m.Groups[1].Value.Trim();
+            if (expr.StartsWith("keyring://", StringComparison.OrdinalIgnoreCase))
+                return new SecretsManager().GetSecret(expr["keyring://".Length..]) ?? m.Value;
+            return Environment.GetEnvironmentVariable(expr) ?? m.Value;
+        });
+    }
+}
