@@ -1,6 +1,7 @@
 using DtPipe.Cli.Security;
 using DtPipe.Core.Security;
 using Xunit;
+using Xunit.Sdk;
 
 namespace DtPipe.Tests.Unit.Security;
 
@@ -111,6 +112,21 @@ public class CliStringContentResolverTests : IAsyncLifetime
         return ValueTask.CompletedTask;
     }
 
+    // Skips the test if the OS keyring is unavailable (e.g. headless Linux CI without libsecret).
+    private static void SkipIfKeyringUnavailable()
+    {
+        try
+        {
+            var mgr = new DtPipe.Cli.Security.SecretsManager();
+            mgr.SetSecret("__dtpipe_keyring_probe__", "probe");
+            mgr.DeleteSecret("__dtpipe_keyring_probe__");
+        }
+        catch (DllNotFoundException ex)
+        {
+            throw SkipException.ForSkip($"OS keyring not available: {ex.Message}");
+        }
+    }
+
     [Fact]
     public async Task PlainString_Passthrough()
     {
@@ -153,6 +169,7 @@ public class CliStringContentResolverTests : IAsyncLifetime
     [Fact]
     public async Task KeyringStandalone_Resolves()
     {
+        SkipIfKeyringUnavailable();
         var mgr = new DtPipe.Cli.Security.SecretsManager();
         mgr.SetSecret("test-duck-init-standalone", "LOAD json;");
         try
@@ -169,6 +186,7 @@ public class CliStringContentResolverTests : IAsyncLifetime
     [Fact]
     public async Task KeyringInline_SubstitutedInString()
     {
+        SkipIfKeyringUnavailable();
         var mgr = new DtPipe.Cli.Security.SecretsManager();
         mgr.SetSecret("test-duck-init-inline-key", "AKIAIOSFODNN7EXAMPLE");
         try
@@ -185,6 +203,7 @@ public class CliStringContentResolverTests : IAsyncLifetime
     [Fact]
     public async Task KeyringAndEnvVar_BothResolved()
     {
+        SkipIfKeyringUnavailable();
         var mgr = new DtPipe.Cli.Security.SecretsManager();
         mgr.SetSecret("test-duck-init-region-key", "eu-west-1");
         Environment.SetEnvironmentVariable("DTPIPE_CLI_TEST_ACCESS_KEY", "MY_KEY");
@@ -204,6 +223,7 @@ public class CliStringContentResolverTests : IAsyncLifetime
     [Fact]
     public async Task KeyringValue_WithEnvVar_BothResolved()
     {
+        SkipIfKeyringUnavailable();
         // Secret stored in keyring itself contains a ${{VAR}} placeholder
         var mgr = new DtPipe.Cli.Security.SecretsManager();
         mgr.SetSecret("test-duck-init-template", "LOAD httpfs; SET region='${{DTPIPE_CLI_REGION_FROM_KEYRING}}';");
