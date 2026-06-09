@@ -2,6 +2,7 @@ using Apache.Arrow;
 using Apache.Arrow.Memory;
 using Apache.Arrow.Types;
 using Apache.Arrow.Arrays;
+using Apache.Arrow.Serialization.Mapping;
 using Apache.Arrow.Serialization.Reflection;
 using System.Collections;
 using System.Collections.Concurrent;
@@ -283,7 +284,7 @@ public static class ArrowSerializer
 
             if (underlyingType == typeof(Guid))
             {
-                return (val, builder) => ((FixedSizeBinaryArrayBuilder)builder).Append(((Guid)val).ToByteArray());
+                return (val, builder) => ((FixedSizeBinaryArrayBuilder)builder).Append(ArrowTypeMap.ToArrowUuidBytes((Guid)val));
             }
             if (underlyingType.IsEnum)
             {

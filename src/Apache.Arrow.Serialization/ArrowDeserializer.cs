@@ -1,6 +1,7 @@
 using Apache.Arrow;
 using Apache.Arrow.Types;
 using Apache.Arrow.Arrays;
+using Apache.Arrow.Serialization.Mapping;
 using Apache.Arrow.Serialization.Reflection;
 using Apache.Arrow.Serialization.Internal;
 using System;
@@ -170,7 +171,7 @@ public static class ArrowDeserializer
         throw new NotSupportedException($"Deser of {targetType.Name} / {arrowType.GetType().Name} not supported yet.");
     }
 
-    internal static Guid CreateGuid(ReadOnlySpan<byte> span) => new Guid(span);
+    internal static Guid CreateGuid(ReadOnlySpan<byte> span) => ArrowTypeMap.FromArrowUuidBytes(span);
 
     private class TypedDeserializer<T> where T : new()
     {

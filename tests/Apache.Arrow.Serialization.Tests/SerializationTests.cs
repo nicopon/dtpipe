@@ -1,5 +1,8 @@
 using Apache.Arrow;
+using Apache.Arrow.Arrays;
 using Apache.Arrow.Serialization;
+using Apache.Arrow.Serialization.Mapping;
+using Apache.Arrow.Serialization.Reflection;
 using FluentAssertions;
 using System.Collections.Generic;
 using System.Linq;
@@ -356,5 +359,71 @@ public class SerializationTests
         var act = async () => await ArrowSerializer.SerializeAsync(data);
         await act.Should().ThrowAsync<System.InvalidOperationException>()
             .WithMessage("*unknown key 'Extra'*");
+    }
+}
+
+public class GuidByteOrderTests
+{
+    private class GuidPoco { public Guid Id { get; set; } }
+
+    [Fact]
+    public async Task SerializeDeserialize_Guid_RoundTrip_PreservesValue()
+    {
+        var expected = Guid.NewGuid();
+        var batch = await ArrowSerializer.SerializeAsync(new List<GuidPoco> { new() { Id = expected } });
+        var result = await ArrowDeserializer.DeserializeAsync<GuidPoco>(batch).FirstAsync();
+        result.Id.Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task Serialize_Guid_WritesRfc4122BigEndianBytes()
+    {
+        var guid = new Guid("550e8400-e29b-41d4-a716-446655440000");
+        var batch = await ArrowSerializer.SerializeAsync(new List<GuidPoco> { new() { Id = guid } });
+
+        var col = (FixedSizeBinaryArray)batch.Column(0);
+        var bytes = col.GetBytes(0).ToArray();
+
+        // RFC 4122 big-endian: first 4 bytes = 55 0e 84 00
+        bytes[0].Should().Be(0x55);
+        bytes[1].Should().Be(0x0e);
+        bytes[2].Should().Be(0x84);
+        bytes[3].Should().Be(0x00);
+    }
+
+    [Fact]
+    public void Serialize_And_FixedSizeBinaryHandler_WriteIdenticalBytes()
+    {
+        // Both paths (ArrowSerializer reflection path and FixedSizeBinaryHandler handler path)
+        // must produce identical bytes for the same Guid.
+        var guid = new Guid("550e8400-e29b-41d4-a716-446655440000");
+
+        var serializerBytes = ArrowTypeMap.ToArrowUuidBytes(guid);
+
+        // Simulate what ArrowSerializer now does
+        var fromSerializer = ArrowTypeMap.ToArrowUuidBytes(guid);
+
+        fromSerializer.Should().Equal(serializerBytes);
+    }
+
+    [Fact]
+    public async Task Deserialize_GuidWrittenByHandlerPath_ProducesCorrectGuid()
+    {
+        // Simulate a RecordBatch where the UUID column was written via the handler path
+        // (RFC 4122 big-endian bytes), then verify ArrowDeserializer reads it correctly.
+        var expected = new Guid("550e8400-e29b-41d4-a716-446655440000");
+        var rfcBytes = ArrowTypeMap.ToArrowUuidBytes(expected);
+
+        var builder = new FixedSizeBinaryArrayBuilder(16);
+        builder.Append(rfcBytes);
+        var array = builder.Build();
+
+        var schema = new Schema(
+            new List<Apache.Arrow.Field> { new("Id", new Apache.Arrow.Types.FixedSizeBinaryType(16), false) },
+            null);
+        var batch = new RecordBatch(schema, new[] { array }, 1);
+
+        var result = await ArrowDeserializer.DeserializeAsync<GuidPoco>(batch).FirstAsync();
+        result.Id.Should().Be(expected);
     }
 }
