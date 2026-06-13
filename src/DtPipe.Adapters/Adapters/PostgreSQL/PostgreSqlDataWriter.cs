@@ -77,59 +77,25 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter, IColumnarD
 			}
 			catch { }
 
-			// Fail fast with a clear message if source/target types are incompatible.
-			// Recreate preserves the existing table DDL (no silent mutations), so a type
-			// mismatch (e.g. source Guid vs existing TEXT) must be surfaced before any DDL
-			// rather than causing a cryptic InvalidCastException in the Arrow write path.
 			if (existingSchema != null && existingSchema.Exists)
 			{
 				ValidateRecreateCompatibility(_columns!, existingSchema);
 			}
 
-			await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS {_quotedTargetTableName}", ct);
-
-			string createSql;
-			if (existingSchema != null && existingSchema.Exists)
-			{
-				createSql = BuildCreateTableFromIntrospection(_quotedTargetTableName, existingSchema);
-				SyncColumnsFromIntrospection(existingSchema);
-			}
-			else
-			{
-				createSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
-			}
-
-			await ExecuteNonQueryAsync(createSql, ct);
-			InvalidateSchemaCache();
-			return null;
+			return await ApplyRecreateStrategyAsync(ct);
 		}
 		else if (_options.Strategy == PostgreSqlWriteStrategy.DeleteThenInsert)
 		{
-			await EnsureTableExistsAsync(ct);
-			await ExecuteNonQueryAsync($"DELETE FROM {_quotedTargetTableName}", ct);
+			return await ApplyDeleteThenInsertStrategyAsync(ct);
 		}
 		else if (_options.Strategy == PostgreSqlWriteStrategy.Truncate)
 		{
-			await EnsureTableExistsAsync(ct);
-			await ExecuteNonQueryAsync($"TRUNCATE TABLE {_quotedTargetTableName}", ct);
-
-			var previous = await InspectTargetAsync(ct);
-			if (previous != null) return previous with { RowCount = 0 };
-			InvalidateSchemaCache();
-			return null;
+			return await ApplyTruncateStrategyAsync(ct);
 		}
 		else
 		{
-			await EnsureTableExistsAsync(ct);
-			var exists = await InspectTargetAsync(ct);
-			if (exists?.Exists == false)
-			{
-				InvalidateSchemaCache();
-				return null;
-			}
+			return await ApplyAppendStrategyAsync(ct);
 		}
-
-		return null;
 	}
 
 	private async Task EnsureMetaDataInitializedAsync(CancellationToken ct)
@@ -226,21 +192,7 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter, IColumnarD
 
 	private async Task ResolveKeysAsync(CancellationToken ct)
 	{
-		var targetInfo = await InspectTargetAsync(ct);
-		if (targetInfo?.PrimaryKeyColumns != null)
-		{
-			_keyColumns.AddRange(targetInfo.PrimaryKeyColumns);
-		}
-
-		if (_keyColumns.Count == 0 && !string.IsNullOrEmpty(_options.Key))
-		{
-			_keyColumns.AddRange(ColumnHelper.ResolveKeyColumns(_options.Key, _columns!));
-		}
-
-		if (_keyColumns.Count == 0)
-		{
-			throw new InvalidOperationException($"Strategy {_options.Strategy} requires a Primary Key. None detected.");
-		}
+		await base.ResolveKeysAsync(_keyColumns, ct);
 	}
 
 	public override async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
@@ -594,13 +546,6 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter, IColumnarD
 	protected override string GetTruncateTableSql(string tableName) => $"TRUNCATE TABLE {tableName}";
 	protected override string GetDropTableSql(string tableName) => $"DROP TABLE {tableName}";
 
-	protected override string GetAddColumnSql(string tableName, PipeColumnInfo column)
-	{
-		var safeName = Dialect.NeedsQuoting(column.Name) ? Dialect.Quote(column.Name) : column.Name;
-		var type = _typeMapper.MapToProviderType(column.ClrType);
-		var nullability = column.IsNullable ? "" : " NOT NULL";
-		return $"ALTER TABLE {tableName} ADD COLUMN {safeName} {type}{nullability}";
-	}
 
 	private static async Task<(string Schema, string Table)?> ResolveTableNativeAsync(NpgsqlConnection connection, string inputName, CancellationToken ct)
 	{
@@ -723,11 +668,7 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter, IColumnarD
 
 	public override string? GetWriteStrategy() => _options.Strategy.ToString();
 
-	public override IReadOnlyList<string>? GetRequestedPrimaryKeys()
-	{
-		if (string.IsNullOrEmpty(_options.Key)) return null;
-		return _options.Key.Split(',').Select(k => k.Trim()).Where(k => !string.IsNullOrEmpty(k)).ToList();
-	}
+	protected override string? GetRequestedKeySpec() => _options.Key;
 
 	public override bool RequiresPrimaryKey() => _options.Strategy is PostgreSqlWriteStrategy.Upsert or PostgreSqlWriteStrategy.Ignore;
 }

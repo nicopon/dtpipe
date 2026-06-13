@@ -272,6 +272,51 @@ public class SqliteProviderTests : IAsyncLifetime
 	}
 
 	[Fact]
+	public async Task SqliteDataWriter_Truncate_ShouldClearTable()
+	{
+		// Arrange
+		var tableName = "TruncateTest";
+
+		// 1. Create table and insert initial data
+		await using (var connection = new SqliteConnection(_outputConnectionString))
+		{
+			await connection.OpenAsync();
+			using var cmd = connection.CreateCommand();
+			cmd.CommandText = $"CREATE TABLE {tableName} (Id INTEGER, Name TEXT)";
+			await cmd.ExecuteNonQueryAsync();
+			cmd.CommandText = $"INSERT INTO {tableName} VALUES (999, 'OldData')";
+			await cmd.ExecuteNonQueryAsync();
+		}
+
+		var registry = new OptionsRegistry();
+		registry.Register(new SqliteWriterOptions { Table = tableName, Strategy = SqliteWriteStrategy.Truncate });
+
+		var columns = new List<PipeColumnInfo> { new("Id", typeof(int), false), new("Name", typeof(string), true) };
+		var rows = new List<object?[]> { new object?[] { 1, "NewData" } };
+
+		// Act
+		await using var writer = new SqliteDataWriter(_outputConnectionString, registry.Get<SqliteWriterOptions>(), NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
+		await writer.InitializeAsync(columns, CancellationToken.None);
+		await writer.WriteBatchAsync(rows, CancellationToken.None);
+		await writer.CompleteAsync(CancellationToken.None);
+
+		// Assert
+		await using (var connection = new SqliteConnection(_outputConnectionString))
+		{
+			await connection.OpenAsync();
+			using var cmd = connection.CreateCommand(); // Check count matches new data only (meaning old data was truncated)
+			cmd.CommandText = $"SELECT COUNT(*) FROM {tableName}";
+			var count = (long)(await cmd.ExecuteScalarAsync())!;
+			count.Should().Be(1);
+
+			using var cmd2 = connection.CreateCommand();
+			cmd2.CommandText = $"SELECT Name FROM {tableName}";
+			var name = (string)(await cmd2.ExecuteScalarAsync())!;
+			name.Should().Be("NewData");
+		}
+	}
+
+	[Fact]
 	public async Task SqliteDataWriter_Recreate_PreservesNativeStructure()
 	{
 		var dbPath = Path.Combine(Path.GetTempPath(), $"test_recreate_p_{Guid.NewGuid():N}.sqlite");

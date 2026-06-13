@@ -44,109 +44,43 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter
 
 	protected override async Task<TargetSchemaInfo?> ApplyWriteStrategyAsync(string resolvedSchema, string resolvedTable, CancellationToken ct)
 	{
+		TargetSchemaInfo? result = null;
 		if (_options.Strategy == SqliteWriteStrategy.Recreate)
 		{
-			// Recreate Strategy:
-			// 1. Introspect existing table (if any) to preserve schema types
-			TargetSchemaInfo? existingSchema = null;
-			try { existingSchema = await InspectTargetAsync(ct); } catch { }
-
-			// Drop
-			await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS {_quotedTargetTableName}", ct);
-			if (_logger.IsEnabled(LogLevel.Information)) _logger.LogInformation("Dropped table {Table}", _quotedTargetTableName);
-
-			// Recreate
-			if (existingSchema?.Exists == true && existingSchema.Columns.Count > 0)
-			{
-				var recreateSql = BuildCreateTableFromIntrospection(_quotedTargetTableName, existingSchema);
-				await ExecuteNonQueryAsync(recreateSql, ct);
-			}
-			else
-			{
-				var createTableSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
-				await ExecuteNonQueryAsync(createTableSql, ct);
-			}
-			if (_logger.IsEnabled(LogLevel.Information)) _logger.LogInformation("Created table {Table}", _quotedTargetTableName);
-
-			// Init Keys
-			await InitKeysAsync(ct);
-			InvalidateSchemaCache();
-			return null;
-		}
-		else if (_options.Strategy == SqliteWriteStrategy.DeleteThenInsert)
-		{
-			if (await TableExistsAsync(ct))
-			{
-				await ExecuteNonQueryAsync($"DELETE FROM {_quotedTargetTableName}", ct);
-				if (_logger.IsEnabled(LogLevel.Information)) _logger.LogInformation("Deleted rows from {Table}", _quotedTargetTableName);
-			}
-			else
-			{
-				var createTableSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
-				await ExecuteNonQueryAsync(createTableSql, ct);
-			}
+			result = await base.ApplyRecreateStrategyAsync(ct);
 		}
 		else if (_options.Strategy == SqliteWriteStrategy.Truncate)
 		{
-			if (await TableExistsAsync(ct))
-			{
-				await ExecuteNonQueryAsync(GetTruncateTableSql(_quotedTargetTableName), ct);
-				if (_logger.IsEnabled(LogLevel.Information)) _logger.LogInformation("Truncated table {Table}", _quotedTargetTableName);
-
-				await InitKeysAsync(ct);
-				var previous = await InspectTargetAsync(ct);
-				if (previous != null) return previous with { RowCount = 0 };
-				InvalidateSchemaCache();
-				return null;
-			}
-			else
-			{
-				var createTableSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
-				await ExecuteNonQueryAsync(createTableSql, ct);
-
-				await InitKeysAsync(ct);
-				InvalidateSchemaCache();
-				return null;
-			}
+			result = await base.ApplyTruncateStrategyAsync(ct);
 		}
-		else // Append
+		else if (_options.Strategy == SqliteWriteStrategy.DeleteThenInsert)
 		{
-			if (!await TableExistsAsync(ct))
-			{
-				var createTableSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
-				await ExecuteNonQueryAsync(createTableSql, ct);
-				if (_logger.IsEnabled(LogLevel.Information)) _logger.LogInformation("Created table {Table} (Append strategy)", _quotedTargetTableName);
-
-				await InitKeysAsync(ct);
-				InvalidateSchemaCache();
-				return null;
-			}
+			result = await base.ApplyDeleteThenInsertStrategyAsync(ct);
+		}
+		else
+		{
+			result = await base.ApplyAppendStrategyAsync(ct);
 		}
 
 		await InitKeysAsync(ct);
-		return null;
+		return result;
+	}
+
+	protected override async Task EnsureTableExistsBaseAsync(CancellationToken ct)
+	{
+		if (!await TableExistsAsync(ct))
+		{
+			var createTableSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
+			await ExecuteNonQueryAsync(createTableSql, ct);
+			InvalidateSchemaCache();
+		}
 	}
 
 	private async Task InitKeysAsync(CancellationToken ct)
 	{
-		// Initialize Keys for Upsert/Ignore
 		if (_options.Strategy == SqliteWriteStrategy.Upsert || _options.Strategy == SqliteWriteStrategy.Ignore)
 		{
-			var targetInfo = await InspectTargetAsync(ct);
-			if (targetInfo?.PrimaryKeyColumns != null)
-			{
-				_keyColumns.AddRange(targetInfo.PrimaryKeyColumns);
-			}
-
-			if (_keyColumns.Count == 0 && !string.IsNullOrEmpty(_options.Key))
-			{
-				_keyColumns.AddRange(ColumnHelper.ResolveKeyColumns(_options.Key, _columns!));
-			}
-
-			if (_keyColumns.Count == 0)
-			{
-				throw new InvalidOperationException($"Strategy {_options.Strategy} requires a Primary Key. None detected.");
-			}
+			await base.ResolveKeysAsync(_keyColumns, ct);
 		}
 	}
 
@@ -224,14 +158,6 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter
 		}
 	}
 
-	public override async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
-	{
-		await EnsureConnectionOpenAsync(ct);
-
-		using var cmd = (DbCommand)_connection!.CreateCommand();
-		cmd.CommandText = command;
-		await cmd.ExecuteNonQueryAsync(ct);
-	}
 
 	protected override ValueTask DisposeResourcesAsync()
 	{
@@ -315,20 +241,9 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter
 
 	protected override string GetDropTableSql(string tableName) => $"DROP TABLE {tableName}";
 
-	protected override string GetAddColumnSql(string tableName, PipeColumnInfo column)
-	{
-		var safeName = SqlIdentifierHelper.GetSafeIdentifier(_dialect, column.Name);
-		var type = _typeMapper.MapToProviderType(column.ClrType);
-		var nullability = column.IsNullable ? "" : " NOT NULL";
-		return $"ALTER TABLE {tableName} ADD COLUMN {safeName} {type}{nullability}";
-	}
 
 	// IKeyValidator Override
 	public override string? GetWriteStrategy() => _options.Strategy.ToString();
-	public override IReadOnlyList<string>? GetRequestedPrimaryKeys()
-	{
-		if (string.IsNullOrEmpty(_options.Key)) return null;
-		return _options.Key.Split(',').Select(k => k.Trim()).Where(k => !string.IsNullOrEmpty(k)).ToList();
-	}
+	protected override string? GetRequestedKeySpec() => _options.Key;
 	public override bool RequiresPrimaryKey() => _options.Strategy is SqliteWriteStrategy.Upsert or SqliteWriteStrategy.Ignore;
 }

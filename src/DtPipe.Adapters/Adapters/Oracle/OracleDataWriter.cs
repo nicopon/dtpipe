@@ -17,6 +17,7 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
     private OracleParameter[]? _insertParameters;
     private OracleCommand? _mergeCommand;
     private OracleParameter[]? _mergeParameters;
+    private Func<object?, object?>[]? _converters;
 
     // Helper property to avoid casting _connection everywhere
     private OracleConnection OracleConnection => (OracleConnection)_connection!;
@@ -68,36 +69,29 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
 
     protected override async Task<TargetSchemaInfo?> ApplyWriteStrategyAsync(string resolvedSchema, string resolvedTable, CancellationToken ct)
     {
+        TargetSchemaInfo? result = null;
         switch (_options.Strategy)
         {
             case OracleWriteStrategy.Recreate:
-                await ApplyRecreateStrategyAsync(resolvedSchema, resolvedTable, ct);
-                InvalidateSchemaCache();
-                return null;
+                result = await base.ApplyRecreateStrategyAsync(ct);
+                break;
             case OracleWriteStrategy.Truncate:
-                await ApplyTruncateStrategyAsync(ct);
-                var prev1 = await InspectTargetAsync(ct);
-                if (prev1 != null) return prev1 with { RowCount = 0 };
-                InvalidateSchemaCache();
-                return null;
+                result = await base.ApplyTruncateStrategyAsync(ct);
+                break;
             case OracleWriteStrategy.Append:
-                await ApplyAppendStrategyAsync(ct);
-                var prev2 = await InspectTargetAsync(ct);
-                if (prev2?.Exists == false)
-                {
-                    InvalidateSchemaCache();
-                    return null;
-                }
+                result = await base.ApplyAppendStrategyAsync(ct);
                 break;
             case OracleWriteStrategy.DeleteThenInsert:
-                await ApplyDeleteThenInsertStrategyAsync(ct);
+                result = await base.ApplyDeleteThenInsertStrategyAsync(ct);
                 break;
             case OracleWriteStrategy.Upsert:
             case OracleWriteStrategy.Ignore:
                 await ApplyUpsertIgnoreStrategyAsync(ct);
                 break;
         }
-        return null;
+
+        await SyncFromTargetAsync(ct);
+        return result;
     }
 
     protected override async ValueTask OnInitializedAsync(CancellationToken ct)
@@ -106,133 +100,28 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
         await ValueTask.CompletedTask;
     }
 
-    private async Task ApplyRecreateStrategyAsync(string resolvedSchema, string resolvedTable, CancellationToken ct)
+    protected override async Task ExecuteDropTableSafeAsync(CancellationToken ct)
     {
-        // 0. Introspect existing table to preserve native types
-        TargetSchemaInfo? existingSchema = null;
-        try
-        {
-            existingSchema = await InspectTargetAsync(ct);
-            if (existingSchema?.Exists == true)
-            {
-                if (_logger.IsEnabled(LogLevel.Information))
-                    _logger.LogInformation("Table {Table} exists. Preserving native schema for recreation.", _quotedTargetTableName);
-            }
-        }
-        catch
-        {
-            if (_logger.IsEnabled(LogLevel.Debug))
-                _logger.LogDebug("Target table {Table} could not be resolved. Proceeding with default creation.", _options.Table);
-        }
-
-        // 1. Drop existing table
         try
         {
             await ExecuteNonQueryAsync(GetDropTableSql(_quotedTargetTableName), ct);
-            if (_logger.IsEnabled(LogLevel.Information))
-                _logger.LogInformation("Dropped table {Table} (Recreate Strategy)", _quotedTargetTableName);
         }
         catch (OracleException ex) when (ex.Number == 942) { /* ORA-00942: table or view does not exist */ }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException($"Recreate Drop failed. SQL: DROP TABLE {_quotedTargetTableName}. Error: {ex.Message}", ex);
-        }
-
-        // 2. Create new table
-        string createTableSql;
-        if (existingSchema?.Exists == true)
-        {
-            createTableSql = BuildCreateTableFromIntrospection(_quotedTargetTableName, existingSchema);
-        }
-        else
-        {
-            createTableSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
-        }
-
-        try
-        {
-            await ExecuteNonQueryAsync(createTableSql, ct);
-            if (_logger.IsEnabled(LogLevel.Information))
-                _logger.LogInformation("Created table {Table}", _quotedTargetTableName);
-
-            // Sync columns metadata from introspection to ensure future DML (INSERT/MERGE) matches exact case/quotes
-            if (existingSchema != null)
-            {
-                SyncColumnsFromIntrospection(existingSchema);
-            }
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException($"Create Table failed. SQL: {createTableSql}{Environment.NewLine}Error: {ex.Message}", ex);
-        }
-    }
-
-    private async Task ApplyTruncateStrategyAsync(CancellationToken ct)
-    {
-        try
-        {
-            await ExecuteNonQueryAsync(GetTruncateTableSql(_quotedTargetTableName), ct);
-            if (_logger.IsEnabled(LogLevel.Information))
-                _logger.LogInformation("Truncated table {Table}", _quotedTargetTableName);
-
-            await SyncFromTargetAsync(ct);
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException($"Truncate failed. SQL: TRUNCATE TABLE {_quotedTargetTableName}. Error: {ex.Message}", ex);
-        }
-    }
-
-    private async Task ApplyAppendStrategyAsync(CancellationToken ct)
-    {
-        await SyncFromTargetAsync(ct);
-    }
-
-    private async Task ApplyDeleteThenInsertStrategyAsync(CancellationToken ct)
-    {
-        try
-        {
-            var sql = $"DELETE FROM {_quotedTargetTableName}";
-            await ExecuteNonQueryAsync(sql, ct);
-            if (_logger.IsEnabled(LogLevel.Information))
-                _logger.LogInformation("Deleted existing rows from table {Table}", _quotedTargetTableName);
-
-            await SyncFromTargetAsync(ct);
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException($"Delete failed. SQL: DELETE FROM {_quotedTargetTableName}. Error: {ex.Message}", ex);
-        }
     }
 
     private async Task ApplyUpsertIgnoreStrategyAsync(CancellationToken ct)
     {
-        // 1. Resolve Keys
+        // 1. Sync columns from target
         var targetInfo = await InspectTargetAsync(ct);
         if (targetInfo != null)
         {
             SyncColumnsFromIntrospection(targetInfo);
-            if (targetInfo.PrimaryKeyColumns != null)
-            {
-                foreach (var pk in targetInfo.PrimaryKeyColumns)
-                {
-                    if (!_keyColumns.Contains(pk, StringComparer.OrdinalIgnoreCase))
-                        _keyColumns.Add(pk);
-                }
-            }
         }
 
-        if (_keyColumns.Count == 0 && !string.IsNullOrEmpty(_options.Key))
-        {
-            _keyColumns.AddRange(ColumnHelper.ResolveKeyColumns(_options.Key, _columns!));
-        }
+        // 2. Resolve Keys using base class logic
+        await base.ResolveKeysAsync(_keyColumns, ct);
 
-        if (_keyColumns.Count == 0)
-        {
-            throw new InvalidOperationException($"Strategy {_options.Strategy} requires a Primary Key. None detected.");
-        }
-
-        // Resolve Indices
+        // 3. Resolve key indices (Oracle-specific)
         foreach (var key in _keyColumns)
         {
             var idx = -1;
@@ -282,13 +171,7 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
     protected override string GetDropTableSql(string tableName)
         => $"DROP TABLE {tableName}";
 
-    protected override string GetAddColumnSql(string tableName, PipeColumnInfo column)
-    {
-        var safeName = Dialect.NeedsQuoting(column.Name) ? Dialect.Quote(column.Name) : column.Name;
-        var type = _typeMapper.MapToProviderType(column.ClrType);
-        var nullability = column.IsNullable ? "NULL" : "NOT NULL";
-        return $"ALTER TABLE {tableName} ADD {safeName} {type} {nullability}";
-    }
+    protected override string AddColumnKeyword => "ADD";
 
     public override async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
     {
@@ -314,38 +197,7 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
 
             int rowCount = rows.Count;
             _insertCommand.ArrayBindCount = rowCount;
-
-            // Transpose rows to columns with type safety
-            for (int colIndex = 0; colIndex < _columns.Count; colIndex++)
-            {
-                var colValues = new object?[rowCount];
-                var colType = _columns[colIndex].ClrType;
-                bool isBool = colType == typeof(bool);
-
-                for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
-                {
-                    var val = rows[rowIndex][colIndex];
-                    if (val is null || val == DBNull.Value)
-                    {
-                        colValues[rowIndex] = DBNull.Value;
-                    }
-                    else if (isBool)
-                    {
-                        colValues[rowIndex] = ((bool)val) ? 1 : 0;
-                    }
-                    else
-                    {
-                        var converted = DtPipe.Core.Helpers.ValueConverter.ConvertValue(val, colType);
-                        if (rowIndex == 0 && _logger.IsEnabled(LogLevel.Debug))
-                        {
-                            _logger.LogDebug("Column {Col} (Type: {Type}) value: {Val} (Actual Type: {ActualType})",
-                                _columns[colIndex].Name, colType.Name, converted, converted?.GetType().Name);
-                        }
-                        colValues[rowIndex] = converted;
-                    }
-                }
-                _insertParameters[colIndex].Value = colValues;
-            }
+            TransposeAndBindParameters(_insertParameters, rows);
 
             try
             {
@@ -400,36 +252,44 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
 
     private async Task BindAndExecuteAsync(OracleCommand cmd, OracleParameter[] paramsArray, IReadOnlyList<object?[]> rows, CancellationToken ct)
     {
-            int rowCount = rows.Count;
-            cmd.ArrayBindCount = rowCount;
+        int rowCount = rows.Count;
+        cmd.ArrayBindCount = rowCount;
+        TransposeAndBindParameters(paramsArray, rows);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
 
-            // Transpose rows to columns with type safety
-            for (int colIndex = 0; colIndex < _columns!.Count; colIndex++)
+    /// <summary>
+    /// Transposes row-oriented data into column-oriented Oracle arrays and binds them to parameters.
+    /// Used by both Insert (Array Binding) and Merge (MERGE SQL) paths.
+    /// </summary>
+    private void TransposeAndBindParameters(OracleParameter[] paramsArray, IReadOnlyList<object?[]> rows)
+    {
+        int rowCount = rows.Count;
+
+        for (int colIndex = 0; colIndex < _columns!.Count; colIndex++)
+        {
+            var colValues = new object?[rowCount];
+            var colType = _columns[colIndex].ClrType;
+            bool isBool = colType == typeof(bool);
+
+            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
             {
-                var colValues = new object?[rowCount];
-                var colType = _columns[colIndex].ClrType;
-                bool isBool = colType == typeof(bool);
-
-                for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+                var val = rows[rowIndex][colIndex];
+                if (val is null || val == DBNull.Value)
                 {
-                    var val = rows[rowIndex][colIndex];
-                    if (val is null || val == DBNull.Value)
-                    {
-                        colValues[rowIndex] = DBNull.Value;
-                    }
-                    else if (isBool)
-                    {
-                        colValues[rowIndex] = ((bool)val) ? 1 : 0;
-                    }
-                    else
-                    {
-                        colValues[rowIndex] = DtPipe.Core.Helpers.ValueConverter.ConvertValue(val, colType);
-                    }
+                    colValues[rowIndex] = DBNull.Value;
                 }
-                paramsArray[colIndex].Value = colValues;
+                else if (isBool)
+                {
+                    colValues[rowIndex] = ((bool)val) ? 1 : 0;
+                }
+                else
+                {
+                    colValues[rowIndex] = _converters![colIndex](val);
+                }
             }
-
-            await cmd.ExecuteNonQueryAsync(ct);
+            paramsArray[colIndex].Value = colValues;
+        }
     }
 
     public override async ValueTask CompleteAsync(CancellationToken ct = default)
@@ -437,21 +297,6 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
         await ValueTask.CompletedTask;
     }
 
-    public override async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
-    {
-        await EnsureConnectionOpenAsync(ct);
-
-        using var cmd = _connection!.CreateCommand();
-        cmd.CommandText = command;
-        if (cmd is System.Data.Common.DbCommand dbCmd)
-        {
-            await dbCmd.ExecuteNonQueryAsync(ct);
-        }
-        else
-        {
-            cmd.ExecuteNonQuery();
-        }
-    }
 
     protected override async ValueTask DisposeResourcesAsync()
     {
@@ -478,16 +323,7 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
 
     public override string? GetWriteStrategy() => _options.Strategy.ToString();
 
-    public override IReadOnlyList<string>? GetRequestedPrimaryKeys()
-    {
-        if (string.IsNullOrEmpty(_options.Key))
-            return null;
-
-        return _options.Key.Split(',')
-            .Select(k => k.Trim())
-            .Where(k => !string.IsNullOrEmpty(k))
-            .ToList();
-    }
+    protected override string? GetRequestedKeySpec() => _options.Key;
 
     public override bool RequiresPrimaryKey()
     {
@@ -500,6 +336,12 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
 
     private void InitializeCommands()
     {
+        _converters = new Func<object?, object?>[_columns!.Count];
+        for (int i = 0; i < _columns.Count; i++)
+        {
+            _converters[i] = ColumnConverterFactory.Build(_columns[i].ClrType, _columns[i].ClrType);
+        }
+
         if (_options.Strategy == OracleWriteStrategy.Upsert || _options.Strategy == OracleWriteStrategy.Ignore)
         {
              bool isUpsert = _options.Strategy == OracleWriteStrategy.Upsert;

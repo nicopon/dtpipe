@@ -401,4 +401,117 @@ public class SqlServerIntegrationTests : IAsyncLifetime
 			}
 		}
 	}
+
+	[Fact]
+	public async Task SqlServerDataWriter_DeleteThenInsert_ClearsAndInserts()
+	{
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+
+		var connectionString = _connectionString;
+		var tableName = $"TestDelIns_{Guid.NewGuid():N}".Substring(0, 25);
+
+		await using (var connection = new SqlConnection(connectionString))
+		{
+			await connection.OpenAsync();
+			using var cmd = connection.CreateCommand();
+			cmd.CommandText = $"CREATE TABLE {tableName} (Id INT, Name NVARCHAR(100))";
+			await cmd.ExecuteNonQueryAsync();
+			cmd.CommandText = $"INSERT INTO {tableName} VALUES (1, 'Old1'), (2, 'Old2')";
+			await cmd.ExecuteNonQueryAsync();
+		}
+
+		var writerOptions = new SqlServerWriterOptions { Table = tableName, Strategy = SqlServerWriteStrategy.DeleteThenInsert };
+		var columns = new List<DtPipe.Core.Models.PipeColumnInfo> { new("Id", typeof(int), false), new("Name", typeof(string), true) };
+		var rows = new List<object?[]> { new object?[] { 3, "NewData" } };
+
+		await using var writer = new SqlServerDataWriter(connectionString, writerOptions, NullLogger<SqlServerDataWriter>.Instance, SqlServerTypeConverter.Instance);
+		try
+		{
+			await writer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+			await writer.WriteBatchAsync(rows, TestContext.Current.CancellationToken);
+			await writer.CompleteAsync(TestContext.Current.CancellationToken);
+
+			await using (var connection = new SqlConnection(connectionString))
+			{
+				await connection.OpenAsync();
+				using var cmd = connection.CreateCommand();
+				cmd.CommandText = $"SELECT Id, Name FROM {tableName} ORDER BY Id";
+				using var reader = await cmd.ExecuteReaderAsync();
+
+				Assert.True(await reader.ReadAsync());
+				Assert.Equal(3, reader.GetInt32(0));
+				Assert.Equal("NewData", reader.GetString(1));
+				Assert.False(await reader.ReadAsync()); // Only 1 row remains
+			}
+		}
+		finally
+		{
+			await using (var connection = new SqlConnection(connectionString))
+			{
+				await connection.OpenAsync();
+				using var cmd = connection.CreateCommand();
+				cmd.CommandText = $"IF OBJECT_ID('{tableName}', 'U') IS NOT NULL DROP TABLE {tableName}";
+				await cmd.ExecuteNonQueryAsync();
+			}
+		}
+	}
+
+	[Fact]
+	public async Task SqlServerDataWriter_Append_AddsToTable()
+	{
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+
+		var connectionString = _connectionString;
+		var tableName = $"TestAppend_{Guid.NewGuid():N}".Substring(0, 25);
+
+		await using (var connection = new SqlConnection(connectionString))
+		{
+			await connection.OpenAsync();
+			using var cmd = connection.CreateCommand();
+			cmd.CommandText = $"CREATE TABLE {tableName} (Id INT, Name NVARCHAR(100))";
+			await cmd.ExecuteNonQueryAsync();
+			cmd.CommandText = $"INSERT INTO {tableName} VALUES (1, 'Old1'), (2, 'Old2')";
+			await cmd.ExecuteNonQueryAsync();
+		}
+
+		var writerOptions = new SqlServerWriterOptions { Table = tableName, Strategy = SqlServerWriteStrategy.Append };
+		var columns = new List<DtPipe.Core.Models.PipeColumnInfo> { new("Id", typeof(int), false), new("Name", typeof(string), true) };
+		var rows = new List<object?[]> { new object?[] { 3, "NewData" } };
+
+		await using var writer = new SqlServerDataWriter(connectionString, writerOptions, NullLogger<SqlServerDataWriter>.Instance, SqlServerTypeConverter.Instance);
+		try
+		{
+			await writer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+			await writer.WriteBatchAsync(rows, TestContext.Current.CancellationToken);
+			await writer.CompleteAsync(TestContext.Current.CancellationToken);
+
+			await using (var connection = new SqlConnection(connectionString))
+			{
+				await connection.OpenAsync();
+				using var cmd = connection.CreateCommand();
+				cmd.CommandText = $"SELECT Id, Name FROM {tableName} ORDER BY Id";
+				using var reader = await cmd.ExecuteReaderAsync();
+
+				Assert.True(await reader.ReadAsync());
+				Assert.Equal(1, reader.GetInt32(0));
+				Assert.True(await reader.ReadAsync());
+				Assert.Equal(2, reader.GetInt32(0));
+				Assert.True(await reader.ReadAsync());
+				Assert.Equal(3, reader.GetInt32(0));
+				Assert.Equal("NewData", reader.GetString(1));
+				Assert.False(await reader.ReadAsync());
+			}
+		}
+		finally
+		{
+			await using (var connection = new SqlConnection(connectionString))
+			{
+				await connection.OpenAsync();
+				using var cmd = connection.CreateCommand();
+				cmd.CommandText = $"IF OBJECT_ID('{tableName}', 'U') IS NOT NULL DROP TABLE {tableName}";
+				await cmd.ExecuteNonQueryAsync();
+			}
+		}
+	}
 }
+

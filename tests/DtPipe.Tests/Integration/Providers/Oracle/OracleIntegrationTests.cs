@@ -486,4 +486,124 @@ public class OracleIntegrationTests : IAsyncLifetime
 			}
 		}
 	}
+
+	[Fact]
+	public async Task OracleDataWriter_DeleteThenInsert_ClearsAndInserts()
+	{
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+
+		var connectionString = _connectionString;
+		var tableName = $"TEST_DEL_INS_{Guid.NewGuid():N}".Substring(0, 25).ToUpperInvariant();
+
+		await using (var connection = new OracleConnection(connectionString))
+		{
+			await connection.OpenAsync();
+			using var cmd = connection.CreateCommand();
+			cmd.CommandText = $"BEGIN EXECUTE IMMEDIATE 'DROP TABLE {tableName} PURGE'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
+			await cmd.ExecuteNonQueryAsync();
+			cmd.CommandText = $"CREATE TABLE {tableName} (\"Id\" NUMBER(10), \"Name\" VARCHAR2(100))";
+			await cmd.ExecuteNonQueryAsync();
+			cmd.CommandText = $"INSERT INTO {tableName} VALUES (1, 'Old1')";
+			await cmd.ExecuteNonQueryAsync();
+			cmd.CommandText = $"INSERT INTO {tableName} VALUES (2, 'Old2')";
+			await cmd.ExecuteNonQueryAsync();
+		}
+
+		var writerOptions = new OracleWriterOptions { Table = tableName, Strategy = OracleWriteStrategy.DeleteThenInsert };
+		var columns = new List<PipeColumnInfo> { new("Id", typeof(int), false, true), new("Name", typeof(string), true, true) };
+		var rows = new List<object?[]> { new object?[] { 3, "NewData" } };
+
+		await using var writer = new OracleDataWriter(connectionString, writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
+		try
+		{
+			await writer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+			await writer.WriteBatchAsync(rows, TestContext.Current.CancellationToken);
+			await writer.CompleteAsync(TestContext.Current.CancellationToken);
+
+			await using (var connection = new OracleConnection(connectionString))
+			{
+				await connection.OpenAsync();
+				using var cmd = connection.CreateCommand();
+				cmd.CommandText = $"SELECT \"Id\", \"Name\" FROM {tableName} ORDER BY \"Id\"";
+				using var reader = await cmd.ExecuteReaderAsync();
+
+				Assert.True(await reader.ReadAsync());
+				Assert.Equal(3, Convert.ToInt32(reader["Id"]));
+				Assert.Equal("NewData", reader["Name"]);
+				Assert.False(await reader.ReadAsync()); // Only 1 row remains
+			}
+		}
+		finally
+		{
+			await using (var connection = new OracleConnection(connectionString))
+			{
+				await connection.OpenAsync();
+				using var cmd = connection.CreateCommand();
+				cmd.CommandText = $"BEGIN EXECUTE IMMEDIATE 'DROP TABLE {tableName} PURGE'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
+				await cmd.ExecuteNonQueryAsync();
+			}
+		}
+	}
+
+	[Fact]
+	public async Task OracleDataWriter_Append_AddsToTable()
+	{
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+
+		var connectionString = _connectionString;
+		var tableName = $"TEST_APPEND_{Guid.NewGuid():N}".Substring(0, 25).ToUpperInvariant();
+
+		await using (var connection = new OracleConnection(connectionString))
+		{
+			await connection.OpenAsync();
+			using var cmd = connection.CreateCommand();
+			cmd.CommandText = $"BEGIN EXECUTE IMMEDIATE 'DROP TABLE {tableName} PURGE'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
+			await cmd.ExecuteNonQueryAsync();
+			cmd.CommandText = $"CREATE TABLE {tableName} (\"Id\" NUMBER(10), \"Name\" VARCHAR2(100))";
+			await cmd.ExecuteNonQueryAsync();
+			cmd.CommandText = $"INSERT INTO {tableName} VALUES (1, 'Old1')";
+			await cmd.ExecuteNonQueryAsync();
+			cmd.CommandText = $"INSERT INTO {tableName} VALUES (2, 'Old2')";
+			await cmd.ExecuteNonQueryAsync();
+		}
+
+		var writerOptions = new OracleWriterOptions { Table = tableName, Strategy = OracleWriteStrategy.Append };
+		var columns = new List<PipeColumnInfo> { new("Id", typeof(int), false, true), new("Name", typeof(string), true, true) };
+		var rows = new List<object?[]> { new object?[] { 3, "NewData" } };
+
+		await using var writer = new OracleDataWriter(connectionString, writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
+		try
+		{
+			await writer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+			await writer.WriteBatchAsync(rows, TestContext.Current.CancellationToken);
+			await writer.CompleteAsync(TestContext.Current.CancellationToken);
+
+			await using (var connection = new OracleConnection(connectionString))
+			{
+				await connection.OpenAsync();
+				using var cmd = connection.CreateCommand();
+				cmd.CommandText = $"SELECT \"Id\", \"Name\" FROM {tableName} ORDER BY \"Id\"";
+				using var reader = await cmd.ExecuteReaderAsync();
+
+				Assert.True(await reader.ReadAsync());
+				Assert.Equal(1, Convert.ToInt32(reader["Id"]));
+				Assert.True(await reader.ReadAsync());
+				Assert.Equal(2, Convert.ToInt32(reader["Id"]));
+				Assert.True(await reader.ReadAsync());
+				Assert.Equal(3, Convert.ToInt32(reader["Id"]));
+				Assert.Equal("NewData", reader["Name"]);
+				Assert.False(await reader.ReadAsync());
+			}
+		}
+		finally
+		{
+			await using (var connection = new OracleConnection(connectionString))
+			{
+				await connection.OpenAsync();
+				using var cmd = connection.CreateCommand();
+				cmd.CommandText = $"BEGIN EXECUTE IMMEDIATE 'DROP TABLE {tableName} PURGE'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
+				await cmd.ExecuteNonQueryAsync();
+			}
+		}
+	}
 }

@@ -47,9 +47,22 @@ public abstract class BaseSqlDataWriter : IRowDataWriter, ISchemaInspector, IKey
 	protected abstract Task<TargetSchemaInfo?> InspectTargetInternalAsync(CancellationToken ct);
 	#endregion
 
-	#region IKeyValidator Implementation (Virtual with default empty)
+	#region IKeyValidator Implementation
 	public virtual string? GetWriteStrategy() => "Unknown";
-	public virtual IReadOnlyList<string>? GetRequestedPrimaryKeys() => null;
+
+	/// <summary>
+	/// Returns the requested primary key column names, parsed from the writer options.
+	/// Derived classes must override <see cref="GetRequestedKeySpec"/> to provide the raw --key value.
+	/// </summary>
+	public virtual IReadOnlyList<string>? GetRequestedPrimaryKeys()
+		=> KeyHelper.ParseKeySpec(GetRequestedKeySpec());
+
+	/// <summary>
+	/// Returns the raw --key option value from writer options. Derived classes must override.
+	/// Returns null if no key was specified.
+	/// </summary>
+	protected virtual string? GetRequestedKeySpec() => null;
+
 	public virtual bool RequiresPrimaryKey() => false;
 	#endregion
 
@@ -167,7 +180,133 @@ public abstract class BaseSqlDataWriter : IRowDataWriter, ISchemaInspector, IKey
 		return string.IsNullOrEmpty(safeSchema) ? safeTable : $"{safeSchema}.{safeTable}";
 	}
 
+	/// <summary>
+	/// Resolves the primary key columns for Upsert/Ignore strategies.
+	/// 1. Reads PK from target schema introspection
+	/// 2. Falls back to user-specified --key option
+	/// 3. Throws if strategy requires PK and none found
+	/// Derived classes should call this during ApplyWriteStrategyAsync when strategy is Upsert/Ignore.
+	/// </summary>
+	protected async Task<List<string>> ResolveKeysAsync(List<string> keyColumns, CancellationToken ct)
+	{
+		keyColumns.Clear();
+
+		var targetInfo = await InspectTargetAsync(ct);
+		if (targetInfo?.PrimaryKeyColumns != null)
+		{
+			keyColumns.AddRange(targetInfo.PrimaryKeyColumns);
+		}
+
+		if (keyColumns.Count == 0)
+		{
+			var keySpec = GetRequestedKeySpec();
+			if (!string.IsNullOrEmpty(keySpec) && _columns != null)
+			{
+				keyColumns.AddRange(ColumnHelper.ResolveKeyColumns(keySpec, _columns));
+			}
+		}
+
+		if (keyColumns.Count == 0 && RequiresPrimaryKey())
+		{
+			throw new InvalidOperationException(
+				$"Strategy {GetWriteStrategy()} requires a Primary Key. None detected.");
+		}
+
+		return keyColumns;
+	}
+
+	/// <summary>
+	/// Applies the write strategy. Derived classes must override to provide their strategy enum
+	/// and any adapter-specific behavior. The base provides the common orchestration.
+	/// </summary>
 	protected abstract Task<TargetSchemaInfo?> ApplyWriteStrategyAsync(string resolvedSchema, string resolvedTable, CancellationToken ct);
+
+	/// <summary>
+	/// Common Recreate strategy implementation: Introspect → Drop → Recreate → SyncColumns.
+	/// Derived classes can call this from their ApplyWriteStrategyAsync.
+	/// </summary>
+	protected async Task<TargetSchemaInfo?> ApplyRecreateStrategyAsync(CancellationToken ct)
+	{
+		TargetSchemaInfo? existingSchema = null;
+		try { existingSchema = await InspectTargetAsync(ct); } catch { }
+
+		await ExecuteDropTableSafeAsync(ct);
+
+		string createSql;
+		if (existingSchema?.Exists == true && existingSchema.Columns.Count > 0)
+		{
+			createSql = BuildCreateTableFromIntrospection(_quotedTargetTableName, existingSchema);
+			SyncColumnsFromIntrospection(existingSchema);
+		}
+		else
+		{
+			createSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
+		}
+
+		await ExecuteNonQueryAsync(createSql, ct);
+		InvalidateSchemaCache();
+		return null;
+	}
+
+	/// <summary>
+	/// Common Truncate strategy implementation: Truncate → return schema with RowCount=0.
+	/// </summary>
+	protected async Task<TargetSchemaInfo?> ApplyTruncateStrategyAsync(CancellationToken ct)
+	{
+		await EnsureTableExistsBaseAsync(ct);
+		await ExecuteNonQueryAsync(GetTruncateTableSql(_quotedTargetTableName), ct);
+		var previous = await InspectTargetAsync(ct);
+		if (previous != null) return previous with { RowCount = 0 };
+		InvalidateSchemaCache();
+		return null;
+	}
+
+	/// <summary>
+	/// Common DeleteThenInsert strategy: DELETE FROM target.
+	/// </summary>
+	protected async Task<TargetSchemaInfo?> ApplyDeleteThenInsertStrategyAsync(CancellationToken ct)
+	{
+		await EnsureTableExistsBaseAsync(ct);
+		await ExecuteNonQueryAsync($"DELETE FROM {_quotedTargetTableName}", ct);
+		return null;
+	}
+
+	/// <summary>
+	/// Common Append strategy: ensure table exists.
+	/// </summary>
+	protected async Task<TargetSchemaInfo?> ApplyAppendStrategyAsync(CancellationToken ct)
+	{
+		await EnsureTableExistsBaseAsync(ct);
+		var existing = await InspectTargetAsync(ct);
+		if (existing?.Exists == false)
+		{
+			InvalidateSchemaCache();
+		}
+		return null;
+	}
+
+	/// <summary>
+	/// Drops the target table, swallowing "table does not exist" errors.
+	/// Uses DROP TABLE IF EXISTS by default. Oracle overrides to catch ORA-00942.
+	/// </summary>
+	protected virtual async Task ExecuteDropTableSafeAsync(CancellationToken ct)
+	{
+		await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS {_quotedTargetTableName}", ct);
+	}
+
+	/// <summary>
+	/// Ensures the target table exists, creating it if needed.
+	/// </summary>
+	protected virtual async Task EnsureTableExistsBaseAsync(CancellationToken ct)
+	{
+		var existing = await InspectTargetAsync(ct);
+		if (existing?.Exists != true)
+		{
+			var createSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
+			await ExecuteNonQueryAsync(createSql, ct);
+			InvalidateSchemaCache();
+		}
+	}
 
 	/// <summary>
 	/// Hook for post-initialization logic (e.g. creating specific commands, bulk copy instances).
@@ -176,7 +315,11 @@ public abstract class BaseSqlDataWriter : IRowDataWriter, ISchemaInspector, IKey
 
 	public abstract ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default);
 
-	public abstract ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default);
+	public virtual async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
+	{
+		await EnsureConnectionOpenAsync(ct);
+		await ExecuteNonQueryAsync(command, ct);
+	}
 
 	public virtual async ValueTask CompleteAsync(CancellationToken ct = default)
 	{
@@ -238,7 +381,19 @@ public abstract class BaseSqlDataWriter : IRowDataWriter, ISchemaInspector, IKey
 
 	protected abstract string GetTruncateTableSql(string tableName);
 	protected abstract string GetDropTableSql(string tableName);
-	protected abstract string GetAddColumnSql(string tableName, PipeColumnInfo column);
+	/// <summary>
+	/// The DDL keyword used for adding a column. Default: "ADD COLUMN".
+	/// SQL Server and Oracle override this to "ADD" (no COLUMN keyword).
+	/// </summary>
+	protected virtual string AddColumnKeyword => "ADD COLUMN";
+
+	protected virtual string GetAddColumnSql(string tableName, PipeColumnInfo column)
+	{
+		var safeName = SqlIdentifierHelper.GetSafeIdentifier(Dialect, column);
+		var type = GetTypeMapper().MapToProviderType(column.ClrType);
+		var nullability = column.IsNullable ? "" : " NOT NULL";
+		return $"ALTER TABLE {tableName} {AddColumnKeyword} {safeName} {type}{nullability}";
+	}
 
 	public virtual async ValueTask MigrateSchemaAsync(DtPipe.Core.Validation.SchemaCompatibilityReport report, CancellationToken ct)
 	{

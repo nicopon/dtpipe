@@ -493,7 +493,7 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
 
 
     public string? GetWriteStrategy() => _options.Strategy.ToString();
-    public IReadOnlyList<string>? GetRequestedPrimaryKeys() => string.IsNullOrEmpty(_options.Key) ? null : _options.Key.Split(',').Select(k => k.Trim()).ToList();
+    public IReadOnlyList<string>? GetRequestedPrimaryKeys() => KeyHelper.ParseKeySpec(_options.Key);
     public bool RequiresPrimaryKey() => _options.Strategy is DuckDbWriteStrategy.Upsert or DuckDbWriteStrategy.Ignore;
 
     public async ValueTask MigrateSchemaAsync(DtPipe.Core.Validation.SchemaCompatibilityReport report, CancellationToken ct)

@@ -168,150 +168,50 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter
 
 	protected override async Task<TargetSchemaInfo?> ApplyWriteStrategyAsync(string resolvedSchema, string resolvedTable, CancellationToken ct)
 	{
-
 		if (_options.Strategy == SqlServerWriteStrategy.Recreate)
 		{
-			// Recreate logic is complex (Introspect -> Drop -> Create from Introspection OR Create from Source)
-
-			// 1. Check if exists (we have _quotedTargetTableName from base now)
-			// But we need strict schema/table.
-
-			TargetSchemaInfo? existingSchema = null;
-			try
-			{
-				existingSchema = await InspectTargetAsync(ct);
-			}
-			catch { /* Ignore */ }
-
-			if (existingSchema?.Exists == true)
-			{
-				// DROP
-				await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS {_quotedTargetTableName}", ct);
-
-				// CREATE from Introspection
-				var createSql = BuildCreateTableFromIntrospection(_quotedTargetTableName, existingSchema);
-				await ExecuteNonQueryAsync(createSql, ct);
-
-				// Sync columns metadata from introspection to ensure future DML matches
-				if (_columns != null)
-				{
-					var newCols = new List<PipeColumnInfo>(_columns.Count);
-					foreach (var col in _columns)
-					{
-						var introspected = existingSchema.Columns.FirstOrDefault(c => c.Name.Equals(col.Name, StringComparison.OrdinalIgnoreCase));
-						if (introspected != null)
-						{
-							newCols.Add(col with { Name = introspected.Name, IsCaseSensitive = introspected.IsCaseSensitive });
-						}
-						else
-						{
-							newCols.Add(col);
-						}
-					}
-					// Updating base protected member
-					_columns = newCols;
-				}
-			}
-			else
-			{
-				// Create from source columns
-				var createSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
-				await ExecuteNonQueryAsync(createSql, ct);
-			}
-
-			// Key Analysis for Upsert/Ignore (needed if strategy changes)
-			if (_options.Strategy == SqlServerWriteStrategy.Upsert || _options.Strategy == SqlServerWriteStrategy.Ignore)
-			{
-				await AnalyzeKeysAsync(ct);
-			}
-
-			InvalidateSchemaCache();
-			return null;
+			return await ApplyRecreateStrategyAsync(ct);
 		}
 		else if (_options.Strategy == SqlServerWriteStrategy.Truncate)
 		{
-			await ExecuteNonQueryAsync(GetTruncateTableSql(_quotedTargetTableName), ct);
-
-			// Key Analysis for Upsert/Ignore
-			if (_options.Strategy == SqlServerWriteStrategy.Upsert || _options.Strategy == SqlServerWriteStrategy.Ignore)
-			{
-				await AnalyzeKeysAsync(ct);
-			}
-
-			// For Truncate, columns stay the same, just row count is 0.
-			// Let's force a fresh inspect if needed, or better, we just clear the cache to be safe
-			// Wait, the requirement says "avoid redundant calls... when cache is invalidated".
-			// Let's just return a new empty reflection that has 0 rows.
-			var previous = await InspectTargetAsync(ct);
-			if (previous != null)
-			{
-				return previous with { RowCount = 0 };
-			}
-			InvalidateSchemaCache();
-			return null;
+			return await ApplyTruncateStrategyAsync(ct);
 		}
 		else if (_options.Strategy == SqlServerWriteStrategy.DeleteThenInsert)
 		{
-			await ExecuteNonQueryAsync($"DELETE FROM {_quotedTargetTableName}", ct);
+			return await ApplyDeleteThenInsertStrategyAsync(ct);
 		}
 		else
 		{
 			// Append/Upsert/Ignore
-			// Create if not exists
-			// Check existence via InspectTargetAsync or try create.
-			var existing = await InspectTargetAsync(ct);
-			var exists = existing?.Exists ?? false;
-
-			if (!exists)
+			var schemaInfo = await ApplyAppendStrategyAsync(ct);
+			if (_options.Strategy == SqlServerWriteStrategy.Upsert || _options.Strategy == SqlServerWriteStrategy.Ignore)
 			{
-				var createSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
-				try
-				{
-					await ExecuteNonQueryAsync(createSql, ct);
-
-					// Key Analysis for Upsert/Ignore
-					if (_options.Strategy == SqlServerWriteStrategy.Upsert || _options.Strategy == SqlServerWriteStrategy.Ignore)
-					{
-						await AnalyzeKeysAsync(ct);
-					}
-
-					InvalidateSchemaCache();
-					return null;
-				}
-				catch (SqlException ex) when (ex.Number == 2714) { /* Ignore race */ }
+				await AnalyzeKeysAsync(ct);
 			}
+			return schemaInfo;
 		}
+	}
 
-		// Key Analysis for Upsert/Ignore
-		if (_options.Strategy == SqlServerWriteStrategy.Upsert || _options.Strategy == SqlServerWriteStrategy.Ignore)
+	protected override async Task EnsureTableExistsBaseAsync(CancellationToken ct)
+	{
+		var existing = await InspectTargetAsync(ct);
+		if (existing?.Exists != true)
 		{
-			await AnalyzeKeysAsync(ct);
+			var createSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
+			try
+			{
+				await ExecuteNonQueryAsync(createSql, ct);
+				InvalidateSchemaCache();
+			}
+			catch (SqlException ex) when (ex.Number == 2714) { /* Ignore race */ }
 		}
-
-		return null;
 	}
 
 	private List<string> _keyColumns = new();
 
 	private async Task AnalyzeKeysAsync(CancellationToken ct)
 	{
-		_keyColumns.Clear();
-		// 1. Resolve Keys
-		var targetInfo = await InspectTargetAsync(ct);
-		if (targetInfo?.PrimaryKeyColumns != null)
-		{
-			_keyColumns.AddRange(targetInfo.PrimaryKeyColumns);
-		}
-
-		if (_keyColumns.Count == 0 && !string.IsNullOrEmpty(_options.Key) && _columns != null)
-		{
-			_keyColumns.AddRange(ColumnHelper.ResolveKeyColumns(_options.Key, _columns));
-		}
-
-		if (_keyColumns.Count == 0 && RequiresPrimaryKey())
-		{
-			throw new InvalidOperationException($"Strategy {_options.Strategy} requires a Primary Key. None detected.");
-		}
+		await base.ResolveKeysAsync(_keyColumns, ct);
 	}
 
 	public override async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
@@ -332,13 +232,7 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter
 	protected override string GetTruncateTableSql(string tableName) => $"TRUNCATE TABLE {tableName}";
 	protected override string GetDropTableSql(string tableName) => $"DROP TABLE {tableName}";
 
-	protected override string GetAddColumnSql(string tableName, PipeColumnInfo column)
-	{
-		var safeName = Dialect.NeedsQuoting(column.Name) ? Dialect.Quote(column.Name) : column.Name;
-		var type = _typeMapper.MapToProviderType(column.ClrType);
-		var nullability = column.IsNullable ? "NULL" : "NOT NULL";
-		return $"ALTER TABLE {tableName} ADD {safeName} {type} {nullability}";
-	}
+	protected override string AddColumnKeyword => "ADD";
 
 	protected override async ValueTask OnInitializedAsync(CancellationToken ct)
 	{
@@ -702,10 +596,6 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter
 
 	// IKeyValidator methods
 	public override string? GetWriteStrategy() => _options.Strategy.ToString();
-	public override IReadOnlyList<string>? GetRequestedPrimaryKeys()
-	{
-		if (string.IsNullOrEmpty(_options.Key)) return null;
-		return _options.Key.Split(',').Select(k => k.Trim()).Where(k => !string.IsNullOrEmpty(k)).ToList();
-	}
+	protected override string? GetRequestedKeySpec() => _options.Key;
 	public override bool RequiresPrimaryKey() => _options.Strategy is SqlServerWriteStrategy.Upsert or SqlServerWriteStrategy.Ignore;
 }
