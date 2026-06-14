@@ -25,8 +25,8 @@ public class FakeDataTransformerFactory : IDataTransformerFactory
 		var globalOptions = _registry.Get<DtPipe.Transformers.Arrow.Fake.FakeOptions>();
 		var mappings = new List<string>();
 		var locale = globalOptions.Locale;
-		var seedColumn = globalOptions.SeedColumn;
-		var deterministic = globalOptions.Deterministic;
+		var seedColumns = new List<string>(globalOptions.SeedColumn);
+		var seedRow = globalOptions.SeedRow;
 		var seed = globalOptions.Seed;
 		var skipNull = globalOptions.SkipNull;
 
@@ -35,9 +35,21 @@ public class FakeDataTransformerFactory : IDataTransformerFactory
 			var opt = option.ToLowerInvariant();
 			if (opt == "fake" || opt == "--fake") mappings.Add(value);
 			else if (opt == "fake-locale" || opt == "--fake-locale" || opt == "locale") locale = value;
-			else if (opt == "fake-seed-column" || opt == "--fake-seed-column" || opt == "seed-column") seedColumn = value;
+			else if (opt == "fake-seed-column" || opt == "--fake-seed-column" || opt == "seed-column")
+			{
+				if (!string.IsNullOrEmpty(value))
+				{
+					// Support comma-separated columns for composite seeds
+					seedColumns.AddRange(value.Split(',').Select(x => x.Trim()).Where(x => !string.IsNullOrEmpty(x)));
+				}
+			}
 			else if (opt == "fake-seed" || opt == "--fake-seed" || opt == "seed") { if (int.TryParse(value, out var sVal)) seed = sVal; }
-			else if (opt == "fake-deterministic" || opt == "--fake-deterministic" || opt == "deterministic") { if (bool.TryParse(value, out var dVal)) deterministic = dVal; }
+			else if (opt == "fake-deterministic" || opt == "--fake-deterministic" || opt == "deterministic")
+			{
+				// Throw explicit exception for the deprecated option to guide users
+				throw new ArgumentException("The option '--fake-deterministic' has been renamed to '--fake-seed-row'. Please update your scripts.");
+			}
+			else if (opt == "fake-seed-row" || opt == "--fake-seed-row" || opt == "seed-row") { if (bool.TryParse(value, out var srVal)) seedRow = srVal; }
 			else if (opt == "fake-skip-null" || opt == "--fake-skip-null" || opt == "skip-null") { if (bool.TryParse(value, out var snVal)) skipNull = snVal; }
 		}
 
@@ -46,8 +58,8 @@ public class FakeDataTransformerFactory : IDataTransformerFactory
 			Fake = mappings,
 			Locale = locale,
 			Seed = seed,
-			SeedColumn = seedColumn,
-			Deterministic = deterministic,
+			SeedColumn = seedColumns,
+			SeedRow = seedRow,
 			SkipNull = skipNull
 		};
 
@@ -79,8 +91,18 @@ public class FakeDataTransformerFactory : IDataTransformerFactory
 		{
 			if (config.Options.TryGetValue("locale", out var loc)) options = options with { Locale = loc };
 			if (config.Options.TryGetValue("seed", out var s) && int.TryParse(s, out var sv)) options = options with { Seed = sv };
-			if (config.Options.TryGetValue("seed-column", out var sc)) options = options with { SeedColumn = sc };
-			if (config.Options.TryGetValue("deterministic", out var d) && bool.TryParse(d, out var dv)) options = options with { Deterministic = dv };
+			if (config.Options.TryGetValue("seed-column", out var sc))
+			{
+				// Support comma-separated seed columns from YAML as well
+				var cols = sc.Split(',').Select(x => x.Trim()).Where(x => !string.IsNullOrEmpty(x)).ToList();
+				options = options with { SeedColumn = cols };
+			}
+			if (config.Options.TryGetValue("deterministic", out var d))
+			{
+				// Throw explicit exception for the deprecated YAML option
+				throw new ArgumentException("The YAML option 'deterministic' has been renamed to 'seed-row'. Please update your configuration.");
+			}
+			if (config.Options.TryGetValue("seed-row", out var sr) && bool.TryParse(sr, out var srv)) options = options with { SeedRow = srv };
 			if (config.Options.TryGetValue("skip-null", out var sn) && bool.TryParse(sn, out var snv)) options = options with { SkipNull = snv };
 		}
 		return new FakeDataTransformer(options);

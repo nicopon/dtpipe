@@ -16,13 +16,13 @@ public class FakeDataTransformerTests
 	}
 
 	[Fact]
-	public void Constructor_ShouldThrowArgumentException_WhenBothDeterministicAndSeedColumnSet()
+	public void Constructor_ShouldThrowArgumentException_WhenBothSeedRowAndSeedColumnsSet()
 	{
 		var options = new FakeOptions
 		{
 			Fake = new[] { "NAME:name.firstname" },
-			Deterministic = true,
-			SeedColumn = "ID"
+			SeedRow = true,
+			SeedColumn = new[] { "ID" }
 		};
 		var act = () => new FakeDataTransformer(options);
 		act.Should().Throw<ArgumentException>().WithMessage("*cannot be used together*");
@@ -177,5 +177,79 @@ public class FakeDataTransformerTests
 
 		TestBatchBuilder.GetVal(result!, 0, 0).Should().BeNull("Should not fake null because SkipNull is true");
 		TestBatchBuilder.GetVal(result!, 0, 1).Should().NotBe("Original").And.NotBeNull("Should still fake non-null values");
+	}
+
+	[Fact]
+	public async Task Transform_ShouldSupportMultiSeedColumns()
+	{
+		// Test multiple seed columns for composite keys (e.g. Region + Branch)
+		var options1 = new FakeOptions { Fake = new[] { "NAME:name.firstname" }, SeedColumn = new[] { "Region", "Branch" }, Seed = 42 };
+		var options2 = new FakeOptions { Fake = new[] { "NAME:name.firstname" }, SeedColumn = new[] { "Region", "Branch" }, Seed = 42 };
+
+		var transformer1 = new FakeDataTransformer(options1);
+		var transformer2 = new FakeDataTransformer(options2);
+
+		var columns = new List<PipeColumnInfo>
+		{
+			new("Region", typeof(string), false),
+			new("Branch", typeof(string), false),
+			new("NAME", typeof(string), true)
+		};
+
+		await transformer1.InitializeAsync(columns, TestContext.Current.CancellationToken);
+		await transformer2.InitializeAsync(columns, TestContext.Current.CancellationToken);
+
+		var batch1 = TestBatchBuilder.FromRows(columns, new object?[] { "North", "A", "Original" });
+		var batch2 = TestBatchBuilder.FromRows(columns, new object?[] { "North", "A", "Original" });
+		var batch3 = TestBatchBuilder.FromRows(columns, new object?[] { "North", "B", "Original" }); // Different composite key
+
+		var res1 = await transformer1.TransformBatchAsync(batch1);
+		var res2 = await transformer2.TransformBatchAsync(batch2);
+		var res3 = await transformer1.TransformBatchAsync(batch3);
+
+		var val1 = TestBatchBuilder.GetVal(res1!, 2, 0);
+		var val2 = TestBatchBuilder.GetVal(res2!, 2, 0);
+		var val3 = TestBatchBuilder.GetVal(res3!, 2, 0);
+
+		// Same seed columns + same values + same global seed = same fake output
+		val1.Should().Be(val2);
+
+		// Different composite seed column value = different fake output
+		val1.Should().NotBe(val3);
+	}
+
+	[Fact]
+	public async Task Transform_SeedRow_ShouldBeInfluencedByGlobalSeed()
+	{
+		// Ensure changing the global seed modifies the output in seed-row mode, but remains reproducible for the same seed
+		var optionsSeed42_1 = new FakeOptions { Fake = new[] { "NAME:name.firstname" }, SeedRow = true, Seed = 42 };
+		var optionsSeed42_2 = new FakeOptions { Fake = new[] { "NAME:name.firstname" }, SeedRow = true, Seed = 42 };
+		var optionsSeed100 = new FakeOptions { Fake = new[] { "NAME:name.firstname" }, SeedRow = true, Seed = 100 };
+
+		var transformer42_1 = new FakeDataTransformer(optionsSeed42_1);
+		var transformer42_2 = new FakeDataTransformer(optionsSeed42_2);
+		var transformer100 = new FakeDataTransformer(optionsSeed100);
+
+		var columns = new List<PipeColumnInfo> { new("NAME", typeof(string), true) };
+
+		await transformer42_1.InitializeAsync(columns, TestContext.Current.CancellationToken);
+		await transformer42_2.InitializeAsync(columns, TestContext.Current.CancellationToken);
+		await transformer100.InitializeAsync(columns, TestContext.Current.CancellationToken);
+
+		var batch = TestBatchBuilder.FromRows(columns, new object?[] { "Original" });
+
+		var res42_1 = await transformer42_1.TransformBatchAsync(batch);
+		var res42_2 = await transformer42_2.TransformBatchAsync(batch);
+		var res100 = await transformer100.TransformBatchAsync(batch);
+
+		var val42_1 = TestBatchBuilder.GetVal(res42_1!, 0, 0);
+		var val42_2 = TestBatchBuilder.GetVal(res42_2!, 0, 0);
+		var val100 = TestBatchBuilder.GetVal(res100!, 0, 0);
+
+		// Reproducibility check: same global seed = same row-deterministic faking
+		val42_1.Should().Be(val42_2);
+
+		// Seed dependency check: changing the global seed must change the row-deterministic output
+		val42_1.Should().NotBe(val100);
 	}
 }

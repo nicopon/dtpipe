@@ -55,7 +55,10 @@ into one step; a different flag type starts a new step.
 |:---|:---|:---|
 | `--fake` | `"Col:dataset.method"` | Generate fake data via [Bogus](https://github.com/bchavez/Bogus) |
 | `--fake-locale` | `fr` | Locale for fake data generation |
-| `--fake-seed-column` | `"UserId"` | Column value used as deterministic seed (same input → same output) |
+| `--fake-seed` | `12345` | Global seed for reproducible random fakes (also acts as a base offset for deterministic row/column faking) |
+| `--fake-seed-column` | `"UserId"` or `"Region,Branch"` | Column(s) used as a deterministic seed (same input -> same output). Supports comma-separated columns for composite seeds. |
+| `--fake-seed-row` | | Row-index based deterministic mode (row N always gets the same values). Formerly `--fake-deterministic` (deprecated, throws error). |
+| `--skip-null` | | Skip fake generation when the source value is null |
 | `--mask` | `"Phone:###-****"` | Partial masking (`#` keeps original char, any other replaces) |
 | `--null` | `"ColName"` | Force a column to NULL |
 | `--overwrite` | `"Status:Active"` | Set a static value for every row in a column |
@@ -285,7 +288,10 @@ branch-name:
           email: internet.email
         options:
           locale: fr
+          seed: 12345
           seed-column: id
+          deterministic: true
+          skip-null: true
     - null:
         mappings:
           phone: ~
@@ -313,7 +319,7 @@ branch-name:
 
 | Transformer | YAML key structure | Notes |
 |:---|:---|:---|
-| `fake` | `mappings: {col: dataset.method}` + `options: {locale, seed-column}` | |
+| `fake` | `mappings: {col: dataset.method}` + `options: {locale, seed, seed-column, deterministic, skip-null}` | |
 | `null` | `mappings: {col: ~}` | Value is ignored |
 | `overwrite` | `mappings: {col: value}` | |
 | `mask` | `mappings: {col: pattern}` | `#` keeps, any other char replaces |

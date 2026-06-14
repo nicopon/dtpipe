@@ -23,11 +23,11 @@ public sealed partial class FakeDataTransformer : BaseColumnarTransformer, IRequ
 	private readonly string _locale;
 	private readonly Faker _faker;
 
-	// Deterministic mode fields
-	private readonly string? _seedColumn;
-	private readonly bool _deterministic;
+	// Seed modes fields
+	private readonly IReadOnlyList<string> _seedColumns;
+	private readonly bool _seedRow;
 	private readonly bool _skipNull;
-	private int _seedColumnIndex = -1;
+	private int[]? _seedColumnIndices;
 	private long _rowCounter = 0;
 
 	// Paged caches for deterministic mode
@@ -52,17 +52,17 @@ public sealed partial class FakeDataTransformer : BaseColumnarTransformer, IRequ
 		_fakerRegistry = new DtPipe.Transformers.Arrow.Fake.FakerRegistry();
 		_mappingParser = new DtPipe.Transformers.Arrow.Fake.FakeMappingParser(_fakerRegistry);
 		_locale = options.Locale;
-		_seedColumn = options.SeedColumn;
-		_deterministic = options.Deterministic;
+		_seedColumns = options.SeedColumn;
+		_seedRow = options.SeedRow;
 		_skipNull = options.SkipNull;
 
 		_faker = options.Seed.HasValue
 			? new Faker(options.Locale) { Random = new Randomizer(options.Seed.Value) }
 			: new Faker(options.Locale);
 
-		if (_deterministic && !string.IsNullOrEmpty(_seedColumn))
+		if (_seedRow && _seedColumns.Count > 0)
 		{
-			throw new ArgumentException("Options --fake-deterministic and --fake-seedcolumn cannot be used together.");
+			throw new ArgumentException("Options --fake-seed-row and --fake-seed-column cannot be used together.");
 		}
 
 		_mappingParser.ParseAll(options.Fake);
@@ -154,14 +154,23 @@ public sealed partial class FakeDataTransformer : BaseColumnarTransformer, IRequ
 		_processors = processors.ToList();
 		_generationOrder = [.. nonTemplateColumns, .. templateColumns];
 
-		// Resolve seed column index
-		if (_seedColumn is not null && !_columnNameToIndex.TryGetValue(_seedColumn, out _seedColumnIndex))
+		// Resolve seed column indices
+		if (_seedColumns.Count > 0)
 		{
-			throw new InvalidOperationException($"Seed column '{_seedColumn}' not found in result set.");
+			var indices = new List<int>();
+			foreach (var col in _seedColumns)
+			{
+				if (!_columnNameToIndex.TryGetValue(col, out var idx))
+				{
+					throw new InvalidOperationException($"Seed column '{col}' not found in result set.");
+				}
+				indices.Add(idx);
+			}
+			_seedColumnIndices = indices.ToArray();
 		}
 
 		// Initialize deterministic caches
-		if (_deterministic || _seedColumnIndex >= 0)
+		if (_seedRow || _seedColumnIndices is not null)
 		{
 			_pagedCaches = [];
 			foreach (var idx in _generationOrder)
@@ -169,7 +178,8 @@ public sealed partial class FakeDataTransformer : BaseColumnarTransformer, IRequ
 				var proc = _processors[idx];
 				if (proc.Generator is not null)
 				{
-					_pagedCaches[idx] = new DtPipe.Transformers.Arrow.Fake.PagedFakeValueCache(_locale, proc.Generator, proc.FakerHash);
+					// Pass the global seed from options to align the page cache seeds
+					_pagedCaches[idx] = new DtPipe.Transformers.Arrow.Fake.PagedFakeValueCache(_locale, proc.Generator, proc.FakerHash, _options.Seed);
 				}
 			}
 		}
@@ -294,15 +304,30 @@ public sealed partial class FakeDataTransformer : BaseColumnarTransformer, IRequ
 
 			// 2. Deterministic Row Seed
 			int? rowSeed = null;
-			if (_deterministic)
+			if (_seedRow)
 			{
 				rowSeed = (int)(_rowCounter & 0x7FFFFFFF);
 			}
-			else if (_seedColumnIndex >= 0)
+			else if (_seedColumnIndices is not null)
 			{
-				var seedVal = rowBuffer[_seedColumnIndex];
-				if (seedVal is not null)
-					rowSeed = (int)(DtPipe.Transformers.Arrow.Fake.StableHash.Compute(seedVal) & 0x7FFFFFFF);
+				// Combine hashes of all seed columns using a stable polynomial rolling hash.
+				// This ensures consistent data masking (same key values result in the same fake values).
+				int combinedHash = 17;
+				bool hasAnyValue = false;
+				foreach (var idx in _seedColumnIndices)
+				{
+					var seedVal = rowBuffer[idx];
+					if (seedVal is not null)
+					{
+						var valHash = DtPipe.Transformers.Arrow.Fake.StableHash.Compute(seedVal);
+						combinedHash = unchecked(combinedHash * 31 + (int)valHash);
+						hasAnyValue = true;
+					}
+				}
+				if (hasAnyValue)
+				{
+					rowSeed = (int)(combinedHash & 0x7FFFFFFF);
+				}
 			}
 
 			// 3. Process Generation Order (fake columns only)

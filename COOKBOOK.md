@@ -71,8 +71,7 @@ dtpipe \
 
 ### Deterministic faking (preserve referential integrity across tables)
 
-Use `--fake-seed-column` to guarantee that the same input value always produces the same
-anonymized output — even across separate runs or tables.
+Use `--fake-seed-column` to guarantee that the same input value always produces the same anonymized output — even across separate runs or tables. You can also specify multiple columns (separated by commas) to handle composite keys.
 
 ```bash
 # Users table
@@ -84,6 +83,26 @@ dtpipe -i "pg:..." --query "SELECT id, name, email FROM users" \
 dtpipe -i "pg:..." --query "SELECT order_id, user_id, name FROM orders" \
        --fake "name:name.fullName" --fake-seed-column user_id \
        -o anonymized_orders.parquet
+```
+
+### Composite key faking (multiple seed columns)
+
+If your table has a composite key, pass all key columns to `--fake-seed-column` separated by commas:
+
+```bash
+dtpipe -i "pg:..." --query "SELECT region, branch, rep_name FROM sales" \
+       --fake "rep_name:name.fullName" --fake-seed-column "region,branch" \
+       -o anonymized_sales.parquet
+```
+
+### Row-index based seeding
+
+Use `--fake-seed-row` to generate deterministic fake values based purely on the row index (row N always gets the same values):
+
+```bash
+dtpipe -i "pg:..." --query "SELECT name, email FROM users" \
+       --fake "name:name.fullName" --fake-seed-row \
+       -o anonymized_users.parquet
 ```
 
 ### French locale

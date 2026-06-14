@@ -18,11 +18,11 @@ public record FakeOptions : ITransformerOptions
 	[Description("Global seed for reproducible random fakes across all columns")]
 	public int? Seed { get; init; } = null;
 
-	[Description("Column to use as seed (same value = same fake output, ideal for ID columns)")]
-	public string? SeedColumn { get; init; } = null;
+	[Description("Column(s) to use as seed (same value = same fake output, ideal for composite ID columns)")]
+	public IReadOnlyList<string> SeedColumn { get; init; } = [];
 
 	[Description("Row-index based deterministic mode (row N always gets same values)")]
-	public bool Deterministic { get; init; } = false;
+	public bool SeedRow { get; init; } = false;
 
 	[ComponentOption("--skip-null", Description = "Skip fake generation when source value is null")]
 	public bool SkipNull { get; init; } = false;

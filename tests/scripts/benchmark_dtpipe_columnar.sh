@@ -14,7 +14,7 @@ echo "OS: $(uname -a)" >> "$OUTPUT_REPORT"
 echo "" >> "$OUTPUT_REPORT"
 
 ROWS=50000000
-FAKE_OPTS="--fake Email:internet.email --fake Name:name.fullname --fake Amount:finance.amount --fake Country:address.countrycode --fake-deterministic --fake-seed 42"
+FAKE_OPTS="--fake Email:internet.email --fake Name:name.fullname --fake Amount:finance.amount --fake Country:address.countrycode --fake-seed-row --fake-seed 42"
 
 echo "Step 1: Baseline (Generate 10M -> Fake -> Null)"
 echo "-----------------------------------------------" | tee -a "$OUTPUT_REPORT"

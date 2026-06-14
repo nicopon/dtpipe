@@ -15,13 +15,18 @@ public sealed class PagedFakeValueCache
 	private readonly string _locale;
 	private readonly Func<Faker, object?> _generator;
 	private readonly uint _fakerHash;
+	private readonly int _globalSeedOffset;
 	private readonly Dictionary<int, object?[]> _pages = [];
 
-	public PagedFakeValueCache(string locale, Func<Faker, object?> generator, uint fakerHash)
+	public PagedFakeValueCache(string locale, Func<Faker, object?> generator, uint fakerHash, int? globalSeed)
 	{
 		_locale = locale;
 		_generator = generator;
 		_fakerHash = fakerHash;
+		
+		// Mix the global seed with a prime multiplier to distribute seeds effectively.
+		// If no global seed is provided, default offset to 0 to maintain backward compatibility.
+		_globalSeedOffset = globalSeed.HasValue ? unchecked(globalSeed.Value * 31337) : 0;
 	}
 
 	/// <summary>
@@ -48,9 +53,9 @@ public sealed class PagedFakeValueCache
 
 	private object?[] GeneratePage(int pageIndex)
 	{
-		// Compute a deterministic seed for this page
-		// Combine fakerHash + pageIndex to ensure different pages have different seeds
-		var pageSeed = unchecked((int)(_fakerHash + (uint)pageIndex * 397));
+		// Compute a deterministic seed for this page.
+		// Combine global seed offset + fakerHash + pageIndex to ensure different pages and configurations have different seeds.
+		var pageSeed = unchecked((int)(_globalSeedOffset + _fakerHash + (uint)pageIndex * 397));
 
 		var faker = new Faker(_locale) { Random = new Randomizer(pageSeed) };
 		var page = new object?[PAGE_SIZE];
