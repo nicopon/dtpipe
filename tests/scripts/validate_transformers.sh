@@ -16,6 +16,33 @@ NC='\033[0m'
 pass() { echo -e "${GREEN}  OK: $1${NC}"; }
 fail() { echo -e "${RED}  FAIL: $1${NC}"; exit 1; }
 
+verify_baseline() {
+    local actual_file=$1 name=$2
+    local baseline_file="$SCRIPT_DIR/baselines/${name}.csv"
+    
+    mkdir -p "$SCRIPT_DIR/baselines"
+
+    if [ "$UPDATE_BASELINES" = "1" ]; then
+        cp "$actual_file" "$baseline_file"
+        pass "$name: baseline updated"
+    else
+        if [ ! -f "$baseline_file" ]; then
+            fail "$name: baseline not found at $baseline_file. Run with UPDATE_BASELINES=1 to generate."
+            return
+        fi
+        
+        if diff -u "$baseline_file" "$actual_file" > "$A/temp.diff"; then
+            pass "$name: matches baseline"
+            rm -f "$A/temp.diff"
+        else
+            echo -e "${RED}  FAIL: $name: mismatch with baseline! Diff:${NC}"
+            cat "$A/temp.diff"
+            rm -f "$A/temp.diff"
+            fail "$name: mismatch with baseline"
+        fi
+    fi
+}
+
 echo "========================================"
 echo "    DtPipe Transformer Validation"
 echo "========================================"
@@ -30,10 +57,9 @@ if [ ! -f "$DTPIPE" ]; then
 fi
 
 cleanup() {
-    rm -f "$ARTIFACTS_DIR"/trans_*.csv "$ARTIFACTS_DIR"/trans_*.arrow
+    rm -f "$ARTIFACTS_DIR"/trans_*.csv "$ARTIFACTS_DIR"/trans_*.arrow "$ARTIFACTS_DIR"/*.checksum
 }
 trap cleanup EXIT
-cleanup
 
 A="$ARTIFACTS_DIR"
 
@@ -42,12 +68,11 @@ A="$ARTIFACTS_DIR"
 # ----------------------------------------
 echo "--- [Setup] Generating reference CSV ---"
 "$DTPIPE" -i "generate:20" \
-  --fake "Id:random.number" \
-  --fake "Name:name.fullName" \
-  --fake "Amount:finance.amount" \
-  --fake "Secret:internet.password" \
+  --fake "Id:random.number" --fake-seed-row \
+  --fake "Name:name.fullName" --fake-seed-row \
+  --fake "Amount:finance.amount" --fake-seed-row \
+  --fake "Secret:internet.password" --fake-seed-row \
   --drop "GenerateIndex" \
-  --fake-seed 42 \
   -o "$A/trans_source.csv" --no-stats
 
 # ----------------------------------------
@@ -58,8 +83,7 @@ echo "--- [1] Overwrite ---"
   --overwrite "Secret:HIDDEN" \
   -o "$A/trans_overwrite.csv" --no-stats
 
-COUNT=$(grep -c "HIDDEN" "$A/trans_overwrite.csv" || true)
-[ "$COUNT" -ge 20 ] && pass "Overwrite: found HIDDEN in $COUNT rows" || fail "Overwrite: expected >=20 HIDDEN, got $COUNT"
+verify_baseline "$A/trans_overwrite.csv" "Overwrite"
 
 # ----------------------------------------
 # 2. Null
@@ -69,9 +93,7 @@ echo "--- [2] Null ---"
   --null "Amount" \
   -o "$A/trans_null.csv" --no-stats
 
-# Amount is column 3; after header, no digit values expected
-NON_EMPTY=$(cut -d',' -f3 "$A/trans_null.csv" | tail -n +2 | grep "[0-9]" | wc -l | tr -d ' ')
-[ "$NON_EMPTY" -eq 0 ] && pass "Null: Amount column is empty" || fail "Null: found $NON_EMPTY non-empty Amount values"
+verify_baseline "$A/trans_null.csv" "Null"
 
 # ----------------------------------------
 # 3. Mask
@@ -81,51 +103,42 @@ echo "--- [3] Mask ---"
   --mask "Name" \
   -o "$A/trans_mask.csv" --no-stats
 
-# Original faked names should not appear verbatim
-ORIG=$(head -2 "$A/trans_source.csv" | tail -1 | cut -d',' -f2)
-MATCH=$(grep -c "$ORIG" "$A/trans_mask.csv" 2>/dev/null || true)
-[ "$MATCH" -eq 0 ] && pass "Mask: original name not present" || fail "Mask: original name leaked ($ORIG found)"
+verify_baseline "$A/trans_mask.csv" "Mask"
 
 # ----------------------------------------
 # 4. Fake
 # ----------------------------------------
 echo "--- [4] Fake ---"
 "$DTPIPE" -i "$A/trans_source.csv" \
-  --fake "Name:name.firstName" \
-  --fake-seed 99 \
+  --fake "Name:name.firstName" --fake-seed-row \
   -o "$A/trans_fake.csv" --no-stats
 
-ORIG_NAME=$(head -2 "$A/trans_source.csv" | tail -1 | cut -d',' -f2)
-NEW_NAME=$(head -2 "$A/trans_fake.csv" | tail -1 | cut -d',' -f2)
-[ "$ORIG_NAME" != "$NEW_NAME" ] && pass "Fake: Name replaced" || fail "Fake: Name unchanged"
+verify_baseline "$A/trans_fake.csv" "Fake"
 
 # ----------------------------------------
 # 5. Format
 # ----------------------------------------
 echo "--- [5] Format ---"
 "$DTPIPE" -i "generate:5" \
-  --fake "First:name.firstName" \
-  --fake "Last:name.lastName" \
+  --fake "First:name.firstName" --fake-seed-row \
+  --fake "Last:name.lastName" --fake-seed-row \
   --drop "GenerateIndex" \
   --format "Full:{First} {Last}" \
   -o "$A/trans_format.csv" --no-stats
 
-# Full column (3rd) should contain a space
-FIRST_FULL=$(awk -F',' 'NR==2 {print $3}' "$A/trans_format.csv" | tr -d '\r')
-[[ "$FIRST_FULL" == *" "* ]] && pass "Format: 'Full' column has space" || fail "Format: unexpected value '$FIRST_FULL'"
+verify_baseline "$A/trans_format.csv" "Format"
 
 # ----------------------------------------
 # 6. Compute (JS expression)
 # ----------------------------------------
 echo "--- [6] Compute ---"
 "$DTPIPE" -i "generate:5" \
-  --fake "Val:random.number" \
+  --fake "Val:random.number" --fake-seed-row \
   --drop "GenerateIndex" \
   --compute "Double:row.Val * 2" \
   -o "$A/trans_compute.csv" --no-stats
 
-COUNT=$(wc -l < "$A/trans_compute.csv" | tr -d ' ')
-[ "$COUNT" -gt 1 ] && pass "Compute: output has $COUNT lines" || fail "Compute: no output"
+verify_baseline "$A/trans_compute.csv" "Compute"
 
 # ----------------------------------------
 # 7. Drop
@@ -135,8 +148,7 @@ echo "--- [7] Drop ---"
   --drop "Secret" \
   -o "$A/trans_drop.csv" --no-stats
 
-HEADER=$(head -1 "$A/trans_drop.csv" | tr -d '\r')
-[[ "$HEADER" != *"Secret"* ]] && pass "Drop: Secret column removed" || fail "Drop: Secret still present in header"
+verify_baseline "$A/trans_drop.csv" "Drop"
 
 # ----------------------------------------
 # 8. Project
@@ -146,8 +158,7 @@ echo "--- [8] Project ---"
   --project "Id,Name" \
   -o "$A/trans_project.csv" --no-stats
 
-HEADER=$(head -1 "$A/trans_project.csv" | tr -d '\r')
-[[ "$HEADER" == "Id,Name" ]] && pass "Project: only Id,Name retained" || fail "Project: unexpected header '$HEADER'"
+verify_baseline "$A/trans_project.csv" "Project"
 
 # ----------------------------------------
 # 9. Rename
@@ -157,56 +168,53 @@ echo "--- [9] Rename ---"
   --rename "Name:FullName" \
   -o "$A/trans_rename.csv" --no-stats
 
-HEADER=$(head -1 "$A/trans_rename.csv" | tr -d '\r')
-[[ "$HEADER" == *"FullName"* ]] && pass "Rename: FullName present" || fail "Rename: unexpected header '$HEADER'"
+verify_baseline "$A/trans_rename.csv" "Rename"
 
 # ----------------------------------------
 # 10. Filter (JS predicate)
 # ----------------------------------------
 echo "--- [10] Filter ---"
 "$DTPIPE" -i "generate:100" \
-  --fake "Id:random.number" \
+  --fake "Id:random.number" --fake-seed-row \
   --drop "GenerateIndex" \
   --filter "row.Id % 2 == 0" \
   -o "$A/trans_filter.csv" --no-stats
 
-COUNT=$(wc -l < "$A/trans_filter.csv" | tr -d ' ')
-[ "$COUNT" -gt 1 ] && pass "Filter: output has $COUNT lines" || fail "Filter: no output"
+verify_baseline "$A/trans_filter.csv" "Filter"
 
 # ----------------------------------------
 # 11. Expand (JS row explosion)
 # ----------------------------------------
 echo "--- [11] Expand ---"
 "$DTPIPE" -i "generate:10" \
-  --fake "Tags:['A','B','C']" \
+  --fake "Tags:['A','B','C']" --fake-seed-row \
   --drop "GenerateIndex" \
   --expand "JSON.parse(row.Tags.replace(/'/g, '\"')).map(t => ({ ...row, Tags: t }))" \
   -o "$A/trans_expand.csv" --no-stats
 
-# 10 rows * 3 tags = 30 + 1 header
-COUNT=$(wc -l < "$A/trans_expand.csv" | tr -d ' ')
-[ "$COUNT" -eq 31 ] && pass "Expand: 31 lines (10*3+header)" || fail "Expand: expected 31 lines, got $COUNT"
+verify_baseline "$A/trans_expand.csv" "Expand"
 
 # ----------------------------------------
 # 12. Window
 # ----------------------------------------
 echo "--- [12] Window ---"
 "$DTPIPE" -i "generate:20" \
-  --fake "Val:random.number" \
+  --fake "Val:random.number" --fake-seed-row \
   --drop "GenerateIndex" \
   --window-count 10 \
   --window-script "rows.map(r => ({ ...r, Val: 99999 }))" \
   -o "$A/trans_window.csv" --no-stats
 
-FIRST_VAL=$(awk -F',' 'NR==2 {print $1}' "$A/trans_window.csv" | tr -d '\r')
-[ "$FIRST_VAL" -eq 99999 ] 2>/dev/null && pass "Window: Val=99999" || fail "Window: unexpected Val='$FIRST_VAL'"
+verify_baseline "$A/trans_window.csv" "Window"
 
 # ----------------------------------------
 # 13. Transformer ordering (interleaved)
 # ----------------------------------------
 echo "--- [13] Transformer ordering ---"
 "$DTPIPE" -i "generate:1" \
-  --fake "A:lorem.word" --fake "B:lorem.word" --fake "C:lorem.word" \
+  --fake "A:lorem.word" --fake-seed-row \
+  --fake "B:lorem.word" --fake-seed-row \
+  --fake "C:lorem.word" --fake-seed-row \
   --drop "GenerateIndex" \
   --overwrite "A:Val1" \
   --format "B:{A}" \
@@ -214,13 +222,7 @@ echo "--- [13] Transformer ordering ---"
   --format "C:{A}" \
   -o "$A/trans_order.csv" --no-stats
 
-# B should be "Val1", C should be "Val2", A should be "Val2"
-A_VAL=$(awk -F',' 'NR==2 {print $1}' "$A/trans_order.csv" | tr -d '\r')
-B_VAL=$(awk -F',' 'NR==2 {print $2}' "$A/trans_order.csv" | tr -d '\r')
-C_VAL=$(awk -F',' 'NR==2 {print $3}' "$A/trans_order.csv" | tr -d '\r')
-[ "$A_VAL" = "Val2" ] && pass "Ordering: A=Val2" || fail "Ordering: A expected Val2, got '$A_VAL'"
-[ "$B_VAL" = "Val1" ] && pass "Ordering: B=Val1" || fail "Ordering: B expected Val1, got '$B_VAL'"
-[ "$C_VAL" = "Val2" ] && pass "Ordering: C=Val2" || fail "Ordering: C expected Val2, got '$C_VAL'"
+verify_baseline "$A/trans_order.csv" "Ordering"
 
 # ----------------------------------------
 # 14. CLI --help sanity check
