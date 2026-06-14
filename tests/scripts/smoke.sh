@@ -149,11 +149,26 @@ echo "[4/9] Pipeline 1: CSV → Parquet (Anonymize & Mask)..."
   --no-stats > /dev/null
 
 "$DTPIPE" -i "parquet:$INPUT_DIR/vicious.parquet" -o "$INPUT_DIR/result_step1.csv" --no-stats > /dev/null
+# Verify headers
+HEADER=$(head -n 1 "$INPUT_DIR/result_step1.csv" | tr -d '\r')
+[ "$HEADER" = "Id,Name,Email,Details,Amount,IsActive,JoinDate" ] \
+  || { echo "❌ FAILED: Header is incorrect: $HEADER"; exit 1; }
+
+# Verify faked emails are generated and no original email leaks
 grep -q "alice@example.com" "$INPUT_DIR/result_step1.csv" \
-  && { echo "❌ FAILED: Anonymization failed"; exit 1; }
+  && { echo "❌ FAILED: Anonymization failed (alice@example.com still present)"; exit 1; }
 grep -q "@" "$INPUT_DIR/result_step1.csv" \
-  || { echo "❌ FAILED: Faking failed"; exit 1; }
-echo "✅ Anonymization Verified."
+  || { echo "❌ FAILED: Faking failed (no @ in faked emails)"; exit 1; }
+
+# Verify Details column is completely empty (nullified)
+NON_EMPTY_DETAILS=$(tail -n +2 "$INPUT_DIR/result_step1.csv" | cut -d',' -f4 | grep -v -E '^$|^NULL$' | wc -l | tr -d ' ')
+[ "$NON_EMPTY_DETAILS" -eq 0 ] \
+  || { echo "❌ FAILED: Details column is not empty (found $NON_EMPTY_DETAILS values)"; exit 1; }
+
+# Verify Name column is masked
+grep -q "Alice" "$INPUT_DIR/result_step1.csv" \
+  && { echo "❌ FAILED: Masking failed (Alice still present)"; exit 1; }
+echo "✅ Anonymization and Masking Verified."
 
 # ----------------------------------------
 # 5. Pipeline 2: Parquet → SQLite
@@ -161,12 +176,21 @@ echo "✅ Anonymization Verified."
 echo "[5/9] Pipeline 2: Parquet → SQLite..."
 "$DTPIPE" -i "parquet:$INPUT_DIR/vicious.parquet" -o "sqlite:$INPUT_DIR/vicious.db" \
   --table "users" --strategy Recreate --no-stats > /dev/null
-"$DTPIPE" -i "sqlite:$INPUT_DIR/vicious.db" --query "SELECT COUNT(*) FROM users" \
-  -o csv --no-stats > "$INPUT_DIR/result_count.csv"
-COUNT=$(tail -n 1 "$INPUT_DIR/result_count.csv" | tr -d '\r' | sed 's/\.0*$//')
-[ "$COUNT" = "7" ] || { echo "❌ FAILED: SQLite Count Mismatch ($COUNT)"; exit 1; }
-echo "✅ SQLite Count Verified."
-rm "$INPUT_DIR"/result_count.csv
+# Export SQLite users table and compare to source
+"$DTPIPE" -i "sqlite:$INPUT_DIR/vicious.db" --query "SELECT Id, Name, Email, Details, Amount, IsActive, JoinDate FROM users ORDER BY Id" \
+  -o "$INPUT_DIR/sqlite_users.csv" --no-stats > /dev/null
+
+tr -d '\r' < "$INPUT_DIR/sqlite_users.csv" | tr '[:upper:]' '[:lower:]' > "$INPUT_DIR/sqlite_users.clean"
+tr -d '\r' < "$INPUT_DIR/result_step1.csv" | tr '[:upper:]' '[:lower:]' > "$INPUT_DIR/result_step1.clean"
+
+if diff -u "$INPUT_DIR/result_step1.clean" "$INPUT_DIR/sqlite_users.clean" >/dev/null; then
+  echo "✅ SQLite Data Quality Verified."
+  rm -f "$INPUT_DIR"/sqlite_users.csv "$INPUT_DIR"/sqlite_users.clean "$INPUT_DIR"/result_step1.clean
+else
+  echo "❌ FAILED: SQLite Data Quality Mismatch"
+  diff -u "$INPUT_DIR/result_step1.clean" "$INPUT_DIR/sqlite_users.clean"
+  exit 1
+fi
 
 # ----------------------------------------
 # 6. Pipeline 3: SQLite → Postgres (Upsert)
@@ -183,11 +207,20 @@ EOF
 
 "$DTPIPE" -i "$INPUT_DIR/vicious_inc.csv" -o "$PG_CONN" \
   --table "vicious_users" --strategy Upsert --key "Id" --no-stats > /dev/null
-"$DTPIPE" -i "$PG_CONN" --query "SELECT name FROM vicious_users WHERE id = '1'" \
-  -o "$INPUT_DIR/result_pg_check.csv" --no-stats > /dev/null
-grep -q "Alice Updated" "$INPUT_DIR/result_pg_check.csv" \
-  || { echo "❌ FAILED: PG Upsert failed"; exit 1; }
+# Export and verify the entire table
+"$DTPIPE" -i "$PG_CONN" --query "SELECT id, name, email, details, amount, isactive FROM vicious_users ORDER BY id" \
+  -o "$INPUT_DIR/pg_users.csv" --no-stats > /dev/null
+tr -d '\r' < "$INPUT_DIR/pg_users.csv" | tr '[:upper:]' '[:lower:]' > "$INPUT_DIR/pg_users.clean"
+
+PG_COUNT=$(tail -n +2 "$INPUT_DIR/pg_users.clean" | wc -l | tr -d ' ')
+[ "$PG_COUNT" -eq 8 ] || { echo "❌ FAILED: PG Table Count Mismatch ($PG_COUNT)"; exit 1; }
+
+grep -q -F "1,alice updated,newalice@example.com,updated,999,true" "$INPUT_DIR/pg_users.clean" \
+  || { echo "❌ FAILED: PG Upsert values for ID 1 incorrect"; cat "$INPUT_DIR/pg_users.clean"; exit 1; }
+grep -q -F "8,new user,new@example.com,new,0,true" "$INPUT_DIR/pg_users.clean" \
+  || { echo "❌ FAILED: PG Upsert values for ID 8 incorrect"; exit 1; }
 echo "✅ Postgres Upsert Verified."
+rm -f "$INPUT_DIR"/pg_users.csv "$INPUT_DIR"/pg_users.clean "$INPUT_DIR"/result_pg_check.csv
 
 # ----------------------------------------
 # 7. Query from file
@@ -207,19 +240,22 @@ echo "✅ Query File Verified."
 echo "[8/9] Testing SQL Server..."
 "$DTPIPE" -i "$INPUT_DIR/vicious_source.csv" -o "$MSSQL_CONN" \
   --table "ViciousUsers" --strategy Recreate --no-stats > /dev/null
-"$DTPIPE" -i "$MSSQL_CONN" --query "SELECT COUNT(*) FROM ViciousUsers" \
-  -o csv --no-stats > "$INPUT_DIR/result_mssql.csv"
-COUNT=$(tail -n 1 "$INPUT_DIR/result_mssql.csv" | tr -d '\r' | sed 's/\.0*$//')
-[ "$COUNT" = "7" ] || { echo "❌ FAILED: MSSQL Count Mismatch (Expected 7, Got $COUNT)"; exit 1; }
-echo "✅ SQL Server Initial Load Verified."
-
 "$DTPIPE" -i "$INPUT_DIR/vicious_inc.csv" -o "$MSSQL_CONN" \
   --table "ViciousUsers" --strategy Upsert --key "Id" --no-stats > /dev/null
-"$DTPIPE" -i "$MSSQL_CONN" --query "SELECT Name FROM ViciousUsers WHERE Id = '1'" \
-  -o "$INPUT_DIR/result_mssql_check.csv" --no-stats > /dev/null
-grep -q "Alice Updated" "$INPUT_DIR/result_mssql_check.csv" \
-  || { echo "❌ FAILED: MSSQL Upsert failed"; exit 1; }
+# Export & Verify
+"$DTPIPE" -i "$MSSQL_CONN" --query "SELECT Id, Name, Email, Details, Amount, IsActive FROM ViciousUsers ORDER BY Id" \
+  -o "$INPUT_DIR/mssql_users.csv" --no-stats > /dev/null
+tr -d '\r' < "$INPUT_DIR/mssql_users.csv" | tr '[:upper:]' '[:lower:]' > "$INPUT_DIR/mssql_users.clean"
+
+MSSQL_COUNT=$(tail -n +2 "$INPUT_DIR/mssql_users.clean" | wc -l | tr -d ' ')
+[ "$MSSQL_COUNT" -eq 8 ] || { echo "❌ FAILED: MSSQL Table Count Mismatch ($MSSQL_COUNT)"; exit 1; }
+
+grep -q -F "1,alice updated,newalice@example.com,updated,999,true" "$INPUT_DIR/mssql_users.clean" \
+  || { echo "❌ FAILED: MSSQL Upsert values for ID 1 incorrect"; exit 1; }
+grep -q -F "8,new user,new@example.com,new,0,true" "$INPUT_DIR/mssql_users.clean" \
+  || { echo "❌ FAILED: MSSQL Upsert values for ID 8 incorrect"; exit 1; }
 echo "✅ SQL Server Upsert Verified."
+rm -f "$INPUT_DIR"/mssql_users.csv "$INPUT_DIR"/mssql_users.clean "$INPUT_DIR"/result_mssql.csv "$INPUT_DIR"/result_mssql_check.csv
 
 # ----------------------------------------
 # 9. Oracle
@@ -227,19 +263,22 @@ echo "✅ SQL Server Upsert Verified."
 echo "[9/9] Testing Oracle..."
 "$DTPIPE" -i "parquet:$INPUT_DIR/vicious.parquet" -o "$ORA_CONN" \
   --table "VICIOUS_USERS" --strategy Recreate --no-stats > /dev/null
-"$DTPIPE" -i "$ORA_CONN" --query "SELECT COUNT(*) FROM VICIOUS_USERS" \
-  -o csv --no-stats > "$INPUT_DIR/result_ora.csv"
-COUNT=$(tail -n 1 "$INPUT_DIR/result_ora.csv" | tr -d '\r' | sed 's/\.0*$//')
-[ "$COUNT" = "7" ] || { echo "❌ FAILED: Oracle Count Mismatch (Expected 7, Got $COUNT)"; exit 1; }
-echo "✅ Oracle Initial Load Verified."
-
 "$DTPIPE" -i "$INPUT_DIR/vicious_inc.csv" -o "$ORA_CONN" \
   --table "VICIOUS_USERS" --strategy Upsert --key "Id" --no-stats > /dev/null
-"$DTPIPE" -i "$ORA_CONN" --query "SELECT Name FROM VICIOUS_USERS WHERE Id = 1" \
-  -o "$INPUT_DIR/result_ora_check.csv" --no-stats > /dev/null
-grep -q "Alice Updated" "$INPUT_DIR/result_ora_check.csv" \
-  || { echo "❌ FAILED: Oracle Upsert failed"; exit 1; }
+# Export & Verify
+"$DTPIPE" -i "$ORA_CONN" --query "SELECT CAST(Id AS INT) AS Id, Name, Email, Details, CAST(Amount AS INT) AS Amount, IsActive FROM VICIOUS_USERS ORDER BY Id" \
+  -o "$INPUT_DIR/ora_users.csv" --no-stats > /dev/null
+tr -d '\r' < "$INPUT_DIR/ora_users.csv" | tr '[:upper:]' '[:lower:]' > "$INPUT_DIR/ora_users.clean"
+
+ORA_COUNT=$(tail -n +2 "$INPUT_DIR/ora_users.clean" | wc -l | tr -d ' ')
+[ "$ORA_COUNT" -eq 8 ] || { echo "❌ FAILED: Oracle Table Count Mismatch ($ORA_COUNT)"; exit 1; }
+
+grep -q -E "1(\.0+)?,alice updated,newalice@example.com,updated,999(\.0+)?,true" "$INPUT_DIR/ora_users.clean" \
+  || { echo "❌ FAILED: Oracle Upsert values for ID 1 incorrect"; cat "$INPUT_DIR/ora_users.clean"; exit 1; }
+grep -q -E "8(\.0+)?,new user,new@example.com,new,0(\.0+)?,true" "$INPUT_DIR/ora_users.clean" \
+  || { echo "❌ FAILED: Oracle Upsert values for ID 8 incorrect"; exit 1; }
 echo "✅ Oracle Upsert Verified."
+rm -f "$INPUT_DIR"/ora_users.csv "$INPUT_DIR"/ora_users.clean "$INPUT_DIR"/result_ora.csv "$INPUT_DIR"/result_ora_check.csv
 
 # ----------------------------------------
 # 10. Composite key upsert (all DBs)
@@ -260,11 +299,22 @@ EOF
 
 verify_composite() {
     local file=$1 name=$2
-    if grep -q "EU,Paris,150" "$file" && grep -q "EU,Madrid,300" "$file" && grep -q "EU,Berlin,200" "$file"; then
+    cat > "$INPUT_DIR/comp_expected.csv" <<'EOF'
+region,branch,target
+eu,berlin,200
+eu,madrid,300
+eu,paris,150
+us,ny,500
+EOF
+    # Clean file: strip \r, make lowercase, and strip trailing decimal zeros
+    tr -d '\r' < "$file" | tr '[:upper:]' '[:lower:]' | sed -E 's/\.0+(,|$)/\1/g' > "$file.clean"
+    
+    if diff -u "$INPUT_DIR/comp_expected.csv" "$file.clean" >/dev/null; then
         echo "✅ $name Composite Verified."
+        rm -f "$file.clean" "$INPUT_DIR/comp_expected.csv"
     else
-        echo "❌ FAILED: $name Composite Key Test Failed"
-        cat "$file"
+        echo "❌ FAILED: $name Composite Key Test Failed (mismatch)"
+        diff -u "$INPUT_DIR/comp_expected.csv" "$file.clean"
         exit 1
     fi
 }
@@ -277,7 +327,7 @@ echo "      DuckDB..."
   -o "duck:$INPUT_DIR/composite.duckdb" \
   --table "comp_users" --strategy Upsert   --key "Region,Branch" --no-stats > /dev/null
 "$DTPIPE" -i "duck:$INPUT_DIR/composite.duckdb" \
-  --query "SELECT * FROM comp_users ORDER BY Region, Branch" \
+  --query "SELECT Region, Branch, CAST(Target AS INT) AS Target FROM comp_users ORDER BY Region, Branch" \
   -o "$INPUT_DIR/comp_duck.csv" --no-stats > /dev/null
 verify_composite "$INPUT_DIR/comp_duck.csv" "DuckDB"
 
@@ -289,7 +339,7 @@ echo "      SQLite..."
   -o "sqlite:$INPUT_DIR/composite.db" \
   --table "comp_users" --strategy Upsert   --key "Region,Branch" --no-stats > /dev/null
 "$DTPIPE" -i "sqlite:$INPUT_DIR/composite.db" \
-  --query "SELECT * FROM comp_users ORDER BY Region, Branch" \
+  --query "SELECT Region, Branch, CAST(Target AS INT) AS Target FROM comp_users ORDER BY Region, Branch" \
   -o "$INPUT_DIR/comp_sqlite.csv" --no-stats > /dev/null
 verify_composite "$INPUT_DIR/comp_sqlite.csv" "SQLite"
 
@@ -301,7 +351,7 @@ echo "      Postgres..."
   -o "$PG_CONN" \
   --table "comp_users" --strategy Upsert   --key "Region,Branch" --no-stats > /dev/null
 "$DTPIPE" -i "$PG_CONN" \
-  --query "SELECT * FROM comp_users ORDER BY region, branch" \
+  --query "SELECT region, branch, CAST(target AS INT) AS target FROM comp_users ORDER BY region, branch" \
   -o "$INPUT_DIR/comp_pg.csv" --no-stats > /dev/null
 verify_composite "$INPUT_DIR/comp_pg.csv" "Postgres"
 
@@ -313,7 +363,7 @@ echo "      MSSQL..."
   -o "$MSSQL_CONN" \
   --table "CompUsers" --strategy Upsert   --key "Region,Branch" --no-stats > /dev/null
 "$DTPIPE" -i "$MSSQL_CONN" \
-  --query "SELECT * FROM CompUsers ORDER BY Region, Branch" \
+  --query "SELECT Region, Branch, CAST(Target AS INT) AS Target FROM CompUsers ORDER BY Region, Branch" \
   -o "$INPUT_DIR/comp_mssql.csv" --no-stats > /dev/null
 verify_composite "$INPUT_DIR/comp_mssql.csv" "MSSQL"
 
@@ -325,7 +375,7 @@ echo "      Oracle..."
   -o "$ORA_CONN" \
   --table "COMP_USERS" --strategy Upsert   --key "Region,Branch" --no-stats > /dev/null
 "$DTPIPE" -i "$ORA_CONN" \
-  --query "SELECT * FROM COMP_USERS ORDER BY Region, Branch" \
+  --query "SELECT Region, Branch, CAST(Target AS INT) AS Target FROM COMP_USERS ORDER BY Region, Branch" \
   -o "$INPUT_DIR/comp_ora.csv" --no-stats > /dev/null
 verify_composite "$INPUT_DIR/comp_ora.csv" "Oracle"
 

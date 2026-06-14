@@ -24,6 +24,9 @@ NC='\033[0m'
 pass() { echo -e "${GREEN}  OK: $1${NC}"; }
 fail() { echo -e "${RED}  FAIL: $1${NC}"; exit 1; }
 skip() { echo -e "${YELLOW}  SKIP: $1${NC}"; }
+clean_csv() {
+    tr -d '\r' < "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+}
 
 echo "========================================"
 echo "    DtPipe Driver Validation"
@@ -51,7 +54,7 @@ MSSQL_CONN="mssql:Server=localhost,1434;Database=master;User Id=sa;Password=Pass
 ORA_CONN="ora:Data Source=localhost:1522/FREEPDB1;User Id=testuser;Password=password"
 
 cleanup() {
-    rm -f "$ARTIFACTS_DIR"/drv_*.csv "$ARTIFACTS_DIR"/drv_*.parquet
+    rm -f "$ARTIFACTS_DIR"/drv_*.csv "$ARTIFACTS_DIR"/drv_*.parquet "$ARTIFACTS_DIR"/*.checksum
 }
 trap cleanup EXIT
 
@@ -66,10 +69,17 @@ INSERT INTO drv_users (name, email) VALUES ('Alice', 'alice@example.com'), ('Bob
 EOF
 
 "$DTPIPE" -i "$PG_CONN" \
-  --query "SELECT * FROM drv_users ORDER BY id" \
+  --query "SELECT id, name, email FROM drv_users ORDER BY id" \
   -o "$ARTIFACTS_DIR/drv_pg.csv" --no-stats
 
-grep -q "Alice" "$ARTIFACTS_DIR/drv_pg.csv" && grep -q "Bob" "$ARTIFACTS_DIR/drv_pg.csv" \
+cat > "$ARTIFACTS_DIR/expected_pg.csv" <<'EOF'
+id,name,email
+1,Alice,alice@example.com
+2,Bob,bob@example.com
+EOF
+
+clean_csv "$ARTIFACTS_DIR/drv_pg.csv"
+diff -u "$ARTIFACTS_DIR/expected_pg.csv" "$ARTIFACTS_DIR/drv_pg.csv" \
   && pass "Postgres: Alice and Bob present" || fail "Postgres: read/write failed"
 
 # ----------------------------------------
@@ -89,20 +99,32 @@ EOF
 
 "$DTPIPE" -i "$ARTIFACTS_DIR/drv_v1.csv" -o "$PG_CONN" --table "drv_upsert" --strategy Recreate --key "Id" --no-stats
 "$DTPIPE" -i "$ARTIFACTS_DIR/drv_v2.csv" -o "$PG_CONN" --table "drv_upsert" --strategy Upsert   --key "Id" --no-stats
-"$DTPIPE" -i "$PG_CONN" --query "SELECT * FROM drv_upsert ORDER BY id" -o "$ARTIFACTS_DIR/drv_upsert_out.csv" --no-stats
+"$DTPIPE" -i "$PG_CONN" --query "SELECT id, name, value FROM drv_upsert ORDER BY id" -o "$ARTIFACTS_DIR/drv_upsert_out.csv" --no-stats
 
-grep -q "Alice_Updated" "$ARTIFACTS_DIR/drv_upsert_out.csv" \
-  && grep -q "200" "$ARTIFACTS_DIR/drv_upsert_out.csv" \
-  && grep -q "300" "$ARTIFACTS_DIR/drv_upsert_out.csv" \
+cat > "$ARTIFACTS_DIR/expected_upsert.csv" <<'EOF'
+id,name,value
+1,Alice_Updated,150
+2,Bob,200
+3,Charlie,300
+EOF
+
+clean_csv "$ARTIFACTS_DIR/drv_upsert_out.csv"
+diff -u "$ARTIFACTS_DIR/expected_upsert.csv" "$ARTIFACTS_DIR/drv_upsert_out.csv" \
   && pass "Postgres Upsert: correct rows" || fail "Postgres Upsert: unexpected output"
 
 "$DTPIPE" -i "$ARTIFACTS_DIR/drv_v1.csv" -o "$PG_CONN" --table "drv_ignore" --strategy Recreate --key "Id" --no-stats
 "$DTPIPE" -i "$ARTIFACTS_DIR/drv_v2.csv" -o "$PG_CONN" --table "drv_ignore" --strategy Ignore   --key "Id" --no-stats
-"$DTPIPE" -i "$PG_CONN" --query "SELECT * FROM drv_ignore ORDER BY id" -o "$ARTIFACTS_DIR/drv_ignore_out.csv" --no-stats
+"$DTPIPE" -i "$PG_CONN" --query "SELECT id, name, value FROM drv_ignore ORDER BY id" -o "$ARTIFACTS_DIR/drv_ignore_out.csv" --no-stats
 
-grep -q "Alice," "$ARTIFACTS_DIR/drv_ignore_out.csv" \
-  && grep -q "200" "$ARTIFACTS_DIR/drv_ignore_out.csv" \
-  && grep -q "300" "$ARTIFACTS_DIR/drv_ignore_out.csv" \
+cat > "$ARTIFACTS_DIR/expected_ignore.csv" <<'EOF'
+id,name,value
+1,Alice,100
+2,Bob,200
+3,Charlie,300
+EOF
+
+clean_csv "$ARTIFACTS_DIR/drv_ignore_out.csv"
+diff -u "$ARTIFACTS_DIR/expected_ignore.csv" "$ARTIFACTS_DIR/drv_ignore_out.csv" \
   && pass "Postgres Ignore: original row preserved" || fail "Postgres Ignore: unexpected output"
 
 # ----------------------------------------
@@ -118,10 +140,17 @@ GO
 EOF
 
 "$DTPIPE" -i "$MSSQL_CONN" \
-  --query "SELECT * FROM DrvUsers ORDER BY Id" \
+  --query "SELECT Id, Name, Email FROM DrvUsers ORDER BY Id" \
   -o "$ARTIFACTS_DIR/drv_mssql.csv" --no-stats
 
-grep -q "Charlie" "$ARTIFACTS_DIR/drv_mssql.csv" && grep -q "David" "$ARTIFACTS_DIR/drv_mssql.csv" \
+cat > "$ARTIFACTS_DIR/expected_mssql.csv" <<'EOF'
+Id,Name,Email
+1,Charlie,charlie@example.com
+2,David,david@example.com
+EOF
+
+clean_csv "$ARTIFACTS_DIR/drv_mssql.csv"
+diff -u "$ARTIFACTS_DIR/expected_mssql.csv" "$ARTIFACTS_DIR/drv_mssql.csv" \
   && pass "MSSQL: Charlie and David present" || fail "MSSQL: read/write failed"
 
 # ----------------------------------------
@@ -139,10 +168,17 @@ EXIT;
 EOF
 
 "$DTPIPE" -i "$ORA_CONN" \
-  --query "SELECT * FROM DrvUsers ORDER BY Id" \
+  --query "SELECT Id, Name, Email FROM DrvUsers ORDER BY Id" \
   -o "$ARTIFACTS_DIR/drv_oracle.csv" --no-stats
 
-grep -q "Eve" "$ARTIFACTS_DIR/drv_oracle.csv" && grep -q "Frank" "$ARTIFACTS_DIR/drv_oracle.csv" \
+cat > "$ARTIFACTS_DIR/expected_oracle.csv" <<'EOF'
+ID,NAME,EMAIL
+1.000000000000000000,Eve,eve@example.com
+2.000000000000000000,Frank,frank@example.com
+EOF
+
+clean_csv "$ARTIFACTS_DIR/drv_oracle.csv"
+diff -ui "$ARTIFACTS_DIR/expected_oracle.csv" "$ARTIFACTS_DIR/drv_oracle.csv" \
   && pass "Oracle: Eve and Frank present" || fail "Oracle: read/write failed"
 
 # ----------------------------------------
@@ -170,7 +206,7 @@ EOF
   --fake-seed 42 \
   -o "$ARTIFACTS_DIR/drv_ref.csv" --no-stats
 
-"$DTPIPE" -i "$ARTIFACTS_DIR/drv_ref.csv" -o "$PG_CONN" --table "chain_table" --strategy Recreate --no-stats
+"$DTPIPE" -i "$ARTIFACTS_DIR/drv_ref.csv" --column-types "seq_id:int,val_id:int,val_price:double,val_date:string" -o "$PG_CONN" --table "chain_table" --strategy Recreate --no-stats
 "$DTPIPE" -i "$PG_CONN" --query "SELECT seq_id, val_id, val_price, val_date FROM chain_table ORDER BY seq_id" \
   -o "$MSSQL_CONN" --table "ChainData" --strategy Recreate --no-stats
 "$DTPIPE" -i "$MSSQL_CONN" --query "SELECT seq_id, val_id, val_price, val_date FROM ChainData ORDER BY seq_id" \
@@ -180,12 +216,15 @@ EOF
   -o "$ARTIFACTS_DIR/drv_chain.parquet" --no-stats
 "$DTPIPE" -i "parquet:$ARTIFACTS_DIR/drv_chain.parquet" -o "$ARTIFACTS_DIR/drv_chain_final.csv" --no-stats
 
-# Row count check
-ORIG_ROWS=$(wc -l < "$ARTIFACTS_DIR/drv_ref.csv" | tr -d ' ')
-FINAL_ROWS=$(wc -l < "$ARTIFACTS_DIR/drv_chain_final.csv" | tr -d ' ')
-[ "$ORIG_ROWS" -eq "$FINAL_ROWS" ] \
-  && pass "Cross-driver chain: $FINAL_ROWS rows preserved" \
-  || fail "Cross-driver chain: expected $ORIG_ROWS rows, got $FINAL_ROWS"
+# Verify using checksums
+"$DTPIPE" -i "$ARTIFACTS_DIR/drv_ref.csv" --column-types "seq_id:int,val_id:int,val_price:double,val_date:string" -o "checksum:$ARTIFACTS_DIR/ref.checksum" --no-stats
+"$DTPIPE" -i "$ARTIFACTS_DIR/drv_chain_final.csv" --column-types "seq_id:int,val_id:int,val_price:double,val_date:string" -o "checksum:$ARTIFACTS_DIR/final.checksum" --no-stats
+
+REF_SUM=$(cat "$ARTIFACTS_DIR/ref.checksum")
+FINAL_SUM=$(cat "$ARTIFACTS_DIR/final.checksum")
+[ "$REF_SUM" = "$FINAL_SUM" ] \
+  && pass "Cross-driver chain: Checksum matched ($FINAL_SUM)" \
+  || fail "Cross-driver chain: Checksum mismatch! Ref: $REF_SUM, Got: $FINAL_SUM"
 
 # ----------------------------------------
 # 6. Oracle insert-mode performance
