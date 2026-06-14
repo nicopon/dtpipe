@@ -99,24 +99,46 @@ public class SqlServerIntegrationTests : IAsyncLifetime
 
 			await reader.OpenAsync(TestContext.Current.CancellationToken);
 
-			await using var writer = new ParquetDataWriter(outputPath);
-			await writer.InitializeAsync(reader.Columns!, TestContext.Current.CancellationToken);
-
-			var rows = new List<object?[]>();
-			await foreach (var batchChunk in reader.ReadBatchesAsync(100, TestContext.Current.CancellationToken))
+			await using (var writer = new ParquetDataWriter(outputPath))
 			{
-				for (int i = 0; i < batchChunk.Length; i++)
-				{
-					rows.Add(batchChunk.Span[i]);
-				}
-			}
+				await writer.InitializeAsync(reader.Columns!, TestContext.Current.CancellationToken);
 
-			await writer.WriteRecordBatchAsync(ArrowTestHelper.ToRecordBatch(rows, reader.Columns!), TestContext.Current.CancellationToken);
-			await writer.CompleteAsync(TestContext.Current.CancellationToken);
+				var rows = new List<object?[]>();
+				await foreach (var batchChunk in reader.ReadBatchesAsync(100, TestContext.Current.CancellationToken))
+				{
+					for (int i = 0; i < batchChunk.Length; i++)
+					{
+						rows.Add(batchChunk.Span[i]);
+					}
+				}
+
+				await writer.WriteRecordBatchAsync(ArrowTestHelper.ToRecordBatch(rows, reader.Columns!), TestContext.Current.CancellationToken);
+				await writer.CompleteAsync(TestContext.Current.CancellationToken);
+			}
 
 			// Assert
 			Assert.True(File.Exists(outputPath));
 			Assert.True(new FileInfo(outputPath).Length > 0);
+
+			await using var parquetReader = new ParquetStreamReader(outputPath);
+			await parquetReader.OpenAsync(TestContext.Current.CancellationToken);
+
+			Assert.Equal(7, parquetReader.Columns!.Count);
+			Assert.Equal("id", parquetReader.Columns[0].Name, ignoreCase: true);
+			Assert.Equal("name", parquetReader.Columns[1].Name, ignoreCase: true);
+
+			var readRows = new List<object?[]>();
+			await foreach (var batchChunk in parquetReader.ReadBatchesAsync(100, TestContext.Current.CancellationToken))
+			{
+				for (int i = 0; i < batchChunk.Length; i++)
+				{
+					readRows.Add(batchChunk.Span[i]);
+				}
+			}
+
+			Assert.Equal(4, readRows.Count);
+			var firstRow = readRows.First(r => r[0]?.ToString() == "1");
+			Assert.Equal("Alice", firstRow[1]?.ToString());
 		}
 		finally
 		{

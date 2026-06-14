@@ -127,6 +127,13 @@ public class DecimalPersistenceTests : IAsyncDisposable
         var outputBatch = await transformer.TransformBatchAsync(inputBatch);
         outputBatch.Should().NotBeNull();
 
+        var d128Array = (Decimal128Array)outputBatch.Column(1);
+        var fakedValues = new List<decimal>();
+        for (int i = 0; i < outputBatch.Length; i++)
+        {
+            fakedValues.Add((decimal)ArrowTypeMapper.GetValue(d128Array, i)!);
+        }
+
         // 3. Write to Parquet (via ArrowToParquetConverter)
         await using (var writer = new ParquetDataWriter(_parquetPath))
         {
@@ -137,5 +144,29 @@ public class DecimalPersistenceTests : IAsyncDisposable
 
         // 4. Check file existence and non-zero size
         new FileInfo(_parquetPath).Length.Should().BeGreaterThan(0);
+
+        // 5. Read back Parquet and verify decimal values match faked inputs
+        await using (var parquetReader = new ParquetStreamReader(_parquetPath))
+        {
+            await parquetReader.OpenAsync();
+
+            var readRows = new List<object?[]>();
+            await foreach (var batchChunk in parquetReader.ReadBatchesAsync(100))
+            {
+                for (int i = 0; i < batchChunk.Length; i++)
+                {
+                    readRows.Add(batchChunk.Span[i]);
+                }
+            }
+
+            readRows.Count.Should().Be(5);
+            for (int i = 0; i < 5; i++)
+            {
+                var fakedVal = fakedValues[i];
+                var readValObj = readRows[i][1];
+                var readVal = Convert.ToDecimal(readValObj);
+                readVal.Should().Be(fakedVal);
+            }
+        }
     }
 }
