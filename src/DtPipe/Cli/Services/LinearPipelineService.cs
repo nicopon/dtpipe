@@ -71,6 +71,22 @@ public class LinearPipelineService
             };
         }
 
+        // Resolve keyring connection string secrets
+        var resolver = _serviceProvider.GetService<DtPipe.Core.Security.IStringContentResolver>();
+        if (resolver != null)
+        {
+            if (job.Input != null)
+            {
+                var resolvedInput = await resolver.ResolveAsync(job.Input, token);
+                if (resolvedInput != null) job = job with { Input = resolvedInput };
+            }
+            if (job.Output != null)
+            {
+                var resolvedOutput = await resolver.ResolveAsync(job.Output, token);
+                if (resolvedOutput != null) job = job with { Output = resolvedOutput };
+            }
+        }
+
         // 1. Resolve Reader (strips "componentName:" prefix, e.g. "arrow-memory:src" → "src")
         var (readerFactory, cleanedInput) = ResolveFactory<IStreamReaderFactory>(job.Input ?? "", _readerFactories);
 

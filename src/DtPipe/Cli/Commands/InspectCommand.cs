@@ -60,6 +60,13 @@ public class InspectCommand : Command
         string format,
         CancellationToken ct)
     {
+        var resolver = sp.GetService<DtPipe.Core.Security.IStringContentResolver>();
+        if (resolver != null)
+        {
+            var resolved = await resolver.ResolveAsync(input, ct);
+            if (resolved != null) input = resolved;
+        }
+
         var registry = sp.GetRequiredService<OptionsRegistry>();
         var readerFactories = sp.GetRequiredService<IEnumerable<IStreamReaderFactory>>().ToList();
 
