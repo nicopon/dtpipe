@@ -55,6 +55,7 @@ public class JobService
 		rootCommand.Subcommands.Add(new ProvidersCommand(_serviceProvider));
 		rootCommand.Subcommands.Add(new CompletionCommand());
 		rootCommand.Subcommands.Add(new SecretCommand(_console));
+		rootCommand.Subcommands.Add(new McpCommand(_serviceProvider));
 		return rootCommand;
 	}
 

@@ -115,7 +115,7 @@ class Program
 
 	private static bool IsSubcommand(string arg)
 	{
-		var subs = new[] { "inspect", "providers", "completion", "secret" };
+		var subs = new[] { "inspect", "providers", "completion", "secret", "mcp" };
 		return subs.Contains(arg.ToLowerInvariant());
 	}
 
@@ -324,6 +324,12 @@ class Program
 		services.AddTransient<IDagOrchestrator, DagOrchestrator>();
 		services.AddSingleton<IRowToColumnarBridgeFactory, DtPipe.Adapters.Infrastructure.Arrow.ArrowRowToColumnarBridgeFactory>();
 		services.AddSingleton<IColumnarToRowBridgeFactory, DtPipe.Adapters.Infrastructure.Arrow.ArrowColumnarToRowBridgeFactory>();
+
+		// MCP Server integration
+		services.AddSingleton<DtPipe.Cli.Mcp.DtPipeMcpTools>();
+		services.AddMcpServer()
+		        .WithStdioServerTransport()
+		        .WithTools<DtPipe.Cli.Mcp.DtPipeMcpTools>();
 	}
 
 	private static void RegisterStreamTransformer<TFac>(IServiceCollection services) where TFac : class, IStreamTransformerFactory => services.AddSingleton<IStreamTransformerFactory>(sp => ActivatorUtilities.CreateInstance<TFac>(sp));

@@ -52,9 +52,14 @@ public class SpectreConsoleObserver : IExportObserver
 	public void ShowTarget(string provider, string output)
 	{
 		if (!string.IsNullOrEmpty(output))
-			_console.MarkupLine($"[grey]Target[/]  [blue]{Markup.Escape(provider)}[/] [grey]({Markup.Escape(output)})[/]");
+		{
+			var safeOutput = DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(output);
+			_console.MarkupLine($"[grey]Target[/]  [blue]{Markup.Escape(provider)}[/] [grey]({Markup.Escape(safeOutput)})[/]");
+		}
 		else
+		{
 			_console.MarkupLine($"[grey]Target[/]  [blue]{Markup.Escape(provider)}[/]");
+		}
 	}
 
 	public void LogMessage(string message)

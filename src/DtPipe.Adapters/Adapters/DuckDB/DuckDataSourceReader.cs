@@ -95,7 +95,12 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
 		// Cap memory to prevent Jetsam overcommit kills when multiple branches run concurrently
 		using (var limitCmd = _connection.CreateCommand())
 		{
-			limitCmd.CommandText = "PRAGMA memory_limit='2GB'; PRAGMA threads=2;";
+			var sql = "PRAGMA memory_limit='2GB'; PRAGMA threads=2;";
+			if (DtPipe.Core.Security.McpSecurityContext.IsMcpSession)
+			{
+				sql += " PRAGMA disable_external_access=true;";
+			}
+			limitCmd.CommandText = sql;
 			await limitCmd.ExecuteNonQueryAsync(ct);
 		}
 
