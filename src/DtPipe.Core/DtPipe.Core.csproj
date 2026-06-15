@@ -15,7 +15,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Apache.Arrow.Serialization\Apache.Arrow.Serialization.csproj" />
     <PackageReference Include="Apache.Arrow" Version="23.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.8" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9" />
   </ItemGroup>
 
 </Project>
