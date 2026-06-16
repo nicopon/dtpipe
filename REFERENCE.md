@@ -79,13 +79,14 @@ Not all mechanisms are available in every context:
 |:---|:---:|:---:|:---:|:---:|
 | Connection strings (`-i`, `-o`) | ✅ | ✅ | ✅ | ✅ |
 | `--duck-init` | ✅ | ✅ | ✅ | ✅ |
-| `--compute`, `--expand` scripts | ✅ | — | ✅ | — |
-| `--query` | ✅ | — | — | — |
-| `--pre-exec`, `--post-exec`, etc. | ✅ | — | — | — |
-| YAML job files (all values) | — | — | ✅ | — |
+| `--query` | ✅ | ✅ | ✅ | ✅ |
+| `--pre-exec`, `--post-exec`, etc. | ✅ | ✅ | ✅ | ✅ |
+| `--compute`, `--expand`, `--filter` scripts| ✅ | ✅ | ✅ | ✅ |
+| YAML job files (all values) | — | — | ✅ | ✅ |
 
 > [!IMPORTANT]
-> **CLI vs YAML**: In YAML job files, `${{ENV_VAR}}` interpolation is applied to the raw YAML text before parsing, so it works on **all** values. However, `keyring://` and `${{keyring://…}}` are only resolved for values that subsequently pass through the CLI resolver (connection strings and `--duck-init`). To use secrets in other YAML fields, resolve them into environment variables first and use `${{ENV_VAR}}`.
+> **YAML Interpolation**: In YAML job files, `${{ENV_VAR}}` and `${{keyring://...}}` interpolations are applied to the raw YAML text *before* parsing, meaning they work on **all** values (including configuration properties that aren't normally resolved, like `batch-size` or `separator`).
+> Full-value replacement (`@file` and `keyring://alias` without braces) only works for specific string fields that pass through the CLI resolver (connection strings, queries, hooks, and transformer scripts).
 
 ### Examples
 

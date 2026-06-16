@@ -13,11 +13,12 @@ public static class PipelineToJobConverter
 {
     public static (Dictionary<string, JobDefinition> Jobs, JobDagDefinition Dag, Dictionary<string, CliJobContext> Contexts) Convert(
         ParsedPipeline parsed,
-        IEnumerable<IStreamTransformerFactory>? streamTransformerFactories = null)
+        IEnumerable<IStreamTransformerFactory>? streamTransformerFactories = null,
+        DtPipe.Cli.Security.ISecretsManager? secretsManager = null)
     {
         // --job mode: load from YAML file and apply CLI overrides
         if (!string.IsNullOrEmpty(parsed.Globals.JobFile))
-            return ConvertFromJobFile(parsed, streamTransformerFactories);
+            return ConvertFromJobFile(parsed, streamTransformerFactories, secretsManager);
 
         var jobs = new Dictionary<string, JobDefinition>(StringComparer.OrdinalIgnoreCase);
         var contexts = new Dictionary<string, CliJobContext>(StringComparer.OrdinalIgnoreCase);
@@ -78,9 +79,10 @@ public static class PipelineToJobConverter
 
     private static (Dictionary<string, JobDefinition> Jobs, JobDagDefinition Dag, Dictionary<string, CliJobContext> Contexts) ConvertFromJobFile(
         ParsedPipeline parsed,
-        IEnumerable<IStreamTransformerFactory>? streamTransformerFactories)
+        IEnumerable<IStreamTransformerFactory>? streamTransformerFactories,
+        DtPipe.Cli.Security.ISecretsManager? secretsManager)
     {
-        var jobs = JobFileParser.Parse(parsed.Globals.JobFile!);
+        var jobs = JobFileParser.Parse(parsed.Globals.JobFile!, secretsManager);
         var flags = parsed.Globals.AllFlags;
 
         // Apply CLI overrides to all loaded jobs

@@ -228,7 +228,7 @@ rm -f "$INPUT_DIR"/pg_users.csv "$INPUT_DIR"/pg_users.clean "$INPUT_DIR"/result_
 echo "[7/9] Testing Query from File..."
 echo "SELECT * FROM vicious_users WHERE CAST(NULLIF(amount, '') AS NUMERIC) > 100 ORDER BY id" \
   > "$INPUT_DIR/query.sql"
-"$DTPIPE" -i "$PG_CONN" --query "$INPUT_DIR/query.sql" \
+"$DTPIPE" -i "$PG_CONN" --query "@$INPUT_DIR/query.sql" \
   -o "$INPUT_DIR/result_final.csv" --no-stats > /dev/null
 LINE_COUNT=$(wc -l < "$INPUT_DIR/result_final.csv" | tr -d ' ')
 [ "$LINE_COUNT" = "5" ] || { echo "❌ FAILED: Query File Mismatch (Expected 5, Got $LINE_COUNT)"; exit 1; }

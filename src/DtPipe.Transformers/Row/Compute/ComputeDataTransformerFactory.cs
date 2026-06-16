@@ -10,11 +10,13 @@ public class ComputeDataTransformerFactory : IDataTransformerFactory
 {
 	private readonly OptionsRegistry _registry;
 	private readonly IJsEngineProvider _jsEngineProvider;
+	private readonly IStringContentResolver _resolver;
 
-	public ComputeDataTransformerFactory(OptionsRegistry registry, IJsEngineProvider jsEngineProvider)
+	public ComputeDataTransformerFactory(OptionsRegistry registry, IJsEngineProvider jsEngineProvider, IStringContentResolver? resolver = null)
 	{
 		_registry = registry;
 		_jsEngineProvider = jsEngineProvider;
+		_resolver = resolver ?? DefaultStringContentResolver.Instance;
 	}
 
 	public string ComponentName => "compute";
@@ -96,9 +98,9 @@ public class ComputeDataTransformerFactory : IDataTransformerFactory
 		return CreateFromOptions(new ComputeOptions { Compute = mappings, SkipNull = skipNull });
 	}
 
-	private static string ResolveScriptContent(string script)
+	private string ResolveScriptContent(string script)
 	{
 		if (string.IsNullOrWhiteSpace(script)) return script;
-		return DefaultStringContentResolver.Instance.ResolveAsync(script).GetAwaiter().GetResult() ?? script;
+		return _resolver.ResolveAsync(script).GetAwaiter().GetResult() ?? script;
 	}
 }

@@ -172,7 +172,8 @@ public class DtPipeMcpTools
             var lexer = new PipelineLexer(registry);
             var parsedPipeline = lexer.Parse(args);
             
-            var (jobs, dag, _) = PipelineToJobConverter.Convert(parsedPipeline, streamTransformerFactories);
+            var secretsManager = _serviceProvider.GetRequiredService<DtPipe.Cli.Security.ISecretsManager>();
+            var (jobs, dag, _) = PipelineToJobConverter.Convert(parsedPipeline, streamTransformerFactories, secretsManager);
 
             var errors = PipelineValidator.Validate(dag, jobs, streamTransformerFactories);
 

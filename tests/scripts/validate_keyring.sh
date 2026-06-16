@@ -73,6 +73,25 @@ if [ $? -ne 0 ]; then
 fi
 echo "✅ Pipeline resolved connection string and ran successfully."
 
+# 3.b Test Job YAML Secret Interpolation
+echo "Running job pipeline utilizing keyring secret in YAML..."
+TEMP_JOB_YAML=$(mktemp)
+cat > "$TEMP_JOB_YAML" <<EOF
+test-job:
+  input: \${{keyring://test-secret-alias}}
+  output: null:-
+EOF
+
+$DTPIPE --job "$TEMP_JOB_YAML"
+if [ $? -ne 0 ]; then
+    echo "❌ Error: Running --job with keyring resolution failed."
+    rm -f "$TEMP_JOB_YAML"
+    exit 1
+fi
+rm -f "$TEMP_JOB_YAML"
+echo "✅ Job pipeline resolved secret and ran successfully."
+
+
 # 4. Test Secrets Listing
 echo "Listing secrets..."
 LIST_OUTPUT=$($DTPIPE secret list 2>&1)

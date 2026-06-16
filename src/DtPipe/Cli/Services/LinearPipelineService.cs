@@ -123,7 +123,7 @@ public class LinearPipelineService
             var readerOptsForLoad = _optionsRegistry.Get(readerFactory.OptionsType) as DtPipe.Core.Options.IQueryAwareOptions;
             if (readerOptsForLoad != null && !string.IsNullOrWhiteSpace(readerOptsForLoad.Query))
             {
-                var resolved = LoadOrReadContent(readerOptsForLoad.Query, _console, "query");
+                var resolved = await (resolver ?? DtPipe.Core.Security.DefaultStringContentResolver.Instance).ResolveAsync(readerOptsForLoad.Query, token);
                 if (resolved != readerOptsForLoad.Query)
                     readerOptsForLoad.Query = resolved;
             }
@@ -136,13 +136,13 @@ public class LinearPipelineService
             if (writerHookOpts != null)
             {
                 if (!string.IsNullOrEmpty(writerHookOpts.PreExec))
-                    writerHookOpts.PreExec = LoadOrReadContent(writerHookOpts.PreExec, _console, "Pre-Exec");
+                    writerHookOpts.PreExec = await (resolver ?? DtPipe.Core.Security.DefaultStringContentResolver.Instance).ResolveAsync(writerHookOpts.PreExec, token);
                 if (!string.IsNullOrEmpty(writerHookOpts.PostExec))
-                    writerHookOpts.PostExec = LoadOrReadContent(writerHookOpts.PostExec, _console, "Post-Exec");
+                    writerHookOpts.PostExec = await (resolver ?? DtPipe.Core.Security.DefaultStringContentResolver.Instance).ResolveAsync(writerHookOpts.PostExec, token);
                 if (!string.IsNullOrEmpty(writerHookOpts.OnErrorExec))
-                    writerHookOpts.OnErrorExec = LoadOrReadContent(writerHookOpts.OnErrorExec, _console, "On-Error-Exec");
+                    writerHookOpts.OnErrorExec = await (resolver ?? DtPipe.Core.Security.DefaultStringContentResolver.Instance).ResolveAsync(writerHookOpts.OnErrorExec, token);
                 if (!string.IsNullOrEmpty(writerHookOpts.FinallyExec))
-                    writerHookOpts.FinallyExec = LoadOrReadContent(writerHookOpts.FinallyExec, _console, "Finally-Exec");
+                    writerHookOpts.FinallyExec = await (resolver ?? DtPipe.Core.Security.DefaultStringContentResolver.Instance).ResolveAsync(writerHookOpts.FinallyExec, token);
             }
         }
 
@@ -272,33 +272,6 @@ public class LinearPipelineService
         return (match, raw);
     }
 
-    private static string? LoadOrReadContent(string? input, IAnsiConsole console, string label)
-    {
-        if (string.IsNullOrWhiteSpace(input)) return input;
-        input = input.Trim();
-
-        string? filename = null;
-        if (input.StartsWith("@"))
-            filename = input.Substring(1).Trim();
-        else if (File.Exists(input) &&
-                 (input.EndsWith(".sql", StringComparison.OrdinalIgnoreCase) ||
-                  input.EndsWith(".txt", StringComparison.OrdinalIgnoreCase) ||
-                  input.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase) ||
-                  input.EndsWith(".yml", StringComparison.OrdinalIgnoreCase)))
-            filename = input;
-
-        if (filename != null)
-        {
-            if (File.Exists(filename))
-            {
-                console.WriteLine($"Loaded {label} from file: {filename}");
-                return File.ReadAllText(filename).Trim();
-            }
-            else if (input.StartsWith("@"))
-                throw new InvalidOperationException($"File not found for {label}: {filename}");
-        }
-        return input;
-    }
 
     private List<IDataTransformer> BuildPipelineFromYaml(JobDefinition job, List<IDataTransformerFactory> factories, IAnsiConsole console)
     {

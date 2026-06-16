@@ -90,7 +90,8 @@ class Program
 
 			var lexer = new PipelineLexer(registry);
 			var parsedPipeline = lexer.Parse(args);
-			var (jobs, dag, contexts) = PipelineToJobConverter.Convert(parsedPipeline, streamTransformerFactories);
+			var secretsManager = serviceProvider.GetRequiredService<DtPipe.Cli.Security.ISecretsManager>();
+			var (jobs, dag, contexts) = PipelineToJobConverter.Convert(parsedPipeline, streamTransformerFactories, secretsManager);
 
 			if (!string.IsNullOrEmpty(parsedPipeline.Globals.ExportJobFile))
 			{

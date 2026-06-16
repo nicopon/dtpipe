@@ -9,14 +9,17 @@ public class FilterDataTransformerFactory : IDataTransformerFactory
 {
 	private readonly OptionsRegistry _registry;
 	private readonly IJsEngineProvider _jsEngineProvider;
-	public string Category => "Transformers";
-	public Type OptionsType => typeof(DtPipe.Transformers.Arrow.Filter.FilterOptions);
+	private readonly DtPipe.Core.Security.IStringContentResolver _resolver;
 
-	public FilterDataTransformerFactory(OptionsRegistry registry, IJsEngineProvider jsEngineProvider)
+	public FilterDataTransformerFactory(OptionsRegistry registry, IJsEngineProvider jsEngineProvider, DtPipe.Core.Security.IStringContentResolver? resolver = null)
 	{
 		_registry = registry;
 		_jsEngineProvider = jsEngineProvider;
+		_resolver = resolver ?? DtPipe.Core.Security.DefaultStringContentResolver.Instance;
 	}
+
+	public string Category => "Transformers";
+	public Type OptionsType => typeof(DtPipe.Transformers.Arrow.Filter.FilterOptions);
 
 	public string ComponentName => "filter";
 
@@ -27,7 +30,12 @@ public class FilterDataTransformerFactory : IDataTransformerFactory
 
 	public IDataTransformer CreateFromOptions(DtPipe.Transformers.Arrow.Filter.FilterOptions options)
 	{
-		return new FilterDataTransformer(options, _jsEngineProvider);
+		var resolved = options.Filters?.Select(f => 
+			_resolver.ResolveAsync(f).GetAwaiter().GetResult() ?? f
+		).ToArray();
+		
+		var newOptions = new FilterOptions { Filters = resolved };
+		return new FilterDataTransformer(newOptions, _jsEngineProvider);
 	}
 
 	public IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration)
@@ -41,7 +49,7 @@ public class FilterDataTransformerFactory : IDataTransformerFactory
 				string.Equals(option, "where", StringComparison.OrdinalIgnoreCase) ||
 				string.Equals(option, "--where", StringComparison.OrdinalIgnoreCase))
 			{
-				filters.Add(value);
+				filters.Add(_resolver.ResolveAsync(value).GetAwaiter().GetResult() ?? value);
 			}
 		}
 

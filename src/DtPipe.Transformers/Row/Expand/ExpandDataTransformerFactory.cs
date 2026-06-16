@@ -10,14 +10,17 @@ public class ExpandDataTransformerFactory : IDataTransformerFactory
 {
 	private readonly OptionsRegistry _registry;
 	private readonly IJsEngineProvider _jsEngineProvider;
-	public string Category => "Transformers";
-	public Type OptionsType => typeof(DtPipe.Transformers.Row.Expand.ExpandOptions);
+	private readonly IStringContentResolver _resolver;
 
-	public ExpandDataTransformerFactory(OptionsRegistry registry, IJsEngineProvider jsEngineProvider)
+	public ExpandDataTransformerFactory(OptionsRegistry registry, IJsEngineProvider jsEngineProvider, IStringContentResolver? resolver = null)
 	{
 		_registry = registry;
 		_jsEngineProvider = jsEngineProvider;
+		_resolver = resolver ?? DefaultStringContentResolver.Instance;
 	}
+
+	public string Category => "Transformers";
+	public Type OptionsType => typeof(DtPipe.Transformers.Row.Expand.ExpandOptions);
 
 	public string ComponentName => "expand";
 
@@ -29,7 +32,7 @@ public class ExpandDataTransformerFactory : IDataTransformerFactory
 	public IDataTransformer CreateFromOptions(DtPipe.Transformers.Row.Expand.ExpandOptions options)
 	{
 		var resolved = options.Expand?.Select(e =>
-			DefaultStringContentResolver.Instance.ResolveAsync(e).GetAwaiter().GetResult() ?? e
+			_resolver.ResolveAsync(e).GetAwaiter().GetResult() ?? e
 		).ToArray();
 		return new ExpandDataTransformer(new ExpandOptions { Expand = resolved }, _jsEngineProvider);
 	}
@@ -44,7 +47,7 @@ public class ExpandDataTransformerFactory : IDataTransformerFactory
 				string.Equals(option, "--expand", StringComparison.OrdinalIgnoreCase))
 			{
 				expands.Add(
-					DefaultStringContentResolver.Instance.ResolveAsync(value).GetAwaiter().GetResult() ?? value);
+					_resolver.ResolveAsync(value).GetAwaiter().GetResult() ?? value);
 			}
 		}
 
