@@ -24,6 +24,119 @@ dtpipe --job FILE [OVERRIDES]
 
 ---
 
+## Secret Management
+
+DtPipe stores secrets in the OS credential store (macOS Keychain, Windows Credential Manager, Linux Secret Service).
+
+```bash
+# Store a connection string
+dtpipe secret set prod-db "pg:Host=...;Password=secret"
+
+# Use it as a connection string
+dtpipe -i keyring://prod-db --query "SELECT * FROM users" -o users.parquet
+
+# Inline substitution within a larger string
+dtpipe -i duck:memory --duck-init "LOAD httpfs; SET s3_access_key_id='${{keyring://aws-key}}';" ...
+```
+
+| Command | Description |
+|:---|:---|
+| `dtpipe secret set <alias> <value>` | Store or update a secret |
+| `dtpipe secret list` | List all stored aliases |
+| `dtpipe secret get <alias>` | Print a secret value |
+| `dtpipe secret delete <alias>` | Delete a specific secret |
+| `dtpipe secret nuke` | Delete all stored secrets |
+
+Secrets can be referenced in two ways:
+- **`keyring://alias`** — replaces the entire value (connection strings, `--duck-init`)
+- **`${{keyring://alias}}`** — inline substitution within a string
+
+> See [Value Resolution](#value-resolution) for the full resolution pipeline, supported contexts, and CLI/YAML differences.
+
+---
+
+## Value Resolution
+
+DtPipe resolves string values through a sequential pipeline before use. The available mechanisms depend on the context.
+
+### Resolution pipeline
+
+1. **Full-value replacement** (mutually exclusive — first match wins):
+   - `@/path/to/file` — load entire file content
+   - `keyring://alias` — load full value from OS keyring
+
+2. **Inline substitution** (applied to the result of step 1):
+   - `${{ENV_VAR}}` — substitute an environment variable
+   - `${{keyring://alias}}` — substitute an inline keyring secret
+
+Steps are composable: a keyring block can itself contain `${{ENV_VAR}}` placeholders that are resolved afterwards.
+
+### Compatibility matrix
+
+Not all mechanisms are available in every context:
+
+| Context | `@file` | `keyring://` | `${{ENV_VAR}}` | `${{keyring://…}}` |
+|:---|:---:|:---:|:---:|:---:|
+| Connection strings (`-i`, `-o`) | ✅ | ✅ | ✅ | ✅ |
+| `--duck-init` | ✅ | ✅ | ✅ | ✅ |
+| `--compute`, `--expand` scripts | ✅ | — | ✅ | — |
+| `--query` | ✅ | — | — | — |
+| `--pre-exec`, `--post-exec`, etc. | ✅ | — | — | — |
+| YAML job files (all values) | — | — | ✅ | — |
+
+> [!IMPORTANT]
+> **CLI vs YAML**: In YAML job files, `${{ENV_VAR}}` interpolation is applied to the raw YAML text before parsing, so it works on **all** values. However, `keyring://` and `${{keyring://…}}` are only resolved for values that subsequently pass through the CLI resolver (connection strings and `--duck-init`). To use secrets in other YAML fields, resolve them into environment variables first and use `${{ENV_VAR}}`.
+
+### Examples
+
+```bash
+# Connection string from keyring (full replacement)
+dtpipe -i keyring://prod-db -q "SELECT * FROM users" -o users.parquet
+
+# Inline keyring secrets in duck-init
+dtpipe -i duck:memory \
+  --duck-init "LOAD httpfs; SET s3_access_key_id='${{keyring://aws-key}}';" \
+  -q "SELECT * FROM read_parquet('s3://bucket/data.parquet')" \
+  -o result.csv
+
+# Load SQL from a file
+dtpipe -i pg:... -q @queries/export.sql -o export.parquet
+
+# Environment variables
+dtpipe -i "pg:Host=${{DB_HOST}};Database=${{DB_NAME}}" -q "SELECT 1" -o out.csv
+
+# Composable: keyring value containing env var placeholders
+dtpipe secret set s3-init "LOAD httpfs; SET s3_region='${{AWS_REGION}}';"
+dtpipe -i duck:memory --duck-init "keyring://s3-init" ...
+# → loads the block, then substitutes ${{AWS_REGION}}
+```
+
+---
+
+## Providers
+
+| Provider | Input | Output | Prefix | Requires query | Stdin/Stdout | Notes |
+|:---|:---:|:---:|:---|:---:|:---:|:---|
+| **DuckDB** | ✅ | ✅ | `duck:` | ✅ | — | `--duck-init` supported |
+| **SQLite** | ✅ | ✅ | `sqlite:` | ✅ | — |
+| **PostgreSQL** | ✅ | ✅ | `pg:` | ✅ | — |
+| **Oracle** | ✅ | ✅ | `ora:` | ✅ | — |
+| **SQL Server** | ✅ | ✅ | `mssql:` | ✅ | — |
+| **CSV** | ✅ | ✅ | `csv:` / `.csv` | — | ✅ |
+| **JsonL** | ✅ | ✅ | `jsonl:` / `.jsonl` | — | ✅ |
+| **XML** | ✅ | — | `xml:` / `.xml` | — | ✅ |
+| **Apache Arrow** | ✅ | ✅ | `arrow:` / `.arrow` | — | ✅ |
+| **Parquet** | ✅ | ✅ | `parquet:` / `.parquet` | — | ✅ |
+| **Data Gen** | ✅ | — | `generate:N` | — | — |
+| **Null** | — | ✅ | `null:` | — | — |
+| **Checksum** | — | ✅ | `checksum:` | — | — |
+
+> For Stdin/Stdout: use `-` as the connection string (`csv:-`) or the bare provider name (`csv` = `csv:-`).
+
+> **DuckDB dual role**: Beyond being a regular read/write provider, DuckDB also serves as the **internal SQL engine** for `--sql` branches in DAG pipelines (joins, unions, CTEs). See [DAG Syntax](#dag-syntax) and [Provider-Specific Options](#provider-specific-options) for details on `--duck-init`.
+
+---
+
 ## Source (Reader) Options
 
 | Flag | Example | Description |
@@ -37,7 +150,7 @@ dtpipe --job FILE [OVERRIDES]
 | `--column-types` | `"Id:uuid,Qty:int32"` | Explicit column type declarations for text readers |
 | `--auto-column-types` | | Infer column types from the first 100 rows |
 | `--path` | `"//Product"` | XPath / JSON path for record selection (XML, JsonL) |
-| `--duck-init` | `"LOAD httpfs"` | **(DuckDB only)** SQL executed after connection open. Supports `@file`, `keyring://alias`, `${{ENV_VAR}}`, `${{keyring://alias}}` |
+| `--duck-init` | `"LOAD httpfs"` | **(DuckDB only)** SQL executed after connection open. See [Value Resolution](#value-resolution) |
 
 ---
 
@@ -99,7 +212,7 @@ into one step; a different flag type starts a new step.
 | `--on-error-exec` | `"..."` | SQL script to run on pipeline error |
 | `--finally-exec` | `"..."` | SQL script to run regardless of outcome |
 | `--prefix` | `"staging_"` | Table name prefix applied to all DB writers |
-| `--duck-init` | `"LOAD azure"` | **(DuckDB only)** SQL executed after connection open. Supports `@file`, `keyring://alias`, `${{ENV_VAR}}`, `${{keyring://alias}}` |
+| `--duck-init` | `"LOAD azure"` | **(DuckDB only)** SQL executed after connection open. See [Value Resolution](#value-resolution) |
 
 > `--pre-exec`, `--post-exec` etc. accept inline SQL or a file path (`@scripts/pre.sql` or a `.sql` file path).
 > `--duck-init` runs on the DuckDB connection before reads or writes (unlike `--pre-exec` which runs on the target DB after connection).
@@ -120,97 +233,6 @@ into one step; a different flag type starts a new step.
 
 ---
 
-## Providers
-
-| Provider | Input | Output | Prefix | Requires query | Stdin/Stdout | Notes |
-|:---|:---:|:---:|:---|:---:|:---:|:---|
-| **DuckDB** | ✅ | ✅ | `duck:` | ✅ | — | `--duck-init` supported |
-| **SQLite** | ✅ | ✅ | `sqlite:` | ✅ | — |
-| **PostgreSQL** | ✅ | ✅ | `pg:` | ✅ | — |
-| **Oracle** | ✅ | ✅ | `ora:` | ✅ | — |
-| **SQL Server** | ✅ | ✅ | `mssql:` | ✅ | — |
-| **CSV** | ✅ | ✅ | `csv:` / `.csv` | — | ✅ |
-| **JsonL** | ✅ | ✅ | `jsonl:` / `.jsonl` | — | ✅ |
-| **XML** | ✅ | — | `xml:` / `.xml` | — | ✅ |
-| **Apache Arrow** | ✅ | ✅ | `arrow:` / `.arrow` | — | ✅ |
-| **Parquet** | ✅ | ✅ | `parquet:` / `.parquet` | — | ✅ |
-| **Data Gen** | ✅ | — | `generate:N` | — | — |
-| **Null** | — | ✅ | `null:` | — | — |
-| **Checksum** | — | ✅ | `checksum:` | — | — |
-
-> For Stdin/Stdout: use `-` as the connection string (`csv:-`) or the bare provider name (`csv` = `csv:-`).
-
----
-
-## DuckDB Options
-
-`--duck-init` runs SQL immediately after the DuckDB connection opens, before any query execution. It applies to all three DuckDB integration points:
-
-| Component | Flag | When it runs |
-|:---|:---|:---|
-| Reader (`duck:`) | `--duck-init` | After connection open, before query |
-| Writer (`duck:`) | `--duck-init` | After connection open, before schema initialization |
-| SQL processor (`--sql`) | `--duck-init` | After connection open and built-in `SET` statements, before Arrow stream registration |
-
-### Value resolution
-
-The `--duck-init` value is resolved through a sequential pipeline before execution:
-
-| Syntax | Resolution |
-|:---|:---|
-| `@/path/to/init.sql` | Load file content (replaces the full value) |
-| `keyring://alias` | Load full block from OS keyring (replaces the full value) |
-| `${{ENV_VAR}}` | Substitute environment variable inline |
-| `${{keyring://alias}}` | Substitute OS keyring secret inline |
-
-`@file` and `keyring://` (standalone) are mutually exclusive — the first match wins. Environment variable and inline keyring substitutions are applied to the result afterwards, so a keyring value can itself contain `${{VAR}}` placeholders.
-
-```bash
-# Inline SQL
---duck-init "INSTALL httpfs; LOAD httpfs; SET s3_region='eu-west-1';"
-
-# From a file
---duck-init "@/path/to/init.sql"
-
-# Full block from the OS keyring (credentials never appear in shell history)
-dtpipe secret set s3-init "LOAD httpfs; SET s3_region='eu-west-1'; SET s3_access_key_id='AKIA...';"
---duck-init "keyring://s3-init"
-
-# Inline keyring secrets (mix multiple secrets in one string)
---duck-init "LOAD httpfs; SET s3_region='${{keyring://s3-region}}'; SET s3_access_key_id='${{keyring://s3-key}}';"
-
-# Environment variables
---duck-init "LOAD httpfs; SET s3_region='${{AWS_REGION}}'; SET s3_access_key_id='${{AWS_ACCESS_KEY_ID}}';"
-
-# Composable: keyring value that itself contains env var placeholders
-dtpipe secret set s3-init "LOAD httpfs; SET s3_region='${{AWS_REGION}}';"
---duck-init "keyring://s3-init"   # → loads block, then substitutes ${{AWS_REGION}}
-```
-
-> `--pre-exec` / `--post-exec` run SQL **on the target database after writes**; `--duck-init` runs **on the DuckDB connection before reads or queries**. They serve different purposes and can be combined.
-
-In YAML job files, use the `provider-options` block keyed by component name:
-
-```yaml
-provider-options:
-  duck:           # reader
-    duck-init: "LOAD httpfs; SET s3_region='eu-west-1';"
-  duck-writer:    # writer
-    duck-init: "keyring://azure-init"
-```
-
-For a `--sql` branch, pass `--duck-init` alongside `--from` and `--sql` on the same branch:
-
-```bash
-dtpipe -i events.parquet --alias ev \
-  --from ev \
-  --duck-init "LOAD httpfs; SET s3_region='${{keyring://s3-region}}';" \
-  --sql "SELECT * FROM ev JOIN read_parquet('s3://bucket/ref.parquet') r ON ev.id = r.id" \
-  -o result.parquet
-```
-
----
-
 ## DAG Syntax
 
 ### Options
@@ -220,13 +242,15 @@ dtpipe -i events.parquet --alias ev \
 | `--alias NAME` | Name the current branch for downstream reference |
 | `--from ALIAS[,ALIAS...]` | Streaming source(s). Fan-out uses a single alias; multi-stream processors use comma-separated aliases |
 | `--ref ALIAS[,ALIAS...]` | Materialized reference source(s) — fully preloaded before query execution. Use for JOIN lookups |
-| `--sql "QUERY"` | Inline SQL (DuckDB dialect: standard SQL, window functions, CTEs, JSON) |
-| `--duck-init "SQL"` | SQL to run on the DuckDB SQL processor connection after open (e.g. `LOAD httpfs`). `@path` reads from a file |
+| `--sql "QUERY"` | Inline SQL executed by the internal DuckDB engine (standard SQL, window functions, CTEs, JSON) |
+| `--duck-init "SQL"` | SQL to run on the DuckDB SQL processor connection after open (e.g. `LOAD httpfs`). See [Value Resolution](#value-resolution) |
 | `--merge` | UNION ALL of all `--from` sources. Requires at least 2 streaming sources |
 
 > **`--ref` is intentionally materialized.** Secondary sources declared via `--ref` are read fully
 > into memory so the query engine can build a cost-based plan. Only the `--from` source streams.
 > Pre-filter large lookup tables upstream before using them as `--ref`.
+
+> **SQL engine**: The `--sql` processor uses DuckDB internally — the same engine available as a read/write provider (`duck:`). This means all DuckDB SQL extensions and functions are available in `--sql` branches. Use `--duck-init` to load extensions before query execution. See [Provider-Specific Options](#provider-specific-options) for details.
 
 ### Canonical topologies
 
@@ -332,37 +356,45 @@ branch-name:
 | `drop` | `mappings: {col: ~}` | Listed columns are removed |
 | `rename` | `mappings: {OldName: NewName}` | |
 
-### Environment variable interpolation
+### Environment variable and secret interpolation
 
-Use `${{VAR_NAME}}` (double braces) to inject environment variables at runtime:
-
-```yaml
-main:
-  input: "${{DB_CONN}}"
-  provider-options:
-    pg:
-      query: "SELECT * FROM ${{TARGET_TABLE}}"
-```
+Environment variables and secrets use the `${{...}}` syntax. See [Value Resolution](#value-resolution) for the full compatibility matrix and CLI/YAML differences.
 
 ---
 
-## Secret Management
+## Provider-Specific Options
 
-```bash
-# Store a connection string in the OS keyring (macOS Keychain, Windows Credential Manager, Linux Secret Service)
-dtpipe secret set prod-db "pg:Host=...;Password=secret"
+### DuckDB
 
-# Reference it anywhere a connection string is expected
-dtpipe -i keyring://prod-db --query "SELECT * FROM users" -o users.parquet
+DuckDB serves a dual role in dtpipe: it is both a standard read/write **provider** (`duck:`) and the **internal SQL engine** powering `--sql` branches. The `--duck-init` flag applies to all three integration points:
+
+| Component | Flag | When it runs |
+|:---|:---|:---|
+| Reader (`duck:`) | `--duck-init` | After connection open, before query |
+| Writer (`duck:`) | `--duck-init` | After connection open, before schema initialization |
+| SQL processor (`--sql`) | `--duck-init` | After connection open and built-in `SET` statements, before Arrow stream registration |
+
+> `--pre-exec` / `--post-exec` run SQL **on the target database after writes**; `--duck-init` runs **on the DuckDB connection before reads or queries**. They serve different purposes and can be combined.
+
+In YAML job files, use the `provider-options` block keyed by component name:
+
+```yaml
+provider-options:
+  duck:           # reader
+    duck-init: "LOAD httpfs; SET s3_region='eu-west-1';"
+  duck-writer:    # writer
+    duck-init: "keyring://azure-init"
 ```
 
-| Command | Description |
-|:---|:---|
-| `dtpipe secret set <alias> <value>` | Store or update a secret |
-| `dtpipe secret list` | List all stored aliases |
-| `dtpipe secret get <alias>` | Print a secret value |
-| `dtpipe secret delete <alias>` | Delete a specific secret |
-| `dtpipe secret nuke` | Delete all stored secrets |
+For a `--sql` branch, pass `--duck-init` alongside `--from` and `--sql` on the same branch:
+
+```bash
+dtpipe -i events.parquet --alias ev \
+  --from ev \
+  --duck-init "LOAD httpfs; SET s3_region='${{keyring://s3-region}}';" \
+  --sql "SELECT * FROM ev JOIN read_parquet('s3://bucket/ref.parquet') r ON ev.id = r.id" \
+  -o result.parquet
+```
 
 ---
 
