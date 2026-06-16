@@ -37,16 +37,16 @@ class Program
 		System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = System.Globalization.CultureInfo.InvariantCulture;
 		Console.OutputEncoding = System.Text.Encoding.UTF8;
 
-		var services = new ServiceCollection();
-		ConfigureServices(services);
-		var serviceProvider = services.BuildServiceProvider();
-
 		Log.Logger = new LoggerConfiguration()
 				.MinimumLevel.Debug()
 				.WriteTo.Console(
 				outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}",
 				standardErrorFromLevel: Serilog.Events.LogEventLevel.Verbose)
 				.CreateLogger();
+
+		var services = new ServiceCollection();
+		ConfigureServices(services);
+		var serviceProvider = services.BuildServiceProvider();
 
 		var jobService = serviceProvider.GetRequiredService<JobService>();
 
@@ -269,6 +269,20 @@ class Program
 		services.AddSingleton<OptionsRegistry>();
 		services.AddSingleton<Spectre.Console.IAnsiConsole>(sp => Spectre.Console.AnsiConsole.Create(new Spectre.Console.AnsiConsoleSettings { Out = new Spectre.Console.AnsiConsoleOutput(Console.Error) }));
 		services.AddSingleton<JobService>();
+
+		var useFakeKeyring = Environment.GetEnvironmentVariable("DTPIPE_UNSAFE_INSECURE_FAKE_KEYRING");
+		if (useFakeKeyring == "1" || useFakeKeyring == "true")
+		{
+			var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+			var tempPath = Path.Combine(appData, "dtpipe", "fake_keyring.json");
+			services.AddSingleton<DtPipe.Cli.Security.ISecretsManager>(sp =>
+				new DtPipe.Cli.Security.FileSecretsManager(tempPath, sp.GetRequiredService<ILogger<DtPipe.Cli.Security.FileSecretsManager>>()));
+		}
+		else
+		{
+			services.AddSingleton<DtPipe.Cli.Security.ISecretsManager, DtPipe.Cli.Security.KeyringSecretsManager>();
+		}
+
 		services.AddSingleton<DtPipe.Core.Security.IStringContentResolver, DtPipe.Cli.Security.CliStringContentResolver>();
 
 		RegisterReader<DtPipe.Adapters.Arrow.ArrowReaderDescriptor>(services);

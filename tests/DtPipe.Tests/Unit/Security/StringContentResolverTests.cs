@@ -100,8 +100,14 @@ public class DefaultStringContentResolverTests : IAsyncLifetime
 
 public class CliStringContentResolverTests : IAsyncLifetime
 {
-    private readonly CliStringContentResolver _resolver = new();
+    private readonly InMemorySecretsManager _secretsManager = new();
+    private readonly CliStringContentResolver _resolver;
     private string? _tempFile;
+
+    public CliStringContentResolverTests()
+    {
+        _resolver = new CliStringContentResolver(_secretsManager);
+    }
 
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
@@ -110,21 +116,6 @@ public class CliStringContentResolverTests : IAsyncLifetime
         if (_tempFile != null && File.Exists(_tempFile))
             File.Delete(_tempFile);
         return ValueTask.CompletedTask;
-    }
-
-    // Skips the test if the OS keyring is unavailable (e.g. headless Linux CI without libsecret).
-    private static void SkipIfKeyringUnavailable()
-    {
-        try
-        {
-            var mgr = new DtPipe.Cli.Security.SecretsManager();
-            mgr.SetSecret("__dtpipe_keyring_probe__", "probe");
-            mgr.DeleteSecret("__dtpipe_keyring_probe__");
-        }
-        catch (DllNotFoundException ex)
-        {
-            throw SkipException.ForSkip($"OS keyring not available: {ex.Message}");
-        }
     }
 
     [Fact]
@@ -169,9 +160,7 @@ public class CliStringContentResolverTests : IAsyncLifetime
     [Fact]
     public async Task KeyringStandalone_Resolves()
     {
-        SkipIfKeyringUnavailable();
-        var mgr = new DtPipe.Cli.Security.SecretsManager();
-        mgr.SetSecret("test-duck-init-standalone", "LOAD json;");
+        _secretsManager.SetSecret("test-duck-init-standalone", "LOAD json;");
         try
         {
             var result = await _resolver.ResolveAsync("keyring://test-duck-init-standalone");
@@ -179,16 +168,14 @@ public class CliStringContentResolverTests : IAsyncLifetime
         }
         finally
         {
-            mgr.DeleteSecret("test-duck-init-standalone");
+            _secretsManager.DeleteSecret("test-duck-init-standalone");
         }
     }
 
     [Fact]
     public async Task KeyringInline_SubstitutedInString()
     {
-        SkipIfKeyringUnavailable();
-        var mgr = new DtPipe.Cli.Security.SecretsManager();
-        mgr.SetSecret("test-duck-init-inline-key", "AKIAIOSFODNN7EXAMPLE");
+        _secretsManager.SetSecret("test-duck-init-inline-key", "AKIAIOSFODNN7EXAMPLE");
         try
         {
             var result = await _resolver.ResolveAsync("SET s3_key='${{keyring://test-duck-init-inline-key}}'");
@@ -196,16 +183,14 @@ public class CliStringContentResolverTests : IAsyncLifetime
         }
         finally
         {
-            mgr.DeleteSecret("test-duck-init-inline-key");
+            _secretsManager.DeleteSecret("test-duck-init-inline-key");
         }
     }
 
     [Fact]
     public async Task KeyringAndEnvVar_BothResolved()
     {
-        SkipIfKeyringUnavailable();
-        var mgr = new DtPipe.Cli.Security.SecretsManager();
-        mgr.SetSecret("test-duck-init-region-key", "eu-west-1");
+        _secretsManager.SetSecret("test-duck-init-region-key", "eu-west-1");
         Environment.SetEnvironmentVariable("DTPIPE_CLI_TEST_ACCESS_KEY", "MY_KEY");
         try
         {
@@ -215,7 +200,7 @@ public class CliStringContentResolverTests : IAsyncLifetime
         }
         finally
         {
-            mgr.DeleteSecret("test-duck-init-region-key");
+            _secretsManager.DeleteSecret("test-duck-init-region-key");
             Environment.SetEnvironmentVariable("DTPIPE_CLI_TEST_ACCESS_KEY", null);
         }
     }
@@ -223,10 +208,7 @@ public class CliStringContentResolverTests : IAsyncLifetime
     [Fact]
     public async Task KeyringValue_WithEnvVar_BothResolved()
     {
-        SkipIfKeyringUnavailable();
-        // Secret stored in keyring itself contains a ${{VAR}} placeholder
-        var mgr = new DtPipe.Cli.Security.SecretsManager();
-        mgr.SetSecret("test-duck-init-template", "LOAD httpfs; SET region='${{DTPIPE_CLI_REGION_FROM_KEYRING}}';");
+        _secretsManager.SetSecret("test-duck-init-template", "LOAD httpfs; SET region='${{DTPIPE_CLI_REGION_FROM_KEYRING}}';");
         Environment.SetEnvironmentVariable("DTPIPE_CLI_REGION_FROM_KEYRING", "us-east-1");
         try
         {
@@ -235,7 +217,7 @@ public class CliStringContentResolverTests : IAsyncLifetime
         }
         finally
         {
-            mgr.DeleteSecret("test-duck-init-template");
+            _secretsManager.DeleteSecret("test-duck-init-template");
             Environment.SetEnvironmentVariable("DTPIPE_CLI_REGION_FROM_KEYRING", null);
         }
     }

@@ -52,6 +52,7 @@ show_help() {
     echo "  $SCRIPT_DIR/validate_dag.sh"
     echo "  $SCRIPT_DIR/validate_sql.sh"
     echo "  $SCRIPT_DIR/validate_hooks.sh"
+    echo "  $SCRIPT_DIR/validate_keyring.sh"
     echo "  $SCRIPT_DIR/validate_xml.sh"
     echo "  $SCRIPT_DIR/smoke.sh"
     echo "  $SCRIPT_DIR/bench.sh [--sql] [--direct]"
@@ -128,6 +129,7 @@ if [ $MODE_TEST -eq 1 ] || [ $MODE_TEST_DOCKER -eq 1 ]; then
     run_script "Options"        "$SCRIPT_DIR/validate_options.sh"
     run_script "Docs"           "$SCRIPT_DIR/validate_docs.sh"
     run_script "Hooks"          "$SCRIPT_DIR/validate_hooks.sh"
+    run_script "Keyring"        "$SCRIPT_DIR/validate_keyring.sh"
     run_script "XML Massive"    "$SCRIPT_DIR/validate_xml.sh"
 fi
 

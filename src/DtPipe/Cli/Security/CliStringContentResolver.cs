@@ -16,6 +16,13 @@ public sealed class CliStringContentResolver : DtPipe.Core.Security.IStringConte
     private static readonly Regex InterpolationPattern =
         new(@"\$\{\{([^}]+)\}\}", RegexOptions.Compiled);
 
+    private readonly ISecretsManager _secretsManager;
+
+    public CliStringContentResolver(ISecretsManager secretsManager)
+    {
+        _secretsManager = secretsManager;
+    }
+
     public async Task<string?> ResolveAsync(string? value, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(value)) return value;
@@ -24,13 +31,13 @@ public sealed class CliStringContentResolver : DtPipe.Core.Security.IStringConte
         if (s.TrimStart().StartsWith('@'))
             s = await File.ReadAllTextAsync(s.TrimStart()[1..], ct);
         else if (s.StartsWith("keyring://", StringComparison.OrdinalIgnoreCase))
-            s = new SecretsManager().GetSecret(s["keyring://".Length..]) ?? s;
+            s = _secretsManager.GetSecret(s["keyring://".Length..]) ?? s;
 
         return InterpolationPattern.Replace(s, m =>
         {
             var expr = m.Groups[1].Value.Trim();
             if (expr.StartsWith("keyring://", StringComparison.OrdinalIgnoreCase))
-                return new SecretsManager().GetSecret(expr["keyring://".Length..]) ?? m.Value;
+                return _secretsManager.GetSecret(expr["keyring://".Length..]) ?? m.Value;
             return Environment.GetEnvironmentVariable(expr) ?? m.Value;
         });
     }

@@ -7,10 +7,12 @@ namespace DtPipe.Cli.Commands;
 public class SecretCommand : Command
 {
 	private readonly IAnsiConsole _console;
+	private readonly ISecretsManager _secretsManager;
 
-	public SecretCommand(IAnsiConsole console) : base("secret", "Manage secure connection strings in OS Keyring")
+	public SecretCommand(IAnsiConsole console, ISecretsManager secretsManager) : base("secret", "Manage secure connection strings in OS Keyring")
 	{
 		_console = console;
+		_secretsManager = secretsManager;
 		Subcommands.Add(CreateSetCommand());
 		Subcommands.Add(CreateGetCommand());
 		Subcommands.Add(CreateListCommand());
@@ -35,8 +37,7 @@ public class SecretCommand : Command
 
 			try
 			{
-				var mgr = new SecretsManager();
-				mgr.SetSecret(alias, value);
+				_secretsManager.SetSecret(alias, value);
 				_console.MarkupLine($"[green]Secret '{alias}' stored successfully.[/]");
 			}
 			catch (Exception ex)
@@ -61,8 +62,7 @@ public class SecretCommand : Command
 
 			try
 			{
-				var mgr = new SecretsManager();
-				var secret = mgr.GetSecret(alias);
+				var secret = _secretsManager.GetSecret(alias);
 				if (secret == null)
 					_console.MarkupLine($"[red]Secret '{alias}' not found.[/]");
 				else
@@ -84,8 +84,7 @@ public class SecretCommand : Command
 		{
 			try
 			{
-				var mgr = new SecretsManager();
-				var secrets = mgr.ListSecrets();
+				var secrets = _secretsManager.ListSecrets();
 				if (secrets.Count == 0)
 				{
 					_console.MarkupLine("[yellow]No secrets found in keyring.[/]");
@@ -125,8 +124,7 @@ public class SecretCommand : Command
 
 			try
 			{
-				var mgr = new SecretsManager();
-				mgr.DeleteSecret(alias);
+				_secretsManager.DeleteSecret(alias);
 				_console.MarkupLine($"[green]Secret '{alias}' deleted (if it existed).[/]");
 			}
 			catch (Exception ex)
@@ -145,8 +143,7 @@ public class SecretCommand : Command
 			if (!_console.Confirm("Are you sure you want to delete ALL secrets?", false)) return;
 			try
 			{
-				var mgr = new SecretsManager();
-				mgr.Nuke();
+				_secretsManager.Nuke();
 				_console.MarkupLine("[green]All secrets nuked.[/]");
 			}
 			catch (Exception ex)

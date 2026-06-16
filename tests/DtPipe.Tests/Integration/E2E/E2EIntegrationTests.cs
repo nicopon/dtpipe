@@ -388,4 +388,91 @@ public class E2EIntegrationTests : IAsyncLifetime
 		row[idxC].Should().Be("Val2");
 		row[idxA].Should().Be("Val2"); // Final value of A
 	}
+
+	[Fact]
+	public async Task LinearPipelineService_ShouldResolveKeyringInput_UsingSecretsManager()
+	{
+		// 1. Setup InMemorySecretsManager with the connection string secret
+		var secretsManager = new DtPipe.Cli.Security.InMemorySecretsManager();
+		secretsManager.SetSecret("test-generator-input", "generate:count=3");
+
+		// 2. Configure DI Services mimicking Program.cs
+		var registry = new OptionsRegistry();
+		registry.Register(new DtPipe.Adapters.Generate.GenerateReaderOptions());
+		registry.Register(new DtPipe.Adapters.Null.NullDataWriterOptions());
+
+		var services = new ServiceCollection();
+		services.AddLogging();
+		services.AddSingleton(registry);
+
+		// Register secrets manager and resolver
+		services.AddSingleton<DtPipe.Cli.Security.ISecretsManager>(secretsManager);
+		services.AddSingleton<DtPipe.Core.Security.IStringContentResolver, DtPipe.Cli.Security.CliStringContentResolver>();
+
+		// Reader Factories
+		services.AddSingleton<IStreamReaderFactory>(sp => new CliStreamReaderFactory(
+			new DtPipe.Adapters.Generate.GenerateReaderDescriptor(),
+			sp.GetRequiredService<OptionsRegistry>(),
+			sp));
+
+		// Writer Factories
+		services.AddSingleton<IDataWriterFactory>(sp => new CliDataWriterFactory(
+			new DtPipe.Adapters.Null.NullDataWriterFactory(),
+			sp.GetRequiredService<OptionsRegistry>(),
+			sp));
+
+		// Bridge Factories
+		services.AddSingleton<IRowToColumnarBridgeFactory, DtPipe.Adapters.Infrastructure.Arrow.ArrowRowToColumnarBridgeFactory>();
+		services.AddSingleton<IColumnarToRowBridgeFactory, DtPipe.Adapters.Infrastructure.Arrow.ArrowColumnarToRowBridgeFactory>();
+
+		services.AddSingleton<ExportService>();
+		services.AddSingleton<HookExecutor>();
+		services.AddSingleton<MetricsService>();
+		services.AddSingleton<SchemaValidationService>();
+		services.AddSingleton<PipelineExecutor>();
+		services.AddSingleton<DtPipe.Core.Abstractions.Dag.IMemoryChannelRegistry, DtPipe.Core.Pipelines.Dag.MemoryChannelRegistry>();
+
+		var mockProgress = new Mock<IExportProgress>();
+		mockProgress.Setup(p => p.GetMetrics()).Returns(new ExportMetrics(DateTime.UtcNow, DateTime.UtcNow, 0, 0, 0, 0, new Dictionary<string, long>()));
+		var mockObserver = new Mock<IExportObserver>();
+		mockObserver.Setup(o => o.CreateProgressReporter(It.IsAny<bool>(), It.IsAny<IReadOnlyList<(string Name, bool IsColumnar)>>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<bool>()))
+					.Returns(mockProgress.Object);
+		services.AddSingleton(mockObserver.Object);
+
+		var serviceProvider = services.BuildServiceProvider();
+
+		// 3. Instantiate LinearPipelineService
+		var contributors = new List<ICliContributor>();
+		contributors.AddRange(serviceProvider.GetServices<IStreamReaderFactory>().OfType<ICliContributor>());
+		contributors.AddRange(serviceProvider.GetServices<IDataWriterFactory>().OfType<ICliContributor>());
+		
+		var pipelineService = new DtPipe.Cli.Services.LinearPipelineService(
+			contributors,
+			serviceProvider,
+			serviceProvider.GetRequiredService<DtPipe.Core.Abstractions.Dag.IMemoryChannelRegistry>(),
+			registry,
+			Spectre.Console.AnsiConsole.Console
+		);
+
+		// 4. Create JobDefinition pointing to keyring://
+		var job = new JobDefinition
+		{
+			Input = "keyring://test-generator-input",
+			Output = "null:",
+			BatchSize = 100
+		};
+
+		var context = new DtPipe.Cli.Pipeline.CliJobContext(
+			ReaderArguments: Array.Empty<string>(),
+			PipelineArguments: Array.Empty<string>(),
+			WriterArguments: Array.Empty<string>(),
+			Arguments: Array.Empty<string>()
+		);
+
+		// 5. Execute - should not throw any resolver or reader factory errors
+		var exitCode = await pipelineService.ExecuteAsync(job, context, TestContext.Current.CancellationToken);
+		
+		exitCode.Should().Be(0);
+	}
 }
+
