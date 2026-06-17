@@ -59,6 +59,7 @@ DtPipe uses a centralized Docker infrastructure for all integration tests.
 | **`validate_schema.sh`** | Strict-schema rejection, `--no-schema-validation` bypass, `--auto-migrate` for SQLite and Postgres. |
 | **`validate_options.sh`** | Provider option scoping (global/writer/YAML), sampling rate + seed + determinism, YAML `provider-options`, `--metrics-path`. |
 | **`validate_hooks.sh`** | `--pre-exec` (inline + file), `--post-exec`, `--finally-exec` lifecycle hooks via SQLite. |
+| **`validate_cursor.sh`** | Incremental loading: `--cursor`, `--state`, `${{cursor://...}}` value resolution, state file lifecycle. |
 | **`validate_docs.sh`** | All `--flags` in README/COOKBOOK are present in `--help`; representative README examples execute correctly. |
 | **`validate_dag.sh`** | All 9 canonical DAG topologies: Linear, Two-source, SQL, SQL JOIN, Fan-out, Fan-out+SQL, Diamond, Join→fan-out, Nested data. |
 

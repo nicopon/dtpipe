@@ -25,6 +25,10 @@ public record JobDefinition
 
     public string? Prefix { get; init; }
 
+	// Incremental loading
+	public string? Cursor { get; init; }
+	public string? State { get; init; }
+
 	public List<TransformerConfig>? Transformers { get; init; }
 
     // Routing/DAG Properties

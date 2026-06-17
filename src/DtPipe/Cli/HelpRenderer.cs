@@ -46,6 +46,9 @@ public static class HelpRenderer
         WriteFlag(console, "--log <path>",            "Log file path");
         WriteFlag(console, "--export-job <file>",     "Export current CLI as YAML job file");
         WriteFlag(console, "--metrics-path <path>",   "Path to save JSON metrics");
+        WriteFlag(console, "--cursor <column>",       "Cursor column for incremental loading (writer-side)");
+        WriteFlag(console, "--state <path>",          "State file path for cursor persistence (writer-side)");
+        WriteFlag(console, "--cursor-from <value>",   "Override starting cursor value for this run");
         WriteFlag(console, "--version",                "Print version and exit");
         console.WriteLine();
 

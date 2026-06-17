@@ -61,89 +61,101 @@ public class JobService
 
 	public async Task<int> ExecutePipelineAsync(Dictionary<string, JobDefinition> jobs, JobDagDefinition dag, Dictionary<string, Pipeline.CliJobContext> contexts, Pipeline.GlobalOptions globals, CancellationToken ct)
 	{
-		var resultsCollector = new System.Collections.Concurrent.ConcurrentQueue<DtPipe.Feedback.BranchSummary>();
-		
-		// Configure logging
-		if (!string.IsNullOrEmpty(globals.LogPath))
+		if (globals.AllFlags.TryGetValue("--cursor-from", out var cursorFromObj) && cursorFromObj is string cursorFromVal && !string.IsNullOrEmpty(cursorFromVal))
 		{
-			Serilog.Log.Logger = new Serilog.LoggerConfiguration()
-				.MinimumLevel.Debug()
-				.WriteTo.File(globals.LogPath)
-				.CreateLogger();
-			_loggerFactory.AddSerilog();
+			Environment.SetEnvironmentVariable("DTPIPE_CURSOR_OVERRIDE", cursorFromVal);
 		}
 
-		// Validation
-		var processorFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamTransformerFactory>>();
-		var validationErrors = Pipeline.PipelineValidator.Validate(dag, jobs, processorFactories);
-		if (validationErrors.Any())
+		try
 		{
-			foreach (var err in validationErrors)
-				_console.MarkupLine($"[red]Validation Error:[/] {err}");
-			return 1;
-		}
-
-		if (dag.IsDag)
-		{
-			// Dry-run selection logic
-			if (globals.DryRunCount > 0 && dag.Branches.Count > 1)
+			var resultsCollector = new System.Collections.Concurrent.ConcurrentQueue<DtPipe.Feedback.BranchSummary>();
+			
+			// Configure logging
+			if (!string.IsNullOrEmpty(globals.LogPath))
 			{
-				if (_console.Profile.Capabilities.Interactive && !Console.IsOutputRedirected && !Console.IsInputRedirected)
+				Serilog.Log.Logger = new Serilog.LoggerConfiguration()
+					.MinimumLevel.Debug()
+					.WriteTo.File(globals.LogPath)
+					.CreateLogger();
+				_loggerFactory.AddSerilog();
+			}
+
+			// Validation
+			var processorFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamTransformerFactory>>();
+			var validationErrors = Pipeline.PipelineValidator.Validate(dag, jobs, processorFactories);
+			if (validationErrors.Any())
+			{
+				foreach (var err in validationErrors)
+					_console.MarkupLine($"[red]Validation Error:[/] {err}");
+				return 1;
+			}
+
+			if (dag.IsDag)
+			{
+				// Dry-run selection logic
+				if (globals.DryRunCount > 0 && dag.Branches.Count > 1)
 				{
-					var prompt = new SelectionPrompt<string>()
-						.Title("Select branch to inspect for dry-run:")
-						.AddChoices(dag.Branches.Select(b => b.Alias));
-					globals.DryRunInteractiveBranch = _console.Prompt(prompt);
+					if (_console.Profile.Capabilities.Interactive && !Console.IsOutputRedirected && !Console.IsInputRedirected)
+					{
+						var prompt = new SelectionPrompt<string>()
+							.Title("Select branch to inspect for dry-run:")
+							.AddChoices(dag.Branches.Select(b => b.Alias));
+						globals.DryRunInteractiveBranch = _console.Prompt(prompt);
+					}
+					else
+					{
+						// Fallback to the last branch if not interactive
+						globals.DryRunInteractiveBranch = dag.Branches.Last().Alias;
+					}
+				}
+
+				_console.WriteLine();
+				var readerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>();
+				_console.Write(DagRenderer.BuildTopologyPanel(dag, readerFactories));
+				_console.WriteLine();
+
+				var orchestrator = _serviceProvider.GetRequiredService<IDagOrchestrator>();
+				orchestrator.OnLogEvent = msg => _console.MarkupLine(msg);
+
+				Func<BranchDefinition, BranchChannelContext, CancellationToken, Task<int>> branchExecutor = async (branch, ctx, token) =>
+				{
+					var job = jobs[branch.Alias];
+					contexts.TryGetValue(branch.Alias, out var branchCtx);
+					return await RunSingleJobAsync(job, branchCtx, branch.Alias, true, ctx, resultsCollector, token, globals);
+				};
+
+				int exitCode;
+				bool isInteractiveLive = !globals.NoStats && globals.DryRunCount == 0 && _console.Profile.Capabilities.Interactive && !Console.IsOutputRedirected && !Console.IsInputRedirected;
+				var observer = _serviceProvider.GetRequiredService<IExportObserver>() as DtPipe.Observers.SpectreConsoleObserver;
+				
+				if (isInteractiveLive && observer != null)
+				{
+					exitCode = await observer.StartUnifiedLiveDisplayAsync(dag, () => orchestrator.ExecuteAsync(dag, branchExecutor, ct), ct);
 				}
 				else
 				{
-					// Fallback to the last branch if not interactive
-					globals.DryRunInteractiveBranch = dag.Branches.Last().Alias;
+					exitCode = await orchestrator.ExecuteAsync(dag, branchExecutor, ct);
 				}
-			}
 
-			_console.WriteLine();
-			var readerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>();
-			_console.Write(DagRenderer.BuildTopologyPanel(dag, readerFactories));
-			_console.WriteLine();
-
-			var orchestrator = _serviceProvider.GetRequiredService<IDagOrchestrator>();
-			orchestrator.OnLogEvent = msg => _console.MarkupLine(msg);
-
-			Func<BranchDefinition, BranchChannelContext, CancellationToken, Task<int>> branchExecutor = async (branch, ctx, token) =>
-			{
-				var job = jobs[branch.Alias];
-				contexts.TryGetValue(branch.Alias, out var branchCtx);
-				return await RunSingleJobAsync(job, branchCtx, branch.Alias, true, ctx, resultsCollector, token, globals);
-			};
-
-			int exitCode;
-			bool isInteractiveLive = !globals.NoStats && globals.DryRunCount == 0 && _console.Profile.Capabilities.Interactive && !Console.IsOutputRedirected && !Console.IsInputRedirected;
-			var observer = _serviceProvider.GetRequiredService<IExportObserver>() as DtPipe.Observers.SpectreConsoleObserver;
-			
-			if (isInteractiveLive && observer != null)
-			{
-				exitCode = await observer.StartUnifiedLiveDisplayAsync(dag, () => orchestrator.ExecuteAsync(dag, branchExecutor, ct), ct);
+				_console.WriteLine();
+				DagRenderer.PrintUnifiedResultsTable(resultsCollector.ToList(), dag, isDag: true, _console);
+				return exitCode;
 			}
 			else
 			{
-				exitCode = await orchestrator.ExecuteAsync(dag, branchExecutor, ct);
+				var mainJob = jobs.Values.First();
+				_console.WriteLine();
+				var readerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>();
+				_console.Write(DagRenderer.BuildLinearTopologyPanel(mainJob, readerFactories));
+				_console.WriteLine();
+
+				var mainContext = contexts.Values.FirstOrDefault();
+				return await RunSingleJobAsync(mainJob, mainContext, null, false, null, null, ct, globals);
 			}
-
-			_console.WriteLine();
-			DagRenderer.PrintUnifiedResultsTable(resultsCollector.ToList(), dag, isDag: true, _console);
-			return exitCode;
 		}
-		else
+		finally
 		{
-			var mainJob = jobs.Values.First();
-			_console.WriteLine();
-			var readerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>();
-			_console.Write(DagRenderer.BuildLinearTopologyPanel(mainJob, readerFactories));
-			_console.WriteLine();
-
-			var mainContext = contexts.Values.FirstOrDefault();
-			return await RunSingleJobAsync(mainJob, mainContext, null, false, null, null, ct, globals);
+			Environment.SetEnvironmentVariable("DTPIPE_CURSOR_OVERRIDE", null);
 		}
 	}
 

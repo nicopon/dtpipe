@@ -34,6 +34,9 @@ public static class PipelineValidator
         if (HasCycle(dag))
             errors.Add("Circular dependency detected in pipeline graph.");
 
+        // 3. Cursor state file uniqueness
+        errors.AddRange(CursorStateValidator.Validate(dag, jobs));
+
         return errors;
     }
 

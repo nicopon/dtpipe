@@ -11,6 +11,7 @@ Recipes and end-to-end scenarios. For the full option reference, see [REFERENCE.
 - [DuckDB Extensions and Cloud Storage](#duckdb-extensions-and-cloud-storage)
 - [DAG Pipelines (Multi-Source)](#dag-pipelines-multi-source)
 - [Standard Streams and Automation](#standard-streams-and-automation)
+- [Incremental Loading](#incremental-loading)
 
 ---
 
@@ -618,3 +619,70 @@ dtpipe -i "pg:..." --query "SELECT * FROM large_table" \
 dtpipe -i "pg:..." --query "SELECT * FROM large_table" \
        --sampling-rate 0.1 --sampling-seed 12345 -o sample.parquet
 ```
+
+---
+
+## Incremental Loading
+
+Incremental loading enables transfer of only changed/new rows. DtPipe handles this dynamically using cursor tracking and query interpolation.
+
+### Scenario: incremental sync of a postgres table to sqlite
+
+In this recipe, we sync user records from PostgreSQL into SQLite, keeping track of the last processed `updated_at` timestamp.
+
+#### First execution (Full Load)
+On the very first run, no state file exists yet. We provide a default timestamp value (e.g. `'1970-01-01'`) using the fallback syntax:
+
+```bash
+dtpipe \
+  -i "pg:Host=localhost;Database=prod" \
+  --query "SELECT * FROM users WHERE updated_at >= '${{cursor://state/users_sync.json|1970-01-01}}'" \
+  -o "sqlite:Data Source=dw.db" \
+  --table "users" \
+  --strategy Recreate \
+  --key id \
+  --cursor "updated_at" \
+  --state "state/users_sync.json"
+```
+
+After this runs successfully, DtPipe automatically generates the state file `state/users_sync.json` containing the maximum `updated_at` value processed.
+
+#### Subsequent executions (Incremental Sync)
+Subsequent runs will load the cursor from the state file and substitute it into the query. We change the query condition to `>` and the strategy to `Upsert` (to merge updates):
+
+```bash
+dtpipe \
+  -i "pg:Host=localhost;Database=prod" \
+  --query "SELECT * FROM users WHERE updated_at > '${{cursor://state/users_sync.json}}'" \
+  -o "sqlite:Data Source=dw.db" \
+  --table "users" \
+  --strategy Upsert \
+  --key id \
+  --cursor "updated_at" \
+  --state "state/users_sync.json"
+```
+
+### Scenario: YAML job file for incremental loading
+
+You can configure incremental loading directly in a YAML job file. Here is a configuration that does an incremental sync of an orders table:
+
+```yaml
+main:
+  input: "pg:Host=localhost;Database=prod"
+  output: "sqlite:Data Source=dw.db"
+  cursor: "updated_at"
+  state: "state/orders_sync.json"
+  provider-options:
+    pg:
+      query: "SELECT * FROM orders WHERE updated_at > '${{cursor://state/orders_sync.json|2026-01-01}}'"
+    sqlite-writer:
+      table: "orders"
+      strategy: "Upsert"
+      key: "id"
+```
+
+To run this job:
+```bash
+dtpipe --job sync_orders.yaml
+```
+

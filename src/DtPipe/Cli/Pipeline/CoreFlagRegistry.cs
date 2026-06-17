@@ -24,5 +24,10 @@ public static class CoreFlagRegistry
         registry.Register(new FlagDef("--log",         new string[] { }, FlagArity.Scalar,  FlagScope.Global, "Log file path",                          FlagStage.All));
         registry.Register(new FlagDef("--export-job",  new string[] { }, FlagArity.Scalar,  FlagScope.Global, "Export current CLI as YAML job file",    FlagStage.All));
         registry.Register(new FlagDef("--metrics-path",new string[] { }, FlagArity.Scalar,  FlagScope.Global, "Path to save JSON metrics",              FlagStage.All));
+
+        // Incremental cursor flags
+        registry.Register(new FlagDef("--cursor",      new string[] { }, FlagArity.Scalar, FlagScope.PerBranch, "Cursor column for incremental loading (writer-side)", FlagStage.All));
+        registry.Register(new FlagDef("--state",       new string[] { }, FlagArity.Scalar, FlagScope.PerBranch, "State file path for cursor persistence (writer-side)", FlagStage.All));
+        registry.Register(new FlagDef("--cursor-from", new string[] { }, FlagArity.Scalar, FlagScope.Global,    "Override cursor value for this run",                   FlagStage.All));
     }
 }

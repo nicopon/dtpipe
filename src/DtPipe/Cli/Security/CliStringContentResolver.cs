@@ -38,7 +38,25 @@ public sealed class CliStringContentResolver : DtPipe.Core.Security.IStringConte
             var expr = m.Groups[1].Value.Trim();
             if (expr.StartsWith("keyring://", StringComparison.OrdinalIgnoreCase))
                 return _secretsManager.GetSecret(expr["keyring://".Length..]) ?? m.Value;
+            if (expr.StartsWith("cursor://", StringComparison.OrdinalIgnoreCase))
+                return ResolveCursorExpression(expr["cursor://".Length..]);
             return Environment.GetEnvironmentVariable(expr) ?? m.Value;
         });
+    }
+
+    private static string ResolveCursorExpression(string expression)
+    {
+        var envOverride = Environment.GetEnvironmentVariable("DTPIPE_CURSOR_OVERRIDE");
+        if (!string.IsNullOrEmpty(envOverride))
+        {
+            return envOverride;
+        }
+
+        var parts = expression.Split('|', 2);
+        var statePath = parts[0].Trim();
+        var defaultValue = parts.Length > 1 ? parts[1].Trim() : "";
+
+        var cursor = DtPipe.Core.Cursor.CursorStateStore.Read(statePath);
+        return cursor?.Value ?? defaultValue;
     }
 }

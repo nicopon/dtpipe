@@ -183,7 +183,9 @@ public class LinearPipelineService
             BatchSize    = job.BatchSize,
             DryRunCount  = job.DryRunCount,
             NoStats      = job.NoStats,
-            DryRunInteractiveBranch = dryRunInteractiveBranch
+            DryRunInteractiveBranch = dryRunInteractiveBranch,
+            Cursor       = job.Cursor,
+            State        = job.State
         };
 
         // 5. Build Pipeline (Transformers)

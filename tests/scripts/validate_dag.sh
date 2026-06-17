@@ -337,5 +337,33 @@ grep -qi "$KNOWN_UUID" "$A/t14_verify.csv" \
   && pass "UUID fidelity (duckdb): exact value preserved" \
   || fail "UUID fidelity (duckdb): value mutated — expected $KNOWN_UUID, got: $(tail -n1 $A/t14_verify.csv)"
 
+# ----------------------------------------
+# Topology 15: Vicious - Duplicate Cursor State Files
+# ----------------------------------------
+echo "--- [15] Vicious: Duplicate Cursor State Files (DAG Validation) ---"
+rm -f "$A/t15_src.csv" "$A/t15_out1.csv" "$A/t15_out2.csv" "$A/t15_shared.sync"
+echo "Id,Val" > "$A/t15_src.csv"
+echo "1,A" >> "$A/t15_src.csv"
+
+echo "  [DAG Validator] T15: Expecting failure for shared state file..."
+set +e
+"$DTPIPE" -i "$A/t15_src.csv" --alias s \
+  --from s -o "$A/t15_out1.csv" --cursor "Id" --state "$A/t15_shared.sync" --no-stats \
+  --from s -o "$A/t15_out2.csv" --cursor "Id" --state "$A/t15_shared.sync" --no-stats > "$A/t15_error.log" 2>&1
+EXIT_CODE=$?
+set -e
+
+if [ $EXIT_CODE -eq 0 ]; then
+    fail "Duplicate State File: Pipeline should have failed DAG validation, but succeeded."
+fi
+
+if tr -d '\n' < "$A/t15_error.log" | grep -q "Each writer must have its own --state file"; then
+    pass "Duplicate State File: Properly rejected by DagValidator."
+else
+    echo -e "${RED}  FAIL: Duplicate State File: Failed with unexpected error message:${NC}"
+    cat "$A/t15_error.log"
+    fail "Duplicate State File: Wrong error message."
+fi
+
 echo ""
 echo -e "${GREEN}All DAG topology tests passed!${NC}"

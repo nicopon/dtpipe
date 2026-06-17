@@ -379,6 +379,63 @@ echo "      Oracle..."
   -o "$INPUT_DIR/comp_ora.csv" --no-stats > /dev/null
 verify_composite "$INPUT_DIR/comp_ora.csv" "Oracle"
 
+# ----------------------------------------
+# 11. Incremental Loading (Postgres E2E)
+# ----------------------------------------
+echo "[11/11] Incremental Loading E2E (Postgres)..."
+
+rm -f "$INPUT_DIR/smoke_cursor.sync"
+cat > "$INPUT_DIR/inc_source_initial.csv" <<'EOF'
+Id,EventDate,Status
+1,2026-06-01T10:00:00,Pending
+2,2026-06-02T10:00:00,Active
+EOF
+
+# 11.1 Full Load initial (cursor interpolation with default value)
+"$DTPIPE" -i "csv:$INPUT_DIR/inc_source_initial.csv" \
+  --column-types "Id:int32,EventDate:datetime,Status:string" \
+  -o "$PG_CONN" --table "smoke_events" --strategy Recreate --key "Id" \
+  --cursor "EventDate" --state "$INPUT_DIR/smoke_cursor.sync" --no-stats > /dev/null
+
+# Verify that the cursor was created and contains 2026-06-02T10:00:00
+if ! grep -q "2026-06-02T10:00:00" "$INPUT_DIR/smoke_cursor.sync"; then
+    echo "❌ FAILED: Incremental Loading E2E - State file not properly initialized"
+    cat "$INPUT_DIR/smoke_cursor.sync"
+    exit 1
+fi
+
+# 11.2 Incremental Load (with persisted cursor)
+cat > "$INPUT_DIR/inc_source_delta.csv" <<'EOF'
+Id,EventDate,Status
+2,2026-06-02T10:00:00,Active
+3,2026-06-03T10:00:00,Processed
+4,2026-06-04T10:00:00,Closed
+EOF
+
+# Using DuckDB direct mode to filter CSV via the state file
+"$DTPIPE" -i "duck:" \
+  --query "SELECT CAST(Id AS INT) AS Id, EventDate, Status FROM read_csv_auto('$INPUT_DIR/inc_source_delta.csv', types={'EventDate': 'TIMESTAMP'}) WHERE EventDate > '\${{cursor://$INPUT_DIR/smoke_cursor.sync}}'" \
+  -o "$PG_CONN" --table "smoke_events" --strategy Upsert --key "Id" \
+  --cursor "EventDate" --state "$INPUT_DIR/smoke_cursor.sync" --no-stats > /dev/null
+
+# 11.3 Export and verify target
+"$DTPIPE" -i "$PG_CONN" --query "SELECT Id, Status FROM smoke_events ORDER BY Id" \
+  -o "$INPUT_DIR/smoke_events_final.csv" --no-stats > /dev/null
+
+tr -d '\r' < "$INPUT_DIR/smoke_events_final.csv" > "$INPUT_DIR/smoke_events_final.clean"
+
+EVENTS_COUNT=$(tail -n +2 "$INPUT_DIR/smoke_events_final.clean" | wc -l | tr -d ' ')
+[ "$EVENTS_COUNT" -eq 4 ] || { echo "❌ FAILED: Incremental Loading E2E - Expected 4 rows in DB, got $EVENTS_COUNT"; exit 1; }
+
+# Verify that the state was updated with MAX = 2026-06-04
+if ! grep -q "2026-06-04T" "$INPUT_DIR/smoke_cursor.sync"; then
+    echo "❌ FAILED: Incremental Loading E2E - State file not updated to max value"
+    exit 1
+fi
+
+echo "✅ Incremental Loading (Postgres) Verified."
+rm -f "$INPUT_DIR/inc_source_initial.csv" "$INPUT_DIR/inc_source_delta.csv" "$INPUT_DIR/smoke_events_final.csv" "$INPUT_DIR/smoke_events_final.clean" "$INPUT_DIR/smoke_cursor.sync"
+
 echo "--------------------------------------------------"
 echo "🎉 GOLDEN SMOKE TEST PASSED: All Systems Nominal"
 echo "--------------------------------------------------"

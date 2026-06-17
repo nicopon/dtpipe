@@ -150,6 +150,38 @@ joined:
 	}
 
 	[Fact]
+	public void Parse_ShouldInterpolateCursorExpression()
+	{
+		// Arrange
+		var path = Path.Combine(Path.GetTempPath(), "test_yaml_cursor_" + Guid.NewGuid().ToString("N") + ".sync").Replace("\\", "/");
+		var cursor = new DtPipe.Core.Cursor.CursorValue("updated_at", "2026-06-16T12:00:00Z", DtPipe.Core.Cursor.CursorType.DateTime);
+		var meta = new DtPipe.Core.Cursor.CursorRunMetadata(DateTime.UtcNow, DateTime.UtcNow, 100, "success");
+		DtPipe.Core.Cursor.CursorStateStore.Save(path, cursor, meta);
+
+		var yaml = $@"main:
+  input: select * from t where updated_at >= '${{{{cursor://{path}|1970-01-01}}}}'
+  output: dummy.parquet
+";
+		var tempFile = Path.GetTempFileName();
+		File.WriteAllText(tempFile, yaml);
+
+		try
+		{
+			// Act
+			var jobs = JobFileParser.Parse(tempFile, null);
+			var job = jobs["main"];
+
+			// Assert
+			job.Input.Should().Be("select * from t where updated_at >= '2026-06-16T12:00:00Z'");
+		}
+		finally
+		{
+			if (File.Exists(tempFile)) File.Delete(tempFile);
+			if (File.Exists(path)) File.Delete(path);
+		}
+	}
+
+	[Fact]
 	public void Parse_ShouldNotBreakYaml_WhenInterpolatedValueContainsYamlSpecialCharacters()
 	{
 		// Arrange

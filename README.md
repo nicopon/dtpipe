@@ -81,7 +81,34 @@ dtpipe -i "pg:..." --query "SELECT * FROM users" --fake "email:internet.email" \
 dtpipe --job nightly.yaml --limit 1000
 ```
 
+### Incremental loading (cursor-driven)
+
+```bash
+# First run: Full load, initializes the state file with the max updated_at cursor value
+dtpipe \
+  -i "pg:Host=localhost;Database=prod" \
+  --query "SELECT * FROM users WHERE updated_at >= '${{cursor://state.json|1970-01-01}}'" \
+  -o "sqlite:Data Source=dw.db" \
+  --table "users" \
+  --strategy Recreate \
+  --key id \
+  --cursor "updated_at" \
+  --state "state.json"
+
+# Subsequent runs: Incremental load, only retrieves newer records
+dtpipe \
+  -i "pg:Host=localhost;Database=prod" \
+  --query "SELECT * FROM users WHERE updated_at > '${{cursor://state.json}}'" \
+  -o "sqlite:Data Source=dw.db" \
+  --table "users" \
+  --strategy Upsert \
+  --key id \
+  --cursor "updated_at" \
+  --state "state.json"
+```
+
 ---
+
 
 ## Providers
 

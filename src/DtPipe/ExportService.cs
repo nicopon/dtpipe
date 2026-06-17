@@ -251,6 +251,35 @@ public class ExportService
 		var exportableSchema = currentSchema ?? throw new InvalidOperationException("Exportable schema is null.");
 		await using var writer = writerFactory.Create(registry);
 
+		// Cursor tracking: wrap the writer if --cursor is specified
+		DtPipe.Core.Cursor.ICursorTracker? cursorTracker = null;
+		IDataWriter effectiveWriter = writer;
+		if (!string.IsNullOrEmpty(options.Cursor) && !string.IsNullOrEmpty(options.State))
+		{
+			if (writer is IColumnarDataWriter columnar)
+			{
+				var colDecorator = new DtPipe.Core.Cursor.CursorTrackingColumnarDecorator(columnar, options.Cursor);
+				cursorTracker = colDecorator;
+				effectiveWriter = colDecorator;
+			}
+			else
+			{
+				var rowDecorator = new DtPipe.Core.Cursor.CursorTrackingRowDecorator(writer, options.Cursor);
+				cursorTracker = rowDecorator;
+				effectiveWriter = rowDecorator;
+			}
+
+			var currentCursor = DtPipe.Core.Cursor.CursorStateStore.Read(options.State);
+			if (currentCursor != null && !silenceInternal)
+			{
+				_observer.LogMessage($"[grey]   Cursor loaded: {currentCursor.Column} = {currentCursor.Value} (from {options.State})[/]");
+			}
+			else if (!silenceInternal)
+			{
+				_observer.LogMessage($"[grey]   No active cursor state found at {options.State}[/]");
+			}
+		}
+
 		// Read schema validation and hook settings from writer options
 		var writerSchemaSettings = registry.Get(writerFactory.OptionsType) as DtPipe.Core.Options.ISchemaValidationAware;
 		var writerHooks = registry.Get(writerFactory.OptionsType) as DtPipe.Core.Options.IHookAware;
@@ -261,7 +290,7 @@ public class ExportService
 		// Execute Pre-Hook (from writer options)
 		await _hookExecutor.ExecuteAsync(writer, "Pre-Hook", writerHooks?.PreExec, ct);
 
-		await writer.InitializeAsync(exportableSchema, ct);
+		await effectiveWriter.InitializeAsync(exportableSchema, ct);
 
 		// Use Observer to create Progress
 		var transformerModes = segments
@@ -300,9 +329,23 @@ public class ExportService
 			var startTime = DateTime.UtcNow;
 
 			// Execute Unified Pipeline
-			await _pipelineExecutor.ExecuteSegmentedPipelineAsync(reader, writer, segments, exportableSchema, options, progress, linkedCts, effectiveCt);
+			await _pipelineExecutor.ExecuteSegmentedPipelineAsync(reader, effectiveWriter, segments, exportableSchema, options, progress, linkedCts, effectiveCt);
 
 			await writer.CompleteAsync(ct);
+
+			// Persist cursor state after successful CompleteAsync
+			if (cursorTracker?.TrackedMaxValue != null && !string.IsNullOrEmpty(options.State))
+			{
+				var runMeta = new DtPipe.Core.Cursor.CursorRunMetadata(
+					StartedAt: startTime,
+					CompletedAt: DateTime.UtcNow,
+					RowsTransferred: progress.GetMetrics().WriteCount,
+					Status: "success");
+				DtPipe.Core.Cursor.CursorStateStore.Save(options.State, cursorTracker.TrackedMaxValue, runMeta);
+				if (!silenceInternal)
+					_observer.LogMessage($"[grey]   Cursor saved: {options.Cursor} = {cursorTracker.TrackedMaxValue.Value} → {options.State}[/]");
+			}
+
 			progress.Complete();
 
 			resultsCollector?.Enqueue(new DtPipe.Feedback.BranchSummary(

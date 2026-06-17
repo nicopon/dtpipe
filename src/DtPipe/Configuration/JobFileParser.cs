@@ -97,6 +97,22 @@ public static partial class JobFileParser
 				}
 			}
 
+			if (innerValue.StartsWith("cursor://", StringComparison.OrdinalIgnoreCase))
+			{
+				var envOverride = Environment.GetEnvironmentVariable("DTPIPE_CURSOR_OVERRIDE");
+				if (!string.IsNullOrEmpty(envOverride))
+				{
+					return envOverride;
+				}
+
+				var cursorExpr = innerValue["cursor://".Length..];
+				var cursorParts = cursorExpr.Split('|', 2);
+				var cursorPath = cursorParts[0].Trim();
+				var cursorDefault = cursorParts.Length > 1 ? cursorParts[1].Trim() : "";
+				var cursorValue = DtPipe.Core.Cursor.CursorStateStore.Read(cursorPath);
+				return cursorValue?.Value ?? cursorDefault;
+			}
+
 			var envValue = Environment.GetEnvironmentVariable(innerValue);
 
 			if (envValue is null)

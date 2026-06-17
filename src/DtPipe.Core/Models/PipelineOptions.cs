@@ -34,4 +34,8 @@ public sealed record PipelineOptions : IOptionSet
 	public bool NoStats { get; init; } = false;
 	public int DryRunCount { get; init; } = 0;
 	public string? DryRunInteractiveBranch { get; init; }
+
+	// Incremental loading — set from JobDefinition by LinearPipelineService
+	public string? Cursor { get; init; }
+	public string? State { get; init; }
 }

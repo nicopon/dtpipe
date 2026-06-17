@@ -20,6 +20,9 @@ dtpipe --job FILE [OVERRIDES]
 | `--job FILE`, `-j FILE` | Load a pipeline from a YAML job file |
 | `--export-job FILE` | Serialize the current CLI pipeline to YAML and exit |
 | `--alias NAME` | Name the current branch for DAG references |
+| `--cursor COLUMN` | Cursor column for incremental loading (writer-side tracking) |
+| `--state PATH` | State file path for cursor persistence (writer-side) |
+| `--cursor-from VALUE` | Global override cursor value for this run |
 | `--version` | Print version and exit |
 
 ---
@@ -68,6 +71,7 @@ DtPipe resolves string values through a sequential pipeline before use. The avai
 2. **Inline substitution** (applied to the result of step 1):
    - `${{ENV_VAR}}` — substitute an environment variable
    - `${{keyring://alias}}` — substitute an inline keyring secret
+   - `${{cursor://path|default}}` — substitute a cursor value from a state file (with optional default value if the state file does not exist)
 
 Steps are composable: a keyring block can itself contain `${{ENV_VAR}}` placeholders that are resolved afterwards.
 
@@ -75,14 +79,14 @@ Steps are composable: a keyring block can itself contain `${{ENV_VAR}}` placehol
 
 Not all mechanisms are available in every context:
 
-| Context | `@file` | `keyring://` | `${{ENV_VAR}}` | `${{keyring://…}}` |
-|:---|:---:|:---:|:---:|:---:|
-| Connection strings (`-i`, `-o`) | ✅ | ✅ | ✅ | ✅ |
-| `--duck-init` | ✅ | ✅ | ✅ | ✅ |
-| `--query` | ✅ | ✅ | ✅ | ✅ |
-| `--pre-exec`, `--post-exec`, etc. | ✅ | ✅ | ✅ | ✅ |
-| `--compute`, `--expand`, `--filter` scripts| ✅ | ✅ | ✅ | ✅ |
-| YAML job files (all values) | — | — | ✅ | ✅ |
+| Context | `@file` | `keyring://` | `${{ENV_VAR}}` | `${{keyring://…}}` | `${{cursor://…}}` |
+|:---|:---:|:---:|:---:|:---:|:---:|
+| Connection strings (`-i`, `-o`) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `--duck-init` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `--query` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `--pre-exec`, `--post-exec`, etc. | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `--compute`, `--expand`, `--filter` scripts| ✅ | ✅ | ✅ | ✅ | ✅ |
+| YAML job files (all values) | — | — | ✅ | ✅ | ✅ |
 
 > [!IMPORTANT]
 > **YAML Interpolation**: In YAML job files, `${{ENV_VAR}}` and `${{keyring://...}}` interpolations are applied to the raw YAML text *before* parsing, meaning they work on **all** values (including configuration properties that aren't normally resolved, like `batch-size` or `separator`).
@@ -396,6 +400,46 @@ dtpipe -i events.parquet --alias ev \
   --sql "SELECT * FROM ev JOIN read_parquet('s3://bucket/ref.parquet') r ON ev.id = r.id" \
   -o result.parquet
 ```
+
+## Incremental Loading
+
+DtPipe supports cursor-driven incremental loading to transfer only new or updated records since the last successful run.
+
+### Overview
+
+Incremental loading uses two key mechanisms:
+1. **State Persistence**: The CLI tracks the maximum value observed in a designated cursor column and writes it to a JSON state file after a successful execution.
+2. **Query Interpolation**: The SQL query uses the `${{cursor://path|default}}` resolver to filter for records greater than (or equal to) the last saved value.
+
+### CLI Flags
+
+- `--cursor COLUMN` — Specifies the column to observe for tracking the maximum value (e.g. `updated_at` or `id`).
+- `--state PATH` — Specifies the path to the state file where the cursor metadata will be saved.
+- `--cursor-from VALUE` — Global override to temporarily force a starting cursor value for the current run, ignoring the state file.
+
+### State File Format
+
+The state file is stored as a simple, human-readable JSON file:
+```json
+{
+  "version": 1,
+  "cursor": {
+    "column": "updated_at",
+    "value": "2026-06-15T23:59:59.000",
+    "type": "datetime"
+  },
+  "last_run": {
+    "started_at": "2026-06-16T02:00:00Z",
+    "completed_at": "2026-06-16T02:03:42Z",
+    "rows_transferred": 1234,
+    "status": "success"
+  }
+}
+```
+
+### DAG Validation
+
+To prevent concurrent writes or corrupted cursor states, DtPipe enforces that **no two writers may share the same state file**. If the DAG validator detects duplicate state files across branches, pipeline execution will fail immediately.
 
 ---
 

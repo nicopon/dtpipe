@@ -221,4 +221,64 @@ public class CliStringContentResolverTests : IAsyncLifetime
             Environment.SetEnvironmentVariable("DTPIPE_CLI_REGION_FROM_KEYRING", null);
         }
     }
+
+    [Fact]
+    public async Task CursorInline_FileExists_SubstitutesValue()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "test_cursor_" + Guid.NewGuid().ToString("N") + ".sync");
+        try
+        {
+            var cursor = new DtPipe.Core.Cursor.CursorValue("updated_at", "2026-06-16T12:00:00Z", DtPipe.Core.Cursor.CursorType.DateTime);
+            var meta = new DtPipe.Core.Cursor.CursorRunMetadata(DateTime.UtcNow, DateTime.UtcNow, 100, "success");
+            DtPipe.Core.Cursor.CursorStateStore.Save(path, cursor, meta);
+
+            var input = "SELECT * FROM orders WHERE updated_at >= '${{cursor://" + path + "}}'";
+            var result = await _resolver.ResolveAsync(input);
+            Assert.Equal("SELECT * FROM orders WHERE updated_at >= '2026-06-16T12:00:00Z'", result);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task CursorInline_FileNotExists_SubstitutesDefault()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "nonexistent_" + Guid.NewGuid().ToString("N") + ".sync");
+        var input = "SELECT * FROM orders WHERE updated_at >= '${{cursor://" + path + "|1970-01-01}}'";
+        var result = await _resolver.ResolveAsync(input);
+        Assert.Equal("SELECT * FROM orders WHERE updated_at >= '1970-01-01'", result);
+    }
+
+    [Fact]
+    public async Task CursorInline_FileNotExists_NoDefault_SubstitutesEmpty()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "nonexistent_" + Guid.NewGuid().ToString("N") + ".sync");
+        var input = "SELECT * FROM orders WHERE updated_at >= '${{cursor://" + path + "}}'";
+        var result = await _resolver.ResolveAsync(input);
+        Assert.Equal("SELECT * FROM orders WHERE updated_at >= ''", result);
+    }
+
+    [Fact]
+    public async Task CursorInline_MixedWithEnvVar_BothResolved()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "test_mixed_" + Guid.NewGuid().ToString("N") + ".sync");
+        Environment.SetEnvironmentVariable("DTPIPE_TEST_RESOLVER_VAR", "my_table");
+        try
+        {
+            var cursor = new DtPipe.Core.Cursor.CursorValue("id", "500", DtPipe.Core.Cursor.CursorType.Integer);
+            var meta = new DtPipe.Core.Cursor.CursorRunMetadata(DateTime.UtcNow, DateTime.UtcNow, 100, "success");
+            DtPipe.Core.Cursor.CursorStateStore.Save(path, cursor, meta);
+
+            var input = "SELECT * FROM ${{DTPIPE_TEST_RESOLVER_VAR}} WHERE id > ${{cursor://" + path + "}}";
+            var result = await _resolver.ResolveAsync(input);
+            Assert.Equal("SELECT * FROM my_table WHERE id > 500", result);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DTPIPE_TEST_RESOLVER_VAR", null);
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
 }

@@ -138,6 +138,10 @@ public static class PipelineToJobConverter
                            ?? GetString(globals.AllFlags, "--metrics-path");
         string? prefix = GetString(branch.Flags, "--prefix", "-p")
                       ?? GetString(globals.AllFlags, "--prefix", "-p");
+        string? cursor = GetString(branch.Flags, "--cursor")
+                      ?? GetString(globals.AllFlags, "--cursor");
+        string? state = GetString(branch.Flags, "--state")
+                     ?? GetString(globals.AllFlags, "--state");
 
         return new JobDefinition
         {
@@ -151,6 +155,8 @@ public static class PipelineToJobConverter
             LogPath      = logPath,
             MetricsPath  = metricsPath,
             Prefix       = prefix,
+            Cursor       = cursor,
+            State        = state,
             NoStats      = globals.NoStats,
 
             From     = branch.From.FirstOrDefault(),

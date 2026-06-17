@@ -755,4 +755,139 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
 			Assert.Equal("Charlie", reader["NAME"]);
 		}
 	}
+
+	[Fact]
+	public async Task CursorTracker_DuckDB_TracksMaxDateTime()
+	{
+		// 1. Setup Table
+		await using var connection = new DuckDBConnection(_connectionString);
+		await connection.OpenAsync();
+		using var cmd = connection.CreateCommand();
+		cmd.CommandText = "CREATE TABLE users_dt (id INT, updated_at TIMESTAMP)";
+		await cmd.ExecuteNonQueryAsync();
+
+		// 2. Prepare Writer
+		var options = new DuckDbWriterOptions { Table = "users_dt" };
+		await using var writer = new DuckDbDataWriter(_connectionString, options, NullLogger<DuckDbDataWriter>.Instance, DuckDbTypeConverter.Instance);
+
+		var columns = new List<DtPipe.Core.Models.PipeColumnInfo> {
+			new("id", typeof(int), false),
+			new("updated_at", typeof(DateTime), false)
+		};
+
+		var decorator = new DtPipe.Core.Cursor.CursorTrackingColumnarDecorator(writer, "updated_at");
+		await decorator.InitializeAsync(columns);
+
+		var baseTime = new DateTime(2026, 6, 16, 12, 0, 0, DateTimeKind.Utc);
+		var batch = new List<object?[]> {
+			new object[] { 1, baseTime },
+			new object[] { 2, baseTime.AddHours(2) }
+		};
+
+		await decorator.WriteRecordBatchAsync(batch.ToRecordBatch(columns));
+		await decorator.CompleteAsync();
+
+		var max = decorator.TrackedMaxValue;
+		max.Should().NotBeNull();
+		max!.Column.Should().Be("updated_at");
+		max.Value.Should().Be(baseTime.AddHours(2).ToString("yyyy-MM-ddTHH:mm:ss.fff"));
+		max.Type.Should().Be(DtPipe.Core.Cursor.CursorType.DateTime);
+	}
+
+	[Fact]
+	public async Task CursorTracker_DuckDB_TracksMaxInt()
+	{
+		// 1. Setup Table
+		await using var connection = new DuckDBConnection(_connectionString);
+		await connection.OpenAsync();
+		using var cmd = connection.CreateCommand();
+		cmd.CommandText = "CREATE TABLE users_int (id INT, name TEXT)";
+		await cmd.ExecuteNonQueryAsync();
+
+		// 2. Prepare Writer
+		var options = new DuckDbWriterOptions { Table = "users_int" };
+		await using var writer = new DuckDbDataWriter(_connectionString, options, NullLogger<DuckDbDataWriter>.Instance, DuckDbTypeConverter.Instance);
+
+		var columns = new List<DtPipe.Core.Models.PipeColumnInfo> {
+			new("id", typeof(int), false),
+			new("name", typeof(string), true)
+		};
+
+		var decorator = new DtPipe.Core.Cursor.CursorTrackingColumnarDecorator(writer, "id");
+		await decorator.InitializeAsync(columns);
+
+		var batch = new List<object?[]> {
+			new object[] { 10, "Alice" },
+			new object[] { 42, "Bob" }
+		};
+
+		await decorator.WriteRecordBatchAsync(batch.ToRecordBatch(columns));
+		await decorator.CompleteAsync();
+
+		var max = decorator.TrackedMaxValue;
+		max.Should().NotBeNull();
+		max!.Column.Should().Be("id");
+		max.Value.Should().Be("42");
+		max.Type.Should().Be(DtPipe.Core.Cursor.CursorType.Integer);
+	}
+
+	[Fact]
+	public void CursorStateStore_RoundTrip_WithRealValues()
+	{
+		var path = Path.Combine(Path.GetTempPath(), $"roundtrip_{Guid.NewGuid()}.sync");
+		try
+		{
+			var cursor = new DtPipe.Core.Cursor.CursorValue("updated_at", "2026-06-16T14:00:00.000", DtPipe.Core.Cursor.CursorType.DateTime);
+			var meta = new DtPipe.Core.Cursor.CursorRunMetadata(DateTime.UtcNow.AddMinutes(-1), DateTime.UtcNow, 42, "success");
+
+			DtPipe.Core.Cursor.CursorStateStore.Save(path, cursor, meta);
+
+			var readCursor = DtPipe.Core.Cursor.CursorStateStore.Read(path);
+			readCursor.Should().NotBeNull();
+			readCursor!.Column.Should().Be("updated_at");
+			readCursor.Value.Should().Be("2026-06-16T14:00:00.000");
+			readCursor.Type.Should().Be(DtPipe.Core.Cursor.CursorType.DateTime);
+		}
+		finally
+		{
+			if (File.Exists(path)) File.Delete(path);
+		}
+	}
+
+	[Fact]
+	public async Task CursorTracker_WithTransforms_ColumnSurvivesRename()
+	{
+		// 1. Setup Table
+		await using var connection = new DuckDBConnection(_connectionString);
+		await connection.OpenAsync();
+		using var cmd = connection.CreateCommand();
+		cmd.CommandText = "CREATE TABLE users_renamed (user_id INT, name TEXT)";
+		await cmd.ExecuteNonQueryAsync();
+
+		// 2. Prepare Writer
+		var options = new DuckDbWriterOptions { Table = "users_renamed" };
+		await using var writer = new DuckDbDataWriter(_connectionString, options, NullLogger<DuckDbDataWriter>.Instance, DuckDbTypeConverter.Instance);
+
+		var targetColumns = new List<DtPipe.Core.Models.PipeColumnInfo> {
+			new("user_id", typeof(int), false),
+			new("name", typeof(string), true)
+		};
+
+		var decorator = new DtPipe.Core.Cursor.CursorTrackingColumnarDecorator(writer, "user_id");
+		await decorator.InitializeAsync(targetColumns);
+
+		var batch = new List<object?[]> {
+			new object[] { 100, "Alice" },
+			new object[] { 250, "Bob" }
+		};
+
+		await decorator.WriteRecordBatchAsync(batch.ToRecordBatch(targetColumns));
+		await decorator.CompleteAsync();
+
+		var max = decorator.TrackedMaxValue;
+		max.Should().NotBeNull();
+		max!.Column.Should().Be("user_id");
+		max.Value.Should().Be("250");
+		max.Type.Should().Be(DtPipe.Core.Cursor.CursorType.Integer);
+	}
 }
