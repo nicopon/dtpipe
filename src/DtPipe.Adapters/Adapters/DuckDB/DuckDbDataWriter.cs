@@ -6,6 +6,7 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Helpers;
 using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
+using DtPipe.Core.Expressions;
 using DtPipe.Core.Security;
 using DuckDB.NET.Data;
 using Microsoft.Extensions.Logging;

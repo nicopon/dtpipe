@@ -1,6 +1,7 @@
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Core.Pipelines.Dag;
+using DtPipe.Core.Expressions;
 using DtPipe.Core.Security;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;

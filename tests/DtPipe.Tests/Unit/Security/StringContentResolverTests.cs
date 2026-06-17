@@ -1,4 +1,6 @@
+using DtPipe.Cli.Expressions;
 using DtPipe.Cli.Security;
+using DtPipe.Core.Expressions;
 using DtPipe.Core.Security;
 using Xunit;
 using Xunit.Sdk;
@@ -98,15 +100,21 @@ public class DefaultStringContentResolverTests : IAsyncLifetime
     }
 }
 
-public class CliStringContentResolverTests : IAsyncLifetime
+public class CompositeStringContentResolverTests : IAsyncLifetime
 {
     private readonly InMemorySecretsManager _secretsManager = new();
-    private readonly CliStringContentResolver _resolver;
+    private readonly CompositeStringContentResolver _resolver;
     private string? _tempFile;
 
-    public CliStringContentResolverTests()
+    public CompositeStringContentResolverTests()
     {
-        _resolver = new CliStringContentResolver(_secretsManager);
+        var interpolators = new IStringInterpolator[]
+        {
+            new EnvVarInterpolator(),
+            new KeyringInterpolator(_secretsManager),
+            new DtPipe.Cli.Incremental.CursorInterpolator()
+        };
+        _resolver = new CompositeStringContentResolver(interpolators);
     }
 
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;

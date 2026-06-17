@@ -57,7 +57,7 @@ fi
 
 # 2. Test Secret Retrieval
 echo "Retrieving test secret..."
-SECRET_VAL=$($DTPIPE secret get test-secret-alias 2>&1 | tail -n 1)
+SECRET_VAL=$($DTPIPE secret get test-secret-alias | tail -n 1)
 if [ "$SECRET_VAL" != "generate:count=5" ]; then
     echo "❌ Error: Retrieved secret value '$SECRET_VAL' does not match expected."
     exit 1

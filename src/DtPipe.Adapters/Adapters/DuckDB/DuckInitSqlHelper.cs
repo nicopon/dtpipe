@@ -1,3 +1,4 @@
+using DtPipe.Core.Expressions;
 using DtPipe.Core.Security;
 using DuckDB.NET.Data;
 

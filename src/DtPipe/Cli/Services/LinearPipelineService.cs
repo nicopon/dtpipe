@@ -72,7 +72,7 @@ public class LinearPipelineService
         }
 
         // Resolve keyring connection string secrets
-        var resolver = _serviceProvider.GetService<DtPipe.Core.Security.IStringContentResolver>();
+        var resolver = _serviceProvider.GetService<DtPipe.Core.Expressions.IStringContentResolver>();
         if (resolver != null)
         {
             if (job.Input != null)
@@ -123,7 +123,7 @@ public class LinearPipelineService
             var readerOptsForLoad = _optionsRegistry.Get(readerFactory.OptionsType) as DtPipe.Core.Options.IQueryAwareOptions;
             if (readerOptsForLoad != null && !string.IsNullOrWhiteSpace(readerOptsForLoad.Query))
             {
-                var resolved = await (resolver ?? DtPipe.Core.Security.DefaultStringContentResolver.Instance).ResolveAsync(readerOptsForLoad.Query, token);
+                var resolved = await (resolver ?? DtPipe.Core.Expressions.DefaultStringContentResolver.Instance).ResolveAsync(readerOptsForLoad.Query, token);
                 if (resolved != readerOptsForLoad.Query)
                     readerOptsForLoad.Query = resolved;
             }
@@ -136,13 +136,13 @@ public class LinearPipelineService
             if (writerHookOpts != null)
             {
                 if (!string.IsNullOrEmpty(writerHookOpts.PreExec))
-                    writerHookOpts.PreExec = await (resolver ?? DtPipe.Core.Security.DefaultStringContentResolver.Instance).ResolveAsync(writerHookOpts.PreExec, token);
+                    writerHookOpts.PreExec = await (resolver ?? DtPipe.Core.Expressions.DefaultStringContentResolver.Instance).ResolveAsync(writerHookOpts.PreExec, token);
                 if (!string.IsNullOrEmpty(writerHookOpts.PostExec))
-                    writerHookOpts.PostExec = await (resolver ?? DtPipe.Core.Security.DefaultStringContentResolver.Instance).ResolveAsync(writerHookOpts.PostExec, token);
+                    writerHookOpts.PostExec = await (resolver ?? DtPipe.Core.Expressions.DefaultStringContentResolver.Instance).ResolveAsync(writerHookOpts.PostExec, token);
                 if (!string.IsNullOrEmpty(writerHookOpts.OnErrorExec))
-                    writerHookOpts.OnErrorExec = await (resolver ?? DtPipe.Core.Security.DefaultStringContentResolver.Instance).ResolveAsync(writerHookOpts.OnErrorExec, token);
+                    writerHookOpts.OnErrorExec = await (resolver ?? DtPipe.Core.Expressions.DefaultStringContentResolver.Instance).ResolveAsync(writerHookOpts.OnErrorExec, token);
                 if (!string.IsNullOrEmpty(writerHookOpts.FinallyExec))
-                    writerHookOpts.FinallyExec = await (resolver ?? DtPipe.Core.Security.DefaultStringContentResolver.Instance).ResolveAsync(writerHookOpts.FinallyExec, token);
+                    writerHookOpts.FinallyExec = await (resolver ?? DtPipe.Core.Expressions.DefaultStringContentResolver.Instance).ResolveAsync(writerHookOpts.FinallyExec, token);
             }
         }
 

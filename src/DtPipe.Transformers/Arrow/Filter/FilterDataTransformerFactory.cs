@@ -9,13 +9,13 @@ public class FilterDataTransformerFactory : IDataTransformerFactory
 {
 	private readonly OptionsRegistry _registry;
 	private readonly IJsEngineProvider _jsEngineProvider;
-	private readonly DtPipe.Core.Security.IStringContentResolver _resolver;
+	private readonly DtPipe.Core.Expressions.IStringContentResolver _resolver;
 
-	public FilterDataTransformerFactory(OptionsRegistry registry, IJsEngineProvider jsEngineProvider, DtPipe.Core.Security.IStringContentResolver? resolver = null)
+	public FilterDataTransformerFactory(OptionsRegistry registry, IJsEngineProvider jsEngineProvider, DtPipe.Core.Expressions.IStringContentResolver? resolver = null)
 	{
 		_registry = registry;
 		_jsEngineProvider = jsEngineProvider;
-		_resolver = resolver ?? DtPipe.Core.Security.DefaultStringContentResolver.Instance;
+		_resolver = resolver ?? DtPipe.Core.Expressions.DefaultStringContentResolver.Instance;
 	}
 
 	public string Category => "Transformers";

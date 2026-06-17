@@ -10,6 +10,7 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
+using DtPipe.Core.Expressions;
 using DtPipe.Core.Security;
 using DtPipe.Processors.Sql;
 using DuckDB.NET.Data;

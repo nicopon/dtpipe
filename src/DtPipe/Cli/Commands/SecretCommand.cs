@@ -66,7 +66,7 @@ public class SecretCommand : Command
 				if (secret == null)
 					_console.MarkupLine($"[red]Secret '{alias}' not found.[/]");
 				else
-					_console.WriteLine(secret);
+					Console.Out.WriteLine(secret);
 			}
 			catch (Exception ex)
 			{

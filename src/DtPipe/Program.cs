@@ -284,7 +284,10 @@ class Program
 			services.AddSingleton<DtPipe.Cli.Security.ISecretsManager, DtPipe.Cli.Security.KeyringSecretsManager>();
 		}
 
-		services.AddSingleton<DtPipe.Core.Security.IStringContentResolver, DtPipe.Cli.Security.CliStringContentResolver>();
+		services.AddSingleton<DtPipe.Core.Expressions.IStringContentResolver, DtPipe.Cli.Expressions.CompositeStringContentResolver>();
+		services.AddSingleton<DtPipe.Core.Expressions.IStringInterpolator, DtPipe.Cli.Expressions.EnvVarInterpolator>();
+		services.AddSingleton<DtPipe.Core.Expressions.IStringInterpolator, DtPipe.Cli.Security.KeyringInterpolator>();
+		services.AddSingleton<DtPipe.Core.Expressions.IStringInterpolator, DtPipe.Cli.Incremental.CursorInterpolator>();
 
 		RegisterReader<DtPipe.Adapters.Arrow.ArrowReaderDescriptor>(services);
 		RegisterReader<DtPipe.Adapters.Csv.CsvReaderDescriptor>(services);

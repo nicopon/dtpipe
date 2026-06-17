@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace DtPipe.Core.Security;
+namespace DtPipe.Core.Expressions;
 
 public interface IStringContentResolver
 {
