@@ -37,8 +37,11 @@ class Program
 		System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = System.Globalization.CultureInfo.InvariantCulture;
 		Console.OutputEncoding = System.Text.Encoding.UTF8;
 
+		var isDebug = Environment.GetEnvironmentVariable("DEBUG") == "1";
+		var minLevel = isDebug ? Serilog.Events.LogEventLevel.Debug : Serilog.Events.LogEventLevel.Warning;
+
 		Log.Logger = new LoggerConfiguration()
-				.MinimumLevel.Debug()
+				.MinimumLevel.Is(minLevel)
 				.WriteTo.Console(
 				outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}",
 				standardErrorFromLevel: Serilog.Events.LogEventLevel.Verbose)
@@ -261,10 +264,11 @@ class Program
 
 	private static void ConfigureServices(IServiceCollection services)
 	{
+		var isDebug = Environment.GetEnvironmentVariable("DEBUG") == "1";
 		services.AddLogging(logging => {
 			logging.ClearProviders();
 			logging.AddSerilog(Log.Logger);
-			logging.SetMinimumLevel(LogLevel.Debug);
+			logging.SetMinimumLevel(isDebug ? LogLevel.Debug : LogLevel.Warning);
 		});
 
 		services.AddSingleton<OptionsRegistry>();
