@@ -2,6 +2,9 @@
 
 Recipes and end-to-end scenarios. For the full option reference, see [REFERENCE.md](./REFERENCE.md).
 
+> [!IMPORTANT]
+> **Database Connection Strings**: All database configurations in these recipes use standard **ADO.NET connection strings** (e.g. `pg:Host=localhost;Database=mydb;...` rather than Python/SQLAlchemy connection URIs). If you are coming from Python or SQLAlchemy, refer to the [Database Connection Strings translation guide in REFERENCE.md](./REFERENCE.md#database-connection-strings-adonet-format) for formatting help.
+
 **Table of Contents**
 - [Basic Transfers](#basic-transfers)
 - [Anonymization Before Export](#anonymization-before-export)

@@ -4,15 +4,6 @@ All built-in provider adapters (readers and writers) for DtPipe. Depends only on
 
 ---
 
-## Package
-
-```xml
-<PackageReference Include="DtPipe.Core" Version="1.4.0" />
-<PackageReference Include="DtPipe.Adapters" Version="1.4.0" />
-```
-
----
-
 ## Supported Providers
 
 | Provider | Reader | Writer | Prefix |

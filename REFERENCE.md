@@ -13,8 +13,8 @@ dtpipe --job FILE [OVERRIDES]
 
 | Flag | Description |
 |:---|:---|
-| `-i`, `--input SOURCE` | Source connection string or file path |
-| `-o`, `--output DEST` | Target connection string or file path |
+| `-i`, `--input SOURCE` | Source ADO.NET connection string or file path |
+| `-o`, `--output DEST` | Target ADO.NET connection string or file path |
 | `-q`, `--query SQL` | SQL query (required for database sources) |
 | `--dry-run [N]` | Preview N rows without writing (default: 10) |
 | `--job FILE`, `-j FILE` | Load a pipeline from a YAML job file |
@@ -139,6 +139,26 @@ dtpipe -i duck:memory --duck-init "keyring://s3-init" ...
 > For Stdin/Stdout: use `-` as the connection string (`csv:-`) or the bare provider name (`csv` = `csv:-`).
 
 > **DuckDB dual role**: Beyond being a regular read/write provider, DuckDB also serves as the **internal SQL engine** for `--sql` branches in DAG pipelines (joins, unions, CTEs). See [DAG Syntax](#dag-syntax) and [Provider-Specific Options](#provider-specific-options) for details on `--duck-init`.
+
+### Database Connection Strings (ADO.NET format)
+
+DtPipe is powered by .NET database providers, which expect standard **ADO.NET connection strings** rather than the connection URIs typically used in the Python/data ecosystem (e.g. by SQLAlchemy or psycopg2).
+
+* **ADO.NET format**: A list of semicolon-separated `Key=Value;` pairs (e.g. `Host=localhost;Database=mydb;`).
+* **Python URIs** (e.g. `postgresql://user:pass@host:port/db`) are **not natively supported** by the underlying database drivers and must be translated.
+
+For a comprehensive catalog of all connection string options, parameters, and database drivers, visit **[connectionstrings.com](https://www.connectionstrings.com/)**.
+
+#### Conversion Reference Table
+
+If you are coming from Python or SQLAlchemy, use this translation guide to build your `-i` / `-o` strings:
+
+| Database | Prefix | Python URI Format | ADO.NET Format (DtPipe) |
+|:---|:---|:---|:---|
+| **PostgreSQL** | `pg:` | `postgresql://user:pass@host:port/db` | `pg:Host=host;Port=port;Database=db;Username=user;Password=pass` |
+| **SQL Server** | `mssql:` | `mssql+pyodbc://user:pass@host/db` | `mssql:Server=host;Database=db;User Id=user;Password=pass;TrustServerCertificate=True` |
+| **SQLite** | `sqlite:` | `sqlite:///path/to/file.db` | `sqlite:Data Source=path/to/file.db` |
+| **Oracle** | `ora:` | `oracle+oracledb://user:pass@host:port/?service_name=service` | `ora:Data Source=host:port/service;User Id=user;Password=pass` |
 
 ---
 

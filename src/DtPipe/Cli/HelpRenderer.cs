@@ -24,6 +24,10 @@ public static class HelpRenderer
         console.WriteLine("  dtpipe --job <file.yaml>");
         console.WriteLine("  dtpipe <subcommand>");
         console.WriteLine();
+        console.WriteLine("  Specify sources/targets using a prefix (e.g., 'pg:...', 'csv:...') or let");
+        console.WriteLine("  dtpipe infer the provider from file extensions (e.g., '.parquet', '.csv').");
+        console.WriteLine("  Run 'dtpipe providers' to list all supported prefixes.");
+        console.WriteLine();
 
         // Subcommands
         console.WriteLine("SUBCOMMANDS:");
@@ -35,8 +39,8 @@ public static class HelpRenderer
 
         // Structural / global flags from CoreFlagRegistry
         console.WriteLine("GLOBAL OPTIONS:");
-        WriteFlag(console, "--input, -i <conn>",      "Input connection string, file path, or '-' for stdin");
-        WriteFlag(console, "--output, -o <conn>",     "Output connection string, file path, or '-' for stdout");
+        WriteFlag(console, "--input, -i <source>",    "Input source (prefixed ADO.NET, file path, or '-' for stdin)");
+        WriteFlag(console, "--output, -o <target>",   "Output target (prefixed ADO.NET, file path, or '-' for stdout)");
         WriteFlag(console, "--from <alias>",          "Read from upstream branch alias (fan-out/tee)");
         WriteFlag(console, "--alias <name>",          "Alias for the current DAG branch");
         WriteFlag(console, "--ref <alias>",           "Secondary source alias for SQL JOINs (preloaded)");
