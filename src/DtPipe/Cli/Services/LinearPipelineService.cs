@@ -324,8 +324,16 @@ internal class StreamTransformerReaderAdapter : IStreamReaderFactory
         public Schema? Schema => _transformer.Schema;
         public Task OpenAsync(CancellationToken ct = default) => _transformer.OpenAsync(ct);
         public IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync(CancellationToken ct = default) => _transformer.ReadResultsAsync(null, ct);
-        public IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(int batchSize, CancellationToken ct = default)
-            => throw new NotSupportedException("StreamTransformerReaderAdapter only supports columnar mode.");
+        public async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(int batchSize, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            await foreach (var batch in ReadRecordBatchesAsync(ct))
+            {
+                foreach (var memory in DtPipe.Core.Infrastructure.Arrow.ArrowRowConverter.FlattenBatch(batch, batchSize))
+                {
+                    yield return memory;
+                }
+            }
+        }
         public ValueTask DisposeAsync() => _transformer.DisposeAsync();
     }
 }

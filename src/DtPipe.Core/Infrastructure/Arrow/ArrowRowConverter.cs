@@ -50,4 +50,31 @@ public static class ArrowRowConverter
         }
         return row;
     }
+
+    /// <summary>
+    /// Flattens a RecordBatch into chunks of ReadOnlyMemory row arrays of a requested size.
+    /// </summary>
+    public static System.Collections.Generic.IEnumerable<System.ReadOnlyMemory<object?[]>> FlattenBatch(RecordBatch batch, int requestedBatchSize)
+    {
+        var rowCount = batch.Length;
+        var flatBatch = new object?[requestedBatchSize][];
+        var currentIndex = 0;
+
+        for (int rowIdx = 0; rowIdx < rowCount; rowIdx++)
+        {
+            flatBatch[currentIndex++] = ToRow(batch, rowIdx);
+
+            if (currentIndex >= requestedBatchSize)
+            {
+                yield return new System.ReadOnlyMemory<object?[]>(flatBatch, 0, currentIndex);
+                flatBatch = new object?[requestedBatchSize][];
+                currentIndex = 0;
+            }
+        }
+
+        if (currentIndex > 0)
+        {
+            yield return new System.ReadOnlyMemory<object?[]>(flatBatch, 0, currentIndex);
+        }
+    }
 }

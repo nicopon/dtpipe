@@ -1,9 +1,11 @@
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Cli.Pipeline;
+using DtPipe.Cli.Services;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
+using Apache.Arrow;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
@@ -146,8 +148,8 @@ public class OrderedPipelineTests
 		var builder = new TransformerPipelineBuilder(_factories);
 
 		// Setup --skip-null as a FLAG (Boolean arity) for Fake factory
-		var skipNullFlag = new FlagDef("--skip-null", Array.Empty<string>(), FlagArity.Boolean, FlagScope.PerBranch, "fake");
-		var fakeFlag = new FlagDef("--fake", Array.Empty<string>(), FlagArity.Scalar, FlagScope.PerBranch, "fake");
+		var skipNullFlag = new FlagDef("--skip-null", System.Array.Empty<string>(), FlagArity.Boolean, FlagScope.PerBranch, "fake");
+		var fakeFlag = new FlagDef("--fake", System.Array.Empty<string>(), FlagArity.Scalar, FlagScope.PerBranch, "fake");
 
 		_fakeFactory.As<ICliContributor>().Setup(f => f.GetFlagDefs()).Returns(new List<FlagDef> { fakeFlag, skipNullFlag });
 
@@ -171,5 +173,61 @@ public class OrderedPipelineTests
 		// Assert
 		pipeline.Should().HaveCount(1);
 		pipeline[0].Should().Be(fakeT.Object);
+	}
+
+	[Fact]
+	public async Task StreamTransformerReaderAdapter_ReadBatchesAsync_ShouldConvertColumnarToRows()
+	{
+		// Arrange
+		var mockTransformer = new Mock<IStreamTransformer>();
+		
+		var schemaBuilder = new Apache.Arrow.Schema.Builder()
+			.Field(f => f.Name("Id").DataType(Apache.Arrow.Types.Int64Type.Default).Nullable(false))
+			.Field(f => f.Name("Value").DataType(Apache.Arrow.Types.StringType.Default).Nullable(true));
+		var schema = schemaBuilder.Build();
+		
+		var columns = new List<PipeColumnInfo>
+		{
+			new("Id", typeof(long), false),
+			new("Value", typeof(string), true)
+		};
+
+		mockTransformer.Setup(t => t.Schema).Returns(schema);
+		mockTransformer.Setup(t => t.Columns).Returns(columns);
+
+		var idBuilder = new Int64Array.Builder().Append(1).Append(2).Append(3);
+		var valueBuilder = new StringArray.Builder().Append("A").Append("B").AppendNull();
+		var batch = new RecordBatch(schema, new IArrowArray[] { idBuilder.Build(), valueBuilder.Build() }, 3);
+
+		mockTransformer.Setup(t => t.ReadResultsAsync(It.IsAny<IAsyncEnumerable<RecordBatch>>(), It.IsAny<CancellationToken>()))
+			.Returns(HelperAsyncEnumerable(batch));
+
+		var adapter = new StreamTransformerReaderAdapter(mockTransformer.Object);
+		var reader = adapter.Create(new OptionsRegistry());
+
+		// Act
+		var rows = new List<object?[]>();
+		await foreach (var batchChunk in reader.ReadBatchesAsync(2))
+		{
+			for (int i = 0; i < batchChunk.Length; i++)
+			{
+				rows.Add(batchChunk.Span[i]);
+			}
+		}
+
+		// Assert
+		rows.Should().HaveCount(3);
+		rows[0].Should().Equal(1L, "A");
+		rows[1].Should().Equal(2L, "B");
+		rows[2].Should().Equal(3L, null);
+	}
+
+	private static async IAsyncEnumerable<T> HelperAsyncEnumerable<T>(params T[] items)
+	{
+		await Task.Yield();
+		foreach (var item in items)
+		{
+			yield return item;
+		}
 	}
 }

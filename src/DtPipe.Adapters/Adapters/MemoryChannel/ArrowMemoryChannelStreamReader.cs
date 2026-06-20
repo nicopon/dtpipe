@@ -51,15 +51,10 @@ public sealed class ArrowMemoryChannelStreamReader : IStreamReader, IColumnarStr
     {
         await foreach (var batch in _reader.ReadAllAsync(ct))
         {
-            var rows = new object?[batch.Length][];
-            for (int i = 0; i < batch.Length; i++)
+            foreach (var memory in ArrowRowConverter.FlattenBatch(batch, batchSize))
             {
-                var row = new object?[batch.Schema.FieldsList.Count];
-                for (int j = 0; j < row.Length; j++)
-                    row[j] = ArrowTypeMapper.GetValueForField(batch.Column(j), batch.Schema.GetFieldByIndex(j), i);
-                rows[i] = row;
+                yield return memory;
             }
-            yield return new ReadOnlyMemory<object?[]>(rows);
         }
     }
 

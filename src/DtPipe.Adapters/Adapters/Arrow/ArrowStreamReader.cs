@@ -116,7 +116,7 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
                 try { batch = await _arrowFileReader.ReadRecordBatchAsync(i, ct); } catch { break; }
                 if (batch == null) break;
 
-                foreach (var memory in FlattenBatch(batch, batchSize))
+                foreach (var memory in ArrowRowConverter.FlattenBatch(batch, batchSize))
                 {
                     yield return memory;
                 }
@@ -129,45 +129,13 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
                 var batch = await _arrowReader.ReadNextRecordBatchAsync(ct);
                 if (batch == null) break;
 
-                foreach (var memory in FlattenBatch(batch, batchSize))
+                foreach (var memory in ArrowRowConverter.FlattenBatch(batch, batchSize))
                 {
                     yield return memory;
                 }
             }
         }
 	}
-
-    private IEnumerable<ReadOnlyMemory<object?[]>> FlattenBatch(RecordBatch batch, int requestedBatchSize)
-    {
-        var rowCount = batch.Length;
-        var colCount = batch.ColumnCount;
-        var flatBatch = new object?[requestedBatchSize][];
-        var currentIndex = 0;
-
-        for (int rowIdx = 0; rowIdx < rowCount; rowIdx++)
-        {
-            var row = new object?[colCount];
-            for (int colIdx = 0; colIdx < colCount; colIdx++)
-            {
-                var column = batch.Column(colIdx);
-                row[colIdx] = ArrowTypeMapper.GetValueForField(column, batch.Schema.GetFieldByIndex(colIdx), rowIdx);
-            }
-
-            flatBatch[currentIndex++] = row;
-
-            if (currentIndex >= requestedBatchSize)
-            {
-                yield return new ReadOnlyMemory<object?[]>(flatBatch, 0, currentIndex);
-                flatBatch = new object?[requestedBatchSize][];
-                currentIndex = 0;
-            }
-        }
-
-        if (currentIndex > 0)
-        {
-            yield return new ReadOnlyMemory<object?[]>(flatBatch, 0, currentIndex);
-        }
-    }
 
 
 	public async ValueTask DisposeAsync()
