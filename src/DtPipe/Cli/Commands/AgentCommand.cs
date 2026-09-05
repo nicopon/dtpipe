@@ -315,7 +315,7 @@ public class AgentCommand : Command
                               break;
 
                           case PostMissionAction.InspectTrajectory:
-                              tui.InspectTrajectory(executor.Trajectory);
+                              tui.ReviewSession(executor.Trajectory);
                               break;
 
                           case PostMissionAction.SaveYaml:

@@ -204,6 +204,47 @@ public class AgentTui
         _console.Write(panel);
     }
 
+    /// <summary>
+    /// Keyboard review of the session trajectory (voie 4 §6 suite, lot C). Uses the full-screen
+    /// <see cref="SessionReview"/> on an interactive terminal; on a piped / non-ANSI console — or
+    /// when stdin is redirected — it falls back to the inline <see cref="InspectTrajectory"/> list.
+    /// </summary>
+    public void ReviewSession(AgentTrajectory trajectory)
+    {
+        if (trajectory.Steps.Count == 0)
+        {
+            _console.MarkupLine("[yellow]No trajectory steps logged in this session yet.[/]");
+            return;
+        }
+
+        bool interactive = _console.Profile.Capabilities.Interactive
+            && _console.Profile.Capabilities.Ansi
+            && !Console.IsInputRedirected;
+        if (!interactive)
+        {
+            InspectTrajectory(trajectory);
+            return;
+        }
+
+        var review = new SessionReview(trajectory.Steps);
+        _console.Live(review.RenderFrame())
+            .AutoClear(true)
+            .Overflow(VerticalOverflow.Visible)
+            .Start(ctx =>
+            {
+                while (true)
+                {
+                    var key = Console.ReadKey(intercept: true);
+                    if (!review.Apply(key)) break;
+                    ctx.UpdateTarget(review.RenderFrame());
+                }
+            });
+
+        // Leave the step the reviewer stopped on in scrollback, so the review produces a record.
+        if (review.Current is { } step)
+            RenderStepDetails(step);
+    }
+
     public void InspectTrajectory(AgentTrajectory trajectory)
     {
         if (trajectory.Steps.Count == 0)
