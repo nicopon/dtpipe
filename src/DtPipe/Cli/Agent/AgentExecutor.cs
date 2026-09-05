@@ -32,6 +32,7 @@ public class AgentExecutor
      public TurnOutcome? LastTurnOutcome { get; private set; }
 
      private AgentMode? _mode;
+     private long _turnTokens;
 
      /// <summary>
      /// The session's live operating mode. Seeded from the first turn's <see cref="AgentOptions.Mode"/>
@@ -89,12 +90,38 @@ public class AgentExecutor
 
         var toolCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var stopwatch = Stopwatch.StartNew();
+        _turnTokens = 0;
 
-        _tui.RenderWorkingHeader(Mode, opts.Detail, opts.Apply);
+        // The persistent shell (D3): one Live frame for the whole turn. Same gate as streaming —
+        // an ANSI, interactive console with a stream-capable client and real stdin. Everything else
+        // (piped, --no-stream, replication) keeps the sequential scrollback path unchanged.
+        bool consoleCanLive = _console.Profile.Capabilities.Ansi && _console.Profile.Capabilities.Interactive;
+        bool useShell = consoleCanLive && !opts.NoStream && _llmClient is IStreamingLlmClient
+            && !Console.IsInputRedirected;
 
         // Primary run uses the instance Messages so the interactive / inspection flows keep state.
-        var primary = await RunPlanningLoopAsync(Messages, userPrompt, model, baseUrl, opts, maxIterations,
-            recordTrajectory: true, renderTui: true, ct);
+        PlanningLoopResult primary;
+        if (useShell)
+        {
+            var shell = new AgentShell
+            {
+                Title = "dtpipe agent",
+                Subtitle = $"{model} · {Mode.ToString().ToLowerInvariant()}",
+                Status = ShellStatusLine(opts),
+                Hints = "esc stop · ^O detail · ⇧⇥ mode",
+            };
+            primary = await _tui.RunInLiveShellAsync(
+                shell,
+                () => (FormatClock(stopwatch.Elapsed), _turnTokens > 0 ? $"{_turnTokens} tok" : string.Empty),
+                view => RunPlanningLoopAsync(Messages, userPrompt, model, baseUrl, opts, maxIterations,
+                    recordTrajectory: true, renderTui: true, view, ct));
+        }
+        else
+        {
+            _tui.RenderWorkingHeader(Mode, opts.Detail, opts.Apply);
+            primary = await RunPlanningLoopAsync(Messages, userPrompt, model, baseUrl, opts, maxIterations,
+                recordTrajectory: true, renderTui: true, new ScrollbackTurnView(_console, _tui), ct);
+        }
         bool success = primary.Success;
         int turnIterations = primary.Iterations;
         LastTurnOutcome = primary.Outcome;
@@ -116,7 +143,7 @@ public class AgentExecutor
                  new("user", userPrompt)
                };
             var repl = await RunPlanningLoopAsync(fresh, userPrompt, model, baseUrl, opts, maxIterations,
-                recordTrajectory: false, renderTui: false, ct);
+                recordTrajectory: false, renderTui: false, view: null, ct);
             if (!string.IsNullOrWhiteSpace(repl.Yaml))
                 observedYamls.Add(repl.Yaml);
          }
@@ -152,6 +179,7 @@ public class AgentExecutor
         int maxIterations,
         bool recordTrajectory,
         bool renderTui,
+        ITurnView? view,
         CancellationToken ct)
      {
         var toolCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -187,18 +215,15 @@ public class AgentExecutor
             if (useStreaming)
               {
                 var streaming = (IStreamingLlmClient)_llmClient;
-                response = await _tui.RunStreamingStepAsync(currentStepNum, maxIterations, opts.Detail,
+                response = await view!.StreamingStepAsync(currentStepNum, maxIterations, opts.Detail,
                     obs => streaming.ChatStreamAsync(baseUrl, model, compactedMessages, availableTools, obs,
                         opts.NumCtx, opts.Temperature, opts.Seed, ct));
               }
              else if (renderTui)
               {
-                response = await _console.Status()
-                      .Spinner(Spinner.Known.Dots)
-                      .SpinnerStyle(Style.Parse("blue bold"))
-                      .StartAsync<LlmResponse>($"Agent thinking (Step {currentStepNum})...",
-                          _ => _llmClient.ChatAsync(baseUrl, model, compactedMessages, availableTools,
-                              opts.NumCtx, temperature: opts.Temperature, seed: opts.Seed, ct));
+                response = await view!.BlockingStepAsync(currentStepNum,
+                    c => _llmClient.ChatAsync(baseUrl, model, compactedMessages, availableTools,
+                        opts.NumCtx, temperature: opts.Temperature, seed: opts.Seed, c), ct);
               }
              else
               {
@@ -207,12 +232,13 @@ public class AgentExecutor
               }
 
              iterationSw.Stop();
+             _turnTokens += response.Usage?.CompletionTokens ?? 0;
 
              if (!string.IsNullOrEmpty(response.Error))
              {
                 string errMsg = response.Error!;
                 if (renderTui)
-                    _tui.RenderAgentResponse($"Error calling LLM: {errMsg}");
+                    view!.AgentResponse($"Error calling LLM: {errMsg}");
                 if (recordTrajectory)
                     Trajectory.AddStep(currentStepNum, $"LLM Error: {errMsg}", isError: true);
                 success = false;
@@ -227,10 +253,10 @@ public class AgentExecutor
              currentThinking = response.Thinking;
              currentUsage = response.Usage;
 
-             // The streaming path writes its digest from inside RunStreamingStepAsync once the live
-             // region collapses; the blocking path writes the same digest here.
+             // The streaming step renders its own digest once the stream ends; the blocking step
+             // does not, so the digest is written here.
              if (renderTui && !useStreaming)
-                 _tui.RenderStepDigest(currentStepNum, maxIterations, iterationSw.Elapsed, response, opts.Detail);
+                 view!.Digest(currentStepNum, maxIterations, iterationSw.Elapsed, response, opts.Detail);
 
             var lastMsg = messages[^1];
             if (lastMsg.ToolCalls == null || lastMsg.ToolCalls.Count == 0)
@@ -239,7 +265,7 @@ public class AgentExecutor
                  {
                      // The model finished the turn with a deliberate textual answer.
                     if (renderTui)
-                        _tui.RenderAgentResponse(lastMsg.Content!);
+                        view!.AgentResponse(lastMsg.Content!);
                     if (recordTrajectory)
                         Trajectory.AddStep(currentStepNum, currentReasoning ?? "Finished response.", thinking: currentThinking, usage: currentUsage);
                     success = true;
@@ -306,7 +332,7 @@ public class AgentExecutor
 
                  toolResultRaw ??= "{}";
                  if (renderTui)
-                     _tui.RenderToolResult(call.Name, toolResultRaw, outcome.IsError);
+                     view!.ToolResult(call.Name, toolResultRaw, outcome.IsError);
                  if (recordTrajectory)
                      Trajectory.AddStep(Trajectory.Steps.Count + 1, currentReasoning ?? "", call.Name, argsFormatted, toolResultRaw, outcome.IsError,
                          thinking: i == 0 ? currentThinking : null, usage: i == 0 ? currentUsage : null);
@@ -348,6 +374,13 @@ public class AgentExecutor
         var args = JsonSerializer.SerializeToElement(new { yamlContent = yaml });
         return await _toolProvider.InvokeToolAsync("execute-yaml-job", args, ct);
     }
+
+    private string ShellStatusLine(AgentOptions opts) => AgentTui.StatusText(Mode, opts.Detail, opts.Apply);
+
+    private static string FormatClock(TimeSpan t) =>
+        t.TotalMinutes >= 1
+            ? $"{(int)t.TotalMinutes}m{t.Seconds:D2}s"
+            : $"{t.TotalSeconds:F0}s";
 
     private async Task<ToolInvocationOutcome> InvokeToolInto(string toolName, JsonElement args, CancellationToken ct)
       {

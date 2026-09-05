@@ -68,6 +68,24 @@ internal static class StepDigest
         return lines;
     }
 
+    /// <summary>One line for a finished tool call — the same shape in scrollback and in the shell.</summary>
+    public static string ToolResultLine(string toolName, string? result, bool isError)
+    {
+        string color = isError ? "red" : "green";
+        string snippet = result ?? "{}";
+        if (snippet.Length > 200) snippet = snippet[..200] + "…";
+        string tag = isError ? " [error]" : string.Empty;
+        return $"[dim]↳ {Markup.Escape(toolName)}{Markup.Escape(tag)}[/]: [bold {color}]{Markup.Escape(snippet)}[/]";
+    }
+
+    /// <summary>The model's final answer as markup lines — the shell has no room for a bordered panel.</summary>
+    public static IEnumerable<string> AgentResponseLines(string content)
+    {
+        yield return "[bold green]🤖 dtpipe Agent[/]";
+        foreach (var l in (content ?? string.Empty).Replace("\r", string.Empty).Split('\n'))
+            yield return "  " + Markup.Escape(l);
+    }
+
     /// <summary>The one-line trace: step, wall-clock, token stats, tool, and a first-line reason.</summary>
     public static string TraceLine(int step, int maxSteps, TimeSpan elapsed, LlmResponse response, string? toolFallback)
     {

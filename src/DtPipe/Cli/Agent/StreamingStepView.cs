@@ -66,31 +66,52 @@ internal sealed class StreamingStepView
     {
         lock (_gate)
         {
-            string phase = _tool != null ? $"calling [magenta]{Markup.Escape(_tool)}[/]"
-                : _sawContent ? "answering"
-                : _sawThinking ? "thinking" : "waiting for first token";
-            char spin = Spin[(int)(_sw.ElapsedMilliseconds / 100) % Spin.Length];
-            var header = $"[blue]{spin}[/] [bold]Step {_step}/{_maxSteps}[/]  [grey]{phase} · {_sw.Elapsed.TotalSeconds:F0}s[/]";
-
-            var lines = new StringBuilder();
-            if (_thinking.Length > 0)
-                lines.Append("[dim]").Append(Markup.Escape(Tail(_thinking.ToString(), BodyLines))).Append("[/]");
-            if (_content.Length > 0)
+            return new Panel(new Markup(BodyMarkupLocked(BodyLines)))
             {
-                if (lines.Length > 0) lines.Append('\n');
-                lines.Append(Markup.Escape(Tail(_content.ToString(), BodyLines)));
-            }
-            if (lines.Length == 0)
-                lines.Append("[grey]…[/]");
-
-            return new Panel(new Markup(lines.ToString()))
-            {
-                Header = new PanelHeader(header),
+                Header = new PanelHeader(HeaderMarkupLocked()),
                 Border = BoxBorder.Rounded,
                 BorderStyle = new Style(Color.Grey),
                 Expand = true
             };
         }
+    }
+
+    /// <summary>
+    /// The same live content as <see cref="Build"/> but flattened to a markup string with a header
+    /// line on top — for the persistent shell, which shows it as <c>AgentShell.LiveTail</c> rather
+    /// than in a bordered panel of its own.
+    /// </summary>
+    public string TailMarkup(int maxLines)
+    {
+        lock (_gate)
+        {
+            var body = BodyMarkupLocked(maxLines);
+            return HeaderMarkupLocked() + "\n" + body;
+        }
+    }
+
+    private string HeaderMarkupLocked()
+    {
+        string phase = _tool != null ? $"calling [magenta]{Markup.Escape(_tool)}[/]"
+            : _sawContent ? "answering"
+            : _sawThinking ? "thinking" : "waiting for first token";
+        char spin = Spin[(int)(_sw.ElapsedMilliseconds / 100) % Spin.Length];
+        return $"[blue]{spin}[/] [bold]Step {_step}/{_maxSteps}[/]  [grey]{phase} · {_sw.Elapsed.TotalSeconds:F0}s[/]";
+    }
+
+    private string BodyMarkupLocked(int maxLines)
+    {
+        var lines = new StringBuilder();
+        if (_thinking.Length > 0)
+            lines.Append("[dim]").Append(Markup.Escape(Tail(_thinking.ToString(), maxLines))).Append("[/]");
+        if (_content.Length > 0)
+        {
+            if (lines.Length > 0) lines.Append('\n');
+            lines.Append(Markup.Escape(Tail(_content.ToString(), maxLines)));
+        }
+        if (lines.Length == 0)
+            lines.Append("[grey]…[/]");
+        return lines.ToString();
     }
 
     /// <summary>Wall-clock since the step started — the elapsed figure for the permanent trace.</summary>

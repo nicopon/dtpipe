@@ -18,6 +18,7 @@ internal sealed class AgentShell
     private const int Chrome = 5;
     private const int MinBody = 3;
 
+    private readonly object _gate = new();
     private readonly List<string> _transcript = new();
 
     public string Title { get; set; } = "dtpipe agent";
@@ -31,11 +32,21 @@ internal sealed class AgentShell
     /// <summary>The step currently streaming — shown below the transcript, not yet committed to it.</summary>
     public string? LiveTail { get; set; }
 
-    public IReadOnlyList<string> Transcript => _transcript;
+    /// <summary>A snapshot of the committed transcript, safe to read while the turn is still running.</summary>
+    public IReadOnlyList<string> Transcript
+    {
+        get { lock (_gate) return _transcript.ToArray(); }
+    }
 
-    public void Append(string markupLine) => _transcript.Add(markupLine);
+    public void Append(string markupLine)
+    {
+        lock (_gate) _transcript.Add(markupLine);
+    }
 
-    public void AppendRange(IEnumerable<string> markupLines) => _transcript.AddRange(markupLines);
+    public void AppendRange(IEnumerable<string> markupLines)
+    {
+        lock (_gate) _transcript.AddRange(markupLines);
+    }
 
     /// <summary>The whole frame, clipped to <paramref name="height"/> total terminal rows.</summary>
     public IRenderable RenderFrame(int height)
@@ -72,9 +83,12 @@ internal sealed class AgentShell
     /// <summary>The last <paramref name="body"/> rendered lines of transcript + live tail.</summary>
     internal List<string> VisibleBodyLines(int body)
     {
-        var all = new List<string>(_transcript);
-        if (!string.IsNullOrEmpty(LiveTail))
-            all.AddRange(LiveTail.Replace("\r", "").Split('\n'));
+        List<string> all;
+        lock (_gate) all = new List<string>(_transcript);
+
+        var tail = LiveTail;   // one read: the field may be reassigned on another thread
+        if (!string.IsNullOrEmpty(tail))
+            all.AddRange(tail.Replace("\r", string.Empty).Split('\n'));
 
         return all.Count <= body ? all : all.Skip(all.Count - body).ToList();
     }
