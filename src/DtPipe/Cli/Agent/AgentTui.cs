@@ -171,52 +171,6 @@ public class AgentTui
     }
 
     /// <summary>
-    /// Runs a whole turn inside one persistent <c>Live</c> region: the <see cref="AgentShell"/> frame
-    /// (header · transcript tail · footer · input). <paramref name="header"/> is polled by the
-    /// refresh ticker so the clock and token meter stay live between steps. The frame auto-clears on
-    /// exit; the committed transcript is then replayed to real scrollback so the permanent record is
-    /// clean lines, not a frozen frame — and <see cref="RenderFinalSummary"/> stays the sole verdict.
-    /// </summary>
-    internal async Task<T> RunInLiveShellAsync<T>(
-        AgentShell shell,
-        Func<(string clock, string meter)> header,
-        Func<ITurnView, Task<T>> body)
-    {
-        T result = default!;
-        int FrameHeight() => Math.Clamp(_console.Profile.Height - 1, 8, 46);
-
-        try
-        {
-            await _console.Live(shell.RenderFrame(FrameHeight()))
-                .AutoClear(true)
-                .Overflow(VerticalOverflow.Crop)
-                .Cropping(VerticalOverflowCropping.Top)
-                .StartAsync(async ctx =>
-                {
-                    void Repaint()
-                    {
-                        var (clock, meter) = header();
-                        shell.Clock = clock;
-                        shell.Meter = meter;
-                        try { ctx.UpdateTarget(shell.RenderFrame(FrameHeight())); } catch { /* teardown race */ }
-                    }
-
-                    using var ticker = new Timer(_ => Repaint(), null, 200, 200);
-                    result = await body(new ShellTurnView(shell, Repaint));
-                    Repaint();
-                });
-        }
-        finally
-        {
-            foreach (var line in shell.Transcript)
-                _console.MarkupLine(line);
-            _console.WriteLine();
-        }
-
-        return result;
-    }
-
-    /// <summary>
     /// Writes the permanent scrollback for one finished step: the one-line trace, then — for an
     /// intermediate step — the model's stated intent, and the chain-of-thought preview or panel
     /// that <paramref name="detail"/> asks for. The single render path for both the streaming and

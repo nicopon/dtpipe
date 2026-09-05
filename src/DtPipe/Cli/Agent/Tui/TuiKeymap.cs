@@ -3,6 +3,28 @@ using Terminal.Gui.Input;
 
 namespace DtPipe.Cli.Agent.Tui;
 
+/// <summary>What a keypress means to the full-screen surface. <see cref="None"/> = not a shortcut.</summary>
+internal enum EditorSignal
+{
+    /// <summary>Not a shortcut — an ordinary key, handled by whichever view has focus.</summary>
+    None,
+
+    /// <summary>Enter — the input line's text is complete.</summary>
+    Submit,
+
+    /// <summary>Esc — a soft interrupt: cancel the model call in flight, keep the session.</summary>
+    Interrupt,
+
+    /// <summary>Ctrl+C — leave the agent.</summary>
+    Quit,
+
+    /// <summary>Ctrl+O — cycle the scrollback detail level.</summary>
+    CycleDetail,
+
+    /// <summary>Shift+Tab — cycle the operating mode.</summary>
+    CycleMode,
+}
+
 /// <summary>
 /// Maps a Terminal.Gui key to the agent's shortcut vocabulary. Pure, so the whole keyboard
 /// contract is asserted from a scripted key list without starting an application.

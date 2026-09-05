@@ -66,13 +66,14 @@ public class AgentCommand : Command
         };
         noStreamOption.DefaultValueFactory = _ => false;
 
-        var tuiOption = new Option<bool>("--tui")
+        var noTuiOption = new Option<bool>("--no-tui")
         {
-            Description = "Run the whole session in the full-screen agent surface instead of the scrollback shell: "
-                + "turns, the input line between them, and the /exec /mode /save /review /quit commands. "
-                + "Requires a real interactive terminal; a pipe, a redirect or --no-stream keeps the sequential output."
+            Description = "Opt out of the full-screen agent surface (turns, the input line between them, and the "
+                + "/exec /mode /save /review /quit commands) and keep the scrollback output instead. "
+                + "The surface is the default on a real interactive terminal; a pipe, a redirect or --no-stream "
+                + "already keeps the sequential output regardless of this flag."
         };
-        tuiOption.DefaultValueFactory = _ => false;
+        noTuiOption.DefaultValueFactory = _ => false;
 
         var showThinkingOption = new Option<bool>("--show-thinking")
         {
@@ -156,7 +157,7 @@ public class AgentCommand : Command
         Options.Add(maxIterOption);
         Options.Add(llmTimeoutOption);
         Options.Add(noStreamOption);
-        Options.Add(tuiOption);
+        Options.Add(noTuiOption);
         Options.Add(showThinkingOption);
         Options.Add(detailOption);
         Options.Add(numCtxOption);
@@ -183,7 +184,7 @@ public class AgentCommand : Command
             var maxIterations = parseResult.GetValue(maxIterOption);
             var llmTimeout = TimeSpan.FromSeconds(Math.Max(1, parseResult.GetValue(llmTimeoutOption)));
             var noStream = parseResult.GetValue(noStreamOption);
-            var fullScreen = parseResult.GetValue(tuiOption);
+            var noTui = parseResult.GetValue(noTuiOption);
             var detail = parseResult.GetValue(detailOption);
             if (parseResult.GetValue(showThinkingOption) || Environment.GetEnvironmentVariable("DEBUG") == "1")
                 detail = AgentDetailLevel.Full;
@@ -246,7 +247,7 @@ public class AgentCommand : Command
                 AllowDestructive = allowDestructive,
                 AllowNetwork = allowNetwork,
                 NoStream = noStream,
-                Tui = fullScreen,
+                NoTui = noTui,
                 Detail = detail,
                 NumCtx = numCtx
                        };
@@ -263,7 +264,8 @@ public class AgentCommand : Command
                   // between them and the commands that replace the menu below all live inside one
                   // application. The Spectre prompts further down are unreachable then — nothing
                   // may write through Spectre while the toolkit holds the terminal.
-                  if (AgentExecutor.WantsFullScreen(console, llmClient, agentOptions))
+                  if (AgentExecutor.WantsFullScreen(console, llmClient, agentOptions,
+                      Console.IsInputRedirected, Console.IsOutputRedirected))
                   {
                       return await new DtPipe.Cli.Agent.Tui.TuiSession(console, tui, executor)
                           .RunAsync(prompt, model, url, agentOptions, maxIterations, ct);

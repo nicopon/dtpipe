@@ -77,22 +77,9 @@ internal sealed class StreamingStepView
     }
 
     /// <summary>
-    /// The same live content as <see cref="Build"/> but flattened to a markup string with a header
-    /// line on top — for the persistent shell, which shows it as <c>AgentShell.LiveTail</c> rather
-    /// than in a bordered panel of its own.
-    /// </summary>
-    public string TailMarkup(int maxLines)
-    {
-        lock (_gate)
-        {
-            var body = BodyMarkupLocked(maxLines);
-            return HeaderMarkupLocked() + "\n" + body;
-        }
-    }
-
-    /// <summary>
-    /// The same live content as <see cref="TailMarkup"/> without any markup — for a full-screen
-    /// toolkit pane, which styles the text itself and would render Spectre tags literally.
+    /// The same live content as <see cref="Build"/> flattened to plain text with a header line on
+    /// top — for the full-screen toolkit pane, which styles the text itself and would render
+    /// Spectre markup tags literally.
     /// </summary>
     public string TailPlain(int maxLines)
     {

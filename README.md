@@ -140,7 +140,7 @@ dtpipe agent --provider openai --api-key "sk-..."
 # Or run a one-shot mission
 dtpipe agent "Inspect csv:invoices.csv, anonymize email, and output to jsonl:users.jsonl"
 ```
-> Features local Ollama auto-discovery, official OpenAI SDK integration, Spectre.Console TUI, step-by-step trajectory inspector, Spectre DAG topology rendering, and 1-click YAML pipeline export.
+> Features local Ollama auto-discovery, official OpenAI SDK integration, a full-screen session surface on a real terminal (steps, detail, plan/DAG, transcript, an input line between turns — `--no-tui` for scrollback instead), Spectre DAG topology rendering, and 1-click YAML pipeline export.
 
 ---
 

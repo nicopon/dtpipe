@@ -88,12 +88,12 @@ public sealed class AgentOptions
     public bool LegacyAgent { get; init; } = false;
 
       /// <summary>
-      /// Run the turn in the full-screen surface instead of the scrollback shell. Opt-in while the
-      /// surface is being built; the shell stays the default. Only ever honoured on a real
-      /// interactive terminal — a pipe, a redirect or <c>--no-stream</c> keeps the sequential path,
-      /// which is what CI asserts against.
+      /// Opt out of the full-screen surface and keep the scrollback path on a real interactive
+      /// terminal. The surface is the default there; a pipe, a redirect or <c>--no-stream</c>
+      /// already keeps the sequential path regardless of this flag — that is what CI asserts
+      /// against, and this option only matters at a real terminal.
       /// </summary>
-    public bool Tui { get; init; } = false;
+    public bool NoTui { get; init; } = false;
 }
 
 /// <summary>

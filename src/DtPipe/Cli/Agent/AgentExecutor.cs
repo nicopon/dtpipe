@@ -98,20 +98,29 @@ public class AgentExecutor
 
     /// <summary>
     /// Whether this run may take over the terminal: an ANSI interactive console, a streaming
-    /// client, real stdin, and streaming not turned off.
+    /// client, real stdin, and streaming not turned off. A necessary condition for the full-screen
+    /// surface (<see cref="WantsFullScreen"/>), never sufficient on its own.
+    /// <paramref name="stdinRedirected"/> is a parameter rather than a direct
+    /// <see cref="Console.IsInputRedirected"/> read so the predicate stays pure and testable —
+    /// the real property is always true inside a unit-test host (stdin is a pipe there), which
+    /// would make this method return false unconditionally if it read it itself.
     /// </summary>
-    internal static bool CanOwnTerminal(IAnsiConsole console, ILlmClient client, AgentOptions opts)
+    internal static bool CanOwnTerminal(IAnsiConsole console, ILlmClient client, AgentOptions opts, bool stdinRedirected)
         => console.Profile.Capabilities.Ansi && console.Profile.Capabilities.Interactive
-           && !opts.NoStream && client is IStreamingLlmClient && !Console.IsInputRedirected;
+           && !opts.NoStream && client is IStreamingLlmClient && !stdinRedirected;
 
     /// <summary>
-    /// Whether the whole session belongs in the full-screen surface. It additionally refuses a
-    /// redirected stdout: the surface drives the terminal directly, so a captured run stays on the
-    /// sequential path. The caller that owns the conversation (<c>AgentCommand</c>) asks this once
-    /// and then drives every turn through <see cref="RunTurnOnSurfaceAsync"/>.
+    /// Whether the whole session belongs in the full-screen surface. This is the default on a real
+    /// interactive terminal — <c>--no-tui</c> is the opt-out, not the surface an opt-in — plus an
+    /// extra refusal of a redirected stdout: the surface drives the terminal directly, so a
+    /// captured run stays on the sequential path even though nothing else about it looks piped.
+    /// The caller that owns the conversation (<c>AgentCommand</c>) asks this once and then drives
+    /// every turn through <see cref="RunTurnOnSurfaceAsync"/>. Same reason for
+    /// <paramref name="stdoutRedirected"/> as a parameter as on <see cref="CanOwnTerminal"/>.
     /// </summary>
-    internal static bool WantsFullScreen(IAnsiConsole console, ILlmClient client, AgentOptions opts)
-        => CanOwnTerminal(console, client, opts) && opts.Tui && !Console.IsOutputRedirected;
+    internal static bool WantsFullScreen(IAnsiConsole console, ILlmClient client, AgentOptions opts,
+        bool stdinRedirected, bool stdoutRedirected)
+        => CanOwnTerminal(console, client, opts, stdinRedirected) && !opts.NoTui && !stdoutRedirected;
 
     /// <summary>
     /// Runs a single agent turn and prints its verdict to scrollback. When
@@ -183,36 +192,16 @@ public class AgentExecutor
         _turnClock.Restart();
         _turnTokens = 0;
 
-        // The persistent shell (D3): one Live frame for the whole turn. Same gate as streaming —
-        // an ANSI, interactive console with a stream-capable client and real stdin. Everything else
-        // (piped, --no-stream, replication) keeps the sequential scrollback path unchanged. A run
-        // that asked for the full-screen surface but reached this method without one is a caller
-        // driving a single turn by hand: it gets the sequential path, never the shell.
-        bool useShell = CanOwnTerminal(_console, _llmClient, opts) && !opts.Tui;
-
         // Primary run uses the instance Messages so the interactive / inspection flows keep state.
+        // A full-screen session (surface not null) owns the screen for the whole conversation and
+        // supplies its own view and soft-cancel token. Everything else — piped, --no-stream,
+        // --no-tui, replication, or a caller driving a single turn by hand — is the sequential
+        // scrollback path; there is no third rendering path (D3 is gone, voie 4 §6 suite 2, E6).
         PlanningLoopResult primary;
         if (surface is not null)
         {
-            // A full-screen session owns the screen for the whole conversation. It supplies the
-            // view and the soft-cancel token; nothing here opens a surface of its own.
             primary = await RunPlanningLoopAsync(Messages, userPrompt, model, baseUrl, opts, maxIterations,
                 recordTrajectory: true, renderTui: true, surface, softCancel, ct);
-        }
-        else if (useShell)
-        {
-            var shell = new AgentShell
-            {
-                Title = "dtpipe agent",
-                Subtitle = $"{model} · {Mode.ToString().ToLowerInvariant()}",
-                Status = ShellStatusLine(opts),
-                Hints = "esc stop · ^O detail · ⇧⇥ mode",
-            };
-            primary = await _tui.RunInLiveShellAsync(
-                shell,
-                LiveHeader,
-                view => RunPlanningLoopAsync(Messages, userPrompt, model, baseUrl, opts, maxIterations,
-                    recordTrajectory: true, renderTui: true, view, CancellationToken.None, ct));
         }
         else
         {
@@ -545,7 +534,6 @@ public class AgentExecutor
         return await _toolProvider.InvokeToolAsync("execute-yaml-job", args, ct);
     }
 
-    private string ShellStatusLine(AgentOptions opts) => AgentTui.StatusText(Mode, opts.Detail, opts.Apply);
 
     private static string FormatClock(TimeSpan t) =>
         t.TotalMinutes >= 1

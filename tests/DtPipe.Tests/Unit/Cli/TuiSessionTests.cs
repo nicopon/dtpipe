@@ -111,7 +111,7 @@ public class TuiSessionTests
 
         var session = new TuiSession(console, new AgentTui(console), executor, DriverRegistry.Names.DOTNET, confirm);
         int exit = await session.RunAsync("mission", "m", "http://x",
-            new AgentOptions { Tui = true, Apply = confirm is not null }, maxIterations: 5, CancellationToken.None,
+            new AgentOptions { Apply = confirm is not null }, maxIterations: 5, CancellationToken.None,
             surfaceReady: live =>
             {
                 int i = 0;
