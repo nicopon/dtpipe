@@ -58,8 +58,10 @@ public sealed class AgentOptions
       /// <summary>Disable token streaming and its live view; fall back to a single blocking call.</summary>
     public bool NoStream { get; init; } = false;
 
-      /// <summary>Keep the model's full chain of thought on screen after each step (also on <c>DEBUG=1</c>).</summary>
-    public bool ShowThinking { get; init; } = false;
+      /// <summary>How much of each step stays in scrollback once its live region collapses.
+      /// <c>--detail full</c> (and <c>DEBUG=1</c>, and the <c>--show-thinking</c> alias) keeps the
+      /// whole chain of thought; the default keeps a trace line plus the model's stated intent.</summary>
+    public AgentDetailLevel Detail { get; init; } = AgentDetailLevel.Compact;
 
       /// <summary>Optional fixed seed for reproducible sampling. Null => provider picks its own.</summary>
     public int? Seed { get; init; } = 0;

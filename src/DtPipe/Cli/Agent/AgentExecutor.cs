@@ -31,6 +31,32 @@ public class AgentExecutor
      /// and the reason line in the session summary.</summary>
      public TurnOutcome? LastTurnOutcome { get; private set; }
 
+     private AgentMode? _mode;
+
+     /// <summary>
+     /// The session's live operating mode. Seeded from the first turn's <see cref="AgentOptions.Mode"/>
+     /// and thereafter the authority for the role prompt and the tool allow-list — the model sees
+     /// the tools for <em>this</em> value at the top of every turn (F1 is a per-turn invariant), so
+     /// switching it between turns is safe by construction. It never loosens a write gate: <c>--apply</c>
+     /// and the <c>--allow-*</c> flags stay launch-time only.
+     /// </summary>
+     public AgentMode Mode => _mode ?? AgentMode.Plan;
+
+     /// <summary>The next mode in the cycle plan → execute → autonomous → plan.</summary>
+     internal static AgentMode NextMode(AgentMode mode) => mode switch
+     {
+         AgentMode.Plan => AgentMode.Execute,
+         AgentMode.Execute => AgentMode.Autonomous,
+         _ => AgentMode.Plan,
+     };
+
+     /// <summary>Advances <see cref="Mode"/> one step around the cycle and returns the new value.</summary>
+     public AgentMode CycleMode()
+     {
+         _mode = NextMode(Mode);
+         return _mode.Value;
+     }
+
      public AgentExecutor(IAgentToolProvider toolProvider, ILlmClient llmClient, AgentTui tui, IAnsiConsole console, AgentContextStore? contextStore = null)
         {
             _toolProvider = toolProvider;
@@ -56,14 +82,15 @@ public class AgentExecutor
         CancellationToken ct = default)
      {
         var opts = options ?? new AgentOptions();
-          // F1: select the role prompt for the operating mode (PLAN forbids execution).
-        Messages[0] = new ChatMessage("system", AgentSystemPrompt.Select(opts.Mode));
+        _mode ??= opts.Mode;
+          // F1: select the role prompt for the live operating mode (PLAN forbids execution).
+        Messages[0] = new ChatMessage("system", AgentSystemPrompt.Select(Mode));
         Messages.Add(new ChatMessage("user", userPrompt));
 
         var toolCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var stopwatch = Stopwatch.StartNew();
 
-        _tui.RenderWorkingHeader();
+        _tui.RenderWorkingHeader(Mode, opts.Detail, opts.Apply);
 
         // Primary run uses the instance Messages so the interactive / inspection flows keep state.
         var primary = await RunPlanningLoopAsync(Messages, userPrompt, model, baseUrl, opts, maxIterations,
@@ -85,7 +112,7 @@ public class AgentExecutor
          {
              var fresh = new List<ChatMessage>
                {
-                 new("system", AgentSystemPrompt.Select(opts.Mode)),
+                 new("system", AgentSystemPrompt.Select(Mode)),
                  new("user", userPrompt)
                };
             var repl = await RunPlanningLoopAsync(fresh, userPrompt, model, baseUrl, opts, maxIterations,
@@ -102,7 +129,7 @@ public class AgentExecutor
 
         if (!success)
             _tui.RenderFailureGuidance(primary.Outcome, Trajectory, maxIterations);
-        else if (opts.Mode == AgentMode.Plan && !string.IsNullOrWhiteSpace(primary.Yaml))
+        else if (Mode == AgentMode.Plan && !string.IsNullOrWhiteSpace(primary.Yaml))
             _tui.RenderPlanNextSteps();
 
         return success ? 0 : 1;
@@ -130,7 +157,7 @@ public class AgentExecutor
         var toolCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
            // F1: the LLM only sees the tools allowed for the current mode (in PLAN mode,
           // 'execute-yaml-job' is filtered out so the model cannot drive execution).
-        var availableTools = _toolProvider.GetToolDefinitions(opts.Mode);
+        var availableTools = _toolProvider.GetToolDefinitions(Mode);
         string? producedYaml = null;     // resolved plan, sourced from the yamlContent tool-call argument
         string? argYaml = null;          // from the yamlContent tool-call argument (the sole source, F6)
 
@@ -151,7 +178,6 @@ public class AgentExecutor
             int currentStepNum = Trajectory.Steps.Count + 1;
             string? currentReasoning = null;
             string? currentThinking = null;
-            string? currentToolName = null;
             LlmUsage? currentUsage = null;
 
             var compactedMessages = _windowManager.Compact(messages, ContextStore);
@@ -161,7 +187,7 @@ public class AgentExecutor
             if (useStreaming)
               {
                 var streaming = (IStreamingLlmClient)_llmClient;
-                response = await _tui.RunStreamingStepAsync(currentStepNum, maxIterations, opts.ShowThinking,
+                response = await _tui.RunStreamingStepAsync(currentStepNum, maxIterations, opts.Detail,
                     obs => streaming.ChatStreamAsync(baseUrl, model, compactedMessages, availableTools, obs,
                         opts.NumCtx, opts.Temperature, opts.Seed, ct));
               }
@@ -200,13 +226,11 @@ public class AgentExecutor
              currentReasoning = response.Message.Content;
              currentThinking = response.Thinking;
              currentUsage = response.Usage;
-             if (response.Message.ToolCalls is { Count: > 0 })
-                 currentToolName = response.Message.ToolCalls[0].Name;
 
-             // The streaming view prints its own richer per-step line; only the blocking paths
-             // need this one.
+             // The streaming path writes its digest from inside RunStreamingStepAsync once the live
+             // region collapses; the blocking path writes the same digest here.
              if (renderTui && !useStreaming)
-                 _tui.RenderCompactIterationStatus(currentStepNum, maxIterations, currentReasoning, currentToolName, iterationSw.Elapsed, currentUsage);
+                 _tui.RenderStepDigest(currentStepNum, maxIterations, iterationSw.Elapsed, response, opts.Detail);
 
             var lastMsg = messages[^1];
             if (lastMsg.ToolCalls == null || lastMsg.ToolCalls.Count == 0)
@@ -305,6 +329,25 @@ public class AgentExecutor
 
         return new PlanningLoopResult(success, producedYaml, turnIterations, toolCounts, turnOutcome);
      }
+
+    /// <summary>
+    /// Runs the validated plan the planner produced — the YAML on <see cref="AgentTrajectory.LastGeneratedYaml"/>
+    /// — straight through the execution tool, never back through the LLM. This is the deterministic
+    /// step <see cref="AgentMode.Plan"/>'s contract promises ("execution is a step run by the engine").
+    /// The model never sees <c>execute-yaml-job</c> in Plan mode (F1); a human choosing to run the
+    /// plan they just reviewed is the intended escape hatch, and the F2 guardrails inside the tool
+    /// still apply — <c>apply=false</c> stays a sample run with the writer neutralised.
+    /// </summary>
+    public async Task<ToolResult> ExecuteValidatedPlanAsync(CancellationToken ct = default)
+    {
+        var yaml = Trajectory.LastGeneratedYaml;
+        if (string.IsNullOrWhiteSpace(yaml))
+            throw new InvalidOperationException("No validated plan to execute — the planner produced no YAML.");
+
+        // F6: yamlContent is the sole plan source. Pass it through byte-for-byte.
+        var args = JsonSerializer.SerializeToElement(new { yamlContent = yaml });
+        return await _toolProvider.InvokeToolAsync("execute-yaml-job", args, ct);
+    }
 
     private async Task<ToolInvocationOutcome> InvokeToolInto(string toolName, JsonElement args, CancellationToken ct)
       {

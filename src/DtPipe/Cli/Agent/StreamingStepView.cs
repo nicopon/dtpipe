@@ -93,30 +93,12 @@ internal sealed class StreamingStepView
         }
     }
 
-    /// <summary>The permanent one-line trace left in scrollback once the step completes.</summary>
-    public string CompactLine(LlmResponse response)
-    {
-        lock (_gate)
-        {
-            var sb = new StringBuilder("[dim][[Step ").Append(_step).Append('/').Append(_maxSteps).Append("]][/]");
-            sb.Append(" [grey](").Append(_sw.Elapsed.TotalSeconds.ToString("F1")).Append("s");
+    /// <summary>Wall-clock since the step started — the elapsed figure for the permanent trace.</summary>
+    public TimeSpan Elapsed => _sw.Elapsed;
 
-            if (response.Usage is { CompletionTokens: > 0 } u)
-            {
-                sb.Append(" · ").Append(u.CompletionTokens).Append(" tok");
-                if (u.TokensPerSecond is { } tps) sb.Append(" · ").Append(tps.ToString("F0")).Append(" tok/s");
-                if (u.PromptEvalTime is { TotalSeconds: >= 1 } p) sb.Append(" · prompt ").Append(p.TotalSeconds.ToString("F0")).Append("s");
-            }
-            sb.Append(")[/]");
-
-            string? tool = response.Message.ToolCalls is { Count: > 0 } tc ? tc[0].Name : _tool;
-            if (!string.IsNullOrEmpty(tool)) sb.Append(" → [magenta]").Append(Markup.Escape(tool)).Append("[/]");
-
-            var reason = FirstLine(response.Message.Content) ?? FirstLine(response.Thinking);
-            if (!string.IsNullOrEmpty(reason)) sb.Append(": [grey]").Append(Markup.Escape(reason)).Append("[/]");
-            return sb.ToString();
-        }
-    }
+    /// <summary>The tool name seen on the stream, if any — a fallback when the assembled response
+    /// somehow lost its tool call. <see cref="StepDigest"/> prefers the response's own.</summary>
+    public string? ToolName { get { lock (_gate) return _tool; } }
 
     public bool HasThinking { get { lock (_gate) return _thinking.Length > 0; } }
 
@@ -125,14 +107,6 @@ internal sealed class StreamingStepView
         var parts = text.Replace("\r", "").Split('\n');
         if (parts.Length <= maxLines) return text.TrimEnd('\n');
         return string.Join('\n', parts.Skip(parts.Length - maxLines));
-    }
-
-    private static string? FirstLine(string? text)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return null;
-        var line = text.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim();
-        if (string.IsNullOrEmpty(line)) return null;
-        return line.Length > 90 ? line[..87] + "…" : line;
     }
 }
 

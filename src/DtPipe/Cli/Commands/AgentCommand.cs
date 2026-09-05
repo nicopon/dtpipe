@@ -68,9 +68,16 @@ public class AgentCommand : Command
 
         var showThinkingOption = new Option<bool>("--show-thinking")
         {
-            Description = "Keep the model's full chain of thought on screen after each step (implied by DEBUG=1)."
+            Description = "Alias for --detail full: keep the model's full chain of thought on screen (implied by DEBUG=1)."
         };
         showThinkingOption.DefaultValueFactory = _ => false;
+
+        var detailOption = new Option<AgentDetailLevel>("--detail")
+        {
+            Description = "How much of each step stays in scrollback: 'compact' (default: trace line + stated intent), "
+                + "'peek' (+ a chain-of-thought preview), 'full' (+ the whole chain of thought)."
+        };
+        detailOption.DefaultValueFactory = _ => AgentDetailLevel.Compact;
 
         var numCtxOption = new Option<int>("--num-ctx")
         {
@@ -142,6 +149,7 @@ public class AgentCommand : Command
         Options.Add(llmTimeoutOption);
         Options.Add(noStreamOption);
         Options.Add(showThinkingOption);
+        Options.Add(detailOption);
         Options.Add(numCtxOption);
         Options.Add(interactiveOption);
         Options.Add(temperatureOption);
@@ -166,8 +174,9 @@ public class AgentCommand : Command
             var maxIterations = parseResult.GetValue(maxIterOption);
             var llmTimeout = TimeSpan.FromSeconds(Math.Max(1, parseResult.GetValue(llmTimeoutOption)));
             var noStream = parseResult.GetValue(noStreamOption);
-            var showThinking = parseResult.GetValue(showThinkingOption)
-                || Environment.GetEnvironmentVariable("DEBUG") == "1";
+            var detail = parseResult.GetValue(detailOption);
+            if (parseResult.GetValue(showThinkingOption) || Environment.GetEnvironmentVariable("DEBUG") == "1")
+                detail = AgentDetailLevel.Full;
             var numCtx = Math.Max(2048, parseResult.GetValue(numCtxOption));
             var temperature = parseResult.GetValue(temperatureOption);
             var seed = parseResult.GetValue(seedOption);
@@ -210,7 +219,7 @@ public class AgentCommand : Command
                 }
             }
 
-            tui.RenderRunContext(model, url, mode);
+            tui.RenderRunContext(model, url, mode, detail);
 
             var toolProvider = new McpToolProvider(mcpTools);
             var executor = new AgentExecutor(toolProvider, llmClient, tui, console);
@@ -226,7 +235,7 @@ public class AgentCommand : Command
                 AllowDestructive = allowDestructive,
                 AllowNetwork = allowNetwork,
                 NoStream = noStream,
-                ShowThinking = showThinking,
+                Detail = detail,
                 NumCtx = numCtx
                        };
 
@@ -254,7 +263,7 @@ public class AgentCommand : Command
                       PostMissionAction action;
                       try
                       {
-                          action = tui.ShowPostMissionMenu(hasYaml);
+                          action = tui.ShowPostMissionMenu(hasYaml, agentOptions.Apply, executor.Mode);
                       }
                       catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException)
                       {
@@ -276,6 +285,27 @@ public class AgentCommand : Command
                                     exitCode = await executor.RunTurnAsync(followUp, model, url, agentOptions, maxIterations, ct);
                                 }
                                break;
+
+                          case PostMissionAction.SwitchMode:
+                              // F1 stays a per-turn invariant: the next RunTurnAsync rebuilds the
+                              // role prompt and tool allow-list from executor.Mode. No write gate moves.
+                              tui.RenderModeSwitch(executor.CycleMode(), agentOptions.Apply);
+                              break;
+
+                          case PostMissionAction.ExecutePlan:
+                              if (!string.IsNullOrEmpty(executor.Trajectory.LastGeneratedYaml))
+                               {
+                                   // Deterministic: the reviewed YAML runs straight through the engine,
+                                   // not back through the model. The tool's own F2 guardrails apply —
+                                   // without --apply this is a sample run with the writer neutralised.
+                                   tui.RenderPipelineDag(executor.Trajectory.LastGeneratedYaml, serviceProvider);
+                                   if (!agentOptions.Apply || tui.ConfirmRealWrite())
+                                    {
+                                        var result = await executor.ExecuteValidatedPlanAsync(ct);
+                                        tui.RenderExecutionResult(result.Content, result.IsError);
+                                    }
+                               }
+                              break;
 
                           case PostMissionAction.ViewDag:
                               if (executor.Trajectory.LastGeneratedYaml != null)

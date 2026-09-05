@@ -16,6 +16,8 @@ namespace DtPipe.Cli.Agent;
 public enum PostMissionAction
 {
     ContinueDiscussion,
+    ExecutePlan,
+    SwitchMode,
     ViewDag,
     InspectTrajectory,
     SaveYaml,
@@ -36,7 +38,7 @@ public class AgentTui
     /// and will not do — so a user who asked the agent to "create a file" in plan mode is told up
     /// front that a plan, not a file, is what comes back.
     /// </summary>
-    public void RenderRunContext(string model, string url, AgentMode mode)
+    public void RenderRunContext(string model, string url, AgentMode mode, AgentDetailLevel detail = AgentDetailLevel.Compact)
     {
         var rule = new Rule("[bold cyan]dtpipe AI Agent[/]")
         {
@@ -46,9 +48,23 @@ public class AgentTui
         _console.MarkupLine(
             $"[grey]Model:[/] [bold green]{Markup.Escape(model)}[/]  |  " +
             $"[grey]Endpoint:[/] [blue]{Markup.Escape(url)}[/]  |  " +
-            $"[grey]Mode:[/] [bold]{Markup.Escape(mode.ToString().ToLowerInvariant())}[/]");
+            $"[grey]Mode:[/] [bold]{Markup.Escape(mode.ToString().ToLowerInvariant())}[/]  |  " +
+            $"[grey]Detail:[/] [bold]{Markup.Escape(detail.ToString().ToLowerInvariant())}[/]");
         _console.MarkupLine($"[grey]{Markup.Escape(DescribeMode(mode))}[/]");
         _console.WriteLine();
+    }
+
+    /// <summary>
+    /// One dim line at a turn boundary: the operating mode, the write posture that mode carries,
+    /// and the scrollback detail level. It states the run's posture — it never renders a verdict;
+    /// that stays <see cref="RenderFinalSummary"/>'s alone.
+    /// </summary>
+    public void RenderStatusLine(AgentMode mode, AgentDetailLevel detail, bool apply)
+    {
+        string posture = mode == AgentMode.Plan
+            ? "plan"
+            : $"{mode.ToString().ToLowerInvariant()} · {(apply ? "apply" : "dry-run")}";
+        _console.MarkupLine($"[grey]▸ {Markup.Escape(posture)} · detail: {Markup.Escape(detail.ToString().ToLowerInvariant())}[/]");
     }
 
     private static string DescribeMode(AgentMode mode) => mode switch
@@ -108,8 +124,9 @@ public class AgentTui
         );
     }
 
-    /// <summary>A separator between the prompt exchange above and the step-by-step work below.</summary>
-    public void RenderWorkingHeader()
+    /// <summary>A separator between the prompt exchange above and the step-by-step work below,
+    /// followed by the status line for the turn about to run.</summary>
+    public void RenderWorkingHeader(AgentMode mode, AgentDetailLevel detail, bool apply)
     {
         _console.WriteLine();
         _console.Write(new Rule("[dim]working[/]")
@@ -117,16 +134,16 @@ public class AgentTui
             Justification = Justify.Left,
             Style = new Style(Color.Grey)
         });
+        RenderStatusLine(mode, detail, apply);
     }
 
     /// <summary>
     /// Runs one model call inside a Spectre <c>Live</c> region: the model's reasoning and answer
-    /// stream in place, bounded in height, then the region is cleared and a single permanent trace
-    /// line is written. With <paramref name="showThinking"/> the full chain of thought is also kept
-    /// on screen.
+    /// stream in place, bounded in height, then the region is cleared and the permanent digest for
+    /// <paramref name="detail"/> is written to scrollback (<see cref="RenderStepDigest"/>).
     /// </summary>
     public async Task<LlmResponse> RunStreamingStepAsync(
-        int step, int maxSteps, bool showThinking,
+        int step, int maxSteps, AgentDetailLevel detail,
         Func<ILlmStreamObserver, Task<LlmResponse>> call)
     {
         var view = new StreamingStepView(step, maxSteps);
@@ -145,11 +162,25 @@ public class AgentTui
                 Repaint();
             });
 
-        _console.MarkupLine(view.CompactLine(result));
+        RenderStepDigest(step, maxSteps, view.Elapsed, result, detail, view.ToolName);
+        return result;
+    }
 
-        if (showThinking && view.HasThinking && !string.IsNullOrWhiteSpace(result.Thinking))
+    /// <summary>
+    /// Writes the permanent scrollback for one finished step: the one-line trace, then — for an
+    /// intermediate step — the model's stated intent, and the chain-of-thought preview or panel
+    /// that <paramref name="detail"/> asks for. The single render path for both the streaming and
+    /// the blocking loop, so a step reads the same either way.
+    /// </summary>
+    public void RenderStepDigest(int step, int maxSteps, TimeSpan elapsed, LlmResponse response,
+        AgentDetailLevel detail, string? toolFallback = null)
+    {
+        foreach (var line in StepDigest.Lines(step, maxSteps, elapsed, response, toolFallback, detail))
+            _console.MarkupLine(line);
+
+        if (detail == AgentDetailLevel.Full && !string.IsNullOrWhiteSpace(response.Thinking))
         {
-            _console.Write(new Panel(Markup.Escape(result.Thinking!.Trim()))
+            _console.Write(new Panel(Markup.Escape(response.Thinking!.Trim()))
             {
                 Header = new PanelHeader("[grey]chain of thought[/]"),
                 Border = BoxBorder.Rounded,
@@ -157,8 +188,6 @@ public class AgentTui
                 Expand = true
             });
         }
-
-        return result;
     }
 
     public void RenderAgentResponse(string content)
@@ -173,32 +202,6 @@ public class AgentTui
             Expand = true
         };
         _console.Write(panel);
-    }
-
-     public void RenderCompactIterationStatus(int iteration, int maxIterations, string? reasoning, string? toolName, TimeSpan? elapsed = null, LlmUsage? usage = null)
-    {
-        string toolPart = !string.IsNullOrEmpty(toolName) ? $" → [magenta]{Markup.Escape(toolName)}[/]" : "";
-        string timePart = "";
-        if (elapsed.HasValue)
-        {
-            var t = $"{elapsed.Value.TotalSeconds:F1}s";
-            if (usage is { CompletionTokens: > 0 } u)
-            {
-                t += $" · {u.CompletionTokens} tok";
-                if (u.TokensPerSecond is { } tps) t += $" · {tps:F0} tok/s";
-                if (u.PromptEvalTime is { TotalSeconds: >= 1 } p) t += $" · prompt {p.TotalSeconds:F0}s";
-            }
-            timePart = $" [grey]({t})[/]";
-        }
-        string reasoningSnippet = "";
-        if (!string.IsNullOrWhiteSpace(reasoning))
-        {
-            var firstLine = reasoning.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "";
-            if (firstLine.Length > 70) firstLine = firstLine[..67] + "...";
-            reasoningSnippet = $": [grey]{Markup.Escape(firstLine)}[/]";
-        }
-
-        _console.MarkupLine($"[dim][[Step {iteration}/{maxIterations}]][/]{timePart}{toolPart}{reasoningSnippet}");
     }
 
     public void InspectTrajectory(AgentTrajectory trajectory)
@@ -381,7 +384,7 @@ public class AgentTui
         }
     }
 
-    public PostMissionAction ShowPostMissionMenu(bool hasYaml)
+    public PostMissionAction ShowPostMissionMenu(bool hasYaml, bool apply, AgentMode mode)
     {
         _console.WriteLine();
         var prompt = new SelectionPrompt<string>()
@@ -389,12 +392,18 @@ public class AgentTui
             .PageSize(10);
 
         const string continueOpt = "💬 Continue discussion / Refine pipeline";
+        string executeOpt = apply
+            ? "▶ Execute this plan now (real write)"
+            : "▶ Execute this plan now (dry-run — nothing written)";
+        string switchModeOpt = $"⇄ Switch mode (now: {mode.ToString().ToLowerInvariant()} → {AgentExecutor.NextMode(mode).ToString().ToLowerInvariant()})";
         const string viewDagOpt = "📊 View Pipeline DAG Topology";
         const string inspectOpt = "🧠 Inspect full step-by-step trajectory";
         const string saveYamlOpt = "💾 Save pipeline YAML file to disk";
         const string exitOpt = "🚪 Exit";
 
         prompt.AddChoice(continueOpt);
+        if (hasYaml) prompt.AddChoice(executeOpt);
+        prompt.AddChoice(switchModeOpt);
         if (hasYaml) prompt.AddChoice(viewDagOpt);
         prompt.AddChoice(inspectOpt);
         if (hasYaml) prompt.AddChoice(saveYamlOpt);
@@ -405,11 +414,122 @@ public class AgentTui
         return selected switch
         {
             continueOpt => PostMissionAction.ContinueDiscussion,
+            _ when selected == executeOpt => PostMissionAction.ExecutePlan,
+            _ when selected == switchModeOpt => PostMissionAction.SwitchMode,
             viewDagOpt => PostMissionAction.ViewDag,
             inspectOpt => PostMissionAction.InspectTrajectory,
             saveYamlOpt => PostMissionAction.SaveYaml,
             _ => PostMissionAction.Exit
         };
+    }
+
+    /// <summary>
+    /// Announces a mid-session mode change. Switching into a mode that can execute states plainly
+    /// what that opens and what it does not — <c>--apply</c> and the <c>--allow-*</c> flags are
+    /// launch-time only and a switch never touches them.
+    /// </summary>
+    public void RenderModeSwitch(AgentMode newMode, bool apply)
+    {
+        _console.WriteLine();
+        _console.MarkupLine($"[bold]Mode is now [cyan]{Markup.Escape(newMode.ToString().ToLowerInvariant())}[/].[/]");
+        _console.MarkupLine($"[grey]{Markup.Escape(DescribeMode(newMode))}[/]");
+        if (newMode != AgentMode.Plan)
+        {
+            string writeState = apply
+                ? "writes are armed (--apply was set) and still ask for a confirmation."
+                : "real writes are still off — the model can run pipelines but only as dry-runs until you relaunch with --apply.";
+            _console.MarkupLine($"[grey]The model can now call execute-yaml-job; {Markup.Escape(writeState)} "
+                + "Destructive SQL and network access stay denied unless allowed at launch.[/]");
+        }
+    }
+
+    /// <summary>
+    /// A last y/N gate before the validated plan performs a real write. This is stricter than the
+    /// tool's own F2 path (a launch-time <c>--apply</c> already consented) — the analogue of
+    /// confirming an exit from plan mode: you approve the plan you just read before it runs.
+    /// </summary>
+    public bool ConfirmRealWrite()
+    {
+        _console.WriteLine();
+        return _console.Prompt(
+            new ConfirmationPrompt("[yellow]Execute this plan and perform a real write?[/]")
+            {
+                DefaultValue = false
+            });
+    }
+
+    /// <summary>Renders the outcome of running a validated plan through <c>execute-yaml-job</c>.</summary>
+    public void RenderExecutionResult(string resultJson, bool isError)
+    {
+        _console.WriteLine();
+
+        string? mode = null, nextStep = null, message = null, error = null;
+        bool? applied = null, success = null;
+        long? durationMs = null;
+        var branchLines = new List<string>();
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(resultJson);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("mode", out var m)) mode = m.GetString();
+            if (root.TryGetProperty("nextStep", out var ns) && ns.ValueKind == System.Text.Json.JsonValueKind.String) nextStep = ns.GetString();
+            if (root.TryGetProperty("message", out var ms) && ms.ValueKind == System.Text.Json.JsonValueKind.String) message = ms.GetString();
+            if (root.TryGetProperty("error", out var er) && er.ValueKind == System.Text.Json.JsonValueKind.String) error = er.GetString();
+            if (root.TryGetProperty("applied", out var ap) && (ap.ValueKind == System.Text.Json.JsonValueKind.True || ap.ValueKind == System.Text.Json.JsonValueKind.False)) applied = ap.GetBoolean();
+            if (root.TryGetProperty("success", out var sc) && (sc.ValueKind == System.Text.Json.JsonValueKind.True || sc.ValueKind == System.Text.Json.JsonValueKind.False)) success = sc.GetBoolean();
+            if (root.TryGetProperty("durationMs", out var d) && d.ValueKind == System.Text.Json.JsonValueKind.Number) durationMs = d.GetInt64();
+            if (root.TryGetProperty("errors", out var errs) && errs.ValueKind == System.Text.Json.JsonValueKind.Array)
+                foreach (var e in errs.EnumerateArray())
+                    if (e.ValueKind == System.Text.Json.JsonValueKind.String) error = (error is null ? "" : error + "\n") + e.GetString();
+            if (root.TryGetProperty("branches", out var br) && br.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                foreach (var b in br.EnumerateArray())
+                {
+                    string alias = b.TryGetProperty("branch", out var ba) ? ba.GetString() ?? "?"
+                        : b.TryGetProperty("Alias", out var al) ? al.GetString() ?? "?" : "?";
+                    string counts = b.TryGetProperty("rowsRead", out var rr)
+                        ? $"{rr} read → {(b.TryGetProperty("rowsDelivered", out var rd) ? rd.ToString() : "?")} delivered"
+                        : "";
+                    branchLines.Add($"  [grey]{Markup.Escape(alias)}[/] {Markup.Escape(counts)}");
+                }
+            }
+        }
+        catch
+        {
+            _console.Write(new Panel(Markup.Escape(resultJson))
+            {
+                Header = new PanelHeader("[grey]execution result[/]"),
+                Border = BoxBorder.Rounded,
+                Expand = true
+            });
+            return;
+        }
+
+        string head = (applied == true, isError || success == false) switch
+        {
+            (_, true) => "[bold red]❌ Execution failed[/]",
+            (true, _) => "[bold green]🟢 Executed — data written[/]",
+            _ => "[bold yellow]◻ Dry-run — nothing written[/]"
+        };
+        var rule = new Rule(head) { Justification = Justify.Left };
+        _console.Write(rule);
+
+        if (mode != null) _console.MarkupLine($"[grey]Mode:[/] {Markup.Escape(mode)}");
+        if (durationMs is { } ms2) _console.MarkupLine($"[grey]Duration:[/] {ms2} ms");
+        foreach (var line in branchLines) _console.MarkupLine(line);
+
+        if (!string.IsNullOrWhiteSpace(error))
+            _console.Write(new Panel(Markup.Escape(error!.Trim()))
+            {
+                Header = new PanelHeader("[bold red]Errors[/]"),
+                Border = BoxBorder.Rounded,
+                Expand = true
+            });
+
+        var note = nextStep ?? message;
+        if (!string.IsNullOrWhiteSpace(note))
+            _console.MarkupLine($"[grey]{Markup.Escape(note!.Trim())}[/]");
     }
 
     public void RenderFinalSummary(bool success, int iterations, Dictionary<string, int> toolCounts, TimeSpan duration, TurnOutcome outcome)

@@ -94,4 +94,52 @@ public class AgentExecutorModeTests
          var systemMsg = executor.Messages.First(m => m.Role == "system");
          Assert.Contains("PLANNER", systemMsg.Content);
            }
+
+       // ── Voie 4 §6 (suite) lot B2 — the operating mode is a live session state ──
+
+       [Theory]
+       [InlineData(AgentMode.Plan, AgentMode.Execute)]
+       [InlineData(AgentMode.Execute, AgentMode.Autonomous)]
+       [InlineData(AgentMode.Autonomous, AgentMode.Plan)]
+    public void CycleMode_Walks_Plan_Execute_Autonomous_And_Wraps(AgentMode from, AgentMode expected)
+        {
+         Assert.Equal(expected, AgentExecutor.NextMode(from));
+           }
+
+       [Fact]
+    public async Task Switching_From_Plan_To_Execute_Between_Turns_Unlocks_The_Execution_Tool()
+        {
+         var llm = new CapturingLlmClient();
+         var executor = BuildExecutor(new PlanAndExecuteTools(), llm);
+         var options = new AgentOptions { Mode = AgentMode.Plan };
+
+         await executor.RunTurnAsync("plan a pipeline", "m", "http://localhost:11434", options, maxIterations: 3);
+         Assert.DoesNotContain("execute-yaml-job", llm.SeenToolNames);
+
+         executor.CycleMode();
+         Assert.Equal(AgentMode.Execute, executor.Mode);
+
+         await executor.RunTurnAsync("now run it", "m", "http://localhost:11434", options, maxIterations: 3);
+
+         Assert.Contains("execute-yaml-job", llm.SeenToolNames);
+         var systemMsg = executor.Messages.First(m => m.Role == "system");
+         Assert.Contains("EXECUTOR", systemMsg.Content);
+           }
+
+       [Fact]
+    public async Task The_Session_Mode_Is_Authoritative_Once_Seeded()
+        {
+         // A later turn passing a different options.Mode must not silently override a mode the
+         // user cycled — the executor's Mode is the single authority after the first turn.
+         var llm = new CapturingLlmClient();
+         var executor = BuildExecutor(new PlanAndExecuteTools(), llm);
+
+         await executor.RunTurnAsync("plan", "m", "http://localhost:11434", new AgentOptions { Mode = AgentMode.Plan }, maxIterations: 3);
+         Assert.Equal(AgentMode.Plan, executor.Mode);
+
+         await executor.RunTurnAsync("again", "m", "http://localhost:11434", new AgentOptions { Mode = AgentMode.Execute }, maxIterations: 3);
+
+         Assert.Equal(AgentMode.Plan, executor.Mode);
+         Assert.DoesNotContain("execute-yaml-job", llm.SeenToolNames);
+           }
 }
