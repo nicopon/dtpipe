@@ -269,6 +269,19 @@ public class AgentCommand : Command
                   // Interactive post-mission conversation loop
                   while (interactive && !ct.IsCancellationRequested)
                   {
+                      // The agent stopped to ask something: answer it directly rather than
+                      // going through the menu. An empty answer falls through to the menu.
+                      if (executor.LastTurnOutcome == DtPipe.Cli.Agent.TurnOutcome.AwaitingUserInput
+                          && !string.IsNullOrWhiteSpace(executor.PendingQuestion))
+                      {
+                          var answer = tui.PromptFollowUp();
+                          if (!string.IsNullOrWhiteSpace(answer))
+                          {
+                              exitCode = await executor.RunTurnAsync(answer, model, url, agentOptions, maxIterations, ct);
+                              continue;
+                          }
+                      }
+
                       bool hasYaml = !string.IsNullOrEmpty(executor.Trajectory.LastGeneratedYaml);
                       PostMissionAction action;
                       try

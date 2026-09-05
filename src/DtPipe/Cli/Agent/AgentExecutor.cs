@@ -32,6 +32,13 @@ public class AgentExecutor
      /// and the reason line in the session summary.</summary>
      public TurnOutcome? LastTurnOutcome { get; private set; }
 
+     /// <summary>
+     /// The question the model asked with <c>ask-user</c>, when the last turn ended on
+     /// <see cref="TurnOutcome.AwaitingUserInput"/>. Cleared at the start of the next turn — the
+     /// user's answer becomes that turn's prompt.
+     /// </summary>
+     public string? PendingQuestion { get; private set; }
+
      private AgentMode? _mode;
      private long _turnTokens;
 
@@ -85,6 +92,7 @@ public class AgentExecutor
      {
         var opts = options ?? new AgentOptions();
         _mode ??= opts.Mode;
+        PendingQuestion = null;   // this turn's prompt is the answer to any previous ask-user
           // F1: select the role prompt for the live operating mode (PLAN forbids execution).
         Messages[0] = new ChatMessage("system", AgentSystemPrompt.Select(Mode));
         Messages.Add(new ChatMessage("user", userPrompt));
@@ -148,6 +156,7 @@ public class AgentExecutor
         bool success = primary.Success;
         int turnIterations = primary.Iterations;
         LastTurnOutcome = primary.Outcome;
+        PendingQuestion = primary.Outcome == TurnOutcome.AwaitingUserInput ? primary.Question : null;
         foreach (var kv in primary.ToolCounts)
             toolCounts[kv.Key] = kv.Value;
 
@@ -177,11 +186,15 @@ public class AgentExecutor
         int shownIterations = turnIterations <= maxIterations ? turnIterations : maxIterations;
         _tui.RenderFinalSummary(success, shownIterations, toolCounts, stopwatch.Elapsed, primary.Outcome);
 
-        if (!success)
+        if (primary.Outcome == TurnOutcome.AwaitingUserInput)
+            _tui.RenderPendingQuestion(primary.Question);
+        else if (!success)
             _tui.RenderFailureGuidance(primary.Outcome, Trajectory, maxIterations);
         else if (Mode == AgentMode.Plan && !string.IsNullOrWhiteSpace(primary.Yaml))
             _tui.RenderPlanNextSteps();
 
+        // AwaitingUserInput is a pause interactively but still a non-zero exit — an agent that
+        // stopped for want of an answer did not finish. Fail-closed: piped / CI reads it as 1.
         return success ? 0 : 1;
      }
 
@@ -191,7 +204,8 @@ public class AgentExecutor
         string? Yaml,
         int Iterations,
         Dictionary<string, int> ToolCounts,
-        TurnOutcome Outcome);
+        TurnOutcome Outcome,
+        string? Question = null);
 
     private async Task<PlanningLoopResult> RunPlanningLoopAsync(
         List<ChatMessage> messages,
@@ -220,6 +234,7 @@ public class AgentExecutor
 
         bool success = false;
         int turnIterations = 1;
+        string? pendingQuestion = null;
         // The value that stands if the loop exits by its own condition — the iteration budget ran
         // out before any explicit break set an outcome.
         var turnOutcome = TurnOutcome.MaxIterationsReached;
@@ -309,12 +324,20 @@ public class AgentExecutor
              // Execute every tool call in this turn (F5). Independent calls run in parallel by
              // default; --sequential forces one-at-a-time execution. Results are appended in the
              // same order as the calls so each "tool" message stays correlated with its call id.
-             var calls = lastMsg.ToolCalls!;
+             var allCalls = lastMsg.ToolCalls!;
+
+             // 'ask-user' is a turn terminator, not a tool: the model needs a decision only the
+             // user can make. It is never dispatched — the user's next message is the answer — but
+             // any other calls in the same turn still run (F5). Extract it, run the rest, then stop.
+             var askUserCall = allCalls.FirstOrDefault(c => string.Equals(c.Name, "ask-user", StringComparison.OrdinalIgnoreCase));
+             var calls = askUserCall is null
+                 ? allCalls
+                 : allCalls.Where(c => !ReferenceEquals(c, askUserCall)).ToList();
 
                        // F6: the yamlContent tool-call argument is the sole source of the plan YAML.
                     // Collect it across all calls so the last one wins.
              string? yamlBeforeThisIteration = argYaml;
-             foreach (var call in calls)
+             foreach (var call in allCalls)
                {
                  if (call.Arguments.ValueKind == JsonValueKind.Object &&
                      call.Arguments.TryGetProperty("yamlContent", out var yamlProp) &&
@@ -376,6 +399,28 @@ public class AgentExecutor
                  }
 
              producedYaml = argYaml;
+
+             if (askUserCall is not null)
+               {
+                 pendingQuestion = ExtractQuestion(askUserCall.Arguments);
+                 const string ack = "{\"status\":\"question delivered to the user; awaiting their reply\"}";
+
+                 if (renderTui)
+                     view!.ToolResult("ask-user", ack, isError: false);
+                 if (recordTrajectory)
+                     Trajectory.AddStep(Trajectory.Steps.Count + 1, currentReasoning ?? "",
+                         "ask-user", askUserCall.Arguments.ToString(), ack, isError: false);
+
+                 // The conversation stays valid for the next turn: every tool call gets a 'tool'
+                 // reply, and the user's answer follows as the next 'user' message.
+                 messages.Add(new ChatMessage("tool", ack, "ask-user", ToolCallId: askUserCall.Id));
+                 toolCounts["ask-user"] = toolCounts.GetValueOrDefault("ask-user", 0) + 1;
+
+                 success = false;
+                 turnOutcome = TurnOutcome.AwaitingUserInput;
+                 break;
+               }
+
              turnIterations++;
            }
 
@@ -383,8 +428,22 @@ public class AgentExecutor
         if (recordTrajectory && !string.IsNullOrWhiteSpace(producedYaml))
             Trajectory.LastGeneratedYaml = producedYaml;
 
-        return new PlanningLoopResult(success, producedYaml, turnIterations, toolCounts, turnOutcome);
+        return new PlanningLoopResult(success, producedYaml, turnIterations, toolCounts, turnOutcome, pendingQuestion);
      }
+
+    /// <summary>Pulls the <c>question</c> string out of an <c>ask-user</c> call's arguments.</summary>
+    private static string ExtractQuestion(JsonElement args)
+    {
+        if (args.ValueKind == JsonValueKind.Object
+            && args.TryGetProperty("question", out var q)
+            && q.ValueKind == JsonValueKind.String)
+        {
+            var text = q.GetString();
+            if (!string.IsNullOrWhiteSpace(text))
+                return text!.Trim();
+        }
+        return "The agent needs more information to continue, but did not say what.";
+    }
 
     /// <summary>
     /// Runs the validated plan the planner produced — the YAML on <see cref="AgentTrajectory.LastGeneratedYaml"/>

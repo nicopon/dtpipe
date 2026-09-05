@@ -54,6 +54,9 @@ public static class AgentSystemPrompt
  4. Validate &amp; Dry-Run: Call 'validate-yaml-job' on your candidate YAML, then 'dry-run' to test connections, fetch schemas, and preview branches without writing data.
  5. Deliver the plan: output the final, validated YAML as the 'yamlContent' argument of your (last) tool call — this is the single source of truth the engine will execute deterministically.
 
+ ASKING THE USER:
+ If a decision is genuinely missing and only the user can make it — a target filename or table, an ambiguous column, a business rule — call 'ask-user' with ONE focused question and stop. Ask only what blocks you; never a closing ""anything else?"", never more than one question at a time. Do not guess a value the user is better placed to give.
+
  YOU ARE FORBIDDEN FROM EXECUTING THE PIPELINE. Do not look for or call 'execute-yaml-job'. Deliver a validated YAML and stop.
  ";
 
@@ -68,6 +71,8 @@ public static class AgentSystemPrompt
 
  When executing, always pass the authoritative YAML via the 'yamlContent' tool argument.
  After a successful run, report the row counts and any guardrail notices.
+
+ If a decision is genuinely missing and only the user can make it — a target, an ambiguous column, a business rule — call 'ask-user' with ONE focused question and stop. Ask only what blocks you; do not guess a value the user is better placed to give.
  ";
 
       /// <summary>

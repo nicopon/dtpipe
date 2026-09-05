@@ -14,11 +14,37 @@ public class McpToolProvider : IAgentToolProvider
     private readonly Type _toolsType;
     private readonly List<ToolDefinition> _definitions;
 
+    /// <summary>
+    /// A tool the model can call to stop and ask the user a question. It is defined here, not on
+    /// the MCP tool surface: outside an interactive agent session there is no user to answer, so
+    /// an external MCP client should never see it. The planning loop intercepts the call and never
+    /// dispatches it — the user's next message is the answer.
+    /// </summary>
+    internal static ToolDefinition AskUserTool { get; } = new(
+        "ask-user",
+        "Stop and ask the user a question when a decision is needed that only they can make — a "
+        + "target filename, an ambiguous column, a business rule. Ask only what blocks you: one "
+        + "focused question, never a closing \"anything else?\".",
+        JsonDocument.Parse("""
+        {
+          "type": "object",
+          "properties": {
+            "question": { "type": "string", "description": "The single question to put to the user." },
+            "options": {
+              "type": "array", "items": { "type": "string" },
+              "description": "Optional: a short list of choices, when the answer is a pick."
+            }
+          },
+          "required": ["question"]
+        }
+        """).RootElement.Clone());
+
     public McpToolProvider(object toolsInstance)
        {
          _toolsInstance = toolsInstance;
          _toolsType = toolsInstance.GetType();
          _definitions = McpToolReflector.BuildToolDefinitions(_toolsType);
+         _definitions.Add(AskUserTool);
        }
 
     public List<ToolDefinition> GetToolDefinitions() => _definitions;
@@ -41,6 +67,12 @@ public class McpToolProvider : IAgentToolProvider
 
     public async Task<ToolResult> InvokeToolAsync(string toolName, JsonElement args, CancellationToken ct)
        {
+         // 'ask-user' is a turn terminator handled by the planning loop and never dispatched.
+         // A call reaching here means the loop's interception was bypassed — fail loud rather
+         // than hand the model a reflection "tool not found".
+         if (string.Equals(toolName, "ask-user", StringComparison.OrdinalIgnoreCase))
+             throw new InvalidOperationException("'ask-user' is a turn terminator; it must not be dispatched as a tool.");
+
            // The LLM drove this call — nobody is watching for a keypress, even though the process
            // shares a real interactive console with the agent's own TUI (NonInteractiveGuard).
         using var _ = NonInteractiveGuard.Suppress();

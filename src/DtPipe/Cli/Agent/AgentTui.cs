@@ -631,7 +631,12 @@ public class AgentTui
         table.AddColumn("[bold]Metric[/]");
         table.AddColumn("[bold]Value[/]");
 
-        string statusMarkup = success ? "[bold green]🟢 COMPLETED[/]" : "[bold red]❌ INCOMPLETE[/]";
+        string statusMarkup = outcome switch
+        {
+            TurnOutcome.Succeeded => "[bold green]🟢 COMPLETED[/]",
+            TurnOutcome.AwaitingUserInput => "[bold yellow]❓ AWAITING INPUT[/]",
+            _ => "[bold red]❌ INCOMPLETE[/]"
+        };
         table.AddRow("Status", statusMarkup);
         table.AddRow("Reason", Markup.Escape(DescribeOutcome(outcome)));
         table.AddRow("Iterations", iterations.ToString());
@@ -649,12 +654,33 @@ public class AgentTui
     private static string DescribeOutcome(TurnOutcome outcome) => outcome switch
     {
         TurnOutcome.Succeeded => "delivered a response",
+        TurnOutcome.AwaitingUserInput => "the agent asked you a question",
         TurnOutcome.MaxIterationsReached => "hit the iteration limit without finishing",
         TurnOutcome.LlmError => "the LLM call failed",
         TurnOutcome.EmptyResponse => "the model returned an empty response",
         TurnOutcome.RepetitionDetected => "the model got stuck repeating itself",
         _ => outcome.ToString()
     };
+
+    /// <summary>
+    /// Shown after the summary when the agent stopped to ask something: the question, and a line
+    /// on how to answer. Interactively the caller then prompts for the reply; piped, the run has
+    /// already returned non-zero.
+    /// </summary>
+    public void RenderPendingQuestion(string? question)
+    {
+        _console.WriteLine();
+        _console.Write(new Panel(Markup.Escape((question ?? "").Trim().Length > 0
+                ? question!.Trim()
+                : "The agent needs more information to continue."))
+        {
+            Header = new PanelHeader("[bold yellow]❓ The agent needs your input[/]"),
+            Border = BoxBorder.Rounded,
+            BorderStyle = new Style(Color.Yellow),
+            Expand = true
+        });
+        _console.MarkupLine("[grey]Answer to continue the session, or exit to stop here.[/]");
+    }
 
     /// <summary>
     /// Shown after the summary when a turn did not succeed: names the failure and, for the cases

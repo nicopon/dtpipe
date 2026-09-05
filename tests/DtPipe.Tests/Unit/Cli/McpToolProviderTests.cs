@@ -28,10 +28,11 @@ public class McpToolProviderTests
         var provider = new McpToolProvider(new TestTools());
         var tools = provider.GetToolDefinitions();
 
-        Assert.Single(tools);
-        var helloTool = tools[0];
-        Assert.Equal("hello", helloTool.Name);
+        var helloTool = Assert.Single(tools, t => t.Name == "hello");
         Assert.Equal("Say hello", helloTool.Description);
+
+        // 'ask-user' is always appended — a turn terminator the model can reach in every mode.
+        Assert.Contains(tools, t => t.Name == "ask-user");
     }
 
     [Fact]
