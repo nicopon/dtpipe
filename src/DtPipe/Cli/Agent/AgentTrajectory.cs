@@ -8,6 +8,14 @@ public class TrajectoryStep
     public int Iteration { get; set; }
     public DateTime Timestamp { get; set; } = DateTime.Now;
     public string Reasoning { get; set; } = string.Empty;
+
+    /// <summary>The model's chain of thought for this step, when it exposed one. Kept out of the
+    /// conversation sent back to the model — for display and inspection only.</summary>
+    public string? Thinking { get; set; }
+
+    /// <summary>Provider-reported token counts / timing for this step's generation.</summary>
+    public LlmUsage? Usage { get; set; }
+
     public string? ToolName { get; set; }
     public string? ToolArgs { get; set; }
     public string? ToolResult { get; set; }
@@ -25,13 +33,16 @@ public class AgentTrajectory
     /// </summary>
     public DeterminismReport? Determinism { get; set; }
 
-    public void AddStep(int iteration, string reasoning, string? toolName = null, string? toolArgs = null, string? toolResult = null, bool isError = false)
+    public void AddStep(int iteration, string reasoning, string? toolName = null, string? toolArgs = null, string? toolResult = null, bool isError = false,
+        string? thinking = null, LlmUsage? usage = null)
     {
         Steps.Add(new TrajectoryStep
         {
             Iteration = iteration,
             Timestamp = DateTime.Now,
             Reasoning = reasoning,
+            Thinking = thinking,
+            Usage = usage,
             ToolName = toolName,
             ToolArgs = toolArgs,
             ToolResult = toolResult,

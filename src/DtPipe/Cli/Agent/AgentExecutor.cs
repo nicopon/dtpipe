@@ -27,6 +27,10 @@ public class AgentExecutor
      public AgentTrajectory Trajectory { get; } = new();
      public List<ChatMessage> Messages { get; } = new();
 
+     /// <summary>Why the most recent turn ended (null before the first turn). Drives the exit code
+     /// and the reason line in the session summary.</summary>
+     public TurnOutcome? LastTurnOutcome { get; private set; }
+
      public AgentExecutor(IAgentToolProvider toolProvider, ILlmClient llmClient, AgentTui tui, IAnsiConsole console, AgentContextStore? contextStore = null)
         {
             _toolProvider = toolProvider;
@@ -59,11 +63,14 @@ public class AgentExecutor
         var toolCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var stopwatch = Stopwatch.StartNew();
 
+        _tui.RenderWorkingHeader();
+
         // Primary run uses the instance Messages so the interactive / inspection flows keep state.
         var primary = await RunPlanningLoopAsync(Messages, userPrompt, model, baseUrl, opts, maxIterations,
             recordTrajectory: true, renderTui: true, ct);
         bool success = primary.Success;
         int turnIterations = primary.Iterations;
+        LastTurnOutcome = primary.Outcome;
         foreach (var kv in primary.ToolCounts)
             toolCounts[kv.Key] = kv.Value;
 
@@ -90,12 +97,26 @@ public class AgentExecutor
         Trajectory.Determinism = BuildDeterminismReport(repls, observedYamls);
 
         stopwatch.Stop();
-         _tui.RenderFinalSummary(success, turnIterations <= maxIterations ? turnIterations : maxIterations, toolCounts, stopwatch.Elapsed);
+        int shownIterations = turnIterations <= maxIterations ? turnIterations : maxIterations;
+        _tui.RenderFinalSummary(success, shownIterations, toolCounts, stopwatch.Elapsed, primary.Outcome);
+
+        if (!success)
+            _tui.RenderFailureGuidance(primary.Outcome, Trajectory, maxIterations);
+        else if (opts.Mode == AgentMode.Plan && !string.IsNullOrWhiteSpace(primary.Yaml))
+            _tui.RenderPlanNextSteps();
 
         return success ? 0 : 1;
      }
 
-    private async Task<(bool Success, string? Yaml, int Iterations, Dictionary<string, int> ToolCounts)> RunPlanningLoopAsync(
+    /// <summary>Outcome of one run of the planning loop, including why it stopped.</summary>
+    private sealed record PlanningLoopResult(
+        bool Success,
+        string? Yaml,
+        int Iterations,
+        Dictionary<string, int> ToolCounts,
+        TurnOutcome Outcome);
+
+    private async Task<PlanningLoopResult> RunPlanningLoopAsync(
         List<ChatMessage> messages,
         string userPrompt,
         string model,
@@ -113,88 +134,102 @@ public class AgentExecutor
         string? producedYaml = null;     // resolved plan, sourced from the yamlContent tool-call argument
         string? argYaml = null;          // from the yamlContent tool-call argument (the sole source, F6)
 
+        // Stream token-by-token into a live view when the client can, the caller renders a TUI, and
+        // the console can host an in-place region. Replication runs (renderTui: false), --no-stream
+        // and piped / dumb terminals take the blocking path (which still reports token stats).
+        bool consoleCanLive = _console.Profile.Capabilities.Ansi && _console.Profile.Capabilities.Interactive;
+        bool useStreaming = renderTui && !opts.NoStream && consoleCanLive && _llmClient is IStreamingLlmClient;
+
         bool success = false;
         int turnIterations = 1;
+        // The value that stands if the loop exits by its own condition — the iteration budget ran
+        // out before any explicit break set an outcome.
+        var turnOutcome = TurnOutcome.MaxIterationsReached;
 
         while (turnIterations <= maxIterations)
          {
             int currentStepNum = Trajectory.Steps.Count + 1;
             string? currentReasoning = null;
+            string? currentThinking = null;
             string? currentToolName = null;
-
-            LlmResponse? response = null;
+            LlmUsage? currentUsage = null;
 
             var compactedMessages = _windowManager.Compact(messages, ContextStore);
+            var iterationSw = Stopwatch.StartNew();
 
-            if (renderTui)
+            LlmResponse response;
+            if (useStreaming)
+              {
+                var streaming = (IStreamingLlmClient)_llmClient;
+                response = await _tui.RunStreamingStepAsync(currentStepNum, maxIterations, opts.ShowThinking,
+                    obs => streaming.ChatStreamAsync(baseUrl, model, compactedMessages, availableTools, obs,
+                        opts.NumCtx, opts.Temperature, opts.Seed, ct));
+              }
+             else if (renderTui)
               {
                 response = await _console.Status()
                       .Spinner(Spinner.Known.Dots)
                       .SpinnerStyle(Style.Parse("blue bold"))
-                      .StartAsync<LlmResponse>($"Agent thinking (Step {currentStepNum})...", async ctx =>
-                      {
-                         response = await _llmClient.ChatAsync(baseUrl, model, compactedMessages,
-                              availableTools, 16384,
-                             temperature: opts.Temperature, seed: opts.Seed, ct);
-
-                        if (string.IsNullOrEmpty(response.Error))
-                            {
-                      var message = response.Message;
-                               messages.Add(message);
-                               currentReasoning = message.Content;
-
-                              if (message.ToolCalls != null && message.ToolCalls.Count > 0)
-                                {
-                                 currentToolName = message.ToolCalls[0].Name;
-                                }
-                           }
-
-                        return response;
-                      });
+                      .StartAsync<LlmResponse>($"Agent thinking (Step {currentStepNum})...",
+                          _ => _llmClient.ChatAsync(baseUrl, model, compactedMessages, availableTools,
+                              opts.NumCtx, temperature: opts.Temperature, seed: opts.Seed, ct));
               }
              else
-                {
-                  response = await _llmClient.ChatAsync(baseUrl, model, compactedMessages,
-                        availableTools, 16384,
-                    temperature: opts.Temperature, seed: opts.Seed, ct);
+              {
+                response = await _llmClient.ChatAsync(baseUrl, model, compactedMessages, availableTools,
+                    opts.NumCtx, temperature: opts.Temperature, seed: opts.Seed, ct);
+              }
 
-                  if (string.IsNullOrEmpty(response.Error))
-                       {
-                      var message = response.Message;
-                       messages.Add(message);
-                       currentReasoning = message.Content;
+             iterationSw.Stop();
 
-                        if (message.ToolCalls != null && message.ToolCalls.Count > 0)
-                           {
-                          currentToolName = message.ToolCalls[0].Name;
-                             }
-                        }
-                 }
-
-             if (response == null || !string.IsNullOrEmpty(response.Error))
+             if (!string.IsNullOrEmpty(response.Error))
              {
-                string errMsg = response?.Error ?? "No response received from LLM.";
+                string errMsg = response.Error!;
                 if (renderTui)
                     _tui.RenderAgentResponse($"Error calling LLM: {errMsg}");
                 if (recordTrajectory)
-                    Trajectory.AddStep(currentStepNum, $"LLM Error: {errMsg}");
+                    Trajectory.AddStep(currentStepNum, $"LLM Error: {errMsg}", isError: true);
                 success = false;
+                turnOutcome = string.Equals(errMsg, RepetitionGuard.DetectedMessage, StringComparison.Ordinal)
+                    ? TurnOutcome.RepetitionDetected
+                    : TurnOutcome.LlmError;
                 break;
              }
 
-             // Compact iteration log
-            if (renderTui)
-                _tui.RenderCompactIterationStatus(currentStepNum, maxIterations, currentReasoning, currentToolName);
+             messages.Add(response.Message);
+             currentReasoning = response.Message.Content;
+             currentThinking = response.Thinking;
+             currentUsage = response.Usage;
+             if (response.Message.ToolCalls is { Count: > 0 })
+                 currentToolName = response.Message.ToolCalls[0].Name;
+
+             // The streaming view prints its own richer per-step line; only the blocking paths
+             // need this one.
+             if (renderTui && !useStreaming)
+                 _tui.RenderCompactIterationStatus(currentStepNum, maxIterations, currentReasoning, currentToolName, iterationSw.Elapsed, currentUsage);
 
             var lastMsg = messages[^1];
             if (lastMsg.ToolCalls == null || lastMsg.ToolCalls.Count == 0)
              {
-                 // Agent finished this turn with text response
-                if (renderTui)
-                    _tui.RenderAgentResponse(lastMsg.Content ?? "");
-                if (recordTrajectory)
-                    Trajectory.AddStep(currentStepNum, currentReasoning ?? "Finished response.");
-                success = true;
+                if (!string.IsNullOrWhiteSpace(lastMsg.Content))
+                 {
+                     // The model finished the turn with a deliberate textual answer.
+                    if (renderTui)
+                        _tui.RenderAgentResponse(lastMsg.Content!);
+                    if (recordTrajectory)
+                        Trajectory.AddStep(currentStepNum, currentReasoning ?? "Finished response.", thinking: currentThinking, usage: currentUsage);
+                    success = true;
+                    turnOutcome = TurnOutcome.Succeeded;
+                 }
+                else
+                 {
+                     // No tool call and no text: the model stopped with nothing to show. Not a
+                     // success — this path used to report one, so an empty turn read as "done".
+                    if (recordTrajectory)
+                        Trajectory.AddStep(currentStepNum, "Model returned an empty response with no tool call.", isError: true, thinking: currentThinking, usage: currentUsage);
+                    success = false;
+                    turnOutcome = TurnOutcome.EmptyResponse;
+                 }
                 break;
              }
 
@@ -249,7 +284,8 @@ public class AgentExecutor
                  if (renderTui)
                      _tui.RenderToolResult(call.Name, toolResultRaw, outcome.IsError);
                  if (recordTrajectory)
-                     Trajectory.AddStep(Trajectory.Steps.Count + 1, currentReasoning ?? "", call.Name, argsFormatted, toolResultRaw, outcome.IsError);
+                     Trajectory.AddStep(Trajectory.Steps.Count + 1, currentReasoning ?? "", call.Name, argsFormatted, toolResultRaw, outcome.IsError,
+                         thinking: i == 0 ? currentThinking : null, usage: i == 0 ? currentUsage : null);
 
                   messages.Add(new ChatMessage("tool", toolResultRaw, call.Name, ToolCallId: call.Id));
 
@@ -267,7 +303,7 @@ public class AgentExecutor
         if (recordTrajectory && !string.IsNullOrWhiteSpace(producedYaml))
             Trajectory.LastGeneratedYaml = producedYaml;
 
-        return (success, producedYaml, turnIterations, toolCounts);
+        return new PlanningLoopResult(success, producedYaml, turnIterations, toolCounts, turnOutcome);
      }
 
     private async Task<ToolInvocationOutcome> InvokeToolInto(string toolName, JsonElement args, CancellationToken ct)

@@ -54,6 +54,30 @@ public class AgentCommand : Command
         };
         maxIterOption.DefaultValueFactory = _ => 25;
 
+        var llmTimeoutOption = new Option<int>("--llm-timeout")
+        {
+            Description = "Seconds to wait for a single LLM response before giving up. When streaming, this is the max silence between tokens (default: 300)."
+        };
+        llmTimeoutOption.DefaultValueFactory = _ => 300;
+
+        var noStreamOption = new Option<bool>("--no-stream")
+        {
+            Description = "Disable token streaming and its live view; use one blocking call per step."
+        };
+        noStreamOption.DefaultValueFactory = _ => false;
+
+        var showThinkingOption = new Option<bool>("--show-thinking")
+        {
+            Description = "Keep the model's full chain of thought on screen after each step (implied by DEBUG=1)."
+        };
+        showThinkingOption.DefaultValueFactory = _ => false;
+
+        var numCtxOption = new Option<int>("--num-ctx")
+        {
+            Description = $"Model context window to request from the provider (default: {AgentOptions.DefaultNumCtx})."
+        };
+        numCtxOption.DefaultValueFactory = _ => AgentOptions.DefaultNumCtx;
+
         var interactiveOption = new Option<bool>("--interactive")
         {
             Description = "Force interactive mode for model selection and task prompt"
@@ -115,6 +139,10 @@ public class AgentCommand : Command
         Options.Add(modelOption);
         Options.Add(urlOption);
         Options.Add(maxIterOption);
+        Options.Add(llmTimeoutOption);
+        Options.Add(noStreamOption);
+        Options.Add(showThinkingOption);
+        Options.Add(numCtxOption);
         Options.Add(interactiveOption);
         Options.Add(temperatureOption);
         Options.Add(seedOption);
@@ -136,6 +164,11 @@ public class AgentCommand : Command
             var model = parseResult.GetValue(modelOption);
             var url = parseResult.GetValue(urlOption);
             var maxIterations = parseResult.GetValue(maxIterOption);
+            var llmTimeout = TimeSpan.FromSeconds(Math.Max(1, parseResult.GetValue(llmTimeoutOption)));
+            var noStream = parseResult.GetValue(noStreamOption);
+            var showThinking = parseResult.GetValue(showThinkingOption)
+                || Environment.GetEnvironmentVariable("DEBUG") == "1";
+            var numCtx = Math.Max(2048, parseResult.GetValue(numCtxOption));
             var temperature = parseResult.GetValue(temperatureOption);
             var seed = parseResult.GetValue(seedOption);
              var repeat = parseResult.GetValue(repeatOption);
@@ -154,8 +187,8 @@ public class AgentCommand : Command
 
             var tui = new AgentTui(console);
             ILlmClient llmClient = provider.Equals("openai", StringComparison.OrdinalIgnoreCase)
-                ? new OpenAiClient(apiKey)
-                : new OllamaClient();
+                ? new OpenAiClient(apiKey, llmTimeout)
+                : new OllamaClient(llmTimeout);
 
             if (string.IsNullOrWhiteSpace(model))
             {
@@ -163,7 +196,7 @@ public class AgentCommand : Command
                 if (string.IsNullOrWhiteSpace(model))
                 {
                     console.MarkupLine("[red]Error:[/] No model selected.");
-                    return;
+                    return 1;
                 }
             }
 
@@ -173,9 +206,11 @@ public class AgentCommand : Command
                 if (string.IsNullOrWhiteSpace(prompt))
                 {
                     console.MarkupLine("[red]Error:[/] Mission prompt cannot be empty.");
-                    return;
+                    return 1;
                 }
             }
+
+            tui.RenderRunContext(model, url, mode);
 
             var toolProvider = new McpToolProvider(mcpTools);
             var executor = new AgentExecutor(toolProvider, llmClient, tui, console);
@@ -189,7 +224,10 @@ public class AgentCommand : Command
                  Sequential = sequential,
                 Apply = apply,
                 AllowDestructive = allowDestructive,
-                AllowNetwork = allowNetwork
+                AllowNetwork = allowNetwork,
+                NoStream = noStream,
+                ShowThinking = showThinking,
+                NumCtx = numCtx
                        };
 
                 // F2: share the agent guardrail options with the execution tool so execute-yaml-job
@@ -202,11 +240,27 @@ public class AgentCommand : Command
               {
                   exitCode = await executor.RunTurnAsync(prompt, model, url, agentOptions, maxIterations, ct);
 
+                  // The post-mission menu is an ANSI selection prompt; it throws on a piped or
+                  // dumb terminal (CI, `script`, a redirect). A one-shot run there is complete —
+                  // its exit code stands.
+                  bool interactive = console.Profile.Capabilities.Interactive
+                      && console.Profile.Capabilities.Ansi
+                      && !Console.IsOutputRedirected && !Console.IsInputRedirected;
+
                   // Interactive post-mission conversation loop
-                  while (!ct.IsCancellationRequested)
+                  while (interactive && !ct.IsCancellationRequested)
                   {
                       bool hasYaml = !string.IsNullOrEmpty(executor.Trajectory.LastGeneratedYaml);
-                      var action = tui.ShowPostMissionMenu(hasYaml);
+                      PostMissionAction action;
+                      try
+                      {
+                          action = tui.ShowPostMissionMenu(hasYaml);
+                      }
+                      catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException)
+                      {
+                          // The terminal cannot host the prompt after all — stop cleanly.
+                          break;
+                      }
 
                       if (action == PostMissionAction.Exit)
                       {
@@ -243,15 +297,15 @@ public class AgentCommand : Command
                       }
                   }
 
-                  if (exitCode != 0)
-                  {
-                      Environment.ExitCode = exitCode;
-                  }
+                  return exitCode;
               }
               catch (OperationCanceledException)
               {
-                  // F16: user cancellation must not mask as success — report POSIX SIGINT convention.
-                  Environment.ExitCode = 130;
+                  // F16: user cancellation must not mask as success — report the POSIX SIGINT
+                  // convention. A slow or dead endpoint no longer lands here: the LLM clients turn
+                  // a request timeout into a stated error instead of a bare cancellation.
+                  console.MarkupLine("[yellow]Interrupted — stopping.[/]");
+                  return 130;
               }
           });
     }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using DtPipe.Cli.Pipeline;
 using DtPipe.Configuration;
@@ -30,16 +31,38 @@ public class AgentTui
         _console = console;
     }
 
-    public void RenderHeader(string model, string url)
+    /// <summary>
+    /// Header for a session: model, endpoint, operating mode, and one line on what the mode will
+    /// and will not do — so a user who asked the agent to "create a file" in plan mode is told up
+    /// front that a plan, not a file, is what comes back.
+    /// </summary>
+    public void RenderRunContext(string model, string url, AgentMode mode)
     {
         var rule = new Rule("[bold cyan]dtpipe AI Agent[/]")
         {
             Justification = Justify.Left
         };
         _console.Write(rule);
-        _console.MarkupLine($"[grey]Model:[/] [bold green]{Markup.Escape(model)}[/]  |  [grey]Endpoint:[/] [blue]{Markup.Escape(url)}[/]");
+        _console.MarkupLine(
+            $"[grey]Model:[/] [bold green]{Markup.Escape(model)}[/]  |  " +
+            $"[grey]Endpoint:[/] [blue]{Markup.Escape(url)}[/]  |  " +
+            $"[grey]Mode:[/] [bold]{Markup.Escape(mode.ToString().ToLowerInvariant())}[/]");
+        _console.MarkupLine($"[grey]{Markup.Escape(DescribeMode(mode))}[/]");
         _console.WriteLine();
     }
+
+    private static string DescribeMode(AgentMode mode) => mode switch
+    {
+        AgentMode.Plan =>
+            "Plan mode: the agent designs and validates a pipeline, then stops — it does not run it and writes no files. "
+            + "To execute: re-run with --mode execute, or save the generated YAML.",
+        AgentMode.Execute =>
+            "Execute mode: the agent may run pipelines. Real writes still need --apply plus approval; "
+            + "destructive SQL and network access stay denied unless allowed.",
+        AgentMode.Autonomous =>
+            "Autonomous mode: the agent plans, then executes through the guardrails. Real writes still need --apply plus approval.",
+        _ => string.Empty
+    };
 
     public async Task<string?> SelectModelAsync(ILlmClient llmClient, string url)
     {
@@ -85,6 +108,59 @@ public class AgentTui
         );
     }
 
+    /// <summary>A separator between the prompt exchange above and the step-by-step work below.</summary>
+    public void RenderWorkingHeader()
+    {
+        _console.WriteLine();
+        _console.Write(new Rule("[dim]working[/]")
+        {
+            Justification = Justify.Left,
+            Style = new Style(Color.Grey)
+        });
+    }
+
+    /// <summary>
+    /// Runs one model call inside a Spectre <c>Live</c> region: the model's reasoning and answer
+    /// stream in place, bounded in height, then the region is cleared and a single permanent trace
+    /// line is written. With <paramref name="showThinking"/> the full chain of thought is also kept
+    /// on screen.
+    /// </summary>
+    public async Task<LlmResponse> RunStreamingStepAsync(
+        int step, int maxSteps, bool showThinking,
+        Func<ILlmStreamObserver, Task<LlmResponse>> call)
+    {
+        var view = new StreamingStepView(step, maxSteps);
+        LlmResponse result = new(new ChatMessage("assistant", null), true, "the stream produced no response");
+        var gate = new object();
+
+        await _console.Live(view.Build())
+            .AutoClear(true)
+            .Overflow(VerticalOverflow.Ellipsis)
+            .Cropping(VerticalOverflowCropping.Top)
+            .StartAsync(async ctx =>
+            {
+                void Repaint() { lock (gate) { try { ctx.UpdateTarget(view.Build()); } catch { /* teardown race */ } } }
+                using var ticker = new Timer(_ => Repaint(), null, 150, 150);
+                result = await call(new LiveStreamObserver(view, Repaint));
+                Repaint();
+            });
+
+        _console.MarkupLine(view.CompactLine(result));
+
+        if (showThinking && view.HasThinking && !string.IsNullOrWhiteSpace(result.Thinking))
+        {
+            _console.Write(new Panel(Markup.Escape(result.Thinking!.Trim()))
+            {
+                Header = new PanelHeader("[grey]chain of thought[/]"),
+                Border = BoxBorder.Rounded,
+                BorderStyle = new Style(Color.Grey35),
+                Expand = true
+            });
+        }
+
+        return result;
+    }
+
     public void RenderAgentResponse(string content)
     {
         if (string.IsNullOrWhiteSpace(content)) return;
@@ -99,9 +175,21 @@ public class AgentTui
         _console.Write(panel);
     }
 
-     public void RenderCompactIterationStatus(int iteration, int maxIterations, string? reasoning, string? toolName)
+     public void RenderCompactIterationStatus(int iteration, int maxIterations, string? reasoning, string? toolName, TimeSpan? elapsed = null, LlmUsage? usage = null)
     {
         string toolPart = !string.IsNullOrEmpty(toolName) ? $" → [magenta]{Markup.Escape(toolName)}[/]" : "";
+        string timePart = "";
+        if (elapsed.HasValue)
+        {
+            var t = $"{elapsed.Value.TotalSeconds:F1}s";
+            if (usage is { CompletionTokens: > 0 } u)
+            {
+                t += $" · {u.CompletionTokens} tok";
+                if (u.TokensPerSecond is { } tps) t += $" · {tps:F0} tok/s";
+                if (u.PromptEvalTime is { TotalSeconds: >= 1 } p) t += $" · prompt {p.TotalSeconds:F0}s";
+            }
+            timePart = $" [grey]({t})[/]";
+        }
         string reasoningSnippet = "";
         if (!string.IsNullOrWhiteSpace(reasoning))
         {
@@ -110,7 +198,7 @@ public class AgentTui
             reasoningSnippet = $": [grey]{Markup.Escape(firstLine)}[/]";
         }
 
-        _console.MarkupLine($"[dim][[Step {iteration}/{maxIterations}]][/]{toolPart}{reasoningSnippet}");
+        _console.MarkupLine($"[dim][[Step {iteration}/{maxIterations}]][/]{timePart}{toolPart}{reasoningSnippet}");
     }
 
     public void InspectTrajectory(AgentTrajectory trajectory)
@@ -158,6 +246,28 @@ public class AgentTui
             Justification = Justify.Left
         };
         _console.Write(rule);
+
+        if (step.Usage is { } u)
+        {
+            var parts = new List<string>();
+            if (u.PromptTokens > 0) parts.Add($"prompt {u.PromptTokens} tok");
+            if (u.CompletionTokens > 0) parts.Add($"output {u.CompletionTokens} tok");
+            if (u.TokensPerSecond is { } tps) parts.Add($"{tps:F0} tok/s");
+            if (u.GenerationTime is { } g) parts.Add($"gen {g.TotalSeconds:F1}s");
+            if (parts.Count > 0)
+                _console.MarkupLine($"[grey]{Markup.Escape(string.Join("  ·  ", parts))}[/]");
+        }
+
+        if (!string.IsNullOrWhiteSpace(step.Thinking))
+        {
+            _console.Write(new Panel(Markup.Escape(step.Thinking!))
+            {
+                Header = new PanelHeader("[grey]Chain of thought[/]"),
+                Border = BoxBorder.Rounded,
+                BorderStyle = new Style(Color.Grey35),
+                Expand = true
+            });
+        }
 
         if (!string.IsNullOrWhiteSpace(step.Reasoning))
         {
@@ -302,7 +412,7 @@ public class AgentTui
         };
     }
 
-    public void RenderFinalSummary(bool success, int iterations, Dictionary<string, int> toolCounts, TimeSpan duration)
+    public void RenderFinalSummary(bool success, int iterations, Dictionary<string, int> toolCounts, TimeSpan duration, TurnOutcome outcome)
     {
         _console.WriteLine();
         var rule = new Rule("[bold cyan]Session Status[/]")
@@ -317,6 +427,7 @@ public class AgentTui
 
         string statusMarkup = success ? "[bold green]🟢 COMPLETED[/]" : "[bold red]❌ INCOMPLETE[/]";
         table.AddRow("Status", statusMarkup);
+        table.AddRow("Reason", Markup.Escape(DescribeOutcome(outcome)));
         table.AddRow("Iterations", iterations.ToString());
         table.AddRow("Duration", $"{duration.TotalSeconds:F2} seconds");
 
@@ -327,5 +438,79 @@ public class AgentTui
         }
 
         _console.Write(table);
+    }
+
+    private static string DescribeOutcome(TurnOutcome outcome) => outcome switch
+    {
+        TurnOutcome.Succeeded => "delivered a response",
+        TurnOutcome.MaxIterationsReached => "hit the iteration limit without finishing",
+        TurnOutcome.LlmError => "the LLM call failed",
+        TurnOutcome.EmptyResponse => "the model returned an empty response",
+        TurnOutcome.RepetitionDetected => "the model got stuck repeating itself",
+        _ => outcome.ToString()
+    };
+
+    /// <summary>
+    /// Shown after the summary when a turn did not succeed: names the failure and, for the cases
+    /// where partial work exists, prints the last recorded step so the user does not have to open
+    /// the trajectory inspector to see where it stopped.
+    /// </summary>
+    public void RenderFailureGuidance(TurnOutcome outcome, AgentTrajectory trajectory, int maxIterations)
+    {
+        _console.WriteLine();
+        switch (outcome)
+        {
+            case TurnOutcome.MaxIterationsReached:
+                _console.MarkupLine($"[yellow]Reached the {maxIterations}-iteration limit without delivering a plan or an answer.[/]");
+                _console.MarkupLine("[grey]Raise --max-iterations, narrow the request, or try a stronger model.[/]");
+                RenderLastStep(trajectory);
+                break;
+            case TurnOutcome.EmptyResponse:
+                _console.MarkupLine("[yellow]The model returned an empty response — nothing was produced.[/]");
+                _console.MarkupLine("[grey]This model may not be tool-aware, or it emitted only hidden reasoning. Try another model.[/]");
+                break;
+            case TurnOutcome.LlmError:
+                _console.MarkupLine("[grey]The LLM call failed (see the error above). Check the endpoint is reachable and the model name is correct.[/]");
+                RenderLastStep(trajectory);
+                break;
+            case TurnOutcome.RepetitionDetected:
+                _console.MarkupLine("[yellow]The model got stuck producing the same text and the call was stopped early.[/]");
+                _console.MarkupLine("[grey]Retry with a temperature above 0 (this run used --temperature 0), or try a different model.[/]");
+                break;
+        }
+    }
+
+    private void RenderLastStep(AgentTrajectory trajectory)
+    {
+        var step = trajectory.Steps.LastOrDefault(s => s.IsError) ?? trajectory.Steps.LastOrDefault();
+        if (step == null) return;
+
+        var body = new System.Text.StringBuilder();
+        if (!string.IsNullOrWhiteSpace(step.Reasoning))
+            body.AppendLine(step.Reasoning.Trim());
+        if (!string.IsNullOrEmpty(step.ToolName))
+            body.AppendLine($"tool: {step.ToolName}");
+        if (!string.IsNullOrWhiteSpace(step.ToolResult))
+        {
+            var r = step.ToolResult.Trim();
+            body.Append(r.Length > 400 ? r[..400] + "…" : r);
+        }
+
+        _console.Write(new Panel(Markup.Escape(body.ToString().TrimEnd()))
+        {
+            Header = new PanelHeader("[grey]Last step before it stopped[/]"),
+            Border = BoxBorder.Rounded,
+            Expand = true
+        });
+        _console.MarkupLine("[grey]Full step-by-step detail: choose “Inspect full step-by-step trajectory” below.[/]");
+    }
+
+    /// <summary>Shown after a successful plan-mode turn: the plan exists but was not run.</summary>
+    public void RenderPlanNextSteps()
+    {
+        _console.WriteLine();
+        _console.MarkupLine(
+            "[green]✓ Plan ready — not executed.[/] [grey]Run it with[/] [white]dtpipe agent --mode execute[/][grey], "
+            + "or pick “Save pipeline YAML file to disk” below.[/]");
     }
 }

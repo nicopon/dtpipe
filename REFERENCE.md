@@ -882,6 +882,10 @@ dtpipe mcp
 
 Launches an interactive or automated ReAct AI agent loop for data integration tasks. The agent runs against a local Ollama install or the OpenAI API (`--provider`), auto-discovers local Ollama models, renders compact TUI status lines, provides an interactive step inspector (trajectory viewer), renders Spectre.Console DAG topology boxes, and offers 1-click YAML file exports.
 
+Each turn opens with the model, endpoint and mode (and what the mode does). On an interactive terminal the model's reasoning and answer **stream token-by-token** into a live, height-bounded region that is then replaced by a single trace line carrying the step's wall-clock time, token count and tokens/s (and prompt-eval time when it is significant); `--show-thinking` keeps the full chain of thought on screen, and it is always available in the trajectory inspector. Piped / non-ANSI output falls back to one blocking call per step (still with token stats). The turn ends on a session summary whose **Reason** row names why it stopped — a delivered response, the iteration cap, a failed LLM call, or an empty response — and a turn that did not succeed prints its last step and a suggested next action. A slow or unreachable endpoint ends the turn with a stated error rather than a silent exit; when streaming, the endpoint is only considered stalled after `--llm-timeout` seconds *with no token*, so a model that keeps producing output is never cut off. A model caught regenerating the same text (a decoding loop, most often with `--temperature 0` on a weaker or heavily quantized model) is stopped as soon as the repeat is detected rather than left to run out the clock. Only a genuine Ctrl-C exits `130`.
+
+MCP tool calls the agent's LLM makes (`dry-run` in particular) never block waiting for a keypress, even on a real interactive terminal — the tool call and the agent's own TUI share that terminal, so a capability check alone cannot tell "a human is at the CLI" from "the LLM invoked a tool"; only the caller can, hence an explicit no-prompts scope around every tool call.
+
 ```bash
 dtpipe agent [<prompt>] [options]
 ```
@@ -894,6 +898,10 @@ dtpipe agent [<prompt>] [options]
 | `--model` | `-m` | Model name, provider-dependent (e.g. `gemma4:12b-mlx`, `qwen2.5-coder:7b` for Ollama; `gpt-4o` for OpenAI) | *(Auto-discovered from Ollama)* |
 | `--url` | `-u` | API endpoint URL | `http://localhost:11434` (ollama) · `https://api.openai.com` (openai) |
 | `--max-iterations` | | Maximum ReAct loop iterations per turn | `25` |
+| `--llm-timeout` | | Seconds to wait for a single LLM response before ending the turn with a stated error. When streaming, the max silence between tokens | `300` |
+| `--no-stream` | | Disable token streaming and its live view; one blocking call per step | `false` |
+| `--show-thinking` | | Keep the model's full chain of thought on screen after each step (implied by `DEBUG=1`) | `false` |
+| `--num-ctx` | | Model context window to request from the provider (Ollama `num_ctx`) | `16384` |
 | `--interactive` | `-i` | Force interactive model selection and prompt entry | `false` |
 | `--mode` | | Operating mode: `plan` designs/validates only (no execution); `execute`/`autonomous` may run through the guardrails | `plan` |
 | `--temperature` | | Sampling temperature; `0` makes decoding deterministic | `0` |
