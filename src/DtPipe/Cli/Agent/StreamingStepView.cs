@@ -90,6 +90,31 @@ internal sealed class StreamingStepView
         }
     }
 
+    /// <summary>
+    /// The same live content as <see cref="TailMarkup"/> without any markup — for a full-screen
+    /// toolkit pane, which styles the text itself and would render Spectre tags literally.
+    /// </summary>
+    public string TailPlain(int maxLines)
+    {
+        lock (_gate)
+        {
+            var sb = new StringBuilder(HeaderPlainLocked());
+            if (_thinking.Length > 0)
+                sb.Append('\n').Append(Tail(_thinking.ToString(), maxLines));
+            if (_content.Length > 0)
+                sb.Append('\n').Append(Tail(_content.ToString(), maxLines));
+            return sb.ToString();
+        }
+    }
+
+    private string PhaseLocked() =>
+        _tool != null ? $"calling {_tool}"
+        : _sawContent ? "answering"
+        : _sawThinking ? "thinking" : "waiting for first token";
+
+    private string HeaderPlainLocked() =>
+        $"· Step {_step}/{_maxSteps}  {PhaseLocked()} · {_sw.Elapsed.TotalSeconds:F0}s";
+
     private string HeaderMarkupLocked()
     {
         string phase = _tool != null ? $"calling [magenta]{Markup.Escape(_tool)}[/]"

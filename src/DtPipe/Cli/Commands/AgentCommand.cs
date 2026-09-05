@@ -66,6 +66,13 @@ public class AgentCommand : Command
         };
         noStreamOption.DefaultValueFactory = _ => false;
 
+        var tuiOption = new Option<bool>("--tui")
+        {
+            Description = "Run the turn in the full-screen agent surface instead of the scrollback shell. "
+                + "Requires a real interactive terminal; a pipe, a redirect or --no-stream keeps the sequential output."
+        };
+        tuiOption.DefaultValueFactory = _ => false;
+
         var showThinkingOption = new Option<bool>("--show-thinking")
         {
             Description = "Alias for --detail full: keep the model's full chain of thought on screen (implied by DEBUG=1)."
@@ -148,6 +155,7 @@ public class AgentCommand : Command
         Options.Add(maxIterOption);
         Options.Add(llmTimeoutOption);
         Options.Add(noStreamOption);
+        Options.Add(tuiOption);
         Options.Add(showThinkingOption);
         Options.Add(detailOption);
         Options.Add(numCtxOption);
@@ -174,6 +182,7 @@ public class AgentCommand : Command
             var maxIterations = parseResult.GetValue(maxIterOption);
             var llmTimeout = TimeSpan.FromSeconds(Math.Max(1, parseResult.GetValue(llmTimeoutOption)));
             var noStream = parseResult.GetValue(noStreamOption);
+            var fullScreen = parseResult.GetValue(tuiOption);
             var detail = parseResult.GetValue(detailOption);
             if (parseResult.GetValue(showThinkingOption) || Environment.GetEnvironmentVariable("DEBUG") == "1")
                 detail = AgentDetailLevel.Full;
@@ -235,6 +244,7 @@ public class AgentCommand : Command
                 AllowDestructive = allowDestructive,
                 AllowNetwork = allowNetwork,
                 NoStream = noStream,
+                Tui = fullScreen,
                 Detail = detail,
                 NumCtx = numCtx
                        };

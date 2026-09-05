@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using DtPipe.Cli.Agent.Tui;
 using DtPipe.Cli.Mcp;
 using Spectre.Console;
 
@@ -96,12 +97,34 @@ public class AgentExecutor
         // an ANSI, interactive console with a stream-capable client and real stdin. Everything else
         // (piped, --no-stream, replication) keeps the sequential scrollback path unchanged.
         bool consoleCanLive = _console.Profile.Capabilities.Ansi && _console.Profile.Capabilities.Interactive;
-        bool useShell = consoleCanLive && !opts.NoStream && _llmClient is IStreamingLlmClient
+        bool canOwnTerminal = consoleCanLive && !opts.NoStream && _llmClient is IStreamingLlmClient
             && !Console.IsInputRedirected;
+
+        // The full-screen surface takes the same gate plus --tui, and additionally refuses a
+        // redirected stdout: it drives the terminal directly, so a captured run must stay on the
+        // sequential path. Without --tui nothing changes.
+        bool useTui = canOwnTerminal && opts.Tui && !Console.IsOutputRedirected;
+        bool useShell = canOwnTerminal && !useTui;
 
         // Primary run uses the instance Messages so the interactive / inspection flows keep state.
         PlanningLoopResult primary;
-        if (useShell)
+        if (useTui)
+        {
+            var log = new TranscriptLog();
+            var view = new TuiTurnView(log);
+            var chrome = new TuiChrome(
+                $"dtpipe agent · {model} · {Mode.ToString().ToLowerInvariant()}",
+                ShellStatusLine(opts),
+                "^C quit · esc stop");
+
+            primary = await new TuiApp(_console).RunTurnAsync(
+                chrome, log, view,
+                () => (FormatClock(stopwatch.Elapsed), _turnTokens > 0 ? $"{_turnTokens} tok" : string.Empty),
+                (turnView, turnCt) => RunPlanningLoopAsync(Messages, userPrompt, model, baseUrl, opts, maxIterations,
+                    recordTrajectory: true, renderTui: true, turnView, turnCt),
+                ct);
+        }
+        else if (useShell)
         {
             var shell = new AgentShell
             {

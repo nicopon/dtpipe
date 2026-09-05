@@ -86,6 +86,14 @@ public sealed class AgentOptions
 
       /// <summary>Restore the legacy monolithic ReAct behavior (single tool call per iteration).</summary>
     public bool LegacyAgent { get; init; } = false;
+
+      /// <summary>
+      /// Run the turn in the full-screen surface instead of the scrollback shell. Opt-in while the
+      /// surface is being built; the shell stays the default. Only ever honoured on a real
+      /// interactive terminal — a pipe, a redirect or <c>--no-stream</c> keeps the sequential path,
+      /// which is what CI asserts against.
+      /// </summary>
+    public bool Tui { get; init; } = false;
 }
 
 /// <summary>
