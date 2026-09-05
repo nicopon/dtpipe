@@ -24,6 +24,8 @@ public class TrajectoryStep
 
 public class AgentTrajectory
 {
+    private readonly object _gate = new();
+
     public List<TrajectoryStep> Steps { get; } = new();
     public string? LastGeneratedYaml { get; set; }
 
@@ -36,7 +38,7 @@ public class AgentTrajectory
     public void AddStep(int iteration, string reasoning, string? toolName = null, string? toolArgs = null, string? toolResult = null, bool isError = false,
         string? thinking = null, LlmUsage? usage = null)
     {
-        Steps.Add(new TrajectoryStep
+        var step = new TrajectoryStep
         {
             Iteration = iteration,
             Timestamp = DateTime.Now,
@@ -47,7 +49,16 @@ public class AgentTrajectory
             ToolArgs = toolArgs,
             ToolResult = toolResult,
             IsError = isError
-        });
+        };
+        // The full-screen surface reads this list from the UI thread while the turn thread appends
+        // to it — the lock keeps a snapshot from tearing. Every other reader runs after the turn.
+        lock (_gate) Steps.Add(step);
+    }
+
+    /// <summary>A copy safe to enumerate while a turn thread is still calling <see cref="AddStep"/>.</summary>
+    public IReadOnlyList<TrajectoryStep> Snapshot()
+    {
+        lock (_gate) return Steps.ToArray();
     }
 }
 

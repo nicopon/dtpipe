@@ -59,9 +59,10 @@ internal sealed class TuiApp
     /// after the terminal has been restored and the transcript replayed, so an interrupted run
     /// still reports 130 and still leaves its partial record behind.
     /// </summary>
-    /// <param name="chrome">Static labels: window title, subtitle, status line.</param>
-    /// <param name="log">The transcript the turn writes into and the surface displays.</param>
+    /// <param name="chrome">The window title, the run's status posture, the fallback hint bar.</param>
+    /// <param name="log">The transcript the turn writes into and the flux panel displays.</param>
     /// <param name="view">The turn view feeding <paramref name="log"/>; polled for the live tail.</param>
+    /// <param name="trajectory">Read (via snapshot) each repaint to fill the steps and detail panels.</param>
     /// <param name="header">Polled each repaint for the clock and token meter.</param>
     /// <param name="body">The turn. Receives a token cancelled when the user asks to stop.</param>
     /// <param name="ct">The caller's token; linked with the surface's own.</param>
@@ -69,20 +70,23 @@ internal sealed class TuiApp
     /// Test seam: called with the live application just before the loop starts, so a test can
     /// inject keystrokes. Production passes nothing.
     /// </param>
+    /// <param name="onScreen">Test seam: the layout, handed over as soon as it is built.</param>
     public async Task<T> RunTurnAsync<T>(
         TuiChrome chrome,
         TranscriptLog log,
         TuiTurnView view,
+        AgentTrajectory trajectory,
         Func<(string Clock, string Meter)> header,
         Func<ITurnView, CancellationToken, Task<T>> body,
         CancellationToken ct,
-        Action<IApplication>? surfaceReady = null)
+        Action<IApplication>? surfaceReady = null,
+        Action<TuiScreen>? onScreen = null)
     {
         using var stopRequested = new CancellationTokenSource();
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, stopRequested.Token);
 
         var app = Application.Create();
-        Window? window = null;
+        TuiScreen? screen = null;
         object? repaintToken = null;
 
         // The engine writes diagnostics straight to the console — an options warning raised inside
@@ -103,20 +107,8 @@ internal sealed class TuiApp
 
             if (_driverName is null) app.Init(); else app.Init(_driverName);
 
-            // A ListView, not a TextView: the latter is obsolete in Terminal.Gui 2.4 (superseded by
-            // a separate editor package) and a transcript is a list of lines anyway.
-            var transcript = new ListView
-            {
-                X = 0,
-                Y = 0,
-                Width = Dim.Fill(),
-                Height = Dim.Fill(2),
-            };
-            var status = new Label { X = 0, Y = Pos.AnchorEnd(2), Width = Dim.Fill(), Text = chrome.Status };
-            var hints = new Label { X = 0, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), Text = chrome.Hints };
-
-            window = new Window { Title = chrome.Title };
-            window.Add(transcript, status, hints);
+            screen = new TuiScreen(chrome);
+            onScreen?.Invoke(screen);
 
             // Raw mode swallows SIGINT: Ctrl+C is a keystroke here and nothing else will turn it
             // back into an interrupt. Cancel the turn and close the surface; the caller maps the
@@ -133,24 +125,17 @@ internal sealed class TuiApp
             repaintToken = app.AddTimeout(RepaintInterval, () =>
             {
                 var (clock, meter) = header();
-                status.Text = string.IsNullOrEmpty(meter)
-                    ? $"{chrome.Status}   {clock}"
-                    : $"{chrome.Status}   {clock} · {meter}";
-
                 log.LiveTail = view.LiveTailPlain();
 
                 long version = log.Version;
-                if (version != seen)
-                {
-                    seen = version;
-                    var lines = log.PlainLines();
-                    transcript.SetSource(new ObservableCollection<string>(lines));
-                    if (lines.Count > 0)
-                    {
-                        transcript.SelectedItem = lines.Count - 1;
-                        transcript.EnsureSelectedItemVisible();
-                    }
-                }
+                bool transcriptChanged = version != seen;
+                if (transcriptChanged) seen = version;
+
+                // Title and clock are a cheap string every tick; the panels rebuild only when
+                // their source moved (the version counter, the step count).
+                screen.Sync(trajectory.Snapshot(),
+                    transcriptChanged ? log.PlainLines() : null,
+                    clock, meter);
                 return true;
             });
 
@@ -170,8 +155,9 @@ internal sealed class TuiApp
                 }
             }, CancellationToken.None);
 
+            screen.Bind(app);
             surfaceReady?.Invoke(app);
-            app.Run(window);
+            app.Run(screen.Root);
 
             return await turn;
         }
@@ -182,7 +168,7 @@ internal sealed class TuiApp
                 try { app.RemoveTimeout(repaintToken); } catch (Exception) { /* already torn down */ }
             }
 
-            try { window?.Dispose(); } catch (Exception) { /* already torn down */ }
+            try { screen?.Root.Dispose(); } catch (Exception) { /* already torn down */ }
             try { app.Dispose(); } catch (Exception) { /* already torn down */ }
 
             Console.SetOut(savedOut);

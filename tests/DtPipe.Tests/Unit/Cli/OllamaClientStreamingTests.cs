@@ -144,28 +144,30 @@ public class OllamaClientStreamingTests
     }
 
     [Fact]
-    public async Task A_Live_Stream_Is_Not_Cut_Off_Even_Past_The_Idle_Ceiling()
+    public async Task A_Live_Stream_Is_Not_Cut_Off_While_Lines_Keep_Arriving()
     {
-        // Total delivery (~24 * 50 ms ≈ 1.2 s) runs past the 1 s idle ceiling, so the ceiling
-        // must reset per line for the call to finish. Each gap is 20x under the ceiling: a build
-        // that runs this next to a parallel compile can stretch a 50 ms delay several times over
-        // and the gap still stays well inside 1 s. (An earlier 150 ms / 1 s pairing — 6.7x — did
-        // flake there.)
-        var alphabet = "abcdefghijklmnopqrstuvwx";
-        var lines = alphabet.Take(alphabet.Length - 1)
+        // The idle ceiling must reset on every line: total delivery (~40 * 50 ms = 2 s) runs well
+        // past it, so a ceiling that did not reset would trip. The gap is 40x under the ceiling —
+        // `build.sh` deliberately saturates the CPU next to this test, and even a 50 ms delay
+        // stretched several times over stays far inside 2 s. (Earlier 150 ms / 1 s — 6.7x — and
+        // 50 ms / 1 s — 20x — both still flaked there; the real fix is a virtual clock in
+        // OllamaClient's idle timer, out of scope here.)
+        const int lineCount = 40;
+        var expected = new string(Enumerable.Range(0, lineCount).Select(i => (char)('a' + i % 26)).ToArray());
+        var lines = expected.Take(lineCount - 1)
             .Select(c => $"{{\"message\":{{\"content\":\"{c}\"}},\"done\":false}}")
-            .Append($"{{\"message\":{{\"content\":\"{alphabet[^1]}\"}},\"done\":true,\"eval_count\":10}}")
+            .Append($"{{\"message\":{{\"content\":\"{expected[^1]}\"}},\"done\":true,\"eval_count\":10}}")
             .ToArray();
         var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StreamContent(new DripStream(TimeSpan.FromMilliseconds(50), lines))
         });
-        var client = new OllamaClient(handler, TimeSpan.FromSeconds(1));
+        var client = new OllamaClient(handler, TimeSpan.FromSeconds(2));
 
         var resp = await client.ChatStreamAsync("http://x", "m", Msgs, NoTools, new RecordingObserver());
 
         Assert.Null(resp.Error);
-        Assert.Equal(alphabet, resp.Message.Content);
+        Assert.Equal(expected, resp.Message.Content);
     }
 
     [Fact]

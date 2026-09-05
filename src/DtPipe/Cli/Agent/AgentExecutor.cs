@@ -126,7 +126,7 @@ public class AgentExecutor
                 "^C quit · esc stop");
 
             primary = await new TuiApp(_console).RunTurnAsync(
-                chrome, log, view,
+                chrome, log, view, Trajectory,
                 () => (FormatClock(stopwatch.Elapsed), _turnTokens > 0 ? $"{_turnTokens} tok" : string.Empty),
                 (turnView, turnCt) => RunPlanningLoopAsync(Messages, userPrompt, model, baseUrl, opts, maxIterations,
                     recordTrajectory: true, renderTui: true, turnView, turnCt),

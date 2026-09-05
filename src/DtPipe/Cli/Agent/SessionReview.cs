@@ -77,13 +77,7 @@ internal sealed class SessionReview
         _selected = Math.Clamp(_selected + delta, 0, LastIndex);
     }
 
-    private void JumpError(int direction)
-    {
-        for (int i = _selected + direction; i >= 0 && i < _steps.Count; i += direction)
-        {
-            if (_steps[i].IsError) { _selected = i; return; }
-        }
-    }
+    private void JumpError(int direction) => _selected = StepNavigation.NextError(_steps, _selected, direction);
 
     public IRenderable RenderFrame()
     {
@@ -132,60 +126,48 @@ internal sealed class SessionReview
         var s = _steps[_selected];
         var parts = new List<IRenderable>();
 
-        if (s.Usage is { } u)
+        // The content decisions live in StepDetailContent (shared with the full-screen panel); the
+        // Spectre styling of each section is this surface's own and is unchanged.
+        foreach (var sec in StepDetailContent.Of(s, _expanded))
         {
-            var m = new List<string>();
-            if (u.PromptTokens > 0) m.Add($"prompt {u.PromptTokens} tok");
-            if (u.CompletionTokens > 0) m.Add($"output {u.CompletionTokens} tok");
-            if (u.TokensPerSecond is { } tps) m.Add($"{tps.ToString("F0", CultureInfo.InvariantCulture)} tok/s");
-            if (m.Count > 0) parts.Add(new Markup($"[grey]{Markup.Escape(string.Join("  ·  ", m))}[/]"));
-        }
-
-        if (!string.IsNullOrWhiteSpace(s.Reasoning))
-            parts.Add(new Panel(new Markup(Markup.Escape(Clip(s.Reasoning, _expanded ? 40 : 4))))
+            parts.Add(sec.Kind switch
             {
-                Header = new PanelHeader("[yellow]reasoning / intent[/]"),
-                Border = BoxBorder.Rounded,
+                DetailSectionKind.Usage =>
+                    new Markup($"[grey]{Markup.Escape(sec.Body)}[/]"),
+                DetailSectionKind.Reasoning =>
+                    new Panel(new Markup(Markup.Escape(sec.Body)))
+                    {
+                        Header = new PanelHeader("[yellow]reasoning / intent[/]"),
+                        Border = BoxBorder.Rounded,
+                    },
+                DetailSectionKind.ChainOfThought =>
+                    new Panel(new Markup($"[dim]{Markup.Escape(sec.Body)}[/]"))
+                    {
+                        Header = new PanelHeader("[grey]chain of thought[/]"),
+                        Border = BoxBorder.Rounded,
+                        BorderStyle = new Style(Color.Grey35),
+                    },
+                DetailSectionKind.ToolName =>
+                    new Markup($"[bold magenta]tool[/] {Markup.Escape(sec.Body)}"),
+                DetailSectionKind.ToolArgs =>
+                    new Panel(new Markup(Markup.Escape(sec.Body)))
+                    {
+                        Header = new PanelHeader("[grey]arguments[/]"),
+                        Border = BoxBorder.Square,
+                    },
+                DetailSectionKind.ToolOutput =>
+                    new Panel(new Markup(Markup.Escape(sec.Body)))
+                    {
+                        Header = new PanelHeader($"[bold {(sec.IsError ? "red" : "green")}]tool output[/]"),
+                        Border = BoxBorder.Rounded,
+                    },
+                _ => new Markup(Markup.Escape(sec.Body)),
             });
-
-        if (_expanded && !string.IsNullOrWhiteSpace(s.Thinking))
-            parts.Add(new Panel(new Markup($"[dim]{Markup.Escape(Clip(s.Thinking!, 40))}[/]"))
-            {
-                Header = new PanelHeader("[grey]chain of thought[/]"),
-                Border = BoxBorder.Rounded,
-                BorderStyle = new Style(Color.Grey35),
-            });
-
-        if (!string.IsNullOrEmpty(s.ToolName))
-        {
-            parts.Add(new Markup($"[bold magenta]tool[/] {Markup.Escape(s.ToolName)}"));
-            if (_expanded && !string.IsNullOrWhiteSpace(s.ToolArgs))
-                parts.Add(new Panel(new Markup(Markup.Escape(Clip(s.ToolArgs!, 20))))
-                {
-                    Header = new PanelHeader("[grey]arguments[/]"),
-                    Border = BoxBorder.Square,
-                });
-            if (!string.IsNullOrWhiteSpace(s.ToolResult))
-            {
-                string color = s.IsError ? "red" : "green";
-                parts.Add(new Panel(new Markup(Markup.Escape(Clip(s.ToolResult!, _expanded ? 40 : 6))))
-                {
-                    Header = new PanelHeader($"[bold {color}]tool output[/]"),
-                    Border = BoxBorder.Rounded,
-                });
-            }
         }
 
         if (!_expanded)
             parts.Add(new Markup("[grey]→ / Enter to expand this step[/]"));
 
         return parts.Count > 0 ? new Rows(parts) : new Markup("[grey](nothing recorded for this step)[/]");
-    }
-
-    private static string Clip(string text, int maxLines)
-    {
-        var lines = text.Replace("\r", "").Split('\n');
-        if (lines.Length <= maxLines) return text.TrimEnd('\n');
-        return string.Join('\n', lines.Take(maxLines)) + "\n…";
     }
 }
