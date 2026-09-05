@@ -24,6 +24,13 @@ internal interface ITurnView
     void Digest(int step, int maxSteps, TimeSpan elapsed, LlmResponse response, AgentDetailLevel detail);
     void ToolResult(string toolName, string result, bool isError);
     void AgentResponse(string content);
+
+    /// <summary>
+    /// A fresh plan YAML was captured from a <c>yamlContent</c> tool-call argument. The scrollback
+    /// views ignore it; a full-screen surface feeds it to <see cref="PlanProgress"/> (voie 4 §6
+    /// suite 2, E1 — the seam; E4 — the panel).
+    /// </summary>
+    void PlanUpdated(string yaml) { }
 }
 
 /// <summary>The pre-D3 behaviour: every line goes straight to the terminal scrollback.</summary>

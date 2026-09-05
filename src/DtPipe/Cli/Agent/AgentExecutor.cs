@@ -290,6 +290,7 @@ public class AgentExecutor
 
                        // F6: the yamlContent tool-call argument is the sole source of the plan YAML.
                     // Collect it across all calls so the last one wins.
+             string? yamlBeforeThisIteration = argYaml;
              foreach (var call in calls)
                {
                  if (call.Arguments.ValueKind == JsonValueKind.Object &&
@@ -299,6 +300,12 @@ public class AgentExecutor
                       argYaml = yamlProp.GetString();
                    }
                }
+
+               // E1: surface a fresh plan to the turn view (no-op on the scrollback path). The
+               // replication pass has view == null and skips it — nothing else to do there.
+             if (renderTui && !string.IsNullOrWhiteSpace(argYaml)
+                 && !string.Equals(argYaml, yamlBeforeThisIteration, StringComparison.Ordinal))
+                 view!.PlanUpdated(argYaml!);
 
              var outcomes = new List<ToolInvocationOutcome>(calls.Count);
              if (opts.Sequential)
