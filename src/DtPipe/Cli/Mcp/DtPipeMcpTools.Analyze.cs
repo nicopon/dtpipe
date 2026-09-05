@@ -193,7 +193,10 @@ public partial class DtPipeMcpTools
         string? failure = null;
         try
         {
-            exitCode = await jobService.ExecutePipelineAsync(jobs, parsed.Dag, contexts, new GlobalOptions { NoStats = true }, ct);
+            // Quiet: the caller is a model reading JSON, not a person watching the run. NoStats
+            // alone leaves the topology panel and the results table on the console.
+            exitCode = await jobService.ExecutePipelineAsync(jobs, parsed.Dag, contexts,
+                new GlobalOptions { NoStats = true, Quiet = true }, ct);
         }
         catch (Exception ex)
         {

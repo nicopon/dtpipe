@@ -274,7 +274,7 @@ class Program
 		return 0;
 	}
 
-	private static void ConfigureServices(IServiceCollection services)
+	internal static void ConfigureServices(IServiceCollection services)
 	{
 		var isDebug = Environment.GetEnvironmentVariable("DEBUG") == "1";
 		services.AddLogging(logging => {
@@ -285,7 +285,7 @@ class Program
 
 		services.AddSingleton<OptionsRegistry>();
 		services.AddSingleton<DtPipe.Core.Security.IMcpSecurityContext, DtPipe.Core.Security.McpSecurityContext>();
-		services.AddSingleton<Spectre.Console.IAnsiConsole>(sp => Spectre.Console.AnsiConsole.Create(new Spectre.Console.AnsiConsoleSettings { Out = new Spectre.Console.AnsiConsoleOutput(Console.Error) }));
+		services.AddSingleton<Spectre.Console.IAnsiConsole>(sp => DtPipe.Cli.Infrastructure.SharedConsole.Create());
 		services.AddSingleton<JobService>();
 
 		var useFakeKeyring = Environment.GetEnvironmentVariable("DTPIPE_UNSAFE_INSECURE_FAKE_KEYRING");

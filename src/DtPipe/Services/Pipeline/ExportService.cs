@@ -71,7 +71,8 @@ public class ExportService
 		OptionsRegistry registry,
 		string? alias = null,
 		System.Collections.Concurrent.ConcurrentQueue<DtPipe.Feedback.BranchSummary>? resultsCollector = null,
-		bool showStatusMessages = false)
+		bool showStatusMessages = false,
+		bool quiet = false)
 	{
 		// Ensure the registry has the correct pipeline options for this run
 		registry.Register(options);
@@ -79,9 +80,11 @@ public class ExportService
 			_logger.LogInformation("Starting export from {Provider} to {OutputPath}", providerName, ConnectionStringSanitizer.Sanitize(outputPath));
 
 		// Silence internal DAG plumbing branches unless DEBUG=1 — capability check, not
-		// an adapter-identity string comparison (F5).
+		// an adapter-identity string comparison (F5). `quiet` folds in here: a run started for
+		// a program (the MCP tools) suppresses the same chatter, and does so even under DEBUG,
+		// because its console feeds a JSON reply or a screen the agent's toolkit owns.
 		bool isInternalChannel = writerFactory is IInternalChannelCapable;
-		bool silenceInternal = isInternalChannel && Environment.GetEnvironmentVariable("DEBUG") != "1";
+		bool silenceInternal = quiet || (isInternalChannel && Environment.GetEnvironmentVariable("DEBUG") != "1");
 		bool outputIsStdio = string.Equals(outputPath, "-", StringComparison.Ordinal);
 
 		if (showStatusMessages && !silenceInternal)

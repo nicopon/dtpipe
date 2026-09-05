@@ -107,8 +107,9 @@ public class JobService
 			var validationErrors = Pipeline.PipelineValidator.Validate(dag, jobs, processorFactories);
 			if (validationErrors.Any())
 			{
-				foreach (var err in validationErrors)
-					_console.MarkupLine($"[red]Validation Error:[/] {err}");
+				if (!globals.Quiet)
+					foreach (var err in validationErrors)
+						_console.MarkupLine($"[red]Validation Error:[/] {err}");
 				return 1;
 			}
 
@@ -135,13 +136,17 @@ public class JobService
 					}
 				}
 
-				_console.WriteLine();
 				var readerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>();
-				_console.Write(DagRenderer.BuildTopologyPanel(dag, readerFactories));
-				_console.WriteLine();
+				if (!globals.Quiet)
+				{
+					_console.WriteLine();
+					_console.Write(DagRenderer.BuildTopologyPanel(dag, readerFactories));
+					_console.WriteLine();
+				}
 
 				var orchestrator = _serviceProvider.GetRequiredService<IDagOrchestrator>();
-				orchestrator.OnLogEvent = msg => _console.MarkupLine(msg);
+				if (!globals.Quiet)
+					orchestrator.OnLogEvent = msg => _console.MarkupLine(msg);
 
 				Func<BranchDefinition, BranchChannelContext, CancellationToken, Task<int>> branchExecutor = async (branch, ctx, token) =>
 				{
@@ -151,7 +156,7 @@ public class JobService
 				};
 
 				int exitCode;
-				bool isInteractiveLive = !globals.NoStats && globals.DryRunCount == 0 && _console.Profile.Capabilities.Interactive && !Console.IsOutputRedirected && !Console.IsInputRedirected;
+				bool isInteractiveLive = !globals.Quiet && !globals.NoStats && globals.DryRunCount == 0 && _console.Profile.Capabilities.Interactive && !Console.IsOutputRedirected && !Console.IsInputRedirected;
 				var observer = _serviceProvider.GetRequiredService<IExportObserver>() as DtPipe.Observers.SpectreConsoleObserver;
 				
 				if (isInteractiveLive && observer != null)
@@ -163,17 +168,23 @@ public class JobService
 					exitCode = await orchestrator.ExecuteAsync(dag, branchExecutor, ct);
 				}
 
-				_console.WriteLine();
-				DagRenderer.PrintUnifiedResultsTable(resultsCollector.ToList(), dag, isDag: true, _console);
+				if (!globals.Quiet)
+				{
+					_console.WriteLine();
+					DagRenderer.PrintUnifiedResultsTable(resultsCollector.ToList(), dag, isDag: true, _console);
+				}
 				return exitCode;
 			}
 			else
 			{
 				var mainJob = jobs.Values.First();
-				_console.WriteLine();
-				var readerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>();
-				_console.Write(DagRenderer.BuildLinearTopologyPanel(mainJob, readerFactories));
-				_console.WriteLine();
+				if (!globals.Quiet)
+				{
+					_console.WriteLine();
+					var readerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>();
+					_console.Write(DagRenderer.BuildLinearTopologyPanel(mainJob, readerFactories));
+					_console.WriteLine();
+				}
 
 				var mainContext = contexts.Values.FirstOrDefault();
 
@@ -250,6 +261,6 @@ public class JobService
 
 		var channelRegistry = _serviceProvider.GetRequiredService<IMemoryChannelRegistry>();
 		var linearPipelineService = new DtPipe.Cli.Services.LinearPipelineService(_contributors, _serviceProvider, channelRegistry, registry, _console);
-		return await linearPipelineService.ExecuteAsync(job, context, ct, userCancellationToken, resultsCollector, isDag, alias, ctx, showStatusMessages: false, dryRunInteractiveBranch: globals?.DryRunInteractiveBranch);
+		return await linearPipelineService.ExecuteAsync(job, context, ct, userCancellationToken, resultsCollector, isDag, alias, ctx, showStatusMessages: false, dryRunInteractiveBranch: globals?.DryRunInteractiveBranch, quiet: globals?.Quiet ?? false);
 	}
 }

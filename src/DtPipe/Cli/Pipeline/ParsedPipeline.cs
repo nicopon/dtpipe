@@ -21,6 +21,16 @@ public record GlobalOptions
     /// <summary>F17: when true, binding failures (unrecognized flags, unparsable values) exit non-zero instead of being skipped.</summary>
     public bool StrictBindings { get; init; }
 
+    /// <summary>
+    /// Suppress every human-facing console rendering the run would otherwise emit — the DAG
+    /// topology panel, the live progress display, the results table, orchestrator log events.
+    /// Set by callers whose consumer is a program, not a person: the MCP tools hand their result
+    /// back as JSON and the panel is decoration nobody reads (and, under the agent's full-screen
+    /// surface, decoration that lands on a screen the toolkit owns). Never the default — the CLI
+    /// path keeps its output.
+    /// </summary>
+    public bool Quiet { get; init; }
+
     /// <summary>All raw flag values (key→value) for passthrough to PipelineToJobConverter.</summary>
     public IReadOnlyDictionary<string, object?> AllFlags { get; init; } = new Dictionary<string, object?>(System.StringComparer.OrdinalIgnoreCase);
 }

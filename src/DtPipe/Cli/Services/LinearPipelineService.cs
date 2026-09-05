@@ -57,8 +57,9 @@ public class LinearPipelineService
         string? localAlias = null,
         BranchChannelContext? ctx = null,
         bool showStatusMessages = false,
-        string? dryRunInteractiveBranch = null)
-        => ExecuteAsync(job, context, token, CancellationToken.None, resultsCollector, isDag, localAlias, ctx, showStatusMessages, dryRunInteractiveBranch);
+        string? dryRunInteractiveBranch = null,
+        bool quiet = false)
+        => ExecuteAsync(job, context, token, CancellationToken.None, resultsCollector, isDag, localAlias, ctx, showStatusMessages, dryRunInteractiveBranch, quiet);
 
     public async Task<int> ExecuteAsync(
         JobDefinition job,
@@ -70,7 +71,8 @@ public class LinearPipelineService
         string? localAlias = null,
         BranchChannelContext? ctx = null,
         bool showStatusMessages = false,
-        string? dryRunInteractiveBranch = null)
+        string? dryRunInteractiveBranch = null,
+        bool quiet = false)
     {
         // Internal cancellation models non-user sources (DAG branch faults, host teardown);
         // the working token honors both so a Ctrl-C still stops the pipeline cooperatively.
@@ -79,7 +81,7 @@ public class LinearPipelineService
         _internalCts = internalCts;
         using var workCts = CancellationTokenSource.CreateLinkedTokenSource(internalCts.Token, userCancellationToken);
         var workCt = workCts.Token;
-        return await ExecuteCoreAsync(job, context, workCt, resultsCollector, isDag, localAlias, ctx, showStatusMessages, dryRunInteractiveBranch);
+        return await ExecuteCoreAsync(job, context, workCt, resultsCollector, isDag, localAlias, ctx, showStatusMessages, dryRunInteractiveBranch, quiet);
     }
 
     private async Task<int> ExecuteCoreAsync(
@@ -91,7 +93,8 @@ public class LinearPipelineService
         string? localAlias,
         BranchChannelContext? ctx,
         bool showStatusMessages,
-        string? dryRunInteractiveBranch)
+        string? dryRunInteractiveBranch,
+        bool quiet)
     {
         var exportService = _serviceProvider.GetRequiredService<ExportService>();
         var currentRawArgs = context?.Arguments ?? System.Array.Empty<string>();
@@ -324,7 +327,7 @@ public class LinearPipelineService
                 }
             }
 
-            await exportService.RunExportAsync(pipelineOptions, readerFactory.ComponentName, cleanedOutput, token, pipeline, readerFactory, writerFactory, _optionsRegistry, isDag ? localAlias : null, resultsCollector, showStatusMessages);
+            await exportService.RunExportAsync(pipelineOptions, readerFactory.ComponentName, cleanedOutput, token, pipeline, readerFactory, writerFactory, _optionsRegistry, isDag ? localAlias : null, resultsCollector, showStatusMessages, quiet);
             return 0;
         }
         catch (OperationCanceledException)

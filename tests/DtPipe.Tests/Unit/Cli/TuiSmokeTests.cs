@@ -216,6 +216,38 @@ public class TuiSmokeTests
     }
 
     [Fact(Timeout = 30000)]
+    public async Task A_Spectre_Console_Write_Is_Held_Back_The_Same_Way_A_Direct_One_Is()
+    {
+        // E2b: the engine renders through the DI IAnsiConsole, not Console.Error directly. That
+        // console is built to forward to the current stderr, so the session's quarantine catches
+        // it too — otherwise a topology panel or an error markup lands mid-screen.
+        var (app, _, _) = Build();
+        var log = new TranscriptLog();
+        var view = new TuiTurnView(log);
+
+        var captured = new StringWriter();
+        var realError = Console.Error;
+        Console.SetError(captured);
+        try
+        {
+            var engineConsole = DtPipe.Cli.Infrastructure.SharedConsole.Create();
+            await app.RunTurnAsync(Chrome, log, view, Header, async (_, _) =>
+            {
+                await Task.Delay(20);
+                engineConsole.MarkupLine("[yellow]Pipeline Execution Plan[/]");
+                Assert.DoesNotContain("Pipeline Execution Plan", captured.ToString());
+                return "ok";
+            }, CancellationToken.None);
+        }
+        finally
+        {
+            Console.SetError(realError);
+        }
+
+        Assert.Contains("Pipeline Execution Plan", captured.ToString());
+    }
+
+    [Fact(Timeout = 30000)]
     public async Task A_Cancelled_Caller_Token_Cancels_The_Turn()
     {
         // The same shape Ctrl+C produces: the turn's token trips, the body throws, and the caller
