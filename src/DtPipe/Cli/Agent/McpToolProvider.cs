@@ -41,6 +41,9 @@ public class McpToolProvider : IAgentToolProvider
 
     public async Task<ToolResult> InvokeToolAsync(string toolName, JsonElement args, CancellationToken ct)
        {
+           // The LLM drove this call — nobody is watching for a keypress, even though the process
+           // shares a real interactive console with the agent's own TUI (NonInteractiveGuard).
+        using var _ = NonInteractiveGuard.Suppress();
         var rawResult = await McpToolReflector.InvokeToolAsync(_toolsInstance, toolName, args, ct);
         return ToolResult.FromJson(rawResult);
        }

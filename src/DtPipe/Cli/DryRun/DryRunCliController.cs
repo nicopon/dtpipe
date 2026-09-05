@@ -121,7 +121,7 @@ public class DryRunCliController
 			_console.MarkupLine($"[yellow]Auto-focusing on first record with errors (Record {initialIndex + 1}/{result.Samples.Count}) - Found {errorIndices.Count} problematic records.[/]");
 		}
 
-        if (_console.Profile.Capabilities.Interactive && !Console.IsInputRedirected && !Console.IsOutputRedirected)
+        if (CanBlockOnKeyboard())
         {
             var navigator = new DryRunNavigator(renderer, _console);
             navigator.Navigate(result.Samples, result.StepNames, columnWidths, result.SchemaInspectionError, targetInfo, initialIndex, errorIndices, stageTotals);
@@ -150,12 +150,22 @@ public class DryRunCliController
 
     private void WaitIfInteractive(string message)
     {
-        if (_console.Profile.Capabilities.Interactive && !Console.IsInputRedirected && !Console.IsOutputRedirected)
+        if (CanBlockOnKeyboard())
         {
             _console.MarkupLine($"[dim]Press any key {message}[/]");
             Console.ReadKey(true);
         }
     }
+
+    /// <summary>Whether it is safe to block this call waiting for a keypress: a real terminal is
+    /// attached AND no caller has declared itself an unattended, LLM-driven invocation
+    /// (<see cref="NonInteractiveGuard"/>) — the two checks answer different questions and neither
+    /// substitutes for the other (see the guard's own doc comment).</summary>
+    private bool CanBlockOnKeyboard() =>
+        !NonInteractiveGuard.IsSuppressed
+        && _console.Profile.Capabilities.Interactive
+        && !Console.IsInputRedirected
+        && !Console.IsOutputRedirected;
 
 
 	private List<int> FindErrorIndices(List<SampleTrace> samples, TargetSchemaInfo? targetInfo, ISqlDialect? dialect)

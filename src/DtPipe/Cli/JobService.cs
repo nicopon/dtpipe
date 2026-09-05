@@ -117,7 +117,11 @@ public class JobService
 				// Dry-run selection logic
 				if (globals.DryRunCount > 0 && dag.Branches.Count > 1)
 				{
-					if (_console.Profile.Capabilities.Interactive && !Console.IsOutputRedirected && !Console.IsInputRedirected)
+					// An LLM-driven dry-run (dtpipe agent's in-process MCP call) shares this
+					// process's real console with the agent's own TUI, so the capability check
+					// alone reads as interactive here too — NonInteractiveGuard is the only thing
+					// that tells the two apart (see its doc comment).
+					if (!NonInteractiveGuard.IsSuppressed && _console.Profile.Capabilities.Interactive && !Console.IsOutputRedirected && !Console.IsInputRedirected)
 					{
 						var prompt = new SelectionPrompt<string>()
 							.Title("Select branch to inspect for dry-run:")
