@@ -329,7 +329,7 @@ public class AgentExecutor
              // 'ask-user' is a turn terminator, not a tool: the model needs a decision only the
              // user can make. It is never dispatched — the user's next message is the answer — but
              // any other calls in the same turn still run (F5). Extract it, run the rest, then stop.
-             var askUserCall = allCalls.FirstOrDefault(c => string.Equals(c.Name, "ask-user", StringComparison.OrdinalIgnoreCase));
+             var askUserCall = allCalls.FirstOrDefault(c => McpToolProvider.IsAskUser(c.Name));
              var calls = askUserCall is null
                  ? allCalls
                  : allCalls.Where(c => !ReferenceEquals(c, askUserCall)).ToList();

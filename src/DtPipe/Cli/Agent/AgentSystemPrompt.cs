@@ -52,12 +52,12 @@ public static class AgentSystemPrompt
  2. Schema Inspection: Call 'inspect' (and 'preview-data') to learn the real schemas; call 'suggest-pipeline' for a valid YAML skeleton.
  3. Documentation: Call 'get-adapter-help', 'get-transformer-help' or 'get-anonymization-help' when you need connection strings, option schemas, or faker method names.
  4. Validate &amp; Dry-Run: Call 'validate-yaml-job' on your candidate YAML, then 'dry-run' to test connections, fetch schemas, and preview branches without writing data.
- 5. Deliver the plan: output the final, validated YAML as the 'yamlContent' argument of your (last) tool call — this is the single source of truth the engine will execute deterministically.
+ 5. Finish the turn ONE of two ways:
+    a. Deliver the plan — output the final, validated YAML as the 'yamlContent' argument of your (last) tool call. This is the single source of truth the engine will execute deterministically.
+    b. If, and only if, a decision is missing that only the user can make (a target filename or table they told you to confirm, an ambiguous column, a business rule) — call 'ask-user' with that ONE question and nothing else. Do not also deliver YAML, do not restate the question, do not add ""anything else?"". The user's reply is the next message and the plan resumes from there.
+    When the mission explicitly says to ask the user something, choice (b) is how you comply — asking is finishing, not failing.
 
- ASKING THE USER:
- If a decision is genuinely missing and only the user can make it — a target filename or table, an ambiguous column, a business rule — call 'ask-user' with ONE focused question and stop. Ask only what blocks you; never a closing ""anything else?"", never more than one question at a time. Do not guess a value the user is better placed to give.
-
- YOU ARE FORBIDDEN FROM EXECUTING THE PIPELINE. Do not look for or call 'execute-yaml-job'. Deliver a validated YAML and stop.
+ YOU ARE FORBIDDEN FROM EXECUTING THE PIPELINE. Do not look for or call 'execute-yaml-job'.
  ";
 
       /// <summary>

@@ -58,34 +58,42 @@ public sealed class NullLlmStreamObserver : ILlmStreamObserver
 
 /// <summary>
 /// Wraps another observer, forwarding every event while also accumulating the full thinking and
-/// content text so the client can assemble the final <see cref="LlmResponse"/>, and watching the
-/// combined stream for a model stuck repeating itself (<see cref="RepetitionGuard"/>) — the loop can
-/// live in either channel, so both feed the same guard.
+/// content text so the client can assemble the final <see cref="LlmResponse"/>, and watching each
+/// channel for a model stuck repeating itself (<see cref="RepetitionGuard"/>).
+///
+/// <para>
+/// Thinking and content get <b>separate</b> guards. A real loop lives in one channel and repeats
+/// there; feeding both into one buffer instead flags a normal turn as stuck — the system prompt
+/// asks the model to restate its INTENT/REASONING in <c>content</c> right after reasoning the same
+/// thing in <c>thinking</c>, so a short phrase ("ask the user for the filename") legitimately
+/// appears two or three times across the two channels.
+/// </para>
 /// </summary>
 internal sealed class AccumulatingLlmStreamObserver : ILlmStreamObserver
 {
     private readonly ILlmStreamObserver _inner;
-    private readonly RepetitionGuard _repetition = new();
+    private readonly RepetitionGuard _thinkingLoop = new();
+    private readonly RepetitionGuard _contentLoop = new();
     public readonly StringBuilder Thinking = new();
     public readonly StringBuilder Content = new();
 
     public AccumulatingLlmStreamObserver(ILlmStreamObserver inner) => _inner = inner;
 
-    /// <summary>True once the stream has been seen repeating the same text — the reading loop
+    /// <summary>True once one channel has been seen repeating the same text — the reading loop
     /// should stop consuming further output and report this as a failed call.</summary>
     public bool RepetitionDetected { get; private set; }
 
     public void OnThinking(string delta)
     {
         Thinking.Append(delta);
-        if (_repetition.Feed(delta)) RepetitionDetected = true;
+        if (_thinkingLoop.Feed(delta)) RepetitionDetected = true;
         _inner.OnThinking(delta);
     }
 
     public void OnContent(string delta)
     {
         Content.Append(delta);
-        if (_repetition.Feed(delta)) RepetitionDetected = true;
+        if (_contentLoop.Feed(delta)) RepetitionDetected = true;
         _inner.OnContent(delta);
     }
 

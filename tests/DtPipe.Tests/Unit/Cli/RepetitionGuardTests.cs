@@ -97,6 +97,44 @@ public class RepetitionGuardTests
         Assert.False(guard.Feed(chunk)); // second occurrence — still short of minRepeats
     }
 
+    [Fact]
+    public void The_Same_Phrase_Echoed_Across_Thinking_And_Content_Is_Not_A_Loop()
+    {
+        // The system prompt asks the model to restate its INTENT/REASONING in `content` right after
+        // reasoning it in `thinking`. Feeding both into one guard flagged a normal turn as stuck.
+        var acc = new AccumulatingLlmStreamObserver(new NullObserver());
+
+        foreach (var w in Chunks("I need to ask the user for the target filename before I can finish the plan. "))
+            acc.OnThinking(w);
+        foreach (var w in Chunks("INTENT: ask the user for the target filename. REASONING: I need to ask the user for the target filename because the mission says so. "))
+            acc.OnContent(w);
+
+        Assert.False(acc.RepetitionDetected);
+    }
+
+    [Fact]
+    public void A_Real_Loop_In_Either_Channel_Is_Still_Caught()
+    {
+        var thinkingLoop = new AccumulatingLlmStreamObserver(new NullObserver());
+        for (int i = 0; i < 8; i++)
+            foreach (var w in Chunks("En fait je vais simplement modifier le YAML pour ceci puis vérifier encore une fois "))
+                thinkingLoop.OnThinking(w);
+        Assert.True(thinkingLoop.RepetitionDetected);
+
+        var contentLoop = new AccumulatingLlmStreamObserver(new NullObserver());
+        for (int i = 0; i < 8; i++)
+            foreach (var w in Chunks("En fait je vais simplement modifier le YAML pour ceci puis vérifier encore une fois "))
+                contentLoop.OnContent(w);
+        Assert.True(contentLoop.RepetitionDetected);
+    }
+
+    private sealed class NullObserver : ILlmStreamObserver
+    {
+        public void OnThinking(string delta) { }
+        public void OnContent(string delta) { }
+        public void OnToolCall(string toolName) { }
+    }
+
     private static System.Collections.Generic.IEnumerable<string> Chunks(string text)
     {
         // Simulate streamed word-sized deltas rather than feeding one giant string at a time.

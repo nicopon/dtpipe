@@ -20,6 +20,15 @@ public class McpToolProvider : IAgentToolProvider
     /// an external MCP client should never see it. The planning loop intercepts the call and never
     /// dispatches it — the user's next message is the answer.
     /// </summary>
+    /// <summary>
+    /// True when <paramref name="toolName"/> is the ask-user terminator, tolerating the underscore
+    /// spelling a model may emit (<c>ask_user</c>) as well as the canonical <c>ask-user</c>.
+    /// </summary>
+    internal static bool IsAskUser(string? toolName) =>
+        toolName is not null
+        && (toolName.Equals("ask-user", StringComparison.OrdinalIgnoreCase)
+            || toolName.Equals("ask_user", StringComparison.OrdinalIgnoreCase));
+
     internal static ToolDefinition AskUserTool { get; } = new(
         "ask-user",
         "Stop and ask the user a question when a decision is needed that only they can make — a "
@@ -70,7 +79,7 @@ public class McpToolProvider : IAgentToolProvider
          // 'ask-user' is a turn terminator handled by the planning loop and never dispatched.
          // A call reaching here means the loop's interception was bypassed — fail loud rather
          // than hand the model a reflection "tool not found".
-         if (string.Equals(toolName, "ask-user", StringComparison.OrdinalIgnoreCase))
+         if (IsAskUser(toolName))
              throw new InvalidOperationException("'ask-user' is a turn terminator; it must not be dispatched as a tool.");
 
            // The LLM drove this call — nobody is watching for a keypress, even though the process

@@ -113,6 +113,23 @@ public class AgentClarificationTests
     }
 
     [Fact]
+    public async Task The_Underscore_Spelling_Is_Also_A_Terminator()
+    {
+        // A model that emits ask_user (underscore) instead of ask-user must still stop the turn,
+        // not fall through to a "tool not found" it would then loop on.
+        var args = JsonSerializer.SerializeToElement(new { question = "which id column?" });
+        var calls = new List<ToolCall> { new("q1", "ask_user", args) };
+        var response = new LlmResponse(new ChatMessage("assistant", "INTENT: ask", null, calls), true, null);
+        var (executor, _, tools) = Build(new QueuedLlmClient(response));
+
+        await executor.RunTurnAsync("mission", "m", "http://x", new AgentOptions(), maxIterations: 5);
+
+        Assert.Equal(TurnOutcome.AwaitingUserInput, executor.LastTurnOutcome);
+        Assert.Equal("which id column?", executor.PendingQuestion);
+        Assert.DoesNotContain("ask_user", tools.Invoked);
+    }
+
+    [Fact]
     public async Task Other_Tool_Calls_In_The_Same_Turn_Still_Run()
     {
         var (executor, _, tools) = Build(new QueuedLlmClient(ToolThenAsk("inspect", "Which schema?")));
