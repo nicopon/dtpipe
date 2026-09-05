@@ -68,7 +68,8 @@ public class AgentCommand : Command
 
         var tuiOption = new Option<bool>("--tui")
         {
-            Description = "Run the turn in the full-screen agent surface instead of the scrollback shell. "
+            Description = "Run the whole session in the full-screen agent surface instead of the scrollback shell: "
+                + "turns, the input line between them, and the /exec /mode /save /review /quit commands. "
                 + "Requires a real interactive terminal; a pipe, a redirect or --no-stream keeps the sequential output."
         };
         tuiOption.DefaultValueFactory = _ => false;
@@ -258,6 +259,16 @@ public class AgentCommand : Command
               var exitCode = 0;
               try
               {
+                  // The full-screen surface owns the whole conversation: turns, the input line
+                  // between them and the commands that replace the menu below all live inside one
+                  // application. The Spectre prompts further down are unreachable then — nothing
+                  // may write through Spectre while the toolkit holds the terminal.
+                  if (AgentExecutor.WantsFullScreen(console, llmClient, agentOptions))
+                  {
+                      return await new DtPipe.Cli.Agent.Tui.TuiSession(console, tui, executor)
+                          .RunAsync(prompt, model, url, agentOptions, maxIterations, ct);
+                  }
+
                   exitCode = await executor.RunTurnAsync(prompt, model, url, agentOptions, maxIterations, ct);
 
                   // The post-mission menu is an ANSI selection prompt; it throws on a piped or

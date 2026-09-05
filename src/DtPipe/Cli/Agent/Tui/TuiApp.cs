@@ -1,23 +1,28 @@
 using System;
-using System.Collections.ObjectModel;
 using System.IO;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using Spectre.Console;
 using Terminal.Gui.App;
-using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
 namespace DtPipe.Cli.Agent.Tui;
 
 /// <summary>
-/// Runs one agent turn inside a Terminal.Gui application that owns the screen, then hands the
-/// terminal back and replays the transcript to real scrollback. The full-screen surface is a
-/// presentation of the turn; the permanent record stays the scrollback lines, and the verdict
-/// stays <see cref="AgentTui.RenderFinalSummary"/>'s alone.
+/// Runs the agent inside a Terminal.Gui application that owns the screen, then hands the terminal
+/// back and replays the transcript to real scrollback. The full-screen surface is a presentation;
+/// the permanent record stays the scrollback lines, and the verdict stays the projection of a
+/// <see cref="TurnSummaryModel"/> the executor built.
 ///
 /// <para>
-/// Two rules hold this together and both are easy to break:
+/// Two entry points over one lifecycle: <see cref="RunSessionAsync"/> holds the application for a
+/// whole conversation — several turns, an input line between them — and <see cref="RunTurnAsync"/>
+/// is the single-turn form, with no input line and Esc ending the run.
+/// </para>
+///
+/// <para>
+/// Three rules hold this together and all three are easy to break:
 /// </para>
 /// <list type="bullet">
 /// <item>
@@ -29,6 +34,11 @@ namespace DtPipe.Cli.Agent.Tui;
 /// <b>The repaint is a poll.</b> The turn thread only mutates the <see cref="TranscriptLog"/>; a
 /// timer on the UI thread notices. Marshalling one call per streamed token would repaint at the
 /// model's token rate.
+/// </item>
+/// <item>
+/// <b>Two cancellation sources, never one.</b> Ctrl+C ends the session and the caller reports 130;
+/// Esc cancels the model call and the session lives. Feeding Esc into the process token would make
+/// a soft stop indistinguishable from a real interrupt (F16).
 /// </item>
 /// </list>
 /// </summary>
@@ -82,6 +92,42 @@ internal sealed class TuiApp
         Action<IApplication>? surfaceReady = null,
         Action<TuiScreen>? onScreen = null)
     {
+        T result = default!;
+        await RunCoreAsync(chrome, log, view, trajectory, header,
+            async surface => result = await body(view, surface.SessionToken),
+            interactive: false, ct, surfaceReady, onScreen);
+        return result;
+    }
+
+    /// <summary>
+    /// Holds the surface for a whole conversation. <paramref name="session"/> drives it from a
+    /// worker thread: it runs turns, reads the input line between them, and returns when the user
+    /// leaves. Same lifecycle and the same teardown-then-replay ordering as a single turn.
+    /// </summary>
+    public Task RunSessionAsync(
+        TuiChrome chrome,
+        TranscriptLog log,
+        TuiTurnView view,
+        AgentTrajectory trajectory,
+        Func<(string Clock, string Meter)> header,
+        Func<TuiSurface, Task> session,
+        CancellationToken ct,
+        Action<IApplication>? surfaceReady = null,
+        Action<TuiScreen>? onScreen = null)
+        => RunCoreAsync(chrome, log, view, trajectory, header, session, interactive: true, ct, surfaceReady, onScreen);
+
+    private async Task RunCoreAsync(
+        TuiChrome chrome,
+        TranscriptLog log,
+        TuiTurnView view,
+        AgentTrajectory trajectory,
+        Func<(string Clock, string Meter)> header,
+        Func<TuiSurface, Task> body,
+        bool interactive,
+        CancellationToken ct,
+        Action<IApplication>? surfaceReady,
+        Action<TuiScreen>? onScreen)
+    {
         using var stopRequested = new CancellationTokenSource();
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, stopRequested.Token);
 
@@ -107,18 +153,46 @@ internal sealed class TuiApp
 
             if (_driverName is null) app.Init(); else app.Init(_driverName);
 
-            screen = new TuiScreen(chrome);
+            screen = new TuiScreen(chrome, interactive);
             onScreen?.Invoke(screen);
 
-            // Raw mode swallows SIGINT: Ctrl+C is a keystroke here and nothing else will turn it
-            // back into an interrupt. Cancel the turn and close the surface; the caller maps the
-            // resulting OperationCanceledException to exit 130.
+            var surface = new TuiSurface(app, screen, linked.Token);
+            screen.Submitted += surface.OfferLine;
+
             app.Keyboard.KeyDown += (_, key) =>
             {
-                if (!TuiKeymap.EndsTheTurn(TuiKeymap.Classify(key))) return;
-                key.Handled = true;
-                stopRequested.Cancel();
-                app.RequestStop();
+                var signal = TuiKeymap.Classify(key);
+
+                // Raw mode swallows SIGINT: Ctrl+C is a keystroke here and nothing else will turn
+                // it back into an interrupt. Cancel everything and close the surface; the caller
+                // maps the resulting OperationCanceledException to exit 130. Without an input line
+                // there is nothing after the turn, so Esc leaves the same way.
+                if (TuiKeymap.EndsTheSession(signal) || (!interactive && TuiKeymap.EndsTheTurn(signal)))
+                {
+                    key.Handled = true;
+                    stopRequested.Cancel();
+                    app.RequestStop();
+                    return;
+                }
+
+                if (!interactive) return;
+
+                // Esc is the toolkit's own quit key. Leaving it unhandled tears the application
+                // down instead of cancelling one model call.
+                if (signal == EditorSignal.Interrupt)
+                {
+                    key.Handled = true;
+                    surface.RequestSoftCancel();
+                    return;
+                }
+
+                // Shift+Tab would otherwise walk the focus ring backwards. The mode cycle goes
+                // through the command path, which drops it while a turn is running (F1).
+                if (signal == EditorSignal.CycleMode)
+                {
+                    key.Handled = true;
+                    surface.OfferLine("/mode");
+                }
             };
 
             long seen = -1;
@@ -140,14 +214,14 @@ internal sealed class TuiApp
                 return true;
             });
 
-            // The turn runs off the UI thread; RequestStop in the finally is what lets Run return
+            // The body runs off the UI thread; RequestStop in the finally is what lets Run return
             // on every path, including a throw. Queuing it before Run has started is safe — the
             // request survives until the first iteration.
             var turn = Task.Run(async () =>
             {
                 try
                 {
-                    return await body(view, linked.Token);
+                    await body(surface);
                 }
                 finally
                 {
@@ -157,10 +231,11 @@ internal sealed class TuiApp
             }, CancellationToken.None);
 
             screen.Bind(app);
+            if (interactive) screen.SetAccepting(true);
             surfaceReady?.Invoke(app);
             app.Run(screen.Root);
 
-            return await turn;
+            await turn;
         }
         finally
         {
@@ -199,7 +274,116 @@ internal sealed class TuiApp
     }
 }
 
-/// <summary>The surface's static labels for one turn.</summary>
+/// <summary>
+/// What a session's worker thread may do to the live surface: read the input line, run a turn
+/// under a cancellation it alone owns, and marshal work onto the UI thread. Everything here is
+/// called from the worker except <see cref="OfferLine"/> and <see cref="RequestSoftCancel"/>,
+/// which the key handler raises on the UI thread.
+/// </summary>
+internal sealed class TuiSurface
+{
+    private readonly IApplication _app;
+    private readonly Channel<string> _lines = Channel.CreateUnbounded<string>();
+    private readonly object _gate = new();
+
+    private CancellationTokenSource? _softCancel;
+
+    internal TuiSurface(IApplication app, TuiScreen screen, CancellationToken sessionToken)
+    {
+        _app = app;
+        Screen = screen;
+        SessionToken = sessionToken;
+    }
+
+    /// <summary>Cancelled when the user leaves (Ctrl+C) or the caller's own token trips.</summary>
+    public CancellationToken SessionToken { get; }
+
+    public TuiScreen Screen { get; }
+
+    /// <summary>True while a turn is running — the input line is closed and drops what it is given.</summary>
+    public bool TurnInFlight { get { lock (_gate) return _softCancel is not null; } }
+
+    /// <summary>UI thread: a submitted line, or a shortcut that spells one. Dropped mid-turn.</summary>
+    internal void OfferLine(string line)
+    {
+        if (TurnInFlight) return;
+        _lines.Writer.TryWrite(line);
+    }
+
+    /// <summary>UI thread: Esc. Cancels the model call in flight and nothing else.</summary>
+    internal void RequestSoftCancel()
+    {
+        lock (_gate)
+        {
+            try { _softCancel?.Cancel(); }
+            catch (ObjectDisposedException) { /* the turn ended between the keypress and here */ }
+        }
+    }
+
+    /// <summary>Waits for the next line the user submits. Throws when the session ends.</summary>
+    public async Task<string> ReadLineAsync() => await _lines.Reader.ReadAsync(SessionToken);
+
+    /// <summary>
+    /// Arms the soft cancel for one turn and closes the input line. The returned token is the one
+    /// Esc trips; it is never the session token, so a soft stop cannot be read as an interrupt.
+    /// </summary>
+    public CancellationToken BeginTurn()
+    {
+        CancellationTokenSource cts;
+        lock (_gate)
+        {
+            _softCancel = cts = new CancellationTokenSource();
+        }
+        Post(() => { Screen.SetAccepting(false); Screen.ShowStatus(null); });
+        return cts.Token;
+    }
+
+    /// <summary>Disarms the soft cancel and reopens the input line.</summary>
+    public void EndTurn()
+    {
+        CancellationTokenSource? cts;
+        lock (_gate)
+        {
+            cts = _softCancel;
+            _softCancel = null;
+        }
+        cts?.Dispose();
+        Post(() => Screen.SetAccepting(true));
+    }
+
+    /// <summary>Runs <paramref name="action"/> on the UI thread. Every view mutation goes through here.</summary>
+    public void Post(Action action)
+    {
+        try { _app.Invoke(action); }
+        catch (Exception) { /* the surface is already gone */ }
+    }
+
+    /// <summary>
+    /// The last gate before a real write, as a modal dialog. The scrollback path keeps its Spectre
+    /// confirmation; a prompt written through Spectre here would land on a screen the toolkit owns.
+    /// </summary>
+    public Task<bool> ConfirmAsync(string title, string message)
+    {
+        var answer = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Post(() =>
+        {
+            try
+            {
+                // The last button is the default one, so "Execute" must not be it: this gate exists
+                // to make a real write a deliberate act.
+                int? choice = MessageBox.Query(_app, title, message, "Execute", "Cancel");
+                answer.TrySetResult(choice == 0);
+            }
+            catch (Exception)
+            {
+                answer.TrySetResult(false);   // fail closed: no dialog, no write
+            }
+        });
+        return answer.Task;
+    }
+}
+
+/// <summary>The surface's static labels for one run.</summary>
 /// <param name="Title">Window title — the agent, its model and its mode.</param>
 /// <param name="Status">The run's posture, as <see cref="AgentTui.StatusText"/> words it.</param>
 /// <param name="Hints">The shortcut bar.</param>

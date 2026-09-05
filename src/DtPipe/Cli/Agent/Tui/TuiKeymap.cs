@@ -31,10 +31,19 @@ internal static class TuiKeymap
     }
 
     /// <summary>
-    /// Whether a signal must end the turn now. Until the soft cancel lands, an interrupt is
-    /// treated exactly like a quit: both stop the run, and the caller reports 130. Splitting them
-    /// — Esc keeping the session alive — is the next lot's job, and only this predicate changes.
+    /// Whether a signal stops the model call in flight. Both do — the difference is what survives,
+    /// which <see cref="EndsTheSession"/> decides.
     /// </summary>
     public static bool EndsTheTurn(EditorSignal signal)
         => signal is EditorSignal.Quit or EditorSignal.Interrupt;
+
+    /// <summary>
+    /// Whether a signal ends the whole session. Only Ctrl+C does: leaving is a decision, and the
+    /// caller turns it into exit 130. Esc stops the model call and keeps the session — so a soft
+    /// stop must never reach the process token, or an interrupted turn would report the code
+    /// reserved for a real interrupt (F16).
+    /// </summary>
+    public static bool EndsTheSession(EditorSignal signal)
+        => signal is EditorSignal.Quit;
+
 }

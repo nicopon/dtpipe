@@ -34,4 +34,11 @@ public enum TurnOutcome
     /// <summary>The model was seen regenerating the same text and the call was stopped early
     /// (<see cref="RepetitionGuard"/>) — a decoding pathology, not an endpoint problem.</summary>
     RepetitionDetected,
+
+    /// <summary>
+    /// The user pressed Esc during a model call on the full-screen surface. The call was
+    /// abandoned, whatever the turn had already done is kept, and the session stays open — so
+    /// this is a soft stop, never the process-wide cancellation that exits 130.
+    /// </summary>
+    UserInterrupted,
 }

@@ -42,6 +42,8 @@ public class AgentExecutor
 
      private AgentMode? _mode;
      private long _turnTokens;
+     private readonly Stopwatch _turnClock = new();
+     private string? _lastTurnYaml;
 
      /// <summary>
      /// The session's live operating mode. Seeded from the first turn's <see cref="AgentOptions.Mode"/>
@@ -80,9 +82,42 @@ public class AgentExecutor
         }
 
     /// <summary>
-    /// Runs a single agent turn. When <see cref="AgentOptions.Repeat"/> &gt; 1 the validated plan
-    /// is replicated that many times (each from a fresh conversation) and a
-    /// <see cref="DeterminismReport"/> is attached to the trajectory (F3 — determinism).
+    /// The turn view a full-screen session renders into. Built here because the plan panel needs
+    /// the topology service this executor was given, and because the view is toolkit-free — it
+    /// feeds a <see cref="TranscriptLog"/> and nothing else.
+    /// </summary>
+    internal TuiTurnView CreateSurfaceView(TranscriptLog log) => new(log, _dagTopology);
+
+    /// <summary>
+    /// The clock and token meter for the turn in flight, polled by the full-screen surface's
+    /// repaint timer. Reading a running <see cref="Stopwatch"/> from another thread is a display
+    /// concern only — it never feeds the verdict.
+    /// </summary>
+    internal (string Clock, string Meter) LiveHeader()
+        => (FormatClock(_turnClock.Elapsed), _turnTokens > 0 ? $"{_turnTokens} tok" : string.Empty);
+
+    /// <summary>
+    /// Whether this run may take over the terminal: an ANSI interactive console, a streaming
+    /// client, real stdin, and streaming not turned off.
+    /// </summary>
+    internal static bool CanOwnTerminal(IAnsiConsole console, ILlmClient client, AgentOptions opts)
+        => console.Profile.Capabilities.Ansi && console.Profile.Capabilities.Interactive
+           && !opts.NoStream && client is IStreamingLlmClient && !Console.IsInputRedirected;
+
+    /// <summary>
+    /// Whether the whole session belongs in the full-screen surface. It additionally refuses a
+    /// redirected stdout: the surface drives the terminal directly, so a captured run stays on the
+    /// sequential path. The caller that owns the conversation (<c>AgentCommand</c>) asks this once
+    /// and then drives every turn through <see cref="RunTurnOnSurfaceAsync"/>.
+    /// </summary>
+    internal static bool WantsFullScreen(IAnsiConsole console, ILlmClient client, AgentOptions opts)
+        => CanOwnTerminal(console, client, opts) && opts.Tui && !Console.IsOutputRedirected;
+
+    /// <summary>
+    /// Runs a single agent turn and prints its verdict to scrollback. When
+    /// <see cref="AgentOptions.Repeat"/> &gt; 1 the validated plan is replicated that many times
+    /// (each from a fresh conversation) and a <see cref="DeterminismReport"/> is attached to the
+    /// trajectory (F3 — determinism).
     /// </summary>
     public async Task<int> RunTurnAsync(
         string userPrompt,
@@ -93,6 +128,51 @@ public class AgentExecutor
         CancellationToken ct = default)
      {
         var opts = options ?? new AgentOptions();
+        var summary = await RunTurnCoreAsync(userPrompt, model, baseUrl, opts, maxIterations,
+            surface: null, softCancel: CancellationToken.None, ct);
+
+        _tui.RenderFinalSummary(summary);
+
+        if (summary.Outcome == TurnOutcome.AwaitingUserInput)
+            _tui.RenderPendingQuestion(summary.Question);
+        else if (summary.Status != TurnStatus.Completed)
+            _tui.RenderFailureGuidance(summary.Outcome, Trajectory, maxIterations);
+        else if (Mode == AgentMode.Plan && !string.IsNullOrWhiteSpace(_lastTurnYaml))
+            _tui.RenderPlanNextSteps();
+
+        // AwaitingUserInput is a pause interactively but still a non-zero exit — an agent that
+        // stopped for want of an answer did not finish. Fail-closed: piped / CI reads it as 1.
+        return summary.ExitCode;
+     }
+
+    /// <summary>
+    /// Runs one turn inside a surface that already owns the screen, and returns the verdict as
+    /// data instead of printing it — nothing may write through Spectre while the toolkit holds the
+    /// terminal. <paramref name="softCancel"/> aborts the model call in flight only: tool calls run
+    /// on <paramref name="ct"/> and are never interrupted mid-flight, and this token must never be
+    /// the process one, or a soft stop would report the 130 reserved for a real interrupt (F16).
+    /// </summary>
+    internal Task<TurnSummaryModel> RunTurnOnSurfaceAsync(
+        string userPrompt,
+        string model,
+        string baseUrl,
+        AgentOptions opts,
+        int maxIterations,
+        ITurnView surface,
+        CancellationToken softCancel,
+        CancellationToken ct)
+        => RunTurnCoreAsync(userPrompt, model, baseUrl, opts, maxIterations, surface, softCancel, ct);
+
+    private async Task<TurnSummaryModel> RunTurnCoreAsync(
+        string userPrompt,
+        string model,
+        string baseUrl,
+        AgentOptions opts,
+        int maxIterations,
+        ITurnView? surface,
+        CancellationToken softCancel,
+        CancellationToken ct)
+     {
         _mode ??= opts.Mode;
         PendingQuestion = null;   // this turn's prompt is the answer to any previous ask-user
           // F1: select the role prompt for the live operating mode (PLAN forbids execution).
@@ -100,39 +180,24 @@ public class AgentExecutor
         Messages.Add(new ChatMessage("user", userPrompt));
 
         var toolCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var stopwatch = Stopwatch.StartNew();
+        _turnClock.Restart();
         _turnTokens = 0;
 
         // The persistent shell (D3): one Live frame for the whole turn. Same gate as streaming —
         // an ANSI, interactive console with a stream-capable client and real stdin. Everything else
-        // (piped, --no-stream, replication) keeps the sequential scrollback path unchanged.
-        bool consoleCanLive = _console.Profile.Capabilities.Ansi && _console.Profile.Capabilities.Interactive;
-        bool canOwnTerminal = consoleCanLive && !opts.NoStream && _llmClient is IStreamingLlmClient
-            && !Console.IsInputRedirected;
-
-        // The full-screen surface takes the same gate plus --tui, and additionally refuses a
-        // redirected stdout: it drives the terminal directly, so a captured run must stay on the
-        // sequential path. Without --tui nothing changes.
-        bool useTui = canOwnTerminal && opts.Tui && !Console.IsOutputRedirected;
-        bool useShell = canOwnTerminal && !useTui;
+        // (piped, --no-stream, replication) keeps the sequential scrollback path unchanged. A run
+        // that asked for the full-screen surface but reached this method without one is a caller
+        // driving a single turn by hand: it gets the sequential path, never the shell.
+        bool useShell = CanOwnTerminal(_console, _llmClient, opts) && !opts.Tui;
 
         // Primary run uses the instance Messages so the interactive / inspection flows keep state.
         PlanningLoopResult primary;
-        if (useTui)
+        if (surface is not null)
         {
-            var log = new TranscriptLog();
-            var view = new TuiTurnView(log, _dagTopology);
-            var chrome = new TuiChrome(
-                $"dtpipe agent · {model} · {Mode.ToString().ToLowerInvariant()}",
-                ShellStatusLine(opts),
-                "^C quit · esc stop");
-
-            primary = await new TuiApp(_console).RunTurnAsync(
-                chrome, log, view, Trajectory,
-                () => (FormatClock(stopwatch.Elapsed), _turnTokens > 0 ? $"{_turnTokens} tok" : string.Empty),
-                (turnView, turnCt) => RunPlanningLoopAsync(Messages, userPrompt, model, baseUrl, opts, maxIterations,
-                    recordTrajectory: true, renderTui: true, turnView, turnCt),
-                ct);
+            // A full-screen session owns the screen for the whole conversation. It supplies the
+            // view and the soft-cancel token; nothing here opens a surface of its own.
+            primary = await RunPlanningLoopAsync(Messages, userPrompt, model, baseUrl, opts, maxIterations,
+                recordTrajectory: true, renderTui: true, surface, softCancel, ct);
         }
         else if (useShell)
         {
@@ -145,17 +210,16 @@ public class AgentExecutor
             };
             primary = await _tui.RunInLiveShellAsync(
                 shell,
-                () => (FormatClock(stopwatch.Elapsed), _turnTokens > 0 ? $"{_turnTokens} tok" : string.Empty),
+                LiveHeader,
                 view => RunPlanningLoopAsync(Messages, userPrompt, model, baseUrl, opts, maxIterations,
-                    recordTrajectory: true, renderTui: true, view, ct));
+                    recordTrajectory: true, renderTui: true, view, CancellationToken.None, ct));
         }
         else
         {
             _tui.RenderWorkingHeader(Mode, opts.Detail, opts.Apply);
             primary = await RunPlanningLoopAsync(Messages, userPrompt, model, baseUrl, opts, maxIterations,
-                recordTrajectory: true, renderTui: true, new ScrollbackTurnView(_console, _tui), ct);
+                recordTrajectory: true, renderTui: true, new ScrollbackTurnView(_console, _tui), CancellationToken.None, ct);
         }
-        bool success = primary.Success;
         int turnIterations = primary.Iterations;
         LastTurnOutcome = primary.Outcome;
         PendingQuestion = primary.Outcome == TurnOutcome.AwaitingUserInput ? primary.Question : null;
@@ -177,27 +241,17 @@ public class AgentExecutor
                  new("user", userPrompt)
                };
             var repl = await RunPlanningLoopAsync(fresh, userPrompt, model, baseUrl, opts, maxIterations,
-                recordTrajectory: false, renderTui: false, view: null, ct);
+                recordTrajectory: false, renderTui: false, view: null, CancellationToken.None, ct);
             if (!string.IsNullOrWhiteSpace(repl.Yaml))
                 observedYamls.Add(repl.Yaml);
          }
 
         Trajectory.Determinism = BuildDeterminismReport(repls, observedYamls);
 
-        stopwatch.Stop();
+        _turnClock.Stop();
+        _lastTurnYaml = primary.Yaml;
         int shownIterations = turnIterations <= maxIterations ? turnIterations : maxIterations;
-        _tui.RenderFinalSummary(success, shownIterations, toolCounts, stopwatch.Elapsed, primary.Outcome);
-
-        if (primary.Outcome == TurnOutcome.AwaitingUserInput)
-            _tui.RenderPendingQuestion(primary.Question);
-        else if (!success)
-            _tui.RenderFailureGuidance(primary.Outcome, Trajectory, maxIterations);
-        else if (Mode == AgentMode.Plan && !string.IsNullOrWhiteSpace(primary.Yaml))
-            _tui.RenderPlanNextSteps();
-
-        // AwaitingUserInput is a pause interactively but still a non-zero exit — an agent that
-        // stopped for want of an answer did not finish. Fail-closed: piped / CI reads it as 1.
-        return success ? 0 : 1;
+        return new TurnSummaryModel(primary.Outcome, shownIterations, _turnClock.Elapsed, toolCounts, primary.Question);
      }
 
     /// <summary>Outcome of one run of the planning loop, including why it stopped.</summary>
@@ -219,6 +273,7 @@ public class AgentExecutor
         bool recordTrajectory,
         bool renderTui,
         ITurnView? view,
+        CancellationToken softCancel,
         CancellationToken ct)
      {
         var toolCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -233,6 +288,15 @@ public class AgentExecutor
         // and piped / dumb terminals take the blocking path (which still reports token stats).
         bool consoleCanLive = _console.Profile.Capabilities.Ansi && _console.Profile.Capabilities.Interactive;
         bool useStreaming = renderTui && !opts.NoStream && consoleCanLive && _llmClient is IStreamingLlmClient;
+
+        // Esc on the full-screen surface cancels the model call and nothing else: the token below
+        // is linked so a real interrupt still cuts through, while tool calls keep running on `ct`
+        // alone. A call already in flight against a database is not something a keystroke may
+        // abandon halfway.
+        using var llmCancel = softCancel.CanBeCanceled
+            ? CancellationTokenSource.CreateLinkedTokenSource(ct, softCancel)
+            : null;
+        var llmCt = llmCancel?.Token ?? ct;
 
         bool success = false;
         int turnIterations = 1;
@@ -252,23 +316,38 @@ public class AgentExecutor
             var iterationSw = Stopwatch.StartNew();
 
             LlmResponse response;
-            if (useStreaming)
+            try
               {
-                var streaming = (IStreamingLlmClient)_llmClient;
-                response = await view!.StreamingStepAsync(currentStepNum, maxIterations, opts.Detail,
-                    obs => streaming.ChatStreamAsync(baseUrl, model, compactedMessages, availableTools, obs,
-                        opts.NumCtx, opts.Temperature, opts.Seed, ct));
+                if (useStreaming)
+                  {
+                    var streaming = (IStreamingLlmClient)_llmClient;
+                    response = await view!.StreamingStepAsync(currentStepNum, maxIterations, opts.Detail,
+                        obs => streaming.ChatStreamAsync(baseUrl, model, compactedMessages, availableTools, obs,
+                            opts.NumCtx, opts.Temperature, opts.Seed, llmCt));
+                  }
+                 else if (renderTui)
+                  {
+                    response = await view!.BlockingStepAsync(currentStepNum,
+                        c => _llmClient.ChatAsync(baseUrl, model, compactedMessages, availableTools,
+                            opts.NumCtx, temperature: opts.Temperature, seed: opts.Seed, c), llmCt);
+                  }
+                 else
+                  {
+                    response = await _llmClient.ChatAsync(baseUrl, model, compactedMessages, availableTools,
+                        opts.NumCtx, temperature: opts.Temperature, seed: opts.Seed, llmCt);
+                  }
               }
-             else if (renderTui)
+             catch (OperationCanceledException) when (softCancel.IsCancellationRequested && !ct.IsCancellationRequested)
               {
-                response = await view!.BlockingStepAsync(currentStepNum,
-                    c => _llmClient.ChatAsync(baseUrl, model, compactedMessages, availableTools,
-                        opts.NumCtx, temperature: opts.Temperature, seed: opts.Seed, c), ct);
-              }
-             else
-              {
-                response = await _llmClient.ChatAsync(baseUrl, model, compactedMessages, availableTools,
-                    opts.NumCtx, temperature: opts.Temperature, seed: opts.Seed, ct);
+                // The user pressed Esc. The session lives on, so this must not escape as the
+                // cancellation the CLI turns into exit 130 — it is a stated outcome like any other,
+                // and the steps taken so far stay in the trajectory.
+                const string note = "Interrupted — you stopped the model call.";
+                if (renderTui) view!.AgentResponse(note);
+                if (recordTrajectory) Trajectory.AddStep(currentStepNum, note);
+                success = false;
+                turnOutcome = TurnOutcome.UserInterrupted;
+                break;
               }
 
              iterationSw.Stop();

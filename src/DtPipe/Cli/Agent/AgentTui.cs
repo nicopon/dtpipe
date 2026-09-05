@@ -436,18 +436,14 @@ public class AgentTui
     {
         var filePath = _console.Prompt(
             new TextPrompt<string>("Enter file path to save the YAML pipeline:")
-                .DefaultValue("pipeline.yaml")
+                .DefaultValue(PlanFile.DefaultPath)
         );
 
-        try
-        {
-            File.WriteAllText(filePath, yamlContent);
+        var failure = PlanFile.TrySave(filePath, yamlContent);
+        if (failure is null)
             _console.MarkupLine($"[bold green]✓ Pipeline configuration saved to '[white]{Markup.Escape(filePath)}[/]'[/]");
-        }
-        catch (Exception ex)
-        {
-            _console.MarkupLine($"[bold red]❌ Failed to save file:[/] {Markup.Escape(ex.Message)}");
-        }
+        else
+            _console.MarkupLine($"[bold red]❌ Failed to save file:[/] {Markup.Escape(failure)}");
     }
 
     public PostMissionAction ShowPostMissionMenu(bool hasYaml, bool apply, AgentMode mode)
@@ -598,7 +594,12 @@ public class AgentTui
             _console.MarkupLine($"[grey]{Markup.Escape(note!.Trim())}[/]");
     }
 
-    public void RenderFinalSummary(bool success, int iterations, Dictionary<string, int> toolCounts, TimeSpan duration, TurnOutcome outcome)
+    /// <summary>
+    /// The scrollback projection of a finished turn: the verdict table. The judgement itself is
+    /// <see cref="TurnSummaryModel"/>'s — this only styles it — so the full-screen surface's
+    /// verdict band and this table are the same call, rendered twice.
+    /// </summary>
+    public void RenderFinalSummary(TurnSummaryModel summary)
     {
         _console.WriteLine();
         var rule = new Rule("[bold cyan]Session Status[/]")
@@ -611,36 +612,24 @@ public class AgentTui
         table.AddColumn("[bold]Metric[/]");
         table.AddColumn("[bold]Value[/]");
 
-        string statusMarkup = outcome switch
+        string statusMarkup = summary.Status switch
         {
-            TurnOutcome.Succeeded => "[bold green]🟢 COMPLETED[/]",
-            TurnOutcome.AwaitingUserInput => "[bold yellow]❓ AWAITING INPUT[/]",
-            _ => "[bold red]❌ INCOMPLETE[/]"
+            TurnStatus.Completed => $"[bold green]{summary.StatusWord}[/]",
+            TurnStatus.AwaitingInput => $"[bold yellow]{summary.StatusWord}[/]",
+            _ => $"[bold red]{summary.StatusWord}[/]"
         };
         table.AddRow("Status", statusMarkup);
-        table.AddRow("Reason", Markup.Escape(DescribeOutcome(outcome)));
-        table.AddRow("Iterations", iterations.ToString());
-        table.AddRow("Duration", $"{duration.TotalSeconds:F2} seconds");
+        table.AddRow("Reason", Markup.Escape(summary.Reason));
+        table.AddRow("Iterations", summary.Iterations.ToString());
+        table.AddRow("Duration", summary.DurationText);
 
-        if (toolCounts.Count > 0)
+        if (summary.ToolSummary is { } toolSummary)
         {
-            var toolSummary = string.Join(", ", toolCounts.Select(kv => $"{kv.Key}: {kv.Value}"));
             table.AddRow("Tool Calls", Markup.Escape(toolSummary));
         }
 
         _console.Write(table);
     }
-
-    private static string DescribeOutcome(TurnOutcome outcome) => outcome switch
-    {
-        TurnOutcome.Succeeded => "delivered a response",
-        TurnOutcome.AwaitingUserInput => "the agent asked you a question",
-        TurnOutcome.MaxIterationsReached => "hit the iteration limit without finishing",
-        TurnOutcome.LlmError => "the LLM call failed",
-        TurnOutcome.EmptyResponse => "the model returned an empty response",
-        TurnOutcome.RepetitionDetected => "the model got stuck repeating itself",
-        _ => outcome.ToString()
-    };
 
     /// <summary>
     /// Shown after the summary when the agent stopped to ask something: the question, and a line
@@ -688,6 +677,11 @@ public class AgentTui
             case TurnOutcome.RepetitionDetected:
                 _console.MarkupLine("[yellow]The model got stuck producing the same text and the call was stopped early.[/]");
                 _console.MarkupLine("[grey]Retry with a temperature above 0 (this run used --temperature 0), or try a different model.[/]");
+                break;
+            case TurnOutcome.UserInterrupted:
+                _console.MarkupLine("[yellow]You stopped the model call — the work done up to that point is kept.[/]");
+                _console.MarkupLine("[grey]Ask again to continue from here; nothing was written.[/]");
+                RenderLastStep(trajectory);
                 break;
         }
     }
