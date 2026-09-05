@@ -231,7 +231,8 @@ public class AgentCommand : Command
             tui.RenderRunContext(model, url, mode, detail);
 
             var toolProvider = new McpToolProvider(mcpTools);
-            var executor = new AgentExecutor(toolProvider, llmClient, tui, console);
+            var executor = new AgentExecutor(toolProvider, llmClient, tui, console,
+                dagTopology: DtPipe.Cli.Pipeline.DagTopologyService.FromServices(serviceProvider));
 
               var agentOptions = new AgentOptions
                       {

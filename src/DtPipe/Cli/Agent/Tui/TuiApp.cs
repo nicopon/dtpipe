@@ -132,10 +132,11 @@ internal sealed class TuiApp
                 if (transcriptChanged) seen = version;
 
                 // Title and clock are a cheap string every tick; the panels rebuild only when
-                // their source moved (the version counter, the step count).
+                // their source moved (the version counter, the step count, the plan lines).
                 screen.Sync(trajectory.Snapshot(),
                     transcriptChanged ? log.PlainLines() : null,
                     clock, meter);
+                screen.SyncPlan(view.PlanSnapshot());
                 return true;
             });
 

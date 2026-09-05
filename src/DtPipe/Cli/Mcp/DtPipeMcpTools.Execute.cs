@@ -30,30 +30,13 @@ public partial class DtPipeMcpTools
 
     private YamlParseResult ParseAndValidateYaml(string yamlContent)
     {
-        var secretsManager = _serviceProvider.GetService<DtPipe.Cli.Security.ISecretsManager>();
-        var jobs = JobFileParser.ParseContent(yamlContent, secretsManager);
+        var build = DagTopologyService.FromServices(_serviceProvider).Build(yamlContent);
 
         var streamTransformerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamTransformerFactory>>();
-        var branches = jobs.Select(kv => new BranchDefinition
-        {
-            Alias = kv.Key,
-            Input = kv.Value.Input,
-            Output = kv.Value.Output,
-            StreamingAliases = kv.Value.From != null
-                ? kv.Value.From.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                : Array.Empty<string>(),
-            RefAliases = kv.Value.Ref ?? Array.Empty<string>(),
-            Arguments = Array.Empty<string>(),
-            ProcessorName = streamTransformerFactories
-                .FirstOrDefault(f => f.IsApplicable(kv.Value))
-                ?.ComponentName
-        }).ToList();
+        var errors = PipelineValidator.Validate(build.Dag, build.Jobs, streamTransformerFactories).ToList();
+        errors.AddRange(ValidateJobTransformers(build.Jobs));
 
-        var dag = new JobDagDefinition { Branches = branches };
-        var errors = PipelineValidator.Validate(dag, jobs, streamTransformerFactories).ToList();
-        errors.AddRange(ValidateJobTransformers(jobs));
-
-        return new YamlParseResult(jobs, dag, errors);
+        return new YamlParseResult(build.Jobs, build.Dag, errors);
     }
 
 

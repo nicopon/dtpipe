@@ -11,11 +11,12 @@ using Terminal.Gui.Views;
 namespace DtPipe.Cli.Agent.Tui;
 
 /// <summary>
-/// The full-screen layout: a steps list and its detail across the top, the running transcript in a
-/// band below, a status line and a focus-aware hint bar at the bottom. Tab moves between the two
-/// focusable panels (the toolkit's own navigation — no focus manager here); the detail panel just
-/// mirrors the steps selection. <see cref="Sync"/> is the single update point, driven by the
-/// repaint timer on the UI thread from thread-safe snapshots.
+/// The full-screen layout: a steps list on the left, its detail and the plan/DAG stacked on the
+/// right, the running transcript in a band below, a status line and a focus-aware hint bar at the
+/// bottom. Tab moves between the two focusable panels (the toolkit's own navigation — no focus
+/// manager here); the detail panel mirrors the steps selection, the plan panel tracks the plan the
+/// agent is building. <see cref="Sync"/> and <see cref="SyncPlan"/> are the update points, driven by
+/// the repaint timer on the UI thread from thread-safe snapshots.
 /// </summary>
 internal sealed class TuiScreen
 {
@@ -24,11 +25,14 @@ internal sealed class TuiScreen
     internal const int FluxHeight = 6;
     // rows reserved at the bottom: the flux band + the status line + the hint bar.
     internal const int BottomChrome = FluxHeight + 2;
+    // The plan panel splits the right column: detail on top, plan (this many rows) below it.
+    internal const int PlanHeight = 7;
 
     private readonly TuiChrome _chrome;
     private readonly Window _window;
     private readonly StepsPanel _steps = new();
     private readonly DetailPanel _detail = new();
+    private readonly PlanPanel _plan = new();
     private readonly FluxPanel _flux = new();
     private readonly Label _status;
     private readonly Label _hints;
@@ -43,7 +47,7 @@ internal sealed class TuiScreen
         _status = new Label { X = 0, Y = Pos.AnchorEnd(2), Width = Dim.Fill(), Text = chrome.Status };
         _hints = new Label { X = 0, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), Text = HintsFor(null) };
 
-        _window.Add(_steps.Frame, _detail.Frame, _flux.Frame, _status, _hints);
+        _window.Add(_steps.Frame, _detail.Frame, _plan.Frame, _flux.Frame, _status, _hints);
 
         _steps.SelectionChanged += RenderDetail;
     }
@@ -74,6 +78,9 @@ internal sealed class TuiScreen
         _steps.Update(steps);            // rebuilds only when the step count moved
         if (fluxLines is not null) _flux.Update(fluxLines);
     }
+
+    /// <summary>Pushes the plan's latest state into the plan panel. A no-op when nothing changed.</summary>
+    public void SyncPlan(PlanView plan) => _plan.Update(plan);
 
     private void RenderDetail() => _detail.Show(_steps.Selected, _expanded);
 
@@ -113,6 +120,7 @@ internal sealed class TuiScreen
     // ── test inspection ────────────────────────────────────────────────────────
     internal string HintsText => _hints.Text;
     internal string DetailText => _detail.BodyText;
+    internal string PlanText => _plan.BodyText;
     internal bool Expanded => _expanded;
     internal int? SelectedStepIteration => _steps.Selected?.Iteration;
     internal void FocusFlux() => _flux.FocusTarget.SetFocus();

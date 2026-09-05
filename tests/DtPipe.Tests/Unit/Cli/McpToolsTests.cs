@@ -217,6 +217,60 @@ main:
     }
 
     [Fact]
+    public void GetDagTopology_EmptyYaml_ReturnsError()
+    {
+        var json = _tools.GetDagTopology("");
+        Assert.Contains("YAML job content cannot be empty", json);
+    }
+
+    [Fact]
+    public void GetDagTopology_MultiBranchDag_ReturnsStructuredBranches()
+    {
+        var yaml = @"
+p:
+  input: ""parquet:p.parquet""
+c:
+  input: ""csv:c.csv""
+joined:
+  from: p
+  ref: [c]
+  output: ""csv:out.csv""
+";
+        var json = _tools.GetDagTopology(yaml);
+
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        Assert.True(root.GetProperty("success").GetBoolean());
+
+        var branches = root.GetProperty("branches");
+        Assert.Equal(3, branches.GetArrayLength());
+
+        var joined = branches.EnumerateArray().Single(b => b.GetProperty("alias").GetString() == "joined");
+        Assert.Equal("p", joined.GetProperty("from")[0].GetString());
+        Assert.Equal("c", joined.GetProperty("ref")[0].GetString());
+        Assert.Equal("csv:out.csv", joined.GetProperty("output").GetString());
+    }
+
+    [Fact]
+    public void GetDagTopology_SanitisesConnectionStrings()
+    {
+        var yaml = @"
+main:
+  input: ""pg:Host=localhost;Username=admin;Password=s3cr3t""
+  output: ""csv:out.csv""
+";
+        var json = _tools.GetDagTopology(yaml);
+        Assert.DoesNotContain("s3cr3t", json);
+    }
+
+    [Fact]
+    public void GetDagTopology_MalformedYaml_ReturnsErrorNotThrow()
+    {
+        var json = _tools.GetDagTopology("this: is: not: valid: yaml:");
+        Assert.Contains("\"success\": false", json);
+    }
+
+    [Fact]
     public void ListCursors_NoStateFiles_ReturnsInfoMessage()
     {
         var result = _tools.ListCursors();

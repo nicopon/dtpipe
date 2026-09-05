@@ -8,9 +8,10 @@ using Terminal.Gui.Views;
 namespace DtPipe.Cli.Agent.Tui.Panels;
 
 /// <summary>
-/// The detail of the step highlighted in <see cref="StepsPanel"/>, on the right. Read-only: it
-/// mirrors the selection and the expand state, and shows the same <see cref="StepDetailContent"/>
-/// sections the scrollback review does, flattened to plain text.
+/// The detail of the step highlighted in <see cref="StepsPanel"/>, top of the right column. Read-only:
+/// it mirrors the selection and the expand state, and shows the same <see cref="StepDetailContent"/>
+/// sections the scrollback review does, flattened to plain text. The plan panel sits below it, so it
+/// stops <see cref="TuiScreen.PlanHeight"/> rows short of the flux band.
 /// </summary>
 internal sealed class DetailPanel
 {
@@ -25,7 +26,7 @@ internal sealed class DetailPanel
             X = Pos.Absolute(TuiScreen.StepsWidth),
             Y = 0,
             Width = Dim.Fill(),
-            Height = Dim.Fill(TuiScreen.BottomChrome),
+            Height = Dim.Fill(TuiScreen.BottomChrome + TuiScreen.PlanHeight),
             CanFocus = false,
         };
         _body = new Label { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(), Text = string.Empty };

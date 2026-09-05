@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using DtPipe.Cli.Pipeline;
 
 namespace DtPipe.Cli.Agent.Tui;
 
@@ -10,23 +11,63 @@ namespace DtPipe.Cli.Agent.Tui;
 /// exposed as a live tail. It touches no toolkit type and marshals nothing — the surface polls
 /// <see cref="TranscriptLog.Version"/> on a timer. That inversion is the point: a push per token
 /// would repaint at the model's token rate.
+///
+/// <para>
+/// It also folds the plan's progress: <see cref="PlanUpdated"/> and every <see cref="ToolResult"/>
+/// feed a <see cref="PlanProgress"/>, and a fresh plan YAML is turned into a
+/// <see cref="DagTopology"/>. Both are read back through <see cref="PlanSnapshot"/> under a lock —
+/// the turn thread writes, the repaint timer reads.
+/// </para>
 /// </summary>
 internal sealed class TuiTurnView : ITurnView
 {
     private const int LiveTailLines = 12;
 
     private readonly TranscriptLog _log;
+    private readonly DagTopologyService? _topology;
 
     // Written by the turn thread, read by the repaint timer on the UI thread.
     private volatile StreamingStepView? _streaming;
 
-    public TuiTurnView(TranscriptLog log) => _log = log;
+    // The plan's progress and its topology — written from the turn thread (PlanUpdated / ToolResult),
+    // read from the UI thread (PlanSnapshot). PlanProgress is not itself thread-safe, hence the lock.
+    private readonly object _planGate = new();
+    private readonly PlanProgress _plan = new();
+    private DagTopology? _planTopology;
+
+    public TuiTurnView(TranscriptLog log, DagTopologyService? topology = null)
+    {
+        _log = log;
+        _topology = topology;
+    }
 
     /// <summary>
     /// The plain text of the step currently streaming, or null between steps. Read by the
     /// surface's repaint timer, never pushed.
     /// </summary>
     public string? LiveTailPlain() => _streaming?.TailPlain(LiveTailLines);
+
+    /// <summary>A thread-safe read of the plan's state, message and topology for the plan panel.</summary>
+    public PlanView PlanSnapshot()
+    {
+        lock (_planGate)
+            return new PlanView(_plan.State, _plan.Message, _planTopology);
+    }
+
+    /// <summary>
+    /// A fresh plan YAML was captured from a <c>yamlContent</c> tool argument. Feeds
+    /// <see cref="PlanProgress"/> and, when the YAML actually changed, rebuilds the topology.
+    /// </summary>
+    public void PlanUpdated(string yaml)
+    {
+        lock (_planGate)
+        {
+            var before = _plan.Yaml;
+            _plan.OnPlanUpdated(yaml);
+            if (!string.Equals(before, _plan.Yaml, StringComparison.Ordinal))
+                _planTopology = _topology?.TryDescribe(_plan.Yaml);
+        }
+    }
 
     public async Task<LlmResponse> StreamingStepAsync(int step, int maxSteps, AgentDetailLevel detail,
         Func<ILlmStreamObserver, Task<LlmResponse>> call)
@@ -76,7 +117,10 @@ internal sealed class TuiTurnView : ITurnView
     }
 
     public void ToolResult(string toolName, string result, bool isError)
-        => _log.Append(StepDigest.ToolResultEntry(toolName, result, isError));
+    {
+        _log.Append(StepDigest.ToolResultEntry(toolName, result, isError));
+        lock (_planGate) _plan.OnToolResult(toolName, isError, result);
+    }
 
     public void AgentResponse(string content)
     {

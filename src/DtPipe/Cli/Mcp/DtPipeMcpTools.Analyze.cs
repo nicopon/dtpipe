@@ -275,6 +275,42 @@ public partial class DtPipeMcpTools
     };
 
 
+    [McpServerTool(Name = "get-dag-topology")]
+    [System.ComponentModel.Description("Return the pipeline's branch topology as structured data: for each branch its alias, input, output, stream processor, and the upstream aliases it streams from ('from') or materialises ('ref'). Read-only — parses the YAML, runs nothing.")]
+    public string GetDagTopology(
+        [System.ComponentModel.Description("The complete YAML configuration string representing the pipeline")] string yamlContent)
+    {
+        if (string.IsNullOrWhiteSpace(yamlContent))
+            return JsonSerializer.Serialize(new { success = false, error = "YAML job content cannot be empty." });
+
+        try
+        {
+            var topology = DagTopologyService.FromServices(_serviceProvider).Describe(yamlContent);
+            return JsonSerializer.Serialize(new
+            {
+                success = true,
+                branches = topology.Branches.Select(b => new
+                {
+                    alias = b.Alias,
+                    input = string.IsNullOrEmpty(b.Input) ? null : DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(b.Input),
+                    output = string.IsNullOrEmpty(b.Output) ? null : DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(b.Output),
+                    processor = b.Processor,
+                    from = b.From,
+                    @ref = b.Ref
+                }).ToList()
+            }, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                success = false,
+                errors = new[] { DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(ex.Message) }
+            }, new JsonSerializerOptions { WriteIndented = true });
+        }
+    }
+
+
     [McpServerTool(Name = "list-cursors")]
     [System.ComponentModel.Description("List active incremental cursors stored in the current workspace. Finds all state files and shows column, last value, last run time, status and row count.")]
     public string ListCursors()

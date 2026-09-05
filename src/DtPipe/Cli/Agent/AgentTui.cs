@@ -413,37 +413,17 @@ public class AgentTui
     {
         try
         {
-            var secretsManager = serviceProvider.GetService<DtPipe.Cli.Security.ISecretsManager>();
-            var jobs = JobFileParser.ParseContent(yamlContent, secretsManager);
-            var streamTransformerFactories = serviceProvider.GetRequiredService<IEnumerable<IStreamTransformerFactory>>();
+            var build = DagTopologyService.FromServices(serviceProvider).Build(yamlContent);
             var readerFactories = serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>();
 
-            var branches = jobs.Select(kv => new BranchDefinition
-            {
-                Alias = kv.Key,
-                Input = kv.Value.Input,
-                Output = kv.Value.Output,
-                StreamingAliases = kv.Value.From != null
-                    ? kv.Value.From.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                    : Array.Empty<string>(),
-                RefAliases = kv.Value.Ref ?? Array.Empty<string>(),
-                Arguments = Array.Empty<string>(),
-                ProcessorName = streamTransformerFactories
-                    .FirstOrDefault(f => f.IsApplicable(kv.Value))
-                    ?.ComponentName,
-                PreParsedJob = kv.Value
-            }).ToList();
-
-            var dag = new JobDagDefinition { Branches = branches };
-
             _console.WriteLine();
-            if (dag.Branches.Count > 1)
+            if (build.Dag.Branches.Count > 1)
             {
-                _console.Write(DagRenderer.BuildTopologyPanel(dag, readerFactories));
+                _console.Write(DagRenderer.BuildTopologyPanel(build.Dag, readerFactories));
             }
-            else if (dag.Branches.Count == 1)
+            else if (build.Dag.Branches.Count == 1)
             {
-                _console.Write(DagRenderer.BuildLinearTopologyPanel(jobs.Values.First(), readerFactories));
+                _console.Write(DagRenderer.BuildLinearTopologyPanel(build.Jobs.Values.First(), readerFactories));
             }
         }
         catch (Exception ex)

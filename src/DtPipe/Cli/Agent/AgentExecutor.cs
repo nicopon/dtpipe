@@ -16,6 +16,7 @@ public class AgentExecutor
     private readonly ILlmClient _llmClient;
     private readonly AgentTui _tui;
     private readonly IAnsiConsole _console;
+    private readonly DtPipe.Cli.Pipeline.DagTopologyService? _dagTopology;
     private readonly ConversationWindowManager _windowManager = new();
 
       /// <summary>
@@ -66,13 +67,14 @@ public class AgentExecutor
          return _mode.Value;
      }
 
-     public AgentExecutor(IAgentToolProvider toolProvider, ILlmClient llmClient, AgentTui tui, IAnsiConsole console, AgentContextStore? contextStore = null)
+     public AgentExecutor(IAgentToolProvider toolProvider, ILlmClient llmClient, AgentTui tui, IAnsiConsole console, AgentContextStore? contextStore = null, DtPipe.Cli.Pipeline.DagTopologyService? dagTopology = null)
         {
             _toolProvider = toolProvider;
             _llmClient = llmClient;
             _tui = tui;
             _console = console;
            ContextStore = contextStore ?? new AgentContextStore();
+           _dagTopology = dagTopology;
 
          Messages.Add(new ChatMessage("system", AgentSystemPrompt.DefaultSystemPrompt));
         }
@@ -119,7 +121,7 @@ public class AgentExecutor
         if (useTui)
         {
             var log = new TranscriptLog();
-            var view = new TuiTurnView(log);
+            var view = new TuiTurnView(log, _dagTopology);
             var chrome = new TuiChrome(
                 $"dtpipe agent · {model} · {Mode.ToString().ToLowerInvariant()}",
                 ShellStatusLine(opts),
@@ -521,7 +523,7 @@ public class AgentExecutor
 
        /// <summary>The tools whose results are reusable facts (schemas, samples, skeletons, errors).</summary>
      private static bool IsFactProducingTool(string toolName)
-          => toolName is "inspect" or "preview-data" or "suggest-pipeline" or "dry-run" or "list-providers" or "get-adapter-help" or "get-transformer-help";
+          => toolName is "inspect" or "preview-data" or "suggest-pipeline" or "dry-run" or "list-providers" or "get-adapter-help" or "get-transformer-help" or "get-dag-topology";
 
        /// <summary>
         /// Derives a stable fact key from a tool call's args. For input/query-bearing tools the
