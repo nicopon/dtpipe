@@ -146,23 +146,26 @@ public class OllamaClientStreamingTests
     [Fact]
     public async Task A_Live_Stream_Is_Not_Cut_Off_Even_Past_The_Idle_Ceiling()
     {
-        // Total delivery (~10 * 150 ms = 1.5 s) runs well past the 1 s idle ceiling, but every
-        // single gap is ~7x under it, so the ceiling must reset per line and the call must
-        // complete. The wide gap-to-ceiling ratio keeps this from flaking under a loaded CI box.
-        var lines = Enumerable.Range(0, 9)
-            .Select(i => $"{{\"message\":{{\"content\":\"{(char)('a' + i)}\"}},\"done\":false}}")
-            .Append("{\"message\":{\"content\":\"j\"},\"done\":true,\"eval_count\":10}")
+        // Total delivery (~24 * 50 ms ≈ 1.2 s) runs past the 1 s idle ceiling, so the ceiling
+        // must reset per line for the call to finish. Each gap is 20x under the ceiling: a build
+        // that runs this next to a parallel compile can stretch a 50 ms delay several times over
+        // and the gap still stays well inside 1 s. (An earlier 150 ms / 1 s pairing — 6.7x — did
+        // flake there.)
+        var alphabet = "abcdefghijklmnopqrstuvwx";
+        var lines = alphabet.Take(alphabet.Length - 1)
+            .Select(c => $"{{\"message\":{{\"content\":\"{c}\"}},\"done\":false}}")
+            .Append($"{{\"message\":{{\"content\":\"{alphabet[^1]}\"}},\"done\":true,\"eval_count\":10}}")
             .ToArray();
         var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StreamContent(new DripStream(TimeSpan.FromMilliseconds(150), lines))
+            Content = new StreamContent(new DripStream(TimeSpan.FromMilliseconds(50), lines))
         });
         var client = new OllamaClient(handler, TimeSpan.FromSeconds(1));
 
         var resp = await client.ChatStreamAsync("http://x", "m", Msgs, NoTools, new RecordingObserver());
 
         Assert.Null(resp.Error);
-        Assert.Equal("abcdefghij", resp.Message.Content);
+        Assert.Equal(alphabet, resp.Message.Content);
     }
 
     [Fact]

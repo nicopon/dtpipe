@@ -41,8 +41,11 @@ internal sealed class TuiApp
 
     /// <param name="console">Where the transcript is replayed once the terminal is handed back.</param>
     /// <param name="driverName">
-    /// Toolkit driver to force, or null to let it pick per platform. Tests pass the pure-ANSI
-    /// driver, which is deterministic and runs headless.
+    /// Toolkit driver to force, or null to let it pick per platform (ANSI on Unix — the right
+    /// driver for a real terminal). Tests pass the managed <c>dotnet</c> driver: it goes through
+    /// <c>System.Console</c>, so a redirected console (as the test host provides) fully contains it
+    /// and it never writes a capability query or an alternate-screen switch to a real terminal —
+    /// the ANSI driver talks to fd 1 directly and would, polluting a developer's shell.
     /// </param>
     public TuiApp(IAnsiConsole console, string? driverName = null)
     {

@@ -36,7 +36,7 @@ public class TuiSmokeTests
         });
         console.Profile.Width = 100;
         console.Profile.Height = 30;
-        return (new TuiApp(console, DriverRegistry.Names.ANSI), console, sw);
+        return (new TuiApp(console, DriverRegistry.Names.DOTNET), console, sw);
     }
 
     private static (string Clock, string Meter) Header() => ("3s", "42 tok");
@@ -60,30 +60,31 @@ public class TuiSmokeTests
     [Fact(Timeout = 30000)]
     public async Task The_Surface_Draws_The_Title_The_Transcript_And_The_Status()
     {
-        // Reading the cell buffer is the only way to assert the surface without a human at a
-        // terminal — and a captured pty cannot stand in for one, because no emulator is there to
-        // answer the toolkit's capability queries, so the transcript never reaches the capture.
+        // Reading the driver's cell buffer is the only way to assert the surface without a human
+        // at a terminal. Sampled on the UI thread, and only once the buffer actually carries the
+        // title — a fixed delay flakes on a loaded machine where the first paint runs late.
         var (app, _, _) = Build();
         var log = new TranscriptLog();
         var view = new TuiTurnView(log);
-        string? screen = null;
+        string screen = string.Empty;
 
         await app.RunTurnAsync(Chrome, log, view, Header,
             async (turnView, _) =>
             {
                 turnView.ToolResult("inspect", "UNIQUEMARKER42", isError: false);
-                await Task.Delay(500);
+                await Task.Delay(800);
                 return "ok";
             },
             CancellationToken.None,
-            surfaceReady: live => live.AddTimeout(TimeSpan.FromMilliseconds(300), () =>
+            surfaceReady: live => live.AddTimeout(TimeSpan.FromMilliseconds(50), () =>
             {
-                // Sampled on the UI thread, where the cell buffer is safe to read.
-                screen ??= Flatten(live.Driver!);
-                return false;
+                // Poll until the committed transcript entry has been pulled onto the screen —
+                // the repaint is a timer, so it lands a tick after the turn appended it.
+                var frame = Flatten(live.Driver!);
+                if (frame.Contains("UNIQUEMARKER42")) { screen = frame; return false; }
+                return true;
             }));
 
-        Assert.NotNull(screen);
         Assert.Contains("dtpipe agent", screen);            // the window title
         Assert.Contains("UNIQUEMARKER42", screen);          // a committed transcript entry
         Assert.Contains("plan · detail: compact", screen);  // the status line

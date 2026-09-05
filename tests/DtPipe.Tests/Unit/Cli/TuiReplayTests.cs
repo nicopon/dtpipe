@@ -38,7 +38,7 @@ public class TuiReplayTests
         });
         console.Profile.Width = 100;
         console.Profile.Height = 30;
-        return (new TuiApp(console, DriverRegistry.Names.ANSI), sw);
+        return (new TuiApp(console, DriverRegistry.Names.DOTNET), sw);
     }
 
     private static (string Clock, string Meter) Header() => ("3s", "42 tok");
