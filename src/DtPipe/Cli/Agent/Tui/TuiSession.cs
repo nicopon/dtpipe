@@ -44,11 +44,12 @@ internal sealed class TuiSession
     }
 
     /// <summary>
-    /// Runs the whole conversation and returns the exit code of the last turn. Ctrl+C leaves
-    /// through an <see cref="OperationCanceledException"/>, which the command reports as 130 (F16).
+    /// Runs the whole conversation and returns the exit code of the last turn. A null or blank
+    /// <paramref name="mission"/> opens on the input line instead of running a first turn. Ctrl+C
+    /// leaves through an <see cref="OperationCanceledException"/>, which the command reports as 130 (F16).
     /// </summary>
     public async Task<int> RunAsync(
-        string mission,
+        string? mission,
         string model,
         string baseUrl,
         AgentOptions opts,
@@ -80,11 +81,12 @@ internal sealed class TuiSession
     /// <c>/</c> is a command and never reaches the model.
     /// </summary>
     private async Task<TurnSummaryModel?> LoopAsync(
-        TuiSurface surface, TuiTurnView view, string mission,
+        TuiSurface surface, TuiTurnView view, string? mission,
         string model, string baseUrl, AgentOptions opts, int maxIterations)
     {
         TurnSummaryModel? last = null;
-        string? prompt = mission;
+        // No mission on the command line means the session opens on its input line and waits.
+        string? prompt = string.IsNullOrWhiteSpace(mission) ? null : mission;
 
         while (true)
         {

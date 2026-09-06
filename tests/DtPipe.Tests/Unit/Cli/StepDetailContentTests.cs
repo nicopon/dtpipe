@@ -91,6 +91,28 @@ public class StepDetailContentTests
         Assert.DoesNotContain("…", expanded);
     }
 
+    /// <summary>
+    /// The brief form is for a surface with a frame title to put it in; the section form stays for
+    /// the one without. Both read the same counts.
+    /// </summary>
+    [Fact]
+    public void The_Brief_Usage_Names_Both_Directions_And_The_Rate()
+    {
+        var step = Step();
+        step.Usage = new LlmUsage(PromptTokens: 3065, CompletionTokens: 117,
+            GenerationTime: TimeSpan.FromSeconds(2));
+
+        var brief = StepDetailContent.UsageBrief(step);
+
+        Assert.Equal("3065↑ 117↓ tok · 58 tok/s", brief);
+    }
+
+    [Fact]
+    public void A_Step_The_Provider_Counted_Nothing_For_Has_No_Brief_Usage()
+    {
+        Assert.Null(StepDetailContent.UsageBrief(Step()));
+    }
+
     [Fact]
     public void The_Tool_Output_Section_Carries_The_Error_Flag()
     {

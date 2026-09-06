@@ -67,6 +67,25 @@ internal static class StepDetailContent
     }
 
     /// <summary>
+    /// The step's token usage in one short clause, for a surface that has a frame title to put it
+    /// in — arrows for direction, so it costs no words. Null when the provider counted nothing.
+    /// The section form stays in <see cref="Of"/>: the scrollback review has no title to lift it
+    /// into, and the two surfaces are allowed to place the same fact differently.
+    /// </summary>
+    internal static string? UsageBrief(TrajectoryStep step)
+    {
+        if (step.Usage is not { } u) return null;
+
+        var parts = new List<string>();
+        if (u.PromptTokens > 0 || u.CompletionTokens > 0)
+            parts.Add($"{u.PromptTokens}↑ {u.CompletionTokens}↓ tok");
+        if (u.TokensPerSecond is { } tps)
+            parts.Add($"{tps.ToString("F0", CultureInfo.InvariantCulture)} tok/s");
+
+        return parts.Count > 0 ? string.Join(" · ", parts) : null;
+    }
+
+    /// <summary>
     /// Leading <paramref name="maxLines"/> lines of <paramref name="text"/>, then an ellipsis line.
     /// Zero or less keeps everything — what a reader who expanded the step asked for.
     /// </summary>

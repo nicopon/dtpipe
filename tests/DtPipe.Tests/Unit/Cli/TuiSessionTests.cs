@@ -101,16 +101,22 @@ public class TuiSessionTests
         params (Func<TuiScreen, bool> When, Action<IApplication, TuiScreen> Do)[] script)
         => Drive(executor, console, output, confirm: null, script);
 
-    private static async Task<(int Exit, string Scrollback)> Drive(
+    private static Task<(int Exit, string Scrollback)> Drive(
         AgentExecutor executor, IAnsiConsole console, StringWriter output,
         Func<string, string, Task<bool>>? confirm,
+        params (Func<TuiScreen, bool> When, Action<IApplication, TuiScreen> Do)[] script)
+        => Drive(executor, console, output, confirm, "mission", script);
+
+    private static async Task<(int Exit, string Scrollback)> Drive(
+        AgentExecutor executor, IAnsiConsole console, StringWriter output,
+        Func<string, string, Task<bool>>? confirm, string? mission,
         params (Func<TuiScreen, bool> When, Action<IApplication, TuiScreen> Do)[] script)
     {
         TuiScreen? screen = null;
         Exception? failure = null;
 
         var session = new TuiSession(console, new AgentTui(console), executor, DriverRegistry.Names.DOTNET, confirm);
-        int exit = await session.RunAsync("mission", "m", "http://x",
+        int exit = await session.RunAsync(mission, "m", "http://x",
             new AgentOptions { Apply = confirm is not null }, maxIterations: 5, CancellationToken.None,
             surfaceReady: live =>
             {
@@ -142,6 +148,30 @@ public class TuiSessionTests
     {
         screen.InputText = line;
         app.InjectKey(Key.Enter);
+    }
+
+    /// <summary>
+    /// Launched with no mission, the session opens on its input line and waits — it does not call
+    /// the model, and it does not ask for the mission through the scrollback prompt the surface is
+    /// about to paint over.
+    /// </summary>
+    [Fact(Timeout = 60000)]
+    public async Task With_No_Mission_The_Session_Opens_On_Its_Input_Line()
+    {
+        var client = new ScriptedClient((call, _) => Task.FromResult(Text($"answer {call}")));
+        var (console, output) = BuildConsole();
+        var executor = new AgentExecutor(new NoopToolProvider(), client, new AgentTui(console), console);
+
+        var (exit, _) = await Drive(executor, console, output, confirm: null, mission: null,
+            (s => s.Accepting, (app, s) =>
+            {
+                Assert.Equal(0, client.Calls);              // nothing ran on its own
+                Submit(app, s, "now do something");
+            }),
+            (s => client.Calls >= 1 && s.Accepting, (app, s) => Submit(app, s, "/quit")));
+
+        Assert.Equal(0, exit);
+        Assert.Equal(1, client.Calls);
     }
 
     [Fact(Timeout = 60000)]

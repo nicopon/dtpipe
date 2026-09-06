@@ -220,16 +220,6 @@ public class AgentCommand : Command
                 }
             }
 
-            if (string.IsNullOrWhiteSpace(prompt))
-            {
-                prompt = tui.PromptUserMission();
-                if (string.IsNullOrWhiteSpace(prompt))
-                {
-                    console.MarkupLine("[red]Error:[/] Mission prompt cannot be empty.");
-                    return 1;
-                }
-            }
-
             tui.RenderRunContext(model, url, mode, detail);
 
             var toolProvider = new McpToolProvider(mcpTools);
@@ -267,8 +257,21 @@ public class AgentCommand : Command
                   if (AgentExecutor.WantsFullScreen(console, llmClient, agentOptions,
                       Console.IsInputRedirected, Console.IsOutputRedirected))
                   {
+                      // A missing mission is not asked for here: the surface has an input line and
+                      // opens on it. Asking through Spectre first would put the first prompt of the
+                      // session in scrollback, on the terminal the toolkit is about to take over.
                       return await new DtPipe.Cli.Agent.Tui.TuiSession(console, tui, executor)
                           .RunAsync(prompt, model, url, agentOptions, maxIterations, ct);
+                  }
+
+                  if (string.IsNullOrWhiteSpace(prompt))
+                  {
+                      prompt = tui.PromptUserMission();
+                      if (string.IsNullOrWhiteSpace(prompt))
+                      {
+                          console.MarkupLine("[red]Error:[/] Mission prompt cannot be empty.");
+                          return 1;
+                      }
                   }
 
                   exitCode = await executor.RunTurnAsync(prompt, model, url, agentOptions, maxIterations, ct);

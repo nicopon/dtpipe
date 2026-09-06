@@ -103,11 +103,19 @@ internal sealed class DetailPanel
             return;
         }
 
-        Retitle($"Detail — step {step.Iteration}" + (expanded ? " (expanded)" : string.Empty));
+        // The usage belongs to the step as a whole, so it goes where the step is named. It is
+        // still a section of the shared content — the scrollback review has no title to lift it
+        // into — and this panel simply reads it from the title instead of the body.
+        var usage = StepDetailContent.UsageBrief(step);
+        Retitle($"Detail — step {step.Iteration}"
+            + (expanded ? " (expanded)" : string.Empty)
+            + (usage is null ? string.Empty : $" · {usage}"));
 
         var sb = new StringBuilder();
         foreach (var section in StepDetailContent.Of(step, expanded))
         {
+            if (section.Kind == DetailSectionKind.Usage) continue;   // it is in the title
+
             if (sb.Length > 0) sb.Append('\n');
             sb.Append(section.Kind == DetailSectionKind.ToolName
                 ? $"tool: {section.Body}"

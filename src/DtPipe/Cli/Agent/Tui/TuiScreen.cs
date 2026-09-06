@@ -48,6 +48,9 @@ internal sealed class TuiScreen
 
     private const string Prompt = "› ";
 
+    /// <summary>How long a passing message holds the hint bar before the shortcuts come back.</summary>
+    private const long FlashMs = 1500;
+
     private bool _expanded;
     private int _working;
     private string _renderedTitle = string.Empty;
@@ -55,6 +58,11 @@ internal sealed class TuiScreen
     private Exchange _last;
     private bool _accepting;
     private LiveStep? _live;
+    private IApplication? _app;
+    private int _copiedStart = -1;
+    private int _copiedLength;
+    private string? _flash;
+    private long _flashUntil;
 
     /// <summary>A line the user submitted. Raised on the UI thread.</summary>
     public event Action<string>? Submitted;
@@ -84,7 +92,7 @@ internal sealed class TuiScreen
         };
         _exchange.Frame.Add(_caret, _input);
 
-        _hints = new Label { X = 0, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), Text = HintsFor(null) };
+        _hints = new Label { X = 0, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), Text = HintsFor() };
 
         _window.Add(_steps.Frame, _detail.Frame, _plan.Frame, _exchange.Frame, _hints);
 
@@ -101,13 +109,26 @@ internal sealed class TuiScreen
             nav.FocusedChanged += (_, _) =>
             {
                 var focused = nav.GetFocused();
-                _hints.Text = HintsFor(focused);
+                if (_flash is null) _hints.Text = HintsFor();
                 MarkFocusedPanel(focused);
             };
 
         app.Keyboard.KeyDown += (_, key) => OnKey(key, nav?.GetFocused());
 
         UnpaintTheInputLine();
+
+        // The toolkit builds a text field a right-click menu of its own — select all, cut, undo —
+        // on first demand. None of it is this surface's vocabulary, and its own property is
+        // read-only, so the demand is what gets refused. Selecting with the mouse copies instead.
+        _input.MouseEvent += (_, mouse) =>
+        {
+            if (mouse.Flags.HasFlag(MouseFlags.RightButtonPressed)
+                || mouse.Flags.HasFlag(MouseFlags.RightButtonReleased)
+                || mouse.Flags.HasFlag(MouseFlags.RightButtonClicked))
+                mouse.Handled = true;
+        };
+
+        _app = app;
         _input.SetFocus();
     }
 
@@ -206,6 +227,51 @@ internal sealed class TuiScreen
         _live = live;
         _steps.Update(steps, live, Wheel.Frame(_working));
         RenderDetail();
+        CopyWhatWasSelected();
+        ExpireFlash();
+    }
+
+    /// <summary>
+    /// Puts a selection made on the input line straight into the clipboard. Polled rather than
+    /// hooked: a selection grows through a drag, a shift-arrow and a double click alike, and this
+    /// way the last state of any of them is what lands there. Silent when the terminal has no
+    /// clipboard — the surface says nothing it cannot deliver.
+    /// </summary>
+    private void CopyWhatWasSelected()
+    {
+        int length = _input.SelectedLength;
+        if (length <= 0) { _copiedLength = 0; return; }
+
+        int start = _input.SelectedStart;
+        if (start == _copiedStart && length == _copiedLength) return;
+        _copiedStart = start;
+        _copiedLength = length;
+
+        var text = _input.SelectedText;
+        if (string.IsNullOrEmpty(text)) return;
+        try
+        {
+            if (_app?.Clipboard?.TrySetClipboardData(text) == true) Flash("copied to the clipboard");
+        }
+        catch (Exception)
+        {
+            // No clipboard on this terminal; the selection still stands.
+        }
+    }
+
+    /// <summary>Says something for a moment, on the line that is otherwise the shortcuts.</summary>
+    private void Flash(string line)
+    {
+        _flash = line;
+        _flashUntil = Environment.TickCount64 + FlashMs;
+        _hints.Text = line;
+    }
+
+    private void ExpireFlash()
+    {
+        if (_flash is null || Environment.TickCount64 < _flashUntil) return;
+        _flash = null;
+        _hints.Text = HintsFor();
     }
 
     /// <summary>
@@ -347,13 +413,12 @@ internal sealed class TuiScreen
     internal void FocusSteps() => _steps.FocusTarget.SetFocus();
     internal void FocusPlan() => _plan.FocusTarget.SetFocus();
 
-    private string HintsFor(View? focused)
+    private string HintsFor()
     {
         if (_input.HasFocus)
             return $"enter sends · {SessionCommand.Hint} · esc stop · ^C quit";
 
-        bool onSteps = Owns(_steps.Frame, focused);
-        return onSteps ? "↑↓ select · e/b errors · →/enter expand · ⇥ panel · esc stop"
+        return _steps.FocusTarget.HasFocus ? "↑↓ select · e/b errors · →/enter expand · ⇥ panel · esc stop"
              : _detail.FocusTarget.HasFocus ? "↑↓ scroll · →/← expand · ⇥ panel · esc stop"
              : _plan.FocusTarget.HasFocus ? "↑↓ scroll the plan · ⇥ panel · esc stop"
              : _exchange.FocusTarget.HasFocus ? "↑↓ scroll the agent's words · ⇥ panel · esc stop"
