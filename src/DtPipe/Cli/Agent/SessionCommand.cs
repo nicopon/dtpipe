@@ -3,7 +3,7 @@ using System;
 namespace DtPipe.Cli.Agent;
 
 /// <summary>What a line typed into the full-screen session's input means.</summary>
-public enum SessionCommandKind
+internal enum SessionCommandKind
 {
     /// <summary>Blank input — nothing to do.</summary>
     Empty,
@@ -44,7 +44,7 @@ public enum SessionCommandKind
 /// </summary>
 /// <param name="Kind">What the line asks for.</param>
 /// <param name="Text">The prompt, a command's argument, or the unrecognised word.</param>
-public readonly record struct SessionCommand(SessionCommandKind Kind, string Text)
+internal readonly record struct SessionCommand(SessionCommandKind Kind, string Text)
 {
     /// <summary>The commands, as the surface advertises them.</summary>
     public const string Hint = "/exec · /mode · /save · /review · /quit";

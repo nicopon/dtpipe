@@ -9,17 +9,11 @@ internal enum EditorSignal
     /// <summary>Not a shortcut — an ordinary key, handled by whichever view has focus.</summary>
     None,
 
-    /// <summary>Enter — the input line's text is complete.</summary>
-    Submit,
-
     /// <summary>Esc — a soft interrupt: cancel the model call in flight, keep the session.</summary>
     Interrupt,
 
     /// <summary>Ctrl+C — leave the agent.</summary>
     Quit,
-
-    /// <summary>Ctrl+O — cycle the scrollback detail level.</summary>
-    CycleDetail,
 
     /// <summary>Shift+Tab — cycle the operating mode.</summary>
     CycleMode,
@@ -38,26 +32,17 @@ internal enum EditorSignal
 /// </summary>
 internal static class TuiKeymap
 {
-    /// <summary>What a keypress means to the agent shell. <see cref="EditorSignal.None"/> = not a shortcut.</summary>
+    /// <summary>What a keypress means to the full-screen surface. <see cref="EditorSignal.None"/> = not a shortcut.</summary>
     public static EditorSignal Classify(Key key)
     {
         if (key is null) return EditorSignal.None;
 
         if (key.KeyCode == (KeyCode.C | KeyCode.CtrlMask)) return EditorSignal.Quit;
         if (key.KeyCode == KeyCode.Esc) return EditorSignal.Interrupt;
-        if (key.KeyCode == (KeyCode.O | KeyCode.CtrlMask)) return EditorSignal.CycleDetail;
         if (key.KeyCode == (KeyCode.Tab | KeyCode.ShiftMask)) return EditorSignal.CycleMode;
-        if (key.KeyCode == KeyCode.Enter) return EditorSignal.Submit;
 
         return EditorSignal.None;
     }
-
-    /// <summary>
-    /// Whether a signal stops the model call in flight. Both do — the difference is what survives,
-    /// which <see cref="EndsTheSession"/> decides.
-    /// </summary>
-    public static bool EndsTheTurn(EditorSignal signal)
-        => signal is EditorSignal.Quit or EditorSignal.Interrupt;
 
     /// <summary>
     /// Whether a signal ends the whole session. Only Ctrl+C does: leaving is a decision, and the
@@ -67,5 +52,4 @@ internal static class TuiKeymap
     /// </summary>
     public static bool EndsTheSession(EditorSignal signal)
         => signal is EditorSignal.Quit;
-
 }

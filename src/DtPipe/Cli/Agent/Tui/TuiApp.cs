@@ -16,9 +16,8 @@ namespace DtPipe.Cli.Agent.Tui;
 /// <see cref="TurnSummaryModel"/> the executor built.
 ///
 /// <para>
-/// Two entry points over one lifecycle: <see cref="RunSessionAsync"/> holds the application for a
-/// whole conversation — several turns, an input line between them — and <see cref="RunTurnAsync"/>
-/// is the single-turn form, with no input line and Esc ending the run.
+/// <see cref="RunSessionAsync"/> holds the application for a whole conversation — several turns,
+/// an input line between them — over one create/run/teardown lifecycle.
 /// </para>
 ///
 /// <para>
@@ -64,47 +63,25 @@ internal sealed class TuiApp
     }
 
     /// <summary>
-    /// Opens the surface, runs <paramref name="body"/> on a worker thread, and closes it. The
-    /// worker's exception — including the cancellation Ctrl+C raises — propagates to the caller
-    /// after the terminal has been restored and the transcript replayed, so an interrupted run
-    /// still reports 130 and still leaves its partial record behind.
+    /// Holds the surface for a whole conversation. <paramref name="session"/> drives it from a
+    /// worker thread: it runs turns, reads the input line between them, and returns when the user
+    /// leaves. The worker's exception — including the cancellation Ctrl+C raises — propagates to
+    /// the caller after the terminal has been restored and the transcript replayed, so an
+    /// interrupted run still reports 130 and still leaves its partial record behind.
     /// </summary>
-    /// <param name="chrome">The window title, the run's status posture, the fallback hint bar.</param>
-    /// <param name="log">The transcript the turn writes into and the flux panel displays.</param>
+    /// <param name="chrome">The window title and the run's status posture.</param>
+    /// <param name="log">The transcript the turns write into and the flux panel displays.</param>
     /// <param name="view">The turn view feeding <paramref name="log"/>; polled for the live tail.</param>
     /// <param name="trajectory">Read (via snapshot) each repaint to fill the steps and detail panels.</param>
     /// <param name="header">Polled each repaint for the clock and token meter.</param>
-    /// <param name="body">The turn. Receives a token cancelled when the user asks to stop.</param>
+    /// <param name="session">The conversation. Runs on a worker thread and drives the surface through <see cref="TuiSurface"/>.</param>
     /// <param name="ct">The caller's token; linked with the surface's own.</param>
     /// <param name="surfaceReady">
     /// Test seam: called with the live application just before the loop starts, so a test can
     /// inject keystrokes. Production passes nothing.
     /// </param>
     /// <param name="onScreen">Test seam: the layout, handed over as soon as it is built.</param>
-    public async Task<T> RunTurnAsync<T>(
-        TuiChrome chrome,
-        TranscriptLog log,
-        TuiTurnView view,
-        AgentTrajectory trajectory,
-        Func<(string Clock, string Meter)> header,
-        Func<ITurnView, CancellationToken, Task<T>> body,
-        CancellationToken ct,
-        Action<IApplication>? surfaceReady = null,
-        Action<TuiScreen>? onScreen = null)
-    {
-        T result = default!;
-        await RunCoreAsync(chrome, log, view, trajectory, header,
-            async surface => result = await body(view, surface.SessionToken),
-            interactive: false, ct, surfaceReady, onScreen);
-        return result;
-    }
-
-    /// <summary>
-    /// Holds the surface for a whole conversation. <paramref name="session"/> drives it from a
-    /// worker thread: it runs turns, reads the input line between them, and returns when the user
-    /// leaves. Same lifecycle and the same teardown-then-replay ordering as a single turn.
-    /// </summary>
-    public Task RunSessionAsync(
+    public async Task RunSessionAsync(
         TuiChrome chrome,
         TranscriptLog log,
         TuiTurnView view,
@@ -114,19 +91,6 @@ internal sealed class TuiApp
         CancellationToken ct,
         Action<IApplication>? surfaceReady = null,
         Action<TuiScreen>? onScreen = null)
-        => RunCoreAsync(chrome, log, view, trajectory, header, session, interactive: true, ct, surfaceReady, onScreen);
-
-    private async Task RunCoreAsync(
-        TuiChrome chrome,
-        TranscriptLog log,
-        TuiTurnView view,
-        AgentTrajectory trajectory,
-        Func<(string Clock, string Meter)> header,
-        Func<TuiSurface, Task> body,
-        bool interactive,
-        CancellationToken ct,
-        Action<IApplication>? surfaceReady,
-        Action<TuiScreen>? onScreen)
     {
         using var stopRequested = new CancellationTokenSource();
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, stopRequested.Token);
@@ -153,7 +117,7 @@ internal sealed class TuiApp
 
             if (_driverName is null) app.Init(); else app.Init(_driverName);
 
-            screen = new TuiScreen(chrome, interactive);
+            screen = new TuiScreen(chrome);
             onScreen?.Invoke(screen);
 
             var surface = new TuiSurface(app, screen, linked.Token);
@@ -165,17 +129,14 @@ internal sealed class TuiApp
 
                 // Raw mode swallows SIGINT: Ctrl+C is a keystroke here and nothing else will turn
                 // it back into an interrupt. Cancel everything and close the surface; the caller
-                // maps the resulting OperationCanceledException to exit 130. Without an input line
-                // there is nothing after the turn, so Esc leaves the same way.
-                if (TuiKeymap.EndsTheSession(signal) || (!interactive && TuiKeymap.EndsTheTurn(signal)))
+                // maps the resulting OperationCanceledException to exit 130.
+                if (TuiKeymap.EndsTheSession(signal))
                 {
                     key.Handled = true;
                     stopRequested.Cancel();
                     app.RequestStop();
                     return;
                 }
-
-                if (!interactive) return;
 
                 // Esc is the toolkit's own quit key. Leaving it unhandled tears the application
                 // down instead of cancelling one model call.
@@ -214,14 +175,14 @@ internal sealed class TuiApp
                 return true;
             });
 
-            // The body runs off the UI thread; RequestStop in the finally is what lets Run return
-            // on every path, including a throw. Queuing it before Run has started is safe — the
-            // request survives until the first iteration.
-            var turn = Task.Run(async () =>
+            // The session runs off the UI thread; RequestStop in the finally is what lets Run
+            // return on every path, including a throw. Queuing it before Run has started is safe —
+            // the request survives until the first iteration.
+            var worker = Task.Run(async () =>
             {
                 try
                 {
-                    await body(surface);
+                    await session(surface);
                 }
                 finally
                 {
@@ -231,11 +192,11 @@ internal sealed class TuiApp
             }, CancellationToken.None);
 
             screen.Bind(app);
-            if (interactive) screen.SetAccepting(true);
+            screen.SetAccepting(true);
             surfaceReady?.Invoke(app);
             app.Run(screen.Root);
 
-            await turn;
+            await worker;
         }
         finally
         {
@@ -383,8 +344,8 @@ internal sealed class TuiSurface
     }
 }
 
-/// <summary>The surface's static labels for one run.</summary>
+/// <summary>The surface's static labels for one run. The hint bar is not here — it is
+/// focus-dependent and built by <see cref="TuiScreen.HintsFor"/>.</summary>
 /// <param name="Title">Window title — the agent, its model and its mode.</param>
 /// <param name="Status">The run's posture, as <see cref="AgentTui.StatusText"/> words it.</param>
-/// <param name="Hints">The shortcut bar.</param>
-internal readonly record struct TuiChrome(string Title, string Status, string Hints);
+internal readonly record struct TuiChrome(string Title, string Status);

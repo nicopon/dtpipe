@@ -22,7 +22,7 @@ namespace DtPipe.Tests.Unit.Cli;
 [Collection(TerminalGuiCollection.Name)]
 public class TuiSmokeTests
 {
-    private static readonly TuiChrome Chrome = new("dtpipe agent · test", "plan · detail: compact", "^C quit");
+    private static readonly TuiChrome Chrome = new("dtpipe agent · test", "plan · detail: compact");
 
     private static (TuiApp App, IAnsiConsole Console, StringWriter Out) Build()
     {
@@ -68,7 +68,7 @@ public class TuiSmokeTests
         var view = new TuiTurnView(log);
         string screen = string.Empty;
 
-        await app.RunTurnAsync(Chrome, log, view, new AgentTrajectory(), Header,
+        await app.RunOneTurnAsync(Chrome, log, view, new AgentTrajectory(), Header,
             async (turnView, _) =>
             {
                 turnView.ToolResult("inspect", "UNIQUEMARKER42", isError: false);
@@ -98,7 +98,7 @@ public class TuiSmokeTests
         var log = new TranscriptLog();
         var view = new TuiTurnView(log);
 
-        var result = await app.RunTurnAsync(Chrome, log, view, new AgentTrajectory(), Header, async (turnView, _) =>
+        var result = await app.RunOneTurnAsync(Chrome, log, view, new AgentTrajectory(), Header, async (turnView, _) =>
         {
             turnView.ToolResult("inspect", "{\"cols\":8}", isError: false);
             await Task.Delay(30);
@@ -119,7 +119,7 @@ public class TuiSmokeTests
         var log = new TranscriptLog();
         var view = new TuiTurnView(log);
 
-        var result = await app.RunTurnAsync(Chrome, log, view, new AgentTrajectory(), Header,
+        var result = await app.RunOneTurnAsync(Chrome, log, view, new AgentTrajectory(), Header,
             (_, _) => Task.FromResult(7), CancellationToken.None);
 
         Assert.Equal(7, result);
@@ -135,7 +135,7 @@ public class TuiSmokeTests
         {
             var log = new TranscriptLog();
             var view = new TuiTurnView(log);
-            var n = await app.RunTurnAsync(Chrome, log, view, new AgentTrajectory(), Header, async (turnView, _) =>
+            var n = await app.RunOneTurnAsync(Chrome, log, view, new AgentTrajectory(), Header, async (turnView, _) =>
             {
                 turnView.ToolResult("inspect", $"turn {i}", isError: false);
                 await Task.Delay(20);
@@ -155,7 +155,7 @@ public class TuiSmokeTests
         var view = new TuiTurnView(log);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            app.RunTurnAsync<string>(Chrome, log, view, new AgentTrajectory(), Header, async (turnView, _) =>
+            app.RunOneTurnAsync<string>(Chrome, log, view, new AgentTrajectory(), Header, async (turnView, _) =>
             {
                 turnView.ToolResult("inspect", "{}", isError: false);
                 await Task.Delay(20);
@@ -174,7 +174,7 @@ public class TuiSmokeTests
         var view = new TuiTurnView(log);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            app.RunTurnAsync<int>(Chrome, log, view, new AgentTrajectory(), Header,
+            app.RunOneTurnAsync<int>(Chrome, log, view, new AgentTrajectory(), Header,
                 async (_, turnCt) =>
                 {
                     await Task.Delay(10_000, turnCt);
@@ -198,7 +198,7 @@ public class TuiSmokeTests
         Console.SetError(captured);
         try
         {
-            await app.RunTurnAsync(Chrome, log, view, new AgentTrajectory(), Header, async (_, _) =>
+            await app.RunOneTurnAsync(Chrome, log, view, new AgentTrajectory(), Header, async (_, _) =>
             {
                 await Task.Delay(20);
                 Console.Error.WriteLine("[dtpipe] Warning: something the engine wanted to say");
@@ -232,7 +232,7 @@ public class TuiSmokeTests
         try
         {
             var engineConsole = DtPipe.Cli.Infrastructure.SharedConsole.Create();
-            await app.RunTurnAsync(Chrome, log, view, new AgentTrajectory(), Header, async (_, _) =>
+            await app.RunOneTurnAsync(Chrome, log, view, new AgentTrajectory(), Header, async (_, _) =>
             {
                 await Task.Delay(20);
                 engineConsole.MarkupLine("[yellow]Pipeline Execution Plan[/]");
@@ -258,7 +258,7 @@ public class TuiSmokeTests
         var view = new TuiTurnView(log);
         using var cts = new CancellationTokenSource();
 
-        var task = app.RunTurnAsync<int>(Chrome, log, view, new AgentTrajectory(), Header, async (_, turnCt) =>
+        var task = app.RunOneTurnAsync<int>(Chrome, log, view, new AgentTrajectory(), Header, async (_, turnCt) =>
         {
             cts.Cancel();
             await Task.Delay(10_000, turnCt);

@@ -23,16 +23,8 @@ public class TuiKeymapTests
         => Assert.Equal(EditorSignal.Interrupt, TuiKeymap.Classify(Key.Esc));
 
     [Fact]
-    public void Ctrl_O_Cycles_The_Detail_Level()
-        => Assert.Equal(EditorSignal.CycleDetail, TuiKeymap.Classify(Key.O.WithCtrl));
-
-    [Fact]
     public void Shift_Tab_Cycles_The_Mode()
         => Assert.Equal(EditorSignal.CycleMode, TuiKeymap.Classify(Key.Tab.WithShift));
-
-    [Fact]
-    public void Enter_Submits()
-        => Assert.Equal(EditorSignal.Submit, TuiKeymap.Classify(Key.Enter));
 
     [Theory]
     [InlineData(KeyCode.A)]
@@ -47,18 +39,5 @@ public class TuiKeymapTests
     {
         // The modifier is the whole difference: typing "c" must never end the run.
         Assert.Equal(EditorSignal.None, TuiKeymap.Classify(Key.C));
-    }
-
-    [Fact]
-    public void Both_Quit_And_Interrupt_End_The_Turn_For_Now()
-    {
-        // Until the soft cancel lands, Esc stops the run exactly like Ctrl+C.
-        Assert.True(TuiKeymap.EndsTheTurn(EditorSignal.Quit));
-        Assert.True(TuiKeymap.EndsTheTurn(EditorSignal.Interrupt));
-
-        Assert.False(TuiKeymap.EndsTheTurn(EditorSignal.None));
-        Assert.False(TuiKeymap.EndsTheTurn(EditorSignal.Submit));
-        Assert.False(TuiKeymap.EndsTheTurn(EditorSignal.CycleDetail));
-        Assert.False(TuiKeymap.EndsTheTurn(EditorSignal.CycleMode));
     }
 }

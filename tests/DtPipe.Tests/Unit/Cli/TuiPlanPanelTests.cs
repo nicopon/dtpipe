@@ -20,7 +20,7 @@ namespace DtPipe.Tests.Unit.Cli;
 [Collection(TerminalGuiCollection.Name)]
 public class TuiPlanPanelTests
 {
-    private static readonly TuiChrome Chrome = new("dtpipe agent · test", "plan · detail: compact", "^C quit");
+    private static readonly TuiChrome Chrome = new("dtpipe agent · test", "plan · detail: compact");
 
     private static (string Clock, string Meter) Header() => ("3s", "42 tok");
 
@@ -53,7 +53,7 @@ public class TuiPlanPanelTests
         TuiScreen? screen = null;
         string planText = string.Empty;
 
-        await app.RunTurnAsync(Chrome, log, view, new AgentTrajectory(), Header,
+        await app.RunOneTurnAsync(Chrome, log, view, new AgentTrajectory(), Header,
             async (turnView, _) =>
             {
                 turnView.PlanUpdated(PlanYaml);

@@ -24,7 +24,7 @@ namespace DtPipe.Tests.Unit.Cli;
 [Collection(TerminalGuiCollection.Name)]
 public class TuiReplayTests
 {
-    private static readonly TuiChrome Chrome = new("dtpipe agent · test", "plan · detail: compact", "^C quit");
+    private static readonly TuiChrome Chrome = new("dtpipe agent · test", "plan · detail: compact");
 
     private static (TuiApp App, StringWriter Out) Build()
     {
@@ -50,7 +50,7 @@ public class TuiReplayTests
         var log = new TranscriptLog();
         var view = new TuiTurnView(log);
 
-        var done = await app.RunTurnAsync(Chrome, log, view, new AgentTrajectory(), Header, async (turnView, _) =>
+        var done = await app.RunOneTurnAsync(Chrome, log, view, new AgentTrajectory(), Header, async (turnView, _) =>
         {
             turnView.ToolResult("inspect", "{\"cols\":8}", isError: false);
             turnView.AgentResponse("here is the plan");
@@ -72,7 +72,7 @@ public class TuiReplayTests
         var view = new TuiTurnView(log);
 
         await Assert.ThrowsAsync<OperationCanceledException>(() =>
-            app.RunTurnAsync<string>(Chrome, log, view, new AgentTrajectory(), Header, async (turnView, _) =>
+            app.RunOneTurnAsync<string>(Chrome, log, view, new AgentTrajectory(), Header, async (turnView, _) =>
             {
                 turnView.ToolResult("inspect", "{}", isError: false);
                 await Task.Delay(20);
@@ -92,7 +92,7 @@ public class TuiReplayTests
         var view = new TuiTurnView(log);
 
         await Assert.ThrowsAsync<OperationCanceledException>(() =>
-            app.RunTurnAsync<string>(Chrome, log, view, new AgentTrajectory(), Header, async (turnView, _) =>
+            app.RunOneTurnAsync<string>(Chrome, log, view, new AgentTrajectory(), Header, async (turnView, _) =>
             {
                 await turnView.StreamingStepAsync(1, 25, AgentDetailLevel.Compact, obs =>
                 {
@@ -115,7 +115,7 @@ public class TuiReplayTests
         var view = new TuiTurnView(log);
         string duringTurn = "(not sampled)";
 
-        await app.RunTurnAsync(Chrome, log, view, new AgentTrajectory(), Header, async (turnView, _) =>
+        await app.RunOneTurnAsync(Chrome, log, view, new AgentTrajectory(), Header, async (turnView, _) =>
         {
             turnView.ToolResult("inspect", "{\"cols\":8}", isError: false);
             await Task.Delay(40);

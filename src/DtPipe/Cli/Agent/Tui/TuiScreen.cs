@@ -12,10 +12,10 @@ namespace DtPipe.Cli.Agent.Tui;
 
 /// <summary>
 /// The full-screen layout: a steps list on the left, its detail and the plan/DAG stacked on the
-/// right, the running transcript in a band below, then a status line, a focus-aware hint bar and —
-/// in a session — the input line. Tab moves between the focusable panels; the detail panel mirrors
-/// the steps selection, the plan panel tracks the plan the agent is building. <see cref="Sync"/>
-/// and <see cref="SyncPlan"/> are the update points, driven by the repaint timer on the UI thread
+/// right, the running transcript in a band below, then a status line, a focus-aware hint bar and
+/// the input line. Tab moves between the focusable panels; the detail panel mirrors the steps
+/// selection, the plan panel tracks the plan the agent is building. <see cref="Sync"/> and
+/// <see cref="SyncPlan"/> are the update points, driven by the repaint timer on the UI thread
 /// from thread-safe snapshots.
 ///
 /// <para>
@@ -31,7 +31,6 @@ internal sealed class TuiScreen
     internal const int StepsWidth = 34;
     internal const int FluxHeight = 6;
     // rows reserved at the bottom: the flux band + the status line + the hint bar + the input line.
-    // The input row is reserved even when no session owns it, so one layout serves both entry points.
     internal const int BottomChrome = FluxHeight + 3;
     // The plan panel splits the right column: detail on top, plan (this many rows) below it.
     internal const int PlanHeight = 7;
@@ -45,7 +44,6 @@ internal sealed class TuiScreen
     private readonly Label _hints;
     private readonly Label _caret;
     private readonly TextField _input;
-    private readonly bool _interactive;
 
     private bool _expanded;
     private string _title;
@@ -57,29 +55,24 @@ internal sealed class TuiScreen
     public event Action<string>? Submitted;
 
     /// <param name="chrome">The static labels for the run.</param>
-    /// <param name="interactive">
-    /// True for a session that reads input between turns. False leaves the input row blank and out
-    /// of the focus ring, which is what the single-turn entry point wants.
-    /// </param>
-    public TuiScreen(TuiChrome chrome, bool interactive = false)
+    public TuiScreen(TuiChrome chrome)
     {
         _title = chrome.Title;
         _posture = chrome.Status;
-        _interactive = interactive;
         _window = new Window { Title = chrome.Title };
 
         _status = new Label { X = 0, Y = Pos.AnchorEnd(3), Width = Dim.Fill(), Text = chrome.Status };
         _hints = new Label { X = 0, Y = Pos.AnchorEnd(2), Width = Dim.Fill(), Text = HintsFor(null) };
-        _caret = new Label { X = 0, Y = Pos.AnchorEnd(1), Width = 2, Text = interactive ? "› " : "  " };
+        _caret = new Label { X = 0, Y = Pos.AnchorEnd(1), Width = 2, Text = "› " };
         _input = new TextField
         {
             X = 2,
             Y = Pos.AnchorEnd(1),
             Width = Dim.Fill(),
             Height = 1,
-            CanFocus = interactive,
-            Visible = interactive,
-            ReadOnly = !interactive,
+            CanFocus = true,
+            Visible = true,
+            ReadOnly = false,
         };
 
         _window.Add(_steps.Frame, _detail.Frame, _plan.Frame, _flux.Frame, _status, _hints, _caret, _input);
@@ -98,7 +91,7 @@ internal sealed class TuiScreen
 
         app.Keyboard.KeyDown += (_, key) => OnKey(key, nav?.GetFocused());
 
-        if (_interactive) _input.SetFocus(); else _steps.FocusTarget.SetFocus();
+        _input.SetFocus();
     }
 
     /// <summary>
@@ -108,7 +101,6 @@ internal sealed class TuiScreen
     /// </summary>
     public void SetAccepting(bool accepting)
     {
-        if (!_interactive) return;
         _accepting = accepting;
         _input.ReadOnly = !accepting;
         _caret.Text = accepting ? "› " : "⏳ ";
@@ -155,7 +147,7 @@ internal sealed class TuiScreen
     /// </summary>
     private void OnKey(Key key, View? focused)
     {
-        bool onInput = _interactive && ReferenceEquals(focused, _input);
+        bool onInput = ReferenceEquals(focused, _input);
 
         if (key.KeyCode == KeyCode.Tab)
         {
@@ -192,11 +184,11 @@ internal sealed class TuiScreen
         }
     }
 
-    /// <summary>Steps → Flux → input (when a session owns it) → Steps.</summary>
+    /// <summary>Steps → Flux → input → Steps.</summary>
     private View NextInRing(View? focused)
     {
         if (Owns(_steps.Frame, focused)) return _flux.FocusTarget;
-        if (Owns(_flux.Frame, focused)) return _interactive ? _input : _steps.FocusTarget;
+        if (Owns(_flux.Frame, focused)) return _input;
         return _steps.FocusTarget;
     }
 
@@ -214,7 +206,7 @@ internal sealed class TuiScreen
 
     private string HintsFor(View? focused)
     {
-        if (_interactive && ReferenceEquals(focused, _input))
+        if (ReferenceEquals(focused, _input))
             return $"enter run · {SessionCommand.Hint} · esc stop · ^C quit";
 
         bool onSteps = Owns(_steps.Frame, focused);

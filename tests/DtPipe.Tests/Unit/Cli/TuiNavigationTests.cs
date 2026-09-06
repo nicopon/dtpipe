@@ -23,7 +23,7 @@ namespace DtPipe.Tests.Unit.Cli;
 [Collection(TerminalGuiCollection.Name)]
 public class TuiNavigationTests
 {
-    private static readonly TuiChrome Chrome = new("dtpipe agent · test", "plan · detail: compact", "^C quit");
+    private static readonly TuiChrome Chrome = new("dtpipe agent · test", "plan · detail: compact");
 
     private static (string Clock, string Meter) Header() => ("3s", "42 tok");
 
@@ -61,7 +61,7 @@ public class TuiNavigationTests
         TuiScreen? screen = null;
         Exception? failure = null;
 
-        await app.RunTurnAsync(Chrome, log, view, trajectory, Header,
+        await app.RunOneTurnAsync(Chrome, log, view, trajectory, Header,
             async (_, turnCt) =>
             {
                 using var reg = turnCt.Register(() => stop.TrySetResult());

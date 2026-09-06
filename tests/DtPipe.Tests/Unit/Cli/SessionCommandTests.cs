@@ -26,20 +26,22 @@ public class SessionCommandTests
         Assert.Equal("anonymize the email column", command.Text);
     }
 
+    // SessionCommandKind is internal, so a public theory cannot take it as a parameter (CS0051);
+    // the expected kind travels as its name and is compared against Kind.ToString().
     [Theory]
-    [InlineData("/exec", SessionCommandKind.Execute)]
-    [InlineData("/execute", SessionCommandKind.Execute)]
-    [InlineData("/run", SessionCommandKind.Execute)]
-    [InlineData("/mode", SessionCommandKind.Mode)]
-    [InlineData("/save", SessionCommandKind.Save)]
-    [InlineData("/review", SessionCommandKind.Review)]
-    [InlineData("/steps", SessionCommandKind.Review)]
-    [InlineData("/quit", SessionCommandKind.Quit)]
-    [InlineData("/exit", SessionCommandKind.Quit)]
-    [InlineData("/q", SessionCommandKind.Quit)]
-    [InlineData("/help", SessionCommandKind.Help)]
-    public void The_Commands_Are_Recognised(string line, SessionCommandKind expected)
-        => Assert.Equal(expected, SessionCommand.Parse(line).Kind);
+    [InlineData("/exec", "Execute")]
+    [InlineData("/execute", "Execute")]
+    [InlineData("/run", "Execute")]
+    [InlineData("/mode", "Mode")]
+    [InlineData("/save", "Save")]
+    [InlineData("/review", "Review")]
+    [InlineData("/steps", "Review")]
+    [InlineData("/quit", "Quit")]
+    [InlineData("/exit", "Quit")]
+    [InlineData("/q", "Quit")]
+    [InlineData("/help", "Help")]
+    public void The_Commands_Are_Recognised(string line, string expected)
+        => Assert.Equal(expected, SessionCommand.Parse(line).Kind.ToString());
 
     [Fact]
     public void A_Command_Is_Case_Insensitive_And_Keeps_Its_Argument()
