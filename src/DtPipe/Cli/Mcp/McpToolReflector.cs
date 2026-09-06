@@ -83,6 +83,18 @@ public static class McpToolReflector
         return tools;
     }
 
+    /// <summary>The tool name a method is exposed under, or null when it is not a tool.</summary>
+    private static string? ToolNameOf(MethodInfo method)
+    {
+        var attr = method.GetCustomAttribute<McpServerToolAttribute>();
+        if (attr is null) return null;
+        return !string.IsNullOrEmpty(attr.Name) ? attr.Name : method.Name;
+    }
+
+    /// <summary>A tool name reduced to what carries meaning: its letters, in one case.</summary>
+    private static string Normalise(string name) =>
+        name.Replace("-", string.Empty).Replace("_", string.Empty).ToLowerInvariant();
+
     /// <summary>
     /// Dynamically invokes an [McpServerTool] method on the target instance by tool name,
     /// deserializing JsonElement arguments to parameter types.
@@ -90,18 +102,29 @@ public static class McpToolReflector
     public static async Task<string> InvokeToolAsync(object instance, string toolName, JsonElement args, CancellationToken ct)
     {
         var targetType = instance.GetType();
-        var method = targetType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
-            .FirstOrDefault(m =>
-            {
-                var attr = m.GetCustomAttribute<McpServerToolAttribute>();
-                if (attr == null) return false;
-                var name = !string.IsNullOrEmpty(attr.Name) ? attr.Name : m.Name;
-                return string.Equals(name, toolName, StringComparison.OrdinalIgnoreCase);
-            });
+        var candidates = targetType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+            .Select(m => (Method: m, Name: ToolNameOf(m)))
+            .Where(x => x.Name is not null)
+            .ToList();
+
+        // A model writes preview_data as readily as preview-data, and the separator carries no
+        // meaning — matching on it turns a spelling into a dead end. The same normalisation already
+        // binds CLI option keys, and the ask-user terminator already tolerated the underscore on its
+        // own; this is that tolerance made general instead of granted to one name.
+        var method = candidates
+            .FirstOrDefault(x => string.Equals(Normalise(x.Name!), Normalise(toolName), StringComparison.Ordinal))
+            .Method;
 
         if (method == null)
         {
-            return JsonSerializer.Serialize(new { error = $"Unknown tool '{toolName}'." });
+            // Naming what does exist is the difference between one wasted call and several: a model
+            // told only that its guess was wrong has nothing to go on but another guess.
+            var available = candidates.Select(x => x.Name!).OrderBy(n => n, StringComparer.Ordinal).ToArray();
+            return JsonSerializer.Serialize(new
+            {
+                error = $"Unknown tool '{toolName}'.",
+                availableTools = available,
+            });
         }
 
         var parameters = method.GetParameters();

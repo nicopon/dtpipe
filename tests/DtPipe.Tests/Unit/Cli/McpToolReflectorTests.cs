@@ -80,6 +80,27 @@ public class McpToolReflectorTests
         Assert.Contains("hello world", resultJson);
     }
 
+    /// <summary>
+    /// A model writes sample_tool as readily as sample-tool and the separator carries no meaning.
+    /// Matching on it turns a spelling into a dead end — a real trace shows one model spending two
+    /// of its ten iterations discovering that the underscore was the problem.
+    /// </summary>
+    [Theory]
+    [InlineData("sample-tool")]
+    [InlineData("sample_tool")]
+    [InlineData("SampleTool")]
+    [InlineData("Sample_Tool")]
+    public async Task InvokeToolAsync_Tolerates_The_Separator_A_Model_Chose(string spelling)
+    {
+        var dummy = new DummyMcpTools();
+        using var argsDoc = JsonDocument.Parse(@"{ ""input"": ""test.csv"", ""limit"": 10 }");
+
+        var resultJson = await McpToolReflector.InvokeToolAsync(dummy, spelling, argsDoc.RootElement, CancellationToken.None);
+
+        Assert.Contains("test.csv", resultJson);
+        Assert.DoesNotContain("Unknown tool", resultJson);
+    }
+
     [Fact]
     public async Task InvokeToolAsync_UnknownTool_ReturnsErrorJson()
     {
@@ -89,6 +110,9 @@ public class McpToolReflectorTests
         var resultJson = await McpToolReflector.InvokeToolAsync(dummy, "nonexistent", argsDoc.RootElement, CancellationToken.None);
 
         Assert.Contains("Unknown tool", resultJson);
+        // A model told only that its guess was wrong has nothing to go on but another guess: a
+        // real trace shows one spending two of its ten iterations on exactly that.
+        Assert.Contains("availableTools", resultJson);
         Assert.True(ToolResult.FromJson(resultJson).IsError);
     }
 }
