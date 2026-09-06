@@ -7,37 +7,66 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// Voie 4 §6 (suite 2) lot E2: the full-screen surface's keyboard contract, asserted without
-/// starting an application. The Ctrl+C case is the one that matters most — the toolkit puts the
-/// terminal in raw mode, so Ctrl+C is a keystroke and no SIGINT is raised; if this map stops
-/// classifying it, an interrupted run reports success instead of 130 (F16).
+/// Voie 4 §6 (suite 2) lot E2 / R4: the full-screen surface's keyboard contract, asserted without
+/// starting an application. <see cref="TuiKeymap"/> is the surface's one keyboard authority — every
+/// shortcut it acts on is named here, including the navigation keys the steps panel reads. The
+/// Ctrl+C case is the one that matters most — the toolkit puts the terminal in raw mode, so Ctrl+C
+/// is a keystroke and no SIGINT is raised; if this map stops classifying it, an interrupted run
+/// reports success instead of 130 (F16).
 /// </summary>
 public class TuiKeymapTests
 {
     [Fact]
     public void Ctrl_C_Is_A_Quit()
-        => Assert.Equal(EditorSignal.Quit, TuiKeymap.Classify(Key.C.WithCtrl));
+        => Assert.Equal(SurfaceSignal.Quit, TuiKeymap.Classify(Key.C.WithCtrl));
 
     [Fact]
     public void Esc_Is_An_Interrupt()
-        => Assert.Equal(EditorSignal.Interrupt, TuiKeymap.Classify(Key.Esc));
+        => Assert.Equal(SurfaceSignal.Interrupt, TuiKeymap.Classify(Key.Esc));
 
     [Fact]
     public void Shift_Tab_Cycles_The_Mode()
-        => Assert.Equal(EditorSignal.CycleMode, TuiKeymap.Classify(Key.Tab.WithShift));
+        => Assert.Equal(SurfaceSignal.CycleMode, TuiKeymap.Classify(Key.Tab.WithShift));
+
+    [Fact]
+    public void Plain_Tab_Moves_To_The_Next_Panel()
+        => Assert.Equal(SurfaceSignal.FocusNext, TuiKeymap.Classify(Key.Tab));
+
+    [Fact]
+    public void Enter_Is_A_Submit()
+        => Assert.Equal(SurfaceSignal.Submit, TuiKeymap.Classify(Key.Enter));
+
+    [Fact]
+    public void E_And_B_Are_Error_Navigation()
+    {
+        // Classify names the signal a key *could* carry, unconditionally; TuiScreen.OnKey stays the
+        // arbiter of whether the focused panel wants it — e/b are letters on the input line and
+        // error jumps on the steps panel. A context-aware classifier is the two-authorities defect
+        // R4 closed.
+        Assert.Equal(SurfaceSignal.NextError, TuiKeymap.Classify(Key.E));
+        Assert.Equal(SurfaceSignal.PrevError, TuiKeymap.Classify(Key.B));
+    }
+
+    [Fact]
+    public void The_Arrows_Expand_And_Collapse_The_Detail()
+    {
+        Assert.Equal(SurfaceSignal.Expand, TuiKeymap.Classify(Key.CursorRight));
+        Assert.Equal(SurfaceSignal.Collapse, TuiKeymap.Classify(Key.CursorLeft));
+    }
 
     [Theory]
     [InlineData(KeyCode.A)]
     [InlineData(KeyCode.Z)]
     [InlineData(KeyCode.Space)]
     [InlineData(KeyCode.CursorDown)]
+    [InlineData(KeyCode.CursorUp)]
     public void Ordinary_Keys_Are_Not_Shortcuts(KeyCode code)
-        => Assert.Equal(EditorSignal.None, TuiKeymap.Classify(code));
+        => Assert.Equal(SurfaceSignal.None, TuiKeymap.Classify(code));
 
     [Fact]
     public void A_Bare_C_Is_Not_A_Quit()
     {
         // The modifier is the whole difference: typing "c" must never end the run.
-        Assert.Equal(EditorSignal.None, TuiKeymap.Classify(Key.C));
+        Assert.Equal(SurfaceSignal.None, TuiKeymap.Classify(Key.C));
     }
 }

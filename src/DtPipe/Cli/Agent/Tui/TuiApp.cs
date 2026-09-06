@@ -155,7 +155,7 @@ internal sealed class TuiApp
 
                 // Esc is the toolkit's own quit key. Leaving it unhandled tears the application
                 // down instead of cancelling one model call.
-                if (signal == EditorSignal.Interrupt)
+                if (signal == SurfaceSignal.Interrupt)
                 {
                     key.Handled = true;
                     surface.RequestSoftCancel();
@@ -164,7 +164,7 @@ internal sealed class TuiApp
 
                 // Shift+Tab would otherwise walk the focus ring backwards. The mode cycle goes
                 // through the command path, which drops it while a turn is running (F1).
-                if (signal == EditorSignal.CycleMode)
+                if (signal == SurfaceSignal.CycleMode)
                 {
                     key.Handled = true;
                     surface.OfferLine("/mode");

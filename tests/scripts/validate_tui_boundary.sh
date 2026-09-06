@@ -14,6 +14,12 @@ set -e
 # is owned by AgentTui.ReportTurn alone. When the scrollback path and the full-screen session each
 # ordered those renders themselves, the copies drifted and one printed plan-next-steps on a stale
 # plan.
+#
+# Check 5 is the same shape once more — which code decides what a key means. TuiKeymap.Classify
+# names every shortcut the full-screen surface acts on; no panel and no screen reads a raw KeyCode.
+# When TuiScreen decided Tab / Enter / e / b / arrows from raw KeyCode while TuiKeymap claimed to be
+# the keymap, the contract lived in two places and drifted — the keymap grew values nothing
+# consumed and the screen consumed keys nothing named.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -68,6 +74,16 @@ if [ -n "$offenders" ]; then
     fail "the turn verdict is sequenced outside AgentTui.ReportTurn"
 fi
 pass "the turn verdict has one author (AgentTui.ReportTurn)"
+
+# 5. One keyboard authority. TuiKeymap.Classify names every shortcut the full-screen surface acts
+#    on; a raw KeyCode literal anywhere else in the surface is a second keymap.
+offenders="$(cd "$PROJECT_ROOT" && grep -rn "KeyCode\." "${TUI_DIR}" --include="*.cs" 2>/dev/null \
+    | grep -v "/obj/" | grep -v "/bin/" | grep -v "${TUI_DIR}/TuiKeymap.cs" || true)"
+if [ -n "$offenders" ]; then
+    echo "$offenders" | sed 's/^/    /'
+    fail "a KeyCode literal lives outside TuiKeymap.cs — the keyboard contract has two authors"
+fi
+pass "the keyboard contract has one author (TuiKeymap.Classify)"
 
 echo ""
 echo -e "${GREEN}TUI boundary intact.${NC}"

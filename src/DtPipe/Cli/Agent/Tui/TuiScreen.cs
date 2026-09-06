@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using DtPipe.Cli.Agent;
 using DtPipe.Cli.Agent.Tui.Panels;
 using Terminal.Gui.App;
-using Terminal.Gui.Drivers;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
@@ -140,16 +139,19 @@ internal sealed class TuiScreen
     private void RenderDetail() => _detail.Show(_steps.Selected, _expanded);
 
     /// <summary>
-    /// Shortcuts handled above the panels: plain Tab moves around the focus ring (a FrameView is a
-    /// tab *group*, so its own Tab stays inside — this flattens them), Enter on the input line
-    /// submits, and while the steps panel has focus <c>e</c>/<c>b</c> jump between errors and
-    /// Right/Enter/Left expand or collapse the detail. Up/Down are left for the list itself.
+    /// Shortcuts handled above the panels, every one of them named by <see cref="TuiKeymap"/> — this
+    /// method reads signals, never a raw key. <see cref="SurfaceSignal.FocusNext"/> moves around the
+    /// focus ring from anywhere (a FrameView is a tab *group*, so its own Tab stays inside — this
+    /// flattens them). On the input line only <see cref="SurfaceSignal.Submit"/> is a shortcut;
+    /// every other key is typing. While the steps panel has focus <c>e</c>/<c>b</c> jump between
+    /// errors and Right/Enter/Left expand or collapse the detail. Up/Down are left for the list.
     /// </summary>
     private void OnKey(Key key, View? focused)
     {
         bool onInput = ReferenceEquals(focused, _input);
+        var signal = TuiKeymap.Classify(key);
 
-        if (key.KeyCode == KeyCode.Tab)
+        if (signal == SurfaceSignal.FocusNext)
         {
             key.Handled = true;
             NextInRing(focused).SetFocus();
@@ -158,7 +160,7 @@ internal sealed class TuiScreen
 
         if (onInput)
         {
-            if (key.KeyCode != KeyCode.Enter) return;   // everything else is typing
+            if (signal != SurfaceSignal.Submit) return;   // everything else is typing
             key.Handled = true;
             if (!_accepting) return;
             var line = _input.Text ?? string.Empty;
@@ -169,17 +171,13 @@ internal sealed class TuiScreen
 
         if (!Owns(_steps.Frame, focused)) return;
 
-        switch (key.AsRune.Value)
+        switch (signal)
         {
-            case 'e': _steps.JumpToError(+1); key.Handled = true; return;
-            case 'b': _steps.JumpToError(-1); key.Handled = true; return;
-        }
-
-        switch (key.KeyCode)
-        {
-            case KeyCode.CursorRight or KeyCode.Enter:
+            case SurfaceSignal.NextError: _steps.JumpToError(+1); key.Handled = true; return;
+            case SurfaceSignal.PrevError: _steps.JumpToError(-1); key.Handled = true; return;
+            case SurfaceSignal.Expand or SurfaceSignal.Submit:
                 _expanded = true; RenderDetail(); key.Handled = true; return;
-            case KeyCode.CursorLeft:
+            case SurfaceSignal.Collapse:
                 _expanded = false; RenderDetail(); key.Handled = true; return;
         }
     }
