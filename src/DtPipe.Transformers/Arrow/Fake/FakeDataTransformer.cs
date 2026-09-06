@@ -282,10 +282,14 @@ public sealed partial class FakeDataTransformer : BaseColumnarTransformer, IRequ
 
 		// Builders for fake columns and virtual columns only.
 		IArrowArrayBuilder?[] builders = new IArrowArrayBuilder?[totalColumns];
+		Action<object?>?[] appenders = new Action<object?>?[totalColumns];
 		for (int i = 0; i < totalColumns; i++)
 		{
 			if (hasFakeForCol[i])
+			{
 				builders[i] = ArrowTypeMapper.CreateBuilder(outputFields[i].DataType);
+				appenders[i] = ArrowTypeMapper.ResolveAppender(builders[i]!);
+			}
 		}
 
 		// Row buffer for template substitution (needs real column values even for non-fake cols).
@@ -354,8 +358,7 @@ public sealed partial class FakeDataTransformer : BaseColumnarTransformer, IRequ
 			// 4. Append to fake column builders only
 			for (int colIdx = 0; colIdx < totalColumns; colIdx++)
 			{
-				if (builders[colIdx] is not null)
-					ArrowTypeMapper.AppendValue(builders[colIdx]!, rowBuffer[colIdx]);
+				appenders[colIdx]?.Invoke(rowBuffer[colIdx]);
 			}
 		}
 

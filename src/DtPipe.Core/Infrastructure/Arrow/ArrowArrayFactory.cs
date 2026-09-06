@@ -9,10 +9,11 @@ public static class ArrowArrayFactory
     {
         var logicalResult = ArrowTypeMapper.GetLogicalType(clrType);
         var builder = ArrowTypeMapper.CreateBuilder(logicalResult.ArrowType);
+        var append = ArrowTypeMapper.ResolveAppender(builder);
 
         foreach (var val in data)
         {
-            ArrowTypeMapper.AppendValue(builder, val);
+            append(val);
         }
 
         return ArrowTypeMapper.BuildArray(builder);

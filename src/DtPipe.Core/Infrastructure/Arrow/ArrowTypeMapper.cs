@@ -188,6 +188,27 @@ public static class ArrowTypeMapper
         throw new NotSupportedException($"Unsupported builder type for AppendValue: {builder.GetType().Name}");
     }
 
+    /// <summary>
+    /// Resolves the handler for <paramref name="builder"/> once and binds it to that builder.
+    /// Hold the result for the builder's lifetime and invoke it per cell: the handler a builder
+    /// needs is fixed for the whole column, but <see cref="AppendValue"/> rescans the list on
+    /// every call, costing a closure and a delegate allocation per value. Same rule the row
+    /// writers follow for their converters — resolve once per column, never per cell.
+    /// </summary>
+    /// <remarks>
+    /// The builder is captured, not taken as a parameter, so an appender cannot be paired with a
+    /// builder of another type. <c>ScalarArrowHandler.AppendValue</c> drops a value whose builder
+    /// does not match its own, with no exception: such a mismatch would lose cells silently while
+    /// column counts still lined up.
+    /// </remarks>
+    public static Action<object?> ResolveAppender(IArrowArrayBuilder builder)
+    {
+        var handler = _handlers.FirstOrDefault(h => h.CanHandle(builder))
+            ?? throw new NotSupportedException($"Unsupported builder type for AppendValue: {builder.GetType().Name}");
+
+        return value => handler.AppendValue(builder, value);
+    }
+
 
     public static void AppendArrayValue(IArrowArrayBuilder builder, IArrowArray array, int index)
     {

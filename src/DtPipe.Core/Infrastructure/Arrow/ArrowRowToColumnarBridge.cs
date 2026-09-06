@@ -135,7 +135,9 @@ public sealed class ArrowRowToColumnarBridge : IRowToColumnarBridge
             await _outputChannel.Writer.WriteAsync(batch, ct);
         }
 
-        // Re-initialize for next batch
+        // Re-initialize for next batch. Each appender is bound to the builder it was resolved
+        // from, so the two must be rebuilt together: one left pointing at a flushed builder
+        // would append into an array nobody reads, losing rows with the batch count intact.
         _builders = CreateBuilders(_schema);
         _appenders = CreateAppenders(_builders);
         _rowsInBuffer = 0;
@@ -162,19 +164,14 @@ public sealed class ArrowRowToColumnarBridge : IRowToColumnarBridge
 
     private IArrowArrayBuilder CreateBuilder(IArrowType type) => ArrowTypeMapper.CreateBuilder(type);
 
-    private Action<object?>[] CreateAppenders(List<IArrowArrayBuilder> builders)
+    private static Action<object?>[] CreateAppenders(List<IArrowArrayBuilder> builders)
     {
         var appenders = new Action<object?>[builders.Count];
         for (int i = 0; i < builders.Count; i++)
         {
-            appenders[i] = CreateAppender(builders[i]);
+            appenders[i] = ArrowTypeMapper.ResolveAppender(builders[i]);
         }
         return appenders;
-    }
-
-    private Action<object?> CreateAppender(IArrowArrayBuilder builder)
-    {
-        return val => ArrowTypeMapper.AppendValue(builder, val);
     }
 
     public async ValueTask DisposeAsync()

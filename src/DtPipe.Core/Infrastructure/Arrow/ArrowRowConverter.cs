@@ -17,12 +17,13 @@ public static class ArrowRowConverter
     public static RecordBatch ToRecordBatch(Schema schema, IEnumerable<IReadOnlyList<object?>> rows, int count)
     {
         var builders = schema.FieldsList.Select(f => ArrowTypeMapper.CreateBuilder(f.DataType)).ToList();
-        
+        var appenders = builders.Select(ArrowTypeMapper.ResolveAppender).ToArray();
+
         foreach (var row in rows)
         {
-            for (int i = 0; i < builders.Count; i++)
+            for (int i = 0; i < appenders.Length; i++)
             {
-                ArrowTypeMapper.AppendValue(builders[i], row[i]);
+                appenders[i](row[i]);
             }
         }
 

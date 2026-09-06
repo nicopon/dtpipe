@@ -64,6 +64,39 @@ public class ArrowRowToColumnarBridgeTests
 		((TimestampType)outputField.DataType).Timezone.Should().Be("Europe/Paris");
 	}
 
+	/// <summary>
+	/// Every flush discards its builders and resolves a fresh appender per column against the
+	/// replacements. An appender left bound to a flushed builder appends into an array nobody
+	/// reads: the batch count still comes out right and the rows are simply gone. Nothing else
+	/// in this suite crosses a batch boundary, so nothing else would catch it.
+	/// </summary>
+	[Fact]
+	public async Task IngestRowsAsync_ShouldKeepEveryValue_WhenIngestSpansSeveralBatches()
+	{
+		var bridge = new ArrowRowToColumnarBridge();
+		var columns = new List<PipeColumnInfo> { new("Id", typeof(int), false) };
+
+		await bridge.InitializeAsync(columns, batchSize: 10, overrideSchema: null);
+
+		var ingestTask = Task.Run(async () =>
+		{
+			for (int i = 0; i < 25; i++)
+				await bridge.IngestRowsAsync(new ReadOnlyMemory<object?[]>(new[] { new object?[] { i } }));
+			await bridge.CompleteAsync();
+		});
+
+		var batches = await bridge.ReadRecordBatchesAsync().ToListAsync();
+		await ingestTask;
+
+		batches.Should().HaveCount(3, "25 rows at a batch size of 10 flush twice, then once on completion");
+
+		var values = batches.SelectMany(b => Enumerable
+			.Range(0, b.Length)
+			.Select(i => ArrowTypeMapper.GetValueForField(b.Column(0), b.Schema.GetFieldByIndex(0), i)));
+
+		values.Should().Equal(Enumerable.Range(0, 25).Select(i => (object?)i));
+	}
+
 	[Fact]
 	public async Task InitializeAsync_ShouldFallbackToPipeColumnInfo_WhenNoOverrideSchema()
 	{

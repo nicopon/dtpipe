@@ -184,11 +184,12 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
 	{
 		// Fallback: build manually via builder
 		var builder = ArrowTypeMapper.CreateBuilder(original.Data.DataType);
+		var append = ArrowTypeMapper.ResolveAppender(builder);
 		for (int i = 0; i < mask.Length; i++)
 		{
 			if (mask[i])
 			{
-				ArrowTypeMapper.AppendValue(builder, ArrowTypeMapper.GetValue(original, i));
+				append(ArrowTypeMapper.GetValue(original, i));
 			}
 		}
 		return ArrowTypeMapper.BuildArray(builder);

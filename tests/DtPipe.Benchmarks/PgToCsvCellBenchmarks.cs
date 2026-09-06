@@ -228,12 +228,12 @@ public class PgToCsvCellBenchmarks
     public object? B7_Extract_Int32() => ExtractColumn(_int32Batch);
 
     /// <summary>
-    /// The other direction, which only a mixed pipeline pays: rows back into Arrow,
-    /// via ArrowRowConverter.ToRecordBatch. It calls ArrowTypeMapper.AppendValue once
-    /// per cell, and AppendValue resolves its builder handler with a LINQ
-    /// FirstOrDefault over the handler list — a closure allocation and a linear scan
-    /// on every single value. Compare against B1: the two directions of the same
-    /// bridge are not symmetric, and the macro bench (B19) only sees their sum.
+    /// The direction a row reader feeding a columnar writer pays on every cell — CSV to
+    /// Parquet is the canonical shape — and a mixed pipeline pays on top of B1. Rows go
+    /// back into Arrow via ArrowRowConverter.ToRecordBatch, which resolves one appender
+    /// per column and reuses it for the whole batch. Compare against B1: the two
+    /// directions of the same bridge are not symmetric, and the macro bench (B19) only
+    /// sees their sum.
     /// </summary>
     [Benchmark(Description = "B8 Bridge — rows back to columnar (ArrowRowConverter)")]
     public RecordBatch B8_Bridge_RowsToColumnar() =>
