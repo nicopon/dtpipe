@@ -161,7 +161,7 @@ public static class OptionBinder
             {
                 if (ignoreUnknownKeys)
                     continue;
-                var message = $"Unrecognized provider option '{key}' for '{target.GetType().Name}'. Check the option name against 'dtpipe providers' output.";
+                var message = DescribeUnknownKey(target.GetType(), key);
                 if (strict)
                     throw new InvalidOperationException(message);
                 Console.Error.WriteLine($"[dtpipe] Warning: {message}");
@@ -185,6 +185,66 @@ public static class OptionBinder
 
     private static string NormalizeKey(string key)
         => key.Replace("-", "").Replace("_", "").ToLowerInvariant();
+
+    /// <summary>
+    /// Why <paramref name="key"/> did not bind, and what to write instead.
+    ///
+    /// <para>
+    /// A YAML provider-option key is the property name, which is not always the command-line flag:
+    /// the generator's throttle is <c>--throttle</c> on the CLI and <c>rows-per-second</c> in YAML,
+    /// and nineteen options across the catalogue diverge the same way. Writing the flag binds
+    /// nothing, and a run that silently keeps a default is the one kind of mistake that leaves no
+    /// trace to read afterwards — so the refusal names the key that would have worked, and says
+    /// when the one that was written is the flag for it.
+    /// </para>
+    /// </summary>
+    public static string DescribeUnknownKey(Type optionsType, string key)
+    {
+        var normalized = NormalizeKey(key);
+        var properties = optionsType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(p => p.CanWrite).ToList();
+
+        var byFlag = properties.FirstOrDefault(p =>
+            p.GetCustomAttribute<ComponentOptionAttribute>() is { Name: { } flag }
+            && NormalizeKey(flag.TrimStart('-')) == normalized);
+
+        if (byFlag is not null)
+            return $"Unrecognized provider option '{key}' for '{optionsType.Name}'. "
+                 + $"'{key}' is the command-line flag; in YAML the key is '{ToYamlKey(byFlag.Name)}'.";
+
+        var closest = properties
+            .Select(p => (Key: ToYamlKey(p.Name), Distance: Distance(normalized, NormalizeKey(p.Name))))
+            .Where(x => x.Distance <= Math.Max(2, normalized.Length / 3))
+            .OrderBy(x => x.Distance)
+            .Select(x => x.Key)
+            .FirstOrDefault();
+
+        var suffix = closest is not null
+            ? $" Did you mean '{closest}'?"
+            : $" Valid keys: {string.Join(", ", properties.Select(p => ToYamlKey(p.Name)).OrderBy(k => k, StringComparer.Ordinal))}.";
+
+        return $"Unrecognized provider option '{key}' for '{optionsType.Name}'.{suffix}";
+    }
+
+    /// <summary>A property name as the YAML key it binds from — PascalCase to kebab-case.</summary>
+    private static string ToYamlKey(string propertyName)
+        => string.Concat(propertyName.Select((c, i) =>
+            char.IsUpper(c) && i > 0 ? "-" + char.ToLowerInvariant(c) : char.ToLowerInvariant(c).ToString()));
+
+    private static int Distance(string a, string b)
+    {
+        var previous = Enumerable.Range(0, b.Length + 1).ToArray();
+        var current = new int[b.Length + 1];
+        for (int i = 1; i <= a.Length; i++)
+        {
+            current[0] = i;
+            for (int j = 1; j <= b.Length; j++)
+                current[j] = Math.Min(Math.Min(previous[j] + 1, current[j - 1] + 1),
+                                      previous[j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1));
+            (previous, current) = (current, previous);
+        }
+        return previous[b.Length];
+    }
 
     private static object? ConvertValue(object? value, Type targetType)
     {

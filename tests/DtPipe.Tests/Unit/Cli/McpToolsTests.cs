@@ -169,6 +169,48 @@ main:
         Assert.Contains("\"success\": true", json);
     }
 
+    /// <summary>
+    /// A provider-option key that binds to nothing must reach the caller. It is otherwise the only
+    /// mistake with no trace: the engine warns on stderr, which never enters a tool result, so the
+    /// run keeps the default and reports success. The validator is where a caller comes to be told
+    /// what is wrong before running.
+    /// </summary>
+    [Fact]
+    public void ValidateYamlJob_An_Unknown_Provider_Option_Reaches_The_Caller()
+    {
+        var yaml = @"
+main:
+  input: ""input.csv""
+  output: ""output.csv""
+  provider-options:
+    csv:
+      no-such-option: 1
+";
+        var json = _tools.ValidateYamlJob(yaml);
+
+        Assert.Contains("\"success\": false", json);
+        Assert.Contains("no-such-option", json);
+    }
+
+    /// <summary>
+    /// A block naming a provider this instance does not carry is left alone. Absence of a factory
+    /// is not evidence of a wrong key, and a container assembled for one purpose does not register
+    /// every provider — speaking there would condemn correct jobs.
+    /// </summary>
+    [Fact]
+    public void ValidateYamlJob_A_Block_For_An_Absent_Provider_Is_Not_Judged()
+    {
+        var yaml = @"
+main:
+  input: ""input.csv""
+  output: ""output.csv""
+  provider-options:
+    generate:
+      anything-at-all: 1
+";
+        Assert.Contains("\"success\": true", _tools.ValidateYamlJob(yaml));
+    }
+
     [Fact]
     public async System.Threading.Tasks.Task ExecuteYamlJob_EmptyYaml_ReturnsError()
     {

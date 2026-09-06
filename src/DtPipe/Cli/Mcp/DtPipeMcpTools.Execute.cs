@@ -35,6 +35,7 @@ public partial class DtPipeMcpTools
         var streamTransformerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamTransformerFactory>>();
         var errors = PipelineValidator.Validate(build.Dag, build.Jobs, streamTransformerFactories).ToList();
         errors.AddRange(ValidateJobTransformers(build.Jobs));
+        errors.AddRange(ValidateProviderOptionKeys(build.Jobs));
 
         return new YamlParseResult(build.Jobs, build.Dag, errors);
     }
@@ -297,6 +298,78 @@ public partial class DtPipeMcpTools
         }
     }
 
+
+    /// <summary>
+    /// Checks every key under <c>provider-options</c> against the options it would bind to.
+    ///
+    /// <para>
+    /// This is the one class of mistake an agent cannot otherwise learn from. A key that binds to
+    /// nothing is a warning on the engine's stderr, which never reaches a tool result — so the run
+    /// succeeds, quietly using the default, and the trace of the session shows nothing wrong. The
+    /// validator is where a caller comes to be told what is wrong before running, so it is where
+    /// this belongs.
+    /// </para>
+    ///
+    /// <para>
+    /// A plain block (<c>csv:</c>) may legitimately carry keys for only one side of a reader/writer
+    /// pair, so it is checked against both; a suffixed block (<c>csv-writer:</c>) is checked against
+    /// that side alone.
+    /// </para>
+    /// </summary>
+    private List<string> ValidateProviderOptionKeys(Dictionary<string, JobDefinition> jobs)
+    {
+        var errors = new List<string>();
+        // The factories this instance was built with, not the container's: they are the same set,
+        // and asking the container for a collection nobody registered returns an empty one rather
+        // than failing, which would silently turn every check below into a no-op.
+        var factories = _readerFactories.Cast<DtPipe.Core.Abstractions.IDataFactory>()
+            .Concat(_writerFactories).ToList();
+
+        foreach (var (alias, job) in jobs)
+        {
+            if (job.ProviderOptions is null) continue;
+
+            foreach (var (block, options) in job.ProviderOptions)
+            {
+                if (options is null || options.Count == 0) continue;
+
+                var (component, writerOnly, readerOnly) = SplitBlock(block);
+                var targets = factories
+                    .Where(f => f.ComponentName.Equals(component, StringComparison.OrdinalIgnoreCase))
+                    .Where(f => !(writerOnly && f is not DtPipe.Core.Abstractions.IDataWriterFactory)
+                             && !(readerOnly && f is DtPipe.Core.Abstractions.IDataWriterFactory))
+                    .ToList();
+
+                // Silence when the block matches no registered factory. A container assembled for
+                // one purpose does not register every provider, and absence of a factory is not
+                // evidence of a wrong key — only a factory we found tells us what the valid keys are.
+                if (targets.Count == 0) continue;
+
+                var known = targets
+                    .SelectMany(t => t.OptionsType.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+                    .Where(p => p.CanWrite)
+                    .Select(p => p.Name.Replace("-", string.Empty).Replace("_", string.Empty).ToLowerInvariant())
+                    .ToHashSet(StringComparer.Ordinal);
+
+                foreach (var key in options.Keys)
+                {
+                    if (known.Contains(key.Replace("-", string.Empty).Replace("_", string.Empty).ToLowerInvariant()))
+                        continue;
+
+                    errors.Add($"Branch '{alias}', provider-options '{block}': "
+                             + Pipeline.OptionBinder.DescribeUnknownKey(targets[0].OptionsType, key));
+                }
+            }
+        }
+
+        return errors;
+    }
+
+    /// <summary>A provider-options block name split into its component and the side it pins, if any.</summary>
+    private static (string Component, bool WriterOnly, bool ReaderOnly) SplitBlock(string block) =>
+        block.EndsWith("-writer", StringComparison.OrdinalIgnoreCase) ? (block[..^7], true, false)
+        : block.EndsWith("-reader", StringComparison.OrdinalIgnoreCase) ? (block[..^7], false, true)
+        : (block, false, false);
 
     private List<string> ValidateJobTransformers(Dictionary<string, JobDefinition> jobs)
     {
