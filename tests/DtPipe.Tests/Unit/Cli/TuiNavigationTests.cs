@@ -160,6 +160,38 @@ public class TuiNavigationTests
     }
 
     /// <summary>
+    /// The plan is the right-hand column beside the detail, and it stands down when the detail is
+    /// expanded — that is the moment the detail wants the width and the plan can spare it.
+    /// </summary>
+    [Fact(Timeout = 30000)]
+    public async Task The_Plan_Sits_Beside_The_Detail_And_Stands_Down_When_It_Expands()
+    {
+        await Drive(FourSteps(),
+            (_, s) =>
+            {
+                Assert.True(s.PlanVisible);
+                Assert.True(s.PlanWidth > 0, "the plan must keep a column of its own");
+                // Side by side: neither runs under the other.
+                Assert.True(s.DetailRight <= s.PlanLeft, $"detail ends at {s.DetailRight}, plan starts at {s.PlanLeft}");
+            },
+            (_, s) => s.FocusSteps(),
+            (app, _) => app.InjectKey(Key.CursorRight),
+            (_, s) =>
+            {
+                Assert.True(s.Expanded);
+                Assert.False(s.PlanVisible);
+                Assert.True(s.DetailRight > s.PlanLeft, "the expanded detail must take the plan's column");
+            },
+            (app, _) => app.InjectKey(Key.CursorLeft),
+            (_, s) =>
+            {
+                Assert.False(s.Expanded);
+                Assert.True(s.PlanVisible);
+                Assert.True(s.DetailRight <= s.PlanLeft);
+            });
+    }
+
+    /// <summary>
     /// The focused panel is the one with the heavy border. Weight is the only emphasis that needs
     /// no colour, which is what lets this surface keep inheriting the terminal's own theme.
     /// </summary>

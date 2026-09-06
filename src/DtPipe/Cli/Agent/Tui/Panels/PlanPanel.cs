@@ -7,9 +7,14 @@ using Terminal.Gui.Views;
 namespace DtPipe.Cli.Agent.Tui.Panels;
 
 /// <summary>
-/// The plan / DAG "work in progress", below the detail on the right. Read-only: one line per branch
-/// and a status badge, both from <see cref="PlanPanelContent"/>. Rebuilds only when the rendered
-/// lines actually change — the repaint timer calls <see cref="Update"/> every tick.
+/// The plan / DAG "work in progress", the right-hand column beside the detail. Read-only: one line
+/// per branch and a status badge, both from <see cref="PlanPanelContent"/>. Rebuilds only when the
+/// rendered lines actually change — the repaint timer calls <see cref="Update"/> every tick.
+///
+/// <para>
+/// Anchored to the right edge at a share of the width rather than a fixed number of columns, so a
+/// branch line keeps a usable width on a narrow terminal instead of the detail taking all of it.
+/// </para>
 /// </summary>
 internal sealed class PlanPanel
 {
@@ -22,10 +27,10 @@ internal sealed class PlanPanel
         _frame = new FrameView
         {
             Title = "Plan",
-            X = Pos.Absolute(TuiScreen.StepsWidth),
-            Y = Pos.AnchorEnd(TuiScreen.BottomChrome + TuiScreen.PlanHeight),
-            Width = Dim.Fill(),
-            Height = Dim.Absolute(TuiScreen.PlanHeight),
+            X = Pos.AnchorEnd(),
+            Y = 0,
+            Width = Dim.Percent(TuiScreen.PlanShare),
+            Height = Dim.Fill(TuiScreen.BottomChrome),
             CanFocus = false,
         };
         _body = new Label { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(), Text = string.Empty };

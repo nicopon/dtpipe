@@ -35,13 +35,13 @@ internal sealed class TuiScreen
     internal const int FluxHeight = 6;
     // rows reserved at the bottom: the flux band + the status line + the hint bar + the input line.
     internal const int BottomChrome = FluxHeight + 3;
-    // The plan panel splits the right column: detail on top, plan (this many rows) below it.
-    internal const int PlanHeight = 7;
+    // The plan panel is the right-hand column, at this share of the screen width.
+    internal const int PlanShare = 33;
 
     private readonly Window _window;
     private readonly StepsPanel _steps = new();
-    private readonly DetailPanel _detail = new();
     private readonly PlanPanel _plan = new();
+    private readonly DetailPanel _detail;
     private readonly FluxPanel _flux = new();
     private readonly Label _status;
     private readonly Label _hints;
@@ -73,6 +73,7 @@ internal sealed class TuiScreen
     /// <param name="chrome">The static labels for the run.</param>
     public TuiScreen(TuiChrome chrome)
     {
+        _detail = new DetailPanel(_plan.Frame);
         _title = chrome.Title;
         _posture = chrome.Status;
         _maxIterations = chrome.MaxIterations;
@@ -218,7 +219,17 @@ internal sealed class TuiScreen
     /// <summary>Pushes the plan's latest state into the plan panel. A no-op when nothing changed.</summary>
     public void SyncPlan(PlanView plan) => _plan.Update(plan);
 
-    private void RenderDetail() => _detail.Show(_steps.Selected, _expanded);
+    /// <summary>
+    /// Re-renders the detail and hands it the plan's column while it is expanded. The plan stands
+    /// down rather than being squeezed: an expanded step detail is the one thing here that wants
+    /// the whole width, and a branch line rendered into half a column says nothing.
+    /// </summary>
+    private void RenderDetail()
+    {
+        _detail.Show(_steps.Selected, _expanded);
+        _plan.Frame.Visible = !_expanded;
+        _detail.Widen(_expanded);
+    }
 
     /// <summary>
     /// Shortcuts handled above the panels, every one of them named by <see cref="TuiKeymap"/> — this
@@ -292,6 +303,10 @@ internal sealed class TuiScreen
     internal Scheme InputScheme => _input.GetScheme();
     internal string CaretText => _caret.Text;
     internal string WindowTitle => _window.Title;
+    internal bool PlanVisible => _plan.Frame.Visible;
+    internal int PlanWidth => _plan.Frame.Frame.Width;
+    internal int PlanLeft => _plan.Frame.Frame.X;
+    internal int DetailRight => _detail.Frame.Frame.X + _detail.Frame.Frame.Width;
     internal LineStyle? BorderOfSteps => _steps.Frame.Border?.LineStyle;
     internal LineStyle? BorderOfFlux => _flux.Frame.Border?.LineStyle;
     internal string DetailText => _detail.BodyText;
