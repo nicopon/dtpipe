@@ -147,9 +147,11 @@ internal sealed class TuiSession
                 surface.EndTurn();
             }
 
-            // The agent's question belongs in the status band, right above the line that answers
-            // it — the verdict projection already puts it there.
-            Note(surface, last.VerdictLine());
+            // The verdict reaches the exchange as the model, not as a sentence: the marker and the
+            // headline that names what to do next are the exchange's own projection of it.
+            var hasPlan = !string.IsNullOrWhiteSpace(_executor.Trajectory.LastGeneratedYaml);
+            var finished = last;
+            surface.Post(() => surface.Screen.ShowTurn(finished, hasPlan));
             prompt = null;
         }
     }
@@ -219,12 +221,12 @@ internal sealed class TuiSession
     }
 
     private static void Note(TuiSurface surface, string line)
-        => surface.Post(() => surface.Screen.ShowStatus(line));
+        => surface.Post(() => surface.Screen.ShowNote(line));
 
     private void Rechrome(TuiSurface surface, string model, AgentOptions opts)
     {
-        var (title, posture) = (Title(model), Posture(opts));
-        surface.Post(() => surface.Screen.Rechrome(title, posture));
+        var title = Title(model);
+        surface.Post(() => surface.Screen.Rechrome(title));
     }
 
     private string Title(string model)

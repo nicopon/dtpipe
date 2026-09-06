@@ -245,7 +245,7 @@ public class TuiSessionTests
     public async Task A_Question_From_The_Agent_Lands_Above_The_Input_Line_And_The_Answer_Is_The_Next_Turn()
     {
         // E7 gave the model a way to stop and ask; here is where the answer is typed. The question
-        // shows in the status band — the line directly above the input — and the input takes focus.
+        // shows in the exchange — the frame the input line sits in — and the input takes focus.
         var askUser = new LlmResponse(
             new ChatMessage("assistant", "I need the target name", null, new List<ToolCall>
             {
@@ -258,7 +258,7 @@ public class TuiSessionTests
         var executor = new AgentExecutor(new NoopToolProvider(), client, new AgentTui(console), console);
 
         var (exit, scrollback) = await Drive(executor, console, output,
-            (s => s.StatusText.Contains("AWAITING INPUT"), (app, s) =>
+            (s => s.StatusText.Contains("QUESTION"), (app, s) =>
             {
                 Assert.Contains("What should the output file be called?", s.StatusText);
                 Assert.True(s.Accepting, "the input line must be open for the answer");

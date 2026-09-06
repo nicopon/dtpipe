@@ -107,34 +107,12 @@ public class TurnSummaryModelTests
     }
 
     [Fact]
-    public void The_Surface_Verdict_Line_Carries_The_Same_Judgement_As_The_Table()
+    public void The_Table_Prints_The_Model_Own_Word_And_Reason()
     {
         var summary = new TurnSummaryModel(TurnOutcome.Succeeded, 4, TimeSpan.FromSeconds(12.3456), TwoTools);
 
-        var line = summary.VerdictLine();
-
-        Assert.Equal($"🟢 COMPLETED · delivered a response · 4 iterations · {summary.DurationText} · inspect: 2, validate-yaml-job: 1", line);
-        Assert.Contains(summary.StatusWord, Render(summary));          // the same word the table prints
+        Assert.Contains(summary.StatusWord, Render(summary));
         Assert.Contains(summary.Reason, Render(summary));
-    }
-
-    [Fact]
-    public void A_Pending_Question_Replaces_The_Tally_On_The_Verdict_Line()
-    {
-        // The band sits directly above the line that answers it: what the user needs there is the
-        // question, not how many tools ran.
-        var summary = new TurnSummaryModel(TurnOutcome.AwaitingUserInput, 3, TimeSpan.FromSeconds(5), TwoTools,
-            Question: "  What should the output file be called?  ");
-
-        Assert.Equal("❓ AWAITING INPUT · What should the output file be called?", summary.VerdictLine());
-    }
-
-    [Fact]
-    public void One_Iteration_Is_Not_Pluralised()
-    {
-        var summary = new TurnSummaryModel(TurnOutcome.Succeeded, 1, TimeSpan.FromSeconds(2), new Dictionary<string, int>());
-
-        Assert.Contains("1 iteration ·", summary.VerdictLine());
     }
 
     // ── R1: AgentTui.ReportTurn is the one place the four-branch verdict sequence lives, so the

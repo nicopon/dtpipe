@@ -58,11 +58,11 @@ public class TuiSmokeTests
     }
 
     [Fact(Timeout = 30000)]
-    public async Task The_Surface_Draws_The_Title_The_Transcript_And_The_Status()
+    public async Task The_Surface_Draws_The_Title_The_Exchange_And_The_Running_Count()
     {
-        // Reading the driver's cell buffer is the only way to assert the surface without a human
-        // at a terminal. Sampled on the UI thread, and only once the buffer actually carries the
-        // title — a fixed delay flakes on a loaded machine where the first paint runs late.
+        // Reading the driver's cell buffer is the only way to assert the surface without a human at
+        // a terminal. Sampled on the UI thread, and only once the buffer actually carries what is
+        // being waited for — a fixed delay flakes on a loaded machine where the first paint is late.
         var (app, _, _) = Build();
         var log = new TranscriptLog();
         var view = new TuiTurnView(log);
@@ -80,16 +80,16 @@ public class TuiSmokeTests
             CancellationToken.None,
             surfaceReady: live => live.AddTimeout(TimeSpan.FromMilliseconds(50), () =>
             {
-                // Poll until the committed transcript entry has been pulled onto the screen —
-                // the repaint is a timer, so it lands a tick after the turn appended it.
                 var frame = Flatten(live.Driver!);
                 if (open.Length == 0)
                 {
-                    if (!frame.Contains("UNIQUEMARKER42")) return true;
+                    if (screen is null) return true;
+                    screen.ShowNote("UNIQUEBANNER42");
+                    if (!frame.Contains("UNIQUEBANNER42")) return true;
                     open = frame;
                     // The polled header only reaches the screen while a turn holds the line, so
-                    // close it and keep polling for the band it feeds.
-                    screen!.SetAccepting(false);
+                    // close it and keep polling for the frame title it feeds.
+                    screen.SetAccepting(false);
                     return true;
                 }
 
@@ -99,13 +99,17 @@ public class TuiSmokeTests
             }),
             onScreen: s => screen = s);
 
-        Assert.Contains("dtpipe agent", open);            // the window title
-        Assert.Contains("UNIQUEMARKER42", open);          // a committed transcript entry
-        Assert.Contains("plan · detail: compact", open);  // the status line, line open
-        Assert.DoesNotContain("3s", open);                // the title carries no clock
+        Assert.Contains("dtpipe agent", open);        // the window title
+        Assert.Contains("UNIQUEBANNER42", open);      // the exchange, in painted cells
+        Assert.Contains("•", open);                   // wearing its marker
+        Assert.DoesNotContain("3s", open);            // the window title carries no clock
 
-        Assert.Contains("3s", closed);                    // the polled clock, in the status band
+        Assert.Contains("3s", closed);                // the running count, in the frame title
         Assert.Contains("42 tok", closed);
+
+        // The band no longer lists the transcript, but the transcript is still the record: it is
+        // what gets replayed to scrollback once the toolkit hands the terminal back.
+        Assert.Contains("UNIQUEMARKER42", log.PlainText());
     }
 
     [Fact(Timeout = 30000)]

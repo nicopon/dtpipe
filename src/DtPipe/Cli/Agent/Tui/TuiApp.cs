@@ -171,21 +171,15 @@ internal sealed class TuiApp
                 }
             };
 
-            long seen = -1;
             repaintToken = app.AddTimeout(RepaintInterval, () =>
             {
                 var (clock, meter) = header();
                 log.LiveTail = view.LiveTailPlain();
 
-                long version = log.Version;
-                bool transcriptChanged = version != seen;
-                if (transcriptChanged) seen = version;
-
-                // Title and clock are a cheap string every tick; the panels rebuild only when
-                // their source moved (the version counter, the step count, the plan lines).
-                screen.Sync(trajectory.Snapshot(),
-                    transcriptChanged ? log.PlainLines() : null,
-                    clock, meter);
+                // The panels rebuild only when their source moved (the step count, the rendered
+                // exchange, the plan lines); the transcript keeps the permanent record and is
+                // replayed to scrollback at teardown, not shown here line by line.
+                screen.Sync(trajectory.Snapshot(), log.LiveTail, clock, meter);
                 screen.SyncPlan(view.PlanSnapshot());
                 return true;
             });
@@ -374,7 +368,7 @@ internal sealed class TuiSurface
         {
             _softCancel = cts = new CancellationTokenSource();
         }
-        Post(() => { Screen.SetAccepting(false); Screen.ShowStatus(null); });
+        Post(() => Screen.SetAccepting(false));
         return cts.Token;
     }
 

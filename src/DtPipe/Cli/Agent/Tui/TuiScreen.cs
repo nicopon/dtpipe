@@ -11,30 +11,28 @@ using Terminal.Gui.Views;
 namespace DtPipe.Cli.Agent.Tui;
 
 /// <summary>
-/// The full-screen layout: a steps list on the left, its detail and the plan/DAG stacked on the
-/// right, the running transcript in a band below, then a status line, the input line, and a
-/// focus-aware hint bar along the bottom edge — the hints stay under the line they describe.
-/// Tab moves between the focusable panels; the detail panel mirrors the steps
-/// selection, the plan panel tracks the plan the agent is building. <see cref="Sync"/> and
-/// <see cref="SyncPlan"/> are the update points, driven by the repaint timer on the UI thread
-/// from thread-safe snapshots.
+/// The full-screen layout: a steps list on the left, its detail and the plan/DAG beside it on the
+/// right, and along the bottom the exchange — the agent's last word and the line that answers it,
+/// in one frame — with a focus-aware hint bar under it. Tab moves between the focusable panels; the
+/// detail panel mirrors the steps selection, the plan panel tracks the plan the agent is building.
+/// <see cref="Sync"/> and <see cref="SyncPlan"/> are the update points, driven by the repaint timer
+/// on the UI thread from thread-safe snapshots.
 ///
 /// <para>
-/// The status line carries three things at three moments. While a turn runs it is the progress of
-/// that turn — the step it has reached, the clock and the tokens — because that is when the line is
-/// looked at hardest and when nothing else on screen is counting. Between turns it is the finished
-/// turn's verdict, or a session note. Before the first turn it is the run's posture. The verdict is
-/// a projection of <see cref="TurnSummaryModel"/> — the same object the scrollback table renders —
-/// so this surface never judges a turn on its own.
+/// The exchange frame is where the session speaks and is spoken to, and its title is where a
+/// running turn counts itself — that is the moment it is watched hardest and nothing else on screen
+/// is counting. A finished turn reaches it as a projection of <see cref="TurnSummaryModel"/>, the
+/// same object the scrollback table renders, so this surface never judges a turn on its own.
 /// </para>
 /// </summary>
 internal sealed class TuiScreen
 {
     // The steps panel is a fixed column on the left; the detail panel starts where it ends.
     internal const int StepsWidth = 34;
-    internal const int FluxHeight = 6;
-    // rows reserved at the bottom: the flux band + the status line + the hint bar + the input line.
-    internal const int BottomChrome = FluxHeight + 3;
+    // The exchange frame: two border rows, the headline, the agent's words, the input line.
+    internal const int ExchangeHeight = 8;
+    // rows reserved at the bottom: the exchange frame + the hint bar under it.
+    internal const int BottomChrome = ExchangeHeight + 1;
     // The plan panel is the right-hand column, at this share of the screen width.
     internal const int PlanShare = 33;
 
@@ -42,8 +40,7 @@ internal sealed class TuiScreen
     private readonly StepsPanel _steps = new();
     private readonly PlanPanel _plan = new();
     private readonly DetailPanel _detail;
-    private readonly FluxPanel _flux = new();
-    private readonly Label _status;
+    private readonly ExchangePanel _exchange = new();
     private readonly Label _hints;
     private readonly Label _caret;
     private readonly TextField _input;
@@ -61,10 +58,8 @@ internal sealed class TuiScreen
     private bool _expanded;
     private int _working;
     private string _renderedTitle = string.Empty;
-    private string _renderedStatus = string.Empty;
     private string _title;
-    private string _posture;
-    private string? _verdict;
+    private Exchange _last;
     private bool _accepting;
 
     /// <summary>A line the user submitted. Raised on the UI thread.</summary>
@@ -75,25 +70,29 @@ internal sealed class TuiScreen
     {
         _detail = new DetailPanel(_plan.Frame);
         _title = chrome.Title;
-        _posture = chrome.Status;
+        _last = ExchangeContent.Note(chrome.Status);
         _maxIterations = chrome.MaxIterations;
         _window = new Window { Title = chrome.Title };
 
-        _status = new Label { X = 0, Y = Pos.AnchorEnd(3), Width = Dim.Fill(), Text = chrome.Status };
-        _caret = new Label { X = 0, Y = Pos.AnchorEnd(2), Width = 2, Text = Prompt };
-        _hints = new Label { X = 0, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), Text = HintsFor(null) };
+        // The caret and the input line live inside the exchange frame: a question and the line that
+        // answers it belong to one gesture, and the frame is what says so. They are built before the
+        // hint bar, which asks them for the focus while wording itself.
+        _caret = new Label { X = 1, Y = Pos.AnchorEnd(1), Width = 2, Text = Prompt };
         _input = new TextField
         {
-            X = 2,
-            Y = Pos.AnchorEnd(2),
-            Width = Dim.Fill(),
+            X = 4,
+            Y = Pos.AnchorEnd(1),
+            Width = Dim.Fill(1),
             Height = 1,
             CanFocus = true,
             Visible = true,
             ReadOnly = false,
         };
+        _exchange.Frame.Add(_caret, _input);
 
-        _window.Add(_steps.Frame, _detail.Frame, _plan.Frame, _flux.Frame, _status, _hints, _caret, _input);
+        _hints = new Label { X = 0, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), Text = HintsFor(null) };
+
+        _window.Add(_steps.Frame, _detail.Frame, _plan.Frame, _exchange.Frame, _hints);
 
         _steps.SelectionChanged += RenderDetail;
     }
@@ -158,24 +157,23 @@ internal sealed class TuiScreen
         if (accepting) _input.SetFocus();
     }
 
-    /// <summary>
-    /// Writes one line into the status band: a finished turn's verdict, or a session note such as
-    /// what a command did. Null restores the run's posture. It never carries a judgement of its
-    /// own — a verdict reaches here as <see cref="TurnSummaryModel.VerdictLine"/>.
-    /// </summary>
-    public void ShowStatus(string? line) => _verdict = line;
+    /// <summary>The session answering for itself — what a command did, or why it did nothing.</summary>
+    public void ShowNote(string line) => _last = ExchangeContent.Note(line);
 
-    /// <summary>Re-labels the run — the operating mode shows in both, and it can change mid-session.</summary>
-    public void Rechrome(string title, string posture)
-    {
-        _title = title;
-        _posture = posture;
-    }
+    /// <summary>
+    /// A finished turn, as the exchange shows it. The surface never judges a turn: the marker and
+    /// the headline are derived from <paramref name="summary"/>, which the executor built and the
+    /// scrollback table renders from too.
+    /// </summary>
+    public void ShowTurn(TurnSummaryModel summary, bool hasPlan) => _last = ExchangeContent.Of(summary, hasPlan);
+
+    /// <summary>Re-labels the run — the operating mode is in the title, and it can change mid-session.</summary>
+    public void Rechrome(string title) => _title = title;
 
     /// <summary>
     /// Pushes the latest state into the panels. The snapshots are already detached copies; this
-    /// only touches views, on the UI thread. <paramref name="fluxLines"/> is null when the
-    /// transcript has not moved since the last tick, so the flux list is left alone.
+    /// only touches views, on the UI thread. <paramref name="liveTail"/> is what the model has said
+    /// so far in the running turn, and is ignored between turns.
     ///
     /// <para>
     /// Every write here is conditional, because the repaint timer runs ten times a second for the
@@ -185,12 +183,14 @@ internal sealed class TuiScreen
     /// panels each guard themselves the same way.
     /// </para>
     /// </summary>
-    public void Sync(IReadOnlyList<TrajectoryStep> steps, IReadOnlyList<string>? fluxLines, string clock, string meter)
+    public void Sync(IReadOnlyList<TrajectoryStep> steps, string? liveTail, string clock, string meter)
     {
         if (_title != _renderedTitle) _window.Title = _renderedTitle = _title;
 
-        var status = _verdict ?? (_accepting ? _posture : Progress(steps.Count, clock, meter));
-        if (status != _renderedStatus) _status.Text = _renderedStatus = status;
+        // Between turns the exchange holds the last word said to the user; while one runs it holds
+        // what the model is saying, and the frame's own title does the counting.
+        _exchange.Retitle(_accepting ? "Agent" : $"Agent · {Progress(steps.Count, clock, meter)}");
+        _exchange.Show(_accepting ? _last : ExchangeContent.Speaking(liveTail));
 
         // The one thing on this surface that redraws with nothing behind it having changed, and
         // that is its whole job: it says the model is still working. Two cells, and only while a
@@ -202,7 +202,6 @@ internal sealed class TuiScreen
         }
 
         _steps.Update(steps);            // rebuilds only when the step count moved
-        if (fluxLines is not null) _flux.Update(fluxLines);
     }
 
     /// <summary>
@@ -241,7 +240,10 @@ internal sealed class TuiScreen
     /// </summary>
     private void OnKey(Key key, View? focused)
     {
-        bool onInput = ReferenceEquals(focused, _input);
+        // The views that matter are nested now, and the navigator reports the focused branch rather
+        // than its leaf — so ask each view whether it holds the focus instead of matching an
+        // identity the navigator never promised to hand back.
+        bool onInput = _input.HasFocus;
         var signal = TuiKeymap.Classify(key);
 
         if (signal == SurfaceSignal.FocusNext)
@@ -282,50 +284,52 @@ internal sealed class TuiScreen
     /// </summary>
     private void MarkFocusedPanel(View? focused)
     {
-        foreach (var frame in new[] { _steps.Frame, _detail.Frame, _plan.Frame, _flux.Frame })
+        foreach (var frame in new[] { _steps.Frame, _detail.Frame, _plan.Frame, _exchange.Frame })
             if (frame.Border is { } border)
                 border.LineStyle = Owns(frame, focused) ? LineStyle.Heavy : LineStyle.Rounded;
     }
 
-    /// <summary>Steps → Flux → input → Steps.</summary>
+    /// <summary>Steps → the agent's words → the input line → Steps.</summary>
     private View NextInRing(View? focused)
     {
-        if (Owns(_steps.Frame, focused)) return _flux.FocusTarget;
-        if (Owns(_flux.Frame, focused)) return _input;
+        if (Owns(_steps.Frame, focused)) return _exchange.FocusTarget;
+        if (_exchange.FocusTarget.HasFocus) return _input;
         return _steps.FocusTarget;
     }
 
     // ── test inspection ────────────────────────────────────────────────────────
     internal string HintsText => _hints.Text;
-    internal string StatusText => _status.Text;
+    internal string StatusText => $"{_exchange.HeadlineText}\n{_exchange.BodyText}";
     internal bool Accepting => _accepting;
     internal string InputText { get => _input.Text ?? string.Empty; set => _input.Text = value; }
     internal Scheme InputScheme => _input.GetScheme();
     internal string CaretText => _caret.Text;
     internal string WindowTitle => _window.Title;
-    internal int? FluxSelected => _flux.SelectedIndex;
+    internal string ExchangeTitle => _exchange.Frame.Title;
+    internal bool InputFocused => _input.HasFocus;
+    internal int? ExchangeSelected => _exchange.SelectedIndex;
     internal bool PlanVisible => _plan.Frame.Visible;
     internal int PlanWidth => _plan.Frame.Frame.Width;
     internal int PlanLeft => _plan.Frame.Frame.X;
     internal int DetailRight => _detail.Frame.Frame.X + _detail.Frame.Frame.Width;
     internal LineStyle? BorderOfSteps => _steps.Frame.Border?.LineStyle;
-    internal LineStyle? BorderOfFlux => _flux.Frame.Border?.LineStyle;
+    internal LineStyle? BorderOfExchange => _exchange.Frame.Border?.LineStyle;
     internal string DetailText => _detail.BodyText;
     internal string PlanText => _plan.BodyText;
     internal bool Expanded => _expanded;
     internal int? SelectedStepIteration => _steps.Selected?.Iteration;
-    internal void FocusFlux() => _flux.FocusTarget.SetFocus();
+    internal void FocusExchange() => _exchange.FocusTarget.SetFocus();
     internal void FocusSteps() => _steps.FocusTarget.SetFocus();
 
     private string HintsFor(View? focused)
     {
-        if (ReferenceEquals(focused, _input))
+        if (_input.HasFocus)
             return $"enter run · {SessionCommand.Hint} · esc stop · ^C quit";
 
         bool onSteps = Owns(_steps.Frame, focused);
-        bool onFlux = Owns(_flux.Frame, focused);
+        bool onAgent = _exchange.FocusTarget.HasFocus;
         return onSteps ? "↑↓ select · e/b errors · →/enter expand · ⇥ panel · esc stop"
-             : onFlux ? "↑↓ scroll · ⇥ panel · esc stop"
+             : onAgent ? "↑↓ scroll the agent's words · ⇥ panel · esc stop"
              : "⇥ panel · esc stop · ^C quit";
     }
 

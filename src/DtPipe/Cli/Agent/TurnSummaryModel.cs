@@ -24,8 +24,9 @@ public enum TurnStatus
 /// <summary>
 /// What one finished turn amounted to, as data. Built once by the executor and rendered twice: as
 /// the scrollback table (<see cref="AgentTui.RenderFinalSummary"/>) and as the full-screen
-/// surface's verdict line. One factory, two projections — so the two surfaces can never disagree
-/// about whether a turn succeeded, and the verdict has a single author.
+/// surface's exchange (<see cref="Tui.ExchangeContent.Of"/>). One factory, two projections — so the
+/// two surfaces can never disagree about whether a turn succeeded, and the verdict has a single
+/// author.
 /// </summary>
 /// <param name="Outcome">Why the turn ended; everything else here is derived from it.</param>
 /// <param name="Iterations">Model calls the turn consumed, clamped to the budget.</param>
@@ -70,27 +71,6 @@ public sealed record TurnSummaryModel(
     public string? ToolSummary => ToolCounts.Count == 0
         ? null
         : string.Join(", ", ToolCounts.Select(kv => $"{kv.Key}: {kv.Value}"));
-
-    /// <summary>
-    /// The single-line projection for the full-screen surface's status band. When the agent asked
-    /// something, the question replaces the tally: it sits directly above the input line, and what
-    /// the user needs there is what to answer, not how many tools ran.
-    /// </summary>
-    public string VerdictLine()
-    {
-        if (Status == TurnStatus.AwaitingInput && !string.IsNullOrWhiteSpace(Question))
-            return $"{StatusWord} · {Question!.Trim()}";
-
-        var parts = new List<string>
-        {
-            StatusWord,
-            Reason,
-            $"{Iterations} iteration{(Iterations == 1 ? "" : "s")}",
-            DurationText,
-        };
-        if (ToolSummary is { } tools) parts.Add(tools);
-        return string.Join(" · ", parts);
-    }
 
     /// <summary>Why the turn ended, in a clause that completes "the turn ended because it …".</summary>
     public static string Describe(TurnOutcome outcome) => outcome switch

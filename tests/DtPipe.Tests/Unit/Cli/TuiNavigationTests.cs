@@ -161,40 +161,41 @@ public class TuiNavigationTests
             (_, s) => Assert.Contains("scroll", s.HintsText));      // flux hints
     }
 
-    private static string[] Lines(int n) => Enumerable.Range(1, n).Select(i => $"flux line {i}").ToArray();
+    private static string Tail(int n) => string.Join('\n', Enumerable.Range(1, n).Select(i => $"the model says {i}"));
 
     /// <summary>
-    /// The flux band chases its newest line until someone reads it. Taking the focus holds the
-    /// position through arriving lines — the list is rebuilt from a fresh source every time, so
-    /// without the restore a held band would snap to the top rather than merely stop following.
+    /// The agent's words chase their newest line until someone reads them. Taking the focus holds
+    /// the position through arriving tokens — the list is rebuilt from a fresh source every time,
+    /// so without the restore a held body would snap to the top rather than merely stop following.
     /// </summary>
     [Fact(Timeout = 30000)]
-    public async Task The_Flux_Holds_Its_Place_While_It_Is_Read_And_Follows_Again_Afterwards()
+    public async Task The_Exchange_Holds_Its_Place_While_It_Is_Read_And_Follows_Again_Afterwards()
     {
         var steps = FourSteps().Snapshot();
 
         await Drive(FourSteps(),
+            (_, s) => s.SetAccepting(false),               // a turn is running: the body streams
             (_, s) =>
             {
-                s.Sync(steps, Lines(10), "3s", string.Empty);
-                Assert.Equal(9, s.FluxSelected);            // nobody reading: it chases the tail
+                s.Sync(steps, Tail(10), "3s", string.Empty);
+                Assert.Equal(9, s.ExchangeSelected);       // nobody reading: it chases the tail
             },
-            (_, s) => s.FocusFlux(),
+            (_, s) => s.FocusExchange(),
             (_, s) =>
             {
-                s.Sync(steps, Lines(20), "3s", string.Empty);
-                Assert.Equal(9, s.FluxSelected);            // read: held exactly where it was
+                s.Sync(steps, Tail(20), "3s", string.Empty);
+                Assert.Equal(9, s.ExchangeSelected);       // read: held exactly where it was
             },
             (_, s) =>
             {
-                s.Sync(steps, Lines(30), "3s", string.Empty);
-                Assert.Equal(9, s.FluxSelected);            // and still held on the next line
+                s.Sync(steps, Tail(30), "3s", string.Empty);
+                Assert.Equal(9, s.ExchangeSelected);       // and still held on the next tokens
             },
             (_, s) => s.FocusSteps(),
             (_, s) =>
             {
-                s.Sync(steps, Lines(40), "3s", string.Empty);
-                Assert.Equal(39, s.FluxSelected);           // reader gone: chasing again
+                s.Sync(steps, Tail(40), "3s", string.Empty);
+                Assert.Equal(39, s.ExchangeSelected);      // reader gone: chasing again
             });
     }
 
@@ -263,23 +264,23 @@ public class TuiNavigationTests
             (_, s) =>
             {
                 Assert.Equal(LineStyle.Heavy, s.BorderOfSteps);
-                Assert.Equal(LineStyle.Rounded, s.BorderOfFlux);
+                Assert.Equal(LineStyle.Rounded, s.BorderOfExchange);
             },
             (app, _) => app.InjectKey(Key.Tab),
             (_, s) =>
             {
                 Assert.Equal(LineStyle.Rounded, s.BorderOfSteps);
-                Assert.Equal(LineStyle.Heavy, s.BorderOfFlux);
+                Assert.Equal(LineStyle.Heavy, s.BorderOfExchange);
             });
     }
 
     /// <summary>
-    /// While a turn runs the status band counts that turn — the step reached, the clock, the
-    /// tokens — and the window title is the run's identity and nothing else. Between turns the band
-    /// goes back to carrying the posture, or whatever note was last posted.
+    /// While a turn runs the exchange frame counts it — the step reached, the clock, the tokens —
+    /// and the window title is the run's identity and nothing else. Between turns the frame is just
+    /// the agent's name and the exchange holds whatever was last said.
     /// </summary>
     [Fact(Timeout = 30000)]
-    public async Task The_Status_Band_Counts_The_Running_Turn_And_The_Title_Stays_Still()
+    public async Task The_Exchange_Title_Counts_The_Running_Turn_And_The_Window_Title_Stays_Still()
     {
         var steps = FourSteps().Snapshot();
 
@@ -287,21 +288,25 @@ public class TuiNavigationTests
             (_, s) =>
             {
                 s.Sync(steps, null, "3s", "42 tok");
-                Assert.Equal("plan · detail: compact", s.StatusText);          // line open: the posture
+                Assert.Equal("Agent", s.ExchangeTitle);                        // line open
+                Assert.Contains("plan · detail: compact", s.StatusText);       // the opening note
                 Assert.Equal("dtpipe agent · test", s.WindowTitle);
             },
             (_, s) => s.SetAccepting(false),
             (_, s) =>
             {
-                s.Sync(steps, null, "3s", "42 tok");
-                Assert.Equal("step 5/12 · 3s · 42 tok", s.StatusText);         // four taken, on the fifth
+                s.Sync(steps, "thinking", "3s", "42 tok");
+                Assert.Equal("Agent · step 5/12 · 3s · 42 tok", s.ExchangeTitle);
                 Assert.Equal("dtpipe agent · test", s.WindowTitle);            // no clock in the title
+                Assert.Contains("thinking", s.StatusText);
             },
+            (_, s) => s.SetAccepting(true),
             (_, s) =>
             {
-                s.ShowStatus("✓ plan validated");
-                s.Sync(steps, null, "9s", "99 tok");
-                Assert.Equal("✓ plan validated", s.StatusText);                // a note outranks progress
+                s.ShowNote("Saved the plan to ./plan.yaml");
+                s.Sync(steps, "thinking", "9s", "99 tok");
+                Assert.Contains("Saved the plan", s.StatusText);               // a note outranks the tail
+                Assert.Equal("Agent", s.ExchangeTitle);
             });
     }
 
