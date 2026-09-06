@@ -6,6 +6,7 @@ using DtPipe.Cli.Agent;
 using DtPipe.Cli.Agent.Tui;
 using Spectre.Console;
 using Terminal.Gui.App;
+using Terminal.Gui.Drawing;
 using Terminal.Gui.Drivers;
 using Terminal.Gui.Input;
 using Terminal.Gui.Testing;
@@ -156,6 +157,57 @@ public class TuiNavigationTests
             (_, s) => Assert.Contains("e/b errors", s.HintsText),   // steps hints
             (app, _) => app.InjectKey(Key.Tab),
             (_, s) => Assert.Contains("scroll", s.HintsText));      // flux hints
+    }
+
+    /// <summary>
+    /// The focused panel is the one with the heavy border. Weight is the only emphasis that needs
+    /// no colour, which is what lets this surface keep inheriting the terminal's own theme.
+    /// </summary>
+    [Fact(Timeout = 30000)]
+    public async Task The_Focused_Panel_Wears_A_Heavier_Border()
+    {
+        await Drive(FourSteps(),
+            (_, s) => s.FocusSteps(),
+            (_, s) =>
+            {
+                Assert.Equal(LineStyle.Heavy, s.BorderOfSteps);
+                Assert.Equal(LineStyle.Rounded, s.BorderOfFlux);
+            },
+            (app, _) => app.InjectKey(Key.Tab),
+            (_, s) =>
+            {
+                Assert.Equal(LineStyle.Rounded, s.BorderOfSteps);
+                Assert.Equal(LineStyle.Heavy, s.BorderOfFlux);
+            });
+    }
+
+    /// <summary>
+    /// While a turn holds the input line closed the caret is a wheel, so a long model call does not
+    /// look like a frozen screen. Sync is called directly here: the wheel must advance because a
+    /// repaint happened, not because the test waited long enough.
+    /// </summary>
+    [Fact(Timeout = 30000)]
+    public async Task The_Caret_Spins_While_The_Line_Is_Closed()
+    {
+        var steps = FourSteps().Snapshot();
+
+        await Drive(FourSteps(),
+            (_, s) => Assert.Equal("› ", s.CaretText),
+            (_, s) => s.SetAccepting(false),
+            (_, s) =>
+            {
+                var first = s.CaretText;
+                Assert.NotEqual("› ", first);
+                s.Sync(steps, null, "3s", "42 tok");
+                Assert.NotEqual(first, s.CaretText);
+            },
+            (_, s) => s.SetAccepting(true),
+            (_, s) =>
+            {
+                Assert.Equal("› ", s.CaretText);
+                s.Sync(steps, null, "3s", "42 tok");
+                Assert.Equal("› ", s.CaretText);   // an open line does not spin
+            });
     }
 
     /// <summary>

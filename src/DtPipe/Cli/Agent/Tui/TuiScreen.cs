@@ -46,7 +46,17 @@ internal sealed class TuiScreen
     private readonly Label _caret;
     private readonly TextField _input;
 
+    /// <summary>
+    /// The frames of a turn in flight, on the caret. Braille dots, the same wheel the scrollback
+    /// path spins through Spectre — one turn, one vocabulary, whichever surface is watching.
+    /// </summary>
+    private static readonly string[] Working =
+        ["⠋ ", "⠙ ", "⠹ ", "⠸ ", "⠼ ", "⠴ ", "⠦ ", "⠧ ", "⠇ ", "⠏ "];
+
+    private const string Prompt = "› ";
+
     private bool _expanded;
+    private int _working;
     private string _renderedTitle = string.Empty;
     private string _renderedStatus = string.Empty;
     private string _title;
@@ -65,7 +75,7 @@ internal sealed class TuiScreen
         _window = new Window { Title = chrome.Title };
 
         _status = new Label { X = 0, Y = Pos.AnchorEnd(3), Width = Dim.Fill(), Text = chrome.Status };
-        _caret = new Label { X = 0, Y = Pos.AnchorEnd(2), Width = 2, Text = "› " };
+        _caret = new Label { X = 0, Y = Pos.AnchorEnd(2), Width = 2, Text = Prompt };
         _hints = new Label { X = 0, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), Text = HintsFor(null) };
         _input = new TextField
         {
@@ -90,7 +100,12 @@ internal sealed class TuiScreen
     {
         var nav = app.Navigation;
         if (nav is not null)
-            nav.FocusedChanged += (_, _) => _hints.Text = HintsFor(nav.GetFocused());
+            nav.FocusedChanged += (_, _) =>
+            {
+                var focused = nav.GetFocused();
+                _hints.Text = HintsFor(focused);
+                MarkFocusedPanel(focused);
+            };
 
         app.Keyboard.KeyDown += (_, key) => OnKey(key, nav?.GetFocused());
 
@@ -133,7 +148,8 @@ internal sealed class TuiScreen
     {
         _accepting = accepting;
         _input.ReadOnly = !accepting;
-        _caret.Text = accepting ? "› " : "⏳ ";
+        _working = 0;
+        _caret.Text = accepting ? Prompt : Working[0];
         if (accepting) _input.SetFocus();
     }
 
@@ -171,6 +187,15 @@ internal sealed class TuiScreen
 
         var status = _verdict ?? _posture;
         if (status != _renderedStatus) _status.Text = _renderedStatus = status;
+
+        // The one thing on this surface that redraws with nothing behind it having changed, and
+        // that is its whole job: it says the model is still working. Two cells, and only while a
+        // turn holds the line closed.
+        if (!_accepting)
+        {
+            _working = (_working + 1) % Working.Length;
+            _caret.Text = Working[_working];
+        }
 
         _steps.Update(steps);            // rebuilds only when the step count moved
         if (fluxLines is not null) _flux.Update(fluxLines);
@@ -225,6 +250,18 @@ internal sealed class TuiScreen
         }
     }
 
+    /// <summary>
+    /// Thickens the border of whichever panel holds the focus. The weight of a line is the one
+    /// emphasis that needs no colour, so it survives any terminal theme — this surface paints
+    /// nothing and inherits everything. A panel that cannot take focus simply never thickens.
+    /// </summary>
+    private void MarkFocusedPanel(View? focused)
+    {
+        foreach (var frame in new[] { _steps.Frame, _detail.Frame, _plan.Frame, _flux.Frame })
+            if (frame.Border is { } border)
+                border.LineStyle = Owns(frame, focused) ? LineStyle.Heavy : LineStyle.Rounded;
+    }
+
     /// <summary>Steps → Flux → input → Steps.</summary>
     private View NextInRing(View? focused)
     {
@@ -239,6 +276,9 @@ internal sealed class TuiScreen
     internal bool Accepting => _accepting;
     internal string InputText { get => _input.Text ?? string.Empty; set => _input.Text = value; }
     internal Scheme InputScheme => _input.GetScheme();
+    internal string CaretText => _caret.Text;
+    internal LineStyle? BorderOfSteps => _steps.Frame.Border?.LineStyle;
+    internal LineStyle? BorderOfFlux => _flux.Frame.Border?.LineStyle;
     internal string DetailText => _detail.BodyText;
     internal string PlanText => _plan.BodyText;
     internal bool Expanded => _expanded;
