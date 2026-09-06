@@ -330,18 +330,18 @@ public class AgentCommand : Command
                               break;
 
                           case PostMissionAction.ExecutePlan:
-                              if (!string.IsNullOrEmpty(executor.Trajectory.LastGeneratedYaml))
-                               {
-                                   // Deterministic: the reviewed YAML runs straight through the engine,
-                                   // not back through the model. The tool's own F2 guardrails apply —
-                                   // without --apply this is a sample run with the writer neutralised.
-                                   tui.RenderPipelineDag(executor.Trajectory.LastGeneratedYaml, serviceProvider);
-                                   if (!agentOptions.Apply || tui.ConfirmRealWrite())
-                                    {
-                                        var result = await executor.ExecuteValidatedPlanAsync(ct);
-                                        tui.RenderExecutionResult(result.Content, result.IsError);
-                                    }
-                               }
+                              {
+                                  // Deterministic: the reviewed YAML runs straight through the engine,
+                                  // not back through the model. Present → confirm iff --apply → execute
+                                  // is PlanExecution's policy, shared with the full-screen surface; the
+                                  // tool's own F2 guardrails still apply.
+                                  var planResult = await PlanExecution.RunAsync(executor, agentOptions,
+                                      present: yaml => { tui.RenderPipelineDag(yaml, serviceProvider); return Task.CompletedTask; },
+                                      confirm: _ => Task.FromResult(tui.ConfirmRealWrite()),
+                                      ct);
+                                  if (planResult is not null)
+                                      tui.RenderExecutionResult(planResult.Content, planResult.IsError);
+                              }
                               break;
 
                           case PostMissionAction.ViewDag:

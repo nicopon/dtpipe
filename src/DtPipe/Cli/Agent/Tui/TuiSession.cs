@@ -1,6 +1,8 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using DtPipe.Core.Security;
 using Spectre.Console;
 using Terminal.Gui.App;
 
@@ -153,44 +155,53 @@ internal sealed class TuiSession
     }
 
     /// <summary>
-    /// Runs the plan the planner produced, straight through the engine. The tool's own F2
-    /// guardrails still apply; without <c>--apply</c> this is a sample run with the writer
-    /// neutralised, and with it the modal below is the last gate.
+    /// Runs the plan the planner produced, straight through the engine. Present → confirm iff
+    /// <c>--apply</c> → execute is <see cref="PlanExecution"/>'s policy, shared with the scrollback
+    /// path; this method only supplies the surface's own gestures. Without <c>--apply</c> the run
+    /// is a sample with the writer neutralised.
     /// </summary>
     private async Task ExecuteAsync(TuiSurface surface, TuiTurnView view, AgentOptions opts)
     {
-        var yaml = _executor.Trajectory.LastGeneratedYaml;
-        if (string.IsNullOrWhiteSpace(yaml))
+        if (string.IsNullOrWhiteSpace(_executor.Trajectory.LastGeneratedYaml))
         {
             Note(surface, "No validated plan yet — ask the agent for one first.");
             return;
         }
 
-        if (opts.Apply)
+        var result = await PlanExecution.RunAsync(_executor, opts,
+            // The plan panel carries the topology on screen for the whole session; there is
+            // nothing to render again before the question.
+            present: _ => Task.CompletedTask,
+            confirm: _ => (_confirm ?? surface.ConfirmAsync)("Execute plan", ConfirmMessage(view)),
+            surface.SessionToken);
+
+        if (result is null)
         {
-            var confirm = _confirm ?? surface.ConfirmAsync;
-            if (!await confirm("Execute plan", "Execute this plan and perform a real write?"))
-            {
-                Note(surface, "Cancelled — nothing was written.");
-                return;
-            }
+            Note(surface, "Cancelled — nothing was written.");
+            return;
         }
 
-        try
-        {
-            var result = await _executor.ExecuteValidatedPlanAsync(surface.SessionToken);
-            view.ToolResult("execute-yaml-job", result.Content, result.IsError);
-            Note(surface, result.IsError ? "The run reported an error — see the transcript."
-                : opts.Apply ? "Plan executed." : "Dry-run complete — nothing was written.");
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            Note(surface, $"Could not run the plan: {ex.Message}");
-        }
+        view.ToolResult("execute-yaml-job", result.Content, result.IsError);
+        Note(surface, result.IsError ? "The run reported an error — see the transcript."
+            : opts.Apply ? "Plan executed." : "Dry-run complete — nothing was written.");
+    }
+
+    /// <summary>
+    /// The modal's message: the write targets by name, taken from the plan panel's own topology so
+    /// the user approves a write knowing where it lands rather than a bare yes/no. Connection
+    /// strings are sanitised — a secret must not surface in the dialog.
+    /// </summary>
+    private static string ConfirmMessage(TuiTurnView view)
+    {
+        var targets = view.PlanSnapshot().Topology?.Branches
+            .Select(b => b.Output)
+            .Where(o => !string.IsNullOrWhiteSpace(o))
+            .Select(o => ConnectionStringSanitizer.Sanitize(o!))
+            .ToList();
+
+        return targets is { Count: > 0 }
+            ? "This will write to:\n  " + string.Join("\n  ", targets) + "\n\nExecute the plan and perform the write?"
+            : "Execute this plan and perform a real write?";
     }
 
     private void Save(TuiSurface surface, string argument)
