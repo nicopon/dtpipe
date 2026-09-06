@@ -158,12 +158,11 @@ public class PgToCsvCellBenchmarks
     // ── B. The columnar → row bridge ─────────────────────────────────────────
 
     /// <summary>
-    /// The materialization the executor actually performs. ArrowColumnarToRowBridge
-    /// yields an ArrowRowView struct as IReadOnlyList&lt;object?&gt;; PipelineExecutor then
-    /// does <c>r as object?[] ?? r.ToArray()</c>. The cast always fails, so this lands
-    /// on the LINQ Enumerable.ToArray path — ArrowRowView exposes no ICollection&lt;T&gt;
-    /// Count for LINQ to pre-size from, so it grows a buffer through the boxed
-    /// iterator. Compare against B2, which calls the struct's own pre-sized ToArray.
+    /// The materialization the executor performs, through the same async bridge.
+    /// ArrowColumnarToRowBridge yields an ArrowRowView struct as IReadOnlyList&lt;object?&gt;,
+    /// and PipelineExecutor dispatches on the concrete type so the view sizes its array
+    /// once. The gap against B2 is what the IAsyncEnumerable machinery costs; the gap
+    /// against B3 is the whole price of handing the writer a row array.
     /// </summary>
     [Benchmark(Description = "B1 Bridge — 5 columns, as the executor materializes")]
     public async Task<int> B1_Bridge_AsExecutorDoes()
@@ -172,16 +171,20 @@ public class PgToCsvCellBenchmarks
         int n = 0;
         await foreach (var row in bridge.ConvertBatchToRowsAsync(_batch))
         {
-            var materialized = row as object?[] ?? System.Linq.Enumerable.ToArray(row);
+            var materialized = row switch
+            {
+                object?[] arr => arr,
+                ArrowRowView view => view.ToArray(),
+                _ => System.Linq.Enumerable.ToArray(row),
+            };
             n += materialized.Length;
         }
         return n;
     }
 
     /// <summary>
-    /// Counterfactual: identical work, but through ArrowRowView.ToArray(), which
-    /// allocates the object?[] at the right size once. The gap against B1 is pure
-    /// materialization overhead — it extracts exactly the same values.
+    /// The same materialization without the async bridge: ArrowRowView.ToArray over a
+    /// plain loop, extracting exactly the same values.
     /// </summary>
     [Benchmark(Description = "B2 Bridge — 5 columns, via ArrowRowView.ToArray")]
     public int B2_Bridge_ViaViewToArray()
