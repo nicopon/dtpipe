@@ -16,16 +16,16 @@ public class OracleWriterOptions : DbWriterOptions, IProviderOptions, ITableAwar
 	public static string Prefix => OracleConstants.ProviderName;
 	public static string DisplayName => "Oracle Writer Options";
 
-	[ComponentOption(Description = "Mapping for DateTime columns (Date, Timestamp)", Hidden = true)]
+	[ComponentOption(Description = "Mapping for DateTime columns", Hidden = true)]
 	public OracleDateTimeMapping DateTimeMapping { get; set; } = OracleDateTimeMapping.Date;
 
 	[ComponentOption("--table", Aliases = new[] { "-t" }, Description = "Target table name", Required = true)]
 	public string Table { get; set; } = string.Empty;
 
-	[ComponentOption("--strategy", Aliases = new[] { "-s" }, Description = "Data write strategy (Append, Truncate, DeleteThenInsert)", Hidden = true)]
+	[ComponentOption("--strategy", Aliases = new[] { "-s" }, Description = "Data write strategy", Hidden = true)]
 	public OracleWriteStrategy? Strategy { get; set; }
 
-	[ComponentOption("--insert-mode", Description = "Data insert mode (Standard, Bulk, Append)", Hidden = true)]
+	[ComponentOption("--insert-mode", Description = "Data insert mode", Hidden = true)]
 	public OracleInsertMode? InsertMode { get; set; }
 }
 

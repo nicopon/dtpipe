@@ -19,10 +19,10 @@ public class MySqlWriterOptions : DbWriterOptions, IWriterOptions, ITableAwareOp
 	[ComponentOption("--table", Aliases = new[] { "-t" }, Description = "Target table name", Required = true)]
 	public string Table { get; set; } = string.Empty;
 
-	[ComponentOption("--strategy", Aliases = new[] { "-s" }, Description = "Write strategy: Append, Truncate, DeleteThenInsert, Recreate, Upsert, or Ignore", Hidden = true)]
+	[ComponentOption("--strategy", Aliases = new[] { "-s" }, Description = "Write strategy", Hidden = true)]
 	public MySqlWriteStrategy? Strategy { get; set; }
 
-	[ComponentOption("--insert-mode", Description = "Data insert mode (Standard, Bulk)", Hidden = true)]
+	[ComponentOption("--insert-mode", Description = "Data insert mode", Hidden = true)]
 	public MySqlInsertMode? InsertMode { get; set; }
 }
 

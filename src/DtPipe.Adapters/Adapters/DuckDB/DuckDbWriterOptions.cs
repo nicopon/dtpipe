@@ -19,7 +19,7 @@ public class DuckDbWriterOptions : DbWriterOptions, IProviderOptions, ITableAwar
 	[ComponentOption("--table", Aliases = new[] { "-t" }, Description = "Target table name", Required = true)]
 	public string Table { get; set; } = string.Empty;
 
-	[ComponentOption("--strategy", Aliases = new[] { "-s" }, Description = "Data write strategy (Append, Truncate, or Recreate)", Hidden = true)]
+	[ComponentOption("--strategy", Aliases = new[] { "-s" }, Description = "Data write strategy", Hidden = true)]
 	public DuckDbWriteStrategy? Strategy { get; set; }
 
 	[ComponentOption("--duck-init", Description = "SQL executed after connection open (e.g. LOAD azure; SET azure_storage_connection_string='...'). Prefix with @ to load from a file.")]

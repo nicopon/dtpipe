@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using DtPipe.Core.Attributes;
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Cli.Mcp;
+using DtPipe.Cli.Pipeline;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Options;
 using Microsoft.Extensions.DependencyInjection;
@@ -112,6 +113,41 @@ public class McpAdapterHelpTests
         return c.Readers.Select(e => (((IComponentDescriptor)Activator.CreateInstance(e.ImplementationType)!).ComponentName, "Reader", ((IComponentDescriptor)Activator.CreateInstance(e.ImplementationType)!).OptionsType))
             .Concat(c.Writers.Select(e => (((IComponentDescriptor)Activator.CreateInstance(e.ImplementationType)!).ComponentName, "Writer", ((IComponentDescriptor)Activator.CreateInstance(e.ImplementationType)!).OptionsType)))
             .ToList();
+    }
+
+    /// <summary>
+    /// A closed set of values is printed, not described. sqlite's write strategy was documented as
+    /// three of its six members while the example beside it used a fourth, so Upsert,
+    /// DeleteThenInsert and Ignore were invisible to a caller choosing one. Reading the members off
+    /// the enum removes the class of drift rather than one instance of it.
+    /// </summary>
+    [Fact]
+    public void An_Enum_Option_Shows_Its_Members_Instead_Of_A_Placeholder()
+    {
+        foreach (var (adapter, _, optionsType) in _roles)
+        {
+            var help = _help.GetAdapterHelp(adapter);
+            foreach (var prop in optionsType.GetProperties().Where(p => p.CanWrite))
+            {
+                var type = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
+                if (!type.IsEnum) continue;
+
+                var expected = $"{prop.Name.ToKebabCase()}: {string.Join(" | ", Enum.GetNames(type))}";
+                Assert.Contains(expected, help);
+            }
+        }
+    }
+
+    /// <summary>An example must set an option to a value that option accepts. sqlite's used
+    /// "Upsert" while the strategy line named three members that did not include it.</summary>
+    [Fact]
+    public void An_Example_Uses_A_Value_The_Option_Lists()
+    {
+        var help = _help.GetAdapterHelp("sqlite");
+        var strategyLine = help.Split('\n').First(l => l.TrimStart().StartsWith("strategy: Append", StringComparison.Ordinal));
+
+        Assert.Contains("strategy: \"Upsert\"", help);
+        Assert.Contains("Upsert", strategyLine);
     }
 
     /// <summary>

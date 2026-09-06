@@ -343,12 +343,29 @@ public class McpHelpService : IMcpHelpService
             var descriptionAttr = prop.GetCustomAttribute<DescriptionAttribute>();
             var desc = CliOptionBuilder.ResolveDescription(cliOptionAttr, descriptionAttr);
 
-            writer.WriteLine($"{indent}{kebabName}: <value>");
+            writer.WriteLine($"{indent}{kebabName}: {ValuePlaceholder(prop.PropertyType)}");
             if (!string.IsNullOrEmpty(desc))
             {
                 writer.WriteLine($"{indent}  # {desc}");
             }
         }
+    }
+
+    /// <summary>
+    /// What may stand on the right of an option. A closed set of values is knowable by reflection,
+    /// so it is printed rather than described: a hand-written list in a Description is unverified
+    /// and drifts — sqlite's named three of its six write strategies while the example beside it
+    /// used a fourth, leaving Upsert, DeleteThenInsert and Ignore invisible to a caller.
+    /// </summary>
+    private static string ValuePlaceholder(Type propertyType)
+    {
+        var underlying = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+
+        if (underlying.IsEnum)
+            return string.Join(" | ", Enum.GetNames(underlying));
+        if (underlying == typeof(bool))
+            return "true | false";
+        return "<value>";
     }
 
     /// <param name="role">Section label when one adapter exposes more than one role, else null.</param>
