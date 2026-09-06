@@ -1,191 +1,191 @@
 {
-  "recorded": "2026-09-01T11:30:18Z",
+  "recorded": "2026-09-04T16:06:18Z",
   "machine_fingerprint": "Darwin/arm64/Apple M5 Pro/18c",
   "benchmarks": {
     "ArrowAdoBenchmarks.BindInt32Column": {
-      "mean_ns": 12776.249,
-      "min_ns": 12726.747,
-      "stddev_ns": 45.748,
+      "mean_ns": 12897.984,
+      "min_ns": 12854.399,
+      "stddev_ns": 40.903,
       "allocated_bytes": 72000
     },
     "ArrowAdoBenchmarks.BuildConfigDefault": {
-      "mean_ns": 72.869,
-      "min_ns": 72.823,
-      "stddev_ns": 0.049,
+      "mean_ns": 76.663,
+      "min_ns": 73.613,
+      "stddev_ns": 3.163,
       "allocated_bytes": 672
     },
     "ArrowAdoBenchmarks.BuildConfigNoOverrides": {
-      "mean_ns": 56.055,
-      "min_ns": 55.904,
-      "stddev_ns": 0.178,
+      "mean_ns": 57.865,
+      "min_ns": 57.115,
+      "stddev_ns": 0.808,
       "allocated_bytes": 448
     },
     "ArrowAdoBenchmarks.ReadToArrowBatches": {
-      "mean_ns": 1995889.484,
-      "min_ns": 1987483.723,
-      "stddev_ns": 13107.472,
+      "mean_ns": 2025538.874,
+      "min_ns": 2014586.832,
+      "stddev_ns": 9708.069,
       "allocated_bytes": 423486
     },
     "ArrowAdoBenchmarks.ReadToArrowBatchesNoOverrides": {
-      "mean_ns": 1999963.867,
-      "min_ns": 1991066.406,
-      "stddev_ns": 11604.298,
+      "mean_ns": 2024182.021,
+      "min_ns": 2013700.684,
+      "stddev_ns": 16401.432,
       "allocated_bytes": 423509
     },
     "ArrowAdoBenchmarks.RecordBatchReaderIterate": {
-      "mean_ns": 41037.153,
-      "min_ns": 40462.54,
-      "stddev_ns": 527.322,
+      "mean_ns": 43194.849,
+      "min_ns": 41640.935,
+      "stddev_ns": 1855.884,
       "allocated_bytes": 72000
     },
     "CheckpointBenchmarks.CipherOnly": {
-      "mean_ns": 2060331.217,
-      "min_ns": 2017971.191,
-      "stddev_ns": 47539.298,
-      "allocated_bytes": 20669193
+      "mean_ns": 2104314.671,
+      "min_ns": 2072887.371,
+      "stddev_ns": 27687.422,
+      "allocated_bytes": 20669347
     },
     "CheckpointBenchmarks.MaterialiseEncrypted": {
-      "mean_ns": 2468387.37,
-      "min_ns": 2459226.562,
-      "stddev_ns": 10039.405,
-      "allocated_bytes": 38028129
+      "mean_ns": 2523700.848,
+      "min_ns": 2510261.883,
+      "stddev_ns": 12514.69,
+      "allocated_bytes": 38028041
     },
     "CheckpointBenchmarks.MaterialiseUnencrypted": {
-      "mean_ns": 1113941.678,
-      "min_ns": 1105937.094,
-      "stddev_ns": 9762.8,
-      "allocated_bytes": 32220495
+      "mean_ns": 1172576.402,
+      "min_ns": 1161677.043,
+      "stddev_ns": 9857.863,
+      "allocated_bytes": 32220538
     },
     "FormatDataTransformerBenchmarks.Transform": {
-      "mean_ns": 70.972,
-      "min_ns": 70.766,
-      "stddev_ns": 0.179,
+      "mean_ns": 70.897,
+      "min_ns": 70.616,
+      "stddev_ns": 0.261,
       "allocated_bytes": 456
     },
     "PgToCsvCellBenchmarks.A1_ArrowBuild_FiveColumns": {
-      "mean_ns": 392703.895,
-      "min_ns": 391138.051,
-      "stddev_ns": 1504.708,
+      "mean_ns": 400198.879,
+      "min_ns": 395896.912,
+      "stddev_ns": 5898.21,
       "allocated_bytes": 922223
     },
     "PgToCsvCellBenchmarks.A2_ArrowBuild_Guid": {
-      "mean_ns": 111896.117,
-      "min_ns": 111178.889,
-      "stddev_ns": 1191.062,
+      "mean_ns": 112387.436,
+      "min_ns": 112119.329,
+      "stddev_ns": 293.046,
       "allocated_bytes": 300688
     },
     "PgToCsvCellBenchmarks.A3_ArrowBuild_Decimal": {
-      "mean_ns": 183994.7,
-      "min_ns": 183439.942,
-      "stddev_ns": 730.112,
+      "mean_ns": 181858.073,
+      "min_ns": 180671.366,
+      "stddev_ns": 1081.104,
       "allocated_bytes": 148903
     },
     "PgToCsvCellBenchmarks.A4_ArrowBuild_String": {
-      "mean_ns": 50136.672,
-      "min_ns": 50044.385,
-      "stddev_ns": 152.029,
+      "mean_ns": 50754.526,
+      "min_ns": 50619.695,
+      "stddev_ns": 127.524,
       "allocated_bytes": 198478
     },
     "PgToCsvCellBenchmarks.B1_Bridge_AsExecutorDoes": {
-      "mean_ns": 405641.961,
-      "min_ns": 405084.106,
-      "stddev_ns": 656.705,
-      "allocated_bytes": 925722
+      "mean_ns": 343044.505,
+      "min_ns": 342298.391,
+      "stddev_ns": 650.427,
+      "allocated_bytes": 811034
     },
     "PgToCsvCellBenchmarks.B2_Bridge_ViaViewToArray": {
-      "mean_ns": 321212.741,
-      "min_ns": 321084.167,
-      "stddev_ns": 111.372,
+      "mean_ns": 327259.074,
+      "min_ns": 326809.266,
+      "stddev_ns": 658.052,
       "allocated_bytes": 728402
     },
     "PgToCsvCellBenchmarks.B3_Bridge_ExtractionOnly": {
-      "mean_ns": 302716.308,
-      "min_ns": 302325.46,
-      "stddev_ns": 583.899,
-      "allocated_bytes": 597330
+      "mean_ns": 319651.645,
+      "min_ns": 312851.562,
+      "stddev_ns": 6970.47,
+      "allocated_bytes": 597329
     },
     "PgToCsvCellBenchmarks.B4_Extract_Guid": {
-      "mean_ns": 53367.829,
-      "min_ns": 52882.903,
-      "stddev_ns": 425.44,
+      "mean_ns": 46739.903,
+      "min_ns": 46274.905,
+      "stddev_ns": 721.789,
       "allocated_bytes": 147456
     },
     "PgToCsvCellBenchmarks.B5_Extract_Decimal": {
-      "mean_ns": 60461.636,
-      "min_ns": 60384.043,
-      "stddev_ns": 78.138,
-      "allocated_bytes": 65536
+      "mean_ns": 64045.454,
+      "min_ns": 63625.244,
+      "stddev_ns": 586.851,
+      "allocated_bytes": 65537
     },
     "PgToCsvCellBenchmarks.B6_Extract_String": {
-      "mean_ns": 60992.776,
-      "min_ns": 60810.572,
-      "stddev_ns": 206.194,
+      "mean_ns": 61809.252,
+      "min_ns": 61677.312,
+      "stddev_ns": 125.371,
       "allocated_bytes": 155761
     },
     "PgToCsvCellBenchmarks.B7_Extract_Int32": {
-      "mean_ns": 20349.506,
-      "min_ns": 20256.384,
-      "stddev_ns": 121.205,
+      "mean_ns": 21298.183,
+      "min_ns": 20701.879,
+      "stddev_ns": 665.289,
       "allocated_bytes": 49152
     },
     "PgToCsvCellBenchmarks.B8_Bridge_RowsToColumnar": {
-      "mean_ns": 1125293.891,
-      "min_ns": 1120890.787,
-      "stddev_ns": 3969.71,
-      "allocated_bytes": 1824156
+      "mean_ns": 482344.116,
+      "min_ns": 482102.925,
+      "stddev_ns": 225.753,
+      "allocated_bytes": 923647
     },
     "PgToCsvCellBenchmarks.C1_CsvWrite": {
-      "mean_ns": 342495.341,
-      "min_ns": 316966.003,
-      "stddev_ns": 22110.916,
+      "mean_ns": 368726.175,
+      "min_ns": 342664.754,
+      "stddev_ns": 26011.335,
       "allocated_bytes": 279138
     },
     "SampleTapOverheadBenchmarks.ColumnarChain_Ordinary": {
-      "mean_ns": 1697941.541,
-      "min_ns": 1688159.992,
-      "stddev_ns": 8942.19,
+      "mean_ns": 1775276.719,
+      "min_ns": 1756045.41,
+      "stddev_ns": 18102.541,
       "allocated_bytes": 3407643
     },
     "SampleTapOverheadBenchmarks.ColumnarChain_SampleRecording": {
-      "mean_ns": 1712504.829,
-      "min_ns": 1708155.518,
-      "stddev_ns": 4107.128,
-      "allocated_bytes": 3407874
+      "mean_ns": 1744711.236,
+      "min_ns": 1741320.721,
+      "stddev_ns": 3179.158,
+      "allocated_bytes": 3407875
     },
     "SampleTapOverheadBenchmarks.ColumnarChain_SampleSated": {
-      "mean_ns": 1699769.912,
-      "min_ns": 1693499.92,
-      "stddev_ns": 6074.419,
+      "mean_ns": 1747299.343,
+      "min_ns": 1742210.287,
+      "stddev_ns": 8487.851,
       "allocated_bytes": 3407875
     },
     "SampleTapOverheadBenchmarks.RowChain_Ordinary": {
-      "mean_ns": 11886914.062,
-      "min_ns": 11859148.438,
-      "stddev_ns": 31548.429,
-      "allocated_bytes": 59238164
+      "mean_ns": 12208115.443,
+      "min_ns": 12173461.578,
+      "stddev_ns": 33121.895,
+      "allocated_bytes": 59238196
     },
     "SampleTapOverheadBenchmarks.RowChain_SampleRecording": {
-      "mean_ns": 14587101.995,
-      "min_ns": 14570678.375,
-      "stddev_ns": 16012.033,
-      "allocated_bytes": 59238381
+      "mean_ns": 14844904.948,
+      "min_ns": 14756453.781,
+      "stddev_ns": 76916.911,
+      "allocated_bytes": 59238428
     },
     "SampleTapOverheadBenchmarks.RowChain_SampleSated": {
-      "mean_ns": 13030381.078,
-      "min_ns": 12996225.266,
-      "stddev_ns": 30999.96,
-      "allocated_bytes": 59238418
+      "mean_ns": 13239706.044,
+      "min_ns": 13187428.695,
+      "stddev_ns": 56766.939,
+      "allocated_bytes": 59238428
     },
     "TypeConverterBenchmarks.ColumnConverterDelegate": {
-      "mean_ns": 12904.175,
-      "min_ns": 12894.697,
-      "stddev_ns": 8.224,
+      "mean_ns": 13387.756,
+      "min_ns": 13335.759,
+      "stddev_ns": 49.555,
       "allocated_bytes": 72000
     },
     "TypeConverterBenchmarks.ConvertValueDirectCall": {
-      "mean_ns": 17427.409,
-      "min_ns": 17388.344,
-      "stddev_ns": 33.876,
+      "mean_ns": 16610.811,
+      "min_ns": 16538.499,
+      "stddev_ns": 100.227,
       "allocated_bytes": 72000
     }
   }
