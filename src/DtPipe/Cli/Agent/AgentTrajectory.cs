@@ -26,6 +26,13 @@ public class AgentTrajectory
 {
     private readonly object _gate = new();
 
+    /// <summary>
+    /// Raised on the turn thread once a step is recorded. A diagnostic trace subscribes rather than
+    /// being called at each of the five sites that append one — a site added later would otherwise
+    /// be silently missing from the record.
+    /// </summary>
+    public event Action<TrajectoryStep>? StepAdded;
+
     public List<TrajectoryStep> Steps { get; } = new();
     public string? LastGeneratedYaml { get; set; }
 
@@ -53,6 +60,7 @@ public class AgentTrajectory
         // The full-screen surface reads this list from the UI thread while the turn thread appends
         // to it — the lock keeps a snapshot from tearing. Every other reader runs after the turn.
         lock (_gate) Steps.Add(step);
+        StepAdded?.Invoke(step);
     }
 
     /// <summary>A copy safe to enumerate while a turn thread is still calling <see cref="AddStep"/>.</summary>

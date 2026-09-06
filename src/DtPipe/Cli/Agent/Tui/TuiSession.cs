@@ -121,6 +121,13 @@ internal sealed class TuiSession
                         Save(surface, command.Text);
                         continue;
 
+                    case SessionCommandKind.Note:
+                        // The one ground truth an interactive run has. A failed mission's trace
+                        // says what the model did; only the person watching knows what it should
+                        // have done, and the moment they know it is now.
+                        Note(surface, Annotate(command.Text));
+                        continue;
+
                     case SessionCommandKind.Execute:
                         await ExecuteAsync(surface, view, opts);
                         continue;
@@ -206,6 +213,16 @@ internal sealed class TuiSession
         return targets is { Count: > 0 }
             ? "This will write to:\n  " + string.Join("\n  ", targets) + "\n\nExecute the plan and perform the write?"
             : "Execute this plan and perform a real write?";
+    }
+
+    /// <summary>Puts a human's verdict into the trace, and says whether it landed.</summary>
+    private string Annotate(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return "Nothing to note — write what went wrong after /note.";
+        if (_executor.Trace is not { } trace) return "No trace for this session — relaunch with --trace to record notes.";
+
+        trace.Note(text);
+        return "Noted in the session trace.";
     }
 
     private void Save(TuiSurface surface, string argument)

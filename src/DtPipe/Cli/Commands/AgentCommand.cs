@@ -94,6 +94,16 @@ public class AgentCommand : Command
         };
         numCtxOption.DefaultValueFactory = _ => AgentOptions.DefaultNumCtx;
 
+        var traceOption = new Option<string?>("--trace")
+        {
+            Description = "Write a diagnostic record of the session as JSON lines: how the run was launched, "
+                        + "the role prompt in force, the tool catalogue as the model was offered it, every step "
+                        + "with its tool call and result, and each turn's verdict. A directory gets a timestamped "
+                        + "file inside it, so a campaign of sessions accumulates. Defaults to $DTPIPE_AGENT_TRACE. "
+                        + "Off unless asked for — arguments and results are recorded as the model saw them, and "
+                        + "only known credential shapes are blanked."
+        };
+
         var interactiveOption = new Option<bool>("--interactive")
         {
             Description = "Force interactive mode for model selection and task prompt"
@@ -150,6 +160,7 @@ public class AgentCommand : Command
 
         Arguments.Add(promptArgument);
         Options.Add(promptOption);
+        Options.Add(traceOption);
         Options.Add(providerOption);
         Options.Add(apiKeyOption);
         Options.Add(modelOption);
@@ -220,11 +231,23 @@ public class AgentCommand : Command
                 }
             }
 
+            // A trace is a diagnostic, never a gate: nothing downstream reads its verdict, and a
+            // destination that cannot be written is reported and then ignored.
+            using var trace = AgentTrace.Open(
+                parseResult.GetValue(traceOption) ?? Environment.GetEnvironmentVariable("DTPIPE_AGENT_TRACE"),
+                out var traceFailure);
+
+            if (traceFailure is not null)
+                console.MarkupLine($"[yellow]Warning:[/] no session trace — {Markup.Escape(traceFailure)}");
+            else if (trace is not null)
+                console.MarkupLine($"[grey]Tracing this session to {Markup.Escape(trace.Path)}[/]");
+
             tui.RenderRunContext(model, url, mode, detail);
 
             var toolProvider = new McpToolProvider(mcpTools);
             var executor = new AgentExecutor(toolProvider, llmClient, tui, console,
-                dagTopology: DtPipe.Cli.Pipeline.DagTopologyService.FromServices(serviceProvider));
+                dagTopology: DtPipe.Cli.Pipeline.DagTopologyService.FromServices(serviceProvider),
+                trace: trace);
 
               var agentOptions = new AgentOptions
                       {

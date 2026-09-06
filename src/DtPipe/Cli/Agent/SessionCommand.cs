@@ -23,6 +23,9 @@ internal enum SessionCommandKind
     /// <summary>Move to the step list — on this surface, the steps and detail panels are the review.</summary>
     Review,
 
+    /// <summary>Record what the human made of what just happened, into the session trace.</summary>
+    Note,
+
     /// <summary>Leave the session.</summary>
     Quit,
 
@@ -47,7 +50,7 @@ internal enum SessionCommandKind
 internal readonly record struct SessionCommand(SessionCommandKind Kind, string Text)
 {
     /// <summary>The commands, as the surface advertises them.</summary>
-    public const string Hint = "/exec · /mode · /save · /review · /quit";
+    public const string Hint = "/exec · /mode · /save · /note · /review · /quit";
 
     public static SessionCommand Parse(string? line)
     {
@@ -64,6 +67,7 @@ internal readonly record struct SessionCommand(SessionCommandKind Kind, string T
             "exec" or "execute" or "run" => SessionCommandKind.Execute,
             "mode" => SessionCommandKind.Mode,
             "save" => SessionCommandKind.Save,
+            "note" => SessionCommandKind.Note,
             "review" or "steps" => SessionCommandKind.Review,
             "quit" or "exit" or "q" => SessionCommandKind.Quit,
             "help" or "?" => SessionCommandKind.Help,

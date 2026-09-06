@@ -34,6 +34,7 @@ public class SessionCommandTests
     [InlineData("/run", "Execute")]
     [InlineData("/mode", "Mode")]
     [InlineData("/save", "Save")]
+    [InlineData("/note it invented a tool name", "Note")]
     [InlineData("/review", "Review")]
     [InlineData("/steps", "Review")]
     [InlineData("/quit", "Quit")]

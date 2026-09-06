@@ -43,6 +43,11 @@ public class AgentExecutor
      private AgentMode? _mode;
      private long _turnTokens;
      private readonly Stopwatch _turnClock = new();
+     private readonly AgentTrace? _trace;
+
+     /// <summary>The session's diagnostic record, when one was asked for.</summary>
+     internal AgentTrace? Trace => _trace;
+     private bool _traceOpened;
 
      /// <summary>
      /// The session's live operating mode. Seeded from the first turn's <see cref="AgentOptions.Mode"/>
@@ -68,7 +73,7 @@ public class AgentExecutor
          return _mode.Value;
      }
 
-     public AgentExecutor(IAgentToolProvider toolProvider, ILlmClient llmClient, AgentTui tui, IAnsiConsole console, AgentContextStore? contextStore = null, DtPipe.Cli.Pipeline.DagTopologyService? dagTopology = null)
+     public AgentExecutor(IAgentToolProvider toolProvider, ILlmClient llmClient, AgentTui tui, IAnsiConsole console, AgentContextStore? contextStore = null, DtPipe.Cli.Pipeline.DagTopologyService? dagTopology = null, AgentTrace? trace = null)
         {
             _toolProvider = toolProvider;
             _llmClient = llmClient;
@@ -76,6 +81,8 @@ public class AgentExecutor
             _console = console;
            ContextStore = contextStore ?? new AgentContextStore();
            _dagTopology = dagTopology;
+           _trace = trace;
+           if (_trace is not null) Trajectory.StepAdded += _trace.Step;
 
          Messages.Add(new ChatMessage("system", AgentSystemPrompt.DefaultSystemPrompt));
         }
@@ -180,6 +187,20 @@ public class AgentExecutor
         Messages[0] = new ChatMessage("system", AgentSystemPrompt.Select(Mode));
         Messages.Add(new ChatMessage("user", userPrompt));
 
+        if (_trace is not null)
+        {
+            // The launch context and the role prompt go down once; the catalogue goes down every
+            // turn, because /mode changes which tools are offered between them.
+            if (!_traceOpened)
+            {
+                _traceOpened = true;
+                _trace.Session(model, baseUrl, Mode, opts, maxIterations);
+            }
+            _trace.SystemPrompt(Mode, AgentSystemPrompt.Select(Mode));
+            _trace.Catalogue(Mode, _toolProvider.GetToolDefinitions(Mode));
+            _trace.Turn(userPrompt);
+        }
+
         var toolCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         _turnClock.Restart();
         _turnTokens = 0;
@@ -231,8 +252,10 @@ public class AgentExecutor
 
         _turnClock.Stop();
         int shownIterations = turnIterations <= maxIterations ? turnIterations : maxIterations;
-        return new TurnSummaryModel(primary.Outcome, shownIterations, _turnClock.Elapsed, toolCounts, primary.Question,
+        var summary = new TurnSummaryModel(primary.Outcome, shownIterations, _turnClock.Elapsed, toolCounts, primary.Question,
             ProducedPlan: !string.IsNullOrWhiteSpace(primary.Yaml), Tokens: _turnTokens);
+        _trace?.Verdict(summary);
+        return summary;
      }
 
     /// <summary>Outcome of one run of the planning loop, including why it stopped.</summary>
