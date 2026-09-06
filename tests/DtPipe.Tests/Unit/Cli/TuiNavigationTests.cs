@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using DtPipe.Cli.Agent;
 using DtPipe.Cli.Agent.Tui;
+using DtPipe.Cli.Agent.Tui.Panels;
 using Spectre.Console;
 using Terminal.Gui.App;
 using Terminal.Gui.Drawing;
@@ -157,6 +158,27 @@ public class TuiNavigationTests
             (_, s) => Assert.Contains("e/b errors", s.HintsText),   // steps hints
             (app, _) => app.InjectKey(Key.Tab),
             (_, s) => Assert.Contains("scroll", s.HintsText));      // flux hints
+    }
+
+    /// <summary>
+    /// No step icon is an emoji. A terminal draws an astral character two cells wide, which eats the
+    /// space after it, and the row budget is counted in UTF-16 code units, which an astral character
+    /// spends two of.
+    /// </summary>
+    [Fact]
+    public void The_Step_Icons_Stay_Single_Width()
+    {
+        var steps = new AgentTrajectory();
+        steps.AddStep(1, "reasoning only");
+        steps.AddStep(2, "a tool call", toolName: "inspect", toolResult: "ok");
+        steps.AddStep(3, "a failure", toolName: "inspect", toolResult: "boom", isError: true);
+
+        foreach (var step in steps.Snapshot())
+        {
+            var row = StepsPanel.RowLabel(step);
+            Assert.DoesNotContain(row, char.IsSurrogate);
+            Assert.Contains(" ", row[3..6]);   // the icon has not swallowed its own spacing
+        }
     }
 
     /// <summary>

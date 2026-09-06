@@ -86,9 +86,20 @@ internal sealed class StepsPanel
         SelectionChanged?.Invoke();
     }
 
-    private static string RowLabel(TrajectoryStep s)
+    /// <summary>
+    /// One row: the iteration, what the step did, and its tool. Filled circle = it called a tool,
+    /// hollow = it only reasoned, warning = it failed.
+    ///
+    /// <para>
+    /// The glyphs stay inside the Basic Multilingual Plane on purpose. An astral character is an
+    /// emoji, a terminal draws most of those two cells wide, and the budget here is counted in
+    /// UTF-16 code units — so an emoji icon both swallowed the space after itself and spent two of
+    /// the thirty characters this row is allowed.
+    /// </para>
+    /// </summary>
+    internal static string RowLabel(TrajectoryStep s)
     {
-        string icon = s.IsError ? "⚠" : s.ToolName != null ? "🛠" : "💭";
+        string icon = s.IsError ? "⚠" : s.ToolName != null ? "●" : "○";
         string label = $"{s.Iteration,3} {icon} {s.ToolName ?? "reasoning"}";
         return label.Length > 30 ? label[..29] + "…" : label;
     }
