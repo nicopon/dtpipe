@@ -47,6 +47,21 @@ internal sealed class TuiTurnView : ITurnView
     /// </summary>
     public string? LiveTailPlain() => _streaming?.TailPlain(LiveTailLines);
 
+    /// <summary>
+    /// The step in flight, or null between steps. It is deliberately not a
+    /// <see cref="TrajectoryStep"/> and never joins <see cref="AgentTrajectory"/>: that list is the
+    /// session's record, read by the scrollback review and the final summary, and a step that has
+    /// not happened yet would be a lie told to both. The surface composes this one onto the end of
+    /// the record for as long as it is running.
+    /// </summary>
+    public LiveStep? LiveStepSnapshot()
+    {
+        var streaming = _streaming;
+        return streaming is null
+            ? null
+            : new LiveStep(streaming.Step, streaming.ToolName, streaming.TailPlain(LiveTailLines) ?? string.Empty);
+    }
+
     /// <summary>A thread-safe read of the plan's state, message and topology for the plan panel.</summary>
     public PlanView PlanSnapshot()
     {
@@ -128,3 +143,12 @@ internal sealed class TuiTurnView : ITurnView
         _log.Append(StepDigest.AgentResponseEntry(content));
     }
 }
+
+/// <summary>
+/// The step the model is producing right now, as a detached read. Its text is the streamed tail, so
+/// it grows between one repaint and the next.
+/// </summary>
+/// <param name="Iteration">Which step of the turn it is.</param>
+/// <param name="ToolName">The tool it has announced, once it has announced one.</param>
+/// <param name="Text">What the model has said so far.</param>
+internal readonly record struct LiveStep(int Iteration, string? ToolName, string Text);

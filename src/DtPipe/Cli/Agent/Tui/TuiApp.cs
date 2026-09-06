@@ -179,7 +179,7 @@ internal sealed class TuiApp
                 // The panels rebuild only when their source moved (the step count, the rendered
                 // exchange, the plan lines); the transcript keeps the permanent record and is
                 // replayed to scrollback at teardown, not shown here line by line.
-                screen.Sync(trajectory.Snapshot(), log.LiveTail, clock, meter);
+                screen.Sync(trajectory.Snapshot(), view.LiveStepSnapshot(), clock, meter);
                 screen.SyncPlan(view.PlanSnapshot());
                 return true;
             });
@@ -368,7 +368,7 @@ internal sealed class TuiSurface
         {
             _softCancel = cts = new CancellationTokenSource();
         }
-        Post(() => Screen.SetAccepting(false));
+        Post(() => { Screen.SetAccepting(false); Screen.FollowTheTurn(); });
         return cts.Token;
     }
 

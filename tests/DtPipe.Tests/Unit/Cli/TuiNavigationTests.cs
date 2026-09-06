@@ -161,63 +161,73 @@ public class TuiNavigationTests
             (_, s) => Assert.Contains("scroll", s.HintsText));      // flux hints
     }
 
-    private static string Tail(int n) => string.Join('\n', Enumerable.Range(1, n).Select(i => $"the model says {i}"));
-
     /// <summary>
-    /// The agent's words chase their newest line until someone reads them. Taking the focus holds
-    /// the position through arriving tokens — the list is rebuilt from a fresh source every time,
-    /// so without the restore a held body would snap to the top rather than merely stop following.
+    /// The step in flight is listed with the recorded ones and the detail panel fills with what the
+    /// model is producing. It is not a trajectory step: the recorded list must not gain an entry for
+    /// something that has not happened.
     /// </summary>
     [Fact(Timeout = 30000)]
-    public async Task The_Exchange_Holds_Its_Place_While_It_Is_Read_And_Follows_Again_Afterwards()
+    public async Task The_Running_Step_Joins_The_List_And_The_Detail_Fills_Live()
     {
-        var steps = FourSteps().Snapshot();
+        var recorded = FourSteps().Snapshot();
+        var live = new LiveStep(5, "inspect", "reading the CSV header");
 
         await Drive(FourSteps(),
-            (_, s) => s.SetAccepting(false),               // a turn is running: the body streams
+            (_, s) => s.SetAccepting(false),
             (_, s) =>
             {
-                s.Sync(steps, Tail(10), "3s", string.Empty);
-                Assert.Equal(9, s.ExchangeSelected);       // nobody reading: it chases the tail
-            },
-            (_, s) => s.FocusExchange(),
-            (_, s) =>
-            {
-                s.Sync(steps, Tail(20), "3s", string.Empty);
-                Assert.Equal(9, s.ExchangeSelected);       // read: held exactly where it was
+                s.Sync(recorded, live, "3s", "42 tok");
+                Assert.True(s.LiveStepSelected, "the running step is what the list follows");
+                Assert.Contains("reading the CSV header", s.DetailText);
+                Assert.Contains("running", s.DetailTitle);
             },
             (_, s) =>
             {
-                s.Sync(steps, Tail(30), "3s", string.Empty);
-                Assert.Equal(9, s.ExchangeSelected);       // and still held on the next tokens
+                s.Sync(recorded, live with { Text = "reading the CSV header\nfound six columns" }, "4s", "60 tok");
+                Assert.Contains("found six columns", s.DetailText);        // it fills as it arrives
             },
-            (_, s) => s.FocusSteps(),
             (_, s) =>
             {
-                s.Sync(steps, Tail(40), "3s", string.Empty);
-                Assert.Equal(39, s.ExchangeSelected);      // reader gone: chasing again
+                s.Sync(recorded, null, "5s", "60 tok");                     // the step finished
+                Assert.False(s.LiveStepSelected);
+                Assert.DoesNotContain("running", s.DetailTitle);
             });
     }
 
     /// <summary>
-    /// No step icon is an emoji. A terminal draws an astral character two cells wide, which eats the
-    /// space after it, and the row budget is counted in UTF-16 code units, which an astral character
-    /// spends two of.
+    /// Reading an earlier step is not interrupted by the turn moving on, but asking for something
+    /// new is a change of subject — the list goes back to following the turn.
     /// </summary>
-    [Fact]
-    public void The_Step_Icons_Stay_Single_Width()
+    [Fact(Timeout = 30000)]
+    public async Task Reading_An_Earlier_Step_Survives_The_Turn_Until_A_New_Prompt()
     {
-        var steps = new AgentTrajectory();
-        steps.AddStep(1, "reasoning only");
-        steps.AddStep(2, "a tool call", toolName: "inspect", toolResult: "ok");
-        steps.AddStep(3, "a failure", toolName: "inspect", toolResult: "boom", isError: true);
+        var recorded = FourSteps().Snapshot();
+        var live = new LiveStep(5, "inspect", "still working");
 
-        foreach (var step in steps.Snapshot())
-        {
-            var row = StepsPanel.RowLabel(step);
-            Assert.DoesNotContain(row, char.IsSurrogate);
-            Assert.Contains(" ", row[3..6]);   // the icon has not swallowed its own spacing
-        }
+        // Every assertion re-establishes the running step first: the surface's own repaint timer runs
+        // between these steps with no live step of its own, and would otherwise drop the row under
+        // the assertion.
+        await Drive(FourSteps(),
+            (_, s) => s.SetAccepting(false),
+            (_, s) =>
+            {
+                s.Sync(recorded, live, "3s", string.Empty);
+                Assert.True(s.LiveStepSelected);
+            },
+            (_, s) => s.FocusSteps(),
+            (app, _) => app.InjectKey(Key.CursorUp),
+            (app, _) => app.InjectKey(Key.CursorUp),
+            (_, s) =>
+            {
+                s.Sync(recorded, live with { Text = "still working, and more" }, "4s", string.Empty);
+                Assert.False(s.LiveStepSelected, "the turn must not drag a reader off an earlier step");
+            },
+            (_, s) =>
+            {
+                s.Sync(recorded, live, "5s", string.Empty);
+                s.FollowTheTurn();                                          // a new prompt was sent
+                Assert.True(s.LiveStepSelected);
+            });
     }
 
     /// <summary>
@@ -295,16 +305,16 @@ public class TuiNavigationTests
             (_, s) => s.SetAccepting(false),
             (_, s) =>
             {
-                s.Sync(steps, "thinking", "3s", "42 tok");
+                s.Sync(steps, new LiveStep(5, null, "thinking"), "3s", "42 tok");
                 Assert.Equal("Agent · step 5/12 · 3s · 42 tok", s.ExchangeTitle);
                 Assert.Equal("dtpipe agent · test", s.WindowTitle);            // no clock in the title
-                Assert.Contains("thinking", s.StatusText);
+                Assert.Contains("esc to stop", s.StatusText);   // the exchange says a turn runs, and no more
             },
             (_, s) => s.SetAccepting(true),
             (_, s) =>
             {
                 s.ShowNote("Saved the plan to ./plan.yaml");
-                s.Sync(steps, "thinking", "9s", "99 tok");
+                s.Sync(steps, null, "9s", "99 tok");
                 Assert.Contains("Saved the plan", s.StatusText);               // a note outranks the tail
                 Assert.Equal("Agent", s.ExchangeTitle);
             });

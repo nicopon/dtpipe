@@ -106,12 +106,7 @@ internal sealed class ExchangePanel
         var headline = $"{exchange.Marker}  {exchange.Headline}";
         if (_headline.Text != headline) _headline.Text = headline;
 
-        // A running turn that is between tokens — executing a tool, waiting on the endpoint — has
-        // nothing new to say, and blanking the body for it would make the zone strobe through every
-        // tool call. Only a fresh word replaces the last one.
         var lines = exchange.BodyLines();
-        if (lines.Count == 0 && exchange.Kind == ExchangeKind.Speaking) return;
-
         var text = string.Join('\n', lines);
         if (text == _rendered) return;
         _rendered = text;

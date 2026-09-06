@@ -46,13 +46,6 @@ internal sealed class TuiScreen
     private readonly TextField _input;
     private readonly int _maxIterations;
 
-    /// <summary>
-    /// The frames of a turn in flight, on the caret. Braille dots, the same wheel the scrollback
-    /// path spins through Spectre — one turn, one vocabulary, whichever surface is watching.
-    /// </summary>
-    private static readonly string[] Working =
-        ["⠋ ", "⠙ ", "⠹ ", "⠸ ", "⠼ ", "⠴ ", "⠦ ", "⠧ ", "⠇ ", "⠏ "];
-
     private const string Prompt = "› ";
 
     private bool _expanded;
@@ -61,6 +54,7 @@ internal sealed class TuiScreen
     private string _title;
     private Exchange _last;
     private bool _accepting;
+    private LiveStep? _live;
 
     /// <summary>A line the user submitted. Raised on the UI thread.</summary>
     public event Action<string>? Submitted;
@@ -153,9 +147,16 @@ internal sealed class TuiScreen
         _accepting = accepting;
         _input.ReadOnly = !accepting;
         _working = 0;
-        _caret.Text = accepting ? Prompt : Working[0];
+        _caret.Text = accepting ? Prompt : $"{Wheel.Frame(0)} ";
         if (accepting) _input.SetFocus();
     }
+
+    /// <summary>
+    /// Puts the step list back on the running row. A new prompt is a deliberate change of subject:
+    /// whatever earlier step was being read, the user has just asked for something else and wants to
+    /// see it happen.
+    /// </summary>
+    public void FollowTheTurn() => _steps.SelectLast();
 
     /// <summary>The session answering for itself — what a command did, or why it did nothing.</summary>
     public void ShowNote(string line) => _last = ExchangeContent.Note(line);
@@ -172,8 +173,8 @@ internal sealed class TuiScreen
 
     /// <summary>
     /// Pushes the latest state into the panels. The snapshots are already detached copies; this
-    /// only touches views, on the UI thread. <paramref name="liveTail"/> is what the model has said
-    /// so far in the running turn, and is ignored between turns.
+    /// only touches views, on the UI thread. <paramref name="live"/> is the step the model is
+    /// producing, or null between steps.
     ///
     /// <para>
     /// Every write here is conditional, because the repaint timer runs ten times a second for the
@@ -183,25 +184,28 @@ internal sealed class TuiScreen
     /// panels each guard themselves the same way.
     /// </para>
     /// </summary>
-    public void Sync(IReadOnlyList<TrajectoryStep> steps, string? liveTail, string clock, string meter)
+    public void Sync(IReadOnlyList<TrajectoryStep> steps, LiveStep? live, string clock, string meter)
     {
         if (_title != _renderedTitle) _window.Title = _renderedTitle = _title;
 
-        // Between turns the exchange holds the last word said to the user; while one runs it holds
-        // what the model is saying, and the frame's own title does the counting.
+        // The exchange holds the last word said to the user, and while a turn runs it says only
+        // that one is running — what the model is producing belongs to the step producing it, over
+        // in the detail panel. Its frame title does the counting.
         _exchange.Retitle(_accepting ? "Agent" : $"Agent · {Progress(steps.Count, clock, meter)}");
-        _exchange.Show(_accepting ? _last : ExchangeContent.Speaking(liveTail));
+        _exchange.Show(_accepting ? _last : ExchangeContent.Working());
 
         // The one thing on this surface that redraws with nothing behind it having changed, and
-        // that is its whole job: it says the model is still working. Two cells, and only while a
-        // turn holds the line closed.
+        // that is its whole job: it says the model is still working. The steps list spins the same
+        // frame on the running row, so the two turn together.
         if (!_accepting)
         {
-            _working = (_working + 1) % Working.Length;
-            _caret.Text = Working[_working];
+            _working++;
+            _caret.Text = $"{Wheel.Frame(_working)} ";
         }
 
-        _steps.Update(steps);            // rebuilds only when the step count moved
+        _live = live;
+        _steps.Update(steps, live, Wheel.Frame(_working));
+        RenderDetail();
     }
 
     /// <summary>
@@ -219,13 +223,15 @@ internal sealed class TuiScreen
     public void SyncPlan(PlanView plan) => _plan.Update(plan);
 
     /// <summary>
-    /// Re-renders the detail and hands it the plan's column while it is expanded. The plan stands
+    /// Re-renders the detail — the running step's live text when that row is highlighted, the
+    /// recorded step otherwise — and hands it the plan's column while it is expanded. The plan stands
     /// down rather than being squeezed: an expanded step detail is the one thing here that wants
     /// the whole width, and a branch line rendered into half a column says nothing.
     /// </summary>
     private void RenderDetail()
     {
-        _detail.Show(_steps.Selected, _expanded);
+        if (_steps.LiveSelected && _live is { } live) _detail.ShowLive(live);
+        else _detail.Show(_steps.Selected, _expanded);
         _plan.Frame.Visible = !_expanded;
         _detail.Widen(_expanded);
     }
@@ -307,6 +313,7 @@ internal sealed class TuiScreen
     internal string WindowTitle => _window.Title;
     internal string ExchangeTitle => _exchange.Frame.Title;
     internal bool InputFocused => _input.HasFocus;
+    internal bool LiveStepSelected => _steps.LiveSelected;
     internal int? ExchangeSelected => _exchange.SelectedIndex;
     internal bool PlanVisible => _plan.Frame.Visible;
     internal int PlanWidth => _plan.Frame.Frame.Width;
@@ -315,6 +322,7 @@ internal sealed class TuiScreen
     internal LineStyle? BorderOfSteps => _steps.Frame.Border?.LineStyle;
     internal LineStyle? BorderOfExchange => _exchange.Frame.Border?.LineStyle;
     internal string DetailText => _detail.BodyText;
+    internal string DetailTitle => _detail.Frame.Title;
     internal string PlanText => _plan.BodyText;
     internal bool Expanded => _expanded;
     internal int? SelectedStepIteration => _steps.Selected?.Iteration;

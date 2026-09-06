@@ -86,15 +86,20 @@ public class ExchangeContentTests
         Assert.Empty(exchange.BodyLines());
     }
 
+    /// <summary>
+    /// A running turn says only that it is running. What the model is producing belongs to the step
+    /// producing it — the detail panel shows that — and putting it here too would put two live
+    /// streams on one screen, which is what retiring the transcript band was for.
+    /// </summary>
     [Fact]
-    public void A_Running_Turn_Puts_What_The_Model_Has_Said_In_The_Body()
+    public void A_Running_Turn_Says_So_And_Carries_No_Stream()
     {
-        var exchange = ExchangeContent.Speaking("first line\nsecond line");
+        var exchange = ExchangeContent.Working();
 
-        Assert.Equal(ExchangeKind.Speaking, exchange.Kind);
+        Assert.Equal(ExchangeKind.Working, exchange.Kind);
         Assert.Equal("▸", exchange.Marker);
-        Assert.Equal(new[] { "first line", "second line" }, exchange.BodyLines());
-        Assert.Empty(ExchangeContent.Speaking(null).BodyLines());
+        Assert.Contains("esc to stop", exchange.Headline);
+        Assert.Empty(exchange.BodyLines());
     }
 
     /// <summary>

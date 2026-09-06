@@ -6,8 +6,8 @@ namespace DtPipe.Cli.Agent.Tui;
 /// <summary>What the agent's last word was, which decides the marker the exchange wears.</summary>
 internal enum ExchangeKind
 {
-    /// <summary>A turn is running and the model is producing text.</summary>
-    Speaking,
+    /// <summary>A turn is running. What it is producing is shown in the detail panel, not here.</summary>
+    Working,
 
     /// <summary>The agent stopped to ask something. The next line typed is the answer.</summary>
     Question,
@@ -41,7 +41,7 @@ internal readonly record struct Exchange(ExchangeKind Kind, string Headline, str
     /// <summary>The one-cell glyph in the gutter.</summary>
     public string Marker => Kind switch
     {
-        ExchangeKind.Speaking => "▸",
+        ExchangeKind.Working => "▸",
         ExchangeKind.Question => "?",
         ExchangeKind.Done => "✓",
         ExchangeKind.Stopped => "✗",
@@ -61,9 +61,13 @@ internal readonly record struct Exchange(ExchangeKind Kind, string Headline, str
 /// </summary>
 internal static class ExchangeContent
 {
-    /// <summary>The model is mid-turn; <paramref name="tail"/> is what it has said so far.</summary>
-    public static Exchange Speaking(string? tail)
-        => new(ExchangeKind.Speaking, "working", (tail ?? string.Empty).Trim());
+    /// <summary>
+    /// A turn is running. The body is empty on purpose: what the model is saying belongs to the
+    /// step it is saying it in, and the detail panel shows that — two live streams on one screen is
+    /// what retiring the transcript band was for.
+    /// </summary>
+    public static Exchange Working()
+        => new(ExchangeKind.Working, "working — esc to stop", string.Empty);
 
     /// <summary>The session speaking for itself — a command's outcome.</summary>
     public static Exchange Note(string line)

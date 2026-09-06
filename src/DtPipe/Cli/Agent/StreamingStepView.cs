@@ -127,6 +127,9 @@ internal sealed class StreamingStepView
     }
 
     /// <summary>Wall-clock since the step started — the elapsed figure for the permanent trace.</summary>
+    /// <summary>Which step of the turn this is — the surface lists it while it runs.</summary>
+    public int Step => _step;
+
     public TimeSpan Elapsed => _sw.Elapsed;
 
     /// <summary>The tool name seen on the stream, if any — a fallback when the assembled response
