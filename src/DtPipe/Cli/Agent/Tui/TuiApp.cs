@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -44,6 +45,13 @@ namespace DtPipe.Cli.Agent.Tui;
 internal sealed class TuiApp
 {
     private static readonly TimeSpan RepaintInterval = TimeSpan.FromMilliseconds(100);
+
+    /// <summary>
+    /// Character ceiling on each held console buffer. A real run's engine diagnostics are a handful
+    /// of lines; past a megabyte the run is flooding the quarantine, and only the tail — the last
+    /// error before exit — is worth holding in memory for the whole session.
+    /// </summary>
+    private const int QuarantineCap = 1024 * 1024;
 
     private readonly IAnsiConsole _console;
     private readonly string? _driverName;
@@ -99,21 +107,28 @@ internal sealed class TuiApp
         TuiScreen? screen = null;
         object? repaintToken = null;
 
-        // The engine writes diagnostics straight to the console — an options warning raised inside
-        // a tool call, for instance. On the sequential path that is a harmless line; here it would
-        // land in the middle of a screen the toolkit believes it owns and corrupt the display.
-        // Hold anything written during the session and let it out once the terminal is back.
+        // Two things here outlive any single turn and reach a reader only once the terminal is
+        // back: this console quarantine and the transcript. The session owns the screen across
+        // every turn of the conversation, and nothing may write through Spectre while the toolkit
+        // owns it — the teardown ordering in the finally is that contract. So an engine diagnostic
+        // written mid-turn, an options warning raised inside a tool call for instance, is held
+        // rather than printed until Dispose has handed the terminal back; it cannot be released
+        // turn by turn.
+        //
+        // The transcript is the run's record and is replayed whole. These two buffers are not a
+        // record — they are diagnostics nobody asked for — so each is bounded and keeps only its
+        // tail, with a notice standing in for whatever it had to drop.
         var savedOut = Console.Out;
         var savedError = Console.Error;
-        var heldOut = new StringWriter();
-        var heldError = new StringWriter();
+        var heldOut = new BoundedTailWriter(QuarantineCap);
+        var heldError = new BoundedTailWriter(QuarantineCap);
 
         try
         {
-            // Parallel tool calls (F5) can write at the same time, so the console gets a
-            // synchronized façade while the buffers stay readable here.
-            Console.SetOut(TextWriter.Synchronized(heldOut));
-            Console.SetError(TextWriter.Synchronized(heldError));
+            // BoundedTailWriter synchronises its own writes, so the buffers go in bare and stay
+            // readable here for the drain at teardown.
+            Console.SetOut(heldOut);
+            Console.SetError(heldError);
 
             if (_driverName is null) app.Init(); else app.Init(_driverName);
 
@@ -218,10 +233,11 @@ internal sealed class TuiApp
         }
     }
 
-    /// <summary>Lets out what the engine wrote while the surface held the screen.</summary>
-    private static void Release(StringWriter held, TextWriter destination)
+    /// <summary>Lets out what the engine wrote while the surface held the screen — tail first,
+    /// behind a notice, when the buffer overflowed its cap.</summary>
+    private static void Release(BoundedTailWriter held, TextWriter destination)
     {
-        var text = held.ToString();
+        var text = held.Drain();
         if (!string.IsNullOrEmpty(text))
             destination.Write(text);
     }
@@ -232,6 +248,69 @@ internal sealed class TuiApp
         foreach (var line in log.MarkupLines())
             _console.MarkupLine(line);
         _console.WriteLine();
+    }
+
+    /// <summary>
+    /// A <see cref="TextWriter"/> that retains only the last <c>capacity</c> characters and counts
+    /// what it dropped. The session quarantine holds every engine write until the terminal is
+    /// handed back; unbounded, a flooding run would keep it all in memory and pour it out at once.
+    /// Overflow is discarded from the front — the tail carries the last error before exit — and
+    /// <see cref="Drain"/> puts a notice line where the rest was. Synchronised: parallel tool
+    /// calls (F5) can write at the same moment.
+    /// </summary>
+    private sealed class BoundedTailWriter : TextWriter
+    {
+        private readonly int _capacity;
+        private readonly object _gate = new();
+        private readonly StringBuilder _buffer = new();
+        private long _dropped;
+
+        public BoundedTailWriter(int capacity) => _capacity = capacity;
+
+        public override Encoding Encoding => Encoding.UTF8;
+
+        public override void Write(char value)
+        {
+            lock (_gate) { _buffer.Append(value); TrimLocked(); }
+        }
+
+        public override void Write(string? value)
+        {
+            if (string.IsNullOrEmpty(value)) return;
+            lock (_gate) { _buffer.Append(value); TrimLocked(); }
+        }
+
+        public override void Write(char[] buffer, int index, int count)
+        {
+            lock (_gate) { _buffer.Append(buffer, index, count); TrimLocked(); }
+        }
+
+        public override void Write(ReadOnlySpan<char> buffer)
+        {
+            lock (_gate) { _buffer.Append(buffer); TrimLocked(); }
+        }
+
+        /// <summary>The retained tail, with a notice line ahead of it when earlier output was cut.</summary>
+        public string Drain()
+        {
+            lock (_gate)
+            {
+                if (_dropped == 0) return _buffer.ToString();
+                long kb = (_dropped + 1023) / 1024;
+                return $"[dtpipe] {kb} KB of earlier engine output omitted{Environment.NewLine}{_buffer}";
+            }
+        }
+
+        // Trim lazily: let the buffer reach twice the cap, then drop back to it. That is one
+        // O(cap) shift per cap characters written — amortised O(1) — where trimming on every
+        // write would be O(n) each time and choke on a real flood.
+        private void TrimLocked()
+        {
+            if (_buffer.Length <= _capacity * 2) return;
+            int excess = _buffer.Length - _capacity;
+            _buffer.Remove(0, excess);
+            _dropped += excess;
+        }
     }
 }
 

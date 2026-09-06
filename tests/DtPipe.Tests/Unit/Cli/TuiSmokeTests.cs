@@ -249,6 +249,46 @@ public class TuiSmokeTests
     }
 
     [Fact(Timeout = 30000)]
+    public async Task A_Flood_Of_Held_Engine_Output_Is_Released_Tail_First_Behind_A_Notice()
+    {
+        // The quarantine holds every engine write for the whole session and only lets it out at
+        // teardown. A run that floods it past the cap must still come back bounded: the front is
+        // dropped, a notice stands in for it, and the last lines before exit — where the real
+        // error usually is — survive.
+        var (app, _, _) = Build();
+        var log = new TranscriptLog();
+        var view = new TuiTurnView(log);
+
+        var captured = new StringWriter();
+        var realError = Console.Error;
+        Console.SetError(captured);
+        try
+        {
+            await app.RunOneTurnAsync(Chrome, log, view, new AgentTrajectory(), Header, async (_, _) =>
+            {
+                await Task.Delay(20);
+                Console.Error.WriteLine("FRONT_LINE_THAT_SHOULD_BE_DROPPED");
+                var filler = new string('x', 100);
+                for (int i = 0; i < 50_000; i++)          // ~5 MB, well past the 1 MB cap
+                    Console.Error.WriteLine(filler);
+                Console.Error.WriteLine("LAST_ERROR_BEFORE_EXIT");
+                return "ok";
+            }, CancellationToken.None);
+        }
+        finally
+        {
+            Console.SetError(realError);
+        }
+
+        var released = captured.ToString();
+        Assert.Contains("earlier engine output omitted", released);            // the notice replaced the front
+        Assert.Contains("LAST_ERROR_BEFORE_EXIT", released);                   // the tail is kept
+        Assert.DoesNotContain("FRONT_LINE_THAT_SHOULD_BE_DROPPED", released);  // the front was dropped
+        Assert.True(released.Length < 3 * 1024 * 1024,                         // bounded, not the whole flood
+            $"released {released.Length} chars — expected the buffer to stay bounded");
+    }
+
+    [Fact(Timeout = 30000)]
     public async Task A_Cancelled_Caller_Token_Cancels_The_Turn()
     {
         // The same shape Ctrl+C produces: the turn's token trips, the body throws, and the caller
