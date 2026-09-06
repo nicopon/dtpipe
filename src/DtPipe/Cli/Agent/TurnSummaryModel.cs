@@ -33,12 +33,16 @@ public enum TurnStatus
 /// <param name="ToolCounts">Tool name to call count, in first-call order.</param>
 /// <param name="Question">The question the model asked, when <paramref name="Outcome"/> is
 /// <see cref="TurnOutcome.AwaitingUserInput"/>.</param>
+/// <param name="ProducedPlan">True when <em>this</em> turn produced plan YAML. Drives the
+/// plan-mode "next steps" line, which speaks to the plan this turn made — not one an earlier turn
+/// left on the trajectory.</param>
 public sealed record TurnSummaryModel(
     TurnOutcome Outcome,
     int Iterations,
     TimeSpan Duration,
     IReadOnlyDictionary<string, int> ToolCounts,
-    string? Question = null)
+    string? Question = null,
+    bool ProducedPlan = false)
 {
     public TurnStatus Status => Outcome switch
     {

@@ -66,17 +66,10 @@ internal sealed class TuiSession
             ct, surfaceReady, onScreen);
 
         // The terminal is back. Now — and only now — the session's verdict reaches scrollback,
-        // through the same projection the sequential path uses.
+        // through the same sequencer the sequential path uses.
         if (last is null) return 0;
 
-        _tui.RenderFinalSummary(last);
-        if (last.Outcome == TurnOutcome.AwaitingUserInput)
-            _tui.RenderPendingQuestion(last.Question);
-        else if (last.Status != TurnStatus.Completed)
-            _tui.RenderFailureGuidance(last.Outcome, _executor.Trajectory, maxIterations);
-        else if (_executor.Mode == AgentMode.Plan && !string.IsNullOrWhiteSpace(_executor.Trajectory.LastGeneratedYaml))
-            _tui.RenderPlanNextSteps();
-
+        _tui.ReportTurn(last, _executor.Trajectory, _executor.Mode, maxIterations);
         return last.ExitCode;
     }
 

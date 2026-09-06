@@ -8,6 +8,12 @@ set -e
 # text into a stream — that is what scrollback, pipes and CI assert against. Terminal.Gui owns the
 # screen, and a piped run has no screen to own. Letting the toolkit spread past the agent surface
 # is how the piped path — the project's non-regression proof — would quietly stop being reachable.
+#
+# Check 4 belongs to the same family — not which toolkit, but which surface is allowed to judge a
+# turn. The verdict sequence (summary, then one of the question / failure / plan-next-steps renders)
+# is owned by AgentTui.ReportTurn alone. When the scrollback path and the full-screen session each
+# ordered those renders themselves, the copies drifted and one printed plan-next-steps on a stale
+# plan.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -51,6 +57,17 @@ if ! grep -q "class ScrollbackTurnView" "$PROJECT_ROOT/src/DtPipe/Cli/Agent/Turn
     fail "ScrollbackTurnView is gone — the piped / CI rendering path lost its implementation"
 fi
 pass "the scrollback turn view still exists"
+
+# 4. One verdict author. RenderFinalSummary and its three companions are sequenced by
+#    AgentTui.ReportTurn and by nothing else — two surfaces that each order the verdict their own
+#    way is how the full-screen session and the scrollback path already came to disagree once.
+offenders="$(cd "$PROJECT_ROOT" && grep -rnE "Render(FinalSummary|PendingQuestion|FailureGuidance|PlanNextSteps)\(" \
+    src/ --include="*.cs" 2>/dev/null | grep -v "/obj/" | grep -v "/bin/" | grep -v "Cli/Agent/AgentTui.cs" || true)"
+if [ -n "$offenders" ]; then
+    echo "$offenders" | sed 's/^/    /'
+    fail "the turn verdict is sequenced outside AgentTui.ReportTurn"
+fi
+pass "the turn verdict has one author (AgentTui.ReportTurn)"
 
 echo ""
 echo -e "${GREEN}TUI boundary intact.${NC}"

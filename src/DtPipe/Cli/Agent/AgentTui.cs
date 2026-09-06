@@ -549,6 +549,26 @@ public class AgentTui
     }
 
     /// <summary>
+    /// The one authority on how a finished turn's verdict is sequenced: the summary table, then
+    /// exactly one of the pending question, the failure guidance, or the plan-mode next steps.
+    /// Both surfaces call this and order none of it themselves — when the scrollback path and the
+    /// full-screen session each sequenced these four renders on their own, one drifted onto a
+    /// stale plan. <paramref name="mode"/> is a parameter, not a read, so the sequencer needs no
+    /// executor.
+    /// </summary>
+    public void ReportTurn(TurnSummaryModel summary, AgentTrajectory trajectory, AgentMode mode, int maxIterations)
+    {
+        RenderFinalSummary(summary);
+
+        if (summary.Outcome == TurnOutcome.AwaitingUserInput)
+            RenderPendingQuestion(summary.Question);
+        else if (summary.Status != TurnStatus.Completed)
+            RenderFailureGuidance(summary.Outcome, trajectory, maxIterations);
+        else if (mode == AgentMode.Plan && summary.ProducedPlan)
+            RenderPlanNextSteps();
+    }
+
+    /// <summary>
     /// The scrollback projection of a finished turn: the verdict table. The judgement itself is
     /// <see cref="TurnSummaryModel"/>'s — this only styles it — so the full-screen surface's
     /// verdict band and this table are the same call, rendered twice.

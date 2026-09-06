@@ -43,7 +43,6 @@ public class AgentExecutor
      private AgentMode? _mode;
      private long _turnTokens;
      private readonly Stopwatch _turnClock = new();
-     private string? _lastTurnYaml;
 
      /// <summary>
      /// The session's live operating mode. Seeded from the first turn's <see cref="AgentOptions.Mode"/>
@@ -140,14 +139,7 @@ public class AgentExecutor
         var summary = await RunTurnCoreAsync(userPrompt, model, baseUrl, opts, maxIterations,
             surface: null, softCancel: CancellationToken.None, ct);
 
-        _tui.RenderFinalSummary(summary);
-
-        if (summary.Outcome == TurnOutcome.AwaitingUserInput)
-            _tui.RenderPendingQuestion(summary.Question);
-        else if (summary.Status != TurnStatus.Completed)
-            _tui.RenderFailureGuidance(summary.Outcome, Trajectory, maxIterations);
-        else if (Mode == AgentMode.Plan && !string.IsNullOrWhiteSpace(_lastTurnYaml))
-            _tui.RenderPlanNextSteps();
+        _tui.ReportTurn(summary, Trajectory, Mode, maxIterations);
 
         // AwaitingUserInput is a pause interactively but still a non-zero exit — an agent that
         // stopped for want of an answer did not finish. Fail-closed: piped / CI reads it as 1.
@@ -238,9 +230,9 @@ public class AgentExecutor
         Trajectory.Determinism = BuildDeterminismReport(repls, observedYamls);
 
         _turnClock.Stop();
-        _lastTurnYaml = primary.Yaml;
         int shownIterations = turnIterations <= maxIterations ? turnIterations : maxIterations;
-        return new TurnSummaryModel(primary.Outcome, shownIterations, _turnClock.Elapsed, toolCounts, primary.Question);
+        return new TurnSummaryModel(primary.Outcome, shownIterations, _turnClock.Elapsed, toolCounts, primary.Question,
+            ProducedPlan: !string.IsNullOrWhiteSpace(primary.Yaml));
      }
 
     /// <summary>Outcome of one run of the planning loop, including why it stopped.</summary>
