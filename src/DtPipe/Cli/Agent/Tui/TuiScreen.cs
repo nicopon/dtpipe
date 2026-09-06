@@ -303,6 +303,7 @@ internal sealed class TuiScreen
     internal Scheme InputScheme => _input.GetScheme();
     internal string CaretText => _caret.Text;
     internal string WindowTitle => _window.Title;
+    internal int? FluxSelected => _flux.SelectedIndex;
     internal bool PlanVisible => _plan.Frame.Visible;
     internal int PlanWidth => _plan.Frame.Frame.Width;
     internal int PlanLeft => _plan.Frame.Frame.X;

@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using DtPipe.Cli.Agent;
@@ -158,6 +159,43 @@ public class TuiNavigationTests
             (_, s) => Assert.Contains("e/b errors", s.HintsText),   // steps hints
             (app, _) => app.InjectKey(Key.Tab),
             (_, s) => Assert.Contains("scroll", s.HintsText));      // flux hints
+    }
+
+    private static string[] Lines(int n) => Enumerable.Range(1, n).Select(i => $"flux line {i}").ToArray();
+
+    /// <summary>
+    /// The flux band chases its newest line until someone reads it. Taking the focus holds the
+    /// position through arriving lines — the list is rebuilt from a fresh source every time, so
+    /// without the restore a held band would snap to the top rather than merely stop following.
+    /// </summary>
+    [Fact(Timeout = 30000)]
+    public async Task The_Flux_Holds_Its_Place_While_It_Is_Read_And_Follows_Again_Afterwards()
+    {
+        var steps = FourSteps().Snapshot();
+
+        await Drive(FourSteps(),
+            (_, s) =>
+            {
+                s.Sync(steps, Lines(10), "3s", string.Empty);
+                Assert.Equal(9, s.FluxSelected);            // nobody reading: it chases the tail
+            },
+            (_, s) => s.FocusFlux(),
+            (_, s) =>
+            {
+                s.Sync(steps, Lines(20), "3s", string.Empty);
+                Assert.Equal(9, s.FluxSelected);            // read: held exactly where it was
+            },
+            (_, s) =>
+            {
+                s.Sync(steps, Lines(30), "3s", string.Empty);
+                Assert.Equal(9, s.FluxSelected);            // and still held on the next line
+            },
+            (_, s) => s.FocusSteps(),
+            (_, s) =>
+            {
+                s.Sync(steps, Lines(40), "3s", string.Empty);
+                Assert.Equal(39, s.FluxSelected);           // reader gone: chasing again
+            });
     }
 
     /// <summary>
