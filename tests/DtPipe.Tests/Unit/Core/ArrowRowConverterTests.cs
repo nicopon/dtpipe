@@ -7,7 +7,7 @@ using DtPipe.Core.Infrastructure.Arrow;
 using AwesomeAssertions;
 using Xunit;
 
-namespace DtPipe.Tests;
+namespace DtPipe.Tests.Unit.Core;
 
 public class ArrowRowConverterTests
 {

@@ -7,7 +7,7 @@ using Parquet.Data;
 using Parquet.Schema;
 using Xunit;
 
-namespace DtPipe.Tests;
+namespace DtPipe.Tests.Unit.Readers;
 
 public class ParquetReaderTests : IAsyncLifetime
 {

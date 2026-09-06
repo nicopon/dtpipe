@@ -4,7 +4,7 @@ using DtPipe.Core.Models;
 using DtPipe.Core.Validation;
 using Xunit;
 
-namespace DtPipe.Tests;
+namespace DtPipe.Tests.Unit.Core;
 
 public class SchemaCompatibilityAnalyzerTests
 {

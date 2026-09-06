@@ -5,7 +5,7 @@ using DtPipe.Transformers.Arrow.Format;
 using AwesomeAssertions;
 using Xunit;
 
-namespace DtPipe.Tests;
+namespace DtPipe.Tests.Unit.Transformers;
 
 public class FormatDataTransformerTests
 {

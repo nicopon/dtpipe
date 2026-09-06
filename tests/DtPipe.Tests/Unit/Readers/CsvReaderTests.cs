@@ -4,7 +4,7 @@ using DtPipe.Core.Options;
 using AwesomeAssertions;
 using Xunit;
 
-namespace DtPipe.Tests;
+namespace DtPipe.Tests.Unit.Readers;
 
 public class CsvReaderTests : IAsyncLifetime
 {

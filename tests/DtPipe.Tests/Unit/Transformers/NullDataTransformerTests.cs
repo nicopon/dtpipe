@@ -5,7 +5,7 @@ using DtPipe.Transformers.Arrow.Null;
 using AwesomeAssertions;
 using Xunit;
 
-namespace DtPipe.Tests;
+namespace DtPipe.Tests.Unit.Transformers;
 
 public class NullDataTransformerTests
 {

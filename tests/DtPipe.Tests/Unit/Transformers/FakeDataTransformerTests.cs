@@ -3,7 +3,7 @@ using DtPipe.Transformers.Arrow.Fake;
 using AwesomeAssertions;
 using Xunit;
 
-namespace DtPipe.Tests;
+namespace DtPipe.Tests.Unit.Transformers;
 
 public class FakeDataTransformerTests
 {

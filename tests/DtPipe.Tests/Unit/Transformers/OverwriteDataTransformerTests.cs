@@ -3,7 +3,7 @@ using DtPipe.Transformers.Arrow.Overwrite;
 using AwesomeAssertions;
 using Xunit;
 
-namespace DtPipe.Tests;
+namespace DtPipe.Tests.Unit.Transformers;
 
 public class OverwriteDataTransformerTests
 {

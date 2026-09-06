@@ -4,7 +4,7 @@ using DtPipe.Transformers.Arrow.Mask;
 using AwesomeAssertions;
 using Xunit;
 
-namespace DtPipe.Tests;
+namespace DtPipe.Tests.Unit.Transformers;
 
 public class MaskDataTransformerTests
 {

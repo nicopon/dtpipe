@@ -5,7 +5,7 @@ using DtPipe.Core.Models;
 using AwesomeAssertions;
 using Xunit;
 
-namespace DtPipe.Tests;
+namespace DtPipe.Tests.Unit.Core;
 
 public class ArrowRowToColumnarBridgeTests
 {

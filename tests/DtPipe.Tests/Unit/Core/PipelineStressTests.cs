@@ -20,7 +20,7 @@ using Moq;
 using Xunit;
 
 
-namespace DtPipe.Tests;
+namespace DtPipe.Tests.Unit.Core;
 
 public class PipelineStressTests : IAsyncLifetime
 {
