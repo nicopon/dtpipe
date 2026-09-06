@@ -11,8 +11,8 @@ internal readonly record struct PlanView(PlanState State, string? Message, DagTo
 /// <summary>
 /// The plan/DAG panel as UI-agnostic lines: one row per branch
 /// (<c>alias: source → [processor] → output</c>) plus a status badge derived from
-/// <see cref="PlanProgress"/>. Pure — no toolkit — so the panel is asserted on this directly
-/// (voie 4 §6 suite 2, E4). Connection strings are sanitised: this is on screen while the run goes.
+/// <see cref="PlanProgress"/>. Pure — no toolkit — so the panel is asserted on this directly.
+/// Connection strings are sanitised: this is on screen while the run goes.
 /// </summary>
 internal static class PlanPanelContent
 {

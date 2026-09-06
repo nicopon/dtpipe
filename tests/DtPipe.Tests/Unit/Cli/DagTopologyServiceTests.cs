@@ -11,7 +11,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// Voie 4 §6 (suite 2) lot E4: <see cref="DagTopologyService"/> is the one place a job file becomes
+/// <see cref="DagTopologyService"/> is the one place a job file becomes
 /// a DAG — the MCP validate/execute path, the Spectre topology box, the <c>get-dag-topology</c> tool
 /// and the plan panel all read it from here. These fixtures pin the structured view: alias, input,
 /// output, processor, from[], ref[] per branch, including multi-branch <c>--from</c>/<c>--ref</c>.

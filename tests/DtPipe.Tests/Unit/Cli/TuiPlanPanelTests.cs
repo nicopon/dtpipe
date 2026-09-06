@@ -13,7 +13,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// Voie 4 §6 (suite 2) lot E4: the plan/DAG panel on the real full-screen surface. A plan YAML
+/// The plan/DAG panel on the real full-screen surface. A plan YAML
 /// captured mid-turn and the validate result that follows it flow through
 /// <see cref="TuiTurnView.PlanSnapshot"/> and land in the panel — the branch line plus the badge.
 /// </summary>

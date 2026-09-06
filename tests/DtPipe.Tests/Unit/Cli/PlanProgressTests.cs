@@ -4,7 +4,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// Voie 4 §6 (suite 2) lot E1: <see cref="PlanProgress"/> is a pure state machine fed by the tool
+/// <see cref="PlanProgress"/> is a pure state machine fed by the tool
 /// calls the agent makes — a <c>yamlContent</c> argument drafts the plan, validate / execute
 /// results move it forward. No console, no LLM; a scripted sequence lands on a deterministic badge.
 /// </summary>

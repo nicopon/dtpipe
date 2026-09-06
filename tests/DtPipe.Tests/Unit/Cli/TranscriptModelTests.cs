@@ -8,7 +8,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// Voie 4 §6 (suite 2) lot E1: the agent transcript is UI-agnostic data. Each
+/// The agent transcript is UI-agnostic data. Each
 /// <see cref="TranscriptEntry"/> carries a plain-text payload and the scrollback markup lines; the
 /// pre-existing <c>StepDigest.Lines</c> / <c>AgentResponseLines</c> projections are now exactly
 /// those markup lines, so the permanent scrollback record does not change a byte.

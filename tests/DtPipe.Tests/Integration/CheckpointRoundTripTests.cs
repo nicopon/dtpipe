@@ -121,8 +121,8 @@ public class CheckpointRoundTripTests : IDisposable
 	}
 
 	/// <summary>
-	/// §5.2 of the cycle plan: deterministic sampling already existed but was "neither
-	/// materialisable nor addressable". Materialising it is the promise; that a seeded sample
+	/// Deterministic sampling already existed but was neither materialisable nor
+	/// addressable. Materialising it is the promise; that a seeded sample
 	/// comes back as the SAME rows is what makes the promise worth anything, and what lets an
 	/// agent iterate against a fixed sample instead of a moving one.
 	/// </summary>

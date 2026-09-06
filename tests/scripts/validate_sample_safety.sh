@@ -2,7 +2,7 @@
 set -e
 
 # validate_sample_safety.sh
-# Cycle 1.7 voie 3 — sample-mode safety is a READ-side property, on the real binary.
+# Sample-mode safety is a READ-side property, on the real binary.
 #
 # Neutralising the writer says nothing about a source that mutates on its way past:
 # DELETE … RETURNING streams rows while the server destroys them, --duck-init runs arbitrary

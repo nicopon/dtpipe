@@ -8,7 +8,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// Voie 4 §6 (suite 2) lot E6: the door between the sequential scrollback path and the full-screen
+/// The door between the sequential scrollback path and the full-screen
 /// surface. Since the default flipped — a real interactive terminal now gets the surface unless
 /// <c>--no-tui</c> asks otherwise — this is the one place the flip's own logic lives, and it is the
 /// riskiest line in the lot: get it wrong and either a CI pipe tries to draw a screen, or a real

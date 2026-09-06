@@ -14,7 +14,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// Voie 4 §6 (suite 2) lot E2: the full-screen surface really starts, runs a turn on a worker
+/// The full-screen surface really starts, runs a turn on a worker
 /// thread, and hands the terminal back — driven headless by the pure-ANSI driver, which needs no
 /// TTY. These are the only tests here that start a toolkit application; everything else about the
 /// surface is asserted on the pure model.

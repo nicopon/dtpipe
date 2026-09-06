@@ -10,7 +10,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.DryRun;
 
 /// <summary>
-/// The architectural acceptance criterion of cycle 1.7 voie 3, as an executable property:
+/// The architectural acceptance criterion, as an executable property:
 ///
 ///     what a sample run REPORTS is what a real run WRITES.
 ///

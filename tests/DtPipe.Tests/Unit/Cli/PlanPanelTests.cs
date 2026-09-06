@@ -7,7 +7,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// Voie 4 §6 (suite 2) lot E4: the plan/DAG panel as UI-agnostic lines — one row per branch plus a
+/// The plan/DAG panel as UI-agnostic lines — one row per branch plus a
 /// status badge from <see cref="PlanProgress"/>. Pure: no toolkit, asserted directly.
 /// </summary>
 public class PlanPanelTests

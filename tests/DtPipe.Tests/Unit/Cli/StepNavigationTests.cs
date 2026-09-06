@@ -6,7 +6,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// Voie 4 §6 (suite 2) lot E3: "jump to the next / previous error" is one function, so it behaves
+/// "Jump to the next / previous error" is one function, so it behaves
 /// the same in the scrollback review and the full-screen steps panel.
 /// </summary>
 public class StepNavigationTests

@@ -33,8 +33,7 @@ internal enum PlanState
 /// Tracks the state of the pipeline the agent is designing, from the tool calls it makes: a
 /// <c>yamlContent</c> argument drafts (or re-drafts) the plan, <c>validate-yaml-job</c> and
 /// <c>execute-yaml-job</c> results move it forward. Pure — no console, no LLM — so a scripted
-/// sequence of outcomes is asserted directly (voie 4 §6 suite 2, E1). It is the source the E4 plan
-/// panel reads; nothing wires it to the UI yet.
+/// sequence of outcomes is asserted directly. It is the source the plan panel reads.
 /// </summary>
 internal sealed class PlanProgress
 {

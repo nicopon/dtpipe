@@ -10,7 +10,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// Voie 4 §6 (suite 2) lot E2: the full-screen turn view only mutates a
+/// The full-screen turn view only mutates a
 /// <see cref="TranscriptLog"/> — it marshals nothing and touches no toolkit type, which is why it
 /// is asserted here without a terminal. The surface reads the log on a timer; that inversion is
 /// what keeps a repaint off the model's token rate.

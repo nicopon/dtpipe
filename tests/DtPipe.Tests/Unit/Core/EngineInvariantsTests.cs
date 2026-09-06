@@ -18,7 +18,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Core;
 
 /// <summary>
-/// §0.5-b pre-flight baseline — the three canonical engine cases as CI-gated facts.
+/// The three canonical engine cases as CI-gated facts.
 /// These drive DagOrchestrator/PipelineExecutor directly (no CLI) with in-memory
 /// readers and writers, mirroring the shapes in GoldenDagDefinitions.cs.
 /// CLAUDE.md's "run before commit" obligation is enforced here.

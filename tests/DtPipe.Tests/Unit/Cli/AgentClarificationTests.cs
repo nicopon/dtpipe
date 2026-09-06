@@ -15,7 +15,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// Voie 4 §6 (suite 2) lot E7: the agent can stop to ask the user something. <c>ask-user</c> is a
+/// The agent can stop to ask the user something. <c>ask-user</c> is a
 /// turn terminator, not a tool — the loop never dispatches it, the turn ends on
 /// <see cref="TurnOutcome.AwaitingUserInput"/> carrying the question, and the run exits non-zero
 /// (an agent that stopped for want of an answer did not finish). Interactively the user answers

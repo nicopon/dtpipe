@@ -2,7 +2,7 @@
 set -e
 
 # validate_vitals.sh
-# §0.5 pre-flight baseline aggregator — runs every tests/scripts/validate_*.sh
+# Pre-flight baseline aggregator — runs every tests/scripts/validate_*.sh
 # (glob, not a hard-coded list), prints a pass/fail summary table, and exits
 # non-zero if any script fails.
 #

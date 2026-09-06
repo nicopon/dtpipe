@@ -8,7 +8,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// Voie 4 §6 (suite 2) lot E5: one summary model, two projections. The scrollback table and the
+/// One summary model, two projections. The scrollback table and the
 /// full-screen surface's verdict band both render <see cref="TurnSummaryModel"/>, so the two
 /// surfaces cannot disagree about whether a turn succeeded — and the verdict keeps a single author.
 ///

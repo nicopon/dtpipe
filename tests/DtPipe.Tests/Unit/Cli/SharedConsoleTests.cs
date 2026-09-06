@@ -7,7 +7,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// Voie 4 §6 (suite 2) lot E2b: the DI console writes through a forwarder so
+/// The DI console writes through a forwarder so
 /// <see cref="Console.SetError"/> — how the agent's full-screen surface holds engine output back
 /// while the toolkit owns the terminal — redirects Spectre too. The forwarder must not shift
 /// Spectre's own capability detection, which keys off whether the writer <em>is</em> a standard

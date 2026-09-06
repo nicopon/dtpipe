@@ -24,10 +24,19 @@ Also cut:
 - **Rhetorical emphasis** — *"the whole point"*, *"and that is the finished state"*.
 - **Worked examples and figures** that belong in a test or the changelog.
 - **Enumerating what another component owns.** A list of other providers' names, prefixes or strategies is stale the day one is added or renamed, and nothing verifies it. Point at the live source instead (`dtpipe providers`, the enum itself). Two such lists have already been removed after going wrong.
+- **Citing a planning document.** `.notes/` is gitignored, so `voie 4 §6 lot E2b` names a file no clone can open, and it tells a reader nothing to act on. Names the repository *does* carry stay legal — `F16`, `F1`–`F7`, `REFERENCE.md#dag-syntax`. The test is not whether it reads like a citation but **whether a clone can open it**. Forty-four such references accumulated across one cycle before a check existed.
 
 Length is not the measure — `DagOrchestrator`'s broadcast description and `ArrowSchemaSerializer`'s type-encoding table are long and earn every line. Subject is the measure.
 
-> **Not enforced** — no check exists, and none is plausible: "does this comment prevent a mistake" is not decidable by a grep. Discipline only.
+> **Enforced by** `tests/scripts/validate_comments.sh` (CI) — for the last bullet only. "Does this comment cite something a clone cannot open" *is* decidable by a grep, which is why that one now has a check. **Not enforced** for the rest: "does this comment prevent a mistake" is not, and no check is plausible. Discipline only.
+
+## Commits
+
+Subject: conventional commit, imperative, one line. **The body is short by default** — a sentence or two on what changed and why it had to change. Length is earned, never the default: a breaking change or a deleted subsystem may take a paragraph, most changes take none.
+
+**A body is not a delivery report.** Test counts, "0 warning", the steps followed, what was verified, what was checked afterwards — none of it belongs in a message. That record lives in `.notes/` and `CHANGELOG.md`, and `git show --stat` already answers "what did this touch".
+
+> **Not enforced** — no check exists. Measured drift over cycle 1.7: median body of **19 lines**, against **3** for the 60 commits preceding it. Discipline only.
 
 ## Build & Run
 

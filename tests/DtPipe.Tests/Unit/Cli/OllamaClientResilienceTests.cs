@@ -11,7 +11,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// §6 feedback UX, piste 1: a slow or dead LLM endpoint must surface as a stated error, never as a
+/// A slow or dead LLM endpoint must surface as a stated error, never as a
 /// bare cancellation that the CLI mistakes for a user Ctrl-C and turns into a silent exit 130.
 /// Only a genuine caller cancellation is allowed to propagate.
 /// </summary>

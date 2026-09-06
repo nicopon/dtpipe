@@ -10,8 +10,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace DtPipe.Benchmarks;
 
 /// <summary>
-/// The price of the observation seam that unifies the dry-run with the real path
-/// (cycle 1.7 voie 3). The tap is offered every row and every batch, so "a null tap costs
+/// The price of the observation seam that unifies the dry-run with the real path.
+/// The tap is offered every row and every batch, so "a null tap costs
 /// nothing" is a claim that has to be a number.
 ///
 /// <c>*_Ordinary</c> is a run with no tap at all — what every non-sampling run does, and the

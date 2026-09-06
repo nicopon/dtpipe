@@ -209,7 +209,7 @@ public class AgentTui
     }
 
     /// <summary>
-    /// Keyboard review of the session trajectory (voie 4 §6 suite, lot C). Uses the full-screen
+    /// Keyboard review of the session trajectory. Uses the full-screen
     /// <see cref="SessionReview"/> on an interactive terminal; on a piped / non-ANSI console — or
     /// when stdin is redirected — it falls back to the inline <see cref="InspectTrajectory"/> list.
     /// </summary>

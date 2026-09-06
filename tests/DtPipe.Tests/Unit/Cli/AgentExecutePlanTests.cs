@@ -10,7 +10,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// Voie 4 §6 (suite) lot B1: "Execute this plan" runs the validated YAML straight through the
+/// "Execute this plan" runs the validated YAML straight through the
 /// execution tool — never back through the model — passing <c>yamlContent</c> unchanged (F6). The
 /// tool's own F2 guardrails then decide what actually happens.
 /// </summary>

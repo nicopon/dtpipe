@@ -11,7 +11,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// §6 feedback UX: token usage and the model's chain of thought reach the trajectory so the step
+/// Token usage and the model's chain of thought reach the trajectory so the step
 /// inspector and the compact trace can show them.
 /// </summary>
 public class AgentTraceTests

@@ -17,7 +17,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// Voie 4 §6 (suite 2) lot E2b: an engine run started for a program, not a person, must emit no
+/// An engine run started for a program, not a person, must emit no
 /// human-facing rendering. The MCP tools hand their result back as JSON; the DAG topology panel,
 /// the results table and the orchestrator log events are decoration nobody reads — and, under the
 /// agent's full-screen surface, decoration that lands on a screen the toolkit owns.

@@ -6,7 +6,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// Voie 4 §6 (suite 2) lot E3: a step's detail as UI-agnostic sections, shared by the full-screen
+/// A step's detail as UI-agnostic sections, shared by the full-screen
 /// panel and the scrollback review. Expanding widens the clips and reveals the chain of thought
 /// and the tool arguments. <see cref="AgentSessionReviewTests"/> proves the review still renders
 /// the same thing off these sections.

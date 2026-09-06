@@ -14,7 +14,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// Voie 4 §6 (suite 2) lot E3: the full-screen layout — a steps list with its detail, a transcript
+/// The full-screen layout — a steps list with its detail, a transcript
 /// band, a focus-aware hint bar. Tab moves between the two focusable panels (the toolkit's own
 /// navigation), Up/Down and e/b move the selection, Right expands the detail, and the detail
 /// mirrors whichever step is highlighted. Driven headless: a state machine on a repeating timeout

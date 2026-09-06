@@ -12,11 +12,11 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// §6 feedback UX: a turn always ends with a stated reason, and the summary's verdict matches what
+/// A turn always ends with a stated reason, and the summary's verdict matches what
 /// actually happened. In particular an empty model response is a failure, not a "COMPLETED".
 ///
 /// <para>
-/// Voie 4 §6 (suite 2) lot E5 extends this with the soft cancel: Esc on the full-screen surface
+/// The soft cancel extends this: Esc on the full-screen surface
 /// stops the model call and nothing else. The session lives, the partial trajectory stays, and the
 /// run does <em>not</em> report the 130 reserved for a real interrupt (F16) — the two cancellation
 /// sources must stay distinguishable, exactly as <c>LinearPipelineService</c> keeps its own apart.

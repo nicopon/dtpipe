@@ -8,7 +8,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// Voie 4 §6 (suite) lot A: what a finished step leaves in scrollback is a pure function of the
+/// What a finished step leaves in scrollback is a pure function of the
 /// step and the detail level. Compact keeps the trace line plus the model's stated intent; peek
 /// adds a chain-of-thought preview; a final answer is just the trace line (it is rendered in full
 /// elsewhere). The streaming and blocking loops both render through <see cref="StepDigest"/>.

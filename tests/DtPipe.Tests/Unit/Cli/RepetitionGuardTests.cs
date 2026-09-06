@@ -4,7 +4,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// §6 feedback UX: a model stuck regenerating the same text (observed on a temperature-0 run,
+/// A model stuck regenerating the same text (observed on a temperature-0 run,
 /// alternating between two sentences without end) must be caught and stopped — Ollama's own
 /// repeat_penalty only looks back 64 tokens, far short of a multi-sentence cycle.
 /// </summary>

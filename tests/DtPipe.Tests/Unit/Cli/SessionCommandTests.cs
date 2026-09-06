@@ -4,7 +4,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// Voie 4 §6 (suite 2) lot E5: the full-screen session's input line replaces the post-mission
+/// The full-screen session's input line replaces the post-mission
 /// selection prompt, so what the user types is now the whole menu. Parsed purely, and asserted
 /// from strings without a terminal.
 /// </summary>

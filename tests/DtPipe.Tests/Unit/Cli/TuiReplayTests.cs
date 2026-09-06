@@ -11,7 +11,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// Voie 4 §6 (suite 2) lot E2: the full-screen surface is a presentation, not the record. When it
+/// The full-screen surface is a presentation, not the record. When it
 /// closes, the committed transcript is replayed to real scrollback — the same contract the
 /// persistent shell holds (<see cref="AgentShellReplayTests"/>), including on the failure path,
 /// so an interrupted run still leaves its partial work behind.

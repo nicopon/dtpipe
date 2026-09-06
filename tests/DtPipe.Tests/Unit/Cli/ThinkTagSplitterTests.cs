@@ -7,7 +7,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// §6 feedback UX: a model that marks its reasoning with &lt;think&gt;…&lt;/think&gt; in the content
+/// A model that marks its reasoning with &lt;think&gt;…&lt;/think&gt; in the content
 /// stream must have that reasoning routed to the thinking channel, even when a tag is split across
 /// two streamed deltas.
 /// </summary>

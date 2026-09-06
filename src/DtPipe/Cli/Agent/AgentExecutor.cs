@@ -188,7 +188,7 @@ public class AgentExecutor
         // A full-screen session (surface not null) owns the screen for the whole conversation and
         // supplies its own view and soft-cancel token. Everything else — piped, --no-stream,
         // --no-tui, replication, or a caller driving a single turn by hand — is the sequential
-        // scrollback path; there is no third rendering path (D3 is gone, voie 4 §6 suite 2, E6).
+        // scrollback path; there is no third rendering path.
         PlanningLoopResult primary;
         if (surface is not null)
         {

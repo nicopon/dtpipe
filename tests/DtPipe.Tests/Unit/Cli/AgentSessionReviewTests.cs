@@ -7,7 +7,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// Voie 4 §6 (suite) lot C: the session review is a pure state machine driven by keypresses, so a
+/// The session review is a pure state machine driven by keypresses, so a
 /// scripted sequence lands on a deterministic step without a console.
 /// </summary>
 public class AgentSessionReviewTests

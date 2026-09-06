@@ -95,7 +95,7 @@ public class AgentExecutorModeTests
          Assert.Contains("PLANNER", systemMsg.Content);
            }
 
-       // ── Voie 4 §6 (suite) lot B2 — the operating mode is a live session state ──
+       // ── The operating mode is a live session state ──
 
        [Theory]
        [InlineData(AgentMode.Plan, AgentMode.Execute)]

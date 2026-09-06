@@ -26,8 +26,7 @@ internal interface ITurnView
 
     /// <summary>
     /// A fresh plan YAML was captured from a <c>yamlContent</c> tool-call argument. The scrollback
-    /// view ignores it; the full-screen surface feeds it to <see cref="PlanProgress"/> (voie 4 §6
-    /// suite 2, E1 — the seam; E4 — the panel).
+    /// view ignores it; the full-screen surface feeds it to <see cref="PlanProgress"/>.
     /// </summary>
     void PlanUpdated(string yaml) { }
 }

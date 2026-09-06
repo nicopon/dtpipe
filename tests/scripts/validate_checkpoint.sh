@@ -2,7 +2,7 @@
 set -e
 
 # validate_checkpoint.sh
-# Cycle 1.7 voie 3 — materialisation, on the real binary.
+# Materialisation, on the real binary.
 #
 # Four claims that only a real run can settle:
 #   1. --checkpoint materialises, and what lands on disk carries no readable values

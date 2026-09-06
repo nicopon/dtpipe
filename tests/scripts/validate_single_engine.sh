@@ -2,7 +2,7 @@
 set -e
 
 # validate_single_engine.sh
-# Cycle 1.7 voie 3 — one engine, not two.
+# One engine, not two.
 #
 # A dry-run is the real execution on a sample with the writer neutralised. It used to be a
 # second engine: DryRunAnalyzer walked rows through IDataTransformer.Transform while

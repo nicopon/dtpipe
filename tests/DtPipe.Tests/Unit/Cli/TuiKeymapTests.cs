@@ -7,7 +7,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// Voie 4 §6 (suite 2) lot E2 / R4: the full-screen surface's keyboard contract, asserted without
+/// The full-screen surface's keyboard contract, asserted without
 /// starting an application. <see cref="TuiKeymap"/> is the surface's one keyboard authority — every
 /// shortcut it acts on is named here, including the navigation keys the steps panel reads. The
 /// Ctrl+C case is the one that matters most — the toolkit puts the terminal in raw mode, so Ctrl+C

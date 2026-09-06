@@ -13,7 +13,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// §6 feedback UX, piste 5: the Ollama client streams a response, separating reasoning from answer,
+/// The Ollama client streams a response, separating reasoning from answer,
 /// assembling tool calls, reporting token usage, and treating <c>_chatTimeout</c> as a max silence
 /// between lines rather than a total wall-clock budget.
 /// </summary>

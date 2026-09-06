@@ -16,7 +16,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// Voie 4 §6 (suite 2) lot E5: the surface holds one application for the whole conversation. Turns
+/// The surface holds one application for the whole conversation. Turns
 /// follow one another with the input line open in between, the post-mission menu is a set of typed
 /// commands, and Esc stops a turn without ending the session.
 ///
