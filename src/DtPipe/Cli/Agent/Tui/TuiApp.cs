@@ -427,4 +427,5 @@ internal sealed class TuiSurface
 /// focus-dependent and built by <see cref="TuiScreen.HintsFor"/>.</summary>
 /// <param name="Title">Window title — the agent, its model and its mode.</param>
 /// <param name="Status">The run's posture, as <see cref="AgentTui.StatusText"/> words it.</param>
-internal readonly record struct TuiChrome(string Title, string Status);
+/// <param name="MaxIterations">The turn's iteration ceiling, the denominator of the step count.</param>
+internal readonly record struct TuiChrome(string Title, string Status, int MaxIterations = 25);

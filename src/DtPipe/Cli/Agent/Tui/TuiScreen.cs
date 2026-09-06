@@ -20,10 +20,12 @@ namespace DtPipe.Cli.Agent.Tui;
 /// from thread-safe snapshots.
 ///
 /// <para>
-/// The status line carries two things at different times: the run's posture while a turn is in
-/// flight, and the finished turn's verdict afterwards. The verdict is a projection of
-/// <see cref="TurnSummaryModel"/> — the same object the scrollback table renders — so this surface
-/// never judges a turn on its own.
+/// The status line carries three things at three moments. While a turn runs it is the progress of
+/// that turn — the step it has reached, the clock and the tokens — because that is when the line is
+/// looked at hardest and when nothing else on screen is counting. Between turns it is the finished
+/// turn's verdict, or a session note. Before the first turn it is the run's posture. The verdict is
+/// a projection of <see cref="TurnSummaryModel"/> — the same object the scrollback table renders —
+/// so this surface never judges a turn on its own.
 /// </para>
 /// </summary>
 internal sealed class TuiScreen
@@ -45,6 +47,7 @@ internal sealed class TuiScreen
     private readonly Label _hints;
     private readonly Label _caret;
     private readonly TextField _input;
+    private readonly int _maxIterations;
 
     /// <summary>
     /// The frames of a turn in flight, on the caret. Braille dots, the same wheel the scrollback
@@ -72,6 +75,7 @@ internal sealed class TuiScreen
     {
         _title = chrome.Title;
         _posture = chrome.Status;
+        _maxIterations = chrome.MaxIterations;
         _window = new Window { Title = chrome.Title };
 
         _status = new Label { X = 0, Y = Pos.AnchorEnd(3), Width = Dim.Fill(), Text = chrome.Status };
@@ -182,10 +186,9 @@ internal sealed class TuiScreen
     /// </summary>
     public void Sync(IReadOnlyList<TrajectoryStep> steps, IReadOnlyList<string>? fluxLines, string clock, string meter)
     {
-        var title = meter.Length > 0 ? $"{_title}    {clock} · {meter}" : $"{_title}    {clock}";
-        if (title != _renderedTitle) _window.Title = _renderedTitle = title;
+        if (_title != _renderedTitle) _window.Title = _renderedTitle = _title;
 
-        var status = _verdict ?? _posture;
+        var status = _verdict ?? (_accepting ? _posture : Progress(steps.Count, clock, meter));
         if (status != _renderedStatus) _status.Text = _renderedStatus = status;
 
         // The one thing on this surface that redraws with nothing behind it having changed, and
@@ -199,6 +202,17 @@ internal sealed class TuiScreen
 
         _steps.Update(steps);            // rebuilds only when the step count moved
         if (fluxLines is not null) _flux.Update(fluxLines);
+    }
+
+    /// <summary>
+    /// How far the running turn has got. The step count is the trajectory's own length, so it needs
+    /// nothing the surface is not already handed every tick; the ceiling is the run's, fixed at
+    /// launch. The wheel is on the caret, not here — one turn is one moving thing.
+    /// </summary>
+    private string Progress(int stepsTaken, string clock, string meter)
+    {
+        var line = $"step {stepsTaken + 1}/{_maxIterations} · {clock}";
+        return meter.Length > 0 ? $"{line} · {meter}" : line;
     }
 
     /// <summary>Pushes the plan's latest state into the plan panel. A no-op when nothing changed.</summary>
@@ -277,6 +291,7 @@ internal sealed class TuiScreen
     internal string InputText { get => _input.Text ?? string.Empty; set => _input.Text = value; }
     internal Scheme InputScheme => _input.GetScheme();
     internal string CaretText => _caret.Text;
+    internal string WindowTitle => _window.Title;
     internal LineStyle? BorderOfSteps => _steps.Frame.Border?.LineStyle;
     internal LineStyle? BorderOfFlux => _flux.Frame.Border?.LineStyle;
     internal string DetailText => _detail.BodyText;

@@ -66,13 +66,15 @@ public class TuiSmokeTests
         var (app, _, _) = Build();
         var log = new TranscriptLog();
         var view = new TuiTurnView(log);
-        string screen = string.Empty;
+        TuiScreen? screen = null;
+        string open = string.Empty;
+        string closed = string.Empty;
 
         await app.RunOneTurnAsync(Chrome, log, view, new AgentTrajectory(), Header,
             async (turnView, _) =>
             {
                 turnView.ToolResult("inspect", "UNIQUEMARKER42", isError: false);
-                await Task.Delay(800);
+                await Task.Delay(1200);
                 return "ok";
             },
             CancellationToken.None,
@@ -81,14 +83,29 @@ public class TuiSmokeTests
                 // Poll until the committed transcript entry has been pulled onto the screen —
                 // the repaint is a timer, so it lands a tick after the turn appended it.
                 var frame = Flatten(live.Driver!);
-                if (frame.Contains("UNIQUEMARKER42")) { screen = frame; return false; }
-                return true;
-            }));
+                if (open.Length == 0)
+                {
+                    if (!frame.Contains("UNIQUEMARKER42")) return true;
+                    open = frame;
+                    // The polled header only reaches the screen while a turn holds the line, so
+                    // close it and keep polling for the band it feeds.
+                    screen!.SetAccepting(false);
+                    return true;
+                }
 
-        Assert.Contains("dtpipe agent", screen);            // the window title
-        Assert.Contains("UNIQUEMARKER42", screen);          // a committed transcript entry
-        Assert.Contains("plan · detail: compact", screen);  // the status line
-        Assert.Contains("3s", screen);                      // the polled clock
+                if (!frame.Contains("3s")) return true;
+                closed = frame;
+                return false;
+            }),
+            onScreen: s => screen = s);
+
+        Assert.Contains("dtpipe agent", open);            // the window title
+        Assert.Contains("UNIQUEMARKER42", open);          // a committed transcript entry
+        Assert.Contains("plan · detail: compact", open);  // the status line, line open
+        Assert.DoesNotContain("3s", open);                // the title carries no clock
+
+        Assert.Contains("3s", closed);                    // the polled clock, in the status band
+        Assert.Contains("42 tok", closed);
     }
 
     [Fact(Timeout = 30000)]

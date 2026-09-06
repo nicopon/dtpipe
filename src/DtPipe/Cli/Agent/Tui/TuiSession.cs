@@ -59,7 +59,7 @@ internal sealed class TuiSession
     {
         var log = new TranscriptLog();
         var view = _executor.CreateSurfaceView(log);
-        var chrome = new TuiChrome(Title(model), Posture(opts));
+        var chrome = new TuiChrome(Title(model), Posture(opts), maxIterations);
 
         TurnSummaryModel? last = null;
         await new TuiApp(_console, _driverName).RunSessionAsync(

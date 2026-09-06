@@ -25,7 +25,7 @@ namespace DtPipe.Tests.Unit.Cli;
 [Collection(TerminalGuiCollection.Name)]
 public class TuiNavigationTests
 {
-    private static readonly TuiChrome Chrome = new("dtpipe agent · test", "plan · detail: compact");
+    private static readonly TuiChrome Chrome = new("dtpipe agent · test", "plan · detail: compact", 12);
 
     private static (string Clock, string Meter) Header() => ("3s", "42 tok");
 
@@ -178,6 +178,38 @@ public class TuiNavigationTests
             {
                 Assert.Equal(LineStyle.Rounded, s.BorderOfSteps);
                 Assert.Equal(LineStyle.Heavy, s.BorderOfFlux);
+            });
+    }
+
+    /// <summary>
+    /// While a turn runs the status band counts that turn — the step reached, the clock, the
+    /// tokens — and the window title is the run's identity and nothing else. Between turns the band
+    /// goes back to carrying the posture, or whatever note was last posted.
+    /// </summary>
+    [Fact(Timeout = 30000)]
+    public async Task The_Status_Band_Counts_The_Running_Turn_And_The_Title_Stays_Still()
+    {
+        var steps = FourSteps().Snapshot();
+
+        await Drive(FourSteps(),
+            (_, s) =>
+            {
+                s.Sync(steps, null, "3s", "42 tok");
+                Assert.Equal("plan · detail: compact", s.StatusText);          // line open: the posture
+                Assert.Equal("dtpipe agent · test", s.WindowTitle);
+            },
+            (_, s) => s.SetAccepting(false),
+            (_, s) =>
+            {
+                s.Sync(steps, null, "3s", "42 tok");
+                Assert.Equal("step 5/12 · 3s · 42 tok", s.StatusText);         // four taken, on the fifth
+                Assert.Equal("dtpipe agent · test", s.WindowTitle);            // no clock in the title
+            },
+            (_, s) =>
+            {
+                s.ShowStatus("✓ plan validated");
+                s.Sync(steps, null, "9s", "99 tok");
+                Assert.Equal("✓ plan validated", s.StatusText);                // a note outranks progress
             });
     }
 
