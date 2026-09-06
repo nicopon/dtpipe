@@ -37,13 +37,17 @@ public enum TurnStatus
 /// <param name="ProducedPlan">True when <em>this</em> turn produced plan YAML. Drives the
 /// plan-mode "next steps" line, which speaks to the plan this turn made — not one an earlier turn
 /// left on the trajectory.</param>
+/// <param name="Tokens">Completion tokens the turn consumed, as the provider reported them. Zero
+/// when no provider reported any. The scrollback table does not print it — its rows are a fixed
+/// contract — so this reaches the reader through the full-screen exchange only.</param>
 public sealed record TurnSummaryModel(
     TurnOutcome Outcome,
     int Iterations,
     TimeSpan Duration,
     IReadOnlyDictionary<string, int> ToolCounts,
     string? Question = null,
-    bool ProducedPlan = false)
+    bool ProducedPlan = false,
+    long Tokens = 0)
 {
     public TurnStatus Status => Outcome switch
     {
@@ -66,6 +70,9 @@ public sealed record TurnSummaryModel(
     public string Reason => Describe(Outcome);
 
     public string DurationText => $"{Duration.TotalSeconds:F2} seconds";
+
+    /// <summary>How many tool calls the turn made, across every tool.</summary>
+    public int TotalToolCalls => ToolCounts.Values.Sum();
 
     /// <summary>The tool tally as one line, or null when no tool ran.</summary>
     public string? ToolSummary => ToolCounts.Count == 0

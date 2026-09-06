@@ -32,6 +32,7 @@ internal sealed class ExchangePanel
     private readonly Label _headline;
     private readonly ListView _body;
     private string _rendered = string.Empty;
+    private int _foldedAt = -1;
     private IReadOnlyList<string> _lines = Array.Empty<string>();
 
     public ExchangePanel()
@@ -84,11 +85,12 @@ internal sealed class ExchangePanel
         var headline = $"{exchange.Marker}  {exchange.Headline}";
         if (_headline.Text != headline) _headline.Text = headline;
 
-        var lines = exchange.BodyLines();
-        var text = string.Join('\n', lines);
-        if (text == _rendered) return;
+        var text = exchange.Body;
+        int width = _body.Viewport.Width;
+        if (text == _rendered && width == _foldedAt) return;
         _rendered = text;
-        _lines = lines;
+        _foldedAt = width;
+        var lines = _lines = text.Length == 0 ? Array.Empty<string>() : TextWrap.Fold(text, width);
 
         _body.SetSource(new ObservableCollection<string>(lines));
         if (lines.Count > 0) _body.SelectedItem = 0;   // a message is read from its beginning

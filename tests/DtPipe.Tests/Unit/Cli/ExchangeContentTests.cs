@@ -39,7 +39,8 @@ public class ExchangeContentTests
     [InlineData(false, "anything else")]
     public void A_Delivered_Turn_Names_The_Next_Move(bool hasPlan, string expected)
     {
-        var summary = new TurnSummaryModel(TurnOutcome.Succeeded, 4, TimeSpan.FromSeconds(12.3), TwoTools);
+        var summary = new TurnSummaryModel(TurnOutcome.Succeeded, 4, TimeSpan.FromSeconds(12.3), TwoTools,
+            Tokens: 1234);
 
         var exchange = ExchangeContent.Of(summary, hasPlan);
 
@@ -47,7 +48,22 @@ public class ExchangeContentTests
         Assert.Equal("✓", exchange.Marker);
         Assert.Contains(expected, exchange.Headline);
         Assert.Contains("4 steps", exchange.Body);
-        Assert.Contains("inspect: 2", exchange.Body);
+        Assert.Contains("3 tool calls", exchange.Body);      // the total, not the breakdown
+        Assert.Contains("1234 tok", exchange.Body);
+        Assert.DoesNotContain("inspect: 2", exchange.Body);  // which tools ran is the steps list's job
+    }
+
+    /// <summary>A turn that called nothing and reported nothing says neither.</summary>
+    [Fact]
+    public void An_Absent_Count_Is_Left_Out_Rather_Than_Printed_As_Zero()
+    {
+        var summary = new TurnSummaryModel(TurnOutcome.Succeeded, 2, TimeSpan.FromSeconds(3),
+            new Dictionary<string, int>());
+
+        var body = ExchangeContent.Of(summary, hasPlan: false).Body;
+
+        Assert.DoesNotContain("tool call", body);
+        Assert.DoesNotContain("tok", body);
     }
 
     [Theory]

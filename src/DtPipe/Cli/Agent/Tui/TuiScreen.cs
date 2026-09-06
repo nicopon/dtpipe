@@ -271,12 +271,22 @@ internal sealed class TuiScreen
             return;
         }
 
-        if (!Owns(_steps.Frame, focused)) return;
+        // Error navigation moves the steps selection, so it belongs to the steps panel. Expanding
+        // is about the detail, and the reader who wants it is as likely to be standing in the
+        // detail as in the list.
+        if (Owns(_steps.Frame, focused))
+        {
+            switch (signal)
+            {
+                case SurfaceSignal.NextError: _steps.JumpToError(+1); key.Handled = true; return;
+                case SurfaceSignal.PrevError: _steps.JumpToError(-1); key.Handled = true; return;
+            }
+        }
+
+        if (!Owns(_steps.Frame, focused) && !_detail.FocusTarget.HasFocus) return;
 
         switch (signal)
         {
-            case SurfaceSignal.NextError: _steps.JumpToError(+1); key.Handled = true; return;
-            case SurfaceSignal.PrevError: _steps.JumpToError(-1); key.Handled = true; return;
             case SurfaceSignal.Expand or SurfaceSignal.Submit:
                 _expanded = true; RenderDetail(); key.Handled = true; return;
             case SurfaceSignal.Collapse:
@@ -340,11 +350,11 @@ internal sealed class TuiScreen
     private string HintsFor(View? focused)
     {
         if (_input.HasFocus)
-            return $"enter run · {SessionCommand.Hint} · esc stop · ^C quit";
+            return $"enter sends · {SessionCommand.Hint} · esc stop · ^C quit";
 
         bool onSteps = Owns(_steps.Frame, focused);
         return onSteps ? "↑↓ select · e/b errors · →/enter expand · ⇥ panel · esc stop"
-             : _detail.FocusTarget.HasFocus ? "↑↓ scroll the step · ⇥ panel · esc stop"
+             : _detail.FocusTarget.HasFocus ? "↑↓ scroll · →/← expand · ⇥ panel · esc stop"
              : _plan.FocusTarget.HasFocus ? "↑↓ scroll the plan · ⇥ panel · esc stop"
              : _exchange.FocusTarget.HasFocus ? "↑↓ scroll the agent's words · ⇥ panel · esc stop"
              : "⇥ panel · esc stop · ^C quit";

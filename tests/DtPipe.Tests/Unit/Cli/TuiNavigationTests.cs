@@ -31,6 +31,9 @@ public class TuiNavigationTests
 
     private static (string Clock, string Meter) Header() => ("3s", "42 tok");
 
+    /// <summary>Panel text with its folding undone — the assertions are about content, not columns.</summary>
+    private static string Flat(string panelText) => panelText.Replace("\n", " ");
+
     private static AgentTrajectory FourSteps()
     {
         var t = new AgentTrajectory();
@@ -162,13 +165,13 @@ public class TuiNavigationTests
             (_, s) => s.FocusSteps(),
             (_, s) => Assert.Contains("e/b errors", s.HintsText),
             (app, _) => app.InjectKey(Key.Tab),
-            (_, s) => Assert.Contains("scroll the step", s.HintsText),
+            (_, s) => Assert.Contains("→/← expand", s.HintsText),      // the detail
             (app, _) => app.InjectKey(Key.Tab),
             (_, s) => Assert.Contains("scroll the plan", s.HintsText),
             (app, _) => app.InjectKey(Key.Tab),
             (_, s) => Assert.Contains("scroll the agent", s.HintsText),
             (app, _) => app.InjectKey(Key.Tab),
-            (_, s) => Assert.Contains("enter run", s.HintsText));
+            (_, s) => Assert.Contains("enter sends", s.HintsText));
     }
 
     /// <summary>
@@ -206,13 +209,13 @@ public class TuiNavigationTests
             {
                 s.Sync(recorded, live, "3s", "42 tok");
                 Assert.True(s.LiveStepSelected, "the running step is what the list follows");
-                Assert.Contains("reading the CSV header", s.DetailText);
+                Assert.Contains("reading the CSV header", Flat(s.DetailText));
                 Assert.Contains("running", s.DetailTitle);
             },
             (_, s) =>
             {
                 s.Sync(recorded, live with { Text = "reading the CSV header\nfound six columns" }, "4s", "60 tok");
-                Assert.Contains("found six columns", s.DetailText);        // it fills as it arrives
+                Assert.Contains("found six columns", Flat(s.DetailText));        // it fills as it arrives
             },
             (_, s) =>
             {

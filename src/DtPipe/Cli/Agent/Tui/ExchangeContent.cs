@@ -96,9 +96,21 @@ internal static class ExchangeContent
                 Tally(summary)),
         };
 
+    /// <summary>
+    /// What the turn cost, in the four numbers a reader acts on: how far it went, how long it took,
+    /// how much work it delegated and what it burned. Which tools ran is in the steps list, one row
+    /// each — repeating the breakdown here spends the width without adding a fact.
+    /// </summary>
     private static string Tally(TurnSummaryModel s)
     {
-        var line = $"{s.Iterations} step{(s.Iterations == 1 ? "" : "s")} · {s.DurationText}";
-        return s.ToolSummary is { } tools ? $"{line} · {tools}" : line;
+        var parts = new List<string>
+        {
+            $"{s.Iterations} step{(s.Iterations == 1 ? "" : "s")}",
+            s.DurationText,
+        };
+        if (s.TotalToolCalls > 0)
+            parts.Add($"{s.TotalToolCalls} tool call{(s.TotalToolCalls == 1 ? "" : "s")}");
+        if (s.Tokens > 0) parts.Add($"{s.Tokens} tok");
+        return string.Join(" · ", parts);
     }
 }

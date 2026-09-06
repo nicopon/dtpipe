@@ -232,7 +232,7 @@ public class AgentExecutor
         _turnClock.Stop();
         int shownIterations = turnIterations <= maxIterations ? turnIterations : maxIterations;
         return new TurnSummaryModel(primary.Outcome, shownIterations, _turnClock.Elapsed, toolCounts, primary.Question,
-            ProducedPlan: !string.IsNullOrWhiteSpace(primary.Yaml));
+            ProducedPlan: !string.IsNullOrWhiteSpace(primary.Yaml), Tokens: _turnTokens);
      }
 
     /// <summary>Outcome of one run of the planning loop, including why it stopped.</summary>

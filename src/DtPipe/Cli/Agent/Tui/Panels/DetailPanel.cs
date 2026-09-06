@@ -43,6 +43,7 @@ internal sealed class DetailPanel
     private bool _syncing;
     private string _renderedTitle = string.Empty;
     private string _rendered = string.Empty;
+    private int _foldedAt = -1;
     private IReadOnlyList<string> _lines = Array.Empty<string>();
 
     /// <param name="plan">The panel to the right; the detail runs up to it while collapsed.</param>
@@ -128,9 +129,13 @@ internal sealed class DetailPanel
     /// </summary>
     private void Write(string text)
     {
-        if (text == _rendered) return;
+        // Refold when the column changes too: expanding the detail hands it the plan's width, and a
+        // resize moves it again — the same text then needs different line breaks.
+        int width = _body.Viewport.Width;
+        if (text == _rendered && width == _foldedAt) return;
         _rendered = text;
-        _lines = text.Replace("\r", string.Empty).Split('\n');
+        _foldedAt = width;
+        _lines = TextWrap.Fold(text, width);
 
         bool follow = _gate.ShouldFollow(Now);
         int? held = _body.SelectedItem;
