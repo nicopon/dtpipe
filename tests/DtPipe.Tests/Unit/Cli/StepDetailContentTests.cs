@@ -73,17 +73,22 @@ public class StepDetailContentTests
         Assert.Contains(DetailSectionKind.ToolArgs, expanded);
     }
 
+    /// <summary>
+    /// Collapsed is a preview and says so with an ellipsis; expanded is the whole thing. Expanding
+    /// is the reader asking for all of it, and both surfaces that show it scroll.
+    /// </summary>
     [Fact]
-    public void Expanding_Widens_The_Reasoning_Clip()
+    public void Expanding_Lifts_The_Clip_Entirely()
     {
-        var wall = string.Join("\n", Enumerable.Range(0, 30).Select(i => $"line {i}"));
+        var wall = string.Join("\n", Enumerable.Range(0, 300).Select(i => $"line {i}"));
         var step = Step(reasoning: wall);
 
         var collapsed = StepDetailContent.Of(step, false).Single(s => s.Kind == DetailSectionKind.Reasoning).Body;
         var expanded = StepDetailContent.Of(step, true).Single(s => s.Kind == DetailSectionKind.Reasoning).Body;
 
         Assert.Equal(5, collapsed.Split('\n').Length);        // 4 lines + the ellipsis line
-        Assert.True(expanded.Split('\n').Length > collapsed.Split('\n').Length);
+        Assert.Equal(wall, expanded);                          // every line, no ellipsis
+        Assert.DoesNotContain("…", expanded);
     }
 
     [Fact]

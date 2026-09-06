@@ -93,14 +93,27 @@ public sealed record DagTopology(IReadOnlyList<BranchTopology> Branches)
             b.Output,
             b.ProcessorName,
             b.StreamingAliases.ToArray(),
-            b.RefAliases.ToArray())).ToArray());
+            b.RefAliases.ToArray(),
+            b.PreParsedJob?.Transformers?.Select(t => t.Type).ToArray() ?? Array.Empty<string>())).ToArray());
 }
 
-/// <summary>One branch: its alias, endpoints, stream processor, and the aliases it reads or materialises.</summary>
+/// <summary>
+/// One branch, end to end: its alias, its endpoints, the stream processor and the row transformers
+/// between them, and the aliases it reads or materialises.
+///
+/// <para>
+/// <paramref name="Transformers"/> is what makes this a description of the pipeline rather than of
+/// its endpoints. A stream processor is a branch of the DAG and shows as one; a row transformer is
+/// a stage inside a branch and shows nowhere else — so a plan whose whole substance is a
+/// <c>fake</c> or a <c>compute</c> would otherwise read as a bare source-to-sink copy, to a reader
+/// and to a model alike.
+/// </para>
+/// </summary>
 public sealed record BranchTopology(
     string Alias,
     string? Input,
     string? Output,
     string? Processor,
     IReadOnlyList<string> From,
-    IReadOnlyList<string> Ref);
+    IReadOnlyList<string> Ref,
+    IReadOnlyList<string> Transformers);

@@ -9,8 +9,8 @@ namespace DtPipe.Cli.Agent;
 internal readonly record struct PlanView(PlanState State, string? Message, DagTopology? Topology);
 
 /// <summary>
-/// The plan/DAG panel as UI-agnostic lines: one row per branch
-/// (<c>alias: source → [processor] → output</c>) plus a status badge derived from
+/// The plan/DAG panel as UI-agnostic lines: one row per branch, every stage of it in order
+/// (<c>alias: source → transformer → [processor] → output</c>), plus a status badge derived from
 /// <see cref="PlanProgress"/>. Pure — no toolkit — so the panel is asserted on this directly.
 /// Connection strings are sanitised: this is on screen while the run goes.
 /// </summary>
@@ -37,6 +37,7 @@ internal static class PlanPanelContent
         {
             b.From.Count > 0 ? string.Join(",", b.From) : Endpoint(b.Input) ?? "(channel)"
         };
+        stages.AddRange(b.Transformers);
         if (!string.IsNullOrEmpty(b.Processor)) stages.Add($"[{b.Processor}]");
         stages.Add(Endpoint(b.Output) ?? "(none)");
 

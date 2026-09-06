@@ -276,7 +276,7 @@ public partial class DtPipeMcpTools
 
 
     [McpServerTool(Name = "get-dag-topology")]
-    [System.ComponentModel.Description("Return the pipeline's branch topology as structured data: for each branch its alias, input, output, stream processor, and the upstream aliases it streams from ('from') or materialises ('ref'). Read-only — parses the YAML, runs nothing.")]
+    [System.ComponentModel.Description("Return the pipeline's branch topology as structured data: for each branch its alias, input, output, the row transformers applied between them in order ('transformers'), the stream processor, and the upstream aliases it streams from ('from') or materialises ('ref'). Every stage of a branch is listed, so a pipeline whose substance is a transformer is not reported as a bare source-to-sink copy. Read-only — parses the YAML, runs nothing.")]
     public string GetDagTopology(
         [System.ComponentModel.Description("The complete YAML configuration string representing the pipeline")] string yamlContent)
     {

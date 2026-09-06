@@ -16,8 +16,10 @@ public class PlanPanelTests
 
     private static BranchTopology Branch(
         string alias, string? input = null, string? output = null, string? processor = null,
-        string[]? from = null, string[]? @ref = null)
-        => new(alias, input, output, processor, from ?? System.Array.Empty<string>(), @ref ?? System.Array.Empty<string>());
+        string[]? from = null, string[]? @ref = null, string[]? transformers = null)
+        => new(alias, input, output, processor,
+            from ?? System.Array.Empty<string>(), @ref ?? System.Array.Empty<string>(),
+            transformers ?? System.Array.Empty<string>());
 
     [Fact]
     public void No_Plan_Yet_Is_Just_The_Badge()
@@ -31,6 +33,31 @@ public class PlanPanelTests
     {
         var lines = PlanPanelContent.Lines(PlanState.Drafted, null, null);
         Assert.Equal(new[] { "(plan YAML not parsed yet)", "◐ drafted — not validated" }, lines);
+    }
+
+    /// <summary>
+    /// A branch is every stage between its endpoints, in order. A row transformer is a stage inside
+    /// the branch and appears nowhere else on the surface, so a plan whose whole substance is a
+    /// fake or a compute would otherwise read as a bare copy from source to sink.
+    /// </summary>
+    [Fact]
+    public void A_Branch_Renders_Every_Stage_Between_Its_Endpoints()
+    {
+        var lines = PlanPanelContent.Lines(PlanState.Validated, null,
+            Topo(Branch("main", input: "generate:500", output: "csv:toto.csv",
+                transformers: new[] { "fake", "compute" })));
+
+        Assert.Equal("main: generate:500 → fake → compute → csv:toto.csv", lines[0]);
+    }
+
+    [Fact]
+    public void A_Stream_Processor_Comes_After_The_Row_Transformers()
+    {
+        var lines = PlanPanelContent.Lines(PlanState.Validated, null,
+            Topo(Branch("joined", from: new[] { "a", "b" }, output: "pg:out",
+                processor: "sql", transformers: new[] { "mask" })));
+
+        Assert.Equal("joined: a,b → mask → [sql] → pg:out", lines[0]);
     }
 
     [Fact]

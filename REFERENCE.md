@@ -870,7 +870,7 @@ dtpipe mcp
 | `validate-yaml-job` | `yamlContent` | Validate YAML job topology and syntax without running |
 | `execute-yaml-job` | `yamlContent`, `apply?`, `allowDestructive?`, `allowNetwork?` | Execute a YAML job in-memory. **Dry-run by default** (no write); `apply=true` performs a write, gated by the approval gate and the SQL safety policy |
 | `dry-run` | `yamlContent` | Validate, open the reader, report schema/estimated count without writing |
-| `get-dag-topology` | `yamlContent` | Structured branch topology: alias, input, output, stream processor, and the `from[]` / `ref[]` upstream aliases per branch. Read-only — parses, runs nothing |
+| `get-dag-topology` | `yamlContent` | Structured branch topology: alias, input, output, the ordered `transformers[]` applied between them, stream processor, and the `from[]` / `ref[]` upstream aliases per branch. Read-only — parses, runs nothing |
 | `help` | *(none)* | General usage guidelines, YAML job structures, and DAG topology rules |
 | `get-adapter-help` | `adapterName` | Inspect connection string format, reader/writer options, and YAML examples for an adapter |
 | `get-transformer-help` | `transformerName` | Inspect options, mapping syntax, and YAML examples for a transformer |

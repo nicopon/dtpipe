@@ -23,8 +23,9 @@ internal readonly record struct DetailSection(DetailSectionKind Kind, string Tit
 /// The detail of one trajectory step as UI-agnostic data. Extracted from <see cref="SessionReview"/>
 /// so the full-screen detail panel and the scrollback review render the same content — the review's
 /// Spectre styling stays in <see cref="SessionReview"/>, the decisions (what to include, how far to
-/// clip, how to format the usage line) live here. <c>expanded</c> widens the clips and adds the
-/// chain of thought and the tool arguments.
+/// clip, how to format the usage line) live here. <c>expanded</c> adds the chain of thought and the
+/// tool arguments, and lifts the clips entirely: expanding is the reader asking for all of it, and
+/// both surfaces that show it can scroll.
 /// </summary>
 internal static class StepDetailContent
 {
@@ -44,30 +45,34 @@ internal static class StepDetailContent
 
         if (!string.IsNullOrWhiteSpace(step.Reasoning))
             sections.Add(new(DetailSectionKind.Reasoning, "reasoning / intent",
-                Clip(step.Reasoning, expanded ? 40 : 4)));
+                Clip(step.Reasoning, expanded ? 0 : 4)));
 
         if (expanded && !string.IsNullOrWhiteSpace(step.Thinking))
             sections.Add(new(DetailSectionKind.ChainOfThought, "chain of thought",
-                Clip(step.Thinking!, 40)));
+                Clip(step.Thinking!, 0)));
 
         if (!string.IsNullOrEmpty(step.ToolName))
         {
             sections.Add(new(DetailSectionKind.ToolName, "tool", step.ToolName!));
 
             if (expanded && !string.IsNullOrWhiteSpace(step.ToolArgs))
-                sections.Add(new(DetailSectionKind.ToolArgs, "arguments", Clip(step.ToolArgs!, 20)));
+                sections.Add(new(DetailSectionKind.ToolArgs, "arguments", Clip(step.ToolArgs!, 0)));
 
             if (!string.IsNullOrWhiteSpace(step.ToolResult))
                 sections.Add(new(DetailSectionKind.ToolOutput, "tool output",
-                    Clip(step.ToolResult!, expanded ? 40 : 6), step.IsError));
+                    Clip(step.ToolResult!, expanded ? 0 : 6), step.IsError));
         }
 
         return sections;
     }
 
-    /// <summary>Leading <paramref name="maxLines"/> lines of <paramref name="text"/>, then an ellipsis line.</summary>
+    /// <summary>
+    /// Leading <paramref name="maxLines"/> lines of <paramref name="text"/>, then an ellipsis line.
+    /// Zero or less keeps everything — what a reader who expanded the step asked for.
+    /// </summary>
     internal static string Clip(string text, int maxLines)
     {
+        if (maxLines <= 0) return text.TrimEnd('\n');
         var lines = text.Replace("\r", string.Empty).Split('\n');
         if (lines.Length <= maxLines) return text.TrimEnd('\n');
         return string.Join('\n', lines.Take(maxLines)) + "\n…";
