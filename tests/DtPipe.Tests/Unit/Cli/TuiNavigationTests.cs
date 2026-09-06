@@ -15,7 +15,8 @@ namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
 /// The full-screen layout — a steps list with its detail, a transcript
-/// band, a focus-aware hint bar. Tab moves between the two focusable panels (the toolkit's own
+/// band, a focus-aware hint bar and an input line that paints like the panels around it.
+/// Tab moves between the two focusable panels (the toolkit's own
 /// navigation), Up/Down and e/b move the selection, Right expands the detail, and the detail
 /// mirrors whichever step is highlighted. Driven headless: a state machine on a repeating timeout
 /// runs each step on the UI thread, one per tick so an injected key is processed before the next.
@@ -155,5 +156,23 @@ public class TuiNavigationTests
             (_, s) => Assert.Contains("e/b errors", s.HintsText),   // steps hints
             (app, _) => app.InjectKey(Key.Tab),
             (_, s) => Assert.Contains("scroll", s.HintsText));      // flux hints
+    }
+
+    /// <summary>
+    /// The input line takes the terminal's own colours, like every panel. A text field draws with
+    /// Editable / ReadOnly / Focus where the panels draw with Normal, and the stock scheme makes
+    /// two of those unreadable: ReadOnly is grey on grey, which is what a running turn selects, and
+    /// Focus is a solid band across the full width, which is the state between turns.
+    /// </summary>
+    [Fact(Timeout = 30000)]
+    public async Task The_Input_Line_Paints_Like_The_Panels_In_Every_State()
+    {
+        await Drive(FourSteps(), (_, s) =>
+        {
+            var scheme = s.InputScheme;
+            Assert.Equal(scheme.Normal, scheme.Editable);
+            Assert.Equal(scheme.Normal, scheme.ReadOnly);
+            Assert.Equal(scheme.Normal, scheme.Focus);
+        });
     }
 }

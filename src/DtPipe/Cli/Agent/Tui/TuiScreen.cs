@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using DtPipe.Cli.Agent;
 using DtPipe.Cli.Agent.Tui.Panels;
 using Terminal.Gui.App;
+using Terminal.Gui.Drawing;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
@@ -91,7 +92,34 @@ internal sealed class TuiScreen
 
         app.Keyboard.KeyDown += (_, key) => OnKey(key, nav?.GetFocused());
 
+        UnpaintTheInputLine();
         _input.SetFocus();
+    }
+
+    /// <summary>
+    /// Makes the input line paint like every panel around it. The scheme is read back from the
+    /// view, so whichever theme is in force is the one inherited.
+    ///
+    /// <para>
+    /// Every other view on this surface draws with the scheme's <c>Normal</c> attribute, which is
+    /// fully inherited — that is why the layout takes the user's own terminal colours. A text field
+    /// draws with <c>Editable</c>, <c>ReadOnly</c> and <c>Focus</c> instead, and in the stock scheme
+    /// those are white-on-grey, grey-on-grey and black-on-white. Two of the three are unreadable
+    /// here: the line spans the full width, so <c>Focus</c> lays a solid band across the screen for
+    /// the whole time between turns, and <c>ReadOnly</c> — grey text on a grey ground — is what
+    /// <see cref="SetAccepting"/> selects for the whole of every turn. The open / closed state is
+    /// carried by the caret (<c>›</c> / <c>⏳</c>), which no theme can wash out.
+    /// </para>
+    /// </summary>
+    private void UnpaintTheInputLine()
+    {
+        var inherited = _input.GetScheme();
+        _input.SetScheme(new Scheme(inherited)
+        {
+            Editable = inherited.Normal,
+            ReadOnly = inherited.Normal,
+            Focus = inherited.Normal,
+        });
     }
 
     /// <summary>
@@ -196,6 +224,7 @@ internal sealed class TuiScreen
     internal string StatusText => _status.Text;
     internal bool Accepting => _accepting;
     internal string InputText { get => _input.Text ?? string.Empty; set => _input.Text = value; }
+    internal Scheme InputScheme => _input.GetScheme();
     internal string DetailText => _detail.BodyText;
     internal string PlanText => _plan.BodyText;
     internal bool Expanded => _expanded;
