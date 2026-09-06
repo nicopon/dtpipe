@@ -92,22 +92,53 @@ public class McpHelpService : IMcpHelpService
         sw.WriteLine("  - state: <path_to_state_file>");
         sw.WriteLine();
 
-        var readerAdapters = _readerFactories.Select(f => f.ComponentName.ToLowerInvariant());
-        var writerAdapters = _writerFactories.Select(f => f.ComponentName.ToLowerInvariant());
-        var allAdapters = readerAdapters.Union(writerAdapters).OrderBy(x => x).ToList();
         sw.WriteLine("ADAPTERS:");
-        sw.WriteLine($"  Available adapters: {string.Join(", ", allAdapters)}");
+        foreach (var a in Adapters())
+            sw.WriteLine($"  {a.Name.PadRight(14)} ({a.Roles}) {a.Description}");
         sw.WriteLine("  To see connection string rules, YAML schema options, and examples for a specific adapter, call 'get-adapter-help <adapter-name>'.");
         sw.WriteLine();
 
-        var allTransformers = _transformerFactories.Select(f => f.ComponentName.ToLowerInvariant()).OrderBy(x => x).ToList();
         sw.WriteLine("TRANSFORMERS:");
-        sw.WriteLine($"  Available transformers: {string.Join(", ", allTransformers)}");
+        foreach (var t in Transformers())
+            sw.WriteLine($"  {t.Name.PadRight(14)} {t.Description}");
         sw.WriteLine("  To see YAML schema mappings, options, and examples for a specific transformer, call 'get-transformer-help <transformer-name>'.");
         sw.WriteLine();
 
         return sw.ToString();
     }
+
+    /// <summary>
+    /// The adapter catalogue as a caller discovering it sees it. The description is the
+    /// component's own <see cref="DescriptionAttribute"/> — the same one
+    /// <see cref="GetAdapterHelp"/> prints — so a listing cannot drift from the detailed help.
+    /// The reader's is preferred when both roles carry one; the roles say which are available.
+    /// </summary>
+    public IReadOnlyList<ComponentSummary> Adapters()
+    {
+        var readers = _readerFactories.ToDictionary(f => f.ComponentName.ToLowerInvariant(), f => f.OptionsType, StringComparer.OrdinalIgnoreCase);
+        var writers = _writerFactories.ToDictionary(f => f.ComponentName.ToLowerInvariant(), f => f.OptionsType, StringComparer.OrdinalIgnoreCase);
+
+        return readers.Keys.Union(writers.Keys, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .Select(name =>
+            {
+                var hasReader = readers.TryGetValue(name, out var readerType);
+                var hasWriter = writers.TryGetValue(name, out var writerType);
+                var roles = hasReader && hasWriter ? "reader, writer" : hasReader ? "reader" : "writer";
+                return new ComponentSummary(name, roles, Describe(hasReader ? readerType : writerType));
+            })
+            .ToList();
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<ComponentSummary> Transformers()
+        => _transformerFactories
+            .Select(f => new ComponentSummary(f.ComponentName.ToLowerInvariant(), "transformer", Describe(f.OptionsType)))
+            .OrderBy(c => c.Name, StringComparer.Ordinal)
+            .ToList();
+
+    private static string Describe(Type? optionsType)
+        => optionsType?.GetCustomAttribute<DescriptionAttribute>()?.Description ?? string.Empty;
 
     public string GetAdapterHelp(string adapterName)
     {

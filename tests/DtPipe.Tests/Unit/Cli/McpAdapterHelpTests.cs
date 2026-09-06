@@ -115,6 +115,43 @@ public class McpAdapterHelpTests
     }
 
     /// <summary>
+    /// The catalogue listing names what each adapter does, not just what it is called. A model
+    /// reading names alone has to open every component's help to find the one it needs, and a
+    /// recorded session shows it running out of turns before reaching the one that unblocked it.
+    /// </summary>
+    [Fact]
+    public void Every_Listed_Adapter_Says_What_It_Does()
+    {
+        var listed = _help.Adapters();
+
+        Assert.Equal(_roles.Select(r => r.Adapter).Distinct(StringComparer.OrdinalIgnoreCase).Count(), listed.Count);
+        foreach (var a in listed)
+            Assert.False(string.IsNullOrWhiteSpace(a.Description), $"adapter '{a.Name}' is listed without a description");
+    }
+
+    /// <summary>An adapter's roles are part of discovery: asking for transformer help on a reader
+    /// is a wrong turn the listing can prevent rather than answer afterwards.</summary>
+    [Fact]
+    public void The_Listing_Says_Which_Roles_An_Adapter_Supports()
+    {
+        var listed = _help.Adapters().ToDictionary(a => a.Name, StringComparer.OrdinalIgnoreCase);
+
+        Assert.Equal("reader", listed["generate"].Roles);
+        Assert.Equal("writer", listed["null"].Roles);
+        Assert.Equal("reader, writer", listed["sqlite"].Roles);
+    }
+
+    /// <summary>The general help carries the same listing, so the two cannot drift.</summary>
+    [Fact]
+    public void The_General_Help_Carries_The_Descriptions_Too()
+    {
+        var help = _help.GetGeneralHelp();
+
+        foreach (var a in _help.Adapters())
+            Assert.Contains(a.Description, help);
+    }
+
+    /// <summary>
     /// Both roles carry their own notes and example. Emitting only the reader's left the writer's
     /// semantics — MySQL's unique-index requirement for upsert, its bulk-load prerequisite —
     /// unreachable, while the writer's options were still listed as if freely usable.

@@ -24,18 +24,19 @@ public partial class DtPipeMcpTools
 {
 
     [McpServerTool(Name = "list-providers")]
-    [System.ComponentModel.Description("List available data source providers, writers, and transformers in dtpipe")]
+    [System.ComponentModel.Description("List available data source providers, writers, and transformers in dtpipe, each with what it does")]
     public string ListProviders()
     {
-        var readers = _readerFactories.Select(f => f.ComponentName).ToList();
-        var transformers = _transformerFactories.Select(f => f.ComponentName).ToList();
-        var writers = _writerFactories.Select(f => f.ComponentName).ToList();
-        
-        return JsonSerializer.Serialize(new 
-        { 
-            readers, 
-            transformers, 
-            writers 
+        // Names alone force a caller to open every component's help to find the one it needs.
+        // The description is the component's own attribute, so this listing cannot drift from
+        // what 'get-adapter-help' and 'get-transformer-help' print.
+        var adapters = _mcpHelpService.Adapters();
+
+        return JsonSerializer.Serialize(new
+        {
+            readers = adapters.Where(a => a.Roles.Contains("reader")).Select(a => new { name = a.Name, description = a.Description }).ToList(),
+            transformers = _mcpHelpService.Transformers().Select(t => new { name = t.Name, description = t.Description }).ToList(),
+            writers = adapters.Where(a => a.Roles.Contains("writer")).Select(a => new { name = a.Name, description = a.Description }).ToList()
         }, new JsonSerializerOptions { WriteIndented = true });
     }
 
