@@ -113,6 +113,49 @@ public class StepDetailContentTests
         Assert.Null(StepDetailContent.UsageBrief(Step()));
     }
 
+    /// <summary>
+    /// A model with a reasoning channel puts its intent there and leaves the content to the tool
+    /// call. A recorded session shows every step of a turn arriving with an empty reasoning and a
+    /// full thinking, which left the detail panel blank for the whole turn.
+    /// </summary>
+    [Fact]
+    public void An_Empty_Reasoning_Falls_Back_To_The_Thinking_Channel()
+    {
+        var step = Step(reasoning: "");
+        step.Thinking = "I need the schema before I can write the mapping";
+
+        var sections = StepDetailContent.Of(step, expanded: false);
+        var narration = Assert.Single(sections, s => s.Kind == DetailSectionKind.Reasoning);
+
+        Assert.Contains("before I can write the mapping", narration.Body);
+    }
+
+    /// <summary>The same text must not be shown twice under two headings.</summary>
+    [Fact]
+    public void A_Borrowed_Narration_Is_Not_Repeated_As_The_Chain_Of_Thought()
+    {
+        var step = Step(reasoning: "");
+        step.Thinking = "one and the same text";
+
+        var kinds = StepDetailContent.Of(step, expanded: true).Select(s => s.Kind).ToArray();
+
+        Assert.Contains(DetailSectionKind.Reasoning, kinds);
+        Assert.DoesNotContain(DetailSectionKind.ChainOfThought, kinds);
+    }
+
+    /// <summary>When the model wrote both, both are shown — they are two different texts.</summary>
+    [Fact]
+    public void A_Model_That_Wrote_Both_Keeps_Both()
+    {
+        var step = Step(reasoning: "INTENT: inspect the source");
+        step.Thinking = "a separate line of reasoning";
+
+        var kinds = StepDetailContent.Of(step, expanded: true).Select(s => s.Kind).ToArray();
+
+        Assert.Contains(DetailSectionKind.Reasoning, kinds);
+        Assert.Contains(DetailSectionKind.ChainOfThought, kinds);
+    }
+
     [Fact]
     public void The_Tool_Output_Section_Carries_The_Error_Flag()
     {

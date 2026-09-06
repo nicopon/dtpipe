@@ -227,7 +227,7 @@ into one step; a different flag type starts a new step.
 
 | Flag | Syntax | Description |
 |:---|:---|:---|
-| `--fake` | `"Col:dataset.method"` | Generate fake data via [Bogus](https://github.com/bchavez/Bogus) |
+| `--fake` | `"Col:dataset.method"` | Generate fake data via [Bogus](https://github.com/bchavez/Bogus). **A column that does not exist in the incoming rows is created**, so `--fake` both anonymizes what is there and synthesizes what is not |
 | `--fake-locale` | `fr` | Locale for fake data generation |
 | `--fake-seed` | `12345` | Global seed for reproducible random fakes (also acts as a base offset for deterministic row/column faking) |
 | `--fake-seed-column` | `"UserId"` or `"Region,Branch"` | Column(s) used as a deterministic seed (same input -> same output). Supports comma-separated columns for composite seeds. |
@@ -546,7 +546,7 @@ branch-name:
 
 | Transformer | YAML key structure | Notes |
 |:---|:---|:---|
-| `fake` | `mappings: {col: dataset.method}` + `options: {locale, seed, seed-column, deterministic, skip-null}` | |
+| `fake` | `mappings: {col: dataset.method}` + `options: {locale, seed, seed-column, deterministic, skip-null}` | A mapped column that the incoming rows do not have is **created** |
 | `null` | `mappings: {col: ~}` | Value is ignored |
 | `overwrite` | `mappings: {col: value}` | |
 | `mask` | `mappings: {col: pattern}` | `#` keeps, any other char replaces |
@@ -555,9 +555,7 @@ branch-name:
 | `filter` | `filter: "expression"` | JS boolean expression |
 | `expand` | `expand: "expression"` | Must return an array of objects |
 | `window` | `mappings: {script: "..."}` + `options: {count: N}` | |
-| `project` | `mappings: {col: ~}` | Listed columns are kept |
-| `drop` | `mappings: {col: ~}` | Listed columns are removed |
-| `rename` | `mappings: {OldName: NewName}` | |
+| `project` | `options: {project: "a,b", drop: "c", rename: "Old:New"}` | One transformer covers all three; `--export-job` emits this shape and its round-trip is tested |
 
 ### Environment variable and secret interpolation
 

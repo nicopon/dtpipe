@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using DtPipe.Core.Attributes;
@@ -25,6 +26,7 @@ namespace DtPipe.Tests.Unit.Cli;
 public class McpAdapterHelpTests
 {
     private readonly IMcpHelpService _help;
+    private readonly string[] _readerNames;
 
     public McpAdapterHelpTests()
     {
@@ -47,6 +49,7 @@ public class McpAdapterHelpTests
             .ToList();
 
         _help = new McpHelpService(readers, Array.Empty<IDataTransformerFactory>(), writers);
+        _readerNames = readers.Select(r => r.ComponentName).ToArray();
 
         _roles = readers.Select(r => (Adapter: r.ComponentName, Role: "Reader", r.OptionsType))
             .Concat(writers.Select(w => (Adapter: w.ComponentName, Role: "Writer", w.OptionsType)))
@@ -193,5 +196,36 @@ public class McpAdapterHelpTests
 
         Assert.Contains("not exhaustive", help);
         Assert.Contains("Driver:", help);
+    }
+
+    /// <summary>
+    /// A name that is not there is answered with the names that are. A recorded session shows a
+    /// model asking for transformer help on a reader it had just read in the list-providers output,
+    /// being told only that it did not exist, and spending three more turns rediscovering where it
+    /// had seen the name.
+    /// </summary>
+    [Fact]
+    public void An_Unknown_Adapter_Is_Answered_With_The_Ones_That_Exist()
+    {
+        var json = JsonDocument.Parse(_help.GetAdapterHelp("no-such-adapter")).RootElement;
+
+        Assert.Contains("Unknown adapter", json.GetProperty("error").GetString());
+        var available = json.GetProperty("available").EnumerateArray().Select(e => e.GetString()).ToArray();
+        Assert.NotEmpty(available);
+        Assert.Equal(_readerNames.OrderBy(n => n, System.StringComparer.Ordinal).First(), available.First());
+    }
+
+    /// <summary>
+    /// list-providers hands back readers, transformers and writers in one payload, so a name is
+    /// easily taken away without its role. Saying which role it does have closes the loop in one
+    /// call instead of several.
+    /// </summary>
+    [Fact]
+    public void A_Name_That_Exists_In_Another_Role_Is_Told_So()
+    {
+        var json = JsonDocument.Parse(_help.GetTransformerHelp(_readerNames[0])).RootElement;
+
+        Assert.Contains("Unknown transformer", json.GetProperty("error").GetString());
+        Assert.Contains("is a adapter", json.GetProperty("hint").GetString());
     }
 }

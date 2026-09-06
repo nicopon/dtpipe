@@ -6,7 +6,7 @@ namespace DtPipe.Transformers.Arrow.Fake;
 
 [Description("Anonymizes columns using fakers (Bogus library).")]
 [ComponentHelp(
-	usageNotes: "In YAML, use the 'mappings' section where key is the column name and value is the Bogus dataset.method path (e.g. 'name.fullName', 'internet.email').",
+	usageNotes: "In YAML, use the 'mappings' section where key is the column name and value is the Bogus dataset.method path (e.g. 'name.fullName', 'internet.email'). A mapping whose column does not exist in the incoming rows CREATES it: this transformer both anonymizes existing columns and synthesizes new ones, so a source carrying no columns of interest is still enough to produce a fully populated table.",
 	examples: new[] {
 		"transformers:\n  - type: fake\n    mappings:\n      Name: name.fullName\n      Email: internet.email\n    options:\n      fake-locale: fr\n      fake-seed: 42"
 	})]

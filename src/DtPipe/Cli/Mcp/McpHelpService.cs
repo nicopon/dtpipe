@@ -119,7 +119,7 @@ public class McpHelpService : IMcpHelpService
         var writers = _writerFactories.Where(f => f.ComponentName.Equals(normalized, StringComparison.OrdinalIgnoreCase)).ToList();
 
         if (readers.Count == 0 && writers.Count == 0)
-            return JsonSerializer.Serialize(new { error = $"Unknown adapter '{adapterName}'." });
+            return Unknown("adapter", adapterName, AdapterNames(), TransformerNames(), "transformer");
 
         using var sw = new StringWriter();
         sw.WriteLine($"ADAPTER: {normalized}");
@@ -176,6 +176,45 @@ public class McpHelpService : IMcpHelpService
         return sw.ToString();
     }
 
+    /// <summary>
+    /// The answer to a name that is not there. It names what is, and — when the name exists as
+    /// another kind of component — says so.
+    ///
+    /// <para>
+    /// Both matter, and a recorded session shows why. <c>list-providers</c> returns readers,
+    /// transformers and writers in one payload, so a caller reading it takes a name away without
+    /// its role; one asked for transformer help on <c>generate</c>, which is a reader, was told
+    /// only that it did not exist, and spent three more turns rediscovering where it had seen the
+    /// name. An error that closes the door without pointing at one costs more calls than it saves.
+    /// </para>
+    /// </summary>
+    private static string Unknown(string kind, string requested,
+        IReadOnlyList<string> available, IReadOnlyList<string> elsewhere, string elsewhereKind)
+    {
+        var normalized = requested.Trim().ToLowerInvariant();
+        var otherRole = elsewhere.Any(n => n.Equals(normalized, StringComparison.OrdinalIgnoreCase))
+            ? $"'{normalized}' is a {elsewhereKind}, not a {kind}."
+            : null;
+
+        return JsonSerializer.Serialize(new
+        {
+            error = $"Unknown {kind} '{requested}'.",
+            hint = otherRole,
+            available,
+        });
+    }
+
+    private IReadOnlyList<string> AdapterNames() =>
+        _readerFactories.Select(f => f.ComponentName)
+            .Concat(_writerFactories.Select(f => f.ComponentName))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.Ordinal).ToList();
+
+    private IReadOnlyList<string> TransformerNames() =>
+        _transformerFactories.Select(f => f.ComponentName)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.Ordinal).ToList();
+
     public string GetTransformerHelp(string transformerName)
     {
         if (string.IsNullOrWhiteSpace(transformerName))
@@ -184,7 +223,7 @@ public class McpHelpService : IMcpHelpService
         var normalized = transformerName.Trim().ToLowerInvariant();
         var factory = _transformerFactories.FirstOrDefault(f => f.ComponentName.Equals(normalized, StringComparison.OrdinalIgnoreCase));
         if (factory == null)
-            return JsonSerializer.Serialize(new { error = $"Unknown transformer '{transformerName}'." });
+            return Unknown("transformer", transformerName, TransformerNames(), AdapterNames(), "adapter");
 
         using var sw = new StringWriter();
         sw.WriteLine($"TRANSFORMER: {normalized}");

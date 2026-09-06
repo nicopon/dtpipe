@@ -43,11 +43,19 @@ internal static class StepDetailContent
                 sections.Add(new(DetailSectionKind.Usage, "usage", string.Join("  ·  ", parts)));
         }
 
-        if (!string.IsNullOrWhiteSpace(step.Reasoning))
-            sections.Add(new(DetailSectionKind.Reasoning, "reasoning / intent",
-                Clip(step.Reasoning, expanded ? 0 : 4)));
+        // A model with a reasoning channel puts its intent there and leaves the content to the tool
+        // call, so the reasoning slot would otherwise be empty for every step of such a turn. Those
+        // models are the common case now; the surface reads whichever channel the model used rather
+        // than asking it to write in both.
+        var narration = !string.IsNullOrWhiteSpace(step.Reasoning) ? step.Reasoning : step.Thinking;
+        bool narrationIsThinking = string.IsNullOrWhiteSpace(step.Reasoning);
 
-        if (expanded && !string.IsNullOrWhiteSpace(step.Thinking))
+        if (!string.IsNullOrWhiteSpace(narration))
+            sections.Add(new(DetailSectionKind.Reasoning, "reasoning / intent",
+                Clip(narration!, expanded ? 0 : 4)));
+
+        // Only a second time when it is genuinely a second text.
+        if (expanded && !narrationIsThinking && !string.IsNullOrWhiteSpace(step.Thinking))
             sections.Add(new(DetailSectionKind.ChainOfThought, "chain of thought",
                 Clip(step.Thinking!, 0)));
 

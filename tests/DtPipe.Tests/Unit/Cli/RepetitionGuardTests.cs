@@ -100,8 +100,8 @@ public class RepetitionGuardTests
     [Fact]
     public void The_Same_Phrase_Echoed_Across_Thinking_And_Content_Is_Not_A_Loop()
     {
-        // The system prompt asks the model to restate its INTENT/REASONING in `content` right after
-        // reasoning it in `thinking`. Feeding both into one guard flagged a normal turn as stuck.
+        // A model that reasons in `thinking` and then restates the same conclusion in `content` is
+        // working normally. Feeding both into one guard flagged such a turn as stuck.
         var acc = new AccumulatingLlmStreamObserver(new NullObserver());
 
         foreach (var w in Chunks("I need to ask the user for the target filename before I can finish the plan. "))

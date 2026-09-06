@@ -155,6 +155,41 @@ dtpipe --job anonymize_users.yaml
 
 DtPipe uses [Bogus](https://github.com/bchavez/Bogus) for fake data generation. Syntax: `--fake "Column:Dataset.Method"` (e.g. `name.fullName`, `internet.email`, `finance.iban`, `date.past`, `random.uuid`). See the [Bogus documentation](https://github.com/bchavez/Bogus) for the full dataset/method reference.
 
+### Scenario: build a realistic dataset from nothing
+
+`--fake` creates a column the incoming rows do not have, so a source that carries no
+columns at all is enough to produce a fully populated table. `generate:N` is that source:
+it emits N rows of a single `GenerateIndex` column, and every other column comes from the
+mapping.
+
+```yaml
+customers:
+  input: "generate:2000"
+  output: "sqlite:Data Source=shop.db"
+  provider-options:
+    sqlite-writer:
+      table: "customers"
+      strategy: "Recreate"
+  transformers:
+    - type: fake
+      mappings:
+        first_name: name.firstName
+        last_name: name.lastName
+        email: internet.email
+        city: address.city
+        signed_up: date.past
+      options:
+        seed: 42
+```
+
+`generate:2000` supplies nothing but a `GenerateIndex` column; every other column in the
+resulting table exists because a mapping named it.
+
+One branch per table fills a whole database in a single job: repeat the block under another
+alias, with its own row count and its own writer table. `seed` makes the set reproducible,
+and `compute` gives a column whose value derives from another rather than being drawn at
+random.
+
 ---
 
 ## Schema Transformations
