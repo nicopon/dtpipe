@@ -47,6 +47,8 @@ internal sealed class TuiScreen
     private readonly TextField _input;
 
     private bool _expanded;
+    private string _renderedTitle = string.Empty;
+    private string _renderedStatus = string.Empty;
     private string _title;
     private string _posture;
     private string? _verdict;
@@ -153,11 +155,23 @@ internal sealed class TuiScreen
     /// Pushes the latest state into the panels. The snapshots are already detached copies; this
     /// only touches views, on the UI thread. <paramref name="fluxLines"/> is null when the
     /// transcript has not moved since the last tick, so the flux list is left alone.
+    ///
+    /// <para>
+    /// Every write here is conditional, because the repaint timer runs ten times a second for the
+    /// whole session while most of what it reads is standing still: between turns the clock is
+    /// stopped and the token count is final, so the title and the status band would otherwise be
+    /// handed the very same string ten times a second with nothing on screen having changed. The
+    /// panels each guard themselves the same way.
+    /// </para>
     /// </summary>
     public void Sync(IReadOnlyList<TrajectoryStep> steps, IReadOnlyList<string>? fluxLines, string clock, string meter)
     {
-        _window.Title = meter.Length > 0 ? $"{_title}    {clock} · {meter}" : $"{_title}    {clock}";
-        _status.Text = _verdict ?? _posture;
+        var title = meter.Length > 0 ? $"{_title}    {clock} · {meter}" : $"{_title}    {clock}";
+        if (title != _renderedTitle) _window.Title = _renderedTitle = title;
+
+        var status = _verdict ?? _posture;
+        if (status != _renderedStatus) _status.Text = _renderedStatus = status;
+
         _steps.Update(steps);            // rebuilds only when the step count moved
         if (fluxLines is not null) _flux.Update(fluxLines);
     }
