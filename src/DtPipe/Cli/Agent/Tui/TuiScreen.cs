@@ -11,8 +11,9 @@ namespace DtPipe.Cli.Agent.Tui;
 
 /// <summary>
 /// The full-screen layout: a steps list on the left, its detail and the plan/DAG stacked on the
-/// right, the running transcript in a band below, then a status line, a focus-aware hint bar and
-/// the input line. Tab moves between the focusable panels; the detail panel mirrors the steps
+/// right, the running transcript in a band below, then a status line, the input line, and a
+/// focus-aware hint bar along the bottom edge — the hints stay under the line they describe.
+/// Tab moves between the focusable panels; the detail panel mirrors the steps
 /// selection, the plan panel tracks the plan the agent is building. <see cref="Sync"/> and
 /// <see cref="SyncPlan"/> are the update points, driven by the repaint timer on the UI thread
 /// from thread-safe snapshots.
@@ -61,12 +62,12 @@ internal sealed class TuiScreen
         _window = new Window { Title = chrome.Title };
 
         _status = new Label { X = 0, Y = Pos.AnchorEnd(3), Width = Dim.Fill(), Text = chrome.Status };
-        _hints = new Label { X = 0, Y = Pos.AnchorEnd(2), Width = Dim.Fill(), Text = HintsFor(null) };
-        _caret = new Label { X = 0, Y = Pos.AnchorEnd(1), Width = 2, Text = "› " };
+        _caret = new Label { X = 0, Y = Pos.AnchorEnd(2), Width = 2, Text = "› " };
+        _hints = new Label { X = 0, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), Text = HintsFor(null) };
         _input = new TextField
         {
             X = 2,
-            Y = Pos.AnchorEnd(1),
+            Y = Pos.AnchorEnd(2),
             Width = Dim.Fill(),
             Height = 1,
             CanFocus = true,
