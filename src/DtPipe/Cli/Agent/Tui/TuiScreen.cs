@@ -232,6 +232,7 @@ internal sealed class TuiScreen
     {
         if (_steps.LiveSelected && _live is { } live) _detail.ShowLive(live);
         else _detail.Show(_steps.Selected, _expanded);
+
         _plan.Frame.Visible = !_expanded;
         _detail.Widen(_expanded);
     }
@@ -295,10 +296,16 @@ internal sealed class TuiScreen
                 border.LineStyle = Owns(frame, focused) ? LineStyle.Heavy : LineStyle.Rounded;
     }
 
-    /// <summary>Steps → the agent's words → the input line → Steps.</summary>
+    /// <summary>
+    /// Steps → Detail → Plan → the agent's words → the input line → Steps. A hidden plan is skipped:
+    /// the detail takes its column while expanded, and handing the focus to a view nobody can see
+    /// would look like the ring had simply stopped.
+    /// </summary>
     private View NextInRing(View? focused)
     {
-        if (Owns(_steps.Frame, focused)) return _exchange.FocusTarget;
+        if (Owns(_steps.Frame, focused)) return _detail.FocusTarget;
+        if (_detail.FocusTarget.HasFocus) return _plan.Frame.Visible ? _plan.FocusTarget : _exchange.FocusTarget;
+        if (_plan.FocusTarget.HasFocus) return _exchange.FocusTarget;
         if (_exchange.FocusTarget.HasFocus) return _input;
         return _steps.FocusTarget;
     }
@@ -328,6 +335,7 @@ internal sealed class TuiScreen
     internal int? SelectedStepIteration => _steps.Selected?.Iteration;
     internal void FocusExchange() => _exchange.FocusTarget.SetFocus();
     internal void FocusSteps() => _steps.FocusTarget.SetFocus();
+    internal void FocusPlan() => _plan.FocusTarget.SetFocus();
 
     private string HintsFor(View? focused)
     {
@@ -335,9 +343,10 @@ internal sealed class TuiScreen
             return $"enter run · {SessionCommand.Hint} · esc stop · ^C quit";
 
         bool onSteps = Owns(_steps.Frame, focused);
-        bool onAgent = _exchange.FocusTarget.HasFocus;
         return onSteps ? "↑↓ select · e/b errors · →/enter expand · ⇥ panel · esc stop"
-             : onAgent ? "↑↓ scroll the agent's words · ⇥ panel · esc stop"
+             : _detail.FocusTarget.HasFocus ? "↑↓ scroll the step · ⇥ panel · esc stop"
+             : _plan.FocusTarget.HasFocus ? "↑↓ scroll the plan · ⇥ panel · esc stop"
+             : _exchange.FocusTarget.HasFocus ? "↑↓ scroll the agent's words · ⇥ panel · esc stop"
              : "⇥ panel · esc stop · ^C quit";
     }
 

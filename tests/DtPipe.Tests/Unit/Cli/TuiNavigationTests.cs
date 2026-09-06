@@ -151,14 +151,42 @@ public class TuiNavigationTests
             (_, s) => Assert.False(s.Expanded));
     }
 
+    /// <summary>
+    /// Tab walks every panel, and each one words the hint bar for itself. The plan is in the ring
+    /// only while it is on screen — expanding the detail takes its column.
+    /// </summary>
     [Fact(Timeout = 30000)]
-    public async Task Tab_Moves_Focus_Between_The_Panels_And_The_Hints_Follow()
+    public async Task Tab_Walks_Every_Panel_And_The_Hints_Follow()
     {
         await Drive(FourSteps(),
             (_, s) => s.FocusSteps(),
-            (_, s) => Assert.Contains("e/b errors", s.HintsText),   // steps hints
+            (_, s) => Assert.Contains("e/b errors", s.HintsText),
             (app, _) => app.InjectKey(Key.Tab),
-            (_, s) => Assert.Contains("scroll", s.HintsText));      // flux hints
+            (_, s) => Assert.Contains("scroll the step", s.HintsText),
+            (app, _) => app.InjectKey(Key.Tab),
+            (_, s) => Assert.Contains("scroll the plan", s.HintsText),
+            (app, _) => app.InjectKey(Key.Tab),
+            (_, s) => Assert.Contains("scroll the agent", s.HintsText),
+            (app, _) => app.InjectKey(Key.Tab),
+            (_, s) => Assert.Contains("enter run", s.HintsText));
+    }
+
+    /// <summary>
+    /// The plan leaves the ring when the expanded detail takes its column, and the focus leaves with
+    /// it rather than sitting on a view nobody can see.
+    /// </summary>
+    [Fact(Timeout = 30000)]
+    public async Task An_Expanded_Detail_Takes_The_Plan_Out_Of_The_Ring()
+    {
+        await Drive(FourSteps(),
+            (_, s) => s.FocusPlan(),
+            (_, s) => Assert.Contains("scroll the plan", s.HintsText),
+            (_, s) => s.FocusSteps(),
+            (app, _) => app.InjectKey(Key.CursorRight),        // expand: the plan stands down
+            (_, s) => Assert.False(s.PlanVisible),
+            (app, _) => app.InjectKey(Key.Tab),                // steps → detail
+            (app, _) => app.InjectKey(Key.Tab),               // detail → the agent, skipping the plan
+            (_, s) => Assert.Contains("scroll the agent", s.HintsText));
     }
 
     /// <summary>
@@ -277,6 +305,8 @@ public class TuiNavigationTests
                 Assert.Equal(LineStyle.Rounded, s.BorderOfExchange);
             },
             (app, _) => app.InjectKey(Key.Tab),
+            (app, _) => app.InjectKey(Key.Tab),
+            (app, _) => app.InjectKey(Key.Tab),          // steps → detail → plan → the agent
             (_, s) =>
             {
                 Assert.Equal(LineStyle.Rounded, s.BorderOfSteps);

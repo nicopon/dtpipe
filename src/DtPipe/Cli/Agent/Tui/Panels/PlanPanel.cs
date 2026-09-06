@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using DtPipe.Cli.Agent;
 using Terminal.Gui.ViewBase;
@@ -19,7 +20,7 @@ namespace DtPipe.Cli.Agent.Tui.Panels;
 internal sealed class PlanPanel
 {
     private readonly FrameView _frame;
-    private readonly Label _body;
+    private readonly ListView _body;
     private string _rendered = string.Empty;
 
     public PlanPanel()
@@ -31,14 +32,16 @@ internal sealed class PlanPanel
             Y = 0,
             Width = Dim.Percent(TuiScreen.PlanShare),
             Height = Dim.Fill(TuiScreen.BottomChrome),
-            CanFocus = false,
+            CanFocus = true,
         };
-        _body = new Label { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(), Text = string.Empty };
+        _body = new ListView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(), CanFocus = true };
+        _body.SetSource(new ObservableCollection<string>());
         _frame.Add(_body);
     }
 
     public View Frame => _frame;
-    internal string BodyText => _body.Text;
+    public View FocusTarget => _body;
+    internal string BodyText => _rendered;
 
     /// <summary>Refreshes the panel from <paramref name="plan"/>; a no-op when nothing changed.</summary>
     public void Update(PlanView plan)
@@ -48,6 +51,6 @@ internal sealed class PlanPanel
         if (text == _rendered) return;
 
         _rendered = text;
-        _body.Text = text;
+        _body.SetSource(new ObservableCollection<string>(lines));
     }
 }

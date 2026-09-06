@@ -1,4 +1,7 @@
+using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Drawing;
 using System.Linq;
 using System.Text;
 using DtPipe.Cli.Agent;
@@ -20,6 +23,12 @@ namespace DtPipe.Cli.Agent.Tui.Panels;
 /// </para>
 ///
 /// <para>
+/// The body scrolls and takes the focus, because the running step's text grows while it is being
+/// read: <see cref="FollowGate"/> chases the newest line until someone starts reading, then holds
+/// their place for as long as they keep moving through it.
+/// </para>
+///
+/// <para>
 /// It runs up to the plan panel beside it, and takes that space too once expanded — the expanded
 /// detail is the one thing on this surface that genuinely wants the width, and the plan is the one
 /// panel that can stand down for it.
@@ -28,10 +37,13 @@ namespace DtPipe.Cli.Agent.Tui.Panels;
 internal sealed class DetailPanel
 {
     private readonly FrameView _frame;
-    private readonly Label _body;
-
+    private readonly ListView _body;
     private readonly View _plan;
+    private FollowGate _gate;
+    private bool _syncing;
     private string _renderedTitle = string.Empty;
+    private string _rendered = string.Empty;
+    private IReadOnlyList<string> _lines = Array.Empty<string>();
 
     /// <param name="plan">The panel to the right; the detail runs up to it while collapsed.</param>
     public DetailPanel(View plan)
@@ -44,14 +56,27 @@ internal sealed class DetailPanel
             Y = 0,
             Width = Dim.Fill(plan),
             Height = Dim.Fill(TuiScreen.BottomChrome),
-            CanFocus = false,
+            CanFocus = true,
         };
-        _body = new Label { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(), Text = string.Empty };
+        _body = new ListView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(), CanFocus = true };
+        _body.SetSource(new ObservableCollection<string>());
+
+        _body.HasFocusChanged += (_, _) =>
+        {
+            if (_body.HasFocus) _gate.Focused(Now); else _gate.Blurred();
+        };
+        // Viewport movement is the one signal a wheel, a drag and an arrow key all produce.
+        _body.ViewportChanged += (_, _) => { if (!_syncing) _gate.Interacted(Now); };
+        _body.ValueChanged += (_, _) => { if (!_syncing) _gate.Interacted(Now); };
+
         _frame.Add(_body);
     }
 
     public View Frame => _frame;
-    internal string BodyText => _body.Text;
+    public View FocusTarget => _body;
+    internal string BodyText => string.Join('\n', _lines);
+
+    private static long Now => Environment.TickCount64;
 
     /// <summary>Takes the plan panel's column as well, or gives it back.</summary>
     public void Widen(bool wide) => _frame.Width = wide ? Dim.Fill() : Dim.Fill(_plan);
@@ -64,8 +89,7 @@ internal sealed class DetailPanel
     public void ShowLive(LiveStep step)
     {
         Retitle($"Detail — step {step.Iteration} (running)");
-        var body = step.Text.Length > 0 ? step.Text : "(the model has not said anything yet)";
-        if (_body.Text != body) _body.Text = body;
+        Write(step.Text.Length > 0 ? step.Text : "(the model has not said anything yet)");
     }
 
     /// <summary>Renders <paramref name="step"/> at the given expand state, or a placeholder when null.</summary>
@@ -73,7 +97,7 @@ internal sealed class DetailPanel
     {
         if (step is null)
         {
-            if (_body.Text != "(no step selected yet)") _body.Text = "(no step selected yet)";
+            Write("(no step selected yet)");
             Retitle("Detail");
             return;
         }
@@ -94,8 +118,45 @@ internal sealed class DetailPanel
         if (sb.Length == 0) sb.Append("(nothing recorded for this step)");
         if (!expanded) sb.Append("\n\n→ / Enter to expand");
 
-        var text = sb.ToString();
-        if (_body.Text != text) _body.Text = text;
+        Write(sb.ToString());
+    }
+
+    /// <summary>
+    /// Replaces the body, then either chases its newest line or puts the reader back where they
+    /// were. The list is rebuilt from a fresh source, which resets both the selection and the scroll
+    /// offset — without the restore, a held body would snap to the top on every arriving token.
+    /// </summary>
+    private void Write(string text)
+    {
+        if (text == _rendered) return;
+        _rendered = text;
+        _lines = text.Replace("\r", string.Empty).Split('\n');
+
+        bool follow = _gate.ShouldFollow(Now);
+        int? held = _body.SelectedItem;
+        int offset = _body.Viewport.Y;
+
+        _syncing = true;
+        try
+        {
+            _body.SetSource(new ObservableCollection<string>(_lines));
+            if (_lines.Count == 0) return;
+
+            if (follow)
+            {
+                _body.SelectedItem = _lines.Count - 1;
+                _body.EnsureSelectedItemVisible();
+                return;
+            }
+
+            if (held is { } index) _body.SelectedItem = Math.Min(index, _lines.Count - 1);
+            var viewport = _body.Viewport;
+            _body.Viewport = new Rectangle(viewport.X, Math.Min(offset, Math.Max(0, _lines.Count - 1)), viewport.Width, viewport.Height);
+        }
+        finally
+        {
+            _syncing = false;
+        }
     }
 
     private void Retitle(string title)
