@@ -430,6 +430,32 @@ Hardening invariants (F1–F7, fail-closed, non-negotiable — details in `REFER
 - **F6 Single YAML path** — `yamlContent` tool arg is sole plan source.
 - **F7 CI gate** — `tests/agentic/analyze-traces.sh --gate` fails on unhandled MCP errors or a failed mission. Its variance criterion applies only when `variance_results.jsonl` holds real replication data; the shipped missions drive their own bash ReAct loop against `dtpipe mcp` and never invoke `dtpipe agent --repeat`, so they produce none. Never record a placeholder variance to fill the file — a criterion that cannot fire is worse than an absent one. The authoritative signal for F1–F7 is the deterministic unit suite (`Unit/Cli/Agent*Tests`, `Unit/Cli/Mcp*Tests`), not this gate.
 
+### The session trace is a diagnostic, and must not become a gate
+
+`dtpipe agent --trace <path>` (or `$DTPIPE_AGENT_TRACE`) records a real session as JSON lines. It
+carries what the model was **given** as well as what it did: the role prompt the mode selected and
+the tool catalogue as it was offered, alongside every step, each turn's verdict and any `/note` the
+person watching left. Those first two are the whole point — a wrong tool call cannot be told apart
+from a tool that was never offered, or one whose description sent the model elsewhere, without
+them.
+
+**Nothing reads its verdict, and nothing should.** A fail-closed criterion over an LLM loop needs an
+attributable signal, which is the open question `voie4_durcissement_agentique.md` reserves for its
+own conversation; a diagnostic read by a person is useful without being decidable. That distinction
+is what makes the trace shippable while the gate is not.
+
+Arguments and results are recorded as the model saw them, past `ConnectionStringSanitizer` — the
+repo's single convention for this. It blanks the shapes it recognises (`password=`, credentials in a
+URI) and nothing else, and the file's own header says so rather than claiming the file is safe.
+
+> Eight defects were read off traces this way and fixed, all of them in what dtpipe tells a model
+> about itself rather than in the model: a tool name matched on its separator, an unknown name
+> answered without naming what exists, a raw .NET exception handed over as an error, a capability
+> (`--fake` creates a mapped column that is missing) that no help stated, and documentation that did
+> not match the binary. The method is: read the trace, verify the claim in the source, run the fix
+> before publishing it. `.notes/02_Roadmap_and_Perspectives/voie4_diagnostic_ux.md` part II is the
+> record.
+
 Mandatory MCP directives:
 1. No hardcoded help — reflect on `[Description]`/`[ComponentHelp]`. *(Not enforced: nothing tests `GetGeneralHelp`. The adapter and transformer lists it prints are derived from the factories, so they cannot drift — but a hardcoded block added elsewhere would pass unnoticed.)*
 2. In-memory execution via `JobFileParser` + `JobService.ExecutePipelineAsync()` — no temp files/shell proxies. *(Not enforced — discipline.)*
