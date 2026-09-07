@@ -448,13 +448,13 @@ Arguments and results are recorded as the model saw them, past `ConnectionString
 repo's single convention for this. It blanks the shapes it recognises (`password=`, credentials in a
 URI) and nothing else, and the file's own header says so rather than claiming the file is safe.
 
-> Eight defects were read off traces this way and fixed, all of them in what dtpipe tells a model
-> about itself rather than in the model: a tool name matched on its separator, an unknown name
-> answered without naming what exists, a raw .NET exception handed over as an error, a capability
-> (`--fake` creates a mapped column that is missing) that no help stated, and documentation that did
-> not match the binary. The method is: read the trace, verify the claim in the source, run the fix
-> before publishing it. `.notes/02_Roadmap_and_Perspectives/voie4_diagnostic_ux.md` part II is the
-> record.
+> Defects read off traces this way have so far all been in what dtpipe tells a model about itself,
+> or in the harness around it, rather than in the model: a tool name matched on its separator, an
+> unknown name answered without naming what exists, a raw .NET exception handed over as an error, a
+> capability (`--fake` creates a mapped column that is missing) that no help stated, a catalogue
+> listing names with no descriptions, an option key published in an example that bound nothing, and
+> the repetition guard stopping a legitimate multi-branch YAML job. The method is: read the trace,
+> verify the claim in the source, run the fix before publishing it.
 
 Mandatory MCP directives:
 1. No hardcoded help — reflect on `[Description]`/`[ComponentHelp]`. *(Not enforced: nothing tests `GetGeneralHelp`. The adapter and transformer lists it prints are derived from the factories, so they cannot drift — but a hardcoded block added elsewhere would pass unnoticed.)*

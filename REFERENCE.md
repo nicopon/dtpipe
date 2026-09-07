@@ -546,16 +546,22 @@ branch-name:
 
 | Transformer | YAML key structure | Notes |
 |:---|:---|:---|
-| `fake` | `mappings: {col: dataset.method}` + `options: {locale, seed, seed-column, deterministic, skip-null}` | A mapped column that the incoming rows do not have is **created** |
+| `fake` | `mappings: {col: dataset.method}` + `options: {locale, seed, seed-column, seed-row, skip-null}` | A mapped column that the incoming rows do not have is **created** |
 | `null` | `mappings: {col: ~}` | Value is ignored |
 | `overwrite` | `mappings: {col: value}` | |
 | `mask` | `mappings: {col: pattern}` | `#` keeps, any other char replaces |
 | `format` | `mappings: {col: "{A} {B}"}` | .NET composite format |
-| `compute` | `compute: ["col:expression", ...]` | JS expressions list |
-| `filter` | `filter: "expression"` | JS boolean expression |
-| `expand` | `expand: "expression"` | Must return an array of objects |
-| `window` | `mappings: {script: "..."}` + `options: {count: N}` | |
+| `compute` | `mappings: {col: expression}` | JS expression per column |
+| `filter` | `mappings: {expression: ~}` | JS boolean expression, carried by the key |
+| `expand` | `mappings: {expression: ~}` | Carried by the key; must return an array of objects |
+| `window` | `options: {count: N, script: "..."}` | Mapping values are taken as script lines when no `script` option is set |
 | `project` | `options: {project: "a,b", drop: "c", rename: "Old:New"}` | One transformer covers all three; `--export-job` emits this shape and its round-trip is tested |
+
+An `options:` key is the **property name**, which is not always the command-line flag: the compute
+output type is `--compute-types` on the command line and `compute-types` in YAML, but DuckDB's init
+SQL is `--duck-init` and `init-sql`. A key that matches no property is refused by name, and names
+the one that would have worked. `--export-job` emits the binding form and its round-trip is tested,
+so it is the authority on any shape this table leaves open.
 
 ### Environment variable and secret interpolation
 

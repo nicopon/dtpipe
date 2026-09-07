@@ -190,6 +190,57 @@ alias, with its own row count and its own writer table. `seed` makes the set rep
 and `compute` gives a column whose value derives from another rather than being drawn at
 random.
 
+#### Keys that join across those tables
+
+`fake` draws each value independently, so it cannot produce a key that matches a row in another
+table. Two other pieces cover that:
+
+- `generate:N` numbers its rows `0..N-1` in `GenerateIndex`. Rename it and the table has a
+  primary key: `project` with `rename: "GenerateIndex:customer_id"`.
+- `compute` evaluates JavaScript, so a foreign key is a bounded draw over the row count of the
+  table it points at: `Math.floor(Math.random() * 2000)`.
+
+```yaml
+customers:
+  input: "generate:2000"
+  output: "sqlite:Data Source=shoe.db"
+  provider-options:
+    sqlite-writer:
+      table: "customers"
+      strategy: "Recreate"
+  transformers:
+    - type: fake
+      mappings:
+        first_name: name.firstName
+        city: address.city
+      options:
+        locale: fr
+        seed: 7
+    - type: project
+      options:
+        rename: "GenerateIndex:customer_id"
+
+sales:
+  input: "generate:8000"
+  output: "sqlite:Data Source=shoe.db"
+  provider-options:
+    sqlite-writer:
+      table: "sales"
+      strategy: "Recreate"
+  transformers:
+    - type: compute
+      mappings:
+        customer_id: "Math.floor(Math.random() * 2000)"
+        quantity: "1 + Math.floor(Math.random() * 3)"
+    - type: project
+      options:
+        rename: "GenerateIndex:sale_id"
+```
+
+`SELECT * FROM sales JOIN customers USING (customer_id)` returns rows: every `customer_id` drawn
+is in range because the bound is the other branch's row count. The bound is yours to keep in
+step — nothing checks it.
+
 ---
 
 ## Schema Transformations
