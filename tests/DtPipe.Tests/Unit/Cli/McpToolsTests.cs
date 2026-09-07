@@ -174,6 +174,84 @@ main:
     }
 
     /// <summary>
+    /// The validator must not be weaker than the engine. A recorded session invented a job shaped
+    /// 'job: / sources: / transformers:' — which parses, because 'job' reads as a branch alias —
+    /// was told it was valid, and spent the rest of its turn re-reading a plan the engine refuses
+    /// before a row moves. A model with no error to act on has nothing to correct.
+    /// </summary>
+    [Fact]
+    public void ValidateYamlJob_A_Branch_With_Nothing_To_Read_Is_Refused()
+    {
+        var yaml = @"
+job:
+  sources:
+    - alias: customers
+      type: generate
+      rows: 2000
+";
+        var json = _tools.ValidateYamlJob(yaml);
+
+        Assert.Contains("\"success\": false", json);
+        Assert.Contains("nothing to read", json);
+        Assert.Contains("job", json);
+    }
+
+    /// <summary>A branch fed by another through a stream processor reads through it, not through an
+    /// 'input:' — refusing that would break every DAG the cookbook shows. The processor is stubbed
+    /// here rather than pulled in: what the rule consults is whether one claims the branch.</summary>
+    [Fact]
+    public void ValidateYamlJob_A_Branch_Reading_Through_A_Processor_Is_Accepted()
+    {
+        var yaml = @"
+src:
+  input: ""csv:in.csv""
+joined:
+  from: ""src""
+  provider-options:
+    sql:
+      query: ""SELECT * FROM src""
+  output: ""csv:out.csv""
+";
+        Assert.Contains("\"success\": true", WithSqlProcessor().ValidateYamlJob(yaml));
+    }
+
+    /// <summary>The same tools, in a deployment where a stream processor named 'sql' is registered.</summary>
+    private DtPipeMcpTools WithSqlProcessor()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(new DtPipe.Core.Options.OptionsRegistry(
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<DtPipe.Core.Options.OptionsRegistry>.Instance));
+        services.AddSingleton<IEnumerable<IStreamTransformerFactory>>(new IStreamTransformerFactory[] { new SqlProcessorStub() });
+        var readers = new IStreamReaderFactory[] { new DummyReaderFactory() };
+        services.AddSingleton<IEnumerable<IStreamReaderFactory>>(readers);
+        services.AddSingleton<IEnumerable<IDataWriterFactory>>(Array.Empty<IDataWriterFactory>());
+
+        return new DtPipeMcpTools(readers, Array.Empty<IDataTransformerFactory>(),
+            Array.Empty<IDataWriterFactory>(), _helpService, services.BuildServiceProvider());
+    }
+
+    /// <summary>Claims a branch the way the real processors do — by its provider-options key. Only
+    /// that question is asked during validation; nothing is ever created.</summary>
+    private sealed class SqlProcessorStub : IStreamTransformerFactory
+    {
+        public string ComponentName => "sql";
+        public string Category => "Stream Processors";
+        public bool RequiresArrowChannels => true;
+        public int MinStreams => 1;
+        public int MaxStreams => 1;
+        public int MinLookups => 0;
+        public int MaxLookups => int.MaxValue;
+        public IReadOnlyList<(string Flag, bool IsBoolean)> CliTriggerFlags => new[] { ("--sql", false) };
+        public bool IsApplicable(string[] branchArgs) => false;
+
+        public IStreamTransformer Create(string[] branchArgs, DtPipe.Core.Pipelines.Dag.BranchChannelContext ctx, IServiceProvider sp)
+            => throw new NotSupportedException("validation never creates one");
+
+        public IStreamTransformer CreateFromJob(DtPipe.Core.Models.JobDefinition job, DtPipe.Core.Pipelines.Dag.BranchChannelContext ctx, IServiceProvider sp)
+            => throw new NotSupportedException("validation never creates one");
+    }
+
+    /// <summary>
     /// A provider-option key that binds to nothing must reach the caller. It is otherwise the only
     /// mistake with no trace: the engine warns on stderr, which never enters a tool result, so the
     /// run keeps the default and reports success. The validator is where a caller comes to be told

@@ -34,10 +34,45 @@ public partial class DtPipeMcpTools
 
         var streamTransformerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamTransformerFactory>>();
         var errors = PipelineValidator.Validate(build.Dag, build.Jobs, streamTransformerFactories).ToList();
+        errors.AddRange(BranchesWithNothingToRead(build.Dag, build.Jobs, streamTransformerFactories));
         errors.AddRange(ValidateJobTransformers(build.Jobs));
         errors.AddRange(ValidateProviderOptionKeys(build.Jobs));
 
         return new YamlParseResult(build.Jobs, build.Dag, errors);
+    }
+
+    /// <summary>
+    /// The rule the engine applies when it resolves a reader: a branch reads from its
+    /// <c>input:</c>, or from a stream processor claiming it. Neither means the run stops before a
+    /// row moves.
+    ///
+    /// <para>
+    /// It lives on the YAML-content path only. A branch built from command-line arguments carries
+    /// its input elsewhere — a channel endpoint, a resumed checkpoint — so asking the same question
+    /// of <see cref="PipelineValidator"/>, which both paths share, refused pipelines that run.
+    /// </para>
+    ///
+    /// <para>
+    /// A recorded session invented a job shaped <c>job: / sources: / transformers:</c>, was told it
+    /// was valid, and spent the rest of its turn re-reading a plan that could never run: a model
+    /// with no error to act on has nothing to correct.
+    /// </para>
+    /// </summary>
+    private static IEnumerable<string> BranchesWithNothingToRead(
+        JobDagDefinition dag, Dictionary<string, JobDefinition> jobs, IEnumerable<IStreamTransformerFactory> processorFactories)
+    {
+        var factories = processorFactories.ToList();
+
+        foreach (var branch in dag.Branches)
+        {
+            if (!jobs.TryGetValue(branch.Alias, out var job)) continue;
+            if (!string.IsNullOrWhiteSpace(job.Input)) continue;
+            if (factories.Any(f => f.IsApplicable(job))) continue;
+
+            yield return $"Branch '{branch.Alias}' has nothing to read: it has no 'input:' and no stream "
+                       + "processor. Give it an 'input:', or — when it combines other branches through "
+                       + "'from'/'ref' — a query under 'provider-options -> sql -> query'.";
+        }
     }
 
 

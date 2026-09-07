@@ -38,8 +38,24 @@ internal static class ToolError
         if (yaml is null) return ConnectionStringSanitizer.Sanitize(reason);
 
         var at = yaml.Start.Line > 0 ? $" (at line {yaml.Start.Line}, column {yaml.Start.Column})" : string.Empty;
-        return ConnectionStringSanitizer.Sanitize($"{reason}{at}");
+        return ConnectionStringSanitizer.Sanitize($"{reason}{at}{ShapeHint(reason)}");
     }
+
+    /// <summary>
+    /// A deserializer that cannot make a branch out of what it was given says so in terms of the
+    /// type it wanted, which names nothing a caller can act on. The one missing fact is what the
+    /// top level of a job is; the shape itself stays in 'help', which owns it.
+    ///
+    /// <para>
+    /// A recorded session answered this error by inventing a 'job:' wrapper, which parsed as a
+    /// branch of that name and validated — the wrong guess cost the rest of the turn.
+    /// </para>
+    /// </summary>
+    private static string ShapeHint(string reason) =>
+        reason.Contains("JobDefinition", StringComparison.Ordinal)
+            ? ". The top level of a job is a map of branch aliases (e.g. 'main:'), each with its own "
+              + "'input:', 'output:', 'transformers:' and 'provider-options:'. Call 'help' for the full shape."
+            : string.Empty;
 
     private static YamlException? Find(Exception? ex)
     {

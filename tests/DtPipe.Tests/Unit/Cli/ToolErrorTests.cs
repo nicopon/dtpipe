@@ -39,6 +39,26 @@ public class ToolErrorTests
         Assert.DoesNotContain("Version=", described);
     }
 
+    /// <summary>
+    /// The deserializer names the type it wanted, which tells a caller nothing to act on. A later
+    /// trace shows the cost: the model answered this error by inventing a 'job:' wrapper, which
+    /// parsed as a branch of that name and validated, and the wrong guess cost the rest of the turn.
+    /// </summary>
+    [Fact]
+    public void A_Job_Shape_Failure_Says_What_The_Top_Level_Is()
+    {
+        var described = ToolError.Describe(Yaml(
+            "No node deserializer was able to deserialize the node into type JobDefinition"));
+
+        Assert.Contains("map of branch aliases", described);
+        Assert.Contains("'help'", described);
+    }
+
+    /// <summary>The hint belongs to that one failure; every other message stays as it is.</summary>
+    [Fact]
+    public void Another_Failure_Gets_No_Shape_Hint()
+        => Assert.DoesNotContain("branch aliases", ToolError.Describe(Yaml("mapping values are not allowed here")));
+
     [Fact]
     public void A_Plain_Failure_Keeps_Its_Message()
     {
