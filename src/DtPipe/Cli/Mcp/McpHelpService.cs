@@ -33,8 +33,11 @@ public class McpHelpService : IMcpHelpService
         using var sw = new StringWriter();
         sw.WriteLine("dtpipe — Data streaming & anonymization engine");
         sw.WriteLine();
+        // No execution tool is named here. The planner role is told 'execute-yaml-job' is
+        // unavailable to it and must not be looked for (F1), and this text is served to it too:
+        // naming the tool made the first call of a planning session contradict its own role prompt.
         sw.WriteLine("YAML JOB USAGE (RECOMMENDED FOR AGENTS):");
-        sw.WriteLine("  To run pipelines, execute a YAML job configuration using the 'execute-yaml-job' tool.");
+        sw.WriteLine("  A pipeline is described as a YAML job, and every tool taking a pipeline takes one.");
         sw.WriteLine("  This is highly structured and completely avoids command-line quoting or shell escaping issues.");
         sw.WriteLine();
         sw.WriteLine("YAML JOB STRUCTURE:");

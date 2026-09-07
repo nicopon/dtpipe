@@ -177,6 +177,15 @@ public class McpAdapterHelpTests
         Assert.Equal("reader, writer", listed["sqlite"].Roles);
     }
 
+    /// <summary>
+    /// The general help is served to the planner role, which is told 'execute-yaml-job' is
+    /// unavailable and must not be looked for. Naming it here made the first call of a planning
+    /// session contradict the role prompt that had just been read.
+    /// </summary>
+    [Fact]
+    public void The_General_Help_Names_No_Execution_Tool()
+        => Assert.DoesNotContain("execute-yaml-job", _help.GetGeneralHelp());
+
     /// <summary>The general help carries the same listing, so the two cannot drift.</summary>
     [Fact]
     public void The_General_Help_Carries_The_Descriptions_Too()
