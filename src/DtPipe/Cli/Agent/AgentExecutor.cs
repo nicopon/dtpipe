@@ -253,7 +253,7 @@ public class AgentExecutor
         _turnClock.Stop();
         int shownIterations = turnIterations <= maxIterations ? turnIterations : maxIterations;
         var summary = new TurnSummaryModel(primary.Outcome, shownIterations, _turnClock.Elapsed, toolCounts, primary.Question,
-            ProducedPlan: !string.IsNullOrWhiteSpace(primary.Yaml), Tokens: _turnTokens);
+            ProducedPlan: !string.IsNullOrWhiteSpace(primary.Yaml), Tokens: _turnTokens, ClosingWords: primary.ClosingWords);
         _trace?.Verdict(summary);
         return summary;
      }
@@ -265,7 +265,8 @@ public class AgentExecutor
         int Iterations,
         Dictionary<string, int> ToolCounts,
         TurnOutcome Outcome,
-        AgentQuestion? Question = null);
+        AgentQuestion? Question = null,
+        string? ClosingWords = null);
 
     private async Task<PlanningLoopResult> RunPlanningLoopAsync(
         List<ChatMessage> messages,
@@ -305,6 +306,7 @@ public class AgentExecutor
         bool success = false;
         int turnIterations = 1;
         AgentQuestion? pendingQuestion = null;
+        string? closingWords = null;
         // The value that stands if the loop exits by its own condition — the iteration budget ran
         // out before any explicit break set an outcome.
         var turnOutcome = TurnOutcome.MaxIterationsReached;
@@ -387,13 +389,19 @@ public class AgentExecutor
              {
                 if (!string.IsNullOrWhiteSpace(lastMsg.Content))
                  {
-                     // The model finished the turn with a deliberate textual answer.
+                     // The model finished the turn with a deliberate textual answer — unless that
+                     // answer IS the ask-user call, written out instead of emitted. A weak model
+                     // does that, and the turn then reported success while the agent waited for a
+                     // reply nobody had been asked for.
                     if (renderTui)
                         view!.AgentResponse(lastMsg.Content!);
                     if (recordTrajectory)
                         Trajectory.AddStep(currentStepNum, currentReasoning ?? "Finished response.", thinking: currentThinking, usage: currentUsage);
-                    success = true;
-                    turnOutcome = TurnOutcome.Succeeded;
+
+                    closingWords = lastMsg.Content;
+                    pendingQuestion = AgentQuestion.FromTextualCall(lastMsg.Content);
+                    success = pendingQuestion is null;
+                    turnOutcome = pendingQuestion is null ? TurnOutcome.Succeeded : TurnOutcome.AwaitingUserInput;
                  }
                 else
                  {
@@ -514,7 +522,7 @@ public class AgentExecutor
         if (recordTrajectory && !string.IsNullOrWhiteSpace(producedYaml))
             Trajectory.LastGeneratedYaml = producedYaml;
 
-        return new PlanningLoopResult(success, producedYaml, turnIterations, toolCounts, turnOutcome, pendingQuestion);
+        return new PlanningLoopResult(success, producedYaml, turnIterations, toolCounts, turnOutcome, pendingQuestion, closingWords);
      }
 
     /// <summary>

@@ -75,6 +75,65 @@ public sealed record AgentQuestion
     }
 
     /// <summary>
+    /// The terminator a model wrote into its reply instead of calling the tool, or null when the
+    /// reply is an answer like any other.
+    ///
+    /// <para>
+    /// Recognised only when the <b>whole</b> reply is that call — a bare JSON object carrying a
+    /// <c>question</c>, or a <c>{"name": "ask-user", "arguments": {…}}</c> envelope, optionally
+    /// inside one fenced block. A reply that merely contains such an object somewhere is an answer
+    /// that quotes one, and reclassifying it would turn a delivered plan into a pending question.
+    /// </para>
+    ///
+    /// <para>
+    /// A question written as prose is deliberately NOT recognised: no rule separates it from a
+    /// direct answer that happens to end in a question mark, and a wrong verdict costs more than
+    /// the missed one. This reads what the model meant to emit as a call and failed to.
+    /// </para>
+    /// </summary>
+    public static AgentQuestion? FromTextualCall(string? content)
+    {
+        var text = Unfence(content);
+        if (text.Length == 0 || text[0] != '{') return null;
+
+        JsonElement root;
+        try
+        {
+            using var doc = JsonDocument.Parse(text);
+            root = doc.RootElement.Clone();
+        }
+        catch (JsonException) { return null; }
+
+        if (root.ValueKind != JsonValueKind.Object) return null;
+
+        // A tool-call envelope: unwrap it to the arguments the call would have carried.
+        if (root.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String
+            && McpToolProvider.IsAskUser(name.GetString())
+            && root.TryGetProperty("arguments", out var args) && args.ValueKind == JsonValueKind.Object)
+            root = args;
+
+        return root.TryGetProperty("question", out var q) && q.ValueKind == JsonValueKind.String
+               && !string.IsNullOrWhiteSpace(q.GetString())
+            ? From(root)
+            : null;
+    }
+
+    /// <summary>The reply with one enclosing markdown fence removed, trimmed. A fence around
+    /// anything else is left alone — this only unwraps a reply that is nothing but one block.</summary>
+    private static string Unfence(string? content)
+    {
+        var text = (content ?? string.Empty).Trim();
+        if (!text.StartsWith("```", StringComparison.Ordinal) || !text.EndsWith("```", StringComparison.Ordinal))
+            return text;
+
+        var firstBreak = text.IndexOf('\n');
+        if (firstBreak < 0) return text;
+
+        var inner = text[(firstBreak + 1)..^3].Trim();
+        return inner.Contains("```", StringComparison.Ordinal) ? text : inner;
+    }
+
+    /// <summary>
     /// The choice a display line refers to, or null when that line belongs to the question itself.
     /// The choices are the trailing lines, so a question that spans several lines maps correctly —
     /// counting forward from the top would misread every option after the first newline.

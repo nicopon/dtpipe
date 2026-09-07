@@ -37,6 +37,10 @@ public enum TurnStatus
 /// <param name="ProducedPlan">True when <em>this</em> turn produced plan YAML. Drives the
 /// plan-mode "next steps" line, which speaks to the plan this turn made — not one an earlier turn
 /// left on the trajectory.</param>
+/// <param name="ClosingWords">What the model said to finish the turn, when it finished with words
+/// rather than a tool call. The exchange band shows it: a turn that ended on a sentence used to
+/// leave a tally in its place, so the sentence — a question among them — was only reachable by
+/// selecting the last step.</param>
 /// <param name="Tokens">Completion tokens the turn consumed, as the provider reported them. Zero
 /// when no provider reported any. The scrollback table does not print it — its rows are a fixed
 /// contract — so this reaches the reader through the full-screen exchange only.</param>
@@ -47,7 +51,8 @@ public sealed record TurnSummaryModel(
     IReadOnlyDictionary<string, int> ToolCounts,
     AgentQuestion? Question = null,
     bool ProducedPlan = false,
-    long Tokens = 0)
+    long Tokens = 0,
+    string? ClosingWords = null)
 {
     public TurnStatus Status => Outcome switch
     {

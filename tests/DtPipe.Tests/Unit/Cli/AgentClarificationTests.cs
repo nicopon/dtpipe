@@ -128,6 +128,62 @@ public class AgentClarificationTests
             question.Lines());
     }
 
+    private static LlmResponse TextOnly(string content)
+        => new(new ChatMessage("assistant", content), true, null);
+
+    /// <summary>
+    /// A weak model writes the ask-user call into its reply instead of emitting it. The turn then
+    /// reported success while the agent waited for a reply nobody had been asked for — and the
+    /// choices it offered went nowhere.
+    /// </summary>
+    [Fact]
+    public async Task An_Ask_User_Call_Written_As_Text_Still_Ends_The_Turn_Awaiting_Input()
+    {
+        var (executor, _, _) = Build(new QueuedLlmClient(TextOnly(
+            """{"question": "Which column keys the upsert?", "options": ["order_id", "customer_id"]}""")));
+
+        int code = await executor.RunTurnAsync("mission", "m", "http://x", new AgentOptions(), maxIterations: 5);
+
+        Assert.Equal(1, code);
+        Assert.Equal(TurnOutcome.AwaitingUserInput, executor.LastTurnOutcome);
+        Assert.Equal("Which column keys the upsert?", executor.PendingQuestion?.Text);
+        Assert.Equal(new[] { "order_id", "customer_id" }, executor.PendingQuestion?.Options);
+    }
+
+    /// <summary>The same call inside a fenced block, which is how a model that formats its reply
+    /// writes it.</summary>
+    [Fact]
+    public async Task A_Fenced_Ask_User_Call_Is_Recognised_Too()
+    {
+        var (executor, _, _) = Build(new QueuedLlmClient(TextOnly(
+            "```json\n{\"name\": \"ask-user\", \"arguments\": {\"question\": \"Which file?\"}}\n```")));
+
+        await executor.RunTurnAsync("mission", "m", "http://x", new AgentOptions(), maxIterations: 5);
+
+        Assert.Equal(TurnOutcome.AwaitingUserInput, executor.LastTurnOutcome);
+        Assert.Equal("Which file?", executor.PendingQuestion?.Text);
+    }
+
+    /// <summary>
+    /// A direct answer is a success at zero tools and zero plan — "which adapters do you have?"
+    /// is answered, not asked. Only a reply that IS the call is reclassified; a reply that merely
+    /// quotes one, or asks in prose, stays a finished turn.
+    /// </summary>
+    [Theory]
+    [InlineData("dtpipe has 18 adapters: arrow, csv, duck…")]
+    [InlineData("Here is an example call: {\"question\": \"what?\"} — you would send that as a tool call.")]
+    [InlineData("**Question**\nQuel nom de fichier SQLite souhaitez-vous utiliser ?")]
+    public async Task A_Reply_That_Is_Not_The_Call_Stays_A_Finished_Turn(string content)
+    {
+        var (executor, _, _) = Build(new QueuedLlmClient(TextOnly(content)));
+
+        int code = await executor.RunTurnAsync("mission", "m", "http://x", new AgentOptions(), maxIterations: 5);
+
+        Assert.Equal(0, code);
+        Assert.Equal(TurnOutcome.Succeeded, executor.LastTurnOutcome);
+        Assert.Null(executor.PendingQuestion);
+    }
+
     /// <summary>
     /// A surface picks a choice by the line the reader is standing on. The choices are the trailing
     /// lines, so a question that spans several lines still maps: counting forward from the top

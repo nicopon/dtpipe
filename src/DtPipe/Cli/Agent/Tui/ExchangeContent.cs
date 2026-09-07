@@ -89,10 +89,15 @@ internal static class ExchangeContent
                     : "QUESTION — answer below",
                 summary.Question?.ToString() ?? string.Empty),
 
+            // The model's own last sentence, when it had one, over the tally: a turn that ended on
+            // words left them reachable only by selecting the last step, so a question asked in
+            // prose sat under a headline reading DONE.
             TurnStatus.Completed => new Exchange(
                 ExchangeKind.Done,
                 hasPlan ? "DONE — /exec to run it, or ask for a change" : "DONE — ask for anything else",
-                Tally(summary)),
+                string.IsNullOrWhiteSpace(summary.ClosingWords)
+                    ? Tally(summary)
+                    : $"{summary.ClosingWords!.Trim()}\n\n{Tally(summary)}"),
 
             _ => new Exchange(
                 ExchangeKind.Stopped,

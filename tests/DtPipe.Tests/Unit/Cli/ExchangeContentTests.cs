@@ -31,6 +31,32 @@ public class ExchangeContentTests
     }
 
     /// <summary>
+    /// A turn that ended on a sentence shows the sentence. It used to leave a tally in its place,
+    /// so a question asked in prose — which a weak model does instead of calling the tool — sat
+    /// under a headline reading DONE, reachable only by selecting the last step.
+    /// </summary>
+    [Fact]
+    public void A_Finished_Turn_Shows_What_The_Agent_Said()
+    {
+        var summary = new TurnSummaryModel(TurnOutcome.Succeeded, 2, TimeSpan.FromSeconds(4), TwoTools,
+            ClosingWords: "  Quel nom de fichier SQLite souhaitez-vous utiliser ?  ");
+
+        var exchange = ExchangeContent.Of(summary, hasPlan: false);
+
+        Assert.StartsWith("Quel nom de fichier SQLite souhaitez-vous utiliser ?", exchange.Body);
+        Assert.Contains("2 steps", exchange.Body);
+    }
+
+    /// <summary>A turn that ended on a tool call has no closing words; the tally is what there is.</summary>
+    [Fact]
+    public void A_Finished_Turn_Without_Words_Still_Shows_Its_Tally()
+    {
+        var summary = new TurnSummaryModel(TurnOutcome.Succeeded, 2, TimeSpan.FromSeconds(4), TwoTools);
+
+        Assert.StartsWith("2 steps", ExchangeContent.Of(summary, hasPlan: false).Body);
+    }
+
+    /// <summary>
     /// The choices the model offered belong to the question. The band's body is a scrollable list,
     /// so each choice is its own line and the headline says an answer may be one of them.
     /// </summary>
