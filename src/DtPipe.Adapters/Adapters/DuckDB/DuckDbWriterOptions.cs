@@ -7,9 +7,9 @@ namespace DtPipe.Adapters.DuckDB;
 
 [Description("Writes data to a DuckDB database file.")]
 [ComponentHelp(
-	usageNotes: "Connection string (minimum keys, not exhaustive): 'duck:path/to/file.duckdb'. Driver: DuckDB.NET — its option set defines the full key vocabulary. In YAML, use 'provider-options' -> 'duck' (or 'duck-writer' when the same job also reads from DuckDB) to set table, strategy, and 'duck-init' — SQL run once after connection open, before schema initialization (e.g. to load extensions or set cloud storage credentials).",
+	usageNotes: "Connection string (minimum keys, not exhaustive): 'duck:path/to/file.duckdb'. Driver: DuckDB.NET — its option set defines the full key vocabulary. In YAML, use 'provider-options' -> 'duck' (or 'duck-writer' when the same job also reads from DuckDB) to set table, strategy, and 'init-sql' — SQL run once after connection open, before schema initialization (e.g. to load extensions or set cloud storage credentials). The YAML keys are the ones listed above, which are not always the CLI flag: the init SQL is '--duck-init' on the command line and 'init-sql' in YAML.",
 	examples: new[] {
-		"main:\n  input: \"<adapter-prefix>:<source>\"\n  output: \"duck:warehouse.duckdb\"\n  provider-options:\n    duck-writer:\n      table: \"sales\"\n      strategy: \"Append\"\n      duck-init: \"LOAD azure; SET azure_storage_connection_string='${{keyring://azure-init}}';\""
+		"main:\n  input: \"<adapter-prefix>:<source>\"\n  output: \"duck:warehouse.duckdb\"\n  provider-options:\n    duck-writer:\n      table: \"sales\"\n      strategy: \"Append\"\n      init-sql: \"LOAD azure; SET azure_storage_connection_string='${{keyring://azure-init}}';\""
 	})]
 public class DuckDbWriterOptions : DbWriterOptions, IProviderOptions, ITableAwareOptions, IVariantAwareOptions
 {

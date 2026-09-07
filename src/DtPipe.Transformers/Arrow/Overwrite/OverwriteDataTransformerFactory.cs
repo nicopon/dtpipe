@@ -36,22 +36,14 @@ public class OverwriteDataTransformerFactory : TransformerFactoryBase<OverwriteO
 		return new OverwriteDataTransformer(options);
 	}
 
-	public override IDataTransformer? CreateFromYamlConfig(TransformerConfig config)
+	public override object? CreateOptionsFromYaml(TransformerConfig config)
 	{
-		if (config.Mappings == null || config.Mappings.Count == 0)
-			return null;
+		// An empty value means the key already carries its own separator ("Col=Val").
+		if (config.Mappings is not { Count: > 0 }) return null;
 
-		// Convert YAML dict to "COLUMN:value" or "COLUMN=value" format
-		// If value is empty, just return key (which might already contain the separator like "Col=Val")
-		var mappings = config.Mappings.Select(kvp => string.IsNullOrEmpty(kvp.Value) ? kvp.Key : $"{kvp.Key}:{kvp.Value}");
-
-		var skipNull = false;
-		if (config.Options != null && config.Options.TryGetValue("skip-null", out var snStr))
+		return new DtPipe.Transformers.Arrow.Overwrite.OverwriteOptions
 		{
-			bool.TryParse(snStr, out skipNull);
-		}
-
-		var options = new DtPipe.Transformers.Arrow.Overwrite.OverwriteOptions { Overwrite = mappings, SkipNull = skipNull };
-		return new OverwriteDataTransformer(options);
+			Overwrite = config.Mappings.Select(kvp => string.IsNullOrEmpty(kvp.Value) ? kvp.Key : $"{kvp.Key}:{kvp.Value}").ToList()
+		};
 	}
 }

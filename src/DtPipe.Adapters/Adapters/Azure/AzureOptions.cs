@@ -31,7 +31,7 @@ public abstract class AzureConnectionOptions
 [ComponentHelp(
 	usageNotes: "Connection string is an object URI such as 'azure://container/prefix/data.parquet'. The format is resolved from the extension (.parquet, .csv, .tsv, .json, .jsonl, .ndjson). In YAML, use 'provider-options' -> 'azure'.",
 	examples: new[] {
-		"main:\n  input: \"azure://reports/daily/2026-08-26.parquet\"\n  provider-options:\n    azure:\n      azure-connection-string: \"${{keyring://azure-conn}}\"\n  output: \"<adapter-prefix>:<target>\""
+		"main:\n  input: \"azure://reports/daily/2026-08-26.parquet\"\n  provider-options:\n    azure:\n      connection-string: \"${{keyring://azure-conn}}\"\n  output: \"<adapter-prefix>:<target>\""
 	})]
 public class AzureReaderOptions : AzureConnectionOptions, IProviderOptions
 {
@@ -43,7 +43,7 @@ public class AzureReaderOptions : AzureConnectionOptions, IProviderOptions
 [ComponentHelp(
 	usageNotes: "Connection string is an object URI such as 'azure://container/prefix/data.parquet'. Writing replaces the target blob: object storage has no append or upsert, so --strategy does not apply.",
 	examples: new[] {
-		"main:\n  input: \"<adapter-prefix>:<source>\"\n  output: \"azure://reports/daily/2026-08-26.parquet\"\n  provider-options:\n    azure:\n      azure-connection-string: \"${{keyring://azure-conn}}\""
+		"main:\n  input: \"<adapter-prefix>:<source>\"\n  output: \"azure://reports/daily/2026-08-26.parquet\"\n  provider-options:\n    azure:\n      connection-string: \"${{keyring://azure-conn}}\""
 	})]
 public class AzureWriterOptions : AzureConnectionOptions, IProviderOptions
 {

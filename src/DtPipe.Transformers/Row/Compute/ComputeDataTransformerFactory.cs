@@ -72,29 +72,14 @@ public class ComputeDataTransformerFactory : TransformerFactoryBase<ComputeOptio
 		return new ComputeDataTransformer(options with { Compute = resolved }, _jsEngineProvider);
 	}
 
-	public override IDataTransformer? CreateFromYamlConfig(TransformerConfig config)
+	public override object? CreateOptionsFromYaml(TransformerConfig config)
 	{
-		var mappings = new List<string>();
+		// Raw values; @file resolution happens in CreateFromTypedOptions.
+		var mappings = (config.Mappings ?? [])
+			.Select(kvp => string.IsNullOrEmpty(kvp.Value) ? kvp.Key : $"{kvp.Key}:{kvp.Value}")
+			.ToList();
 
-		if (config.Mappings != null && config.Mappings.Any())
-		{
-			foreach (var kvp in config.Mappings)
-			{
-				// Raw values; @file resolution happens in CreateFromOptions
-				if (string.IsNullOrEmpty(kvp.Value))
-					mappings.Add(kvp.Key);
-				else
-					mappings.Add($"{kvp.Key}:{kvp.Value}");
-			}
-		}
-
-		if (!mappings.Any()) return null;
-
-		bool skipNull = false;
-		if (config.Options != null && config.Options.TryGetValue("skip-null", out var snStr))
-			bool.TryParse(snStr, out skipNull);
-
-		return CreateFromOptions(new ComputeOptions { Compute = mappings, SkipNull = skipNull });
+		return mappings.Count == 0 ? null : new ComputeOptions { Compute = mappings };
 	}
 
 	private string ResolveScriptContent(string script)

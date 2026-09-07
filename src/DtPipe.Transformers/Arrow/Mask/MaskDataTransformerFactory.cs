@@ -35,23 +35,14 @@ public class MaskDataTransformerFactory : TransformerFactoryBase<MaskOptions>
 		return new MaskDataTransformer(options);
 	}
 
-	public override IDataTransformer? CreateFromYamlConfig(TransformerConfig config)
+	public override object? CreateOptionsFromYaml(TransformerConfig config)
 	{
-		// For mask transformer, Mappings are key=column, value=pattern
-		if (config.Mappings == null || config.Mappings.Count == 0)
-			return null;
+		// A mapping is column → pattern; an empty value means the default mask for that column.
+		if (config.Mappings is not { Count: > 0 }) return null;
 
-		// For mask transformer, Mappings are key=column, value=pattern
-		// If value is empty, use key only (implies default mask)
-		var mappings = config.Mappings.Select(kvp => string.IsNullOrEmpty(kvp.Value) ? kvp.Key : $"{kvp.Key}:{kvp.Value}").ToList();
-
-		var skipNull = false;
-		if (config.Options != null && config.Options.TryGetValue("skip-null", out var snStr))
+		return new MaskOptions
 		{
-			bool.TryParse(snStr, out skipNull);
-		}
-
-		var options = new MaskOptions { Mask = mappings, SkipNull = skipNull };
-		return new MaskDataTransformer(options);
+			Mask = config.Mappings.Select(kvp => string.IsNullOrEmpty(kvp.Value) ? kvp.Key : $"{kvp.Key}:{kvp.Value}").ToList()
+		};
 	}
 }

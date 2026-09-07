@@ -388,7 +388,7 @@ public class LinearPipelineService
         {
             var factory = factories.FirstOrDefault(f => f.ComponentName.Equals(config.Type, StringComparison.OrdinalIgnoreCase));
             if (factory == null) throw new InvalidOperationException($"Transformer factory '{config.Type}' not found.");
-            var transformer = factory.CreateFromYamlConfig(config);
+            var transformer = Pipeline.YamlTransformerBuilder.Build(factory, config);
             if (transformer != null) pipeline.Add(transformer);
         }
 

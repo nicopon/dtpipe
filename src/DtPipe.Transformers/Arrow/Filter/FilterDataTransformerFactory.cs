@@ -55,30 +55,15 @@ public class FilterDataTransformerFactory : TransformerFactoryBase<FilterOptions
 		return new FilterDataTransformer(options, _jsEngineProvider);
 	}
 
-	public override IDataTransformer? CreateFromYamlConfig(TransformerConfig config)
+	public override object? CreateOptionsFromYaml(TransformerConfig config)
 	{
-		var filters = new List<string>();
+		// A mapping is an expression, split on its first ':' by the CLI export — rejoin it.
+		var filters = (config.Mappings ?? [])
+			.Select(kvp => string.IsNullOrEmpty(kvp.Value) ? kvp.Key : $"{kvp.Key}:{kvp.Value}")
+			.ToArray();
 
-		if (config.Mappings != null)
-		{
-			// In Filter, Mappings might be used as "COL: expression" or just expressions in key/value
-			// But usually it's healthier to use config.Mappings if it's a dict
-			foreach (var kvp in config.Mappings)
-			{
-				if (string.IsNullOrEmpty(kvp.Value))
-					filters.Add(kvp.Key);
-				else
-					filters.Add($"{kvp.Key}:{kvp.Value}");
-			}
-		}
-
-		if (config.Options != null && config.Options.TryGetValue("filter", out var f))
-		{
-			filters.Add(f);
-		}
-
-		if (filters.Count == 0) return null;
-
-		return new FilterDataTransformer(new DtPipe.Transformers.Arrow.Filter.FilterOptions { Filters = filters.ToArray() }, _jsEngineProvider);
+		return filters.Length == 0
+			? null
+			: new DtPipe.Transformers.Arrow.Filter.FilterOptions { Filters = filters };
 	}
 }

@@ -154,8 +154,7 @@ public static class OptionBinder
             var key = kvp.Key;
             var value = kvp.Value;
 
-            var normalizedKey = NormalizeKey(key);
-            var prop = properties.FirstOrDefault(p => NormalizeKey(p.Name) == normalizedKey);
+            var prop = FindProperty(properties, key);
 
             if (prop == null)
             {
@@ -185,6 +184,20 @@ public static class OptionBinder
 
     private static string NormalizeKey(string key)
         => key.Replace("-", "").Replace("_", "").ToLowerInvariant();
+
+    private static PropertyInfo? FindProperty(IEnumerable<PropertyInfo> properties, string key)
+    {
+        var normalized = NormalizeKey(key);
+        return properties.FirstOrDefault(p => NormalizeKey(p.Name) == normalized);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="key"/> names an option of <paramref name="optionsType"/> that would
+    /// bind. Documented examples are checked against this: a key published in a component's help
+    /// that binds nothing teaches a call that silently keeps every default.
+    /// </summary>
+    public static bool Binds(Type optionsType, string key)
+        => FindProperty(optionsType.GetProperties(BindingFlags.Public | BindingFlags.Instance).Where(p => p.CanWrite), key) is not null;
 
     /// <summary>
     /// Why <paramref name="key"/> did not bind, and what to write instead.
@@ -267,8 +280,32 @@ public static class OptionBinder
         if (underlyingType == typeof(TimeSpan))
             return TimeSpan.Parse(stringValue);
 
+        // A YAML transformer option arrives flattened to a string (TransformerConfig.Options is
+        // Dictionary<string,string>), so the two shapes the CLI already accepts must be readable
+        // from one: a comma-separated list, and comma-separated "key:value" pairs.
+        if (underlyingType == typeof(Dictionary<string, string>))
+        {
+            var pairs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in SplitList(stringValue))
+            {
+                var sep = entry.IndexOf(':');
+                if (sep > 0) pairs[entry[..sep].Trim()] = entry[(sep + 1)..].Trim();
+                else pairs[entry] = string.Empty;
+            }
+            return pairs;
+        }
+
+        if (GetElementType(underlyingType) == typeof(string))
+        {
+            var items = SplitList(stringValue);
+            return underlyingType.IsArray ? items.ToArray() : items;
+        }
+
         return Convert.ChangeType(value, underlyingType);
     }
+
+    private static List<string> SplitList(string value)
+        => value.Split(',').Select(v => v.Trim()).Where(v => v.Length > 0).ToList();
 
     // ─────────────────────────────────────────────────────────────────────────
     // Required enforcement + value assignment

@@ -120,6 +120,10 @@ public static class OptionObjectExporter
             case string s: return s;
             case bool b: return b ? "true" : "false";
             case Enum e: return e.ToString();
+            // Before the IEnumerable case: a dictionary enumerates as KeyValuePair, whose ToString
+            // renders "[k, v]" — a shape nothing reads back, so the option was lost on re-import.
+            case System.Collections.IDictionary map:
+                return string.Join(",", map.Keys.Cast<object?>().Select(k => $"{k}:{map[k!]}"));
             case System.Collections.IEnumerable list when value is not string:
                 var items = list.Cast<object?>().Select(v => v?.ToString() ?? "");
                 return string.Join(",", items);

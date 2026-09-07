@@ -55,25 +55,16 @@ public class ExpandDataTransformerFactory : TransformerFactoryBase<ExpandOptions
  		return new ExpandDataTransformer(new DtPipe.Transformers.Row.Expand.ExpandOptions { Expand = expands.ToArray() }, _jsEngineProvider);
 	}
 
-	public override IDataTransformer? CreateFromYamlConfig(TransformerConfig config)
+	public override object? CreateOptionsFromYaml(TransformerConfig config)
 	{
-		var expands = new List<string>();
+		// BuildTransformerConfigsFromCli splits the expression on its first ':' into a key:value
+		// mapping. Rejoin it to recover the original expression.
+		var expands = (config.Mappings ?? [])
+			.Select(kvp => string.IsNullOrEmpty(kvp.Value) ? kvp.Key : $"{kvp.Key}:{kvp.Value}")
+			.ToArray();
 
-		if (config.Mappings != null)
-		{
-			foreach (var kvp in config.Mappings)
-			{
-				// BuildTransformerConfigsFromCli splits the expression on the first ':' into a key:value mapping.
-				// Reconstruct the original expression by joining with ':' (same pattern as FilterDataTransformerFactory).
-				if (string.IsNullOrEmpty(kvp.Value))
-					expands.Add(kvp.Key);
-				else
-					expands.Add($"{kvp.Key}:{kvp.Value}");
-			}
-		}
-
-		if (expands.Count == 0) return null;
-
-		return new ExpandDataTransformer(new DtPipe.Transformers.Row.Expand.ExpandOptions { Expand = expands.ToArray() }, _jsEngineProvider);
+		return expands.Length == 0
+			? null
+			: new DtPipe.Transformers.Row.Expand.ExpandOptions { Expand = expands };
 	}
 }

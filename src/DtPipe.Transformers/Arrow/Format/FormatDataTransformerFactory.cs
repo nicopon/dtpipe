@@ -36,21 +36,10 @@ public class FormatDataTransformerFactory : TransformerFactoryBase<FormatOptions
 		return new FormatDataTransformer(options);
 	}
 
-	public override IDataTransformer? CreateFromYamlConfig(TransformerConfig config)
+	public override object? CreateOptionsFromYaml(TransformerConfig config)
 	{
-		if (config.Mappings == null || config.Mappings.Count == 0)
-			return null;
+		if (config.Mappings is not { Count: > 0 }) return null;
 
-		// Convert YAML dict to "COLUMN:template" format
-		var mappings = config.Mappings.Select(kvp => $"{kvp.Key}:{kvp.Value}");
-
-		var skipNull = false;
-		if (config.Options != null && config.Options.TryGetValue("skip-null", out var snStr))
-		{
-			bool.TryParse(snStr, out skipNull);
-		}
-
-		var options = new FormatOptions { Format = mappings, SkipNull = skipNull };
-		return new FormatDataTransformer(options);
+		return new FormatOptions { Format = config.Mappings.Select(kvp => $"{kvp.Key}:{kvp.Value}").ToList() };
 	}
 }

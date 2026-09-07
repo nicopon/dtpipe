@@ -8,10 +8,14 @@ using DtPipe.Core.Security;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
+using DtPipe.Tests.Helpers;
 using Xunit;
 
 namespace DtPipe.Tests.Unit.Cli;
 
+// ValidatePathSafety resolves against the process working directory, which another class in this
+// collection moves into a temp folder while it runs.
+[Collection(SessionStateCollection.Name)]
 public class McpToolsTests
 {
     private readonly ServiceProvider _serviceProvider;

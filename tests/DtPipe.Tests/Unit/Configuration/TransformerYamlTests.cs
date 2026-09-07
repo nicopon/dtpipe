@@ -53,7 +53,7 @@ public class TransformerYamlTests
             var factory = _sp.GetRequiredService<IEnumerable<DtPipe.Core.Abstractions.IDataTransformerFactory>>()
                 .OfType<WindowDataTransformerFactory>().First();
             
-            var transformer = factory.CreateFromYamlConfig(config) as WindowDataTransformer;
+            var transformer = DtPipe.Cli.Pipeline.YamlTransformerBuilder.Build(factory, config) as WindowDataTransformer;
 
             // Assert
             transformer.Should().NotBeNull();
@@ -93,7 +93,7 @@ public class TransformerYamlTests
             var factory = _sp.GetRequiredService<IEnumerable<DtPipe.Core.Abstractions.IDataTransformerFactory>>()
                 .OfType<WindowDataTransformerFactory>().First();
             
-            var transformer = factory.CreateFromYamlConfig(config) as WindowDataTransformer;
+            var transformer = DtPipe.Cli.Pipeline.YamlTransformerBuilder.Build(factory, config) as WindowDataTransformer;
 
             // Assert
             var options = typeof(WindowDataTransformer).GetField("_options", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
@@ -129,7 +129,7 @@ public class TransformerYamlTests
             var factory = _sp.GetRequiredService<IEnumerable<DtPipe.Core.Abstractions.IDataTransformerFactory>>()
                 .OfType<ComputeDataTransformerFactory>().First();
             
-            var transformer = factory.CreateFromYamlConfig(config) as ComputeDataTransformer;
+            var transformer = DtPipe.Cli.Pipeline.YamlTransformerBuilder.Build(factory, config) as ComputeDataTransformer;
 
             // Assert
             var options = typeof(ComputeDataTransformer).GetField("_options", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)

@@ -41,5 +41,5 @@ public abstract class TransformerFactoryBase<TOptions> : IDataTransformerFactory
 
     public abstract IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration);
 
-    public abstract IDataTransformer? CreateFromYamlConfig(TransformerConfig config);
+    public abstract object? CreateOptionsFromYaml(TransformerConfig config);
 }

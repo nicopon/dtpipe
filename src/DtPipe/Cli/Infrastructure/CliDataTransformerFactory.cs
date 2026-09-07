@@ -24,8 +24,8 @@ public class CliDataTransformerFactory : IDataTransformerFactory, ICliContributo
 	public IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration)
 		=> _inner.CreateFromConfiguration(configuration);
 
-	public IDataTransformer? CreateFromYamlConfig(TransformerConfig config)
-		=> _inner.CreateFromYamlConfig(config);
+	public object? CreateOptionsFromYaml(TransformerConfig config)
+		=> _inner.CreateOptionsFromYaml(config);
 
 	public IDataTransformer? CreateFromOptions(object options)
 		=> _inner.CreateFromOptions(options);

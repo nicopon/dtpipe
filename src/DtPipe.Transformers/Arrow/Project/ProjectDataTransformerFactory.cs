@@ -45,35 +45,13 @@ public class ProjectDataTransformerFactory : TransformerFactoryBase<ProjectOptio
 		return new ProjectDataTransformer(options);
 	}
 
-	public override IDataTransformer? CreateFromYamlConfig(TransformerConfig config)
+	public override object? CreateOptionsFromYaml(TransformerConfig config)
 	{
+		// A mapping names a column to keep; project, drop and rename are also plain options.
 		var options = new ProjectOptions();
-
-		// Handle "project" (whitelist)
-		if (config.Mappings != null && config.Mappings.Count > 0)
-		{
+		if (config.Mappings is { Count: > 0 })
 			options.Project = config.Mappings.Keys;
-		}
-		else if (config.Options != null && config.Options.TryGetValue("project", out var projectVal))
-		{
-			options.Project = new[] { projectVal };
-		}
 
-		// Handle "drop" (blacklist)
-		if (config.Options != null && config.Options.TryGetValue("drop", out var dropVal))
-		{
-			options.Drop = new[] { dropVal };
-		}
-
-        // Handle "rename"
-        if (config.Options != null && config.Options.TryGetValue("rename", out var renameVal))
-        {
-            options.Rename = new[] { renameVal };
-        }
-
-		if (!options.Project.Any() && !options.Drop.Any() && !options.Rename.Any())
-			return null;
-
-		return new ProjectDataTransformer(options);
+		return options;
 	}
 }

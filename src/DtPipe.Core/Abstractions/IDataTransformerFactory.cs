@@ -18,10 +18,18 @@ public interface IDataTransformerFactory : IDataFactory
 	IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration);
 
 	/// <summary>
-	/// Creates a transformer instance from YAML TransformerConfig.
+	/// Turns the <c>mappings:</c> half of a YAML transformer block into this transformer's own
+	/// options object, or null when there is nothing to build. How a mapping encodes — keys only,
+	/// "key:value" pairs, values joined into a script — is per-transformer and stays here.
+	///
+	/// <para>
+	/// The <c>options:</c> half is NOT read here. It is bound reflectively onto the returned object
+	/// by the caller, against the same properties the help prints. Reading it here by hand is how a
+	/// key advertised by the help came to bind nothing and say nothing.
+	/// </para>
 	/// </summary>
 	/// <param name="config">The YAML transformer configuration with Mappings and Options dictionaries.</param>
-	IDataTransformer? CreateFromYamlConfig(TransformerConfig config);
+	object? CreateOptionsFromYaml(TransformerConfig config);
 
 	/// <summary>
 	/// Creates a transformer from a pre-bound options object (typically populated by OptionBinder).

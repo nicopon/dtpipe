@@ -48,33 +48,15 @@ public class WindowDataTransformerFactory : TransformerFactoryBase<WindowOptions
 		return new WindowDataTransformer(options, _jsEngineProvider);
 	}
 
-	public override IDataTransformer? CreateFromYamlConfig(TransformerConfig config)
+	public override object? CreateOptionsFromYaml(TransformerConfig config)
 	{
-		// For YAML, we map properties from dictionary
+		// Mapping values are script lines; the keys carry nothing for this transformer. An explicit
+		// 'script' option binds after this and wins.
 		var options = new WindowOptions();
-
-		if (config.Options != null && config.Options.TryGetValue("count", out var countVal) && int.TryParse(countVal, out var c))
-		{
-			options.Count = c;
-		}
-
-		if (config.Options != null && config.Options.TryGetValue("key", out var keyVal))
-		{
-			options.Key = keyVal;
-		}
-
-		if (config.Options != null && config.Options.TryGetValue("script", out var scriptVal))
-		{
-			options.Script = scriptVal;
-		}
-		else if (config.Mappings != null && config.Mappings.Any())
-		{
-			// If provided in mappings, we treat values as script lines.
-			// Reconstruct the script by joining values (ignoring keys which are irrelevant for window).
-			options.Script = string.Join("\n", config.Mappings.Select(kvp => 
+		if (config.Mappings is { Count: > 0 })
+			options.Script = string.Join("\n", config.Mappings.Select(kvp =>
 				string.IsNullOrEmpty(kvp.Value) ? kvp.Key : kvp.Value));
-		}
 
-		return new WindowDataTransformer(options, _jsEngineProvider);
+		return options;
 	}
 }

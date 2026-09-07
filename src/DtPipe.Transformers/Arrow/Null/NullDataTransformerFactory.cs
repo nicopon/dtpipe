@@ -31,13 +31,11 @@ public class NullDataTransformerFactory : TransformerFactoryBase<NullOptions>
 		return new NullDataTransformer(options);
 	}
 
-	public override IDataTransformer? CreateFromYamlConfig(TransformerConfig config)
+	public override object? CreateOptionsFromYaml(TransformerConfig config)
 	{
-		// For null transformer, Mappings keys are the column names (values are ignored)
-		if (config.Mappings == null || config.Mappings.Count == 0)
-			return null;
+		// Mapping keys are the column names; values are ignored.
+		if (config.Mappings is not { Count: > 0 }) return null;
 
-		var options = new DtPipe.Transformers.Arrow.Null.NullOptions { Columns = [.. config.Mappings.Keys] };
-		return new NullDataTransformer(options);
+		return new DtPipe.Transformers.Arrow.Null.NullOptions { Columns = [.. config.Mappings.Keys] };
 	}
 }

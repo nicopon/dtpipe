@@ -68,37 +68,15 @@ public class FakeDataTransformerFactory : TransformerFactoryBase<FakeOptions>
 		return new FakeDataTransformer(options);
 	}
 
-	public override IDataTransformer? CreateFromYamlConfig(TransformerConfig config)
+	public override object? CreateOptionsFromYaml(TransformerConfig config)
 	{
-		var mappings = new List<string>();
-		if (config.Mappings != null)
-		{
-			foreach (var kvp in config.Mappings)
-			{
-				mappings.Add($"{kvp.Key}:{kvp.Value}");
-			}
-		}
+		// 'deterministic' is not a property, so the generic binder would report it as an unknown
+		// key and suggest nothing: the edit distance to 'seed-row' is far past the threshold.
+		// Naming the rename here is what turns a dead job file into a one-line fix.
+		if (config.Options?.ContainsKey("deterministic") == true)
+			throw new ArgumentException("The YAML option 'deterministic' has been renamed to 'seed-row'. Please update your configuration.");
 
-		var options = new DtPipe.Transformers.Arrow.Fake.FakeOptions { Fake = mappings };
-
-		if (config.Options != null)
-		{
-			if (config.Options.TryGetValue("locale", out var loc)) options = options with { Locale = loc };
-			if (config.Options.TryGetValue("seed", out var s) && int.TryParse(s, out var sv)) options = options with { Seed = sv };
-			if (config.Options.TryGetValue("seed-column", out var sc))
-			{
-				// Support comma-separated seed columns from YAML as well
-				var cols = sc.Split(',').Select(x => x.Trim()).Where(x => !string.IsNullOrEmpty(x)).ToList();
-				options = options with { SeedColumn = cols };
-			}
-			if (config.Options.TryGetValue("deterministic", out var d))
-			{
-				// Throw explicit exception for the deprecated YAML option
-				throw new ArgumentException("The YAML option 'deterministic' has been renamed to 'seed-row'. Please update your configuration.");
-			}
-			if (config.Options.TryGetValue("seed-row", out var sr) && bool.TryParse(sr, out var srv)) options = options with { SeedRow = srv };
-			if (config.Options.TryGetValue("skip-null", out var sn) && bool.TryParse(sn, out var snv)) options = options with { SkipNull = snv };
-		}
-		return new FakeDataTransformer(options);
+		var mappings = (config.Mappings ?? []).Select(kvp => $"{kvp.Key}:{kvp.Value}").ToList();
+		return new DtPipe.Transformers.Arrow.Fake.FakeOptions { Fake = mappings };
 	}
 }

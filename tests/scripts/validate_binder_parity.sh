@@ -149,5 +149,16 @@ run_pair reader_table \
     -i "sqlite:$A/f_src.db" --table src_t \
     -o "$A/f_out.csv" --no-stats
 
+# ----------------------------------------
+echo "--- [g] transformer options block: --compute-types ---"
+# A transformer's YAML "options:" keys were read by a hand-written list in each factory, so
+# --compute-types bound on the CLI and silently bound nothing in YAML: the exported job produced
+# a String column where the direct run produced a Double.
+run_pair compute_types \
+    "$A/g_out.csv" \
+    -i "csv:$A/src.csv" \
+    --compute "Doubled:parseInt(row.Id) * 2" --compute-types "Doubled:double" \
+    -o "$A/g_out.csv" --no-stats
+
 echo ""
 echo "All binder parity checks passed."

@@ -34,7 +34,7 @@ public abstract class S3ConnectionOptions
 [ComponentHelp(
 	usageNotes: "Connection string is an object URI such as 's3://bucket/prefix/data.parquet'. The format is resolved from the extension (.parquet, .csv, .tsv, .json, .jsonl, .ndjson); globs like 's3://bucket/dt=*/part-*.parquet' are read natively. Credentials are set through --s3-* options or the ambient AWS credential chain. In YAML, use 'provider-options' -> 's3'.",
 	examples: new[] {
-		"main:\n  input: \"s3://analytics/events/2026-08-*.parquet\"\n  provider-options:\n    s3:\n      s3-region: \"eu-west-1\"\n      s3-secret-key: \"${{keyring://aws-secret}}\"\n  output: \"<adapter-prefix>:<target>\""
+		"main:\n  input: \"s3://analytics/events/2026-08-*.parquet\"\n  provider-options:\n    s3:\n      region: \"eu-west-1\"\n      secret-key: \"${{keyring://aws-secret}}\"\n  output: \"<adapter-prefix>:<target>\""
 	})]
 public class S3ReaderOptions : S3ConnectionOptions, IProviderOptions
 {
@@ -46,7 +46,7 @@ public class S3ReaderOptions : S3ConnectionOptions, IProviderOptions
 [ComponentHelp(
 	usageNotes: "Connection string is an object URI such as 's3://bucket/prefix/data.parquet'. The format is resolved from the extension. Writing replaces the target key: object storage has no append or upsert, so --strategy does not apply. The upload is issued once the pipeline completes, so a failed run leaves the existing object untouched.",
 	examples: new[] {
-		"main:\n  input: \"<adapter-prefix>:<source>\"\n  output: \"s3://warehouse/sales/2026-08.parquet\"\n  provider-options:\n    s3:\n      s3-endpoint: \"http://127.0.0.1:9000\"\n      s3-access-key: \"${{keyring://minio-key}}\"\n      s3-secret-key: \"${{keyring://minio-secret}}\""
+		"main:\n  input: \"<adapter-prefix>:<source>\"\n  output: \"s3://warehouse/sales/2026-08.parquet\"\n  provider-options:\n    s3:\n      endpoint: \"http://127.0.0.1:9000\"\n      access-key: \"${{keyring://minio-key}}\"\n      secret-key: \"${{keyring://minio-secret}}\""
 	})]
 public class S3WriterOptions : S3ConnectionOptions, IProviderOptions
 {
