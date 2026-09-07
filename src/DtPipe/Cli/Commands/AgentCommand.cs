@@ -314,7 +314,7 @@ public class AgentCommand : Command
                       if (executor.LastTurnOutcome == DtPipe.Cli.Agent.TurnOutcome.AwaitingUserInput
                           && !string.IsNullOrWhiteSpace(executor.PendingQuestion?.Text))
                       {
-                          var answer = tui.PromptFollowUp();
+                          var answer = tui.PromptFollowUp(executor.PendingQuestion);
                           if (!string.IsNullOrWhiteSpace(answer))
                           {
                               exitCode = await executor.RunTurnAsync(answer, model, url, agentOptions, maxIterations, ct);

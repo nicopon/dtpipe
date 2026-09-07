@@ -119,9 +119,33 @@ public class AgentTui
         );
     }
 
-    public string PromptFollowUp()
+    public string PromptFollowUp() => PromptFollowUp(null);
+
+    /// <summary>
+    /// The reply to the agent. When the agent offered choices, they are a pick list with a way out
+    /// to free text — a choice is a suggestion, never a constraint, so answering something the model
+    /// did not think of has to stay one keystroke away.
+    /// </summary>
+    public string PromptFollowUp(AgentQuestion? question)
     {
         _console.WriteLine();
+
+        if (question is { Options.Count: > 0 })
+        {
+            const string ownAnswer = "✎ Type my own answer…";
+
+            var picker = new SelectionPrompt<string>()
+                .Title($"💬 [bold cyan]{Markup.Escape(question.Text)}[/]")
+                .PageSize(10)
+                .MoreChoicesText("[grey](Move up and down to reveal more choices)[/]");
+
+            foreach (var option in question.Options) picker.AddChoice(option);
+            picker.AddChoice(ownAnswer);
+
+            var picked = _console.Prompt(picker);
+            if (!string.Equals(picked, ownAnswer, StringComparison.Ordinal)) return picked;
+        }
+
         return _console.Prompt(
             new TextPrompt<string>("💬 [bold cyan]Follow-up prompt or question[/]:")
                 .PromptStyle("yellow")

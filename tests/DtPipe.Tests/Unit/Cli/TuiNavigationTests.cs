@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -399,4 +400,51 @@ public class TuiNavigationTests
             Assert.Equal(scheme.Normal, scheme.Focus);
         });
     }
+    /// <summary>
+    /// Standing on a choice the agent offered, Enter puts it on the input line instead of sending
+    /// it: the reader edits it first, and a stray keypress in a focused panel cannot answer for
+    /// them. The reply stays free text — a choice is a suggestion, not a constraint.
+    /// </summary>
+    [Fact(Timeout = 30000)]
+    public async Task Enter_On_A_Choice_Fills_The_Input_Line()
+    {
+        var question = new AgentQuestion("Which column keys the upsert?", new[] { "order_id", "customer_id" });
+        var summary = new TurnSummaryModel(TurnOutcome.AwaitingUserInput, 1, TimeSpan.FromSeconds(1),
+            new Dictionary<string, int>(), question);
+
+        await Drive(FourSteps(),
+            (_, s) => s.ShowTurn(summary, hasPlan: false),
+            (_, s) => s.FocusExchange(),
+            (app, _) => app.InjectKey(Key.CursorDown),   // off the question, onto the first choice
+            (app, _) => app.InjectKey(Key.Enter),
+            (_, s) => Assert.Equal("order_id", s.InputText));
+    }
+
+    /// <summary>The hint bar names the pick, or nobody discovers it.</summary>
+    [Fact(Timeout = 30000)]
+    public async Task The_Hints_Name_The_Pick_While_Choices_Are_Offered()
+    {
+        var summary = new TurnSummaryModel(TurnOutcome.AwaitingUserInput, 1, TimeSpan.FromSeconds(1),
+            new Dictionary<string, int>(), new AgentQuestion("Which column?", new[] { "order_id" }));
+
+        await Drive(FourSteps(),
+            (_, s) => s.ShowTurn(summary, hasPlan: false),
+            (_, s) => s.FocusExchange(),
+            (_, s) => Assert.Contains("enter puts it on the input line", s.HintsText));
+    }
+
+    /// <summary>A turn that ended with no choices leaves Enter in the exchange alone.</summary>
+    [Fact(Timeout = 30000)]
+    public async Task Enter_In_The_Exchange_Does_Nothing_Without_Choices()
+    {
+        var summary = new TurnSummaryModel(TurnOutcome.AwaitingUserInput, 1, TimeSpan.FromSeconds(1),
+            new Dictionary<string, int>(), new AgentQuestion("Name the target file."));
+
+        await Drive(FourSteps(),
+            (_, s) => s.ShowTurn(summary, hasPlan: false),
+            (_, s) => s.FocusExchange(),
+            (app, _) => app.InjectKey(Key.Enter),
+            (_, s) => Assert.Equal(string.Empty, s.InputText));
+    }
+
 }

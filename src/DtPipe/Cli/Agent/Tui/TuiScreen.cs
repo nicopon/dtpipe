@@ -187,7 +187,19 @@ internal sealed class TuiScreen
     /// the headline are derived from <paramref name="summary"/>, which the executor built and the
     /// scrollback table renders from too.
     /// </summary>
-    public void ShowTurn(TurnSummaryModel summary, bool hasPlan) => _last = ExchangeContent.Of(summary, hasPlan);
+    public void ShowTurn(TurnSummaryModel summary, bool hasPlan)
+    {
+        _last = ExchangeContent.Of(summary, hasPlan);
+        // Kept beside the rendered exchange so a line the reader stands on can be mapped back to
+        // the choice it shows. The band renders text; only the question knows which lines are picks.
+        _pending = summary.Question;
+        // The hint bar is otherwise refreshed on focus changes alone, and a turn ending on a
+        // question changes what the exchange offers without the focus moving.
+        if (_flash is null) _hints.Text = HintsFor();
+    }
+
+    /// <summary>The question the last turn ended on, when it ended on one. Null otherwise.</summary>
+    private AgentQuestion? _pending;
 
     /// <summary>Re-labels the run — the operating mode is in the title, and it can change mid-session.</summary>
     public void Rechrome(string title) => _title = title;
@@ -337,6 +349,20 @@ internal sealed class TuiScreen
             return;
         }
 
+        // Standing on a choice the agent offered, Enter puts it on the input line rather than
+        // sending it: the reader can edit it first, and a stray keypress in a focused panel cannot
+        // answer on their behalf. The reply stays free text — a choice is a suggestion.
+        if (_exchange.FocusTarget.HasFocus && signal == SurfaceSignal.Submit && _accepting
+            && _exchange.SelectedIndex is { } selected
+            && _pending?.OptionAtLine(selected) is { } choice)
+        {
+            _input.Text = choice;
+            _input.SetFocus();
+            _input.MoveEnd();
+            key.Handled = true;
+            return;
+        }
+
         // Error navigation moves the steps selection, so it belongs to the steps panel. Expanding
         // is about the detail, and the reader who wants it is as likely to be standing in the
         // detail as in the list.
@@ -421,7 +447,10 @@ internal sealed class TuiScreen
         return _steps.FocusTarget.HasFocus ? "↑↓ select · e/b errors · →/enter expand · ⇥ panel · esc stop"
              : _detail.FocusTarget.HasFocus ? "↑↓ scroll · →/← expand · ⇥ panel · esc stop"
              : _plan.FocusTarget.HasFocus ? "↑↓ scroll the plan · ⇥ panel · esc stop"
-             : _exchange.FocusTarget.HasFocus ? "↑↓ scroll the agent's words · ⇥ panel · esc stop"
+             : _exchange.FocusTarget.HasFocus
+                 ? _pending is { Options.Count: > 0 }
+                     ? "↑↓ a choice · enter puts it on the input line · ⇥ panel · esc stop"
+                     : "↑↓ scroll the agent's words · ⇥ panel · esc stop"
              : "⇥ panel · esc stop · ^C quit";
     }
 

@@ -128,6 +128,27 @@ public class AgentClarificationTests
             question.Lines());
     }
 
+    /// <summary>
+    /// A surface picks a choice by the line the reader is standing on. The choices are the trailing
+    /// lines, so a question that spans several lines still maps: counting forward from the top
+    /// would misread every option after the first newline.
+    /// </summary>
+    [Fact]
+    public void A_Line_Maps_Back_To_The_Choice_It_Shows()
+    {
+        var question = new AgentQuestion("Which column?\nThe upsert needs one.", new[] { "order_id", "customer_id" });
+
+        Assert.Null(question.OptionAtLine(0));
+        Assert.Null(question.OptionAtLine(1));
+        Assert.Equal("order_id", question.OptionAtLine(2));
+        Assert.Equal("customer_id", question.OptionAtLine(3));
+        Assert.Null(question.OptionAtLine(4));
+    }
+
+    [Fact]
+    public void A_Question_Without_Choices_Maps_No_Line()
+        => Assert.Null(new AgentQuestion("Name the target file.").OptionAtLine(0));
+
     /// <summary>A question with no choices reads exactly as it did before they existed.</summary>
     [Fact]
     public void A_Question_Without_Choices_Is_Just_Its_Text()

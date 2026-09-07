@@ -56,14 +56,37 @@ public sealed record AgentQuestion
         return new AgentQuestion(text, options);
     }
 
-    /// <summary>The question and its choices as display lines, the choices numbered so a reader can
-    /// refer to one by number. Shared by both surfaces so they cannot number them differently.</summary>
+    /// <summary>
+    /// The question and its choices as display lines, the choices numbered so a reader can refer to
+    /// one by number. Shared by both surfaces so they cannot number them differently.
+    ///
+    /// <para>
+    /// A multi-line question contributes one entry per line, not one entry containing newlines: the
+    /// full-screen band is a list widget that splits on them anyway, so a count that disagreed with
+    /// what is on screen would make <see cref="OptionAtLine"/> pick the wrong choice.
+    /// </para>
+    /// </summary>
     public IReadOnlyList<string> Lines()
     {
-        var lines = new List<string> { Text };
+        var lines = new List<string>(Text.Replace("\r", string.Empty).Split('\n'));
         for (int i = 0; i < Options.Count; i++)
             lines.Add($"  {i + 1}. {Options[i]}");
         return lines;
+    }
+
+    /// <summary>
+    /// The choice a display line refers to, or null when that line belongs to the question itself.
+    /// The choices are the trailing lines, so a question that spans several lines maps correctly —
+    /// counting forward from the top would misread every option after the first newline.
+    /// </summary>
+    public string? OptionAtLine(int lineIndex)
+    {
+        if (Options.Count == 0) return null;
+
+        var lines = Lines();
+        var firstOption = lines.Count - Options.Count;
+        var index = lineIndex - firstOption;
+        return index >= 0 && index < Options.Count ? Options[index] : null;
     }
 
     public override string ToString() => string.Join('\n', Lines());
