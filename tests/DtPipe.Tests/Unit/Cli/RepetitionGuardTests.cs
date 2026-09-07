@@ -10,6 +10,64 @@ namespace DtPipe.Tests.Unit.Cli;
 /// </summary>
 public class RepetitionGuardTests
 {
+    private const string MultiBranchYaml = """
+        customers:
+          input: "generate:5000"
+          transformers:
+            - type: fake
+              mappings:
+                first_name: name.firstname
+                last_name: name.lastname
+                email: internet.email
+                city: address.city
+          output: "sqlite:Data Source=shoe_store.db"
+          provider-options:
+            sqlite-writer:
+              table: "customers"
+              strategy: "Recreate"
+
+        products:
+          input: "generate:400"
+          transformers:
+            - type: fake
+              mappings:
+                model: commerce.productname
+                brand: company.companyname
+                color: commerce.color
+          output: "sqlite:Data Source=shoe_store.db"
+          provider-options:
+            sqlite-writer:
+              table: "products"
+              strategy: "Recreate"
+
+        suppliers:
+          input: "generate:40"
+          transformers:
+            - type: fake
+              mappings:
+                name: company.companyname
+                contact: name.fullname
+                email: internet.email
+          output: "sqlite:Data Source=shoe_store.db"
+          provider-options:
+            sqlite-writer:
+              table: "suppliers"
+              strategy: "Recreate"
+
+        orders:
+          input: "generate:20000"
+          transformers:
+            - type: fake
+              mappings:
+                order_date: date.past
+                status: commerce.department
+          output: "sqlite:Data Source=shoe_store.db"
+          provider-options:
+            sqlite-writer:
+              table: "orders"
+              strategy: "Recreate"
+        """;
+
     private const string CycleA = "En fait, je vais simplement modifier le YAML pour ceci ";
     private const string CycleB = "Je vais modifier le YAML pour cela avant de vérifier ";
 
@@ -67,6 +125,22 @@ public class RepetitionGuardTests
         foreach (var s in sentences)
             foreach (var chunk in Chunks(s + " "))
                 Assert.False(guard.Feed(chunk));
+    }
+
+    /// <summary>
+    /// The content channel carries the deliverable, and a multi-branch YAML job repeats its writer
+    /// header verbatim per branch: a recorded session was stopped 933 characters into exactly this
+    /// shape and lost the mission. A chunk length cannot separate the two cases — in a real
+    /// three-branch job a 96-character chunk already occurs three times — so the cycle behind the
+    /// chunk has to repeat as well.
+    /// </summary>
+    [Fact]
+    public void A_Multi_Branch_Yaml_Job_Is_Not_A_Loop()
+    {
+        var guard = new RepetitionGuard();
+
+        foreach (var chunk in Chunks(MultiBranchYaml))
+            Assert.False(guard.Feed(chunk), "a legitimate multi-branch YAML job was stopped as a loop");
     }
 
     [Fact]

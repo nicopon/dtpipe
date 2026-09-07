@@ -11,6 +11,16 @@ namespace DtPipe.Cli.Agent;
 ///
 /// This is a backstop, not a decoding fix: it does not try to make the model behave, it bounds how
 /// long dtpipe waits before giving up on a call that will not converge on its own.
+///
+/// <para>
+/// <b>A repeated chunk is not a loop; a repeated cycle is.</b> The content channel carries the
+/// deliverable, and a YAML job is repetitive by construction: one branch per target table means the
+/// same <c>provider-options / writer / table</c> header verbatim per branch. In a real three-branch
+/// job a 96-character chunk already occurs three times, so no chunk length both survives a
+/// multi-branch job and still catches a cycle of ~110 characters. What separates the two is
+/// progress: between two occurrences of a looping phrase the text is the same, between two branch
+/// headers it is not. So the trailing chunk must repeat AND the whole cycle behind it must repeat.
+/// </para>
 /// </summary>
 internal sealed class RepetitionGuard
 {
@@ -37,8 +47,9 @@ internal sealed class RepetitionGuard
     }
 
     /// <summary>Feeds one delta of streamed text. Returns true the first time the trailing
-    /// <see cref="_matchChars"/>-long chunk is found to already have occurred <see cref="_minRepeats"/>
-    /// times (this occurrence included) within the tracked window.</summary>
+    /// <see cref="_matchChars"/>-long chunk has occurred <see cref="_minRepeats"/> times (this one
+    /// included) within the tracked window AND the text between two of those occurrences is itself
+    /// repeated — the difference between a loop and a document with a recurring header.</summary>
     public bool Feed(string delta)
     {
         if (string.IsNullOrEmpty(delta)) return false;
@@ -52,14 +63,20 @@ internal sealed class RepetitionGuard
         string window = _buffer.ToString();
         string probe = window[^_matchChars..];
 
-        int count = 0, idx = 0;
+        int count = 0, idx = 0, previous = -1, last = -1;
         while (count < _minRepeats)
         {
             idx = window.IndexOf(probe, idx, StringComparison.Ordinal);
             if (idx < 0) break;
+            (previous, last) = (last, idx);
             count++;
             idx++;
         }
-        return count >= _minRepeats;
+        if (count < _minRepeats) return false;
+
+        int period = last - previous;
+        if (period <= 0 || window.Length < 2 * period) return false;
+
+        return string.CompareOrdinal(window, window.Length - 2 * period, window, window.Length - period, period) == 0;
     }
 }
