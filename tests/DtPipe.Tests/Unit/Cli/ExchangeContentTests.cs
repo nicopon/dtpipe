@@ -20,7 +20,7 @@ public class ExchangeContentTests
     public void A_Question_Asks_For_An_Answer_And_Carries_It_In_The_Body()
     {
         var summary = new TurnSummaryModel(TurnOutcome.AwaitingUserInput, 3, TimeSpan.FromSeconds(5), TwoTools,
-            Question: "  What should the output file be called?  ");
+            Question: new AgentQuestion("  What should the output file be called?  "));
 
         var exchange = ExchangeContent.Of(summary, hasPlan: false);
 
@@ -28,6 +28,24 @@ public class ExchangeContentTests
         Assert.Equal("?", exchange.Marker);
         Assert.Contains("answer below", exchange.Headline);
         Assert.Equal("What should the output file be called?", exchange.Body);
+    }
+
+    /// <summary>
+    /// The choices the model offered belong to the question. The band's body is a scrollable list,
+    /// so each choice is its own line and the headline says an answer may be one of them.
+    /// </summary>
+    [Fact]
+    public void The_Choices_The_Model_Offered_Are_Shown_Under_The_Question()
+    {
+        var summary = new TurnSummaryModel(TurnOutcome.AwaitingUserInput, 1, TimeSpan.FromSeconds(1), TwoTools,
+            Question: new AgentQuestion("Which column keys the upsert?", new[] { "order_id", "customer_id" }));
+
+        var exchange = ExchangeContent.Of(summary, hasPlan: false);
+
+        Assert.Contains("pick one", exchange.Headline);
+        Assert.Equal(
+            new[] { "Which column keys the upsert?", "  1. order_id", "  2. customer_id" },
+            exchange.BodyLines());
     }
 
     /// <summary>

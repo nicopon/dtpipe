@@ -32,8 +32,8 @@ public enum TurnStatus
 /// <param name="Iterations">Model calls the turn consumed, clamped to the budget.</param>
 /// <param name="Duration">Wall time from the prompt to the verdict.</param>
 /// <param name="ToolCounts">Tool name to call count, in first-call order.</param>
-/// <param name="Question">The question the model asked, when <paramref name="Outcome"/> is
-/// <see cref="TurnOutcome.AwaitingUserInput"/>.</param>
+/// <param name="Question">The question the model asked and the choices it offered, when
+/// <paramref name="Outcome"/> is <see cref="TurnOutcome.AwaitingUserInput"/>.</param>
 /// <param name="ProducedPlan">True when <em>this</em> turn produced plan YAML. Drives the
 /// plan-mode "next steps" line, which speaks to the plan this turn made — not one an earlier turn
 /// left on the trajectory.</param>
@@ -45,7 +45,7 @@ public sealed record TurnSummaryModel(
     int Iterations,
     TimeSpan Duration,
     IReadOnlyDictionary<string, int> ToolCounts,
-    string? Question = null,
+    AgentQuestion? Question = null,
     bool ProducedPlan = false,
     long Tokens = 0)
 {

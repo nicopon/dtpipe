@@ -610,19 +610,23 @@ public class AgentTui
     /// on how to answer. Interactively the caller then prompts for the reply; piped, the run has
     /// already returned non-zero.
     /// </summary>
-    public void RenderPendingQuestion(string? question)
+    public void RenderPendingQuestion(AgentQuestion? question)
     {
+        var body = question is null || question.Text.Trim().Length == 0
+            ? "The agent needs more information to continue."
+            : string.Join('\n', question.Lines());
+
         _console.WriteLine();
-        _console.Write(new Panel(Markup.Escape((question ?? "").Trim().Length > 0
-                ? question!.Trim()
-                : "The agent needs more information to continue."))
+        _console.Write(new Panel(Markup.Escape(body))
         {
             Header = new PanelHeader("[bold yellow]❓ The agent needs your input[/]"),
             Border = BoxBorder.Rounded,
             BorderStyle = new Style(Color.Yellow),
             Expand = true
         });
-        _console.MarkupLine("[grey]Answer to continue the session, or exit to stop here.[/]");
+        _console.MarkupLine(question is { Options.Count: > 0 }
+            ? "[grey]Answer to continue the session — one of the choices above or anything else — or exit to stop here.[/]"
+            : "[grey]Answer to continue the session, or exit to stop here.[/]");
     }
 
     /// <summary>

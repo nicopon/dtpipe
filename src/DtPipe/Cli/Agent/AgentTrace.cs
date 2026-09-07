@@ -176,7 +176,10 @@ public sealed class AgentTrace : IDisposable
             ["tokens"] = summary.Tokens,
             ["toolCalls"] = summary.TotalToolCalls,
             ["producedPlan"] = summary.ProducedPlan,
-            ["question"] = Safe(summary.Question),
+            ["question"] = Safe(summary.Question?.Text),
+            // Beside the question, not folded into it: a wrong answer cannot be told apart from a
+            // question that offered the wrong choices without seeing what was offered.
+            ["questionOptions"] = summary.Question?.Options.Select(Safe).ToList(),
         });
 
     private void Write(Dictionary<string, object?> record)

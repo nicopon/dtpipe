@@ -162,7 +162,7 @@ public class TurnSummaryModelTests
     public void ReportTurn_On_A_Pending_Question_Prints_The_Question_And_Neither_Failure_Nor_Plan_Lines()
     {
         var summary = new TurnSummaryModel(TurnOutcome.AwaitingUserInput, 2, TimeSpan.FromSeconds(3), NoTools,
-            Question: "What should the output file be called?", ProducedPlan: true);
+            Question: new AgentQuestion("What should the output file be called?"), ProducedPlan: true);
 
         var text = RenderReport(summary, AgentMode.Plan);
 

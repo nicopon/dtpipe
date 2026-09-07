@@ -70,6 +70,13 @@ public class AgentClarificationTests
         return new LlmResponse(new ChatMessage("assistant", reasoning, null, calls), true, null);
     }
 
+    private static LlmResponse AskUserWithOptions(string question, params string[] options)
+    {
+        var args = JsonSerializer.SerializeToElement(new { question, options });
+        var calls = new List<ToolCall> { new("q1", "ask-user", args) };
+        return new LlmResponse(new ChatMessage("assistant", "INTENT: pick one", null, calls), true, null);
+    }
+
     private static LlmResponse ToolThenAsk(string toolName, string question)
     {
         var calls = new List<ToolCall>
@@ -89,8 +96,42 @@ public class AgentClarificationTests
 
         Assert.Equal(1, code);   // fail-closed: not a finished turn
         Assert.Equal(TurnOutcome.AwaitingUserInput, executor.LastTurnOutcome);
-        Assert.Equal("What should the output file be called?", executor.PendingQuestion);
+        Assert.Equal("What should the output file be called?", executor.PendingQuestion?.Text);
     }
+
+    /// <summary>
+    /// ask-user's schema declares an 'options' array — "a short list of choices, when the answer is
+    /// a pick" — so a model that fills it answered the schema correctly. Reading only 'question'
+    /// discarded that half before any surface could show it.
+    /// </summary>
+    [Fact]
+    public async Task The_Choices_The_Model_Offered_Survive_The_Turn()
+    {
+        var (executor, _, _) = Build(new QueuedLlmClient(
+            AskUserWithOptions("Which column keys the upsert?", "order_id", "customer_id")));
+
+        await executor.RunTurnAsync("mission", "m", "http://x", new AgentOptions(), maxIterations: 5);
+
+        Assert.Equal("Which column keys the upsert?", executor.PendingQuestion?.Text);
+        Assert.Equal(new[] { "order_id", "customer_id" }, executor.PendingQuestion?.Options);
+    }
+
+    /// <summary>The choices are numbered once, by the question itself, so the two surfaces cannot
+    /// number them differently.</summary>
+    [Fact]
+    public void The_Choices_Are_Numbered_For_Display()
+    {
+        var question = new AgentQuestion("Which column?", new[] { "order_id", "customer_id" });
+
+        Assert.Equal(
+            new[] { "Which column?", "  1. order_id", "  2. customer_id" },
+            question.Lines());
+    }
+
+    /// <summary>A question with no choices reads exactly as it did before they existed.</summary>
+    [Fact]
+    public void A_Question_Without_Choices_Is_Just_Its_Text()
+        => Assert.Equal(new[] { "Name the target file." }, new AgentQuestion("Name the target file.").Lines());
 
     [Fact]
     public async Task The_Partial_Trajectory_Is_Kept()
@@ -125,7 +166,7 @@ public class AgentClarificationTests
         await executor.RunTurnAsync("mission", "m", "http://x", new AgentOptions(), maxIterations: 5);
 
         Assert.Equal(TurnOutcome.AwaitingUserInput, executor.LastTurnOutcome);
-        Assert.Equal("which id column?", executor.PendingQuestion);
+        Assert.Equal("which id column?", executor.PendingQuestion?.Text);
         Assert.DoesNotContain("ask_user", tools.Invoked);
     }
 
@@ -174,7 +215,7 @@ public class AgentClarificationTests
             new LlmResponse(new ChatMessage("assistant", "Understood — here is the plan."), true, null)));
 
         await executor.RunTurnAsync("mission", "m", "http://x", new AgentOptions(), maxIterations: 5);
-        Assert.Equal("Which id column?", executor.PendingQuestion);
+        Assert.Equal("Which id column?", executor.PendingQuestion?.Text);
 
         int code = await executor.RunTurnAsync("the 'client_ref' column", "m", "http://x", new AgentOptions(), maxIterations: 5);
 

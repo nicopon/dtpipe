@@ -312,7 +312,7 @@ public class AgentCommand : Command
                       // The agent stopped to ask something: answer it directly rather than
                       // going through the menu. An empty answer falls through to the menu.
                       if (executor.LastTurnOutcome == DtPipe.Cli.Agent.TurnOutcome.AwaitingUserInput
-                          && !string.IsNullOrWhiteSpace(executor.PendingQuestion))
+                          && !string.IsNullOrWhiteSpace(executor.PendingQuestion?.Text))
                       {
                           var answer = tui.PromptFollowUp();
                           if (!string.IsNullOrWhiteSpace(answer))

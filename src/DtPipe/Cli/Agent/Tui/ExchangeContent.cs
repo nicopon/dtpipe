@@ -80,10 +80,14 @@ internal static class ExchangeContent
     public static Exchange Of(TurnSummaryModel summary, bool hasPlan)
         => summary.Status switch
         {
+            // The choices the model offered are part of the question: the band's body is a scrollable
+            // list, so they cost nothing to show and say what shape of answer is expected.
             TurnStatus.AwaitingInput => new Exchange(
                 ExchangeKind.Question,
-                "QUESTION — answer below",
-                (summary.Question ?? string.Empty).Trim()),
+                summary.Question is { Options.Count: > 0 }
+                    ? "QUESTION — answer below, or pick one"
+                    : "QUESTION — answer below",
+                summary.Question?.ToString() ?? string.Empty),
 
             TurnStatus.Completed => new Exchange(
                 ExchangeKind.Done,

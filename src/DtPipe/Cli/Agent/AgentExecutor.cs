@@ -38,7 +38,7 @@ public class AgentExecutor
      /// <see cref="TurnOutcome.AwaitingUserInput"/>. Cleared at the start of the next turn — the
      /// user's answer becomes that turn's prompt.
      /// </summary>
-     public string? PendingQuestion { get; private set; }
+     public AgentQuestion? PendingQuestion { get; private set; }
 
      private AgentMode? _mode;
      private long _turnTokens;
@@ -265,7 +265,7 @@ public class AgentExecutor
         int Iterations,
         Dictionary<string, int> ToolCounts,
         TurnOutcome Outcome,
-        string? Question = null);
+        AgentQuestion? Question = null);
 
     private async Task<PlanningLoopResult> RunPlanningLoopAsync(
         List<ChatMessage> messages,
@@ -304,7 +304,7 @@ public class AgentExecutor
 
         bool success = false;
         int turnIterations = 1;
-        string? pendingQuestion = null;
+        AgentQuestion? pendingQuestion = null;
         // The value that stands if the loop exits by its own condition — the iteration budget ran
         // out before any explicit break set an outcome.
         var turnOutcome = TurnOutcome.MaxIterationsReached;
@@ -488,7 +488,7 @@ public class AgentExecutor
 
              if (askUserCall is not null)
                {
-                 pendingQuestion = ExtractQuestion(askUserCall.Arguments);
+                 pendingQuestion = AgentQuestion.From(askUserCall.Arguments);
                  const string ack = "{\"status\":\"question delivered to the user; awaiting their reply\"}";
 
                  if (renderTui)
@@ -516,20 +516,6 @@ public class AgentExecutor
 
         return new PlanningLoopResult(success, producedYaml, turnIterations, toolCounts, turnOutcome, pendingQuestion);
      }
-
-    /// <summary>Pulls the <c>question</c> string out of an <c>ask-user</c> call's arguments.</summary>
-    private static string ExtractQuestion(JsonElement args)
-    {
-        if (args.ValueKind == JsonValueKind.Object
-            && args.TryGetProperty("question", out var q)
-            && q.ValueKind == JsonValueKind.String)
-        {
-            var text = q.GetString();
-            if (!string.IsNullOrWhiteSpace(text))
-                return text!.Trim();
-        }
-        return "The agent needs more information to continue, but did not say what.";
-    }
 
     /// <summary>
     /// Runs the validated plan the planner produced — the YAML on <see cref="AgentTrajectory.LastGeneratedYaml"/>
