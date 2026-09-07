@@ -30,6 +30,15 @@ public static class OptionObjectExporter
     };
 
     /// <summary>
+    /// The property <paramref name="optionsType"/> encodes as <c>mappings:</c>, or null when it has
+    /// none. The help asks so it does not list that property as an <c>options:</c> key: setting it
+    /// there binds but changes nothing, because the factory decides it has no work before the
+    /// options block is read. Both surfaces reading one map is what keeps them from disagreeing.
+    /// </summary>
+    public static string? PrimaryMappingPropertyFor(Type optionsType)
+        => PrimaryMappingProperty.TryGetValue(optionsType, out var name) ? name : null;
+
+    /// <summary>
     /// Builds a TransformerConfig from a bound transformer options instance.
     /// Returns null when nothing differs from defaults (nothing to export).
     /// </summary>

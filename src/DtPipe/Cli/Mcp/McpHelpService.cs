@@ -271,7 +271,11 @@ public class McpHelpService : IMcpHelpService
             sw.WriteLine();
         }
 
-        var skipNames = new[] { normalized, "filters", "mask", "fake" };
+        // What 'mappings:' encodes is not an 'options:' key. The list used to be written by hand
+        // and keyed on the component name, which hid project's own 'project' option (it works, and
+        // --export-job emits it) while publishing null's 'columns' (it binds and does nothing).
+        var primary = OptionObjectExporter.PrimaryMappingPropertyFor(factory.OptionsType);
+        var skipNames = primary is null ? Array.Empty<string>() : new[] { primary.ToKebabCase() };
         using (var section = new StringWriter())
         {
             if (FormatOptionProperties(section, factory.OptionsType, "  ", skipNames))
@@ -324,7 +328,9 @@ public class McpHelpService : IMcpHelpService
 
         sw.WriteLine();
         sw.WriteLine("ANONYMIZATION OPTIONS (DYNAMICALLY RESOLVED FROM COMPONENT OPTIONS):");
-        FormatOptionProperties(sw, typeof(DtPipe.Transformers.Arrow.Fake.FakeOptions), "  ", new[] { "fake" });
+        var fakeOptions = typeof(DtPipe.Transformers.Arrow.Fake.FakeOptions);
+        FormatOptionProperties(sw, fakeOptions, "  ",
+            new[] { OptionObjectExporter.PrimaryMappingPropertyFor(fakeOptions)!.ToKebabCase() });
         return sw.ToString();
     }
 
