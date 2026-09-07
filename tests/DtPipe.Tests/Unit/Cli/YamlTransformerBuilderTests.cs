@@ -79,6 +79,33 @@ public class YamlTransformerBuilderTests
         Assert.Contains("seed-row", ex.Message);
     }
 
+    /// <summary>
+    /// A block that sets options and produces no transformer is refused, not skipped. The null
+    /// transformer took its columns from 'mappings:', so 'options: {columns: b}' left the column
+    /// untouched, exit 0, not a word — the pipeline that ran was not the one that was written.
+    /// </summary>
+    [Fact]
+    public void An_Options_Block_That_Produces_No_Transformer_Is_Refused()
+    {
+        var factory = new DtPipe.Transformers.Arrow.Null.NullDataTransformerFactory(new OptionsRegistry());
+        var config = Config("null", options: new() { ["columns"] = "b" });
+
+        var ex = Assert.Throws<InvalidOperationException>(() => YamlTransformerBuilder.Build(factory, config));
+
+        Assert.Contains("columns", ex.Message);
+        Assert.Contains("mappings", ex.Message);
+    }
+
+    /// <summary>A block with nothing in it asked for nothing; only a block that sets options and
+    /// yields no transformer is a contradiction.</summary>
+    [Fact]
+    public void An_Empty_Block_Is_Still_Skipped_Quietly()
+    {
+        var factory = new DtPipe.Transformers.Arrow.Null.NullDataTransformerFactory(new OptionsRegistry());
+
+        Assert.Null(YamlTransformerBuilder.Build(factory, Config("null")));
+    }
+
     /// <summary>An option set in the block wins over what the mappings implied.</summary>
     [Fact]
     public void An_Explicit_Option_Overrides_What_The_Mappings_Encoded()

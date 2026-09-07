@@ -28,7 +28,20 @@ public static class YamlTransformerBuilder
     public static IDataTransformer? Build(IDataTransformerFactory factory, TransformerConfig config, bool strict = false)
     {
         var options = factory.CreateOptionsFromYaml(config);
-        if (options is null) return null;
+        if (options is null)
+        {
+            // A block that sets options and produces nothing is refused, not skipped — even outside
+            // strict mode, and unlike an unrecognised key, which leaves the rest of the block
+            // working. Here the whole transformer disappears, so the pipeline that runs is not the
+            // one that was written, and nothing afterwards can show the difference.
+            if (config.Options is { Count: > 0 })
+                throw new InvalidOperationException(
+                    $"Transformer '{config.Type}' sets options ({string.Join(", ", config.Options.Keys)}) "
+                  + "but has no 'mappings:', so it produces no transformer. This transformer is "
+                  + "configured through 'mappings:'; the options block only refines it.");
+
+            return null;
+        }
 
         if (config.Options is { Count: > 0 })
             OptionBinder.BindYaml(options, config.Options.ToDictionary(kv => kv.Key, kv => (object?)kv.Value), strict);
