@@ -40,9 +40,16 @@ public class PipelineLexer
         var seenGlobalScalars = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         LexStage currentStage = LexStage.Reader;
 
+        // The unrecognised flag last seen, if it was the immediately preceding token. An unknown
+        // flag does not consume a value (it is kept as a boolean in RawArgs for OptionBinder), so
+        // whatever follows it arrives here as a bare token.
+        string? lastUnknownFlag = null;
+
         for (int i = 0; i < args.Length; i++)
         {
             var token = args[i];
+            var previousUnknownFlag = lastUnknownFlag;
+            lastUnknownFlag = null;
 
             var def = _registry.Lookup(token);
             if (def != null)
@@ -118,6 +125,7 @@ public class PipelineLexer
                 if (token.StartsWith('-'))
                 {
                     // Unknown flag — store as boolean, captured in RawArgs for OptionBinder.
+                    lastUnknownFlag = token;
                     globalDict[token] = "true";
                     if (!seenPerStage.TryGetValue(token, out var unknownStages))
                     {
@@ -133,6 +141,16 @@ public class PipelineLexer
                 }
                 else
                 {
+                    // A bare token right after an unrecognised flag is that flag's value, not a
+                    // query. Promoting it made `--ouput out.csv` build a DuckDB branch and fail
+                    // with "Parser Error: syntax error at or near 'out.csv'", never naming the
+                    // flag that was misspelt.
+                    if (previousUnknownFlag != null)
+                        throw new InvalidOperationException(
+                            $"Unrecognized flag '{previousUnknownFlag}', and '{token}' reads as its value. "
+                          + $"Check the spelling, or pass a query explicitly with --sql \"{token}\" "
+                          + "if it really is one.");
+
                     // Positional token (SQL query without --sql flag).
                     // Split the reader into its own branch before the SQL processor branch.
                     if (currentBranchArgs.Count > 0 && !currentBranchFlags.ContainsKey("--from"))

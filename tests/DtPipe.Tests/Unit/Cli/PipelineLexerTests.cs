@@ -22,6 +22,9 @@ public class PipelineLexerTests
         _registry.Register(new FlagDef("--fake", new[] { "-f" }, FlagArity.Scalar, FlagScope.PerBranch, "fake transformer", FlagStage.Pipeline));
         _registry.Register(new FlagDef("--sql",  Array.Empty<string>(), FlagArity.Scalar,  FlagScope.PerBranch, "sql processor",   FlagStage.Pipeline, ProcessorTrigger: true));
         _registry.Register(new FlagDef("--merge", Array.Empty<string>(), FlagArity.Boolean, FlagScope.PerBranch, "merge processor", FlagStage.Pipeline, ProcessorTrigger: true));
+        // Registered at runtime from FilterOptions. Left out, it was an unknown flag here, which
+        // now refuses the expression that follows it.
+        _registry.Register(new FlagDef("--filter", Array.Empty<string>(), FlagArity.Repeatable, FlagScope.PerBranch, "filter transformer", FlagStage.Pipeline));
 
         // Shared reader+writer flags (FlagStage.Any = Reader | Writer)
         _registry.Register(new FlagDef("--table", new[] { "-t" }, FlagArity.Scalar, FlagScope.PerBranch, "table", FlagStage.Any));
@@ -331,6 +334,33 @@ public class PipelineLexerTests
 
         Assert.Contains("SELECT * FROM s", pipeline.Branches[1].RawArgs);
     }
+
+    /// <summary>
+    /// An unrecognised flag is kept as a boolean for OptionBinder, so it does not consume the token
+    /// after it — which then reached the positional-query rule. A misspelt '--ouput out.csv' built a
+    /// DuckDB branch and died on "Parser Error: syntax error at or near 'out.csv'", never naming the
+    /// flag. Refusing here is the only place that still knows the two tokens were adjacent.
+    /// </summary>
+    [Fact]
+    public void A_Positional_After_An_Unknown_Flag_Names_The_Flag()
+    {
+        var args = new[] { "-i", "a.csv", "--ouput", "out.csv" };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => _lexer.Parse(args));
+
+        Assert.Contains("--ouput", ex.Message);
+        Assert.Contains("out.csv", ex.Message);
+    }
+
+    /// <summary>The refusal is about adjacency: an unknown flag followed by a recognised one stays
+    /// the boolean it has always been.</summary>
+    [Fact]
+    public void An_Unknown_Flag_Followed_By_A_Known_One_Is_Still_A_Boolean()
+    {
+        var pipeline = _lexer.Parse(new[] { "-i", "a.csv", "--custom-flag", "-o", "out.csv" });
+
+        Assert.Contains("--custom-flag", pipeline.Branches[0].RawArgs);
+    }
 }
 
 [Collection("console-serial")]
@@ -345,6 +375,10 @@ public class RepeatedFlagStrictnessTests
         // Reader|Writer (FlagStage.Any) — cross-stage repeats are then legitimate.
         foreach (var def in DtPipe.Cli.Infrastructure.CliOptionBuilder.GenerateFlagDefsForType(typeof(DtPipe.Adapters.Csv.CsvReaderOptions)))
             registry.Register(def with { Stage = FlagStage.Any });
+        // --sql comes from the stream-processor trigger flags at runtime, not from the core set.
+        // Leaving it unregistered made it an unknown flag here, which now refuses the query that
+        // follows it — these tests are about --sql's own duplicate rule, so it must be known.
+        registry.Register(new FlagDef("--sql", Array.Empty<string>(), FlagArity.Scalar, FlagScope.PerBranch, "sql processor", FlagStage.Pipeline, ProcessorTrigger: true));
         return new PipelineLexer(registry);
     }
 
@@ -399,12 +433,17 @@ public class RepeatedFlagStrictnessTests
         Assert.Contains("SQL query provided more than once", ex.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// This ordering is refused by the generic duplicate-flag rule rather than the dedicated
+    /// message: a positional query registers itself as '--sql', so the explicit one that follows is
+    /// a second occurrence in the same stage. Both refuse; only the wording differs.
+    /// </summary>
     [Fact]
     public void Explicit_Sql_After_Positional_Query_In_From_Branch_Throws()
     {
         var ex = Assert.Throws<InvalidOperationException>(() =>
             ParseCapturingStderr("-i", "in.csv", "--alias", "s", "--from", "s", "SELECT 1", "--sql", "SELECT 2"));
-        Assert.Contains("SQL query provided more than once", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("appears more than once in the same branch stage", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
