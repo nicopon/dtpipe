@@ -245,6 +245,11 @@ public class OllamaClientStreamingTests
         var resp = await task;
         Assert.Equal(RepetitionGuard.DetectedMessage, resp.Error);
 
+        // The text it looped on is the whole evidence. Returning an empty message left the session
+        // trace saying a run died of repetition without saying on what — the one question the
+        // trace exists to answer.
+        Assert.Contains("modifier le YAML", resp.Message.Content);
+
         // The cycle is ~180 bytes; stopping within a handful of repeats means low hundreds of
         // bytes read, nowhere near what "kept draining an unbounded stream" would look like.
         Assert.True(source.TotalBytesProduced < 5000,

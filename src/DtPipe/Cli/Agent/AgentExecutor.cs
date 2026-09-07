@@ -363,7 +363,8 @@ public class AgentExecutor
                 if (renderTui)
                     view!.AgentResponse($"Error calling LLM: {errMsg}");
                 if (recordTrajectory)
-                    Trajectory.AddStep(currentStepNum, $"LLM Error: {errMsg}", isError: true);
+                    Trajectory.AddStep(currentStepNum, $"LLM Error: {errMsg}",
+                        thinking: response.Thinking ?? response.Message.Content, isError: true);
                 success = false;
                 turnOutcome = string.Equals(errMsg, RepetitionGuard.DetectedMessage, StringComparison.Ordinal)
                     ? TurnOutcome.RepetitionDetected

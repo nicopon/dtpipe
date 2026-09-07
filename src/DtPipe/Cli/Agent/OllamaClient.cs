@@ -280,8 +280,11 @@ public class OllamaClient : ILlmClient, IStreamingLlmClient
                 if (root.TryGetProperty("done", out var dEl) && dEl.ValueKind == JsonValueKind.True)
                     usage = ParseUsage(root);
 
+                // The text it looped on is the whole evidence: a trace that records only the
+                // verdict says a run died of repetition without saying on what.
                 if (acc.RepetitionDetected)
-                    return new LlmResponse(new ChatMessage("assistant", null), true, RepetitionGuard.DetectedMessage);
+                    return new LlmResponse(new ChatMessage("assistant", acc.ContentOrNull), true,
+                        RepetitionGuard.DetectedMessage, null, acc.ThinkingOrNull);
             }
 
             splitter.Flush(acc);

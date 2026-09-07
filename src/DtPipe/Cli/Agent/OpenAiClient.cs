@@ -244,8 +244,11 @@ public class OpenAiClient : ILlmClient, IStreamingLlmClient
                 if (update.Usage is { } u)
                     usage = new LlmUsage(u.InputTokenCount, u.OutputTokenCount);
 
+                // The text it looped on is the whole evidence: a trace that records only the
+                // verdict says a run died of repetition without saying on what.
                 if (acc.RepetitionDetected)
-                    return new LlmResponse(new ChatMessage("assistant", null), true, RepetitionGuard.DetectedMessage);
+                    return new LlmResponse(new ChatMessage("assistant", acc.ContentOrNull), true,
+                        RepetitionGuard.DetectedMessage, null, acc.ThinkingOrNull);
             }
 
             splitter.Flush(acc);
