@@ -182,25 +182,8 @@ public class McpHelpService : IMcpHelpService
         sw.WriteLine("YAML Provider Options Configuration:");
         sw.WriteLine($"  Place these under 'provider-options' -> '{normalized}' (or specific role suffix '{normalized}-reader' / '{normalized}-writer'):");
 
-        if (readers.Count > 0)
-        {
-            sw.WriteLine("  Role: Reader (Data Source)");
-            foreach (var r in readers)
-            {
-                FormatOptionProperties(sw, r.OptionsType, "    ");
-            }
-            sw.WriteLine();
-        }
-
-        if (writers.Count > 0)
-        {
-            sw.WriteLine("  Role: Writer (Data Destination)");
-            foreach (var w in writers)
-            {
-                FormatOptionProperties(sw, w.OptionsType, "    ");
-            }
-            sw.WriteLine();
-        }
+        WriteRole(sw, "  Role: Reader (Data Source)", readers.Select(r => r.OptionsType));
+        WriteRole(sw, "  Role: Writer (Data Destination)", writers.Select(w => w.OptionsType));
 
         foreach (var (roles, type) in roleTypes)
         {
@@ -208,6 +191,23 @@ public class McpHelpService : IMcpHelpService
         }
 
         return sw.ToString();
+    }
+
+    /// <summary>A role's option list, written only when it has one. An adapter whose sole property
+    /// is undocumented — checksum's output-path, which the writer overwrites with the connection
+    /// string — would otherwise print a header over nothing.</summary>
+    private static void WriteRole(TextWriter writer, string header, IEnumerable<Type> optionsTypes)
+    {
+        using var section = new StringWriter();
+        var wrote = false;
+        foreach (var type in optionsTypes)
+            wrote |= FormatOptionProperties(section, type, "    ");
+
+        if (!wrote) return;
+
+        writer.WriteLine(header);
+        writer.Write(section.ToString());
+        writer.WriteLine();
     }
 
     /// <summary>
@@ -272,16 +272,15 @@ public class McpHelpService : IMcpHelpService
         }
 
         var skipNames = new[] { normalized, "filters", "mask", "fake" };
-        var properties = factory.OptionsType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(p => p.CanWrite)
-            .ToList();
-
-        if (properties.Count > 0)
+        using (var section = new StringWriter())
         {
-            sw.WriteLine("YAML Options Configuration:");
-            sw.WriteLine("  Place these options under the 'options' block of the transformer:");
-            FormatOptionProperties(sw, factory.OptionsType, "  ", skipNames);
-            sw.WriteLine();
+            if (FormatOptionProperties(section, factory.OptionsType, "  ", skipNames))
+            {
+                sw.WriteLine("YAML Options Configuration:");
+                sw.WriteLine("  Place these options under the 'options' block of the transformer:");
+                sw.Write(section.ToString());
+                sw.WriteLine();
+            }
         }
 
         FormatComponentHelp(sw, factory.OptionsType);
@@ -329,8 +328,10 @@ public class McpHelpService : IMcpHelpService
         return sw.ToString();
     }
 
-    private static void FormatOptionProperties(TextWriter writer, Type optionsType, string indent, IEnumerable<string>? skipNames = null)
+    /// <returns>True when at least one option was written, so a caller can drop an empty role header.</returns>
+    private static bool FormatOptionProperties(TextWriter writer, Type optionsType, string indent, IEnumerable<string>? skipNames = null)
     {
+        var wrote = false;
         var skipSet = skipNames != null ? new HashSet<string>(skipNames, StringComparer.OrdinalIgnoreCase) : null;
         var properties = optionsType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(p => p.CanWrite)
@@ -346,12 +347,19 @@ public class McpHelpService : IMcpHelpService
             var descriptionAttr = prop.GetCustomAttribute<DescriptionAttribute>();
             var desc = CliOptionBuilder.ResolveDescription(cliOptionAttr, descriptionAttr);
 
+            // A public settable property is not an option until someone has documented it. Listing
+            // every one of them published six keys with no explanation at all — including DuckDB's
+            // 'variant', which the router sets and a caller must never supply, and 'expand-types',
+            // whose effect nobody could state. An option a caller can set without knowing what it
+            // does is worse than one they cannot see.
+            if (string.IsNullOrEmpty(desc)) continue;
+
             writer.WriteLine($"{indent}{kebabName}: {ValuePlaceholder(prop.PropertyType)}");
-            if (!string.IsNullOrEmpty(desc))
-            {
-                writer.WriteLine($"{indent}  # {desc}");
-            }
+            writer.WriteLine($"{indent}  # {desc}");
+            wrote = true;
         }
+
+        return wrote;
     }
 
     /// <summary>

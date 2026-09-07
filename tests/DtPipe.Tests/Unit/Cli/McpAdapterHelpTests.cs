@@ -24,7 +24,7 @@ namespace DtPipe.Tests.Unit.Cli;
 /// model relies on to write a correct job.
 /// </para>
 /// </summary>
-public class McpAdapterHelpTests
+public partial class McpAdapterHelpTests
 {
     private readonly IMcpHelpService _help;
     private readonly string[] _readerNames;
@@ -137,6 +137,32 @@ public class McpAdapterHelpTests
             }
         }
     }
+
+    /// <summary>
+    /// Every option the help lists carries an explanation. Listing every public settable property
+    /// published six keys with none — among them DuckDB's 'variant', which the router sets from the
+    /// 'duck+mysql:' selector and a caller must never supply.
+    /// </summary>
+    [Fact]
+    public void No_Option_Is_Listed_Without_Saying_What_It_Does()
+    {
+        foreach (var (adapter, _, _) in _roles)
+        {
+            var lines = _help.GetAdapterHelp(adapter).Split('\n');
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (!OptionLine().IsMatch(lines[i])) continue;
+                var next = i + 1 < lines.Length ? lines[i + 1].Trim() : string.Empty;
+                Assert.True(next.StartsWith('#'),
+                    $"{adapter}: '{lines[i].Trim()}' is listed with no explanation");
+            }
+        }
+    }
+
+    /// <summary>An option line inside a listing: indented, "name: placeholder", never a YAML
+    /// example (which is flush left or nested under a branch alias).</summary>
+    [GeneratedRegex(@"^    [a-z0-9-]+: (<value>|true \| false|[A-Za-z]+( \| [A-Za-z]+)+)$")]
+    private static partial Regex OptionLine();
 
     /// <summary>An example must set an option to a value that option accepts. sqlite's used
     /// "Upsert" while the strategy line named three members that did not include it.</summary>
