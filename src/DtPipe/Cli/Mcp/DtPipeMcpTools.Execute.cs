@@ -108,7 +108,7 @@ public partial class DtPipeMcpTools
             return JsonSerializer.Serialize(new
             {
                 success = false,
-                errors = new[] { ToolError.Describe(ex) }
+                errors = new[] { ToolError.Describe(ex, yamlContent) }
             }, new JsonSerializerOptions { WriteIndented = true });
         }
     }
@@ -262,7 +262,7 @@ public partial class DtPipeMcpTools
                      : "NOTHING WAS WRITTEN. This call ran with apply=false, so the target was never going "
                        + "to be modified. Fix the errors above, then call execute-yaml-job again with "
                        + "apply=true to perform the real write.",
-                 errors = new[] { ToolError.Describe(ex) }
+                 errors = new[] { ToolError.Describe(ex, yamlContent) }
                }, new JsonSerializerOptions { WriteIndented = true });
            }
        }

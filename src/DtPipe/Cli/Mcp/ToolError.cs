@@ -17,6 +17,15 @@ namespace DtPipe.Cli.Mcp;
 /// </para>
 ///
 /// <para>
+/// A line and column alone are not "where" for a caller that submitted its YAML as one escaped
+/// string: counting newlines in it is the step that fails. So when the source is at hand the
+/// offending line is quoted with a caret under the column. A recorded session spent four
+/// iterations on <c>description: "Description for " + "category"</c> — a quoted scalar with more
+/// after it — and escaped by deleting every expression in the job, delivering a plan that filled
+/// a thousand rows with one constant.
+/// </para>
+///
+/// <para>
 /// This restates those facts; it does not add advice. Telling the model what a job file should look
 /// like belongs to the tool descriptions it already reads, not to an error message maintained by
 /// hand in a second place.
@@ -30,7 +39,9 @@ internal static class ToolError
         RegexOptions.Compiled);
 
     /// <summary>The message to hand back, sanitised and located.</summary>
-    public static string Describe(Exception ex)
+    /// <param name="source">The text the caller submitted, when the tool still has it; the failing
+    /// line is quoted from it.</param>
+    public static string Describe(Exception ex, string? source = null)
     {
         var yaml = Find(ex);
         var reason = Simplify(Innermost(yaml ?? ex).Message);
@@ -38,7 +49,37 @@ internal static class ToolError
         if (yaml is null) return ConnectionStringSanitizer.Sanitize(reason);
 
         var at = yaml.Start.Line > 0 ? $" (at line {yaml.Start.Line}, column {yaml.Start.Column})" : string.Empty;
-        return ConnectionStringSanitizer.Sanitize($"{reason}{at}{ShapeHint(reason)}");
+        return ConnectionStringSanitizer.Sanitize($"{reason}{at}{ShapeHint(reason)}{Excerpt(source, yaml.Start)}");
+    }
+
+    /// <summary>Longest line quoted whole; past it a window is taken around the column.</summary>
+    private const int MaxQuoted = 160;
+
+    /// <summary>The failing line under the message, with a caret at the column it stopped on.</summary>
+    private static string Excerpt(string? source, Mark at)
+    {
+        if (string.IsNullOrEmpty(source) || at.Line <= 0) return string.Empty;
+
+        var lines = source.Replace("\r\n", "\n").Split('\n');
+        if (at.Line > lines.Length) return string.Empty;
+
+        var line = lines[(int)at.Line - 1];
+        var caret = (int)at.Column - 1;               // Mark.Column is 1-based
+        var prefix = string.Empty;
+
+        if (line.Length > MaxQuoted)
+        {
+            var from = Math.Max(0, Math.Min(caret - MaxQuoted / 2, line.Length - MaxQuoted));
+            line = line.Substring(from, Math.Min(MaxQuoted, line.Length - from));
+            caret -= from;
+            prefix = "…";
+        }
+
+        caret = Math.Clamp(caret, 0, line.Length);
+        var gutter = at.Line.ToString();
+
+        return $"\n{gutter} | {prefix}{line}"
+             + $"\n{new string(' ', gutter.Length)} | {new string(' ', prefix.Length + caret)}^";
     }
 
     /// <summary>
