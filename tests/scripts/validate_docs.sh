@@ -172,6 +172,45 @@ run_test "YAML job file execution (dry-run)" \
     "$DTPIPE" --job "$TMP_DIR/readme_job.yaml" --dry-run
 
 # ----------------------------------------
+# 3. MCP tool table matches the server
+# ----------------------------------------
+# The table in REFERENCE.md is what a reader is pointed at as the catalogue, and it is written by
+# hand — it named 'register-yaml-job', which the server has never exposed, while omitting four
+# tools it does. Ask the server instead of trusting the table.
+echo "--- [3] REFERENCE.md MCP tool table matches 'dtpipe mcp' ---"
+
+MCP_OUT="$TMP_DIR/mcp_tools.json"
+# The server stops at stdin EOF, so the input is held open past the reply.
+{ printf '%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"validate_docs","version":"1"}}}' \
+    '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+  sleep 5
+} | "$DTPIPE" mcp > "$MCP_OUT" 2>/dev/null || true
+
+SERVED="$(python3 -c "
+import json, sys
+for line in open('$MCP_OUT'):
+    line = line.strip()
+    if not line: continue
+    m = json.loads(line)
+    if m.get('id') == 2:
+        print('\n'.join(sorted(t['name'] for t in m['result']['tools'])))
+        break
+")"
+[ -z "$SERVED" ] && fail "'dtpipe mcp' returned no tool list"
+
+DOCUMENTED="$(sed -n '/^### Exposed MCP Tools/,/^---$/p' "$PROJECT_ROOT/REFERENCE.md" \
+    | sed -n 's/^| `\([a-z-]*\)` |.*/\1/p' | sort)"
+
+MISSING="$(comm -23 <(printf '%s\n' "$SERVED") <(printf '%s\n' "$DOCUMENTED") | tr '\n' ' ')"
+EXTRA="$(comm -13 <(printf '%s\n' "$SERVED") <(printf '%s\n' "$DOCUMENTED") | tr '\n' ' ')"
+
+[ -n "$(echo "$MISSING" | tr -d ' ')" ] && fail "MCP tools served but absent from REFERENCE.md: $MISSING"
+[ -n "$(echo "$EXTRA" | tr -d ' ')" ] && fail "REFERENCE.md documents MCP tools the server does not expose: $EXTRA"
+pass "$(printf '%s\n' "$SERVED" | wc -l | tr -d ' ') MCP tools, table and server agree"
+
+# ----------------------------------------
 # Cleanup
 # ----------------------------------------
 rm -rf "$TMP_DIR"

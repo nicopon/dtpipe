@@ -871,15 +871,18 @@ dtpipe mcp
 | `list-providers` | *(none)* | List all registered data readers, transformers, and writers |
 | `inspect` | `input`, `query?` | Inspect data source schema or auto-discover database tables if query is omitted |
 | `preview-data` | `input`, `limit?`, `query?` | Preview sample data rows (default: 5 rows) |
-| `validate-yaml-job` | `yamlContent` | Validate YAML job topology and syntax without running |
+| `validate-yaml-job` | `yamlContent` | Validate a YAML job without running it: syntax, topology, provider-option keys, and every transformer built as the engine builds it |
 | `execute-yaml-job` | `yamlContent`, `apply?`, `allowDestructive?`, `allowNetwork?` | Execute a YAML job in-memory. **Dry-run by default** (no write); `apply=true` performs a write, gated by the approval gate and the SQL safety policy |
-| `dry-run` | `yamlContent` | Validate, open the reader, report schema/estimated count without writing |
+| `dry-run` | `yamlContent`, `rows?` | Run the pipeline over a small sample through the real execution path with the writer neutralised, and return the rows leaving each stage. See [Sample Mode](#sample-mode--materialisation) |
+| `suggest-pipeline` | `source`, `destination`, `query?` | Inspect the source schema and return a ready-to-validate YAML skeleton for that source and destination |
 | `get-dag-topology` | `yamlContent` | Structured branch topology: alias, input, output, the ordered `transformers[]` applied between them, stream processor, and the `from[]` / `ref[]` upstream aliases per branch. Read-only — parses, runs nothing |
+| `list-cursors` | *(none)* | List the incremental cursors stored in the current workspace: column, last value, last run time, status and row count |
+| `list-checkpoints` | `session?` | List the materialised checkpoints of a session, each named by the hash of what produces it |
+| `read-checkpoint` | `checkpointKey`, `rows?`, `session?` | Read rows back from a materialised checkpoint without touching the original source |
 | `help` | *(none)* | General usage guidelines, YAML job structures, and DAG topology rules |
 | `get-adapter-help` | `adapterName` | Inspect connection string format, reader/writer options, and YAML examples for an adapter |
 | `get-transformer-help` | `transformerName` | Inspect options, mapping syntax, and YAML examples for a transformer |
 | `get-anonymization-help` | *(none)* | Inspect Bogus faker datasets, methods, and options for anonymization |
-| `register-yaml-job` | `name`, `yamlContent` | Register a YAML job configuration in memory to obtain a virtual `memory://` URI |
 
 ---
 
