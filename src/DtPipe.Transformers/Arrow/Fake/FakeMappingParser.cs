@@ -33,6 +33,23 @@ public sealed partial class FakeMappingParser
 	/// <summary>
 	/// Parses a mapping string in format COLUMN:value.
 	/// </summary>
+	/// <summary>
+	/// The dataset the caller already named, spelled out. Pointing at a listing instead names a
+	/// surface that has to exist on every side the transformer is reachable from — the message
+	/// sent people to '--fake-list', which is not a flag of this binary and never was.
+	/// </summary>
+	private string MethodsIn(string datasetName)
+	{
+		var methods = _registry.ListAll()
+			.Where(g => g.Dataset.Equals(datasetName, StringComparison.OrdinalIgnoreCase))
+			.SelectMany(g => g.Methods.Select(m => $"{g.Dataset}.{m.Method}"))
+			.ToList();
+
+		return methods.Count == 0
+			? $"Dataset '{datasetName}' has no methods."
+			: $"Available in '{datasetName}': {string.Join(", ", methods)}.";
+	}
+
 	public void Parse(string mapping)
 	{
 		// Format: COLUMN:dataset.method or COLUMN:{OTHER_COLUMN} template
@@ -72,7 +89,8 @@ public sealed partial class FakeMappingParser
 		{
 			if (!_registry.HasGenerator(baseFakerPath))
 			{
-				throw new InvalidOperationException($"Unknown faker method '{baseFakerPath}' for dataset '{datasetName}'. Use --fake-list to see available options.");
+				throw new InvalidOperationException(
+					$"Unknown faker method '{baseFakerPath}' for dataset '{datasetName}'. {MethodsIn(datasetName)}");
 			}
 			// Store full path including variant for distinct hashing
 			_mappings[column] = value;
