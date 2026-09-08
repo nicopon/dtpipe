@@ -314,7 +314,7 @@ public class McpHelpService : IMcpHelpService
         sw.WriteLine("          Email: internet.email");
         sw.WriteLine("          Name: name.fullName");
         sw.WriteLine();
-        sw.WriteLine("AVAILABLE DATASETS & METHODS (DYNAMICALLY RESOLVED):");
+        sw.WriteLine("AVAILABLE DATASETS & METHODS (DYNAMICALLY RESOLVED), each with one sample value:");
 
         var fakerRegistry = new DtPipe.Transformers.Arrow.Fake.FakerRegistry();
         foreach (var group in fakerRegistry.ListAll())
@@ -324,7 +324,10 @@ public class McpHelpService : IMcpHelpService
             {
                 var paddedMethod = method.Method.PadRight(25);
                 var desc = string.IsNullOrEmpty(method.Description) ? "" : $" {method.Description}";
-                sw.WriteLine($"    - {paddedMethod}{desc}");
+                // A sample says what a description cannot: whether this faker suits the column.
+                var sample = fakerRegistry.Sample($"{group.Dataset}.{method.Method}");
+                var shown = sample is null ? "" : $" -> {sample}";
+                sw.WriteLine($"    - {paddedMethod}{desc}{shown}");
             }
         }
 

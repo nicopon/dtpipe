@@ -882,7 +882,7 @@ dtpipe mcp
 | `help` | *(none)* | General usage guidelines, YAML job structures, and DAG topology rules |
 | `get-adapter-help` | `adapterName` | Inspect connection string format, reader/writer options, and YAML examples for an adapter |
 | `get-transformer-help` | `transformerName` | Inspect options, mapping syntax, and YAML examples for a transformer |
-| `get-anonymization-help` | *(none)* | Inspect Bogus faker datasets, methods, and options for anonymization |
+| `get-anonymization-help` | *(none)* | Every Bogus faker dataset and method, each with one sample value, plus the anonymization options |
 
 ---
 

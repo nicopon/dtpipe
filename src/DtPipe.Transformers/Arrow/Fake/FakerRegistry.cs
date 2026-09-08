@@ -63,6 +63,37 @@ public sealed class FakerRegistry
 			));
 	}
 
+	/// <summary>
+	/// One value the path actually produces, so a caller can judge whether the faker fits the
+	/// column before writing a pipeline around it. A recorded session rebuilt shoe brands by hand
+	/// in JavaScript without ever learning what 'commerce.product' yields.
+	///
+	/// <para>
+	/// Seeded once and shared, so the same build always prints the same listing — a help text that
+	/// changed on every call would read as instability rather than as sampling.
+	/// </para>
+	/// </summary>
+	public string? Sample(string path)
+	{
+		if (!_generators.TryGetValue(path, out var generator)) return null;
+
+		try
+		{
+			var value = generator(_sampler)?.ToString();
+			if (string.IsNullOrEmpty(value)) return null;
+			value = value.ReplaceLineEndings(" ");
+			return value.Length <= SampleWidth ? value : value[..SampleWidth] + "…";
+		}
+		catch
+		{
+			// A sample is a convenience; a generator that throws must not take the listing with it.
+			return null;
+		}
+	}
+
+	private const int SampleWidth = 32;
+	private readonly Faker _sampler = new("en") { Random = new Randomizer(20260909) };
+
 	private void RegisterBuiltInGenerators()
 	{
 		// Address
