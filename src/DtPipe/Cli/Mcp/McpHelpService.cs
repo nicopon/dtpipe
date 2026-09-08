@@ -305,6 +305,8 @@ public class McpHelpService : IMcpHelpService
         sw.WriteLine("  Specify column-level fakers in the 'mappings' section of the 'fake' transformer.");
         sw.WriteLine("  Syntax (under mappings):");
         sw.WriteLine("    <column_name>: <dataset>.<method>");
+        sw.WriteLine("  A value that is not one of the paths below is refused: 'firstName' is an error,");
+        sw.WriteLine("  'name.firstName' is the path. A '{Column}' template is also accepted.");
         sw.WriteLine("  Example YAML:");
         sw.WriteLine("    transformers:");
         sw.WriteLine("      - type: fake");

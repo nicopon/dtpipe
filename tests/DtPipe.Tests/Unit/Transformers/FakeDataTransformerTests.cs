@@ -107,19 +107,42 @@ public class FakeDataTransformerTests
 		TestBatchBuilder.GetVal(result!, 0, 0).Should().BeOfType<string>();
 	}
 
-	[Fact]
-	public async Task Transform_ShouldFallbackToString_WhenDatasetIsUnknown()
+	/// <summary>
+	/// An unresolvable value is refused, not written into every row. Accepting it as a constant is
+	/// what let a recorded session map four columns to 'firstName', 'lastName', 'safeEmail' and
+	/// 'membership' and ship two thousand rows of those four words as anonymised data. Writing a
+	/// constant is another transformer's job.
+	/// </summary>
+	[Theory]
+	[InlineData("NAME:invalid.dataset")]   // no such dataset
+	[InlineData("NAME:firstName")]         // a Bogus method without its dataset
+	[InlineData("NAME:Nike")]              // a plain word
+	[InlineData("NAME:nope:iban")]         // colon spelling of a path that does not exist
+	public void Constructor_ShouldThrow_WhenTheValueIsNotAFakerPath(string mapping)
 	{
-		// "invalid" is not a known dataset → treated as a hardcoded string literal
-		var options = new FakeOptions { Fake = new[] { "NAME:invalid.dataset" }, Seed = 123 };
-		var transformer = new FakeDataTransformer(options);
-		var columns = new List<PipeColumnInfo> { new("NAME", typeof(string), true) };
+		var act = () => new FakeDataTransformer(new FakeOptions { Fake = new[] { mapping }, Seed = 123 });
 
-		await transformer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-		var batch = TestBatchBuilder.FromRows(columns, new object?[] { "Original" });
-		var result = await transformer.TransformBatchAsync(batch);
+		act.Should().Throw<InvalidOperationException>()
+		   .WithMessage("*Unknown faker path*");
+	}
 
-		TestBatchBuilder.GetVal(result!, 0, 0).Should().Be("invalid.dataset");
+	/// <summary>The refusal carries what the dataset does have, so the next attempt has enough.</summary>
+	[Fact]
+	public void An_Unknown_Method_Names_The_Methods_Of_Its_Dataset()
+	{
+		var act = () => new FakeDataTransformer(new FakeOptions { Fake = new[] { "D:date" } });
+
+		act.Should().Throw<InvalidOperationException>()
+		   .WithMessage("*date.past*").And.Message.Should().NotContain("fake-list");
+	}
+
+	/// <summary>A refused path names the datasets, which is where a caller with no dot starts.</summary>
+	[Fact]
+	public void A_Refused_Path_Names_The_Datasets()
+	{
+		var act = () => new FakeDataTransformer(new FakeOptions { Fake = new[] { "NAME:firstName" } });
+
+		act.Should().Throw<InvalidOperationException>().WithMessage("*name*");
 	}
 
 	[Fact]

@@ -227,7 +227,7 @@ into one step; a different flag type starts a new step.
 
 | Flag | Syntax | Description |
 |:---|:---|:---|
-| `--fake` | `"Col:dataset.method"` | Generate fake data via [Bogus](https://github.com/bchavez/Bogus). **A column that does not exist in the incoming rows is created**, so `--fake` both anonymizes what is there and synthesizes what is not |
+| `--fake` | `"Col:dataset.method"` | Generate fake data via [Bogus](https://github.com/bchavez/Bogus). **A column that does not exist in the incoming rows is created**, so `--fake` both anonymizes what is there and synthesizes what is not. **A value that is not a known faker path is refused**, naming what the dataset has — `Col:firstName` is an error, `Col:name.firstName` is the path |
 | `--fake-locale` | `fr` | Locale for fake data generation |
 | `--fake-seed` | `12345` | Global seed for reproducible random fakes (also acts as a base offset for deterministic row/column faking) |
 | `--fake-seed-column` | `"UserId"` or `"Region,Branch"` | Column(s) used as a deterministic seed (same input -> same output). Supports comma-separated columns for composite seeds. |
@@ -546,7 +546,7 @@ branch-name:
 
 | Transformer | YAML key structure | Notes |
 |:---|:---|:---|
-| `fake` | `mappings: {col: dataset.method}` + `options: {locale, seed, seed-column, seed-row, skip-null}` | A mapped column that the incoming rows do not have is **created** |
+| `fake` | `mappings: {col: dataset.method}` + `options: {locale, seed, seed-column, seed-row, skip-null}` | A mapped column that the incoming rows do not have is **created**; a value that is not a known faker path is **refused** |
 | `null` | `mappings: {col: ~}` | Value is ignored |
 | `overwrite` | `mappings: {col: value}` | |
 | `mask` | `mappings: {col: pattern}` | `#` keeps, any other char replaces |

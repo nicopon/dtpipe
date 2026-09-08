@@ -38,17 +38,31 @@ public sealed partial class FakeMappingParser
 	/// surface that has to exist on every side the transformer is reachable from — the message
 	/// sent people to '--fake-list', which is not a flag of this binary and never was.
 	/// </summary>
-	private string MethodsIn(string datasetName)
+	private InvalidOperationException UnknownMethod(string path, string datasetName)
 	{
 		var methods = _registry.ListAll()
 			.Where(g => g.Dataset.Equals(datasetName, StringComparison.OrdinalIgnoreCase))
 			.SelectMany(g => g.Methods.Select(m => $"{g.Dataset}.{m.Method}"))
 			.ToList();
 
-		return methods.Count == 0
-			? $"Dataset '{datasetName}' has no methods."
-			: $"Available in '{datasetName}': {string.Join(", ", methods)}.";
+		return new InvalidOperationException(
+			$"Unknown faker method '{path}' for dataset '{datasetName}'. "
+		  + (methods.Count == 0
+				? $"Dataset '{datasetName}' has no methods."
+				: $"Available in '{datasetName}': {string.Join(", ", methods)}."));
 	}
+
+	/// <summary>
+	/// A value this transformer cannot resolve to a generator is refused rather than written into
+	/// every row. Silence made a Bogus method name given without its dataset — 'firstName' for
+	/// 'name.firstName' — fill the column with that word, and a recorded session shipped four
+	/// columns of 'firstName', 'lastName', 'safeEmail' and 'membership' as anonymised data.
+	/// Writing a constant is another transformer's job.
+	/// </summary>
+	private InvalidOperationException UnknownPath(string path) =>
+		new($"Unknown faker path '{path}'. A 'fake' mapping value is '<dataset>.<method>' "
+		  + "(e.g. 'name.firstName'), optionally suffixed '#variant', or a '{Column}' template. "
+		  + $"Datasets: {string.Join(", ", _registry.ListAll().Select(g => g.Dataset))}.");
 
 	public void Parse(string mapping)
 	{
@@ -88,33 +102,31 @@ public sealed partial class FakeMappingParser
 		if (_registry.HasDataset(datasetName))
 		{
 			if (!_registry.HasGenerator(baseFakerPath))
-			{
-				throw new InvalidOperationException(
-					$"Unknown faker method '{baseFakerPath}' for dataset '{datasetName}'. {MethodsIn(datasetName)}");
-			}
+				throw UnknownMethod(baseFakerPath, datasetName);
+
 			// Store full path including variant for distinct hashing
 			_mappings[column] = value;
+			return;
 		}
-		else if (value.Contains(':'))
+
+		// A colon where the dot belongs ("finance:iban") spells the same path.
+		if (baseFakerPath.Contains(':'))
 		{
-			// Fallback: User might have used colon instead of dot (e.g. "finance:iban")
 			var normalized = baseFakerPath.Replace(':', '.');
 			if (_registry.HasGenerator(normalized))
 			{
 				// Keep variant if present
 				_mappings[column] = variant is not null ? $"{normalized}#{variant}" : normalized;
+				return;
 			}
-			else
-			{
-				// Not a known faker even after normalization, treat as string
-				_mappings[column] = value;
-			}
+
+			var normalizedDataset = normalized.Split('.', 2)[0];
+			throw _registry.HasDataset(normalizedDataset)
+				? UnknownMethod(normalized, normalizedDataset)
+				: UnknownPath(baseFakerPath);
 		}
-		else
-		{
-			// Hardcoded string
-			_mappings[column] = value;
-		}
+
+		throw UnknownPath(baseFakerPath);
 	}
 
 	/// <summary>

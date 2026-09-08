@@ -63,6 +63,20 @@ public class McpTransformerHelpTests
     }
 
     /// <summary>
+    /// A value 'fake' does not recognise is refused. Accepting it as a constant is what let a
+    /// recorded session map four columns to 'firstName', 'lastName', 'safeEmail' and 'membership'
+    /// and ship two thousand rows of those four words as anonymised data.
+    /// </summary>
+    [Fact]
+    public void Fake_Says_That_An_Unknown_Value_Is_Refused()
+    {
+        var help = _help.GetTransformerHelp("fake");
+
+        Assert.Contains("refused", help, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("name.firstName", help);
+    }
+
+    /// <summary>
     /// project has no mappings-encoded property, so all three of its options are real and reachable
     /// — `--export-job` emits exactly this shape. Keying the exclusion on the component name hid
     /// 'project' from its own help.
