@@ -54,6 +54,22 @@ public class ToolErrorTests
         Assert.Contains("'help'", described);
     }
 
+    /// <summary>
+    /// A key the loader could not place is a different mistake from a shape it could not read: the
+    /// caller got the top level right. A recorded session wrote 'providers:' for 'provider-options:'
+    /// and had the whole block discarded in silence.
+    /// </summary>
+    [Fact]
+    public void An_Unplaceable_Key_Is_Answered_With_The_Keys_A_Branch_Takes()
+    {
+        var described = ToolError.Describe(Yaml("Property 'providers' not found on type 'JobDefinition'"));
+
+        Assert.Contains("A branch takes:", described);
+        Assert.Contains("provider-options", described);
+        Assert.Contains("transformers", described);
+        Assert.DoesNotContain("The top level of a job", described);
+    }
+
     /// <summary>The hint belongs to that one failure; every other message stays as it is.</summary>
     [Fact]
     public void Another_Failure_Gets_No_Shape_Hint()

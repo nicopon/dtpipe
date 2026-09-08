@@ -61,6 +61,22 @@ public class JobFileParserTests
 		}
 	}
 
+	/// <summary>
+	/// A key this loader does not know is refused. This fixture itself carried one for a cycle —
+	/// 'sql:' at branch level, where the query belongs under 'provider-options' — and the dropped
+	/// key went unnoticed because the assertions only looked at 'from' and 'ref'.
+	/// </summary>
+	[Fact]
+	public void Parse_ShouldRefuse_AKeyItDoesNotKnow()
+	{
+		var act = () => JobFileParser.ParseContent(@"
+joined:
+  sql: SELECT 1
+  from: p
+");
+		act.Should().Throw<YamlDotNet.Core.YamlException>().WithMessage("*sql*");
+	}
+
 	[Fact]
 	public void Parse_ShouldHandleMultiBranchDag()
 	{
@@ -71,7 +87,9 @@ p:
 c:
   input: data.csv
 joined:
-  sql: SELECT * FROM p JOIN c ON p.id = c.id
+  provider-options:
+    sql:
+      query: SELECT * FROM p JOIN c ON p.id = c.id
   from: p
   ref: [c]
 ";

@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Text.RegularExpressions;
 using DtPipe.Core.Security;
 using YamlDotNet.Core;
@@ -92,11 +93,25 @@ internal static class ToolError
     /// branch of that name and validated — the wrong guess cost the rest of the turn.
     /// </para>
     /// </summary>
-    private static string ShapeHint(string reason) =>
-        reason.Contains("JobDefinition", StringComparison.Ordinal)
-            ? ". The top level of a job is a map of branch aliases (e.g. 'main:'), each with its own "
-              + "'input:', 'output:', 'transformers:' and 'provider-options:'. Call 'help' for the full shape."
-            : string.Empty;
+    private static string ShapeHint(string reason)
+    {
+        if (!reason.Contains("JobDefinition", StringComparison.Ordinal)) return string.Empty;
+
+        // A key the loader could not place is a different mistake from a shape it could not read:
+        // the caller got the top level right and named one thing wrong inside a branch, so the
+        // answer is the list of keys a branch takes — read off the type, never written twice.
+        if (reason.Contains("not found", StringComparison.Ordinal))
+            return $". A branch takes: {BranchKeys}. Call 'help' for the full shape.";
+
+        return ". The top level of a job is a map of branch aliases (e.g. 'main:'), each with its own "
+             + "'input:', 'output:', 'transformers:' and 'provider-options:'. Call 'help' for the full shape.";
+    }
+
+    private static readonly string BranchKeys = string.Join(", ",
+        typeof(DtPipe.Core.Models.JobDefinition)
+            .GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
+            .Select(p => Pipeline.StringExtensions.ToKebabCase(p.Name))
+            .OrderBy(n => n, StringComparer.Ordinal));
 
     private static YamlException? Find(Exception? ex)
     {

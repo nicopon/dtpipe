@@ -184,17 +184,31 @@ main:
     public void ValidateYamlJob_A_Branch_With_Nothing_To_Read_Is_Refused()
     {
         var yaml = @"
-job:
-  sources:
-    - alias: customers
-      type: generate
-      rows: 2000
+main:
+  output: ""out.csv""
 ";
         var json = _tools.ValidateYamlJob(yaml);
 
         Assert.Contains("\"success\": false", json);
         Assert.Contains("nothing to read", json);
-        Assert.Contains("job", json);
+        Assert.Contains("main", json);
+    }
+
+    /// <summary>
+    /// The invented shape that started all this is now refused one step earlier, by the loader,
+    /// which names the key it could not place instead of leaving the caller to infer it.
+    /// </summary>
+    [Fact]
+    public void ValidateYamlJob_An_Invented_Shape_Is_Refused_By_Name()
+    {
+        var json = _tools.ValidateYamlJob(@"
+job:
+  sources:
+    - alias: customers
+      type: generate
+");
+        Assert.Contains("\"success\": false", json);
+        Assert.Contains("sources", json);
     }
 
     /// <summary>A branch fed by another through a stream processor reads through it, not through an

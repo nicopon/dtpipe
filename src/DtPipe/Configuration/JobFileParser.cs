@@ -61,9 +61,13 @@ public static partial class JobFileParser
 	/// </summary>
 	public static Dictionary<string, DtPipe.Core.Models.JobDefinition> ParseContent(string content, DtPipe.Cli.Security.ISecretsManager? secretsManager = null)
 	{
+		// A key this loader does not know is refused, not dropped. Three defects of one shape have
+		// been found this way — 'columns:' on a project transformer, an 'options:' block that built
+		// nothing, and 'providers:' for 'provider-options:' — each silently discarded, each leaving
+		// a job that validated and did not do what it said. The parser reports the line, which
+		// ToolError then quotes back to the caller.
 		var deserializer = new DeserializerBuilder()
 			.WithNamingConvention(HyphenatedNamingConvention.Instance)
-			.IgnoreUnmatchedProperties()
 			.WithNodeDeserializer(new InterpolatingNodeDeserializer(secretsManager), s => s.OnTop())
 			.Build();
 
