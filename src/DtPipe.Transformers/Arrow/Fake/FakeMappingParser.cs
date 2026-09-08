@@ -132,13 +132,35 @@ public sealed partial class FakeMappingParser
 	/// <summary>
 	/// Parses multiple mappings.
 	/// </summary>
+	/// <summary>
+	/// Parses every mapping and reports every one it rejects, not the first.
+	///
+	/// <para>
+	/// Stopping at the first cost a round trip per wrong path. A recorded session spent five of its
+	/// eleven iterations discovering faker paths one dataset at a time — seven mappings, five of
+	/// them wrong — and answered the fifth refusal by abandoning 'fake' for JavaScript, which
+	/// accepts anything.
+	/// </para>
+	/// </summary>
 	public void ParseAll(IEnumerable<string>? mappings)
 	{
 		if (mappings is null) return;
+
+		List<string>? refused = null;
 		foreach (var mapping in mappings)
 		{
-			Parse(mapping);
+			try
+			{
+				Parse(mapping);
+			}
+			catch (InvalidOperationException ex)
+			{
+				(refused ??= []).Add(ex.Message);
+			}
 		}
+
+		if (refused is { Count: > 0 })
+			throw new InvalidOperationException(string.Join(" ", refused));
 	}
 
 	/// <summary>

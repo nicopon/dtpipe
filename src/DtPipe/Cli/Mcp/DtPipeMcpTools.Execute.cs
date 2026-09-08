@@ -400,6 +400,20 @@ public partial class DtPipeMcpTools
         return errors;
     }
 
+    /// <summary>
+    /// The tool that answers the question a refusal raises, named where naming it is true.
+    ///
+    /// <para>
+    /// The transformer cannot say this itself: it is reached from the command line too, where no
+    /// such tool exists — that is how the message came to cite '--fake-list', a flag this binary
+    /// never had. Here the catalogue is the caller's own, so the pointer holds.
+    /// </para>
+    /// </summary>
+    private static string HelpPointerFor(string transformerType) =>
+        transformerType.Equals("fake", StringComparison.OrdinalIgnoreCase)
+            ? " Call 'get-anonymization-help' for every dataset and method at once."
+            : $" Call 'get-transformer-help' with '{transformerType}' for its options and examples.";
+
     /// <summary>A provider-options block name split into its component and the side it pins, if any.</summary>
     private static (string Component, bool WriterOnly, bool ReaderOnly) SplitBlock(string block) =>
         block.EndsWith("-writer", StringComparison.OrdinalIgnoreCase) ? (block[..^7], true, false)
@@ -442,7 +456,7 @@ public partial class DtPipeMcpTools
                 }
                 catch (Exception ex)
                 {
-                    errors.Add($"Branch '{alias}', transformer '{t.Type}': {ToolError.Describe(ex)}");
+                    errors.Add($"Branch '{alias}', transformer '{t.Type}': {ToolError.Describe(ex)}{HelpPointerFor(t.Type)}");
                 }
             }
         }

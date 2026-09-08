@@ -93,6 +93,34 @@ main:
     public void A_Faker_Method_That_Exists_Passes()
         => Assert.Contains("\"success\": true", _tools.ValidateYamlJob(string.Format(WithFaker, "date.past")));
 
+    /// <summary>
+    /// Every wrong mapping at once. Reporting the first cost a round trip each: a recorded session
+    /// spent five of eleven iterations on seven mappings, five of them wrong.
+    /// </summary>
+    [Fact]
+    public void Every_Wrong_Faker_In_One_Block_Is_Reported_Together()
+    {
+        var json = _tools.ValidateYamlJob(@"
+main:
+  input: ""input.csv""
+  output: ""out.csv""
+  transformers:
+    - type: fake
+      mappings:
+        a: ""date""
+        b: ""firstName""
+        c: ""commerce.brand""
+");
+        Assert.Contains("date.past", json);          // a — the dataset's methods
+        Assert.Contains("Datasets:", json);          // b — no dataset at all
+        Assert.Contains("commerce.product", json);   // c — the dataset's methods
+    }
+
+    /// <summary>The refusal names the tool that answers it — legal here, where that tool exists.</summary>
+    [Fact]
+    public void A_Faker_Refusal_Names_The_Tool_That_Lists_Them()
+        => Assert.Contains("get-anonymization-help", _tools.ValidateYamlJob(string.Format(WithFaker, "date")));
+
     /// <summary>An options block that builds no transformer is refused by the engine; so here.</summary>
     [Fact]
     public void A_Transformer_That_Builds_Nothing_Is_Refused()
