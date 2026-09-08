@@ -406,22 +406,43 @@ public partial class DtPipeMcpTools
         : block.EndsWith("-reader", StringComparison.OrdinalIgnoreCase) ? (block[..^7], false, true)
         : (block, false, false);
 
+    /// <summary>
+    /// A transformer is checked by building it, which is what the engine does with the same
+    /// factory and the same <see cref="YamlTransformerBuilder"/> — construction only, no reader,
+    /// no connection, no row.
+    ///
+    /// <para>
+    /// Checking the type name alone made the validator weaker than the engine on everything a
+    /// transformer rejects at construction: a faker method that does not exist, a rename that is
+    /// not 'Old:New', an options block that produces nothing. A recorded session was told a job
+    /// was valid and delivered it; the run died on 'Unknown faker method' before a row moved.
+    /// </para>
+    /// </summary>
     private List<string> ValidateJobTransformers(Dictionary<string, JobDefinition> jobs)
     {
         var errors = new List<string>();
-        var transformerFactories = _serviceProvider.GetRequiredService<IEnumerable<IDataTransformerFactory>>();
-        var registeredTransformers = new HashSet<string>(transformerFactories.Select(f => f.ComponentName), StringComparer.OrdinalIgnoreCase);
+        var transformerFactories = _serviceProvider.GetRequiredService<IEnumerable<IDataTransformerFactory>>().ToList();
 
         foreach (var (alias, job) in jobs)
         {
-            if (job.Transformers != null)
+            foreach (var t in job.Transformers ?? new List<Core.Pipelines.TransformerConfig>())
             {
-                foreach (var t in job.Transformers)
+                if (string.IsNullOrEmpty(t.Type)) continue;
+
+                var factory = transformerFactories.FirstOrDefault(f => f.ComponentName.Equals(t.Type, StringComparison.OrdinalIgnoreCase));
+                if (factory is null)
                 {
-                    if (!string.IsNullOrEmpty(t.Type) && !registeredTransformers.Contains(t.Type))
-                    {
-                        errors.Add($"Branch '{alias}': Unknown transformer type '{t.Type}'. Call 'list-providers' to see valid transformer types (e.g., 'fake', 'compute', 'filter', 'project'). Note: Joins across data sources are configured using the 'sql' provider under 'provider-options', not as a transformer type.");
-                    }
+                    errors.Add($"Branch '{alias}': Unknown transformer type '{t.Type}'. Call 'list-providers' to see valid transformer types (e.g., 'fake', 'compute', 'filter', 'project'). Note: Joins across data sources are configured using the 'sql' provider under 'provider-options', not as a transformer type.");
+                    continue;
+                }
+
+                try
+                {
+                    (YamlTransformerBuilder.Build(factory, t) as IDisposable)?.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    errors.Add($"Branch '{alias}', transformer '{t.Type}': {ToolError.Describe(ex)}");
                 }
             }
         }
