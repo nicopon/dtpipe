@@ -180,13 +180,23 @@ run_test "YAML job file execution (dry-run)" \
 echo "--- [3] REFERENCE.md MCP tool table matches 'dtpipe mcp' ---"
 
 MCP_OUT="$TMP_DIR/mcp_tools.json"
-# The server stops at stdin EOF, so the input is held open past the reply.
+MCP_IN="$TMP_DIR/mcp_in.fifo"
+# `dtpipe mcp` serves STDIO until it is stopped: it does not exit when its input ends, so the
+# request goes in through a fifo and the server is killed once the reply is on disk. Without the
+# kill this check waits forever.
+rm -f "$MCP_IN"; mkfifo "$MCP_IN"
+"$DTPIPE" mcp < "$MCP_IN" > "$MCP_OUT" 2>/dev/null &
+MCP_PID=$!
 { printf '%s\n' \
     '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"validate_docs","version":"1"}}}' \
     '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
     '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
-  sleep 5
-} | "$DTPIPE" mcp > "$MCP_OUT" 2>/dev/null || true
+  # The fifo is held open while the server answers; closing it early would end the session.
+  for _ in $(seq 30); do grep -q '"id":2' "$MCP_OUT" 2>/dev/null && break; sleep 0.5; done
+} > "$MCP_IN"
+kill "$MCP_PID" 2>/dev/null || true
+wait "$MCP_PID" 2>/dev/null || true
+rm -f "$MCP_IN"
 
 SERVED="$(python3 -c "
 import json, sys
