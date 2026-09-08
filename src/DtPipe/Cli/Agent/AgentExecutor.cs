@@ -282,6 +282,8 @@ public class AgentExecutor
         CancellationToken ct)
      {
         var toolCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        // What each call already answered in this turn — see AnsweredCall.
+        var answered = new Dictionary<string, AnsweredCall>(StringComparer.Ordinal);
            // F1: the LLM only sees the tools allowed for the current mode (in PLAN mode,
           // 'execute-yaml-job' is filtered out so the model cannot drive execution).
         var availableTools = _toolProvider.GetToolDefinitions(Mode);
@@ -474,10 +476,21 @@ public class AgentExecutor
                {
                  var call = calls[i];
                  var outcome = outcomes[i];
-                 string toolResultRaw = (outcome.Content ?? "{}");
+                 string answer = outcome.Content ?? "{}";
                  string argsFormatted = call.Arguments.ValueKind != JsonValueKind.Undefined ? call.Arguments.ToString() : "{}";
 
-                 toolResultRaw ??= "{}";
+                 // A repeat is established on the pair, not on the question: the call ran, and the
+                 // answer came back the same. Predicting instead — replaying a cached answer for a
+                 // question already asked — would have dtpipe assert "this cannot return anything
+                 // new" about a source another process is free to change, which is the one thing
+                 // this whole surface must never do.
+                 var callKey = AnsweredCall.KeyOf(call);
+                 string toolResultRaw = answer;
+                 if (answered.TryGetValue(callKey, out var prior) && prior.Answer == answer)
+                     toolResultRaw = prior.Advise(answer);
+                 else
+                     answered[callKey] = new AnsweredCall(Trajectory.Steps.Count + 1, answer);
+
                  if (renderTui)
                      view!.ToolResult(call.Name, toolResultRaw, outcome.IsError);
                  if (recordTrajectory)
@@ -488,8 +501,9 @@ public class AgentExecutor
 
                    // F4: cache "fact" tool results so they survive conversation compaction. The
                    // fact key is derived from the call's arguments so re-inspections of the same
-                   // input overwrite rather than accumulate.
-                  RecordFactFor(call, toolResultRaw, outcome.IsError);
+                   // input overwrite rather than accumulate. The fact is the answer; the advice
+                   // wrapped around it is not one.
+                  RecordFactFor(call, answer, outcome.IsError);
                  }
 
              producedYaml = argYaml;
