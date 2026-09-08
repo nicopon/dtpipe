@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using DtPipe.Cli.Mcp;
@@ -408,6 +409,37 @@ main:
         Assert.Contains("main:", result);
         Assert.Contains("input: \"csv:input.csv\"", result);
         Assert.Contains("output: \"sqlite:output.db\"", result);
+    }
+
+    /// <summary>
+    /// The skeleton is the one thing this tool exists to produce, so every line of it must bind.
+    /// It offered 'project' a 'columns:' list, which the deserializer drops: the transformer was
+    /// built with an empty whitelist, passed every column through, and validated. A recorded
+    /// session copied that block into all six candidates it wrote.
+    /// </summary>
+    [Fact]
+    public async System.Threading.Tasks.Task SuggestPipeline_The_Project_Block_It_Offers_Binds()
+    {
+        var skeleton = await _tools.SuggestPipeline("csv:input.csv", "sqlite:output.db");
+
+        var uncommented = string.Join("\n", skeleton
+            .Split('\n')
+            .Select(l => System.Text.RegularExpressions.Regex.Replace(l, @"^(\s*)# ?", "$1"))
+            .Where(l => !l.TrimStart().StartsWith("Source schema", StringComparison.Ordinal)
+                     && !l.TrimStart().StartsWith("- id (", StringComparison.Ordinal)
+                     && !l.TrimStart().StartsWith("- name (", StringComparison.Ordinal)
+                     && !l.TrimStart().StartsWith("Uncomment", StringComparison.Ordinal)
+                     && !l.TrimStart().StartsWith("(keys are", StringComparison.Ordinal)));
+
+        var job = DtPipe.Configuration.JobFileParser.ParseContent(uncommented)["main"];
+        var project = Assert.Single(job.Transformers!, t => t.Type == "project");
+
+        var options = (DtPipe.Transformers.Arrow.Project.ProjectOptions)
+            new DtPipe.Transformers.Arrow.Project.ProjectDataTransformerFactory(
+                _serviceProvider.GetRequiredService<OptionsRegistry>())
+            .CreateOptionsFromYaml(project)!;
+
+        Assert.Equal(new[] { "id", "name" }, options.Project);
     }
 }
 

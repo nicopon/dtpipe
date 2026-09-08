@@ -437,13 +437,19 @@ public partial class DtPipeMcpTools
                     sb.AppendLine($"  #   - {col.Name} ({col.ClrType?.Name ?? "unknown"}, nullable: {col.IsNullable})");
                 }
                 sb.AppendLine();
-                sb.AppendLine("  # Uncomment and modify to select or transform columns:");
+                // 'project' whitelists through 'mappings:' keys — the form its own help publishes
+                // and the one '--export-job' emits. A skeleton offering 'columns:' binds nothing:
+                // the key is dropped by the deserializer, the transformer is built with an empty
+                // whitelist and passes every column through, and validation says the job is fine.
+                // A recorded session copied it into all six of its candidates.
+                sb.AppendLine("  # Uncomment and modify to select or transform columns");
+                sb.AppendLine("  # (keys are the columns to keep, in order; values are ignored):");
                 sb.AppendLine("  # transformers:");
                 sb.AppendLine("  #   - type: project");
-                sb.AppendLine("  #     columns:");
+                sb.AppendLine("  #     mappings:");
                 foreach (var col in columns)
                 {
-                    sb.AppendLine($"  #       - {col.Name}");
+                    sb.AppendLine($"  #       {col.Name}: ~");
                 }
             }
 
