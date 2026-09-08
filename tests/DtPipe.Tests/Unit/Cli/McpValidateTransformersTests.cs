@@ -121,6 +121,40 @@ main:
     public void A_Faker_Refusal_Names_The_Tool_That_Lists_Them()
         => Assert.Contains("get-anonymization-help", _tools.ValidateYamlJob(string.Format(WithFaker, "date")));
 
+    /// <summary>
+    /// A verdict of "valid" is read as "done". It has to say what it did not look at: a recorded
+    /// session delivered a plan this tool passed and the engine refused on the first column name.
+    /// </summary>
+    [Fact]
+    public void The_Success_Says_What_It_Did_Not_Check_And_Names_Dry_Run()
+    {
+        var json = _tools.ValidateYamlJob(string.Format(WithFaker, "date.past"));
+
+        Assert.Contains("notChecked", json);
+        Assert.Contains("dry-run", json);
+    }
+
+    /// <summary>
+    /// The shape it just built, beside the verdict. A recorded session wrote three branches whose
+    /// foreign keys were Math.random() because nothing showed it the branches were independent.
+    /// </summary>
+    [Fact]
+    public void The_Success_Reports_The_Shape_Of_The_Job()
+    {
+        var json = _tools.ValidateYamlJob(@"
+products:
+  input: ""input.csv""
+  output: ""sqlite:Data Source=shop.db""
+customers:
+  input: ""input.csv""
+  output: ""sqlite:Data Source=shop.db""
+");
+        Assert.Contains("\"branchesReadingAnother\": 0", json);
+        Assert.Contains("\"independent\": 2", json);
+        Assert.Contains("sharedTargets", json);
+        Assert.Contains("shop.db", json);
+    }
+
     /// <summary>An options block that builds no transformer is refused by the engine; so here.</summary>
     [Fact]
     public void A_Transformer_That_Builds_Nothing_Is_Refused()

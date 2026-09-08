@@ -17,6 +17,7 @@ using DtPipe.Cli;
 using DtPipe.Cli.Pipeline;
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Cli.Security;
+using DtPipe.Core.Security;
 using ModelContextProtocol.Server;
 namespace DtPipe.Cli.Mcp;
 
@@ -39,6 +40,49 @@ public partial class DtPipeMcpTools
         errors.AddRange(ValidateProviderOptionKeys(build.Jobs));
 
         return new YamlParseResult(build.Jobs, build.Dag, errors);
+    }
+
+    /// <summary>
+    /// What the job is shaped like, returned beside the verdict.
+    ///
+    /// <para>
+    /// Strictly descriptive: how many branches, which read another, which targets they share. A
+    /// recorded session built three branches whose foreign keys were <c>Math.random()</c> because
+    /// nothing ever showed it that its branches were independent — the <c>from</c>/<c>ref</c>
+    /// grammar was in 'help', nine iterations earlier and in the abstract. Saying what was built,
+    /// in the tool the model actually returns to, is not advice; it is the shape it just made.
+    /// </para>
+    /// </summary>
+    private static object Shape(YamlParseResult parsed)
+    {
+        var branches = parsed.Dag.Branches
+            .Select(b => new
+            {
+                alias = b.Alias,
+                reads = parsed.Jobs.TryGetValue(b.Alias, out var j) && !string.IsNullOrEmpty(j.Input)
+                    ? ConnectionStringSanitizer.Sanitize(j.Input) : null,
+                writes = parsed.Jobs.TryGetValue(b.Alias, out var w) && !string.IsNullOrEmpty(w.Output)
+                    ? ConnectionStringSanitizer.Sanitize(w.Output) : null,
+                from = parsed.Jobs.TryGetValue(b.Alias, out var f) && !string.IsNullOrEmpty(f.From) ? f.From : null,
+                @ref = parsed.Jobs.TryGetValue(b.Alias, out var r) ? r.Ref : Array.Empty<string>()
+            })
+            .ToList();
+
+        var linked = branches.Count(b => b.from is not null || b.@ref.Length > 0);
+        var sharedTargets = branches
+            .Where(b => b.writes is not null)
+            .GroupBy(b => b.writes!, StringComparer.Ordinal)
+            .Where(g => g.Count() > 1)
+            .Select(g => new { target = g.Key, branches = g.Select(b => b.alias).ToList() })
+            .ToList();
+
+        return new
+        {
+            branches,
+            branchesReadingAnother = linked,
+            independent = branches.Count - linked,
+            sharedTargets
+        };
     }
 
     /// <summary>
@@ -100,7 +144,13 @@ public partial class DtPipeMcpTools
             return JsonSerializer.Serialize(new
             {
                 success = true,
-                message = "YAML job configuration and topology are valid."
+                message = "YAML job configuration and topology are valid.",
+                @checked = "Syntax, branch topology, provider-option keys, and every transformer built the way "
+                         + "the engine builds it.",
+                notChecked = "The source is never opened here, so no column name is verified: a transformer "
+                           + "naming a column the source does not carry fails when the job runs, not now. "
+                           + "Call 'dry-run' on this same YAML to check it against the real schema.",
+                shape = Shape(parsed)
             }, new JsonSerializerOptions { WriteIndented = true });
         }
         catch (Exception ex)
