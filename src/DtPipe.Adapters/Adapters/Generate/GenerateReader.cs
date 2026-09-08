@@ -26,20 +26,35 @@ public partial class GenerateReader : IStreamReader, IColumnarStreamReader, IReq
 		{
 			if (part.StartsWith("count=", StringComparison.OrdinalIgnoreCase))
 			{
-				if (TryParseWithSuffix(part["count=".Length..], out var count))
-					_options.RowCount = count;
+				if (!TryParseWithSuffix(part["count=".Length..], out var count)) throw Reject(part);
+				_options.RowCount = count;
 			}
 			else if (part.StartsWith("rate=", StringComparison.OrdinalIgnoreCase))
 			{
-				if (TryParseWithSuffix(part["rate=".Length..], out var rate))
-					_options.RowsPerSecond = (int)rate;
+				if (!TryParseWithSuffix(part["rate=".Length..], out var rate)) throw Reject(part);
+				_options.RowsPerSecond = (int)rate;
 			}
-			else if (TryParseWithSuffix(part, out var rawCount))
+			else
 			{
+				if (!TryParseWithSuffix(part, out var rawCount)) throw Reject(part);
 				_options.RowCount = rawCount;
 			}
 		}
 	}
+
+	/// <summary>
+	/// What this reader takes is a row count, and anything else is refused rather than dropped.
+	///
+	/// <para>
+	/// Ignoring it silently fell back to the default 100 rows: a recorded session wrote
+	/// 'generate:id' — meaning "an id column" — and got a hundred rows of something it never asked
+	/// for, with nothing said. A connection string is not the place to name a column.
+	/// </para>
+	/// </summary>
+	private static InvalidOperationException Reject(string part) =>
+		new($"'{part}' is not a row count. The 'generate' connection string is 'generate:N' "
+		  + "(N accepts a 'k' or 'm' suffix, e.g. 'generate:10m'), or 'generate:count=N;rate=R'. "
+		  + "It names no columns: a column is added by a transformer.");
 
 	private static bool TryParseWithSuffix(string input, out long result)
 	{
