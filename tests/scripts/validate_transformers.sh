@@ -189,7 +189,7 @@ verify_baseline "$A/trans_filter.csv" "Filter"
 # ----------------------------------------
 echo "--- [11] Expand ---"
 "$DTPIPE" -i "generate:10" \
-  --compute "Tags:\"['A','B','C']\"" \
+  --overwrite "Tags:['A','B','C']" \
   --drop "GenerateIndex" \
   --expand "JSON.parse(row.Tags.replace(/'/g, '\"')).map(t => ({ ...row, Tags: t }))" \
   -o "$A/trans_expand.csv" --no-stats

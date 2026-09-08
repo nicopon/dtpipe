@@ -548,7 +548,7 @@ branch-name:
 |:---|:---|:---|
 | `fake` | `mappings: {col: dataset.method}` + `options: {locale, seed, seed-column, seed-row, skip-null}` | A mapped column that the incoming rows do not have is **created**; a value that is not a known faker path is **refused** |
 | `null` | `mappings: {col: ~}` | Value is ignored |
-| `overwrite` | `mappings: {col: value}` | |
+| `overwrite` | `mappings: {col: value}` | A mapped column the incoming rows do not carry is **created** (string, appended); `skip-null` has nothing to skip on one |
 | `mask` | `mappings: {col: pattern}` | `#` keeps, any other char replaces |
 | `format` | `mappings: {col: "{A} {B}"}` | .NET composite format |
 | `compute` | `mappings: {col: expression}` | JS expression per column |

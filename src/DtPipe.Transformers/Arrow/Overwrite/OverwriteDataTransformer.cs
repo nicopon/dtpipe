@@ -15,6 +15,7 @@ public class OverwriteDataTransformer : BaseColumnarTransformer, IRequiresOption
 	private readonly Dictionary<string, string> _staticMappings = new(StringComparer.OrdinalIgnoreCase);
 	private readonly bool _skipNull;
 	private object?[]? _columnValues;
+	private string[] _created = [];
 
 	public bool HasOverwrite => _staticMappings.Count > 0;
 
@@ -42,8 +43,15 @@ public class OverwriteDataTransformer : BaseColumnarTransformer, IRequiresOption
 			return columns;
 		}
 
-		bool hasMappingForColumns = false;
-		var values = new string?[columns.Count];
+		// A mapping the incoming rows do not carry creates its column, appended after the real
+		// ones — the rule 'fake' and 'format' already follow. Skipping it instead made a
+		// misspelled name do nothing at all, which nothing in the output could show.
+		_created = _staticMappings.Keys
+			.Where(name => !columns.Any(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase)))
+			.ToArray();
+
+		var values = new string?[columns.Count + _created.Length];
+		bool hasMappingForColumns = _created.Length > 0;
 
 		for (var i = 0; i < columns.Count; i++)
 		{
@@ -52,11 +60,10 @@ public class OverwriteDataTransformer : BaseColumnarTransformer, IRequiresOption
 				values[i] = val;
 				hasMappingForColumns = true;
 			}
-			else
-			{
-				values[i] = null;
-			}
 		}
+
+		for (var i = 0; i < _created.Length; i++)
+			values[columns.Count + i] = _staticMappings[_created[i]];
 
 		if (!hasMappingForColumns)
 		{
@@ -66,18 +73,16 @@ public class OverwriteDataTransformer : BaseColumnarTransformer, IRequiresOption
 
 		_columnValues = values;
 
-		var outputColumns = new List<PipeColumnInfo>(columns.Count);
+		var outputColumns = new List<PipeColumnInfo>(values.Length);
 		for (var i = 0; i < columns.Count; i++)
 		{
-			if (values[i] != null)
-			{
-				outputColumns.Add(columns[i] with { ClrType = typeof(string) });
-			}
-			else
-			{
-				outputColumns.Add(columns[i]);
-			}
+			outputColumns.Add(values[i] != null
+				? columns[i] with { ClrType = typeof(string) }
+				: columns[i]);
 		}
+
+		foreach (var name in _created)
+			outputColumns.Add(new PipeColumnInfo(name, typeof(string), true));
 
 		return outputColumns;
 	}
@@ -86,10 +91,11 @@ public class OverwriteDataTransformer : BaseColumnarTransformer, IRequiresOption
 	{
 		if (_columnValues == null) return new ValueTask<RecordBatch?>(batch);
 
-		var arrays = new IArrowArray[batch.Schema.FieldsList.Count];
-		var outputFields = new List<Field>();
+		var real = batch.Schema.FieldsList.Count;
+		var arrays = new IArrowArray[real + _created.Length];
+		var outputFields = new List<Field>(arrays.Length);
 
-		for (int i = 0; i < arrays.Length; i++)
+		for (int i = 0; i < real; i++)
 		{
 			var field = batch.Schema.FieldsList[i];
 			var staticVal = _columnValues[i];
@@ -107,6 +113,13 @@ public class OverwriteDataTransformer : BaseColumnarTransformer, IRequiresOption
 				arrays[i] = ArrowOwnership.RetainArray(batch.Column(i));
 				outputFields.Add(field);
 			}
+		}
+
+		// A created column has no source value, so 'skip-null' has nothing to skip.
+		for (int i = 0; i < _created.Length; i++)
+		{
+			arrays[real + i] = BuildConstant(_columnValues[real + i]!.ToString() ?? "", batch.Length);
+			outputFields.Add(new Field(_created[i], StringType.Default, true));
 		}
 
 		var newSchema = new Schema(outputFields, batch.Schema.Metadata);
@@ -130,6 +143,13 @@ public class OverwriteDataTransformer : BaseColumnarTransformer, IRequiresOption
 			}
 		}
 
+		return builder.Build();
+	}
+
+	private static IArrowArray BuildConstant(string value, int length)
+	{
+		var builder = new StringArray.Builder();
+		for (int i = 0; i < length; i++) builder.Append(value);
 		return builder.Build();
 	}
 }
