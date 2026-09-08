@@ -873,7 +873,7 @@ dtpipe mcp
 | `preview-data` | `input`, `limit?`, `query?` | Preview sample data rows (default: 5 rows) |
 | `validate-yaml-job` | `yamlContent` | Validate a YAML job without running it: syntax, topology, provider-option keys, and every transformer built as the engine builds it |
 | `execute-yaml-job` | `yamlContent`, `apply?`, `allowDestructive?`, `allowNetwork?` | Execute a YAML job in-memory. **Dry-run by default** (no write); `apply=true` performs a write, gated by the approval gate and the SQL safety policy |
-| `dry-run` | `yamlContent`, `rows?` | Run the pipeline over a small sample through the real execution path with the writer neutralised, and return the rows leaving each stage. See [Sample Mode](#sample-mode--materialisation) |
+| `dry-run` | `yamlContent`, `rows?` | Run the pipeline over a small sample through the real execution path with the writer neutralised, and return the rows leaving each stage, plus any column one transformer produced and a later one wrote over. See [Sample Mode](#sample-mode--materialisation) |
 | `suggest-pipeline` | `source`, `destination`, `query?` | Inspect the source schema and return a ready-to-validate YAML skeleton for that source and destination |
 | `get-dag-topology` | `yamlContent` | Structured branch topology: alias, input, output, the ordered `transformers[]` applied between them, stream processor, and the `from[]` / `ref[]` upstream aliases per branch. Read-only — parses, runs nothing |
 | `list-cursors` | *(none)* | List the incremental cursors stored in the current workspace: column, last value, last run time, status and row count |

@@ -271,7 +271,12 @@ public partial class DtPipeMcpTools
             errors = report.ConstraintValidation.Errors,
             warnings = report.ConstraintValidation.Warnings
         },
-        performanceHints = report.PerformanceHints
+        performanceHints = report.PerformanceHints,
+        // Reported, not judged: a produced column written over again is sometimes the point and
+        // sometimes a stage doing nothing. Only the author can tell, so the fact is stated.
+        producedThenReplaced = DtPipe.DryRun.SampleRunExtensions.ProducedThenReplaced(report.Run)
+            .Select(r => new { column = r.Column, producedBy = r.ProducedBy, replacedBy = r.ReplacedBy })
+            .ToList()
     };
 
 
