@@ -28,6 +28,12 @@ public class OllamaClientResilienceTests
     private static readonly List<ChatMessage> Msgs = new() { new ChatMessage("user", "hi") };
     private static readonly List<ToolDefinition> NoTools = new();
 
+    /// <summary>
+    /// The deadline is an IDLE ceiling on both paths — the blocking call reads the same streamed
+    /// response with nobody watching it — so a stalled endpoint is reported as silence, not as a
+    /// call that ran too long. It was a total deadline here and an idle one when streaming, and a
+    /// 12B model generating a long YAML was cut off mid-answer and told it had been silent.
+    /// </summary>
     [Fact]
     public async Task Endpoint_Timeout_Returns_An_Error_Response_Not_An_Exception()
     {
@@ -42,7 +48,7 @@ public class OllamaClientResilienceTests
 
         Assert.True(resp.Done);
         Assert.NotNull(resp.Error);
-        Assert.Contains("did not respond within", resp.Error);
+        Assert.Contains("sent no output for", resp.Error);
     }
 
     /// <summary>

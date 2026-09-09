@@ -33,11 +33,10 @@ public class OllamaClient : ILlmClient, IStreamingLlmClient
     /// Hands the deadline to <see cref="_chatTimeout"/> alone.
     ///
     /// <para>
-    /// HttpClient's own default is 100 s, and whichever expires first wins — so on the blocking
-    /// path <c>--llm-timeout</c> did nothing above 100 s while the failure was still reported as
-    /// "did not respond within {--llm-timeout}s". A measurement run recorded turns dying after
-    /// 122 s and being told they had waited 420. Removing this line puts the cap back and makes
-    /// the message lie again.
+    /// HttpClient's own default is 100 s and whichever expires first wins, so without this line
+    /// <c>--llm-timeout</c> silently stops mattering above 100 s while the failure still reports
+    /// the flag's value. A measurement run recorded turns dying after 122 s and being told they
+    /// had waited 420.
     /// </para>
     /// </summary>
     private static HttpClient Unbounded(HttpClient http)
@@ -149,7 +148,7 @@ public class OllamaClient : ILlmClient, IStreamingLlmClient
         return JsonSerializer.Serialize(new { model, messages, tools, options, stream }, JsonOpts);
     }
 
-    public async Task<LlmResponse> ChatAsync(
+    public Task<LlmResponse> ChatAsync(
         string baseUrl,
         string model,
         List<ChatMessage> messages,
@@ -158,63 +157,13 @@ public class OllamaClient : ILlmClient, IStreamingLlmClient
         double temperature = 0.7,
         int? seed = null,
         CancellationToken ct = default)
-     {
-        var url = baseUrl.TrimEnd('/') + "/api/chat";
-        var requestJson = BuildRequestJson(model, MapMessages(messages), MapTools(tools), numCtx, temperature, seed, stream: false);
-
-        // A single chat call is bounded by _chatTimeout. Without it the call rides HttpClient's
-        // own 100 s default and surfaces as a bare TaskCanceledException — indistinguishable from
-        // a user Ctrl-C, which the CLI turns into a silent exit 130.
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(_chatTimeout);
-
-        try
-        {
-            using var content = new StringContent(requestJson, Encoding.UTF8, "application/json");
-            using var response = await _http.PostAsync(url, content, timeoutCts.Token);
-            var responseJson = await response.Content.ReadAsStringAsync(timeoutCts.Token);
-
-            if (!response.IsSuccessStatusCode)
-                return new LlmResponse(new ChatMessage("assistant", null), true, ExtractError(responseJson, (int)response.StatusCode));
-
-            using var doc = JsonDocument.Parse(responseJson);
-            var root = doc.RootElement;
-
-            if (root.TryGetProperty("error", out var errorEl) && errorEl.ValueKind == JsonValueKind.String)
-                return new LlmResponse(new ChatMessage("assistant", null), true, errorEl.GetString());
-
-            var messageEl = root.GetProperty("message");
-            var role = messageEl.GetProperty("role").GetString() ?? "assistant";
-            var (content0, thinking0) = SplitThinking(
-                messageEl.TryGetProperty("content", out var cEl) && cEl.ValueKind == JsonValueKind.String ? cEl.GetString() : null,
-                messageEl.TryGetProperty("thinking", out var tEl) && tEl.ValueKind == JsonValueKind.String ? tEl.GetString() : null);
-
-            var toolCalls = ParseToolCalls(messageEl);
-            var assistantMsg = new ChatMessage(role, content0, null,
-                toolCalls?.Select(tc => new ToolCall(tc.Id ?? $"call_{Guid.NewGuid():N}", tc.Function.Name, tc.Function.Arguments)).ToList());
-
-            return new LlmResponse(assistantMsg, true, null, ParseUsage(root), thinking0);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;   // genuine user cancellation (Ctrl-C) — propagate so the CLI exits 130 (F16)
-        }
-        catch (OperationCanceledException)
-        {
-            return new LlmResponse(new ChatMessage("assistant", null), true,
-                $"Ollama at {baseUrl} did not respond within {_chatTimeout.TotalSeconds:F0}s. " +
-                "The model may still be loading, or is generating an unbounded response — retry, " +
-                "pick a smaller model, or raise --llm-timeout.");
-        }
-        catch (Exception ex)
-        {
-            // Connection refused, DNS failure, a stream severed mid-response, malformed JSON — each
-            // must reach the user as a stated error, never a bare throw the CLI's cancellation
-            // handler would swallow as if the user had interrupted.
-            return new LlmResponse(new ChatMessage("assistant", null), true,
-                $"Ollama request to {baseUrl} failed: {ex.Message}");
-        }
-    }
+        // One transport, one meaning for --llm-timeout. The blocking call reads the same streamed
+        // response and simply has nobody watching it: the flag is an IDLE ceiling on both paths,
+        // reset by every line the model sends, rather than a total call deadline here and an idle
+        // one there. It was the second: a 12B model generating a long YAML was cut off mid-answer
+        // and told it had been silent, which is a claim about the model that was not true.
+        => ChatStreamAsync(baseUrl, model, messages, tools, NullLlmStreamObserver.Instance,
+                           numCtx, temperature, seed, ct);
 
     public async Task<LlmResponse> ChatStreamAsync(
         string baseUrl,
