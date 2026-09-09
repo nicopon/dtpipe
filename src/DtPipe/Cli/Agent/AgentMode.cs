@@ -49,8 +49,19 @@ public sealed class AgentOptions
       /// still loops; going much higher mainly costs prefill time and VRAM.</summary>
     public const int DefaultNumCtx = 16384;
 
-      /// <summary>Sampling temperature. 0 => fully deterministic decoding.</summary>
-    public double Temperature { get; init; } = 0.0;
+      /// <summary>
+      /// Sampling temperature. 0 is greedy decoding, which is where a weak or heavily quantized
+      /// model degenerates: dtpipe's own repetition guard tells the user to raise it, and a
+      /// measurement run on a 12B local model returned empty responses at 0 and complete plans at
+      /// 1. A default whose own error messages advise leaving it is not a default.
+      ///
+      /// <para>
+      /// Reproducibility does not go with it: <see cref="Seed"/> still fixes the sampling, so the
+      /// same prompt and seed give the same run. What is given up is greedy decoding, not the
+      /// ability to replay — and <c>--temperature 0</c> is still there for the determinism report.
+      /// </para>
+      /// </summary>
+    public double Temperature { get; init; } = 1.0;
 
       /// <summary>Model context window to request from the provider.</summary>
     public int NumCtx { get; init; } = DefaultNumCtx;

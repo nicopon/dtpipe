@@ -80,6 +80,17 @@ public class AgentDeterminismTests
         return new AgentExecutor(new EmptyToolProvider(), llm, tui, console);
        }
 
+    /// <summary>
+    /// The shipped default is 1, and F3's determinism is a capability rather than a default.
+    /// Greedy decoding is where a weak quantized model degenerates — dtpipe's own repetition guard
+    /// tells the user to raise the temperature — and a measurement run on a 12B local model
+    /// returned empty responses at 0 and complete plans at 1. Replay stays available through the
+    /// seed, which fixes the sampling at any temperature.
+    /// </summary>
+    [Fact]
+    public void The_Default_Temperature_Is_Not_Greedy_Decoding()
+        => Assert.Equal(1.0, new AgentOptions().Temperature);
+
     [Fact]
     public async Task Temperature_And_Seed_Are_Propagated_To_LlmClient()
     {

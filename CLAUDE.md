@@ -424,7 +424,7 @@ Key APIs:
 Hardening invariants (F1–F7, fail-closed, non-negotiable — details in `REFERENCE.md#agent-guardrails`):
 - **F1 Planner/Executor split** — `--mode plan` (default) hides `execute-yaml-job` from the model.
 - **F2 Guardrails** — `ISqlSafetyPolicy` (destructive verbs / network) + `IApprovalGate`; `apply` + approval + clean check required for writes.
-- **F3 Determinism** — `temperature 0 + seed` and `--repeat N`; `DeterminismReport` variance = distinct-YAML − 1.
+- **F3 Determinism** — available, not default: `--temperature 0 --seed N --repeat N`; `DeterminismReport` variance = distinct-YAML − 1. The shipped default temperature is `1` (greedy decoding degenerates weak quantized models); `--seed` keeps a run replayable at any temperature.
 - **F4 Non-destructive context** — fact cache + `ConversationWindowManager.Compact`.
 - **F5 Parallel tools** — all `ToolCalls` per turn executed (`Task.WhenAll`; `--sequential` forces serial).
 - **F6 Single YAML path** — `yamlContent` tool arg is sole plan source.

@@ -112,9 +112,9 @@ public class AgentCommand : Command
 
         var temperatureOption = new Option<double>("--temperature")
           {
-            Description = "Sampling temperature. 0 makes decoding deterministic (default)."
+            Description = "Sampling temperature. 0 is greedy decoding, which weaker quantized models degenerate on; --seed fixes the sampling either way."
           };
-        temperatureOption.DefaultValueFactory = _ => 0.0;
+        temperatureOption.DefaultValueFactory = _ => 1.0;
 
         var seedOption = new Option<int?>("--seed")
           {

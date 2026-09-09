@@ -922,7 +922,7 @@ dtpipe agent [<prompt>] [options]
 | `--num-ctx` | | Model context window to request from the provider (Ollama `num_ctx`) | `16384` |
 | `--interactive` | `-i` | Force interactive model selection and prompt entry | `false` |
 | `--mode` | | Operating mode: `plan` designs/validates only (no execution); `execute`/`autonomous` may run through the guardrails | `plan` |
-| `--temperature` | | Sampling temperature; `0` makes decoding deterministic | `0` |
+| `--temperature` | | Sampling temperature; `0` is greedy decoding, which weaker quantized models degenerate on. `--seed` fixes the sampling either way | `1` |
 | `--seed` | | Fixed seed for reproducible sampling | `0` |
 | `--repeat` | | Replicate the validated plan N times and report determinism variance | `1` |
 | `--sequential` | | Execute tool calls one at a time instead of running independent calls in parallel | `false` |
@@ -932,8 +932,10 @@ dtpipe agent [<prompt>] [options]
 | `--allow-network` | | Allow network access in SQL (`LOAD httpfs`/`azure`, remote `read_parquet`/`read_csv`) | `false` |
 
 > **Hardening (fail-closed defaults).** With no flags, `dtpipe agent` is the safest behavior:
-> mode `plan`, temperature `0` + seed (deterministic), dry-run only, destructive SQL and network
-> access denied. A real write requires `--apply` **and** approval **and** a compliant SQL safety
+> mode `plan`, dry-run only, destructive SQL and network access denied. Sampling is **not** part of
+> that list: the default temperature is `1`, because `0` is greedy decoding and weaker quantized
+> models degenerate on it. A run stays replayable through `--seed`, and `--temperature 0` remains
+> available for the determinism report. A real write requires `--apply` **and** approval **and** a compliant SQL safety
 > check. The planner never sees the `execute-yaml-job` tool; execution is a deterministic engine
 > step. The `yamlContent` tool argument is the sole source of the plan YAML. Inspected schemas/
 > samples/errors survive conversation compaction (non-destructive context). See the **Agent
