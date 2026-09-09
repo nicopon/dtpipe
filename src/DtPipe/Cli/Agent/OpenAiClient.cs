@@ -71,12 +71,27 @@ public class OpenAiClient : ILlmClient, IStreamingLlmClient
         }
     }
 
+    /// <summary>
+    /// Pipeline options for one endpoint, separated from the client so the deadline is assertable.
+    ///
+    /// <para>
+    /// The SDK pipeline carries its own <c>NetworkTimeout</c> (100 s) and whichever deadline
+    /// expires first wins, so leaving it unset makes <c>--llm-timeout</c> inert above 100 s while
+    /// the failure still reports the flag's value — the defect HttpClient's default caused on the
+    /// Ollama client.
+    /// </para>
+    /// </summary>
+    internal static OpenAIClientOptions BuildClientOptions(string baseUrl)
+    {
+        var options = new OpenAIClientOptions { NetworkTimeout = System.Threading.Timeout.InfiniteTimeSpan };
+        if (!string.IsNullOrEmpty(baseUrl))
+            options.Endpoint = new Uri(baseUrl.TrimEnd('/') + "/v1");
+        return options;
+    }
+
     private ChatClient BuildClient(string baseUrl, string model)
     {
-        var clientOptions = new OpenAIClientOptions();
-        if (!string.IsNullOrEmpty(baseUrl))
-            clientOptions.Endpoint = new Uri(baseUrl.TrimEnd('/') + "/v1");
-        return new ChatClient(model, new ApiKeyCredential(_apiKey), clientOptions);
+        return new ChatClient(model, new ApiKeyCredential(_apiKey), BuildClientOptions(baseUrl));
     }
 
     private static List<OpenAI.Chat.ChatMessage> MapMessages(List<ChatMessage> messages)
@@ -131,7 +146,7 @@ public class OpenAiClient : ILlmClient, IStreamingLlmClient
         }
     }
 
-    public async Task<LlmResponse> ChatAsync(
+    public Task<LlmResponse> ChatAsync(
         string baseUrl,
         string model,
         List<ChatMessage> messages,
@@ -140,52 +155,12 @@ public class OpenAiClient : ILlmClient, IStreamingLlmClient
         double temperature = 0.7,
         int? seed = null,
         CancellationToken ct = default)
-      {
-        try
-        {
-            var chatClient = BuildClient(baseUrl, model);
-            var sdkMessages = MapMessages(messages);
-            var options = BuildOptions(tools, temperature, seed);
-
-            // Bound a single completion so a stalled endpoint fails as a stated error rather than
-            // hanging until the SDK's own default fires.
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(_chatTimeout);
-
-            ClientResult<ChatCompletion> result = await chatClient.CompleteChatAsync(sdkMessages, options, timeoutCts.Token);
-            ChatCompletion completion = result.Value;
-
-            string? content = completion.Content is { Count: > 0 }
-                ? string.Join(Environment.NewLine, completion.Content.Select(p => p.Text))
-                : null;
-
-            List<ToolCall>? responseToolCalls = null;
-            if (completion.ToolCalls is { Count: > 0 })
-            {
-                responseToolCalls = completion.ToolCalls
-                    .Select(tc => new ToolCall(tc.Id, tc.FunctionName, ParseArgs(tc.FunctionArguments.ToString())))
-                    .ToList();
-            }
-
-            var usage = completion.Usage is { } u ? new LlmUsage(u.InputTokenCount, u.OutputTokenCount) : null;
-            return new LlmResponse(new ChatMessage("assistant", content, null, responseToolCalls), true, null, usage);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            // Genuine user cancellation (Ctrl-C) — propagate so the CLI exits 130 (F16) instead of
-            // reporting it as an LLM error and exiting 1.
-            throw;
-        }
-        catch (OperationCanceledException)
-        {
-            return new LlmResponse(new ChatMessage("assistant", null), true,
-                $"The endpoint at {baseUrl} did not respond within {_chatTimeout.TotalSeconds:F0}s.");
-        }
-        catch (Exception ex)
-        {
-            return new LlmResponse(new ChatMessage("assistant", null), true, ex.Message);
-        }
-    }
+        // One transport, one meaning for --llm-timeout, as on the Ollama client: the blocking call
+        // reads the same streamed completion and simply has nobody watching it, so the flag is an
+        // IDLE ceiling on both paths. It was a total call deadline here — a model whose answer took
+        // longer than the flag was cut off and told it had been silent.
+        => ChatStreamAsync(baseUrl, model, messages, tools, NullLlmStreamObserver.Instance,
+                           maxTokens, temperature, seed, ct);
 
     public async Task<LlmResponse> ChatStreamAsync(
         string baseUrl,
