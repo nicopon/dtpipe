@@ -149,8 +149,11 @@ public partial class DtPipeMcpTools
                     new JsonSerializerOptions { WriteIndented = true });
 
             var report = await RunSampleAsync(parsed, Math.Clamp(rows, 1, 1000), ct,
-                nextStep: "This was a preview: no data was written to the target. To run the pipeline for real, "
-                        + "call execute-yaml-job with apply=true.");
+                // Not a pointer to 'execute-yaml-job': in plan mode that tool is hidden and the role
+                // prompt forbids it, so naming it here sends the reader after something it cannot
+                // reach — the same mistake 'help' made and had removed.
+                nextStep: "This was a preview: nothing was written to the target. Running the pipeline "
+                        + "for real is a separate, deliberate step.");
             return JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
         }
         catch (Exception ex)
@@ -189,6 +192,7 @@ public partial class DtPipeMcpTools
 
         collector.Clear();
         collector.Enabled = true;
+        var branchFailures = new System.Collections.Concurrent.ConcurrentDictionary<string, string>();
         int exitCode;
         string? failure = null;
         try
@@ -196,7 +200,7 @@ public partial class DtPipeMcpTools
             // Quiet: the caller is a model reading JSON, not a person watching the run. NoStats
             // alone leaves the topology panel and the results table on the console.
             exitCode = await jobService.ExecutePipelineAsync(jobs, parsed.Dag, contexts,
-                new GlobalOptions { NoStats = true, Quiet = true }, ct);
+                new GlobalOptions { NoStats = true, Quiet = true }, ct, branchFailures);
         }
         catch (Exception ex)
         {
@@ -211,6 +215,15 @@ public partial class DtPipeMcpTools
         {
             collector.Enabled = false;
         }
+
+        // A branch that fails does not throw here: the orchestrator turns it into an exit code and
+        // the reason goes to the console, which this run has silenced. Reported without them, a
+        // failed sample was `success: false` with `error: null` — and validate-yaml-job now sends
+        // every caller straight to this tool.
+        if (failure is null && branchFailures.Count > 0)
+            failure = string.Join(" ", branchFailures
+                .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                .Select(kv => $"Branch '{kv.Key}': {DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(kv.Value)}"));
 
         return new
         {

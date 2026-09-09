@@ -70,7 +70,10 @@ public class JobService
 			new AgentCommand(_serviceProvider),
 		};
 
-	public async Task<int> ExecutePipelineAsync(Dictionary<string, JobDefinition> jobs, JobDagDefinition dag, Dictionary<string, Pipeline.CliJobContext> contexts, Pipeline.GlobalOptions globals, CancellationToken ct)
+	/// <param name="branchFailures">Filled with the reason each failing branch stopped, for a caller
+	/// that has silenced the console — an MCP tool reads a result, not a terminal.</param>
+	public async Task<int> ExecutePipelineAsync(Dictionary<string, JobDefinition> jobs, JobDagDefinition dag, Dictionary<string, Pipeline.CliJobContext> contexts, Pipeline.GlobalOptions globals, CancellationToken ct,
+		System.Collections.Concurrent.ConcurrentDictionary<string, string>? branchFailures = null)
 	{
 		if (globals.AllFlags.TryGetValue("--cursor-from", out var cursorFromObj) && cursorFromObj is string cursorFromVal && !string.IsNullOrEmpty(cursorFromVal))
 		{
@@ -152,7 +155,7 @@ public class JobService
 				{
 					var job = jobs[branch.Alias];
 					contexts.TryGetValue(branch.Alias, out var branchCtx);
-					return await RunSingleJobAsync(job, branchCtx, branch.Alias, true, ctx, resultsCollector, token, globals, userCts.Token);
+					return await RunSingleJobAsync(job, branchCtx, branch.Alias, true, ctx, resultsCollector, token, globals, userCts.Token, branchFailures);
 				};
 
 				int exitCode;
@@ -209,12 +212,12 @@ public class JobService
 					var orchestrator = _serviceProvider.GetRequiredService<IDagOrchestrator>();
 
 					Func<BranchDefinition, BranchChannelContext, CancellationToken, Task<int>> linearExecutor =
-						(_, branchCtx, token) => RunSingleJobAsync(mainJob, mainContext, "main", isDag: false, branchCtx, null, token, globals, userCts.Token);
+						(_, branchCtx, token) => RunSingleJobAsync(mainJob, mainContext, "main", isDag: false, branchCtx, null, token, globals, userCts.Token, branchFailures);
 
 					return await orchestrator.ExecuteAsync(linearDag, linearExecutor, ct);
 				}
 
-				return await RunSingleJobAsync(mainJob, mainContext, null, false, null, null, ct, globals, userCts.Token);
+				return await RunSingleJobAsync(mainJob, mainContext, null, false, null, null, ct, globals, userCts.Token, branchFailures);
 			}
 		}
 		finally
@@ -233,7 +236,8 @@ public class JobService
 		System.Collections.Concurrent.ConcurrentQueue<DtPipe.Feedback.BranchSummary>? resultsCollector,
 		CancellationToken ct,
 		Pipeline.GlobalOptions? globals = null,
-		CancellationToken userCancellationToken = default)
+		CancellationToken userCancellationToken = default,
+		System.Collections.Concurrent.ConcurrentDictionary<string, string>? branchFailures = null)
 	{
 		var registry = _serviceProvider.GetRequiredService<OptionsRegistry>();
 		registry.BeginScope();
@@ -261,6 +265,9 @@ public class JobService
 
 		var channelRegistry = _serviceProvider.GetRequiredService<IMemoryChannelRegistry>();
 		var linearPipelineService = new DtPipe.Cli.Services.LinearPipelineService(_contributors, _serviceProvider, channelRegistry, registry, _console);
-		return await linearPipelineService.ExecuteAsync(job, context, ct, userCancellationToken, resultsCollector, isDag, alias, ctx, showStatusMessages: false, dryRunInteractiveBranch: globals?.DryRunInteractiveBranch, quiet: globals?.Quiet ?? false);
+		var exitCode = await linearPipelineService.ExecuteAsync(job, context, ct, userCancellationToken, resultsCollector, isDag, alias, ctx, showStatusMessages: false, dryRunInteractiveBranch: globals?.DryRunInteractiveBranch, quiet: globals?.Quiet ?? false);
+		if (branchFailures is not null && linearPipelineService.Failure is { } why)
+			branchFailures[alias ?? "main"] = why;
+		return exitCode;
 	}
 }

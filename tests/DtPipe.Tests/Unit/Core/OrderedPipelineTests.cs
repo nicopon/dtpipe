@@ -284,6 +284,68 @@ public class OrderedPipelineTests
 		fakeFactory.CliCreateCalls.Should().Be(0, "the CLI string[] surface must not be used for a YAML branch");
 	}
 
+	// LinearPipelineService failure reporting (CLAUDE.md engine-change obligation): a branch that
+	// faults must leave the reason on the service, not only on the console. A caller that silences
+	// the console to read a tool result got `exitCode: 1` with nothing to act on — and
+	// validate-yaml-job now sends every caller to the tool that does exactly that.
+	[Fact]
+	public async Task ExecuteAsync_ABranchThatFaults_LeavesTheReasonOnTheService()
+	{
+		var registry = new OptionsRegistry();
+		registry.Register(new DtPipe.Adapters.Generate.GenerateReaderOptions());
+		registry.Register(new DtPipe.Adapters.Null.NullDataWriterOptions());
+
+		var services = new ServiceCollection();
+		services.AddLogging();
+		services.AddSingleton(registry);
+		services.AddSingleton<IStreamReaderFactory>(sp => new CliStreamReaderFactory(
+			new DtPipe.Adapters.Generate.GenerateReaderDescriptor(), sp.GetRequiredService<OptionsRegistry>(), sp));
+		services.AddSingleton<IDataWriterFactory>(sp => new CliDataWriterFactory(
+			new DtPipe.Adapters.Null.NullDataWriterFactory(), sp.GetRequiredService<OptionsRegistry>(), sp));
+		services.AddSingleton<IRowToColumnarBridgeFactory, DtPipe.Adapters.Infrastructure.Arrow.ArrowRowToColumnarBridgeFactory>();
+		services.AddSingleton<IColumnarToRowBridgeFactory, DtPipe.Adapters.Infrastructure.Arrow.ArrowColumnarToRowBridgeFactory>();
+		services.AddSingleton<ExportService>();
+		services.AddSingleton<HookExecutor>();
+		services.AddSingleton<MetricsService>();
+		services.AddSingleton<SchemaValidationService>();
+		services.AddSingleton<PipelineExecutor>();
+		services.AddSingleton<DtPipe.Core.Abstractions.Dag.IMemoryChannelRegistry, DtPipe.Core.Pipelines.Dag.MemoryChannelRegistry>();
+		services.AddSingleton<IEnumerable<IStreamTransformerFactory>>(System.Array.Empty<IStreamTransformerFactory>());
+
+		var mockProgress = new Mock<IExportProgress>();
+		mockProgress.Setup(p => p.GetMetrics()).Returns(new ExportMetrics(DateTime.UtcNow, DateTime.UtcNow, 0, 0, 0, 0, new Dictionary<string, long>()));
+		var mockObserver = new Mock<IExportObserver>();
+		mockObserver.Setup(o => o.CreateProgressReporter(It.IsAny<bool>(), It.IsAny<IReadOnlyList<(string Name, bool IsColumnar)>>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<bool>()))
+			.Returns(mockProgress.Object);
+		services.AddSingleton(mockObserver.Object);
+
+		var serviceProvider = services.BuildServiceProvider();
+		var project = new CliDataTransformerFactory(new DtPipe.Transformers.Arrow.Project.ProjectDataTransformerFactory(registry));
+
+		var pipelineService = new LinearPipelineService(
+			new List<ICliContributor> { project },
+			serviceProvider,
+			serviceProvider.GetRequiredService<DtPipe.Core.Abstractions.Dag.IMemoryChannelRegistry>(),
+			registry,
+			Spectre.Console.AnsiConsole.Console);
+
+		// The real shape a recorded session delivered: a projection naming a column the source has not.
+		var job = new JobDefinition
+		{
+			Input = "generate:5",
+			Output = "null:",
+			Transformers = new List<TransformerConfig>
+			{
+				new() { Type = "project", Mappings = new Dictionary<string, string> { ["id"] = "" } }
+			}
+		};
+
+		var exitCode = await pipelineService.ExecuteAsync(job, context: null, token: default);
+
+		exitCode.Should().Be(1);
+		pipelineService.Failure.Should().NotBeNull().And.Subject.Should().Contain("Projected column");
+	}
+
 	// Concrete fake exercising the real IsApplicable(JobDefinition) default interface method.
 	private sealed class ThrowingStreamTransformerFactory : IStreamTransformerFactory
 	{

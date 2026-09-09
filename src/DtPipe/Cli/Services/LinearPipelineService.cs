@@ -48,6 +48,19 @@ public class LinearPipelineService
         _readerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>();
     }
 
+    /// <summary>
+    /// Why this branch stopped, when it stopped on a fault — the same chain written to the console.
+    ///
+    /// <para>
+    /// One instance runs one branch, so this needs no threading. It exists because the console is
+    /// the only place the reason went, and a caller that silenced the console to read a tool result
+    /// got <c>exitCode: 1</c> with nothing to act on: a sample run reported failure and an empty
+    /// error, while the reason — a projected column absent from the source — was printed where
+    /// nobody was listening.
+    /// </para>
+    /// </summary>
+    public string? Failure { get; private set; }
+
     public Task<int> ExecuteAsync(
         JobDefinition job,
         CliJobContext? context,
@@ -346,6 +359,7 @@ public class LinearPipelineService
         catch (Exception ex)
         {
             var chain = DtPipe.Core.Infrastructure.Diagnostics.ExceptionChainFlattener.Format(ex);
+            Failure = chain;
             _console.Write(new Spectre.Console.Markup($"{Environment.NewLine}[red]Error: {Markup.Escape(chain)}[/]{Environment.NewLine}"));
             if (Environment.GetEnvironmentVariable("DEBUG") == "1")
                 _console.WriteLine(ex.StackTrace ?? "");
