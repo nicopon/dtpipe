@@ -52,7 +52,10 @@ public sealed record TurnSummaryModel(
     AgentQuestion? Question = null,
     bool ProducedPlan = false,
     long Tokens = 0,
-    string? ClosingWords = null)
+    string? ClosingWords = null,
+    /// <summary>Sampling temperature the turn ran at, so failure advice can name it truthfully
+    /// instead of asserting a default that has since changed.</summary>
+    double Temperature = 1.0)
 {
     public TurnStatus Status => Outcome switch
     {

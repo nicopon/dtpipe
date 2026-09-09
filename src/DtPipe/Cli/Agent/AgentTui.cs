@@ -587,7 +587,7 @@ public class AgentTui
         if (summary.Outcome == TurnOutcome.AwaitingUserInput)
             RenderPendingQuestion(summary.Question);
         else if (summary.Status != TurnStatus.Completed)
-            RenderFailureGuidance(summary.Outcome, trajectory, maxIterations);
+            RenderFailureGuidance(summary.Outcome, trajectory, maxIterations, summary.Temperature);
         else if (mode == AgentMode.Plan && summary.ProducedPlan)
             RenderPlanNextSteps();
     }
@@ -658,8 +658,17 @@ public class AgentTui
     /// where partial work exists, prints the last recorded step so the user does not have to open
     /// the trajectory inspector to see where it stopped.
     /// </summary>
-    public void RenderFailureGuidance(TurnOutcome outcome, AgentTrajectory trajectory, int maxIterations)
+    public void RenderFailureGuidance(TurnOutcome outcome, AgentTrajectory trajectory, int maxIterations,
+        double temperature = 1.0)
     {
+        // Greedy decoding is where a weak quantized model degenerates, and it produces both of the
+        // outcomes below. The advice names it only when the run actually used it: the sentence was
+        // written when 0 was the default and asserted it unconditionally, which the new default
+        // made false.
+        var greedy = temperature == 0.0
+            ? " This run used --temperature 0; retry above 0."
+            : string.Empty;
+
         _console.WriteLine();
         switch (outcome)
         {
@@ -670,7 +679,7 @@ public class AgentTui
                 break;
             case TurnOutcome.EmptyResponse:
                 _console.MarkupLine("[yellow]The model returned an empty response — nothing was produced.[/]");
-                _console.MarkupLine("[grey]This model may not be tool-aware, or it emitted only hidden reasoning. Try another model.[/]");
+                _console.MarkupLine($"[grey]This model may not be tool-aware, or it emitted only hidden reasoning.{greedy} Otherwise try another model.[/]");
                 break;
             case TurnOutcome.LlmError:
                 _console.MarkupLine("[grey]The LLM call failed (see the error above). Check the endpoint is reachable and the model name is correct.[/]");
@@ -678,7 +687,7 @@ public class AgentTui
                 break;
             case TurnOutcome.RepetitionDetected:
                 _console.MarkupLine("[yellow]The model got stuck producing the same text and the call was stopped early.[/]");
-                _console.MarkupLine("[grey]Retry with a temperature above 0 (this run used --temperature 0), or try a different model.[/]");
+                _console.MarkupLine($"[grey]A decoding loop.{greedy} Otherwise try a different model.[/]");
                 break;
             case TurnOutcome.UserInterrupted:
                 _console.MarkupLine("[yellow]You stopped the model call — the work done up to that point is kept.[/]");

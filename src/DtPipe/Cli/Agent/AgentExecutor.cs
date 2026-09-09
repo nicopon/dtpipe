@@ -253,7 +253,8 @@ public class AgentExecutor
         _turnClock.Stop();
         int shownIterations = turnIterations <= maxIterations ? turnIterations : maxIterations;
         var summary = new TurnSummaryModel(primary.Outcome, shownIterations, _turnClock.Elapsed, toolCounts, primary.Question,
-            ProducedPlan: !string.IsNullOrWhiteSpace(primary.Yaml), Tokens: _turnTokens, ClosingWords: primary.ClosingWords);
+            ProducedPlan: !string.IsNullOrWhiteSpace(primary.Yaml), Tokens: _turnTokens, ClosingWords: primary.ClosingWords,
+            Temperature: opts.Temperature);
         _trace?.Verdict(summary);
         return summary;
      }

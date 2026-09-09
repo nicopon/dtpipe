@@ -194,4 +194,34 @@ public class TurnSummaryModelTests
 
         Assert.DoesNotContain("Plan ready", text);
     }
+
+    /// <summary>
+    /// The advice for a degenerate turn names greedy decoding only when the run used it. The
+    /// sentence was written when 0 was the default and asserted "this run used --temperature 0"
+    /// unconditionally; changing the default made it false.
+    /// </summary>
+    [Theory]
+    [InlineData(TurnOutcome.RepetitionDetected)]
+    [InlineData(TurnOutcome.EmptyResponse)]
+    public void Failure_Advice_Names_Greedy_Decoding_Only_When_It_Was_Used(TurnOutcome outcome)
+    {
+        Assert.Contains("--temperature 0", Guidance(outcome, temperature: 0.0));
+        Assert.DoesNotContain("--temperature 0", Guidance(outcome, temperature: 1.0));
+    }
+
+    private static string Guidance(TurnOutcome outcome, double temperature)
+    {
+        var writer = new System.IO.StringWriter();
+        var console = Spectre.Console.AnsiConsole.Create(new Spectre.Console.AnsiConsoleSettings
+        {
+            Ansi = Spectre.Console.AnsiSupport.No,
+            ColorSystem = Spectre.Console.ColorSystemSupport.NoColors,
+            Out = new Spectre.Console.AnsiConsoleOutput(writer)
+        });
+
+        new DtPipe.Cli.Agent.AgentTui(console)
+            .RenderFailureGuidance(outcome, new DtPipe.Cli.Agent.AgentTrajectory(), 25, temperature);
+
+        return writer.ToString();
+    }
 }
