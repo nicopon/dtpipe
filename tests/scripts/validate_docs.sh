@@ -156,16 +156,16 @@ main:
     duck:
       query: "SELECT 'Alice' AS name, 'test@example.com' AS email, '0612345678' AS phone, 1 AS id"
   transformers:
-    - null:
-        mappings:
-          phone: ~
-    - fake:
-        mappings:
-          name: name.fullName
-          email: internet.email
-        options:
-          locale: fr
-          seed-column: id
+    - type: "null"
+      mappings:
+        phone: ~
+    - type: fake
+      mappings:
+        name: name.fullName
+        email: internet.email
+      options:
+        locale: fr
+        seed-column: id
 EOF
 
 run_test "YAML job file execution (dry-run)" \

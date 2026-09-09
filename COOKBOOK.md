@@ -13,6 +13,7 @@ Recipes and end-to-end scenarios. For the full option reference, see [REFERENCE.
 - [Schema Transformations](#schema-transformations)
 - [Database Import & Migration](#database-import--migration)
 - [SQL Processors and Joins](#sql-processors-and-joins)
+  - [Generating two related tables](#generating-two-related-tables)
 - [DuckDB Extensions and Cloud Storage](#duckdb-extensions-and-cloud-storage)
 - [DAG Pipelines (Multi-Source)](#dag-pipelines-multi-source)
 - [Standard Streams and Automation](#standard-streams-and-automation)
@@ -426,6 +427,58 @@ dtpipe ... --pre-exec "@scripts/pre_migration.sql"
 
 ## SQL Processors and Joins
 
+### Generating two related tables
+
+Two tables whose foreign keys actually match cannot come from two independent branches drawing
+random ids: the branch that builds the sales rows has to read the products it references. And a
+branch is readable only while it has no `output:` of its own, so the products table is produced by
+one branch and written by a second.
+
+```yaml
+products:                        # produces the rows; writes nothing, so it is readable
+  input: "generate:50"
+  transformers:
+    - type: compute
+      mappings:
+        id: "row.GenerateIndex + 1"
+        name: "'Shoe model ' + (row.GenerateIndex + 1)"
+        price: "Math.round(2000 + (row.GenerateIndex * 137) % 8000) / 100"
+    - type: project
+      mappings:
+        id: ~
+        name: ~
+        price: ~
+
+write_products:                  # writes what the first branch produced
+  from: "products"
+  output: "sqlite:Data Source=shop.db"
+  provider-options:
+    sqlite-writer:
+      table: products
+      strategy: Recreate
+
+seed:                            # one row per sale, nothing else
+  input: "generate:500"
+
+sales:                           # streams the seed, joins on the products it references
+  from: "seed"
+  ref: ["products"]
+  provider-options:
+    sql:
+      query: "SELECT seed.GenerateIndex + 1 AS id, p.id AS product_id,
+               (seed.GenerateIndex % 3) + 1 AS quantity,
+               ROUND(CAST(p.price AS DOUBLE) * ((seed.GenerateIndex % 3) + 1), 2) AS total
+               FROM seed JOIN products p ON p.id = (seed.GenerateIndex % 50) + 1"
+    sqlite-writer:
+      table: sales
+      strategy: Recreate
+  output: "sqlite:Data Source=shop.db"
+```
+
+`compute` emits strings, hence the `CAST(p.price AS DOUBLE)`: without it DuckDB refuses the
+multiplication. Verified on the result — 50 products, 500 sales, no orphan `product_id`, and every
+`total` equal to `price × quantity`.
+
 ### In-memory SQL join (DuckDB)
 
 DuckDB is the default SQL engine. The `--from` source streams; `--ref` sources are preloaded
@@ -747,13 +800,13 @@ users:
     pg:
       query: "SELECT * FROM users"
   transformers:
-    - fake:
-        mappings:
-          email: internet.email
-          name: name.fullName
-        options:
-          locale: fr
-          seed-column: id
+    - type: fake
+      mappings:
+        email: internet.email
+        name: name.fullName
+      options:
+        locale: fr
+        seed-column: id
 
 orders:
   input: "pg:Host=prod;Database=app;Username=postgres"

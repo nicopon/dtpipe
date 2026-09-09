@@ -172,6 +172,44 @@ main:
         Assert.Contains("produces no transformer", json);
     }
 
+    /// <summary>
+    /// A branch publishes a channel only when it has no output of its own, so a branch that writes
+    /// to a target cannot also be read. Reaching the run instead died on "An Arrow channel with the
+    /// alias 'x' is not registered" — an internal object, naming neither cause nor fix. Building two
+    /// related tables is exactly the shape that hits it.
+    /// </summary>
+    [Fact]
+    public void A_Branch_That_Writes_Cannot_Also_Be_Read()
+    {
+        var json = _tools.ValidateYamlJob(@"
+products:
+  input: ""input.csv""
+  output: ""sqlite:Data Source=shop.db""
+sales:
+  input: ""input.csv""
+  ref: [""products""]
+  output: ""sqlite:Data Source=shop.db""
+");
+        Assert.Contains("\"success\": false", json);
+        Assert.Contains("publishes nothing to read", json);
+        Assert.Contains("from: products", json);
+    }
+
+    /// <summary>A branch with no output of its own is a legitimate source.</summary>
+    [Fact]
+    public void A_Branch_Without_An_Output_Can_Be_Read()
+    {
+        var json = _tools.ValidateYamlJob(@"
+products:
+  input: ""input.csv""
+write:
+  from: ""products""
+  output: ""out.csv""
+");
+        Assert.DoesNotContain("publishes nothing to read", json);
+        Assert.DoesNotContain("nothing to read", json);
+    }
+
     [Fact]
     public void An_Unregistered_Type_Still_Names_The_Type()
     {

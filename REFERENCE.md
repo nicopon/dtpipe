@@ -416,6 +416,12 @@ DuckDB extensions (`excel`, `httpfs`, `azure`, `ducklake`…) are reached throug
 > `--sql` streams exactly one and materializes the rest through `--ref`, so `--from a,b --sql`
 > is refused with the rewrite to apply.
 
+> **A branch is readable only while it has no output of its own.** A branch publishes its stream to
+> the other branches exactly when it declares no `output:`; one that writes to a target publishes
+> nothing, and naming it in `from`/`ref` is refused at validation. So a table that must be both
+> written *and* joined on takes two branches — one that produces it, one that writes it — plus the
+> branch that joins. See [COOKBOOK.md](./COOKBOOK.md#generating-two-related-tables).
+
 #### Implicit branch-split rules
 
 Branches are separated implicitly while walking the arguments. One pure function
@@ -509,27 +515,27 @@ branch-name:
 
   # Transformer pipeline (optional)
   transformers:
-    - fake:
-        mappings:
-          name: name.fullName
-          email: internet.email
-        options:
-          locale: fr
-          seed: 12345
-          seed-column: id
-          deterministic: true
-          skip-null: true
-    - null:
-        mappings:
-          phone: ~
-    - compute:
-        compute:
-          - "FullName:row.Name + ' ' + row.Surname"
-    - filter:
-        filter: "row.Active"
-    - project:
-        mappings:
-          id: ~
+    - type: fake
+      mappings:
+        name: name.fullName
+        email: internet.email
+      options:
+        locale: fr
+        seed: 12345
+        seed-column: id
+        skip-null: true
+    - type: "null"
+      mappings:
+        phone: ~
+    - type: compute
+      mappings:
+        FullName: "row.Name + ' ' + row.Surname"
+    - type: filter
+      mappings:
+        "row.Active": ""
+    - type: project
+      mappings:
+        id: ~
           name: ~
           email: ~
 

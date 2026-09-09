@@ -112,10 +112,16 @@ public partial class DtPipeMcpTools
             if (!jobs.TryGetValue(branch.Alias, out var job)) continue;
             if (!string.IsNullOrWhiteSpace(job.Input)) continue;
             if (factories.Any(f => f.IsApplicable(job))) continue;
+            // A branch streaming from another reads that branch's channel, with or without a
+            // processor: 'from: x' plus an 'output:' is the plain write half of a fan-out, and the
+            // engine runs it. Demanding a query here refused the very shape a job needs to build
+            // two related tables — one branch produces, one writes, a third joins.
+            if (!string.IsNullOrWhiteSpace(job.From)) continue;
 
-            yield return $"Branch '{branch.Alias}' has nothing to read: it has no 'input:' and no stream "
-                       + "processor. Give it an 'input:', or — when it combines other branches through "
-                       + "'from'/'ref' — a query under 'provider-options -> sql -> query'.";
+            yield return $"Branch '{branch.Alias}' has nothing to read: it has no 'input:', no 'from:' and "
+                       + "no stream processor. Give it an 'input:', stream from another branch with "
+                       + "'from:', or — when it combines several — a query under "
+                       + "'provider-options -> sql -> query'.";
         }
     }
 

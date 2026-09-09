@@ -80,6 +80,14 @@ public class McpHelpService : IMcpHelpService
         sw.WriteLine("      sql:");
         sw.WriteLine("        query: \"SELECT * FROM branch1 JOIN branch2 ON branch1.id = branch2.id\"");
         sw.WriteLine("    output: \"<adapter3>:<target>\"");
+        // The rule that decides whether a topology can exist at all, and the one the grammar above
+        // does not show: branch1 and branch2 are readable precisely because neither has an output.
+        sw.WriteLine("  A branch is readable ('from'/'ref') only while it has NO 'output:' of its own:");
+        sw.WriteLine("  a branch either writes to a target or feeds other branches, never both. To write");
+        sw.WriteLine("  a table AND join on it, produce it in one branch and write it from a second:");
+        sw.WriteLine("    products:        { input: \"...\" }                    # produces, writes nothing");
+        sw.WriteLine("    write_products:  { from: products, output: \"...\" }   # writes it");
+        sw.WriteLine("    sales:           { from: seed, ref: [products], ... } # joins on it");
         sw.WriteLine();
         sw.WriteLine("VALUE RESOLUTION & INLINE INTERPOLATION:");
         sw.WriteLine("  Values are resolved sequentially prior to execution:");

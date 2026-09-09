@@ -30,11 +30,33 @@ public static class PipelineValidator
             }
         }
 
-        // 2. Loop detection
+        // 2. A source of 'from' / 'ref' must be a branch that publishes a channel, and a branch
+        //    publishes one only when it has no 'output:' of its own (DagOrchestrator pre-registers
+        //    channels for output-less branches). Without this the run reaches the processor and
+        //    dies on "An Arrow channel with the alias 'x' is not registered", which names an
+        //    internal object and neither the cause nor the fix. Building two related tables is the
+        //    shape that hits it: the table everyone reads must be produced by one branch and
+        //    written by another.
+        foreach (var branch in dag.Branches)
+        {
+            foreach (var upstream in branch.StreamingAliases.Concat(branch.RefAliases).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (!definedAliases.Contains(upstream)) continue;   // already reported above
+                if (!jobs.TryGetValue(upstream, out var source) || string.IsNullOrEmpty(source.Output)) continue;
+
+                errors.Add($"Branch '{branch.Alias}' reads branch '{upstream}', but '{upstream}' has an "
+                         + $"'output:' of its own and therefore publishes nothing to read. A branch either "
+                         + $"writes to a target or feeds other branches, never both: drop the 'output:' from "
+                         + $"'{upstream}' and add a branch that does the writing ('from: {upstream}' plus the "
+                         + $"'output:').");
+            }
+        }
+
+        // 3. Loop detection
         if (HasCycle(dag))
             errors.Add("Circular dependency detected in pipeline graph.");
 
-        // 3. Cursor state file uniqueness
+        // 4. Cursor state file uniqueness
         errors.AddRange(CursorStateValidator.Validate(dag, jobs));
 
         return errors;
