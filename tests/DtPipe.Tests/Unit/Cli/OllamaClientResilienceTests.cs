@@ -45,6 +45,25 @@ public class OllamaClientResilienceTests
         Assert.Contains("did not respond within", resp.Error);
     }
 
+    /// <summary>
+    /// The chat timeout is the only deadline. HttpClient's own default is 100 s and whichever
+    /// expires first wins, so '--llm-timeout' did nothing above 100 s while the failure still
+    /// reported the flag's value: a measurement run recorded turns dying after 122 s and being
+    /// told they had waited 420. Asserting the field is the only check that does not take 100 s
+    /// to run.
+    /// </summary>
+    [Fact]
+    public void The_Client_Imposes_No_Deadline_Of_Its_Own()
+    {
+        var client = new DtPipe.Cli.Agent.OllamaClient(TimeSpan.FromSeconds(420));
+
+        var http = (System.Net.Http.HttpClient)typeof(DtPipe.Cli.Agent.OllamaClient)
+            .GetField("_http", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .GetValue(client)!;
+
+        Assert.Equal(System.Threading.Timeout.InfiniteTimeSpan, http.Timeout);
+    }
+
     [Fact]
     public async Task Genuine_Caller_Cancellation_Propagates()
     {

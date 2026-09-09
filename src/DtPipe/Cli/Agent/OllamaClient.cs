@@ -19,14 +19,31 @@ public class OllamaClient : ILlmClient, IStreamingLlmClient
     public OllamaClient(TimeSpan? chatTimeout = null)
     {
         _chatTimeout = chatTimeout ?? AgentOptions.DefaultLlmTimeout;
-        _http = new HttpClient();
+        _http = Unbounded(new HttpClient());
     }
 
     /// <summary>Test seam: inject a handler to exercise the timeout / connection-failure paths.</summary>
     internal OllamaClient(HttpMessageHandler handler, TimeSpan chatTimeout)
     {
         _chatTimeout = chatTimeout;
-        _http = new HttpClient(handler);
+        _http = Unbounded(new HttpClient(handler));
+    }
+
+    /// <summary>
+    /// Hands the deadline to <see cref="_chatTimeout"/> alone.
+    ///
+    /// <para>
+    /// HttpClient's own default is 100 s, and whichever expires first wins — so on the blocking
+    /// path <c>--llm-timeout</c> did nothing above 100 s while the failure was still reported as
+    /// "did not respond within {--llm-timeout}s". A measurement run recorded turns dying after
+    /// 122 s and being told they had waited 420. Removing this line puts the cap back and makes
+    /// the message lie again.
+    /// </para>
+    /// </summary>
+    private static HttpClient Unbounded(HttpClient http)
+    {
+        http.Timeout = System.Threading.Timeout.InfiniteTimeSpan;
+        return http;
     }
 
     public string ProviderName => "ollama";
