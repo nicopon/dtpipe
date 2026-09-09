@@ -53,7 +53,19 @@ public static partial class JobFileParser
 			content = File.ReadAllText(filePath);
 		}
 
-		return ParseContent(content, secretsManager);
+		// YamlDotNet wraps the real cause — the property it could not match — in a
+		// YamlException whose own Message is the useless "Exception during deserialization".
+		// Program.cs prints ex.Message, so the CLI reported exactly that while the MCP surface,
+		// which already unwraps through ToolError, named the key and quoted its line. Refusing an
+		// unknown key is only actionable if the refusal says which one.
+		try
+		{
+			return ParseContent(content, secretsManager);
+		}
+		catch (YamlException ex)
+		{
+			throw new InvalidOperationException(DtPipe.Cli.Mcp.ToolError.Describe(ex, content), ex);
+		}
 	}
 
 	/// <summary>
