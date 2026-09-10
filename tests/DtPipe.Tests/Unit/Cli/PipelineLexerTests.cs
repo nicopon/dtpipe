@@ -26,6 +26,9 @@ public class PipelineLexerTests
         // now refuses the expression that follows it.
         _registry.Register(new FlagDef("--filter", Array.Empty<string>(), FlagArity.Repeatable, FlagScope.PerBranch, "filter transformer", FlagStage.Pipeline));
 
+        // Contributed by every DB reader through QueryableReaderOptions (FlagStage.Reader).
+        _registry.Register(new FlagDef("--query", new[] { "-q" }, FlagArity.Scalar, FlagScope.PerBranch, "query", FlagStage.Reader));
+
         // Shared reader+writer flags (FlagStage.Any = Reader | Writer)
         _registry.Register(new FlagDef("--table", new[] { "-t" }, FlagArity.Scalar, FlagScope.PerBranch, "table", FlagStage.Any));
         _registry.Register(new FlagDef("--strategy", new[] { "-s" }, FlagArity.Scalar, FlagScope.PerBranch, "strategy", FlagStage.Any));
@@ -360,6 +363,102 @@ public class PipelineLexerTests
         var pipeline = _lexer.Parse(new[] { "-i", "a.csv", "--custom-flag", "-o", "out.csv" });
 
         Assert.Contains("--custom-flag", pipeline.Branches[0].RawArgs);
+    }
+
+    // ── Reader flags in a branch that has no reader ─────────────────────
+
+    [Theory]
+    [InlineData("--query")]
+    [InlineData("-q")]
+    [InlineData("--table")]
+    public void Parse_ReaderFlagOnAFromBranch_Throws(string flag)
+    {
+        var args = new[] { "-i", "a.csv", "--alias", "A", "-i", "b.csv", "--alias", "B",
+                           "--from", "A", "--ref", "B", flag, "SELECT 1", "-o", "out.csv" };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => _lexer.Parse(args));
+        Assert.Contains(flag, ex.Message);
+        Assert.Contains("no reader of its own", ex.Message);
+    }
+
+    [Fact]
+    public void Parse_ReaderOnlyFlagOnAFromBranch_ListsTheProcessorsTheRegistryCarries()
+    {
+        var args = new[] { "-i", "a.csv", "--alias", "A", "--from", "A", "--query", "SELECT 1", "-o", "out.csv" };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => _lexer.Parse(args));
+
+        Assert.Contains("--sql <value>", ex.Message);   // scalar trigger
+        Assert.Contains("--merge", ex.Message);         // boolean trigger, no value marker
+        Assert.DoesNotContain("--filter", ex.Message);  // a transformer is not a processor
+    }
+
+    /// <summary>
+    /// The catalogue is read, not restated: a registry carrying different processors produces a
+    /// different list, so adding, renaming or retiring one cannot leave the message behind.
+    /// The trigger is named so no real processor can ever claim it — a plausible name like
+    /// '--pivot' would quietly stop testing genericity the day the catalogue grew one.
+    /// </summary>
+    [Fact]
+    public void Parse_ProcessorHint_FollowsTheRegistryRatherThanAFixedList()
+    {
+        var registry = new FlagRegistry();
+        CoreFlagRegistry.RegisterCoreFlags(registry);
+        registry.Register(new FlagDef("--query", new[] { "-q" }, FlagArity.Scalar, FlagScope.PerBranch, "query", FlagStage.Reader));
+        registry.Register(new FlagDef("--unknown-processor", Array.Empty<string>(), FlagArity.Scalar, FlagScope.PerBranch, "unknown-processor", FlagStage.Pipeline, ProcessorTrigger: true));
+
+        var ex = Assert.Throws<InvalidOperationException>(() => new PipelineLexer(registry).Parse(
+            new[] { "-i", "a.csv", "--alias", "A", "--from", "A", "--query", "SELECT 1", "-o", "out.csv" }));
+
+        Assert.Contains("--unknown-processor <value>", ex.Message);
+        Assert.DoesNotContain("--sql", ex.Message);
+    }
+
+    /// <summary>A flag that also configures a writer is misplaced, not unbindable — say so.</summary>
+    [Fact]
+    public void Parse_ReaderAndWriterFlagOnAFromBranch_SaysToMoveItAfterOutput()
+    {
+        var args = new[] { "-i", "a.csv", "--alias", "A", "--from", "A", "--table", "t", "-o", "out.csv" };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => _lexer.Parse(args));
+
+        Assert.Contains("move it after -o", ex.Message);
+        Assert.DoesNotContain("stream processor", ex.Message);
+    }
+
+    [Fact]
+    public void Parse_EngineFlagsOnAFromBranch_AreAccepted()
+    {
+        var args = new[] { "-i", "a.csv", "--alias", "A", "--from", "A",
+                           "--batch-size", "1024", "--limit", "10", "-o", "out.csv" };
+
+        var pipeline = _lexer.Parse(args);
+
+        var consumer = pipeline.Branches.Last();
+        Assert.Equal(new[] { "A" }, consumer.From);
+        Assert.Equal("out.csv", consumer.Output);
+    }
+
+    /// <summary>With a job file the reader comes from YAML, so a CLI reader flag is an override.</summary>
+    [Fact]
+    public void Parse_ReaderFlagOnAFromBranch_IsAcceptedWithAJobFile()
+    {
+        var args = new[] { "--job", "j.yaml", "--from", "A", "--query", "SELECT 1", "-o", "out.csv" };
+
+        var pipeline = _lexer.Parse(args);
+
+        Assert.Equal("j.yaml", pipeline.Globals.JobFile);
+    }
+
+    [Fact]
+    public void Parse_ReaderFlagOnABranchThatHasAReader_IsAccepted()
+    {
+        var args = new[] { "-i", "db:conn", "--query", "SELECT 1", "-o", "out.csv" };
+
+        var pipeline = _lexer.Parse(args);
+
+        Assert.Single(pipeline.Branches);
+        Assert.Contains("--query", pipeline.Branches[0].ReaderArgs);
     }
 }
 

@@ -182,7 +182,14 @@ public class PipelineLexer
         if (currentBranchArgs.Count > 0)
             branches.Add(BuildBranch(currentBranchFlags, currentBranchArgs));
 
-        foreach (var branch in branches) RejectOrphanBranch(branch);
+        // A job file supplies each branch's reader from YAML, so CLI reader flags are overrides
+        // there rather than flags with nothing to bind to.
+        bool hasJobFile = globalDict.ContainsKey("--job");
+        foreach (var branch in branches)
+        {
+            RejectOrphanBranch(branch);
+            if (!hasJobFile) RejectReaderFlagsWithoutAReader(branch);
+        }
 
         return new ParsedPipeline(MapGlobals(globalDict), branches);
     }
@@ -324,6 +331,54 @@ public class PipelineLexer
             RawArgs = rawArgs.ToArray(),
             Flags   = flags
         };
+    }
+
+    /// <summary>
+    /// A branch opened by '--from' has no reader of its own, so a flag that is not valid in the
+    /// pipeline stage has nothing to bind to. Such a flag used to be dropped in silence:
+    /// '--from a --ref b --query "&lt;join&gt;"' ran as a pass-through of 'a', wrote a file missing
+    /// b's columns and exited 0, while the same line misspelt '--quer' failed closed and even
+    /// named --sql as the fix. Reject the right spelling in the wrong place the way the
+    /// misspelling already is.
+    /// </summary>
+    private void RejectReaderFlagsWithoutAReader(BranchSpec branch)
+    {
+        if (branch.From.Count == 0 || !string.IsNullOrEmpty(branch.Input)) return;
+
+        foreach (var token in branch.ReaderArgs)
+        {
+            if (!token.StartsWith('-')) continue;
+            var def = _registry.Lookup(token);
+            if (def == null) continue;
+            if (def.Stage.HasFlag(FlagStage.Pipeline)) continue;
+
+            throw new InvalidOperationException(
+                $"Flag '{token}' configures a reader, but this branch reads from "
+              + $"'{string.Join(",", branch.From)}' and has no reader of its own, so nothing binds it."
+              + (def.Stage.HasFlag(FlagStage.Writer)
+                    ? " It also configures a writer: move it after -o to apply it to the target."
+                    : ProcessorTriggerHint()));
+        }
+    }
+
+    /// <summary>
+    /// Names the processors the registry actually carries, with the value each one takes.
+    /// FlagRegistryFactory registers one trigger per <c>IStreamTransformerFactory.CliTriggerFlags</c>
+    /// entry, so the catalogue is already here to be read; a hardcoded "use --sql" would be wrong
+    /// the day a processor is added, renamed or retired, and nothing would catch it.
+    /// </summary>
+    private string ProcessorTriggerHint()
+    {
+        var triggers = _registry.GetAll()
+            .Where(d => d.ProcessorTrigger)
+            .Select(d => d.ConsumesNextToken ? $"{d.Name} <value>" : d.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(t => t, StringComparer.Ordinal)
+            .ToList();
+
+        return triggers.Count == 0
+            ? string.Empty
+            : $" A branch reading other branches is driven by a stream processor: {string.Join(", ", triggers)}.";
     }
 
     private void ValidateStageConstraints(string[] args, FlagStage requiredStage, string stageName)
