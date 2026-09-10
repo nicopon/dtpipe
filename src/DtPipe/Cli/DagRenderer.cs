@@ -1,6 +1,7 @@
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Pipelines.Dag;
+using DtPipe.Core.Security;
 using Spectre.Console;
 
 namespace DtPipe.Cli;
@@ -24,7 +25,7 @@ internal static class DagRenderer
 		}
 
 		string modeLabel = isColumnar ? "  [cyan]◈ Arrow[/]" : "  [yellow]● row[/]";
-		string inputLabel = !string.IsNullOrEmpty(input) ? $"  [grey]{Markup.Escape(input)}[/]" : string.Empty;
+		string inputLabel = !string.IsNullOrEmpty(input) ? $"  [grey]{Safe(input)}[/]" : string.Empty;
 
 		sb.AppendLine($"  [green]◉[/]{inputLabel}{modeLabel}");
 
@@ -33,7 +34,7 @@ internal static class DagRenderer
 				sb.AppendLine($"     [grey]→ {Markup.Escape(t.Type)}[/]");
 
 		if (!string.IsNullOrEmpty(job?.Output))
-			sb.AppendLine($"     [grey]──▶[/]  [blue]{Markup.Escape(job.Output)}[/]");
+			sb.AppendLine($"     [grey]──▶[/]  [blue]{Safe(job.Output)}[/]");
 
 		return new Panel(new Markup(sb.ToString().TrimEnd()))
 			.Header("[yellow] Pipeline [/]")
@@ -183,14 +184,14 @@ internal static class DagRenderer
 				AppendTransformers(lines, branch, "      ");
 
 				if (!string.IsNullOrEmpty(branch.Output))
-					lines.AppendLine($"      [grey]──▶[/]  [blue]{Markup.Escape(branch.Output)}[/]");
+					lines.AppendLine($"      [grey]──▶[/]  [blue]{Safe(branch.Output)}[/]");
 			}
 			else if (branch.StreamingAliases.Count > 0)
 			{
 				lines.AppendLine($"  [green]◉[/] [white][[{Markup.Escape(branch.Alias)}]][/]  [grey]← [[{Markup.Escape(branch.StreamingAliases[0])}]][/]");
 				AppendTransformers(lines, branch, "      ");
 				if (!string.IsNullOrEmpty(branch.Output))
-					lines.AppendLine($"      [grey]──▶[/]  [blue]{Markup.Escape(branch.Output)}[/]");
+					lines.AppendLine($"      [grey]──▶[/]  [blue]{Safe(branch.Output)}[/]");
 			}
 			else
 			{
@@ -215,13 +216,13 @@ internal static class DagRenderer
 					string modeLabel = feedsChannel
 						? (isArrow ? "  [cyan]◈ Arrow[/]" : "  [yellow]● row[/]")
 						: string.Empty;
-					lines.AppendLine($"      [grey]← {Markup.Escape(branch.Input)}[/]{modeLabel}");
+					lines.AppendLine($"      [grey]← {Safe(branch.Input)}[/]{modeLabel}");
 				}
 
 				AppendTransformers(lines, branch, "      ");
 
 				if (!string.IsNullOrEmpty(branch.Output))
-					lines.AppendLine($"      [grey]──▶[/]  [blue]{Markup.Escape(branch.Output)}[/]");
+					lines.AppendLine($"      [grey]──▶[/]  [blue]{Safe(branch.Output)}[/]");
 			}
 		}
 
@@ -258,6 +259,15 @@ internal static class DagRenderer
 		foreach (var t in transformers)
 			sb.AppendLine($"{indent}[grey]→ {Markup.Escape(t.Type)}[/]");
 	}
+
+	/// <summary>
+	/// Renders a connection string for display. A 'keyring://' reference reaches the banner
+	/// already expanded — JobFileParser resolves it before the renderer runs — so printing one
+	/// verbatim put the password on screen that the keyring exists to keep off it.
+	/// Factory resolution keeps using the raw string; only the displayed form is masked.
+	/// </summary>
+	private static string Safe(string? connectionString)
+		=> Markup.Escape(ConnectionStringSanitizer.Sanitize(connectionString));
 
 	private static string ExtractArgValue(string[]? args, string flag)
 	{
