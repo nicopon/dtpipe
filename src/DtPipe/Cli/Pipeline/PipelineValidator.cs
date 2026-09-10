@@ -52,11 +52,25 @@ public static class PipelineValidator
             }
         }
 
-        // 3. Loop detection
+        // 3. A 'ref' is materialised for a stream processor to query, so a branch declaring one
+        //    without a processor has no consumer for it: the referenced branch was read in full
+        //    and discarded, and the run reported success over a result missing its columns
+        //    entirely. Writing '--query' where '--sql' was meant produces exactly that shape.
+        foreach (var branch in dag.Branches)
+        {
+            if (branch.RefAliases.Count == 0 || branch.HasStreamTransformer) continue;
+
+            var refs = string.Join(",", branch.RefAliases);
+            errors.Add($"Branch '{branch.Alias}' declares ref '{refs}' but runs no stream processor, "
+                     + $"so '{refs}' would be read and discarded. A ref exists for a processor to query: "
+                     + $"add --sql \"<query>\" (or another processor flag) to this branch, or drop the ref.");
+        }
+
+        // 4. Loop detection
         if (HasCycle(dag))
             errors.Add("Circular dependency detected in pipeline graph.");
 
-        // 4. Cursor state file uniqueness
+        // 5. Cursor state file uniqueness
         errors.AddRange(CursorStateValidator.Validate(dag, jobs));
 
         return errors;
