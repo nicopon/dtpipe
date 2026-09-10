@@ -169,7 +169,9 @@ public static class PipelineToJobConverter
             // must all land in the same session.
             Session = globals.Session,
 
-            From     = string.Join(",", branch.From),
+            // Empty means "this branch has no upstream", which is the absence of the key, not an
+            // empty string: string.Join over no aliases wrote "from: ''" on every source branch.
+            From     = branch.From.Count > 0 ? string.Join(",", branch.From) : null,
             Ref      = branch.Ref.ToArray(),
 
             Transformers    = null,

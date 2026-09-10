@@ -273,4 +273,93 @@ public class JobFileRoundTripTests
 
         Assert.Equal("keyring://ABSENT", converted.Jobs["main"].Input);
     }
+
+    // ── (g) an exported job carries only what the branch has ─────────────────
+
+    /// <summary>
+    /// 'ref' defaults to Array.Empty&lt;string&gt;(), which OmitDefaults does not treat as a default
+    /// (the type default is null), so every source branch was written with 'ref: []' — anchored
+    /// '&amp;o0' and aliased on the next branch, because that initialiser is one shared instance.
+    /// 'from' had the matching problem: string.Join over no aliases is "", not absence.
+    /// </summary>
+    [Fact]
+    public void Export_SourceBranches_CarryNoEmptyRoutingKeys()
+    {
+        var parsed = _lexer.Parse(new[]
+        {
+            "-i", "a.csv", "--alias", "A",
+            "-i", "b.csv", "--alias", "B",
+            "--from", "A", "--ref", "B", "--sql", "SELECT 1", "-o", "out.csv",
+        });
+
+        var yaml = JobFileWriter.Serialize(PipelineToJobConverter.Convert(
+            parsed,
+            streamTransformerFactories: new IStreamTransformerFactory[] { new CompositeSqlTransformerFactory() },
+            secretsManager: null,
+            readerFactories: new IStreamReaderFactory[] { new StubCsvReaderFactory() },
+            writerFactories: new IDataWriterFactory[] { new StubCsvWriterFactory() },
+            dataTransformerFactories: TransformerFactories()).Jobs);
+
+        Assert.DoesNotContain("ref: []", yaml);
+        Assert.DoesNotContain("from: ''", yaml);
+        Assert.DoesNotContain("&o0", yaml);   // no anchor, so no alias either
+
+        // What the processor branch really has is still written.
+        Assert.Contains("from: A", yaml);
+        Assert.Contains("- B", yaml);
+    }
+
+    [Fact]
+    public void Export_EmptyRoutingKeys_StillRoundTripToAUsablePipeline()
+    {
+        var reparsed = RoundTrip(new[]
+        {
+            "-i", "a.csv", "--alias", "A",
+            "-i", "b.csv", "--alias", "B",
+            "--from", "A", "--ref", "B", "--sql", "SELECT 1", "-o", "out.csv",
+        }, out _);
+
+        Assert.Null(reparsed["A"].From);
+        Assert.Empty(reparsed["A"].Ref ?? Array.Empty<string>());
+        Assert.Equal("A", reparsed["stream1"].From);
+        Assert.Equal(new[] { "B" }, reparsed["stream1"].Ref);
+    }
+
+    // ── (h) key order follows the pipeline ───────────────────────────────────
+
+    /// <summary>
+    /// Reflection order is the order JobDefinition happens to declare its properties, which read
+    /// 'output' before 'from' and scattered the routing keys through the engine controls.
+    /// </summary>
+    [Fact]
+    public void Export_KeysOfABranch_ReadInPipelineOrder()
+    {
+        var parsed = _lexer.Parse(new[]
+        {
+            "-i", "a.csv", "--alias", "A",
+            "-i", "b.csv", "--alias", "B",
+            "--from", "A", "--ref", "B", "--sql", "SELECT 1", "--limit", "5", "-o", "out.csv",
+        });
+
+        var yaml = JobFileWriter.Serialize(PipelineToJobConverter.Convert(
+            parsed,
+            streamTransformerFactories: new IStreamTransformerFactory[] { new CompositeSqlTransformerFactory() },
+            secretsManager: null,
+            readerFactories: new IStreamReaderFactory[] { new StubCsvReaderFactory() },
+            writerFactories: new IDataWriterFactory[] { new StubCsvWriterFactory() },
+            dataTransformerFactories: TransformerFactories()).Jobs);
+
+        // Keys of the processor branch alone — IndexOf over the whole file would find another
+        // branch's engine keys first.
+        var keys = yaml.Split('\n')
+            .SkipWhile(l => !l.StartsWith("stream1:")).Skip(1)
+            .TakeWhile(l => l.StartsWith(" "))
+            .Where(l => l.StartsWith("  ") && !l.StartsWith("   ") && l.Contains(':'))
+            .Select(l => l.Trim().Split(':')[0])
+            .ToList();
+
+        // Reads before it writes, writes before it is tuned, nested detail last.
+        var order = string.Join(",", keys);
+        Assert.Equal("from,ref,output,batch-size,limit,sampling-rate,provider-options", order);
+    }
 }
