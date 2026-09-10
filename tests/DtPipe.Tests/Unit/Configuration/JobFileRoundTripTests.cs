@@ -221,4 +221,56 @@ public class JobFileRoundTripTests
         Assert.Equal(0.5, job.SamplingRate);
         Assert.Equal(7, job.SamplingSeed);
     }
+
+    // ── (f) provider options behind a keyring indirection ────────────────────
+
+    /// <summary>
+    /// An unresolved 'keyring://alias' matches no ComponentSelector prefix and no CanHandle, so the
+    /// reader factory came back null and every reader option — the query included — was dropped
+    /// from the exported file, which then died on "A query is required for provider 'mssql'".
+    /// </summary>
+    [Fact]
+    public void RoundTrip_KeyringInput_PreservesReaderProviderOptions()
+    {
+        var secrets = new DtPipe.Cli.Security.InMemorySecretsManager();
+        secrets.SetSecret("SRC", "in.csv");
+
+        var parsed = _lexer.Parse(new[]
+        {
+            "-i", "keyring://SRC", "--csv-separator", ";",
+            "-o", "out.csv",
+        });
+
+        var converted = PipelineToJobConverter.Convert(
+            parsed,
+            streamTransformerFactories: new IStreamTransformerFactory[] { new CompositeSqlTransformerFactory() },
+            secretsManager: secrets,
+            readerFactories: new IStreamReaderFactory[] { new StubCsvReaderFactory() },
+            writerFactories: new IDataWriterFactory[] { new StubCsvWriterFactory() },
+            dataTransformerFactories: TransformerFactories());
+
+        var job = JobFileParser.ParseContent(JobFileWriter.Serialize(converted.Jobs))["main"];
+
+        Assert.NotNull(job.ProviderOptions);
+        Assert.Equal(";", job.ProviderOptions!["csv-reader"]["separator"]);
+
+        // The indirection is what gets written, never what it stands for.
+        Assert.Equal("keyring://SRC", job.Input);
+    }
+
+    [Fact]
+    public void RoundTrip_UnknownKeyringAlias_DoesNotThrow()
+    {
+        var parsed = _lexer.Parse(new[] { "-i", "keyring://ABSENT", "-o", "out.csv" });
+
+        var converted = PipelineToJobConverter.Convert(
+            parsed,
+            streamTransformerFactories: Array.Empty<IStreamTransformerFactory>(),
+            secretsManager: new DtPipe.Cli.Security.InMemorySecretsManager(),
+            readerFactories: new IStreamReaderFactory[] { new StubCsvReaderFactory() },
+            writerFactories: new IDataWriterFactory[] { new StubCsvWriterFactory() },
+            dataTransformerFactories: TransformerFactories());
+
+        Assert.Equal("keyring://ABSENT", converted.Jobs["main"].Input);
+    }
 }

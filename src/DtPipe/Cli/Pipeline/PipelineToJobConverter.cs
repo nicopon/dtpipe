@@ -66,7 +66,7 @@ public static class PipelineToJobConverter
             {
                 Transformers = BuildTransformerConfigs(branchSpec.PipelineArgs, dataTransformerFactories),
                 ProviderOptions = BuildProviderOptions(
-                    job.Input, job.Output,
+                    ForFactoryLookup(job.Input, secretsManager), ForFactoryLookup(job.Output, secretsManager),
                     branchSpec.ReaderArgs, branchSpec.WriterArgs,
                     readerFactories, writerFactories,
                     processor, branchSpec.RawArgs)
@@ -259,9 +259,11 @@ public static class PipelineToJobConverter
     /// <c>&lt;component&gt;-writer</c> for the writer. Only values that differ from the
     /// options defaults are emitted. A detected stream processor contributes its own
     /// payload under its component name (e.g. <c>sql</c>, <c>merge</c>).
+    /// The two connection strings serve only to identify the components; they are never
+    /// emitted, so passing a resolved form of an indirection leaks nothing into the job file.
     /// </summary>
     private static Dictionary<string, Dictionary<string, object?>>? BuildProviderOptions(
-        string? input, string? output,
+        string? inputForLookup, string? outputForLookup,
         string[] readerArgs, string[] writerArgs,
         IEnumerable<IStreamReaderFactory>? readerFactories,
         IEnumerable<IDataWriterFactory>? writerFactories,
@@ -275,12 +277,12 @@ public static class PipelineToJobConverter
 
         // When a reader and a writer share the same component name (csv, jsonl…), the plain
         // key would be consumed by BOTH at load time — suffix both entries explicitly.
-        var readerFactory = ResolveFactory(input, readerFactories);
+        var readerFactory = ResolveFactory(inputForLookup, readerFactories);
         var readerKey = readerFactory?.ComponentName;
         if (readerFactory != null && writerFactories?.Any(w => w.ComponentName.Equals(readerFactory.ComponentName, StringComparison.OrdinalIgnoreCase)) == true)
             readerKey += "-reader";
 
-        var writerFactory2 = ResolveFactory(output, writerFactories);
+        var writerFactory2 = ResolveFactory(outputForLookup, writerFactories);
         var readerEntry = readerFactory != null && readerArgs is { Length: > 0 }
             ? BindToOptionDictionary(readerFactory.OptionsType, readerArgs, readerFactory.ComponentName)
             : null;
@@ -302,6 +304,28 @@ public static class PipelineToJobConverter
         }
 
         return result.Count > 0 ? result : null;
+    }
+
+    /// <summary>
+    /// Expands a bare <c>keyring://alias</c> so the component behind it can be identified.
+    /// An unresolved indirection matches no <see cref="ComponentSelector"/> prefix and no
+    /// <c>CanHandle</c>, so <see cref="ResolveFactory"/> returned null and every reader option —
+    /// the query included — was dropped from the exported job file, which then died on
+    /// "A query is required for provider 'mssql'". <c>JobService.RunSingleJobAsync</c> resolves a
+    /// throwaway copy against the same gate before binding; this is the export side of it.
+    /// The expansion stays inside factory lookup: the job keeps the keyring reference.
+    /// </summary>
+    private static string? ForFactoryLookup(string? connectionString, DtPipe.Cli.Security.ISecretsManager? secretsManager)
+    {
+        const string keyringPrefix = "keyring://";
+        if (secretsManager == null || string.IsNullOrWhiteSpace(connectionString))
+            return connectionString;
+
+        var raw = connectionString.Trim();
+        if (!raw.StartsWith(keyringPrefix, StringComparison.OrdinalIgnoreCase))
+            return connectionString;
+
+        return secretsManager.GetSecret(raw[keyringPrefix.Length..].Trim()) ?? connectionString;
     }
 
     private static T? ResolveFactory<T>(string? connectionString, IEnumerable<T>? factories)
