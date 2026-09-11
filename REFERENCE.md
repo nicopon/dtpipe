@@ -927,9 +927,41 @@ dtpipe agent [<prompt>] [options]
 | `--repeat` | | Replicate the validated plan N times and report determinism variance | `1` |
 | `--sequential` | | Execute tool calls one at a time instead of running independent calls in parallel | `false` |
 | `--trace` | | Write a diagnostic record of the session as JSON lines (a directory gets a timestamped file inside it). Defaults to `$DTPIPE_AGENT_TRACE` | off |
+| `--mcp-server` | | Drive an external MCP server instead of dtpipe's own tools: the command that starts it over stdio (e.g. `"sometool mcp"`, `"npx -y some-server"`). See below | *(unset)* |
 | `--apply` | | Perform a real write (a write also requires an approving gate and a clean SQL safety check) | `false` (dry-run) |
 | `--allow-destructive` | | Allow destructive SQL verbs (`DROP`/`DELETE`/`TRUNCATE`/`UPDATE`/`ALTER`/`INSERT`/`ATTACH`) | `false` |
 | `--allow-network` | | Allow network access in SQL (`LOAD httpfs`/`azure`, remote `read_parquet`/`read_csv`) | `false` |
+
+#### Driving another MCP server (`--mcp-server`)
+
+`--mcp-server "<command>"` starts that command as a child process, completes the MCP handshake and
+offers **its** tools to the model instead of dtpipe's. The command is split on spaces, so
+`--mcp-server "sometool mcp"` and `--mcp-server "npx -y some-server"` both work; quote a path that
+contains a space in your shell.
+
+The point is measurement. `--trace` already records the system message and the tool catalogue as the
+model was offered them, so this turns dtpipe's instrumented loop on a surface it did not design:
+
+```bash
+dtpipe agent -p "list the configured connections" \
+  --mcp-server "sometool mcp" --trace ./traces/ --no-tui
+```
+
+What changes when the flag is set:
+
+- **The system message comes from that server**, not from dtpipe. Hosts use a server's handshake
+  `instructions` as the system message, and this does the same; a server that sends none gets a
+  neutral frame. A dtpipe role prompt is never sent, because it names dtpipe tools a foreign
+  catalogue does not carry.
+- **No dtpipe pipeline can run.** `/exec` and the post-mission "Execute this plan" refuse: there is
+  no dtpipe engine behind a foreign catalogue, and a foreign tool that happens to be named
+  `execute-yaml-job` is a coincidence of naming, not the engine.
+- **`--mode` does not filter the catalogue.** Plan mode hides a tool by the name dtpipe gave it;
+  applied to someone else's catalogue that is either a no-op or hides an unrelated tool.
+- **dtpipe vouches for nothing that server does.** Its tools run under its own guardrails. dtpipe's
+  `--apply`, `--allow-destructive` and `--allow-network` govern `execute-yaml-job`, which is not in
+  play here.
+
 
 > **Hardening (fail-closed defaults).** With no flags, `dtpipe agent` is the safest behavior:
 > mode `plan`, dry-run only, destructive SQL and network access denied. Sampling is **not** part of
