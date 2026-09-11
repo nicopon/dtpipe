@@ -53,14 +53,23 @@ public static partial class JobFileParser
 			content = File.ReadAllText(filePath);
 		}
 
-		// YamlDotNet wraps the real cause — the property it could not match — in a
-		// YamlException whose own Message is the useless "Exception during deserialization".
-		// Program.cs prints ex.Message, so the CLI reported exactly that while the MCP surface,
-		// which already unwraps through ToolError, named the key and quoted its line. Refusing an
-		// unknown key is only actionable if the refusal says which one.
+		return ParseContent(content, secretsManager);
+	}
+
+	/// <summary>
+	/// Parses a YAML job content string into a dictionary of JobDefinitions (DAG).
+	/// </summary>
+	public static Dictionary<string, DtPipe.Core.Models.JobDefinition> ParseContent(string content, DtPipe.Cli.Security.ISecretsManager? secretsManager = null)
+	{
+		// YamlDotNet wraps the real cause — the property it could not match — in a YamlException
+		// whose own Message is the useless "Exception during deserialization". The unwrap belongs
+		// here, on the one method both entry points reach: posted on the file path alone, it left
+		// 'dry-run' and 'get-dag-topology' answering an unknown key with the bare property name
+		// while 'validate-yaml-job' named the key, its line and the legal key list — the same YAML,
+		// the same server, two answers.
 		try
 		{
-			return ParseContent(content, secretsManager);
+			return Deserialize(content, secretsManager);
 		}
 		catch (YamlException ex)
 		{
@@ -68,10 +77,7 @@ public static partial class JobFileParser
 		}
 	}
 
-	/// <summary>
-	/// Parses a YAML job content string into a dictionary of JobDefinitions (DAG).
-	/// </summary>
-	public static Dictionary<string, DtPipe.Core.Models.JobDefinition> ParseContent(string content, DtPipe.Cli.Security.ISecretsManager? secretsManager = null)
+	private static Dictionary<string, DtPipe.Core.Models.JobDefinition> Deserialize(string content, DtPipe.Cli.Security.ISecretsManager? secretsManager)
 	{
 		// A key this loader does not know is refused, not dropped. Three defects of one shape have
 		// been found this way — 'columns:' on a project transformer, an 'options:' block that built

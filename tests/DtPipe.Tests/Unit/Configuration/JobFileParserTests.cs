@@ -74,7 +74,26 @@ joined:
   sql: SELECT 1
   from: p
 ");
-		act.Should().Throw<YamlDotNet.Core.YamlException>().WithMessage("*sql*");
+		act.Should().Throw<InvalidOperationException>().WithMessage("*sql*");
+	}
+
+	/// <summary>
+	/// The described refusal belongs to <see cref="JobFileParser.ParseContent"/>, not to the file
+	/// entry point above it: 'dry-run' and 'get-dag-topology' reach the parser through the string
+	/// path, and while the unwrap sat on the file path they answered an unknown key with the bare
+	/// property name. Asserting it here is what keeps the two entry points from drifting apart.
+	/// </summary>
+	[Fact]
+	public void Unknown_Key_Is_Named_With_Its_Line_On_The_String_Path()
+	{
+		var yaml = "main:\n  input: in.csv\n  providers:\n    csv:\n      separator: ';'\n  output: out.csv\n";
+
+		var ex = Assert.Throws<InvalidOperationException>(() => JobFileParser.ParseContent(yaml));
+
+		ex.Message.Should().Contain("providers");
+		ex.Message.Should().Contain("line 3");
+		ex.Message.Should().Contain("provider-options");   // the legal key it was mistaken for
+		ex.Message.Should().Contain("^");                  // the caret under the offending column
 	}
 
 	[Fact]
