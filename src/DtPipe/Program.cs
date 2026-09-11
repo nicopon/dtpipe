@@ -385,7 +385,10 @@ class Program
 				gate.Override = _ => true;
 			return (DtPipe.Cli.Security.IApprovalGate)gate;
 		});
-		services.AddMcpServer()
+		// Hosts hand these to the model as a system message. Without them a plain MCP client
+		// got the tool list and no relationship between the tools — the agent command's role
+		// prompt reaches its own loop only.
+		services.AddMcpServer(o => o.ServerInstructions = DtPipe.Cli.Mcp.McpServerInstructions.Build())
 		        .WithStdioServerTransport()
 		        .WithTools<DtPipe.Cli.Mcp.DtPipeMcpTools>();
 	}
