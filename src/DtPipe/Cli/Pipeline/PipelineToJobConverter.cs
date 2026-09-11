@@ -83,6 +83,10 @@ public static class PipelineToJobConverter
                 RefAliases = branchSpec.Ref.ToArray(),
                 Arguments = branchSpec.RawArgs,
                 ProcessorName = processor?.ComponentName,
+                // DagRenderer names a branch's stages from here. Set only by DagTopologyService
+                // until now, so the panel the agent draws listed the transformers and the one the
+                // CLI draws for the same job did not.
+                PreParsedJob = job,
                 Engine = DeriveEngineSettings(parsed.Globals, branchSpec.Flags)
             });
         }
@@ -143,6 +147,7 @@ public static class PipelineToJobConverter
             ProcessorName = streamTransformerFactories?
                 .FirstOrDefault(f => f.IsApplicable(kv.Value))
                 ?.ComponentName,
+            PreParsedJob = kv.Value,
             Engine = new BranchEngineSettings(
                 Limit: kv.Value.Limit, BatchSize: kv.Value.BatchSize, MaxBatchBytes: kv.Value.MaxBatchBytes,
                 SamplingRate: kv.Value.SamplingRate, SamplingSeed: kv.Value.SamplingSeed,
