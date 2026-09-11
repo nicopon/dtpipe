@@ -103,6 +103,19 @@ public class McpHelpService : IMcpHelpService
         sw.WriteLine("  - state: <path_to_state_file>");
         sw.WriteLine();
 
+        // 'list-checkpoints' and 'read-checkpoint' describe reading a checkpoint and say nothing
+        // about producing one, and this text said nothing at all — so the branch keys that create
+        // it were reachable only by guessing. Asked to iterate on a transformation without
+        // re-reading the source, a recorded session built its own Arrow files in a temp directory
+        // and failed three dry-runs on channels it had invented.
+        sw.WriteLine("CHECKPOINTS (iterate on a transformation without re-reading the source):");
+        sw.WriteLine("  Define these keys directly in the branch root:");
+        sw.WriteLine("  - checkpoint: <name>         Materialise this branch's output in the session store.");
+        sw.WriteLine("  - from-checkpoint: <key>     Read from a stored checkpoint instead of 'input'.");
+        sw.WriteLine("  - session: <name>            Session the checkpoints belong to (optional).");
+        sw.WriteLine("  Call 'list-checkpoints' for the keys a session already holds.");
+        sw.WriteLine();
+
         sw.WriteLine("ADAPTERS:");
         foreach (var a in Adapters())
             sw.WriteLine($"  {a.Name.PadRight(14)} ({a.Roles}) {a.Description}");

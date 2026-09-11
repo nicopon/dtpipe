@@ -223,6 +223,21 @@ public partial class McpAdapterHelpTests
     }
 
     /// <summary>
+    /// 'list-checkpoints' and 'read-checkpoint' both describe reading a checkpoint; neither says
+    /// how one comes to exist. The general help is therefore the only surface naming the branch
+    /// keys that make one, and a recorded session asked exactly for what they do, was told nothing,
+    /// and built its own Arrow files instead.
+    /// </summary>
+    [Fact]
+    public void The_General_Help_Names_The_Keys_That_Make_A_Checkpoint()
+    {
+        var help = _help.GetGeneralHelp();
+
+        Assert.Contains("checkpoint:", help);
+        Assert.Contains("from-checkpoint:", help);
+    }
+
+    /// <summary>
     /// Both roles carry their own notes and example. Emitting only the reader's left the writer's
     /// semantics — MySQL's unique-index requirement for upsert, its bulk-load prerequisite —
     /// unreachable, while the writer's options were still listed as if freely usable.
