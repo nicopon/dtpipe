@@ -445,6 +445,20 @@ public partial class DtPipeMcpTools
             }
             sb.AppendLine($"  output: \"{destination.Replace("\"", "\\\"")}\"");
 
+            // A target that needs a table gets the key named here. Without it the skeleton
+            // validates — 'validate-yaml-job' never builds the writer — and fails only once the
+            // job runs, which is the one thing a skeleton is meant to spare its caller.
+            if (resolvedWriter is not null
+                && resolvedWriter.GetSupportedOptionTypes().Any(typeof(ITableAwareOptions).IsAssignableFrom))
+            {
+                sb.AppendLine();
+                sb.AppendLine("  # This target writes into a table. Uncomment and name it, or the job");
+                sb.AppendLine("  # validates and then fails when it runs:");
+                sb.AppendLine("  # provider-options:");
+                sb.AppendLine($"  #   {resolvedWriter.ComponentName}-writer:");
+                sb.AppendLine("  #     table: <table-name>");
+            }
+
             if (schemaError != null)
             {
                 sb.AppendLine();
