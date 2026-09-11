@@ -85,7 +85,13 @@ public class CliDataWriterFactory : CliProviderFactory<IDataWriter>, IDataWriter
 		// F13: typed capability instead of GetProperty("Table") reflection.
 		if (specificOptions is ITableAwareOptions tableOpts && string.IsNullOrWhiteSpace(tableOpts.Table))
 		{
-			throw new InvalidOperationException($"A target table is required for provider '{_descriptor.ComponentName}'. Use --table \"[name]\"");
+			// Both spellings, because the caller may have no command line: a model driving the MCP
+			// server writes a YAML job, and a message naming only --table sends it after a flag it
+			// cannot pass.
+			throw new InvalidOperationException(
+				$"A target table is required for provider '{_descriptor.ComponentName}'. "
+				+ $"In a YAML job, set 'table' under provider-options -> {_descriptor.ComponentName}-writer; "
+				+ "on the command line, pass --table \"<name>\".");
 		}
 
 		ApplyVariant(specificOptions, route?.OutputVariant);
