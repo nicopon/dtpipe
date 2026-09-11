@@ -16,13 +16,13 @@ public static class AgentSystemPrompt
  spends a turn for nothing.
 
  RECOMMENDED WORKFLOW:
- 1. Discovery &amp; Guidelines: Call 'list-providers', 'help' or 'list-cursors' to discover available adapters, transformers, active cursors, and the exact YAML job &amp; DAG topology rules.
- 2. Schema Inspection &amp; Bootstrapping: Use 'inspect' to inspect schemas, and call 'suggest-pipeline' to generate a valid YAML pipeline skeleton.
+ 1. Discovery & Guidelines: Call 'list-providers', 'help' or 'list-cursors' to discover available adapters, transformers, active cursors, and the exact YAML job & DAG topology rules.
+ 2. Schema Inspection & Bootstrapping: Use 'inspect' to inspect schemas, and call 'suggest-pipeline' to generate a valid YAML pipeline skeleton.
  3. Detailed Documentation: Call 'get-adapter-help', 'get-transformer-help', or 'get-anonymization-help' whenever you need specific adapter connection strings, option schemas, or faker method names.
- 4. Pipeline Design, Validation &amp; Sample Run: Call 'validate-yaml-job' to check syntax and topology. Then run 'dry-run', which executes the pipeline over a few source rows through the real execution path with the writer neutralised: it returns the rows as they leave each transformer, so a step that drops or multiplies rows is visible. Nothing is written to the target.
+ 4. Pipeline Design, Validation & Sample Run: Call 'validate-yaml-job' to check syntax and topology. Then run 'dry-run', which executes the pipeline over a few source rows through the real execution path with the writer neutralised: it returns the rows as they leave each transformer, so a step that drops or multiplies rows is visible. Nothing is written to the target.
  5. Execution: Call 'execute-yaml-job' with your validated YAML string to execute the pipeline.
 
- MISSION COMPLETION &amp; SUMMARY REQUIREMENTS:
+ MISSION COMPLETION & SUMMARY REQUIREMENTS:
  When you have completed the task or achieved the sub-goal:
  1. Provide a concise MACRO SUMMARY of the strategy employed (data sources used, transformers applied, target output, and key options).
  2. Display the complete, clean YAML job configuration block ready for reuse.
@@ -44,10 +44,10 @@ public static class AgentSystemPrompt
  spends a turn for nothing.
 
  PLANNING WORKFLOW:
- 1. Discovery &amp; Guidelines: Call 'list-providers', 'help' or 'list-cursors' to discover adapters, transformers, active cursors, and the exact YAML job &amp; DAG topology rules.
+ 1. Discovery & Guidelines: Call 'list-providers', 'help' or 'list-cursors' to discover adapters, transformers, active cursors, and the exact YAML job & DAG topology rules.
  2. Schema Inspection: Call 'inspect' (and 'preview-data') to learn the real schemas; call 'suggest-pipeline' for a valid YAML skeleton.
  3. Documentation: Call 'get-adapter-help', 'get-transformer-help' or 'get-anonymization-help' when you need connection strings, option schemas, or faker method names.
- 4. Validate &amp; Dry-Run: Call 'validate-yaml-job' on your candidate YAML, then 'dry-run' to test connections, fetch schemas, and preview branches without writing data.
+ 4. Validate & Dry-Run: Call 'validate-yaml-job' on your candidate YAML, then 'dry-run' to test connections, fetch schemas, and preview branches without writing data.
  5. Finish the turn ONE of two ways:
     a. Deliver the plan — output the final, validated YAML as the 'yamlContent' argument of your (last) tool call. This is the single source of truth the engine will execute deterministically.
     b. If, and only if, a decision is missing that only the user can make (a target filename or table they told you to confirm, an ambiguous column, a business rule) — call 'ask-user' with that ONE question and nothing else. When the answer is a pick between a few values you already know, list them in the 'options' argument — they are shown as choices and the user may still answer something else. Do not also deliver YAML, do not restate the question, do not add ""anything else?"". The user's reply is the next message and the plan resumes from there.
