@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,6 +14,7 @@ public class McpToolProvider : IAgentToolProvider
     private readonly object _toolsInstance;
     private readonly Type _toolsType;
     private readonly List<ToolDefinition> _definitions;
+    private readonly IReadOnlySet<string> _writingTools;
 
     /// <summary>
     /// A tool the model can call to stop and ask the user a question. It is defined here, not on
@@ -54,6 +56,7 @@ public class McpToolProvider : IAgentToolProvider
          _toolsType = toolsInstance.GetType();
          _definitions = McpToolReflector.BuildToolDefinitions(_toolsType);
          _definitions.Add(AskUserTool);
+         _writingTools = ToolModePolicy.WritingTools(_toolsType);
        }
 
     /// <inheritdoc />
@@ -65,11 +68,11 @@ public class McpToolProvider : IAgentToolProvider
     public List<ToolDefinition> GetToolDefinitions(AgentMode mode)
        {
          // In Plan mode the agent only plans & validates: it must never be able to trigger
-          // a real write. The execution tool is excluded from the allow-list.
+          // a real write. Every tool marked as writing to a target is excluded from the allow-list.
         if (mode == AgentMode.Plan)
           {
             return _definitions
-                  .Where(d => !ToolModePolicy.IsBlockedInPlanMode(d.Name))
+                  .Where(d => !_writingTools.Contains(d.Name))
                   .ToList();
           }
 
@@ -96,25 +99,37 @@ public class McpToolProvider : IAgentToolProvider
 
  /// <summary>
  /// Central definition of which tools are available in each <see cref="AgentMode"/>.
- /// KISS + fail-closed: <c>execute-yaml-job</c> is the only execution tool and is blocked
- /// in <see cref="AgentMode.Plan"/>.
+ /// Fail-closed: a tool that writes to a target is blocked in <see cref="AgentMode.Plan"/>.
+ ///
+ /// <para>
+ /// Which tools those are is read off <see cref="WritesToTargetAttribute"/>, never listed here.
+ /// A list in this file is a second place to edit when a tool is added, and the first symptom of
+ /// forgetting it is a planner that can write.
+ /// </para>
  /// </summary>
 public static class ToolModePolicy
  {
-    private static readonly IReadOnlyList<string> ExecutionToolNames = new[]
+    /// <summary>
+    /// The tools on <paramref name="toolsType"/> that declare they write to a target, by the name
+    /// they are exposed under — <see cref="McpToolReflector.ToolNameOf"/> owns that spelling, so a
+    /// tool renamed through its attribute cannot fall out of this set.
+    /// </summary>
+    public static IReadOnlySet<string> WritingTools(Type toolsType)
        {
-        "execute-yaml-job"
-       };
+        return toolsType
+              .GetMethods(BindingFlags.Public | BindingFlags.Instance)
+              .Where(m => m.GetCustomAttribute<WritesToTargetAttribute>() is not null)
+              .Select(McpToolReflector.ToolNameOf)
+              .Where(n => n is not null)
+              .Select(n => n!)
+              .ToHashSet(StringComparer.OrdinalIgnoreCase);
+       }
+
+    private static readonly IReadOnlySet<string> DtPipeWritingTools = WritingTools(typeof(DtPipeMcpTools));
 
         /// <summary>True when <paramref name="toolName"/> must not be offered in Plan mode.</summary>
-    public static bool IsBlockedInPlanMode(string toolName)
-       {
-        return ExecutionToolNames.Any(n => string.Equals(n, toolName, StringComparison.OrdinalIgnoreCase));
-       }
+    public static bool IsBlockedInPlanMode(string toolName) => IsExecutionTool(toolName);
 
         /// <summary>True when <paramref name="toolName"/> performs a real write / execution.</summary>
-    public static bool IsExecutionTool(string toolName)
-       {
-        return ExecutionToolNames.Any(n => string.Equals(n, toolName, StringComparison.OrdinalIgnoreCase));
-       }
+    public static bool IsExecutionTool(string toolName) => DtPipeWritingTools.Contains(toolName);
  }

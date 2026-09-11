@@ -1,8 +1,11 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using DtPipe.Cli.Agent;
+using DtPipe.Cli.Mcp;
+using DtPipe.Tests.Helpers;
 using ModelContextProtocol.Server;
 using Spectre.Console;
 using Xunit;
@@ -26,8 +29,16 @@ public class AgentModeTests
          public string ValidateYamlJob(string yamlContent) => "ok";
 
         [McpServerTool(Name = "execute-yaml-job")]
+        [WritesToTarget]
         [System.ComponentModel.Description("Execute a YAML job.")]
         public string ExecuteYamlJob(string yamlContent) => "ran";
+
+         // Named nothing like the execution tool on purpose: the filter must follow the mark, not
+         // a spelling. A name-matching filter lets a second writing tool through unnoticed.
+        [McpServerTool(Name = "push-to-warehouse")]
+        [WritesToTarget]
+        [System.ComponentModel.Description("Write rows somewhere.")]
+        public string PushToWarehouse(string yamlContent) => "pushed";
         }
 
      [Fact]
@@ -37,6 +48,7 @@ public class AgentModeTests
 
         var planTools = provider.GetToolDefinitions(AgentMode.Plan);
         Assert.DoesNotContain(planTools, t => t.Name == "execute-yaml-job");
+        Assert.DoesNotContain(planTools, t => t.Name == "push-to-warehouse");
         Assert.Contains(planTools, t => t.Name == "validate-yaml-job");
         }
 
@@ -85,4 +97,46 @@ public class AgentModeTests
             Assert.Contains("EXECUTOR", AgentSystemPrompt.Select(AgentMode.Execute));
             Assert.Contains("EXECUTOR", AgentSystemPrompt.Select(AgentMode.Autonomous));
              }
+
+    /// <summary>
+    /// The whole catalogue, not a name: a tool added with <see cref="WritesToTargetAttribute"/>
+    /// is covered here without this file being edited, which is the point of reading the mark
+    /// instead of keeping a list.
+    /// </summary>
+    [Fact]
+    public void No_Tool_That_Writes_To_A_Target_Is_Offered_In_Plan_Mode()
+        {
+        var provider = new McpToolProvider(McpCatalogue.Tools());
+        var writing = ToolModePolicy.WritingTools(typeof(DtPipeMcpTools));
+
+        // A guard over an empty set is green for the wrong reason.
+        Assert.NotEmpty(writing);
+
+        var planTools = provider.GetToolDefinitions(AgentMode.Plan).Select(t => t.Name).ToList();
+        foreach (var tool in writing)
+            {
+            Assert.DoesNotContain(tool, planTools);
+            Assert.True(ToolModePolicy.IsBlockedInPlanMode(tool));
+            }
+
+        var allTools = provider.GetToolDefinitions(AgentMode.Execute).Select(t => t.Name).ToList();
+        foreach (var tool in writing)
+            Assert.Contains(tool, allTools);
+        }
+
+    /// <summary>
+    /// 'dry-run' executes the real pipeline with the writer neutralised. Marking it would hide it
+    /// from the planner, which its own role prompt tells it to call.
+    /// </summary>
+    [Fact]
+    public void Dry_Run_Is_Not_A_Writing_Tool()
+        {
+        var writing = ToolModePolicy.WritingTools(typeof(DtPipeMcpTools));
+
+        Assert.DoesNotContain("dry-run", writing);
+        Assert.Contains(
+            new McpToolProvider(McpCatalogue.Tools()).GetToolDefinitions(AgentMode.Plan),
+            t => t.Name == "dry-run");
+        }
+
 }

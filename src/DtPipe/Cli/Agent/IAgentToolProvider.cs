@@ -16,8 +16,8 @@ public interface IAgentToolProvider
 
         /// <summary>
         /// Return the tool definitions allowed in a given <see cref="AgentMode"/>.
-        /// In <see cref="AgentMode.Plan"/> the destructive/execution tool
-        /// <c>execute-yaml-job</c> is excluded; the LLM only plans and validates.
+        /// In <see cref="AgentMode.Plan"/> every tool that declares it writes to a target is
+        /// excluded; the LLM only plans and validates.
         /// </summary>
     List<ToolDefinition> GetToolDefinitions(AgentMode mode);
 

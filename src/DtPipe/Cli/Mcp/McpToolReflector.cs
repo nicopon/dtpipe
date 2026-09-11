@@ -84,7 +84,7 @@ public static class McpToolReflector
     }
 
     /// <summary>The tool name a method is exposed under, or null when it is not a tool.</summary>
-    private static string? ToolNameOf(MethodInfo method)
+    internal static string? ToolNameOf(MethodInfo method)
     {
         var attr = method.GetCustomAttribute<McpServerToolAttribute>();
         if (attr is null) return null;

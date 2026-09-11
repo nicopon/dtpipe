@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using DtPipe.Cli.Agent;
+using DtPipe.Cli.Mcp;
 using ModelContextProtocol.Server;
 using Spectre.Console;
 using Xunit;
@@ -22,6 +23,7 @@ public class AgentExecutorModeTests
          public string ValidateYamlJob(string yamlContent) => "ok";
 
         [McpServerTool(Name = "execute-yaml-job")]
+        [WritesToTarget]
          [System.ComponentModel.Description("Execute a YAML job.")]
         public string ExecuteYamlJob(string yamlContent) => "ran";
          }

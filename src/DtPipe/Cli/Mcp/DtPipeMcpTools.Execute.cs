@@ -171,6 +171,7 @@ public partial class DtPipeMcpTools
 
 
      [McpServerTool(Name = "execute-yaml-job")]
+     [WritesToTarget]
      [System.ComponentModel.Description("Execute a pipeline configuration specified directly as YAML. This is the only way to run pipelines and avoids command-line quoting/escaping issues. By default the run is a dry-run (no data is written); pass apply=true to perform a real write, which additionally requires approval and a compliant SQL safety check.")]
      public async Task<string> ExecuteYamlJob(
           [System.ComponentModel.Description("The complete YAML configuration string representing the pipeline")] string yamlContent,
