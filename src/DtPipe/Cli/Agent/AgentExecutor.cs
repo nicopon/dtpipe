@@ -184,7 +184,7 @@ public class AgentExecutor
         _mode ??= opts.Mode;
         PendingQuestion = null;   // this turn's prompt is the answer to any previous ask-user
           // F1: select the role prompt for the live operating mode (PLAN forbids execution).
-        Messages[0] = new ChatMessage("system", AgentSystemPrompt.Select(Mode));
+        Messages[0] = new ChatMessage("system", SystemPrompt);
         Messages.Add(new ChatMessage("user", userPrompt));
 
         if (_trace is not null)
@@ -196,7 +196,7 @@ public class AgentExecutor
                 _traceOpened = true;
                 _trace.Session(model, baseUrl, Mode, opts, maxIterations);
             }
-            _trace.SystemPrompt(Mode, AgentSystemPrompt.Select(Mode));
+            _trace.SystemPrompt(Mode, SystemPrompt);
             _trace.Catalogue(Mode, _toolProvider.GetToolDefinitions(Mode));
             _trace.Turn(userPrompt);
         }
@@ -239,7 +239,7 @@ public class AgentExecutor
          {
              var fresh = new List<ChatMessage>
                {
-                 new("system", AgentSystemPrompt.Select(Mode)),
+                 new("system", SystemPrompt),
                  new("user", userPrompt)
                };
             var repl = await RunPlanningLoopAsync(fresh, userPrompt, model, baseUrl, opts, maxIterations,
@@ -548,8 +548,25 @@ public class AgentExecutor
     /// plan they just reviewed is the intended escape hatch, and the F2 guardrails inside the tool
     /// still apply — <c>apply=false</c> stays a sample run with the writer neutralised.
     /// </summary>
+    /// <summary>
+    /// The system message in force. A foreign server gets its own instructions (or the neutral
+    /// fallback); dtpipe's own tools get the role prompt for the mode. Read from three places —
+    /// Messages[0], the trace and each replication — so they cannot drift apart.
+    /// </summary>
+    private string SystemPrompt =>
+        _toolProvider.CanRunDtPipePlans
+            ? AgentSystemPrompt.Select(Mode)
+            : AgentSystemPrompt.ForExternalServer(ExternalServerInstructions);
+
+    /// <summary>What a foreign server said about itself at the handshake; null for dtpipe's own.</summary>
+    public string? ExternalServerInstructions { get; init; }
+
     public async Task<ToolResult> ExecuteValidatedPlanAsync(CancellationToken ct = default)
     {
+        if (!_toolProvider.CanRunDtPipePlans)
+            throw new InvalidOperationException(
+                "This session drives an external MCP server, so there is no dtpipe pipeline to run.");
+
         var yaml = Trajectory.LastGeneratedYaml;
         if (string.IsNullOrWhiteSpace(yaml))
             throw new InvalidOperationException("No validated plan to execute — the planner produced no YAML.");

@@ -56,6 +56,10 @@ public class McpToolProvider : IAgentToolProvider
          _definitions.Add(AskUserTool);
        }
 
+    /// <inheritdoc />
+    /// <remarks>Stated rather than inherited: these tools are dtpipe's own engine.</remarks>
+    public bool CanRunDtPipePlans => true;
+
     public List<ToolDefinition> GetToolDefinitions() => _definitions;
 
     public List<ToolDefinition> GetToolDefinitions(AgentMode mode)

@@ -72,6 +72,33 @@ public static class AgentSystemPrompt
  ";
 
       /// <summary>
+       /// The frame for a session driving a foreign MCP server. The three prompts above name dtpipe
+       /// tools by hand, so sending one to another server's catalogue measures a model fighting a
+       /// briefing about tools it was never offered. A real host uses the server's own instructions
+       /// as its system message; <see cref="ForExternalServer"/> does the same, and falls back to
+       /// this when the server sent none.
+       /// </summary>
+     public const string ExternalServerFallbackPrompt = @"You are driving an MCP server through its tools.
+ The server did not describe itself, so its tool list is all you have: read the descriptions before
+ calling anything, and prefer a tool that reports over one that changes something.
+
+ WHEN A CALL COMES BACK WRONG:
+ Say what it told you and what you will change, before trying again. Repeating a call unchanged
+ spends a turn for nothing.
+ ";
+
+      /// <summary>
+       /// The system message for a foreign server: what it said about itself at the handshake, or
+       /// <see cref="ExternalServerFallbackPrompt"/> when it said nothing. Never a dtpipe role
+       /// prompt — naming tools the catalogue does not carry is the one thing that would make the
+       /// measurement unreadable.
+       /// </summary>
+     public static string ForExternalServer(string? serverInstructions)
+          => string.IsNullOrWhiteSpace(serverInstructions)
+             ? ExternalServerFallbackPrompt
+             : serverInstructions!;
+
+      /// <summary>
        /// Returns the system prompt for an operating mode. PLAN uses the planner prompt; EXECUTE and
        /// AUTONOMOUS use the executor prompt (autonomous = plan then execute through the guardrails).
        /// </summary>

@@ -38,7 +38,13 @@ public class AgentTui
     /// and will not do — so a user who asked the agent to "create a file" in plan mode is told up
     /// front that a plan, not a file, is what comes back.
     /// </summary>
-    public void RenderRunContext(string model, string url, AgentMode mode, AgentDetailLevel detail = AgentDetailLevel.Compact)
+    /// <param name="externalServer">
+    /// Name of the foreign MCP server being driven, when there is one. The mode line below describes
+    /// what dtpipe's own tools would do; none of that applies to someone else's catalogue, so it is
+    /// replaced rather than printed beside a contradiction.
+    /// </param>
+    public void RenderRunContext(string model, string url, AgentMode mode,
+        AgentDetailLevel detail = AgentDetailLevel.Compact, string? externalServer = null)
     {
         var rule = new Rule("[bold cyan]dtpipe AI Agent[/]")
         {
@@ -50,7 +56,10 @@ public class AgentTui
             $"[grey]Endpoint:[/] [blue]{Markup.Escape(url)}[/]  |  " +
             $"[grey]Mode:[/] [bold]{Markup.Escape(mode.ToString().ToLowerInvariant())}[/]  |  " +
             $"[grey]Detail:[/] [bold]{Markup.Escape(detail.ToString().ToLowerInvariant())}[/]");
-        _console.MarkupLine($"[grey]{Markup.Escape(DescribeMode(mode))}[/]");
+        _console.MarkupLine(externalServer is null
+            ? $"[grey]{Markup.Escape(DescribeMode(mode))}[/]"
+            : $"[grey]Driving {Markup.Escape(externalServer)} through its own tools. dtpipe runs no "
+              + "pipeline here and vouches for none of that server's guardrails.[/]");
         _console.WriteLine();
     }
 

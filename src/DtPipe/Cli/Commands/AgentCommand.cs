@@ -104,6 +104,15 @@ public class AgentCommand : Command
                         + "only known credential shapes are blanked."
         };
 
+        var mcpServerOption = new Option<string?>("--mcp-server")
+        {
+            Description = "Drive an external MCP server instead of dtpipe's own tools: the command to start it "
+                        + "over stdio (e.g. \"sometool mcp\", \"npx -y some-server\"). Turns the loop into an "
+                        + "instrument — --trace records that server's catalogue as the model was offered it. "
+                        + "Planning is off and no dtpipe pipeline can run, so nothing is executed here but the "
+                        + "foreign server's own tools, under its own guardrails, not dtpipe's."
+        };
+
         var interactiveOption = new Option<bool>("--interactive")
         {
             Description = "Force interactive mode for model selection and task prompt"
@@ -161,6 +170,7 @@ public class AgentCommand : Command
         Arguments.Add(promptArgument);
         Options.Add(promptOption);
         Options.Add(traceOption);
+        Options.Add(mcpServerOption);
         Options.Add(providerOption);
         Options.Add(apiKeyOption);
         Options.Add(modelOption);
@@ -242,12 +252,52 @@ public class AgentCommand : Command
             else if (trace is not null)
                 console.MarkupLine($"[grey]Tracing this session to {Markup.Escape(trace.Path)}[/]");
 
-            tui.RenderRunContext(model, url, mode, detail);
 
-            var toolProvider = new McpToolProvider(mcpTools);
+            // Pointing the loop at a foreign server makes it an instrument rather than a driver:
+            // there is no plan to extract and no dtpipe pipeline to run, so the DAG panel — which
+            // reads a dtpipe job out of the model's YAML — is left unwired rather than asked to
+            // render something it cannot parse.
+            var externalServer = parseResult.GetValue(mcpServerOption);
+            ExternalMcpToolProvider? external = null;
+            IAgentToolProvider toolProvider;
+
+            if (!string.IsNullOrWhiteSpace(externalServer))
+            {
+                try
+                {
+                    external = await ExternalMcpToolProvider.ConnectAsync(externalServer!, ct: CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    console.MarkupLine($"[red]Error:[/] could not start the MCP server "
+                                     + $"'{Markup.Escape(externalServer!)}' — {Markup.Escape(ex.Message)}");
+                    return 1;
+                }
+
+                toolProvider = external;
+            }
+            else
+            {
+                toolProvider = new McpToolProvider(mcpTools);
+            }
+
+            tui.RenderRunContext(model, url, mode, detail,
+                external is null ? null : $"{external.ServerName} ({external.GetToolDefinitions().Count} tools)");
+
+            if (external is not null && string.IsNullOrWhiteSpace(external.ServerInstructions))
+                console.MarkupLine("[grey]That server sent no instructions at the handshake; "
+                                 + "the model gets its tool list and nothing else.[/]");
+
+            await using var externalLifetime = external;
+
             var executor = new AgentExecutor(toolProvider, llmClient, tui, console,
-                dagTopology: DtPipe.Cli.Pipeline.DagTopologyService.FromServices(serviceProvider),
-                trace: trace);
+                dagTopology: external is null
+                    ? DtPipe.Cli.Pipeline.DagTopologyService.FromServices(serviceProvider)
+                    : null,
+                trace: trace)
+            {
+                ExternalServerInstructions = external?.ServerInstructions,
+            };
 
               var agentOptions = new AgentOptions
                       {

@@ -22,4 +22,12 @@ public interface IAgentToolProvider
     List<ToolDefinition> GetToolDefinitions(AgentMode mode);
 
     Task<ToolResult> InvokeToolAsync(string toolName, JsonElement args, CancellationToken ct);
+
+    /// <summary>
+    /// True when the tools behind this provider are dtpipe's own, so a validated plan can be handed
+    /// to the execution tool. False for a foreign MCP server: there is no dtpipe engine behind its
+    /// catalogue, and a tool that happens to share the name is a coincidence, not the engine. The
+    /// default is true so a provider says nothing unless it is not dtpipe.
+    /// </summary>
+    bool CanRunDtPipePlans => true;
 }
