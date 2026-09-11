@@ -422,7 +422,11 @@ Key APIs:
 `dtpipe mcp` (STDIO) exposes schema-discovery, validation, and execution tools for AI assistants (`execute-yaml-job` is dry-run by default). Don't enumerate tool names here — see `REFERENCE.md#mcp-server` (canonical, up-to-date tool table) and `REFERENCE.md#agent-guardrails` for full options. `dtpipe agent` runs an interactive loop with Ollama/OpenAI (`AgentExecutor`, `AgentTui`, `OllamaClient`).
 
 Hardening invariants (F1–F7, fail-closed, non-negotiable — details in `REFERENCE.md#agent-guardrails`):
-- **F1 Planner/Executor split** — `--mode plan` (default) hides `execute-yaml-job` from the model.
+- **F1 Planner/Executor split** — `--mode plan` (default) hides every tool marked
+  `[WritesToTarget]` from the model. The set is reflected off the attribute, never listed, and
+  `AgentModeTests` checks it over the whole catalogue. `dry-run` is deliberately unmarked: it
+  runs the real pipeline with the writer neutralised, and the planner's own role prompt tells
+  it to call it.
 - **F2 Guardrails** — `ISqlSafetyPolicy` (destructive verbs / network) + `IApprovalGate`; `apply` + approval + clean check required for writes.
 - **F3 Determinism** — available, not default: `--temperature 0 --seed N --repeat N`; `DeterminismReport` variance = distinct-YAML − 1. The shipped default temperature is `1` (greedy decoding degenerates weak quantized models); `--seed` keeps a run replayable at any temperature.
 - **F4 Non-destructive context** — fact cache + `ConversationWindowManager.Compact`.
