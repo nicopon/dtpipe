@@ -313,6 +313,10 @@ public partial class DtPipeMcpTools
                     input = string.IsNullOrEmpty(b.Input) ? null : DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(b.Input),
                     output = string.IsNullOrEmpty(b.Output) ? null : DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(b.Output),
                     processor = b.Processor,
+                    // The description promises this key by name and says why it is there. It was
+                    // absent from the projection, so every branch read as a bare source-to-sink
+                    // copy — the exact failure the description says the tool avoids.
+                    transformers = b.Transformers,
                     from = b.From,
                     @ref = b.Ref
                 }).ToList()

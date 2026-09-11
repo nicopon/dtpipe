@@ -390,6 +390,31 @@ joined:
         Assert.Equal("csv:out.csv", joined.GetProperty("output").GetString());
     }
 
+    /// <summary>
+    /// The tool's own description promises a 'transformers' key by name, and says why: without it
+    /// a branch whose whole substance is a 'fake' reads as a bare source-to-sink copy. The
+    /// projection did not emit the key, so the description described a tool that did not exist.
+    /// </summary>
+    [Fact]
+    public void GetDagTopology_NamesTheTransformersOfABranch()
+    {
+        var yaml = @"
+main:
+  input: ""csv:in.csv""
+  transformers:
+    - type: fake
+      mappings:
+        email: ""internet.email""
+  output: ""csv:out.csv""
+";
+        var json = _tools.GetDagTopology(yaml);
+
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        var main = doc.RootElement.GetProperty("branches").EnumerateArray().Single();
+
+        Assert.Equal("fake", main.GetProperty("transformers")[0].GetString());
+    }
+
     [Fact]
     public void GetDagTopology_SanitisesConnectionStrings()
     {
