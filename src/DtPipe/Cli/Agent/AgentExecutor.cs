@@ -630,9 +630,19 @@ public class AgentExecutor
          ContextStore.RecordFact(key, call.Name, result, isError);
           }
 
-       /// <summary>The tools whose results are reusable facts (schemas, samples, skeletons, errors).</summary>
-     private static bool IsFactProducingTool(string toolName)
-          => toolName is "inspect" or "preview-data" or "suggest-pipeline" or "dry-run" or "list-providers" or "get-adapter-help" or "get-transformer-help" or "get-dag-topology";
+       /// <summary>
+        /// The tools whose results are reusable facts (schemas, samples, skeletons, errors). Named
+        /// here rather than inline so a guard can hold them against the live catalogue: a renamed
+        /// tool would otherwise stop being cached with nothing to show for it.
+        /// </summary>
+     internal static readonly IReadOnlySet<string> FactProducingTools =
+          new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+             {
+              "inspect", "preview-data", "suggest-pipeline", "dry-run",
+              "list-providers", "get-adapter-help", "get-transformer-help", "get-dag-topology",
+             };
+
+     private static bool IsFactProducingTool(string toolName) => FactProducingTools.Contains(toolName);
 
        /// <summary>
         /// Derives a stable fact key from a tool call's args. For input/query-bearing tools the

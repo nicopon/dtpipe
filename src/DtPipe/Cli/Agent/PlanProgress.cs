@@ -62,8 +62,14 @@ internal sealed class PlanProgress
         Message = null;
     }
 
+    /// <summary>The tool whose result moves a drafted plan to validated or invalid.</summary>
+    internal const string ValidateTool = "validate-yaml-job";
+
+    /// <summary>The tool whose result moves a plan to dry-run, applied or failed.</summary>
+    internal const string ExecuteTool = "execute-yaml-job";
+
     /// <summary>
-    /// A tool call finished. Only <c>validate-yaml-job</c> and <c>execute-yaml-job</c> move the
+    /// A tool call finished. Only <see cref="ValidateTool"/> and <see cref="ExecuteTool"/> move the
     /// plan state; every other tool is ignored. Ignored entirely until a plan has been drafted.
     /// </summary>
     public void OnToolResult(string toolName, bool isError, string? resultJson)
@@ -72,7 +78,7 @@ internal sealed class PlanProgress
 
         switch (toolName)
         {
-            case "validate-yaml-job":
+            case ValidateTool:
                 if (isError)
                 {
                     State = PlanState.Invalid;
@@ -85,7 +91,7 @@ internal sealed class PlanProgress
                 }
                 break;
 
-            case "execute-yaml-job":
+            case ExecuteTool:
                 if (isError)
                 {
                     State = PlanState.Failed;
