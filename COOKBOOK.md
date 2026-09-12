@@ -621,7 +621,8 @@ Notes:
 - Format comes from the extension (`.parquet`, `.csv`, `.tsv`, `.json`, `.jsonl`, `.ndjson`).
   Anything else is refused with the supported list — use `--duck-init` + `--query` for other formats.
 - A write replaces the target key and is issued only once the pipeline completes, so a failed run
-  leaves the existing object intact. `--strategy` does not apply to objects.
+  leaves the existing object intact. `--strategy` does not apply to objects, and passing it is
+  refused rather than ignored.
 - The `httpfs` / `azure` DuckDB extensions are installed on first use, so the host needs access to
   DuckDB's extension repository once.
 

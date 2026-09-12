@@ -124,7 +124,7 @@ check_t4() {
     fi
 }
 # Prepare data with specific types
-"$DTPIPE" -i "generate:1000" --fake "Id:random.number" --fake "Name:name.firstName" --drop "GenerateIndex" -o "$A/t4_main.parquet" --strategy Recreate --no-stats
+"$DTPIPE" -i "generate:1000" --fake "Id:random.number" --fake "Name:name.firstName" --drop "GenerateIndex" -o "$A/t4_main.parquet" --no-stats
 cat > "$A/t4_ref.csv" <<'EOF'
 Id,Label
 1,Alpha
@@ -161,7 +161,7 @@ check_t6() {
     local count=$(csv_rows "$1")
     [ "$count" -ge 1 ] && pass "Fan-out+SQL ($2): SQL branch produced result" || fail "Fan-out+SQL ($2): SQL branch empty"
 }
-"$DTPIPE" -i "generate:200" --fake "Id:random.number" --fake "Cat:lorem.word" --drop "GenerateIndex" -o "$A/t6_src.parquet" --strategy Recreate --no-stats
+"$DTPIPE" -i "generate:200" --fake "Id:random.number" --fake "Cat:lorem.word" --drop "GenerateIndex" -o "$A/t6_src.parquet" --no-stats
 
 # We run this one manually because it has multiple branches
 echo "  [SQL Engine: DuckDB] T6: Fan-out + SQL..."
@@ -191,7 +191,7 @@ check_t7() {
         fail "Diamond ($2): expected 1 row with numeric hi_cnt in [0..100], got rows=$count cnt=$cnt"
     fi
 }
-"$DTPIPE" -i "generate:100" --fake "Id:random.number" --fake "Score:random.number" --drop "GenerateIndex" -o "$A/t7_src.parquet" --strategy Recreate --no-stats
+"$DTPIPE" -i "generate:100" --fake "Id:random.number" --fake "Score:random.number" --drop "GenerateIndex" -o "$A/t7_src.parquet" --no-stats
 
 run_sql_test "T7: Diamond" \
   "-i \"parquet:$A/t7_src.parquet\" --alias s --from s --filter \"row.Score > 0\" --alias hi --from s --filter \"row.Score <= 0\" --alias lo --from hi --ref lo --sql \"SELECT COUNT(*) AS hi_cnt FROM hi\"" \
@@ -201,7 +201,7 @@ run_sql_test "T7: Diamond" \
 # Topology 8: Join → fan-out
 # ----------------------------------------
 echo "--- [8] Join → fan-out (joined result broadcast to two outputs) ---"
-"$DTPIPE" -i "generate:50" --fake "Id:random.number" --fake "Val:lorem.word" --drop "GenerateIndex" -o "$A/t8_main.parquet" --strategy Recreate --no-stats
+"$DTPIPE" -i "generate:50" --fake "Id:random.number" --fake "Val:lorem.word" --drop "GenerateIndex" -o "$A/t8_main.parquet" --no-stats
 "$DTPIPE" -i "generate:10" --fake "Id:random.number" --fake "Extra:lorem.word" --drop "GenerateIndex" -o "$A/t8_ref.csv" --no-stats
 
 echo "  [SQL Engine: DuckDB] T8: Join -> Fan-out..."
@@ -280,7 +280,7 @@ rm -f "$A/t11_uuid.parquet" "$A/t11_uuid_verify.csv"
     --alias src \
   --from src \
     --sql "SELECT Id FROM src" \
-    -o "$A/t11_uuid.parquet" --strategy Recreate --no-stats \
+    -o "$A/t11_uuid.parquet" --no-stats \
   || fail "UUID Parquet (duckdb): pipeline failed"
 
 # Read Parquet back to CSV to verify data round-trip
@@ -361,7 +361,7 @@ printf "Id\n%s\n" "$KNOWN_UUID" > "$A/t14_src.csv"
   -i "$A/t14_src.csv" --column-types "Id:uuid" --alias src \
   --from src \
     --sql "SELECT Id FROM src" \
-    -o "$A/t14_out.parquet" --strategy Recreate --no-stats \
+    -o "$A/t14_out.parquet" --no-stats \
   || fail "UUID fidelity (duckdb): pipeline failed"
 
 "$DTPIPE" -i "parquet:$A/t14_out.parquet" -o "$A/t14_verify.csv" --no-stats \

@@ -285,7 +285,7 @@ schema time rather than written as something else. Cast it in your query: `col::
 
 | Flag | Syntax | Description |
 |:---|:---|:---|
-| `--strategy` | `Append` | Write strategy. One of: `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`, `Upsert`, `Ignore` |
+| `--strategy` | `Append` | Write strategy. One of: `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`, `Upsert`, `Ignore`. **Database targets only** — a file or object writer replaces its target and refuses the flag rather than accepting one it cannot honour |
 | `--table` | `"users"` | Override target table name (default: `export`) |
 | `--key` | `"Id,Code"` | Primary key column(s) for `Upsert`/`Ignore`. Auto-detected from DB if omitted |
 | `--insert-mode` | `Bulk` | `Standard` or `Bulk` (high-speed batch insert for PG, Oracle, MSSQL) |
@@ -327,9 +327,9 @@ dtpipe -i sales.csv -o azure://reports/sales.parquet --azure-connection-string "
   Leave the key pair unset to use the ambient credential chain (env, shared config, instance
   profile). Secrets are scoped to their bucket/container, so a read and a write in the same
   pipeline can use different credentials.
-- **Writes replace the target key.** Object storage has no append or upsert, so `--strategy` does
-  not apply. The upload is issued once the pipeline completes: a failed run leaves the existing
-  object untouched rather than replacing it with a partial one.
+- **Writes replace the target key.** Object storage has no append or upsert, so `--strategy` is
+  refused rather than ignored. The upload is issued once the pipeline completes: a failed run
+  leaves the existing object untouched rather than replacing it with a partial one.
 - **Reads glob natively**: `s3://bucket/dt=*/part-*.parquet` reads every match.
 - `https://`, `gs://` and other schemes are **not** claimed by any provider, and object storage is
   never a hub target (`duck+s3:` fails closed). Reach those through the DuckDB engine

@@ -78,7 +78,7 @@ public static class PipelineToJobConverter
             if (processor == null)
                 RejectFlagsThatBindToNothing(
                     ForFactoryLookup(job.Input, secretsManager), branchSpec.ReaderArgs, readerFactories,
-                    ForFactoryLookup(job.Output, secretsManager), writerFactories);
+                    ForFactoryLookup(job.Output, secretsManager), branchSpec.WriterArgs, writerFactories);
 
             jobs[alias] = job;
             contexts[alias] = new CliJobContext(branchSpec.ReaderArgs, branchSpec.PipelineArgs, branchSpec.WriterArgs, branchSpec.RawArgs);
@@ -301,31 +301,30 @@ public static class PipelineToJobConverter
     /// The expansion stays inside factory lookup: the job keeps the keyring reference.
     /// </summary>
     /// <summary>
-    /// A reader flag the branch's reader does not carry binds to nothing, and dropping it in
+    /// A stage flag the branch's component does not carry binds to nothing, and dropping it in
     /// silence is a run that did not do what the line said: <c>--query</c> on a <c>csv:</c> source
-    /// copied the whole file and exited 0.
+    /// copied the whole file and exited 0, and <c>--strategy Append</c> on a <c>.parquet</c> target
+    /// replaced the file.
     /// </summary>
     /// <remarks>
     /// The flag registry is global — every database reader contributes <c>--query</c> through
-    /// <c>QueryableReaderOptions</c>, so the token is legal whatever the branch reads — and the
-    /// capability interface that decides whether it applies was acting as a silent filter.
-    /// <c>666987eb</c> refused the neighbouring case, a reader flag in a branch with no reader at
-    /// all; this is the same fact about a branch whose reader simply has no such option.
+    /// <c>QueryableReaderOptions</c>, every database writer contributes <c>--strategy</c> — so the
+    /// token is legal whatever the branch reads or writes, and the capability interface that
+    /// decides whether it applies was acting as a silent filter. <c>666987eb</c> refused the
+    /// neighbouring case, a reader flag in a branch with no reader at all; this is the same fact
+    /// about a branch whose component simply has no such option.
     /// <para>
     /// Core and engine flags are never candidates: they belong to the engine, not to a component,
-    /// so they are absent from the catalogue built here. The writer stage is deliberately left
-    /// out — <c>--strategy</c> on a file target is inert rather than wrong, since the writer
-    /// replaces the file anyway, and <c>REFERENCE.md</c> already states where the flag does not
-    /// apply.
+    /// so they are absent from the catalogue built here.
     /// </para>
     /// </remarks>
     private static void RejectFlagsThatBindToNothing(
         string? inputForLookup, string[] readerArgs, IEnumerable<IStreamReaderFactory>? readerFactories,
-        string? outputForLookup, IEnumerable<IDataWriterFactory>? writerFactories)
+        string? outputForLookup, string[] writerArgs, IEnumerable<IDataWriterFactory>? writerFactories)
     {
         var reader = ResolveFactory(inputForLookup, readerFactories);
-        if (reader == null) return;
         var writer = ResolveFactory(outputForLookup, writerFactories);
+        if (reader == null && writer == null) return;
 
         var componentFlags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var f in (readerFactories ?? Enumerable.Empty<IDataFactory>()).Concat(writerFactories ?? Enumerable.Empty<IDataFactory>()))
@@ -342,12 +341,13 @@ public static class PipelineToJobConverter
             foreach (var def in CliOptionBuilder.GenerateFlagDefsForType(f.OptionsType))
                 arity.Register(def);
 
-        RejectReaderStage(reader, readerArgs, writer, componentFlags, arity);
+        if (reader != null) RejectStage(reader, readerArgs, "reader", writer, "writer", componentFlags, arity);
+        if (writer != null) RejectStage(writer, writerArgs, "writer", reader, "reader", componentFlags, arity);
     }
 
-    private static void RejectReaderStage(
-        IDataFactory target, string[] stageArgs,
-        IDataFactory? counterpart,
+    private static void RejectStage(
+        IDataFactory target, string[] stageArgs, string role,
+        IDataFactory? counterpart, string counterpartRole,
         HashSet<string> componentFlags, FlagRegistry arity)
     {
         var owned = FlagNamesOf(target.OptionsType);
@@ -363,13 +363,14 @@ public static class PipelineToJobConverter
                 continue;
 
             var message =
-                $"Flag '{token}' is not an option of the '{target.ComponentName}' reader, so nothing binds it.";
+                $"Flag '{token}' is not an option of the '{target.ComponentName}' {role}, so nothing binds it.";
 
             message += counterpartOwned.Contains(token)
-                ? $" The '{counterpart!.ComponentName}' writer does carry it: move it after -o."
+                ? $" The '{counterpart!.ComponentName}' {counterpartRole} does carry it: "
+                  + (counterpartRole == "writer" ? "move it after -o." : "move it before -o.")
                 : owned.Count > 0
-                    ? $" Options the '{target.ComponentName}' reader accepts: {string.Join(", ", owned.OrderBy(f => f, StringComparer.Ordinal))}."
-                    : $" The '{target.ComponentName}' reader takes no options at all.";
+                    ? $" Options the '{target.ComponentName}' {role} accepts: {string.Join(", ", owned.OrderBy(f => f, StringComparer.Ordinal))}."
+                    : $" The '{target.ComponentName}' {role} takes no options at all.";
 
             throw new InvalidOperationException(message);
         }

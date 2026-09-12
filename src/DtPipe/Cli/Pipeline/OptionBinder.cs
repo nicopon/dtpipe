@@ -174,10 +174,10 @@ public static class OptionBinder
             }
             catch (Exception ex)
             {
-                var message = $"Failed to bind provider option '{key}' to property '{prop.Name}': {ex.Message}";
-                if (strict)
-                    throw new InvalidOperationException(message, ex);
-                Console.Error.WriteLine($"[dtpipe] Warning: {message}");
+                // A key that is not an option of this type is skipped above; reaching here means
+                // the key was right and the VALUE was not, which has no sensible fallback.
+                throw new InvalidOperationException(
+                    $"Provider option '{key}' cannot take the value '{value}': {ex.Message}", ex);
             }
         }
     }
@@ -351,11 +351,29 @@ public static class OptionBinder
         }
         catch (Exception ex) when (ex is FormatException or InvalidCastException or OverflowException or ArgumentException)
         {
-            if (strict)
-                throw new InvalidOperationException(
-                    $"Failed to bind value '{value}' to option '{prop.Name}': {ex.Message}", ex);
-            Console.Error.WriteLine($"Warning: OptionBinder could not bind '{prop.Name}': {ex.Message}");
+            throw new InvalidOperationException(DescribeUnbindableValue(prop, value, ex), ex);
         }
+    }
+
+    /// <summary>
+    /// Why a value could not be bound, and what the option does accept.
+    /// </summary>
+    /// <remarks>
+    /// A value that does not parse used to warn and leave the default in place, so
+    /// <c>--strategy Banana</c> wrote three rows with <c>Append</c> and exited 0: the run did
+    /// something other than what was asked, which is worse than not running. An enum names its
+    /// members, since "Requested value 'Banana' was not found" does not say what would have been.
+    /// </remarks>
+    private static string DescribeUnbindableValue(PropertyInfo prop, string value, Exception ex)
+    {
+        var type = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
+        var flag = prop.GetCustomAttribute<ComponentOptionAttribute>()?.Name ?? prop.Name;
+
+        var accepted = type.IsEnum
+            ? $" One of: {string.Join(", ", Enum.GetNames(type))}."
+            : $" It takes {(type == typeof(bool) ? "true or false" : $"a value of type {type.Name}")}.";
+
+        return $"'{flag}' cannot take the value '{value}'.{accepted}";
     }
 
     private static void SetProperty(object instance, PropertyInfo prop, List<string> values, bool strict)
@@ -399,10 +417,7 @@ public static class OptionBinder
         }
         catch (Exception ex) when (ex is FormatException or InvalidCastException or OverflowException or ArgumentException)
         {
-            if (strict)
-                throw new InvalidOperationException(
-                    $"Failed to bind value '{values.Last()}' to option '{prop.Name}': {ex.Message}", ex);
-            Console.Error.WriteLine($"Warning: OptionBinder could not bind '{prop.Name}': {ex.Message}");
+            throw new InvalidOperationException(DescribeUnbindableValue(prop, values.Last(), ex), ex);
         }
     }
 

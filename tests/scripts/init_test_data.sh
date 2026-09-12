@@ -82,7 +82,7 @@ $DTPIPE -i "generate:1000" \
   --fake "Category:commerce.department" \
   --fake "Price:commerce.price" \
   --drop "GenerateIndex" \
-  -o "$ARTIFACTS_DIR/test_data.parquet" --no-schema-validation --strategy Recreate || exit 1
+  -o "$ARTIFACTS_DIR/test_data.parquet" || exit 1
 
 # 2b. Parquet (BIG - 1M rows)
 if [ ! -f "$ARTIFACTS_DIR/test_data_big.parquet" ]; then
@@ -92,7 +92,7 @@ if [ ! -f "$ARTIFACTS_DIR/test_data_big.parquet" ]; then
       --fake "Timestamp:date.past" \
       --fake "Value:random.number" \
       --drop "GenerateIndex" \
-      -o "$ARTIFACTS_DIR/test_data_big.parquet" --no-schema-validation --strategy Recreate || exit 1
+      -o "$ARTIFACTS_DIR/test_data_big.parquet" || exit 1
 else
     echo "  Skipping test_data_big.parquet (already exists)"
     KEPT=$((KEPT + 1))
@@ -106,7 +106,7 @@ $DTPIPE -i "generate:1000" \
   --fake "Level:lorem.word" \
   --fake "Message:lorem.sentence" \
   --drop "GenerateIndex" \
-  -o "$ARTIFACTS_DIR/test_data.arrow" --no-schema-validation --strategy Recreate || exit 1
+  -o "$ARTIFACTS_DIR/test_data.arrow" || exit 1
 
 echo -e "${YELLOW}Step 4: Initializing database sources...${NC}"
 

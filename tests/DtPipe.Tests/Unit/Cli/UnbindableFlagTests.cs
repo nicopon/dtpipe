@@ -136,14 +136,39 @@ public class UnbindableFlagTests
     }
 
     /// <summary>
-    /// The writer stage is deliberately not judged. <c>--strategy</c> on a file target binds to
-    /// nothing, but the writer replaces the file anyway, so the flag is redundant rather than
-    /// wrong — and four of this repository's own data-init scripts write it that way.
+    /// <c>--strategy</c> on a file target binds to nothing. It is not merely redundant: measured on
+    /// the binary, a second write with <c>--strategy Append</c> left three rows rather than six —
+    /// the flag stated the opposite of what happened — and <c>--strategy Banana</c> was accepted
+    /// with no message at all.
     /// </summary>
-    [Fact]
-    public void A_Writer_Flag_The_Writer_Does_Not_Carry_Is_Left_Alone()
+    [Theory]
+    [InlineData("Append")]
+    [InlineData("Recreate")]
+    public void A_Writer_Flag_The_Writer_Does_Not_Carry_Is_Refused(string value)
     {
-        var (jobs, _, _) = Convert("-i", "csv:in.csv", "-o", "parquet:out.parquet", "--strategy", "Recreate");
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            Convert("-i", "csv:in.csv", "-o", "parquet:out.parquet", "--strategy", value));
+
+        Assert.Contains("--strategy", ex.Message);
+        Assert.Contains("'parquet' writer", ex.Message);
+        Assert.Contains("takes no options at all", ex.Message);
+    }
+
+    /// <summary>A flag the reader carries, written after -o, is misplaced — say which way to move it.</summary>
+    [Fact]
+    public void A_Flag_The_Reader_Carries_Says_To_Move_It_Before_Output()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            Convert("-i", "sqlite:Data Source=in.db", "-o", "csv:out.csv", "--query", "SELECT 1"));
+
+        Assert.Contains("'sqlite' reader does carry it", ex.Message);
+        Assert.Contains("move it before -o", ex.Message);
+    }
+
+    [Fact]
+    public void A_Writer_Flag_The_Writer_Does_Carry_Is_Accepted()
+    {
+        var (jobs, _, _) = Convert("-i", "csv:in.csv", "-o", "sqlite:Data Source=out.db", "--table", "t", "--strategy", "Append");
 
         Assert.Single(jobs);
     }
@@ -179,5 +204,40 @@ public class UnbindableFlagTests
             => throw new NotSupportedException();
         public IStreamTransformer CreateFromJob(DtPipe.Core.Models.JobDefinition job, DtPipe.Core.Pipelines.Dag.BranchChannelContext ctx, IServiceProvider sp)
             => throw new NotSupportedException();
+    }
+
+    /// <summary>
+    /// A value that does not parse used to warn and leave the default in place, so
+    /// <c>--strategy Banana</c> wrote three rows with <c>Append</c> and exited 0 — the run did
+    /// something other than what was asked. An enum names its members, because "Requested value
+    /// 'Banana' was not found" does not say what would have been.
+    /// </summary>
+    [Fact]
+    public void A_Value_The_Option_Cannot_Take_Is_Refused_And_Names_What_It_Accepts()
+    {
+        var target = new DtPipe.Adapters.Sqlite.SqliteWriterOptions();
+        var registry = new FlagRegistry();
+        foreach (var def in CliOptionBuilder.GenerateFlagDefsForType(typeof(DtPipe.Adapters.Sqlite.SqliteWriterOptions)))
+            registry.Register(def);
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            OptionBinder.BindCli(target, new[] { "--strategy", "Banana" }, registry));
+
+        Assert.Contains("cannot take the value 'Banana'", ex.Message);
+        Assert.Contains("Append", ex.Message);
+        Assert.Contains("Upsert", ex.Message);
+    }
+
+    [Fact]
+    public void A_Value_The_Option_Can_Take_Still_Binds()
+    {
+        var target = new DtPipe.Adapters.Sqlite.SqliteWriterOptions();
+        var registry = new FlagRegistry();
+        foreach (var def in CliOptionBuilder.GenerateFlagDefsForType(typeof(DtPipe.Adapters.Sqlite.SqliteWriterOptions)))
+            registry.Register(def);
+
+        OptionBinder.BindCli(target, new[] { "--strategy", "Recreate" }, registry);
+
+        Assert.Equal(DtPipe.Adapters.Sqlite.SqliteWriteStrategy.Recreate, target.Strategy);
     }
 }

@@ -60,7 +60,7 @@ if [ ! -f "$ARTIFACTS_DIR/test_data.parquet" ]; then
       --fake "Category:commerce.department" \
       --fake "Price:commerce.price" \
       --drop "GenerateIndex" \
-      -o "$ARTIFACTS_DIR/test_data.parquet" --strategy Recreate || exit 1
+      -o "$ARTIFACTS_DIR/test_data.parquet" || exit 1
 else
     echo "  Skipping test_data.parquet (already exists)"
 fi
@@ -73,7 +73,7 @@ if [ ! -f "$ARTIFACTS_DIR/test_data_big.parquet" ]; then
       --fake "Timestamp:date.past" \
       --fake "Value:random.number" \
       --drop "GenerateIndex" \
-      -o "$ARTIFACTS_DIR/test_data_big.parquet" --strategy Recreate || exit 1
+      -o "$ARTIFACTS_DIR/test_data_big.parquet" || exit 1
 else
     echo "  Skipping test_data_big.parquet (already exists)"
 fi
@@ -87,7 +87,7 @@ if [ ! -f "$ARTIFACTS_DIR/test_data.arrow" ]; then
       --fake "Level:lorem.word" \
       --fake "Message:lorem.sentence" \
       --drop "GenerateIndex" \
-      -o "$ARTIFACTS_DIR/test_data.arrow" --strategy Recreate || exit 1
+      -o "$ARTIFACTS_DIR/test_data.arrow" || exit 1
 else
     echo "  Skipping test_data.arrow (already exists)"
 fi
