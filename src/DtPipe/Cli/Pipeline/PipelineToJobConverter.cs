@@ -73,8 +73,10 @@ public static class PipelineToJobConverter
             };
 
             // A processor reads its own branch's raw tokens — DuckDBSqlTransformerFactory pulls
-            // --duck-init straight out of them — so on such a branch the reader's and writer's
-            // option sets do not decide what binds.
+            // --duck-init straight out of them, after -o, and executes it — so on such a branch the
+            // writer's option set does not decide what binds. The reader's half of the exemption is
+            // covered from elsewhere: PipelineValidator refuses a processor branch that declares an
+            // input at all, and does it in terms the flag stage cannot reach.
             if (processor == null)
                 RejectFlagsThatBindToNothing(
                     ForFactoryLookup(job.Input, secretsManager), branchSpec.ReaderArgs, readerFactories,
