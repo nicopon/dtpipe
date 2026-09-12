@@ -3,8 +3,8 @@ set -e
 
 # validate_core_boundary.sh
 # F10 — source-level boundary guard: no concrete SQL/dialect/cursor-persistence classes
-# in DtPipe.Core; standalone Arrow libraries stay DtPipe-free; ArrowBridge (when present)
-# must not reference DtPipe projects.
+# in DtPipe.Core; standalone Arrow libraries stay DtPipe-free; the Arrow bridge inside Core
+# sees only the three DtPipe types it needs.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -60,15 +60,45 @@ if [ -n "$DTO_HITS" ]; then
 fi
 pass "time-zone resolution confined to TemporalNormalization"
 
-# 4. ArrowBridge project, when extracted, must not reference DtPipe projects.
-if [ -d "$PROJECT_ROOT/src/DtPipe.ArrowBridge" ]; then
-    if grep -q "DtPipe" "$PROJECT_ROOT/src/DtPipe.ArrowBridge/"*.csproj 2>/dev/null; then
-        fail "ArrowBridge must not reference DtPipe projects"
-    fi
-    pass "ArrowBridge has zero DtPipe references"
-else
-    echo "  INFO: ArrowBridge not yet extracted (deferred — see remediation notes)"
+# 4. The Arrow bridge keeps a narrow surface onto the rest of DtPipe.
+#
+# src/DtPipe.Core/Infrastructure/Arrow/ is generic Arrow code: the CLR<->Arrow map, the
+# row<->columnar bridges, the ownership helpers. It is allowed to know exactly three DtPipe
+# types — the schema record it converts, and the two bridge interfaces it implements. Anything
+# else crossing into it means engine concerns are leaking into the conversion layer, and the
+# conversion layer is the hottest path in the product.
+#
+# The allowlist is deliberately short and checked against every type DtPipe.Core declares, so a
+# type added to Models or Abstractions is covered without editing this script.
+#
+# Scope, stated honestly: this matches type names, so a Core type whose name is also an ordinary
+# word or an Apache.Arrow type name would false-positive. None of the 52 declared today collide;
+# if one ever does, rename it or widen the allowlist deliberately rather than deleting the check.
+ARROW_DIR="$PROJECT_ROOT/src/DtPipe.Core/Infrastructure/Arrow"
+ALLOWED="PipeColumnInfo IRowToColumnarBridge IColumnarToRowBridge"
+
+CORE_TYPES=$(grep -rhoE '^(public |internal )?(sealed |abstract |static )*(class|interface|record|struct|enum) +[A-Za-z_][A-Za-z0-9_]*' \
+    "$PROJECT_ROOT/src/DtPipe.Core/Models/" "$PROJECT_ROOT/src/DtPipe.Core/Abstractions/" --include="*.cs" 2>/dev/null \
+    | awk '{print $NF}' | sort -u)
+
+if [ -z "$CORE_TYPES" ]; then
+    fail "could not enumerate DtPipe.Core types — the boundary check would pass vacuously"
 fi
+
+LEAKS=""
+for TYPE in $CORE_TYPES; do
+    case " $ALLOWED " in *" $TYPE "*) continue ;; esac
+    HIT=$(grep -rlw "$TYPE" "$ARROW_DIR" --include="*.cs" 2>/dev/null || true)
+    if [ -n "$HIT" ]; then
+        LEAKS="$LEAKS\n  $TYPE <- $(echo "$HIT" | tr '\n' ' ')"
+    fi
+done
+
+if [ -n "$LEAKS" ]; then
+    echo -e "$LEAKS"
+    fail "DtPipe types beyond the allowlist reached Infrastructure/Arrow/ (allowed: $ALLOWED)"
+fi
+pass "Arrow bridge sees only $ALLOWED"
 
 echo ""
 echo -e "${GREEN}Core boundary checks passed.${NC}"
