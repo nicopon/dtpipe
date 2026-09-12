@@ -69,7 +69,15 @@ public static partial class JobFileParser
 		// the same server, two answers.
 		try
 		{
-			return Deserialize(content, secretsManager);
+			var jobs = Deserialize(content, secretsManager);
+
+			// Reported here because this is the last place that still holds the job as written: the
+			// cursor:// token is replaced during deserialization, so afterwards there is no way to
+			// tell a job that filters from one that only tracks.
+			foreach (var advisory in DtPipe.Cli.Incremental.CursorAdvisory.Advise(jobs, content))
+				Console.Error.WriteLine($"[dtpipe] Warning: {advisory}");
+
+			return jobs;
 		}
 		catch (YamlException ex)
 		{

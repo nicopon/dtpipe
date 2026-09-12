@@ -147,17 +147,26 @@ public partial class DtPipeMcpTools
                 }, new JsonSerializerOptions { WriteIndented = true });
             }
 
-            return JsonSerializer.Serialize(new
+            var answer = new Dictionary<string, object?>
             {
-                success = true,
-                message = "YAML job configuration and topology are valid.",
-                @checked = "Syntax, branch topology, provider-option keys, and every transformer built the way "
-                         + "the engine builds it.",
-                notChecked = "The source is never opened here, so no column name is verified: a transformer "
-                           + "naming a column the source does not carry fails when the job runs, not now. "
-                           + "Call 'dry-run' on this same YAML to check it against the real schema.",
-                shape = Shape(parsed)
-            }, new JsonSerializerOptions { WriteIndented = true });
+                ["success"] = true,
+                ["message"] = "YAML job configuration and topology are valid.",
+                ["checked"] = "Syntax, branch topology, provider-option keys, and every transformer built the way "
+                            + "the engine builds it.",
+                ["notChecked"] = "The source is never opened here, so no column name is verified: a transformer "
+                               + "naming a column the source does not carry fails when the job runs, not now. "
+                               + "Call 'dry-run' on this same YAML to check it against the real schema.",
+                ["shape"] = Shape(parsed),
+            };
+
+            // A valid job that will silently do the wrong thing. Carried beside the verdict rather
+            // than folded into it: the job IS valid, and demoting it to an error would refuse a
+            // pipeline whose author wants tracking without filtering. Absent when there is nothing
+            // to say, so the key means something wherever it appears.
+            var advisories = DtPipe.Cli.Incremental.CursorAdvisory.Advise(parsed.Jobs, yamlContent);
+            if (advisories.Count > 0) answer["advisories"] = advisories;
+
+            return JsonSerializer.Serialize(answer, new JsonSerializerOptions { WriteIndented = true });
         }
         catch (Exception ex)
         {

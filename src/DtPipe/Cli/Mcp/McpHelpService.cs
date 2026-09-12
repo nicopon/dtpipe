@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Text.Json;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Attributes;
+using DtPipe.Core.Options;
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Cli.Pipeline;
 
@@ -97,10 +98,20 @@ public class McpHelpService : IMcpHelpService
         sw.WriteLine("  - ${{keyring://<alias>}}     Substitutes inline keyring secret.");
         sw.WriteLine("  - ${{cursor://path|default}}  Substitutes incremental cursor value from a state file.");
         sw.WriteLine();
-        sw.WriteLine("INCREMENTAL SYNC:");
+        // The two keys were listed alone, and that is what a job written from this block does:
+        // it tracks and filters nothing, so every run re-reads the source and appends it again —
+        // 50 rows, then 100. The interpolation is the half that filters; naming the keys without
+        // it teaches the duplicate.
+        sw.WriteLine("INCREMENTAL SYNC (load only what is new since the last run):");
         sw.WriteLine("  Define these keys directly in the branch root:");
-        sw.WriteLine("  - cursor: <column_name>");
-        sw.WriteLine("  - state: <path_to_state_file>");
+        sw.WriteLine("  - cursor: <column_name>        Track the highest value seen in this column.");
+        sw.WriteLine("  - state: <path_to_state_file>  Where that value is kept between runs.");
+        sw.WriteLine("  These two only TRACK. What FILTERS is ${{cursor://<path_to_state_file>|<default>}},");
+        sw.WriteLine("  which you place yourself:");
+        sw.WriteLine("  - in the reader's query, for a source that takes one — the source does the filtering;");
+        sw.WriteLine("  - otherwise in a filter transformer expression — every row is read, then dropped.");
+        sw.WriteLine("  Without it, every run re-reads the whole source and writes it again.");
+        sw.WriteLine("  Call 'list-cursors' for the state files a workspace already holds.");
         sw.WriteLine();
 
         // 'list-checkpoints' and 'read-checkpoint' describe reading a checkpoint and say nothing
@@ -206,12 +217,45 @@ public class McpHelpService : IMcpHelpService
         WriteRole(sw, "  Role: Reader (Data Source)", readers.Select(r => r.OptionsType));
         WriteRole(sw, "  Role: Writer (Data Destination)", writers.Select(w => w.OptionsType));
 
+        WriteIncrementalReads(sw, readers.Select(r => r.OptionsType));
+
         foreach (var (roles, type) in roleTypes)
         {
             FormatComponentHelp(sw, type, roleTypes.Count > 1 ? roles : null);
         }
 
         return sw.ToString();
+    }
+
+    /// <summary>
+    /// Where a cursor filter goes for THIS adapter, read off the reader's options.
+    ///
+    /// <para>
+    /// An adapter that accepts a query can push the filter to the server; one that cannot must
+    /// read every row and drop it afterwards. That difference is the adapter's own, so it belongs
+    /// here rather than in the general help — which states the rule once and cannot know which
+    /// half applies. Both halves are written: told only that a cursor exists, a caller puts the
+    /// two branch keys on a CSV source and gets a job that re-reads and duplicates.
+    /// </para>
+    /// </summary>
+    private static void WriteIncrementalReads(TextWriter writer, IEnumerable<Type> readerOptionsTypes)
+    {
+        var types = readerOptionsTypes.ToList();
+        if (types.Count == 0) return;
+
+        writer.WriteLine("Incremental reads:");
+        if (types.Any(t => typeof(IQueryAwareOptions).IsAssignableFrom(t)))
+        {
+            writer.WriteLine("  This reader takes a query, so the filter runs at the source: put");
+            writer.WriteLine("  ${{cursor://<state-file>|<default>}} in it, with 'cursor:' and 'state:' in the branch root.");
+        }
+        else
+        {
+            writer.WriteLine("  This reader takes no query. 'cursor:' and 'state:' still track the highest value");
+            writer.WriteLine("  seen, but they filter nothing here: put ${{cursor://<state-file>|<default>}} in a");
+            writer.WriteLine("  filter transformer expression, and every row is read before being dropped.");
+        }
+        writer.WriteLine();
     }
 
     /// <summary>A role's option list, written only when it has one. An adapter whose sole property

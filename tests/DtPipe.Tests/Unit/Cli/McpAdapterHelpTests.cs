@@ -351,4 +351,41 @@ public partial class McpAdapterHelpTests
         Assert.Contains("Unknown transformer", json.GetProperty("error").GetString());
         Assert.Contains("is a adapter", json.GetProperty("hint").GetString());
     }
+    /// <summary>
+    /// Every reader says where its cursor filter goes, and says the half that is true of it. The
+    /// general help states the rule once and cannot know which half applies; an adapter can.
+    /// </summary>
+    [Fact]
+    public void Every_Reader_Says_Where_Its_Cursor_Filter_Goes()
+    {
+        foreach (var name in _readerNames)
+        {
+            var text = _help.GetAdapterHelp(name);
+            Assert.Contains("Incremental reads:", text);
+            Assert.Contains("${{cursor://", text);
+
+            var queryAware = _roles.Any(r =>
+                r.Adapter == name && r.Role == "Reader"
+                && typeof(DtPipe.Core.Options.IQueryAwareOptions).IsAssignableFrom(r.OptionsType));
+
+            if (queryAware)
+                Assert.Contains("the filter runs at the source", text);
+            else
+                Assert.Contains("they filter nothing here", text);
+        }
+    }
+
+    /// <summary>
+    /// The two branch keys alone produce a job that re-reads its source and appends it again, so
+    /// the block that names them must name what actually filters.
+    /// </summary>
+    [Fact]
+    public void The_General_Help_Says_What_Filters_An_Incremental_Read()
+    {
+        var text = _help.GetGeneralHelp();
+
+        Assert.Contains("INCREMENTAL SYNC", text);
+        Assert.Contains("${{cursor://", text);
+        Assert.Contains("only TRACK", text);
+    }
 }
