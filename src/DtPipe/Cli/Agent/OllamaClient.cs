@@ -190,13 +190,22 @@ public class OllamaClient : ILlmClient, IStreamingLlmClient
         // reset per line, so a model that keeps producing is never cut off as silent — and is no
         // longer unbounded either.
         var deadline = TurnLimits.CallDeadline(_chatTimeout);
-        using var deadlineCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        deadlineCts.CancelAfter(deadline);
 
-        // When streaming, _chatTimeout is an IDLE ceiling: it is reset on every line received, so a
-        // model that keeps producing tokens is never cut off, and only a genuine stall trips it.
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(deadlineCts.Token);
-        timeoutCts.CancelAfter(_chatTimeout);
+        // Which bound tripped is captured the instant it fires, not read off a flag afterwards.
+        // Both are armed from the same moment and the idle ceiling is a fraction of the deadline,
+        // so by the time the idle ceiling's exception was observed on a loaded machine the
+        // deadline's flag was set too, and a stalled endpoint was told it had been "producing
+        // output the whole time" — the wrong knob, which is exactly what telling the two apart is
+        // for. The two sources are independent for the same reason: a linked child cannot say
+        // which of the two elapsed.
+        int tripped = 0;                            // 1 = idle ceiling, 2 = call deadline
+        using var deadlineCts = new CancellationTokenSource(deadline);
+        using var idleCts = new CancellationTokenSource(_chatTimeout);
+        deadlineCts.Token.Register(() => Interlocked.CompareExchange(ref tripped, 2, 0));
+        idleCts.Token.Register(() => Interlocked.CompareExchange(ref tripped, 1, 0));
+
+        // The token the request actually runs under: the caller's, plus both bounds.
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct, deadlineCts.Token, idleCts.Token);
 
         var acc = new AccumulatingLlmStreamObserver(observer);
         var splitter = new ThinkTagSplitter();
@@ -224,7 +233,7 @@ public class OllamaClient : ILlmClient, IStreamingLlmClient
 
             while (await reader.ReadLineAsync(timeoutCts.Token) is { } line)
             {
-                timeoutCts.CancelAfter(_chatTimeout);   // a line arrived — a live stream is not a stall
+                idleCts.CancelAfter(_chatTimeout);      // a line arrived — a live stream is not a stall
                 if (line.Length == 0) continue;
 
                 using var doc = JsonDocument.Parse(line);
@@ -290,10 +299,10 @@ public class OllamaClient : ILlmClient, IStreamingLlmClient
         {
             throw;
         }
-        catch (OperationCanceledException) when (deadlineCts.IsCancellationRequested)
+        catch (OperationCanceledException) when (Volatile.Read(ref tripped) == 2)
         {
-            // Told apart from the idle ceiling on purpose: "sent no output" would be false here,
-            // and a false claim about the model sends the reader to the wrong knob.
+            // Still producing when it was stopped: "sent no output" would be false here, and a
+            // false claim about the model sends the reader to the wrong knob.
             return new LlmResponse(new ChatMessage("assistant", acc.ContentOrNull), true,
                 TurnLimits.CallDeadlineMessage(deadline), null, acc.ThinkingOrNull);
         }

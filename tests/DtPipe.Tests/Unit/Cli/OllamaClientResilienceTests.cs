@@ -51,6 +51,42 @@ public class OllamaClientResilienceTests
         Assert.Contains("sent no output for", resp.Error);
     }
 
+
+    /// <summary>
+    /// Both bounds have elapsed by the time the exception is observed — the idle ceiling at 50 ms,
+    /// the call deadline at 150 ms, and the stub answers at neither. Reading the verdict off
+    /// <c>deadlineCts.IsCancellationRequested</c> made this the deadline's message, which claims
+    /// the model "was producing output the whole time" about an endpoint that sent nothing at all.
+    /// The same race made the test above fail roughly one run in five on a loaded machine.
+    /// </summary>
+    [Fact]
+    public async Task An_Endpoint_Silent_Past_Both_Bounds_Is_Reported_As_Silent()
+    {
+        var handler = new StubHandler(async (_, ct) =>
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(30), ct);
+            }
+            catch (OperationCanceledException)
+            {
+                // Stall the observation past the call deadline (3 × 50 ms), so both bounds have
+                // elapsed when the client's catch runs. On a loaded machine that happens on its
+                // own, which is why the verdict could not be read off a timer flag.
+                await Task.Delay(250, CancellationToken.None);
+                throw;
+            }
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+        var client = new OllamaClient(handler, TimeSpan.FromMilliseconds(50));
+
+        var resp = await client.ChatAsync("http://localhost:11434", "m", Msgs, NoTools);
+
+        Assert.True(resp.Done);
+        Assert.Contains("sent no output for", resp.Error);
+        Assert.DoesNotContain("producing output the whole time", resp.Error);
+    }
+
     /// <summary>
     /// The chat timeout is the only deadline. HttpClient's own default is 100 s and whichever
     /// expires first wins, so '--llm-timeout' did nothing above 100 s while the failure still
