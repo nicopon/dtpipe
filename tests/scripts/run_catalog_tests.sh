@@ -385,7 +385,7 @@ run_test "T118" "$DTPIPE -i artifacts/test_data.csv --compute \"X:row.Score * 2\
 # T119: --post-exec SQL: verify hook runs a SQL statement against the Postgres target
 run_test "T119" "$DTPIPE -i artifacts/test_data.csv -o \"$PG\" --table \"output_t119\" --strategy Recreate --post-exec \"ANALYZE output_t119\""
 # T120: --auto-migrate: add a new column to a Postgres table that already exists
-run_test "T120" "$DTPIPE -i \"generate:10\" --fake \"Id:random.guid\" -o \"$PG\" --table \"output_t120\" --strategy Recreate --no-schema-validation && $DTPIPE -i \"generate:5\" --fake \"Id:random.guid\" --fake \"NewCol:name.firstName\" -o \"$PG\" --table \"output_t120\" --auto-migrate --no-schema-validation"
+run_test "T120" "$DTPIPE -i \"generate:10\" --fake \"Id:random.guid\" -o \"$PG\" --table \"output_t120\" --strategy Recreate --no-schema-validation && $DTPIPE -i \"generate:5\" --fake \"Id:random.guid\" --fake \"NewCol:name.firstName\" -o \"$PG\" --table \"output_t120\" --auto-migrate"
 
 # 11. CLI Subcommands
 # T121: 'inspect' subcommand: inspect schema and stats of a Parquet file

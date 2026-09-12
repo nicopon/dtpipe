@@ -24,8 +24,13 @@ internal sealed partial class ExportRunState
         // invariant for the catalogue — so a sample run can build the real writer and inspect it.
         Writer = WriterFactory.Create(Registry);
 
+        // Read before the sample branch: two schema flags that cancel each other is a fact about
+        // the line, not about the writer, and a sample run never reaches ValidateAndMigrateAsync.
+        var writerSchemaSettings = Registry.Get(WriterFactory.OptionsType) as ISchemaValidationAware;
+
         if (IsSampleMode)
         {
+            SchemaValidationService.RejectContradictorySettings(writerSchemaSettings);
             await PrepareSampleWriterAsync(exportableSchema, retryCt);
             return;
         }
@@ -55,8 +60,7 @@ internal sealed partial class ExportRunState
                 Observer.LogMessage($"[grey]   No active cursor state found at {Options.State}[/]");
         }
 
-        // Read schema validation and hook settings from writer options
-        var writerSchemaSettings = Registry.Get(WriterFactory.OptionsType) as ISchemaValidationAware;
+        // Read hook settings from writer options
         WriterHooks = Registry.Get(WriterFactory.OptionsType) as IHookAware;
 
         // Schema Validation

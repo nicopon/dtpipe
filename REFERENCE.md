@@ -307,9 +307,9 @@ schema time rather than written as something else. Cast it in your query: `col::
 | `--table` | `"users"` | Override target table name (default: `export`) |
 | `--key` | `"Id,Code"` | Primary key column(s) for `Upsert`/`Ignore`. Auto-detected from DB if omitted |
 | `--insert-mode` | `Bulk` | `Standard` or `Bulk` (high-speed batch insert for PG, Oracle, MSSQL) |
-| `--auto-migrate` | | `ALTER TABLE` to add missing columns automatically |
-| `--strict-schema` | | Reject rows that don't match the target schema |
-| `--no-schema-validation` | | Disable schema validation entirely |
+| `--auto-migrate` | | `ALTER TABLE` to add missing columns automatically. See [Schema modes](#schema-modes) |
+| `--strict-schema` | | Abort the run on any schema incompatibility. See [Schema modes](#schema-modes) |
+| `--no-schema-validation` | | Skip target inspection entirely. See [Schema modes](#schema-modes) |
 | `--pre-exec` | `"TRUNCATE ..."` | SQL script to run **before** the pipeline starts |
 | `--post-exec` | `"ANALYZE ..."` | SQL script to run **after** a successful transfer |
 | `--on-error-exec` | `"..."` | SQL script to run on pipeline error |
@@ -319,6 +319,39 @@ schema time rather than written as something else. Cast it in your query: `col::
 
 > `--pre-exec`, `--post-exec` etc. accept inline SQL or a file path (`@scripts/pre.sql` or a `.sql` file path).
 > `--duck-init` runs on the DuckDB connection before reads or writes (unlike `--pre-exec` which runs on the target DB after connection).
+
+### Schema modes
+
+Before writing to a database target, dtpipe compares the source schema with the target's and acts
+on the difference. Three independent flags decide how, and they describe **four regimes plus an
+off switch** — there is no `--schema-evolution` flag, and these are the names for what the
+combinations already do.
+
+| Flags | Regime | A column the target does not have | A type mismatch |
+|:---|:---|:---|:---|
+| *(none)* | **discard** | reported, then skipped — the run continues | reported, the run continues |
+| `--strict-schema` | **freeze** | aborts the run | aborts the run |
+| `--auto-migrate` | **evolve** | `ALTER TABLE ADD COLUMN`, then written | reported, the run continues |
+| `--auto-migrate --strict-schema` | **evolve, with a net** | added, then the target is re-inspected | aborts, unless migrating resolved it |
+| `--no-schema-validation` | **off** | the target is never inspected — neither question is asked | |
+
+`--no-schema-validation` **cannot be combined** with either of the other two: it returns before the
+inspection both of them need, so the run would silently do the opposite of what half the line asked
+for. The combination is refused with an error naming the two flags.
+
+Each run states the regime it validated under, in one line, whatever the outcome:
+
+```
+Schema mode: freeze (--strict-schema) - any incompatibility aborts the run.
+```
+
+That line is not decoration. On a target that happens to be compatible, **discard** and **freeze**
+produce exactly the same output while offering opposite guarantees, and only the regime tells them
+apart.
+
+**The regime applies only where the target is inspected.** A file or object target is replaced
+wholesale, and `--strategy Recreate` drops and rebuilds the table from the source schema, so there
+is nothing to compare: no inspection runs and no mode line is printed.
 
 ### Object storage (`s3://`, `azure://`)
 

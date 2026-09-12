@@ -9,13 +9,13 @@ namespace DtPipe.Adapters.Common;
 /// </summary>
 public abstract class DbWriterOptions : DbConnectionOptions, ISchemaValidationAware, IHookAware, IKeyAwareOptions
 {
-    [ComponentOption("--strict-schema", Description = "Fail if schema incompatibilities are detected")]
+    [ComponentOption("--strict-schema", Description = "Freeze mode: fail if schema incompatibilities are detected. Combines with --auto-migrate; excludes --no-schema-validation")]
     public bool StrictSchema { get; set; } = false;
 
-    [ComponentOption("--no-schema-validation", Description = "Disable pre-write schema compatibility validation")]
+    [ComponentOption("--no-schema-validation", Description = "Disable pre-write schema compatibility validation. Excludes --strict-schema and --auto-migrate, which both need the inspection")]
     public bool NoSchemaValidation { get; set; } = false;
 
-    [ComponentOption("--auto-migrate", Description = "Automatically add missing columns to target table")]
+    [ComponentOption("--auto-migrate", Description = "Evolve mode: automatically add missing columns to target table. Combines with --strict-schema; excludes --no-schema-validation")]
     public bool AutoMigrate { get; set; } = false;
 
     [ComponentOption("--key", Aliases = new[] { "-k" }, Description = "Primary key column(s) for upsert/delete")]

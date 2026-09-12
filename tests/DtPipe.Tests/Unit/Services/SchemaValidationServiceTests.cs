@@ -124,4 +124,126 @@ public class SchemaValidationServiceTests
         // Assert
         mockMigrator.Verify(i => i.MigrateSchemaAsync(It.IsAny<SchemaCompatibilityReport>(), It.IsAny<CancellationToken>()), Times.Once);
     }
+
+    /// <summary>
+    /// A writer that inspects its target, so the regime is in force and gets named.
+    /// </summary>
+    private static Mock<IDataWriter> InspectableWriter(bool exists = true, params TargetColumnInfo[] columns)
+    {
+        var mockWriter = new Mock<IDataWriter>();
+        var mockInspector = mockWriter.As<ISchemaInspector>();
+        mockInspector.Setup(i => i.RequiresTargetInspection).Returns(true);
+        mockInspector.Setup(i => i.InspectTargetAsync(It.IsAny<CancellationToken>())).ReturnsAsync(
+            new TargetSchemaInfo(columns.ToList(), exists, null, null, null));
+        return mockWriter;
+    }
+
+    [Theory]
+    [InlineData(false, false, false, "discard")]
+    [InlineData(true, false, false, "freeze (--strict-schema)")]
+    [InlineData(false, true, false, "evolve (--auto-migrate)")]
+    [InlineData(true, true, false, "evolve+freeze (--auto-migrate --strict-schema)")]
+    [InlineData(false, false, true, "off (--no-schema-validation)")]
+    public async Task ValidateAndMigrateAsync_NamesTheRegimeInForce(
+        bool strict, bool autoMigrate, bool noValidation, string expectedMode)
+    {
+        // Arrange
+        var options = new SchemaSettings { StrictSchema = strict, AutoMigrate = autoMigrate, NoSchemaValidation = noValidation };
+        var schema = new List<PipeColumnInfo> { new("ID", typeof(int), false) };
+        var mockWriter = InspectableWriter(true, new TargetColumnInfo("ID", "INTEGER", typeof(int), false, true, false));
+        mockWriter.As<ISchemaMigrator>();
+
+        var messages = new List<string>();
+        _mockObserver.Setup(o => o.LogMessage(It.IsAny<string>())).Callback<string>(messages.Add);
+
+        // Act
+        await _service.ValidateAndMigrateAsync(mockWriter.Object, schema, options, CancellationToken.None);
+
+        // Assert
+        Assert.Contains(messages, m => m.Contains($"Schema mode: {expectedMode}"));
+    }
+
+    /// <summary>
+    /// discard and freeze differ only in the guarantee; on a compatible target their outcome lines
+    /// are identical, which is why the regime has to be stated separately.
+    /// </summary>
+    [Fact]
+    public async Task ValidateAndMigrateAsync_NamesTheRegime_EvenWhenTheOutcomeIsIdentical()
+    {
+        var schema = new List<PipeColumnInfo> { new("ID", typeof(int), false) };
+        var column = new TargetColumnInfo("ID", "INTEGER", typeof(int), false, true, false);
+
+        var discard = new List<string>();
+        _mockObserver.Setup(o => o.LogMessage(It.IsAny<string>())).Callback<string>(discard.Add);
+        await _service.ValidateAndMigrateAsync(InspectableWriter(true, column).Object, schema, new SchemaSettings(), CancellationToken.None);
+
+        var freeze = new List<string>();
+        _mockObserver.Setup(o => o.LogMessage(It.IsAny<string>())).Callback<string>(freeze.Add);
+        await _service.ValidateAndMigrateAsync(
+            InspectableWriter(true, column).Object, schema, new SchemaSettings { StrictSchema = true }, CancellationToken.None);
+
+        Assert.Contains(discard, m => m.Contains("Target schema compatible"));
+        Assert.Contains(freeze, m => m.Contains("Target schema compatible"));
+        Assert.NotEqual(discard, freeze);
+    }
+
+    [Fact]
+    public async Task ValidateAndMigrateAsync_WhenTargetIsNotInspected_NamesNoRegime()
+    {
+        // Arrange — a file writer replaces its target, so no regime is in force.
+        var options = new SchemaSettings { StrictSchema = true };
+        var mockWriter = new Mock<IDataWriter>();
+        mockWriter.As<ISchemaInspector>().Setup(i => i.RequiresTargetInspection).Returns(false);
+
+        // Act
+        await _service.ValidateAndMigrateAsync(mockWriter.Object, new List<PipeColumnInfo>(), options, CancellationToken.None);
+
+        // Assert
+        _mockObserver.Verify(o => o.LogMessage(It.IsAny<string>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(true, false, "'--strict-schema'")]
+    [InlineData(false, true, "'--auto-migrate'")]
+    [InlineData(true, true, "'--strict-schema' and '--auto-migrate'")]
+    public void RejectContradictorySettings_RefusesAFlagThatCancelsAnother(bool strict, bool autoMigrate, string expectedNames)
+    {
+        var options = new SchemaSettings { NoSchemaValidation = true, StrictSchema = strict, AutoMigrate = autoMigrate };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => SchemaValidationService.RejectContradictorySettings(options));
+
+        Assert.Contains("--no-schema-validation", ex.Message);
+        Assert.Contains(expectedNames, ex.Message);
+    }
+
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, true, false)]   // evolve with a net: migrate, re-inspect, then fail if it did not suffice
+    [InlineData(false, false, true)]
+    public void RejectContradictorySettings_AcceptsEveryRegimeThatMeansSomething(bool strict, bool autoMigrate, bool noValidation)
+    {
+        var options = new SchemaSettings { StrictSchema = strict, AutoMigrate = autoMigrate, NoSchemaValidation = noValidation };
+
+        SchemaValidationService.RejectContradictorySettings(options);
+    }
+
+    [Fact]
+    public void RejectContradictorySettings_WithoutSettings_Accepts()
+    {
+        SchemaValidationService.RejectContradictorySettings(null);
+    }
+
+    [Fact]
+    public async Task ValidateAndMigrateAsync_WhenFlagsContradict_ThrowsBeforeTouchingTheTarget()
+    {
+        var options = new SchemaSettings { NoSchemaValidation = true, StrictSchema = true };
+        var mockWriter = InspectableWriter();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _service.ValidateAndMigrateAsync(mockWriter.Object, new List<PipeColumnInfo>(), options, CancellationToken.None));
+
+        mockWriter.As<ISchemaInspector>().Verify(i => i.InspectTargetAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
 }
