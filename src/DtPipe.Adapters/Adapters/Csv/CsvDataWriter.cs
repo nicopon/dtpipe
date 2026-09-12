@@ -302,11 +302,11 @@ public sealed class CsvDataWriter : IRowDataWriter, IRequiresOptions<CsvWriterOp
 
 	public async ValueTask CompleteAsync(CancellationToken ct = default)
 	{
-		// Flush any remaining data
-		if (_rowsInBuffer > 0)
-		{
-			await FlushBufferToFileAsync(ct);
-		}
+		// Unconditional. InitializeAsync writes the header into the buffer before any row exists,
+		// so gating this on the row count discarded the header along with them: a pipeline whose
+		// filter matched nothing produced a 0-byte file that this adapter's own reader then
+		// refuses. The schema survives an empty result, the way it already does for Parquet.
+		await FlushBufferToFileAsync(ct);
 
 		if (_outputStream != null)
 			await _outputStream.FlushAsync(ct);

@@ -38,9 +38,14 @@ public class CsvStreamReader : IStreamReader, IColumnTypeInferenceCapable
 		if (!File.Exists(filePath))
 			throw new FileNotFoundException($"CSV file not found: {filePath}", filePath);
 
+		// A file of zero bytes carries no header line, so there are no column names to read and no
+		// schema to hand downstream. A header with no data rows below it is a different thing — an
+		// empty dataset — and streams normally as zero rows.
 		var fileInfo = new FileInfo(filePath);
 		if (fileInfo.Length == 0)
-			throw new InvalidOperationException($"CSV file is empty: {filePath}");
+			throw new InvalidOperationException(
+				$"CSV file has no header line, so it declares no columns: {filePath}. "
+				+ "A file holding only a header row is read normally, as zero rows.");
 
 		// Retry loop to handle transient locks or filesystem lag (especially on Mac/Unix)
 		int retries = 5;
