@@ -192,22 +192,46 @@ public class ExpandDataTransformerTests
 		Assert.Equal(typeof(string), schema[1].ClrType);
 	}
 
-	/// <summary>An unparseable hint was dropped, leaving the column silently at its source type.</summary>
+	/// <summary>An unresolved hint was dropped, leaving the column silently at its source type.</summary>
 	[Fact]
 	public async Task A_Declaration_With_An_Unknown_Type_Is_Refused()
 	{
 		var options = new ExpandOptions
 		{
 			Expand = new[] { "return [row];" },
-			ExpandTypes = new(StringComparer.OrdinalIgnoreCase) { ["Tag"] = "int32" }
+			ExpandTypes = new(StringComparer.OrdinalIgnoreCase) { ["Tag"] = "banana" }
 		};
 		var transformer = new ExpandDataTransformer(options, _realJsProvider);
 
 		var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
 			await transformer.InitializeAsync(new List<PipeColumnInfo> { new("Id", typeof(int), false) }));
 
-		Assert.Contains("'int32'", ex.Message);
-		Assert.Contains("string, int, long, double, decimal, bool, datetime, guid", ex.Message);
+		Assert.Contains("'banana'", ex.Message);
+		Assert.Contains("names no type", ex.Message);
+		Assert.Contains("int32", ex.Message);
+	}
+
+	/// <summary>
+	/// The vocabulary is the one `--column-types` uses. `int32` resolved there and named nothing
+	/// here, two flags apart, and the difference was invisible: the column simply stayed a string.
+	/// </summary>
+	[Theory]
+	[InlineData("int32", typeof(int))]
+	[InlineData("int64", typeof(long))]
+	[InlineData("text", typeof(string))]
+	[InlineData("timestamp", typeof(DateTimeOffset))]
+	public async Task A_Declaration_Accepts_The_Same_Spellings_As_Column_Types(string hint, Type expected)
+	{
+		var options = new ExpandOptions
+		{
+			Expand = new[] { "return [row];" },
+			ExpandTypes = new(StringComparer.OrdinalIgnoreCase) { ["Tag"] = hint }
+		};
+		var transformer = new ExpandDataTransformer(options, _realJsProvider);
+
+		var schema = await transformer.InitializeAsync(new List<PipeColumnInfo> { new("Id", typeof(int), false) });
+
+		Assert.Equal(expected, schema[1].ClrType);
 	}
 
 	private async Task<ExpandDataTransformer> Ready(string script)

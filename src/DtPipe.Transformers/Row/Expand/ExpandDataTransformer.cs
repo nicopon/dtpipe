@@ -257,14 +257,9 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<DtPi
 
 	/// <summary>The hint a declaration carries, defaulting to string when it names only a column.</summary>
 	private static Type ParseDeclaredType(string column, string? hint)
-	{
-		if (string.IsNullOrWhiteSpace(hint)) return typeof(string);
-
-		return TypeHelper.ParseTypeHint(hint)
-			?? throw new InvalidOperationException(
-				$"--expand-types declares '{column}' as '{hint}', which is not a type this accepts. "
-			  + "Use one of: string, int, long, double, decimal, bool, datetime, guid.");
-	}
+		=> string.IsNullOrWhiteSpace(hint)
+			? typeof(string)
+			: TypeHelper.RequireTypeHint("--expand-types", column, hint);
 
 	private void EnsureFunctionsCompiled(Engine engine)
 	{

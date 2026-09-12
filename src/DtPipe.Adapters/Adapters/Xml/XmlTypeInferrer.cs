@@ -4,6 +4,8 @@ using DtPipe.Core.Infrastructure.Arrow;
 using Apache.Arrow.Types;
 using DtPipe.Core.Models;
 
+using DtPipe.Core.Helpers;
+
 namespace DtPipe.Adapters.Xml;
 
 /// <summary>
@@ -19,19 +21,13 @@ internal static class XmlTypeInferrer
 			_ => ArrowTypeMapper.GetClrTypeFromField(f)
 		};
 	}
-	internal static IArrowType ResolveHintToArrowType(string hint) => hint.ToLowerInvariant() switch
-	{
-		"uuid" or "guid" => ArrowTypeMapper.GetLogicalType(typeof(Guid)).ArrowType,
-		"int32" => Int32Type.Default,
-		"int64" => Int64Type.Default,
-		"double" => DoubleType.Default,
-		"float" => FloatType.Default,
-		"decimal" => new Decimal128Type(38, 18),
-		"bool" or "boolean" => BooleanType.Default,
-		"datetime" => TimestampType.Default,
-		"datetimeoffset" => TimestampType.Default,
-		_ => StringType.Default
-	};
+	/// <summary>
+	/// The Arrow type a hint names, derived from the CLR type rather than from a second switch:
+	/// the two lists had drifted, so 'int' resolved to Int32 on the CLR side and to String here,
+	/// and XmlStreamReader used both together.
+	/// </summary>
+	internal static IArrowType ResolveHintToArrowType(string hint)
+		=> ClrToArrowType(ResolveHintToClrType(hint) ?? typeof(string));
 	internal static Dictionary<string, Type> ParseColumnTypesOption(string spec)
 	{
 		var result = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
@@ -43,8 +39,7 @@ internal static class XmlTypeInferrer
 			if (idx <= 0) continue;
 			var name = entry[..idx].Trim();
 			var typeName = entry[(idx + 1)..].Trim();
-			var clrType = ResolveHintToClrType(typeName);
-			if (clrType != null) result[name] = clrType;
+			result[name] = TypeHelper.RequireTypeHint("--column-types", name, typeName);
 		}
 		return result;
 	}
@@ -61,20 +56,7 @@ internal static class XmlTypeInferrer
 		if (clrType == typeof(Guid)) return ArrowTypeMapper.GetLogicalType(typeof(Guid)).ArrowType;
 		return StringType.Default;
 	}
-	internal static Type? ResolveHintToClrType(string hint) => hint.ToLowerInvariant() switch
-	{
-		"uuid" or "guid" => typeof(Guid),
-		"string" or "str" => typeof(string),
-		"int" or "int32" => typeof(int),
-		"long" or "int64" => typeof(long),
-		"double" or "float64" => typeof(double),
-		"float" or "float32" or "single" => typeof(float),
-		"decimal" or "numeric" or "money" => typeof(decimal),
-		"bool" or "boolean" => typeof(bool),
-		"datetime" or "date" => typeof(DateTime),
-		"datetimeoffset" or "timestamp" => typeof(DateTimeOffset),
-		_ => null
-	};
+	internal static Type? ResolveHintToClrType(string hint) => TypeHelper.ParseTypeHint(hint);
 	internal static Dictionary<string, Func<string, object?>> BuildColumnParsers(Dictionary<string, Type> overrides)
 	{
 		var result = new Dictionary<string, Func<string, object?>>(StringComparer.OrdinalIgnoreCase);

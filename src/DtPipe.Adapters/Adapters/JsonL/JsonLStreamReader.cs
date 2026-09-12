@@ -520,19 +520,7 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 		return result;
 	}
 
-	private static Type? ResolveHintToClrType(string hint) => hint.ToLowerInvariant() switch
-	{
-		"uuid" or "guid" => typeof(Guid),
-		"string" or "text" => typeof(string),
-		"int32" or "int" or "integer" => typeof(int),
-		"int64" or "long" => typeof(long),
-		"double" or "float64" or "number" => typeof(double),
-		"decimal" => typeof(decimal),
-		"bool" or "boolean" => typeof(bool),
-		"datetime" => typeof(DateTime),
-		"datetimeoffset" or "datetimetz" => typeof(DateTimeOffset),
-		_ => null
-	};
+	private static Type? ResolveHintToClrType(string hint) => DtPipe.Core.Helpers.TypeHelper.ParseTypeHint(hint);
 
 	/// <summary>Maps a CLR type back to the type hint string used in --json-column-types.</summary>
 	private static string? ClrTypeToHint(Type t)

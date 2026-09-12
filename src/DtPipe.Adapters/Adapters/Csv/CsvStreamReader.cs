@@ -340,27 +340,13 @@ public class CsvStreamReader : IStreamReader, IColumnTypeInferenceCapable
 			if (idx <= 0) continue;
 			var name = entry[..idx].Trim();
 			var typeName = entry[(idx + 1)..].Trim();
-			var clrType = ResolveHintToClrType(typeName);
-			if (clrType != null) result[name] = clrType;
+			result[name] = DtPipe.Core.Helpers.TypeHelper.RequireTypeHint("--column-types", name, typeName);
 		}
 		return result;
 	}
 
 	/// <summary>Maps a hint string to the CLR type the column will carry in the pipeline.</summary>
-	private static Type? ResolveHintToClrType(string hint) => hint.ToLowerInvariant() switch
-	{
-		"uuid" or "guid" => typeof(Guid),
-		"string" or "str" => typeof(string),
-		"int" or "int32" => typeof(int),
-		"long" or "int64" => typeof(long),
-		"double" or "float64" => typeof(double),
-		"float" or "float32" or "single" => typeof(float),
-		"decimal" or "numeric" or "money" => typeof(decimal),
-		"bool" or "boolean" => typeof(bool),
-		"datetime" or "date" => typeof(DateTime),
-		"datetimeoffset" or "timestamp" => typeof(DateTimeOffset),
-		_ => null
-	};
+	private static Type? ResolveHintToClrType(string hint) => DtPipe.Core.Helpers.TypeHelper.ParseTypeHint(hint);
 
 	/// <summary>Builds per-column parser functions. Null parser means "keep as string".</summary>
 	private static Func<string, object?>[] BuildColumnParsers(string[] headers, Dictionary<string, Type> overrides)

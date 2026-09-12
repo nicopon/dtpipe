@@ -35,8 +35,7 @@ public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<
 
 		foreach (var (col, typeStr) in options.ComputeTypes)
 		{
-			var t = DtPipe.Core.Helpers.TypeHelper.ParseTypeHint(typeStr);
-			if (t != null) _typeHints[col] = t;
+			_typeHints[col] = DtPipe.Core.Helpers.TypeHelper.RequireTypeHint("--compute-types", col, typeStr);
 		}
 
 		foreach (var mapping in options.Compute)

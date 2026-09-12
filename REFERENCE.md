@@ -206,7 +206,7 @@ If you are coming from Python or SQLAlchemy, use this translation guide to build
 | `--csv-separator` | `","` | CSV field separator |
 | `--csv-has-header` | | CSV has a header row (default: true) |
 | `--encoding` | `ISO-8859-1` | Text file encoding |
-| `--column-types` | `"Id:uuid,Qty:int32"` | Explicit column type declarations for text readers |
+| `--column-types` | `"Id:uuid,Qty:int32"` | Explicit column type declarations for text readers. A hint naming no type is refused — see [Type hints](#type-hints) |
 | `--auto-column-types` | | Infer column types from the first 100 rows |
 | `--path` | `"//Product"` | XPath / JSON path for record selection (XML, JsonL) |
 | `--query` / `-q` | `"SELECT ..."` | SQL query executed by database readers (or a path to a `.sql` file) |
@@ -238,10 +238,28 @@ into one step; a different flag type starts a new step.
 | `--overwrite` | `"Status:Active"` | Set a static value for every row in a column |
 | `--format` | `"Display:{First} {Last}"` | [.NET Composite Format](https://learn.microsoft.com/en-us/dotnet/standard/base-types/composite-formatting) using column names as placeholders |
 | `--compute` | `"Col:row.A * 2"` | JS expression. Implicit return for single expressions; use `return` with statements |
-| `--compute-types` | `"Col:int32"` | Declare the CLR type of a computed or new column |
+| `--compute-types` | `"Col:int32"` | Declare the CLR type of a computed or new column. Same vocabulary as `--column-types` — see [Type hints](#type-hints) |
 | `--filter` | `"row.Val > 100"` | Drop rows where the JS expression returns falsy |
 | `--expand` | `"row.Tags.split(',').map(t => ({ ...row, Tag: t }))"` | Expand one row into multiple. Must return an array of **row objects**: an array of plain values is refused |
 | `--expand-types` | `"Tag:string"` | Declare a column `--expand` creates. Undeclared keys are not in the output schema and are dropped |
+
+#### Type hints
+
+`--column-types`, `--compute-types` and `--expand-types` share one vocabulary. A hint that names no
+type is **refused**, rather than leaving the column at whatever type it already had.
+
+| Type | Accepted spellings |
+|:---|:---|
+| `string` | `string`, `str`, `text` |
+| `int` | `int`, `int32`, `integer` |
+| `long` | `long`, `int64` |
+| `float` | `float`, `float32`, `single` |
+| `double` | `double`, `float64`, `number` |
+| `decimal` | `decimal`, `numeric`, `money` |
+| `bool` | `bool`, `boolean` |
+| `DateTime` | `datetime`, `date` |
+| `DateTimeOffset` | `datetimeoffset`, `timestamp`, `datetimetz` |
+| `Guid` | `guid`, `uuid` |
 | `--window-count` | `5` | Window size for stateful batch processing |
 | `--window-script` | `"rows.map(...)"` | JS logic executed over a sliding window of rows |
 | `--ignore-nulls` | | Skip transformations when the input cell is NULL |
