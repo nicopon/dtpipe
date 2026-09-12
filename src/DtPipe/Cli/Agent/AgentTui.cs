@@ -698,6 +698,16 @@ public class AgentTui
                 _console.MarkupLine("[yellow]The model got stuck producing the same text and the call was stopped early.[/]");
                 _console.MarkupLine($"[grey]A decoding loop.{greedy} Otherwise try a different model.[/]");
                 break;
+            case TurnOutcome.OutputCeilingReached:
+                _console.MarkupLine("[yellow]The model was still generating at the output ceiling — its answer is cut short.[/]");
+                _console.MarkupLine("[grey]Raise --max-output-tokens for a genuinely long answer; a model that reaches it without calling a tool is usually rambling.[/]");
+                RenderLastStep(trajectory);
+                break;
+            case TurnOutcome.CallTookTooLong:
+                _console.MarkupLine("[yellow]One model call ran past the total deadline and was stopped.[/]");
+                _console.MarkupLine("[grey]It was producing output throughout, so the endpoint is fine — raise --llm-timeout if the model is simply slow.[/]");
+                RenderLastStep(trajectory);
+                break;
             case TurnOutcome.UserInterrupted:
                 _console.MarkupLine("[yellow]You stopped the model call — the work done up to that point is kept.[/]");
                 _console.MarkupLine("[grey]Ask again to continue from here; nothing was written.[/]");

@@ -60,6 +60,14 @@ public class AgentCommand : Command
         };
         llmTimeoutOption.DefaultValueFactory = _ => 300;
 
+        var maxOutputOption = new Option<int>("--max-output-tokens")
+        {
+            Description = "Tokens a single model response may generate before it is cut "
+                        + $"(default: {TurnLimits.DefaultMaxOutputTokens}). Without a ceiling, a model that "
+                        + "keeps producing is never stopped: --llm-timeout only measures silence."
+        };
+        maxOutputOption.DefaultValueFactory = _ => TurnLimits.DefaultMaxOutputTokens;
+
         var noStreamOption = new Option<bool>("--no-stream")
         {
             Description = "Disable token streaming and its live view; use one blocking call per step."
@@ -177,6 +185,7 @@ public class AgentCommand : Command
         Options.Add(urlOption);
         Options.Add(maxIterOption);
         Options.Add(llmTimeoutOption);
+        Options.Add(maxOutputOption);
         Options.Add(noStreamOption);
         Options.Add(noTuiOption);
         Options.Add(showThinkingOption);
@@ -204,6 +213,7 @@ public class AgentCommand : Command
             var url = parseResult.GetValue(urlOption);
             var maxIterations = parseResult.GetValue(maxIterOption);
             var llmTimeout = TimeSpan.FromSeconds(Math.Max(1, parseResult.GetValue(llmTimeoutOption)));
+            var maxOutputTokens = Math.Max(256, parseResult.GetValue(maxOutputOption));
             var noStream = parseResult.GetValue(noStreamOption);
             var noTui = parseResult.GetValue(noTuiOption);
             var detail = parseResult.GetValue(detailOption);
@@ -228,8 +238,8 @@ public class AgentCommand : Command
 
             var tui = new AgentTui(console);
             ILlmClient llmClient = provider.Equals("openai", StringComparison.OrdinalIgnoreCase)
-                ? new OpenAiClient(apiKey, llmTimeout)
-                : new OllamaClient(llmTimeout);
+                ? new OpenAiClient(apiKey, llmTimeout, maxOutputTokens)
+                : new OllamaClient(llmTimeout, maxOutputTokens);
 
             if (string.IsNullOrWhiteSpace(model))
             {
@@ -312,7 +322,8 @@ public class AgentCommand : Command
                 NoStream = noStream,
                 NoTui = noTui,
                 Detail = detail,
-                NumCtx = numCtx
+                NumCtx = numCtx,
+                MaxOutputTokens = maxOutputTokens
                        };
 
                 // F2: share the agent guardrail options with the execution tool so execute-yaml-job

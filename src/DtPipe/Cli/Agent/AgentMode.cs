@@ -66,6 +66,13 @@ public sealed class AgentOptions
       /// <summary>Model context window to request from the provider.</summary>
     public int NumCtx { get; init; } = DefaultNumCtx;
 
+      /// <summary>
+      /// Tokens a single model call may generate (Ollama <c>num_predict</c>, OpenAI
+      /// <c>max_output_tokens</c>). See <see cref="TurnLimits"/> for why a call needs this bound
+      /// at all when <c>--llm-timeout</c> already exists.
+      /// </summary>
+    public int MaxOutputTokens { get; init; } = TurnLimits.DefaultMaxOutputTokens;
+
       /// <summary>Disable token streaming and its live view; fall back to a single blocking call.</summary>
     public bool NoStream { get; init; } = false;
 

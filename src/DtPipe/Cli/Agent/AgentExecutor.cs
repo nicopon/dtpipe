@@ -365,15 +365,27 @@ public class AgentExecutor
              if (!string.IsNullOrEmpty(response.Error))
              {
                 string errMsg = response.Error!;
+                var failure = errMsg switch
+                {
+                    _ when string.Equals(errMsg, RepetitionGuard.DetectedMessage, StringComparison.Ordinal)
+                        => TurnOutcome.RepetitionDetected,
+                    _ when string.Equals(errMsg, TurnLimits.OutputCeilingMessage, StringComparison.Ordinal)
+                        => TurnOutcome.OutputCeilingReached,
+                    _ when TurnLimits.IsCallDeadline(errMsg) => TurnOutcome.CallTookTooLong,
+                    _ => TurnOutcome.LlmError,
+                };
+
+                // Only an endpoint fault is announced as one. A ceiling, a deadline and a decoding
+                // loop are ours, and labelling them "LLM Error" sends the reader to check a
+                // connection that is working.
+                var prefix = failure == TurnOutcome.LlmError ? "LLM Error: " : string.Empty;
                 if (renderTui)
-                    view!.AgentResponse($"Error calling LLM: {errMsg}");
+                    view!.AgentResponse(failure == TurnOutcome.LlmError ? $"Error calling LLM: {errMsg}" : errMsg);
                 if (recordTrajectory)
-                    Trajectory.AddStep(currentStepNum, $"LLM Error: {errMsg}",
+                    Trajectory.AddStep(currentStepNum, $"{prefix}{errMsg}",
                         thinking: response.Thinking ?? response.Message.Content, isError: true);
                 success = false;
-                turnOutcome = string.Equals(errMsg, RepetitionGuard.DetectedMessage, StringComparison.Ordinal)
-                    ? TurnOutcome.RepetitionDetected
-                    : TurnOutcome.LlmError;
+                turnOutcome = failure;
                 break;
              }
 

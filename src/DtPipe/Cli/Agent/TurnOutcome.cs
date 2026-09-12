@@ -35,6 +35,14 @@ public enum TurnOutcome
     /// (<see cref="RepetitionGuard"/>) — a decoding pathology, not an endpoint problem.</summary>
     RepetitionDetected,
 
+    /// <summary>The model was still generating when the call hit the output ceiling: the answer is
+    /// truncated, so it must not be read as one (<see cref="TurnLimits.DefaultMaxOutputTokens"/>).</summary>
+    OutputCeilingReached,
+
+    /// <summary>One model call outlived the total deadline while still streaming — not a stall,
+    /// which the idle ceiling already covers, but a call that never ends.</summary>
+    CallTookTooLong,
+
     /// <summary>
     /// The user pressed Esc during a model call on the full-screen surface. The call was
     /// abandoned, whatever the turn had already done is kept, and the session stays open — so

@@ -97,6 +97,8 @@ public sealed record TurnSummaryModel(
         TurnOutcome.LlmError => "the LLM call failed",
         TurnOutcome.EmptyResponse => "the model returned an empty response",
         TurnOutcome.RepetitionDetected => "the model got stuck repeating itself",
+        TurnOutcome.OutputCeilingReached => "the model hit the output ceiling mid-answer",
+        TurnOutcome.CallTookTooLong => "one model call ran past the total deadline",
         _ => outcome.ToString(),
     };
 }

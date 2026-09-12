@@ -15,17 +15,20 @@ public class OllamaClient : ILlmClient, IStreamingLlmClient
 {
     private readonly HttpClient _http;
     private readonly TimeSpan _chatTimeout;
+    private readonly int _maxOutputTokens;
 
-    public OllamaClient(TimeSpan? chatTimeout = null)
+    public OllamaClient(TimeSpan? chatTimeout = null, int? maxOutputTokens = null)
     {
         _chatTimeout = chatTimeout ?? AgentOptions.DefaultLlmTimeout;
+        _maxOutputTokens = maxOutputTokens ?? TurnLimits.DefaultMaxOutputTokens;
         _http = Unbounded(new HttpClient());
     }
 
     /// <summary>Test seam: inject a handler to exercise the timeout / connection-failure paths.</summary>
-    internal OllamaClient(HttpMessageHandler handler, TimeSpan chatTimeout)
+    internal OllamaClient(HttpMessageHandler handler, TimeSpan chatTimeout, int? maxOutputTokens = null)
     {
         _chatTimeout = chatTimeout;
+        _maxOutputTokens = maxOutputTokens ?? TurnLimits.DefaultMaxOutputTokens;
         _http = Unbounded(new HttpClient(handler));
     }
 
@@ -134,14 +137,17 @@ public class OllamaClient : ILlmClient, IStreamingLlmClient
     )).ToList();
 
     private static string BuildRequestJson(string model, List<OllamaChatMessage> messages,
-        List<OllamaToolDefinition> tools, int numCtx, double temperature, int? seed, bool stream)
+        List<OllamaToolDefinition> tools, int numCtx, double temperature, int? seed, bool stream,
+        int maxOutputTokens)
     {
         // temperature is always sent so a run can be made fully deterministic (temperature = 0).
         // seed is only sent when explicitly provided (null => omit, provider picks its own).
         var options = new Dictionary<string, object>
         {
             ["num_ctx"] = numCtx,
-            ["temperature"] = temperature
+            ["temperature"] = temperature,
+            // The bound that makes a runaway impossible rather than interrupted late.
+            ["num_predict"] = maxOutputTokens
         };
         if (seed.HasValue) options["seed"] = seed.Value;
 
@@ -177,11 +183,19 @@ public class OllamaClient : ILlmClient, IStreamingLlmClient
         CancellationToken ct = default)
     {
         var url = baseUrl.TrimEnd('/') + "/api/chat";
-        var requestJson = BuildRequestJson(model, MapMessages(messages), MapTools(tools), numCtx, temperature, seed, stream: true);
+        var requestJson = BuildRequestJson(model, MapMessages(messages), MapTools(tools), numCtx, temperature, seed, stream: true, _maxOutputTokens);
+
+        // Two bounds, and they answer different questions. The deadline asks "is this call ever
+        // going to end"; the idle ceiling below asks "is anything still coming". Only the second is
+        // reset per line, so a model that keeps producing is never cut off as silent — and is no
+        // longer unbounded either.
+        var deadline = TurnLimits.CallDeadline(_chatTimeout);
+        using var deadlineCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadlineCts.CancelAfter(deadline);
 
         // When streaming, _chatTimeout is an IDLE ceiling: it is reset on every line received, so a
         // model that keeps producing tokens is never cut off, and only a genuine stall trips it.
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(deadlineCts.Token);
         timeoutCts.CancelAfter(_chatTimeout);
 
         var acc = new AccumulatingLlmStreamObserver(observer);
@@ -189,6 +203,7 @@ public class OllamaClient : ILlmClient, IStreamingLlmClient
         List<OllamaToolCall>? toolCalls = null;
         LlmUsage? usage = null;
         string role = "assistant";
+        bool truncated = false;
 
         try
         {
@@ -244,7 +259,12 @@ public class OllamaClient : ILlmClient, IStreamingLlmClient
                 }
 
                 if (root.TryGetProperty("done", out var dEl) && dEl.ValueKind == JsonValueKind.True)
+                {
                     usage = ParseUsage(root);
+                    truncated = root.TryGetProperty("done_reason", out var rEl)
+                             && rEl.ValueKind == JsonValueKind.String
+                             && string.Equals(rEl.GetString(), "length", StringComparison.OrdinalIgnoreCase);
+                }
 
                 // The text it looped on is the whole evidence: a trace that records only the
                 // verdict says a run died of repetition without saying on what.
@@ -258,11 +278,24 @@ public class OllamaClient : ILlmClient, IStreamingLlmClient
             var assistant = new ChatMessage(role, acc.ContentOrNull, null,
                 toolCalls?.Select(tc => new ToolCall(tc.Id ?? $"call_{Guid.NewGuid():N}", tc.Function.Name, tc.Function.Arguments)).ToList());
 
+            // A cut-off answer with no tool call is not an answer. Returned as a response, the loop
+            // would end the turn on it and report a plan the model never finished writing; the tool
+            // call case is left alone, since a parsed call is usable whatever followed it.
+            if (truncated && assistant.ToolCalls is null)
+                return new LlmResponse(assistant, true, TurnLimits.OutputCeilingMessage, usage, acc.ThinkingOrNull);
+
             return new LlmResponse(assistant, true, null, usage, acc.ThinkingOrNull);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
+        }
+        catch (OperationCanceledException) when (deadlineCts.IsCancellationRequested)
+        {
+            // Told apart from the idle ceiling on purpose: "sent no output" would be false here,
+            // and a false claim about the model sends the reader to the wrong knob.
+            return new LlmResponse(new ChatMessage("assistant", acc.ContentOrNull), true,
+                TurnLimits.CallDeadlineMessage(deadline), null, acc.ThinkingOrNull);
         }
         catch (OperationCanceledException)
         {

@@ -21,13 +21,15 @@ public class OpenAiClient : ILlmClient, IStreamingLlmClient
 {
     private readonly string _apiKey;
     private readonly TimeSpan _chatTimeout;
+    private readonly int _maxOutputTokens;
 
     public string ProviderName => "openai";
 
-    public OpenAiClient(string? apiKey = null, TimeSpan? chatTimeout = null)
+    public OpenAiClient(string? apiKey = null, TimeSpan? chatTimeout = null, int? maxOutputTokens = null)
     {
         _apiKey = apiKey ?? Environment.GetEnvironmentVariable("DTPIPE_LLM_API_KEY") ?? "";
         _chatTimeout = chatTimeout ?? AgentOptions.DefaultLlmTimeout;
+        _maxOutputTokens = maxOutputTokens ?? TurnLimits.DefaultMaxOutputTokens;
     }
 
     public async Task<List<string>> ListModelsAsync(string baseUrl, CancellationToken ct = default)
@@ -124,9 +126,15 @@ public class OpenAiClient : ILlmClient, IStreamingLlmClient
         return sdkMessages;
     }
 
-    private static ChatCompletionOptions BuildOptions(List<ToolDefinition> tools, double temperature, int? seed)
+    private static ChatCompletionOptions BuildOptions(List<ToolDefinition> tools, double temperature, int? seed,
+        int maxOutputTokens)
     {
-        var options = new ChatCompletionOptions { Temperature = (float)temperature };
+        // The bound that makes a runaway impossible rather than interrupted late.
+        var options = new ChatCompletionOptions
+        {
+            Temperature = (float)temperature,
+            MaxOutputTokenCount = maxOutputTokens,
+        };
         if (seed.HasValue) options.Seed = seed.Value;
         foreach (var t in tools)
             options.Tools.Add(ChatTool.CreateFunctionTool(t.Name, t.Description, BinaryData.FromString(t.ParametersSchema.GetRawText())));
@@ -173,20 +181,27 @@ public class OpenAiClient : ILlmClient, IStreamingLlmClient
         int? seed = null,
         CancellationToken ct = default)
     {
+        // Two bounds: the deadline asks whether this call will ever end, the idle ceiling whether
+        // anything is still coming. Only the second is reset per update.
+        var deadline = TurnLimits.CallDeadline(_chatTimeout);
+        using var deadlineCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadlineCts.CancelAfter(deadline);
+
         // When streaming, _chatTimeout is an IDLE ceiling — reset on every update received.
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(deadlineCts.Token);
         timeoutCts.CancelAfter(_chatTimeout);
 
         var acc = new AccumulatingLlmStreamObserver(observer);
         var splitter = new ThinkTagSplitter();
         var toolAcc = new SortedDictionary<int, (string id, string name, StringBuilder args)>();
         LlmUsage? usage = null;
+        bool truncated = false;
 
         try
         {
             var chatClient = BuildClient(baseUrl, model);
             var sdkMessages = MapMessages(messages);
-            var options = BuildOptions(tools, temperature, seed);
+            var options = BuildOptions(tools, temperature, seed, _maxOutputTokens);
 
             await foreach (var update in chatClient.CompleteChatStreamingAsync(sdkMessages, options, timeoutCts.Token))
             {
@@ -219,6 +234,8 @@ public class OpenAiClient : ILlmClient, IStreamingLlmClient
                 if (update.Usage is { } u)
                     usage = new LlmUsage(u.InputTokenCount, u.OutputTokenCount);
 
+                if (update.FinishReason == ChatFinishReason.Length) truncated = true;
+
                 // The text it looped on is the whole evidence: a trace that records only the
                 // verdict says a run died of repetition without saying on what.
                 if (acc.RepetitionDetected)
@@ -232,11 +249,22 @@ public class OpenAiClient : ILlmClient, IStreamingLlmClient
                 ? toolAcc.Values.Select(e => new ToolCall(e.id, e.name, ParseArgs(e.args.ToString()))).ToList()
                 : null;
 
+            // A cut-off answer with no tool call is not an answer; a parsed call is usable whatever
+            // followed it.
+            if (truncated && toolCalls is null)
+                return new LlmResponse(new ChatMessage("assistant", acc.ContentOrNull), true,
+                    TurnLimits.OutputCeilingMessage, usage, acc.ThinkingOrNull);
+
             return new LlmResponse(new ChatMessage("assistant", acc.ContentOrNull, null, toolCalls), true, null, usage, acc.ThinkingOrNull);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
+        }
+        catch (OperationCanceledException) when (deadlineCts.IsCancellationRequested)
+        {
+            return new LlmResponse(new ChatMessage("assistant", acc.ContentOrNull), true,
+                TurnLimits.CallDeadlineMessage(deadline), null, acc.ThinkingOrNull);
         }
         catch (OperationCanceledException)
         {
