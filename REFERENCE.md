@@ -240,7 +240,8 @@ into one step; a different flag type starts a new step.
 | `--compute` | `"Col:row.A * 2"` | JS expression. Implicit return for single expressions; use `return` with statements |
 | `--compute-types` | `"Col:int32"` | Declare the CLR type of a computed or new column |
 | `--filter` | `"row.Val > 100"` | Drop rows where the JS expression returns falsy |
-| `--expand` | `"row.Tags.split(',')"` | Expand one row into multiple (must return an array of objects) |
+| `--expand` | `"row.Tags.split(',').map(t => ({ ...row, Tag: t }))"` | Expand one row into multiple. Must return an array of **row objects**: an array of plain values is refused |
+| `--expand-types` | `"Tag:string"` | Declare a column `--expand` creates. Undeclared keys are not in the output schema and are dropped |
 | `--window-count` | `5` | Window size for stateful batch processing |
 | `--window-script` | `"rows.map(...)"` | JS logic executed over a sliding window of rows |
 | `--ignore-nulls` | | Skip transformations when the input cell is NULL |

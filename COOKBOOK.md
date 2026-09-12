@@ -290,8 +290,11 @@ dtpipe ... --filter "row.is_active && row.score >= 50"
 ### Row expansion
 
 ```bash
-# If 'tags' is "a,b,c", this produces 3 output rows
-dtpipe ... --expand "row.tags.split(',').map(t => ({ ...row, tag: t.trim() }))"
+# If 'tags' is "a,b,c", this produces 3 output rows.
+# 'tag' is a column the source does not carry, so it has to be declared: the output schema is
+# fixed before the first row, and an undeclared key is dropped.
+dtpipe ... --expand "row.tags.split(',').map(t => ({ ...row, tag: t.trim() }))" \
+           --expand-types "tag:string"
 ```
 
 ### Stateful windowing

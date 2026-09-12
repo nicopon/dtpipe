@@ -14,7 +14,9 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<DtPi
 	private readonly IJsEngineProvider _jsEngineProvider;
 	private readonly List<JsValue> _compiledExpands = new();
 	private readonly List<string> _wrappedScripts = new();
+	private readonly List<string> _sourceExpressions = new();
 	private string[]? _columnNames;
+	private readonly HashSet<string> _reportedUnknownKeys = new(StringComparer.OrdinalIgnoreCase);
 
 	public ExpandDataTransformer(DtPipe.Transformers.Row.Expand.ExpandOptions options, IJsEngineProvider jsEngineProvider)
 	{
@@ -50,6 +52,7 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<DtPi
 			engine.SetValue(funcName, engine.Evaluate($"({wrappedScript})"));
 
 			_wrappedScripts.Add(wrappedScript);
+			_sourceExpressions.Add(expandScript.Trim());
 
 			_compiledExpands.Add(new JsString(funcName));
 		}
@@ -58,17 +61,18 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<DtPi
 		foreach (KeyValuePair<string, string> entry in _options.ExpandTypes)
 		{
 			string col = entry.Key;
-			string typeStr = entry.Value;
-			Type? type = TypeHelper.ParseTypeHint(typeStr);
-			if (type != null)
-			{
-				var idx = updatedColumns.FindIndex(c => c.Name.Equals(col, StringComparison.OrdinalIgnoreCase));
-				if (idx >= 0)
-				{
-					updatedColumns[idx] = updatedColumns[idx] with { ClrType = type };
-				}
-			}
+			Type type = ParseDeclaredType(col, entry.Value);
+
+			var idx = updatedColumns.FindIndex(c => c.Name.Equals(col, StringComparison.OrdinalIgnoreCase));
+			if (idx >= 0)
+				updatedColumns[idx] = updatedColumns[idx] with { ClrType = type };
+			else
+				updatedColumns.Add(new PipeColumnInfo(col, type, IsNullable: true));
 		}
+
+		// Appended, never inserted: TransformMany indexes _columnNames by the incoming row's
+		// position, so a declared column has to sit past the last source column.
+		_columnNames = updatedColumns.Select(c => c.Name).ToArray();
 
 		return ValueTask.FromResult<IReadOnlyList<PipeColumnInfo>>(updatedColumns);
 	}
@@ -107,8 +111,10 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<DtPi
 		// Helper to process a list of rows through a specific expand function
 		IEnumerable<object?[]> currentRows = new[] { row as object?[] ?? row.ToArray() };
 
-		foreach (var funcName in _compiledExpands)
+		for (int e = 0; e < _compiledExpands.Count; e++)
 		{
+			var funcName = _compiledExpands[e];
+			var expression = _sourceExpressions[e];
 			var nextRows = new List<object?[]>();
 
 			foreach (var r in currentRows)
@@ -135,46 +141,47 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<DtPi
 				// Set 'row' in global scope for Evaluate Call
 				engine.SetValue("row", currentJsRow);
 
+				JsValue result;
 				try
 				{
-					var result = engine.Evaluate($"{funcName}(row)");
-
-					// Result should be array of rows
-					if (result.IsArray())
-					{
-						var array = result.AsArray();
-						// Console.Error.WriteLine($"[Window] Result array length: {array.Length}");
-						foreach (var item in array)
-						{
-							if (item.IsObject())
-							{
-								var newRow = new object?[_columnNames.Length];
-								var obj = item.AsObject();
-
-								// Console.Error.WriteLine($"[Window] Item Value: {obj.Get("Value")}");
-
-								// Map by column name
-								for (int c = 0; c < _columnNames.Length; c++)
-								{
-									var val = obj.Get(_columnNames[c]);
-									if (val.IsUndefined() || val.IsNull())
-									{
-										newRow[c] = null;
-									}
-									else
-									{
-										// Convert JsValue to primitive safely via ToObject()
-										newRow[c] = val.ToObject();
-									}
-								}
-								nextRows.Add(newRow);
-							}
-						}
-					}
+					result = engine.Evaluate($"{funcName}(row)");
 				}
 				catch (Exception ex)
 				{
-					throw new InvalidOperationException($"Error evaluating expand script '{funcName}': {ex.Message}", ex);
+					// The generated symbol and the Jint wrapper used to go to the user, who had no
+					// way to connect '__expand_80f14686' to anything they had written.
+					throw new InvalidOperationException(
+						$"--expand could not evaluate {Quote(expression)}: {ex.Message}. "
+					  + "It takes a JavaScript expression over 'row' — a bare column name is not one, "
+					  + "write 'row.<column>'.", ex);
+				}
+
+				// A result of the wrong shape used to yield no rows at all, with no message and
+				// exit code 0 — a whole source silently discarded.
+				if (!TryGetElements(engine, result, out var elements))
+					throw new InvalidOperationException(
+						$"--expand expects {Quote(expression)} to return an array of row objects, "
+					  + $"but it returned {Describe(result)}.");
+
+				foreach (var item in elements)
+				{
+					if (!item.IsObject())
+						throw new InvalidOperationException(
+							$"--expand expects {Quote(expression)} to return an array of row objects, "
+						  + $"but an element of the array is {Describe(item)}. Map each element onto a row — "
+						  + "'row.tags.map(t => ({ ...row, tag: t }))' — and declare the column it adds with "
+						  + "--expand-types \"tag:string\".");
+
+					var obj = item.AsObject();
+					ReportKeysWithNoColumn(obj, expression);
+
+					var newRow = new object?[_columnNames.Length];
+					for (int c = 0; c < _columnNames.Length; c++)
+					{
+						var val = obj.Get(_columnNames[c]);
+						newRow[c] = val.IsUndefined() || val.IsNull() ? null : val.ToObject();
+					}
+					nextRows.Add(newRow);
 				}
 			}
 			currentRows = nextRows;
@@ -184,6 +191,79 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<DtPi
 		{
 			yield return r;
 		}
+	}
+
+	/// <summary>
+	/// A key the output schema does not carry is dropped: the schema is fixed before the first
+	/// row, so there is nowhere to put it. Say it once per key rather than per row — the run
+	/// stays valid, but nothing disappears without a word.
+	/// </summary>
+	private void ReportKeysWithNoColumn(Jint.Native.Object.ObjectInstance obj, string expression)
+	{
+		foreach (var property in obj.GetOwnProperties())
+		{
+			var key = property.Key.ToString();
+			if (Array.Exists(_columnNames!, c => c.Equals(key, StringComparison.OrdinalIgnoreCase))) continue;
+			if (!_reportedUnknownKeys.Add(key)) continue;
+
+			Console.Error.WriteLine(
+				$"[dtpipe] Warning: --expand {Quote(expression)} sets '{key}', which is not a column of the "
+			  + $"output, so it is dropped. Declare it with --expand-types \"{key}:string\" to keep it.");
+		}
+	}
+
+	/// <summary>
+	/// The elements of a result, when it has any.
+	/// </summary>
+	/// <remarks>
+	/// A nested JSON array reaches the engine as a wrapped CLR collection: it carries
+	/// <c>length</c> and answers <c>.map</c>, but <c>Array.isArray</c> is false and so is
+	/// <see cref="JsValue.IsArray"/>. Judging the result on that alone reported <c>row.tags</c> as
+	/// "not an array", which is not what a reader sees in the file.
+	/// </remarks>
+	private static bool TryGetElements(Engine engine, JsValue value, out IEnumerable<JsValue> elements)
+	{
+		if (value.IsArray())
+		{
+			elements = value.AsArray();
+			return true;
+		}
+
+		if (value.IsObject() && value.ToObject() is System.Collections.IEnumerable clr and not string)
+		{
+			elements = clr.Cast<object?>().Select(o => JsValue.FromObject(engine, o)).ToList();
+			return true;
+		}
+
+		elements = Array.Empty<JsValue>();
+		return false;
+	}
+
+	/// <summary>Names a JavaScript value by shape, for a message about a result of the wrong one.</summary>
+	private static string Describe(JsValue value) => value.Type switch
+	{
+		Jint.Runtime.Types.String => "a string",
+		Jint.Runtime.Types.Number => "a number",
+		Jint.Runtime.Types.Boolean => "a boolean",
+		Jint.Runtime.Types.Undefined => "undefined",
+		Jint.Runtime.Types.Null => "null",
+		Jint.Runtime.Types.Object => "a single object",
+		_ => "a value of another kind"
+	};
+
+	/// <summary>The user's expression, trimmed to stay readable inside a one-line message.</summary>
+	private static string Quote(string expression)
+		=> expression.Length <= 60 ? $"'{expression}'" : $"'{expression[..57]}...'";
+
+	/// <summary>The hint a declaration carries, defaulting to string when it names only a column.</summary>
+	private static Type ParseDeclaredType(string column, string? hint)
+	{
+		if (string.IsNullOrWhiteSpace(hint)) return typeof(string);
+
+		return TypeHelper.ParseTypeHint(hint)
+			?? throw new InvalidOperationException(
+				$"--expand-types declares '{column}' as '{hint}', which is not a type this accepts. "
+			  + "Use one of: string, int, long, double, decimal, bool, datetime, guid.");
 	}
 
 	private void EnsureFunctionsCompiled(Engine engine)

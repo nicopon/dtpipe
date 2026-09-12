@@ -33,26 +33,30 @@ public class ExpandDataTransformerFactory : TransformerFactoryBase<ExpandOptions
 		var resolved = options.Expand?.Select(e =>
 			_resolver.ResolveAsync(e).GetAwaiter().GetResult() ?? e
 		).ToArray();
-		return new ExpandDataTransformer(new ExpandOptions { Expand = resolved }, _jsEngineProvider);
+		return new ExpandDataTransformer(
+			new ExpandOptions { Expand = resolved, ExpandTypes = options.ExpandTypes },
+			_jsEngineProvider);
 	}
 
 	public override IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration)
 	{
 		var expands = new List<string>();
+		var declared = NewDeclarationMap();
 
 		foreach (var (option, value) in configuration)
 		{
-			if (string.Equals(option, "expand", StringComparison.OrdinalIgnoreCase) ||
-				string.Equals(option, "--expand", StringComparison.OrdinalIgnoreCase))
-			{
-				expands.Add(
-					_resolver.ResolveAsync(value).GetAwaiter().GetResult() ?? value);
-			}
+			var name = option.TrimStart('-');
+			if (string.Equals(name, "expand", StringComparison.OrdinalIgnoreCase))
+				expands.Add(_resolver.ResolveAsync(value).GetAwaiter().GetResult() ?? value);
+			else if (string.Equals(name, "expand-types", StringComparison.OrdinalIgnoreCase))
+				AddDeclarations(declared, value);
 		}
 
-		if (expands.Count == 0) return new ExpandDataTransformer(new DtPipe.Transformers.Row.Expand.ExpandOptions(), _jsEngineProvider);
+		if (expands.Count == 0) return new ExpandDataTransformer(new ExpandOptions(), _jsEngineProvider);
 
- 		return new ExpandDataTransformer(new DtPipe.Transformers.Row.Expand.ExpandOptions { Expand = expands.ToArray() }, _jsEngineProvider);
+		return new ExpandDataTransformer(
+			new ExpandOptions { Expand = expands.ToArray(), ExpandTypes = declared },
+			_jsEngineProvider);
 	}
 
 	public override object? CreateOptionsFromYaml(TransformerConfig config)
@@ -63,8 +67,29 @@ public class ExpandDataTransformerFactory : TransformerFactoryBase<ExpandOptions
 			.Select(kvp => string.IsNullOrEmpty(kvp.Value) ? kvp.Key : $"{kvp.Key}:{kvp.Value}")
 			.ToArray();
 
-		return expands.Length == 0
-			? null
-			: new DtPipe.Transformers.Row.Expand.ExpandOptions { Expand = expands };
+		if (expands.Length == 0) return null;
+
+		var declared = NewDeclarationMap();
+		if (config.Options is not null
+			&& config.Options.TryGetValue("expand-types", out var value))
+			AddDeclarations(declared, value);
+
+		return new ExpandOptions { Expand = expands, ExpandTypes = declared };
+	}
+
+	private static Dictionary<string, string> NewDeclarationMap() => new(StringComparer.OrdinalIgnoreCase);
+
+	/// <summary>
+	/// Reads <c>name:type</c> declarations, comma-separated so one YAML key can carry several —
+	/// a mapping key cannot repeat, while the command-line flag can.
+	/// </summary>
+	private static void AddDeclarations(Dictionary<string, string> into, string value)
+	{
+		foreach (var entry in value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+		{
+			var sep = entry.IndexOf(':');
+			if (sep > 0) into[entry[..sep].Trim()] = entry[(sep + 1)..].Trim();
+			else into[entry] = string.Empty;
+		}
 	}
 }
