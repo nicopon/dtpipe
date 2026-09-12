@@ -427,7 +427,7 @@ DuckDB extensions (`excel`, `httpfs`, `azure`, `ducklake`…) are reached throug
 
 | Flag | Syntax | Description |
 |:---|:---|:---|
-| `--limit` | `1000` | Stop after N rows have been processed |
+| `--limit` | `1000` | Read at most N rows from the source, then stop reading. Bounds the **read**, so a filter downstream yields fewer than N rather than topping the count back up |
 | `--sampling-rate` | `0.1` | Row inclusion probability (0.0–1.0) |
 | `--sampling-seed` | `12345` | Fixed seed for deterministic, reproducible sampling |
 | `--batch-size` | `10000` | Rows per columnar batch (default: 50,000) |

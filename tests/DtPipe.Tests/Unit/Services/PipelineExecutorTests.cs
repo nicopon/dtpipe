@@ -263,5 +263,96 @@ public class PipelineExecutorTests
         Assert.Equal(2, values.GetValue(1));
         Assert.Equal(3, values.GetValue(2));
     }
-}
 
+    /// <summary>
+    /// The combination the columnar limit test above does not reach: a columnar reader, a columnar
+    /// segment, and a ROW writer. The bound used to live only on the two paths that happened to
+    /// carry it — <see cref="PipelineExecutor.ProduceRowStreamAsync"/> and the columnar consumer —
+    /// and this shape has neither, so --limit 10 wrote a million rows.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteSegmentedPipelineAsync_ColumnarReader_RowWriter_RespectsLimit()
+    {
+        var schema = new Schema.Builder().Field(f => f.Name("Value").DataType(Int32Type.Default)).Build();
+        var array = new Int32Array.Builder().AppendRange(Enumerable.Range(1, 10)).Build();
+        var batch = new RecordBatch(schema, new[] { array }, 10);
+
+        var mockReader = new Mock<IColumnarStreamReader>();
+        mockReader.As<IStreamReader>();
+        mockReader.Setup(r => r.ReadRecordBatchesAsync(It.IsAny<CancellationToken>()))
+                  .Returns(new[] { batch }.ToAsyncEnumerable());
+        mockReader.SetupGet(r => r.Schema).Returns(schema);
+
+        // Row writer only: no IColumnarDataWriter, so the run ends on ConsumeRowStreamAsync.
+        var mockWriter = new Mock<IRowDataWriter>();
+        mockWriter.As<IDataWriter>();
+        var written = new List<object?[]>();
+        mockWriter.Setup(w => w.WriteBatchAsync(It.IsAny<IReadOnlyList<object?[]>>(), It.IsAny<CancellationToken>()))
+                  .Callback<IReadOnlyList<object?[]>, CancellationToken>((b, _) => written.AddRange(b))
+                  .Returns(new ValueTask());
+
+        var executor = new PipelineExecutor(
+            [new DtPipe.Adapters.Infrastructure.Arrow.ArrowRowToColumnarBridgeFactory(
+                NullLogger<DtPipe.Core.Infrastructure.Arrow.ArrowRowToColumnarBridge>.Instance)],
+            [new DtPipe.Adapters.Infrastructure.Arrow.ArrowColumnarToRowBridgeFactory()],
+            NullLogger<PipelineExecutor>.Instance);
+
+        var segments = new List<PipelineSegment> { new PipelineSegment(true, new List<IDataTransformer>()) };
+        var columns = new List<PipeColumnInfo> { new PipeColumnInfo("Value", typeof(int), true, false) };
+        using var linkedCts = new CancellationTokenSource();
+
+        await executor.ExecuteSegmentedPipelineAsync(
+            mockReader.Object, (IDataWriter)mockWriter.Object, segments, columns,
+            new PipelineOptions { Limit = 3 }, new Mock<IExportProgress>().Object, linkedCts, default);
+
+        Assert.Equal(3, written.Count);
+        Assert.Equal(new object?[] { 1, 2, 3 }, written.Select(r => r[0]));
+    }
+
+    /// <summary>
+    /// --limit counts rows READ, so a filter downstream of it yields fewer, never a topped-up N.
+    /// Applying the bound a second time at the writer would answer the other question, and the two
+    /// disagree exactly here.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteSegmentedPipelineAsync_LimitBoundsRowsRead_NotRowsWritten()
+    {
+        var schema = new Schema.Builder().Field(f => f.Name("Value").DataType(Int32Type.Default)).Build();
+        var array = new Int32Array.Builder().AppendRange(Enumerable.Range(1, 100)).Build();
+        var batch = new RecordBatch(schema, new[] { array }, 100);
+
+        var mockReader = new Mock<IColumnarStreamReader>();
+        mockReader.As<IStreamReader>();
+        mockReader.Setup(r => r.ReadRecordBatchesAsync(It.IsAny<CancellationToken>()))
+                  .Returns(new[] { batch }.ToAsyncEnumerable());
+        mockReader.SetupGet(r => r.Schema).Returns(schema);
+
+        var mockWriter = new Mock<IColumnarDataWriter>();
+        mockWriter.As<IDataWriter>();
+        long writtenRows = 0;
+        mockWriter.Setup(w => w.WriteRecordBatchAsync(It.IsAny<RecordBatch>(), It.IsAny<CancellationToken>()))
+                  .Callback<RecordBatch, CancellationToken>((b, _) => writtenRows += b.Length)
+                  .Returns(new ValueTask());
+
+        // Keeps only even values: of the first 10 rows read, 5 survive.
+        var dropOdds = new Mock<IDataTransformer>();
+        dropOdds.Setup(t => t.Transform(It.IsAny<IReadOnlyList<object?>>()))
+                .Returns<IReadOnlyList<object?>>(r => Convert.ToInt32(r[0]) % 2 == 0 ? r.ToArray() : null);
+
+        var executor = new PipelineExecutor(
+            [new DtPipe.Adapters.Infrastructure.Arrow.ArrowRowToColumnarBridgeFactory(
+                NullLogger<DtPipe.Core.Infrastructure.Arrow.ArrowRowToColumnarBridge>.Instance)],
+            [new DtPipe.Adapters.Infrastructure.Arrow.ArrowColumnarToRowBridgeFactory()],
+            NullLogger<PipelineExecutor>.Instance);
+
+        var segments = new List<PipelineSegment> { new PipelineSegment(false, new List<IDataTransformer> { dropOdds.Object }) };
+        var columns = new List<PipeColumnInfo> { new PipeColumnInfo("Value", typeof(int), true, false) };
+        using var linkedCts = new CancellationTokenSource();
+
+        await executor.ExecuteSegmentedPipelineAsync(
+            mockReader.Object, (IDataWriter)mockWriter.Object, segments, columns,
+            new PipelineOptions { Limit = 10 }, new Mock<IExportProgress>().Object, linkedCts, default);
+
+        Assert.Equal(5, writtenRows);
+    }
+}

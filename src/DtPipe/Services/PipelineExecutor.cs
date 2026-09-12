@@ -211,6 +211,8 @@ public sealed class PipelineExecutor
                     var sampler = options.SamplingSeed.HasValue ? new Random(options.SamplingSeed.Value) : Random.Shared;
                     currentColumnarSource = ApplySamplingAsync(currentColumnarSource, options.SamplingRate, sampler, ct);
                 }
+                if (options.Limit > 0)
+                    currentColumnarSource = ApplyLimitAsync(currentColumnarSource, options.Limit, ct);
                 currentColumnarSource = ReportColumnarReadAsync(currentColumnarSource, progress, ct);
                 currentColumnarSource = TapBatchesAsync(currentColumnarSource, tap, ReaderStage, ct);
                 isCurrentColumnar = true;
@@ -271,7 +273,10 @@ public sealed class PipelineExecutor
                 // from it replay the same rows rather than an earlier approximation of them.
                 if (materialise is not null)
                     currentColumnarSource = materialise(currentColumnarSource);
-                await ConsumeColumnarStreamAsync(currentColumnarSource, columnarWriter, options.Limit, progress, ct);
+                // Limit 0: the bound is the source's, applied once at whichever entry this run took.
+                // Re-applying it here would cap rows WRITTEN, which is a different question from
+                // the rows read that --limit asks about, and the two disagree behind a filter.
+                await ConsumeColumnarStreamAsync(currentColumnarSource, columnarWriter, limit: 0, progress, ct);
             }
             else if (writer is IRowDataWriter rowWriter)
             {
@@ -640,6 +645,61 @@ public sealed class PipelineExecutor
         }
 
         await DrainRowSourceAsync(MaterializeRows(ct), writer, batchSize, limit, samplingRate, samplingSeed, progress, ct);
+    }
+
+    /// <summary>
+    /// Bounds a columnar stream to <paramref name="limit"/> source rows, then stops pulling.
+    /// </summary>
+    /// <remarks>
+    /// The row entry carries the same bound inside <see cref="ProduceRowStreamAsync"/>. The columnar
+    /// entry carried none, so <c>--limit</c> reached the target only when the writer happened to be
+    /// columnar and was absent entirely otherwise: a Parquet source with one columnar transformer
+    /// wrote its whole million rows to a CSV that asked for ten, and <c>--dry-run</c> paid the same
+    /// price against the invariant that a sample never reads more than it shows.
+    /// <para>
+    /// The bound belongs at the source. It is the only position where it stops work instead of
+    /// discarding work already done, and the only one that answers the question <c>--limit</c> asks
+    /// — how many rows to READ — the same way whatever sits downstream.
+    /// </para>
+    /// </remarks>
+    private async IAsyncEnumerable<RecordBatch> ApplyLimitAsync(
+        IAsyncEnumerable<RecordBatch> source,
+        int limit,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        long seen = 0;
+        await foreach (var batch in source.WithCancellation(ct))
+        {
+            var remaining = limit - seen;
+            if (batch.Length <= remaining)
+            {
+                seen += batch.Length;
+                yield return batch;
+                if (seen >= limit) yield break;
+                continue;
+            }
+
+            // TruncateBatch builds its own arrays, so the input is ours to dispose.
+            var truncated = TruncateBatch(batch, (int)remaining);
+            batch.Dispose();
+            yield return truncated;
+            yield break;
+        }
+    }
+
+    /// <summary>First <paramref name="count"/> rows as a new batch owning its buffers.</summary>
+    private static RecordBatch TruncateBatch(RecordBatch batch, int count)
+    {
+        var arrays = new IArrowArray[batch.Schema.FieldsList.Count];
+        for (int colIdx = 0; colIdx < arrays.Length; colIdx++)
+        {
+            var original = batch.Column(colIdx);
+            var builder = ArrowTypeMapper.CreateBuilder(original.Data.DataType);
+            for (int i = 0; i < count; i++)
+                ArrowTypeMapper.AppendArrayValue(builder, original, i);
+            arrays[colIdx] = ArrowTypeMapper.BuildArray(builder);
+        }
+        return new RecordBatch(batch.Schema, arrays, count);
     }
 
     private async IAsyncEnumerable<RecordBatch> ApplySamplingAsync(
