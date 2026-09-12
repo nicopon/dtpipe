@@ -9,6 +9,7 @@ internal class ListArrayManualBuilder : IArrowArrayBuilder
 {
     private readonly ListType _type;
     private readonly IArrowArrayBuilder _valueBuilder;
+    private readonly Action<object?> _appendItem;
     private readonly List<int> _offsets = new();
     private readonly List<bool> _validity = new();
     private int _nullCount;
@@ -17,6 +18,7 @@ internal class ListArrayManualBuilder : IArrowArrayBuilder
     {
         _type = type;
         _valueBuilder = ArrowTypeMapper.CreateBuilder(type.ValueDataType);
+        _appendItem = ArrowTypeMapper.ResolveAppender(_valueBuilder);
         _offsets.Add(0);
     }
 
@@ -31,7 +33,7 @@ internal class ListArrayManualBuilder : IArrowArrayBuilder
             int count = 0;
             foreach (var item in enumerable)
             {
-                ArrowTypeMapper.AppendValue(_valueBuilder, item);
+                _appendItem(item);
                 count++;
             }
             _offsets.Add(_offsets.Last() + count);

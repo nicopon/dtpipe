@@ -335,11 +335,13 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
                 "Cast the column in your query, for example with array_to_json(col)::text.")
         };
 
+        var append = ArrowTypeMapper.ResolveAppender(builder);
+
         return (
             e =>
             {
-                if (e.IsNull) { e.Skip(); ArrowTypeMapper.AppendNull(builder); }
-                else ArrowTypeMapper.AppendValue(builder, readArray(e));
+                if (e.IsNull) { e.Skip(); append(null); }
+                else append(readArray(e));
             },
             () => ArrowTypeMapper.BuildArray(builder));
     }

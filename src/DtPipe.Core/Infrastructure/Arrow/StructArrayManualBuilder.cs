@@ -9,6 +9,7 @@ internal class StructArrayManualBuilder : IArrowArrayBuilder
 {
     private readonly StructType _type;
     private readonly List<IArrowArrayBuilder> _builders;
+    private readonly List<Action<object?>> _appenders;
     private readonly List<bool> _validity = new();
     private int _nullCount;
 
@@ -16,9 +17,14 @@ internal class StructArrayManualBuilder : IArrowArrayBuilder
     {
         _type = type;
         _builders = new List<IArrowArrayBuilder>(type.Fields.Count);
+        _appenders = new List<Action<object?>>(type.Fields.Count);
         foreach (var field in type.Fields)
         {
-            _builders.Add(ArrowTypeMapper.CreateBuilder(field.DataType));
+            var builder = ArrowTypeMapper.CreateBuilder(field.DataType);
+            _builders.Add(builder);
+            // Resolved once per child, never per cell: an appender given null appends a null,
+            // which is what AppendNull below needs too.
+            _appenders.Add(ArrowTypeMapper.ResolveAppender(builder));
         }
     }
 
@@ -34,7 +40,7 @@ internal class StructArrayManualBuilder : IArrowArrayBuilder
                 {
                     var field = _type.Fields[i];
                     var childValue = dict.Contains(field.Name) ? dict[field.Name] : null;
-                    ArrowTypeMapper.AppendValue(_builders[i], childValue);
+                    _appenders[i](childValue);
                 }
             }
             else
@@ -45,7 +51,7 @@ internal class StructArrayManualBuilder : IArrowArrayBuilder
                     var field = _type.Fields[i];
                     var prop = props.FirstOrDefault(p => string.Equals(p.Name, field.Name, StringComparison.OrdinalIgnoreCase));
                     var childValue = prop?.GetValue(value);
-                    ArrowTypeMapper.AppendValue(_builders[i], childValue);
+                    _appenders[i](childValue);
                 }
             }
         }
@@ -55,7 +61,7 @@ internal class StructArrayManualBuilder : IArrowArrayBuilder
     {
         _validity.Add(false);
         _nullCount++;
-        for (int i = 0; i < _builders.Count; i++) ArrowTypeMapper.AppendNull(_builders[i]);
+        for (int i = 0; i < _appenders.Count; i++) _appenders[i](null);
     }
 
     public IArrowArray Build()
