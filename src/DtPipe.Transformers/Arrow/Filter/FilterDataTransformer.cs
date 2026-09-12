@@ -7,6 +7,9 @@ using DtPipe.Core.Options;
 using DtPipe.Transformers.Services;
 using Jint;
 using Jint.Native;
+using Jint.Native.Object;
+using Jint.Runtime;
+using System.Globalization;
 using DtPipe.Core.Infrastructure.Arrow;
 
 namespace DtPipe.Transformers.Arrow.Filter;
@@ -17,7 +20,10 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
 	private readonly IJsEngineProvider _jsEngineProvider;
 	private readonly List<JsValue> _compiledFilters = new();
 
-	[GeneratedRegex(@"^(\w+)\s*(==|!=|>|<|>=|<=)\s*(.+)$", RegexOptions.Compiled)]
+	// Matches the DOCUMENTED spelling only. Keying the fast path on a bare column name served a
+	// different semantics to whoever found it, and the two-character operators must precede their
+	// prefixes or ">=" parses as ">" against the value "= 500" — which matched no row at all.
+	[GeneratedRegex(@"^row\.(\w+)\s*(==|!=|>=|<=|>|<)\s*(.+)$", RegexOptions.Compiled)]
 	private static partial Regex SimpleFilterPattern();
 
 	public override bool CanProcessColumnar { get; protected set; }
@@ -53,28 +59,11 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
 		{
 			var filterScript = _options.Filters[i].Trim();
 
-			// Try simple detection
 			var match = SimpleFilterPattern().Match(filterScript);
-			if (match.Success)
-			{
-				var colName = match.Groups[1].Value;
-				var op = match.Groups[2].Value;
-				var valStr = match.Groups[3].Value.Trim();
-
-				var colIdx = System.Array.FindIndex(_columnNames, c => c.Equals(colName, StringComparison.OrdinalIgnoreCase));
-				if (colIdx >= 0)
-				{
-					simpleFilters.Add(new SimpleFilterInfo(colIdx, op, valStr));
-				}
-				else
-				{
-					allSimple = false;
-				}
-			}
+			if (match.Success && TryBuildSimpleFilter(match, sourceColumns, out var simple))
+				simpleFilters.Add(simple);
 			else
-			{
 				allSimple = false;
-			}
 
 			var funcName = $"__filter_{Guid.NewGuid():N}";
 
@@ -104,7 +93,70 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
 
 	private List<SimpleFilterInfo>? _simpleFilters;
 
-	private record SimpleFilterInfo(int ColumnIndex, string Operator, string RawValue);
+	private enum LiteralKind { Number, Text }
+
+	private record SimpleFilterInfo(int ColumnIndex, string Operator, LiteralKind Kind, double Number, string Text);
+
+	/// <summary>
+	/// Whether the vectorised path can answer this expression with the same result Jint would give.
+	/// It is an optimisation, so it may decline — never disagree.
+	/// </summary>
+	/// <remarks>
+	/// Two shapes qualify by construction: a numeric column against an unquoted numeric literal
+	/// (JavaScript compares two numbers) and a text column against a quoted literal under == or !=
+	/// (it compares two strings). Everything else — a quoted literal on a relational operator, a
+	/// null or boolean literal, a temporal or binary column — goes to Jint, rather than to a second
+	/// hand-written copy of JavaScript's coercion rules that would drift from the first.
+	/// </remarks>
+	private static bool TryBuildSimpleFilter(Match match, IReadOnlyList<PipeColumnInfo> columns, out SimpleFilterInfo filter)
+	{
+		filter = null!;
+		var colName = match.Groups[1].Value;
+		var op = match.Groups[2].Value;
+		var raw = match.Groups[3].Value.Trim();
+
+		var colIdx = -1;
+		for (int i = 0; i < columns.Count; i++)
+		{
+			if (columns[i].Name.Equals(colName, StringComparison.OrdinalIgnoreCase)) { colIdx = i; break; }
+		}
+		if (colIdx < 0) return false;
+
+		var clrType = Nullable.GetUnderlyingType(columns[colIdx].ClrType) ?? columns[colIdx].ClrType;
+
+		if (TryReadStringLiteral(raw, out var text))
+		{
+			if (clrType != typeof(string) || (op != "==" && op != "!=")) return false;
+			filter = new SimpleFilterInfo(colIdx, op, LiteralKind.Text, 0, text);
+			return true;
+		}
+
+		if (IsNumeric(clrType) && double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var number))
+		{
+			filter = new SimpleFilterInfo(colIdx, op, LiteralKind.Number, number, string.Empty);
+			return true;
+		}
+
+		return false;
+	}
+
+	/// <summary>A single quoted literal, and not an expression that merely starts and ends with a quote.</summary>
+	private static bool TryReadStringLiteral(string raw, out string text)
+	{
+		text = string.Empty;
+		if (raw.Length < 2) return false;
+		var quote = raw[0];
+		if (quote != '\'' && quote != '"') return false;
+		if (raw[^1] != quote) return false;
+		if (raw.IndexOf(quote, 1) != raw.Length - 1) return false;
+		text = raw[1..^1];
+		return true;
+	}
+
+	private static bool IsNumeric(Type t) =>
+		t == typeof(sbyte) || t == typeof(byte) || t == typeof(short) || t == typeof(ushort)
+		|| t == typeof(int) || t == typeof(uint) || t == typeof(long) || t == typeof(ulong)
+		|| t == typeof(float) || t == typeof(double) || t == typeof(decimal);
 
 	protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)
 	{
@@ -121,7 +173,7 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
 			{
 				if (!selectionMask[i]) continue;
 				var val = ArrowTypeMapper.GetValueForField(column, batch.Schema.GetFieldByIndex(filter.ColumnIndex), i);
-				selectionMask[i] = EvaluateSimple(val, filter.Operator, filter.RawValue);
+				selectionMask[i] = EvaluateSimple(val, filter);
 			}
 		}
 
@@ -143,41 +195,32 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
 		return new ValueTask<RecordBatch?>(new RecordBatch(batch.Schema, newArrays, selectedCount));
 	}
 
-	private bool EvaluateSimple(object? val, string op, string rawVal)
+	/// <summary>
+	/// The comparison JavaScript would make, for the two shapes <see cref="TryBuildSimpleFilter"/>
+	/// admits. A null reads as 0 under a relational operator, the way ToNumber(null) does, but
+	/// never equals a number — loose equality matches only null and undefined.
+	/// </summary>
+	private static bool EvaluateSimple(object? val, SimpleFilterInfo filter)
 	{
-		var valStr = val?.ToString();
-		var targetVal = rawVal.Trim('\'', '\"');
+		if (val is DBNull) val = null;
 
-		// Handle null
-		if (rawVal.Equals("null", StringComparison.OrdinalIgnoreCase))
+		if (filter.Kind == LiteralKind.Text)
 		{
-			return op switch {
-				"==" => val == null,
-				"!=" => val != null,
-				_ => false
-			};
+			var text = val as string;
+			return filter.Operator == "==" ? text == filter.Text : text != filter.Text;
 		}
 
-		if (val == null) return op == "!=";
-
-		// Value comparison
-		return op switch {
-			"==" => valStr == targetVal,
-			"!=" => valStr != targetVal,
-			">" => Compare(val, targetVal) > 0,
-			"<" => Compare(val, targetVal) < 0,
-			">=" => Compare(val, targetVal) >= 0,
-			"<=" => Compare(val, targetVal) <= 0,
+		var number = val is null ? 0d : Convert.ToDouble(val, CultureInfo.InvariantCulture);
+		return filter.Operator switch
+		{
+			"==" => val is not null && number == filter.Number,
+			"!=" => val is null || number != filter.Number,
+			">" => number > filter.Number,
+			"<" => number < filter.Number,
+			">=" => number >= filter.Number,
+			"<=" => number <= filter.Number,
 			_ => false
 		};
-	}
-
-	private int Compare(object val, string target)
-	{
-		if (val is double d1 && double.TryParse(target, out var d2)) return d1.CompareTo(d2);
-		if (val is int i1 && int.TryParse(target, out var i2)) return i1.CompareTo(i2);
-		if (val is long l1 && long.TryParse(target, out var l2)) return l1.CompareTo(l2);
-		return string.Compare(val.ToString(), target, StringComparison.Ordinal);
 	}
 
 	private IArrowArray CompactArray(IArrowArray original, bool[] mask, int count)
@@ -219,21 +262,26 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
 		// Set 'row' in global scope for Evaluate Call
 		engine.SetValue("row", jsRow);
 
-		foreach (var funcName in _compiledFilters)
+		for (int i = 0; i < _compiledFilters.Count; i++)
 		{
 			try
 			{
-				var result = engine.Evaluate($"{funcName}(row)");
+				var result = engine.Evaluate($"{_compiledFilters[i]}(row)");
 				if (!result.IsBoolean() || !result.AsBoolean())
 				{
 					return null; // Drop row if result is false or not boolean
 				}
 			}
-			catch (Exception ex)
+			catch (JavaScriptException jsEx) when (IsMissingColumn(jsEx))
 			{
-                // If it's a ReferenceError (column missing), rethrow to fail the process if strict.
-                // Otherwise, treat property access on null as 'false' (permissive mode for existing columns).
-                if (ex.Message.Contains("ReferenceError")) throw;
+				var expression = _options.Filters?[i] ?? "(unknown)";
+				throw new InvalidOperationException(
+					$"Error evaluating filter '{expression}': {jsEx.Message}. "
+					+ "A filter reads its columns off 'row' — write row.<column>.", jsEx);
+			}
+			catch (Exception)
+			{
+				// Property access on a null value: the filter reads it as "no match", on purpose.
 				return null;
 			}
 		}
@@ -241,6 +289,19 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
 
 		return row as object?[] ?? row.ToArray();
 	}
+
+	/// <summary>
+	/// A column absent from the schema and a property read on a null value are different failures,
+	/// and the filter must not answer both with "no match".
+	/// </summary>
+	/// <remarks>
+	/// Matched on the JS error's own <c>name</c>. The Proxy raises a ReferenceError whose MESSAGE is
+	/// "Column 'X' not found in schema", so a test for the word "ReferenceError" inside that message
+	/// could never fire: every row was dropped instead, and a filter naming a column that did not
+	/// exist wrote a zero-byte file and exited 0.
+	/// </remarks>
+	private static bool IsMissingColumn(JavaScriptException ex) =>
+		ex.Error is ObjectInstance error && error.Get("name").ToString() == "ReferenceError";
 
 	private void EnsureFiltersCompiled(Engine engine)
 	{

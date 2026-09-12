@@ -48,7 +48,7 @@ run_test() {
     local status=$?
 
     # Tests in this list are EXPECTED to fail (non-zero exit code = PASS)
-    if [[ "$id" =~ ^T(76|77|78|79|80|81|82|83|84|85|86|87|88|89|90|129|130|131|132|133|134|135|140|141|142|143|144|145|146)$ ]]; then
+    if [[ "$id" =~ ^T(76|77|78|79|80|81|82|83|84|85|86|87|88|89|90|105|129|130|131|132|133|134|135|140|141|142|143|144|145|146)$ ]]; then
         if [ $status -eq 0 ]; then
             echo -e "\e[31mFAILED (Expected error but got success)\e[0m"
             FAILED_TESTS+=("$id")
@@ -263,7 +263,7 @@ run_test "T63" "$DTPIPE -i artifacts/test_data_big.parquet -o artifacts/output_t
 # T64: Big Arrow IPC → Parquet (Arrow as source, measures IPC decoding)
 run_test "T64" "$DTPIPE -i artifacts/output_t63.arrow -o artifacts/output_t64.parquet"
 # T65: Compute + filter chain on big dataset (measures segmented pipeline throughput)
-run_test "T65" "$DTPIPE -i artifacts/test_data_big.parquet --compute \"Val:parseInt(row.Value)\" --filter \"Val > 500\" -o null"
+run_test "T65" "$DTPIPE -i artifacts/test_data_big.parquet --compute \"Val:parseInt(row.Value)\" --filter \"row.Val > 500\" -o null"
 # T66: Big Parquet → fan-out to two different formats simultaneously (exercises DAG with large data)
 run_test "T66" "$DTPIPE -i artifacts/test_data_big.parquet --alias src --from src -o artifacts/output_t66a.parquet --from src -o null"
 # T67: Generate 1M rows with UUID fake column (generator + fake throughput)
