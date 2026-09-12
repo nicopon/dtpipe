@@ -33,10 +33,10 @@ public class CoreBoundaryTests
         Assert.NotNull(typeof(DtPipe.Core.Abstractions.Dag.IMemoryChannelRegistry));
         Assert.NotNull(typeof(DtPipe.Core.Abstractions.IStreamReader));
         Assert.NotNull(typeof(DtPipe.Core.Abstractions.ISqlDialect)); // abstraction stays
-        Assert.NotNull(typeof(DtPipe.Core.Models.Branch));
+        Assert.NotNull(typeof(DtPipe.Core.Pipelines.Dag.BranchDefinition));
 
         // …and they live in the Core assembly, not elsewhere.
         Assert.Equal(typeof(DtPipe.Core.Options.OptionsRegistry).Assembly, typeof(DtPipe.Core.Abstractions.Dag.IDagOrchestrator).Assembly);
-        Assert.Equal(typeof(DtPipe.Core.Options.OptionsRegistry).Assembly, typeof(DtPipe.Core.Models.Branch).Assembly);
+        Assert.Equal(typeof(DtPipe.Core.Options.OptionsRegistry).Assembly, typeof(DtPipe.Core.Pipelines.Dag.BranchDefinition).Assembly);
     }
 }

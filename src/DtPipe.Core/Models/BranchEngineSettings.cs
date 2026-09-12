@@ -52,19 +52,3 @@ public sealed record BranchEngineSettings(
         FromCheckpoint = FromCheckpoint ?? job.FromCheckpoint,
     };
 }
-
-/// <summary>
-/// F7 — canonical description of one pipeline branch: DAG routing plus its engine
-/// settings. This is the authoritative model; JobDefinition carries provider-level data
-/// and CliJobContext only transient binding info.
-/// </summary>
-public sealed record Branch(
-    string Alias,
-    string? Input,
-    string? Output,
-    IReadOnlyList<string> StreamingAliases,
-    IReadOnlyList<string> RefAliases,
-    string? ProcessorName)
-{
-    public bool HasStreamTransformer => ProcessorName != null;
-}

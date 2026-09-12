@@ -4,24 +4,11 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Core;
 
 /// <summary>
-/// F7 — canonical Branch model: equality, with-expression behavior and defaults of the
-/// engine-settings bundle.
+/// F7 — the engine-settings bundle: its defaults, and the single derivation step that folds it
+/// into a job.
 /// </summary>
-public class BranchTests
+public class BranchEngineSettingsTests
 {
-    [Fact]
-    public void Branch_Equality_And_HasStreamTransformer()
-    {
-        var a = new Branch("src", "generate:5", null, new[] { "x" }, System.Array.Empty<string>(), null);
-        var b = a with { };
-        Assert.Equal(a, b);
-
-        var sql = a with { ProcessorName = "sql" };
-        Assert.NotEqual(a, sql);
-        Assert.True(sql.HasStreamTransformer);
-        Assert.False(a.HasStreamTransformer);
-    }
-
     [Fact]
     public void EngineSettings_Defaults_Are_Sane()
     {
