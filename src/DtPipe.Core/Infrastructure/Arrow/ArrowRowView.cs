@@ -8,7 +8,14 @@ namespace DtPipe.Core.Infrastructure.Arrow;
 /// Does not allocate an object?[] — values are extracted on demand.
 /// Since it is a struct capturing the rowIndex, it is safer than a reusable class instance.
 /// </summary>
-public readonly struct ArrowRowView : IReadOnlyList<object?>
+/// <remarks>
+/// <see cref="ICollection{T}"/> is implemented for one reason: the pipeline is full of
+/// <c>row as object?[] ?? row.ToArray()</c>, whose second half binds to
+/// <see cref="System.Linq.Enumerable.ToArray"/>. Without a collection to ask for a count, that
+/// grows a buffer through the boxed iterator — several times the cost of the array it produces —
+/// and the first half can never match, because this is a struct. The mutators throw.
+/// </remarks>
+public readonly struct ArrowRowView : IReadOnlyList<object?>, ICollection<object?>
 {
     private readonly RecordBatch _batch;
     private readonly int _rowIndex;
@@ -63,4 +70,27 @@ public readonly struct ArrowRowView : IReadOnlyList<object?>
             array[i] = this[i];
         return array;
     }
+
+    bool ICollection<object?>.IsReadOnly => true;
+
+    void ICollection<object?>.CopyTo(object?[] array, int arrayIndex)
+    {
+        ArgumentNullException.ThrowIfNull(array);
+        if (arrayIndex < 0 || array.Length - arrayIndex < Count)
+            throw new ArgumentOutOfRangeException(nameof(arrayIndex));
+
+        for (int i = 0; i < Count; i++)
+            array[arrayIndex + i] = this[i];
+    }
+
+    bool ICollection<object?>.Contains(object? item)
+    {
+        for (int i = 0; i < Count; i++)
+            if (Equals(this[i], item)) return true;
+        return false;
+    }
+
+    void ICollection<object?>.Add(object? item) => throw new NotSupportedException("ArrowRowView is a read-only view over a RecordBatch row.");
+    void ICollection<object?>.Clear() => throw new NotSupportedException("ArrowRowView is a read-only view over a RecordBatch row.");
+    bool ICollection<object?>.Remove(object? item) => throw new NotSupportedException("ArrowRowView is a read-only view over a RecordBatch row.");
 }

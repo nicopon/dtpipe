@@ -628,10 +628,8 @@ public sealed class PipelineExecutor
             await foreach (var r in rows.WithCancellation(innerCt))
             {
                 // ArrowRowView is a struct, so the array arm never matches what the
-                // columnar→row bridge yields. Its own ToArray sizes the array once; calling
-                // ToArray through IReadOnlyList binds to Enumerable.ToArray, which cannot
-                // pre-size (the view exposes no ICollection<T>) and grows a buffer through
-                // the boxed iterator instead — five times the cost of the allocation it wraps.
+                // columnar→row bridge yields. Naming the view calls its own ToArray directly,
+                // with no interface dispatch and no boxed iterator behind it.
                 yield return r switch
                 {
                     object?[] arr => arr,
