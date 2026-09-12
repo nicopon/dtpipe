@@ -638,7 +638,7 @@ public class AgentExecutor
      internal static readonly IReadOnlySet<string> FactProducingTools =
           new HashSet<string>(StringComparer.OrdinalIgnoreCase)
              {
-              "inspect", "preview-data", "suggest-pipeline", "dry-run",
+              "inspect", "preview-data", "dry-run",
               "list-providers", "get-adapter-help", "get-transformer-help", "get-dag-topology",
              };
 

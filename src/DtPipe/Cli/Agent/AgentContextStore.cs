@@ -14,7 +14,7 @@ public sealed class Fact
  {
     public string Key { get; init; } = string.Empty;
 
-       /// <summary>Tool that produced the fact (inspect, preview-data, suggest-pipeline, ...).</summary>
+       /// <summary>Tool that produced the fact; see AgentExecutor.FactProducingTools for the set.</summary>
     public string ToolName { get; init; } = string.Empty;
 
        /// <summary>The (possibly truncated) tool result payload.</summary>

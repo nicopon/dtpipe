@@ -113,8 +113,8 @@ public class AgentStepDigestTests
         // The assembled response somehow lost its tool call, but the stream saw the name.
         var r = new LlmResponse(new ChatMessage("assistant", "INTENT: do the thing"), true, null);
 
-        var line = StepDigest.TraceLine(1, 25, TimeSpan.FromSeconds(1), r, "suggest-pipeline");
+        var line = StepDigest.TraceLine(1, 25, TimeSpan.FromSeconds(1), r, "get-dag-topology");
 
-        Assert.Contains("suggest-pipeline", line);
+        Assert.Contains("get-dag-topology", line);
     }
 }

@@ -129,7 +129,7 @@ dtpipe \
 # Launch native MCP server over STDIO for AI assistants (Cursor, Claude Desktop, Antigravity)
 dtpipe mcp
 ```
-Includes tools: `dry-run`, `suggest-pipeline`, `list-cursors`, `execute-yaml-job`, and schema discovery.
+Includes tools: `dry-run`, `list-cursors`, `execute-yaml-job`, and schema discovery.
 
 ### Interactive AI Agent Mode
 

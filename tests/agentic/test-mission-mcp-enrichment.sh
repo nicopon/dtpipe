@@ -23,6 +23,6 @@ validate_data() {
 
 run_mission \
     "MCP Enrichment Tools Verification" \
-    "Your mission is to perform a pipeline check: 1. Use the 'suggest-pipeline' tool to create a pipeline skeleton from 'csv:tests/agentic/artifacts/users_raw.csv' to 'csv:tests/agentic/artifacts/users_clean.csv'. 2. Perform a 'dry-run' of the pipeline to validate schema compatibility and preview transformations without writing to disk." \
+    "Your mission is to perform a pipeline check: 1. Use the 'inspect' tool to read the real schema of 'csv:tests/agentic/artifacts/users_raw.csv'. 2. Write a YAML job copying it to 'csv:tests/agentic/artifacts/users_clean.csv'. 3. Perform a 'dry-run' of that job to validate schema compatibility and preview transformations without writing to disk." \
     setup_data \
     validate_data
