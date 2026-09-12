@@ -81,7 +81,9 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
                 c.ColumnName,
                 ResolveClrType(c),
                 c.AllowDBNull ?? true,
-                IsCaseSensitive: c.ColumnName != c.ColumnName.ToLowerInvariant()
+                IsCaseSensitive: c.ColumnName != c.ColumnName.ToLowerInvariant(),
+                Precision: (int?)c.NumericPrecision,
+                Scale: (int?)c.NumericScale
             )).ToList();
         }
 

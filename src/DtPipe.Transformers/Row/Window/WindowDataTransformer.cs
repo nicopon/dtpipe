@@ -61,7 +61,10 @@ public class WindowDataTransformer : IMultiRowTransformer, IRequiresOptions<DtPi
 			_keyColumnIndex = sourceColumns.ToList().IndexOf(col);
 		}
 
-		return ValueTask.FromResult(sourceColumns);
+		// The script emits every value of every row it yields, so no column keeps the numeric
+		// width its source declared — see ComputeDataTransformer for the same rule.
+		return ValueTask.FromResult<IReadOnlyList<PipeColumnInfo>>(
+			sourceColumns.Select(c => c with { Precision = null, Scale = null }).ToList());
 	}
 
 	public object?[]? Transform(IReadOnlyList<object?> row)

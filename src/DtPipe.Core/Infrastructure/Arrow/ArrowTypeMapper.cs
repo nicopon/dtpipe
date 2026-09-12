@@ -144,6 +144,23 @@ public static class ArrowTypeMapper
     public static Apache.Arrow.Field GetField(string name, Type clrType, bool isNullable = true) => 
         Apache.Arrow.Serialization.Mapping.ArrowTypeMap.GetField(name, GetLogicalType(clrType), isNullable);
 
+    /// <summary>
+    /// Same field, given what the source declared about a numeric column. Only a decimal reads
+    /// <paramref name="precision"/> and <paramref name="scale"/>; every other type maps from the
+    /// CLR type alone. A column whose source declares nothing keeps the widest Decimal128.
+    /// </summary>
+    public static Apache.Arrow.Field GetField(string name, Type clrType, bool isNullable, int? precision, int? scale) =>
+        Apache.Arrow.Serialization.Mapping.ArrowTypeMap.GetField(
+            name, GetLogicalType(clrType, precision, scale), isNullable);
+
+    /// <inheritdoc cref="ArrowTypeMap.GetLogicalType(Type, int?, int?)"/>
+    public static Apache.Arrow.Serialization.Mapping.ArrowTypeResult GetLogicalType(Type clrType, int? precision, int? scale)
+    {
+        if (TryGetCollectionElementType(clrType, out _)) return GetLogicalType(clrType);
+
+        return ArrowTypeMap.GetLogicalType(clrType, precision, scale);
+    }
+
 
     public static IArrowArrayBuilder CreateBuilder(IArrowType type)
     {

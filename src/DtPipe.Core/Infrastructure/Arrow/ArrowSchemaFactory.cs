@@ -13,7 +13,7 @@ public static class ArrowSchemaFactory
         foreach (var col in columns)
         {
             // Use the centralized mapping logic that ensures all metadata (e.g. arrow.uuid) is consistently applied
-            builder.Field(ArrowTypeMapper.GetField(col.Name, col.ClrType, col.IsNullable));
+            builder.Field(ArrowTypeMapper.GetField(col.Name, col.ClrType, col.IsNullable, col.Precision, col.Scale));
         }
         return builder.Build();
     }
@@ -62,7 +62,28 @@ public static class ArrowSchemaFactory
         return schema.FieldsList.Select(f => new PipeColumnInfo(
             f.Name,
             ArrowTypeMapper.GetClrTypeFromField(f),
-            f.IsNullable
+            f.IsNullable,
+            Precision: DeclaredPrecision(f.DataType),
+            Scale: DeclaredScale(f.DataType)
         )).ToList();
     }
+
+    /// <summary>
+    /// Precision an Arrow decimal declares, so a column that goes Schema → PipeColumnInfo →
+    /// Schema comes back at the width it left with rather than at the default.
+    /// </summary>
+    private static int? DeclaredPrecision(IArrowType type) => type switch
+    {
+        Decimal128Type d => d.Precision,
+        Decimal256Type d => d.Precision,
+        _ => null
+    };
+
+    /// <inheritdoc cref="DeclaredPrecision"/>
+    private static int? DeclaredScale(IArrowType type) => type switch
+    {
+        Decimal128Type d => d.Scale,
+        Decimal256Type d => d.Scale,
+        _ => null
+    };
 }

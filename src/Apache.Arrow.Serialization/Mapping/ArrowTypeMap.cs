@@ -59,7 +59,7 @@ public static class ArrowTypeMap
         if (type == typeof(ushort) || type == typeof(ushort?)) return new ArrowTypeResult(UInt16Type.Default);
         if (type == typeof(uint) || type == typeof(uint?)) return new ArrowTypeResult(UInt32Type.Default);
         if (type == typeof(ulong) || type == typeof(ulong?)) return new ArrowTypeResult(UInt64Type.Default);
-        if (type == typeof(decimal) || type == typeof(decimal?)) return new ArrowTypeResult(new Decimal128Type(38, 18));
+        if (type == typeof(decimal) || type == typeof(decimal?)) return new ArrowTypeResult(DefaultDecimalType);
         // DateTime → Timestamp(null tz) — round-trips correctly via GetClrType(Timestamp(null)) → DateTime
         if (type == typeof(DateTime) || type == typeof(DateTime?)) return new ArrowTypeResult(new TimestampType(TimeUnit.Microsecond, (string?)null));
         // DateTimeOffset → Timestamp with UTC timezone — round-trips correctly via GetClrType(Timestamp) → DateTimeOffset
@@ -98,6 +98,30 @@ public static class ArrowTypeMap
             result = default;
             return false;
         }
+    }
+
+    /// <summary>
+    /// Widest Decimal128 a .NET <see cref="decimal"/> fits into, used for a column whose source
+    /// declares no precision or scale.
+    /// </summary>
+    public static Decimal128Type DefaultDecimalType { get; } = new(38, 18);
+
+    /// <summary>
+    /// Same mapping, given what the source declared about a numeric column. Decimal is the one
+    /// scalar whose Arrow form a CLR type does not fix on its own: the storage is Decimal128
+    /// either way, but precision and scale belong to the column, not to <c>System.Decimal</c>.
+    /// Anything Arrow cannot express — no precision, one past 38, a scale outside it — falls back
+    /// to <see cref="DefaultDecimalType"/>, which holds any value the narrower form could.
+    /// </summary>
+    public static ArrowTypeResult GetLogicalType(Type type, int? precision, int? scale)
+    {
+        var logical = GetLogicalType(type);
+
+        if (logical.ArrowType is not Decimal128Type) return logical;
+        if (precision is not int p || p < 1 || p > 38) return logical;
+        if (scale is not int s || s < 0 || s > p) return logical;
+
+        return new ArrowTypeResult(new Decimal128Type(p, s), logical.Metadata);
     }
 
     /// <summary>

@@ -47,7 +47,9 @@ public sealed class MySqlReader : AdoColumnarReader
 				col.AllowDBNull ?? true,
 				// MySQL compares column identifiers case-insensitively regardless of the server's
 				// lower_case_table_names, so no column ever needs case-preserving quoting.
-				IsCaseSensitive: false
+				IsCaseSensitive: false,
+				Precision: (int?)col.NumericPrecision,
+				Scale: (int?)col.NumericScale
 			));
 		}
 		Columns = columns;

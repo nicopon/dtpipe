@@ -85,6 +85,13 @@ public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<
 				// Default to string; may be overridden by _typeHints below
 				outputColumns.Add(new PipeColumnInfo(colName, typeof(string), IsNullable: true));
 			}
+			else
+			{
+				// The script writes this column's values now, so whatever numeric width the source
+				// declared no longer describes them: a DECIMAL(10,2) whose script returns a
+				// third decimal digit would be refused by a builder held to the source's scale.
+				outputColumns[colIndex] = outputColumns[colIndex] with { Precision = null, Scale = null };
+			}
 
 			string body = script.Trim();
 			if (!body.Contains("return ") && !body.EndsWith(";"))

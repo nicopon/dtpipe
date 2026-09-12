@@ -58,7 +58,9 @@ public sealed class SqlServerReader : AdoColumnarReader, IRequiresOptions<SqlSer
                 col.ColumnName,
                 col.DataType ?? typeof(object),
                 col.AllowDBNull ?? true,
-                IsCaseSensitive: false // SQL Server is case-insensitive by default
+                IsCaseSensitive: false, // SQL Server is case-insensitive by default
+                Precision: (int?)col.NumericPrecision,
+                Scale: (int?)col.NumericScale
             ));
         }
         Columns = columns;

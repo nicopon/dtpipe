@@ -96,4 +96,54 @@ public class ArrowSchemaFactoryTests
 
 		result.FieldsList.Should().HaveCount(2);
 	}
+
+	[Fact]
+	public void Create_GivesTheDecimalTheWidthTheColumnDeclares()
+	{
+		var columns = new List<PipeColumnInfo> { new("Amount", typeof(decimal), true, Precision: 10, Scale: 2) };
+
+		var field = ArrowSchemaFactory.Create(columns).GetFieldByIndex(0);
+
+		field.DataType.Should().BeOfType<Decimal128Type>();
+		((Decimal128Type)field.DataType).Precision.Should().Be(10);
+		((Decimal128Type)field.DataType).Scale.Should().Be(2);
+	}
+
+	[Fact]
+	public void Create_FallsBackToTheWidestDecimal_WhenTheColumnDeclaresNothing()
+	{
+		var columns = new List<PipeColumnInfo> { new("Amount", typeof(decimal), true) };
+
+		var field = ArrowSchemaFactory.Create(columns).GetFieldByIndex(0);
+
+		((Decimal128Type)field.DataType).Precision.Should().Be(38);
+		((Decimal128Type)field.DataType).Scale.Should().Be(18);
+	}
+
+	[Theory]
+	[InlineData(0, 0)]      // no precision to speak of
+	[InlineData(39, 2)]     // wider than Decimal128 carries
+	[InlineData(10, 12)]    // scale past its own precision
+	[InlineData(10, -1)]    // negative scale
+	public void Create_FallsBackToTheWidestDecimal_WhenTheDeclarationIsNotExpressible(int precision, int scale)
+	{
+		var columns = new List<PipeColumnInfo> { new("Amount", typeof(decimal), true, Precision: precision, Scale: scale) };
+
+		var field = ArrowSchemaFactory.Create(columns).GetFieldByIndex(0);
+
+		((Decimal128Type)field.DataType).Precision.Should().Be(38);
+		((Decimal128Type)field.DataType).Scale.Should().Be(18);
+	}
+
+	[Fact]
+	public void ToPipeColumns_ThenCreate_KeepsTheDecimalWidthItStartedWith()
+	{
+		var original = new Schema(new[] { new Field("Amount", new Decimal128Type(10, 2), true) }, null);
+
+		var roundTripped = ArrowSchemaFactory.Create(ArrowSchemaFactory.ToPipeColumns(original));
+
+		var type = (Decimal128Type)roundTripped.GetFieldByIndex(0).DataType;
+		type.Precision.Should().Be(10);
+		type.Scale.Should().Be(2);
+	}
 }

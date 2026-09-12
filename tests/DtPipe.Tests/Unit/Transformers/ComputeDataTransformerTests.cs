@@ -298,4 +298,25 @@ public class ComputeDataTransformerTests : IDisposable
 		// Assert
 		row[1].Should().Be("ABC-123");
 	}
+
+	[Fact]
+	public async Task Initialize_DropsTheDeclaredWidthOfAColumnItRewrites()
+	{
+		// The script decides the values now, so a builder held to the source's scale would refuse
+		// the third decimal digit this one produces.
+		var options = new ComputeOptions { Compute = new[] { "Amount:row.Amount * 1.1" } };
+		var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
+		var columns = new List<PipeColumnInfo>
+		{
+			new("Amount", typeof(decimal), false, Precision: 10, Scale: 2),
+			new("Untouched", typeof(decimal), false, Precision: 10, Scale: 2)
+		};
+
+		var result = await transformer.InitializeAsync(columns);
+
+		result[0].Precision.Should().BeNull();
+		result[0].Scale.Should().BeNull();
+		result[1].Precision.Should().Be(10, "a column no script writes keeps what its source declared");
+		result[1].Scale.Should().Be(2);
+	}
 }

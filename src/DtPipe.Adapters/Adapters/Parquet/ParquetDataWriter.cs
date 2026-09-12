@@ -196,7 +196,12 @@ public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, 
 			Type t when t == typeof(long) => new DataField<long?>(col.Name),
 			Type t when t == typeof(float) => new DataField<float?>(col.Name),
 			Type t when t == typeof(double) => new DataField<double?>(col.Name),
-			Type t when t == typeof(decimal) => new DataField<decimal?>(col.Name),
+			// A decimal the source declared a width for keeps it: DataField<decimal?> would write
+			// Parquet.Net's default (38, 18), turning a DECIMAL(10,2) column into one the target
+			// no longer describes.
+			Type t when t == typeof(decimal) => col is { Precision: int p, Scale: int s } && p >= 1 && p <= 38 && s >= 0 && s <= p
+				? new DecimalDataField(col.Name, p, s, isNullable: true)
+				: new DataField<decimal?>(col.Name),
 			Type t when t == typeof(DateTime) => new DataField<DateTime?>(col.Name),
 			Type t when t == typeof(DateTimeOffset) => new DataField<DateTimeOffset?>(col.Name),
 			Type t when t == typeof(TimeSpan) => new DataField<TimeSpan?>(col.Name),

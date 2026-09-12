@@ -8,10 +8,14 @@ namespace DtPipe.Core.Models;
 /// <param name="IsNullable">Whether the column is nullable</param>
 /// <param name="IsCaseSensitive">Whether the column name requires case-sensitive handling (must be quoted)</param>
 /// <param name="OriginalName">Original column name if normalization occurred (e.g. from UPPERCASE to Normal case)</param>
+/// <param name="Precision">Numeric precision the source declares, null when it declares none</param>
+/// <param name="Scale">Numeric scale the source declares, null when it declares none</param>
 public sealed record PipeColumnInfo(
 	string Name,
 	Type ClrType,
 	bool IsNullable,
 	bool IsCaseSensitive = false,
-	string? OriginalName = null
+	string? OriginalName = null,
+	int? Precision = null,
+	int? Scale = null
 );
