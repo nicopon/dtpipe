@@ -121,8 +121,18 @@ public partial class DtPipeMcpTools
         // required" for a call that supplied one. The write-back is what makes it stick, the
         // same way ExportService.InjectSchema does it.
         var readerOpts = registry.Get(factory.OptionsType) as DtPipe.Core.Options.IQueryAwareOptions;
-        if (readerOpts != null && !string.IsNullOrWhiteSpace(query))
+        if (!string.IsNullOrWhiteSpace(query))
         {
+            // No else here meant the capability interface acted as a silent filter: a query aimed
+            // at a reader that takes none was dropped, and the tool answered about the whole
+            // source as though it had been narrowed. Say so instead — a wrong answer that looks
+            // right is the one kind of failure a model cannot recover from.
+            if (readerOpts == null)
+                throw new InvalidOperationException(
+                    $"The '{factory.ComponentName}' reader takes no query, so the one supplied would be ignored and "
+                  + $"the whole source read instead. Narrow it downstream — a 'filter' transformer, or a '--sql' "
+                  + $"branch reading this one — and call 'get-adapter-help' for what '{factory.ComponentName}' does accept.");
+
             readerOpts.Query = query;
             registry.RegisterByType(factory.OptionsType, readerOpts);
         }

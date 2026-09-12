@@ -91,11 +91,14 @@ run_pair csv_scoping \
 
 # ----------------------------------------
 echo "--- [c] --duck-init + --sql ---"
+# --duck-init belongs to the branch that runs the processor: DuckDBSqlTransformerFactory reads it
+# off that branch's own raw tokens. On the source branch it bound to nothing, so this case was
+# asserting parity over a flag neither side executed.
 run_pair duck_init_sql \
     "$A/c_out.csv" \
-    -i "csv:$A/src.csv" --column-types "Id:int32" --duck-init "SELECT 1;" --alias s \
+    -i "csv:$A/src.csv" --column-types "Id:int32" --alias s \
     --from s --sql "SELECT Id, Val FROM s WHERE Id >= 2" \
-    -o "$A/c_out.csv" --no-stats
+    -o "$A/c_out.csv" --duck-init "SELECT 1;" --no-stats
 
 # ----------------------------------------
 echo "--- [d] --strategy Upsert --key id (sqlite round-trip) ---"

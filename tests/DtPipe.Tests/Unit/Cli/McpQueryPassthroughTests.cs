@@ -30,6 +30,7 @@ public class McpQueryPassthroughTests
 	private static DtPipeMcpTools BuildTools()
 	{
 		var services = new ServiceCollection();
+		services.AddLogging();
 		services.AddSingleton<DtPipe.Core.Options.OptionsRegistry>();
 		services.AddSingleton<IEnumerable<IStreamTransformerFactory>>(Array.Empty<IStreamTransformerFactory>());
 		// Wrapped exactly as Program.cs wraps every descriptor, so the registry interaction under
@@ -38,6 +39,10 @@ public class McpQueryPassthroughTests
 		{
 			new DtPipe.Cli.Infrastructure.CliStreamReaderFactory(
 				new DtPipe.Adapters.Sqlite.SqliteReaderDescriptor(),
+				sp.GetRequiredService<DtPipe.Core.Options.OptionsRegistry>(), sp),
+			// A reader that takes no query, so the other half of the rule is exercised too.
+			new DtPipe.Cli.Infrastructure.CliStreamReaderFactory(
+				new DtPipe.Adapters.Csv.CsvReaderDescriptor(),
 				sp.GetRequiredService<DtPipe.Core.Options.OptionsRegistry>(), sp)
 		});
 		services.AddSingleton<IEnumerable<IDataWriterFactory>>(Array.Empty<IDataWriterFactory>());
@@ -76,6 +81,59 @@ public class McpQueryPassthroughTests
 		finally
 		{
 			if (File.Exists(db)) File.Delete(db);
+		}
+	}
+
+	/// <summary>
+	/// The write-back above is guarded by <c>readerOpts is IQueryAwareOptions</c>, and that test
+	/// had no else: a query aimed at a reader carrying none was dropped, and the tool answered
+	/// about the whole source as though it had been narrowed. Silence there is worse than over
+	/// the CLI, because the caller is a model with no other way to notice.
+	/// </summary>
+	[Theory]
+	[InlineData("inspect")]
+	[InlineData("preview-data")]
+	public async Task A_Query_Given_To_A_Reader_That_Takes_None_Is_Refused(string tool)
+	{
+		var csv = Path.Combine(Directory.GetCurrentDirectory(), $"dtpipe_q_{Guid.NewGuid():N}.csv");
+		try
+		{
+			await File.WriteAllTextAsync(csv, "id,label\n1,a\n2,b\n");
+			var tools = BuildTools();
+
+			var json = tool == "inspect"
+				? await tools.Inspect($"csv:{csv}", "SELECT id FROM t")
+				: await tools.PreviewData($"csv:{csv}", "SELECT id FROM t");
+
+			var error = JsonDocument.Parse(json).RootElement.GetProperty("error").GetString();
+			error.Should().Contain("takes no query",
+				"a query that binds to nothing has to be named, not dropped");
+			error.Should().Contain("get-adapter-help",
+				"the refusal points at the tool that lists what the reader does accept");
+		}
+		finally
+		{
+			if (File.Exists(csv)) File.Delete(csv);
+		}
+	}
+
+	/// <summary>Without a query the same source is inspected normally — the refusal is about the flag, not the reader.</summary>
+	[Fact]
+	public async Task A_Reader_That_Takes_No_Query_Is_Inspected_Normally_Without_One()
+	{
+		var csv = Path.Combine(Directory.GetCurrentDirectory(), $"dtpipe_q_{Guid.NewGuid():N}.csv");
+		try
+		{
+			await File.WriteAllTextAsync(csv, "id,label\n1,a\n");
+
+			var json = await BuildTools().Inspect($"csv:{csv}");
+
+			json.Should().Contain("label");
+			json.Should().NotContain("takes no query");
+		}
+		finally
+		{
+			if (File.Exists(csv)) File.Delete(csv);
 		}
 	}
 }

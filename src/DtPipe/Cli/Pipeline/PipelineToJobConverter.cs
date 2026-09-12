@@ -72,6 +72,14 @@ public static class PipelineToJobConverter
                     processor, branchSpec.RawArgs)
             };
 
+            // A processor reads its own branch's raw tokens — DuckDBSqlTransformerFactory pulls
+            // --duck-init straight out of them — so on such a branch the reader's and writer's
+            // option sets do not decide what binds.
+            if (processor == null)
+                RejectFlagsThatBindToNothing(
+                    ForFactoryLookup(job.Input, secretsManager), branchSpec.ReaderArgs, readerFactories,
+                    ForFactoryLookup(job.Output, secretsManager), writerFactories);
+
             jobs[alias] = job;
             contexts[alias] = new CliJobContext(branchSpec.ReaderArgs, branchSpec.PipelineArgs, branchSpec.WriterArgs, branchSpec.RawArgs);
             // The processor comes from the raw tokens here: --sql and --merge are CLI spellings,
@@ -292,6 +300,93 @@ public static class PipelineToJobConverter
     /// throwaway copy against the same gate before binding; this is the export side of it.
     /// The expansion stays inside factory lookup: the job keeps the keyring reference.
     /// </summary>
+    /// <summary>
+    /// A reader flag the branch's reader does not carry binds to nothing, and dropping it in
+    /// silence is a run that did not do what the line said: <c>--query</c> on a <c>csv:</c> source
+    /// copied the whole file and exited 0.
+    /// </summary>
+    /// <remarks>
+    /// The flag registry is global — every database reader contributes <c>--query</c> through
+    /// <c>QueryableReaderOptions</c>, so the token is legal whatever the branch reads — and the
+    /// capability interface that decides whether it applies was acting as a silent filter.
+    /// <c>666987eb</c> refused the neighbouring case, a reader flag in a branch with no reader at
+    /// all; this is the same fact about a branch whose reader simply has no such option.
+    /// <para>
+    /// Core and engine flags are never candidates: they belong to the engine, not to a component,
+    /// so they are absent from the catalogue built here. The writer stage is deliberately left
+    /// out — <c>--strategy</c> on a file target is inert rather than wrong, since the writer
+    /// replaces the file anyway, and <c>REFERENCE.md</c> already states where the flag does not
+    /// apply.
+    /// </para>
+    /// </remarks>
+    private static void RejectFlagsThatBindToNothing(
+        string? inputForLookup, string[] readerArgs, IEnumerable<IStreamReaderFactory>? readerFactories,
+        string? outputForLookup, IEnumerable<IDataWriterFactory>? writerFactories)
+    {
+        var reader = ResolveFactory(inputForLookup, readerFactories);
+        if (reader == null) return;
+        var writer = ResolveFactory(outputForLookup, writerFactories);
+
+        var componentFlags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in (readerFactories ?? Enumerable.Empty<IDataFactory>()).Concat(writerFactories ?? Enumerable.Empty<IDataFactory>()))
+            foreach (var name in FlagNamesOf(f.OptionsType))
+                componentFlags.Add(name);
+
+        // Arity has to come from the full catalogue, structural and engine flags included: without
+        // it, the value of a flag this check does not judge would be read as a flag of its own.
+        var arity = new FlagRegistry();
+        CoreFlagRegistry.RegisterCoreFlags(arity);
+        foreach (var def in new PipelineOptionsCliContributor().GetFlagDefs())
+            arity.Register(def);
+        foreach (var f in (readerFactories ?? Enumerable.Empty<IDataFactory>()).Concat(writerFactories ?? Enumerable.Empty<IDataFactory>()))
+            foreach (var def in CliOptionBuilder.GenerateFlagDefsForType(f.OptionsType))
+                arity.Register(def);
+
+        RejectReaderStage(reader, readerArgs, writer, componentFlags, arity);
+    }
+
+    private static void RejectReaderStage(
+        IDataFactory target, string[] stageArgs,
+        IDataFactory? counterpart,
+        HashSet<string> componentFlags, FlagRegistry arity)
+    {
+        var owned = FlagNamesOf(target.OptionsType);
+        var counterpartOwned = counterpart != null ? FlagNamesOf(counterpart.OptionsType) : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 0; i < stageArgs.Length; i++)
+        {
+            var token = stageArgs[i];
+            var def = arity.Lookup(token);
+            if (def?.ConsumesNextToken == true) i++;
+
+            if (!token.StartsWith('-') || owned.Contains(token) || !componentFlags.Contains(token))
+                continue;
+
+            var message =
+                $"Flag '{token}' is not an option of the '{target.ComponentName}' reader, so nothing binds it.";
+
+            message += counterpartOwned.Contains(token)
+                ? $" The '{counterpart!.ComponentName}' writer does carry it: move it after -o."
+                : owned.Count > 0
+                    ? $" Options the '{target.ComponentName}' reader accepts: {string.Join(", ", owned.OrderBy(f => f, StringComparer.Ordinal))}."
+                    : $" The '{target.ComponentName}' reader takes no options at all.";
+
+            throw new InvalidOperationException(message);
+        }
+    }
+
+    /// <summary>Every flag spelling an options type binds, canonical names and aliases alike.</summary>
+    private static HashSet<string> FlagNamesOf(Type optionsType)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var def in CliOptionBuilder.GenerateFlagDefsForType(optionsType))
+        {
+            names.Add(def.Name);
+            foreach (var alias in def.Aliases) names.Add(alias);
+        }
+        return names;
+    }
+
     private static string? ForFactoryLookup(string? connectionString, DtPipe.Cli.Security.ISecretsManager? secretsManager)
     {
         const string keyringPrefix = "keyring://";
