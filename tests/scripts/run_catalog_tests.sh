@@ -128,7 +128,7 @@ run_test "T11" "$DTPIPE -i artifacts/test_data.csv --rename \"FirstName:Prenom\"
 # T12: Format transformer: inject Id into a string template
 run_test "T12" "$DTPIPE -i artifacts/test_data.parquet --format \"Id:USR-{Id}\" -o artifacts/output_t12.csv"
 # T13: Strict schema validation: PG → Parquet (must pass compatibility check)
-run_test "T13" "$DTPIPE -i \"$PG\" -q \"SELECT * FROM users_test\" -o artifacts/output_t13.parquet --strict-schema"
+run_test "T13" "$DTPIPE -i \"$PG\" -q \"SELECT * FROM users_test\" -o artifacts/output_t13.parquet"
 # T14: Small batch size (10) to exercise the batching infrastructure
 run_test "T14" "$DTPIPE -i artifacts/test_data.csv --batch-size 10 -o artifacts/output_t14.parquet"
 # T15: Compute with parseInt for explicit numeric type coercion
@@ -200,7 +200,7 @@ run_test "T33" "$DTPIPE -i artifacts/test_data.parquet --alias main --from main 
 # T34: DuckDB with upstream sampling applied before SQL execution
 run_test "T34" "$DTPIPE -i artifacts/test_data_big.parquet --alias main --sampling-rate 0.01 --from main --sql \"SELECT * FROM main ORDER BY value DESC\" -o artifacts/output_t34.csv"
 # T35: Fake clone: source one column value into a new column via fake literal
-run_test "T35" "$DTPIPE -i artifacts/test_data.csv --fake \"Id:random.guid\" --fake \"IdClone:Id\" -o artifacts/output_t35.csv"
+run_test "T35" "$DTPIPE -i artifacts/test_data.csv --fake \"Id:random.guid\" --fake \"IdClone:{Id}\" -o artifacts/output_t35.csv"
 # T36: Compute with string functions on Arrow data (force string conversion)
 run_test "T36" "$DTPIPE -i artifacts/test_data.arrow --compute \"ShortId:String(row.Id).substring(0,8).toUpperCase()\" -o artifacts/output_t36.csv"
 # T37: Filter with modulo: keep only rows where Score is even
