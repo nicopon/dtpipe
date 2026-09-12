@@ -9,8 +9,7 @@
       "RefAliases": [],
       "ProcessorName": null,
       "HasStreamTransformer": false,
-      "PreParsedJob": null,
-      "Engine": null
+      "PreParsedJob": null
     },
     {
       "Alias": "consumer_a",
@@ -23,8 +22,7 @@
       "RefAliases": [],
       "ProcessorName": null,
       "HasStreamTransformer": false,
-      "PreParsedJob": null,
-      "Engine": null
+      "PreParsedJob": null
     },
     {
       "Alias": "consumer_b",
@@ -37,8 +35,7 @@
       "RefAliases": [],
       "ProcessorName": null,
       "HasStreamTransformer": false,
-      "PreParsedJob": null,
-      "Engine": null
+      "PreParsedJob": null
     }
   ],
   "IsDag": true

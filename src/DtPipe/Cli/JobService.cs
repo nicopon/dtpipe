@@ -198,16 +198,7 @@ public class JobService
 				{
 					var linearDag = new JobDagDefinition
 					{
-						Branches = new[]
-						{
-							new BranchDefinition
-							{
-								Alias = "main",
-								Input = mainJob.Input,
-								Output = mainJob.Output,
-								Arguments = Array.Empty<string>()
-							}
-						}
+						Branches = new[] { BranchDefinition.FromJob("main", mainJob, processorFactories) }
 					};
 					var orchestrator = _serviceProvider.GetRequiredService<IDagOrchestrator>();
 

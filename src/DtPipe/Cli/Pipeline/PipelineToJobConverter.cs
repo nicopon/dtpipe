@@ -74,21 +74,10 @@ public static class PipelineToJobConverter
 
             jobs[alias] = job;
             contexts[alias] = new CliJobContext(branchSpec.ReaderArgs, branchSpec.PipelineArgs, branchSpec.WriterArgs, branchSpec.RawArgs);
-            branches.Add(new BranchDefinition
-            {
-                Alias = alias,
-                Input = job.Input,
-                Output = job.Output,
-                StreamingAliases = branchSpec.From.ToArray(),
-                RefAliases = branchSpec.Ref.ToArray(),
-                Arguments = branchSpec.RawArgs,
-                ProcessorName = processor?.ComponentName,
-                // DagRenderer names a branch's stages from here. Set only by DagTopologyService
-                // until now, so the panel the agent draws listed the transformers and the one the
-                // CLI draws for the same job did not.
-                PreParsedJob = job,
-                Engine = DeriveEngineSettings(parsed.Globals, branchSpec.Flags)
-            });
+            // The processor comes from the raw tokens here: --sql and --merge are CLI spellings,
+            // and the job's provider options that the YAML paths match on are built further down.
+            branches.Add(BranchDefinition.FromJob(
+                alias, job, arguments: branchSpec.RawArgs, processorName: processor?.ComponentName));
         }
 
         var dag = new JobDagDefinition { Branches = branches };
@@ -134,28 +123,9 @@ public static class PipelineToJobConverter
             jobs[alias] = job;
         }
 
-        var branches = jobs.Select(kv => new BranchDefinition
-        {
-            Alias = kv.Key,
-            Input = kv.Value.Input,
-            Output = kv.Value.Output,
-            StreamingAliases = kv.Value.From != null
-                ? kv.Value.From.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                : Array.Empty<string>(),
-            RefAliases = kv.Value.Ref ?? Array.Empty<string>(),
-            Arguments = Array.Empty<string>(),
-            ProcessorName = streamTransformerFactories?
-                .FirstOrDefault(f => f.IsApplicable(kv.Value))
-                ?.ComponentName,
-            PreParsedJob = kv.Value,
-            Engine = new BranchEngineSettings(
-                Limit: kv.Value.Limit, BatchSize: kv.Value.BatchSize, MaxBatchBytes: kv.Value.MaxBatchBytes,
-                SamplingRate: kv.Value.SamplingRate, SamplingSeed: kv.Value.SamplingSeed,
-                DryRunCount: kv.Value.DryRunCount, NoStats: kv.Value.NoStats,
-                MetricsPath: kv.Value.MetricsPath, LogPath: kv.Value.LogPath,
-                Prefix: kv.Value.Prefix, Cursor: kv.Value.Cursor, State: kv.Value.State,
-                Checkpoint: kv.Value.Checkpoint, FromCheckpoint: kv.Value.FromCheckpoint)
-        }).ToList();
+        var branches = jobs
+            .Select(kv => BranchDefinition.FromJob(kv.Key, kv.Value, streamTransformerFactories))
+            .ToList();
 
         return (jobs, new JobDagDefinition { Branches = branches }, new Dictionary<string, CliJobContext>(StringComparer.OrdinalIgnoreCase));
     }

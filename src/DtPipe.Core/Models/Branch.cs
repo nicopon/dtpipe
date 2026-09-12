@@ -4,9 +4,11 @@ namespace DtPipe.Core.Models;
 
 /// <summary>
 /// F7 — canonical per-branch engine-control settings (limit/batch/sampling/dry-run/
-/// metrics/log/prefix/cursor/state). One authoritative bundle: the CLI converter derives
-/// it once (global defaults overlaid by branch-local flags) and every consumer reads it
-/// instead of re-parsing flag dictionaries.
+/// metrics/log/prefix/cursor/state). The CLI converter derives the bundle once, from global
+/// defaults overlaid by branch-local flags, and immediately folds it into the branch's job
+/// through <see cref="ApplyTo"/>. Downstream the settings are read off the
+/// <see cref="JobDefinition"/>; the bundle itself is the derivation step, not a second place
+/// to look them up.
 /// </summary>
 public sealed record BranchEngineSettings(
     int Limit,

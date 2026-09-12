@@ -106,12 +106,12 @@ run goes through it once, giving uniform cancellation and channel wiring:
 
 ```csharp
 var orchestrator = new DagOrchestrator(logger, channelRegistry, readerFactories);
+var job = new JobDefinition { Input = "csv:in.csv", Output = "parquet:out.parquet" };
 var dag = new JobDagDefinition
 {
-    Branches = new[]
-    {
-        new BranchDefinition { Alias = "main", Input = "csv:in.csv", Output = "parquet:out.parquet" }
-    }
+    // BranchDefinition.FromJob is the one projection from a job to a branch; building the
+    // record by hand is how four call sites drifted apart.
+    Branches = new[] { BranchDefinition.FromJob("main", job) }
 };
 
 int exitCode = await orchestrator.ExecuteAsync(dag, (branch, ctx, ct) =>

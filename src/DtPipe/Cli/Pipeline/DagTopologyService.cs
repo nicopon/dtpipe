@@ -42,21 +42,9 @@ public sealed class DagTopologyService
     {
         var jobs = JobFileParser.ParseContent(yamlContent, _secretsManager);
 
-        var branches = jobs.Select(kv => new BranchDefinition
-        {
-            Alias = kv.Key,
-            Input = kv.Value.Input,
-            Output = kv.Value.Output,
-            StreamingAliases = kv.Value.From != null
-                ? kv.Value.From.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                : Array.Empty<string>(),
-            RefAliases = kv.Value.Ref ?? Array.Empty<string>(),
-            Arguments = Array.Empty<string>(),
-            ProcessorName = _streamTransformerFactories
-                .FirstOrDefault(f => f.IsApplicable(kv.Value))
-                ?.ComponentName,
-            PreParsedJob = kv.Value,
-        }).ToList();
+        var branches = jobs
+            .Select(kv => BranchDefinition.FromJob(kv.Key, kv.Value, _streamTransformerFactories))
+            .ToList();
 
         return new DagBuild(jobs, new JobDagDefinition { Branches = branches });
     }

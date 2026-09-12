@@ -60,12 +60,55 @@ public record BranchDefinition
     /// Optional pre-parsed job definition if loaded from YAML.
     /// If present, this overrides the logic otherwise derived from <see cref="Arguments"/>.
     /// </summary>
-    public Models.JobDefinition? PreParsedJob { get; set; }
+    public Models.JobDefinition? PreParsedJob { get; init; }
 
     /// <summary>
-    /// F7: canonical engine-control settings for this branch, derived once by the CLI
-    /// converter (global defaults + branch-local flags). Null when the branch was built
-    /// without engine derivation (e.g. hand-built in tests).
+    /// The one projection from a hydrated <see cref="Models.JobDefinition"/> to the branch the
+    /// orchestrator runs — CLI arguments, CLI <c>--job</c>, the YAML path behind MCP and the
+    /// linear path's synthetic branch all come through here.
     /// </summary>
-    public Models.BranchEngineSettings? Engine { get; init; }
+    /// <remarks>
+    /// Four call sites used to spell this out by hand and the copies drifted: two of them left
+    /// <see cref="PreParsedJob"/> unset, so <c>get-dag-topology</c> promised a branch's
+    /// transformers without emitting them and the CLI panel listed branches with no stages while
+    /// the results table below it showed those stages running. Reintroducing a hand-written
+    /// initializer reopens that class of defect.
+    /// </remarks>
+    /// <param name="alias">The branch's key in the job dictionary.</param>
+    /// <param name="job">The hydrated job this branch runs.</param>
+    /// <param name="processorFactories">
+    /// Catalogue consulted to name the branch's stream processor. Ignored when
+    /// <paramref name="processorName"/> is supplied.
+    /// </param>
+    /// <param name="arguments">The CLI slice that defined the branch; empty on the YAML paths.</param>
+    /// <param name="processorName">
+    /// Supplied by the CLI arguments path, which resolves the processor from the raw tokens
+    /// (<c>--sql</c>, <c>--merge</c>) before the job carries the provider options to detect it.
+    /// </param>
+    public static BranchDefinition FromJob(
+        string alias,
+        Models.JobDefinition job,
+        IEnumerable<Abstractions.IStreamTransformerFactory>? processorFactories = null,
+        string[]? arguments = null,
+        string? processorName = null) => new()
+    {
+        Alias = alias,
+        Input = job.Input,
+        Output = job.Output,
+        StreamingAliases = SplitAliases(job.From),
+        RefAliases = job.Ref ?? Array.Empty<string>(),
+        Arguments = arguments ?? Array.Empty<string>(),
+        ProcessorName = processorName
+            ?? processorFactories?.FirstOrDefault(f => f.IsApplicable(job))?.ComponentName,
+        PreParsedJob = job
+    };
+
+    /// <summary>
+    /// <c>from</c> carries the aliases comma-separated; absent means no upstream, which is the
+    /// absence of the key rather than one empty alias.
+    /// </summary>
+    private static IReadOnlyList<string> SplitAliases(string? from)
+        => string.IsNullOrEmpty(from)
+            ? Array.Empty<string>()
+            : from.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 }

@@ -9,8 +9,7 @@
       "RefAliases": [],
       "ProcessorName": null,
       "HasStreamTransformer": false,
-      "PreParsedJob": null,
-      "Engine": null
+      "PreParsedJob": null
     }
   ],
   "IsDag": false

@@ -9,8 +9,7 @@
       "RefAliases": [],
       "ProcessorName": null,
       "HasStreamTransformer": false,
-      "PreParsedJob": null,
-      "Engine": null
+      "PreParsedJob": null
     },
     {
       "Alias": "ref_data",
@@ -21,8 +20,7 @@
       "RefAliases": [],
       "ProcessorName": null,
       "HasStreamTransformer": false,
-      "PreParsedJob": null,
-      "Engine": null
+      "PreParsedJob": null
     },
     {
       "Alias": "result",
@@ -37,8 +35,7 @@
       ],
       "ProcessorName": "sql",
       "HasStreamTransformer": true,
-      "PreParsedJob": null,
-      "Engine": null
+      "PreParsedJob": null
     }
   ],
   "IsDag": true
