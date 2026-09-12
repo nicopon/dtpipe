@@ -16,7 +16,7 @@ rm -f "$LOG_FILE"
 touch "$LOG_FILE"
 
 echo "===================================================="
-echo "   dtpipe 135-Command Test Runner"
+echo "   dtpipe 142-Command Test Runner"
 echo "===================================================="
 echo "Starting at $(date)"
 echo ""
@@ -32,11 +32,20 @@ echo ""
 FAILED_TESTS=()
 
 # Helper to run a test.
-# Tests listed in the EXPECTED_ERROR regex should return a non-zero exit code.
-# Any test NOT in the regex is expected to succeed (exit 0).
+#
+#   run_test <id> <command>                 the command must succeed (exit 0)
+#   run_test <id> <command> <error-fragment> the command must FAIL, and its output must contain
+#                                            that fragment
+#
+# The third argument is what a failing test asserts, and it lives here, at the call site, rather
+# than in a list of identifiers elsewhere in the file. Membership of such a list is invisible while
+# editing a test: T83 and T105 each ended up asserting the opposite of what their own comment said,
+# and T78 passed for years while never opening a socket, because "it failed" was the whole check.
 run_test() {
     local id=$1
     local cmd=$2
+    local expect_error=${3:-}
+    local out="$ARTIFACTS_DIR/.last_test_output"
 
     echo -n "Test $id: "
     echo "----------------------------------------------------" >> "$LOG_FILE"
@@ -44,58 +53,67 @@ run_test() {
     echo "----------------------------------------------------" >> "$LOG_FILE"
 
     cd "$SCRIPT_DIR"
-    eval "$cmd" >> "$LOG_FILE" 2>&1
+    eval "$cmd" > "$out" 2>&1
     local status=$?
+    cat "$out" >> "$LOG_FILE"
 
-    # Tests in this list are EXPECTED to fail (non-zero exit code = PASS)
-    if [[ "$id" =~ ^T(76|77|78|79|80|81|82|83|84|85|86|87|88|89|90|105|129|130|131|132|133|134|135|140|141|142|143|144|145|146)$ ]]; then
+    if [ -n "$expect_error" ]; then
         if [ $status -eq 0 ]; then
-            echo -e "\e[31mFAILED (Expected error but got success)\e[0m"
+            echo -e "\e[31mFAILED (expected an error, got success)\e[0m"
             FAILED_TESTS+=("$id")
             return 1
-        else
-            echo -e "\e[32mPASSED (Expected error encountered)\e[0m"
-            return 0
         fi
-    else
-        if [ $status -eq 0 ]; then
-            echo -e "\e[32mPASSED\e[0m"
-            
-            # --- YAML Round-trip Verification ---
-            if [ "$VERIFY_YAML" == "1" ]; then
-                # Only verify if it's a success case and not a complex command already using --job or --alias/--from/--sql
-                if [[ ! "$cmd" =~ "--job" ]] && [[ ! "$cmd" =~ "--alias" ]] && [[ ! "$cmd" =~ "--from" ]] && [[ ! "$cmd" =~ "--sql" ]] && [[ ! "$cmd" =~ "--export-job" ]]; then
-                    local yaml_file="$ARTIFACTS_DIR/verify_$id.yaml"
-                    echo "  -> YAML Export/Import Check..."
-                    
-                    # 1. Export to YAML
-                    eval "$cmd --export-job $yaml_file" > /dev/null 2>&1
-                    if [ $? -eq 0 ]; then
-                        # 2. Run from YAML
-                        echo "  -> YAML Verification execution..." >> "$LOG_FILE"
-                        eval "$DTPIPE --job $yaml_file" >> "$LOG_FILE" 2>&1
-                        if [ $? -eq 0 ]; then
-                            echo -e "     \e[32mYAML OK\e[0m"
-                        else
-                            echo -e "     \e[31mYAML EXECUTION FAILED\e[0m"
-                            FAILED_TESTS+=("$id (YAML execution)")
-                            return 1
-                        fi
-                    else
-                        echo -e "     \e[31mYAML EXPORT FAILED\e[0m"
-                        FAILED_TESTS+=("$id (YAML export)")
-                        return 1
-                    fi
+        # The console wraps a long message at the terminal width, mid-sentence, so the fragment is
+        # matched against a copy with every run of whitespace — newlines included — squeezed to one
+        # space. Shortening fragments until they fit instead would make each one weaker, and would
+        # break again at the next message whose wrap point moved.
+        tr '\n' ' ' < "$out" | tr -s '[:space:]' ' ' > "$out.flat"
+        if ! grep -qF -- "$expect_error" "$out.flat"; then
+            echo -e "\e[31mFAILED (wrong reason: expected '$expect_error')\e[0m"
+            # Falls back to the first non-empty line: a refusal does not always spell "error",
+            # and an empty "actual" is the least useful thing to print at the moment it fails.
+            local actual
+            actual=$(grep -iE 'error|exception' "$out" | head -1)
+            [ -z "$actual" ] && actual=$(grep -v '^[[:space:]]*$' "$out" | head -1)
+            echo "      actual: $(echo "$actual" | cut -c1-120)"
+            FAILED_TESTS+=("$id")
+            return 1
+        fi
+        echo -e "\e[32mPASSED (refused: $expect_error)\e[0m"
+        return 0
+    fi
+
+    if [ $status -ne 0 ]; then
+        echo -e "\e[31mFAILED\e[0m"
+        FAILED_TESTS+=("$id")
+        return 1
+    fi
+
+    echo -e "\e[32mPASSED\e[0m"
+
+    # --- YAML Round-trip Verification ---
+    if [ "$VERIFY_YAML" == "1" ]; then
+        # Only verify if it's a success case and not a complex command already using --job or --alias/--from/--sql
+        if [[ ! "$cmd" =~ "--job" ]] && [[ ! "$cmd" =~ "--alias" ]] && [[ ! "$cmd" =~ "--from" ]] && [[ ! "$cmd" =~ "--sql" ]] && [[ ! "$cmd" =~ "--export-job" ]]; then
+            local yaml_file="$ARTIFACTS_DIR/verify_$id.yaml"
+            echo "  -> YAML Export/Import Check..."
+
+            # 1. Export to YAML
+            eval "$cmd --export-job $yaml_file" > /dev/null 2>&1
+            if [ $? -eq 0 ]; then
+                # 2. Run from YAML
+                echo "  -> YAML Verification execution..." >> "$LOG_FILE"
+                eval "$DTPIPE --job $yaml_file" >> "$LOG_FILE" 2>&1
+                if [ $? -eq 0 ]; then
+                    echo -e "     \e[32mYAML OK\e[0m"
+                else
+                    echo -e "     \e[31mYAML EXECUTION FAILED\e[0m"
+                    FAILED_TESTS+=("$id-yaml")
                 fi
             fi
-            
-            return 0
-        else
-            echo -e "\e[31mFAILED (Exit code $status)\e[0m"
-            FAILED_TESTS+=("$id")
-            return 1
         fi
     fi
+    return 0
 }
 
 # 0. Setup
@@ -127,7 +145,7 @@ run_test "T10" "$DTPIPE -i artifacts/test_data.csv --drop \"Email\" --drop \"Com
 run_test "T11" "$DTPIPE -i artifacts/test_data.csv --rename \"FirstName:Prenom\" --rename \"LastName:Nom\" -o artifacts/output_t11.csv"
 # T12: Format transformer: inject Id into a string template
 run_test "T12" "$DTPIPE -i artifacts/test_data.parquet --format \"Id:USR-{Id}\" -o artifacts/output_t12.csv"
-# T13: Strict schema validation: PG → Parquet (must pass compatibility check)
+# T13: PostgreSQL read → Parquet write, no transformer (the plain DB-to-columnar-file hop)
 run_test "T13" "$DTPIPE -i \"$PG\" -q \"SELECT * FROM users_test\" -o artifacts/output_t13.parquet"
 # T14: Small batch size (10) to exercise the batching infrastructure
 run_test "T14" "$DTPIPE -i artifacts/test_data.csv --batch-size 10 -o artifacts/output_t14.parquet"
@@ -141,7 +159,7 @@ run_test "T17" "$DTPIPE -i artifacts/test_data.parquet --fake \"Category:commerc
 run_test "T18" "$DTPIPE -i artifacts/test_data.csv --compute \"Year:new Date(row.BirthDate).getFullYear()\" -o artifacts/output_t18.csv"
 # T19: Arrow source → PostgreSQL write with Truncate strategy
 run_test "T19" "$DTPIPE -i artifacts/test_data.arrow -o \"$PG\" --table \"output_t19\" --strategy Truncate"
-# T20: Limit 0 produces an empty output file (boundary edge case)
+# T20: --limit 0 means NO limit, the conventional reading of 0 as "off" — all rows are written
 run_test "T20" "$DTPIPE -i artifacts/test_data.csv --limit 0 -o artifacts/output_t20.csv"
 
 # 2. Advanced Pipelines & SQL Processors
@@ -218,8 +236,8 @@ run_test "T41" "$DTPIPE -i artifacts/test_data.csv --column-types \"id:uuid\" --
 run_test "T42" "$DTPIPE -i artifacts/test_data.csv --compute \"Score:Math.min(row.Score, 500)\" -o artifacts/output_t42.csv"
 # T43: DuckDB window function: count(*) over() applied to a PG result
 run_test "T43" "$DTPIPE -i \"$PG\" -q \"SELECT * FROM users_test\" --alias p --from p --sql \"SELECT id, count(*) over() as total FROM p\" -o artifacts/output_t43.csv"
-# T44: Fake with JS Date.now() to inject a synthetic metadata column
-run_test "T44" "$DTPIPE -i artifacts/test_data.parquet --fake \"Meta:{\\\"source\\\": \\\"parquet\\\", \\\"time\\\": Date.now()}\" -o artifacts/output_t44.csv"
+# T44: --fake writes a literal template verbatim: it substitutes {Column} and evaluates nothing
+run_test "T44" "$DTPIPE -i artifacts/test_data.parquet --fake \"Meta:{\\\"source\\\": \\\"parquet\\\"}\" -o artifacts/output_t44.csv"
 # T45: Write to Postgres with --ignore-nulls: null cells are skipped on insert
 run_test "T45" "$DTPIPE -i artifacts/test_data.csv --null \"Id\" --ignore-nulls -o \"$PG\" --table \"users_test\" --no-schema-validation --strategy Append"
 # T46: DuckDB passthrough on big dataset (with upstream limit)
@@ -287,37 +305,40 @@ run_test "T75" "$DTPIPE -i artifacts/test_data_big.parquet --batch-size 1 -o nul
 
 # 4. Corner Cases & Errors (T76-T90: expected to fail — non-zero exit = PASS)
 # T76: Non-existent source file: must fail with file-not-found error
-run_test "T76" "$DTPIPE -i non_existent.csv -o out.csv"
+run_test "T76" "$DTPIPE -i non_existent.csv -o out.csv" "CSV file not found"
 # T77: Write to directory with no write permissions: must fail with access error
-run_test "T77" "$DTPIPE -i artifacts/test_data.csv -o artifacts/restricted/test.csv"
-# T78: Unreachable PostgreSQL host: must fail with connection error
-run_test "T78" "$DTPIPE -i \"pg:Host=badhost\" -o null"
+run_test "T77" "$DTPIPE -i artifacts/test_data.csv -o artifacts/restricted/test.csv" "Access to the path"
+# T78: Unreachable PostgreSQL host: must reach the driver and fail there. The query is what gets
+# it past validation — without one the run died on "a query is required", never opening a socket.
+run_test "T78" "$DTPIPE -i \"pg:Host=badhost\" -q \"SELECT 1\" -o null" "NpgsqlException"
 # T79: Compute accesses a property on undefined/null: must fail with JS error
-run_test "T79" "$DTPIPE -i artifacts/test_data.csv --compute \"Err:row.Missing.Prop\" -o null"
+run_test "T79" "$DTPIPE -i artifacts/test_data.csv --compute \"Err:row.Missing.Prop\" -o null" "Column 'Missing' not found in schema"
 # T80: Strict schema rejects incompatible column types on existing PG table
-run_test "T80" "$DTPIPE -i artifacts/test_data.parquet -o \"$PG\" --table \"wrong_schema\" --strict-schema"
+run_test "T80" "$DTPIPE -i artifacts/test_data.parquet -o \"$PG\" --table \"wrong_schema\" --strict-schema" "Type mismatch"
 # T81: Same file used as both source and target: must fail (conflict)
-run_test "T81" "$DTPIPE -i artifacts/test_data.csv -o artifacts/test_data.csv"
+run_test "T81" "$DTPIPE -i artifacts/test_data.csv -o artifacts/test_data.csv" "cannot access the file"
 # T82: Negative --limit value: must fail with validation error
-run_test "T82" "$DTPIPE -i artifacts/test_data.csv --limit -5 -o null"
-# T83: Empty CSV source: produces empty output (not an error — 0 rows)
-run_test "T83" "touch artifacts/empty.csv && $DTPIPE -i artifacts/empty.csv -o artifacts/output_t83.csv"
+run_test "T82" "$DTPIPE -i artifacts/test_data.csv --limit -5 -o null" "--limit value must be >= 0"
+# T83: [ERROR] A zero-byte CSV declares no columns — there is no header line to read them from.
+# A header with no data rows below it is the empty dataset, and it reads normally as zero rows.
+run_test "T83" "touch artifacts/empty.csv && $DTPIPE -i artifacts/empty.csv -o artifacts/output_t83.csv" "no header line"
 # T84: Corrupted Parquet binary: must fail with parse error
-run_test "T84" "echo 'garbage' > artifacts/broken.parquet && $DTPIPE -i artifacts/broken.parquet -o null"
+run_test "T84" "echo 'garbage' > artifacts/broken.parquet && $DTPIPE -i artifacts/broken.parquet -o null" "not a Parquet file"
 # T85: Division by zero in compute: must fail (Infinity/NaN guard)
-run_test "T85" "$DTPIPE -i artifacts/test_data.csv --compute \"X:1/0\" -o null"
+run_test "T85" "$DTPIPE -i artifacts/test_data.csv --compute \"X:1/0\" -o null" "resulted in Infinity"
 # T86: Unknown method on a known Bogus dataset: must fail with provider error
-run_test "T86" "$DTPIPE -i artifacts/test_data.csv --fake \"Bad:name.nonexistent\" -o null"
+run_test "T86" "$DTPIPE -i artifacts/test_data.csv --fake \"Bad:name.nonexistent\" -o null" "Unknown faker method"
 # T87: Query against non-existent Postgres table: must fail with SQL error
-run_test "T87" "$DTPIPE -i \"$PG\" -q \"SELECT * FROM non_existent_table\" -o null"
+run_test "T87" "$DTPIPE -i \"$PG\" -q \"SELECT * FROM non_existent_table\" -o null" "42P01"
 # T88: Rename references column absent from source schema: must fail
-run_test "T88" "$DTPIPE -i artifacts/test_data.csv --rename \"NonExistent:New\" -o null"
-# T89: Write to DuckDB with --no-schema-validation: bypasses compatibility check
-run_test "T89" "$DTPIPE -i artifacts/test_data.csv -o artifacts/output_t89.duckdb --no-schema-validation"
+run_test "T88" "$DTPIPE -i artifacts/test_data.csv --rename \"NonExistent:New\" -o null" "Rename source column"
+# T89: Write to DuckDB with --no-schema-validation: the target is not inspected, and the run
+# succeeds. Without --table it died on a missing target table, exercising nothing.
+run_test "T89" "$DTPIPE -i artifacts/test_data.csv -o artifacts/output_t89.duckdb --table \"output_t89\" --no-schema-validation"
 # T90: Invalid Compute Script (Syntax Error)
-run_test "T90" "$DTPIPE -i artifacts/test_data.csv --compute \"Score:{ row.Score \" -o null"
-# T105: [ERROR] filter references a column dropped upstream: must fail (schema mismatch)
-run_test "T105" "$DTPIPE -i artifacts/test_data.csv --drop \"Email\" --filter \"row.Email.includes('@')\" -o artifacts/output_t105.csv"
+run_test "T90" "$DTPIPE -i artifacts/test_data.csv --compute \"Score:{ row.Score \" -o null" "Unexpected token"
+# T105: [ERROR] filter references a column dropped upstream: must fail, not silently drop every row
+run_test "T105" "$DTPIPE -i artifacts/test_data.csv --drop \"Email\" --filter \"row.Email.includes('@')\" -o artifacts/output_t105.csv" "Column 'Email' not found in schema"
 
 # 5. Real-world Scenarios
 # T91: Filter + fake anonymize + mask: GDPR-style 3-stage hardening pipeline
@@ -393,22 +414,20 @@ run_test "T121" "$DTPIPE inspect -i artifacts/test_data.parquet"
 # T122: 'providers' subcommand: list all registered reader/writer/transformer providers
 run_test "T122" "$DTPIPE providers"
 
-# T130: Rename to an already existing column: must fail with collision error
-run_test "T130" "$DTPIPE -i artifacts/test_data.csv --rename \"FirstName:LastName\" -o artifacts/output_t130.csv"
 
 # 13. [DELETED T125/T126/T129 - Obsolete or Skip based]
 
 # 14. New Error Cases
 # T131: [ERROR] --project non-existent column
-run_test "T131" "$DTPIPE -i artifacts/test_data.csv --project \"GhostColumn\" -o null"
+run_test "T131" "$DTPIPE -i artifacts/test_data.csv --project \"GhostColumn\" -o null" "Projected column 'GhostColumn' not found"
 # T132: [ERROR] rename to a column name that already exists in schema (Collision)
-run_test "T132" "$DTPIPE -i artifacts/test_data.csv --rename \"FirstName:LastName\" -o null"
+run_test "T132" "$DTPIPE -i artifacts/test_data.csv --rename \"FirstName:LastName\" -o null" "duplicate column"
 # T133: [ERROR] Oracle DDL statement rejected by the safety guard
-run_test "T133" "$DTPIPE -i \"$ORA\" --query \"DROP TABLE USERS_TEST_DATA\" -o null"
+run_test "T133" "$DTPIPE -i \"$ORA\" --query \"DROP TABLE USERS_TEST_DATA\" -o null" "Only SELECT/WITH queries are allowed"
 # T134: [ERROR] JSONL source from a file containing invalid JSON
-run_test "T134" "echo 'not json at all' > artifacts/broken.jsonl && $DTPIPE -i artifacts/broken.jsonl -o null"
+run_test "T134" "echo 'not json at all' > artifacts/broken.jsonl && $DTPIPE -i artifacts/broken.jsonl -o null" "invalid JSON literal"
 # T135: [ERROR] DuckDB --query referencing a table that does not exist
-run_test "T135" "$DTPIPE -i artifacts/test_data.duckdb --query \"SELECT * FROM ghost_table\" -o null"
+run_test "T135" "$DTPIPE -i artifacts/test_data.duckdb --query \"SELECT * FROM ghost_table\" -o null" "Table with name ghost_table does not exist"
 
 echo -e "\n### Advanced Fan-out and Routing Tests ###"
 
@@ -441,34 +460,34 @@ run_test "T139" "$DTPIPE -i artifacts/complex_data.jsonl --alias orders --from o
 # T140: [ERROR] Recreate into table with incompatible column types (Guid source vs integer target)
 # wrong_schema has numeric columns (id INTEGER, name INTEGER, ...); test_data.parquet has Id:uuid.
 # ValidateRecreateCompatibility must detect the Guid vs Int32 mismatch and fail with a clear error.
-run_test "T140" "$DTPIPE -i artifacts/test_data.parquet -o \"$PG\" --table \"wrong_schema\" --strategy Recreate"
+run_test "T140" "$DTPIPE -i artifacts/test_data.parquet -o \"$PG\" --table \"wrong_schema\" --strategy Recreate" "Recreate strategy"
 
 # T141: [ERROR] Duplicate --sql in the same branch — strict duplicate policy (last-wins removed)
 run_test "T141" "$DTPIPE -i artifacts/test_data.csv --alias s --from s \
   --sql \"SELECT * FROM s\" --sql \"SELECT count(*) AS c FROM s\" \
-  -o artifacts/output_t141.csv"
+  -o artifacts/output_t141.csv" "Flag '--sql' appears more than once"
 
 # T142: [ERROR] Duplicate scalar flag (--alias) in the same branch stage
 run_test "T142" "$DTPIPE -i artifacts/test_data.csv --alias a --alias b \
-  -o artifacts/output_t142.csv"
+  -o artifacts/output_t142.csv" "Flag '--alias' appears more than once"
 
-# T143: [ERROR] Positional query combined with explicit --sql in the same branch
+# T143: [ERROR] A positional query is normalised into --sql, so pairing it with an explicit --sql
+# is the duplicate-flag case — which is what the message reports.
 run_test "T143" "$DTPIPE -i artifacts/test_data.csv --alias s --from s \
   \"SELECT Id FROM s\" --sql \"SELECT Val FROM s\" \
-  -o artifacts/output_t143.csv"
+  -o artifacts/output_t143.csv" "Flag '--sql' appears more than once"
 
-# T144: [ERROR] Object-storage URI with a format outside the closed extension map.
-# The s3/azure providers resolve the format from the extension and refuse anything else,
-# so this fails the same way with or without a reachable bucket. A local-file writer must
-# never claim it either — that bug silently created a literal "s3:" directory.
-run_test "T144" "$DTPIPE -i artifacts/test_data.csv -o \"s3://dtpipe-test-bucket/t144.avro\""
+# T144-T146: three shapes of remote URI that no writer may claim. All three are refused at
+# routing, before any network call, and all three with the same message — measured, not assumed.
+# A local-file writer must never claim one: that bug silently created a literal "s3:" directory.
+# T144: an extension outside the closed format map.
+run_test "T144" "$DTPIPE -i artifacts/test_data.csv -o \"s3://dtpipe-test-bucket/t144.avro\"" "No writer factory resolved"
 
-# T145: [ERROR] Remote scheme that no provider claims. Only s3/s3a and azure/az are
-# routed to object storage; gs:// must fail closed rather than land on the filesystem.
-run_test "T145" "$DTPIPE -i artifacts/test_data.csv -o \"gs://dtpipe-test-bucket/t145.parquet\""
+# T145: a scheme no provider routes — only s3/s3a and azure/az reach object storage.
+run_test "T145" "$DTPIPE -i artifacts/test_data.csv -o \"gs://dtpipe-test-bucket/t145.parquet\"" "No writer factory resolved"
 
-# T146: [ERROR] Object-storage URI naming a container but no key: there are no bytes there.
-run_test "T146" "$DTPIPE -i artifacts/test_data.csv -o \"s3://dtpipe-test-bucket\""
+# T146: a container with no key — there are no bytes at that address.
+run_test "T146" "$DTPIPE -i artifacts/test_data.csv -o \"s3://dtpipe-test-bucket\"" "No writer factory resolved"
 
 echo "----------------------------------------"
 

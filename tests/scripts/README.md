@@ -67,7 +67,7 @@ DtPipe uses a centralized Docker infrastructure for all integration tests.
 ### 📋 Catalog Suite
 | Script | Description | Docker? |
 |:---|:---|:---|
-| **`run_catalog_tests.sh`** | 135 numbered commands covering the full feature surface: adapters, DAG patterns, transformers, volumetrics, error cases, real-world scenarios. Requires `init_test_data.sh`. | Yes |
+| **`run_catalog_tests.sh`** | 142 numbered commands covering the full feature surface: adapters, DAG patterns, transformers, volumetrics, error cases, real-world scenarios. A test that must fail declares the message fragment it expects as a third argument to `run_test`, so it asserts *why* it failed rather than only that it did. Requires `init_test_data.sh`. | Yes |
 | **`init_test_data.sh`** | Provisions all data sources (CSV, Parquet, Arrow, DuckDB, PG, MSSQL, Oracle) used by the catalog suite. Idempotent. | Yes |
 | **`clean_test_data.sh`** | Removes all provisioned artifacts for a full reset. | No |
 
