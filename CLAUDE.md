@@ -84,6 +84,17 @@ Three tiers, all local — none run in CI:
 | Macro complete | 15 scenarios incl. Oracle / SQL Server | Local only, `experiments/dtpipe-sandbox` | 15 % |
 | Macro light | file↔file + PostgreSQL subset | Optional, nightly, only if micro proves insufficient | Wide |
 
+**Two things the macro tier cannot be read for, both measured.** First, its transformation
+family publishes *derived* figures — `B18 − B16` as "the cost of `--compute`", and
+`(B19 − B17) − (B18 − B16)` as "the cost of the extra row↔columnar bridge". The second has
+returned ≈0 or negative on every run since `NullDataWriter` gained the columnar contract
+(−96, −92, −2 ms): `B18` now carries the round trip the subtraction is trying to isolate, so it
+cancels on both sides, and `B18 − B16` measures the compute **plus** an Arrow round trip. The
+per-scenario totals the gate compares are unaffected — it is the interpretation lines that are
+mis-calibrated. Second, **run-to-run dispersion is far wider than within-run**: the same binary
+and configuration gave `B18` 17 969 ms then 19 627 ms the same day (**+9 %**) while σ inside each
+run was ~1.9 %. **Below ~10 % between two macro runs, there is no result to report.**
+
 Micro ran in CI once, on 2026-09-05, comparing the reference-machine baseline against
 a GitHub-hosted runner via `--allow-foreign-host`: 30 of the 31 committed benchmarks
 came back flagged as regressions, all between +111 % and +201 %, purely from machine
@@ -233,7 +244,10 @@ Three pieces, and only the first touches the engine:
 - **`SampleModeSink`** — two decorators selected by the real writer's **capability**, the shape
   `CursorTracking{Row,Columnar}Decorator` already uses. Mirroring matters: the engine reads
   row-vs-columnar mode off `writer is IColumnarDataWriter`, so a sink of the wrong kind changes
-  the segmentation and the bridge count — substituting `null:` (row-only) is exactly that mistake.
+  the segmentation and the bridge count. Substituting a fixed sink is exactly that mistake, and
+  no sink escapes it by taking both shapes: `NullDataWriter` implements both contracts, and
+  because `PipelineExecutor` tests the columnar one first — at the entry and again at the writer
+  boundary — it pulls a row-mode pipeline into Arrow and back out for nothing.
 - **`SampleRun`** — the capture, read by both the renderer and the checkpoint store. One run, one
   report, two presentations.
 
