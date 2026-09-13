@@ -204,7 +204,14 @@ public static class ArrowTypeMap
         if (array.IsNull(index)) return null;
 
         // 1. Extension types, which carry a logical meaning their storage type does not.
-        if (ArrowExtensionInfo.TryRead(field, out var ext))
+        // Ordered cheapest-first, and measured: this runs on every cell of every columnar read,
+        // where a plain int costs ~10 ns, so a couple of extra type tests is a 10 % regression.
+        // A field with no metadata carries no extension, and that test is one field access;
+        // the storage shapes come second, and a new extension on another one must widen them or
+        // it will never be reached.
+        if (field is { HasMetadata: true } &&
+            array is FixedSizeBinaryArray or BinaryArray or Int8Array &&
+            ArrowExtensionInfo.TryRead(field, out var ext))
         {
             if (ext.Is("arrow.uuid") && array is FixedSizeBinaryArray uuidArray)
                 return FromArrowUuidBytes(uuidArray.GetBytes(index));
