@@ -7,6 +7,7 @@ using Apache.Arrow;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Core.Models;
+using DtPipe.Core.Helpers;
 using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines.Dag;
 using DtPipe.Core.Pipelines;
@@ -264,11 +265,16 @@ public class LinearPipelineService
                 readerOpts = readerOptsObj as DtPipe.Core.Options.IQueryAwareOptions;
             if (readerOpts != null && string.IsNullOrWhiteSpace(readerOpts.Query))
             {
+                // The source dialect, so a qualified name is split and quoted the way this engine
+                // spells it — and the way the matching writer already spelled it.
+                var dialect = (readerFactory as DtPipe.Core.Abstractions.IHasSqlDialect)?.Dialect;
+
                 // 1. Reader's own --table (e.g. DuckDB reader: --table source_table)
                 var readerTable = (readerOpts as ITableAwareOptions)?.Table;
                 if (!string.IsNullOrWhiteSpace(readerTable))
                 {
-                    readerOpts.Query = $"SELECT * FROM \"{readerTable}\"";
+                    readerOpts.Query = $"SELECT * FROM {SqlIdentifierHelper.QuoteQualifiedName(dialect, readerTable)}";
+                    _optionsRegistry.Register(new AutoBuiltSourceQuery { Table = readerTable, Query = readerOpts.Query });
                 }
                 else
                 {
@@ -278,7 +284,10 @@ public class LinearPipelineService
                         _optionsRegistry.TryGetByType(writerFactory.OptionsType, out writerOpts);
                     var tableVal = (writerOpts as ITableAwareOptions)?.Table;
                     if (!string.IsNullOrWhiteSpace(tableVal))
-                        readerOpts.Query = $"SELECT * FROM \"{tableVal}\"";
+                    {
+                        readerOpts.Query = $"SELECT * FROM {SqlIdentifierHelper.QuoteQualifiedName(dialect, tableVal)}";
+                        _optionsRegistry.Register(new AutoBuiltSourceQuery { Table = tableVal, Query = readerOpts.Query });
+                    }
                 }
             }
         }

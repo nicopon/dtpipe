@@ -1,6 +1,7 @@
 using System.Threading.Channels;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
+using DtPipe.Cli.Infrastructure;
 using DtPipe.Core.Options;
 using DtPipe.Core.Security;
 using DtPipe.Core.Validation;
@@ -118,7 +119,15 @@ internal sealed partial class ExportRunState
         Reader = ReaderFactory.Create(Registry);
         try
         {
-            await Reader.OpenAsync(retryCt);
+            try
+            {
+                await Reader.OpenAsync(retryCt);
+            }
+            catch (Exception ex) when (AutoBuiltQueryHint(ex) is { } hint)
+            {
+                throw new InvalidOperationException(hint, ex);
+            }
+
             await RunCoreAsync(retryCt);
         }
         finally
@@ -127,6 +136,21 @@ internal sealed partial class ExportRunState
             await Reader.DisposeAsync();
             if (Writer is not null) await Writer.DisposeAsync();
         }
+    }
+
+    /// <summary>
+    /// The message to raise when opening the source failed and its query came from
+    /// <c>--table</c>, or <c>null</c> when the user wrote the query themselves and the driver's
+    /// own message is already about what they typed.
+    /// </summary>
+    private string? AutoBuiltQueryHint(Exception ex)
+    {
+        if (ex is OperationCanceledException) return null;
+        if (!Registry.TryGet<AutoBuiltSourceQuery>(out var auto)) return null;
+
+        return $"Reading --table \"{auto.Table}\" failed: {ex.Message.TrimEnd()}" + Environment.NewLine +
+               $"dtpipe ran the query it built from that flag: {auto.Query}" + Environment.NewLine +
+               "Pass --query to write the statement yourself, or check the name and its schema.";
     }
 
     private async Task RunCoreAsync(CancellationToken retryCt)

@@ -210,7 +210,7 @@ If you are coming from Python or SQLAlchemy, use this translation guide to build
 | `--auto-column-types` | | Infer column types from the first 100 rows |
 | `--path` | `"//Product"` | XPath / JSON path for record selection (XML, JsonL) |
 | `--query` / `-q` | `"SELECT ..."` | SQL query executed by database readers (or a path to a `.sql` file) |
-| `--table` / `-t` | `"users"` | Source table name — auto-builds `SELECT * FROM "<table>"` when no `--query` is given (database readers) |
+| `--table` / `-t` | `"users"` | Source table name — auto-builds `SELECT * FROM <table>` when no `--query` is given (database readers). A qualified name is split on the dot and each part quoted the way the source engine spells it: `eshop.customers` reads `"eshop"."customers"` on PostgreSQL, `` `eshop`.`customers` `` on MySQL, `[eshop].[customers]` on SQL Server. Spell the value yourself — `'"an.awkward.name"'` — to keep a dot inside a single identifier |
 | `--duck-init` | `"LOAD httpfs"` | **(DuckDB only)** SQL executed after connection open. See [Value Resolution](#value-resolution) |
 
 ---
