@@ -14,8 +14,8 @@ public class DuckDbDialect : BaseSqlDialect
 
 	public override string Normalize(string identifier)
 	{
-		// DuckDB is generally case-insensitive for unquoted SQL identifiers.
-		// Treated like SQLite/SQLServer: Check for keywords/special chars.
+		// Identity: DuckDB compares identifiers case-insensitively and stores them as written,
+		// so there is no default casing to fold towards.
 		return identifier;
 	}
 
@@ -31,9 +31,11 @@ public class DuckDbDialect : BaseSqlDialect
 
 	protected override bool IsCaseMismatch(string identifier)
 	{
-		// DuckDB normalizes unquoted identifiers to lowercase (like PostgreSQL)
-		// Quote if contains uppercase to preserve case
-		return identifier != identifier.ToLowerInvariant();
+		// DuckDB does not fold: an unquoted CREATE TABLE BareName stores "BareName", and
+		// resolution is case-insensitive, so a bare `bareName` still finds it. Nothing is lost by
+		// leaving the identifier unquoted, and quoting to "preserve" a case the engine was never
+		// going to change only made the name look deliberate.
+		return false;
 	}
 
 	public override string? TableDiscoveryQuery => "SELECT table_name, table_type FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema') ORDER BY table_name";

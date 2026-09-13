@@ -497,5 +497,7 @@ public sealed partial class MySqlDataWriter : BaseSqlDataWriter, IColumnarDataWr
 	// IKeyValidator
 	public override string? GetWriteStrategy() => _options.Strategy.ToString();
 	protected override string? GetRequestedKeySpec() => _options.Key;
+
+	protected override string? GetRequestedTableSpec() => _options.Table;
 	public override bool RequiresPrimaryKey() => _options.Strategy is MySqlWriteStrategy.Upsert or MySqlWriteStrategy.Ignore;
 }

@@ -432,5 +432,7 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter, IColumnarD
 
 	protected override string? GetRequestedKeySpec() => _options.Key;
 
+	protected override string? GetRequestedTableSpec() => _options.Table;
+
 	public override bool RequiresPrimaryKey() => _options.Strategy is PostgreSqlWriteStrategy.Upsert or PostgreSqlWriteStrategy.Ignore;
 }

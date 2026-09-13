@@ -336,6 +336,29 @@ when the schema is built, rather than read as something else. Cast it in your qu
 > `--pre-exec`, `--post-exec` etc. accept inline SQL or a file path (`@scripts/pre.sql` or a `.sql` file path).
 > `--duck-init` runs on the DuckDB connection before reads or writes (unlike `--pre-exec` which runs on the target DB after connection).
 
+### Identifier casing
+
+An identifier — the target table, and every column — is handed to the engine the way that engine
+reads it **unquoted**, so the name it stores is the name any other tool can type. Quoting is
+reserved for what actually needs it: a reserved word, or a character the parser would not accept.
+
+| Engine | `--table stock_moves` creates | `--table StockMoves` creates |
+|:---|:---|:---|
+| Oracle | `STOCK_MOVES` | `STOCKMOVES` |
+| PostgreSQL | `stock_moves` | `stockmoves` |
+| MySQL, SQL Server, SQLite, DuckDB | `stock_moves` | `StockMoves` |
+
+The rule is one rule; the outcomes differ because the engines do. Oracle folds up, PostgreSQL
+folds down, the rest store what they are given and compare case-insensitively.
+
+**To keep an exact spelling, quote the value yourself** — `--table '"StockMoves"'` creates
+`StockMoves` on every engine, and it is then addressable only in quotes, from dtpipe and from
+anything else.
+
+> Quoting a name to preserve the case as typed is what dtpipe used to do for the table, and only
+> the table — columns already folded. On Oracle it produced `"stock_moves"`, which
+> `SELECT * FROM stock_moves` cannot reach (`ORA-00942`): a table dtpipe alone could address.
+
 ### Schema modes
 
 Before writing to a database target, dtpipe compares the source schema with the target's and acts

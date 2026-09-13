@@ -325,6 +325,8 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
 
     protected override string? GetRequestedKeySpec() => _options.Key;
 
+    protected override string? GetRequestedTableSpec() => _options.Table;
+
     public override bool RequiresPrimaryKey()
     {
         return _options.Strategy is

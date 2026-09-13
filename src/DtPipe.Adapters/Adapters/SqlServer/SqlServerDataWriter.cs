@@ -574,5 +574,7 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter
 	// IKeyValidator methods
 	public override string? GetWriteStrategy() => _options.Strategy.ToString();
 	protected override string? GetRequestedKeySpec() => _options.Key;
+
+	protected override string? GetRequestedTableSpec() => _options.Table;
 	public override bool RequiresPrimaryKey() => _options.Strategy is SqlServerWriteStrategy.Upsert or SqlServerWriteStrategy.Ignore;
 }

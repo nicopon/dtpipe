@@ -63,6 +63,13 @@ public abstract class BaseSqlDataWriter : IRowDataWriter, ISchemaInspector, IKey
 	/// </summary>
 	protected virtual string? GetRequestedKeySpec() => null;
 
+	/// <summary>
+	/// Returns the raw --table option value, before any parsing trimmed its quotes. Derived
+	/// classes must override for a caller's explicit quoting to survive to
+	/// <see cref="BuildQuotedTableName"/>.
+	/// </summary>
+	protected virtual string? GetRequestedTableSpec() => null;
+
 	public virtual bool RequiresPrimaryKey() => false;
 	#endregion
 
@@ -175,9 +182,34 @@ public abstract class BaseSqlDataWriter : IRowDataWriter, ISchemaInspector, IKey
 
 	protected virtual string BuildQuotedTableName(string schema, string table)
 	{
-		var safeSchema = Dialect.NeedsQuoting(schema) ? Dialect.Quote(schema) : schema;
-		var safeTable = Dialect.NeedsQuoting(table) ? Dialect.Quote(table) : table;
+		var safeSchema = SafeTableIdentifier(schema);
+		var safeTable = SafeTableIdentifier(table);
 		return string.IsNullOrEmpty(safeSchema) ? safeTable : $"{safeSchema}.{safeTable}";
+	}
+
+	/// <summary>
+	/// One segment of the target table name: folded to the engine's own casing, then quoted only
+	/// if something other than case still requires it — a reserved word, a special character.
+	/// </summary>
+	/// <remarks>
+	/// This is the rule <see cref="NormalizeColumns"/> already applies to every column, and the
+	/// table name was the one identifier escaping it. Quoting to preserve the case as typed made
+	/// Oracle store <c>"stock_moves"</c>, which <c>SELECT * FROM stock_moves</c> from SQL*Plus or
+	/// any other tool cannot reach (ORA-00942) — a table addressable by dtpipe alone. Folding
+	/// costs the ability to create a case-sensitive table name; the columns gave that up already,
+	/// and being reachable is worth more than being spelled back.
+	/// </remarks>
+	private string SafeTableIdentifier(string identifier)
+	{
+		if (string.IsNullOrEmpty(identifier)) return identifier;
+
+		// A caller who quoted the value in --table has spelled out the identifier they want, and
+		// that is now the only way to ask for a case the engine would otherwise fold. The parsing
+		// on the way here strips the quotes, so the intent is read off the raw option.
+		if (GetRequestedTableSpec()?.Contains('"') == true) return Dialect.Quote(identifier);
+
+		var normalized = Dialect.Normalize(identifier);
+		return Dialect.NeedsQuoting(normalized) ? Dialect.Quote(normalized) : normalized;
 	}
 
 	/// <summary>

@@ -238,5 +238,7 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter
 	// IKeyValidator Override
 	public override string? GetWriteStrategy() => _options.Strategy.ToString();
 	protected override string? GetRequestedKeySpec() => _options.Key;
+
+	protected override string? GetRequestedTableSpec() => _options.Table;
 	public override bool RequiresPrimaryKey() => _options.Strategy is SqliteWriteStrategy.Upsert or SqliteWriteStrategy.Ignore;
 }
