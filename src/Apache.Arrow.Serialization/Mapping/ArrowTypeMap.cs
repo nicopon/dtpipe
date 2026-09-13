@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Apache.Arrow.Types;
 using Apache.Arrow;
 using Apache.Arrow.Arrays;
+using System.Globalization;
 using System.Linq;
 
 namespace Apache.Arrow.Serialization.Mapping;
@@ -168,8 +169,10 @@ public static class ArrowTypeMap
             ArrowTypeId.Decimal256 => typeof(decimal),
             ArrowTypeId.Duration => typeof(TimeSpan),
             ArrowTypeId.Struct => typeof(Dictionary<string, object?>),
-            ArrowTypeId.List or ArrowTypeId.LargeList => typeof(List<object?>),
+            ArrowTypeId.List or ArrowTypeId.LargeList or ArrowTypeId.FixedSizeList => typeof(List<object?>),
             ArrowTypeId.Map => typeof(Dictionary<object, object?>),
+            // A dictionary-encoded column is its value type; the encoding is storage, not meaning.
+            ArrowTypeId.Dictionary => type is DictionaryType dict ? GetClrType(dict.ValueType) : typeof(string),
             _ => typeof(string)
         };
     }
@@ -179,10 +182,13 @@ public static class ArrowTypeMap
     /// </summary>
     public static Type GetClrTypeFromField(Field field)
     {
-        if (field.HasMetadata &&
-            field.Metadata.TryGetValue("ARROW:extension:name", out var ext) &&
-            string.Equals(ext, "arrow.uuid", StringComparison.OrdinalIgnoreCase))
-            return typeof(Guid);
+        if (ArrowExtensionInfo.TryRead(field, out var ext))
+        {
+            if (ext.Is("arrow.uuid")) return typeof(Guid);
+            if (ext.Is("arrow.bool8")) return typeof(bool);
+            if (ext.Is("arrow.opaque") && ArrowOpaqueCodec.CanDecode(ext.VendorName, ext.TypeName))
+                return typeof(string);
+        }
         return GetClrType(field.DataType);
     }
 
@@ -194,13 +200,27 @@ public static class ArrowTypeMap
     {
         if (array.IsNull(index)) return null;
 
-        // 1. Handle Extension Types (UUID)
-        if (field != null && array is FixedSizeBinaryArray fsba &&
-            field.HasMetadata &&
-            field.Metadata.TryGetValue("ARROW:extension:name", out var ext) &&
-            string.Equals(ext, "arrow.uuid", StringComparison.OrdinalIgnoreCase))
+        // 1. Extension types, which carry a logical meaning their storage type does not.
+        if (ArrowExtensionInfo.TryRead(field, out var ext))
         {
-            return FromArrowUuidBytes(fsba.GetBytes(index));
+            if (ext.Is("arrow.uuid") && array is FixedSizeBinaryArray uuidArray)
+                return FromArrowUuidBytes(uuidArray.GetBytes(index));
+
+            // A canonical bool8 is an int8 whose non-zero values mean true.
+            if (ext.Is("arrow.bool8") && array is Int8Array boolArray)
+                return boolArray.GetValue(index) != 0;
+
+            if (ext.Is("arrow.opaque"))
+            {
+                var payload = array switch
+                {
+                    FixedSizeBinaryArray a => a.GetBytes(index),
+                    BinaryArray a => a.GetBytes(index),
+                    _ => ReadOnlySpan<byte>.Empty
+                };
+                var decoded = ArrowOpaqueCodec.TryDecode(ext.VendorName, ext.TypeName, payload);
+                if (decoded != null) return decoded;
+            }
         }
 
         // 2. Standard Types
@@ -229,7 +249,13 @@ public static class ArrowTypeMap
             Time32Array a => a.GetValue(index),
             Time64Array a => a.GetValue(index),
             StructArray a => GetStructValue(a, index),
+            // Before ListArray: MapArray derives from it, so the general case would win and a map
+            // would come back as a list of {key,value} structs, contradicting the Dictionary that
+            // GetClrType declares for it.
+            MapArray a => GetMapValue(a, index),
             ListArray a => GetListValue(a, index),
+            FixedSizeListArray a => GetFixedSizeListValue(a, index),
+            DictionaryArray a => GetDictionaryValue(a, index, field),
             _ => throw new NotSupportedException($"Unsupported Arrow array type for value extraction: {array.GetType().Name}")
         };
 
@@ -255,6 +281,59 @@ public static class ArrowTypeMap
             var field = type.Fields[i];
             var childArray = array.Fields[i];
             dict[field.Name] = GetValue(childArray, index, field);
+        }
+
+        return dict;
+    }
+
+    private static object? GetFixedSizeListValue(FixedSizeListArray array, int index)
+    {
+        if (array.IsNull(index)) return null;
+        var size = ((FixedSizeListType)array.Data.DataType).ListSize;
+        var values = array.Values;
+        var list = new List<object?>(size);
+
+        for (var i = index * size; i < (index + 1) * size; i++)
+            list.Add(GetValue(values, i));
+
+        return list;
+    }
+
+    /// <summary>
+    /// Resolves a dictionary-encoded value: the index array points into the shared dictionary,
+    /// and the decoded value is what a consumer expects to receive.
+    /// </summary>
+    private static object? GetDictionaryValue(DictionaryArray array, int index, Field? field)
+    {
+        if (array.IsNull(index)) return null;
+
+        var key = GetValue(array.Indices, index);
+        if (key is null) return null;
+
+        var position = Convert.ToInt32(key, CultureInfo.InvariantCulture);
+        if (position < 0 || position >= array.Dictionary.Length) return null;
+
+        // The field describes the logical column, not the dictionary's own storage, so it is not
+        // forwarded: an extension on the column has already been handled before this point.
+        return GetValue(array.Dictionary, position);
+    }
+
+    private static object? GetMapValue(MapArray array, int index)
+    {
+        if (array.IsNull(index)) return null;
+
+        var dict = new Dictionary<object, object?>();
+        var entries = array.KeyValues;
+        var keys = entries.Fields[0];
+        var values = entries.Fields[1];
+
+        var start = array.ValueOffsets[index];
+        var end = array.ValueOffsets[index + 1];
+
+        for (var i = start; i < end; i++)
+        {
+            var key = GetValue(keys, i);
+            if (key is not null) dict[key] = GetValue(values, i);
         }
 
         return dict;
