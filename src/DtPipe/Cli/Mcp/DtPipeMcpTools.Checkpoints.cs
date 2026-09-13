@@ -25,7 +25,7 @@ public partial class DtPipeMcpTools
     {
         try
         {
-            var store = SessionStore.Resolve(session);
+            var store = SessionStore.Resolve(session, WorkingDirectoryOverride);
             var checkpoints = new CheckpointStore(store);
 
             return JsonSerializer.Serialize(new
@@ -59,7 +59,7 @@ public partial class DtPipeMcpTools
 
         try
         {
-            var store = SessionStore.Resolve(session);
+            var store = SessionStore.Resolve(session, WorkingDirectoryOverride);
             var checkpoints = new CheckpointStore(store);
 
             if (!checkpoints.Contains(checkpointKey))

@@ -35,6 +35,16 @@ public partial class DtPipeMcpTools
         /// </summary>
      public DtPipe.Cli.Agent.AgentOptions? AgentOptions { get; set; }
 
+    /// <summary>
+    /// Overrides the working directory session resolution starts from (checkpoint tools). Null in
+    /// production — <see cref="Sessions.SessionResolver"/> then falls back to the process's own
+    /// <see cref="Directory.GetCurrentDirectory"/>, which is the real MCP-server behaviour. Exists
+    /// so a test can hand this an isolated temp directory instead of calling
+    /// <see cref="Directory.SetCurrentDirectory"/>, which is process-global and races any test
+    /// running concurrently in another collection.
+    /// </summary>
+    internal string? WorkingDirectoryOverride { get; set; }
+
 
     public DtPipeMcpTools(
         IEnumerable<IStreamReaderFactory> readerFactories,

@@ -18,7 +18,6 @@ namespace DtPipe.Tests.Unit.Cli;
 public class McpCheckpointToolsTests : IDisposable
 {
 	private readonly string _tmp;
-	private readonly string _cwd;
 	private readonly string? _savedState;
 	private readonly DtPipeMcpTools _tools;
 
@@ -28,8 +27,6 @@ public class McpCheckpointToolsTests : IDisposable
 		Directory.CreateDirectory(_tmp);
 		_savedState = Environment.GetEnvironmentVariable(UserStatePaths.RootEnvironmentVariable);
 		Environment.SetEnvironmentVariable(UserStatePaths.RootEnvironmentVariable, Path.Combine(_tmp, "state"));
-		_cwd = Directory.GetCurrentDirectory();
-		Directory.SetCurrentDirectory(_tmp);
 
 		var services = new ServiceCollection();
 		services.AddSingleton<DtPipe.Core.Options.OptionsRegistry>();
@@ -43,12 +40,14 @@ public class McpCheckpointToolsTests : IDisposable
 			Array.Empty<IDataTransformerFactory>(),
 			sp.GetRequiredService<IEnumerable<IDataWriterFactory>>(),
 			sp.GetRequiredService<IMcpHelpService>(),
-			sp);
+			sp)
+		{
+			WorkingDirectoryOverride = _tmp
+		};
 	}
 
 	public void Dispose()
 	{
-		Directory.SetCurrentDirectory(_cwd);
 		Environment.SetEnvironmentVariable(UserStatePaths.RootEnvironmentVariable, _savedState);
 		if (Directory.Exists(_tmp)) Directory.Delete(_tmp, recursive: true);
 	}
@@ -86,7 +85,7 @@ public class McpCheckpointToolsTests : IDisposable
 	[Fact]
 	public async Task A_Materialised_Checkpoint_Is_Listed_And_Read_Back()
 	{
-		var session = SessionStore.Resolve("s1");
+		var session = SessionStore.Resolve("s1", _tmp);
 		var store = new CheckpointStore(session);
 		await store.WriteAsync("abc123", SampleBatches());
 
@@ -103,7 +102,7 @@ public class McpCheckpointToolsTests : IDisposable
 	[Fact]
 	public async Task The_Row_Cap_Is_Clamped_Rather_Than_Trusted()
 	{
-		var store = new CheckpointStore(SessionStore.Resolve("s1"));
+		var store = new CheckpointStore(SessionStore.Resolve("s1", _tmp));
 		await store.WriteAsync("abc123", SampleBatches());
 
 		var read = Parse(await _tools.ReadCheckpoint("abc123", rows: 999_999, session: "s1"));
