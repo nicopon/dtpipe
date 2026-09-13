@@ -211,7 +211,17 @@ Branches communicate via `IMemoryChannelRegistry` (`Channel<IReadOnlyList<object
 
 ### SQL Processors
 
-`CompositeSqlTransformerFactory` is the DI entry point for `--sql` branches. The default (and currently only) engine is DuckDB — `DuckDBSqlTransformerFactory` / `DuckDBSqlProcessor`: zero-copy Arrow C Data Interface on read (`--from`), lazy streaming fetch (`duckdb_execute_prepared_streaming` + `duckdb_fetch_chunk`) on write, schema inferred from the prepared statement before execution. `DuckHubConnectionParser` parses `duck+{provider}:` connection strings and auto-issues `INSTALL`/`LOAD`/`ATTACH`. `--retry` uses Polly v8 (`DatabaseRetryPolicy`). `--duck-init`/`--compute`/`--expand` value resolution goes through `IStringContentResolver` (`CliStringContentResolver` for the CLI, `DefaultStringContentResolver` for headless contexts). The init-SQL runner is duplicated verbatim between `DuckInitSqlHelper` (Adapters) and a private `RunInitSqlAsync` (Processors) — Processors can't reference Adapters, so don't add a third copy; if consolidating, promote it to a neutral shared location instead. User-facing flag syntax and examples: `REFERENCE.md#provider-specific-options`, `COOKBOOK.md#sql-processors-and-joins`.
+`CompositeSqlTransformerFactory` is the DI entry point for `--sql` branches. The default (and currently only) engine is DuckDB — `DuckDBSqlTransformerFactory` / `DuckDBSqlProcessor`: zero-copy Arrow C Data Interface on read (`--from`), lazy streaming fetch (`duckdb_execute_prepared_streaming` + `duckdb_fetch_chunk`) on write, schema inferred from the prepared statement before execution. `DuckHubConnectionParser` parses `duck+{provider}:` connection strings and auto-issues `INSTALL`/`LOAD`/`ATTACH`. `--retry` uses Polly v8 (`DatabaseRetryPolicy`). `--duck-init`/`--compute`/`--expand` value resolution goes through `IStringContentResolver` (`CliStringContentResolver` for the CLI, `DefaultStringContentResolver` for headless contexts). The init-SQL runner is `DuckInitSqlRunner` (Core), the single copy for the reader, the writer and the processor. User-facing flag syntax and examples: `REFERENCE.md#provider-specific-options`, `COOKBOOK.md#sql-processors-and-joins`.
+
+#### One way to read DuckDB, and it lives in neither consumer
+
+`DuckDbArrowNative` + `DuckDbArrowResultReader` (`DtPipe.Adapters.Shared/Infrastructure/DuckDb/`) own the whole prepare-to-batch half: `duckdb_prepare` → schema off the prepared statement → `duckdb_execute_prepared_streaming` → `duckdb_fetch_chunk` → `duckdb_data_chunk_to_arrow`. **Both `DuckDataSourceReader` (`duck:`) and `DuckDBSqlProcessor` (`--sql`) read through it**, and Adapters and Processors are siblings that cannot reference one another — so a copy in either is a second P/Invoke surface onto one native library, free to drift.
+
+They *did* drift, and it shipped: `--sql` exited 1 on an `ENUM` and on a fixed-size `ARRAY`, rendered a `BOOLEAN` as `1` and a `HUGEINT` as base64, while `duck:` read all four correctly. **A maintainer who reimplements the fetch loop in one consumer reproduces exactly that.**
+
+> **Enforced by** nothing. `validate_core_boundary.sh` does not look here, and no check counts P/Invoke surfaces. Discipline.
+
+**The ownership net does not reach this path.** A `RecordBatch` imported by `CArrowArrayImporter` follows the ordinary rule — the consumer disposes what it receives — but its memory is freed by the C Data release callback and never passes through a `MemoryAllocator`, so `TrackingMemoryPool` (and therefore `ArrowOwnershipTests`) cannot observe it. A green suite proves nothing about DuckDB reads.
 
 ### Transformer Pipeline
 
