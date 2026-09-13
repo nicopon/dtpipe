@@ -392,6 +392,24 @@ apart.
 wholesale, and `--strategy Recreate` drops and rebuilds the table from the source schema, so there
 is nothing to compare: no inspection runs and no mode line is printed.
 
+### File globs
+
+A local input whose **file name** carries `*` or `?` is read as one stream over every file it
+matches, in ordinal path order:
+
+```bash
+dtpipe -i "daily/*.csv" -o events.parquet
+dtpipe -i "exports/part-?.jsonl" -o "pg:Host=…" --table events
+```
+
+- **The schema is the first file's.** A later file with different columns stops the run and names
+  it, rather than dropping or misaligning them.
+- **Matching nothing is an error**, not an empty read.
+- **The wildcard stays in the file name.** A pattern spanning directories is not supported; object
+  storage, which globs through DuckDB, does support one (`s3://bucket/dt=*/part-*.parquet`).
+- Every file adapter gets this — CSV, JSONL, Parquet, XML — and the reader keeps its own options
+  and its columnar path where it has one.
+
 ### Object storage (`s3://`, `azure://`)
 
 Object-storage locations are first-class inputs and outputs. They go through the DuckDB engine
@@ -420,7 +438,7 @@ dtpipe -i sales.csv -o azure://reports/sales.parquet --azure-connection-string "
 - **Writes replace the target key.** Object storage has no append or upsert, so `--strategy` is
   refused rather than ignored. The upload is issued once the pipeline completes: a failed run
   leaves the existing object untouched rather than replacing it with a partial one.
-- **Reads glob natively**: `s3://bucket/dt=*/part-*.parquet` reads every match.
+- **Reads glob natively**: `s3://bucket/dt=*/part-*.parquet` reads every match. A local path globs too, over one directory — see [File globs](#file-globs).
 - `https://`, `gs://` and other schemes are **not** claimed by any provider, and object storage is
   never a hub target (`duck+s3:` fails closed). Reach those through the DuckDB engine
   (`--duck-init "INSTALL httpfs; …"` + `read_parquet(…)` / `COPY … TO …`) — see the MinIO/Azurite

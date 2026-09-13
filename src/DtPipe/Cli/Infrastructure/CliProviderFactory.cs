@@ -133,14 +133,31 @@ public class CliStreamReaderFactory : CliProviderFactory<IStreamReader>, IStream
 		// stripped the selector. Query is set by OptionBinder (CLI path) or MapProcessorProperties (YAML path).
 		ApplyVariant(specificOptions, route?.InputVariant);
 
-		var reader = _descriptor.Create(route?.Input ?? "", specificOptions!, _serviceProvider);
-		if (reader is IBatchSizeConfigurable batchConfigurable)
+		var input = route?.Input ?? "";
+		var pipelineOptions = registry.Get<PipelineOptions>();
+
+		IStreamReader Build(string connection)
 		{
-			var pipelineOptions = registry.Get<PipelineOptions>();
-			batchConfigurable.BatchSize = pipelineOptions.BatchSize;
-			batchConfigurable.MaxBatchBytes = pipelineOptions.MaxBatchBytes;
+			var built = _descriptor.Create(connection, specificOptions!, _serviceProvider);
+			if (built is IBatchSizeConfigurable configurable)
+			{
+				configurable.BatchSize = pipelineOptions.BatchSize;
+				configurable.MaxBatchBytes = pipelineOptions.MaxBatchBytes;
+			}
+			return built;
 		}
-		return reader;
+
+		if (!LocalFileGlob.IsPattern(input)) return Build(input);
+
+		var matches = LocalFileGlob.Expand(input);
+
+		// The capability has to be settled before the first file is read: the engine picks the row
+		// or the columnar path off the reader's type, so a row-shaped wrapper around a columnar
+		// adapter would add a round trip through Arrow and back. Constructing a reader opens
+		// nothing, so asking the first one what it is costs nothing either.
+		return Build(matches[0]) is IColumnarStreamReader
+			? new ConcatenatedColumnarStreamReader(matches, Build)
+			: new ConcatenatedStreamReader(matches, Build);
 	}
 
 	public IEnumerable<Type> GetSupportedOptionTypes()
