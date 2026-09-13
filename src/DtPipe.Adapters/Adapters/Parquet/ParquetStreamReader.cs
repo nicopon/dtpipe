@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Parquet;
 using Parquet.Schema;
+using ParquetField = Parquet.Schema.Field;
 
 namespace DtPipe.Adapters.Parquet;
 
@@ -78,13 +79,29 @@ public class ParquetStreamReader : IColumnarStreamReader
 
 		foreach (var field in schema.Fields)
 		{
- 			if (field is DataField dataField)
- 						{
- 						var (precision, scale) = DeclaredDecimal(dataField);
- 						columns.Add(new PipeColumnInfo(
- 							dataField.Name, NormalizeClrType(dataField.ClrType), dataField.IsNullable,
- 							Precision: precision, Scale: scale));
- 						}
+			switch (field)
+			{
+				case DataField dataField:
+				{
+					var (precision, scale) = DeclaredDecimal(dataField);
+					columns.Add(new PipeColumnInfo(
+						dataField.Name, NormalizeClrType(dataField.ClrType), dataField.IsNullable,
+						Precision: precision, Scale: scale));
+					break;
+				}
+
+				case ListField listField:
+					columns.Add(new PipeColumnInfo(listField.Name, ListClrType(listField), IsNullable: true));
+					break;
+
+				// Dropping it silently would leave Columns and the read loop disagreeing on how
+				// many columns the file has, which is the shape the list bug took: the schema lost
+				// a column while the loop found an extra one.
+				default:
+					throw new NotSupportedException(
+						$"Parquet column '{field.Name}' is a {field.GetType().Name}, which this reader " +
+						"cannot represent. Project it in your query, for example to JSON text.");
+			}
 		}
 
 		Columns = columns;
@@ -119,12 +136,14 @@ public class ParquetStreamReader : IColumnarStreamReader
 				var rowCount = (int)rowGroupReader.RowCount;
 				var arrays = new List<IArrowArray>();
 
-				foreach (var field in _reader.Schema.DataFields)
+				// Top-level fields, not Schema.DataFields: the latter flattens a LIST onto its leaf,
+				// which carries one entry per element rather than per row.
+				foreach (var field in _reader.Schema.Fields)
 				{
- 						var columnData = await ReadColumnDataAsArrayAsync(rowGroupReader, field, ct);
- 						var (precision, scale) = DeclaredDecimal(field);
- 						arrays.Add(DtPipe.Core.Infrastructure.Arrow.ArrowArrayFactory.Create(
- 							columnData, NormalizeClrType(field.ClrType), field.IsNullable, precision, scale));
+					var columnData = await ReadColumnAsRowValuesAsync(rowGroupReader, field, ct);
+					var (clrType, precision, scale) = ColumnShape(field);
+					arrays.Add(DtPipe.Core.Infrastructure.Arrow.ArrowArrayFactory.Create(
+						columnData, clrType, IsFieldNullable(field), precision, scale));
 				}
 
 				yield return new RecordBatch(schema, arrays, rowCount);
@@ -184,8 +203,8 @@ public class ParquetStreamReader : IColumnarStreamReader
 				var columnDataArrays = new System.Array[Columns.Count];
 				for (int colIndex = 0; colIndex < Columns.Count; colIndex++)
 				{
-					var dataField = _reader.Schema.DataFields[colIndex];
-					columnDataArrays[colIndex] = await ReadColumnDataAsArrayAsync(rowGroupReader, dataField, ct);
+					columnDataArrays[colIndex] =
+						await ReadColumnAsRowValuesAsync(rowGroupReader, _reader.Schema.Fields[colIndex], ct);
 				}
 
 				// Yield rows
@@ -219,6 +238,144 @@ public class ParquetStreamReader : IColumnarStreamReader
 		{
 			_isReading = false;
 		}
+	}
+
+	/// <summary>
+	/// One column of a row group as one CLR value per row — a list column giving an array per row,
+	/// so both read paths index by row and neither has to know how the file nests.
+	/// </summary>
+	private static Task<System.Array> ReadColumnAsRowValuesAsync(
+		ParquetRowGroupReader rowGroupReader, ParquetField field, CancellationToken ct)
+		=> field switch
+		{
+			ListField list => ReadListColumnAsync(rowGroupReader, list, (int)rowGroupReader.RowCount, ct),
+			DataField data => ReadColumnDataAsArrayAsync(rowGroupReader, data, ct),
+			_ => throw new NotSupportedException($"Parquet column '{field.Name}' is a {field.GetType().Name}."),
+		};
+
+	private static (Type ClrType, int? Precision, int? Scale) ColumnShape(ParquetField field)
+	{
+		if (field is ListField list) return (ListClrType(list), null, null);
+
+		var data = (DataField)field;
+		var (precision, scale) = DeclaredDecimal(data);
+		return (NormalizeClrType(data.ClrType), precision, scale);
+	}
+
+	private static bool IsFieldNullable(ParquetField field)
+		=> field is not DataField data || data.IsNullable;
+
+	/// <summary>
+	/// The CLR type standing for a list column: an array of the item type, made nullable when the
+	/// item is, so a NULL element keeps its slot instead of collapsing to the type's default.
+	/// </summary>
+	private static Type ListClrType(ListField list)
+	{
+		var item = (DataField)list.Item;
+		var element = NormalizeClrType(item.ClrType);
+
+		if (item.IsNullable && element.IsValueType && Nullable.GetUnderlyingType(element) is null)
+			element = typeof(Nullable<>).MakeGenericType(element);
+
+		return element.MakeArrayType();
+	}
+
+	/// <summary>
+	/// Reads a Parquet LIST back into one array per row, decoding the three-level encoding
+	/// <c>ArrowToParquetConverter.WriteListColumnAsync</c> writes — definition 0 for a NULL list,
+	/// 1 for an empty one, <c>MaxDefinitionLevel</c> for an element with a value and one below it
+	/// for a NULL element; repetition 0 opens a row and 1 continues the current list.
+	/// </summary>
+	/// <remarks>
+	/// The reader had no list support at all: <c>Schema.DataFields</c> flattens a LIST onto its
+	/// leaf, which holds one entry per element, and the buffer was sized by row count — so dtpipe
+	/// could not read back a single list file it had written itself. The column chunk's NumValues
+	/// counts level entries, which is the upper bound for values too, so one read fills all three
+	/// buffers.
+	/// </remarks>
+	private static Task<System.Array> ReadListColumnAsync(
+		ParquetRowGroupReader rowGroupReader, ListField listField, int rowCount, CancellationToken ct)
+	{
+		var item = (DataField)listField.Item;
+
+		return NormalizeClrType(item.ClrType) switch
+		{
+			var t when t == typeof(bool) => ReadTypedListAsync<bool>(rowGroupReader, item, rowCount, ct),
+			var t when t == typeof(short) => ReadTypedListAsync<short>(rowGroupReader, item, rowCount, ct),
+			var t when t == typeof(int) => ReadTypedListAsync<int>(rowGroupReader, item, rowCount, ct),
+			var t when t == typeof(long) => ReadTypedListAsync<long>(rowGroupReader, item, rowCount, ct),
+			var t when t == typeof(float) => ReadTypedListAsync<float>(rowGroupReader, item, rowCount, ct),
+			var t when t == typeof(double) => ReadTypedListAsync<double>(rowGroupReader, item, rowCount, ct),
+			var t when t == typeof(decimal) => ReadTypedListAsync<decimal>(rowGroupReader, item, rowCount, ct),
+			var t when t == typeof(DateTime) => ReadTypedListAsync<DateTime>(rowGroupReader, item, rowCount, ct),
+			var t when t == typeof(DateTimeOffset) => ReadTypedListAsync<DateTimeOffset>(rowGroupReader, item, rowCount, ct),
+
+			// Parquet.Net carries repetition levels only through the value-type overloads, which is
+			// the same limit that makes the writer refuse a list of text — so the two halves refuse
+			// the same shape rather than one writing what the other cannot read.
+			var t when t == typeof(string) => throw new NotSupportedException(
+				$"Parquet column '{item.Path}': lists of text are not supported yet. " +
+				"Read it through DuckDB instead, for example with --sql over read_parquet."),
+
+			var t => throw new NotSupportedException(
+				$"Parquet column '{item.Path}': a list of {t.Name} is not supported."),
+		};
+	}
+
+	private static async Task<System.Array> ReadTypedListAsync<T>(
+		ParquetRowGroupReader rowGroupReader, DataField item, int rowCount, CancellationToken ct)
+		where T : struct
+	{
+		var rows = new T?[]?[rowCount];
+		var levelCount = (int)(rowGroupReader.GetMetadata(item)?.MetaData?.NumValues ?? 0);
+		if (levelCount == 0) return rows;
+
+		var definitions = new int[levelCount];
+		var repetitions = new int[levelCount];
+		var values = new T[levelCount];
+		await rowGroupReader.ReadRawAsync<T>(
+			item, values.AsMemory(), definitions.AsMemory(), repetitions.AsMemory(), ct);
+
+		var maxDefinition = item.MaxDefinitionLevel;
+		var current = new List<T?>();
+		var row = -1;
+		var value = 0;
+
+		// A NULL list and an empty one are both falsy in the output array, so "is this row set yet"
+		// cannot be read off rows[row] — it is tracked here. Collapsing the two is the classic
+		// definition-level mistake, and the writer's own tests assert they stay distinct.
+		var currentIsNull = false;
+
+		for (var i = 0; i < levelCount; i++)
+		{
+			if (repetitions[i] == 0)
+			{
+				if (row >= 0 && row < rowCount) rows[row] = currentIsNull ? null : current.ToArray();
+				current = new List<T?>();
+				currentIsNull = false;
+				row++;
+			}
+
+			if (row >= rowCount) break;
+
+			if (definitions[i] == 0)
+			{
+				currentIsNull = true;       // the list itself is NULL, distinct from an empty one
+			}
+			else if (definitions[i] == maxDefinition)
+			{
+				current.Add(values[value++]);
+			}
+			else if (item.IsNullable && definitions[i] == maxDefinition - 1)
+			{
+				current.Add(null);          // the list holds a NULL element
+			}
+			// else: definition below the element levels — the list is present and empty.
+		}
+
+		if (row >= 0 && row < rowCount) rows[row] = currentIsNull ? null : current.ToArray();
+
+		return rows;
 	}
 
  	private static async Task<System.Array> ReadColumnDataAsArrayAsync(ParquetRowGroupReader rowGroupReader, DataField field, CancellationToken ct)

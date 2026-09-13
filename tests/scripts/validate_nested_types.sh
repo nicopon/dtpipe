@@ -84,11 +84,16 @@ expect_eq "NULL array is an empty field" "$(sed -n '3p' "$OUT")" '2,'
 expect_eq "empty array is not NULL"      "$(sed -n '4p' "$OUT")" '3,[]'
 
 # ── 4. Postgres int[] → Parquet, including a NULL element ───────────────────────
+#
+# Read back TWICE, and the second half is the point. Reading only through DuckDB's read_parquet
+# proves the file is well formed and says nothing about dtpipe's own Parquet reader — which could
+# not read back a single list file dtpipe had written, for as long as this section existed.
 echo ""
 echo "--- [4] Postgres int[] -> Parquet -> read back ---"
 PQ="$ARTIFACTS_DIR/nested_pg.parquet"
 RT="$ARTIFACTS_DIR/nested_pg_rt.csv"
-rm -f "$PQ" "$RT"
+RT_SELF="$ARTIFACTS_DIR/nested_pg_rt_self.csv"
+rm -f "$PQ" "$RT" "$RT_SELF"
 "$DTPIPE" -i "$PG" -q "SELECT id, tags FROM nested_t ORDER BY id" -o "$PQ" --no-stats > /dev/null 2>&1
 "$DTPIPE" -i "duck::memory:" \
     --duck-init "CREATE TABLE r AS SELECT id, to_json(tags)::VARCHAR AS j FROM read_parquet('$PQ');" \
@@ -98,6 +103,12 @@ expect_eq "NULL array stays NULL"                "$(sed -n '3p' "$RT")" '2,'
 expect_eq "empty array stays empty"              "$(sed -n '4p' "$RT")" '3,[]'
 # Exercises the "element is NULL" definition level, which the DuckDB driver cannot produce.
 expect_eq "NULL *inside* a list keeps its slot"  "$(sed -n '5p' "$RT")" '4,"[1,null,3]"'
+
+"$DTPIPE" -i "$PQ" -o "$RT_SELF" --no-stats > /dev/null 2>&1
+expect_eq "dtpipe reads its own Parquet list"    "$(sed -n '2p' "$RT_SELF")" '1,"[10,20,30]"'
+expect_eq "and a NULL list, through its reader"  "$(sed -n '3p' "$RT_SELF")" '2,'
+expect_eq "and an empty one, still distinct"     "$(sed -n '4p' "$RT_SELF")" '3,[]'
+expect_eq "and a NULL element, in its slot"      "$(sed -n '5p' "$RT_SELF")" '4,"[1,null,3]"'
 
 # ── 5. Unsupported combinations must fail, not corrupt ──────────────────────────
 echo ""
