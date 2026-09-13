@@ -29,22 +29,34 @@ public sealed class SqlServerReader : AdoColumnarReader, IRequiresOptions<SqlSer
         Command = new SqlCommand(query, (SqlConnection)Connection) { CommandTimeout = queryTimeout };
     }
 
+    /// <summary>
+    /// Whether the connected database allows snapshot isolation. Anything but a definite ON —
+    /// OFF, either transition state, or a row the caller cannot read — answers no, because
+    /// ReadCommitted is the level that always works.
+    /// </summary>
+    private async Task<bool> SupportsSnapshotAsync(CancellationToken ct)
+    {
+        await using var probe = new SqlCommand(
+            "SELECT snapshot_isolation_state FROM sys.databases WHERE database_id = DB_ID()",
+            (SqlConnection)Connection!);
+
+        var state = await probe.ExecuteScalarAsync(ct);
+        return state is byte on && on == 1;
+    }
+
     public override async Task OpenAsync(CancellationToken ct = default)
     {
         await Connection!.OpenAsync(ct);
 
-        // Try to use Snapshot isolation for consistent reads without blocking, 
-        // fall back to ReadCommitted if Snapshot is not enabled on the database
-        try
-        {
-            _transaction = ((SqlConnection)Connection).BeginTransaction(IsolationLevel.Snapshot);
-            Command!.Transaction = _transaction;
-        }
-        catch (SqlException)
-        {
-            _transaction = ((SqlConnection)Connection).BeginTransaction(IsolationLevel.ReadCommitted);
-            Command!.Transaction = _transaction;
-        }
+        // Snapshot gives a consistent read without blocking writers, but the database has to
+        // allow it and a freshly created one does not — ALLOW_SNAPSHOT_ISOLATION is OFF by
+        // default. Ask before choosing: SQL Server raises error 3952 when a statement first
+        // touches a user object, not when the transaction opens, so catching around
+        // BeginTransaction guards a line the error never reaches. One extra round trip buys a
+        // level the server has already agreed to.
+        var level = await SupportsSnapshotAsync(ct) ? IsolationLevel.Snapshot : IsolationLevel.ReadCommitted;
+        _transaction = ((SqlConnection)Connection).BeginTransaction(level);
+        Command!.Transaction = _transaction;
 
         Reader = await Command!.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct);
 
