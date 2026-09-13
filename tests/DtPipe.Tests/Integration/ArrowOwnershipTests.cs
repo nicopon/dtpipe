@@ -142,7 +142,7 @@ public class ArrowOwnershipTests
         // Transformer 1: Filter (Columnar) -> Will return NEW batch (clone) and dispose INPUT
         var filter = new FilterDataTransformer(new FilterOptions 
         { 
-            Filters = new[] { "id > 50" },
+            Filters = new[] { "row.id > 50" },
         }, mockJs.Object);
 
         // Transformer 2: Project (Columnar) -> Will return NEW batch and dispose INPUT

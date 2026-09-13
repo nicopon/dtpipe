@@ -91,7 +91,7 @@ public class ExportServiceIntegrationTests
         // Pipeline:
         // 1. Filter (Columnar): Val > 15 (Drops Id 1)
         var jsProvider = _serviceProvider.GetRequiredService<IJsEngineProvider>();
-        var filter = new FilterDataTransformer(new FilterOptions { Filters = new[] { "Val > 15" } }, jsProvider);
+        var filter = new FilterDataTransformer(new FilterOptions { Filters = new[] { "row.Val > 15" } }, jsProvider);
         await filter.InitializeAsync(columns);
 
         // 2. Compute (Row): NewVal = Val * 2

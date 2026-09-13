@@ -104,7 +104,7 @@ public class ZeroCopyPipelineTests : IAsyncLifetime
         var writerFactory = new ParquetWriterDescriptor();
 
         // Pipeline: Filter (Columnar)
-        var filter = new FilterDataTransformer(new FilterOptions { Filters = new[] { "val > 15" } }, mockJs.Object);
+        var filter = new FilterDataTransformer(new FilterOptions { Filters = new[] { "row.val > 15" } }, mockJs.Object);
         var pipeline = new List<IDataTransformer> { filter };
 
         // Act
