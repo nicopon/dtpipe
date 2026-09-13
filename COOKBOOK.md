@@ -903,6 +903,35 @@ dtpipe \
   --state "state/users_sync.json"
 ```
 
+### Scenario: incremental sync from Oracle — the cursor needs a format mask
+
+Postgres and SQLite compare the cursor mark as a string, so the recipes above interpolate it
+straight into the predicate. Oracle does not: a `TIMESTAMP` column compared against a bare literal
+makes it parse that literal with the session's `NLS_TIMESTAMP_FORMAT`, which will not be the format
+dtpipe writes. Wrap it in `TO_TIMESTAMP` with a mask that matches the state file — ISO 8601 with
+milliseconds, `2026-09-05T08:15:00.000`, as
+[REFERENCE.md#incremental-loading](./REFERENCE.md#incremental-loading) specifies:
+
+```bash
+dtpipe \
+  -i "ora:Data Source=localhost:1521/FREEPDB1;User Id=app;Password=secret" \
+  -q "SELECT * FROM invoices WHERE updated_at > TO_TIMESTAMP('${{cursor://state/invoices.json|1970-01-01T00:00:00.000}}', 'YYYY-MM-DD\"T\"HH24:MI:SS.FF3')" \
+  -o "parquet:invoices.parquet" \
+  --cursor UPDATED_AT \
+  --state "state/invoices.json"
+```
+
+Three details decide whether this runs, and each has its own error when it is wrong:
+
+| Detail | Get it wrong | Oracle says |
+|:---|:---|:---|
+| `\"T\"` quotes the literal T between date and time | `YYYY-MM-DDTHH24:MI:SS.FF3` | `ORA-01821: date format not recognized` |
+| A space instead of that T | `YYYY-MM-DD HH24:MI:SS` | `ORA-01858: A non-numeric character was found instead of a numeric character.` |
+| `.FF3` for the three fractional digits the state file writes | mask stops at `SS` | `ORA-01830: Date format picture ends before converting entire input string.` |
+
+`--cursor` also names the column as the reader returns it, which for an unquoted Oracle identifier
+is upper case: `UPDATED_AT`, not `updated_at`.
+
 ### Scenario: YAML job file for incremental loading
 
 You can configure incremental loading directly in a YAML job file. Here is a configuration that does an incremental sync of an orders table:
