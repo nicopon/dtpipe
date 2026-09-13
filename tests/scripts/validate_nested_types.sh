@@ -110,6 +110,28 @@ expect_eq "and a NULL list, through its reader"  "$(sed -n '3p' "$RT_SELF")" '2,
 expect_eq "and an empty one, still distinct"     "$(sed -n '4p' "$RT_SELF")" '3,[]'
 expect_eq "and a NULL element, in its slot"      "$(sed -n '5p' "$RT_SELF")" '4,"[1,null,3]"'
 
+# ── 4bis. DuckDB STRUCT and MAP, which have no Arrow form ───────────────────────
+#
+# A LIST maps to an Arrow ListType and must stay one; a STRUCT and a MAP arrive from the driver as
+# a Dictionary, which has none — the reader declares those as text and renders the value as JSON,
+# the same answer the writers give a composite a target cannot hold. Before that, building the
+# schema threw before a single row was read, on types the --sql processor handles.
+echo ""
+echo "--- [4bis] DuckDB STRUCT / MAP / LIST through the duck: reader ---"
+RT="$ARTIFACTS_DIR/nested_duck_reader.csv"
+
+rm -f "$RT"
+"$DTPIPE" -i "duck::memory:" -q "SELECT 1 AS id, {'sev':'info','n':2} AS p" -o "$RT" --no-stats > /dev/null 2>&1
+expect_eq "a STRUCT reads back as JSON" "$(sed -n '2p' "$RT")" '1,"{""sev"":""info"",""n"":2}"'
+
+rm -f "$RT"
+"$DTPIPE" -i "duck::memory:" -q "SELECT 1 AS id, MAP{'a':1} AS m" -o "$RT" --no-stats > /dev/null 2>&1
+expect_eq "a MAP reads back as JSON"    "$(sed -n '2p' "$RT")" '1,"{""a"":1}"'
+
+rm -f "$RT"
+"$DTPIPE" -i "duck::memory:" -q "SELECT 1 AS id, [10,20,30]::INTEGER[] AS vals" -o "$RT" --no-stats > /dev/null 2>&1
+expect_eq "a LIST stays a list"         "$(sed -n '2p' "$RT")" '1,"[10,20,30]"'
+
 # ── 5. Unsupported combinations must fail, not corrupt ──────────────────────────
 echo ""
 echo "--- [5] Unsupported combinations fail closed ---"

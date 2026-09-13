@@ -6,6 +6,8 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Core.Expressions;
+using DtPipe.Core.Helpers;
+using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Security;
 using DuckDB.NET.Data;
 using Microsoft.Extensions.Logging;
@@ -170,11 +172,18 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
 					var colCount = Columns.Count;
 					var row = new object[colCount];
 
+					// A column this reader had to declare as text because Arrow has no form for it
+					// (a STRUCT, a MAP) still arrives from the driver as a Dictionary; render it
+					// here so the value matches the column.
+					var renderAsJson = CompositeColumnIndexes(Columns);
+
 					while (await _reader.ReadAsync(ct))
 					{
 						_reader.GetValues(row);
 						var rowCopy = new object?[colCount];
 						System.Array.Copy(row, rowCopy, colCount);
+						foreach (var i in renderAsJson)
+							rowCopy[i] = CompositeCellJson.RenderIfComposite(rowCopy[i]);
 						await bridge.IngestRowsAsync(new[] { rowCopy }, ct);
 					}
 
@@ -216,6 +225,10 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
 			var batch = new object?[batchSize][];
 			var index = 0;
 
+			// Same rendering as the columnar path: a column declared text because Arrow has no form
+			// for it still arrives composite from the driver.
+			var renderAsJson = Columns is null ? [] : CompositeColumnIndexes(Columns);
+
 			while (await _reader.ReadAsync(ct))
 			{
 				var row = new object?[columnCount];
@@ -223,6 +236,9 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
 				{
 					row[i] = _reader.IsDBNull(i) ? null : _reader.GetValue(i);
 				}
+
+				foreach (var i in renderAsJson)
+					row[i] = CompositeCellJson.RenderIfComposite(row[i]);
 
 				batch[index++] = row;
 
@@ -257,7 +273,7 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
 				var name = reader.GetName(i);
 				columns.Add(new PipeColumnInfo(
 					name,
-					reader.GetFieldType(i),
+					RepresentableType(reader.GetFieldType(i)),
 					true,
 					IsCaseSensitive: name != name.ToLowerInvariant() // DuckDB normalizes to lowercase
 				));
@@ -273,12 +289,38 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
 
 			// DuckDB normalizes unquoted identifiers to lowercase (like PostgreSQL)
 			// If column name contains uppercase, it was created with quotes (case-sensitive)
-			columns.Add(new PipeColumnInfo(name, clrType, allowNull,
+			columns.Add(new PipeColumnInfo(name, RepresentableType(clrType), allowNull,
 				IsCaseSensitive: name != name.ToLowerInvariant()));
 		}
 
 		return columns;
 	}
+
+	/// <summary>
+	/// Indexes of the columns declared as text whose value may still arrive composite, computed
+	/// once per read rather than tested per cell.
+	/// </summary>
+	private static int[] CompositeColumnIndexes(IReadOnlyList<PipeColumnInfo> columns)
+		=> Enumerable.Range(0, columns.Count)
+			.Where(i => columns[i].ClrType == typeof(string))
+			.ToArray();
+
+	/// <summary>
+	/// The type to declare for a DuckDB column: its own, or <c>string</c> when Arrow has no form
+	/// for it and the value will be rendered as JSON.
+	/// </summary>
+	/// <remarks>
+	/// A DuckDB STRUCT and a MAP arrive from the driver as a <c>Dictionary</c>, which the Arrow
+	/// type map refuses — so building the schema threw before a single row was read, on a type the
+	/// <c>--sql</c> processor handles without trouble because it takes the Arrow C Data interface
+	/// rather than this row reader. A LIST needs nothing here: it arrives as a collection Arrow
+	/// maps to a ListType, and keeps it.
+	///
+	/// Rendering as JSON is the same answer the writers give a composite a target cannot hold, and
+	/// for the same reason — it is the adapter's decision, not the engine's.
+	/// </remarks>
+	private static Type RepresentableType(Type clrType)
+		=> ArrowTypeMapper.TryGetLogicalType(clrType, out _) ? clrType : typeof(string);
 
 	public async ValueTask DisposeAsync()
 	{

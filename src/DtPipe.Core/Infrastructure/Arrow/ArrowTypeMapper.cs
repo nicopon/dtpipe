@@ -112,6 +112,30 @@ public static class ArrowTypeMapper
     }
 
     /// <summary>
+    /// The same mapping, answering instead of throwing, so a reader can ask whether a column type
+    /// has an Arrow form before it builds a schema around it.
+    /// </summary>
+    /// <remarks>
+    /// This is a question, not a conversion: it decides nothing about what an adapter should do
+    /// with a type Arrow cannot express. A DuckDB STRUCT arrives as a <c>Dictionary</c>, which has
+    /// no Arrow form here, and the adapter that asked renders it as JSON — in the adapter, which
+    /// is where such a decision belongs.
+    /// </remarks>
+    public static bool TryGetLogicalType(Type clrType, out Apache.Arrow.Serialization.Mapping.ArrowTypeResult result)
+    {
+        try
+        {
+            result = GetLogicalType(clrType);
+            return true;
+        }
+        catch (NotSupportedException)
+        {
+            result = default;
+            return false;
+        }
+    }
+
+    /// <summary>
     /// True for CLR collections that represent an Arrow list. <see cref="byte"/>[] and
     /// <see cref="string"/> are excluded on purpose: both are collections in CLR terms, and both
     /// already have their own Arrow encoding (Binary and Utf8).

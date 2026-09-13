@@ -313,6 +313,12 @@ A **source** column whose type the reader cannot map at all — a PostgreSQL `po
 when the schema is built, rather than read as something else. Cast it in your query: `col::json`,
 `array_to_json(col)::text`.
 
+A DuckDB `STRUCT` or `MAP` read through `duck:` is the one composite that arrives as text rather
+than being refused: it has no Arrow form, so the reader declares the column as text and renders
+the value as JSON — the same answer the writers give. A DuckDB `LIST` is unaffected and stays a
+list. To address a field rather than the whole object, name it in the query
+(`SELECT payload.severity`) or read the source through `--sql`, which carries the struct.
+
 ---
 
 ## Target (Writer) Options
