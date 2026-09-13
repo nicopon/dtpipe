@@ -156,7 +156,7 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter, IColumnarD
 		for (int k = 0; k < _targetToSourceMap.Length; k++)
 		{
 			var sourceClrType = _columns![_targetToSourceMap[k]].ClrType;
-			_converters[k] = ColumnConverterFactory.Build(sourceClrType, _targetTypes[k]);
+			_converters[k] = CompositeCellJson.Wrap(ColumnConverterFactory.Build(sourceClrType, _targetTypes[k]));
 		}
 
 		// Build per-column Arrow writers — sync Npgsql Write<T>(), zero boxing (columnar path)
@@ -245,13 +245,18 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter, IColumnarD
 
 		using (batch)
 		{
+			// COPY BINARY has no composite form a text column can accept, so a struct or a list
+			// column becomes JSON before the column writers see it. Same reference back when the
+			// batch holds none, which is the ordinary case.
+			using var payload = CompositeCellJson.RenderComposites(batch);
+
 			if (_options.Strategy is PostgreSqlWriteStrategy.Upsert or PostgreSqlWriteStrategy.Ignore)
 			{
-				await WriteRecordBatchViaStagingAsync(batch, ct);
+				await WriteRecordBatchViaStagingAsync(payload.Batch, ct);
 			}
 			else
 			{
-				await WriteRecordBatchDirectAsync(batch, ct);
+				await WriteRecordBatchDirectAsync(payload.Batch, ct);
 			}
 		}
 	}

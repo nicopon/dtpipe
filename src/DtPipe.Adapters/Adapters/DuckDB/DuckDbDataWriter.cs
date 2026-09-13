@@ -390,7 +390,7 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
                 _targetTypes[i] = targetCol.InferredClrType ?? typeof(string);
                 // F12: build the per-column converter once at init instead of calling
                 // ValueConverter.ConvertValue on every cell.
-                _cellConverters[i] = ColumnConverterFactory.Build(null, _targetTypes[i]);
+                _cellConverters[i] = CompositeCellJson.Wrap(ColumnConverterFactory.Build(null, _targetTypes[i]));
                 var sourceIdx = -1;
                 for (int s = 0; s < _columns!.Count; s++)
                 {

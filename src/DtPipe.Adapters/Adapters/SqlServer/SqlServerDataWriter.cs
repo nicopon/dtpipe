@@ -149,7 +149,7 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter
 				}
 			}
 			_sourceIndices[i] = srcIdx;
-			_converters[i] = ColumnConverterFactory.Build(srcClrType, _targetTypes[i]);
+			_converters[i] = CompositeCellJson.Wrap(ColumnConverterFactory.Build(srcClrType, _targetTypes[i]));
 		}
 
 		_bulkCopy = new SqlBulkCopy((SqlConnection)_connection!, SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.UseInternalTransaction, null)
@@ -254,7 +254,11 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter
 
 			await EnsureBulkCopyInitializedAsync(ct);
 
-			using var reader = new RecordBatchDataReader(batch);
+			// SqlBulkCopy reads cells through RecordBatchDataReader, which hands a struct column
+			// over as a Dictionary the driver has no mapping for. Render those to JSON first.
+			using var payload = CompositeCellJson.RenderComposites(batch);
+
+			using var reader = new RecordBatchDataReader(payload.Batch);
 			if (_options.Strategy is SqlServerWriteStrategy.Upsert or SqlServerWriteStrategy.Ignore)
 				await ExecuteMergeFromReaderAsync(reader, ct);
 			else

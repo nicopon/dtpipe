@@ -133,7 +133,7 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter
 			{
 				for (int i = 0; i < _columns.Count; i++)
 				{
-					cmd.Parameters[i].Value = row[i] ?? DBNull.Value;
+					cmd.Parameters[i].Value = CompositeCellJson.RenderIfComposite(row[i]) ?? DBNull.Value;
 				}
 				await cmd.ExecuteNonQueryAsync(ct);
 			}

@@ -149,25 +149,29 @@ public sealed partial class MySqlDataWriter : BaseSqlDataWriter, IColumnarDataWr
 			// parameterized fallback needs random access to build its VALUES tuples, which a
 			// forward-only RecordBatchDataReader does not offer. Materializing then costs one
 			// buffer pass — the price of not having LOAD DATA at all.
+			// LOAD DATA serialises each cell through RecordBatchDataReader, which hands a struct
+			// column over as a Dictionary MySqlConnector refuses. Render those to JSON first.
+			using var payload = CompositeCellJson.RenderComposites(batch);
+
 			if (await ResolveBulkPathAsync(ct))
 			{
 				if (_options.Strategy is MySqlWriteStrategy.Upsert or MySqlWriteStrategy.Ignore)
 				{
 					await WriteViaStagingAsync(async (destination, token) =>
 					{
-						using var reader = new RecordBatchDataReader(batch);
+						using var reader = new RecordBatchDataReader(payload.Batch);
 						await BulkCopyAsync(destination, reader, token);
 					}, ct);
 				}
 				else
 				{
-					using var reader = new RecordBatchDataReader(batch);
+					using var reader = new RecordBatchDataReader(payload.Batch);
 					await BulkCopyAsync(_quotedTargetTableName, reader, ct);
 				}
 				return;
 			}
 
-			await WriteBatchAsync(MaterializeRows(batch), ct);
+			await WriteBatchAsync(MaterializeRows(payload.Batch), ct);
 		}
 	}
 
@@ -391,7 +395,7 @@ public sealed partial class MySqlDataWriter : BaseSqlDataWriter, IColumnarDataWr
 		for (var i = 0; i < names.Count; i++)
 		{
 			_bufferTable.Columns.Add(names[i], Nullable.GetUnderlyingType(_targetTypes[i]) ?? _targetTypes[i]);
-			_converters[i] = ColumnConverterFactory.Build(_columns![_sourceIndices[i]].ClrType, _targetTypes[i]);
+			_converters[i] = CompositeCellJson.Wrap(ColumnConverterFactory.Build(_columns![_sourceIndices[i]].ClrType, _targetTypes[i]));
 		}
 	}
 

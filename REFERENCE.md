@@ -284,6 +284,22 @@ list, an empty list and a NULL element inside a list stay distinct end to end.
 | Parquet | a native Parquet `LIST` |
 | Arrow | an Arrow `ListType` column |
 | CSV, and any text target | the list rendered as JSON — `[10,20,30]` |
+| A database column that is not itself a collection | the same JSON text |
+
+A nested object — a JSONL record with an object in one of its fields, an Arrow struct — follows the
+same rule wherever the target has no composite type of its own: it is written as JSON text
+(`{"severity":"info"}`), in the target's own text column. The declared schema decides, and the
+rendering never changes it: Parquet still writes a real `LIST` for a column typed as one, and only
+falls back to JSON text for a shape it was given no element type for.
+
+To land a nested object as something other than text — a PostgreSQL `jsonb`, a typed column per
+field — name it in the pipeline rather than relying on the target:
+
+```bash
+dtpipe -i events.jsonl \
+  --compute "severity:row.payload.severity" --compute-types "severity:string" --drop payload \
+  -o "pg:Host=…" --table events
+```
 
 Two combinations are refused rather than approximated, both with the rewrite to apply:
 
@@ -293,8 +309,8 @@ Two combinations are refused rather than approximated, both with the rewrite to 
 - **A NULL element inside a DuckDB `LIST`.** The DuckDB driver refuses to materialize it, whatever
   the target. Postgres arrays have no such limit.
 
-A composite type with no representation — a PostgreSQL `point`, a DuckDB `STRUCT` — is refused at
-schema time rather than written as something else. Cast it in your query: `col::json`,
+A **source** column whose type the reader cannot map at all — a PostgreSQL `point` — is refused
+when the schema is built, rather than read as something else. Cast it in your query: `col::json`,
 `array_to_json(col)::text`.
 
 ---

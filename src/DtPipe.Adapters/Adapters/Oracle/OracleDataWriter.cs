@@ -339,7 +339,7 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
         _converters = new Func<object?, object?>[_columns!.Count];
         for (int i = 0; i < _columns.Count; i++)
         {
-            _converters[i] = ColumnConverterFactory.Build(_columns[i].ClrType, _columns[i].ClrType);
+            _converters[i] = CompositeCellJson.Wrap(ColumnConverterFactory.Build(_columns[i].ClrType, _columns[i].ClrType));
         }
 
         if (_options.Strategy == OracleWriteStrategy.Upsert || _options.Strategy == OracleWriteStrategy.Ignore)

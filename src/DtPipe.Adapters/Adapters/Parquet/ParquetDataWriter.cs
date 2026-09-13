@@ -1,5 +1,6 @@
 using Apache.Arrow;
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Helpers;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using Parquet;
@@ -128,12 +129,18 @@ public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, 
 
 		using (batch)
 		{
-			// Create row group for this batch
+			// Parquet carries a LIST natively, so a column declared as one keeps its shape. A
+			// composite the schema declared as text — a struct, or a list whose source gave no
+			// element type — becomes JSON rather than failing the write: the declared field is
+			// what decides, and it was fixed at InitializeAsync.
+			using var payload = CompositeCellJson.RenderComposites(
+				batch, (index, _) => _dataFields[index] is ListField);
+
 			using var rowGroup = _writer.CreateRowGroup();
 
-			for (int i = 0; i < batch.ColumnCount; i++)
+			for (int i = 0; i < payload.Batch.ColumnCount; i++)
 			{
-				var arrowArray = batch.Column(i);
+				var arrowArray = payload.Batch.Column(i);
 				await ArrowToParquetConverter.WriteColumnAsync(rowGroup, arrowArray, _dataFields[i], ct);
 			}
 		}
