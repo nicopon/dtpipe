@@ -275,8 +275,7 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
 					name,
 					RepresentableType(reader.GetFieldType(i)),
 					true,
-					IsCaseSensitive: name != name.ToLowerInvariant() // DuckDB normalizes to lowercase
-				));
+					IsCaseSensitive: false));
 			}
 			return columns;
 		}
@@ -287,10 +286,14 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
 			var clrType = row["DataType"] as Type ?? typeof(object);
 			var allowNull = row["AllowDBNull"] as bool? ?? true;
 
-			// DuckDB normalizes unquoted identifiers to lowercase (like PostgreSQL)
-			// If column name contains uppercase, it was created with quotes (case-sensitive)
+			// Not case-sensitive, like MySQL, SQLite and SQL Server and unlike PostgreSQL and Oracle.
+			// The rule those two use — a stored name that differs from the engine's folding must
+			// have been quoted when it was created — needs the engine to fold, and DuckDB does not:
+			// a bare CREATE TABLE t(MyCol INT) stores "MyCol" and resolves it case-insensitively.
+			// Copied from the PostgreSQL reader, it marked every mixed-case column as one to
+			// preserve, against the rule every other column follows.
 			columns.Add(new PipeColumnInfo(name, RepresentableType(clrType), allowNull,
-				IsCaseSensitive: name != name.ToLowerInvariant()));
+				IsCaseSensitive: false));
 		}
 
 		return columns;

@@ -231,9 +231,13 @@ public class OracleIntegrationTests : IAsyncLifetime
 			var count = Convert.ToInt32(await countCmd.ExecuteScalarAsync(TestContext.Current.CancellationToken));
 			Assert.Equal(4, count); // 4 rows from test-data.json
 
-			// Verify sample data integrity
+			// Verify sample data integrity — unquoted, which is the point. The source columns are
+			// Id, Name and Score; Oracle folds an unquoted identifier up, so they land as ID, NAME
+			// and SCORE and this query reaches them the way SQL*Plus or any other tool would.
+			// Quoting them here would pass only while dtpipe created "Id", a column nothing but
+			// dtpipe could address.
 			await using var selectCmd = verifyConnection.CreateCommand();
-			selectCmd.CommandText = $"SELECT \"Name\", \"Score\" FROM \"{targetTable}\" WHERE \"Id\" = 1";
+			selectCmd.CommandText = $"SELECT NAME, SCORE FROM \"{targetTable}\" WHERE ID = 1";
 			await using var resultReader = await selectCmd.ExecuteReaderAsync(TestContext.Current.CancellationToken);
 			Assert.True(await resultReader.ReadAsync(TestContext.Current.CancellationToken));
 			Assert.Equal("Alice", resultReader.GetString(0));
