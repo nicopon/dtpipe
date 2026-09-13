@@ -169,7 +169,10 @@ public static class ArrowTypeMap
             ArrowTypeId.Decimal256 => typeof(decimal),
             ArrowTypeId.Duration => typeof(TimeSpan),
             ArrowTypeId.Struct => typeof(Dictionary<string, object?>),
-            ArrowTypeId.List or ArrowTypeId.LargeList or ArrowTypeId.FixedSizeList => typeof(List<object?>),
+            // Typed on the element, not List<object?>: a writer builds its column schema from this
+            // type, and an untyped list makes it guess — Parquet settles on string and then throws
+            // when the first int arrives.
+            ArrowTypeId.List or ArrowTypeId.LargeList or ArrowTypeId.FixedSizeList => GetListClrType(type),
             ArrowTypeId.Map => typeof(Dictionary<object, object?>),
             // A dictionary-encoded column is its value type; the encoding is storage, not meaning.
             ArrowTypeId.Dictionary => type is DictionaryType dict ? GetClrType(dict.ValueType) : typeof(string),
@@ -284,6 +287,26 @@ public static class ArrowTypeMap
         }
 
         return dict;
+    }
+
+    /// <summary>
+    /// <c>List&lt;TElement&gt;</c> for a list column, falling back to <c>List&lt;object?&gt;</c>
+    /// when the element itself has no distinct CLR type to name.
+    /// </summary>
+    private static Type GetListClrType(IArrowType type)
+    {
+        var valueType = type switch
+        {
+            ListType list => list.ValueDataType,
+            LargeListType largeList => largeList.ValueDataType,
+            FixedSizeListType fixedSize => fixedSize.ValueDataType,
+            _ => null
+        };
+
+        if (valueType is null) return typeof(List<object?>);
+
+        var elementType = GetClrType(valueType);
+        return elementType == typeof(object) ? typeof(List<object?>) : typeof(List<>).MakeGenericType(elementType);
     }
 
     private static object? GetFixedSizeListValue(FixedSizeListArray array, int index)

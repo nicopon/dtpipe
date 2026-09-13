@@ -145,6 +145,34 @@ public class ArrowExtensionAndCompositeValueTests
 		ArrowTypeMap.GetClrTypeFromField(field).Should().Be<byte[]>();
 	}
 
+	// ── List element typing ──────────────────────────────────────────────────────────
+
+	[Fact]
+	public void GetClrType_ShouldTypeAListOnItsElement()
+	{
+		// A writer builds its column schema from this type. Left as List<object?>, Parquet
+		// settled on a string column and threw when the first int arrived.
+		var type = new ListType(new Field("item", Int32Type.Default, true));
+
+		ArrowTypeMap.GetClrType(type).Should().Be<List<int>>();
+	}
+
+	[Fact]
+	public void GetClrType_ShouldTypeAFixedSizeListOnItsElement()
+	{
+		var type = new FixedSizeListType(new Field("item", DoubleType.Default, true), 3);
+
+		ArrowTypeMap.GetClrType(type).Should().Be<List<double>>();
+	}
+
+	[Fact]
+	public void GetClrType_ShouldTypeANestedListAllTheWayDown()
+	{
+		var type = new ListType(new Field("item", new ListType(new Field("inner", Int32Type.Default, true)), true));
+
+		ArrowTypeMap.GetClrType(type).Should().Be<List<List<int>>>();
+	}
+
 	// ── Map ──────────────────────────────────────────────────────────────────────────
 
 	[Fact]
