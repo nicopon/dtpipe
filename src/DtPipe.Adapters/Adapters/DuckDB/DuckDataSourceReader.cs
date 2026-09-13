@@ -1,7 +1,7 @@
-using System.Data;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using Apache.Arrow;
+using DtPipe.Adapters.Shared.Infrastructure.DuckDb;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
@@ -15,45 +15,49 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace DtPipe.Adapters.DuckDB;
 
+/// <summary>
+/// Reads a DuckDB query through the Arrow C Data interface.
+/// </summary>
+/// <remarks>
+/// DuckDB is columnar, so a row reader made the data cross into rows and back into columns to
+/// reach Arrow — a detour that boxed every cell and lost any type the driver's schema table could
+/// not name, which is why a STRUCT or a MAP used to arrive as text. The interface takes the
+/// columns as they already are, and it is the same one the SQL processor reads through, so the
+/// two paths cannot report different values for the same column again.
+/// </remarks>
 public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequiresOptions<DuckDbReaderOptions>, IBatchSizeConfigurable
 {
 	private readonly DuckDBConnection _connection;
+	private readonly bool _ownsConnection;
 	private readonly DuckHubConnectionInfo _hubInfo;
-	private readonly DuckDBCommand _command;
 	private readonly string _query;
 	private readonly string? _initSql;
 	private readonly IStringContentResolver? _resolver;
 	private readonly ILogger _logger;
-	private DuckDBDataReader? _reader;
+	private readonly IMcpSecurityContext? _mcpSecurityContext;
 	private readonly SemaphoreSlim _semaphore = new(1, 1);
+	private DuckDbArrowResultReader? _arrowReader;
 
 	public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
-	public Schema? Schema => Columns != null ? DtPipe.Core.Infrastructure.Arrow.ArrowSchemaFactory.Create(Columns) : null;
+	public Schema? Schema { get; private set; }
+
+	// Accepted for interface parity but not enforced: DuckDB hands out its own fixed-size Arrow
+	// chunks, and the reader passes them on rather than regrouping them. The byte cap matters on
+	// the wire-decode readers (ADO, Postgres COPY).
 	public int BatchSize { get; set; } = PipelineOptions.DefaultBatchSize;
-
-	// Accepted for interface parity but not enforced here: DuckDB streams its own fixed-size
-	// Arrow chunks, so a batch never holds more than BatchSize rows' worth of already-bounded
-	// vectors. The byte cap matters on the wire-decode readers (ADO, Postgres COPY).
 	public long MaxBatchBytes { get; set; }
-
-	// DDL/DML keywords to reject
-	// Block destructive commands.
-	private static readonly string[] DdlKeywords =
-	{
-		"CREATE", "DROP", "ALTER", "TRUNCATE", "RENAME",
-		"GRANT", "REVOKE", "VACUUM", "ATTACH", "DETACH",
-		"INSERT", "UPDATE", "DELETE", "REPLACE", "COPY"
-	};
 
 	[GeneratedRegex(@"^\s*(\w+)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
 	private static partial Regex FirstWordRegex();
 
-	private readonly IMcpSecurityContext? _mcpSecurityContext;
-
+	// queryTimeout is accepted for call-site parity and ignored: it only ever reached
+	// DuckDBCommand.CommandTimeout, which DuckDB.NET declares to satisfy the ADO contract and
+	// never reads. Cancellation is the token.
 	public DuckDataSourceReader(string connectionString, string query, DuckDbReaderOptions options, ILogger? logger = null, int queryTimeout = 0, IStringContentResolver? resolver = null, IMcpSecurityContext? mcpSecurityContext = null)
 	{
 		_hubInfo = DuckHubConnectionParser.Parse(options.Variant, connectionString);
 		_connection = new DuckDBConnection(_hubInfo.EffectiveConnectionString);
+		_ownsConnection = true;
 
 		ValidateQueryIsSafeSelect(query);
 
@@ -62,12 +66,9 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
 		_resolver = resolver;
 		_logger = logger ?? NullLogger.Instance;
 		_mcpSecurityContext = mcpSecurityContext;
-		_command = new DuckDBCommand(query, _connection)
-		{
-			CommandTimeout = queryTimeout
-		};
 	}
 
+	// Same contract, over a connection the caller owns and keeps.
 	public DuckDataSourceReader(DuckDBConnection connection, string query, DuckDbReaderOptions options, ILogger? logger = null, int queryTimeout = 0, IStringContentResolver? resolver = null, IMcpSecurityContext? mcpSecurityContext = null)
 	{
 		_hubInfo = new DuckHubConnectionInfo { IsHub = false };
@@ -78,11 +79,8 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
 		_resolver = resolver;
 		_logger = logger ?? NullLogger.Instance;
 		_connection = connection;
+		_ownsConnection = false;
 		_mcpSecurityContext = mcpSecurityContext;
-		_command = new DuckDBCommand(query, _connection)
-		{
-			CommandTimeout = queryTimeout
-		};
 	}
 
 	private static void ValidateQueryIsSafeSelect(string query)
@@ -100,24 +98,12 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
 		{
 			throw new InvalidOperationException($"Query must start with SELECT/WITH. Detected: {firstWord}");
 		}
-
-		// Basic keyword check
-		var upperQuery = query.ToUpperInvariant();
-		foreach (var keyword in DdlKeywords)
-		{
-			if (Regex.IsMatch(upperQuery, $@"\b{keyword}\b"))
-			{
-				// Allow SELECT
-				if (firstWord == "SELECT") continue;
-				// Be stricter for DuckDB as it might operate on local files
-				// But for now, simple consistency
-			}
-		}
 	}
 
 	public async Task OpenAsync(CancellationToken ct = default)
 	{
-		await _connection.OpenAsync(ct);
+		if (_connection.State != System.Data.ConnectionState.Open)
+			await _connection.OpenAsync(ct);
 
 		if (_hubInfo.IsHub && _hubInfo.InitSqlStatements.Length > 0)
 		{
@@ -142,67 +128,34 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
 		}
 
 		await DuckInitSqlRunner.RunAsync(_connection, _initSql, _resolver, ct);
+		await DuckDbArrowResultReader.ApplyArrowSessionSettingsAsync(_connection, ct);
 
-		_reader = (DuckDBDataReader)await _command.ExecuteReaderAsync(ct);
-		Columns = ExtractColumns(_reader);
+		_arrowReader = new DuckDbArrowResultReader(_connection, _query, _logger);
+		Schema = _arrowReader.Prepare();
+		Columns = Schema.FieldsList
+			.Select(f => new PipeColumnInfo(
+				f.Name,
+				ArrowTypeMapper.GetClrTypeFromField(f),
+				f.IsNullable,
+				// Not case-sensitive, like MySQL, SQLite and SQL Server and unlike PostgreSQL and
+				// Oracle. The rule those two use — a stored name that differs from the engine's
+				// folding must have been quoted when it was created — needs the engine to fold,
+				// and DuckDB does not: a bare CREATE TABLE t(MyCol INT) stores "MyCol" and
+				// resolves it case-insensitively.
+				IsCaseSensitive: false))
+			.ToList();
 	}
 
 	public async IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync([EnumeratorCancellation] CancellationToken ct = default)
 	{
-		if (_reader is null)
+		if (_arrowReader is null)
 			throw new InvalidOperationException("Call OpenAsync first.");
 
-		// Lock to ensure we don't dispose while reading
 		await _semaphore.WaitAsync(ct);
 		try
 		{
-			if (Columns == null) throw new InvalidOperationException("Reader not opened.");
-
-			// Using ArrowRowToColumnarBridge to efficiently produce RecordBatches from the DataReader.
-			var bridge = new DtPipe.Core.Infrastructure.Arrow.ArrowRowToColumnarBridge(_logger);
-			await bridge.InitializeAsync(Columns, BatchSize, ct: ct);
-
-			// Yield batches as they are produced by the bridge
-			// Synchronous feeder loop to avoid Task.Run overhead and potential deadlocks in simple scenarios
-			// For larger datasets, this could be returned to a Task.Run if needed for concurrency
-			var ingestionTask = Task.Run(async () =>
-			{
-				try
-				{
-					var colCount = Columns.Count;
-					var row = new object[colCount];
-
-					// A column this reader had to declare as text because Arrow has no form for it
-					// (a STRUCT, a MAP) still arrives from the driver as a Dictionary; render it
-					// here so the value matches the column.
-					var renderAsJson = CompositeColumnIndexes(Columns);
-
-					while (await _reader.ReadAsync(ct))
-					{
-						_reader.GetValues(row);
-						var rowCopy = new object?[colCount];
-						System.Array.Copy(row, rowCopy, colCount);
-						foreach (var i in renderAsJson)
-							rowCopy[i] = CompositeCellJson.RenderIfComposite(rowCopy[i]);
-						await bridge.IngestRowsAsync(new[] { rowCopy }, ct);
-					}
-
-					await bridge.CompleteAsync(ct);
-				}
-				catch (Exception ex)
-				{
-					_logger.LogError(ex, "Error during DuckDB to Arrow ingestion");
-					bridge.Fault(ex);
-					throw;
-				}
-			}, ct);
-
-			await foreach (var batch in bridge.ReadRecordBatchesAsync(ct))
-			{
+			await foreach (var batch in _arrowReader.ReadRecordBatchesAsync(ct))
 				yield return batch;
-			}
-
-			await ingestionTask;
 		}
 		finally
 		{
@@ -212,130 +165,41 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
 
 	public async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(
 		int batchSize,
-		[System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+		[EnumeratorCancellation] CancellationToken ct = default)
 	{
-		if (_reader is null)
-			throw new InvalidOperationException("Call OpenAsync first.");
-
-		// Lock to ensure we don't dispose while reading
-		await _semaphore.WaitAsync(ct);
-		try
+		await foreach (var batch in ReadRecordBatchesAsync(ct))
 		{
-			var columnCount = _reader.FieldCount;
-			var batch = new object?[batchSize][];
-			var index = 0;
-
-			// Same rendering as the columnar path: a column declared text because Arrow has no form
-			// for it still arrives composite from the driver.
-			var renderAsJson = Columns is null ? [] : CompositeColumnIndexes(Columns);
-
-			while (await _reader.ReadAsync(ct))
-			{
-				var row = new object?[columnCount];
-				for (var i = 0; i < columnCount; i++)
-				{
-					row[i] = _reader.IsDBNull(i) ? null : _reader.GetValue(i);
-				}
-
-				foreach (var i in renderAsJson)
-					row[i] = CompositeCellJson.RenderIfComposite(row[i]);
-
-				batch[index++] = row;
-
-				if (index >= batchSize)
-				{
-					yield return new ReadOnlyMemory<object?[]>(batch, 0, index);
-					batch = new object?[batchSize][];
-					index = 0;
-				}
-			}
-
-			if (index > 0)
-			{
-				yield return new ReadOnlyMemory<object?[]>(batch, 0, index);
-			}
-		}
-		finally
-		{
-			_semaphore.Release();
+			using (batch)
+				yield return ConvertBatchToRows(batch);
 		}
 	}
 
-	private static List<PipeColumnInfo> ExtractColumns(DuckDBDataReader reader)
+	private static ReadOnlyMemory<object?[]> ConvertBatchToRows(RecordBatch batch)
 	{
-		var columns = new List<PipeColumnInfo>(reader.FieldCount);
-		var schemaTable = reader.GetSchemaTable();
-
-		if (schemaTable is null)
+		var rows = new object?[batch.Length][];
+		for (var r = 0; r < batch.Length; r++)
 		{
-			for (var i = 0; i < reader.FieldCount; i++)
+			rows[r] = new object?[batch.ColumnCount];
+			for (var c = 0; c < batch.ColumnCount; c++)
 			{
-				var name = reader.GetName(i);
-				columns.Add(new PipeColumnInfo(
-					name,
-					RepresentableType(reader.GetFieldType(i)),
-					true,
-					IsCaseSensitive: false));
+				var column = batch.Column(c);
+				rows[r][c] = column is null
+					? null
+					: ArrowTypeMapper.GetValueForField(column, batch.Schema.GetFieldByIndex(c), r);
 			}
-			return columns;
 		}
-
-		foreach (DataRow row in schemaTable.Rows)
-		{
-			var name = row["ColumnName"]?.ToString() ?? $"Column{columns.Count}";
-			var clrType = row["DataType"] as Type ?? typeof(object);
-			var allowNull = row["AllowDBNull"] as bool? ?? true;
-
-			// Not case-sensitive, like MySQL, SQLite and SQL Server and unlike PostgreSQL and Oracle.
-			// The rule those two use — a stored name that differs from the engine's folding must
-			// have been quoted when it was created — needs the engine to fold, and DuckDB does not:
-			// a bare CREATE TABLE t(MyCol INT) stores "MyCol" and resolves it case-insensitively.
-			// Copied from the PostgreSQL reader, it marked every mixed-case column as one to
-			// preserve, against the rule every other column follows.
-			columns.Add(new PipeColumnInfo(name, RepresentableType(clrType), allowNull,
-				IsCaseSensitive: false));
-		}
-
-		return columns;
+		return rows;
 	}
-
-	/// <summary>
-	/// Indexes of the columns declared as text whose value may still arrive composite, computed
-	/// once per read rather than tested per cell.
-	/// </summary>
-	private static int[] CompositeColumnIndexes(IReadOnlyList<PipeColumnInfo> columns)
-		=> Enumerable.Range(0, columns.Count)
-			.Where(i => columns[i].ClrType == typeof(string))
-			.ToArray();
-
-	/// <summary>
-	/// The type to declare for a DuckDB column: its own, or <c>string</c> when Arrow has no form
-	/// for it and the value will be rendered as JSON.
-	/// </summary>
-	/// <remarks>
-	/// A DuckDB STRUCT and a MAP arrive from the driver as a <c>Dictionary</c>, which the Arrow
-	/// type map refuses — so building the schema threw before a single row was read, on a type the
-	/// <c>--sql</c> processor handles without trouble because it takes the Arrow C Data interface
-	/// rather than this row reader. A LIST needs nothing here: it arrives as a collection Arrow
-	/// maps to a ListType, and keeps it.
-	///
-	/// Rendering as JSON is the same answer the writers give a composite a target cannot hold, and
-	/// for the same reason — it is the adapter's decision, not the engine's.
-	/// </remarks>
-	private static Type RepresentableType(Type clrType)
-		=> ArrowTypeMapper.TryGetLogicalType(clrType, out _) ? clrType : typeof(string);
 
 	public async ValueTask DisposeAsync()
 	{
 		await _semaphore.WaitAsync();
 		try
 		{
-			if (_reader is not null)
-			{
-				await _reader.DisposeAsync();
-			}
-			await _command.DisposeAsync();
-			await _connection.DisposeAsync();
+			_arrowReader?.Dispose();
+			_arrowReader = null;
+			if (_ownsConnection)
+				await _connection.DisposeAsync();
 		}
 		finally
 		{
