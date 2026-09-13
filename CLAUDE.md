@@ -221,7 +221,20 @@ They *did* drift, and it shipped: `--sql` exited 1 on an `ENUM` and on a fixed-s
 
 > **Enforced by** nothing. `validate_core_boundary.sh` does not look here, and no check counts P/Invoke surfaces. Discipline.
 
-**The ownership net does not reach this path.** A `RecordBatch` imported by `CArrowArrayImporter` follows the ordinary rule — the consumer disposes what it receives — but its memory is freed by the C Data release callback and never passes through a `MemoryAllocator`, so `TrackingMemoryPool` (and therefore `ArrowOwnershipTests`) cannot observe it. A green suite proves nothing about DuckDB reads.
+**The ownership net reaches this path through a different instrument.** A `RecordBatch` imported by
+`CArrowArrayImporter` follows the ordinary rule — the consumer disposes what it receives — but its
+memory is freed by the C Data release callback and never passes through a `MemoryAllocator`, so
+`TrackingMemoryPool` (and therefore `ArrowOwnershipTests`) cannot observe it. `CDataReleaseProbe`
+counts the release callback instead, and `CDataOwnershipTests` runs the engine's consumers —
+segment runner, writer boundary and its `--limit` slice, fan-out, row bridge — over imported
+batches.
+
+**Peak memory is not that instrument, and reaching for it measures nothing.** A batch a consumer
+forgets to dispose is released by its finalizer, so the cost of a broken dispose is a backlog
+rather than the payload: a binary whose `null:` writer drops every batch peaks at the same 108 MB
+as the correct one on 4 000 000 rows. `validate_duck_streaming.sh` uses that same peak for the
+claim it *can* decide — that the result is streamed chunk by chunk rather than held whole — and
+says in its own header that it is not the ownership net.
 
 ### Transformer Pipeline
 
@@ -401,10 +414,11 @@ touches it. Ownership moves downstream when the batch is yielded, returned, or w
   `Clone`), then disposes its own reference. Each consumer disposes the batch it received.
 
 > **Enforced by** `ArrowOwnershipTests` (CI) — `TrackingMemoryPool` asserts allocations return to
-> zero after a linear chain and after a fan-out where one branch bridges to rows. **Not covered:**
-> a new transformer that aliases a column without retaining it — no check distinguishes an aliased
-> array from a rebuilt one. Discipline, plus the `RetainArray` call reads as the obvious idiom next
-> to the five that already have it.
+> zero after a linear chain and after a fan-out where one branch bridges to rows — and, over batches
+> that arrived through the C Data interface, by `CDataOwnershipTests` counting the release callback
+> (see *One way to read DuckDB*). **Not covered:** a new transformer that aliases a column without
+> retaining it — no check distinguishes an aliased array from a rebuilt one. Discipline, plus the
+> `RetainArray` call reads as the obvious idiom next to the five that already have it.
 
 ## Apache.Arrow.Serialization
 
