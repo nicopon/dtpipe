@@ -1,7 +1,8 @@
 # Extending DtPipe: adding an Adapter or a Transformer
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://github.com/codespaces/new?repo=nicopon/DtPipe)
-This guide explains where and how to add a new *adapter* (reader/writer) or a *transformer* in DtPipe.
+This guide explains where and how to add a new *adapter* (reader/writer) or a *transformer* in
+DtPipe.
 
 ---
 
@@ -63,7 +64,9 @@ public class MyProviderWriterOptions : IProviderOptions, IKeyAwareOptions
 }
 ```
 
-> **Why `Hidden = true`?** Generic options (`--table`, `--strategy`, `--insert-mode`) appear once in the CLI help under "Core". Provider-specific versions of these options are hidden to keep help output clean while retaining backward compatibility.
+> **Why `Hidden = true`?** Generic options (`--table`, `--strategy`, `--insert-mode`) appear once in
+> the CLI help under "Core". Provider-specific versions of these options are hidden to keep help
+> output clean while retaining backward compatibility.
 
 ### Step 2 — IStreamReader / IDataWriter (in DtPipe.Adapters)
 
@@ -100,7 +103,8 @@ public class MyProviderStreamReader : IStreamReader
 
 Create `src/DtPipe.Adapters/Adapters/MyProvider/MyProviderReaderDescriptor.cs`.
 
-The descriptor is the only coupling point between `DtPipe` (CLI) and `DtPipe.Adapters`. It must **not** use dump options — the query is received via the cast options object:
+The descriptor is the only coupling point between `DtPipe` (CLI) and `DtPipe.Adapters`. It must
+**not** use dump options — the query is received via the cast options object:
 
 ```csharp
 using DtPipe.Core.Abstractions;
@@ -141,7 +145,9 @@ Implement `ITypeMapper` in `MyProviderTypeConverter.cs` for custom CLR → colum
 
 ### Step 6 — Tests
 
-Place unit tests under `tests/DtPipe.Tests/Unit/` and integration tests under `tests/DtPipe.Tests/Integration/`. If the provider requires a database, provide a Docker Compose service in `tests/infra/`.
+Place unit tests under `tests/DtPipe.Tests/Unit/` and integration tests under
+`tests/DtPipe.Tests/Integration/`. If the provider requires a database, provide a Docker Compose
+service in `tests/infra/`.
 
 ---
 
@@ -210,7 +216,8 @@ public class MyTransformer : IDataTransformer
 The factory has three creation paths:
 
 - `CreateFromOptions(object)` — called by the CLI pipeline builder (main path since refactoring).
-- `CreateFromConfiguration(...)` — legacy path kept for compatibility; can delegate to `CreateFromOptions`.
+- `CreateFromConfiguration(...)` — legacy path kept for compatibility; can delegate to
+  `CreateFromOptions`.
 - `CreateFromYamlConfig(TransformerConfig)` — YAML job file path.
 
 ```csharp
@@ -261,10 +268,11 @@ public class MyTransformerFactory : IDataTransformerFactory
 }
 ```
 
-> **Note on `ICliContributor`:** Transformers do **not** need to implement `ICliContributor`.
-> CLI flags are auto-generated from `[ComponentOption]` attributes by `CliOptionBuilder.GenerateFlagDefsForType(OptionsType)`.
-> Implement `ICliContributor` only if you need to customize flag definitions beyond what `[ComponentOption]` provides
-> (e.g. non-standard arity or complex aliases).
+> **Note on `ICliContributor`:** Transformers do **not** need to implement `ICliContributor`. CLI
+> flags are auto-generated from `[ComponentOption]` attributes by
+> `CliOptionBuilder.GenerateFlagDefsForType(OptionsType)`. Implement `ICliContributor` only if you
+> need to customize flag definitions beyond what `[ComponentOption]` provides (e.g. non-standard
+> arity or complex aliases).
 
 ### Step 4 — Register in DI
 

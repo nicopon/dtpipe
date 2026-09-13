@@ -1,6 +1,8 @@
 # DtPipe CLI Reference
 
-> **Docs map:** [README.md](./README.md) — quick start · [COOKBOOK.md](./COOKBOOK.md) — recipes · [EXTENDING.md](./EXTENDING.md) — new adapters/transformers · [CLAUDE.md](./CLAUDE.md) — contributor internals.
+> **Docs map:** [README.md](./README.md) — quick start · [COOKBOOK.md](./COOKBOOK.md) — recipes ·
+> [EXTENDING.md](./EXTENDING.md) — new adapters/transformers · [CLAUDE.md](./CLAUDE.md) —
+> contributor internals.
 
 ## Table of Contents
 
@@ -54,7 +56,8 @@ dtpipe --job FILE [OVERRIDES]
 
 ## Secret Management
 
-DtPipe stores secrets in the OS credential store (macOS Keychain, Windows Credential Manager, Linux Secret Service).
+DtPipe stores secrets in the OS credential store (macOS Keychain, Windows Credential Manager, Linux
+Secret Service).
 
 ```bash
 # Store a connection string
@@ -79,13 +82,15 @@ Secrets can be referenced in two ways:
 - **`keyring://alias`** — replaces the entire value (connection strings, `--duck-init`)
 - **`${{keyring://alias}}`** — inline substitution within a string
 
-> See [Value Resolution](#value-resolution) for the full resolution pipeline, supported contexts, and CLI/YAML differences.
+> See [Value Resolution](#value-resolution) for the full resolution pipeline, supported contexts,
+> and CLI/YAML differences.
 
 ---
 
 ## Value Resolution
 
-DtPipe resolves string values through a sequential pipeline before use. The available mechanisms depend on the context.
+DtPipe resolves string values through a sequential pipeline before use. The available mechanisms
+depend on the context.
 
 ### Resolution pipeline
 
@@ -96,9 +101,11 @@ DtPipe resolves string values through a sequential pipeline before use. The avai
 2. **Inline substitution** (applied to the result of step 1):
    - `${{ENV_VAR}}` — substitute an environment variable
    - `${{keyring://alias}}` — substitute an inline keyring secret
-   - `${{cursor://path|default}}` — substitute a cursor value from a state file (with optional default value if the state file does not exist)
+   - `${{cursor://path|default}}` — substitute a cursor value from a state file (with optional
+     default value if the state file does not exist)
 
-Steps are composable: a keyring block can itself contain `${{ENV_VAR}}` placeholders that are resolved afterwards.
+Steps are composable: a keyring block can itself contain `${{ENV_VAR}}` placeholders that are
+resolved afterwards.
 
 ### Compatibility matrix
 
@@ -115,12 +122,12 @@ Not all mechanisms are available in every context:
 
 > [!IMPORTANT]
 > **YAML Interpolation**: In YAML job files, `${{ENV_VAR}}`, `${{keyring://...}}` and
-> `${{cursor://...}}` interpolations run through the same resolver engine as the CLI
-> (env → keyring → cursor, in that order) and are applied to the raw YAML text *before*
-> parsing — so they work on **all** values (including configuration properties that aren't
-> normally resolved, like `batch-size` or `separator`). Unresolved variables are left
-> verbatim in the text.
-> Full-value replacement (`@file` and `keyring://alias` without braces) only works for specific string fields that pass through the CLI resolver (connection strings, queries, hooks, and transformer scripts).
+> `${{cursor://...}}` interpolations run through the same resolver engine as the CLI (env → keyring
+> → cursor, in that order) and are applied to the raw YAML text *before* parsing — so they work on
+> **all** values (including configuration properties that aren't normally resolved, like
+> `batch-size` or `separator`). Unresolved variables are left verbatim in the text. Full-value
+> replacement (`@file` and `keyring://alias` without braces) only works for specific string fields
+> that pass through the CLI resolver (connection strings, queries, hooks, and transformer scripts).
 
 ### Examples
 
@@ -169,22 +176,32 @@ dtpipe -i duck:memory --duck-init "keyring://s3-init" ...
 | **Null** | — | ✅ | `null:` | — | — |
 | **Checksum** | — | ✅ | `checksum:` | — | — |
 
-> For Stdin/Stdout: use `-` as the connection string (`csv:-`) or the bare provider name (`csv` = `csv:-`).
+> For Stdin/Stdout: use `-` as the connection string (`csv:-`) or the bare provider name (`csv` =
+> `csv:-`).
 
-> **DuckDB dual role**: Beyond being a regular read/write provider, DuckDB also serves as the **internal SQL engine** for `--sql` branches in DAG pipelines (joins, unions, CTEs). See [DAG Syntax](#dag-syntax) and [Provider-Specific Options](#provider-specific-options) for details on `--duck-init`.
+> **DuckDB dual role**: Beyond being a regular read/write provider, DuckDB also serves as the
+> **internal SQL engine** for `--sql` branches in DAG pipelines (joins, unions, CTEs). See
+> [DAG Syntax](#dag-syntax) and [Provider-Specific Options](#provider-specific-options) for details
+> on `--duck-init`.
 
 ### Database Connection Strings (ADO.NET format)
 
-DtPipe is powered by .NET database providers, which expect standard **ADO.NET connection strings** rather than the connection URIs typically used in the Python/data ecosystem (e.g. by SQLAlchemy or psycopg2).
+DtPipe is powered by .NET database providers, which expect standard **ADO.NET connection strings**
+rather than the connection URIs typically used in the Python/data ecosystem (e.g. by SQLAlchemy or
+psycopg2).
 
-* **ADO.NET format**: A list of semicolon-separated `Key=Value;` pairs (e.g. `Host=localhost;Database=mydb;`).
-* **Python URIs** (e.g. `postgresql://user:pass@host:port/db`) are **not natively supported** by the underlying database drivers and must be translated.
+* **ADO.NET format**: A list of semicolon-separated `Key=Value;` pairs (e.g.
+  `Host=localhost;Database=mydb;`).
+* **Python URIs** (e.g. `postgresql://user:pass@host:port/db`) are **not natively supported** by the
+  underlying database drivers and must be translated.
 
-For a comprehensive catalog of all connection string options, parameters, and database drivers, visit **[connectionstrings.com](https://www.connectionstrings.com/)**.
+For a comprehensive catalog of all connection string options, parameters, and database drivers,
+visit **[connectionstrings.com](https://www.connectionstrings.com/)**.
 
 #### Conversion Reference Table
 
-If you are coming from Python or SQLAlchemy, use this translation guide to build your `-i` / `-o` strings:
+If you are coming from Python or SQLAlchemy, use this translation guide to build your `-i` / `-o`
+strings:
 
 | Database | Prefix | Python URI Format | ADO.NET Format (DtPipe) |
 |:---|:---|:---|:---|
@@ -338,8 +355,9 @@ everything else — at a target with no composite type of its own.
 | `--prefix` | `"staging_"` | Table name prefix applied to all DB writers |
 | `--duck-init` | `"LOAD azure"` | **(DuckDB only)** SQL executed after connection open. See [Value Resolution](#value-resolution) |
 
-> `--pre-exec`, `--post-exec` etc. accept inline SQL or a file path (`@scripts/pre.sql` or a `.sql` file path).
-> `--duck-init` runs on the DuckDB connection before reads or writes (unlike `--pre-exec` which runs on the target DB after connection).
+> `--pre-exec`, `--post-exec` etc. accept inline SQL or a file path (`@scripts/pre.sql` or a `.sql`
+> file path). `--duck-init` runs on the DuckDB connection before reads or writes (unlike
+> `--pre-exec` which runs on the target DB after connection).
 
 ### Identifier casing
 
@@ -443,7 +461,8 @@ dtpipe -i sales.csv -o azure://reports/sales.parquet --azure-connection-string "
 - **Writes replace the target key.** Object storage has no append or upsert, so `--strategy` is
   refused rather than ignored. The upload is issued once the pipeline completes: a failed run
   leaves the existing object untouched rather than replacing it with a partial one.
-- **Reads glob natively**: `s3://bucket/dt=*/part-*.parquet` reads every match. A local path globs too, over one directory — see [File globs](#file-globs).
+- **Reads glob natively**: `s3://bucket/dt=*/part-*.parquet` reads every match. A local path globs
+  too, over one directory — see [File globs](#file-globs).
 - `https://`, `gs://` and other schemes are **not** claimed by any provider, and object storage is
   never a hub target (`duck+s3:` fails closed). Reach those through the DuckDB engine
   (`--duck-init "INSTALL httpfs; …"` + `read_parquet(…)` / `COPY … TO …`) — see the MinIO/Azurite
@@ -573,7 +592,10 @@ Transformer options are the exception: a new transformer **instance** starts at 
 trigger-flag recurrence (`--fake A --fake-seed-row --fake B --fake-seed-row` builds two
 instances), so repeating a transformer option configures the next instance and is legal.
 
-> **SQL engine**: The `--sql` processor uses DuckDB internally — the same engine available as a read/write provider (`duck:`). This means all DuckDB SQL extensions and functions are available in `--sql` branches. Use `--duck-init` to load extensions before query execution. See [Provider-Specific Options](#provider-specific-options) for details.
+> **SQL engine**: The `--sql` processor uses DuckDB internally — the same engine available as a
+> read/write provider (`duck:`). This means all DuckDB SQL extensions and functions are available in
+> `--sql` branches. Use `--duck-init` to load extensions before query execution. See
+> [Provider-Specific Options](#provider-specific-options) for details.
 
 ### Canonical topologies
 
@@ -685,7 +707,8 @@ so it is the authority on any shape this table leaves open.
 
 ### Environment variable and secret interpolation
 
-Environment variables and secrets use the `${{...}}` syntax. See [Value Resolution](#value-resolution) for the full compatibility matrix and CLI/YAML differences.
+Environment variables and secrets use the `${{...}}` syntax. See
+[Value Resolution](#value-resolution) for the full compatibility matrix and CLI/YAML differences.
 
 ---
 
@@ -693,7 +716,9 @@ Environment variables and secrets use the `${{...}}` syntax. See [Value Resoluti
 
 ### DuckDB
 
-DuckDB serves a dual role in dtpipe: it is both a standard read/write **provider** (`duck:`) and the **internal SQL engine** powering `--sql` branches. The `--duck-init` flag applies to all three integration points:
+DuckDB serves a dual role in dtpipe: it is both a standard read/write **provider** (`duck:`) and the
+**internal SQL engine** powering `--sql` branches. The `--duck-init` flag applies to all three
+integration points:
 
 | Component | Flag | When it runs |
 |:---|:---|:---|
@@ -701,7 +726,9 @@ DuckDB serves a dual role in dtpipe: it is both a standard read/write **provider
 | Writer (`duck:`) | `--duck-init` | After connection open, before schema initialization |
 | SQL processor (`--sql`) | `--duck-init` | After connection open and built-in `SET` statements, before Arrow stream registration |
 
-> `--pre-exec` / `--post-exec` run SQL **on the target database after writes**; `--duck-init` runs **on the DuckDB connection before reads or queries**. They serve different purposes and can be combined.
+> `--pre-exec` / `--post-exec` run SQL **on the target database after writes**; `--duck-init` runs
+> **on the DuckDB connection before reads or queries**. They serve different purposes and can be
+> combined.
 
 In YAML job files, use the `provider-options` block keyed by component name:
 
@@ -723,7 +750,8 @@ dtpipe -i events.parquet --alias ev \
   -o result.parquet
 ```
 
-In a YAML job, the same branch nests both under `provider-options.sql` (not `provider-options.duck` — that key belongs to the reader/writer):
+In a YAML job, the same branch nests both under `provider-options.sql` (not `provider-options.duck`
+— that key belongs to the reader/writer):
 
 ```yaml
 ev:
@@ -798,19 +826,24 @@ specific one, or when the table does not exist yet and dtpipe must generate the 
 
 ## Incremental Loading
 
-DtPipe supports cursor-driven incremental loading to transfer only new or updated records since the last successful run.
+DtPipe supports cursor-driven incremental loading to transfer only new or updated records since the
+last successful run.
 
 ### Overview
 
 Incremental loading uses two key mechanisms:
-1. **State Persistence**: The CLI tracks the maximum value observed in a designated cursor column and writes it to a JSON state file after a successful execution.
-2. **Query Interpolation**: The SQL query uses the `${{cursor://path|default}}` resolver to filter for records greater than (or equal to) the last saved value.
+1. **State Persistence**: The CLI tracks the maximum value observed in a designated cursor column
+   and writes it to a JSON state file after a successful execution.
+2. **Query Interpolation**: The SQL query uses the `${{cursor://path|default}}` resolver to filter
+   for records greater than (or equal to) the last saved value.
 
 ### CLI Flags
 
-- `--cursor COLUMN` — Specifies the column to observe for tracking the maximum value (e.g. `updated_at` or `id`).
+- `--cursor COLUMN` — Specifies the column to observe for tracking the maximum value (e.g.
+  `updated_at` or `id`).
 - `--state PATH` — Specifies the path to the state file where the cursor metadata will be saved.
-- `--cursor-from VALUE` — Global override to temporarily force a starting cursor value for the current run, ignoring the state file.
+- `--cursor-from VALUE` — Global override to temporarily force a starting cursor value for the
+  current run, ignoring the state file.
 
 ### State File Format
 
@@ -834,7 +867,9 @@ The state file is stored as a simple, human-readable JSON file:
 
 ### DAG Validation
 
-To prevent concurrent writes or corrupted cursor states, DtPipe enforces that **no two writers may share the same state file**. If the DAG validator detects duplicate state files across branches, pipeline execution will fail immediately.
+To prevent concurrent writes or corrupted cursor states, DtPipe enforces that **no two writers may
+share the same state file**. If the DAG validator detects duplicate state files across branches,
+pipeline execution will fail immediately.
 
 ---
 
@@ -871,9 +906,9 @@ trace says so (`10 → 3 rows`) rather than leaving a blank cell that would read
 
 ### Materialising a point in the pipeline
 
-`--checkpoint` writes a branch's output to a local store on its way to the writer; `--from-checkpoint`
-replaces the reader with it. Together they let you run up to a point, look, change a transformer,
-and pick up again without reading the source a second time.
+`--checkpoint` writes a branch's output to a local store on its way to the writer;
+`--from-checkpoint` replaces the reader with it. Together they let you run up to a point, look,
+change a transformer, and pick up again without reading the source a second time.
 
 ```bash
 dtpipe -i oracle:"…" --query "SELECT * FROM big_table" --mask email --checkpoint -o null:
@@ -976,7 +1011,9 @@ Restart your terminal (or `source ~/.zshrc`) to activate. Completion suggests pr
 
 ## Model Context Protocol (MCP) Server
 
-`dtpipe mcp` starts a native Model Context Protocol (MCP) server over STDIO. This allows AI coding agents and assistants (Cursor, Claude Desktop, Antigravity, VS Code MCP) to interact with `dtpipe` directly.
+`dtpipe mcp` starts a native Model Context Protocol (MCP) server over STDIO. This allows AI coding
+agents and assistants (Cursor, Claude Desktop, Antigravity, VS Code MCP) to interact with `dtpipe`
+directly.
 
 ### Usage
 
@@ -1007,13 +1044,52 @@ dtpipe mcp
 
 ### AI Agent Subcommand (`dtpipe agent`)
 
-Launches an interactive or automated ReAct AI agent loop for data integration tasks. The agent runs against a local Ollama install or the OpenAI API (`--provider`), auto-discovers local Ollama models, renders Spectre.Console DAG topology boxes, and offers 1-click YAML file exports.
+Launches an interactive or automated ReAct AI agent loop for data integration tasks. The agent runs
+against a local Ollama install or the OpenAI API (`--provider`), auto-discovers local Ollama models,
+renders Spectre.Console DAG topology boxes, and offers 1-click YAML file exports.
 
-**On a real interactive terminal, the whole session runs inside a full-screen surface** — a steps list, its detail, the plan/DAG under construction and a running transcript, with an input line open between turns. `Enter` on the input line starts the next turn; a line starting with `/` is a command instead — `/exec` runs the validated plan through `execute-yaml-job` (dry-run unless `--apply`, which adds one more confirmation before the real write), `/mode` cycles the operating mode, `/save [path]` writes the plan YAML to disk, `/note <text>` records what you made of what just happened into the session trace, `/review` moves focus to the steps list, `/quit` leaves. **Esc during a turn is a soft cancel**: it stops the model call in flight (never a tool call already running) and keeps the session open — the trajectory so far is kept, and the turn is reported as interrupted, not as an error. Only Ctrl-C ends the session, exiting `130`. `--no-tui` opts out and keeps the scrollback output described below; `--no-stream`, a pipe, a redirect or a non-ANSI terminal already fall back to it regardless of the flag.
+**On a real interactive terminal, the whole session runs inside a full-screen surface** — a steps
+list, its detail, the plan/DAG under construction and a running transcript, with an input line open
+between turns. `Enter` on the input line starts the next turn; a line starting with `/` is a command
+instead — `/exec` runs the validated plan through `execute-yaml-job` (dry-run unless `--apply`,
+which adds one more confirmation before the real write), `/mode` cycles the operating mode,
+`/save [path]` writes the plan YAML to disk, `/note <text>` records what you made of what just
+happened into the session trace, `/review` moves focus to the steps list, `/quit` leaves. **Esc
+during a turn is a soft cancel**: it stops the model call in flight (never a tool call already
+running) and keeps the session open — the trajectory so far is kept, and the turn is reported as
+interrupted, not as an error. Only Ctrl-C ends the session, exiting `130`. `--no-tui` opts out and
+keeps the scrollback output described below; `--no-stream`, a pipe, a redirect or a non-ANSI
+terminal already fall back to it regardless of the flag.
 
-**Scrollback output** (the default without a real interactive terminal, or with `--no-tui`): each turn opens with the model, endpoint and mode (and what the mode does). On an ANSI terminal the model's reasoning and answer **stream token-by-token** into a live, height-bounded region that is then replaced by a trace line carrying the step's wall-clock time, token count and tokens/s (and prompt-eval time when it is significant), followed — for a step that calls a tool — by the model's stated intent. `--detail peek` adds a chain-of-thought preview under each step and `--detail full` (alias `--show-thinking`, implied by `DEBUG=1`) keeps the whole chain of thought on screen; it is always available in the trajectory inspector regardless. Piped / non-ANSI output falls back to one blocking call per step (still with token stats); it reads the same streamed response, so the timeout means the same thing there. The turn ends on a session summary whose **Reason** row names why it stopped — a delivered response, the iteration cap, a failed LLM call, an empty response, or a user interrupt — and a turn that did not succeed prints its last step and a suggested next action. A slow or unreachable endpoint ends the turn with a stated error rather than a silent exit: the endpoint is considered stalled only after `--llm-timeout` seconds *with no token*, on both the streaming and the blocking path, so a model that keeps producing output is never cut off as silent. What bounds such a model instead is `--max-output-tokens`, and a total per-call deadline of three times `--llm-timeout` behind it; each ends the turn naming which bound it was, never "the model was silent". A model caught regenerating the same text (a decoding loop, most often with `--temperature 0` on a weaker or heavily quantized model) is stopped as soon as the repeat is detected rather than left to run out the clock. After the turn, the post-mission menu offers a full-screen keyboard session review (scroll the steps, expand one, jump between errors; falls back to an inline list on a piped console) and **Execute this plan now** whenever a validated YAML was produced — the reviewed YAML runs straight through `execute-yaml-job` deterministically, never back through the model, under that tool's own F2 guardrails.
+**Scrollback output** (the default without a real interactive terminal, or with `--no-tui`): each
+turn opens with the model, endpoint and mode (and what the mode does). On an ANSI terminal the
+model's reasoning and answer **stream token-by-token** into a live, height-bounded region that is
+then replaced by a trace line carrying the step's wall-clock time, token count and tokens/s (and
+prompt-eval time when it is significant), followed — for a step that calls a tool — by the model's
+stated intent. `--detail peek` adds a chain-of-thought preview under each step and `--detail full`
+(alias `--show-thinking`, implied by `DEBUG=1`) keeps the whole chain of thought on screen; it is
+always available in the trajectory inspector regardless. Piped / non-ANSI output falls back to one
+blocking call per step (still with token stats); it reads the same streamed response, so the timeout
+means the same thing there. The turn ends on a session summary whose **Reason** row names why it
+stopped — a delivered response, the iteration cap, a failed LLM call, an empty response, or a user
+interrupt — and a turn that did not succeed prints its last step and a suggested next action. A slow
+or unreachable endpoint ends the turn with a stated error rather than a silent exit: the endpoint is
+considered stalled only after `--llm-timeout` seconds *with no token*, on both the streaming and the
+blocking path, so a model that keeps producing output is never cut off as silent. What bounds such a
+model instead is `--max-output-tokens`, and a total per-call deadline of three times `--llm-timeout`
+behind it; each ends the turn naming which bound it was, never "the model was silent". A model
+caught regenerating the same text (a decoding loop, most often with `--temperature 0` on a weaker or
+heavily quantized model) is stopped as soon as the repeat is detected rather than left to run out
+the clock. After the turn, the post-mission menu offers a full-screen keyboard session review
+(scroll the steps, expand one, jump between errors; falls back to an inline list on a piped console)
+and **Execute this plan now** whenever a validated YAML was produced — the reviewed YAML runs
+straight through `execute-yaml-job` deterministically, never back through the model, under that
+tool's own F2 guardrails.
 
-MCP tool calls the agent's LLM makes (`dry-run` in particular) never block waiting for a keypress, even on a real interactive terminal — the tool call and the agent's own surface share that terminal, so a capability check alone cannot tell "a human is at the CLI" from "the LLM invoked a tool"; only the caller can, hence an explicit no-prompts scope around every tool call.
+MCP tool calls the agent's LLM makes (`dry-run` in particular) never block waiting for a keypress,
+even on a real interactive terminal — the tool call and the agent's own surface share that terminal,
+so a capability check alone cannot tell "a human is at the CLI" from "the LLM invoked a tool"; only
+the caller can, hence an explicit no-prompts scope around every tool call.
 
 ```bash
 dtpipe agent [<prompt>] [options]
@@ -1077,14 +1153,14 @@ What changes when the flag is set:
   play here.
 
 
-> **Hardening (fail-closed defaults).** With no flags, `dtpipe agent` is the safest behavior:
-> mode `plan`, dry-run only, destructive SQL and network access denied. Sampling is **not** part of
-> that list: the default temperature is `1`, because `0` is greedy decoding and weaker quantized
-> models degenerate on it. A run stays replayable through `--seed`, and `--temperature 0` remains
-> available for the determinism report. A real write requires `--apply` **and** approval **and** a compliant SQL safety
-> check. The planner never sees the `execute-yaml-job` tool; execution is a deterministic engine
-> step. The `yamlContent` tool argument is the sole source of the plan YAML. Inspected schemas/
-> samples/errors survive conversation compaction (non-destructive context). See the **Agent
+> **Hardening (fail-closed defaults).** With no flags, `dtpipe agent` is the safest behavior: mode
+> `plan`, dry-run only, destructive SQL and network access denied. Sampling is **not** part of that
+> list: the default temperature is `1`, because `0` is greedy decoding and weaker quantized models
+> degenerate on it. A run stays replayable through `--seed`, and `--temperature 0` remains available
+> for the determinism report. A real write requires `--apply` **and** approval **and** a compliant
+> SQL safety check. The planner never sees the `execute-yaml-job` tool; execution is a deterministic
+> engine step. The `yamlContent` tool argument is the sole source of the plan YAML. Inspected
+> schemas/ samples/errors survive conversation compaction (non-destructive context). See the **Agent
 > Guardrails** section for the SQL safety policy detail.
 
 ---
@@ -1107,10 +1183,10 @@ than executes. Every unlock flag is documented so nothing is implicit.
 - **Approval gate** (`DefaultApprovalGate`). A real write is approved only when `apply` is set
    **and** either the context is interactive or an override predicate grants it. Non-interactive
    ⇒ write denied (read-only).
-- **Session trace.** `--trace <path>` (or `$DTPIPE_AGENT_TRACE`) records the run as JSON lines: how it
-  was launched, the role prompt the mode selected, **the tool catalogue as the model was offered it**,
-  every step with its tool call and result, each turn's verdict, and any `/note` you leave. The
-  catalogue and the prompt are what make a failure attributable — without them a wrong tool call
+- **Session trace.** `--trace <path>` (or `$DTPIPE_AGENT_TRACE`) records the run as JSON lines: how
+  it was launched, the role prompt the mode selected, **the tool catalogue as the model was offered
+  it**, every step with its tool call and result, each turn's verdict, and any `/note` you leave.
+  The catalogue and the prompt are what make a failure attributable — without them a wrong tool call
   cannot be told apart from a tool that was never offered, or one whose description sent the model
   elsewhere. Every line is flushed, so a run that dies mid-turn still leaves its last step. It is a
   diagnostic, not a gate: nothing reads its verdict. Arguments and results are recorded as the model

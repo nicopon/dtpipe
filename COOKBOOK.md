@@ -3,9 +3,14 @@
 Recipes and end-to-end scenarios. For the full option reference, see [REFERENCE.md](./REFERENCE.md).
 
 > [!IMPORTANT]
-> **Database Connection Strings**: All database configurations in these recipes use standard **ADO.NET connection strings** (e.g. `pg:Host=localhost;Database=mydb;...` rather than Python/SQLAlchemy connection URIs). If you are coming from Python or SQLAlchemy, refer to the [Database Connection Strings translation guide in REFERENCE.md](./REFERENCE.md#database-connection-strings-adonet-format) for formatting help.
+> **Database Connection Strings**: All database configurations in these recipes use standard
+> **ADO.NET connection strings** (e.g. `pg:Host=localhost;Database=mydb;...` rather than
+> Python/SQLAlchemy connection URIs). If you are coming from Python or SQLAlchemy, refer to the
+> [Database Connection Strings translation guide in REFERENCE.md](./REFERENCE.md#database-connection-strings-adonet-format)
+> for formatting help.
 
-> **Docs map:** [README.md](./README.md) — quick start · [REFERENCE.md](./REFERENCE.md) — full CLI & YAML reference · [EXTENDING.md](./EXTENDING.md) — new adapters/transformers
+> **Docs map:** [README.md](./README.md) — quick start · [REFERENCE.md](./REFERENCE.md) — full CLI &
+> YAML reference · [EXTENDING.md](./EXTENDING.md) — new adapters/transformers
 
 **Table of Contents**
 - [Basic Transfers](#basic-transfers)
@@ -79,7 +84,9 @@ dtpipe \
 
 ### Deterministic faking (preserve referential integrity across tables)
 
-Use `--fake-seed-column` to guarantee that the same input value always produces the same anonymized output — even across separate runs or tables. You can also specify multiple columns (separated by commas) to handle composite keys.
+Use `--fake-seed-column` to guarantee that the same input value always produces the same anonymized
+output — even across separate runs or tables. You can also specify multiple columns (separated by
+commas) to handle composite keys.
 
 ```bash
 # Users table
@@ -105,7 +112,8 @@ dtpipe -i "pg:..." --query "SELECT region, branch, rep_name FROM sales" \
 
 ### Row-index based seeding
 
-Use `--fake-seed-row` to generate deterministic fake values based purely on the row index (row N always gets the same values):
+Use `--fake-seed-row` to generate deterministic fake values based purely on the row index (row N
+always gets the same values):
 
 ```bash
 dtpipe -i "pg:..." --query "SELECT name, email FROM users" \
@@ -154,7 +162,10 @@ dtpipe --job anonymize_users.yaml
 > This invariant is enforced end-to-end by `tests/scripts/validate_export_job.sh`
 > (CLI run vs `--job` run must report identical row counts).
 
-DtPipe uses [Bogus](https://github.com/bchavez/Bogus) for fake data generation. Syntax: `--fake "Column:Dataset.Method"` (e.g. `name.fullName`, `internet.email`, `finance.iban`, `date.past`, `random.uuid`). See the [Bogus documentation](https://github.com/bchavez/Bogus) for the full dataset/method reference.
+DtPipe uses [Bogus](https://github.com/bchavez/Bogus) for fake data generation. Syntax:
+`--fake "Column:Dataset.Method"` (e.g. `name.fullName`, `internet.email`, `finance.iban`,
+`date.past`, `random.uuid`). See the [Bogus documentation](https://github.com/bchavez/Bogus) for the
+full dataset/method reference.
 
 ### Scenario: build a realistic dataset from nothing
 
@@ -535,7 +546,8 @@ dtpipe -i orders.parquet --alias o \
   --sql 'SELECT "order".id, "order".amount FROM o AS "order"'
 ```
 
-> **Tip:** DuckDB queries can be developed and tested externally with the DuckDB CLI before use in DtPipe.
+> **Tip:** DuckDB queries can be developed and tested externally with the DuckDB CLI before use in
+> DtPipe.
 
 ### UNION ALL (merge processor)
 
@@ -565,15 +577,16 @@ combined:
 
 ## DuckDB Extensions and Cloud Storage
 
-DtPipe's native provider list is intentionally focused. Rather than shipping adapters
-for every cloud store or SaaS format, DtPipe delegates to DuckDB's extension ecosystem —
-making DuckDB an on-demand connector for sources and destinations it can't reach natively.
-Load an extension with `--duck-init` on any DuckDB branch (reader, writer, or `--sql` processor)
-to read remote files directly in a query, write to a DuckDB-supported target, or join local
-data with remote sources. The examples below cover S3 and env-var patterns (Azure, inline and
-DuckDB-file variants use the same mechanism).
-`--duck-init` value forms: `keyring://alias`, `${{keyring://alias}}`, `${{ENV_VAR}}`,
-`@/path/file.sql` — composable, full syntax in [REFERENCE.md#value-resolution](./REFERENCE.md#value-resolution) and [REFERENCE.md#provider-specific-options](./REFERENCE.md#provider-specific-options).
+DtPipe's native provider list is intentionally focused. Rather than shipping adapters for every
+cloud store or SaaS format, DtPipe delegates to DuckDB's extension ecosystem — making DuckDB an
+on-demand connector for sources and destinations it can't reach natively. Load an extension with
+`--duck-init` on any DuckDB branch (reader, writer, or `--sql` processor) to read remote files
+directly in a query, write to a DuckDB-supported target, or join local data with remote sources. The
+examples below cover S3 and env-var patterns (Azure, inline and DuckDB-file variants use the same
+mechanism). `--duck-init` value forms: `keyring://alias`, `${{keyring://alias}}`, `${{ENV_VAR}}`,
+`@/path/file.sql` — composable, full syntax in
+[REFERENCE.md#value-resolution](./REFERENCE.md#value-resolution) and
+[REFERENCE.md#provider-specific-options](./REFERENCE.md#provider-specific-options).
 
 ### Object storage: S3 and Azure Blob
 
@@ -619,7 +632,8 @@ main:
 
 Notes:
 - Format comes from the extension (`.parquet`, `.csv`, `.tsv`, `.json`, `.jsonl`, `.ndjson`).
-  Anything else is refused with the supported list — use `--duck-init` + `--query` for other formats.
+  Anything else is refused with the supported list — use `--duck-init` + `--query` for other
+  formats.
 - A write replaces the target key and is issued only once the pipeline completes, so a failed run
   leaves the existing object intact. `--strategy` does not apply to objects, and passing it is
   refused rather than ignored.
@@ -683,10 +697,16 @@ dtpipe \
   -o result.parquet
 ```
 
-> **Other `duck-init` patterns** — same mechanism, different secret shape. See [REFERENCE.md#provider-specific-options](./REFERENCE.md#provider-specific-options) and [REFERENCE.md#value-resolution](./REFERENCE.md#value-resolution) for the full `keyring://` / `${{keyring://…}}` / `${{ENV}}` / `@file` composable syntax.
-> - Database credentials (main use — inline in the connection string, not `duck-init`): `dtpipe -i "pg:Host=prod;Database=app;Username=${{keyring://pg-user}};Password=${{keyring://pg-pass}}" --query "SELECT * FROM orders" -o out.parquet`
-> - Azure: `INSTALL azure; LOAD azure; SET azure_storage_connection_string='…'` (same `keyring://azure-init` pattern)
-> - DuckDB file I/O: `--duck-init "LOAD spatial"` on a `duck:` reader/writer, or pre-load cloud creds on a `duck:` writer (`-o duck:output.duckdb --duck-init "keyring://azure-init"`).
+> **Other `duck-init` patterns** — same mechanism, different secret shape. See
+> [REFERENCE.md#provider-specific-options](./REFERENCE.md#provider-specific-options) and
+> [REFERENCE.md#value-resolution](./REFERENCE.md#value-resolution) for the full `keyring://` /
+> `${{keyring://…}}` / `${{ENV}}` / `@file` composable syntax.
+> - Database credentials (main use — inline in the connection string, not `duck-init`):
+>   `dtpipe -i "pg:Host=prod;Database=app;Username=${{keyring://pg-user}};Password=${{keyring://pg-pass}}" --query "SELECT * FROM orders" -o out.parquet`
+> - Azure: `INSTALL azure; LOAD azure; SET azure_storage_connection_string='…'` (same
+>   `keyring://azure-init` pattern)
+> - DuckDB file I/O: `--duck-init "LOAD spatial"` on a `duck:` reader/writer, or pre-load cloud
+>   creds on a `duck:` writer (`-o duck:output.duckdb --duck-init "keyring://azure-init"`).
 
 ### YAML job with duck-init
 
@@ -702,7 +722,9 @@ enrich:
   output: "result.parquet"
 ```
 
-> `--duck-init` is scoped to a single DuckDB connection. In a DAG with both a DuckDB reader/writer and a `--sql` branch, each uses its own connection — specify `--duck-init` on each branch that needs it.
+> `--duck-init` is scoped to a single DuckDB connection. In a DAG with both a DuckDB reader/writer
+> and a `--sql` branch, each uses its own connection — specify `--duck-init` on each branch that
+> needs it.
 
 ---
 
@@ -865,14 +887,20 @@ dtpipe -i "pg:..." --query "SELECT * FROM large_table" \
 
 ## Incremental Loading
 
-Incremental loading enables transfer of only changed/new rows. DtPipe handles this dynamically using cursor tracking and query interpolation. **Canonical flag table, state file format and `${{cursor://…}}` resolution rules: [REFERENCE.md#incremental-loading](./REFERENCE.md#incremental-loading) and [REFERENCE.md#value-resolution](./REFERENCE.md#value-resolution).**
+Incremental loading enables transfer of only changed/new rows. DtPipe handles this dynamically using
+cursor tracking and query interpolation. **Canonical flag table, state file format and
+`${{cursor://…}}` resolution rules:
+[REFERENCE.md#incremental-loading](./REFERENCE.md#incremental-loading) and
+[REFERENCE.md#value-resolution](./REFERENCE.md#value-resolution).**
 
 ### Scenario: incremental sync of a postgres table to sqlite
 
-In this recipe, we sync user records from PostgreSQL into SQLite, keeping track of the last processed `updated_at` timestamp.
+In this recipe, we sync user records from PostgreSQL into SQLite, keeping track of the last
+processed `updated_at` timestamp.
 
 #### First execution (Full Load)
-On the very first run, no state file exists yet. We provide a default timestamp value (e.g. `'1970-01-01'`) using the fallback syntax:
+On the very first run, no state file exists yet. We provide a default timestamp value (e.g.
+`'1970-01-01'`) using the fallback syntax:
 
 ```bash
 dtpipe \
@@ -886,10 +914,12 @@ dtpipe \
   --state "state/users_sync.json"
 ```
 
-After this runs successfully, DtPipe automatically generates the state file `state/users_sync.json` containing the maximum `updated_at` value processed.
+After this runs successfully, DtPipe automatically generates the state file `state/users_sync.json`
+containing the maximum `updated_at` value processed.
 
 #### Subsequent executions (Incremental Sync)
-Subsequent runs will load the cursor from the state file and substitute it into the query. We change the query condition to `>` and the strategy to `Upsert` (to merge updates):
+Subsequent runs will load the cursor from the state file and substitute it into the query. We change
+the query condition to `>` and the strategy to `Upsert` (to merge updates):
 
 ```bash
 dtpipe \
@@ -934,7 +964,8 @@ is upper case: `UPDATED_AT`, not `updated_at`.
 
 ### Scenario: YAML job file for incremental loading
 
-You can configure incremental loading directly in a YAML job file. Here is a configuration that does an incremental sync of an orders table:
+You can configure incremental loading directly in a YAML job file. Here is a configuration that does
+an incremental sync of an orders table:
 
 ```yaml
 main:
@@ -962,7 +993,8 @@ dtpipe --job sync_orders.yaml
 
 ### Scenario: Interactive Pipeline Generation using `dtpipe agent`
 
-Instead of writing YAML jobs or long CLI commands by hand, you can describe your data integration goal in natural language using the `dtpipe agent` subcommand:
+Instead of writing YAML jobs or long CLI commands by hand, you can describe your data integration
+goal in natural language using the `dtpipe agent` subcommand:
 
 ```bash
 # Launch interactive mode (auto-discovers local Ollama models)
@@ -970,13 +1002,15 @@ dtpipe agent
 ```
 
 When prompted, enter your data integration mission:
-> *"Inspect csv:invoices.csv, compute gross_total = subtotal * (1 + tax), filter gross_total > 100, and save to jsonl:high_invoices.jsonl"*
+> *"Inspect csv:invoices.csv, compute gross_total = subtotal * (1 + tax), filter gross_total > 100,
+> and save to jsonl:high_invoices.jsonl"*
 
 The agent will:
 1. Inspect the source schema.
  2. Validate the YAML topology.
  3. Execute the pipeline.
- 4. Render the DAG topology box and allow exporting a standalone `high_invoices.yaml` file for production automation.
+ 4. Render the DAG topology box and allow exporting a standalone `high_invoices.yaml` file for
+    production automation.
 
 ### Guardrails: keep the agent safe and deterministic
 
@@ -1002,9 +1036,11 @@ The guardrails (`ISqlSafetyPolicy` / `IApprovalGate`):
 - **Destructive verbs** (`DROP`/`DELETE`/`TRUNCATE`/`UPDATE`/`ALTER`/`INSERT`/`ATTACH`) and
   **network access** (`LOAD httpfs`/`azure`, remote `read_parquet`/`read_csv`) are denied unless
   `--allow-destructive` / `--allow-network` are set.
-- **Planner mode** hides `execute-yaml-job` from the model; execution is a deterministic engine step.
+- **Planner mode** hides `execute-yaml-job` from the model; execution is a deterministic engine
+  step.
 - **Non-destructive context** — inspected schemas/samples/errors survive compaction.
-- **Parallel tools** — every `ToolCall` is executed (independent ones in parallel; `--sequential` forces one at a time).
+- **Parallel tools** — every `ToolCall` is executed (independent ones in parallel; `--sequential`
+  forces one at a time).
 
 See `REFERENCE.md` → *Agent Guardrails* for the full policy.
 
