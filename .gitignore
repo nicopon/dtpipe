@@ -5,6 +5,7 @@
 .nuget_plugins/
 .nuget_scratch/
 .notes/
+.notes_*.zip
 .scripts/
 .tmp/
 
