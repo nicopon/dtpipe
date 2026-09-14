@@ -2,39 +2,43 @@
 
 [← Documentation](README.md)
 
-dtpipe is a .NET application, and that shows up in three places that matter on a corporate
-network: **what you have to install**, **what a connection string looks like**, and **which
-databases are first-class**.
+dtpipe is a .NET application, and that shows up in three places on a corporate network: **what you
+install**, **what a connection string looks like**, and **which databases it knows well**.
 
-## One file, nothing to install around it
+This page is about fitting into an existing estate. Nothing here is a claim about other tools —
+if what you use already does these things, that is one less reason to change.
+
+## One file
 
 A release archive holds a single self-contained executable. The .NET runtime, the DuckDB engine
 and every database driver are inside it.
 
-| You do **not** need | Because |
+| Carried in the binary | What that saves |
 |:---|:---|
-| A .NET runtime on the host | The binary is self-contained |
-| A Python environment | There is none |
-| An ODBC driver manager or a `DSN` | `Microsoft.Data.SqlClient` speaks TDS directly |
-| Oracle Instant Client, `LD_LIBRARY_PATH`, a matching architecture package | `Oracle.ManagedDataAccess` is fully managed |
-| Admin rights | Unpack it anywhere and run it |
+| The .NET runtime | Nothing to install on the host first |
+| `Microsoft.Data.SqlClient` | Speaks TDS directly — no ODBC driver manager, no `DSN` |
+| `Oracle.ManagedDataAccess` | Fully managed — no Instant Client, no `LD_LIBRARY_PATH`, no architecture-matched package |
+| DuckDB, Npgsql, MySqlConnector, Microsoft.Data.Sqlite | The engines and drivers the pipelines use |
 
-Six platforms per release — Linux, macOS and Windows, x64 and arm64. On a locked-down workstation
-or a hardened build agent, "copy one file" is often the difference between a tool you can use and
-one you cannot.
+Unpacking needs no admin rights and no installer. Six platforms per release — Linux, macOS and
+Windows, x64 and arm64. On a locked-down workstation or a hardened build agent, that can be the
+deciding constraint.
+
+The cost of that choice is size: a self-contained binary is around 240 MB on disk, because it
+carries all of the above whether a given run needs it or not.
 
 ## The connection strings you already have
 
-Sources and targets take **ADO.NET connection strings** — the ones in your `appsettings.json`, not
-a URI dialect invented for the tool:
+Sources and targets take **ADO.NET connection strings** — the same ones your applications keep in
+`appsettings.json`:
 
 ```bash
 dtpipe -i "mssql:Server=prod;Database=sales;Integrated Security=true" \
   --query "SELECT * FROM dbo.Invoices" -o invoices.parquet
 ```
 
-The key vocabulary belongs to the driver, so anything your applications already rely on works
-here: Windows authentication, `Encrypt` / `TrustServerCertificate`, `ApplicationIntent`,
+The key vocabulary belongs to the driver, so what your applications already rely on works here:
+Windows authentication, `Encrypt` / `TrustServerCertificate`, `ApplicationIntent`,
 `MultiSubnetFailover`, pooling, `Application Name` — which is worth setting, because it is what
 your DBA sees in `sys.dm_exec_sessions` when they ask who is running the query.
 
@@ -46,12 +50,12 @@ your DBA sees in `sys.dm_exec_sessions` when they ask who is running the query.
 | `mysql:` | MySqlConnector |
 | `sqlite:` | Microsoft.Data.Sqlite |
 
-## Oracle and SQL Server are not an afterthought
+## Oracle and SQL Server
 
-Both read and write, with bulk loading (`SqlBulkCopy`, Oracle direct-path), upsert, schema
-migration and per-engine identifier casing handled rather than approximated: Oracle folds
-identifiers up, PostgreSQL down, the rest store what they are given, and dtpipe hands each the
-spelling it reads unquoted so the object it creates is addressable from every other tool.
+Both read and write, with bulk loading (`SqlBulkCopy`, Oracle direct-path), upsert and schema
+migration. Identifier casing follows each engine: Oracle folds unquoted identifiers up, PostgreSQL
+folds them down, the rest store what they are given — dtpipe hands each engine the spelling it
+reads unquoted, so an object it creates is addressable from every other tool on the same database.
 
 See [SQL Server](connections/sql-server.md) and [Oracle](connections/oracle.md), including the two
 engine-specific traps that cost the most time: SQL Server has no read-only session for previews,
@@ -83,30 +87,39 @@ store. Either way, nothing sensitive needs to sit in a job file or a shell histo
 
 ```json
 {
-  "StartTime": "2026-09-13T16:22:52.322362Z",
-  "EndTime": "2026-09-13T16:22:52.329564Z",
+  "StartTime": "2026-09-14T16:59:08.834614Z",
+  "EndTime": "2026-09-14T16:59:08.842365Z",
   "ReadCount": 1000,
   "WriteCount": 1000,
-  "OverallThroughputRowsPerSec": 173532.78,
-  "PeakMemoryWorkingSetMb": 76.67,
-  "Duration": "00:00:00.0072020"
+  "OverallThroughputRowsPerSec": 161563.9389288311,
+  "PeakMemoryWorkingSetMb": 76.734375,
+  "TransformerStats": {},
+  "TransformerCountsByIndex": null,
+  "Duration": "00:00:00.0077510"
 }
 ```
 
-## Handling production data
+`ReadCount` and `WriteCount` differing is the number to alert on: a row read and not written was
+dropped by a filter, or refused by the target.
 
-Three things make the difference between a tool that touches production and one that is allowed
-to:
+There is no scheduler and no daemon: a run starts, streams and exits. `cron`, a CI job or an
+orchestrator decides *when*.
+
+## Working with production data
 
 - **Anonymization happens in transit.** The source is read, never written; no intermediate file
   holds clear values. Seeded faking keeps joins working across tables, so an anonymized extract is
   still usable. See [Anonymization](guides/anonymization.md).
 - **A preview writes nothing**, and on PostgreSQL, Oracle, MySQL and SQLite the source session is
-  set read-only so the *server* enforces it. On SQL Server no such session exists and the run says
-  so rather than implying a guarantee it does not have. See
+  set read-only so the *server* enforces it. On SQL Server no such session exists, and the run
+  reports the weaker guarantee rather than implying the stronger one. See
   [Preview and checkpoints](guides/preview-and-checkpoints.md).
 - **Materialised data is always encrypted** (AES-GCM), with no opt-out, so a checkpoint left on a
   laptop is inert and a purge is reliable.
+
+Worth being explicit about what none of that covers: masking and faking are not anonymity proofs,
+and choosing which columns are sensitive is yours.
+[Anonymization](guides/anonymization.md#what-this-is-and-what-it-is-not) says where the limits are.
 
 ## Running without internet access
 
@@ -116,8 +129,8 @@ as-is. Two things do need access:
 
 - **DuckDB extensions** (`httpfs`, `azure`, `spatial`…) are installed from DuckDB's repository on
   first use. Pre-populate the extension directory, or avoid the extensions.
-- **Object storage** obviously needs to reach the endpoint — including a MinIO on your own
-  network, via `--s3-endpoint`.
+- **Object storage** needs to reach its endpoint — including a MinIO on your own network, via
+  `--s3-endpoint`.
 
 ---
 

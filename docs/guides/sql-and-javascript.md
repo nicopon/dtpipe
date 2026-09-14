@@ -8,7 +8,7 @@ Two ways to reshape a stream, with different jobs.
 |:---|:---|:---|
 | Works on | Sets — the whole stream is a table | One row at a time |
 | Good at | Joins, aggregates, window functions, deduplication, sorting | Parsing a string, deriving a field, calling logic that has no SQL form |
-| Costs | A branch, and Arrow batches | A function call per row |
+| Costs | A branch, and Arrow batches | A function call per row, and the row path |
 | Needs | An alias per source | Nothing |
 
 Rule of thumb: **if it involves more than one row, it belongs in SQL.**
@@ -31,17 +31,35 @@ it works on volumes that would not fit in memory:
 ```bash
 dtpipe -i dup.csv --alias src \
   --from src --sql "SELECT * FROM src
-                    QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1" \
+                    QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1
+                    ORDER BY id" \
   -o dedup.csv
 ```
 
+> [!NOTE]
+> The trailing `ORDER BY id` is not decoration. DuckDB evaluates in parallel and promises no row
+> order unless you ask for one — the same query without it returns the same three rows in a
+> different arrangement from one run to the next. Order the output whenever something downstream,
+> a diff or a test compares it.
+
+`dup.csv`
+
 ```
-id,updated_at,status        id,updated_at,status
-1,2026-01-01,new            1,2026-02-01,paid
-2,2026-01-01,new     →      2,2026-03-01,cancelled
-1,2026-02-01,paid           3,2026-01-15,new
+id,updated_at,status
+1,2026-01-01,new
+2,2026-01-01,new
+1,2026-02-01,paid
 3,2026-01-15,new
 2,2026-03-01,cancelled
+```
+
+`dedup.csv` — the last version of each key, one row per `id`:
+
+```
+id,updated_at,status
+1,2026-02-01,paid
+2,2026-03-01,cancelled
+3,2026-01-15,new
 ```
 
 Loading an extension first — `httpfs`, `spatial`, `excel`, `iceberg` — is what `--duck-init` is
@@ -54,19 +72,70 @@ for; see [DuckDB](../connections/duckdb.md).
 
 ## JavaScript per row
 
+`emp.csv` is used for the rest of this page:
+
+```
+id,name,email,salary
+1,Alice Martin,alice@corp.com,52000
+2,Bob Durand,bob@corp.com,61000
+3,Carla Neri,carla@corp.com,74000
+4,Dan Petit,dan@corp.com,
+```
+
+A single expression returns implicitly. `row` is the current row, by column name:
+
 ```bash
-dtpipe -i emp.csv \
+dtpipe -i emp.csv --auto-column-types \
   --compute "domain:row.email.split('@')[1]" \
-  --compute "band:Math.floor(row.salary/10000)*10000" \
-  --compute-types "band:int32" \
   --filter "row.salary > 55000" \
   -o js.csv
 ```
 
 ```
-id,name,email,phone,iban,salary,domain,band
-2,Bob Durand,bob@corp.com,…,61000,corp.com,60000
+id,name,email,salary,domain
+2,Bob Durand,bob@corp.com,61000,corp.com
+3,Carla Neri,carla@corp.com,74000,corp.com
 ```
+
+### When one expression is not enough
+
+As soon as you need a guard or a branch, write statements and `return` explicitly. A NULL is the
+usual reason — it arrives as `null`, and arithmetic on it silently produces nothing useful:
+
+```bash
+dtpipe -i emp.csv --auto-column-types \
+  --compute "band:const s = row.salary; if (s === null) return 'unknown'; if (s >= 70000) return 'C'; if (s >= 55000) return 'B'; return 'A';" \
+  -o banded.csv
+```
+
+That works, and it is already hard to read on one line — which is what `@file` is for. The same
+script in `scripts/band.js`:
+
+```js
+const s = row.salary;
+if (s === null) return "unknown";
+if (s >= 70000) return "C";
+if (s >= 55000) return "B";
+return "A";
+```
+
+```bash
+dtpipe -i emp.csv --auto-column-types --compute "band:@scripts/band.js" -o banded.csv
+```
+
+```
+id,name,email,salary,band
+1,Alice Martin,alice@corp.com,52000,A
+2,Bob Durand,bob@corp.com,61000,B
+3,Carla Neri,carla@corp.com,74000,C
+4,Dan Petit,dan@corp.com,,unknown
+```
+
+Prefer the file past the first line or two: it is reviewable in a pull request, it keeps quoting
+out of the shell, and the job file that `--export-job` writes carries the reference rather than a
+wall of escaped JavaScript.
+
+### The flags
 
 | Flag | What it does |
 |:---|:---|
@@ -84,14 +153,33 @@ dtpipe -i products.jsonl \
   --drop tags -o product_tags.parquet
 ```
 
-Scripts can live in files rather than in the shell: `--compute "col:@scripts/derive.js"`.
+## What a JavaScript step costs, and when to pay it
 
-## Which one runs where
+A `--compute` step runs on the **row** path; a `--sql` branch runs on the **Arrow** path. A
+pipeline whose reader and writer are both columnar — Parquet to DuckDB, say — travels as Arrow
+batches from end to end, and inserting a JavaScript step pulls it out to rows and back:
 
-A `--compute` step runs on the **row** path, and a `--sql` branch on the **Arrow** path. Every run
-prints the mode per branch (`● row`, `◈ Arrow`) and a `--dry-run` names the bridges between them,
-so a pipeline that pays for a conversion says so. Mixing them is normal — anonymize with row
-transformers, aggregate with SQL:
+```
+╭─Pipeline Execution Plan──────────────────────╮
+│  Reader  csv                  ▼ row          │
+│  Step    Compute              ▼ row-only     │
+│  Sink    duck                 ▲ columnar sink│
+│                                              │
+│  Strategy: Columnar · 1 bridge               │
+╰──────────────────────────────────────────────╯
+```
+
+That is a function call per row plus the conversions, against a set operation DuckDB runs on whole
+batches. The order to try things in:
+
+1. **`--sql`**, if the work can be expressed over the set — including per-row expressions:
+   `split_part(email, '@', 2)` is the SQL form of the `domain` example above.
+2. **A dedicated transformer** — `--mask`, `--format`, `--overwrite`, `--null`, `--project` all
+   run columnar, with no JavaScript engine involved. See [Anonymization](anonymization.md).
+3. **`--compute`**, for what neither can express.
+
+Mixing paths is normal, and a `--dry-run` names every bridge so the cost is visible rather than
+guessed:
 
 ```bash
 dtpipe -i "pg:…" --query "SELECT * FROM orders" --fake "email:internet.email" --alias o \
@@ -102,5 +190,6 @@ dtpipe -i "pg:…" --query "SELECT * FROM orders" --fake "email:internet.email" 
 ---
 
 See also: [DAG pipelines](dag.md) · [Files](../connections/files.md) ·
+[Anonymization](anonymization.md) ·
 [COOKBOOK.md](../../COOKBOOK.md#sql-processors-and-joins) ·
 [REFERENCE.md](../../REFERENCE.md#data-transformations)

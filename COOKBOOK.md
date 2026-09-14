@@ -84,9 +84,16 @@ dtpipe \
 
 ### Deterministic faking (preserve referential integrity across tables)
 
-Use `--fake-seed-column` to guarantee that the same input value always produces the same anonymized
-output — even across separate runs or tables. You can also specify multiple columns (separated by
-commas) to handle composite keys.
+Use `--fake-seed-column` so that the same input value always produces the same anonymized output,
+across separate runs and across tables. You can also specify multiple columns (separated by commas)
+to handle composite keys.
+
+> [!WARNING]
+> The generated value is a function of the seed **and of the run's whole `--fake` set, in order** —
+> adding a second mapping or swapping two of them changes what the first one produces. Two pipelines
+> that must agree therefore have to declare the same mappings in the same order, which in practice
+> means one `--fake` each, as below. Verify a cross-table pair before relying on it: anonymize both
+> sides, join the two outputs, and check the row count.
 
 ```bash
 # Users table

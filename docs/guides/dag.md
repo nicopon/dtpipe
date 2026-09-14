@@ -34,6 +34,36 @@ flowchart LR
 | `--sql "…"` | Run DuckDB SQL over the branches this branch reads |
 | `--merge` | `UNION ALL` of every `--from` source |
 
+## The data used below
+
+Every example on this page runs against these three files, so the shapes can be read one after the
+other without changing dataset.
+
+`orders.csv`
+
+```
+order_id,customer_email,amount
+10,alice@corp.com,120
+11,bob@corp.com,80
+12,alice@corp.com,45
+```
+
+`customers.csv`
+
+```
+id,email,name
+1,alice@corp.com,Alice
+2,bob@corp.com,Bob
+```
+
+`orders_2025.csv`
+
+```
+order_id,customer_email,amount
+7,alice@corp.com,200
+8,bob@corp.com,150
+```
+
 ## Join two sources
 
 ```bash
@@ -46,15 +76,23 @@ dtpipe -i orders.csv --auto-column-types --alias o \
        -o revenue.csv
 ```
 
+The panel every run prints is the DAG it built — one block per branch, with what each one reads:
+
 ```
-╭───────────┬───────────┬──────┬───────┬─────────╮
-│ Branch    │ Stage     │ Rows │ Speed │ Mode    │
-├───────────┼───────────┼──────┼───────┼─────────┤
-│ [o]       │ ▸ Reading │    3 │ 238/s │ ● row   │
-│ [c]       │ ▸ Reading │    2 │ 157/s │ ● row   │
-│ [stream1] │ ▸ Reading │    2 │ 208/s │ ◈ Arrow │
-╰───────────┴───────────┴──────┴───────┴─────────╯
+╭─ Pipeline ───────────────────────────────────────────────────────────────╮
+│   ◉ [o]  →  [stream1]                                                    │
+│       ← orders.csv  ◈ Arrow                                              │
+│                                                                          │
+│   ◉ [c]  →  [stream1]                                                    │
+│       ← customers.csv  ◈ Arrow                                           │
+│                                                                          │
+│  ⚡ [stream1]  ← [o]  +ref [c]                                           │
+│       SQL › SELECT c.name, sum(o.amount) AS total FROM o JOIN c ON o.... │
+│       ──▶  revenue.csv                                                   │
+╰──────────────────────────────────────────────────────────────────────────╯
 ```
+
+`revenue.csv`
 
 ```
 name,total
@@ -67,34 +105,91 @@ against an Oracle table joined against a Parquet file on S3.
 
 > [!NOTE]
 > `--from` **streams**; `--ref` is **materialized** — read fully into memory so the query engine
-> can plan a real join. Filter a large lookup upstream before making it a `--ref`.
+> can plan a real join. The panel spells the difference: `← [o]` for the streamed input, `+ref [c]`
+> for the materialized one. Filter a large lookup upstream before making it a `--ref`.
+
+> [!IMPORTANT]
+> `--auto-column-types` on the orders reader is what makes `sum(amount)` work. A CSV column is
+> text until something says otherwise, and `sum(VARCHAR)` has no meaning — see
+> [Files](../connections/files.md).
 
 ## Fan one source out to several targets
 
-The source is read **once** and broadcast:
+The source is read **once** and broadcast — a full copy to one target and an aggregate to another,
+concurrently:
 
 ```bash
-dtpipe -i people.csv --alias s \
-       --from s -o all.parquet \
-       --from s --sql "SELECT city, count(*) AS n FROM s GROUP BY city ORDER BY n DESC LIMIT 5" \
-       -o top_cities.csv
+dtpipe -i orders.csv --auto-column-types --alias s \
+       --from s -o orders.parquet \
+       --from s --sql "SELECT customer_email, sum(amount) AS total
+                       FROM s GROUP BY customer_email ORDER BY total DESC" \
+       -o totals.csv
 ```
 
 ```
-│ [s]       │ ▸ Reading │ 1,000 │ 64.1K/s │ ● row   │
-│ [stream1] │ ▸ Reading │ 1,000 │ 40.1K/s │ ◈ Arrow │
-│ [stream2] │ ▸ Reading │     5 │   550/s │ ◈ Arrow │
+╭─ Pipeline ───────────────────────────────────────────────────────────────╮
+│   ◉ [s]  →  [stream1], [stream2]                                         │
+│       ← orders.csv  ◈ Arrow                                              │
+│                                                                          │
+│   ◉ [stream1]  ← [s]                                                     │
+│       ──▶  orders.parquet                                                │
+│                                                                          │
+│  ⚡ [stream2]  ← [s]                                                     │
+│       SQL › SELECT customer_email, sum(amount) AS total FROM s GROUP ... │
+│       ──▶  totals.csv                                                    │
+╰──────────────────────────────────────────────────────────────────────────╯
 ```
 
-One read of the source, a full copy to one target and an aggregate to another, concurrently.
+`totals.csv`
+
+```
+customer_email,total
+alice@corp.com,165
+bob@corp.com,80
+```
+
+The `→ [stream1], [stream2]` on the source branch is the broadcast. The row counts in the results
+table show it too: the source reads its rows once, and each consumer receives them all.
 
 ## Merge several sources
 
 ```bash
-dtpipe -i sales_2025.parquet --alias a \
-       -i sales_2026.parquet --alias b \
-       --from a,b --merge -o sales_all.parquet
+dtpipe -i orders_2025.csv --auto-column-types --alias a \
+       -i orders.csv --auto-column-types --alias b \
+       --from a,b --merge -o orders_all.csv
 ```
+
+```
+╭─ Pipeline ───────────────────────╮
+│   ◉ [a]  →  [stream1]            │
+│       ← orders_2025.csv  ◈ Arrow │
+│                                  │
+│   ◉ [b]  →  [stream1]            │
+│       ← orders.csv  ◈ Arrow      │
+│                                  │
+│  ⚡ [stream1]  ← [a]  +from [b]  │
+│       merge                      │
+│       ──▶  orders_all.csv        │
+╰──────────────────────────────────╯
+```
+
+`orders_all.csv`
+
+```
+order_id,customer_email,amount
+7,alice@corp.com,200
+8,bob@corp.com,150
+10,alice@corp.com,120
+11,bob@corp.com,80
+12,alice@corp.com,45
+```
+
+Both inputs are streamed — `← [a]  +from [b]`, where the join above read `+ref [c]`.
+
+> [!NOTE]
+> `--merge` is a `UNION ALL` of branches that run **concurrently**, so it guarantees which rows
+> come out, not the order they come out in. Add an `--sql` stage with an `ORDER BY` if something
+> downstream depends on it.
 
 ## The rules that catch people out
 
@@ -136,28 +231,48 @@ flag twice in one stage is a hard error rather than a silent last-wins.
 
 ## In YAML
 
-Every shape above survives `--export-job`, which is the quickest way to learn the file form:
+Every shape above survives `--export-job`, which is the quickest way to learn the file form. This
+is the join, exported verbatim:
 
 ```yaml
 o:
   input: orders.csv
+  batch-size: 32768
+  sampling-rate: 1
   provider-options:
     csv-reader:
       auto-column-types: true
 c:
   input: customers.csv
+  batch-size: 32768
+  sampling-rate: 1
 stream1:
   from: o
   ref:
   - c
   output: revenue.csv
+  batch-size: 32768
+  sampling-rate: 1
   provider-options:
     sql:
-      query: SELECT c.name, sum(o.amount) AS total FROM o JOIN c ON o.customer_email = c.email GROUP BY c.name
+      query: SELECT c.name, sum(o.amount) AS total FROM o JOIN c ON o.customer_email = c.email GROUP BY c.name ORDER BY total DESC
 ```
+
+The branch names on the left are the aliases, and `stream1` is the one the CLI generated for the
+`--sql` stage. See [YAML jobs](yaml-jobs.md).
+
+## When something does not behave
+
+| Symptom | Where it is explained |
+|:---|:---|
+| `sum(VARCHAR)` has no meaning | [Files](../connections/files.md) — a CSV column is text until typed |
+| `--ref a --ref b` refused | The repetition rule above |
+| A branch cannot be read by another | It declares an `-o` of its own — see the rule above |
+| A flag appears to be ignored | It landed in the wrong stage; `--strict-bindings` makes a bad binding fail |
 
 ---
 
 See also: [SQL and JavaScript](sql-and-javascript.md) · [YAML jobs](yaml-jobs.md) ·
+[Troubleshooting](../troubleshooting.md) ·
 [COOKBOOK.md](../../COOKBOOK.md#dag-pipelines-multi-source) ·
 [REFERENCE.md](../../REFERENCE.md#dag-syntax)

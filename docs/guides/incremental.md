@@ -18,11 +18,19 @@ flowchart LR
 | Flag | Role |
 |:---|:---|
 | `--cursor COLUMN` | The column to watch. Name it **as the reader returns it** — upper case for an unquoted Oracle identifier |
-| `--state PATH` | Where the mark is persisted |
+| `--state PATH` | Where the mark is persisted. There is **no default path** |
 | `--cursor-from VALUE` | Ignore the state file for this run and start from here — for a backfill or a replay |
 
+> [!IMPORTANT]
+> **`--cursor` and `--state` only work as a pair.** Tracking is installed only when both are
+> present, so `--cursor updated_at` on its own follows nothing and writes nothing — and today it
+> says so with neither a warning nor a non-zero exit. The same holds for `--state` without
+> `--cursor`. If a second run re-reads everything the first one already moved, check that both
+> flags are on the command line, in the branch that writes.
+
 And one resolver, `${{cursor://path|default}}`, which injects the mark into the query. The default
-after `|` is what the first run uses, when no state file exists yet.
+after `|` is what the first run uses, when no state file exists yet. The path in the resolver is
+the same file `--state` names — write it twice, or the query will read a mark nothing updates.
 
 ```bash
 dtpipe -i "pg:Host=prod;Database=app;Username=app" \
