@@ -47,27 +47,35 @@ public class AgentTerminalGateTests
             => Task.FromResult(new LlmResponse(new ChatMessage("assistant", "x"), true, null));
     }
 
-    private static IAnsiConsole RealTerminal()
+    /// <summary>
+    /// A console whose capabilities are the ones the test names, whatever it is running on.
+    /// </summary>
+    /// <remarks>
+    /// Spectre's profile enrichers run after the settings and override them: a runner that
+    /// declares itself through <c>GITHUB_ACTIONS</c>, <c>TF_BUILD</c> or <c>TEAMCITY_VERSION</c>
+    /// gets <c>Interactive = false</c> back even though <see cref="InteractionSupport.Yes"/> was
+    /// asked for. That made four assertions here pass on a workstation and fail on every CI
+    /// provider — and since the unit step gates the rest of the workflow, it also kept the
+    /// Validators step from ever running. Set the capabilities after creation, for the same reason
+    /// the predicates take the redirection flags as parameters: this suite states the terminal it
+    /// is reasoning about, it does not sample the one it happens to run on.
+    /// </remarks>
+    private static IAnsiConsole Terminal(bool capable)
     {
         var console = AnsiConsole.Create(new AnsiConsoleSettings
         {
             Out = new AnsiConsoleOutput(new System.IO.StringWriter()),
-            Ansi = AnsiSupport.Yes,
-            Interactive = InteractionSupport.Yes,
+            Ansi = capable ? AnsiSupport.Yes : AnsiSupport.No,
+            Interactive = capable ? InteractionSupport.Yes : InteractionSupport.No,
         });
+        console.Profile.Capabilities.Ansi = capable;
+        console.Profile.Capabilities.Interactive = capable;
         return console;
     }
 
-    private static IAnsiConsole DumbTerminal()
-    {
-        var console = AnsiConsole.Create(new AnsiConsoleSettings
-        {
-            Out = new AnsiConsoleOutput(new System.IO.StringWriter()),
-            Ansi = AnsiSupport.No,
-            Interactive = InteractionSupport.No,
-        });
-        return console;
-    }
+    private static IAnsiConsole RealTerminal() => Terminal(capable: true);
+
+    private static IAnsiConsole DumbTerminal() => Terminal(capable: false);
 
     [Fact]
     public void A_Real_Interactive_Terminal_With_A_Streaming_Client_Can_Own_The_Terminal()
