@@ -72,14 +72,21 @@ public class CDataOwnershipTests
     /// that never disposes costs latency and a finalizer backlog rather than unbounded memory.
     /// A maintainer who reaches for peak RSS instead of this counter measures nothing.
     /// </summary>
+    /// <remarks>
+    /// This case asserts the finalizer outcome and nothing about when the collector runs. An
+    /// assertion that the counter is still 0 on the line after the drop states that no collection
+    /// has happened yet — which the runtime never promised: a gen-0 collection can fall on any
+    /// allocation from any thread, and xunit runs other collections in parallel. It read 1 instead
+    /// of 0 under load, on this machine and on a runner. The "not before" half is covered where it
+    /// is decidable, in <see cref="AnImportedBatch_IsReleasedByItsConsumer_AndNotBefore"/>, whose
+    /// batch stays rooted in a local across the assertion.
+    /// </remarks>
     [Fact]
     public void ADroppedImportedBatch_IsReleasedLateByItsFinalizer_NotNever()
     {
         using var probe = new CDataReleaseProbe();
 
         DropWithoutDisposing(probe, 8);
-
-        probe.Released.Should().Be(0, "nothing has collected yet");
 
         // Two passes: the first queues the finalizers, the second collects what they freed. More
         // than two only guards against a collection the runtime deferred under load.
