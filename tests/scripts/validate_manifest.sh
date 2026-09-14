@@ -69,7 +69,15 @@ EXPECTED="arrow arrow-memory checksum csv duck generate jsonl mem merge mssql my
 
 # "Provider" is the table header, not a component.
 RAW_OUTPUT=$("$DTPIPE" providers 2>&1)
-ACTUAL=$(echo "$RAW_OUTPUT" | awk '/│/ {gsub(/│/,""); gsub(/^ +| +$/,"",$1); if ($1!="" && $1!="Provider") print $1}' | sort -u)
+
+# Strip SGR sequences before reading the cells. Spectre colours the table whenever it believes the
+# sink renders ANSI, and "a CI provider is running me" is one of those beliefs: on GitHub Actions
+# every cell arrives as "\033[38;5;14marrow\033[0m" even though stdout is a pipe here, while the
+# same command redirected on a workstation is plain. Without this, $1 is the escape sequence, every
+# provider reads as missing, and the script says "provider 'arrow' not registered" about a provider
+# the dump above shows registered — which is exactly what it said, on CI only, for four days.
+ANSI=$(printf '\033')
+ACTUAL=$(echo "$RAW_OUTPUT" | sed "s/${ANSI}\[[0-9;]*m//g" | awk '/│/ {gsub(/│/,""); gsub(/^ +| +$/,"",$1); if ($1!="" && $1!="Provider") print $1}' | sort -u)
 for p in $EXPECTED; do
     echo "$ACTUAL" | grep -qx "$p" || fail "provider '$p' not registered"
 done
