@@ -58,7 +58,7 @@ public static class HelpRenderer
         WriteFlag(console, "--session <name>",        "Session that materialised artefacts belong to");
         WriteFlag(console, "--checkpoint [<name>]",   "Materialise this branch's output in the session store");
         WriteFlag(console, "--from-checkpoint <key>", "Resume this branch from a stored checkpoint");
-        WriteFlag(console, "--strict-bindings",       "Fail on unrecognized flags or failed option bindings instead of skipping them silently");
+        WriteFlag(console, "--strict-bindings",       "Fail on an undeclared flag that consumes no value, or an unknown job-file option key");
         WriteFlag(console, "--version",                "Print version and exit");
         console.WriteLine();
 

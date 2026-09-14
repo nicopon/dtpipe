@@ -18,7 +18,8 @@ public static class PipelineToJobConverter
         DtPipe.Cli.Security.ISecretsManager? secretsManager = null,
         IEnumerable<IStreamReaderFactory>? readerFactories = null,
         IEnumerable<IDataWriterFactory>? writerFactories = null,
-        IEnumerable<IDataTransformerFactory>? dataTransformerFactories = null)
+        IEnumerable<IDataTransformerFactory>? dataTransformerFactories = null,
+        FlagRegistry? lineFlags = null)
     {
         // --job mode: load from YAML file and apply CLI overrides
         if (!string.IsNullOrEmpty(parsed.Globals.JobFile))
@@ -69,7 +70,7 @@ public static class PipelineToJobConverter
                     ForFactoryLookup(job.Input, secretsManager), ForFactoryLookup(job.Output, secretsManager),
                     branchSpec.ReaderArgs, branchSpec.WriterArgs,
                     readerFactories, writerFactories,
-                    processor, branchSpec.RawArgs)
+                    processor, branchSpec.RawArgs, lineFlags)
             };
 
             // A processor reads its own branch's raw tokens — DuckDBSqlTransformerFactory pulls
@@ -255,7 +256,8 @@ public static class PipelineToJobConverter
         IEnumerable<IStreamReaderFactory>? readerFactories,
         IEnumerable<IDataWriterFactory>? writerFactories,
         IStreamTransformerFactory? processor = null,
-        string[]? branchRawArgs = null)
+        string[]? branchRawArgs = null,
+        FlagRegistry? lineFlags = null)
     {
         if (readerFactories == null && writerFactories == null && processor == null)
             return null;
@@ -271,14 +273,14 @@ public static class PipelineToJobConverter
 
         var writerFactory2 = ResolveFactory(outputForLookup, writerFactories);
         var readerEntry = readerFactory != null && readerArgs is { Length: > 0 }
-            ? BindToOptionDictionary(readerFactory.OptionsType, readerArgs, readerFactory.ComponentName)
+            ? BindToOptionDictionary(readerFactory.OptionsType, readerArgs, readerFactory.ComponentName, lineFlags)
             : null;
         if (readerFactory != null && readerEntry is { Count: > 0 } && readerKey != null)
             result[readerKey] = readerEntry.ToDictionary(kvp => kvp.Key, kvp => (object?)kvp.Value);
 
         if (writerFactory2 != null && writerArgs is { Length: > 0 })
         {
-            var entry = BindToOptionDictionary(writerFactory2.OptionsType, writerArgs, writerFactory2.ComponentName);
+            var entry = BindToOptionDictionary(writerFactory2.OptionsType, writerArgs, writerFactory2.ComponentName, lineFlags);
             if (entry is { Count: > 0 })
                 result[writerFactory2.ComponentName + "-writer"] = entry.ToDictionary(kvp => kvp.Key, kvp => (object?)kvp.Value);
         }
@@ -418,7 +420,7 @@ public static class PipelineToJobConverter
         return factories.FirstOrDefault(f => f.CanHandle(raw));
     }
 
-    private static Dictionary<string, string>? BindToOptionDictionary(Type optionsType, string[] args, string prefix)
+    private static Dictionary<string, string>? BindToOptionDictionary(Type optionsType, string[] args, string prefix, FlagRegistry? lineFlags)
     {
         object instance;
         try
@@ -435,7 +437,7 @@ public static class PipelineToJobConverter
         foreach (var def in CliOptionBuilder.GenerateFlagDefsForType(optionsType))
             registry.Register(def);
 
-        OptionBinder.BindCli(instance, args, registry, prefix);
+        OptionBinder.BindCli(instance, args, registry, prefix, lineFlags: lineFlags);
         return OptionObjectExporter.CollectChanged(instance);
     }
 

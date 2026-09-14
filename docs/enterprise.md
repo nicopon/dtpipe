@@ -82,7 +82,7 @@ store. Either way, nothing sensitive needs to sit in a job file or a shell histo
 | Exit codes | `0` success · `1` failure · `130` cancelled (Ctrl-C). A cancellation never reports as success |
 | `--metrics-path run.json` | Structured result: row counts read and written, throughput, peak memory, start/end, duration |
 | `--log run.log` | The run's log to a file |
-| `--strict-bindings` | An unrecognised flag or a failed binding becomes a non-zero exit instead of a warning |
+| `--strict-bindings` | The two tolerated binding faults become a non-zero exit: an undeclared flag that consumes no value, and an unknown `provider-options` key |
 | `--job pipeline.yaml` | The pipeline itself, in version control, reviewable in a pull request |
 
 ```json

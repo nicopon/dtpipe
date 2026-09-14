@@ -22,11 +22,20 @@ public class ProviderConfigurationService
 {
     private readonly IEnumerable<ICliContributor> _contributors;
     private readonly OptionsRegistry _registry;
+    private readonly Pipeline.FlagRegistry? _lineFlags;
 
-    public ProviderConfigurationService(IEnumerable<ICliContributor> contributors, OptionsRegistry registry)
+    /// <param name="lineFlags">
+    /// Every flag the command line may carry. A stage slice holds more than the component's own
+    /// options — the boundary token that opened it, the engine controls — and
+    /// <see cref="Pipeline.OptionBinder.BindCli"/> needs this to tell a flag that belongs
+    /// elsewhere from one nobody declares.
+    /// </param>
+    public ProviderConfigurationService(IEnumerable<ICliContributor> contributors, OptionsRegistry registry,
+        Pipeline.FlagRegistry? lineFlags = null)
     {
         _contributors = contributors;
         _registry = registry;
+        _lineFlags = lineFlags;
     }
 
     public void BindOptions(JobDefinition job, Pipeline.CliJobContext? context = null, GlobalOptions? globals = null)
@@ -78,7 +87,7 @@ public class ProviderConfigurationService
                     var tempRegistry = new Pipeline.FlagRegistry();
                     foreach (var f in contributor.GetFlagDefs()) tempRegistry.Register(f);
                     Pipeline.OptionBinder.BindCli(instance, stageArgs, tempRegistry, factory.ComponentName,
-                        strict: globals?.StrictBindings == true);
+                        strict: globals?.StrictBindings == true, lineFlags: _lineFlags);
                 }
 
                 _registry.RegisterByType(optionsType, instance);

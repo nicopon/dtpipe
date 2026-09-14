@@ -251,7 +251,8 @@ public class JobService
 		}
 
 		// Bind options from JobDefinition to the registry (for providers/transformers)
-		var providerConfigService = new DtPipe.Cli.Services.ProviderConfigurationService(_contributors, registry);
+		var providerConfigService = new DtPipe.Cli.Services.ProviderConfigurationService(
+			_contributors, registry, _serviceProvider.GetService<Pipeline.FlagRegistry>());
 		providerConfigService.BindOptions(jobForBinding, context, globals);
 
 		var channelRegistry = _serviceProvider.GetRequiredService<IMemoryChannelRegistry>();

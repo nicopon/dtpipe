@@ -268,7 +268,7 @@ The branch names on the left are the aliases, and `stream1` is the one the CLI g
 | `sum(VARCHAR)` has no meaning | [Files](../connections/files.md) — a CSV column is text until typed |
 | `--ref a --ref b` refused | The repetition rule above |
 | A branch cannot be read by another | It declares an `-o` of its own — see the rule above |
-| A flag appears to be ignored | It landed in the wrong stage; `--strict-bindings` makes a bad binding fail |
+| A flag appears to be ignored | It landed in the wrong stage — the refusal names the stage that carries it |
 
 ---
 

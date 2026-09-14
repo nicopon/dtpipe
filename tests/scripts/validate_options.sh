@@ -201,9 +201,99 @@ set -e
   || fail "unknown flag broke default lenient run (exit $EXIT)"
 
 # ----------------------------------------
+# [9] --strict-bindings on an ordinary command line
+# ----------------------------------------
+# The stage slice a component is bound from opens with the boundary token that defined it, so
+# judging it against that component's own flags alone made this exit 1 on every line there is.
+echo "--- [9] --strict-bindings on an ordinary command line ---"
+for LINE in "-i;$ARTIFACTS_DIR/in_comma.csv;-o;csv:$ARTIFACTS_DIR/strict_ok.csv" \
+            "-i;generate:5;-o;null:" \
+            "-i;$ARTIFACTS_DIR/in_comma.csv;--limit;1;-o;csv:$ARTIFACTS_DIR/strict_ok2.csv"; do
+  IFS=';' read -r -a ARGS <<< "$LINE"
+  set +e
+  OUT=$("$DTPIPE" "${ARGS[@]}" --strict-bindings --no-stats 2>&1)
+  EXIT=$?
+  set -e
+  [ "$EXIT" -eq 0 ] \
+    && pass "--strict-bindings: '${ARGS[*]}' exits 0" \
+    || fail "--strict-bindings rejected an ordinary line '${ARGS[*]}' (exit $EXIT): $OUT"
+done
+
+# ----------------------------------------
+# [10] A provider option reaches the reader (CLI ≡ YAML)
+# ----------------------------------------
+# --row-count is a long and --quote a char: the CLI binder assigned nothing for a type it did not
+# list, so '-r 1000' wrote 100 rows and exited 0 while the same option in YAML wrote 1000.
+echo "--- [10] A provider option reaches the reader ---"
+for FLAG in "--row-count" "-r"; do
+  "$DTPIPE" -i "generate:" "$FLAG" 1000 -o "csv:$ARTIFACTS_DIR/rowcount.csv" --no-stats > /dev/null
+  COUNT=$(( $(wc -l < "$ARTIFACTS_DIR/rowcount.csv" | tr -d ' ') - 1 ))
+  [ "$COUNT" -eq 1000 ] \
+    && pass "generate $FLAG 1000 -> $COUNT rows" \
+    || fail "generate $FLAG 1000 -> $COUNT rows (expected 1000)"
+done
+
+cat > "$ARTIFACTS_DIR/job_rowcount.yaml" <<EOF
+main:
+  input: "generate:"
+  output: "csv:$ARTIFACTS_DIR/rowcount_yaml.csv"
+  provider-options:
+    generate:
+      row-count: 1000
+EOF
+"$DTPIPE" --job "$ARTIFACTS_DIR/job_rowcount.yaml" --no-stats > /dev/null
+COUNT_YAML=$(( $(wc -l < "$ARTIFACTS_DIR/rowcount_yaml.csv" | tr -d ' ') - 1 ))
+[ "$COUNT_YAML" -eq "$COUNT" ] \
+  && pass "the command line and the job file agree on row-count ($COUNT)" \
+  || fail "row-count: CLI gave $COUNT rows, YAML gave $COUNT_YAML"
+
+"$DTPIPE" -i "$ARTIFACTS_DIR/in_comma.csv" -o "csv:$ARTIFACTS_DIR/quoted.csv" \
+  --csv-quote "'" --export-job "$ARTIFACTS_DIR/job_quote.yaml" > /dev/null
+grep -q "quote:" "$ARTIFACTS_DIR/job_quote.yaml" \
+  && pass "--csv-quote (char) binds and survives --export-job" \
+  || fail "--csv-quote did not bind (absent from the exported job file)"
+
+# ----------------------------------------
+# [11] --cursor and --state are a pair
+# ----------------------------------------
+# Half a pair installed no tracking decorator, wrote no state file and said nothing: exit 0, and
+# the next run reloaded everything.
+echo "--- [11] --cursor and --state are a pair ---"
+for HALF in "--cursor;id" "--state;$ARTIFACTS_DIR/half.sync"; do
+  IFS=';' read -r -a PAIR <<< "$HALF"
+  set +e
+  OUT=$("$DTPIPE" -i "generate:5" "${PAIR[@]}" -o "csv:$ARTIFACTS_DIR/cursor_half.csv" --no-stats 2>&1)
+  EXIT=$?
+  set -e
+  [ "$EXIT" -ne 0 ] \
+    && pass "${PAIR[0]} alone is refused (exit $EXIT)" \
+    || fail "${PAIR[0]} alone ran and reported success"
+done
+
+set +e
+"$DTPIPE" -i "generate:5" --cursor GenerateIndex --state "$ARTIFACTS_DIR/full.sync" \
+  -o "csv:$ARTIFACTS_DIR/cursor_full.csv" --no-stats > /dev/null 2>&1
+EXIT=$?
+set -e
+[ "$EXIT" -eq 0 ] \
+  && pass "the complete pair runs" \
+  || fail "a complete --cursor/--state pair was refused (exit $EXIT)"
+
+# ----------------------------------------
+# [12] inspect says nothing about options it never expected
+# ----------------------------------------
+echo "--- [12] inspect emits no missing-options warning ---"
+set +e
+ERR=$("$DTPIPE" inspect -i "$ARTIFACTS_DIR/in_comma.csv" 2>&1 >/dev/null)
+set -e
+echo "$ERR" | grep -q "no options of type" \
+  && fail "inspect still warns about options nothing was meant to bind: $ERR" \
+  || pass "inspect emits no missing-options warning"
+
+# ----------------------------------------
 # Cleanup
 # ----------------------------------------
-rm -f "$ARTIFACTS_DIR"/*.csv "$ARTIFACTS_DIR"/*.yaml "$ARTIFACTS_DIR"/*.db "$ARTIFACTS_DIR"/*.json
+rm -f "$ARTIFACTS_DIR"/*.csv "$ARTIFACTS_DIR"/*.yaml "$ARTIFACTS_DIR"/*.db "$ARTIFACTS_DIR"/*.json "$ARTIFACTS_DIR"/*.sync
 
 echo ""
 echo -e "${GREEN}Options validation complete!${NC}"

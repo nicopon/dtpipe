@@ -46,7 +46,7 @@ These have no error message to search for, which is why they are collected here.
 DEBUG=1 dtpipe …                 # verbose, branch-level logging to stderr
 dtpipe … --dry-run 5             # the real pipeline, nothing written
 dtpipe … --log run.log           # keep the log
-dtpipe … --strict-bindings       # unrecognised flags become a non-zero exit
+dtpipe … --strict-bindings       # an undeclared flag or job-file key exits non-zero
 dtpipe inspect -i "<source>"     # what does the source actually look like?
 dtpipe providers                 # what does this binary actually support?
 ```

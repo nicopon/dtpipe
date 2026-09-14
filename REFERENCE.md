@@ -516,7 +516,7 @@ DuckDB extensions (`excel`, `httpfs`, `azure`, `ducklake`…) are reached throug
 | `--no-stats` | | Suppress progress bars and transfer statistics |
 | `--metrics-path` | `metrics.json` | Write structured execution results to a JSON file |
 | `--log` | `pipeline.log` | Write log output to a file |
-| `--strict-bindings` | | Fail with a non-zero exit code on unrecognized flags or failed option bindings instead of skipping them silently (default: warn/skip) |
+| `--strict-bindings` | | Non-zero exit on the two binding faults that are otherwise tolerated: a flag nothing declares that consumes no value (one followed by a value is refused by the parser either way), and a job file's unrecognized `provider-options` key (a warning otherwise). A flag that exists but is not an option of the branch's component is refused with or without it |
 | `--dry-run` | `10` | Run the pipeline over N source rows with the writer neutralised — see [Sample Mode](#sample-mode--materialisation) |
 | `--session` | `mission-7` | Name the session materialised artefacts belong to |
 | `--checkpoint` | `stage1` | Materialise this branch's output in the session store |

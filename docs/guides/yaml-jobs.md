@@ -93,8 +93,9 @@ dtpipe --job nightly.yaml --metrics-path metrics.json --log run.log --strict-bin
 echo "exit=$?"     # 0 success · 1 failure · 130 cancelled
 ```
 
-`--strict-bindings` turns an unrecognised flag or a failed option binding into a non-zero exit
-instead of a warning — worth it in automation, where nobody reads the warning.
+`--strict-bindings` turns an unrecognised `provider-options` key into a non-zero exit instead of
+a warning — worth it in automation, where nobody reads the warning. The case it catches most often
+is a key that is really the command-line flag: `throttle` where the key is `rows-per-second`.
 
 ---
 

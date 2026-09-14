@@ -90,7 +90,7 @@ class Program
 			}
 
 			// 4. Pipeline Execution (New Parser)
-			var registry = FlagRegistryFactory.Build(serviceProvider);
+			var registry = serviceProvider.GetRequiredService<FlagRegistry>();
 			var streamTransformerFactories = serviceProvider.GetRequiredService<IEnumerable<IStreamTransformerFactory>>();
 			var readerFactories = serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>();
 			var writerFactories = serviceProvider.GetRequiredService<IEnumerable<IDataWriterFactory>>();
@@ -105,7 +105,8 @@ class Program
 				secretsManager,
 				readerFactories,
 				writerFactories,
-				dataTransformerFactories);
+				dataTransformerFactories,
+				registry);
 
 			if (!string.IsNullOrEmpty(parsedPipeline.Globals.ExportJobFile))
 			{
@@ -149,8 +150,8 @@ class Program
 			 : "";
 		var precedingWords = words.Take(Math.Max(0, cursorPos - 1)).ToArray();
 
-		// Build the unified FlagRegistry (shared with Main pipeline execution)
-		var registry = FlagRegistryFactory.Build(sp);
+		// The unified FlagRegistry (shared with Main pipeline execution)
+		var registry = sp.GetRequiredService<FlagRegistry>();
 		var readerFactories    = sp.GetRequiredService<IEnumerable<IStreamReaderFactory>>().ToList();
 		var writerFactories    = sp.GetRequiredService<IEnumerable<IDataWriterFactory>>().ToList();
 		var transformerFactories = sp.GetRequiredService<IEnumerable<IDataTransformerFactory>>().ToList();
@@ -284,6 +285,9 @@ class Program
 		});
 
 		services.AddSingleton<OptionsRegistry>();
+		// One registry for the whole process: the lexer parses against it, shell completion
+		// suggests from it, and option binding classifies a stage slice's foreign tokens with it.
+		services.AddSingleton<DtPipe.Cli.Pipeline.FlagRegistry>(sp => DtPipe.Cli.Pipeline.FlagRegistryFactory.Build(sp));
 		services.AddSingleton<DtPipe.Core.Security.IMcpSecurityContext, DtPipe.Core.Security.McpSecurityContext>();
 		services.AddSingleton<Spectre.Console.IAnsiConsole>(sp => DtPipe.Cli.Infrastructure.SharedConsole.Create());
 		services.AddSingleton<JobService>();

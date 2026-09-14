@@ -23,12 +23,35 @@ public static class OptionBinder
     // CLI surface
     // ─────────────────────────────────────────────────────────────────────────
 
-    public static void BindCli(object target, string[] args, FlagRegistry registry, string prefix = "", bool strict = false)
+    /// <summary>
+    /// Binds one stage's raw tokens onto a component's options instance.
+    /// <paramref name="registry"/> holds that component's own flags;
+    /// <paramref name="lineFlags"/> holds every flag the whole command line may carry.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A stage slice is never made only of the component's own flags: it opens with the boundary
+    /// token that defined it (<c>-i</c> for the reader, <c>-o</c> for the writer) and carries the
+    /// engine and structural flags written alongside. Judging those against the component's
+    /// registry alone is what made <c>--strict-bindings</c> exit 1 on every command line there is,
+    /// on the very first token — so a token absent from <paramref name="registry"/> is classified
+    /// against <paramref name="lineFlags"/> before anything is decided about it.
+    /// </para>
+    /// <para>
+    /// A token the line declares is skipped with its value, whoever owns it. A token the line does
+    /// not declare is unrecognized, and strict mode refuses it. The narrower fault — a flag that
+    /// exists but belongs to another component, so it binds nothing here — is refused earlier and
+    /// unconditionally by <see cref="PipelineToJobConverter"/>, which names what the component does
+    /// accept; a second verdict on it here would be one more message to keep in step for nothing.
+    /// </para>
+    /// </remarks>
+    public static void BindCli(object target, string[] args, FlagRegistry registry, string prefix = "", bool strict = false, FlagRegistry? lineFlags = null)
     {
         var type = target.GetType();
         var props = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
         // Inverse of flag-def generation: canonical name (+ explicit aliases) → property.
         var flagMap = BuildFlagToPropertyMap(props, type);
+        var component = string.IsNullOrEmpty(prefix) ? type.Name : prefix;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -38,9 +61,13 @@ public static class OptionBinder
             var def = registry.Lookup(token);
             if (def == null)
             {
-                if (strict)
+                var foreign = lineFlags?.Lookup(token);
+                // Its value token is no more ours than the flag itself.
+                if (foreign is { ConsumesNextToken: true }) i++;
+
+                if (strict && lineFlags != null && foreign == null)
                     throw new InvalidOperationException(
-                        $"Unrecognized flag '{token}' for component '{(string.IsNullOrEmpty(prefix) ? type.Name : prefix)}'. " +
+                        $"Unrecognized flag '{token}' for component '{component}'. " +
                         "Check the provider prefix and flag spelling (see 'dtpipe --help'), or remove --strict-bindings to skip unknown flags.");
                 continue;
             }
@@ -67,7 +94,7 @@ public static class OptionBinder
                 continue;
             }
 
-            SetValue(target, prop, value, strict);
+            SetValue(target, prop, value);
         }
     }
 
@@ -338,18 +365,22 @@ public static class OptionBinder
            || (value is string s && s.Length == 0)
            || (value is not string && !(value is System.Collections.IEnumerable) && Equals(value, Activator.CreateInstance(Nullable.GetUnderlyingType(value.GetType()) ?? value.GetType())));
 
-    private static void SetValue(object target, PropertyInfo prop, string value, bool strict)
+    /// <summary>
+    /// Assigns one CLI token to a property, through the same conversion the YAML surface uses.
+    /// </summary>
+    /// <remarks>
+    /// The conversion must stay shared. A per-type <c>if</c> chain here listed the types it knew
+    /// and assigned nothing for the rest, in silence: <c>--row-count 1000</c> on a <c>long</c>
+    /// property wrote 100 rows and exited 0, while the same option in YAML wrote 1000. A type
+    /// this routine cannot convert now refuses the value instead of keeping the default.
+    /// </remarks>
+    private static void SetValue(object target, PropertyInfo prop, string value)
     {
         try
         {
-            var type = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
-            if (type == typeof(string)) prop.SetValue(target, value);
-            else if (type == typeof(bool)) prop.SetValue(target, bool.Parse(value));
-            else if (type == typeof(int)) prop.SetValue(target, int.Parse(value));
-            else if (type == typeof(double)) prop.SetValue(target, double.Parse(value));
-            else if (type.IsEnum) prop.SetValue(target, Enum.Parse(type, value, true));
+            prop.SetValue(target, ConvertValue(value, prop.PropertyType));
         }
-        catch (Exception ex) when (ex is FormatException or InvalidCastException or OverflowException or ArgumentException)
+        catch (Exception ex) when (ex is FormatException or InvalidCastException or OverflowException or ArgumentException or NotSupportedException)
         {
             throw new InvalidOperationException(DescribeUnbindableValue(prop, value, ex), ex);
         }

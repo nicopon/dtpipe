@@ -28,7 +28,7 @@ public static class CoreFlagRegistry
         registry.Register(new FlagDef("--log",         new string[] { }, FlagArity.Scalar,  FlagScope.Global, "Log file path",                          FlagStage.All));
         registry.Register(new FlagDef("--export-job",  new string[] { }, FlagArity.Scalar,  FlagScope.Global, "Export current CLI as YAML job file",    FlagStage.All));
         registry.Register(new FlagDef("--metrics-path",new string[] { }, FlagArity.Scalar,  FlagScope.Global, "Path to save JSON metrics",              FlagStage.All));
-        registry.Register(new FlagDef("--strict-bindings", new string[] { }, FlagArity.Boolean, FlagScope.Global, "Fail (exit non-zero) on unrecognized flags or failed option bindings instead of skipping them silently", FlagStage.All));
+        registry.Register(new FlagDef("--strict-bindings", new string[] { }, FlagArity.Boolean, FlagScope.Global, "Fail (exit non-zero) on an undeclared flag that consumes no value, or an unknown job-file option key", FlagStage.All));
 
         // Incremental cursor flags
         registry.Register(new FlagDef("--cursor",      new string[] { }, FlagArity.Scalar, FlagScope.PerBranch, "Cursor column for incremental loading (writer-side)", FlagStage.All));

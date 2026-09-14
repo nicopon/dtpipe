@@ -80,7 +80,50 @@ public class ValueTokenParityTests
         OptionBinder.BindCli(target, new[] { "--nope" }, registry); // lenient: skipped
 
         Assert.Throws<InvalidOperationException>(() =>
-            OptionBinder.BindCli(target, new[] { "--nope" }, registry, strict: true));
+            OptionBinder.BindCli(target, new[] { "--nope" }, registry, strict: true, lineFlags: LineFlags()));
+    }
+
+    /// <summary>
+    /// The vocabulary of a whole command line: structural flags and engine controls (no component
+    /// owner), plus one other component's option.
+    /// </summary>
+    private static FlagRegistry LineFlags()
+    {
+        var line = new FlagRegistry();
+        CoreFlagRegistry.RegisterCoreFlags(line);
+        foreach (var def in new DtPipe.Cli.Infrastructure.PipelineOptionsCliContributor().GetFlagDefs())
+            line.Register(def with { Stage = FlagStage.All });
+        line.Register(new FlagDef("--ora-fetch-size", System.Array.Empty<string>(), FlagArity.Scalar,
+            FlagScope.PerBranch, "fetch size", FlagStage.Reader, ComponentName: "ora"));
+        return line;
+    }
+
+    [Fact]
+    public void Strict_Accepts_The_Structural_Token_That_Opens_A_Stage_Slice()
+    {
+        // A reader slice always starts with -i and carries the engine controls written beside it.
+        var registry = new FlagRegistry();
+        registry.Register(new FlagDef("--sep", System.Array.Empty<string>(), FlagArity.Scalar, FlagScope.PerBranch, "separator"));
+
+        var target = new BindTarget();
+        OptionBinder.BindCli(target, new[] { "-i", "csv:x.csv", "--sep", ";", "--limit", "5" },
+            registry, "csv", strict: true, lineFlags: LineFlags());
+
+        Assert.Equal(";", target.Sep);
+    }
+
+    [Fact]
+    public void A_Foreign_Scalar_Flag_Takes_Its_Value_Token_With_It()
+    {
+        // --limit swallows "--sep": without arity-aware skipping the next token would be read
+        // as a flag of this component and bind the one after it.
+        var registry = new FlagRegistry();
+        registry.Register(new FlagDef("--sep", System.Array.Empty<string>(), FlagArity.Scalar, FlagScope.PerBranch, "separator"));
+
+        var target = new BindTarget();
+        OptionBinder.BindCli(target, new[] { "--limit", "--sep", ";" }, registry, "csv", lineFlags: LineFlags());
+
+        Assert.Equal("", target.Sep);
     }
 
     private sealed class BindTarget : DtPipe.Core.Options.IOptionSet

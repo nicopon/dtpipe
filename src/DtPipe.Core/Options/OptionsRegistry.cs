@@ -115,6 +115,13 @@ public class OptionsRegistry : IOptionsProvider
 	}
 
 	/// <summary>
+	/// Materializes a default instance of <typeparamref name="T"/> WITHOUT the missing-options
+	/// warning, for consumers whose default is a legitimate outcome rather than a lost binding.
+	/// </summary>
+	public T GetOrNew<T>() where T : class, IOptionSet, new()
+		=> CurrentOptions.TryGetValue(typeof(T), out var value) ? (T)value : new T();
+
+	/// <summary>
 	/// Attempts to retrieve registered options of a specific type without side effects.
 	/// </summary>
 	public bool TryGet<T>(out T value) where T : class, IOptionSet, new()
