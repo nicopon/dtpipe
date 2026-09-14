@@ -37,11 +37,13 @@ echo "========================================"
 
 cd "$PROJECT_ROOT"
 
-# Derived, never listed: every tracked Markdown file at the repository root is user-facing
-# documentation, so a new one is covered by adding the file.
+# Derived, never listed: every tracked Markdown file at the repository root, plus every page of
+# the docs/ site, is user-facing documentation — so a new one is covered by adding the file.
 DOCS=()
 while IFS= read -r doc; do DOCS+=("$doc"); done \
-    < <(git ls-files --full-name -- '*.md' | grep -v / | grep -v '^CLAUDE.md$')
+    < <(git ls-files --full-name -- '*.md' \
+        | grep -E '^([^/]+\.md|docs/.+\.md)$' \
+        | grep -v '^CLAUDE.md$')
 if [ ${#DOCS[@]} -eq 0 ]; then fail "no documentation file found at the repository root"; fi
 
 echo "  Checking ${DOCS[*]} at $WIDTH columns..."

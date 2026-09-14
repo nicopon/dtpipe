@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> **Docs map:** end-user CLI/YAML syntax, flag semantics, and recipes live in [README.md](./README.md), [COOKBOOK.md](./COOKBOOK.md), and [REFERENCE.md](./REFERENCE.md) — this file covers internals only (call chains, class ownership, invariants) and links out rather than restating them.
+> **Docs map:** end-user CLI/YAML syntax, flag semantics, and recipes live in [README.md](./README.md), [COOKBOOK.md](./COOKBOOK.md), and [REFERENCE.md](./REFERENCE.md); [docs/](./docs/) is the task-oriented site layered over them. This file covers internals only (call chains, class ownership, invariants) and links out rather than restating them.
 
 ## Language
 
@@ -74,6 +74,20 @@ dotnet test tests/DtPipe.Tests/ --filter "FullyQualifiedName~PipelineLexerTests"
 
 `test_local.sh` sets `DTPIPE_TEST_REUSE_INFRA=true` to connect to fixed-port containers started by `tests/infra/start_infra.sh`. Use `tests/infra/stop_infra.sh` to tear them down. Shell-based integration scripts are also in `tests/scripts/`.
 
+### Nine validators CI never runs — run them before you push
+
+`build.yml` discovers `tests/scripts/validate_*.sh` and runs each one, **except** a script that sources `lib/test_connections.sh` (that line is how a script declares it needs a database) plus `validate_vitals` and `validate_xml`. Free runners cannot host Oracle or SQL Server, and `validate_xml` writes 2.7 GB. So the ones below are green on your machine or nowhere:
+
+```bash
+tests/infra/start_infra.sh          # once
+for f in tests/scripts/validate_{drivers,duck_hub,mysql,nested_types,schema,temporal,upsert_dialect}.sh; do bash "$f"; done
+bash tests/scripts/validate_xml.sh  # 2.7 GB of scratch
+```
+
+**A push that touches an adapter, a dialect, a type mapping or a cursor without that run is a push whose result nobody has.** CI going green afterwards says nothing about the seven it skipped — that is the whole reason they are listed here rather than trusted to memory.
+
+> **Enforced by** nothing, and nothing plausible: a pre-push hook would have to start containers. Discipline, which is why the command is written out above rather than described.
+
 ### Performance Gate
 
 Three tiers, all local — none run in CI:
@@ -125,6 +139,47 @@ Before committing engine changes, verify the three canonical cases:
 Golden DAG fixtures in `GoldenDagDefinitions.cs` are the canonical shapes, consumed by the engine suites (`DagOrchestratorTests`, `ChannelInjectionTests`, `EngineInvariantsTests`, `JobDagDefinition_JsonTests`). The CLI side — args → DAG — is covered separately by `PipelineLexerTests` and `PipelineToJobConverterTests`. Add a new topology → add a golden definition + round-trip test in `JobDagDefinition_JsonTests.cs`.
 
 > **Enforced by** those suites (CI). **Not covered:** nothing ties CLI arguments to the golden shapes — the engine and the parser are guarded, the bridge between them is not — and nothing verifies that a change to `DagOrchestrator` or `LinearPipelineService` arrives with a test. That obligation is discipline.
+
+## The docs/ site
+
+`docs/` is a task-oriented layer **over** the three root documents, not a replacement: a reader who
+does not yet know which question to ask starts there, and every page ends by pointing into
+`REFERENCE.md` or `COOKBOOK.md` for the exhaustive form. The division that holds: **the site
+explains and shows, the root documents enumerate.** A flag table belongs in `REFERENCE.md`; a page
+that walks someone through anonymizing two tables belongs in `docs/guides/`.
+
+It is plain Markdown browsed in the repository. There is no generator, no build step and no
+published artefact — that option was examined and closed, because publication has no beneficiary
+and a build chain would be one more thing to keep green.
+
+Three checks cover it, all derived from `git ls-files` so a new page is covered by adding the file:
+
+| Check | What it decides |
+|---|---|
+| `validate_docs.sh` | Every `--flag` a page names exists in the binary's help. It found `--strict-bindings` cited on four pages and absent from `--help` on the first run |
+| `validate_doc_links.sh` | Every relative link and `#anchor` resolves. Anchors follow GitHub's rule exactly — spaces are **not** collapsed, so `a — b` is `#a--b`; an intuitive implementation reports three correct links as broken |
+| `validate_doc_width.sh` | Prose stays within 100 columns |
+| `validate_doc_examples.sh` | The examples run, and produce what the page prints |
+
+**`validate_doc_examples.sh` is the one that earns its keep, and only because it compares output.**
+The v0 draft claimed *"every output shown was produced by running it"* while shipping a
+deduplication result whose rows were in the wrong order and a YAML block `--export-job` does not
+produce. Both render perfectly. Only file-based examples are in it — no database, no container, so
+it runs in CI like the rest.
+
+Assert an exact result only where the run is deterministic, and **row order is not deterministic
+unless the pipeline asked for it.** DuckDB evaluates in parallel and `--merge` unions concurrent
+branches, so a `SELECT` without `ORDER BY` returns the same rows in a different arrangement — the
+deduplication example failed one run in three before its query gained one. Two ways out, and the
+choice says something: give the *example* an `ORDER BY` when a reader would want stable output
+anyway, or compare as a **set** when ordering would misrepresent what the feature guarantees
+(`expect_rows`, used for `--merge`). An unseeded `--fake` is random by design, so its check is
+shape (exit code, header, row count, and that the clear value is gone); pinning its values would
+test a Bogus version rather than a promise the docs make.
+
+> **Not covered:** whether a page is *true* — prose that misstates behaviour passes all four. The
+> examples check is what converts part of that into something decidable, which is why a claim worth
+> making is worth writing as a runnable example.
 
 ## Architecture Overview
 

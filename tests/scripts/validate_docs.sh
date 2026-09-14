@@ -32,7 +32,12 @@ fi
 # ----------------------------------------
 echo "--- [1] Documented flags present in --help ---"
 
+# Derived, never listed: the two root documents plus every page of the docs/ site. The site cites
+# flags as freely as COOKBOOK.md does and had no coverage at all, so a page could name a flag the
+# binary does not carry and nothing would say so.
 DOC_FILES=("$PROJECT_ROOT/README.md" "$PROJECT_ROOT/COOKBOOK.md")
+while IFS= read -r page; do DOC_FILES+=("$PROJECT_ROOT/$page"); done \
+    < <(cd "$PROJECT_ROOT" && git ls-files --full-name -- 'docs/*.md' 'docs/**/*.md')
 
 # Build a "help universe" from the WHOLE command tree, not just the root.
 # We walk the subcommand graph generically (no hardcoded names): the root help
@@ -73,7 +78,8 @@ FAILED=0
 
 for doc in "${DOC_FILES[@]}"; do
     [ -f "$doc" ] || continue
-     echo "  Checking $(basename "$doc")..."
+    rel="${doc#"$PROJECT_ROOT"/}"
+     echo "  Checking $rel..."
     # Markdown link targets carry "--" too: a heading like "A & B" yields the anchor
     # "#a--b", which is not a flag. Strip (...) link targets before extracting, or the check
     # reports a documentation cross-reference as an undocumented flag.
@@ -81,7 +87,7 @@ for doc in "${DOC_FILES[@]}"; do
     for flag in $FLAGS; do
         [[ $ALLOW_LIST =~ (^|[[:space:]])$flag([[:space:]]|$) ]] && continue
         if ! grep -qF -- "$flag" "$UNIVERSE"; then
-             echo -e "${RED}     [FAIL] '$flag' in $(basename "$doc") not found in --help${NC}"
+             echo -e "${RED}     [FAIL] '$flag' in $rel not found in --help${NC}"
             FAILED=1
         fi
     done
