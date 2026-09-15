@@ -34,7 +34,7 @@ These have no error message to search for, which is why they are collected here.
 | Upsert inserts duplicates instead of updating | No unique index covers exactly the key columns | [Write strategies](guides/write-strategies.md) |
 | A column is missing from the target and nothing failed | Schema regime **discard**, the default — `--auto-migrate` adds it, `--strict-schema` aborts | [Write strategies](guides/write-strategies.md) |
 | A flag seems to be ignored | It landed in the wrong stage or branch: reader options go before the alias, writer options after `-o` | [DAG pipelines](guides/dag.md#the-rules-that-catch-people-out) |
-| An incremental run re-reads everything each time | `--cursor` and `--state` only work as a pair, and one without the other is silent | [Incremental loading](guides/incremental.md#three-flags) |
+| An incremental run re-reads everything each time | The `${{cursor://…}}` resolver is missing from the query — the flags track the mark, the resolver is what filters. The run warns | [Incremental loading](guides/incremental.md#two-flags-that-track-one-resolver-that-filters) |
 | `--cursor` never advances on Oracle | The column name is not spelled as the reader returns it — upper case for an unquoted identifier | [Incremental loading](guides/incremental.md#things-that-bite) |
 | Anonymized values do not match between two tables | The generated value depends on the whole `--fake` set of the run, not only on the seed | [Anonymization](guides/anonymization.md#joins-have-to-survive--seed-the-generator-by-value) |
 | A table dtpipe created is not reachable as you typed it | Identifier casing: Oracle folds up, PostgreSQL folds down | [dtpipe and .NET](dotnet.md#oracle-and-sql-server) |

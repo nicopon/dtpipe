@@ -13,24 +13,28 @@ flowchart LR
     s -. "next run" .-> q
 ```
 
-## Three flags
+## Two flags that track, one resolver that filters
 
-| Flag | Role |
+The split matters more than the count: the flags record the mark, and **nothing filters until the
+resolver is in the query**. A run carrying only the two flags reads its whole source every time
+and says so — see the warning below.
+
+| Piece | Role |
 |:---|:---|
 | `--cursor COLUMN` | The column to watch. Name it **as the reader returns it** — upper case for an unquoted Oracle identifier |
 | `--state PATH` | Where the mark is persisted. There is **no default path** |
-| `--cursor-from VALUE` | Ignore the state file for this run and start from here — for a backfill or a replay |
+| `${{cursor://PATH\|DEFAULT}}` | **In the query** — this is what filters. `PATH` is the same file `--state` names; `DEFAULT` is what the first run uses, before any state file exists |
+| `--cursor-from VALUE` | Optional. Ignore the state file for this run and start from here — for a backfill or a replay |
 
 > [!IMPORTANT]
-> **`--cursor` and `--state` only work as a pair.** Tracking is installed only when both are
-> present, so `--cursor updated_at` on its own follows nothing and writes nothing — and today it
-> says so with neither a warning nor a non-zero exit. The same holds for `--state` without
-> `--cursor`. If a second run re-reads everything the first one already moved, check that both
-> flags are on the command line, in the branch that writes.
+> **The two flags go together, and the resolver goes with both.** `--cursor` without `--state`
+> is refused before anything runs, and so is the reverse. The pair **without** the resolver is
+> accepted and warns — *« sets 'cursor: …', but no `${{cursor://…}}` appears »* — because it
+> tracks correctly and filters nothing: every run re-reads the whole source, and the mark it saves
+> is never read back.
 
-And one resolver, `${{cursor://path|default}}`, which injects the mark into the query. The default
-after `|` is what the first run uses, when no state file exists yet. The path in the resolver is
-the same file `--state` names — write it twice, or the query will read a mark nothing updates.
+The path inside the resolver is the same file `--state` names — **write it twice**, or the query
+reads a mark nothing updates and the run silently re-reads everything.
 
 ```bash
 dtpipe -i "pg:Host=prod;Database=app;Username=app" \
@@ -86,7 +90,7 @@ main:
   cursor: "updated_at"
   state: "state/orders_sync.json"
   provider-options:
-    pg:
+    pg-reader:
       query: "SELECT * FROM orders WHERE updated_at > '${{cursor://state/orders_sync.json|1970-01-01T00:00:00.000}}'"
 ```
 

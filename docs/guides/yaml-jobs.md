@@ -28,7 +28,7 @@ main:
   input: "pg:Host=localhost;Database=prod;Username=app"
   output: "output.parquet"
   provider-options:
-    pg:
+    pg-reader:
       query: "SELECT * FROM users"
 ```
 

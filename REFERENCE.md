@@ -622,7 +622,7 @@ main:
   input: "pg:Host=localhost;Database=prod;Username=postgres"
   output: "output.parquet"
   provider-options:
-    pg:
+    pg-reader:
       query: "SELECT * FROM users"
 ```
 
