@@ -212,6 +212,19 @@ public static class OptionBinder
     private static string NormalizeKey(string key)
         => key.Replace("-", "").Replace("_", "").ToLowerInvariant();
 
+    /// <summary>
+    /// Whether <paramref name="optionsType"/> declares a property this YAML key resolves to.
+    /// </summary>
+    /// <remarks>
+    /// Same property selection and same normalization <see cref="BindYaml"/> uses, so a caller
+    /// deciding which keys to hand over cannot answer the question differently from the binder
+    /// that acts on them.
+    /// </remarks>
+    public static bool Accepts(Type optionsType, string key)
+        => FindProperty(
+            optionsType.GetProperties(BindingFlags.Public | BindingFlags.Instance).Where(p => p.CanWrite),
+            key) != null;
+
     private static PropertyInfo? FindProperty(IEnumerable<PropertyInfo> properties, string key)
     {
         var normalized = NormalizeKey(key);

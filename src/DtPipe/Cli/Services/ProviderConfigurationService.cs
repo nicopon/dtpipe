@@ -57,16 +57,19 @@ public class ProviderConfigurationService
                 {
                     bool strict = globals?.StrictBindings == true;
 
-                    // Shared plain key ("csv:" feeding both sides of a same-named pair):
-                    // some keys legitimately target only one side — skip unknowns silently.
-                    bool sharedPlainKey = _contributors.Any(o =>
-                        o is IDataFactory sibling
-                        && !ReferenceEquals(sibling, factory)
-                        && (sibling is IDataWriterFactory) != isWriter
-                        && sibling.ComponentName.Equals(factory.ComponentName, StringComparison.OrdinalIgnoreCase));
+                    // Shared plain key ("csv:" feeding both sides of a same-named pair): some keys
+                    // legitimately target only one side. Those are dropped here, before the binder
+                    // sees them, rather than silenced inside it — silencing was a single switch
+                    // that also swallowed a key NEITHER side declares, so a misspelling under
+                    // "pg:" was lost without a word and --strict-bindings, whose whole job is to
+                    // refuse exactly that, never got a verdict.
+                    var sibling = _contributors.OfType<IDataFactory>().FirstOrDefault(s =>
+                        !ReferenceEquals(s, factory)
+                        && (s is IDataWriterFactory) != isWriter
+                        && s.ComponentName.Equals(factory.ComponentName, StringComparison.OrdinalIgnoreCase));
 
                     if (job.ProviderOptions.TryGetValue(factory.ComponentName, out var opts))
-                        Pipeline.OptionBinder.BindYaml(instance, opts, strict, ignoreUnknownKeys: sharedPlainKey);
+                        Pipeline.OptionBinder.BindYaml(instance, KeysNotOwnedBy(sibling, optionsType, opts), strict);
 
                     var suffix = isWriter ? "-writer" : "-reader";
                     if (job.ProviderOptions.TryGetValue(factory.ComponentName + suffix, out var specificOpts))
@@ -101,6 +104,22 @@ public class ProviderConfigurationService
         else if (globals?.AllFlags.TryGetValue("-k", out var kVal) == true)
             globalKey = kVal?.ToString();
         PropagateKey(globalKey);
+    }
+
+    /// <summary>
+    /// The keys of a shared plain block minus those that belong to the other role alone: what
+    /// this options type accepts, plus what nobody declares — the second being the whole point,
+    /// since an unknown key must still reach the binder's unknown-key path.
+    /// </summary>
+    private static IReadOnlyDictionary<string, object?> KeysNotOwnedBy(
+        IDataFactory? sibling, Type optionsType, Dictionary<string, object?> opts)
+    {
+        if (sibling is null) return opts;
+
+        return opts
+            .Where(kv => Pipeline.OptionBinder.Accepts(optionsType, kv.Key)
+                         || !Pipeline.OptionBinder.Accepts(sibling.OptionsType, kv.Key))
+            .ToDictionary(kv => kv.Key, kv => kv.Value);
     }
 
     /// <summary>
