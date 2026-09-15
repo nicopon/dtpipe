@@ -4,7 +4,7 @@
 
 Two ways to reshape a stream, with different jobs.
 
-| | `--sql` (DuckDB) | `--compute` / `--filter` / `--expand` (JavaScript) |
+| | `--sql` (DuckDB engine) | `--compute` / `--filter` / `--expand` (JavaScript) |
 |:---|:---|:---|
 | Works on | Sets — the whole stream is a table | One row at a time |
 | Good at | Joins, aggregates, window functions, deduplication, sorting | Parsing a string, deriving a field, calling logic that has no SQL form |
@@ -12,6 +12,27 @@ Two ways to reshape a stream, with different jobs.
 | Needs | An alias per source | Nothing |
 
 Rule of thumb: **if it involves more than one row, it belongs in SQL.**
+
+## Nothing is loaded into a database
+
+`--sql` runs on a DuckDB engine embedded in the dtpipe process, on a connection that has no file
+behind it. Your data is never written to a DuckDB database and read back: each branch is
+**registered as a view over the Arrow batches already travelling through the pipeline**, and the
+query reads from there.
+
+The two ways in differ, and it is the only part worth knowing:
+
+| | What happens | Memory |
+|:---|:---|:---|
+| `--from <alias>` | the branch is scanned **as it streams**, zero-copy | bounded by the batch size |
+| `--ref <alias>` | the branch is **collected first**, then queried | the whole branch is held |
+
+That is why `--from` takes the large side of a join and `--ref` the small one: the engine needs a
+materialised side to plan against, not because either is a table on disk. Nothing survives the
+run — the engine goes away with the process, and there is no file to clean up.
+
+`duck:` is a different thing: that one *is* a DuckDB database you name, read or write like any
+other target. See [DuckDB](../connections/duckdb.md).
 
 ## SQL over any source
 

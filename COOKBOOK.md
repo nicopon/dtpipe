@@ -500,7 +500,7 @@ sales:                           # streams the seed, joins on the products it re
 multiplication. Verified on the result — 50 products, 500 sales, no orphan `product_id`, and every
 `total` equal to `price × quantity`.
 
-### In-memory SQL join (DuckDB)
+### In-memory SQL join (DuckDB engine)
 
 DuckDB is the default SQL engine. The `--from` source streams; `--ref` sources are preloaded
 into memory before query execution (required for cost-based join planning).

@@ -33,7 +33,7 @@ server — `cron`, a CI job or an orchestrator decides *when*, dtpipe decides *w
 | **Transformer** | One step in the chain — `--fake`, `--mask`, `--compute`, `--filter`, `--rename`… Applied left to right |
 | **Branch** | One source-to-target path. A command line with one `-i` has one branch |
 | **Alias** | A name given to a branch with `--alias`, so another branch can read it |
-| **Stream processor** | A step that takes *several* branches as input — `--sql` (DuckDB) and `--merge` |
+| **Stream processor** | A step that takes *several* branches as input — `--sql`, which runs on the embedded DuckDB engine, and `--merge` |
 | **Job** | A pipeline written as YAML instead of flags, replayable with `--job` |
 
 ## Several branches make a DAG
