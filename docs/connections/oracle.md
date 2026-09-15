@@ -80,7 +80,7 @@ no space in its place, and `.FF3` for the fractional digits. The full table of n
 
 ---
 
-See also: [Enterprise deployment](../enterprise.md) ·
+See also: [dtpipe and .NET](../dotnet.md) ·
 [Incremental loading](../guides/incremental.md) ·
 [Write strategies](../guides/write-strategies.md) ·
 [REFERENCE.md](../../REFERENCE.md#providers)

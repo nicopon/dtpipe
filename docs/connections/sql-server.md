@@ -82,7 +82,7 @@ write.
 
 ---
 
-See also: [Enterprise deployment](../enterprise.md) ·
+See also: [dtpipe and .NET](../dotnet.md) ·
 [Write strategies](../guides/write-strategies.md) ·
 [Incremental loading](../guides/incremental.md) ·
 [REFERENCE.md](../../REFERENCE.md#providers)

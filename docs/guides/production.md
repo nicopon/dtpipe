@@ -119,4 +119,4 @@ Everything on the command line decides how the machine hears about it.
 
 See also: [YAML jobs](yaml-jobs.md) · [Secrets](secrets.md) ·
 [Preview and checkpoints](preview-and-checkpoints.md) ·
-[DtPipe in a .NET estate](../enterprise.md)
+[dtpipe and .NET](../dotnet.md)

@@ -1,13 +1,13 @@
-# DtPipe in a .NET estate
+# dtpipe and .NET
 
 [← Documentation](README.md)
 
-dtpipe is a .NET application, and that shows up in four places on a corporate network: **what you
-install**, **what a connection string looks like**, **which databases it knows well**, and **what
-you can reference from your own code**.
+dtpipe is a .NET application, and that shows up in four places: **what you install**, **what a
+connection string looks like**, **which databases it knows well**, and **what you can reference
+from your own code**.
 
-This page is about fitting into an existing estate. Nothing here is a claim about other tools —
-if what you use already does these things, that is one less reason to change.
+Nothing here is a claim about other tools — if what you use already does these things, that is one
+less reason to change.
 
 ## One file
 
@@ -25,6 +25,9 @@ Unpacking needs no admin rights and no installer. Six platforms per release — 
 Windows, x64 and arm64. On a locked-down workstation or a hardened build agent, that can be the
 deciding constraint. Because the drivers travel with the binary, a database-to-database or
 database-to-file pipeline also runs on an isolated network as-is.
+
+It talks to nothing of its own either: dtpipe collects no telemetry and contacts no service that is
+not a source or a target you named.
 
 The cost of that choice is size: a self-contained binary is around 240 MB on disk, because it
 carries all of the above whether a given run needs it or not.
@@ -108,26 +111,8 @@ One more thing a direct consumer has to know: **the `name:` prefix is command-li
 of the connection string.** It is stripped before the adapter is constructed, so from your own code
 you pass what is left — `new GenerateReader("5", …)`, not `"generate:5"`.
 
-## Credentials, automation, production data
-
-Connection strings live in the OS credential store and are referenced by alias; on a build agent,
-`${{ENV_VAR}}` covers the same ground from the pipeline's own secret store. See
-[Secrets](guides/secrets.md).
-
-Exit codes, `--metrics-path`, logs to a file, retries on a flaky link, and what a preview does and
-does not guarantee against a production source: see
-[Running in production](guides/production.md).
-
-## Running without internet access
-
-dtpipe collects no telemetry and contacts no service of its own. Two things still need access:
-
-- **DuckDB extensions** (`httpfs`, `azure`, `spatial`…) are installed from DuckDB's repository on
-  first use. Pre-populate the extension directory, or avoid the extensions.
-- **Object storage** needs to reach its endpoint — including a MinIO on your own network, via
-  `--s3-endpoint`.
-
 ---
 
 See also: [Install](install.md) · [SQL Server](connections/sql-server.md) ·
-[Oracle](connections/oracle.md) · [YAML jobs](guides/yaml-jobs.md)
+[Oracle](connections/oracle.md) · [Running in production](guides/production.md) ·
+[Secrets](guides/secrets.md)

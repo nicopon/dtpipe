@@ -95,4 +95,4 @@ codes, metrics, logs, `--strict-bindings`, `--retry` — are in
 ---
 
 See also: [DAG pipelines](dag.md) · [Incremental loading](incremental.md) ·
-[Enterprise](../enterprise.md) · [REFERENCE.md](../../REFERENCE.md#yaml-job-file-schema)
+[dtpipe and .NET](../dotnet.md) · [REFERENCE.md](../../REFERENCE.md#yaml-job-file-schema)

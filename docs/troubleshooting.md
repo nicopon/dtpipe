@@ -37,7 +37,7 @@ These have no error message to search for, which is why they are collected here.
 | An incremental run re-reads everything each time | `--cursor` and `--state` only work as a pair, and one without the other is silent | [Incremental loading](guides/incremental.md#three-flags) |
 | `--cursor` never advances on Oracle | The column name is not spelled as the reader returns it — upper case for an unquoted identifier | [Incremental loading](guides/incremental.md#things-that-bite) |
 | Anonymized values do not match between two tables | The generated value depends on the whole `--fake` set of the run, not only on the seed | [Anonymization](guides/anonymization.md#joins-have-to-survive--seed-the-generator-by-value) |
-| A table dtpipe created is not reachable as you typed it | Identifier casing: Oracle folds up, PostgreSQL folds down | [DtPipe in a .NET estate](enterprise.md#oracle-and-sql-server) |
+| A table dtpipe created is not reachable as you typed it | Identifier casing: Oracle folds up, PostgreSQL folds down | [dtpipe and .NET](dotnet.md#oracle-and-sql-server) |
 | MySQL bulk load warns and slows down | `local_infile` is OFF on the server (default since MySQL 8) | [MySQL](connections/mysql.md) |
 
 ## Make the failure show itself

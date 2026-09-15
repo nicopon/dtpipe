@@ -28,7 +28,7 @@ build and nothing to publish. Every link below is a relative link inside this fo
 | Save a pipeline and run it from CI | [YAML jobs](guides/yaml-jobs.md) |
 | Run it every night, unattended, against production | [Running in production](guides/production.md) |
 | Keep credentials out of the command line | [Secrets](guides/secrets.md) |
-| Run this against Oracle, SQL Server and the rest of a .NET estate | [Enterprise](enterprise.md) |
+| Run it in a .NET estate, or call it from .NET code | [dtpipe and .NET](dotnet.md) |
 | Understand an error message | [Troubleshooting](troubleshooting.md) |
 
 ## Connections
