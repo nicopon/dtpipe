@@ -103,5 +103,5 @@ cheap way to point a whole job at a scratch area.
 ---
 
 See also: [Incremental loading](incremental.md) · [SQL Server](../connections/sql-server.md) ·
-[Oracle](../connections/oracle.md) · [COOKBOOK.md](../../COOKBOOK.md#write-strategies) ·
+[Oracle](../connections/oracle.md) ·
 [REFERENCE.md](../../REFERENCE.md#target-writer-options)

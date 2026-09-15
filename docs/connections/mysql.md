@@ -51,4 +51,4 @@ own PRIMARY KEY or UNIQUE indexes. There is no `ON CONFLICT (…)` to name a tar
 ---
 
 See also: [Write strategies](../guides/write-strategies.md) ·
-[COOKBOOK.md](../../COOKBOOK.md#mysql-upsert) · [REFERENCE.md](../../REFERENCE.md#mysql)
+[REFERENCE.md](../../REFERENCE.md#mysql)

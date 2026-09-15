@@ -1,6 +1,6 @@
 # DtPipe CLI Reference
 
-> **Docs map:** [README.md](./README.md) — quick start · [COOKBOOK.md](./COOKBOOK.md) — recipes ·
+> **Docs map:** [README.md](./README.md) — quick start · [docs/](./docs/README.md) — guides ·
 > [EXTENDING.md](./EXTENDING.md) — new adapters/transformers · [CLAUDE.md](./CLAUDE.md) —
 > contributor internals.
 
@@ -553,7 +553,7 @@ DuckDB extensions (`excel`, `httpfs`, `azure`, `ducklake`…) are reached throug
 > the other branches exactly when it declares no `output:`; one that writes to a target publishes
 > nothing, and naming it in `from`/`ref` is refused at validation. So a table that must be both
 > written *and* joined on takes two branches — one that produces it, one that writes it — plus the
-> branch that joins. See [COOKBOOK.md](./COOKBOOK.md#generating-two-related-tables).
+> branch that joins. See [DAG pipelines](./docs/guides/dag.md).
 
 #### Implicit branch-split rules
 

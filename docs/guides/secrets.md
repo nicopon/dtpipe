@@ -64,5 +64,4 @@ instance profile — which is usually the right answer on a managed runner. See
 
 See also: [Running in production](production.md) · [YAML jobs](yaml-jobs.md) ·
 [dtpipe and .NET](../dotnet.md) ·
-[COOKBOOK.md](../../COOKBOOK.md#security--secrets) ·
 [REFERENCE.md](../../REFERENCE.md#secret-management)

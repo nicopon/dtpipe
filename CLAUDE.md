@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> **Docs map:** end-user CLI/YAML syntax, flag semantics, and recipes live in [README.md](./README.md), [COOKBOOK.md](./COOKBOOK.md), and [REFERENCE.md](./REFERENCE.md); [docs/](./docs/) is the task-oriented site layered over them. This file covers internals only (call chains, class ownership, invariants) and links out rather than restating them.
+> **Docs map:** end-user CLI/YAML syntax and flag semantics live in [README.md](./README.md) and [REFERENCE.md](./REFERENCE.md); [docs/](./docs/) is the task-oriented site that holds the guides and the recipes. This file covers internals only (call chains, class ownership, invariants) and links out rather than restating them.
 
 ## Language
 
@@ -144,9 +144,10 @@ Golden DAG fixtures in `GoldenDagDefinitions.cs` are the canonical shapes, consu
 
 `docs/` is a task-oriented layer **over** the three root documents, not a replacement: a reader who
 does not yet know which question to ask starts there, and every page ends by pointing into
-`REFERENCE.md` or `COOKBOOK.md` for the exhaustive form. The division that holds: **the site
-explains and shows, the root documents enumerate.** A flag table belongs in `REFERENCE.md`; a page
-that walks someone through anonymizing two tables belongs in `docs/guides/`.
+`REFERENCE.md` for the exhaustive form. The division that holds: **the site explains and shows,
+`REFERENCE.md` enumerates.** A flag table belongs in `REFERENCE.md`; a page that walks someone
+through anonymizing two tables belongs in `docs/guides/`. `COOKBOOK.md` used to hold the second
+kind and was folded into `docs/guides/` on 2026-09-15 — do not recreate it.
 
 It is plain Markdown browsed in the repository. There is no generator, no build step and no
 published artefact — that option was examined and closed, because publication has no beneficiary
@@ -266,7 +267,7 @@ Branches communicate via `IMemoryChannelRegistry` (`Channel<IReadOnlyList<object
 
 ### SQL Processors
 
-`CompositeSqlTransformerFactory` is the DI entry point for `--sql` branches. The default (and currently only) engine is DuckDB — `DuckDBSqlTransformerFactory` / `DuckDBSqlProcessor`: zero-copy Arrow C Data Interface on read (`--from`), lazy streaming fetch (`duckdb_execute_prepared_streaming` + `duckdb_fetch_chunk`) on write, schema inferred from the prepared statement before execution. `DuckHubConnectionParser` parses `duck+{provider}:` connection strings and auto-issues `INSTALL`/`LOAD`/`ATTACH`. `--retry` uses Polly v8 (`DatabaseRetryPolicy`). `--duck-init`/`--compute`/`--expand` value resolution goes through `IStringContentResolver` (`CliStringContentResolver` for the CLI, `DefaultStringContentResolver` for headless contexts). The init-SQL runner is `DuckInitSqlRunner` (Core), the single copy for the reader, the writer and the processor. User-facing flag syntax and examples: `REFERENCE.md#provider-specific-options`, `COOKBOOK.md#sql-processors-and-joins`.
+`CompositeSqlTransformerFactory` is the DI entry point for `--sql` branches. The default (and currently only) engine is DuckDB — `DuckDBSqlTransformerFactory` / `DuckDBSqlProcessor`: zero-copy Arrow C Data Interface on read (`--from`), lazy streaming fetch (`duckdb_execute_prepared_streaming` + `duckdb_fetch_chunk`) on write, schema inferred from the prepared statement before execution. `DuckHubConnectionParser` parses `duck+{provider}:` connection strings and auto-issues `INSTALL`/`LOAD`/`ATTACH`. `--retry` uses Polly v8 (`DatabaseRetryPolicy`). `--duck-init`/`--compute`/`--expand` value resolution goes through `IStringContentResolver` (`CliStringContentResolver` for the CLI, `DefaultStringContentResolver` for headless contexts). The init-SQL runner is `DuckInitSqlRunner` (Core), the single copy for the reader, the writer and the processor. User-facing flag syntax and examples: `REFERENCE.md#provider-specific-options`, `docs/guides/sql-and-javascript.md`.
 
 #### One way to read DuckDB, and it lives in neither consumer
 

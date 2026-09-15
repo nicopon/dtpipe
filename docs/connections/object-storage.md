@@ -56,5 +56,4 @@ use different credentials.
 ---
 
 See also: [DuckDB](duckdb.md) · [Secrets](../guides/secrets.md) ·
-[COOKBOOK.md](../../COOKBOOK.md#object-storage-s3-and-azure-blob) ·
 [REFERENCE.md](../../REFERENCE.md#object-storage-s3-azure)

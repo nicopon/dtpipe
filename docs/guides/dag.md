@@ -206,7 +206,7 @@ the others exactly when it declares no `-o`. One that writes to a target publish
 naming it in `--from`/`--ref` is refused at validation. A table that must be both written *and*
 joined on therefore takes two branches — one that produces it, one that writes it — plus the branch
 that joins. The recipe is in
-[COOKBOOK.md](../../COOKBOOK.md#generating-two-related-tables).
+[SQL and JavaScript](sql-and-javascript.md).
 
 **`--from` arity belongs to the processor, not the grammar.** `--merge` takes several sources;
 `--sql` streams exactly one and materializes the rest through `--ref`, so `--from a,b --sql` is
@@ -273,6 +273,4 @@ The branch names on the left are the aliases, and `stream1` is the one the CLI g
 ---
 
 See also: [SQL and JavaScript](sql-and-javascript.md) · [YAML jobs](yaml-jobs.md) ·
-[Troubleshooting](../troubleshooting.md) ·
-[COOKBOOK.md](../../COOKBOOK.md#dag-pipelines-multi-source) ·
-[REFERENCE.md](../../REFERENCE.md#dag-syntax)
+[Troubleshooting](../troubleshooting.md) · [REFERENCE.md](../../REFERENCE.md#dag-syntax)

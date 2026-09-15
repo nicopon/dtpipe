@@ -2,7 +2,7 @@
 set -e
 
 # validate_docs.sh
-# 1. Verifies all --flags mentioned in README.md and COOKBOOK.md are registered in the binary.
+# 1. Verifies all --flags mentioned in README.md and the docs/ site are registered in the binary.
 # 2. Runs representative README examples to ensure they work end-to-end.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,14 +28,20 @@ if [ ! -f "$DTPIPE" ]; then
 fi
 
 # ----------------------------------------
-# 1. Flag presence check (README + COOKBOOK)
+# 1. Flag presence check (README + the docs/ site)
 # ----------------------------------------
 echo "--- [1] Documented flags present in --help ---"
 
-# Derived, never listed: the two root documents plus every page of the docs/ site. The site cites
-# flags as freely as COOKBOOK.md does and had no coverage at all, so a page could name a flag the
-# binary does not carry and nothing would say so.
-DOC_FILES=("$PROJECT_ROOT/README.md" "$PROJECT_ROOT/COOKBOOK.md")
+# Derived, never listed: README.md plus every page of the docs/ site. The site cites flags freely
+# and had no coverage at all, so a page could name a flag the binary does not carry and nothing
+# would say so.
+#
+# REFERENCE.md is deliberately NOT in this list, and adding it is the obvious mistake. This check
+# reads every "--token" as a claim that the binary carries it, which REFERENCE.md breaks four times
+# on purpose: two flags belong to tests/agentic/analyze-traces.sh, one is named as the deprecated
+# spelling of --fake-seed-row, and one is named to say it does not exist ("there is no
+# --schema-evolution flag"). Including the file fails on all four, none of which is a defect.
+DOC_FILES=("$PROJECT_ROOT/README.md")
 while IFS= read -r page; do DOC_FILES+=("$PROJECT_ROOT/$page"); done \
     < <(cd "$PROJECT_ROOT" && git ls-files --full-name -- 'docs/*.md' 'docs/**/*.md')
 

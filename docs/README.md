@@ -48,5 +48,4 @@ YAML key — go to the reference documents at the root of the repository:
 | Document | What it holds |
 |:---|:---|
 | [REFERENCE.md](../REFERENCE.md) | Every CLI flag, the YAML job schema, provider-specific options, the MCP tool table |
-| [COOKBOOK.md](../COOKBOOK.md) | End-to-end recipes, including ones these pages only summarise |
 | [EXTENDING.md](../EXTENDING.md) | Writing a new adapter or transformer |

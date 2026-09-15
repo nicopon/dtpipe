@@ -104,5 +104,4 @@ materialised, so an ordinary run leaves no trace. Sessions expire after 7 days
 ---
 
 See also: [Anonymization](anonymization.md) · [SQL and JavaScript](sql-and-javascript.md) ·
-[COOKBOOK.md](../../COOKBOOK.md#seeing-what-a-pipeline-will-actually-do) ·
 [REFERENCE.md](../../REFERENCE.md#sample-mode-and-materialisation)

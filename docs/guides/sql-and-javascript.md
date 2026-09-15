@@ -212,5 +212,4 @@ dtpipe -i "pg:…" --query "SELECT * FROM orders" --fake "email:internet.email" 
 
 See also: [DAG pipelines](dag.md) · [Files](../connections/files.md) ·
 [Anonymization](anonymization.md) ·
-[COOKBOOK.md](../../COOKBOOK.md#sql-processors-and-joins) ·
 [REFERENCE.md](../../REFERENCE.md#data-transformations)

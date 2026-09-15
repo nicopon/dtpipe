@@ -61,7 +61,7 @@ DtPipe uses a centralized Docker infrastructure for all integration tests.
 | **`validate_options.sh`** | Provider option scoping (global/writer/YAML), sampling rate + seed + determinism, YAML `provider-options`, `--metrics-path`. |
 | **`validate_hooks.sh`** | `--pre-exec` (inline + file), `--post-exec`, `--finally-exec` lifecycle hooks via SQLite. |
 | **`validate_cursor.sh`** | Incremental loading: `--cursor`, `--state`, `${{cursor://...}}` value resolution, state file lifecycle. |
-| **`validate_docs.sh`** | All `--flags` in README/COOKBOOK are present in `--help`; representative README examples execute correctly. |
+| **`validate_docs.sh`** | All `--flags` in README and the docs/ site are present in `--help`; representative README examples execute correctly. |
 | **`validate_dag.sh`** | All 9 canonical DAG topologies: Linear, Two-source, SQL, SQL JOIN, Fan-out, Fan-out+SQL, Diamond, Join→fan-out, Nested data. |
 | **`validate_duck_streaming.sh`** | A `duck:` read stays flat as the result grows — 20× the rows at the same peak memory, linear and fan-out. Calibrates its own tolerance against a query that holds the result whole, and skips rather than fails where that calibration does not hold. Not the ownership net: a missed `Dispose` is caught by `CDataOwnershipTests`, not by memory. |
 

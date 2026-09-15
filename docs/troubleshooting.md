@@ -60,7 +60,6 @@ per-column trace of what each step does to a row. See
 
 - [REFERENCE.md](../REFERENCE.md) — the exhaustive flag list; the answer is often a flag you have
   not met yet
-- [COOKBOOK.md](../COOKBOOK.md) — a working recipe close to what you are doing
 - `dtpipe --help`, `dtpipe <subcommand> --help` — generated from the binary, so never out of date
 
 ---

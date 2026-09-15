@@ -93,5 +93,4 @@ main:
 ---
 
 See also: [Write strategies](write-strategies.md) · [YAML jobs](yaml-jobs.md) ·
-[COOKBOOK.md](../../COOKBOOK.md#incremental-loading) ·
 [REFERENCE.md](../../REFERENCE.md#incremental-loading)

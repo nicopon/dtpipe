@@ -68,7 +68,6 @@ format and the rules that apply to every provider, is at
 |:---|:---|
 | [**docs/**](./docs/README.md) | **Start here.** Install, quickstart, concepts, a guide per task, a page per connection |
 | [REFERENCE.md](./REFERENCE.md) | The exhaustive lists: every CLI flag, the YAML job schema, provider options, the MCP tools |
-| [COOKBOOK.md](./COOKBOOK.md) | End-to-end recipes |
 | [EXTENDING.md](./EXTENDING.md) | Writing a new adapter or transformer |
 
 ## Contributing

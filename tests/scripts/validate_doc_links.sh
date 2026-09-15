@@ -9,8 +9,8 @@ set -e
 # precisely because a reader could not find things. A link to a renamed heading still renders, so
 # nothing about writing or reviewing the page reveals it -- only following it does.
 #
-# Root documents are link targets here, not sources: REFERENCE.md and COOKBOOK.md are checked when
-# a site page points into them, and their own links are left to their owners.
+# REFERENCE.md is a link target here, not a source: it is checked when a site page points into it,
+# and its own links are left to its owner.
 #
 # To fix: correct the path, or the heading spelling the anchor is derived from.
 

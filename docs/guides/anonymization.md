@@ -215,5 +215,4 @@ Edit it, commit it, run it with `dtpipe --job anonymize-employees.yaml`.
 See also: [SQL and JavaScript](sql-and-javascript.md) ·
 [Preview and checkpoints](preview-and-checkpoints.md) ·
 [Troubleshooting](../troubleshooting.md) ·
-[COOKBOOK.md](../../COOKBOOK.md#anonymization-before-export) ·
 [REFERENCE.md](../../REFERENCE.md#data-transformations)
