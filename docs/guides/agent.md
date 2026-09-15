@@ -110,4 +110,4 @@ It is a diagnostic for a person to read, not a gate: nothing in dtpipe reads its
 
 See also: [Running in production](production.md) · [YAML jobs](yaml-jobs.md) ·
 [Preview and checkpoints](preview-and-checkpoints.md) ·
-[REFERENCE.md](../../REFERENCE.md#agent-guardrails)
+[REFERENCE.md](../../REFERENCE.md#agent-guardrails-isqlsafetypolicy--iapprovalgate)
