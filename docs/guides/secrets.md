@@ -62,6 +62,7 @@ instance profile — which is usually the right answer on a managed runner. See
 
 ---
 
-See also: [YAML jobs](yaml-jobs.md) · [Enterprise](../enterprise.md) ·
+See also: [Running in production](production.md) · [YAML jobs](yaml-jobs.md) ·
+[Enterprise](../enterprise.md) ·
 [COOKBOOK.md](../../COOKBOOK.md#security--secrets) ·
 [REFERENCE.md](../../REFERENCE.md#secret-management)

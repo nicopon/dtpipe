@@ -26,6 +26,7 @@ build and nothing to publish. Every link below is a relative link inside this fo
 | Transfer only what changed since the last run | [Incremental loading](guides/incremental.md) |
 | See what a pipeline will do before it does it | [Preview and checkpoints](guides/preview-and-checkpoints.md) |
 | Save a pipeline and run it from CI | [YAML jobs](guides/yaml-jobs.md) |
+| Run it every night, unattended, against production | [Running in production](guides/production.md) |
 | Keep credentials out of the command line | [Secrets](guides/secrets.md) |
 | Run this against Oracle, SQL Server and the rest of a .NET estate | [Enterprise](enterprise.md) |
 | Understand an error message | [Troubleshooting](troubleshooting.md) |

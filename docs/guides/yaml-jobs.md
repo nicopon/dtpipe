@@ -88,14 +88,9 @@ See [Secrets](secrets.md).
 
 ## In CI
 
-```bash
-dtpipe --job nightly.yaml --metrics-path metrics.json --log run.log --strict-bindings
-echo "exit=$?"     # 0 success · 1 failure · 130 cancelled
-```
-
-`--strict-bindings` turns an unrecognised `provider-options` key into a non-zero exit instead of
-a warning — worth it in automation, where nobody reads the warning. The case it catches most often
-is a key that is really the command-line flag: `throttle` where the key is `rows-per-second`.
+A job file is what you put under review; the flags that make a run legible to a machine — exit
+codes, metrics, logs, `--strict-bindings`, `--retry` — are in
+[Running in production](production.md).
 
 ---
 

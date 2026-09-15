@@ -114,9 +114,9 @@ Connection strings live in the OS credential store and are referenced by alias; 
 `${{ENV_VAR}}` covers the same ground from the pipeline's own secret store. See
 [Secrets](guides/secrets.md).
 
-Exit codes, `--metrics-path`, logs to a file, and what a preview does and does not guarantee against
-a production source: see [YAML jobs](guides/yaml-jobs.md) and
-[Preview and checkpoints](guides/preview-and-checkpoints.md).
+Exit codes, `--metrics-path`, logs to a file, retries on a flaky link, and what a preview does and
+does not guarantee against a production source: see
+[Running in production](guides/production.md).
 
 ## Running without internet access
 
