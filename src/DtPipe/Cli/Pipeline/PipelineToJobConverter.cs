@@ -91,6 +91,13 @@ public static class PipelineToJobConverter
                 alias, job, arguments: branchSpec.RawArgs, processorName: processor?.ComponentName));
         }
 
+        // Reported here for the same reason JobFileParser reports it: this is the last place that
+        // still holds the pipeline as the author wrote it. The --job path returned above with its
+        // own advisory, so a job file carrying CLI overrides is never told twice.
+        foreach (var advisory in DtPipe.Cli.Incremental.CursorAdvisory.AdviseCommandLine(
+                     jobs, parsed.Branches.SelectMany(b => b.RawArgs)))
+            Console.Error.WriteLine($"[dtpipe] Warning: {advisory}");
+
         var dag = new JobDagDefinition { Branches = branches };
         return (jobs, dag, contexts);
     }

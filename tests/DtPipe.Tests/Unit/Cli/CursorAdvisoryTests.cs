@@ -62,4 +62,29 @@ public class CursorAdvisoryTests
 
         Assert.Empty(CursorAdvisory.Advise(JobFileParser.ParseContent(plain), plain));
     }
+
+    /// <summary>
+    /// The command line is the other half of the same rule: --export-job turns one into the other,
+    /// so a pipeline reported as a job file must be reported as a command line too.
+    /// </summary>
+    [Theory]
+    [InlineData(new[] { "-i", "csv:orders.csv", "--cursor", "order_id", "--state", "orders.state.json", "-o", "null:" }, true)]
+    [InlineData(new[] { "-i", "sqlite:Data Source=src.db", "--query", "SELECT * FROM orders WHERE order_id > ${{cursor://orders.state.json|0}}", "--cursor", "order_id", "-o", "null:" }, false)]
+    [InlineData(new[] { "-i", "sqlite:Data Source=src.db", "--query", "@incremental.sql", "--cursor", "order_id", "-o", "null:" }, false)]
+    public void The_Same_Rule_Reads_A_Command_Line(string[] args, bool reported)
+    {
+        var advisories = CursorAdvisory.AdviseCommandLine(JobFileParser.ParseContent(Tracking), args);
+
+        Assert.Equal(reported, advisories.Count == 1);
+    }
+
+    [Fact]
+    public void A_Command_Line_Without_A_Cursor_Is_Not_Reported()
+    {
+        const string plain =
+            "main:\n  input: \"csv:orders.csv\"\n  output: \"sqlite:Data Source=out.db\"\n";
+
+        Assert.Empty(CursorAdvisory.AdviseCommandLine(
+            JobFileParser.ParseContent(plain), new[] { "-i", "csv:orders.csv", "-o", "null:" }));
+    }
 }
