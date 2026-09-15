@@ -110,52 +110,23 @@ public class OptionsRegistryIsolationTests
         Assert.Equal("", bRead); // and the fallback default carries no leaked value
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // F17 — silent failures made loud
-    // ─────────────────────────────────────────────────────────────────────────
-
-    private sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger
-    {
-        public System.Collections.Generic.List<string> Warnings { get; } = new();
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
-        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId,
-            TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-        {
-            if (logLevel == Microsoft.Extensions.Logging.LogLevel.Warning)
-                Warnings.Add(formatter(state, exception));
-        }
-    }
-
     private sealed class ProbeOptions : IOptionSet
     {
         public static string Prefix => "probe";
         public static string DisplayName => "Probe";
     }
 
+    /// <summary>
+    /// A miss yields a usable default and says nothing. What it would have to say is a wiring
+    /// condition, not a user's mistake, and it is asserted where it is decidable:
+    /// OptionsRegistryCoverageTests, over the whole catalogue.
+    /// </summary>
     [Fact]
-    public void Get_Missing_Logs_Warning()
+    public void A_Miss_Returns_A_Default_Instance()
     {
-        var logger = new CapturingLogger();
-        var registry = new OptionsRegistry(logger);
+        var registry = new OptionsRegistry();
 
-        var options = registry.Get<ProbeOptions>();
-
-        Assert.NotNull(options);
-        var warning = Assert.Single(logger.Warnings);
-        Assert.Contains("ProbeOptions", warning);
-    }
-
-    [Fact]
-    public void Get_Hit_Does_Not_Log_Warning()
-    {
-        var logger = new CapturingLogger();
-        var registry = new OptionsRegistry(logger);
-        registry.Register(new ProbeOptions());
-
-        registry.Get<ProbeOptions>();
-
-        Assert.Empty(logger.Warnings);
+        Assert.NotNull(registry.Get<ProbeOptions>());
     }
 
     [Fact]

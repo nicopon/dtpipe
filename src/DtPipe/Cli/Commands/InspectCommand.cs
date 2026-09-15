@@ -88,7 +88,7 @@ public class InspectCommand : Command
                 var optionsType = f.GetSupportedOptionTypes().FirstOrDefault();
                 if (optionsType != null)
                 {
-                    var instance = registry.GetOrNew(optionsType);
+                    var instance = registry.Get(optionsType);
                     optionsType.GetProperty("Input")?.SetValue(instance, effectiveConnectionString);
                     registry.RegisterByType(optionsType, instance);
                 }
@@ -107,7 +107,7 @@ public class InspectCommand : Command
                     var optionsType = f.GetSupportedOptionTypes().FirstOrDefault();
                     if (optionsType != null)
                     {
-                        var instance = registry.GetOrNew(optionsType);
+                        var instance = registry.Get(optionsType);
                         optionsType.GetProperty("Input")?.SetValue(instance, input);
                         registry.RegisterByType(optionsType, instance);
                     }
@@ -141,7 +141,7 @@ public class InspectCommand : Command
             var optionsType = factory.GetSupportedOptionTypes().FirstOrDefault();
             if (optionsType != null)
             {
-                var instance = registry.GetOrNew(optionsType);
+                var instance = registry.Get(optionsType);
                 optionsType.GetProperty("Query")?.SetValue(instance, query);
                 registry.RegisterByType(optionsType, instance);
             }

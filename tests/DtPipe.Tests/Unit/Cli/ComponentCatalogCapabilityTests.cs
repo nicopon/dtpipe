@@ -50,7 +50,7 @@ public class ComponentCatalogCapabilityTests
     [Fact]
     public void Reader_And_Writer_Option_Types_Are_Instantiable()
     {
-        // GetOrNew materializes defaults through Activator during binding bulk passes;
+        // The bulk pass materializes defaults through Activator for every contributor;
         // an options type without a parameterless ctor fails only at runtime today.
         var catalog = DiscoverCatalog();
 

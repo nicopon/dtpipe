@@ -45,9 +45,10 @@ public class ProviderConfigurationService
             if (contributor is IDataFactory factory)
             {
                 var optionsType = factory.OptionsType;
-                // Bulk pass: materialize defaults for every contributor without warning —
-                // most providers are inactive in any given run (F17 noise control).
-                var instance = _registry.GetOrNew(optionsType);
+                // Bulk pass: every contributor gets an instance, active or not. Most providers are
+                // inactive in any given run, and registering them all is what lets a later Get
+                // mean "no configuration pass reached this flow" rather than "this one was idle".
+                var instance = _registry.Get(optionsType);
                 bool isWriter = factory is IDataWriterFactory;
 
                 // 1. Bind from ProviderOptions (YAML path) — only for the contributor that

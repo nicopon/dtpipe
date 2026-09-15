@@ -137,7 +137,7 @@ public class CliStreamReaderFactory : CliProviderFactory<IStreamReader>, IStream
 		// Not Get<T>(): LinearPipelineService always registers PipelineOptions before a factory
 		// runs, so a miss here means 'inspect', which has no pipeline and legitimately wants the
 		// defaults. Warning there taught every user to ignore the one diagnostic the registry has.
-		var pipelineOptions = registry.GetOrNew<PipelineOptions>();
+		var pipelineOptions = registry.Get<PipelineOptions>();
 
 		IStreamReader Build(string connection)
 		{

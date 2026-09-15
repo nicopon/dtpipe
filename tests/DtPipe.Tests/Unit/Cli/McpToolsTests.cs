@@ -26,9 +26,7 @@ public class McpToolsTests
     public McpToolsTests()
     {
         var services = new ServiceCollection();
-        // Silent logger: these tests exercise tool plumbing, not the F17 missing-options warning.
-        services.AddSingleton(new DtPipe.Core.Options.OptionsRegistry(
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<DtPipe.Core.Options.OptionsRegistry>.Instance));
+        services.AddSingleton(new DtPipe.Core.Options.OptionsRegistry());
         services.AddSingleton<IEnumerable<IStreamTransformerFactory>>(Array.Empty<IStreamTransformerFactory>());
 
         var readerFactories = new IStreamReaderFactory[] { new DummyReaderFactory() };
@@ -234,8 +232,7 @@ joined:
     private DtPipeMcpTools WithSqlProcessor()
     {
         var services = new ServiceCollection();
-        services.AddSingleton(new DtPipe.Core.Options.OptionsRegistry(
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<DtPipe.Core.Options.OptionsRegistry>.Instance));
+        services.AddSingleton(new DtPipe.Core.Options.OptionsRegistry());
         services.AddSingleton<IEnumerable<IStreamTransformerFactory>>(new IStreamTransformerFactory[] { new SqlProcessorStub() });
         var readers = new IStreamReaderFactory[] { new DummyReaderFactory() };
         services.AddSingleton<IEnumerable<IStreamReaderFactory>>(readers);
