@@ -308,8 +308,11 @@ internal sealed partial class ExportRunState
         }
         catch (Exception ex)
         {
+            // No Observer.LogError here: this exception is rethrown, and RunExportAsync's
+            // only caller renders the whole causal chain. Reporting it again produced the
+            // same fault twice on the console. The hook catches below DO report, because
+            // they swallow: nothing downstream would ever show them.
             Logger.LogError(ex, "Export failed");
-            Observer.LogError(ex);
 
             try
             {

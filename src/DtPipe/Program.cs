@@ -42,10 +42,20 @@ class Program
 		var isDebug = Environment.GetEnvironmentVariable("DEBUG") == "1";
 		var minLevel = isDebug ? Serilog.Events.LogEventLevel.Debug : Serilog.Events.LogEventLevel.Warning;
 
+		// {Exception} renders type, message AND stack trace. It is attached only under
+		// DEBUG=1 because the top-level handler in LinearPipelineService already decides
+		// how a fault is presented: the full causal chain for everyone, the stack behind
+		// DEBUG=1. An unconditional {Exception} here defeats that decision rather than
+		// complementing it -- it fires first, so a broken pipe printed thirteen stack
+		// frames through SafeFileHandle and Apache.Arrow.Ipc at ordinary verbosity.
+		var outputTemplate = isDebug
+			? "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}"
+			: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}";
+
 		Log.Logger = new LoggerConfiguration()
 				.MinimumLevel.Is(minLevel)
 				.WriteTo.Console(
-				outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}",
+				outputTemplate: outputTemplate,
 				standardErrorFromLevel: Serilog.Events.LogEventLevel.Verbose)
 				.CreateLogger();
 
