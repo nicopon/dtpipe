@@ -291,6 +291,22 @@ main:
       table: people
 EOF
 
+# ----------------------------------------
+# guides/secrets.md — what a routing failure prints
+# ----------------------------------------
+
+# The page shows this message verbatim to claim that a resolved credential does not reach the
+# logs. Comparing the whole line is the point: an assertion on the exit code alone would pass
+# just as well with the password printed.
+SECRETS_MSG=$("$DTPIPE" -i "Host=db.internal;Database=app;Username=etl;Password=hunter2" \
+    -o out.csv 2>&1 | grep -o "No reader factory resolved for input '[^']*'" | head -1)
+if [ "$SECRETS_MSG" = "No reader factory resolved for input 'Host=db.internal;Database=app;Username=etl;Password=***'" ]; then
+    pass "a routing failure prints the redacted connection"
+else
+    bad "a routing failure prints the redacted connection"
+    echo "       got: $SECRETS_MSG"
+fi
+
 echo ""
 if [ $FAILED -eq 0 ]; then
     echo -e "${GREEN}Documentation example validation complete!${NC}"
