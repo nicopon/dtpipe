@@ -200,7 +200,16 @@ public static class SchemaCompatibilityAnalyzer
 		return (CompatibilityStatus.Compatible, null);
 	}
 
-	private static bool IsNumericUpcast(Type source, Type target)
+	/// <summary>
+	/// Whether a value of <paramref name="source"/> fits in <paramref name="target"/> without loss.
+	/// </summary>
+	/// <remarks>
+	/// Public because it is the repository's ONE widening rule, and it now has two callers: this
+	/// analyzer, comparing a pipeline's output to a target table, and <c>ContractDiff</c>, comparing
+	/// two versions of a contract. A second copy would drift — the two would disagree about whether
+	/// a producer's change is breaking, and only one of them gates a pull request.
+	/// </remarks>
+	public static bool IsNumericUpcast(Type source, Type target)
 	{
 		// Safe numeric conversions
 		var numericOrder = new Dictionary<Type, int>

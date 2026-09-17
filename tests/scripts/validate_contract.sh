@@ -205,4 +205,61 @@ grep -q "initial" "$A/show.log" || fail "contract show does not list the columns
 pass "contract show lists the schema"
 
 echo ""
+echo "--- Case 12: diff says nothing when nothing changed ---"
+"$DTPIPE" contract diff "$A/real.json" "$A/again.json" > "$A/diff_same.log" 2>&1 \
+    || fail "two identical contracts were reported as a break"
+pass "identical contracts compare clean"
+
+echo ""
+echo "--- Case 13: a dropped column breaks consumers ---"
+printf 'id\n1\n2\n3\n' > "$A/narrowed.csv"
+"$DTPIPE" -i csv:"$A/narrowed.csv" -o csv:"$A/narrowed_out.csv" \
+          --contract-save "$A/narrowed.json" > /dev/null 2>&1 || fail "the narrowed run failed"
+
+set +e
+"$DTPIPE" contract diff "$A/real.json" "$A/narrowed.json" > "$A/diff_break.log" 2>&1
+rc=$?
+set -e
+[ "$rc" -eq 1 ] || fail "dropping a column exited $rc, expected 1"
+grep -q "Removed" "$A/diff_break.log" || fail "the diff does not name the removal"
+grep -q "name" "$A/diff_break.log" || fail "the diff does not name the column"
+pass "a dropped column exits 1 and names the column"
+
+echo ""
+echo "--- Case 14: an added column does not ---"
+set +e
+"$DTPIPE" contract diff "$A/real.json" "$A/computed.json" > "$A/diff_add.log" 2>&1
+rc=$?
+set -e
+[ "$rc" -eq 0 ] || fail "adding a column exited $rc, expected 0"
+grep -q "Added" "$A/diff_add.log" || fail "the diff does not report the addition"
+pass "an added column exits 0"
+
+echo ""
+echo "--- Case 15: --json carries the same verdict ---"
+set +e
+"$DTPIPE" contract diff --json "$A/real.json" "$A/narrowed.json" > "$A/diff.json" 2>"$A/diff_json.err"
+rc=$?
+set -e
+[ "$rc" -eq 1 ] || fail "--json disagreed with the exit code of the plain form"
+python3 -c "
+import json,sys
+d = json.load(open(sys.argv[1]))
+assert d['compatible'] is False, 'compatible should be false'
+assert any(c['breaking'] and c['kind'] == 'Removed' for c in d['changes']), d
+" "$A/diff.json" || fail "--json does not carry the breaking change"
+pass "--json and the exit code agree"
+
+echo ""
+echo "--- Case 16: the check and the diff agree on the same break ---"
+# The narrowed producer no longer supplies 'name'. A consumer whose target has it NOT NULL must
+# be refused by check, exactly as diff refuses the contract change. Two commands, one break.
+set +e
+"$DTPIPE" contract check --job "$A/strict.yaml" --contract "$A/narrowed.json" > "$A/check_narrow.log" 2>&1
+rc=$?
+set -e
+[ "$rc" -eq 1 ] || fail "check accepted a contract diff calls breaking"
+pass "check and diff do not disagree"
+
+echo ""
 echo -e "${GREEN}Contract validation passed.${NC}"

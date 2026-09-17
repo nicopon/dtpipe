@@ -991,6 +991,30 @@ statement about the *shape*, and it stops there.
 > suppresses because it can `CREATE` and `ALTER`. Making that flag fire inside a preview would
 > change what a preview means for every pipeline, to serve one command.
 
+#### Comparing two versions of a contract
+
+```bash
+dtpipe contract diff contracts/orders.json contracts/orders.new.json
+dtpipe contract diff --json old.json new.json     # for a CI step
+```
+
+It answers one question, and it is **not symmetric**: *does the new contract still satisfy a
+consumer the old one satisfied?* Exit `0` when it does, `1` when it does not.
+
+| Change | Verdict | Why |
+|:---|:---|:---|
+| Column added | compatible | a consumer ignores what it does not read |
+| Column removed | **breaks** | |
+| Column renamed | **breaks** | it is a removal plus an addition; the diff does not guess a rename |
+| Number widened (`int32` → `int64`) | compatible | |
+| Number narrowed, or family changed | **breaks** | |
+| Decimal precision or scale reduced | **breaks** | both sides are still `decimal`, so only an explicit rule catches it |
+| `nullable: false` → `true` | **breaks** | the producer may now send NULL where it never did |
+| `nullable: true` → `false` | compatible | it only narrows what the producer emits |
+| A timestamp's time zone changed or dropped | **breaks** | dropping it turns an instant into a wall clock |
+| Extension metadata dropped (`arrow.uuid` → raw binary) | **breaks** | the storage is identical and the consumer stops getting a `Guid` |
+| Column order | indifferent | a writer resolves by name |
+
 ### Sessions
 
 Artefacts belong to a session, resolved by precedence:

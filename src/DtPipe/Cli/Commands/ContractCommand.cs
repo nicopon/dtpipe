@@ -31,7 +31,103 @@ public class ContractCommand : Command
         _serviceProvider = serviceProvider;
         _console = console;
         Subcommands.Add(CreateCheckCommand());
+        Subcommands.Add(CreateDiffCommand());
         Subcommands.Add(CreateShowCommand());
+    }
+
+    // ── diff ─────────────────────────────────────────────────────────────────
+
+    private Command CreateDiffCommand()
+    {
+        var cmd = new Command("diff", "Compare two contracts: does the new one still satisfy the old one's consumers?");
+
+        var oldArgument = new Argument<string>("old") { Description = "The contract consumers were built against" };
+        var newArgument = new Argument<string>("new") { Description = "The contract the producer now writes" };
+        var jsonOption = new Option<bool>("--json") { Description = "Emit the changes as JSON, for a CI step" };
+
+        cmd.Arguments.Add(oldArgument);
+        cmd.Arguments.Add(newArgument);
+        cmd.Options.Add(jsonOption);
+
+        cmd.SetAction(parseResult => Diff(
+            parseResult.GetValue(oldArgument)!,
+            parseResult.GetValue(newArgument)!,
+            parseResult.GetValue(jsonOption)));
+
+        return cmd;
+    }
+
+    private int Diff(string oldPath, string newPath, bool json)
+    {
+        foreach (var path in new[] { oldPath, newPath })
+            if (!File.Exists(path))
+            {
+                _console.MarkupLine($"[red]No contract at '{Markup.Escape(path)}'.[/]");
+                return 1;
+            }
+
+        DataContract older, newer;
+        try
+        {
+            older = DataContract.Read(oldPath);
+            newer = DataContract.Read(newPath);
+        }
+        catch (Exception ex)
+        {
+            _console.MarkupLine($"[red]{Markup.Escape(ex.Message)}[/]");
+            return 1;
+        }
+
+        var changes = ContractDiff.Compare(older, newer);
+        var compatible = ContractDiff.IsCompatible(changes);
+
+        if (json)
+        {
+            var payload = new
+            {
+                oldHash = older.Hash,
+                newHash = newer.Hash,
+                compatible,
+                changes = changes.Select(c => new
+                {
+                    column = c.Column,
+                    kind = c.Kind.ToString(),
+                    breaking = c.Breaking,
+                    detail = c.Detail,
+                }),
+            };
+            Console.Out.WriteLine(System.Text.Json.JsonSerializer.Serialize(
+                payload, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+            return compatible ? 0 : 1;
+        }
+
+        if (older.Hash == newer.Hash)
+        {
+            _console.MarkupLine($"[green]Identical — {Markup.Escape(older.Hash[..12])}.[/]");
+            return 0;
+        }
+
+        _console.MarkupLine($"{Markup.Escape(older.Hash[..12])} → {Markup.Escape(newer.Hash[..12])}");
+        _console.WriteLine();
+
+        var table = new Table().Border(TableBorder.Rounded);
+        table.AddColumn("Column");
+        table.AddColumn("Change");
+        table.AddColumn("What it does to a consumer");
+
+        foreach (var change in changes)
+            table.AddRow(
+                Markup.Escape(change.Column),
+                change.Breaking ? $"[red]{change.Kind}[/]" : $"[green]{change.Kind}[/]",
+                Markup.Escape(change.Detail));
+
+        _console.Write(table);
+        _console.WriteLine();
+        _console.MarkupLine(compatible
+            ? "[green]Consumers of the old contract still work.[/]"
+            : "[red]This breaks consumers of the old contract.[/]");
+
+        return compatible ? 0 : 1;
     }
 
     // ── check ────────────────────────────────────────────────────────────────
