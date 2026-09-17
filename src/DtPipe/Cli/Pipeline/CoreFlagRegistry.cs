@@ -43,6 +43,7 @@ public static class CoreFlagRegistry
         // Materialisation. Per-branch, and neither splits a branch: only -i, --from and --job do.
         registry.Register(new FlagDef("--checkpoint",      new string[] { }, FlagArity.Scalar, FlagScope.PerBranch, "Materialise this branch's output in the session store", FlagStage.All));
         registry.Register(new FlagDef("--contract-save",   new string[] { }, FlagArity.Scalar, FlagScope.PerBranch, "Write the schema this branch produces to a contract file", FlagStage.All));
+        registry.Register(new FlagDef("--from-contract",   new string[] { }, FlagArity.Scalar, FlagScope.PerBranch, "Take this branch's source schema from a contract, with no rows", FlagStage.All));
         registry.Register(new FlagDef("--from-checkpoint", new string[] { }, FlagArity.Scalar, FlagScope.PerBranch, "Resume this branch from a stored checkpoint",           FlagStage.All));
     }
 }

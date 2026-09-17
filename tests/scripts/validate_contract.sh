@@ -11,9 +11,11 @@ set -e
 #
 # Only file sources, so this runs in CI like the rest.
 #
-# Lots B and C (`contract check`, `contract diff`) are not built yet; when they are, the cases that
-# belong here are a consumer checking green, then a column dropped from the producer's query and
-# both commands exiting 1.
+# `contract check` is a sample run over the contract's schema and no rows, so its exit code is the
+# whole product: a check that cannot go red is a check nobody should trust. Every refusal below is
+# therefore driven, not assumed.
+#
+# DuckDB is embedded, so the target side needs no container either.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -117,6 +119,90 @@ grep -q 'contract-save:' "$A/job.yaml" || fail "the exported job lost contract-s
 [ "$(hash_of "$A/rt.json")" = "$(hash_of "$A/real.json")" ] \
     || fail "the replayed job produced a different contract"
 pass "exported, replayed, same contract"
+
+echo ""
+echo "--- Case 7: a consumer that accepts the contract ---"
+cat > "$A/consumer.yaml" <<YAML
+main:
+  input: csv:$A/in.csv
+  output: duck:$A/consumer.duckdb
+  provider-options:
+    duck-writer:
+      table: landing
+YAML
+"$DTPIPE" contract check --job "$A/consumer.yaml" --contract "$A/real.json" > "$A/check_ok.log" 2>&1 \
+    || fail "a compatible consumer was refused"
+grep -q "accepts this contract" "$A/check_ok.log" || fail "the green verdict is not stated"
+pass "a compatible consumer exits 0"
+
+# The caveat is printed on the GREEN verdict too. That is where it will be misread, and a
+# guarantee that is sometimes absent must never read as though it were always there.
+grep -q "says nothing about rules the target" "$A/check_ok.log" \
+    || fail "the green verdict does not state what it did not check"
+pass "the green verdict says what it does not cover"
+
+echo ""
+echo "--- Case 8: a target column the contract cannot fill ---"
+printf 'id,name,total\n1,ana,10\n' > "$A/seed.csv"
+"$DTPIPE" -i csv:"$A/seed.csv" -o duck:"$A/strict.duckdb" --table landing --no-stats > /dev/null 2>&1
+"$DTPIPE" -i duck:"$A/strict.duckdb" --duck-init "ALTER TABLE landing ALTER COLUMN total SET NOT NULL;" \
+          --query "SELECT 1 AS x" -o null: --no-stats > /dev/null 2>&1
+
+cat > "$A/strict.yaml" <<YAML
+main:
+  input: csv:$A/in.csv
+  output: duck:$A/strict.duckdb
+  provider-options:
+    duck-writer:
+      table: landing
+YAML
+set +e
+"$DTPIPE" contract check --job "$A/strict.yaml" --contract "$A/real.json" > "$A/check_bad.log" 2>&1
+rc=$?
+set -e
+[ "$rc" -eq 1 ] || fail "a NOT NULL column the contract cannot fill was accepted (exit $rc)"
+grep -q "NOT NULL" "$A/check_bad.log" || fail "the refusal does not name the constraint"
+pass "an unfillable NOT NULL column is refused, and named"
+
+echo ""
+echo "--- Case 9: a consumer that cannot even initialise ---"
+cat > "$A/broken.yaml" <<YAML
+main:
+  input: csv:$A/in.csv
+  transformers:
+  - type: project
+    options:
+      project: id,does_not_exist
+  output: duck:$A/consumer.duckdb
+  provider-options:
+    duck-writer:
+      table: landing
+YAML
+set +e
+"$DTPIPE" contract check --job "$A/broken.yaml" --contract "$A/real.json" > "$A/check_init.log" 2>&1
+rc=$?
+set -e
+[ "$rc" -eq 1 ] || fail "a consumer that cannot initialise was accepted (exit $rc)"
+grep -q "does_not_exist" "$A/check_init.log" || fail "the refusal does not name the column"
+grep -qE '^ +at ' "$A/check_init.log" && fail "the refusal is a stack trace"
+pass "a consumer that cannot initialise is refused, by name and without a stack trace"
+
+echo ""
+echo "--- Case 10: a malformed job file is a message, not a stack trace ---"
+printf 'main:\n  input: [unclosed\n' > "$A/malformed.yaml"
+set +e
+"$DTPIPE" contract check --job "$A/malformed.yaml" --contract "$A/real.json" > "$A/check_yaml.log" 2>&1
+rc=$?
+set -e
+[ "$rc" -eq 1 ] || fail "a malformed job file was accepted"
+grep -qE '^ +at YamlDotNet' "$A/check_yaml.log" && fail "YamlDotNet's stack trace reached the user"
+pass "a malformed job file is reported, not dumped"
+
+echo ""
+echo "--- Case 11: contract show reads back what was written ---"
+"$DTPIPE" contract show "$A/computed.json" > "$A/show.log" 2>&1 || fail "contract show failed"
+grep -q "initial" "$A/show.log" || fail "contract show does not list the columns"
+pass "contract show lists the schema"
 
 echo ""
 echo -e "${GREEN}Contract validation passed.${NC}"

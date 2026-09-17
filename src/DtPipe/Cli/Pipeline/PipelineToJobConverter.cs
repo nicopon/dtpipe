@@ -204,6 +204,8 @@ public static class PipelineToJobConverter
                               ?? GetString(globals.AllFlags, "--from-checkpoint");
         string? contractSave = GetString(branchFlags, "--contract-save")
                             ?? GetString(globals.AllFlags, "--contract-save");
+        string? fromContract = GetString(branchFlags, "--from-contract")
+                            ?? GetString(globals.AllFlags, "--from-contract");
 
         return new BranchEngineSettings(
             Limit: limit,
@@ -220,7 +222,8 @@ public static class PipelineToJobConverter
             State: state,
             Checkpoint: checkpoint,
             FromCheckpoint: fromCheckpoint,
-            ContractSave: contractSave);
+            ContractSave: contractSave,
+            FromContract: fromContract);
     }
 
 

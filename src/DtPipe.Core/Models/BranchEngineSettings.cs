@@ -28,7 +28,9 @@ public sealed record BranchEngineSettings(
     string? Checkpoint = null,
     string? FromCheckpoint = null,
     // ContractSave: write the schema this branch produces to a file (--contract-save).
-    string? ContractSave = null)
+    // FromContract: take the source schema from a contract, with no rows (--from-contract).
+    string? ContractSave = null,
+    string? FromContract = null)
 {
     public static BranchEngineSettings Default { get; }
         = new(Limit: 0, BatchSize: PipelineOptions.DefaultBatchSize, MaxBatchBytes: 0, SamplingRate: 1.0, SamplingSeed: null,
@@ -53,5 +55,6 @@ public sealed record BranchEngineSettings(
         Checkpoint = Checkpoint ?? job.Checkpoint,
         FromCheckpoint = FromCheckpoint ?? job.FromCheckpoint,
         ContractSave = ContractSave ?? job.ContractSave,
+        FromContract = FromContract ?? job.FromContract,
     };
 }

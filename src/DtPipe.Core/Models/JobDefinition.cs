@@ -28,6 +28,9 @@ public record JobDefinition
 	/// <summary>Where to write the schema this branch produces (--contract-save).</summary>
 	public string? ContractSave { get; init; }
 
+	/// <summary>Read this branch's schema from a contract instead of a source (--from-contract).</summary>
+	public string? FromContract { get; init; }
+
 	/// <summary>Session the checkpoints belong to (--session); null lets the precedence chain decide.</summary>
 	public string? Session { get; init; }
 	public string? MetricsPath { get; init; }

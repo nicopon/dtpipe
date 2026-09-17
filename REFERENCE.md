@@ -522,6 +522,7 @@ DuckDB extensions (`excel`, `httpfs`, `azure`, `ducklake`…) are reached throug
 | `--checkpoint` | `stage1` | Materialise this branch's output in the session store |
 | `--from-checkpoint` | `<key>` | Resume this branch from a stored checkpoint instead of its input |
 | `--contract-save` | `orders.json` | Write the schema this branch produces to a contract file — see [Contracts](#the-schema-a-pipeline-produces-is-a-contract) |
+| `--from-contract` | `orders.json` | Take this branch's source schema from a contract, with no rows — see [Contracts](#the-schema-a-pipeline-produces-is-a-contract) |
 
 ---
 
@@ -967,6 +968,28 @@ file is refused before the run starts.
 > cannot know that the receiving service enforces invariants in its application code — a row can
 > satisfy every type here and still be wrong for that domain. "The contract is green" is not "the
 > write is safe"; see [Write strategies](./docs/guides/write-strategies.md).
+
+#### Checking a consumer against a contract
+
+```bash
+dtpipe contract check --job consumer.yaml --contract contracts/orders.json
+```
+
+This is a **sample run** whose source is the contract's schema and no rows: the consumer's
+transformers are built and initialised over the shape the producer promised, its target is
+inspected, and nothing is written. Exit `0` when the target accepts it, `1` when it does not or
+when the consumer cannot initialise at all — a projected column the contract does not carry, say.
+
+`--branch <alias>` names which branch the contract feeds when the job has more than one source.
+`dtpipe contract show <path>` prints a contract's hash and columns.
+
+**What a zero-row check cannot decide.** Anything that only fails on a row: a `--compute` reading a
+column the producer removed throws on the first row, not at initialisation. The check is a
+statement about the *shape*, and it stops there.
+
+> This is deliberately not `--strict-schema`, which lives in the migration path a sample run
+> suppresses because it can `CREATE` and `ALTER`. Making that flag fire inside a preview would
+> change what a preview means for every pipeline, to serve one command.
 
 ### Sessions
 

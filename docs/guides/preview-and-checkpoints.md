@@ -148,10 +148,31 @@ about not writing to its *source*; a real run carries none rather than claiming 
 Commit the file next to the pipeline. Each branch of a DAG produces its own schema, so each needs
 its own path — two branches naming one file is refused before the run starts.
 
+### Checking the other half against it
+
+The team that consumes the data runs the contract against their own job:
+
+```bash
+dtpipe contract check --job consumer.yaml --contract contracts/people.json
+```
+
+That is a preview whose source is the contract's schema and no rows. The consumer's transformers
+are built over the shape the producer promised, its target is inspected, nothing is written, and
+the exit code is the answer: `0` if the target accepts it, `1` if it does not — or if the consumer
+cannot even initialise, such as a projected column the contract does not carry.
+
+Put it in both CIs and a schema change breaks in the pull request of whoever changed it, not in
+someone else's nightly run.
+
+`dtpipe contract show contracts/people.json` prints a contract's hash and columns.
+
 > [!IMPORTANT]
 > A schema contract fixes columns and types, and nothing else. It cannot know that the receiving
 > service enforces rules in its own application code, so a row can satisfy every type in it and
 > still be wrong for that domain. See [Write strategies](write-strategies.md).
+>
+> A zero-row check also cannot see anything that only fails on a row: a `--compute` reading a
+> column the producer removed throws on the first row, not at initialisation.
 
 ---
 

@@ -22,7 +22,7 @@ public static class JobFileWriter
 	private static readonly string[] KeyOrder =
 	[
 		nameof(JobDefinition.Input), nameof(JobDefinition.From), nameof(JobDefinition.Ref),
-		nameof(JobDefinition.FromCheckpoint),
+		nameof(JobDefinition.FromCheckpoint), nameof(JobDefinition.FromContract),
 		nameof(JobDefinition.Transformers),
 		nameof(JobDefinition.Output), nameof(JobDefinition.Checkpoint),
 		nameof(JobDefinition.ContractSave),

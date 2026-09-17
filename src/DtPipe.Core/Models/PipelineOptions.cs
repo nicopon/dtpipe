@@ -53,5 +53,6 @@ public sealed record PipelineOptions : IOptionSet
 
 	// Contract — set from JobDefinition by LinearPipelineService
 	public string? ContractSave { get; init; }
+	public string? FromContract { get; init; }
 	public string? Session { get; init; }
 }

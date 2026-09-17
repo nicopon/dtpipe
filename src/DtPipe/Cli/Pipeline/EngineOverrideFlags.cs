@@ -11,6 +11,6 @@ public static class EngineOverrideFlags
     [
         "--limit", "--batch-size", "-b", "--max-batch-bytes", "--log", "--metrics-path",
         "--cursor", "--state", "--sampling-rate", "--sampling-seed",
-        "--prefix", "--dry-run", "--session", "--checkpoint", "--from-checkpoint", "--contract-save",
+        "--prefix", "--dry-run", "--session", "--checkpoint", "--from-checkpoint", "--contract-save", "--from-contract",
     ];
 }

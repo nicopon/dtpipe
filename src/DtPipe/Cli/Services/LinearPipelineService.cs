@@ -142,12 +142,15 @@ public class LinearPipelineService
 
         // 1. Resolve Reader. A typed input endpoint bypasses connection-string resolution
         // entirely: the factory is picked by capability and the channel alias handed over.
-        // --from-checkpoint resolves like a typed endpoint, by capability: a checkpoint key is
-        // not a connection string and must not enter the ComponentSelector grammar, where a
-        // hex key could be read as a component prefix.
+        // --from-checkpoint and --from-contract resolve like a typed endpoint, by capability:
+        // neither value is a connection string, and letting them into the ComponentSelector
+        // grammar is how a hex key gets read as a component prefix — or 'C:\contracts\o.json'
+        // as the component 'C'.
         (IStreamReaderFactory? readerFactory, string cleanedInput, string? inputVariant) =
             !string.IsNullOrEmpty(job.FromCheckpoint)
                 ? (new DtPipe.Sessions.CheckpointReaderFactory(job.FromCheckpoint, job.Session), job.FromCheckpoint, (string?)null)
+            : !string.IsNullOrEmpty(job.FromContract)
+                ? (new DtPipe.Contracts.ContractReaderFactory(job.FromContract), job.FromContract, (string?)null)
             : inputEndpoint != null
                 ? (PickChannelReader(inputEndpoint.Kind), inputEndpoint.Alias, (string?)null)
                 : ResolveFactory<IStreamReaderFactory>(job.Input ?? "", _readerFactories);
@@ -223,6 +226,7 @@ public class LinearPipelineService
             Checkpoint   = job.Checkpoint,
             FromCheckpoint = job.FromCheckpoint,
             ContractSave = job.ContractSave,
+            FromContract = job.FromContract,
             Session      = job.Session
         };
         _optionsRegistry.Register(pipelineOptions);
