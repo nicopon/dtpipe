@@ -93,6 +93,13 @@ public static class PipelineValidator
         // 6. Cursor state file uniqueness
         errors.AddRange(CursorStateValidator.Validate(dag, jobs));
 
+        // 7. Contract file uniqueness — same rule as the state file, same helper
+        BranchPathClaims.RejectShared(
+            errors, dag, jobs,
+            job => job.ContractSave,
+            "Contract file",
+            "Each branch produces its own schema, so it needs its own --contract-save path.");
+
         return errors;
     }
 

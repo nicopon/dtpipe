@@ -222,6 +222,7 @@ public class LinearPipelineService
             State        = job.State,
             Checkpoint   = job.Checkpoint,
             FromCheckpoint = job.FromCheckpoint,
+            ContractSave = job.ContractSave,
             Session      = job.Session
         };
         _optionsRegistry.Register(pipelineOptions);

@@ -144,10 +144,21 @@ public static class ArrowSchemaSerializer
         };
     }
 
+    /// <summary>
+    /// Emits metadata with its keys in ordinal order, at the schema level and inside every field.
+    /// </summary>
+    /// <remarks>
+    /// The order must not come from the dictionary. <see cref="Field.Metadata"/> is a bare
+    /// <c>Dictionary&lt;string,string&gt;</c>, whose enumeration order follows insertion, so two
+    /// schemas carrying the same pairs serialize to two different strings — and therefore to two
+    /// different SHA-256 values. A contract identifies a schema by that hash, so an unsorted
+    /// enumeration here makes a pipeline look changed when nothing about it did.
+    /// </remarks>
     private static JsonObject MetadataToNode(IReadOnlyDictionary<string, string> meta)
     {
         var obj = new JsonObject();
-        foreach (var kv in meta) obj[kv.Key] = kv.Value;
+        foreach (var key in meta.Keys.OrderBy(k => k, StringComparer.Ordinal))
+            obj[key] = meta[key];
         return obj;
     }
 

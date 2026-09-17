@@ -28,7 +28,9 @@ public sealed record SampleReport(
 	/// <summary>Which branch this report is about. A DAG produces one per branch.</summary>
 	string? BranchAlias = null,
 	/// <summary>The content-addressed checkpoint this run materialised, when --checkpoint was set.</summary>
-	string? CheckpointKey = null);
+	string? CheckpointKey = null,
+	/// <summary>Where this run wrote its contract, when --contract-save was set.</summary>
+	string? ContractPath = null);
 
 public static class SampleRunExtensions
 {

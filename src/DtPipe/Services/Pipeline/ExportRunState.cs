@@ -63,6 +63,9 @@ internal sealed partial class ExportRunState
     /// <summary>The content-addressed key this run materialises under, when --checkpoint is set.</summary>
     internal string? CheckpointKey;
 
+    /// <summary>Where this run wrote its contract, when --contract-save is set and a stream completed.</summary>
+    internal string? ContractPath;
+
     /// <summary>How far this sample run could guarantee it would not write. Reported, never assumed.</summary>
     internal DtPipe.Sessions.SampleSafetyVerdict? SafetyVerdict;
 

@@ -307,6 +307,32 @@ else
     echo "       got: $SECRETS_MSG"
 fi
 
+echo "--- guides/preview-and-checkpoints.md ---"
+
+# The page prints a contract, hash included. The values in people.csv are random and the hash is
+# not: it identifies the SCHEMA. That is exactly the claim worth checking -- a hash copied from a
+# neighbouring example renders just as convincingly as the right one.
+rm -rf contracts
+"$DTPIPE" -i people.csv --compute "domain:row.email.split('@')[1]" \
+          -o duck:analytics.duckdb --table people \
+          --dry-run 100 --contract-save contracts/people.json > /dev/null 2>&1
+
+DOC_HASH=$(python3 -c "import json;print(json.load(open('contracts/people.json'))['hash'])" 2>/dev/null)
+if [ "$DOC_HASH" = "5617094d2289c89cca008e515e168b8baf19c559db93ff7e9d0032a0e4127140" ]; then
+    pass "the contract hash the page prints"
+else
+    bad "the contract hash the page prints"
+    echo "       got: $DOC_HASH"
+fi
+
+DOC_FIELDS=$(python3 -c "import json;print(','.join(f['name'] for f in json.load(open('contracts/people.json'))['schema']['fields']))" 2>/dev/null)
+if [ "$DOC_FIELDS" = "name,email,city,domain" ]; then
+    pass "the computed column is in the contract, as shown"
+else
+    bad "the computed column is in the contract, as shown"
+    echo "       got: $DOC_FIELDS"
+fi
+
 echo ""
 if [ $FAILED -eq 0 ]; then
     echo -e "${GREEN}Documentation example validation complete!${NC}"

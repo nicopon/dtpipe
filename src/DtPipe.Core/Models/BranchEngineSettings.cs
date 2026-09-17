@@ -26,7 +26,9 @@ public sealed record BranchEngineSettings(
     // Checkpoint: materialise this branch's output in the session store (--checkpoint).
     // FromCheckpoint: read its source from the store instead of the input (--from-checkpoint).
     string? Checkpoint = null,
-    string? FromCheckpoint = null)
+    string? FromCheckpoint = null,
+    // ContractSave: write the schema this branch produces to a file (--contract-save).
+    string? ContractSave = null)
 {
     public static BranchEngineSettings Default { get; }
         = new(Limit: 0, BatchSize: PipelineOptions.DefaultBatchSize, MaxBatchBytes: 0, SamplingRate: 1.0, SamplingSeed: null,
@@ -50,5 +52,6 @@ public sealed record BranchEngineSettings(
         State = State ?? job.State,
         Checkpoint = Checkpoint ?? job.Checkpoint,
         FromCheckpoint = FromCheckpoint ?? job.FromCheckpoint,
+        ContractSave = ContractSave ?? job.ContractSave,
     };
 }

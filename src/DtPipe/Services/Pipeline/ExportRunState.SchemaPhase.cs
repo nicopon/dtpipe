@@ -134,7 +134,8 @@ internal sealed partial class ExportRunState
             SampleTap?.TypeHints,
             SafetyVerdict?.Enforcement ?? DtPipe.Sessions.ReadOnlyEnforcement.VerbScanOnly,
             Alias,
-            CheckpointKey);
+            CheckpointKey,
+            ContractPath);
 
         var executionPlan = ExportService.BuildExecutionPlan(ProviderName, Reader, WriterFactory.ComponentName, Writer, Pipeline, Segments);
 

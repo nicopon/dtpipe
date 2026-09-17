@@ -25,6 +25,9 @@ public record JobDefinition
 	/// <summary>Resume this branch from a stored checkpoint instead of its input (--from-checkpoint).</summary>
 	public string? FromCheckpoint { get; init; }
 
+	/// <summary>Where to write the schema this branch produces (--contract-save).</summary>
+	public string? ContractSave { get; init; }
+
 	/// <summary>Session the checkpoints belong to (--session); null lets the precedence chain decide.</summary>
 	public string? Session { get; init; }
 	public string? MetricsPath { get; init; }

@@ -101,6 +101,58 @@ ancestor `.dtpipe/` (as git looks for `.git`), else a new one — created **only
 materialised, so an ordinary run leaves no trace. Sessions expire after 7 days
 (`DTPIPE_SESSION_TTL_DAYS`) and are purged the next time the store is touched.
 
+## Capturing the schema a pipeline produces
+
+A preview already knows the exact shape the writer would receive. `--contract-save` writes it down:
+
+```bash
+dtpipe -i people.csv --compute "domain:row.email.split('@')[1]" \
+  -o duck:analytics.duckdb --table people \
+  --dry-run 100 --contract-save contracts/people.json
+```
+
+Because a dry run *is* the real run with the writer switched off, this captures the same schema a
+full run produces — the two contracts have the same hash. That is what makes the line above usable
+as a CI gate: nothing is written, and the promise is still the real one.
+
+What comes out is the schema **after** the transformers, not the source's. The `--compute` above
+puts `domain` in the file. A schema you write by hand cannot know that; this one is read off the
+execution path.
+
+```json
+{
+  "version": 1,
+  "hash": "5617094d2289c89cca008e515e168b8baf19c559db93ff7e9d0032a0e4127140",
+  "schemaSource": "batch",
+  "enforcement": "VerbScanOnly",
+  "producer": "1.8.2+e994ee51…",
+  "schema": {
+    "fields": [
+      { "name": "name",   "nullable": true, "type": "utf8" },
+      { "name": "email",  "nullable": true, "type": "utf8" },
+      { "name": "city",   "nullable": true, "type": "utf8" },
+      { "name": "domain", "nullable": true, "type": "utf8" }
+    ]
+  }
+}
+```
+
+The values in `people.csv` are random, and that hash is still fixed: it identifies the **schema**,
+not the data.
+
+`hash` identifies the schema — an unchanged pipeline keeps it across runs. `schemaSource` is
+`batch` when it came off real data and `columns` when the run produced no rows, in which case it is
+flat and a nested type is missing from it. `enforcement` records what that run could guarantee
+about not writing to its *source*; a real run carries none rather than claiming the weakest.
+
+Commit the file next to the pipeline. Each branch of a DAG produces its own schema, so each needs
+its own path — two branches naming one file is refused before the run starts.
+
+> [!IMPORTANT]
+> A schema contract fixes columns and types, and nothing else. It cannot know that the receiving
+> service enforces rules in its own application code, so a row can satisfy every type in it and
+> still be wrong for that domain. See [Write strategies](write-strategies.md).
+
 ---
 
 See also: [Anonymization](anonymization.md) · [SQL and JavaScript](sql-and-javascript.md) ·

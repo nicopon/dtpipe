@@ -50,5 +50,8 @@ public sealed record PipelineOptions : IOptionSet
 	// Materialisation — set from JobDefinition by LinearPipelineService
 	public string? Checkpoint { get; init; }
 	public string? FromCheckpoint { get; init; }
+
+	// Contract — set from JobDefinition by LinearPipelineService
+	public string? ContractSave { get; init; }
 	public string? Session { get; init; }
 }

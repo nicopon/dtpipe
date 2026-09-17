@@ -521,6 +521,7 @@ DuckDB extensions (`excel`, `httpfs`, `azure`, `ducklake`…) are reached throug
 | `--session` | `mission-7` | Name the session materialised artefacts belong to |
 | `--checkpoint` | `stage1` | Materialise this branch's output in the session store |
 | `--from-checkpoint` | `<key>` | Resume this branch from a stored checkpoint instead of its input |
+| `--contract-save` | `orders.json` | Write the schema this branch produces to a contract file — see [Contracts](#the-schema-a-pipeline-produces-is-a-contract) |
 
 ---
 
@@ -930,6 +931,42 @@ normalise a type the row path would have carried loosely.
 (credentials stripped), query, the transformers up to the point, and the sampling parameters — not
 of the alias. Two different pipelines run in the same directory therefore cannot collide, and an
 unchanged prefix is reused. Renaming an alias changes nothing.
+
+### The schema a pipeline produces is a contract
+
+`--contract-save <path>` writes the schema a branch produces at its writer boundary, with a hash
+that identifies it. Unlike a schema you declare in a file, this one is **captured on the real
+execution path** — transformers, DuckDB SQL and the row/columnar bridges included — by the engine
+that will run the job.
+
+```bash
+# The producer, in its CI: capture without writing anything.
+dtpipe -i pg:"Host=db;Database=app" --query "SELECT id, email, total FROM orders" \
+       --mask email -o parquet:orders.parquet \
+       --dry-run 100 --contract-save contracts/orders.json
+```
+
+`--dry-run` and a real run produce the **same** contract, which is what makes the line above a
+legitimate CI gate: nothing is written to the target, and the schema is still the one the nightly
+run will produce.
+
+The file is meant to be committed next to the pipeline that produces it — an explicit path, never
+under `.dtpipe/`, which is a session with a limited lifetime.
+
+| Field | What it says |
+|:---|:---|
+| `hash` | SHA-256 of the canonical schema. Two runs of an unchanged pipeline give the same hash; metadata order cannot change it |
+| `schemaSource` | `batch` when the schema came off a real record batch, `columns` when the run produced none and it was derived from the column list. The second is **flat** — a struct or a list the reader publishes is not in it |
+| `enforcement` | What the capturing run could guarantee about not writing to its *source*. A sample run records it; a real run never asked, so it carries nothing rather than the weakest value |
+| `producer`, `branchAlias` | Which build captured it, and which branch of the DAG it describes |
+
+Each branch of a DAG produces its own schema, so each needs its own path; two branches naming one
+file is refused before the run starts.
+
+> **A schema contract says nothing about the target's own rules.** It fixes columns and types. It
+> cannot know that the receiving service enforces invariants in its application code — a row can
+> satisfy every type here and still be wrong for that domain. "The contract is green" is not "the
+> write is safe"; see [Write strategies](./docs/guides/write-strategies.md).
 
 ### Sessions
 

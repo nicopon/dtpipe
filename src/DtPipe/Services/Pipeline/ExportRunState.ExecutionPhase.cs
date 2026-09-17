@@ -248,8 +248,25 @@ internal sealed partial class ExportRunState
                 DtPipe.Sessions.OptInNotice.ShowOnce(session, Observer, SilenceInternal);
             }
 
+            // The contract reads the same materialised stream, composed onto whatever is already
+            // there rather than replacing it: --checkpoint and --contract-save are independent
+            // requests and a branch may carry both.
+            DtPipe.Contracts.ContractTee? contractTee = null;
+            if (!string.IsNullOrEmpty(Options.ContractSave))
+            {
+                contractTee = new DtPipe.Contracts.ContractTee();
+                var teeRef = contractTee;
+                var upstream = materialise;
+                materialise = upstream is null
+                    ? src => teeRef.TeeAsync(src, effectiveCt)
+                    : src => teeRef.TeeAsync(upstream(src), effectiveCt);
+            }
+
             await _svc._pipelineExecutor.ExecuteSegmentedPipelineAsync(
                 Reader, EffectiveWriter, Segments, exportableSchema, effectiveOptions, Progress, LinkedCts, effectiveCt, SampleTap, materialise);
+
+            if (contractTee is not null)
+                WriteContract(contractTee, exportableSchema);
 
             if (IsSampleMode)
             {
@@ -340,6 +357,53 @@ internal sealed partial class ExportRunState
                 Observer.LogError(hookEx);
             }
         }
+    }
+
+    /// <summary>
+    /// Writes the schema this branch produced to the path <c>--contract-save</c> named.
+    /// </summary>
+    /// <remarks>
+    /// Called after a completed stream and nowhere else. A contract written from a failed run
+    /// would describe a shape the pipeline never finished producing while looking exactly like
+    /// one that did — and the consumer checking it has no way to tell the two apart.
+    ///
+    /// <para>
+    /// A run that yielded no batch at all still gets a contract, derived from the column list and
+    /// marked <c>columns</c>. That schema is FLAT — a struct or a list the reader really publishes
+    /// is not in it — so the two sources must stay distinguishable in the file rather than being
+    /// quietly equivalent.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>Enforcement</c> stays null outside sample mode instead of defaulting to the weakest
+    /// value: a real run never asked the question, and "we only scanned verbs" is an answer, not
+    /// an absence of one.
+    /// </para>
+    /// </remarks>
+    private void WriteContract(
+        DtPipe.Contracts.ContractTee tee,
+        IReadOnlyList<DtPipe.Core.Models.PipeColumnInfo> columns)
+    {
+        var captured = tee.CapturedSchema;
+        var schema = captured ?? DtPipe.Core.Infrastructure.Arrow.ArrowSchemaFactory.Create(columns);
+
+        var contract = DtPipe.Contracts.DataContract.FromSchema(
+            schema,
+            captured is not null ? "batch" : "columns",
+            SafetyVerdict?.Enforcement.ToString(),
+            Alias);
+
+        contract.Write(Options.ContractSave!);
+        ContractPath = Options.ContractSave;
+
+        Logger.LogDebug("[Contract] wrote {Path} ({Source}, {Hash})",
+            Options.ContractSave, contract.SchemaSource, contract.Hash);
+
+        // Announced here rather than from a dry-run renderer: this runs for a real run too, and
+        // the interactive and non-interactive sample renderings do not share a footer.
+        if (!SilenceInternal)
+            Observer.LogMessage(
+                $"[grey]   Contract saved: {contract.Hash[..12]} → {Spectre.Console.Markup.Escape(Options.ContractSave!)}[/]");
     }
 
     private List<(string Name, bool IsColumnar)> GetTransformerModes()

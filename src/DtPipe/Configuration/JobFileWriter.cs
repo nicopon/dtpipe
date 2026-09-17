@@ -25,6 +25,7 @@ public static class JobFileWriter
 		nameof(JobDefinition.FromCheckpoint),
 		nameof(JobDefinition.Transformers),
 		nameof(JobDefinition.Output), nameof(JobDefinition.Checkpoint),
+		nameof(JobDefinition.ContractSave),
 		nameof(JobDefinition.BatchSize), nameof(JobDefinition.MaxBatchBytes), nameof(JobDefinition.Limit),
 		nameof(JobDefinition.SamplingRate), nameof(JobDefinition.SamplingSeed),
 		nameof(JobDefinition.DryRunCount), nameof(JobDefinition.Prefix),
