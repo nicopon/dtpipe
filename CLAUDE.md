@@ -403,6 +403,42 @@ Cancellation never masks as success (F16): `LinearPipelineService` discriminates
 
 > **Enforced by** `tests/scripts/validate_cancellation.sh` (F16), local — it drives real interrupts, so it needs a live process rather than a unit test.
 
+## A connection string is redacted by parsing it, prose only by scanning it
+
+`ConnectionStringSanitizer` has two entry points, and the difference between them is how much
+structure the caller knows.
+
+- **`Redact`** receives a connection string — a grammar it can parse — so it prints only keys on a
+  safe list and masks every other `key=value` pair. **Fail-closed: a key nobody anticipated is
+  masked.** Use it wherever the value *is* a connection: a message, the DAG panel, an MCP plan, the
+  agent's approval dialog.
+- **`Sanitize`** receives text with no grammar — a driver's exception, a YAML excerpt, a tool
+  argument — so it can only scan for keys that look sensitive. Best-effort by construction.
+
+Both consult the same safe list, so they never disagree about one key.
+
+**Do not re-anchor the sensitive-key pattern on `\b`.** It breaks on neither `_` nor a capital, so
+there is no boundary around `secret` in `s3_secret_access_key` or `SecretAccessKey`: under that
+pattern `AccountKey`, `SharedAccessSignature`, `SecretAccessKey` and `s3_secret_access_key` — four
+forms this product builds itself — passed through in the clear at sites that *looked* sanitised.
+
+**There is no site on the other side of that line** — not even `CheckpointKey`, which hashes rather
+than prints and could have argued for the weaker call. One carve-out plus no check is the shape
+that produced this defect in the first place: six sites sanitised, two did not, and nothing told
+them apart.
+
+Where the prefix must be stepped over to reach the first key, the grammar stays
+`ComponentSelector`'s (`SkipSelector`) — hand-rolling the `(?!//)` is how the remote-URI rule ended
+up fixed in one site and broken in three.
+
+> **Enforced by** `ConnectionStringSanitizerTests` (the form table is the specification — a new
+> secret-bearing form is added there first), `LinearPipelineServiceTests` over both routing
+> failures, and `tests/scripts/validate_secret_redaction.sh`, which refuses a connection-valued
+> expression interpolated outside `Redact` *or* handed to `Sanitize`, and checks that each helper
+> it lets through is itself defined over `Redact`. **Not covered:** a connection reaching a message
+> by a route with no connection-shaped name, and a credential a driver quotes back inside its own
+> exception — the secrets guide says so rather than implying the logs are safe.
+
 ## Pipeline Design Principles
 
 ### No magic conversions in the engine core
