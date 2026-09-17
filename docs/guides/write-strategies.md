@@ -33,6 +33,13 @@ does not exist yet, or when several unique indexes could match.
 **A file or object target has no strategies.** It is replaced wholesale, so `--strategy` is refused
 rather than accepted and quietly ignored.
 
+**dtpipe writes rows, not domain objects.** Where a target table belongs to a service whose rules
+live in application code — validation, audit columns, domain events, a soft-delete marker —
+those rules do not run: the rows arrive through SQL, below that layer. Whether that is acceptable
+is a property of the target, not of the transfer, so it is the team owning the target database
+that weighs it. `Recreate` is worth a second look in that conversation: it drops the table, and
+with it whatever indexes, constraints and triggers that team put on it.
+
 ## What happens when the schemas differ
 
 Before writing to a database, dtpipe compares the source schema to the target's. Three flags
