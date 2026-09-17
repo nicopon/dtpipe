@@ -77,7 +77,7 @@ public class ExportService
 		// Ensure the registry has the correct pipeline options for this run
 		registry.Register(options);
 		if (_logger.IsEnabled(LogLevel.Information))
-			_logger.LogInformation("Starting export from {Provider} to {OutputPath}", providerName, ConnectionStringSanitizer.Sanitize(outputPath));
+			_logger.LogInformation("Starting export from {Provider} to {OutputPath}", providerName, ConnectionStringSanitizer.Redact(outputPath));
 
 		// Silence internal DAG plumbing branches unless DEBUG=1 — capability check, not
 		// an adapter-identity string comparison (F5). `quiet` folds in here: a run started for

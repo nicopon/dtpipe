@@ -66,5 +66,5 @@ internal static class PlanPanelContent
     }
 
     private static string? Endpoint(string? connectionString) =>
-        string.IsNullOrEmpty(connectionString) ? null : ConnectionStringSanitizer.Sanitize(connectionString);
+        string.IsNullOrEmpty(connectionString) ? null : ConnectionStringSanitizer.Redact(connectionString);
 }

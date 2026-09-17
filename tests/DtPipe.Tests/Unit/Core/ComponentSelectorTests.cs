@@ -97,4 +97,28 @@ public class ComponentSelectorTests
         Assert.True(ComponentSelector.Matches("duck:x.duckdb", "duck"));
         Assert.False(ComponentSelector.Matches("s3://bucket/k.parquet", "s3"));
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // SkipSelector — the same grammar, with no name to match against.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("sqlserver:Password=p", "Password=p")]
+    [InlineData("duck+mysql:Host=x;", "Host=x;")]
+    [InlineData("azure:DefaultEndpointsProtocol=https", "DefaultEndpointsProtocol=https")]
+    public void SkipSelector_Steps_Over_A_Selector(string raw, string expected)
+        => Assert.Equal(expected, ComponentSelector.SkipSelector(raw));
+
+    /// <summary>
+    /// The remote-URI rule holds for the name-agnostic form too. A copy of this grammar that
+    /// dropped the "(?!//)" would turn "s3://bucket/key" into "//bucket/key" — the failure that
+    /// made ComponentSelector the single authority in the first place.
+    /// </summary>
+    [Theory]
+    [InlineData("s3://bucket/key.parquet")]
+    [InlineData("postgresql://postgres:pw@localhost:5432/mydb")]
+    [InlineData("Host=localhost;Database=mydb")]
+    [InlineData(@"C:\data\file.csv")]
+    public void SkipSelector_Leaves_Everything_Else_Intact(string raw)
+        => Assert.Equal(raw, ComponentSelector.SkipSelector(raw));
 }

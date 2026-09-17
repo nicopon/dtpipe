@@ -207,7 +207,7 @@ internal sealed class TuiSession
         var targets = view.PlanSnapshot().Topology?.Branches
             .Select(b => b.Output)
             .Where(o => !string.IsNullOrWhiteSpace(o))
-            .Select(o => ConnectionStringSanitizer.Sanitize(o!))
+            .Select(o => ConnectionStringSanitizer.Redact(o!))
             .ToList();
 
         return targets is { Count: > 0 }

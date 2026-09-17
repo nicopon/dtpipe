@@ -79,7 +79,7 @@ public static class PipelineValidator
         {
             if (!branch.HasStreamTransformer || string.IsNullOrEmpty(branch.Input)) continue;
 
-            var input = DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(branch.Input);
+            var input = DtPipe.Core.Security.ConnectionStringSanitizer.Redact(branch.Input);
             errors.Add($"Branch '{branch.Alias}' runs the '{branch.ProcessorName}' processor and also "
                      + $"declares the input '{input}', which a processor branch never reads — it is not "
                      + $"even opened. Give that source a branch of its own and name it here "

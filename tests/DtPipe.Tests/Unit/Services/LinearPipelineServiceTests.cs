@@ -351,4 +351,39 @@ public class LinearPipelineServiceTests
         Assert.True(transformer.PipelineOptionsWasRegistered,
             "PipelineOptions must be registered before the stream-transformer branch executes.");
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // A routing failure must not reprint the credentials it was routing.
+    // A keyring alias is resolved before routing, so the value these two messages
+    // carry is the secret the keyring existed to keep off stderr.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Unresolved_Input_Does_Not_Reprint_The_Secret()
+    {
+        var (service, _, _) = BuildService(new StubReaderFactory(() => new BlockingReader()));
+
+        // Reader resolution throws ahead of the fault handler, so this one surfaces as the
+        // exception itself rather than through Failure — unlike the writer site below.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.ExecuteAsync(
+            new JobDefinition { Input = "Server=srvA;Database=A;User Id=u;Password=hunter2" },
+            context: null, token: CancellationToken.None, userCancellationToken: CancellationToken.None));
+
+        Assert.DoesNotContain("hunter2", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Server=srvA", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Unresolved_Output_Does_Not_Reprint_The_Secret()
+    {
+        var (service, _, _) = BuildService(new StubReaderFactory(() => new BlockingReader()));
+
+        var exitCode = await service.ExecuteAsync(
+            new JobDefinition { Input = "stub:x", Output = "Server=srvB;Database=B;Password=hunter2" },
+            context: null, token: CancellationToken.None, userCancellationToken: CancellationToken.None);
+
+        Assert.Equal(1, exitCode);
+        Assert.DoesNotContain("hunter2", service.Failure, StringComparison.Ordinal);
+        Assert.Contains("Server=srvB", service.Failure!, StringComparison.Ordinal);
+    }
 }

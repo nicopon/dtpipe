@@ -91,4 +91,28 @@ public static class ComponentSelector
     /// need the routing verdict and not the cleaned string.
     /// </summary>
     public static bool Matches(string? raw, string componentName) => Select(raw, componentName).Matched;
+
+    /// <summary>
+    /// Any component's selector, with no name to match against. Two characters minimum, because
+    /// a one-letter prefix is a Windows drive: matching it turns @"C:\data\file.csv" into
+    /// @"\data\file.csv". <see cref="Select"/> is immune by construction — no component is named
+    /// "C" — but a name-agnostic reader has to say so.
+    /// </summary>
+    private static readonly Regex AnySelectorPattern = new(
+        @"^[A-Za-z0-9_.+\-]{2,}:(?!//)",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// Steps over whatever selector <paramref name="raw"/> starts with, without asking which
+    /// component it names.
+    /// <para>
+    /// <b>Not a routing primitive.</b> It cannot tell a real selector from a string that merely
+    /// looks like one, so a caller that needs to know *which* provider is addressed uses
+    /// <see cref="Select"/> with a name. This exists for a reader that has to find where the
+    /// connection string's own syntax begins — redaction, for one — and it lives here so the
+    /// <c>(?!//)</c> that keeps "s3://bucket/key" from reading as a prefix is written once.
+    /// </para>
+    /// </summary>
+    public static string SkipSelector(string? raw)
+        => string.IsNullOrEmpty(raw) ? string.Empty : AnySelectorPattern.Replace(raw, string.Empty);
 }

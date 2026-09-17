@@ -9,6 +9,7 @@ using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Core.Models;
 using DtPipe.Core.Helpers;
 using DtPipe.Core.Options;
+using DtPipe.Core.Security;
 using DtPipe.Core.Pipelines.Dag;
 using DtPipe.Core.Pipelines;
 using DtPipe.Cli.Pipeline;
@@ -180,7 +181,8 @@ public class LinearPipelineService
         {
             if (string.IsNullOrEmpty(cleanedInput))
                 throw new InvalidOperationException("No input source specified and no stream transformer detected. When combining multiple branches ('from'/'ref'), specify a stream transformer query under 'provider-options -> sql -> query: \"SELECT ... FROM branch1 JOIN branch2 ON ...\"'.");
-            throw new InvalidOperationException($"No reader factory resolved for input '{job.Input}'");
+            throw new InvalidOperationException(
+                $"No reader factory resolved for input '{ConnectionStringSanitizer.Redact(job.Input)}'");
         }
 
         // 3. Resolve Writer — typed output endpoint first (capability-selected), then
@@ -345,7 +347,8 @@ public class LinearPipelineService
 
                 if (writerFactory == null)
                 {
-                    throw new InvalidOperationException($"No writer factory resolved for output '{job.Output ?? "null:"}'");
+                    throw new InvalidOperationException(
+                        $"No writer factory resolved for output '{ConnectionStringSanitizer.Redact(job.Output ?? "null:")}'");
                 }
             }
 

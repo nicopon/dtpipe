@@ -320,8 +320,8 @@ public partial class DtPipeMcpTools
                 branches = topology.Branches.Select(b => new
                 {
                     alias = b.Alias,
-                    input = string.IsNullOrEmpty(b.Input) ? null : DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(b.Input),
-                    output = string.IsNullOrEmpty(b.Output) ? null : DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(b.Output),
+                    input = string.IsNullOrEmpty(b.Input) ? null : DtPipe.Core.Security.ConnectionStringSanitizer.Redact(b.Input),
+                    output = string.IsNullOrEmpty(b.Output) ? null : DtPipe.Core.Security.ConnectionStringSanitizer.Redact(b.Output),
                     processor = b.Processor,
                     // The description promises this key by name and says why it is there. It was
                     // absent from the projection, so every branch read as a bare source-to-sink

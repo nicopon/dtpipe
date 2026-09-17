@@ -267,7 +267,7 @@ internal static class DagRenderer
 	/// Factory resolution keeps using the raw string; only the displayed form is masked.
 	/// </summary>
 	private static string Safe(string? connectionString)
-		=> Markup.Escape(ConnectionStringSanitizer.Sanitize(connectionString));
+		=> Markup.Escape(ConnectionStringSanitizer.Redact(connectionString));
 
 	private static string ExtractArgValue(string[]? args, string flag)
 	{

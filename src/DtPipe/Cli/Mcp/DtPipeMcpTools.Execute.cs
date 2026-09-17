@@ -60,9 +60,9 @@ public partial class DtPipeMcpTools
             {
                 alias = b.Alias,
                 reads = parsed.Jobs.TryGetValue(b.Alias, out var j) && !string.IsNullOrEmpty(j.Input)
-                    ? ConnectionStringSanitizer.Sanitize(j.Input) : null,
+                    ? ConnectionStringSanitizer.Redact(j.Input) : null,
                 writes = parsed.Jobs.TryGetValue(b.Alias, out var w) && !string.IsNullOrEmpty(w.Output)
-                    ? ConnectionStringSanitizer.Sanitize(w.Output) : null,
+                    ? ConnectionStringSanitizer.Redact(w.Output) : null,
                 from = parsed.Jobs.TryGetValue(b.Alias, out var f) && !string.IsNullOrEmpty(f.From) ? f.From : null,
                 @ref = parsed.Jobs.TryGetValue(b.Alias, out var r) ? r.Ref : Array.Empty<string>()
             })
@@ -305,8 +305,8 @@ public partial class DtPipeMcpTools
                 branches = parsed.Dag.Branches.Select(b => new
                    {
                     b.Alias,
-                    Input = DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(b.Input),
-                    Output = DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(b.Output)
+                    Input = DtPipe.Core.Security.ConnectionStringSanitizer.Redact(b.Input),
+                    Output = DtPipe.Core.Security.ConnectionStringSanitizer.Redact(b.Output)
                    }).ToList()
                }, new JsonSerializerOptions { WriteIndented = true });
            }

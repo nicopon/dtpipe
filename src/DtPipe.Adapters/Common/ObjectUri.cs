@@ -79,7 +79,7 @@ public sealed class ObjectUri
         if (!TryParse(connectionString, acceptedSchemes, out var uri) || uri is null)
         {
             throw new InvalidOperationException(
-                $"'{connectionString}' is not a valid object-storage location. " +
+                $"'{DtPipe.Core.Security.ConnectionStringSanitizer.Redact(connectionString)}' is not a valid object-storage location. " +
                 $"Expected <scheme>://<container>/<key>, with scheme one of: {string.Join(", ", acceptedSchemes)}.");
         }
         return uri;

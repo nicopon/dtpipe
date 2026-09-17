@@ -56,7 +56,7 @@ public class SpectreConsoleObserver : IExportObserver
 	{
 		if (!string.IsNullOrEmpty(output))
 		{
-			var safeOutput = DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(output);
+			var safeOutput = DtPipe.Core.Security.ConnectionStringSanitizer.Redact(output);
 			_console.MarkupLine($"[grey]Target[/]  [blue]{Markup.Escape(provider)}[/] [grey]({Markup.Escape(safeOutput)})[/]");
 		}
 		else

@@ -31,7 +31,7 @@ public sealed class ChecksumDataWriter : IRowDataWriter, IColumnarDataWriter, IR
 	{
 		if (_logger.IsEnabled(LogLevel.Information))
 		{
-			_logger.LogInformation("Initializing Checksum Writer to {Path}", ConnectionStringSanitizer.Sanitize(_options.OutputPath));
+			_logger.LogInformation("Initializing Checksum Writer to {Path}", ConnectionStringSanitizer.Redact(_options.OutputPath));
 		}
 		return ValueTask.CompletedTask;
 	}

@@ -30,9 +30,11 @@ public static class CheckpointKey
     /// <summary>
     /// Computes the key for a branch prefix.
     /// </summary>
-    /// <param name="connection">The reader's connection string. Sanitised before hashing —
+    /// <param name="connection">The reader's connection string. Redacted before hashing —
     /// a credential must never end up inside a cache key, where it would sit in a directory
-    /// name and in every listing that prints one.</param>
+    /// name and in every listing that prints one. It goes through the same entry point as every
+    /// other connection string the product handles, so this site is not an exception a grep has
+    /// to learn about.</param>
     public static string Compute(
         string? connection,
         string? query,
@@ -45,7 +47,7 @@ public static class CheckpointKey
         int segmentIndex)
     {
         var sb = new StringBuilder();
-        Append(sb, "conn", ConnectionStringSanitizer.Sanitize(connection ?? ""));
+        Append(sb, "conn", ConnectionStringSanitizer.Redact(connection ?? ""));
         Append(sb, "query", query ?? "");
 
         var index = 0;
