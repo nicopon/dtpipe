@@ -15,12 +15,15 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
 	private readonly ILogger _logger;
 
 	private Stream? _inputStream;
+	private ArrowStreamTerminationProbe? _probe;
 	private Apache.Arrow.Ipc.ArrowStreamReader? _arrowReader;
 	private ArrowFileReader? _arrowFileReader;
     private bool _isIpcFile;
 
 	public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
 	public Schema? Schema => _isIpcFile ? _arrowFileReader?.Schema : _arrowReader?.Schema;
+
+	private string Source => string.IsNullOrEmpty(_path) || _path == "-" ? "STDIN" : _path;
 
 	public ArrowAdapterStreamReader(string path, ArrowReaderOptions options, ILogger? logger = null)
 	{
@@ -59,7 +62,8 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
         }
         else
         {
-            _arrowReader = new Apache.Arrow.Ipc.ArrowStreamReader(_inputStream);
+            _probe = new ArrowStreamTerminationProbe(_inputStream);
+            _arrowReader = new Apache.Arrow.Ipc.ArrowStreamReader(_probe);
             var schema = _arrowReader.Schema;
             Columns = MapSchema(schema);
         }
@@ -67,17 +71,32 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
         return Task.CompletedTask;
 	}
 
-    public async IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    /// <summary>
+    /// The one loop that pulls batches out of whichever reader was opened, and the one place that
+    /// decides what the end of the data means.
+    /// </summary>
+    /// <remarks>
+    /// Both public read methods go through this. Four copies of <c>if (batch == null) break;</c>
+    /// lived here instead, and none of them asked whether the stream had ended or merely stopped —
+    /// which is how a killed producer became a successful run. A second loop added beside this one
+    /// starts that over.
+    /// </remarks>
+    private async IAsyncEnumerable<RecordBatch> ReadAllAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         if (Columns is null) throw new InvalidOperationException("Call OpenAsync first.");
 
         if (_isIpcFile && _arrowFileReader != null)
         {
-            for (int i = 0; ; i++)
+            // The IPC file format carries its batch count in the footer, so a file that stops
+            // short is a file whose footer disagrees with its body — say so rather than break.
+            int count = await _arrowFileReader.RecordBatchCountAsync();
+            for (int i = 0; i < count; i++)
             {
-                RecordBatch? batch = null;
-                try { batch = await _arrowFileReader.ReadRecordBatchAsync(i, ct); } catch { break; }
-                if (batch == null) break;
+                var batch = await _arrowFileReader.ReadRecordBatchAsync(i, ct)
+                    ?? throw new EndOfStreamException(
+                        $"Arrow file '{Source}' is truncated: its footer declares {count} record " +
+                        $"batches and the body runs out at {i}.");
                 yield return batch;
             }
         }
@@ -86,11 +105,31 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
             while (true)
             {
                 var batch = await _arrowReader.ReadNextRecordBatchAsync(ct);
-                if (batch == null) break;
+                if (batch is null)
+                {
+                    EnsureStreamEnded();
+                    yield break;
+                }
                 yield return batch;
             }
         }
     }
+
+    /// <summary>
+    /// Refuses a stream that stopped on a message boundary without its end-of-stream marker.
+    /// </summary>
+    private void EnsureStreamEnded()
+    {
+        if (_probe is not { SourceRanDry: true }) return;
+
+        throw new EndOfStreamException(
+            $"Arrow stream '{Source}' is truncated: it stops without the end-of-stream marker, so " +
+            "the producer died or was killed before it finished writing. The rows read so far are " +
+            "a partial result.");
+    }
+
+    public IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync(CancellationToken ct = default)
+        => ReadAllAsync(ct);
 
     private List<PipeColumnInfo> MapSchema(Schema schema)
     {
@@ -106,29 +145,12 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
 		int batchSize,
 		[System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
 	{
-		if (Columns is null) throw new InvalidOperationException("Call OpenAsync first.");
-
-        if (_isIpcFile && _arrowFileReader != null)
+        // Row-mode consumer: FlattenBatch fully materialises each row into object?[], so the batch
+        // can be disposed here once its rows have been yielded.
+        await foreach (var batch in ReadAllAsync(ct))
         {
-            for (int i = 0; ; i++)
+            using (batch)
             {
-                RecordBatch? batch = null;
-                try { batch = await _arrowFileReader.ReadRecordBatchAsync(i, ct); } catch { break; }
-                if (batch == null) break;
-
-                foreach (var memory in ArrowRowConverter.FlattenBatch(batch, batchSize))
-                {
-                    yield return memory;
-                }
-            }
-        }
-        else if (_arrowReader != null)
-        {
-            while (true)
-            {
-                var batch = await _arrowReader.ReadNextRecordBatchAsync(ct);
-                if (batch == null) break;
-
                 foreach (var memory in ArrowRowConverter.FlattenBatch(batch, batchSize))
                 {
                     yield return memory;
