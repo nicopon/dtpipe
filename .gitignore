@@ -4,7 +4,9 @@
 .nuget_cache/
 .nuget_plugins/
 .nuget_scratch/
-.notes/
+# No trailing slash: `.notes/` matches a directory only, and `.notes` is a symlink
+# into the notes repository. With the slash git reported it as an untracked file.
+.notes
 .notes_*.zip
 .scripts/
 .tmp/
