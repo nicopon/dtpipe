@@ -1019,6 +1019,28 @@ consumer the old one satisfied?* Exit `0` when it does, `1` when it does not.
 | Extension metadata dropped (`arrow.uuid` → raw binary) | **breaks** | the storage is identical and the consumer stops getting a `Guid` |
 | Column order | indifferent | a writer resolves by name |
 
+#### Offering the points a job could be cut at
+
+```bash
+dtpipe split producer.yaml
+dtpipe split producer.yaml --branch orders --rows 100
+```
+
+It lists one candidate per pipeline stage — `0` is the reader, `1..n` the transformers in order —
+with the schema that would cross and what the link would cost. **It proposes and never decides:**
+where to cut depends on who owns each side and who pays for the work, none of which is in the job
+file.
+
+The candidates come from a **sample run** of the job, so the writer is neutralised and the reader
+is the real one. That is why a column a `--compute` creates is listed from its own stage on: what a
+transformer emits is not derivable from what it is.
+
+The link is Arrow and is not a user choice, so the cost column has two values. A stage already
+columnar hands its batches over as they are (`free`); a row-mode stage is bridged into Arrow to be
+written and back out to be read (`two bridges`).
+
+A job with several branches reading a source is not cut on a guess — name one with `--branch`.
+
 ### Sessions
 
 Artefacts belong to a session, resolved by precedence:
