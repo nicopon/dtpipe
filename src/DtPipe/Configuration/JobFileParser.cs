@@ -22,8 +22,12 @@ public static partial class JobFileParser
 	/// </summary>
 	/// <param name="filePath">Path to the YAML file or a memory:// job URL.</param>
 	/// <param name="secretsManager">Optional secrets manager to resolve keyring:// references.</param>
+	/// <param name="interpolate">
+	/// False loads the job as written, leaving every <c>${{…}}</c> token in place. A caller that is
+	/// going to WRITE the job back out passes false; one that is going to RUN it does not.
+	/// </param>
 	/// <returns>Dictionary of JobDefinitions keyed by branch alias.</returns>
-	public static Dictionary<string, DtPipe.Core.Models.JobDefinition> Parse(string filePath, DtPipe.Cli.Security.ISecretsManager? secretsManager = null)
+	public static Dictionary<string, DtPipe.Core.Models.JobDefinition> Parse(string filePath, DtPipe.Cli.Security.ISecretsManager? secretsManager = null, bool interpolate = true)
 	{
 		string content;
 
@@ -53,13 +57,13 @@ public static partial class JobFileParser
 			content = File.ReadAllText(filePath);
 		}
 
-		return ParseContent(content, secretsManager);
+		return ParseContent(content, secretsManager, interpolate);
 	}
 
 	/// <summary>
 	/// Parses a YAML job content string into a dictionary of JobDefinitions (DAG).
 	/// </summary>
-	public static Dictionary<string, DtPipe.Core.Models.JobDefinition> ParseContent(string content, DtPipe.Cli.Security.ISecretsManager? secretsManager = null)
+	public static Dictionary<string, DtPipe.Core.Models.JobDefinition> ParseContent(string content, DtPipe.Cli.Security.ISecretsManager? secretsManager = null, bool interpolate = true)
 	{
 		// YamlDotNet wraps the real cause — the property it could not match — in a YamlException
 		// whose own Message is the useless "Exception during deserialization". The unwrap belongs
@@ -69,7 +73,7 @@ public static partial class JobFileParser
 		// the same server, two answers.
 		try
 		{
-			var jobs = Deserialize(content, secretsManager);
+			var jobs = Deserialize(content, secretsManager, interpolate);
 
 			// Reported here because this is the last place that still holds the job as written: the
 			// cursor:// token is replaced during deserialization, so afterwards there is no way to
@@ -85,7 +89,7 @@ public static partial class JobFileParser
 		}
 	}
 
-	private static Dictionary<string, DtPipe.Core.Models.JobDefinition> Deserialize(string content, DtPipe.Cli.Security.ISecretsManager? secretsManager)
+	private static Dictionary<string, DtPipe.Core.Models.JobDefinition> Deserialize(string content, DtPipe.Cli.Security.ISecretsManager? secretsManager, bool interpolate)
 	{
 		// A key this loader does not know is refused, not dropped. Three defects of one shape have
 		// been found this way — 'columns:' on a project transformer, an 'options:' block that built
@@ -94,7 +98,7 @@ public static partial class JobFileParser
 		// ToolError then quotes back to the caller.
 		var deserializer = new DeserializerBuilder()
 			.WithNamingConvention(HyphenatedNamingConvention.Instance)
-			.WithNodeDeserializer(new InterpolatingNodeDeserializer(secretsManager), s => s.OnTop())
+			.WithNodeDeserializer(new InterpolatingNodeDeserializer(secretsManager, interpolate), s => s.OnTop())
 			.Build();
 
 		// 1. Deserialize as a dictionary (DAG)
@@ -187,20 +191,31 @@ public static partial class JobFileParser
 		return result;
 	}
 
+	/// <summary>
+	/// Resolves <c>${{…}}</c> in every scalar as it is read.
+	/// </summary>
+	/// <remarks>
+	/// It stays registered when <c>_interpolate</c> is false, and returns the scalar verbatim. It is
+	/// also what forces every scalar to a string: dropping it would hand <c>object</c>-typed values
+	/// — a provider-options block — to YamlDotNet's own inference, so the way to load a job as
+	/// written is to keep this seam and neutralise it, not to remove it.
+	/// </remarks>
 	private sealed class InterpolatingNodeDeserializer : YamlDotNet.Serialization.INodeDeserializer
 	{
 		private readonly DtPipe.Cli.Security.ISecretsManager? _secretsManager;
+		private readonly bool _interpolate;
 
-		public InterpolatingNodeDeserializer(DtPipe.Cli.Security.ISecretsManager? secretsManager)
+		public InterpolatingNodeDeserializer(DtPipe.Cli.Security.ISecretsManager? secretsManager, bool interpolate)
 		{
 			_secretsManager = secretsManager;
+			_interpolate = interpolate;
 		}
 
 		public bool Deserialize(YamlDotNet.Core.IParser parser, Type expectedType, Func<YamlDotNet.Core.IParser, Type, object?> nestedObjectDeserializer, out object? value, YamlDotNet.Serialization.ObjectDeserializer rootDeserializer)
 		{
 			if (expectedType == typeof(string) && parser.TryConsume<YamlDotNet.Core.Events.Scalar>(out var scalar))
 			{
-				value = InterpolateVariables(scalar.Value, _secretsManager);
+				value = _interpolate ? InterpolateVariables(scalar.Value, _secretsManager) : scalar.Value;
 				return true;
 			}
 
@@ -208,7 +223,7 @@ public static partial class JobFileParser
 			// normally reads scalars as strings. We want to intercept those too, but ONLY if the next event is a scalar.
 			if (expectedType == typeof(object) && parser.TryConsume<YamlDotNet.Core.Events.Scalar>(out var objScalar))
 			{
-				value = InterpolateVariables(objScalar.Value, _secretsManager);
+				value = _interpolate ? InterpolateVariables(objScalar.Value, _secretsManager) : objScalar.Value;
 				return true;
 			}
 

@@ -35,7 +35,13 @@ fi
 
 A="$ARTIFACTS_DIR"
 
-cleanup() { rm -rf "$A"; }
+cleanup() {
+    rm -rf "$A"
+    # Case 6 stores one alias in the fake keyring; a second `trap … EXIT` would
+    # replace this one rather than add to it, so the removal lives here.
+    [ -n "${REFERENCE_ALIAS:-}" ] && "$DTPIPE" secret delete "$REFERENCE_ALIAS" > /dev/null 2>&1
+    return 0
+}
 trap cleanup EXIT
 
 metric_value() { # file, key
@@ -126,6 +132,90 @@ rm -f "$A/state.json"
 OUTPUT_FILE="$A/cursor_out.csv" run_pair incremental_cursor output \
     -i "csv:$A/events.csv" --cursor Id --state "$A/state.json" \
     -o "$A/cursor_out.csv" --no-stats
+
+# ----------------------------------------------------------------------------
+# What enters as a reference leaves as a reference.
+#
+# The round-trip cases above compare what a job DOES. These compare what the file SAYS, because a
+# ${{…}} token exists to keep a value out of it — and an exported job is bound for a repository,
+# which is the point of exporting one.
+#
+# The two entry points disagreed here, and the asymmetry is what hid it. From a command line
+# nothing interpolates before the writer, so the reference survived and the behaviour read as
+# correct. Through --job every string scalar was resolved as it was read, so an env var and a
+# keyring alias that RESOLVED were written out in clear. An alias that did NOT resolve survived,
+# which looks exactly like the guarantee — hence case 9, which is here to say it proves nothing.
+# ----------------------------------------------------------------------------
+echo ""
+echo "--- [4] a reference survives the export ---"
+
+SECRET='S3cr3t!Pa55'
+ALIAS_SECRET='An0th3rSecret'
+export DTPIPE_TEST_EXPORT_PWD="$SECRET"
+export DTPIPE_UNSAFE_INSECURE_FAKE_KEYRING=1
+
+# The fake keyring's path comes from the platform's application-data folder, which does NOT follow
+# $HOME on macOS — setting it reads as isolation and gives none. So this owns one alias and removes
+# it in cleanup, rather than owning the file.
+REFERENCE_ALIAS=validate-export-job
+"$DTPIPE" secret set "$REFERENCE_ALIAS" "$ALIAS_SECRET" > /dev/null 2>&1 \
+    || fail "could not store the alias the keyring case needs"
+
+printf 'a,b\n1,2\n' > "$A/ref-in.csv"
+
+cat > "$A/ref-env.yaml" <<'YAML'
+main:
+  input: "csv:ref-in.csv"
+  output: "mssql:Server=srvB;Database=B;User Id=u;Password=${{DTPIPE_TEST_EXPORT_PWD}}"
+YAML
+"$DTPIPE" --job "$A/ref-env.yaml" --export-job "$A/ref-env-out.yaml" > /dev/null 2>&1 \
+    || fail "[reference] the env export failed"
+grep -qF "$SECRET" "$A/ref-env-out.yaml" && fail "[reference] the env var was resolved into the exported job"
+grep -qF '${{DTPIPE_TEST_EXPORT_PWD}}' "$A/ref-env-out.yaml" \
+    || fail "[reference] the env reference is neither resolved nor preserved — it is gone"
+pass "[reference] a job file's env reference survived the export"
+
+cat > "$A/ref-keyring.yaml" <<'YAML'
+main:
+  input: "csv:ref-in.csv"
+  output: "mssql:Server=srvB;Password=${{keyring://validate-export-job}}"
+YAML
+"$DTPIPE" --job "$A/ref-keyring.yaml" --export-job "$A/ref-keyring-out.yaml" > /dev/null 2>&1 \
+    || fail "[reference] the keyring export failed"
+grep -qF "$ALIAS_SECRET" "$A/ref-keyring-out.yaml" \
+    && fail "[reference] the keyring alias was resolved into the exported job"
+grep -qF '${{keyring://validate-export-job}}' "$A/ref-keyring-out.yaml" \
+    || fail "[reference] the keyring reference is neither resolved nor preserved — it is gone"
+pass "[reference] a RESOLVABLE keyring alias survived the export"
+
+"$DTPIPE" -i csv:"$A/ref-in.csv" \
+          -o 'mssql:Server=srvB;Password=${{DTPIPE_TEST_EXPORT_PWD}}' \
+          --export-job "$A/ref-cli-out.yaml" > /dev/null 2>&1 \
+    || fail "[reference] the command-line export failed"
+grep -qF "$SECRET" "$A/ref-cli-out.yaml" && fail "[reference] the command-line path now resolves too"
+pass "[reference] the command-line path is unchanged"
+
+cat > "$A/ref-absent.yaml" <<'YAML'
+main:
+  input: "csv:ref-in.csv"
+  output: "mssql:Server=srvB;Password=${{keyring://no-such-alias}}"
+YAML
+"$DTPIPE" --job "$A/ref-absent.yaml" --export-job "$A/ref-absent-out.yaml" > /dev/null 2>&1 \
+    || fail "[reference] the absent-alias export failed"
+grep -qF '${{keyring://no-such-alias}}' "$A/ref-absent-out.yaml" \
+    || fail "[reference] an alias with nothing behind it did not survive either"
+pass "[reference] an unresolvable alias survives — as it did while the two above were leaking"
+
+cat > "$A/ref-run.yaml" <<'YAML'
+main:
+  input: "csv:${{DTPIPE_TEST_EXPORT_SRC}}"
+  output: "csv:ref-run-out.csv"
+YAML
+( cd "$A" && DTPIPE_TEST_EXPORT_SRC=ref-in.csv "$DTPIPE" --job ref-run.yaml > /dev/null 2>&1 ) \
+    || fail "[reference] the run failed — the export rule leaked into execution"
+grep -q '^1,2' "$A/ref-run-out.csv" 2>/dev/null \
+    || fail "[reference] the run did not resolve the reference it was given"
+pass "[reference] execution still resolves, as it must"
 
 echo ""
 echo "All export-job round-trip checks passed."

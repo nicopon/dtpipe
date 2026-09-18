@@ -107,7 +107,20 @@ public static class PipelineToJobConverter
         IEnumerable<IStreamTransformerFactory>? streamTransformerFactories,
         DtPipe.Cli.Security.ISecretsManager? secretsManager)
     {
-        var jobs = JobFileParser.Parse(parsed.Globals.JobFile!, secretsManager);
+        // --export-job writes the job as written, so the export path reads it as written. A
+        // ${{…}} is a reference its author placed to keep a value out of a file; resolving it
+        // here and serialising the result puts that value INTO one — and an exported job is
+        // bound for a repository, which is the whole point of exporting it.
+        //
+        // The two entry points had drifted apart on exactly this. From a command line nothing
+        // interpolates before the writer, so a reference survived; through a job file every
+        // scalar was resolved, so an env var and a keyring alias that RESOLVED were both written
+        // out in clear, in a -rw-r--r-- file. An alias that did not resolve survived, which is
+        // what made the leak look like it was not there.
+        var jobs = JobFileParser.Parse(
+            parsed.Globals.JobFile!,
+            secretsManager,
+            interpolate: string.IsNullOrEmpty(parsed.Globals.ExportJobFile));
         var flags = parsed.Globals.AllFlags;
 
         // Apply CLI overrides to all loaded jobs — driven by EngineOverrideFlags.All
