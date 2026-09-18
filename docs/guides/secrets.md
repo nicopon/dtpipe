@@ -40,11 +40,35 @@ dtpipe -i "pg:Host=${{PGHOST}};Database=app;Username=app;Password=${{keyring://p
 ```
 
 > [!NOTE]
-> In a YAML job, `${{…}}` interpolation is applied to the raw text **before** parsing, so it works
-> on every value — including keys that are never otherwise resolved, like `batch-size`. Full-value
+> In a YAML job, `${{…}}` interpolation is applied to each scalar as it is read, so it reaches every
+> **text** value — including every `provider-options` entry. It does not reach a key the loader
+> converts to another type: `batch-size: ${{SIZE}}` fails rather than resolves. Full-value
 > replacement (`keyring://alias` and `@file` without braces) only applies to the fields that pass
 > through the CLI resolver. The compatibility matrix is in
 > [REFERENCE.md](../../REFERENCE.md#value-resolution).
+
+## What a job file you export carries
+
+`--export-job` writes the **reference**, not the value behind it — even when the value resolves:
+
+```bash
+PGPASSWORD=hunter2 dtpipe \
+  -i "pg:Host=db.internal;Database=app;Username=etl;Password=${{PGPASSWORD}}" \
+  -o out.csv --export-job load.yaml
+```
+
+```yaml
+main:
+  input: pg:Host=db.internal;Database=app;Username=etl;Password=${{PGPASSWORD}}
+  output: out.csv
+  batch-size: 32768
+  sampling-rate: 1
+```
+
+The same holds for `${{keyring://alias}}`, and whether the pipeline came from a command line or
+from another job file — which is what makes an exported job safe to commit, and the only reason it
+is. A connection string you wrote as a **literal** is exported as a literal; nothing masks it for
+you.
 
 ## What reaches the logs
 

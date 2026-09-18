@@ -307,6 +307,27 @@ else
     echo "       got: $SECRETS_MSG"
 fi
 
+# The page claims an exported job is safe to commit BECAUSE it carries the reference rather than
+# the value. That claim is only worth making if the variable actually resolves — an unset one
+# would be preserved by a build that leaks, so this exports with PGPASSWORD set and then checks
+# that the literal is absent as well as that the token is there.
+rm -f load.yaml
+PGPASSWORD=hunter2 "$DTPIPE" \
+    -i 'pg:Host=db.internal;Database=app;Username=etl;Password=${{PGPASSWORD}}' \
+    -o out.csv --export-job load.yaml > /dev/null 2>&1
+if grep -qF 'hunter2' load.yaml 2>/dev/null; then
+    bad "an exported job carries the reference, not the value"
+    echo "       the resolved password is in the file"
+else
+    expect_file "an exported job carries the reference, not the value" load.yaml <<'EOF'
+main:
+  input: pg:Host=db.internal;Database=app;Username=etl;Password=${{PGPASSWORD}}
+  output: out.csv
+  batch-size: 32768
+  sampling-rate: 1
+EOF
+fi
+
 echo "--- guides/preview-and-checkpoints.md ---"
 
 # The page prints a contract, hash included. The values in people.csv are random and the hash is

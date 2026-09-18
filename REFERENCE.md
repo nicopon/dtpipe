@@ -118,16 +118,20 @@ Not all mechanisms are available in every context:
 | `--query` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `--pre-exec`, `--post-exec`, etc. | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `--compute`, `--expand`, `--filter` scripts| ✅ | ✅ | ✅ | ✅ | ✅ |
-| YAML job files (all values) | — | — | ✅ | ✅ | ✅ |
+| YAML job files (text values) | — | — | ✅ | ✅ | ✅ |
 
 > [!IMPORTANT]
 > **YAML Interpolation**: In YAML job files, `${{ENV_VAR}}`, `${{keyring://...}}` and
 > `${{cursor://...}}` interpolations run through the same resolver engine as the CLI (env → keyring
-> → cursor, in that order) and are applied to the raw YAML text *before* parsing — so they work on
-> **all** values (including configuration properties that aren't normally resolved, like
-> `batch-size` or `separator`). Unresolved variables are left verbatim in the text. Full-value
-> replacement (`@file` and `keyring://alias` without braces) only works for specific string fields
-> that pass through the CLI resolver (connection strings, queries, hooks, and transformer scripts).
+> → cursor, in that order), applied to each scalar as it is read. They reach every **text** value —
+> `input`, `output`, `query`, and every `provider-options` entry, `separator` included. They do not
+> reach a key the loader converts to another type: `batch-size: ${{SIZE}}` fails with the token
+> quoted back, because the token is what `int` is asked to parse. Unresolved variables are left
+> verbatim. Full-value replacement (`@file` and `keyring://alias` without braces) only works for
+> specific string fields that pass through the CLI resolver (connection strings, queries, hooks,
+> and transformer scripts).
+>
+> `--export-job` writes the reference, never the value it resolves to — on both entry points.
 
 ### Examples
 
