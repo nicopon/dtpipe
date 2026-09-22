@@ -1041,6 +1041,42 @@ written and back out to be read (`two bridges`).
 
 A job with several branches reading a source is not cut on a guess — name one with `--branch`.
 
+#### Making the cut
+
+```bash
+dtpipe split producer.yaml --at 1 --out orders
+dtpipe split producer.yaml --at 1 --out orders --acknowledge
+```
+
+`--at` names a candidate from the list above and `--out` a prefix; the two go together. It writes
+`<prefix>-producer.yaml` and `<prefix>-consumer.yaml`, meeting on `arrow:-`.
+
+| Flag | |
+|:---|:---|
+| `--at <k>` | Cut after stage `k`, so the producer keeps stages `1..k` and the consumer the rest |
+| `--out <prefix>` | Where the halves go: `<prefix>-producer.yaml`, `<prefix>-consumer.yaml` |
+| `--acknowledge` | Confirm the listed placement and write the files |
+
+Each value of the job goes to the half that governs it — the source, cursor, `--limit` and sampling
+to the producer; the target, `--prefix` and `--checkpoint` to the consumer. A `provider-options`
+block follows **the component that owns it**, so a block neither end answers to stops the cut by
+name rather than being placed on a guess. `--metrics-path` and `--log-path` reach neither half: one
+path cannot hold two runs' reports, and the table says so instead of letting them vanish.
+
+Without `--acknowledge` it prints the placement and exits `1`. The gate is not a clean bill of
+health — it reports a scan of the keys this build knows, and **a cut does not remove a secret, it
+redistributes one**: where there was one file and one owner, there are now two of each. A value
+written out in full stops the cut, naming where it is; parameterise it (`${{ENV_VAR}}`,
+`${{keyring://alias}}`) and cut again. Blanking it would produce a file that looks like a
+deliverable and cannot run.
+
+The halves are written from the job **as its author wrote it**, with every `${{…}}` intact — not
+from the resolved copy that ran.
+
+```bash
+dtpipe --job orders-producer.yaml | dtpipe --job orders-consumer.yaml
+```
+
 ### Sessions
 
 Artefacts belong to a session, resolved by precedence:

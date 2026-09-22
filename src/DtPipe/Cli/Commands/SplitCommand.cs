@@ -1,5 +1,7 @@
 using System.CommandLine;
 using DtPipe.Cli.Pipeline;
+using DtPipe.Cli.Split;
+using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Validation;
 using DtPipe.DryRun;
@@ -50,19 +52,38 @@ public class SplitCommand : Command
             Description = "How many source rows the sample reads (default 10)",
             DefaultValueFactory = _ => 10,
         };
+        var atOption = new Option<int?>("--at")
+        {
+            Description = "Cut after this stage instead of listing the candidates",
+        };
+        var outOption = new Option<string?>("--out")
+        {
+            Description = "Where to write the halves: <prefix>-producer.yaml and <prefix>-consumer.yaml",
+        };
+        var acknowledgeOption = new Option<bool>("--acknowledge")
+        {
+            Description = "Confirm the values the cut lists on each side, and write the two files",
+        };
 
         Arguments.Add(jobArgument);
         Options.Add(branchOption);
         Options.Add(rowsOption);
+        Options.Add(atOption);
+        Options.Add(outOption);
+        Options.Add(acknowledgeOption);
 
-        this.SetAction(async (parseResult, ct) => await ProposeAsync(
+        this.SetAction(async (parseResult, ct) => await RunAsync(
             parseResult.GetValue(jobArgument)!,
             parseResult.GetValue(branchOption),
             parseResult.GetValue(rowsOption),
+            parseResult.GetValue(atOption),
+            parseResult.GetValue(outOption),
+            parseResult.GetValue(acknowledgeOption),
             ct));
     }
 
-    private async Task<int> ProposeAsync(string jobPath, string? branch, int rows, CancellationToken ct)
+    private async Task<int> RunAsync(
+        string jobPath, string? branch, int rows, int? at, string? outPrefix, bool acknowledge, CancellationToken ct)
     {
         if (!File.Exists(jobPath))
         {
@@ -74,13 +95,20 @@ public class SplitCommand : Command
             _console.MarkupLine("[red]--rows must be at least 1: the cut points are read off a run, and a run of no rows observes no stage.[/]");
             return 1;
         }
+        if (at is null != string.IsNullOrEmpty(outPrefix))
+        {
+            _console.MarkupLine("[red]--at and --out go together: --at names the cut, --out says where the two halves go.[/]");
+            return 1;
+        }
+
+        var yaml = File.ReadAllText(jobPath);
 
         // Building the DAG parses YAML, so a malformed job file arrives here as a driver exception.
         // Reporting it as one is what the rest of the CLI does.
         DagBuild build;
         try
         {
-            build = DagTopologyService.FromServices(_serviceProvider).Build(File.ReadAllText(jobPath));
+            build = DagTopologyService.FromServices(_serviceProvider).Build(yaml);
         }
         catch (Exception ex)
         {
@@ -107,6 +135,12 @@ public class SplitCommand : Command
             _console.MarkupLine($"[red]{Markup.Escape(resolveError!)}[/]");
             return 1;
         }
+
+        // Everything the gate decides is a property of the job as written, so it is decided before
+        // the job is run. A pipeline this refuses to cut is one that would otherwise have opened
+        // its source and read rows first — using, in the case the gate exists for, the very
+        // credential it is about to complain about.
+        if (at is not null && !PassesGate(target, yaml)) return 1;
 
         // DryRunCount makes it a sample run: the writer is neutralised, and the four hooks, the
         // cursor, the metrics file and the schema migration are suppressed with it.
@@ -148,7 +182,170 @@ public class SplitCommand : Command
             return 1;
         }
 
-        return Render(target, jobPath, report.Run);
+        return at is null
+            ? Render(target, jobPath, report.Run)
+            : Cut(target, jobPath, yaml, report.Run, at.Value, outPrefix!, acknowledge);
+    }
+
+    /// <summary>
+    /// Re-reads the job <b>as written</b> — every <c>${{…}}</c> left in place.
+    /// </summary>
+    /// <remarks>
+    /// The copy that ran had them resolved, as it must to connect; serialising that one would turn
+    /// a reference its author placed to keep a value out of a file into the value itself, in two
+    /// files bound for two repositories. It is the same distinction <c>--export-job</c> draws, and
+    /// the same one it was found on the wrong side of.
+    /// </remarks>
+    private Dictionary<string, JobDefinition>? ReadVerbatim(string yaml, out string? error)
+    {
+        error = null;
+        try
+        {
+            return DtPipe.Configuration.JobFileParser.ParseContent(
+                yaml,
+                _serviceProvider.GetService<DtPipe.Cli.Security.ISecretsManager>(),
+                interpolate: false);
+        }
+        catch (Exception ex)
+        {
+            error = $"The job could not be re-read as written: {ex.Message}";
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The two refusals, answered before the job runs. Both are read off the text the author wrote,
+    /// so neither needs the sample run that establishes where the stages are.
+    /// </summary>
+    private bool PassesGate(string alias, string yaml)
+    {
+        var verbatim = ReadVerbatim(yaml, out var parseError);
+        if (verbatim is null)
+        {
+            _console.MarkupLine($"[red]{Markup.Escape(parseError!)}[/]");
+            return false;
+        }
+
+        var inspection = JobCutter.Inspect(
+            verbatim, alias,
+            _serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>(),
+            _serviceProvider.GetRequiredService<IEnumerable<IDataWriterFactory>>());
+
+        if (inspection.IsCuttable) return true;
+
+        foreach (var block in inspection.UnplaceableOptionBlocks)
+            _console.MarkupLine($"[red]provider-options block '{Markup.Escape(block)}' belongs to neither the source nor the target of this branch.[/]");
+        if (inspection.UnplaceableOptionBlocks.Count > 0)
+            _console.MarkupLine("[red]Which half inherits it is not something the cut can read off the job, and guessing "
+                              + "would send it — credentials included — to a repository it does not belong in.[/]");
+
+        if (inspection.Literals.Count > 0)
+        {
+            foreach (var field in inspection.Literals)
+                _console.MarkupLine($"[red]{Markup.Escape(field)} carries a credential in full.[/]");
+            _console.WriteLine();
+            _console.MarkupLine("[red]Each half of a cut is bound for a different team's repository, so a literal here is "
+                              + "copied into two of them. Parameterise it first — [bold]${{ENV_VAR}}[/] or "
+                              + "[bold]${{keyring://alias}}[/] — then cut again.[/]");
+            _console.MarkupLine("[grey]Blanking it instead would produce a file that looks like a deliverable and cannot run.[/]");
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Writes the two halves, once the run has shown that the cut index names a real stage.
+    /// </summary>
+    private int Cut(string alias, string jobPath, string yaml, SampleRun run, int at, string outPrefix, bool acknowledge)
+    {
+        var lastStage = run.Stages.Count - 1;
+        if (at < 0 || at > lastStage)
+        {
+            _console.MarkupLine($"[red]--at {at} is not a stage of branch '{Markup.Escape(alias)}': it has 0 to {lastStage}. "
+                              + $"Run 'dtpipe split {Markup.Escape(Path.GetFileName(jobPath))}' to see them.[/]");
+            return 1;
+        }
+
+        var verbatim = ReadVerbatim(yaml, out var parseError);
+        if (verbatim is null)
+        {
+            _console.MarkupLine($"[red]{Markup.Escape(parseError!)}[/]");
+            return 1;
+        }
+
+        // The cut moves transformers by position, so a position has to mean the same thing in the
+        // file and in the run. It does not when a block produces no transformer — one that sets
+        // options without mappings is refused, but one that sets neither is skipped — and a cut
+        // placed by number would then move a different stage than the one the candidate named.
+        var declared = verbatim[alias].Transformers?.Count ?? 0;
+        if (declared != lastStage)
+        {
+            _console.MarkupLine($"[red]Branch '{Markup.Escape(alias)}' declares {declared} transformers but ran {lastStage}, "
+                              + "so a stage number does not name a block of the file. Cutting it would move the wrong stage.[/]");
+            return 1;
+        }
+
+        var result = JobCutter.Cut(
+            verbatim, alias, at,
+            _serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>(),
+            _serviceProvider.GetRequiredService<IEnumerable<IDataWriterFactory>>());
+
+        _console.MarkupLine($"Cutting branch [bold]{Markup.Escape(alias)}[/] of {Markup.Escape(Path.GetFileName(jobPath))} "
+                          + $"after {Markup.Escape(at == 0 ? "the reader" : run.Stages[at].Name)}, "
+                          + $"{run.Stages[at].Schema.Count} columns crossing on [bold]{JobCutter.Link}[/].");
+        _console.WriteLine();
+
+        var producerPath = outPrefix + "-producer.yaml";
+        var consumerPath = outPrefix + "-consumer.yaml";
+
+        RenderPlacement(result, producerPath, consumerPath);
+
+        if (!acknowledge)
+        {
+            _console.WriteLine();
+            _console.MarkupLine("Nothing above was recognised as a credential written in full, and that is a scan of the "
+                              + "keys this build knows — not a proof that there is none.");
+            _console.MarkupLine("A cut does not remove a secret, it redistributes one: where there was one place and one "
+                              + "owner, there are now two of each.");
+            _console.MarkupLine("Re-run with [bold]--acknowledge[/] to write the two files.");
+            return 1;
+        }
+
+        File.WriteAllText(producerPath, DtPipe.Configuration.JobFileWriter.Serialize(result.Producer));
+        File.WriteAllText(consumerPath, DtPipe.Configuration.JobFileWriter.Serialize(result.Consumer));
+
+        _console.WriteLine();
+        _console.MarkupLine($"[green]Written[/] {Markup.Escape(producerPath)} and {Markup.Escape(consumerPath)}.");
+        _console.MarkupLine($"[grey]On one host: dtpipe --job {Markup.Escape(producerPath)} | dtpipe --job {Markup.Escape(consumerPath)}[/]");
+        return 0;
+    }
+
+    /// <summary>Prints what the cut put on each side, and what it carried to neither.</summary>
+    private void RenderPlacement(CutResult result, string producerPath, string consumerPath)
+    {
+        var table = new Table().Border(TableBorder.Rounded);
+        table.AddColumn("Half");
+        table.AddColumn("Key");
+        table.AddColumn("Value");
+
+        string Where(CutSide side) => side switch
+        {
+            CutSide.Producer => Markup.Escape(producerPath),
+            CutSide.Consumer => Markup.Escape(consumerPath),
+            _ => "[yellow]neither[/]",
+        };
+
+        foreach (var group in result.Placements.GroupBy(p => p.Side))
+        {
+            foreach (var placement in group)
+                table.AddRow(Where(placement.Side), Markup.Escape(placement.Key), Markup.Escape(placement.Display));
+        }
+
+        _console.Write(table);
+
+        if (result.Placements.Any(p => p.Side == CutSide.Dropped))
+            _console.MarkupLine("[yellow]A cut makes two runs out of one, and one path cannot hold both their reports — "
+                              + "give each half its own when you run them.[/]");
     }
 
     /// <summary>

@@ -134,6 +134,51 @@ public static class ConnectionStringSanitizer
 		return UriCredentialsRegex.Replace(sanitized, "${prefix}***${suffix}");
 	}
 
+	/// <summary>
+	/// Whether the text spells a credential out instead of pointing at one. Same vocabulary as
+	/// <see cref="Sanitize"/> — a key that looks sensitive, holding a value that is not an
+	/// indirection — asked as a question rather than applied as a mask, so the two cannot disagree
+	/// about one key.
+	///
+	/// <para>
+	/// It answers about the text <b>as written</b>. A caller that has already interpolated its
+	/// <c>${{…}}</c> tokens has no references left for this to recognise, and every value looks
+	/// literal; <c>dtpipe split</c> therefore classifies the verbatim job, not the one it ran.
+	/// </para>
+	/// </summary>
+	public static bool CarriesLiteralSecret(string? input)
+	{
+		if (string.IsNullOrWhiteSpace(input)) return false;
+
+		foreach (Match match in UriCredentialsRegex.Matches(input))
+			if (!IsIndirection(match.Groups["password"].Value)) return true;
+
+		foreach (Match match in LooseKeyValueRegex.Matches(input))
+		{
+			if (!IsSensitive(Normalize(TrailingKey(match.Groups["key"].Value)))) continue;
+			if (!IsIndirection(match.Groups["value"].Value)) return true;
+		}
+
+		return false;
+	}
+
+	/// <summary>A <c>${{…}}</c> token, the form a job file's indirections take.</summary>
+	private static readonly Regex InterpolationTokenRegex = new(
+		@"\$\{\{[^}]+\}\}",
+		RegexOptions.Compiled);
+
+	/// <summary>
+	/// A value that names a secret rather than holding one. Whole-value test: <c>abc${{SUFFIX}}</c>
+	/// still puts <c>abc</c> in the file, so only a value left empty by removing its tokens counts.
+	/// </summary>
+	private static bool IsIndirection(string value)
+	{
+		var trimmed = value.Trim();
+		if (trimmed.Length == 0) return true;
+		if (trimmed.StartsWith(KeyringPrefix, StringComparison.OrdinalIgnoreCase)) return true;
+		return InterpolationTokenRegex.Replace(trimmed, string.Empty).Trim().Length == 0;
+	}
+
 	/// <summary>Masks one <c>;</c>-delimited segment, leaving anything that is not a pair alone.</summary>
 	private static string RedactSegment(string segment)
 	{

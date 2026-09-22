@@ -13,6 +13,14 @@ set -e
 #
 # Case 5 is the safety claim: `split` runs the pipeline, so it has to be shown writing nothing.
 #
+# Cases 8 onwards cut. Case 12 is the one that matters: the two halves REPLAYED must produce what
+# the monolithic run produced, byte for byte. It is the only check here that exercises the link
+# rather than describing it, and it is what caught the `arrow:` reader handing downstream batches
+# that do not obey the ownership contract — --mask over the link read freed memory. Its pipeline is
+# deliberately deterministic (--compute + --mask, no unseeded --fake) so the comparison can be an
+# exact one, and deliberately built on an ALIASING transformer so a regression of that defect fails
+# here and not only in the unit suite.
+#
 # Only file sources and embedded DuckDB, so this runs in CI like the rest.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -146,6 +154,138 @@ if "$DTPIPE" split dag.yaml > dag.out 2>&1; then
 fi
 grep -qF -- "--branch" dag.out || fail "the refusal does not say how to name the branch"
 pass "it asks rather than choosing"
+
+echo ""
+echo "--- Case 8: --at and --out go together ---"
+if "$DTPIPE" split two-steps.yaml --at 1 > lonely.out 2>&1; then
+    fail "--at was accepted without --out"
+fi
+grep -qF -- "--out" lonely.out || fail "the refusal does not say what is missing"
+if "$DTPIPE" split two-steps.yaml --out half > lonely2.out 2>&1; then
+    fail "--out was accepted without --at"
+fi
+grep -qF -- "--at" lonely2.out || fail "the refusal does not say what is missing"
+pass "neither half of the pair is accepted alone"
+
+echo ""
+echo "--- Case 9: a stage that does not exist is refused, by range ---"
+if "$DTPIPE" split two-steps.yaml --at 9 --out bad > range.out 2>&1; then
+    fail "a cut after a stage the branch does not have was accepted"
+fi
+grep -qE "0 to 2" range.out || fail "the refusal does not name the range the branch has"
+[ -f bad-producer.yaml ] && fail "a refused cut still wrote a file"
+pass "out of range is refused, and names 0 to 2"
+
+echo ""
+echo "--- Case 10: without --acknowledge nothing is written ---"
+rm -f gate-producer.yaml gate-consumer.yaml
+if "$DTPIPE" split two-steps.yaml --at 1 --out gate > gate.out 2>&1; then
+    fail "the cut wrote its files without being acknowledged"
+fi
+[ -f gate-producer.yaml ] && fail "the producer half was written anyway"
+[ -f gate-consumer.yaml ] && fail "the consumer half was written anyway"
+grep -qF -- "--acknowledge" gate.out || fail "the gate does not say how to pass it"
+# The gate has to state what it is NOT claiming, or it reads as a clean bill of health.
+grep -qi "redistribut" gate.out || fail "the gate does not say a cut redistributes a secret"
+pass "the two files are withheld, and the gate says what it does not prove"
+
+echo ""
+echo "--- Case 11: acknowledged, both halves are written and meet on the link ---"
+"$DTPIPE" split two-steps.yaml --at 1 --out half --acknowledge > cut.out 2>&1 \
+    || fail "an acknowledged cut failed"
+[ -f half-producer.yaml ] || fail "the producer half was not written"
+[ -f half-consumer.yaml ] || fail "the consumer half was not written"
+grep -qF 'output: arrow:-' half-producer.yaml || fail "the producer does not write to the link"
+grep -qF 'input: arrow:-' half-consumer.yaml || fail "the consumer does not read the link"
+# Cut 1 is after the first transformer: compute upstream, fake downstream.
+grep -qF 'type: compute' half-producer.yaml || fail "the upstream transformer is not on the producer"
+grep -qF 'type: fake' half-producer.yaml && fail "a downstream transformer stayed on the producer"
+grep -qF 'type: fake' half-consumer.yaml || fail "the downstream transformer is not on the consumer"
+grep -qF 'type: compute' half-consumer.yaml && fail "an upstream transformer crossed to the consumer"
+grep -qF 'csv:people.csv' half-producer.yaml || fail "the producer lost the source"
+grep -qF 'csv:anon.csv' half-consumer.yaml || fail "the consumer lost the target"
+pass "each half carries its own end, its own stages, and the link"
+
+echo ""
+echo "--- Case 12: the halves replayed produce what the monolithic run produced ---"
+"$DTPIPE" -i csv:people.csv \
+          --compute "domain:row.email.split('@')[1]" \
+          --mask email \
+          -o csv:whole.csv --export-job whole.yaml > /dev/null 2>&1 \
+    || fail "could not export the deterministic job"
+"$DTPIPE" --job whole.yaml --no-stats > /dev/null 2>&1 || fail "the monolithic job did not run"
+[ -f whole.csv ] || fail "the monolithic job wrote nothing"
+
+# Every cut point, not just a convenient one: the link has to carry the stream wherever it is put.
+for at in 0 1 2; do
+    rm -f whole.csv.rt "rt$at-producer.yaml" "rt$at-consumer.yaml"
+    "$DTPIPE" split whole.yaml --at "$at" --out "rt$at" --acknowledge > /dev/null 2>&1 \
+        || fail "the cut at $at failed"
+    # Retarget the consumer so the two runs do not write the same file.
+    sed "s|csv:whole.csv|csv:replayed$at.csv|" "rt$at-consumer.yaml" > "rt$at-consumer-out.yaml"
+    rm -f "replayed$at.csv"
+    if ! "$DTPIPE" --job "rt$at-producer.yaml" --no-stats 2>/dev/null \
+       | "$DTPIPE" --job "rt$at-consumer-out.yaml" --no-stats > /dev/null 2>&1; then
+        fail "the two halves cut at $at did not run through the link"
+    fi
+    [ -f "replayed$at.csv" ] || fail "the consumer cut at $at wrote nothing"
+    diff whole.csv "replayed$at.csv" > /dev/null \
+        || fail "cut at $at: the halves produced something other than the monolithic run"
+done
+pass "cut at 0, 1 and 2 each replay to the monolithic result"
+
+echo ""
+echo "--- Case 13: a credential written in full stops the cut ---"
+cat > literal.yaml <<'EOF'
+main:
+  input: "csv:people.csv"
+  output: "pg:Host=db;Username=u;Password=hunter2"
+EOF
+if "$DTPIPE" split literal.yaml --at 0 --out leak --acknowledge > literal.out 2>&1; then
+    fail "a job spelling a credential out was cut anyway"
+fi
+[ -f leak-producer.yaml ] && fail "a refused cut still wrote a half"
+grep -qF "main.output" literal.out || fail "the refusal does not name where the credential is"
+grep -qF '${{ENV_VAR}}' literal.out || fail "the refusal does not say how to parameterise it"
+pass "the literal is named, and blanking it is not offered"
+
+echo ""
+echo "--- Case 14: a reference is not a credential, and survives the cut ---"
+# The job that RAN had its ${{…}} resolved, as it must to connect. Writing that copy would turn a
+# reference its author placed to keep a value out of a file into the value itself, in two files.
+export SPLIT_TEST_DELIM=","
+cat > ref.yaml <<'EOF'
+main:
+  input: "csv:people.csv"
+  output: "csv:refout.csv"
+  provider-options:
+    csv-reader:
+      delimiter: "${{SPLIT_TEST_DELIM}}"
+EOF
+"$DTPIPE" split ref.yaml --at 0 --out ref --acknowledge > ref.out 2>&1 \
+    || fail "a job using a reference was refused"
+grep -qF '${{SPLIT_TEST_DELIM}}' ref-producer.yaml \
+    || fail "the cut resolved the reference instead of carrying it"
+grep -qF 'csv-reader' ref-producer.yaml || fail "the reader's options did not follow the producer"
+grep -qF 'csv-reader' ref-consumer.yaml && fail "the reader's options crossed to the consumer"
+pass "the reference is carried verbatim, on the half that owns it"
+
+echo ""
+echo "--- Case 15: a block neither end owns is not guessed at ---"
+cat > orphan.yaml <<'EOF'
+main:
+  input: "csv:people.csv"
+  output: "csv:orphanout.csv"
+  provider-options:
+    duck:
+      init-sql: "ATTACH 'other.duckdb'"
+EOF
+if "$DTPIPE" split orphan.yaml --at 0 --out orphan --acknowledge > orphan.out 2>&1; then
+    fail "a block belonging to neither end was placed on a guess"
+fi
+[ -f orphan-producer.yaml ] && fail "a refused cut still wrote a half"
+grep -qF "duck" orphan.out || fail "the refusal does not name the block it cannot place"
+pass "it names the block rather than choosing a side"
 
 echo ""
 echo -e "${GREEN}All split checks passed.${NC}"

@@ -431,7 +431,14 @@ public static class PipelineToJobConverter
         return secretsManager.GetSecret(raw[keyringPrefix.Length..].Trim()) ?? connectionString;
     }
 
-    private static T? ResolveFactory<T>(string? connectionString, IEnumerable<T>? factories)
+    /// <summary>
+    /// The component behind a connection string: its selector prefix first, then <c>CanHandle</c>
+    /// on the raw text for a string that carries no prefix. The one copy of this lookup for
+    /// everything that has to name the component of an endpoint without opening it —
+    /// <c>--export-job</c> here, and the cut in <see cref="DtPipe.Cli.Split.JobCutter"/>, which
+    /// decides from it which half inherits a provider-options block.
+    /// </summary>
+    internal static T? ResolveFactory<T>(string? connectionString, IEnumerable<T>? factories)
         where T : class, IDataFactory
     {
         if (factories == null || string.IsNullOrEmpty(connectionString))
