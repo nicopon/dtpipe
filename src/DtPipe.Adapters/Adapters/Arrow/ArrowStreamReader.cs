@@ -1,5 +1,6 @@
 using Apache.Arrow;
 using Apache.Arrow.Ipc;
+using Apache.Arrow.Memory;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using Microsoft.Extensions.Logging;
@@ -97,7 +98,7 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
                     ?? throw new EndOfStreamException(
                         $"Arrow file '{Source}' is truncated: its footer declares {count} record " +
                         $"batches and the body runs out at {i}.");
-                yield return batch;
+                yield return TakeOwnership(batch);
             }
         }
         else if (_arrowReader != null)
@@ -110,8 +111,45 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
                     EnsureStreamEnded();
                     yield break;
                 }
-                yield return batch;
+                yield return TakeOwnership(batch);
             }
+        }
+    }
+
+    /// <summary>
+    /// Re-homes an IPC batch onto buffers that carry their own reference count, and releases the
+    /// message body it was read into.
+    /// </summary>
+    /// <remarks>
+    /// <b>An IPC batch does not obey the ownership contract the rest of the pipeline is written
+    /// against</b> (CLAUDE.md › "RecordBatch ownership"). Its column buffers hold no shared handle;
+    /// the whole message body is a single allocation owned by the <see cref="RecordBatch"/>. So
+    /// <c>ArrowOwnership.RetainArray</c> — which the six column-aliasing transformers call to keep
+    /// an input column alive past the segment runner's dispose — bumps nothing, and disposing the
+    /// input frees the body under the output. Reading it back then dereferences freed native
+    /// memory: <c>--mask</c>, <c>--fake</c>, <c>--null</c> and <c>--format</c> each crashed on an
+    /// <c>arrow:</c> source with a <c>NullReferenceException</c> raised from inside Arrow, while
+    /// the same transformers over a <c>parquet:</c> source were correct.
+    ///
+    /// <para>
+    /// The machinery for sharing a buffer is <c>internal</c> to Apache.Arrow, so the handle cannot
+    /// be attached from here: the copy is what buys the contract. It is one allocator copy per
+    /// batch — measured at roughly three times the cost of reading the batch, ~3 ns per row — paid
+    /// on this reader only, and it is what lets every consumer downstream obey one rule instead of
+    /// asking where its batch came from.
+    /// </para>
+    /// </remarks>
+    private static RecordBatch TakeOwnership(RecordBatch batch)
+    {
+        using (batch)
+        {
+            var allocator = MemoryAllocator.Default.Value;
+            int columnCount = batch.Schema.FieldsList.Count;
+            var columns = new IArrowArray[columnCount];
+            for (int i = 0; i < columnCount; i++)
+                columns[i] = global::Apache.Arrow.ArrowArrayFactory.BuildArray(batch.Column(i).Data.Clone(allocator));
+
+            return new RecordBatch(batch.Schema, columns, batch.Length);
         }
     }
 

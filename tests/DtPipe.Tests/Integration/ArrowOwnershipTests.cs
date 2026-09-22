@@ -176,6 +176,86 @@ public class ArrowOwnershipTests
         pool.ActiveAllocations.Should().Be(0, "All Arrow buffers should be disposed after pipeline completion.");
     }
 
+    /// <summary>
+    /// A batch handed over by the <c>arrow:</c> reader survives the contract every other batch
+    /// obeys: a transformer retains a column, the segment runner disposes the input, and the
+    /// retained column still reads.
+    /// </summary>
+    /// <remarks>
+    /// Read straight from Apache.Arrow's IPC reader it does not. That reader puts no shared handle
+    /// on the column buffers and owns the whole message body on the <see cref="RecordBatch"/>, so
+    /// <see cref="ArrowOwnership.RetainArray"/> bumps nothing and disposing the input frees the
+    /// buffers the output points at. This is the case with no <c>TrackingMemoryPool</c> signal —
+    /// the allocation is Arrow's own, and the symptom was a <c>NullReferenceException</c> thrown
+    /// from inside <c>StringArray.GetString</c> rather than a leak — so the assertion is on the
+    /// values, which is what a reader of a freed buffer cannot produce.
+    /// </remarks>
+    [Fact]
+    public async Task ArrowReader_YieldsBatches_AnAliasingTransformer_CanRetainPastTheInputDispose()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"ownership-{Guid.NewGuid():N}.arrow");
+        var schema = new Schema.Builder()
+            .Field(f => f.Name("id").DataType(Int32Type.Default))
+            .Field(f => f.Name("name").DataType(StringType.Default))
+            .Build();
+
+        try
+        {
+            await using (var file = File.Create(path))
+            using (var writer = new Apache.Arrow.Ipc.ArrowFileWriter(file, schema))
+            {
+                var ids = new Int32Array.Builder();
+                var names = new StringArray.Builder();
+                for (int i = 0; i < 64; i++) { ids.Append(i); names.Append($"name-{i}"); }
+                using var batch = new RecordBatch(schema, new IArrowArray[] { ids.Build(), names.Build() }, 64);
+                writer.WriteRecordBatch(batch);
+                writer.WriteEnd();
+            }
+
+            await using var reader = new DtPipe.Adapters.Arrow.ArrowAdapterStreamReader(
+                path, new DtPipe.Adapters.Arrow.ArrowReaderOptions());
+            await reader.OpenAsync();
+
+            // Project with a rename returns a new batch aliasing every input column, so the
+            // segment runner's dispose of the input lands on buffers the output still points at.
+            var project = new ProjectDataTransformer(new ProjectOptions { Rename = new[] { "id:ident" } });
+            await project.InitializeAsync(new List<PipeColumnInfo>
+            {
+                new("id", typeof(int), true),
+                new("name", typeof(string), true),
+            });
+
+            var executor = new PipelineExecutor(
+                System.Linq.Enumerable.Empty<IRowToColumnarBridgeFactory>(),
+                System.Linq.Enumerable.Empty<IColumnarToRowBridgeFactory>(),
+                NullLogger<PipelineExecutor>.Instance);
+
+            var seen = 0;
+            await foreach (var outBatch in executor.ApplyColumnarSegmentAsync(
+                reader.ReadRecordBatchesAsync(), new List<IDataTransformer> { project },
+                Mock.Of<IExportProgress>(), default))
+            {
+                using (outBatch)
+                {
+                    outBatch.Schema.FieldsList[0].Name.Should().Be("ident");
+                    var ids = (Int32Array)outBatch.Column(0);
+                    var names = (StringArray)outBatch.Column(1);
+                    for (int i = 0; i < outBatch.Length; i++, seen++)
+                    {
+                        ids.GetValue(i).Should().Be(seen);
+                        names.GetString(i).Should().Be($"name-{seen}");
+                    }
+                }
+            }
+
+            seen.Should().Be(64, "every row crossed the segment intact");
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
     private class SpyTransformer : BaseColumnarTransformer
     {
         public override bool CanProcessColumnar { get; protected set; } = true;
