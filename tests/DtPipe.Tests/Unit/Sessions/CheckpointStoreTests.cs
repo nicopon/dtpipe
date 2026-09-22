@@ -2,6 +2,11 @@ using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using Apache.Arrow;
 using Apache.Arrow.Types;
+using DtPipe.Core.Abstractions;
+using DtPipe.Core.Infrastructure.Arrow;
+using DtPipe.Core.Models;
+using DtPipe.Services;
+using DtPipe.Transformers.Arrow.Project;
 using DtPipe.Sessions;
 using DtPipe.Tests.Helpers;
 using AwesomeAssertions;
@@ -120,6 +125,52 @@ public class CheckpointStoreTests : IDisposable
 		var act = async () => await Drain(_store.ReadAsync("key1"));
 
 		await act.Should().ThrowAsync<CryptographicException>();
+	}
+
+	/// <summary>
+	/// A batch the store hands back survives the contract every other batch obeys: a transformer
+	/// retains a column, the segment runner disposes the input, and the retained column still reads.
+	/// </summary>
+	/// <remarks>
+	/// What the store reads back is Arrow IPC, whose batches carry no shared handle on their column
+	/// buffers, so <c>ArrowOwnership.RetainArray</c> bumps nothing and the dispose of the input frees
+	/// the body under an output that aliases it. The symptom was a <c>NullReferenceException</c>
+	/// thrown from inside <c>StringArray.GetString</c> rather than a leak, so there is no
+	/// <c>TrackingMemoryPool</c> signal here and the assertion is on the values.
+	/// </remarks>
+	[Fact]
+	public async Task A_Resumed_Batch_Survives_An_Aliasing_Transformer()
+	{
+		await _store.WriteAsync("key1", Batches(2, 8));
+
+		// Project with a rename returns a new batch aliasing every input column.
+		var project = new ProjectDataTransformer(new ProjectOptions { Rename = ["Id:Ident"] });
+		await project.InitializeAsync([new PipeColumnInfo("Id", typeof(int), false),
+		                               new PipeColumnInfo("Name", typeof(string), true)]);
+
+		var executor = new PipelineExecutor(
+			Enumerable.Empty<IRowToColumnarBridgeFactory>(),
+			Enumerable.Empty<IColumnarToRowBridgeFactory>(),
+			Microsoft.Extensions.Logging.Abstractions.NullLogger<PipelineExecutor>.Instance);
+
+		var seen = 0;
+		await foreach (var batch in executor.ApplyColumnarSegmentAsync(
+			_store.ReadAsync("key1"), [project], Moq.Mock.Of<IExportProgress>(), default))
+		{
+			using (batch)
+			{
+				batch.Schema.FieldsList[0].Name.Should().Be("Ident");
+				var ids = (Int32Array)batch.Column(0);
+				var names = (StringArray)batch.Column(1);
+				for (var i = 0; i < batch.Length; i++, seen++)
+				{
+					ids.GetValue(i).Should().Be(seen);
+					names.GetString(i).Should().Be($"row-{seen / 8}-{seen % 8}");
+				}
+			}
+		}
+
+		seen.Should().Be(16, "every row crossed the segment intact");
 	}
 
 	[Fact]

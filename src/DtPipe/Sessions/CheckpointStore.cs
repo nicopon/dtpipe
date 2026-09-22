@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Apache.Arrow;
 using Apache.Arrow.Ipc;
+using DtPipe.Core.Infrastructure.Arrow;
 
 namespace DtPipe.Sessions;
 
@@ -99,8 +100,10 @@ public sealed class CheckpointStore
 
             using var buffer = new MemoryStream(frame, writable: false);
             using var reader = new ArrowStreamReader(buffer);
+            // An IPC batch carries no shared handle on its columns, so it must be re-homed before
+            // it reaches a transformer that aliases one.
             while (await reader.ReadNextRecordBatchAsync(ct) is { } batch)
-                yield return batch;
+                yield return ArrowOwnership.TakeOwnership(batch);
         }
     }
 

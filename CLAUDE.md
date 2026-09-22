@@ -501,6 +501,13 @@ touches it. Ownership moves downstream when the batch is yielded, returned, or w
 - The **writer** takes ownership via `WriteRecordBatchAsync` (its interface doc says so) and
   disposes.
 - `BridgeColumnarToRowsAsync` is a terminal consumer: `using (batch)`.
+- A reader that hands over **Arrow IPC** batches must re-home them through
+  `ArrowOwnership.TakeOwnership`. IPC column buffers carry no shared handle — the whole message
+  body is one allocation owned by the `RecordBatch` — so `RetainArray` bumps nothing and the
+  segment runner's dispose frees the body under an aliasing output. `--mask`, `--fake`, `--null`
+  and `--format` each crashed with a `NullReferenceException` from inside Arrow, on an `arrow:`
+  source and on `--from-checkpoint`. Apache.Arrow keeps the sharing machinery `internal`, so the
+  copy is the only fix available from outside it.
 - **Fan-out** (`DagOrchestrator` broadcast): the broadcaster owns the upstream batch, gives each of
   N consumers an independent batch via `ArrowOwnership.RetainAll` (refcount bump, not a deep
   `Clone`), then disposes its own reference. Each consumer disposes the batch it received.
