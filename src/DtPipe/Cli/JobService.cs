@@ -107,6 +107,18 @@ public class JobService
 				_loggerFactory.AddSerilog();
 			}
 
+			// Alias binding: substitute --bind-input/--bind-output onto the job dictionary before
+			// validation, so a bound fragment is checked under exactly the same rules as a
+			// complete job (indexed by alias, whether it came from --job or the command line).
+			var bindingErrors = Pipeline.AliasBindingApplier.Apply(jobs, globals.BindInput, globals.BindOutput);
+			if (bindingErrors.Count > 0)
+			{
+				if (!globals.Quiet)
+					foreach (var err in bindingErrors)
+						_console.MarkupLine($"[red]Binding Error:[/] {err}");
+				return 1;
+			}
+
 			// Validation
 			var processorFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamTransformerFactory>>();
 			var validationErrors = Pipeline.PipelineValidator.Validate(dag, jobs, processorFactories);

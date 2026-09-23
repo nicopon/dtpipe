@@ -119,6 +119,22 @@ public static class PipelineValidator
                      + "in a job file) to read without writing.");
         }
 
+        // 9. At most one branch may read 'arrow:-' (stdin) and at most one may write it (stdout):
+        //    each is one process-wide stream. This holds whether or not --bind-input/--bind-output
+        //    is used — binding replaces 'arrow:-' with a real location, but two branches left
+        //    unbound on the same standard stream is unverified behaviour either way.
+        var stdinReaders = dag.Branches.Where(b => jobs.TryGetValue(b.Alias, out var j) && j.Input == "arrow:-")
+                                        .Select(b => b.Alias).ToList();
+        if (stdinReaders.Count > 1)
+            errors.Add($"More than one branch reads 'arrow:-' (stdin): {string.Join(", ", stdinReaders)}. "
+                     + "Only one reader of stdin is possible; bind each to its own location with --bind-input.");
+
+        var stdoutWriters = dag.Branches.Where(b => jobs.TryGetValue(b.Alias, out var j) && j.Output == "arrow:-")
+                                         .Select(b => b.Alias).ToList();
+        if (stdoutWriters.Count > 1)
+            errors.Add($"More than one branch writes 'arrow:-' (stdout): {string.Join(", ", stdoutWriters)}. "
+                     + "Only one writer of stdout is possible; bind each to its own location with --bind-output.");
+
         return errors;
     }
 
