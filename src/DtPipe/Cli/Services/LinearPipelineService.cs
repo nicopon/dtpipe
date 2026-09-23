@@ -343,8 +343,13 @@ public class LinearPipelineService
                     }
                     else
                     {
-                        // Linear job with no output — validation mode only
-                        _console.Write(new Spectre.Console.Markup($"[yellow]Warning: No output specified. Running in validation mode.[/]{Environment.NewLine}"));
+                        // PipelineValidator refuses a branch with no output that nothing reads
+                        // before any branch starts, a lone branch included, so a non-DAG run
+                        // reaching here found none configured is a caller that skipped
+                        // validation, not a legitimate "no output" job.
+                        throw new InvalidOperationException(
+                            "Invariant violated: PipelineValidator should have refused a branch with no output "
+                          + "before execution reached here.");
                     }
 
                     (writerFactory, _, _) = ResolveFactory<IDataWriterFactory>("null:", _writerFactories);

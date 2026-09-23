@@ -215,7 +215,7 @@ public class LinearPipelineServiceTests
         return (service, consoleMock, serviceRegistry);
     }
 
-    private static JobDefinition BlockingJob() => new() { Input = "stub:block", Output = null, Limit = 0 };
+    private static JobDefinition BlockingJob() => new() { Input = "stub:block", Output = "null:", Limit = 0 };
 
     // ─────────────────────────────────────────────────────────────────────────
     // Facts
@@ -342,7 +342,7 @@ public class LinearPipelineServiceTests
         transformer.Probe = () => registry.Has<DtPipe.Core.Models.PipelineOptions>();
 
         await service.ExecuteAsync(
-            new JobDefinition { Input = "stub:x" },
+            new JobDefinition { Input = "stub:x", Output = "null:" },
             context: new CliJobContext(null, null, null, new[] { "--stubproc" }),
             token: CancellationToken.None, userCancellationToken: CancellationToken.None);
 
