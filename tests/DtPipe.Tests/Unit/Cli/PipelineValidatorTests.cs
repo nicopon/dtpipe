@@ -181,6 +181,39 @@ public class PipelineValidatorTests
         Assert.Empty(Validate(new BranchDefinition { Alias = "main", Input = "a.csv", Output = "out.csv" }));
     }
 
+    // ── A branch with no output that nothing reads writes nowhere ───────────
+
+    /// <summary>
+    /// Played 2026-09-23: '-i generate:1000 --alias orders -i generate:10 --alias other -o csv:...'
+    /// exited 0 having read and thrown away everything from 'orders'. The error must name it.
+    /// </summary>
+    [Fact]
+    public void ABranchWithNoOutputThatNothingReads_IsRejected()
+    {
+        var errors = Validate(
+            new BranchDefinition { Alias = "orders", Input = "generate:1000" },
+            new BranchDefinition { Alias = "other", Input = "generate:10", Output = "out.csv" });
+
+        var error = Assert.Single(errors);
+        Assert.Contains("orders", error);
+        Assert.Contains("-o null:", error);
+    }
+
+    [Fact]
+    public void ALoneBranchWithNoOutput_IsRejected()
+    {
+        var errors = Validate(new BranchDefinition { Alias = "main", Input = "a.csv" });
+
+        var error = Assert.Single(errors);
+        Assert.Contains("main", error);
+    }
+
+    [Fact]
+    public void ALoneBranchWithNullOutput_IsAccepted()
+    {
+        Assert.Empty(Validate(new BranchDefinition { Alias = "main", Input = "a.csv", Output = "null:" }));
+    }
+
     private sealed class FakeProcessor : IStreamTransformerFactory
     {
         private readonly (string Flag, bool IsBoolean) _trigger;

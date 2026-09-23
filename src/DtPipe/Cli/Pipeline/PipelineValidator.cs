@@ -100,6 +100,25 @@ public static class PipelineValidator
             "Contract file",
             "Each branch produces its own schema, so it needs its own --contract-save path.");
 
+        // 8. A branch with no output that nothing reads writes nowhere: every row it processes is
+        //    read and discarded silently. Played 2026-09-23: a two-branch job where one alias was
+        //    simply dropped from the command line exited 0 having read and thrown away everything.
+        //    Being read via 'from:'/'ref:' is the legitimate output-less shape (check 2 above);
+        //    this is what remains once that shape is excluded.
+        var readAliases = dag.Branches
+            .SelectMany(b => b.StreamingAliases.Concat(b.RefAliases))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var branch in dag.Branches)
+        {
+            if (!jobs.TryGetValue(branch.Alias, out var job) || !string.IsNullOrEmpty(job.Output)) continue;
+            if (readAliases.Contains(branch.Alias)) continue;
+
+            errors.Add($"Branch '{branch.Alias}' has no output and nothing reads it, so every row it "
+                     + "processes would be read and discarded. Write '-o null:' ('output: \"null:\"' "
+                     + "in a job file) to read without writing.");
+        }
+
         return errors;
     }
 

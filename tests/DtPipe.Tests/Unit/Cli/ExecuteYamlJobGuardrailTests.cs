@@ -59,7 +59,7 @@ public class ExecuteYamlJobGuardrailTests
      public async System.Threading.Tasks.Task Destructive_Sql_IsBlocked_Without_AllowDestructive()
          {
          var (tools, _) = BuildTools();
-         var yaml = "main:\n  input: \"duck:m.db\"\n  provider-options:\n    duck:\n      pre-exec: \"DROP TABLE sales\"\n";
+         var yaml = "main:\n  input: \"duck:m.db\"\n  output: \"null:\"\n  provider-options:\n    duck:\n      pre-exec: \"DROP TABLE sales\"\n";
 
          var json = await tools.ExecuteYamlJob(yaml);
          Assert.Contains("\"stage\": \"safety\"", json);
@@ -70,7 +70,7 @@ public class ExecuteYamlJobGuardrailTests
     public async System.Threading.Tasks.Task Destructive_Sql_Allowed_With_Flag()
              {
              var (tools, _) = BuildTools();
-             var yaml = "main:\n  input: \"duck:m.db\"\n  provider-options:\n    duck:\n      pre-exec: \"DROP TABLE sales\"\n";
+             var yaml = "main:\n  input: \"duck:m.db\"\n  output: \"null:\"\n  provider-options:\n    duck:\n      pre-exec: \"DROP TABLE sales\"\n";
 
              // allowDestructive=true should clear the safety stage; the run then proceeds as a
              // dry-run because apply defaults to false.
@@ -82,7 +82,7 @@ public class ExecuteYamlJobGuardrailTests
     public async System.Threading.Tasks.Task Network_Sql_IsBlocked_Without_AllowNetwork()
              {
              var (tools, _) = BuildTools();
-             var yaml = "main:\n  input: \"duck:m.db\"\n  provider-options:\n    duck:\n      duck-init: \"LOAD httpfs; SET s3_region='eu'\"\n";
+             var yaml = "main:\n  input: \"duck:m.db\"\n  output: \"null:\"\n  provider-options:\n    duck:\n      duck-init: \"LOAD httpfs; SET s3_region='eu'\"\n";
 
              var json = await tools.ExecuteYamlJob(yaml);
              Assert.Contains("\"stage\": \"safety\"", json);
