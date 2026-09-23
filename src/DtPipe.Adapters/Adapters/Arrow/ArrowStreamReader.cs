@@ -48,7 +48,7 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
 			if (!File.Exists(_path))
 				throw new FileNotFoundException($"Arrow file not found: {_path}", _path);
 
-			_inputStream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.Asynchronous);
+			_inputStream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.Asynchronous);
 
             _isIpcFile = _path.EndsWith(".arrow", StringComparison.OrdinalIgnoreCase) ||
                          _path.EndsWith(".arrowfile", StringComparison.OrdinalIgnoreCase);
