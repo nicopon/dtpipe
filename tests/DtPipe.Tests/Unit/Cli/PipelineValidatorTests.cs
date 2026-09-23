@@ -214,6 +214,40 @@ public class PipelineValidatorTests
         Assert.Empty(Validate(new BranchDefinition { Alias = "main", Input = "a.csv", Output = "null:" }));
     }
 
+    // ── At most one unbound arrow:- reader, and one writer ──────────────────
+
+    [Fact]
+    public void TwoBranchesReadingArrowStdin_AreRejected()
+    {
+        var errors = Validate(
+            new BranchDefinition { Alias = "a", Input = "arrow:-", Output = "a.csv" },
+            new BranchDefinition { Alias = "b", Input = "arrow:-", Output = "b.csv" });
+
+        var error = Assert.Single(errors);
+        Assert.Contains("stdin", error);
+        Assert.Contains("a", error);
+        Assert.Contains("b", error);
+    }
+
+    [Fact]
+    public void TwoBranchesWritingArrowStdout_AreRejected()
+    {
+        var errors = Validate(
+            new BranchDefinition { Alias = "a", Input = "a.csv", Output = "arrow:-" },
+            new BranchDefinition { Alias = "b", Input = "b.csv", Output = "arrow:-" });
+
+        var error = Assert.Single(errors);
+        Assert.Contains("stdout", error);
+    }
+
+    [Fact]
+    public void OneBranchReadingAndOneWritingArrowStdStream_IsAccepted()
+    {
+        Assert.Empty(Validate(
+            new BranchDefinition { Alias = "a", Input = "arrow:-", Output = "out.csv" },
+            new BranchDefinition { Alias = "b", Input = "b.csv", Output = "arrow:-" }));
+    }
+
     private sealed class FakeProcessor : IStreamTransformerFactory
     {
         private readonly (string Flag, bool IsBoolean) _trigger;

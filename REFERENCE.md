@@ -561,6 +561,30 @@ DuckDB extensions (`excel`, `httpfs`, `azure`, `ducklake`…) are reached throug
 > written *and* joined on takes two branches — one that produces it, one that writes it — plus the
 > branch that joins. See [DAG pipelines](./docs/guides/dag.md).
 
+#### Binding a fragment's boundary
+
+| Option | Description |
+|:---|:---|
+| `--bind-input ALIAS=LOCATION[,ALIAS=LOCATION...]` | Wire a real location into a branch's `arrow:-` input |
+| `--bind-output ALIAS=LOCATION[,ALIAS=LOCATION...]` | Wire a real location into a branch's `arrow:-` output |
+
+A fragment written by `dtpipe split` keeps the boundary its text names — a branch whose input or
+output is exactly `arrow:-` — and a single shell pipe wires a two-process chain without either
+flag. Beyond one edge per direction (a fragment with two links, or two producers feeding a join),
+name where each `arrow:-` actually is for this run:
+
+```
+dtpipe --job anonymiser.yaml --bind-input anonymiser=/run/42/in --bind-output anonymiser=/run/42/out
+dtpipe --job join.yaml --bind-input orders=/run/42/orders,customers=/run/42/customers
+```
+
+Each value is a comma-separated `alias=location` list — a path, a FIFO or a named pipe, never an
+adapter prefix: the boundary stays an Arrow IPC stream. A location ending in `.arrow` or
+`.arrowfile` is refused, since the `arrow:` reader and writer would read that extension as a
+request for file format instead. Binding a branch whose input or output is not exactly `arrow:-`,
+an unknown alias, or the same `(branch, direction)` pair twice are refused by name; combining
+either flag with `--export-job` is refused, since a binding names a location specific to this run.
+
 #### Implicit branch-split rules
 
 Branches are separated implicitly while walking the arguments. One pure function
