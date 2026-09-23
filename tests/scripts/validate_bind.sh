@@ -123,4 +123,39 @@ grep -qF "bind-input" case4.out || fail "the refusal does not name the binding f
 pass "--export-job combined with a binding is refused"
 
 echo ""
+echo "--- Case 5: --dry-run against a FIFO neither hangs nor steals bytes from the real reader ---"
+rm -f dryrun.fifo consumed.bin
+mkfifo dryrun.fifo
+
+# A real reader, so a stray inspection read end that later resolved would have somewhere to steal
+# bytes from if it read anything.
+cat dryrun.fifo > consumed.bin &
+READER_PID=$!
+
+"$DTPIPE" -i "generate:1000" --fake "Email:internet.email" -o arrow:dryrun.fifo --dry-run 5 --no-stats \
+    > dryrun.out 2>&1 &
+DRYRUN_PID=$!
+
+SECS=0
+while kill -0 "$DRYRUN_PID" 2>/dev/null && [ "$SECS" -lt 10 ]; do
+    sleep 1
+    SECS=$((SECS + 1))
+done
+
+if kill -0 "$DRYRUN_PID" 2>/dev/null; then
+    kill -9 "$DRYRUN_PID" 2>/dev/null
+    kill -9 "$READER_PID" 2>/dev/null
+    fail "a dry-run against a FIFO did not complete within 10s (hung opening it for inspection)"
+fi
+wait "$DRYRUN_PID" || fail "the dry-run against a FIFO exited non-zero: $(cat dryrun.out)"
+
+# Nothing is ever written on a dry-run (the writer is neutralised), so a real reader on the other
+# end must see EOF with no bytes — never bytes a stray inspection read end produced.
+kill -9 "$READER_PID" 2>/dev/null
+wait "$READER_PID" 2>/dev/null || true
+[ "$(wc -c < consumed.bin | tr -d ' ')" = "0" ] \
+    || fail "the real reader received bytes a dry-run's advisory inspection should never have produced"
+pass "a dry-run against a FIFO completes in at most ${SECS}s and consumes nothing from the real reader"
+
+echo ""
 echo -e "${GREEN}All alias binding checks passed.${NC}"
