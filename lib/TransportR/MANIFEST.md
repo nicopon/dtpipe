@@ -10,8 +10,8 @@ copy: rebuild from a later commit only after checking what changed against
 | `TransportR.dll` | `d31ad2a5dc84d7528a38b9648188a71b1f13945d607854865229de3cae01dc44` | core interfaces and models; every project below references it |
 | `TransportR.Hub.SignalR.dll` | `5f5879d75241c8f6106f051c97a625feda4c2cdfd4af17fd7f7060aaf255ba77` | `DtPipe.Coordinator` — hosts `CommandHub`, `AddDataHub()`/`UseHub<THub>()` |
 | `TransportR.FlowControl.dll` | `7dcdc3104077344c0871cfceff721dc45edc6dcde0fea26b89e5fcceccb2dc1d` | `DtPipe.Coordinator` — `DefaultFlowControlService`, the plan's edge check |
-| `TransportR.Client.SignalR.dll` | `153acb9f794428b385dccd9be48263dd8b1409384dadfb7e1071ef100f59ba13` | `DtPipe.Coordinator.Tests` only, standing in for pipeline nodes |
-| `TransportR.Serialization.MessagePack.dll` | `fe2fb8f357a0e78a862499bdfbfed18a526b692084baa5e353489e2046cdd254` | `DtPipe.Coordinator.Tests` only, paired with the client above |
+| `TransportR.Client.SignalR.dll` | `153acb9f794428b385dccd9be48263dd8b1409384dadfb7e1071ef100f59ba13` | `DtPipe.Coordinator.Tests`, standing in for pipeline nodes; `DtPipe.PipelineNode` — the real client, one per fragment |
+| `TransportR.Serialization.MessagePack.dll` | `fe2fb8f357a0e78a862499bdfbfed18a526b692084baa5e353489e2046cdd254` | `DtPipe.Coordinator.Tests` and `DtPipe.PipelineNode`, paired with the client above |
 
 Not carried: `TransportR.Auth.ClientCredentials.dll` and `TransportR.Serialization.Arrow.dll`,
 unreferenced by anything on this branch — the coordinator relays no application data and has no
