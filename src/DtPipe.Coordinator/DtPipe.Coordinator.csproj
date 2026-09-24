@@ -21,15 +21,8 @@
     <!-- TransportR.Hub.SignalR's own transitive dependencies; a private Reference does not pull
          them in the way a PackageReference would, so they are declared here at TransportR's own
          pinned version (see TransportR.Hub.SignalR.csproj). -->
-    <PackageReference Include="OpenTelemetry" Version="1.14.0" />
-    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.14.0" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- OpenTelemetry.Api 1.14.0, pinned to match TransportR.Hub.SignalR, carries a known,
-         unactioned advisory. Suppressed by id rather than by NoWarn NU1902, so a future,
-         different advisory on another package still stops the build. -->
-    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-g94r-2vxg-569j" />
+    <PackageReference Include="OpenTelemetry" Version="1.19.1" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.19.1" />
   </ItemGroup>
 
 </Project>
