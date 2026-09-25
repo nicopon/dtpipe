@@ -6,7 +6,7 @@ description: Run the dtpipe validators that CI never runs (database-backed valid
 # dtpipe pre-push
 
 CI skips every `tests/scripts/validate_*.sh` that sources `lib/test_connections.sh` (it needs a
-database), plus `validate_vitals` and `validate_xml`. Those are green on this machine or nowhere.
+database), plus `validate_vitals` and `validate_xml`. Nothing runs them unless you do.
 
 ## Run
 
