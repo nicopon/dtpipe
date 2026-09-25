@@ -43,7 +43,7 @@ pass "standalone Arrow libraries remain DtPipe-free"
 # the host's time zone into the data path and making the same input produce different output on
 # different machines. The rule lives in exactly one place; this check keeps it there.
 #
-# Scope, stated honestly: this catches the constructor, not every way a bare DateTime can reach
+# Scope: this catches the constructor, not every way a bare DateTime can reach
 # TimestampArray.Builder.Append — that hazard depends on the argument's static type and is not
 # expressible as a grep (Date32/Date64 builders take DateTime legitimately, and share a file with
 # the timestamp handler). tests/scripts/validate_temporal.sh is the net for that half: it runs the
@@ -71,8 +71,8 @@ pass "time-zone resolution confined to TemporalNormalization"
 # The allowlist is deliberately short and checked against every type DtPipe.Core declares, so a
 # type added to Models or Abstractions is covered without editing this script.
 #
-# Scope, stated honestly: this matches type names, so a Core type whose name is also an ordinary
-# word or an Apache.Arrow type name would false-positive. None of the 52 declared today collide;
+# Scope: this matches type names, so a Core type whose name is also an ordinary
+# word or an Apache.Arrow type name would false-positive. None collide today;
 # if one ever does, rename it or widen the allowlist deliberately rather than deleting the check.
 ARROW_DIR="$PROJECT_ROOT/src/DtPipe.Core/Infrastructure/Arrow"
 ALLOWED="PipeColumnInfo IRowToColumnarBridge IColumnarToRowBridge"

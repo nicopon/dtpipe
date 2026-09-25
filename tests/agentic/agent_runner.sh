@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Common agentic ReAct loop test runner for dtpipe MCP with Trajectory Tracing
 
-# One definition, called from both the completed and the abandoned path — the second is the
-# one that used to be missing.
+# One definition, called from both the completed and the abandoned path.
 record_benchmark_row() {
     local MODEL="$1" MISSION_NAME="$2" SUCCESS_FLAG="$3" ITER="$4" TOOLS="$5"
     local STATS_FILE="tests/agentic/artifacts/benchmark_results.jsonl"
@@ -34,14 +33,10 @@ run_mission() {
     # means something is wrong rather than slow.
     local OLLAMA_TIMEOUT="${OLLAMA_TIMEOUT:-300}"
 
-    # F3 states the determinism rule as "temperature 0 + seed", and this harness — the one that
-    # feeds the CI gate — was running at Ollama's default temperature with no seed. A gate that
-    # is fail-closed on a non-deterministic input produces random red rather than a signal: the
-    # same commit took 7 iterations on one run and hit the 25-iteration ceiling on the next.
-    # That is the argument the cycle plan already makes about running a 15% perf gate on a
-    # shared runner, applied to the input instead of the machine.
+    # F3's determinism rule is "temperature 0 + seed", and this harness feeds the CI gate: a
+    # fail-closed gate over a non-deterministic input produces random red rather than a signal.
     #
-    # Honest limit: this reduces variance, it does not abolish it. Batching and floating-point
+    # Limit: this reduces variance, it does not abolish it. Batching and floating-point
     # non-associativity on a GPU can still make two runs differ at temperature 0, and a model
     # is free to ignore the seed. A red run remains worth reading before it is believed.
     local OLLAMA_TEMPERATURE="${OLLAMA_TEMPERATURE:-0}"

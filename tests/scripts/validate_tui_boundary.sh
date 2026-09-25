@@ -6,20 +6,14 @@ set -e
 #
 # Two rendering stacks coexist on purpose and they are NOT interchangeable. Spectre.Console emits
 # text into a stream — that is what scrollback, pipes and CI assert against. Terminal.Gui owns the
-# screen, and a piped run has no screen to own. Letting the toolkit spread past the agent surface
-# is how the piped path — the project's non-regression proof — would quietly stop being reachable.
+# screen, and a piped run has no screen to own. If the toolkit spreads past the agent surface, the
+# piped path — the project's non-regression proof — stops being reachable.
 #
-# Check 4 belongs to the same family — not which toolkit, but which surface is allowed to judge a
-# turn. The verdict sequence (summary, then one of the question / failure / plan-next-steps renders)
-# is owned by AgentTui.ReportTurn alone. When the scrollback path and the full-screen session each
-# ordered those renders themselves, the copies drifted and one printed plan-next-steps on a stale
-# plan.
+# Check 4: AgentTui.ReportTurn alone owns the verdict sequence (summary, then one of the question /
+# failure / plan-next-steps renders). A second ordering of those renders drifts from the first.
 #
-# Check 5 is the same shape once more — which code decides what a key means. TuiKeymap.Classify
-# names every shortcut the full-screen surface acts on; no panel and no screen reads a raw KeyCode.
-# When TuiScreen decided Tab / Enter / e / b / arrows from raw KeyCode while TuiKeymap claimed to be
-# the keymap, the contract lived in two places and drifted — the keymap grew values nothing
-# consumed and the screen consumed keys nothing named.
+# Check 5: TuiKeymap.Classify names every shortcut the full-screen surface acts on; no panel and no
+# screen reads a raw KeyCode. A second place deciding what a key means drifts from the keymap.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
