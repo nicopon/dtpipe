@@ -27,6 +27,10 @@ public static class CoordinatorServiceCollectionExtensions
         services.AddSingleton<IHubProgressMonitor, LoggingHubProgressMonitor>();
         services.AddSignalR(options => options.AddFilter<PeerToPeerHubFilter>());
 
+        services.AddSingleton<INodeRegistry, NodeRegistry>();
+        services.AddSingleton<AdmissionGate>();
+        services.AddSingleton<IRunOrchestrator, RunOrchestrator>();
+
         return services.AddDataHub().UseHub<CoordinatorHub>();
     }
 }

@@ -10,16 +10,23 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DtPipe.PipelineNode\DtPipe.PipelineNode.csproj" />
+    <ProjectReference Include="..\..\src\DtPipe.Coordinator\DtPipe.Coordinator.csproj" />
+    <!-- CoordinatorTestHost: the same in-process Kestrel-hosted coordinator DtPipe.Coordinator.Tests
+         uses, reused here rather than duplicated. -->
+    <ProjectReference Include="..\DtPipe.Coordinator.Tests\DtPipe.Coordinator.Tests.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- This project hosts the hub itself (no coordinator project reference to carry these
-         transitively), so every TransportR DLL it touches is declared here directly. -->
+    <!-- A plain file Reference does not flow transitively through a ProjectReference, so every
+         TransportR DLL this project or DtPipe.Coordinator touches is declared here directly. -->
     <Reference Include="TransportR">
       <HintPath>..\..\lib\TransportR\TransportR.dll</HintPath>
     </Reference>
     <Reference Include="TransportR.Hub.SignalR">
       <HintPath>..\..\lib\TransportR\TransportR.Hub.SignalR.dll</HintPath>
+    </Reference>
+    <Reference Include="TransportR.FlowControl">
+      <HintPath>..\..\lib\TransportR\TransportR.FlowControl.dll</HintPath>
     </Reference>
     <Reference Include="TransportR.Client.SignalR">
       <HintPath>..\..\lib\TransportR\TransportR.Client.SignalR.dll</HintPath>

@@ -21,7 +21,19 @@ Arrow IPC bytes of each edge between the child's stdin/stdout and TransportR.
   the node on Windows]`
 - Keep `MaxInFlightBatches` non-null: a null bound lets a sender race ahead of a slow receiver.
   `[local: MemoryCeilingTests, macOS only]`
+- **A relay task tags its own fault with a `FaultOrigin`**: `Local` when its own child process failed
+  (an exit code check or a plain I/O exception), `Remote` when the transfer itself failed
+  (`TransferFailedException`, or an `OperationCanceledException` - never this code's own doing, since
+  no token reaches `SendAsync`/`ReceiveAsync`). The coordinator's outcome rule tells a run's cause
+  from its consequences by this, not by which fragment reports first. `[local: PipelineNode.Tests,
+  DtPipe.Coordinator.Tests.RunOrchestratorTests]`
+- `ConnectAsync` connects and declares the fragment (`Register`) without launching the child; a
+  `Launch` push from the coordinator triggers `LaunchAsync`, a `Wire` push triggers `WireAsync`. Once
+  every declared edge is wired the node runs itself to completion and reports `Exited` on its own -
+  see `Completion`. `StartAsync` still launches immediately, for the hand-wired path with no
+  coordinator.
 
 `tests/DtPipe.PipelineNode.Tests` spawns the real `dist/release/dtpipe` against an in-process
-TransportR hub (`NodeTestHost`); build the binary first. The project is outside `DtPipe.sln`, so CI
-never runs it.
+TransportR hub (`NodeTestHost`) or a real `DtPipe.Coordinator` hub (`CoordinatorTestHost`, from
+`DtPipe.Coordinator.Tests` - referenced as a project, not duplicated); build the binary first. Both
+projects are outside `DtPipe.sln`, so CI never runs their tests.

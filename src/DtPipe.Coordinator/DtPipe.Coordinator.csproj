@@ -6,6 +6,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="DtPipe.Coordinator.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Reference Include="TransportR">
       <HintPath>..\..\lib\TransportR\TransportR.dll</HintPath>
     </Reference>

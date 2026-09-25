@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using TransportR.Abstractions;
@@ -8,6 +9,15 @@ using TransportR.Client.SignalR.Services;
 using TransportR.Serialization.MessagePack;
 
 namespace DtPipe.PipelineNode;
+
+/// <summary>
+/// Where a fragment's fault came from: its own child process (<see cref="Local"/>), or a transfer a
+/// peer tore down (<see cref="Remote"/>, always a <c>TransferFailedException</c> or an equivalent
+/// cancellation). The coordinator's outcome rule uses this, not arrival order, to tell a run's cause
+/// from its consequences: a peer that aborts its own transfer can fail a healthy fragment in
+/// milliseconds, before the fragment that actually died has finished reporting.
+/// </summary>
+public enum FaultOrigin { Local, Remote }
 
 public sealed class PipelineNodeOptions
 {
@@ -48,7 +58,7 @@ public sealed class PipelineNode : IAsyncDisposable
     private readonly PipelineNodeOptions _options;
     private readonly ILogger _logger;
     private readonly SignalRDataClient<byte[]> _client;
-    private readonly Process _child;
+    private Process _child = null!;
 
     private readonly ConcurrentDictionary<string, TaskCompletionSource<object>> _handles = new();
 
@@ -57,40 +67,125 @@ public sealed class PipelineNode : IAsyncDisposable
     private readonly object _rowCountsLock = new();
     private int _faulted;
     private string? _firstFault;
+    private FaultOrigin? _faultOrigin;
+    private bool _coordinatorDriven;
+    private string? _runId;
+    private int _wiredCount;
+    private readonly TaskCompletionSource<int> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public Guid ClientId => _client.ClientId;
     public int ChildProcessId => _child.Id;
     public bool ChildHasExited => _child.HasExited;
     public IReadOnlyDictionary<string, long> RowCounts { get { lock (_rowCountsLock) return new Dictionary<string, long>(_rowCounts); } }
     public string? FirstFault => _firstFault;
+    public FaultOrigin? Origin => _faultOrigin;
 
-    private PipelineNode(PipelineNodeOptions options, ILogger logger, SignalRDataClient<byte[]> client, Process child)
+    /// <summary>
+    /// Resolves with this fragment's exit code once every edge a coordinator wired has finished
+    /// relaying - the self-driving path started by <see cref="ConnectAsync"/>. Never resolves for a
+    /// node started with <see cref="StartAsync"/>, which has no coordinator to drive it.
+    /// </summary>
+    public Task<int> Completion => _completion.Task;
+
+    /// <summary>True once <see cref="LaunchAsync"/> has spawned the child - before that, <see cref="ChildProcessId"/> throws.</summary>
+    public bool IsLaunched => _child is not null;
+
+    private PipelineNode(PipelineNodeOptions options, ILogger logger, SignalRDataClient<byte[]> client)
     {
         _options = options;
         _logger = logger;
         _client = client;
-        _child = child;
     }
 
-    public static async Task<PipelineNode> StartAsync(
-        PipelineNodeOptions options, ILoggerFactory? loggerFactory = null, CancellationToken ct = default)
+    private static void ValidateEdges(PipelineNodeOptions options)
     {
         if (options.Edges.Count(e => e.Direction == EdgeDirection.Inbound) > 1
             || options.Edges.Count(e => e.Direction == EdgeDirection.Outbound) > 1)
             throw new NotSupportedException(
                 "A node relays each direction through the child's single stdin/stdout; a fragment " +
                 "with more than one inbound or more than one outbound edge is not supported yet.");
+    }
+
+    public static async Task<PipelineNode> StartAsync(
+        PipelineNodeOptions options, ILoggerFactory? loggerFactory = null, CancellationToken ct = default)
+    {
+        ValidateEdges(options);
 
         loggerFactory ??= NullLoggerFactory.Instance;
         var logger = loggerFactory.CreateLogger<PipelineNode>();
 
-        var child = LaunchChild(options, logger);
+        var client = BuildClient(options, loggerFactory, controlConnectionSetup: null);
+        var node = new PipelineNode(options, logger, client);
 
+        client.OnSendRequested += node.HandleSendRequested;
+        client.OnTransferStarted += node.HandleTransferStarted;
+
+        await client.ConnectAsync(cancellationToken: ct);
+        node._child = LaunchChild(options, logger);
+
+        return node;
+    }
+
+    /// <summary>
+    /// Connects to the coordinator and declares this fragment (<c>Register</c>), but does not
+    /// launch the child yet: the coordinator's admission barrier decides when, by pushing
+    /// <c>Launch</c> - handled here by <see cref="LaunchAsync"/> - once every fragment a run needs
+    /// has registered. <c>Wire</c> pushes are handled the same way, through <see cref="WireAsync"/>;
+    /// once every declared edge is wired, the node runs itself to completion and reports
+    /// <c>Exited</c> without further prompting - see <see cref="Completion"/>.
+    /// </summary>
+    public static async Task<PipelineNode> ConnectAsync(
+        PipelineNodeOptions options, string fragmentName, ILoggerFactory? loggerFactory = null, CancellationToken ct = default)
+    {
+        ValidateEdges(options);
+
+        loggerFactory ??= NullLoggerFactory.Instance;
+        var logger = loggerFactory.CreateLogger<PipelineNode>();
+
+        PipelineNode? node = null;
+        var client = BuildClient(options, loggerFactory, controlConnectionSetup: conn =>
+        {
+            conn.On<string>("Launch", async runId =>
+            {
+                try { await node!.LaunchAsync(runId); }
+                catch (Exception ex) { logger.LogError(ex, "Launch handler failed for run {RunId}", runId); }
+            });
+            conn.On<string, string, string>("Wire", async (runId, alias, transferId) =>
+            {
+                try { await node!.WireAsync(alias, transferId); }
+                catch (Exception ex) { logger.LogError(ex, "Wire handler failed for run {RunId}, alias {Alias}", runId, alias); }
+            });
+        });
+
+        node = new PipelineNode(options, logger, client) { _coordinatorDriven = true };
+        client.OnSendRequested += node.HandleSendRequested;
+        client.OnTransferStarted += node.HandleTransferStarted;
+
+        await client.ConnectAsync(cancellationToken: ct);
+        await client.ControlConnection.InvokeAsync("Register", fragmentName, ct);
+
+        return node;
+    }
+
+    /// <summary>Spawns the child and reports this fragment ready for every declared edge to be wired.</summary>
+    public async Task LaunchAsync(string runId, CancellationToken ct = default)
+    {
+        _runId = runId;
+        _child = LaunchChild(_options, _logger);
+        await _client.ControlConnection.InvokeAsync("Ready", runId, ct);
+    }
+
+    private static SignalRDataClient<byte[]> BuildClient(
+        PipelineNodeOptions options, ILoggerFactory loggerFactory, Action<HubConnection>? controlConnectionSetup)
+    {
         var builder = new TransportRClientBuilder<byte[]>()
             .WithUrl(options.HubUrl)
             .WithMessagePackSerialization()
             .WithBatchSize(options.BatchSize)
             .WithLoggerFactory(loggerFactory);
+
+        if (controlConnectionSetup is not null)
+            builder.WithControlConnection(controlConnectionSetup);
 
         if (options.MaxInFlightBatches is { } maxInFlight)
             builder.WithMaxInFlightBatches(maxInFlight);
@@ -102,15 +197,7 @@ public sealed class PipelineNode : IAsyncDisposable
             ?? (long)options.ReadChunkBytes * options.BatchSize * (options.MaxInFlightBatches ?? 8);
         builder.WithReceiveCapacity(options.ReceiveMaxItems, receiveMaxBytes);
 
-        var client = builder.Build();
-        var node = new PipelineNode(options, logger, client, child);
-
-        client.OnSendRequested += node.HandleSendRequested;
-        client.OnTransferStarted += node.HandleTransferStarted;
-
-        await client.ConnectAsync(cancellationToken: ct);
-
-        return node;
+        return builder.Build();
     }
 
     private static Process LaunchChild(PipelineNodeOptions options, ILogger logger)
@@ -208,7 +295,27 @@ public sealed class PipelineNode : IAsyncDisposable
             lock (_relayTasks) _relayTasks.Add(Task.Run(() => RelayOutboundAsync(alias, (Send<byte[]>)handle)));
         else
             lock (_relayTasks) _relayTasks.Add(Task.Run(() => RelayInboundAsync(alias, (Receive<byte[]>)handle)));
+
+        // Self-driving path only (ConnectAsync): once every declared edge has started relaying, run
+        // this fragment to completion and report Exited without further prompting from the
+        // coordinator - StartAsync's hand-wired callers drive RunToCompletionAsync themselves and
+        // never touch _coordinatorDriven.
+        if (_coordinatorDriven && Interlocked.Increment(ref _wiredCount) == _options.Edges.Count)
+            _ = Task.Run(() => CompleteAndReportAsync(_runId!));
     }
+
+    private async Task CompleteAndReportAsync(string runId)
+    {
+        var exitCode = await RunToCompletionAsync();
+        _completion.TrySetResult(exitCode);
+        try { await ReportExitedAsync(runId, exitCode); }
+        catch (Exception ex) { _logger.LogError(ex, "Failed to report Exited for run {RunId}", runId); }
+    }
+
+    /// <summary>Reports this fragment's own outcome to the coordinator: exit code, fault origin, row counts.</summary>
+    public Task ReportExitedAsync(string runId, int exitCode, CancellationToken ct = default) =>
+        _client.ControlConnection.InvokeAsync(
+            "Exited", runId, exitCode, (_faultOrigin ?? FaultOrigin.Local).ToString(), _firstFault, _rowCounts, ct);
 
     private async Task RelayOutboundAsync(string alias, Send<byte[]> send)
     {
@@ -230,11 +337,20 @@ public sealed class PipelineNode : IAsyncDisposable
             if (_child.ExitCode == 0)
                 await send.CompleteAsync();
             else
-                Fault($"outbound edge '{alias}': child dtpipe exited {_child.ExitCode}");
+                Fault(FaultOrigin.Local, $"outbound edge '{alias}': child dtpipe exited {_child.ExitCode}");
+        }
+        catch (Exception ex) when (ex is TransferFailedException or OperationCanceledException)
+        {
+            // TransferFailedException is the documented contract for SendAsync/CompleteAsync. An
+            // OperationCanceledException here is never this code's own doing - no cancellation
+            // token reaches SendAsync - so it can only be the transfer failing underneath it, the
+            // same as TransferFailedException.
+            Fault(FaultOrigin.Remote, $"outbound edge '{alias}': {ex.Message}");
         }
         catch (Exception ex)
         {
-            Fault($"outbound edge '{alias}': {ex.Message}");
+            // Anything else - reading the child's own stdout failed locally.
+            Fault(FaultOrigin.Local, $"outbound edge '{alias}': {ex.Message}");
         }
         finally
         {
@@ -257,9 +373,18 @@ public sealed class PipelineNode : IAsyncDisposable
             await stream.FlushAsync();
             await receive.WaitForCompletionAsync();
         }
+        catch (Exception ex) when (ex is TransferFailedException or OperationCanceledException)
+        {
+            // Thrown by ReceiveAsync's own enumeration or WaitForCompletionAsync: the child was
+            // still fine, the transfer itself failed. OperationCanceledException here is never this
+            // code's own doing either, for the same reason as the outbound side.
+            Fault(FaultOrigin.Remote, $"inbound edge '{alias}': {ex.Message}");
+        }
         catch (Exception ex)
         {
-            Fault($"inbound edge '{alias}': {ex.Message}");
+            // Anything else - writing to the child's own stdin failed locally (a dead child closes
+            // its end of the pipe first).
+            Fault(FaultOrigin.Local, $"inbound edge '{alias}': {ex.Message}");
         }
         finally
         {
@@ -272,10 +397,18 @@ public sealed class PipelineNode : IAsyncDisposable
         }
     }
 
-    private void Fault(string reason)
+    /// <summary>
+    /// Records only the first fault: both origin and message come from that single winning call, so
+    /// a second relay task's own fault (this fragment can have one inbound and one outbound edge)
+    /// never mixes its origin with the first one's message.
+    /// </summary>
+    private void Fault(FaultOrigin origin, string reason)
     {
         if (Interlocked.CompareExchange(ref _firstFault, reason, null) is null)
-            _logger.LogError("Node faulted: {Reason}", reason);
+        {
+            _faultOrigin = origin;
+            _logger.LogError("Node faulted ({Origin}): {Reason}", origin, reason);
+        }
         Interlocked.Exchange(ref _faulted, 1);
     }
 
@@ -311,6 +444,10 @@ public sealed class PipelineNode : IAsyncDisposable
     {
         try { await _client.DisconnectAsync(); } catch { }
         await _client.DisposeAsync();
+
+        // Null for a ConnectAsync node never reached by a Launch push (e.g. disposed while still
+        // waiting on admission): there is no child to tear down.
+        if (_child is null) return;
 
         if (!_child.HasExited)
         {

@@ -22,9 +22,10 @@ between nodes.
 
 ## Hosting
 
-`AddCoordinatorHub` registers the flow-control matrix, `IPlanRegistry`, `LoggingHubProgressMonitor`
-and the peer-to-peer filter. It returns TransportR's `DataHubBuilder` already pointed at
-`CoordinatorHub`, and the caller finishes it (identity provider, then `Build()`).
+`AddCoordinatorHub` registers the flow-control matrix, `IPlanRegistry`, `LoggingHubProgressMonitor`,
+the peer-to-peer filter, `INodeRegistry` and `IRunOrchestrator`. It returns TransportR's
+`DataHubBuilder` already pointed at `CoordinatorHub`, and the caller finishes it (identity provider,
+then `Build()`).
 
 - Register the progress monitor **before** `AddDataHub()`: TransportR adds a no-op default only when
   none is registered.
@@ -37,5 +38,30 @@ and the peer-to-peer filter. It returns TransportR's `DataHubBuilder` already po
 - **Check a plan before anything opens.** `PlanRegistry.Register` refuses a plan with any edge the
   flow-control matrix forbids, and names every forbidden edge. The same matrix governs runtime
   transfers. `[local: PlanRegistryTests]`
+
+## The barrier
+
+`RunOrchestrator.RunAsync` is the barrier: it admits a run only once `AdmissionGate` sees every
+fragment `RunSpec.Fragments` names registered in `INodeRegistry`, pushes `Launch` to each, waits for
+every `Ready`, opens each `RunSpec.Edges` entry through `ITransferInitiator` and pushes `Wire`, then
+waits for every `Exited` and applies `DetermineOutcome`. `RunAsync` is an in-process API - no
+`RegisterPlan`/`Run`/`Status` network surface yet - and one run at a time; a second call while one is
+in flight throws instead of queuing.
+
+- **A fragment's identity comes from its connection, never from a method argument.** `Register`,
+  `Ready` and `Exited` all resolve the caller through `INodeRegistry.TryGetByConnection(Context.ConnectionId)`
+  (itself seeded from `IStateStore` at `Register` time) - the same rule `ComponentSelector` and
+  TransportR's own `Connect` follow, so a fragment can never claim another's report. `[local:
+  AdmissionGateTests, RunOrchestratorTests, CoordinatorDrivenTests in DtPipe.PipelineNode.Tests]`
+- **A 0 exit code is not proof of delivery.** `DetermineOutcome` also compares each edge's two row
+  counts and fails the run, naming the edge, on a mismatch even when every fragment reported 0. A
+  fragment attests its own process, not what its peer received. `[local: RunOrchestratorTests]`
+- **The cause is the first *locally* faulted fragment, never arrival order.** A peer aborting its own
+  transfer can fail a healthy fragment before the fragment that actually died reports `Exited`, so
+  `DetermineOutcome` picks the cause by `FaultOrigin.Local`, falling back to first-reported only when
+  no report carries it. `[local: RunOrchestratorTests, CoordinatorDrivenTests]`
+- **A dropped connection is not yet a lost node.** `CoordinatorHub.OnDisconnectedAsync` only drops the
+  `INodeRegistry` entry; a run still waiting on that fragment is not failed, and a reconnect is not
+  re-routed to the new connection id yet. `[unchecked]`
 
 `tests/DtPipe.Coordinator.Tests` is outside `DtPipe.sln`, so CI never runs it.
