@@ -35,8 +35,9 @@ public class RunOrchestratorTests
 
     /// <summary>
     /// A fragment reporting 0 attests its own process, not that its peer received what it sent: a
-    /// producer can exit 0 having sent every row while its consumer, killed mid-flow, received only
-    /// part of them.
+    /// transfer can be acknowledged into a receive buffer before the receiving fragment has actually
+    /// drained all of it, so a consumer can exit 0 having only forwarded part of what its producer
+    /// sent - no fault, no non-zero exit code, on either side.
     /// </summary>
     [Fact]
     public void EveryFragmentZero_MismatchedCounts_FailsNamingTheEdge()
@@ -92,5 +93,45 @@ public class RunOrchestratorTests
 
         Assert.Equal(RunOutcome.Failed, result.Outcome);
         Assert.Equal("A", result.Cause);
+    }
+
+    /// <summary>
+    /// A fragment that never reports a count for its side of an edge - it died before ever being
+    /// wired to it - must not read as an agreement. A chain of <c>&amp;&amp;</c> lookups that
+    /// short-circuits past the missing key would do exactly that.
+    /// </summary>
+    [Fact]
+    public void AnEdgeWithAMissingCount_FailsClosed()
+    {
+        var reports = new Dictionary<string, FragmentExitReport>
+        {
+            ["A"] = Ok("A", "out", 100),
+            ["B"] = new FragmentExitReport("B", 0, null, null, NoRows),
+        };
+        var edges = new[] { new RunEdge("A", "out", "B", "in") };
+
+        var result = RunOrchestrator.DetermineOutcome(reports, edges);
+
+        Assert.Equal(RunOutcome.Failed, result.Outcome);
+        Assert.Contains("A->B", result.Cause);
+    }
+
+    [Fact]
+    public void EdgeCounts_AreReported_EvenWhenTheCauseIsAFragmentFailure()
+    {
+        var reports = new Dictionary<string, FragmentExitReport>
+        {
+            ["A"] = Ok("A", "out", 500),
+            ["B"] = Failed("B", FaultOrigin.Local, "in"),
+        };
+        var edges = new[] { new RunEdge("A", "out", "B", "in") };
+
+        var result = RunOrchestrator.DetermineOutcome(reports, edges);
+
+        var edge = Assert.Single(result.EdgeCounts);
+        Assert.Equal(500, edge.Sent);
+        Assert.Equal(0, edge.Received);
+        Assert.False(edge.Agrees);
+        Assert.Contains("A.out -> B.in", result.Describe());
     }
 }

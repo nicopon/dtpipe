@@ -101,8 +101,11 @@ public class CoordinatorDrivenTests
     [Fact]
     public async Task MiddleFragmentDies_RunFailsWithItAsCause_OthersAsConsequences()
     {
-        // Throttled so the child cannot finish (and A with it) before the kill below lands: at
-        // 100,000 rows/s, 1M rows take 10s, wide margin against the 200ms delay before killing B.
+        // Throttled: A's own SendAsync/CompleteAsync can succeed for rows B's relay never actually
+        // reads (TransportR acknowledges into B's receive buffer, not on B's own consumption of it),
+        // so an unthrottled A can look done well before B - still alive, still relaying - has caught
+        // up to what it was sent. At 100,000 rows/s, 1M rows take 10s: a wide margin against the
+        // 200ms delay before killing B, so A is still mid-stream when the kill lands.
         using var fixture = ChainFixture.Create(rowCount: 1_000_000, "--throttle", "100000");
         await using var host = await CoordinatorTestHost.StartAsync(
             o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] });

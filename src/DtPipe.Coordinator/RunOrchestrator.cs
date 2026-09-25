@@ -19,10 +19,38 @@ public sealed record FragmentExitReport(
 
 public enum RunOutcome { Succeeded, Failed }
 
+/// <summary>
+/// One edge's two row counts, always both looked up - never defaulted to "agree" when a fragment
+/// never reported a count for its side, which a chain of <c>&amp;&amp;</c> lookups would do by
+/// short-circuiting past a missing key instead of flagging it.
+/// </summary>
+public sealed record EdgeCount(
+    string ProducerFragment, string ProducerAlias, string ConsumerFragment, string ConsumerAlias,
+    long? Sent, long? Received)
+{
+    public bool Agrees => Sent is not null && Received is not null && Sent == Received;
+}
+
 /// <summary><see cref="Cause"/> is null on <see cref="RunOutcome.Succeeded"/>.</summary>
 public sealed record RunResult(
     RunOutcome Outcome, string? Cause, IReadOnlyList<string> Consequences,
-    IReadOnlyDictionary<string, FragmentExitReport> Reports);
+    IReadOnlyDictionary<string, FragmentExitReport> Reports, IReadOnlyList<EdgeCount> EdgeCounts)
+{
+    /// <summary>The human-readable run report the exit criterion asks for: cause, consequences, counts per edge.</summary>
+    public string Describe()
+    {
+        var lines = new List<string> { $"Outcome: {Outcome}" };
+        if (Cause is not null) lines.Add($"Cause: {Cause}");
+        if (Consequences.Count > 0) lines.Add($"Consequences: {string.Join(", ", Consequences)}");
+        foreach (var e in EdgeCounts)
+        {
+            var mismatch = e.Agrees ? "" : " (mismatch)";
+            lines.Add($"  {e.ProducerFragment}.{e.ProducerAlias} -> {e.ConsumerFragment}.{e.ConsumerAlias}: " +
+                      $"sent={e.Sent?.ToString() ?? "?"} received={e.Received?.ToString() ?? "?"}{mismatch}");
+        }
+        return string.Join(Environment.NewLine, lines);
+    }
+}
 
 public sealed class RunOrchestratorOptions
 {
@@ -168,22 +196,27 @@ public sealed class RunOrchestrator : IRunOrchestrator
     internal static RunResult DetermineOutcome(
         IReadOnlyDictionary<string, FragmentExitReport> reports, IReadOnlyList<RunEdge> edges)
     {
-        var mismatchedEdges = edges
-            .Where(e =>
-                reports.TryGetValue(e.ProducerFragment, out var producer) &&
-                reports.TryGetValue(e.ConsumerFragment, out var consumer) &&
-                producer.RowCounts.TryGetValue(e.ProducerAlias, out var sent) &&
-                consumer.RowCounts.TryGetValue(e.ConsumerAlias, out var received) &&
-                sent != received)
-            .ToList();
+        var edgeCounts = edges.Select(e =>
+        {
+            long? sent = reports.TryGetValue(e.ProducerFragment, out var producer)
+                && producer.RowCounts.TryGetValue(e.ProducerAlias, out var s) ? s : null;
+            long? received = reports.TryGetValue(e.ConsumerFragment, out var consumer)
+                && consumer.RowCounts.TryGetValue(e.ConsumerAlias, out var r) ? r : null;
+            return new EdgeCount(e.ProducerFragment, e.ProducerAlias, e.ConsumerFragment, e.ConsumerAlias, sent, received);
+        }).ToList();
+
+        // A missing count on either side is not an agreement: it means a fragment never reported
+        // one for that alias at all (it died before ever being wired to it), which is exactly the
+        // case a chain of `&&` lookups would silently treat as a match by short-circuiting past it.
+        var mismatchedEdges = edgeCounts.Where(e => !e.Agrees).ToList();
 
         if (reports.Values.All(r => r.ExitCode == 0))
         {
             if (mismatchedEdges.Count == 0)
-                return new RunResult(RunOutcome.Succeeded, null, [], reports);
+                return new RunResult(RunOutcome.Succeeded, null, [], reports, edgeCounts);
 
             var edgeNames = mismatchedEdges.Select(e => $"{e.ProducerFragment}->{e.ConsumerFragment}");
-            return new RunResult(RunOutcome.Failed, $"row count mismatch on edge(s): {string.Join(", ", edgeNames)}", [], reports);
+            return new RunResult(RunOutcome.Failed, $"row count mismatch on edge(s): {string.Join(", ", edgeNames)}", [], reports, edgeCounts);
         }
 
         var cause = reports.Values.FirstOrDefault(r => r.ExitCode != 0 && r.Origin == FaultOrigin.Local)
@@ -192,6 +225,6 @@ public sealed class RunOrchestrator : IRunOrchestrator
             .Where(r => r.Fragment != cause.Fragment && r.ExitCode != 0)
             .Select(r => r.Fragment)
             .ToList();
-        return new RunResult(RunOutcome.Failed, cause.Fragment, consequences, reports);
+        return new RunResult(RunOutcome.Failed, cause.Fragment, consequences, reports, edgeCounts);
     }
 }

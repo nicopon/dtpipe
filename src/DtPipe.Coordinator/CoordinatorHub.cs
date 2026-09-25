@@ -56,7 +56,14 @@ public class CoordinatorHub : CommandHub
     {
         var client = await _stateStore.GetClientByConnectionIdAsync(Context.ConnectionId)
             ?? throw new HubException("Register: call Connect first.");
-        _nodeRegistry.Register(client.ClientId, Context.ConnectionId, fragmentName);
+        try
+        {
+            _nodeRegistry.Register(client.ClientId, Context.ConnectionId, fragmentName);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new HubException(ex.Message);
+        }
     }
 
     /// <summary>The fragment's child process is spawned and its declared edges can be wired.</summary>

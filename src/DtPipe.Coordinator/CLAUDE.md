@@ -48,18 +48,26 @@ waits for every `Exited` and applies `DetermineOutcome`. `RunAsync` is an in-pro
 `RegisterPlan`/`Run`/`Status` network surface yet - and one run at a time; a second call while one is
 in flight throws instead of queuing.
 
-- **A fragment's identity comes from its connection, never from a method argument.** `Register`,
-  `Ready` and `Exited` all resolve the caller through `INodeRegistry.TryGetByConnection(Context.ConnectionId)`
-  (itself seeded from `IStateStore` at `Register` time) - the same rule `ComponentSelector` and
-  TransportR's own `Connect` follow, so a fragment can never claim another's report. `[local:
-  AdmissionGateTests, RunOrchestratorTests, CoordinatorDrivenTests in DtPipe.PipelineNode.Tests]`
+- **A fragment's identity is never a method argument.** `Register` resolves the caller's `ClientId`
+  through `IStateStore.GetClientByConnectionIdAsync(Context.ConnectionId)` - TransportR's own
+  `Connect` always precedes it on the one connection a node holds. `Ready` and `Exited` then resolve
+  the caller's fragment through `INodeRegistry.TryGetByConnection(Context.ConnectionId)`, seeded by
+  that `Register` call, never trusting a fragment name passed as an argument at that point.
+  `[local: NodeRegistryTests]`
+- **`NodeRegistry` refuses a fragment name already held by another live connection**, naming it, and
+  an `Unregister` only ever drops the entry it still owns - a disconnect and the re-registration that
+  replaces it race by nature, and a stale `Unregister` that removed by name alone would orphan the
+  connection that had already reclaimed it. `[local: NodeRegistryTests]`
 - **A 0 exit code is not proof of delivery.** `DetermineOutcome` also compares each edge's two row
-  counts and fails the run, naming the edge, on a mismatch even when every fragment reported 0. A
-  fragment attests its own process, not what its peer received. `[local: RunOrchestratorTests]`
+  counts (`RunResult.EdgeCounts`) and fails the run, naming the edge, on a mismatch even when every
+  fragment reported 0 - a fragment attests its own process, not what its peer received. A count
+  missing on either side fails closed (never reads as agreement); `RunResult.Describe()` renders
+  every edge's two counts regardless of which branch produced the outcome. `[local: RunOrchestratorTests]`
 - **The cause is the first *locally* faulted fragment, never arrival order.** A peer aborting its own
   transfer can fail a healthy fragment before the fragment that actually died reports `Exited`, so
-  `DetermineOutcome` picks the cause by `FaultOrigin.Local`, falling back to first-reported only when
-  no report carries it. `[local: RunOrchestratorTests, CoordinatorDrivenTests]`
+  `DetermineOutcome` picks the cause by `FaultOrigin.Local`, falling back to `RunSpec.Fragments`'
+  own order - never arrival order - only when no report carries that origin.
+  `[local: RunOrchestratorTests, CoordinatorDrivenTests]`
 - **A dropped connection is not yet a lost node.** `CoordinatorHub.OnDisconnectedAsync` only drops the
   `INodeRegistry` entry; a run still waiting on that fragment is not failed, and a reconnect is not
   re-routed to the new connection id yet. `[unchecked]`

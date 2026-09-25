@@ -11,9 +11,14 @@ public sealed record RegisteredNode(Guid ClientId, string ConnectionId, string F
 /// </summary>
 public interface INodeRegistry
 {
+    /// <exception cref="InvalidOperationException"><paramref name="fragmentName"/> is already held by another live connection.</exception>
     void Register(Guid clientId, string connectionId, string fragmentName);
 
-    /// <summary>Called from <c>OnDisconnectedAsync</c>; a no-op if the connection was never registered.</summary>
+    /// <summary>
+    /// Called from <c>OnDisconnectedAsync</c>. Only removes the fragment entry if it still points to
+    /// this connection: a disconnect and the re-registration that replaces it race by nature, and a
+    /// disconnect that loses that race must not drop the live entry it no longer owns.
+    /// </summary>
     void Unregister(string connectionId);
 
     RegisteredNode? TryGetByFragment(string fragmentName);
@@ -31,6 +36,10 @@ public sealed class NodeRegistry : INodeRegistry
     {
         lock (_lock)
         {
+            if (_byFragment.TryGetValue(fragmentName, out var existing) && existing.ConnectionId != connectionId)
+                throw new InvalidOperationException(
+                    $"Fragment '{fragmentName}' is already registered by another live connection.");
+
             _byFragment[fragmentName] = new RegisteredNode(clientId, connectionId, fragmentName);
             _fragmentByConnection[connectionId] = fragmentName;
         }
@@ -40,7 +49,12 @@ public sealed class NodeRegistry : INodeRegistry
     {
         lock (_lock)
         {
-            if (_fragmentByConnection.Remove(connectionId, out var fragmentName))
+            if (!_fragmentByConnection.Remove(connectionId, out var fragmentName))
+                return;
+
+            // The entry may already belong to a different connection that re-registered this same
+            // fragment name after this one dropped but before this Unregister ran - do not remove it.
+            if (_byFragment.TryGetValue(fragmentName, out var node) && node.ConnectionId == connectionId)
                 _byFragment.Remove(fragmentName);
         }
     }
@@ -54,8 +68,10 @@ public sealed class NodeRegistry : INodeRegistry
     public RegisteredNode? TryGetByConnection(string connectionId)
     {
         lock (_lock)
-            return _fragmentByConnection.TryGetValue(connectionId, out var fragmentName)
-                ? _byFragment[fragmentName]
-                : null;
+        {
+            if (!_fragmentByConnection.TryGetValue(connectionId, out var fragmentName))
+                return null;
+            return _byFragment.TryGetValue(fragmentName, out var node) ? node : null;
+        }
     }
 }
