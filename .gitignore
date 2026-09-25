@@ -71,7 +71,8 @@ dist/release/.env
 
 # Experiments
 experiments/*
-.claude/
+.claude/*
+!.claude/skills/
 tests/DtPipe.Tests/TestResults/*
 nuget-packages/*
 
