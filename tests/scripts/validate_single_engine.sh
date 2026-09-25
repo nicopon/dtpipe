@@ -4,26 +4,23 @@ set -e
 # validate_single_engine.sh
 # One engine, not two.
 #
-# A dry-run is the real execution on a sample with the writer neutralised. It used to be a
-# second engine: DryRunAnalyzer walked rows through IDataTransformer.Transform while
-# PipelineExecutor used TransformMany and Flush, and the two disagreed — a --window pipeline
-# reported every row as dropped while the run wrote aggregates. That engine is deleted; this
-# guard is about it not growing back.
+# A dry-run is the real execution on a sample with the writer neutralised. A second engine
+# that walks rows through IDataTransformer.Transform disagrees with PipelineExecutor, which
+# uses TransformMany and Flush; this guard keeps one from being written.
 #
 # --------------------------------------------------------------------------
-# Scope, stated honestly — this is a grep
+# Scope — this is a grep
 # --------------------------------------------------------------------------
-# It catches the plausible regression: a second execution loop written in plain sight, or the
-# rendering side reaching back to the source to fetch its own rows. It does NOT catch a call
-# made by reflection, one routed through a helper, or an interface renamed around it.
+# It catches a second execution loop written in plain sight, or the rendering side reaching
+# back to the source to fetch its own rows. It does NOT catch a call made by reflection, one
+# routed through a helper, or an interface renamed around it.
 #
 # The behavioural guard is SampleModeEquivalenceTests (CI), which asserts that what a sample
-# run reports is what a real run writes. That is the test that would fail if the two paths
-# diverged again. This script only makes the cheap regression cheap to detect.
+# run reports is what a real run writes.
 #
-# Deliberately NOT checked: IDataTransformer.Flush(). A grep cannot tell it from Stream.Flush()
-# or TextWriter.Flush(), of which the adapters have several legitimate calls. A check with
-# known false positives trains people to ignore the script, which is worse than no check.
+# Not checked: IDataTransformer.Flush(). A grep cannot tell it from Stream.Flush() or
+# TextWriter.Flush(), which the adapters call legitimately; a check with known false
+# positives gets ignored.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"

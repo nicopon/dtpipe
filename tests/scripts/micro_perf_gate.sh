@@ -3,38 +3,24 @@
 # micro_perf_gate.sh
 # The micro stage of the three-tier performance gate: BenchmarkDotNet in-process
 # on the hot conversion paths, no infrastructure. Local only, on the reference
-# machine, run deliberately before an engine change — not wired into any CI job.
+# machine, run deliberately before an engine change. Not wired into CI: shared
+# runners give no stable measure, so no fixed threshold separates their noise
+# from a real regression.
 #
-# It was, once: run in build.yml against the reference-machine baseline via
-# --allow-foreign-host on a GitHub-hosted runner (2026-09-05), 30 of 31 committed
-# benchmarks came back flagged as regressions, +111 % to +201 %, from machine
-# identity alone, on the very first push that exercised the job. GitHub gives no
-# stability guarantee on shared-runner performance, so no fixed threshold survives
-# that gap without also surviving a real regression unnoticed. Removed the same day.
-#
-# The two other stages live elsewhere for the same reason:
-#   - macro complete (15 scenarios, Oracle + SQL Server): local only, in the
-#     dtpipe-sandbox repo. Free CI runners cannot host those containers, and a
-#     shared runner's 20-50 % duration variance would turn a 15 % gate into
-#     random red.
-#   - macro light (file<->file + PostgreSQL): optional, nightly, only if this
-#     stage ever proves insufficient.
+# The two macro stages (complete: Oracle + SQL Server; light: file<->file +
+# PostgreSQL) live in the dtpipe-sandbox repository, local only.
 #
 # --------------------------------------------------------------------------
 # The machine-fingerprint rule
 # --------------------------------------------------------------------------
-# A baseline records the machine it was measured on. Comparing a run against a
-# baseline taken on different hardware does not produce a weaker verdict — it
-# produces a misleading one, because the difference between the two numbers is
-# then mostly hardware. So:
+# A baseline records the machine it was measured on. Against a baseline from
+# other hardware the difference is mostly hardware, so a verdict would mislead:
 #
 #   - Same fingerprint  -> a verdict is rendered at whatever threshold is asked.
 #   - Different one     -> the gate REFUSES (exit 2) and renders no verdict,
 #                          unless --allow-foreign-host is passed explicitly.
 #   - --allow-foreign-host clamps the threshold to no tighter than
-#     $FOREIGN_HOST_MIN_THRESHOLD %, because a tight verdict on foreign
-#     hardware is exactly the misleading verdict this rule exists to prevent.
-#     That mode detects a x2; it does not detect a +15 %.
+#     $FOREIGN_HOST_MIN_THRESHOLD %. That mode detects a x2, not a +15 %.
 #
 # --------------------------------------------------------------------------
 # Usage
@@ -46,8 +32,7 @@
 #       Run and compare against that baseline. Strict: refuses a foreign host.
 #
 #   ./tests/scripts/micro_perf_gate.sh --allow-foreign-host --threshold 100
-#       A deliberate cross-machine check, wide threshold, run by hand. Not run
-#       anywhere automatically — see the note above on why.
+#       A deliberate cross-machine check, wide threshold, run by hand.
 #
 #   ./tests/scripts/micro_perf_gate.sh --report-only
 #       Run and print the numbers, compare nothing, never fail.
@@ -103,7 +88,7 @@ while [ $# -gt 0 ]; do
         --allow-foreign-host) ALLOW_FOREIGN_HOST=true; shift ;;
         --update)             UPDATE=true; shift ;;
         --report-only)        REPORT_ONLY=true; shift ;;
-        -h|--help)            sed -n '2,56p' "$0"; exit 0 ;;
+        -h|--help)            awk 'NR > 1 && !/^#/ { exit } NR > 1' "$0"; exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit $EXIT_ERROR ;;
     esac
 done

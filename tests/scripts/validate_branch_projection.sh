@@ -4,18 +4,13 @@ set -e
 # validate_branch_projection.sh
 # One door from a job to a branch.
 #
-# Building a BranchDefinition out of a JobDefinition was written by hand at four sites — the CLI
-# argument path, the CLI --job path, the YAML path behind MCP, and the linear path's synthetic
-# branch. The copies drifted, and the drift was not theoretical: two of them left PreParsedJob
-# unset, so get-dag-topology promised a branch's transformers in its own description and emitted
-# none, while the CLI panel listed branches with no stages above a results table showing those
-# same stages running. Both were fixed as instances. This guard is about the fifth copy.
+# A BranchDefinition is built out of a JobDefinition in one place. Hand-written copies at each
+# call site drift — a copy that leaves PreParsedJob unset shows a branch with no stages.
 #
 # --------------------------------------------------------------------------
-# Scope, stated honestly — this is a grep
+# Scope — this is a grep
 # --------------------------------------------------------------------------
-# It catches the plausible regression: a hand-written object initializer added next to the ones
-# that were removed. It does NOT catch a projection assembled through a local helper, a `with`
+# It catches a hand-written BranchDefinition initializer at a call site. It does NOT catch a projection assembled through a local helper, a `with`
 # expression applied to a branch obtained elsewhere, or reflection.
 #
 # Tests are deliberately out of scope: GoldenDagDefinitions and the engine suites hand-build

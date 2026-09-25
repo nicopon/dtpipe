@@ -2,14 +2,9 @@
 set -e
 
 # validate_commit_trailers.sh
-# No assistant attribution in the git history. Nicolas does not want Claude, Anthropic or any
-# tool byline appearing in this repository's commits or PR bodies.
-#
-# Why this is a script and not a line of documentation: the rule was written down three times
-# (CLAUDE.md, the plan documents' survival rules, and the session memory) and broken three times,
-# because a harness-level attribution default can instruct the opposite and a model reasons about
-# which instruction wins instead of applying the rule. Twelve commits have been rewritten after
-# the fact so far. A grep does not reason.
+# No assistant attribution in the git history: no Claude, Anthropic or tool byline in this
+# repository's commits or PR bodies. A harness attribution default can instruct the opposite,
+# and a model weighing the two instructions gets it wrong; a grep does not weigh.
 #
 # Scope: commits not yet pushed (@{u}..HEAD) — the set that can still be rewritten cheaply with
 # git rebase. Once a commit is pushed the fix is a force-push, which is a different decision.

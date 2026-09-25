@@ -27,8 +27,8 @@ echo "--- Initializing test data ---"
 "$SCRIPT_DIR/init_test_data.sh" || { echo "init_test_data.sh failed — aborting catalog."; exit 1; }
 echo ""
 
-# Tests that failed. run_test's return value is ignored by all 135 call sites, so without
-# this the script ends on an echo and reports success while printing FAILED in red.
+# Tests that failed. The call sites ignore run_test's return value, so without this the script
+# would report success while printing FAILED in red.
 FAILED_TESTS=()
 
 # Helper to run a test.
@@ -37,10 +37,9 @@ FAILED_TESTS=()
 #   run_test <id> <command> <error-fragment> the command must FAIL, and its output must contain
 #                                            that fragment
 #
-# The third argument is what a failing test asserts, and it lives here, at the call site, rather
-# than in a list of identifiers elsewhere in the file. Membership of such a list is invisible while
-# editing a test: T83 and T105 each ended up asserting the opposite of what their own comment said,
-# and T78 passed for years while never opening a socket, because "it failed" was the whole check.
+# The third argument is what a failing test asserts, and it lives at the call site rather than in a
+# list of identifiers elsewhere: membership of such a list is invisible while editing a test, and
+# "it failed" alone passes for the wrong reason.
 run_test() {
     local id=$1
     local cmd=$2

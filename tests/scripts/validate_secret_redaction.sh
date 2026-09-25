@@ -4,14 +4,9 @@ set -e
 # validate_secret_redaction.sh
 # A connection string reaches a message only through ConnectionStringSanitizer.Redact.
 #
-# Six sites sanitised and two did not, and nothing distinguished them: a resolved
-# keyring alias — password included — was reprinted on stderr by the two routing
-# failures, which is the one thing using a keyring was meant to prevent.
-#
 # Redact parses the string and shows only keys known to carry no credential; Sanitize
 # only scans text that has no grammar, so handing it a connection is a silent
-# downgrade. That is why the two are not interchangeable here, and why the weaker call
-# is refused by name rather than merely preferred in prose.
+# downgrade. The weaker call is therefore refused by name, not merely discouraged.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"

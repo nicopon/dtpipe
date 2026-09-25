@@ -4,16 +4,13 @@ set -e
 # validate_doc_examples.sh
 # The examples printed in the docs/ site are run, and their documented output is compared.
 #
-# The site claims "every output shown was produced by running it". Before this script the claim
-# rested on whoever last edited a page: the v0 draft shipped a deduplication result whose rows were
-# in the wrong order, and a YAML sample that --export-job does not produce -- neither visible to a
-# reader who does not retype the command.
+# The site claims "every output shown was produced by running it"; this script is what makes the
+# claim true. A wrong row order or a YAML sample the binary does not produce renders perfectly.
 #
 # Only file-based examples live here, so no database and no container is needed and the check runs
-# anywhere the binary does. Examples against PostgreSQL, Oracle or SQL Server are out of scope by
-# construction, not by omission.
+# anywhere the binary does. Examples against PostgreSQL, Oracle or SQL Server are out of scope.
 #
-# Two kinds of assertion, and the difference matters:
+# Two kinds of assertion:
 #   - exact output, for anything seeded or deterministic;
 #   - shape only (exit code, header, row count) for an unseeded --fake, whose values are random by
 #     design and whose stability is NOT what the doc promises.
