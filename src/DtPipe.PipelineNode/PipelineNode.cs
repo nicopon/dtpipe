@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.IO.Pipes;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -60,6 +61,13 @@ public sealed class PipelineNode : IAsyncDisposable
     private readonly SignalRDataClient<byte[]> _client;
     private Process _child = null!;
 
+    /// <summary>
+    /// One server pipe per excess edge (the second-and-later edge of a direction), keyed by
+    /// <see cref="EdgeBinding.Alias"/> — empty for a fragment with at most one inbound and one
+    /// outbound edge, which still rides stdin/stdout exactly as before J2.
+    /// </summary>
+    private Dictionary<string, NamedPipeServerStream> _pipes = new(StringComparer.Ordinal);
+
     private readonly ConcurrentDictionary<string, TaskCompletionSource<object>> _handles = new();
 
     private readonly List<Task> _relayTasks = new();
@@ -100,13 +108,16 @@ public sealed class PipelineNode : IAsyncDisposable
         _client = client;
     }
 
+    /// <summary>
+    /// The only invariant left once a direction can carry more than one edge: <see cref="WireAsync"/>
+    /// and <see cref="_pipes"/> both key purely on <see cref="EdgeBinding.Alias"/>, regardless of
+    /// direction, so two edges sharing one would collide silently instead of relaying independently.
+    /// </summary>
     private static void ValidateEdges(PipelineNodeOptions options)
     {
-        if (options.Edges.Count(e => e.Direction == EdgeDirection.Inbound) > 1
-            || options.Edges.Count(e => e.Direction == EdgeDirection.Outbound) > 1)
-            throw new NotSupportedException(
-                "A node relays each direction through the child's single stdin/stdout; a fragment " +
-                "with more than one inbound or more than one outbound edge is not supported yet.");
+        var duplicate = options.Edges.GroupBy(e => e.Alias, StringComparer.Ordinal).FirstOrDefault(g => g.Count() > 1);
+        if (duplicate is not null)
+            throw new ArgumentException($"Edge alias '{duplicate.Key}' is declared more than once.", nameof(options));
     }
 
     public static async Task<PipelineNode> StartAsync(
@@ -124,7 +135,7 @@ public sealed class PipelineNode : IAsyncDisposable
         client.OnTransferStarted += node.HandleTransferStarted;
 
         await client.ConnectAsync(cancellationToken: ct);
-        node._child = LaunchChild(options, logger);
+        (node._child, node._pipes) = LaunchChild(options, logger);
 
         return node;
     }
@@ -191,7 +202,7 @@ public sealed class PipelineNode : IAsyncDisposable
     public async Task LaunchAsync(string runId, CancellationToken ct = default)
     {
         _runId = runId;
-        _child = LaunchChild(_options, _logger);
+        (_child, _pipes) = LaunchChild(_options, _logger);
         await _client.ControlConnection.InvokeAsync("Ready", runId, ct);
     }
 
@@ -307,8 +318,39 @@ public sealed class PipelineNode : IAsyncDisposable
         return builder.Build();
     }
 
-    private static Process LaunchChild(PipelineNodeOptions options, ILogger logger)
+    /// <summary>Short and random, never a readable composed name (alias + run id): the pipe name
+    /// joins <c>$TMPDIR/CoreFxPipe_</c> on Unix, and a long <c>TMPDIR</c> (macOS routinely runs
+    /// ~60 characters) already leaves little of the 104-character <c>sun_path</c> budget spare.</summary>
+    private static string NewPipeName() => Guid.NewGuid().ToString("N")[..10];
+
+    private static (Process Child, Dictionary<string, NamedPipeServerStream> Pipes) LaunchChild(
+        PipelineNodeOptions options, ILogger logger)
     {
+        var inbound = options.Edges.Where(e => e.Direction == EdgeDirection.Inbound).ToList();
+        var outbound = options.Edges.Where(e => e.Direction == EdgeDirection.Outbound).ToList();
+
+        // The first edge of each direction keeps riding stdin/stdout - the path already proven;
+        // only an excess edge (a join's second source, a fan-out's second sink) needs a pipe of
+        // its own, created here as server before the child that connects to it as client starts.
+        var pipes = new Dictionary<string, NamedPipeServerStream>(StringComparer.Ordinal);
+        var bindInputPairs = new List<string>();
+        var bindOutputPairs = new List<string>();
+
+        foreach (var edge in inbound.Skip(1))
+        {
+            var pipeName = NewPipeName();
+            pipes[edge.Alias] = new NamedPipeServerStream(pipeName, PipeDirection.Out, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+            // AliasBindingApplier prepends its own 'arrow:' to this location - adding it here too
+            // would double it into 'arrow:arrow:pipe://...' and fail closed with "file not found".
+            bindInputPairs.Add($"{edge.Alias}=pipe://{pipeName}");
+        }
+        foreach (var edge in outbound.Skip(1))
+        {
+            var pipeName = NewPipeName();
+            pipes[edge.Alias] = new NamedPipeServerStream(pipeName, PipeDirection.In, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+            bindOutputPairs.Add($"{edge.Alias}=pipe://{pipeName}");
+        }
+
         var psi = new ProcessStartInfo
         {
             FileName = options.DtPipeExecutable,
@@ -319,9 +361,12 @@ public sealed class PipelineNode : IAsyncDisposable
         };
         psi.ArgumentList.Add("--job");
         psi.ArgumentList.Add(options.FragmentJobPath);
+        if (bindInputPairs.Count > 0) { psi.ArgumentList.Add("--bind-input"); psi.ArgumentList.Add(string.Join(",", bindInputPairs)); }
+        if (bindOutputPairs.Count > 0) { psi.ArgumentList.Add("--bind-output"); psi.ArgumentList.Add(string.Join(",", bindOutputPairs)); }
 
-        // The fragment's own 'arrow:-' already means the child's own stdin/stdout, piped to this
-        // node rather than inherited (AliasBindingApplier); no binding flag is needed here.
+        // The fragment's own primary 'arrow:-' already means the child's own stdin/stdout, piped
+        // to this node rather than inherited (AliasBindingApplier); no binding flag is needed for
+        // it. An excess edge's 'arrow:-' is overridden above instead.
         var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
         process.Start();
         _ = DrainStderrAsync(process, logger);
@@ -329,12 +374,29 @@ public sealed class PipelineNode : IAsyncDisposable
         // An edge-less direction still has to be a live pipe (never the node's own stdio), but
         // nothing ever wires it: close it, or drain it, so the child cannot block writing to or
         // reading from a pipe nobody is ever going to service.
-        if (!options.Edges.Any(e => e.Direction == EdgeDirection.Inbound))
+        if (inbound.Count == 0)
             process.StandardInput.Close();
-        if (!options.Edges.Any(e => e.Direction == EdgeDirection.Outbound))
+        if (outbound.Count == 0)
             _ = DrainAsync(process.StandardOutput.BaseStream, logger, "stdout");
 
-        return process;
+        return (process, pipes);
+    }
+
+    /// <summary>
+    /// Races the excess edge's own <see cref="NamedPipeServerStream.WaitForConnectionAsync()"/>
+    /// against the child's own exit: without this, a child that dies before ever connecting to its
+    /// bound pipe (an invalid job, a binding error) would block this relay task, and so this whole
+    /// node, forever - nothing else was ever going to connect to a server nobody dials into after
+    /// its only prospective client is dead.
+    /// </summary>
+    private async Task<Stream> ConnectPipeAsync(NamedPipeServerStream pipe, string alias)
+    {
+        var childExited = _child.WaitForExitAsync();
+        var connected = pipe.WaitForConnectionAsync();
+        if (await Task.WhenAny(connected, childExited) == childExited)
+            throw new IOException($"child dtpipe exited before connecting to the named pipe for edge '{alias}'.");
+        await connected;
+        return pipe;
     }
 
     private static async Task DrainStderrAsync(Process process, ILogger logger)
@@ -427,9 +489,12 @@ public sealed class PipelineNode : IAsyncDisposable
     {
         var counter = new ArrowIpcRowCounter();
         var buffer = new byte[_options.ReadChunkBytes];
-        var stream = _child.StandardOutput.BaseStream;
         try
         {
+            var stream = _pipes.TryGetValue(alias, out var pipe)
+                ? await ConnectPipeAsync(pipe, alias)
+                : _child.StandardOutput.BaseStream;
+
             while (true)
             {
                 int read = await stream.ReadAsync(buffer);
@@ -461,6 +526,7 @@ public sealed class PipelineNode : IAsyncDisposable
         finally
         {
             lock (_rowCountsLock) _rowCounts[alias] = counter.RowCount;
+            if (_pipes.TryGetValue(alias, out var ownPipe)) { try { await ownPipe.DisposeAsync(); } catch { /* best-effort */ } }
             try { await send.DisposeAsync(); } catch { /* best-effort: the fault is already recorded */ }
         }
     }
@@ -468,9 +534,12 @@ public sealed class PipelineNode : IAsyncDisposable
     private async Task RelayInboundAsync(string alias, Receive<byte[]> receive)
     {
         var counter = new ArrowIpcRowCounter();
-        var stream = _child.StandardInput.BaseStream;
         try
         {
+            var stream = _pipes.TryGetValue(alias, out var pipe)
+                ? await ConnectPipeAsync(pipe, alias)
+                : _child.StandardInput.BaseStream;
+
             await foreach (var chunk in receive.ReceiveAsync())
             {
                 counter.Feed(chunk);
@@ -497,8 +566,10 @@ public sealed class PipelineNode : IAsyncDisposable
             lock (_rowCountsLock) _rowCounts[alias] = counter.RowCount;
             // Never synthesises dtpipe's own end-of-stream marker: on success it was already part of
             // the relayed bytes, on failure the child's arrow: reader turns this truncation into its
-            // own EndOfStreamException — the propagation this node adds is exactly one closed pipe.
-            try { _child.StandardInput.Close(); } catch { /* already closed */ }
+            // own EndOfStreamException — the propagation this node adds is exactly one closed stream,
+            // the primary edge's real stdin or an excess edge's own named pipe, never the other one.
+            if (_pipes.TryGetValue(alias, out var ownPipe)) { try { await ownPipe.DisposeAsync(); } catch { /* already closed */ } }
+            else { try { _child.StandardInput.Close(); } catch { /* already closed */ } }
             try { await receive.DisposeAsync(); } catch { /* best-effort: the fault is already recorded */ }
         }
     }
@@ -534,6 +605,12 @@ public sealed class PipelineNode : IAsyncDisposable
             try { _child.StandardInput.Close(); } catch { }
             try { _child.StandardOutput.Close(); } catch { }
 
+            // Closes every pipe regardless of whether its own relay task already did so in its
+            // finally (a harmless second dispose): a fragment cancelled before an excess edge was
+            // ever wired never started a relay task for it, and its pipe would otherwise sit
+            // listening for a client that is never coming - Cancel reuses this same rupture.
+            foreach (var pipe in _pipes.Values) { try { pipe.Dispose(); } catch { } }
+
             if (!_child.HasExited)
             {
                 var exitedInGrace = _child.WaitForExit(GracePeriodMs);
@@ -552,7 +629,7 @@ public sealed class PipelineNode : IAsyncDisposable
         await _client.DisposeAsync();
 
         // Null for a ConnectAsync node never reached by a Launch push (e.g. disposed while still
-        // waiting on admission): there is no child to tear down.
+        // waiting on admission): there is no child to tear down, and no pipe was ever created either.
         if (_child is null) return;
 
         if (!_child.HasExited)
@@ -560,5 +637,6 @@ public sealed class PipelineNode : IAsyncDisposable
             try { _child.Kill(entireProcessTree: true); } catch { }
         }
         _child.Dispose();
+        foreach (var pipe in _pipes.Values) { try { pipe.Dispose(); } catch { } }
     }
 }

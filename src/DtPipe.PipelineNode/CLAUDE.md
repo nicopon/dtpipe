@@ -11,9 +11,14 @@ Arrow IPC bytes of each edge between the child's stdin/stdout and TransportR.
   `ArrowIpcRowCounter` reads the IPC framing only to count rows.
 - **The node is the only TransportR client of its fragment.** dtpipe has no TransportR adapter and
   reaches the node only through `arrow:`.
-- An edge is a branch alias plus a direction (`EdgeBinding`). stdin and stdout carry one edge each,
-  so a fragment takes at most one inbound and one outbound edge. An extra edge needs a named pipe
-  (`System.IO.Pipes`), never a POSIX FIFO.
+- An edge is a branch alias plus a direction (`EdgeBinding`). The first edge of each direction rides
+  the child's stdin/stdout; `LaunchChild` gives every further edge its own `NamedPipeServerStream`
+  (`System.IO.Pipes`, never a POSIX FIFO — the mechanism has to reach Windows too), created before
+  the child starts and wired into it via `--bind-input`/`--bind-output alias=arrow:pipe://<name>`
+  (`AliasBindingApplier` does the substitution). `ConnectPipeAsync` races the pipe's own
+  `WaitForConnectionAsync()` against the child's exit, so a child that dies before ever dialing in
+  cannot block the node forever. `WireAsync` and the pipe dictionary both key on `EdgeBinding.Alias`
+  alone, regardless of direction — `ValidateEdges` refuses a duplicate up front.
 - **Cancel by stream rupture, never by signal.** A fault closes the child's stdio, which its
   `arrow:` endpoint turns into exit 1; the node kills the child after a grace period if that is not
   enough. `CancelAsync` (the coordinator's `Cancel` push, for a fragment that has not yet opened a
