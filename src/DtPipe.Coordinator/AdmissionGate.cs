@@ -32,11 +32,16 @@ public sealed class AdmissionGate
     /// At least one fragment in <paramref name="requiredFragments"/> was still unregistered when
     /// <paramref name="timeout"/> elapsed. Names every one still missing at that instant.
     /// </exception>
+    /// <exception cref="OperationCanceledException">
+    /// <paramref name="ct"/> itself fired - a requester cancellation, never reported as a named
+    /// refusal: the two are different callers and a caller that cancelled its own wait did not
+    /// have any fragment refuse it.
+    /// </exception>
     public async Task<IReadOnlyList<RegisteredNode>> AwaitAllAsync(
         IReadOnlyList<string> requiredFragments, TimeSpan timeout, CancellationToken ct = default)
     {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(timeout);
+        using var timeoutCts = new CancellationTokenSource(timeout);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
 
         while (true)
         {
@@ -47,7 +52,9 @@ public sealed class AdmissionGate
             if (found.All(n => n is not null))
                 return found!;
 
-            if (cts.IsCancellationRequested)
+            ct.ThrowIfCancellationRequested();
+
+            if (timeoutCts.IsCancellationRequested)
             {
                 var absent = requiredFragments
                     .Where((name, i) => found[i] is null)
@@ -55,8 +62,8 @@ public sealed class AdmissionGate
                 throw new AdmissionRefusedException(absent);
             }
 
-            try { await Task.Delay(PollInterval, cts.Token); }
-            catch (OperationCanceledException) { /* loop once more to build the named refusal above */ }
+            try { await Task.Delay(PollInterval, linked.Token); }
+            catch (OperationCanceledException) { /* loop once more to tell which side fired above */ }
         }
     }
 }

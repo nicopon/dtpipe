@@ -155,6 +155,19 @@ public sealed class PipelineNode : IAsyncDisposable
                 try { await node!.WireAsync(alias, transferId); }
                 catch (Exception ex) { logger.LogError(ex, "Wire handler failed for run {RunId}, alias {Alias}", runId, alias); }
             });
+            conn.On<string>("Cancel", async runId =>
+            {
+                try { await node!.CancelAsync(runId); }
+                catch (Exception ex) { logger.LogError(ex, "Cancel handler failed for run {RunId}", runId); }
+            });
+
+            // TransportR re-issues its own Connect on this same event (SignalRDataClient); the
+            // coordinator's Register is a second, application-level registration on top of it that
+            // TransportR has no reason to know about, so nothing re-issues it but this node. A bare
+            // reconnect gives this connection a new SignalR ConnectionId, so without this the
+            // fragment's inventory entry in NodeRegistry keeps pointing at a dead one until its
+            // disconnect grace period lapses and declares the fragment lost outright.
+            conn.Reconnected += _ => ReRegisterWithRetryAsync(conn, fragmentName, logger);
         });
 
         node = new PipelineNode(options, logger, client) { _coordinatorDriven = true };
@@ -173,6 +186,63 @@ public sealed class PipelineNode : IAsyncDisposable
         _runId = runId;
         _child = LaunchChild(_options, _logger);
         await _client.ControlConnection.InvokeAsync("Ready", runId, ct);
+    }
+
+    /// <summary>
+    /// A bounded retry, not a single best-effort attempt: unlike TransportR's own presence heartbeat
+    /// (which repairs a missed re-registration on its own next tick), nothing else ever retries this
+    /// application-level call, and the reconnect this runs on can itself race the hub's own
+    /// bookkeeping for the dropped connection - an immediate Register can still find the old
+    /// connection's <c>Connect</c> record not yet superseded and be refused. Giving up after every
+    /// attempt fails is deliberate: the coordinator's own disconnect grace period is the backstop,
+    /// and it will correctly declare the fragment lost.
+    /// </summary>
+    private static async Task ReRegisterWithRetryAsync(HubConnection connection, string fragmentName, ILogger logger)
+    {
+        const int maxAttempts = 5;
+        var delay = TimeSpan.FromMilliseconds(200);
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                await connection.InvokeAsync("Register", fragmentName);
+                return;
+            }
+            catch (Exception ex) when (attempt < maxAttempts)
+            {
+                logger.LogWarning(ex,
+                    "Re-Register attempt {Attempt}/{MaxAttempts} failed for fragment {Fragment} after reconnect",
+                    attempt, maxAttempts, fragmentName);
+                await Task.Delay(delay);
+                delay += delay;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex,
+                    "Fragment {Fragment} could not re-Register after reconnect; the coordinator's " +
+                    "disconnect grace period will declare it lost", fragmentName);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The coordinator's own request to abandon this run before this fragment ever opened a
+    /// transfer: a run the requester cancelled, or another fragment going silent before this one
+    /// reached <see cref="WireAsync"/>. Reuses the rupture a mid-flow peer fault already takes -
+    /// closing the child's stdio turns into its own truncated-stream exit, then
+    /// <see cref="RunToCompletionAsync"/>'s existing grace-period kill applies unchanged. A stale or
+    /// mistargeted message (not this fragment's current run) is silently ignored.
+    /// </summary>
+    public async Task CancelAsync(string runId, CancellationToken ct = default)
+    {
+        if (runId != _runId) return;
+
+        Fault(FaultOrigin.Local, "cancelled by coordinator before this fragment opened any transfer");
+
+        var exitCode = await RunToCompletionAsync(ct);
+        _completion.TrySetResult(exitCode);
+        try { await ReportExitedAsync(runId, exitCode, ct); }
+        catch (Exception ex) { _logger.LogError(ex, "Failed to report Exited after Cancel for run {RunId}", runId); }
     }
 
     private static SignalRDataClient<byte[]> BuildClient(

@@ -67,4 +67,23 @@ public class AdmissionGateTests
         var admitted = await admission.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(2, admitted.Count);
     }
+
+    /// <summary>
+    /// A requester's own cancellation is a different caller than a timeout: reporting it as
+    /// <see cref="AdmissionRefusedException"/> would blame absent fragments for a wait the caller
+    /// itself gave up on, which <see cref="RunOrchestrator"/> relies on to tell "requester cancelled"
+    /// apart from "admission timed out" - the two map to different run outcomes.
+    /// </summary>
+    [Fact]
+    public async Task ARequesterCancellation_ThrowsOperationCanceled_NeverAdmissionRefused()
+    {
+        await using var host = await CoordinatorTestHost.StartAsync(_ => { });
+        var gate = host.Host.Services.GetRequiredService<AdmissionGate>();
+
+        using var cts = new CancellationTokenSource();
+        var admission = gate.AwaitAllAsync(["fragment-a"], TimeSpan.FromSeconds(30), cts.Token);
+        cts.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => admission);
+    }
 }

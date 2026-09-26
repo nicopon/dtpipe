@@ -16,7 +16,16 @@ Arrow IPC bytes of each edge between the child's stdin/stdout and TransportR.
   (`System.IO.Pipes`), never a POSIX FIFO.
 - **Cancel by stream rupture, never by signal.** A fault closes the child's stdio, which its
   `arrow:` endpoint turns into exit 1; the node kills the child after a grace period if that is not
-  enough.
+  enough. `CancelAsync` (the coordinator's `Cancel` push, for a fragment that has not yet opened a
+  transfer, or a multi-edge fragment still waiting on one side) reuses exactly this path - it is a
+  `Fault(Local, ...)` like any other, not a second teardown mechanism.
+- **A reconnect re-issues `Register`, with a bounded retry.** TransportR's own `SignalRDataClient`
+  already re-issues `Connect` on `HubConnection.Reconnected`; nothing re-issues the coordinator's own
+  `Register` but this node, since TransportR has no reason to know that call exists. The retry exists
+  because an immediate `Register` can still find the hub's own bookkeeping for the dropped connection
+  not yet superseded and be refused - unlike TransportR's presence heartbeat, nothing else ever
+  retries this call. Giving up after every attempt fails is deliberate: the coordinator's own
+  disconnect grace period (`DtPipe.Coordinator`) is the backstop.
 - **The node must run on Windows**: no POSIX-only API (FIFO, signals). `[unchecked: nothing runs
   the node on Windows]`
 - Keep `MaxInFlightBatches` non-null: a null bound lets a sender race ahead of a slow receiver.

@@ -54,10 +54,13 @@ in flight throws instead of queuing.
   the caller's fragment through `INodeRegistry.TryGetByConnection(Context.ConnectionId)`, seeded by
   that `Register` call, never trusting a fragment name passed as an argument at that point.
   `[local: NodeRegistryTests]`
-- **`NodeRegistry` refuses a fragment name already held by another live connection**, naming it, and
-  an `Unregister` only ever drops the entry it still owns - a disconnect and the re-registration that
-  replaces it race by nature, and a stale `Unregister` that removed by name alone would orphan the
-  connection that had already reclaimed it. `[local: NodeRegistryTests]`
+- **`NodeRegistry` refuses a fragment name only while it is held by another *live* connection.** A
+  disconnected entry stays reclaimable by any `ClientId` for its disconnect grace period (see below),
+  and a *live* entry's own `ClientId` reclaiming under a new `ConnectionId` is always allowed too -
+  the reconnect's `Register` can land before that same connection's own `OnDisconnectedAsync` has
+  run. `Unregister` only ever drops the entry it still owns - a disconnect and the re-registration
+  that replaces it race by nature, and a stale `Unregister` that removed by name alone would orphan
+  the connection that had already reclaimed it. `[local: NodeRegistryTests]`
 - **A 0 exit code is not proof of delivery.** `DetermineOutcome` also compares each edge's two row
   counts (`RunResult.EdgeCounts`) and fails the run, naming the edge, on a mismatch even when every
   fragment reported 0 - a fragment attests its own process, not what its peer received. A count
@@ -66,10 +69,66 @@ in flight throws instead of queuing.
 - **The cause is the first *locally* faulted fragment, never arrival order.** A peer aborting its own
   transfer can fail a healthy fragment before the fragment that actually died reports `Exited`, so
   `DetermineOutcome` picks the cause by `FaultOrigin.Local`, falling back to `RunSpec.Fragments`'
-  own order - never arrival order - only when no report carries that origin.
-  `[local: RunOrchestratorTests, CoordinatorDrivenTests]`
-- **A dropped connection is not yet a lost node.** `CoordinatorHub.OnDisconnectedAsync` only drops the
-  `INodeRegistry` entry; a run still waiting on that fragment is not failed, and a reconnect is not
-  re-routed to the new connection id yet. `[unchecked]`
+  own order - never arrival order - only when no report carries that origin. A fragment the
+  coordinator itself told to `Cancel` is excluded from both cause and consequence: its own child was
+  killed on command, and reports a plain non-zero `Local` exit indistinguishable on the wire from an
+  organic one. `[local: RunOrchestratorTests, CoordinatorDrivenTests]`
+- **A fragment absent from the reports is never read as success.** `DetermineOutcome` takes
+  `RunSpec.Fragments` as well as the reports collected so far, precisely so a fragment that never
+  reported `Exited` at all - the pair muet case, distinct from one that reported a fault - is still
+  named as the cause even when everyone who *did* report is at 0. `[local: RunOrchestratorTests]`
+- **A dropped connection is a pending loss, not a lost node - until its grace period elapses, or a
+  different `ClientId` takes the name.** `CoordinatorHub.OnDisconnectedAsync` marks the
+  `INodeRegistry` entry rather than dropping it: an ordinary SignalR reconnect (its own default
+  schedule: 0/2/10/30s) must not fail an in-flight run - the earlier attempt that fired an immediate
+  teardown on every disconnect did exactly that. `INodeRegistry.FragmentLost` fires either once the
+  grace period (`NodeRegistryOptions`) elapses with no reclaim, or immediately when a *different*
+  `ClientId` reclaims a still-pending entry (a restarted process, not a reconnect of the same one) -
+  without the second case, that old identity would never be declared lost at all, since the reclaim
+  itself is what would have cancelled its grace timer. `RunOrchestrator` subscribes only once its own
+  run is admitted (an unadmitted fragment is already `AdmissionGate`'s own named refusal, never this
+  event) and compares the reported `ClientId` against the one it admitted, so a name that has moved on
+  to a fresh node is never read as *this* run's own fragment going quiet.
+  `[local: NodeRegistryTests, CoordinatorAbortTests]`
+- **`RunOrchestrator` resolves each `Launch`/`Wire` target's `ConnectionId` fresh, by `ClientId`,
+  through `IStateStore.GetClientAsync`** - never from the admission snapshot, and never through
+  `INodeRegistry`: TransportR's own state store already tracks the current `ConnectionId` against the
+  stable `ClientId` on every reconnect, the same lookup `InitTransferAsync` makes internally at every
+  handshake. A `null` `DisconnectedAtUtc` is what "currently reachable" means; a `ConnectionId` is
+  never trusted while that field is set, even though the record survives past it for TransportR's own
+  (much longer) grace period.
+- **The data-transfer phase has no coordinator-side wall clock.** The design's own three-clock table
+  names none for it, only node liveness - a legitimately long transfer must not be reported failed for
+  outliving a fixed duration. `RunOrchestratorOptions.ExitTimeout` therefore bounds only the
+  *teardown's* wait for an already-cancelled or already-terminated fragment to finish reporting, never
+  the happy path: that wait is bounded solely by `abort.Token` (the requester's own cancellation, or
+  `FragmentLost`).
+- **On teardown, every fragment already fully wired is left to its own torn-down transfer** -
+  `ITransferTerminator.TerminateAsync` on each open transfer is what turns it into the same
+  `FaultOrigin.Remote` exit a mid-flow peer death already produces (C0bis's `Abort`). `Cancel` reaches
+  only a launched fragment that is *not* fully wired: one with no transfer yet to open, or - in a
+  multi-edge fragment - wired on one side and still waiting on `Wire` for the other, which nothing
+  else would ever unblock (`PipelineNode.WireAsync` only self-completes once every declared edge has
+  been wired). The fragment identified as the cause is never sent `Cancel`, even when it is still
+  reachable (one that stops responding right after admission is still connected) - it must stay
+  absent from the run's reports for `DetermineOutcome` to name it, not be masked by a `Cancel` it
+  happens to still receive. A fragment resolved as unreachable during this pass is excluded from the
+  wait that follows for the same reason it was never sent one: it can never report on its own, and
+  counting it among the stragglers would wait out the full `ExitTimeout` for nothing.
+  `[local: RunOrchestratorTests, CoordinatorAbortTests]`
+
+**Residual, not built:** a `Launch` sent to a `ConnectionId` that drops between resolution and
+delivery is not retried - SignalR delivers to a dead connection silently, no exception - but still
+falls to `ReadyTimeout`, since the fragment can then never report `Ready`. A `Wire` dropped the same
+way has no such backstop now that the data-transfer phase has no wall clock of its own: the fragment
+simply never reports `Exited`, and only the requester's own cancellation or an unrelated
+`FragmentLost` would ever end the wait. Also unaddressed: a fragment's own `Exited` landing on a
+fresh connection before that connection's reconnect-triggered `Register` has completed
+(`PipelineNode`'s own retry narrows this without closing it) fails `ResolveFragment` with no retry on
+the hub side. Finally, a fragment that goes quiet by **closing its connection cleanly** (this
+project's own tests can only simulate a vanished node this way, disposing `PipelineNode` in-process)
+resolves through the data plane's own handling of an orderly close, not through `FragmentLost` or
+`TerminateAsync` - both exist for the harder case, a peer that stops responding without ever closing
+anything, which is not reproducible from an in-process test.
 
 `tests/DtPipe.Coordinator.Tests` is outside `DtPipe.sln`, so CI never runs it.

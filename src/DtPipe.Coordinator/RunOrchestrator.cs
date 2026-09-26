@@ -17,7 +17,11 @@ public sealed record RunSpec(string RunId, IReadOnlyList<string> Fragments, IRea
 public sealed record FragmentExitReport(
     string Fragment, int ExitCode, FaultOrigin? Origin, string? FirstFault, IReadOnlyDictionary<string, long> RowCounts);
 
-public enum RunOutcome { Succeeded, Failed }
+/// <summary>
+/// <see cref="Cancelled"/> mirrors the product's own 130 convention (root <c>CLAUDE.md</c>'s exit
+/// codes): the requester asked for it, or the first uncommanded stop was itself a 130.
+/// </summary>
+public enum RunOutcome { Succeeded, Failed, Cancelled }
 
 /// <summary>
 /// One edge's two row counts, always both looked up - never defaulted to "agree" when a fragment
@@ -31,16 +35,26 @@ public sealed record EdgeCount(
     public bool Agrees => Sent is not null && Received is not null && Sent == Received;
 }
 
-/// <summary><see cref="Cause"/> is null on <see cref="RunOutcome.Succeeded"/>.</summary>
+/// <summary>
+/// <see cref="Cause"/> is null on <see cref="RunOutcome.Succeeded"/>, and on a requester-cancelled
+/// <see cref="RunOutcome.Cancelled"/> run - the requester asked for it, nothing to name.
+/// <see cref="Reports"/> is partial by construction: a fragment absent from it never reported
+/// <c>Exited</c> at all, whether because it went silent or because the coordinator's own teardown
+/// gave up waiting on it. <see cref="CauseIsUnresponsive"/> is set only when <see cref="Cause"/> is
+/// exactly such a fragment - it is never true for the row-count-mismatch form of <see cref="Cause"/>,
+/// which is a message, not a fragment name.
+/// </summary>
 public sealed record RunResult(
     RunOutcome Outcome, string? Cause, IReadOnlyList<string> Consequences,
-    IReadOnlyDictionary<string, FragmentExitReport> Reports, IReadOnlyList<EdgeCount> EdgeCounts)
+    IReadOnlyDictionary<string, FragmentExitReport> Reports, IReadOnlyList<EdgeCount> EdgeCounts,
+    bool CauseIsUnresponsive = false)
 {
     /// <summary>The human-readable run report the exit criterion asks for: cause, consequences, counts per edge.</summary>
     public string Describe()
     {
         var lines = new List<string> { $"Outcome: {Outcome}" };
-        if (Cause is not null) lines.Add($"Cause: {Cause}");
+        if (Cause is not null)
+            lines.Add($"Cause: {Cause}" + (CauseIsUnresponsive ? " (unresponsive)" : ""));
         if (Consequences.Count > 0) lines.Add($"Consequences: {string.Join(", ", Consequences)}");
         foreach (var e in EdgeCounts)
         {
@@ -56,6 +70,14 @@ public sealed class RunOrchestratorOptions
 {
     public TimeSpan AdmissionTimeout { get; init; } = TimeSpan.FromSeconds(10);
     public TimeSpan ReadyTimeout { get; init; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// Bounds only the teardown's wait for an already-cancelled or already-terminated fragment to
+    /// finish reporting its own <c>Exited</c>, once the run has already been given up on. Never
+    /// bounds a healthy run's own data-transfer phase: the design's own three-clock table names no
+    /// coordinator-side wall clock there, only node liveness (<see cref="INodeRegistry.FragmentLost"/>) -
+    /// a legitimately long transfer must not be reported failed for outliving a fixed duration.
+    /// </summary>
     public TimeSpan ExitTimeout { get; init; } = TimeSpan.FromSeconds(30);
     public int BatchSize { get; init; } = 8;
     public int TransferTimeoutMs { get; init; } = 20_000;
@@ -70,17 +92,20 @@ public interface IRunOrchestrator
 
 /// <summary>
 /// The barrier. Admits a run only once every fragment it names has registered (<see cref="AdmissionGate"/>),
-/// launches all of them, opens each declared edge once both endpoints report ready, then collects
-/// every fragment's own exit report and applies the outcome rule (<see cref="DetermineOutcome"/>).
+/// launches all of them, opens each declared edge once both endpoints report ready, then waits out
+/// the data-transfer phase (bounded only by <see cref="INodeRegistry.FragmentLost"/> or the caller's
+/// own cancellation, never a fixed duration) and applies the outcome rule (<see cref="DetermineOutcome"/>).
 /// One run in flight at a time: a second call to <see cref="RunAsync"/> is refused outright, not
-/// queued - concurrent runs are not supported yet. A node whose connection drops mid-run is not
-/// handled here yet: see the coordinator's own guidance file.
+/// queued - concurrent runs are not supported yet.
 /// </summary>
 public sealed class RunOrchestrator : IRunOrchestrator
 {
     private readonly AdmissionGate _admission;
     private readonly IHubContext<CoordinatorHub> _hub;
     private readonly ITransferInitiator _transferInitiator;
+    private readonly ITransferTerminator _transferTerminator;
+    private readonly INodeRegistry _nodeRegistry;
+    private readonly IStateStore _stateStore;
     private readonly RunOrchestratorOptions _options;
     private readonly ILogger<RunOrchestrator> _logger;
 
@@ -95,12 +120,18 @@ public sealed class RunOrchestrator : IRunOrchestrator
         AdmissionGate admission,
         IHubContext<CoordinatorHub> hub,
         ITransferInitiator transferInitiator,
+        ITransferTerminator transferTerminator,
+        INodeRegistry nodeRegistry,
+        IStateStore stateStore,
         ILogger<RunOrchestrator> logger,
         RunOrchestratorOptions? options = null)
     {
         _admission = admission;
         _hub = hub;
         _transferInitiator = transferInitiator;
+        _transferTerminator = transferTerminator;
+        _nodeRegistry = nodeRegistry;
+        _stateStore = stateStore;
         _logger = logger;
         _options = options ?? new RunOrchestratorOptions();
     }
@@ -120,31 +151,150 @@ public sealed class RunOrchestrator : IRunOrchestrator
                 f => f, _ => new TaskCompletionSource<FragmentExitReport>(TaskCreationOptions.RunContinuationsAsynchronously),
                 StringComparer.Ordinal);
 
-            // Admission: the run does not exist yet, so a refusal here names the absentee and never
-            // reaches the outcome rule below.
-            var admitted = await _admission.AwaitAllAsync(spec.Fragments, _options.AdmissionTimeout, ct);
-            var byFragment = admitted.ToDictionary(n => n.FragmentName, StringComparer.Ordinal);
+            using var abort = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            string? lostFragment = null;
+            var launched = new HashSet<string>(StringComparer.Ordinal);
+            var cancelledFragments = new HashSet<string>(StringComparer.Ordinal);
+            var openTransfers = new List<string>();
+            Dictionary<string, Guid>? clientIdByFragment = null;
 
-            foreach (var fragment in spec.Fragments)
-                await _hub.Clients.Client(byFragment[fragment].ConnectionId).SendAsync("Launch", spec.RunId, ct);
-
-            await Task.WhenAll(_ready.Values.Select(tcs => tcs.Task)).WaitAsync(_options.ReadyTimeout, ct);
-
+            // Total edge participation per fragment (at most one inbound + one outbound -
+            // PipelineNode.ValidateEdges), so a teardown can tell a fragment whose every declared
+            // edge is already wired - it self-completes once its transfer is torn down, the same
+            // path a mid-flow child death already takes - from one still waiting on a Wire it will
+            // now never get, which needs an explicit Cancel to ever finish at all.
+            var totalEdgesByFragment = new Dictionary<string, int>(StringComparer.Ordinal);
             foreach (var edge in spec.Edges)
             {
-                var producer = byFragment[edge.ProducerFragment];
-                var consumer = byFragment[edge.ConsumerFragment];
-                var transferId = await _transferInitiator.InitTransferAsync(
-                    producer.ClientId, consumer.ClientId, _options.BatchSize, _options.TransferTimeoutMs, ct);
+                totalEdgesByFragment[edge.ProducerFragment] = totalEdgesByFragment.GetValueOrDefault(edge.ProducerFragment) + 1;
+                totalEdgesByFragment[edge.ConsumerFragment] = totalEdgesByFragment.GetValueOrDefault(edge.ConsumerFragment) + 1;
+            }
+            var wiredEdgesByFragment = new Dictionary<string, int>(StringComparer.Ordinal);
 
-                await _hub.Clients.Client(producer.ConnectionId).SendAsync("Wire", spec.RunId, edge.ProducerAlias, transferId, ct);
-                await _hub.Clients.Client(consumer.ConnectionId).SendAsync("Wire", spec.RunId, edge.ConsumerAlias, transferId, ct);
+            // Subscribed only once the run is admitted (below), so a fragment lost during admission
+            // itself is never seen here: an unadmitted run is already AdmissionGate's own refusal,
+            // naming the absentee, and must not also surface as a Failed run from this handler.
+            void OnFragmentLost(string fragment, Guid clientId)
+            {
+                // Compared against the ClientId this run actually admitted, not just the fragment
+                // name: a name reclaimed by a different node after admission (a restart) must not
+                // be read as *this* run's own fragment going quiet, and must not be missed either -
+                // NodeRegistry fires this same event for that case for exactly this reason.
+                if (clientIdByFragment is null || !clientIdByFragment.TryGetValue(fragment, out var admittedClientId)
+                    || admittedClientId != clientId)
+                    return;
+                if (_exited!.TryGetValue(fragment, out var tcs) && tcs.Task.IsCompleted) return;
+                lostFragment ??= fragment;
+                abort.Cancel();
             }
 
-            await Task.WhenAll(_exited.Values.Select(tcs => tcs.Task)).WaitAsync(_options.ExitTimeout, ct);
+            IReadOnlyList<RegisteredNode> admitted;
+            try
+            {
+                admitted = await _admission.AwaitAllAsync(spec.Fragments, _options.AdmissionTimeout, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                return CancelledByRequester(spec.Edges);
+            }
+            // AdmissionRefusedException propagates unchanged: nothing was launched yet.
 
-            var reports = spec.Fragments.ToDictionary(f => f, f => _exited[f].Task.Result, StringComparer.Ordinal);
-            return DetermineOutcome(reports, spec.Edges);
+            clientIdByFragment = admitted.ToDictionary(n => n.FragmentName, n => n.ClientId, StringComparer.Ordinal);
+            _nodeRegistry.FragmentLost += OnFragmentLost;
+
+            try
+            {
+                foreach (var fragment in spec.Fragments)
+                {
+                    if (abort.IsCancellationRequested) break;
+                    var connectionId = await ResolveConnectionIdAsync(clientIdByFragment[fragment]);
+                    if (connectionId is null) { lostFragment ??= fragment; abort.Cancel(); break; }
+                    try { await _hub.Clients.Client(connectionId).SendAsync("Launch", spec.RunId, abort.Token); }
+                    catch (OperationCanceledException) { break; }
+                    launched.Add(fragment);
+                }
+
+                if (!abort.IsCancellationRequested)
+                {
+                    try
+                    {
+                        await Task.WhenAll(_ready.Values.Select(t => t.Task)).WaitAsync(_options.ReadyTimeout, abort.Token);
+                    }
+                    catch (TimeoutException)
+                    {
+                        lostFragment ??= spec.Fragments.FirstOrDefault(f => !_ready[f].Task.IsCompleted);
+                        abort.Cancel();
+                    }
+                    catch (OperationCanceledException) { /* ct or FragmentLost already set abort */ }
+                }
+
+                if (!abort.IsCancellationRequested)
+                {
+                    foreach (var edge in spec.Edges)
+                    {
+                        if (abort.IsCancellationRequested) break;
+
+                        var producerConnection = await ResolveConnectionIdAsync(clientIdByFragment[edge.ProducerFragment]);
+                        var consumerConnection = await ResolveConnectionIdAsync(clientIdByFragment[edge.ConsumerFragment]);
+                        if (producerConnection is null || consumerConnection is null)
+                        {
+                            lostFragment ??= producerConnection is null ? edge.ProducerFragment : edge.ConsumerFragment;
+                            abort.Cancel();
+                            break;
+                        }
+
+                        try
+                        {
+                            var transferId = await _transferInitiator.InitTransferAsync(
+                                clientIdByFragment[edge.ProducerFragment], clientIdByFragment[edge.ConsumerFragment],
+                                _options.BatchSize, _options.TransferTimeoutMs, abort.Token);
+                            openTransfers.Add(transferId);
+
+                            await _hub.Clients.Client(producerConnection).SendAsync("Wire", spec.RunId, edge.ProducerAlias, transferId, abort.Token);
+                            await _hub.Clients.Client(consumerConnection).SendAsync("Wire", spec.RunId, edge.ConsumerAlias, transferId, abort.Token);
+
+                            wiredEdgesByFragment[edge.ProducerFragment] = wiredEdgesByFragment.GetValueOrDefault(edge.ProducerFragment) + 1;
+                            wiredEdgesByFragment[edge.ConsumerFragment] = wiredEdgesByFragment.GetValueOrDefault(edge.ConsumerFragment) + 1;
+                        }
+                        catch (OperationCanceledException) { break; }
+                        catch (Exception ex)
+                        {
+                            // InitTransferAsync's documented failure modes (unknown client, expired
+                            // token, unauthorized, unreachable, handshake timeout) name neither party
+                            // in the exception itself; the producer is named by convention.
+                            _logger.LogWarning(ex, "Wiring edge {Producer}->{Consumer} failed", edge.ProducerFragment, edge.ConsumerFragment);
+                            lostFragment ??= edge.ProducerFragment;
+                            abort.Cancel();
+                            break;
+                        }
+                    }
+                }
+
+                // Execution: no coordinator-side wall clock (the design's own three-clock table) -
+                // bounded only by the abort a FragmentLost or the requester's own ct raises.
+                if (!abort.IsCancellationRequested)
+                {
+                    try { await Task.WhenAll(_exited.Values.Select(t => t.Task)).WaitAsync(abort.Token); }
+                    catch (OperationCanceledException) { /* falls through to the teardown below */ }
+                }
+
+                if (abort.IsCancellationRequested)
+                {
+                    await TeardownAsync(
+                        spec, lostFragment, clientIdByFragment, launched, openTransfers,
+                        totalEdgesByFragment, wiredEdgesByFragment, cancelledFragments);
+                }
+            }
+            finally
+            {
+                _nodeRegistry.FragmentLost -= OnFragmentLost;
+            }
+
+            var reports = spec.Fragments
+                .Where(f => _exited[f].Task.IsCompletedSuccessfully)
+                .ToDictionary(f => f, f => _exited[f].Task.Result, StringComparer.Ordinal);
+
+            return DetermineOutcome(reports, spec.Edges, spec.Fragments, cancelledFragments, ct.IsCancellationRequested);
         }
         finally
         {
@@ -153,6 +303,76 @@ public sealed class RunOrchestrator : IRunOrchestrator
             _exited = null;
             _singleRun.Release();
         }
+    }
+
+    private static RunResult CancelledByRequester(IReadOnlyList<RunEdge> edges) =>
+        new(RunOutcome.Cancelled, null, [], new Dictionary<string, FragmentExitReport>(), BuildEdgeCounts(new Dictionary<string, FragmentExitReport>(), edges));
+
+    /// <summary>
+    /// Terminates every transfer this run opened, tells every launched fragment that is not yet
+    /// fully wired to <c>Cancel</c> (a fully wired one self-completes once its own torn-down
+    /// transfer faults it - the same path a mid-flow child death already takes), then waits, bounded
+    /// by <see cref="RunOrchestratorOptions.ExitTimeout"/>, for whichever of those it could actually
+    /// reach to finish reporting.
+    /// </summary>
+    private async Task TeardownAsync(
+        RunSpec spec, string? lostFragment, Dictionary<string, Guid> clientIdByFragment, HashSet<string> launched,
+        List<string> openTransfers, Dictionary<string, int> totalEdgesByFragment,
+        Dictionary<string, int> wiredEdgesByFragment, HashSet<string> cancelledFragments)
+    {
+        foreach (var transferId in openTransfers)
+            await _transferTerminator.TerminateAsync(transferId);
+
+        // A fragment resolved as unreachable here can never report Exited on its own - it is
+        // unreachable precisely because nothing can tell it anything, itself included - checked
+        // before the wiring test, since a fragment that was fully wired but has since gone silent
+        // (the canonical pair muet case) is still unreachable and must be excluded the same way, not
+        // just skipped for Cancel. The identified cause itself is excluded outright, even when its
+        // own connection still resolves (a fragment that never became Ready is still connected): it
+        // must stay silent for DetermineOutcome to name it, not be masked by a Cancel it happens to
+        // still be reachable for.
+        var unreachable = new HashSet<string>(StringComparer.Ordinal);
+        if (lostFragment is not null) unreachable.Add(lostFragment);
+
+        foreach (var fragment in launched)
+        {
+            if (fragment == lostFragment) continue;
+            if (_exited![fragment].Task.IsCompleted) continue;
+
+            var connectionId = await ResolveConnectionIdAsync(clientIdByFragment[fragment]);
+            if (connectionId is null) { unreachable.Add(fragment); continue; }
+
+            var isFullyWired = totalEdgesByFragment.TryGetValue(fragment, out var total) && total > 0
+                && wiredEdgesByFragment.GetValueOrDefault(fragment) == total;
+            if (isFullyWired) continue;
+
+            cancelledFragments.Add(fragment);
+            try { await _hub.Clients.Client(connectionId).SendAsync("Cancel", spec.RunId); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Cancel delivery failed for fragment {Fragment}", fragment); }
+        }
+
+        var pending = launched
+            .Where(f => !unreachable.Contains(f) && !_exited![f].Task.IsCompleted)
+            .Select(f => _exited![f].Task).ToArray();
+        if (pending.Length > 0)
+        {
+            try { await Task.WhenAll(pending).WaitAsync(_options.ExitTimeout); }
+            catch (TimeoutException) { /* still-missing fragments become the silent ones in DetermineOutcome */ }
+        }
+    }
+
+    /// <summary>
+    /// The connection id to send this run's control messages to, resolved fresh rather than carried
+    /// from the admission snapshot: a reconnect gives a fragment a new SignalR ConnectionId, and
+    /// TransportR's own state store already tracks the current one against the stable ClientId - the
+    /// same lookup <c>InitTransferAsync</c> makes internally at every handshake. Null while the
+    /// client is disconnected, whether or not it is still within its own grace period there: a
+    /// connection marked disconnected is dead regardless of how long the record survives.
+    /// </summary>
+    private async Task<string?> ResolveConnectionIdAsync(Guid clientId)
+    {
+        var client = await _stateStore.GetClientAsync(clientId);
+        return client is { DisconnectedAtUtc: null } ? client.ConnectionId : null;
     }
 
     public Task OnReadyAsync(string runId, string fragment)
@@ -182,21 +402,9 @@ public sealed class RunOrchestrator : IRunOrchestrator
         return Task.CompletedTask;
     }
 
-    /// <summary>
-    /// Pure. Every fragment at 0 is not enough: a fragment reporting 0 attests its own process, not
-    /// that its peer received what it sent, so a run only succeeds when every declared edge's two
-    /// row counts also agree. A count mismatch fails the run even with every exit code at 0, naming
-    /// the edge rather than a fragment - neither end is individually at fault.
-    ///
-    /// Otherwise the cause is the first fragment whose own failure has a <see cref="FaultOrigin.Local"/>
-    /// origin - its own child process, not a transfer an aborting peer tore down - and every other
-    /// non-zero fragment is a consequence, regardless of arrival order: an aborting peer can fail a
-    /// healthy fragment before the fragment that actually failed has finished reporting.
-    /// </summary>
-    internal static RunResult DetermineOutcome(
-        IReadOnlyDictionary<string, FragmentExitReport> reports, IReadOnlyList<RunEdge> edges)
-    {
-        var edgeCounts = edges.Select(e =>
+    private static IReadOnlyList<EdgeCount> BuildEdgeCounts(
+        IReadOnlyDictionary<string, FragmentExitReport> reports, IReadOnlyList<RunEdge> edges) =>
+        edges.Select(e =>
         {
             long? sent = reports.TryGetValue(e.ProducerFragment, out var producer)
                 && producer.RowCounts.TryGetValue(e.ProducerAlias, out var s) ? s : null;
@@ -205,13 +413,54 @@ public sealed class RunOrchestrator : IRunOrchestrator
             return new EdgeCount(e.ProducerFragment, e.ProducerAlias, e.ConsumerFragment, e.ConsumerAlias, sent, received);
         }).ToList();
 
-        // A missing count on either side is not an agreement: it means a fragment never reported
-        // one for that alias at all (it died before ever being wired to it), which is exactly the
-        // case a chain of `&&` lookups would silently treat as a match by short-circuiting past it.
-        var mismatchedEdges = edgeCounts.Where(e => !e.Agrees).ToList();
+    /// <summary>
+    /// Pure. <paramref name="reports"/> is partial by construction - a fragment absent from it never
+    /// reported <c>Exited</c>, whether it went silent or the coordinator gave up waiting on it after
+    /// a teardown - so <paramref name="allFragments"/> is required to tell that apart from "every
+    /// fragment reported 0". A fragment in <paramref name="coordinatorCancelled"/> is excluded from
+    /// both cause and consequence: its own child was killed on the coordinator's own command, which
+    /// otherwise reports as a plain <see cref="FaultOrigin.Local"/> failure indistinguishable from an
+    /// organic one.
+    ///
+    /// Every fragment at 0 is not enough either: a fragment reporting 0 attests its own process, not
+    /// that its peer received what it sent, so a run only succeeds when every declared edge's two row
+    /// counts also agree. Otherwise the cause is the first fragment whose own failure has a
+    /// <see cref="FaultOrigin.Local"/> origin, falling back to the first non-zero report when none
+    /// does - never arrival order, since an aborting peer can fail a healthy fragment before the
+    /// fragment that actually failed has finished reporting. An uncommanded first-local fault whose
+    /// own exit code is 130 reports the whole run as cancelled (root <c>CLAUDE.md</c>'s convention),
+    /// same as <paramref name="requesterCancelled"/> itself.
+    /// </summary>
+    internal static RunResult DetermineOutcome(
+        IReadOnlyDictionary<string, FragmentExitReport> reports,
+        IReadOnlyList<RunEdge> edges,
+        IReadOnlyList<string> allFragments,
+        IReadOnlySet<string> coordinatorCancelled,
+        bool requesterCancelled)
+    {
+        var edgeCounts = BuildEdgeCounts(reports, edges);
 
-        if (reports.Values.All(r => r.ExitCode == 0))
+        var silent = allFragments.Where(f => !reports.ContainsKey(f) && !coordinatorCancelled.Contains(f)).ToList();
+        var organicFaults = reports.Values.Where(r => r.ExitCode != 0 && !coordinatorCancelled.Contains(r.Fragment)).ToList();
+
+        if (requesterCancelled)
         {
+            var consequences = silent.Concat(organicFaults.Select(r => r.Fragment)).Distinct().ToList();
+            return new RunResult(RunOutcome.Cancelled, null, consequences, reports, edgeCounts);
+        }
+
+        if (silent.Count > 0)
+        {
+            var cause = silent[0];
+            var consequences = allFragments
+                .Where(f => f != cause && (silent.Contains(f) || organicFaults.Any(r => r.Fragment == f)))
+                .ToList();
+            return new RunResult(RunOutcome.Failed, cause, consequences, reports, edgeCounts, CauseIsUnresponsive: true);
+        }
+
+        if (organicFaults.Count == 0)
+        {
+            var mismatchedEdges = edgeCounts.Where(e => !e.Agrees).ToList();
             if (mismatchedEdges.Count == 0)
                 return new RunResult(RunOutcome.Succeeded, null, [], reports, edgeCounts);
 
@@ -219,12 +468,15 @@ public sealed class RunOrchestrator : IRunOrchestrator
             return new RunResult(RunOutcome.Failed, $"row count mismatch on edge(s): {string.Join(", ", edgeNames)}", [], reports, edgeCounts);
         }
 
-        var cause = reports.Values.FirstOrDefault(r => r.ExitCode != 0 && r.Origin == FaultOrigin.Local)
-            ?? reports.Values.First(r => r.ExitCode != 0);
-        var consequences = reports.Values
-            .Where(r => r.Fragment != cause.Fragment && r.ExitCode != 0)
-            .Select(r => r.Fragment)
-            .ToList();
-        return new RunResult(RunOutcome.Failed, cause.Fragment, consequences, reports, edgeCounts);
+        var localFault = organicFaults.FirstOrDefault(r => r.Origin == FaultOrigin.Local);
+        if (localFault is { ExitCode: 130 })
+        {
+            var consequences = organicFaults.Where(r => r.Fragment != localFault.Fragment).Select(r => r.Fragment).ToList();
+            return new RunResult(RunOutcome.Cancelled, localFault.Fragment, consequences, reports, edgeCounts);
+        }
+
+        var faultCause = localFault ?? organicFaults[0];
+        var faultConsequences = organicFaults.Where(r => r.Fragment != faultCause.Fragment).Select(r => r.Fragment).ToList();
+        return new RunResult(RunOutcome.Failed, faultCause.Fragment, faultConsequences, reports, edgeCounts);
     }
 }

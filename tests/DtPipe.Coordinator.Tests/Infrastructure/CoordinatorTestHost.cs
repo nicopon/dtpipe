@@ -33,7 +33,8 @@ public sealed class CoordinatorTestHost : IAsyncDisposable
         Url = url;
     }
 
-    public static async Task<CoordinatorTestHost> StartAsync(Action<FlowControlOptions> configureFlowControl)
+    public static async Task<CoordinatorTestHost> StartAsync(
+        Action<FlowControlOptions> configureFlowControl, Action<IServiceCollection>? configureServices = null)
     {
         var host = new HostBuilder()
             .ConfigureWebHost(webBuilder =>
@@ -51,6 +52,10 @@ public sealed class CoordinatorTestHost : IAsyncDisposable
                                     options.DefaultGroups = ["test"];
                                 })
                                 .Build();
+                        // After AddCoordinatorHub: lets a test override NodeRegistryOptions or
+                        // RunOrchestratorOptions, neither registered by default (both types resolve
+                        // their own default when DI has nothing for them).
+                        configureServices?.Invoke(services);
                     })
                     .Configure(app =>
                     {

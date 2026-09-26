@@ -1,3 +1,4 @@
+using DtPipe.Coordinator;
 using Xunit;
 
 namespace DtPipe.Coordinator.Tests;
@@ -10,12 +11,18 @@ namespace DtPipe.Coordinator.Tests;
 public class RunOrchestratorTests
 {
     private static readonly IReadOnlyDictionary<string, long> NoRows = new Dictionary<string, long>();
+    private static readonly IReadOnlySet<string> NoneCancelled = new HashSet<string>();
 
     private static FragmentExitReport Ok(string fragment, string alias, long rows) =>
         new(fragment, 0, null, null, new Dictionary<string, long> { [alias] = rows });
 
-    private static FragmentExitReport Failed(string fragment, FaultOrigin origin, string alias = "out") =>
-        new(fragment, 1, origin, $"{fragment} failed", new Dictionary<string, long> { [alias] = 0 });
+    private static FragmentExitReport Failed(string fragment, FaultOrigin origin, string alias = "out", int exitCode = 1) =>
+        new(fragment, exitCode, origin, $"{fragment} failed", new Dictionary<string, long> { [alias] = 0 });
+
+    private static RunResult Determine(
+        IReadOnlyDictionary<string, FragmentExitReport> reports, IReadOnlyList<RunEdge> edges,
+        IReadOnlySet<string>? cancelled = null, bool requesterCancelled = false) =>
+        RunOrchestrator.DetermineOutcome(reports, edges, reports.Keys.ToList(), cancelled ?? NoneCancelled, requesterCancelled);
 
     [Fact]
     public void EveryFragmentZero_MatchingCounts_Succeeds()
@@ -27,7 +34,7 @@ public class RunOrchestratorTests
         };
         var edges = new[] { new RunEdge("A", "out", "B", "in") };
 
-        var result = RunOrchestrator.DetermineOutcome(reports, edges);
+        var result = Determine(reports, edges);
 
         Assert.Equal(RunOutcome.Succeeded, result.Outcome);
         Assert.Null(result.Cause);
@@ -49,7 +56,7 @@ public class RunOrchestratorTests
         };
         var edges = new[] { new RunEdge("A", "out", "B", "in") };
 
-        var result = RunOrchestrator.DetermineOutcome(reports, edges);
+        var result = Determine(reports, edges);
 
         Assert.Equal(RunOutcome.Failed, result.Outcome);
         Assert.Contains("A->B", result.Cause);
@@ -73,7 +80,7 @@ public class RunOrchestratorTests
         };
         var edges = Array.Empty<RunEdge>();
 
-        var result = RunOrchestrator.DetermineOutcome(reports, edges);
+        var result = Determine(reports, edges);
 
         Assert.Equal(RunOutcome.Failed, result.Outcome);
         Assert.Equal("B", result.Cause);
@@ -89,7 +96,7 @@ public class RunOrchestratorTests
             ["B"] = Failed("B", FaultOrigin.Remote),
         };
 
-        var result = RunOrchestrator.DetermineOutcome(reports, Array.Empty<RunEdge>());
+        var result = Determine(reports, Array.Empty<RunEdge>());
 
         Assert.Equal(RunOutcome.Failed, result.Outcome);
         Assert.Equal("A", result.Cause);
@@ -110,7 +117,7 @@ public class RunOrchestratorTests
         };
         var edges = new[] { new RunEdge("A", "out", "B", "in") };
 
-        var result = RunOrchestrator.DetermineOutcome(reports, edges);
+        var result = Determine(reports, edges);
 
         Assert.Equal(RunOutcome.Failed, result.Outcome);
         Assert.Contains("A->B", result.Cause);
@@ -126,12 +133,107 @@ public class RunOrchestratorTests
         };
         var edges = new[] { new RunEdge("A", "out", "B", "in") };
 
-        var result = RunOrchestrator.DetermineOutcome(reports, edges);
+        var result = Determine(reports, edges);
 
         var edge = Assert.Single(result.EdgeCounts);
         Assert.Equal(500, edge.Sent);
         Assert.Equal(0, edge.Received);
         Assert.False(edge.Agrees);
         Assert.Contains("A.out -> B.in", result.Describe());
+    }
+
+    /// <summary>
+    /// A fragment absent from <c>reports</c> - it never reported <c>Exited</c> at all - is the pair
+    /// muet case: named as the cause even though every fragment that did report is at 0. A run is
+    /// never read as a success just because nothing present has failed.
+    /// </summary>
+    [Fact]
+    public void AFragmentThatNeverReported_IsTheCause_NeverReadAsSuccess()
+    {
+        var reports = new Dictionary<string, FragmentExitReport> { ["A"] = Ok("A", "out", 100) };
+        var edges = new[] { new RunEdge("A", "out", "B", "in") };
+
+        var result = RunOrchestrator.DetermineOutcome(reports, edges, ["A", "B"], NoneCancelled, requesterCancelled: false);
+
+        Assert.Equal(RunOutcome.Failed, result.Outcome);
+        Assert.Equal("B", result.Cause);
+        Assert.DoesNotContain("B", result.Reports.Keys);
+        Assert.True(result.CauseIsUnresponsive);
+        Assert.Contains("(unresponsive)", result.Describe());
+    }
+
+    /// <summary>
+    /// The row-count-mismatch form of <c>Cause</c> is a message, not a fragment name, and must never
+    /// be labelled "(unresponsive)" in <see cref="RunResult.Describe"/> - the deterrent case for
+    /// annotating any cause absent from <c>Reports</c>, which this message always is.
+    /// </summary>
+    [Fact]
+    public void AnEdgeMismatchCause_IsNeverLabelledUnresponsive()
+    {
+        var reports = new Dictionary<string, FragmentExitReport>
+        {
+            ["A"] = Ok("A", "out", 1_000_000),
+            ["B"] = Ok("B", "in", 200_000),
+        };
+        var edges = new[] { new RunEdge("A", "out", "B", "in") };
+
+        var result = Determine(reports, edges);
+
+        Assert.False(result.CauseIsUnresponsive);
+        Assert.DoesNotContain("(unresponsive)", result.Describe());
+    }
+
+    [Fact]
+    public void RequesterCancelled_ReportsCancelled_RegardlessOfWhatReported()
+    {
+        var reports = new Dictionary<string, FragmentExitReport> { ["A"] = Failed("A", FaultOrigin.Remote) };
+
+        var result = RunOrchestrator.DetermineOutcome(reports, [], ["A", "B"], NoneCancelled, requesterCancelled: true);
+
+        Assert.Equal(RunOutcome.Cancelled, result.Outcome);
+        Assert.Null(result.Cause);
+    }
+
+    /// <summary>
+    /// A first uncommanded stop that is itself a 130 (the product's own user-cancellation exit code,
+    /// root <c>CLAUDE.md</c>) reports the whole run as cancelled, not failed - no distinction is drawn
+    /// between a requester's own cancel and a fragment's child exiting 130 on its own.
+    /// </summary>
+    [Fact]
+    public void AnUncommandedLocalFaultAt130_ReportsCancelled()
+    {
+        var reports = new Dictionary<string, FragmentExitReport>
+        {
+            ["A"] = Failed("A", FaultOrigin.Local, exitCode: 130),
+            ["B"] = Failed("B", FaultOrigin.Remote),
+        };
+
+        var result = Determine(reports, []);
+
+        Assert.Equal(RunOutcome.Cancelled, result.Outcome);
+        Assert.Equal("A", result.Cause);
+        Assert.Equal(["B"], result.Consequences);
+    }
+
+    /// <summary>
+    /// A fragment the coordinator itself told to <c>Cancel</c> reports a plain non-zero, local-origin
+    /// exit - its own child was killed on command - indistinguishable on the wire from an organic
+    /// failure. Excluding it from cause and consequence is what keeps a coordinator-driven abort from
+    /// misreporting its own collateral as the reason the run failed.
+    /// </summary>
+    [Fact]
+    public void ACoordinatorCancelledFragment_IsNeverTheCauseNorAConsequence()
+    {
+        var reports = new Dictionary<string, FragmentExitReport>
+        {
+            ["A"] = Failed("A", FaultOrigin.Remote), // the organic failure driving the abort
+            ["B"] = Failed("B", FaultOrigin.Local),  // killed by the coordinator's own Cancel
+        };
+
+        var result = Determine(reports, [], cancelled: new HashSet<string> { "B" });
+
+        Assert.Equal(RunOutcome.Failed, result.Outcome);
+        Assert.Equal("A", result.Cause);
+        Assert.DoesNotContain("B", result.Consequences);
     }
 }
