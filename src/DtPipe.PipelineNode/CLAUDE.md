@@ -26,6 +26,13 @@ Arrow IPC bytes of each edge between the child's stdin/stdout and TransportR.
   not yet superseded and be refused - unlike TransportR's presence heartbeat, nothing else ever
   retries this call. Giving up after every attempt fails is deliberate: the coordinator's own
   disconnect grace period (`DtPipe.Coordinator`) is the backstop.
+- **A failed `Exited` report is held, not dropped.** The same race that can refuse a re-`Register`
+  can refuse an `Exited` sent on a fresh connection before that connection's own re-`Register` has
+  landed (`ResolveFragment` on the hub side has nothing to resolve yet). `ReportExitedWithFallbackAsync`
+  keeps the pending `(runId, exitCode)` and `RetryPendingExitedReportAsync` resends it once
+  `ReRegisterWithRetryAsync` returns - a single attempt, no further retry: this is the fragment's own
+  outcome, and losing it silently would report a run that actually finished as unresolved instead.
+  `[unchecked: no test forces this exact ordering]`
 - **The node must run on Windows**: no POSIX-only API (FIFO, signals). `[unchecked: nothing runs
   the node on Windows]`
 - Keep `MaxInFlightBatches` non-null: a null bound lets a sender race ahead of a slow receiver.

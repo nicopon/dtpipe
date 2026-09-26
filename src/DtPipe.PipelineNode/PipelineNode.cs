@@ -71,6 +71,9 @@ public sealed class PipelineNode : IAsyncDisposable
     private bool _coordinatorDriven;
     private string? _runId;
     private int _wiredCount;
+    /// <summary>Set when <see cref="ReportExitedAsync"/> fails - retried once a reconnect's re-Register succeeds.</summary>
+    private string? _pendingExitedRunId;
+    private int _pendingExitedCode;
     private readonly TaskCompletionSource<int> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public Guid ClientId => _client.ClientId;
@@ -167,7 +170,11 @@ public sealed class PipelineNode : IAsyncDisposable
             // reconnect gives this connection a new SignalR ConnectionId, so without this the
             // fragment's inventory entry in NodeRegistry keeps pointing at a dead one until its
             // disconnect grace period lapses and declares the fragment lost outright.
-            conn.Reconnected += _ => ReRegisterWithRetryAsync(conn, fragmentName, logger);
+            conn.Reconnected += async _ =>
+            {
+                await ReRegisterWithRetryAsync(conn, fragmentName, logger);
+                await node!.RetryPendingExitedReportAsync();
+            };
         });
 
         node = new PipelineNode(options, logger, client) { _coordinatorDriven = true };
@@ -241,8 +248,38 @@ public sealed class PipelineNode : IAsyncDisposable
 
         var exitCode = await RunToCompletionAsync(ct);
         _completion.TrySetResult(exitCode);
+        await ReportExitedWithFallbackAsync(runId, exitCode, "after Cancel", ct);
+    }
+
+    /// <summary>
+    /// Retries a report <see cref="ReportExitedAsync"/> could not deliver, once a reconnect's
+    /// re-Register has (or has not) had its chance: a report sent on a fresh connection before its
+    /// own re-Register lands fails <c>ResolveFragment</c> on the hub side, and nothing but this retry
+    /// would ever send it again.
+    /// </summary>
+    private async Task RetryPendingExitedReportAsync()
+    {
+        if (_pendingExitedRunId is not { } runId) return;
+        try
+        {
+            await ReportExitedAsync(runId, _pendingExitedCode);
+            _pendingExitedRunId = null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Retry of Exited for run {RunId} failed again after reconnect", runId);
+        }
+    }
+
+    private async Task ReportExitedWithFallbackAsync(string runId, int exitCode, string when, CancellationToken ct)
+    {
         try { await ReportExitedAsync(runId, exitCode, ct); }
-        catch (Exception ex) { _logger.LogError(ex, "Failed to report Exited after Cancel for run {RunId}", runId); }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to report Exited {When} for run {RunId}; will retry after the next successful Register", when, runId);
+            _pendingExitedRunId = runId;
+            _pendingExitedCode = exitCode;
+        }
     }
 
     private static SignalRDataClient<byte[]> BuildClient(
@@ -378,8 +415,7 @@ public sealed class PipelineNode : IAsyncDisposable
     {
         var exitCode = await RunToCompletionAsync();
         _completion.TrySetResult(exitCode);
-        try { await ReportExitedAsync(runId, exitCode); }
-        catch (Exception ex) { _logger.LogError(ex, "Failed to report Exited for run {RunId}", runId); }
+        await ReportExitedWithFallbackAsync(runId, exitCode, "on completion", default);
     }
 
     /// <summary>Reports this fragment's own outcome to the coordinator: exit code, fault origin, row counts.</summary>

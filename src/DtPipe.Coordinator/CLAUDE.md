@@ -119,16 +119,18 @@ in flight throws instead of queuing.
 
 **Residual, not built:** a `Launch` sent to a `ConnectionId` that drops between resolution and
 delivery is not retried - SignalR delivers to a dead connection silently, no exception - but still
-falls to `ReadyTimeout`, since the fragment can then never report `Ready`. A `Wire` dropped the same
-way has no such backstop now that the data-transfer phase has no wall clock of its own: the fragment
-simply never reports `Exited`, and only the requester's own cancellation or an unrelated
-`FragmentLost` would ever end the wait. Also unaddressed: a fragment's own `Exited` landing on a
-fresh connection before that connection's reconnect-triggered `Register` has completed
-(`PipelineNode`'s own retry narrows this without closing it) fails `ResolveFragment` with no retry on
-the hub side. Finally, a fragment that goes quiet by **closing its connection cleanly** (this
-project's own tests can only simulate a vanished node this way, disposing `PipelineNode` in-process)
-resolves through the data plane's own handling of an orderly close, not through `FragmentLost` or
-`TerminateAsync` - both exist for the harder case, a peer that stops responding without ever closing
-anything, which is not reproducible from an in-process test.
+falls to `ReadyTimeout`, since the fragment can then never report `Ready`. **A `Wire` dropped the
+same way has no such backstop now that the data-transfer phase has no wall clock of its own**: the
+fragment simply never reports `Exited`, and only the requester's own cancellation or an unrelated
+`FragmentLost` would ever end the wait - `PipelineNode.WireAsync` is not idempotent, so there is no
+cheap retry on either side. A fragment's own `Exited` landing on a fresh connection before that
+connection's reconnect-triggered `Register` has completed fails `ResolveFragment` with no retry on
+the hub side; `PipelineNode` narrows this by holding the report and resending it once its own
+re-`Register` succeeds, but a hub-side retry does not exist. Finally, a fragment that goes quiet by
+**closing its connection cleanly** (this project's own tests can only simulate a vanished node this
+way, disposing `PipelineNode` in-process) resolves through the data plane's own handling of an
+orderly close, not through `FragmentLost` or `TerminateAsync` - both exist for the harder case, a
+peer that stops responding without ever closing anything, which is not reproducible from an
+in-process test.
 
 `tests/DtPipe.Coordinator.Tests` is outside `DtPipe.sln`, so CI never runs it.

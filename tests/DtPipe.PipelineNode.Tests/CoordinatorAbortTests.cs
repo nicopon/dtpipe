@@ -109,14 +109,17 @@ public class CoordinatorAbortTests
     /// throttled so the kill lands mid-stream, not before either edge has carried anything.
     /// </summary>
     /// <remarks>
-    /// Proves the run resolves quickly and correctly, naming B, and that A and C do not hang - it does
-    /// <b>not</b> isolate <c>ITransferTerminator.TerminateAsync</c> as the reason: disposing
-    /// <see cref="PipelineNode"/> in-process closes its own data-plane connections cleanly, which
-    /// resolves A and C on its own (confirmed by temporarily removing the <c>TerminateAsync</c> call -
-    /// the run still passed). An abruptly unresponsive peer - a network partition, a process that hangs
-    /// rather than exits - is the case <c>TerminateAsync</c> exists for, and is not reproducible this
-    /// way: <see cref="PipelineNode"/> runs in-process here, so there is no separate process left to
-    /// kill without also going through its own clean disposal path.
+    /// Proves that <c>FragmentLost</c> is what ends the execution-phase wait and resolves the run
+    /// (confirmed by temporarily disabling the <c>abort.Cancel()</c> call it drives - the run then
+    /// hangs until <c>Bound</c> and the test fails), and that the result names B correctly, quickly.
+    /// It does <b>not</b> isolate <c>ITransferTerminator.TerminateAsync</c> as what unblocks A and C:
+    /// disposing <see cref="PipelineNode"/> in-process closes its own data-plane connections cleanly,
+    /// which resolves them on its own (confirmed the same way, temporarily disabling the
+    /// <c>TerminateAsync</c> call instead - the run still passed). An abruptly unresponsive peer - a
+    /// network partition, a process that hangs rather than exits - is the case <c>TerminateAsync</c>
+    /// exists for, and is not reproducible this way: <see cref="PipelineNode"/> runs in-process here,
+    /// so there is no separate process left to kill without also going through its own clean disposal
+    /// path.
     /// </remarks>
     [Fact]
     public async Task ANodeThatVanishesMidFlow_FailsTheRun_NamingIt_QuicklyAndSurvivorsDoNotHang()
