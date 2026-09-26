@@ -1,5 +1,6 @@
 using Apache.Arrow;
 using Apache.Arrow.Ipc;
+using System.IO.Pipes;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using Microsoft.Extensions.Logging;
@@ -10,6 +11,11 @@ namespace DtPipe.Adapters.Arrow;
 
 public class ArrowAdapterStreamReader : IColumnarStreamReader
 {
+	// A pipeline node's own excess edge always creates the pipe before launching the child that
+	// reads this side of it, so under normal operation the connect is near-instant; the bound
+	// exists only to fail loudly, naming the pipe, instead of hanging on a misconfigured one.
+	private static readonly TimeSpan PipeConnectTimeout = TimeSpan.FromSeconds(10);
+
 	private readonly string _path;
 	private readonly ArrowReaderOptions _options;
 	private readonly ILogger _logger;
@@ -32,7 +38,7 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
 		_logger = logger ?? NullLogger.Instance;
 	}
 
-	public Task OpenAsync(CancellationToken ct = default)
+	public async Task OpenAsync(CancellationToken ct = default)
 	{
 		if (string.IsNullOrEmpty(_path) || _path == "-")
 		{
@@ -42,6 +48,23 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
 			}
 			_inputStream = Console.OpenStandardInput();
             _isIpcFile = false;
+		}
+		else if (ArrowPipeLocation.TryParse(_path, out var pipeName))
+		{
+			var client = new NamedPipeClientStream(".", pipeName, PipeDirection.In, PipeOptions.Asynchronous);
+			try
+			{
+				await client.ConnectAsync((int)PipeConnectTimeout.TotalMilliseconds, ct);
+			}
+			catch (TimeoutException ex)
+			{
+				client.Dispose();
+				throw new TimeoutException(
+					$"Arrow reader could not connect to named pipe '{pipeName}' within {PipeConnectTimeout.TotalSeconds:F0}s. " +
+					"Nothing was listening as a server on it.", ex);
+			}
+			_inputStream = client;
+			_isIpcFile = false;
 		}
 		else
 		{
@@ -67,8 +90,6 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
             var schema = _arrowReader.Schema;
             Columns = MapSchema(schema);
         }
-
-        return Task.CompletedTask;
 	}
 
     /// <summary>
