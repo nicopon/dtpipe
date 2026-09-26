@@ -1,6 +1,7 @@
 using Apache.Arrow;
 using Apache.Arrow.Ipc;
 using Apache.Arrow.Types;
+using System.IO.Pipes;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
@@ -64,6 +65,14 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
         {
              throw new InvalidOperationException("Output path is required. Use '-' for standard output.");
         }
+
+		// A pipe location is never a filesystem path: File.Exists would read it as one relative to
+		// the current directory and (harmlessly, but wrongly) report it as absent. Its state mirrors
+		// a FIFO with no writer yet - unknown until connected, which InitializeAsync is about to do.
+		if (ArrowPipeLocation.TryParse(_path, out _))
+		{
+			return new TargetSchemaInfo([], true, null, null, null);
+		}
 
 		if (!File.Exists(_path))
 		{
@@ -135,12 +144,34 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
 		return columns;
 	}
 
-	public ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
+	// See ArrowAdapterStreamReader.PipeConnectTimeout: the pipeline node creates the pipe before
+	// launching the child that writes this side of it, so the bound only guards against a
+	// misconfigured one.
+	private static readonly TimeSpan PipeConnectTimeout = TimeSpan.FromSeconds(10);
+
+	public async ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
 	{
 		if (_path == "-")
 		{
 			_outputStream = Console.OpenStandardOutput();
             _isIpcFile = false;
+		}
+		else if (ArrowPipeLocation.TryParse(_path, out var pipeName))
+		{
+			var client = new NamedPipeClientStream(".", pipeName, PipeDirection.Out, PipeOptions.Asynchronous);
+			try
+			{
+				await client.ConnectAsync((int)PipeConnectTimeout.TotalMilliseconds, ct);
+			}
+			catch (TimeoutException ex)
+			{
+				client.Dispose();
+				throw new TimeoutException(
+					$"Arrow writer could not connect to named pipe '{pipeName}' within {PipeConnectTimeout.TotalSeconds:F0}s. " +
+					"Nothing was listening as a server on it.", ex);
+			}
+			_outputStream = client;
+			_isIpcFile = false;
 		}
 		else
 		{
@@ -155,8 +186,6 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
             _arrowFileWriter = new ArrowFileWriter(_outputStream, _schema, leaveOpen: true);
         else
     		_arrowStreamWriter = new ArrowStreamWriter(_outputStream, _schema, leaveOpen: true);
-
-		return ValueTask.CompletedTask;
 	}
 
 	private static Schema BuildSchema(IReadOnlyList<PipeColumnInfo> columns)

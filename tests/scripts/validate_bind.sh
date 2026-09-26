@@ -16,7 +16,11 @@ set -e
 # PipelineValidatorTests cover directly; case 4 is the only coverage --export-job's refusal has,
 # since it lives in Program.cs ahead of PipelineValidator.
 #
-# Only file sources and FIFOs, so this runs in CI like the rest.
+# Case 6 drives arrow:pipe://<name> - client-only by design - through both directions against the
+# real binary. The server role it needs (DtPipe.PipelineNode's own job, out of DtPipe.sln) is stood
+# in for by tools/ArrowPipeServer.cs, a file-based dotnet app.
+#
+# File sources, FIFOs and named pipes only (no database), so this runs in CI like the rest.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -156,6 +160,40 @@ wait "$READER_PID" 2>/dev/null || true
 [ "$(wc -c < consumed.bin | tr -d ' ')" = "0" ] \
     || fail "the real reader received bytes a dry-run's advisory inspection should never have produced"
 pass "a dry-run against a FIFO completes in at most ${SECS}s and consumes nothing from the real reader"
+
+echo ""
+echo "--- Case 6: arrow:pipe://<name>, both directions, against a real named-pipe server ---"
+PIPE_TOOL="$SCRIPT_DIR/tools/ArrowPipeServer.cs"
+PIPE_IN="dtpipe-validate-bind-in-$$"
+PIPE_OUT="dtpipe-validate-bind-out-$$"
+
+"$DTPIPE" -i csv:people.csv -o arrow:stream.ipcbytes --no-stats > /dev/null \
+    || fail "producing the stream-format fixture failed"
+
+dotnet run "$PIPE_TOOL" -- "$PIPE_IN" relay-out stream.ipcbytes 15 > pipe_reader_server.out 2>&1 &
+READER_SERVER_PID=$!
+sleep 2
+"$DTPIPE" -i "arrow:pipe://$PIPE_IN" -o csv:pipe_read.csv --no-stats \
+    || fail "dtpipe reading from arrow:pipe:// failed: $(cat pipe_reader_server.out)"
+wait "$READER_SERVER_PID" || fail "the pipe server (relay-out) failed: $(cat pipe_reader_server.out)"
+
+# Content, not byte-for-byte: the CSV writer's own line ending (CRLF, RFC 4180) is unrelated to
+# the pipe - stripped so this checks what crossed the pipe, not an incidental writer default.
+tr -d '\r' < people.csv | sort > people.sorted
+tr -d '\r' < pipe_read.csv | sort > pipe_read.sorted
+diff people.sorted pipe_read.sorted > /dev/null \
+    || fail "rows read over arrow:pipe:// differ from the source"
+
+dotnet run "$PIPE_TOOL" -- "$PIPE_OUT" relay-in pipe_written.ipcbytes 15 > pipe_writer_server.out 2>&1 &
+WRITER_SERVER_PID=$!
+sleep 2
+"$DTPIPE" -i csv:people.csv -o "arrow:pipe://$PIPE_OUT" --no-stats \
+    || fail "dtpipe writing to arrow:pipe:// failed: $(cat pipe_writer_server.out)"
+wait "$WRITER_SERVER_PID" || fail "the pipe server (relay-in) failed: $(cat pipe_writer_server.out)"
+
+cmp stream.ipcbytes pipe_written.ipcbytes \
+    || fail "bytes written over arrow:pipe:// differ from a direct file write of the same source"
+pass "arrow:pipe://<name> round-trips both directions against a real named-pipe server"
 
 echo ""
 echo -e "${GREEN}All alias binding checks passed.${NC}"

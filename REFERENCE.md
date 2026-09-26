@@ -578,12 +578,14 @@ dtpipe --job anonymiser.yaml --bind-input anonymiser=/run/42/in --bind-output an
 dtpipe --job join.yaml --bind-input orders=/run/42/orders,customers=/run/42/customers
 ```
 
-Each value is a comma-separated `alias=location` list — a path, a FIFO or a named pipe, never an
-adapter prefix: the boundary stays an Arrow IPC stream. A location ending in `.arrow` or
-`.arrowfile` is refused, since the `arrow:` reader and writer would read that extension as a
-request for file format instead. Binding a branch whose input or output is not exactly `arrow:-`,
-an unknown alias, or the same `(branch, direction)` pair twice are refused by name; combining
-either flag with `--export-job` is refused, since a binding names a location specific to this run.
+Each value is a comma-separated `alias=location` list — a path, a FIFO, or `pipe://<name>` for a
+named pipe (`arrow:` connects to it as a client only; something else, such as a distributed
+pipeline node, must already be serving it) — never an adapter prefix: the boundary stays an Arrow
+IPC stream. A location ending in `.arrow` or `.arrowfile` is refused, since the `arrow:` reader and
+writer would read that extension as a request for file format instead. Binding a branch whose input
+or output is not exactly `arrow:-`, an unknown alias, or the same `(branch, direction)` pair twice
+are refused by name; combining either flag with `--export-job` is refused, since a binding names a
+location specific to this run.
 
 #### Implicit branch-split rules
 
