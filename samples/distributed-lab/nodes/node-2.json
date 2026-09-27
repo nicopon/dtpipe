@@ -1,0 +1,8 @@
+{
+  "name": "node-2",
+  "group": "sales",
+  "description": "Sales - DuckDB",
+  "datasets": [
+    { "variable": "LAB_SALES_DB", "engine": "duck", "file": "sales.duckdb", "description": "orders (current year)" }
+  ]
+}

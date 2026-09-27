@@ -1,0 +1,8 @@
+{
+  "name": "node-3",
+  "group": "catalog",
+  "description": "Catalog and archive - SQLite",
+  "datasets": [
+    { "variable": "LAB_CATALOG_DB", "engine": "sqlite", "file": "catalog.sqlite", "description": "products, legacy_orders" }
+  ]
+}

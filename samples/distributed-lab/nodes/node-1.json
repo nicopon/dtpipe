@@ -1,0 +1,8 @@
+{
+  "name": "node-1",
+  "group": "crm",
+  "description": "CRM - SQLite",
+  "datasets": [
+    { "variable": "LAB_CRM_DB", "engine": "sqlite", "file": "crm.sqlite", "description": "customers" }
+  ]
+}

@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>DtPipe.Lab.Coordinator</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Consumed as a library, never modified: AddCoordinatorHub, IRunOrchestrator, INodeRegistry
+         and IPlanRegistry are used exactly as DtPipe.Coordinator's own tests use them. -->
+    <ProjectReference Include="..\..\..\src\DtPipe.Coordinator\DtPipe.Coordinator.csproj" />
+    <ProjectReference Include="..\Lab.Contracts\Lab.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
+  </ItemGroup>
+
+</Project>

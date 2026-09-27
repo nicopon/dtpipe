@@ -1,0 +1,8 @@
+{
+  "groups": {
+    "crm": ["catalog", "warehouse"],
+    "sales": ["catalog", "warehouse"],
+    "catalog": ["warehouse"],
+    "warehouse": []
+  }
+}

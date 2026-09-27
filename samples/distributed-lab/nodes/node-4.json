@@ -1,0 +1,8 @@
+{
+  "name": "node-4",
+  "group": "warehouse",
+  "description": "Warehouse - DuckDB",
+  "datasets": [
+    { "variable": "LAB_WAREHOUSE_DB", "engine": "duck", "file": "warehouse.duckdb", "description": "reporting tables, written by the pipelines" }
+  ]
+}
