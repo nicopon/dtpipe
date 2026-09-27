@@ -91,8 +91,8 @@ public sealed class NodeRegistry : INodeRegistry
     private readonly Dictionary<string, Dictionary<Guid, Entry>> _byFragment = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (string FragmentName, Guid ClientId)> _byConnection = new(StringComparer.Ordinal);
 
-    // Every version ever registered per fragment name, appended to and never pruned - retention is a
-    // deferred product decision (root CLAUDE.md's split-pipeline notes), not this registry's job.
+    // Every version ever registered per fragment name, appended to and never pruned - deciding when a
+    // version is old enough to forget is a deferred product decision, not this registry's job.
     private readonly Dictionary<string, HashSet<string>> _knownVersions = new(StringComparer.Ordinal);
 
     private readonly NodeRegistryOptions _options;
