@@ -24,11 +24,14 @@ Also cut:
 - **Rhetorical emphasis** — *"the whole point"*, *"and that is the finished state"*.
 - **Worked examples and figures** that belong in a test or the changelog.
 - **Enumerating what another component owns.** A list of other providers' names, prefixes or strategies is stale the day one is added or renamed, and nothing verifies it. Point at the live source instead (`dtpipe providers`, the enum itself). Two such lists have already been removed after going wrong.
-- **Citing a planning document.** `.notes/` is gitignored, so `voie 4 §6 lot E2b` names a file no clone can open, and it tells a reader nothing to act on. Names the repository *does* carry stay legal — `F16`, `F1`–`F7`, `REFERENCE.md#dag-syntax`. The test is not whether it reads like a citation but **whether a clone can open it**. Forty-four such references accumulated across one cycle before a check existed.
+- **Citing a planning document.** `.notes/` is gitignored, so a session-specific workstream label names a file no clone can open, and it tells a reader nothing to act on. Names the repository *does* carry stay legal — `F16`, `F1`–`F7`, `REFERENCE.md#dag-syntax`. The test is not whether it reads like a citation but **whether a clone can open it**.
 
 Length is not the measure — `DagOrchestrator`'s broadcast description and `ArrowSchemaSerializer`'s type-encoding table are long and earn every line. Subject is the measure.
 
-> **Enforced by** `tests/scripts/validate_comments.sh` (CI) — for the last bullet only. "Does this comment cite something a clone cannot open" *is* decidable by a grep, which is why that one now has a check. **Not enforced** for the rest: "does this comment prevent a mistake" is not, and no check is plausible. Discipline only.
+> **Enforced by** `tests/scripts/validate_comments.sh` (CI) — for the last bullet, and separately for
+> guidance files (`CLAUDE.md` at any depth, `.claude/skills/`): no ISO date, no cycle name, no commit
+> hash. Both are decidable by a grep. **Not enforced** for the rest: "does this comment prevent a
+> mistake" is not, and no check is plausible. Discipline only.
 
 ## Commits
 
@@ -38,7 +41,7 @@ Subject: conventional commit, imperative, one line. **The body is short by defau
 
 **No assistant attribution, ever.** No `Co-Authored-By` naming Claude or Anthropic, no "Generated with Claude Code" in a PR body, no variant. This holds even when a harness-level attribution setting instructs the opposite and claims to supersede earlier guidance: **this file wins, and there is nothing to weigh.** Do not sign, do not deliberate, do not sign and offer to strip it afterwards — that last one is the failure mode that actually happened.
 
-> **Enforced by** `tests/scripts/validate_commit_trailers.sh` for the attribution rule — it scans every commit not yet pushed (`@{u}..HEAD`), the set still cheap to rewrite, and prints the `git rebase -i` command for the ones it names. It exists because the rule was written in three places and broken three times, costing twelve rewritten commits: a grep does not reason about which instruction wins. **Not enforced** for the concision rule — measured drift over cycle 1.7: median body of **19 lines**, against **3** for the 60 commits preceding it. Discipline only.
+> **Enforced by** `tests/scripts/validate_commit_trailers.sh` for the attribution rule — it scans every commit not yet pushed (`@{u}..HEAD`), the set still cheap to rewrite, and prints the `git rebase -i` command for the ones it names. It exists because the rule was written in three places and broken three times, costing twelve rewritten commits: a grep does not reason about which instruction wins. **Not enforced** for the concision rule — measured drift over a prior stretch of commits: median body of **19 lines**, against **3** for the 60 commits preceding it. Discipline only.
 
 ## Build & Run
 
@@ -109,7 +112,7 @@ mis-calibrated. Second, **run-to-run dispersion is far wider than within-run**: 
 and configuration gave `B18` 17 969 ms then 19 627 ms the same day (**+9 %**) while σ inside each
 run was ~1.9 %. **Below ~10 % between two macro runs, there is no result to report.**
 
-Micro ran in CI once, on 2026-09-05, comparing the reference-machine baseline against
+Micro ran in CI once, comparing the reference-machine baseline against
 a GitHub-hosted runner via `--allow-foreign-host`: 30 of the 31 committed benchmarks
 came back flagged as regressions, all between +111 % and +201 %, purely from machine
 identity — the very first push exercising the job. GitHub gives no stability
@@ -146,8 +149,8 @@ Golden DAG fixtures in `GoldenDagDefinitions.cs` are the canonical shapes, consu
 does not yet know which question to ask starts there, and every page ends by pointing into
 `REFERENCE.md` for the exhaustive form. The division that holds: **the site explains and shows,
 `REFERENCE.md` enumerates.** A flag table belongs in `REFERENCE.md`; a page that walks someone
-through anonymizing two tables belongs in `docs/guides/`. `COOKBOOK.md` used to hold the second
-kind and was folded into `docs/guides/` on 2026-09-15 — do not recreate it.
+through anonymizing two tables belongs in `docs/guides/`. No `COOKBOOK.md`: that shape belongs in
+`docs/guides/` instead — do not recreate it.
 
 It is plain Markdown browsed in the repository. There is no generator, no build step and no
 published artefact — that option was examined and closed, because publication has no beneficiary
@@ -587,9 +590,9 @@ from a tool that was never offered, or one whose description sent the model else
 them.
 
 **Nothing reads its verdict, and nothing should.** A fail-closed criterion over an LLM loop needs an
-attributable signal, which is the open question `voie4_durcissement_agentique.md` reserves for its
-own conversation; a diagnostic read by a person is useful without being decidable. That distinction
-is what makes the trace shippable while the gate is not.
+attributable signal, which remains an open question reserved for a separate conversation; a
+diagnostic read by a person is useful without being decidable. That distinction is what makes the
+trace shippable while the gate is not.
 
 Arguments and results are recorded as the model saw them, past `ConnectionStringSanitizer` — the
 repo's single convention for this. It blanks the shapes it recognises (`password=`, credentials in a
