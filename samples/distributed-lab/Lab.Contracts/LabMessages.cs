@@ -19,12 +19,38 @@ public static class LabHubMethods
     public const string Undeploy = nameof(Undeploy);
     public const string Rearm = nameof(Rearm);
     public const string Kill = nameof(Kill);
+
+    // Coordinator -> node host, answered: a few rows of a brick, read by the node that owns it.
+    public const string PreviewBrick = nameof(PreviewBrick);
 }
 
 /// <summary>A database a node hosts, reachable from a fragment's job through <c>${{Variable}}</c>.</summary>
 public sealed record DatasetInfo(string Variable, string Engine, string Path, string Description);
 
-public sealed record NodeAnnouncement(string Name, string Group, string Description, IReadOnlyList<DatasetInfo> Datasets);
+/// <summary>A data node hosts databases and offers bricks; a runner hosts neither and carries every step between them.</summary>
+public enum NodeRole { Data, Runner }
+
+public sealed record NodeAnnouncement(
+    string Name, string Group, string Description, IReadOnlyList<DatasetInfo> Datasets, NodeRole Role,
+    IReadOnlyList<BrickInfo> Bricks);
+
+public enum BrickKind { Source, Sink }
+
+public sealed record BrickColumn(string Name, string Type, bool IsNullable);
+
+/// <summary>
+/// A read or a write the node's owner preconfigured on one of its databases. <see cref="Branch"/>
+/// is the brick's piece of a dtpipe branch, as JSON text exactly as the node's file declares it: a
+/// source's <c>input</c> and reader options, a sink's <c>output</c> and writer options. The node
+/// inspects a source's schema itself, where the data is; <see cref="SchemaError"/> says why it
+/// could not.
+/// </summary>
+public sealed record BrickInfo(
+    string Id, BrickKind Kind, string Title, string Description, string Branch,
+    IReadOnlyList<BrickColumn>? Schema, string? SchemaError);
+
+/// <summary>What <c>PreviewBrick</c> answers: CSV text, or why the node could not read it.</summary>
+public sealed record BrickPreview(string? Csv, string? Error);
 
 public enum LabEdgeDirection { Inbound, Outbound }
 

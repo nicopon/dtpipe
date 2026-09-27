@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Starts, stops and inspects the distributed lab: one coordinator and four pipeline-node hosts, as
-# plain local processes. Everything the lab writes lives under .state/ (databases, fragments, logs).
+# Starts, stops and inspects the distributed lab: one coordinator, four data-node hosts and a
+# runner, as plain local processes. Everything the lab writes lives under .state/ (databases,
+# fragments, library, runs, logs).
 #
 #   ./lab.sh up        build, seed if needed, start everything, print the page URL
 #   ./lab.sh down      stop every lab process
 #   ./lab.sh status    which processes run, and what the coordinator sees
 #   ./lab.sh seed      rebuild the four databases (LAB_SCALE multiplies the row counts)
-#   ./lab.sh smoke     every catalog pipeline, distributed, against its monolithic witness
-#   ./lab.sh ui        every catalog pipeline renders in the page (headless Chrome)
+#   ./lab.sh smoke     every pipeline, distributed, against its monolithic witness
+#   ./lab.sh ui        both pages render, and a designer scenario passes (headless Chrome)
 #   ./lab.sh logs      follow every log
 #   ./lab.sh reset     down, then delete .state/
 set -euo pipefail
@@ -18,7 +19,7 @@ STATE="$LAB/.state"
 PORT="${LAB_PORT:-5180}"
 URL="http://127.0.0.1:$PORT"
 DTPIPE="${DTPIPE:-$REPO/dist/release/dtpipe}"
-NODES=(node-1 node-2 node-3 node-4)
+NODES=(node-1 node-2 node-3 node-4 runner-1)
 
 require_dtpipe() {
     if [[ ! -x "$DTPIPE" ]]; then
@@ -114,7 +115,7 @@ case "${1:-}" in
     down) down ;;
     status) status ;;
     seed) mkdir -p "$STATE"; seed ;;
-    smoke) shift; python3 "$LAB/smoke.py" "$URL" "$DTPIPE" "$STATE" "$@" ;;
+    smoke) shift; python3 -u "$LAB/smoke.py" "$URL" "$DTPIPE" "$STATE" "$@" ;;
     ui) python3 "$LAB/tools/ui_check.py" "$URL" "$STATE/ui" ;;
     logs) tail -n 20 -F "$STATE"/logs/*.log ;;
     reset) down; rm -rf "$STATE"; echo "Removed $STATE" ;;

@@ -1,9 +1,13 @@
 # dtpipe distributed lab
 
-A self-contained demonstrator for dtpipe's distributed pipelines: one coordinator and four
-pipeline nodes, each with its own database, run as plain local processes (no container). A web
-page shows a dtpipe job as a graph, lets you cut it, place each piece on a node, deploy the
-fragments and run them, live.
+A self-contained demonstrator for dtpipe's distributed pipelines: one coordinator, four data
+nodes each with its own database, and a runner, run as plain local processes (no container).
+
+Each data node offers **bricks**: reads and writes its owner preconfigured on its database. The
+coordinator's page assembles bricks and processing steps into a pipeline by drag and drop, keeps
+it in a git-backed **library**, places every brick on its node and every other step on the
+runner, deploys the fragments and runs them, live. A second page, the **Lab view**, cuts and
+places a job by hand and injects faults.
 
 The lab **uses** dtpipe and changes nothing in it. It drives the `dtpipe` binary like a user
 (`split`, `--export-job`, `--job`) and hosts `DtPipe.Coordinator` and `DtPipe.PipelineNode` as
@@ -18,7 +22,7 @@ NuGet cache (the same requirement as `DtPipe.Coordinator`), and a built binary:
 ./build.sh                          # at the repository root: produces dist/release/dtpipe
 cd samples/distributed-lab
 ./lab.sh up                         # build, seed the four databases, start everything
-open http://127.0.0.1:5180          # the page
+open http://127.0.0.1:5180          # the coordinator's page; the Lab view is /lab.html
 ./lab.sh smoke                      # every pipeline, distributed, against its witness
 ./lab.sh down
 ```
@@ -27,8 +31,8 @@ open http://127.0.0.1:5180          # the page
 |---|---|
 | `./lab.sh up` | builds the lab, seeds the databases on first use, starts the coordinator then the nodes |
 | `./lab.sh status` | which processes run, and what the coordinator sees of each node |
-| `./lab.sh smoke [id…]` | runs the end-to-end check, optionally on some pipelines only |
-| `./lab.sh ui` | opens the page in headless Chrome, renders every pipeline, screenshots to `.state/ui/` |
+| `./lab.sh smoke [lab\|library] [id…]` | runs the end-to-end check, optionally one pass or some pipelines only |
+| `./lab.sh ui` | drives both pages in headless Chrome, a designer scenario included; screenshots to `.state/ui/` |
 | `./lab.sh seed` | rebuilds the databases (`LAB_SCALE=5` multiplies the row counts) |
 | `./lab.sh logs` | follows every log |
 | `./lab.sh down` / `reset` | stops everything / also deletes `.state/` |
@@ -36,7 +40,7 @@ open http://127.0.0.1:5180          # the page
 `LAB_PORT` changes the port (default `5180`), `DTPIPE` the binary. Everything the lab writes lives
 under `.state/`: databases, fragment jobs, plans, logs, build output.
 
-## The four nodes
+## The nodes
 
 | Node | Group | Database | Holds |
 |---|---|---|---|
@@ -44,16 +48,48 @@ under `.state/`: databases, fragment jobs, plans, logs, build output.
 | node-2 | `sales` | DuckDB `sales.duckdb` | `orders` (300 000, current year) |
 | node-3 | `catalog` | SQLite `catalog.sqlite` | `products` (500), `legacy_orders` (100 000) |
 | node-4 | `warehouse` | DuckDB `warehouse.duckdb` | nothing until a pipeline writes it |
+| runner-1 | `runner` | none | every step between the bricks |
+
+Each data node's bricks are in its `nodes/<node>.json`, under `bricks`: a source is an `input`
+and its reader options, a sink an `output` and its writer options (a table, a strategy, a key).
+The node inspects each source's schema itself (`dtpipe inspect`) and reads previews on request:
+the coordinator never opens a brick's database.
 
 `seed/seed.sh` builds them with dtpipe itself (`generate:`, `--fake`, a DuckDB `--sql`);
 row-seeded fakes and hashed values make every seed identical. A node publishes its database as an
 environment variable (`LAB_CRM_DB`, …) that its `dtpipe` children inherit, so a job names
 `sqlite:${{LAB_CRM_DB}}` and never a path: the fragment runs against whichever node hosts it.
 
-`flow-matrix.json` says which group may send to which. `crm` and `sales` may feed `catalog` and
-`warehouse`, `catalog` may feed `warehouse`, and nothing leaves `warehouse`.
+`flow-matrix.json` says which group may send to which: every data group may feed the `runner`,
+the `runner` feeds `warehouse`, and the direct links the Lab view's scenarios use stay.
 
-## Scenarios
+## The coordinator's page
+
+| View | Does |
+|---|---|
+| Nodes | every node, its bricks (schema, version, preview), the fragments it hosts, the flow matrix |
+| Library | the pipelines kept, their plan and deployment state, last run, git history, diff, restore, import (YAML or a command line) |
+| Designer | a palette of bricks and steps (Transform, SQL, Merge), a canvas wired port to port, an inspector per card, the composed YAML to copy or edit |
+| Distribution | the plan placed automatically, drawn in lanes (sources, runner, sinks); save it, deploy, run |
+| Runs | deployments, the run in flight and the queue, the journal with each run's report, node events, a query on any database |
+
+**A pipeline is a plain dtpipe job**, one branch per card, that also runs whole on one machine
+(`smoke.py` uses it as the witness). A branch *is* a brick when its content equals the brick's:
+no reference in the YAML, and a brick its owner changes stops matching. Importing a job takes
+each branch apart around the bricks it contains (a branch reading a brick, transforming, then
+writing a brick becomes three cards).
+
+**Distribution is automatic**: a brick runs on its node, every other branch on the runner, and a
+source wired straight into a sink goes directly, without the runner. `PlanBuilder` then builds
+the fragments exactly as for a placement chosen by hand. A saved plan records the hash of the job
+it came from; a job changed since is refused at deployment until it is distributed again.
+
+**The library** is a git repository under `.state/library`, started from `library-seed/`: each
+save and each saved plan is a commit. Several pipelines may be deployed at once; their runs wait
+in one queue, since the coordinator runs one at a time. Finished runs are kept in `.state/runs/`.
+
+
+## Lab view scenarios (`/lab.html`)
 
 | Pipeline | Shows | Try |
 |---|---|---|
@@ -76,16 +112,19 @@ between the witness and the lab's warehouse.
  browser ──HTTP / SSE──▶ Lab.Coordinator :5180
                           ├─ AddCoordinatorHub()  TransportR hub: registry, admission, runs, bytes
                           ├─ /lab                 the lab's control channel to the node hosts
-                          └─ /api                 catalog, plan, deploy, run, query, events
+                          ├─ /api                 bricks, design, library, plan, deploy, runs, events
+                          └─ DeploymentManager    deployments, the run queue, re-arming
                                   ▲                      ▲
                    /lab (SignalR) │                      │ TransportR (Arrow IPC bytes)
-      ┌───────────────┬───────────┴───┬───────────────┬──┴────────────┐
-      │ node-1        │ node-2        │ node-3        │ node-4        │  Lab.NodeHost
-      │ PipelineNode ×n, one per fragment deployed here, each running a dtpipe child │
-      └───────────────┴───────────────┴───────────────┴───────────────┘
+      ┌─────────────┬─────────────┼─────────────┬────────┴────┬─────────────┐
+      │ node-1      │ node-2      │ node-3      │ node-4      │ runner-1    │  Lab.NodeHost
+      │ bricks, and a PipelineNode per fragment deployed here, each running a dtpipe child │
+      └─────────────┴─────────────┴─────────────┴─────────────┴─────────────┘
 ```
 
-**Planning** (`PlanBuilder`) turns a monolithic job into one fragment per node, in two steps:
+**Planning** (`PlanBuilder`) turns a monolithic job into one fragment per node, in two steps; the
+Lab view gives it cuts and a placement, the Distribution view only the placement `AutoPlacer`
+chose:
 
 1. *Cuts inside a branch* are `dtpipe split --at k`. The lab keeps both halves as dtpipe wrote
    them, so where each option lands, and the secret check, stay dtpipe's decisions.
@@ -111,8 +150,12 @@ afterwards (a fresh instance each) before it accepts the next run.
   and the query panel opens a node's file from the coordinator's process.
 - `PipelineNode` connects without TransportR groups, so every node shares one runtime group; the
   per-node matrix is enforced on the plan, not on each transfer.
-- One deployed plan and one run at a time, as `RunOrchestrator` allows; no persistence across a
-  coordinator restart.
+- One run at a time, as `RunOrchestrator` allows: runs queue. Deployments do not survive a
+  coordinator restart; the library and the run journal do.
+- Cancelling a run reaches a fragment's outbound relay only on its next write: a fragment whose
+  child emits late (a SQL join over a slow source) holds the verdict until then.
+- The designer knows a source brick's columns, not those after a step: dtpipe offers no schema of
+  a job's branch without running it.
 - `lab.sh` needs bash. The node host itself uses no POSIX-only API, but the lab is not tested on
   Windows.
 - `--compute` and the other JavaScript transformers retain memory per row; keep their volumes
@@ -122,10 +165,18 @@ afterwards (a fresh instance each) before it accepts the next run.
 
 | Endpoint | |
 |---|---|
-| `GET /api/nodes`, `/api/pipelines`, `/api/flow-matrix`, `/api/state` | what the page draws |
-| `POST /api/plan` | `{pipelineId, yaml, cuts, placement}` → units, fragments, edges, errors |
-| `POST /api/deploy` | the same body; plans, then deploys (409 if not deployable) |
-| `POST /api/runs`, `/api/runs/cancel` | `{pins: {fragment: version}}` optional |
+| `GET /api/nodes`, `/api/bricks`, `/api/flow-matrix`, `/api/pipelines`, `/api/state` | what the pages draw |
+| `POST /api/bricks/{node}/{id}/preview` | a few rows, read by the node that owns the brick |
+| `POST /api/design/compose`, `/decompose`, `/validate` | cards → job, job → cards, `dtpipe --dry-run 1` over the job |
+| `GET /api/library` · `GET`/`PUT`/`DELETE /api/library/{id}` | pipelines; `PUT {yaml, layout, message}` commits |
+| `GET /api/library/{id}/history`, `/at/{commit}` | commits; the job, layout and diff at one |
+| `POST /api/library/{id}/distribute` | `{save?, message?}` → the automatic plan, saved as a commit on request |
+| `POST /api/library/{id}/deploy` | deploys the saved plan (409 if the job changed since) |
+| `POST /api/plan` | Lab view: `{pipelineId, yaml, cuts, placement}` → units, fragments, edges, errors |
+| `POST /api/deploy` | Lab view: the same body; plans, then deploys (409 if not deployable) |
+| `GET /api/deployments` · `DELETE /api/deployments/{id}` | what is deployed; undeploy |
+| `POST /api/runs` · `GET /api/runs`, `/api/runs/queue` | `{pipelineId?, pins?}` queues a run; the journal; in flight and queued |
+| `POST /api/runs/cancel` | `{runId?}`: the run in flight, or a queued one |
 | `POST /api/fragments/{name}/kill`, `/variant` | fault injection |
 | `POST /api/pipelines/from-command` | `{args: [...]}` → YAML through `--export-job` |
 | `POST /api/query` | `{variable, sql}` → CSV of a node's database |

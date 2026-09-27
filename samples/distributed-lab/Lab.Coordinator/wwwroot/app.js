@@ -1,5 +1,7 @@
-// The lab page: a thin client over /api. The coordinator plans, deploys and judges; this page only
-// draws what it returns and sends the user's cuts and placement back.
+// The Lab view: a thin client over /api. The coordinator plans, deploys and judges; this page only
+// draws what it returns and sends the user's cuts and placement back. Other pipelines may be
+// deployed and run from the coordinator's own views meanwhile: this page follows only the one it
+// deployed.
 "use strict";
 
 const state = {
@@ -53,7 +55,7 @@ function signature(plan) {
 }
 
 const isDeployedLayout = () => !!state.deployed && !!state.plan && state.plan.fragments.length > 0 && signature(state.plan) === signature(state.deployed);
-const isRunning = () => state.run?.state === "running";
+const isRunning = () => ["running", "queued"].includes(state.run?.state);
 
 let planSeq = 0;
 let planTimer = null;
@@ -413,12 +415,14 @@ function connectEvents() {
         renderAll();
         break;
       case "deploy":
+        if (state.deployed && data.pipelineId !== state.deployed.pipelineId) break;
         state.deployState = data.state;
         if (data.state === "failed") addLog({ node: "lab", level: "Error", message: `deployment: ${data.message}` });
         renderPlan();
         renderStatus();
         break;
       case "run":
+        if (state.deployed && data.pipelineId && data.pipelineId !== state.deployed.pipelineId) break;
         state.run = data;
         if (data.state !== "running") {
           state.history = [data, ...state.history.filter((h) => h.runId !== data.runId)].slice(0, 20);
@@ -593,9 +597,9 @@ function bind() {
   });
   $("run-btn").addEventListener("click", async () => {
     const pins = Object.fromEntries(Object.entries(state.pins).filter(([, v]) => v));
-    try { state.run = await api("/api/runs", { pins }); renderAll(); } catch (e) { toast(e.message); }
+    try { state.run = await api("/api/runs", { pins, pipelineId: state.deployed?.pipelineId }); renderAll(); } catch (e) { toast(e.message); }
   });
-  $("cancel-btn").addEventListener("click", () => api("/api/runs/cancel", {}).catch((e) => toast(e.message)));
+  $("cancel-btn").addEventListener("click", () => api("/api/runs/cancel", { runId: state.run?.runId }).catch((e) => toast(e.message)));
 
   $("query-dataset").addEventListener("change", defaultQuery);
   $("query-btn").addEventListener("click", runQuery);

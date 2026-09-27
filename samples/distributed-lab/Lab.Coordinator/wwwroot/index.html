@@ -3,111 +3,30 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>dtpipe distributed lab</title>
+  <title>dtpipe coordinator</title>
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="app.css">
 </head>
-<body>
+<body class="app">
   <header class="topbar">
-    <div class="brand">dtpipe <span>distributed lab</span></div>
+    <div class="brand">dtpipe <span>coordinator</span></div>
+    <nav class="nav" id="nav">
+      <a href="#/nodes" data-view="nodes">Nodes</a>
+      <a href="#/library" data-view="library">Library</a>
+      <a href="#/designer" data-view="designer">Designer</a>
+      <a href="#/distribution" data-view="distribution">Distribution</a>
+      <a href="#/runs" data-view="runs">Runs</a>
+      <a href="lab.html" class="external" title="The expert view: cut branches, place them by hand, inject faults">Lab ↗</a>
+    </nav>
     <div class="status">
       <span id="conn" class="pill off">disconnected</span>
-      <span id="deploy-state" class="pill">nothing deployed</span>
+      <span id="nodes-pill" class="pill">0 nodes</span>
+      <span id="runs-pill" class="pill">no run</span>
       <span id="bytes" class="pill mono">hub 0 B</span>
     </div>
   </header>
-
-  <main class="layout">
-    <aside class="sidebar">
-      <section>
-        <h2>Nodes</h2>
-        <div id="nodes"></div>
-      </section>
-      <section>
-        <h2>Flow matrix</h2>
-        <p class="hint">Which node group may send to which. Checked on every plan.</p>
-        <div id="matrix"></div>
-      </section>
-    </aside>
-
-    <section class="workspace">
-      <div class="card pipeline-bar">
-        <div class="row">
-          <label for="pipeline-select">Pipeline</label>
-          <select id="pipeline-select"></select>
-          <button id="toggle-yaml" class="ghost">Edit YAML</button>
-          <button id="toggle-command" class="ghost">From a command line</button>
-          <button id="reset-layout" class="ghost" title="Back to the catalog's proposed cuts and placement">Reset layout</button>
-        </div>
-        <p id="pipeline-description" class="hint"></p>
-        <div id="yaml-editor" hidden>
-          <textarea id="yaml-text" spellcheck="false" rows="14"></textarea>
-          <div class="row"><button id="apply-yaml">Apply</button><span class="hint">A job file: one top-level key per branch alias.</span></div>
-        </div>
-        <div id="command-editor" hidden>
-          <input id="command-text" class="mono" spellcheck="false"
-                 placeholder="-i sqlite:${{LAB_CRM_DB}} -q &quot;SELECT * FROM customers&quot; -o duck:${{LAB_WAREHOUSE_DB}} --table t">
-          <div class="row"><button id="apply-command">Convert with --export-job</button><span class="hint">dtpipe arguments, without the binary name. Quote as in a shell.</span></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-head">
-          <h2>Pipeline graph</h2>
-          <div class="legend">
-            <span><i class="sw memory"></i>same node (memory)</span>
-            <span><i class="sw network"></i>arrow edge between nodes</span>
-            <span><i class="sw forbidden"></i>refused by the flow matrix</span>
-            <span><i class="sw cut">✂</i>cut point (dtpipe split)</span>
-          </div>
-        </div>
-        <p class="hint">Pick a node for each branch. Click ✂ between two stages of a source branch to cut it there; its head then runs on a node of its own.</p>
-        <div id="graph" class="graph"></div>
-      </div>
-
-      <div class="grid2">
-        <div class="card">
-          <div class="card-head">
-            <h2>Plan</h2>
-            <div class="actions">
-              <button id="deploy-btn">Deploy</button>
-              <button id="run-btn" class="primary">Run</button>
-              <button id="cancel-btn" class="danger ghost">Cancel run</button>
-            </div>
-          </div>
-          <div id="plan"></div>
-        </div>
-        <div class="card">
-          <div class="card-head"><h2>Run</h2></div>
-          <div id="run"></div>
-          <h3>History</h3>
-          <div id="history"></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-head"><h2>Look into a node's database</h2></div>
-        <div class="row">
-          <select id="query-dataset"></select>
-          <input id="query-sql" class="mono grow" spellcheck="false">
-          <button id="query-btn">Query</button>
-        </div>
-        <div id="query-result" class="table-wrap"></div>
-      </div>
-
-      <div class="card">
-        <div class="card-head">
-          <h2>Events</h2>
-          <div class="actions">
-            <select id="log-filter"><option value="">all nodes</option></select>
-            <label class="check"><input type="checkbox" id="log-debug"> child stderr</label>
-            <button id="log-clear" class="ghost">Clear</button>
-          </div>
-        </div>
-        <div id="log" class="log mono"></div>
-      </div>
-    </section>
-  </main>
-
-  <script src="app.js"></script>
+  <main id="view" class="view"></main>
+  <div id="toast" class="toast" hidden></div>
+  <script type="module" src="js/main.js"></script>
 </body>
 </html>

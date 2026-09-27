@@ -1,8 +1,9 @@
 {
   "groups": {
-    "crm": ["catalog", "warehouse"],
-    "sales": ["catalog", "warehouse"],
-    "catalog": ["warehouse"],
+    "crm": ["catalog", "warehouse", "runner"],
+    "sales": ["catalog", "warehouse", "runner"],
+    "catalog": ["warehouse", "runner"],
+    "runner": ["warehouse"],
     "warehouse": []
   }
 }

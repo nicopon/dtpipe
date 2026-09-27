@@ -1,0 +1,6 @@
+{
+  "name": "runner-1",
+  "group": "runner",
+  "role": "runner",
+  "description": "Runner - no database, carries every step between the bricks"
+}

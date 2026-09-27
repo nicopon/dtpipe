@@ -1,0 +1,30 @@
+# Slow sensor stream
+# 300,000 readings generated on the runner at 10,000 rows/s (about 30 s), enriched with the
+# customers' country, loaded into the warehouse. Long enough to watch a run, or to cancel it.
+# lab-check: SELECT count(*) AS n, sum(reading_id) AS ids, round(sum(value), 1) AS total FROM sensor_readings
+readings:
+  input: generate:300000
+  provider-options:
+    generate:
+      rows-per-second: 10000
+customers:
+  input: sqlite:${{LAB_CRM_DB}}
+  provider-options:
+    sqlite-reader:
+      query: SELECT customer_id, country FROM customers
+enrich:
+  from: readings
+  ref:
+  - customers
+  provider-options:
+    sql:
+      query: |-
+        SELECT r.GenerateIndex AS reading_id, c.country, (r.GenerateIndex * 37) % 1000 / 10.0 AS value
+        FROM readings r JOIN customers c ON c.customer_id = 1 + r.GenerateIndex % 20000
+load:
+  from: enrich
+  output: duck:${{LAB_WAREHOUSE_DB}}
+  provider-options:
+    duck-writer:
+      table: sensor_readings
+      strategy: Recreate

@@ -84,6 +84,22 @@ class Browser:
             if self.js(expr): return True
             time.sleep(0.25)
         return False
+    def mouse(self, kind, x, y):
+        self.cmd("Input.dispatchMouseEvent", type=kind, x=x, y=y, button="left",
+                 buttons=0 if kind == "mouseReleased" else 1, clickCount=1, pointerType="mouse")
+    def drag(self, a, b, steps=10):
+        """Presses at a, moves to b in steps, releases: what a user's drag sends to pointer handlers."""
+        self.mouse("mouseMoved", *a); self.mouse("mousePressed", *a)
+        for i in range(1, steps + 1):
+            self.mouse("mouseMoved", a[0] + (b[0] - a[0]) * i / steps, a[1] + (b[1] - a[1]) * i / steps)
+        self.mouse("mouseReleased", *b)
+    def center(self, selector):
+        """Viewport centre of the first element matching selector, scrolled into view first."""
+        r = self.js(f"(() => {{ const e = document.querySelector({json.dumps(selector)}); if (!e) return null;"
+                    " e.scrollIntoView({block: 'nearest', inline: 'nearest'}); const b = e.getBoundingClientRect();"
+                    " return [b.left + b.width / 2, b.top + b.height / 2]; })()")
+        if r is None: raise RuntimeError(f"no element matches {selector}")
+        return r
     def shot(self, path, full=True):
         params = {"format": "png"}
         if full:

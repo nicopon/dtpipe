@@ -1,13 +1,23 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using DtPipe.Lab.Contracts;
 
 namespace DtPipe.Lab.NodeHost;
 
 public sealed record DatasetConfig(string Variable, string Engine, string File, string Description);
 
-/// <summary>A node's identity and the databases it hosts, read from <c>nodes/&lt;name&gt;.json</c>.</summary>
-public sealed record NodeConfig(string Name, string Group, string Description, IReadOnlyList<DatasetConfig> Datasets)
+/// <summary>A brick as the node's file declares it: <see cref="Branch"/> is a piece of a dtpipe branch.</summary>
+public sealed record BrickConfig(string Id, BrickKind Kind, string Title, string? Description, JsonElement Branch);
+
+/// <summary>A node's identity, the databases it hosts and the bricks it offers, read from <c>nodes/&lt;name&gt;.json</c>.</summary>
+public sealed record NodeConfig(
+    string Name, string Group, string Description, IReadOnlyList<DatasetConfig>? Datasets, NodeRole Role = NodeRole.Data,
+    IReadOnlyList<BrickConfig>? Bricks = null)
 {
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new JsonStringEnumConverter() },
+    };
 
     public static NodeConfig Load(string path) =>
         JsonSerializer.Deserialize<NodeConfig>(File.ReadAllText(path), Json)

@@ -4,5 +4,23 @@
   "description": "CRM - SQLite",
   "datasets": [
     { "variable": "LAB_CRM_DB", "engine": "sqlite", "file": "crm.sqlite", "description": "customers" }
+  ],
+  "bricks": [
+    {
+      "id": "customers", "kind": "source", "title": "Customers, every column",
+      "description": "Personal data included: whoever reads this brick receives names and emails.",
+      "branch": {
+        "input": "sqlite:${{LAB_CRM_DB}}",
+        "provider-options": { "sqlite-reader": { "query": "SELECT customer_id, first_name, last_name, email, city, country, signup_date FROM customers" } }
+      }
+    },
+    {
+      "id": "customer-countries", "kind": "source", "title": "Customer countries",
+      "description": "customer_id and country only: no personal data leaves the CRM.",
+      "branch": {
+        "input": "sqlite:${{LAB_CRM_DB}}",
+        "provider-options": { "sqlite-reader": { "query": "SELECT customer_id, country FROM customers" } }
+      }
+    }
   ]
 }

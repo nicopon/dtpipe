@@ -7,9 +7,9 @@ using Microsoft.Extensions.Logging.Console;
 namespace DtPipe.Lab.NodeHost;
 
 /// <summary>
-/// One lab node: announces the databases it hosts, and keeps every fragment the coordinator
-/// deploys on it registered through its own <see cref="FragmentSupervisor"/>. Commands are applied
-/// one at a time, in arrival order.
+/// One lab node: announces the databases it hosts and the bricks it offers, and keeps every
+/// fragment the coordinator deploys on it registered through its own <see cref="FragmentSupervisor"/>.
+/// Commands are applied one at a time, in arrival order; a brick preview answers outside that queue.
 /// </summary>
 public sealed class NodeHost : IAsyncDisposable
 {
@@ -17,6 +17,7 @@ public sealed class NodeHost : IAsyncDisposable
     private readonly NodeConfig _config;
     private readonly string _fragmentsDir;
     private readonly IReadOnlyList<DatasetInfo> _datasets;
+    private readonly BrickHost _bricks;
     private readonly LabLogForwarder _forwarder = new();
     private readonly ILogger _logger;
     private readonly ILoggerFactory _hostLoggerFactory;
@@ -35,7 +36,7 @@ public sealed class NodeHost : IAsyncDisposable
 
         // The dtpipe child inherits this process's environment, so a fragment written against
         // ${{LAB_CRM_DB}} resolves to this node's own copy of the database.
-        _datasets = config.Datasets
+        _datasets = (config.Datasets ?? [])
             .Select(d => new DatasetInfo(d.Variable, d.Engine, Path.GetFullPath(Path.Combine(dataDir, d.File)), d.Description))
             .ToList();
         foreach (var dataset in _datasets)
@@ -43,6 +44,7 @@ public sealed class NodeHost : IAsyncDisposable
 
         _hostLoggerFactory = CreateLoggerFactory(fragment: null);
         _logger = _hostLoggerFactory.CreateLogger($"node.{config.Name}");
+        _bricks = new BrickHost(config, options, _logger);
     }
 
     public async Task RunAsync(CancellationToken ct)
@@ -56,7 +58,12 @@ public sealed class NodeHost : IAsyncDisposable
         _hub.On<string>(LabHubMethods.Undeploy, f => Enqueue(() => UndeployAsync(f)));
         _hub.On<string, string>(LabHubMethods.Rearm, (f, generation) => Enqueue(() => RearmAsync(f, generation, ct)));
         _hub.On<string>(LabHubMethods.Kill, f => Enqueue(() => KillAsync(f)));
+        _hub.On<string, int, BrickPreview>(LabHubMethods.PreviewBrick, (id, rows) => _bricks.PreviewAsync(id, rows));
         _hub.Reconnected += async _ => await AnnounceAsync();
+
+        // Schemas are inspected before the first announcement, so the coordinator never shows a
+        // brick without the columns its node could read.
+        await _bricks.InspectAsync(ct);
 
         while (!ct.IsCancellationRequested)
         {
@@ -73,7 +80,8 @@ public sealed class NodeHost : IAsyncDisposable
         }
 
         await AnnounceAsync();
-        _logger.LogInformation("Node {Name} ({Group}) connected to {Url}", _config.Name, _config.Group, _options.CoordinatorUrl);
+        _logger.LogInformation("Node {Name} ({Group}, {Role}, {Bricks} brick(s)) connected to {Url}",
+            _config.Name, _config.Group, _config.Role, _bricks.Bricks.Count, _options.CoordinatorUrl);
 
         await foreach (var line in _forwarder.Reader.ReadAllAsync(ct))
         {
@@ -86,7 +94,7 @@ public sealed class NodeHost : IAsyncDisposable
     private async Task AnnounceAsync()
     {
         await _hub.InvokeAsync(LabHubMethods.Announce,
-            new NodeAnnouncement(_config.Name, _config.Group, _config.Description, _datasets));
+            new NodeAnnouncement(_config.Name, _config.Group, _config.Description, _datasets, _config.Role, _bricks.Bricks));
 
         FragmentStatus[] statuses;
         await _commands.WaitAsync();
