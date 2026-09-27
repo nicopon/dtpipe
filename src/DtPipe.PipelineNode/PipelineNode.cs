@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO.Pipes;
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -155,6 +156,7 @@ public sealed class PipelineNode : IAsyncDisposable
 
         loggerFactory ??= NullLoggerFactory.Instance;
         var logger = loggerFactory.CreateLogger<PipelineNode>();
+        var version = ComputeFragmentVersion(options.FragmentJobPath);
 
         PipelineNode? node = null;
         var client = BuildClient(options, loggerFactory, controlConnectionSetup: conn =>
@@ -183,7 +185,7 @@ public sealed class PipelineNode : IAsyncDisposable
             // disconnect grace period lapses and declares the fragment lost outright.
             conn.Reconnected += async _ =>
             {
-                await ReRegisterWithRetryAsync(conn, fragmentName, logger);
+                await ReRegisterWithRetryAsync(conn, fragmentName, version, logger);
                 await node!.RetryPendingExitedReportAsync();
             };
         });
@@ -193,9 +195,22 @@ public sealed class PipelineNode : IAsyncDisposable
         client.OnTransferStarted += node.HandleTransferStarted;
 
         await client.ConnectAsync(cancellationToken: ct);
-        await client.ControlConnection.InvokeAsync("Register", fragmentName, ct);
+        await client.ControlConnection.InvokeAsync("Register", fragmentName, version, ct);
 
         return node;
+    }
+
+    /// <summary>
+    /// This fragment's own identity: the SHA-256 hash of its job YAML's bytes, hex-encoded - cheap
+    /// and requires no sample run, unlike the contract hash (a different, out-of-scope concept: it
+    /// hashes the executed schema, not the file). The coordinator's instance alignment
+    /// (<c>AdmissionGate.Resolve</c>) compares this string across every live instance of one fragment
+    /// name.
+    /// </summary>
+    private static string ComputeFragmentVersion(string fragmentJobPath)
+    {
+        using var stream = File.OpenRead(fragmentJobPath);
+        return Convert.ToHexStringLower(SHA256.HashData(stream));
     }
 
     /// <summary>Spawns the child and reports this fragment ready for every declared edge to be wired.</summary>
@@ -215,7 +230,7 @@ public sealed class PipelineNode : IAsyncDisposable
     /// attempt fails is deliberate: the coordinator's own disconnect grace period is the backstop,
     /// and it will correctly declare the fragment lost.
     /// </summary>
-    private static async Task ReRegisterWithRetryAsync(HubConnection connection, string fragmentName, ILogger logger)
+    private static async Task ReRegisterWithRetryAsync(HubConnection connection, string fragmentName, string version, ILogger logger)
     {
         const int maxAttempts = 5;
         var delay = TimeSpan.FromMilliseconds(200);
@@ -223,7 +238,7 @@ public sealed class PipelineNode : IAsyncDisposable
         {
             try
             {
-                await connection.InvokeAsync("Register", fragmentName);
+                await connection.InvokeAsync("Register", fragmentName, version);
                 return;
             }
             catch (Exception ex) when (attempt < maxAttempts)

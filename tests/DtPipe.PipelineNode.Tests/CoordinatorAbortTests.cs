@@ -28,7 +28,7 @@ public class CoordinatorAbortTests
 
     private static RunSpec ChainSpec(string runId) => new(
         runId,
-        Fragments: ["A", "B", "C"],
+        Fragments: [new FragmentPin("A"), new FragmentPin("B"), new FragmentPin("C")],
         Edges:
         [
             new RunEdge("A", "out", "B", "in"),
@@ -90,7 +90,7 @@ public class CoordinatorAbortTests
 
         await using var c = host.CreateClient();
         await c.ConnectAsync();
-        await c.ControlConnection.InvokeAsync("Register", "C");
+        await c.ControlConnection.InvokeAsync("Register", "C", "v-test");
 
         var result = await orchestrator.RunAsync(ChainSpec("run-ready-timeout")).WaitAsync(Bound);
 
@@ -159,5 +159,58 @@ public class CoordinatorAbortTests
 
         await Task.WhenAll(a.Completion, c.Completion).WaitAsync(Bound);
         await a.DisposeAsync();
+    }
+
+    /// <summary>
+    /// Two live instances of "A" - the same job, hence the same version, so instance alignment
+    /// passes and admission is free to pick either. <see cref="RunOrchestrator.OnFragmentLost"/>
+    /// (untouched by this lot) already discriminates a <c>FragmentLost</c> report by comparing its
+    /// ClientId against the one this run actually admitted; this proves that path for real, against a
+    /// fragment name with more than one live instance - the shape the pre-lot <c>NodeRegistry</c>
+    /// could not even represent.
+    /// </summary>
+    [Fact]
+    public async Task ANonSelectedInstanceOfAnAlignedFragmentName_CanDropWithoutAffectingAnInFlightRun()
+    {
+        using var fixture = ChainFixture.Create(rowCount: 1_000);
+        await using var host = await CoordinatorTestHost.StartAsync(
+            o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] },
+            services => services.AddSingleton(new NodeRegistryOptions { DisconnectGracePeriod = TimeSpan.FromMilliseconds(300) }));
+        var orchestrator = host.Host.Services.GetRequiredService<IRunOrchestrator>();
+        var registry = host.Host.Services.GetRequiredService<INodeRegistry>();
+
+        var a1 = await ConnectNode(host, fixture.FragmentAJobPath, "A", new EdgeBinding("out", EdgeDirection.Outbound));
+        var a2 = await ConnectNode(host, fixture.FragmentAJobPath, "A", new EdgeBinding("out", EdgeDirection.Outbound));
+        await using var b = await ConnectNode(host, fixture.FragmentBJobPath, "B",
+            new EdgeBinding("in", EdgeDirection.Inbound), new EdgeBinding("out", EdgeDirection.Outbound));
+        await using var c = await ConnectNode(host, fixture.FragmentCJobPath, "C", new EdgeBinding("in", EdgeDirection.Inbound));
+
+        var lost = new List<(string Fragment, Guid ClientId)>();
+        registry.FragmentLost += (fragment, clientId) => lost.Add((fragment, clientId));
+
+        var runTask = orchestrator.RunAsync(ChainSpec("run-redundant-a"));
+
+        var deadline = DateTime.UtcNow + Bound;
+        while (!a1.IsLaunched && !a2.IsLaunched)
+        {
+            if (DateTime.UtcNow > deadline) throw new TimeoutException("neither instance of A was ever launched");
+            await Task.Delay(10);
+        }
+        // Whichever of the two admission happened to pick keeps running the actual chain; the other
+        // never receives Launch at all, and is the one this test drops.
+        var (selected, notSelected) = a1.IsLaunched ? (a1, a2) : (a2, a1);
+        var notSelectedClientId = notSelected.ClientId;
+
+        await notSelected.DisposeAsync(); // the whole non-selected instance vanishes - never wired, never launched
+        await Task.Delay(500); // past the 300ms grace period configured above
+
+        Assert.Contains(lost, e => e.Fragment == "A" && e.ClientId == notSelectedClientId);
+
+        var result = await runTask.WaitAsync(Bound);
+
+        Assert.Equal(RunOutcome.Succeeded, result.Outcome);
+        Assert.Null(result.Cause);
+
+        await selected.DisposeAsync();
     }
 }

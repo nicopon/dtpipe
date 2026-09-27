@@ -47,7 +47,7 @@ public class JoinTests
         await using var c = await ConnectNode(host, fixture.ConsumerJobPath, "C",
             new EdgeBinding("a", EdgeDirection.Inbound), new EdgeBinding("b", EdgeDirection.Inbound));
 
-        var spec = new RunSpec("run-merge", ["A", "B", "C"],
+        var spec = new RunSpec("run-merge", [new FragmentPin("A"), new FragmentPin("B"), new FragmentPin("C")],
             [new RunEdge("A", "main", "C", "a"), new RunEdge("B", "main", "C", "b")]);
 
         var result = await orchestrator.RunAsync(spec).WaitAsync(Bound);
@@ -74,7 +74,7 @@ public class JoinTests
         await using var c = await ConnectNode(host, fixture.ConsumerJobPath, "C",
             new EdgeBinding("orders", EdgeDirection.Inbound), new EdgeBinding("customers", EdgeDirection.Inbound));
 
-        var spec = new RunSpec("run-join", ["A", "B", "C"],
+        var spec = new RunSpec("run-join", [new FragmentPin("A"), new FragmentPin("B"), new FragmentPin("C")],
             [new RunEdge("A", "main", "C", "orders"), new RunEdge("B", "main", "C", "customers")]);
 
         var result = await orchestrator.RunAsync(spec).WaitAsync(Bound);
@@ -107,7 +107,7 @@ public class JoinTests
         await using var c = await ConnectNode(host, fixture.ConsumerJobPath, "C",
             new EdgeBinding("orders", EdgeDirection.Inbound), new EdgeBinding("customers", EdgeDirection.Inbound));
 
-        var spec = new RunSpec("run-join-kill", ["A", "B", "C"],
+        var spec = new RunSpec("run-join-kill", [new FragmentPin("A"), new FragmentPin("B"), new FragmentPin("C")],
             [new RunEdge("A", "main", "C", "orders"), new RunEdge("B", "main", "C", "customers")]);
 
         var runTask = orchestrator.RunAsync(spec);

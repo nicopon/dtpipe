@@ -47,23 +47,19 @@ public class CoordinatorHub : CommandHub
     }
 
     /// <summary>
-    /// Declares this connection's fragment - the admission barrier's inventory entry. The caller's
-    /// identity comes from its TransportR registration (<see cref="IStateStore"/>), never from an
-    /// argument: <c>Connect</c> always precedes <c>Register</c> on the single connection a node
-    /// holds.
+    /// Declares this connection's fragment instance and its version - the admission barrier's
+    /// inventory entry. The caller's identity comes from its TransportR registration
+    /// (<see cref="IStateStore"/>), never from an argument: <c>Connect</c> always precedes
+    /// <c>Register</c> on the single connection a node holds. Never refuses on a name already held by
+    /// another live connection - a second, distinct instance of the same fragment name is legitimate
+    /// (redundancy, horizontal scaling); whether every live instance agrees on version is checked at
+    /// admission, not here.
     /// </summary>
-    public async Task Register(string fragmentName)
+    public async Task Register(string fragmentName, string version)
     {
         var client = await _stateStore.GetClientByConnectionIdAsync(Context.ConnectionId)
             ?? throw new HubException("Register: call Connect first.");
-        try
-        {
-            _nodeRegistry.Register(client.ClientId, Context.ConnectionId, fragmentName);
-        }
-        catch (InvalidOperationException ex)
-        {
-            throw new HubException(ex.Message);
-        }
+        _nodeRegistry.Register(client.ClientId, Context.ConnectionId, fragmentName, version);
     }
 
     /// <summary>The fragment's child process is spawned and its declared edges can be wired.</summary>

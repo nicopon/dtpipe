@@ -54,13 +54,17 @@ in flight throws instead of queuing.
   the caller's fragment through `INodeRegistry.TryGetByConnection(Context.ConnectionId)`, seeded by
   that `Register` call, never trusting a fragment name passed as an argument at that point.
   `[local: NodeRegistryTests]`
-- **`NodeRegistry` refuses a fragment name only while it is held by another *live* connection.** A
-  disconnected entry stays reclaimable by any `ClientId` for its disconnect grace period (see below),
-  and a *live* entry's own `ClientId` reclaiming under a new `ConnectionId` is always allowed too -
-  the reconnect's `Register` can land before that same connection's own `OnDisconnectedAsync` has
-  run. `Unregister` only ever drops the entry it still owns - a disconnect and the re-registration
-  that replaces it race by nature, and a stale `Unregister` that removed by name alone would orphan
-  the connection that had already reclaimed it. `[local: NodeRegistryTests]`
+- **`NodeRegistry` never refuses a fragment name - it tracks one entry per (fragment name, `ClientId`)
+  pair, not one per name.** A second, previously-unseen `ClientId` registering an already-live name is
+  a new, additional instance (redundancy, horizontal scaling), never a collision; whether every live
+  instance of a name agrees on version is instance alignment, checked at admission
+  (`AdmissionGate.Resolve`, see "Versions" below), not here. A disconnected instance stays reclaimable
+  by its own `ClientId` for its disconnect grace period (see below), and a *live* instance's own
+  `ClientId` reclaiming under a new `ConnectionId` is always allowed too - the reconnect's `Register`
+  can land before that same connection's own `OnDisconnectedAsync` has run. `Unregister` only ever
+  drops the entry it still owns - a disconnect and the re-registration that replaces it race by
+  nature, and a stale `Unregister` that removed by name alone would orphan the connection that had
+  already reclaimed it. `[local: NodeRegistryTests]`
 - **A 0 exit code is not proof of delivery.** `DetermineOutcome` also compares each edge's two row
   counts (`RunResult.EdgeCounts`) and fails the run, naming the edge, on a mismatch even when every
   fragment reported 0 - a fragment attests its own process, not what its peer received. A count
@@ -73,22 +77,25 @@ in flight throws instead of queuing.
   coordinator itself told to `Cancel` is excluded from both cause and consequence: its own child was
   killed on command, and reports a plain non-zero `Local` exit indistinguishable on the wire from an
   organic one. `[local: RunOrchestratorTests, CoordinatorDrivenTests]`
-- **A fragment absent from the reports is never read as success.** `DetermineOutcome` takes
-  `RunSpec.Fragments` as well as the reports collected so far, precisely so a fragment that never
-  reported `Exited` at all - the pair muet case, distinct from one that reported a fault - is still
-  named as the cause even when everyone who *did* report is at 0. `[local: RunOrchestratorTests]`
-- **A dropped connection is a pending loss, not a lost node - until its grace period elapses, or a
-  different `ClientId` takes the name.** `CoordinatorHub.OnDisconnectedAsync` marks the
-  `INodeRegistry` entry rather than dropping it: an ordinary SignalR reconnect (its own default
-  schedule: 0/2/10/30s) must not fail an in-flight run - the earlier attempt that fired an immediate
-  teardown on every disconnect did exactly that. `INodeRegistry.FragmentLost` fires either once the
-  grace period (`NodeRegistryOptions`) elapses with no reclaim, or immediately when a *different*
-  `ClientId` reclaims a still-pending entry (a restarted process, not a reconnect of the same one) -
-  without the second case, that old identity would never be declared lost at all, since the reclaim
-  itself is what would have cancelled its grace timer. `RunOrchestrator` subscribes only once its own
-  run is admitted (an unadmitted fragment is already `AdmissionGate`'s own named refusal, never this
-  event) and compares the reported `ClientId` against the one it admitted, so a name that has moved on
-  to a fresh node is never read as *this* run's own fragment going quiet.
+- **A fragment absent from the reports is never read as success.** `DetermineOutcome` takes the
+  fragment *names* from `RunSpec.Fragments` (versioning is fully resolved by admission time - the
+  outcome rule has no reason to know a pin from a plain name) as well as the reports collected so far,
+  precisely so a fragment that never reported `Exited` at all - the pair muet case, distinct from one
+  that reported a fault - is still named as the cause even when everyone who *did* report is at 0.
+  `[local: RunOrchestratorTests]`
+- **A dropped connection is a pending loss, not a lost instance, until its own grace period
+  elapses.** `CoordinatorHub.OnDisconnectedAsync` marks the `INodeRegistry` entry rather than
+  dropping it: an ordinary SignalR reconnect (its own default schedule: 0/2/10/30s) must not fail an
+  in-flight run - the earlier attempt that fired an immediate teardown on every disconnect did exactly
+  that. Each instance is keyed by (fragment name, `ClientId`) and carries its own grace timer, so a
+  *different* `ClientId` registering the same fragment name never touches another instance's pending
+  grace - it is simply a new, separate entry; a restarted node's old identity just times out on its
+  own schedule like any other drop, while its replacement (if it gets a fresh `ClientId`) registers as
+  an ordinary new instance. `RunOrchestrator` subscribes only once its own run is admitted (an
+  unadmitted fragment is already `AdmissionGate`'s own named refusal, never this event) and compares
+  the reported `ClientId` against the one it admitted, so a name that has moved on to a fresh node -
+  or a *different*, non-selected live instance of the same name dropping (see "Versions" below) - is
+  never read as *this* run's own fragment going quiet.
   `[local: NodeRegistryTests, CoordinatorAbortTests]`
 - **`RunOrchestrator` resolves each `Launch`/`Wire` target's `ConnectionId` fresh, by `ClientId`,
   through `IStateStore.GetClientAsync`** - never from the admission snapshot, and never through
@@ -132,5 +139,35 @@ way, disposing `PipelineNode` in-process) resolves through the data plane's own 
 orderly close, not through `FragmentLost` or `TerminateAsync` - both exist for the harder case, a
 peer that stops responding without ever closing anything, which is not reproducible from an
 in-process test.
+
+## Versions
+
+A fragment's version identifies its own YAML: the SHA-256 hash of `PipelineNodeOptions.FragmentJobPath`'s
+bytes (`PipelineNode`'s own helper, computed once before `Register`) - never the contract hash a
+run's edges are checked against, a separate, still out-of-scope concern. An unpinned
+`FragmentPin` is Docker's own "latest": whichever version the fragment's live instance currently
+reports. Pinning names an exact version; "rollback" is not a separate mechanism, only pinning to a
+version that still - or again - has a live instance behind it
+(`AdmissionGateTests.RollbackIsFree...`).
+
+Instance alignment - every live instance of one fragment name agreeing on version - is checked by
+`AdmissionGate.Resolve` **unconditionally, even for a pinned request**: two disagreeing instances are
+a defect of the peer itself, never something a pin could paper over by picking a side. Per-instance
+version filtering (admit whichever instances happen to match, ignore the rest) was considered and
+rejected: it would make canary-style partial rollout possible, which nothing here needs, and it would
+quietly reopen the "which instance did this run actually use" question the whole design exists to
+close - instance selection stays free (any live instance will do) only because every one of them is
+guaranteed equivalent.
+
+Four distinct admission refusals, each naming the fragment: **absent** (`AdmissionRefusedException`,
+unpinned, no live instance at all) · **unknown version** (`PinnedVersionUnavailableException`,
+`Reason: Unknown`, a pin nobody has ever reported) · **retired version** (same exception,
+`Reason: Retired`, a pin once reported but nothing currently hosts - operationally: redeploy that
+version, or pin to whatever is live) · **misaligned instances**
+(`MisalignedInstancesException`, naming every distinct version found - the reading is "the peers
+hosting this fragment disagree with each other, fix the deployment before retrying, no pin will help").
+`NodeRegistry.HasKnownVersion` is what tells unknown from retired apart; it is never pruned - old
+versions are appended to forever, since retention is a deferred product decision, not this registry's
+job. `[local: NodeRegistryTests, AdmissionGateTests]`
 
 `tests/DtPipe.Coordinator.Tests` is outside `DtPipe.sln`, so CI never runs it.

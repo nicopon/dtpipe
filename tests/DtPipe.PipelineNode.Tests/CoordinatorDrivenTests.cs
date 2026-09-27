@@ -34,7 +34,7 @@ public class CoordinatorDrivenTests
 
     private static RunSpec ChainSpec(string runId) => new(
         runId,
-        Fragments: ["A", "B", "C"],
+        Fragments: [new FragmentPin("A"), new FragmentPin("B"), new FragmentPin("C")],
         Edges:
         [
             new RunEdge("A", "out", "B", "in"),

@@ -10,8 +10,8 @@ public enum FaultOrigin { Local, Remote }
 /// <summary>One flow from a producer fragment's outbound alias to a consumer fragment's inbound alias.</summary>
 public sealed record RunEdge(string ProducerFragment, string ProducerAlias, string ConsumerFragment, string ConsumerAlias);
 
-/// <summary>The fragments a run needs present, and the edges to wire once they are.</summary>
-public sealed record RunSpec(string RunId, IReadOnlyList<string> Fragments, IReadOnlyList<RunEdge> Edges);
+/// <summary>The fragments a run needs present - each optionally pinned to a version, <see cref="FragmentPin"/> - and the edges to wire once they are.</summary>
+public sealed record RunSpec(string RunId, IReadOnlyList<FragmentPin> Fragments, IReadOnlyList<RunEdge> Edges);
 
 /// <summary>What one fragment reported when its own process finished.</summary>
 public sealed record FragmentExitReport(
@@ -145,10 +145,10 @@ public sealed class RunOrchestrator : IRunOrchestrator
         {
             _activeRunId = spec.RunId;
             _ready = spec.Fragments.ToDictionary(
-                f => f, _ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
+                p => p.FragmentName, _ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
                 StringComparer.Ordinal);
             _exited = spec.Fragments.ToDictionary(
-                f => f, _ => new TaskCompletionSource<FragmentExitReport>(TaskCreationOptions.RunContinuationsAsynchronously),
+                p => p.FragmentName, _ => new TaskCompletionSource<FragmentExitReport>(TaskCreationOptions.RunContinuationsAsynchronously),
                 StringComparer.Ordinal);
 
             using var abort = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -197,16 +197,18 @@ public sealed class RunOrchestrator : IRunOrchestrator
             {
                 return CancelledByRequester(spec.Edges);
             }
-            // AdmissionRefusedException propagates unchanged: nothing was launched yet.
+            // AdmissionRefusedException, MisalignedInstancesException and PinnedVersionUnavailableException
+            // all propagate unchanged: nothing was launched yet.
 
             clientIdByFragment = admitted.ToDictionary(n => n.FragmentName, n => n.ClientId, StringComparer.Ordinal);
             _nodeRegistry.FragmentLost += OnFragmentLost;
 
             try
             {
-                foreach (var fragment in spec.Fragments)
+                foreach (var pin in spec.Fragments)
                 {
                     if (abort.IsCancellationRequested) break;
+                    var fragment = pin.FragmentName;
                     var connectionId = await ResolveConnectionIdAsync(clientIdByFragment[fragment]);
                     if (connectionId is null) { lostFragment ??= fragment; abort.Cancel(); break; }
                     try { await _hub.Clients.Client(connectionId).SendAsync("Launch", spec.RunId, abort.Token); }
@@ -222,7 +224,7 @@ public sealed class RunOrchestrator : IRunOrchestrator
                     }
                     catch (TimeoutException)
                     {
-                        lostFragment ??= spec.Fragments.FirstOrDefault(f => !_ready[f].Task.IsCompleted);
+                        lostFragment ??= spec.Fragments.Select(p => p.FragmentName).FirstOrDefault(f => !_ready[f].Task.IsCompleted);
                         abort.Cancel();
                     }
                     catch (OperationCanceledException) { /* ct or FragmentLost already set abort */ }
@@ -290,11 +292,12 @@ public sealed class RunOrchestrator : IRunOrchestrator
                 _nodeRegistry.FragmentLost -= OnFragmentLost;
             }
 
-            var reports = spec.Fragments
+            var fragmentNames = spec.Fragments.Select(p => p.FragmentName).ToList();
+            var reports = fragmentNames
                 .Where(f => _exited[f].Task.IsCompletedSuccessfully)
                 .ToDictionary(f => f, f => _exited[f].Task.Result, StringComparer.Ordinal);
 
-            return DetermineOutcome(reports, spec.Edges, spec.Fragments, cancelledFragments, ct.IsCancellationRequested);
+            return DetermineOutcome(reports, spec.Edges, fragmentNames, cancelledFragments, ct.IsCancellationRequested);
         }
         finally
         {
