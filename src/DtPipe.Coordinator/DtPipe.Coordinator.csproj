@@ -10,23 +10,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Reference Include="TransportR">
-      <HintPath>..\..\lib\TransportR\TransportR.dll</HintPath>
-    </Reference>
-    <Reference Include="TransportR.Hub.SignalR">
-      <HintPath>..\..\lib\TransportR\TransportR.Hub.SignalR.dll</HintPath>
-    </Reference>
-    <Reference Include="TransportR.FlowControl">
-      <HintPath>..\..\lib\TransportR\TransportR.FlowControl.dll</HintPath>
-    </Reference>
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- TransportR.Hub.SignalR's own transitive dependencies; a private Reference does not pull
-         them in the way a PackageReference would, so they are declared here at TransportR's own
-         pinned version (see TransportR.Hub.SignalR.csproj). -->
-    <PackageReference Include="OpenTelemetry" Version="1.19.1" />
-    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.19.1" />
+    <!-- TransportR.FlowControl (DefaultFlowControlService, the plan's edge check) ships inside
+         this package's assembly now; there is no separate TransportR.FlowControl package. -->
+    <PackageReference Include="TransportR" Version="0.1.0" />
+    <PackageReference Include="TransportR.Hub.SignalR" Version="0.1.0" />
   </ItemGroup>
 
 </Project>

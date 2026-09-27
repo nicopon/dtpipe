@@ -14,11 +14,11 @@ between nodes.
   only for a missing transport function. `[unchecked]`
 - Put hosting policy in ASP.NET Core extension points on this side, not in TransportR:
   `PeerToPeerHubFilter` is an `IHubFilter`.
-- TransportR is referenced as compiled DLLs in `lib/TransportR/`. `MANIFEST.md` records the source
-  commit and a hash per file. Refreshing them is a port, not a copy: rebuild, then check each API
-  change against this project and `DtPipe.PipelineNode`.
-- A private `Reference` does not pull in transitive packages. Declare them in the `.csproj` at the
-  version TransportR pins.
+- TransportR is referenced as NuGet packages (`TransportR`, `TransportR.Hub.SignalR`). Bumping the
+  pinned version is a port, not a copy: check each API change against this project and
+  `DtPipe.PipelineNode` before moving it.
+- `DefaultFlowControlService`/`FlowControlOptions` (namespace `TransportR.FlowControl`) ship inside
+  the `TransportR.Hub.SignalR` package; there is no separate `TransportR.FlowControl` package.
 
 ## Hosting
 

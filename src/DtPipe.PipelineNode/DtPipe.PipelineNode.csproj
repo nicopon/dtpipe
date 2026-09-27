@@ -13,24 +13,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Reference Include="TransportR">
-      <HintPath>..\..\lib\TransportR\TransportR.dll</HintPath>
-    </Reference>
-    <Reference Include="TransportR.Client.SignalR">
-      <HintPath>..\..\lib\TransportR\TransportR.Client.SignalR.dll</HintPath>
-    </Reference>
-    <Reference Include="TransportR.Serialization.MessagePack">
-      <HintPath>..\..\lib\TransportR\TransportR.Serialization.MessagePack.dll</HintPath>
-    </Reference>
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- TransportR.Client.SignalR / .Serialization.MessagePack's own transitive dependencies - a
-         private Reference does not pull them in the way a PackageReference would, so they are
-         declared here at the version TransportR itself was built against. -->
-    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.12" />
-    <PackageReference Include="Microsoft.IO.RecyclableMemoryStream" Version="3.0.1" />
-    <PackageReference Include="MessagePack" Version="3.1.10" />
+    <PackageReference Include="TransportR" Version="0.1.0" />
+    <PackageReference Include="TransportR.Client.SignalR" Version="0.1.0" />
+    <PackageReference Include="TransportR.Serialization.MessagePack" Version="0.1.0" />
   </ItemGroup>
 
 </Project>

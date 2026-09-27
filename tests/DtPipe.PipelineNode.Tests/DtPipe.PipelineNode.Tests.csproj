@@ -17,35 +17,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- A plain file Reference does not flow transitively through a ProjectReference, so every
-         TransportR DLL this project or DtPipe.Coordinator touches is declared here directly. -->
-    <Reference Include="TransportR">
-      <HintPath>..\..\lib\TransportR\TransportR.dll</HintPath>
-    </Reference>
-    <Reference Include="TransportR.Hub.SignalR">
-      <HintPath>..\..\lib\TransportR\TransportR.Hub.SignalR.dll</HintPath>
-    </Reference>
-    <Reference Include="TransportR.FlowControl">
-      <HintPath>..\..\lib\TransportR\TransportR.FlowControl.dll</HintPath>
-    </Reference>
-    <Reference Include="TransportR.Client.SignalR">
-      <HintPath>..\..\lib\TransportR\TransportR.Client.SignalR.dll</HintPath>
-    </Reference>
-    <Reference Include="TransportR.Serialization.MessagePack">
-      <HintPath>..\..\lib\TransportR\TransportR.Serialization.MessagePack.dll</HintPath>
-    </Reference>
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- Transitive dependencies of the TransportR DLLs above; a private Reference does not pull
-         them in the way a PackageReference would, so they are declared here at the version
-         TransportR itself was built against. -->
-    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.12" />
-    <PackageReference Include="Microsoft.IO.RecyclableMemoryStream" Version="3.0.1" />
-    <PackageReference Include="MessagePack" Version="3.1.10" />
-    <PackageReference Include="OpenTelemetry" Version="1.19.1" />
-    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.19.1" />
-
+    <!-- Every TransportR package this project, DtPipe.Coordinator and DtPipe.Coordinator.Tests
+         touch flows transitively through the ProjectReferences above; nothing to declare here. -->
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageReference Include="xunit.v3" Version="3.2.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">

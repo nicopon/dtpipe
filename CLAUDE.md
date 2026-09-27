@@ -141,8 +141,8 @@ example to make it checked]`
 | `tests/DtPipe.Tests` | xunit.v3 unit and integration tests |
 
 `DtPipe.Core` holds abstractions, models and the engine only. `DtPipe.Coordinator` and
-`DtPipe.PipelineNode` reference TransportR as DLLs in `lib/TransportR/` and stay outside
-`DtPipe.sln`, so CI never builds or tests them.
+`DtPipe.PipelineNode` reference TransportR as NuGet packages and stay outside `DtPipe.sln`, so CI
+never builds or tests them.
 
 Data flow: `args` → `PipelineLexer.Parse` → `PipelineToJobConverter` → `DagOrchestrator` →
 `LinearPipelineService` → `ExportService.RunExportAsync` → `PipelineExecutor` → `IDataWriter`.
