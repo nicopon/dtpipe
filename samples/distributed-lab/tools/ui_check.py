@@ -46,7 +46,9 @@ def lab_view(browser):
             f"state.plan && state.plan.pipelineId === {pid}"
             " && document.querySelectorAll('.unit').length === state.plan.units.length"
             " && document.querySelectorAll('#plan .frag-card, #plan .msgs').length > 0", 30)
-        errors = browser.js("[...document.querySelectorAll('#log .Error')].map(e => e.textContent)") or []
+        # The page's own errors only: the log also replays node faults, which a run may cause on purpose.
+        errors = browser.js("[...document.querySelectorAll('#log .Error')].filter(e => e.querySelector('.n')?.textContent === 'lab')"
+                            ".map(e => e.textContent)") or []
         shot = browser.shot(os.path.join(OUT, "lab-" + entry["id"] + ".png"))
         units = browser.js("document.querySelectorAll('.unit').length")
         report(rendered and not errors, "lab " + entry["id"], f"{units} units" + (f"  errors: {errors}" if errors else ""), shot)

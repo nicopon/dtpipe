@@ -162,6 +162,62 @@ public class CoordinatorAbortTests
     }
 
     /// <summary>
+    /// A fully wired fragment whose child has nothing to write - here an aggregate over a slow
+    /// source, which emits only once its input ends - never touches its torn-down outbound transfer,
+    /// so that transfer alone cannot fault it. The requester's cancellation must still end the run
+    /// within the grace period, with that fragment reporting a <see cref="FaultOrigin.Remote"/>
+    /// consequence rather than the transfer's own disposal as a local fault.
+    /// </summary>
+    [Fact]
+    public async Task RequesterCancelsWhileAFullyWiredChildIsSilent_EndsWithinTheGracePeriod()
+    {
+        var dir = Directory.CreateTempSubdirectory("pnode-silent-");
+        try
+        {
+            var producerJob = Path.Combine(dir.FullName, "producer.yaml");
+            File.WriteAllText(producerJob,
+                "g:\n  input: generate:100000000\n  provider-options:\n    generate:\n      rows-per-second: 1000\n" +
+                "agg:\n  from: g\n  output: arrow:-\n  provider-options:\n    sql:\n      query: SELECT count(*) AS n FROM g\n");
+            var consumerJob = Path.Combine(dir.FullName, "consumer.yaml");
+            File.WriteAllText(consumerJob, $"main:\n  input: arrow:-\n  output: csv:{Path.Combine(dir.FullName, "out.csv")}\n");
+
+            await using var host = await CoordinatorTestHost.StartAsync(
+                o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] });
+            var orchestrator = host.Host.Services.GetRequiredService<IRunOrchestrator>();
+
+            await using var a = await ConnectNode(host, producerJob, "A", new EdgeBinding("out", EdgeDirection.Outbound));
+            await using var b = await ConnectNode(host, consumerJob, "B", new EdgeBinding("in", EdgeDirection.Inbound));
+
+            using var cts = new CancellationTokenSource();
+            var runTask = orchestrator.RunAsync(new RunSpec("run-silent-cancel",
+                [new FragmentPin("A"), new FragmentPin("B")], [new RunEdge("A", "out", "B", "in")]), cts.Token);
+
+            var deadline = DateTime.UtcNow + Bound;
+            while (!(a.IsLaunched && b.IsLaunched))
+            {
+                if (DateTime.UtcNow > deadline) throw new TimeoutException("A and B were never launched");
+                await Task.Delay(10);
+            }
+            await Task.Delay(1500); // wired, and A's child busy reading its slow source
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            cts.Cancel();
+            var result = await runTask.WaitAsync(Bound);
+            await a.Completion.WaitAsync(Bound);
+            sw.Stop();
+
+            Assert.Equal(RunOutcome.Cancelled, result.Outcome);
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10),
+                $"the silent fragment took {sw.Elapsed.TotalSeconds:F1}s to end - it should be bounded by the grace period");
+            Assert.Equal(FaultOrigin.Remote, a.Origin);
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
+
+    /// <summary>
     /// Two live instances of "A" - the same job, hence the same version, so instance alignment
     /// passes and admission is free to pick either. <see cref="RunOrchestrator.OnFragmentLost"/>
     /// (untouched by this lot) already discriminates a <c>FragmentLost</c> report by comparing its

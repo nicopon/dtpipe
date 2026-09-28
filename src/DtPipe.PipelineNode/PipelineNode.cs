@@ -75,11 +75,14 @@ public sealed class PipelineNode : IAsyncDisposable
     private readonly Dictionary<string, long> _rowCounts = new();
     private readonly object _rowCountsLock = new();
     private int _faulted;
+    private int _ruptured;
     private string? _firstFault;
     private FaultOrigin? _faultOrigin;
     private bool _coordinatorDriven;
     private string? _runId;
     private int _wiredCount;
+    /// <summary>Wire pushes received, counted on arrival: the coordinator's own view of "fully wired".</summary>
+    private int _wireRequests;
     /// <summary>Set when <see cref="ReportExitedAsync"/> fails - retried once a reconnect's re-Register succeeds.</summary>
     private string? _pendingExitedRunId;
     private int _pendingExitedCode;
@@ -259,16 +262,30 @@ public sealed class PipelineNode : IAsyncDisposable
     }
 
     /// <summary>
-    /// The coordinator's own request to abandon this run before this fragment ever opened a
-    /// transfer: a run the requester cancelled, or another fragment going silent before this one
-    /// reached <see cref="WireAsync"/>. Reuses the rupture a mid-flow peer fault already takes -
-    /// closing the child's stdio turns into its own truncated-stream exit, then
-    /// <see cref="RunToCompletionAsync"/>'s existing grace-period kill applies unchanged. A stale or
-    /// mistargeted message (not this fragment's current run) is silently ignored.
+    /// The coordinator's own request to abandon this run: a run the requester cancelled, or another
+    /// fragment failing. Reuses the rupture any fault takes - closing the child's stdio turns into its
+    /// own truncated-stream exit, and the grace-period kill follows. A stale or mistargeted message
+    /// (not this fragment's current run) is silently ignored.
+    /// <para>
+    /// A fully wired fragment is already completing on its own (<see cref="CompleteAndReportAsync"/>),
+    /// and its torn-down transfers fault it - but only once a relay touches them, which a child with
+    /// nothing to write never makes happen. Its fault is <see cref="FaultOrigin.Remote"/>: the run
+    /// ended around it. A fragment not yet fully wired has nothing else to finish it, so this call
+    /// runs it to completion and reports; the coordinator excludes that one from cause and
+    /// consequence.
+    /// </para>
     /// </summary>
     public async Task CancelAsync(string runId, CancellationToken ct = default)
     {
         if (runId != _runId) return;
+
+        // Judged on the Wire pushes received, as the coordinator judges on the ones it sent: a Cancel
+        // racing a WireAsync still waiting on its handle must not read as "not yet wired".
+        if (_coordinatorDriven && Volatile.Read(ref _wireRequests) == _options.Edges.Count)
+        {
+            Fault(FaultOrigin.Remote, "run torn down by the coordinator");
+            return;
+        }
 
         Fault(FaultOrigin.Local, "cancelled by coordinator before this fragment opened any transfer");
 
@@ -470,6 +487,7 @@ public sealed class PipelineNode : IAsyncDisposable
     {
         var edge = _options.Edges.FirstOrDefault(e => e.Alias == alias)
             ?? throw new ArgumentException($"'{alias}' is not a declared edge of this node.", nameof(alias));
+        Interlocked.Increment(ref _wireRequests);
 
         var tcs = _handles.GetOrAdd(transferId, _ => new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously));
         var handle = await tcs.Task.WaitAsync(ct);
@@ -504,6 +522,7 @@ public sealed class PipelineNode : IAsyncDisposable
     {
         var counter = new ArrowIpcRowCounter();
         var buffer = new byte[_options.ReadChunkBytes];
+        var sending = false;
         try
         {
             var stream = _pipes.TryGetValue(alias, out var pipe)
@@ -516,14 +535,25 @@ public sealed class PipelineNode : IAsyncDisposable
                 if (read == 0) break;
                 var chunk = buffer.AsSpan(0, read).ToArray();
                 counter.Feed(chunk);
+                sending = true;
                 await send.SendAsync(chunk);
+                sending = false;
             }
 
             await _child.WaitForExitAsync();
             if (_child.ExitCode == 0)
+            {
+                sending = true;
                 await send.CompleteAsync();
+            }
             else
                 Fault(FaultOrigin.Local, $"outbound edge '{alias}': child dtpipe exited {_child.ExitCode}");
+        }
+        catch (ObjectDisposedException) when (sending)
+        {
+            // The handle itself was disposed under the call: the transfer was torn down, the same
+            // as TransferFailedException - not a local failure worth naming as the run's cause.
+            Fault(FaultOrigin.Remote, $"outbound edge '{alias}': the transfer was torn down");
         }
         catch (Exception ex) when (ex is TransferFailedException or OperationCanceledException)
         {
@@ -592,7 +622,7 @@ public sealed class PipelineNode : IAsyncDisposable
     /// <summary>
     /// Records only the first fault: both origin and message come from that single winning call, so
     /// a second relay task's own fault (this fragment can have one inbound and one outbound edge)
-    /// never mixes its origin with the first one's message.
+    /// never mixes its origin with the first one's message. Every fault ruptures the child at once.
     /// </summary>
     private void Fault(FaultOrigin origin, string reason)
     {
@@ -602,12 +632,37 @@ public sealed class PipelineNode : IAsyncDisposable
             _logger.LogError("Node faulted ({Origin}): {Reason}", origin, reason);
         }
         Interlocked.Exchange(ref _faulted, 1);
+        Rupture();
     }
 
     /// <summary>
-    /// Waits for every wired edge to finish relaying, then — if any faulted — ruptures the child's
-    /// streams and kills it after a grace period. Returns the child's own exit code, or 1 if the
-    /// child had not yet produced one of its own.
+    /// Closes the child's stdin and every named pipe, then kills the child if it has not exited
+    /// within the grace period - once, at the first fault. It cannot wait for the relays to finish:
+    /// an outbound relay blocked reading a child that has nothing to write (an aggregate over a slow
+    /// source) finishes only when that child's stdout closes, which is what the kill brings about.
+    /// Closes every pipe regardless of whether its own relay task already did (a harmless second
+    /// dispose): an excess edge never wired has no relay task, and its pipe would otherwise sit
+    /// listening for a client that is never coming.
+    /// </summary>
+    private void Rupture()
+    {
+        var child = _child;
+        if (child is null || Interlocked.Exchange(ref _ruptured, 1) != 0) return;
+
+        try { child.StandardInput.Close(); } catch { }
+        foreach (var pipe in _pipes.Values) { try { pipe.Dispose(); } catch { } }
+
+        _ = Task.Run(async () =>
+        {
+            try { await child.WaitForExitAsync().WaitAsync(TimeSpan.FromMilliseconds(GracePeriodMs)); }
+            catch (TimeoutException) { try { child.Kill(entireProcessTree: true); } catch { } }
+            catch (Exception) { /* disposed with the node: nothing left to kill */ }
+        });
+    }
+
+    /// <summary>
+    /// Waits for every wired edge to finish relaying - a fault has already ruptured the child - then
+    /// for the child itself. Returns the child's own exit code, or 1 if the fragment faulted.
     /// </summary>
     public async Task<int> RunToCompletionAsync(CancellationToken ct = default)
     {
@@ -617,21 +672,8 @@ public sealed class PipelineNode : IAsyncDisposable
 
         if (_faulted != 0)
         {
-            try { _child.StandardInput.Close(); } catch { }
+            Rupture();
             try { _child.StandardOutput.Close(); } catch { }
-
-            // Closes every pipe regardless of whether its own relay task already did so in its
-            // finally (a harmless second dispose): a fragment cancelled before an excess edge was
-            // ever wired never started a relay task for it, and its pipe would otherwise sit
-            // listening for a client that is never coming - Cancel reuses this same rupture.
-            foreach (var pipe in _pipes.Values) { try { pipe.Dispose(); } catch { } }
-
-            if (!_child.HasExited)
-            {
-                var exitedInGrace = _child.WaitForExit(GracePeriodMs);
-                if (!exitedInGrace)
-                    _child.Kill(entireProcessTree: true);
-            }
         }
 
         await _child.WaitForExitAsync(ct);

@@ -32,7 +32,7 @@ open http://127.0.0.1:5180          # the coordinator's page; the Lab view is /l
 |---|---|
 | `./lab.sh up` | builds the lab, seeds the databases on first use, starts the coordinator then the nodes |
 | `./lab.sh status` | which processes run, and what the coordinator sees of each node |
-| `./lab.sh smoke [lab\|library\|rights] [id…]` | runs the end-to-end check, optionally one pass or some pipelines only |
+| `./lab.sh smoke [lab\|library\|rights\|faults] [id…]` | runs the end-to-end check, optionally one pass or some pipelines only |
 | `./lab.sh ui` | drives both pages in headless Chrome, a designer scenario included; screenshots to `.state/ui/` |
 | `./lab.sh seed` | rebuilds the databases (`LAB_SCALE=5` multiplies the row counts) |
 | `./lab.sh logs` | follows every log |
@@ -179,8 +179,6 @@ afterwards (a fresh instance each) before it accepts the next run.
   fragment: the coordinator's log carries the refusal.
 - One run at a time, as `RunOrchestrator` allows: runs queue. Deployments do not survive a
   coordinator restart; the library and the run journal do.
-- Cancelling a run reaches a fragment's outbound relay only on its next write: a fragment whose
-  child emits late (a SQL join over a slow source) holds the verdict until then.
 - The designer knows a source brick's columns, not those after a step: dtpipe offers no schema of
   a job's branch without running it.
 - `lab.sh` needs bash. The node host itself uses no POSIX-only API, but the lab is not tested on

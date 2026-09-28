@@ -312,11 +312,12 @@ public sealed class RunOrchestrator : IRunOrchestrator
         new(RunOutcome.Cancelled, null, [], new Dictionary<string, FragmentExitReport>(), BuildEdgeCounts(new Dictionary<string, FragmentExitReport>(), edges));
 
     /// <summary>
-    /// Terminates every transfer this run opened, tells every launched fragment that is not yet
-    /// fully wired to <c>Cancel</c> (a fully wired one self-completes once its own torn-down
-    /// transfer faults it - the same path a mid-flow child death already takes), then waits, bounded
-    /// by <see cref="RunOrchestratorOptions.ExitTimeout"/>, for whichever of those it could actually
-    /// reach to finish reporting.
+    /// Terminates every transfer this run opened, tells every launched fragment still running to
+    /// <c>Cancel</c>, then waits, bounded by <see cref="RunOrchestratorOptions.ExitTimeout"/>, for
+    /// whichever of those it could actually reach to finish reporting. A fully wired fragment is told
+    /// too - its torn-down transfer faults it only once a relay touches it, which a child with nothing
+    /// to write never does - but it stays out of <paramref name="cancelledFragments"/>: it reports the
+    /// <c>FaultOrigin.Remote</c> consequence a mid-flow peer death already produces.
     /// </summary>
     private async Task TeardownAsync(
         RunSpec spec, string? lostFragment, Dictionary<string, Guid> clientIdByFragment, HashSet<string> launched,
@@ -347,9 +348,7 @@ public sealed class RunOrchestrator : IRunOrchestrator
 
             var isFullyWired = totalEdgesByFragment.TryGetValue(fragment, out var total) && total > 0
                 && wiredEdgesByFragment.GetValueOrDefault(fragment) == total;
-            if (isFullyWired) continue;
-
-            cancelledFragments.Add(fragment);
+            if (!isFullyWired) cancelledFragments.Add(fragment);
             try { await _hub.Clients.Client(connectionId).SendAsync("Cancel", spec.RunId); }
             catch (Exception ex) { _logger.LogWarning(ex, "Cancel delivery failed for fragment {Fragment}", fragment); }
         }

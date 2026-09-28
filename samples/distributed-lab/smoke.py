@@ -1,25 +1,27 @@
 #!/usr/bin/env python3
 """End-to-end check of the lab: every pipeline, distributed, against its monolithic witness.
 
-Three passes. The Lab view's: each pipelines/*.yaml with its catalog layout, deployed and run one
+Four passes. The Lab view's: each pipelines/*.yaml with its catalog layout, deployed and run one
 after the other. The library's: each library pipeline distributed automatically and its plan
 saved, then all of them deployed at once and their runs queued together, as the page does.
 The rights': the embedded IDP, the flow matrix refusing a plan and then, edited under a deployed
 pipeline, a transfer at run time, and a brick policy refusing a plan; every edit is undone.
+The faults': a run cancelled while a fully wired fragment's child has nothing to write, whose
+verdict must come within the grace period.
 For every pipeline of the first two:
   1. the witness: the unsplit job run by dtpipe alone, writing a separate warehouse file;
   2. the lab: the distributed run, through the coordinator;
   3. the verdict: outcome Succeeded, every edge's two row counts equal, and the job's
      `# lab-check:` query returning the same row on both warehouses.
 
-Usage: smoke.py <lab-url> <dtpipe> <state-dir> [lab|library|rights] [pipeline-id-substring ...]
+Usage: smoke.py <lab-url> <dtpipe> <state-dir> [lab|library|rights|faults] [pipeline-id-substring ...]
 A leading pass name runs that pass alone.
 Exits 0 when every selected pipeline passes, 1 otherwise. Standard library only.
 """
 import base64, csv, io, json, os, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
 
 URL, DTPIPE, STATE = sys.argv[1].rstrip("/"), sys.argv[2], sys.argv[3]
-PASSES = {"lab", "library", "rights"}
+PASSES = {"lab", "library", "rights", "faults"}
 ONLY = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] in PASSES else None
 SELECTED = sys.argv[5:] if ONLY else sys.argv[4:]
 RUN_TIMEOUT = 180
@@ -276,10 +278,38 @@ def rights_pass():
     return failures
 
 
+def faults_pass():
+    """The seed of sensor-stream, deployed on its own: the runner's child joins a slow source it
+    generates itself and writes nothing until that source ends. Read from library-seed/, not from the
+    library, whose copy anyone may have edited."""
+    started = time.time()
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "library-seed", "sensor-stream.yaml")) as f:
+            yaml = f.read()
+        placement = {"readings": "runner-1", "enrich": "runner-1", "customers": "node-1", "load": "node-4"}
+        plan = call("/api/deploy", {"pipelineId": "smoke-faults", "yaml": yaml, "cuts": [], "placement": placement})
+        run = call("/api/runs", {"pipelineId": plan["pipelineId"]})
+        until(lambda: any(r["runId"] == run["runId"] and r["state"] == "running" for r in call("/api/runs/queue")), 60, "the run to start")
+        time.sleep(3)
+        cancelled_at = time.time()
+        call("/api/runs/cancel", {"runId": run["runId"]})
+        final = until(lambda: _finished(run["runId"]), RUN_TIMEOUT, "the cancelled run")
+        elapsed = time.time() - cancelled_at
+        runner = next((r for f, r in (final["result"] or {}).get("reports", {}).items() if f.endswith("@runner-1")), None)
+        if final["state"] != "cancelled" or elapsed > 6 or runner is None or runner["origin"] != "Remote":
+            raise RuntimeError(f"{final['state']} after {elapsed:.1f}s, runner report {runner}")
+        print(f"PASS  faults   {'cancel, silent fragment':28} cancelled in {elapsed:.1f}s, runner: {runner['origin']} "
+              f"'{runner['firstFault']}'  ({time.time() - started:.1f}s)")
+        return 0
+    except Exception as e:
+        print(f"FAIL  faults   {'cancel, silent fragment':28} {e}")
+        return 1
+
+
 def main():
     ctx = Context()
     failures = (catalog_pass(ctx) if ONLY in (None, "lab") else 0) + (library_pass(ctx) if ONLY in (None, "library") else 0) \
-        + (rights_pass() if ONLY in (None, "rights") else 0)
+        + (rights_pass() if ONLY in (None, "rights") else 0) + (faults_pass() if ONLY in (None, "faults") else 0)
     return 1 if failures else 0
 
 

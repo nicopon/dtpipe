@@ -19,11 +19,13 @@ Arrow IPC bytes of each edge between the child's stdin/stdout and TransportR.
   `WaitForConnectionAsync()` against the child's exit, so a child that dies before ever dialing in
   cannot block the node forever. `WireAsync` and the pipe dictionary both key on `EdgeBinding.Alias`
   alone, regardless of direction — `ValidateEdges` refuses a duplicate up front.
-- **Cancel by stream rupture, never by signal.** A fault closes the child's stdio, which its
-  `arrow:` endpoint turns into exit 1; the node kills the child after a grace period if that is not
-  enough. `CancelAsync` (the coordinator's `Cancel` push, for a fragment that has not yet opened a
-  transfer, or a multi-edge fragment still waiting on one side) reuses exactly this path - it is a
-  `Fault(Local, ...)` like any other, not a second teardown mechanism.
+- **Cancel by stream rupture, never by signal.** The first fault ruptures the child at once
+  (`Rupture`: stdin and every pipe closed, a kill after the grace period), never after the relays
+  finish - an outbound relay reading a child with nothing to write finishes only when the kill closes
+  that child's stdout. `CancelAsync` (the coordinator's `Cancel` push) reuses exactly this path, not
+  a second teardown mechanism: `Fault(Local, ...)` then run to completion for a fragment not yet fully
+  wired, `Fault(Remote, ...)` alone for a fully wired one, which is already completing on its own.
+  `[local: CoordinatorAbortTests]`
 - **A reconnect re-issues `Register`, with a bounded retry.** TransportR's own `SignalRDataClient`
   already re-issues `Connect` on `HubConnection.Reconnected`; nothing re-issues the coordinator's own
   `Register` but this node, since TransportR has no reason to know that call exists. The retry exists
@@ -44,10 +46,11 @@ Arrow IPC bytes of each edge between the child's stdin/stdout and TransportR.
   `[local: MemoryCeilingTests, macOS only]`
 - **A relay task tags its own fault with a `FaultOrigin`**: `Local` when its own child process failed
   (an exit code check or a plain I/O exception), `Remote` when the transfer itself failed
-  (`TransferFailedException`, or an `OperationCanceledException` - never this code's own doing, since
-  no token reaches `SendAsync`/`ReceiveAsync`). The coordinator's outcome rule tells a run's cause
-  from its consequences by this, not by which fragment reports first. `[local: PipelineNode.Tests,
-  DtPipe.Coordinator.Tests.RunOrchestratorTests]`
+  (`TransferFailedException`, an `OperationCanceledException` - never this code's own doing, since
+  no token reaches `SendAsync`/`ReceiveAsync` - or an `ObjectDisposedException` thrown by the send
+  handle itself, disposed under the call when its transfer was torn down). The coordinator's
+  outcome rule tells a run's cause from its consequences by this, not by which fragment reports
+  first. `[local: PipelineNode.Tests, DtPipe.Coordinator.Tests.RunOrchestratorTests]`
 - `ConnectAsync` connects and declares the fragment (`Register`) without launching the child; a
   `Launch` push from the coordinator triggers `LaunchAsync`, a `Wire` push triggers `WireAsync`. Once
   every declared edge is wired the node runs itself to completion and reports `Exited` on its own -

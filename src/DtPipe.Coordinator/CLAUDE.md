@@ -110,13 +110,15 @@ in flight throws instead of queuing.
   *teardown's* wait for an already-cancelled or already-terminated fragment to finish reporting, never
   the happy path: that wait is bounded solely by `abort.Token` (the requester's own cancellation, or
   `FragmentLost`).
-- **On teardown, every fragment already fully wired is left to its own torn-down transfer** -
-  `ITransferTerminator.TerminateAsync` on each open transfer is what turns it into the same
-  `FaultOrigin.Remote` exit a mid-flow peer death already produces (C0bis's `Abort`). `Cancel` reaches
-  only a launched fragment that is *not* fully wired: one with no transfer yet to open, or - in a
-  multi-edge fragment - wired on one side and still waiting on `Wire` for the other, which nothing
-  else would ever unblock (`PipelineNode.WireAsync` only self-completes once every declared edge has
-  been wired). The fragment identified as the cause is never sent `Cancel`, even when it is still
+- **On teardown, every launched fragment still running is told to `Cancel`** after
+  `ITransferTerminator.TerminateAsync` has ended each open transfer. A torn-down transfer faults a
+  fully wired fragment only once one of its relays touches it, which never happens while its child
+  has nothing to write (an aggregate over a slow source): without `Cancel` such a fragment holds the
+  verdict until its source ends. A fully wired fragment answers `Cancel` with a
+  `FaultOrigin.Remote` exit, a consequence like a mid-flow peer death, and stays out of the
+  cancelled set; a fragment *not* fully wired - no transfer yet, or a multi-edge one still waiting on
+  `Wire` for one side - joins the cancelled set, excluded from cause and consequence. The fragment
+  identified as the cause is never sent `Cancel`, even when it is still
   reachable (one that stops responding right after admission is still connected) - it must stay
   absent from the run's reports for `DetermineOutcome` to name it, not be masked by a `Cancel` it
   happens to still receive. A fragment resolved as unreachable during this pass is excluded from the
