@@ -10,12 +10,14 @@ public sealed class LabOptions
 
     public required string DtPipeExecutable { get; init; }
 
+    /// <summary>The URL node hosts reach the coordinator at: the issuer of every token.</summary>
+    public required string PublicUrl { get; init; }
+
     /// <summary>
-    /// The TransportR group every pipeline node lands in. <c>PipelineNode</c> connects without
-    /// declaring groups, so the dev identity provider gives them all this one; the per-node groups
-    /// of <c>flow-matrix.json</c> are enforced on the plan instead (<c>IPlanRegistry</c>).
+    /// How long a token lasts. A pipeline node keeps the token it connected with for as long as it
+    /// is deployed; every re-arm fetches a new one.
     /// </summary>
-    public const string RuntimeGroup = "lab";
+    public TimeSpan TokenLifetime { get; init; } = TimeSpan.FromHours(12);
 
     public static LabOptions FromConfiguration(IConfiguration configuration)
     {
@@ -23,6 +25,7 @@ public sealed class LabOptions
         return new LabOptions
         {
             LabRoot = labRoot,
+            PublicUrl = (configuration["urls"] ?? "http://127.0.0.1:5180").Split(';')[0].TrimEnd('/'),
             StateDir = Path.GetFullPath(configuration["state"] ?? Path.Combine(labRoot, ".state")),
             DtPipeExecutable = Path.GetFullPath(configuration["dtpipe"]
                 ?? Path.Combine(labRoot, "..", "..", "dist", "release", OperatingSystem.IsWindows() ? "dtpipe.exe" : "dtpipe")),

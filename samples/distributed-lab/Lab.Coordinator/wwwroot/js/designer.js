@@ -286,7 +286,7 @@ function renderPalette() {
     ${step("sql", "SQL", "A DuckDB query over one main input, joined to others as ref")}
     ${step("merge", "Merge", "UNION ALL of several inputs with the same schema")}
     <h3>Sinks</h3>${group("Sink")}
-    <p class="hint">Drag a brick or a step onto the canvas, then wire an output port (right) to an input port (left).</p>`;
+    <p class="hint">Drag a brick or a step onto the canvas, then wire an output port (right) to an input port (left). Drag a wire's end off its input port to move it or, dropped in the void, to remove it.</p>`;
 }
 
 function cardInfo(step) {
@@ -365,6 +365,14 @@ function drawEdges(temp) {
   }
   if (temp) parts.push(`<path class="dedge temp" d="${curve(temp.a, temp.b)}"/>`);
   svg.innerHTML = parts.join("");
+
+  // The selected wire carries its own delete button, at its middle.
+  inner.querySelector(".edge-delete")?.remove();
+  const sel = selected?.edge && svg.querySelector(`.dedge-hit[data-from="${CSS.escape(selected.edge.from)}"][data-to="${CSS.escape(selected.edge.to)}"][data-port="${selected.edge.port}"]`);
+  if (sel && !temp) {
+    const mid = sel.getPointAtLength(sel.getTotalLength() / 2);
+    inner.insertAdjacentHTML("beforeend", `<button class="edge-delete" style="left:${mid.x}px;top:${mid.y}px" title="Remove this wire (Delete)">×</button>`);
+  }
 }
 
 // ---------------------------------------------------------------- canvas interaction
@@ -380,8 +388,31 @@ function bindCanvas() {
 
   inner.addEventListener("pointerdown", (e) => {
     const port = e.target.closest(".port.out");
+    const inPort = e.target.closest(".port.in, .port.ref");
     const card = e.target.closest(".dcard");
     const edge = e.target.closest(".dedge-hit");
+    if (e.target.closest(".edge-delete")) {
+      disconnect(selected.edge);
+      e.preventDefault();
+      return;
+    }
+    if (inPort && card) {
+      // A wire is moved or removed by its input end: picked up here, dropped on another input,
+      // or dropped anywhere else to remove it.
+      const target = stepOf(card.dataset.alias);
+      const portName = inPort.dataset.port === "ref" ? "ref" : "in";
+      const list = portName === "ref" ? target.ref : target.from;
+      if (list.length) {
+        const from = list[list.length - 1];
+        list.splice(list.length - 1, 1);
+        drag = { type: "link", from, picked: { to: target.alias, port: portName } };
+        selected = null;
+        inner.setPointerCapture(e.pointerId);
+        drawEdges({ a: portPoint(from, "out"), b: canvasPoint(e) });
+        e.preventDefault();
+      }
+      return;
+    }
     if (port && card) {
       drag = { type: "link", from: card.dataset.alias };
       inner.setPointerCapture(e.pointerId);
@@ -431,6 +462,9 @@ function bindCanvas() {
         const step = stepOf(card.dataset.alias);
         const fallback = step?.kind === "sql" && step.from.length && !step.from.includes(d.from) ? "ref" : "in";
         connect(d.from, card.dataset.alias, port ? port.dataset.port : fallback);
+      } else if (d.picked) {
+        touch({ inspector: true });
+        toast(`Wire ${d.from} → ${d.picked.to} removed.`, "info");
       } else drawEdges();
     } else if (d.moved) {
       dirty = true;
@@ -514,7 +548,8 @@ function renderInspector() {
   if (selected?.edge) {
     const e = selected.edge;
     el.innerHTML = `<h2>Connection</h2><p><code>${esc(e.from)}</code> → <code>${esc(e.to)}</code>${e.port === "ref" ? " (ref)" : ""}</p>
-      <button class="danger" data-unwire="${esc(e.from)}" data-port="${e.port}" data-to="${esc(e.to)}">Disconnect</button><p class="hint">or press Delete.</p>`;
+      <button class="danger" data-unwire="${esc(e.from)}" data-port="${e.port}" data-to="${esc(e.to)}">Disconnect</button>
+      <p class="hint">Or press Delete, or click the × on the wire. To move it, drag its end off <code>${esc(e.to)}</code>'s input port and drop it on another input; dropped anywhere else, it is removed.</p>`;
     return;
   }
   const step = selected?.alias ? stepOf(selected.alias) : null;

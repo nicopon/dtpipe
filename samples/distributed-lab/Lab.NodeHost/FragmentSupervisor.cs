@@ -18,6 +18,7 @@ public sealed class FragmentSupervisor : IAsyncDisposable
     private readonly FragmentDeployment _deployment;
     private readonly string _jobPath;
     private readonly NodeHostOptions _options;
+    private readonly Func<Task<string>> _hubUrl;
     private readonly ILoggerFactory _loggerFactory;
     private readonly Func<FragmentStatus, Task> _report;
 
@@ -38,9 +39,10 @@ public sealed class FragmentSupervisor : IAsyncDisposable
     private string _generation;
 
     public FragmentSupervisor(
-        string node, FragmentDeployment deployment, string jobPath, NodeHostOptions options,
+        string node, FragmentDeployment deployment, string jobPath, NodeHostOptions options, Func<Task<string>> hubUrl,
         ILoggerFactory loggerFactory, Func<FragmentStatus, Task> report)
     {
+        _hubUrl = hubUrl;
         _node = node;
         _deployment = deployment;
         _jobPath = jobPath;
@@ -59,7 +61,8 @@ public sealed class FragmentSupervisor : IAsyncDisposable
         {
             _pipelineNode = await PipelineNode.PipelineNode.ConnectAsync(new PipelineNodeOptions
             {
-                HubUrl = _options.CoordinatorUrl,
+                // Carries this node's token: TransportR reads the node's group from it.
+                HubUrl = await _hubUrl(),
                 DtPipeExecutable = _options.DtPipeExecutable,
                 FragmentJobPath = _jobPath,
                 Edges = _deployment.Edges

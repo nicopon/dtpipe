@@ -18,6 +18,7 @@ public sealed class NodeHost : IAsyncDisposable
     private readonly string _fragmentsDir;
     private readonly IReadOnlyList<DatasetInfo> _datasets;
     private readonly BrickHost _bricks;
+    private readonly IdpTokenClient _idp;
     private readonly LabLogForwarder _forwarder = new();
     private readonly ILogger _logger;
     private readonly ILoggerFactory _hostLoggerFactory;
@@ -45,12 +46,14 @@ public sealed class NodeHost : IAsyncDisposable
         _hostLoggerFactory = CreateLoggerFactory(fragment: null);
         _logger = _hostLoggerFactory.CreateLogger($"node.{config.Name}");
         _bricks = new BrickHost(config, options, _logger);
+        _idp = new IdpTokenClient(options, config);
     }
 
     public async Task RunAsync(CancellationToken ct)
     {
+        // Authenticated by the coordinator's IDP: each (re)connection presents a current token.
         _hub = new HubConnectionBuilder()
-            .WithUrl(_options.CoordinatorUrl + LabHubMethods.Path)
+            .WithUrl(_options.CoordinatorUrl + LabHubMethods.Path, o => o.AccessTokenProvider = async () => await _idp.GetAsync())
             .WithAutomaticReconnect(new KeepRetrying())
             .Build();
 
@@ -74,14 +77,14 @@ public sealed class NodeHost : IAsyncDisposable
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogInformation("Coordinator not reachable at {Url} yet, retrying", _options.CoordinatorUrl);
+                _logger.LogInformation("Coordinator not reachable at {Url} yet, retrying ({Reason})", _options.CoordinatorUrl, ex.Message);
                 await Task.Delay(TimeSpan.FromSeconds(1), ct);
             }
         }
 
         await AnnounceAsync();
-        _logger.LogInformation("Node {Name} ({Group}, {Role}, {Bricks} brick(s)) connected to {Url}",
-            _config.Name, _config.Group, _config.Role, _bricks.Bricks.Count, _options.CoordinatorUrl);
+        _logger.LogInformation("Node {Name} ({Role}, {Bricks} brick(s)) connected to {Url} as {ClientId}",
+            _config.Name, _config.Role, _bricks.Bricks.Count, _options.CoordinatorUrl, _idp.ClientId);
 
         await foreach (var line in _forwarder.Reader.ReadAllAsync(ct))
         {
@@ -94,7 +97,7 @@ public sealed class NodeHost : IAsyncDisposable
     private async Task AnnounceAsync()
     {
         await _hub.InvokeAsync(LabHubMethods.Announce,
-            new NodeAnnouncement(_config.Name, _config.Group, _config.Description, _datasets, _config.Role, _bricks.Bricks));
+            new NodeAnnouncement(_config.Name, "", _config.Description, _datasets, _config.Role, _bricks.Bricks));
 
         FragmentStatus[] statuses;
         await _commands.WaitAsync();
@@ -121,7 +124,7 @@ public sealed class NodeHost : IAsyncDisposable
         await File.WriteAllTextAsync(jobPath, deployment.Yaml, new UTF8Encoding(false), ct);
 
         var supervisor = new FragmentSupervisor(
-            _config.Name, deployment, jobPath, _options, CreateLoggerFactory(deployment.Fragment), ReportAsync);
+            _config.Name, deployment, jobPath, _options, _idp.HubUrlAsync, CreateLoggerFactory(deployment.Fragment), ReportAsync);
         _fragments[key] = supervisor;
         _logger.LogInformation("Deploying {Fragment} ({Edges})", key,
             string.Join(", ", deployment.Edges.Select(e => $"{e.Direction} {e.Alias}")));
@@ -190,6 +193,7 @@ public sealed class NodeHost : IAsyncDisposable
         }
         _fragments.Clear();
         if (_hub is not null) await _hub.DisposeAsync();
+        _idp.Dispose();
         _hostLoggerFactory.Dispose();
     }
 

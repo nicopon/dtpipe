@@ -72,7 +72,7 @@ function render() {
   host.innerHTML = `
     <div class="view-head"><h1>Nodes</h1><p class="hint">What each node offers. A brick is a read or a write its owner preconfigured; the designer assembles pipelines from them.</p></div>
     <div class="node-grid">${cards || `<p class="hint">No node connected yet. Start them with <code>./lab.sh up</code>.</p>`}</div>
-    <section class="card"><h2>Flow matrix</h2><p class="hint">Which node group may send to which. Every plan is checked against it before it deploys.</p>${matrix}</section>`;
+    <section class="card"><div class="card-head"><h2>Flow matrix</h2><a href="#/access">edit in Access →</a></div><p class="hint">Which node group may send to which: the hub checks it on every transfer, the planner on every plan. A node's group comes from its token.</p>${matrix}</section>`;
 }
 
 async function onClick(e) {

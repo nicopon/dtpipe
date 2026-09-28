@@ -123,7 +123,14 @@ pre.diff .del { color: var(--bad); }
 .dedge.ref { stroke: var(--warn); stroke-dasharray: 5 4; }
 .dedge.selected { stroke: var(--accent); stroke-width: 3; }
 .dedge.temp { stroke: var(--accent); stroke-dasharray: 4 4; }
-.dedge-hit { fill: none; stroke: transparent; stroke-width: 12; pointer-events: stroke; cursor: pointer; }
+.dedge-hit { fill: none; stroke: var(--accent); stroke-opacity: 0; stroke-width: 18; pointer-events: stroke; cursor: pointer; }
+.dedge-hit:hover { stroke-opacity: .18; }
+.edge-delete {
+  position: absolute; transform: translate(-50%, -50%); z-index: 3; width: 22px; height: 22px; padding: 0;
+  border-radius: 50%; border: 1px solid var(--bad); background: var(--surface); color: var(--bad); font-weight: 700; line-height: 1;
+}
+.edge-delete:hover { background: var(--bad); color: #fff; }
+.port.in, .port.ref { cursor: grab; }
 .inspector { padding: 12px; overflow: auto; max-height: 72vh; }
 .inspector .row { justify-content: space-between; }
 .inspector textarea { font-size: 12px; }
@@ -153,6 +160,15 @@ pre.diff .del { color: var(--bad); }
 .unit-line { padding: 5px 10px; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
 .unit-line code { font-weight: 700; }
 details.frag-card summary { cursor: pointer; }
+
+/* Access */
+input.narrow { width: 120px; }
+table.kv-table { width: auto; }
+table.kv-table th { padding-right: 16px; }
+table.matrix.edit td { width: 80px; }
+table.matrix.edit input { cursor: pointer; }
+.add-identity { margin: 8px 0 12px; }
+.audit { font-size: 12.5px; padding: 2px 0; border-bottom: 1px dashed var(--border); }
 
 /* Runs */
 .queue-item { display: flex; gap: 10px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--border); }

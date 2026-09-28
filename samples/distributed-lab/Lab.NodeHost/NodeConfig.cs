@@ -9,10 +9,13 @@ public sealed record DatasetConfig(string Variable, string Engine, string File, 
 /// <summary>A brick as the node's file declares it: <see cref="Branch"/> is a piece of a dtpipe branch.</summary>
 public sealed record BrickConfig(string Id, BrickKind Kind, string Title, string? Description, JsonElement Branch);
 
-/// <summary>A node's identity, the databases it hosts and the bricks it offers, read from <c>nodes/&lt;name&gt;.json</c>.</summary>
+/// <summary>
+/// A node's name, credentials, the databases it hosts and the bricks it offers, read from
+/// <c>nodes/&lt;name&gt;.json</c>. Its group is not here: the coordinator's IDP decides it.
+/// </summary>
 public sealed record NodeConfig(
-    string Name, string Group, string Description, IReadOnlyList<DatasetConfig>? Datasets, NodeRole Role = NodeRole.Data,
-    IReadOnlyList<BrickConfig>? Bricks = null)
+    string Name, string Description, IReadOnlyList<DatasetConfig>? Datasets, NodeRole Role = NodeRole.Data,
+    IReadOnlyList<BrickConfig>? Bricks = null, string? ClientId = null, string? Secret = null)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {

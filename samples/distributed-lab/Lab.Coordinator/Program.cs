@@ -20,26 +20,19 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 });
 builder.Logging.AddFilter("TransportR", LogLevel.Warning);
 builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
-var flowMatrix = FlowMatrix.Load(Path.Combine(lab.LabRoot, "flow-matrix.json"));
+builder.Logging.AddFilter("OpenIddict", LogLevel.Warning);
+builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
 
 builder.Services.AddSingleton(lab);
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
-// The coordinator exactly as DtPipe.Coordinator ships it; only the dev identity and the matrix are
-// the lab's. Every pipeline node lands in the runtime group, which may send to itself.
-builder.Services
-    .AddCoordinatorHub(flow =>
-    {
-        foreach (var (group, targets) in flowMatrix.Groups)
-            flow.Groups[group] = new GroupAccess { CanSendTo = targets.ToList() };
-        flow.Groups[LabOptions.RuntimeGroup] = new GroupAccess { CanSendTo = [LabOptions.RuntimeGroup] };
-    })
-    .UseDevMode(o =>
-    {
-        o.AllowAnonymous = true;
-        o.DefaultGroups = [LabOptions.RuntimeGroup];
-    })
-    .Build();
+// The coordinator as DtPipe.Coordinator ships it, in TransportR's production mode: every client
+// is identified by a token of the embedded IDP, its group read from the token. The flow matrix is
+// the rights document's, read live by the hub on every transfer and by the planner on every plan.
+builder.Services.AddSingleton<RightsStore>();
+builder.Services.AddCoordinatorHub(_ => { }).Build();
+builder.Services.Replace(ServiceDescriptor.Singleton<IFlowControlService, RightsFlowControl>());
+builder.Services.AddEmbeddedIdp(lab);
 
 builder.Services.AddSingleton<LoggingHubProgressMonitor>();
 builder.Services.Replace(ServiceDescriptor.Singleton<IHubProgressMonitor, LabProgressMonitor>());
@@ -69,15 +62,20 @@ app.Use(async (context, next) =>
     }
 });
 
+app.UseTokenInPath();
 app.UseDefaultFiles();
 app.UseStaticFiles();
-app.MapDataHub(requireAuth: false);
-app.MapHub<LabHub>(LabHubMethods.Path);
+app.UseRouting();
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapDataHub(requireAuth: true);
+app.MapHub<LabHub>(LabHubMethods.Path).RequireAuthorization();
+app.MapEmbeddedIdp();
 
 var api = app.MapGroup("/api");
 
 api.MapGet("/nodes", (NodeInventory inventory) => inventory.Snapshot());
-api.MapGet("/flow-matrix", () => flowMatrix);
+api.MapGet("/flow-matrix", (RightsStore rights) => new { groups = rights.Snapshot().Matrix });
 api.MapGet("/bricks", (BrickCatalog bricks) => bricks.List());
 
 // A brick is read by the node that owns it, never by the coordinator.
@@ -110,12 +108,12 @@ api.MapPost("/pipelines/from-command", async (CommandRequest request, DtPipeCli 
         : Results.BadRequest(new { error = result.Diagnostic() });
 });
 
-api.MapPost("/plan", async (PlanRequest request, PlanBuilder planner, CancellationToken ct) =>
-    await planner.BuildAsync(request, ct));
+api.MapPost("/plan", async (PlanRequest request, PlanBuilder planner, RightsStore rights, BrickCatalog bricks, CancellationToken ct) =>
+    rights.WithPolicies(await planner.BuildAsync(request, ct), request.Yaml, bricks));
 
-api.MapPost("/deploy", async (PlanRequest request, PlanBuilder planner, DeploymentManager deployments, CancellationToken ct) =>
+api.MapPost("/deploy", async (PlanRequest request, PlanBuilder planner, RightsStore rights, BrickCatalog bricks, DeploymentManager deployments, CancellationToken ct) =>
 {
-    var plan = await planner.BuildAsync(request, ct);
+    var plan = rights.WithPolicies(await planner.BuildAsync(request, ct), request.Yaml, bricks);
     await deployments.DeployAsync(plan, "lab", ct);
     return plan;
 });
@@ -210,14 +208,76 @@ api.MapPost("/library/{id}/distribute", async (string id, DistributeRequest? req
     catch (Exception) { }
     return Results.Ok(new { plan, commit, bricks = brickOf });
 });
-api.MapPost("/library/{id}/deploy", async (string id, PipelineLibrary library, DeploymentManager deployments, CancellationToken ct) =>
+api.MapPost("/library/{id}/deploy", async (string id, PipelineLibrary library, RightsStore rights, BrickCatalog bricks, DeploymentManager deployments, CancellationToken ct) =>
 {
     var doc = await library.GetAsync(id, ct);
     if (doc?.Plan is null) return Results.Conflict(new { error = $"'{id}' has no saved distributed plan: distribute it first." });
     if (!doc.PlanCurrent) return Results.Conflict(new { error = $"'{id}' changed since its plan was saved: distribute it again." });
+    // A saved plan is checked against the rights as they are now.
+    var violations = rights.PolicyViolations(doc.Plan.Plan, doc.Yaml, bricks);
+    if (violations.Count > 0) return Results.Conflict(new { error = string.Join(" ", violations) });
     await deployments.DeployAsync(doc.Plan.Plan, "library", ct);
     return Results.Ok(doc.Plan.Plan);
 });
+
+// Rights: who may send what to whom. The page edits them; every change is audited and applies at once.
+api.MapGet("/rights", (RightsStore rights, NodeInventory inventory, LabOptions options) =>
+{
+    var doc = rights.Snapshot();
+    var online = inventory.Snapshot().Where(n => n.Online).Select(n => n.Name).ToHashSet();
+    return new
+    {
+        idp = new { issuer = options.PublicUrl + "/", tokenEndpoint = options.PublicUrl + EmbeddedIdp.TokenPath, grant = "client_credentials", tokenLifetime = options.TokenLifetime.ToString(), scope = EmbeddedIdp.GroupScopePrefix + "<group>" },
+        identities = doc.Identities.Select(i => new
+        {
+            i.ClientId, i.DisplayName, i.Group, i.Node, i.Enabled,
+            connected = i.Node is not null && online.Contains(i.Node) && inventory.ClientIdOf(i.Node) == i.ClientId,
+        }),
+        groups = rights.Groups(),
+        matrix = doc.Matrix,
+        brickPolicies = doc.BrickPolicies,
+        audit = doc.Audit,
+    };
+});
+api.MapPut("/rights/matrix", (MatrixRequest request, RightsStore rights, EventBus bus) =>
+{
+    rights.SetMatrix(request.Matrix);
+    bus.Publish("rights", new { });
+    return Results.Ok();
+});
+api.MapPut("/rights/bricks/{node}/{id}", (string node, string id, PolicyRequest request, RightsStore rights, EventBus bus) =>
+{
+    rights.SetBrickPolicy($"{node}/{id}", request.Groups);
+    bus.Publish("rights", new { });
+    return Results.Ok();
+});
+api.MapPost("/rights/identities", (IdentityRequest request, RightsStore rights, EventBus bus) =>
+{
+    if (!PipelineLibrary.IsValidId(request.ClientId)) throw new LabConflictException($"'{request.ClientId}' is not a client id: lowercase letters, digits and '-'.");
+    if (string.IsNullOrWhiteSpace(request.Group)) throw new LabConflictException("An identity belongs to one group.");
+    rights.AddIdentity(new Identity(request.ClientId, request.DisplayName ?? request.ClientId, request.Secret ?? "", request.Group.Trim(),
+        string.IsNullOrWhiteSpace(request.Node) ? null : request.Node.Trim(), request.Enabled ?? true));
+    bus.Publish("rights", new { });
+    return Results.Ok();
+});
+api.MapPut("/rights/identities/{id}", (string id, IdentityRequest request, RightsStore rights, EventBus bus) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Group)) throw new LabConflictException("An identity belongs to one group.");
+    rights.UpdateIdentity(id, request.DisplayName ?? id, request.Group.Trim(), request.Node, request.Enabled ?? true);
+    bus.Publish("rights", new { });
+    return Results.Ok();
+});
+api.MapDelete("/rights/identities/{id}", (string id, RightsStore rights, NodeInventory inventory, EventBus bus) =>
+{
+    rights.RemoveIdentity(id);
+    inventory.Disconnect(id);
+    bus.Publish("rights", new { });
+    return Results.Accepted();
+});
+// A node's group is fixed in the token it connected with: dropping its control connection makes its
+// host fetch a new one. Fragments already deployed keep theirs until they are re-armed.
+api.MapPost("/rights/identities/{id}/reconnect", (string id, NodeInventory inventory) =>
+    Results.Ok(new { disconnected = inventory.Disconnect(id) }));
 
 // Reads a node's database through dtpipe, to show what a run wrote. Single-machine shortcut: the
 // coordinator opens the node's file directly.
@@ -268,12 +328,7 @@ internal sealed record CancelRequest(string? RunId);
 internal sealed record DecomposeRequest(string Yaml, System.Text.Json.Nodes.JsonObject? Layout = null);
 internal sealed record SaveRequest(string Yaml, System.Text.Json.Nodes.JsonObject? Layout, string? Message);
 internal sealed record DistributeRequest(bool Save = false, string? Message = null);
+internal sealed record MatrixRequest(Dictionary<string, List<string>> Matrix);
+internal sealed record PolicyRequest(List<string>? Groups);
+internal sealed record IdentityRequest(string ClientId, string? DisplayName, string? Secret, string Group, string? Node, bool? Enabled);
 internal sealed record QueryRequest(string Variable, string Sql);
-
-/// <summary><c>flow-matrix.json</c>: which node group may send to which. Checked on every plan.</summary>
-internal sealed record FlowMatrix(Dictionary<string, string[]> Groups)
-{
-    public static FlowMatrix Load(string path) =>
-        JsonSerializer.Deserialize<FlowMatrix>(File.ReadAllText(path), new JsonSerializerOptions(JsonSerializerDefaults.Web))
-            ?? throw new InvalidOperationException($"{path}: empty flow matrix.");
-}

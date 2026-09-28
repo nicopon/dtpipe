@@ -17,13 +17,15 @@ public sealed class NodeInventory
     {
         public required NodeAnnouncement Announcement;
         public string? ConnectionId;
+        public string? ClientId;
+        public Action? Abort;
         public readonly Dictionary<string, FragmentStatus> Fragments = new(StringComparer.Ordinal);
     }
 
     private readonly object _lock = new();
     private readonly Dictionary<string, Entry> _nodes = new(StringComparer.Ordinal);
 
-    public void Announce(string connectionId, NodeAnnouncement announcement)
+    public void Announce(string connectionId, NodeAnnouncement announcement, string clientId, Action abort)
     {
         lock (_lock)
         {
@@ -31,7 +33,29 @@ public sealed class NodeInventory
                 _nodes[announcement.Name] = entry = new Entry { Announcement = announcement };
             entry.Announcement = announcement;
             entry.ConnectionId = connectionId;
+            entry.ClientId = clientId;
+            entry.Abort = abort;
         }
+    }
+
+    /// <summary>The node a control connection announced itself as, once the coordinator accepted it.</summary>
+    public string? NodeOf(string connectionId)
+    {
+        lock (_lock) return _nodes.Values.FirstOrDefault(e => e.ConnectionId == connectionId)?.Announcement.Name;
+    }
+
+    /// <summary>Drops the control connection of every node <paramref name="clientId"/> announced: its host reconnects with a new token.</summary>
+    public int Disconnect(string clientId)
+    {
+        List<Action> aborts;
+        lock (_lock) aborts = _nodes.Values.Where(e => e.ClientId == clientId && e.ConnectionId is not null && e.Abort is not null).Select(e => e.Abort!).ToList();
+        foreach (var abort in aborts) abort();
+        return aborts.Count;
+    }
+
+    public string? ClientIdOf(string node)
+    {
+        lock (_lock) return _nodes.TryGetValue(node, out var e) && e.ConnectionId is not null ? e.ClientId : null;
     }
 
     public void Disconnected(string connectionId)
@@ -96,18 +120,37 @@ public sealed class NodeInventory
     }
 }
 
-/// <summary>The lab's control channel (<see cref="LabHubMethods"/>), one connection per node host.</summary>
-public sealed class LabHub(NodeInventory inventory, EventBus bus) : Hub
+/// <summary>
+/// The lab's control channel (<see cref="LabHubMethods"/>), one connection per node host, each
+/// authenticated by the embedded IDP. A host is who its token says: it may announce only the node
+/// its identity is bound to, and its group is the identity's, whatever it declares.
+/// </summary>
+public sealed class LabHub(NodeInventory inventory, RightsStore rights, EventBus bus, ILogger<LabHub> logger) : Hub
 {
     public Task Announce(NodeAnnouncement announcement)
     {
-        inventory.Announce(Context.ConnectionId, announcement);
+        var clientId = EmbeddedIdp.ClientIdOf(Context.User);
+        var identity = rights.Find(clientId);
+        if (identity is not { Enabled: true } || identity.Node != announcement.Name)
+        {
+            var reason = identity is null ? $"'{clientId}' is no known identity"
+                : !identity.Enabled ? $"'{clientId}' is disabled"
+                : $"'{clientId}' may announce {identity.Node ?? "no node"}, not {announcement.Name}";
+            logger.LogWarning("Announcement of {Node} refused: {Reason}", announcement.Name, reason);
+            bus.Publish("log", new NodeLogLine("coordinator", null, "Error", $"Announcement of {announcement.Name} refused: {reason}."));
+            Context.Abort();
+            return Task.CompletedTask;
+        }
+        var context = Context;
+        inventory.Announce(Context.ConnectionId, announcement with { Group = identity.Group }, identity.ClientId, context.Abort);
         bus.Publish("nodes", inventory.Snapshot());
         return Task.CompletedTask;
     }
 
     public Task ReportFragment(FragmentStatus status)
     {
+        // A host reports only on the node it announced.
+        if (inventory.NodeOf(Context.ConnectionId) != status.Node) return Task.CompletedTask;
         inventory.Update(status);
         bus.Publish("fragment", status);
         bus.Publish("nodes", inventory.Snapshot());
@@ -116,6 +159,7 @@ public sealed class LabHub(NodeInventory inventory, EventBus bus) : Hub
 
     public Task ReportLog(NodeLogLine line)
     {
+        if (inventory.NodeOf(Context.ConnectionId) != line.Node) return Task.CompletedTask;
         bus.Publish("log", line);
         return Task.CompletedTask;
     }

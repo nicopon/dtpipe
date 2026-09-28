@@ -152,6 +152,9 @@ export async function start() {
       case "log": addLog({ node: data.node, fragment: data.fragment, level: data.level, message: data.message }); break;
       case "bytes": store.bytes = data; emit("bytes"); break;
       case "library": emit("library"); break;
+      case "rights":
+        api("/api/flow-matrix").then((m) => { store.matrix = m.groups; emit("rights"); }).catch(() => emit("rights"));
+        break;
     }
   };
 }

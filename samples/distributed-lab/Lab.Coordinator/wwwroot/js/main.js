@@ -5,8 +5,9 @@ import * as library from "./library.js";
 import * as designer from "./designer.js";
 import * as distribution from "./distribution.js";
 import * as runs from "./runs.js";
+import * as access from "./access.js";
 
-const views = { nodes, library, designer, distribution, runs };
+const views = { nodes, library, designer, distribution, runs, access };
 
 // For scripted checks (tools/ui_check.py): the live store, to hand the designer a draft.
 window.lab = { store };

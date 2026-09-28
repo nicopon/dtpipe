@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
 """End-to-end check of the lab: every pipeline, distributed, against its monolithic witness.
 
-Two passes. The Lab view's: each pipelines/*.yaml with its catalog layout, deployed and run one
+Three passes. The Lab view's: each pipelines/*.yaml with its catalog layout, deployed and run one
 after the other. The library's: each library pipeline distributed automatically and its plan
 saved, then all of them deployed at once and their runs queued together, as the page does.
-For every pipeline:
+The rights': the embedded IDP, the flow matrix refusing a plan and then, edited under a deployed
+pipeline, a transfer at run time, and a brick policy refusing a plan; every edit is undone.
+For every pipeline of the first two:
   1. the witness: the unsplit job run by dtpipe alone, writing a separate warehouse file;
   2. the lab: the distributed run, through the coordinator;
   3. the verdict: outcome Succeeded, every edge's two row counts equal, and the job's
      `# lab-check:` query returning the same row on both warehouses.
 
-Usage: smoke.py <lab-url> <dtpipe> <state-dir> [lab|library] [pipeline-id-substring ...]
-A leading `lab` or `library` runs that pass alone.
+Usage: smoke.py <lab-url> <dtpipe> <state-dir> [lab|library|rights] [pipeline-id-substring ...]
+A leading pass name runs that pass alone.
 Exits 0 when every selected pipeline passes, 1 otherwise. Standard library only.
 """
-import csv, io, json, os, subprocess, sys, time, urllib.error, urllib.request
+import base64, csv, io, json, os, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
 
 URL, DTPIPE, STATE = sys.argv[1].rstrip("/"), sys.argv[2], sys.argv[3]
-PASSES = {"lab", "library"}
+PASSES = {"lab", "library", "rights"}
 ONLY = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] in PASSES else None
 SELECTED = sys.argv[5:] if ONLY else sys.argv[4:]
 RUN_TIMEOUT = 180
@@ -169,9 +171,115 @@ def library_pass(ctx):
     return failures
 
 
+def token(client_id, secret):
+    form = urllib.parse.urlencode({"grant_type": "client_credentials", "client_id": client_id, "client_secret": secret}).encode()
+    try:
+        answer = json.loads(urllib.request.urlopen(urllib.request.Request(URL + "/connect/token", form), timeout=20).read())
+    except urllib.error.HTTPError as e:
+        return None, e.code
+    payload = answer["access_token"].split(".")[1]
+    return json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))), 200
+
+
+def rights_pass():
+    failures = 0
+    rights = call("/api/rights")
+    matrix = rights["matrix"]
+    revoked = {g: [t for t in targets if not (g == "crm" and t == "runner")] for g, targets in matrix.items()}
+
+    def check(name, test):
+        nonlocal failures
+        started = time.time()
+        try:
+            detail = test()
+            print(f"PASS  rights   {name:28} {detail}  ({time.time() - started:.1f}s)")
+        except Exception as e:
+            failures += 1
+            print(f"FAIL  rights   {name:28} {e}")
+
+    def idp():
+        _, refused = token("node-1", "not-the-secret")
+        claims, _ = token("node-1", "node-1-lab-secret")
+        if refused == 200 or not claims or claims.get("sub") != "node-1" or claims.get("scope") != "transportr:group:crm":
+            raise RuntimeError(f"wrong secret -> {refused}, claims {claims}")
+        return f"wrong secret refused ({refused}); token for node-1 carries {claims['scope']}"
+
+    def matrix_plan():
+        try:
+            call("/api/rights/matrix", {"matrix": revoked}, "PUT")
+            plan = call("/api/library/customers-anonymized/distribute", {})["plan"]
+            if plan["deployable"] or "crm -> runner" not in (plan.get("flowRejection") or ""):
+                raise RuntimeError(f"plan not refused: {plan.get('flowRejection')}")
+            return "crm -> runner revoked: plan refused"
+        finally:
+            call("/api/rights/matrix", {"matrix": matrix}, "PUT")
+
+    def matrix_runtime():
+        # Deployed under the full matrix, then run with crm -> runner revoked: the hub refuses the transfer.
+        call("/api/library/revenue-by-country/distribute", {"save": True, "message": "smoke: distribute"})
+        call("/api/library/revenue-by-country/deploy", {})
+        try:
+            call("/api/rights/matrix", {"matrix": revoked}, "PUT")
+            refused = call("/api/runs", {"pipelineId": "revenue-by-country"})
+            refused = until(lambda: _finished(refused["runId"]), RUN_TIMEOUT, "the refused run")
+        finally:
+            call("/api/rights/matrix", {"matrix": matrix}, "PUT")
+        ok = call("/api/runs", {"pipelineId": "revenue-by-country"})
+        ok = until(lambda: _finished(ok["runId"]), RUN_TIMEOUT, "the run after restoring")
+        if refused["state"] == "succeeded" or ok["state"] != "succeeded":
+            raise RuntimeError(f"revoked -> {refused['state']}, restored -> {ok['state']}")
+        return f"revoked at run time -> {refused['state']}; restored -> {ok['state']}"
+
+    def brick_policy():
+        try:
+            call("/api/rights/bricks/node-1/customers", {"groups": ["runner"]}, "PUT")
+            mirror = call("/api/library/customers-mirror/distribute", {})["plan"]
+            anonymized = call("/api/library/customers-anonymized/distribute", {})["plan"]
+            if mirror["deployable"] or not anonymized["deployable"]:
+                raise RuntimeError(f"mirror {mirror['errors']}, anonymized {anonymized['errors']}")
+            return "node-1/customers only to runner: the mirror is refused, the anonymized pipeline passes"
+        finally:
+            call("/api/rights/bricks/node-1/customers", {"groups": None}, "PUT")
+
+    def impostor():
+        # A host holding node-1's credentials announces itself as node-2: the coordinator refuses it,
+        # and the real node-2 stays online under its own identity.
+        root = os.path.join(STATE, "impostor")
+        os.makedirs(root, exist_ok=True)
+        config = os.path.join(root, "node.json")
+        with open(config, "w") as f:
+            json.dump({"name": "node-2", "description": "impostor", "clientId": "node-1", "secret": "node-1-lab-secret"}, f)
+        log = os.path.join(STATE, "logs", "coordinator.log")
+        seen = os.path.getsize(log)
+        host = subprocess.Popen(["dotnet", os.path.join(STATE, "bin", "node", "Lab.NodeHost.dll"), "--config", config,
+                                 "--state", root, "--coordinator", URL, "--dtpipe", DTPIPE],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            def refused():
+                with open(log, errors="replace") as f:
+                    f.seek(seen)
+                    return "Announcement of node-2 refused" in f.read()
+            until(refused, 30, "the impostor's refusal")
+        finally:
+            host.terminate()
+            host.wait(10)
+        node2 = next(i for i in call("/api/rights")["identities"] if i["clientId"] == "node-2")
+        if not node2["connected"]:
+            raise RuntimeError("node-2 is no longer connected under its own identity")
+        return "node-1's credentials announcing node-2: refused; node-2 still connected as itself"
+
+    check("identity provider", idp)
+    check("announcement, impostor", impostor)
+    check("flow matrix, plan", matrix_plan)
+    check("flow matrix, run time", matrix_runtime)
+    check("brick policy", brick_policy)
+    return failures
+
+
 def main():
     ctx = Context()
-    failures = (catalog_pass(ctx) if ONLY in (None, "lab") else 0) + (library_pass(ctx) if ONLY in (None, "library") else 0)
+    failures = (catalog_pass(ctx) if ONLY in (None, "lab") else 0) + (library_pass(ctx) if ONLY in (None, "library") else 0) \
+        + (rights_pass() if ONLY in (None, "rights") else 0)
     return 1 if failures else 0
 
 

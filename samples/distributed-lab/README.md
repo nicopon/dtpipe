@@ -2,6 +2,7 @@
 
 A self-contained demonstrator for dtpipe's distributed pipelines: one coordinator, four data
 nodes each with its own database, and a runner, run as plain local processes (no container).
+Every node authenticates with the coordinator's own identity provider, which decides its group.
 
 Each data node offers **bricks**: reads and writes its owner preconfigured on its database. The
 coordinator's page assembles bricks and processing steps into a pipeline by drag and drop, keeps
@@ -31,7 +32,7 @@ open http://127.0.0.1:5180          # the coordinator's page; the Lab view is /l
 |---|---|
 | `./lab.sh up` | builds the lab, seeds the databases on first use, starts the coordinator then the nodes |
 | `./lab.sh status` | which processes run, and what the coordinator sees of each node |
-| `./lab.sh smoke [lab\|library] [id…]` | runs the end-to-end check, optionally one pass or some pipelines only |
+| `./lab.sh smoke [lab\|library\|rights] [id…]` | runs the end-to-end check, optionally one pass or some pipelines only |
 | `./lab.sh ui` | drives both pages in headless Chrome, a designer scenario included; screenshots to `.state/ui/` |
 | `./lab.sh seed` | rebuilds the databases (`LAB_SCALE=5` multiplies the row counts) |
 | `./lab.sh logs` | follows every log |
@@ -60,8 +61,28 @@ row-seeded fakes and hashed values make every seed identical. A node publishes i
 environment variable (`LAB_CRM_DB`, …) that its `dtpipe` children inherit, so a job names
 `sqlite:${{LAB_CRM_DB}}` and never a path: the fragment runs against whichever node hosts it.
 
-`flow-matrix.json` says which group may send to which: every data group may feed the `runner`,
-the `runner` feeds `warehouse`, and the direct links the Lab view's scenarios use stay.
+A node's group is not in its file: the coordinator's IDP gives it (below). The flow matrix says
+which group may send to which: every data group may feed the `runner`, the `runner` feeds
+`warehouse`, and the direct links the Lab view's scenarios use stay.
+
+## Rights and the identity provider
+
+The coordinator carries its own IDP, after TransportR's SimpleIdp: OpenIddict, the
+client-credentials flow, `POST /connect/token`. Each node host holds a client id and secret in its
+`nodes/<node>.json`; the token it obtains names it (`sub`) and carries its group as the
+`transportr:group:<group>` scope, which TransportR's hub reads. What is allowed lives in one
+document, `.state/rights.json`, started from `rights-seed.json` and edited in the **Access** view:
+
+| | Enforced |
+|---|---|
+| **Who**: identities, each bound to one group and to the one node it may announce | by the IDP (no token for an unknown or disabled client) and by the control channel (an announcement of another node is refused) |
+| **To whom**: the flow matrix between groups | by the hub on **every transfer**, live, and on every plan |
+| **What**: per source brick, the groups its rows may be sent to as they leave their node | on every plan (the hub sees groups, not bricks) |
+
+Every change is audited. A pipeline node has no credential option of its own, so its host hands
+it a hub URL carrying the token in its path (`/t/<token>/…`); the coordinator turns it back into a
+bearer header. Signing keys are ephemeral: a coordinator restart invalidates every token, and the
+hosts fetch new ones as they reconnect.
 
 ## The coordinator's page
 
@@ -72,6 +93,7 @@ the `runner` feeds `warehouse`, and the direct links the Lab view's scenarios us
 | Designer | a palette of bricks and steps (Transform, SQL, Merge), a canvas wired port to port, an inspector per card, the composed YAML to copy or edit |
 | Distribution | the plan placed automatically, drawn in lanes (sources, runner, sinks); save it, deploy, run |
 | Runs | deployments, the run in flight and the queue, the journal with each run's report, node events, a query on any database |
+| Access | the IDP, identities (group, bound node, enabled, reconnect), the editable flow matrix, brick policies, the audit |
 
 **A pipeline is a plain dtpipe job**, one branch per card, that also runs whole on one machine
 (`smoke.py` uses it as the witness). A branch *is* a brick when its content equals the brick's:
@@ -83,6 +105,9 @@ writing a brick becomes three cards).
 source wired straight into a sink goes directly, without the runner. `PlanBuilder` then builds
 the fragments exactly as for a placement chosen by hand. A saved plan records the hash of the job
 it came from; a job changed since is refused at deployment until it is distributed again.
+
+In the designer, a wire is moved or removed by its input end: drag it off the input port and drop
+it on another input, or anywhere else to remove it. A selected wire also shows a × to remove it.
 
 **The library** is a git repository under `.state/library`, started from `library-seed/`: each
 save and each saved plan is a commit. Several pipelines may be deployed at once; their runs wait
@@ -148,8 +173,10 @@ afterwards (a fresh instance each) before it accepts the next run.
 
 - Everything runs on one machine, which the lab uses as a shortcut: `split` samples the sources
   and the query panel opens a node's file from the coordinator's process.
-- `PipelineNode` connects without TransportR groups, so every node shares one runtime group; the
-  per-node matrix is enforced on the plan, not on each transfer.
+- The page and `/api` are not authenticated: only the nodes are. Tokens last 12 hours; a
+  deployment idle longer than that must be redeployed.
+- A transfer the hub refuses under the flow matrix shows in the run's verdict as an unresponsive
+  fragment: the coordinator's log carries the refusal.
 - One run at a time, as `RunOrchestrator` allows: runs queue. Deployments do not survive a
   coordinator restart; the library and the run journal do.
 - Cancelling a run reaches a fragment's outbound relay only on its next write: a fragment whose
@@ -175,6 +202,9 @@ afterwards (a fresh instance each) before it accepts the next run.
 | `POST /api/plan` | Lab view: `{pipelineId, yaml, cuts, placement}` → units, fragments, edges, errors |
 | `POST /api/deploy` | Lab view: the same body; plans, then deploys (409 if not deployable) |
 | `GET /api/deployments` · `DELETE /api/deployments/{id}` | what is deployed; undeploy |
+| `POST /connect/token` | the embedded IDP: `grant_type=client_credentials`, `client_id`, `client_secret` |
+| `GET /api/rights` · `PUT /api/rights/matrix` · `PUT /api/rights/bricks/{node}/{id}` | rights, the flow matrix, a brick's policy (`{groups}` or `null`) |
+| `POST /api/rights/identities` · `PUT`/`DELETE /api/rights/identities/{id}` · `POST …/{id}/reconnect` | identities; reconnect drops a node's control connection so it fetches a new token |
 | `POST /api/runs` · `GET /api/runs`, `/api/runs/queue` | `{pipelineId?, pins?}` queues a run; the journal; in flight and queued |
 | `POST /api/runs/cancel` | `{runId?}`: the run in flight, or a queued one |
 | `POST /api/fragments/{name}/kill`, `/variant` | fault injection |

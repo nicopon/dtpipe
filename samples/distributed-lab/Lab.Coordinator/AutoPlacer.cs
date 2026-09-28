@@ -8,7 +8,7 @@ namespace DtPipe.Lab.Coordinator;
 /// builds the fragments from it exactly as for a placement the user picked, and cuts nothing.
 /// A source brick wired straight into a sink brick therefore crosses no runner.
 /// </summary>
-public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, PlanBuilder planner)
+public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, PlanBuilder planner, RightsStore rights)
 {
     public async Task<LabPlan> PlanAsync(string pipelineId, string yaml, CancellationToken ct)
     {
@@ -45,7 +45,7 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
             errors.Add($"The job is not readable: {ex.Message}");
         }
 
-        var plan = await planner.BuildAsync(new PlanRequest(pipelineId, yaml, [], placement), ct);
+        var plan = rights.WithPolicies(await planner.BuildAsync(new PlanRequest(pipelineId, yaml, [], placement), ct), yaml, bricks);
         return errors.Count == 0 ? plan : plan with { Errors = [.. errors, .. plan.Errors] };
     }
 }

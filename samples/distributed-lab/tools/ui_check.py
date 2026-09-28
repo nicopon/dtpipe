@@ -3,10 +3,11 @@
 Writes one screenshot per step.
 
   1. Lab view: every catalog pipeline selected in turn, its graph and plan drawn.
-  2. Coordinator: each view rendered (nodes, library, designer, distribution, runs).
+  2. Coordinator: each view rendered (nodes, library, designer, distribution, runs, access).
   3. Designer scenario: a pipeline built with the mouse from the palette - a source brick, a
-     Transform step, a sink brick, wired port to port - then given a transformer, composed by the
-     coordinator and validated by dtpipe. Nothing is saved.
+     Transform step, a sink brick, wired port to port; a wire picked up by its input end and
+     dropped in the void, another removed with its x button, both wired again - then given a
+     transformer, composed by the coordinator and validated by dtpipe. Nothing is saved.
 
 Usage: ui_check.py [lab-url] [out-dir]     (defaults: http://127.0.0.1:5180, .state/ui)
 The lab must be up. Exits 1 if any step fails.
@@ -60,6 +61,7 @@ def coordinator_views(browser):
         (f"designer/{pid}", "document.querySelectorAll('.dcard').length > 0 && document.querySelector('#d-yaml')?.textContent.length > 0"),
         (f"distribution/{pid}", "document.querySelectorAll('.xbox').length > 0 && document.querySelectorAll('.lanes svg path').length > 0"),
         ("runs", "!!document.getElementById('r-journal') && !!document.getElementById('r-deployments')"),
+        ("access", "document.querySelectorAll('table.matrix.edit input').length > 0 && document.querySelectorAll('[data-identity]').length > 0"),
     ]
     browser.goto(URL + "/#/nodes", 1)
     for view, predicate in checks:
@@ -93,6 +95,28 @@ def designer_scenario(browser):
     browser.drag(browser.center(card(source["id"]) + " .port.out"), browser.center(card("transform") + " .port.in"))
     browser.drag(browser.center(card("transform") + " .port.out"), browser.center(card(sink["id"]) + " .port.in"))
 
+    wires = "document.querySelectorAll('.dedge-hit').length"
+    wired = browser.wait_for(f"{wires} === 2", 5)
+
+    # Picked up by its input end and dropped in the void: removed. Wired again.
+    sink_in = browser.center(card(sink["id"]) + " .port.in")
+    browser.drag(sink_in, (sink_in[0] + 40, sink_in[1] + 260))
+    dropped = browser.wait_for(f"{wires} === 1", 5)
+    browser.drag(browser.center(card("transform") + " .port.out"), browser.center(card(sink["id"]) + " .port.in"))
+
+    # Selected by a click on its middle, removed with its x button. Wired again.
+    mid = browser.js("""(() => { const p = [...document.querySelectorAll('.dedge-hit')].find(p => p.dataset.to === 'transform');
+        const m = p.getPointAtLength(p.getTotalLength() / 2); const r = document.getElementById('d-inner').getBoundingClientRect();
+        return [r.left + m.x, r.top + m.y]; })()""")
+    browser.mouse("mouseMoved", *mid); browser.mouse("mousePressed", *mid); browser.mouse("mouseReleased", *mid)
+    browser.wait_for("!!document.querySelector('.edge-delete')", 5)
+    x, y = browser.center(".edge-delete")
+    browser.mouse("mousePressed", x, y); browser.mouse("mouseReleased", x, y)
+    crossed = browser.wait_for(f"{wires} === 1", 5)
+    browser.drag(browser.center(card(source["id"]) + " .port.out"), browser.center(card("transform") + " .port.in"))
+    rewired = browser.wait_for(f"{wires} === 2", 5)
+    wiring = wired and dropped and crossed and rewired
+
     # A transformer on the Transform card: project, dropping the country.
     x, y = browser.center(card("transform") + " .dcard-sub")
     browser.mouse("mousePressed", x, y); browser.mouse("mouseReleased", x, y)
@@ -113,10 +137,10 @@ def designer_scenario(browser):
     validated = browser.wait_for("!!document.querySelector('.drawer-status')?.textContent.includes('dtpipe accepts it')", 60)
     errors = page_errors(browser)
     shot = browser.shot(os.path.join(OUT, "designer-scenario.png"))
-    detail = f"composed={composed} validated={validated}" + (f"  errors: {errors}" if errors else "")
+    detail = f"wiring={wiring} composed={composed} validated={validated}" + (f"  errors: {errors}" if errors else "")
     if not composed:
         detail += "  yaml: " + (browser.js("document.getElementById('d-yaml')?.textContent") or "")[:400]
-    report(composed and validated and not errors, "designer scenario", detail, shot)
+    report(wiring and composed and validated and not errors, "designer scenario", detail, shot)
 
 
 browser = Browser(height=1200)
