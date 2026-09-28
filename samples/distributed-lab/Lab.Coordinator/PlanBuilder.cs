@@ -50,7 +50,6 @@ public sealed class PlanBuilder(
     LabOptions options, DtPipeCli cli, NodeInventory inventory, IPlanRegistry planRegistry, IFlowControlService flowControl)
 {
     private const string ArrowEndpoint = "arrow:-";
-    private const string SingleBranchAlias = "main";
     private static readonly TimeSpan SplitTimeout = TimeSpan.FromSeconds(90);
 
     private sealed class Unit
@@ -274,14 +273,11 @@ public sealed class PlanBuilder(
                 return null;
             }
 
-            // dtpipe split observes no stage on a single-branch job whose alias is not "main", so
-            // such a job is cut under that name and handed back under its own.
-            var splitAlias = branches.Count == 1 ? SingleBranchAlias : cut.Branch;
             var jobPath = Path.Combine(workDir, $"job-{i}.yaml");
-            await File.WriteAllTextAsync(jobPath, RenameBranch(JobYaml.Parse(current), cut.Branch, splitAlias), ct);
+            await File.WriteAllTextAsync(jobPath, current, ct);
             var prefix = Path.Combine(workDir, $"cut-{i}");
             var result = await cli.RunAsync(
-                ["split", jobPath, "--branch", splitAlias, "--at", cut.At.ToString(), "--out", prefix, "--acknowledge"],
+                ["split", jobPath, "--branch", cut.Branch, "--at", cut.At.ToString(), "--out", prefix, "--acknowledge"],
                 workDir, SplitTimeout, ct);
             if (!result.Succeeded)
             {
@@ -290,19 +286,11 @@ public sealed class PlanBuilder(
             }
 
             var producer = JobYaml.Parse(await File.ReadAllTextAsync(prefix + "-producer.yaml", ct));
-            heads[cut.Branch] = JobYaml.Branches(producer).Single(b => b.Alias == splitAlias).Branch;
-            current = RenameBranch(JobYaml.Parse(await File.ReadAllTextAsync(prefix + "-consumer.yaml", ct)), splitAlias, cut.Branch);
+            heads[cut.Branch] = JobYaml.Branches(producer).Single(b => b.Alias == cut.Branch).Branch;
+            current = await File.ReadAllTextAsync(prefix + "-consumer.yaml", ct);
         }
 
         return (JobYaml.Parse(current), heads);
-    }
-
-    private static string RenameBranch(YamlMappingNode job, string from, string to)
-    {
-        var renamed = new YamlMappingNode();
-        foreach (var (alias, branch) in JobYaml.Branches(job))
-            renamed.Add(alias == from ? to : alias, branch);
-        return JobYaml.Serialize(renamed);
     }
 
     private static List<Unit> BuildUnits(YamlMappingNode remaining, IReadOnlyDictionary<string, YamlMappingNode> heads)

@@ -194,7 +194,8 @@ public class JobService
 			}
 			else
 			{
-				var mainJob = jobs.Values.First();
+				var (mainAlias, mainJob) = jobs.First();
+				_serviceProvider.GetService<DtPipe.DryRun.SampleReportCollector>()?.LinearBranch = mainAlias;
 				if (!globals.Quiet)
 				{
 					_console.WriteLine();
