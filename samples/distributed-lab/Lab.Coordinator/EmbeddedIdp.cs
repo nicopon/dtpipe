@@ -27,14 +27,6 @@ public static class EmbeddedIdp
     public const string TokenPath = "/connect/token";
     public const string GroupScopePrefix = "transportr:group:";
 
-    /// <summary>
-    /// The prefix a <c>PipelineNode</c>'s hub URL carries its token in: <c>/t/&lt;token&gt;/…</c>.
-    /// <c>PipelineNodeOptions</c> has no credential, and the TransportR client builds its hub and
-    /// stream URLs by appending paths to the one it is given, so a query string would not survive;
-    /// a path prefix does, and <see cref="UseTokenInPath"/> turns it back into a bearer header.
-    /// </summary>
-    public const string TokenPathPrefix = "/t/";
-
     public static void AddEmbeddedIdp(this IServiceCollection services, LabOptions lab)
     {
         services.AddDbContext<IdpDbContext>(o =>
@@ -84,22 +76,6 @@ public static class EmbeddedIdp
         services.AddAuthorization();
         services.AddHostedService<IdpClientSync>();
     }
-
-    /// <summary>Strips <see cref="TokenPathPrefix"/> and presents its token as a bearer header. Runs before routing.</summary>
-    public static void UseTokenInPath(this WebApplication app) => app.Use((context, next) =>
-    {
-        var path = context.Request.Path.Value;
-        if (path is not null && path.StartsWith(TokenPathPrefix, StringComparison.Ordinal))
-        {
-            var rest = path[TokenPathPrefix.Length..];
-            var slash = rest.IndexOf('/');
-            var token = slash < 0 ? rest : rest[..slash];
-            context.Request.Headers.Authorization = "Bearer " + token;
-            context.Request.PathBase = context.Request.PathBase.Add(TokenPathPrefix + token);
-            context.Request.Path = slash < 0 ? "/" : rest[slash..];
-        }
-        return next(context);
-    });
 
     /// <summary>
     /// The token endpoint, past OpenIddict's own checks (known client, right secret): the token

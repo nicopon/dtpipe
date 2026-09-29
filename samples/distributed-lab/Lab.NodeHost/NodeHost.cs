@@ -143,7 +143,7 @@ public sealed class NodeHost : IAsyncDisposable
         await File.WriteAllTextAsync(jobPath, deployment.Yaml, new UTF8Encoding(false), ct);
 
         var supervisor = new FragmentSupervisor(
-            _config.Name, deployment, jobPath, _options, _idp.HubUrlAsync, CreateLoggerFactory(deployment.Fragment), ReportAsync);
+            _config.Name, deployment, jobPath, _options, () => _idp.GetAsync(fresh: true), CreateLoggerFactory(deployment.Fragment), ReportAsync);
         _fragments[key] = supervisor;
         _logger.LogInformation("Deploying {Fragment} ({Edges})", key,
             string.Join(", ", deployment.Edges.Select(e => $"{e.Direction} {e.Alias}")));

@@ -18,7 +18,7 @@ public sealed class FragmentSupervisor : IAsyncDisposable
     private readonly FragmentDeployment _deployment;
     private readonly string _jobPath;
     private readonly NodeHostOptions _options;
-    private readonly Func<Task<string>> _hubUrl;
+    private readonly Func<Task<string>> _accessToken;
     private readonly ILoggerFactory _loggerFactory;
     private readonly Func<FragmentStatus, Task> _report;
 
@@ -39,10 +39,10 @@ public sealed class FragmentSupervisor : IAsyncDisposable
     private string _generation;
 
     public FragmentSupervisor(
-        string node, FragmentDeployment deployment, string jobPath, NodeHostOptions options, Func<Task<string>> hubUrl,
+        string node, FragmentDeployment deployment, string jobPath, NodeHostOptions options, Func<Task<string>> accessToken,
         ILoggerFactory loggerFactory, Func<FragmentStatus, Task> report)
     {
-        _hubUrl = hubUrl;
+        _accessToken = accessToken;
         _node = node;
         _deployment = deployment;
         _jobPath = jobPath;
@@ -59,10 +59,15 @@ public sealed class FragmentSupervisor : IAsyncDisposable
         await ReportAsync(FragmentState.Registering);
         try
         {
+            // TransportR keeps the previous token when its provider throws, and a refused identity
+            // would then surface as a bare 401 after its connection retries: ask once here so the
+            // IDP's refusal is what gets reported.
+            await _accessToken();
             _pipelineNode = await PipelineNode.PipelineNode.ConnectAsync(new PipelineNodeOptions
             {
-                // Carries this node's token: TransportR reads the node's group from it.
-                HubUrl = await _hubUrl(),
+                HubUrl = _options.CoordinatorUrl,
+                // The hub reads this node's group from its token.
+                AccessTokenProvider = _accessToken,
                 DtPipeExecutable = _options.DtPipeExecutable,
                 FragmentJobPath = _jobPath,
                 Edges = _deployment.Edges

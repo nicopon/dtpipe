@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
@@ -16,6 +17,8 @@ namespace DtPipe.PipelineNode.Tests.Infrastructure;
 /// straight off <see cref="Host"/>, the way a coordinator would from inside its own process. Every
 /// client, including a real <see cref="DtPipe.PipelineNode.PipelineNode"/>, connects the same way
 /// it would against a real coordinator: through <c>TransportRClientBuilder&lt;T&gt;</c> over HTTP.
+/// Started with a <see cref="TestJwt"/> the hub runs in production mode instead: every client is
+/// identified by a bearer token signed with that key, and its group is read from the token.
 /// </summary>
 public sealed class NodeTestHost : IAsyncDisposable
 {
@@ -28,7 +31,7 @@ public sealed class NodeTestHost : IAsyncDisposable
         Url = url;
     }
 
-    public static async Task<NodeTestHost> StartAsync()
+    public static async Task<NodeTestHost> StartAsync(TestJwt? jwt = null)
     {
         var host = new HostBuilder()
             .ConfigureWebHost(webBuilder =>
@@ -43,19 +46,36 @@ public sealed class NodeTestHost : IAsyncDisposable
                         // requires one: without it the hub accepts a transfer and then returns 500 on
                         // every stream request instead of forwarding bytes.
                         services.AddSingleton<IHubProgressMonitor, SilentHubProgressMonitor>();
-                        services.AddDataHub()
-                                .UseHub<TestHub>()
-                                .UseDevMode(options =>
-                                {
-                                    options.AllowAnonymous = true;
-                                    options.DefaultGroups = ["test"];
-                                })
-                                .Build();
+                        var hub = services.AddDataHub().UseHub<TestHub>();
+                        if (jwt is null)
+                        {
+                            hub.UseDevMode(options =>
+                            {
+                                options.AllowAnonymous = true;
+                                options.DefaultGroups = ["test"];
+                            });
+                        }
+                        else
+                        {
+                            services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+                                    .AddJwtBearer(options =>
+                                    {
+                                        options.MapInboundClaims = false;
+                                        options.TokenValidationParameters = jwt.ValidationParameters;
+                                    });
+                            services.AddAuthorization();
+                        }
+                        hub.Build();
                     })
                     .Configure(app =>
                     {
                         app.UseRouting();
-                        app.UseEndpoints(endpoints => endpoints.MapDataHub(requireAuth: false));
+                        if (jwt is not null)
+                        {
+                            app.UseAuthentication();
+                            app.UseAuthorization();
+                        }
+                        app.UseEndpoints(endpoints => endpoints.MapDataHub(requireAuth: jwt is not null));
                     });
             })
             .Build();

@@ -80,10 +80,10 @@ document, `.state/rights.json`, started from `rights-seed.json` and edited in th
 | **To whom**: the flow matrix between groups | by the hub on **every transfer**, live, and on every plan |
 | **What**: per source brick, the groups its rows may be sent to as they leave their node | on every plan (the hub sees groups, not bricks) |
 
-Every change is audited. A pipeline node has no credential option of its own, so its host hands
-it a hub URL carrying the token in its path (`/t/<token>/…`); the coordinator turns it back into a
-bearer header. Signing keys are ephemeral: a coordinator restart invalidates every token, and the
-hosts fetch new ones as they reconnect.
+Every change is audited. A node host gives each of its pipeline nodes a token provider
+(`PipelineNodeOptions.AccessTokenProvider`) that asks the IDP for the node's token. Signing keys
+are ephemeral: a coordinator restart invalidates every token, and the hosts fetch new ones as they
+reconnect.
 
 ## The coordinator's page
 

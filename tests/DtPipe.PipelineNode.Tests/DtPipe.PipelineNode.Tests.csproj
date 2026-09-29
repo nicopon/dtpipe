@@ -19,6 +19,7 @@
   <ItemGroup>
     <!-- Every TransportR package this project, DtPipe.Coordinator and DtPipe.Coordinator.Tests
          touch flows transitively through the ProjectReferences above; nothing to declare here. -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.12" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageReference Include="xunit.v3" Version="3.2.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">

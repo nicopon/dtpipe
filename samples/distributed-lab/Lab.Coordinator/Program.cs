@@ -62,7 +62,6 @@ app.Use(async (context, next) =>
     }
 });
 
-app.UseTokenInPath();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseRouting();

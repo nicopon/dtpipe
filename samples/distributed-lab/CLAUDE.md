@@ -59,10 +59,11 @@ Mechanics for editing the lab. What it is and how to run it: `README.md`.
   matrix as it is now on every transfer, and every plan (`/api/plan`, `/api/deploy`, `AutoPlacer`,
   a library deploy) goes through `RightsStore.WithPolicies`. Never add a second matrix.
   `[local: smoke.py rights]`
-- `PipelineNodeOptions` has no credential: a node host gives each pipeline node a hub URL carrying
-  its token in the path (`/t/<token>/…`), which `EmbeddedIdp.UseTokenInPath` turns back into a
-  bearer header before routing. It must stay the first middleware after the conflict handler.
-  `[unchecked]`
+- A node host hands each pipeline node `PipelineNodeOptions.AccessTokenProvider`, bound to
+  `IdpTokenClient.GetAsync(fresh: true)`: TransportR retries a stream refused with 401 through the
+  provider, so it must return a new token, not the cached one. `FragmentSupervisor` asks once before
+  connecting because TransportR swallows a provider that throws. `[local: smoke.py rights — the token
+  reaches the hub]` `[unchecked: the fresh token on retry, the ask before connecting]`
 - The library is a git repository of its own under `.state/library`, driven by the `git` command
   line with a fixed identity; it never touches the dtpipe repository around it. It starts from
   `library-seed/`. Run history lives in `.state/runs/`, outside git. Deployments are in memory.

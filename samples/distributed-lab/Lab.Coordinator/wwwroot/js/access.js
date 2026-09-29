@@ -82,7 +82,7 @@ function render() {
         <tr><th>token endpoint</th><td><code>${esc(rights.idp.tokenEndpoint)}</code></td></tr>
         <tr><th>token lifetime</th><td>${esc(rights.idp.tokenLifetime)}</td></tr>
       </table>
-      <p class="hint">A node host presents its token on the control channel, and gives each pipeline node a hub URL that carries it (<code>/t/&lt;token&gt;/…</code>): <code>PipelineNode</code> has no credential option of its own.</p>
+      <p class="hint">A node host presents its token on the control channel, and gives each pipeline node a token provider (<code>PipelineNodeOptions.AccessTokenProvider</code>) for the data hub.</p>
     </section>
 
     <section class="card">

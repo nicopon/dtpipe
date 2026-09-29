@@ -24,6 +24,14 @@ public enum FaultOrigin { Local, Remote }
 public sealed class PipelineNodeOptions
 {
     public required string HubUrl { get; init; }
+
+    /// <summary>Supplies the bearer token a hub in production mode identifies this node by; the hub
+    /// reads the node's group from the token, never from an option. TransportR calls it when the
+    /// connection opens, again as the token nears its expiry, and once more after a stream is
+    /// refused with 401. Null connects anonymously, which only a development-mode hub accepts. A
+    /// provider that throws leaves the previous token in place.</summary>
+    public Func<Task<string>>? AccessTokenProvider { get; init; }
+
     public required string DtPipeExecutable { get; init; }
     public required string FragmentJobPath { get; init; }
     public required IReadOnlyList<EdgeBinding> Edges { get; init; }
@@ -333,6 +341,9 @@ public sealed class PipelineNode : IAsyncDisposable
             .WithMessagePackSerialization()
             .WithBatchSize(options.BatchSize)
             .WithLoggerFactory(loggerFactory);
+
+        if (options.AccessTokenProvider is { } tokenProvider)
+            builder.WithTokenProvider(tokenProvider);
 
         if (controlConnectionSetup is not null)
             builder.WithControlConnection(controlConnectionSetup);

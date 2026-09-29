@@ -5,7 +5,8 @@ namespace DtPipe.Lab.NodeHost;
 
 /// <summary>
 /// Obtains this node's tokens from the coordinator's embedded IDP (client credentials), and reuses
-/// one until shortly before it expires. The group a token carries is decided by the IDP, not here.
+/// one until shortly before it expires; <c>fresh</c> asks for a new one, which is what TransportR's
+/// retry after a 401 needs. The group a token carries is decided by the IDP, not here.
 /// </summary>
 public sealed class IdpTokenClient(NodeHostOptions options, NodeConfig config) : IDisposable
 {
@@ -45,12 +46,6 @@ public sealed class IdpTokenClient(NodeHostOptions options, NodeConfig config) :
             _gate.Release();
         }
     }
-
-    /// <summary>
-    /// The hub URL a <c>PipelineNode</c> is given: <c>PipelineNodeOptions</c> has no credential, so
-    /// the token rides in the URL's path, where the coordinator turns it back into a bearer header.
-    /// </summary>
-    public async Task<string> HubUrlAsync() => $"{options.CoordinatorUrl}/t/{await GetAsync()}";
 
     public void Dispose() => _http.Dispose();
 }
