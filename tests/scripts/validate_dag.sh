@@ -34,6 +34,14 @@ A="$ARTIFACTS_DIR"
 # Helper: count CSV data rows (excluding header)
 csv_rows() { tail -n +2 "$1" | wc -l | tr -d ' '; }
 
+# A file a finished process wrote can read as missing or empty for a moment on a network-backed
+# checkout (a VM share), then complete: wait until it has content before reading it.
+wait_visible() {
+    local i
+    for i in 1 2 3 4 5 6 7 8 9 10; do [ -s "$1" ] && return 0; sleep 0.5; done
+    return 0
+}
+
 # Helper: run a SQL test against DuckDB
 run_sql_test() {
     local name="$1"
@@ -162,6 +170,7 @@ check_t6() {
     [ "$count" -ge 1 ] && pass "Fan-out+SQL ($2): SQL branch produced result" || fail "Fan-out+SQL ($2): SQL branch empty"
 }
 "$DTPIPE" -i "generate:200" --fake "Id:random.number" --fake "Cat:lorem.word" --drop "GenerateIndex" -o "$A/t6_src.parquet" --no-stats
+wait_visible "$A/t6_src.parquet"
 
 # We run this one manually because it has multiple branches
 echo "  [SQL Engine: DuckDB] T6: Fan-out + SQL..."
@@ -171,6 +180,7 @@ rm -f "$A/t6_passthru.csv" "$A/t6_sql.csv"
   --from s -o "$A/t6_passthru.csv" \
   --from s --sql "SELECT COUNT(*) AS total FROM s" -o "$A/t6_sql.csv" --no-stats
 
+wait_visible "$A/t6_passthru.csv"; wait_visible "$A/t6_sql.csv"
 COUNT_PT=$(csv_rows "$A/t6_passthru.csv")
 [ "$COUNT_PT" -eq 200 ] && pass "Fan-out+SQL (duckdb): passthru OK" || fail "Fan-out+SQL (duckdb): passthru $COUNT_PT"
 check_t6 "$A/t6_sql.csv" "duckdb"
