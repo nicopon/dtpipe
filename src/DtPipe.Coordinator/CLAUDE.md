@@ -77,6 +77,17 @@ in flight throws instead of queuing.
   coordinator itself told to `Cancel` is excluded from both cause and consequence: its own child was
   killed on command, and reports a plain non-zero `Local` exit indistinguishable on the wire from an
   organic one. `[local: RunOrchestratorTests, CoordinatorDrivenTests]`
+- **A fragment's own failure ends the run at once.** `OnExitedAsync` raises the run's abort on the
+  first `Exited` that is non-zero with a `FaultOrigin.Local` origin, so the teardown tells every
+  fragment still running to `Cancel` without waiting for its peers to notice: a peer whose child has
+  nothing to write (an aggregate over a slow source) never would. It acts only on a report that
+  arrives: a node reports once its relays have ended, so a fragment whose child died while its
+  relay waits on a silent peer reports nothing yet. `[local: FaultVerdictTests]`
+- **A transfer the hub cannot open is the cause, as a message.** When `InitTransferAsync` or the
+  `Wire` push fails, the run tears down and `Cause` reads `transfer P -> C could not be opened by
+  the hub`: no fragment is blamed as unresponsive, and the verdict gives no reason (which side, which
+  group, which rule) to whoever reads it; the hub's log holds the detail. A fragment that went
+  silent still outranks it. `[local: RunOrchestratorTests, FaultVerdictTests]`
 - **A fragment absent from the reports is never read as success.** `DetermineOutcome` takes the
   fragment *names* from `RunSpec.Fragments` (versioning is fully resolved by admission time - the
   outcome rule has no reason to know a pin from a plain name) as well as the reports collected so far,
@@ -117,8 +128,8 @@ in flight throws instead of queuing.
   names none for it, only node liveness - a legitimately long transfer must not be reported failed for
   outliving a fixed duration. `RunOrchestratorOptions.ExitTimeout` therefore bounds only the
   *teardown's* wait for an already-cancelled or already-terminated fragment to finish reporting, never
-  the happy path: that wait is bounded solely by `abort.Token` (the requester's own cancellation, or
-  `FragmentLost`).
+  the happy path: that wait is bounded solely by `abort.Token` (the requester's own cancellation,
+  `FragmentLost`, or a fragment's own failure reported by `Exited`).
 - **On teardown, every launched fragment still running is told to `Cancel`** after
   `ITransferTerminator.TerminateAsync` has ended each open transfer. A torn-down transfer faults a
   fully wired fragment only once one of its relays touches it, which never happens while its child
@@ -139,8 +150,8 @@ in flight throws instead of queuing.
 delivery is not retried - SignalR delivers to a dead connection silently, no exception - but still
 falls to `ReadyTimeout`, since the fragment can then never report `Ready`. **A `Wire` dropped the
 same way has no such backstop now that the data-transfer phase has no wall clock of its own**: the
-fragment simply never reports `Exited`, and only the requester's own cancellation or an unrelated
-`FragmentLost` would ever end the wait - `PipelineNode.WireAsync` is not idempotent, so there is no
+fragment simply never reports `Exited`, and only the requester's own cancellation, an unrelated
+`FragmentLost` or another fragment's local failure would ever end the wait - `PipelineNode.WireAsync` is not idempotent, so there is no
 cheap retry on either side. A fragment's own `Exited` landing on a fresh connection before that
 connection's reconnect-triggered `Register` has completed fails `ResolveFragment` with no retry on
 the hub side; `PipelineNode` narrows this by holding the report and resending it once its own

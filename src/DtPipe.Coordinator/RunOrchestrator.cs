@@ -41,8 +41,8 @@ public sealed record EdgeCount(
 /// <see cref="Reports"/> is partial by construction: a fragment absent from it never reported
 /// <c>Exited</c> at all, whether because it went silent or because the coordinator's own teardown
 /// gave up waiting on it. <see cref="CauseIsUnresponsive"/> is set only when <see cref="Cause"/> is
-/// exactly such a fragment - it is never true for the row-count-mismatch form of <see cref="Cause"/>,
-/// which is a message, not a fragment name.
+/// exactly such a fragment - it is never true for the row-count-mismatch or refused-transfer forms of
+/// <see cref="Cause"/>, which are messages, not fragment names.
 /// </summary>
 public sealed record RunResult(
     RunOutcome Outcome, string? Cause, IReadOnlyList<string> Consequences,
@@ -75,8 +75,8 @@ public sealed class RunOrchestratorOptions
     /// Bounds only the teardown's wait for an already-cancelled or already-terminated fragment to
     /// finish reporting its own <c>Exited</c>, once the run has already been given up on. Never
     /// bounds a healthy run's own data-transfer phase: the design's own three-clock table names no
-    /// coordinator-side wall clock there, only node liveness (<see cref="INodeRegistry.FragmentLost"/>) -
-    /// a legitimately long transfer must not be reported failed for outliving a fixed duration.
+    /// coordinator-side wall clock there, only node liveness (<see cref="INodeRegistry.FragmentLost"/>) and a
+    /// fragment's own failure - a legitimately long transfer must not be reported failed for outliving a fixed duration.
     /// </summary>
     public TimeSpan ExitTimeout { get; init; } = TimeSpan.FromSeconds(30);
     public int BatchSize { get; init; } = 8;
@@ -93,8 +93,8 @@ public interface IRunOrchestrator
 /// <summary>
 /// The barrier. Admits a run only once every fragment it names has registered (<see cref="AdmissionGate"/>),
 /// launches all of them, opens each declared edge once both endpoints report ready, then waits out
-/// the data-transfer phase (bounded only by <see cref="INodeRegistry.FragmentLost"/> or the caller's
-/// own cancellation, never a fixed duration) and applies the outcome rule (<see cref="DetermineOutcome"/>).
+/// the data-transfer phase (bounded only by <see cref="INodeRegistry.FragmentLost"/>, a fragment
+/// reporting its own failure, or the caller's own cancellation, never a fixed duration) and applies the outcome rule (<see cref="DetermineOutcome"/>).
 /// One run in flight at a time: a second call to <see cref="RunAsync"/> is refused outright, not
 /// queued - concurrent runs are not supported yet.
 /// </summary>
@@ -115,6 +115,7 @@ public sealed class RunOrchestrator : IRunOrchestrator
     private string? _activeRunId;
     private Dictionary<string, TaskCompletionSource>? _ready;
     private Dictionary<string, TaskCompletionSource<FragmentExitReport>>? _exited;
+    private CancellationTokenSource? _abort;
 
     public RunOrchestrator(
         AdmissionGate admission,
@@ -152,7 +153,9 @@ public sealed class RunOrchestrator : IRunOrchestrator
                 StringComparer.Ordinal);
 
             using var abort = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            _abort = abort;
             string? lostFragment = null;
+            string? wiringFailure = null;
             var launched = new HashSet<string>(StringComparer.Ordinal);
             var cancelledFragments = new HashSet<string>(StringComparer.Ordinal);
             var openTransfers = new List<string>();
@@ -227,7 +230,7 @@ public sealed class RunOrchestrator : IRunOrchestrator
                         lostFragment ??= spec.Fragments.Select(p => p.FragmentName).FirstOrDefault(f => !_ready[f].Task.IsCompleted);
                         abort.Cancel();
                     }
-                    catch (OperationCanceledException) { /* ct or FragmentLost already set abort */ }
+                    catch (OperationCanceledException) { /* ct, FragmentLost or a local failure already set abort */ }
                 }
 
                 if (!abort.IsCancellationRequested)
@@ -263,9 +266,11 @@ public sealed class RunOrchestrator : IRunOrchestrator
                         {
                             // InitTransferAsync's documented failure modes (unknown client, expired
                             // token, unauthorized, unreachable, handshake timeout) name neither party
-                            // in the exception itself; the producer is named by convention.
+                            // in the exception itself, and neither fragment is known to have gone
+                            // quiet: the edge is the cause. The verdict carries no reason beyond
+                            // that (which side, which rule); the hub's log holds the detail.
                             _logger.LogWarning(ex, "Wiring edge {Producer}->{Consumer} failed", edge.ProducerFragment, edge.ConsumerFragment);
-                            lostFragment ??= edge.ProducerFragment;
+                            wiringFailure ??= $"transfer {edge.ProducerFragment} -> {edge.ConsumerFragment} could not be opened by the hub";
                             abort.Cancel();
                             break;
                         }
@@ -273,7 +278,8 @@ public sealed class RunOrchestrator : IRunOrchestrator
                 }
 
                 // Execution: no coordinator-side wall clock (the design's own three-clock table) -
-                // bounded only by the abort a FragmentLost or the requester's own ct raises.
+                // bounded only by the abort a FragmentLost, a fragment's own local failure or the
+                // requester's own ct raises.
                 if (!abort.IsCancellationRequested)
                 {
                     try { await Task.WhenAll(_exited.Values.Select(t => t.Task)).WaitAsync(abort.Token); }
@@ -297,11 +303,12 @@ public sealed class RunOrchestrator : IRunOrchestrator
                 .Where(f => _exited[f].Task.IsCompletedSuccessfully)
                 .ToDictionary(f => f, f => _exited[f].Task.Result, StringComparer.Ordinal);
 
-            return DetermineOutcome(reports, spec.Edges, fragmentNames, cancelledFragments, ct.IsCancellationRequested);
+            return DetermineOutcome(reports, spec.Edges, fragmentNames, cancelledFragments, ct.IsCancellationRequested, wiringFailure);
         }
         finally
         {
             _activeRunId = null;
+            _abort = null;
             _ready = null;
             _exited = null;
             _singleRun.Release();
@@ -401,6 +408,17 @@ public sealed class RunOrchestrator : IRunOrchestrator
         // A fragment that exited 0 carries no origin: there was no fault to attribute.
         FaultOrigin? parsedOrigin = exitCode == 0 ? null : Enum.Parse<FaultOrigin>(origin);
         tcs.TrySetResult(new FragmentExitReport(fragment, exitCode, parsedOrigin, firstFault, rowCounts));
+
+        // A fragment whose own process failed has decided the run: the verdict is Failed whatever
+        // its peers do next. Waiting for them to notice would leave a peer with nothing to write
+        // (an aggregate over a slow source) holding the verdict until its source ends, since the
+        // torn-down transfer never reaches a child that does not write. The teardown tells every
+        // fragment still running to Cancel.
+        if (parsedOrigin == FaultOrigin.Local)
+        {
+            try { _abort?.Cancel(); }
+            catch (ObjectDisposedException) { /* the run already ended */ }
+        }
         return Task.CompletedTask;
     }
 
@@ -431,14 +449,17 @@ public sealed class RunOrchestrator : IRunOrchestrator
     /// does - never arrival order, since an aborting peer can fail a healthy fragment before the
     /// fragment that actually failed has finished reporting. An uncommanded first-local fault whose
     /// own exit code is 130 reports the whole run as cancelled (root <c>CLAUDE.md</c>'s convention),
-    /// same as <paramref name="requesterCancelled"/> itself.
+    /// same as <paramref name="requesterCancelled"/> itself. A <paramref name="wiringFailure"/> - the hub
+    /// could not open an edge's transfer - is the cause, as a message, unless a fragment went silent or
+    /// one reports a local fault of its own.
     /// </summary>
     internal static RunResult DetermineOutcome(
         IReadOnlyDictionary<string, FragmentExitReport> reports,
         IReadOnlyList<RunEdge> edges,
         IReadOnlyList<string> allFragments,
         IReadOnlySet<string> coordinatorCancelled,
-        bool requesterCancelled)
+        bool requesterCancelled,
+        string? wiringFailure = null)
     {
         var edgeCounts = BuildEdgeCounts(reports, edges);
 
@@ -460,6 +481,11 @@ public sealed class RunOrchestrator : IRunOrchestrator
             return new RunResult(RunOutcome.Failed, cause, consequences, reports, edgeCounts, CauseIsUnresponsive: true);
         }
 
+        var localFault = organicFaults.FirstOrDefault(r => r.Origin == FaultOrigin.Local);
+
+        if (wiringFailure is not null && localFault is null)
+            return new RunResult(RunOutcome.Failed, wiringFailure, [], reports, edgeCounts);
+
         if (organicFaults.Count == 0)
         {
             var mismatchedEdges = edgeCounts.Where(e => !e.Agrees).ToList();
@@ -470,7 +496,6 @@ public sealed class RunOrchestrator : IRunOrchestrator
             return new RunResult(RunOutcome.Failed, $"row count mismatch on edge(s): {string.Join(", ", edgeNames)}", [], reports, edgeCounts);
         }
 
-        var localFault = organicFaults.FirstOrDefault(r => r.Origin == FaultOrigin.Local);
         if (localFault is { ExitCode: 130 })
         {
             var consequences = organicFaults.Where(r => r.Fragment != localFault.Fragment).Select(r => r.Fragment).ToList();

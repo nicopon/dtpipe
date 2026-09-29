@@ -236,4 +236,73 @@ public class RunOrchestratorTests
         Assert.Equal("A", result.Cause);
         Assert.DoesNotContain("B", result.Consequences);
     }
+    /// <summary>
+    /// A transfer the hub could not open is the cause, as a message: the fragments it cancelled are
+    /// neither silent nor a mismatch, and the verdict is never labelled "(unresponsive)".
+    /// </summary>
+    [Fact]
+    public void AWiringFailure_IsTheCause_NeitherUnresponsiveNorAMismatch()
+    {
+        var edges = new[] { new RunEdge("A", "out", "B", "in") };
+        var cancelled = new HashSet<string> { "A", "B" };
+        var reports = new Dictionary<string, FragmentExitReport>
+        {
+            ["A"] = Failed("A", FaultOrigin.Local),
+            ["B"] = Failed("B", FaultOrigin.Local),
+        };
+
+        var result = RunOrchestrator.DetermineOutcome(
+            reports, edges, ["A", "B"], cancelled, requesterCancelled: false,
+            wiringFailure: "transfer A -> B could not be opened by the hub");
+
+        Assert.Equal(RunOutcome.Failed, result.Outcome);
+        Assert.Equal("transfer A -> B could not be opened by the hub", result.Cause);
+        Assert.False(result.CauseIsUnresponsive);
+        Assert.DoesNotContain("(unresponsive)", result.Describe());
+    }
+
+    [Fact]
+    public void AWiringFailure_YieldsToAFragmentThatWentSilent()
+    {
+        var edges = new[] { new RunEdge("A", "out", "B", "in") };
+        var reports = new Dictionary<string, FragmentExitReport> { ["A"] = Ok("A", "out", 0) };
+
+        var result = RunOrchestrator.DetermineOutcome(
+            reports, edges, ["A", "B"], NoneCancelled, requesterCancelled: false,
+            wiringFailure: "transfer A -> B could not be opened by the hub");
+
+        Assert.Equal("B", result.Cause);
+        Assert.True(result.CauseIsUnresponsive);
+    }
+
+    [Fact]
+    public void AWiringFailure_NeverOutranksTheRequestersCancellation()
+    {
+        var edges = new[] { new RunEdge("A", "out", "B", "in") };
+
+        var result = RunOrchestrator.DetermineOutcome(
+            new Dictionary<string, FragmentExitReport>(), edges, ["A", "B"], NoneCancelled, requesterCancelled: true,
+            wiringFailure: "transfer A -> B could not be opened by the hub");
+
+        Assert.Equal(RunOutcome.Cancelled, result.Outcome);
+    }
+
+    /// <summary>The cause stays the first fragment whose own process failed, even when a transfer also failed to open.</summary>
+    [Fact]
+    public void AWiringFailure_YieldsToAFragmentsLocalFault()
+    {
+        var edges = new[] { new RunEdge("A", "out", "B", "in") };
+        var reports = new Dictionary<string, FragmentExitReport>
+        {
+            ["A"] = Failed("A", FaultOrigin.Local),
+            ["B"] = Failed("B", FaultOrigin.Remote),
+        };
+
+        var result = RunOrchestrator.DetermineOutcome(
+            reports, edges, ["A", "B"], NoneCancelled, requesterCancelled: false,
+            wiringFailure: "transfer A -> B could not be opened by the hub");
+
+        Assert.Equal("A", result.Cause);
+        Assert.Equal(["B"], result.Consequences);
+    }
 }
