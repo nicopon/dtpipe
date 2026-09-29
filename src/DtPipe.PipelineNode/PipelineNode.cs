@@ -65,6 +65,9 @@ public sealed class PipelineNode : IAsyncDisposable
 {
     private const int GracePeriodMs = 3000;
 
+    /// <summary>How long the relays get to fail on their own once the child has died, before the fragment reports without them.</summary>
+    private const int RelayDrainAfterChildFailureMs = 1000;
+
     private readonly PipelineNodeOptions _options;
     private readonly ILogger _logger;
     private readonly SignalRDataClient<byte[]> _client;
@@ -83,6 +86,9 @@ public sealed class PipelineNode : IAsyncDisposable
     private readonly Dictionary<string, long> _rowCounts = new();
     private readonly object _rowCountsLock = new();
     private int _faulted;
+
+    /// <summary>Completed when the child exits with a non-zero code, whatever its relays are doing.</summary>
+    private readonly TaskCompletionSource _childFailed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _ruptured;
     private string? _firstFault;
     private FaultOrigin? _faultOrigin;
@@ -154,6 +160,7 @@ public sealed class PipelineNode : IAsyncDisposable
 
         await client.ConnectAsync(cancellationToken: ct);
         (node._child, node._pipes) = LaunchChild(options, logger);
+        node.WatchChild();
 
         return node;
     }
@@ -236,6 +243,7 @@ public sealed class PipelineNode : IAsyncDisposable
     {
         _runId = runId;
         (_child, _pipes) = LaunchChild(_options, _logger);
+        WatchChild();
         await _client.ControlConnection.InvokeAsync("Ready", runId, ct);
     }
 
@@ -679,14 +687,39 @@ public sealed class PipelineNode : IAsyncDisposable
     }
 
     /// <summary>
+    /// Watches the child independently of the relays: a child that exits non-zero is this fragment's
+    /// own failure from that instant. A relay only notices it on its next read or write, which a
+    /// fragment waiting on a silent peer never makes, so without this the fragment would never report.
+    /// </summary>
+    private void WatchChild()
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await WaitForChildExitAsync(CancellationToken.None);
+                var code = _child.ExitCode;
+                if (code == 0) return;
+                Fault(FaultOrigin.Local, $"child dtpipe exited {code}");
+                _childFailed.TrySetResult();
+            }
+            catch (Exception) { /* disposed with the node: nothing left to watch */ }
+        });
+    }
+
+    /// <summary>
     /// Waits for every wired edge to finish relaying - a fault has already ruptured the child - then
-    /// for the child itself. Returns the child's own exit code, or 1 if the fragment faulted.
+    /// for the child itself. Returns the child's own exit code, or 1 if the fragment faulted. A relay
+    /// still waiting on its peer once the child has failed gets a short delay to fail on its own, then
+    /// is left behind: the coordinator's teardown ends its transfer.
     /// </summary>
     public async Task<int> RunToCompletionAsync(CancellationToken ct = default)
     {
         Task[] tasks;
         lock (_relayTasks) tasks = _relayTasks.ToArray();
-        await Task.WhenAll(tasks);
+        var relays = Task.WhenAll(tasks);
+        if (await Task.WhenAny(relays, _childFailed.Task) != relays)
+            await Task.WhenAny(relays, Task.Delay(RelayDrainAfterChildFailureMs, ct));
 
         if (_faulted != 0)
         {
@@ -694,9 +727,24 @@ public sealed class PipelineNode : IAsyncDisposable
             try { _child.StandardOutput.Close(); } catch { }
         }
 
-        await _child.WaitForExitAsync(ct);
+        await WaitForChildExitAsync(ct);
         return _faulted != 0 ? Math.Max(_child.ExitCode, 1) : _child.ExitCode;
     }
+
+    /// <summary>
+    /// <c>Process.WaitForExitAsync</c> alone can stay pending after the process has exited, which would
+    /// hold the fragment's <c>Exited</c> report - and the run's verdict - back for good. Polling
+    /// <c>HasExited</c> beside it bounds that.
+    /// </summary>
+    private async Task WaitForChildExitAsync(CancellationToken ct)
+    {
+        var exited = _child.WaitForExitAsync(ct);
+        while (!exited.IsCompleted && !_child.HasExited)
+            await Task.WhenAny(exited, Task.Delay(ExitPollMs, ct));
+        if (exited.IsFaulted || exited.IsCanceled) await exited;
+    }
+
+    private const int ExitPollMs = 200;
 
     /// <summary>How long disposal waits for the coordinator to acknowledge <c>Unregister</c> before closing anyway.</summary>
     private static readonly TimeSpan UnregisterTimeout = TimeSpan.FromSeconds(2);

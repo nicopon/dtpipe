@@ -32,6 +32,16 @@ Arrow IPC bytes of each edge between the child's stdin/stdout and TransportR.
   its closed predecessor. `_disposing` stops a reconnect that lands during disposal from registering
   again. `Completion` resolves only after `Exited` has been sent, so a node disposed the moment it
   completes never has its `Unregister` overtake its own report. `[local: RedeployTests]`
+- **The child is watched independently of the relays.** `WatchChild` faults the fragment
+  (`FaultOrigin.Local`) the moment the child exits non-zero: a relay only notices a dead child on its
+  next read or write, which a fragment waiting on a silent peer never makes. `RunToCompletionAsync`
+  then gives the relays `RelayDrainAfterChildFailureMs` to fail on their own and reports without a
+  relay still waiting on its peer; the coordinator's teardown ends that transfer.
+  `[local: FaultVerdictTests]`
+- **The child's exit is awaited by polling `HasExited` beside `WaitForExitAsync`.**
+  `RunToCompletionAsync` uses `WaitForChildExitAsync`: `Process.WaitForExitAsync` alone can stay
+  pending after the child has exited, which holds the `Exited` report, and so the run's verdict,
+  back for good; a cancelled fragment whose child ends on its own is the case that shows it. `[unchecked: the race is not reproducible on demand]`
 - **A reconnect re-issues `Register`, with a bounded retry.** TransportR's own `SignalRDataClient`
   already re-issues `Connect` on `HubConnection.Reconnected`; nothing re-issues the coordinator's own
   `Register` but this node, since TransportR has no reason to know that call exists. The retry exists
