@@ -22,7 +22,12 @@ export const $ = (id) => document.getElementById(id);
 export const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 export const fmt = (n) => (n ?? 0).toLocaleString("en-US");
 export const nodeColor = (node) => (node ? `var(--${node}, var(--muted))` : "var(--muted)");
-export const shortNode = (fragment) => String(fragment ?? "").split("@").pop();
+// A fragment reads "pipeline@node"; a cause that is a sentence (a refused transfer, a row-count
+// mismatch) names fragments inside it and is shown whole.
+export const shortNode = (fragment) => {
+  const text = String(fragment ?? "");
+  return text.includes(" ") ? text : text.split("@").pop();
+};
 
 export function bytes(b) {
   return b > 1 << 30 ? (b / (1 << 30)).toFixed(2) + " GiB" : b > 1 << 20 ? (b / (1 << 20)).toFixed(1) + " MiB" : b > 1024 ? (b / 1024).toFixed(0) + " KiB" : b + " B";

@@ -27,7 +27,11 @@ const fmt = (n) => (n ?? 0).toLocaleString("en-US");
 const nodeColor = (node) => `var(--${node}, var(--muted))`;
 const fragmentOf = (plan, node) => `${plan.pipelineId}@${node}`;
 // A run's fragments all share the pipeline id; the node is what tells them apart on screen.
-const short = (fragment) => String(fragment ?? "").split("@").pop();
+// A cause that is a sentence (a refused transfer, a row-count mismatch) is shown whole.
+const short = (fragment) => {
+  const text = String(fragment ?? "");
+  return text.includes(" ") ? text : text.split("@").pop();
+};
 
 async function api(path, body) {
   const init = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
