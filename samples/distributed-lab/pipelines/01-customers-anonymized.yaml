@@ -1,8 +1,10 @@
-# Customers, anonymized before they leave the CRM
-# One linear branch: read the CRM, replace the personal columns with seeded fakes, drop the first
-# name, load the warehouse. Cut after the project stage and place the head on node-1: the
-# personal data never crosses the network, only the anonymized rows do.
-# lab-cut: customers@2
+# Customers, anonymized on the runner
+# One branch reads the CRM and anonymizes it (seeded fakes for the personal columns, the first name
+# dropped), a second loads the warehouse. Cut the first after its reader: the read stays on node-1,
+# the anonymizing goes to the runner, the load to node-4. A data node only reads and writes, so the
+# personal columns do leave the CRM (crm -> runner) and are replaced before they reach the warehouse.
+# lab-cut: customers@0
+# lab-place: customers^=node-1, customers=runner-1, dim=node-4
 # lab-check: SELECT count(*) AS n, count(DISTINCT email) AS emails, sum(hash(email) % 1000003) AS email_sum, sum(customer_id) AS ids FROM dim_customers
 customers:
   input: sqlite:${{LAB_CRM_DB}}
@@ -16,10 +18,13 @@ customers:
   - type: project
     options:
       drop: first_name
-  output: duck:${{LAB_WAREHOUSE_DB}}
   provider-options:
     sqlite-reader:
       query: SELECT customer_id, first_name, last_name, email, city, country, signup_date FROM customers
+dim:
+  from: customers
+  output: duck:${{LAB_WAREHOUSE_DB}}
+  provider-options:
     duck-writer:
       table: dim_customers
       strategy: Recreate

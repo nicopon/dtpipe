@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DtPipe.Lab.Contracts;
 using TransportR.Interfaces;
 using YamlDotNet.RepresentationModel;
 

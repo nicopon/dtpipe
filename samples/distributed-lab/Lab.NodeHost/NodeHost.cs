@@ -10,6 +10,10 @@ namespace DtPipe.Lab.NodeHost;
 /// One lab node: announces the databases it hosts and the bricks it offers, and keeps every
 /// fragment the coordinator deploys on it registered through its own <see cref="FragmentSupervisor"/>.
 /// Commands are applied one at a time, in arrival order; a brick preview answers outside that queue.
+/// A data node runs a fragment only when each of its branches only reads or writes and is one of its
+/// own bricks or a bare arrow edge (<see cref="BrickRules"/>), whatever the coordinator asks. Started
+/// with <see cref="NodeHostOptions.SandboxVariable"/> set, it still only reads and writes, but any
+/// reader or writer will do. A runner hosts no data and runs whatever it is given.
 /// </summary>
 public sealed class NodeHost : IAsyncDisposable
 {
@@ -23,6 +27,7 @@ public sealed class NodeHost : IAsyncDisposable
     private readonly ILogger _logger;
     private readonly ILoggerFactory _hostLoggerFactory;
     private readonly Dictionary<string, FragmentSupervisor> _fragments = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, FragmentStatus> _refusals = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _commands = new(1, 1);
     private HubConnection _hub = null!;
 
@@ -83,8 +88,8 @@ public sealed class NodeHost : IAsyncDisposable
         }
 
         await AnnounceAsync();
-        _logger.LogInformation("Node {Name} ({Role}, {Bricks} brick(s)) connected to {Url} as {ClientId}",
-            _config.Name, _config.Role, _bricks.Bricks.Count, _options.CoordinatorUrl, _idp.ClientId);
+        _logger.LogInformation("Node {Name} ({Role}, {Bricks} brick(s), {Mode}) connected to {Url} as {ClientId}",
+            _config.Name, _config.Role, _bricks.Bricks.Count, _options.Sandbox ? "sandbox" : "strict", _options.CoordinatorUrl, _idp.ClientId);
 
         await foreach (var line in _forwarder.Reader.ReadAllAsync(ct))
         {
@@ -97,11 +102,11 @@ public sealed class NodeHost : IAsyncDisposable
     private async Task AnnounceAsync()
     {
         await _hub.InvokeAsync(LabHubMethods.Announce,
-            new NodeAnnouncement(_config.Name, "", _config.Description, _datasets, _config.Role, _bricks.Bricks));
+            new NodeAnnouncement(_config.Name, "", _config.Description, _datasets, _config.Role, _bricks.Bricks, _options.Sandbox));
 
         FragmentStatus[] statuses;
         await _commands.WaitAsync();
-        try { statuses = _fragments.Values.Select(f => f.LastStatus).ToArray(); }
+        try { statuses = _fragments.Values.Select(f => f.LastStatus).Concat(_refusals.Values).ToArray(); }
         finally { _commands.Release(); }
         foreach (var status in statuses) await ReportAsync(status);
     }
@@ -119,6 +124,20 @@ public sealed class NodeHost : IAsyncDisposable
         var key = FragmentSupervisor.KeyOf(deployment.Fragment, deployment.Instance);
         if (_fragments.Remove(key, out var previous))
             await previous.DisposeAsync();
+        _refusals.Remove(key);
+
+        // Before anything registers: a registered instance is admissible, and admission is the
+        // coordinator's to grant, not this node's to leave open.
+        if (_config.Role == NodeRole.Data
+            && BrickRules.FragmentRefusal(deployment.Yaml, _bricks.Forms, requireBricks: !_options.Sandbox) is { } reason)
+        {
+            _logger.LogWarning("Refusing {Fragment}: {Reason}", key, reason);
+            var refusal = new FragmentStatus(_config.Name, deployment.Fragment, deployment.Instance, deployment.Generation,
+                FragmentState.Failed, null, null, null, $"refused by {_config.Name}: {reason}");
+            _refusals[key] = refusal;
+            await ReportAsync(refusal);
+            return;
+        }
 
         var jobPath = Path.Combine(_fragmentsDir, SafeFileName(key) + ".yaml");
         await File.WriteAllTextAsync(jobPath, deployment.Yaml, new UTF8Encoding(false), ct);
@@ -142,7 +161,13 @@ public sealed class NodeHost : IAsyncDisposable
             _fragments.Remove(supervisor.Key);
             await supervisor.DisposeAsync();
         }
+        foreach (var (key, refusal) in _refusals.Where(r => fragment == "*" || r.Value.Fragment == fragment).ToList())
+        {
+            _refusals.Remove(key);
+            await ReportAsync(refusal with { State = FragmentState.Undeployed });
+        }
     }
+
 
     private async Task RearmAsync(string fragment, string generation, CancellationToken ct)
     {

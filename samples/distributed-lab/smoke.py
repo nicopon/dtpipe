@@ -1,27 +1,34 @@
 #!/usr/bin/env python3
 """End-to-end check of the lab: every pipeline, distributed, against its monolithic witness.
 
-Four passes. The Lab view's: each pipelines/*.yaml with its catalog layout, deployed and run one
+Six passes. The Lab view's: each pipelines/*.yaml with its catalog layout, deployed and run one
 after the other. The library's: each library pipeline distributed automatically and its plan
 saved, then all of them deployed at once and their runs queued together, as the page does.
 The rights': the embedded IDP, the flow matrix refusing a plan and then, edited under a deployed
 pipeline, a transfer at run time, and a brick policy refusing a plan; every edit is undone.
 The faults': a run cancelled while a fully wired fragment's child has nothing to write, whose
 verdict must come within the grace period.
+The bricks': on strict nodes, a fragment whose branch is not one of the node's bricks, or is one only
+by a hair, is refused by the node at once and leaves nothing deployed; the same wiring built from the
+bricks as declared deploys, relays included.
+The sandbox': on sandbox nodes any reader or writer is accepted, but a join or a processor on a data
+node is refused all the same: a data node only reads and writes.
+The lab and sandbox passes need sandbox nodes and every other pass strict ones: `lab.sh smoke`
+switches the node hosts between them.
 For every pipeline of the first two:
   1. the witness: the unsplit job run by dtpipe alone, writing a separate warehouse file;
   2. the lab: the distributed run, through the coordinator;
   3. the verdict: outcome Succeeded, every edge's two row counts equal, and the job's
      `# lab-check:` query returning the same row on both warehouses.
 
-Usage: smoke.py <lab-url> <dtpipe> <state-dir> [lab|library|rights|faults] [pipeline-id-substring ...]
+Usage: smoke.py <lab-url> <dtpipe> <state-dir> [lab|library|rights|faults|bricks|sandbox] [pipeline-id-substring ...]
 A leading pass name runs that pass alone.
 Exits 0 when every selected pipeline passes, 1 otherwise. Standard library only.
 """
 import base64, csv, io, json, os, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
 
 URL, DTPIPE, STATE = sys.argv[1].rstrip("/"), sys.argv[2], sys.argv[3]
-PASSES = {"lab", "library", "rights", "faults"}
+PASSES = {"lab", "library", "rights", "faults", "bricks", "sandbox"}
 ONLY = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] in PASSES else None
 SELECTED = sys.argv[5:] if ONLY else sys.argv[4:]
 RUN_TIMEOUT = 180
@@ -278,6 +285,192 @@ def rights_pass():
     return failures
 
 
+LIBRARY_SEED = os.path.join(os.path.dirname(os.path.abspath(__file__)), "library-seed")
+
+# One source brick feeding a sink brick on another node and, through a runner step, a second sink brick:
+# the source's node relays the same branch onto two edges.
+RELAY_JOB = """customers:
+  input: sqlite:${{LAB_CRM_DB}}
+  provider-options:
+    sqlite-reader:
+      query: SELECT customer_id, first_name, last_name, email, city, country, signup_date FROM customers
+mirror:
+  from: customers
+  output: duck:${{LAB_WAREHOUSE_DB}}
+  provider-options:
+    duck-writer:
+      table: customers_mirror
+      strategy: Upsert
+      key: customer_id
+copy:
+  from: customers
+  transformers:
+  - type: project
+    options:
+      drop: first_name
+dim:
+  from: copy
+  output: duck:${{LAB_WAREHOUSE_DB}}
+  provider-options:
+    duck-writer:
+      table: dim_customers
+      strategy: Recreate
+"""
+RELAY_PLACEMENT = {"customers": "node-1", "mirror": "node-4", "copy": "runner-1", "dim": "node-4"}
+
+
+def left_behind(prefix):
+    return [f["fragment"] for n in call("/api/nodes") for f in n["fragments"] if f["fragment"].startswith(prefix)]
+
+
+def undeploy(pipeline):
+    try:
+        call(f"/api/deployments/{pipeline}", method="DELETE")
+    except RuntimeError:
+        pass
+
+
+def refused(pipeline, yaml, cuts, placement, alias, node, why):
+    """A deployment through the Lab view's own path (a job, cuts, a placement) that `node` must refuse at
+    once, naming `alias` and saying `why`, and that leaves nothing deployed."""
+    started = time.time()
+    try:
+        call("/api/deploy", {"pipelineId": pipeline, "yaml": yaml, "cuts": cuts, "placement": placement})
+    except RuntimeError as e:
+        elapsed = time.time() - started
+        said = str(e)
+        if f"refused by {node}" not in said or f"'{alias}'" not in said or why not in said:
+            raise RuntimeError(f"refused, but not by {node} naming '{alias}' ({why}): {said}")
+        if elapsed > 15:
+            raise RuntimeError(f"refused after {elapsed:.1f}s, so by the registration timeout rather than by the node: {said}")
+        # The other hosts undeploy what did register as they get to the command.
+        try:
+            until(lambda: not left_behind(pipeline + "@"), 10, "the undeploy")
+        except RuntimeError:
+            raise RuntimeError(f"refused, but still deployed: {', '.join(left_behind(pipeline + '@'))}") from None
+        return f"{node} refused '{alias}' in {elapsed:.1f}s, nothing left deployed"
+    finally:
+        undeploy(pipeline)
+    raise RuntimeError("the deployment was accepted")
+
+
+def accepted(pipeline, yaml, cuts, placement):
+    try:
+        return call("/api/deploy", {"pipelineId": pipeline, "yaml": yaml, "cuts": cuts, "placement": placement})
+    finally:
+        undeploy(pipeline)
+
+
+def checker(name, counter):
+    def check(label, test):
+        started = time.time()
+        try:
+            detail = test()
+            print(f"PASS  {name:8} {label:28} {detail}  ({time.time() - started:.1f}s)")
+        except Exception as e:
+            counter[0] += 1
+            print(f"FAIL  {name:8} {label:28} {e}")
+    return check
+
+
+def mirror_jobs():
+    mirror = open(os.path.join(LIBRARY_SEED, "customers-mirror.yaml")).read()
+    narrower = mirror.replace("SELECT customer_id, first_name, last_name, email, city, country, signup_date FROM customers",
+                              "SELECT customer_id, email FROM customers")
+    elsewhere = mirror.replace("table: customers_mirror", "table: customers_elsewhere")
+    if narrower == mirror or elsewhere == mirror:
+        raise RuntimeError("library-seed/customers-mirror.yaml no longer has the query and table this pass alters")
+    return mirror, narrower, elsewhere
+
+
+MIRROR_PLACEMENT = {"customers": "node-1", "mirror": "node-4"}
+
+
+def bricks_pass():
+    """On strict nodes a fragment is run only if each branch is one of the node's bricks. Deployed through
+    the Lab view's own path (a job and a placement, no brick lookup), anything else is refused by the node
+    that would run it, well before the registration timeout, and nothing of that deployment stays behind."""
+    failures = [0]
+    check = checker("bricks", failures)
+    mirror, narrower, elsewhere = mirror_jobs()
+
+    def strict():
+        loose = [n["name"] for n in call("/api/nodes") if n["sandbox"]]
+        if loose:
+            raise RuntimeError(f"still in sandbox mode: {', '.join(loose)}")
+        return "every node host announces itself strict"
+
+    def no_brick():
+        # A file the node's owner never offered: the sink is a declared brick, so only the read is refused.
+        job = mirror.replace("sqlite:${{LAB_CRM_DB}}", "csv:/etc/hosts")
+        if job == mirror:
+            raise RuntimeError("library-seed/customers-mirror.yaml no longer reads sqlite:${{LAB_CRM_DB}}")
+        return refused("bricks-probe", job, [], MIRROR_PLACEMENT, "customers", "node-1", "not one of this node's bricks")
+
+    def source_by_a_hair():
+        accepted("bricks-probe", mirror, [], MIRROR_PLACEMENT)
+        detail = refused("bricks-probe", narrower, [], MIRROR_PLACEMENT, "customers", "node-1", "not one of this node's bricks")
+        return "the bricks as declared deploy; a narrower query on the same brick: " + detail
+
+    def sink_by_a_hair():
+        detail = refused("bricks-probe", elsewhere, [], MIRROR_PLACEMENT, "mirror", "node-4", "not one of this node's bricks")
+        return "another table on the same sink: " + detail
+
+    def relays():
+        plan = accepted("bricks-relay", RELAY_JOB, [], RELAY_PLACEMENT)
+        relays_on_source = next(f["yaml"] for f in plan["fragments"] if f["node"] == "node-1").count("__to__")
+        if relays_on_source < 2:
+            raise RuntimeError(f"node-1 relays onto {relays_on_source} edge(s), expected 2")
+        return f"a source brick feeding two nodes: {relays_on_source} relays on node-1, every branch accepted"
+
+    check("strict nodes", strict)
+    check("a read that is no brick", no_brick)
+    check("a source brick by a hair", source_by_a_hair)
+    check("a sink brick by a hair", sink_by_a_hair)
+    check("relays", relays)
+    return failures[0]
+
+
+def sandbox_pass():
+    """On sandbox nodes any reader or writer is run, but a data node still only reads and writes: compute
+    goes to the runner, and the node refuses it."""
+    failures = [0]
+    check = checker("sandbox", failures)
+    _, narrower, _ = mirror_jobs()
+
+    def loose():
+        strict_nodes = [n["name"] for n in call("/api/nodes") if not n["sandbox"]]
+        if strict_nodes:
+            raise RuntimeError(f"still strict: {', '.join(strict_nodes)}")
+        return "every node host announces itself sandbox"
+
+    def any_reader():
+        accepted("sandbox-probe", narrower, [], MIRROR_PLACEMENT)
+        return "a read no brick declares is accepted"
+
+    def compute():
+        entry = next(e for e in call("/api/pipelines") if e["id"].startswith("02-"))
+        placement = {**entry["placement"], "revenue": "node-3"}
+        return refused(entry["id"], entry["yaml"], entry["cuts"], placement, "revenue", "node-3", "does more than read or write")
+
+    def cut_leaves_a_transformer():
+        entry = next(e for e in call("/api/pipelines") if e["id"].startswith("01-"))
+        placement = {"customers^": "node-1", "customers": "runner-1", "dim": "node-4"}
+        return refused(entry["id"], entry["yaml"], [{"branch": "customers", "at": 1}], placement, "customers", "node-1",
+                       "does more than read or write")
+
+    def processor():
+        job = "a:\n  input: generate:10\nb:\n  from: a\n  provider-options:\n    sql:\n      query: SELECT * FROM a\nc:\n  from: b\n  output: duck:${{LAB_WAREHOUSE_DB}}\n"
+        return refused("sandbox-probe", job, [], {"a": "node-2", "b": "node-2", "c": "node-4"}, "b", "node-2", "sql processor")
+
+    check("sandbox nodes", loose)
+    check("any reader or writer", any_reader)
+    check("a join on a data node", compute)
+    check("a cut after a transformer", cut_leaves_a_transformer)
+    check("a processor on a data node", processor)
+    return failures[0]
+
+
 def faults_pass():
     """The seed of sensor-stream, deployed on its own: the runner's child joins a slow source it
     generates itself and writes nothing until that source ends. Read from library-seed/, not from the
@@ -309,7 +502,8 @@ def faults_pass():
 def main():
     ctx = Context()
     failures = (catalog_pass(ctx) if ONLY in (None, "lab") else 0) + (library_pass(ctx) if ONLY in (None, "library") else 0) \
-        + (rights_pass() if ONLY in (None, "rights") else 0) + (faults_pass() if ONLY in (None, "faults") else 0)
+        + (rights_pass() if ONLY in (None, "rights") else 0) + (faults_pass() if ONLY in (None, "faults") else 0) \
+        + (bricks_pass() if ONLY in (None, "bricks") else 0) + (sandbox_pass() if ONLY in (None, "sandbox") else 0)
     return 1 if failures else 0
 
 

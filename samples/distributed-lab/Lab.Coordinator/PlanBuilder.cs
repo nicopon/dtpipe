@@ -174,7 +174,10 @@ public sealed class PlanBuilder(
             var producer = drafts[producerNode];
             var producerBranch = producer.Branch(alias);
             var readLocally = units.Any(u => placement[u.Id] == producerNode && u.DependsOn.Contains(alias));
-            var sendDirectly = !JobYaml.Has(producerBranch, "output") && consumerNodes.Count == 1 && !readLocally;
+            // A cut's tail already receives its head under this alias, and a fragment declares each
+            // edge alias once: what it sends on goes out through a relay.
+            var isCutTail = units.Any(u => u.IsHead && u.Key == alias);
+            var sendDirectly = !JobYaml.Has(producerBranch, "output") && consumerNodes.Count == 1 && !readLocally && !isCutTail;
 
             foreach (var consumerNode in consumerNodes)
             {

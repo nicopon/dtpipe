@@ -1,7 +1,8 @@
 # Order history: current orders merged with the archive
-# UNION ALL of the current orders (DuckDB, node-2) and the archived ones (SQLite, node-3). The
-# two engines disagree on integer widths and on dates, and dtpipe never converts silently: each
-# source query casts to the shared schema itself.
+# UNION ALL of the current orders (DuckDB, node-2) and the archived ones (SQLite, node-3), merged on
+# the runner and loaded into the warehouse (node-4). The two engines disagree on integer widths and
+# on dates, and dtpipe never converts silently: each source query casts to the shared schema itself.
+# lab-place: history=runner-1
 # lab-check: SELECT count(*) AS n, sum(order_id) AS ids, count(DISTINCT order_date) AS days FROM fact_orders
 current:
   input: duck:${{LAB_SALES_DB}}
@@ -21,9 +22,12 @@ legacy:
         FROM legacy_orders
 history:
   from: current,legacy
-  output: duck:${{LAB_WAREHOUSE_DB}}
   provider-options:
     merge: {}
+load:
+  from: history
+  output: duck:${{LAB_WAREHOUSE_DB}}
+  provider-options:
     duck-writer:
       table: fact_orders
       strategy: Recreate

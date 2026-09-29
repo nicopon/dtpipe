@@ -6,4 +6,9 @@
     <RootNamespace>DtPipe.Lab.Contracts</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- JobYaml and BrickRules live here so the coordinator and every node host read a branch the same way. -->
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
+  </ItemGroup>
+
 </Project>

@@ -1,3 +1,4 @@
+using DtPipe.Lab.Contracts;
 using YamlDotNet.RepresentationModel;
 
 namespace DtPipe.Lab.Coordinator;
@@ -19,9 +20,6 @@ public sealed record BranchView(
 
 public static class JobGraph
 {
-    // provider-options keys that name a processor rather than a reader or writer.
-    private static readonly string[] Processors = ["sql", "merge"];
-
     public static IReadOnlyList<BranchView> Describe(YamlMappingNode root) =>
         JobYaml.Branches(root).Select(b => Describe(b.Alias, b.Branch)).ToList();
 
@@ -29,7 +27,7 @@ public static class JobGraph
     {
         var providerOptions = JobYaml.Mapping(branch, "provider-options");
         var processor = providerOptions?.Children.Keys.OfType<YamlScalarNode>()
-            .Select(k => k.Value!).FirstOrDefault(k => Processors.Contains(k));
+            .Select(k => k.Value!).FirstOrDefault(k => BrickRules.Processors.Contains(k));
 
         var options = new List<string>();
         if (providerOptions is not null)

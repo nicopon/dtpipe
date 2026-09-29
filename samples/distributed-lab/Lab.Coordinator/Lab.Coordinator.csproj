@@ -15,7 +15,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="YamlDotNet" Version="18.1.0" />
     <!-- The embedded identity provider, after TransportR's SimpleIdp. -->
     <PackageReference Include="OpenIddict.AspNetCore" Version="7.7.1" />
     <PackageReference Include="OpenIddict.EntityFrameworkCore" Version="7.7.1" />

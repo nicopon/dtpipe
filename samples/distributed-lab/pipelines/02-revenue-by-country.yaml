@@ -1,7 +1,8 @@
 # Revenue by country, category and month
-# A three-source join: orders (node-2) joined to customers (node-1) and products (node-3), then
-# loaded into the warehouse (node-4). Where the join runs is the choice: on node-3 the products
-# stay local, on node-4 everything travels once, on node-2 the flow matrix refuses the plan.
+# A three-source join: orders (node-2) joined to customers (node-1) and products (node-3) on the
+# runner, then loaded into the warehouse (node-4): three inbound edges on one node. A join is not a
+# read or a write, so a data node refuses it: move `revenue` to node-3 and the deployment fails.
+# lab-place: revenue=runner-1
 # lab-check: SELECT count(*) AS n, sum(orders) AS orders, round(sum(revenue), 2) AS revenue FROM revenue_by_country
 orders:
   input: duck:${{LAB_SALES_DB}}

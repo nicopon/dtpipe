@@ -17,11 +17,20 @@ public sealed class BrickHost(NodeConfig config, NodeHostOptions options, ILogge
 
     public IReadOnlyList<BrickInfo> Bricks { get; private set; } = [];
 
+    /// <summary>What every announced brick is, for <see cref="BrickRules"/>; set once with <see cref="Bricks"/>.</summary>
+    public IReadOnlyList<BrickForm> Forms { get; private set; } = [];
+
     public async Task InspectAsync(CancellationToken ct)
     {
         var bricks = new List<BrickInfo>();
         foreach (var brick in config.Bricks ?? [])
         {
+            // A brick this node would refuse to run must not be offered: the designer would place it here.
+            if (BrickRules.DeclaredRefusal(brick.Id, brick.Branch.GetRawText()) is { } refusal)
+            {
+                logger.LogWarning("Brick {Brick} is not offered: {Reason}", brick.Id, refusal);
+                continue;
+            }
             IReadOnlyList<BrickColumn>? schema = null;
             string? error = null;
             if (brick.Kind == BrickKind.Source)
@@ -42,6 +51,7 @@ public sealed class BrickHost(NodeConfig config, NodeHostOptions options, ILogge
             bricks.Add(new BrickInfo(brick.Id, brick.Kind, brick.Title, brick.Description ?? "", brick.Branch.GetRawText(), schema, error));
         }
         Bricks = bricks;
+        Forms = bricks.Select(b => BrickRules.Declared(b.Kind, b.Branch)).ToList();
     }
 
     /// <summary>A source's first rows, or what a sink's table holds now.</summary>

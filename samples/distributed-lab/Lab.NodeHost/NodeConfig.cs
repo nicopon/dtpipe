@@ -27,8 +27,16 @@ public sealed record NodeConfig(
             ?? throw new InvalidOperationException($"{path}: empty node configuration.");
 }
 
-public sealed record NodeHostOptions(string ConfigPath, string StateDir, string CoordinatorUrl, string DtPipeExecutable)
+/// <summary>
+/// <summary>
+/// <see cref="Sandbox"/> lets a data node run a fragment whose branches are not its bricks. It is set
+/// by <see cref="SandboxVariable"/> in the host process's own environment, never by anything the
+/// coordinator sends; only <c>1</c> or <c>true</c> turns it on, so any other value stays strict.
+/// </summary>
+public sealed record NodeHostOptions(string ConfigPath, string StateDir, string CoordinatorUrl, string DtPipeExecutable, bool Sandbox = false)
 {
+    public const string SandboxVariable = "LAB_NODE_SANDBOX";
+
     public static NodeHostOptions Parse(string[] args)
     {
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -39,10 +47,14 @@ public sealed record NodeHostOptions(string ConfigPath, string StateDir, string 
             ? v
             : throw new ArgumentException($"Missing {key}. Usage: --config <node.json> --state <dir> --coordinator <url> --dtpipe <path>");
 
+        var sandbox = Environment.GetEnvironmentVariable(SandboxVariable) is { } flag
+            && (flag == "1" || flag.Equals("true", StringComparison.OrdinalIgnoreCase));
+
         return new NodeHostOptions(
             Path.GetFullPath(Required("--config")),
             Path.GetFullPath(Required("--state")),
             Required("--coordinator").TrimEnd('/'),
-            Path.GetFullPath(Required("--dtpipe")));
+            Path.GetFullPath(Required("--dtpipe")),
+            sandbox);
     }
 }

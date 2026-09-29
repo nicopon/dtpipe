@@ -30,9 +30,14 @@ public sealed record DatasetInfo(string Variable, string Engine, string Path, st
 /// <summary>A data node hosts databases and offers bricks; a runner hosts neither and carries every step between them.</summary>
 public enum NodeRole { Data, Runner }
 
+/// <summary>
+/// <see cref="Sandbox"/> only reports how the host was started: a data node runs a fragment only if
+/// each branch is one of its bricks, unless its own start command said otherwise. The coordinator
+/// shows it and never sets it.
+/// </summary>
 public sealed record NodeAnnouncement(
     string Name, string Group, string Description, IReadOnlyList<DatasetInfo> Datasets, NodeRole Role,
-    IReadOnlyList<BrickInfo> Bricks);
+    IReadOnlyList<BrickInfo> Bricks, bool Sandbox = false);
 
 public enum BrickKind { Source, Sink }
 

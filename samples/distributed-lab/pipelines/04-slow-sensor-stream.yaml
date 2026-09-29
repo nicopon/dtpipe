@@ -1,8 +1,8 @@
 # Slow sensor stream, for fault injection
 # 300,000 generated readings throttled to 10,000 rows/s (about 30 s), enriched with the customers'
-# country on node-3, loaded into the warehouse. Long enough to kill a fragment from the page, to
+# country on the runner, loaded into the warehouse. Long enough to kill a fragment from the page, to
 # cancel the run, or to deploy a misaligned variant before starting it.
-# lab-place: readings=node-2, enrich=node-3, load=node-4
+# lab-place: readings=node-2, enrich=runner-1, load=node-4
 # lab-check: SELECT count(*) AS n, sum(reading_id) AS ids, round(sum(value), 1) AS total FROM sensor_readings
 readings:
   input: generate:300000

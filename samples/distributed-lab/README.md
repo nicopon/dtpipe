@@ -32,7 +32,8 @@ open http://127.0.0.1:5180          # the coordinator's page; the Lab view is /l
 |---|---|
 | `./lab.sh up` | builds the lab, seeds the databases on first use, starts the coordinator then the nodes |
 | `./lab.sh status` | which processes run, and what the coordinator sees of each node |
-| `./lab.sh smoke [lab\|library\|rights\|faults] [id…]` | runs the end-to-end check, optionally one pass or some pipelines only |
+| `./lab.sh smoke [lab\|sandbox\|library\|rights\|faults\|bricks] [id…]` | runs the end-to-end check, optionally one pass or some pipelines only; restarts the node hosts in the mode each pass needs |
+| `./lab.sh nodes strict\|sandbox` | restarts the node hosts in that mode after undoing every deployment (`LAB_NODE_SANDBOX=1 ./lab.sh up` starts them in sandbox mode) |
 | `./lab.sh ui` | drives both pages in headless Chrome, a designer scenario included; screenshots to `.state/ui/` |
 | `./lab.sh seed` | rebuilds the databases (`LAB_SCALE=5` multiplies the row counts) |
 | `./lab.sh logs` | follows every log |
@@ -106,6 +107,17 @@ source wired straight into a sink goes directly, without the runner. `PlanBuilde
 the fragments exactly as for a placement chosen by hand. A saved plan records the hash of the job
 it came from; a job changed since is refused at deployment until it is distributed again.
 
+**A data node only reads and writes, and runs only its bricks.** Whatever the coordinator sends, a
+node host reads each branch of a fragment and refuses the fragment, at once and by name, unless
+every branch only reads or writes (no transformer, no `sql` or `merge`, at most one `from`) and is
+one of its own bricks as its owner declared them, a bare `input: arrow:-`, or a relay of another
+branch onto an edge. Everything between a read and a write belongs on a runner, which hosts no data
+and runs what it is given. The **Lab view** places branches by hand, including reads and writes no
+brick declares, so it needs the sandbox mode: `./lab.sh nodes sandbox` (the variable
+`LAB_NODE_SANDBOX=1` in the host process's environment; the Nodes view shows a `sandbox` chip). A
+sandbox node still only reads and writes, but any reader or writer will do. The switch belongs to the
+host's own environment and is never a field of a message the coordinator sends.
+
 In the designer, a wire is moved or removed by its input end: drag it off the input port and drop
 it on another input, or anywhere else to remove it. A selected wire also shows a × to remove it.
 
@@ -118,9 +130,9 @@ in one queue, since the coordinator runs one at a time. Finished runs are kept i
 
 | Pipeline | Shows | Try |
 |---|---|---|
-| `01-customers-anonymized` | a cut inside a branch, by `dtpipe split` | move the ✂: the personal columns cross the network or not |
-| `02-revenue-by-country` | a three-source join, three inbound edges on one node | move `revenue` to node-3 (products stay local), then to node-2 (refused) |
-| `03-order-history` | `--merge` of a DuckDB and a SQLite source | read the source queries: each casts to the shared schema, dtpipe converts nothing |
+| `01-customers-anonymized` | a cut inside a branch, by `dtpipe split`: read on node-1, anonymized on the runner, loaded on node-4 | move the ✂ one stage later, after `fake`: the head keeps that transformer and node-1 refuses to run it |
+| `02-revenue-by-country` | a three-source join on the runner, three inbound edges on one node | move `revenue` to node-3: the plan is fine and the node refuses to run a join |
+| `03-order-history` | `--merge` of a DuckDB and a SQLite source, on the runner | read the source queries: each casts to the shared schema, dtpipe converts nothing |
 | `04-slow-sensor-stream` | a 30-second throttled run | kill a fragment mid-run, cancel, add a misaligned instance, pin a version |
 
 Every refusal the page shows is the coordinator's own: `PlanRegistry` for the flow matrix,

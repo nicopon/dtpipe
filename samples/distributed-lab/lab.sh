@@ -4,7 +4,11 @@
 # fragments, library, runs, logs).
 #
 #   ./lab.sh up        build, seed if needed, start everything, print the page URL
+#                      (LAB_NODE_SANDBOX=1 starts the nodes in sandbox mode: see "nodes")
 #   ./lab.sh down      stop every lab process
+#   ./lab.sh nodes M   restart the node hosts, M = strict (a data node runs only its own bricks,
+#                      the default) or sandbox (it runs any reader or writer, whatever it reads or
+#                      writes: the Lab view's mode; compute goes to the runner in both)
 #   ./lab.sh status    which processes run, and what the coordinator sees
 #   ./lab.sh seed      rebuild the four databases (LAB_SCALE multiplies the row counts)
 #   ./lab.sh smoke     every pipeline, distributed, against its monolithic witness
@@ -52,6 +56,20 @@ start() {
     echo "  $name started (pid $!)"
 }
 
+# A node host holds its fragments to its bricks unless LAB_NODE_SANDBOX=1 is in its own environment;
+# a strict host has the variable removed, whatever this shell exports.
+start_nodes() {
+    local setting=(-u LAB_NODE_SANDBOX)
+    [[ "$1" == sandbox ]] && setting=(LAB_NODE_SANDBOX=1)
+    for node in "${NODES[@]}"; do
+        start "$node" env "${setting[@]}" dotnet "$STATE/bin/node/Lab.NodeHost.dll" \
+            --config "$LAB/nodes/$node.json" --state "$STATE" --coordinator "$URL" --dtpipe "$DTPIPE"
+    done
+}
+
+# Whether every node host announces the mode $1 (waiting up to $2 seconds): their own word is the only truth.
+nodes_report() { python3 "$LAB/tools/nodes_report.py" "$URL" "$1" "$2" "${#NODES[@]}"; }
+
 up() {
     require_dtpipe
     mkdir -p "$STATE/logs" "$STATE/run"
@@ -68,13 +86,61 @@ up() {
     done
     curl -fs "$URL/api/nodes" >/dev/null || { echo "The coordinator did not come up; see $STATE/logs/coordinator.log" >&2; exit 1; }
 
-    for node in "${NODES[@]}"; do
-        start "$node" dotnet "$STATE/bin/node/Lab.NodeHost.dll" \
-            --config "$LAB/nodes/$node.json" --state "$STATE" --coordinator "$URL" --dtpipe "$DTPIPE"
-    done
+    start_nodes "$([[ "${LAB_NODE_SANDBOX:-}" == 1 ]] && echo sandbox || echo strict)"
 
     echo
     echo "Lab ready: $URL"
+}
+
+# The fragments a node host holds go with it, so every deployment is undone first.
+nodes_mode() {
+    local mode="${1:-}"
+    [[ "$mode" == strict || "$mode" == sandbox ]] || { echo "usage: $0 nodes strict|sandbox" >&2; exit 1; }
+    if nodes_report "$mode" 0; then return; fi
+
+    echo "Nodes: $mode"
+    python3 - "$URL" <<'PY'
+import json, sys, urllib.request
+url = sys.argv[1]
+for d in json.load(urllib.request.urlopen(url + "/api/deployments", timeout=20)):
+    req = urllib.request.Request(f"{url}/api/deployments/{d['pipelineId']}", method="DELETE")
+    try: urllib.request.urlopen(req, timeout=60)
+    except Exception as e: print(f"  {d['pipelineId']}: not undeployed ({e})")
+PY
+    for node in "${NODES[@]}"; do
+        if is_running "$node"; then kill -TERM "$(cat "$STATE/run/$node.pid")" 2>/dev/null || true; fi
+    done
+    for node in "${NODES[@]}"; do
+        for _ in $(seq 1 20); do is_running "$node" || break; sleep 0.25; done
+        if is_running "$node"; then kill -KILL "$(cat "$STATE/run/$node.pid")" 2>/dev/null || true; fi
+        rm -f "$STATE/run/$node.pid"
+    done
+    start_nodes "$mode"
+    nodes_report "$mode" 90 || { echo "The node hosts did not come back in $mode mode." >&2; exit 1; }
+}
+
+# The lab pass puts branches that are not bricks on data nodes, so it runs on sandbox nodes; every
+# other pass runs on strict ones, which is what they prove.
+smoke() {
+    local pass="${1:-}"
+    case "$pass" in lab|library|rights|faults|bricks|sandbox) shift ;; *) pass="" ;; esac
+    local code=0
+    run_pass() {
+        local mode="$1" name="$2"; shift 2
+        nodes_mode "$mode"
+        python3 -u "$LAB/smoke.py" "$URL" "$DTPIPE" "$STATE" "$name" "$@" || code=1
+    }
+    if [[ -z "$pass" ]]; then
+        run_pass sandbox lab "$@"
+        run_pass sandbox sandbox
+        run_pass strict library "$@"
+        for name in rights faults bricks; do run_pass strict "$name"; done
+    elif [[ "$pass" == lab || "$pass" == sandbox ]]; then
+        run_pass sandbox "$pass" "$@"
+    else
+        run_pass strict "$pass" "$@"
+    fi
+    return $code
 }
 
 down() {
@@ -115,7 +181,8 @@ case "${1:-}" in
     down) down ;;
     status) status ;;
     seed) mkdir -p "$STATE"; seed ;;
-    smoke) shift; python3 -u "$LAB/smoke.py" "$URL" "$DTPIPE" "$STATE" "$@" ;;
+    nodes) shift; nodes_mode "${1:-}" ;;
+    smoke) shift; smoke "$@" ;;
     ui) python3 "$LAB/tools/ui_check.py" "$URL" "$STATE/ui" ;;
     logs) tail -n 20 -F "$STATE"/logs/*.log ;;
     reset) down; rm -rf "$STATE"; echo "Removed $STATE" ;;

@@ -14,6 +14,29 @@ Mechanics for editing the lab. What it is and how to run it: `README.md`.
   no reference to a brick in it. `DesignService.Decompose` may take an imported branch apart
   around the bricks it contains (authoring, before anything is saved); the planner never does.
   `[local: smoke.py, ui_check.py]`
+- **A data node only reads and writes, and runs only its bricks.** `NodeHost.DeployAsync` reads
+  every branch through `BrickRules` (`Lab.Contracts`, the same reading `BrickCatalog.Match` uses)
+  before any `PipelineNode` registers, and refuses the fragment with a `Failed` status in the
+  deployment's generation. Structure, always: a branch carries only `input`, `output`, `from`,
+  `provider-options` and the volume settings `dtpipe split` writes, no processor, and reads at most
+  one branch; a key not on that list is refused, so a key dtpipe adds later waits for a decision.
+  Bricks, unless the host runs in sandbox mode: the branch is also one of the node's own bricks, a
+  bare `input: arrow:-`, or a `from` + `output: arrow:-` relay of a branch of the fragment. A source
+  brick sent straight to another node gains `output: arrow:-`, which `FormOf` sets aside. Sandbox
+  (`LAB_NODE_SANDBOX=1` in the host's environment, the Lab view's mode) keeps only the structure:
+  any reader or writer, whatever it reads or writes. The runner hosts no data and runs any fragment; what
+  contains it is network isolation, not this rule. That switch is the host process's environment only, never a field of `FragmentDeployment` or of
+  anything else the coordinator sends (a brick id or a skip flag in a message would return to
+  matching by name); only `1` or `true` turns it on. `BrickRules.Processors`
+  is the one list of processors, shared with `JobGraph`. `DeploymentManager.WaitRegisteredAsync`
+  fails on the first `Failed` main instance of the current generation and `DeployAsync` then
+  undeploys the plan's fragments. `BrickHost` does not announce a declared brick that would fail
+  the structure rule itself, so the designer never places one the node then declines. `lab.sh smoke`
+  restarts the hosts strict or sandbox per pass. `[local: smoke.py bricks, smoke.py sandbox]`
+  `[unchecked: a declared brick that fails the structure rule]`
+- **A fragment declares each edge alias once**, so a branch that receives an edge under its own
+  alias (a cut's tail) sends on through a relay, never with `output: arrow:-` on itself.
+  `[local: smoke.py lab]`
 - **The server writes the job, the page never does.** `DesignService.Compose` is the only writer
   of a designer pipeline's YAML; the page sends cards and reads back the text. `[unchecked]`
 - **A `PipelineNode` serves one run.** `DeploymentManager` re-arms every fragment of a pipeline

@@ -127,9 +127,7 @@ public sealed class DeploymentManager
             Publish(deployment);
 
             var names = plan.Fragments.Select(f => f.Name).Concat(previous?.Plan.Fragments.Select(f => f.Name) ?? []).Distinct().ToList();
-            foreach (var node in _inventory.Snapshot().Where(n => n.Online))
-                foreach (var name in names)
-                    await SendAsync(node.Name, LabHubMethods.Undeploy, name, ct);
+            await UndeployEverywhereAsync(names, ct);
             foreach (var fragment in plan.Fragments)
                 await SendAsync(fragment.Node, LabHubMethods.Deploy,
                     new FragmentDeployment(fragment.Name, fragment.Yaml, fragment.Edges, deployment.Generation), ct);
@@ -143,6 +141,9 @@ public sealed class DeploymentManager
             deployment.State = "failed";
             deployment.Message = ex.Message;
             Publish(deployment);
+            // A deployment is all of its fragments or none: what did register must not stay admissible.
+            try { await UndeployEverywhereAsync(plan.Fragments.Select(f => f.Name).ToList(), CancellationToken.None); }
+            catch (Exception cleanup) { _logger.LogWarning(cleanup, "Undeploying the fragments of {Pipeline} failed", plan.PipelineId); }
             throw;
         }
         finally
@@ -150,6 +151,13 @@ public sealed class DeploymentManager
             deployment.Gate.Release();
             previous?.Gate.Release();
         }
+    }
+
+    private async Task UndeployEverywhereAsync(IReadOnlyList<string> fragmentNames, CancellationToken ct)
+    {
+        foreach (var node in _inventory.Snapshot().Where(n => n.Online))
+            foreach (var name in fragmentNames)
+                await SendAsync(node.Name, LabHubMethods.Undeploy, name, ct);
     }
 
     public async Task UndeployAsync(string pipelineId, CancellationToken ct)
@@ -387,6 +395,15 @@ public sealed class DeploymentManager
         var deadline = DateTime.UtcNow + RegistrationTimeout;
         while (true)
         {
+            // A host that refuses or fails to register a fragment says so in this generation; waiting
+            // out the timeout would only hide why.
+            foreach (var fragment in deployment.Plan.Fragments)
+            {
+                var failed = _inventory.Reported(fragment.Name)
+                    .FirstOrDefault(s => s.Instance == "main" && s.State == FragmentState.Failed && s.Generation == deployment.Generation);
+                if (failed is not null)
+                    throw new LabConflictException($"{fragment.Name} was not registered: {failed.Message}");
+            }
             var missing = deployment.Plan.Fragments.Where(f => !Ready(f)).Select(f => f.Name).ToList();
             if (missing.Count == 0) return;
             if (DateTime.UtcNow > deadline)

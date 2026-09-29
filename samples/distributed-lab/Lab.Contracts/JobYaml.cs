@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 using YamlDotNet.Core;
 using YamlDotNet.RepresentationModel;
 
-namespace DtPipe.Lab.Coordinator;
+namespace DtPipe.Lab.Contracts;
 
 /// <summary>
 /// Reads and writes dtpipe job files as a plain YAML tree: one top-level key per branch alias. The

@@ -49,7 +49,7 @@ function render() {
       <section class="card node-card ${n.online ? "" : "offline"}" style="--node-color:${nodeColor(n.name)}">
         <div class="node-head">
           <span class="node-name"><span class="dot ${n.online ? "on" : ""}"></span>${esc(n.name)}</span>
-          <span><span class="chip">${esc(n.role === "Runner" ? "runner" : "data")}</span> <span class="chip">group ${esc(n.group)}</span></span>
+          <span><span class="chip">${esc(n.role === "Runner" ? "runner" : "data")}</span> <span class="chip">group ${esc(n.group)}</span>${n.sandbox && n.role !== "Runner" ? ` <span class="chip" title="Started with LAB_NODE_SANDBOX: this node runs any reader or writer, not only its bricks.">sandbox</span>` : ""}</span>
         </div>
         <p class="hint">${esc(n.description)}</p>
         ${n.datasets.map((d) => `<div class="dataset"><code>\${{${esc(d.variable)}}}</code> ${esc(d.engine)} · ${esc(d.description)}</div>`).join("")}

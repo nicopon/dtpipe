@@ -23,8 +23,6 @@ public sealed class BrickCatalog(NodeInventory inventory)
 {
     private sealed record Resolved(BrickView View, YamlMappingNode Branch, string Canonical);
 
-    private static readonly YamlScalarNode FromKey = new("from");
-
     public IReadOnlyList<BrickView> List() => Resolve().Select(r => r.View).ToList();
 
     public BrickView? Find(string key) => Resolve().FirstOrDefault(r => r.View.Key == key)?.View;
@@ -32,13 +30,11 @@ public sealed class BrickCatalog(NodeInventory inventory)
     public YamlMappingNode BranchOf(BrickView brick) =>
         JobYaml.CloneBranch(Resolve().First(r => r.View.Key == brick.Key).Branch);
 
-    /// <summary>The brick a whole branch is: a source read as declared, or a sink fed through <c>from</c>.</summary>
+    /// <summary>The brick a whole branch is, read the way every node host reads it (<see cref="BrickRules.FormOf"/>).</summary>
     public BrickView? Match(YamlMappingNode branch)
     {
-        var isSink = JobYaml.Has(branch, "from");
-        var withoutFrom = new YamlMappingNode(branch.Children.Where(kv => !kv.Key.Equals(FromKey)));
-        var canonical = JobYaml.Canonical(withoutFrom);
-        return Resolve().FirstOrDefault(r => r.View.Kind == (isSink ? BrickKind.Sink : BrickKind.Source) && r.Canonical == canonical)?.View;
+        var form = BrickRules.FormOf(branch);
+        return Resolve().FirstOrDefault(r => r.View.Kind == form.Kind && r.Canonical == form.Canonical)?.View;
     }
 
     /// <summary>
@@ -74,7 +70,7 @@ public sealed class BrickCatalog(NodeInventory inventory)
                 YamlMappingNode branch;
                 try { branch = (YamlMappingNode)JobYaml.FromJson(JsonNode.Parse(brick.Branch)); }
                 catch (Exception) { continue; }
-                var canonical = JobYaml.Canonical(branch);
+                var canonical = BrickRules.Declared(brick.Kind, branch).Canonical;
                 var version = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)))[..12];
                 var yaml = JobYaml.Serialize(branch);
                 resolved.Add(new Resolved(
