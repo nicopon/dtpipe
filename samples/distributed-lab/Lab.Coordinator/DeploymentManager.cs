@@ -374,22 +374,18 @@ public sealed class DeploymentManager
 
     /// <summary>
     /// Ready means the main instance reports itself registered in the deployment's current
-    /// generation, and every live instance the registry holds for the fragment is one a node host
-    /// reports now. An instance just closed for a redeploy or a re-arm stays live until the hub
-    /// sees its disconnect, with the same version as its replacement; admission may pick it, and a
-    /// Launch sent to it is never answered.
+    /// generation and the coordinator's registry holds it at the fragment's version. A closed
+    /// instance has left the registry by then (a node unregisters before it disconnects), so
+    /// admission has no stale one to pick.
     /// </summary>
     private async Task WaitRegisteredAsync(Deployment deployment, CancellationToken ct)
     {
         bool Ready(PlannedFragment fragment)
         {
-            var reported = _inventory.Reported(fragment.Name);
-            var main = reported.FirstOrDefault(s => s.Instance == "main");
+            var main = _inventory.Reported(fragment.Name).FirstOrDefault(s => s.Instance == "main");
             if (main is not { State: FragmentState.Registered, ClientId: { } clientId } || main.Generation != deployment.Generation)
                 return false;
-            var live = _registry.GetLiveInstances(fragment.Name);
-            var known = reported.Where(s => s.ClientId is not null).Select(s => s.ClientId!.Value).ToHashSet();
-            return live.Any(i => i.ClientId == clientId && i.Version == fragment.Version) && live.All(i => known.Contains(i.ClientId));
+            return _registry.GetLiveInstances(fragment.Name).Any(i => i.ClientId == clientId && i.Version == fragment.Version);
         }
 
         var deadline = DateTime.UtcNow + RegistrationTimeout;

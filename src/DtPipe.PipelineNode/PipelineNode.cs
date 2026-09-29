@@ -87,6 +87,9 @@ public sealed class PipelineNode : IAsyncDisposable
     private string? _firstFault;
     private FaultOrigin? _faultOrigin;
     private bool _coordinatorDriven;
+
+    /// <summary>Set once disposal starts: a reconnect that lands after must not register the fragment again.</summary>
+    private volatile bool _disposing;
     private string? _runId;
     private int _wiredCount;
     /// <summary>Wire pushes received, counted on arrival: the coordinator's own view of "fully wired".</summary>
@@ -105,7 +108,10 @@ public sealed class PipelineNode : IAsyncDisposable
 
     /// <summary>
     /// Resolves with this fragment's exit code once every edge a coordinator wired has finished
-    /// relaying - the self-driving path started by <see cref="ConnectAsync"/>. Never resolves for a
+    /// relaying and the coordinator has been told (or the report failed, and is held for a
+    /// reconnect) - the self-driving path started by <see cref="ConnectAsync"/>. A caller may dispose
+    /// the node the moment this resolves: its <c>Unregister</c> cannot overtake its own <c>Exited</c>.
+    /// Never resolves for a
     /// node started with <see cref="StartAsync"/>, which has no coordinator to drive it.
     /// </summary>
     public Task<int> Completion => _completion.Task;
@@ -196,6 +202,7 @@ public sealed class PipelineNode : IAsyncDisposable
             // disconnect grace period lapses and declares the fragment lost outright.
             conn.Reconnected += async _ =>
             {
+                if (node!._disposing) return;
                 await ReRegisterWithRetryAsync(conn, fragmentName, version, logger);
                 await node!.RetryPendingExitedReportAsync();
             };
@@ -298,8 +305,8 @@ public sealed class PipelineNode : IAsyncDisposable
         Fault(FaultOrigin.Local, "cancelled by coordinator before this fragment opened any transfer");
 
         var exitCode = await RunToCompletionAsync(ct);
-        _completion.TrySetResult(exitCode);
-        await ReportExitedWithFallbackAsync(runId, exitCode, "after Cancel", ct);
+        try { await ReportExitedWithFallbackAsync(runId, exitCode, "after Cancel", ct); }
+        finally { _completion.TrySetResult(exitCode); }
     }
 
     /// <summary>
@@ -520,8 +527,8 @@ public sealed class PipelineNode : IAsyncDisposable
     private async Task CompleteAndReportAsync(string runId)
     {
         var exitCode = await RunToCompletionAsync();
-        _completion.TrySetResult(exitCode);
-        await ReportExitedWithFallbackAsync(runId, exitCode, "on completion", default);
+        try { await ReportExitedWithFallbackAsync(runId, exitCode, "on completion", default); }
+        finally { _completion.TrySetResult(exitCode); }
     }
 
     /// <summary>Reports this fragment's own outcome to the coordinator: exit code, fault origin, row counts.</summary>
@@ -691,8 +698,27 @@ public sealed class PipelineNode : IAsyncDisposable
         return _faulted != 0 ? Math.Max(_child.ExitCode, 1) : _child.ExitCode;
     }
 
+    /// <summary>How long disposal waits for the coordinator to acknowledge <c>Unregister</c> before closing anyway.</summary>
+    private static readonly TimeSpan UnregisterTimeout = TimeSpan.FromSeconds(2);
+
     public async ValueTask DisposeAsync()
     {
+        _disposing = true;
+
+        // The coordinator drops this instance from its inventory only when it processes the closed
+        // connection, some time after the close; until then admission can still pick it. Saying so
+        // first makes the removal precede the close. Best effort: a node that cannot reach the
+        // coordinator is covered by the coordinator's own disconnect handling.
+        if (_coordinatorDriven)
+        {
+            try
+            {
+                using var timeout = new CancellationTokenSource(UnregisterTimeout);
+                await _client.ControlConnection.InvokeAsync("Unregister", timeout.Token);
+            }
+            catch { }
+        }
+
         try { await _client.DisconnectAsync(); } catch { }
         await _client.DisposeAsync();
 

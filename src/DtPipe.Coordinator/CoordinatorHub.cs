@@ -62,6 +62,17 @@ public class CoordinatorHub : CommandHub
         _nodeRegistry.Register(client.ClientId, Context.ConnectionId, fragmentName, version);
     }
 
+    /// <summary>
+    /// This connection's fragment instance is leaving for good: it leaves the inventory now, ahead of
+    /// the close the hub processes some time after. Never a substitute for the disconnect handling,
+    /// which still covers a node that dies without saying so.
+    /// </summary>
+    public Task Unregister()
+    {
+        _nodeRegistry.Withdraw(Context.ConnectionId);
+        return Task.CompletedTask;
+    }
+
     /// <summary>The fragment's child process is spawned and its declared edges can be wired.</summary>
     public Task Ready(string runId) => _runOrchestrator.OnReadyAsync(runId, ResolveFragment());
 

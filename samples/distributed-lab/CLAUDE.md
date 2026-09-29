@@ -44,11 +44,11 @@ Mechanics for editing the lab. What it is and how to run it: `README.md`.
   the fragments are registered again, so no run starts on a spent instance. Runs of every
   pipeline wait in one queue, since `RunOrchestrator` refuses a second one in flight.
   `[local: smoke.py]`
-- **Ready means no stale instance is live.** A closed instance stays live in `NodeRegistry` until
-  the hub sees its disconnect, with the same version as its replacement; admission may pick it and
-  its `Launch` is never answered. `WaitRegisteredAsync` therefore requires the main instance in the
-  deployment's current generation and every live `ClientId` to be one a node host reports now.
-  Every `Deploy` and `Rearm` carries a new generation, echoed in `FragmentStatus`. `[unchecked]`
+- **Ready means the main instance is registered.** A node unregisters from the coordinator before
+  it disconnects, so a closed instance is never left for admission to pick.
+  `WaitRegisteredAsync` requires the main instance in the deployment's current generation, held by
+  the registry at the fragment's version. Every `Deploy` and `Rearm` carries a new generation,
+  echoed in `FragmentStatus`. `[local: smoke.py]`
 - **A node is who its token says.** Every client of the coordinator authenticates with the
   embedded IDP (`EmbeddedIdp`, OpenIddict, client credentials); a node's group is its identity's,
   carried as `transportr:group:<g>` and read by TransportR's `JwtIdentityProvider`, never the one a

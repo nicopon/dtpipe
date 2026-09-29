@@ -102,13 +102,17 @@ public class CoordinatorAbortTests
     }
 
     /// <summary>
-    /// A fragment's whole process vanishing (simulated by disposing it outright, not just killing its
-    /// child) once it is fully wired and actively relaying is the pair muet case the disconnect grace
-    /// period exists for: no <c>Exited</c>, no <c>Fault</c>, nothing at all from that side. Modelled on
+    /// A fragment's whole node going away (simulated by disposing it outright, not just killing its
+    /// child) once it is fully wired and actively relaying is the pair muet case: no <c>Exited</c>, no
+    /// <c>Fault</c>, nothing at all from that side. Modelled on
     /// <see cref="CoordinatorDrivenTests.MiddleFragmentDies_RunFailsWithItAsCause_OthersAsConsequences"/> -
     /// throttled so the kill lands mid-stream, not before either edge has carried anything.
     /// </summary>
     /// <remarks>
+    /// Disposal unregisters the node before it closes, so <c>FragmentLost</c> fires at once through
+    /// <c>NodeRegistry.Withdraw</c>; the disconnect grace period a node that dies without saying so
+    /// waits out is covered by <c>NodeRegistryTests</c> alone, since no in-process node can drop its
+    /// connection without going through its own disposal.
     /// Proves that <c>FragmentLost</c> is what ends the execution-phase wait and resolves the run
     /// (confirmed by temporarily disabling the <c>abort.Cancel()</c> call it drives - the run then
     /// hangs until <c>Bound</c> and the test fails), and that the result names B correctly, quickly.
@@ -126,8 +130,7 @@ public class CoordinatorAbortTests
     {
         using var fixture = ChainFixture.Create(rowCount: 1_000_000, "--throttle", "100000");
         await using var host = await CoordinatorTestHost.StartAsync(
-            o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] },
-            services => services.AddSingleton(new NodeRegistryOptions { DisconnectGracePeriod = TimeSpan.FromMilliseconds(300) }));
+            o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] });
         var orchestrator = host.Host.Services.GetRequiredService<IRunOrchestrator>();
 
         var a = await ConnectNode(host, fixture.FragmentAJobPath, "A", new EdgeBinding("out", EdgeDirection.Outbound));
@@ -154,8 +157,8 @@ public class CoordinatorAbortTests
         Assert.Equal(RunOutcome.Failed, result.Outcome);
         Assert.Equal("B", result.Cause);
         Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10),
-            $"cause attribution took {sw.Elapsed.TotalSeconds:F1}s - should be bounded by the disconnect " +
-            "grace period, seconds, not by a peer's own stall window (tens of seconds to minutes)");
+            $"cause attribution took {sw.Elapsed.TotalSeconds:F1}s - should be bounded by the node's " +
+            "withdrawal, seconds, not by a peer's own stall window (tens of seconds to minutes)");
 
         await Task.WhenAll(a.Completion, c.Completion).WaitAsync(Bound);
         await a.DisposeAsync();
@@ -230,8 +233,7 @@ public class CoordinatorAbortTests
     {
         using var fixture = ChainFixture.Create(rowCount: 1_000);
         await using var host = await CoordinatorTestHost.StartAsync(
-            o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] },
-            services => services.AddSingleton(new NodeRegistryOptions { DisconnectGracePeriod = TimeSpan.FromMilliseconds(300) }));
+            o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] });
         var orchestrator = host.Host.Services.GetRequiredService<IRunOrchestrator>();
         var registry = host.Host.Services.GetRequiredService<INodeRegistry>();
 
@@ -258,7 +260,7 @@ public class CoordinatorAbortTests
         var notSelectedClientId = notSelected.ClientId;
 
         await notSelected.DisposeAsync(); // the whole non-selected instance vanishes - never wired, never launched
-        await Task.Delay(500); // past the 300ms grace period configured above
+        await Task.Delay(500); // the withdrawal has long been processed
 
         Assert.Contains(lost, e => e.Fragment == "A" && e.ClientId == notSelectedClientId);
 

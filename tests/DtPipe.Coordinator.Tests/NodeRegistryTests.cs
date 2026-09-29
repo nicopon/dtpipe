@@ -276,4 +276,82 @@ public class NodeRegistryTests
         Assert.Equal(["B"], lost);
         Assert.Empty(registry.GetLiveInstances("B"));
     }
+    [Fact]
+    public void Withdraw_DropsTheInstanceAtOnce_KeepsItsVersionKnown_AndFiresFragmentLost()
+    {
+        var registry = new NodeRegistry();
+        var clientId = Guid.NewGuid();
+        var lost = new List<(string Fragment, Guid ClientId)>();
+        registry.FragmentLost += (fragment, id) => lost.Add((fragment, id));
+        registry.Register(clientId, "conn1", "A", V1);
+
+        registry.Withdraw("conn1");
+
+        Assert.Empty(registry.GetLiveInstances("A"));
+        Assert.Null(registry.TryGetByConnection("conn1"));
+        Assert.True(registry.HasKnownVersion("A", V1));
+        Assert.Equal([("A", clientId)], lost);
+    }
+
+    [Fact]
+    public void Withdraw_LeavesAnotherInstanceOfTheSameNameLive()
+    {
+        var registry = new NodeRegistry();
+        registry.Register(Guid.NewGuid(), "conn1", "A", V1);
+        var other = Guid.NewGuid();
+        registry.Register(other, "conn2", "A", V1);
+
+        registry.Withdraw("conn1");
+
+        Assert.Equal(other, Assert.Single(registry.GetLiveInstances("A")).ClientId);
+    }
+
+    /// <summary>
+    /// The close that follows a withdrawal reaches <see cref="INodeRegistry.Unregister"/> for a
+    /// connection the registry no longer knows: it must neither start a grace nor declare a second loss.
+    /// </summary>
+    [Fact]
+    public void ADisconnectAfterWithdraw_DeclaresNothingMore()
+    {
+        var registry = new NodeRegistry(new NodeRegistryOptions { DisconnectGracePeriod = TimeSpan.Zero });
+        var lost = new List<string>();
+        registry.FragmentLost += (fragment, _) => lost.Add(fragment);
+        registry.Register(Guid.NewGuid(), "conn1", "A", V1);
+
+        registry.Withdraw("conn1");
+        registry.Unregister("conn1");
+        registry.Withdraw("conn1");
+
+        Assert.Equal(["A"], lost);
+    }
+
+    /// <summary>A withdrawal that arrives after the same instance reconnected must not evict the connection that replaced it.</summary>
+    [Fact]
+    public void Withdraw_FromAConnectionThatNoLongerOwnsTheEntry_IsIgnored()
+    {
+        var registry = new NodeRegistry();
+        var clientId = Guid.NewGuid();
+        registry.Register(clientId, "conn1", "A", V1);
+        registry.Register(clientId, "conn2", "A", V1);
+
+        registry.Withdraw("conn1");
+
+        Assert.Equal("conn2", Assert.Single(registry.GetLiveInstances("A")).ConnectionId);
+    }
+
+    [Fact]
+    public async Task Withdraw_AfterTheConnectionDropped_IsIgnored_TheGraceStillDeclaresTheLossOnce()
+    {
+        var registry = new NodeRegistry(new NodeRegistryOptions { DisconnectGracePeriod = TimeSpan.FromMilliseconds(100) });
+        var lost = new List<string>();
+        registry.FragmentLost += (fragment, _) => lost.Add(fragment);
+        registry.Register(Guid.NewGuid(), "conn1", "A", V1);
+        registry.Unregister("conn1");
+
+        // A dropped connection is no longer looked up by id: its grace, not a withdrawal, ends it.
+        registry.Withdraw("conn1");
+        await Task.Delay(400);
+
+        Assert.Equal(["A"], lost);
+    }
 }

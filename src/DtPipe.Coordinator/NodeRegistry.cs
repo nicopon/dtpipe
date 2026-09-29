@@ -50,6 +50,16 @@ public interface INodeRegistry
     /// </summary>
     void Unregister(string connectionId);
 
+    /// <summary>
+    /// The instance on <paramref name="connectionId"/> announces it is leaving for good (its node is
+    /// being disposed): it is dropped at once, with no grace period, and <see cref="FragmentLost"/>
+    /// fires for it. A dropped connection cannot tell a close from a fault and waits out its grace
+    /// (<see cref="Unregister"/>); a node that says so first is never admittable again, even while the
+    /// hub has yet to process the close that follows. Idempotent, and a no-op for a connection that no
+    /// longer owns its entry.
+    /// </summary>
+    void Withdraw(string connectionId);
+
     /// <summary>Every currently-connected instance of a fragment name - excludes one mid-grace-period after a drop.</summary>
     IReadOnlyList<RegisteredNode> GetLiveInstances(string fragmentName);
 
@@ -189,6 +199,30 @@ public sealed class NodeRegistry : INodeRegistry
             FragmentLost?.Invoke(fragmentName, clientId);
         else
             _ = DeclareLostAfterGraceAsync(fragmentName, clientId, grace!);
+    }
+
+    public void Withdraw(string connectionId)
+    {
+        string fragmentName;
+        Guid clientId;
+        lock (_lock)
+        {
+            // A dropped connection is already out of _byConnection (Unregister): only a live one
+            // reaches the removal below, so there is never a grace timer to cancel here.
+            if (!_byConnection.Remove(connectionId, out var owner))
+                return;
+            (fragmentName, clientId) = owner;
+
+            if (!_byFragment.TryGetValue(fragmentName, out var instances)
+                || !instances.TryGetValue(clientId, out var entry)
+                || entry.Node.ConnectionId != connectionId)
+                return;
+
+            instances.Remove(clientId);
+            if (instances.Count == 0) _byFragment.Remove(fragmentName);
+        }
+
+        FragmentLost?.Invoke(fragmentName, clientId);
     }
 
     private async Task DeclareLostAfterGraceAsync(string fragmentName, Guid clientId, CancellationTokenSource grace)

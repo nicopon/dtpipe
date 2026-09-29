@@ -83,6 +83,15 @@ in flight throws instead of queuing.
   precisely so a fragment that never reported `Exited` at all - the pair muet case, distinct from one
   that reported a fault - is still named as the cause even when everyone who *did* report is at 0.
   `[local: RunOrchestratorTests]`
+- **A node that is disposed says so before it closes: `Unregister` drops its instance at once.**
+  The hub processes a closed connection some time after the client closed it, and an instance still
+  in the inventory in between is admittable, with the same version as its replacement: a `Launch` to
+  it is never answered and the run ends at `ReadyTimeout`. `CoordinatorHub.Unregister` calls
+  `INodeRegistry.Withdraw`, which removes the entry with no grace period and fires `FragmentLost`
+  (an in-flight run that admitted it ends at once). The disconnect handling stays the only cover for
+  a node that dies without saying so. `Withdraw` ignores a connection that no longer owns its entry,
+  like `INodeRegistry.Unregister` (the disconnect handler; the hub method of the same name is the
+  node's own announcement). `[local: NodeRegistryTests, RedeployTests]`
 - **A dropped connection is a pending loss, not a lost instance, until its own grace period
   elapses.** `CoordinatorHub.OnDisconnectedAsync` marks the `INodeRegistry` entry rather than
   dropping it: an ordinary SignalR reconnect (its own default schedule: 0/2/10/30s) must not fail an
@@ -136,11 +145,12 @@ cheap retry on either side. A fragment's own `Exited` landing on a fresh connect
 connection's reconnect-triggered `Register` has completed fails `ResolveFragment` with no retry on
 the hub side; `PipelineNode` narrows this by holding the report and resending it once its own
 re-`Register` succeeds, but a hub-side retry does not exist. Finally, a fragment that goes quiet by
-**closing its connection cleanly** (this project's own tests can only simulate a vanished node this
-way, disposing `PipelineNode` in-process) resolves through the data plane's own handling of an
-orderly close, not through `FragmentLost` or `TerminateAsync` - both exist for the harder case, a
-peer that stops responding without ever closing anything, which is not reproducible from an
-in-process test.
+**disposing its node** unregisters first (`FragmentLost` fires at once through `Withdraw`, and the run
+ends naming it); the data plane resolves its transfers on its own orderly close. The disconnect grace
+period is the path of a node that dies without saying so, the harder case, which `TerminateAsync`
+also exists for: a peer that stops responding without ever closing anything. No in-process test can
+drop a node's connection without going through its own disposal, so `NodeRegistryTests` alone covers
+the grace.
 
 ## Versions
 

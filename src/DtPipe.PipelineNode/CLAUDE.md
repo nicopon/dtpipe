@@ -26,6 +26,12 @@ Arrow IPC bytes of each edge between the child's stdin/stdout and TransportR.
   a second teardown mechanism: `Fault(Local, ...)` then run to completion for a fragment not yet fully
   wired, `Fault(Remote, ...)` alone for a fully wired one, which is already completing on its own.
   `[local: CoordinatorAbortTests]`
+- **Disposal unregisters before it disconnects.** `DisposeAsync` of a coordinator-driven node invokes
+  the hub's `Unregister` (bounded, best effort) ahead of closing the connection, so the fragment is
+  out of the coordinator's inventory when disposal returns; a redeployed fragment is never admitted on
+  its closed predecessor. `_disposing` stops a reconnect that lands during disposal from registering
+  again. `Completion` resolves only after `Exited` has been sent, so a node disposed the moment it
+  completes never has its `Unregister` overtake its own report. `[local: RedeployTests]`
 - **A reconnect re-issues `Register`, with a bounded retry.** TransportR's own `SignalRDataClient`
   already re-issues `Connect` on `HubConnection.Reconnected`; nothing re-issues the coordinator's own
   `Register` but this node, since TransportR has no reason to know that call exists. The retry exists
