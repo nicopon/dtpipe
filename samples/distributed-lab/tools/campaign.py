@@ -16,6 +16,8 @@ sys.argv = sys.argv[:5]  # smoke.py reads argv[1:4]; the campaign id at argv[4] 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import smoke as S  # noqa: E402  (reads sys.argv itself)
+from campaign_queue import queue_is_stuck  # noqa: E402
+from campaign_logs import capture as capture_logs  # noqa: E402
 
 URL, DTPIPE, STATE, CAMPAIGN = _ARGS[1].rstrip("/"), _ARGS[2], _ARGS[3], _ARGS[4]
 CELLS = _ARGS[5:]
@@ -103,8 +105,19 @@ def hosts_online():
     return len(nodes) == len(NODES) and all(n["online"] for n in nodes)
 
 
+def restart_lab():
+    lab = os.path.join(LAB, "lab.sh")
+    subprocess.run([lab, "down"], capture_output=True, timeout=120)
+    time.sleep(2)
+    subprocess.run([lab, "up"], capture_output=True, timeout=300)
+    S.until(hosts_online, 120, "the lab after a restart")
+
+
 def recover():
     """Bring the lab back to nine online hosts and no deployment, the way an operator would."""
+    if queue_is_stuck(S.call):
+        restart_lab()
+        return "lab restarted (a run stayed in the queue)"
     if not hosts_online():
         subprocess.run([os.path.join(LAB, "lab.sh"), "nodes", "strict"], capture_output=True, timeout=300)
         return "hosts restarted"
@@ -202,6 +215,8 @@ def trial(cell, rep, pid, at, inject, expect, bound, cause_of=None, wait_running
         elapsed = t_end - t_fault
         rec["elapsed"] = round(elapsed, 2)
         judge(rec, pid, final, elapsed, expect, bound, cause_of)
+        if rec["inv"]:
+            rec["logs"] = capture_logs(STATE)
     except NotApplicable as e:
         rec["inv"] = {}
         rec["state"] = "n/a"
@@ -280,6 +295,8 @@ class NotApplicable(Exception):
 def cell_F1():
     for pid in ("sensor-stream", P3):
         for node, _ in nodes_of(pid):
+            if os.environ.get("CAMPAIGN_ONLY") and os.environ["CAMPAIGN_ONLY"] != f"{pid}:{node}":
+                continue
             for rep in range(REPS):
                 trial(f"F1 {pid}:{node}", rep, pid, 4, kill_if_alive(node), {"failed"}, BOUND["kill"], cause_of="@" + node)
 
@@ -330,6 +347,7 @@ def cell_F4():
         except Exception as e:
             rec["inv"]["I1"] = f"the lab did not come back: {str(e)[:150]}"
             rec["elapsed"] = round(time.time() - t0, 2)
+            rec["logs"] = capture_logs(STATE)
             try:
                 rec["evidence"] = {n: [l.strip()[:200] for l in open(os.path.join(STATE, "logs", n + ".log")).readlines()[-4:]] for n in ("node-1", "runner-1")}
                 rec["evidence"]["nodes_online"] = [(n["name"], n["online"]) for n in S.call("/api/nodes")]
@@ -503,6 +521,8 @@ def cell_F5():
             ("reset_peer 1s", reset, {"succeeded", "failed"}, 4, 100),
             ("black hole 20s runner", blackhole, {"succeeded", "failed"}, 4, 100),
         ):
+            if os.environ.get("CAMPAIGN_ONLY") and os.environ["CAMPAIGN_ONLY"] not in label:
+                continue
             for rep in range(REPS):
                 try:
                     trial(f"F5 {label}", rep, "sensor-stream", at, inj, expect, bound)
