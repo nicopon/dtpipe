@@ -71,6 +71,13 @@ Mechanics for editing the lab. What it is and how to run it: `README.md`.
   `index.html` + `js/` (the coordinator's views, ES modules, no build) and `lab.html` + `app.js`
   (the Lab view). `window.lab.store` exists for `tools/ui_check.py`. The page and `/api` are not
   authenticated: the lab has one operator.
+- `tools/campaign.py` plays a fixed matrix of faults (a killed child or host, a cancellation, a
+  coordinator restart, network faults through toxiproxy, revoked rights, rapid cycles) against the
+  running lab and judges every trial on the same invariants: it ends, the verdict is right, nothing
+  is left running, the lab still runs a reference pipeline. It needs the lab seeded with
+  `LAB_SCALE=60` (shorter runs end before a timed fault reaches them), strict nodes, and the
+  toxiproxy binaries (`TOXIPROXY_DIR`) for the network cells. It records, it never fixes.
+  `[unchecked]`
 - Verify a change with `./lab.sh smoke`, and a page change with `./lab.sh ui` too: it drives
   headless Chrome over the DevTools protocol (`tools/cdp.py`), because Chrome's own `--screenshot`
   stops the page before its fetches finish. `tools/cdp.py` also clicks and drags with the mouse.
