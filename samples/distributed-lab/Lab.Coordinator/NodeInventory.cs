@@ -58,12 +58,21 @@ public sealed class NodeInventory
         lock (_lock) return _nodes.TryGetValue(node, out var e) && e.ConnectionId is not null ? e.ClientId : null;
     }
 
+    /// <summary>
+    /// The host behind <paramref name="connectionId"/> is gone: what it last reported about its fragments
+    /// is no longer known to be true (a killed host leaves a fragment "Launched" for good), so it is
+    /// forgotten. A host that only lost its connection reports every fragment again when it announces
+    /// itself on reconnecting.
+    /// </summary>
     public void Disconnected(string connectionId)
     {
         lock (_lock)
         {
             foreach (var entry in _nodes.Values.Where(e => e.ConnectionId == connectionId))
+            {
                 entry.ConnectionId = null;
+                entry.Fragments.Clear();
+            }
         }
     }
 

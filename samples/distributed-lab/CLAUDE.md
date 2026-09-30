@@ -54,6 +54,14 @@ Mechanics for editing the lab. What it is and how to run it: `README.md`.
   carried as `transportr:group:<g>` and read by TransportR's `JwtIdentityProvider`, never the one a
   node declares. `LabHub.Announce` refuses a host announcing a node its identity is not bound to.
   `[local: smoke.py rights]`
+- **The IDP's signing key survives a coordinator restart.** A node host reuses its cached token until
+  shortly before it expires, so `PersistentSigningKey` reads the key from `.state/idp/signing-key.pem`
+  (generated once, readable by its owner only, outside git) instead of generating one per process.
+  `--token-lifetime-seconds` shortens the lifetime for trials. `[local: tools/campaign.py F4]`
+- **A disconnected host is forgotten fragment by fragment.** `NodeInventory.Disconnected` drops what
+  the host last reported: a killed host would otherwise leave its fragments "Launched" for good. A host
+  that only lost its connection reports them all again when it announces itself.
+  `[local: tools/campaign.py F3]`
 - **One source of rights.** `RightsStore` holds the identities, the flow matrix and the brick
   policies; `RightsFlowControl` replaces TransportR's `IFlowControlService`, so the hub checks the
   matrix as it is now on every transfer, and every plan (`/api/plan`, `/api/deploy`, `AutoPlacer`,
@@ -76,8 +84,9 @@ Mechanics for editing the lab. What it is and how to run it: `README.md`.
   running lab and judges every trial on the same invariants: it ends, the verdict is right, nothing
   is left running, the lab still runs a reference pipeline. It needs the lab seeded with
   `LAB_SCALE=60` (shorter runs end before a timed fault reaches them), strict nodes, and the
-  toxiproxy binaries (`TOXIPROXY_DIR`) for the network cells. It records, it never fixes.
-  `[unchecked]`
+  toxiproxy binaries (`TOXIPROXY_DIR`) for the network cells. Its security cells call the hub as a
+  peer would (`campaign_security.py`, a SignalR client over long polling) and start the coordinator
+  with `--token-lifetime-seconds`. It records, it never fixes. `[unchecked]`
 - Verify a change with `./lab.sh smoke`, and a page change with `./lab.sh ui` too: it drives
   headless Chrome over the DevTools protocol (`tools/cdp.py`), because Chrome's own `--screenshot`
   stops the page before its fetches finish. `tools/cdp.py` also clicks and drags with the mouse.

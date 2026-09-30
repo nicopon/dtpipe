@@ -19,8 +19,9 @@ public sealed class IdpDbContext(DbContextOptions<IdpDbContext> options) : DbCon
 /// scope, which TransportR's <c>JwtIdentityProvider</c> reads. Unlike SimpleIdp, its clients are
 /// the identities of <see cref="RightsStore"/>, synchronised whenever the rights change, and a
 /// token's group is the identity's group at issuance, whatever scope the client asked for.
-/// Signing keys are ephemeral: a coordinator restart invalidates every token, and node hosts fetch
-/// new ones as they reconnect.
+/// The signing key is generated once and kept in the state directory (<see cref="PersistentSigningKey"/>):
+/// a node host reuses its cached token until shortly before it expires, so the tokens must stay valid
+/// across a coordinator restart.
 /// </summary>
 public static class EmbeddedIdp
 {
@@ -42,7 +43,10 @@ public static class EmbeddedIdp
                 o.SetIssuer(new Uri(lab.PublicUrl + "/"));
                 o.SetTokenEndpointUris(TokenPath.TrimStart('/'));
                 o.AllowClientCredentialsFlow();
-                o.AddEphemeralEncryptionKey().AddEphemeralSigningKey();
+                // Access tokens are signed, not encrypted, and the client-credentials flow issues nothing
+                // else: only the signing key has to outlive a restart.
+                o.AddEphemeralEncryptionKey();
+                o.AddSigningKey(PersistentSigningKey.LoadOrCreate(Path.Combine(lab.StateDir, "idp", "signing-key.pem")));
                 o.DisableAccessTokenEncryption();
                 o.SetAccessTokenLifetime(lab.TokenLifetime);
                 o.UseAspNetCore().EnableTokenEndpointPassthrough().DisableTransportSecurityRequirement();

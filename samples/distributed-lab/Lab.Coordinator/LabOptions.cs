@@ -27,6 +27,9 @@ public sealed class LabOptions
             LabRoot = labRoot,
             PublicUrl = (configuration["urls"] ?? "http://127.0.0.1:5180").Split(';')[0].TrimEnd('/'),
             StateDir = Path.GetFullPath(configuration["state"] ?? Path.Combine(labRoot, ".state")),
+            TokenLifetime = int.TryParse(configuration["token-lifetime-seconds"], out var seconds) && seconds > 0
+                ? TimeSpan.FromSeconds(seconds)
+                : TimeSpan.FromHours(12),
             DtPipeExecutable = Path.GetFullPath(configuration["dtpipe"]
                 ?? Path.Combine(labRoot, "..", "..", "dist", "release", OperatingSystem.IsWindows() ? "dtpipe.exe" : "dtpipe")),
         };
