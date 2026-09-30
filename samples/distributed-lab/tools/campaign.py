@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 import smoke as S  # noqa: E402  (reads sys.argv itself)
 from campaign_queue import queue_is_stuck  # noqa: E402
 from campaign_logs import capture as capture_logs  # noqa: E402
+import campaign_security as sec  # noqa: E402
 
 URL, DTPIPE, STATE, CAMPAIGN = _ARGS[1].rstrip("/"), _ARGS[2], _ARGS[3], _ARGS[4]
 CELLS = _ARGS[5:]
@@ -203,10 +204,10 @@ def trial(cell, rep, pid, at, inject, expect, bound, cause_of=None, wait_running
     t_fault = time.time()
     try:
         recover()
+        check_for(pid)  # the witness can take as long as a run: before the deployment, so no node waits for it
         plan = deploy(pid)
         if before:
             before()
-        check_for(pid)
         run = submit(pid, wait_running=wait_running)
         time.sleep(at)
         t_fault = time.time()
@@ -217,6 +218,13 @@ def trial(cell, rep, pid, at, inject, expect, bound, cause_of=None, wait_running
         judge(rec, pid, final, elapsed, expect, bound, cause_of)
         if rec["inv"]:
             rec["logs"] = capture_logs(STATE)
+        if final is None and os.environ.get("CAMPAIGN_CANCEL_STUCK"):
+            # What an operator would do about a run that never ends: cancel it, and time the verdict.
+            t_cancel = time.time()
+            S.call("/api/runs/cancel", {"runId": run["runId"]})
+            after_cancel, _ = await_final(run["runId"], 120)
+            rec["cancel_after_stall"] = {"state": after_cancel["state"] if after_cancel else "none",
+                                         "seconds": round(time.time() - t_cancel, 1)}
     except NotApplicable as e:
         rec["inv"] = {}
         rec["state"] = "n/a"
@@ -317,12 +325,12 @@ def cell_F3():
             trial(f"F3 host {node}", rep, "sensor-stream", 4, kill_host(node), expect, BOUND["host"])
 
 
-def stop_start_coordinator():
+def stop_start_coordinator(*extra):
     os.kill(pid_of("coordinator"), signal.SIGKILL)
     time.sleep(2)
     log = open(os.path.join(STATE, "logs", "coordinator.log"), "a")
     p = subprocess.Popen(["dotnet", os.path.join(STATE, "bin", "coordinator", "Lab.Coordinator.dll"), "--urls", URL,
-                          "--lab-root", LAB, "--state", STATE, "--dtpipe", DTPIPE], stdout=log, stderr=log, start_new_session=True)
+                          "--lab-root", LAB, "--state", STATE, "--dtpipe", DTPIPE, *extra], stdout=log, stderr=log, start_new_session=True)
     with open(os.path.join(STATE, "run", "coordinator.pid"), "w") as f:
         f.write(str(p.pid))
 
@@ -533,8 +541,124 @@ def cell_F5():
         subprocess.run([os.path.join(LAB, "lab.sh"), "nodes", "strict"], capture_output=True, timeout=300)
 
 
+# ------------------------------------------------------------------ security
+
+class Violation(Exception):
+    """A request a client that is not the coordinator should not have been able to make."""
+
+
+def security_trial(cell, rep, check):
+    """One security check. Judged on: refused (I2), nothing changed (I6: every host still online), and the
+    lab still runs its reference pipeline (I4)."""
+    rec = {"cell": cell, "rep": rep, "pipeline": REFERENCE, "expect": ["refused"], "at": 0, "campaign": CAMPAIGN,
+           "time": time.strftime("%Y-%m-%dT%H:%M:%S"), "inv": {}}
+    t0 = time.time()
+    try:
+        rec["note"] = check()
+        rec["state"] = "refused"
+    except Violation as e:
+        rec["inv"]["I2"] = str(e)[:300]
+        rec["state"] = "accepted"
+    except Exception as e:
+        rec["inv"]["H"] = f"harness: {str(e)[:200]}"
+    rec["elapsed"] = round(time.time() - t0, 2)
+    if not hosts_online():
+        rec["inv"]["I6"] = "a host is no longer online after the check"
+    problem = reference_ok(rec)
+    if problem:
+        rec["inv"]["I4"] = problem
+    record(rec)
+
+
+def expect_status(what, actual, allowed=(401, 403)):
+    if actual not in allowed:
+        raise Violation(f"{what}: HTTP {actual}, expected one of {allowed}")
+
+
+def check_S2():
+    base = URL
+    bogus = sec.bogus_jwt()
+    expect_status("command hub negotiate, no token", sec.negotiate_status(base, sec.COMMAND_HUB, None))
+    expect_status("command hub negotiate, unsigned token", sec.negotiate_status(base, sec.COMMAND_HUB, bogus))
+    expect_status("lab hub negotiate, no token", sec.negotiate_status(base, sec.LAB_HUB, None))
+    expect_status("lab hub negotiate, unsigned token", sec.negotiate_status(base, sec.LAB_HUB, bogus))
+    expect_status("data plane, no token", sec.stream_status(base, None))
+    expect_status("data plane, unsigned token", sec.stream_status(base, bogus))
+    for label, client, secret in (("wrong secret", "node-1", "not-the-secret"), ("unknown client", "node-9", "x")):
+        status, token = sec.token_for(base, client, secret)
+        if token is not None or status not in (400, 401):
+            raise Violation(f"token endpoint, {label}: HTTP {status}, token issued={token is not None}")
+    return "six entry points and two credential failures refused"
+
+
+def check_S4():
+    node = json.load(open(os.path.join(LAB, "nodes", "node-1.json")))
+    status, token = sec.token_for(URL, node["clientId"], node["secret"])
+    if not token:
+        raise RuntimeError(f"no token for node-1 (HTTP {status})")
+    hub = sec.LongPollingHub(URL, sec.COMMAND_HUB, token).open()
+    try:
+        answers = {
+            "GetReceivers": hub.invoke("GetReceivers"),
+            "InitTransfer": hub.invoke("InitTransfer", "00000000-0000-0000-0000-000000000001", 8, 1000),
+        }
+    finally:
+        hub.close()
+    for method, answer in answers.items():
+        if "error" not in answer:
+            raise Violation(f"{method} from a peer was accepted: {json.dumps(answer)[:200]}")
+        if "reserved to the coordinator" not in answer["error"]:
+            raise Violation(f"{method} from a peer failed for another reason: {answer['error'][:200]}")
+    return "GetReceivers and InitTransfer from a peer refused by the coordinator's filter"
+
+
+def check_S1():
+    out = subprocess.run([sys.executable, os.path.join(LAB, "smoke.py"), URL, DTPIPE, STATE, "rights"], capture_output=True, text=True, timeout=300)
+    line = next((l for l in out.stdout.splitlines() if "announcement, impostor" in l), "")
+    if not line.startswith("PASS"):
+        raise Violation(f"impostor announcement: {line or out.stdout[-200:]}")
+    return line[:160]
+
+
+def cell_S():
+    for rep in range(REPS):
+        security_trial("S1 impostor announcement", rep, check_S1)
+    for rep in range(REPS):
+        security_trial("S2 unauthenticated entry points", rep, check_S2)
+    for rep in range(REPS):
+        security_trial("S4 peer-initiated transfer", rep, check_S4)
+
+
+def short_token_trials(label, before=None):
+    """The coordinator issues 20-second tokens, the hosts restart to fetch them, and a run of P2 follows. It
+    either finishes (tokens renewed) or fails saying so; it never hangs, and the lab is usable afterwards."""
+    for rep in range(REPS):
+        try:
+            stop_start_coordinator("--token-lifetime-seconds", "20")
+            time.sleep(3)
+            subprocess.run([os.path.join(LAB, "lab.sh"), "nodes", "strict"], capture_output=True, timeout=300)
+            S.until(hosts_online, 120, "the hosts with short-lived tokens")
+            trial(label, rep, "sensor-stream", 0, lambda run, plan: "", {"succeeded", "failed"}, 150,
+                  wait_running=False, before=before, after=restart_lab)
+        except Exception as e:
+            record({"cell": label, "rep": rep, "pipeline": "sensor-stream", "expect": [], "at": 0,
+                    "campaign": CAMPAIGN, "time": time.strftime("%Y-%m-%dT%H:%M:%S"), "elapsed": 0, "state": "?",
+                    "inv": {"H": f"harness: {str(e)[:200]}"}})
+            restart_lab()
+
+
+def cell_S3():
+    """Tokens that expire during the run (the run lasts 30 s, the tokens 20)."""
+    short_token_trials("S3 token expires mid-run")
+
+
+def cell_S5():
+    """A pipeline deployed, then left idle past its nodes' token lifetime, then run."""
+    short_token_trials("S5 deployed node idle past its token", before=lambda: time.sleep(25))
+
+
 CELL_FUNCS = {"F1": cell_F1, "F2": cell_F2, "F3": cell_F3, "F4": cell_F4, "F5": cell_F5, "F6": cell_F6, "F7": cell_F7,
-              "F8": cell_F8, "F9": cell_F9, "F10": cell_F10}
+              "F8": cell_F8, "F9": cell_F9, "F10": cell_F10, "S": cell_S, "S3": cell_S3, "S5": cell_S5}
 
 
 def main():
