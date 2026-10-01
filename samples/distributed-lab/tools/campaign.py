@@ -5,11 +5,13 @@ before the first trial; this script only plays and records them.
 
   campaign.py <lab-url> <dtpipe> <state-dir> <campaign-id> [cell ...]
 
-Cells are F1 ... F10 (a prefix selects: F1 alone is F1 and F10 only as F10). Every trial is one line of
-JSON in <state-dir>/campaign/<campaign-id>/trials.jsonl. The lab must be up on strict nodes
-(./lab.sh up). Standard library only.
+Cells are F1 ... F11, then S, S3 and S5 for the security volet (a prefix selects: F1 alone is F1 and F10 only as
+F10). Every trial is one line of JSON in <state-dir>/campaign/<campaign-id>/trials.jsonl, and every line the lab
+logs is kept, stamped, in <state-dir>/campaign/<campaign-id>/logs/. The lab must be up on strict nodes
+(./lab.sh up), and nothing else of the lab may be running: the campaign refuses to start otherwise
+(CAMPAIGN_SKIP_PREFLIGHT=1 overrides, for a harness check). Standard library only.
 """
-import json, os, shutil, signal, subprocess, sys, time
+import json, os, shutil, signal, subprocess, sys, tempfile, time, urllib.error
 
 _ARGS = list(sys.argv)
 sys.argv = sys.argv[:5]  # smoke.py reads argv[1:4]; the campaign id at argv[4] is not a pass name
@@ -17,7 +19,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import smoke as S  # noqa: E402  (reads sys.argv itself)
 from campaign_queue import queue_is_stuck  # noqa: E402
-from campaign_logs import capture as capture_logs  # noqa: E402
+from campaign_logs import capture as capture_logs, follow as follow_logs  # noqa: E402
+import campaign_bench as bench  # noqa: E402
 import campaign_security as sec  # noqa: E402
 
 URL, DTPIPE, STATE, CAMPAIGN = _ARGS[1].rstrip("/"), _ARGS[2], _ARGS[3], _ARGS[4]
@@ -26,6 +29,35 @@ LAB = os.path.dirname(HERE)
 OUT = os.path.join(STATE, "campaign", CAMPAIGN)
 NODES = ["node-1", "node-2", "node-3", "node-4", "runner-1"]
 TOXI = os.environ.get("TOXIPROXY_DIR", os.path.normpath(os.path.join(LAB, "..", "..", "..", "transportr", "tools")))
+
+# A retry storm on the loopback can exhaust the ephemeral ports for a few seconds, the harness's own API calls included
+# (EADDRINUSE / EADDRNOTAVAIL): those are retried, nothing else is (a coordinator that is down must still refuse at once).
+_raw_call = S.call
+
+
+def _call(path, body=None, method=None):
+    for attempt in range(40):
+        try:
+            return _raw_call(path, body, method)
+        except urllib.error.URLError as e:
+            if isinstance(getattr(e, "reason", None), OSError) and e.reason.errno in (48, 49) and attempt < 39:
+                time.sleep(1.0)
+                continue
+            raise
+
+
+S.call = _call
+
+
+def wait_ports_free(timeout=90):
+    """Waits until the sockets a storm left in TIME_WAIT have drained, so the next check does not meet an exhausted range."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        out = subprocess.run(["netstat", "-an", "-p", "tcp"], capture_output=True, text=True).stdout
+        if out.count("TIME_WAIT") < 2000:
+            return
+        time.sleep(2)
+
 
 BOUND = {"kill": 10, "cancel": 6, "host": 60}
 REFERENCE = "customers-anonymized"
@@ -116,6 +148,7 @@ def restart_lab():
 
 def recover():
     """Bring the lab back to nine online hosts and no deployment, the way an operator would."""
+    wait_ports_free()
     if queue_is_stuck(S.call):
         restart_lab()
         return "lab restarted (a run stayed in the queue)"
@@ -335,23 +368,42 @@ def stop_start_coordinator(*extra):
         f.write(str(p.pid))
 
 
+def survivors():
+    """The fragment children alive now, with how long they have lived."""
+    out = []
+    for pid in children():
+        age = subprocess.run(["ps", "-o", "etime=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+        out.append({"pid": pid, "age": age})
+    return out
+
+
 def cell_F4():
+    """The coordinator is killed and restarted in mid-run. It is not highly available (its state is in memory and
+    nothing rebuilds it from the nodes), so what is judged is that the hosts come back (I1), that the operator's reset,
+    which restarts the hosts, leaves nothing running (I3), and that the lab runs a reference pipeline afterwards (I4).
+    What the restart left behind before that reset is recorded, not judged."""
     for rep in range(REPS):
-        rec = {"cell": "F4 coordinator restart", "rep": rep, "pipeline": "sensor-stream", "expect": ["lost"], "at": 4,
+        rec = {"cell": "F4 coordinator restart", "rep": rep, "pipeline": "sensor-stream", "expect": ["restarted"], "at": 4,
                "campaign": CAMPAIGN, "time": time.strftime("%Y-%m-%dT%H:%M:%S"), "inv": {}}
         t0 = time.time()
+        lost = None
         try:
             recover(); deploy("sensor-stream"); check_for("sensor-stream")
-            submit("sensor-stream"); time.sleep(4)
+            lost = submit("sensor-stream")["runId"]; time.sleep(4)
             t_fault = time.time()
             stop_start_coordinator()
             S.until(hosts_online, 90, "the hosts back online")
             rec["elapsed"] = round(time.time() - t_fault, 2)
             rec["state"] = "restarted"
             time.sleep(10)
+            rec["info"] = {"lost_run": lost, "survivors_10s_after_return": survivors(),
+                           "lost_run_in_queue": any(r["runId"] == lost for r in S.call("/api/runs/queue")),
+                           "lost_run_in_history": any(r["runId"] == lost for r in S.call("/api/runs"))}
+            restart_lab()  # the operator's reset: stopping the hosts stops their fragment children
+            time.sleep(10)
             left = children()
             if left:
-                rec["inv"]["I3"] = f"{len(left)} fragment child process(es) alive after the coordinator restarted"
+                rec["inv"]["I3"] = f"{len(left)} fragment child process(es) alive 10s after the operator's reset"
         except Exception as e:
             rec["inv"]["I1"] = f"the lab did not come back: {str(e)[:150]}"
             rec["elapsed"] = round(time.time() - t0, 2)
@@ -364,6 +416,10 @@ def cell_F4():
         problem = reference_ok(rec)
         if problem:
             rec["inv"]["I4"] = problem
+        try:
+            rec.setdefault("info", {})["lost_run_id_reused"] = lost is not None and any(r["runId"] == lost for r in S.call("/api/runs"))
+        except Exception:
+            pass
         record(rec)
 
 
@@ -485,6 +541,22 @@ def hosts_through_proxies():
     S.until(hosts_online, 120, "the hosts through their proxies")
 
 
+def bench_selftest():
+    """A run of P2 with no fault, through the proxies the network cell is about to fault. If it does not succeed with the
+    witness's numbers, the bench is not clean and nothing the cell records would mean anything."""
+    recover()
+    check_for("sensor-stream")
+    deploy("sensor-stream")
+    run = submit("sensor-stream", wait_running=False)
+    final, _ = await_final(run["runId"], 150)
+    with open(os.path.join(OUT, "selftest.jsonl"), "a") as f:
+        f.write(json.dumps({"time": time.strftime("%Y-%m-%dT%H:%M:%S"), "state": final["state"] if final else "none"}) + "\n")
+    if final is None or final["state"] != "succeeded":
+        raise RuntimeError(f"the reference run through the proxies gave {final['state'] if final else 'no verdict'}")
+    ctx().verdict(final, check_for("sensor-stream"))
+    recover()
+
+
 def cell_F5():
     server = subprocess.Popen([os.path.join(TOXI, "toxiproxy-server"), "-host", "127.0.0.1", "-port", "8474"],
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
@@ -493,6 +565,10 @@ def cell_F5():
         for n in NODES:
             toxi("create", "-l", f"127.0.0.1:{PORTS[n]}", "-u", URL.replace("http://", ""), n)
         hosts_through_proxies()
+        wrong = bench.exactly_the_hosts(STATE, NODES)
+        if wrong:
+            raise RuntimeError("the bench is not what the cell assumes: " + wrong)
+        bench_selftest()
 
         def latency(run, plan):
             for n in NODES:
@@ -539,6 +615,80 @@ def cell_F5():
     finally:
         server.terminate()
         subprocess.run([os.path.join(LAB, "lab.sh"), "nodes", "strict"], capture_output=True, timeout=300)
+
+
+# ------------------------------------------------------------------ a consumer that stops reading
+
+F11_BOUND = 200  # the window fills in seconds + the sender's 60 s bound + the coordinator's 60 s grace + teardown 30 s, with margin
+
+# Two fragments, a source far larger than the send window and the receive buffer can hold: the sender fails on its
+# window while the sink, blocked on its FIFO, never reads. (A source that fits the buffers lets the sender finish, and
+# a run held open by a sink alone is only a slow sink, which no clock may end.)
+F11_YAML = """readings:
+  input: generate:50000000
+load:
+  from: readings
+  output: csv:{fifo}
+"""
+
+
+def release_fifo(path):
+    """Lets a writer blocked on opening the FIFO go: a reader that opens without waiting is enough."""
+    try:
+        os.close(os.open(path, os.O_RDONLY | os.O_NONBLOCK))
+    except OSError:
+        pass
+
+
+def cell_F11():
+    """A consumer stops reading for good: the sink writes to a FIFO nobody reads, so its child blocks. The sender gives
+    up on its full window, and the receiver is never told. The run must end `failed`, naming the sink's fragment, in the
+    bound, with nothing left running. Needs sandbox nodes (a data node otherwise refuses a writer that is not a brick)."""
+    lab = os.path.join(LAB, "lab.sh")
+    placement = {"readings": "runner-1", "load": "node-4"}
+    for rep in range(REPS):
+        rec = {"cell": "F11 consumer stuck", "rep": rep, "pipeline": "campaign-f11", "expect": ["failed"], "at": 0,
+               "campaign": CAMPAIGN, "time": time.strftime("%Y-%m-%dT%H:%M:%S"), "inv": {}}
+        fifo_dir = tempfile.mkdtemp(prefix="campaign-f11-")  # a FIFO cannot live on the shared volume
+        fifo = os.path.join(fifo_dir, "sink.fifo")
+        t0 = time.time()
+        try:
+            recover()
+            subprocess.run([lab, "nodes", "sandbox"], capture_output=True, timeout=300)
+            S.until(hosts_online, 120, "the hosts in sandbox mode")
+            os.mkfifo(fifo)
+            S.call("/api/deploy", {"pipelineId": "campaign-f11", "yaml": F11_YAML.format(fifo=fifo), "cuts": [], "placement": placement})
+            run = submit("campaign-f11")
+            t_run = time.time()
+            final, t_end = await_final(run["runId"], F11_BOUND + 30)
+            elapsed = t_end - t_run
+            rec["elapsed"] = round(elapsed, 2)
+            rec["injected"] = "the sink writes to a FIFO nobody reads"
+            judge(rec, "campaign-f11", final, elapsed, {"failed"}, F11_BOUND, cause_of="@node-4")
+            if rec["inv"]:
+                rec["logs"] = capture_logs(STATE)
+            if final is None and os.environ.get("CAMPAIGN_CANCEL_STUCK"):
+                t_cancel = time.time()
+                S.call("/api/runs/cancel", {"runId": run["runId"]})
+                after_cancel, _ = await_final(run["runId"], 120)
+                rec["cancel_after_stall"] = {"state": after_cancel["state"] if after_cancel else "none",
+                                             "seconds": round(time.time() - t_cancel, 1)}
+        except Exception as e:
+            rec["inv"] = {"H": f"harness: {str(e)[:200]}"}
+            rec["elapsed"] = round(time.time() - t0, 2)
+        finally:
+            release_fifo(fifo)
+            shutil.rmtree(fifo_dir, ignore_errors=True)
+            undeploy("campaign-f11")
+            subprocess.run([lab, "nodes", "strict"], capture_output=True, timeout=300)
+            try:
+                S.until(hosts_online, 120, "the hosts back in strict mode")
+            except Exception as e:
+                rec.setdefault("inv", {})["H"] = f"harness: cleanup failed: {str(e)[:150]}"
+        problem = reference_ok(rec)
+        if problem:
+            rec["inv"]["I4"] = problem
+        record(rec)
 
 
 # ------------------------------------------------------------------ security
@@ -658,15 +808,27 @@ def cell_S5():
 
 
 CELL_FUNCS = {"F1": cell_F1, "F2": cell_F2, "F3": cell_F3, "F4": cell_F4, "F5": cell_F5, "F6": cell_F6, "F7": cell_F7,
-              "F8": cell_F8, "F9": cell_F9, "F10": cell_F10, "S": cell_S, "S3": cell_S3, "S5": cell_S5}
+              "F8": cell_F8, "F9": cell_F9, "F10": cell_F10, "F11": cell_F11, "S": cell_S, "S3": cell_S3, "S5": cell_S5}
 
 
 def main():
     os.makedirs(OUT, exist_ok=True)
-    wanted = CELLS or list(CELL_FUNCS)
-    for name in wanted:
-        print(f"== {name}", flush=True)
-        CELL_FUNCS[name]()
+    if not os.environ.get("CAMPAIGN_SKIP_PREFLIGHT"):
+        strays = bench.foreign(STATE, NODES)
+        if strays:
+            print("The bench is not clean: these lab processes are not the ones the pid files name.", file=sys.stderr)
+            for pid, ppid, kind, args in strays:
+                print(f"  {kind} pid {pid} (parent {ppid}) {args[:140]}", file=sys.stderr)
+            print("Stop them (or ./lab.sh down, then ./lab.sh up) and start again.", file=sys.stderr)
+            return 2
+    stop_logs = follow_logs(STATE, os.path.join(OUT, "logs"))
+    try:
+        wanted = CELLS or list(CELL_FUNCS)
+        for name in wanted:
+            print(f"== {name}", flush=True)
+            CELL_FUNCS[name]()
+    finally:
+        stop_logs.set()
     return 0
 
 

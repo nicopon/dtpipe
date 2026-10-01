@@ -82,9 +82,9 @@ document, `.state/rights.json`, started from `rights-seed.json` and edited in th
 | **What**: per source brick, the groups its rows may be sent to as they leave their node | on every plan (the hub sees groups, not bricks) |
 
 Every change is audited. A node host gives each of its pipeline nodes a token provider
-(`PipelineNodeOptions.AccessTokenProvider`) that asks the IDP for the node's token. Signing keys
-are ephemeral: a coordinator restart invalidates every token, and the hosts fetch new ones as they
-reconnect.
+(`PipelineNodeOptions.AccessTokenProvider`) that asks the IDP for the node's token. The IDP's signing
+key is generated once and kept in `.state/idp/signing-key.pem` (readable by its owner only, outside
+git), so a coordinator restart does not invalidate the tokens in circulation.
 
 ## The coordinator's page
 
@@ -186,12 +186,18 @@ afterwards (a fresh instance each) before it accepts the next run.
 
 - Everything runs on one machine, which the lab uses as a shortcut: `split` samples the sources
   and the query panel opens a node's file from the coordinator's process.
-- The page and `/api` are not authenticated: only the nodes are. Tokens last 12 hours; a
-  deployment idle longer than that must be redeployed.
+- The page and `/api` are not authenticated: only the nodes are. Tokens last 12 hours
+  (`--token-lifetime-seconds` changes it). A token is checked when a transfer opens, so a
+  deployment idle longer than its tokens' lifetime has its next run refused (`could not be opened by
+  the hub`): redeploy it, which recreates its nodes with fresh tokens. Keep the lifetime above the
+  longest idle time you expect.
 - A transfer the hub refuses under the flow matrix shows in the run's verdict as an unresponsive
   fragment: the coordinator's log carries the refusal.
-- One run at a time, as `RunOrchestrator` allows: runs queue. Deployments do not survive a
-  coordinator restart; the library and the run journal do.
+- One run at a time, as `RunOrchestrator` allows: runs queue. The coordinator is not highly
+  available: a restart loses every deployment and the run in flight (the library and the finished
+  runs of the run journal survive), and the node hosts keep running the lost run's fragments until
+  they are restarted. After a coordinator restart, restart the lab (`./lab.sh down`, then
+  `./lab.sh up`); nothing reconstructs a run from the nodes reconnecting.
 - The designer knows a source brick's columns, not those after a step: dtpipe offers no schema of
   a job's branch without running it.
 - `lab.sh` needs bash. The node host itself uses no POSIX-only API, but the lab is not tested on
