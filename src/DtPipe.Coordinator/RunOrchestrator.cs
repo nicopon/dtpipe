@@ -40,9 +40,11 @@ public sealed record EdgeCount(
 /// <see cref="RunOutcome.Cancelled"/> run - the requester asked for it, nothing to name.
 /// <see cref="Reports"/> is partial by construction: a fragment absent from it never reported
 /// <c>Exited</c> at all, whether because it went silent or because the coordinator's own teardown
-/// gave up waiting on it. <see cref="CauseIsUnresponsive"/> is set only when <see cref="Cause"/> is
-/// exactly such a fragment - it is never true for the row-count-mismatch or refused-transfer forms of
-/// <see cref="Cause"/>, which are messages, not fragment names.
+/// gave up waiting on it. <see cref="CauseIsUnresponsive"/> is set only when <see cref="Cause"/> is a
+/// fragment the coordinator gave up on: one absent from <see cref="Reports"/>, or one that had not
+/// reported when the grace after a remote failure ran out and reported only once told to cancel. It is
+/// never true for the row-count-mismatch or refused-transfer forms of <see cref="Cause"/>, which are
+/// messages, not fragment names.
 /// </summary>
 public sealed record RunResult(
     RunOutcome Outcome, string? Cause, IReadOnlyList<string> Consequences,
@@ -73,12 +75,27 @@ public sealed class RunOrchestratorOptions
 
     /// <summary>
     /// Bounds only the teardown's wait for an already-cancelled or already-terminated fragment to
-    /// finish reporting its own <c>Exited</c>, once the run has already been given up on. Never
-    /// bounds a healthy run's own data-transfer phase: the design's own three-clock table names no
-    /// coordinator-side wall clock there, only node liveness (<see cref="INodeRegistry.FragmentLost"/>) and a
-    /// fragment's own failure - a legitimately long transfer must not be reported failed for outliving a fixed duration.
+    /// finish reporting its own <c>Exited</c>, once the run has already been given up on.
     /// </summary>
     public TimeSpan ExitTimeout { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// How long a run goes on after a fragment failed <see cref="FaultOrigin.Remote"/> - its transfer
+    /// failed under it. Its peers have this long to report their own <c>Exited</c>; when it runs out the
+    /// run, already failed, is torn down, and the verdict names the peers that had not reported (see
+    /// <see cref="RunOrchestrator.PeersOwingAReport"/>), never a fragment that is silent only because its
+    /// own peer is. A <see cref="FaultOrigin.Local"/> fault, a lost node
+    /// (<see cref="INodeRegistry.FragmentLost"/>) and the requester's cancellation each end the run on
+    /// their own, so this is only the last bound on a run that nothing else ends: a peer that stopped
+    /// answering without its node dropping, such as a consumer blocked on its sink. Keep it above
+    /// <see cref="NodeRegistryOptions.DisconnectGracePeriod"/>, or a node that is merely reconnecting
+    /// is named by its silence instead of by its loss. A run in which no fragment has failed
+    /// <see cref="FaultOrigin.Remote"/> has no clock at all: a legitimately long transfer, or a slow
+    /// consumer, is never reported failed for taking time. <see cref="Timeout.InfiniteTimeSpan"/>
+    /// removes the bound.
+    /// </summary>
+    public TimeSpan RemoteFailureGrace { get; init; } = TimeSpan.FromSeconds(60);
+
     public int BatchSize { get; init; } = 8;
     public int TransferTimeoutMs { get; init; } = 20_000;
 }
@@ -93,8 +110,11 @@ public interface IRunOrchestrator
 /// <summary>
 /// The barrier. Admits a run only once every fragment it names has registered (<see cref="AdmissionGate"/>),
 /// launches all of them, opens each declared edge once both endpoints report ready, then waits out
-/// the data-transfer phase (bounded only by <see cref="INodeRegistry.FragmentLost"/>, a fragment
-/// reporting its own failure, or the caller's own cancellation, never a fixed duration) and applies the outcome rule (<see cref="DetermineOutcome"/>).
+/// the data-transfer phase and applies the outcome rule (<see cref="DetermineOutcome"/>). That phase ends
+/// when every fragment has reported, or is given up on: a fragment lost (<see cref="INodeRegistry.FragmentLost"/>),
+/// a fragment's own local failure, the caller's cancellation, or - once a fragment has failed
+/// <see cref="FaultOrigin.Remote"/> - <see cref="RunOrchestratorOptions.RemoteFailureGrace"/> for its peers to
+/// report. A run in which nothing has failed has no clock.
 /// One run in flight at a time: a second call to <see cref="RunAsync"/> is refused outright, not
 /// queued - concurrent runs are not supported yet.
 /// </summary>
@@ -116,6 +136,7 @@ public sealed class RunOrchestrator : IRunOrchestrator
     private Dictionary<string, TaskCompletionSource>? _ready;
     private Dictionary<string, TaskCompletionSource<FragmentExitReport>>? _exited;
     private CancellationTokenSource? _abort;
+    private TaskCompletionSource? _remoteFailure;
 
     public RunOrchestrator(
         AdmissionGate admission,
@@ -151,13 +172,16 @@ public sealed class RunOrchestrator : IRunOrchestrator
             _exited = spec.Fragments.ToDictionary(
                 p => p.FragmentName, _ => new TaskCompletionSource<FragmentExitReport>(TaskCreationOptions.RunContinuationsAsynchronously),
                 StringComparer.Ordinal);
+            _remoteFailure = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
+            var fragmentNames = spec.Fragments.Select(p => p.FragmentName).ToList();
             using var abort = CancellationTokenSource.CreateLinkedTokenSource(ct);
             _abort = abort;
             string? lostFragment = null;
             string? wiringFailure = null;
             var launched = new HashSet<string>(StringComparer.Ordinal);
             var cancelledFragments = new HashSet<string>(StringComparer.Ordinal);
+            var unresponsive = new HashSet<string>(StringComparer.Ordinal);
             var openTransfers = new List<string>();
             Dictionary<string, Guid>? clientIdByFragment = null;
 
@@ -277,12 +301,38 @@ public sealed class RunOrchestrator : IRunOrchestrator
                     }
                 }
 
-                // Execution: no coordinator-side wall clock (the design's own three-clock table) -
-                // bounded only by the abort a FragmentLost, a fragment's own local failure or the
-                // requester's own ct raises.
+                // Execution: nothing times a run in which no fragment has failed. It ends when every
+                // fragment has reported, or by the abort a FragmentLost, a fragment's own local failure or
+                // the requester's own ct raises - or, once a fragment has failed Remote, when its peers
+                // have not reported within RemoteFailureGrace: the run is then torn down, and the verdict
+                // names the fragments that had not reported, never the ones that failed because of them.
                 if (!abort.IsCancellationRequested)
                 {
-                    try { await Task.WhenAll(_exited.Values.Select(t => t.Task)).WaitAsync(abort.Token); }
+                    try
+                    {
+                        var allExited = Task.WhenAll(_exited.Values.Select(t => t.Task));
+                        var remoteFailure = _remoteFailure.Task;
+                        if (await Task.WhenAny(allExited, remoteFailure).WaitAsync(abort.Token) == remoteFailure && !allExited.IsCompleted)
+                        {
+                            try { await allExited.WaitAsync(_options.RemoteFailureGrace, abort.Token); }
+                            catch (TimeoutException)
+                            {
+                                var reported = fragmentNames.Where(f => _exited[f].Task.IsCompleted).ToHashSet(StringComparer.Ordinal);
+                                var failedRemotely = fragmentNames
+                                    .Where(f => _exited[f].Task.IsCompletedSuccessfully && _exited[f].Task.Result.Origin == FaultOrigin.Remote)
+                                    .ToHashSet(StringComparer.Ordinal);
+                                unresponsive.UnionWith(PeersOwingAReport(spec.Edges, failedRemotely, reported));
+                                _logger.LogWarning(
+                                    "Run {RunId}: {Fragments} did not report within {Grace} of a fragment failing remotely; tearing the run down",
+                                    spec.RunId, string.Join(", ", fragmentNames.Where(f => !reported.Contains(f))), _options.RemoteFailureGrace);
+                                abort.Cancel();
+                            }
+                        }
+                        else
+                        {
+                            await allExited.WaitAsync(abort.Token);
+                        }
+                    }
                     catch (OperationCanceledException) { /* falls through to the teardown below */ }
                 }
 
@@ -298,17 +348,17 @@ public sealed class RunOrchestrator : IRunOrchestrator
                 _nodeRegistry.FragmentLost -= OnFragmentLost;
             }
 
-            var fragmentNames = spec.Fragments.Select(p => p.FragmentName).ToList();
             var reports = fragmentNames
                 .Where(f => _exited[f].Task.IsCompletedSuccessfully)
                 .ToDictionary(f => f, f => _exited[f].Task.Result, StringComparer.Ordinal);
 
-            return DetermineOutcome(reports, spec.Edges, fragmentNames, cancelledFragments, ct.IsCancellationRequested, wiringFailure);
+            return DetermineOutcome(reports, spec.Edges, fragmentNames, cancelledFragments, ct.IsCancellationRequested, wiringFailure, unresponsive);
         }
         finally
         {
             _activeRunId = null;
             _abort = null;
+            _remoteFailure = null;
             _ready = null;
             _exited = null;
             _singleRun.Release();
@@ -409,6 +459,10 @@ public sealed class RunOrchestrator : IRunOrchestrator
         FaultOrigin? parsedOrigin = exitCode == 0 ? null : Enum.Parse<FaultOrigin>(origin);
         tcs.TrySetResult(new FragmentExitReport(fragment, exitCode, parsedOrigin, firstFault, rowCounts));
 
+        // A fragment whose transfer failed under it is not the cause of anything yet: its peers owe the
+        // run their own report, within RemoteFailureGrace.
+        if (parsedOrigin == FaultOrigin.Remote) _remoteFailure?.TrySetResult();
+
         // A fragment whose own process failed has decided the run: the verdict is Failed whatever
         // its peers do next. Waiting for them to notice would leave a peer with nothing to write
         // (an aggregate over a slow source) holding the verdict until its source ends, since the
@@ -434,6 +488,27 @@ public sealed class RunOrchestrator : IRunOrchestrator
         }).ToList();
 
     /// <summary>
+    /// Pure. The fragments to name when the grace after a remote failure runs out: those that have not
+    /// reported and share an edge with a fragment that failed <see cref="FaultOrigin.Remote"/>, the peers it
+    /// was waiting on. A fragment silent only because its own peer is (the far end of a chain whose middle is
+    /// stuck), or on a branch the failure never touched, is not named, though the teardown cancels it too.
+    /// Empty when no such peer is left: the cause then follows the ordinary rule.
+    /// </summary>
+    internal static IReadOnlySet<string> PeersOwingAReport(
+        IReadOnlyList<RunEdge> edges, IReadOnlySet<string> failedRemotely, IReadOnlySet<string> reported)
+    {
+        var owing = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var edge in edges)
+        {
+            if (failedRemotely.Contains(edge.ProducerFragment) && !reported.Contains(edge.ConsumerFragment))
+                owing.Add(edge.ConsumerFragment);
+            if (failedRemotely.Contains(edge.ConsumerFragment) && !reported.Contains(edge.ProducerFragment))
+                owing.Add(edge.ProducerFragment);
+        }
+        return owing;
+    }
+
+    /// <summary>
     /// Pure. <paramref name="reports"/> is partial by construction - a fragment absent from it never
     /// reported <c>Exited</c>, whether it went silent or the coordinator gave up waiting on it after
     /// a teardown - so <paramref name="allFragments"/> is required to tell that apart from "every
@@ -451,7 +526,10 @@ public sealed class RunOrchestrator : IRunOrchestrator
     /// own exit code is 130 reports the whole run as cancelled (root <c>CLAUDE.md</c>'s convention),
     /// same as <paramref name="requesterCancelled"/> itself. A <paramref name="wiringFailure"/> - the hub
     /// could not open an edge's transfer - is the cause, as a message, unless a fragment went silent or
-    /// one reports a local fault of its own.
+    /// one reports a local fault of its own. A fragment in <paramref name="unresponsive"/> - one that had not
+    /// reported when <see cref="RunOrchestratorOptions.RemoteFailureGrace"/> ran out - counts as silent even
+    /// when it reported afterwards, once told to cancel: that report is a consequence of the teardown, and
+    /// the fragments that failed remotely because of it are its consequences, not the cause.
     /// </summary>
     internal static RunResult DetermineOutcome(
         IReadOnlyDictionary<string, FragmentExitReport> reports,
@@ -459,11 +537,14 @@ public sealed class RunOrchestrator : IRunOrchestrator
         IReadOnlyList<string> allFragments,
         IReadOnlySet<string> coordinatorCancelled,
         bool requesterCancelled,
-        string? wiringFailure = null)
+        string? wiringFailure = null,
+        IReadOnlySet<string>? unresponsive = null)
     {
         var edgeCounts = BuildEdgeCounts(reports, edges);
 
-        var silent = allFragments.Where(f => !reports.ContainsKey(f) && !coordinatorCancelled.Contains(f)).ToList();
+        var silent = allFragments
+            .Where(f => (!reports.ContainsKey(f) || unresponsive?.Contains(f) == true) && !coordinatorCancelled.Contains(f))
+            .ToList();
         var organicFaults = reports.Values.Where(r => r.ExitCode != 0 && !coordinatorCancelled.Contains(r.Fragment)).ToList();
 
         if (requesterCancelled)

@@ -130,12 +130,19 @@ in flight throws instead of queuing.
   handshake. A `null` `DisconnectedAtUtc` is what "currently reachable" means; a `ConnectionId` is
   never trusted while that field is set, even though the record survives past it for TransportR's own
   (much longer) grace period.
-- **The data-transfer phase has no coordinator-side wall clock.** The design's own three-clock table
-  names none for it, only node liveness - a legitimately long transfer must not be reported failed for
-  outliving a fixed duration. `RunOrchestratorOptions.ExitTimeout` therefore bounds only the
-  *teardown's* wait for an already-cancelled or already-terminated fragment to finish reporting, never
-  the happy path: that wait is bounded solely by `abort.Token` (the requester's own cancellation,
-  `FragmentLost`, or a fragment's own failure reported by `Exited`).
+- **A run in which no fragment has failed has no coordinator-side clock; a remote failure starts one.** A
+  legitimately long transfer, or a slow consumer, must not be reported failed for taking time, so the
+  transfer phase is bounded only by `abort.Token`: the requester's own cancellation, `FragmentLost`, or a
+  fragment's own *local* failure reported by `Exited`. A fragment that fails `FaultOrigin.Remote` - its
+  transfer failed under it - has not decided the run, but its peers now owe their own report within
+  `RunOrchestratorOptions.RemoteFailureGrace`. When it runs out the run, already failed, is torn down
+  and every fragment is told to cancel, but the verdict names only the *peers* of the failed fragment
+  that had not reported (`PeersOwingAReport`, then `DetermineOutcome`'s `unresponsive`, even if they
+  report once told to cancel): never the fragment that failed because of them, a fragment silent only
+  because its own peer is, or one on a branch the failure never touched. Keep the grace above
+  `NodeRegistryOptions.DisconnectGracePeriod`, so a lost node is named by its loss and not by its
+  silence. `ExitTimeout` bounds only the *teardown's* wait for an already-cancelled or
+  already-terminated fragment to finish reporting. `[local: RemoteFailureGraceTests, RunOrchestratorTests]`
 - **On teardown, every launched fragment still running is told to `Cancel`** after
   `ITransferTerminator.TerminateAsync` has ended each open transfer. A torn-down transfer faults a
   fully wired fragment only once one of its relays touches it, which never happens while its child
@@ -168,6 +175,24 @@ period is the path of a node that dies without saying so, the harder case, which
 also exists for: a peer that stops responding without ever closing anything. No in-process test can
 drop a node's connection without going through its own disposal, so `NodeRegistryTests` alone covers
 the grace.
+
+## State and availability
+
+- **The coordinator is not highly available.** Its state - the node registry, the plans, the run in
+  flight - and TransportR's own (the default in-memory store) live in the process: a restart loses
+  all of it, and the transfers it carried are gone. **Nothing reconstructs that state from what the
+  nodes do next**: a node registering again is an ordinary registration, never evidence of a run, and
+  no message tells a node to drop what it holds on a guess. A coordinator restart is an operator
+  event: the operator restarts the node hosts, which kills their fragment children. High
+  availability would be a mode of its own, with the state held in an external persistent store
+  (TransportR's hub is highly available only with its Redis store and sticky sessions, and even then
+  its transfers are local to the instance), designed as such rather than inferred from reconnections.
+  `[local: tools/campaign.py F4 — hosts come back, the reset leaves nothing running]`
+- **A node's token is checked when a transfer opens, not while the node sits idle.** A deployed
+  pipeline left idle past its nodes' token lifetime has its next run refused (`could not be opened
+  by the hub`) until its nodes are recreated: redeploying it does that, with a fresh token. Keep the
+  token lifetime above the longest time a deployment sits idle (the lab issues 12 hours).
+  `[local: tools/campaign.py S5]`
 
 ## Versions
 

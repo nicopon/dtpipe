@@ -305,4 +305,106 @@ public class RunOrchestratorTests
         Assert.Equal("A", result.Cause);
         Assert.Equal(["B"], result.Consequences);
     }
+
+    /// <summary>
+    /// The grace after a remote failure ran out on B, which never reported on its own: it is the cause, even though it
+    /// reported (a remote exit) once the teardown told it to cancel, and A - which failed remotely because of it - is its
+    /// consequence. Without B in the unresponsive set, the first remote report in plan order (A) would be named instead.
+    /// </summary>
+    [Fact]
+    public void AFragmentThatDidNotReportWithinTheGrace_IsTheCause_NotTheFragmentThatFailedBecauseOfIt()
+    {
+        var edges = new[] { new RunEdge("A", "out", "B", "in") };
+        var reports = new Dictionary<string, FragmentExitReport>
+        {
+            ["A"] = Failed("A", FaultOrigin.Remote),
+            ["B"] = Failed("B", FaultOrigin.Remote),
+        };
+
+        var withoutTheSet = RunOrchestrator.DetermineOutcome(reports, edges, ["A", "B"], NoneCancelled, requesterCancelled: false);
+        var result = RunOrchestrator.DetermineOutcome(
+            reports, edges, ["A", "B"], NoneCancelled, requesterCancelled: false, unresponsive: new HashSet<string> { "B" });
+
+        Assert.Equal("A", withoutTheSet.Cause);
+        Assert.False(withoutTheSet.CauseIsUnresponsive);
+        Assert.Equal(RunOutcome.Failed, result.Outcome);
+        Assert.Equal("B", result.Cause);
+        Assert.True(result.CauseIsUnresponsive);
+        Assert.Equal(["A"], result.Consequences);
+    }
+
+    /// <summary>An empty set changes nothing: a run that never needed the grace is judged as before.</summary>
+    [Fact]
+    public void NoUnresponsiveFragment_LeavesTheOutcomeRuleUntouched()
+    {
+        var edges = new[] { new RunEdge("A", "out", "B", "in") };
+        var reports = new Dictionary<string, FragmentExitReport>
+        {
+            ["A"] = Failed("A", FaultOrigin.Remote),
+            ["B"] = Failed("B", FaultOrigin.Remote),
+        };
+
+        var plain = RunOrchestrator.DetermineOutcome(reports, edges, ["A", "B"], NoneCancelled, requesterCancelled: false);
+        var empty = RunOrchestrator.DetermineOutcome(
+            reports, edges, ["A", "B"], NoneCancelled, requesterCancelled: false, unresponsive: new HashSet<string>());
+
+        Assert.Equal(plain.Cause, empty.Cause);
+        Assert.Equal(plain.Consequences, empty.Consequences);
+        Assert.Equal(plain.CauseIsUnresponsive, empty.CauseIsUnresponsive);
+    }
+
+    private static IReadOnlySet<string> Set(params string[] names) => new HashSet<string>(names);
+
+    /// <summary>
+    /// A chain A -> B -> C whose middle is stuck: A failed because of B, and C is silent only because B is. B alone is
+    /// named, even with the victim listed first in the plan.
+    /// </summary>
+    [Fact]
+    public void TheStuckMiddleOfAChain_IsNamed_NotTheFragmentThatWaitsOnIt()
+    {
+        var edges = new[] { new RunEdge("A", "out", "B", "in"), new RunEdge("B", "out", "C", "in") };
+
+        var owing = RunOrchestrator.PeersOwingAReport(edges, failedRemotely: Set("A"), reported: Set("A"));
+        var reports = new Dictionary<string, FragmentExitReport>
+        {
+            ["A"] = Failed("A", FaultOrigin.Remote),
+            ["B"] = Failed("B", FaultOrigin.Remote),
+            ["C"] = Failed("C", FaultOrigin.Remote),
+        };
+        var result = RunOrchestrator.DetermineOutcome(reports, edges, ["A", "C", "B"], NoneCancelled, requesterCancelled: false, unresponsive: owing);
+
+        Assert.Equal(Set("B"), owing);
+        Assert.Equal("B", result.Cause);
+        Assert.True(result.CauseIsUnresponsive);
+    }
+
+    /// <summary>A branch the failure never touched is not named, however long its fragments take.</summary>
+    [Fact]
+    public void AnIndependentBranchStillRunning_IsNeverNamed()
+    {
+        var edges = new[] { new RunEdge("A", "out", "B", "in"), new RunEdge("Y", "out", "Z", "in") };
+
+        var owing = RunOrchestrator.PeersOwingAReport(edges, failedRemotely: Set("A"), reported: Set("A"));
+
+        Assert.Equal(Set("B"), owing);
+    }
+
+    /// <summary>The failed fragment may be either end of its edge: its silent peer is named on both sides.</summary>
+    [Fact]
+    public void ThePeerOfAFailedFragment_IsNamedWhicheverEndItIs()
+    {
+        var edges = new[] { new RunEdge("A", "out", "B", "in") };
+
+        Assert.Equal(Set("A"), RunOrchestrator.PeersOwingAReport(edges, failedRemotely: Set("B"), reported: Set("B")));
+        Assert.Equal(Set("B"), RunOrchestrator.PeersOwingAReport(edges, failedRemotely: Set("A"), reported: Set("A")));
+    }
+
+    /// <summary>Nothing is owed when every peer of a failed fragment has reported: the ordinary cause rule applies.</summary>
+    [Fact]
+    public void WhenEveryPeerHasReported_NoFragmentIsOwing()
+    {
+        var edges = new[] { new RunEdge("A", "out", "B", "in") };
+
+        Assert.Empty(RunOrchestrator.PeersOwingAReport(edges, failedRemotely: Set("A"), reported: Set("A", "B")));
+    }
 }
