@@ -19,6 +19,12 @@ between nodes.
   `DtPipe.PipelineNode` before moving it.
 - `DefaultFlowControlService`/`FlowControlOptions` (namespace `TransportR.FlowControl`) ship inside
   the `TransportR.Hub.SignalR` package; there is no separate `TransportR.FlowControl` package.
+- **The coordinator and every `DtPipe.PipelineNode` it drives run the same TransportR version.** A
+  hub and clients of different versions interoperate, but a transfer then fails to resume after a
+  transient cut of a node's link, and nothing reports it: deploy the coordinator and the nodes
+  together. `[unchecked]`
+- **A reverse proxy in front of the hub must accept `Expect: 100-continue`.** The client sends it on
+  every write stream, and a proxy that answers `417` fails all of them. `[unchecked]`
 
 ## Hosting
 

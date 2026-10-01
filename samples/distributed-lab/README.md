@@ -16,8 +16,9 @@ libraries, exactly as their own tests do. It sits outside `DtPipe.sln`: CI never
 
 ## Quick start
 
-Prerequisites: the .NET 10 SDK, `python3`, a bash shell, the TransportR `0.1.0` packages in your
-NuGet cache (the same requirement as `DtPipe.Coordinator`), and a built binary:
+Prerequisites: the .NET 10 SDK, `python3`, a bash shell, network access to nuget.org for the
+TransportR `0.2.0` packages (restored like any other dependency of `DtPipe.Coordinator`), and a
+built binary:
 
 ```bash
 ./build.sh                          # at the repository root: produces dist/release/dtpipe
