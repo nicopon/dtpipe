@@ -120,9 +120,11 @@ def pid_of(name):
 
 
 def children():
-    """Fragment children of any host: `dtpipe --job <fragment>` processes."""
+    """Fragment children of any host: `dtpipe --job <fragment>` processes. The harness's own witness runs are told
+    apart by their directory, never by a word in the job's name (a pipeline such as campaign-f11 would be hidden)."""
     out = subprocess.run(["ps", "-axo", "pid,command"], capture_output=True, text=True).stdout
-    return [int(l.split(None, 1)[0]) for l in out.splitlines() if "release/dtpipe --job" in l and "campaign" not in l]
+    witness = os.sep + "witness" + os.sep
+    return [int(l.split(None, 1)[0]) for l in out.splitlines() if "release/dtpipe --job" in l and witness not in l]
 
 
 def fragment_states():
