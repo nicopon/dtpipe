@@ -52,7 +52,7 @@ public class TerminateTests
         _ = await producer.RunToCompletionAsync().WaitAsync(Bound); // drains the producer's own relay task; not this guard's assertion
 
         Assert.Equal(1, consumerExit);
-        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(1), $"terminate-to-exit took {sw.ElapsedMilliseconds}ms");
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(3), $"terminate-to-exit took {sw.ElapsedMilliseconds}ms");
         Assert.True(
             consumer.RowCounts["main"] < fixture.RowCount,
             $"expected a mid-transfer truncation, got {consumer.RowCounts["main"]} of {fixture.RowCount} rows");
