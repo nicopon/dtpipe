@@ -89,8 +89,9 @@ Mechanics for editing the lab. What it is and how to run it: `README.md`.
   with `--token-lifetime-seconds`. It records, it never fixes. It starts only on a bench it can judge
   (`campaign_bench.py`): only the lab's own processes, a machine with no build, test run or TransportR
   process, and the binary the hosts run starts and reports the full hash of the frozen commit with a
-  clean tracked tree. `[local: tools/campaign.py with CAMPAIGN_PREFLIGHT=report prints the checks
-  without refusing]`
+  clean tracked tree. Every call retried on `EADDRINUSE`/`EADDRNOTAVAIL` and every port-exhaustion line
+  in the lab's logs is counted into the trial's `I7`, never absorbed. `[local: tools/campaign.py with
+  CAMPAIGN_PREFLIGHT=report prints the checks without refusing]`
 - Verify a change with `./lab.sh smoke`, and a page change with `./lab.sh ui` too: it drives
   headless Chrome over the DevTools protocol (`tools/cdp.py`), because Chrome's own `--screenshot`
   stops the page before its fetches finish. `tools/cdp.py` also clicks and drags with the mouse.

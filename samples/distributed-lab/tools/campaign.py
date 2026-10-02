@@ -14,7 +14,7 @@ or CAMPAIGN_FROZEN) with a clean tree. The campaign refuses to start otherwise. 
 checks, prints what they find and plays on (the harness pass); CAMPAIGN_SKIP_PREFLIGHT=1 skips them. Standard library
 only.
 """
-import json, os, shutil, signal, subprocess, sys, tempfile, time, urllib.error
+import errno, json, os, shutil, signal, subprocess, sys, tempfile, time, urllib.error
 
 _ARGS = list(sys.argv)
 sys.argv = sys.argv[:5]  # smoke.py reads argv[1:4]; the campaign id at argv[4] is not a pass name
@@ -22,7 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import smoke as S  # noqa: E402  (reads sys.argv itself)
 from campaign_queue import queue_is_stuck  # noqa: E402
-from campaign_logs import capture as capture_logs, follow as follow_logs  # noqa: E402
+from campaign_logs import capture as capture_logs, follow as follow_logs, port_exhaustion_lines as port_lines  # noqa: E402
 import campaign_bench as bench  # noqa: E402
 import campaign_security as sec  # noqa: E402
 
@@ -35,6 +35,11 @@ TOXI = os.environ.get("TOXIPROXY_DIR", os.path.normpath(os.path.join(LAB, "..", 
 
 # A retry storm on the loopback can exhaust the ephemeral ports for a few seconds, the harness's own API calls included
 # (EADDRINUSE / EADDRNOTAVAIL): those are retried, nothing else is (a coordinator that is down must still refuse at once).
+# Every retry is counted, and so is every wait for the sockets to drain: I7 judges them, the harness never absorbs them
+# silently. `record` reads the counters.
+PORT_ERRNOS = {errno.EADDRINUSE: "EADDRINUSE", errno.EADDRNOTAVAIL: "EADDRNOTAVAIL"}
+RETRIED = {name: 0 for name in PORT_ERRNOS.values()}
+PORT_WAIT = {"seconds": 0.0, "peak_time_wait": 0}
 _raw_call = S.call
 
 
@@ -43,9 +48,12 @@ def _call(path, body=None, method=None):
         try:
             return _raw_call(path, body, method)
         except urllib.error.URLError as e:
-            if isinstance(getattr(e, "reason", None), OSError) and e.reason.errno in (48, 49) and attempt < 39:
-                time.sleep(1.0)
-                continue
+            name = PORT_ERRNOS.get(getattr(getattr(e, "reason", None), "errno", None))
+            if name:
+                RETRIED[name] += 1
+                if attempt < 39:
+                    time.sleep(1.0)
+                    continue
             raise
 
 
@@ -53,13 +61,21 @@ S.call = _call
 
 
 def wait_ports_free(timeout=90):
-    """Waits until the sockets a storm left in TIME_WAIT have drained, so the next check does not meet an exhausted range."""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        out = subprocess.run(["netstat", "-an", "-p", "tcp"], capture_output=True, text=True).stdout
-        if out.count("TIME_WAIT") < 2000:
-            return
-        time.sleep(2)
+    """Waits until the sockets a storm left in TIME_WAIT have drained, so the next check does not meet an exhausted range.
+    A wait is recorded (seconds, peak) for the trial it falls in; it is not judged."""
+    started, waited = time.time(), False
+    try:
+        while time.time() - started < timeout:
+            out = subprocess.run(["netstat", "-an", "-p", "tcp"], capture_output=True, text=True).stdout
+            waiting = out.count("TIME_WAIT")
+            if waiting < 2000:
+                return
+            waited = True
+            PORT_WAIT["peak_time_wait"] = max(PORT_WAIT["peak_time_wait"], waiting)
+            time.sleep(2)
+    finally:
+        if waited:
+            PORT_WAIT["seconds"] += time.time() - started
 
 
 BOUND = {"kill": 10, "cancel": 6, "host": 60}
@@ -227,7 +243,27 @@ def reference_ok(rec):
 
 # ------------------------------------------------------------------ trials
 
+_mark = {"retried": dict(RETRIED), "log_lines": 0}
+
+
+def judge_ports(rec):
+    """I7, the bench stays usable during the trial: no retried call on EADDRINUSE / EADDRNOTAVAIL and no port-exhaustion
+    line in the lab's logs since the previous record (the trial, its recovery and its I4 check). Recorded for every trial,
+    violated or not; a wait for the sockets to drain is recorded, not judged. The log follower reads every half second, so
+    a line can land in the next record: the campaign's total is exact, a trial's share is not."""
+    retried = {k: RETRIED[k] - _mark["retried"][k] for k in RETRIED}
+    lines = port_lines() - _mark["log_lines"]
+    _mark["retried"], _mark["log_lines"] = dict(RETRIED), _mark["log_lines"] + lines
+    rec["ports"] = {"retried": retried, "log_lines": lines}
+    if PORT_WAIT["seconds"]:
+        rec["ports"]["waited"] = {"seconds": round(PORT_WAIT["seconds"], 1), "peak_time_wait": PORT_WAIT["peak_time_wait"]}
+        PORT_WAIT.update(seconds=0.0, peak_time_wait=0)
+    if rec.get("state") != "n/a" and (sum(retried.values()) or lines):
+        rec.setdefault("inv", {})["I7"] = f"ports exhausted: {sum(retried.values())} call(s) retried {retried}, {lines} log line(s)"
+
+
 def record(rec):
+    judge_ports(rec)
     os.makedirs(OUT, exist_ok=True)
     with open(os.path.join(OUT, "trials.jsonl"), "a") as f:
         f.write(json.dumps(rec) + "\n")
@@ -849,6 +885,7 @@ def main():
             CELL_FUNCS[name]()
     finally:
         stop_logs.set()
+        print(f"ports: {sum(RETRIED.values())} call(s) retried {RETRIED}, {port_lines()} log line(s) in all", flush=True)
     return 0
 
 

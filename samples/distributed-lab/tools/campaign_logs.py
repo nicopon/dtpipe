@@ -1,8 +1,14 @@
 """The lab logs: the tail of each, taken before a recovery restarts the lab (which truncates them), and a follower that
 keeps every line, stamped, for the whole campaign."""
 import os
+import re
 import threading
 import time
+
+# The lines a lab process logs when the machine's ephemeral ports run out. Linux says "Cannot assign", macOS "Can't
+# assign": the match is on the part both share.
+PORT_EXHAUSTION = re.compile(r"assign requested address|address already in use", re.IGNORECASE)
+_port_lines = {"n": 0}
 
 
 def capture(state_dir, lines=120):
@@ -22,6 +28,11 @@ def capture(state_dir, lines=120):
         except OSError:
             continue
     return out
+
+
+def port_exhaustion_lines():
+    """How many port-exhaustion lines the follower has read so far, across every log it follows."""
+    return _port_lines["n"]
 
 
 NAMES = ("coordinator", "node-1", "node-2", "node-3", "node-4", "runner-1")
@@ -57,6 +68,8 @@ def follow(state_dir, out_dir, names=NAMES):
                     with open(os.path.join(out_dir, n + ".all"), "a") as out:
                         for line in data.decode("utf-8", "replace").splitlines():
                             out.write(f"{stamp} {line[:400]}\n")
+                            if PORT_EXHAUSTION.search(line):
+                                _port_lines["n"] += 1
                 except OSError:
                     continue
             stop.wait(0.5)
