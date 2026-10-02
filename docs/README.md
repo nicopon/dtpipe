@@ -40,6 +40,12 @@ string format and the rules that apply to every provider.
 |:---|:---|
 | [SQL Server](connections/sql-server.md) · [Oracle](connections/oracle.md) · [PostgreSQL](connections/postgresql.md) · [MySQL / MariaDB](connections/mysql.md) · [DuckDB](connections/duckdb.md) | [Files](connections/files.md) (CSV, JSONL, Parquet, Arrow, XML) · [Object storage](connections/object-storage.md) (S3, Azure Blob) |
 
+## Experimentation
+
+Running one pipeline cut into fragments on several hosts is **experimental**: the libraries behind
+it and the lab that demonstrates them may change or go away. Read
+[**Experimentation**](experimentation.md) before you try it.
+
 ## Reference
 
 These pages explain and show. When you need the exhaustive list — every flag, every option, every

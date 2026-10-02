@@ -1,0 +1,44 @@
+{
+  "name": "node-2",
+  "description": "Sales - DuckDB",
+  "clientId": "node-2",
+  "secret": "node-2-lab-secret",
+  "datasets": [
+    {
+      "variable": "LAB_SALES_DB",
+      "engine": "duck",
+      "file": "sales.duckdb",
+      "description": "orders (current year)"
+    }
+  ],
+  "bricks": [
+    {
+      "id": "orders-billable",
+      "kind": "source",
+      "title": "Orders, refunds excluded",
+      "description": "The current year's orders that count toward revenue.",
+      "branch": {
+        "input": "duck:${{LAB_SALES_DB}}",
+        "provider-options": {
+          "duck-reader": {
+            "query": "SELECT order_id, customer_id, product_id, quantity, order_date FROM orders WHERE status <> 'refunded'"
+          }
+        }
+      }
+    },
+    {
+      "id": "orders-history",
+      "kind": "source",
+      "title": "Orders, archive schema",
+      "description": "Every current order, cast to the schema the archive shares (BIGINT ids, text dates).",
+      "branch": {
+        "input": "duck:${{LAB_SALES_DB}}",
+        "provider-options": {
+          "duck-reader": {
+            "query": "SELECT CAST(order_id AS BIGINT) AS order_id, CAST(customer_id AS BIGINT) AS customer_id, CAST(product_id AS BIGINT) AS product_id, CAST(quantity AS BIGINT) AS quantity, CAST(order_date AS VARCHAR) AS order_date, status FROM orders"
+          }
+        }
+      }
+    }
+  ]
+}

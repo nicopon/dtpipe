@@ -1,0 +1,87 @@
+{
+  "name": "node-4",
+  "description": "Warehouse - DuckDB",
+  "clientId": "node-4",
+  "secret": "node-4-lab-secret",
+  "datasets": [
+    {
+      "variable": "LAB_WAREHOUSE_DB",
+      "engine": "duck",
+      "file": "warehouse.duckdb",
+      "description": "reporting tables, written by the pipelines"
+    }
+  ],
+  "bricks": [
+    {
+      "id": "dim-customers",
+      "kind": "sink",
+      "title": "dim_customers, rebuilt on each run",
+      "branch": {
+        "output": "duck:${{LAB_WAREHOUSE_DB}}",
+        "provider-options": {
+          "duck-writer": {
+            "table": "dim_customers",
+            "strategy": "Recreate"
+          }
+        }
+      }
+    },
+    {
+      "id": "customers-mirror",
+      "kind": "sink",
+      "title": "customers_mirror, upserted on customer_id",
+      "branch": {
+        "output": "duck:${{LAB_WAREHOUSE_DB}}",
+        "provider-options": {
+          "duck-writer": {
+            "table": "customers_mirror",
+            "strategy": "Upsert",
+            "key": "customer_id"
+          }
+        }
+      }
+    },
+    {
+      "id": "revenue-by-country",
+      "kind": "sink",
+      "title": "revenue_by_country, rebuilt on each run",
+      "branch": {
+        "output": "duck:${{LAB_WAREHOUSE_DB}}",
+        "provider-options": {
+          "duck-writer": {
+            "table": "revenue_by_country",
+            "strategy": "Recreate"
+          }
+        }
+      }
+    },
+    {
+      "id": "fact-orders",
+      "kind": "sink",
+      "title": "fact_orders, rebuilt on each run",
+      "branch": {
+        "output": "duck:${{LAB_WAREHOUSE_DB}}",
+        "provider-options": {
+          "duck-writer": {
+            "table": "fact_orders",
+            "strategy": "Recreate"
+          }
+        }
+      }
+    },
+    {
+      "id": "sensor-readings",
+      "kind": "sink",
+      "title": "sensor_readings, rebuilt on each run",
+      "branch": {
+        "output": "duck:${{LAB_WAREHOUSE_DB}}",
+        "provider-options": {
+          "duck-writer": {
+            "table": "sensor_readings",
+            "strategy": "Recreate"
+          }
+        }
+      }
+    }
+  ]
+}

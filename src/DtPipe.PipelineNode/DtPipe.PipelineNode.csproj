@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DtPipe.PipelineNode.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="TransportR" Version="0.3.1" />
+    <PackageReference Include="TransportR.Client.SignalR" Version="0.3.1" />
+    <PackageReference Include="TransportR.Serialization.MessagePack" Version="0.3.1" />
+  </ItemGroup>
+
+</Project>

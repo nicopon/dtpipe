@@ -105,7 +105,8 @@ set +e
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "two branches sharing a contract path were accepted"
-grep -q "claimed by both branch" "$A/shared.log" || fail "the refusal does not name the collision"
+# The message wraps at the console width, and a repository path with a space wraps inside the sentence.
+tr '\n' ' ' < "$A/shared.log" | tr -s ' ' | grep -q "claimed by both branch" || fail "the refusal does not name the collision"
 [ -f "$A/shared.json" ] && fail "a refused pipeline still wrote a contract"
 pass "refused, named, and nothing written"
 

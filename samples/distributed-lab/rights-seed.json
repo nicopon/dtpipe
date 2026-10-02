@@ -1,0 +1,17 @@
+{
+  "identities": [
+    { "clientId": "node-1", "displayName": "CRM node", "secret": "node-1-lab-secret", "group": "crm", "node": "node-1" },
+    { "clientId": "node-2", "displayName": "Sales node", "secret": "node-2-lab-secret", "group": "sales", "node": "node-2" },
+    { "clientId": "node-3", "displayName": "Catalog node", "secret": "node-3-lab-secret", "group": "catalog", "node": "node-3" },
+    { "clientId": "node-4", "displayName": "Warehouse node", "secret": "node-4-lab-secret", "group": "warehouse", "node": "node-4" },
+    { "clientId": "runner-1", "displayName": "Runner", "secret": "runner-1-lab-secret", "group": "runner", "node": "runner-1" }
+  ],
+  "matrix": {
+    "crm": ["catalog", "warehouse", "runner"],
+    "sales": ["catalog", "warehouse", "runner"],
+    "catalog": ["warehouse", "runner"],
+    "runner": ["warehouse"],
+    "warehouse": []
+  },
+  "brickPolicies": {}
+}

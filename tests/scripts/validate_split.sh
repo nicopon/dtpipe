@@ -288,4 +288,17 @@ grep -qF "duck" orphan.out || fail "the refusal does not name the block it canno
 pass "it names the block rather than choosing a side"
 
 echo ""
+echo "--- Case 16: a single branch is found under its own name ---"
+# A one-branch job runs on the linear path, which carries no alias: its sample report has to be
+# filed under the name the job gives the branch, or split finds no stage on it at all.
+"$DTPIPE" -i csv:people.csv --alias people --project id,email -o csv:named.csv \
+          --export-job named.yaml > /dev/null 2>&1 || fail "could not export the named single-branch job"
+"$DTPIPE" split named.yaml > named.out 2>&1 || fail "split found no stage on a single branch named 'people'"
+grep -qF '│ 1 │' named.out || fail "the project stage is not offered as a cut point"
+"$DTPIPE" split named.yaml --at 1 --out named --acknowledge > /dev/null 2>&1 \
+    || fail "split could not cut the single branch named 'people'"
+grep -q '^people:' named-producer.yaml || fail "the producer half lost the branch's name"
+pass "a single branch named 'people' is sampled and cut under its name"
+
+echo ""
 echo -e "${GREEN}All split checks passed.${NC}"

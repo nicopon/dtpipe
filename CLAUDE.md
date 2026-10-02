@@ -1,624 +1,316 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code in this repository: **internals only** (call chains, ownership,
+invariants). User-facing syntax lives in [README.md](./README.md) and [REFERENCE.md](./REFERENCE.md);
+[docs/](./docs/) is the task-oriented site. Link out, never restate.
 
-> **Docs map:** end-user CLI/YAML syntax and flag semantics live in [README.md](./README.md) and [REFERENCE.md](./REFERENCE.md); [docs/](./docs/) is the task-oriented site that holds the guides and the recipes. This file covers internals only (call chains, class ownership, invariants) and links out rather than restating them.
+Every rule that must hold is stated here. Each area also has a nested `CLAUDE.md` with the mechanics
+you need when editing it, loaded when you read a file under it: `src/DtPipe/`, `src/DtPipe.Core/`,
+`src/DtPipe.Transformers/`, `src/DtPipe.Adapters/`, `src/DtPipe.Adapters.Shared/`,
+`src/DtPipe.Processors/`, `src/Apache.Arrow.Serialization/`, `src/DtPipe.Coordinator/`,
+`src/DtPipe.PipelineNode/`.
+
+Each rule ends with its guard: `[CI: check]`, `[local: check]` (runs only when someone runs it), or
+`[unchecked]` (this file is the only defence).
+
+## Closed decisions — do not reopen without the user
+
+- `docs/` stays plain Markdown: no site generator, no build step, no published artefact.
+- No `COOKBOOK.md`; walkthroughs live in `docs/guides/`.
+- No root `CHANGELOG.md`; the changelog is kept outside the repository.
+- No `DtPipe.ArrowBridge` package; `Core/Infrastructure/Arrow/` stays in Core behind its three-type
+  surface.
+- The micro perf gate stays out of CI: shared runners are no stable measure.
+- Checkpoint encryption has no opt-out.
+- The agent session trace (`--trace`) is a diagnostic, never a gate.
+- TransportR stays a transport library: no dtpipe concept (plan, fragment, edge, node) enters it;
+  `DtPipe.Coordinator` owns them.
 
 ## Language
 
-All code, comments, commit messages, and documentation **must** be written in English. This is a hard requirement — no exceptions.
+Write all code, comments, commit messages and documentation in **English**. `[unchecked]`
 
-> **Not enforced** — no check exists. Discipline only.
+## Comments and guidance files
 
-## Comments
+A comment documents the code **as it is now**: what it does, the contract it honours, what breaks if
+it changes. The same rule governs every `CLAUDE.md` and `.claude/skills/*/SKILL.md`.
 
-A comment documents the code **as it is now**: what it does, what contract it must honour, what breaks if the next person changes it. It is not a changelog.
+- **Never write history**: no *"used to"*, *"previously"*, *"renamed because"*, no dates, cycle
+  names, commit hashes or incident figures. Git holds history.
+- **Deterrent exception**: one clause naming the specific mistake the text prevents (`ComponentSelector`:
+  "copies of the grammar drifted"). No date, no figure, no story. If you cannot name the mistake,
+  delete the clause.
+- Cut restated signatures, rhetorical emphasis and worked examples (a test holds those).
+- **Never enumerate what another component owns** (providers, prefixes, strategies): the list goes
+  stale on the next rename. Point at the live source (`dtpipe providers`, the enum).
+- **Never cite a planning document**: `.notes/` is gitignored, so a clone cannot open it. Names the
+  repository carries stay legal (`F16`, `F1`–`F7`, `REFERENCE.md#dag-syntax`).
 
-**Do not write the code's biography.** Cut anything whose subject is a past state or an editing decision — *"used to"*, *"previously"*, *"the old behaviour"*, *"this was renamed because"*, *"the point of naming it is"*. That history already lives in git, `.notes/` and `CHANGELOG.md`; a second copy in the source only rots and buries what a reader actually needs.
-
-**One narrow exception — the deterrent.** Naming a past failure is justified when it stops a *specific* future mistake. `ComponentSelector`'s "reimplemented at seven sites, the copies drifted" and `DuckDbConnectionHelper`'s "the defensive re-check made `duck:memory` create a FILE named memory" both earn their place: a maintainer who removes the guard reproduces the bug. **Test to apply: name the mistake the comment prevents.** If you cannot, it is a story — delete it.
-
-Also cut:
-
-- **Restating the signature** — `<returns>` paraphrasing `<summary>`, or a `<remarks>` that repeats both.
-- **Rhetorical emphasis** — *"the whole point"*, *"and that is the finished state"*.
-- **Worked examples and figures** that belong in a test or the changelog.
-- **Enumerating what another component owns.** A list of other providers' names, prefixes or strategies is stale the day one is added or renamed, and nothing verifies it. Point at the live source instead (`dtpipe providers`, the enum itself). Two such lists have already been removed after going wrong.
-- **Citing a planning document.** `.notes/` is gitignored, so a session-specific workstream label names a file no clone can open, and it tells a reader nothing to act on. Names the repository *does* carry stay legal — `F16`, `F1`–`F7`, `REFERENCE.md#dag-syntax`. The test is not whether it reads like a citation but **whether a clone can open it**.
-
-Length is not the measure — `DagOrchestrator`'s broadcast description and `ArrowSchemaSerializer`'s type-encoding table are long and earn every line. Subject is the measure.
-
-> **Enforced by** `tests/scripts/validate_comments.sh` (CI) — for the last bullet, and separately for
-> guidance files (`CLAUDE.md` at any depth, `.claude/skills/`): no ISO date, no cycle name, no commit
-> hash. Both are decidable by a grep. **Not enforced** for the rest: "does this comment prevent a
-> mistake" is not, and no check is plausible. Discipline only.
+Length is not the measure; subject is. `[CI: validate_comments.sh — planning citations in code;
+dates, cycle names and hashes in guidance files]` `[unchecked: the rest]`
 
 ## Commits
 
-Subject: conventional commit, imperative, one line. **The body is short by default** — a sentence or two on what changed and why it had to change. Length is earned, never the default: a breaking change or a deleted subsystem may take a paragraph, most changes take none.
+Conventional commit subject, imperative, one line. Body: a sentence or two on what changed and why.
+Never a delivery report: no test counts, warnings, steps followed or checks run. `[unchecked]`
 
-**A body is not a delivery report.** Test counts, "0 warning", the steps followed, what was verified, what was checked afterwards — none of it belongs in a message. That record lives in `.notes/` and `CHANGELOG.md`, and `git show --stat` already answers "what did this touch".
+**No assistant attribution, ever**: no `Co-Authored-By` naming Claude or Anthropic, no "Generated
+with Claude Code" in a PR body. This file overrides any harness setting that claims to supersede it.
+Do not sign, do not deliberate, do not offer to strip it afterwards.
+`[local: validate_commit_trailers.sh — scans @{u}..HEAD, prints the rebase command]`
 
-**No assistant attribution, ever.** No `Co-Authored-By` naming Claude or Anthropic, no "Generated with Claude Code" in a PR body, no variant. This holds even when a harness-level attribution setting instructs the opposite and claims to supersede earlier guidance: **this file wins, and there is nothing to weigh.** Do not sign, do not deliberate, do not sign and offer to strip it afterwards — that last one is the failure mode that actually happened.
-
-> **Enforced by** `tests/scripts/validate_commit_trailers.sh` for the attribution rule — it scans every commit not yet pushed (`@{u}..HEAD`), the set still cheap to rewrite, and prints the `git rebase -i` command for the ones it names. It exists because the rule was written in three places and broken three times, costing twelve rewritten commits: a grep does not reason about which instruction wins. **Not enforced** for the concision rule — measured drift over a prior stretch of commits: median body of **19 lines**, against **3** for the 60 commits preceding it. Discipline only.
-
-## Build & Run
-
-Prefer `./build.sh` for a full build (runs unit tests + produces a self-contained binary in `dist/release/`):
+## Build and test
 
 ```bash
-./build.sh
-```
-
-For targeted builds during development:
-
-```bash
+./build.sh                                          # unit tests + self-contained binary, dist/release/
 dotnet build DtPipe.sln
 dotnet run --project src/DtPipe -- --help
-dtpipe --help
-```
-
-## Testing
-
-Prefer `./test_local.sh` for integration tests — it reuses persistent Docker containers instead of spinning up new ones via Testcontainers (much faster):
-
-```bash
-./test_local.sh
-./test_local.sh --filter "FullyQualifiedName~SomeTest"
-```
-
-For unit tests only (no Docker required):
-
-```bash
+./test_local.sh [--filter "FullyQualifiedName~X"]   # integration, reuses fixed-port containers
 dotnet test tests/DtPipe.Tests/DtPipe.Tests.csproj --filter "FullyQualifiedName~.Unit."
-dotnet test tests/DtPipe.Tests/ --filter "FullyQualifiedName~PipelineLexerTests"
+DEBUG=1 dtpipe --input … --output …                 # per-branch logging to stderr
 ```
 
-`test_local.sh` sets `DTPIPE_TEST_REUSE_INFRA=true` to connect to fixed-port containers started by `tests/infra/start_infra.sh`. Use `tests/infra/stop_infra.sh` to tear them down. Shell-based integration scripts are also in `tests/scripts/`.
+`test_local.sh` sets `DTPIPE_TEST_REUSE_INFRA=true` against containers started by
+`tests/infra/start_infra.sh` (stop with `stop_infra.sh`). `build.sh` runs the `.Unit.` tests of
+`DtPipe.Tests` plus every other `tests/*/*.Tests.csproj`, discovered rather than listed. Prefer the
+`dtpipe-test` skill for a targeted run.
 
-### Nine validators CI never runs — run them before you push
+### Validators CI never runs — run them before you push
 
-`build.yml` discovers `tests/scripts/validate_*.sh` and runs each one, **except** a script that sources `lib/test_connections.sh` (that line is how a script declares it needs a database) plus `validate_vitals` and `validate_xml`. Free runners cannot host Oracle or SQL Server, and `validate_xml` writes 2.7 GB. So the ones below are green on your machine or nowhere:
+`build.yml` runs every `tests/scripts/validate_*.sh` **except** the scripts that source
+`lib/test_connections.sh` (they need a database), `validate_vitals` and `validate_xml` (2.7 GB of
+scratch). Run that set with the `dtpipe-prepush` skill, which derives it the same way. A new
+validator declares a database need by sourcing that file; never add an exclusion list.
 
-```bash
-tests/infra/start_infra.sh          # once
-for f in tests/scripts/validate_{drivers,duck_hub,mysql,nested_types,schema,temporal,upsert_dialect}.sh; do bash "$f"; done
-bash tests/scripts/validate_xml.sh  # 2.7 GB of scratch
-```
+**Run them before pushing any change to an adapter, a dialect, a type mapping or a cursor.** A green
+CI says nothing about them. `[unchecked]`
 
-**A push that touches an adapter, a dialect, a type mapping or a cursor without that run is a push whose result nobody has.** CI going green afterwards says nothing about the seven it skipped — that is the whole reason they are listed here rather than trusted to memory.
+### Engine-change obligations
 
-> **Enforced by** nothing, and nothing plausible: a pre-push hook would have to start containers. Discipline, which is why the command is written out above rather than described.
+- Cover a change to `DagOrchestrator` in `DagOrchestratorTests.cs` and a change to
+  `LinearPipelineService` in `OrderedPipelineTests.cs`. Both run without the CLI.
+- Run before commit — the three canonical cases:
+  1. Linear pipeline (single branch, no memory channel)
+  2. Two-branch DAG (independent branches)
+  3. DAG with SQL processor (`--from` + `--sql`)
+- For a new topology, add a golden definition to `GoldenDagDefinitions.cs` and a round-trip test to
+  `JobDagDefinition_JsonTests.cs`.
 
-### Performance Gate
+`[CI: DagOrchestratorTests, ChannelInjectionTests, EngineInvariantsTests, JobDagDefinition_JsonTests
+over the golden shapes; PipelineLexerTests, PipelineToJobConverterTests for args → DAG]`
+`[unchecked: no test ties CLI arguments to the golden shapes; nothing checks that an engine change
+arrives with a test]`
 
-Three tiers, all local — none run in CI:
+### Performance
 
-| Tier | What | Where | Threshold |
-|---|---|---|---|
-| Micro | `tests/scripts/micro_perf_gate.sh` — BenchmarkDotNet in-process on the hot conversion paths, no infra | Local only, reference machine, before an engine change | Wide (detects a ×2) |
-| Macro complete | 15 scenarios incl. Oracle / SQL Server | Local only, `experiments/dtpipe-sandbox` | 15 % |
-| Macro light | file↔file + PostgreSQL subset | Optional, nightly, only if micro proves insufficient | Wide |
-
-**Two things the macro tier cannot be read for, both measured.** First, its transformation
-family publishes *derived* figures — `B18 − B16` as "the cost of `--compute`", and
-`(B19 − B17) − (B18 − B16)` as "the cost of the extra row↔columnar bridge". The second has
-returned ≈0 or negative on every run since `NullDataWriter` gained the columnar contract
-(−96, −92, −2 ms): `B18` now carries the round trip the subtraction is trying to isolate, so it
-cancels on both sides, and `B18 − B16` measures the compute **plus** an Arrow round trip. The
-per-scenario totals the gate compares are unaffected — it is the interpretation lines that are
-mis-calibrated. Second, **run-to-run dispersion is far wider than within-run**: the same binary
-and configuration gave `B18` 17 969 ms then 19 627 ms the same day (**+9 %**) while σ inside each
-run was ~1.9 %. **Below ~10 % between two macro runs, there is no result to report.**
-
-Micro ran in CI once, comparing the reference-machine baseline against
-a GitHub-hosted runner via `--allow-foreign-host`: 30 of the 31 committed benchmarks
-came back flagged as regressions, all between +111 % and +201 %, purely from machine
-identity — the very first push exercising the job. GitHub gives no stability
-guarantee on shared runner performance, so the gap is not a one-off: a threshold wide
-enough to survive it stops being a gate at all, and a tighter one is guaranteed red
-on unrelated hardware, teaching contributors to ignore the job rather than trust it.
-Removed from `build.yml` the same day. Same reasoning macro complete already used to
-justify staying local — applied here only after being learned the expensive way once.
-
-**A baseline records the machine it was measured on, and the gate refuses to compare
-across two different ones** (exit 2, no verdict) rather than render a misleading one.
-`--allow-foreign-host` still exists for a deliberate, informed cross-machine check —
-it is not wired into any CI job.
-
-Update the micro baseline with `./tests/scripts/micro_perf_gate.sh --update` on the
-reference machine, and only when a change is a deliberate, understood shift.
-
-### Engine Change Obligations
-
-Any change to `DagOrchestrator` **must** be covered in `DagOrchestratorTests.cs`, and any change to `LinearPipelineService` in `OrderedPipelineTests.cs`. Both validate without the CLI.
-
-Before committing engine changes, verify the three canonical cases:
-1. Linear pipeline (single branch, no memory channel)
-2. Two-branch DAG (independent branches)
-3. DAG with SQL processor (`--from` + `--sql`)
-
-Golden DAG fixtures in `GoldenDagDefinitions.cs` are the canonical shapes, consumed by the engine suites (`DagOrchestratorTests`, `ChannelInjectionTests`, `EngineInvariantsTests`, `JobDagDefinition_JsonTests`). The CLI side — args → DAG — is covered separately by `PipelineLexerTests` and `PipelineToJobConverterTests`. Add a new topology → add a golden definition + round-trip test in `JobDagDefinition_JsonTests.cs`.
-
-> **Enforced by** those suites (CI). **Not covered:** nothing ties CLI arguments to the golden shapes — the engine and the parser are guarded, the bridge between them is not — and nothing verifies that a change to `DagOrchestrator` or `LinearPipelineService` arrives with a test. That obligation is discipline.
+Local only. Use the `dtpipe-perf-gate` skill before stating any figure. **Below ~10 % between two
+macro runs there is no result.** Update the micro baseline only on the reference machine, for a
+deliberate, understood shift.
 
 ## The docs/ site
 
-`docs/` is a task-oriented layer **over** the three root documents, not a replacement: a reader who
-does not yet know which question to ask starts there, and every page ends by pointing into
-`REFERENCE.md` for the exhaustive form. The division that holds: **the site explains and shows,
-`REFERENCE.md` enumerates.** A flag table belongs in `REFERENCE.md`; a page that walks someone
-through anonymizing two tables belongs in `docs/guides/`. No `COOKBOOK.md`: that shape belongs in
-`docs/guides/` instead — do not recreate it.
+A task-oriented layer **over** the root documents. **The site explains and shows; `REFERENCE.md`
+enumerates**: flag tables go there, walkthroughs in `docs/guides/`. End every page with a pointer
+into `REFERENCE.md`.
 
-It is plain Markdown browsed in the repository. There is no generator, no build step and no
-published artefact — that option was examined and closed, because publication has no beneficiary
-and a build chain would be one more thing to keep green.
+`[CI: validate_docs.sh (every --flag named exists in --help), validate_doc_links.sh (links and
+anchors), validate_doc_width.sh (prose ≤ 100 columns), validate_doc_examples.sh (file-based
+examples run and print what the page shows)]` — all discover pages through `git ls-files`. Anchors
+follow GitHub's rule exactly: spaces are **not** collapsed, so `a — b` is `#a--b`.
 
-Three checks cover it, all derived from `git ls-files` so a new page is covered by adding the file:
+**Row order is not deterministic unless the pipeline asked for it**: DuckDB evaluates in parallel
+and `--merge` unions concurrent branches. Give an example an `ORDER BY` when a reader wants stable
+output, or compare as a set (`expect_rows`) when ordering would misrepresent the feature. Check an
+unseeded `--fake` by shape only. `[unchecked: whether prose is true — write a claim as a runnable
+example to make it checked]`
 
-| Check | What it decides |
-|---|---|
-| `validate_docs.sh` | Every `--flag` a page names exists in the binary's help. It found `--strict-bindings` cited on four pages and absent from `--help` on the first run |
-| `validate_doc_links.sh` | Every relative link and `#anchor` resolves. Anchors follow GitHub's rule exactly — spaces are **not** collapsed, so `a — b` is `#a--b`; an intuitive implementation reports three correct links as broken |
-| `validate_doc_width.sh` | Prose stays within 100 columns |
-| `validate_doc_examples.sh` | The examples run, and produce what the page prints |
-
-**`validate_doc_examples.sh` is the one that earns its keep, and only because it compares output.**
-The v0 draft claimed *"every output shown was produced by running it"* while shipping a
-deduplication result whose rows were in the wrong order and a YAML block `--export-job` does not
-produce. Both render perfectly. Only file-based examples are in it — no database, no container, so
-it runs in CI like the rest.
-
-Assert an exact result only where the run is deterministic, and **row order is not deterministic
-unless the pipeline asked for it.** DuckDB evaluates in parallel and `--merge` unions concurrent
-branches, so a `SELECT` without `ORDER BY` returns the same rows in a different arrangement — the
-deduplication example failed one run in three before its query gained one. Two ways out, and the
-choice says something: give the *example* an `ORDER BY` when a reader would want stable output
-anyway, or compare as a **set** when ordering would misrepresent what the feature guarantees
-(`expect_rows`, used for `--merge`). An unseeded `--fake` is random by design, so its check is
-shape (exit code, header, row count, and that the clear value is gone); pinning its values would
-test a Bogus version rather than a promise the docs make.
-
-> **Not covered:** whether a page is *true* — prose that misstates behaviour passes all four. The
-> examples check is what converts part of that into something decidable, which is why a claim worth
-> making is worth writing as a runnable example.
-
-## Architecture Overview
-
-### Solution Structure
+## Architecture
 
 | Project | Role |
 |---|---|
-| `src/DtPipe` | CLI entry point, DI wiring, `JobService`, `ExportService`, MCP server, AI Agent |
+| `src/DtPipe` | CLI entry, DI wiring, `JobService`, `ExportService`, MCP server, AI agent |
 | `src/DtPipe.Core` | Abstractions, DAG engine, pipeline models, helpers |
-| `src/DtPipe.Adapters` | Readers and writers for all data sources/targets |
-| `src/DtPipe.Transformers` | Row and columnar data transformers |
-| `src/DtPipe.Processors` | C# side of SQL stream processors (DuckDB, factories) |
-| `src/Apache.Arrow.Ado` | Standalone ADO.NET → Arrow library; zero DtPipe deps (depends on `Apache.Arrow.Serialization` only) |
-| `src/Apache.Arrow.Serialization` | Standalone CLR↔Arrow type map + POCO serializer; zero DtPipe deps, no external deps beyond `Apache.Arrow` |
+| `src/DtPipe.Adapters` | Readers and writers (`Adapters/<Name>/`) |
+| `src/DtPipe.Adapters.Shared` | Infrastructure shared by adapters and processors (DuckDB read path) |
+| `src/DtPipe.Transformers` | Row and columnar transformers (one subdirectory each) |
+| `src/DtPipe.Processors` | SQL stream processors (DuckDB, Merge) |
+| `src/Apache.Arrow.Ado` | Standalone ADO.NET → Arrow; depends on `Apache.Arrow.Serialization` only |
+| `src/Apache.Arrow.Serialization` | Standalone CLR↔Arrow type map + POCO serializer |
+| `src/DtPipe.Coordinator` | Central hub of a distributed pipeline: the control plane over TransportR |
+| `src/DtPipe.PipelineNode` | Runs one distributed-pipeline fragment under the coordinator's control |
 | `tests/DtPipe.Tests` | xunit.v3 unit and integration tests |
 
-File placement: `DtPipe.Core` = abstractions/models/engine only. Each transformer in `DtPipe.Transformers` lives in its own subdirectory (`Row/Expand/`, `Arrow/Filter/`…) with matching sub-namespace. Each stream processor in `DtPipe.Processors` follows the same pattern (`DuckDB/`, `Merge/`…). Readers/writers under `DtPipe.Adapters/Adapters/<Name>/`. AI Agent classes under `src/DtPipe/Cli/Agent/`.
+`DtPipe.Core` holds abstractions, models and the engine only. `DtPipe.Coordinator` and
+`DtPipe.PipelineNode` reference TransportR as NuGet packages and stay outside `DtPipe.sln`, so CI
+never builds or tests them.
+They are libraries (a host owns `Program`, the identity provider and the address). Nothing else
+in `src/` names TransportR; only they, their tests and the lab do. The lab under
+`samples/distributed-lab` is a host, and it and its sample data are named nowhere else. `[CI: validate_distributed_boundary.sh — names, references and
+project shape, not behaviour]`
 
-### Core Data Flow
+Data flow: `args` → `PipelineLexer.Parse` → `PipelineToJobConverter` → `DagOrchestrator` →
+`LinearPipelineService` → `ExportService.RunExportAsync` → `PipelineExecutor` → `IDataWriter`.
+`DagOrchestrator` runs this chain once per branch, concurrently; a linear run goes through it once.
+Fundamental shape: `IStreamReader` → `IDataTransformer[]` → `IDataWriter`.
 
-```mermaid
-flowchart LR
-    args["string[] args"] --> lexer["PipelineLexer.Parse"]
-    lexer --> converter["PipelineToJobConverter"]
-    converter --> dag["DagOrchestrator"]
-    dag --> linear["LinearPipelineService"]
-    linear --> export["ExportService.RunExportAsync"]
-    export --> executor["PipelineExecutor"]
-    executor --> writer["IDataWriter"]
-```
+Key interfaces: `IStreamReader` / `IColumnarStreamReader`; `IDataWriter` / `IRowDataWriter` /
+`IColumnarDataWriter`; `IDataTransformer` / `IDataTransformerFactory`; `IStreamTransformerFactory`
+(multi-input, receives `BranchChannelContext`); `ICliContributor` / `OptionsRegistry`.
 
-`DagOrchestrator` spawns this same chain once per branch, concurrently — even a single-branch (linear) run goes through it once. Fundamental pipeline: `IStreamReader` → `IDataTransformer[]` → `IDataWriter`.
+Providers implement `IProviderDescriptor<TService>`, registered in `Program.cs`; options come from
+`[ComponentOption]` via reflection. Detail: `src/DtPipe/CLAUDE.md`.
 
-1. `JobService.BuildSubcommands()` registers named subcommands (`inspect`, `providers`, `completion`, `secret`, `mcp`, `agent`) into `System.CommandLine`.
-2. `FlagRegistryFactory.Build(serviceProvider)` assembles a `FlagRegistry` from `[ComponentOption]` providers + stream processor trigger flags. `PipelineLexer.Parse(args)` → `ParsedPipeline` (`BranchSpec[]`). `PipelineToJobConverter.Convert(parsed, …)` → `(Dictionary<string, JobDefinition>, JobDagDefinition)`.
-3. Linear: `LinearPipelineService` → `ExportService.RunExportAsync()` → `PipelineExecutor`.
-4. DAG: `DagOrchestrator` spawns concurrent `Task`s per branch via `Channel<T>` for zero-copy data flow. The kernel is `PipelineExecutor.ExecuteSegmentedPipelineAsync`.
-
-### Provider Pattern
-
-Every adapter implements `IProviderDescriptor<TService>` and is registered in `Program.cs` via `RegisterReader<T>()` / `RegisterWriter<T>()` / `RegisterStreamTransformer<T>()`. `CliProviderFactory<T>` wraps descriptors: `CliOptionBuilder.GenerateFlagDefsForType(OptionsType)` reflects on `[ComponentOption]` → `FlagDef` entries. At execution `FlagBinder.Bind(optionsInstance, args, registry)` maps CLI args to the options object. Provider options live scoped in `OptionsRegistry` (keyed by type).
-
-#### Connection selectors are invisible to providers (non-negotiable)
-
-`ComponentSelector` (`DtPipe.Core.Abstractions`) is the **single authority** on the `{component}[+{variant}]:` grammar. It is the only place allowed to know that prefixes exist.
-
-- **No adapter may test for its own prefix.** `CanHandle` receives the RAW string and must judge by *content* only — file extension (`.duckdb`, `.csv`) or connection-string keywords (`Host=`, `Data Source=`). See the warning on `IDataFactory.CanHandle`. A prefix test there hands the provider a string the router never stripped.
-- **Every routing site goes through `ComponentSelector`** — `LinearPipelineService.ResolveFactory`, `InspectCommand`, `DtPipeMcpTools.Analyze` (×3), `PipelineToJobConverter`, `ProviderConfigurationService`, `DagRenderer`. Hand-rolling `StartsWith(ComponentName + ":")` is how the URI rule below ended up fixed in one site and broken in three.
-- **A remote URI is never a selector.** The grammar ends in `(?!//)`, so `s3://bucket/key.parquet` is not read as an `s3:` prefix and reaches the provider intact. This is a property of the grammar, not a guard each caller must remember.
-- **Variants reach the provider as data, not as text to re-parse.** `ComponentSelector` splits `duck+mysql:Host=…` into variant `mysql` + details `Host=…`; the router puts the variant on `ConnectionRoute.InputVariant`/`OutputVariant`, and `CliProviderFactory` pushes it onto options implementing `IVariantAwareOptions`. The selector owns the *syntax*; which variants are valid stays the provider's business (`DuckHubConnectionParser`) — and as of the native `mysql:` provider its allowlist is empty, so the grammar still parses `duck+mysql:` while the provider rejects it. That split is the point: a retired variant is a provider decision, not a grammar change.
-
-> **Enforced by** `ComponentSelectorTests` and `RemoteUriClaimTests.No_Component_Selector_Strips_A_Remote_Uri`, both CI, the second catalog-wide — a new provider is covered without editing the test. **Not covered:** a routing site that bypasses `ComponentSelector` entirely; only the sites that use it are verified.
-
-### DAG Pipeline
-
-`PipelineLexer` (`DtPipe.Cli.Pipeline`) tokenises args into `ParsedPipeline` (`BranchSpec` with `ReaderArgs`/`PipelineArgs`/`WriterArgs`). Three tokens trigger an implicit branch split:
-- `-i` / `--input` — when an input or job file was already seen in the current branch
-- `--from <alias[,alias...]>` — when a `--from`, `--input`, or `--job` was already seen; first `--from` in a fresh branch stays in current branch
-- `--job` / `-j <file>` — when a job file or input was already seen
-
-Neither `--sql` nor boolean processor flags (e.g. `--merge`) trigger a split. Each processor declares trigger flags via `IStreamTransformerFactory.CliTriggerFlags`.
-
-Canonical processor grammar (see `REFERENCE.md#dag-syntax` for per-flag semantics, topologies, and examples — not restated here):
+### DAG grammar
 
 ```
 --from <alias[,alias...]> [--ref <alias[,alias...]>] (--sql "<query>" | --<processor>) [--alias <name>] [-o <dest>]
 ```
 
-**An alias list is always comma-separated, and repeating a flag never accumulates.** Repetition has
-exactly one meaning in this grammar — `-i`, `--from` and `--job` open a new branch — so a value flag
-that also grew on repeat would teach that `--from a --from b` adds a source when it starts a second
-branch. Every other value flag is scalar and rejects a second occurrence in the same stage.
+`-i`, `--from` and `--job` open a new branch (exact rules: `src/DtPipe/CLAUDE.md`). **An alias list
+is always comma-separated, and repeating a flag never accumulates**: repetition already means "new
+branch", so every other value flag is scalar and rejects a second occurrence in the same stage. How
+many aliases `--from` accepts is the processor's business, not the grammar's. Semantics:
+`REFERENCE.md#dag-syntax`.
 
-How many aliases `--from` accepts is the **processor's** business, not the grammar's: `--merge` takes
-several, `--sql` takes exactly one and materializes the rest through `--ref` (each factory validates
-its own arity). The `[,alias...]` above is therefore permitted by the syntax, not by every processor.
+## Invariants
 
-- `--job <file>` / `-j <file>` loads a YAML pipeline job file; `PipelineToJobConverter` reads it and applies any additional CLI flags as overrides.
-- `--export-job <file>` serializes the current CLI pipeline to a YAML job file via `JobFileWriter` and exits without running the pipeline.
+### Connection selectors are invisible to providers
 
-Branches communicate via `IMemoryChannelRegistry` (`Channel<IReadOnlyList<object?[]>>` or Arrow `Channel<RecordBatch>`). Fan-out (broadcast/tee) is resolved via `BranchChannelContext.AliasMap` (logical alias → physical channel including `s__fan_0` sub-channels), populated by `DagOrchestrator` and consumed directly by factories (e.g. `DuckDBSqlTransformerFactory.cs:71`).
+`ComponentSelector` is the **single authority** on `{component}[+{variant}]:`.
+- `CanHandle` judges the raw string by **content** (extension, connection-string keywords), never by
+  its own prefix.
+- Route every site through `ComponentSelector`; never hand-roll `StartsWith(name + ":")`.
+- A remote URI (`s3://…`) is never a selector.
+- Variants reach providers as data (`IVariantAwareOptions`), never as text to re-parse.
 
-> `--ref` is intentionally materialized (cost-based query planning) — rationale and per-flag semantics: `REFERENCE.md#dag-syntax`.
+`[CI: ComponentSelectorTests, RemoteUriClaimTests]` `[unchecked: a site that bypasses the
+selector]` Detail: `src/DtPipe.Adapters/CLAUDE.md`.
 
-### SQL Processors
+### One way to read DuckDB
 
-`CompositeSqlTransformerFactory` is the DI entry point for `--sql` branches. The default (and currently only) engine is DuckDB — `DuckDBSqlTransformerFactory` / `DuckDBSqlProcessor`: zero-copy Arrow C Data Interface on read (`--from`), lazy streaming fetch (`duckdb_execute_prepared_streaming` + `duckdb_fetch_chunk`) on write, schema inferred from the prepared statement before execution. `DuckHubConnectionParser` parses `duck+{provider}:` connection strings and auto-issues `INSTALL`/`LOAD`/`ATTACH`. `--retry` uses Polly v8 (`DatabaseRetryPolicy`). `--duck-init`/`--compute`/`--expand` value resolution goes through `IStringContentResolver` (`CliStringContentResolver` for the CLI, `DefaultStringContentResolver` for headless contexts). The init-SQL runner is `DuckInitSqlRunner` (Core), the single copy for the reader, the writer and the processor. User-facing flag syntax and examples: `REFERENCE.md#provider-specific-options`, `docs/guides/sql-and-javascript.md`.
-
-#### One way to read DuckDB, and it lives in neither consumer
-
-`DuckDbArrowNative` + `DuckDbArrowResultReader` (`DtPipe.Adapters.Shared/Infrastructure/DuckDb/`) own the whole prepare-to-batch half: `duckdb_prepare` → schema off the prepared statement → `duckdb_execute_prepared_streaming` → `duckdb_fetch_chunk` → `duckdb_data_chunk_to_arrow`. **Both `DuckDataSourceReader` (`duck:`) and `DuckDBSqlProcessor` (`--sql`) read through it**, and Adapters and Processors are siblings that cannot reference one another — so a copy in either is a second P/Invoke surface onto one native library, free to drift.
-
-They *did* drift, and it shipped: `--sql` exited 1 on an `ENUM` and on a fixed-size `ARRAY`, rendered a `BOOLEAN` as `1` and a `HUGEINT` as base64, while `duck:` read all four correctly. **A maintainer who reimplements the fetch loop in one consumer reproduces exactly that.**
-
-> **Enforced by** nothing. `validate_core_boundary.sh` does not look here, and no check counts P/Invoke surfaces. Discipline.
-
-**The ownership net reaches this path through a different instrument.** A `RecordBatch` imported by
-`CArrowArrayImporter` follows the ordinary rule — the consumer disposes what it receives — but its
-memory is freed by the C Data release callback and never passes through a `MemoryAllocator`, so
-`TrackingMemoryPool` (and therefore `ArrowOwnershipTests`) cannot observe it. `CDataReleaseProbe`
-counts the release callback instead, and `CDataOwnershipTests` runs the engine's consumers —
-segment runner, writer boundary and its `--limit` slice, fan-out, row bridge — over imported
-batches.
-
-**Peak memory is not that instrument, and reaching for it measures nothing.** A batch a consumer
-forgets to dispose is released by its finalizer, so the cost of a broken dispose is a backlog
-rather than the payload: a binary whose `null:` writer drops every batch peaks at the same 108 MB
-as the correct one on 4 000 000 rows. `validate_duck_streaming.sh` uses that same peak for the
-claim it *can* decide — that the result is streamed chunk by chunk rather than held whole — and
-says in its own header that it is not the ownership net.
-
-### Transformer Pipeline
-
-`IDataTransformer` has `InitializeAsync` (schema), `Transform` (per-row), `Flush` (end-of-stream). `PipelineSegmenter` groups consecutive columnar-capable transformers into segments for Arrow zero-copy bridging between row and columnar modes.
-
-### Key Interfaces
-
-- `IStreamReader` / `IColumnarStreamReader` — open + stream batches
-- `IDataWriter` / `IRowDataWriter` / `IColumnarDataWriter` — write contracts
-- `IDataTransformer` / `IDataTransformerFactory` — row transforms
-- `IStreamTransformerFactory` — multi-input processors; `Create(branchArgs, ctx, serviceProvider)` receives `BranchChannelContext` for alias resolution
-- `ICliContributor` / `OptionsRegistry` — CLI contribution + scoped option store
-
-### Sample mode — there is no second engine
-
-`--dry-run N` is **the real execution over N source rows with the writer neutralised**. Same
-reader, same transformers, same segmentation, same row↔columnar bridges. There is no analyser
-beside `PipelineExecutor`, and adding one back is the mistake this section exists to prevent.
-
-There was one, and the two disagreed: `DryRunAnalyzer` walked rows through
-`IDataTransformer.Transform`, so a `--window` pipeline reported every row as dropped
-(`WindowDataTransformer.Transform` returns `null`) while the run wrote aggregates via
-`TransformMany` + `Flush`, and `--expand` reported one row of every N.
-
-Three pieces, and only the first touches the engine:
-
-- **`ISampleTap`** — an observation point offered each stage's output where `ReportTransform` is
-  already called. Read-only, and forbidden from disposing or retaining a `RecordBatch`. Stage 0 is
-  the reader, 1..n the transformers in pipeline order.
-- **`SampleModeSink`** — two decorators selected by the real writer's **capability**, the shape
-  `CursorTracking{Row,Columnar}Decorator` already uses. Mirroring matters: the engine reads
-  row-vs-columnar mode off `writer is IColumnarDataWriter`, so a sink of the wrong kind changes
-  the segmentation and the bridge count. Substituting a fixed sink is exactly that mistake, and
-  no sink escapes it by taking both shapes: `NullDataWriter` implements both contracts, and
-  because `PipelineExecutor` tests the columnar one first — at the entry and again at the writer
-  boundary — it pulls a row-mode pipeline into Arrow and back out for nothing.
-- **`SampleRun`** — the capture, read by both the renderer and the checkpoint store. One run, one
-  report, two presentations.
-
-Sample mode also suppresses `ValidateAndMigrateAsync` (it can CREATE/ALTER the target), **all four
-hooks** (they are SQL on the target connection), the cursor and the metrics file.
-
-> **Enforced by** `SampleModeEquivalenceTests` (CI) — what a sample reports must equal what a real
-> run writes, over pipelines that expand, aggregate and pass through — plus
-> `tests/scripts/validate_single_engine.sh`, which is a grep and says so in its own header: it
-> catches a second execution loop written in plain sight or a renderer fetching its own rows, not
-> a call made by reflection. **Not covered:** a transformer whose semantics the parameterised
-> cases do not exercise.
-
-### Sample-mode safety is a read-side problem
-
-Neutralising the writer is a claim about the **writer**. A reader can mutate: `DELETE … RETURNING`,
-`… OUTPUT`, `--duck-init`, an `ATTACH` inside `--sql` — and `--limit` bounds what the client reads,
-never what the server already destroyed. `SampleModeSafetyGate` classifies the **resolved**
-pipeline's source SQL (so a `@file` query is covered, unlike the YAML text scan) and
-`ISqlDialect.ReadOnlySessionSql` lets the server refuse instead of a regex guessing.
-
-Writer hooks are deliberately **not** classified: they are already suppressed, so refusing a
-pipeline for carrying one adds no safety and teaches people to pass `--allow-destructive` by
-reflex — which would then unlock the source side too.
-
-SQL Server returns `null` for `ReadOnlySessionSql` — `ApplicationIntent=ReadOnly` routes to a
-replica, it does not make a session read-only. The report says which guarantee the run had. **A
-guarantee that is sometimes absent must never be reported as though it were always there.**
-
-> **Enforced by** `SampleModeSafetyGateTests` (CI) and `tests/scripts/validate_sample_safety.sh`.
-> **Not covered:** a query that writes through a function — `SELECT my_function()` passes a verb
-> scan, which is why the server-enforced form exists and why the weaker one is reported as weaker.
-
-### Checkpoints are addressed by content, and always encrypted
-
-`--checkpoint` tees the columnar stream into the session store; `--from-checkpoint` reads it back.
-The key is a hash of the branch prefix's **definition** (sanitised connection, query, transformers,
-sampling parameters) — never the alias — so two pipelines in one directory cannot collide and an
-unchanged prefix is reused.
-
-Encryption has **no opt-out**, and the reason is structural rather than cautious: what AES-GCM buys
-is not confidentiality at rest (the key is on the same disk) but two properties of the **store as a
-whole** — an inert copy, and a purge made reliable by destroying the key. Both are properties of the
-store, so one cleartext session would void them for every other session in it, retroactively. Cost
-measured at ~3.5–4 GB/s (~24 ms per 100 MB).
-
-`--from-checkpoint` resolves by capability and **never** through `ComponentSelector`: a checkpoint
-key is a hex string, and letting it into the `{component}[+{variant}]:` grammar is how a key would
-one day be read as a prefix.
-
-**A row-mode pipeline gets a bridge, not a refusal.** When materialising and the last segment is
-not columnar, `ExecuteSegmentedPipelineAsync` appends an *empty* columnar segment — the device the
-engine already uses for a row reader feeding a columnar writer — so the chain reaches Arrow at the
-writer boundary, tees, and bridges back. Refusing CSV→CSV was not defensible: it is the commonest
-shape there is, and refusing did not avoid the Arrow round-trip, since resuming reads Arrow
-anyway. The segment is added **only** when `materialise is not null`, so an ordinary run does not
-see one extra branch.
-
-> **Enforced by** `CheckpointCipherTests`, `CheckpointKeyTests`, `CheckpointRoundTripTests` (CI)
-> and `tests/scripts/validate_checkpoint.sh` (local, real binary).
-
-## Debug Mode
-
-```bash
-DEBUG=1 dtpipe --input pg:"..." --output csv:out.csv
-```
-Verbose branch-level logging to stderr.
-
-## Exit Codes
-
-`0` = success · `1` = fault · `130` = user cancellation (Ctrl-C, POSIX SIGINT convention).
-
-Cancellation never masks as success (F16): `LinearPipelineService` discriminates the dedicated user token from internal cancellation sources and returns 130 on user shutdown; internal cancellation propagates. In DAG runs, a branch reporting 130 makes `DagOrchestrator` cancel the rest and return 130. The only intentional cancellation-swallowing site is `DagOrchestrator.ExecuteBranchAsync`'s orphaned-producer path (returning 0 is normal fan-out operation when consumers complete).
-
-> **Enforced by** `tests/scripts/validate_cancellation.sh` (F16), local — it drives real interrupts, so it needs a live process rather than a unit test.
-
-## A connection string is redacted by parsing it, prose only by scanning it
-
-`ConnectionStringSanitizer` has two entry points, and the difference between them is how much
-structure the caller knows.
-
-- **`Redact`** receives a connection string — a grammar it can parse — so it prints only keys on a
-  safe list and masks every other `key=value` pair. **Fail-closed: a key nobody anticipated is
-  masked.** Use it wherever the value *is* a connection: a message, the DAG panel, an MCP plan, the
-  agent's approval dialog.
-- **`Sanitize`** receives text with no grammar — a driver's exception, a YAML excerpt, a tool
-  argument — so it can only scan for keys that look sensitive. Best-effort by construction.
-
-Both consult the same safe list, so they never disagree about one key.
-
-**Do not re-anchor the sensitive-key pattern on `\b`.** It breaks on neither `_` nor a capital, so
-there is no boundary around `secret` in `s3_secret_access_key` or `SecretAccessKey`: under that
-pattern `AccountKey`, `SharedAccessSignature`, `SecretAccessKey` and `s3_secret_access_key` — four
-forms this product builds itself — passed through in the clear at sites that *looked* sanitised.
-
-**There is no site on the other side of that line** — not even `CheckpointKey`, which hashes rather
-than prints and could have argued for the weaker call. One carve-out plus no check is the shape
-that produced this defect in the first place: six sites sanitised, two did not, and nothing told
-them apart.
-
-Where the prefix must be stepped over to reach the first key, the grammar stays
-`ComponentSelector`'s (`SkipSelector`) — hand-rolling the `(?!//)` is how the remote-URI rule ended
-up fixed in one site and broken in three.
-
-> **Enforced by** `ConnectionStringSanitizerTests` (the form table is the specification — a new
-> secret-bearing form is added there first), `LinearPipelineServiceTests` over both routing
-> failures, and `tests/scripts/validate_secret_redaction.sh`, which refuses a connection-valued
-> expression interpolated outside `Redact` *or* handed to `Sanitize`, and checks that each helper
-> it lets through is itself defined over `Redact`. **Not covered:** a connection reaching a message
-> by a route with no connection-shaped name, and a credential a driver quotes back inside its own
-> exception — the secrets guide says so rather than implying the logs are safe.
-
-## Pipeline Design Principles
+`duck:` and `--sql` both read through `DuckDbArrowResultReader`. **Never reimplement the fetch loop
+in one consumer**: a copy is a second P/Invoke surface onto the same library, and it drifts. Init
+SQL follows the same rule: `DuckInitSqlRunner` (Core) is the single runner for reader, writer and
+processor. `[unchecked]` Detail: `src/DtPipe.Adapters.Shared/CLAUDE.md`.
 
 ### No magic conversions in the engine core
 
-The engine (Core, Processors, DAG orchestrator) must **never** perform implicit type conversions to work around an adapter limitation. Adapter-specific behavior belongs in the adapter.
+Core, Processors and the DAG orchestrator never convert types implicitly to work around an adapter.
+On a type mismatch, prefer in order: (1) adapter parameterisation (`--column-type "Id:uuid"`), (2) a
+transformer (`--compute`), (3) the SQL processor (`CAST(... AS UUID)`). Forbidden:
+- detecting a source format and silently converting in a type mapper or schema factory;
+- changing `ArrowTypeMapper` / `PipeColumnInfo` to compensate for an adapter;
+- branching in `ExportService` / `PipelineExecutor` / `DagOrchestrator` on adapter identity.
 
-When a type mismatch arises (e.g. CSV `string` UUID vs Parquet `FixedSizeBinary(16)` UUID), prefer in order:
-1. **Adapter parameterization** — e.g. `--column-type "Id:uuid"` on CSV reader
-2. **Pipeline transformer** — e.g. `--compute` to parse the string column
-3. **SQL processor** — e.g. `CAST(base64_decode(id) AS UUID)` in `--sql`
+`[CI: validate_core_boundary.sh — keeps concrete SQL/dialect/cursor classes out of Core]`
+`[unchecked: the three bullets]`
 
-Forbidden:
-- Detecting a source format and silently converting in a type mapper/schema factory
-- Changing `ArrowTypeMapper` / `PipeColumnInfo` to compensate for an adapter
-- Branching in `ExportService`/`PipelineExecutor`/`DagOrchestrator` on adapter identity
-
-> **Partly enforced.** `tests/scripts/validate_core_boundary.sh` keeps concrete SQL/dialect/cursor classes out of `DtPipe.Core`. **Not covered:** the three bullets above — no check looks for a branch on adapter identity inside the engine. Discipline.
-
-Canonical UUID: `FixedSizeBinaryType(16)` + Field metadata `ARROW:extension:name = arrow.uuid`, RFC 4122 big-endian (`ArrowTypeMapper.ToArrowUuidBytes` / `FromArrowUuidBytes`).
-
-### Representation rules are named for themselves, not for Arrow
-
-Two conventions are needed **outside** Arrow as well — a database `BINARY(16)` column wants RFC 4122
-byte order, and a row-mode DB parameter needs the same temporal rule — so each lives under its own
-name in `Apache.Arrow.Serialization/Mapping/`, with the Arrow-facing spellings delegating to it:
-
-| Rule | Owner | Arrow-facing spelling |
-|---|---|---|
-| RFC 4122 big-endian byte order | `Rfc4122Guid.ToBigEndianBytes` / `FromBigEndianBytes` | `ArrowTypeMap.ToArrowUuidBytes` / `FromArrowUuidBytes` |
-| Zone-less `DateTime` handling | `TemporalNormalization.ToOffset` / `ToWallClock` | called directly by `ArrowTypeMap.GetValue` and the readers |
-
-**`TemporalNormalization` owns both directions on purpose.** A `DateTime` with
-`Kind=Unspecified` is a wall clock with no zone; `new DateTimeOffset(dt)` and
-`TimestampArray.Builder.Append(DateTime)` both resolve it against `TimeZoneInfo.Local`, which put
-the machine's time zone inside the data path — the same rows produced different bytes in Paris and
-in Tokyo, sometimes on a different calendar day. The write and read halves drifted apart once
-already; keeping them in one class is the fix's whole point, and they must be changed together.
-
-Guarded by `validate_core_boundary.sh` (no `new DateTimeOffset(` outside the rule) and
-`validate_temporal.sh` (the real binary under two `TZ` values must produce identical output).
-
-### RecordBatch ownership (columnar path)
-
-Arrow buffers are off-heap (`NativeMemoryAllocator`) and reference-counted. A `RecordBatch` that
-nobody disposes is not a leak the GC reports — it is native RSS the GC cannot see, reclaimed only
-when the finalizer eventually runs. So the columnar path has one rule:
-
-**Every `RecordBatch` has exactly one owner. The owner calls `Dispose()` exactly once, then never
-touches it. Ownership moves downstream when the batch is yielded, returned, or written.**
-
-- A **reader** / **row→columnar bridge** produces batches and hands each one to its consumer.
-- `PipelineExecutor.ApplyColumnarSegmentAsync` owns every batch it pulls from its source. It
-  disposes that input after the transformer chain has run — **unless the transformer returned the
-  same reference** (`ReferenceEquals`), which means pure pass-through and the one object is still
-  the live batch. It does **not** dispose what it yields; the next segment or the writer owns that.
-- An `IColumnarTransformer` that returns a **new** `RecordBatch` reusing any input column buffer
-  **must** wrap that column in `ArrowOwnership.RetainArray(...)`. Without the retain, the segment
-  runner's dispose of the input frees buffers the output still points at (use-after-free). The
-  six transformers that alias columns — Project, Mask, Overwrite, Null, Format, Fake — all do this.
-- The **writer** takes ownership via `WriteRecordBatchAsync` (its interface doc says so) and
-  disposes.
-- `BridgeColumnarToRowsAsync` is a terminal consumer: `using (batch)`.
-- A reader that hands over **Arrow IPC** batches must re-home them through
-  `ArrowOwnership.TakeOwnership`. IPC column buffers carry no shared handle — the whole message
-  body is one allocation owned by the `RecordBatch` — so `RetainArray` bumps nothing and the
-  segment runner's dispose frees the body under an aliasing output. `--mask`, `--fake`, `--null`
-  and `--format` each crashed with a `NullReferenceException` from inside Arrow, on an `arrow:`
-  source and on `--from-checkpoint`. Apache.Arrow keeps the sharing machinery `internal`, so the
-  copy is the only fix available from outside it.
-- **Fan-out** (`DagOrchestrator` broadcast): the broadcaster owns the upstream batch, gives each of
-  N consumers an independent batch via `ArrowOwnership.RetainAll` (refcount bump, not a deep
-  `Clone`), then disposes its own reference. Each consumer disposes the batch it received.
-
-> **Enforced by** `ArrowOwnershipTests` (CI) — `TrackingMemoryPool` asserts allocations return to
-> zero after a linear chain and after a fan-out where one branch bridges to rows — and, over batches
-> that arrived through the C Data interface, by `CDataOwnershipTests` counting the release callback
-> (see *One way to read DuckDB*). **Not covered:** a new transformer that aliases a column without
-> retaining it — no check distinguishes an aliased array from a rebuilt one. Discipline, plus the
-> `RetainArray` call reads as the obvious idiom next to the five that already have it.
-
-## Apache.Arrow.Serialization
-
-Standalone library with no DtPipe deps (only `Apache.Arrow`):
-
-```
-Apache.Arrow.Serialization ← standalone
-       ↑ 
-Apache.Arrow.Ado          ← uses ArrowTypeResult
-       ↑
-DtPipe.Core               ← ArrowTypeMapper is facade over ArrowTypeMap
-```
-
-`DtPipe.Core/Infrastructure/Arrow/` is the fourth layer and it is **not** standalone — it is generic Arrow code (the type map facade, the row↔columnar bridges, `ArrowOwnership`) that lives inside Core. Its surface onto the rest of DtPipe is exactly **three types**: `PipeColumnInfo`, `IRowToColumnarBridge`, `IColumnarToRowBridge`. Nothing else may cross into it — this is the hottest path in the product, and engine concerns leaking into the conversion layer is how it stops being replaceable.
-
-Extracting it into a `DtPipe.ArrowBridge` package was considered and **closed**: its only real dependency, `PipeColumnInfo`, is used in 83 files, so extraction means either the Arrow library dictates the engine's schema type or an indirection lands on the per-cell path. The narrow-surface guard buys the discipline without the cost.
-
-`ArrowTypeMap` (`Mapping/ArrowTypeMap.cs`) is the canonical CLR↔Arrow map; `ArrowTypeMapper` in Core is a facade. `FixedSizeBinaryArrayBuilder` lives only in `Apache.Arrow.Serialization/Reflection/FixedSizeBinaryArrayBuilder.cs` — Core consumes it via project reference (single definition). See `EXTENDING.md` for `ArrowSerializer`/`ArrowDeserializer` usage.
-
-> **Enforced by** `tests/scripts/validate_core_boundary.sh`, which fails on any `using DtPipe.` or project reference to DtPipe from either standalone Arrow library, and on any DtPipe type beyond the three-type allowlist reaching `Infrastructure/Arrow/` — the allowlist is checked against every type `Core/Models` and `Core/Abstractions` declare, so a new type is covered without editing the script. **Note:** `tests/Apache.Arrow.Serialization.Tests` is **never run by `build.sh`**, which only executes `tests/DtPipe.Tests --filter ".Unit."` — `dotnet test DtPipe.sln` in CI is the only thing that runs it, so a regression here is invisible to a local `./build.sh` before push.
-
-## Adding a New Adapter
-
-See `EXTENDING.md` for full patterns. Key rules:
-- **Row writers**: build `ColumnConverterFactory.Build(sourceClrType, targetClrType)` once per column at init; never per-cell `ValueConverter.ConvertValue()`.
-- **Columnar writers**: implement `IColumnarDataWriter`; use `ArrowTypeMapper.GetValueForField(array, field, i)` when a `Field` is available.
-- **Text readers**: implement `IColumnTypeInferenceCapable` for `--auto-column-types`.
-
-> **Not enforced** — nothing checks that a writer builds its converters per column rather than per cell, nor that a text reader opts into inference. Both are performance and capability defaults a new adapter silently loses. Discipline only.
+Canonical UUID: `FixedSizeBinaryType(16)` + field metadata `ARROW:extension:name = arrow.uuid`,
+RFC 4122 big-endian.
 
 ### Arrow ↔ CLR mapping: no heuristics
 
-`ArrowTypeMapper.GetClrType(IArrowType)` never infers semantic type from storage alone (`FixedSizeBinary` → `byte[]`). Use `GetClrTypeFromField(Field)` (checks extension metadata).
+`GetClrType(IArrowType)` / `GetValue(array, i)` are storage-only and never infer semantics
+(`FixedSizeBinary` → `byte[]`). Use the metadata-aware `GetClrTypeFromField(Field)` and
+`GetValueForField(array, field, i)`, and `GetField(name, clrType, nullable)` instead of
+`new Field(...)`. `[unchecked]`
 
-Key APIs:
-- `GetLogicalType(Type)` → `ArrowTypeResult` (`.ArrowType` + `.Metadata`)
-- `GetField(name, clrType, nullable)` → `Field` with metadata — use instead of `new Field(...)`
-- `GetClrTypeFromField(Field)` / `GetValueForField(array, field, i)` — metadata-aware (e.g. `arrow.uuid` → `Guid`)
-- `GetClrType(IArrowType)` / `GetValue(array, i)` — storage-only
+Representation rules live under their own names in `Apache.Arrow.Serialization/Mapping/`:
+`Rfc4122Guid` (byte order) and `TemporalNormalization` (zone-less `DateTime`). **Change both
+directions of `TemporalNormalization` together**; never call `new DateTimeOffset(dt)`, which resolves
+against the local zone. `[CI: validate_core_boundary.sh]` `[local: validate_temporal.sh]`
 
-> **Not enforced** — no check distinguishes a legitimate storage-only call from one that should have been metadata-aware. Round-trip behaviour is covered indirectly (`ArrowAdapterTests`, `validate_temporal.sh`), which catches the symptom, not the wrong call. Discipline only.
+`Core/Infrastructure/Arrow/` exposes exactly three DtPipe types: `PipeColumnInfo`,
+`IRowToColumnarBridge`, `IColumnarToRowBridge`. The standalone Arrow libraries never reference
+DtPipe. `[CI: validate_core_boundary.sh]`
 
-## MCP Server & Agentic Integration
+### RecordBatch ownership
 
-`dtpipe mcp` (STDIO) exposes schema-discovery, validation, and execution tools for AI assistants (`execute-yaml-job` is dry-run by default). Don't enumerate tool names here — see `REFERENCE.md#mcp-server` (canonical, up-to-date tool table) and `REFERENCE.md#agent-guardrails` for full options. `dtpipe agent` runs an interactive loop with Ollama/OpenAI (`AgentExecutor`, `AgentTui`, `OllamaClient`).
+**Every `RecordBatch` has exactly one owner. The owner disposes it exactly once, then never touches
+it. Ownership moves downstream when a batch is yielded, returned or written.**
+- The segment runner disposes its input after the chain, unless the transformer returned the same
+  reference (pass-through).
+- A transformer returning a **new** batch that reuses an input column **must** wrap it in
+  `ArrowOwnership.RetainArray(...)`; without it the output points at freed buffers.
+- A reader handing over Arrow IPC batches re-homes them with `ArrowOwnership.TakeOwnership`.
+- Fan-out gives each consumer its own batch via `ArrowOwnership.RetainAll`.
 
-Hardening invariants (F1–F7, fail-closed, non-negotiable — details in `REFERENCE.md#agent-guardrails`):
-- **F1 Planner/Executor split** — `--mode plan` (default) hides every tool marked
-  `[WritesToTarget]` from the model. The set is reflected off the attribute, never listed, and
-  `AgentModeTests` checks it over the whole catalogue. `dry-run` is deliberately unmarked: it
-  runs the real pipeline with the writer neutralised, and the planner's own role prompt tells
-  it to call it.
-- **F2 Guardrails** — `ISqlSafetyPolicy` (destructive verbs / network) + `IApprovalGate`; `apply` + approval + clean check required for writes.
-- **F3 Determinism** — available, not default: `--temperature 0 --seed N --repeat N`; `DeterminismReport` variance = distinct-YAML − 1. The shipped default temperature is `1` (greedy decoding degenerates weak quantized models); `--seed` keeps a run replayable at any temperature.
-- **F4 Non-destructive context** — fact cache + `ConversationWindowManager.Compact`.
-- **F5 Parallel tools** — all `ToolCalls` per turn executed (`Task.WhenAll`; `--sequential` forces serial).
-- **F6 Single YAML path** — `yamlContent` tool arg is sole plan source.
-- **F7 CI gate** — `tests/agentic/analyze-traces.sh --gate` fails on unhandled MCP errors or a failed mission. Its variance criterion applies only when `variance_results.jsonl` holds real replication data; the shipped missions drive their own bash ReAct loop against `dtpipe mcp` and never invoke `dtpipe agent --repeat`, so they produce none. Never record a placeholder variance to fill the file — a criterion that cannot fire is worse than an absent one. The authoritative signal for F1–F7 is the deterministic unit suite (`Unit/Cli/Agent*Tests`, `Unit/Cli/Mcp*Tests`), not this gate.
+`[CI: ArrowOwnershipTests, CDataOwnershipTests]` `[unchecked: a transformer that aliases a column
+without retaining it]` Detail: `src/DtPipe.Core/CLAUDE.md`.
 
-### The session trace is a diagnostic, and must not become a gate
+### Adding an adapter
 
-`dtpipe agent --trace <path>` (or `$DTPIPE_AGENT_TRACE`) records a real session as JSON lines. It
-carries what the model was **given** as well as what it did: the role prompt the mode selected and
-the tool catalogue as it was offered, alongside every step, each turn's verdict and any `/note` the
-person watching left. Those first two are the whole point — a wrong tool call cannot be told apart
-from a tool that was never offered, or one whose description sent the model elsewhere, without
-them.
+Full patterns: `EXTENDING.md`.
+- Row writers build `ColumnConverterFactory.Build(source, target)` once per column at init, never
+  per-cell `ValueConverter.ConvertValue()`.
+- Columnar writers implement `IColumnarDataWriter` and read with `GetValueForField`.
+- Text readers implement `IColumnTypeInferenceCapable` for `--auto-column-types`.
 
-**Nothing reads its verdict, and nothing should.** A fail-closed criterion over an LLM loop needs an
-attributable signal, which remains an open question reserved for a separate conversation; a
-diagnostic read by a person is useful without being decidable. That distinction is what makes the
-trace shippable while the gate is not.
+`[unchecked]` Help attributes are a contract for models: `src/DtPipe.Adapters/CLAUDE.md`.
 
-Arguments and results are recorded as the model saw them, past `ConnectionStringSanitizer` — the
-repo's single convention for this. It blanks the shapes it recognises (`password=`, credentials in a
-URI) and nothing else, and the file's own header says so rather than claiming the file is safe.
+### Sample mode — there is no second engine
 
-> Defects read off traces this way have so far all been in what dtpipe tells a model about itself,
-> or in the harness around it, rather than in the model: a tool name matched on its separator, an
-> unknown name answered without naming what exists, a raw .NET exception handed over as an error, a
-> capability (`--fake` creates a mapped column that is missing) that no help stated, a catalogue
-> listing names with no descriptions, an option key published in an example that bound nothing, and
-> the repetition guard stopping a legitimate multi-branch YAML job. The method is: read the trace,
-> verify the claim in the source, run the fix before publishing it.
+`--dry-run N` is **the real execution over N source rows with the writer neutralised**: same reader,
+transformers, segmentation and bridges. Never add an analyser beside `PipelineExecutor`; a second
+engine disagrees with the real run. The sink mirrors the real writer's capability (row or
+columnar), never a fixed sink. Sample mode suppresses schema migration, all four hooks, the cursor
+and the metrics file.
 
-Mandatory MCP directives:
-1. No hardcoded help — reflect on `[Description]`/`[ComponentHelp]`. *(Not enforced: nothing tests `GetGeneralHelp`. The adapter and transformer lists it prints are derived from the factories, so they cannot drift — but a hardcoded block added elsewhere would pass unnoticed.)*
-2. In-memory execution via `JobFileParser` + `JobService.ExecutePipelineAsync()` — no temp files/shell proxies. *(Not enforced — discipline.)*
-3. Auto table discovery on `inspect` without a query, plus actionable hints on validation errors. *(Not enforced — discipline.)*
-4. Fail-closed — default `apply=false`, reject on ambiguity. *(Enforced by `ExecuteYamlJobGuardrailTests`, CI.)*
+Safety is a **read-side** problem: a source can mutate (`DELETE … RETURNING`, `--duck-init`,
+`ATTACH`). `SampleModeSafetyGate` classifies the resolved source SQL; `ReadOnlySessionSql` lets the
+server refuse. **Never report a guarantee that is sometimes absent as always there.**
 
-### Writing adapter help (`[Description]` / `[ComponentHelp]`)
+`[CI: SampleModeEquivalenceTests, SampleModeSafetyGateTests, validate_single_engine.sh,
+validate_sample_safety.sh]` Detail: `src/DtPipe/CLAUDE.md`.
 
-`get-adapter-help` is the only view a model gets of an adapter, so these attributes are a contract, not decoration.
+### Checkpoints
 
-- **Say what reflection cannot.** Option names, types and descriptions are already emitted from the properties. `usageNotes` exists for what they cannot convey: prerequisites (MySQL bulk needs `local_infile=ON` server-side), silent fallbacks, and semantics that make an option dangerous — `--strategy Upsert` requires a PRIMARY KEY or UNIQUE index covering the key columns, or MySQL appends duplicates instead of updating. **An option a model can set without knowing its failure mode is worse than one it cannot see.**
-- **Reader and writer each carry their own attributes, and both are emitted.** The writer's is not a redundant copy of the reader's — it is where write semantics live.
-- **The component's own side of an example stays concrete; the counterpart side is a placeholder** (`<adapter-prefix>:<target>` / `<source>`). Naming a real adapter anchors the model on an unrelated component, and a verbatim copy silently writes a file nobody asked for — where a placeholder fails closed with "No writer factory resolved". The one exception is `generate:` ↔ `null:`, where the pairing itself is the lesson.
-- **Name the driver and say the key list is open.** ADO.NET fixes the `Key=Value` form but not the vocabulary, so there is no single specification to point at: the option set belongs to the provider's driver (Npgsql, MySqlConnector, …). Naming it is what lets a model reach past the keys shown, and steers it away from a different driver's options.
+The key is a hash of the branch prefix's **definition**, never the alias. **Always encrypt, no
+opt-out**: one cleartext session voids the store-wide guarantees. `--from-checkpoint` resolves by
+capability and **never** through `ComponentSelector`, so a hex key is never read as a prefix.
+`[CI: Checkpoint*Tests]` `[local: validate_checkpoint.sh]` Detail: `src/DtPipe/CLAUDE.md`.
 
-`McpAdapterHelpTests` enforces the mechanical half over the whole catalog — both roles present, counterpart placeholders, driver named. The first point is the one only a human can honour.
+### Redaction
+
+Use `ConnectionStringSanitizer.Redact` for anything that *is* a connection string: it parses it and
+masks every key not on the safe list (fail-closed). Use `Sanitize` only for prose with no grammar
+(best-effort). **No site sits on the other side of that line.** **Never anchor the sensitive-key
+pattern on `\b`**: it finds no boundary at `_` or a capital, so `SecretAccessKey` passes.
+`[CI: ConnectionStringSanitizerTests, validate_secret_redaction.sh]` Detail:
+`src/DtPipe.Core/CLAUDE.md`.
+
+### Distributed pipelines
+
+A distributed pipeline runs its fragments on pipeline nodes, each a `dtpipe` child process driven
+by a node. The coordinator is the control plane; TransportR carries the data plane.
+- **Peers never address each other**: only the coordinator opens a transfer, and it checks a plan's
+  edges against the flow-control matrix before any opens.
+- **The node is a byte relay**, and the only TransportR client of its fragment. dtpipe reaches it
+  through `arrow:` and references no TransportR assembly.
+- **Cancel by stream rupture, never by signal**: the node must run on Windows.
+
+`[local: DtPipe.Coordinator.Tests, DtPipe.PipelineNode.Tests]` `[unchecked: Windows]` Detail:
+`src/DtPipe.Coordinator/CLAUDE.md`, `src/DtPipe.PipelineNode/CLAUDE.md`.
+
+### Exit codes
+
+`0` success · `1` fault · `130` user cancellation. Cancellation never masks as success (F16): a
+branch reporting 130 cancels the DAG, which returns 130. `[local: validate_cancellation.sh]`
+Detail: `src/DtPipe.Core/CLAUDE.md`.
+
+## MCP server and agent
+
+`dtpipe mcp` (STDIO) and `dtpipe agent`. Never enumerate tool names here; see
+`REFERENCE.md#mcp-server`. Hardening invariants, fail-closed:
+**F1** plan mode hides every `[WritesToTarget]` tool (reflected, never listed) ·
+**F2** `ISqlSafetyPolicy` + `IApprovalGate`; a write needs `apply` + approval ·
+**F3** determinism available, not default (`--temperature 0 --seed N --repeat N`) ·
+**F4** fact cache + `ConversationWindowManager.Compact` ·
+**F5** all tool calls of a turn run in parallel ·
+**F6** `yamlContent` is the sole plan source ·
+**F7** `analyze-traces.sh --gate`; never record a placeholder variance.
+
+MCP directives: reflect help from `[Description]` / `[ComponentHelp]`, never hardcode it; execute
+in memory via `JobFileParser` + `JobService.ExecutePipelineAsync()`, no temp files; discover tables
+on `inspect`; default `apply=false`. `[CI: ExecuteYamlJobGuardrailTests — the last one]`
+`[unchecked: the rest]` Detail: `src/DtPipe/CLAUDE.md`.

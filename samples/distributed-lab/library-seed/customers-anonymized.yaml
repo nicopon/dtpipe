@@ -1,0 +1,28 @@
+# Customers, anonymized on the runner
+# The CRM's customers brick, its personal columns replaced by seeded fakes and the first name
+# dropped on the runner, loaded into the warehouse's dim_customers.
+# lab-check: SELECT count(*) AS n, count(DISTINCT email) AS emails, sum(hash(email) % 1000003) AS email_sum, sum(customer_id) AS ids FROM dim_customers
+customers:
+  input: sqlite:${{LAB_CRM_DB}}
+  provider-options:
+    sqlite-reader:
+      query: SELECT customer_id, first_name, last_name, email, city, country, signup_date FROM customers
+anonymize:
+  from: customers
+  transformers:
+  - type: fake
+    mappings:
+      last_name: name.lastName
+      email: internet.email
+    options:
+      seed-column: customer_id
+  - type: project
+    options:
+      drop: first_name
+load:
+  from: anonymize
+  output: duck:${{LAB_WAREHOUSE_DB}}
+  provider-options:
+    duck-writer:
+      table: dim_customers
+      strategy: Recreate

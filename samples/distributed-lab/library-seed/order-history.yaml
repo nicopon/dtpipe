@@ -1,0 +1,24 @@
+# Order history: current orders merged with the archive
+# Two bricks that already cast to the archive schema, merged on the runner.
+# lab-check: SELECT count(*) AS n, sum(order_id) AS ids, count(DISTINCT order_date) AS days FROM fact_orders
+current:
+  input: duck:${{LAB_SALES_DB}}
+  provider-options:
+    duck-reader:
+      query: SELECT CAST(order_id AS BIGINT) AS order_id, CAST(customer_id AS BIGINT) AS customer_id, CAST(product_id AS BIGINT) AS product_id, CAST(quantity AS BIGINT) AS quantity, CAST(order_date AS VARCHAR) AS order_date, status FROM orders
+legacy:
+  input: sqlite:${{LAB_CATALOG_DB}}
+  provider-options:
+    sqlite-reader:
+      query: SELECT order_id, customer_id, product_id, quantity, date(order_date) AS order_date, status FROM legacy_orders
+history:
+  from: current,legacy
+  provider-options:
+    merge: {}
+load:
+  from: history
+  output: duck:${{LAB_WAREHOUSE_DB}}
+  provider-options:
+    duck-writer:
+      table: fact_orders
+      strategy: Recreate

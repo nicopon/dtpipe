@@ -1,0 +1,7 @@
+{
+  "name": "runner-1",
+  "role": "runner",
+  "description": "Runner - no database, carries every step between the bricks",
+  "clientId": "runner-1",
+  "secret": "runner-1-lab-secret"
+}

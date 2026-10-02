@@ -1,0 +1,42 @@
+{
+  "name": "node-3",
+  "description": "Catalog and archive - SQLite",
+  "clientId": "node-3",
+  "secret": "node-3-lab-secret",
+  "datasets": [
+    {
+      "variable": "LAB_CATALOG_DB",
+      "engine": "sqlite",
+      "file": "catalog.sqlite",
+      "description": "products, legacy_orders"
+    }
+  ],
+  "bricks": [
+    {
+      "id": "products",
+      "kind": "source",
+      "title": "Products and prices",
+      "branch": {
+        "input": "sqlite:${{LAB_CATALOG_DB}}",
+        "provider-options": {
+          "sqlite-reader": {
+            "query": "SELECT product_id, category, unit_price FROM products"
+          }
+        }
+      }
+    },
+    {
+      "id": "legacy-orders",
+      "kind": "source",
+      "title": "Archived orders, archive schema",
+      "branch": {
+        "input": "sqlite:${{LAB_CATALOG_DB}}",
+        "provider-options": {
+          "sqlite-reader": {
+            "query": "SELECT order_id, customer_id, product_id, quantity, date(order_date) AS order_date, status FROM legacy_orders"
+          }
+        }
+      }
+    }
+  ]
+}

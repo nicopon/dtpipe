@@ -1,0 +1,42 @@
+# Revenue by country, category and month
+# A three-source join: orders (node-2) joined to customers (node-1) and products (node-3) on the
+# runner, then loaded into the warehouse (node-4): three inbound edges on one node. A join is not a
+# read or a write, so a data node refuses it: move `revenue` to node-3 and the deployment fails.
+# lab-place: revenue=runner-1
+# lab-check: SELECT count(*) AS n, sum(orders) AS orders, round(sum(revenue), 2) AS revenue FROM revenue_by_country
+orders:
+  input: duck:${{LAB_SALES_DB}}
+  provider-options:
+    duck-reader:
+      query: SELECT order_id, customer_id, product_id, quantity, order_date FROM orders WHERE status <> 'refunded'
+customers:
+  input: sqlite:${{LAB_CRM_DB}}
+  provider-options:
+    sqlite-reader:
+      query: SELECT customer_id, country FROM customers
+products:
+  input: sqlite:${{LAB_CATALOG_DB}}
+  provider-options:
+    sqlite-reader:
+      query: SELECT product_id, category, unit_price FROM products
+revenue:
+  from: orders
+  ref:
+  - customers
+  - products
+  provider-options:
+    sql:
+      query: >-
+        SELECT c.country, p.category, date_trunc('month', o.order_date) AS month,
+        COUNT(*) AS orders, SUM(o.quantity * p.unit_price) AS revenue
+        FROM orders o
+        JOIN customers c ON c.customer_id = o.customer_id
+        JOIN products p ON p.product_id = o.product_id
+        GROUP BY ALL
+load:
+  from: revenue
+  output: duck:${{LAB_WAREHOUSE_DB}}
+  provider-options:
+    duck-writer:
+      table: revenue_by_country
+      strategy: Recreate

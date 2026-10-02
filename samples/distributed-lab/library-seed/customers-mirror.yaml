@@ -1,0 +1,17 @@
+# Customers mirrored into the warehouse
+# A source brick wired straight into a sink brick: nothing happens in between, so the rows go
+# from the CRM to the warehouse directly, without a runner. Upserted on customer_id.
+# lab-check: SELECT count(*) AS n, sum(customer_id) AS ids, count(DISTINCT email) AS emails FROM customers_mirror
+customers:
+  input: sqlite:${{LAB_CRM_DB}}
+  provider-options:
+    sqlite-reader:
+      query: SELECT customer_id, first_name, last_name, email, city, country, signup_date FROM customers
+mirror:
+  from: customers
+  output: duck:${{LAB_WAREHOUSE_DB}}
+  provider-options:
+    duck-writer:
+      table: customers_mirror
+      strategy: Upsert
+      key: customer_id

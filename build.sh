@@ -70,29 +70,8 @@ RELEASE_DIR="./dist/release"
 rm -rf "$RELEASE_DIR"
 mkdir -p "$RELEASE_DIR"
 
-# ============================================================
-# Run Tests
-# ============================================================
-echo ""
-echo -e "${YELLOW}Running Tests...${NC}"
-dotnet test tests/DtPipe.Tests/DtPipe.Tests.csproj -c Release --filter "FullyQualifiedName~.Unit."
-
-# The standalone Arrow libraries carry their own suites, and they must block this build while they
-# live in the solution. Discovered rather than listed: a named list is exactly how
-# Apache.Arrow.Serialization.Tests stayed outside both the solution and the build, with two
-# failures in it, until someone ran it by hand.
-for proj in tests/*/*.Tests.csproj; do
-    [ "$proj" = "tests/DtPipe.Tests/DtPipe.Tests.csproj" ] && continue
-    echo ""
-    echo -e "${YELLOW}Running $(basename "$(dirname "$proj")")...${NC}"
-    dotnet test "$proj" -c Release
-done
-
-echo ""
-echo -e "${YELLOW}Performing a clean full rebuild...${NC}"
-dotnet clean DtPipe.sln -c Release
-dotnet build DtPipe.sln -c Release
-
+# Published before the tests below: tests/DtPipe.PipelineNode.Tests spawns this binary, and every
+# discovered test project runs on a tree where dist/release/ was just removed above.
 echo ""
 echo -e "${YELLOW}Building Release (single-file)...${NC}"
 dotnet restore src/DtPipe/DtPipe.csproj -r "$RID"
@@ -115,6 +94,29 @@ echo "  Verifying binary integrity..."
 echo "----------------------------------------"
 "$RELEASE_DIR/dtpipe$EXT" --help > /dev/null
 [ $? -eq 0 ] && echo "  OK: Binary is healthy." || { echo "  FAILED: Binary sanity check failed."; exit 1; }
+
+# ============================================================
+# Run Tests
+# ============================================================
+echo ""
+echo -e "${YELLOW}Running Tests...${NC}"
+dotnet test tests/DtPipe.Tests/DtPipe.Tests.csproj -c Release --filter "FullyQualifiedName~.Unit."
+
+# The standalone Arrow libraries carry their own suites, and they must block this build while they
+# live in the solution. Discovered rather than listed: a named list is exactly how
+# Apache.Arrow.Serialization.Tests stayed outside both the solution and the build, with two
+# failures in it, until someone ran it by hand.
+for proj in tests/*/*.Tests.csproj; do
+    [ "$proj" = "tests/DtPipe.Tests/DtPipe.Tests.csproj" ] && continue
+    echo ""
+    echo -e "${YELLOW}Running $(basename "$(dirname "$proj")")...${NC}"
+    dotnet test "$proj" -c Release
+done
+
+echo ""
+echo -e "${YELLOW}Performing a clean full rebuild...${NC}"
+dotnet clean DtPipe.sln -c Release
+dotnet build DtPipe.sln -c Release
 
 
 # ============================================================

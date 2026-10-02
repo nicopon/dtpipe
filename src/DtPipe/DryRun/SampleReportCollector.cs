@@ -18,13 +18,25 @@ public sealed class SampleReportCollector
     /// <summary>Off by default: an ordinary run collects nothing and keeps no rows alive.</summary>
     public bool Enabled { get; set; }
 
+    /// <summary>
+    /// The alias of a single-branch job's one branch, set by the run that executes it. Its report
+    /// arrives with no alias - a linear run carries none - and is filed under this name, not under a
+    /// fixed "main": a caller looking the branch up by the name the job gives it (<c>split</c>, the
+    /// MCP sample) would otherwise find nothing, or a branch the job does not have.
+    /// </summary>
+    public string? LinearBranch { get; set; }
+
     public void Publish(string? branchAlias, SampleReport report)
     {
         if (!Enabled) return;
-        _reports[branchAlias ?? "main"] = report;
+        _reports[branchAlias ?? LinearBranch ?? "main"] = report;
     }
 
     public IReadOnlyDictionary<string, SampleReport> Reports => _reports;
 
-    public void Clear() => _reports.Clear();
+    public void Clear()
+    {
+        _reports.Clear();
+        LinearBranch = null;
+    }
 }
