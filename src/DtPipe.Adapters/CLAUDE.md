@@ -26,6 +26,13 @@ live under `Adapters/<Name>/`.
 `[CI: ComponentSelectorTests, RemoteUriClaimTests.No_Component_Selector_Strips_A_Remote_Uri —
 catalogue-wide]` `[unchecked: a routing site that bypasses ComponentSelector entirely]`
 
+## A file path may be a FIFO
+
+A file adapter's path can name a FIFO whose other end is another dtpipe process, and .NET cannot tell
+one from a regular file. `System.IO.DisableFileLocking` (`DtPipe.csproj`) keeps the `FileShare`
+flock from excluding the process on the far end, so **never rely on `FileShare` for exclusion**:
+a writer's `FileShare.None` guards nothing on Unix. `[CI: validate_bind.sh on ubuntu-latest]`
+
 ## Writing adapter help (`[Description]` / `[ComponentHelp]`)
 
 `get-adapter-help` is the only view a model gets of an adapter, so these attributes are a contract.
