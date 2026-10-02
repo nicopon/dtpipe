@@ -232,4 +232,5 @@ hosting this fragment disagree with each other, fix the deployment before retryi
 versions are appended to forever, since retention is a deferred product decision, not this registry's
 job. `[local: NodeRegistryTests, AdmissionGateTests]`
 
-`tests/DtPipe.Coordinator.Tests` is outside `DtPipe.sln`, so CI never runs it.
+`tests/DtPipe.Coordinator.Tests` is outside `DtPipe.sln`, so `build.yml` never runs it; `build.sh`
+discovers it, so `agentic-ci.yml` runs it on Linux.

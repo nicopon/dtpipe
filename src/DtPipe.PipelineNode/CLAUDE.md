@@ -76,4 +76,5 @@ Arrow IPC bytes of each edge between the child's stdin/stdout and TransportR.
 `tests/DtPipe.PipelineNode.Tests` spawns the real `dist/release/dtpipe` against an in-process
 TransportR hub (`NodeTestHost`) or a real `DtPipe.Coordinator` hub (`CoordinatorTestHost`, from
 `DtPipe.Coordinator.Tests` - referenced as a project, not duplicated); build the binary first. Both
-projects are outside `DtPipe.sln`, so CI never runs their tests.
+projects are outside `DtPipe.sln`, so `build.yml` never runs their tests; `build.sh` discovers
+them, so `agentic-ci.yml` runs them on Linux.
