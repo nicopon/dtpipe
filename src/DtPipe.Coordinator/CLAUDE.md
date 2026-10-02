@@ -31,6 +31,11 @@ between nodes.
 
 ## Hosting
 
+- **This project is a library, not an application.** It has no `Program`: the host (the lab's
+  `Lab.Coordinator`, or any ASP.NET Core app) owns the identity provider, the listening address and
+  `MapDataHub`, and calls `AddCoordinatorHub`. The project references `Microsoft.AspNetCore.App` as
+  a framework, so a package of it carries no executable.
+  `[CI: validate_distributed_boundary.sh]`
 `AddCoordinatorHub` registers the flow-control matrix, `IPlanRegistry`, `LoggingHubProgressMonitor`,
 the peer-to-peer filter, `INodeRegistry` and `IRunOrchestrator`. It returns TransportR's
 `DataHubBuilder` already pointed at `CoordinatorHub`, and the caller finishes it (identity provider,

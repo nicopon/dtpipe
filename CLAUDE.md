@@ -143,6 +143,10 @@ example to make it checked]`
 `DtPipe.Core` holds abstractions, models and the engine only. `DtPipe.Coordinator` and
 `DtPipe.PipelineNode` reference TransportR as NuGet packages and stay outside `DtPipe.sln`, so CI
 never builds or tests them.
+They are libraries (a host owns `Program`, the identity provider and the address). Nothing else
+in `src/` names TransportR; only they, their tests and the lab do. The lab under
+`samples/distributed-lab` is a host, and it and its sample data are named nowhere else. `[CI: validate_distributed_boundary.sh — names, references and
+project shape, not behaviour]`
 
 Data flow: `args` → `PipelineLexer.Parse` → `PipelineToJobConverter` → `DagOrchestrator` →
 `LinearPipelineService` → `ExportService.RunExportAsync` → `PipelineExecutor` → `IDataWriter`.
