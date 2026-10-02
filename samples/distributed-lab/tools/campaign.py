@@ -8,8 +8,11 @@ before the first trial; this script only plays and records them.
 Cells are F1 ... F11, then S, S3 and S5 for the security volet (a prefix selects: F1 alone is F1 and F10 only as
 F10). Every trial is one line of JSON in <state-dir>/campaign/<campaign-id>/trials.jsonl, and every line the lab
 logs is kept, stamped, in <state-dir>/campaign/<campaign-id>/logs/. The lab must be up on strict nodes
-(./lab.sh up), and nothing else of the lab may be running: the campaign refuses to start otherwise
-(CAMPAIGN_SKIP_PREFLIGHT=1 overrides, for a harness check). Standard library only.
+(./lab.sh up), and the start is checked: nothing of the lab runs that the pid files do not name, the machine is at rest
+(no build, no test run, no TransportR process), and the dtpipe the hosts run starts and reports the frozen commit (HEAD,
+or CAMPAIGN_FROZEN) with a clean tree. The campaign refuses to start otherwise. CAMPAIGN_PREFLIGHT=report runs the same
+checks, prints what they find and plays on (the harness pass); CAMPAIGN_SKIP_PREFLIGHT=1 skips them. Standard library
+only.
 """
 import json, os, shutil, signal, subprocess, sys, tempfile, time, urllib.error
 
@@ -813,16 +816,31 @@ CELL_FUNCS = {"F1": cell_F1, "F2": cell_F2, "F3": cell_F3, "F4": cell_F4, "F5": 
               "F8": cell_F8, "F9": cell_F9, "F10": cell_F10, "F11": cell_F11, "S": cell_S, "S3": cell_S3, "S5": cell_S5}
 
 
+def preflight():
+    """What keeps this machine from judging the lab as it is: a list of (check, finding) pairs, empty when all hold."""
+    repo = os.path.normpath(os.path.join(LAB, "..", ".."))
+    found = [("stray", f"{kind} pid {pid} (parent {ppid}) {args[:140]}") for pid, ppid, kind, args in bench.foreign(STATE, NODES)]
+    found += [("busy", f"pid {pid}: {why}: {args[:140]}") for pid, why, args in bench.busy_machine(STATE, NODES, os.path.dirname(TOXI))]
+    found += [("version", p) for p in bench.frozen_problems(repo, DTPIPE, STATE, NODES, os.environ.get("CAMPAIGN_FROZEN"))]
+    return found
+
+
+REMEDY = {"stray": "stop them (./lab.sh down, then ./lab.sh up)",
+          "busy": "let the work finish, or stop it (`dotnet build-server shutdown` ends the resident compilers)",
+          "version": "rebuild at the frozen commit (./build.sh, then ./lab.sh down and up) and start again"}
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
-    if not os.environ.get("CAMPAIGN_SKIP_PREFLIGHT"):
-        strays = bench.foreign(STATE, NODES)
-        if strays:
-            print("The bench is not clean: these lab processes are not the ones the pid files name.", file=sys.stderr)
-            for pid, ppid, kind, args in strays:
-                print(f"  {kind} pid {pid} (parent {ppid}) {args[:140]}", file=sys.stderr)
-            print("Stop them (or ./lab.sh down, then ./lab.sh up) and start again.", file=sys.stderr)
+    mode = "skip" if os.environ.get("CAMPAIGN_SKIP_PREFLIGHT") else os.environ.get("CAMPAIGN_PREFLIGHT", "refuse")
+    if mode != "skip":
+        found = preflight()
+        for check, what in found:
+            print(f"preflight {check}: {what}", file=sys.stderr)
+        if found and mode != "report":
+            print("The bench is not ready: " + "; ".join(sorted({REMEDY[c] for c, _ in found})) + ".", file=sys.stderr)
             return 2
+        print(f"preflight {'reported' if found else 'clean'}: {len(found)} finding(s), load {os.getloadavg()[0]:.2f}", flush=True)
     stop_logs = follow_logs(STATE, os.path.join(OUT, "logs"))
     try:
         wanted = CELLS or list(CELL_FUNCS)
