@@ -17,7 +17,7 @@ libraries, exactly as their own tests do. It sits outside `DtPipe.sln`: CI never
 ## Quick start
 
 Prerequisites: the .NET 10 SDK, `python3`, a bash shell, network access to nuget.org for the
-TransportR `0.2.0` packages (restored like any other dependency of `DtPipe.Coordinator`), and a
+TransportR `0.3.1` packages (restored like any other dependency of `DtPipe.Coordinator`), and a
 built binary:
 
 ```bash
@@ -187,10 +187,10 @@ afterwards (a fresh instance each) before it accepts the next run.
 - Everything runs on one machine, which the lab uses as a shortcut: `split` samples the sources
   and the query panel opens a node's file from the coordinator's process.
 - The page and `/api` are not authenticated: only the nodes are. Tokens last 12 hours
-  (`--token-lifetime-seconds` changes it). A token is checked when a transfer opens, so a
-  deployment idle longer than its tokens' lifetime has its next run refused (`could not be opened by
-  the hub`): redeploy it, which recreates its nodes with fresh tokens. Keep the lifetime above the
-  longest idle time you expect.
+  (`--token-lifetime-seconds` changes it). Each node renews its token before it expires, so a
+  deployment can sit idle, or run, past its tokens' lifetime. A node that cannot renew (the
+  identity provider unreachable for longer than the renewal advance) is closed by the hub and its
+  runs end.
 - A transfer the hub refuses under the flow matrix shows in the run's verdict as an unresponsive
   fragment: the coordinator's log carries the refusal.
 - One run at a time, as `RunOrchestrator` allows: runs queue. The coordinator is not highly

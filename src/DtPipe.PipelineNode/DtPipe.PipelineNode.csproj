@@ -13,9 +13,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="TransportR" Version="0.2.0" />
-    <PackageReference Include="TransportR.Client.SignalR" Version="0.2.0" />
-    <PackageReference Include="TransportR.Serialization.MessagePack" Version="0.2.0" />
+    <PackageReference Include="TransportR" Version="0.3.1" />
+    <PackageReference Include="TransportR.Client.SignalR" Version="0.3.1" />
+    <PackageReference Include="TransportR.Serialization.MessagePack" Version="0.3.1" />
   </ItemGroup>
 
 </Project>

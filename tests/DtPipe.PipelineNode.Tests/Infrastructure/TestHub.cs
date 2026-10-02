@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TransportR.Hub.SignalR.Access;
 using TransportR.Hub.SignalR.Configuration;
 using TransportR.Hub.SignalR.Hubs;
 using TransportR.Hub.SignalR.Services;
@@ -20,10 +21,12 @@ public sealed class TestHub : CommandHub
         IClientIdentityProvider identityProvider,
         IBridgeManager bridgeManager,
         SignalRTransferInitiator initiator,
+        AccessPolicy policy,
+        ConnectionRegistry connections,
         IOptions<AffinityOptions> affinityOptions,
         ILogger<CommandHub> logger,
-        IFlowControlService? flowControlService = null)
-        : base(stateStore, transferManager, identityProvider, bridgeManager, initiator, affinityOptions, logger, flowControlService)
+        TimeProvider timeProvider)
+        : base(stateStore, transferManager, identityProvider, bridgeManager, initiator, policy, connections, affinityOptions, logger, timeProvider)
     {
     }
 }

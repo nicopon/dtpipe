@@ -25,6 +25,9 @@ between nodes.
   together. `[unchecked]`
 - **A reverse proxy in front of the hub must accept `Expect: 100-continue`.** The client sends it on
   every write stream, and a proxy that answers `417` fails all of them. `[unchecked]`
+- **A reverse proxy that filters by path must let `/api/client/*` through**, as it does
+  `/api/stream/*`: token renewal travels there, and every connection closes at its token's expiry
+  when it is blocked. `[unchecked]`
 
 ## Hosting
 
@@ -188,11 +191,11 @@ the grace.
   (TransportR's hub is highly available only with its Redis store and sticky sessions, and even then
   its transfers are local to the instance), designed as such rather than inferred from reconnections.
   `[local: tools/campaign.py F4 — hosts come back, the reset leaves nothing running]`
-- **A node's token is checked when a transfer opens, not while the node sits idle.** A deployed
-  pipeline left idle past its nodes' token lifetime has its next run refused (`could not be opened
-  by the hub`) until its nodes are recreated: redeploying it does that, with a fresh token. Keep the
-  token lifetime above the longest time a deployment sits idle (the lab issues 12 hours).
-  `[local: tools/campaign.py S5]`
+- **A node renews its own token, and the hub closes a connection whose token ran out.** A node built
+  with `AccessTokenProvider` renews ahead of the expiry, so an idle or a long-running node outlives
+  its token's lifetime. A node given a static token cannot renew: its connection is closed at the
+  expiry. A node that cannot renew has its transfers ended and its connection closed by the hub
+  within its access sweep. `[local: tools/campaign.py S3, S5]`
 
 ## Versions
 

@@ -16,8 +16,8 @@
     <!-- TransportR and TransportR.Hub.SignalR flow transitively through the ProjectReference
          above; only what this test project uses directly (standing in for pipeline nodes) needs
          its own PackageReference. -->
-    <PackageReference Include="TransportR.Client.SignalR" Version="0.2.0" />
-    <PackageReference Include="TransportR.Serialization.MessagePack" Version="0.2.0" />
+    <PackageReference Include="TransportR.Client.SignalR" Version="0.3.1" />
+    <PackageReference Include="TransportR.Serialization.MessagePack" Version="0.3.1" />
 
     <PackageReference Include="Microsoft.AspNetCore.TestHost" Version="10.0.12" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
