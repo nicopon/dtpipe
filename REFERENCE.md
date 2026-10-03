@@ -268,7 +268,7 @@ sits in, wherever it falls among the step's flags.
 | `--skip-null` | | Skip fake generation when the source value is null. Also a `--compute` option: it binds to the step it follows |
 | `--mask` | `"Phone:###-****"` | Partial masking (`#` keeps original char, any other replaces) |
 | `--null` | `"ColName"` | Force a column to NULL |
-| `--overwrite` | `"Status:Active"` | Set a static value for every row in a column |
+| `--overwrite` | `"Status:Active"` | Set a static value for every row in a column. The value is text and the column becomes a string; for a typed constant use `--compute "Col:12345" --compute-types "Col:int32"` |
 | `--format` | `"Display:{First} {Last}"` | [.NET Composite Format](https://learn.microsoft.com/en-us/dotnet/standard/base-types/composite-formatting) using column names as placeholders |
 | `--compute` | `"Col:row.A * 2"` | JS expression, returned as is; a body of statements needs `return`. A result of `undefined` is an error, `null` is an empty value |
 | `--compute-types` | `"Col:int32"` | Declare the CLR type of a computed or new column. Same vocabulary as `--column-types` — see [Type hints](#type-hints) |

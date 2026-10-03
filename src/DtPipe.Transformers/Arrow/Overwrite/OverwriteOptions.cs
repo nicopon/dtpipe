@@ -15,7 +15,7 @@ public class OverwriteOptions : ITransformerOptions
 	public static string Prefix => "overwrite";
 	public static string DisplayName => "Static Overwrite Transformer";
 
-	[ComponentOption(Description = "Column:value mapping to overwrite with static value (repeatable)")]
+	[ComponentOption(Description = "Column:value mapping to overwrite with a static value, always text: the column becomes a string, so use --compute with --compute-types for a typed value (repeatable)")]
 	public IEnumerable<string> Overwrite { get; set; } = Array.Empty<string>();
 
 	[ComponentOption(Description = "Skip overwrite when source value is null")]
