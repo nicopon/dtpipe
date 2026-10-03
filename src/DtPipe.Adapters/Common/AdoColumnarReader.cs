@@ -31,9 +31,6 @@ public abstract partial class AdoColumnarReader : IColumnarStreamReader, IBatchS
     public IReadOnlyList<PipeColumnInfo>? Columns { get; protected set; }
     public Schema? Schema { get; protected set; }
 
-    [GeneratedRegex(@"^\s*(\w+)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
-    private static partial Regex FirstWordRegex();
-
     public abstract Task OpenAsync(CancellationToken ct = default);
 
     public virtual async IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync(
@@ -88,19 +85,5 @@ public abstract partial class AdoColumnarReader : IColumnarStreamReader, IBatchS
     }
 
     protected static void ValidateQueryIsSafeSelect(string query, params string[] additionalAllowedKeywords)
-    {
-        if (string.IsNullOrWhiteSpace(query))
-            throw new ArgumentException("Query cannot be empty.", nameof(query));
-
-        var match = FirstWordRegex().Match(query);
-        if (!match.Success)
-            throw new ArgumentException("Invalid query format.", nameof(query));
-
-        var firstWord = match.Groups[1].Value.ToUpperInvariant();
-        var isAllowed = firstWord == "SELECT" || firstWord == "WITH" || additionalAllowedKeywords.Contains(firstWord, StringComparer.OrdinalIgnoreCase);
-
-        if (!isAllowed)
-            throw new InvalidOperationException(
-                $"Only SELECT/WITH queries are allowed. Detected: {firstWord}. DDL/DML statements are blocked for safety.");
-    }
+        => SqlQueryGuard.RequireReadOnlyStatement(query, additionalAllowedKeywords);
 }

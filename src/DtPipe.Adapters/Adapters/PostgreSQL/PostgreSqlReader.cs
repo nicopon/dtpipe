@@ -32,9 +32,6 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
     public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
     public Schema? Schema { get; private set; }
 
-    [GeneratedRegex(@"^\s*(\w+)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
-    private static partial Regex FirstWordRegex();
-
     public PostgreSqlReader(string connectionString, string query, int timeout = 0)
     {
         ValidateQueryIsSafeSelect(query);
@@ -44,18 +41,7 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
     }
 
     private static void ValidateQueryIsSafeSelect(string query)
-    {
-        if (string.IsNullOrWhiteSpace(query))
-            throw new ArgumentException("Query cannot be empty.", nameof(query));
-
-        var match = FirstWordRegex().Match(query);
-        if (!match.Success)
-            throw new ArgumentException("Invalid query format.", nameof(query));
-
-        var firstWord = match.Groups[1].Value.ToUpperInvariant();
-        if (firstWord != "SELECT" && firstWord != "WITH" && firstWord != "VALUES")
-            throw new InvalidOperationException($"Only SELECT queries are allowed. Detected: {firstWord}");
-    }
+        => SqlQueryGuard.RequireReadOnlyStatement(query, "VALUES");
 
     public async Task OpenAsync(CancellationToken ct = default)
     {

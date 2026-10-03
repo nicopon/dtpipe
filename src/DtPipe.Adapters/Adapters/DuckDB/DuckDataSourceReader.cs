@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
-using System.Text.RegularExpressions;
 using Apache.Arrow;
+using DtPipe.Adapters.Common;
 using DtPipe.Adapters.Shared.Infrastructure.DuckDb;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
@@ -47,9 +47,6 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
 	public int BatchSize { get; set; } = PipelineOptions.DefaultBatchSize;
 	public long MaxBatchBytes { get; set; }
 
-	[GeneratedRegex(@"^\s*(\w+)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
-	private static partial Regex FirstWordRegex();
-
 	// queryTimeout is accepted for call-site parity and ignored: it only ever reached
 	// DuckDBCommand.CommandTimeout, which DuckDB.NET declares to satisfy the ADO contract and
 	// never reads. Cancellation is the token.
@@ -84,21 +81,7 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
 	}
 
 	private static void ValidateQueryIsSafeSelect(string query)
-	{
-		if (string.IsNullOrWhiteSpace(query))
-			throw new ArgumentException("Query cannot be empty.", nameof(query));
-
-		var match = FirstWordRegex().Match(query);
-		if (!match.Success)
-			throw new ArgumentException("Invalid query format.", nameof(query));
-
-		var firstWord = match.Groups[1].Value.ToUpperInvariant();
-
-		if (firstWord != "SELECT" && firstWord != "WITH" && firstWord != "PRAGMA" && firstWord != "DESCRIBE")
-		{
-			throw new InvalidOperationException($"Query must start with SELECT/WITH. Detected: {firstWord}");
-		}
-	}
+		=> SqlQueryGuard.RequireReadOnlyStatement(query, "PRAGMA", "DESCRIBE");
 
 	public async Task OpenAsync(CancellationToken ct = default)
 	{
