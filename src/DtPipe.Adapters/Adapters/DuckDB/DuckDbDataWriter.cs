@@ -347,14 +347,12 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
 
     private async Task SetupUpsertStagingAsync(CancellationToken ct)
     {
+        // Same order as BaseSqlDataWriter.ResolveKeysAsync: the key the target declares, then --key.
         var targetInfo = await InspectTargetAsync(ct);
         if (targetInfo?.PrimaryKeyColumns != null) _keyColumns.AddRange(targetInfo.PrimaryKeyColumns);
 
-        if (!string.IsNullOrEmpty(_options.Key))
-        {
-            _keyColumns.Clear();
+        if (_keyColumns.Count == 0 && !string.IsNullOrEmpty(_options.Key))
             _keyColumns.AddRange(ColumnHelper.ResolveKeyColumns(_options.Key, _columns!));
-        }
 
         if (_keyColumns.Count == 0) throw new InvalidOperationException($"Strategy {_options.Strategy} requires a defined Key.");
 
@@ -455,9 +453,29 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
             return new TargetSchemaInfo([], false, null, null, null);
 
         var columns = new List<TargetColumnInfo>();
-        var pkCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pkCols = new List<string>();
+        var uniqueCols = new List<string>();
 
         using var cmd = _connection!.CreateCommand();
+
+        // Constraints, read the way the other engines read them: the primary key in declaration order,
+        // and every column under a UNIQUE constraint. A table in another schema that shares the name
+        // must not lend its key, so the lookup is pinned to the schema (the connection's own by default).
+        var constraintSchema = string.IsNullOrEmpty(schemaName) ? "current_schema()" : $"'{schemaName.Replace("'", "''")}'";
+        cmd.CommandText =
+            "SELECT constraint_type, unnest(constraint_column_names) FROM duckdb_constraints() "
+          + $"WHERE LOWER(table_name) = LOWER('{tableName.Replace("'", "''")}') AND LOWER(schema_name) = LOWER({constraintSchema}) "
+          + "AND constraint_type IN ('PRIMARY KEY', 'UNIQUE')";
+        if (cmd is System.Data.Common.DbCommand constraintCmd)
+        {
+            using var constraintReader = await constraintCmd.ExecuteReaderAsync(ct);
+            while (await constraintReader.ReadAsync(ct))
+            {
+                var target = constraintReader.GetString(0) == "PRIMARY KEY" ? pkCols : uniqueCols;
+                target.Add(constraintReader.GetString(1));
+            }
+        }
+
         var schemaFilter = string.IsNullOrEmpty(schemaName) ? "" : $"AND LOWER(table_schema) = LOWER('{schemaName}')";
         cmd.CommandText = $"SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE LOWER(table_name) = LOWER('{tableName}') {schemaFilter} ORDER BY ordinal_position";
 
@@ -471,7 +489,10 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
                 var isNullableStr = reader.GetString(2);
                 bool notNull = string.Equals(isNullableStr, "NO", StringComparison.OrdinalIgnoreCase);
 
-                columns.Add(new TargetColumnInfo(name, type.ToUpperInvariant(), _typeMapper.MapFromProviderType(type), !notNull, false, false, null));
+                columns.Add(new TargetColumnInfo(
+                    name, type.ToUpperInvariant(), _typeMapper.MapFromProviderType(type), !notNull,
+                    pkCols.Contains(name, StringComparer.OrdinalIgnoreCase),
+                    uniqueCols.Contains(name, StringComparer.OrdinalIgnoreCase), null));
             }
         }
 
@@ -493,7 +514,8 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
         }
         catch { /* Fallback if count fails */ }
 
-        _cachedSchema = new TargetSchemaInfo(columns, true, rowCount, null, pkCols.Count > 0 ? pkCols.ToList() : null);
+        _cachedSchema = new TargetSchemaInfo(columns, true, rowCount, null,
+            pkCols.Count > 0 ? pkCols : null, uniqueCols.Count > 0 ? uniqueCols.Distinct(StringComparer.OrdinalIgnoreCase).ToList() : null);
         return _cachedSchema;
     }
 

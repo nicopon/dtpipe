@@ -231,4 +231,87 @@ public class DuckDBIntegrationTests : IAsyncLifetime
 			if (File.Exists(duckDbPath)) File.Delete(duckDbPath);
 		}
 	}
+
+	[Fact]
+	public async Task DuckDbDataWriter_Inspect_ReadsThePrimaryKeyAndUniqueColumnsOfTheTarget()
+	{
+		var duckDbPath = Path.Combine(Path.GetTempPath(), $"test_inspect_keys_{Guid.NewGuid():N}.duckdb");
+		var connectionString = $"Data Source={duckDbPath}";
+
+		try
+		{
+			await using (var connection = new DuckDBConnection(connectionString))
+			{
+				await connection.OpenAsync();
+				using var cmd = connection.CreateCommand();
+				cmd.CommandText = "CREATE TABLE keyed (region VARCHAR, id INTEGER, email VARCHAR UNIQUE, note VARCHAR, PRIMARY KEY (region, id))";
+				await cmd.ExecuteNonQueryAsync();
+				cmd.CommandText = "CREATE TABLE other_keyed (note VARCHAR)";
+				await cmd.ExecuteNonQueryAsync();
+			}
+
+			var columns = new List<Core.Models.PipeColumnInfo> { new("region", typeof(string), true), new("id", typeof(int), false) };
+			await using var writer = new DuckDbDataWriter(connectionString,
+				new DuckDbWriterOptions { Table = "keyed", Strategy = DuckDbWriteStrategy.Append },
+				NullLogger<DuckDbDataWriter>.Instance, DuckDbTypeConverter.Instance);
+			await writer.InitializeAsync(columns);
+
+			var schema = await writer.InspectTargetAsync();
+
+			schema!.PrimaryKeyColumns.Should().Equal("region", "id");
+			schema.UniqueColumns.Should().Equal("email");
+			schema.Columns.Where(c => c.IsPrimaryKey).Select(c => c.Name).Should().BeEquivalentTo("region", "id");
+			schema.Columns.Single(c => c.Name == "email").IsUnique.Should().BeTrue();
+			schema.Columns.Single(c => c.Name == "note").IsPrimaryKey.Should().BeFalse();
+		}
+		finally
+		{
+			if (File.Exists(duckDbPath)) File.Delete(duckDbPath);
+		}
+	}
+
+	[Fact]
+	public async Task DuckDbDataWriter_Upsert_UsesTheTargetPrimaryKeyWhenNoKeyIsGiven()
+	{
+		var duckDbPath = Path.Combine(Path.GetTempPath(), $"test_upsert_pk_{Guid.NewGuid():N}.duckdb");
+		var connectionString = $"Data Source={duckDbPath}";
+
+		try
+		{
+			await using (var connection = new DuckDBConnection(connectionString))
+			{
+				await connection.OpenAsync();
+				using var cmd = connection.CreateCommand();
+				cmd.CommandText = "CREATE TABLE people (id INTEGER PRIMARY KEY, name VARCHAR)";
+				await cmd.ExecuteNonQueryAsync();
+				cmd.CommandText = "INSERT INTO people VALUES (1, 'old'), (2, 'kept')";
+				await cmd.ExecuteNonQueryAsync();
+			}
+
+			var columns = new List<Core.Models.PipeColumnInfo> { new("id", typeof(int), false), new("name", typeof(string), true) };
+			var batch = new List<object?[]> { new object?[] { 1, "new" }, new object?[] { 3, "added" } };
+
+			await using (var writer = new DuckDbDataWriter(connectionString,
+				new DuckDbWriterOptions { Table = "people", Strategy = DuckDbWriteStrategy.Upsert },
+				NullLogger<DuckDbDataWriter>.Instance, DuckDbTypeConverter.Instance))
+			{
+				await writer.InitializeAsync(columns);
+				await writer.WriteRecordBatchAsync(batch.ToRecordBatch(columns));
+				await writer.CompleteAsync();
+			}
+
+			await using var check = new DuckDBConnection(connectionString);
+			await check.OpenAsync();
+			using var read = check.CreateCommand();
+			read.CommandText = "SELECT id, name FROM people ORDER BY id";
+			var rows = new List<(int, string)>();
+			using (var reader = await read.ExecuteReaderAsync())
+				while (await reader.ReadAsync()) rows.Add((reader.GetInt32(0), reader.GetString(1)));
+			rows.Should().Equal((1, "new"), (2, "kept"), (3, "added"));
+		}
+		finally
+		{
+			if (File.Exists(duckDbPath)) File.Delete(duckDbPath);
+		}
+	}
 }
