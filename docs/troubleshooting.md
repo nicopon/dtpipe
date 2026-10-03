@@ -36,7 +36,7 @@ These have no error message to search for, which is why they are collected here.
 | A flag seems to be ignored | It landed in the wrong stage or branch: reader options go before the alias, writer options after `-o` | [DAG pipelines](guides/dag.md#the-rules-that-catch-people-out) |
 | An incremental run re-reads everything each time | The `${{cursor://…}}` resolver is missing from the query — the flags track the mark, the resolver is what filters. The run warns | [Incremental loading](guides/incremental.md#two-flags-that-track-one-resolver-that-filters) |
 | `--cursor` never advances on Oracle | The column name is not spelled as the reader returns it — upper case for an unquoted identifier | [Incremental loading](guides/incremental.md#things-that-bite) |
-| Anonymized values do not match between two tables | The generated value depends on the whole `--fake` set of the run, not only on the seed | [Anonymization](guides/anonymization.md#joins-have-to-survive--seed-the-generator-by-value) |
+| Anonymized values do not match between two tables | A global `--fake-seed` is one sequence shared by every column, so the whole `--fake` set matters; `--fake-seed-column` does not have that limit | [Anonymization](guides/anonymization.md#joins-have-to-survive--seed-the-generator-by-value) |
 | A table dtpipe created is not reachable as you typed it | Identifier casing: Oracle folds up, PostgreSQL folds down | [dtpipe and .NET](dotnet.md#oracle-and-sql-server) |
 | MySQL bulk load warns and slows down | `local_infile` is OFF on the server (default since MySQL 8) | [MySQL](connections/mysql.md) |
 

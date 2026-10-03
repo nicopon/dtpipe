@@ -38,8 +38,12 @@ public class TransformerPipelineBuilder
 
     /// <summary>
     /// Groups raw args into ordered transformer flag groups using the canonical rule:
-    /// consecutive options belonging to the same factory form one group; re-occurrence of
-    /// the factory's trigger flag starts a new group of the same factory.
+    /// consecutive options belonging to the same factory form one group, so a trailing option
+    /// reaches every trigger value before it. A trigger that cannot hold a second value
+    /// (non-repeatable) opens a new group of the same factory instead.
+    /// A scalar option given twice in one group is accepted when both values agree and refused
+    /// when they differ: one instance holds one value. A flag several factories declare binds
+    /// only through the factory in context; anywhere else it is refused.
     /// Single source shared by live execution (<see cref="Build"/>) and --export-job.
     /// </summary>
     public List<(IDataTransformerFactory Factory, List<(string Option, string Value)> Pairs)> CollectGroups(string[] args)
@@ -49,6 +53,7 @@ public class TransformerPipelineBuilder
 
         // Build option maps
         var globalOptionMap = new Dictionary<string, (IDataTransformerFactory Factory, FlagDef Flag)>(StringComparer.OrdinalIgnoreCase);
+        var flagOwners = new Dictionary<string, List<IDataTransformerFactory>>(StringComparer.OrdinalIgnoreCase);
         var perFactoryMap = new Dictionary<IDataTransformerFactory, Dictionary<string, FlagDef>>();
 
         foreach (var factory in transformerFactories)
@@ -66,13 +71,22 @@ public class TransformerPipelineBuilder
                 {
                     globalOptionMap[flag.Name] = (factory, flag);
                     factoryDict[flag.Name] = flag;
+                    AddOwner(flag.Name, factory);
                 }
                 foreach (var alias in flag.Aliases)
                 {
                     globalOptionMap[alias] = (factory, flag);
                     factoryDict[alias] = flag;
+                    AddOwner(alias, factory);
                 }
             }
+        }
+
+        void AddOwner(string name, IDataTransformerFactory factory)
+        {
+            if (!flagOwners.TryGetValue(name, out var owners))
+                flagOwners[name] = owners = new List<IDataTransformerFactory>();
+            if (!owners.Contains(factory)) owners.Add(factory);
         }
 
         // Group consecutive args by transformer type
@@ -94,20 +108,28 @@ public class TransformerPipelineBuilder
             (IDataTransformerFactory Factory, FlagDef Flag)? match = null;
             if (currentFactory != null && perFactoryMap[currentFactory].TryGetValue(arg, out var currentFlag))
             {
-                // Trigger Detection: if this is the "trigger" flag (matching prefix)
-                // and we already have it in currentOptions, it starts a new instance.
+                // Trigger Detection: a repeatable trigger extends the open instance, so the
+                // options that follow reach every value. A trigger that holds one value only
+                // starts a new instance of the same factory when it is already present.
                 var triggerName = $"--{currentFactory.ComponentName.ToLowerInvariant()}";
                 bool isTrigger = string.Equals(arg, triggerName, StringComparison.OrdinalIgnoreCase);
 
-                if (isTrigger && currentOptions.Any(o => string.Equals(o.Key, arg, StringComparison.OrdinalIgnoreCase)))
+                if (isTrigger
+                    && currentFlag.Arity != FlagArity.Repeatable
+                    && currentOptions.Any(o => string.Equals(o.Key, arg, StringComparison.OrdinalIgnoreCase)))
                 {
-                    // Force flush to start new instance of the same factory
                     FlushCurrent();
                 }
 
                 match = (currentFactory, currentFlag);
             }
-            // 2. Global lookup
+            // 2. Global lookup: a flag several factories declare has no owner outside its context.
+            else if (flagOwners.TryGetValue(arg, out var owners) && owners.Count > 1)
+            {
+                throw new InvalidOperationException(
+                    $"Flag '{arg}' is declared by several transformers ({string.Join(", ", owners.Select(o => $"--{o.ComponentName.ToLowerInvariant()}"))}). " +
+                    "Place it right after a flag of the transformer it belongs to.");
+            }
             else if (globalOptionMap.TryGetValue(arg, out var globalMatch))
             {
                 match = globalMatch;
@@ -148,7 +170,16 @@ public class TransformerPipelineBuilder
 
                 if (value != null)
                 {
-                    currentOptions.Add((arg, value));
+                    var heldIndex = flag.Arity == FlagArity.Repeatable
+                        ? -1
+                        : currentOptions.FindIndex(o => string.Equals(o.Key, arg, StringComparison.OrdinalIgnoreCase));
+
+                    if (heldIndex < 0)
+                        currentOptions.Add((arg, value));
+                    else if (!string.Equals(currentOptions[heldIndex].Value, value, StringComparison.Ordinal))
+                        throw new InvalidOperationException(
+                            $"Flag '{arg}' is given twice with different values ('{currentOptions[heldIndex].Value}', '{value}') to the same --{factory.ComponentName.ToLowerInvariant()} step. " +
+                            "Consecutive flags of one transformer form one step: separate the steps with another transformer's flag or a new branch (--from) to give them different values.");
                 }
             }
         }

@@ -30,6 +30,14 @@ Provider wiring: `RegisterReader<T>()` / `RegisterWriter<T>()` / `RegisterStream
 reflects on `[ComponentOption]`; `FlagBinder.Bind(options, args, registry)` binds at execution.
 Options live scoped in `OptionsRegistry`, keyed by type.
 
+`TransformerPipelineBuilder.CollectGroups` is the single source of transformer steps, shared by the
+live run and `--export-job`. Consecutive flags of one factory are **one step**, so an option reaches
+every trigger value before and after it; a trigger that is not repeatable opens a new step. Two
+values for one scalar option in a step are refused unless equal. A flag several factories declare
+(`--skip-null`) binds only through the factory in context. Derive each rule from `FlagArity` and the
+declared owners, never from a transformer's name. `[CI: OrderedPipelineTests]`
+`[local: validate_doc_examples.sh]`
+
 A flag that binds nothing must fail, never exit 0 with no effect. Two causes look identical from
 outside — tell them apart first:
 - **The component does not own the option**: `PipelineToJobConverter.RejectFlagsThatBindToNothing`

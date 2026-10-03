@@ -26,7 +26,7 @@ public class OrderedPipelineTests
 	public OrderedPipelineTests()
 	{
 		_fakeFactory = new Mock<IDataTransformerFactory>();
-		SetupFactory(_fakeFactory, "--fake", FlagArity.Scalar, "-f");
+		SetupFactory(_fakeFactory, "--fake", FlagArity.Repeatable, "-f");
 
 		_nullFactory = new Mock<IDataTransformerFactory>();
 		SetupFactory(_nullFactory, "--null", FlagArity.Scalar);
@@ -102,46 +102,165 @@ public class OrderedPipelineTests
 	}
 
 	[Fact]
-	public void Build_ShouldGroupConsecutiveTransformers_OfTheSameType()
+	public void Build_ShouldMergeConsecutiveTriggers_OfARepeatableTransformer()
 	{
 		// Arrange
 		var builder = new TransformerPipelineBuilder(_factories);
 		var args = new[]
 		{
 			"--fake", "A:a",
-			"--fake", "B:b", // Should group with A
-            "--null", "C",
-			"--fake", "D:d"  // Should NOT group
-        };
+			"--fake", "B:b", // Same step as A
+			"--null", "C",
+			"--fake", "D:d"  // Not consecutive with A and B: its own step
+		};
 
-		var fakeGroup1 = new Mock<IDataTransformer>();
-		var fakeGroup1bis = new Mock<IDataTransformer>();
-		var fakeGroup2 = new Mock<IDataTransformer>();
+		var fakeAB = new Mock<IDataTransformer>();
+		var fakeD = new Mock<IDataTransformer>();
 		var nullGroup = new Mock<IDataTransformer>();
 
-		// Expected behavior: every --fake is a trigger and creates a new instance if --fake was already seen in current group
-		_fakeFactory.Setup(f => f.CreateFromOptions(It.Is<DtPipe.Transformers.Arrow.Fake.FakeOptions>(o => o.Fake.Count == 1 && o.Fake.Contains("A:a"))))
-			.Returns(fakeGroup1.Object);
-
-		_fakeFactory.Setup(f => f.CreateFromOptions(It.Is<DtPipe.Transformers.Arrow.Fake.FakeOptions>(o => o.Fake.Count == 1 && o.Fake.Contains("B:b"))))
-			.Returns(fakeGroup1bis.Object);
-
+		_fakeFactory.Setup(f => f.CreateFromOptions(It.Is<DtPipe.Transformers.Arrow.Fake.FakeOptions>(o => o.Fake.SequenceEqual(new[] { "A:a", "B:b" }))))
+			.Returns(fakeAB.Object);
 		_nullFactory.Setup(f => f.CreateFromOptions(It.Is<DtPipe.Transformers.Arrow.Null.NullOptions>(o => o.Columns.Contains("C"))))
 			.Returns(nullGroup.Object);
-
-		_fakeFactory.Setup(f => f.CreateFromOptions(It.Is<DtPipe.Transformers.Arrow.Fake.FakeOptions>(o => o.Fake.Count == 1 && o.Fake.Contains("D:d"))))
-			.Returns(fakeGroup2.Object);
+		_fakeFactory.Setup(f => f.CreateFromOptions(It.Is<DtPipe.Transformers.Arrow.Fake.FakeOptions>(o => o.Fake.SequenceEqual(new[] { "D:d" }))))
+			.Returns(fakeD.Object);
 
 		// Act
 		var pipeline = builder.Build(args);
 
 		// Assert
-		pipeline.Should().HaveCount(4);
-		pipeline[0].Should().Be(fakeGroup1.Object);    // Fake [A]
-		pipeline[1].Should().Be(fakeGroup1bis.Object); // Fake [B]
-		pipeline[2].Should().Be(nullGroup.Object);     // Null [C]
-		pipeline[3].Should().Be(fakeGroup2.Object);    // Fake [D]
+		pipeline.Should().Equal(fakeAB.Object, nullGroup.Object, fakeD.Object);
 	}
+
+	[Fact]
+	public void Build_ShouldApplyATrailingOption_ToEveryMergedTrigger()
+	{
+		// Arrange
+		var builder = new TransformerPipelineBuilder(_factories);
+		SetupFakeLocale();
+		var args = new[] { "--fake", "A:a", "--fake-locale", "fr", "--fake", "B:b", "--fake", "C:c" };
+		var merged = new Mock<IDataTransformer>();
+
+		_fakeFactory.Setup(f => f.CreateFromOptions(It.Is<DtPipe.Transformers.Arrow.Fake.FakeOptions>(o =>
+			o.Fake.SequenceEqual(new[] { "A:a", "B:b", "C:c" }) && o.Locale == "fr")))
+			.Returns(merged.Object);
+
+		// Act
+		var pipeline = builder.Build(args);
+
+		// Assert
+		pipeline.Should().Equal(merged.Object);
+	}
+
+	[Fact]
+	public void Build_ShouldAcceptARepeatedScalarOption_WhenTheValuesAgree()
+	{
+		// Arrange
+		var builder = new TransformerPipelineBuilder(_factories);
+		SetupFakeLocale();
+		var args = new[] { "--fake", "A:a", "--fake-locale", "fr", "--fake", "B:b", "--fake-locale", "fr" };
+		var merged = new Mock<IDataTransformer>();
+
+		_fakeFactory.Setup(f => f.CreateFromOptions(It.Is<DtPipe.Transformers.Arrow.Fake.FakeOptions>(o =>
+			o.Fake.SequenceEqual(new[] { "A:a", "B:b" }) && o.Locale == "fr")))
+			.Returns(merged.Object);
+
+		// Act
+		var pipeline = builder.Build(args);
+
+		// Assert
+		pipeline.Should().Equal(merged.Object);
+	}
+
+	[Fact]
+	public void Build_ShouldRefuseARepeatedScalarOption_WhenTheValuesDiffer()
+	{
+		// Arrange
+		var builder = new TransformerPipelineBuilder(_factories);
+		SetupFakeLocale();
+		var args = new[] { "--fake", "A:a", "--fake-locale", "fr", "--fake", "B:b", "--fake-locale", "en" };
+
+		// Act
+		var act = () => builder.Build(args);
+
+		// Assert
+		act.Should().Throw<InvalidOperationException>().WithMessage("*--fake-locale*'fr'*'en'*");
+	}
+
+	[Fact]
+	public void Build_ShouldKeepDifferentValues_WhenAnotherTransformerSeparatesTheSteps()
+	{
+		// Arrange
+		var builder = new TransformerPipelineBuilder(_factories);
+		SetupFakeLocale();
+		var args = new[] { "--fake", "A:a", "--fake-locale", "fr", "--null", "C", "--fake", "B:b", "--fake-locale", "en" };
+		var french = new Mock<IDataTransformer>();
+		var english = new Mock<IDataTransformer>();
+		var nullGroup = new Mock<IDataTransformer>();
+
+		_fakeFactory.Setup(f => f.CreateFromOptions(It.Is<DtPipe.Transformers.Arrow.Fake.FakeOptions>(o => o.Locale == "fr")))
+			.Returns(french.Object);
+		_fakeFactory.Setup(f => f.CreateFromOptions(It.Is<DtPipe.Transformers.Arrow.Fake.FakeOptions>(o => o.Locale == "en")))
+			.Returns(english.Object);
+		_nullFactory.Setup(f => f.CreateFromOptions(It.IsAny<DtPipe.Transformers.Arrow.Null.NullOptions>()))
+			.Returns(nullGroup.Object);
+
+		// Act
+		var pipeline = builder.Build(args);
+
+		// Assert
+		pipeline.Should().Equal(french.Object, nullGroup.Object, english.Object);
+	}
+
+	[Fact]
+	public void Build_ShouldOpenANewStep_WhenAScalarTriggerRepeats()
+	{
+		// Arrange: a trigger holding one value cannot take a second, so each occurrence is a step.
+		var builder = new TransformerPipelineBuilder(_factories);
+		var args = new[] { "--null", "A", "--null", "B" };
+		var first = new Mock<IDataTransformer>();
+		var second = new Mock<IDataTransformer>();
+
+		_nullFactory.Setup(f => f.CreateFromOptions(It.Is<DtPipe.Transformers.Arrow.Null.NullOptions>(o => o.Columns.Contains("A"))))
+			.Returns(first.Object);
+		_nullFactory.Setup(f => f.CreateFromOptions(It.Is<DtPipe.Transformers.Arrow.Null.NullOptions>(o => o.Columns.Contains("B"))))
+			.Returns(second.Object);
+
+		// Act
+		var pipeline = builder.Build(args);
+
+		// Assert
+		pipeline.Should().Equal(first.Object, second.Object);
+	}
+
+	[Fact]
+	public void Build_ShouldRefuseAFlagSeveralTransformersDeclare_OutsideItsContext()
+	{
+		// Arrange: --skip-null belongs to both fake and format; after --null it has no owner.
+		var builder = new TransformerPipelineBuilder(_factories);
+		var skipNull = new FlagDef("--skip-null", System.Array.Empty<string>(), FlagArity.Boolean, FlagScope.PerBranch, "skip");
+		_fakeFactory.As<ICliContributor>().Setup(f => f.GetFlagDefs()).Returns(new List<FlagDef> { FakeTrigger(), skipNull });
+		_formatFactory.As<ICliContributor>().Setup(f => f.GetFlagDefs()).Returns(new List<FlagDef>
+		{
+			new("--format", System.Array.Empty<string>(), FlagArity.Repeatable, FlagScope.PerBranch, "format"), skipNull
+		});
+
+		// Act
+		var act = () => builder.Build(new[] { "--null", "A", "--skip-null" });
+
+		// Assert
+		act.Should().Throw<InvalidOperationException>().WithMessage("*--skip-null*--fake*--format*");
+	}
+
+	private static FlagDef FakeTrigger()
+		=> new("--fake", System.Array.Empty<string>(), FlagArity.Repeatable, FlagScope.PerBranch, "fake");
+
+	private void SetupFakeLocale()
+		=> _fakeFactory.As<ICliContributor>().Setup(f => f.GetFlagDefs()).Returns(new List<FlagDef>
+		{
+			FakeTrigger(),
+			new("--fake-locale", System.Array.Empty<string>(), FlagArity.Scalar, FlagScope.PerBranch, "locale")
+		});
 
 	[Fact]
 	public void Build_ShouldHandleFlags_WithoutConsumingNextToken()

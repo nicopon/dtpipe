@@ -239,12 +239,24 @@ strings:
 ## Data Transformations
 
 Transformers execute in left-to-right order. Consecutive flags of the same type are grouped
-into one step; a different flag type starts a new step.
+into one step; a different flag type starts a new step. An option applies to the whole step it
+sits in, wherever it falls among the step's flags.
 
 ```
---fake A --fake B --format C --fake D
-→  FakeTransformer(A, B) → FormatTransformer(C) → FakeTransformer(D)
+--fake A --fake B --fake-locale fr --format C --fake D
+→  FakeTransformer(A, B, locale fr) → FormatTransformer(C) → FakeTransformer(D)
 ```
+
+- **One step holds one value per option.** Giving the same option twice in a step is accepted when
+  both values agree and refused when they differ. To run two `--fake` groups with different
+  locales or seeds, put another transformer's flag between them, or use a separate branch.
+- **A step's mappings read the columns the step receives.** `--compute "b:1" --compute
+  "c:row.b + 1"` fails with `Column 'b' not found`: both are one step, and `b` does not exist yet.
+  Put the dependent mapping in a later step — another transformer's flag between the two, or a
+  new branch (`--from`). `--fake`, `--format` and `--expand` mappings may use what an earlier
+  mapping of the same step produced.
+- **`--skip-null` belongs to `--fake` and to `--compute`.** It binds to the step it follows and is
+  refused anywhere else, since both claim it.
 
 | Flag | Syntax | Description |
 |:---|:---|:---|
@@ -253,7 +265,7 @@ into one step; a different flag type starts a new step.
 | `--fake-seed` | `12345` | Global seed for reproducible random fakes (also acts as a base offset for deterministic row/column faking) |
 | `--fake-seed-column` | `"UserId"` or `"Region,Branch"` | Column(s) used as a deterministic seed (same input -> same output). Supports comma-separated columns for composite seeds. |
 | `--fake-seed-row` | | Row-index based deterministic mode (row N always gets the same values). Formerly `--fake-deterministic` (deprecated, throws error). |
-| `--skip-null` | | Skip fake generation when the source value is null |
+| `--skip-null` | | Skip fake generation when the source value is null. Also a `--compute` option: it binds to the step it follows |
 | `--mask` | `"Phone:###-****"` | Partial masking (`#` keeps original char, any other replaces) |
 | `--null` | `"ColName"` | Force a column to NULL |
 | `--overwrite` | `"Status:Active"` | Set a static value for every row in a column |
@@ -620,9 +632,10 @@ Global scalar flags (`--log`, `--metrics-path`, …) may appear only once per co
 The SQL query of a branch must come from exactly one source: an explicit `--sql "<query>"`
 **or** one positional query — combining both is an error.
 
-Transformer options are the exception: a new transformer **instance** starts at every
-trigger-flag recurrence (`--fake A --fake-seed-row --fake B --fake-seed-row` builds two
-instances), so repeating a transformer option configures the next instance and is legal.
+Transformer options are the exception: consecutive flags of one transformer form one step, so
+an option may repeat inside it (`--fake A --fake-seed-row --fake B --fake-seed-row`) as long as
+every occurrence carries the same value. Different values are refused — see
+[Data Transformations](#data-transformations).
 
 > **SQL engine**: The `--sql` processor uses DuckDB internally — the same engine available as a
 > read/write provider (`duck:`). This means all DuckDB SQL extensions and functions are available in

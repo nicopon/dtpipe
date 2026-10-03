@@ -89,12 +89,11 @@ Two separate runs, two separate files, and the foreign key still points where it
 column names differ — `email` here, `customer_email` there — and that is fine: the name plays no
 part, only the seed value does.
 
-> [!WARNING]
-> **The generated value depends on the whole `--fake` set of the run, not just on the seed.**
-> Adding a second `--fake` mapping, or reordering two of them, changes what the first one produces
-> — so two pipelines that must agree have to declare **the same mappings in the same order**. In
-> practice today that means one `--fake` per pipeline, as above. Verify a cross-table run before
-> relying on it: anonymize both sides, then join the two outputs and check the row count.
+> [!NOTE]
+> **With `--fake-seed-column` or `--fake-seed-row`, each column depends only on its own mapping.**
+> Adding a second `--fake`, or reordering two of them, leaves the first column's values alone.
+> A global `--fake-seed` is the exception: it feeds one sequence shared by every column, so
+> adding or reordering a mapping changes what the others produce.
 
 | Mode | What it is a function of | Use it for |
 |:---|:---|:---|

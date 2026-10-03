@@ -223,6 +223,50 @@ matched
 3
 EOF
 
+# A second --fake leaves the first column's values alone under --fake-seed-column: the claim of the
+# note above the seed table. Both runs seed the same email mapping; only the second adds a step.
+"$DTPIPE" -i cust_key.csv --fake "email:internet.email" \
+          --fake-seed-column customer_id -o one_fake.csv --no-stats > /dev/null 2>&1
+"$DTPIPE" -i cust_key.csv --fake "email:internet.email" --fake "name:name.fullName" \
+          --fake-seed-column customer_id -o two_fakes.csv --no-stats > /dev/null 2>&1
+if [ "$(cut -d, -f2 one_fake.csv | tr -d '\r')" = "$(cut -d, -f2 two_fakes.csv | tr -d '\r')" ]; then
+    pass "a second --fake leaves the first column's seeded values alone"
+else
+    bad "a second --fake leaves the first column's seeded values alone"
+fi
+
+# The step rules of REFERENCE.md#data-transformations: an option reaches the whole step, two values
+# for one option are refused, and a mapping cannot read a column its own step creates.
+"$DTPIPE" -i cust_key.csv --fake "email:internet.email" --fake "name:name.fullName" \
+          --fake-locale fr --fake-seed 7 --export-job step.yaml --no-stats > /dev/null 2>&1
+if [ "$(grep -c 'type: fake' step.yaml)" = "1" ] && grep -q 'locale: fr' step.yaml; then
+    pass "consecutive --fake flags are one step and share its --fake-locale"
+else
+    bad "consecutive --fake flags are one step and share its --fake-locale"
+fi
+
+if "$DTPIPE" -i cust_key.csv --fake "email:internet.email" --fake-locale fr \
+             --fake "name:name.fullName" --fake-locale en \
+             -o conflict.csv --no-stats > /dev/null 2>&1; then
+    bad "two different --fake-locale values in one step are refused"
+else
+    pass "two different --fake-locale values in one step are refused"
+fi
+
+if "$DTPIPE" -i cust_key.csv --compute "b:1" --compute "c:row.b + 1" \
+             -o same_step.csv --no-stats > /dev/null 2>&1; then
+    bad "a --compute cannot read a column created by the --compute beside it"
+else
+    pass "a --compute cannot read a column created by the --compute beside it"
+fi
+"$DTPIPE" -i cust_key.csv --compute "b:1" --filter "true" --compute "c:row.b + 1" \
+          -o later_step.csv --no-stats > /dev/null 2>&1
+if [ "$(head -1 later_step.csv | tr -d '\r')" = "customer_id,email,name,b,c" ]; then
+    pass "a --compute in a later step reads the column an earlier step created"
+else
+    bad "a --compute in a later step reads the column an earlier step created"
+fi
+
 # An unseeded --fake is random by design: assert the shape, never the values.
 "$DTPIPE" -i emp.csv --fake "name:name.fullName" --fake "email:internet.email" \
           --null salary -o emp_anon.csv --no-stats > /dev/null 2>&1
