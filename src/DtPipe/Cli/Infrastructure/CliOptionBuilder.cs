@@ -50,10 +50,18 @@ public static class CliOptionBuilder
 			var isList = propType != typeof(string) && typeof(System.Collections.IEnumerable).IsAssignableFrom(propType);
 
 			var arity = FlagArity.Scalar;
+			var booleanValued = false;
 			if (isList) arity = FlagArity.Repeatable;
-			else if (GetUnderlyingType(propType) == typeof(bool)) arity = FlagArity.Boolean;
+			else if (GetUnderlyingType(propType) == typeof(bool))
+			{
+				// A switch turns an option on, so it only means something for an option that is
+				// off by default. One that starts on takes true|false, or nothing could turn it off.
+				booleanValued = defaultInstance is not null && property.GetValue(defaultInstance) is true;
+				arity = booleanValued ? FlagArity.Scalar : FlagArity.Boolean;
+			}
 
-			flags.Add(new FlagDef(flagName, cliOptionAttr?.Aliases ?? Array.Empty<string>(), arity, scope, description));
+			flags.Add(new FlagDef(flagName, cliOptionAttr?.Aliases ?? Array.Empty<string>(), arity, scope, description,
+				BooleanValued: booleanValued));
 		}
 		return flags;
 	}

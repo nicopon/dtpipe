@@ -45,11 +45,17 @@ public class PipelineLexer
         // whatever follows it arrives here as a bare token.
         string? lastUnknownFlag = null;
 
+        // The switch last seen, if it was the immediately preceding token. A switch takes no value,
+        // so a `true`/`false` after it arrives as a bare token and would be read as a query.
+        string? lastSwitch = null;
+
         for (int i = 0; i < args.Length; i++)
         {
             var token = args[i];
             var previousUnknownFlag = lastUnknownFlag;
+            var previousSwitch = lastSwitch;
             lastUnknownFlag = null;
+            lastSwitch = null;
 
             var def = _registry.Lookup(token);
             if (def != null)
@@ -62,6 +68,16 @@ public class PipelineLexer
                     // This is the same rule OptionBinder.BindCli applies to raw args.
                     if (i + 1 < args.Length)
                         value = args[++i];
+
+                    if (def.BooleanValued && !bool.TryParse(value, out _))
+                        throw new InvalidOperationException(value is null
+                            ? $"Flag '{token}' takes true or false, and nothing follows it."
+                            : $"Flag '{token}' takes true or false, not '{value}'. It is on by default, so "
+                            + $"write '{token} false' to turn it off; the flag alone does not mean true.");
+                }
+                else
+                {
+                    lastSwitch = token;
                 }
 
                 // Implicit branch-split: one pure function decides (F6). State is read
@@ -124,6 +140,14 @@ public class PipelineLexer
             {
                 if (token.StartsWith('-'))
                 {
+                    // `--flag=value` is not a spelling the grammar has: the whole token is an
+                    // unknown flag, which binds nothing and exits 0 with the option unchanged.
+                    var equals = token.IndexOf('=');
+                    if (equals > 1 && _registry.Lookup(token[..equals]) is not null)
+                        throw new InvalidOperationException(
+                            $"'{token}' is not a flag. A value follows its flag after a space: "
+                          + $"{token[..equals]} {token[(equals + 1)..]}");
+
                     // Unknown flag — store as boolean, captured in RawArgs for OptionBinder.
                     lastUnknownFlag = token;
                     globalDict[token] = "true";
@@ -150,6 +174,11 @@ public class PipelineLexer
                             $"Unrecognized flag '{previousUnknownFlag}', and '{token}' reads as its value. "
                           + $"Check the spelling, or pass a query explicitly with --sql \"{token}\" "
                           + "if it really is one.");
+
+                    if (previousSwitch != null && bool.TryParse(token, out _))
+                        throw new InvalidOperationException(
+                            $"Flag '{previousSwitch}' takes no value, so '{token}' cannot follow it. "
+                          + "A switch is written alone to turn it on, and left out to keep it off.");
 
                     // Positional token (SQL query without --sql flag).
                     // Split the reader into its own branch before the SQL processor branch.

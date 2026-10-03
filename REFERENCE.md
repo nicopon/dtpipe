@@ -225,7 +225,7 @@ strings:
 | `--query-timeout` | `0` | Query timeout in seconds (0 = no timeout) |
 | `--unsafe-query` | | Allow non-SELECT queries (stored procs, etc.) |
 | `--csv-separator` | `","` | CSV field separator |
-| `--csv-has-header` | | CSV has a header row (default: true) |
+| `--csv-has-header` | `false` | Whether the CSV has a header row (default: `true`). Takes `true` or `false`: see [Boolean flags](#boolean-flags) |
 | `--encoding` | `ISO-8859-1` | Text file encoding |
 | `--column-types` | `"Id:uuid,Qty:int32"` | Explicit column type declarations for text readers. A hint naming no type is refused — see [Type hints](#type-hints) |
 | `--auto-column-types` | | Infer column types from the first 100 rows |
@@ -359,6 +359,7 @@ everything else — at a target with no composite type of its own.
 |:---|:---|:---|
 | `--strategy` | `Append` | Write strategy. One of: `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`, `Upsert`, `Ignore`. **Database targets only** — a file or object writer replaces its target and refuses the flag rather than accepting one it cannot honour |
 | `--table` | `"users"` | Override target table name (default: `export`) |
+| `--csv-header` | `false` | **(CSV only)** Whether to write the header row (default: `true`). Takes `true` or `false`: see [Boolean flags](#boolean-flags) |
 | `--key` | `"Id,Code"` | Primary key column(s) for `Upsert`/`Ignore`. Auto-detected from DB if omitted |
 | `--insert-mode` | `Bulk` | `Standard` or `Bulk` (high-speed batch insert for PG, Oracle, MSSQL) |
 | `--auto-migrate` | | `ALTER TABLE` to add missing columns automatically. See [Schema modes](#schema-modes) |
@@ -627,6 +628,14 @@ dtpipe -i src.csv --alias s --from s --sql "SELECT * FROM s" --sql "SELECT count
 # OK: same flag in two different stages = two independent bindings
 dtpipe -i in.csv --csv-separator ";" -o out.csv --csv-separator "|"
 ```
+
+#### Boolean flags
+
+An option that is **off** by default is a switch: write the flag alone to turn it on (`--no-stats`,
+`--merge`). An option that is **on** by default takes a value, because the flag alone would change
+nothing: `--csv-header false`, `--csv-has-header false`. The value is `true` or `false`, after a
+space. `--csv-header=false` is refused, a value other than `true`/`false` is refused at the flag,
+and so is a `true` or `false` written after a switch. The help marks the first kind `<true|false>`.
 
 Global scalar flags (`--log`, `--metrics-path`, …) may appear only once per command line.
 The SQL query of a branch must come from exactly one source: an explicit `--sql "<query>"`

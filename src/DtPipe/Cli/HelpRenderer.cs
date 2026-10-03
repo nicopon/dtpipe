@@ -122,7 +122,7 @@ public static class HelpRenderer
                 var arity = flag.Arity switch
                 {
                     FlagArity.Boolean    => "",
-                    FlagArity.Scalar     => " <value>",
+                    FlagArity.Scalar     => flag.BooleanValued ? " <true|false>" : " <value>",
                     FlagArity.Repeatable => " <value...>",
                     _                    => ""
                 };

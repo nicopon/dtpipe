@@ -126,7 +126,10 @@ public class CliOptionBindingTests
 
         string[] With(string value) => new[] { flag, value };
 
-        if (type == typeof(bool)) return (new[] { flag }, true);
+        // An option that starts on cannot be switched on again, so it is driven to false: the
+        // only value that proves the command line can reach it.
+        if (type == typeof(bool))
+            return StartsOn(prop) ? (With("false"), false) : (new[] { flag }, true);
         if (type == typeof(string)) return (With("dtpipe-sample"), "dtpipe-sample");
         if (type == typeof(char)) return (With("|"), '|');
         if (type == typeof(Guid)) return (With("6f9619ff-8b86-d011-b42d-00c04fc964ff"), Guid.Parse("6f9619ff-8b86-d011-b42d-00c04fc964ff"));
@@ -158,6 +161,28 @@ public class CliOptionBindingTests
             $"'{component}' publishes {prop.DeclaringType!.Name}.{prop.Name} of type {type.Name}, which this test "
             + "does not know how to write on a command line. Add it here and to OptionBinder's conversion, or the "
             + "flag binds nothing and nobody is told.");
+    }
+
+    private static bool StartsOn(PropertyInfo prop)
+        => prop.GetValue(Activator.CreateInstance(prop.ReflectedType!)) is true;
+
+    // ── 3. A boolean that starts on takes a value; one that starts off is a switch ──
+
+    [Theory]
+    [MemberData(nameof(CatalogueOptions))]
+    public void A_Boolean_Option_Is_A_Switch_Only_When_It_Starts_Off(
+        string component, Type optionsType, string propertyName)
+    {
+        var prop = optionsType.GetProperty(propertyName)!;
+        if ((Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType) != typeof(bool)) return;
+
+        var flag = FlagNameDeriver.DeriveCanonical(prop, optionsType,
+            (Activator.CreateInstance(optionsType) as DtPipe.Core.Options.ICliOptionMetadata)?.PropertyToFlag);
+        var def = CliOptionBuilder.GenerateFlagDefsForType(optionsType).Single(d => d.Name == flag);
+
+        Assert.True(StartsOn(prop) == def.BooleanValued,
+            $"'{component}' publishes {flag} as {(def.BooleanValued ? "taking a value" : "a switch")}, but the option starts {(StartsOn(prop) ? "on" : "off")}.");
+        Assert.Equal(StartsOn(prop) ? FlagArity.Scalar : FlagArity.Boolean, def.Arity);
     }
 
     private static void AssertBound(object? actual, object? expected, string because)

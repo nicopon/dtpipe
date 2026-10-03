@@ -31,6 +31,11 @@ public enum FlagStage
     All      = Reader | Pipeline | Writer  // valid anywhere (engine controls, DAG routing flags)
 }
 
+/// <param name="BooleanValued">
+/// A scalar flag whose value is <c>true</c> or <c>false</c>. An option that is on by default has no
+/// presence form that means anything (writing the flag changes nothing), so it takes its value
+/// instead of being a switch; <c>CliOptionBuilder</c> derives this from the default.
+/// </param>
 public record FlagDef(
     string Name,
     string[] Aliases,
@@ -39,7 +44,8 @@ public record FlagDef(
     string? Description = null,
     FlagStage Stage = FlagStage.All,
     string? ComponentName = null,
-    bool ProcessorTrigger = false)
+    bool ProcessorTrigger = false,
+    bool BooleanValued = false)
 {
     /// <summary>
     /// F8 single source of value-token semantics: a flag consumes the token that follows it

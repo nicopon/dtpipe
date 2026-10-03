@@ -11,7 +11,7 @@ dtpipe -i csv:sales.data -o parquet:sales.out      # explicit, when the extensio
 
 | Format | Read | Write | Notes |
 |:---|:---:|:---:|:---|
-| CSV | ✅ | ✅ | `--csv-separator`, `--csv-has-header`, `--encoding` |
+| CSV | ✅ | ✅ | `--csv-separator`, `--csv-has-header false` (reader), `--csv-header false` (writer), `--encoding` |
 | JSONL / NDJSON | ✅ | ✅ | one JSON object per line; `--path` selects a sub-document |
 | Parquet | ✅ | ✅ | columnar end to end, native `LIST` columns |
 | Arrow IPC | ✅ | ✅ | the in-memory format, written as-is |
