@@ -264,7 +264,7 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
 	}
 
 	[Fact]
-	public async Task PostgreSqlWriter_Recreate_PreservesNativeStructure()
+	public async Task PostgreSqlWriter_Recreate_RebuildsFromTheSourceSchema()
 	{
 		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
@@ -286,11 +286,12 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
                     ""MixedScore"" NUMERIC(10,5),
                     description TEXT,
                     flags VARCHAR(10),
+                    extra INTEGER,
                     PRIMARY KEY (code)
                 )";
 			await cmd.ExecuteNonQueryAsync();
 
-			cmd.CommandText = $"INSERT INTO {tableNameRaw} (code, \"MixedScore\", description, flags) VALUES ('OLD', 10.5, 'OldDesc', B'101')";
+			cmd.CommandText = $"INSERT INTO {tableNameRaw} (code, \"MixedScore\", description, flags, extra) VALUES ('OLD', 10.5, 'OldDesc', B'101', 5)";
 			await cmd.ExecuteNonQueryAsync();
 		}
 
@@ -308,64 +309,44 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
 		var batch = new List<object?[]> { new object?[] { "NEW", 99.12345m, "NewDesc", "010" } }; // "010" string -> BIT(3)
 
 		// Act
-		// Recreate should Drop and Re-Create using Introspection
+		// Recreate drops the table and builds it from the source columns
 		await using var writer = new PostgreSqlDataWriter(connectionString, options, NullLogger<PostgreSqlDataWriter>.Instance, PostgreSqlTypeConverter.Instance);
 		await writer.InitializeAsync(columns);
 		await writer.WriteBatchAsync(batch);
 		await writer.CompleteAsync();
 
 		// Assert
-		// Inspect table structure to verify it matches original, not default
+		// Inspect table structure to verify it was rebuilt from the source, not from the old table
 		await using (var connection = new NpgsqlConnection(connectionString))
 		{
 			await connection.OpenAsync();
 
 			// Check Data
 			using var cmd = connection.CreateCommand();
-			cmd.CommandText = $"SELECT code, \"MixedScore\", description, flags::TEXT FROM {tableNameRaw}"; // Cast flags to text for easy reading
+			cmd.CommandText = $"SELECT code, MixedScore, description, flags::TEXT FROM {tableNameRaw}"; // Cast flags to text for easy reading
 			using (var reader = await cmd.ExecuteReaderAsync())
 			{
 				Assert.True(await reader.ReadAsync());
-				Assert.Equal("NEW       ", reader.GetString(0)); // CHAR(10) padded
+				Assert.Equal("NEW", reader.GetString(0)); // the source says string, not CHAR(10)
 				Assert.Equal(99.12345m, reader.GetDecimal(1));
 				Assert.Equal("NewDesc", reader.GetString(2));
 				Assert.Equal("010", reader.GetString(3));
 			}
 
 			// Check Metadata using information_schema
-
-			// 1. code (CHAR(10))
-			using var metaCode = connection.CreateCommand();
-			metaCode.CommandText = $"SELECT data_type, character_maximum_length FROM information_schema.columns WHERE table_name = '{tableNameRaw}' AND column_name = 'code'";
-			using (var rCode = await metaCode.ExecuteReaderAsync())
+			using var meta = connection.CreateCommand();
+			meta.CommandText = $"SELECT column_name, data_type, character_maximum_length, numeric_precision FROM information_schema.columns WHERE table_name = '{tableNameRaw}' ORDER BY column_name";
+			var columnsFound = new Dictionary<string, (string Type, object Length, object Precision)>();
+			using (var r = await meta.ExecuteReaderAsync())
 			{
-				if (!await rCode.ReadAsync())
-				{
-					throw new Exception($"Column 'code' not found in information_schema.columns for table '{tableNameRaw}'. Check casing.");
-				}
-				Assert.Equal("character", rCode.GetString(0)); // Postgres often calls CHAR "character"
-				Assert.Equal(10, Convert.ToInt32(rCode["character_maximum_length"]));
+				while (await r.ReadAsync())
+					columnsFound[r.GetString(0)] = (r.GetString(1), r.GetValue(2), r.GetValue(3));
 			}
 
-			// 2. MixedScore (NUMERIC(10,5)) - Preserved case in quotes?
-			using var metaScore = connection.CreateCommand();
-			metaScore.CommandText = $"SELECT numeric_precision, numeric_scale FROM information_schema.columns WHERE table_name = '{tableNameRaw}' AND column_name = 'MixedScore'";
-			using (var rScore = await metaScore.ExecuteReaderAsync())
-			{
-				Assert.True(await rScore.ReadAsync());
-				Assert.Equal(10, Convert.ToInt32(rScore["numeric_precision"]));
-				Assert.Equal(5, Convert.ToInt32(rScore["numeric_scale"]));
-			}
-
-			// 3. flags (BIT(3))
-			using var metaFlags = connection.CreateCommand();
-			metaFlags.CommandText = $"SELECT data_type, character_maximum_length FROM information_schema.columns WHERE table_name = '{tableNameRaw}' AND column_name = 'flags'";
-			using (var rFlags = await metaFlags.ExecuteReaderAsync())
-			{
-				Assert.True(await rFlags.ReadAsync());
-				Assert.Equal("character varying", rFlags.GetString(0));
-				Assert.Equal(10, Convert.ToInt32(rFlags["character_maximum_length"]));
-			}
+			// The column the source lacks is gone, and no native width survives.
+			Assert.Equal(new[] { "code", "description", "flags", "mixedscore" }, columnsFound.Keys.OrderBy(k => k, StringComparer.Ordinal).ToArray());
+			Assert.True(columnsFound["code"].Length is DBNull, "code was CHAR(10); the source column is a string.");
+			Assert.True(columnsFound["mixedscore"].Precision is DBNull, "MixedScore was NUMERIC(10,5); the source column is a decimal.");
 		}
 	}
 }

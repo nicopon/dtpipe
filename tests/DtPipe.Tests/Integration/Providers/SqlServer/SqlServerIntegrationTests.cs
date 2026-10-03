@@ -247,7 +247,7 @@ public class SqlServerIntegrationTests : IAsyncLifetime
 	}
 
 	[Fact]
-	public async Task SqlServerDataWriter_Recreate_PreservesNativeStructure()
+	public async Task SqlServerDataWriter_Recreate_RebuildsFromTheSourceSchema()
 	{
 		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
@@ -269,11 +269,12 @@ public class SqlServerIntegrationTests : IAsyncLifetime
                     Price MONEY,
                     Score DECIMAL(5,2),
                     ""Created At"" DATETIME2(3),
+                    Extra INT,
                     PRIMARY KEY (Code)
                 )";
 			await cmd.ExecuteNonQueryAsync();
 
-			cmd.CommandText = $"INSERT INTO {tableNameRaw} (Code, Price, Score, \"Created At\") VALUES ('OLD', 10.50, 10.5, '2023-01-01 12:00:00.123')";
+			cmd.CommandText = $"INSERT INTO {tableNameRaw} (Code, Price, Score, \"Created At\", Extra) VALUES ('OLD', 10.50, 10.5, '2023-01-01 12:00:00.123', 5)";
 			await cmd.ExecuteNonQueryAsync();
 		}
 
@@ -294,7 +295,7 @@ public class SqlServerIntegrationTests : IAsyncLifetime
 		var batch = new List<object?[]> { new object?[] { "NEW", 99.99m, 99.9m, new DateTime(2024, 01, 01, 10, 0, 0).AddMilliseconds(999) } };
 
 		// Act
-		// Recreate should Drop and Re-Create using Introspection
+		// Recreate drops the table and builds it from the source columns
 		await using var writer = new SqlServerDataWriter(connectionString, writerOptions, NullLogger<SqlServerDataWriter>.Instance, SqlServerTypeConverter.Instance);
 		try
 		{
@@ -310,7 +311,7 @@ public class SqlServerIntegrationTests : IAsyncLifetime
 		}
 
 		// Assert
-		// Inspect table structure to verify it matches original, not default
+		// Inspect table structure to verify it was rebuilt from the source, not from the old table
 		await using (var connection = new SqlConnection(connectionString))
 		{
 			await connection.OpenAsync();
@@ -321,7 +322,7 @@ public class SqlServerIntegrationTests : IAsyncLifetime
 			using (var reader = await cmd.ExecuteReaderAsync())
 			{
 				Assert.True(await reader.ReadAsync());
-				Assert.Equal("NEW       ", reader.GetString(0)); // NCHAR padded
+				Assert.Equal("NEW", reader.GetString(0)); // the source says string, not NCHAR(10)
 				Assert.Equal(99.99m, reader.GetDecimal(1));
 				Assert.Equal(99.9m, reader.GetDecimal(2));
 				Assert.Equal(999, reader.GetDateTime(3).Millisecond);
@@ -329,42 +330,19 @@ public class SqlServerIntegrationTests : IAsyncLifetime
 
 			// Check Metadata
 			// SQL Server: INFORMATION_SCHEMA.COLUMNS
-
-			// 1. Code (NCHAR(10))
-			using var metaCode = connection.CreateCommand();
-			metaCode.CommandText = $"SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '{tableNameRaw}' AND COLUMN_NAME = 'Code'";
-			using (var rCode = await metaCode.ExecuteReaderAsync())
+			using var meta = connection.CreateCommand();
+			meta.CommandText = $"SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '{tableNameRaw}'";
+			var types = new Dictionary<string, string>();
+			using (var r = await meta.ExecuteReaderAsync())
 			{
-				Assert.True(await rCode.ReadAsync());
-				Assert.Equal("nchar", rCode.GetString(0));
-				Assert.Equal(10, Convert.ToInt32(rCode["CHARACTER_MAXIMUM_LENGTH"]));
+				while (await r.ReadAsync())
+					types[r.GetString(0)] = r.GetString(1);
 			}
 
-			// 2. Price (MONEY)
-			using var metaPrice = connection.CreateCommand();
-			metaPrice.CommandText = $"SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '{tableNameRaw}' AND COLUMN_NAME = 'Price'";
-			var typePrice = await metaPrice.ExecuteScalarAsync();
-			Assert.Equal("money", typePrice);
-
-			// 3. Score (DECIMAL(5,2))
-			using var scoreCmd = connection.CreateCommand();
-			scoreCmd.CommandText = $"SELECT NUMERIC_PRECISION, NUMERIC_SCALE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '{tableNameRaw}' AND COLUMN_NAME = 'Score'";
-			using (var scoreReader = await scoreCmd.ExecuteReaderAsync())
-			{
-				Assert.True(await scoreReader.ReadAsync());
-				Assert.Equal(5, Convert.ToInt32(scoreReader["NUMERIC_PRECISION"]));
-				Assert.Equal(2, Convert.ToInt32(scoreReader["NUMERIC_SCALE"]));
-			}
-
-			// 4. "Created At" (DATETIME2(3))
-			using var metaDate = connection.CreateCommand();
-			metaDate.CommandText = $"SELECT DATA_TYPE, DATETIME_PRECISION FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '{tableNameRaw}' AND COLUMN_NAME = 'Created At'";
-			using (var rDate = await metaDate.ExecuteReaderAsync())
-			{
-				Assert.True(await rDate.ReadAsync());
-				Assert.Equal("datetime2", rDate.GetString(0));
-				Assert.Equal(3, Convert.ToInt16(rDate["DATETIME_PRECISION"]));
-			}
+			// The column the source lacks is gone, and no native type survives.
+			Assert.Equal(new[] { "Code", "Created At", "Price", "Score" }, types.Keys.OrderBy(k => k, StringComparer.Ordinal).ToArray());
+			Assert.NotEqual("nchar", types["Code"]);
+			Assert.NotEqual("money", types["Price"]);
 		}
 	}
 
@@ -408,8 +386,8 @@ public class SqlServerIntegrationTests : IAsyncLifetime
 
 			Assert.NotNull(schema);
 			Assert.True(schema!.Exists);
-			Assert.Single(schema.Columns);
-			Assert.Equal("OldCol", schema.Columns[0].Name);
+			// The table was rebuilt from the source, so the fresh inspection shows its columns, not OldCol.
+			Assert.Equal(new[] { "NewCol1", "NewCol2" }, schema.Columns.Select(c => c.Name).OrderBy(c => c, StringComparer.Ordinal).ToArray());
 		}
 		finally
 		{

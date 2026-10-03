@@ -2,6 +2,7 @@ using System.Data;
 using DtPipe.Core.Models;
 using DtPipe.Core.Helpers;
 using System.Text;
+using DtPipe.Adapters.Shared.Abstractions;
 
 namespace DtPipe.Core.Abstractions;
 
@@ -254,28 +255,27 @@ public abstract class BaseSqlDataWriter : IRowDataWriter, ISchemaInspector, IKey
 	protected abstract Task<TargetSchemaInfo?> ApplyWriteStrategyAsync(string resolvedSchema, string resolvedTable, CancellationToken ct);
 
 	/// <summary>
-	/// Common Recreate strategy implementation: Introspect → Drop → Recreate → SyncColumns.
-	/// Derived classes can call this from their ApplyWriteStrategyAsync.
+	/// Common Recreate strategy implementation: Introspect → Warn if the target differs → Drop →
+	/// Create from the source schema. The key is the one <c>--key</c> names, never the old table's.
 	/// </summary>
 	protected async Task<TargetSchemaInfo?> ApplyRecreateStrategyAsync(CancellationToken ct)
 	{
 		TargetSchemaInfo? existingSchema = null;
 		try { existingSchema = await InspectTargetAsync(ct); } catch { }
 
-		await ExecuteDropTableSafeAsync(ct);
-
-		string createSql;
 		if (existingSchema?.Exists == true && existingSchema.Columns.Count > 0)
 		{
-			createSql = BuildCreateTableFromIntrospection(_quotedTargetTableName, existingSchema);
-			SyncColumnsFromIntrospection(existingSchema);
-		}
-		else
-		{
-			createSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
+			var divergence = RecreateDivergence.Describe(
+				_quotedTargetTableName,
+				existingSchema.Columns.Select(c => c.Name),
+				_columns!.Select(c => c.Name),
+				existingSchema.PrimaryKeyColumns,
+				sourceNamesAKey: GetRequestedPrimaryKeys() is { Count: > 0 });
+			if (divergence is not null) RecreateDivergence.Warn(divergence);
 		}
 
-		await ExecuteNonQueryAsync(createSql, ct);
+		await ExecuteDropTableSafeAsync(ct);
+		await ExecuteNonQueryAsync(GetCreateTableSql(_quotedTargetTableName, _columns!), ct);
 		InvalidateSchemaCache();
 		return null;
 	}
@@ -475,41 +475,6 @@ public abstract class BaseSqlDataWriter : IRowDataWriter, ISchemaInspector, IKey
 		{
 			cmd.ExecuteNonQuery();
 		}
-	}
-
-	/// <summary>
-	/// Builds a CREATE TABLE DDL statement from introspected schema metadata.
-	/// Uses Dialect.Quote() for identifier quoting and ITypeMapper.BuildNativeType() for type construction.
-	/// Derived classes can override this if they need adapter-specific DDL syntax (e.g. Oracle PK constraints).
-	/// </summary>
-	protected virtual string BuildCreateTableFromIntrospection(string tableName, TargetSchemaInfo schema)
-	{
-		var sb = new StringBuilder();
-		sb.Append($"CREATE TABLE {tableName} (");
-
-		var columns = schema.Columns;
-		for (int i = 0; i < columns.Count; i++)
-		{
-			if (i > 0) sb.Append(", ");
-			var col = columns[i];
-			var safeName = SqlIdentifierHelper.GetSafeIdentifier(Dialect, col.Name);
-			var nativeType = GetTypeMapper().BuildNativeType(
-				col.NativeType, col.MaxLength, col.Precision, col.Scale, col.MaxLength);
-			var nullable = col.IsNullable ? "" : " NOT NULL";
-
-			sb.Append($"{safeName} {nativeType}{nullable}");
-		}
-
-		// Primary Key constraint
-		if (schema.PrimaryKeyColumns?.Count > 0)
-		{
-			var pkCols = string.Join(", ", schema.PrimaryKeyColumns.Select(
-				pk => SqlIdentifierHelper.GetSafeIdentifier(Dialect, pk)));
-			sb.Append($", PRIMARY KEY ({pkCols})");
-		}
-
-		sb.Append(")");
-		return sb.ToString();
 	}
 
 	/// <summary>

@@ -430,7 +430,10 @@ apart.
 
 **The regime applies only where the target is inspected.** A file or object target is replaced
 wholesale, and `--strategy Recreate` drops and rebuilds the table from the source schema, so there
-is nothing to compare: no inspection runs and no mode line is printed.
+is nothing to compare and no mode line is printed. `Recreate` still looks at the table it replaces,
+once, to warn when that table has columns the source lacks or a primary key the run does not
+recreate. The key of the new table is the one `--key` names, never the old table's; indexes,
+defaults and storage settings of the old table are not carried over.
 
 ### File globs
 

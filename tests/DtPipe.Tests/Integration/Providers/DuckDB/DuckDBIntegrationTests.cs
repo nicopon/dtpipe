@@ -125,7 +125,7 @@ public class DuckDBIntegrationTests : IAsyncLifetime
 	}
 
 	[Fact]
-	public async Task DuckDbDataWriter_Recreate_PreservesNativeStructure()
+	public async Task DuckDbDataWriter_Recreate_RebuildsFromTheSourceSchema()
 	{
 		var duckDbPath = Path.Combine(Path.GetTempPath(), $"test_recreate_p_{Guid.NewGuid():N}.duckdb");
 		var connectionString = $"Data Source={duckDbPath}";
@@ -148,11 +148,12 @@ public class DuckDBIntegrationTests : IAsyncLifetime
                         PreciseNum DECIMAL(10,5),
                         ""My Blob"" BLOB,
                         Tiny TINYINT,
+                        Extra INTEGER,
                         PRIMARY KEY (Code)
                     )";
 				await cmd.ExecuteNonQueryAsync();
 
-				cmd.CommandText = $"INSERT INTO {tableNameRaw} VALUES ('OLD', 10.5, '0xAA', 1)";
+				cmd.CommandText = $"INSERT INTO {tableNameRaw} VALUES ('OLD', 10.5, '0xAA', 1, 5)";
 				await cmd.ExecuteNonQueryAsync();
 			}
 
@@ -170,7 +171,7 @@ public class DuckDBIntegrationTests : IAsyncLifetime
 				new("Tiny", typeof(int), false)
 			};
 
-			var batch = new List<object?[]> { new object?[] { "NEW", 99.12345m, new byte[] { 0xBB }, 120 } };
+			var batch = new List<object?[]> { new object?[] { "NEW", 99.123m, new byte[] { 0xBB }, 120 } };
 
 			// Act
 			await using var writer = new DuckDbDataWriter(connectionString, writerOptions, NullLogger<DuckDbDataWriter>.Instance, DuckDbTypeConverter.Instance);
@@ -190,7 +191,7 @@ public class DuckDBIntegrationTests : IAsyncLifetime
 				{
 					Assert.True(await reader.ReadAsync());
 					Assert.Equal("NEW", reader.GetString(0));
-					Assert.Equal(99.12345m, reader.GetDecimal(1));
+					Assert.Equal(99.123m, reader.GetDecimal(1));
 
 					Assert.IsAssignableFrom<Stream>(reader.GetValue(2));
 					var stream = (Stream)reader.GetValue(2);
@@ -219,9 +220,10 @@ public class DuckDBIntegrationTests : IAsyncLifetime
 					}
 				}
 
-				Assert.Contains("DECIMAL(10,5)", types["PreciseNum"]);
-				Assert.Contains("BLOB", types["My Blob"]);
-				Assert.Contains("TINYINT", types["Tiny"]);
+				// Rebuilt from the source: the column the source lacks is gone and no native width survives.
+				Assert.Equal(new[] { "Code", "My Blob", "PreciseNum", "Tiny" }, types.Keys.OrderBy(k => k, StringComparer.Ordinal).ToArray());
+				Assert.DoesNotContain("DECIMAL(10,5)", types["PreciseNum"]);
+				Assert.DoesNotContain("TINYINT", types["Tiny"]);
 			}
 		}
 		finally

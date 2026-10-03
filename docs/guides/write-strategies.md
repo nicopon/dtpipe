@@ -38,7 +38,9 @@ live in application code — validation, audit columns, domain events, a soft-de
 those rules do not run: the rows arrive through SQL, below that layer. Whether that is acceptable
 is a property of the target, not of the transfer, so it is the team owning the target database
 that weighs it. `Recreate` is worth a second look in that conversation: it drops the table, and
-with it whatever indexes, constraints and triggers that team put on it.
+with it whatever indexes, constraints and triggers that team put on it. It builds the new table from
+the source schema, with the primary key `--key` names, and warns when the table it replaces had
+columns the source lacks or a primary key of its own.
 
 ## What happens when the schemas differ
 

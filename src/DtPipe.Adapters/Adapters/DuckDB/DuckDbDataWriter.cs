@@ -1,3 +1,4 @@
+using DtPipe.Adapters.Shared.Abstractions;
 using System.Data;
 using System.Text;
 using Apache.Arrow;
@@ -279,38 +280,23 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
             TargetSchemaInfo? existingSchema = null;
             try { existingSchema = await InspectTargetAsync(ct); } catch { }
 
-            await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS {_quotedTargetTableName}", ct);
+            var keyCols = string.IsNullOrEmpty(_options.Key) ? null : ColumnHelper.ResolveKeyColumns(_options.Key, _columns!);
 
             if (existingSchema?.Exists == true && existingSchema.Columns.Count > 0)
             {
-                 // Re-creates the table from existing schema meta
-                 var sb = new StringBuilder();
-                 sb.Append($"CREATE TABLE {_quotedTargetTableName} (");
-                 for (int i = 0; i < existingSchema.Columns.Count; i++)
-                 {
-                     if (i > 0) sb.Append(", ");
-                     var col = existingSchema.Columns[i];
-                     var safeName = _dialect.Quote(col.Name);
-                     var nativeType = _typeMapper.BuildNativeType(col.NativeType, col.MaxLength, col.Precision, col.Scale, col.MaxLength);
-                     sb.Append($"{safeName} {nativeType}{(col.IsNullable ? "" : " NOT NULL")}");
-                 }
-
-                 var keyCols = string.IsNullOrEmpty(_options.Key) 
-                    ? (existingSchema.PrimaryKeyColumns ?? new List<string>())
-                    : ColumnHelper.ResolveKeyColumns(_options.Key, _columns!);
-
-                 if (keyCols.Count > 0)
-                 {
-                     sb.Append($", PRIMARY KEY ({string.Join(", ", keyCols.Select(pk => _dialect.Quote(pk)))})");
-                 }
-                 sb.Append(")");
-                 await ExecuteNonQueryAsync(sb.ToString(), ct);
+                var divergence = RecreateDivergence.Describe(
+                    _quotedTargetTableName!,
+                    existingSchema.Columns.Select(c => c.Name),
+                    _columns!.Select(c => c.Name),
+                    existingSchema.PrimaryKeyColumns,
+                    sourceNamesAKey: keyCols is { Count: > 0 });
+                if (divergence is not null) RecreateDivergence.Warn(divergence);
             }
-            else
-            {
-                var keyCols = string.IsNullOrEmpty(_options.Key) ? null : ColumnHelper.ResolveKeyColumns(_options.Key, _columns!);
-                await ExecuteNonQueryAsync(GenerateCreateTableSql(_quotedTargetTableName!, _columns!, keyCols), ct);
-            }
+
+            await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS {_quotedTargetTableName}", ct);
+            await ExecuteNonQueryAsync(GenerateCreateTableSql(_quotedTargetTableName!, _columns!, keyCols), ct);
+            // The inspection above cached the table that was just replaced.
+            InvalidateSchemaCache();
         }
         else if (_options.Strategy == DuckDbWriteStrategy.Truncate && exists)
         {

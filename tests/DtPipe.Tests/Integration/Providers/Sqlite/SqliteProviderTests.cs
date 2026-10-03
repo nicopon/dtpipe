@@ -317,7 +317,7 @@ public class SqliteProviderTests : IAsyncLifetime
 	}
 
 	[Fact]
-	public async Task SqliteDataWriter_Recreate_PreservesNativeStructure()
+	public async Task SqliteDataWriter_Recreate_RebuildsFromTheSourceSchema()
 	{
 		var dbPath = Path.Combine(Path.GetTempPath(), $"test_recreate_p_{Guid.NewGuid():N}.sqlite");
 		var connectionString = $"Data Source={dbPath}";
@@ -340,11 +340,12 @@ public class SqliteProviderTests : IAsyncLifetime
                         Score DECIMAL(10,5), 
                         ""Memo Text"" TEXT,
                         BlobData BLOB,
+                        Extra INTEGER,
                         PRIMARY KEY (Code)
                     )";
 				await cmd.ExecuteNonQueryAsync();
 
-				cmd.CommandText = $"INSERT INTO {tableNameRaw} VALUES ('OLD', 10.5, 'OldMemo', X'AA')";
+				cmd.CommandText = $"INSERT INTO {tableNameRaw} VALUES ('OLD', 10.5, 'OldMemo', X'AA', 5)";
 				await cmd.ExecuteNonQueryAsync();
 			}
 
@@ -398,10 +399,10 @@ public class SqliteProviderTests : IAsyncLifetime
 					}
 				}
 
-				Assert.Contains("VARCHAR(10)", types["Code"]);
-				Assert.Contains("DECIMAL(10,5)", types["Score"]);
-				Assert.Contains("TEXT", types["Memo Text"]);
-				Assert.Contains("BLOB", types["BlobData"]);
+				// Rebuilt from the source: the column the source lacks is gone and no native width survives.
+				Assert.Equal(new[] { "BlobData", "Code", "Memo Text", "Score" }, types.Keys.OrderBy(k => k, StringComparer.Ordinal).ToArray());
+				Assert.DoesNotContain("VARCHAR(10)", types["Code"]);
+				Assert.DoesNotContain("DECIMAL(10,5)", types["Score"]);
 			}
 		}
 		finally
