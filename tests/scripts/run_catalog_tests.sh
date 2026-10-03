@@ -225,7 +225,7 @@ run_test "T37" "$DTPIPE -i artifacts/test_data.csv --filter \"parseInt(row.Score
 # T38: Compute toUpperCase string transformation on a column
 run_test "T38" "$DTPIPE -i artifacts/test_data.parquet --compute \"Label:row.Category.toUpperCase()\" -o artifacts/output_t38.csv"
 # T39: Export pipeline config to YAML job file for later reuse
-run_test "T39" "$DTPIPE -i artifacts/test_data.csv --limit 10 --export-job artifacts/output_t39.yaml"
+run_test "T39" "$DTPIPE -i artifacts/test_data.csv --limit 10 -o null: --export-job artifacts/output_t39.yaml"
 # T40: Reload and execute the exported job file produced by T39
 run_test "T40" "$DTPIPE --job artifacts/output_t39.yaml"
 # T41: DuckDB JOIN between CSV and DuckDB table on shared Id
