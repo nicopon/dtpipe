@@ -270,7 +270,7 @@ sits in, wherever it falls among the step's flags.
 | `--null` | `"ColName"` | Force a column to NULL |
 | `--overwrite` | `"Status:Active"` | Set a static value for every row in a column |
 | `--format` | `"Display:{First} {Last}"` | [.NET Composite Format](https://learn.microsoft.com/en-us/dotnet/standard/base-types/composite-formatting) using column names as placeholders |
-| `--compute` | `"Col:row.A * 2"` | JS expression. Implicit return for single expressions; use `return` with statements |
+| `--compute` | `"Col:row.A * 2"` | JS expression, returned as is; a body of statements needs `return`. A result of `undefined` is an error, `null` is an empty value |
 | `--compute-types` | `"Col:int32"` | Declare the CLR type of a computed or new column. Same vocabulary as `--column-types` — see [Type hints](#type-hints) |
 | `--filter` | `"row.Val > 100"` | Drop rows where the JS expression returns falsy. Columns are read off `row`; a name the schema does not carry is an error, not an empty result |
 | `--expand` | `"row.Tags.split(',').map(t => ({ ...row, Tag: t }))"` | Expand one row into multiple. Must return an array of **row objects**: an array of plain values is refused |

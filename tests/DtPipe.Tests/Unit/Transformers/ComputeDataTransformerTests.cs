@@ -319,4 +319,56 @@ public class ComputeDataTransformerTests : IDisposable
 		result[1].Precision.Should().Be(10, "a column no script writes keeps what its source declared");
 		result[1].Scale.Should().Be(2);
 	}
+
+	private async Task<object?> RunOnce(string script)
+	{
+		var transformer = new ComputeDataTransformer(new ComputeOptions { Compute = new[] { script } }, _jsEngineProvider);
+		await transformer.InitializeAsync(new[] { new PipeColumnInfo("Id", typeof(int), false) });
+		return transformer.Transform(new object?[] { 3 })![^1];
+	}
+
+	[Theory]
+	[InlineData("X:row.Id + 4", 7L)]
+	[InlineData("X:return row.Id + 4;", 7L)]
+	[InlineData("X:row.Id + 4;", 7L)]
+	[InlineData("X:(function(){ return 7; })()", 7L)]
+	[InlineData("X:function(){ return 7; }()", 7L)]
+	[InlineData("X:(() => row.Id * 2)()", 6L)]
+	[InlineData("X:if (row.Id > 1) { return 'big'; } else { return 'small'; }", "big")]
+	[InlineData("X:const a = row.Id; return a + 1;", 4L)]
+	[InlineData("X:row.Id // a comment", 3L)]
+	public async Task A_Body_Gives_Its_Value_Whatever_Its_Form(string script, object expected)
+	{
+		var value = await RunOnce(script);
+
+		Convert.ToString(value).Should().Be(Convert.ToString(expected));
+	}
+
+	[Fact]
+	public async Task An_Explicit_Null_Is_A_Value()
+	{
+		(await RunOnce("X:null")).Should().BeNull();
+	}
+
+	[Theory]
+	[InlineData("X:undefined")]
+	[InlineData("X:const a = row.Id;")]
+	[InlineData("X:if (row.Id > 5) { return 1; }")]
+	public async Task A_Script_Returning_Undefined_Is_An_Error_Naming_The_Column(string script)
+	{
+		var act = async () => await RunOnce(script);
+
+		(await act.Should().ThrowAsync<InvalidOperationException>())
+			.WithMessage("*column 'X'*returned undefined*");
+	}
+
+	[Fact]
+	public async Task A_Syntax_Error_Is_Still_Refused_At_Initialisation()
+	{
+		var transformer = new ComputeDataTransformer(new ComputeOptions { Compute = new[] { "X:row.Id +" } }, _jsEngineProvider);
+
+		var act = async () => await transformer.InitializeAsync(new[] { new PipeColumnInfo("Id", typeof(int), false) });
+
+		await act.Should().ThrowAsync<Exception>();
+	}
 }

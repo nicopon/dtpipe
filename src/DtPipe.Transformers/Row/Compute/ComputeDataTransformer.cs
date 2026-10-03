@@ -4,6 +4,7 @@ using DtPipe.Core.Options;
 using DtPipe.Transformers.Services;
 using Jint;
 using Jint.Native;
+using Jint.Runtime;
 
 namespace DtPipe.Transformers.Row.Compute;
 
@@ -93,13 +94,9 @@ public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<
 				outputColumns[colIndex] = outputColumns[colIndex] with { Precision = null, Scale = null };
 			}
 
-			string body = script.Trim();
-			if (!body.Contains("return ") && !body.EndsWith(";"))
-				body = "return " + body + ";";
-
+			var (function, wrappedScript) = CompileBody(engine, script);
 			var uniqueFunctionName = $"proc_{colIndex}_{Guid.NewGuid():N}";
-			var wrappedScript = $"function(row) {{ {body} }}";
-			engine.SetValue(uniqueFunctionName, engine.Evaluate($"({wrappedScript})"));
+			engine.SetValue(uniqueFunctionName, function);
 
 			processors.Add(new ScriptColumnProcessor(colIndex, uniqueFunctionName, wrappedScript));
 		}
@@ -164,9 +161,14 @@ public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<
 			{
 				var result = engine.Evaluate($"{processor.FunctionName}(row)");
 
-				rowArray[processor.ColumnIndex] = (result.IsUndefined() || result.IsNull())
-					? null
-					: result.ToObject();
+				// null is a value a script may mean; undefined is the absence of one. Writing it as NULL
+				// would drop the data without a trace, so it stops the run and names the column.
+				if (result.IsUndefined())
+					throw new InvalidOperationException(
+						"the script returned undefined. Return a value, or null for an empty one: a body with "
+						+ "statements needs an explicit 'return', and a function must be called to give its result.");
+
+				rowArray[processor.ColumnIndex] = result.IsNull() ? null : result.ToObject();
 
                 if (rowArray[processor.ColumnIndex] is double d && (double.IsInfinity(d) || double.IsNaN(d)))
                 {
@@ -180,6 +182,34 @@ public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<
 		}
 
 		return rowArray;
+	}
+
+	/// <summary>
+	/// Compiles a column's script as <c>function(row)</c>. A body that parses as one expression is
+	/// returned as such, so an expression containing the word "return" (an immediately invoked
+	/// function) still yields its value; anything else is taken as the statements of the function.
+	/// </summary>
+	private static (JsValue Function, string WrappedScript) CompileBody(Engine engine, string script)
+	{
+		var body = script.Trim();
+		var expression = body.TrimEnd(';').Trim();
+
+		if (expression.Length > 0)
+		{
+			var asExpression = $"function(row) {{ return ({expression}\n); }}";
+			try
+			{
+				return (engine.Evaluate($"({asExpression})"), asExpression);
+			}
+			catch (JavaScriptException)
+			{
+				// Defining a function runs nothing, so the only failure here is a syntax error: the
+				// body is not one expression. Fall through to the statement form below.
+			}
+		}
+
+		var asStatements = $"function(row) {{ {body} }}";
+		return (engine.Evaluate($"({asStatements})"), asStatements);
 	}
 
 	// Dispose handled by DI scope? No, provider is singleton/scoped.
