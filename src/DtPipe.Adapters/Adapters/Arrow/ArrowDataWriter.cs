@@ -47,18 +47,11 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
 
     public bool RequiresTargetInspection => false;
 
-	// Opening the target for inspection can block indefinitely: a FIFO with no writer yet blocks
-	// its reader's open() until one arrives, and this process is itself about to become that
-	// writer (InitializeAsync, right after this call returns) - a run bound to a named pipe via
-	// --bind-output deadlocked here under a real reader on the other end. Bounded so a preview
-	// reports "unknown" instead, which InspectTargetAsync is already free to return.
-	private static readonly TimeSpan InspectionOpenTimeout = TimeSpan.FromSeconds(2);
-
-	public async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
+	public Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
 	{
 		if (_path == "-")
 		{
-			return new TargetSchemaInfo([], false, null, null, null);
+			return Task.FromResult<TargetSchemaInfo?>(new TargetSchemaInfo([], false, null, null, null));
 		}
 
         if (string.IsNullOrEmpty(_path))
@@ -67,64 +60,45 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
         }
 
 		// A pipe location is never a filesystem path: File.Exists would read it as one relative to
-		// the current directory and (harmlessly, but wrongly) report it as absent. Its state mirrors
-		// a FIFO with no writer yet - unknown until connected, which InitializeAsync is about to do.
+		// the current directory and (harmlessly, but wrongly) report it as absent. Its state is
+		// unknown until connected, which InitializeAsync is about to do.
 		if (ArrowPipeLocation.TryParse(_path, out _))
 		{
-			return new TargetSchemaInfo([], true, null, null, null);
+			return Task.FromResult<TargetSchemaInfo?>(new TargetSchemaInfo([], true, null, null, null));
 		}
 
 		if (!File.Exists(_path))
 		{
-			return new TargetSchemaInfo([], false, null, null, null);
-		}
-
-		var openTask = Task.Run(() => File.OpenRead(_path), ct);
-		FileStream fs;
-		try
-		{
-			fs = await openTask.WaitAsync(InspectionOpenTimeout, ct);
-		}
-		catch (TimeoutException)
-		{
-			// The open is still blocked on the far side of a pipe with no writer - the same
-			// position InitializeAsync is about to fill. Close it in the background rather than
-			// abandon an open read end that could later steal bytes from the real consumer.
-			_ = openTask.ContinueWith(t =>
-			{
-				if (t.IsCompletedSuccessfully) t.Result.Dispose();
-			}, TaskScheduler.Default);
-			return new TargetSchemaInfo([], true, null, null, null);
+			return Task.FromResult<TargetSchemaInfo?>(new TargetSchemaInfo([], false, null, null, null));
 		}
 
 		try
 		{
-			using (fs)
+			using var fs = File.OpenRead(_path);
+
+			// Try reading as file first (IPC file format)
+			if (_path.EndsWith(".arrow", StringComparison.OrdinalIgnoreCase) || _path.EndsWith(".arrowfile", StringComparison.OrdinalIgnoreCase))
 			{
-				// Try reading as file first (IPC file format)
-				if (_path.EndsWith(".arrow", StringComparison.OrdinalIgnoreCase) || _path.EndsWith(".arrowfile", StringComparison.OrdinalIgnoreCase))
+				try
 				{
-					try
-					{
-						using var reader = new ArrowFileReader(fs);
-						var schema = reader.Schema;
-						var columns = MapArrowSchema(schema);
-						return new TargetSchemaInfo(columns, true, null, fs.Length, null);
-					}
-					catch { /* Fallback to stream */ }
+					using var reader = new ArrowFileReader(fs);
+					var schema = reader.Schema;
+					var columns = MapArrowSchema(schema);
+					return Task.FromResult<TargetSchemaInfo?>(new TargetSchemaInfo(columns, true, null, fs.Length, null));
 				}
-
-				// Try as stream (IPC stream format)
-				fs.Position = 0;
-				using var streamReader = new ArrowStreamReader(fs);
-				var streamSchema = streamReader.Schema;
-				var streamColumns = MapArrowSchema(streamSchema);
-				return new TargetSchemaInfo(streamColumns, true, null, fs.Length, null);
+				catch { /* Fallback to stream */ }
 			}
+
+			// Try as stream (IPC stream format)
+			fs.Position = 0;
+			using var streamReader = new ArrowStreamReader(fs);
+			var streamSchema = streamReader.Schema;
+			var streamColumns = MapArrowSchema(streamSchema);
+			return Task.FromResult<TargetSchemaInfo?>(new TargetSchemaInfo(streamColumns, true, null, fs.Length, null));
 		}
 		catch
 		{
-			return new TargetSchemaInfo([], true, null, new FileInfo(_path).Length, null);
+			return Task.FromResult<TargetSchemaInfo?>(new TargetSchemaInfo([], true, null, new FileInfo(_path).Length, null));
 		}
 	}
 

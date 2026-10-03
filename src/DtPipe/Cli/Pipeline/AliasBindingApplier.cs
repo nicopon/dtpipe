@@ -79,7 +79,7 @@ public static class AliasBindingApplier
             {
                 errors.Add($"{flag} location '{location}' for branch '{alias}' ends in '.arrow' or "
                          + $"'.arrowfile', which the arrow: reader and writer treat as a file rather "
-                         + $"than a stream. Name a path, FIFO or named pipe with no such extension.");
+                         + $"than a stream. Name a path or a named pipe (pipe://<name>) with no such extension.");
                 continue;
             }
 

@@ -590,7 +590,7 @@ dtpipe --job anonymiser.yaml --bind-input anonymiser=/run/42/in --bind-output an
 dtpipe --job join.yaml --bind-input orders=/run/42/orders,customers=/run/42/customers
 ```
 
-Each value is a comma-separated `alias=location` list — a path, a FIFO, or `pipe://<name>` for a
+Each value is a comma-separated `alias=location` list — a path, or `pipe://<name>` for a
 named pipe (`arrow:` connects to it as a client only; something else, such as a distributed
 pipeline node, must already be serving it) — never an adapter prefix: the boundary stays an Arrow
 IPC stream. A location ending in `.arrow` or `.arrowfile` is refused, since the `arrow:` reader and

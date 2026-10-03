@@ -26,13 +26,15 @@ live under `Adapters/<Name>/`.
 `[CI: ComponentSelectorTests, RemoteUriClaimTests.No_Component_Selector_Strips_A_Remote_Uri —
 catalogue-wide]` `[unchecked: a routing site that bypasses ComponentSelector entirely]`
 
-## A file path may be a FIFO
+## A file adapter's exclusion is the operating system's lock
 
-A file adapter's path can name a FIFO whose other end is another dtpipe process, and .NET cannot tell
-one from a regular file. `System.IO.DisableFileLocking` (`DtPipe.csproj`) keeps the `FileShare`
-flock from excluding the process on the far end, so **never rely on `FileShare` for exclusion**:
-a writer's `FileShare.None` guards nothing on Unix. `[CI: validate_bind.sh on ubuntu-latest]`
-
+The file adapters open through `FileStream` with a `FileShare`, which .NET turns into an flock on
+Unix: a writer's `FileShare.None` is what refuses a run whose source and target are one file. It
+sees through symbolic and hard links, which a path comparison does not. **Never disable it**
+(`System.IO.DisableFileLocking`) **and never point a file adapter at a FIFO**: the lock can refuse the
+process at the other end. A boundary between processes is stdio (`arrow:-`) or a named pipe
+(`arrow:pipe://<name>`). `[local: run_catalog_tests.sh T81]` `[CI: validate_bind.sh]`
+`[unchecked: DuckDB reading a file from inside a query, which takes no .NET lock]`
 ## Writing adapter help (`[Description]` / `[ComponentHelp]`)
 
 `get-adapter-help` is the only view a model gets of an adapter, so these attributes are a contract.

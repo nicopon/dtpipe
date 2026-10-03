@@ -89,14 +89,15 @@ public class AliasBindingApplierTests
     }
 
     [Fact]
-    public void AFifoOrNamedPipeLocation_IsAccepted()
+    public void APathOrANamedPipeLocation_IsAccepted()
     {
-        var jobs = Jobs(("main", "arrow:-", "out.csv"));
+        var jobs = Jobs(("main", "arrow:-", "out.csv"), ("other", "arrow:-", "out2.csv"));
 
-        var errors = AliasBindingApplier.Apply(jobs, "main=/run/42/fifo", null);
+        var errors = AliasBindingApplier.Apply(jobs, "main=/run/42/in,other=pipe://run-42-other", null);
 
         Assert.Empty(errors);
-        Assert.Equal("arrow:/run/42/fifo", jobs["main"].Input);
+        Assert.Equal("arrow:/run/42/in", jobs["main"].Input);
+        Assert.Equal("arrow:pipe://run-42-other", jobs["other"].Input);
     }
 
     // ── Rule 3: unknown alias, or the same (branch, direction) pair twice ─

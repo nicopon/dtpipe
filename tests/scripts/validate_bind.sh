@@ -7,20 +7,24 @@ set -e
 #
 # Case 1 is the shape a single shell pipe cannot carry: a fragment with TWO links (a lone stage
 # between a producer and a consumer), so one process's stdin and stdout would each have to be "the
-# pipe" at once. Two real FIFOs stand in for the two neighbours split would produce.
+# pipe" at once. Two named pipes stand in for the two neighbours split would produce.
 #
 # Case 2 is the join: two bound inputs feed a --sql join, and the result must equal a monolithic
-# witness's — compared as a set, sorted, since DuckDB does not guarantee row order (CLAUDE.md).
+# witness's - compared as a set, sorted, since DuckDB does not guarantee row order (CLAUDE.md).
 #
 # Cases 3-4 spot-check the CLI wiring for two of the named refusals AliasBindingApplierTests and
 # PipelineValidatorTests cover directly; case 4 is the only coverage --export-job's refusal has,
 # since it lives in Program.cs ahead of PipelineValidator.
 #
-# Case 6 drives arrow:pipe://<name> - client-only by design - through both directions against the
-# real binary. The server role it needs (DtPipe.PipelineNode's own job, out of DtPipe.sln) is stood
-# in for by tools/ArrowPipeServer.cs, a file-based dotnet app.
+# Case 5 binds a dry run to a pipe nobody serves: the writer is neutralised, so nothing may dial it.
 #
-# File sources, FIFOs and named pipes only (no database), so this runs in CI like the rest.
+# Case 6 drives arrow:pipe://<name> - client-only by design - through both directions against the
+# real binary.
+#
+# The server role every case needs (DtPipe.PipelineNode's own job, out of DtPipe.sln) is stood in
+# for by tools/ArrowPipeServer.cs, a file-based dotnet app.
+#
+# File sources and named pipes only (no database), so this runs in CI like the rest.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -49,27 +53,40 @@ fi
 A="$ARTIFACTS_DIR"
 cd "$A"
 
-echo ""
-echo "--- Case 1: a fragment with two links, run for real over two FIFOs ---"
-printf 'id,name,email\n1,Ana,ana@corp.com\n2,Bo,bo@corp.com\n3,Cyd,cyd@corp.com\n' > people.csv
-mkfifo in.fifo out.fifo
+PIPE_TOOL="$SCRIPT_DIR/tools/ArrowPipeServer.cs"
+# Compile the server once: the cases below start several at the same time.
+dotnet run "$PIPE_TOOL" > /dev/null 2>&1 || true
 
-"$DTPIPE" -i csv:people.csv -o arrow:in.fifo --no-stats &
-PRODUCER_PID=$!
+# serve <pipe> <relay-out|relay-in> <file> <log>: a pipe server in the background, pid in $SERVER_PID.
+serve() {
+    dotnet run "$PIPE_TOOL" -- "$1" "$2" "$3" 20 > "$4" 2>&1 &
+    SERVER_PID=$!
+}
+
+echo ""
+echo "--- Case 1: a fragment with two links, run for real over two named pipes ---"
+printf 'id,name,email\n1,Ana,ana@corp.com\n2,Bo,bo@corp.com\n3,Cyd,cyd@corp.com\n' > people.csv
+"$DTPIPE" -i csv:people.csv -o arrow:people.ipcbytes --no-stats > /dev/null \
+    || fail "producing the stream fixture failed"
+
+C1_IN="dtpipe-validate-bind-c1-in-$$"
+C1_OUT="dtpipe-validate-bind-c1-out-$$"
+serve "$C1_IN" relay-out people.ipcbytes c1_in.log;  PRODUCER_PID=$SERVER_PID
+serve "$C1_OUT" relay-in anon.ipcbytes c1_out.log;   CONSUMER_PID=$SERVER_PID
+sleep 1
 
 "$DTPIPE" -i arrow:- --fake "email:internet.email" --alias anonymiser -o arrow:- \
-          --bind-input "anonymiser=$A/in.fifo" --bind-output "anonymiser=$A/out.fifo" --no-stats &
-ANON_PID=$!
+          --bind-input "anonymiser=pipe://$C1_IN" --bind-output "anonymiser=pipe://$C1_OUT" --no-stats \
+    || fail "the anonymiser failed: $(cat c1_in.log c1_out.log)"
 
-"$DTPIPE" -i arrow:out.fifo -o csv:anon.csv --no-stats
+wait "$PRODUCER_PID" || fail "the producer's pipe server failed: $(cat c1_in.log)"
+wait "$CONSUMER_PID" || fail "the consumer's pipe server failed: $(cat c1_out.log)"
 
-wait "$PRODUCER_PID" || fail "the producer failed"
-wait "$ANON_PID" || fail "the anonymiser failed"
-
-[ -f anon.csv ] || fail "the consumer wrote nothing"
-[ "$(tail -n +2 anon.csv | wc -l | tr -d ' ')" = "3" ] || fail "row count changed crossing the two FIFOs"
+"$DTPIPE" -i arrow:anon.ipcbytes -o csv:anon.csv --no-stats > /dev/null \
+    || fail "reading the anonymised stream back failed"
+[ "$(tail -n +2 anon.csv | wc -l | tr -d ' ')" = "3" ] || fail "row count changed crossing the two pipes"
 grep -q "ana@corp.com" anon.csv && fail "the original email survived the anonymiser"
-pass "three rows crossed two real FIFOs, --fake ran on the middle process"
+pass "three rows crossed two named pipes, --fake ran on the middle process"
 
 echo ""
 echo "--- Case 2: a join fed by two bound inputs equals the monolithic witness ---"
@@ -85,22 +102,26 @@ JOIN_SQL="SELECT o.id, c.name, o.amount FROM orders o JOIN customers c ON o.cust
     || fail "the monolithic witness did not run"
 [ -f witness.csv ] || fail "the witness wrote nothing"
 
-mkfifo orders.fifo customers.fifo
+"$DTPIPE" -i csv:orders.csv -o arrow:orders.ipcbytes --no-stats > /dev/null \
+    || fail "producing the orders fixture failed"
+"$DTPIPE" -i csv:customers.csv -o arrow:customers.ipcbytes --no-stats > /dev/null \
+    || fail "producing the customers fixture failed"
 
-"$DTPIPE" -i csv:orders.csv -o arrow:orders.fifo --no-stats &
-ORDERS_PID=$!
-"$DTPIPE" -i csv:customers.csv -o arrow:customers.fifo --no-stats &
-CUSTOMERS_PID=$!
+C2_ORDERS="dtpipe-validate-bind-c2-orders-$$"
+C2_CUSTOMERS="dtpipe-validate-bind-c2-customers-$$"
+serve "$C2_ORDERS" relay-out orders.ipcbytes c2_orders.log;           ORDERS_PID=$SERVER_PID
+serve "$C2_CUSTOMERS" relay-out customers.ipcbytes c2_customers.log;  CUSTOMERS_PID=$SERVER_PID
+sleep 1
 
 "$DTPIPE" -i arrow:- --alias orders \
           -i arrow:- --alias customers \
           --from orders --ref customers --sql "$JOIN_SQL" --alias joined \
           -o csv:joined.csv \
-          --bind-input "orders=$A/orders.fifo,customers=$A/customers.fifo" --no-stats \
-    || fail "the bound join did not run"
+          --bind-input "orders=pipe://$C2_ORDERS,customers=pipe://$C2_CUSTOMERS" --no-stats \
+    || fail "the bound join did not run: $(cat c2_orders.log c2_customers.log)"
 
-wait "$ORDERS_PID" || fail "the orders producer failed"
-wait "$CUSTOMERS_PID" || fail "the customers producer failed"
+wait "$ORDERS_PID" || fail "the orders pipe server failed: $(cat c2_orders.log)"
+wait "$CUSTOMERS_PID" || fail "the customers pipe server failed: $(cat c2_customers.log)"
 
 [ -f joined.csv ] || fail "the bound join wrote nothing"
 sort witness.csv > witness.sorted
@@ -127,43 +148,28 @@ grep -qF "bind-input" case4.out || fail "the refusal does not name the binding f
 pass "--export-job combined with a binding is refused"
 
 echo ""
-echo "--- Case 5: --dry-run against a FIFO neither hangs nor steals bytes from the real reader ---"
-rm -f dryrun.fifo consumed.bin
-mkfifo dryrun.fifo
-
-# A real reader, so a stray inspection read end that later resolved would have somewhere to steal
-# bytes from if it read anything.
-cat dryrun.fifo > consumed.bin &
-READER_PID=$!
-
-"$DTPIPE" -i "generate:1000" --fake "Email:internet.email" -o arrow:dryrun.fifo --dry-run 5 --no-stats \
-    > dryrun.out 2>&1 &
+echo "--- Case 5: --dry-run bound to a pipe nobody serves neither dials it nor hangs ---"
+# A dry run neutralises the writer. A client that dialled the pipe would wait out its connect
+# timeout (10s) and fail, so finishing sooner than that, and cleanly, is the proof it never did.
+"$DTPIPE" -i "generate:1000" --fake "Email:internet.email" -o "arrow:pipe://dtpipe-validate-bind-nobody-$$" \
+    --dry-run 5 --no-stats > dryrun.out 2>&1 &
 DRYRUN_PID=$!
 
 SECS=0
-while kill -0 "$DRYRUN_PID" 2>/dev/null && [ "$SECS" -lt 10 ]; do
+while kill -0 "$DRYRUN_PID" 2>/dev/null && [ "$SECS" -lt 8 ]; do
     sleep 1
     SECS=$((SECS + 1))
 done
 
 if kill -0 "$DRYRUN_PID" 2>/dev/null; then
     kill -9 "$DRYRUN_PID" 2>/dev/null
-    kill -9 "$READER_PID" 2>/dev/null
-    fail "a dry-run against a FIFO did not complete within 10s (hung opening it for inspection)"
+    fail "a dry-run bound to an unserved pipe did not complete within 8s (it dialled the pipe)"
 fi
-wait "$DRYRUN_PID" || fail "the dry-run against a FIFO exited non-zero: $(cat dryrun.out)"
-
-# Nothing is ever written on a dry-run (the writer is neutralised), so a real reader on the other
-# end must see EOF with no bytes — never bytes a stray inspection read end produced.
-kill -9 "$READER_PID" 2>/dev/null
-wait "$READER_PID" 2>/dev/null || true
-[ "$(wc -c < consumed.bin | tr -d ' ')" = "0" ] \
-    || fail "the real reader received bytes a dry-run's advisory inspection should never have produced"
-pass "a dry-run against a FIFO completes in at most ${SECS}s and consumes nothing from the real reader"
+wait "$DRYRUN_PID" || fail "the dry-run bound to an unserved pipe exited non-zero: $(cat dryrun.out)"
+pass "a dry-run bound to an unserved pipe completes in at most ${SECS}s without dialling it"
 
 echo ""
 echo "--- Case 6: arrow:pipe://<name>, both directions, against a real named-pipe server ---"
-PIPE_TOOL="$SCRIPT_DIR/tools/ArrowPipeServer.cs"
 PIPE_IN="dtpipe-validate-bind-in-$$"
 PIPE_OUT="dtpipe-validate-bind-out-$$"
 

@@ -127,7 +127,7 @@ public class ArrowPipeTests
     {
         // No server is ever created for this pipe name: if InspectTargetAsync tried
         // File.OpenRead on it, the call would hang or throw FileNotFoundException instead of
-        // returning promptly with "exists, unknown" - the same shape an un-attached FIFO reports.
+        // returning promptly with "exists, unknown".
         var writer = new ArrowAdapterDataWriter($"pipe://{NewPipeName()}");
 
         var info = await writer.InspectTargetAsync().WaitAsync(TimeSpan.FromSeconds(1));
