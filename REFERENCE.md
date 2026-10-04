@@ -1070,12 +1070,12 @@ consumer the old one satisfied?* Exit `0` when it does, `1` when it does not.
 | Extension metadata dropped (`arrow.uuid` → raw binary) | **breaks** | the storage is identical and the consumer stops getting a `Guid` |
 | Column order | indifferent | a writer resolves by name |
 
-A decimal whose source declared no precision and scale (a `--fake`, a `--compute`, an Oracle `NUMBER` with no
-constraint) is written at the default `decimal128:38:18` and carries the field metadata
-`Apache.Arrow.Serialization:decimal-width = undeclared`. That is what lets a writer create the engine
-default instead of a `DECIMAL(38,18)` nobody asked for. A contract captured before this mark existed has no
-such metadata, so its hash differs from a fresh capture of the same pipeline; the diff above still reports
-no change, since it compares types.
+A decimal whose source declared no precision and scale (a `--fake`, a `--compute`, an Oracle
+`NUMBER` with no constraint) is written at the default `decimal128:38:18` and carries the field
+metadata `Apache.Arrow.Serialization:decimal-width = undeclared`. That is what lets a writer create
+the engine default instead of a `DECIMAL(38,18)` nobody asked for. A contract captured before this
+mark existed has no such metadata, so its hash differs from a fresh capture of the same pipeline;
+the diff above still reports no change, since it compares types.
 
 #### Offering the points a job could be cut at
 
