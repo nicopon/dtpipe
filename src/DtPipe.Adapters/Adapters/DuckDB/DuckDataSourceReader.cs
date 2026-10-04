@@ -115,17 +115,13 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
 
 		_arrowReader = new DuckDbArrowResultReader(_connection, _query, _logger);
 		Schema = _arrowReader.Prepare();
-		Columns = Schema.FieldsList
-			.Select(f => new PipeColumnInfo(
-				f.Name,
-				ArrowTypeMapper.GetClrTypeFromField(f),
-				f.IsNullable,
-				// Not case-sensitive, like MySQL, SQLite and SQL Server and unlike PostgreSQL and
-				// Oracle. The rule those two use — a stored name that differs from the engine's
-				// folding must have been quoted when it was created — needs the engine to fold,
-				// and DuckDB does not: a bare CREATE TABLE t(MyCol INT) stores "MyCol" and
-				// resolves it case-insensitively.
-				IsCaseSensitive: false))
+		Columns = ArrowSchemaFactory.ToPipeColumns(Schema)
+			// Not case-sensitive, like MySQL, SQLite and SQL Server and unlike PostgreSQL and
+			// Oracle. The rule those two use — a stored name that differs from the engine's
+			// folding must have been quoted when it was created — needs the engine to fold,
+			// and DuckDB does not: a bare CREATE TABLE t(MyCol INT) stores "MyCol" and
+			// resolves it case-insensitively.
+			.Select(c => c with { IsCaseSensitive = false })
 			.ToList();
 	}
 

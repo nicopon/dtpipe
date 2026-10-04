@@ -11,6 +11,8 @@ public class OracleTypeConverter : ITypeMapper
 {
     public static readonly OracleTypeConverter Instance = new();
 
+    public DecimalSpelling DecimalType { get; } = new("NUMBER", 38, 38);
+
     public string MapToProviderType(Type clrType)
     {
         var type = Nullable.GetUnderlyingType(clrType) ?? clrType;

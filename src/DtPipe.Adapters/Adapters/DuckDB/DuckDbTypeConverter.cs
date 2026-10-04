@@ -9,6 +9,8 @@ public class DuckDbTypeConverter : ITypeMapper
 {
 	public static readonly DuckDbTypeConverter Instance = new();
 
+	public DecimalSpelling DecimalType { get; } = new("DECIMAL", 38, 38);
+
 	public string MapToProviderType(Type clrType)
 	{
 		var underlying = Nullable.GetUnderlyingType(clrType) ?? clrType;

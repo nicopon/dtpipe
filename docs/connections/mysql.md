@@ -44,7 +44,7 @@ own PRIMARY KEY or UNIQUE indexes. There is no `ON CONFLICT (…)` to name a tar
 |:---|:---|:---|
 | `Guid` | `CHAR(36)` | MySQL has no UUID type |
 | `bool` | `TINYINT(1)` | a bare `TINYINT` would come back as a number |
-| `decimal` | `DECIMAL(38,9)` | |
+| `decimal` | `DECIMAL(p,s)` as the source declares it, else `DECIMAL(38,9)` | |
 | `DateTimeOffset` | `DATETIME(6)` | **the offset is not preserved** — MySQL has no offset-carrying type |
 | `string` | `LONGTEXT`, or `VARCHAR(255)` in a key | `LONGTEXT` cannot be indexed without a prefix length |
 

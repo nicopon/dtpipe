@@ -17,6 +17,8 @@ public class MySqlTypeConverter : ITypeMapper
 	/// </summary>
 	public const string KeyStringType = "VARCHAR(255)";
 
+	public DecimalSpelling DecimalType { get; } = new("DECIMAL", 65, 30);
+
 	public string MapToProviderType(Type clrType)
 	{
 		var type = Nullable.GetUnderlyingType(clrType) ?? clrType;

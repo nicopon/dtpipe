@@ -424,7 +424,7 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
             if (i > 0) sb.Append(", ");
             var col = list[i];
             var safeName = _dialect.Quote(col.Name);
-            var nativeType = _typeMapper.MapToProviderType(col.ClrType);
+            var nativeType = _typeMapper.MapToProviderType(col);
             sb.Append($"{safeName} {nativeType}");
         }
 
@@ -537,7 +537,7 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
         foreach (var col in missingColumns)
         {
             var safeName = _dialect.Quote(col.Name);
-            var nativeType = _typeMapper.MapToProviderType(col.ClrType);
+            var nativeType = _typeMapper.MapToProviderType(col);
             await ExecuteNonQueryAsync($"ALTER TABLE {_quotedTargetTableName} ADD COLUMN {safeName} {nativeType}", ct);
         }
 

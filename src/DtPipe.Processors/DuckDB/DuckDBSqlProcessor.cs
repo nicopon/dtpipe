@@ -113,9 +113,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
             _resultReader = new DuckDbArrowResultReader(_conn, _query, _logger);
             _resultSchema = _resultReader.Prepare();
 
-            _columns = _resultSchema.FieldsList
-                .Select(f => new PipeColumnInfo(f.Name, ArrowTypeMapper.GetClrTypeFromField(f), f.IsNullable))
-                .ToList();
+            _columns = ArrowSchemaFactory.ToPipeColumns(_resultSchema).ToList();
         }
         catch (Exception ex)
         {

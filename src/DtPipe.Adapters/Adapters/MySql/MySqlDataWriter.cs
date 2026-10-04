@@ -460,7 +460,7 @@ public sealed partial class MySqlDataWriter : BaseSqlDataWriter, IColumnarDataWr
 			if (i > 0) sb.Append(", ");
 			var col = colList[i];
 			var safeName = SqlIdentifierHelper.GetSafeIdentifier(Dialect, col);
-			var nativeType = GetTypeMapper().MapToProviderType(col.ClrType);
+			var nativeType = GetTypeMapper().MapToProviderType(col);
 			if (keySet.Contains(col.Name) && nativeType.Equals("LONGTEXT", StringComparison.OrdinalIgnoreCase))
 				nativeType = MySqlTypeConverter.KeyStringType;
 			// A PRIMARY KEY member cannot be nullable in MySQL; it would be silently coerced to

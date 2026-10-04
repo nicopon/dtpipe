@@ -391,7 +391,7 @@ public abstract class BaseSqlDataWriter : IRowDataWriter, ISchemaInspector, IKey
 			if (i > 0) sb.Append(", ");
 			var col = colList[i];
 			var safeName = SqlIdentifierHelper.GetSafeIdentifier(Dialect, col);
-			var nativeType = GetTypeMapper().MapToProviderType(col.ClrType);
+			var nativeType = GetTypeMapper().MapToProviderType(col);
 			sb.Append($"{safeName} {nativeType}");
 		}
 
@@ -422,7 +422,7 @@ public abstract class BaseSqlDataWriter : IRowDataWriter, ISchemaInspector, IKey
 	protected virtual string GetAddColumnSql(string tableName, PipeColumnInfo column)
 	{
 		var safeName = SqlIdentifierHelper.GetSafeIdentifier(Dialect, column);
-		var type = GetTypeMapper().MapToProviderType(column.ClrType);
+		var type = GetTypeMapper().MapToProviderType(column);
 		var nullability = column.IsNullable ? "" : " NOT NULL";
 		return $"ALTER TABLE {tableName} {AddColumnKeyword} {safeName} {type}{nullability}";
 	}

@@ -40,9 +40,7 @@ public sealed class MergeTransformer : IStreamTransformer
             await _registry.WaitForArrowChannelSchemaAsync(alias, ct);
 
         _schema = await _registry.WaitForArrowChannelSchemaAsync(_aliases[0], ct);
-        _columns = _schema.FieldsList
-            .Select(f => new PipeColumnInfo(f.Name, ArrowTypeMapper.GetClrTypeFromField(f), f.IsNullable))
-            .ToList();
+        _columns = ArrowSchemaFactory.ToPipeColumns(_schema).ToList();
     }
 
     public async IAsyncEnumerable<RecordBatch> ReadResultsAsync(

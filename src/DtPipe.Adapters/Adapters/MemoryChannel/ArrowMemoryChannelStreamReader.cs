@@ -34,9 +34,7 @@ public sealed class ArrowMemoryChannelStreamReader : IStreamReader, IColumnarStr
     public async Task OpenAsync(CancellationToken ct = default)
     {
         Schema = await _registry.WaitForArrowChannelSchemaAsync(_alias, ct);
-        _columns = Schema.FieldsList
-            .Select(f => new PipeColumnInfo(f.Name, ArrowTypeMapper.GetClrTypeFromField(f), f.IsNullable))
-            .ToList();
+        _columns = ArrowSchemaFactory.ToPipeColumns(Schema).ToList();
     }
 
     public async IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync([EnumeratorCancellation] CancellationToken ct = default)

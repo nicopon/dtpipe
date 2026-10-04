@@ -550,7 +550,7 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter
 			if (i > 0) sb.Append(", ");
 			var col = colList[i];
 			var safeName = SqlIdentifierHelper.GetSafeIdentifier(Dialect, col);
-			var nativeType = GetTypeMapper().MapToProviderType(col.ClrType);
+			var nativeType = GetTypeMapper().MapToProviderType(col);
 			if (keySet.Contains(col.Name) && nativeType.Equals("NVARCHAR(MAX)", StringComparison.OrdinalIgnoreCase))
 				nativeType = "NVARCHAR(450)";
 			sb.Append($"{safeName} {nativeType}");

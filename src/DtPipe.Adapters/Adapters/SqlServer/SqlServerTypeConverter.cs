@@ -9,6 +9,8 @@ public class SqlServerTypeConverter : ITypeMapper
 {
     public static readonly SqlServerTypeConverter Instance = new();
 
+    public DecimalSpelling DecimalType { get; } = new("DECIMAL", 38, 38);
+
     public string MapToProviderType(Type clrType)
     {
         var type = Nullable.GetUnderlyingType(clrType) ?? clrType;

@@ -876,7 +876,7 @@ specific one, or when the table does not exist yet and dtpipe must generate the 
 |:---|:---|:---|
 | `Guid` | `CHAR(36)` | MySQL has no UUID type; `CHAR(36)` is what round-trips back to `Guid` |
 | `bool` | `TINYINT(1)` | a bare `TINYINT` would come back as a number |
-| `decimal` | `DECIMAL(38,9)` | MySQL's ceiling is `DECIMAL(65,30)` |
+| `decimal` | `DECIMAL(p,s)` as the source declares it, else `DECIMAL(38,9)` | MySQL's ceiling is `DECIMAL(65,30)` |
 | `DateTime` | `DATETIME(6)` | |
 | `DateTimeOffset` | `DATETIME(6)` | **the zone offset is not preserved** — MySQL has no offset-carrying type |
 | `string` | `LONGTEXT`, or `VARCHAR(255)` when part of the key | `LONGTEXT` cannot be indexed without a prefix length |

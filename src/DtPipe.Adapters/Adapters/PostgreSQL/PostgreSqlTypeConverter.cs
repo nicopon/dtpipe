@@ -7,6 +7,8 @@ public class PostgreSqlTypeConverter : ITypeMapper
 {
 	public static readonly PostgreSqlTypeConverter Instance = new();
 
+	public DecimalSpelling DecimalType { get; } = new("NUMERIC", 1000, 1000);
+
 	public string MapToProviderType(Type clrType)
 	{
 		var type = Nullable.GetUnderlyingType(clrType) ?? clrType;
