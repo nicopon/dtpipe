@@ -65,6 +65,53 @@ public class SampleModeSafetyGateTests
 		collected.Should().BeEmpty();
 	}
 
+	/// <summary>
+	/// Every refusal here is a way the gate could be talked into dropping real SQL by mistaking it
+	/// for a comment. They come first because a pass is only worth something if these still fail.
+	/// </summary>
+	[Theory]
+	[InlineData("/* x */ DELETE FROM t")]
+	[InlineData("-- c\nDELETE FROM t")]
+	[InlineData("-- c\r\nDELETE FROM t")]
+	[InlineData("/*! DELETE FROM t */ SELECT 1")]
+	[InlineData("/*!50000 DELETE FROM t */ SELECT 1")]
+	[InlineData("/* /* */ DELETE FROM t; /* */ */ SELECT 1")]
+	[InlineData("/* never closed DELETE FROM t")]
+	[InlineData("SELECT '--' ; DELETE FROM t")]
+	[InlineData("SELECT \"--\" ; DELETE FROM t")]
+	[InlineData("SELECT `--` ; DELETE FROM t")]
+	[InlineData("SELECT [x--] ; DELETE FROM t")]
+	[InlineData("SELECT [a]]-- x] ; DELETE FROM t")]
+	[InlineData("SELECT 1--1 ; DELETE FROM t")]
+	[InlineData("SELECT 'a\\' -- ' ; DELETE FROM t")]
+	[InlineData("SELECT E'a\\' -- ' ; DELETE FROM t")]
+	[InlineData("SELECT $$ -- $$ ; DELETE FROM t")]
+	[InlineData("SELECT $tag$ -- $tag$ ; DELETE FROM t")]
+	[InlineData("SELECT q'{it's -- }' FROM dual ; DELETE FROM t")]
+	[InlineData("SELECT 'never closed -- \nDELETE FROM t")]
+	[InlineData("# delete the rows\nSELECT 1")]
+	[InlineData("SELECT 1 -- c\n; DELETE FROM t")]
+	[InlineData("SELECT 1 /* c */ ; DELETE FROM t")]
+	public void A_Verb_Is_Refused_Wherever_A_Comment_Could_Not_Have_Hidden_It(string sql)
+		=> Evaluate(null, sql).Allowed.Should().BeFalse();
+
+	[Theory]
+	[InlineData("-- delete old rows first\nSELECT 1 AS a")]
+	[InlineData("/* delete old rows first */ SELECT 1 AS a")]
+	[InlineData("SELECT 1 AS a -- drop nothing\n")]
+	[InlineData("SELECT 1 AS a -- drop nothing")]
+	[InlineData("SELECT 'a -- b' AS a")]
+	[InlineData("SELECT 'it''s -- fine' AS a /* update */")]
+	[InlineData("SELECT 1 /* a */ + /* b */ 2")]
+	[InlineData("-- load httpfs\nSELECT 1")]
+	public void A_Verb_Only_A_Comment_Names_Does_Not_Refuse_The_Run(string sql)
+		=> Evaluate(null, sql).Allowed.Should().BeTrue();
+
+	[Fact]
+	public void A_Comment_Is_A_Separator_Not_Glue()
+		=> Evaluate(null, "SELECT 1 FROM t WHERE x = 'a' AND DE/**/LETE = 1").Allowed.Should().BeTrue(
+			"DE/**/LETE is two tokens to every engine, so no verb is spelt");
+
 	[Fact]
 	public void A_Server_Enforced_Dialect_Is_Reported_As_Such()
 		=> Evaluate(new ReadOnlyCapableDialect(), "SELECT 1").Enforcement

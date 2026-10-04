@@ -68,4 +68,25 @@ public class SqlQueryGuardTests
     [InlineData("   ")]
     public void An_Empty_Query_Is_Refused(string query)
         => Assert.Throws<ArgumentException>(() => SqlQueryGuard.RequireReadOnlyStatement(query));
+
+    [Theory]
+    [InlineData("SELECT 1 -- note\nFROM t", "SELECT 1  \nFROM t")]
+    [InlineData("SELECT /* a */ 1 /* b */", "SELECT   1  ")]
+    [InlineData("SELECT 'a -- b', \"c /* d */\"", "SELECT 'a -- b', \"c /* d */\"")]
+    [InlineData("SELECT 'it''s -- x' -- y", "SELECT 'it''s -- x'  ")]
+    [InlineData("SELECT 1 --", "SELECT 1  ")]
+    public void A_Comment_Is_Replaced_By_One_Space_And_A_Literal_Is_Left_Alone(string query, string expected)
+        => Assert.Equal(expected, SqlQueryGuard.StripComments(query));
+
+    [Theory]
+    [InlineData("SELECT 1--1")]
+    [InlineData("/*! DELETE */ SELECT 1")]
+    [InlineData("/* /* */ */ SELECT 1")]
+    [InlineData("SELECT 'a\\' -- '")]
+    [InlineData("SELECT $$ -- $$")]
+    [InlineData("SELECT q'{it's -- }'")]
+    [InlineData("SELECT 'open -- ")]
+    [InlineData("SELECT 1 -- c\n/* never closed")]
+    public void A_Text_The_Engines_Read_Differently_Comes_Back_Unchanged(string query)
+        => Assert.Equal(query, SqlQueryGuard.StripComments(query));
 }

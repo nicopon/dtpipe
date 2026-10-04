@@ -1,3 +1,4 @@
+using DtPipe.Adapters.Common;
 using DtPipe.Cli.Security;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Options;
@@ -46,6 +47,11 @@ public static class SampleModeSafetyGate
 {
     /// <summary>
     /// Classifies everything SQL-bearing that a sample run would execute.
+    ///
+    /// A comment is not executed, so each value is classified without its comments, by the rule of
+    /// <see cref="SqlQueryGuard.StripComments"/>; a text that rule cannot read the way every engine
+    /// does is classified whole. That also stops a network pattern inside a comment from refusing the
+    /// run. The policy itself still scans raw text: the MCP pre-check hands it YAML, which is not SQL.
     /// </summary>
     public static SampleSafetyVerdict Evaluate(
         ISqlSafetyPolicy policy,
@@ -58,7 +64,7 @@ public static class SampleModeSafetyGate
         foreach (var value in sqlBearingValues)
         {
             if (string.IsNullOrWhiteSpace(value)) continue;
-            var result = policy.Analyze(value, options);
+            var result = policy.Analyze(SqlQueryGuard.StripComments(value), options);
             if (!result.Allowed) violations.AddRange(result.Violations);
         }
 
