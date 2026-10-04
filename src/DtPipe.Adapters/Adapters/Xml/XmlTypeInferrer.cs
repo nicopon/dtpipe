@@ -1,6 +1,7 @@
 using System.Globalization;
 using Apache.Arrow;
 using DtPipe.Core.Infrastructure.Arrow;
+using Apache.Arrow.Serialization.Mapping;
 using Apache.Arrow.Types;
 using DtPipe.Core.Models;
 
@@ -43,6 +44,15 @@ internal static class XmlTypeInferrer
 		}
 		return result;
 	}
+	/// <summary>
+	/// A field for a type this class produced. Its only decimal is the default width, a hint
+	/// naming no precision, so that decimal carries the undeclared mark.
+	/// </summary>
+	internal static Field FieldFor(string name, IArrowType arrowType)
+		=> arrowType is Decimal128Type
+			? new Field(name, arrowType, true, ArrowTypeMap.DefaultDecimal.Metadata)
+			: new Field(name, arrowType, true);
+
 	internal static IArrowType ClrToArrowType(Type clrType)
 	{
 		if (clrType == typeof(int)) return Int32Type.Default;

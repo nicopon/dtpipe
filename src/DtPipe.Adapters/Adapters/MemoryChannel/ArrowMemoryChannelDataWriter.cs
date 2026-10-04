@@ -78,7 +78,7 @@ public sealed class ArrowMemoryChannelDataWriter : IColumnarDataWriter
         var builder = new Schema.Builder();
         foreach (var col in columns)
         {
-            builder.Field(ArrowTypeMapper.GetField(col.Name, col.ClrType, col.IsNullable));
+            builder.Field(ArrowTypeMapper.GetField(col.Name, col.ClrType, col.IsNullable, col.Precision, col.Scale));
         }
         return builder.Build();
     }

@@ -138,7 +138,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 		var fields = new List<Field>();
 		foreach (var kvp in _typeOverrides!)
 		{
-			fields.Add(new Field(kvp.Key, XmlTypeInferrer.ClrToArrowType(kvp.Value), true));
+			fields.Add(XmlTypeInferrer.FieldFor(kvp.Key, XmlTypeInferrer.ClrToArrowType(kvp.Value)));
 		}
 		Columns = fields.Select(f => new PipeColumnInfo(f.Name, _typeOverrides[f.Name], true)).ToList();
 		Schema = new Schema(fields, null);
@@ -306,7 +306,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 				var sampleValue = kvp.Value;
 
 				var (clrType, arrowType) = InferTypes(sampleValue, name);
-				fields.Add(new Field(name, arrowType, true));
+				fields.Add(XmlTypeInferrer.FieldFor(name, arrowType));
 				seenPaths.Add(name);
 			}
 		}
@@ -321,7 +321,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 				if (!kvp.Key.Contains('.') && !seenPaths.Contains(kvp.Key))
 				{
 					var arrowType = XmlTypeInferrer.ResolveHintToArrowType(kvp.Value);
-					fields.Add(new Field(kvp.Key, arrowType, true));
+					fields.Add(XmlTypeInferrer.FieldFor(kvp.Key, arrowType));
 					seenPaths.Add(kvp.Key);
 				}
 			}
@@ -678,7 +678,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 		{
 			var childPath = string.IsNullOrEmpty(currentPath) ? kvp.Key : $"{currentPath}.{kvp.Key}";
 			var (_, arrowType) = InferTypes(kvp.Value, childPath);
-			fields.Add(new Field(kvp.Key, arrowType, true));
+			fields.Add(XmlTypeInferrer.FieldFor(kvp.Key, arrowType));
 		}
 		return new StructType(fields);
 	}

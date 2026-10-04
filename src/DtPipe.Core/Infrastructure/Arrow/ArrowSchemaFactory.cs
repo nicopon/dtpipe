@@ -1,4 +1,5 @@
 using Apache.Arrow;
+using Apache.Arrow.Serialization.Mapping;
 using Apache.Arrow.Types;
 using DtPipe.Core.Models;
 using System.Linq;
@@ -63,16 +64,17 @@ public static class ArrowSchemaFactory
             f.Name,
             ArrowTypeMapper.GetClrTypeFromField(f),
             f.IsNullable,
-            Precision: DeclaredPrecision(f.DataType),
-            Scale: DeclaredScale(f.DataType)
+            Precision: DeclaredPrecision(f),
+            Scale: DeclaredScale(f)
         )).ToList();
     }
 
     /// <summary>
     /// Precision an Arrow decimal declares, so a column that goes Schema → PipeColumnInfo →
-    /// Schema comes back at the width it left with rather than at the default.
+    /// Schema comes back at the width it left with rather than at the default. A decimal marked
+    /// undeclared reports none: the default width it carries is not something the source said.
     /// </summary>
-    private static int? DeclaredPrecision(IArrowType type) => type switch
+    private static int? DeclaredPrecision(Field f) => ArrowTypeMap.IsUndeclaredDecimal(f) ? null : f.DataType switch
     {
         Decimal128Type d => d.Precision,
         Decimal256Type d => d.Precision,
@@ -80,7 +82,7 @@ public static class ArrowSchemaFactory
     };
 
     /// <inheritdoc cref="DeclaredPrecision"/>
-    private static int? DeclaredScale(IArrowType type) => type switch
+    private static int? DeclaredScale(Field f) => ArrowTypeMap.IsUndeclaredDecimal(f) ? null : f.DataType switch
     {
         Decimal128Type d => d.Scale,
         Decimal256Type d => d.Scale,

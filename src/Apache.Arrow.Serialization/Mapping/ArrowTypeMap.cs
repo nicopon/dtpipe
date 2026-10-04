@@ -60,7 +60,7 @@ public static class ArrowTypeMap
         if (type == typeof(ushort) || type == typeof(ushort?)) return new ArrowTypeResult(UInt16Type.Default);
         if (type == typeof(uint) || type == typeof(uint?)) return new ArrowTypeResult(UInt32Type.Default);
         if (type == typeof(ulong) || type == typeof(ulong?)) return new ArrowTypeResult(UInt64Type.Default);
-        if (type == typeof(decimal) || type == typeof(decimal?)) return new ArrowTypeResult(DefaultDecimalType);
+        if (type == typeof(decimal) || type == typeof(decimal?)) return DefaultDecimal;
         // DateTime → Timestamp(null tz) — round-trips correctly via GetClrType(Timestamp(null)) → DateTime
         if (type == typeof(DateTime) || type == typeof(DateTime?)) return new ArrowTypeResult(new TimestampType(TimeUnit.Microsecond, (string?)null));
         // DateTimeOffset → Timestamp with UTC timezone — round-trips correctly via GetClrType(Timestamp) → DateTimeOffset
@@ -108,6 +108,31 @@ public static class ArrowTypeMap
     public static Decimal128Type DefaultDecimalType { get; } = new(38, 18);
 
     /// <summary>
+    /// Field metadata key marking a decimal whose width is <see cref="DefaultDecimalType"/> because
+    /// the source declared none, not because it declared (38,18). An Arrow decimal always carries a
+    /// precision and scale, so without the mark the two are indistinguishable downstream.
+    /// </summary>
+    public const string DecimalWidthKey = "Apache.Arrow.Serialization:decimal-width";
+
+    /// <summary>The value <see cref="DecimalWidthKey"/> takes on a decimal that declared no width.</summary>
+    public const string UndeclaredDecimalWidth = "undeclared";
+
+    /// <summary>
+    /// <see cref="DefaultDecimalType"/>, marked as undeclared. The one place the default is produced
+    /// as a field type, so a reader of the field can tell it from a declared (38,18).
+    /// </summary>
+    public static ArrowTypeResult DefaultDecimal { get; } = new(
+        DefaultDecimalType,
+        new Dictionary<string, string> { [DecimalWidthKey] = UndeclaredDecimalWidth });
+
+    /// <summary>True when the field is a decimal that declared no width (see <see cref="DecimalWidthKey"/>).</summary>
+    public static bool IsUndeclaredDecimal(Field field)
+        => field.DataType is Decimal128Type or Decimal256Type
+           && field.Metadata is not null
+           && field.Metadata.TryGetValue(DecimalWidthKey, out var mark)
+           && mark == UndeclaredDecimalWidth;
+
+    /// <summary>
     /// Same mapping, given what the source declared about a numeric column. Decimal is the one
     /// scalar whose Arrow form a CLR type does not fix on its own: the storage is Decimal128
     /// either way, but precision and scale belong to the column, not to <c>System.Decimal</c>.
@@ -122,7 +147,8 @@ public static class ArrowTypeMap
         if (precision is not int p || p < 1 || p > 38) return logical;
         if (scale is not int s || s < 0 || s > p) return logical;
 
-        return new ArrowTypeResult(new Decimal128Type(p, s), logical.Metadata);
+        // A declared width carries no undeclared mark.
+        return new ArrowTypeResult(new Decimal128Type(p, s));
     }
 
     /// <summary>

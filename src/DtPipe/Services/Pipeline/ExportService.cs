@@ -179,9 +179,9 @@ public class ExportService
 			}
 			else
 			{
-				// New field (e.g. from --fake), map from CLR type
-				var arrowType = DtPipe.Core.Infrastructure.Arrow.ArrowTypeMapper.GetLogicalType(col.ClrType).ArrowType;
-				fields.Add(new Field(col.Name, arrowType, col.IsNullable));
+				// New field (e.g. from --fake), map from CLR type and the width the column declares
+				fields.Add(DtPipe.Core.Infrastructure.Arrow.ArrowTypeMapper.GetField(
+					col.Name, col.ClrType, col.IsNullable, col.Precision, col.Scale));
 			}
 		}
 		return new Schema(fields, null);
