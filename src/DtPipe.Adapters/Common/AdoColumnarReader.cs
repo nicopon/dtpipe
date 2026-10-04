@@ -10,6 +10,7 @@ using Apache.Arrow;
 using Apache.Arrow.Ado;
 using Apache.Arrow.Types;
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
 
 namespace DtPipe.Adapters.Common;
@@ -32,6 +33,28 @@ public abstract partial class AdoColumnarReader : IColumnarStreamReader, IBatchS
     public Schema? Schema { get; protected set; }
 
     public abstract Task OpenAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// The one type resolver the ADO readers share: the CLR type and the declared decimal
+    /// precision and scale come from <see cref="Columns"/> (matched by ordinal), so the Arrow
+    /// batches carry the width the source declared. A decimal that declares none keeps
+    /// <c>ArrowTypeMap.DefaultDecimalType</c>.
+    /// </summary>
+    protected Func<DbColumn, Apache.Arrow.Serialization.Mapping.ArrowTypeResult> DeclaredTypeResolver => col =>
+    {
+        var declared = col.ColumnOrdinal is int i && Columns is { } columns && i >= 0 && i < columns.Count
+            ? columns[i]
+            : null;
+        var clrType = declared?.ClrType ?? col.DataType ?? typeof(string);
+        clrType = Nullable.GetUnderlyingType(clrType) ?? clrType;
+        return ArrowTypeMapper.GetLogicalType(clrType, declared?.Precision, declared?.Scale);
+    };
+
+    /// <summary>
+    /// Value of the current row's cell in row mode. A reader whose driver hands back a different
+    /// CLR type than the one <see cref="Columns"/> declares overrides this to convert.
+    /// </summary>
+    protected virtual object? GetCellValue(int ordinal) => Reader!.GetValue(ordinal);
 
     public virtual async IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync(
         [EnumeratorCancellation] CancellationToken ct = default)
@@ -59,7 +82,7 @@ public abstract partial class AdoColumnarReader : IColumnarStreamReader, IBatchS
         {
             var row = new object?[columnCount];
             for (var i = 0; i < columnCount; i++)
-                row[i] = Reader.IsDBNull(i) ? null : Reader.GetValue(i);
+                row[i] = Reader.IsDBNull(i) ? null : GetCellValue(i);
 
             batch[index++] = row;
 

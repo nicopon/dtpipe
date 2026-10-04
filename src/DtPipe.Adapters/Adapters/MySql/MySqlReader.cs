@@ -66,8 +66,7 @@ public sealed class MySqlReader : AdoColumnarReader
 					 .Select(x => x.i));
 
 		Config = new AdoToArrowConfigBuilder()
-			.SetTypeResolver(col => ArrowTypeMapper.GetLogicalType(
-				Nullable.GetUnderlyingType(col.DataType ?? typeof(string)) ?? col.DataType ?? typeof(string)))
+			.SetTypeResolver(DeclaredTypeResolver)
 			.SetTargetBatchSize(BatchSize)
 			.SetMaxBatchBytes(MaxBatchBytes)
 			.Build();

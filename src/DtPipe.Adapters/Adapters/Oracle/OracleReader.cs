@@ -41,8 +41,7 @@ public sealed class OracleReader : AdoColumnarReader, IRequiresOptions<OracleRea
         Schema = ArrowSchemaFactory.Create(Columns);
 
         Config = new AdoToArrowConfigBuilder()
-            .SetTypeResolver(col => ArrowTypeMapper.GetLogicalType(
-                Nullable.GetUnderlyingType(col.DataType ?? typeof(string)) ?? col.DataType ?? typeof(string)))
+            .SetTypeResolver(DeclaredTypeResolver)
             .SetTargetBatchSize(BatchSize)
             .SetMaxBatchBytes(MaxBatchBytes)
             .Build();
@@ -69,12 +68,40 @@ public sealed class OracleReader : AdoColumnarReader, IRequiresOptions<OracleRea
             var name = row["ColumnName"]?.ToString() ?? $"Column{columns.Count}";
             var clrType = row["DataType"] as Type ?? typeof(object);
             var allowNull = row["AllowDBNull"] as bool? ?? true;
+            var (precision, scale) = DeclaredDecimalShape(row);
+
+            // ODP.NET surfaces a NUMBER(p,s) with a small p as Double, which cannot hold what the
+            // column declares; BINARY_DOUBLE reports no precision and stays a Double.
+            if (clrType == typeof(double) && precision is not null)
+                clrType = typeof(decimal);
+
             columns.Add(new PipeColumnInfo(name, clrType, allowNull,
-                IsCaseSensitive: name != name.ToUpperInvariant()));
+                IsCaseSensitive: name != name.ToUpperInvariant(),
+                Precision: clrType == typeof(decimal) ? precision : null,
+                Scale: clrType == typeof(decimal) ? scale : null));
         }
 
         return columns;
     }
+
+    // ODP.NET reports an unconstrained NUMBER (and FLOAT) as precision 38, scale 127: nothing declared.
+    private const int UndeclaredScale = 127;
+
+    private static (int? Precision, int? Scale) DeclaredDecimalShape(DataRow row)
+    {
+        if (row["NumericPrecision"] is not (short or int) || row["NumericScale"] is not (short or int))
+            return (null, null);
+
+        var precision = Convert.ToInt32(row["NumericPrecision"]);
+        var scale = Convert.ToInt32(row["NumericScale"]);
+        return scale == UndeclaredScale || precision < 1 ? (null, null) : (precision, scale);
+    }
+
+    /// <summary>Row mode reads the value ODP.NET converts to <see cref="decimal"/> where the column declares a width.</summary>
+    protected override object? GetCellValue(int ordinal) =>
+        Columns![ordinal].ClrType == typeof(decimal) && Reader!.GetFieldType(ordinal) == typeof(double)
+            ? Reader.GetDecimal(ordinal)
+            : base.GetCellValue(ordinal);
 
     public override async ValueTask DisposeAsync()
     {

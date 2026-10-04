@@ -63,8 +63,7 @@ public sealed class SqliteReader : AdoColumnarReader
 
         // SQLite CLR types: long, double, string, byte[] — no special consumers needed
         Config = new AdoToArrowConfigBuilder()
-            .SetTypeResolver(col => ArrowTypeMapper.GetLogicalType(
-                Nullable.GetUnderlyingType(col.DataType ?? typeof(string)) ?? col.DataType ?? typeof(string)))
+            .SetTypeResolver(DeclaredTypeResolver)
             .SetTargetBatchSize(BatchSize)
             .SetMaxBatchBytes(MaxBatchBytes)
             .Build();
