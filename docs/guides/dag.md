@@ -30,7 +30,7 @@ flowchart LR
 |:---|:---|
 | `--alias NAME` | Name this branch so another one can read it |
 | `--from A` | Read the stream published by branch `A` |
-| `--ref A,B` | Read `A` and `B` as **materialized** lookups — fully loaded before the query runs |
+| `--ref A,B` | Read `A` and `B` as **materialized** lookups — fully loaded before the query runs. A branch of refs alone needs no `--from` |
 | `--sql "…"` | Run DuckDB SQL over the branches this branch reads |
 | `--merge` | `UNION ALL` of every `--from` source |
 
@@ -104,14 +104,69 @@ An alias is a table name inside the query. The sources can be anything dtpipe re
 against an Oracle table joined against a Parquet file on S3.
 
 > [!NOTE]
-> `--from` **streams**; `--ref` is **materialized** — read fully into memory so the query engine
-> can plan a real join. The panel spells the difference: `← [o]` for the streamed input, `+ref [c]`
-> for the materialized one. Filter a large lookup upstream before making it a `--ref`.
+> `--from` **streams**; `--ref` is **materialized** — loaded in full into a table of the query
+> engine, so it can plan a real join and read the lookup as often as the query names it. That table
+> spills to disk past the engine's memory ceiling (see [DuckDB](../connections/duckdb.md)). The
+> panel spells the difference: `← [o]` for the streamed input, `+ref [c]` for the materialized one.
+> Filter a large lookup upstream before making it a `--ref`.
 
 > [!IMPORTANT]
 > `--auto-column-types` on the orders reader is what makes `sum(amount)` work. A CSV column is
 > text until something says otherwise, and `sum(VARCHAR)` has no meaning — see
 > [Files](../connections/files.md).
+
+## Use a source twice
+
+`--from` streams: the rows pass through once and are not kept. A query that names the `--from`
+alias more than once — a self-join, a `UNION ALL` of the alias with itself, a subquery over the same
+table — would find nothing the second time and return wrong rows without a word. dtpipe refuses it
+before running, with a message that begins:
+
+```bash
+dtpipe -i orders.csv --auto-column-types --alias o \
+       --from o --sql "SELECT count(*) AS n FROM o a JOIN o b USING (order_id)" \
+       -o n.csv
+```
+
+```
+The query reads the streaming source 'o' (--from o) 2 times, and a stream can only be read once.
+```
+
+(The terminal wraps it; the sentence is unchanged.)
+
+The message names two ways out. Read the stream once and reuse the result through a materialized
+CTE:
+
+```bash
+dtpipe -i orders.csv --auto-column-types --alias o \
+       --from o --sql "WITH once AS MATERIALIZED (SELECT * FROM o)
+                       SELECT count(*) AS n FROM once a JOIN once b USING (order_id)" \
+       -o n.csv
+```
+
+`n.csv`
+
+```
+n
+3
+```
+
+Or give the source to `--ref`, which loads it in full into a table the query can read as often as
+it likes. When every input of a branch is a `--ref`, there is nothing left to stream and `--from`
+is left out:
+
+```bash
+dtpipe -i orders.csv --auto-column-types --alias o \
+       -i customers.csv --alias c \
+       --ref o,c \
+       --sql "SELECT c.name, sum(o.amount) AS total
+              FROM o JOIN c ON o.customer_email = c.email
+              GROUP BY c.name ORDER BY total DESC" \
+       -o revenue.csv
+```
+
+The result is the same `revenue.csv` as above. The panel shows the branch with `+ref [o], [c]` and
+no `←`, because nothing streams into it.
 
 ## Fan one source out to several targets
 
@@ -224,6 +279,7 @@ flag twice in one stage is a hard error rather than a silent last-wins.
 | Two independent copies | `-i src1 -o dst1  -i src2 -o dst2` |
 | SQL over one source | `-i src --alias a  --from a --sql "…" -o dst` |
 | Join (main + lookup) | `-i main --alias m  -i ref --alias r  --from m --ref r --sql "…"` |
+| Join, all inputs materialized | `-i a --alias a  -i b --alias b  --ref a,b --sql "…"` |
 | Merge (UNION ALL) | `-i a --alias a  -i b --alias b  --from a,b --merge -o dst` |
 | Fan-out | `-i src --alias s  --from s -o dstA  --from s -o dstB` |
 | Diamond | `-i src --alias s  --from s --filter '…' --alias hi  --from s --filter '…' --alias lo  --from hi --ref lo --sql "…"` |

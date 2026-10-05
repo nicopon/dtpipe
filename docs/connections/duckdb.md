@@ -56,6 +56,26 @@ Extensions are installed from DuckDB's repository on first use, so the host need
 once — or an extension directory that already holds them. That is the one thing to check before
 running on an air-gapped machine.
 
+## Memory and temporary files
+
+Every DuckDB instance dtpipe opens — the `duck:` reader and writer, and the `--sql` stage — starts
+with two settings. DuckDB may use 60 % of the memory the runtime reports as available (the
+machine's memory, or the share of a container's limit the runtime grants itself). The rest is
+headroom for what DuckDB does not count: the .NET heap and the Arrow batches in flight.
+
+Past that ceiling DuckDB writes to disk instead of failing. Each instance spills into its own
+directory under the system temporary directory (`dtpipe/duckdb-<pid>-<id>`), which DuckDB creates
+at the first spill and removes when the instance closes. A `--ref` table lives in the `--sql`
+stage's instance, so it spills like any other table.
+
+To change either setting, set it in `--duck-init`, which runs afterwards:
+`--duck-init "SET memory_limit='4GB'; SET temp_directory='/fast/disk/tmp'"`. A `--sql` stage takes
+the same SQL as `duck-init` under `provider-options.sql` in a YAML job.
+
+> [!WARNING]
+> Never point two instances at the same `temp_directory`. When one closes it deletes the spill
+> files of the other, whose query then fails with an I/O error. Give each branch its own directory.
+
 ## As the SQL engine
 
 See [SQL and JavaScript](../guides/sql-and-javascript.md) and [DAG pipelines](../guides/dag.md).

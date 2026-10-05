@@ -554,13 +554,18 @@ DuckDB extensions (`excel`, `httpfs`, `azure`, `ducklake`…) are reached throug
 |:---|:---|
 | `--alias NAME` | Name the current branch for downstream reference |
 | `--from ALIAS[,ALIAS...]` | Streaming source(s). Fan-out uses a single alias; multi-stream processors use comma-separated aliases |
-| `--ref ALIAS[,ALIAS...]` | Materialized reference source(s) — fully preloaded before query execution. Use for JOIN lookups |
+| `--ref ALIAS[,ALIAS...]` | Materialized reference source(s) — fully loaded before query execution. Use for JOIN lookups. A `--sql` branch with no `--from` reads only its refs |
 | `--sql "QUERY"` | Inline SQL executed by the internal DuckDB engine (standard SQL, window functions, CTEs, JSON) |
 | `--duck-init "SQL"` | SQL to run on the DuckDB SQL processor connection after open (e.g. `LOAD httpfs`). See [Value Resolution](#value-resolution) |
 | `--merge` | UNION ALL of all `--from` sources. Requires at least 2 streaming sources |
 
-> **`--ref` is intentionally materialized.** Secondary sources declared via `--ref` are read fully
-> into memory so the query engine can build a cost-based plan. Only the `--from` source streams.
+> **`--ref` is intentionally materialized.** Secondary sources declared via `--ref` are loaded in
+> full into a table of the query engine, which can then build a cost-based plan and read the table
+> as often as the query names it. That table spills to disk past the engine's memory ceiling
+> ([DuckDB](./docs/connections/duckdb.md#memory-and-temporary-files)). Only the `--from` source
+> streams, and a stream can be read once: a query that names the `--from` alias more than once is
+> refused before it runs, because the later reads would find nothing. Read it once through a
+> `WITH x AS MATERIALIZED (SELECT * FROM <alias>)`, or give it to `--ref`.
 
 > **An alias list is comma-separated; repeating a flag never adds to it.** Repetition has one
 > meaning in this grammar — `-i`, `--from` and `--job` open a new branch — so `--from a --from b`
@@ -613,6 +618,7 @@ Branches are separated implicitly while walking the arguments. One pure function
 | `-i` / `--input` | an input **or** job file was already seen in the current branch |
 | `--from` | a `--from`, `--input` or `--job` was already seen — the first `--from` in a fresh branch stays in the current branch |
 | `--job` / `-j` | a job file **or** input was already seen |
+| `--ref` | an input **or** job file was already seen and no `--from` was — the branch that follows has no streamed source, only refs. A `--from` branch keeps its `--ref`, and a second `--ref` is refused |
 | *positional SQL text* | a bare (non-flag) token starts a new branch that becomes the `--sql` processor branch |
 
 Neither `--sql` nor boolean processor flags (e.g. `--merge`) trigger a split.

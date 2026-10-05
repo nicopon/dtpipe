@@ -12,11 +12,18 @@ Mechanics for editing the CLI project. The rules themselves are in the root `CLA
    JobDagDefinition)`.
 3. Linear: `LinearPipelineService` → `ExportService.RunExportAsync()` → `PipelineExecutor`.
 
-Implicit branch split — exactly three tokens:
+Implicit branch split — exactly four tokens:
 - `-i` / `--input` — when an input or job file was already seen in the current branch;
 - `--from <alias[,alias...]>` — when a `--from`, `--input` or `--job` was already seen (the first
   `--from` in a fresh branch stays in it);
+- `--ref <alias[,alias...]>` — when an input or job file was already seen and no `--from` was: the
+  new branch has no streamed source. A branch opened by `--ref` carries no input, so a second `--ref`
+  stays in it and the duplicate-flag refusal applies, as it does after a `--from`;
 - `--job` / `-j <file>` — when a job file or input was already seen.
+
+A positional query stays in a branch that holds a `--from` or a `--ref`. A branch with no `--from`
+and no input is a branch of refs alone, and `PipelineLexer` applies to it the rules it applies to a
+`--from` branch: no reader flag, and not empty.
 
 Neither `--sql` nor boolean processor flags (`--merge`) split. Each processor declares its trigger
 flags via `IStreamTransformerFactory.CliTriggerFlags`. `--job` loads a YAML job and applies extra CLI

@@ -98,16 +98,14 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
 			}
 		}
 
-		// Cap memory to prevent Jetsam overcommit kills when multiple branches run concurrently
-		using (var limitCmd = _connection.CreateCommand())
+		// Before any lock below: the spill directory cannot be changed once external access is off.
+		await DuckDbResourceSettings.ApplyAsync(_connection, ct);
+
+		if (_mcpSecurityContext?.IsMcpSession == true)
 		{
-			var sql = "PRAGMA memory_limit='2GB'; PRAGMA threads=2;";
-			if (_mcpSecurityContext?.IsMcpSession == true)
-			{
-				sql += " PRAGMA disable_external_access=true;";
-			}
-			limitCmd.CommandText = sql;
-			await limitCmd.ExecuteNonQueryAsync(ct);
+			using var lockCmd = _connection.CreateCommand();
+			lockCmd.CommandText = "SET enable_external_access=false;";
+			await lockCmd.ExecuteNonQueryAsync(ct);
 		}
 
 		await DuckInitSqlRunner.RunAsync(_connection, _initSql, _resolver, ct);

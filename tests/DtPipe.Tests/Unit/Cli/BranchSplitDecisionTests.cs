@@ -48,6 +48,25 @@ public class BranchSplitDecisionTests
         Assert.Equal(expected, BranchSplitDecision.Decide(s, "-j"));
     }
 
+    [Theory]
+    [MemberData(nameof(AllStates))]
+    public void Ref_Splits_After_An_Input_Or_Job_Unless_The_Branch_Already_Has_A_From(bool hasInput, bool hasJob, bool hasFrom)
+    {
+        var s = new BranchSplitState(hasInput, hasJob, hasFrom);
+        var expected = (hasInput || hasJob) && !hasFrom ? SplitDecision.NewRef : SplitDecision.Stay;
+
+        Assert.Equal(expected, BranchSplitDecision.Decide(s, "--ref"));
+    }
+
+    [Fact]
+    public void A_Branch_Opened_By_Ref_Keeps_A_Second_Ref_So_It_Is_Refused_Not_Split()
+    {
+        // A branch opened by --ref carries no input, no job and no from.
+        var openedByRef = new BranchSplitState(HasInput: false, HasJob: false, HasFrom: false);
+
+        Assert.Equal(SplitDecision.Stay, BranchSplitDecision.Decide(openedByRef, "--ref"));
+    }
+
     [Fact]
     public void Non_Trigger_Tokens_Never_Split()
     {

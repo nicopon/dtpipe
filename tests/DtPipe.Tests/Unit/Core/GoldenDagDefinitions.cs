@@ -112,6 +112,24 @@ public static class GoldenDagDefinitions
         }
     };
 
+    // Case 5b: SQL stream transformer whose inputs are all materialised (no streamed source)
+    public static JobDagDefinition Dag_SqlProcessor_RefsOnly => new()
+    {
+        Branches = new[]
+        {
+            new BranchDefinition { Alias = "orders",    Input = "generate:100", Output = null, Arguments = Array.Empty<string>() },
+            new BranchDefinition { Alias = "customers", Input = "generate:10",  Output = null, Arguments = Array.Empty<string>() },
+            new BranchDefinition
+            {
+                Alias = "result",
+                RefAliases = new[] { "orders", "customers" },
+                ProcessorName = "sql",
+                Output = "csv:/tmp/result.csv",
+                Arguments = Array.Empty<string>()
+            }
+        }
+    };
+
     // Case 6: Fan-out + SQL transformer consuming the same source (tests fan-out alias resolution)
     public static JobDagDefinition Dag_FanOut_WithSqlProcessor => new()
     {

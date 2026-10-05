@@ -24,3 +24,19 @@ imported batches.
 **Never use peak memory to check ownership.** A finalizer releases a batch a consumer forgot to
 dispose, so a broken dispose leaves peak memory unchanged. `validate_duck_streaming.sh` reads the
 peak only to show that the result streams chunk by chunk rather than being held whole.
+
+## Memory ceiling and spill directory
+
+`DuckDbResourceSettings` is applied by the `duck:` reader, the `duck:` writer and the `--sql`
+processor right after their connection opens, before `--duck-init` so a user's own `SET` wins. It
+sets `memory_limit` to a fraction of what the runtime reports as available and gives the instance
+its own `temp_directory`. Never hard-code either at a call site: the sites would disagree.
+
+- **One spill directory per instance.** Instances sharing one delete each other's live spill files
+  when one closes, and the survivor's query fails with an I/O error.
+- **Apply it before any `enable_external_access=false`:** the spill directory is locked after that.
+- **A `ref` table is the processor's own table, not a scan.** `duckdb_arrow_scan` hands its single
+  stream to the first scan and leaves nothing for the next, so only a table can be read twice.
+
+`[CI: DuckDbResourceSettingsTests, DuckDBSqlProcessorTests]` `[unchecked: a new DuckDB connection
+site that skips the helper]`

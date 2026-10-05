@@ -75,6 +75,8 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
             _conn = new DuckDBConnection("DataSource=:memory:");
             await _conn.OpenAsync(ct);
 
+            await DuckDbResourceSettings.ApplyAsync(_conn, ct);
+
             using (var cmd = _conn.CreateCommand())
             {
                 // duckdb_arrow_scan (used to register CDI streaming sources) declares filter_pushdown=true,
@@ -115,6 +117,11 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
 
             _columns = ArrowSchemaFactory.ToPipeColumns(_resultSchema).ToList();
         }
+        catch (StreamedSourceReadRepeatedlyException)
+        {
+            // The message is the whole diagnosis; the caller reports it once.
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "DuckDBSqlProcessor: OpenAsync FAILED: {Message}", ex.Message);
@@ -124,9 +131,13 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
 
     // ── Input registration ───────────────────────────────────────────────────────────
 
-    // Materialises a --ref source fully into an in-memory list of RecordBatches,
-    // then registers it as a zero-copy Arrow scan in DuckDB.
-    // Draining is required because ref tables are often joined multiple times.
+    // Loads a --ref source into a DuckDB table. duckdb_arrow_scan hands its single stream to the first
+    // scan and leaves nothing for the next, so a zero-copy scan cannot serve a ref the query reads more
+    // than once (a self-join, a UNION ALL, a CTE the optimiser inlines): the later reads come back empty.
+    // A table is read as often as the query wants. The channel is drained straight into it, so no
+    // second copy of the ref is held on the .NET side.
+    // Each ref loads on its own connection to the same database: refs keep draining concurrently, and
+    // none waits for another to finish (several can hang off one fan-out with bounded channels).
     private async Task RegisterRefTableAsync(string alias, string channelAlias, CancellationToken ct)
     {
         var schema = await _registry.WaitForArrowChannelSchemaAsync(channelAlias, ct);
@@ -134,12 +145,19 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
         var channelTuple = _registry.GetArrowChannel(channelAlias)
             ?? throw new Exception($"Arrow channel '{channelAlias}' not found");
 
-        var batches = new List<RecordBatch>();
-        await foreach (var batch in channelTuple.Channel.Reader.ReadAllAsync(ct))
-            batches.Add(batch);
+        var stream = new ChannelArrowStream(schema, channelTuple.Channel.Reader, _logger, ct);
 
-        var stream = new StaticArrowStream(schema, batches);
-        await RegisterArrowStreamAsync(alias, stream, ct);
+        // The scan views are temporary: they live and die with this connection, the table stays.
+        using var loader = _conn!.Duplicate();
+        await loader.OpenAsync(ct);
+
+        var source = $"{alias}__ref_source";
+        await RegisterArrowStreamAsync(loader, source, stream, projectable: false, ct);
+
+        using var cmd = loader.CreateCommand();
+        cmd.CommandText = $"CREATE TABLE \"{alias}\" AS SELECT * FROM \"{source}\"";
+        // DuckDB pulls from the channel on the calling thread; keep it off this one so the other refs start.
+        await Task.Run(() => cmd.ExecuteNonQuery(), ct);
     }
 
     // Registers the main source as a streaming Arrow scan in DuckDB (zero-copy).
@@ -151,7 +169,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
             ?? throw new Exception($"Arrow channel '{channelAlias}' not found");
 
         var stream = new ChannelArrowStream(schema, channelTuple.Channel.Reader, _logger, ct);
-        await RegisterArrowStreamAsync(alias, stream, ct);
+        await RegisterArrowStreamAsync(_conn!, alias, stream, projectable: true, ct);
     }
 
     private static string? GetDuckDBCastForExtension(string extensionName)
@@ -165,10 +183,18 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
         };
     }
 
-    private async Task RegisterArrowStreamAsync(string alias, IArrowArrayStream underlyingStream, CancellationToken ct)
+    // A projectable stream is trimmed to the columns the plan reads (see ApplyProjectionsFromExplainAsync);
+    // a stream that is drained whole (a ref feeding CREATE TABLE) is not.
+    private async Task RegisterArrowStreamAsync(
+        DuckDBConnection conn, string alias, IArrowArrayStream underlyingStream, bool projectable, CancellationToken ct)
     {
-        var stream = new ProjectedArrowStream(underlyingStream);
-        _streamProjections[alias] = stream;
+        IArrowArrayStream stream = underlyingStream;
+        if (projectable)
+        {
+            var projected = new ProjectedArrowStream(underlyingStream);
+            _streamProjections[alias] = projected;
+            stream = projected;
+        }
 
         var schema = stream.Schema;
         var needsView = false;
@@ -196,7 +222,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
             _allocatedPointers.Add((IntPtr)ffiStreamPtr);
             CArrowArrayStreamExporter.ExportArrayStream(stream, ffiStreamPtr);
 
-            if (DuckDbArrowNative.DuckDBArrowScan(_conn!.NativeConnection, scanAlias, ffiStreamPtr) != DuckDBState.Success)
+            if (DuckDbArrowNative.DuckDBArrowScan(conn.NativeConnection, scanAlias, ffiStreamPtr) != DuckDBState.Success)
             {
                 _activeStreams.Remove(stream);
                 CArrowArrayStreamImporter.ImportArrayStream(ffiStreamPtr).Dispose();
@@ -220,7 +246,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
             var viewSql = $"CREATE VIEW \"{alias}\" AS SELECT {string.Join(", ", columns)} FROM \"{scanAlias}\"";
 
             _logger.LogDebug("DuckDBSqlProcessor: Restoring Arrow extension semantics via semantic view '{Alias}'", alias);
-            using var cmd = _conn!.CreateCommand();
+            using var cmd = conn.CreateCommand();
             cmd.CommandText = viewSql;
             await cmd.ExecuteNonQueryAsync(ct);
         }
@@ -243,6 +269,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
             // hardcoded). Losing this order (e.g. by using a HashSet) would map children[idx]
             // to the wrong column for any multi-column projection where query order ≠ schema order.
             var projectedColumnsOrdered = new List<string>();
+            var arrowScans = 0;
 
             while (await reader.ReadAsync(ct))
             {
@@ -251,8 +278,13 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
                 var json = reader.GetValue(1)?.ToString();
                 if (string.IsNullOrEmpty(json)) continue;
 
-                ParseProjectionsFromJson(json, projectedColumnsOrdered);
+                arrowScans = Math.Max(arrowScans, ParseProjectionsFromJson(json, projectedColumnsOrdered));
             }
+
+            // A --ref is a table here, so every ARROW_SCAN left in the plan reads the streaming --from
+            // source, which hands its rows to the first scan and keeps none for the next.
+            if (!string.IsNullOrEmpty(_mainAlias) && arrowScans > 1)
+                throw new StreamedSourceReadRepeatedlyException(_mainAlias, arrowScans);
 
             foreach (var kvp in _streamProjections)
             {
@@ -298,6 +330,10 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
                 }
             }
         }
+        catch (StreamedSourceReadRepeatedlyException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             throw new Exception(
@@ -308,28 +344,35 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
     // Parses ARROW_SCAN projection lists from a DuckDB EXPLAIN (FORMAT JSON) result.
     // Projections are appended to `ordered` in the order they appear in the JSON, which
     // matches DuckDB's column_ids order and therefore the expected CDI children[] position.
-    private void ParseProjectionsFromJson(string json, List<string> ordered)
+    // Returns how many ARROW_SCAN nodes the plan holds.
+    private int ParseProjectionsFromJson(string json, List<string> ordered)
     {
+        var scans = 0;
         try
         {
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
             if (root.ValueKind == JsonValueKind.Array)
                 foreach (var item in root.EnumerateArray())
-                    TraversePlanForProjections(item, ordered);
+                    TraversePlanForProjections(item, ordered, ref scans);
             else if (root.ValueKind == JsonValueKind.Object)
-                TraversePlanForProjections(root, ordered);
+                TraversePlanForProjections(root, ordered, ref scans);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "DuckDBSqlProcessor: Failed to parse EXPLAIN JSON");
         }
+        return scans;
     }
 
-    private static void TraversePlanForProjections(JsonElement element, List<string> ordered)
+    private static void TraversePlanForProjections(JsonElement element, List<string> ordered, ref int scans)
     {
-        if (element.TryGetProperty("name", out var nameProp) &&
-            nameProp.GetString() == "ARROW_SCAN" &&
+        var isArrowScan = element.TryGetProperty("name", out var nameProp) &&
+                          nameProp.GetString() == "ARROW_SCAN";
+        if (isArrowScan)
+            scans++;
+
+        if (isArrowScan &&
             element.TryGetProperty("extra_info", out var extraInfo) &&
             extraInfo.TryGetProperty("Projections", out var projProp))
         {
@@ -355,7 +398,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
         if (element.TryGetProperty("children", out var children) &&
             children.ValueKind == JsonValueKind.Array)
             foreach (var child in children.EnumerateArray())
-                TraversePlanForProjections(child, ordered);
+                TraversePlanForProjections(child, ordered, ref scans);
     }
 
     // ── Streaming output ─────────────────────────────────────────────────────────────

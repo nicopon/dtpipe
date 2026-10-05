@@ -1,0 +1,41 @@
+{
+  "Branches": [
+    {
+      "Alias": "orders",
+      "Arguments": [],
+      "Input": "generate:100",
+      "Output": null,
+      "StreamingAliases": [],
+      "RefAliases": [],
+      "ProcessorName": null,
+      "HasStreamTransformer": false,
+      "PreParsedJob": null
+    },
+    {
+      "Alias": "customers",
+      "Arguments": [],
+      "Input": "generate:10",
+      "Output": null,
+      "StreamingAliases": [],
+      "RefAliases": [],
+      "ProcessorName": null,
+      "HasStreamTransformer": false,
+      "PreParsedJob": null
+    },
+    {
+      "Alias": "result",
+      "Arguments": [],
+      "Input": null,
+      "Output": "csv:/tmp/result.csv",
+      "StreamingAliases": [],
+      "RefAliases": [
+        "orders",
+        "customers"
+      ],
+      "ProcessorName": "sql",
+      "HasStreamTransformer": true,
+      "PreParsedJob": null
+    }
+  ],
+  "IsDag": true
+}

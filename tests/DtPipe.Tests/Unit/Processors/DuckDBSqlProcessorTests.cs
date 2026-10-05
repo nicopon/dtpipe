@@ -693,4 +693,186 @@ public class DuckDBSqlProcessorTests
         Assert.Equal("Admin", roleColumn.GetString(0));
         Assert.Equal("Guest", roleColumn.GetString(1));
     }
+
+    // ── --ref scanned more than once ──────────────────────────────────────────────────────
+
+    private static IMemoryChannelRegistry BuildRefRegistry(
+        (string Alias, Schema Schema, RecordBatch[] Batches)[] sources)
+    {
+        var mock = new Mock<IMemoryChannelRegistry>();
+        foreach (var (alias, schema, batches) in sources)
+        {
+            var channel = Channel.CreateUnbounded<RecordBatch>();
+            foreach (var b in batches) channel.Writer.TryWrite(b);
+            channel.Writer.Complete();
+            mock.Setup(r => r.WaitForArrowChannelSchemaAsync(alias, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(schema);
+            mock.Setup(r => r.GetArrowChannel(alias)).Returns((channel, schema));
+        }
+        return mock.Object;
+    }
+
+    private static (Schema Schema, RecordBatch[] Batches) LookupSource(params (long Id, long V)[][] batches)
+    {
+        var schema = new Schema(new[]
+        {
+            new Field("id", Int64Type.Default, nullable: false),
+            new Field("v", Int64Type.Default, nullable: false),
+        }, null);
+        var built = batches.Select(rows => new RecordBatch(schema, new IArrowArray[]
+        {
+            new Int64Array.Builder().AppendRange(rows.Select(r => r.Id)).Build(),
+            new Int64Array.Builder().AppendRange(rows.Select(r => r.V)).Build(),
+        }, rows.Length)).ToArray();
+        return (schema, built);
+    }
+
+    private static async Task<List<object?[]>> RunRowsAsync(
+        IMemoryChannelRegistry registry, string query, string[] refs, string mainAlias = "main")
+    {
+        var processor = new DuckDBSqlProcessor(
+            registry, query, mainAlias, mainAlias,
+            refAliases: refs, refChannelAliases: refs,
+            NullLogger<DuckDBSqlProcessor>.Instance);
+
+        await processor.OpenAsync();
+        var rows = new List<object?[]>();
+        await foreach (var batch in processor.ReadRecordBatchesAsync())
+        {
+            using (batch)
+                for (var i = 0; i < batch.Length; i++)
+                    rows.Add(Enumerable.Range(0, batch.ColumnCount)
+                        .Select(c => ArrowTypeMapper.GetValue(batch.Column(c), i)).ToArray());
+        }
+        await processor.DisposeAsync();
+        return rows;
+    }
+
+    /// <summary>
+    /// A <c>--ref</c> is documented as joinable several times. <c>duckdb_arrow_scan</c> hands its single
+    /// stream to the first scan and leaves nothing for the second, so a self-join silently returned no
+    /// rows (INNER) or NULLs (LEFT).
+    /// </summary>
+    [Fact]
+    public async Task Ref_JoinedTwice_ReadsTheFullTableEachTime()
+    {
+        var (mainSchema, mainBatches) = LookupSource(new[] { (1L, 0L), (2L, 0L), (3L, 0L) });
+        var (refSchema, refBatches) = LookupSource(new[] { (1L, 10L), (2L, 20L) }, new[] { (3L, 30L) });
+        var registry = BuildRefRegistry(new[]
+        {
+            ("main", mainSchema, mainBatches),
+            ("r", refSchema, refBatches),
+        });
+
+        var rows = await RunRowsAsync(registry,
+            "SELECT m.id, a.v AS av, b.v AS bv FROM main m JOIN r a ON a.id = m.id JOIN r b ON b.id = m.id ORDER BY m.id",
+            refs: ["r"]);
+
+        Assert.Equal(3, rows.Count);
+        Assert.Equal(new object?[] { 1L, 10L, 10L }, rows[0]);
+        Assert.Equal(new object?[] { 3L, 30L, 30L }, rows[2]);
+    }
+
+    [Fact]
+    public async Task Ref_UnionedWithItself_ReturnsEveryRowTwice()
+    {
+        var (mainSchema, mainBatches) = LookupSource(new[] { (1L, 0L) });
+        var (refSchema, refBatches) = LookupSource(new[] { (1L, 10L), (2L, 20L), (3L, 30L) });
+        var registry = BuildRefRegistry(new[]
+        {
+            ("main", mainSchema, mainBatches),
+            ("r", refSchema, refBatches),
+        });
+
+        var rows = await RunRowsAsync(registry,
+            "SELECT count(*) AS n, CAST(sum(v) AS BIGINT) AS s FROM (SELECT * FROM r UNION ALL SELECT * FROM r)",
+            refs: ["r"]);
+
+        Assert.Equal(new object?[] { 6L, 120L }, Assert.Single(rows));
+    }
+
+    /// <summary>
+    /// Every <c>--ref</c> alias is materialised independently: one scanned twice must not disturb
+    /// another scanned once.
+    /// </summary>
+    [Fact]
+    public async Task TwoRefs_OneScannedTwice_BothAreComplete()
+    {
+        var (mainSchema, mainBatches) = LookupSource(new[] { (1L, 0L), (2L, 0L) });
+        var (aSchema, aBatches) = LookupSource(new[] { (1L, 10L), (2L, 20L) });
+        var (bSchema, bBatches) = LookupSource(new[] { (1L, 100L), (2L, 200L) });
+        var registry = BuildRefRegistry(new[]
+        {
+            ("main", mainSchema, mainBatches),
+            ("a", aSchema, aBatches),
+            ("b", bSchema, bBatches),
+        });
+
+        var rows = await RunRowsAsync(registry,
+            "SELECT m.id, a1.v + a2.v AS av, b.v AS bv FROM main m JOIN a a1 ON a1.id = m.id JOIN a a2 ON a2.id = m.id JOIN b ON b.id = m.id ORDER BY m.id",
+            refs: ["a", "b"]);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(new object?[] { 1L, 20L, 100L }, rows[0]);
+        Assert.Equal(new object?[] { 2L, 40L, 200L }, rows[1]);
+    }
+
+    // ── --from read more than once ────────────────────────────────────────────────────────
+
+    private static IMemoryChannelRegistry StreamedMainWithRef()
+    {
+        var (mainSchema, mainBatches) = LookupSource(new[] { (1L, 10L), (2L, 20L), (3L, 30L) });
+        var (refSchema, refBatches) = LookupSource(new[] { (1L, 100L), (2L, 200L) });
+        return BuildRefRegistry(new[]
+        {
+            ("main", mainSchema, mainBatches),
+            ("r", refSchema, refBatches),
+        });
+    }
+
+    /// <summary>
+    /// A stream keeps nothing for a second read, so these queries used to run and return wrong rows
+    /// with no error. Each must now be refused before it executes, with a message that says why.
+    /// </summary>
+    [Theory]
+    [InlineData("SELECT count(*) AS n FROM main a JOIN main b USING(id)")]
+    [InlineData("SELECT count(*) AS n FROM (SELECT * FROM main UNION ALL SELECT * FROM main)")]
+    [InlineData("SELECT id FROM main WHERE v > (SELECT avg(v) FROM main)")]
+    public async Task From_ReadMoreThanOnce_IsRefusedBeforeTheQueryRuns(string query)
+    {
+        var ex = await Assert.ThrowsAsync<DtPipe.Processors.Sql.StreamedSourceReadRepeatedlyException>(
+            () => RunRowsAsync(StreamedMainWithRef(), query, refs: ["r"]));
+
+        Assert.Equal("main", ex.Alias);
+        Assert.True(ex.Reads >= 2);
+        Assert.Contains("'main'", ex.Message);
+        Assert.Contains("MATERIALIZED", ex.Message);
+        Assert.Contains("--ref", ex.Message);
+        Assert.DoesNotContain("Pre-flight EXPLAIN failed", ex.Message);
+    }
+
+    /// <summary>The way out the message offers has to work, or the message is a trap.</summary>
+    [Fact]
+    public async Task From_ReadOnceIntoAMaterializedCte_CanBeReusedFreely()
+    {
+        var rows = await RunRowsAsync(StreamedMainWithRef(),
+            "WITH once AS MATERIALIZED (SELECT * FROM main) SELECT count(*) AS n, CAST(sum(a.v + b.v) AS BIGINT) AS s FROM once a JOIN once b USING(id)",
+            refs: ["r"]);
+
+        Assert.Equal(new object?[] { 3L, 120L }, Assert.Single(rows));
+    }
+
+    /// <summary>Shapes that read the streaming source once, however much they look like they read it twice.</summary>
+    [Theory]
+    [InlineData("SELECT m.id, (SELECT count(*) FROM r WHERE r.id = m.id) AS c FROM main m ORDER BY m.id", 3)]
+    [InlineData("SELECT id, sum(v) AS s FROM main GROUP BY ROLLUP(id)", 4)]
+    [InlineData("SELECT id, sum(v) OVER (ORDER BY id) AS running FROM main", 3)]
+    [InlineData("SELECT m.id FROM main m JOIN r a ON a.id = m.id JOIN r b ON b.id = m.id", 2)]
+    [InlineData("SELECT count(*) AS n FROM r", 1)]
+    public async Task From_ReadOnce_IsNotRefused(string query, int expectedRows)
+    {
+        var rows = await RunRowsAsync(StreamedMainWithRef(), query, refs: ["r"]);
+
+        Assert.Equal(expectedRows, rows.Count);
+    }
 }
