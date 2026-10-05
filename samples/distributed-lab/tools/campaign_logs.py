@@ -35,7 +35,7 @@ def port_exhaustion_lines():
     return _port_lines["n"]
 
 
-NAMES = ("coordinator", "node-1", "node-2", "node-3", "node-4", "runner-1")
+NAMES = ("idp", "coordinator", "node-1", "node-2", "node-3", "node-4", "runner-1")
 
 
 def follow(state_dir, out_dir, names=NAMES):

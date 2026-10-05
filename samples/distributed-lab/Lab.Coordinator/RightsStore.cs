@@ -7,11 +7,11 @@ using YamlDotNet.RepresentationModel;
 namespace DtPipe.Lab.Coordinator;
 
 /// <summary>
-/// A principal the embedded identity provider issues tokens to. <see cref="Group"/> is the one
-/// TransportR group its tokens carry (<c>transportr:group:&lt;group&gt;</c>); <see cref="Node"/> is
-/// the only node name it may announce itself as.
+/// What the coordinator grants a client of the trusted IdP, named by the <c>sub</c> of its tokens.
+/// <see cref="Group"/> is the one TransportR group it belongs to; <see cref="Node"/> is the only node
+/// name it may announce itself as. Its secret is the IdP's business, never stored here.
 /// </summary>
-public sealed record Identity(string ClientId, string DisplayName, string Secret, string Group, string? Node, bool Enabled = true);
+public sealed record Identity(string ClientId, string DisplayName, string Group, string? Node, bool Enabled = true);
 
 public sealed record AuditEntry(DateTimeOffset At, string Change);
 
@@ -23,8 +23,8 @@ public sealed record RightsDocument(
 /// Who may send what to whom, in one editable document under <c>.state/rights.json</c>, started
 /// from <c>rights-seed.json</c>:
 /// <list type="bullet">
-/// <item><b>who</b>: the identities of the embedded IDP; the group a node belongs to is the one
-///   its token carries, never the one it declares;</item>
+/// <item><b>who</b>: the clients of the trusted IdP this coordinator grants anything to; the group a
+///   node belongs to is its identity's, never one it declares or its token carries;</item>
 /// <item><b>to whom</b>: the flow matrix between groups, read live by TransportR's hub on every
 ///   transfer and by the planner on every plan;</item>
 /// <item><b>what</b>: per source brick, the groups its rows may be sent to as they leave their
@@ -109,7 +109,6 @@ public sealed class RightsStore
         lock (_lock)
         {
             if (_doc.Identities.Any(i => i.ClientId == identity.ClientId)) throw new LabConflictException($"'{identity.ClientId}' already exists.");
-            if (string.IsNullOrWhiteSpace(identity.Secret) || identity.Secret.Length < 12) throw new LabConflictException("A secret has at least 12 characters.");
             _doc.Identities.Add(identity);
             Save($"Identity {identity.ClientId} added (group {identity.Group}{(identity.Node is null ? "" : $", node {identity.Node}")})");
         }

@@ -15,10 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- The embedded identity provider, after TransportR's SimpleIdp. -->
-    <PackageReference Include="OpenIddict.AspNetCore" Version="7.7.1" />
-    <PackageReference Include="OpenIddict.EntityFrameworkCore" Version="7.7.1" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.12" />
+    <!-- Tokens are issued by an external OpenID Connect provider (the lab's Lab.Idp) and validated here. -->
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.12" />
   </ItemGroup>
 

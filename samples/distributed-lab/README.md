@@ -2,7 +2,8 @@
 
 A self-contained demonstrator for dtpipe's distributed pipelines: one coordinator, four data
 nodes each with its own database, and a runner, run as plain local processes (no container).
-Every node authenticates with the coordinator's own identity provider, which decides its group.
+Every node authenticates with a test identity provider, `Lab.Idp`, which says who it is; the
+coordinator decides what it may do.
 
 Each data node offers **bricks**: reads and writes its owner preconfigured on its database. The
 coordinator's page assembles bricks and processing steps into a pipeline by drag and drop, keeps
@@ -31,7 +32,7 @@ open http://127.0.0.1:5180          # the coordinator's page; the Lab view is /l
 
 | Command | Does |
 |---|---|
-| `./lab.sh up` | builds the lab, seeds the databases on first use, starts the coordinator then the nodes |
+| `./lab.sh up` | builds the lab, seeds the databases on first use, starts the IdP, the coordinator, then the nodes |
 | `./lab.sh status` | which processes run, and what the coordinator sees of each node |
 | `./lab.sh smoke [lab\|sandbox\|library\|rights\|faults\|bricks] [id…]` | runs the end-to-end check, optionally one pass or some pipelines only; restarts the node hosts in the mode each pass needs |
 | `./lab.sh nodes strict\|sandbox` | restarts the node hosts in that mode after undoing every deployment (`LAB_NODE_SANDBOX=1 ./lab.sh up` starts them in sandbox mode) |
@@ -40,7 +41,8 @@ open http://127.0.0.1:5180          # the coordinator's page; the Lab view is /l
 | `./lab.sh logs` | follows every log |
 | `./lab.sh down` / `reset` | stops everything / also deletes `.state/` |
 
-`LAB_PORT` changes the port (default `5180`), `DTPIPE` the binary. Everything the lab writes lives
+`LAB_PORT` changes the coordinator's port (default `5180`), `LAB_IDP_PORT` the IdP's (`5190`),
+`DTPIPE` the binary. Everything the lab writes lives
 under `.state/`: databases, fragment jobs, plans, logs, build output.
 
 ## The nodes
@@ -69,34 +71,35 @@ official runner, `DtPipe.PipelineNode.Runner`, configured only through its envir
 (`DtPipeNode__Name`, `DtPipeNode__CoordinatorUrl`, `DtPipeNode__Oidc__Authority`, …): `lab.sh`
 starts it that way for a node file whose `role` is `runner`.
 
-A node's group is not in its file: the coordinator's IDP gives it (below). The flow matrix says
+A node's group is not in its file, nor in its token: the coordinator gives it (below). The flow matrix says
 which group may send to which: every data group may feed the `runner`, the `runner` feeds
 `warehouse`, and the direct links the Lab view's scenarios use stay.
 
 ## Rights and the identity provider
 
-The coordinator carries its own IDP, after TransportR's SimpleIdp: OpenIddict, the
-client-credentials flow, `POST /connect/token`. Each node host holds a client id and secret in its
-`nodes/<node>.json`; the token it obtains names it (`sub`) and carries its group as the
-`transportr:group:<group>` scope, which TransportR's hub reads. What is allowed lives in one
-document, `.state/rights.json`, started from `rights-seed.json` and edited in the **Access** view:
+Tokens come from `Lab.Idp` (below), which the coordinator trusts for its audience. Each node host
+holds a client id and secret in its `nodes/<node>.json`, which `idp-clients.json` registers; the
+token it obtains names it (`sub`) and grants nothing. The coordinator gives that subject its group,
+which TransportR's hub then enforces. What is allowed lives in one document, `.state/rights.json`,
+started from `rights-seed.json` and edited in the **Access** view:
 
 | | Enforced |
 |---|---|
-| **Who**: identities, each bound to one group and to the one node it may announce | by the IDP (no token for an unknown or disabled client) and by the control channel (an announcement of another node is refused) |
+| **Who**: identities, each a client of the IdP bound to one group and to the one node it may announce | by the coordinator (no group for an unknown or disabled client, from its next connection or token renewal) and by the control channel (an announcement of another node is refused) |
 | **To whom**: the flow matrix between groups | by the hub on **every transfer**, live, and on every plan |
 | **What**: per source brick, the groups its rows may be sent to as they leave their node | on every plan (the hub sees groups, not bricks) |
 
 Every change is audited. A node host gives each of its pipeline nodes a token provider
-(`PipelineNodeOptions.AccessTokenProvider`) that asks the IDP for the node's token. The IDP's signing
-key is generated once and kept in `.state/idp/signing-key.pem` (readable by its owner only, outside
-git), so a coordinator restart does not invalidate the tokens in circulation.
+(`PipelineNodeOptions.AccessTokenProvider`) that asks the IdP for the node's token. Adding a node
+takes its client in `idp-clients.json` (then an IdP restart) and its identity in the Access view.
 
 ### The stand-alone test IdP (`Lab.Idp`)
 
-A separate identity provider for a coordinator that trusts an external one; the lab's coordinator
-does not use it yet. It says **who** a caller is, never what the caller may do: its tokens carry a
-subject, a name and an email, no group and no role.
+The identity provider of the lab, standing in for whatever provider a deployment trusts. It says
+**who** a caller is, never what the caller may do: its tokens carry a subject, a name and an email,
+no group and no role. `lab.sh` starts it on `LAB_IDP_PORT`, its signing key in
+`.state/idp/signing-key.pem` (generated once, readable by its owner only), so tokens in circulation
+survive its restart.
 
 | Caller | Flow | Token |
 |---|---|---|
@@ -109,15 +112,14 @@ Any user name of letters, digits, `.`, `_` or `-` signs in with that name follow
 
 | Setting | Default |
 |---|---|
-| `Issuer` | `http://localhost:5190/`: the one address browsers and services both reach |
+| `Issuer` | `http://localhost:5190/` (the lab passes `http://127.0.0.1:5190`): the one address browsers and services both reach |
 | `ClientsFile` | `clients.json` in the content root; the lab's is `idp-clients.json` |
 | `SigningKeyFile` | `.state/signing-key.pem` in the content root, created on first start |
 | `EmailDomain` · `Audience` · `AccessTokenLifetimeSeconds` | `dtpipe.test` · `dtpipe-coordinator` · `43200` |
 
 ```bash
-dotnet run --project Lab.Idp -- --urls http://localhost:5190 \
-  --Idp:ClientsFile=$PWD/idp-clients.json --Idp:SigningKeyFile=$PWD/.state/idp-server/signing-key.pem
-python3 tools/idp_check.py http://localhost:5190
+./lab.sh up                         # starts it on 5190 with the lab's clients
+python3 tools/idp_check.py          # discovery, both flows, and the refusals that matter
 ```
 
 ## The coordinator's page
@@ -129,7 +131,7 @@ python3 tools/idp_check.py http://localhost:5190
 | Designer | a palette of bricks and steps (Transform, SQL, Merge), a canvas wired port to port, an inspector per card, the composed YAML to copy or edit |
 | Distribution | the plan placed automatically, drawn in lanes (sources, runner, sinks); save it, deploy, run |
 | Runs | deployments, the run in flight and the queue, the journal with each run's report, node events, a query on any database |
-| Access | the IDP, identities (group, bound node, enabled, reconnect), the editable flow matrix, brick policies, the audit |
+| Access | the trusted IdP, identities (group, bound node, enabled, reconnect), the editable flow matrix, brick policies, the audit |
 
 **A pipeline is a plain dtpipe job**, one branch per card, that also runs whole on one machine
 (`smoke.py` uses it as the witness). A branch *is* a brick when its content equals the brick's:
@@ -221,7 +223,7 @@ afterwards (a fresh instance each) before it accepts the next run.
 - Everything runs on one machine, which the lab uses as a shortcut: `split` samples the sources
   and the query panel opens a node's file from the coordinator's process.
 - The page and `/api` are not authenticated: only the nodes are. Tokens last 12 hours
-  (`--token-lifetime-seconds` changes it). Each node renews its token before it expires, so a
+  (the IdP's `Idp:AccessTokenLifetimeSeconds` changes it). Each node renews its token before it expires, so a
   deployment can sit idle, or run, past its tokens' lifetime. A node that cannot renew (the
   identity provider unreachable for longer than the renewal advance) is closed by the hub and its
   runs end.
@@ -253,7 +255,6 @@ afterwards (a fresh instance each) before it accepts the next run.
 | `POST /api/plan` | Lab view: `{pipelineId, yaml, cuts, placement}` → units, fragments, edges, errors |
 | `POST /api/deploy` | Lab view: the same body; plans, then deploys (409 if not deployable) |
 | `GET /api/deployments` · `DELETE /api/deployments/{id}` | what is deployed; undeploy |
-| `POST /connect/token` | the embedded IDP: `grant_type=client_credentials`, `client_id`, `client_secret` |
 | `GET /api/rights` · `PUT /api/rights/matrix` · `PUT /api/rights/bricks/{node}/{id}` | rights, the flow matrix, a brick's policy (`{groups}` or `null`) |
 | `POST /api/rights/identities` · `PUT`/`DELETE /api/rights/identities/{id}` · `POST …/{id}/reconnect` | identities; reconnect drops a node's control connection so it fetches a new token |
 | `POST /api/runs` · `GET /api/runs`, `/api/runs/queue` | `{pipelineId?, pins?}` queues a run; the journal; in flight and queued |

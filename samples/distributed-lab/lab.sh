@@ -22,6 +22,7 @@ REPO="$(cd "$LAB/../.." && pwd)"
 STATE="$LAB/.state"
 PORT="${LAB_PORT:-5180}"
 URL="http://127.0.0.1:$PORT"
+IDP_URL="http://127.0.0.1:${LAB_IDP_PORT:-5190}"
 DTPIPE="${DTPIPE:-$REPO/dist/release/dtpipe}"
 NODES=(node-1 node-2 node-3 node-4 runner-1)
 
@@ -34,7 +35,9 @@ require_dtpipe() {
 
 build() {
     echo "Building the lab"
-    dotnet build "$LAB/Lab.Coordinator/Lab.Coordinator.csproj" -c Release -o "$STATE/bin/coordinator" -v q -nologo >"$STATE/logs/build.log" 2>&1 \
+    dotnet build "$LAB/Lab.Idp/Lab.Idp.csproj" -c Release -o "$STATE/bin/idp" -v q -nologo >"$STATE/logs/build.log" 2>&1 \
+        || { cat "$STATE/logs/build.log" >&2; exit 1; }
+    dotnet build "$LAB/Lab.Coordinator/Lab.Coordinator.csproj" -c Release -o "$STATE/bin/coordinator" -v q -nologo >>"$STATE/logs/build.log" 2>&1 \
         || { cat "$STATE/logs/build.log" >&2; exit 1; }
     dotnet build "$LAB/Lab.NodeHost/Lab.NodeHost.csproj" -c Release -o "$STATE/bin/node" -v q -nologo >>"$STATE/logs/build.log" 2>&1 \
         || { cat "$STATE/logs/build.log" >&2; exit 1; }
@@ -58,6 +61,19 @@ start() {
     echo "  $name started (pid $!)"
 }
 
+# The test IdP every token comes from: the nodes' client credentials, and the coordinator's trust.
+# Its signing key lives in .state/idp/, so tokens survive its restart. Extra arguments are passed on
+# (tools/campaign.py shortens the token lifetime with --Idp:AccessTokenLifetimeSeconds=20).
+start_idp() {
+    start idp dotnet "$STATE/bin/idp/Lab.Idp.dll" --urls "$IDP_URL" --Idp:Issuer="$IDP_URL" \
+        --Idp:ClientsFile="$LAB/idp-clients.json" --Idp:SigningKeyFile="$STATE/idp/signing-key.pem" "$@"
+    for _ in $(seq 1 60); do
+        python3 -c 'import sys,urllib.request; urllib.request.urlopen(sys.argv[1] + "/healthz", timeout=2)' "$IDP_URL" 2>/dev/null && return
+        sleep 0.5
+    done
+    echo "The IdP did not come up; see $STATE/logs/idp.log" >&2; exit 1
+}
+
 # Replaces this shell with node $1's host, pointed at the coordinator $2: the official runner for a
 # node file whose role is runner, configured through its environment, else the lab's data node host.
 # The one way a node starts, for this script and for tools/campaign.py.
@@ -68,11 +84,11 @@ exec_node() {
         { read -r id; read -r secret; read -r description; } < <(python3 -c \
             'import json,sys; n=json.load(open(sys.argv[1])); print(n.get("clientId", n["name"])); print(n["secret"]); print(n.get("description", ""))' "$file")
         export DtPipeNode__Name="$node" DtPipeNode__Description="$description" DtPipeNode__CoordinatorUrl="$coordinator" \
-            DtPipeNode__DtPipe="$DTPIPE" DtPipeNode__StateDirectory="$STATE/$node" DtPipeNode__Oidc__Authority="$coordinator" \
+            DtPipeNode__DtPipe="$DTPIPE" DtPipeNode__StateDirectory="$STATE/$node" DtPipeNode__Oidc__Authority="$IDP_URL" \
             DtPipeNode__Oidc__ClientId="$id" DtPipeNode__Oidc__ClientSecret="$secret"
         exec dotnet "$STATE/bin/runner/DtPipe.PipelineNode.Runner.dll"
     fi
-    exec dotnet "$STATE/bin/node/Lab.NodeHost.dll" --config "$file" --state "$STATE" --coordinator "$coordinator" --dtpipe "$DTPIPE"
+    exec dotnet "$STATE/bin/node/Lab.NodeHost.dll" --config "$file" --state "$STATE" --coordinator "$coordinator" --idp "$IDP_URL" --dtpipe "$DTPIPE"
 }
 
 # A data node holds its fragments to its bricks unless LAB_NODE_SANDBOX=1 is in its own environment;
@@ -95,8 +111,9 @@ up() {
     [[ -f "$STATE/node-1/crm.sqlite" ]] || seed
 
     echo "Starting"
+    start_idp
     start coordinator dotnet "$STATE/bin/coordinator/Lab.Coordinator.dll" \
-        --urls "$URL" --lab-root "$LAB" --state "$STATE" --dtpipe "$DTPIPE"
+        --urls "$URL" --lab-root "$LAB" --state "$STATE" --dtpipe "$DTPIPE" --authority "$IDP_URL"
 
     for _ in $(seq 1 60); do
         curl -fs "$URL/api/nodes" >/dev/null 2>&1 && break
@@ -162,9 +179,9 @@ smoke() {
 }
 
 down() {
-    local names=(coordinator "${NODES[@]}")
+    local names=(coordinator idp "${NODES[@]}")
     # Nodes first, so each can tear down its own dtpipe children while the coordinator still answers.
-    for name in "${NODES[@]}" coordinator; do
+    for name in "${NODES[@]}" coordinator idp; do
         if is_running "$name"; then
             kill -TERM "$(cat "$STATE/run/$name.pid")" 2>/dev/null || true
         fi
@@ -178,7 +195,7 @@ down() {
 }
 
 status() {
-    for name in coordinator "${NODES[@]}"; do
+    for name in idp coordinator "${NODES[@]}"; do
         if is_running "$name"; then echo "  $name  running (pid $(cat "$STATE/run/$name.pid"))"; else echo "  $name  stopped"; fi
     done
     if curl -fs "$URL/api/nodes" >/dev/null 2>&1; then
@@ -201,6 +218,7 @@ case "${1:-}" in
     seed) mkdir -p "$STATE"; seed ;;
     nodes) shift; nodes_mode "${1:-}" ;;
     exec-node) shift; exec_node "$@" ;;
+    idp) shift; mkdir -p "$STATE/logs" "$STATE/run"; start_idp "$@" ;;
     smoke) shift; smoke "$@" ;;
     ui) python3 "$LAB/tools/ui_check.py" "$URL" "$STATE/ui" ;;
     logs) tail -n 20 -F "$STATE"/logs/*.log ;;

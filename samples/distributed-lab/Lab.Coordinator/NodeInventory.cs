@@ -130,15 +130,15 @@ public sealed class NodeInventory
 }
 
 /// <summary>
-/// The lab's control channel (<see cref="NodeChannel"/>), one connection per node host, each
-/// authenticated by the embedded IDP. A host is who its token says: it may announce only the node
-/// its identity is bound to, and its group is the identity's, whatever it declares.
+/// The node channel (<see cref="NodeChannel"/>), one connection per node host, each authenticated by
+/// the trusted IdP. A host is who its token says: it may announce only the node its identity is bound
+/// to, and its group is the identity's, whatever it declares.
 /// </summary>
 public sealed class LabHub(NodeInventory inventory, RightsStore rights, EventBus bus, ILogger<LabHub> logger) : Hub
 {
     public Task Announce(NodeAnnouncement announcement)
     {
-        var clientId = EmbeddedIdp.ClientIdOf(Context.User);
+        var clientId = TrustedIdp.SubjectOf(Context.User);
         var identity = rights.Find(clientId);
         if (identity is not { Enabled: true } || identity.Node != announcement.Name)
         {

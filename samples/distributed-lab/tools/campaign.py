@@ -28,6 +28,8 @@ import campaign_security as sec  # noqa: E402
 
 URL, DTPIPE, STATE, CAMPAIGN = _ARGS[1].rstrip("/"), _ARGS[2], _ARGS[3], _ARGS[4]
 CELLS = _ARGS[5:]
+# The IdP lab.sh starts: every token comes from it, the coordinator only trusts it.
+IDP_URL = f"http://127.0.0.1:{os.environ.get('LAB_IDP_PORT', '5190')}"
 LAB = os.path.dirname(HERE)
 OUT = os.path.join(STATE, "campaign", CAMPAIGN)
 NODES = ["node-1", "node-2", "node-3", "node-4", "runner-1"]
@@ -404,9 +406,16 @@ def stop_start_coordinator(*extra):
     time.sleep(2)
     log = open(os.path.join(STATE, "logs", "coordinator.log"), "a")
     p = subprocess.Popen(["dotnet", os.path.join(STATE, "bin", "coordinator", "Lab.Coordinator.dll"), "--urls", URL,
-                          "--lab-root", LAB, "--state", STATE, "--dtpipe", DTPIPE, *extra], stdout=log, stderr=log, start_new_session=True)
+                          "--lab-root", LAB, "--state", STATE, "--dtpipe", DTPIPE, "--authority", IDP_URL, *extra],
+                         stdout=log, stderr=log, start_new_session=True)
     with open(os.path.join(STATE, "run", "coordinator.pid"), "w") as f:
         f.write(str(p.pid))
+
+
+def stop_start_idp(*extra):
+    os.kill(pid_of("idp"), signal.SIGTERM)
+    time.sleep(2)
+    subprocess.run([os.path.join(LAB, "lab.sh"), "idp", *extra], capture_output=True, timeout=120, check=True)
 
 
 def survivors():
@@ -775,7 +784,7 @@ def check_S2():
     expect_status("data plane, no token", sec.stream_status(base, None))
     expect_status("data plane, unsigned token", sec.stream_status(base, bogus))
     for label, client, secret in (("wrong secret", "node-1", "not-the-secret"), ("unknown client", "node-9", "x")):
-        status, token = sec.token_for(base, client, secret)
+        status, token = sec.token_for(IDP_URL, client, secret)
         if token is not None or status not in (400, 401):
             raise Violation(f"token endpoint, {label}: HTTP {status}, token issued={token is not None}")
     return "six entry points and two credential failures refused"
@@ -783,7 +792,7 @@ def check_S2():
 
 def check_S4():
     node = json.load(open(os.path.join(LAB, "nodes", "node-1.json")))
-    status, token = sec.token_for(URL, node["clientId"], node["secret"])
+    status, token = sec.token_for(IDP_URL, node["clientId"], node["secret"])
     if not token:
         raise RuntimeError(f"no token for node-1 (HTTP {status})")
     hub = sec.LongPollingHub(URL, sec.COMMAND_HUB, token).open()
@@ -820,11 +829,11 @@ def cell_S():
 
 
 def short_token_trials(label, before=None):
-    """The coordinator issues 20-second tokens, the hosts restart to fetch them, and a run of P2 follows. It
-    either finishes (tokens renewed) or fails saying so; it never hangs, and the lab is usable afterwards."""
+    """The IdP issues 20-second tokens, the hosts restart to fetch them, and a run of P2 follows. It either
+    finishes (tokens renewed) or fails saying so; it never hangs, and the lab is usable afterwards."""
     for rep in range(REPS):
         try:
-            stop_start_coordinator("--token-lifetime-seconds", "20")
+            stop_start_idp("--Idp:AccessTokenLifetimeSeconds=20")
             time.sleep(3)
             subprocess.run([os.path.join(LAB, "lab.sh"), "nodes", "strict"], capture_output=True, timeout=300)
             S.until(hosts_online, 120, "the hosts with short-lived tokens")

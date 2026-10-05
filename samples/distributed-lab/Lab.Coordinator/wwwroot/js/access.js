@@ -52,7 +52,7 @@ function render() {
       <td>${i.connected ? `<span class="chip ok">connected</span>` : `<span class="chip">offline</span>`}</td>
       <td class="actions-cell">
         <button class="small" data-save-identity>Save</button>
-        <button class="small ghost" data-reconnect ${i.connected ? "" : "disabled"} title="Drop its control connection: its host reconnects with a new token, carrying its current group">Reconnect</button>
+        <button class="small ghost" data-reconnect ${i.connected ? "" : "disabled"} title="Drop its control connection: its host connects again, under its current group">Reconnect</button>
         <button class="small ghost danger" data-remove-identity>Remove</button>
       </td>
     </tr>`).join("");
@@ -72,15 +72,14 @@ function render() {
 
   host.innerHTML = `
     <div class="view-head"><h1>Access</h1>
-      <p class="hint">Who may send what to whom. Every node authenticates with the coordinator's own identity provider; the group it belongs to is the one its token carries, never the one it declares.</p></div>
+      <p class="hint">Who may send what to whom. Every node authenticates with an identity provider the coordinator trusts, which says who it is; the coordinator decides its group, never the token or the node.</p></div>
 
     <section class="card">
       <h2>Identity provider</h2>
-      <p class="hint">Embedded in the coordinator, after TransportR's SimpleIdp: OpenIddict, the <code>${esc(rights.idp.grant)}</code> flow, and the node's group as the <code>${esc(rights.idp.scope)}</code> scope TransportR reads.</p>
+      <p class="hint">An external OpenID Connect provider, trusted for the <code>${esc(rights.idp.grant)}</code> tokens it signs for this coordinator's audience. It holds the clients and their secrets; a token names its client (<code>sub</code>) and nothing more.</p>
       <table class="kv-table">
         <tr><th>issuer</th><td><code>${esc(rights.idp.issuer)}</code></td></tr>
-        <tr><th>token endpoint</th><td><code>${esc(rights.idp.tokenEndpoint)}</code></td></tr>
-        <tr><th>token lifetime</th><td>${esc(rights.idp.tokenLifetime)}</td></tr>
+        <tr><th>audience</th><td><code>${esc(rights.idp.audience)}</code></td></tr>
       </table>
       <p class="hint">A node host presents its token on the control channel, and gives each pipeline node a token provider (<code>PipelineNodeOptions.AccessTokenProvider</code>) for the data hub.</p>
     </section>
@@ -89,12 +88,12 @@ function render() {
       <div class="card-head"><h2>Identities <span class="hint">who</span></h2><button data-add>${adding ? "Cancel" : "Add an identity"}</button></div>
       ${adding ? `<div class="row add-identity">
         <input id="a-id" class="mono" placeholder="client id"><input id="a-name" placeholder="display name">
-        <input id="a-secret" type="password" placeholder="secret (12+ characters)"><input id="a-group" class="mono" placeholder="group" list="groups-list">
+        <input id="a-group" class="mono" placeholder="group" list="groups-list">
         <select id="a-node"><option value="">— no node —</option>${nodes.map((n) => `<option>${esc(n)}</option>`).join("")}</select>
         <button class="primary" data-create>Create</button></div>` : ""}
       <datalist id="groups-list">${groups.map((g) => `<option>${esc(g)}</option>`).join("")}</datalist>
       <table><tr><th>client</th><th>group</th><th>may announce node</th><th></th><th>state</th><th></th></tr>${identities}</table>
-      <p class="hint">A new group takes effect with the node's next token: reconnect it, then redeploy what runs there. A disabled identity obtains no token and may not announce.</p>
+      <p class="hint">An identity is a client the IdP already knows, by its client id: its secret lives in the IdP. A new group or a disabled identity takes effect when the node connects again or renews its token: reconnect it, then redeploy what runs there. A disabled identity may not announce and holds no group.</p>
     </section>
 
     <section class="card">
@@ -144,7 +143,7 @@ async function onClick(e) {
     if (b.dataset.add !== undefined) { adding = !adding; render(); }
     else if (b.dataset.create !== undefined) {
       const v = (id) => document.getElementById(id).value.trim();
-      await api("/api/rights/identities", { clientId: v("a-id"), displayName: v("a-name") || null, secret: v("a-secret"), group: v("a-group"), node: v("a-node") || null });
+      await api("/api/rights/identities", { clientId: v("a-id"), displayName: v("a-name") || null, group: v("a-group"), node: v("a-node") || null });
       adding = false;
       toast(`${v("a-id")} created: it can obtain tokens now.`, "info");
     } else if (b.dataset.saveIdentity !== undefined) {

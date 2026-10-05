@@ -5,15 +5,15 @@ using Microsoft.Extensions.Logging;
 
 // One lab data node: a plain host that adds a dtpipe node to itself, read from nodes/<node>.json.
 //
-//   Lab.NodeHost --config <node.json> --state <dir> --coordinator <url> --dtpipe <path>
+//   Lab.NodeHost --config <node.json> --state <dir> --coordinator <url> --idp <url> --dtpipe <path>
 //
 // The node's databases live under <state>/<node>/ and reach its fragments as ${{VARIABLE}}. Its
-// identity is the coordinator's IdP client named in the file. LAB_NODE_SANDBOX=1 (or true) in this
+// identity is the IdP client named in the file. LAB_NODE_SANDBOX=1 (or true) in this
 // process's environment lets it run any reader or writer, not only its bricks: the switch is the
 // host's own, never something the coordinator sends.
 var arguments = new ConfigurationBuilder().AddCommandLine(args).Build();
 string Required(string key) => arguments[key]
-    ?? throw new ArgumentException($"Missing --{key}. Usage: --config <node.json> --state <dir> --coordinator <url> --dtpipe <path>");
+    ?? throw new ArgumentException($"Missing --{key}. Usage: --config <node.json> --state <dir> --coordinator <url> --idp <url> --dtpipe <path>");
 
 var file = new ConfigurationBuilder().AddJsonFile(Path.GetFullPath(Required("config")), optional: false).Build();
 var name = file["name"] ?? throw new InvalidOperationException("The node file names no node.");
@@ -33,8 +33,7 @@ var node = builder.Services.AddDtPipeNode(o =>
     o.DtPipe = Path.GetFullPath(Required("dtpipe"));
     o.StateDirectory = Path.Combine(state, name);
     o.Policy = sandbox ? FragmentPolicy.AnyReadOrWrite : FragmentPolicy.Bricks;
-    // The coordinator's embedded IdP issues the lab's tokens.
-    o.Oidc.Authority = coordinator;
+    o.Oidc.Authority = Required("idp");
     o.Oidc.ClientId = file["clientId"] ?? name;
     o.Oidc.ClientSecret = file["secret"] ?? "";
 });

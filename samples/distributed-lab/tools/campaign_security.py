@@ -29,7 +29,7 @@ def http(url, method="GET", headers=None, body=None, timeout=20):
 
 
 def token_for(base, client_id, secret):
-    """(status, access token or None) from the coordinator's identity provider."""
+    """(status, access token or None) from the identity provider at `base`."""
     form = urllib.parse.urlencode({"grant_type": "client_credentials", "client_id": client_id, "client_secret": secret}).encode()
     status, text = http(base + "/connect/token", "POST", {"Content-Type": "application/x-www-form-urlencoded"}, form)
     try:

@@ -20,19 +20,19 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 });
 builder.Logging.AddFilter("TransportR", LogLevel.Warning);
 builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
-builder.Logging.AddFilter("OpenIddict", LogLevel.Warning);
-builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
 
 builder.Services.AddSingleton(lab);
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 // The coordinator as DtPipe.Coordinator ships it, in TransportR's production mode: every client
-// is identified by a token of the embedded IDP, its group read from the token. The flow matrix is
-// the rights document's, read live by the hub on every transfer and by the planner on every plan.
+// is identified by a token of the trusted IdP, its group read from the rights document by its
+// subject. The flow matrix is the rights document's too, read live by the hub on every transfer and
+// by the planner on every plan.
 builder.Services.AddSingleton<RightsStore>();
 builder.Services.AddCoordinatorHub(_ => { }).Build();
 builder.Services.Replace(ServiceDescriptor.Singleton<IFlowControlService, RightsFlowControl>());
-builder.Services.AddEmbeddedIdp(lab);
+builder.Services.Replace(ServiceDescriptor.Singleton<IClientIdentityProvider, RightsIdentityProvider>());
+builder.Services.AddTrustedIdp(lab);
 
 builder.Services.AddSingleton<LoggingHubProgressMonitor>();
 builder.Services.Replace(ServiceDescriptor.Singleton<IHubProgressMonitor, LabProgressMonitor>());
@@ -69,7 +69,6 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapDataHub(requireAuth: true);
 app.MapHub<LabHub>(NodeChannel.Path).RequireAuthorization();
-app.MapEmbeddedIdp();
 
 var api = app.MapGroup("/api");
 
@@ -226,7 +225,7 @@ api.MapGet("/rights", (RightsStore rights, NodeInventory inventory, LabOptions o
     var online = inventory.Snapshot().Where(n => n.Online).Select(n => n.Name).ToHashSet();
     return new
     {
-        idp = new { issuer = options.PublicUrl + "/", tokenEndpoint = options.PublicUrl + EmbeddedIdp.TokenPath, grant = "client_credentials", tokenLifetime = options.TokenLifetime.ToString(), scope = EmbeddedIdp.GroupScopePrefix + "<group>" },
+        idp = new { issuer = options.Authority, audience = options.Audience, grant = "client_credentials" },
         identities = doc.Identities.Select(i => new
         {
             i.ClientId, i.DisplayName, i.Group, i.Node, i.Enabled,
@@ -254,7 +253,7 @@ api.MapPost("/rights/identities", (IdentityRequest request, RightsStore rights, 
 {
     if (!PipelineLibrary.IsValidId(request.ClientId)) throw new LabConflictException($"'{request.ClientId}' is not a client id: lowercase letters, digits and '-'.");
     if (string.IsNullOrWhiteSpace(request.Group)) throw new LabConflictException("An identity belongs to one group.");
-    rights.AddIdentity(new Identity(request.ClientId, request.DisplayName ?? request.ClientId, request.Secret ?? "", request.Group.Trim(),
+    rights.AddIdentity(new Identity(request.ClientId, request.DisplayName ?? request.ClientId, request.Group.Trim(),
         string.IsNullOrWhiteSpace(request.Node) ? null : request.Node.Trim(), request.Enabled ?? true));
     bus.Publish("rights", new { });
     return Results.Ok();
@@ -273,8 +272,9 @@ api.MapDelete("/rights/identities/{id}", (string id, RightsStore rights, NodeInv
     bus.Publish("rights", new { });
     return Results.Accepted();
 });
-// A node's group is fixed in the token it connected with: dropping its control connection makes its
-// host fetch a new one. Fragments already deployed keep theirs until they are re-armed.
+// TransportR records a node's group when it connects and when it renews its token: dropping its
+// control connection makes its host connect again under its current group. Fragments already
+// deployed keep theirs until they are re-armed.
 api.MapPost("/rights/identities/{id}/reconnect", (string id, NodeInventory inventory) =>
     Results.Ok(new { disconnected = inventory.Disconnect(id) }));
 
@@ -329,5 +329,5 @@ internal sealed record SaveRequest(string Yaml, System.Text.Json.Nodes.JsonObjec
 internal sealed record DistributeRequest(bool Save = false, string? Message = null);
 internal sealed record MatrixRequest(Dictionary<string, List<string>> Matrix);
 internal sealed record PolicyRequest(List<string>? Groups);
-internal sealed record IdentityRequest(string ClientId, string? DisplayName, string? Secret, string Group, string? Node, bool? Enabled);
+internal sealed record IdentityRequest(string ClientId, string? DisplayName, string Group, string? Node, bool? Enabled);
 internal sealed record QueryRequest(string Variable, string Sql);

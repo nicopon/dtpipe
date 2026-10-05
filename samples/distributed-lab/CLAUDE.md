@@ -55,15 +55,18 @@ Mechanics for editing the lab. What it is and how to run it: `README.md`.
   `WaitRegisteredAsync` requires the main instance in the deployment's current generation, held by
   the registry at the fragment's version. Every `Deploy` and `Rearm` carries a new generation,
   echoed in `FragmentStatus`. `[local: smoke.py]`
-- **A node is who its token says.** Every client of the coordinator authenticates with the
-  embedded IDP (`EmbeddedIdp`, OpenIddict, client credentials); a node's group is its identity's,
-  carried as `transportr:group:<g>` and read by TransportR's `JwtIdentityProvider`, never the one a
-  node declares. `LabHub.Announce` refuses a host announcing a node its identity is not bound to.
+- **A node is who its token says; its group is what the coordinator says.** Every client of the
+  coordinator authenticates with `Lab.Idp` (client credentials), which the coordinator trusts for its
+  audience (`TrustedIdp`). The token names the client (`sub`) and grants nothing:
+  `RightsIdentityProvider` replaces TransportR's `IClientIdentityProvider` and gives the subject its
+  identity's group, none for an unknown or disabled one. TransportR records that group at `Connect`
+  and at each renewal, so an identity edit applies when the node connects again. `LabHub.Announce`
+  refuses a host announcing a node its identity is not bound to, or a disabled one.
   `[local: smoke.py rights]`
-- **The IDP's signing key survives a coordinator restart.** A node host reuses its cached token until
-  shortly before it expires, so `PersistentSigningKey` reads the key from `.state/idp/signing-key.pem`
-  (generated once, readable by its owner only, outside git) instead of generating one per process.
-  `--token-lifetime-seconds` shortens the lifetime for trials. `[local: tools/campaign.py F4]`
+- **The IdP's signing key survives an IdP restart.** A node host reuses its cached token until
+  shortly before it expires, so `Lab.Idp` reads its key from `.state/idp/signing-key.pem` (generated
+  once, readable by its owner only, outside git). `lab.sh idp --Idp:AccessTokenLifetimeSeconds=N`
+  restarts it with shorter tokens for trials. `[local: tools/campaign.py S3, S5]`
 - **`Lab.Idp` says who, never what.** Its tokens carry a subject, a name and an email; no group,
   role or permission enters a token or the clients file, because what a caller may do belongs to
   the coordinator. It stands alone: no reference to dtpipe, TransportR or the coordinator.
@@ -78,8 +81,9 @@ Mechanics for editing the lab. What it is and how to run it: `README.md`.
   a library deploy) goes through `RightsStore.WithPolicies`. Never add a second matrix.
   `[local: smoke.py rights]`
 - A node's tokens come from the IdP its `Oidc:Authority` names, through the discovery document:
-  the lab points it at the coordinator's embedded IdP. `[local: smoke.py rights — the token reaches
-  the hub]`
+  `lab.sh` starts `Lab.Idp` first and points the coordinator (`--authority`) and every node at it.
+  The secrets live in `idp-clients.json` (the IdP) and the node files (the clients), never in the
+  rights document. `[local: smoke.py rights]`
 - The library is a git repository of its own under `.state/library`, driven by the `git` command
   line with a fixed identity; it never touches the dtpipe repository around it. It starts from
   `library-seed/`. Run history lives in `.state/runs/`, outside git. Deployments are in memory.
@@ -94,7 +98,7 @@ Mechanics for editing the lab. What it is and how to run it: `README.md`.
   `LAB_SCALE=60` (shorter runs end before a timed fault reaches them), strict nodes, and the
   toxiproxy binaries (`TOXIPROXY_DIR`) for the network cells. Its security cells call the hub as a
   peer would (`campaign_security.py`, a SignalR client over long polling) and start the coordinator
-  with `--token-lifetime-seconds`. It records, it never fixes. It starts only on a bench it can judge
+  with shorter tokens through `lab.sh idp`. It records, it never fixes. It starts only on a bench it can judge
   (`campaign_bench.py`): only the lab's own processes, a machine with no build, test run or TransportR
   process, and the binary the hosts run starts and reports the full hash of the frozen commit with a
   clean tracked tree. Every call retried on `EADDRINUSE`/`EADDRNOTAVAIL` and every port-exhaustion line

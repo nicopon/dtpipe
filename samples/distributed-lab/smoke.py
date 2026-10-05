@@ -180,10 +180,10 @@ def library_pass(ctx):
     return failures
 
 
-def token(client_id, secret):
+def token(issuer, client_id, secret):
     form = urllib.parse.urlencode({"grant_type": "client_credentials", "client_id": client_id, "client_secret": secret}).encode()
     try:
-        answer = json.loads(urllib.request.urlopen(urllib.request.Request(URL + "/connect/token", form), timeout=20).read())
+        answer = json.loads(urllib.request.urlopen(urllib.request.Request(issuer.rstrip("/") + "/connect/token", form), timeout=20).read())
     except urllib.error.HTTPError as e:
         return None, e.code
     payload = answer["access_token"].split(".")[1]
@@ -207,11 +207,17 @@ def rights_pass():
             print(f"FAIL  rights   {name:28} {e}")
 
     def idp():
-        _, refused = token("node-1", "not-the-secret")
-        claims, _ = token("node-1", "node-1-lab-secret")
-        if refused == 200 or not claims or claims.get("sub") != "node-1" or claims.get("scope") != "transportr:group:crm":
+        # The IdP says who: the token names node-1 and grants no group. The coordinator says what:
+        # node-1 belongs to crm because its identity does.
+        issuer = rights["idp"]["issuer"]
+        _, refused = token(issuer, "node-1", "not-the-secret")
+        claims, _ = token(issuer, "node-1", "node-1-lab-secret")
+        if refused == 200 or not claims or claims.get("sub") != "node-1" or "transportr:group:" in str(claims.get("scope", "")):
             raise RuntimeError(f"wrong secret -> {refused}, claims {claims}")
-        return f"wrong secret refused ({refused}); token for node-1 carries {claims['scope']}"
+        group = next((n["group"] for n in call("/api/nodes") if n["name"] == "node-1"), None)
+        if group != "crm":
+            raise RuntimeError(f"node-1 is in group {group!r}, its identity says crm")
+        return f"wrong secret refused ({refused}); node-1's token names it and grants nothing, the coordinator puts it in crm"
 
     def matrix_plan():
         try:
@@ -261,7 +267,7 @@ def rights_pass():
         log = os.path.join(STATE, "logs", "coordinator.log")
         seen = os.path.getsize(log)
         host = subprocess.Popen(["dotnet", os.path.join(STATE, "bin", "node", "Lab.NodeHost.dll"), "--config", config,
-                                 "--state", root, "--coordinator", URL, "--dtpipe", DTPIPE],
+                                 "--state", root, "--coordinator", URL, "--idp", rights["idp"]["issuer"], "--dtpipe", DTPIPE],
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
             def refused():
@@ -277,8 +283,38 @@ def rights_pass():
             raise RuntimeError("node-2 is no longer connected under its own identity")
         return "node-1's credentials announcing node-2: refused; node-2 still connected as itself"
 
+    def disabled():
+        # The coordinator decides what an identity may do: disabled, node-3 is refused when it connects
+        # again, whatever token the IdP still issues it; enabled again, it comes back on its own.
+        def update(enabled):
+            node3 = next(i for i in call("/api/rights")["identities"] if i["clientId"] == "node-3")
+            call("/api/rights/identities/node-3", {"clientId": "node-3", "displayName": node3["displayName"],
+                                                  "group": node3["group"], "node": node3["node"], "enabled": enabled}, "PUT")
+            call("/api/rights/identities/node-3/reconnect", {})
+
+        def online():
+            return next((n["online"] for n in call("/api/nodes") if n["name"] == "node-3"), False)
+
+        log = os.path.join(STATE, "logs", "coordinator.log")
+        seen = os.path.getsize(log)
+        try:
+            update(False)
+
+            def refused():
+                with open(log, errors="replace") as f:
+                    f.seek(seen)
+                    return "Announcement of node-3 refused: 'node-3' is disabled" in f.read()
+            until(refused, 30, "node-3's refusal while disabled")
+            if online():
+                raise RuntimeError("node-3 is online while its identity is disabled")
+        finally:
+            update(True)
+        until(online, 30, "node-3 back online once enabled")
+        return "disabled: node-3 refused when it connects again; enabled: back online"
+
     check("identity provider", idp)
     check("announcement, impostor", impostor)
+    check("identity, disabled", disabled)
     check("flow matrix, plan", matrix_plan)
     check("flow matrix, run time", matrix_runtime)
     check("brick policy", brick_policy)

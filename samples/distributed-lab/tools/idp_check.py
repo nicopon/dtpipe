@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Checks the lab's test IdP (Lab.Idp) end to end, as its clients use it.
 
-    python3 tools/idp_check.py [http://localhost:5190]
+    python3 tools/idp_check.py [http://127.0.0.1:5190]
 
 Client credentials (a node), authorization code with PKCE (the coordinator's front end, through
 the login form), and the refusals that matter: a wrong secret, a wrong password, a redirect URI the
@@ -19,9 +19,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-IDP = (sys.argv[1] if len(sys.argv) > 1 else "http://localhost:5190").rstrip("/")
+IDP = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:5190").rstrip("/")
 UI = {"id": "coordinator-ui", "secret": "coordinator-ui-lab-secret",
-      "redirect": "http://localhost:5180/signin-oidc", "logout": "http://localhost:5180/signout-callback-oidc"}
+      "redirect": "http://127.0.0.1:5180/signin-oidc", "logout": "http://127.0.0.1:5180/signout-callback-oidc"}
 NODE = {"id": "node-1", "secret": "node-1-lab-secret"}
 
 
