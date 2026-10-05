@@ -22,9 +22,6 @@ public sealed class ObjectStorageBinding
     /// <summary>DuckDB extension backing this scheme ("httpfs" for S3, "azure" for Azure Blob).</summary>
     public required string SchemeExtension { get; init; }
 
-    private static string TempDirectory =>
-        System.IO.Path.Combine(System.IO.Path.GetTempPath(), "dtpipe").Replace("'", "''", StringComparison.Ordinal);
-
     /// <summary>SQL run once the connection opens: extension load, then the scoped secret.</summary>
     public string InitSql
     {
@@ -33,10 +30,6 @@ public sealed class ObjectStorageBinding
             var sb = new StringBuilder();
             // Only the scheme needs an extension: parquet/csv/json readers are DuckDB core.
             sb.Append("INSTALL ").Append(SchemeExtension).Append("; LOAD ").Append(SchemeExtension).Append("; ");
-            // A write stages rows in memory before COPY (a Parquet footer is only known at the
-            // end). Giving DuckDB a temp directory lets it spill instead of failing outright on
-            // an output larger than RAM.
-            sb.Append("SET temp_directory='").Append(TempDirectory).Append("'; ");
             sb.Append(Secret.Sql);
             return sb.ToString();
         }

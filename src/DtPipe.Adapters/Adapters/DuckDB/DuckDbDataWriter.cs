@@ -1,4 +1,5 @@
 using DtPipe.Adapters.Shared.Abstractions;
+using DtPipe.Adapters.Shared.Infrastructure.DuckDb;
 using System.Data;
 using System.Text;
 using Apache.Arrow;
@@ -256,6 +257,7 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
             if (!_initSqlApplied)
             {
                 _initSqlApplied = true;
+                await DuckDbResourceSettings.ApplyAsync((System.Data.Common.DbConnection)_connection, ct);
                 await DuckInitSqlRunner.RunAsync((System.Data.Common.DbConnection)_connection, _options.InitSql, _resolver, ct);
             }
         }

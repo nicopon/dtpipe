@@ -36,7 +36,7 @@ public sealed class ObjectStorageStreamReader : IColumnarStreamReader, IBatchSiz
         _binding = binding;
         var options = new DuckDbReaderOptions { InitSql = binding.InitSql };
         // The MCP context is forwarded so a tool-driven session keeps DuckDB's
-        // disable_external_access guard: object storage must not become a way around it.
+        // enable_external_access=false guard: object storage must not become a way around it.
         _inner = new DuckDataSourceReader(
             DuckDbConnectionHelper.InMemoryConnectionString,
             binding.SelectQuery,
