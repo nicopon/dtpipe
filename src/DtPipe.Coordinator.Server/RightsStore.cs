@@ -13,7 +13,8 @@ namespace DtPipe.Coordinator.Server;
 /// </summary>
 public sealed record Identity(string ClientId, string DisplayName, string Group, string? Node, bool Enabled = true);
 
-public sealed record AuditEntry(DateTimeOffset At, string Change);
+/// <summary>One change to the rights, and who made it (the email of the person signed in), when known.</summary>
+public sealed record AuditEntry(DateTimeOffset At, string Change, string? By = null);
 
 public sealed record RightsDocument(
     List<Identity> Identities, Dictionary<string, List<string>> Matrix, Dictionary<string, List<string>> BrickPolicies,
@@ -80,7 +81,7 @@ public sealed class RightsStore
         lock (_lock) return _doc.Matrix.TryGetValue(from, out var targets) && (targets.Contains("*") || targets.Contains(to, StringComparer.OrdinalIgnoreCase));
     }
 
-    public void SetMatrix(Dictionary<string, List<string>> matrix)
+    public void SetMatrix(Dictionary<string, List<string>> matrix, string? by = null)
     {
         lock (_lock)
         {
@@ -94,31 +95,31 @@ public sealed class RightsStore
             }
             _doc.Matrix.Clear();
             foreach (var (group, targets) in matrix) _doc.Matrix[group] = targets.Distinct().Order(StringComparer.Ordinal).ToList();
-            Save(changes.Count > 0 ? "Flow matrix: " + string.Join(", ", changes) : "Flow matrix saved, unchanged");
+            Save(changes.Count > 0 ? "Flow matrix: " + string.Join(", ", changes) : "Flow matrix saved, unchanged", by);
         }
     }
 
-    public void SetBrickPolicy(string brickKey, List<string>? groups)
+    public void SetBrickPolicy(string brickKey, List<string>? groups, string? by = null)
     {
         lock (_lock)
         {
             if (groups is null) _doc.BrickPolicies.Remove(brickKey);
             else _doc.BrickPolicies[brickKey] = groups.Distinct().Order(StringComparer.Ordinal).ToList();
-            Save(groups is null ? $"{brickKey}: may go wherever the matrix allows" : $"{brickKey}: may leave its node only for {(groups.Count == 0 ? "no group" : string.Join(", ", groups))}");
+            Save(groups is null ? $"{brickKey}: may go wherever the matrix allows" : $"{brickKey}: may leave its node only for {(groups.Count == 0 ? "no group" : string.Join(", ", groups))}", by);
         }
     }
 
-    public void AddIdentity(Identity identity)
+    public void AddIdentity(Identity identity, string? by = null)
     {
         lock (_lock)
         {
             if (_doc.Identities.Any(i => i.ClientId == identity.ClientId)) throw new ConflictException($"'{identity.ClientId}' already exists.");
             _doc.Identities.Add(identity);
-            Save($"Identity {identity.ClientId} added (group {identity.Group}{(identity.Node is null ? "" : $", node {identity.Node}")})");
+            Save($"Identity {identity.ClientId} added (group {identity.Group}{(identity.Node is null ? "" : $", node {identity.Node}")})", by);
         }
     }
 
-    public void UpdateIdentity(string clientId, string displayName, string group, string? node, bool enabled)
+    public void UpdateIdentity(string clientId, string displayName, string group, string? node, bool enabled, string? by = null)
     {
         lock (_lock)
         {
@@ -132,16 +133,16 @@ public sealed class RightsStore
             if (before.Node != after.Node) changes.Add($"node {before.Node ?? "none"} → {after.Node ?? "none"}");
             if (before.Enabled != after.Enabled) changes.Add(after.Enabled ? "enabled" : "disabled");
             if (before.DisplayName != after.DisplayName) changes.Add("renamed");
-            Save($"Identity {clientId}: " + (changes.Count > 0 ? string.Join(", ", changes) : "unchanged"));
+            Save($"Identity {clientId}: " + (changes.Count > 0 ? string.Join(", ", changes) : "unchanged"), by);
         }
     }
 
-    public void RemoveIdentity(string clientId)
+    public void RemoveIdentity(string clientId, string? by = null)
     {
         lock (_lock)
         {
             if (_doc.Identities.RemoveAll(i => i.ClientId == clientId) == 0) throw new ConflictException($"'{clientId}' does not exist.");
-            Save($"Identity {clientId} removed");
+            Save($"Identity {clientId} removed", by);
         }
     }
 
@@ -181,9 +182,9 @@ public sealed class RightsStore
         return violations.Count == 0 ? plan : plan with { Errors = [.. plan.Errors, .. violations] };
     }
 
-    private void Save(string change)
+    private void Save(string change, string? by = null)
     {
-        _doc.Audit!.Insert(0, new AuditEntry(DateTimeOffset.UtcNow, change));
+        _doc.Audit!.Insert(0, new AuditEntry(DateTimeOffset.UtcNow, change, by));
         if (_doc.Audit.Count > AuditKept) _doc.Audit.RemoveRange(AuditKept, _doc.Audit.Count - AuditKept);
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         File.WriteAllText(_path, JsonSerializer.Serialize(_doc, Json));

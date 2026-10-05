@@ -16,8 +16,12 @@ public sealed class CoordinatorServerOptions
     /// <summary>The issuer of every token the server accepts: an OpenID Connect provider it trusts.</summary>
     public required string Authority { get; init; }
 
-    /// <summary>The audience a token must name to be accepted here.</summary>
+    /// <summary>The audience a service's token must name to be accepted here.</summary>
     public required string Audience { get; init; }
+
+    /// <summary>The provider's client the pages sign people in with: a confidential authorization-code client.</summary>
+    public required string UiClientId { get; init; }
+    public required string UiClientSecret { get; init; }
 
     /// <summary>Pipelines a new library starts with, one <c>.yaml</c> each; none when unset.</summary>
     public string? LibrarySeed { get; init; }
@@ -47,6 +51,8 @@ public sealed class CoordinatorServerOptions
                 : section["DtPipe"] is { Length: > 0 } name ? name : "dtpipe",
             Authority = (section["Authority"] ?? throw new InvalidOperationException("Coordinator:Authority is required: the issuer this server trusts.")).TrimEnd('/'),
             Audience = section["Audience"] ?? "dtpipe-coordinator",
+            UiClientId = section["Ui:ClientId"] ?? "coordinator-ui",
+            UiClientSecret = section["Ui:ClientSecret"] ?? throw new InvalidOperationException("Coordinator:Ui:ClientSecret is required: the secret of the pages' client at the provider."),
             LibrarySeed = PathOf("LibrarySeed"),
             RightsSeed = PathOf("RightsSeed"),
             LabMode = section.GetValue<bool>("LabMode"),

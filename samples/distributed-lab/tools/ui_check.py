@@ -12,15 +12,18 @@ Writes one screenshot per step.
 Usage: ui_check.py [lab-url] [out-dir]     (defaults: http://127.0.0.1:5180, .state/ui)
 The lab must be up. Exits 1 if any step fails.
 """
-import json, os, sys, time, urllib.request
+import json, os, sys, time, urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cdp import Browser
+from lab_session import Session
 
 URL = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:5180").rstrip("/")
 OUT = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(__file__), "..", ".state", "ui")
 os.makedirs(OUT, exist_ok=True)
 failed = False
+# Signed in as the lab's admin through the IdP; the browser is handed the same session cookie.
+SESSION = Session(URL)
 
 
 def report(ok, name, detail, shot):
@@ -35,7 +38,7 @@ def page_errors(browser):
 
 
 def lab_view(browser):
-    catalog = json.load(urllib.request.urlopen(URL + "/api/pipelines"))
+    catalog = SESSION.call("/api/pipelines")
     browser.goto(URL + "/lab/", 1)
     for entry in catalog:
         pid = json.dumps(entry["id"])
@@ -55,7 +58,7 @@ def lab_view(browser):
 
 
 def coordinator_views(browser):
-    library = json.load(urllib.request.urlopen(URL + "/api/library"))
+    library = SESSION.call("/api/library")
     pid = library[0]["id"] if library else ""
     checks = [
         ("nodes", "document.querySelectorAll('.node-card').length > 0 && document.querySelectorAll('.brick').length > 0"),
@@ -76,7 +79,7 @@ def coordinator_views(browser):
 
 
 def designer_scenario(browser):
-    bricks = json.load(urllib.request.urlopen(URL + "/api/bricks"))
+    bricks = SESSION.call("/api/bricks")
     source = next(b for b in bricks if b["key"] == "node-1/customer-countries")
     sink = next(b for b in bricks if b["key"] == "node-4/dim-customers")
     draft = {"id": "ui-scenario", "model": {"title": "UI scenario", "description": "", "check": None, "steps": [], "layout": {}}}
@@ -146,6 +149,8 @@ def designer_scenario(browser):
 
 
 browser = Browser(height=1200)
+cookie = SESSION.cookie()
+browser.cmd("Network.setCookie", name=cookie.name, value=cookie.value, url=URL + "/", httpOnly=True)
 try:
     lab_view(browser)
     coordinator_views(browser)

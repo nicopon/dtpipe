@@ -14,8 +14,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Tokens are issued by an external OpenID Connect provider and validated here. -->
+    <!-- An external OpenID Connect provider issues every token: services present bearer tokens,
+         people sign in through the provider into a session cookie. -->
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.12" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.12" />
   </ItemGroup>
 
 </Project>

@@ -27,7 +27,7 @@ built binary:
 ./build.sh                          # at the repository root: produces dist/release/dtpipe
 cd samples/distributed-lab
 ./lab.sh up                         # build, seed the four databases, start everything
-open http://127.0.0.1:5180          # the coordinator's page; the Lab view is /lab/
+open http://127.0.0.1:5180          # sign in as labadmin / labadminpwd; the Lab view is /lab/
 ./lab.sh smoke                      # every pipeline, distributed, against its witness
 ./lab.sh down
 ```
@@ -42,6 +42,10 @@ open http://127.0.0.1:5180          # the coordinator's page; the Lab view is /l
 | `./lab.sh seed` | rebuilds the databases (`LAB_SCALE=5` multiplies the row counts) |
 | `./lab.sh logs` | follows every log |
 | `./lab.sh down` / `reset` | stops everything / also deletes `.state/` |
+
+Every page and `/api` call needs a person signed in through the IdP, with a role: `labadmin`
+(`labadminpwd`) may do everything, `labdesigner` everything but the rights and the Lab view,
+`labreader` look. The lab's tools sign in as `labadmin` through the same flow.
 
 `LAB_PORT` changes the coordinator's port (default `5180`), `LAB_IDP_PORT` the IdP's (`5190`),
 `DTPIPE` the binary. Everything the lab writes lives
@@ -224,7 +228,8 @@ afterwards (a fresh instance each) before it accepts the next run.
 
 - Everything runs on one machine, which the lab uses as a shortcut: `split` samples the sources
   and the query panel opens a node's file from the coordinator's process.
-- The page and `/api` are not authenticated: only the nodes are. Tokens last 12 hours
+- People sign in through `Lab.Idp`: `labadmin`, `labdesigner` and `labreader` (password: the name
+  followed by `pwd`) hold the coordinator's three roles; any other name signs in with none. Tokens last 12 hours
   (the IdP's `Idp:AccessTokenLifetimeSeconds` changes it). Each node renews its token before it expires, so a
   deployment can sit idle, or run, past its tokens' lifetime. A node that cannot renew (the
   identity provider unreachable for longer than the renewal advance) is closed by the hub and its
@@ -245,8 +250,14 @@ afterwards (a fresh instance each) before it accepts the next run.
 
 ## API
 
+Every route below needs the session cookie of a person with a role (reader for a `GET`, designer to
+change a pipeline, deploy or run, admin for the rights and the lab-mode routes) and, unless it is a
+`GET`, the header `X-Dtpipe-Csrf`. `/healthz` is anonymous; `/account/login` and `/account/logout`
+sign a person in and out.
+
 | Endpoint | |
 |---|---|
+| `GET /api/me`, `/api/info` | who is signed in and with which roles; whether the server runs in lab mode |
 | `GET /api/nodes`, `/api/bricks`, `/api/flow-matrix`, `/api/pipelines`, `/api/state` | what the pages draw |
 | `POST /api/bricks/{node}/{id}/preview` | a few rows, read by the node that owns the brick |
 | `POST /api/design/compose`, `/decompose`, `/validate` | cards → job, job → cards, `dtpipe --dry-run 1` over the job |

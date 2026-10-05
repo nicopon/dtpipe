@@ -15,10 +15,28 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   records that group at `Connect` and at each token renewal, so an identity edit applies when the
   node connects again. `NodeChannelHub.Announce` refuses a host announcing a node its identity is
   not bound to, or a disabled one. `[local: the lab's smoke.py rights]`
+- **A person's rights are the server's configuration, never the token's.** People sign in through
+  the provider (`Coordinator:Ui:ClientId`, a confidential authorization-code client, PKCE, the code
+  in the query so the Lax correlation cookies ride the redirect) into the `dtpipe-coordinator`
+  cookie. `CoordinatorRoles` (an `IClaimsTransformation`) reads `Coordinator:Roles:Admin|Designer|
+  Reader` (lists of the claim `Coordinator:Roles:Claim`, `email` by default) on every request:
+  cumulative roles, none for anyone unlisted (403, never reader by default). `/api` and the pages
+  accept the cookie only; the default policy, which the node channel and TransportR's hub and
+  streams use, accepts a service's bearer token only, so a person's session never reaches the
+  data plane and a service's token never reaches `/api`. Only a page navigation
+  (`TrustedIdp.IsPageNavigation`) is sent to the provider; any other request is told 401.
+  `[local: the lab's smoke.py rights — roles and sessions]`
+- **A request that changes something carries `X-Dtpipe-Csrf`** (`RequireCsrfHeader`, on every
+  `/api` group): another site cannot set it without a CORS preflight this server never answers.
+  The pages' `api()` helpers send it. Never add a cookie-authenticated route outside those groups.
+  `[local: the lab's smoke.py rights]`
+- **Every rights change names its author** (`AuditEntry.By`, the signed-in email). The session
+  cookie's keys live in `keys/` in the state directory, so a restart signs nobody out.
 - **Lab mode is off by default, and everything only a bench needs sits behind it.**
   `LabModeEndpoints` maps the Lab view's scenario catalog and manual planning (`/api/plan`,
-  `/api/deploy`), fault injection and `/api/query`; the pages under `wwwroot/lab/` answer 404
-  without it, and `GET /api/info` tells the pages which mode they run in. Never add a bench-only
+  `/api/deploy`), fault injection and `/api/query`, for admins; the pages under `wwwroot/lab/`
+  answer 404 without it (and 403 to anyone but an admin), and `GET /api/info` tells the pages
+  which mode they run in. Never add a bench-only
   route outside `MapLabMode`. `[unchecked]`
 - **The server reads sources itself in three places**: `split` (planning a cut), `--dry-run`
   (`/design/validate`) and `/api/query`. `DtPipeCli` gives dtpipe every dataset path a node
@@ -71,6 +89,6 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   bricks, sandbox]`
 - The pages are served from the `wwwroot` published beside the binary (`dotnet publish`): `index.html`
   + `js/` (the coordinator's views, ES modules, no build) and `lab/` (the Lab view, lab mode only).
-  `window.lab.store` exists for the lab's `tools/ui_check.py`. The page and `/api` are not
-  authenticated yet. Verify a change with the lab's `./lab.sh smoke`, and a page change with
+  `window.lab.store` exists for the lab's `tools/ui_check.py`. `/healthz` is the only anonymous
+  route. Verify a change with the lab's `./lab.sh smoke`, and a page change with
   `./lab.sh ui` too.

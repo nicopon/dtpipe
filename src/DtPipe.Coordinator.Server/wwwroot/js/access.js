@@ -111,7 +111,7 @@ function render() {
     </section>
 
     <section class="card"><h2>Audit</h2>
-      ${(rights.audit || []).slice(0, 40).map((a) => `<div class="audit"><span class="hint">${esc(new Date(a.at).toLocaleString())}</span> ${esc(a.change)}</div>`).join("") || `<p class="hint">No change yet.</p>`}
+      ${(rights.audit || []).slice(0, 40).map((a) => `<div class="audit"><span class="hint">${esc(new Date(a.at).toLocaleString())}${a.by ? ` · ${esc(a.by)}` : ""}</span> ${esc(a.change)}</div>`).join("") || `<p class="hint">No change yet.</p>`}
     </section>`;
 }
 

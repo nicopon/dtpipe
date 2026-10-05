@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using DtPipe.Coordinator;
 using DtPipe.Coordinator.Contracts;
 using DtPipe.Coordinator.Server;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using TransportR.FlowControl;
@@ -58,26 +59,71 @@ app.Use(async (context, next) =>
     }
 });
 
+app.UseAuthentication();
 // The Lab view's pages exist only in lab mode, like the endpoints they call.
 if (!server.LabMode)
     app.Use((context, next) => context.Request.Path.StartsWithSegments("/lab") ? Results.NotFound().ExecuteAsync(context) : next(context));
+// A page is opened by a person signed in through the provider, with a role: the Lab view an admin's.
+app.Use(async (context, next) =>
+{
+    if (!TrustedIdp.IsPageNavigation(context.Request) || context.Request.Path.StartsWithSegments("/account"))
+    {
+        await next(context);
+        return;
+    }
+    if (context.User.Identity?.IsAuthenticated != true)
+    {
+        await context.ChallengeAsync(TrustedIdp.OidcScheme);
+        return;
+    }
+    var needed = context.Request.Path.StartsWithSegments("/lab") ? CoordinatorRoles.Admin : CoordinatorRoles.Reader;
+    if (!context.User.IsInRole(needed))
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        await context.Response.WriteAsync($"{context.User.FindFirst("email")?.Value ?? context.User.Identity.Name} is not a {needed} of this coordinator. Sign out: /account/logout\n");
+        return;
+    }
+    await next(context);
+});
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseRouting();
-app.UseAuthentication();
 app.UseAuthorization();
 app.MapDataHub(requireAuth: true);
 app.MapHub<NodeChannelHub>(NodeChannel.Path).RequireAuthorization();
 
-var api = app.MapGroup("/api");
+// Anonymous: whether the server answers at all, for a container's health check.
+app.MapGet("/healthz", () => Results.Ok());
 
-api.MapGet("/info", (CoordinatorServerOptions options) => new { labMode = options.LabMode });
+// A person signs in and out through the provider; the pages send them here.
+app.MapGet("/account/login", (string? returnUrl) => Results.Challenge(
+    new AuthenticationProperties { RedirectUri = returnUrl is { Length: > 0 } url && url.StartsWith('/') && !url.StartsWith("//") ? url : "/" },
+    [TrustedIdp.OidcScheme]));
+app.MapGet("/account/logout", () => Results.SignOut(new AuthenticationProperties { RedirectUri = "/" }, [TrustedIdp.CookieScheme, TrustedIdp.OidcScheme]));
+
+// /api serves the pages, by the session cookie, with three cumulative roles: a reader sees
+// everything, a designer also changes pipelines, deploys and runs them, an admin also changes the
+// rights and, in lab mode, uses the bench's tools. A request that changes something carries the CSRF
+// header. TransportR's own routes under /api (client, stream) are mapped by MapDataHub, not here.
+var account = app.MapGroup("/api").RequireAuthorization(TrustedIdp.SignedIn).AddEndpointFilter(RequireCsrfHeader);
+account.MapGet("/me", (HttpContext context) => new
+{
+    name = context.User.Identity?.Name,
+    email = context.User.FindFirst("email")?.Value,
+    roles = CoordinatorRoles.All.Where(context.User.IsInRole),
+});
+account.MapGet("/info", (CoordinatorServerOptions options) => new { labMode = options.LabMode });
+
+var api = app.MapGroup("/api").RequireAuthorization(CoordinatorRoles.Reader).AddEndpointFilter(RequireCsrfHeader);
+var designer = api.MapGroup("").RequireAuthorization(CoordinatorRoles.Designer);
+var admin = api.MapGroup("").RequireAuthorization(CoordinatorRoles.Admin);
+
 api.MapGet("/nodes", (NodeInventory inventory) => inventory.Snapshot());
 api.MapGet("/flow-matrix", (RightsStore rights) => new { groups = rights.Snapshot().Matrix });
 api.MapGet("/bricks", (BrickCatalog bricks) => bricks.List());
 
 // A brick is read by the node that owns it, never by the coordinator.
-api.MapPost("/bricks/{node}/{id}/preview", async (string node, string id, NodeInventory inventory, IHubContext<NodeChannelHub> hub, CancellationToken ct) =>
+designer.MapPost("/bricks/{node}/{id}/preview", async (string node, string id, NodeInventory inventory, IHubContext<NodeChannelHub> hub, CancellationToken ct) =>
 {
     var connection = inventory.ConnectionOf(node);
     if (connection is null) return Results.Conflict(new { error = $"{node} is offline." });
@@ -87,14 +133,14 @@ api.MapPost("/bricks/{node}/{id}/preview", async (string node, string id, NodeIn
     return preview.Error is null ? Results.Ok(new { csv = preview.Csv }) : Results.BadRequest(new { error = preview.Error });
 });
 
-api.MapPost("/graph", (GraphRequest request) =>
+designer.MapPost("/graph", (GraphRequest request) =>
 {
     try { return Results.Ok(JobGraph.Describe(JobYaml.Parse(request.Yaml))); }
     catch (Exception ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
 // A command line becomes a job through dtpipe's own --export-job.
-api.MapPost("/pipelines/from-command", async (CommandRequest request, DtPipeCli cli, CoordinatorServerOptions options, CancellationToken ct) =>
+designer.MapPost("/pipelines/from-command", async (CommandRequest request, DtPipeCli cli, CoordinatorServerOptions options, CancellationToken ct) =>
 {
     var dir = Path.Combine(options.StateDir, "commands", Guid.NewGuid().ToString("N"));
     Directory.CreateDirectory(dir);
@@ -108,26 +154,26 @@ api.MapPost("/pipelines/from-command", async (CommandRequest request, DtPipeCli 
 
 api.MapGet("/state", (DeploymentManager deployments, RunJournal journal) =>
     new { plan = deployments.ActivePlan, run = deployments.CurrentRun, history = journal.List(limit: 20) });
-api.MapPost("/runs", (RunRequest? request, DeploymentManager deployments) => deployments.Enqueue(request?.PipelineId, request?.Pins));
+designer.MapPost("/runs", (RunRequest? request, DeploymentManager deployments) => deployments.Enqueue(request?.PipelineId, request?.Pins));
 api.MapGet("/runs", (string? pipeline, RunJournal journal) => journal.List(pipeline));
 api.MapGet("/runs/queue", (DeploymentManager deployments) => deployments.Queue);
-api.MapPost("/runs/cancel", (CancelRequest? request, DeploymentManager deployments) =>
+designer.MapPost("/runs/cancel", (CancelRequest? request, DeploymentManager deployments) =>
 {
     deployments.Cancel(request?.RunId);
     return Results.Accepted();
 });
 
 api.MapGet("/deployments", (DeploymentManager deployments) => deployments.Deployments);
-api.MapDelete("/deployments/{id}", async (string id, DeploymentManager deployments, CancellationToken ct) =>
+designer.MapDelete("/deployments/{id}", async (string id, DeploymentManager deployments, CancellationToken ct) =>
 {
     await deployments.UndeployAsync(id, ct);
     return Results.Accepted();
 });
 
 // The designer: cards to job and back. The page never writes YAML itself.
-api.MapPost("/design/compose", (DesignModel model, DesignService design) => design.Compose(model));
-api.MapPost("/design/decompose", (DecomposeRequest request, DesignService design) => design.Decompose(request.Yaml, request.Layout));
-api.MapPost("/design/validate", async (DesignModel model, DesignService design, DtPipeCli cli, CoordinatorServerOptions options, CancellationToken ct) =>
+designer.MapPost("/design/compose", (DesignModel model, DesignService design) => design.Compose(model));
+designer.MapPost("/design/decompose", (DecomposeRequest request, DesignService design) => design.Decompose(request.Yaml, request.Layout));
+designer.MapPost("/design/validate", async (DesignModel model, DesignService design, DtPipeCli cli, CoordinatorServerOptions options, CancellationToken ct) =>
 {
     var composed = design.Compose(model);
     if (!composed.Valid) return Results.Ok(new { composed.Errors, dryRun = (string?)null, ok = false });
@@ -144,13 +190,13 @@ api.MapPost("/design/validate", async (DesignModel model, DesignService design, 
 api.MapGet("/library", async (PipelineLibrary library, CancellationToken ct) => await library.ListAsync(ct));
 api.MapGet("/library/{id}", async (string id, PipelineLibrary library, CancellationToken ct) =>
     await library.GetAsync(id, ct) is { } doc ? Results.Ok(doc) : Results.NotFound(new { error = $"'{id}' is not in the library." }));
-api.MapPut("/library/{id}", async (string id, SaveRequest request, PipelineLibrary library, EventBus bus, CancellationToken ct) =>
+designer.MapPut("/library/{id}", async (string id, SaveRequest request, PipelineLibrary library, EventBus bus, CancellationToken ct) =>
 {
     var commit = await library.SaveAsync(id, request.Yaml, request.Layout, request.Message ?? "", ct);
     bus.Publish("library", new { id, commit });
     return Results.Ok(new { id, commit });
 });
-api.MapDelete("/library/{id}", async (string id, PipelineLibrary library, EventBus bus, CancellationToken ct) =>
+designer.MapDelete("/library/{id}", async (string id, PipelineLibrary library, EventBus bus, CancellationToken ct) =>
 {
     await library.DeleteAsync(id, ct);
     bus.Publish("library", new { id, commit = (string?)null });
@@ -164,7 +210,7 @@ api.MapGet("/library/{id}/at/{commit}", async (string id, string commit, Pipelin
 });
 
 // Distribution: the library's job placed automatically, previewed or saved as the pipeline's plan.
-api.MapPost("/library/{id}/distribute", async (string id, DistributeRequest? request, PipelineLibrary library, AutoPlacer placer, BrickCatalog bricks, EventBus bus, CancellationToken ct) =>
+designer.MapPost("/library/{id}/distribute", async (string id, DistributeRequest? request, PipelineLibrary library, AutoPlacer placer, BrickCatalog bricks, EventBus bus, CancellationToken ct) =>
 {
     var doc = await library.GetAsync(id, ct);
     if (doc is null) return Results.NotFound(new { error = $"'{id}' is not in the library." });
@@ -186,7 +232,7 @@ api.MapPost("/library/{id}/distribute", async (string id, DistributeRequest? req
     catch (Exception) { }
     return Results.Ok(new { plan, commit, bricks = brickOf });
 });
-api.MapPost("/library/{id}/deploy", async (string id, PipelineLibrary library, RightsStore rights, BrickCatalog bricks, DeploymentManager deployments, CancellationToken ct) =>
+designer.MapPost("/library/{id}/deploy", async (string id, PipelineLibrary library, RightsStore rights, BrickCatalog bricks, DeploymentManager deployments, CancellationToken ct) =>
 {
     var doc = await library.GetAsync(id, ct);
     if (doc?.Plan is null) return Results.Conflict(new { error = $"'{id}' has no saved distributed plan: distribute it first." });
@@ -217,37 +263,37 @@ api.MapGet("/rights", (RightsStore rights, NodeInventory inventory, CoordinatorS
         audit = doc.Audit,
     };
 });
-api.MapPut("/rights/matrix", (MatrixRequest request, RightsStore rights, EventBus bus) =>
+admin.MapPut("/rights/matrix", (MatrixRequest request, RightsStore rights, EventBus bus, HttpContext http) =>
 {
-    rights.SetMatrix(request.Matrix);
+    rights.SetMatrix(request.Matrix, EmailOf(http));
     bus.Publish("rights", new { });
     return Results.Ok();
 });
-api.MapPut("/rights/bricks/{node}/{id}", (string node, string id, PolicyRequest request, RightsStore rights, EventBus bus) =>
+admin.MapPut("/rights/bricks/{node}/{id}", (string node, string id, PolicyRequest request, RightsStore rights, EventBus bus, HttpContext http) =>
 {
-    rights.SetBrickPolicy($"{node}/{id}", request.Groups);
+    rights.SetBrickPolicy($"{node}/{id}", request.Groups, EmailOf(http));
     bus.Publish("rights", new { });
     return Results.Ok();
 });
-api.MapPost("/rights/identities", (IdentityRequest request, RightsStore rights, EventBus bus) =>
+admin.MapPost("/rights/identities", (IdentityRequest request, RightsStore rights, EventBus bus, HttpContext http) =>
 {
     if (!PipelineLibrary.IsValidId(request.ClientId)) throw new ConflictException($"'{request.ClientId}' is not a client id: lowercase letters, digits and '-'.");
     if (string.IsNullOrWhiteSpace(request.Group)) throw new ConflictException("An identity belongs to one group.");
     rights.AddIdentity(new Identity(request.ClientId, request.DisplayName ?? request.ClientId, request.Group.Trim(),
-        string.IsNullOrWhiteSpace(request.Node) ? null : request.Node.Trim(), request.Enabled ?? true));
+        string.IsNullOrWhiteSpace(request.Node) ? null : request.Node.Trim(), request.Enabled ?? true), EmailOf(http));
     bus.Publish("rights", new { });
     return Results.Ok();
 });
-api.MapPut("/rights/identities/{id}", (string id, IdentityRequest request, RightsStore rights, EventBus bus) =>
+admin.MapPut("/rights/identities/{id}", (string id, IdentityRequest request, RightsStore rights, EventBus bus, HttpContext http) =>
 {
     if (string.IsNullOrWhiteSpace(request.Group)) throw new ConflictException("An identity belongs to one group.");
-    rights.UpdateIdentity(id, request.DisplayName ?? id, request.Group.Trim(), request.Node, request.Enabled ?? true);
+    rights.UpdateIdentity(id, request.DisplayName ?? id, request.Group.Trim(), request.Node, request.Enabled ?? true, EmailOf(http));
     bus.Publish("rights", new { });
     return Results.Ok();
 });
-api.MapDelete("/rights/identities/{id}", (string id, RightsStore rights, NodeInventory inventory, EventBus bus) =>
+admin.MapDelete("/rights/identities/{id}", (string id, RightsStore rights, NodeInventory inventory, EventBus bus, HttpContext http) =>
 {
-    rights.RemoveIdentity(id);
+    rights.RemoveIdentity(id, EmailOf(http));
     inventory.Disconnect(id);
     bus.Publish("rights", new { });
     return Results.Accepted();
@@ -255,11 +301,11 @@ api.MapDelete("/rights/identities/{id}", (string id, RightsStore rights, NodeInv
 // TransportR records a node's group when it connects and when it renews its token: dropping its
 // control connection makes its host connect again under its current group. Fragments already
 // deployed keep theirs until they are re-armed.
-api.MapPost("/rights/identities/{id}/reconnect", (string id, NodeInventory inventory) =>
+admin.MapPost("/rights/identities/{id}/reconnect", (string id, NodeInventory inventory) =>
     Results.Ok(new { disconnected = inventory.Disconnect(id) }));
 
 
-if (server.LabMode) api.MapLabMode();
+if (server.LabMode) admin.MapLabMode();
 
 api.MapGet("/events", async (HttpContext context, EventBus bus, NodeInventory inventory, DeploymentManager deployments) =>
 {
@@ -287,6 +333,16 @@ api.MapGet("/events", async (HttpContext context, EventBus bus, NodeInventory in
 });
 
 app.Run();
+
+static string? EmailOf(HttpContext context) => context.User.FindFirst("email")?.Value;
+
+static async ValueTask<object?> RequireCsrfHeader(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+{
+    var request = context.HttpContext.Request;
+    if (HttpMethods.IsGet(request.Method) || HttpMethods.IsHead(request.Method) || request.Headers.ContainsKey(TrustedIdp.CsrfHeader))
+        return await next(context);
+    return Results.Problem($"A request that changes something carries the {TrustedIdp.CsrfHeader} header.", statusCode: StatusCodes.Status403Forbidden);
+}
 
 internal sealed record GraphRequest(string Yaml);
 internal sealed record CommandRequest(string[] Args);

@@ -34,20 +34,19 @@ SELECTED = sys.argv[5:] if ONLY else sys.argv[4:]
 RUN_TIMEOUT = 180
 
 
+# /api serves people: smoke signs in as the lab's admin, through the IdP, as a browser would.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
+from lab_session import ApiError, Session  # noqa: E402
+SESSION = Session(URL, timeout=RUN_TIMEOUT)
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
 def call(path, body=None, method=None):
-    data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(URL + path, data, {"Content-Type": "application/json"},
-                                 method=method or ("POST" if data is not None else "GET"))
-    try:
-        raw = urllib.request.urlopen(req, timeout=RUN_TIMEOUT).read()
-        return json.loads(raw) if raw else {}
-    except urllib.error.HTTPError as e:
-        body = e.read().decode()
-        try:
-            message = json.loads(body).get("error", body)
-        except ValueError:
-            message = body
-        raise RuntimeError(f"{path}: HTTP {e.code}: {message}") from None
+    return SESSION.call(path, body, method)
 
 
 def until(predicate, timeout, what):
@@ -312,7 +311,60 @@ def rights_pass():
         until(online, 30, "node-3 back online once enabled")
         return "disabled: node-3 refused when it connects again; enabled: back online"
 
+    def roles():
+        # A person's rights are the coordinator's configuration: labreader reads, labdesigner also
+        # changes pipelines, labadmin also the rights; anyone else holds nothing. A change needs the
+        # CSRF header; a service's token opens no page and no /api route; an anonymous call is told
+        # 401, never sent to the IdP.
+        def status(fn):
+            try:
+                fn()
+                return 200
+            except ApiError as e:
+                return e.status
+
+        def raw(path, headers=None, data=None, method=None):
+            req = urllib.request.Request(URL + path, data, headers or {}, method=method)
+            opener = urllib.request.build_opener(_NoRedirect)
+            try:
+                return opener.open(req, timeout=20).status
+            except urllib.error.HTTPError as e:
+                return e.code
+
+        reader, designer, nobody = Session(URL, "labreader"), Session(URL, "labdesigner"), Session(URL, "toto")
+        policy = call("/api/rights")["matrix"]
+        expected = {
+            "reader GET /api/library": (status(lambda: reader.call("/api/library")), 200),
+            "reader PUT /api/rights/matrix": (status(lambda: reader.call("/api/rights/matrix", {"matrix": policy}, "PUT")), 403),
+            "designer POST /api/design/compose": (status(lambda: designer.call("/api/design/compose", {"title": "roles", "steps": []})), 200),
+            "designer PUT /api/rights/matrix": (status(lambda: designer.call("/api/rights/matrix", {"matrix": policy}, "PUT")), 403),
+            "designer GET /api/pipelines (lab mode)": (status(lambda: designer.call("/api/pipelines")), 403),
+            "no role GET /api/nodes": (status(lambda: nobody.call("/api/nodes")), 403),
+            "no role GET /api/me": (status(lambda: nobody.call("/api/me")), 200),
+            "anonymous GET /api/nodes": (raw("/api/nodes"), 401),
+            "anonymous GET /": (raw("/"), 302),
+            "service token GET /api/nodes": (raw("/api/nodes", {"Authorization": "Bearer " + service_token()}), 401),
+            "anonymous node channel": (raw("/node-channel/negotiate?negotiateVersion=1", method="POST", data=b""), 401),
+            "admin POST without CSRF header": (raw_session("/api/runs/cancel", b"{}"), 403),
+        }
+        wrong = {k: v for k, v in expected.items() if v[0] != v[1]}
+        if wrong:
+            raise RuntimeError("; ".join(f"{k}: {got} (expected {want})" for k, (got, want) in wrong.items()))
+        return f"{len(expected)} access rules hold: reader, designer, admin, no role, anonymous, service token, CSRF"
+
+    def service_token():
+        form = urllib.parse.urlencode({"grant_type": "client_credentials", "client_id": "node-1", "client_secret": "node-1-lab-secret"}).encode()
+        return json.loads(urllib.request.urlopen(urllib.request.Request(rights["idp"]["issuer"] + "/connect/token", form), timeout=20).read())["access_token"]
+
+    def raw_session(path, data):
+        req = urllib.request.Request(URL + path, data, {"Content-Type": "application/json"}, method="POST")
+        try:
+            return SESSION._opener.open(req, timeout=20).status
+        except urllib.error.HTTPError as e:
+            return e.code
+
     check("identity provider", idp)
+    check("roles and sessions", roles)
     check("announcement, impostor", impostor)
     check("identity, disabled", disabled)
     check("flow matrix, plan", matrix_plan)

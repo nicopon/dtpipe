@@ -34,8 +34,12 @@ const short = (fragment) => {
 };
 
 async function api(path, body) {
-  const init = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  // The CSRF header rides every call: the server refuses a change without it.
+  const init = body === undefined
+    ? { headers: { "X-Dtpipe-Csrf": "1" } }
+    : { method: "POST", headers: { "Content-Type": "application/json", "X-Dtpipe-Csrf": "1" }, body: JSON.stringify(body) };
   const response = await fetch(path, init);
+  if (response.status === 401) { location.reload(); throw new Error("signed out"); }
   const text = await response.text();
   const data = text ? JSON.parse(text) : {};
   if (!response.ok) throw new Error(data.error || `${response.status} ${response.statusText}`);

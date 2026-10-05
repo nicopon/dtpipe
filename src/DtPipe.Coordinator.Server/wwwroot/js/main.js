@@ -50,4 +50,10 @@ window.addEventListener("beforeunload", (e) => { if (current?.dirty?.()) { e.pre
 window.addEventListener("error", (e) => addLog({ node: "coordinator", level: "Error", message: `page: ${e.message}` }));
 window.addEventListener("unhandledrejection", (e) => addLog({ node: "coordinator", level: "Error", message: `page: ${e.reason?.stack || e.reason}` }));
 
-start().then(() => { $("lab-link").hidden = !store.labMode; renderPills(); route(); }).catch((e) => toast(`The page failed to start: ${e.message}`));
+start().then(() => {
+  // The Lab view is an admin's, in lab mode only.
+  $("lab-link").hidden = !(store.labMode && store.me.roles.includes("admin"));
+  $("me").textContent = `${store.me.email || store.me.name} · ${store.me.roles[0] || "no role"}`;
+  renderPills();
+  route();
+}).catch((e) => toast(`The page failed to start: ${e.message}`));

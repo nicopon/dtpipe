@@ -12,6 +12,7 @@ export const store = {
   bytes: { total: 0, activeTransfers: 0 },
   connected: false,
   labMode: false, // the server's own word: the Lab view and the query panel exist only then
+  me: null,       // { name, email, roles }: who is signed in, and what the server lets them do
   draft: null,       // { id, model }: a pipeline imported but not saved yet, handed to the designer
 };
 
@@ -49,9 +50,12 @@ export function duration(run) {
 }
 
 export async function api(path, body, method) {
-  const init = { method: method || (body === undefined ? "GET" : "POST") };
-  if (body !== undefined) { init.headers = { "Content-Type": "application/json" }; init.body = JSON.stringify(body); }
+  // The CSRF header rides every call: the server refuses a change without it.
+  const init = { method: method || (body === undefined ? "GET" : "POST"), headers: { "X-Dtpipe-Csrf": "1" } };
+  if (body !== undefined) { init.headers["Content-Type"] = "application/json"; init.body = JSON.stringify(body); }
   const response = await fetch(path, init);
+  // The session ended: open the page again, which signs the person in through the provider.
+  if (response.status === 401) { location.reload(); throw new Error("signed out"); }
   const text = await response.text();
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text }; }
@@ -127,10 +131,10 @@ function onRun(run) {
 }
 
 export async function start() {
-  const [info, nodes, bricks, matrix, deployments, runs, queue] = await Promise.all([
-    api("/api/info"), api("/api/nodes"), api("/api/bricks"), api("/api/flow-matrix"), api("/api/deployments"), api("/api/runs"), api("/api/runs/queue"),
+  const [me, info, nodes, bricks, matrix, deployments, runs, queue] = await Promise.all([
+    api("/api/me"), api("/api/info"), api("/api/nodes"), api("/api/bricks"), api("/api/flow-matrix"), api("/api/deployments"), api("/api/runs"), api("/api/runs/queue"),
   ]);
-  Object.assign(store, { labMode: info.labMode, nodes, bricks, matrix: matrix.groups, deployments, runs, queue });
+  Object.assign(store, { me, labMode: info.labMode, nodes, bricks, matrix: matrix.groups, deployments, runs, queue });
   emit("all");
   // ?static renders once without the live stream (a headless browser waits on it forever).
   if (new URLSearchParams(location.search).has("static")) return;

@@ -81,7 +81,9 @@ exec_coordinator() {
     exec dotnet "$STATE/bin/coordinator/DtPipe.Coordinator.Server.dll" --urls "$URL" \
         --Coordinator:StateDirectory="$STATE" --Coordinator:DtPipe="$DTPIPE" --Coordinator:Authority="$IDP_URL" \
         --Coordinator:LabMode=true --Coordinator:Scenarios="$LAB/pipelines" \
-        --Coordinator:LibrarySeed="$LAB/library-seed" --Coordinator:RightsSeed="$LAB/rights-seed.json" "$@"
+        --Coordinator:LibrarySeed="$LAB/library-seed" --Coordinator:RightsSeed="$LAB/rights-seed.json" \
+        --Coordinator:Ui:ClientSecret=coordinator-ui-lab-secret --Coordinator:Roles:Admin="${LAB_ADMIN:-labadmin}@dtpipe.test" \
+        --Coordinator:Roles:Designer=labdesigner@dtpipe.test --Coordinator:Roles:Reader=labreader@dtpipe.test "$@"
 }
 
 # Replaces this shell with node $1's host, pointed at the coordinator $2: the official runner for a
@@ -125,10 +127,10 @@ up() {
     start coordinator "$LAB/lab.sh" exec-coordinator
 
     for _ in $(seq 1 60); do
-        curl -fs "$URL/api/nodes" >/dev/null 2>&1 && break
+        curl -fs "$URL/healthz" >/dev/null 2>&1 && break
         sleep 0.5
     done
-    curl -fs "$URL/api/nodes" >/dev/null || { echo "The coordinator did not come up; see $STATE/logs/coordinator.log" >&2; exit 1; }
+    curl -fs "$URL/healthz" >/dev/null || { echo "The coordinator did not come up; see $STATE/logs/coordinator.log" >&2; exit 1; }
 
     start_nodes "$([[ "${LAB_NODE_SANDBOX:-}" == 1 ]] && echo sandbox || echo strict)"
 
@@ -143,12 +145,13 @@ nodes_mode() {
     if nodes_report "$mode" 0; then return; fi
 
     echo "Nodes: $mode"
-    python3 - "$URL" <<'PY'
-import json, sys, urllib.request
-url = sys.argv[1]
-for d in json.load(urllib.request.urlopen(url + "/api/deployments", timeout=20)):
-    req = urllib.request.Request(f"{url}/api/deployments/{d['pipelineId']}", method="DELETE")
-    try: urllib.request.urlopen(req, timeout=60)
+    python3 - "$URL" "$LAB/tools" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[2])
+from lab_session import Session
+session = Session(sys.argv[1], timeout=60)
+for d in session.call("/api/deployments"):
+    try: session.call(f"/api/deployments/{d['pipelineId']}", method="DELETE")
     except Exception as e: print(f"  {d['pipelineId']}: not undeployed ({e})")
 PY
     for node in "${NODES[@]}"; do
@@ -207,9 +210,9 @@ status() {
     for name in idp coordinator "${NODES[@]}"; do
         if is_running "$name"; then echo "  $name  running (pid $(cat "$STATE/run/$name.pid"))"; else echo "  $name  stopped"; fi
     done
-    if curl -fs "$URL/api/nodes" >/dev/null 2>&1; then
+    if curl -fs "$URL/healthz" >/dev/null 2>&1; then
         echo
-        curl -fs "$URL/api/nodes" | python3 -c "$(cat <<'EOF'
+        python3 "$LAB/tools/lab_session.py" "$URL" /api/nodes | python3 -c "$(cat <<'EOF'
 import json, sys
 for n in json.load(sys.stdin):
     frags = ", ".join(f["fragment"] + ":" + f["state"] for f in n["fragments"]) or "-"
