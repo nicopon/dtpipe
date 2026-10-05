@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The coordinator's server: a host of DtPipe.Coordinator (AddCoordinatorHub, IRunOrchestrator,
+         INodeRegistry, IPlanRegistry), used exactly as that library's own tests use it. -->
+    <ProjectReference Include="..\DtPipe.Coordinator\DtPipe.Coordinator.csproj" />
+    <ProjectReference Include="..\DtPipe.Coordinator.Contracts\DtPipe.Coordinator.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Tokens are issued by an external OpenID Connect provider and validated here. -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.12" />
+  </ItemGroup>
+
+</Project>

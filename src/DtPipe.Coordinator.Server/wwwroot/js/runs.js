@@ -17,22 +17,25 @@ export function mount(el) {
     <section class="card"><h2>Deployments</h2><div id="r-deployments"></div></section>
     <section class="card"><h2>In flight and queued</h2><div id="r-queue"></div></section>
     <section class="card"><div class="card-head"><h2>Journal</h2><select id="r-filter"></select></div><div id="r-journal"></div></section>
-    <div class="grid2">
+    <div class="${store.labMode ? "grid2" : ""}">
       <section class="card"><div class="card-head"><h2>Events</h2>
         <div class="actions"><select id="r-lognode"></select><label class="check"><input type="checkbox" id="r-debug"> child stderr</label><button id="r-clear" class="ghost small">Clear</button></div></div>
         <div id="r-log" class="log mono"></div></section>
-      <section class="card"><h2>Look into a node's database</h2>
+      ${store.labMode ? `<section class="card"><h2>Look into a node's database</h2>
         <div class="row"><select id="r-dataset"></select><input id="r-sql" class="mono grow" spellcheck="false"><button id="r-query">Query</button></div>
-        <div id="r-result"></div></section>
+        <div id="r-result"></div></section>` : ""}
     </div>`;
   host.addEventListener("click", onClick);
   $("r-filter").addEventListener("change", (e) => { filter = e.target.value; renderJournal(); });
   $("r-lognode").addEventListener("change", (e) => { logNode = e.target.value; renderLog(); });
   $("r-debug").addEventListener("change", (e) => { logDebug = e.target.checked; renderLog(); });
   $("r-clear").addEventListener("click", () => { store.logs = []; renderLog(); });
-  $("r-dataset").addEventListener("change", defaultQuery);
-  $("r-query").addEventListener("click", runQuery);
-  $("r-sql").addEventListener("keydown", (e) => { if (e.key === "Enter") runQuery(); });
+  // Lab mode only: the server opens a node's database itself.
+  if (store.labMode) {
+    $("r-dataset").addEventListener("change", defaultQuery);
+    $("r-query").addEventListener("click", runQuery);
+    $("r-sql").addEventListener("keydown", (e) => { if (e.key === "Enter") runQuery(); });
+  }
   clearInterval(ticker);
   ticker = setInterval(() => { if (host?.isConnected) renderQueue(); else clearInterval(ticker); }, 1000);
   renderAll();
@@ -83,8 +86,9 @@ function renderSelectors() {
   f.innerHTML = `<option value="">every pipeline</option>` + ids.map((i) => `<option ${i === filter ? "selected" : ""}>${esc(i)}</option>`).join("");
   const n = $("r-lognode");
   n.innerHTML = `<option value="">every node</option>` + [...store.nodes.map((x) => x.name), "coordinator"].map((x) => `<option ${x === logNode ? "selected" : ""}>${esc(x)}</option>`).join("");
-  const datasets = store.nodes.flatMap((node) => node.datasets.map((d) => ({ ...d, node: node.name })));
   const qs = $("r-dataset");
+  if (!qs) return;
+  const datasets = store.nodes.flatMap((node) => node.datasets.filter((d) => d.path).map((d) => ({ ...d, node: node.name })));
   if (qs.options.length !== datasets.length) {
     const previous = qs.value;
     qs.innerHTML = datasets.map((d) => `<option value="${esc(d.variable)}" data-engine="${esc(d.engine)}">${esc(d.node)} · ${esc(d.variable)}</option>`).join("");

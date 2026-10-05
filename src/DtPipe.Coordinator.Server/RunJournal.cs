@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using DtPipe.Coordinator;
 
-namespace DtPipe.Lab.Coordinator;
+namespace DtPipe.Coordinator.Server;
 
 public sealed record RunView(
     string RunId, string PlanId, string State, DateTimeOffset StartedAt, DateTimeOffset? FinishedAt,
@@ -13,7 +13,7 @@ public sealed record RunView(
 }
 
 /// <summary>
-/// Every finished run, one JSON file each under <c>.state/runs/&lt;pipeline&gt;/</c>, read back at
+/// Every finished run, one JSON file each under <c>runs/&lt;pipeline&gt;/</c> in the state directory, read back at
 /// start. Runs are what happened, not what was designed: the library's git history never holds them.
 /// </summary>
 public sealed class RunJournal
@@ -30,7 +30,7 @@ public sealed class RunJournal
     private readonly List<RunView> _runs = [];
     private int _seq;
 
-    public RunJournal(LabOptions options, ILogger<RunJournal> logger)
+    public RunJournal(CoordinatorServerOptions options, ILogger<RunJournal> logger)
     {
         _dir = Path.Combine(options.StateDir, "runs");
         Directory.CreateDirectory(_dir);

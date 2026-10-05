@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 using DtPipe.Coordinator.Contracts;
 using YamlDotNet.RepresentationModel;
 
-namespace DtPipe.Lab.Coordinator;
+namespace DtPipe.Coordinator.Server;
 
 /// <summary>The kinds of card the designer draws. Each one is exactly one branch of the job.</summary>
 public static class StepKinds

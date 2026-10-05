@@ -1,7 +1,7 @@
 using DtPipe.Coordinator.Contracts;
 using YamlDotNet.RepresentationModel;
 
-namespace DtPipe.Lab.Coordinator;
+namespace DtPipe.Coordinator.Server;
 
 public sealed record StageView(string Type, string Summary);
 

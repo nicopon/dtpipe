@@ -4,7 +4,7 @@ using DtPipe.Coordinator.Contracts;
 using TransportR.Interfaces;
 using YamlDotNet.RepresentationModel;
 
-namespace DtPipe.Lab.Coordinator;
+namespace DtPipe.Coordinator.Server;
 
 /// <summary>
 /// What the coordinator grants a client of the trusted IdP, named by the <c>sub</c> of its tokens.
@@ -20,8 +20,8 @@ public sealed record RightsDocument(
     List<AuditEntry>? Audit = null);
 
 /// <summary>
-/// Who may send what to whom, in one editable document under <c>.state/rights.json</c>, started
-/// from <c>rights-seed.json</c>:
+/// Who may send what to whom, in one editable document, <c>rights.json</c> in the state directory,
+/// started from <see cref="CoordinatorServerOptions.RightsSeed"/>:
 /// <list type="bullet">
 /// <item><b>who</b>: the clients of the trusted IdP this coordinator grants anything to; the group a
 ///   node belongs to is its identity's, never one it declares or its token carries;</item>
@@ -42,14 +42,18 @@ public sealed class RightsStore
 
     public event Action? Changed;
 
-    public RightsStore(LabOptions options)
+    public RightsStore(CoordinatorServerOptions options)
     {
         _path = Path.Combine(options.StateDir, "rights.json");
-        var source = File.Exists(_path) ? _path : Path.Combine(options.LabRoot, "rights-seed.json");
-        _doc = JsonSerializer.Deserialize<RightsDocument>(File.ReadAllText(source), Json)
-               ?? throw new InvalidOperationException($"{source}: empty rights document.");
+        // A new state directory starts from the seed, or from no identity and an empty matrix: nobody
+        // may send anything until an administrator says so.
+        var source = File.Exists(_path) ? _path : options.RightsSeed;
+        _doc = source is null
+            ? new RightsDocument([], [], [])
+            : JsonSerializer.Deserialize<RightsDocument>(File.ReadAllText(source), Json)
+              ?? throw new InvalidOperationException($"{source}: empty rights document.");
         _doc = _doc with { Audit = _doc.Audit ?? [] };
-        if (source != _path) Save("Rights started from rights-seed.json");
+        if (source != _path) Save(source is null ? "Rights started empty" : $"Rights started from {Path.GetFileName(source)}");
     }
 
     public RightsDocument Snapshot()
@@ -108,7 +112,7 @@ public sealed class RightsStore
     {
         lock (_lock)
         {
-            if (_doc.Identities.Any(i => i.ClientId == identity.ClientId)) throw new LabConflictException($"'{identity.ClientId}' already exists.");
+            if (_doc.Identities.Any(i => i.ClientId == identity.ClientId)) throw new ConflictException($"'{identity.ClientId}' already exists.");
             _doc.Identities.Add(identity);
             Save($"Identity {identity.ClientId} added (group {identity.Group}{(identity.Node is null ? "" : $", node {identity.Node}")})");
         }
@@ -119,7 +123,7 @@ public sealed class RightsStore
         lock (_lock)
         {
             var index = _doc.Identities.FindIndex(i => i.ClientId == clientId);
-            if (index < 0) throw new LabConflictException($"'{clientId}' does not exist.");
+            if (index < 0) throw new ConflictException($"'{clientId}' does not exist.");
             var before = _doc.Identities[index];
             var after = before with { DisplayName = displayName, Group = group, Node = string.IsNullOrWhiteSpace(node) ? null : node, Enabled = enabled };
             _doc.Identities[index] = after;
@@ -136,7 +140,7 @@ public sealed class RightsStore
     {
         lock (_lock)
         {
-            if (_doc.Identities.RemoveAll(i => i.ClientId == clientId) == 0) throw new LabConflictException($"'{clientId}' does not exist.");
+            if (_doc.Identities.RemoveAll(i => i.ClientId == clientId) == 0) throw new ConflictException($"'{clientId}' does not exist.");
             Save($"Identity {clientId} removed");
         }
     }
@@ -146,7 +150,7 @@ public sealed class RightsStore
     /// not allow. A brick is found by content in the logical job; an edge's consumer alias is always
     /// the alias of the branch whose rows it carries.
     /// </summary>
-    public IReadOnlyList<string> PolicyViolations(LabPlan plan, string yaml, BrickCatalog bricks)
+    public IReadOnlyList<string> PolicyViolations(DistributionPlan plan, string yaml, BrickCatalog bricks)
     {
         Dictionary<string, List<string>> policies;
         lock (_lock) policies = _doc.BrickPolicies.ToDictionary(kv => kv.Key, kv => kv.Value.ToList());
@@ -171,7 +175,7 @@ public sealed class RightsStore
         return violations.Distinct().ToList();
     }
 
-    public LabPlan WithPolicies(LabPlan plan, string yaml, BrickCatalog bricks)
+    public DistributionPlan WithPolicies(DistributionPlan plan, string yaml, BrickCatalog bricks)
     {
         var violations = PolicyViolations(plan, yaml, bricks);
         return violations.Count == 0 ? plan : plan with { Errors = [.. plan.Errors, .. violations] };

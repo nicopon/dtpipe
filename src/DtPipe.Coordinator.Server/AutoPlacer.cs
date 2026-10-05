@@ -1,6 +1,6 @@
 using DtPipe.Coordinator.Contracts;
 
-namespace DtPipe.Lab.Coordinator;
+namespace DtPipe.Coordinator.Server;
 
 /// <summary>
 /// Places a job with no help from the user: a branch that is a brick runs on the node that offers
@@ -10,7 +10,7 @@ namespace DtPipe.Lab.Coordinator;
 /// </summary>
 public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, PlanBuilder planner, RightsStore rights)
 {
-    public async Task<LabPlan> PlanAsync(string pipelineId, string yaml, CancellationToken ct)
+    public async Task<DistributionPlan> PlanAsync(string pipelineId, string yaml, CancellationToken ct)
     {
         var errors = new List<string>();
         var placement = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -33,7 +33,7 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
                 if (variables.Count > 0)
                 {
                     errors.Add($"'{alias}' reads or writes {string.Join(", ", variables.Select(v => hostOf[v]).Distinct())} " +
-                               "without being one of its bricks. Rebuild it from the node's bricks, or place it by hand in the Lab view.");
+                               "without being one of its bricks. Rebuild it from the node's bricks.");
                     continue;
                 }
                 if (runner is null) errors.Add($"'{alias}' needs a runner, and none is connected.");

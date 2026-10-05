@@ -50,4 +50,4 @@ window.addEventListener("beforeunload", (e) => { if (current?.dirty?.()) { e.pre
 window.addEventListener("error", (e) => addLog({ node: "coordinator", level: "Error", message: `page: ${e.message}` }));
 window.addEventListener("unhandledrejection", (e) => addLog({ node: "coordinator", level: "Error", message: `page: ${e.reason?.stack || e.reason}` }));
 
-start().then(() => { renderPills(); route(); }).catch((e) => toast(`The page failed to start: ${e.message}`));
+start().then(() => { $("lab-link").hidden = !store.labMode; renderPills(); route(); }).catch((e) => toast(`The page failed to start: ${e.message}`));

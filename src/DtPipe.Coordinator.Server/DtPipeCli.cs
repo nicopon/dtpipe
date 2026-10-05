@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace DtPipe.Lab.Coordinator;
+namespace DtPipe.Coordinator.Server;
 
 public sealed record CliResult(int ExitCode, string Stdout, string Stderr)
 {
@@ -14,10 +14,10 @@ public sealed record CliResult(int ExitCode, string Stdout, string Stderr)
 }
 
 /// <summary>
-/// Runs the dtpipe binary the way a user would. The lab never links dtpipe's engine: splitting and
-/// querying go through the published command line.
+/// Runs the dtpipe binary the way a user would. The server never links dtpipe's engine: splitting,
+/// exporting a job and checking one go through the published command line.
 /// </summary>
-public sealed partial class DtPipeCli(LabOptions options, NodeInventory inventory)
+public sealed partial class DtPipeCli(CoordinatorServerOptions options, NodeInventory inventory)
 {
     public async Task<CliResult> RunAsync(IEnumerable<string> args, string workingDirectory, TimeSpan timeout, CancellationToken ct)
     {
@@ -31,8 +31,9 @@ public sealed partial class DtPipeCli(LabOptions options, NodeInventory inventor
         };
         foreach (var arg in args) psi.ArgumentList.Add(arg);
 
-        // A fragment's job names its databases through ${{VAR}}; on this single machine the
-        // coordinator can resolve every node's variable, which is what lets `split` sample a source.
+        // A fragment's job names its databases through ${{VAR}}. `split` and `--dry-run` read the
+        // sources, so the server resolves every path a node announced: this works only where the
+        // server shares the nodes' file system, and a node that announces no path cannot be read.
         foreach (var (name, path) in inventory.AllDatasetVariables())
             psi.Environment[name] = path;
         psi.Environment["NO_COLOR"] = "1";

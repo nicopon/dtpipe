@@ -1,14 +1,14 @@
 using DtPipe.Coordinator.Contracts;
 using Microsoft.AspNetCore.SignalR;
 
-namespace DtPipe.Lab.Coordinator;
+namespace DtPipe.Coordinator.Server;
 
 public sealed record NodeView(
     string Name, string Group, string Description, bool Online, IReadOnlyList<DatasetInfo> Datasets,
     IReadOnlyList<FragmentStatus> Fragments, NodeRole Role, IReadOnlyList<BrickInfo> Bricks, bool Sandbox);
 
 /// <summary>
-/// The lab hosts it knows of and what each reports about its fragments. <c>INodeRegistry</c> only
+/// The node hosts it knows of and what each reports about its fragments. <c>INodeRegistry</c> only
 /// answers per fragment name; this is the host-level view the page draws.
 /// </summary>
 public sealed class NodeInventory
@@ -116,7 +116,7 @@ public sealed class NodeInventory
         }
     }
 
-    /// <summary>Every dataset variable of every node. The lab runs on one machine, so the coordinator can reach them all.</summary>
+    /// <summary>Every dataset variable a node announced with its path; reachable only from a shared file system.</summary>
     public IReadOnlyDictionary<string, string> AllDatasetVariables()
     {
         lock (_lock)
@@ -134,7 +134,7 @@ public sealed class NodeInventory
 /// the trusted IdP. A host is who its token says: it may announce only the node its identity is bound
 /// to, and its group is the identity's, whatever it declares.
 /// </summary>
-public sealed class LabHub(NodeInventory inventory, RightsStore rights, EventBus bus, ILogger<LabHub> logger) : Hub
+public sealed class NodeChannelHub(NodeInventory inventory, RightsStore rights, EventBus bus, ILogger<NodeChannelHub> logger) : Hub
 {
     public Task Announce(NodeAnnouncement announcement)
     {

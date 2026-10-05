@@ -2,26 +2,22 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using DtPipe.Coordinator;
 using DtPipe.Coordinator.Contracts;
-using DtPipe.Lab.Coordinator;
+using DtPipe.Coordinator.Server;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using TransportR.FlowControl;
 using TransportR.Hub.SignalR;
 using TransportR.Interfaces;
 
-var lab = LabOptions.FromConfiguration(new ConfigurationBuilder().AddCommandLine(args).Build());
-
-// The page is served from the lab's sources: a build output carries no wwwroot outside Development.
-var builder = WebApplication.CreateBuilder(new WebApplicationOptions
-{
-    Args = args,
-    ContentRootPath = AppContext.BaseDirectory,
-    WebRootPath = Path.Combine(lab.LabRoot, "Lab.Coordinator", "wwwroot"),
-});
+// The coordinator's server. Its settings are the Coordinator configuration section, from the
+// environment first (Coordinator__Authority, Coordinator__StateDirectory, …); the pages are served
+// from the wwwroot published beside the binary, whatever directory the server starts in.
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = args, ContentRootPath = AppContext.BaseDirectory });
 builder.Logging.AddFilter("TransportR", LogLevel.Warning);
 builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
 
-builder.Services.AddSingleton(lab);
+var server = CoordinatorServerOptions.FromConfiguration(builder.Configuration);
+builder.Services.AddSingleton(server);
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 // The coordinator as DtPipe.Coordinator ships it, in TransportR's production mode: every client
@@ -32,10 +28,10 @@ builder.Services.AddSingleton<RightsStore>();
 builder.Services.AddCoordinatorHub(_ => { }).Build();
 builder.Services.Replace(ServiceDescriptor.Singleton<IFlowControlService, RightsFlowControl>());
 builder.Services.Replace(ServiceDescriptor.Singleton<IClientIdentityProvider, RightsIdentityProvider>());
-builder.Services.AddTrustedIdp(lab);
+builder.Services.AddTrustedIdp(server);
 
 builder.Services.AddSingleton<LoggingHubProgressMonitor>();
-builder.Services.Replace(ServiceDescriptor.Singleton<IHubProgressMonitor, LabProgressMonitor>());
+builder.Services.Replace(ServiceDescriptor.Singleton<IHubProgressMonitor, EventProgressMonitor>());
 
 builder.Services.AddSingleton<EventBus>();
 builder.Services.AddSingleton<NodeInventory>();
@@ -55,29 +51,33 @@ app.Services.GetRequiredService<DeploymentManager>();
 app.Use(async (context, next) =>
 {
     try { await next(context); }
-    catch (LabConflictException ex)
+    catch (ConflictException ex)
     {
         context.Response.StatusCode = StatusCodes.Status409Conflict;
         await context.Response.WriteAsJsonAsync(new { error = ex.Message });
     }
 });
 
+// The Lab view's pages exist only in lab mode, like the endpoints they call.
+if (!server.LabMode)
+    app.Use((context, next) => context.Request.Path.StartsWithSegments("/lab") ? Results.NotFound().ExecuteAsync(context) : next(context));
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapDataHub(requireAuth: true);
-app.MapHub<LabHub>(NodeChannel.Path).RequireAuthorization();
+app.MapHub<NodeChannelHub>(NodeChannel.Path).RequireAuthorization();
 
 var api = app.MapGroup("/api");
 
+api.MapGet("/info", (CoordinatorServerOptions options) => new { labMode = options.LabMode });
 api.MapGet("/nodes", (NodeInventory inventory) => inventory.Snapshot());
 api.MapGet("/flow-matrix", (RightsStore rights) => new { groups = rights.Snapshot().Matrix });
 api.MapGet("/bricks", (BrickCatalog bricks) => bricks.List());
 
 // A brick is read by the node that owns it, never by the coordinator.
-api.MapPost("/bricks/{node}/{id}/preview", async (string node, string id, NodeInventory inventory, IHubContext<LabHub> hub, CancellationToken ct) =>
+api.MapPost("/bricks/{node}/{id}/preview", async (string node, string id, NodeInventory inventory, IHubContext<NodeChannelHub> hub, CancellationToken ct) =>
 {
     var connection = inventory.ConnectionOf(node);
     if (connection is null) return Results.Conflict(new { error = $"{node} is offline." });
@@ -86,7 +86,6 @@ api.MapPost("/bricks/{node}/{id}/preview", async (string node, string id, NodeIn
     var preview = await hub.Clients.Client(connection).InvokeAsync<BrickPreview>(NodeChannel.PreviewBrick, id, 20, bounded.Token);
     return preview.Error is null ? Results.Ok(new { csv = preview.Csv }) : Results.BadRequest(new { error = preview.Error });
 });
-api.MapGet("/pipelines", (PipelineCatalog catalog) => catalog.List());
 
 api.MapPost("/graph", (GraphRequest request) =>
 {
@@ -95,7 +94,7 @@ api.MapPost("/graph", (GraphRequest request) =>
 });
 
 // A command line becomes a job through dtpipe's own --export-job.
-api.MapPost("/pipelines/from-command", async (CommandRequest request, DtPipeCli cli, LabOptions options, CancellationToken ct) =>
+api.MapPost("/pipelines/from-command", async (CommandRequest request, DtPipeCli cli, CoordinatorServerOptions options, CancellationToken ct) =>
 {
     var dir = Path.Combine(options.StateDir, "commands", Guid.NewGuid().ToString("N"));
     Directory.CreateDirectory(dir);
@@ -106,15 +105,6 @@ api.MapPost("/pipelines/from-command", async (CommandRequest request, DtPipeCli 
         : Results.BadRequest(new { error = result.Diagnostic() });
 });
 
-api.MapPost("/plan", async (PlanRequest request, PlanBuilder planner, RightsStore rights, BrickCatalog bricks, CancellationToken ct) =>
-    rights.WithPolicies(await planner.BuildAsync(request, ct), request.Yaml, bricks));
-
-api.MapPost("/deploy", async (PlanRequest request, PlanBuilder planner, RightsStore rights, BrickCatalog bricks, DeploymentManager deployments, CancellationToken ct) =>
-{
-    var plan = rights.WithPolicies(await planner.BuildAsync(request, ct), request.Yaml, bricks);
-    await deployments.DeployAsync(plan, "lab", ct);
-    return plan;
-});
 
 api.MapGet("/state", (DeploymentManager deployments, RunJournal journal) =>
     new { plan = deployments.ActivePlan, run = deployments.CurrentRun, history = journal.List(limit: 20) });
@@ -124,16 +114,6 @@ api.MapGet("/runs/queue", (DeploymentManager deployments) => deployments.Queue);
 api.MapPost("/runs/cancel", (CancelRequest? request, DeploymentManager deployments) =>
 {
     deployments.Cancel(request?.RunId);
-    return Results.Accepted();
-});
-api.MapPost("/fragments/{name}/kill", async (string name, DeploymentManager deployments, CancellationToken ct) =>
-{
-    await deployments.KillAsync(name, ct);
-    return Results.Accepted();
-});
-api.MapPost("/fragments/{name}/variant", async (string name, DeploymentManager deployments, CancellationToken ct) =>
-{
-    await deployments.DeployVariantAsync(name, ct);
     return Results.Accepted();
 });
 
@@ -147,7 +127,7 @@ api.MapDelete("/deployments/{id}", async (string id, DeploymentManager deploymen
 // The designer: cards to job and back. The page never writes YAML itself.
 api.MapPost("/design/compose", (DesignModel model, DesignService design) => design.Compose(model));
 api.MapPost("/design/decompose", (DecomposeRequest request, DesignService design) => design.Decompose(request.Yaml, request.Layout));
-api.MapPost("/design/validate", async (DesignModel model, DesignService design, DtPipeCli cli, LabOptions options, CancellationToken ct) =>
+api.MapPost("/design/validate", async (DesignModel model, DesignService design, DtPipeCli cli, CoordinatorServerOptions options, CancellationToken ct) =>
 {
     var composed = design.Compose(model);
     if (!composed.Valid) return Results.Ok(new { composed.Errors, dryRun = (string?)null, ok = false });
@@ -219,7 +199,7 @@ api.MapPost("/library/{id}/deploy", async (string id, PipelineLibrary library, R
 });
 
 // Rights: who may send what to whom. The page edits them; every change is audited and applies at once.
-api.MapGet("/rights", (RightsStore rights, NodeInventory inventory, LabOptions options) =>
+api.MapGet("/rights", (RightsStore rights, NodeInventory inventory, CoordinatorServerOptions options) =>
 {
     var doc = rights.Snapshot();
     var online = inventory.Snapshot().Where(n => n.Online).Select(n => n.Name).ToHashSet();
@@ -251,8 +231,8 @@ api.MapPut("/rights/bricks/{node}/{id}", (string node, string id, PolicyRequest 
 });
 api.MapPost("/rights/identities", (IdentityRequest request, RightsStore rights, EventBus bus) =>
 {
-    if (!PipelineLibrary.IsValidId(request.ClientId)) throw new LabConflictException($"'{request.ClientId}' is not a client id: lowercase letters, digits and '-'.");
-    if (string.IsNullOrWhiteSpace(request.Group)) throw new LabConflictException("An identity belongs to one group.");
+    if (!PipelineLibrary.IsValidId(request.ClientId)) throw new ConflictException($"'{request.ClientId}' is not a client id: lowercase letters, digits and '-'.");
+    if (string.IsNullOrWhiteSpace(request.Group)) throw new ConflictException("An identity belongs to one group.");
     rights.AddIdentity(new Identity(request.ClientId, request.DisplayName ?? request.ClientId, request.Group.Trim(),
         string.IsNullOrWhiteSpace(request.Node) ? null : request.Node.Trim(), request.Enabled ?? true));
     bus.Publish("rights", new { });
@@ -260,7 +240,7 @@ api.MapPost("/rights/identities", (IdentityRequest request, RightsStore rights, 
 });
 api.MapPut("/rights/identities/{id}", (string id, IdentityRequest request, RightsStore rights, EventBus bus) =>
 {
-    if (string.IsNullOrWhiteSpace(request.Group)) throw new LabConflictException("An identity belongs to one group.");
+    if (string.IsNullOrWhiteSpace(request.Group)) throw new ConflictException("An identity belongs to one group.");
     rights.UpdateIdentity(id, request.DisplayName ?? id, request.Group.Trim(), request.Node, request.Enabled ?? true);
     bus.Publish("rights", new { });
     return Results.Ok();
@@ -278,20 +258,8 @@ api.MapDelete("/rights/identities/{id}", (string id, RightsStore rights, NodeInv
 api.MapPost("/rights/identities/{id}/reconnect", (string id, NodeInventory inventory) =>
     Results.Ok(new { disconnected = inventory.Disconnect(id) }));
 
-// Reads a node's database through dtpipe, to show what a run wrote. Single-machine shortcut: the
-// coordinator opens the node's file directly.
-api.MapPost("/query", async (QueryRequest request, NodeInventory inventory, DtPipeCli cli, LabOptions options, CancellationToken ct) =>
-{
-    var dataset = inventory.Snapshot().SelectMany(n => n.Datasets).FirstOrDefault(d => d.Variable == request.Variable);
-    if (dataset is null) return Results.BadRequest(new { error = $"No node hosts {request.Variable}." });
-    Directory.CreateDirectory(options.StateDir);
-    var result = await cli.RunAsync(
-        ["--input", $"{dataset.Engine}:{dataset.Path}", "--query", request.Sql, "--limit", "200", "--output", "csv:-", "--no-stats"],
-        options.StateDir, TimeSpan.FromSeconds(30), ct);
-    return result.Succeeded
-        ? Results.Ok(new { csv = result.Stdout })
-        : Results.BadRequest(new { error = result.Diagnostic() });
-});
+
+if (server.LabMode) api.MapLabMode();
 
 api.MapGet("/events", async (HttpContext context, EventBus bus, NodeInventory inventory, DeploymentManager deployments) =>
 {
@@ -330,4 +298,3 @@ internal sealed record DistributeRequest(bool Save = false, string? Message = nu
 internal sealed record MatrixRequest(Dictionary<string, List<string>> Matrix);
 internal sealed record PolicyRequest(List<string>? Groups);
 internal sealed record IdentityRequest(string ClientId, string? DisplayName, string Group, string? Node, bool? Enabled);
-internal sealed record QueryRequest(string Variable, string Sql);

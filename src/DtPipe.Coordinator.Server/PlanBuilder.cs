@@ -5,7 +5,7 @@ using DtPipe.Coordinator.Contracts;
 using TransportR.Interfaces;
 using YamlDotNet.RepresentationModel;
 
-namespace DtPipe.Lab.Coordinator;
+namespace DtPipe.Coordinator.Server;
 
 public sealed record CutRequest(string Branch, int At);
 
@@ -28,7 +28,7 @@ public sealed record PlannedEdge(
     string ProducerFragment, string ProducerAlias, string ConsumerFragment, string ConsumerAlias,
     string ProducerGroup, string ConsumerGroup, bool Allowed);
 
-public sealed record LabPlan(
+public sealed record DistributionPlan(
     string Id, string PipelineId, IReadOnlyList<CutRequest> Cuts, IReadOnlyList<UnitView> Units,
     IReadOnlyList<PlannedFragment> Fragments, IReadOnlyList<PlannedEdge> Edges,
     IReadOnlyList<string> Errors, IReadOnlyList<string> Warnings, string? FlowRejection)
@@ -39,15 +39,15 @@ public sealed record LabPlan(
 /// <summary>
 /// Turns one monolithic job, a set of cuts and a placement into one fragment per node.
 /// <para>
-/// A cut inside a branch is <c>dtpipe split</c>'s: the lab runs it and keeps both halves as
+/// A cut inside a branch is <c>dtpipe split</c>'s: the planner runs it and keeps both halves as
 /// written, so where each option lands stays dtpipe's decision. Only the regrouping of whole
-/// branches is the lab's own: a <c>from</c>/<c>ref</c> dependency that crosses two nodes becomes an
+/// branches is the planner's own: a <c>from</c>/<c>ref</c> dependency that crosses two nodes becomes an
 /// <c>arrow:-</c> input branch on the consumer's side and an <c>arrow:-</c> output on the
 /// producer's - the shape <c>dtpipe split</c> itself gives a cut. It never edits an option.
 /// </para>
 /// </summary>
 public sealed class PlanBuilder(
-    LabOptions options, DtPipeCli cli, NodeInventory inventory, IPlanRegistry planRegistry, IFlowControlService flowControl)
+    CoordinatorServerOptions options, DtPipeCli cli, NodeInventory inventory, IPlanRegistry planRegistry, IFlowControlService flowControl)
 {
     private const string ArrowEndpoint = "arrow:-";
     private static readonly TimeSpan SplitTimeout = TimeSpan.FromSeconds(90);
@@ -76,14 +76,14 @@ public sealed class PlanBuilder(
         public YamlMappingNode Branch(string key) => Owned.First(b => b.Key == key).Branch;
     }
 
-    public async Task<LabPlan> BuildAsync(PlanRequest request, CancellationToken ct)
+    public async Task<DistributionPlan> BuildAsync(PlanRequest request, CancellationToken ct)
     {
         var planId = $"{DateTime.UtcNow:HHmmss}-{Guid.NewGuid().ToString("N")[..6]}";
         var pipelineId = Sanitize(request.PipelineId);
         var cuts = request.Cuts ?? [];
         var errors = new List<string>();
         var warnings = new List<string>();
-        LabPlan Result(IReadOnlyList<UnitView> units, IReadOnlyList<PlannedFragment>? fragments = null,
+        DistributionPlan Result(IReadOnlyList<UnitView> units, IReadOnlyList<PlannedFragment>? fragments = null,
             IReadOnlyList<PlannedEdge>? edges = null, string? flowRejection = null) =>
             new(planId, pipelineId, cuts, units, fragments ?? [], edges ?? [], errors, warnings, flowRejection);
 
@@ -208,7 +208,7 @@ public sealed class PlanBuilder(
 
         if (errors.Count > 0) return Result(unitViews);
 
-        // 4. Assemble, then check what the lab can check before anything is deployed.
+        // 4. Assemble, then check what the planner can check before anything is deployed.
         var fragments = new List<PlannedFragment>();
         foreach (var draft in drafts.Values.OrderBy(d => d.Node, StringComparer.Ordinal))
         {
@@ -267,7 +267,7 @@ public sealed class PlanBuilder(
             var branches = JobYaml.Branches(JobYaml.Parse(current)).ToDictionary(b => b.Alias, b => b.Branch, StringComparer.Ordinal);
             if (heads.ContainsKey(cut.Branch))
             {
-                errors.Add($"'{cut.Branch}' is cut more than once; the lab keeps one cut per branch.");
+                errors.Add($"'{cut.Branch}' is cut more than once; the planner keeps one cut per branch.");
                 return null;
             }
             if (!branches.TryGetValue(cut.Branch, out var branch) || !JobGraph.Describe(cut.Branch, branch).Cuttable)

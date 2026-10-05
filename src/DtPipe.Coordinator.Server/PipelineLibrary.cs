@@ -6,10 +6,10 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
-namespace DtPipe.Lab.Coordinator;
+namespace DtPipe.Coordinator.Server;
 
 /// <summary>A distributed plan as the library keeps it, with the hash of the job it was computed from.</summary>
-public sealed record SavedPlan(string PipelineSha, DateTimeOffset SavedAt, LabPlan Plan);
+public sealed record SavedPlan(string PipelineSha, DateTimeOffset SavedAt, DistributionPlan Plan);
 
 public sealed record LibraryEntry(
     string Id, string Title, string? Description, string? Commit, DateTimeOffset? UpdatedAt, string? Message,
@@ -20,7 +20,7 @@ public sealed record LibraryDocument(string Id, string Yaml, JsonObject? Layout,
 public sealed record LibraryCommit(string Hash, DateTimeOffset Date, string Message);
 
 /// <summary>
-/// The pipelines people keep, in a git repository of their own under <c>.state/library</c>, driven
+/// The pipelines people keep, in a git repository of their own under <c>library/</c> in the state directory, driven
 /// through the <c>git</c> command line. One directory per pipeline: <c>pipeline.yaml</c> (the
 /// logical job, runnable whole), <c>layout.json</c> (where the designer drew each card) and
 /// <c>distributed/</c> (the last plan saved, with each fragment's job). Every save is a commit.
@@ -35,14 +35,14 @@ public sealed partial class PipelineLibrary
     };
 
     private readonly string _root;
-    private readonly string _seedDir;
+    private readonly string? _seedDir;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private bool _ready;
 
-    public PipelineLibrary(LabOptions options)
+    public PipelineLibrary(CoordinatorServerOptions options)
     {
         _root = Path.Combine(options.StateDir, "library");
-        _seedDir = Path.Combine(options.LabRoot, "library-seed");
+        _seedDir = options.LibrarySeed;
     }
 
     public async Task<IReadOnlyList<LibraryEntry>> ListAsync(CancellationToken ct) => await Locked(async () =>
@@ -87,11 +87,11 @@ public sealed partial class PipelineLibrary
         return await CommitAsync($"pipelines/{id}", Message(message, $"Save {id}"), ct);
     }, ct);
 
-    public async Task<string?> SavePlanAsync(string id, LabPlan plan, string message, CancellationToken ct) => await Locked(async () =>
+    public async Task<string?> SavePlanAsync(string id, DistributionPlan plan, string message, CancellationToken ct) => await Locked(async () =>
     {
         var dir = PipelineDir(id);
         var yamlPath = Path.Combine(dir, "pipeline.yaml");
-        if (!File.Exists(yamlPath)) throw new LabConflictException($"'{id}' is not in the library.");
+        if (!File.Exists(yamlPath)) throw new ConflictException($"'{id}' is not in the library.");
         var distributed = Path.Combine(dir, "distributed");
         if (Directory.Exists(distributed)) Directory.Delete(distributed, recursive: true);
         Directory.CreateDirectory(distributed);
@@ -105,7 +105,7 @@ public sealed partial class PipelineLibrary
     public async Task DeleteAsync(string id, CancellationToken ct) => await Locked(async () =>
     {
         var dir = PipelineDir(id);
-        if (!Directory.Exists(dir)) throw new LabConflictException($"'{id}' is not in the library.");
+        if (!Directory.Exists(dir)) throw new ConflictException($"'{id}' is not in the library.");
         Directory.Delete(dir, recursive: true);
         await CommitAsync($"pipelines/{id}", $"Delete {id}", ct);
         return true;
@@ -117,7 +117,7 @@ public sealed partial class PipelineLibrary
     /// <summary>The job, its layout and the change a commit made to the pipeline's directory.</summary>
     public async Task<(string Yaml, JsonObject? Layout, string Diff)> AtAsync(string id, string commit, CancellationToken ct) => await Locked(async () =>
     {
-        if (!CommitPattern().IsMatch(commit)) throw new LabConflictException($"'{commit}' is not a commit.");
+        if (!CommitPattern().IsMatch(commit)) throw new ConflictException($"'{commit}' is not a commit.");
         var yaml = await GitAsync(["show", $"{commit}:pipelines/{id}/pipeline.yaml"], ct);
         var layout = await TryGitAsync(["show", $"{commit}:pipelines/{id}/layout.json"], ct);
         var diff = await GitAsync(["show", "--format=", commit, "--", $"pipelines/{id}"], ct);
@@ -171,20 +171,22 @@ public sealed partial class PipelineLibrary
         {
             Directory.CreateDirectory(_root);
             await GitAsync(["init", "-q", "-b", "main"], ct);
-            foreach (var seed in Directory.Exists(_seedDir) ? Directory.GetFiles(_seedDir, "*.yaml") : [])
+            var seeds = _seedDir is not null && Directory.Exists(_seedDir) ? Directory.GetFiles(_seedDir, "*.yaml") : [];
+            foreach (var seed in seeds)
             {
                 var dir = PipelineDir(Path.GetFileNameWithoutExtension(seed));
                 Directory.CreateDirectory(dir);
                 File.Copy(seed, Path.Combine(dir, "pipeline.yaml"));
             }
-            await CommitAsync("pipelines", "Start the library from library-seed/", ct);
+            // An empty library has nothing to commit: its first save is its first commit.
+            if (seeds.Length > 0) await CommitAsync("pipelines", $"Start the library from {Path.GetFileName(_seedDir)}/", ct);
         }
         _ready = true;
     }
 
     private string PipelineDir(string id)
     {
-        if (!IdPattern().IsMatch(id)) throw new LabConflictException($"'{id}' is not a pipeline id: lowercase letters, digits and '-'.");
+        if (!IdPattern().IsMatch(id)) throw new ConflictException($"'{id}' is not a pipeline id: lowercase letters, digits and '-'.");
         return Path.Combine(_root, "pipelines", id);
     }
 
@@ -211,8 +213,8 @@ public sealed partial class PipelineLibrary
             RedirectStandardError = true,
             UseShellExecute = false,
         };
-        // A fixed identity, and nothing from the dtpipe repository that encloses .state/.
-        foreach (var arg in new[] { "-c", "user.name=lab", "-c", "user.email=lab@localhost", "-c", "commit.gpgsign=false", "-c", "core.quotepath=false" })
+        // A fixed identity, and nothing from any repository that encloses the state directory.
+        foreach (var arg in new[] { "-c", "user.name=dtpipe-coordinator", "-c", "user.email=coordinator@localhost", "-c", "commit.gpgsign=false", "-c", "core.quotepath=false" })
             psi.ArgumentList.Add(arg);
         foreach (var arg in args) psi.ArgumentList.Add(arg);
         psi.Environment.Remove("GIT_DIR");

@@ -36,7 +36,7 @@ def page_errors(browser):
 
 def lab_view(browser):
     catalog = json.load(urllib.request.urlopen(URL + "/api/pipelines"))
-    browser.goto(URL + "/lab.html", 1)
+    browser.goto(URL + "/lab/", 1)
     for entry in catalog:
         pid = json.dumps(entry["id"])
         browser.js(f"{{ const s = document.getElementById('pipeline-select'); s.value = {pid};"

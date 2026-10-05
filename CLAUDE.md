@@ -8,7 +8,7 @@ Every rule that must hold is stated here. Each area also has a nested `CLAUDE.md
 you need when editing it, loaded when you read a file under it: `src/DtPipe/`, `src/DtPipe.Core/`,
 `src/DtPipe.Transformers/`, `src/DtPipe.Adapters/`, `src/DtPipe.Adapters.Shared/`,
 `src/DtPipe.Processors/`, `src/Apache.Arrow.Serialization/`, `src/DtPipe.Coordinator/`,
-`src/DtPipe.PipelineNode/`, `src/DtPipe.PipelineNode.Hosting/`.
+`src/DtPipe.PipelineNode/`, `src/DtPipe.PipelineNode.Hosting/`, `src/DtPipe.Coordinator.Server/`.
 
 Each rule ends with its guard: `[CI: check]`, `[local: check]` (runs only when someone runs it), or
 `[unchecked]` (this file is the only defence).
@@ -138,6 +138,7 @@ example to make it checked]`
 | `src/Apache.Arrow.Serialization` | Standalone CLR↔Arrow type map + POCO serializer |
 | `src/DtPipe.Coordinator` | Central hub of a distributed pipeline: the control plane over TransportR |
 | `src/DtPipe.PipelineNode` | Runs one distributed-pipeline fragment under the coordinator's control |
+| `src/DtPipe.Coordinator.Server` | The coordinator's server: API, pages, planner, library, rights; lab mode for benches |
 | `src/DtPipe.Coordinator.Contracts` | Node channel messages, `JobYaml`, `BrickRules`: what coordinator and nodes share |
 | `src/DtPipe.PipelineNode.Hosting` | `AddDtPipeNode`: makes any .NET host a node (bricks, fragments, tokens) |
 | `src/DtPipe.PipelineNode.Runner` | The official runner: a node that hosts no data and runs any fragment |

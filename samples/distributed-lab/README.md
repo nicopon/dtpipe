@@ -11,9 +11,11 @@ it in a git-backed **library**, places every brick on its node and every other s
 runner, deploys the fragments and runs them, live. A second page, the **Lab view**, cuts and
 places a job by hand and injects faults.
 
-The lab **uses** dtpipe and changes nothing in it. It drives the `dtpipe` binary like a user
-(`split`, `--export-job`, `--job`) and hosts `DtPipe.Coordinator` and `DtPipe.PipelineNode` as
-libraries, exactly as their own tests do. It sits outside `DtPipe.sln`: CI never builds it.
+The lab **uses** dtpipe and changes nothing in it. Its coordinator is the product's server,
+`src/DtPipe.Coordinator.Server`, run in **lab mode** (the Lab view, fault injection and the query
+panel exist only then); its runner is the official `DtPipe.PipelineNode.Runner`; its data nodes are
+disposable hosts of `DtPipe.PipelineNode.Hosting`. They drive the `dtpipe` binary like a user
+(`split`, `--export-job`, `--job`). None of it is in `DtPipe.sln`: `build.yml` never builds it.
 
 ## Quick start
 
@@ -25,7 +27,7 @@ built binary:
 ./build.sh                          # at the repository root: produces dist/release/dtpipe
 cd samples/distributed-lab
 ./lab.sh up                         # build, seed the four databases, start everything
-open http://127.0.0.1:5180          # the coordinator's page; the Lab view is /lab.html
+open http://127.0.0.1:5180          # the coordinator's page; the Lab view is /lab/
 ./lab.sh smoke                      # every pipeline, distributed, against its witness
 ./lab.sh down
 ```
@@ -163,7 +165,7 @@ save and each saved plan is a commit. Several pipelines may be deployed at once;
 in one queue, since the coordinator runs one at a time. Finished runs are kept in `.state/runs/`.
 
 
-## Lab view scenarios (`/lab.html`)
+## Lab view scenarios (`/lab/`)
 
 | Pipeline | Shows | Try |
 |---|---|---|
@@ -183,7 +185,7 @@ between the witness and the lab's warehouse.
 ## How it works
 
 ```
- browser ──HTTP / SSE──▶ Lab.Coordinator :5180
+ browser ──HTTP / SSE──▶ DtPipe.Coordinator.Server :5180 (lab mode)
                           ├─ AddCoordinatorHub()  TransportR hub: registry, admission, runs, bytes
                           ├─ /node-channel        the control channel to the node hosts
                           ├─ /api                 bricks, design, library, plan, deploy, runs, events

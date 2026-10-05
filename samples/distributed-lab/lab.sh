@@ -37,7 +37,8 @@ build() {
     echo "Building the lab"
     dotnet build "$LAB/Lab.Idp/Lab.Idp.csproj" -c Release -o "$STATE/bin/idp" -v q -nologo >"$STATE/logs/build.log" 2>&1 \
         || { cat "$STATE/logs/build.log" >&2; exit 1; }
-    dotnet build "$LAB/Lab.Coordinator/Lab.Coordinator.csproj" -c Release -o "$STATE/bin/coordinator" -v q -nologo >>"$STATE/logs/build.log" 2>&1 \
+    # Published, not built: the server serves the wwwroot published beside it.
+    dotnet publish "$REPO/src/DtPipe.Coordinator.Server/DtPipe.Coordinator.Server.csproj" -c Release -o "$STATE/bin/coordinator" -v q -nologo >>"$STATE/logs/build.log" 2>&1 \
         || { cat "$STATE/logs/build.log" >&2; exit 1; }
     dotnet build "$LAB/Lab.NodeHost/Lab.NodeHost.csproj" -c Release -o "$STATE/bin/node" -v q -nologo >>"$STATE/logs/build.log" 2>&1 \
         || { cat "$STATE/logs/build.log" >&2; exit 1; }
@@ -72,6 +73,15 @@ start_idp() {
         sleep 0.5
     done
     echo "The IdP did not come up; see $STATE/logs/idp.log" >&2; exit 1
+}
+
+# Replaces this shell with the coordinator's server, in lab mode, on the lab's state and seeds. Extra
+# arguments are passed on. The one way the server starts, for this script and for tools/campaign.py.
+exec_coordinator() {
+    exec dotnet "$STATE/bin/coordinator/DtPipe.Coordinator.Server.dll" --urls "$URL" \
+        --Coordinator:StateDirectory="$STATE" --Coordinator:DtPipe="$DTPIPE" --Coordinator:Authority="$IDP_URL" \
+        --Coordinator:LabMode=true --Coordinator:Scenarios="$LAB/pipelines" \
+        --Coordinator:LibrarySeed="$LAB/library-seed" --Coordinator:RightsSeed="$LAB/rights-seed.json" "$@"
 }
 
 # Replaces this shell with node $1's host, pointed at the coordinator $2: the official runner for a
@@ -112,8 +122,7 @@ up() {
 
     echo "Starting"
     start_idp
-    start coordinator dotnet "$STATE/bin/coordinator/Lab.Coordinator.dll" \
-        --urls "$URL" --lab-root "$LAB" --state "$STATE" --dtpipe "$DTPIPE" --authority "$IDP_URL"
+    start coordinator "$LAB/lab.sh" exec-coordinator
 
     for _ in $(seq 1 60); do
         curl -fs "$URL/api/nodes" >/dev/null 2>&1 && break
@@ -218,6 +227,7 @@ case "${1:-}" in
     seed) mkdir -p "$STATE"; seed ;;
     nodes) shift; nodes_mode "${1:-}" ;;
     exec-node) shift; exec_node "$@" ;;
+    exec-coordinator) shift; exec_coordinator "$@" ;;
     idp) shift; mkdir -p "$STATE/logs" "$STATE/run"; start_idp "$@" ;;
     smoke) shift; smoke "$@" ;;
     ui) python3 "$LAB/tools/ui_check.py" "$URL" "$STATE/ui" ;;

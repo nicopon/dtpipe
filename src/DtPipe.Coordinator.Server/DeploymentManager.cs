@@ -4,10 +4,10 @@ using DtPipe.Coordinator.Contracts;
 using Microsoft.AspNetCore.SignalR;
 using TransportR.Interfaces;
 
-namespace DtPipe.Lab.Coordinator;
+namespace DtPipe.Coordinator.Server;
 
-/// <summary>A request the lab refuses in its current state (HTTP 409).</summary>
-public sealed class LabConflictException(string message) : Exception(message);
+/// <summary>A request the server refuses in its current state (HTTP 409).</summary>
+public sealed class ConflictException(string message) : Exception(message);
 
 public sealed record DeployedFragment(string Name, string Node, string Version);
 
@@ -32,7 +32,7 @@ public sealed class DeploymentManager
 
     private sealed class Deployment
     {
-        public required LabPlan Plan;
+        public required DistributionPlan Plan;
         public required string Origin;
         public required DateTimeOffset DeployedAt;
         public string Generation = "";
@@ -44,7 +44,7 @@ public sealed class DeploymentManager
     private sealed record Ticket(RunView View, CancellationTokenSource Cancel);
 
     private readonly NodeInventory _inventory;
-    private readonly IHubContext<LabHub> _labHub;
+    private readonly IHubContext<NodeChannelHub> _labHub;
     private readonly IRunOrchestrator _orchestrator;
     private readonly INodeRegistry _registry;
     private readonly IFlowControlService _flowControl;
@@ -60,7 +60,7 @@ public sealed class DeploymentManager
     private string? _lastDeployed;
 
     public DeploymentManager(
-        NodeInventory inventory, IHubContext<LabHub> labHub, IRunOrchestrator orchestrator, INodeRegistry registry,
+        NodeInventory inventory, IHubContext<NodeChannelHub> labHub, IRunOrchestrator orchestrator, INodeRegistry registry,
         IFlowControlService flowControl, EventBus bus, RunJournal journal, ILogger<DeploymentManager> logger)
     {
         (_inventory, _labHub, _orchestrator, _registry, _flowControl, _bus, _journal, _logger) =
@@ -69,7 +69,7 @@ public sealed class DeploymentManager
     }
 
     /// <summary>The plan deployed last: what the Lab view shows and what a run naming no pipeline runs.</summary>
-    public LabPlan? ActivePlan
+    public DistributionPlan? ActivePlan
     {
         get { lock (_lock) return _lastDeployed is not null && _deployments.TryGetValue(_lastDeployed, out var d) ? d.Plan : null; }
     }
@@ -90,22 +90,22 @@ public sealed class DeploymentManager
         get { lock (_lock) return _deployments.Values.OrderByDescending(d => d.DeployedAt).Select(View).ToList(); }
     }
 
-    public LabPlan? PlanOf(string pipelineId)
+    public DistributionPlan? PlanOf(string pipelineId)
     {
         lock (_lock) return _deployments.GetValueOrDefault(pipelineId)?.Plan;
     }
 
-    public async Task DeployAsync(LabPlan plan, string origin, CancellationToken ct)
+    public async Task DeployAsync(DistributionPlan plan, string origin, CancellationToken ct)
     {
         if (!plan.Deployable)
-            throw new LabConflictException("This plan cannot be deployed: " +
+            throw new ConflictException("This plan cannot be deployed: " +
                 string.Join(" ", plan.Errors.Append(plan.FlowRejection ?? "").Where(s => s.Length > 0)));
         // A plan read back from the library is checked against the matrix as it is now.
         var refused = plan.Edges.Where(e => !_flowControl.CanSendTo(new HashSet<string> { e.ProducerGroup }, new HashSet<string> { e.ConsumerGroup })).ToList();
         if (refused.Count > 0)
-            throw new LabConflictException("The flow matrix refuses " + string.Join(", ", refused.Select(e => $"{e.ProducerGroup} -> {e.ConsumerGroup}")) + ".");
+            throw new ConflictException("The flow matrix refuses " + string.Join(", ", refused.Select(e => $"{e.ProducerGroup} -> {e.ConsumerGroup}")) + ".");
         var offline = plan.Fragments.Where(f => _inventory.ConnectionOf(f.Node) is null).Select(f => f.Node).Distinct().ToList();
-        if (offline.Count > 0) throw new LabConflictException($"Offline: {string.Join(", ", offline)}.");
+        if (offline.Count > 0) throw new ConflictException($"Offline: {string.Join(", ", offline)}.");
 
         Deployment? previous;
         lock (_lock)
@@ -165,7 +165,7 @@ public sealed class DeploymentManager
         Deployment deployment;
         lock (_lock)
         {
-            deployment = _deployments.GetValueOrDefault(pipelineId) ?? throw new LabConflictException($"'{pipelineId}' is not deployed.");
+            deployment = _deployments.GetValueOrDefault(pipelineId) ?? throw new ConflictException($"'{pipelineId}' is not deployed.");
             ThrowIfBusy(pipelineId);
         }
         await deployment.Gate.WaitAsync(ct);
@@ -194,9 +194,9 @@ public sealed class DeploymentManager
         Ticket ticket;
         lock (_lock)
         {
-            pipelineId ??= _lastDeployed ?? throw new LabConflictException("Deploy a plan first.");
-            var deployment = _deployments.GetValueOrDefault(pipelineId) ?? throw new LabConflictException($"'{pipelineId}' is not deployed.");
-            if (deployment.State == "failed") throw new LabConflictException($"The deployment of '{pipelineId}' failed: {deployment.Message}");
+            pipelineId ??= _lastDeployed ?? throw new ConflictException("Deploy a plan first.");
+            var deployment = _deployments.GetValueOrDefault(pipelineId) ?? throw new ConflictException($"'{pipelineId}' is not deployed.");
+            if (deployment.State == "failed") throw new ConflictException($"The deployment of '{pipelineId}' failed: {deployment.Message}");
             var now = DateTimeOffset.UtcNow;
             ticket = new Ticket(
                 new RunView(_journal.NextRunId(), deployment.Plan.Id, "queued", now, null, pins, null, null, null, pipelineId, now),
@@ -238,7 +238,7 @@ public sealed class DeploymentManager
     {
         var (deployment, fragment) = RequireFragment(fragmentName);
         lock (_lock) ThrowIfBusy(deployment.Plan.PipelineId);
-        if (deployment.Gate.CurrentCount == 0) throw new LabConflictException("Fragments are being deployed.");
+        if (deployment.Gate.CurrentCount == 0) throw new ConflictException("Fragments are being deployed.");
         var yaml = fragment.Yaml + $"# variant {Guid.NewGuid():N}\n";
         await SendAsync(fragment.Node, NodeChannel.Deploy,
             new FragmentDeployment(fragment.Name, yaml, fragment.Edges, NewGeneration(), Instance: "variant"), ct);
@@ -275,10 +275,10 @@ public sealed class DeploymentManager
         var gated = false;
         try
         {
-            if (deployment is null) throw new LabConflictException($"'{pipelineId}' is no longer deployed.");
+            if (deployment is null) throw new ConflictException($"'{pipelineId}' is no longer deployed.");
             await deployment.Gate.WaitAsync(ticket.Cancel.Token);
             gated = true;
-            if (deployment.State != "ready") throw new LabConflictException($"'{pipelineId}' is not ready: {deployment.State} {deployment.Message}".Trim());
+            if (deployment.State != "ready") throw new ConflictException($"'{pipelineId}' is not ready: {deployment.State} {deployment.Message}".Trim());
         }
         catch (Exception ex)
         {
@@ -352,7 +352,7 @@ public sealed class DeploymentManager
             deployment.Generation = generation;
             foreach (var fragment in deployment.Plan.Fragments)
             {
-                var connection = _inventory.ConnectionOf(fragment.Node) ?? throw new LabConflictException($"{fragment.Node} is offline.");
+                var connection = _inventory.ConnectionOf(fragment.Node) ?? throw new ConflictException($"{fragment.Node} is offline.");
                 await _labHub.Clients.Client(connection).SendAsync(NodeChannel.Rearm, fragment.Name, generation);
             }
             await WaitRegisteredAsync(deployment, CancellationToken.None);
@@ -398,12 +398,12 @@ public sealed class DeploymentManager
                 var failed = _inventory.Reported(fragment.Name)
                     .FirstOrDefault(s => s.Instance == "main" && s.State == FragmentState.Failed && s.Generation == deployment.Generation);
                 if (failed is not null)
-                    throw new LabConflictException($"{fragment.Name} was not registered: {failed.Message}");
+                    throw new ConflictException($"{fragment.Name} was not registered: {failed.Message}");
             }
             var missing = deployment.Plan.Fragments.Where(f => !Ready(f)).Select(f => f.Name).ToList();
             if (missing.Count == 0) return;
             if (DateTime.UtcNow > deadline)
-                throw new LabConflictException($"Not registered with the coordinator in time: {string.Join(", ", missing)}.");
+                throw new ConflictException($"Not registered with the coordinator in time: {string.Join(", ", missing)}.");
             await Task.Delay(100, ct);
         }
     }
@@ -411,7 +411,7 @@ public sealed class DeploymentManager
     private void ThrowIfBusy(string pipelineId)
     {
         if (_current?.View.PipelineId == pipelineId || _queued.Any(t => t.View.PipelineId == pipelineId))
-            throw new LabConflictException($"A run of '{pipelineId}' is queued or in flight.");
+            throw new ConflictException($"A run of '{pipelineId}' is queued or in flight.");
     }
 
     private (Deployment Deployment, PlannedFragment Fragment) RequireFragment(string fragmentName)
@@ -422,7 +422,7 @@ public sealed class DeploymentManager
                 if (deployment.Plan.Fragments.FirstOrDefault(f => f.Name == fragmentName) is { } fragment)
                     return (deployment, fragment);
         }
-        throw new LabConflictException($"'{fragmentName}' is not a fragment of a deployed plan.");
+        throw new ConflictException($"'{fragmentName}' is not a fragment of a deployed plan.");
     }
 
     private DeploymentView View(Deployment d) => new(
@@ -441,7 +441,7 @@ public sealed class DeploymentManager
 
     private Task SendAsync(string node, string method, object argument, CancellationToken ct)
     {
-        var connection = _inventory.ConnectionOf(node) ?? throw new LabConflictException($"{node} is offline.");
+        var connection = _inventory.ConnectionOf(node) ?? throw new ConflictException($"{node} is offline.");
         return _labHub.Clients.Client(connection).SendAsync(method, argument, ct);
     }
 }

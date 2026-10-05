@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 using DtPipe.Coordinator.Contracts;
 using YamlDotNet.RepresentationModel;
 
-namespace DtPipe.Lab.Coordinator;
+namespace DtPipe.Coordinator.Server;
 
 /// <summary>
 /// One brick as the page sees it. <see cref="Key"/> is <c>node/id</c>; <see cref="Version"/> hashes

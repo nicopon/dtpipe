@@ -11,6 +11,7 @@ export const store = {
   logs: [],
   bytes: { total: 0, activeTransfers: 0 },
   connected: false,
+  labMode: false, // the server's own word: the Lab view and the query panel exist only then
   draft: null,       // { id, model }: a pipeline imported but not saved yet, handed to the designer
 };
 
@@ -126,10 +127,10 @@ function onRun(run) {
 }
 
 export async function start() {
-  const [nodes, bricks, matrix, deployments, runs, queue] = await Promise.all([
-    api("/api/nodes"), api("/api/bricks"), api("/api/flow-matrix"), api("/api/deployments"), api("/api/runs"), api("/api/runs/queue"),
+  const [info, nodes, bricks, matrix, deployments, runs, queue] = await Promise.all([
+    api("/api/info"), api("/api/nodes"), api("/api/bricks"), api("/api/flow-matrix"), api("/api/deployments"), api("/api/runs"), api("/api/runs/queue"),
   ]);
-  Object.assign(store, { nodes, bricks, matrix: matrix.groups, deployments, runs, queue });
+  Object.assign(store, { labMode: info.labMode, nodes, bricks, matrix: matrix.groups, deployments, runs, queue });
   emit("all");
   // ?static renders once without the live stream (a headless browser waits on it forever).
   if (new URLSearchParams(location.search).has("static")) return;

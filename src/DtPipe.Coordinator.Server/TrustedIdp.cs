@@ -5,7 +5,7 @@ using TransportR.Identity;
 using TransportR.Interfaces;
 using TransportR.Models;
 
-namespace DtPipe.Lab.Coordinator;
+namespace DtPipe.Coordinator.Server;
 
 /// <summary>
 /// The coordinator trusts an external OpenID Connect provider to say <b>who</b> a caller is, and
@@ -15,14 +15,14 @@ namespace DtPipe.Lab.Coordinator;
 /// </summary>
 public static class TrustedIdp
 {
-    public static void AddTrustedIdp(this IServiceCollection services, LabOptions lab)
+    public static void AddTrustedIdp(this IServiceCollection services, CoordinatorServerOptions server)
     {
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(o =>
         {
-            o.Authority = lab.Authority;
-            o.Audience = lab.Audience;
+            o.Authority = server.Authority;
+            o.Audience = server.Audience;
             // A test provider on plain HTTP; a real deployment points Authority at an HTTPS issuer.
-            o.RequireHttpsMetadata = lab.Authority.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+            o.RequireHttpsMetadata = server.Authority.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
             o.MapInboundClaims = false;
             o.TokenValidationParameters = new TokenValidationParameters { NameClaimType = "sub" };
             // The node channel is SignalR, which may carry its token as the access_token query.

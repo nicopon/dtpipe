@@ -1,7 +1,7 @@
-namespace DtPipe.Lab.Coordinator;
+namespace DtPipe.Coordinator.Server;
 
 /// <summary>
-/// A catalog job, with the layout the lab proposes for it: <see cref="Cuts"/> and
+/// A scenario of the Lab view, with the layout it proposes: <see cref="Cuts"/> and
 /// <see cref="Placement"/> preload the page, the user changes them freely.
 /// </summary>
 public sealed record CatalogEntry(
@@ -9,12 +9,13 @@ public sealed record CatalogEntry(
     IReadOnlyList<CutRequest> Cuts, IReadOnlyDictionary<string, string> Placement);
 
 /// <summary>
-/// The monolithic jobs under <c>pipelines/</c>. A file's leading <c>#</c> comment lines give its
-/// title (the first) and description (the rest); dtpipe reads past them. Directives among them are
-/// the lab's: <c># lab-cut: branch@stage, ...</c> and <c># lab-place: unit=node, ...</c> preload the
-/// page; <c># lab-check: &lt;SQL&gt;</c> is the query <c>smoke.py</c> compares against the witness.
+/// The Lab view's scenarios: the monolithic jobs in <see cref="CoordinatorServerOptions.Scenarios"/>,
+/// read in lab mode only. A file's leading <c>#</c> comment lines give its title (the first) and
+/// description (the rest); dtpipe reads past them. Directives among them preload the page
+/// (<c># lab-cut: branch@stage, ...</c>, <c># lab-place: unit=node, ...</c>), and
+/// <c># lab-check: &lt;SQL&gt;</c> names the query a test compares between a run and its witness.
 /// </summary>
-public sealed class PipelineCatalog(LabOptions options)
+public sealed class PipelineCatalog(CoordinatorServerOptions options)
 {
     private const string CutDirective = "lab-cut:";
     private const string PlaceDirective = "lab-place:";
@@ -22,8 +23,8 @@ public sealed class PipelineCatalog(LabOptions options)
 
     public IReadOnlyList<CatalogEntry> List()
     {
-        var dir = Path.Combine(options.LabRoot, "pipelines");
-        if (!Directory.Exists(dir)) return [];
+        var dir = options.Scenarios;
+        if (!options.LabMode || dir is null || !Directory.Exists(dir)) return [];
         return Directory.GetFiles(dir, "*.yaml").Order(StringComparer.Ordinal).Select(Load).ToList();
     }
 

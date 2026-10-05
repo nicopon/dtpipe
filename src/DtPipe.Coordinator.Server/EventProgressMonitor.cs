@@ -1,14 +1,14 @@
 using DtPipe.Coordinator;
 using TransportR.Interfaces;
 
-namespace DtPipe.Lab.Coordinator;
+namespace DtPipe.Coordinator.Server;
 
 /// <summary>
 /// Takes the place of the coordinator's progress monitor, keeps its logging by delegating to it,
 /// and publishes the bytes crossing the hub at most four times a second. TransportR reports bytes
 /// without a transfer id, so the figure is the hub's total, not a per-edge one.
 /// </summary>
-public sealed class LabProgressMonitor(LoggingHubProgressMonitor inner, EventBus bus) : IHubProgressMonitor
+public sealed class EventProgressMonitor(LoggingHubProgressMonitor inner, EventBus bus) : IHubProgressMonitor
 {
     private long _bytes;
     private int _activeTransfers;

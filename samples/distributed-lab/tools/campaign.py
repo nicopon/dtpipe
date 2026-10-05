@@ -405,9 +405,8 @@ def stop_start_coordinator(*extra):
     os.kill(pid_of("coordinator"), signal.SIGKILL)
     time.sleep(2)
     log = open(os.path.join(STATE, "logs", "coordinator.log"), "a")
-    p = subprocess.Popen(["dotnet", os.path.join(STATE, "bin", "coordinator", "Lab.Coordinator.dll"), "--urls", URL,
-                          "--lab-root", LAB, "--state", STATE, "--dtpipe", DTPIPE, "--authority", IDP_URL, *extra],
-                         stdout=log, stderr=log, start_new_session=True)
+    p = subprocess.Popen([os.path.join(LAB, "lab.sh"), "exec-coordinator", *extra],
+                         env=os.environ | {"DTPIPE": DTPIPE}, stdout=log, stderr=log, start_new_session=True)
     with open(os.path.join(STATE, "run", "coordinator.pid"), "w") as f:
         f.write(str(p.pid))
 
