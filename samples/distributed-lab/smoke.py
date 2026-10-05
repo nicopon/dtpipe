@@ -346,11 +346,18 @@ def rights_pass():
             "service token GET /api/nodes": (raw("/api/nodes", {"Authorization": "Bearer " + service_token()}), 401),
             "anonymous node channel": (raw("/node-channel/negotiate?negotiateVersion=1", method="POST", data=b""), 401),
             "admin POST without CSRF header": (raw_session("/api/runs/cancel", b"{}"), 403),
+            # A person's session never reaches the data plane: only a service's token opens it.
+            "admin session on the node channel": (raw_session("/node-channel/negotiate?negotiateVersion=1", b""), 401),
+            "admin session on TransportR's hub": (raw_session("/hub/command/negotiate?negotiateVersion=1", b""), 401),
+            "admin session on a stream": (raw_session(f"/api/stream/{STREAM}/send", b""), 401),
+            "anonymous stream": (raw(f"/api/stream/{STREAM}/send", data=b"", method="POST"), 401),
         }
         wrong = {k: v for k, v in expected.items() if v[0] != v[1]}
         if wrong:
             raise RuntimeError("; ".join(f"{k}: {got} (expected {want})" for k, (got, want) in wrong.items()))
-        return f"{len(expected)} access rules hold: reader, designer, admin, no role, anonymous, service token, CSRF"
+        return f"{len(expected)} access rules hold: reader, designer, admin, no role, anonymous, service token, CSRF, data plane"
+
+    STREAM = "00000000-0000-0000-0000-000000000000"
 
     def service_token():
         form = urllib.parse.urlencode({"grant_type": "client_credentials", "client_id": "node-1", "client_secret": "node-1-lab-secret"}).encode()

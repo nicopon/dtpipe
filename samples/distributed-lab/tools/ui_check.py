@@ -2,6 +2,8 @@
 """Drives the lab's pages in headless Chrome and checks what they render, with no page error.
 Writes one screenshot per step.
 
+  0. Sign in: the coordinator's page sends the browser to the IdP's form, filled and submitted as
+     the lab's admin, and comes back naming them with the admin role.
   1. Lab view: every catalog pipeline selected in turn, its graph and plan drawn.
   2. Coordinator: each view rendered (nodes, library, designer, distribution, runs, access).
   3. Designer scenario: a pipeline built with the mouse from the palette - a source brick, a
@@ -16,13 +18,13 @@ import json, os, sys, time, urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cdp import Browser
-from lab_session import Session
+from lab_session import ADMIN, Session
 
 URL = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:5180").rstrip("/")
 OUT = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(__file__), "..", ".state", "ui")
 os.makedirs(OUT, exist_ok=True)
 failed = False
-# Signed in as the lab's admin through the IdP; the browser is handed the same session cookie.
+# The tool's own calls sign in through the IdP; the browser signs in through the IdP's form.
 SESSION = Session(URL)
 
 
@@ -148,10 +150,21 @@ def designer_scenario(browser):
     report(wiring and composed and validated and not errors, "designer scenario", detail, shot)
 
 
+def sign_in(browser):
+    browser.goto(URL + "/", 2)
+    on_form = browser.wait_for("!!document.querySelector('form input[name=password]')", 20)
+    if on_form:
+        browser.js(f"(() => {{ const f = document.querySelector('form'); f.user.value = {json.dumps(ADMIN)};"
+                   f" f.password.value = {json.dumps(ADMIN + 'pwd')}; f.submit(); }})()")
+    back = browser.wait_for(f"location.origin === {json.dumps(URL)} && (document.getElementById('me')?.textContent || '').includes('admin')", 30)
+    who = browser.js("document.getElementById('me')?.textContent || location.href")
+    shot = browser.shot(os.path.join(OUT, "sign-in.png"))
+    report(on_form and back and not page_errors(browser), "sign in through the IdP", who, shot)
+
+
 browser = Browser(height=1200)
-cookie = SESSION.cookie()
-browser.cmd("Network.setCookie", name=cookie.name, value=cookie.value, url=URL + "/", httpOnly=True)
 try:
+    sign_in(browser)
     lab_view(browser)
     coordinator_views(browser)
     designer_scenario(browser)

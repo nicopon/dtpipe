@@ -65,12 +65,6 @@ class Session:
         self._signed_in = True
         return self
 
-    def cookie(self, name="dtpipe-coordinator"):
-        """The session cookie, for a browser driven by a tool (tools/ui_check.py)."""
-        if not self._signed_in:
-            self.sign_in()
-        return next(c for c in self.jar if c.name == name)
-
     def call(self, path, body=None, method=None):
         """JSON in, JSON out; raises ApiError on an HTTP error. Signs in on first use and once again
         when the session has ended."""

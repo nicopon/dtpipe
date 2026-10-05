@@ -16,8 +16,8 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   `[CI: validate_distributed_boundary.sh]`
 - **Lab tools sign in as people, through the IdP.** `tools/lab_session.py` follows the real flow
   (login form, code back to `/signin-oidc`) and sends the CSRF header; every tool reaches `/api`
-  through it (`smoke.call`, `ui_check.py`, which hands its browser the session cookie,
-  `nodes_report.py`, `lab.sh`). `lab.sh exec-coordinator` lists `labadmin`, `labdesigner` and
+  through it (`smoke.call`, `ui_check.py`, `nodes_report.py`, `lab.sh`). `ui_check.py` also signs its
+  browser in through the IdP's form, so the flow a person follows runs on every pass. `lab.sh exec-coordinator` lists `labadmin`, `labdesigner` and
   `labreader` (`@dtpipe.test`) in the three roles; any other `{user}` / `{user}pwd` signs in with
   none. `[local: smoke.py rights — roles and sessions]`
 - **Sandbox is a lab node's own switch.** `LAB_NODE_SANDBOX=1` (or `true`) in `Lab.NodeHost`'s
