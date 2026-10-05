@@ -33,7 +33,7 @@ def lab_processes():
         base = os.path.basename(comm)
         if base == "dotnet":
             args = _args(pid)
-            if "Lab.NodeHost.dll" in args:
+            if "Lab.NodeHost.dll" in args or "DtPipe.PipelineNode.Runner.dll" in args:
                 rows.append((pid, ppid, "host", args))
             elif "Lab.Coordinator.dll" in args:
                 rows.append((pid, ppid, "coordinator", args))
@@ -174,7 +174,8 @@ def frozen_problems(repo, dtpipe, state_dir, node_names, expected=None):
                  "Directory.Build.props").splitlines()
     if dirty:
         problems.append(f"{len(dirty)} tracked file(s) changed since the frozen commit, e.g. {dirty[0].strip()}")
-    for dll in (os.path.join("node", "Lab.NodeHost.dll"), os.path.join("coordinator", "Lab.Coordinator.dll")):
+    for dll in (os.path.join("node", "Lab.NodeHost.dll"), os.path.join("runner", "DtPipe.PipelineNode.Runner.dll"),
+                os.path.join("coordinator", "Lab.Coordinator.dll")):
         path = os.path.join(state_dir, "bin", dll)
         try:
             with open(path, "rb") as f:
