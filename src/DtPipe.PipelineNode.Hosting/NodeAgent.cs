@@ -1,4 +1,5 @@
 using System.Text;
+using System.Threading.Channels;
 using DtPipe.Coordinator.Contracts;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Hosting;
@@ -31,6 +32,9 @@ internal sealed class NodeAgent : BackgroundService
     private readonly Dictionary<string, FragmentStatus> _refusals = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _commands = new(1, 1);
     private HubConnection? _hub;
+
+    // Signalled by every close of the connection; one loop reads it and connects again.
+    private readonly Channel<bool> _closed = Channel.CreateBounded<bool>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
 
     public NodeAgent(IOptions<DtPipeNodeOptions> options, NodeDefinition definition, ILoggerFactory loggers)
     {
@@ -72,28 +76,24 @@ internal sealed class NodeAgent : BackgroundService
         hub.On<string>(NodeChannel.Kill, f => Enqueue(() => KillAsync(f)));
         hub.On<string, int, BrickPreview>(NodeChannel.PreviewBrick, (id, rows) => _bricks.PreviewAsync(id, rows));
         hub.Reconnected += async _ => await AnnounceAsync();
+        // A connection the coordinator closes (a reconnect it asked for, an announcement it refused)
+        // is not retried by SignalR's own policy: the reconnect loop starts it again, so a node the
+        // coordinator accepts once more comes back without a restart of its host. The handler only
+        // signals: starting the connection from inside it races the next close.
+        hub.Closed += _ =>
+        {
+            _closed.Writer.TryWrite(true);
+            return Task.CompletedTask;
+        };
 
         // Schemas are inspected before the first announcement, so the coordinator never shows a
         // brick without the columns its node could read.
         await _bricks.InspectAsync(ct);
 
-        while (!ct.IsCancellationRequested)
-        {
-            try
-            {
-                await hub.StartAsync(ct);
-                break;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogInformation("Coordinator not reachable at {Url} yet, retrying ({Reason})", _options.CoordinatorUrl, ex.Message);
-                await Task.Delay(TimeSpan.FromSeconds(1), ct);
-            }
-        }
-
-        await AnnounceAsync();
+        await ConnectAsync(hub, ct);
         _logger.LogInformation("Node {Name} ({Role}, {Bricks} brick(s), {Policy}) connected to {Url} as {ClientId}",
             _options.Name, Role, _bricks.Bricks.Count, _policy, _options.CoordinatorUrl, _tokens.ClientId);
+        _ = ReconnectLoopAsync(hub, ct);
 
         await foreach (var line in _forwarder.Reader.ReadAllAsync(ct))
         {
@@ -103,11 +103,57 @@ internal sealed class NodeAgent : BackgroundService
         }
     }
 
+    private async Task ReconnectLoopAsync(HubConnection hub, CancellationToken ct)
+    {
+        try
+        {
+            await foreach (var _ in _closed.Reader.ReadAllAsync(ct))
+            {
+                if (hub.State != HubConnectionState.Disconnected) continue;
+                _logger.LogWarning("The coordinator closed the connection; connecting again");
+                await Task.Delay(ReconnectDelay, ct);
+                await ConnectAsync(hub, ct);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+    }
+
+    private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan AnnounceTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>Starts the connection, retrying until the coordinator answers, then announces the node.</summary>
+    private async Task ConnectAsync(HubConnection hub, CancellationToken ct)
+    {
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                if (hub.State == HubConnectionState.Disconnected) await hub.StartAsync(ct);
+                await AnnounceAsync();
+                return;
+            }
+            // Only the host's own stop ends the loop: an invocation the coordinator's close cancels
+            // fails with an OperationCanceledException too.
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                _logger.LogInformation("Coordinator not reachable at {Url} yet, retrying ({Reason})", _options.CoordinatorUrl, ex.Message);
+                if (hub.State != HubConnectionState.Disconnected)
+                {
+                    try { await hub.StopAsync(ct); } catch (Exception) when (!ct.IsCancellationRequested) { }
+                }
+                await Task.Delay(TimeSpan.FromSeconds(1), ct);
+            }
+        }
+    }
+
     private async Task AnnounceAsync()
     {
+        // Bounded: a connection the coordinator aborts as it refuses the announcement may never answer it.
+        using var bounded = new CancellationTokenSource(AnnounceTimeout);
         await _hub!.InvokeAsync(NodeChannel.Announce,
             new NodeAnnouncement(_options.Name, "", _options.Description, _datasets, Role, _bricks.Bricks,
-                Sandbox: _policy == FragmentPolicy.AnyReadOrWrite));
+                Sandbox: _policy == FragmentPolicy.AnyReadOrWrite), bounded.Token);
 
         FragmentStatus[] statuses;
         await _commands.WaitAsync();

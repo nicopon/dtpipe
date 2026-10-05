@@ -26,6 +26,12 @@ none. One node per process; a second `AddDtPipeNode` throws.
   `OidcTokenClient.GetAsync(fresh: true)`, and asks once before connecting because TransportR
   swallows a provider that throws. The token endpoint comes from the provider's discovery document.
   `[unchecked: the fresh token on retry]`
+- **A node the coordinator disconnects connects again.** SignalR's automatic reconnect does not
+  cover a connection the server closes (a reconnect the coordinator asked for, an announcement it
+  refused), so `hub.Closed` only signals and `ReconnectLoopAsync` starts the connection again and
+  announces. Only the host's own stop ends a connect loop: an invocation cut by the coordinator's
+  close also throws an `OperationCanceledException`. `[local: the lab's smoke.py rights — identity,
+  disabled]`
 - **A `PipelineNode` serves one run**: `FragmentSupervisor.RearmAsync` replaces it with a fresh
   instance under the new generation; every `FragmentStatus` echoes the generation of the command it
   answers.
