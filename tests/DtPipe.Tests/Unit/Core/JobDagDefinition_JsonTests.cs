@@ -31,6 +31,7 @@ public class JobDagDefinition_JsonTests
         WriteGoldenJson("dag_sql_processor", GoldenDagDefinitions.Dag_SourcePlusSqlProcessor);
         WriteGoldenJson("dag_fanout", GoldenDagDefinitions.Dag_FanOut_OneSourceTwoConsumers);
         WriteGoldenJson("dag_sql_with_ref", GoldenDagDefinitions.Dag_SqlProcessor_WithRef);
+        WriteGoldenJson("dag_sql_refs_only", GoldenDagDefinitions.Dag_SqlProcessor_RefsOnly);
 
         // Verification Phase: Round-trip
         VerifyRoundTrip(GoldenDagDefinitions.Linear_SingleBranch);
@@ -38,6 +39,7 @@ public class JobDagDefinition_JsonTests
         VerifyRoundTrip(GoldenDagDefinitions.Dag_SourcePlusSqlProcessor);
         VerifyRoundTrip(GoldenDagDefinitions.Dag_FanOut_OneSourceTwoConsumers);
         VerifyRoundTrip(GoldenDagDefinitions.Dag_SqlProcessor_WithRef);
+        VerifyRoundTrip(GoldenDagDefinitions.Dag_SqlProcessor_RefsOnly);
     }
 
     private void VerifyRoundTrip(JobDagDefinition original)
@@ -53,6 +55,7 @@ public class JobDagDefinition_JsonTests
             Assert.Equal(original.Branches[i].Input, deserialized.Branches[i].Input);
             Assert.Equal(original.Branches[i].Output, deserialized.Branches[i].Output);
             Assert.Equal(original.Branches[i].StreamingAliases, deserialized.Branches[i].StreamingAliases);
+            Assert.Equal(original.Branches[i].RefAliases, deserialized.Branches[i].RefAliases);
             Assert.Equal(original.Branches[i].ProcessorName, deserialized.Branches[i].ProcessorName);
             Assert.Equal(original.Branches[i].HasStreamTransformer, deserialized.Branches[i].HasStreamTransformer);
         }

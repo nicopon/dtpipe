@@ -309,6 +309,28 @@ public class JobFileRoundTripTests
         Assert.Contains("- B", yaml);
     }
 
+    /// <summary>
+    /// The CLI form with no --from must export the same branch a hand-written job has: a ref list and
+    /// no from key. The job-file form already ran before the CLI could say it.
+    /// </summary>
+    [Fact]
+    public void Export_RefsOnlyBranch_HasARefListAndNoFrom()
+    {
+        var jobs = RoundTrip(new[]
+        {
+            "-i", "a.csv", "--alias", "A",
+            "-i", "b.csv", "--alias", "B",
+            "--ref", "A,B", "--sql", "SELECT 1", "-o", "out.csv",
+        }, out _);
+
+        var consumer = jobs.Values.Single(j => j.Ref.Length > 0);
+        Assert.Equal(new[] { "A", "B" }, consumer.Ref);
+        Assert.True(string.IsNullOrEmpty(consumer.From));
+        Assert.Null(consumer.Input);
+        Assert.Equal("out.csv", consumer.Output);
+        Assert.Contains("SELECT 1", consumer.ProviderOptions!["sql"]["query"]?.ToString());
+    }
+
     [Fact]
     public void Export_EmptyRoutingKeys_StillRoundTripToAUsablePipeline()
     {

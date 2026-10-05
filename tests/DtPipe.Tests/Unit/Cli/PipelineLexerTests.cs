@@ -223,6 +223,89 @@ public class PipelineLexerTests
         Assert.Contains("--ref a,b", ex.Message);
     }
 
+    private static string[] RefsOnly(params string[] tail) => new[]
+    {
+        "-i", "a.csv", "--alias", "m",
+        "-i", "b.csv", "--alias", "r",
+        "--ref", "m,r",
+    }.Concat(tail).ToArray();
+
+    /// <summary>
+    /// A branch whose inputs are all materialised needs no streamed source: the --ref that follows an
+    /// input opens it, the way --from opens a consumer. The input before it keeps its own alias.
+    /// </summary>
+    [Fact]
+    public void Parse_RefWithoutFrom_OpensABranchWithNoStreamedSource()
+    {
+        var pipeline = _lexer.Parse(RefsOnly("--sql", "SELECT 1", "-o", "out.csv"));
+
+        Assert.Equal(3, pipeline.Branches.Count);
+        Assert.Equal("r", pipeline.Branches[1].Alias);
+        Assert.Null(pipeline.Branches[1].Output);
+
+        var consumer = pipeline.Branches[2];
+        Assert.Empty(consumer.From);
+        Assert.Equal(new[] { "m", "r" }, consumer.Ref);
+        Assert.Null(consumer.Input);
+        Assert.Contains("SELECT 1", consumer.RawArgs);
+        Assert.Equal("out.csv", consumer.Output);
+    }
+
+    [Fact]
+    public void Parse_RefWithoutFrom_KeepsAPositionalQueryInTheSameBranch()
+    {
+        var pipeline = _lexer.Parse(RefsOnly("SELECT 1", "-o", "out.csv"));
+
+        Assert.Equal(3, pipeline.Branches.Count);
+        Assert.Equal(new[] { "m", "r" }, pipeline.Branches[2].Ref);
+        Assert.Contains("--sql", pipeline.Branches[2].RawArgs);
+    }
+
+    [Fact]
+    public void Parse_RefWithoutFrom_StillRefusesARepeatedRef()
+    {
+        var args = new[]
+        {
+            "-i", "a.csv", "--alias", "m",
+            "-i", "b.csv", "--alias", "r",
+            "--ref", "m", "--ref", "r", "--sql", "SELECT 1", "-o", "out.csv",
+        };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => _lexer.Parse(args));
+
+        Assert.Contains("--ref a,b", ex.Message);
+    }
+
+    [Fact]
+    public void Parse_RefWithoutFrom_AndNothingToDoWithIt_IsRefusedAndNamesSql()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() => _lexer.Parse(RefsOnly()));
+
+        Assert.Contains("--sql", ex.Message);
+        Assert.Contains("m,r", ex.Message);
+    }
+
+    [Fact]
+    public void Parse_RefWithoutFrom_RefusesAReaderFlagThatHasNoReaderToBind()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => _lexer.Parse(RefsOnly("--query", "SELECT 1", "--sql", "SELECT 1", "-o", "out.csv")));
+
+        Assert.Contains("'--query'", ex.Message);
+        Assert.Contains("through --ref", ex.Message);
+    }
+
+    /// <summary>The documented form is untouched: a --from branch keeps its --ref.</summary>
+    [Fact]
+    public void Parse_FromThenRef_IsStillOneBranch()
+    {
+        var pipeline = _lexer.Parse(SqlBranchWith("--ref", "r,r2"));
+
+        Assert.Equal(4, pipeline.Branches.Count);
+        Assert.Equal(new[] { "m" }, pipeline.Branches[^1].From);
+        Assert.Equal(new[] { "r", "r2" }, pipeline.Branches[^1].Ref);
+    }
+
     [Fact]
     public void Parse_Session_IsGlobalAndDoesNotSplitTheBranch()
     {

@@ -139,6 +139,38 @@ Alice,165
 Bob,80
 EOF
 
+"$DTPIPE" -i orders.csv --auto-column-types --alias o \
+          -i customers.csv --alias c \
+          --ref o,c \
+          --sql "SELECT c.name, sum(o.amount) AS total
+                 FROM o JOIN c ON o.customer_email = c.email
+                 GROUP BY c.name ORDER BY total DESC" \
+          -o revenue.csv --no-stats > /dev/null 2>&1
+expect_file "join with refs only, no --from" revenue.csv <<'EOF'
+name,total
+Alice,165
+Bob,80
+EOF
+
+if refusal="$("$DTPIPE" -i orders.csv --auto-column-types --alias o \
+          --from o --sql "SELECT count(*) AS n FROM o a JOIN o b USING (order_id)" \
+          -o n.csv --no-stats 2>&1)"; then
+    bad "a --from read twice is refused (it ran)"
+elif tr -s ' \n' ' ' <<< "$refusal" | grep -qF "The query reads the streaming source 'o' (--from o) 2 times, and a stream can only be read once."; then
+    pass "a --from read twice is refused"
+else
+    bad "a --from read twice is refused (message differs)"
+fi
+
+"$DTPIPE" -i orders.csv --auto-column-types --alias o \
+          --from o --sql "WITH once AS MATERIALIZED (SELECT * FROM o)
+                          SELECT count(*) AS n FROM once a JOIN once b USING (order_id)" \
+          -o n.csv --no-stats > /dev/null 2>&1
+expect_file "a --from read once into a materialized CTE" n.csv <<'EOF'
+n
+3
+EOF
+
 "$DTPIPE" -i orders.csv --auto-column-types --alias s \
           --from s -o orders.parquet \
           --from s --sql "SELECT customer_email, sum(amount) AS total

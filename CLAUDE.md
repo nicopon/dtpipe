@@ -164,10 +164,13 @@ Providers implement `IProviderDescriptor<TService>`, registered in `Program.cs`;
 ### DAG grammar
 
 ```
---from <alias[,alias...]> [--ref <alias[,alias...]>] (--sql "<query>" | --<processor>) [--alias <name>] [-o <dest>]
+[--from <alias[,alias...]>] [--ref <alias[,alias...]>] (--sql "<query>" | --<processor>) [--alias <name>] [-o <dest>]
 ```
 
-`-i`, `--from` and `--job` open a new branch (exact rules: `src/DtPipe/CLAUDE.md`). **An alias list
+`-i`, `--from` and `--job` open a new branch, and so does a `--ref` that follows an input and no
+`--from`: a `--sql` branch of refs alone has nothing to stream, so it takes no `--from` (exact rules:
+`src/DtPipe/CLAUDE.md`). A streamed source is read once: a query naming the `--from` alias twice is
+refused. **An alias list
 is always comma-separated, and repeating a flag never accumulates**: repetition already means "new
 branch", so every other value flag is scalar and rejects a second occurrence in the same stage. How
 many aliases `--from` accepts is the processor's business, not the grammar's. Semantics:

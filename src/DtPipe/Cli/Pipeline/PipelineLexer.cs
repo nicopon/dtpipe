@@ -7,7 +7,8 @@ namespace DtPipe.Cli.Pipeline;
 
 /// <summary>
 /// Sequential lexer for DtPipe pipelines.
-/// Branches are split implicitly by the second occurrence of -i/--input or by any --from flag.
+/// Branches are split implicitly by the second occurrence of -i/--input, by any --from flag, or by a
+/// --ref that follows an input and no --from.
 /// All flags belong to the branch in which they appear, with strict stage-scoping enforced by
 /// BuildBranch: flags must appear in the correct stage (reader before transformers, writer after -o).
 /// Strictness: a non-repeatable flag may appear at most ONCE per stage within a branch, and a
@@ -182,7 +183,8 @@ public class PipelineLexer
 
                     // Positional token (SQL query without --sql flag).
                     // Split the reader into its own branch before the SQL processor branch.
-                    if (currentBranchArgs.Count > 0 && !currentBranchFlags.ContainsKey("--from"))
+                    if (currentBranchArgs.Count > 0 && !currentBranchFlags.ContainsKey("--from")
+                        && !currentBranchFlags.ContainsKey("--ref"))
                     {
                         branches.Add(BuildBranch(currentBranchFlags, currentBranchArgs));
                         currentBranchFlags = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
@@ -244,13 +246,19 @@ public class PipelineLexer
     /// </summary>
     private static void RejectOrphanBranch(BranchSpec branch)
     {
-        if (branch.From.Count == 0) return;
+        if (branch.From.Count == 0 && branch.Ref.Count == 0) return;
         if (!string.IsNullOrEmpty(branch.Output) || !string.IsNullOrEmpty(branch.Alias)) return;
         if (branch.PipelineArgs.Length > 0 || branch.WriterArgs.Length > 0) return;
 
         // Everything the branch carries is the --from itself and its value.
         var carried = branch.ReaderArgs.Where(a => a is not ("--from" or "--ref")).ToArray();
         if (carried.Length > branch.From.Count + branch.Ref.Count) return;
+
+        if (branch.From.Count == 0)
+            throw new InvalidOperationException(
+                $"The branch that materialises '{string.Join(",", branch.Ref)}' through --ref has no output, no " +
+                "alias and no transformer, so it produces nothing. A --ref belongs to a processor: add " +
+                "--sql \"<query>\" to say what to do with it.");
 
         throw new InvalidOperationException(
             $"The branch reading from '{string.Join(",", branch.From)}' has no output, no alias and no transformer, " +
@@ -374,7 +382,11 @@ public class PipelineLexer
     /// </summary>
     private void RejectReaderFlagsWithoutAReader(BranchSpec branch)
     {
-        if (branch.From.Count == 0 || !string.IsNullOrEmpty(branch.Input)) return;
+        if ((branch.From.Count == 0 && branch.Ref.Count == 0) || !string.IsNullOrEmpty(branch.Input)) return;
+
+        var reads = branch.From.Count > 0
+            ? $"reads from '{string.Join(",", branch.From)}'"
+            : $"only materialises '{string.Join(",", branch.Ref)}' through --ref";
 
         foreach (var token in branch.ReaderArgs)
         {
@@ -384,8 +396,8 @@ public class PipelineLexer
             if (def.Stage.HasFlag(FlagStage.Pipeline)) continue;
 
             throw new InvalidOperationException(
-                $"Flag '{token}' configures a reader, but this branch reads from "
-              + $"'{string.Join(",", branch.From)}' and has no reader of its own, so nothing binds it."
+                $"Flag '{token}' configures a reader, but this branch {reads} "
+              + "and has no reader of its own, so nothing binds it."
               + (def.Stage.HasFlag(FlagStage.Writer)
                     ? " It also configures a writer: move it after -o to apply it to the target."
                     : ProcessorTriggerHint()));
