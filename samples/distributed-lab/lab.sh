@@ -38,6 +38,8 @@ build() {
         || { cat "$STATE/logs/build.log" >&2; exit 1; }
     dotnet build "$LAB/Lab.NodeHost/Lab.NodeHost.csproj" -c Release -o "$STATE/bin/node" -v q -nologo >>"$STATE/logs/build.log" 2>&1 \
         || { cat "$STATE/logs/build.log" >&2; exit 1; }
+    dotnet build "$REPO/src/DtPipe.PipelineNode.Runner/DtPipe.PipelineNode.Runner.csproj" -c Release -o "$STATE/bin/runner" -v q -nologo >>"$STATE/logs/build.log" 2>&1 \
+        || { cat "$STATE/logs/build.log" >&2; exit 1; }
 }
 
 seed() {
@@ -56,14 +58,30 @@ start() {
     echo "  $name started (pid $!)"
 }
 
-# A node host holds its fragments to its bricks unless LAB_NODE_SANDBOX=1 is in its own environment;
-# a strict host has the variable removed, whatever this shell exports.
+# Replaces this shell with node $1's host, pointed at the coordinator $2: the official runner for a
+# node file whose role is runner, configured through its environment, else the lab's data node host.
+# The one way a node starts, for this script and for tools/campaign.py.
+exec_node() {
+    local node="$1" coordinator="$2" file="$LAB/nodes/$1.json"
+    if [[ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("role", ""))' "$file")" == runner ]]; then
+        local id secret description
+        { read -r id; read -r secret; read -r description; } < <(python3 -c \
+            'import json,sys; n=json.load(open(sys.argv[1])); print(n.get("clientId", n["name"])); print(n["secret"]); print(n.get("description", ""))' "$file")
+        export DtPipeNode__Name="$node" DtPipeNode__Description="$description" DtPipeNode__CoordinatorUrl="$coordinator" \
+            DtPipeNode__DtPipe="$DTPIPE" DtPipeNode__StateDirectory="$STATE/$node" DtPipeNode__Oidc__Authority="$coordinator" \
+            DtPipeNode__Oidc__ClientId="$id" DtPipeNode__Oidc__ClientSecret="$secret"
+        exec dotnet "$STATE/bin/runner/DtPipe.PipelineNode.Runner.dll"
+    fi
+    exec dotnet "$STATE/bin/node/Lab.NodeHost.dll" --config "$file" --state "$STATE" --coordinator "$coordinator" --dtpipe "$DTPIPE"
+}
+
+# A data node holds its fragments to its bricks unless LAB_NODE_SANDBOX=1 is in its own environment;
+# a strict host has the variable removed, whatever this shell exports. A runner runs any fragment.
 start_nodes() {
     local setting=(-u LAB_NODE_SANDBOX)
     [[ "$1" == sandbox ]] && setting=(LAB_NODE_SANDBOX=1)
     for node in "${NODES[@]}"; do
-        start "$node" env "${setting[@]}" dotnet "$STATE/bin/node/Lab.NodeHost.dll" \
-            --config "$LAB/nodes/$node.json" --state "$STATE" --coordinator "$URL" --dtpipe "$DTPIPE"
+        start "$node" env "${setting[@]}" "$LAB/lab.sh" exec-node "$node" "$URL"
     done
 }
 
@@ -182,6 +200,7 @@ case "${1:-}" in
     status) status ;;
     seed) mkdir -p "$STATE"; seed ;;
     nodes) shift; nodes_mode "${1:-}" ;;
+    exec-node) shift; exec_node "$@" ;;
     smoke) shift; smoke "$@" ;;
     ui) python3 "$LAB/tools/ui_check.py" "$URL" "$STATE/ui" ;;
     logs) tail -n 20 -F "$STATE"/logs/*.log ;;

@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
-using DtPipe.Lab.Contracts;
+using DtPipe.Coordinator.Contracts;
 using YamlDotNet.RepresentationModel;
 
 namespace DtPipe.Lab.Coordinator;

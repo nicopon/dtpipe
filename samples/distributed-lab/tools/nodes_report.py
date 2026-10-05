@@ -12,7 +12,8 @@ deadline = time.time() + timeout
 while True:
     try:
         nodes = json.load(urllib.request.urlopen(url + "/api/nodes", timeout=20))
-        if len(nodes) >= count and all(n["online"] and n["sandbox"] == (mode == "sandbox") for n in nodes):
+        # A runner runs any fragment in either mode: only data nodes announce one.
+        if len(nodes) >= count and all(n["online"] and (n["role"] == "Runner" or n["sandbox"] == (mode == "sandbox")) for n in nodes):
             sys.exit(0)
     except Exception:
         pass

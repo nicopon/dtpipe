@@ -71,7 +71,7 @@ public static class EmbeddedIdp
                 {
                     OnMessageReceived = context =>
                     {
-                        if (context.Request.Path.StartsWithSegments(Contracts.LabHubMethods.Path) && context.Request.Query["access_token"] is { Count: > 0 } token)
+                        if (context.Request.Path.StartsWithSegments(DtPipe.Coordinator.Contracts.NodeChannel.Path) && context.Request.Query["access_token"] is { Count: > 0 } token)
                             context.Token = token;
                         return Task.CompletedTask;
                     },

@@ -1,6 +1,6 @@
 using System.Threading.Channels;
 using DtPipe.Coordinator;
-using DtPipe.Lab.Contracts;
+using DtPipe.Coordinator.Contracts;
 using Microsoft.AspNetCore.SignalR;
 using TransportR.Interfaces;
 
@@ -129,7 +129,7 @@ public sealed class DeploymentManager
             var names = plan.Fragments.Select(f => f.Name).Concat(previous?.Plan.Fragments.Select(f => f.Name) ?? []).Distinct().ToList();
             await UndeployEverywhereAsync(names, ct);
             foreach (var fragment in plan.Fragments)
-                await SendAsync(fragment.Node, LabHubMethods.Deploy,
+                await SendAsync(fragment.Node, NodeChannel.Deploy,
                     new FragmentDeployment(fragment.Name, fragment.Yaml, fragment.Edges, deployment.Generation), ct);
 
             await WaitRegisteredAsync(deployment, ct);
@@ -157,7 +157,7 @@ public sealed class DeploymentManager
     {
         foreach (var node in _inventory.Snapshot().Where(n => n.Online))
             foreach (var name in fragmentNames)
-                await SendAsync(node.Name, LabHubMethods.Undeploy, name, ct);
+                await SendAsync(node.Name, NodeChannel.Undeploy, name, ct);
     }
 
     public async Task UndeployAsync(string pipelineId, CancellationToken ct)
@@ -173,7 +173,7 @@ public sealed class DeploymentManager
         {
             foreach (var node in _inventory.Snapshot().Where(n => n.Online))
                 foreach (var fragment in deployment.Plan.Fragments)
-                    await SendAsync(node.Name, LabHubMethods.Undeploy, fragment.Name, ct);
+                    await SendAsync(node.Name, NodeChannel.Undeploy, fragment.Name, ct);
             lock (_lock)
             {
                 _deployments.Remove(pipelineId);
@@ -228,7 +228,7 @@ public sealed class DeploymentManager
     }
 
     public Task KillAsync(string fragmentName, CancellationToken ct) =>
-        SendAsync(RequireFragment(fragmentName).Fragment.Node, LabHubMethods.Kill, fragmentName, ct);
+        SendAsync(RequireFragment(fragmentName).Fragment.Node, NodeChannel.Kill, fragmentName, ct);
 
     /// <summary>
     /// A second instance of one fragment on the same node, from a job that differs by a comment:
@@ -240,7 +240,7 @@ public sealed class DeploymentManager
         lock (_lock) ThrowIfBusy(deployment.Plan.PipelineId);
         if (deployment.Gate.CurrentCount == 0) throw new LabConflictException("Fragments are being deployed.");
         var yaml = fragment.Yaml + $"# variant {Guid.NewGuid():N}\n";
-        await SendAsync(fragment.Node, LabHubMethods.Deploy,
+        await SendAsync(fragment.Node, NodeChannel.Deploy,
             new FragmentDeployment(fragment.Name, yaml, fragment.Edges, NewGeneration(), Instance: "variant"), ct);
         _bus.Publish("deploy", new { planId = deployment.Plan.Id, pipelineId = deployment.Plan.PipelineId, state = "variant", fragment = fragment.Name });
     }
@@ -353,7 +353,7 @@ public sealed class DeploymentManager
             foreach (var fragment in deployment.Plan.Fragments)
             {
                 var connection = _inventory.ConnectionOf(fragment.Node) ?? throw new LabConflictException($"{fragment.Node} is offline.");
-                await _labHub.Clients.Client(connection).SendAsync(LabHubMethods.Rearm, fragment.Name, generation);
+                await _labHub.Clients.Client(connection).SendAsync(NodeChannel.Rearm, fragment.Name, generation);
             }
             await WaitRegisteredAsync(deployment, CancellationToken.None);
             deployment.State = "ready";

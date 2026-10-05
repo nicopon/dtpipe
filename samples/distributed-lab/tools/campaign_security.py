@@ -13,7 +13,7 @@ import urllib.request
 
 RECORD_SEPARATOR = "\x1e"
 COMMAND_HUB = "/hub/command"
-LAB_HUB = "/lab"
+LAB_HUB = "/node-channel"
 
 
 def http(url, method="GET", headers=None, body=None, timeout=20):

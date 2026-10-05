@@ -1,16 +1,18 @@
 using System.Diagnostics;
 using System.Text.Json;
-using DtPipe.Lab.Contracts;
+using DtPipe.Coordinator.Contracts;
 using Microsoft.Extensions.Logging;
 
-namespace DtPipe.Lab.NodeHost;
+namespace DtPipe.PipelineNode.Hosting;
 
 /// <summary>
 /// The bricks this node offers. It reads its own databases through the dtpipe binary, with the
 /// environment its fragments inherit: a source's schema comes from <c>dtpipe inspect</c>, a preview
 /// from a bounded read. The coordinator never opens a brick's database for this.
 /// </summary>
-public sealed class BrickHost(NodeConfig config, NodeHostOptions options, ILogger logger)
+internal sealed class BrickHost(
+    string node, IReadOnlyList<BrickDeclaration> declared, string dtpipe, string workingDirectory,
+    IReadOnlyDictionary<string, string> environment, ILogger logger)
 {
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(30);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -23,10 +25,10 @@ public sealed class BrickHost(NodeConfig config, NodeHostOptions options, ILogge
     public async Task InspectAsync(CancellationToken ct)
     {
         var bricks = new List<BrickInfo>();
-        foreach (var brick in config.Bricks ?? [])
+        foreach (var brick in declared)
         {
             // A brick this node would refuse to run must not be offered: the designer would place it here.
-            if (BrickRules.DeclaredRefusal(brick.Id, brick.Branch.GetRawText()) is { } refusal)
+            if (BrickRules.DeclaredRefusal(brick.Id, brick.BranchJson) is { } refusal)
             {
                 logger.LogWarning("Brick {Brick} is not offered: {Reason}", brick.Id, refusal);
                 continue;
@@ -48,7 +50,7 @@ public sealed class BrickHost(NodeConfig config, NodeHostOptions options, ILogge
                 }
                 if (error is not null) logger.LogWarning("Brick {Brick}: schema not inspected: {Error}", brick.Id, error);
             }
-            bricks.Add(new BrickInfo(brick.Id, brick.Kind, brick.Title, brick.Description ?? "", brick.Branch.GetRawText(), schema, error));
+            bricks.Add(new BrickInfo(brick.Id, brick.Kind, brick.Title, brick.Description ?? "", brick.BranchJson, schema, error));
         }
         Bricks = bricks;
         Forms = bricks.Select(b => BrickRules.Declared(b.Kind, b.Branch)).ToList();
@@ -57,8 +59,8 @@ public sealed class BrickHost(NodeConfig config, NodeHostOptions options, ILogge
     /// <summary>A source's first rows, or what a sink's table holds now.</summary>
     public async Task<BrickPreview> PreviewAsync(string id, int rows)
     {
-        var brick = config.Bricks?.FirstOrDefault(b => b.Id == id);
-        if (brick is null) return new BrickPreview(null, $"{config.Name} offers no brick '{id}'.");
+        var brick = declared.FirstOrDefault(b => b.Id == id);
+        if (brick is null) return new BrickPreview(null, $"{node} offers no brick '{id}'.");
         try
         {
             string input;
@@ -66,8 +68,9 @@ public sealed class BrickHost(NodeConfig config, NodeHostOptions options, ILogge
             if (brick.Kind == BrickKind.Source) (input, query) = SourceRead(brick);
             else
             {
-                input = Scalar(brick.Branch, "output") ?? throw new InvalidOperationException("The sink names no output.");
-                var table = ProviderOption(brick.Branch, "-writer", "table") ?? throw new InvalidOperationException("The sink names no table.");
+                var branch = Branch(brick);
+                input = Scalar(branch, "output") ?? throw new InvalidOperationException("The sink names no output.");
+                var table = ProviderOption(branch, "-writer", "table") ?? throw new InvalidOperationException("The sink names no table.");
                 query = $"SELECT * FROM {table}";
             }
             var result = await RunAsync(
@@ -81,9 +84,14 @@ public sealed class BrickHost(NodeConfig config, NodeHostOptions options, ILogge
         }
     }
 
-    private static (string Input, string? Query) SourceRead(BrickConfig brick) =>
-        (Scalar(brick.Branch, "input") ?? throw new InvalidOperationException("The source names no input."),
-         ProviderOption(brick.Branch, "-reader", "query"));
+    private static (string Input, string? Query) SourceRead(BrickDeclaration brick)
+    {
+        var branch = Branch(brick);
+        return (Scalar(branch, "input") ?? throw new InvalidOperationException("The source names no input."),
+                ProviderOption(branch, "-reader", "query"));
+    }
+
+    private static JsonElement Branch(BrickDeclaration brick) => JsonDocument.Parse(brick.BranchJson).RootElement.Clone();
 
     private static string? Scalar(JsonElement branch, string key) =>
         branch.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
@@ -105,12 +113,13 @@ public sealed class BrickHost(NodeConfig config, NodeHostOptions options, ILogge
     {
         var psi = new ProcessStartInfo
         {
-            FileName = options.DtPipeExecutable,
+            FileName = dtpipe,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-            WorkingDirectory = options.StateDir,
+            WorkingDirectory = workingDirectory,
         };
+        foreach (var (name, value) in environment) psi.Environment[name] = value;
         foreach (var arg in args) psi.ArgumentList.Add(arg);
         psi.Environment["NO_COLOR"] = "1";
         psi.Environment["DTPIPE_NO_TUI"] = "1";

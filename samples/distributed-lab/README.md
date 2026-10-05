@@ -59,9 +59,15 @@ The node inspects each source's schema itself (`dtpipe inspect`) and reads previ
 the coordinator never opens a brick's database.
 
 `seed/seed.sh` builds them with dtpipe itself (`generate:`, `--fake`, a DuckDB `--sql`);
-row-seeded fakes and hashed values make every seed identical. A node publishes its database as an
-environment variable (`LAB_CRM_DB`, …) that its `dtpipe` children inherit, so a job names
+row-seeded fakes and hashed values make every seed identical. A node publishes its database as a
+variable (`LAB_CRM_DB`, …) that its `dtpipe` children see, so a job names
 `sqlite:${{LAB_CRM_DB}}` and never a path: the fragment runs against whichever node hosts it.
+
+A data node is `Lab.NodeHost`, a plain .NET host that adds a node to itself with
+`DtPipe.PipelineNode.Hosting` (`AddDtPipeNode`), as any business service would. `runner-1` is the
+official runner, `DtPipe.PipelineNode.Runner`, configured only through its environment
+(`DtPipeNode__Name`, `DtPipeNode__CoordinatorUrl`, `DtPipeNode__Oidc__Authority`, …): `lab.sh`
+starts it that way for a node file whose `role` is `runner`.
 
 A node's group is not in its file: the coordinator's IDP gives it (below). The flow matrix says
 which group may send to which: every data group may feed the `runner`, the `runner` feeds
@@ -177,13 +183,13 @@ between the witness and the lab's warehouse.
 ```
  browser ──HTTP / SSE──▶ Lab.Coordinator :5180
                           ├─ AddCoordinatorHub()  TransportR hub: registry, admission, runs, bytes
-                          ├─ /lab                 the lab's control channel to the node hosts
+                          ├─ /node-channel        the control channel to the node hosts
                           ├─ /api                 bricks, design, library, plan, deploy, runs, events
                           └─ DeploymentManager    deployments, the run queue, re-arming
                                   ▲                      ▲
-                   /lab (SignalR) │                      │ TransportR (Arrow IPC bytes)
+          /node-channel (SignalR) │                      │ TransportR (Arrow IPC bytes)
       ┌─────────────┬─────────────┼─────────────┬────────┴────┬─────────────┐
-      │ node-1      │ node-2      │ node-3      │ node-4      │ runner-1    │  Lab.NodeHost
+      │ node-1      │ node-2      │ node-3      │ node-4      │ runner-1    │  AddDtPipeNode
       │ bricks, and a PipelineNode per fragment deployed here, each running a dtpipe child │
       └─────────────┴─────────────┴─────────────┴─────────────┴─────────────┘
 ```

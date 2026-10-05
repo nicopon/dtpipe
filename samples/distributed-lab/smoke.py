@@ -439,10 +439,11 @@ def sandbox_pass():
     _, narrower, _ = mirror_jobs()
 
     def loose():
-        strict_nodes = [n["name"] for n in call("/api/nodes") if not n["sandbox"]]
+        # A runner runs any fragment in either mode: only data nodes announce one.
+        strict_nodes = [n["name"] for n in call("/api/nodes") if not n["sandbox"] and n["role"] != "Runner"]
         if strict_nodes:
             raise RuntimeError(f"still strict: {', '.join(strict_nodes)}")
-        return "every node host announces itself sandbox"
+        return "every data node host announces itself sandbox"
 
     def any_reader():
         accepted("sandbox-probe", narrower, [], MIRROR_PLACEMENT)

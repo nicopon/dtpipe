@@ -2,10 +2,16 @@
 
 Mechanics for editing the lab. What it is and how to run it: `README.md`.
 
-- **The lab uses dtpipe, it never changes it.** No file under `src/` and nothing in `DtPipe.sln`
-  moves for the lab. It reaches dtpipe through the binary (`split`, `--export-job`, `--job`,
-  `inspect`, `--dry-run`) and hosts `DtPipe.Coordinator` / `DtPipe.PipelineNode` as libraries. A
-  need the libraries do not meet is reported to the user, not patched in. `[unchecked]`
+- **The lab uses dtpipe, it never changes it.** Nothing in `DtPipe.sln` moves for the lab. It
+  reaches the engine through the binary (`split`, `--export-job`, `--job`, `inspect`, `--dry-run`)
+  and hosts the distributed family (`src/DtPipe.Coordinator*`, `src/DtPipe.PipelineNode*`) as a
+  consumer: product code a lab need may shape, never code written for the lab alone. A need of the
+  engine is reported to the user, not patched in. `[unchecked]`
+- **Lab nodes are disposable hosts of `DtPipe.PipelineNode.Hosting`.** `Lab.NodeHost` reads
+  `nodes/<node>.json` into `AddDtPipeNode`; a node file whose `role` is `runner` starts the official
+  `DtPipe.PipelineNode.Runner` instead, configured through its environment. `lab.sh exec-node` is
+  the one way a node starts, for `lab.sh` and `tools/campaign.py`. Node mechanics:
+  `src/DtPipe.PipelineNode.Hosting/CLAUDE.md`. `[local: smoke.py]`
 - **Cuts inside a branch belong to `dtpipe split`.** `PlanBuilder` only regroups whole branches
   and adds `arrow:-` endpoints or relay branches; it never edits an option or moves a transformer.
   `AutoPlacer` only chooses a placement for `PlanBuilder` and cuts nothing. `[local: smoke.py]`
@@ -14,8 +20,8 @@ Mechanics for editing the lab. What it is and how to run it: `README.md`.
   no reference to a brick in it. `DesignService.Decompose` may take an imported branch apart
   around the bricks it contains (authoring, before anything is saved); the planner never does.
   `[local: smoke.py, ui_check.py]`
-- **A data node only reads and writes, and runs only its bricks.** `NodeHost.DeployAsync` reads
-  every branch through `BrickRules` (`Lab.Contracts`, the same reading `BrickCatalog.Match` uses)
+- **A data node only reads and writes, and runs only its bricks.** `NodeAgent.DeployAsync` reads
+  every branch through `BrickRules` (`DtPipe.Coordinator.Contracts`, the reading `BrickCatalog.Match` uses)
   before any `PipelineNode` registers, and refuses the fragment with a `Failed` status in the
   deployment's generation. Structure, always: a branch carries only `input`, `output`, `from`,
   `provider-options` and the volume settings `dtpipe split` writes, no processor, and reads at most
@@ -23,11 +29,11 @@ Mechanics for editing the lab. What it is and how to run it: `README.md`.
   Bricks, unless the host runs in sandbox mode: the branch is also one of the node's own bricks, a
   bare `input: arrow:-`, or a `from` + `output: arrow:-` relay of a branch of the fragment. A source
   brick sent straight to another node gains `output: arrow:-`, which `FormOf` sets aside. Sandbox
-  (`LAB_NODE_SANDBOX=1` in the host's environment, the Lab view's mode) keeps only the structure:
-  any reader or writer, whatever it reads or writes. The runner hosts no data and runs any fragment; what
-  contains it is network isolation, not this rule. That switch is the host process's environment only, never a field of `FragmentDeployment` or of
-  anything else the coordinator sends (a brick id or a skip flag in a message would return to
-  matching by name); only `1` or `true` turns it on. `BrickRules.Processors`
+  (`LAB_NODE_SANDBOX=1` in the host's environment, which `Lab.NodeHost` maps to
+  `FragmentPolicy.AnyReadOrWrite`; the Lab view's mode) keeps only the structure: any reader or
+  writer, whatever it reads or writes. The runner hosts no data and runs any fragment; what contains
+  it is network isolation, not this rule. The switch is the host's own, never a field of anything
+  the coordinator sends; only `1` or `true` turns it on. `BrickRules.Processors`
   is the one list of processors, shared with `JobGraph`. `DeploymentManager.WaitRegisteredAsync`
   fails on the first `Failed` main instance of the current generation and `DeployAsync` then
   undeploys the plan's fragments. `BrickHost` does not announce a declared brick that would fail
@@ -71,11 +77,9 @@ Mechanics for editing the lab. What it is and how to run it: `README.md`.
   matrix as it is now on every transfer, and every plan (`/api/plan`, `/api/deploy`, `AutoPlacer`,
   a library deploy) goes through `RightsStore.WithPolicies`. Never add a second matrix.
   `[local: smoke.py rights]`
-- A node host hands each pipeline node `PipelineNodeOptions.AccessTokenProvider`, bound to
-  `IdpTokenClient.GetAsync(fresh: true)`: TransportR retries a stream refused with 401 through the
-  provider, so it must return a new token, not the cached one. `FragmentSupervisor` asks once before
-  connecting because TransportR swallows a provider that throws. `[local: smoke.py rights — the token
-  reaches the hub]` `[unchecked: the fresh token on retry, the ask before connecting]`
+- A node's tokens come from the IdP its `Oidc:Authority` names, through the discovery document:
+  the lab points it at the coordinator's embedded IdP. `[local: smoke.py rights — the token reaches
+  the hub]`
 - The library is a git repository of its own under `.state/library`, driven by the `git` command
   line with a fixed identity; it never touches the dtpipe repository around it. It starts from
   `library-seed/`. Run history lives in `.state/runs/`, outside git. Deployments are in memory.

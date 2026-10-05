@@ -5,11 +5,11 @@ using System.Text.RegularExpressions;
 using YamlDotNet.Core;
 using YamlDotNet.RepresentationModel;
 
-namespace DtPipe.Lab.Contracts;
+namespace DtPipe.Coordinator.Contracts;
 
 /// <summary>
 /// Reads and writes dtpipe job files as a plain YAML tree: one top-level key per branch alias. The
-/// lab moves whole branches between fragments and adds <c>arrow:-</c> endpoints; it never
+/// planner moves whole branches between fragments and adds <c>arrow:-</c> endpoints; it never
 /// interprets a branch's options, which stay dtpipe's business.
 /// </summary>
 public static partial class JobYaml

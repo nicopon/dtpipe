@@ -1,4 +1,4 @@
-using DtPipe.Lab.Contracts;
+using DtPipe.Coordinator.Contracts;
 
 namespace DtPipe.Lab.Coordinator;
 

@@ -3,11 +3,11 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <IsPackable>false</IsPackable>
-    <RootNamespace>DtPipe.Lab.Contracts</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- JobYaml and BrickRules live here so the coordinator and every node host read a branch the same way. -->
+    <!-- What the coordinator and every node host share: the node channel's messages, and JobYaml and
+         BrickRules, so both read a branch the same way. No TransportR: the channel is plain SignalR. -->
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
   </ItemGroup>
 

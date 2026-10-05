@@ -1,28 +1,30 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
-using DtPipe.Lab.Contracts;
-using DtPipe.PipelineNode;
+using DtPipe.Coordinator.Contracts;
 using Microsoft.Extensions.Logging;
+using Node = DtPipe.PipelineNode.PipelineNode;
 
-namespace DtPipe.Lab.NodeHost;
+namespace DtPipe.PipelineNode.Hosting;
 
 /// <summary>
-/// Keeps one fragment registered with the coordinator through a <see cref="PipelineNode"/>, and
-/// reports what it does. A <see cref="PipelineNode"/> serves a single run - its child, pipes and
+/// Keeps one fragment registered with the coordinator through a <see cref="Node"/>, and
+/// reports what it does. A <see cref="Node"/> serves a single run - its child, pipes and
 /// relay tasks are never reset - so <see cref="RearmAsync"/> replaces it with a fresh instance
 /// rather than reusing it.
 /// </summary>
-public sealed class FragmentSupervisor : IAsyncDisposable
+internal sealed class FragmentSupervisor : IAsyncDisposable
 {
     private readonly string _node;
     private readonly FragmentDeployment _deployment;
     private readonly string _jobPath;
-    private readonly NodeHostOptions _options;
+    private readonly string _coordinatorUrl;
+    private readonly string _dtpipe;
+    private readonly IReadOnlyDictionary<string, string> _environment;
     private readonly Func<Task<string>> _accessToken;
     private readonly ILoggerFactory _loggerFactory;
     private readonly Func<FragmentStatus, Task> _report;
 
-    private PipelineNode.PipelineNode? _pipelineNode;
+    private Node? _pipelineNode;
     private CancellationTokenSource? _watch;
     private Task? _watchTask;
 
@@ -31,7 +33,7 @@ public sealed class FragmentSupervisor : IAsyncDisposable
 
     public static string KeyOf(string fragment, string instance) => $"{fragment}#{instance}";
 
-    /// <summary>The same identity <see cref="PipelineNode.PipelineNode"/> registers: SHA-256 of the job file's bytes.</summary>
+    /// <summary>The same identity <see cref="Node"/> registers: SHA-256 of the job file's bytes.</summary>
     public string Version { get; }
 
     public FragmentStatus LastStatus { get; private set; }
@@ -39,14 +41,17 @@ public sealed class FragmentSupervisor : IAsyncDisposable
     private string _generation;
 
     public FragmentSupervisor(
-        string node, FragmentDeployment deployment, string jobPath, NodeHostOptions options, Func<Task<string>> accessToken,
+        string node, FragmentDeployment deployment, string jobPath, string coordinatorUrl, string dtpipe,
+        IReadOnlyDictionary<string, string> environment, Func<Task<string>> accessToken,
         ILoggerFactory loggerFactory, Func<FragmentStatus, Task> report)
     {
         _accessToken = accessToken;
         _node = node;
         _deployment = deployment;
         _jobPath = jobPath;
-        _options = options;
+        _coordinatorUrl = coordinatorUrl;
+        _dtpipe = dtpipe;
+        _environment = environment;
         _loggerFactory = loggerFactory;
         _report = report;
         Version = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(jobPath)));
@@ -61,18 +66,19 @@ public sealed class FragmentSupervisor : IAsyncDisposable
         {
             // TransportR keeps the previous token when its provider throws, and a refused identity
             // would then surface as a bare 401 after its connection retries: ask once here so the
-            // IDP's refusal is what gets reported.
+            // provider's refusal is what gets reported.
             await _accessToken();
-            _pipelineNode = await PipelineNode.PipelineNode.ConnectAsync(new PipelineNodeOptions
+            _pipelineNode = await Node.ConnectAsync(new PipelineNodeOptions
             {
-                HubUrl = _options.CoordinatorUrl,
-                // The hub reads this node's group from its token.
+                HubUrl = _coordinatorUrl,
+                // The coordinator decides this node's group from the identity its token names.
                 AccessTokenProvider = _accessToken,
-                DtPipeExecutable = _options.DtPipeExecutable,
+                DtPipeExecutable = _dtpipe,
+                ChildEnvironment = _environment,
                 FragmentJobPath = _jobPath,
                 Edges = _deployment.Edges
                     .Select(e => new EdgeBinding(e.Alias,
-                        e.Direction == LabEdgeDirection.Inbound ? EdgeDirection.Inbound : EdgeDirection.Outbound))
+                        e.Direction == FragmentEdgeDirection.Inbound ? EdgeDirection.Inbound : EdgeDirection.Outbound))
                     .ToList(),
             }, Fragment, _loggerFactory, ct);
         }
@@ -94,7 +100,7 @@ public sealed class FragmentSupervisor : IAsyncDisposable
         await ConnectAsync(ct);
     }
 
-    /// <summary>Fault injection for the demonstrator: kills the running child outright, the way a crashed host would.</summary>
+    /// <summary>Fault injection: kills the running child outright, the way a crashed host would.</summary>
     public bool KillChild()
     {
         if (_pipelineNode is not { IsLaunched: true, ChildHasExited: false } node) return false;
@@ -106,7 +112,7 @@ public sealed class FragmentSupervisor : IAsyncDisposable
         catch (Exception) { return false; }
     }
 
-    private async Task WatchAsync(PipelineNode.PipelineNode node, CancellationToken ct)
+    private async Task WatchAsync(Node node, CancellationToken ct)
     {
         try
         {
@@ -120,10 +126,10 @@ public sealed class FragmentSupervisor : IAsyncDisposable
         catch (OperationCanceledException) { }
     }
 
-    private static string FormatCounts(PipelineNode.PipelineNode node) =>
+    private static string FormatCounts(Node node) =>
         string.Join(", ", node.RowCounts.Select(kv => $"{kv.Key}={kv.Value:N0} rows"));
 
-    private static string FormatFault(PipelineNode.PipelineNode node) =>
+    private static string FormatFault(Node node) =>
         node.FirstFault is null ? "" : $" - {node.Origin}: {node.FirstFault}";
 
     private async Task StopAsync()

@@ -573,9 +573,8 @@ def hosts_through_proxies():
     time.sleep(3)
     for n in NODES:
         log = open(os.path.join(STATE, "logs", n + ".log"), "a")
-        env = {k: v for k, v in os.environ.items() if k != "LAB_NODE_SANDBOX"}
-        p = subprocess.Popen(["dotnet", os.path.join(STATE, "bin", "node", "Lab.NodeHost.dll"), "--config", os.path.join(LAB, "nodes", n + ".json"),
-                              "--state", STATE, "--coordinator", f"http://127.0.0.1:{PORTS[n]}", "--dtpipe", DTPIPE],
+        env = {k: v for k, v in os.environ.items() if k != "LAB_NODE_SANDBOX"} | {"DTPIPE": DTPIPE}
+        p = subprocess.Popen([os.path.join(LAB, "lab.sh"), "exec-node", n, f"http://127.0.0.1:{PORTS[n]}"],
                              stdout=log, stderr=log, env=env, start_new_session=True)
         with open(os.path.join(STATE, "run", n + ".pid"), "w") as f:
             f.write(str(p.pid))

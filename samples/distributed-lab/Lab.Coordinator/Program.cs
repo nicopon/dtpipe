@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DtPipe.Coordinator;
-using DtPipe.Lab.Contracts;
+using DtPipe.Coordinator.Contracts;
 using DtPipe.Lab.Coordinator;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -68,7 +68,7 @@ app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapDataHub(requireAuth: true);
-app.MapHub<LabHub>(LabHubMethods.Path).RequireAuthorization();
+app.MapHub<LabHub>(NodeChannel.Path).RequireAuthorization();
 app.MapEmbeddedIdp();
 
 var api = app.MapGroup("/api");
@@ -84,7 +84,7 @@ api.MapPost("/bricks/{node}/{id}/preview", async (string node, string id, NodeIn
     if (connection is null) return Results.Conflict(new { error = $"{node} is offline." });
     using var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct);
     bounded.CancelAfter(TimeSpan.FromSeconds(40));
-    var preview = await hub.Clients.Client(connection).InvokeAsync<BrickPreview>(LabHubMethods.PreviewBrick, id, 20, bounded.Token);
+    var preview = await hub.Clients.Client(connection).InvokeAsync<BrickPreview>(NodeChannel.PreviewBrick, id, 20, bounded.Token);
     return preview.Error is null ? Results.Ok(new { csv = preview.Csv }) : Results.BadRequest(new { error = preview.Error });
 });
 api.MapGet("/pipelines", (PipelineCatalog catalog) => catalog.List());

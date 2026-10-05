@@ -1,4 +1,4 @@
-using DtPipe.Lab.Contracts;
+using DtPipe.Coordinator.Contracts;
 using YamlDotNet.RepresentationModel;
 
 namespace DtPipe.Lab.Coordinator;

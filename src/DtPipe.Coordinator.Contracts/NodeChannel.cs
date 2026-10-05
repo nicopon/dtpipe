@@ -1,20 +1,20 @@
-namespace DtPipe.Lab.Contracts;
+namespace DtPipe.Coordinator.Contracts;
 
 /// <summary>
-/// The lab's own control channel between a node host and the lab coordinator, separate from the
-/// coordinator's TransportR hub: it carries only what the demonstrator needs to place fragments on
-/// hosts and to show what they do. Run admission, launch and wiring never travel here.
+/// The control channel between a node host and the coordinator, a SignalR hub separate from the
+/// coordinator's TransportR hub: it places fragments on hosts and reports what they do. Run
+/// admission, launch and wiring never travel here; they belong to the TransportR hub.
 /// </summary>
-public static class LabHubMethods
+public static class NodeChannel
 {
-    public const string Path = "/lab";
+    public const string Path = "/node-channel";
 
     // Node host -> coordinator.
     public const string Announce = nameof(Announce);
     public const string ReportFragment = nameof(ReportFragment);
     public const string ReportLog = nameof(ReportLog);
 
-    // Coordinator -> node host.
+    // Coordinator -> node host. Kill is fault injection: it ends a fragment's child outright.
     public const string Deploy = nameof(Deploy);
     public const string Undeploy = nameof(Undeploy);
     public const string Rearm = nameof(Rearm);
@@ -31,9 +31,9 @@ public sealed record DatasetInfo(string Variable, string Engine, string Path, st
 public enum NodeRole { Data, Runner }
 
 /// <summary>
-/// <see cref="Sandbox"/> only reports how the host was started: a data node runs a fragment only if
-/// each branch is one of its bricks, unless its own start command said otherwise. The coordinator
-/// shows it and never sets it.
+/// <see cref="Sandbox"/> only reports how the host was configured: a data node runs a fragment only
+/// if each branch is one of its bricks, unless its own configuration accepts any read or write. The
+/// coordinator shows it and never sets it.
 /// </summary>
 public sealed record NodeAnnouncement(
     string Name, string Group, string Description, IReadOnlyList<DatasetInfo> Datasets, NodeRole Role,
@@ -57,22 +57,22 @@ public sealed record BrickInfo(
 /// <summary>What <c>PreviewBrick</c> answers: CSV text, or why the node could not read it.</summary>
 public sealed record BrickPreview(string? Csv, string? Error);
 
-public enum LabEdgeDirection { Inbound, Outbound }
+public enum FragmentEdgeDirection { Inbound, Outbound }
 
 /// <summary>
 /// One frontier of a fragment. Order matters: the first edge of each direction rides the child's
 /// stdin or stdout, every further one a named pipe (<c>DtPipe.PipelineNode.EdgeBinding</c>).
 /// </summary>
-public sealed record LabEdge(string Alias, LabEdgeDirection Direction);
+public sealed record FragmentEdge(string Alias, FragmentEdgeDirection Direction);
 
 /// <summary>
 /// <see cref="Instance"/> tells two deployments of one fragment name apart on the same node: a
-/// second instance is what lets the demonstrator show admission refusing misaligned versions.
+/// second instance is how admission's refusal of misaligned versions is shown and tested.
 /// <see cref="Generation"/> is echoed in every <see cref="FragmentStatus"/>, and renewed by each
 /// <c>Rearm</c>, so the coordinator never reads a status that predates its last command as current.
 /// </summary>
 public sealed record FragmentDeployment(
-    string Fragment, string Yaml, IReadOnlyList<LabEdge> Edges, string Generation, string Instance = "main");
+    string Fragment, string Yaml, IReadOnlyList<FragmentEdge> Edges, string Generation, string Instance = "main");
 
 public enum FragmentState { Registering, Registered, Launched, Exited, Failed, Undeployed }
 

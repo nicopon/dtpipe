@@ -1,4 +1,4 @@
-using DtPipe.Lab.Contracts;
+using DtPipe.Coordinator.Contracts;
 using Microsoft.AspNetCore.SignalR;
 
 namespace DtPipe.Lab.Coordinator;
@@ -130,7 +130,7 @@ public sealed class NodeInventory
 }
 
 /// <summary>
-/// The lab's control channel (<see cref="LabHubMethods"/>), one connection per node host, each
+/// The lab's control channel (<see cref="NodeChannel"/>), one connection per node host, each
 /// authenticated by the embedded IDP. A host is who its token says: it may announce only the node
 /// its identity is bound to, and its group is the identity's, whatever it declares.
 /// </summary>

@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DtPipe.PipelineNode.Hosting.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- A library any .NET host adds a node to (AddDtPipeNode), never an application. The SignalR
+         client of the node channel comes transitively through TransportR, at its version. -->
+    <ProjectReference Include="..\DtPipe.PipelineNode\DtPipe.PipelineNode.csproj" />
+    <ProjectReference Include="..\DtPipe.Coordinator.Contracts\DtPipe.Coordinator.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.12" />
+  </ItemGroup>
+
+</Project>

@@ -1,7 +1,7 @@
 using System.Text.Json.Nodes;
 using YamlDotNet.RepresentationModel;
 
-namespace DtPipe.Lab.Contracts;
+namespace DtPipe.Coordinator.Contracts;
 
 /// <summary>A brick reduced to what matching needs: its kind and the canonical text of its branch.</summary>
 public sealed record BrickForm(BrickKind Kind, string Canonical);

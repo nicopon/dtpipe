@@ -11,7 +11,7 @@
     <!-- Consumed as a library, never modified: AddCoordinatorHub, IRunOrchestrator, INodeRegistry
          and IPlanRegistry are used exactly as DtPipe.Coordinator's own tests use them. -->
     <ProjectReference Include="..\..\..\src\DtPipe.Coordinator\DtPipe.Coordinator.csproj" />
-    <ProjectReference Include="..\Lab.Contracts\Lab.Contracts.csproj" />
+    <ProjectReference Include="..\..\..\src\DtPipe.Coordinator.Contracts\DtPipe.Coordinator.Contracts.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using DtPipe.Coordinator;
-using DtPipe.Lab.Contracts;
+using DtPipe.Coordinator.Contracts;
 using TransportR.Interfaces;
 using YamlDotNet.RepresentationModel;
 
@@ -21,7 +21,7 @@ public sealed record UnitView(
     string? SuggestedNode, string? Node);
 
 public sealed record PlannedFragment(
-    string Name, string Node, string Group, string Yaml, string Version, IReadOnlyList<LabEdge> Edges,
+    string Name, string Node, string Group, string Yaml, string Version, IReadOnlyList<FragmentEdge> Edges,
     IReadOnlyList<string> Units);
 
 public sealed record PlannedEdge(
@@ -69,7 +69,7 @@ public sealed class PlanBuilder(
         public List<(string Key, YamlMappingNode Branch)> Inbound { get; } = [];
         public List<(string Key, YamlMappingNode Branch)> Owned { get; } = [];
         public List<(string Key, YamlMappingNode Branch)> Relays { get; } = [];
-        public List<LabEdge> Edges { get; } = [];
+        public List<FragmentEdge> Edges { get; } = [];
         public List<string> Units { get; } = [];
 
         public bool HasKey(string key) => Inbound.Concat(Owned).Concat(Relays).Any(b => b.Key == key);
@@ -131,8 +131,8 @@ public sealed class PlanBuilder(
         var runEdges = new List<(FragmentDraft Producer, string ProducerAlias, FragmentDraft Consumer, string ConsumerAlias)>();
         void Connect(FragmentDraft producer, string producerAlias, FragmentDraft consumer, string consumerAlias)
         {
-            producer.Edges.Add(new LabEdge(producerAlias, LabEdgeDirection.Outbound));
-            consumer.Edges.Add(new LabEdge(consumerAlias, LabEdgeDirection.Inbound));
+            producer.Edges.Add(new FragmentEdge(producerAlias, FragmentEdgeDirection.Outbound));
+            consumer.Edges.Add(new FragmentEdge(consumerAlias, FragmentEdgeDirection.Inbound));
             runEdges.Add((producer, producerAlias, consumer, consumerAlias));
         }
 

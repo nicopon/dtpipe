@@ -1,7 +1,7 @@
 using System.Text;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
-using DtPipe.Lab.Contracts;
+using DtPipe.Coordinator.Contracts;
 using YamlDotNet.RepresentationModel;
 
 namespace DtPipe.Lab.Coordinator;
