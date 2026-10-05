@@ -86,6 +86,34 @@ Every change is audited. A node host gives each of its pipeline nodes a token pr
 key is generated once and kept in `.state/idp/signing-key.pem` (readable by its owner only, outside
 git), so a coordinator restart does not invalidate the tokens in circulation.
 
+### The stand-alone test IdP (`Lab.Idp`)
+
+A separate identity provider for a coordinator that trusts an external one; the lab's coordinator
+does not use it yet. It says **who** a caller is, never what the caller may do: its tokens carry a
+subject, a name and an email, no group and no role.
+
+| Caller | Flow | Token |
+|---|---|---|
+| a service (node, runner) | `client_credentials`, client id and secret from `idp-clients.json` | `sub` = client id, `aud` = `Idp:Audience` |
+| a front end (`coordinator-ui`) | `authorization_code` + PKCE, through the IdP's login form | `sub`, `name`, `email` = `<user>@Idp:EmailDomain` |
+
+Any user name of letters, digits, `.`, `_` or `-` signs in with that name followed by `pwd`
+(`toto` / `totopwd`). Settings are the `Idp` configuration section, from the environment
+(`Idp__Issuer`) or the command line (`--Idp:Issuer`):
+
+| Setting | Default |
+|---|---|
+| `Issuer` | `http://localhost:5190/`: the one address browsers and services both reach |
+| `ClientsFile` | `clients.json` in the content root; the lab's is `idp-clients.json` |
+| `SigningKeyFile` | `.state/signing-key.pem` in the content root, created on first start |
+| `EmailDomain` · `Audience` · `AccessTokenLifetimeSeconds` | `dtpipe.test` · `dtpipe-coordinator` · `43200` |
+
+```bash
+dotnet run --project Lab.Idp -- --urls http://localhost:5190 \
+  --Idp:ClientsFile=$PWD/idp-clients.json --Idp:SigningKeyFile=$PWD/.state/idp-server/signing-key.pem
+python3 tools/idp_check.py http://localhost:5190
+```
+
 ## The coordinator's page
 
 | View | Does |

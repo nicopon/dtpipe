@@ -58,6 +58,10 @@ Mechanics for editing the lab. What it is and how to run it: `README.md`.
   shortly before it expires, so `PersistentSigningKey` reads the key from `.state/idp/signing-key.pem`
   (generated once, readable by its owner only, outside git) instead of generating one per process.
   `--token-lifetime-seconds` shortens the lifetime for trials. `[local: tools/campaign.py F4]`
+- **`Lab.Idp` says who, never what.** Its tokens carry a subject, a name and an email; no group,
+  role or permission enters a token or the clients file, because what a caller may do belongs to
+  the coordinator. It stands alone: no reference to dtpipe, TransportR or the coordinator.
+  `[local: tools/idp_check.py]`
 - **A disconnected host is forgotten fragment by fragment.** `NodeInventory.Disconnected` drops what
   the host last reported: a killed host would otherwise leave its fragments "Launched" for good. A host
   that only lost its connection reports them all again when it announces itself.

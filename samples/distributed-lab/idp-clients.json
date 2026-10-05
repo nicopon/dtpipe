@@ -1,0 +1,17 @@
+{
+  "clients": [
+    {
+      "clientId": "coordinator-ui",
+      "grant": "authorization_code",
+      "secret": "coordinator-ui-lab-secret",
+      "displayName": "Coordinator UI",
+      "redirectUris": ["http://localhost:5180/signin-oidc"],
+      "postLogoutRedirectUris": ["http://localhost:5180/signout-callback-oidc"]
+    },
+    { "clientId": "node-1", "grant": "client_credentials", "secret": "node-1-lab-secret", "displayName": "CRM node" },
+    { "clientId": "node-2", "grant": "client_credentials", "secret": "node-2-lab-secret", "displayName": "Sales node" },
+    { "clientId": "node-3", "grant": "client_credentials", "secret": "node-3-lab-secret", "displayName": "Catalog node" },
+    { "clientId": "node-4", "grant": "client_credentials", "secret": "node-4-lab-secret", "displayName": "Warehouse node" },
+    { "clientId": "runner-1", "grant": "client_credentials", "secret": "runner-1-lab-secret", "displayName": "Runner" }
+  ]
+}
