@@ -23,10 +23,13 @@ public sealed class OracleReader : AdoColumnarReader, IRequiresOptions<OracleRea
     {
         ValidateQueryIsSafeSelect(query, "FLASHBACK", "PURGE", "CALL", "LOCK", "EXPLAIN");
         Connection = new OracleConnection(connectionString);
+        // ODP.NET prefetches no LONG / LONG RAW byte unless told to: left at its default, the column reads
+        // back empty with no error. -1 fetches the whole value, at the memory cost of any large text column.
         Command = new OracleCommand(query, (OracleConnection)Connection)
         {
             FetchSize = options.FetchSize,
-            CommandTimeout = queryTimeout
+            CommandTimeout = queryTimeout,
+            InitialLONGFetchSize = -1
         };
     }
 

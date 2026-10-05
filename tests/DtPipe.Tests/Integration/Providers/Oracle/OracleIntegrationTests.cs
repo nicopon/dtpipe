@@ -589,4 +589,73 @@ public class OracleIntegrationTests : IAsyncLifetime
 			}
 		}
 	}
+
+	[Fact]
+	public async Task OracleReader_LongAndLongRaw_ReturnTheirContent_NeverEmpty()
+	{
+		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+
+		var tableName = $"TEST_LONG_{Guid.NewGuid():N}".Substring(0, 25).ToUpperInvariant();
+		var large = new string('y', 200_000);
+		byte[] bytes = [0xDE, 0xAD, 0xBE, 0xEF];
+
+		await using (var connection = new OracleConnection(_connectionString))
+		{
+			await connection.OpenAsync();
+			// A table holds a single LONG-family column, so each type gets its own table.
+			using var cmd = connection.CreateCommand();
+			cmd.CommandText = $"CREATE TABLE {tableName} (txt LONG, id NUMBER(10))";
+			await cmd.ExecuteNonQueryAsync();
+			cmd.CommandText = $"CREATE TABLE {tableName}_R (id NUMBER(10), bin LONG RAW)";
+			await cmd.ExecuteNonQueryAsync();
+
+			foreach (var (id, text) in new (int, string?)[] { (1, "hello long"), (2, null), (3, large) })
+			{
+				using var insert = connection.CreateCommand();
+				insert.CommandText = $"INSERT INTO {tableName} (txt, id) VALUES (:t, :i)";
+				insert.Parameters.Add("t", OracleDbType.Long).Value = (object?)text ?? DBNull.Value;
+				insert.Parameters.Add("i", OracleDbType.Int32).Value = id;
+				await insert.ExecuteNonQueryAsync();
+			}
+
+			using var insertRaw = connection.CreateCommand();
+			insertRaw.CommandText = $"INSERT INTO {tableName}_R (id, bin) VALUES (1, :b)";
+			insertRaw.Parameters.Add("b", OracleDbType.LongRaw).Value = bytes;
+			await insertRaw.ExecuteNonQueryAsync();
+		}
+
+		try
+		{
+			// The LONG comes first, so the read cannot rely on column order.
+			var longRows = await ReadAllAsync($"SELECT txt, id FROM {tableName} ORDER BY id");
+			Assert.Equal(3, longRows.Count);
+			Assert.Equal("hello long", longRows[0][0]);
+			Assert.Null(longRows[1][0]);
+			Assert.Equal(large, longRows[2][0]);
+
+			var rawRows = await ReadAllAsync($"SELECT id, bin FROM {tableName}_R");
+			Assert.Equal(bytes, Assert.IsType<byte[]>(rawRows[0][1]));
+		}
+		finally
+		{
+			await using var connection = new OracleConnection(_connectionString);
+			await connection.OpenAsync();
+			using var cmd = connection.CreateCommand();
+			cmd.CommandText = $"DROP TABLE {tableName} PURGE";
+			await cmd.ExecuteNonQueryAsync();
+			cmd.CommandText = $"DROP TABLE {tableName}_R PURGE";
+			await cmd.ExecuteNonQueryAsync();
+		}
+
+		async Task<List<object?[]>> ReadAllAsync(string query)
+		{
+			await using var reader = new OracleReader(_connectionString!, query, new OracleReaderOptions { FetchSize = 65536 });
+			await reader.OpenAsync(TestContext.Current.CancellationToken);
+			var rows = new List<object?[]>();
+			await foreach (var batch in reader.ReadBatchesAsync(100, TestContext.Current.CancellationToken))
+				for (var i = 0; i < batch.Length; i++)
+					rows.Add(batch.Span[i]);
+			return rows;
+		}
+	}
 }
