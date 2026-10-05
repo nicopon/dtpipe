@@ -2,9 +2,10 @@
 set -e
 
 # validate_distributed_boundary.sh
-# Source-level guard on the distributed-pipeline split: TransportR is named only by the two projects
-# that wrap it (DtPipe.Coordinator, DtPipe.PipelineNode), their tests and the lab; no core project
-# reaches them; the lab and its sample data stay under samples/, outside the solution and the build.
+# Source-level guard on the distributed-pipeline split: TransportR is named only by the distributed
+# family (every project named DtPipe.Coordinator* or DtPipe.PipelineNode*), its tests and the lab; no
+# core project reaches it; the two base libraries stay libraries; the lab and its sample data stay
+# under samples/, outside the solution and the build.
 #
 # Scope: names and references, not behaviour. A type that crosses the line without naming TransportR
 # (a transitive use) is not seen here.
@@ -23,14 +24,14 @@ fail() { echo -e "  ${RED}FAIL: $1${NC}"; exit 1; }
 # Tracked files plus new ones not yet added, so the guard sees a change before it is committed.
 FILES=$(git ls-files --cached --others --exclude-standard)
 
-# Files that are not part of the two wrapper projects, their tests or the lab.
-OUTSIDE=$(echo "$FILES" | grep -vE '^(src/DtPipe\.(Coordinator|PipelineNode)/|tests/DtPipe\.(Coordinator|PipelineNode)\.Tests/|samples/distributed-lab/)' || true)
+# Files that are not part of the distributed family, its tests or the lab.
+OUTSIDE=$(echo "$FILES" | grep -vE '^((src|tests)/DtPipe\.(Coordinator|PipelineNode)(\.[A-Za-z]+)*/|samples/distributed-lab/)' || true)
 
 echo "========================================"
 echo "  DtPipe Distributed Boundary Validation"
 echo "========================================"
 
-# 1. TransportR is named by project files and sources of the wrapper projects only.
+# 1. TransportR is named by project files and sources of the distributed family only.
 HITS=""
 for f in $(echo "$OUTSIDE" | grep -E '\.(cs|csproj|props|targets|sln)$' || true); do
     [ -f "$f" ] || continue
@@ -38,11 +39,11 @@ for f in $(echo "$OUTSIDE" | grep -E '\.(cs|csproj|props|targets|sln)$' || true)
 done
 if [ -n "$HITS" ]; then
     echo -e "$HITS"
-    fail "TransportR named outside DtPipe.Coordinator, DtPipe.PipelineNode, their tests and the lab"
+    fail "TransportR named outside the distributed family, its tests and the lab"
 fi
-pass "TransportR is named only by the wrapper projects, their tests and the lab"
+pass "TransportR is named only by the distributed family, its tests and the lab"
 
-# 2. No project outside them (and outside the lab) references a wrapper project or the lab.
+# 2. No project outside the family (and outside the lab) references a family project or the lab.
 HITS=""
 for f in $(echo "$OUTSIDE" | grep -E '\.csproj$' || true); do
     [ -f "$f" ] || continue
@@ -52,15 +53,15 @@ for f in $(echo "$OUTSIDE" | grep -E '\.csproj$' || true); do
 done
 if [ -n "$HITS" ]; then
     echo -e "$HITS"
-    fail "a project outside the wrapper projects, their tests and the lab references one of them or the lab"
+    fail "a project outside the distributed family and the lab references a family project or the lab"
 fi
-pass "no core project references the wrapper projects or the lab"
+pass "no core project references the distributed family or the lab"
 
-# 3. The wrapper projects and the lab stay out of the solution.
+# 3. The distributed family and the lab stay out of the solution.
 if grep -qE 'DtPipe\.(Coordinator|PipelineNode)|distributed-lab|Lab\.(Coordinator|NodeHost|Contracts)' DtPipe.sln; then
-    fail "DtPipe.sln names a wrapper project or a lab project"
+    fail "DtPipe.sln names a distributed-family project or a lab project"
 fi
-pass "DtPipe.sln names neither the wrapper projects nor the lab"
+pass "DtPipe.sln names neither the distributed family nor the lab"
 
 # 4. The lab, and the pipelines and bricks of its sample data, are named under samples/ only.
 HITS=""
@@ -78,7 +79,8 @@ if [ -n "$HITS" ]; then
 fi
 pass "the lab and its sample data are named only under samples/distributed-lab"
 
-# 5. The wrapper projects are libraries: a host owns Program, the identity provider and the address.
+# 5. The two base libraries stay libraries: a host owns Program, authentication and the address. An
+#    executable of the family (DtPipe.Coordinator.Server, a runner) is such a host and is not checked.
 HITS=""
 for f in src/DtPipe.Coordinator/DtPipe.Coordinator.csproj src/DtPipe.PipelineNode/DtPipe.PipelineNode.csproj; do
     if grep -qE 'Sdk="Microsoft\.NET\.Sdk\.Web"|<OutputType>[[:space:]]*(Exe|WinExe)' "$f"; then HITS="$HITS\n  $f"; fi
@@ -88,7 +90,7 @@ for f in $(echo "$FILES" | grep -E '^src/DtPipe\.(Coordinator|PipelineNode)/(Pro
 done
 if [ -n "$HITS" ]; then
     echo -e "$HITS"
-    fail "a wrapper project is built as an application (web SDK, executable output type or Program.cs)"
+    fail "a base library of the family is built as an application (web SDK, executable output type or Program.cs)"
 fi
 pass "DtPipe.Coordinator and DtPipe.PipelineNode are libraries"
 

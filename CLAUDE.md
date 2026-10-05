@@ -140,14 +140,15 @@ example to make it checked]`
 | `src/DtPipe.PipelineNode` | Runs one distributed-pipeline fragment under the coordinator's control |
 | `tests/DtPipe.Tests` | xunit.v3 unit and integration tests |
 
-`DtPipe.Core` holds abstractions, models and the engine only. `DtPipe.Coordinator` and
-`DtPipe.PipelineNode` reference TransportR as NuGet packages and stay outside `DtPipe.sln`, so
-`build.yml` never builds or tests them; `build.sh` discovers their test projects, so `agentic-ci.yml`
-does.
-They are libraries (a host owns `Program`, the identity provider and the address). Nothing else
-in `src/` names TransportR; only they, their tests and the lab do. The lab under
-`samples/distributed-lab` is a host, and it and its sample data are named nowhere else. `[CI: validate_distributed_boundary.sh — names, references and
-project shape, not behaviour]`
+`DtPipe.Core` holds abstractions, models and the engine only. The **distributed family** is every
+project named `DtPipe.Coordinator*` or `DtPipe.PipelineNode*`: it references TransportR as NuGet
+packages and stays outside `DtPipe.sln`, so `build.yml` never builds or tests it; `build.sh`
+discovers its test projects, so `agentic-ci.yml` does.
+`DtPipe.Coordinator` and `DtPipe.PipelineNode` are libraries; a host owns `Program`, authentication
+and the address, and an executable of the family is such a host. Nothing else in `src/` names
+TransportR; only the family, its tests and the lab do. The lab under `samples/distributed-lab` is a
+host, and it and its sample data are named nowhere else. `[CI: validate_distributed_boundary.sh —
+names, references and project shape, not behaviour]`
 
 Data flow: `args` → `PipelineLexer.Parse` → `PipelineToJobConverter` → `DagOrchestrator` →
 `LinearPipelineService` → `ExportService.RunExportAsync` → `PipelineExecutor` → `IDataWriter`.
