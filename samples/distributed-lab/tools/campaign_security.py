@@ -28,14 +28,21 @@ def http(url, method="GET", headers=None, body=None, timeout=20):
         return 0, str(e.reason)
 
 
-def token_for(base, client_id, secret):
-    """(status, access token or None) from the identity provider at `base`."""
+def token_answer(base, client_id, secret):
+    """(status, the token endpoint's JSON answer, or {} when it is not JSON) from the identity provider at `base`."""
     form = urllib.parse.urlencode({"grant_type": "client_credentials", "client_id": client_id, "client_secret": secret}).encode()
     status, text = http(base + "/connect/token", "POST", {"Content-Type": "application/x-www-form-urlencoded"}, form)
     try:
-        return status, json.loads(text).get("access_token")
+        answer = json.loads(text)
     except ValueError:
-        return status, None
+        return status, {}
+    return status, answer if isinstance(answer, dict) else {}
+
+
+def token_for(base, client_id, secret):
+    """(status, access token or None) from the identity provider at `base`."""
+    status, answer = token_answer(base, client_id, secret)
+    return status, answer.get("access_token")
 
 
 def bogus_jwt():

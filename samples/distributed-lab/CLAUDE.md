@@ -49,8 +49,11 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   is left running, the lab still runs a reference pipeline. It needs the lab seeded with
   `LAB_SCALE=60` (shorter runs end before a timed fault reaches them), strict nodes, and the
   toxiproxy binaries (`TOXIPROXY_DIR`) for the network cells. Its security cells call the hub as a
-  peer would (`campaign_security.py`, a SignalR client over long polling) and start the coordinator
-  with shorter tokens through `lab.sh idp`. It records, it never fixes. It starts only on a bench it can judge
+  peer would (`campaign_security.py`, a SignalR client over long polling); S3 and S5 restart the IdP
+  with shorter tokens through `lab.sh idp`, check the lifetime it now issues, and restart the hosts
+  themselves (`lab.sh nodes` leaves hosts already in their mode, and their tokens, alone). Every
+  wait for the hosts names the ones still offline, so a reference check that reads the warehouse
+  through node-4 never fails for a node-4 not yet back. It records, it never fixes. It starts only on a bench it can judge
   (`campaign_bench.py`): only the lab's own processes, a machine with no build, test run or TransportR
   process, and the binary the hosts run starts and reports the full hash of the frozen commit with a
   clean tracked tree. Every call retried on `EADDRINUSE`/`EADDRNOTAVAIL` and every port-exhaustion line
