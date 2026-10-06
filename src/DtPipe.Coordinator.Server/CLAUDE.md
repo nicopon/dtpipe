@@ -44,8 +44,8 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   (`SampleBrick`, written by the `arrow:-` writer its fragment uses), dtpipe dry-runs the runner's
   view of the job here, and each sink brick's node checks its target against the contract that
   reaches it (`CheckSink`). A branch that reaches a node's data without being its brick is refused
-  before anything runs. `DtPipeCli` still gives dtpipe every announced path, which nothing it runs
-  names any more. `[local: the lab's smoke.py bricks — a designer's check, a sink that refuses;
+  before anything runs. A node announces a variable's name, never its value, and `DtPipeCli`
+  hands dtpipe no node variable. `[local: the lab's smoke.py bricks — a designer's check, a sink that refuses;
   sandbox — a cut on its node]`
 - **A new state directory starts from the seeds, or empty.** `Coordinator:LibrarySeed` (one
   `.yaml` per pipeline) and `Coordinator:RightsSeed`; with neither, the library has no pipeline

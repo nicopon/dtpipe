@@ -50,11 +50,11 @@ internal sealed class NodeAgent : BackgroundService
         foreach (var variable in definition.Variables) environment[variable.Name] = variable.Value;
         _environment = environment;
 
-        // A value is announced only for a dataset the coordinator may open itself; every other value
-        // stays on the node, only its name is described.
+        // No value is announced: the coordinator learns a variable's name, and for a database its
+        // engine; whatever reads it runs here.
         _datasets = definition.Variables
-            .Select(v => new DatasetInfo(v.Name, v.Engine ?? "", v.Engine is null ? "" : v.Value, v.Description ?? ""))
-            .Concat(_options.Variables.Keys.Where(k => definition.Variables.All(v => v.Name != k)).Select(k => new DatasetInfo(k, "", "", "")))
+            .Select(v => new DatasetInfo(v.Name, v.Engine ?? "", v.Description ?? ""))
+            .Concat(_options.Variables.Keys.Where(k => definition.Variables.All(v => v.Name != k)).Select(k => new DatasetInfo(k, "", "")))
             .ToList();
 
         _hostLoggers = loggers;

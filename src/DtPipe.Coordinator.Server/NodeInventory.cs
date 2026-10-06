@@ -115,18 +115,6 @@ public sealed class NodeInventory
                 .ToList();
         }
     }
-
-    /// <summary>Every dataset variable a node announced with its path; reachable only from a shared file system.</summary>
-    public IReadOnlyDictionary<string, string> AllDatasetVariables()
-    {
-        lock (_lock)
-        {
-            var variables = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (var dataset in _nodes.Values.SelectMany(e => e.Announcement.Datasets))
-                variables[dataset.Variable] = dataset.Path;
-            return variables;
-        }
-    }
 }
 
 /// <summary>

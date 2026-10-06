@@ -41,8 +41,8 @@ var node = builder.Services.AddDtPipeNode(o =>
     o.Oidc.ClientSecret = file["secret"] ?? "";
 });
 
-// A database is a dataset the coordinator may open itself: the lab runs on one machine, so it
-// announces the file's path.
+// A database reaches the node's dtpipe children as ${{VARIABLE}}: the file under the node's own
+// state directory. The coordinator learns its name and engine, never where it is.
 foreach (var dataset in file.GetSection("datasets").GetChildren())
 {
     node.WithVariable(dataset["variable"]!, Path.Combine(state, name, dataset["file"]!), dataset["description"], dataset["engine"]);

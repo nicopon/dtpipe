@@ -28,8 +28,8 @@ none. One node per process; a second `AddDtPipeNode` throws.
   shared with the coordinator, so the designer never calls something a brick the node then
   declines. `BrickHost` does not announce a declared brick that fails the structure rule.
   `[unchecked: a declared brick that fails the structure rule]`
-- **A variable's value never leaves the node**, except a dataset given an engine, whose value the
-  coordinator opens itself. Variables reach a child through `PipelineNodeOptions.ChildEnvironment`
+- **A variable's value never leaves the node.** The announcement names it, with an engine for a
+  database, so the coordinator never holds a path or a secret to open. Variables reach a child through `PipelineNodeOptions.ChildEnvironment`
   and `DtPipeCommand` (the node's own reads), never through this process's environment: the host
   is someone else's service. `[unchecked]`
 - **The token provider returns a fresh token.** TransportR retries a stream refused with 401

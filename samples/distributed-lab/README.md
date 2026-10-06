@@ -206,8 +206,9 @@ between the witness and the lab's warehouse.
 Lab view gives it cuts and a placement, the Distribution view only the placement `AutoPlacer`
 chose:
 
-1. *Cuts inside a branch* are `dtpipe split --at k`. The lab keeps both halves as dtpipe wrote
-   them, so where each option lands, and the secret check, stay dtpipe's decisions.
+1. *Cuts inside a branch* are `dtpipe split --at k`, run by the node whose data the branch reads.
+   The lab keeps both halves as dtpipe wrote them, so where each option lands, and the secret
+   check, stay dtpipe's decisions.
 2. *Regrouping whole branches* is the lab's own rewrite. A `from`/`ref` dependency that crosses two
    nodes becomes an `arrow:-` input branch on the consumer's side and an `arrow:-` output on the
    producer's — the shape `split` gives a cut. A branch that already writes somewhere, is also
@@ -226,8 +227,9 @@ afterwards (a fresh instance each) before it accepts the next run.
 
 ## Limits
 
-- Everything runs on one machine, which the lab uses as a shortcut: `split` samples the sources
-  and the query panel opens a node's file from the coordinator's process.
+- Everything runs on one machine, but nothing relies on it: the coordinator never opens a node's
+  database. A cut, the query panel, a brick preview and the designer's check are each read by the
+  node that hosts the data; only `smoke.py`'s witness reads the seeded files directly.
 - People sign in through `Lab.Idp`: `labadmin`, `labdesigner` and `labreader` (password: the name
   followed by `pwd`) hold the coordinator's three roles; any other name signs in with none. Tokens last 12 hours
   (the IdP's `Idp:AccessTokenLifetimeSeconds` changes it). Each node renews its token before it expires, so a
@@ -260,7 +262,7 @@ sign a person in and out.
 | `GET /api/me`, `/api/info` | who is signed in and with which roles; whether the server runs in lab mode |
 | `GET /api/nodes`, `/api/bricks`, `/api/flow-matrix`, `/api/pipelines`, `/api/state` | what the pages draw |
 | `POST /api/bricks/{node}/{id}/preview` | a few rows, read by the node that owns the brick |
-| `POST /api/design/compose`, `/decompose`, `/validate` | cards → job, job → cards, `dtpipe --dry-run 1` over the job |
+| `POST /api/design/compose`, `/decompose`, `/validate` | cards → job, job → cards, `dtpipe --dry-run 1` over one row per source brick sent by its node, then each sink brick's node checks its target |
 | `GET /api/library` · `GET`/`PUT`/`DELETE /api/library/{id}` | pipelines; `PUT {yaml, layout, message}` commits |
 | `GET /api/library/{id}/history`, `/at/{commit}` | commits; the job, layout and diff at one |
 | `POST /api/library/{id}/distribute` | `{save?, message?}` → the automatic plan, saved as a commit on request |
@@ -274,5 +276,5 @@ sign a person in and out.
 | `POST /api/runs/cancel` | `{runId?}`: the run in flight, or a queued one |
 | `POST /api/fragments/{name}/kill`, `/variant` | fault injection |
 | `POST /api/pipelines/from-command` | `{args: [...]}` → YAML through `--export-job` |
-| `POST /api/query` | `{variable, sql}` → CSV of a node's database |
+| `POST /api/query` | `{variable, sql}` → CSV of a node's database, read by that node |
 | `GET /api/events` | server-sent events: nodes, fragment states, logs, bytes, runs |

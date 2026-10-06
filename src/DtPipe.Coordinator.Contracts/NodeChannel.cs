@@ -38,8 +38,12 @@ public static class NodeChannel
     public const string SplitBranch = nameof(SplitBranch);
 }
 
-/// <summary>A database a node hosts, reachable from a fragment's job through <c>${{Variable}}</c>.</summary>
-public sealed record DatasetInfo(string Variable, string Engine, string Path, string Description);
+/// <summary>
+/// A variable a node describes, reachable from a fragment's job through <c>${{Variable}}</c>. Its value
+/// never leaves the node; <see cref="Engine"/> says it is a database the node queries for the
+/// coordinator's lab mode, and is empty for any other variable.
+/// </summary>
+public sealed record DatasetInfo(string Variable, string Engine, string Description);
 
 /// <summary>A data node hosts databases and offers bricks; a runner hosts neither and carries every step between them.</summary>
 public enum NodeRole { Data, Runner }

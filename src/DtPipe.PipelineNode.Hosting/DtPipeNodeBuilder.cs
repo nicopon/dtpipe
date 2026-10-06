@@ -11,9 +11,9 @@ namespace DtPipe.PipelineNode.Hosting;
 public sealed record BrickDeclaration(string Id, BrickKind Kind, string Title, string? Description, string BranchJson);
 
 /// <summary>
-/// A variable described to the coordinator. <see cref="Engine"/> makes it a dataset the coordinator
-/// may open itself (<c>engine:value</c>), and only then is its value announced; any other value stays
-/// on the node.
+/// A variable described to the coordinator by its name; its value stays on the node.
+/// <see cref="Engine"/> makes it a database the node queries for the coordinator's lab mode
+/// (<c>engine:${{Name}}</c>).
 /// </summary>
 public sealed record NodeVariable(string Name, string Value, string? Description, string? Engine);
 
