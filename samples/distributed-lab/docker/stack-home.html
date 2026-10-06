@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dtpipe distributed lab</title>
+<!-- The stack's home page, served by its proxy. It names only what compose.yaml fixes (services,
+     host names, test accounts); everything else is in the lab's README. -->
+<style>
+  :root { --bg: #fafaf9; --fg: #1c1917; --muted: #57534e; --line: #e7e5e4; --card: #fff; --accent: #1d4ed8;
+          --ok: #15803d; --bad: #b91c1c; --wait: #a8a29e; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1c1917; --fg: #f5f5f4; --muted: #a8a29e; --line: #44403c; --card: #292524; --accent: #93c5fd;
+            --ok: #4ade80; --bad: #f87171; --wait: #78716c; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.55 system-ui, sans-serif; }
+  main { max-width: 52rem; margin: 0 auto; padding: 2rem 1rem 3rem; }
+  h1 { font-size: 1.6rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1.05rem; margin: 2rem 0 .6rem; }
+  p { margin: .4rem 0; }
+  .lead { color: var(--muted); }
+  a { color: var(--accent); }
+  code { font: .9em ui-monospace, monospace; }
+  .links { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: .6rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: .7rem .9rem; }
+  .card a { font-weight: 600; }
+  .card p { color: var(--muted); font-size: .9rem; margin: .2rem 0 0; }
+  .dot { display: inline-block; width: .6rem; height: .6rem; border-radius: 50%; background: var(--wait);
+         margin-right: .4rem; vertical-align: middle; }
+  .dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); }
+  table { width: 100%; border-collapse: collapse; font-size: .93rem; }
+  th, td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  td:first-child { white-space: nowrap; }
+  pre { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: .7rem .9rem;
+        overflow-x: auto; font-size: .88rem; margin: .4rem 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>dtpipe distributed lab</h1>
+  <p class="lead">A coordinator splits a dtpipe pipeline into fragments and runs each on the node that
+    holds its data; Arrow streams carry the rows between nodes. This stack runs the whole lab in
+    containers, each on its own data only.</p>
+
+  <h2>Open</h2>
+  <div class="links">
+    <div class="card"><a data-host="coordinator" href="/">Coordinator</a>
+      <p>Library, designer, runs, nodes, rights. Sign in with an account below.</p></div>
+    <div class="card"><a data-host="coordinator" href="/lab/">Lab view</a>
+      <p>Scenarios, manual placement, fault injection. Admins only.</p></div>
+    <div class="card"><a data-host="idp" href="/.well-known/openid-configuration">Identity provider</a>
+      <p>Its discovery document: the issuer every token names.</p></div>
+    <div class="card"><span class="dot" data-health="coordinator"></span><a href="/health/coordinator">Coordinator health</a>
+      <p>Its <code>/healthz</code>, the only anonymous route.</p></div>
+    <div class="card"><span class="dot" data-health="idp"></span><a href="/health/idp">IdP health</a>
+      <p>The identity provider's <code>/healthz</code>.</p></div>
+  </div>
+
+  <h2>Accounts</h2>
+  <table>
+    <tr><th>User</th><th>Password</th><th>Role on the coordinator</th></tr>
+    <tr><td><code>labadmin</code></td><td><code>labadminpwd</code></td><td>admin: everything, rights and the Lab view included</td></tr>
+    <tr><td><code>labdesigner</code></td><td><code>labdesignerpwd</code></td><td>designer: compose, distribute, deploy, run</td></tr>
+    <tr><td><code>labreader</code></td><td><code>labreaderpwd</code></td><td>reader: sees everything, changes nothing</td></tr>
+    <tr><td><code>any</code></td><td><code>anypwd</code></td><td>signs in with no role: every call is refused</td></tr>
+  </table>
+  <p class="lead">The IdP says who you are; the coordinator's own configuration says what you may do.</p>
+
+  <h2>Services</h2>
+  <table>
+    <tr><th>Service</th><th>What it does</th></tr>
+    <tr><td><code>proxy</code></td><td>This page, and the only published port: routes each host name to its service.</td></tr>
+    <tr><td><code>idp</code></td><td>Test OpenID Connect provider: client credentials for the nodes, a sign-in form for people.</td></tr>
+    <tr><td><code>coordinator</code></td><td>The control plane, in lab mode: plans, deploys and runs pipelines, holds the library (a git repository) and the rights.</td></tr>
+    <tr><td><code>node-1</code> … <code>node-4</code></td><td>Data nodes, each with its own database, seeded on first start. They serve no HTTP: their state is in the coordinator's Nodes view.</td></tr>
+    <tr><td><code>runner-1</code></td><td>The official runner: holds no data, carries every step between the bricks.</td></tr>
+  </table>
+
+  <h2>From a terminal</h2>
+  <pre>cd samples/distributed-lab
+docker compose ps                 # which services run
+docker compose logs -f coordinator
+docker compose down               # .stack/ keeps the data; delete it to seed again</pre>
+  <p>More in <code>samples/distributed-lab/README.md</code>.</p>
+</main>
+<script>
+  // Links to the other services keep this page's port, so the stack works on any proxy port.
+  const port = location.port ? ":" + location.port : "";
+  for (const a of document.querySelectorAll("a[data-host]"))
+    a.href = `http://${a.dataset.host}.localtest.me${port}${a.getAttribute("href")}`;
+  for (const dot of document.querySelectorAll("[data-health]"))
+    fetch(`/health/${dot.dataset.health}`, { cache: "no-store" })
+      .then(r => dot.classList.add(r.ok ? "ok" : "bad"), () => dot.classList.add("bad"));
+</script>
+</body>
+</html>

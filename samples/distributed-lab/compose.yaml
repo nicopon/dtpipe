@@ -1,0 +1,145 @@
+# The lab as a compose stack: the IdP, the coordinator in lab mode, four data nodes and the runner,
+# behind one proxy. Each service mounts its own directory under .stack/ and nothing else; no
+# service reads another's data. Configuration is the environment's.
+#
+#   docker compose up -d --build        then open http://lab.localtest.me
+#   docker compose down                 .stack/ stays; delete it to seed again
+#
+# *.localtest.me resolves to 127.0.0.1 outside Docker; inside, the proxy carries those names as
+# network aliases, so the IdP has one issuer for browsers and containers alike.
+# LAB_SCALE (default 1) multiplies the seeded rows and is shared by every node.
+# LAB_STACK_HTTP_PORT (default 80) is the proxy's port, outside and inside: a token names the
+# issuer with it. On another port, register the coordinator's redirect URIs with that port in
+# idp-clients.json.
+name: dtpipe-lab-stack
+
+x-dotnet-service: &dotnet-service
+  # dotnet as PID 1 ignores the SIGABRT of its own crash, and the nodes start dtpipe children:
+  # an init reaps them and passes signals on. A fragment is still cancelled by stream rupture.
+  init: true
+  stop_grace_period: 30s
+  restart: "no"
+
+x-build: &build
+  context: ../..
+  dockerfile: samples/distributed-lab/docker/Dockerfile
+
+x-node: &node
+  <<: *dotnet-service
+  image: dtpipe-lab-stack/node
+  build:
+    <<: *build
+    target: node
+  depends_on:
+    coordinator: { condition: service_healthy }
+    proxy: { condition: service_healthy }
+
+x-node-environment: &node-environment
+  LAB_SCALE: ${LAB_SCALE:-1}
+  LAB_COORDINATOR_URL: http://coordinator:8080
+  LAB_IDP_URL: http://idp.localtest.me:${LAB_STACK_HTTP_PORT:-80}
+  LAB_NODE_SANDBOX: ${LAB_NODE_SANDBOX:-}
+
+services:
+  proxy:
+    image: caddy:2-alpine
+    ports:
+      - "${LAB_STACK_HTTP_PORT:-80}:${LAB_STACK_HTTP_PORT:-80}"
+    environment:
+      LAB_STACK_HTTP_PORT: ${LAB_STACK_HTTP_PORT:-80}
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./docker/stack-home.html:/srv/index.html:ro
+    networks:
+      default:
+        aliases: [idp.localtest.me, coordinator.localtest.me, lab.localtest.me]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "--header", "Host: lab.localtest.me", "http://127.0.0.1:${LAB_STACK_HTTP_PORT:-80}/"]
+      interval: 2s
+      retries: 30
+
+  idp:
+    <<: *dotnet-service
+    image: dtpipe-lab-stack/idp
+    build:
+      <<: *build
+      target: idp
+    environment:
+      Idp__Issuer: http://idp.localtest.me:${LAB_STACK_HTTP_PORT:-80}
+      Idp__ClientsFile: /lab/idp-clients.json
+      Idp__SigningKeyFile: /state/signing-key.pem
+    volumes:
+      - ./.stack/idp:/state
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8080/healthz"]
+      interval: 2s
+      retries: 30
+
+  coordinator:
+    <<: *dotnet-service
+    image: dtpipe-lab-stack/coordinator-lab
+    build:
+      <<: *build
+      target: coordinator-lab
+    environment:
+      Coordinator__Authority: http://idp.localtest.me:${LAB_STACK_HTTP_PORT:-80}
+      Coordinator__LabMode: "true"
+      Coordinator__Scenarios: /lab/pipelines
+      Coordinator__LibrarySeed: /lab/library-seed
+      Coordinator__RightsSeed: /lab/rights-seed.json
+      Coordinator__Ui__ClientSecret: ${LAB_UI_SECRET:-coordinator-ui-lab-secret}
+      Coordinator__Roles__Admin: ${LAB_ADMIN:-labadmin}@dtpipe.test
+      Coordinator__Roles__Designer: labdesigner@dtpipe.test
+      Coordinator__Roles__Reader: labreader@dtpipe.test
+    volumes:
+      - ./.stack/coordinator:/state
+    depends_on:
+      idp: { condition: service_healthy }
+      proxy: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8080/healthz"]
+      interval: 2s
+      retries: 60
+
+  node-1:
+    <<: *node
+    command: [node-1]
+    environment: *node-environment
+    volumes: [./.stack/node-1:/lab/state/node-1]
+
+  node-2:
+    <<: *node
+    command: [node-2]
+    environment: *node-environment
+    volumes: [./.stack/node-2:/lab/state/node-2]
+
+  node-3:
+    <<: *node
+    command: [node-3]
+    environment: *node-environment
+    volumes: [./.stack/node-3:/lab/state/node-3]
+
+  node-4:
+    <<: *node
+    command: [node-4]
+    environment: *node-environment
+    volumes: [./.stack/node-4:/lab/state/node-4]
+
+  # The official runner, configured as any deployment would: through its environment. It holds no
+  # data, so it mounts nothing.
+  runner-1:
+    <<: *dotnet-service
+    image: dtpipe-lab-stack/runner
+    build:
+      <<: *build
+      target: runner
+    environment:
+      DtPipeNode__Name: runner-1
+      DtPipeNode__Description: Runner - no database, carries every step between the bricks
+      DtPipeNode__CoordinatorUrl: http://coordinator:8080
+      DtPipeNode__Oidc__Authority: http://idp.localtest.me:${LAB_STACK_HTTP_PORT:-80}
+      DtPipeNode__Oidc__ClientId: runner-1
+      DtPipeNode__Oidc__ClientSecret: ${LAB_RUNNER_SECRET:-runner-1-lab-secret}
+    depends_on:
+      coordinator: { condition: service_healthy }
+      proxy: { condition: service_healthy }

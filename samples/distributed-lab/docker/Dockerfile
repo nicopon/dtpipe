@@ -10,7 +10,8 @@
 #   coordinator      the coordinator's server, with git (its library is a git repository)
 #   coordinator-lab  the same, plus the lab's scenarios, library seed and rights seed under /lab
 #   runner           the official runner
-#   node             the lab's data node host, its node files and seed script under /lab
+#   node             the lab's data node host, its node files and seed script under /lab; it
+#                    seeds its own database on first start (node-entrypoint.sh)
 #   idp              the lab's test identity provider, its clients file under /lab
 #
 # coordinator and runner hold nothing of the lab; everything lab-specific comes from the targets
@@ -70,7 +71,8 @@ FROM with-dtpipe AS node
 COPY --from=hosts-build /out/node /app
 COPY samples/distributed-lab/nodes/ /lab/nodes/
 COPY samples/distributed-lab/seed/seed.sh /lab/seed/seed.sh
-ENTRYPOINT ["dotnet", "/app/Lab.NodeHost.dll"]
+COPY samples/distributed-lab/docker/node-entrypoint.sh /lab/node-entrypoint.sh
+ENTRYPOINT ["/lab/node-entrypoint.sh"]
 
 FROM runtime AS idp
 COPY --from=hosts-build /out/idp /app

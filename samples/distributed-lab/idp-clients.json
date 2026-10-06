@@ -5,8 +5,8 @@
       "grant": "authorization_code",
       "secret": "coordinator-ui-lab-secret",
       "displayName": "Coordinator UI",
-      "redirectUris": ["http://127.0.0.1:5180/signin-oidc", "http://localhost:5180/signin-oidc"],
-      "postLogoutRedirectUris": ["http://127.0.0.1:5180/signout-callback-oidc", "http://localhost:5180/signout-callback-oidc"]
+      "redirectUris": ["http://127.0.0.1:5180/signin-oidc", "http://localhost:5180/signin-oidc", "http://coordinator.localtest.me/signin-oidc"],
+      "postLogoutRedirectUris": ["http://127.0.0.1:5180/signout-callback-oidc", "http://localhost:5180/signout-callback-oidc", "http://coordinator.localtest.me/signout-callback-oidc"]
     },
     { "clientId": "node-1", "grant": "client_credentials", "secret": "node-1-lab-secret", "displayName": "CRM node" },
     { "clientId": "node-2", "grant": "client_credentials", "secret": "node-2-lab-secret", "displayName": "Sales node" },
