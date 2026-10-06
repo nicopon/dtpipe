@@ -13,14 +13,18 @@ none. One node per process; a second `AddDtPipeNode` throws.
   every branch through `BrickRules.FragmentRefusal` before any `PipelineNode` registers (a
   registered instance is admissible), except under `AnyFragment`. `[local: the lab's smoke.py
   bricks, sandbox]`
+- **Lab requests are the host's to answer.** The coordinator's lab mode asks a node to read its own
+  datasets (`LabRequests`: a query); the node answers only when its own `DtPipeNodeOptions.LabMode`
+  is on, off by default, and reads only a variable given an engine. `[local: Hosting.Tests
+  LabRequestsTests; the lab's smoke.py, whose checks read the warehouse this way]`
 - **`BrickRules` and `JobYaml` (`DtPipe.Coordinator.Contracts`) are the one reading of a branch**,
   shared with the coordinator, so the designer never calls something a brick the node then
   declines. `BrickHost` does not announce a declared brick that fails the structure rule.
   `[unchecked: a declared brick that fails the structure rule]`
 - **A variable's value never leaves the node**, except a dataset given an engine, whose value the
   coordinator opens itself. Variables reach a child through `PipelineNodeOptions.ChildEnvironment`
-  and `BrickHost`'s own processes, never through this process's environment: the host is someone
-  else's service. `[unchecked]`
+  and `DtPipeCommand` (the node's own reads), never through this process's environment: the host
+  is someone else's service. `[unchecked]`
 - **The token provider returns a fresh token.** TransportR retries a stream refused with 401
   through `PipelineNodeOptions.AccessTokenProvider`, so `FragmentSupervisor` binds it to
   `OidcTokenClient.GetAsync(fresh: true)`, and asks once before connecting because TransportR

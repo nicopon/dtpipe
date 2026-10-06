@@ -22,6 +22,10 @@ public static class NodeChannel
 
     // Coordinator -> node host, answered: a few rows of a brick, read by the node that owns it.
     public const string PreviewBrick = nameof(PreviewBrick);
+
+    // Coordinator -> node host, answered: a query on one of the node's datasets, for the coordinator's
+    // lab mode. The node answers it only if its own configuration says so.
+    public const string QueryDataset = nameof(QueryDataset);
 }
 
 /// <summary>A database a node hosts, reachable from a fragment's job through <c>${{Variable}}</c>.</summary>
@@ -56,6 +60,9 @@ public sealed record BrickInfo(
 
 /// <summary>What <c>PreviewBrick</c> answers: CSV text, or why the node could not read it.</summary>
 public sealed record BrickPreview(string? Csv, string? Error);
+
+/// <summary>What <c>QueryDataset</c> answers: CSV text, or why the node did not or could not read it.</summary>
+public sealed record DatasetQueryResult(string? Csv, string? Error);
 
 public enum FragmentEdgeDirection { Inbound, Outbound }
 

@@ -88,7 +88,7 @@ function renderSelectors() {
   n.innerHTML = `<option value="">every node</option>` + [...store.nodes.map((x) => x.name), "coordinator"].map((x) => `<option ${x === logNode ? "selected" : ""}>${esc(x)}</option>`).join("");
   const qs = $("r-dataset");
   if (!qs) return;
-  const datasets = store.nodes.flatMap((node) => node.datasets.filter((d) => d.path).map((d) => ({ ...d, node: node.name })));
+  const datasets = store.nodes.flatMap((node) => node.datasets.filter((d) => d.engine).map((d) => ({ ...d, node: node.name })));
   if (qs.options.length !== datasets.length) {
     const previous = qs.value;
     qs.innerHTML = datasets.map((d) => `<option value="${esc(d.variable)}" data-engine="${esc(d.engine)}">${esc(d.node)} · ${esc(d.variable)}</option>`).join("");

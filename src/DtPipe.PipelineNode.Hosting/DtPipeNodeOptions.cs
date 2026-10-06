@@ -46,6 +46,12 @@ public sealed class DtPipeNodeOptions
 
     public FragmentPolicy Policy { get; set; } = FragmentPolicy.Bricks;
 
+    /// <summary>
+    /// Whether the node answers the coordinator's lab-mode requests on its datasets (a query). Off by
+    /// default: like <see cref="Policy"/>, the host's own word, never something the coordinator sends.
+    /// </summary>
+    public bool LabMode { get; set; }
+
     public NodeOidcOptions Oidc { get; set; } = new();
 
     /// <summary>Variables every dtpipe child sees, which a fragment resolves through <c>${{NAME}}</c>. Their values never leave the node.</summary>

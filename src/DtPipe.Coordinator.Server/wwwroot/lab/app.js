@@ -128,7 +128,7 @@ function renderNodes() {
   filter.innerHTML = `<option value="">all nodes</option>` + state.nodes.map((n) => `<option>${esc(n.name)}</option>`).join("") + `<option>lab</option>`;
   filter.value = current;
 
-  const datasets = state.nodes.flatMap((n) => n.datasets.map((d) => ({ ...d, node: n.name })));
+  const datasets = state.nodes.flatMap((n) => n.datasets.filter((d) => d.engine).map((d) => ({ ...d, node: n.name })));
   const qs = $("query-dataset");
   if (qs.options.length !== datasets.length) {
     const previous = qs.value;

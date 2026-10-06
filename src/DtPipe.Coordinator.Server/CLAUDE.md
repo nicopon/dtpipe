@@ -38,10 +38,11 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   answer 404 without it (and 403 to anyone but an admin), and `GET /api/info` tells the pages
   which mode they run in. Never add a bench-only
   route outside `MapLabMode`. `[unchecked]`
-- **The server reads sources itself in three places**: `split` (planning a cut), `--dry-run`
-  (`/design/validate`) and `/api/query`. `DtPipeCli` gives dtpipe every dataset path a node
-  announced, so all three work only where the server shares the nodes' file system. A node that
-  announces a variable without an engine keeps its path to itself. `[unchecked]`
+- **The server reads sources itself in two places**: `split` (planning a cut) and `--dry-run`
+  (`/design/validate`). `DtPipeCli` gives dtpipe every dataset path a node announced, so both work
+  only where the server shares the nodes' file system. A node that announces a variable without an
+  engine keeps its path to itself. `/api/query` is the node's to answer (`NodeChannel.QueryDataset`),
+  like a brick preview. `[unchecked]`
 - **A new state directory starts from the seeds, or empty.** `Coordinator:LibrarySeed` (one
   `.yaml` per pipeline) and `Coordinator:RightsSeed`; with neither, the library has no pipeline
   and the rights no identity and an empty matrix: nobody may send anything until an administrator

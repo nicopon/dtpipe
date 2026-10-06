@@ -33,13 +33,16 @@ var node = builder.Services.AddDtPipeNode(o =>
     o.DtPipe = Path.GetFullPath(Required("dtpipe"));
     o.StateDirectory = Path.Combine(state, name);
     o.Policy = sandbox ? FragmentPolicy.AnyReadOrWrite : FragmentPolicy.Bricks;
+    // The lab's coordinator runs in lab mode, and its query panel and smoke's checks read the
+    // warehouse through the node: every lab node answers lab requests, strict or sandbox.
+    o.LabMode = true;
     o.Oidc.Authority = Required("idp");
     o.Oidc.ClientId = file["clientId"] ?? name;
     o.Oidc.ClientSecret = file["secret"] ?? "";
 });
 
-// A database is a dataset the coordinator may open itself (the query panel, split): the lab runs on
-// one machine, so it announces the file's path.
+// A database is a dataset the coordinator may open itself (split, the designer's check): the lab
+// runs on one machine, so it announces the file's path.
 foreach (var dataset in file.GetSection("datasets").GetChildren())
 {
     node.WithVariable(dataset["variable"]!, Path.Combine(state, name, dataset["file"]!), dataset["description"], dataset["engine"]);

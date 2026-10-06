@@ -77,11 +77,28 @@ def check_of(yaml):
     return None
 
 
+def seeded_databases():
+    """Every node database as seed.sh wrote it on this machine, by variable: what the witness reads.
+    The node files say where; the coordinator never knows."""
+    lab = os.path.dirname(os.path.abspath(__file__))
+    databases = {}
+    for name in sorted(os.listdir(os.path.join(lab, "nodes"))):
+        with open(os.path.join(lab, "nodes", name)) as f:
+            node = json.load(f)
+        for d in node.get("datasets", []):
+            databases[d["variable"]] = os.path.join(STATE, node["name"], d["file"])
+    return databases
+
+
+def lab_query(variable, sql):
+    """A query on a node's dataset, read by that node through the coordinator."""
+    return list(csv.reader(io.StringIO(call("/api/query", {"variable": variable, "sql": sql})["csv"])))
+
+
 class Context:
     def __init__(self):
-        nodes = call("/api/nodes")
-        self.variables = {d["variable"]: d for n in nodes for d in n["datasets"]}
-        self.warehouse = next(d for v, d in self.variables.items() if "WAREHOUSE" in v)
+        self.databases = seeded_databases()
+        self.warehouse = next(v for v in self.databases if "WAREHOUSE" in v)
         self.witness_db = os.path.join(STATE, "witness", "warehouse.duckdb")
         os.makedirs(os.path.dirname(self.witness_db), exist_ok=True)
 
@@ -90,8 +107,8 @@ class Context:
         check = check_of(yaml)
         if not check:
             raise RuntimeError("no `# lab-check:` query in the job header")
-        env = {**os.environ, **{v: d["path"] for v, d in self.variables.items()}}
-        env[self.warehouse["variable"]] = self.witness_db
+        env = {**os.environ, **self.databases}
+        env[self.warehouse] = self.witness_db
         job = os.path.join(STATE, "witness", name + ".yaml")
         with open(job, "w") as f:
             f.write(yaml)
@@ -107,7 +124,7 @@ class Context:
         if bad:
             raise RuntimeError(f"edge counts disagree: {bad}")
         expected = query(f"duck:{self.witness_db}", check)
-        actual = query(f"{self.warehouse['engine']}:{self.warehouse['path']}", check)
+        actual = lab_query(self.warehouse, check)
         if expected != actual:
             raise RuntimeError(f"check differs\n    witness: {expected}\n    lab:     {actual}")
         rows = sum(e["received"] for e in final["result"]["edgeCounts"])

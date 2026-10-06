@@ -1,11 +1,12 @@
 using DtPipe.Coordinator.Contracts;
+using Microsoft.AspNetCore.SignalR;
 
 namespace DtPipe.Coordinator.Server;
 
 /// <summary>
 /// What only a test bench needs, mapped in <see cref="CoordinatorServerOptions.LabMode"/> alone: the
 /// Lab view's scenario catalog and manual planning (cuts and a placement chosen by hand), fault
-/// injection, and a query on any node's database opened from the server's own process.
+/// injection, and a query on a node's dataset, read by that node.
 /// </summary>
 public static class LabModeEndpoints
 {
@@ -34,19 +35,18 @@ public static class LabModeEndpoints
             return Results.Accepted();
         });
 
-        // Reads a node's database through dtpipe, to show what a run wrote: the server opens the path
-        // the node announced, so it works only where both share a file system.
-        api.MapPost("/query", async (QueryRequest request, NodeInventory inventory, DtPipeCli cli, CoordinatorServerOptions options, CancellationToken ct) =>
+        // A query on a node's dataset, to show what a run wrote: the node that hosts it reads it, if
+        // its own configuration answers lab requests; the server never opens a node's database.
+        api.MapPost("/query", async (QueryRequest request, NodeInventory inventory, IHubContext<NodeChannelHub> hub, CancellationToken ct) =>
         {
-            var dataset = inventory.Snapshot().SelectMany(n => n.Datasets).FirstOrDefault(d => d.Variable == request.Variable && d.Path.Length > 0);
-            if (dataset is null) return Results.BadRequest(new { error = $"No node announces a database at {request.Variable}." });
-            Directory.CreateDirectory(options.StateDir);
-            var result = await cli.RunAsync(
-                ["--input", $"{dataset.Engine}:{dataset.Path}", "--query", request.Sql, "--limit", "200", "--output", "csv:-", "--no-stats"],
-                options.StateDir, TimeSpan.FromSeconds(30), ct);
-            return result.Succeeded
-                ? Results.Ok(new { csv = result.Stdout })
-                : Results.BadRequest(new { error = result.Diagnostic() });
+            var host = inventory.Snapshot().FirstOrDefault(n => n.Datasets.Any(d => d.Variable == request.Variable && d.Engine.Length > 0));
+            if (host is null) return Results.BadRequest(new { error = $"No node announces a dataset at {request.Variable}." });
+            if (inventory.ConnectionOf(host.Name) is not { } connection) return Results.Conflict(new { error = $"{host.Name} is offline." });
+            using var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            bounded.CancelAfter(TimeSpan.FromSeconds(40));
+            var answer = await hub.Clients.Client(connection).InvokeAsync<DatasetQueryResult>(
+                NodeChannel.QueryDataset, request.Variable, request.Sql, 200, bounded.Token);
+            return answer.Error is null ? Results.Ok(new { csv = answer.Csv }) : Results.BadRequest(new { error = answer.Error });
         });
     }
 

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.Json;
 using DtPipe.Coordinator.Contracts;
 using Microsoft.Extensions.Logging;
@@ -10,11 +9,8 @@ namespace DtPipe.PipelineNode.Hosting;
 /// environment its fragments inherit: a source's schema comes from <c>dtpipe inspect</c>, a preview
 /// from a bounded read. The coordinator never opens a brick's database for this.
 /// </summary>
-internal sealed class BrickHost(
-    string node, IReadOnlyList<BrickDeclaration> declared, string dtpipe, string workingDirectory,
-    IReadOnlyDictionary<string, string> environment, ILogger logger)
+internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> declared, DtPipeCommand dtpipe, ILogger logger)
 {
-    private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(30);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     public IReadOnlyList<BrickInfo> Bricks { get; private set; } = [];
@@ -40,9 +36,9 @@ internal sealed class BrickHost(
                 try
                 {
                     var (input, query) = SourceRead(brick);
-                    var result = await RunAsync(["inspect", "--input", input, .. query is null ? Array.Empty<string>() : ["--query", query], "--format", "json"], ct);
-                    if (result.ExitCode == 0) schema = JsonSerializer.Deserialize<List<BrickColumn>>(result.Stdout, Json);
-                    else error = LastLines(result.Stderr);
+                    var result = await dtpipe.RunAsync(["inspect", "--input", input, .. query is null ? Array.Empty<string>() : ["--query", query], "--format", "json"], ct);
+                    if (result.Succeeded) schema = JsonSerializer.Deserialize<List<BrickColumn>>(result.Stdout, Json);
+                    else error = result.Diagnostic;
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -73,10 +69,10 @@ internal sealed class BrickHost(
                 var table = ProviderOption(branch, "-writer", "table") ?? throw new InvalidOperationException("The sink names no table.");
                 query = $"SELECT * FROM {table}";
             }
-            var result = await RunAsync(
+            var result = await dtpipe.RunAsync(
                 ["--input", input, .. query is null ? Array.Empty<string>() : ["--query", query], "--limit", rows.ToString(), "--output", "csv:-", "--no-stats"],
                 CancellationToken.None);
-            return result.ExitCode == 0 ? new BrickPreview(result.Stdout, null) : new BrickPreview(null, LastLines(result.Stderr));
+            return result.Succeeded ? new BrickPreview(result.Stdout, null) : new BrickPreview(null, result.Diagnostic);
         }
         catch (Exception ex)
         {
@@ -108,39 +104,4 @@ internal sealed class BrickHost(
         }
         return null;
     }
-
-    private async Task<(int ExitCode, string Stdout, string Stderr)> RunAsync(IEnumerable<string> args, CancellationToken ct)
-    {
-        var psi = new ProcessStartInfo
-        {
-            FileName = dtpipe,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            WorkingDirectory = workingDirectory,
-        };
-        foreach (var (name, value) in environment) psi.Environment[name] = value;
-        foreach (var arg in args) psi.ArgumentList.Add(arg);
-        psi.Environment["NO_COLOR"] = "1";
-        psi.Environment["DTPIPE_NO_TUI"] = "1";
-
-        using var process = Process.Start(psi) ?? throw new InvalidOperationException("dtpipe did not start.");
-        var stdout = process.StandardOutput.ReadToEndAsync(ct);
-        var stderr = process.StandardError.ReadToEndAsync(ct);
-        using var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        bounded.CancelAfter(CommandTimeout);
-        try
-        {
-            await process.WaitForExitAsync(bounded.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            try { process.Kill(entireProcessTree: true); } catch { }
-            throw new TimeoutException($"dtpipe did not answer within {CommandTimeout.TotalSeconds:F0}s.");
-        }
-        return (process.ExitCode, await stdout, await stderr);
-    }
-
-    private static string LastLines(string text) =>
-        string.Join('\n', text.Split('\n').Select(l => l.TrimEnd()).Where(l => l.Length > 0).TakeLast(4));
 }

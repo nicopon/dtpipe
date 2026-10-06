@@ -27,7 +27,9 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
 - **Lab nodes are disposable hosts of `DtPipe.PipelineNode.Hosting`.** `Lab.NodeHost` reads
   `nodes/<node>.json` into `AddDtPipeNode`; a node file whose `role` is `runner` starts the official
   `DtPipe.PipelineNode.Runner` instead, configured through its environment. `lab.sh exec-node` is
-  the one way a node starts, for `lab.sh` and `tools/campaign.py`. Node mechanics:
+  the one way a node starts, for `lab.sh` and `tools/campaign.py`. Every lab node turns `LabMode`
+  on, so `smoke.py` reads the warehouse through `/api/query`; its witness reads the databases
+  `seed.sh` wrote, located from the node files, never from the coordinator. Node mechanics:
   `src/DtPipe.PipelineNode.Hosting/CLAUDE.md`. `[local: smoke.py]`
 - **The IdP's signing key survives an IdP restart.** A node host reuses its cached token until
   shortly before it expires, so `Lab.Idp` reads its key from `.state/idp/signing-key.pem` (generated
