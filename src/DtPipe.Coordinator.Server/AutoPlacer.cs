@@ -10,6 +10,10 @@ namespace DtPipe.Coordinator.Server;
 /// </summary>
 public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, PlanBuilder planner, RightsStore rights)
 {
+    /// <summary>Why a branch that reaches <paramref name="nodes"/>' data without being one of their bricks is refused.</summary>
+    public static string NotABrick(string alias, IEnumerable<string> nodes) =>
+        $"'{alias}' reads or writes {string.Join(", ", nodes)} without being one of its bricks. Rebuild it from the node's bricks.";
+
     public async Task<DistributionPlan> PlanAsync(string pipelineId, string yaml, CancellationToken ct)
     {
         var errors = new List<string>();
@@ -32,8 +36,7 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
                 var variables = JobYaml.Variables(JobYaml.Serialize(new() { { alias, branch } })).Where(hostOf.ContainsKey).ToList();
                 if (variables.Count > 0)
                 {
-                    errors.Add($"'{alias}' reads or writes {string.Join(", ", variables.Select(v => hostOf[v]).Distinct())} " +
-                               "without being one of its bricks. Rebuild it from the node's bricks.");
+                    errors.Add(NotABrick(alias, variables.Select(v => hostOf[v]).Distinct()));
                     continue;
                 }
                 if (runner is null) errors.Add($"'{alias}' needs a runner, and none is connected.");

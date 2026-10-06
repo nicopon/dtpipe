@@ -23,6 +23,12 @@ public static class NodeChannel
     // Coordinator -> node host, answered: a few rows of a brick, read by the node that owns it.
     public const string PreviewBrick = nameof(PreviewBrick);
 
+    // Coordinator -> node host, answered: what checking a designer's job needs from a node, which
+    // never lets the coordinator open its database. A source brick's first rows as its fragment would
+    // send them; a sink brick's verdict on the schema that would reach it.
+    public const string SampleBrick = nameof(SampleBrick);
+    public const string CheckSink = nameof(CheckSink);
+
     // Coordinator -> node host, answered: a query on one of the node's datasets, for the coordinator's
     // lab mode. The node answers it only if its own configuration says so.
     public const string QueryDataset = nameof(QueryDataset);
@@ -64,6 +70,15 @@ public sealed record BrickInfo(
 
 /// <summary>What <c>PreviewBrick</c> answers: CSV text, or why the node could not read it.</summary>
 public sealed record BrickPreview(string? Csv, string? Error);
+
+/// <summary>
+/// What <c>SampleBrick</c> answers: the source brick's first rows as an Arrow IPC stream, written by
+/// the same <c>arrow:-</c> writer its fragment sends the runner, or why the node could not read them.
+/// </summary>
+public sealed record BrickSample(byte[]? Arrow, string? Error);
+
+/// <summary>What <c>CheckSink</c> answers: whether the sink brick's target accepts a contract, and dtpipe's report.</summary>
+public sealed record SinkCheck(bool Accepted, string Report);
 
 /// <summary>What <c>QueryDataset</c> answers: CSV text, or why the node did not or could not read it.</summary>
 public sealed record DatasetQueryResult(string? Csv, string? Error);

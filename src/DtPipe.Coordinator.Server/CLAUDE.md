@@ -38,11 +38,14 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   answer 404 without it (and 403 to anyone but an admin), and `GET /api/info` tells the pages
   which mode they run in. Never add a bench-only
   route outside `MapLabMode`. `[unchecked]`
-- **The server reads sources itself in one place**: `--dry-run` (`/design/validate`). `DtPipeCli`
-  gives dtpipe every dataset path a node announced, so it works only where the server shares the
-  nodes' file system. A node that announces a variable without an engine keeps its path to itself.
-  Everything else that reads a node's data asks that node through `NodeRequests`: a brick preview,
-  `/api/query` (`NodeChannel.QueryDataset`), a cut (`SplitBranch`). `[local: the lab's smoke.py
+- **The server never opens a node's data.** What reads it asks the node that hosts it, through
+  `NodeRequests`: a brick preview, `/api/query` (`QueryDataset`), a cut (`SplitBranch`), and a
+  designer's check (`DesignValidator`): each source brick's node sends its first row as Arrow IPC
+  (`SampleBrick`, written by the `arrow:-` writer its fragment uses), dtpipe dry-runs the runner's
+  view of the job here, and each sink brick's node checks its target against the contract that
+  reaches it (`CheckSink`). A branch that reaches a node's data without being its brick is refused
+  before anything runs. `DtPipeCli` still gives dtpipe every announced path, which nothing it runs
+  names any more. `[local: the lab's smoke.py bricks — a designer's check, a sink that refuses;
   sandbox — a cut on its node]`
 - **A new state directory starts from the seeds, or empty.** `Coordinator:LibrarySeed` (one
   `.yaml` per pipeline) and `Coordinator:RightsSeed`; with neither, the library has no pipeline

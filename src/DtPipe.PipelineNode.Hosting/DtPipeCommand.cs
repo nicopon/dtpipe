@@ -10,8 +10,10 @@ internal sealed record DtPipeCommandResult(int ExitCode, byte[] Output, string S
     public string Stdout => Encoding.UTF8.GetString(Output);
 
     /// <summary>The last non-empty stderr lines: where dtpipe states why it refused.</summary>
-    public string Diagnostic => string.Join('\n',
-        Stderr.Split('\n').Select(l => l.TrimEnd()).Where(l => l.Length > 0).TakeLast(4));
+    public string Diagnostic => Tail(4);
+
+    public string Tail(int lines) => string.Join('\n',
+        Stderr.Split('\n').Select(l => l.TrimEnd()).Where(l => l.Length > 0).TakeLast(lines));
 }
 
 /// <summary>

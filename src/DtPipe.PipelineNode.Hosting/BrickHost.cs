@@ -1,13 +1,16 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using DtPipe.Coordinator.Contracts;
 using Microsoft.Extensions.Logging;
+using YamlDotNet.RepresentationModel;
 
 namespace DtPipe.PipelineNode.Hosting;
 
 /// <summary>
 /// The bricks this node offers. It reads its own databases through the dtpipe binary, with the
 /// environment its fragments inherit: a source's schema comes from <c>dtpipe inspect</c>, a preview
-/// from a bounded read. The coordinator never opens a brick's database for this.
+/// and a sample from a bounded read, a sink's verdict on a contract from <c>dtpipe contract check</c>.
+/// The coordinator never opens a brick's database for this.
 /// </summary>
 internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> declared, DtPipeCommand dtpipe, ILogger logger)
 {
@@ -77,6 +80,86 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
         catch (Exception ex)
         {
             return new BrickPreview(null, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// A source brick's first rows, read by the brick's own branch sent to <c>arrow:-</c>, exactly as
+    /// its fragment sends the runner: the same reader and writer, so the coordinator checks a job
+    /// against the schema the runner will receive. A real read bounded by <c>--limit</c>, like a
+    /// preview, not a sample run: the source-side guarantees of <c>--dry-run</c> do not apply.
+    /// </summary>
+    public async Task<BrickSample> SampleAsync(string id, int rows)
+    {
+        var brick = Bricks.FirstOrDefault(b => b.Id == id && b.Kind == BrickKind.Source);
+        if (brick is null) return new BrickSample(null, $"{node} offers no source brick '{id}'.");
+        try
+        {
+            var result = await RunBranchAsync(brick, "output", new Dictionary<string, string>(),
+                job => ["--job", job, "--limit", rows.ToString(), "--no-stats"]);
+            if (!result.Succeeded) return new BrickSample(null, result.Diagnostic);
+            return result.Output.Length > MaxSampleBytes
+                ? new BrickSample(null, $"{node}: the first {rows} row(s) of '{id}' take {result.Output.Length:N0} bytes, over the {MaxSampleBytes:N0} a sample may.")
+                : new BrickSample(result.Output, null);
+        }
+        catch (Exception ex)
+        {
+            return new BrickSample(null, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Whether a sink brick's target accepts a contract: <c>dtpipe contract check</c> on the brick fed
+    /// from <c>arrow:-</c>, which inspects the target and writes nothing.
+    /// </summary>
+    public async Task<SinkCheck> CheckSinkAsync(string id, string contractJson)
+    {
+        var brick = Bricks.FirstOrDefault(b => b.Id == id && b.Kind == BrickKind.Sink);
+        if (brick is null) return new SinkCheck(false, $"{node} offers no sink brick '{id}'.");
+        try
+        {
+            var result = await RunBranchAsync(brick, "input", new Dictionary<string, string> { ["contract.json"] = contractJson },
+                job => ["contract", "check", "--job", job, "--contract", Path.Combine(Path.GetDirectoryName(job)!, "contract.json")]);
+            return new SinkCheck(result.Succeeded, Findings(result.Stderr) ?? result.Tail(12));
+        }
+        catch (Exception ex)
+        {
+            return new SinkCheck(false, ex.Message);
+        }
+    }
+
+    /// <summary>dtpipe's findings, from its first <c>error:</c> or <c>warning:</c> line on, without the table above them.</summary>
+    private static string? Findings(string stderr)
+    {
+        var lines = stderr.Split('\n').Select(l => l.TrimEnd()).Where(l => l.Length > 0).ToList();
+        var first = lines.FindIndex(l => l.StartsWith("error:", StringComparison.Ordinal) || l.StartsWith("warning:", StringComparison.Ordinal));
+        return first < 0 ? null : string.Join('\n', lines.Skip(first));
+    }
+
+    // A sample crosses the node channel as one message.
+    private const int MaxSampleBytes = 256 * 1024;
+
+    /// <summary>
+    /// Runs dtpipe on a job holding the brick's branch alone, its <paramref name="endpoint"/> set to
+    /// <c>arrow:-</c>, in a directory of its own with <paramref name="files"/> beside the job.
+    /// </summary>
+    private async Task<DtPipeCommandResult> RunBranchAsync(
+        BrickInfo brick, string endpoint, IReadOnlyDictionary<string, string> files, Func<string, string[]> args)
+    {
+        var dir = Path.Combine(dtpipe.WorkingDirectory, "bricks", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var branch = (YamlMappingNode)JobYaml.FromJson(JsonNode.Parse(brick.Branch));
+            JobYaml.Set(branch, endpoint, BrickRules.ArrowEndpoint);
+            var job = Path.Combine(dir, "job.yaml");
+            await File.WriteAllTextAsync(job, JobYaml.Serialize(new YamlMappingNode { { "brick", branch } }));
+            foreach (var (name, content) in files) await File.WriteAllTextAsync(Path.Combine(dir, name), content);
+            return await dtpipe.RunAsync(args(job), CancellationToken.None);
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch (IOException) { }
         }
     }
 

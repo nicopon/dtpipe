@@ -79,6 +79,8 @@ internal sealed class NodeAgent : BackgroundService
         hub.On<string, string>(NodeChannel.Rearm, (f, generation) => Enqueue(() => RearmAsync(f, generation, ct)));
         hub.On<string>(NodeChannel.Kill, f => Enqueue(() => KillAsync(f)));
         hub.On<string, int, BrickPreview>(NodeChannel.PreviewBrick, (id, rows) => _bricks.PreviewAsync(id, rows));
+        hub.On<string, int, BrickSample>(NodeChannel.SampleBrick, (id, rows) => _bricks.SampleAsync(id, rows));
+        hub.On<string, string, SinkCheck>(NodeChannel.CheckSink, (id, contract) => _bricks.CheckSinkAsync(id, contract));
         hub.On<string, string, int, DatasetQueryResult>(NodeChannel.QueryDataset, (variable, sql, rows) => _lab.QueryAsync(variable, sql, rows));
         hub.On<string, string, int, BranchSplit>(NodeChannel.SplitBranch, (alias, job, at) => _lab.SplitAsync(alias, job, at));
         hub.Reconnected += async _ => await AnnounceAsync();

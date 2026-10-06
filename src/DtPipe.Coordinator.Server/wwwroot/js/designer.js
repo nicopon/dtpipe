@@ -229,7 +229,7 @@ function renderShell() {
         <span id="d-dirty" class="chip warn" hidden>unsaved</span>
         <span class="actions">
           <button id="d-layout" class="ghost" title="Arrange the cards in columns, sources first">Arrange</button>
-          <button id="d-validate" title="dtpipe runs the whole job over one row per source, writers neutralised">Validate</button>
+          <button id="d-validate" title="each source brick's node sends one row, dtpipe runs the job over them with writers neutralised, and each sink brick's node checks its target">Validate</button>
           <button id="d-save">Save…</button>
           <button id="d-distribute" class="primary">Distribute →</button>
         </span>
@@ -696,7 +696,7 @@ function renderDrawer() {
   } else if (drawer === "problems") {
     body = `${result.errors?.length ? `<ul class="msgs errors">${result.errors.map((m) => `<li>${esc(m)}</li>`).join("")}</ul>` : ""}
       ${result.warnings?.length ? `<ul class="msgs">${result.warnings.map((m) => `<li>${esc(m)}</li>`).join("")}</ul>` : ""}
-      ${validation?.dryRun ? `<h3>dtpipe --dry-run</h3><pre class="mismatch">${esc(validation.dryRun)}</pre>` : ""}
+      ${validation?.dryRun ? `<h3>dtpipe check: --dry-run here, each sink on its node</h3><pre class="mismatch">${esc(validation.dryRun)}</pre>` : ""}
       ${!problems ? `<p class="hint">Nothing to report.${validation ? "" : " Validate to have dtpipe run it over one row per source."}</p>` : ""}`;
   } else {
     body = `<textarea id="d-edit" class="mono" rows="16" spellcheck="false">${esc(result.yaml)}</textarea>

@@ -537,9 +537,33 @@ def bricks_pass():
 
     check("strict nodes", strict)
     check("a read that is no brick", no_brick)
+    def designer_check():
+        # The server opens no node database: each source brick's node sends one row, dtpipe runs the
+        # job over them on the server, and each sink brick's node judges its own target.
+        names = sorted(n for n in os.listdir(LIBRARY_SEED) if n.endswith(".yaml"))
+        for name in names:
+            yaml = open(os.path.join(LIBRARY_SEED, name)).read()
+            answer = call("/api/design/validate", call("/api/design/decompose", {"yaml": yaml})["model"])
+            if not answer["ok"]:
+                raise RuntimeError(f"{name}: {answer.get('errors')} {answer.get('dryRun')}")
+        return f"{len(names)} library pipelines accepted"
+
+    def sink_refuses():
+        yaml = open(os.path.join(LIBRARY_SEED, "revenue-by-country.yaml")).read()
+        wrong = yaml.replace("table: revenue_by_country\n      strategy: Recreate",
+                             "table: customers_mirror\n      strategy: Upsert\n      key: customer_id")
+        if wrong == yaml:
+            raise RuntimeError("library-seed/revenue-by-country.yaml no longer loads its table this way")
+        answer = call("/api/design/validate", call("/api/design/decompose", {"yaml": wrong})["model"])
+        if answer["ok"] or "node-4/customers-mirror" not in (answer.get("dryRun") or ""):
+            raise RuntimeError(f"node-4 should refuse: {answer}")
+        return "node-4 refuses revenue rows for customers_mirror"
+
     check("a source brick by a hair", source_by_a_hair)
     check("a sink brick by a hair", sink_by_a_hair)
     check("relays", relays)
+    check("a designer's check", designer_check)
+    check("a sink that refuses", sink_refuses)
     return failures[0]
 
 

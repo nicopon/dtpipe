@@ -18,6 +18,12 @@ none. One node per process; a second `AddDtPipeNode` throws.
   run executes the branch's transformers on the node); the node answers only when its own
   `DtPipeNodeOptions.LabMode` is on, off by default, and queries only a variable given an engine. `[local: Hosting.Tests
   LabRequestsTests; the lab's smoke.py, whose checks read the warehouse this way]`
+- **A node reads its bricks for a designer's check, never more.** `BrickHost.SampleAsync` reads a
+  source brick it announced, with `output: arrow:-` and `--limit`, the bytes its fragment would
+  send; a real bounded read like a preview, so `--dry-run`'s source-side guarantees do not apply.
+  `CheckSinkAsync` runs `dtpipe contract check` on a sink brick fed from `arrow:-`, which inspects
+  the target and writes nothing. Neither needs `LabMode`: checking a design is the product's.
+  `[local: the lab's smoke.py bricks — a designer's check]`
 - **`BrickRules` and `JobYaml` (`DtPipe.Coordinator.Contracts`) are the one reading of a branch**,
   shared with the coordinator, so the designer never calls something a brick the node then
   declines. `BrickHost` does not announce a declared brick that fails the structure rule.

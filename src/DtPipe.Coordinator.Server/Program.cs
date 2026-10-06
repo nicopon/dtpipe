@@ -27,6 +27,8 @@ builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Ad
 // by the planner on every plan.
 builder.Services.AddSingleton<RightsStore>();
 builder.Services.AddCoordinatorHub(_ => { }).Build();
+// A node answers a designer's check with a source brick's first row, larger than SignalR's 32 KB default.
+builder.Services.Configure<HubOptions<NodeChannelHub>>(o => o.MaximumReceiveMessageSize = 1024 * 1024);
 builder.Services.Replace(ServiceDescriptor.Singleton<IFlowControlService, RightsFlowControl>());
 builder.Services.Replace(ServiceDescriptor.Singleton<IClientIdentityProvider, RightsIdentityProvider>());
 builder.Services.AddTrustedIdp(server);
@@ -43,6 +45,7 @@ builder.Services.AddSingleton<PipelineCatalog>();
 builder.Services.AddSingleton<PlanBuilder>();
 builder.Services.AddSingleton<AutoPlacer>();
 builder.Services.AddSingleton<DesignService>();
+builder.Services.AddSingleton<DesignValidator>();
 builder.Services.AddSingleton<PipelineLibrary>();
 builder.Services.AddSingleton<RunJournal>();
 builder.Services.AddSingleton<DeploymentManager>();
@@ -170,17 +173,12 @@ designer.MapDelete("/deployments/{id}", async (string id, DeploymentManager depl
 // The designer: cards to job and back. The page never writes YAML itself.
 designer.MapPost("/design/compose", (DesignModel model, DesignService design) => design.Compose(model));
 designer.MapPost("/design/decompose", (DecomposeRequest request, DesignService design) => design.Decompose(request.Yaml, request.Layout));
-designer.MapPost("/design/validate", async (DesignModel model, DesignService design, DtPipeCli cli, CoordinatorServerOptions options, CancellationToken ct) =>
+designer.MapPost("/design/validate", async (DesignModel model, DesignService design, DesignValidator validator, CancellationToken ct) =>
 {
     var composed = design.Compose(model);
     if (!composed.Valid) return Results.Ok(new { composed.Errors, dryRun = (string?)null, ok = false });
-    // dtpipe itself judges the job: one row per source through the real engine, writers neutralised.
-    var dir = Path.Combine(options.StateDir, "validate", Guid.NewGuid().ToString("N"));
-    Directory.CreateDirectory(dir);
-    var jobPath = Path.Combine(dir, "job.yaml");
-    await File.WriteAllTextAsync(jobPath, composed.Yaml, ct);
-    var result = await cli.RunAsync(["--job", jobPath, "--dry-run", "1", "--no-stats"], dir, TimeSpan.FromSeconds(60), ct);
-    return Results.Ok(new { composed.Errors, dryRun = result.Succeeded ? null : result.Diagnostic(8), ok = result.Succeeded });
+    var check = await validator.ValidateAsync(composed.Yaml, ct);
+    return Results.Ok(new { composed.Errors, dryRun = check.Report, ok = check.Ok });
 });
 
 // The library.
