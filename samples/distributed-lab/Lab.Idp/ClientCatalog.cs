@@ -66,14 +66,19 @@ public sealed class ClientCatalog(IServiceProvider services, IdpOptions options,
         await using var scope = services.CreateAsyncScope();
         var manager = scope.ServiceProvider.GetRequiredService<IOpenIddictApplicationManager>();
         foreach (var client in clients)
-            await manager.CreateAsync(Describe(client), cancellationToken);
+            await manager.CreateAsync(Describe(client, options.ExtraOrigins), cancellationToken);
         logger.LogInformation("IdP: {Count} clients registered from {File}", clients.Count, options.ClientsFile);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-    private static OpenIddictApplicationDescriptor Describe(ClientDefinition client)
+    private static OpenIddictApplicationDescriptor Describe(ClientDefinition client, IReadOnlyList<Uri> extraOrigins)
     {
+        // A registered URI, and the same path at every extra origin. Uri normalizes a default port
+        // away, as the redirect URI a front end on that port sends.
+        IEnumerable<Uri> AtEveryOrigin(IEnumerable<string>? uris) => (uris ?? []).Select(u => new Uri(u))
+            .SelectMany(u => extraOrigins.Select(o => new Uri(o, u.PathAndQuery)).Prepend(u));
+
         var descriptor = new OpenIddictApplicationDescriptor
         {
             ClientId = client.ClientId,
@@ -101,8 +106,8 @@ public sealed class ClientCatalog(IServiceProvider services, IdpOptions options,
                     Permissions.Scopes.Profile,
                 ]);
                 descriptor.Requirements.Add(Requirements.Features.ProofKeyForCodeExchange);
-                foreach (var uri in client.RedirectUris ?? []) descriptor.RedirectUris.Add(new Uri(uri));
-                foreach (var uri in client.PostLogoutRedirectUris ?? []) descriptor.PostLogoutRedirectUris.Add(new Uri(uri));
+                foreach (var uri in AtEveryOrigin(client.RedirectUris)) descriptor.RedirectUris.Add(uri);
+                foreach (var uri in AtEveryOrigin(client.PostLogoutRedirectUris)) descriptor.PostLogoutRedirectUris.Add(uri);
                 break;
         }
         return descriptor;

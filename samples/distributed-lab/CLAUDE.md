@@ -67,7 +67,9 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   recorded. `[local: smoke.py library against the stack]`
 - **The IdP has one name for browsers and containers.** The proxy carries `idp.localtest.me` as a
   network alias and publishes the same port, so a token names one issuer everywhere; the authority
-  stays `http://`, a choice of the lab. The coordinator is browsed at `coordinator.localtest.me`,
+  stays `http://`, a choice of the lab. `idp-clients.json` registers only the local lab's URIs;
+  the stack hands the IdP its coordinator's origin (`Idp:ExtraOrigins`, port included), so any
+  `LAB_STACK_HTTP_PORT` works unedited. The coordinator is browsed at `coordinator.localtest.me`,
   never `127.0.0.1` or `localhost`, which the local lab's cookies hold. Nodes reach the coordinator
   directly, never through the proxy. `[unchecked]`
 - **The `coordinator` and `runner` image targets hold nothing of the lab**: lab content enters

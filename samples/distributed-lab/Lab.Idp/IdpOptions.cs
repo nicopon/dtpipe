@@ -26,6 +26,13 @@ public sealed class IdpOptions
 
     public TimeSpan AccessTokenLifetime { get; init; } = TimeSpan.FromHours(12);
 
+    /// <summary>
+    /// Origins a front end is also reached at (<c>Idp:ExtraOrigins</c>, separated by commas or
+    /// semicolons): every redirect URI an authorization-code client registers is accepted at each of
+    /// them too, path unchanged, so a deployment on another host or port needs no edit of the clients file.
+    /// </summary>
+    public IReadOnlyList<Uri> ExtraOrigins { get; init; } = [];
+
     public static IdpOptions From(IConfiguration configuration, string contentRoot)
     {
         var section = configuration.GetSection("Idp");
@@ -41,6 +48,10 @@ public sealed class IdpOptions
             AccessTokenLifetime = int.TryParse(section["AccessTokenLifetimeSeconds"], out var seconds) && seconds > 0
                 ? TimeSpan.FromSeconds(seconds)
                 : TimeSpan.FromHours(12),
+            ExtraOrigins = (section["ExtraOrigins"] ?? "")
+                .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(origin => new Uri(origin))
+                .ToList(),
         };
     }
 }

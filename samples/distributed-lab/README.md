@@ -82,8 +82,8 @@ cookie apart from the local lab's, so both run side by side.
 The runner mounts nothing. `LAB_SCALE` (default `1`) multiplies the seeded rows for every node: a
 node's rows reference the others' counts, so a node seeded at another scale refuses to start; delete
 `.stack/` to seed again. `LAB_NODE_SANDBOX=1` starts the data nodes in sandbox mode.
-`LAB_STACK_HTTP_PORT` moves the proxy off port 80; tokens then name the issuer with that port, and
-the coordinator's redirect URIs with it must be added to `idp-clients.json`.
+`LAB_STACK_HTTP_PORT` moves the proxy off port 80, outside and inside: tokens name the issuer with
+that port, and the IdP accepts the coordinator's redirects at it (`Idp:ExtraOrigins`).
 
 The smoke check's `library` pass runs against the stack from the host, with `./build.sh`'s binary,
 its witness reading the seeded databases under `.stack/`. The other passes drive local processes
