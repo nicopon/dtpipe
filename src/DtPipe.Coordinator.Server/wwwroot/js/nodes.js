@@ -1,5 +1,5 @@
 // Nodes: every node and runner, the bricks each offers with their schema and a preview read by
-// the node itself, the fragments it hosts, and the flow matrix.
+// the node itself, the fragments of deployed pipelines it holds, and the flow matrix.
 import { api, csvTable, esc, nodeColor, store } from "./core.js";
 
 let host = null;
@@ -55,10 +55,11 @@ function render() {
         ${n.datasets.map((d) => `<div class="dataset"><code>\${{${esc(d.variable)}}}</code> ${esc(d.engine)} · ${esc(d.description)}</div>`).join("")}
         ${n.role === "Runner" ? `<p class="hint">Carries every step between the bricks: transformers, SQL, merges.</p>` : ""}
         ${bricks.length ? `<h3>Bricks</h3>${bricks.map(brickRow).join("")}` : n.role === "Runner" ? "" : `<p class="hint">No brick offered.</p>`}
-        <h3>Fragments hosted (${fragments.length})</h3>
+        ${fragments.length ? `<h3 title="A fragment is the part of a deployed pipeline placed on this node: its bricks, or for a runner the steps between them.">Deployed here (${fragments.length})</h3>
         ${fragments.map((f) => `
           <div class="frag-line"><span>${esc(f.fragment)}${f.instance !== "main" ? ` <span class="chip">${esc(f.instance)}</span>` : ""}</span>
-          <span class="state ${esc(f.state)}">${esc(f.state)}${f.exitCode != null ? ` ${f.exitCode}` : ""}</span></div>`).join("") || `<p class="hint">none</p>`}
+          <span class="state ${esc(f.state)}">${esc(f.state)}${f.exitCode != null ? ` ${f.exitCode}` : ""}</span></div>`).join("")}`
+          : `<p class="hint">No pipeline deployed here.</p>`}
       </section>`;
   }).join("");
 
