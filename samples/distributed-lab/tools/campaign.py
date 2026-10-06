@@ -904,13 +904,14 @@ def short_token_trials(label, before=None):
     """The IdP issues 20-second tokens, the hosts restart to fetch them, and a run of P2 follows. It either
     finishes (tokens renewed) or fails saying so; it never hangs, and the lab is usable afterwards. The hosts are
     stopped and started here, never through `lab.sh nodes`, which leaves hosts already online in their mode as they
-    are, with the tokens they hold. The IdP must answer node-1's credentials with a 20-second token, or the trial is
-    the harness's (H)."""
+    are, with the tokens they hold. The IdP must answer node-1's credentials with a 20-second token (19 once rounded
+    down), or the trial is the harness's (H)."""
     for rep in range(REPS):
         try:
             stop_start_idp(f"--Idp:AccessTokenLifetimeSeconds={SHORT_TOKEN}")
             lifetime = idp_token_lifetime()
-            if lifetime != SHORT_TOKEN:
+            # expires_in counts the whole seconds left when the answer is written: one under the lifetime is the same token.
+            if not SHORT_TOKEN - 1 <= lifetime <= SHORT_TOKEN:
                 raise RuntimeError(f"the IdP issues {lifetime}-second tokens, not {SHORT_TOKEN}")
             start_hosts(lambda n: URL, "the hosts with short-lived tokens")
             trial(label, rep, "sensor-stream", 0, lambda run, plan: "", {"succeeded", "failed"}, 150,
