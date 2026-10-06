@@ -26,6 +26,11 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   data plane and a service's token never reaches `/api`. Only a page navigation
   (`TrustedIdp.IsPageNavigation`) is sent to the provider; any other request is told 401.
   `[local: the lab's smoke.py rights — roles and sessions]`
+- **A refused page gives a way out.** A person with no role who opens a page is signed out here
+  and at the provider and lands on `/account/denied`: keeping the provider's session would sign
+  the same person in again on the next try. A person who lacks only the admin role gets a 403 page
+  linking back to `/` and to `/account/logout`. `AccessPage` writes both; a message it shows is
+  HTML-encoded first. `[local: the lab's smoke.py rights — roles and sessions]`
 - **A request that changes something carries `X-Dtpipe-Csrf`** (`RequireCsrfHeader`, on every
   `/api` group): another site cannot set it without a CORS preflight this server never answers.
   The pages' `api()` helpers send it. Never add a cookie-authenticated route outside those groups.

@@ -332,7 +332,9 @@ def rights_pass():
         # A person's rights are the coordinator's configuration: labreader reads, labdesigner also
         # changes pipelines, labadmin also the rights; anyone else holds nothing. A change needs the
         # CSRF header; a service's token opens no page and no /api route; an anonymous call is told
-        # 401, never sent to the IdP.
+        # 401, never sent to the IdP. A page refuses with a way out: a reader is offered to sign out of
+        # the Lab view, and a person with no role is signed out here and at the IdP, so the next
+        # sign-in can be someone else.
         def status(fn):
             try:
                 fn()
@@ -349,6 +351,25 @@ def rights_pass():
                 return e.code
 
         reader, designer, nobody = Session(URL, "labreader"), Session(URL, "labdesigner"), Session(URL, "toto")
+
+        def navigate(session, path):
+            """Where a browser opening path ends, redirects followed: (url, status, body)."""
+            try:
+                with session._opener.open(URL + path, timeout=30) as r:
+                    return r.geturl(), r.status, r.read().decode(errors="replace")
+            except urllib.error.HTTPError as e:
+                return e.geturl(), e.code, e.read().decode(errors="replace")
+
+        def lab_refusal():
+            _, code, body = navigate(reader, "/lab/")
+            return code, 'href="/account/logout"' in body
+
+        def signed_out():
+            # Ends on the denied page, without the session, and the IdP asks for a password again.
+            url, code, _ = navigate(nobody, "/")
+            _, me, _ = navigate(nobody, "/api/me")
+            again, _, _ = navigate(nobody, "/")
+            return urllib.parse.urlparse(url).path, code, me, "/account/login" in again and not again.startswith(URL)
         policy = call("/api/rights")["matrix"]
         expected = {
             "reader GET /api/library": (status(lambda: reader.call("/api/library")), 200),
@@ -358,6 +379,8 @@ def rights_pass():
             "designer GET /api/pipelines (lab mode)": (status(lambda: designer.call("/api/pipelines")), 403),
             "no role GET /api/nodes": (status(lambda: nobody.call("/api/nodes")), 403),
             "no role GET /api/me": (status(lambda: nobody.call("/api/me")), 200),
+            "reader opens the Lab view": (lab_refusal(), (403, True)),
+            "no role opens a page": (signed_out(), ("/account/denied", 200, 401, True)),
             "anonymous GET /api/nodes": (raw("/api/nodes"), 401),
             "anonymous GET /": (raw("/"), 302),
             "service token GET /api/nodes": (raw("/api/nodes", {"Authorization": "Bearer " + service_token()}), 401),

@@ -80,11 +80,19 @@ app.Use(async (context, next) =>
         await context.ChallengeAsync(TrustedIdp.OidcScheme);
         return;
     }
-    var needed = context.Request.Path.StartsWithSegments("/lab") ? CoordinatorRoles.Admin : CoordinatorRoles.Reader;
-    if (!context.User.IsInRole(needed))
+    // A person with no role can open no page: they are signed out of the coordinator and of the
+    // provider, so the next sign-in can be someone else's instead of the same refusal again.
+    if (!context.User.IsInRole(CoordinatorRoles.Reader))
     {
-        context.Response.StatusCode = StatusCodes.Status403Forbidden;
-        await context.Response.WriteAsync($"{context.User.FindFirst("email")?.Value ?? context.User.Identity.Name} is not a {needed} of this coordinator. Sign out: /account/logout\n");
+        await Results.SignOut(new AuthenticationProperties { RedirectUri = "/account/denied" }, [TrustedIdp.CookieScheme, TrustedIdp.OidcScheme])
+            .ExecuteAsync(context);
+        return;
+    }
+    if (context.Request.Path.StartsWithSegments("/lab") && !context.User.IsInRole(CoordinatorRoles.Admin))
+    {
+        var who = System.Net.WebUtility.HtmlEncode(EmailOf(context) ?? context.User.Identity.Name ?? "This account");
+        await AccessPage(StatusCodes.Status403Forbidden, $"{who} is not an admin of this coordinator: the Lab view is for administrators.",
+            ("/", "Back to the coordinator"), ("/account/logout", "Sign out")).ExecuteAsync(context);
         return;
     }
     await next(context);
@@ -104,6 +112,10 @@ app.MapGet("/account/login", (string? returnUrl) => Results.Challenge(
     new AuthenticationProperties { RedirectUri = returnUrl is { Length: > 0 } url && url.StartsWith('/') && !url.StartsWith("//") ? url : "/" },
     [TrustedIdp.OidcScheme]));
 app.MapGet("/account/logout", () => Results.SignOut(new AuthenticationProperties { RedirectUri = "/" }, [TrustedIdp.CookieScheme, TrustedIdp.OidcScheme]));
+// Where a person with no role lands once signed out: anonymous, it names nobody.
+app.MapGet("/account/denied", () => AccessPage(StatusCodes.Status200OK,
+    "That account holds no role on this coordinator, so it has been signed out, here and at the identity provider.",
+    ("/", "Sign in with another account")));
 
 // /api serves the pages, by the session cookie, with three cumulative roles: a reader sees
 // everything, a designer also changes pipelines, deploys and runs them, an admin also changes the
@@ -330,6 +342,18 @@ api.MapGet("/events", async (HttpContext context, EventBus bus, NodeInventory in
 app.Run();
 
 static string? EmailOf(HttpContext context) => context.User.FindFirst("email")?.Value;
+
+// A refused page navigation: a sentence and its ways out, readable without the pages' scripts.
+// The message is HTML already encoded.
+static IResult AccessPage(int status, string message, params (string Href, string Label)[] links) => Results.Content(
+    "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+    + "<title>dtpipe coordinator</title><link rel=\"stylesheet\" href=\"/styles.css\"></head>"
+    + "<body style=\"max-width:40rem;margin:4rem auto;padding:0 1rem;font-family:system-ui,sans-serif;line-height:1.5\">"
+    + $"<h1 style=\"font-size:1.3rem\">dtpipe coordinator</h1><p>{message}</p><p>"
+    + string.Join(" · ", links.Select(l => $"<a href=\"{l.Href}\">{l.Label}</a>"))
+    + "</p></body></html>",
+    "text/html; charset=utf-8",
+    statusCode: status);
 
 static async ValueTask<object?> RequireCsrfHeader(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
 {
