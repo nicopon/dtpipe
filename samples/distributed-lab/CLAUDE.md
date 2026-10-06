@@ -59,6 +59,21 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   clean tracked tree. Every call retried on `EADDRINUSE`/`EADDRNOTAVAIL` and every port-exhaustion line
   in the lab's logs is counted into the trial's `I7`, never absorbed. `[local: tools/campaign.py with
   CAMPAIGN_PREFLIGHT=report prints the checks without refusing]`
+- **The compose stack mounts nothing across services.** `compose.yaml` gives each service its own
+  directory under `.stack/` (a node its database, the coordinator its state, the IdP its key) and
+  the runner none: the stack is the proof that the coordinator reads no node's data, so a volume
+  shared between two services voids it. A node seeds its own database on first start
+  (`docker/node-entrypoint.sh`, `seed.sh` with its name) and refuses a scale other than the one it
+  recorded. `[local: smoke.py library against the stack]`
+- **The IdP has one name for browsers and containers.** The proxy carries `idp.localtest.me` as a
+  network alias and publishes the same port, so a token names one issuer everywhere; the authority
+  stays `http://`, a choice of the lab. The coordinator is browsed at `coordinator.localtest.me`,
+  never `127.0.0.1` or `localhost`, which the local lab's cookies hold. Nodes reach the coordinator
+  directly, never through the proxy. `[unchecked]`
+- **The `coordinator` and `runner` image targets hold nothing of the lab**: lab content enters
+  through `coordinator-lab`, `node`, `idp` or `compose.yaml`'s environment, so those two targets
+  can leave `samples/` unchanged. Every .NET service runs under `init: true`: dotnet as PID 1 hangs
+  on its own crash, and the nodes start dtpipe children. `[unchecked]`
 - Verify a change with `./lab.sh smoke`, and a page change with `./lab.sh ui` too: it drives
   headless Chrome over the DevTools protocol (`tools/cdp.py`), because Chrome's own `--screenshot`
   stops the page before its fetches finish. `tools/cdp.py` also clicks and drags with the mouse.

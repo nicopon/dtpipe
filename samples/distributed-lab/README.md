@@ -1,7 +1,8 @@
 # dtpipe distributed lab
 
 A self-contained demonstrator for dtpipe's distributed pipelines: one coordinator, four data
-nodes each with its own database, and a runner, run as plain local processes (no container).
+nodes each with its own database, and a runner, run as plain local processes or as a compose
+stack ([below](#the-compose-stack)).
 Every node authenticates with a test identity provider, `Lab.Idp`, which says who it is; the
 coordinator decides what it may do.
 
@@ -50,6 +51,49 @@ Every page and `/api` call needs a person signed in through the IdP, with a role
 `LAB_PORT` changes the coordinator's port (default `5180`), `LAB_IDP_PORT` the IdP's (`5190`),
 `DTPIPE` the binary. Everything the lab writes lives
 under `.state/`: databases, fragment jobs, plans, logs, build output.
+
+## The compose stack
+
+The same lab in containers, each service on its own data: no service mounts another's
+directory, and the coordinator never reads a node's database. Prerequisites: Docker with
+Compose, and port 80 free. The images build dtpipe for Linux themselves, so no `./build.sh` is
+needed to start it.
+
+```bash
+cd samples/distributed-lab
+docker compose up -d --build        # build the images, seed each node on first start, start all
+open http://lab.localtest.me        # the home page: links, health, test accounts
+docker compose down                 # stops everything; .stack/ keeps the data
+```
+
+`*.localtest.me` resolves to `127.0.0.1`. A proxy (Caddy) publishes the stack's only port and
+routes by host name: `coordinator.localtest.me` to the coordinator, `idp.localtest.me` to the
+IdP, `lab.localtest.me` to the home page. Inside the network the proxy carries the same names, so
+the IdP has one issuer for browsers and containers. The nodes reach the coordinator directly; the
+data plane never crosses the proxy. The coordinator's distinct host name also keeps its session
+cookie apart from the local lab's, so both run side by side.
+
+| Directory | Mounted by | Holds |
+|---|---|---|
+| `.stack/idp/` | `idp` | its signing key |
+| `.stack/coordinator/` | `coordinator` | library, runs, rights, session keys |
+| `.stack/node-N/` | `node-N` | its database, seeded on first start, and its fragment jobs |
+
+The runner mounts nothing. `LAB_SCALE` (default `1`) multiplies the seeded rows for every node: a
+node's rows reference the others' counts, so a node seeded at another scale refuses to start; delete
+`.stack/` to seed again. `LAB_NODE_SANDBOX=1` starts the data nodes in sandbox mode.
+`LAB_STACK_HTTP_PORT` moves the proxy off port 80; tokens then name the issuer with that port, and
+the coordinator's redirect URIs with it must be added to `idp-clients.json`.
+
+The smoke check's `library` pass runs against the stack from the host, with `./build.sh`'s binary,
+its witness reading the seeded databases under `.stack/`. The other passes drive local processes
+(`lab.sh nodes`, an impostor host) and need the local lab.
+
+```bash
+python3 smoke.py http://coordinator.localtest.me ../../dist/release/dtpipe .stack library
+```
+
+The containers run in UTC whatever the host's zone; the witness runs in the host's.
 
 ## The nodes
 
