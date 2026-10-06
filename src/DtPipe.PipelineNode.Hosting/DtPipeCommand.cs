@@ -21,10 +21,13 @@ internal sealed record DtPipeCommandResult(int ExitCode, byte[] Output, string S
 /// </summary>
 internal sealed class DtPipeCommand(string dtpipe, string workingDirectory, IReadOnlyDictionary<string, string> environment)
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
 
-    public async Task<DtPipeCommandResult> RunAsync(IEnumerable<string> args, CancellationToken ct)
+    public string WorkingDirectory => workingDirectory;
+
+    public async Task<DtPipeCommandResult> RunAsync(IEnumerable<string> args, CancellationToken ct, TimeSpan? timeout = null)
     {
+        var bound = timeout ?? DefaultTimeout;
         var psi = new ProcessStartInfo
         {
             FileName = dtpipe,
@@ -44,7 +47,7 @@ internal sealed class DtPipeCommand(string dtpipe, string workingDirectory, IRea
         var stdout = process.StandardOutput.BaseStream.CopyToAsync(output, ct);
         var stderr = process.StandardError.ReadToEndAsync(ct);
         using var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        bounded.CancelAfter(Timeout);
+        bounded.CancelAfter(bound);
         try
         {
             await process.WaitForExitAsync(bounded.Token);
@@ -52,7 +55,7 @@ internal sealed class DtPipeCommand(string dtpipe, string workingDirectory, IRea
         catch (OperationCanceledException)
         {
             try { process.Kill(entireProcessTree: true); } catch { }
-            throw new TimeoutException($"dtpipe did not answer within {Timeout.TotalSeconds:F0}s.");
+            throw new TimeoutException($"dtpipe did not answer within {bound.TotalSeconds:F0}s.");
         }
         await stdout;
         return new DtPipeCommandResult(process.ExitCode, output.ToArray(), await stderr);

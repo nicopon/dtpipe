@@ -14,8 +14,9 @@ none. One node per process; a second `AddDtPipeNode` throws.
   registered instance is admissible), except under `AnyFragment`. `[local: the lab's smoke.py
   bricks, sandbox]`
 - **Lab requests are the host's to answer.** The coordinator's lab mode asks a node to read its own
-  datasets (`LabRequests`: a query); the node answers only when its own `DtPipeNodeOptions.LabMode`
-  is on, off by default, and reads only a variable given an engine. `[local: Hosting.Tests
+  datasets (`LabRequests`: a query, and `dtpipe split` of a branch that reads them, whose sample
+  run executes the branch's transformers on the node); the node answers only when its own
+  `DtPipeNodeOptions.LabMode` is on, off by default, and queries only a variable given an engine. `[local: Hosting.Tests
   LabRequestsTests; the lab's smoke.py, whose checks read the warehouse this way]`
 - **`BrickRules` and `JobYaml` (`DtPipe.Coordinator.Contracts`) are the one reading of a branch**,
   shared with the coordinator, so the designer never calls something a brick the node then

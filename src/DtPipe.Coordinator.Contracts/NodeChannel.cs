@@ -26,6 +26,10 @@ public static class NodeChannel
     // Coordinator -> node host, answered: a query on one of the node's datasets, for the coordinator's
     // lab mode. The node answers it only if its own configuration says so.
     public const string QueryDataset = nameof(QueryDataset);
+
+    // Coordinator -> node host, answered: dtpipe split of one branch that reads the node's data, for
+    // the Lab view's cuts; a lab request too (BranchCut).
+    public const string SplitBranch = nameof(SplitBranch);
 }
 
 /// <summary>A database a node hosts, reachable from a fragment's job through <c>${{Variable}}</c>.</summary>
@@ -63,6 +67,12 @@ public sealed record BrickPreview(string? Csv, string? Error);
 
 /// <summary>What <c>QueryDataset</c> answers: CSV text, or why the node did not or could not read it.</summary>
 public sealed record DatasetQueryResult(string? Csv, string? Error);
+
+/// <summary>
+/// What <c>SplitBranch</c> answers: the cut branch's producer and consumer halves, each a one-branch
+/// job (<see cref="BranchCut.Half"/>), or why the node did not or could not cut it.
+/// </summary>
+public sealed record BranchSplit(string? Producer, string? Consumer, string? Error);
 
 public enum FragmentEdgeDirection { Inbound, Outbound }
 

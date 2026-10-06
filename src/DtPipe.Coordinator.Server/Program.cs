@@ -36,6 +36,7 @@ builder.Services.Replace(ServiceDescriptor.Singleton<IHubProgressMonitor, EventP
 
 builder.Services.AddSingleton<EventBus>();
 builder.Services.AddSingleton<NodeInventory>();
+builder.Services.AddSingleton<NodeRequests>();
 builder.Services.AddSingleton<BrickCatalog>();
 builder.Services.AddSingleton<DtPipeCli>();
 builder.Services.AddSingleton<PipelineCatalog>();
@@ -123,13 +124,9 @@ api.MapGet("/flow-matrix", (RightsStore rights) => new { groups = rights.Snapsho
 api.MapGet("/bricks", (BrickCatalog bricks) => bricks.List());
 
 // A brick is read by the node that owns it, never by the coordinator.
-designer.MapPost("/bricks/{node}/{id}/preview", async (string node, string id, NodeInventory inventory, IHubContext<NodeChannelHub> hub, CancellationToken ct) =>
+designer.MapPost("/bricks/{node}/{id}/preview", async (string node, string id, NodeRequests nodes, CancellationToken ct) =>
 {
-    var connection = inventory.ConnectionOf(node);
-    if (connection is null) return Results.Conflict(new { error = $"{node} is offline." });
-    using var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct);
-    bounded.CancelAfter(TimeSpan.FromSeconds(40));
-    var preview = await hub.Clients.Client(connection).InvokeAsync<BrickPreview>(NodeChannel.PreviewBrick, id, 20, bounded.Token);
+    var preview = await nodes.AskAsync<BrickPreview>(node, NodeChannel.PreviewBrick, [id, 20], TimeSpan.FromSeconds(40), ct);
     return preview.Error is null ? Results.Ok(new { csv = preview.Csv }) : Results.BadRequest(new { error = preview.Error });
 });
 

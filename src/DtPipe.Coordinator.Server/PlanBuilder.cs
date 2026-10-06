@@ -39,15 +39,15 @@ public sealed record DistributionPlan(
 /// <summary>
 /// Turns one monolithic job, a set of cuts and a placement into one fragment per node.
 /// <para>
-/// A cut inside a branch is <c>dtpipe split</c>'s: the planner runs it and keeps both halves as
-/// written, so where each option lands stays dtpipe's decision. Only the regrouping of whole
+/// A cut inside a branch is <c>dtpipe split</c>'s, run by the node whose data the branch reads; the
+/// planner keeps both halves as written, so where each option lands stays dtpipe's decision. Only the regrouping of whole
 /// branches is the planner's own: a <c>from</c>/<c>ref</c> dependency that crosses two nodes becomes an
 /// <c>arrow:-</c> input branch on the consumer's side and an <c>arrow:-</c> output on the
 /// producer's - the shape <c>dtpipe split</c> itself gives a cut. It never edits an option.
 /// </para>
 /// </summary>
 public sealed class PlanBuilder(
-    CoordinatorServerOptions options, DtPipeCli cli, NodeInventory inventory, IPlanRegistry planRegistry, IFlowControlService flowControl)
+    CoordinatorServerOptions options, DtPipeCli cli, NodeInventory inventory, NodeRequests nodes, IPlanRegistry planRegistry, IFlowControlService flowControl)
 {
     private const string ArrowEndpoint = "arrow:-";
     private static readonly TimeSpan SplitTimeout = TimeSpan.FromSeconds(90);
@@ -276,24 +276,63 @@ public sealed class PlanBuilder(
                 return null;
             }
 
-            var jobPath = Path.Combine(workDir, $"job-{i}.yaml");
-            await File.WriteAllTextAsync(jobPath, current, ct);
-            var prefix = Path.Combine(workDir, $"cut-{i}");
-            var result = await cli.RunAsync(
-                ["split", jobPath, "--branch", cut.Branch, "--at", cut.At.ToString(), "--out", prefix, "--acknowledge"],
-                workDir, SplitTimeout, ct);
-            if (!result.Succeeded)
-            {
-                errors.Add($"dtpipe split refused to cut '{cut.Branch}' after stage {cut.At}:\n{result.Diagnostic()}");
-                return null;
-            }
+            var split = await SplitAsync(cut, branch, Path.Combine(workDir, $"cut-{i}"), errors, ct);
+            if (split is null) return null;
 
-            var producer = JobYaml.Parse(await File.ReadAllTextAsync(prefix + "-producer.yaml", ct));
-            heads[cut.Branch] = JobYaml.Branches(producer).Single(b => b.Alias == cut.Branch).Branch;
-            current = await File.ReadAllTextAsync(prefix + "-consumer.yaml", ct);
+            heads[cut.Branch] = JobYaml.Branches(JobYaml.Parse(split.Producer!)).Single().Branch;
+            // The consumer half takes the branch's place; every other branch stays as written.
+            var remaining = JobYaml.Parse(current);
+            remaining.Children[new YamlScalarNode(cut.Branch)] = JobYaml.Branches(JobYaml.Parse(split.Consumer!)).Single().Branch;
+            current = JobYaml.Serialize(remaining);
         }
 
         return (JobYaml.Parse(current), heads);
+    }
+
+    /// <summary>
+    /// Cuts one branch with <c>dtpipe split</c>, on the node that hosts what the branch reads, since
+    /// only that node opens its data; a branch that reads no node's data is cut here. <c>null</c>, with
+    /// the reason in <paramref name="errors"/>, when it cannot be cut.
+    /// </summary>
+    private async Task<BranchSplit?> SplitAsync(CutRequest cut, YamlMappingNode branch, string workDir, List<string> errors, CancellationToken ct)
+    {
+        var single = new YamlMappingNode { { cut.Branch, JobYaml.CloneBranch(branch) } };
+        var owners = JobYaml.Variables(JobYaml.Serialize(single)).Select(nodes.HostOf).OfType<string>().Distinct().ToList();
+        if (owners.Count > 1)
+        {
+            errors.Add($"'{cut.Branch}' reaches data on {string.Join(" and ", owners)}; a cut runs on the one node whose data the branch reads.");
+            return null;
+        }
+
+        BranchSplit split;
+        try
+        {
+            split = owners is [var owner]
+                ? await nodes.AskAsync<BranchSplit>(owner, NodeChannel.SplitBranch, [cut.Branch, JobYaml.Serialize(single), cut.At], SplitTimeout + TimeSpan.FromSeconds(10), ct)
+                : await SplitHereAsync(cut, branch, workDir, ct);
+        }
+        catch (Exception ex) when (ex is ConflictException or TimeoutException || (ex is OperationCanceledException && !ct.IsCancellationRequested))
+        {
+            split = new BranchSplit(null, null, ex is OperationCanceledException ? "no answer in time." : ex.Message);
+        }
+        if (split.Error is null) return split;
+        var where = owners is [var node] ? $" on {node}" : "";
+        errors.Add($"dtpipe split refused to cut '{cut.Branch}' after stage {cut.At}{where}:\n{split.Error}");
+        return null;
+    }
+
+    private async Task<BranchSplit> SplitHereAsync(CutRequest cut, YamlMappingNode branch, string workDir, CancellationToken ct)
+    {
+        Directory.CreateDirectory(workDir);
+        var jobPath = Path.Combine(workDir, "job.yaml");
+        await File.WriteAllTextAsync(jobPath, BranchCut.Job(cut.Branch, branch), ct);
+        var prefix = Path.Combine(workDir, "cut");
+        var result = await cli.RunAsync(BranchCut.Arguments(jobPath, cut.Branch, cut.At, prefix), workDir, SplitTimeout, ct);
+        if (!result.Succeeded) return new BranchSplit(null, null, result.Diagnostic());
+        return new BranchSplit(
+            BranchCut.Half(await File.ReadAllTextAsync(prefix + "-producer.yaml", ct), cut.Branch),
+            BranchCut.Half(await File.ReadAllTextAsync(prefix + "-consumer.yaml", ct), cut.Branch),
+            null);
     }
 
     private static List<Unit> BuildUnits(YamlMappingNode remaining, IReadOnlyDictionary<string, YamlMappingNode> heads)

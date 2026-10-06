@@ -38,18 +38,21 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   answer 404 without it (and 403 to anyone but an admin), and `GET /api/info` tells the pages
   which mode they run in. Never add a bench-only
   route outside `MapLabMode`. `[unchecked]`
-- **The server reads sources itself in two places**: `split` (planning a cut) and `--dry-run`
-  (`/design/validate`). `DtPipeCli` gives dtpipe every dataset path a node announced, so both work
-  only where the server shares the nodes' file system. A node that announces a variable without an
-  engine keeps its path to itself. `/api/query` is the node's to answer (`NodeChannel.QueryDataset`),
-  like a brick preview. `[unchecked]`
+- **The server reads sources itself in one place**: `--dry-run` (`/design/validate`). `DtPipeCli`
+  gives dtpipe every dataset path a node announced, so it works only where the server shares the
+  nodes' file system. A node that announces a variable without an engine keeps its path to itself.
+  Everything else that reads a node's data asks that node through `NodeRequests`: a brick preview,
+  `/api/query` (`NodeChannel.QueryDataset`), a cut (`SplitBranch`). `[local: the lab's smoke.py
+  sandbox — a cut on its node]`
 - **A new state directory starts from the seeds, or empty.** `Coordinator:LibrarySeed` (one
   `.yaml` per pipeline) and `Coordinator:RightsSeed`; with neither, the library has no pipeline
   and the rights no identity and an empty matrix: nobody may send anything until an administrator
   says so. The library is a git repository of its own under `library/` in the state directory,
   driven by the `git` command line with a fixed identity (the image needs `git`); run history lives
   in `runs/`, outside git; deployments are in memory.
-- **Cuts inside a branch belong to `dtpipe split`.** `PlanBuilder` only regroups whole branches
+- **Cuts inside a branch belong to `dtpipe split`**, run on the node whose data the branch reads
+  (`BranchCut`: the branch alone, its two halves back), or here for a branch that reads no node's
+  data. `PlanBuilder` puts the consumer half in the branch's place, only regroups whole branches
   and adds `arrow:-` endpoints or relay branches; it never edits an option or moves a transformer.
   `AutoPlacer` only chooses a placement for `PlanBuilder` and cuts nothing. `[local: the lab's smoke.py]`
 - **A brick is matched by content, never by name.** A branch is a brick when its canonical form

@@ -1,5 +1,4 @@
 using DtPipe.Coordinator.Contracts;
-using Microsoft.AspNetCore.SignalR;
 
 namespace DtPipe.Coordinator.Server;
 
@@ -37,15 +36,12 @@ public static class LabModeEndpoints
 
         // A query on a node's dataset, to show what a run wrote: the node that hosts it reads it, if
         // its own configuration answers lab requests; the server never opens a node's database.
-        api.MapPost("/query", async (QueryRequest request, NodeInventory inventory, IHubContext<NodeChannelHub> hub, CancellationToken ct) =>
+        api.MapPost("/query", async (QueryRequest request, NodeInventory inventory, NodeRequests nodes, CancellationToken ct) =>
         {
             var host = inventory.Snapshot().FirstOrDefault(n => n.Datasets.Any(d => d.Variable == request.Variable && d.Engine.Length > 0));
             if (host is null) return Results.BadRequest(new { error = $"No node announces a dataset at {request.Variable}." });
-            if (inventory.ConnectionOf(host.Name) is not { } connection) return Results.Conflict(new { error = $"{host.Name} is offline." });
-            using var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            bounded.CancelAfter(TimeSpan.FromSeconds(40));
-            var answer = await hub.Clients.Client(connection).InvokeAsync<DatasetQueryResult>(
-                NodeChannel.QueryDataset, request.Variable, request.Sql, 200, bounded.Token);
+            var answer = await nodes.AskAsync<DatasetQueryResult>(
+                host.Name, NodeChannel.QueryDataset, [request.Variable, request.Sql, 200], TimeSpan.FromSeconds(40), ct);
             return answer.Error is null ? Results.Ok(new { csv = answer.Csv }) : Results.BadRequest(new { error = answer.Error });
         });
     }

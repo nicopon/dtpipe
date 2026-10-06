@@ -80,6 +80,7 @@ internal sealed class NodeAgent : BackgroundService
         hub.On<string>(NodeChannel.Kill, f => Enqueue(() => KillAsync(f)));
         hub.On<string, int, BrickPreview>(NodeChannel.PreviewBrick, (id, rows) => _bricks.PreviewAsync(id, rows));
         hub.On<string, string, int, DatasetQueryResult>(NodeChannel.QueryDataset, (variable, sql, rows) => _lab.QueryAsync(variable, sql, rows));
+        hub.On<string, string, int, BranchSplit>(NodeChannel.SplitBranch, (alias, job, at) => _lab.SplitAsync(alias, job, at));
         hub.Reconnected += async _ => await AnnounceAsync();
         // A connection the coordinator closes (a reconnect it asked for, an announcement it refused)
         // is not retried by SignalR's own policy: the reconnect loop starts it again, so a node the

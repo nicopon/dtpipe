@@ -572,6 +572,21 @@ def sandbox_pass():
         return refused(entry["id"], entry["yaml"], [{"branch": "customers", "at": 1}], placement, "customers", "node-1",
                        "does more than read or write")
 
+    def cut_on_its_node():
+        # The cut branch reads node-2's sales while the job joins two other nodes' data: only node-2
+        # can run dtpipe split on it, and the planner asks it to.
+        yaml = open(os.path.join(LIBRARY_SEED, "revenue-by-country.yaml")).read()
+        placement = {"orders^": "node-2", "orders": "runner-1", "customers": "node-1", "products": "node-3",
+                     "revenue": "runner-1", "load": "node-4"}
+        plan = call("/api/plan", {"pipelineId": "smoke-cut", "yaml": yaml, "cuts": [{"branch": "orders", "at": 0}],
+                                  "placement": placement})
+        if plan["errors"]:
+            raise RuntimeError(f"the plan has errors: {plan['errors']}")
+        head = next((u for u in plan["units"] if u["id"] == "orders^"), None)
+        if head is None:
+            raise RuntimeError("no head for the cut branch")
+        return f"orders cut on node-2, {len(plan['fragments'])} fragments planned"
+
     def processor():
         job = "a:\n  input: generate:10\nb:\n  from: a\n  provider-options:\n    sql:\n      query: SELECT * FROM a\nc:\n  from: b\n  output: duck:${{LAB_WAREHOUSE_DB}}\n"
         return refused("sandbox-probe", job, [], {"a": "node-2", "b": "node-2", "c": "node-4"}, "b", "node-2", "sql processor")
@@ -580,6 +595,7 @@ def sandbox_pass():
     check("any reader or writer", any_reader)
     check("a join on a data node", compute)
     check("a cut after a transformer", cut_leaves_a_transformer)
+    check("a cut on its node", cut_on_its_node)
     check("a processor on a data node", processor)
     return failures[0]
 
