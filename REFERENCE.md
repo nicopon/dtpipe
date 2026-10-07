@@ -1225,10 +1225,16 @@ cards still form one chain, the job composes back into that one branch. A branch
 describe stays one card, as written. Edit the cards, or the job as YAML, and sample it: the job
 runs through the real engine, as `--dry-run` does, over the source rows you ask for (at most
 1000), with the writer neutralised: the target is never written. Each stage shows the rows it
-passed, with its columns and types. The page saves no file; a job that asks for a checkpoint still
-stores it in the folder's session store, as `--dry-run` does. The sample mode's safety gate
+passed, with its columns and types. A sample writes no file; a job that asks for a checkpoint
+still stores it in the folder's session store, as `--dry-run` does. The sample mode's safety gate
 applies, and each branch reports which source protection it had (see
 [Sample Mode](#sample-mode-and-materialisation)).
+
+Save writes the job the studio composes from the cards, never a text the page sends: a job written
+by hand loses its inner comments and its key order, and the page says so when it opens one. A save
+refuses a file that changed on disk since it was opened, never creates a folder, and never
+overwrites an existing file with a new job. Where each card sits is kept outside the job, in
+`.dtpipe/studio/<job>-layout.json` under the folder; `.dtpipe/` ignores itself in git.
 
 ```bash
 dtpipe studio ./jobs              # prints the address to open, then serves until stopped
@@ -1242,8 +1248,9 @@ dtpipe studio ./jobs --port 8765  # a fixed port instead of any free one
 The page runs dtpipe with your own access. It listens on 127.0.0.1 only and answers only the
 address it printed: the address carries a token for this session, which every request must
 present, and a request from another site is refused. It reads only the `.yaml` and `.yml` files
-under the folder, never a hidden one or one reached through a link. A job's relative paths
-resolve from the folder, as `dtpipe --job` run there would.
+under the folder, and writes only those and its own files under `.dtpipe/studio/`, never a hidden
+one or one reached through a link. A job's relative paths resolve from the folder, as
+`dtpipe --job` run there would.
 
 Quit from the page ends the session (exit 0); Ctrl+C ends it with exit 130.
 

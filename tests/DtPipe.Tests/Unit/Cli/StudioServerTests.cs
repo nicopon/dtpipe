@@ -308,6 +308,138 @@ public sealed class StudioServerTests : IAsyncLifetime
         Assert.Contains("/api/design/compose", body.GetProperty("error").GetString());
     }
 
+    // ── Saving ───────────────────────────────────────────────────────────────
+
+    private const string Copy = "# Copy\nmain:\n  input: csv:a.csv\n  output: csv:b.csv\n";
+
+    private static object Cards(string output, object? layout = null) => new
+    {
+        title = "Copy",
+        steps = new object[] { new { alias = "main", kind = "branch", yaml = $"input: csv:a.csv\noutput: {output}\n" } },
+        layout,
+    };
+
+    private async Task<JsonElement> OpenAsync(string path)
+    {
+        var (status, body) = await SendAsync(Request(HttpMethod.Get, $"/api/job?path={Uri.EscapeDataString(path)}"));
+        Assert.Equal(HttpStatusCode.OK, status);
+        return body;
+    }
+
+    private Task<(HttpStatusCode Status, JsonElement Body)> SaveAsync(string path, string? hash, object model, bool acceptErrors = false) =>
+        SendAsync(Request(HttpMethod.Put, "/api/job", body: new { path, hash, model, acceptErrors }));
+
+    [Fact]
+    public async Task A_save_writes_the_job_the_server_composes_and_keeps_the_layout_outside_git()
+    {
+        File.WriteAllText(Path.Combine(_dir, "copy.yaml"), Copy);
+        var opened = await OpenAsync("copy.yaml");
+        Assert.False(opened.GetProperty("rewrites").GetBoolean());
+
+        var (status, saved) = await SaveAsync("copy.yaml", opened.GetProperty("hash").GetString(),
+            Cards("csv:c.csv", new { main = new { x = 40, y = 60 } }));
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal("# Copy\nmain:\n  input: csv:a.csv\n  output: csv:c.csv\n", File.ReadAllText(Path.Combine(_dir, "copy.yaml")));
+        Assert.Equal("*\n", File.ReadAllText(Path.Combine(_dir, ".dtpipe", ".gitignore")));
+        Assert.True(File.Exists(Path.Combine(_dir, ".dtpipe", "studio", "copy.yaml-layout.json")));
+        var again = await OpenAsync("copy.yaml");
+        Assert.Equal(saved.GetProperty("hash").GetString(), again.GetProperty("hash").GetString());
+        Assert.Equal(40, again.GetProperty("layout").GetProperty("main").GetProperty("x").GetInt32());
+        Assert.DoesNotContain("copy.yaml-layout.json", (await SendAsync(Request(HttpMethod.Get, "/api/jobs"))).Body.ToString());
+    }
+
+    [Fact]
+    public async Task A_save_over_a_file_changed_since_it_was_opened_is_refused()
+    {
+        var path = Path.Combine(_dir, "copy.yaml");
+        File.WriteAllText(path, Copy);
+        var hash = (await OpenAsync("copy.yaml")).GetProperty("hash").GetString();
+        File.WriteAllText(path, Copy + "# edited elsewhere\n");
+
+        var (status, body) = await SaveAsync("copy.yaml", hash, Cards("csv:c.csv"));
+
+        Assert.Equal(HttpStatusCode.Conflict, status);
+        Assert.Contains("changed on disk", body.GetProperty("error").GetString());
+        Assert.EndsWith("# edited elsewhere\n", File.ReadAllText(path));
+    }
+
+    [Fact]
+    public async Task A_new_job_is_created_once_and_never_over_an_existing_file()
+    {
+        var (created, _) = await SaveAsync("sub/new.yaml", null, Cards("csv:c.csv"));
+        var (again, body) = await SaveAsync("sub/new.yaml", null, Cards("csv:d.csv"));
+
+        Assert.Equal(HttpStatusCode.OK, created);
+        Assert.Equal(HttpStatusCode.Conflict, again);
+        Assert.Contains("already exists", body.GetProperty("error").GetString());
+        Assert.Contains("csv:c.csv", File.ReadAllText(Path.Combine(_dir, "sub", "new.yaml")));
+    }
+
+    [Theory]
+    [InlineData("nowhere/new.yaml", HttpStatusCode.NotFound)]
+    [InlineData(".hidden/new.yaml", HttpStatusCode.BadRequest)]
+    [InlineData("../new.yaml", HttpStatusCode.BadRequest)]
+    [InlineData("new.txt", HttpStatusCode.BadRequest)]
+    [InlineData("sub", HttpStatusCode.BadRequest)]
+    public async Task A_job_is_written_only_where_it_could_be_read(string path, HttpStatusCode expected)
+    {
+        var (status, _) = await SaveAsync(path, null, Cards("csv:c.csv"));
+
+        Assert.Equal(expected, status);
+        Assert.False(File.Exists(Path.Combine(_dir, "nowhere", "new.yaml")));
+    }
+
+    [Fact]
+    public async Task Nothing_is_written_through_a_link()
+    {
+        var outside = Path.Combine(Path.GetTempPath(), "studio-out-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outside);
+        try
+        {
+            Directory.CreateSymbolicLink(Path.Combine(_dir, "linked"), outside);
+            var (throughFolder, _) = await SaveAsync("linked/x.yaml", null, Cards("csv:c.csv"));
+            Assert.Equal(HttpStatusCode.BadRequest, throughFolder);
+            Assert.Empty(Directory.EnumerateFileSystemEntries(outside));
+
+            // A clone can carry a .dtpipe that points anywhere: the layout is not kept through it,
+            // and the job is not written either.
+            Directory.CreateSymbolicLink(Path.Combine(_dir, ".dtpipe"), outside);
+            var (throughStore, body) = await SaveAsync("fresh.yaml", null, Cards("csv:c.csv", new { main = new { x = 1, y = 1 } }));
+            Assert.Equal(HttpStatusCode.BadRequest, throughStore);
+            Assert.Contains("link", body.GetProperty("error").GetString());
+            Assert.False(File.Exists(Path.Combine(_dir, "fresh.yaml")));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(outside));
+        }
+        finally
+        {
+            Directory.Delete(outside, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Cards_that_do_not_compose_are_written_only_when_the_person_accepts_it()
+    {
+        var broken = new { title = "Broken", steps = new object[] { new { alias = "lonely", kind = "branch", yaml = "input: csv:a.csv\n" } } };
+
+        var (refused, body) = await SaveAsync("broken.yaml", null, broken);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, refused);
+        Assert.Contains("leads nowhere", body.GetProperty("error").GetString());
+        Assert.False(File.Exists(Path.Combine(_dir, "broken.yaml")));
+
+        var (accepted, _) = await SaveAsync("broken.yaml", null, broken, acceptErrors: true);
+        Assert.Equal(HttpStatusCode.OK, accepted);
+        Assert.True(File.Exists(Path.Combine(_dir, "broken.yaml")));
+    }
+
+    [Fact]
+    public async Task Opening_a_job_says_when_saving_would_rewrite_its_text()
+    {
+        File.WriteAllText(Path.Combine(_dir, "hand.yaml"), "# Hand\nmain:\n  # read the file\n  input: csv:a.csv\n  output: csv:b.csv\n");
+
+        Assert.True((await OpenAsync("hand.yaml")).GetProperty("rewrites").GetBoolean());
+    }
+
     [Fact]
     public async Task Quitting_from_the_page_ends_the_session()
     {

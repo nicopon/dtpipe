@@ -21,7 +21,8 @@ header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; bord
 header #quit { margin-left: auto; }
 main { display: grid; grid-template-columns: 220px minmax(0, 1fr); height: calc(100vh - 49px); }
 .jobs-pane { border-right: 1px solid var(--line); padding: 12px; overflow: auto; background: var(--panel); }
-.jobs-pane h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; }
+.jobs-pane .row { justify-content: space-between; margin-bottom: 8px; }
+.jobs-pane h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0; }
 .jobs-pane ul { list-style: none; margin: 0; padding: 0; }
 .job { width: 100%; text-align: left; border: 0; background: none; color: var(--ink); padding: 5px 8px; border-radius: 6px; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; cursor: pointer; overflow-wrap: anywhere; }
 .job:hover { background: var(--code); }

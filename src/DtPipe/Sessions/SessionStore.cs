@@ -64,7 +64,7 @@ public sealed class SessionStore
     /// </summary>
     public SessionMetadata EnsureCreated()
     {
-        EnsureRootIgnored();
+        EnsureIgnored(RootPath);
         Directory.CreateDirectory(SessionPath);
 
         var meta = ReadMetadata() ?? new SessionMetadata
@@ -84,10 +84,10 @@ public sealed class SessionStore
     /// .dtpipe/ is not ignored in this repository — leaving that to each project's discipline is
     /// how a checkpoint ends up in a commit.
     /// </summary>
-    private void EnsureRootIgnored()
+    public static void EnsureIgnored(string rootPath)
     {
-        Directory.CreateDirectory(RootPath);
-        var gitignore = Path.Combine(RootPath, ".gitignore");
+        Directory.CreateDirectory(rootPath);
+        var gitignore = Path.Combine(rootPath, ".gitignore");
         if (!File.Exists(gitignore)) File.WriteAllText(gitignore, "*\n");
     }
 

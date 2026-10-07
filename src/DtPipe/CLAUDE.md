@@ -173,6 +173,12 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   `dom.js`) and positions them through the CSSOM; `replaceChildren` takes nodes, never a list.
 - **The folder only.** `StudioFolder` reads `.yaml`/`.yml` files under it: no segment starting with
   a dot, no symbolic link below it. The empty builder reads no `appsettings.json` from the folder.
+- **The server writes, from cards.** `PUT /api/job` composes the page's cards and writes that text
+  (`WriteJob`): whole and atomic, only where a job could be read, into a folder that exists, against
+  the hash the page opened (409 otherwise), never over a file with a new job. What the studio keeps
+  for a job (`StudioLocalFiles`) lives under `.dtpipe/studio/`, which `SessionStore.EnsureIgnored`
+  keeps out of git; nothing there is reached through a link, and a link refuses the save before the
+  job is written.
 - Quit from the page exits 0, Ctrl+C 130.
 
 `[CI: StudioServerTests (no script writes HTML or an inline style), StudioSampleTests,

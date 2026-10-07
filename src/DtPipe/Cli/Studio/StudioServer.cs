@@ -66,6 +66,7 @@ public sealed class StudioServer : IAsyncDisposable
     private readonly WebApplication _app;
     private readonly StudioFolder _folder;
     private readonly StudioTools _tools;
+    private readonly StudioLocalFiles _local;
     private readonly byte[] _token;
     private readonly SemaphoreSlim _sampling = new(1, 1);
     private readonly TaskCompletionSource _quit = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -75,6 +76,7 @@ public sealed class StudioServer : IAsyncDisposable
         _app = app;
         _folder = folder;
         _tools = tools;
+        _local = new StudioLocalFiles(folder);
         Token = token;
         _token = Encoding.UTF8.GetBytes(token);
     }
@@ -137,8 +139,10 @@ public sealed class StudioServer : IAsyncDisposable
                     await JsonAsync(context, new { folder = Path.GetFileName(_folder.Root), jobs = _folder.Jobs() });
                     break;
                 case ("GET", "/api/job"):
-                    var relative = request.Query["path"].ToString();
-                    await JsonAsync(context, new { path = relative, yaml = _folder.Read(relative) });
+                    await OpenAsync(context, request.Query["path"].ToString());
+                    break;
+                case ("PUT", "/api/job"):
+                    await SaveAsync(context);
                     break;
                 case ("GET", "/api/components"):
                     await JsonAsync(context, new { readers = _tools.Readers, writers = _tools.Writers });
@@ -186,6 +190,36 @@ public sealed class StudioServer : IAsyncDisposable
             throw new StudioRefusal(403, "A request from another site is refused.");
         if (request.Headers["Sec-Fetch-Site"].ToString() is { Length: > 0 } site && site is not ("same-origin" or "none"))
             throw new StudioRefusal(403, "A request from another site is refused.");
+    }
+
+    /// <summary>
+    /// A job, the hash a save must find again, its layout, and whether saving would change its text:
+    /// the server writes what it composes, so a file written by hand loses its comments and its order.
+    /// </summary>
+    private async Task OpenAsync(HttpContext context, string relative)
+    {
+        var job = _folder.ReadJob(relative);
+        var rewrites = _tools.Design.Decompose(job.Text).Yaml != job.Text.Replace("\r\n", "\n");
+        await JsonAsync(context, new { path = relative, yaml = job.Text, hash = job.Hash, layout = _local.ReadLayout(relative), rewrites });
+    }
+
+    /// <summary>
+    /// Writes the job the server composes from the page's cards, never a text the page sends, then
+    /// the cards' layout beside the folder's files. A job whose cards do not compose is written only
+    /// when the page says the person accepted it.
+    /// </summary>
+    private async Task SaveAsync(HttpContext context)
+    {
+        var save = await BodyAsync<SaveRequest>(context);
+        if (save.Model is null) throw new StudioRefusal(400, "A save carries the cards as 'model'.");
+        var composed = _tools.Design.Compose(save.Model);
+        if (!composed.Valid && !save.AcceptErrors)
+            throw new StudioRefusal(422, "The cards do not compose into a job: " + string.Join(" ", composed.Errors));
+        _folder.ResolveForWrite(save.Path ?? "");
+        if (save.Model.Layout is not null) _local.CheckLayout(save.Path!);
+        var hash = _folder.WriteJob(save.Path!, composed.Yaml, save.Hash);
+        if (save.Model.Layout is { } layout) _local.WriteLayout(save.Path!, layout);
+        await JsonAsync(context, new { path = save.Path, hash, yaml = composed.Yaml });
     }
 
     private async Task SampleAsync(HttpContext context)
@@ -254,6 +288,8 @@ public sealed class StudioServer : IAsyncDisposable
     }
 
     private sealed record DecomposeRequest(string? Yaml, JsonObject? Layout);
+
+    private sealed record SaveRequest(string? Path, string? Hash, DesignModel? Model, bool AcceptErrors);
 
     public async ValueTask DisposeAsync()
     {
