@@ -217,7 +217,7 @@ import json, sys
 for n in json.load(sys.stdin):
     frags = ", ".join(f["fragment"] + ":" + f["state"] for f in n["fragments"]) or "-"
     state = "online " if n["online"] else "offline"
-    print(f"  {n['name']:8} {state} {n['group']:10} {frags}")
+    print(f"  {n['name']:8} {state} {'+'.join(n['groups']):10} {frags}")
 EOF
 )"
     fi
