@@ -32,10 +32,13 @@ function renderPills() {
   const online = store.nodes.filter((n) => n.online).length;
   $("nodes-pill").textContent = `${online}/${store.nodes.length} nodes`;
   $("nodes-pill").className = `pill ${online === store.nodes.length && online > 0 ? "on" : "off"}`;
-  const running = store.queue.find((r) => r.state === "running");
+  // Runs on disjoint data nodes are in flight together: one names its pipeline, several are counted.
+  const running = store.queue.filter((r) => r.state === "running");
   const queued = store.queue.filter((r) => r.state === "queued").length;
-  $("runs-pill").textContent = running ? `${running.pipelineId} running${queued ? ` · ${queued} queued` : ""}` : queued ? `${queued} queued` : "no run";
-  $("runs-pill").className = `pill ${running || queued ? "busy" : ""}`;
+  const inFlight = running.length === 1 ? `${running[0].pipelineId} running` : running.length ? `${running.length} running` : "";
+  $("runs-pill").textContent = [inFlight, queued ? `${queued} queued` : ""].filter(Boolean).join(" · ") || "no run";
+  $("runs-pill").title = running.map((r) => r.pipelineId).join(", ");
+  $("runs-pill").className = `pill ${running.length || queued ? "busy" : ""}`;
   $("bytes").textContent = `hub ${bytes(store.bytes.total)}${store.bytes.activeTransfers > 0 ? ` · ${store.bytes.activeTransfers} transfer(s)` : ""}`;
 }
 

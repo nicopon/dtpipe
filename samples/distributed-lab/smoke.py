@@ -187,7 +187,7 @@ def library_pass(ctx):
             failures += 1
             print(f"FAIL  library  {pid:28} {e}")
 
-    # Every run queued at once: the lab starts them one at a time.
+    # Every run queued at once: runs that share a data node start one at a time, in the order they came.
     runs = [(pid, plan, check, call("/api/runs", {"pipelineId": pid})) for pid, plan, check in queued]
     # The warehouse is one DuckDB file, locked by whichever run writes it: judge once all are over.
     finals = {}

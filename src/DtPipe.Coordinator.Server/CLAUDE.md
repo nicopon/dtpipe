@@ -85,9 +85,16 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   it so. `[local: the lab's smoke.py library]`
 - **A `PipelineNode` serves one run.** `DeploymentManager` re-arms every fragment of a pipeline
   after its run, and holds that deployment's gate from before it reports the run finished until
-  the fragments are registered again, so no run starts on a spent instance. Runs of every
-  pipeline wait in one queue and start one at a time.
+  the fragments are registered again, so no run starts on a spent instance.
   `[local: the lab's smoke.py]`
+- **One run at a time per data node, first come first served.** `RunDispatch` decides, at each
+  enqueue and each finish, which waiting runs `DeploymentManager` sends: one that no run already
+  sent, and no older run still waiting, shares a data node with. A run's data nodes are its plan's
+  fragment nodes that the inventory does not list as runners; a node it does not know counts
+  (fail-closed). A run holds them from being sent until it finishes, its wait on its deployment's
+  gate included, and is never sent twice. A runner never counts, so its fragments of two runs share
+  its host with no resource bound. With no id, `/api/runs/cancel` refuses (409) while several runs
+  are in flight rather than guess. `[local: RunDispatchTests, the lab's smoke.py library and sandbox]`
 - **Ready means the main instance is registered.** A node unregisters from the coordinator before
   it disconnects, so a closed instance is never left for admission to pick.
   `WaitRegisteredAsync` requires the main instance in the deployment's current generation, held by

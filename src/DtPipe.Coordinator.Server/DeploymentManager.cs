@@ -1,4 +1,3 @@
-using System.Threading.Channels;
 using DtPipe.Coordinator;
 using DtPipe.Coordinator.Contracts;
 using Microsoft.AspNetCore.SignalR;
@@ -20,10 +19,12 @@ public sealed record DeploymentView(
 /// <see cref="IRunOrchestrator"/>, which admits, launches, wires and judges; this class only asks.
 /// <para>
 /// Several pipelines may be deployed at once, their fragments told apart by name
-/// (<c>&lt;pipeline&gt;@&lt;node&gt;</c>). Runs wait in one queue and start one at a time.
-/// Each deployment has a gate, held
-/// while it deploys, runs and re-arms: a run starts only on registered, unspent instances, and a
-/// deployment is never replaced under a run.
+/// (<c>&lt;pipeline&gt;@&lt;node&gt;</c>). A run is sent to the orchestrator once no run already
+/// sent, and no older run still waiting, uses one of its data nodes (<see cref="RunDispatch"/>): runs
+/// on disjoint data nodes are in flight together, and a runner never counts. A run sent holds its data
+/// nodes until it finishes. Each deployment has a gate, held while it deploys, runs and re-arms: a run
+/// starts only on registered, unspent instances, and a deployment is never replaced under a run. A run
+/// sent that waits on its deployment's gate keeps its data nodes and is never sent twice.
 /// </para>
 /// </summary>
 public sealed class DeploymentManager
@@ -41,7 +42,14 @@ public sealed class DeploymentManager
         public readonly SemaphoreSlim Gate = new(1, 1);
     }
 
-    private sealed record Ticket(RunView View, CancellationTokenSource Cancel);
+    private sealed class Ticket(RunView view)
+    {
+        public RunView View = view;
+        public readonly CancellationTokenSource Cancel = new();
+        /// <summary>The data nodes it holds, from when it is sent until it finishes.</summary>
+        public IReadOnlySet<string> Held = new HashSet<string>();
+        public bool Running => View.State == "running";
+    }
 
     private readonly NodeInventory _inventory;
     private readonly IHubContext<NodeChannelHub> _labHub;
@@ -54,9 +62,10 @@ public sealed class DeploymentManager
 
     private readonly object _lock = new();
     private readonly Dictionary<string, Deployment> _deployments = new(StringComparer.Ordinal);
+    // A run is in exactly one of the two lists until it finishes: waiting to be sent, then sent
+    // (waiting on its deployment's gate, then running).
     private readonly List<Ticket> _queued = [];
-    private readonly Channel<Ticket> _queue = Channel.CreateUnbounded<Ticket>();
-    private Ticket? _current;
+    private readonly List<Ticket> _sent = [];
     private string? _lastDeployed;
 
     public DeploymentManager(
@@ -65,7 +74,6 @@ public sealed class DeploymentManager
     {
         (_inventory, _labHub, _orchestrator, _registry, _flowControl, _bus, _journal, _logger) =
             (inventory, labHub, orchestrator, registry, flowControl, bus, journal, logger);
-        _ = Task.Run(WorkAsync);
     }
 
     /// <summary>The plan deployed last: what the Lab view shows and what a run naming no pipeline runs.</summary>
@@ -74,16 +82,23 @@ public sealed class DeploymentManager
         get { lock (_lock) return _lastDeployed is not null && _deployments.TryGetValue(_lastDeployed, out var d) ? d.Plan : null; }
     }
 
-    /// <summary>The run in flight, else the next queued, else the last finished.</summary>
-    public RunView? CurrentRun
+    /// <summary>The oldest run in flight, else the next waiting, else the last finished: of one pipeline, or of any.</summary>
+    public RunView? CurrentRun(string? pipelineId = null)
     {
-        get { lock (_lock) return _current?.View ?? _queued.FirstOrDefault()?.View ?? _journal.List(limit: 1).FirstOrDefault(); }
+        lock (_lock)
+            return Active().FirstOrDefault(t => pipelineId is null || t.View.PipelineId == pipelineId)?.View
+                ?? _journal.List(pipelineId, limit: 1).FirstOrDefault();
     }
 
+    /// <summary>The runs in flight, oldest first, then the waiting ones in the order they came.</summary>
     public IReadOnlyList<RunView> Queue
     {
-        get { lock (_lock) return [.. _current is null ? [] : new[] { _current.View }, .. _queued.Select(t => t.View)]; }
+        get { lock (_lock) return Active().Select(t => t.View).ToList(); }
     }
+
+    private IEnumerable<Ticket> Active() =>
+        _sent.Where(t => t.Running).OrderBy(t => t.View.StartedAt)
+            .Concat(_sent.Where(t => !t.Running).Concat(_queued).OrderBy(t => t.View.QueuedAt));
 
     public IReadOnlyList<DeploymentView> Deployments
     {
@@ -201,33 +216,46 @@ public sealed class DeploymentManager
             var deployment = _deployments.GetValueOrDefault(pipelineId) ?? throw new ConflictException($"'{pipelineId}' is not deployed.");
             if (deployment.State == "failed") throw new ConflictException($"The deployment of '{pipelineId}' failed: {deployment.Message}");
             var now = DateTimeOffset.UtcNow;
-            ticket = new Ticket(
-                new RunView(_journal.NextRunId(), deployment.Plan.Id, "queued", now, null, pins, null, null, null, pipelineId, now),
-                new CancellationTokenSource());
+            ticket = new Ticket(new RunView(_journal.NextRunId(), deployment.Plan.Id, "queued", now, null, pins, null, null, null, pipelineId, now));
             _queued.Add(ticket);
         }
-        _queue.Writer.TryWrite(ticket);
-        _bus.Publish("run", ticket.View);
+        var view = ticket.View;
+        _bus.Publish("run", view);
         _bus.Publish("deployments", Deployments);
-        return ticket.View;
+        Dispatch();
+        return view;
     }
 
-    /// <summary>Cancels a run in flight or still queued; with no id, the one in flight.</summary>
+    /// <summary>
+    /// Cancels a run in flight or still waiting. With no id, the one in flight: several in flight must
+    /// be named, and none leaves everything as it is.
+    /// </summary>
     public void Cancel(string? runId = null)
     {
-        Ticket? queued;
+        Ticket? waiting;
         lock (_lock)
         {
-            if (runId is null || _current?.View.RunId == runId)
+            if (runId is null)
             {
-                _current?.Cancel.Cancel();
+                var running = _sent.Where(t => t.Running).ToList();
+                if (running.Count > 1)
+                    throw new ConflictException($"{running.Count} runs are in flight: name the one to cancel.");
+                running.SingleOrDefault()?.Cancel.Cancel();
                 return;
             }
-            queued = _queued.FirstOrDefault(t => t.View.RunId == runId);
+            // A run sent ends through its token: the orchestrator cancels it in flight, and a wait on
+            // its deployment's gate ends it before it starts.
+            if (_sent.FirstOrDefault(t => t.View.RunId == runId) is { } sent)
+            {
+                sent.Cancel.Cancel();
+                return;
+            }
+            // Out of the queue under the lock, so the dispatcher can no longer send it.
+            waiting = _queued.FirstOrDefault(t => t.View.RunId == runId);
+            if (waiting is not null) _queued.Remove(waiting);
         }
-        // A queued run never started: it ends now, and the worker skips it when it comes up.
-        if (queued is not null)
-            Finish(queued, queued.View with { State = "cancelled", StartedAt = DateTimeOffset.UtcNow, Refusal = "Cancelled while queued." });
+        if (waiting is not null)
+            Finish(waiting, waiting.View with { State = "cancelled", StartedAt = DateTimeOffset.UtcNow, Refusal = "Cancelled while queued." });
     }
 
     public Task KillAsync(string fragmentName, CancellationToken ct) =>
@@ -250,18 +278,47 @@ public sealed class DeploymentManager
         _bus.Publish("deploy", new { planId = deployment.Plan.Id, pipelineId = deployment.Plan.PipelineId, state = "variant", fragment = fragment.Name });
     }
 
-    private async Task WorkAsync()
+    /// <summary>
+    /// Sends every waiting run that may start now (<see cref="RunDispatch"/>); runs when a run is
+    /// queued and when one finishes, the only two moments a run can become free to start.
+    /// </summary>
+    private void Dispatch()
     {
-        await foreach (var ticket in _queue.Reader.ReadAllAsync())
+        var roles = new Dictionary<string, NodeRole>(StringComparer.Ordinal);
+        foreach (var node in _inventory.Snapshot()) roles[node.Name] = node.Role;
+
+        var start = new List<Ticket>();
+        lock (_lock)
         {
-            try
+            // A run whose pipeline is gone holds nothing: it is sent at once and refused.
+            var waiting = _queued.Select(t => (Ticket: t, Nodes: _deployments.GetValueOrDefault(t.View.PipelineId!) is { } d
+                ? RunDispatch.DataNodes(d.Plan, roles) : new HashSet<string>())).ToList();
+            var startable = RunDispatch.Startable(
+                _sent.Select(t => t.Held), waiting.Select(w => new RunDispatch.Waiting(w.Ticket.View.RunId, w.Nodes)).ToList());
+            foreach (var (ticket, nodes) in waiting.Where(w => startable.Contains(w.Ticket.View.RunId)))
             {
-                await RunOneAsync(ticket);
+                ticket.Held = nodes;
+                _queued.Remove(ticket);
+                _sent.Add(ticket);
+                start.Add(ticket);
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Run {RunId} could not be handled", ticket.View.RunId);
-            }
+        }
+        foreach (var ticket in start) _ = Task.Run(() => StartAsync(ticket));
+    }
+
+    private async Task StartAsync(Ticket ticket)
+    {
+        try
+        {
+            await RunOneAsync(ticket);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Run {RunId} could not be handled", ticket.View.RunId);
+            // Its data nodes are released only when it finishes.
+            bool sent;
+            lock (_lock) sent = _sent.Contains(ticket);
+            if (sent) Finish(ticket, ticket.View with { State = "error", Refusal = ex.Message });
         }
     }
 
@@ -272,7 +329,7 @@ public sealed class DeploymentManager
         Deployment? deployment;
         lock (_lock)
         {
-            if (!_queued.Contains(ticket)) return;
+            if (!_sent.Contains(ticket)) return;
             deployment = _deployments.GetValueOrDefault(pipelineId);
         }
 
@@ -288,7 +345,7 @@ public sealed class DeploymentManager
         catch (Exception ex)
         {
             if (gated) deployment!.Gate.Release();
-            lock (_lock) if (!_queued.Contains(ticket)) return;
+            lock (_lock) if (!_sent.Contains(ticket)) return;
             var cancelled = ex is OperationCanceledException;
             Finish(ticket, view with { State = cancelled ? "cancelled" : "refused", StartedAt = DateTimeOffset.UtcNow, Refusal = cancelled ? "Cancelled while queued." : ex.Message });
             return;
@@ -296,11 +353,7 @@ public sealed class DeploymentManager
 
         var plan = deployment.Plan;
         view = view with { State = "running", StartedAt = DateTimeOffset.UtcNow };
-        lock (_lock)
-        {
-            _queued.Remove(ticket);
-            _current = ticket with { View = view };
-        }
+        lock (_lock) ticket.View = view;
         _bus.Publish("run", view);
         _bus.Publish("deployments", Deployments);
 
@@ -340,12 +393,13 @@ public sealed class DeploymentManager
         lock (_lock)
         {
             _queued.Remove(ticket);
-            if (_current?.View.RunId == final.RunId) _current = null;
+            _sent.Remove(ticket);
         }
-        // The token source is left to the collector: a queued run cancelled here may still be
-        // waiting on its deployment's gate with that token.
+        // The token source is left to the collector: a run finished here may still be waiting on
+        // its deployment's gate with that token.
         _bus.Publish("run", final);
         _bus.Publish("deployments", Deployments);
+        Dispatch();
     }
 
     private async Task RearmAsync(Deployment deployment)
@@ -415,7 +469,7 @@ public sealed class DeploymentManager
 
     private void ThrowIfBusy(string pipelineId)
     {
-        if (_current?.View.PipelineId == pipelineId || _queued.Any(t => t.View.PipelineId == pipelineId))
+        if (_sent.Concat(_queued).Any(t => t.View.PipelineId == pipelineId))
             throw new ConflictException($"A run of '{pipelineId}' is queued or in flight.");
     }
 
@@ -433,8 +487,8 @@ public sealed class DeploymentManager
     private DeploymentView View(Deployment d) => new(
         d.Plan.PipelineId, d.Plan.Id, d.Origin, d.State, d.DeployedAt, d.Message,
         d.Plan.Fragments.Select(f => new DeployedFragment(f.Name, f.Node, f.Version)).ToList(), d.Plan.Edges.Count,
-        _queued.Count(t => t.View.PipelineId == d.Plan.PipelineId),
-        _current?.View.PipelineId == d.Plan.PipelineId ? _current.View.RunId : null);
+        _sent.Where(t => !t.Running).Concat(_queued).Count(t => t.View.PipelineId == d.Plan.PipelineId),
+        _sent.FirstOrDefault(t => t.Running && t.View.PipelineId == d.Plan.PipelineId)?.View.RunId);
 
     private void Publish(Deployment deployment)
     {

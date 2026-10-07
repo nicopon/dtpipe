@@ -64,6 +64,8 @@ function signature(plan) {
 
 const isDeployedLayout = () => !!state.deployed && !!state.plan && state.plan.fragments.length > 0 && signature(state.plan) === signature(state.deployed);
 const isRunning = () => ["running", "queued"].includes(state.run?.state);
+// Other pipelines' runs may be in flight at the same time: this view follows the run of its deployed plan only.
+const ownRun = (plan, run) => (run && plan && run.planId === plan.id ? run : null);
 
 let planSeq = 0;
 let planTimer = null;
@@ -417,7 +419,7 @@ function connectEvents() {
         break;
       case "state":
         state.deployed = data.plan;
-        state.run = data.run;
+        state.run = ownRun(data.plan, data.run);
         if (data.plan) state.deployState = "ready";
         restoreDeployedLayout();
         renderAll();
@@ -430,7 +432,7 @@ function connectEvents() {
         renderStatus();
         break;
       case "run":
-        if (state.deployed && data.pipelineId && data.pipelineId !== state.deployed.pipelineId) break;
+        if (!ownRun(state.deployed, data)) break;
         state.run = data;
         if (data.state !== "running") {
           state.history = [data, ...state.history.filter((h) => h.runId !== data.runId)].slice(0, 20);
@@ -607,7 +609,10 @@ function bind() {
     const pins = Object.fromEntries(Object.entries(state.pins).filter(([, v]) => v));
     try { state.run = await api("/api/runs", { pins, pipelineId: state.deployed?.pipelineId }); renderAll(); } catch (e) { toast(e.message); }
   });
-  $("cancel-btn").addEventListener("click", () => api("/api/runs/cancel", { runId: state.run?.runId }).catch((e) => toast(e.message)));
+  $("cancel-btn").addEventListener("click", () => {
+    // Never without an id: with several runs in flight the server would refuse to guess.
+    if (state.run?.runId) api("/api/runs/cancel", { runId: state.run.runId }).catch((e) => toast(e.message));
+  });
 
   $("query-dataset").addEventListener("change", defaultQuery);
   $("query-btn").addEventListener("click", runQuery);
@@ -625,7 +630,7 @@ async function init() {
   state.matrix = matrix.groups;
   state.history = snapshot.history || [];
   state.deployed = snapshot.plan;
-  state.run = snapshot.run;
+  state.run = ownRun(snapshot.plan, snapshot.run);
   if (snapshot.plan) state.deployState = "ready";
   renderCatalog();
   renderMatrix();

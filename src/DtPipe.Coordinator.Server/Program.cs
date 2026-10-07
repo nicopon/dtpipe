@@ -170,8 +170,12 @@ designer.MapPost("/pipelines/from-command", async (CommandRequest request, NodeR
 });
 
 
+// The Lab view's snapshot: the plan deployed last and its own run, whatever else is in flight.
 api.MapGet("/state", (DeploymentManager deployments, RunJournal journal) =>
-    new { plan = deployments.ActivePlan, run = deployments.CurrentRun, history = journal.List(limit: 20) });
+{
+    var plan = deployments.ActivePlan;
+    return new { plan, run = deployments.CurrentRun(plan?.PipelineId), history = journal.List(limit: 20) };
+});
 designer.MapPost("/runs", (RunRequest? request, DeploymentManager deployments) => deployments.Enqueue(request?.PipelineId, request?.Pins));
 api.MapGet("/runs", (string? pipeline, RunJournal journal) => journal.List(pipeline));
 api.MapGet("/runs/queue", (DeploymentManager deployments) => deployments.Queue);
@@ -347,7 +351,8 @@ api.MapGet("/events", async (HttpContext context, EventBus bus, NodeInventory in
     try
     {
         await WriteAsync("nodes", inventory.Snapshot());
-        await WriteAsync("state", new { plan = deployments.ActivePlan, run = deployments.CurrentRun });
+        var plan = deployments.ActivePlan;
+        await WriteAsync("state", new { plan, run = deployments.CurrentRun(plan?.PipelineId) });
         await WriteAsync("deployments", deployments.Deployments);
         foreach (var evt in backlog.Where(e => e.Type == "log").TakeLast(150)) await WriteAsync(evt.Type, evt.Data);
         await foreach (var evt in live.ReadAllAsync(context.RequestAborted)) await WriteAsync(evt.Type, evt.Data);

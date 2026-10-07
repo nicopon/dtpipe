@@ -7,7 +7,7 @@ export const store = {
   matrix: {},
   deployments: [],
   runs: [],          // the journal, newest first
-  queue: [],         // the run in flight, then the queued ones
+  queue: [],         // the runs in flight, then the queued ones
   logs: [],
   bytes: { total: 0, activeTransfers: 0 },
   connected: false,
@@ -121,7 +121,8 @@ let bricksTimer = null;
 function onRun(run) {
   if (isActive(run)) {
     store.queue = [...store.queue.filter((r) => r.runId !== run.runId), run]
-      .sort((a, b) => (a.state === "running" ? -1 : b.state === "running" ? 1 : new Date(a.queuedAt) - new Date(b.queuedAt)));
+      .sort((a, b) => (a.state === "running") !== (b.state === "running") ? (a.state === "running" ? -1 : 1)
+        : a.state === "running" ? new Date(a.startedAt) - new Date(b.startedAt) : new Date(a.queuedAt) - new Date(b.queuedAt));
   } else {
     store.queue = store.queue.filter((r) => r.runId !== run.runId);
     store.runs = [run, ...store.runs.filter((r) => r.runId !== run.runId)].slice(0, 200);

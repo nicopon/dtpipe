@@ -1,4 +1,4 @@
-// Runs: what is deployed, the run in flight and the queue behind it, the journal of finished runs,
+// Runs: what is deployed, the runs in flight and the queue behind them, the journal of finished runs,
 // the live events of every node, and a look into a node's database.
 import { $, api, csvTable, duration, esc, fmt, nodeColor, shortNode, store, toast } from "./core.js";
 
@@ -13,7 +13,7 @@ let logTimer = null;
 export function mount(el) {
   host = el;
   host.innerHTML = `
-    <div class="view-head"><h1>Runs</h1><p class="hint">The coordinator runs one pipeline at a time: a run waits in the queue until the one in flight ends and its own fragments are registered.</p></div>
+    <div class="view-head"><h1>Runs</h1><p class="hint">Runs that share no data node are in flight together; a run that shares one waits its turn, in the order runs came, until that run ends and its own fragments are registered again. The runner never counts.</p></div>
     <section class="card"><h2>Deployments</h2><div id="r-deployments"></div></section>
     <section class="card"><h2>In flight and queued</h2><div id="r-queue"></div></section>
     <section class="card"><div class="card-head"><h2>Journal</h2><select id="r-filter"></select></div><div id="r-journal"></div></section>

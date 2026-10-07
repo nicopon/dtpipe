@@ -184,7 +184,7 @@ python3 tools/idp_check.py          # discovery, both flows, and the refusals th
 | Library | the pipelines kept, their plan and deployment state, last run, git history, diff, restore, import (YAML or a command line) |
 | Designer | a palette of bricks and steps (Transform, SQL, Merge), a canvas wired port to port, an inspector per card, the composed YAML to copy or edit |
 | Distribution | the plan placed automatically, drawn in lanes (sources, runner, sinks); save it, deploy, run |
-| Runs | deployments, the run in flight and the queue, the journal with each run's report, node events, a query on any database |
+| Runs | deployments, the runs in flight and the queue, the journal with each run's report, node events, a query on any database |
 | Access | the trusted IdP, the hosts waiting for approval, identities (node name, groups, enabled, reconnect), the editable flow matrix, the audit |
 
 **A pipeline is a plain dtpipe job**, one branch per card, that also runs whole on one machine
@@ -215,8 +215,9 @@ In the designer, a wire is moved or removed by its input end: drag it off the in
 it on another input, or anywhere else to remove it. A selected wire also shows a × to remove it.
 
 **The library** is a git repository under `.state/library`, started from `library-seed/`: each
-save and each saved plan is a commit. Several pipelines may be deployed at once; their runs wait
-in one queue, since the coordinator runs one at a time. Finished runs are kept in `.state/runs/`.
+save and each saved plan is a commit. Several pipelines may be deployed at once. Their runs are in
+flight together when they share no data node; otherwise they wait their turn in the order they came
+(the runner never counts). Finished runs are kept in `.state/runs/`.
 
 
 ## Lab view scenarios (`/lab/`)
@@ -288,10 +289,10 @@ afterwards (a fresh instance each) before it accepts the next run.
   runs end.
 - A transfer the hub refuses under the flow matrix shows in the run's verdict as an unresponsive
   fragment: the coordinator's log carries the refusal.
-- One run at a time, as `RunOrchestrator` allows: runs queue. The coordinator is not highly
-  available: a restart loses every deployment and the run in flight (the library and the finished
-  runs of the run journal survive), and the node hosts keep running the lost run's fragments until
-  they are restarted. After a coordinator restart, restart the lab (`./lab.sh down`, then
+- One run at a time per data node: the runner's fragments of two runs share its host with no bound
+  on either. The coordinator is not highly available: a restart loses every deployment and the runs
+  in flight (the library and the finished runs of the run journal survive), and the node hosts keep
+  running the lost runs' fragments until they are restarted. After a coordinator restart, restart the lab (`./lab.sh down`, then
   `./lab.sh up`); nothing reconstructs a run from the nodes reconnecting.
 - The designer knows a source brick's columns, not those after a step: dtpipe offers no schema of
   a job's branch without running it.
@@ -324,7 +325,7 @@ sign a person in and out.
 | `POST /api/rights/identities` · `PUT`/`DELETE /api/rights/identities/{id}` · `POST …/{id}/reconnect` | identities; reconnect drops a node's control connection so it fetches a new token |
 | `POST /api/rights/pending/{subject}/accept` (`{name, groups, description?}`) · `…/ignore` | a host waiting for approval: accept it as an identity, or set it aside for 24 hours |
 | `POST /api/runs` · `GET /api/runs`, `/api/runs/queue` | `{pipelineId?, pins?}` queues a run; the journal; in flight and queued |
-| `POST /api/runs/cancel` | `{runId?}`: the run in flight, or a queued one |
+| `POST /api/runs/cancel` | `{runId?}`: a run in flight or queued; with no id, the one in flight (409 when several are) |
 | `POST /api/fragments/{name}/kill`, `/variant` | fault injection |
 | `POST /api/pipelines/from-command` | `{args: [...]}` → YAML through `--export-job`, run by a runner (the coordinator runs no dtpipe; none online, no import) |
 | `POST /api/query` | `{variable, sql}` → CSV of a node's database, read by that node |
