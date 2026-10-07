@@ -311,7 +311,8 @@ public sealed class PlanBuilder(
         BranchSplit split;
         try
         {
-            split = await nodes.AskAsync<BranchSplit>(owners[0], NodeChannel.SplitBranch, [cut.Branch, JobYaml.Serialize(single), cut.At], SplitTimeout + TimeSpan.FromSeconds(10), ct);
+            split = await nodes.RequestAsync(owners[0], "lab.split", new { alias = cut.Branch, job = JobYaml.Serialize(single), at = cut.At },
+                SplitTimeout + TimeSpan.FromSeconds(10), why => new BranchSplit(null, null, why), ct);
         }
         catch (Exception ex) when (ex is ConflictException or TimeoutException || (ex is OperationCanceledException && !ct.IsCancellationRequested))
         {

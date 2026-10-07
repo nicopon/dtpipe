@@ -49,7 +49,7 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   which mode they run in. Never add a bench-only
   route outside `MapLabMode`. `[unchecked]`
 - **The server never opens a node's data.** What reads it asks the node that hosts it, through
-  `NodeRequests`: a brick preview, `/api/query` (`QueryDataset`), a cut (`SplitBranch`), and a
+  `NodeRequests`: a brick preview, `/api/query` and a cut (the named requests `lab.query` and `lab.split`, which only a lab host registers), and a
   designer's check (`DesignValidator`): each source brick's node sends its first row as Arrow IPC
   (`SampleBrick`, written by the `arrow:-` writer its fragment uses), a runner dry-runs the job as
   the runner will see it (`ValidateJob`), and each sink brick's node checks its target against the contract that

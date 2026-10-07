@@ -21,14 +21,14 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   `labreader` (`@dtpipe.test`) in the three roles; any other `{user}` / `{user}pwd` signs in with
   none. `[local: smoke.py rights — roles and sessions]`
 - **Sandbox is a lab node's own switch.** `LAB_NODE_SANDBOX=1` (or `true`) in `Lab.NodeHost`'s
-  environment maps to `FragmentPolicy.AnyReadOrWrite`, the Lab view's mode; `lab.sh nodes
+  environment registers a fragment gate that accepts any reader or writer, the Lab view's mode; `lab.sh nodes
   strict|sandbox` restarts the hosts in a mode, and `lab.sh smoke` does so per pass. The runner
   runs any fragment in both. `[local: smoke.py bricks, sandbox]`
 - **Lab nodes are disposable hosts of `DtPipe.PipelineNode.Hosting`.** `Lab.NodeHost` reads
   `nodes/<node>.json` into `AddDtPipeNode`; a node file whose `role` is `runner` starts the official
   `DtPipe.PipelineNode.Runner` instead, configured through its environment. `lab.sh exec-node` is
-  the one way a node starts, for `lab.sh` and `tools/campaign.py`. Every lab node turns `LabMode`
-  on, so `smoke.py` reads the warehouse through `/api/query`; its witness reads the databases
+  the one way a node starts, for `lab.sh` and `tools/campaign.py`. Every lab node registers `lab.query` and
+  `lab.split` (`Lab.NodeHost/LabRequests.cs`), so `smoke.py` reads the warehouse through `/api/query`; its witness reads the databases
   `seed.sh` wrote, located from the node files, never from the coordinator. Node mechanics:
   `src/DtPipe.PipelineNode.Hosting/CLAUDE.md`. `[local: smoke.py]`
 - **The IdP's signing key survives an IdP restart.** A node host reuses its cached token until

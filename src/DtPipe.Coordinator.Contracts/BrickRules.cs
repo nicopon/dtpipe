@@ -13,7 +13,7 @@ public sealed record BrickForm(BrickKind Kind, string Canonical);
 /// <para>
 /// Two layers. <b>Structure</b>, always: a data node only reads and writes, so a branch carries no
 /// transformer, no processor and reads at most one other branch; everything between belongs on a
-/// runner. <b>Bricks</b>, unless the host runs in sandbox mode: the branch is also one of the node's own
+/// runner. <b>Bricks</b>, unless the host registered a fragment gate that waives it: the branch is also one of the node's own
 /// bricks as its owner declared them, or a bare arrow edge.
 /// </para>
 /// </summary>

@@ -25,8 +25,10 @@ internal sealed class NodeAgent : BackgroundService
     private readonly IReadOnlyList<DatasetInfo> _datasets;
     private readonly IReadOnlyDictionary<string, string> _environment;
     private readonly BrickHost _bricks;
-    private readonly LabRequests _lab;
     private readonly DelegatedJobs _jobs;
+    private readonly FragmentGate? _gate;
+    private readonly IReadOnlyDictionary<string, NodeRequestHandler> _requests;
+    private readonly NodeDtPipe _dtpipe;
     private readonly OidcTokenClient _tokens;
     private readonly NodeLogForwarder _forwarder = new();
     private readonly ILoggerFactory _hostLoggers;
@@ -62,7 +64,9 @@ internal sealed class NodeAgent : BackgroundService
         _logger = _forwarder.For(loggers, _options.Name, fragment: null).CreateLogger(typeof(NodeAgent).FullName!);
         var dtpipe = new DtPipeCommand(_options.DtPipe, _stateDir, _environment);
         _bricks = new BrickHost(_options.Name, definition.Bricks, dtpipe, _logger);
-        _lab = new LabRequests(_options.Name, _options.LabMode, definition.Variables, dtpipe);
+        _gate = definition.Gate;
+        _requests = new Dictionary<string, NodeRequestHandler>(definition.Requests, StringComparer.Ordinal);
+        _dtpipe = new NodeDtPipe(dtpipe);
         _jobs = new DelegatedJobs(_options.Name, _policy == FragmentPolicy.AnyFragment, dtpipe);
         _tokens = new OidcTokenClient(_options.Oidc);
     }
@@ -83,8 +87,7 @@ internal sealed class NodeAgent : BackgroundService
         hub.On<string, int, BrickPreview>(NodeChannel.PreviewBrick, (id, rows) => _bricks.PreviewAsync(id, rows));
         hub.On<string, int, BrickSample>(NodeChannel.SampleBrick, (id, rows) => _bricks.SampleAsync(id, rows));
         hub.On<string, string, SinkCheck>(NodeChannel.CheckSink, (id, contract) => _bricks.CheckSinkAsync(id, contract));
-        hub.On<string, string, int, DatasetQueryResult>(NodeChannel.QueryDataset, (variable, sql, rows) => _lab.QueryAsync(variable, sql, rows));
-        hub.On<string, string, int, BranchSplit>(NodeChannel.SplitBranch, (alias, job, at) => _lab.SplitAsync(alias, job, at));
+        hub.On<string, string, NodeResponse>(NodeChannel.Request, (name, payload) => AnswerAsync(name, payload));
         hub.On<JobCheck, JobCheckResult>(NodeChannel.ValidateJob, check => _jobs.ValidateAsync(check));
         hub.On<string[], ExportedJob>(NodeChannel.ExportJob, args => _jobs.ExportAsync(args));
         hub.Reconnected += async _ => await AnnounceAsync();
@@ -165,13 +168,28 @@ internal sealed class NodeAgent : BackgroundService
         using var bounded = new CancellationTokenSource(AnnounceTimeout);
         await _hub!.InvokeAsync(NodeChannel.Announce,
             new NodeAnnouncement(_options.Name, _options.Description, _datasets, Role, _bricks.Bricks,
-                Sandbox: _policy == FragmentPolicy.AnyReadOrWrite), bounded.Token);
+                Capabilities: [.. _gate is null ? [] : new[] { NodeAnnouncement.RawFragments }, .. _requests.Keys.Order(StringComparer.Ordinal)]), bounded.Token);
 
         FragmentStatus[] statuses;
         await _commands.WaitAsync();
         try { statuses = _fragments.Values.Select(f => f.LastStatus).Concat(_refusals.Values).ToArray(); }
         finally { _commands.Release(); }
         foreach (var status in statuses) await ReportAsync(status);
+    }
+
+    /// <summary>A request the host registered a handler for, answered outside the command queue; any other is said not to be answered.</summary>
+    private async Task<NodeResponse> AnswerAsync(string name, string payload)
+    {
+        if (!_requests.TryGetValue(name, out var handler))
+            return new NodeResponse(null, $"{_options.Name} does not answer '{name}'.");
+        try
+        {
+            return new NodeResponse(await handler(new NodeRequestContext(payload, _dtpipe)), null);
+        }
+        catch (Exception ex)
+        {
+            return new NodeResponse(null, ex.Message);
+        }
     }
 
     private Task Enqueue(Func<Task> command) => Task.Run(async () =>
@@ -192,7 +210,7 @@ internal sealed class NodeAgent : BackgroundService
         // Before anything registers: a registered instance is admissible, and admission is the
         // coordinator's to grant, not this node's to leave open.
         if (_policy != FragmentPolicy.AnyFragment
-            && BrickRules.FragmentRefusal(deployment.Yaml, _bricks.Forms, requireBricks: _policy == FragmentPolicy.Bricks) is { } reason)
+            && (_gate is null ? BrickRules.FragmentRefusal(deployment.Yaml, _bricks.Forms, requireBricks: true) : _gate(deployment, _bricks.Forms)) is { } reason)
         {
             _logger.LogWarning("Refusing {Fragment}: {Reason}", key, reason);
             var refusal = new FragmentStatus(_options.Name, deployment.Fragment, deployment.Instance, deployment.Generation,

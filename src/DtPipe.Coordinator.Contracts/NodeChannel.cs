@@ -29,13 +29,10 @@ public static class NodeChannel
     public const string SampleBrick = nameof(SampleBrick);
     public const string CheckSink = nameof(CheckSink);
 
-    // Coordinator -> node host, answered: a query on one of the node's datasets, for the coordinator's
-    // lab mode. The node answers it only if its own configuration says so.
-    public const string QueryDataset = nameof(QueryDataset);
-
-    // Coordinator -> node host, answered: dtpipe split of one branch that reads the node's data, for
-    // the Lab view's cuts; a lab request too (BranchCut).
-    public const string SplitBranch = nameof(SplitBranch);
+    // Coordinator -> node host, answered: a request a host registered under a name of its own (it
+    // announces the names in NodeAnnouncement.Capabilities). The coordinator's lab mode asks a lab host to
+    // query a dataset and to cut a branch this way; a host that registered nothing answers that it does not.
+    public const string Request = nameof(Request);
 
     // Coordinator -> runner, answered: the dtpipe runs the coordinator no longer makes itself. A designer's
     // job checked over one-row samples with its writers neutralised, and a command line turned into a job.
@@ -57,13 +54,19 @@ public enum NodeRole { Data, Runner }
 /// <summary>
 /// What a node host says of itself. <see cref="Name"/> and <see cref="Description"/> are proposals: the
 /// coordinator names the node from its rights, and a host its rights do not know only waits for
-/// approval. <see cref="Sandbox"/> only reports how the host was configured: a data node runs a fragment only
-/// if each branch is one of its bricks, unless its own configuration accepts any read or write. The
-/// coordinator shows it and never sets it.
+/// approval. <see cref="Capabilities"/> only report how the host was configured: <see cref="RawFragments"/>
+/// when its own configuration lets it run a fragment that is no brick, and the name of each request it
+/// answers. The coordinator shows them and never sets them; the host enforces what it offers.
 /// </summary>
 public sealed record NodeAnnouncement(
     string Name, string Description, IReadOnlyList<DatasetInfo> Datasets, NodeRole Role,
-    IReadOnlyList<BrickInfo> Bricks, bool Sandbox = false);
+    IReadOnlyList<BrickInfo> Bricks, IReadOnlyList<string>? Capabilities = null)
+{
+    /// <summary>The capability of a host that accepts a fragment written as a job, not only one made of its bricks.</summary>
+    public const string RawFragments = "raw-fragments";
+
+    public bool Offers(string capability) => Capabilities?.Contains(capability, StringComparer.Ordinal) == true;
+}
 
 public enum BrickKind { Source, Sink }
 
@@ -110,11 +113,14 @@ public sealed record JobCheckResult(bool Ok, string Report, IReadOnlyDictionary<
 /// <summary>What <c>ExportJob</c> answers: the job dtpipe's <c>--export-job</c> wrote for a command line, or why it did not.</summary>
 public sealed record ExportedJob(string? Yaml, string? Error);
 
-/// <summary>What <c>QueryDataset</c> answers: CSV text, or why the node did not or could not read it.</summary>
+/// <summary>What a <c>Request</c> answers: the handler's payload (JSON), or why the host does not answer it.</summary>
+public sealed record NodeResponse(string? Payload, string? Error);
+
+/// <summary>What the lab's <c>lab.query</c> request answers: CSV text, or why the node did not or could not read it.</summary>
 public sealed record DatasetQueryResult(string? Csv, string? Error);
 
 /// <summary>
-/// What <c>SplitBranch</c> answers: the cut branch's producer and consumer halves, each a one-branch
+/// What the lab's <c>lab.split</c> request answers: the cut branch's producer and consumer halves, each a one-branch
 /// job (<see cref="BranchCut.Half"/>), or why the node did not or could not cut it.
 /// </summary>
 public sealed record BranchSplit(string? Producer, string? Consumer, string? Error);

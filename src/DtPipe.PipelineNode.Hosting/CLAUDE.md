@@ -13,11 +13,12 @@ none. One node per process; a second `AddDtPipeNode` throws.
   every branch through `BrickRules.FragmentRefusal` before any `PipelineNode` registers (a
   registered instance is admissible), except under `AnyFragment`. `[local: the lab's smoke.py
   bricks, sandbox]`
-- **Lab requests are the host's to answer.** The coordinator's lab mode asks a node to read its own
-  datasets (`LabRequests`: a query, and `dtpipe split` of a branch that reads them, whose sample
-  run executes the branch's transformers on the node); the node answers only when its own
-  `DtPipeNodeOptions.LabMode` is on, off by default, and queries only a variable given an engine. `[local: Hosting.Tests
-  LabRequestsTests; the lab's smoke.py, whose checks read the warehouse this way]`
+- **What a host offers beyond its bricks is its own registration.** `WithFragmentGate` replaces the
+  check a data node makes of a fragment (the host's word, like the policy), and `WithRequest`
+  answers a named request of the coordinator; both are announced as capabilities, which the
+  coordinator shows and never sets. No product code answers a query or a cut: the lab's host
+  registers `lab.query` and `lab.split` itself, and the node says it does not answer any name it
+  did not register. `[local: Hosting.Tests DtPipeNodeBuilderTests; the lab's smoke.py lab, sandbox]`
 - **A runner runs dtpipe for the coordinator, a data node never does.** `DelegatedJobs` answers
   `ValidateJob` (a designer's job dry-run over one-row samples, writers neutralised) and `ExportJob`
   (a command line as a job) only on a host that runs any fragment; any other host says it is no
@@ -27,7 +28,7 @@ none. One node per process; a second `AddDtPipeNode` throws.
   source brick it announced, with `output: arrow:-` and `--limit`, the bytes its fragment would
   send; a real bounded read like a preview, so `--dry-run`'s source-side guarantees do not apply.
   `CheckSinkAsync` runs `dtpipe contract check` on a sink brick fed from `arrow:-`, which inspects
-  the target and writes nothing. Neither needs `LabMode`: checking a design is the product's.
+  the target and writes nothing. Checking a design is the product's, so neither is a registered request.
   `[local: the lab's smoke.py bricks — a designer's check]`
 - **`BrickRules` and `JobYaml` (`DtPipe.Coordinator.Contracts`) are the one reading of a branch**,
   shared with the coordinator, so the designer never calls something a brick the node then

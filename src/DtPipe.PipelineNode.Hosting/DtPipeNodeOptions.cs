@@ -3,11 +3,8 @@ namespace DtPipe.PipelineNode.Hosting;
 /// <summary>Which fragments a node host agrees to run, whatever the coordinator sends.</summary>
 public enum FragmentPolicy
 {
-    /// <summary>A data node: each branch only reads or writes, and is one of the node's bricks or a bare edge.</summary>
+    /// <summary>A data node: each branch only reads or writes, and is one of the node's bricks or a bare edge, unless the host registered a <see cref="FragmentGate"/>.</summary>
     Bricks,
-
-    /// <summary>A data node in sandbox mode: each branch only reads or writes, through any reader or writer.</summary>
-    AnyReadOrWrite,
 
     /// <summary>A runner: it hosts no data, and runs any fragment; network isolation is what contains it.</summary>
     AnyFragment,
@@ -45,12 +42,6 @@ public sealed class DtPipeNodeOptions
     public string? StateDirectory { get; set; }
 
     public FragmentPolicy Policy { get; set; } = FragmentPolicy.Bricks;
-
-    /// <summary>
-    /// Whether the node answers the coordinator's lab-mode requests on its datasets (a query). Off by
-    /// default: like <see cref="Policy"/>, the host's own word, never something the coordinator sends.
-    /// </summary>
-    public bool LabMode { get; set; }
 
     public NodeOidcOptions Oidc { get; set; } = new();
 

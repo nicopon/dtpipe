@@ -5,7 +5,7 @@ namespace DtPipe.Coordinator.Server;
 
 public sealed record NodeView(
     string Name, IReadOnlyList<string> Groups, string Description, bool Online, IReadOnlyList<DatasetInfo> Datasets,
-    IReadOnlyList<FragmentStatus> Fragments, NodeRole Role, IReadOnlyList<BrickInfo> Bricks, bool Sandbox);
+    IReadOnlyList<FragmentStatus> Fragments, NodeRole Role, IReadOnlyList<BrickInfo> Bricks, IReadOnlyList<string> Capabilities);
 
 /// <summary>
 /// The node hosts it knows of and what each reports about its fragments. <c>INodeRegistry</c> only
@@ -126,7 +126,7 @@ public sealed class NodeInventory
                     e.Announcement.Name, e.Groups, e.Announcement.Description, e.ConnectionId is not null,
                     e.Announcement.Datasets,
                     e.Fragments.Values.OrderBy(f => f.Fragment, StringComparer.Ordinal).ThenBy(f => f.Instance).ToList(),
-                    e.Announcement.Role, e.Announcement.Bricks ?? [], e.Announcement.Sandbox))
+                    e.Announcement.Role, e.Announcement.Bricks ?? [], e.Announcement.Capabilities ?? []))
                 .ToList();
         }
     }

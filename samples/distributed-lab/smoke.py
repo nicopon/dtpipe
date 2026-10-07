@@ -606,7 +606,7 @@ def bricks_pass():
     mirror, narrower, elsewhere = mirror_jobs()
 
     def strict():
-        loose = [n["name"] for n in call("/api/nodes") if n["sandbox"]]
+        loose = [n["name"] for n in call("/api/nodes") if "raw-fragments" in n["capabilities"]]
         if loose:
             raise RuntimeError(f"still in sandbox mode: {', '.join(loose)}")
         return "every node host announces itself strict"
@@ -683,7 +683,7 @@ def sandbox_pass():
 
     def loose():
         # A runner runs any fragment in either mode: only data nodes announce one.
-        strict_nodes = [n["name"] for n in call("/api/nodes") if not n["sandbox"] and n["role"] != "Runner"]
+        strict_nodes = [n["name"] for n in call("/api/nodes") if "raw-fragments" not in n["capabilities"] and n["role"] != "Runner"]
         if strict_nodes:
             raise RuntimeError(f"still strict: {', '.join(strict_nodes)}")
         return "every data node host announces itself sandbox"

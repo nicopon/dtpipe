@@ -1,4 +1,6 @@
+using DtPipe.Coordinator.Contracts;
 using DtPipe.PipelineNode.Hosting;
+using Lab.NodeHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -32,10 +34,7 @@ var node = builder.Services.AddDtPipeNode(o =>
     o.CoordinatorUrl = coordinator;
     o.DtPipe = Path.GetFullPath(Required("dtpipe"));
     o.StateDirectory = Path.Combine(state, name);
-    o.Policy = sandbox ? FragmentPolicy.AnyReadOrWrite : FragmentPolicy.Bricks;
-    // The lab's coordinator runs in lab mode, and its query panel and smoke's checks read the
-    // warehouse through the node: every lab node answers lab requests, strict or sandbox.
-    o.LabMode = true;
+    o.Policy = FragmentPolicy.Bricks;
     o.Oidc.Authority = Required("idp");
     o.Oidc.ClientId = file["clientId"] ?? name;
     o.Oidc.ClientSecret = file["secret"] ?? "";
@@ -48,5 +47,14 @@ foreach (var dataset in file.GetSection("datasets").GetChildren())
     node.WithVariable(dataset["variable"]!, Path.Combine(state, name, dataset["file"]!), dataset["description"], dataset["engine"]);
 }
 node.AddBricks(file.GetSection("bricks"));
+
+// The coordinator's lab mode has its query panel and smoke's checks read the warehouse through the node, and
+// cuts a branch where its data is: every lab node answers both, strict or sandbox.
+var lab = new LabRequests(name, [.. file.GetSection("datasets").GetChildren().Where(d => d["engine"] is not null).Select(d => (d["variable"]!, d["engine"]!))]);
+node.WithRequest("lab.query", lab.QueryAsync).WithRequest("lab.split", lab.SplitAsync);
+
+// Sandbox mode lets a lab node run a fragment that reads or writes through any reader or writer, not only
+// through its bricks: its own switch, and the one the Lab view's manual planning needs.
+if (sandbox) node.WithFragmentGate((deployment, bricks) => BrickRules.FragmentRefusal(deployment.Yaml, bricks, requireBricks: false));
 
 await builder.Build().RunAsync();

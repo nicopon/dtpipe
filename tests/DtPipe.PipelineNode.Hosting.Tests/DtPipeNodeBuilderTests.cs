@@ -86,13 +86,45 @@ public class DtPipeNodeBuilderTests
     }
 
     [Fact]
+    public void A_host_registers_its_own_gate_and_requests()
+    {
+        var services = new ServiceCollection();
+        services.AddDtPipeNode(o => o.Name = "lab-1")
+            .WithFragmentGate((_, _) => null)
+            .WithRequest("lab.query", _ => Task.FromResult("{}"));
+
+        var definition = DefinitionOf(services);
+        Assert.NotNull(definition.Gate);
+        Assert.Contains("lab.query", definition.Requests.Keys);
+    }
+
+    [Fact]
+    public void A_host_that_registers_nothing_has_no_gate_and_no_request()
+    {
+        var services = new ServiceCollection();
+        services.AddDtPipeNode(o => o.Name = "node-1");
+
+        var definition = DefinitionOf(services);
+        Assert.Null(definition.Gate);
+        Assert.Empty(definition.Requests);
+    }
+
+    [Fact]
+    public void A_request_has_a_name()
+    {
+        var services = new ServiceCollection();
+        var builder = services.AddDtPipeNode(o => o.Name = "node-1");
+        Assert.Throws<ArgumentException>(() => builder.WithRequest(" ", _ => Task.FromResult("{}")));
+    }
+
+    [Fact]
     public void The_options_bind_from_the_environment_shape()
     {
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["DtPipeNode:Name"] = "runner-1",
             ["DtPipeNode:CoordinatorUrl"] = "http://coordinator:8080",
-            ["DtPipeNode:Policy"] = "AnyReadOrWrite",
+            ["DtPipeNode:Policy"] = "AnyFragment",
             ["DtPipeNode:Oidc:Authority"] = "http://idp:5190",
             ["DtPipeNode:Oidc:ClientId"] = "runner-1",
             ["DtPipeNode:Oidc:ClientSecret"] = "secret",
@@ -103,7 +135,7 @@ public class DtPipeNodeBuilderTests
 
         var options = services.BuildServiceProvider().GetRequiredService<IOptions<DtPipeNodeOptions>>().Value;
         Assert.Equal("runner-1", options.Name);
-        Assert.Equal(FragmentPolicy.AnyReadOrWrite, options.Policy);
+        Assert.Equal(FragmentPolicy.AnyFragment, options.Policy);
         Assert.Equal("http://idp:5190", options.Oidc.Authority);
         Assert.Equal("/data/crm.sqlite", options.Variables["CRM_DB"]);
     }

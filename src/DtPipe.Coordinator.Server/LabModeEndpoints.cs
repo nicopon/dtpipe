@@ -40,8 +40,9 @@ public static class LabModeEndpoints
         {
             var host = inventory.Snapshot().FirstOrDefault(n => n.Datasets.Any(d => d.Variable == request.Variable && d.Engine.Length > 0));
             if (host is null) return Results.BadRequest(new { error = $"No node announces a dataset at {request.Variable}." });
-            var answer = await nodes.AskAsync<DatasetQueryResult>(
-                host.Name, NodeChannel.QueryDataset, [request.Variable, request.Sql, 200], TimeSpan.FromSeconds(40), ct);
+            var answer = await nodes.RequestAsync(
+                host.Name, "lab.query", new { variable = request.Variable, sql = request.Sql, rows = 200 }, TimeSpan.FromSeconds(40),
+                why => new DatasetQueryResult(null, why), ct);
             return answer.Error is null ? Results.Ok(new { csv = answer.Csv }) : Results.BadRequest(new { error = answer.Error });
         });
     }
