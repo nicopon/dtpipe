@@ -1,12 +1,11 @@
 // Access: who may send what to whom. Identities of the coordinator's own IDP (who, and in which
-// group), the flow matrix between groups (to whom, enforced by the hub on every transfer), the
-// policies of source bricks (what, enforced on every plan), and the audit of every change.
+// group), the flow matrix between groups (to whom, enforced by the hub on every transfer), and the
+// audit of every change.
 import { api, esc, nodeColor, store, toast } from "./core.js";
 
 let host = null;
 let rights = null;
 let matrixDraft = null;      // group -> Set(targets), while edited
-let policyDraft = {};        // brick key -> Set(groups) | null, while edited
 let adding = false;
 
 export function mount(el) {
@@ -22,8 +21,7 @@ export function update(kind) {
 }
 
 export function leave() {
-  const pending = matrixDraft || Object.keys(policyDraft).length;
-  return !pending || confirm("Unsaved rights changes will be lost. Leave anyway?");
+  return !matrixDraft || confirm("Unsaved rights changes will be lost. Leave anyway?");
 }
 
 async function load() {
@@ -56,19 +54,6 @@ function render() {
         <button class="small ghost danger" data-remove-identity>Remove</button>
       </td>
     </tr>`).join("");
-
-  const sources = store.bricks.filter((b) => b.kind === "Source");
-  const policies = sources.map((b) => {
-    const saved = rights.brickPolicies[b.key];
-    const draft = b.key in policyDraft ? policyDraft[b.key] : saved ? setOf(saved) : null;
-    const nodeGroup = store.nodes.find((n) => n.name === b.node)?.group;
-    return `<tr data-brick="${esc(b.key)}">
-      <td><span style="color:${nodeColor(b.node)}">${esc(b.node)}</span> · <b>${esc(b.title)}</b><div class="hint mono">${esc(b.key)}</div></td>
-      <td><label class="check"><input type="checkbox" data-any ${draft ? "" : "checked"}> wherever the matrix allows</label></td>
-      <td>${draft ? groups.filter((g) => g !== nodeGroup).map((g) => `<label class="check"><input type="checkbox" data-policy="${esc(g)}" ${draft.has(g) ? "checked" : ""}> ${esc(g)}</label>`).join(" ") : `<span class="hint">no restriction</span>`}</td>
-      <td class="actions-cell">${b.key in policyDraft ? `<button class="small" data-save-policy>Save</button>` : ""}</td>
-    </tr>`;
-  }).join("");
 
   host.innerHTML = `
     <div class="view-head"><h1>Access</h1>
@@ -104,12 +89,6 @@ function render() {
         ${groups.map((g) => `<tr><th>${esc(g)}</th>${groups.map((t) => matrixCell(g, t)).join("")}</tr>`).join("")}</table>
     </section>
 
-    <section class="card">
-      <h2>Source bricks <span class="hint">what</span></h2>
-      <p class="hint">The groups a brick's rows may be sent to as they leave their node. Checked on every plan: the hub sees groups, not bricks.</p>
-      <table>${policies || `<tr><td class="hint">No source brick offered.</td></tr>`}</table>
-    </section>
-
     <section class="card"><h2>Audit</h2>
       ${(rights.audit || []).slice(0, 40).map((a) => `<div class="audit"><span class="hint">${esc(new Date(a.at).toLocaleString())}${a.by ? ` · ${esc(a.by)}` : ""}</span> ${esc(a.change)}</div>`).join("") || `<p class="hint">No change yet.</p>`}
     </section>`;
@@ -121,16 +100,6 @@ function onChange(e) {
     if (!matrixDraft) matrixDraft = Object.fromEntries(rights.groups.map((g) => [g, setOf(rights.matrix[g])]));
     const row = (matrixDraft[t.dataset.matrix] ||= new Set());
     t.checked ? row.add(t.dataset.to) : row.delete(t.dataset.to);
-    render();
-  } else if (t.dataset.any !== undefined || t.dataset.policy !== undefined) {
-    const key = t.closest("[data-brick]").dataset.brick;
-    const current = key in policyDraft ? policyDraft[key] : rights.brickPolicies[key] ? setOf(rights.brickPolicies[key]) : null;
-    if (t.dataset.any !== undefined) policyDraft[key] = t.checked ? null : new Set(current || []);
-    else {
-      const next = new Set(current || []);
-      t.checked ? next.add(t.dataset.policy) : next.delete(t.dataset.policy);
-      policyDraft[key] = next;
-    }
     render();
   }
 }
@@ -168,13 +137,6 @@ async function onClick(e) {
       matrixDraft = null;
       toast("Flow matrix applied: the hub uses it from the next transfer.", "info");
     } else if (b.dataset.matrixReset !== undefined) { matrixDraft = null; render(); return; }
-    else if (b.dataset.savePolicy !== undefined) {
-      const key = b.closest("[data-brick]").dataset.brick;
-      const [node, id] = key.split("/");
-      const draft = policyDraft[key];
-      await api(`/api/rights/bricks/${encodeURIComponent(node)}/${encodeURIComponent(id)}`, { groups: draft ? [...draft] : null }, "PUT");
-      delete policyDraft[key];
-    }
     await load();
   } catch (err) {
     toast(err.message);

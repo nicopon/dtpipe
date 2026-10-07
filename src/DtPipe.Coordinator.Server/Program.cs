@@ -240,14 +240,11 @@ designer.MapPost("/design/place", async (PlaceRequest request, DesignService des
     var plan = await placer.PlanAsync(request.Id, composed.Yaml, ct);
     return Results.Ok(new { errors = Array.Empty<string>(), plan, bricks = placer.BrickAliases(composed.Yaml) });
 });
-designer.MapPost("/library/{id}/deploy", async (string id, PipelineLibrary library, RightsStore rights, BrickCatalog bricks, DeploymentManager deployments, CancellationToken ct) =>
+designer.MapPost("/library/{id}/deploy", async (string id, PipelineLibrary library, DeploymentManager deployments, CancellationToken ct) =>
 {
     var doc = await library.GetAsync(id, ct);
     if (doc?.Plan is null) return Results.Conflict(new { error = $"'{id}' has no saved distributed plan: distribute it first." });
     if (!doc.PlanCurrent) return Results.Conflict(new { error = $"'{id}' changed since its plan was saved: distribute it again." });
-    // A saved plan is checked against the rights as they are now.
-    var violations = rights.PolicyViolations(doc.Plan.Plan, doc.Yaml, bricks);
-    if (violations.Count > 0) return Results.Conflict(new { error = string.Join(" ", violations) });
     await deployments.DeployAsync(doc.Plan.Plan, "library", ct);
     return Results.Ok(doc.Plan.Plan);
 });
@@ -267,19 +264,12 @@ api.MapGet("/rights", (RightsStore rights, NodeInventory inventory, CoordinatorS
         }),
         groups = rights.Groups(),
         matrix = doc.Matrix,
-        brickPolicies = doc.BrickPolicies,
         audit = doc.Audit,
     };
 });
 admin.MapPut("/rights/matrix", (MatrixRequest request, RightsStore rights, EventBus bus, HttpContext http) =>
 {
     rights.SetMatrix(request.Matrix, EmailOf(http));
-    bus.Publish("rights", new { });
-    return Results.Ok();
-});
-admin.MapPut("/rights/bricks/{node}/{id}", (string node, string id, PolicyRequest request, RightsStore rights, EventBus bus, HttpContext http) =>
-{
-    rights.SetBrickPolicy($"{node}/{id}", request.Groups, EmailOf(http));
     bus.Publish("rights", new { });
     return Results.Ok();
 });
@@ -373,5 +363,4 @@ internal sealed record SaveRequest(string Yaml, System.Text.Json.Nodes.JsonObjec
 internal sealed record PlaceRequest(string Id, DesignModel Model);
 internal sealed record DistributeRequest(bool Save = false, string? Message = null);
 internal sealed record MatrixRequest(Dictionary<string, List<string>> Matrix);
-internal sealed record PolicyRequest(List<string>? Groups);
 internal sealed record IdentityRequest(string ClientId, string? DisplayName, string Group, string? Node, bool? Enabled);

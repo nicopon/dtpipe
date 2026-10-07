@@ -91,10 +91,10 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   the host last reported: a killed host would otherwise leave its fragments "Launched" for good. A host
   that only lost its connection reports them all again when it announces itself.
   `[local: the lab's tools/campaign.py F3]`
-- **One source of rights.** `RightsStore` holds the identities, the flow matrix and the brick
-  policies; `RightsFlowControl` replaces TransportR's `IFlowControlService`, so the hub checks the
-  matrix as it is now on every transfer, and every plan (`/api/plan`, `/api/deploy`, `AutoPlacer`,
-  a library deploy) goes through `RightsStore.WithPolicies`. Never add a second matrix.
+- **One source of rights.** `RightsStore` holds the identities and the flow matrix;
+  `RightsFlowControl` replaces TransportR's `IFlowControlService`, so the hub checks the matrix as
+  it is now on every transfer, and the planner and a deployment check every edge against it. Never
+  add a second matrix.
   `[local: the lab's smoke.py rights]`
 - **A data node only reads and writes, and runs only its bricks**: the node enforces it
   (`src/DtPipe.PipelineNode.Hosting/CLAUDE.md`), and the server reads a branch the same way

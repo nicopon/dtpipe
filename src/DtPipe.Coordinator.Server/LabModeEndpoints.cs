@@ -13,12 +13,12 @@ public static class LabModeEndpoints
     {
         api.MapGet("/pipelines", (PipelineCatalog catalog) => catalog.List());
 
-        api.MapPost("/plan", async (PlanRequest request, PlanBuilder planner, RightsStore rights, BrickCatalog bricks, CancellationToken ct) =>
-            rights.WithPolicies(await planner.BuildAsync(request, ct), request.Yaml, bricks));
+        api.MapPost("/plan", async (PlanRequest request, PlanBuilder planner, CancellationToken ct) =>
+            await planner.BuildAsync(request, ct));
 
-        api.MapPost("/deploy", async (PlanRequest request, PlanBuilder planner, RightsStore rights, BrickCatalog bricks, DeploymentManager deployments, CancellationToken ct) =>
+        api.MapPost("/deploy", async (PlanRequest request, PlanBuilder planner, DeploymentManager deployments, CancellationToken ct) =>
         {
-            var plan = rights.WithPolicies(await planner.BuildAsync(request, ct), request.Yaml, bricks);
+            var plan = await planner.BuildAsync(request, ct);
             await deployments.DeployAsync(plan, "lab", ct);
             return plan;
         });

@@ -5,7 +5,7 @@ Six passes. The Lab view's: each pipelines/*.yaml with its catalog layout, deplo
 after the other. The library's: each library pipeline distributed automatically and its plan
 saved, then all of them deployed at once and their runs queued together, as the page does.
 The rights': the embedded IDP, the flow matrix refusing a plan and then, edited under a deployed
-pipeline, a transfer at run time, and a brick policy refusing a plan; every edit is undone.
+pipeline and, edited under a deployed pipeline, a transfer at run time; every edit is undone.
 The faults': a run cancelled while a fully wired fragment's child has nothing to write, whose
 verdict must come within the grace period.
 The bricks': on strict nodes, a fragment whose branch is not one of the node's bricks, or is one only
@@ -280,17 +280,6 @@ def rights_pass():
             raise RuntimeError(f"revoked -> {refused['state']}, restored -> {ok['state']}")
         return f"revoked at run time -> {refused['state']}; restored -> {ok['state']}"
 
-    def brick_policy():
-        try:
-            call("/api/rights/bricks/node-1/customers", {"groups": ["runner"]}, "PUT")
-            mirror = call("/api/library/customers-mirror/distribute", {})["plan"]
-            anonymized = call("/api/library/customers-anonymized/distribute", {})["plan"]
-            if mirror["deployable"] or not anonymized["deployable"]:
-                raise RuntimeError(f"mirror {mirror['errors']}, anonymized {anonymized['errors']}")
-            return "node-1/customers only to runner: the mirror is refused, the anonymized pipeline passes"
-        finally:
-            call("/api/rights/bricks/node-1/customers", {"groups": None}, "PUT")
-
     def impostor():
         # A host holding node-1's credentials announces itself as node-2: the coordinator refuses it,
         # and the real node-2 stays online under its own identity.
@@ -435,7 +424,6 @@ def rights_pass():
     check("identity, disabled", disabled)
     check("flow matrix, plan", matrix_plan)
     check("flow matrix, run time", matrix_runtime)
-    check("brick policy", brick_policy)
     return failures
 
 

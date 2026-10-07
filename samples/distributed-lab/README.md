@@ -137,7 +137,6 @@ started from `rights-seed.json` and edited in the **Access** view:
 |---|---|
 | **Who**: identities, each a client of the IdP bound to one group and to the one node it may announce | by the coordinator (no group for an unknown or disabled client, from its next connection or token renewal) and by the control channel (an announcement of another node is refused) |
 | **To whom**: the flow matrix between groups | by the hub on **every transfer**, live, and on every plan |
-| **What**: per source brick, the groups its rows may be sent to as they leave their node | on every plan (the hub sees groups, not bricks) |
 
 Every change is audited. A node host gives each of its pipeline nodes a token provider
 (`PipelineNodeOptions.AccessTokenProvider`) that asks the IdP for the node's token. Adding a node
@@ -181,7 +180,7 @@ python3 tools/idp_check.py          # discovery, both flows, and the refusals th
 | Designer | a palette of bricks and steps (Transform, SQL, Merge), a canvas wired port to port, an inspector per card, the composed YAML to copy or edit |
 | Distribution | the plan placed automatically, drawn in lanes (sources, runner, sinks); save it, deploy, run |
 | Runs | deployments, the run in flight and the queue, the journal with each run's report, node events, a query on any database |
-| Access | the trusted IdP, identities (group, bound node, enabled, reconnect), the editable flow matrix, brick policies, the audit |
+| Access | the trusted IdP, identities (group, bound node, enabled, reconnect), the editable flow matrix, the audit |
 
 **A pipeline is a plain dtpipe job**, one branch per card, that also runs whole on one machine
 (`smoke.py` uses it as the witness). A branch *is* a brick when its content equals the brick's:
@@ -314,7 +313,7 @@ sign a person in and out.
 | `POST /api/plan` | Lab view: `{pipelineId, yaml, cuts, placement}` → units, fragments, edges, errors |
 | `POST /api/deploy` | Lab view: the same body; plans, then deploys (409 if not deployable) |
 | `GET /api/deployments` · `DELETE /api/deployments/{id}` | what is deployed; undeploy |
-| `GET /api/rights` · `PUT /api/rights/matrix` · `PUT /api/rights/bricks/{node}/{id}` | rights, the flow matrix, a brick's policy (`{groups}` or `null`) |
+| `GET /api/rights` · `PUT /api/rights/matrix` | rights, the flow matrix |
 | `POST /api/rights/identities` · `PUT`/`DELETE /api/rights/identities/{id}` · `POST …/{id}/reconnect` | identities; reconnect drops a node's control connection so it fetches a new token |
 | `POST /api/runs` · `GET /api/runs`, `/api/runs/queue` | `{pipelineId?, pins?}` queues a run; the journal; in flight and queued |
 | `POST /api/runs/cancel` | `{runId?}`: the run in flight, or a queued one |

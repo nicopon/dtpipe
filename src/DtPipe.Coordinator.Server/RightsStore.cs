@@ -1,8 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using DtPipe.Coordinator.Contracts;
 using TransportR.Interfaces;
-using YamlDotNet.RepresentationModel;
 
 namespace DtPipe.Coordinator.Server;
 
@@ -17,8 +15,7 @@ public sealed record Identity(string ClientId, string DisplayName, string Group,
 public sealed record AuditEntry(DateTimeOffset At, string Change, string? By = null);
 
 public sealed record RightsDocument(
-    List<Identity> Identities, Dictionary<string, List<string>> Matrix, Dictionary<string, List<string>> BrickPolicies,
-    List<AuditEntry>? Audit = null);
+    List<Identity> Identities, Dictionary<string, List<string>> Matrix, List<AuditEntry>? Audit = null);
 
 /// <summary>
 /// Who may send what to whom, in one editable document, <c>rights.json</c> in the state directory,
@@ -27,9 +24,7 @@ public sealed record RightsDocument(
 /// <item><b>who</b>: the clients of the trusted IdP this coordinator grants anything to; the group a
 ///   node belongs to is its identity's, never one it declares or its token carries;</item>
 /// <item><b>to whom</b>: the flow matrix between groups, read live by TransportR's hub on every
-///   transfer and by the planner on every plan;</item>
-/// <item><b>what</b>: per source brick, the groups its rows may be sent to as they leave their
-///   node, checked on every plan (the hub sees groups, not bricks).</item>
+///   transfer and by the planner on every plan.</item>
 /// </list>
 /// </summary>
 public sealed class RightsStore
@@ -50,7 +45,7 @@ public sealed class RightsStore
         // may send anything until an administrator says so.
         var source = File.Exists(_path) ? _path : options.RightsSeed;
         _doc = source is null
-            ? new RightsDocument([], [], [])
+            ? new RightsDocument([], [])
             : JsonSerializer.Deserialize<RightsDocument>(File.ReadAllText(source), Json)
               ?? throw new InvalidOperationException($"{source}: empty rights document.");
         _doc = _doc with { Audit = _doc.Audit ?? [] };
@@ -99,16 +94,6 @@ public sealed class RightsStore
         }
     }
 
-    public void SetBrickPolicy(string brickKey, List<string>? groups, string? by = null)
-    {
-        lock (_lock)
-        {
-            if (groups is null) _doc.BrickPolicies.Remove(brickKey);
-            else _doc.BrickPolicies[brickKey] = groups.Distinct().Order(StringComparer.Ordinal).ToList();
-            Save(groups is null ? $"{brickKey}: may go wherever the matrix allows" : $"{brickKey}: may leave its node only for {(groups.Count == 0 ? "no group" : string.Join(", ", groups))}", by);
-        }
-    }
-
     public void AddIdentity(Identity identity, string? by = null)
     {
         lock (_lock)
@@ -144,42 +129,6 @@ public sealed class RightsStore
             if (_doc.Identities.RemoveAll(i => i.ClientId == clientId) == 0) throw new ConflictException($"'{clientId}' does not exist.");
             Save($"Identity {clientId} removed", by);
         }
-    }
-
-    /// <summary>
-    /// The plan's edges that carry a source brick's rows off its node to a group its policy does
-    /// not allow. A brick is found by content in the logical job; an edge's consumer alias is always
-    /// the alias of the branch whose rows it carries.
-    /// </summary>
-    public IReadOnlyList<string> PolicyViolations(DistributionPlan plan, string yaml, BrickCatalog bricks)
-    {
-        Dictionary<string, List<string>> policies;
-        lock (_lock) policies = _doc.BrickPolicies.ToDictionary(kv => kv.Key, kv => kv.Value.ToList());
-        if (policies.Count == 0) return [];
-
-        var brickOf = new Dictionary<string, BrickView>(StringComparer.Ordinal);
-        try
-        {
-            foreach (var (alias, branch) in JobYaml.Branches(JobYaml.Parse(yaml)))
-                if (bricks.Match(branch) is { } brick) brickOf[alias] = brick;
-        }
-        catch (Exception) { return []; }
-
-        var violations = new List<string>();
-        foreach (var edge in plan.Edges)
-        {
-            if (!brickOf.TryGetValue(edge.ConsumerAlias, out var brick) || !policies.TryGetValue(brick.Key, out var allowed)) continue;
-            if (!allowed.Contains(edge.ConsumerGroup, StringComparer.OrdinalIgnoreCase))
-                violations.Add($"{brick.Key} ('{edge.ConsumerAlias}') may leave {brick.Node} only for " +
-                               $"{(allowed.Count == 0 ? "no group" : string.Join(", ", allowed))}; this plan sends it to {edge.ConsumerFragment} (group {edge.ConsumerGroup}).");
-        }
-        return violations.Distinct().ToList();
-    }
-
-    public DistributionPlan WithPolicies(DistributionPlan plan, string yaml, BrickCatalog bricks)
-    {
-        var violations = PolicyViolations(plan, yaml, bricks);
-        return violations.Count == 0 ? plan : plan with { Errors = [.. plan.Errors, .. violations] };
     }
 
     private void Save(string change, string? by = null)
