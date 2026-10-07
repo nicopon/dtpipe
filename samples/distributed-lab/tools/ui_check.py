@@ -10,6 +10,8 @@ Writes one screenshot per step.
      Transform step, a sink brick, wired port to port; a wire picked up by its input end and
      dropped in the void, another removed with its x button, both wired again - then given a
      transformer, composed by the coordinator and validated by dtpipe. Nothing is saved.
+  4. Designer panels: the palette and inspector handles and the drawer handle dragged with the
+     mouse, each panel measured before and after.
 
 Usage: ui_check.py [lab-url] [out-dir]     (defaults: http://127.0.0.1:5180, .state/ui)
 The lab must be up. Exits 1 if any step fails.
@@ -150,6 +152,24 @@ def designer_scenario(browser):
     report(wiring and composed and validated and not errors, "designer scenario", detail, shot)
 
 
+def designer_panels(browser):
+    # The scenario leaves its pipeline open: every panel is measured, dragged by its handle, measured again.
+    size = lambda selector, axis: browser.js(f"document.querySelector({json.dumps(selector)}).getBoundingClientRect().{axis}")
+    cases = (("palette", "#d-palette", "width", ".split-pal", (60, 0)),
+             ("inspector", "#d-inspector", "width", ".split-insp", (-60, 0)),
+             ("drawer", "#d-drawer", "height", ".split-row", (0, -60)))
+    for name, panel, axis, handle, (dx, dy) in cases:
+        before = size(panel, axis)
+        x, y = browser.center(handle)
+        browser.drag((x, y), (x + dx, y + dy))
+        browser.wait_for(f"Math.abs(document.querySelector({json.dumps(panel)}).getBoundingClientRect().{axis} - {before}) > 20", 5)
+        after = size(panel, axis)
+        report(abs(after - before) > 20, "designer resize " + name, f"{axis} {before:.0f} -> {after:.0f}", "")
+    errors = page_errors(browser)
+    shot = browser.shot(os.path.join(OUT, "designer-resized.png"))
+    report(not errors, "designer resize errors", "none" if not errors else f"errors: {errors}", shot)
+
+
 def sign_in(browser):
     browser.goto(URL + "/", 2)
     on_form = browser.wait_for("!!document.querySelector('form input[name=password]')", 20)
@@ -168,6 +188,7 @@ try:
     lab_view(browser)
     coordinator_views(browser)
     designer_scenario(browser)
+    designer_panels(browser)
 finally:
     browser.close()
 sys.exit(1 if failed else 0)

@@ -77,11 +77,23 @@ pre.diff .del { color: var(--bad); }
 .import button { margin-top: 6px; }
 
 /* Designer */
-.designer { display: flex; flex-direction: column; gap: 12px; }
+.designer {
+  --pal-w: 230px; --insp-w: 330px; --drawer-h: 240px;
+  display: flex; flex-direction: column; gap: 12px; height: calc(100vh - 100px); min-height: 520px;
+}
 .designer-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 12px; }
 .title-input { font-weight: 700; min-width: 260px; }
-.designer-body { display: grid; grid-template-columns: 230px minmax(0, 1fr) 330px; gap: 12px; min-height: 560px; }
-.palette { padding: 10px; overflow: auto; max-height: 72vh; }
+.designer-bar { flex: none; }
+.designer-body { position: relative; display: grid; grid-template-columns: var(--pal-w) minmax(0, 1fr) var(--insp-w); gap: 12px; flex: 1; min-height: 0; }
+.designer-body > .card { min-height: 0; }
+/* The handles lie over the 12px gaps beside the palette and the inspector, and over the drawer's top edge. */
+.split { position: absolute; z-index: 4; background: transparent; touch-action: none; }
+.split:hover, .split.dragging, .split:focus-visible { background: var(--accent); opacity: .35; outline: none; }
+.split-col { top: 0; bottom: 0; width: 12px; cursor: col-resize; }
+.split-pal { left: var(--pal-w); }
+.split-insp { right: var(--insp-w); }
+.split-row { flex: none; height: 6px; margin: -9px 0 -9px; position: relative; cursor: row-resize; }
+.palette { padding: 10px; overflow: auto; }
 .palette h3 { margin: 10px 0 4px; }
 .palette h3:first-child { margin-top: 0; }
 .pal-node { font-size: 12px; font-weight: 700; color: var(--node-color); margin: 8px 0 2px; }
@@ -92,7 +104,7 @@ pre.diff .del { color: var(--bad); }
 }
 .pal-item:hover { border-color: var(--accent); }
 .pal-item button { padding: 0 6px; }
-.canvas { padding: 0; overflow: auto; max-height: 72vh; position: relative; background:
+.canvas { padding: 0; overflow: auto; position: relative; background:
   radial-gradient(circle, var(--border) 1px, transparent 1px) 0 0 / 20px 20px, var(--surface); }
 .canvas-inner { position: relative; min-width: 100%; min-height: 100%; touch-action: none; }
 .canvas-inner > svg { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
@@ -131,7 +143,7 @@ pre.diff .del { color: var(--bad); }
 }
 .edge-delete:hover { background: var(--bad); color: #fff; }
 .port.in, .port.ref { cursor: grab; }
-.inspector { padding: 12px; overflow: auto; max-height: 72vh; }
+.inspector { padding: 12px; overflow: auto; }
 .inspector .row { justify-content: space-between; }
 .inspector textarea { font-size: 12px; }
 .inspector ul.inputs { padding-left: 18px; margin: 4px 0; }
@@ -141,8 +153,8 @@ pre.diff .del { color: var(--bad); }
 .transformer .sub { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; margin-top: 4px; }
 .kv-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 4px; margin: 3px 0; }
 .kv-row input { min-width: 0; padding: 2px 6px; font-size: 12px; }
-.drawer { padding: 10px 12px; }
-.drawer pre { background: var(--surface-2); padding: 10px; border-radius: 6px; overflow: auto; max-height: 360px; }
+.drawer { flex: none; height: var(--drawer-h); padding: 10px 12px; overflow: auto; }
+.drawer pre { background: var(--surface-2); padding: 10px; border-radius: 6px; overflow: auto; }
 .drawer textarea { width: 100%; }
 .tabs { display: flex; gap: 4px; align-items: center; border-bottom: 1px solid var(--border); margin-bottom: 8px; flex-wrap: wrap; }
 .tabs button { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; padding: 6px 10px; }
@@ -177,8 +189,12 @@ table.matrix.edit input { cursor: pointer; }
 .run-report table { width: auto; }
 
 @media (max-width: 1250px) {
-  .designer-body { grid-template-columns: 200px minmax(0, 1fr); }
-  .inspector { grid-column: 1 / -1; max-height: none; }
+  .designer { height: auto; }
+  .designer-body { grid-template-columns: 200px minmax(0, 1fr); flex: none; min-height: 560px; }
+  .designer-body > .canvas, .designer-body > .palette { max-height: 72vh; }
+  .inspector { grid-column: 1 / -1; }
+  .split { display: none; }
+  .drawer { height: auto; max-height: 360px; }
 }
 @media (max-width: 820px) {
   .designer-body { grid-template-columns: minmax(0, 1fr); }

@@ -23,6 +23,12 @@ const TRANSFORMERS = {
   project: { hint: "options: project \"a,b\", drop \"c\", rename \"Old:New\"", mapping: null, value: null },
 };
 
+// The panels' sizes: kept across Apply (which renders the shell again) and across visits.
+const SIZE_LIMITS = { pal: [160, 420], insp: [240, 640], drawer: [100, 640] };
+const SIZE_KEY = "dtpipe.designer.sizes";
+const sizes = { pal: 230, insp: 330, drawer: 240 };
+try { Object.assign(sizes, JSON.parse(localStorage.getItem(SIZE_KEY) || "{}")); } catch { /* storage unavailable: defaults */ }
+
 let host = null;
 let id = null;
 let model = null;          // { title, description, check, steps, layout }
@@ -238,7 +244,10 @@ function renderShell() {
         <aside class="palette card" id="d-palette"></aside>
         <div class="canvas card" id="d-canvas"><div class="canvas-inner" id="d-inner"><svg id="d-svg"></svg></div></div>
         <aside class="inspector card" id="d-inspector"></aside>
+        <div class="split split-col split-pal" data-split="pal" role="separator" aria-orientation="vertical" aria-label="Resize the palette" tabindex="0"></div>
+        <div class="split split-col split-insp" data-split="insp" role="separator" aria-orientation="vertical" aria-label="Resize the inspector" tabindex="0"></div>
       </div>
+      <div class="split split-row" data-split="drawer" role="separator" aria-orientation="horizontal" aria-label="Resize the drawer" tabindex="0"></div>
       <div class="drawer card" id="d-drawer"></div>
     </div>`;
 
@@ -248,6 +257,8 @@ function renderShell() {
   $("d-validate").addEventListener("click", validate);
   $("d-save").addEventListener("click", () => save().catch((e) => toast(e.message)));
   $("d-distribute").addEventListener("click", distribute);
+  applySizes();
+  bindSplits();
   bindCanvas();
   bindPalette();
   bindInspector();
@@ -259,6 +270,46 @@ function renderShell() {
   renderCanvas();
   renderDrawer();
   renderToolbarState();
+}
+
+function applySizes() {
+  const el = host.querySelector(".designer");
+  for (const [name, [lo, hi]] of Object.entries(SIZE_LIMITS)) {
+    sizes[name] = Math.min(hi, Math.max(lo, Math.round(+sizes[name] || lo)));
+    el.style.setProperty(name === "pal" ? "--pal-w" : name === "insp" ? "--insp-w" : "--drawer-h", `${sizes[name]}px`);
+  }
+}
+
+function resize(name, value, persist) {
+  sizes[name] = value;
+  applySizes();
+  if (persist) { try { localStorage.setItem(SIZE_KEY, JSON.stringify(sizes)); } catch { /* storage unavailable */ } }
+}
+
+// A handle is dragged with the pointer, or moved with the arrow keys; the size is clamped to its limits.
+function bindSplits() {
+  const designer = host.querySelector(".designer");
+  const body = host.querySelector(".designer-body");
+  for (const handle of host.querySelectorAll(".split")) {
+    const name = handle.dataset.split;
+    const target = (e) => {
+      if (name === "pal") return e.clientX - body.getBoundingClientRect().left - 6;
+      if (name === "insp") return body.getBoundingClientRect().right - e.clientX - 6;
+      return designer.getBoundingClientRect().bottom - e.clientY - 12;
+    };
+    handle.addEventListener("pointerdown", (e) => { handle.setPointerCapture(e.pointerId); handle.classList.add("dragging"); e.preventDefault(); });
+    handle.addEventListener("pointermove", (e) => { if (handle.hasPointerCapture(e.pointerId)) resize(name, target(e), false); });
+    const end = (e) => { if (handle.hasPointerCapture(e.pointerId)) { handle.releasePointerCapture(e.pointerId); handle.classList.remove("dragging"); resize(name, sizes[name], true); } };
+    handle.addEventListener("pointerup", end);
+    handle.addEventListener("pointercancel", end);
+    handle.addEventListener("keydown", (e) => {
+      const grow = { pal: "ArrowRight", insp: "ArrowLeft", drawer: "ArrowUp" }[name];
+      const shrink = { pal: "ArrowLeft", insp: "ArrowRight", drawer: "ArrowDown" }[name];
+      if (e.key !== grow && e.key !== shrink) return;
+      resize(name, sizes[name] + (e.key === grow ? 16 : -16), true);
+      e.preventDefault();
+    });
+  }
 }
 
 function renderToolbarState() {
