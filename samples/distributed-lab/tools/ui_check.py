@@ -13,6 +13,8 @@ Writes one screenshot per step.
      transformer, composed by the coordinator and validated by dtpipe. Nothing is saved.
   4. Designer panels: the palette and inspector handles and the drawer handle dragged with the
      mouse, each panel measured before and after.
+  6. Designer placement: the same unsaved pipeline switched to Placement (one frame per node, from
+     the plan the coordinator makes of the cards), its Fragments tab, and back to the canvas.
   5. Designer zoom: the Transform card opened as a chain with its magnifier, edited and extended
      there, and left by the breadcrumb.
 
@@ -230,6 +232,28 @@ def designer_zoom(browser):
     report(left and not errors, "designer zoom leave", "canvas back" if left else "still zoomed" + (f"  errors: {errors}" if errors else ""), "")
 
 
+def designer_placement(browser):
+    # The scenario's pipeline is still unsaved: its placement comes from /api/design/place, never the library.
+    browser.js("document.getElementById('d-mode-place').click()")
+    placed = browser.wait_for("!document.getElementById('d-place').hidden && document.getElementById('d-inner').hidden"
+                              " && document.querySelectorAll('#d-place .xbox').length === 3"
+                              " && document.querySelectorAll('#d-place .lanes svg path.edge').length === 2", 15)
+    nodes = browser.js("[...document.querySelectorAll('#d-place .xbox .node-name')].map(n => n.textContent).sort().join(',')")
+    shot = browser.shot(os.path.join(OUT, "designer-placement.png"))
+    report(placed and nodes == "node-1,node-4,runner-1", "designer placement", f"frames on {nodes}", shot)
+
+    browser.js("document.querySelector('#d-drawer [data-tab=\"fragments\"]').click()")
+    listed = browser.wait_for("document.querySelectorAll('#d-drawer .frag-card').length === 3", 10)
+    browser.js("document.querySelector('#d-drawer [data-tab=\"problems\"]').click()")
+    clean = browser.wait_for("!document.querySelector('#d-drawer .msgs.errors') && !!document.querySelector('#d-drawer .drawer-status')", 5)
+    browser.js("document.getElementById('d-mode-canvas').click()")
+    back = browser.wait_for("document.getElementById('d-place').hidden && !document.getElementById('d-inner').hidden"
+                            " && document.querySelectorAll('.dcard').length === 3", 5)
+    errors = page_errors(browser)
+    report(listed and clean and back and not errors, "designer placement tabs",
+           f"fragments={listed} problems clean={clean} canvas back={back}" + (f"  errors: {errors}" if errors else ""), "")
+
+
 def sign_in(browser):
     browser.goto(URL + "/", 2)
     on_form = browser.wait_for("!!document.querySelector('form input[name=password]')", 20)
@@ -251,6 +275,7 @@ try:
     designer_scenario(browser)
     designer_panels(browser)
     designer_zoom(browser)
+    designer_placement(browser)
 finally:
     browser.close()
 sys.exit(1 if failed else 0)

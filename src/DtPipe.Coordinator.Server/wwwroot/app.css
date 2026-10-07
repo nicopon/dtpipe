@@ -226,3 +226,13 @@ table.matrix.edit input { cursor: pointer; }
   .designer-body { grid-template-columns: minmax(0, 1fr); }
   .node-grid { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Designer: the view switch, and the placement of the cards in lanes. */
+.seg { display: inline-flex; }
+.seg button { border-radius: 0; margin-left: -1px; }
+.seg button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+.seg button:last-child { border-radius: 0 6px 6px 0; }
+.seg button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.place-view { padding: 14px 18px; min-height: 100%; }
+.place-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.place-view .lanes { overflow: visible; }

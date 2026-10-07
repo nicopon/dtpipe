@@ -2,6 +2,7 @@
 // branch. The coordinator composes the job (POST /api/design/compose) on every change; this page
 // never writes YAML itself.
 import { $, api, esc, nodeColor, store, toast } from "./core.js";
+import { drawLanes, fragmentJobs, legend, planProblems } from "./placement.js";
 
 const CARD_W = 210;
 const CARD_H = 96;
@@ -37,14 +38,17 @@ let selected = null;       // { alias } (+ t, a transformer's index, while zoome
 let zoom = null;           // the alias of the Transform step shown as a chain of its transformers
 let dirty = false;
 let validation = null;     // { ok, dryRun, errors }
-let drawer = "yaml";       // yaml | problems | edit
+let drawer = "yaml";       // yaml | problems | fragments | edit
+let placing = false;       // Placement mode: the cards shown as the plan's fragments, one frame per node
+let placement = null;      // the last /api/design/place answer for the cards as they are, or null while stale
+let placeSeq = 0;
 let composeSeq = 0;
 let composeTimer = null;
 
 export function mount(el, params) {
   host = el;
   id = params[0] || null;
-  model = null; result = null; selected = null; zoom = null; dirty = false; validation = null; drawer = "yaml";
+  model = null; result = null; selected = null; zoom = null; placing = false; placement = null; dirty = false; validation = null; drawer = "yaml";
   if (!id) { renderPicker(); return; }
   load().catch((e) => { host.innerHTML = `<p class="mismatch">${esc(e.message)}</p>`; });
 }
@@ -117,15 +121,69 @@ async function compose() {
   renderCanvas();
   renderDrawer();
   renderToolbarState();
+  if (needsPlacement()) fetchPlacement();
 }
 
 function touch({ recompose = true, inspector = false, canvas = true } = {}) {
   dirty = true;
   validation = null;
+  if (recompose) placement = null;
   if (canvas) renderCanvas();
   if (inspector) renderInspector();
   renderToolbarState();
   if (recompose) scheduleCompose();
+}
+
+// ---------------------------------------------------------------- placement
+
+// The plan is asked for only where it is shown: Placement, and the Problems and Fragments tabs.
+const needsPlacement = () => placing || drawer === "problems" || drawer === "fragments";
+
+// Places the cards as composed, saving nothing. Not asked while the composition has errors: the
+// job is not one yet.
+async function fetchPlacement() {
+  const seq = ++placeSeq;
+  if (result?.errors?.length) { placement = { errors: result.errors, plan: null, bricks: {} }; renderPlacement(); return; }
+  try {
+    const answer = await api("/api/design/place", { id, model });
+    if (seq !== placeSeq) return;
+    placement = answer;
+  } catch (e) {
+    if (seq === placeSeq) placement = { errors: [e.message], plan: null, bricks: {} };
+  }
+  renderPlacement();
+}
+
+function renderPlacement() {
+  renderPlaceView();
+  renderDrawer();
+}
+
+function renderPlaceView() {
+  const el = $("d-place");
+  if (!el || el.hidden) return;
+  if (!placement) { el.innerHTML = `<p class="hint">Placing the cards…</p>`; return; }
+  if (!placement.plan) {
+    el.innerHTML = `<p class="hint">No placement yet: the cards do not compose into a job. See Problems.</p>`;
+    return;
+  }
+  const problems = planProblems(placement.plan);
+  el.innerHTML = `
+    <div class="place-head"><span class="hint">Every brick on the node that offers it, every other step on the runner. Wire and edit on the Canvas.</span>${legend}</div>
+    ${problems.length ? `<ul class="msgs errors">${problems.map((m) => `<li>${esc(m)}</li>`).join("")}</ul>` : ""}
+    <div class="lanes" id="d-lanes"></div>`;
+  const lanes = $("d-lanes");
+  drawLanes(lanes, placement.plan, placement.bricks || {});
+  // The three lanes are drawn at their own width; shrunk to the canvas when it is narrower, never enlarged.
+  lanes.style.zoom = Math.max(0.55, Math.min(1, (el.clientWidth - 40) / lanes.offsetWidth));
+}
+
+function setPlacing(on) {
+  if (placing === on) return;
+  placing = on;
+  if (on && zoom) { selected = { alias: zoom }; zoom = null; }
+  applyView();
+  if (on) { placement = null; renderPlaceView(); fetchPlacement(); }
 }
 
 // ---------------------------------------------------------------- model edits
@@ -162,7 +220,7 @@ function removeStep(alias) {
   if (zoom === alias) zoom = null;
   selected = null;
   touch({ inspector: true });
-  applyZoom();
+  applyView();
 }
 
 function renameStep(from, to) {
@@ -235,21 +293,24 @@ function enterZoom(alias) {
   if (step?.kind !== "transform") return;
   zoom = alias;
   selected = { alias, t: step.transformers?.length ? 0 : undefined };
-  applyZoom();
+  applyView();
 }
 
 function exitZoom() {
   if (!zoom) return;
   selected = { alias: zoom };
   zoom = null;
-  applyZoom();
+  applyView();
 }
 
-// Shows the canvas or the chain, whichever the zoom state names, and the inspector that goes with it.
-function applyZoom() {
-  $("d-inner").hidden = !!zoom;
-  $("d-chain").hidden = !zoom;
-  $("d-palette").classList.toggle("dimmed", !!zoom);
+// Shows the canvas, the chain or the placement, whichever the view state names, and the inspector that goes with it.
+function applyView() {
+  $("d-inner").hidden = !!zoom || placing;
+  $("d-chain").hidden = !zoom || placing;
+  $("d-place").hidden = !placing;
+  $("d-palette").classList.toggle("dimmed", !!zoom || placing);
+  $("d-mode-canvas").classList.toggle("active", !placing);
+  $("d-mode-place").classList.toggle("active", placing);
   renderCanvas();
   renderInspector();
 }
@@ -304,6 +365,7 @@ function renderShell() {
         <input id="d-description" class="grow" value="${esc(model.description)}" placeholder="What this pipeline does" aria-label="Description">
         <span id="d-dirty" class="chip warn" hidden>unsaved</span>
         <span class="actions">
+          <span class="seg" role="group" aria-label="View"><button id="d-mode-canvas" class="active" title="Wire and edit the cards">Canvas</button><button id="d-mode-place" title="Where each brick and step would run: one frame per node, from the plan the Library would make">Placement</button></span>
           <button id="d-layout" class="ghost" title="Arrange the cards in columns, sources first">Arrange</button>
           <button id="d-validate" title="each source brick's node sends one row, dtpipe runs the job over them with writers neutralised, and each sink brick's node checks its target">Validate</button>
           <button id="d-save">Save…</button>
@@ -312,7 +374,7 @@ function renderShell() {
       </div>
       <div class="designer-body">
         <aside class="palette card" id="d-palette"></aside>
-        <div class="canvas card" id="d-canvas"><div class="canvas-inner" id="d-inner"><svg id="d-svg"></svg></div><div class="chain-view" id="d-chain" hidden></div></div>
+        <div class="canvas card" id="d-canvas"><div class="canvas-inner" id="d-inner"><svg id="d-svg"></svg></div><div class="chain-view" id="d-chain" hidden></div><div class="place-view" id="d-place" hidden></div></div>
         <aside class="inspector card" id="d-inspector"></aside>
         <div class="split split-col split-pal" data-split="pal" role="separator" aria-orientation="vertical" aria-label="Resize the palette" tabindex="0"></div>
         <div class="split split-col split-insp" data-split="insp" role="separator" aria-orientation="vertical" aria-label="Resize the inspector" tabindex="0"></div>
@@ -323,6 +385,8 @@ function renderShell() {
 
   $("d-title").addEventListener("input", (e) => { model.title = e.target.value; touch({ canvas: !!zoom }); });
   $("d-description").addEventListener("input", (e) => { model.description = e.target.value; touch({ canvas: false }); });
+  $("d-mode-canvas").addEventListener("click", () => setPlacing(false));
+  $("d-mode-place").addEventListener("click", () => setPlacing(true));
   $("d-layout").addEventListener("click", () => autoLayout());
   $("d-validate").addEventListener("click", validate);
   $("d-save").addEventListener("click", () => save().catch((e) => toast(e.message)));
@@ -337,7 +401,7 @@ function renderShell() {
   document.removeEventListener("keydown", onKey);
   document.addEventListener("keydown", onKey);
   renderPalette();
-  applyZoom();
+  applyView();
   renderDrawer();
   renderToolbarState();
 }
@@ -428,6 +492,7 @@ const KIND_LABEL = { source: "source", sink: "sink", transform: "transform", sql
 function renderCanvas() {
   const inner = $("d-inner");
   if (!inner || !model) return;
+  if (placing) { renderPlaceView(); return; }
   if (zoom) { renderChain(); return; }
   const problems = new Set((result?.errors || []).flatMap((e) => [...e.matchAll(/'([^']+)'/g)].map((m) => m[1])));
   inner.querySelectorAll(".dcard").forEach((c) => c.remove());
@@ -660,6 +725,10 @@ function bindPalette() {
 function onKey(e) {
   if (!model || !host?.isConnected) return;
   if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
+  if (placing) {
+    if (e.key === "Escape") { setPlacing(false); e.preventDefault(); }
+    return;
+  }
   if (zoom) {
     // Zoomed, Delete removes the selected transformer, never the step.
     if (e.key === "Escape") { exitZoom(); e.preventDefault(); }
@@ -859,10 +928,12 @@ function bindInspector() {
 function renderDrawer() {
   const el = $("d-drawer");
   if (!el || !result) return;
-  const problems = (result.errors?.length || 0) + (result.warnings?.length || 0) + (validation && !validation.ok ? 1 : 0);
+  const planIssues = placement?.plan ? planProblems(placement.plan) : [];
+  const problems = (result.errors?.length || 0) + (result.warnings?.length || 0) + planIssues.length + (validation && !validation.ok ? 1 : 0);
   const tabs = `<div class="tabs">
       <button class="${drawer === "yaml" ? "active" : ""}" data-tab="yaml">YAML</button>
       <button class="${drawer === "problems" ? "active" : ""}" data-tab="problems">Problems ${problems ? `<span class="count">${problems}</span>` : ""}</button>
+      <button class="${drawer === "fragments" ? "active" : ""}" data-tab="fragments" title="The jobs each node would run">Fragments</button>
       <button class="${drawer === "edit" ? "active" : ""}" data-tab="edit">Edit as YAML</button>
       <span class="drawer-status">${result.errors?.length ? `<span class="mismatch">${result.errors.length} error(s)</span>` : `<span class="ok-line">composes</span>`}${validation ? (validation.ok ? ` · <span class="ok-line">dtpipe accepts it</span>` : ` · <span class="mismatch">dtpipe refuses it</span>`) : ""}</span>
     </div>`;
@@ -872,8 +943,11 @@ function renderDrawer() {
   } else if (drawer === "problems") {
     body = `${result.errors?.length ? `<ul class="msgs errors">${result.errors.map((m) => `<li>${esc(m)}</li>`).join("")}</ul>` : ""}
       ${result.warnings?.length ? `<ul class="msgs">${result.warnings.map((m) => `<li>${esc(m)}</li>`).join("")}</ul>` : ""}
+      ${planIssues.length ? `<h3>Placement: what stops the plan</h3><ul class="msgs errors">${planIssues.map((m) => `<li>${esc(m)}</li>`).join("")}</ul>` : ""}
       ${validation?.dryRun ? `<h3>dtpipe check: --dry-run here, each sink on its node</h3><pre class="mismatch">${esc(validation.dryRun)}</pre>` : ""}
       ${!problems ? `<p class="hint">Nothing to report.${validation ? "" : " Validate to have dtpipe run it over one row per source."}</p>` : ""}`;
+  } else if (drawer === "fragments") {
+    body = placement?.plan ? fragmentJobs(placement.plan) : placement ? `<p class="hint">No fragments: the cards do not compose into a job. See Problems.</p>` : `<p class="hint">Placing the cards…</p>`;
   } else {
     body = `<textarea id="d-edit" class="mono" rows="16" spellcheck="false">${esc(result.yaml)}</textarea>
       <div class="row"><button data-apply>Apply</button><span class="hint">The job is taken apart into cards again; cards that keep their alias keep their place.</span></div>`;
@@ -885,7 +959,11 @@ function bindDrawer() {
   $("d-drawer").addEventListener("click", async (e) => {
     const b = e.target.closest("button");
     if (!b) return;
-    if (b.dataset.tab) { drawer = b.dataset.tab; renderDrawer(); }
+    if (b.dataset.tab) {
+      drawer = b.dataset.tab;
+      renderDrawer();
+      if (needsPlacement() && !placement) fetchPlacement();
+    }
     else if (b.dataset.copy !== undefined) {
       try { await navigator.clipboard.writeText(result.yaml); toast("YAML copied.", "info"); }
       catch { const sel = window.getSelection(); sel.selectAllChildren($("d-yaml")); toast("Selected: copy it with your keyboard.", "info"); }
@@ -898,6 +976,7 @@ function bindDrawer() {
         if (model.steps.some((s) => !model.layout[s.alias])) autoLayout(false);
         selected = null;
         zoom = null;
+        placement = null;
         drawer = "yaml";
         dirty = true;
         renderShell();

@@ -39,7 +39,7 @@ open http://127.0.0.1:5180          # sign in as labadmin / labadminpwd; the Lab
 | `./lab.sh status` | which processes run, and what the coordinator sees of each node |
 | `./lab.sh smoke [lab\|sandbox\|library\|rights\|faults\|bricks] [id…]` | runs the end-to-end check, optionally one pass or some pipelines only; restarts the node hosts in the mode each pass needs |
 | `./lab.sh nodes strict\|sandbox` | restarts the node hosts in that mode after undoing every deployment (`LAB_NODE_SANDBOX=1 ./lab.sh up` starts them in sandbox mode) |
-| `./lab.sh ui` | drives both pages in headless Chrome, a designer scenario, its panels and its zoom included; screenshots to `.state/ui/` |
+| `./lab.sh ui` | drives both pages in headless Chrome, a designer scenario, its panels, its zoom and its placement included; screenshots to `.state/ui/` |
 | `./lab.sh seed` | rebuilds the databases (`LAB_SCALE=5` multiplies the row counts) |
 | `./lab.sh logs` | follows every log |
 | `./lab.sh down` / `reset` | stops everything / also deletes `.state/` |

@@ -12,7 +12,7 @@
 #   ./lab.sh status    which processes run, and what the coordinator sees
 #   ./lab.sh seed      rebuild the four databases (LAB_SCALE multiplies the row counts)
 #   ./lab.sh smoke     every pipeline, distributed, against its monolithic witness
-#   ./lab.sh ui        both pages render, and a designer scenario, its panels and its zoom pass (headless Chrome)
+#   ./lab.sh ui        both pages render, and a designer scenario, its panels, its zoom and its placement pass (headless Chrome)
 #   ./lab.sh logs      follow every log
 #   ./lab.sh reset     down, then delete .state/
 set -euo pipefail
