@@ -999,6 +999,7 @@ async function validate() {
   $("d-validate").disabled = false;
   $("d-validate").textContent = "Validate";
   renderDrawer();
+  if (needsPlacement() && !placement) fetchPlacement();
 }
 
 async function save() {

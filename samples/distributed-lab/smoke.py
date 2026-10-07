@@ -255,7 +255,12 @@ def rights_pass():
             plan = call("/api/library/customers-anonymized/distribute", {})["plan"]
             if plan["deployable"] or "crm -> runner" not in (plan.get("flowRejection") or ""):
                 raise RuntimeError(f"plan not refused: {plan.get('flowRejection')}")
-            return "crm -> runner revoked: plan refused"
+            # The designer's placement refuses the same way, with the same words.
+            doc = call("/api/library/customers-anonymized")
+            placed = call("/api/design/place", {"id": "customers-anonymized", "model": call("/api/design/decompose", {"yaml": doc["yaml"]})["model"]})["plan"]
+            if placed["deployable"] or placed["flowRejection"] != plan["flowRejection"]:
+                raise RuntimeError(f"the designer's placement was not refused like the library's: {placed['flowRejection']}")
+            return "crm -> runner revoked: plan refused, in the library and in the designer"
         finally:
             call("/api/rights/matrix", {"matrix": matrix}, "PUT")
 
