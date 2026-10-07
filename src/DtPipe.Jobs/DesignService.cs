@@ -5,7 +5,10 @@ using YamlDotNet.RepresentationModel;
 
 namespace DtPipe.Jobs;
 
-/// <summary>The kinds of card the designer draws. Each one is exactly one branch of the job.</summary>
+/// <summary>
+/// The kinds of card the designer draws. Each one is one branch of the job, except where
+/// <see cref="DesignService.Compose"/> joins a chain of cards back into the branch they came from.
+/// </summary>
 public static class StepKinds
 {
     public const string Source = "source";
@@ -19,9 +22,11 @@ public static class StepKinds
 }
 
 /// <summary>
-/// One card. <see cref="Brick"/> is the key of a brick (<see cref="IBrickLookup"/>) for a source or a sink;
-/// <see cref="Transformers"/> is the <c>transformers</c> list as JSON; <see cref="Yaml"/> is the
-/// body of a <see cref="StepKinds.Branch"/> step.
+/// One card. A source or a sink names a brick by <see cref="Brick"/> (<see cref="IBrickLookup"/>),
+/// or carries its own endpoint as <see cref="Yaml"/>: <c>input</c> or <c>output</c>, the keys of
+/// that side (<see cref="BranchSides"/>) and its provider-options blocks. <see cref="Transformers"/>
+/// is the <c>transformers</c> list as JSON; <see cref="Yaml"/> is also the body of a
+/// <see cref="StepKinds.Branch"/> step.
 /// </summary>
 public sealed record DesignStep(
     string Alias, string Kind, string? Brick = null, IReadOnlyList<string>? From = null, IReadOnlyList<string>? Ref = null,
@@ -35,8 +40,12 @@ public sealed record DesignStep(
 public sealed record DesignModel(
     string Title, string? Description, IReadOnlyList<string>? Directives, IReadOnlyList<DesignStep> Steps, JsonObject? Layout = null);
 
-/// <summary>What the designer shows for a step besides the step itself: its brick, and its node.</summary>
-public sealed record StepInfo(string Alias, string? Node, string? BrickVersion, string? BrickTitle, IReadOnlyList<string> DependsOn);
+/// <summary>
+/// What the designer shows for a step besides the step itself: its brick, its node, and the branch
+/// of the composed job that runs it (<see cref="Branch"/>, its own alias unless a chain was joined).
+/// </summary>
+public sealed record StepInfo(
+    string Alias, string? Node, string? BrickVersion, string? BrickTitle, IReadOnlyList<string> DependsOn, string? Branch = null);
 
 public sealed record DesignResult(
     DesignModel Model, string Yaml, IReadOnlyList<StepInfo> Steps, IReadOnlyList<string> Errors, IReadOnlyList<string> Warnings)
@@ -47,11 +56,19 @@ public sealed record DesignResult(
 /// <summary>
 /// Converts between the designer's cards and a dtpipe job, both ways, and is the only writer of the
 /// job text, for <c>dtpipe studio</c> and the coordinator alike. A composed job is a plain dtpipe
-/// job: one branch per card, a source or sink brick copied in as <paramref name="bricks"/> declares
-/// it, readable and runnable as a whole on one machine.
+/// job, readable and runnable as a whole on one machine: a source or sink brick is copied in as
+/// <paramref name="bricks"/> declares it, and a branch <paramref name="endpoints"/> took apart into
+/// its own source, transform and sink cards is joined back into one branch.
 /// </summary>
-public sealed partial class DesignService(IBrickLookup bricks)
+public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? endpoints = null)
 {
+    /// <summary>
+    /// A source or a sink inside a branch: a brick, or the branch's own endpoint (<see cref="Local"/>).
+    /// <see cref="Keys"/> and <see cref="Components"/> are the branch keys and provider-options
+    /// blocks it accounts for.
+    /// </summary>
+    private sealed record Endpoint(
+        string Kind, DesignBrick? Brick, YamlMappingNode? Local, IReadOnlySet<string> Keys, IReadOnlySet<string> Components);
 
     public DesignResult Compose(DesignModel model)
     {
@@ -72,6 +89,7 @@ public sealed partial class DesignService(IBrickLookup bricks)
         // A step whose alias is unusable or taken is reported above and composes into nothing.
         var usable = new HashSet<string>(aliases, StringComparer.Ordinal);
         var branches = new List<(string Alias, YamlMappingNode Branch)>();
+        var joinable = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var step in steps)
         {
             if (!usable.Remove(step.Alias ?? "")) continue;
@@ -81,9 +99,14 @@ public sealed partial class DesignService(IBrickLookup bricks)
             YamlMappingNode? branch = null;
             switch (step.Kind)
             {
+                case StepKinds.Source or StepKinds.Sink when step.Brick is null:
+                    branch = LocalEndpoint(step, from, refs, errors, warnings);
+                    if (branch is not null) joinable[step.Alias!] = step.Kind;
+                    break;
+
                 case StepKinds.Source:
                 case StepKinds.Sink:
-                    brick = step.Brick is null ? null : bricks.Find(step.Brick);
+                    brick = bricks.Find(step.Brick!);
                     if (brick is null)
                     {
                         errors.Add($"'{step.Alias}': no brick '{step.Brick}' is on offer.");
@@ -115,6 +138,7 @@ public sealed partial class DesignService(IBrickLookup bricks)
                     branch = new YamlMappingNode();
                     if (from.Count > 0) branch.Add("from", string.Join(',', from));
                     if (step.Transformers is { Count: > 0 }) branch.Add("transformers", JobYaml.FromJson(step.Transformers));
+                    joinable[step.Alias!] = StepKinds.Transform;
                     break;
 
                 case StepKinds.Sql:
@@ -134,15 +158,7 @@ public sealed partial class DesignService(IBrickLookup bricks)
                     break;
 
                 case StepKinds.Branch:
-                    try
-                    {
-                        var parsed = JobYaml.Parse($"b:\n{Indent(step.Yaml ?? "")}");
-                        branch = (YamlMappingNode)parsed["b"];
-                    }
-                    catch (Exception ex)
-                    {
-                        errors.Add($"'{step.Alias}': its YAML is not a branch ({ex.Message}).");
-                    }
+                    branch = Body(step, errors);
                     break;
 
                 default:
@@ -172,7 +188,9 @@ public sealed partial class DesignService(IBrickLookup bricks)
             if (!consumed.Contains(alias) && !JobYaml.Has(branch, "output"))
                 errors.Add($"'{alias}' leads nowhere: connect it to a sink, or remove it.");
         }
-        var ordered = TopologicalOrder(branches, infos, errors);
+        var branchOf = infos.ToDictionary(i => i.Alias, i => i.Alias, StringComparer.Ordinal);
+        var ordered = Join(TopologicalOrder(branches, infos, errors), joinable, branchOf);
+        infos = infos.Select(i => i with { Branch = branchOf[i.Alias] }).ToList();
 
         var root = new YamlMappingNode();
         foreach (var (alias, branch) in ordered) root.Add(alias, branch);
@@ -181,10 +199,11 @@ public sealed partial class DesignService(IBrickLookup bricks)
     }
 
     /// <summary>
-    /// A job back into cards. A branch that is a brick becomes that brick; a branch that reads a
-    /// source brick, writes a sink brick, or does both around its own work is taken apart into one
-    /// card each, the last one keeping the alias its readers name. Anything else stays one
-    /// <see cref="StepKinds.Branch"/> card, with its YAML as written.
+    /// A job back into cards. A branch that is a brick becomes that brick; a branch that reads, writes
+    /// or does both around its own work is taken apart into one card each, the last one before the
+    /// sink keeping the alias its readers name, when each part is a brick or an endpoint
+    /// <paramref name="endpoints"/> can place. Anything else stays one <see cref="StepKinds.Branch"/>
+    /// card, with its YAML as written.
     /// </summary>
     public DesignResult Decompose(string yaml, JsonObject? layout = null)
     {
@@ -226,14 +245,19 @@ public sealed partial class DesignService(IBrickLookup bricks)
         var keys = branch.Children.Keys.OfType<YamlScalarNode>().Select(k => k.Value!).ToHashSet(StringComparer.Ordinal);
         var options = JobYaml.Mapping(branch, "provider-options");
         var components = options?.Children.Keys.OfType<YamlScalarNode>().Select(k => k.Value!).ToHashSet(StringComparer.Ordinal) ?? [];
-        var source = keys.Contains("input") ? bricks.Contained(branch, StepKinds.Source) : null;
-        var sink = keys.Contains("output") ? bricks.Contained(branch, StepKinds.Sink) : null;
+        var owners = endpoints is not null && (keys.Contains("input") || keys.Contains("output"))
+            ? endpoints.Blocks(JobYaml.Scalar(branch, "input"), JobYaml.Scalar(branch, "output"), components.ToList())
+            : null;
+        var source = keys.Contains("input") ? FindEndpoint(branch, StepKinds.Source, owners) : null;
+        var sink = keys.Contains("output") ? FindEndpoint(branch, StepKinds.Sink, owners) : null;
         var middle = keys.Contains("input") && source is null || keys.Contains("output") && sink is null
-            ? null
+            ? NoCard(alias)
             : Middle(alias, branch, keys, components, source, sink);
 
-        // A branch no card describes, or one whose only content is a plain tee, stays as written.
-        if (middle is null && (source is null || sink is null) || middle is { Kind: "" })
+        // A branch no card describes, or one whose only content is a plain tee, stays as written. A
+        // branch that is nothing but one endpoint of its own is that endpoint's card.
+        var alone = source is null != sink is null && (source ?? sink)!.Local is not null;
+        if (middle is { Kind: "" } || middle is null && (source is null || sink is null) && !alone)
         {
             yield return RawStep(alias, branch);
             yield break;
@@ -242,30 +266,77 @@ public sealed partial class DesignService(IBrickLookup bricks)
         // Readers of the branch get its rows after its own work: the alias stays with the last
         // card before the sink.
         var carriers = new List<DesignStep>();
-        if (source is not null) carriers.Add(new DesignStep(middle is null ? alias : fresh(alias, "source"), StepKinds.Source, source.Key));
+        if (source is not null) carriers.Add(Card(source, middle is null ? alias : fresh(alias, "source"), null));
         if (middle is not null) carriers.Add(source is null ? middle : middle with { From = [carriers[0].Alias] });
         foreach (var card in carriers) yield return card;
-        if (sink is not null) yield return new DesignStep(fresh(alias, "sink"), StepKinds.Sink, sink.Key, [carriers[^1].Alias]);
+        if (sink is not null)
+            yield return carriers.Count == 0
+                ? Card(sink, alias, JobYaml.Aliases(branch, "from"))
+                : Card(sink, fresh(alias, "sink"), [carriers[^1].Alias]);
     }
 
     /// <summary>
-    /// The card for what a branch does between its bricks, or null when it does nothing there. A
+    /// The brick a branch starts or ends with, or else the branch's own endpoint on that side when
+    /// <paramref name="owners"/> places every provider-options block it needs.
+    /// </summary>
+    private Endpoint? FindEndpoint(YamlMappingNode branch, string kind, EndpointBlocks? owners)
+    {
+        var endpointKey = kind == StepKinds.Source ? "input" : "output";
+        if (bricks.Contained(branch, kind) is { } brick)
+            return new Endpoint(kind, brick, null, new HashSet<string>([endpointKey], StringComparer.Ordinal), ComponentsOf(brick).ToHashSet(StringComparer.Ordinal));
+        if (owners is null) return null;
+
+        var sideKeys = kind == StepKinds.Source ? BranchSides.Read : BranchSides.Write;
+        var owned = kind == StepKinds.Source ? owners.Reader : owners.Writer;
+        var local = new YamlMappingNode();
+        var keys = new HashSet<string>(StringComparer.Ordinal) { endpointKey };
+        var components = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (key, value) in branch.Children)
+        {
+            var name = ((YamlScalarNode)key).Value!;
+            if (name == endpointKey || sideKeys.Contains(name))
+            {
+                local.Add(name, value);
+                keys.Add(name);
+            }
+            else if (name == "provider-options" && value is YamlMappingNode blocks)
+            {
+                var mine = blocks.Children.Where(kv => owned.Contains(((YamlScalarNode)kv.Key).Value!)).ToList();
+                if (mine.Count == 0) continue;
+                local.Add("provider-options", new YamlMappingNode(mine));
+                components.UnionWith(mine.Select(kv => ((YamlScalarNode)kv.Key).Value!));
+            }
+        }
+        return new Endpoint(kind, null, JobYaml.CloneBranch(local), keys, components);
+    }
+
+    private static DesignStep Card(Endpoint endpoint, string alias, IReadOnlyList<string>? from) =>
+        endpoint.Brick is not null
+            ? new DesignStep(alias, endpoint.Kind, endpoint.Brick.Key, from)
+            : new DesignStep(alias, endpoint.Kind, From: from, Yaml: BodyText(endpoint.Local!));
+
+    private static DesignStep NoCard(string alias) => new(alias, "");
+
+    /// <summary>
+    /// The card for what a branch does between its endpoints, or null when it does nothing there. A
     /// step whose <see cref="DesignStep.Kind"/> is empty means "no card fits": the branch stays raw.
     /// </summary>
-    private DesignStep? Middle(
-        string alias, YamlMappingNode branch, HashSet<string> keys, HashSet<string> components, DesignBrick? source, DesignBrick? sink)
+    private static DesignStep? Middle(
+        string alias, YamlMappingNode branch, HashSet<string> keys, HashSet<string> components, Endpoint? source, Endpoint? sink)
     {
         var rest = new HashSet<string>(components, StringComparer.Ordinal);
-        if (source is not null) rest.ExceptWith(ComponentsOf(source));
-        if (sink is not null) rest.ExceptWith(ComponentsOf(sink));
-        var middleKeys = keys.Except(["input", "output", "provider-options"]).ToHashSet(StringComparer.Ordinal);
+        if (source is not null) rest.ExceptWith(source.Components);
+        if (sink is not null) rest.ExceptWith(sink.Components);
+        var middleKeys = keys.Except(["provider-options"]).ToHashSet(StringComparer.Ordinal);
+        if (source is not null) middleKeys.ExceptWith(source.Keys);
+        if (sink is not null) middleKeys.ExceptWith(sink.Keys);
         var from = JobYaml.Aliases(branch, "from");
-        var noCard = new DesignStep(alias, "");
 
-        if (source is not null && (middleKeys.Contains("from") || middleKeys.Contains("ref"))) return noCard;
+        if (source is not null && (middleKeys.Contains("from") || middleKeys.Contains("ref"))) return NoCard(alias);
         if (rest.Count == 0 && middleKeys.IsSubsetOf(["from", "transformers"]))
         {
-            if (!middleKeys.Contains("transformers")) return source is not null && sink is not null ? null : noCard;
+            if (!middleKeys.Contains("transformers"))
+                return source is not null && sink is not null || (source ?? sink)?.Local is not null ? null : NoCard(alias);
             return new DesignStep(alias, StepKinds.Transform, From: from, Transformers: JobYaml.ToJson(branch["transformers"]) as JsonArray);
         }
         if (source is null && rest.SetEquals(["sql"]) && middleKeys.Contains("from") && middleKeys.IsSubsetOf(["from", "ref"])
@@ -274,18 +345,144 @@ public sealed partial class DesignService(IBrickLookup bricks)
             return new DesignStep(alias, StepKinds.Sql, From: from, Ref: JobYaml.Aliases(branch, "ref"), Query: query);
         if (source is null && rest.SetEquals(["merge"]) && middleKeys.SetEquals(["from"]))
             return new DesignStep(alias, StepKinds.Merge, From: from);
-        return noCard;
+        return NoCard(alias);
     }
 
     private IEnumerable<string> ComponentsOf(DesignBrick brick) =>
         JobYaml.Mapping(bricks.BranchOf(brick), "provider-options")?.Children.Keys.OfType<YamlScalarNode>().Select(k => k.Value!) ?? [];
 
-    private static DesignStep RawStep(string alias, YamlMappingNode branch)
+    /// <summary>
+    /// A source or sink card that carries its own endpoint: a source's YAML is its whole branch, a
+    /// sink's gets its one input as <c>from</c>.
+    /// </summary>
+    private static YamlMappingNode? LocalEndpoint(
+        DesignStep step, IReadOnlyList<string> from, IReadOnlyList<string> refs, List<string> errors, List<string> warnings)
+    {
+        if (string.IsNullOrWhiteSpace(step.Yaml))
+        {
+            errors.Add($"'{step.Alias}' is a {step.Kind} with neither a brick nor an endpoint of its own.");
+            return null;
+        }
+        var local = Body(step, errors);
+        if (local is null) return null;
+
+        var (endpointKey, other) = step.Kind == StepKinds.Source ? ("input", "output") : ("output", "input");
+        if (!JobYaml.Has(local, endpointKey)) errors.Add($"'{step.Alias}' is a {step.Kind}: its YAML names no {endpointKey}.");
+        var stray = new[] { "from", "ref", "transformers", other }.Where(k => JobYaml.Has(local, k)).ToList();
+        if (stray.Count > 0) errors.Add($"'{step.Alias}' is a {step.Kind}: {string.Join(", ", stray)} belong to other cards.");
+
+        if (step.Kind == StepKinds.Source)
+        {
+            if (from.Count > 0 || refs.Count > 0) warnings.Add($"'{step.Alias}' is a source: its inputs are ignored.");
+            return local;
+        }
+        if (from.Count != 1) errors.Add($"'{step.Alias}' writes {JobYaml.Scalar(local, "output")}: connect exactly one step to it.");
+        var branch = new YamlMappingNode();
+        if (from.Count > 0) branch.Add("from", string.Join(',', from));
+        foreach (var (key, value) in local.Children) branch.Add(key, value);
+        return branch;
+    }
+
+    /// <summary>
+    /// Joins each chain the cards drew from one branch back into that branch: a source of its own
+    /// into the transform or sink that alone reads it, then a transform into the sink of its own that
+    /// alone reads it. The joined branch keeps the alias of the transform, or the source's when there
+    /// is none, as <see cref="Decompose"/> gave it. A brick never joins: its branch is what its node
+    /// runs.
+    /// </summary>
+    private static List<(string Alias, YamlMappingNode Branch)> Join(
+        List<(string Alias, YamlMappingNode Branch)> ordered, Dictionary<string, string> joinable, Dictionary<string, string> branchOf)
+    {
+        var list = ordered.ToList();
+        var kinds = new Dictionary<string, string>(joinable, StringComparer.Ordinal);
+
+        bool JoinPass(string upstreamKind)
+        {
+            for (var i = 0; i < list.Count; i++)
+            {
+                var (up, upBranch) = list[i];
+                if (kinds.GetValueOrDefault(up) != upstreamKind || JobYaml.Has(upBranch, "output")) continue;
+
+                var readers = list.Where(b => JobYaml.Aliases(b.Branch, "from").Concat(JobYaml.Aliases(b.Branch, "ref")).Contains(up)).ToList();
+                if (readers.Count != 1) continue;
+                var (down, downBranch) = readers[0];
+                var downKind = kinds.GetValueOrDefault(down);
+                var accepts = downKind == StepKinds.Sink || upstreamKind == StepKinds.Source && downKind == StepKinds.Transform;
+                if (!accepts || JobYaml.Has(downBranch, "input") || JobYaml.Has(downBranch, "ref")
+                    || !JobYaml.Aliases(downBranch, "from").SequenceEqual([up])) continue;
+                if (downKind == StepKinds.Sink && list.Any(b => JobYaml.Aliases(b.Branch, "from").Concat(JobYaml.Aliases(b.Branch, "ref")).Contains(down))) continue;
+
+                var joined = JoinBranches(upBranch, downBranch);
+                if (joined is null) continue;
+                var alias = downKind == StepKinds.Transform ? down : up;
+                var j = list.FindIndex(b => b.Alias == down);
+                list[i] = (alias, joined);
+                list.RemoveAt(j);
+                foreach (var card in branchOf.Where(kv => kv.Value == up || kv.Value == down).Select(kv => kv.Key).ToList())
+                    branchOf[card] = alias;
+                kinds.Remove(up);
+                kinds.Remove(down);
+                kinds[alias] = downKind == StepKinds.Transform ? StepKinds.Transform : "";
+                return true;
+            }
+            return false;
+        }
+
+        while (JoinPass(StepKinds.Source)) { }
+        while (JoinPass(StepKinds.Transform)) { }
+        return list;
+    }
+
+    /// <summary>
+    /// The upstream branch's keys, then the downstream's without its <c>from</c>, their
+    /// provider-options blocks in one mapping. Null when a key or a block appears on both sides.
+    /// </summary>
+    private static YamlMappingNode? JoinBranches(YamlMappingNode up, YamlMappingNode down)
+    {
+        var upOptions = JobYaml.Mapping(up, "provider-options");
+        var downOptions = JobYaml.Mapping(down, "provider-options");
+        var joined = new YamlMappingNode();
+        foreach (var (key, value) in up.Children)
+        {
+            if (key is YamlScalarNode { Value: "provider-options" } && downOptions is not null)
+            {
+                if (upOptions!.Children.Keys.Any(downOptions.Children.ContainsKey)) return null;
+                joined.Add(key, new YamlMappingNode(upOptions.Children.Concat(downOptions.Children)));
+            }
+            else joined.Add(key, value);
+        }
+        foreach (var (key, value) in down.Children)
+        {
+            if (key is YamlScalarNode { Value: "from" }) continue;
+            if (key is YamlScalarNode { Value: "provider-options" } && upOptions is not null) continue;
+            if (joined.Children.ContainsKey(key)) return null;
+            joined.Add(key, value);
+        }
+        return JobYaml.CloneBranch(joined);
+    }
+
+    private static YamlMappingNode? Body(DesignStep step, List<string> errors)
+    {
+        try
+        {
+            var parsed = JobYaml.Parse($"b:\n{Indent(step.Yaml ?? "")}");
+            return (YamlMappingNode)parsed["b"];
+        }
+        catch (Exception ex)
+        {
+            errors.Add($"'{step.Alias}': its YAML is not a branch ({ex.Message}).");
+            return null;
+        }
+    }
+
+    private static string BodyText(YamlMappingNode branch)
     {
         var text = JobYaml.Serialize(new YamlMappingNode { { "b", JobYaml.CloneBranch(branch) } });
-        var body = string.Join('\n', text.Split('\n').Skip(1).Select(l => l.StartsWith("  ") ? l[2..] : l)).TrimEnd() + "\n";
-        return new DesignStep(alias, StepKinds.Branch, From: JobYaml.Aliases(branch, "from"), Ref: JobYaml.Aliases(branch, "ref"), Yaml: body);
+        return string.Join('\n', text.Split('\n').Skip(1).Select(l => l.StartsWith("  ") ? l[2..] : l)).TrimEnd() + "\n";
     }
+
+    private static DesignStep RawStep(string alias, YamlMappingNode branch) =>
+        new(alias, StepKinds.Branch, From: JobYaml.Aliases(branch, "from"), Ref: JobYaml.Aliases(branch, "ref"), Yaml: BodyText(branch));
 
     private static List<(string Alias, YamlMappingNode Branch)> TopologicalOrder(
         List<(string Alias, YamlMappingNode Branch)> branches, List<StepInfo> infos, List<string> errors)
