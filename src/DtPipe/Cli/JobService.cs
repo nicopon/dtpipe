@@ -70,6 +70,7 @@ public class JobService
 			new SplitCommand(_serviceProvider, _console),
 			new McpCommand(_serviceProvider),
 			new AgentCommand(_serviceProvider),
+			new StudioCommand(_serviceProvider),
 		};
 
 	/// <param name="branchFailures">Filled with the reason each failing branch stopped, for a caller
