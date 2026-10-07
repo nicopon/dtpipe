@@ -321,32 +321,45 @@ def rights_pass():
             put_identity(runner["groups"])
         return "runner-1 in runner+audit: refused until crm -> audit and audit -> warehouse are both allowed"
 
-    def impostor():
-        # A host holding node-1's credentials announces itself as node-2: the coordinator refuses it,
-        # and the real node-2 stays online under its own identity.
-        root = os.path.join(STATE, "impostor")
+    def enrollment():
+        # A host whose token the rights do not know waits for an administrator: it proposes a name, which
+        # authorises nothing. It is not a node, and no name it proposes (here node-2's) takes anyone's place.
+        # Accepted under another name and a group, it comes online as what the rights say.
+        root = os.path.join(STATE, "enroll")
         os.makedirs(root, exist_ok=True)
         config = os.path.join(root, "node.json")
         with open(config, "w") as f:
-            json.dump({"name": "node-2", "description": "impostor", "clientId": "node-1", "secret": "node-1-lab-secret"}, f)
-        log = os.path.join(STATE, "logs", "coordinator.log")
-        seen = os.path.getsize(log)
+            json.dump({"name": "node-2", "description": "proposes to be node-2", "clientId": "node-enroll", "secret": "node-enroll-lab-secret"}, f)
         host = subprocess.Popen(["dotnet", os.path.join(STATE, "bin", "node", "Lab.NodeHost.dll"), "--config", config,
                                  "--state", root, "--coordinator", URL, "--idp", rights["idp"]["issuer"], "--dtpipe", DTPIPE],
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        def waiting():
+            return next((p for p in call("/api/rights")["pending"] if p["subject"] == "node-enroll"), None)
+
+        def node(name):
+            return next((n for n in call("/api/nodes") if n["name"] == name), None)
         try:
-            def refused():
-                with open(log, errors="replace") as f:
-                    f.seek(seen)
-                    return "Announcement of node-2 refused" in f.read()
-            until(refused, 30, "the impostor's refusal")
+            pending = until(waiting, 60, "the unknown host to wait for approval")
+            if pending["proposedName"] != "node-2" or "node-enroll" in {i["clientId"] for i in call("/api/rights")["identities"]}:
+                raise RuntimeError(f"pending {pending}")
+            node2 = node("node-2")
+            if not node2 or not node2["online"] or node2["groups"] != ["sales"]:
+                raise RuntimeError(f"node-2 after the proposal: {node2}")
+            if node("enrolled-node"):
+                raise RuntimeError("a host waiting for approval is listed as a node")
+            call("/api/rights/pending/node-enroll/accept", {"name": "enrolled-node", "groups": ["crm"]})
+            until(lambda: (node("enrolled-node") or {}).get("online"), 60, "the accepted host to come online")
+            enrolled = node("enrolled-node")
+            if enrolled["groups"] != ["crm"] or waiting() or (node("node-2") or {}).get("groups") != ["sales"]:
+                raise RuntimeError(f"enrolled {enrolled}, still waiting {waiting()}, node-2 {node('node-2')}")
         finally:
             host.terminate()
             host.wait(10)
-        node2 = next(i for i in call("/api/rights")["identities"] if i["clientId"] == "node-2")
-        if not node2["connected"]:
-            raise RuntimeError("node-2 is no longer connected under its own identity")
-        return "node-1's credentials announcing node-2: refused; node-2 still connected as itself"
+            if "node-enroll" in {i["clientId"] for i in call("/api/rights")["identities"]}:
+                call("/api/rights/identities/node-enroll", None, "DELETE")
+        until(lambda: node("enrolled-node") is None, 30, "the removed identity's node to leave the inventory")
+        return "node-enroll proposing node-2: waits, node-2 untouched; accepted as enrolled-node in crm: online; removed: gone"
 
     def disabled():
         # The coordinator decides what an identity may do: disabled, node-3 is refused when it connects
@@ -461,7 +474,7 @@ def rights_pass():
 
     check("identity provider", idp)
     check("roles and sessions", roles)
-    check("announcement, impostor", impostor)
+    check("enrollment", enrollment)
     check("identity, disabled", disabled)
     check("flow matrix, plan", matrix_plan)
     check("flow matrix, run time", matrix_runtime)

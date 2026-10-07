@@ -1,6 +1,6 @@
-// Access: who may send what to whom. Identities of the coordinator's own IDP (who, and in which
-// group), the flow matrix between groups (to whom, enforced by the hub on every transfer), and the
-// audit of every change.
+// Access: who may send what to whom. Identities of the coordinator's own IDP (who: node name and
+// groups), the hosts waiting for approval, the flow matrix between groups (to whom, enforced by the
+// hub on every transfer), and the audit of every change.
 import { api, esc, nodeColor, store, toast } from "./core.js";
 
 let host = null;
@@ -56,6 +56,21 @@ function render() {
       </td>
     </tr>`).join("");
 
+  // What a host proposes for itself is untrusted text: shown escaped, and the administrator decides every field.
+  const nameFrom = (proposed) => proposed.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 63);
+  const pending = (rights.pending || []).map((p) => `
+    <tr data-pending="${esc(p.subject)}">
+      <td><code>${esc(p.subject)}</code>${Object.entries(p.labels || {}).map(([k, v]) => `<div class="hint">${esc(k)}: ${esc(v)}</div>`).join("")}</td>
+      <td>${esc(p.proposedName)}<div class="hint">${esc(p.description)}</div></td>
+      <td class="hint">${p.bricks.length ? p.bricks.map(esc).join(", ") : "no brick"}</td>
+      <td><input class="mono narrow" data-field="name" value="${esc(nameFrom(p.proposedName || p.subject))}" aria-label="Node name for ${esc(p.subject)}"></td>
+      <td><input class="mono" data-field="groups" placeholder="groups, separated by commas" list="groups-list" aria-label="Groups for ${esc(p.subject)}, separated by commas"></td>
+      <td class="actions-cell">
+        <button class="small primary" data-accept>Accept</button>
+        <button class="small ghost" data-ignore title="Set it aside for 24 hours: it is not shown again until then">Ignore for 24 h</button>
+      </td>
+    </tr>`).join("");
+
   host.innerHTML = `
     <div class="view-head"><h1>Access</h1>
       <p class="hint">Who may send what to whom. Every node authenticates with an identity provider the coordinator trusts, which says who it is; the coordinator decides its name and its groups, never the token or the node.</p></div>
@@ -69,6 +84,12 @@ function render() {
       </table>
       <p class="hint">A node host presents its token on the control channel, and gives each pipeline node a token provider (<code>PipelineNodeOptions.AccessTokenProvider</code>) for the data hub.</p>
     </section>
+
+    ${pending ? `<section class="card">
+      <h2>Waiting for approval <span class="hint">${rights.pending.length}</span></h2>
+      <p class="hint">A host presented a valid token that no identity knows. Its name, description and bricks are what it <i>proposes</i>: you decide its node name and its groups. Nothing runs on it, and it receives no group, until you accept it.</p>
+      <table><tr><th>client</th><th>proposes</th><th>bricks</th><th>node name</th><th>groups</th><th></th></tr>${pending}</table>
+    </section>` : ""}
 
     <section class="card">
       <div class="card-head"><h2>Identities <span class="hint">who</span></h2><button data-add>${adding ? "Cancel" : "Add an identity"}</button></div>
@@ -108,8 +129,19 @@ async function onClick(e) {
   const b = e.target.closest("button");
   if (!b || b.disabled) return;
   const row = b.closest("[data-identity]");
+  const waiting = b.closest("[data-pending]");
   try {
-    if (b.dataset.add !== undefined) { adding = !adding; render(); }
+    if (b.dataset.accept !== undefined) {
+      const subject = waiting.dataset.pending;
+      await api(`/api/rights/pending/${encodeURIComponent(subject)}/accept`, {
+        name: waiting.querySelector('[data-field="name"]').value.trim(),
+        groups: groupsOf(waiting.querySelector('[data-field="groups"]').value),
+      });
+      toast(`${subject} accepted: its host joins on its next attempt.`, "info");
+    } else if (b.dataset.ignore !== undefined) {
+      await api(`/api/rights/pending/${encodeURIComponent(waiting.dataset.pending)}/ignore`, {});
+      toast(`${waiting.dataset.pending} set aside for 24 hours.`, "info");
+    } else if (b.dataset.add !== undefined) { adding = !adding; render(); }
     else if (b.dataset.create !== undefined) {
       const v = (id) => document.getElementById(id).value.trim();
       await api("/api/rights/identities", { clientId: v("a-id"), name: v("a-name") || null, description: v("a-description"), groups: groupsOf(v("a-groups")) });

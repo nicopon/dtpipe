@@ -12,6 +12,7 @@
     { "clientId": "node-2", "grant": "client_credentials", "secret": "node-2-lab-secret", "displayName": "Sales node" },
     { "clientId": "node-3", "grant": "client_credentials", "secret": "node-3-lab-secret", "displayName": "Catalog node" },
     { "clientId": "node-4", "grant": "client_credentials", "secret": "node-4-lab-secret", "displayName": "Warehouse node" },
-    { "clientId": "runner-1", "grant": "client_credentials", "secret": "runner-1-lab-secret", "displayName": "Runner" }
+    { "clientId": "runner-1", "grant": "client_credentials", "secret": "runner-1-lab-secret", "displayName": "Runner" },
+    { "clientId": "node-enroll", "grant": "client_credentials", "secret": "node-enroll-lab-secret", "displayName": "A host no identity knows" }
   ]
 }

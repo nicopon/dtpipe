@@ -13,8 +13,13 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   nothing. `RightsIdentityProvider` replaces TransportR's `IClientIdentityProvider` and gives the
   subject its identity's groups in `RightsStore`, none for an unknown or disabled one. TransportR
   records those groups at `Connect` and at each token renewal, so an identity edit applies when the
-  node connects again. `NodeChannelHub.Announce` refuses a host announcing a node its identity is
-  not named for, or a disabled one. `[local: the lab's smoke.py rights]`
+  node connects again. The node name belongs to the rights, never to the host: `NodeChannelHub`
+  files a known host under its identity's name whatever it proposes, and everything it reports
+  under the name its connection announced. A token no identity knows is no node: its host waits in
+  `EnrollmentQueue` (bounded, expired, never evicting a waiting subject), and what it proposes is
+  untrusted text, cut here and escaped by the page. A disabled identity is refused. A node whose
+  identity is gone or renamed leaves the inventory with its host.
+  `[CI: EnrollmentQueueTests, NodeChannelHubTests]` `[local: the lab's smoke.py rights]`
 - **A person's rights are the server's configuration, never the token's.** People sign in through
   the provider (`Coordinator:Ui:ClientId`, a confidential authorization-code client, PKCE, the code
   in the query so the Lax correlation cookies ride the redirect) into the `dtpipe-coordinator`

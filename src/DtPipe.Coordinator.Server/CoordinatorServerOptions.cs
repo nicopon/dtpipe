@@ -30,6 +30,12 @@ public sealed class CoordinatorServerOptions
     public string? RightsSeed { get; init; }
 
     /// <summary>
+    /// The claims of a token shown beside a host waiting for approval, to help an administrator tell
+    /// who it is (<c>Coordinator:Identity:LabelClaims</c>, a list). Only a label: nothing grants anything. None when unset.
+    /// </summary>
+    public IReadOnlyList<string> IdentityLabelClaims { get; init; } = [];
+
+    /// <summary>
     /// Turns on what only a test bench needs: the Lab view and its manual planning (<c>/api/plan</c>,
     /// <c>/api/deploy</c>, the scenario catalog), fault injection, and <c>/api/query</c>, which opens
     /// a node's database from the server's own process. Off by default.
@@ -55,6 +61,7 @@ public sealed class CoordinatorServerOptions
             UiClientSecret = section["Ui:ClientSecret"] ?? throw new InvalidOperationException("Coordinator:Ui:ClientSecret is required: the secret of the pages' client at the provider."),
             LibrarySeed = PathOf("LibrarySeed"),
             RightsSeed = PathOf("RightsSeed"),
+            IdentityLabelClaims = section.GetSection("Identity:LabelClaims").Get<string[]>() ?? [],
             LabMode = section.GetValue<bool>("LabMode"),
             Scenarios = PathOf("Scenarios"),
         };

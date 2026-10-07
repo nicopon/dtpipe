@@ -882,15 +882,15 @@ def check_S4():
 
 def check_S1():
     out = subprocess.run([sys.executable, os.path.join(LAB, "smoke.py"), URL, DTPIPE, STATE, "rights"], capture_output=True, text=True, timeout=300)
-    line = next((l for l in out.stdout.splitlines() if "announcement, impostor" in l), "")
+    line = next((l for l in out.stdout.splitlines() if "PASS  rights   enrollment" in l or "FAIL  rights   enrollment" in l), "")
     if not line.startswith("PASS"):
-        raise Violation(f"impostor announcement: {line or out.stdout[-200:]}")
+        raise Violation(f"enrollment of an unknown host: {line or out.stdout[-200:]}")
     return line[:160]
 
 
 def cell_S():
     for rep in range(REPS):
-        security_trial("S1 impostor announcement", rep, check_S1)
+        security_trial("S1 unknown host announcement", rep, check_S1)
     for rep in range(REPS):
         security_trial("S2 unauthenticated entry points", rep, check_S2)
     for rep in range(REPS):

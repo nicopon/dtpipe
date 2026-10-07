@@ -38,6 +38,7 @@ builder.Services.Replace(ServiceDescriptor.Singleton<IHubProgressMonitor, EventP
 
 builder.Services.AddSingleton<EventBus>();
 builder.Services.AddSingleton<NodeInventory>();
+builder.Services.AddSingleton<EnrollmentQueue>();
 builder.Services.AddSingleton<NodeRequests>();
 builder.Services.AddSingleton<BrickCatalog>();
 builder.Services.AddSingleton<DtPipeCli>();
@@ -250,7 +251,7 @@ designer.MapPost("/library/{id}/deploy", async (string id, PipelineLibrary libra
 });
 
 // Rights: who may send what to whom. The page edits them; every change is audited and applies at once.
-api.MapGet("/rights", (RightsStore rights, NodeInventory inventory, CoordinatorServerOptions options) =>
+api.MapGet("/rights", (RightsStore rights, NodeInventory inventory, EnrollmentQueue enrollment, CoordinatorServerOptions options) =>
 {
     var doc = rights.Snapshot();
     var online = inventory.Snapshot().Where(n => n.Online).Select(n => n.Name).ToHashSet();
@@ -263,6 +264,7 @@ api.MapGet("/rights", (RightsStore rights, NodeInventory inventory, CoordinatorS
             connected = online.Contains(i.Name) && inventory.ClientIdOf(i.Name) == i.ClientId,
         }),
         groups = rights.Groups(),
+        pending = enrollment.List(),
         matrix = doc.Matrix,
         audit = doc.Audit,
     };
@@ -273,26 +275,47 @@ admin.MapPut("/rights/matrix", (MatrixRequest request, RightsStore rights, Event
     bus.Publish("rights", new { });
     return Results.Ok();
 });
-admin.MapPost("/rights/identities", (IdentityRequest request, RightsStore rights, EventBus bus, HttpContext http) =>
+admin.MapPost("/rights/identities", (IdentityRequest request, RightsStore rights, EnrollmentQueue enrollment, EventBus bus, HttpContext http) =>
 {
     if (!PipelineLibrary.IsValidId(request.ClientId)) throw new ConflictException($"'{request.ClientId}' is not a client id: lowercase letters, digits and '-'.");
     rights.AddIdentity(new Identity(request.ClientId, string.IsNullOrWhiteSpace(request.Name) ? request.ClientId : request.Name, request.Description ?? "",
         request.Groups ?? [], request.Enabled ?? true), EmailOf(http));
+    enrollment.Remove(request.ClientId);
     bus.Publish("rights", new { });
     return Results.Ok();
 });
-admin.MapPut("/rights/identities/{id}", (string id, IdentityRequest request, RightsStore rights, EventBus bus, HttpContext http) =>
+admin.MapPut("/rights/identities/{id}", (string id, IdentityRequest request, RightsStore rights, NodeInventory inventory, EventBus bus, HttpContext http) =>
 {
+    var before = rights.Find(id);
     rights.UpdateIdentity(id, request.Name ?? id, request.Description ?? "", request.Groups ?? [], request.Enabled ?? true, EmailOf(http));
+    // A node renamed connects again under its new name; the old one is forgotten once its host is gone.
+    if (before is not null && rights.Find(id)!.Name != before.Name) { inventory.Disconnect(id); inventory.Forget(before.Name); }
     bus.Publish("rights", new { });
     return Results.Ok();
 });
 admin.MapDelete("/rights/identities/{id}", (string id, RightsStore rights, NodeInventory inventory, EventBus bus, HttpContext http) =>
 {
+    var name = rights.Find(id)?.Name;
     rights.RemoveIdentity(id, EmailOf(http));
     inventory.Disconnect(id);
+    if (name is not null) inventory.Forget(name);
     bus.Publish("rights", new { });
     return Results.Accepted();
+});
+// A host no identity knows waits here: the administrator names it and gives it its groups, or sets it aside.
+admin.MapPost("/rights/pending/{subject}/accept", (string subject, AcceptRequest request, RightsStore rights, EnrollmentQueue enrollment, EventBus bus, HttpContext http) =>
+{
+    var pending = enrollment.Find(subject) ?? throw new ConflictException($"'{subject}' does not wait for approval.");
+    rights.AddIdentity(new Identity(subject, request.Name ?? "", request.Description ?? pending.Description, request.Groups ?? [], true), EmailOf(http));
+    enrollment.Remove(subject);
+    bus.Publish("rights", new { });
+    return Results.Ok();
+});
+admin.MapPost("/rights/pending/{subject}/ignore", (string subject, EnrollmentQueue enrollment, EventBus bus) =>
+{
+    enrollment.Ignore(subject);
+    bus.Publish("rights", new { });
+    return Results.Ok();
 });
 // TransportR records a node's group when it connects and when it renews its token: dropping its
 // control connection makes its host connect again under its current group. Fragments already
@@ -361,4 +384,5 @@ internal sealed record SaveRequest(string Yaml, System.Text.Json.Nodes.JsonObjec
 internal sealed record PlaceRequest(string Id, DesignModel Model);
 internal sealed record DistributeRequest(bool Save = false, string? Message = null);
 internal sealed record MatrixRequest(Dictionary<string, List<string>> Matrix);
+internal sealed record AcceptRequest(string? Name, string? Description, List<string>? Groups);
 internal sealed record IdentityRequest(string ClientId, string? Name, string? Description, List<string>? Groups, bool? Enabled);

@@ -87,7 +87,7 @@ that port, and the IdP accepts the coordinator's redirects at it (`Idp:ExtraOrig
 
 The smoke check's `library` pass runs against the stack from the host, with `./build.sh`'s binary,
 its witness reading the seeded databases under `.stack/`. The other passes drive local processes
-(`lab.sh nodes`, an impostor host) and need the local lab.
+(`lab.sh nodes`, a host no identity knows) and need the local lab.
 
 ```bash
 python3 smoke.py http://coordinator.localtest.me ../../dist/release/dtpipe .stack library
@@ -136,12 +136,16 @@ started from `rights-seed.json` and edited in the **Access** view:
 
 | | Enforced |
 |---|---|
-| **Who**: identities, each a client of the IdP with a node name and one or more groups | by the coordinator (no group for an unknown or disabled client, from its next connection or token renewal) and by the control channel (an announcement of another node is refused) |
+| **Who**: identities, each a client of the IdP with a node name and one or more groups | by the coordinator (no group for an unknown or disabled client, from its next connection or token renewal) and by the control channel (a host is filed under its identity's node name, whatever it proposes; a disabled identity is refused) |
 | **To whom**: the flow matrix between groups | by the hub on **every transfer**, live, and on every plan |
 
 Every change is audited. A node host gives each of its pipeline nodes a token provider
 (`PipelineNodeOptions.AccessTokenProvider`) that asks the IdP for the node's token. Adding a node
-takes its client in `idp-clients.json` (then an IdP restart) and its identity in the Access view.
+takes its client in `idp-clients.json` (then an IdP restart); its identity then comes from the Access view, or by approval:
+a host whose token no identity knows is not a node. It waits in the Access view's *Waiting for approval* card,
+with the name, description and bricks it proposes (and the token's claims listed by
+`Coordinator:Identity:LabelClaims`, none by default), and an administrator accepts it by giving it a node name and
+groups, or sets it aside for 24 hours. The list lives in memory, holds 50 hosts, and never evicts one that waits.
 
 ### The stand-alone test IdP (`Lab.Idp`)
 
@@ -181,7 +185,7 @@ python3 tools/idp_check.py          # discovery, both flows, and the refusals th
 | Designer | a palette of bricks and steps (Transform, SQL, Merge), a canvas wired port to port, an inspector per card, the composed YAML to copy or edit |
 | Distribution | the plan placed automatically, drawn in lanes (sources, runner, sinks); save it, deploy, run |
 | Runs | deployments, the run in flight and the queue, the journal with each run's report, node events, a query on any database |
-| Access | the trusted IdP, identities (node name, groups, enabled, reconnect), the editable flow matrix, the audit |
+| Access | the trusted IdP, the hosts waiting for approval, identities (node name, groups, enabled, reconnect), the editable flow matrix, the audit |
 
 **A pipeline is a plain dtpipe job**, one branch per card, that also runs whole on one machine
 (`smoke.py` uses it as the witness). A branch *is* a brick when its content equals the brick's:
@@ -316,6 +320,7 @@ sign a person in and out.
 | `GET /api/deployments` · `DELETE /api/deployments/{id}` | what is deployed; undeploy |
 | `GET /api/rights` · `PUT /api/rights/matrix` | rights, the flow matrix |
 | `POST /api/rights/identities` · `PUT`/`DELETE /api/rights/identities/{id}` · `POST …/{id}/reconnect` | identities; reconnect drops a node's control connection so it fetches a new token |
+| `POST /api/rights/pending/{subject}/accept` (`{name, groups, description?}`) · `…/ignore` | a host waiting for approval: accept it as an identity, or set it aside for 24 hours |
 | `POST /api/runs` · `GET /api/runs`, `/api/runs/queue` | `{pipelineId?, pins?}` queues a run; the journal; in flight and queued |
 | `POST /api/runs/cancel` | `{runId?}`: the run in flight, or a queued one |
 | `POST /api/fragments/{name}/kill`, `/variant` | fault injection |

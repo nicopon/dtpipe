@@ -55,6 +55,15 @@ public sealed class NodeInventory
         return aborts.Count;
     }
 
+    /// <summary>Drops an offline node from the inventory: its identity is gone or named it otherwise. A node that is connected stays.</summary>
+    public void Forget(string node)
+    {
+        lock (_lock)
+        {
+            if (_nodes.TryGetValue(node, out var entry) && entry.ConnectionId is null) _nodes.Remove(node);
+        }
+    }
+
     public string? ClientIdOf(string node)
     {
         lock (_lock) return _nodes.TryGetValue(node, out var e) && e.ConnectionId is not null ? e.ClientId : null;
@@ -121,35 +130,71 @@ public sealed class NodeInventory
 
 /// <summary>
 /// The node channel (<see cref="NodeChannel"/>), one connection per node host, each authenticated by
-/// the trusted IdP. A host is who its token says: it may announce only the node its identity is named
-/// for, and its groups are the identity's.
+/// the trusted IdP. A host is who its token says, and the rights say what that is: the node name and
+/// the groups are its identity's, and the name a host proposes for itself is only ever a proposal, shown
+/// to an administrator when no identity knows the token's subject. Everything a host reports is filed
+/// under the name of the node its connection announced.
 /// </summary>
-public sealed class NodeChannelHub(NodeInventory inventory, RightsStore rights, EventBus bus, ILogger<NodeChannelHub> logger) : Hub
+public sealed class NodeChannelHub(
+    NodeInventory inventory, RightsStore rights, EnrollmentQueue enrollment, CoordinatorServerOptions options, EventBus bus, ILogger<NodeChannelHub> logger) : Hub
 {
     public Task Announce(NodeAnnouncement announcement)
     {
         var clientId = TrustedIdp.SubjectOf(Context.User);
         var identity = rights.Find(clientId);
-        if (identity is not { Enabled: true } || identity.Name != announcement.Name)
+        if (identity is null)
         {
-            var reason = identity is null ? $"'{clientId}' is no known identity"
-                : !identity.Enabled ? $"'{clientId}' is disabled"
-                : $"'{clientId}' may announce {identity.Name}, not {announcement.Name}";
-            logger.LogWarning("Announcement of {Node} refused: {Reason}", announcement.Name, reason);
-            bus.Publish("log", new NodeLogLine("coordinator", null, "Error", $"Announcement of {announcement.Name} refused: {reason}."));
+            Propose(clientId, announcement);
+            Context.Abort();
+            return Task.CompletedTask;
+        }
+        if (!identity.Enabled)
+        {
+            Refuse(identity.Name, $"'{clientId}' is disabled");
             Context.Abort();
             return Task.CompletedTask;
         }
         var context = Context;
-        inventory.Announce(Context.ConnectionId, announcement, identity.ClientId, identity.Groups, context.Abort);
+        inventory.Announce(Context.ConnectionId, announcement with { Name = identity.Name }, identity.ClientId, identity.Groups, context.Abort);
         bus.Publish("nodes", inventory.Snapshot());
         return Task.CompletedTask;
     }
 
+    /// <summary>A valid token no identity knows: the host waits for an administrator, and nothing else of it is let in.</summary>
+    private void Propose(string? subject, NodeAnnouncement announcement)
+    {
+        var outcome = enrollment.Propose(subject, announcement, EnrollmentQueue.LabelsOf(Context.User, options.IdentityLabelClaims));
+        switch (outcome)
+        {
+            case Proposal.Recorded:
+                logger.LogInformation("{Subject} waits for approval as {Node}", subject, announcement.Name);
+                bus.Publish("log", new NodeLogLine("coordinator", null, "Warning", $"'{subject}' waits for approval, proposing the node name {EnrollmentQueue.Clean(announcement.Name, EnrollmentQueue.MaxName)}."));
+                bus.Publish("rights", new { });
+                break;
+            case Proposal.Changed:
+                bus.Publish("rights", new { });
+                break;
+            case Proposal.Full:
+                logger.LogWarning("{Subject} refused: {Max} hosts already wait for approval", subject, EnrollmentQueue.MaxPending);
+                bus.Publish("log", new NodeLogLine("coordinator", null, "Error", $"'{subject}' refused: {EnrollmentQueue.MaxPending} hosts already wait for approval."));
+                break;
+            case Proposal.Invalid:
+                logger.LogWarning("An announcement with no usable subject was refused");
+                break;
+        }
+    }
+
+    private void Refuse(string node, string reason)
+    {
+        logger.LogWarning("Announcement of {Node} refused: {Reason}", node, reason);
+        bus.Publish("log", new NodeLogLine("coordinator", null, "Error", $"Announcement of {node} refused: {reason}."));
+    }
+
     public Task ReportFragment(FragmentStatus status)
     {
-        // A host reports only on the node it announced.
-        if (inventory.NodeOf(Context.ConnectionId) != status.Node) return Task.CompletedTask;
+        // A host reports only on the node its connection announced, under that node's name.
+        if (inventory.NodeOf(Context.ConnectionId) is not { } node) return Task.CompletedTask;
+        status = status with { Node = node };
         inventory.Update(status);
         bus.Publish("fragment", status);
         bus.Publish("nodes", inventory.Snapshot());
@@ -158,14 +203,18 @@ public sealed class NodeChannelHub(NodeInventory inventory, RightsStore rights, 
 
     public Task ReportLog(NodeLogLine line)
     {
-        if (inventory.NodeOf(Context.ConnectionId) != line.Node) return Task.CompletedTask;
-        bus.Publish("log", line);
+        if (inventory.NodeOf(Context.ConnectionId) is not { } node) return Task.CompletedTask;
+        bus.Publish("log", line with { Node = node });
         return Task.CompletedTask;
     }
 
     public override Task OnDisconnectedAsync(Exception? exception)
     {
+        var node = inventory.NodeOf(Context.ConnectionId);
+        var clientId = node is null ? null : inventory.ClientIdOf(node);
         inventory.Disconnected(Context.ConnectionId);
+        // A node whose identity is gone, or now carries another name, is no longer a node of this coordinator.
+        if (node is not null && rights.Find(clientId)?.Name != node) inventory.Forget(node);
         bus.Publish("nodes", inventory.Snapshot());
         return base.OnDisconnectedAsync(exception);
     }
