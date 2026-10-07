@@ -1,4 +1,5 @@
 using DtPipe.Coordinator.Contracts;
+using DtPipe.Jobs;
 using Xunit;
 using YamlDotNet.RepresentationModel;
 

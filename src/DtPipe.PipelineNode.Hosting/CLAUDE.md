@@ -34,9 +34,9 @@ none. One node per process; a second `AddDtPipeNode` throws.
   `CheckSinkAsync` runs `dtpipe contract check` on a sink brick fed from `arrow:-`, which inspects
   the target and writes nothing. Checking a design is the product's, so neither is a registered request.
   `[local: the lab's smoke.py bricks — a designer's check]`
-- **`BrickRules` and `JobYaml` (`DtPipe.Coordinator.Contracts`) are the one reading of a branch**,
-  shared with the coordinator, so the designer never calls something a brick the node then
-  declines. `BrickHost` does not announce a declared brick that fails the structure rule.
+- **`BrickRules` (`DtPipe.Coordinator.Contracts`) over `JobYaml` (`DtPipe.Jobs`) is the one
+  reading of a branch**, shared with the coordinator, so the designer never calls something a brick
+  the node then declines. `BrickHost` does not announce a declared brick that fails the structure rule.
   `[unchecked: a declared brick that fails the structure rule]`
 - **A variable's value never leaves the node.** The announcement names it, with an engine for a
   database, so the coordinator never holds a path or a secret to open. Variables reach a child through `PipelineNodeOptions.ChildEnvironment`

@@ -1,10 +1,9 @@
 using System.Text;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
-using DtPipe.Coordinator.Contracts;
 using YamlDotNet.RepresentationModel;
 
-namespace DtPipe.Coordinator.Server;
+namespace DtPipe.Jobs;
 
 /// <summary>The kinds of card the designer draws. Each one is exactly one branch of the job.</summary>
 public static class StepKinds
@@ -20,7 +19,7 @@ public static class StepKinds
 }
 
 /// <summary>
-/// One card. <see cref="Brick"/> is a brick key (<c>node/id</c>) for a source or a sink;
+/// One card. <see cref="Brick"/> is the key of a brick (<see cref="IBrickLookup"/>) for a source or a sink;
 /// <see cref="Transformers"/> is the <c>transformers</c> list as JSON; <see cref="Yaml"/> is the
 /// body of a <see cref="StepKinds.Branch"/> step.
 /// </summary>
@@ -28,8 +27,13 @@ public sealed record DesignStep(
     string Alias, string Kind, string? Brick = null, IReadOnlyList<string>? From = null, IReadOnlyList<string>? Ref = null,
     string? Query = null, JsonArray? Transformers = null, string? Yaml = null);
 
+/// <summary>
+/// The cards of a job and its header: the first comment line is the title, the next ones the
+/// description, and <see cref="Directives"/> the header lines of the form <c>some-name: value</c>,
+/// which belong to whoever reads them and are written back as they came.
+/// </summary>
 public sealed record DesignModel(
-    string Title, string? Description, string? Check, IReadOnlyList<DesignStep> Steps, JsonObject? Layout = null);
+    string Title, string? Description, IReadOnlyList<string>? Directives, IReadOnlyList<DesignStep> Steps, JsonObject? Layout = null);
 
 /// <summary>What the designer shows for a step besides the step itself: its brick, and its node.</summary>
 public sealed record StepInfo(string Alias, string? Node, string? BrickVersion, string? BrickTitle, IReadOnlyList<string> DependsOn);
@@ -42,12 +46,12 @@ public sealed record DesignResult(
 
 /// <summary>
 /// Converts between the designer's cards and a dtpipe job, both ways, and is the only writer of the
-/// job text. A composed job is a plain dtpipe job: one branch per card, a source or sink brick
-/// copied in as its node declares it, readable and runnable as a whole on one machine.
+/// job text, for <c>dtpipe studio</c> and the coordinator alike. A composed job is a plain dtpipe
+/// job: one branch per card, a source or sink brick copied in as <paramref name="bricks"/> declares
+/// it, readable and runnable as a whole on one machine.
 /// </summary>
-public sealed partial class DesignService(BrickCatalog bricks)
+public sealed partial class DesignService(IBrickLookup bricks)
 {
-    private const string CheckDirective = "lab-check:";
 
     public DesignResult Compose(DesignModel model)
     {
@@ -65,12 +69,15 @@ public sealed partial class DesignService(BrickCatalog bricks)
                 errors.Add($"Two steps are named '{step.Alias}'.");
         }
 
+        // A step whose alias is unusable or taken is reported above and composes into nothing.
+        var usable = new HashSet<string>(aliases, StringComparer.Ordinal);
         var branches = new List<(string Alias, YamlMappingNode Branch)>();
         foreach (var step in steps)
         {
+            if (!usable.Remove(step.Alias ?? "")) continue;
             var from = step.From ?? [];
             var refs = step.Ref ?? [];
-            BrickView? brick = null;
+            DesignBrick? brick = null;
             YamlMappingNode? branch = null;
             switch (step.Kind)
             {
@@ -79,13 +86,12 @@ public sealed partial class DesignService(BrickCatalog bricks)
                     brick = step.Brick is null ? null : bricks.Find(step.Brick);
                     if (brick is null)
                     {
-                        errors.Add($"'{step.Alias}': no online node offers the brick '{step.Brick}'.");
+                        errors.Add($"'{step.Alias}': no brick '{step.Brick}' is on offer.");
                         break;
                     }
-                    var expected = step.Kind == StepKinds.Source ? BrickKind.Source : BrickKind.Sink;
-                    if (brick.Kind != expected)
+                    if (brick.Kind != step.Kind)
                     {
-                        errors.Add($"'{step.Alias}': {brick.Key} is a {brick.Kind.ToString().ToLowerInvariant()}, not a {step.Kind}.");
+                        errors.Add($"'{step.Alias}': {brick.Key} is a {brick.Kind}, not a {step.Kind}.");
                         break;
                     }
                     if (step.Kind == StepKinds.Source)
@@ -182,12 +188,12 @@ public sealed partial class DesignService(BrickCatalog bricks)
     /// </summary>
     public DesignResult Decompose(string yaml, JsonObject? layout = null)
     {
-        var (title, description, check) = ReadHeader(yaml);
+        var (title, description, directives) = ReadHeader(yaml);
         YamlMappingNode job;
         try { job = JobYaml.Parse(yaml); }
         catch (Exception ex)
         {
-            return new DesignResult(new DesignModel(title, description, check, []), yaml, [], [$"The job is not readable: {ex.Message}"], []);
+            return new DesignResult(new DesignModel(title, description, directives, []), yaml, [], [$"The job is not readable: {ex.Message}"], []);
         }
 
         var taken = JobYaml.Branches(job).Select(b => b.Alias).ToHashSet(StringComparer.Ordinal);
@@ -202,7 +208,7 @@ public sealed partial class DesignService(BrickCatalog bricks)
         foreach (var (alias, branch) in JobYaml.Branches(job))
             steps.AddRange(Split(alias, branch, Fresh));
 
-        var composed = Compose(new DesignModel(title, description, check, steps, layout));
+        var composed = Compose(new DesignModel(title, description, directives, steps, layout));
         return composed;
     }
 
@@ -211,7 +217,7 @@ public sealed partial class DesignService(BrickCatalog bricks)
         var whole = bricks.Match(branch);
         if (whole is not null)
         {
-            yield return whole.Kind == BrickKind.Source
+            yield return whole.Kind == StepKinds.Source
                 ? new DesignStep(alias, StepKinds.Source, whole.Key)
                 : new DesignStep(alias, StepKinds.Sink, whole.Key, JobYaml.Aliases(branch, "from"));
             yield break;
@@ -220,8 +226,8 @@ public sealed partial class DesignService(BrickCatalog bricks)
         var keys = branch.Children.Keys.OfType<YamlScalarNode>().Select(k => k.Value!).ToHashSet(StringComparer.Ordinal);
         var options = JobYaml.Mapping(branch, "provider-options");
         var components = options?.Children.Keys.OfType<YamlScalarNode>().Select(k => k.Value!).ToHashSet(StringComparer.Ordinal) ?? [];
-        var source = keys.Contains("input") ? bricks.Contained(branch, BrickKind.Source) : null;
-        var sink = keys.Contains("output") ? bricks.Contained(branch, BrickKind.Sink) : null;
+        var source = keys.Contains("input") ? bricks.Contained(branch, StepKinds.Source) : null;
+        var sink = keys.Contains("output") ? bricks.Contained(branch, StepKinds.Sink) : null;
         var middle = keys.Contains("input") && source is null || keys.Contains("output") && sink is null
             ? null
             : Middle(alias, branch, keys, components, source, sink);
@@ -247,7 +253,7 @@ public sealed partial class DesignService(BrickCatalog bricks)
     /// step whose <see cref="DesignStep.Kind"/> is empty means "no card fits": the branch stays raw.
     /// </summary>
     private DesignStep? Middle(
-        string alias, YamlMappingNode branch, HashSet<string> keys, HashSet<string> components, BrickView? source, BrickView? sink)
+        string alias, YamlMappingNode branch, HashSet<string> keys, HashSet<string> components, DesignBrick? source, DesignBrick? sink)
     {
         var rest = new HashSet<string>(components, StringComparer.Ordinal);
         if (source is not null) rest.ExceptWith(ComponentsOf(source));
@@ -271,7 +277,7 @@ public sealed partial class DesignService(BrickCatalog bricks)
         return noCard;
     }
 
-    private IEnumerable<string> ComponentsOf(BrickView brick) =>
+    private IEnumerable<string> ComponentsOf(DesignBrick brick) =>
         JobYaml.Mapping(bricks.BranchOf(brick), "provider-options")?.Children.Keys.OfType<YamlScalarNode>().Select(k => k.Value!) ?? [];
 
     private static DesignStep RawStep(string alias, YamlMappingNode branch)
@@ -309,17 +315,21 @@ public sealed partial class DesignService(BrickCatalog bricks)
         var text = new StringBuilder();
         text.Append("# ").Append(OneLine(model.Title) is { Length: > 0 } t ? t : "Untitled pipeline").Append('\n');
         foreach (var line in Wrap(OneLine(model.Description ?? ""), 96)) text.Append("# ").Append(line).Append('\n');
-        if (!string.IsNullOrWhiteSpace(model.Check)) text.Append("# ").Append(CheckDirective).Append(' ').Append(OneLine(model.Check)).Append('\n');
+        foreach (var directive in model.Directives ?? [])
+            if (OneLine(directive) is { Length: > 0 } line) text.Append("# ").Append(line).Append('\n');
         return text.ToString();
     }
 
-    /// <summary>Same header convention as the catalog: the first comment line is the title, the others the description.</summary>
-    public static (string Title, string? Description, string? Check) ReadHeader(string yaml)
+    /// <summary>
+    /// The header of a job: its leading comment lines. A line of the form <c>some-name: value</c> is
+    /// a directive, kept whole; the first other line is the title, the rest the description.
+    /// </summary>
+    public static (string Title, string? Description, IReadOnlyList<string> Directives) ReadHeader(string yaml)
     {
         var header = yaml.Split('\n').TakeWhile(l => l.StartsWith('#')).Select(l => l.TrimStart('#').Trim()).ToList();
-        var check = header.FirstOrDefault(l => l.StartsWith(CheckDirective))?[CheckDirective.Length..].Trim();
-        var prose = header.Where(l => !l.StartsWith("lab-")).ToList();
-        return (prose.FirstOrDefault() ?? "Untitled pipeline", prose.Count > 1 ? string.Join(' ', prose.Skip(1)) : null, check);
+        var directives = header.Where(l => DirectivePattern().IsMatch(l)).ToList();
+        var prose = header.Where(l => !DirectivePattern().IsMatch(l)).ToList();
+        return (prose.FirstOrDefault() ?? "Untitled pipeline", prose.Count > 1 ? string.Join(' ', prose.Skip(1)) : null, directives);
     }
 
     private static string OneLine(string text) => string.Join(' ', text.Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries)).Trim();
@@ -341,4 +351,7 @@ public sealed partial class DesignService(BrickCatalog bricks)
 
     [GeneratedRegex("^[A-Za-z][A-Za-z0-9_-]*$")]
     private static partial Regex AliasPattern();
+
+    [GeneratedRegex("^[a-z][a-z0-9]*(-[a-z0-9]+)+:")]
+    private static partial Regex DirectivePattern();
 }

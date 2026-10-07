@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using DtPipe.Jobs;
 using YamlDotNet.RepresentationModel;
 
 namespace DtPipe.Coordinator.Contracts;

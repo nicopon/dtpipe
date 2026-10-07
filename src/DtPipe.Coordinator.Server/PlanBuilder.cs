@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using DtPipe.Coordinator;
 using DtPipe.Coordinator.Contracts;
+using DtPipe.Jobs;
 using TransportR.Interfaces;
 using YamlDotNet.RepresentationModel;
 

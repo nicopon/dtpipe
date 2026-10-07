@@ -5,7 +5,8 @@ set -e
 # Source-level guard on the distributed-pipeline split: TransportR is named only by the distributed
 # family (every project named DtPipe.Coordinator* or DtPipe.PipelineNode*), its tests and the lab; no
 # core project reaches it; the two base libraries stay libraries; the lab and its sample data stay
-# under samples/, outside the solution and the build.
+# under samples/, outside the solution and the build; the family reaches the solution only through
+# DtPipe.Jobs.
 #
 # Scope: names and references, not behaviour. A type that crosses the line without naming TransportR
 # (a transitive use) is not seen here.
@@ -93,6 +94,21 @@ if [ -n "$HITS" ]; then
     fail "a base library of the family is built as an application (web SDK, executable output type or Program.cs)"
 fi
 pass "DtPipe.Coordinator and DtPipe.PipelineNode are libraries"
+
+# 6. The family reaches the solution through DtPipe.Jobs only: a job file's YAML and the designer's
+#    cards, no engine, so a host of the family never runs dtpipe in its own process.
+HITS=""
+for f in $(echo "$FILES" | grep -E '^src/DtPipe\.(Coordinator|PipelineNode)[^/]*/[^/]*\.csproj$' || true); do
+    [ -f "$f" ] || continue
+    if grep -oE 'ProjectReference Include="[^"]*"' "$f" | grep -vqE 'DtPipe\.(Coordinator|PipelineNode)[^/\\]*\.csproj|DtPipe\.Jobs\.csproj'; then
+        HITS="$HITS\n  $f"
+    fi
+done
+if [ -n "$HITS" ]; then
+    echo -e "$HITS"
+    fail "a project of the family references a solution project other than DtPipe.Jobs"
+fi
+pass "the family references DtPipe.Jobs and nothing else of the solution"
 
 echo ""
 echo -e "${GREEN}Distributed boundary checks passed.${NC}"

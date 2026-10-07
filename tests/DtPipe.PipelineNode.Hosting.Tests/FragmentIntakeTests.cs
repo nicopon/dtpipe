@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using DtPipe.Coordinator.Contracts;
+using DtPipe.Jobs;
 using Xunit;
 using YamlDotNet.RepresentationModel;
 

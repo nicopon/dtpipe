@@ -1,5 +1,6 @@
 using System.Text.Json;
 using DtPipe.Coordinator.Contracts;
+using DtPipe.Jobs;
 using DtPipe.PipelineNode.Hosting;
 
 namespace Lab.NodeHost;

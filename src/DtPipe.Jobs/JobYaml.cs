@@ -1,16 +1,15 @@
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using YamlDotNet.Core;
 using YamlDotNet.RepresentationModel;
 
-namespace DtPipe.Coordinator.Contracts;
+namespace DtPipe.Jobs;
 
 /// <summary>
-/// Reads and writes dtpipe job files as a plain YAML tree: one top-level key per branch alias. The
-/// planner moves whole branches between fragments and adds <c>arrow:-</c> endpoints; it never
-/// interprets a branch's options, which stay dtpipe's business.
+/// Reads and writes dtpipe job files as a plain YAML tree: one top-level key per branch alias. Its
+/// readers move whole branches, or take one apart at its endpoints; none interprets a branch's
+/// options, which stay dtpipe's business.
 /// </summary>
 public static partial class JobYaml
 {
@@ -105,47 +104,6 @@ public static partial class JobYaml
         YamlScalarNode s => JsonValue.Create(s.Value),
         _ => null,
     };
-
-    /// <summary>
-    /// A form that ignores key order and scalar style: two branches that dtpipe reads the same way
-    /// have the same canonical text. What a brick is matched on, and hashed into its version.
-    /// </summary>
-    public static string Canonical(YamlNode node)
-    {
-        var text = new StringBuilder();
-        void Write(YamlNode n)
-        {
-            switch (n)
-            {
-                case YamlMappingNode m:
-                    text.Append('{');
-                    var first = true;
-                    foreach (var (key, value) in m.Children.OrderBy(kv => ((YamlScalarNode)kv.Key).Value, StringComparer.Ordinal))
-                    {
-                        if (!first) text.Append(',');
-                        first = false;
-                        text.Append(JsonSerializer.Serialize(((YamlScalarNode)key).Value)).Append(':');
-                        Write(value);
-                    }
-                    text.Append('}');
-                    break;
-                case YamlSequenceNode s:
-                    text.Append('[');
-                    for (var i = 0; i < s.Children.Count; i++)
-                    {
-                        if (i > 0) text.Append(',');
-                        Write(s.Children[i]);
-                    }
-                    text.Append(']');
-                    break;
-                case YamlScalarNode s:
-                    text.Append(JsonSerializer.Serialize(s.Value));
-                    break;
-            }
-        }
-        Write(node);
-        return text.ToString();
-    }
 
     /// <summary>Environment variables a job text resolves through <c>${{NAME}}</c>.</summary>
     public static IReadOnlyList<string> Variables(string text) =>

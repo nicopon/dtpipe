@@ -11,6 +11,8 @@
          INodeRegistry, IPlanRegistry), used exactly as that library's own tests use it. -->
     <ProjectReference Include="..\DtPipe.Coordinator\DtPipe.Coordinator.csproj" />
     <ProjectReference Include="..\DtPipe.Coordinator.Contracts\DtPipe.Coordinator.Contracts.csproj" />
+    <!-- The designer's cards: the same model dtpipe studio composes with, never a copy. -->
+    <ProjectReference Include="..\DtPipe.Jobs\DtPipe.Jobs.csproj" />
   </ItemGroup>
 
   <ItemGroup>

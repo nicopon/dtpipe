@@ -6,9 +6,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- What the coordinator and every node host share: the node channel's messages, and JobYaml and
-         BrickRules, so both read a branch the same way. No TransportR: the channel is plain SignalR. -->
-    <PackageReference Include="YamlDotNet" Version="18.1.0" />
+    <!-- What the coordinator and every node host share: the node channel's messages, and BrickRules
+         over DtPipe.Jobs' JobYaml, so both read a branch the same way. No TransportR: the channel is
+         plain SignalR. -->
+    <ProjectReference Include="..\DtPipe.Jobs\DtPipe.Jobs.csproj" />
   </ItemGroup>
 
 </Project>

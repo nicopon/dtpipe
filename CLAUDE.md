@@ -136,10 +136,11 @@ example to make it checked]`
 | `src/DtPipe.Processors` | SQL stream processors (DuckDB, Merge) |
 | `src/Apache.Arrow.Ado` | Standalone ADO.NET → Arrow; depends on `Apache.Arrow.Serialization` only |
 | `src/Apache.Arrow.Serialization` | Standalone CLR↔Arrow type map + POCO serializer |
+| `src/DtPipe.Jobs` | A job file as a YAML tree (`JobYaml`) and the designer's cards (`DesignService`) |
 | `src/DtPipe.Coordinator` | Central hub of a distributed pipeline: the control plane over TransportR |
 | `src/DtPipe.PipelineNode` | Runs one distributed-pipeline fragment under the coordinator's control |
 | `src/DtPipe.Coordinator.Server` | The coordinator's server: API, pages, planner, library, rights; lab mode for benches |
-| `src/DtPipe.Coordinator.Contracts` | Node channel messages, `JobYaml`, `BrickRules`: what coordinator and nodes share |
+| `src/DtPipe.Coordinator.Contracts` | Node channel messages, `BrickRules`: what coordinator and nodes share |
 | `src/DtPipe.PipelineNode.Hosting` | `AddDtPipeNode`: makes any .NET host a node (bricks, fragments, tokens) |
 | `src/DtPipe.PipelineNode.Runner` | The official runner: a node that hosts no data and runs any fragment |
 | `tests/DtPipe.Tests` | xunit.v3 unit and integration tests |
@@ -150,9 +151,10 @@ packages and stays outside `DtPipe.sln`, so `build.yml` never builds or tests it
 discovers its test projects, so `agentic-ci.yml` does.
 `DtPipe.Coordinator` and `DtPipe.PipelineNode` are libraries; a host owns `Program`, authentication
 and the address, and an executable of the family is such a host. Nothing else in `src/` names
-TransportR; only the family, its tests and the lab do. The lab under `samples/distributed-lab` is a
-host, and it and its sample data are named nowhere else. `[CI: validate_distributed_boundary.sh —
-names, references and project shape, not behaviour]`
+TransportR; only the family, its tests and the lab do. The family references `DtPipe.Jobs` and no
+other project of the solution, so none of its hosts runs dtpipe in its own process. The lab under
+`samples/distributed-lab` is a host, and it and its sample data are named nowhere else.
+`[CI: validate_distributed_boundary.sh — names, references and project shape, not behaviour]`
 
 Data flow: `args` → `PipelineLexer.Parse` → `PipelineToJobConverter` → `DagOrchestrator` →
 `LinearPipelineService` → `ExportService.RunExportAsync` → `PipelineExecutor` → `IDataWriter`.
@@ -300,6 +302,14 @@ by a node. The coordinator is the control plane; TransportR carries the data pla
 `[local: DtPipe.Coordinator.Tests, DtPipe.PipelineNode.Tests, the lab's smoke.py]`
 `[unchecked: Windows]` Detail: `src/DtPipe.Coordinator/CLAUDE.md`, `src/DtPipe.PipelineNode/CLAUDE.md`,
 `src/DtPipe.PipelineNode.Hosting/CLAUDE.md`.
+
+### The designer writes the job, the page never does
+
+`DesignService.Compose` (`DtPipe.Jobs`) is the only writer of a designed job's YAML, for `dtpipe
+studio` and the coordinator's server alike: a page sends cards and reads back the text. **One model,
+never a copy per host**: a host adds what only it knows behind `IBrickLookup` (the coordinator its
+nodes' bricks) and maps its page's fields, never a second composer.
+`[CI: DesignServiceTests]` `[unchecked: a page that builds YAML itself]`
 
 ### Exit codes
 

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- A job file as a YAML tree, and the designer's cards over it: what dtpipe studio and the
+         coordinator's server share. YAML only, so the distributed family can reference it without
+         reaching the engine. Shipped inside dtpipe and the family's hosts, never as a package. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
+  </ItemGroup>
+
+</Project>

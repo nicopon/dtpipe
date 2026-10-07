@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using DtPipe.Coordinator.Contracts;
+using DtPipe.Jobs;
 using Microsoft.Extensions.Logging;
 using YamlDotNet.RepresentationModel;
 

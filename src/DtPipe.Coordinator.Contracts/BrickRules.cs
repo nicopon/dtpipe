@@ -1,4 +1,7 @@
+using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
+using DtPipe.Jobs;
 using YamlDotNet.RepresentationModel;
 
 namespace DtPipe.Coordinator.Contracts;
@@ -40,7 +43,7 @@ public static class BrickRules
     public static BrickForm Declared(BrickKind kind, string branchJson) =>
         Declared(kind, (YamlMappingNode)JobYaml.FromJson(JsonNode.Parse(branchJson)));
 
-    public static BrickForm Declared(BrickKind kind, YamlMappingNode branch) => new(kind, JobYaml.Canonical(branch));
+    public static BrickForm Declared(BrickKind kind, YamlMappingNode branch) => new(kind, Canonical(branch));
 
     /// <summary>
     /// The form of a whole branch, with the wiring the planner adds around a brick set aside: a sink is
@@ -52,7 +55,7 @@ public static class BrickRules
         var kept = branch.Children.Where(kv =>
             !kv.Key.Equals(FromKey)
             && !(!isSink && kv.Key.Equals(OutputKey) && kv.Value is YamlScalarNode { Value: ArrowEndpoint }));
-        return new BrickForm(isSink ? BrickKind.Sink : BrickKind.Source, JobYaml.Canonical(new YamlMappingNode(kept)));
+        return new BrickForm(isSink ? BrickKind.Sink : BrickKind.Source, Canonical(new YamlMappingNode(kept)));
     }
 
     /// <summary>
@@ -130,5 +133,46 @@ public static class BrickRules
         {
             return $"the fragment is not readable: {ex.Message}";
         }
+    }
+
+    /// <summary>
+    /// A form that ignores key order and scalar style: two branches that dtpipe reads the same way
+    /// have the same canonical text. What a brick is matched on, and hashed into its version.
+    /// </summary>
+    public static string Canonical(YamlNode node)
+    {
+        var text = new StringBuilder();
+        void Write(YamlNode n)
+        {
+            switch (n)
+            {
+                case YamlMappingNode m:
+                    text.Append('{');
+                    var first = true;
+                    foreach (var (key, value) in m.Children.OrderBy(kv => ((YamlScalarNode)kv.Key).Value, StringComparer.Ordinal))
+                    {
+                        if (!first) text.Append(',');
+                        first = false;
+                        text.Append(JsonSerializer.Serialize(((YamlScalarNode)key).Value)).Append(':');
+                        Write(value);
+                    }
+                    text.Append('}');
+                    break;
+                case YamlSequenceNode s:
+                    text.Append('[');
+                    for (var i = 0; i < s.Children.Count; i++)
+                    {
+                        if (i > 0) text.Append(',');
+                        Write(s.Children[i]);
+                    }
+                    text.Append(']');
+                    break;
+                case YamlScalarNode s:
+                    text.Append(JsonSerializer.Serialize(s.Value));
+                    break;
+            }
+        }
+        Write(node);
+        return text.ToString();
     }
 }

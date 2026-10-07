@@ -70,15 +70,18 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   and adds `arrow:-` endpoints or relay branches; it never edits an option or moves a transformer.
   `AutoPlacer` only chooses a placement for `PlanBuilder` and cuts nothing. `[local: the lab's smoke.py]`
 - **A brick is matched by content, never by name.** A branch is a brick when its canonical form
-  (`JobYaml.Canonical`) equals the one its node declares; a pipeline stays a plain dtpipe job with
+  (`BrickRules.Canonical`) equals the one its node declares; a pipeline stays a plain dtpipe job with
   no reference to a brick in it. `DesignService.Decompose` may take an imported branch apart
   around the bricks it contains (authoring, before anything is saved); the planner never does.
   `[local: the lab's smoke.py, ui_check.py]`
 - **A fragment declares each edge alias once**, so a branch that receives an edge under its own
   alias (a cut's tail) sends on through a relay, never with `output: arrow:-` on itself.
   `[local: the lab's smoke.py lab]`
-- **The server writes the job, the page never does.** `DesignService.Compose` is the only writer
-  of a designer pipeline's YAML; the page sends cards and reads back the text. `[unchecked]`
+- **The designer's model is dtpipe's** (`DtPipe.Jobs`, rule in the root `CLAUDE.md`). The server
+  offers `BrickCatalog` as its `IBrickLookup` and maps the page's `check` to the job's `lab-check:`
+  directive (`PageDesignModel`); it adds no rule of its own to the cards. A brick's canonical form
+  and version are pinned by `BrickFormTests`: changing either gives every brick a new version.
+  `[local: DtPipe.Coordinator.Server.Tests, the lab's smoke.py, ui_check.py]`
 - **A designer's placement is the library's placement.** `/api/design/place` composes the cards
   and hands the job to `AutoPlacer` like `/api/library/{id}/distribute`, saves nothing and accepts
   an id not yet in the library. It cuts nothing, so it asks no node and starts no `dtpipe`; keep

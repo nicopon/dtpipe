@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using DtPipe.Coordinator;
 using DtPipe.Coordinator.Contracts;
 using DtPipe.Coordinator.Server;
+using DtPipe.Jobs;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -44,7 +45,7 @@ builder.Services.AddSingleton<BrickCatalog>();
 builder.Services.AddSingleton<PipelineCatalog>();
 builder.Services.AddSingleton<PlanBuilder>();
 builder.Services.AddSingleton<AutoPlacer>();
-builder.Services.AddSingleton<DesignService>();
+builder.Services.AddSingleton(sp => new DesignService(sp.GetRequiredService<BrickCatalog>()));
 builder.Services.AddSingleton<DesignValidator>();
 builder.Services.AddSingleton<PipelineLibrary>();
 builder.Services.AddSingleton<RunJournal>();
@@ -193,11 +194,11 @@ designer.MapDelete("/deployments/{id}", async (string id, DeploymentManager depl
 });
 
 // The designer: cards to job and back. The page never writes YAML itself.
-designer.MapPost("/design/compose", (DesignModel model, DesignService design) => design.Compose(model));
-designer.MapPost("/design/decompose", (DecomposeRequest request, DesignService design) => design.Decompose(request.Yaml, request.Layout));
-designer.MapPost("/design/validate", async (DesignModel model, DesignService design, DesignValidator validator, CancellationToken ct) =>
+designer.MapPost("/design/compose", (PageDesignModel model, DesignService design) => PageDesignResult.From(design.Compose(model.ToModel())));
+designer.MapPost("/design/decompose", (DecomposeRequest request, DesignService design) => PageDesignResult.From(design.Decompose(request.Yaml, request.Layout)));
+designer.MapPost("/design/validate", async (PageDesignModel model, DesignService design, DesignValidator validator, CancellationToken ct) =>
 {
-    var composed = design.Compose(model);
+    var composed = design.Compose(model.ToModel());
     if (!composed.Valid) return Results.Ok(new { composed.Errors, dryRun = (string?)null, ok = false });
     var check = await validator.ValidateAsync(composed.Yaml, ct);
     return Results.Ok(new { composed.Errors, dryRun = check.Report, ok = check.Ok });
@@ -245,7 +246,7 @@ designer.MapPost("/library/{id}/distribute", async (string id, DistributeRequest
 designer.MapPost("/design/place", async (PlaceRequest request, DesignService design, AutoPlacer placer, CancellationToken ct) =>
 {
     if (!PipelineLibrary.IsValidId(request.Id)) return Results.BadRequest(new { error = $"'{request.Id}' is not a pipeline id: lowercase letters, digits and '-'." });
-    var composed = design.Compose(request.Model);
+    var composed = design.Compose(request.Model.ToModel());
     if (!composed.Valid) return Results.Ok(new { errors = composed.Errors, plan = (DistributionPlan?)null, bricks = new Dictionary<string, string>() });
     var plan = await placer.PlanAsync(request.Id, composed.Yaml, ct);
     return Results.Ok(new { errors = Array.Empty<string>(), plan, bricks = placer.BrickAliases(composed.Yaml) });
@@ -391,7 +392,7 @@ internal sealed record RunRequest(Dictionary<string, string>? Pins, string? Pipe
 internal sealed record CancelRequest(string? RunId);
 internal sealed record DecomposeRequest(string Yaml, System.Text.Json.Nodes.JsonObject? Layout = null);
 internal sealed record SaveRequest(string Yaml, System.Text.Json.Nodes.JsonObject? Layout, string? Message);
-internal sealed record PlaceRequest(string Id, DesignModel Model);
+internal sealed record PlaceRequest(string Id, PageDesignModel Model);
 internal sealed record DistributeRequest(bool Save = false, string? Message = null);
 internal sealed record MatrixRequest(Dictionary<string, List<string>> Matrix);
 internal sealed record AcceptRequest(string? Name, string? Description, List<string>? Groups);
