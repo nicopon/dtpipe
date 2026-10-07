@@ -326,6 +326,6 @@ sign a person in and out.
 | `POST /api/runs` · `GET /api/runs`, `/api/runs/queue` | `{pipelineId?, pins?}` queues a run; the journal; in flight and queued |
 | `POST /api/runs/cancel` | `{runId?}`: the run in flight, or a queued one |
 | `POST /api/fragments/{name}/kill`, `/variant` | fault injection |
-| `POST /api/pipelines/from-command` | `{args: [...]}` → YAML through `--export-job` |
+| `POST /api/pipelines/from-command` | `{args: [...]}` → YAML through `--export-job`, run by a runner (the coordinator runs no dtpipe; none online, no import) |
 | `POST /api/query` | `{variable, sql}` → CSV of a node's database, read by that node |
 | `GET /api/events` | server-sent events: nodes, fragment states, logs, bytes, runs |
