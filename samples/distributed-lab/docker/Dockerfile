@@ -4,10 +4,10 @@
 #   docker build -f samples/distributed-lab/docker/Dockerfile --target <target> .
 #
 # The dtpipe binary is built here for Linux, never copied from the host: a host build may link
-# libraries the image does not have. Every target that runs fragments, plans or seeds carries it in
+# libraries the image does not have. Every target that runs fragments or seeds carries it in
 # /usr/local/bin.
 #
-#   coordinator      the coordinator's server, with git (its library is a git repository)
+#   coordinator      the coordinator's server, with git (its library is a git repository) and no dtpipe: a runner runs it
 #   coordinator-lab  the same, plus the lab's scenarios, library seed and rights seed under /lab
 #   runner           the official runner
 #   node             the lab's data node host, its node files and seed script under /lab; it
@@ -49,11 +49,10 @@ WORKDIR /app
 FROM runtime AS with-dtpipe
 COPY --from=dtpipe-build /out/dtpipe /usr/local/bin/dtpipe
 
-FROM with-dtpipe AS coordinator
+FROM runtime AS coordinator
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 COPY --from=hosts-build /out/coordinator /app
-ENV Coordinator__DtPipe=/usr/local/bin/dtpipe \
-    Coordinator__StateDirectory=/state
+ENV Coordinator__StateDirectory=/state
 ENTRYPOINT ["dotnet", "/app/DtPipe.Coordinator.Server.dll"]
 
 FROM coordinator AS coordinator-lab
