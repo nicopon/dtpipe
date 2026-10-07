@@ -101,9 +101,9 @@ public sealed class DeploymentManager
             throw new ConflictException("This plan cannot be deployed: " +
                 string.Join(" ", plan.Errors.Append(plan.FlowRejection ?? "").Where(s => s.Length > 0)));
         // A plan read back from the library is checked against the matrix as it is now.
-        var refused = plan.Edges.Where(e => !_flowControl.CanSendTo(new HashSet<string> { e.ProducerGroup }, new HashSet<string> { e.ConsumerGroup })).ToList();
+        var refused = plan.Edges.Where(e => !_flowControl.CanSendTo(e.ProducerGroups.ToHashSet(), e.ConsumerGroups.ToHashSet())).ToList();
         if (refused.Count > 0)
-            throw new ConflictException("The flow matrix refuses " + string.Join(", ", refused.Select(e => $"{e.ProducerGroup} -> {e.ConsumerGroup}")) + ".");
+            throw new ConflictException("The flow matrix refuses " + string.Join(", ", refused.Select(e => $"{string.Join("+", e.ProducerGroups)} -> {string.Join("+", e.ConsumerGroups)}")) + ".");
         var offline = plan.Fragments.Where(f => _inventory.ConnectionOf(f.Node) is null).Select(f => f.Node).Distinct().ToList();
         if (offline.Count > 0) throw new ConflictException($"Offline: {string.Join(", ", offline)}.");
 

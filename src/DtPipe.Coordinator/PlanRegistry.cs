@@ -18,7 +18,7 @@ public sealed class PlanRejectedException : Exception
 
     private static string BuildMessage(IReadOnlyList<PlanEdge> edges) =>
         "Plan rejected, edge(s) not permitted by the flow control matrix: " +
-        string.Join(", ", edges.Select(e => $"{e.Name} ({e.ProducerGroup} -> {e.ConsumerGroup})"));
+        string.Join(", ", edges.Select(e => $"{e.Name} ({string.Join("+", e.ProducerGroups)} -> {string.Join("+", e.ConsumerGroups)})"));
 }
 
 /// <summary>Verifies a plan's edges against the flow control matrix before a run can open any of them.</summary>
@@ -41,8 +41,8 @@ public sealed class PlanRegistry : IPlanRegistry
     {
         var forbidden = plan.Edges
             .Where(edge => !_flowControl.CanSendTo(
-                new HashSet<string> { edge.ProducerGroup },
-                new HashSet<string> { edge.ConsumerGroup }))
+                edge.ProducerGroups.ToHashSet(),
+                edge.ConsumerGroups.ToHashSet()))
             .ToList();
 
         if (forbidden.Count > 0)

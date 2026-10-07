@@ -121,7 +121,7 @@ official runner, `DtPipe.PipelineNode.Runner`, configured only through its envir
 (`DtPipeNode__Name`, `DtPipeNode__CoordinatorUrl`, `DtPipeNode__Oidc__Authority`, …): `lab.sh`
 starts it that way for a node file whose `role` is `runner`.
 
-A node's group is not in its file, nor in its token: the coordinator gives it (below). The flow matrix says
+A node's groups are not in its file, nor in its token: the coordinator gives them (below). The flow matrix says
 which group may send to which: every data group may feed the `runner`, the `runner` feeds
 `warehouse`, and the direct links the Lab view's scenarios use stay.
 
@@ -129,13 +129,14 @@ which group may send to which: every data group may feed the `runner`, the `runn
 
 Tokens come from `Lab.Idp` (below), which the coordinator trusts for its audience. Each node host
 holds a client id and secret in its `nodes/<node>.json`, which `idp-clients.json` registers; the
-token it obtains names it (`sub`) and grants nothing. The coordinator gives that subject its group,
-which TransportR's hub then enforces. What is allowed lives in one document, `.state/rights.json`,
+token it obtains names it (`sub`) and grants nothing. The coordinator gives that subject its groups,
+which TransportR's hub then enforces: a node sends to another only if every group of the sender may
+send to every group of the receiver. What is allowed lives in one document, `.state/rights.json`,
 started from `rights-seed.json` and edited in the **Access** view:
 
 | | Enforced |
 |---|---|
-| **Who**: identities, each a client of the IdP bound to one group and to the one node it may announce | by the coordinator (no group for an unknown or disabled client, from its next connection or token renewal) and by the control channel (an announcement of another node is refused) |
+| **Who**: identities, each a client of the IdP with a node name and one or more groups | by the coordinator (no group for an unknown or disabled client, from its next connection or token renewal) and by the control channel (an announcement of another node is refused) |
 | **To whom**: the flow matrix between groups | by the hub on **every transfer**, live, and on every plan |
 
 Every change is audited. A node host gives each of its pipeline nodes a token provider
@@ -180,7 +181,7 @@ python3 tools/idp_check.py          # discovery, both flows, and the refusals th
 | Designer | a palette of bricks and steps (Transform, SQL, Merge), a canvas wired port to port, an inspector per card, the composed YAML to copy or edit |
 | Distribution | the plan placed automatically, drawn in lanes (sources, runner, sinks); save it, deploy, run |
 | Runs | deployments, the run in flight and the queue, the journal with each run's report, node events, a query on any database |
-| Access | the trusted IdP, identities (group, bound node, enabled, reconnect), the editable flow matrix, the audit |
+| Access | the trusted IdP, identities (node name, groups, enabled, reconnect), the editable flow matrix, the audit |
 
 **A pipeline is a plain dtpipe job**, one branch per card, that also runs whole on one machine
 (`smoke.py` uses it as the witness). A branch *is* a brick when its content equals the brick's:

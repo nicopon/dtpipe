@@ -244,9 +244,9 @@ def rights_pass():
         claims, _ = token(issuer, "node-1", "node-1-lab-secret")
         if refused == 200 or not claims or claims.get("sub") != "node-1" or "transportr:group:" in str(claims.get("scope", "")):
             raise RuntimeError(f"wrong secret -> {refused}, claims {claims}")
-        group = next((n["group"] for n in call("/api/nodes") if n["name"] == "node-1"), None)
-        if group != "crm":
-            raise RuntimeError(f"node-1 is in group {group!r}, its identity says crm")
+        groups = next((n["groups"] for n in call("/api/nodes") if n["name"] == "node-1"), None)
+        if groups != ["crm"]:
+            raise RuntimeError(f"node-1 is in groups {groups!r}, its identity says crm")
         return f"wrong secret refused ({refused}); node-1's token names it and grants nothing, the coordinator puts it in crm"
 
     def matrix_plan():
@@ -280,6 +280,47 @@ def rights_pass():
             raise RuntimeError(f"revoked -> {refused['state']}, restored -> {ok['state']}")
         return f"revoked at run time -> {refused['state']}; restored -> {ok['state']}"
 
+    def several_groups():
+        # A node in several groups sends to another only if every group of the sender may send to every group of
+        # the receiver. runner-1 joins `audit`: crm -> runner then needs crm -> audit, and runner -> warehouse needs
+        # audit -> warehouse too. Each is added in turn; the identity and the matrix are restored.
+        runner = next(i for i in call("/api/rights")["identities"] if i["clientId"] == "runner-1")
+
+        def put_identity(groups):
+            call("/api/rights/identities/runner-1", {"clientId": "runner-1", "name": runner["name"], "description": runner["description"],
+                                                    "groups": groups, "enabled": True}, "PUT")
+            call("/api/rights/identities/runner-1/reconnect", {})
+            until(lambda: next((n["groups"] == sorted(groups) and n["online"] for n in call("/api/nodes") if n["name"] == "runner-1"), False),
+                  60, f"runner-1 online in {groups}")
+
+        def plan():
+            return call("/api/library/customers-anonymized/distribute", {})["plan"]
+
+        def allowing(*edges):
+            edited = {g: list(t) for g, t in matrix.items()}
+            for sender, receiver in edges:
+                edited.setdefault(sender, []).append(receiver)
+            call("/api/rights/matrix", {"matrix": edited}, "PUT")
+
+        try:
+            for deployment in call("/api/deployments"):
+                call(f"/api/deployments/{deployment['pipelineId']}", None, "DELETE")
+            put_identity(["runner", "audit"])
+            refused = plan()
+            if refused["deployable"] or "audit" not in (refused.get("flowRejection") or ""):
+                raise RuntimeError(f"runner+audit with no matrix entry for audit: {refused.get('flowRejection')}")
+            allowing(("crm", "audit"))
+            half = plan()
+            if half["deployable"] or "audit+runner -> warehouse" not in (half.get("flowRejection") or ""):
+                raise RuntimeError(f"crm -> audit alone must still refuse audit+runner -> warehouse: {half.get('flowRejection')}")
+            allowing(("crm", "audit"), ("audit", "warehouse"))
+            if not plan()["deployable"]:
+                raise RuntimeError(f"every group allowed, still refused: {plan().get('flowRejection')}")
+        finally:
+            call("/api/rights/matrix", {"matrix": matrix}, "PUT")
+            put_identity(runner["groups"])
+        return "runner-1 in runner+audit: refused until crm -> audit and audit -> warehouse are both allowed"
+
     def impostor():
         # A host holding node-1's credentials announces itself as node-2: the coordinator refuses it,
         # and the real node-2 stays online under its own identity.
@@ -312,8 +353,8 @@ def rights_pass():
         # again, whatever token the IdP still issues it; enabled again, it comes back on its own.
         def update(enabled):
             node3 = next(i for i in call("/api/rights")["identities"] if i["clientId"] == "node-3")
-            call("/api/rights/identities/node-3", {"clientId": "node-3", "displayName": node3["displayName"],
-                                                  "group": node3["group"], "node": node3["node"], "enabled": enabled}, "PUT")
+            call("/api/rights/identities/node-3", {"clientId": "node-3", "name": node3["name"], "description": node3["description"],
+                                                  "groups": node3["groups"], "enabled": enabled}, "PUT")
             call("/api/rights/identities/node-3/reconnect", {})
 
         def online():
@@ -424,6 +465,7 @@ def rights_pass():
     check("identity, disabled", disabled)
     check("flow matrix, plan", matrix_plan)
     check("flow matrix, run time", matrix_runtime)
+    check("flow matrix, several groups", several_groups)
     return failures
 
 

@@ -202,7 +202,7 @@ public sealed class RightsIdentityProvider(RightsStore rights) : IClientIdentity
     {
         var identity = _token.ResolveIdentity(user, providedClientId, providedGroups);
         if (identity is null) return null;
-        var granted = rights.Find(identity.Subject) is { Enabled: true } known ? new HashSet<string> { known.Group } : [];
+        var granted = rights.Find(identity.Subject) is { Enabled: true } known ? known.Groups.ToHashSet() : [];
         return identity with { Groups = granted };
     }
 }

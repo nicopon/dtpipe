@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.SignalR;
 namespace DtPipe.Coordinator.Server;
 
 public sealed record NodeView(
-    string Name, string Group, string Description, bool Online, IReadOnlyList<DatasetInfo> Datasets,
+    string Name, IReadOnlyList<string> Groups, string Description, bool Online, IReadOnlyList<DatasetInfo> Datasets,
     IReadOnlyList<FragmentStatus> Fragments, NodeRole Role, IReadOnlyList<BrickInfo> Bricks, bool Sandbox);
 
 /// <summary>
@@ -16,6 +16,7 @@ public sealed class NodeInventory
     private sealed class Entry
     {
         public required NodeAnnouncement Announcement;
+        public IReadOnlyList<string> Groups = [];
         public string? ConnectionId;
         public string? ClientId;
         public Action? Abort;
@@ -25,13 +26,14 @@ public sealed class NodeInventory
     private readonly object _lock = new();
     private readonly Dictionary<string, Entry> _nodes = new(StringComparer.Ordinal);
 
-    public void Announce(string connectionId, NodeAnnouncement announcement, string clientId, Action abort)
+    public void Announce(string connectionId, NodeAnnouncement announcement, string clientId, IReadOnlyList<string> groups, Action abort)
     {
         lock (_lock)
         {
             if (!_nodes.TryGetValue(announcement.Name, out var entry))
                 _nodes[announcement.Name] = entry = new Entry { Announcement = announcement };
             entry.Announcement = announcement;
+            entry.Groups = groups;
             entry.ConnectionId = connectionId;
             entry.ClientId = clientId;
             entry.Abort = abort;
@@ -108,7 +110,7 @@ public sealed class NodeInventory
             return _nodes.Values
                 .OrderBy(e => e.Announcement.Name, StringComparer.Ordinal)
                 .Select(e => new NodeView(
-                    e.Announcement.Name, e.Announcement.Group, e.Announcement.Description, e.ConnectionId is not null,
+                    e.Announcement.Name, e.Groups, e.Announcement.Description, e.ConnectionId is not null,
                     e.Announcement.Datasets,
                     e.Fragments.Values.OrderBy(f => f.Fragment, StringComparer.Ordinal).ThenBy(f => f.Instance).ToList(),
                     e.Announcement.Role, e.Announcement.Bricks ?? [], e.Announcement.Sandbox))
@@ -119,8 +121,8 @@ public sealed class NodeInventory
 
 /// <summary>
 /// The node channel (<see cref="NodeChannel"/>), one connection per node host, each authenticated by
-/// the trusted IdP. A host is who its token says: it may announce only the node its identity is bound
-/// to, and its group is the identity's, whatever it declares.
+/// the trusted IdP. A host is who its token says: it may announce only the node its identity is named
+/// for, and its groups are the identity's.
 /// </summary>
 public sealed class NodeChannelHub(NodeInventory inventory, RightsStore rights, EventBus bus, ILogger<NodeChannelHub> logger) : Hub
 {
@@ -128,18 +130,18 @@ public sealed class NodeChannelHub(NodeInventory inventory, RightsStore rights, 
     {
         var clientId = TrustedIdp.SubjectOf(Context.User);
         var identity = rights.Find(clientId);
-        if (identity is not { Enabled: true } || identity.Node != announcement.Name)
+        if (identity is not { Enabled: true } || identity.Name != announcement.Name)
         {
             var reason = identity is null ? $"'{clientId}' is no known identity"
                 : !identity.Enabled ? $"'{clientId}' is disabled"
-                : $"'{clientId}' may announce {identity.Node ?? "no node"}, not {announcement.Name}";
+                : $"'{clientId}' may announce {identity.Name}, not {announcement.Name}";
             logger.LogWarning("Announcement of {Node} refused: {Reason}", announcement.Name, reason);
             bus.Publish("log", new NodeLogLine("coordinator", null, "Error", $"Announcement of {announcement.Name} refused: {reason}."));
             Context.Abort();
             return Task.CompletedTask;
         }
         var context = Context;
-        inventory.Announce(Context.ConnectionId, announcement with { Group = identity.Group }, identity.ClientId, context.Abort);
+        inventory.Announce(Context.ConnectionId, announcement, identity.ClientId, identity.Groups, context.Abort);
         bus.Publish("nodes", inventory.Snapshot());
         return Task.CompletedTask;
     }

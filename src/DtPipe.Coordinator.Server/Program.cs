@@ -259,8 +259,8 @@ api.MapGet("/rights", (RightsStore rights, NodeInventory inventory, CoordinatorS
         idp = new { issuer = options.Authority, audience = options.Audience, grant = "client_credentials" },
         identities = doc.Identities.Select(i => new
         {
-            i.ClientId, i.DisplayName, i.Group, i.Node, i.Enabled,
-            connected = i.Node is not null && online.Contains(i.Node) && inventory.ClientIdOf(i.Node) == i.ClientId,
+            i.ClientId, i.Name, i.Description, i.Groups, i.Enabled,
+            connected = online.Contains(i.Name) && inventory.ClientIdOf(i.Name) == i.ClientId,
         }),
         groups = rights.Groups(),
         matrix = doc.Matrix,
@@ -276,16 +276,14 @@ admin.MapPut("/rights/matrix", (MatrixRequest request, RightsStore rights, Event
 admin.MapPost("/rights/identities", (IdentityRequest request, RightsStore rights, EventBus bus, HttpContext http) =>
 {
     if (!PipelineLibrary.IsValidId(request.ClientId)) throw new ConflictException($"'{request.ClientId}' is not a client id: lowercase letters, digits and '-'.");
-    if (string.IsNullOrWhiteSpace(request.Group)) throw new ConflictException("An identity belongs to one group.");
-    rights.AddIdentity(new Identity(request.ClientId, request.DisplayName ?? request.ClientId, request.Group.Trim(),
-        string.IsNullOrWhiteSpace(request.Node) ? null : request.Node.Trim(), request.Enabled ?? true), EmailOf(http));
+    rights.AddIdentity(new Identity(request.ClientId, string.IsNullOrWhiteSpace(request.Name) ? request.ClientId : request.Name, request.Description ?? "",
+        request.Groups ?? [], request.Enabled ?? true), EmailOf(http));
     bus.Publish("rights", new { });
     return Results.Ok();
 });
 admin.MapPut("/rights/identities/{id}", (string id, IdentityRequest request, RightsStore rights, EventBus bus, HttpContext http) =>
 {
-    if (string.IsNullOrWhiteSpace(request.Group)) throw new ConflictException("An identity belongs to one group.");
-    rights.UpdateIdentity(id, request.DisplayName ?? id, request.Group.Trim(), request.Node, request.Enabled ?? true, EmailOf(http));
+    rights.UpdateIdentity(id, request.Name ?? id, request.Description ?? "", request.Groups ?? [], request.Enabled ?? true, EmailOf(http));
     bus.Publish("rights", new { });
     return Results.Ok();
 });
@@ -363,4 +361,4 @@ internal sealed record SaveRequest(string Yaml, System.Text.Json.Nodes.JsonObjec
 internal sealed record PlaceRequest(string Id, DesignModel Model);
 internal sealed record DistributeRequest(bool Save = false, string? Message = null);
 internal sealed record MatrixRequest(Dictionary<string, List<string>> Matrix);
-internal sealed record IdentityRequest(string ClientId, string? DisplayName, string Group, string? Node, bool? Enabled);
+internal sealed record IdentityRequest(string ClientId, string? Name, string? Description, List<string>? Groups, bool? Enabled);

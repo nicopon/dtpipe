@@ -21,12 +21,12 @@ public sealed record UnitView(
     string? SuggestedNode, string? Node);
 
 public sealed record PlannedFragment(
-    string Name, string Node, string Group, string Yaml, string Version, IReadOnlyList<FragmentEdge> Edges,
+    string Name, string Node, IReadOnlyList<string> Groups, string Yaml, string Version, IReadOnlyList<FragmentEdge> Edges,
     IReadOnlyList<string> Units);
 
 public sealed record PlannedEdge(
     string ProducerFragment, string ProducerAlias, string ConsumerFragment, string ConsumerAlias,
-    string ProducerGroup, string ConsumerGroup, bool Allowed);
+    IReadOnlyList<string> ProducerGroups, IReadOnlyList<string> ConsumerGroups, bool Allowed);
 
 public sealed record DistributionPlan(
     string Id, string PipelineId, IReadOnlyList<CutRequest> Cuts, IReadOnlyList<UnitView> Units,
@@ -61,11 +61,11 @@ public sealed class PlanBuilder(
         public required IReadOnlyList<string> DependsOn;
     }
 
-    private sealed class FragmentDraft(string name, string node, string group)
+    private sealed class FragmentDraft(string name, string node, IReadOnlyList<string> groups)
     {
         public string Name { get; } = name;
         public string Node { get; } = node;
-        public string Group { get; } = group;
+        public IReadOnlyList<string> Groups { get; } = groups;
         public List<(string Key, YamlMappingNode Branch)> Inbound { get; } = [];
         public List<(string Key, YamlMappingNode Branch)> Owned { get; } = [];
         public List<(string Key, YamlMappingNode Branch)> Relays { get; } = [];
@@ -117,7 +117,7 @@ public sealed class PlanBuilder(
         var drafts = new Dictionary<string, FragmentDraft>(StringComparer.Ordinal);
         FragmentDraft DraftOf(string node) => drafts.TryGetValue(node, out var d)
             ? d
-            : drafts[node] = new FragmentDraft($"{pipelineId}@{node}", node, nodes[node].Group);
+            : drafts[node] = new FragmentDraft($"{pipelineId}@{node}", node, nodes[node].Groups);
 
         foreach (var unit in units)
         {
@@ -229,12 +229,12 @@ public sealed class PlanBuilder(
                            (owners.Count > 0 ? $" (hosted by {string.Join(", ", owners)})." : "."));
             }
 
-            fragments.Add(new PlannedFragment(draft.Name, draft.Node, draft.Group, yaml, version, draft.Edges, draft.Units));
+            fragments.Add(new PlannedFragment(draft.Name, draft.Node, draft.Groups, yaml, version, draft.Edges, draft.Units));
         }
 
         var plannedEdges = runEdges.Select(e => new PlannedEdge(
-            e.Producer.Name, e.ProducerAlias, e.Consumer.Name, e.ConsumerAlias, e.Producer.Group, e.Consumer.Group,
-            flowControl.CanSendTo(new HashSet<string> { e.Producer.Group }, new HashSet<string> { e.Consumer.Group })))
+            e.Producer.Name, e.ProducerAlias, e.Consumer.Name, e.ConsumerAlias, e.Producer.Groups, e.Consumer.Groups,
+            flowControl.CanSendTo(e.Producer.Groups.ToHashSet(), e.Consumer.Groups.ToHashSet())))
             .ToList();
 
         string? flowRejection = null;
@@ -242,7 +242,7 @@ public sealed class PlanBuilder(
         {
             planRegistry.Register(new FlowPlan(planId, plannedEdges
                 .Select(e => new PlanEdge($"{e.ProducerFragment}.{e.ProducerAlias} -> {e.ConsumerFragment}.{e.ConsumerAlias}",
-                    e.ProducerGroup, e.ConsumerGroup))
+                    e.ProducerGroups, e.ConsumerGroups))
                 .ToList()));
         }
         catch (PlanRejectedException ex)

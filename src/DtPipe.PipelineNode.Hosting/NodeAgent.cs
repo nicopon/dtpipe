@@ -160,7 +160,7 @@ internal sealed class NodeAgent : BackgroundService
         // Bounded: a connection the coordinator aborts as it refuses the announcement may never answer it.
         using var bounded = new CancellationTokenSource(AnnounceTimeout);
         await _hub!.InvokeAsync(NodeChannel.Announce,
-            new NodeAnnouncement(_options.Name, "", _options.Description, _datasets, Role, _bricks.Bricks,
+            new NodeAnnouncement(_options.Name, _options.Description, _datasets, Role, _bricks.Bricks,
                 Sandbox: _policy == FragmentPolicy.AnyReadOrWrite), bounded.Token);
 
         FragmentStatus[] statuses;

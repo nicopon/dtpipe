@@ -11,10 +11,10 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
 - **The server trusts an IdP for who, and decides what.** `TrustedIdp` validates the tokens of
   `Coordinator:Authority` for `Coordinator:Audience`; a token names its client (`sub`) and grants
   nothing. `RightsIdentityProvider` replaces TransportR's `IClientIdentityProvider` and gives the
-  subject its identity's group in `RightsStore`, none for an unknown or disabled one. TransportR
-  records that group at `Connect` and at each token renewal, so an identity edit applies when the
+  subject its identity's groups in `RightsStore`, none for an unknown or disabled one. TransportR
+  records those groups at `Connect` and at each token renewal, so an identity edit applies when the
   node connects again. `NodeChannelHub.Announce` refuses a host announcing a node its identity is
-  not bound to, or a disabled one. `[local: the lab's smoke.py rights]`
+  not named for, or a disabled one. `[local: the lab's smoke.py rights]`
 - **A person's rights are the server's configuration, never the token's.** People sign in through
   the provider (`Coordinator:Ui:ClientId`, a confidential authorization-code client, PKCE, the code
   in the query so the Lax correlation cookies ride the redirect) into the `dtpipe-coordinator`
@@ -93,8 +93,11 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   `[local: the lab's tools/campaign.py F3]`
 - **One source of rights.** `RightsStore` holds the identities and the flow matrix;
   `RightsFlowControl` replaces TransportR's `IFlowControlService`, so the hub checks the matrix as
-  it is now on every transfer, and the planner and a deployment check every edge against it. Never
-  add a second matrix.
+  it is now on every transfer, and the planner and a deployment check every edge against it. A
+  node in several groups sends only if every one of its groups may send to every group of the
+  receiver, on both sides, and an edge carries the groups of both ends. Never add a second matrix.
+  `RightsStore` reads only a document that says `"version": 2`; a saved plan without its groups is
+  read as no plan.
   `[local: the lab's smoke.py rights]`
 - **A data node only reads and writes, and runs only its bricks**: the node enforces it
   (`src/DtPipe.PipelineNode.Hosting/CLAUDE.md`), and the server reads a branch the same way

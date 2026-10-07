@@ -34,7 +34,7 @@ export const legend = `<div class="legend"><span><i class="sw network"></i>arrow
 
 // The jobs each fragment runs, folded.
 export function fragmentJobs(plan) {
-  return plan.fragments.map((f) => `<details class="frag-card" style="--node-color:${nodeColor(f.node)}"><summary><b>${esc(f.name)}</b> <span class="hint">group ${esc(f.group)} · version <code>${esc(f.version.slice(0, 12))}</code> · ${f.edges.map((e) => `${e.direction === "Inbound" ? "in" : "out"} ${esc(e.alias)}`).join(", ")}</span></summary><pre>${esc(f.yaml)}</pre></details>`).join("");
+  return plan.fragments.map((f) => `<details class="frag-card" style="--node-color:${nodeColor(f.node)}"><summary><b>${esc(f.name)}</b> <span class="hint">${f.groups.length > 1 ? "groups" : "group"} ${esc(f.groups.join(" + "))} · version <code>${esc(f.version.slice(0, 12))}</code> · ${f.edges.map((e) => `${e.direction === "Inbound" ? "in" : "out"} ${esc(e.alias)}`).join(", ")}</span></summary><pre>${esc(f.yaml)}</pre></details>`).join("");
 }
 
 // Draws plan into el. run, running and current say what to show on the edges: a run's row counts
@@ -45,7 +45,7 @@ export function drawLanes(el, plan, brickOfUnit, { run = null, running = false, 
   el.innerHTML = plan.fragments.map((f) => {
     const units = plan.units.filter((u) => f.units.includes(u.id));
     return `<div class="xbox" data-fragment="${esc(f.name)}" style="--node-color:${nodeColor(f.node)}">
-      <div class="xbox-head"><span class="node-name">${esc(f.node)}</span><span class="chip">${esc(f.group)}</span></div>
+      <div class="xbox-head"><span class="node-name">${esc(f.node)}</span><span class="chip">${esc(f.groups.join(" + "))}</span></div>
       ${units.map((u) => unitLine(u, brickOfUnit)).join("")}
     </div>`;
   }).join("") + `<svg></svg>`;

@@ -54,7 +54,7 @@ public enum NodeRole { Data, Runner }
 /// coordinator shows it and never sets it.
 /// </summary>
 public sealed record NodeAnnouncement(
-    string Name, string Group, string Description, IReadOnlyList<DatasetInfo> Datasets, NodeRole Role,
+    string Name, string Description, IReadOnlyList<DatasetInfo> Datasets, NodeRole Role,
     IReadOnlyList<BrickInfo> Bricks, bool Sandbox = false);
 
 public enum BrickKind { Source, Sink }

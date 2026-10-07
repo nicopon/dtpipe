@@ -109,7 +109,7 @@ function renderNodes() {
     <div class="node ${n.online ? "" : "offline"}" style="--node-color:${nodeColor(n.name)}">
       <div class="node-head">
         <span class="node-name"><span class="dot ${n.online ? "on" : ""}"></span>${esc(n.name)}</span>
-        <span class="chip">${esc(n.group)}</span>
+        <span class="chip">${esc(n.groups.join(" + "))}</span>
       </div>
       <div class="hint" style="margin:2px 0">${esc(n.description)}</div>
       ${n.datasets.map((d) => `<div class="dataset"><code>\${{${esc(d.variable)}}}</code> ${esc(d.engine)} · ${esc(d.description)}</div>`).join("")}
@@ -172,7 +172,7 @@ function renderGraph() {
   units.forEach((u) => depthOf(u));
 
   const nodeOptions = (u) => `<option value="">— node —</option>` + state.nodes.map((n) =>
-    `<option value="${esc(n.name)}" ${u.node === n.name ? "selected" : ""} style="color:${nodeColor(n.name)}">${esc(n.name)} · ${esc(n.group)}</option>`).join("");
+    `<option value="${esc(n.name)}" ${u.node === n.name ? "selected" : ""} style="color:${nodeColor(n.name)}">${esc(n.name)} · ${esc(n.groups.join(" + "))}</option>`).join("");
 
   const cards = units.map((u) => {
     const b = u.branch;
@@ -312,7 +312,7 @@ function renderPlan() {
             <button class="small ghost" data-variant="${esc(f.name)}" ${deployedHere && !running && ready ? "" : "disabled"} title="Deploy a second instance whose job differs by a comment: admission then refuses the run as misaligned">+ misaligned instance</button>
           </span>
         </div>
-        <div class="edges">group ${esc(f.group)} · in: ${inbound.map(esc).join(", ") || "—"} · out: ${outbound.map(esc).join(", ") || "—"} · version <code>${esc(f.version.slice(0, 12))}</code></div>
+        <div class="edges">${f.groups.length > 1 ? "groups" : "group"} ${esc(f.groups.join(" + "))} · in: ${inbound.map(esc).join(", ") || "—"} · out: ${outbound.map(esc).join(", ") || "—"} · version <code>${esc(f.version.slice(0, 12))}</code></div>
         <details><summary>job and pin</summary>
           <pre>${esc(f.yaml)}</pre>
           <div class="row" style="margin-top:6px"><span class="hint">Pin this run to version</span>

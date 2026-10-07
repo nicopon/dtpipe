@@ -30,6 +30,7 @@ async function load() {
 }
 
 const setOf = (list) => new Set(list || []);
+const groupsOf = (text) => text.split(",").map((g) => g.trim()).filter(Boolean);
 
 function matrixCell(from, to) {
   const allowed = matrixDraft ? matrixDraft[from]?.has(to) : (rights.matrix[from] || []).includes(to);
@@ -39,25 +40,25 @@ function matrixCell(from, to) {
 function render() {
   if (!host || !rights) return;
   const groups = rights.groups;
-  const nodes = store.nodes.map((n) => n.name);
 
   const identities = rights.identities.map((i) => `
     <tr data-identity="${esc(i.clientId)}">
-      <td><code>${esc(i.clientId)}</code><div class="hint">${esc(i.displayName)}</div></td>
-      <td><input class="mono narrow" data-field="group" value="${esc(i.group)}" list="groups-list"></td>
-      <td><select data-field="node"><option value="">— none —</option>${nodes.map((n) => `<option ${n === i.node ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></td>
+      <td><code>${esc(i.clientId)}</code></td>
+      <td><input class="mono narrow" data-field="name" value="${esc(i.name)}" aria-label="Node name of ${esc(i.clientId)}"></td>
+      <td><input class="mono" data-field="groups" value="${esc(i.groups.join(", "))}" list="groups-list" aria-label="Groups of ${esc(i.clientId)}, separated by commas"></td>
+      <td><input data-field="description" value="${esc(i.description)}" aria-label="Description of ${esc(i.clientId)}"></td>
       <td><label class="check"><input type="checkbox" data-field="enabled" ${i.enabled ? "checked" : ""}> enabled</label></td>
       <td>${i.connected ? `<span class="chip ok">connected</span>` : `<span class="chip">offline</span>`}</td>
       <td class="actions-cell">
         <button class="small" data-save-identity>Save</button>
-        <button class="small ghost" data-reconnect ${i.connected ? "" : "disabled"} title="Drop its control connection: its host connects again, under its current group">Reconnect</button>
+        <button class="small ghost" data-reconnect ${i.connected ? "" : "disabled"} title="Drop its control connection: its host connects again, under its current groups">Reconnect</button>
         <button class="small ghost danger" data-remove-identity>Remove</button>
       </td>
     </tr>`).join("");
 
   host.innerHTML = `
     <div class="view-head"><h1>Access</h1>
-      <p class="hint">Who may send what to whom. Every node authenticates with an identity provider the coordinator trusts, which says who it is; the coordinator decides its group, never the token or the node.</p></div>
+      <p class="hint">Who may send what to whom. Every node authenticates with an identity provider the coordinator trusts, which says who it is; the coordinator decides its name and its groups, never the token or the node.</p></div>
 
     <section class="card">
       <h2>Identity provider</h2>
@@ -72,19 +73,18 @@ function render() {
     <section class="card">
       <div class="card-head"><h2>Identities <span class="hint">who</span></h2><button data-add>${adding ? "Cancel" : "Add an identity"}</button></div>
       ${adding ? `<div class="row add-identity">
-        <input id="a-id" class="mono" placeholder="client id"><input id="a-name" placeholder="display name">
-        <input id="a-group" class="mono" placeholder="group" list="groups-list">
-        <select id="a-node"><option value="">— no node —</option>${nodes.map((n) => `<option>${esc(n)}</option>`).join("")}</select>
+        <input id="a-id" class="mono" placeholder="client id"><input id="a-name" class="mono" placeholder="node name (the client id by default)">
+        <input id="a-groups" class="mono" placeholder="groups, separated by commas" list="groups-list"><input id="a-description" placeholder="description">
         <button class="primary" data-create>Create</button></div>` : ""}
       <datalist id="groups-list">${groups.map((g) => `<option>${esc(g)}</option>`).join("")}</datalist>
-      <table><tr><th>client</th><th>group</th><th>may announce node</th><th></th><th>state</th><th></th></tr>${identities}</table>
-      <p class="hint">An identity is a client the IdP already knows, by its client id: its secret lives in the IdP. A new group or a disabled identity takes effect when the node connects again or renews its token: reconnect it, then redeploy what runs there. A disabled identity may not announce and holds no group.</p>
+      <table><tr><th>client</th><th>node name</th><th>groups</th><th>description</th><th></th><th>state</th><th></th></tr>${identities}</table>
+      <p class="hint">An identity is a client the IdP already knows, by its client id: its secret lives in the IdP. A node sends to another only if every one of its groups may send to every group of the receiver, in the matrix below. New groups or a disabled identity take effect when the node connects again or renews its token: reconnect it, then redeploy what runs there. A disabled identity may not announce and holds no group.</p>
     </section>
 
     <section class="card">
       <div class="card-head"><h2>Flow matrix <span class="hint">to whom</span></h2>
         <span class="actions">${matrixDraft ? `<button class="ghost" data-matrix-reset>Discard</button><button class="primary" data-matrix-save>Apply</button>` : ""}</span></div>
-      <p class="hint">Rows send, columns receive. The hub checks it on every transfer it opens, so a change applies to the next run with no redeployment; every plan is checked against it too.</p>
+      <p class="hint">Rows send, columns receive. A node sends to another only if every group of the sender may send to every group of the receiver. The hub checks it on every transfer it opens, so a change applies to the next run with no redeployment; every plan is checked against it too.</p>
       <table class="matrix edit"><tr><th>from \\ to</th>${groups.map((g) => `<th>${esc(g)}</th>`).join("")}</tr>
         ${groups.map((g) => `<tr><th>${esc(g)}</th>${groups.map((t) => matrixCell(g, t)).join("")}</tr>`).join("")}</table>
     </section>
@@ -112,16 +112,16 @@ async function onClick(e) {
     if (b.dataset.add !== undefined) { adding = !adding; render(); }
     else if (b.dataset.create !== undefined) {
       const v = (id) => document.getElementById(id).value.trim();
-      await api("/api/rights/identities", { clientId: v("a-id"), displayName: v("a-name") || null, group: v("a-group"), node: v("a-node") || null });
+      await api("/api/rights/identities", { clientId: v("a-id"), name: v("a-name") || null, description: v("a-description"), groups: groupsOf(v("a-groups")) });
       adding = false;
       toast(`${v("a-id")} created: it can obtain tokens now.`, "info");
     } else if (b.dataset.saveIdentity !== undefined) {
       const id = row.dataset.identity;
-      const current = rights.identities.find((i) => i.clientId === id);
       await api(`/api/rights/identities/${encodeURIComponent(id)}`, {
-        clientId: id, displayName: current.displayName,
-        group: row.querySelector('[data-field="group"]').value.trim(),
-        node: row.querySelector('[data-field="node"]').value || null,
+        clientId: id,
+        name: row.querySelector('[data-field="name"]').value.trim(),
+        description: row.querySelector('[data-field="description"]').value,
+        groups: groupsOf(row.querySelector('[data-field="groups"]').value),
         enabled: row.querySelector('[data-field="enabled"]').checked,
       }, "PUT");
       toast(`${id} saved.`, "info");
