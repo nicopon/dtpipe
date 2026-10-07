@@ -5,7 +5,8 @@ Writes one screenshot per step.
   0. Sign in: the coordinator's page sends the browser to the IdP's form, filled and submitted as
      the lab's admin, and comes back naming them with the admin role.
   1. Lab view: every catalog pipeline selected in turn, its graph and plan drawn.
-  2. Coordinator: each view rendered (nodes, library, designer, distribution, runs, access).
+  2. Coordinator: each view rendered (nodes, library, a pipeline's page, designer, runs, access).
+  2b. Library: the row actions agree with the plans and deployments, and Open shows the pipeline's page.
   3. Designer scenario: a pipeline built with the mouse from the palette - a source brick, a
      Transform step, a sink brick, wired port to port; a wire picked up by its input end and
      dropped in the void, another removed with its x button, both wired again - then given a
@@ -70,7 +71,7 @@ def coordinator_views(browser):
         ("nodes", "document.querySelectorAll('.node-card').length > 0 && document.querySelectorAll('.brick').length > 0"),
         ("library", f"document.querySelectorAll('table.library tr').length === {len(library) + 1}"),
         (f"designer/{pid}", "document.querySelectorAll('.dcard').length > 0 && document.querySelector('#d-yaml')?.textContent.length > 0"),
-        (f"distribution/{pid}", "document.querySelectorAll('.xbox').length > 0 && document.querySelectorAll('.lanes svg path').length > 0"),
+        (f"library/{pid}", "document.querySelectorAll('.xbox').length > 0 && document.querySelectorAll('.lanes svg path').length > 0"),
         ("runs", "!!document.getElementById('r-journal') && !!document.getElementById('r-deployments')"),
         ("access", "document.querySelectorAll('table.matrix.edit input').length > 0 && document.querySelectorAll('[data-identity]').length > 0"),
     ]
@@ -80,8 +81,34 @@ def coordinator_views(browser):
         browser.js(f"location.hash = {json.dumps('#/' + view)}")
         rendered = browser.wait_for(predicate, 20)
         errors = page_errors(browser)
-        shot = browser.shot(os.path.join(OUT, "app-" + view.split("/")[0] + ".png"))
+        shot = browser.shot(os.path.join(OUT, "app-library-detail.png" if view.startswith("library/") else "app-" + view.split("/")[0] + ".png"))
         report(rendered and not errors, "view " + view, "rendered" if rendered else "not rendered" + (f"  errors: {errors}" if errors else ""), shot)
+
+
+def library_page(browser):
+    # The list's row actions agree with the library's and the deployments' state, and Open leads to the pipeline's page.
+    entries = SESSION.call("/api/library")
+    deployments = {d["pipelineId"]: d for d in SESSION.call("/api/deployments")}
+    browser.console.clear()
+    browser.js("location.hash = '#/library'")
+    browser.wait_for(f"document.querySelectorAll('table.library [data-run]').length === {len(entries)}", 20)
+    wrong = []
+    for e in entries:
+        deployment = deployments.get(e["id"])
+        row = f"[data-deploy={json.dumps(e['id'])}]"
+        deploy_off = browser.js(f"document.querySelector({json.dumps(row)}).disabled")
+        run_off = browser.js(f"document.querySelector('[data-run={json.dumps(e['id'])}]').disabled")
+        if deploy_off != (not (e["distributed"] and e["planCurrent"])):
+            wrong.append(f"{e['id']} deploy disabled={deploy_off}")
+        if run_off != (not deployment or deployment["state"] == "failed"):
+            wrong.append(f"{e['id']} run disabled={run_off}")
+    pid = entries[0]["id"]
+    browser.js(f"document.querySelector('table.library a[href=\"#/library/{pid}\"]').click()")
+    opened = browser.wait_for("document.querySelectorAll('.xbox').length > 0 && !!document.getElementById('x-deploy') && !!document.getElementById('x-run')", 20)
+    gone = browser.js("!document.querySelector('#nav a[data-view=\"distribution\"]')")
+    errors = page_errors(browser)
+    report(not wrong and opened and gone and not errors, "library row actions and page",
+           f"rows={len(entries)} opened={opened} no distribution entry={gone}" + (f"  wrong: {wrong}" if wrong else "") + (f"  errors: {errors}" if errors else ""), "")
 
 
 def designer_scenario(browser):
@@ -220,6 +247,7 @@ try:
     sign_in(browser)
     lab_view(browser)
     coordinator_views(browser)
+    library_page(browser)
     designer_scenario(browser)
     designer_panels(browser)
     designer_zoom(browser)

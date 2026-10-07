@@ -247,7 +247,7 @@ between the witness and the lab's warehouse.
 ```
 
 **Planning** (`PlanBuilder`) turns a monolithic job into one fragment per node, in two steps; the
-Lab view gives it cuts and a placement, the Distribution view only the placement `AutoPlacer`
+Lab view gives it cuts and a placement, the Library and the designer only the placement `AutoPlacer`
 chose:
 
 1. *Cuts inside a branch* are `dtpipe split --at k`, run by the node whose data the branch reads.

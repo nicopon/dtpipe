@@ -1,13 +1,12 @@
-// The coordinator's page: a hash router over five views, and the status pills of the top bar.
+// The coordinator's page: a hash router over its views, and the status pills of the top bar.
 import { $, addLog, bytes, start, store, subscribe, toast } from "./core.js";
 import * as nodes from "./nodes.js";
 import * as library from "./library.js";
 import * as designer from "./designer.js";
-import * as distribution from "./distribution.js";
 import * as runs from "./runs.js";
 import * as access from "./access.js";
 
-const views = { nodes, library, designer, distribution, runs, access };
+const views = { nodes, library, designer, runs, access };
 
 // For scripted checks (tools/ui_check.py): the live store, to hand the designer a draft.
 window.lab = { store };

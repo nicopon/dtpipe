@@ -307,7 +307,7 @@ function renderShell() {
           <button id="d-layout" class="ghost" title="Arrange the cards in columns, sources first">Arrange</button>
           <button id="d-validate" title="each source brick's node sends one row, dtpipe runs the job over them with writers neutralised, and each sink brick's node checks its target">Validate</button>
           <button id="d-save">Save…</button>
-          <button id="d-distribute" class="primary">Distribute →</button>
+          <button id="d-plan" class="primary" title="Its plan, its fragments and its runs, in the Library">Plan →</button>
         </span>
       </div>
       <div class="designer-body">
@@ -326,7 +326,7 @@ function renderShell() {
   $("d-layout").addEventListener("click", () => autoLayout());
   $("d-validate").addEventListener("click", validate);
   $("d-save").addEventListener("click", () => save().catch((e) => toast(e.message)));
-  $("d-distribute").addEventListener("click", distribute);
+  $("d-plan").addEventListener("click", openPlan);
   applySizes();
   bindSplits();
   bindCanvas();
@@ -934,12 +934,12 @@ async function save() {
   return true;
 }
 
-async function distribute() {
+async function openPlan() {
   try {
     if (dirty) {
-      if (!confirm("Save before distributing? The plan is computed from the saved pipeline.")) return;
+      if (!confirm("Save before opening its plan? The plan is computed from the saved pipeline.")) return;
       if (!(await save())) return;
     }
-    location.hash = `#/distribution/${encodeURIComponent(id)}`;
+    location.hash = `#/library/${encodeURIComponent(id)}`;
   } catch (e) { toast(e.message); }
 }

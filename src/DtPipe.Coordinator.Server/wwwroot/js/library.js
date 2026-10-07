@@ -1,6 +1,7 @@
 // Library: the pipelines kept in the coordinator's git repository, their plan and deployment
 // state, their history, and the ways in: a new pipeline, pasted YAML, or a dtpipe command line.
 import { ago, api, deploymentOf, esc, isActive, lastRunOf, store, toast } from "./core.js";
+import * as detail from "./library-detail.js";
 
 let host = null;
 let entries = [];
@@ -9,9 +10,12 @@ let history = [];
 let shown = null;          // { commit, yaml, diff }
 let importing = false;
 let creating = false;      // the new-pipeline form is open
+let page = null;           // the detail page, when #/library/{id} is open
 
-export function mount(el) {
+export function mount(el, params) {
   host = el;
+  page = params[0] ? detail : null;
+  if (page) { page.mount(el, params); return; }
   host.addEventListener("click", onClick);
   host.addEventListener("input", onInput);
   host.addEventListener("keydown", onKeydown);
@@ -19,6 +23,7 @@ export function mount(el) {
 }
 
 export function update(kind) {
+  if (page) { page.update(kind); return; }
   if (kind === "library") load();
   else if (["all", "deployments", "runs"].includes(kind)) render();
 }
@@ -45,6 +50,19 @@ function runCell(id) {
   return `<span class="outcome-chip ${esc(run.state)}">${esc(run.state)}</span> <span class="hint">${isActive(run) ? "" : ago(run.finishedAt)}${rows ? ` · ${rows.toLocaleString("en-US")} rows` : ""}</span>`;
 }
 
+// Deploy, Run and Undeploy from the list. The list knows only whether the saved plan is current and
+// what is deployed; the page of the pipeline compares the deployed plan with today's, and the server
+// decides in every case.
+function deployRowActions(e) {
+  const deployment = deploymentOf(e.id);
+  const active = isActive(lastRunOf(e.id));
+  const deploy = e.distributed && e.planCurrent && !active;
+  const run = deployment && deployment.state !== "failed";
+  return `<button class="small" data-deploy="${esc(e.id)}" ${deploy ? "" : "disabled"} title="${e.distributed && e.planCurrent ? "" : "Save its plan first, on its page"}">${deployment ? "Redeploy" : "Deploy"}</button>
+        <button class="small primary" data-run="${esc(e.id)}" ${run ? "" : "disabled"}>Run</button>
+        ${deployment ? `<button class="small ghost danger" data-undeploy="${esc(e.id)}" ${active ? "disabled" : ""}>Undeploy</button>` : ""}`;
+}
+
 function render() {
   if (!host) return;
   const rows = entries.map((e) => `
@@ -56,7 +74,8 @@ function render() {
       <td class="hint">${esc(e.message || "")}<div>${esc(ago(e.updatedAt))}</div></td>
       <td class="actions-cell">
         <a class="button small" href="#/designer/${encodeURIComponent(e.id)}">Design</a>
-        <a class="button small" href="#/distribution/${encodeURIComponent(e.id)}">Distribute</a>
+        <a class="button small" href="#/library/${encodeURIComponent(e.id)}" title="Its plan, its fragments and its runs">Open</a>
+        ${deployRowActions(e)}
         <button class="small ghost" data-history="${esc(e.id)}">${historyOf === e.id ? "Hide history" : "History"}</button>
         <button class="small ghost danger" data-delete="${esc(e.id)}">Delete</button>
       </td>
@@ -233,6 +252,16 @@ async function onClick(e) {
       shown = null;
       toast(`${id} restored to ${t.dataset.restore.slice(0, 8)}.`, "info");
       await load();
+    } else if (t.dataset.deploy) {
+      const id = t.dataset.deploy;
+      toast(`Deploying ${id}…`, "info");
+      await api(`/api/library/${encodeURIComponent(id)}/deploy`, {});
+      toast(`${id} deployed: every fragment registered.`, "info");
+    } else if (t.dataset.run) {
+      const run = await api("/api/runs", { pipelineId: t.dataset.run });
+      toast(`${run.runId} ${run.state}.`, "info");
+    } else if (t.dataset.undeploy) {
+      await api(`/api/deployments/${encodeURIComponent(t.dataset.undeploy)}`, undefined, "DELETE");
     } else if (t.dataset.delete) {
       const id = t.dataset.delete;
       if (!confirm(`Delete ${id} from the library? Its history stays in the repository.`)) return;
