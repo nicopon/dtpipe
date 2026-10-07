@@ -3,7 +3,8 @@
 
 Six passes. The Lab view's: each pipelines/*.yaml with its catalog layout, deployed and run one
 after the other. The library's: each library pipeline distributed automatically and its plan
-saved, then all of them deployed at once and their runs queued together, as the page does.
+saved, then all of them deployed at once and their runs queued together, as the page does: runs
+that share a data node must never be in flight together.
 The rights': the embedded IDP, the flow matrix refusing a plan and then, edited under a deployed
 pipeline and, edited under a deployed pipeline, a transfer at run time; every edit is undone.
 The faults': a run cancelled while a fully wired fragment's child has nothing to write, whose
@@ -12,7 +13,8 @@ The bricks': on strict nodes, a fragment whose branch is not one of the node's b
 by a hair, is refused by the node at once and leaves nothing deployed; the same wiring built from the
 bricks as declared deploys, relays included.
 The sandbox': on sandbox nodes any reader or writer is accepted, but a join or a processor on a data
-node is refused all the same: a data node only reads and writes.
+node is refused all the same: a data node only reads and writes. Runs on disjoint data nodes are in
+flight together, the runner they share notwithstanding.
 The lab and sandbox passes need sandbox nodes and every other pass strict ones: `lab.sh smoke`
 switches the node hosts between them.
 For every pipeline of the first two:
@@ -25,7 +27,8 @@ Usage: smoke.py <lab-url> <dtpipe> <state-dir> [lab|library|rights|faults|bricks
 A leading pass name runs that pass alone.
 Exits 0 when every selected pipeline passes, 1 otherwise. Standard library only.
 """
-import base64, csv, io, json, os, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
+import base64, csv, io, itertools, json, os, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
+from datetime import datetime
 
 URL, DTPIPE, STATE = sys.argv[1].rstrip("/"), sys.argv[2], sys.argv[3]
 PASSES = {"lab", "library", "rights", "faults", "bricks", "sandbox"}
@@ -207,7 +210,48 @@ def library_pass(ctx):
         except Exception as e:
             failures += 1
             print(f"FAIL  library  {pid:28} {e}")
+
+    try:
+        print(f"PASS  library  {'a shared node, in turn':28} {shared_in_turn(runs, finals)}")
+    except Exception as e:
+        failures += 1
+        print(f"FAIL  library  {'a shared node, in turn':28} {e}")
     return failures
+
+
+def data_nodes(plan):
+    """The nodes a run holds: its fragments' nodes, runners excepted."""
+    runners = {n["name"] for n in call("/api/nodes") if n["role"] == "Runner"}
+    return {f["node"] for f in plan["fragments"]} - runners
+
+
+def span(final):
+    return datetime.fromisoformat(final["startedAt"]), datetime.fromisoformat(final["finishedAt"])
+
+
+def overlap(a, b):
+    (a0, a1), (b0, b1) = span(a), span(b)
+    return a0 < b1 and b0 < a1
+
+
+def shared_in_turn(runs, finals):
+    """Runs that share a data node never overlap: each starts once the one before it has finished."""
+    if len(runs) < 2:
+        return "one run selected, nothing to compare"
+    pairs = []
+    for (pa, plan_a, _, _), (pb, plan_b, _, _) in itertools.combinations(runs, 2):
+        shared = data_nodes(plan_a) & data_nodes(plan_b)
+        if not shared:
+            continue
+        a, b = finals[pa], finals[pb]
+        if isinstance(a, Exception) or isinstance(b, Exception):
+            raise RuntimeError(f"{pa} or {pb} did not finish")
+        if overlap(a, b):
+            raise RuntimeError(f"{pa} and {pb} share {', '.join(sorted(shared))} but were in flight together: {span(a)} {span(b)}")
+        pairs.append(f"{pa}/{pb}")
+    if not pairs:
+        raise RuntimeError("no two runs share a data node: the check proves nothing")
+    return f"{len(pairs)} pairs sharing a data node, none in flight together"
 
 
 def token(issuer, client_id, secret):
@@ -741,7 +785,45 @@ def sandbox_pass():
         job = "a:\n  input: generate:10\nb:\n  from: a\n  provider-options:\n    sql:\n      query: SELECT * FROM a\nc:\n  from: b\n  output: duck:${{LAB_WAREHOUSE_DB}}\n"
         return refused("sandbox-probe", job, [], {"a": "node-2", "b": "node-2", "c": "node-4"}, "b", "node-2", "sql processor")
 
+    def disjoint_together():
+        # Three raw pipelines, a slow source each, queued together: P1 and P2 share only the runner, which
+        # never counts, so they are in flight together; P3 reads node-1 like P1, so it starts once P1 is over.
+        # Nothing is written anywhere: every sink is null.
+        job = lambda: ("gen:\n  input: generate:15000\n  provider-options:\n    generate:\n      rows-per-second: 1000\n"
+                       "sink:\n  from: gen\n  output: \"null:\"\n")
+        shapes = {"smoke-par-1": ("node-1", "runner-1"), "smoke-par-2": ("node-2", "runner-1"), "smoke-par-3": ("node-1", "node-3")}
+        runs = {}
+        try:
+            for pid, (source, sink) in shapes.items():
+                call("/api/deploy", {"pipelineId": pid, "yaml": job(), "cuts": [], "placement": {"gen": source, "sink": sink}})
+            for pid in shapes:
+                runs[pid] = call("/api/runs", {"pipelineId": pid})["runId"]
+            finals = {pid: until(lambda: _finished(rid), RUN_TIMEOUT, f"{rid} to finish") for pid, rid in runs.items()}
+            bad = {pid: f"{f['state']} {f.get('refusal') or ''}" for pid, f in finals.items() if f["state"] != "succeeded"}
+            if bad:
+                raise RuntimeError(f"not every run succeeded: {bad}")
+            p1, p2, p3 = (finals[p] for p in shapes)
+            if not overlap(p1, p2):
+                raise RuntimeError(f"P1 and P2 share only the runner but ran in turn: {span(p1)} {span(p2)}")
+            if span(p3)[0] < span(p1)[1]:
+                raise RuntimeError(f"P3 started before P1, which holds node-1, finished: {span(p1)} {span(p3)}")
+            together = (min(span(p1)[1], span(p2)[1]) - max(span(p1)[0], span(p2)[0])).total_seconds()
+            return f"P1 and P2 in flight together for {together:.1f}s through runner-1; P3 waited for node-1"
+        finally:
+            for rid in runs.values():
+                if not _finished(rid):
+                    call("/api/runs/cancel", {"runId": rid})
+            for rid in runs.values():
+                until(lambda: _finished(rid), RUN_TIMEOUT, f"{rid} to end")
+            for pid in shapes:
+                undeploy(pid)
+            try:
+                until(lambda: not left_behind("smoke-par-"), 10, "the undeploy")
+            except RuntimeError:
+                raise RuntimeError(f"still deployed: {', '.join(left_behind('smoke-par-'))}") from None
+
     check("sandbox nodes", loose)
+    check("disjoint nodes, together", disjoint_together)
     check("any reader or writer", any_reader)
     check("a join on a data node", compute)
     check("a cut after a transformer", cut_leaves_a_transformer)
