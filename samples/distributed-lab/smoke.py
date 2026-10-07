@@ -565,6 +565,24 @@ def refused(pipeline, yaml, cuts, placement, alias, node, why):
     raise RuntimeError("the deployment was accepted")
 
 
+def planned_refusal(pipeline, yaml, cuts, placement, alias, why):
+    """A deployment through the Lab view's own path to strict nodes. A data node runs only the bricks its owner
+    declared, by id, so a branch that is none is refused by the planner, naming `alias` and saying `why`,
+    before anything is sent to a node, and nothing of that deployment exists."""
+    try:
+        call("/api/deploy", {"pipelineId": pipeline, "yaml": yaml, "cuts": cuts, "placement": placement})
+    except RuntimeError as e:
+        said = str(e)
+        if "This plan cannot be deployed" not in said or f"'{alias}'" not in said or why not in said:
+            raise RuntimeError(f"refused, but not by the planner naming '{alias}' ({why}): {said}")
+        if left_behind(pipeline + "@"):
+            raise RuntimeError(f"refused, but still deployed: {', '.join(left_behind(pipeline + '@'))}")
+        return f"the planner refused '{alias}' before any node was asked, nothing deployed"
+    finally:
+        undeploy(pipeline)
+    raise RuntimeError("the deployment was accepted")
+
+
 def accepted(pipeline, yaml, cuts, placement):
     try:
         return call("/api/deploy", {"pipelineId": pipeline, "yaml": yaml, "cuts": cuts, "placement": placement})
@@ -598,9 +616,10 @@ MIRROR_PLACEMENT = {"customers": "node-1", "mirror": "node-4"}
 
 
 def bricks_pass():
-    """On strict nodes a fragment is run only if each branch is one of the node's bricks. Deployed through
-    the Lab view's own path (a job and a placement, no brick lookup), anything else is refused by the node
-    that would run it, well before the registration timeout, and nothing of that deployment stays behind."""
+    """On strict nodes a fragment is run only if each branch is one of the node's bricks, which the node
+    composes by id from its own declarations. Deployed through the Lab view's own path (a job and a
+    placement), anything else is refused by the planner, before any node is asked, and nothing of that
+    deployment stays behind."""
     failures = [0]
     check = checker("bricks", failures)
     mirror, narrower, elsewhere = mirror_jobs()
@@ -616,15 +635,15 @@ def bricks_pass():
         job = mirror.replace("sqlite:${{LAB_CRM_DB}}", "csv:/etc/hosts")
         if job == mirror:
             raise RuntimeError("library-seed/customers-mirror.yaml no longer reads sqlite:${{LAB_CRM_DB}}")
-        return refused("bricks-probe", job, [], MIRROR_PLACEMENT, "customers", "node-1", "not one of this node's bricks")
+        return planned_refusal("bricks-probe", job, [], MIRROR_PLACEMENT, "customers", "not one of this node's bricks")
 
     def source_by_a_hair():
         accepted("bricks-probe", mirror, [], MIRROR_PLACEMENT)
-        detail = refused("bricks-probe", narrower, [], MIRROR_PLACEMENT, "customers", "node-1", "not one of this node's bricks")
+        detail = planned_refusal("bricks-probe", narrower, [], MIRROR_PLACEMENT, "customers", "not one of this node's bricks")
         return "the bricks as declared deploy; a narrower query on the same brick: " + detail
 
     def sink_by_a_hair():
-        detail = refused("bricks-probe", elsewhere, [], MIRROR_PLACEMENT, "mirror", "node-4", "not one of this node's bricks")
+        detail = planned_refusal("bricks-probe", elsewhere, [], MIRROR_PLACEMENT, "mirror", "not one of this node's bricks")
         return "another table on the same sink: " + detail
 
     def relays():

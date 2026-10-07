@@ -132,7 +132,7 @@ public sealed partial class PipelineLibrary
         {
             var saved = JsonSerializer.Deserialize<SavedPlan>(File.ReadAllText(path), Json);
             // A plan without the groups of its fragments and edges is no plan: a transfer checked against none would pass.
-            return saved?.Plan.Fragments.All(f => f.Groups is not null) == true && saved.Plan.Edges.All(e => e.ProducerGroups is not null && e.ConsumerGroups is not null) ? saved : null;
+            return saved?.Plan.Fragments.All(f => f.Groups is not null && f.Form != FragmentForm.Unknown) == true && saved.Plan.Edges.All(e => e.ProducerGroups is not null && e.ConsumerGroups is not null) ? saved : null;
         }
         catch (JsonException) { return null; }
     }

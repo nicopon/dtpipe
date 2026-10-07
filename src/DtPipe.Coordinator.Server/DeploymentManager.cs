@@ -97,6 +97,8 @@ public sealed class DeploymentManager
 
     public async Task DeployAsync(DistributionPlan plan, string origin, CancellationToken ct)
     {
+        if (plan.Fragments.Any(f => f.Form == FragmentForm.Unknown))
+            throw new ConflictException("This plan does not say how each fragment reaches its node: distribute the pipeline again.");
         if (!plan.Deployable)
             throw new ConflictException("This plan cannot be deployed: " +
                 string.Join(" ", plan.Errors.Append(plan.FlowRejection ?? "").Where(s => s.Length > 0)));
@@ -130,7 +132,8 @@ public sealed class DeploymentManager
             await UndeployEverywhereAsync(names, ct);
             foreach (var fragment in plan.Fragments)
                 await SendAsync(fragment.Node, NodeChannel.Deploy,
-                    new FragmentDeployment(fragment.Name, fragment.Yaml, fragment.Edges, deployment.Generation), ct);
+                    new FragmentDeployment(fragment.Name, fragment.Form == FragmentForm.Bricks ? "" : fragment.Yaml, fragment.Edges, deployment.Generation,
+                        Units: fragment.Composition, Version: fragment.Version), ct);
 
             await WaitRegisteredAsync(deployment, ct);
             deployment.State = "ready";
@@ -239,6 +242,8 @@ public sealed class DeploymentManager
         var (deployment, fragment) = RequireFragment(fragmentName);
         lock (_lock) ThrowIfBusy(deployment.Plan.PipelineId);
         if (deployment.Gate.CurrentCount == 0) throw new ConflictException("Fragments are being deployed.");
+        if (fragment.Form != FragmentForm.Job)
+            throw new ConflictException($"{fragment.Name} is made of its node's bricks, which the node composes by id: a variant is a job as written, so only a runner or a node that accepts raw fragments takes one.");
         var yaml = fragment.Yaml + $"# variant {Guid.NewGuid():N}\n";
         await SendAsync(fragment.Node, NodeChannel.Deploy,
             new FragmentDeployment(fragment.Name, yaml, fragment.Edges, NewGeneration(), Instance: "variant"), ct);

@@ -20,9 +20,22 @@ public sealed record UnitView(
     string Id, string YamlKey, bool IsHead, BranchView Branch, IReadOnlyList<string> DependsOn,
     string? SuggestedNode, string? Node);
 
+/// <summary>How a fragment reaches its node: <see cref="Bricks"/> composed by the node from its own declarations, or a <see cref="Job"/> as written.</summary>
+public enum FragmentForm
+{
+    /// <summary>Not said: a plan saved before fragments had a form, which is no plan.</summary>
+    Unknown = 0,
+
+    /// <summary>A data node's fragment, made of its bricks by id (<see cref="PlannedFragment.Composition"/>).</summary>
+    Bricks,
+
+    /// <summary>A runner's fragment, or one a lab host that accepts raw fragments runs as written.</summary>
+    Job,
+}
+
 public sealed record PlannedFragment(
     string Name, string Node, IReadOnlyList<string> Groups, string Yaml, string Version, IReadOnlyList<FragmentEdge> Edges,
-    IReadOnlyList<string> Units);
+    IReadOnlyList<string> Units, FragmentForm Form = FragmentForm.Unknown, IReadOnlyList<FragmentUnit>? Composition = null);
 
 public sealed record PlannedEdge(
     string ProducerFragment, string ProducerAlias, string ConsumerFragment, string ConsumerAlias,
@@ -47,7 +60,7 @@ public sealed record DistributionPlan(
 /// </para>
 /// </summary>
 public sealed class PlanBuilder(
-    NodeInventory inventory, NodeRequests nodes, IPlanRegistry planRegistry, IFlowControlService flowControl)
+    NodeInventory inventory, NodeRequests nodes, BrickCatalog bricks, IPlanRegistry planRegistry, IFlowControlService flowControl)
 {
     private const string ArrowEndpoint = "arrow:-";
     private static readonly TimeSpan SplitTimeout = TimeSpan.FromSeconds(90);
@@ -76,7 +89,12 @@ public sealed class PlanBuilder(
         public YamlMappingNode Branch(string key) => Owned.First(b => b.Key == key).Branch;
     }
 
-    public async Task<DistributionPlan> BuildAsync(PlanRequest request, CancellationToken ct)
+    /// <summary>
+    /// Plans <paramref name="request"/>. A data node's fragment is made of its bricks by id; one that is not
+    /// is an error naming why, unless <paramref name="allowRaw"/> (the Lab view's manual planning) and the
+    /// node announces that it accepts raw fragments, when it goes as a job as written.
+    /// </summary>
+    public async Task<DistributionPlan> BuildAsync(PlanRequest request, bool allowRaw, CancellationToken ct)
     {
         var planId = $"{DateTime.UtcNow:HHmmss}-{Guid.NewGuid().ToString("N")[..6]}";
         var pipelineId = Sanitize(request.PipelineId);
@@ -216,7 +234,23 @@ public sealed class PlanBuilder(
             foreach (var (key, branch) in draft.Inbound.Concat(draft.Owned).Concat(draft.Relays))
                 root.Add(key, branch);
             var yaml = JobYaml.Serialize(root);
-            var version = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(yaml)));
+            var form = FragmentForm.Job;
+            IReadOnlyList<FragmentUnit>? composition = null;
+            var node = nodes[draft.Node];
+            if (node.Role != NodeRole.Runner)
+            {
+                if (UnitsOf(draft) is { } pieces && FragmentJob.Compose(pieces, (id, kind) => BranchOf(draft.Node, id, kind)) is { Yaml: { } composed })
+                {
+                    (yaml, form, composition) = (composed, FragmentForm.Bricks, pieces);
+                }
+                else if (!(allowRaw && node.Capabilities.Contains(NodeAnnouncement.RawFragments)))
+                {
+                    var forms = node.Bricks.Select(b => BrickRules.Declared(b.Kind, b.Branch)).ToList();
+                    errors.Add($"{draft.Name}: {BrickRules.FragmentRefusal(yaml, forms, requireBricks: true) ?? "this node runs bricks by id, and this fragment is not made of them."}");
+                    continue;
+                }
+            }
+            var version = FragmentJob.VersionOf(yaml);
 
             if (draft.Edges.Count == 0)
                 errors.Add($"{draft.Name} exchanges nothing with another node. A pipeline node completes only once every one of its edges is wired: cut the pipeline, or spread its branches over several nodes.");
@@ -229,7 +263,7 @@ public sealed class PlanBuilder(
                            (owners.Count > 0 ? $" (hosted by {string.Join(", ", owners)})." : "."));
             }
 
-            fragments.Add(new PlannedFragment(draft.Name, draft.Node, draft.Groups, yaml, version, draft.Edges, draft.Units));
+            fragments.Add(new PlannedFragment(draft.Name, draft.Node, draft.Groups, yaml, version, draft.Edges, draft.Units, form, composition));
         }
 
         var plannedEdges = runEdges.Select(e => new PlannedEdge(
@@ -252,6 +286,33 @@ public sealed class PlanBuilder(
 
         return Result(unitViews, fragments, plannedEdges, flowRejection);
     }
+
+    /// <summary>The pieces of a data node's fragment in the closed vocabulary of ids, or <c>null</c> when a branch is no brick of that node.</summary>
+    private List<FragmentUnit>? UnitsOf(FragmentDraft draft)
+    {
+        var units = new List<FragmentUnit>();
+        foreach (var (key, _) in draft.Inbound) units.Add(new FragmentUnit(key, FragmentUnitKind.Inbound));
+        foreach (var (key, branch) in draft.Owned)
+        {
+            if (bricks.Match(branch) is not { } brick || brick.Node != draft.Node) return null;
+            if (brick.Kind == BrickKind.Source)
+            {
+                var sends = JobYaml.Scalar(branch, "output") == ArrowEndpoint;
+                units.Add(new FragmentUnit(key, sends ? FragmentUnitKind.SourceSend : FragmentUnitKind.Source, brick.Id));
+            }
+            else if (JobYaml.Aliases(branch, "from") is [var feed])
+            {
+                units.Add(new FragmentUnit(key, FragmentUnitKind.Sink, brick.Id, feed));
+            }
+            else return null;
+        }
+        foreach (var (key, branch) in draft.Relays)
+            units.Add(new FragmentUnit(key, FragmentUnitKind.Relay, From: JobYaml.Scalar(branch, "from")));
+        return units;
+    }
+
+    private YamlMappingNode? BranchOf(string node, string id, BrickKind kind) =>
+        bricks.Find($"{node}/{id}") is { } view && view.Kind == kind ? bricks.BranchOf(view) : null;
 
     private async Task<(YamlMappingNode Remaining, Dictionary<string, YamlMappingNode> Heads)?> ApplyCutsAsync(
         string planId, string yaml, IReadOnlyList<CutRequest> cuts, List<string> errors, CancellationToken ct)

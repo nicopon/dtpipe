@@ -105,10 +105,14 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   `RightsStore` reads only a document that says `"version": 2`; a saved plan without its groups is
   read as no plan.
   `[local: the lab's smoke.py rights]`
-- **A data node only reads and writes, and runs only its bricks**: the node enforces it
-  (`src/DtPipe.PipelineNode.Hosting/CLAUDE.md`), and the server reads a branch the same way
-  (`BrickRules`, `DtPipe.Coordinator.Contracts`) so the designer never places a brick its node then
-  declines. `BrickRules.Processors` is the one list of processors, shared with `JobGraph`.
+- **A data node only reads and writes, and runs only its bricks, which it composes by id.**
+  `PlanBuilder` gives a data node's fragment as `FragmentUnit`s and composes the job with
+  `FragmentJob` (`DtPipe.Coordinator.Contracts`), the function the node calls again on its own
+  declarations, so both hash the same bytes; a branch that is none of the node's bricks is a planner
+  error naming why (`BrickRules`), never a job sent to run. Only the Lab view's manual planning
+  (`allowRaw`) sends a job as written, and only to a host that announces `raw-fragments`; the library
+  and `AutoPlacer` never do. A saved plan whose fragments do not say how they reach their node
+  (`FragmentForm`) is read as no plan. `BrickRules.Processors` is the one list of processors, shared with `JobGraph`.
   `DeploymentManager.WaitRegisteredAsync` fails on the first `Failed` main instance of the current
   generation and `DeployAsync` then undeploys the plan's fragments. `[local: the lab's smoke.py
   bricks, sandbox]`

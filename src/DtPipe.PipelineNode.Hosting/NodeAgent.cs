@@ -209,8 +209,8 @@ internal sealed class NodeAgent : BackgroundService
 
         // Before anything registers: a registered instance is admissible, and admission is the
         // coordinator's to grant, not this node's to leave open.
-        if (_policy != FragmentPolicy.AnyFragment
-            && (_gate is null ? BrickRules.FragmentRefusal(deployment.Yaml, _bricks.Forms, requireBricks: true) : _gate(deployment, _bricks.Forms)) is { } reason)
+        var (yaml, reason) = FragmentIntake.JobOf(deployment, _policy, _gate, _bricks.DeclaredBranch, _bricks.Forms);
+        if (yaml is null)
         {
             _logger.LogWarning("Refusing {Fragment}: {Reason}", key, reason);
             var refusal = new FragmentStatus(_options.Name, deployment.Fragment, deployment.Instance, deployment.Generation,
@@ -221,7 +221,7 @@ internal sealed class NodeAgent : BackgroundService
         }
 
         var jobPath = Path.Combine(_fragmentsDir, SafeFileName(key) + ".yaml");
-        await File.WriteAllTextAsync(jobPath, deployment.Yaml, new UTF8Encoding(false), ct);
+        await File.WriteAllTextAsync(jobPath, yaml, new UTF8Encoding(false), ct);
 
         var supervisor = new FragmentSupervisor(
             _options.Name, deployment, jobPath, _options.CoordinatorUrl.TrimEnd('/'), _options.DtPipe, _environment,

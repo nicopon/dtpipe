@@ -20,10 +20,10 @@ public sealed class SavedPlanTests : IDisposable
         });
     }
 
-    private static string Plan(string fragmentGroups, string edgeGroups) => $$"""
+    private static string Plan(string fragmentGroups, string edgeGroups, string form = "\"form\": \"Bricks\",") => $$"""
         { "pipelineSha": "x", "savedAt": "2026-10-07T00:00:00+00:00", "plan": {
           "id": "1", "pipelineId": "p", "cuts": [], "units": [], "errors": [], "warnings": [], "flowRejection": null,
-          "fragments": [ { "name": "p@a", "node": "a", {{fragmentGroups}} "yaml": "", "version": "v", "edges": [], "units": [] } ],
+          "fragments": [ { "name": "p@a", "node": "a", {{fragmentGroups}} {{form}} "yaml": "", "version": "v", "edges": [], "units": [] } ],
           "edges": [ { "producerFragment": "p@a", "producerAlias": "x", "consumerFragment": "p@b", "consumerAlias": "x", {{edgeGroups}} "allowed": true } ] } }
         """;
 
@@ -34,6 +34,14 @@ public sealed class SavedPlanTests : IDisposable
         var document = await library.GetAsync("p", TestContext.Current.CancellationToken);
         Assert.NotNull(document!.Plan);
         Assert.Equal(["crm"], document.Plan.Plan.Fragments[0].Groups);
+    }
+
+    [Fact]
+    public async Task A_Plan_Whose_Fragments_Say_Not_How_They_Reach_Their_Node_Is_Read_As_No_Plan()
+    {
+        var library = LibraryWith(Plan("\"groups\": [\"crm\"],", "\"producerGroups\": [\"crm\"], \"consumerGroups\": [\"runner\"],", form: ""));
+        var document = await library.GetAsync("p", TestContext.Current.CancellationToken);
+        Assert.Null(document!.Plan);
     }
 
     [Fact]

@@ -198,16 +198,18 @@ source wired straight into a sink goes directly, without the runner. `PlanBuilde
 the fragments exactly as for a placement chosen by hand. A saved plan records the hash of the job
 it came from; a job changed since is refused at deployment until it is distributed again.
 
-**A data node only reads and writes, and runs only its bricks.** Whatever the coordinator sends, a
-node host reads each branch of a fragment and refuses the fragment, at once and by name, unless
-every branch only reads or writes (no transformer, no `sql` or `merge`, at most one `from`) and is
-one of its own bricks as its owner declared them, a bare `input: arrow:-`, or a relay of another
-branch onto an edge. Everything between a read and a write belongs on a runner, which hosts no data
-and runs what it is given. The **Lab view** places branches by hand, including reads and writes no
-brick declares, so it needs the sandbox mode: `./lab.sh nodes sandbox` (the variable
-`LAB_NODE_SANDBOX=1` in the host process's environment; the Nodes view shows a `sandbox` chip). A
-sandbox node still only reads and writes, but any reader or writer will do. The switch belongs to the
-host's own environment and is never a field of a message the coordinator sends.
+**A data node only reads and writes, and runs only its bricks.** The coordinator sends a data node
+the ids of its bricks, in order, and the version of the job they make; the node composes the job
+from what its owner declared and refuses the fragment, at once and by name, when a brick changed
+since the plan. A fragment is made of a source brick, a sink brick, the bare `input: arrow:-` end
+of an edge, and relays of a branch onto an edge, and the planner refuses, naming why, any branch of
+a data node that is none of them: everything between a read and a write belongs on a runner, which
+hosts no data and runs what it is given. The **Lab view** places branches by hand, including reads
+and writes no brick declares, so it needs the sandbox mode: `./lab.sh nodes sandbox` (the variable
+`LAB_NODE_SANDBOX=1` in the host process's environment; the Nodes view shows a `raw fragments`
+chip). A sandbox node accepts a job as written, which still may only read and write, through any
+reader or writer. The switch belongs to the host's own environment, and only the Lab view's manual
+planning ever sends a job as written.
 
 In the designer, a wire is moved or removed by its input end: drag it off the input port and drop
 it on another input, or anywhere else to remove it. A selected wire also shows a × to remove it.

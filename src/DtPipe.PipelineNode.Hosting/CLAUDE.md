@@ -7,12 +7,16 @@ runner (`DtPipe.PipelineNode.Runner`, which only calls `RunAnyFragment`). It is 
 (`NodeAgent`), not HTTP middleware: the node opens its connections to the coordinator, it serves
 none. One node per process; a second `AddDtPipeNode` throws.
 
-- **The policy is the host's own.** `FragmentPolicy` comes from configuration or `RunAnyFragment`,
-  never from a field of `FragmentDeployment` or any other message: a brick id or a skip flag sent
-  by the coordinator would turn matching back into trusting a name. `NodeAgent.DeployAsync` reads
-  every branch through `BrickRules.FragmentRefusal` before any `PipelineNode` registers (a
-  registered instance is admissible), except under `AnyFragment`. `[local: the lab's smoke.py
-  bricks, sandbox]`
+- **A data node composes its job from its own declarations, and the policy is the host's own.**
+  The coordinator names bricks (`FragmentDeployment.Units`: ids in a closed vocabulary) and the
+  version of the job they compose to; the node builds the job with `FragmentJob.Compose` from the
+  bricks its owner declared, compares the version, and refuses by name when a brick changed since the
+  plan. It never runs text the coordinator sent: a job as written is refused unless the host
+  registered a `FragmentGate` or runs any fragment (`AnyFragment`). What a brick runs stays the
+  owner's, so naming one by id does not turn matching back into trusting a name. `FragmentPolicy`
+  comes from configuration or `RunAnyFragment`, never from a field of a message. `FragmentIntake`
+  decides it all before any `PipelineNode` registers (a registered instance is admissible).
+  `[local: Hosting.Tests FragmentJobTests, FragmentIntakeTests; the lab's smoke.py bricks, sandbox]`
 - **What a host offers beyond its bricks is its own registration.** `WithFragmentGate` replaces the
   check a data node makes of a fragment (the host's word, like the policy), and `WithRequest`
   answers a named request of the coordinator; both are announced as capabilities, which the

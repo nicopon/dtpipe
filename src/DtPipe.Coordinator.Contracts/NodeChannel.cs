@@ -133,14 +133,44 @@ public enum FragmentEdgeDirection { Inbound, Outbound }
 /// </summary>
 public sealed record FragmentEdge(string Alias, FragmentEdgeDirection Direction);
 
+/// <summary>What a fragment's piece is, in the closed vocabulary a data node composes its job from.</summary>
+public enum FragmentUnitKind
+{
+    /// <summary>The bare inbound end of an edge: <c>input: arrow:-</c>.</summary>
+    Inbound,
+
+    /// <summary>A source brick, kept as its owner declared it.</summary>
+    Source,
+
+    /// <summary>A source brick that also sends its rows onto an edge: <c>output: arrow:-</c> added.</summary>
+    SourceSend,
+
+    /// <summary>A branch that only forwards another branch of the fragment onto an edge: <c>from</c> and <c>output: arrow:-</c>.</summary>
+    Relay,
+
+    /// <summary>A sink brick, fed from another branch of the fragment (<see cref="FragmentUnit.From"/>).</summary>
+    Sink,
+}
+
+/// <summary>
+/// One piece of a data node's fragment, named by its brick id: the node builds the job from what its own
+/// owner declared, so the coordinator never sends the text of a read or a write. <see cref="Brick"/> is the
+/// node's brick id, <see cref="From"/> the key of the piece a relay or a sink reads.
+/// </summary>
+public sealed record FragmentUnit(string Key, FragmentUnitKind Kind, string? Brick = null, string? From = null);
+
 /// <summary>
 /// <see cref="Instance"/> tells two deployments of one fragment name apart on the same node: a
 /// second instance is how admission's refusal of misaligned versions is shown and tested.
 /// <see cref="Generation"/> is echoed in every <see cref="FragmentStatus"/>, and renewed by each
 /// <c>Rearm</c>, so the coordinator never reads a status that predates its last command as current.
+/// A fragment for a data node is its <see cref="Units"/>, in order, with the <see cref="Version"/> of the job
+/// they compose to (<see cref="FragmentJob"/>): the node composes the job itself and refuses it when its
+/// bricks no longer give that version. A runner takes <see cref="Yaml"/>, the job as written.
 /// </summary>
 public sealed record FragmentDeployment(
-    string Fragment, string Yaml, IReadOnlyList<FragmentEdge> Edges, string Generation, string Instance = "main");
+    string Fragment, string Yaml, IReadOnlyList<FragmentEdge> Edges, string Generation, string Instance = "main",
+    IReadOnlyList<FragmentUnit>? Units = null, string? Version = null);
 
 public enum FragmentState { Registering, Registered, Launched, Exited, Failed, Undeployed }
 

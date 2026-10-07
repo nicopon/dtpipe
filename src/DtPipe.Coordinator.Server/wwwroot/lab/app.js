@@ -309,7 +309,7 @@ function renderPlan() {
           <b>${esc(f.name)}</b>
           <span class="actions">
             <button class="small danger ghost" data-kill="${esc(f.name)}" ${deployedHere && running ? "" : "disabled"} title="Kill this fragment's dtpipe child, as a crashed host would">kill</button>
-            <button class="small ghost" data-variant="${esc(f.name)}" ${deployedHere && !running && ready ? "" : "disabled"} title="Deploy a second instance whose job differs by a comment: admission then refuses the run as misaligned">+ misaligned instance</button>
+            <button class="small ghost" data-variant="${esc(f.name)}" ${deployedHere && !running && ready && f.form === "Job" ? "" : "disabled"} title="Deploy a second instance whose job differs by a comment: admission then refuses the run as misaligned">+ misaligned instance</button>
           </span>
         </div>
         <div class="edges">${f.groups.length > 1 ? "groups" : "group"} ${esc(f.groups.join(" + "))} · in: ${inbound.map(esc).join(", ") || "—"} · out: ${outbound.map(esc).join(", ") || "—"} · version <code>${esc(f.version.slice(0, 12))}</code></div>

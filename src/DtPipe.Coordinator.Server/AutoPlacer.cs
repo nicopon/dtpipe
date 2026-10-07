@@ -61,7 +61,7 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
             errors.Add($"The job is not readable: {ex.Message}");
         }
 
-        var plan = await planner.BuildAsync(new PlanRequest(pipelineId, yaml, [], placement), ct);
+        var plan = await planner.BuildAsync(new PlanRequest(pipelineId, yaml, [], placement), allowRaw: false, ct);
         return errors.Count == 0 ? plan : plan with { Errors = [.. errors, .. plan.Errors] };
     }
 }
