@@ -20,8 +20,8 @@ public sealed record DeploymentView(
 /// <see cref="IRunOrchestrator"/>, which admits, launches, wires and judges; this class only asks.
 /// <para>
 /// Several pipelines may be deployed at once, their fragments told apart by name
-/// (<c>&lt;pipeline&gt;@&lt;node&gt;</c>). The orchestrator refuses a second run while one is in
-/// flight, so runs wait in one queue and start one at a time. Each deployment has a gate, held
+/// (<c>&lt;pipeline&gt;@&lt;node&gt;</c>). Runs wait in one queue and start one at a time.
+/// Each deployment has a gate, held
 /// while it deploys, runs and re-arms: a run starts only on registered, unspent instances, and a
 /// deployment is never replaced under a run.
 /// </para>
@@ -316,7 +316,7 @@ public sealed class DeploymentManager
             final = view with { State = result.Outcome.ToString().ToLowerInvariant(), Result = result, Description = result.Describe() };
         }
         catch (Exception ex) when (ex is AdmissionRefusedException or MisalignedInstancesException
-                                       or PinnedVersionUnavailableException or InvalidOperationException)
+                                       or PinnedVersionUnavailableException or FragmentInFlightException)
         {
             final = view with { State = "refused", Refusal = ex.Message };
         }

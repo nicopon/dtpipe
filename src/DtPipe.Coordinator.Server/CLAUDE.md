@@ -86,7 +86,7 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
 - **A `PipelineNode` serves one run.** `DeploymentManager` re-arms every fragment of a pipeline
   after its run, and holds that deployment's gate from before it reports the run finished until
   the fragments are registered again, so no run starts on a spent instance. Runs of every
-  pipeline wait in one queue, since `RunOrchestrator` refuses a second one in flight.
+  pipeline wait in one queue and start one at a time.
   `[local: the lab's smoke.py]`
 - **Ready means the main instance is registered.** A node unregisters from the coordinator before
   it disconnects, so a closed instance is never left for admission to pick.
