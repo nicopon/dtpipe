@@ -283,7 +283,8 @@ def rights_pass():
     def several_groups():
         # A node in several groups sends to another only if every group of the sender may send to every group of
         # the receiver. runner-1 joins `audit`: crm -> runner then needs crm -> audit, and runner -> warehouse needs
-        # audit -> warehouse too. Each is added in turn; the identity and the matrix are restored.
+        # audit -> warehouse too. Each is added in turn, in the plan and then at run time; the identity, the
+        # matrix and the deployment are restored.
         runner = next(i for i in call("/api/rights")["identities"] if i["clientId"] == "runner-1")
 
         def put_identity(groups):
@@ -316,10 +317,23 @@ def rights_pass():
             allowing(("crm", "audit"), ("audit", "warehouse"))
             if not plan()["deployable"]:
                 raise RuntimeError(f"every group allowed, still refused: {plan().get('flowRejection')}")
+            # The hub enforces the same rule on every transfer: deployed and run with both groups allowed it
+            # succeeds; with audit -> warehouse revoked under the deployment, the transfer is refused.
+            call("/api/library/customers-anonymized/distribute", {"save": True, "message": "smoke: several groups"})
+            call("/api/library/customers-anonymized/deploy", {})
+            run = call("/api/runs", {"pipelineId": "customers-anonymized"})
+            allowed = until(lambda: _finished(run["runId"]), RUN_TIMEOUT, "the run with every group allowed")
+            allowing(("crm", "audit"))
+            run = call("/api/runs", {"pipelineId": "customers-anonymized"})
+            refused = until(lambda: _finished(run["runId"]), RUN_TIMEOUT, "the run with audit -> warehouse revoked")
+            if allowed["state"] != "succeeded" or refused["state"] == "succeeded":
+                raise RuntimeError(f"every group allowed -> {allowed['state']}, audit -> warehouse revoked -> {refused['state']}")
         finally:
             call("/api/rights/matrix", {"matrix": matrix}, "PUT")
+            for deployment in call("/api/deployments"):
+                call(f"/api/deployments/{deployment['pipelineId']}", None, "DELETE")
             put_identity(runner["groups"])
-        return "runner-1 in runner+audit: refused until crm -> audit and audit -> warehouse are both allowed"
+        return "runner-1 in runner+audit: refused until crm -> audit and audit -> warehouse are both allowed; the run succeeds, and fails once audit -> warehouse is revoked"
 
     def enrollment():
         # A host whose token the rights do not know waits for an administrator: it proposes a name, which

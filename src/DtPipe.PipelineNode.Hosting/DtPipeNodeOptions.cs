@@ -31,7 +31,7 @@ public sealed class NodeOidcOptions
 /// </summary>
 public sealed class DtPipeNodeOptions
 {
-    /// <summary>The node's name, as the coordinator shows it and the identity it is bound to.</summary>
+    /// <summary>The name the host proposes for its node, and files its own logs under. The coordinator names the node from the rights, and shows that name.</summary>
     public string Name { get; set; } = "";
     public string Description { get; set; } = "";
 

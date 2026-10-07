@@ -49,7 +49,9 @@ public sealed record DatasetInfo(string Variable, string Engine, string Descript
 public enum NodeRole { Data, Runner }
 
 /// <summary>
-/// <see cref="Sandbox"/> only reports how the host was configured: a data node runs a fragment only
+/// What a node host says of itself. <see cref="Name"/> and <see cref="Description"/> are proposals: the
+/// coordinator names the node from its rights, and a host its rights do not know only waits for
+/// approval. <see cref="Sandbox"/> only reports how the host was configured: a data node runs a fragment only
 /// if each branch is one of its bricks, unless its own configuration accepts any read or write. The
 /// coordinator shows it and never sets it.
 /// </summary>

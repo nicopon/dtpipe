@@ -19,7 +19,7 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   `EnrollmentQueue` (bounded, expired, never evicting a waiting subject), and what it proposes is
   untrusted text, cut here and escaped by the page. A disabled identity is refused. A node whose
   identity is gone or renamed leaves the inventory with its host.
-  `[CI: EnrollmentQueueTests, NodeChannelHubTests]` `[local: the lab's smoke.py rights]`
+  `[local: DtPipe.Coordinator.Server.Tests, the lab's smoke.py rights]`
 - **A person's rights are the server's configuration, never the token's.** People sign in through
   the provider (`Coordinator:Ui:ClientId`, a confidential authorization-code client, PKCE, the code
   in the query so the Lax correlation cookies ride the redirect) into the `dtpipe-coordinator`
