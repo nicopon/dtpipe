@@ -115,7 +115,7 @@ function render(result) {
   const errors = result.errors || (result.error ? [result.error] : []);
   $("results").replaceChildren(...[
     el("p", { class: result.success ? "good" : "bad" },
-      result.success ? `Sampled ${result.rowsRequested} source rows. Nothing was written.` : `The sample failed${result.stage ? ` (${result.stage})` : ""}. Nothing was written.`),
+      result.success ? `Sampled ${result.rowsRequested} source rows. The target was not written.` : `The sample failed${result.stage ? ` (${result.stage})` : ""}. The target was not written.`),
     list("Errors", errors, "bad"),
     ...(result.branches || []).map(branchCard),
   ].filter(Boolean));
