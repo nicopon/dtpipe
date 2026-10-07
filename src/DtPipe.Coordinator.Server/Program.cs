@@ -217,7 +217,7 @@ api.MapGet("/library/{id}/at/{commit}", async (string id, string commit, Pipelin
 });
 
 // Distribution: the library's job placed automatically, previewed or saved as the pipeline's plan.
-designer.MapPost("/library/{id}/distribute", async (string id, DistributeRequest? request, PipelineLibrary library, AutoPlacer placer, BrickCatalog bricks, EventBus bus, CancellationToken ct) =>
+designer.MapPost("/library/{id}/distribute", async (string id, DistributeRequest? request, PipelineLibrary library, AutoPlacer placer, EventBus bus, CancellationToken ct) =>
 {
     var doc = await library.GetAsync(id, ct);
     if (doc is null) return Results.NotFound(new { error = $"'{id}' is not in the library." });
@@ -229,15 +229,16 @@ designer.MapPost("/library/{id}/distribute", async (string id, DistributeRequest
         commit = await library.SavePlanAsync(id, plan, request.Message ?? "", ct);
         bus.Publish("library", new { id, commit });
     }
-    // Which brick each branch is, for the page to name it.
-    var brickOf = new Dictionary<string, string>(StringComparer.Ordinal);
-    try
-    {
-        foreach (var (alias, branch) in JobYaml.Branches(JobYaml.Parse(doc.Yaml)))
-            if (bricks.Match(branch) is { } brick) brickOf[alias] = brick.Key;
-    }
-    catch (Exception) { }
-    return Results.Ok(new { plan, commit, bricks = brickOf });
+    return Results.Ok(new { plan, commit, bricks = placer.BrickAliases(doc.Yaml) });
+});
+// The same placement for a pipeline still being designed: its cards composed, then placed, nothing saved.
+designer.MapPost("/design/place", async (PlaceRequest request, DesignService design, AutoPlacer placer, CancellationToken ct) =>
+{
+    if (!PipelineLibrary.IsValidId(request.Id)) return Results.BadRequest(new { error = $"'{request.Id}' is not a pipeline id: lowercase letters, digits and '-'." });
+    var composed = design.Compose(request.Model);
+    if (!composed.Valid) return Results.Ok(new { errors = composed.Errors, plan = (DistributionPlan?)null, bricks = new Dictionary<string, string>() });
+    var plan = await placer.PlanAsync(request.Id, composed.Yaml, ct);
+    return Results.Ok(new { errors = Array.Empty<string>(), plan, bricks = placer.BrickAliases(composed.Yaml) });
 });
 designer.MapPost("/library/{id}/deploy", async (string id, PipelineLibrary library, RightsStore rights, BrickCatalog bricks, DeploymentManager deployments, CancellationToken ct) =>
 {
@@ -369,6 +370,7 @@ internal sealed record RunRequest(Dictionary<string, string>? Pins, string? Pipe
 internal sealed record CancelRequest(string? RunId);
 internal sealed record DecomposeRequest(string Yaml, System.Text.Json.Nodes.JsonObject? Layout = null);
 internal sealed record SaveRequest(string Yaml, System.Text.Json.Nodes.JsonObject? Layout, string? Message);
+internal sealed record PlaceRequest(string Id, DesignModel Model);
 internal sealed record DistributeRequest(bool Save = false, string? Message = null);
 internal sealed record MatrixRequest(Dictionary<string, List<string>> Matrix);
 internal sealed record PolicyRequest(List<string>? Groups);

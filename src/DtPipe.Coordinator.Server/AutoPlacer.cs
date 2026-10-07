@@ -14,6 +14,19 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
     public static string NotABrick(string alias, IEnumerable<string> nodes) =>
         $"'{alias}' reads or writes {string.Join(", ", nodes)} without being one of its bricks. Rebuild it from the node's bricks.";
 
+    /// <summary>Which brick each branch of <paramref name="yaml"/> is, by alias: what a page needs to name a placed unit. Empty for a job that is not readable.</summary>
+    public IReadOnlyDictionary<string, string> BrickAliases(string yaml)
+    {
+        var brickOf = new Dictionary<string, string>(StringComparer.Ordinal);
+        try
+        {
+            foreach (var (alias, branch) in JobYaml.Branches(JobYaml.Parse(yaml)))
+                if (bricks.Match(branch) is { } brick) brickOf[alias] = brick.Key;
+        }
+        catch (Exception) { }
+        return brickOf;
+    }
+
     public async Task<DistributionPlan> PlanAsync(string pipelineId, string yaml, CancellationToken ct)
     {
         var errors = new List<string>();

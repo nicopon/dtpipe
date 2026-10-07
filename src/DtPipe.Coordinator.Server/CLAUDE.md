@@ -73,6 +73,10 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   `[local: the lab's smoke.py lab]`
 - **The server writes the job, the page never does.** `DesignService.Compose` is the only writer
   of a designer pipeline's YAML; the page sends cards and reads back the text. `[unchecked]`
+- **A designer's placement is the library's placement.** `/api/design/place` composes the cards
+  and hands the job to `AutoPlacer` like `/api/library/{id}/distribute`, saves nothing and accepts
+  an id not yet in the library. It cuts nothing, so it asks no node and starts no `dtpipe`; keep
+  it so. `[local: the lab's smoke.py library]`
 - **A `PipelineNode` serves one run.** `DeploymentManager` re-arms every fragment of a pipeline
   after its run, and holds that deployment's gate from before it reports the run finished until
   the fragments are registered again, so no run starts on a spent instance. Runs of every

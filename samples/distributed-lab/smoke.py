@@ -167,6 +167,20 @@ def library_pass(ctx):
             doc = call(f"/api/library/{pid}")
             check = ctx.witness("library-" + pid, doc["yaml"])
             plan = call(f"/api/library/{pid}/distribute", {"save": True, "message": "smoke: distribute"})["plan"]
+            # What the designer shows before saving is what the library distributes: the same fragments, nodes and edges.
+            # Versions differ for a hand-written seed (compose writes the job in its own key order), so they are
+            # compared on the designer's own text: composing what it composed gives the same fragments again.
+            model = call("/api/design/decompose", {"yaml": doc["yaml"]})["model"]
+            placed = call("/api/design/place", {"id": pid, "model": model})
+            if placed["errors"] or not placed["plan"]:
+                raise AssertionError(f"the designer's placement of {pid} failed: {placed['errors']}")
+            shape = lambda p, versions=False: sorted((f["name"], f["node"], sorted((e["direction"], e["alias"]) for e in f["edges"]),
+                                                      f["version"] if versions else None) for f in p["fragments"])
+            if shape(placed["plan"]) != shape(plan):
+                raise AssertionError(f"the designer's placement of {pid} differs from the library's: {shape(placed['plan'])} != {shape(plan)}")
+            again = call("/api/design/place", {"id": pid, "model": call("/api/design/decompose", {"yaml": call("/api/design/compose", model)["yaml"]})["model"]})
+            if shape(again["plan"], True) != shape(placed["plan"], True):
+                raise AssertionError(f"the designer's job for {pid} is not stable under compose: its fragment versions change")
             call(f"/api/library/{pid}/deploy", {})
             queued.append((pid, plan, check))
         except Exception as e:
