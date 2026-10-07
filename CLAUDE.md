@@ -128,7 +128,7 @@ example to make it checked]`
 
 | Project | Role |
 |---|---|
-| `src/DtPipe` | CLI entry, DI wiring, `JobService`, `ExportService`, MCP server, AI agent |
+| `src/DtPipe` | CLI entry, DI wiring, `JobService`, `ExportService`, MCP server, AI agent, studio |
 | `src/DtPipe.Core` | Abstractions, DAG engine, pipeline models, helpers |
 | `src/DtPipe.Adapters` | Readers and writers (`Adapters/<Name>/`) |
 | `src/DtPipe.Adapters.Shared` | Infrastructure shared by adapters and processors (DuckDB read path) |

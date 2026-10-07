@@ -1,4 +1,4 @@
-# DtPipe (CLI) — parsing, options, sample mode, checkpoints, MCP and agent
+# DtPipe (CLI) — parsing, options, sample mode, checkpoints, MCP, agent and studio
 
 Mechanics for editing the CLI project. The rules themselves are in the root `CLAUDE.md`.
 
@@ -150,3 +150,23 @@ only the shapes it recognises; the file header says so rather than claiming the 
 
 To diagnose a failing session: read the trace, verify the claim in the source, run the fix before
 publishing it. Look first at what dtpipe tells the model about itself.
+
+## Studio
+
+`dtpipe studio [folder]` (`StudioCommand`, `Cli/Studio/`) serves a local page over a folder's YAML
+jobs and samples them through `DtPipeMcpTools.SampleAsync`, the `dry-run` tool's own path: never a
+second sample path. `SampleReportCollector` belongs to the process, so `StudioServer` runs one sample
+at a time (409 otherwise). Kestrel is referenced for this server alone.
+
+The page runs dtpipe with the person's access, so the server is guarded like a shell:
+- **No cookie.** The token rides in the URL fragment, the page keeps it in `sessionStorage` and sends
+  it in `X-Dtpipe-Studio` on every `/api` call; cookies are shared by every port of a host.
+- **Only its own address.** `Host` must be `127.0.0.1` or `localhost` at its port (DNS rebinding);
+  another `Origin`, or `Sec-Fetch-Site` other than same-origin, is refused; no CORS header, ever.
+- **No inline script or style**, and every value from a job or a source set as text in the page,
+  never as HTML: a sampled value is untrusted.
+- **The folder only.** `StudioFolder` reads `.yaml`/`.yml` files under it: no segment starting with
+  a dot, no symbolic link below it. The empty builder reads no `appsettings.json` from the folder.
+- Quit from the page exits 0, Ctrl+C 130.
+
+`[CI: StudioServerTests, StudioSampleTests]` `[unchecked: the page itself - no test drives a browser]`

@@ -22,6 +22,7 @@
 - [Incremental Loading](#incremental-loading)
 - [Sample Mode and Materialisation](#sample-mode-and-materialisation)
 - [Shell Completion](#shell-completion)
+- [Studio](#studio-dtpipe-studio)
 - [Model Context Protocol (MCP) Server](#model-context-protocol-mcp-server)
 - [AI Agent Subcommand](#ai-agent-subcommand-dtpipe-agent)
 - [Agent Guardrails](#agent-guardrails-isqlsafetypolicy--iapprovalgate)
@@ -1210,6 +1211,33 @@ dtpipe completion --install   # installs for bash, zsh, or PowerShell
 
 Restart your terminal (or `source ~/.zshrc`) to activate. Completion suggests providers
 (`pg:`, `csv:`…) strategies (`Append`, `Upsert`…), and flag names based on cursor position.
+
+---
+
+## Studio (`dtpipe studio`)
+
+`dtpipe studio [folder]` opens a local page over the YAML jobs of a folder (default: the current
+directory). Open a job, edit it in the page, and sample it: the job runs through the real engine,
+as `--dry-run` does, over the source rows you ask for (at most 1000), with the writer neutralised.
+Each stage shows the rows it passed, with its columns and types. Nothing is written: the page
+saves no file, and a source that could be modified is refused, as in sample mode.
+
+```bash
+dtpipe studio ./jobs              # prints the address to open, then serves until stopped
+dtpipe studio ./jobs --port 8765  # a fixed port instead of any free one
+```
+
+| Option | Description |
+|---|---|
+| `--port` | Port on 127.0.0.1. Default: any free port |
+
+The page runs dtpipe with your own access. It listens on 127.0.0.1 only and answers only the
+address it printed: the address carries a token for this session, which every request must
+present, and a request from another site is refused. It reads only the `.yaml` and `.yml` files
+under the folder, never a hidden one or one reached through a link. A job's relative paths
+resolve from the folder, as `dtpipe --job` run there would.
+
+Quit from the page ends the session (exit 0); Ctrl+C ends it with exit 130.
 
 ---
 

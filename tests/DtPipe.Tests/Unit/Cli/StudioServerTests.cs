@@ -199,6 +199,42 @@ public sealed class StudioServerTests : IAsyncLifetime
         Assert.Equal(StudioServer.MaxRows, asked);
     }
 
+    [Theory]
+    [InlineData("/", "text/html")]
+    [InlineData("/studio.js", "text/javascript")]
+    [InlineData("/studio.css", "text/css")]
+    public async Task The_page_is_served_from_the_binary_without_a_token(string path, string type)
+    {
+        using var response = await _http.SendAsync(Request(HttpMethod.Get, path, token: null));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.StartsWith(type, response.Content.Headers.ContentType!.ToString());
+    }
+
+    /// <summary>The policy forbids inline script and style: a page that used either would break, or tempt a looser policy.</summary>
+    [Fact]
+    public async Task The_page_holds_no_inline_script_nor_style()
+    {
+        var html = await _http.GetStringAsync($"http://127.0.0.1:{_server.Port}/");
+
+        Assert.Matches("<script[^>]* src=\"/studio.js\"", html);
+        Assert.DoesNotMatch("<script(?![^>]* src=)", html);
+        Assert.DoesNotContain("<style", html);
+        Assert.DoesNotContain("style=", html);
+        Assert.DoesNotMatch(" on[a-z]+=", html);
+    }
+
+    [Theory]
+    [InlineData("GET", "/index.html")]
+    [InlineData("POST", "/")]
+    [InlineData("GET", "/api/nothing")]
+    public async Task Anything_else_is_not_found(string method, string path)
+    {
+        var (status, _) = await SendAsync(Request(new HttpMethod(method), path));
+
+        Assert.Equal(HttpStatusCode.NotFound, status);
+    }
+
     [Fact]
     public async Task Quitting_from_the_page_ends_the_session()
     {
