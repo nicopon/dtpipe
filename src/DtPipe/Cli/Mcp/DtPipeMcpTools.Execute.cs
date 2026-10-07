@@ -271,7 +271,7 @@ public partial class DtPipeMcpTools
                     // pipeline would actually do — which is the loop this cycle exists to close.
                 if (!consentedApply)
                         {
-                       var sample = await RunSampleAsync(parsed, rows: 10, ct,
+                       var sample = await RunSampleAsync(parsed, rows: 10, shownRows: 10, ct,
                            nextStep: "NOTHING WAS WRITTEN. This ran the pipeline over a sample with the writer "
                                    + "neutralised, so you can see what it would do. The target file or table has "
                                    + "NOT been created or modified. Call execute-yaml-job again with apply=true to "
