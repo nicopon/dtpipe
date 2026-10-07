@@ -2,7 +2,9 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using DtPipe.Core.Security;
+using DtPipe.Jobs;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -14,6 +16,16 @@ namespace DtPipe.Cli.Studio;
 
 /// <summary>Samples a job: its YAML, the source rows to read, and the call's cancellation. Returns the sample as JSON.</summary>
 public delegate Task<string> StudioSampler(string yaml, int rows, CancellationToken ct);
+
+/// <summary>A reader or a writer the designer's palette offers, by its component name.</summary>
+public sealed record StudioComponent(string Name, string Category);
+
+/// <summary>
+/// What the studio's server works with: the sample path, the designer's model (the coordinator's
+/// own, with dtpipe's components for endpoints) and the components the palette lists.
+/// </summary>
+public sealed record StudioTools(
+    StudioSampler Sample, DesignService Design, IReadOnlyList<StudioComponent> Readers, IReadOnlyList<StudioComponent> Writers);
 
 /// <summary>
 /// The local server behind <c>dtpipe studio</c>. It runs dtpipe with the person's own access, so it
@@ -44,21 +56,25 @@ public sealed class StudioServer : IAsyncDisposable
     {
         ["/"] = ("studio/index.html", "text/html; charset=utf-8"),
         ["/studio.js"] = ("studio/studio.js", "text/javascript; charset=utf-8"),
+        ["/dom.js"] = ("studio/dom.js", "text/javascript; charset=utf-8"),
+        ["/designer.js"] = ("studio/designer.js", "text/javascript; charset=utf-8"),
         ["/studio.css"] = ("studio/studio.css", "text/css; charset=utf-8"),
     };
 
+    private static readonly JsonSerializerOptions Json = JsonSerializerOptions.Web;
+
     private readonly WebApplication _app;
     private readonly StudioFolder _folder;
-    private readonly StudioSampler _sample;
+    private readonly StudioTools _tools;
     private readonly byte[] _token;
     private readonly SemaphoreSlim _sampling = new(1, 1);
     private readonly TaskCompletionSource _quit = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    private StudioServer(WebApplication app, StudioFolder folder, StudioSampler sample, string token)
+    private StudioServer(WebApplication app, StudioFolder folder, StudioTools tools, string token)
     {
         _app = app;
         _folder = folder;
-        _sample = sample;
+        _tools = tools;
         Token = token;
         _token = Encoding.UTF8.GetBytes(token);
     }
@@ -73,7 +89,7 @@ public sealed class StudioServer : IAsyncDisposable
     public Task Quit => _quit.Task;
 
     /// <param name="port">0 lets the system choose a free port.</param>
-    public static async Task<StudioServer> StartAsync(StudioFolder folder, int port, StudioSampler sample, CancellationToken ct)
+    public static async Task<StudioServer> StartAsync(StudioFolder folder, int port, StudioTools tools, CancellationToken ct)
     {
         // The empty builder reads no configuration file, no environment and logs nothing: the folder
         // is the person's, and an appsettings.json in it must not configure this server.
@@ -85,7 +101,7 @@ public sealed class StudioServer : IAsyncDisposable
             o.Limits.MaxRequestBodySize = 2_000_000;
         });
         var app = builder.Build();
-        var server = new StudioServer(app, folder, sample, Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+        var server = new StudioServer(app, folder, tools, Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
             .TrimEnd('=').Replace('+', '-').Replace('/', '_'));
         app.Run(server.HandleAsync);
         await app.StartAsync(ct);
@@ -123,6 +139,16 @@ public sealed class StudioServer : IAsyncDisposable
                 case ("GET", "/api/job"):
                     var relative = request.Query["path"].ToString();
                     await JsonAsync(context, new { path = relative, yaml = _folder.Read(relative) });
+                    break;
+                case ("GET", "/api/components"):
+                    await JsonAsync(context, new { readers = _tools.Readers, writers = _tools.Writers });
+                    break;
+                case ("POST", "/api/design/compose"):
+                    await JsonAsync(context, _tools.Design.Compose(await BodyAsync<DesignModel>(context)));
+                    break;
+                case ("POST", "/api/design/decompose"):
+                    var decompose = await BodyAsync<DecomposeRequest>(context);
+                    await JsonAsync(context, _tools.Design.Decompose(decompose.Yaml ?? "", decompose.Layout));
                     break;
                 case ("POST", "/api/sample"):
                     await SampleAsync(context);
@@ -186,7 +212,7 @@ public sealed class StudioServer : IAsyncDisposable
         {
             // Nobody watches the terminal for a prompt: a run that would ask one fails instead.
             using var _ = NonInteractiveGuard.Suppress();
-            var json = await _sample(yaml, Math.Clamp(rows, 1, MaxRows), context.RequestAborted);
+            var json = await _tools.Sample(yaml, Math.Clamp(rows, 1, MaxRows), context.RequestAborted);
             context.Response.ContentType = "application/json; charset=utf-8";
             await context.Response.WriteAsync(json, context.RequestAborted);
         }
@@ -209,8 +235,25 @@ public sealed class StudioServer : IAsyncDisposable
     private static Task JsonAsync(HttpContext context, object value)
     {
         context.Response.ContentType = "application/json; charset=utf-8";
-        return context.Response.WriteAsync(JsonSerializer.Serialize(value), context.RequestAborted);
+        return context.Response.WriteAsync(JsonSerializer.Serialize(value, Json), context.RequestAborted);
     }
+
+    private static async Task<T> BodyAsync<T>(HttpContext context) where T : class
+    {
+        if (!(context.Request.ContentType ?? "").StartsWith("application/json", StringComparison.OrdinalIgnoreCase))
+            throw new StudioRefusal(415, "The body is JSON.");
+        try
+        {
+            return await JsonSerializer.DeserializeAsync<T>(context.Request.Body, Json, context.RequestAborted)
+                ?? throw new StudioRefusal(400, "The body is empty.");
+        }
+        catch (JsonException ex)
+        {
+            throw new StudioRefusal(400, $"The body is not what {context.Request.Path} reads: {ex.Message}");
+        }
+    }
+
+    private sealed record DecomposeRequest(string? Yaml, JsonObject? Layout);
 
     public async ValueTask DisposeAsync()
     {

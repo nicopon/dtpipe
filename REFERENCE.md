@@ -1217,12 +1217,18 @@ Restart your terminal (or `source ~/.zshrc`) to activate. Completion suggests pr
 ## Studio (`dtpipe studio`)
 
 `dtpipe studio [folder]` opens a local page over the YAML jobs of a folder (default: the current
-directory). Open a job, edit it in the page, and sample it: the job runs through the real engine,
-as `--dry-run` does, over the source rows you ask for (at most 1000), with the writer neutralised:
-the target is never written. Each stage shows the rows it passed, with its columns and types. The
-page saves no file; a job that asks for a checkpoint still stores it in the folder's session store,
-as `--dry-run` does. The sample mode's safety gate applies, and each branch reports which source
-protection it had (see [Sample Mode](#sample-mode-and-materialisation)).
+directory). A job opens as cards: one per source, step and sink, wired as the job reads them. A
+branch's own reader and writer become a source card and a sink card, each holding its endpoint
+and the keys of its side (the same split as
+[`dtpipe split`](#offering-the-points-a-job-could-be-cut-at)); when the
+cards still form one chain, the job composes back into that one branch. A branch no card can
+describe stays one card, as written. Edit the cards, or the job as YAML, and sample it: the job
+runs through the real engine, as `--dry-run` does, over the source rows you ask for (at most
+1000), with the writer neutralised: the target is never written. Each stage shows the rows it
+passed, with its columns and types. The page saves no file; a job that asks for a checkpoint still
+stores it in the folder's session store, as `--dry-run` does. The sample mode's safety gate
+applies, and each branch reports which source protection it had (see
+[Sample Mode](#sample-mode-and-materialisation)).
 
 ```bash
 dtpipe studio ./jobs              # prints the address to open, then serves until stopped

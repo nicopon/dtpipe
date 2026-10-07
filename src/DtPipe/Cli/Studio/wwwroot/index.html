@@ -10,25 +10,19 @@
   <header>
     <b>dtpipe studio</b>
     <span id="folder" class="muted"></span>
+    <span id="job-name" class="mono"></span>
     <span id="status" class="pill"></span>
     <button id="quit" class="ghost">Quit</button>
   </header>
   <main>
-    <aside>
+    <aside class="jobs-pane">
       <h2>Jobs</h2>
       <ul id="jobs"></ul>
     </aside>
-    <section class="work">
-      <div class="bar">
-        <span id="job-name" class="muted">No job open</span>
-        <label>source rows <input id="rows" type="number" min="1" max="1000" value="20"></label>
-        <button id="sample" class="primary" title="Ctrl+Enter">Sample</button>
-      </div>
-      <textarea id="yaml" spellcheck="false" placeholder="Open a job on the left, or write one here."></textarea>
-      <div id="results">
-        <p class="muted">A sample runs the job through the real engine over the first source rows, with the
-          writer neutralised: the target is never written. Each stage shows the rows it passed.</p>
-      </div>
+    <section id="designer" class="designer">
+      <p class="muted intro">Open a job on the left. It opens as cards: its sources, its steps and its sinks. A sample
+        runs it through the real engine over the first source rows, with the writer neutralised: the target is never
+        written.</p>
     </section>
   </main>
   <script type="module" src="/studio.js"></script>

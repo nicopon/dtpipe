@@ -4,6 +4,8 @@ using System.Text;
 using System.Text.Json;
 using DtPipe.Cli.Mcp;
 using DtPipe.Cli.Studio;
+using DtPipe.Core.Abstractions;
+using DtPipe.Jobs;
 using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console;
 using Xunit;
@@ -29,7 +31,9 @@ public sealed class StudioServerTests : IAsyncLifetime
         File.WriteAllText(Path.Combine(_dir, "sub", "b.yml"), "b: 1\n");
         File.WriteAllText(Path.Combine(_dir, ".hidden", "c.yaml"), "c: 1\n");
         File.WriteAllText(Path.Combine(_dir, "notes.txt"), "not a job\n");
-        _server = await StudioServer.StartAsync(new StudioFolder(_dir), 0, (y, r, ct) => _sampler(y, r, ct), CancellationToken.None);
+        _server = await StudioServer.StartAsync(new StudioFolder(_dir), 0, new StudioTools(
+            (y, r, ct) => _sampler(y, r, ct), new DesignService(IBrickLookup.None),
+            [new StudioComponent("csv", "Files")], [new StudioComponent("duck", "Databases")]), CancellationToken.None);
     }
 
     public async ValueTask DisposeAsync()
@@ -203,6 +207,8 @@ public sealed class StudioServerTests : IAsyncLifetime
     [InlineData("/", "text/html")]
     [InlineData("/studio.js", "text/javascript")]
     [InlineData("/studio.css", "text/css")]
+    [InlineData("/dom.js", "text/javascript")]
+    [InlineData("/designer.js", "text/javascript")]
     public async Task The_page_is_served_from_the_binary_without_a_token(string path, string type)
     {
         using var response = await _http.SendAsync(Request(HttpMethod.Get, path, token: null));
@@ -233,6 +239,73 @@ public sealed class StudioServerTests : IAsyncLifetime
         var (status, _) = await SendAsync(Request(new HttpMethod(method), path));
 
         Assert.Equal(HttpStatusCode.NotFound, status);
+    }
+
+    /// <summary>
+    /// Every value the page shows comes from a job or a source: set as HTML, a sampled value would
+    /// run as script with the person's access. The page builds nodes and sets text, nothing else.
+    /// </summary>
+    [Fact]
+    public void No_script_of_the_page_writes_html_or_an_inline_style()
+    {
+        var assembly = typeof(StudioServer).Assembly;
+        var scripts = assembly.GetManifestResourceNames().Where(n => n.StartsWith("studio/") && n.EndsWith(".js")).ToList();
+        Assert.Contains("studio/designer.js", scripts);
+        foreach (var name in scripts)
+        {
+            using var reader = new StreamReader(assembly.GetManifestResourceStream(name)!);
+            var code = reader.ReadToEnd();
+            foreach (var sink in new[] { "innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "style=", "\"style\"", "eval(", "new Function" })
+                Assert.False(code.Contains(sink, StringComparison.Ordinal), $"{name} uses {sink}");
+        }
+    }
+
+    [Fact]
+    public async Task The_palette_lists_the_components()
+    {
+        var (status, body) = await SendAsync(Request(HttpMethod.Get, "/api/components"));
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal("csv", body.GetProperty("readers")[0].GetProperty("name").GetString());
+        Assert.Equal("duck", body.GetProperty("writers")[0].GetProperty("name").GetString());
+    }
+
+    [Fact]
+    public async Task Cards_are_composed_by_the_server_and_a_job_taken_apart_by_it()
+    {
+        var cards = new
+        {
+            title = "Copy",
+            steps = new object[]
+            {
+                new { alias = "a", kind = "branch", yaml = "input: csv:a.csv\n" },
+                new { alias = "b", kind = "branch", from = new[] { "a" }, yaml = "from: a\noutput: csv:b.csv\n" },
+            },
+        };
+
+        var (status, composed) = await SendAsync(Request(HttpMethod.Post, "/api/design/compose", body: cards));
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal(0, composed.GetProperty("errors").GetArrayLength());
+        var yaml = composed.GetProperty("yaml").GetString()!;
+        Assert.StartsWith("# Copy\na:\n", yaml);
+
+        var (again, decomposed) = await SendAsync(Request(HttpMethod.Post, "/api/design/decompose", body: new { yaml }));
+
+        Assert.Equal(HttpStatusCode.OK, again);
+        Assert.Equal(["a", "b"], decomposed.GetProperty("model").GetProperty("steps").EnumerateArray().Select(s => s.GetProperty("alias").GetString()));
+    }
+
+    [Fact]
+    public async Task A_body_the_route_cannot_read_is_refused()
+    {
+        var request = Request(HttpMethod.Post, "/api/design/compose");
+        request.Content = new StringContent("{\"steps\": 3}", Encoding.UTF8, "application/json");
+
+        var (status, body) = await SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, status);
+        Assert.Contains("/api/design/compose", body.GetProperty("error").GetString());
     }
 
     [Fact]
@@ -295,5 +368,31 @@ public sealed class StudioSampleTests
         Assert.Single(stages);
         Assert.Equal(3, stages[0].GetProperty("rowsSeen").GetInt64());
         Assert.Equal(3, Branch(second).GetProperty("rowsDelivered").GetInt64());
+    }
+
+    [Fact]
+    public async Task A_hand_written_job_opens_as_cards_of_dtpipe_s_components_and_samples_as_written()
+    {
+        var services = new ServiceCollection();
+        Program.ConfigureServices(services);
+        services.AddSingleton<IAnsiConsole>(AnsiConsole.Create(new AnsiConsoleSettings
+        {
+            Out = new AnsiConsoleOutput(new StringWriter()), Ansi = AnsiSupport.No, Interactive = InteractionSupport.No,
+        }));
+        var provider = services.BuildServiceProvider();
+        var design = new DesignService(IBrickLookup.None, new ComponentEndpointRules(
+            provider.GetServices<IStreamReaderFactory>(), provider.GetServices<IDataWriterFactory>()));
+        const string job = "main:\n  input: \"generate:4\"\n  limit: 3\n  transformers:\n  - type: compute\n    mappings:\n"
+            + "      doubled: \"row.GenerateIndex * 2\"\n  output: \"null:\"\n";
+
+        var cards = design.Decompose(job);
+
+        Assert.Empty(cards.Errors);
+        Assert.Equal(["main_source:source", "main:transform", "main_sink:sink"], cards.Model.Steps.Select(c => $"{c.Alias}:{c.Kind}"));
+        Assert.Single(JobYaml.Branches(JobYaml.Parse(cards.Yaml)));
+        var json = await provider.GetRequiredService<DtPipeMcpTools>().SampleAsync(cards.Yaml, rows: 10, shownRows: 10, CancellationToken.None);
+        Assert.True(JsonDocument.Parse(json).RootElement.GetProperty("success").GetBoolean(), json);
+        Assert.Contains("doubled", json);
+        Assert.Equal(3, Branch(json).GetProperty("rowsDelivered").GetInt64());
     }
 }

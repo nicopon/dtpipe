@@ -158,15 +158,23 @@ jobs and samples them through `DtPipeMcpTools.SampleAsync`, the `dry-run` tool's
 second sample path. `SampleReportCollector` belongs to the process, so `StudioServer` runs one sample
 at a time (409 otherwise). Kestrel is referenced for this server alone.
 
+The page is the designer: `DesignService` (`DtPipe.Jobs`, the coordinator's own model) composes the
+cards and takes a job apart, never the page. `ComponentEndpointRules` gives it dtpipe's readers and
+writers through `JobCutter.OwnersOf`, so a source or sink card holds the blocks a cut would put on
+that side, and `BranchSides` names the keys of each side for both.
+
 The page runs dtpipe with the person's access, so the server is guarded like a shell:
 - **No cookie.** The token rides in the URL fragment, the page keeps it in `sessionStorage` and sends
   it in `X-Dtpipe-Studio` on every `/api` call; cookies are shared by every port of a host.
 - **Only its own address.** `Host` must be `127.0.0.1` or `localhost` at its port (DNS rebinding);
   another `Origin`, or `Sec-Fetch-Site` other than same-origin, is refused; no CORS header, ever.
 - **No inline script or style**, and every value from a job or a source set as text in the page,
-  never as HTML: a sampled value is untrusted.
+  never as HTML: a sampled value is untrusted. The page builds nodes (`el`, `fill`, `svg` in
+  `dom.js`) and positions them through the CSSOM; `replaceChildren` takes nodes, never a list.
 - **The folder only.** `StudioFolder` reads `.yaml`/`.yml` files under it: no segment starting with
   a dot, no symbolic link below it. The empty builder reads no `appsettings.json` from the folder.
 - Quit from the page exits 0, Ctrl+C 130.
 
-`[CI: StudioServerTests, StudioSampleTests]` `[unchecked: the page itself - no test drives a browser]`
+`[CI: StudioServerTests (no script writes HTML or an inline style), StudioSampleTests,
+DesignServiceTests, LocalEndpointCardTests]` `[unchecked: the page's behaviour - no test drives a
+browser]`

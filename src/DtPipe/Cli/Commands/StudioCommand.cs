@@ -1,6 +1,8 @@
 using System.CommandLine;
 using DtPipe.Cli.Mcp;
 using DtPipe.Cli.Studio;
+using DtPipe.Core.Abstractions;
+using DtPipe.Jobs;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace DtPipe.Cli.Commands;
@@ -41,12 +43,18 @@ public sealed class StudioCommand : Command
             // from the folder, as `dtpipe --job` run there would.
             Directory.SetCurrentDirectory(folder.Root);
 
-            var tools = serviceProvider.GetRequiredService<DtPipeMcpTools>();
+            var mcp = serviceProvider.GetRequiredService<DtPipeMcpTools>();
+            var readers = serviceProvider.GetServices<IStreamReaderFactory>().ToList();
+            var writers = serviceProvider.GetServices<IDataWriterFactory>().ToList();
+            var tools = new StudioTools(
+                (yaml, rows, token) => mcp.SampleAsync(yaml, rows, shownRows: rows, token),
+                new DesignService(IBrickLookup.None, new ComponentEndpointRules(readers, writers)),
+                readers.Select(r => new StudioComponent(r.ComponentName, r.Category)).OrderBy(c => c.Name, StringComparer.Ordinal).ToList(),
+                writers.Select(w => new StudioComponent(w.ComponentName, w.Category)).OrderBy(c => c.Name, StringComparer.Ordinal).ToList());
             StudioServer server;
             try
             {
-                server = await StudioServer.StartAsync(folder, parseResult.GetValue(portOption),
-                    (yaml, rows, token) => tools.SampleAsync(yaml, rows, shownRows: rows, token), ct);
+                server = await StudioServer.StartAsync(folder, parseResult.GetValue(portOption), tools, ct);
             }
             catch (IOException ex)
             {
