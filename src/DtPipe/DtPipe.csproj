@@ -39,6 +39,7 @@
     <ProjectReference Include="../DtPipe.Adapters.Shared/DtPipe.Adapters.Shared.csproj" />
     <ProjectReference Include="..\DtPipe.Processors\DtPipe.Processors.csproj" />
     <ProjectReference Include="..\DtPipe.Transformers\DtPipe.Transformers.csproj" />
+    <ProjectReference Include="..\DtPipe.Jobs\DtPipe.Jobs.csproj" />
   </ItemGroup>
 
   <!-- Kestrel, for dtpipe studio's local page and nothing else. -->
