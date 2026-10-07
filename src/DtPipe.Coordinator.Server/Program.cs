@@ -41,7 +41,6 @@ builder.Services.AddSingleton<NodeInventory>();
 builder.Services.AddSingleton<EnrollmentQueue>();
 builder.Services.AddSingleton<NodeRequests>();
 builder.Services.AddSingleton<BrickCatalog>();
-builder.Services.AddSingleton<DtPipeCli>();
 builder.Services.AddSingleton<PipelineCatalog>();
 builder.Services.AddSingleton<PlanBuilder>();
 builder.Services.AddSingleton<AutoPlacer>();
@@ -152,16 +151,22 @@ designer.MapPost("/graph", (GraphRequest request) =>
     catch (Exception ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-// A command line becomes a job through dtpipe's own --export-job.
-designer.MapPost("/pipelines/from-command", async (CommandRequest request, DtPipeCli cli, CoordinatorServerOptions options, CancellationToken ct) =>
+// A command line becomes a job through dtpipe's own --export-job, run by a runner: the coordinator runs no dtpipe.
+designer.MapPost("/pipelines/from-command", async (CommandRequest request, NodeRequests nodes, CancellationToken ct) =>
 {
-    var dir = Path.Combine(options.StateDir, "commands", Guid.NewGuid().ToString("N"));
-    Directory.CreateDirectory(dir);
-    var jobPath = Path.Combine(dir, "job.yaml");
-    var result = await cli.RunAsync([.. request.Args, "--export-job", jobPath], dir, TimeSpan.FromSeconds(30), ct);
-    return result.Succeeded && File.Exists(jobPath)
-        ? Results.Ok(new { yaml = await File.ReadAllTextAsync(jobPath, ct) })
-        : Results.BadRequest(new { error = result.Diagnostic() });
+    try
+    {
+        var exported = await nodes.AskRunnerAsync<ExportedJob>(NodeChannel.ExportJob, [request.Args], TimeSpan.FromSeconds(40), ct);
+        return exported.Yaml is { } yaml ? Results.Ok(new { yaml }) : Results.BadRequest(new { error = exported.Error });
+    }
+    catch (ConflictException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+    {
+        return Results.BadRequest(new { error = "The runner did not answer in time." });
+    }
 });
 
 

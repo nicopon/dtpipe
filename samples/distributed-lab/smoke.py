@@ -637,8 +637,8 @@ def bricks_pass():
     check("strict nodes", strict)
     check("a read that is no brick", no_brick)
     def designer_check():
-        # The server opens no node database: each source brick's node sends one row, dtpipe runs the
-        # job over them on the server, and each sink brick's node judges its own target.
+        # The server opens no node database and runs no dtpipe: each source brick's node sends one row, a
+        # runner dry-runs the job over them, and each sink brick's node judges its own target.
         names = sorted(n for n in os.listdir(LIBRARY_SEED) if n.endswith(".yaml"))
         for name in names:
             yaml = open(os.path.join(LIBRARY_SEED, name)).read()
@@ -646,6 +646,13 @@ def bricks_pass():
             if not answer["ok"]:
                 raise RuntimeError(f"{name}: {answer.get('errors')} {answer.get('dryRun')}")
         return f"{len(names)} library pipelines accepted"
+
+    def import_command():
+        # A command line becomes a job through dtpipe's own --export-job, which a runner runs for the coordinator.
+        answer = call("/api/pipelines/from-command", {"args": ["--input", "generate:5", "--output", "csv:-"]})
+        if "generate:5" not in answer["yaml"]:
+            raise RuntimeError(f"the exported job does not hold the command: {answer['yaml'][:200]}")
+        return "a command line exported as a job by the runner"
 
     def sink_refuses():
         yaml = open(os.path.join(LIBRARY_SEED, "revenue-by-country.yaml")).read()
@@ -662,6 +669,7 @@ def bricks_pass():
     check("a sink brick by a hair", sink_by_a_hair)
     check("relays", relays)
     check("a designer's check", designer_check)
+    check("a command line imported", import_command)
     check("a sink that refuses", sink_refuses)
     return failures[0]
 

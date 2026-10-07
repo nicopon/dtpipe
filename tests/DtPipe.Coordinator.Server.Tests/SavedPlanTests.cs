@@ -16,7 +16,7 @@ public sealed class SavedPlanTests : IDisposable
         File.WriteAllText(Path.Combine(pipeline, "distributed", "plan.json"), planJson);
         return new PipelineLibrary(new CoordinatorServerOptions
         {
-            StateDir = _dir, DtPipeExecutable = "dtpipe", Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret",
+            StateDir = _dir, Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret",
         });
     }
 

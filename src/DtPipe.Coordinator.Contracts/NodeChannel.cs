@@ -36,6 +36,12 @@ public static class NodeChannel
     // Coordinator -> node host, answered: dtpipe split of one branch that reads the node's data, for
     // the Lab view's cuts; a lab request too (BranchCut).
     public const string SplitBranch = nameof(SplitBranch);
+
+    // Coordinator -> runner, answered: the dtpipe runs the coordinator no longer makes itself. A designer's
+    // job checked over one-row samples with its writers neutralised, and a command line turned into a job.
+    // Only a host that runs any fragment answers them.
+    public const string ValidateJob = nameof(ValidateJob);
+    public const string ExportJob = nameof(ExportJob);
 }
 
 /// <summary>
@@ -85,6 +91,24 @@ public sealed record BrickSample(byte[]? Arrow, string? Error);
 
 /// <summary>What <c>CheckSink</c> answers: whether the sink brick's target accepts a contract, and dtpipe's report.</summary>
 public sealed record SinkCheck(bool Accepted, string Report);
+
+/// <summary>
+/// What <c>ValidateJob</c> asks of a runner: dry-run <see cref="Job"/> over one row per source, each source
+/// alias bound to its Arrow sample, each sink alias bound to a throwaway file and its contract saved
+/// (<see cref="ContractFile"/>) for the coordinator to send on to the sink's own node.
+/// </summary>
+public sealed record JobCheck(string Job, IReadOnlyDictionary<string, byte[]> Samples, IReadOnlyList<string> Sinks)
+{
+    public static string SampleFile(string alias) => alias + ".arrows";
+
+    public static string ContractFile(string alias) => alias + ".contract.json";
+}
+
+/// <summary>What <c>ValidateJob</c> answers: whether dtpipe accepts the job, its report when it does not, and each sink's contract by alias.</summary>
+public sealed record JobCheckResult(bool Ok, string Report, IReadOnlyDictionary<string, string> Contracts);
+
+/// <summary>What <c>ExportJob</c> answers: the job dtpipe's <c>--export-job</c> wrote for a command line, or why it did not.</summary>
+public sealed record ExportedJob(string? Yaml, string? Error);
 
 /// <summary>What <c>QueryDataset</c> answers: CSV text, or why the node did not or could not read it.</summary>
 public sealed record DatasetQueryResult(string? Csv, string? Error);

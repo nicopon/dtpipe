@@ -12,7 +12,7 @@ public sealed class RightsStoreTests : IDisposable
 
     private static CoordinatorServerOptions Options(string dir, string? seed = null) => new()
     {
-        StateDir = dir, DtPipeExecutable = "dtpipe", Authority = "http://idp", Audience = "test",
+        StateDir = dir, Authority = "http://idp", Audience = "test",
         UiClientId = "ui", UiClientSecret = "secret", RightsSeed = seed,
     };
 

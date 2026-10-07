@@ -47,7 +47,7 @@ public sealed record DistributionPlan(
 /// </para>
 /// </summary>
 public sealed class PlanBuilder(
-    CoordinatorServerOptions options, DtPipeCli cli, NodeInventory inventory, NodeRequests nodes, IPlanRegistry planRegistry, IFlowControlService flowControl)
+    NodeInventory inventory, NodeRequests nodes, IPlanRegistry planRegistry, IFlowControlService flowControl)
 {
     private const string ArrowEndpoint = "arrow:-";
     private static readonly TimeSpan SplitTimeout = TimeSpan.FromSeconds(90);
@@ -257,8 +257,6 @@ public sealed class PlanBuilder(
         string planId, string yaml, IReadOnlyList<CutRequest> cuts, List<string> errors, CancellationToken ct)
     {
         var heads = new Dictionary<string, YamlMappingNode>(StringComparer.Ordinal);
-        var workDir = Path.Combine(options.StateDir, "plans", planId);
-        Directory.CreateDirectory(workDir);
 
         var current = yaml;
         for (var i = 0; i < cuts.Count; i++)
@@ -276,7 +274,7 @@ public sealed class PlanBuilder(
                 return null;
             }
 
-            var split = await SplitAsync(cut, branch, Path.Combine(workDir, $"cut-{i}"), errors, ct);
+            var split = await SplitAsync(cut, branch, errors, ct);
             if (split is null) return null;
 
             heads[cut.Branch] = JobYaml.Branches(JobYaml.Parse(split.Producer!)).Single().Branch;
@@ -294,7 +292,7 @@ public sealed class PlanBuilder(
     /// only that node opens its data; a branch that reads no node's data is cut here. <c>null</c>, with
     /// the reason in <paramref name="errors"/>, when it cannot be cut.
     /// </summary>
-    private async Task<BranchSplit?> SplitAsync(CutRequest cut, YamlMappingNode branch, string workDir, List<string> errors, CancellationToken ct)
+    private async Task<BranchSplit?> SplitAsync(CutRequest cut, YamlMappingNode branch, List<string> errors, CancellationToken ct)
     {
         var single = new YamlMappingNode { { cut.Branch, JobYaml.CloneBranch(branch) } };
         var owners = JobYaml.Variables(JobYaml.Serialize(single)).Select(nodes.HostOf).OfType<string>().Distinct().ToList();
@@ -304,12 +302,16 @@ public sealed class PlanBuilder(
             return null;
         }
 
+        if (owners.Count == 0)
+        {
+            errors.Add($"'{cut.Branch}' reads no node's data, and the coordinator runs no dtpipe itself: a cut runs on the node whose data the branch reads.");
+            return null;
+        }
+
         BranchSplit split;
         try
         {
-            split = owners is [var owner]
-                ? await nodes.AskAsync<BranchSplit>(owner, NodeChannel.SplitBranch, [cut.Branch, JobYaml.Serialize(single), cut.At], SplitTimeout + TimeSpan.FromSeconds(10), ct)
-                : await SplitHereAsync(cut, branch, workDir, ct);
+            split = await nodes.AskAsync<BranchSplit>(owners[0], NodeChannel.SplitBranch, [cut.Branch, JobYaml.Serialize(single), cut.At], SplitTimeout + TimeSpan.FromSeconds(10), ct);
         }
         catch (Exception ex) when (ex is ConflictException or TimeoutException || (ex is OperationCanceledException && !ct.IsCancellationRequested))
         {
@@ -319,20 +321,6 @@ public sealed class PlanBuilder(
         var where = owners is [var node] ? $" on {node}" : "";
         errors.Add($"dtpipe split refused to cut '{cut.Branch}' after stage {cut.At}{where}:\n{split.Error}");
         return null;
-    }
-
-    private async Task<BranchSplit> SplitHereAsync(CutRequest cut, YamlMappingNode branch, string workDir, CancellationToken ct)
-    {
-        Directory.CreateDirectory(workDir);
-        var jobPath = Path.Combine(workDir, "job.yaml");
-        await File.WriteAllTextAsync(jobPath, BranchCut.Job(cut.Branch, branch), ct);
-        var prefix = Path.Combine(workDir, "cut");
-        var result = await cli.RunAsync(BranchCut.Arguments(jobPath, cut.Branch, cut.At, prefix), workDir, SplitTimeout, ct);
-        if (!result.Succeeded) return new BranchSplit(null, null, result.Diagnostic());
-        return new BranchSplit(
-            BranchCut.Half(await File.ReadAllTextAsync(prefix + "-producer.yaml", ct), cut.Branch),
-            BranchCut.Half(await File.ReadAllTextAsync(prefix + "-consumer.yaml", ct), cut.Branch),
-            null);
     }
 
     private static List<Unit> BuildUnits(YamlMappingNode remaining, IReadOnlyDictionary<string, YamlMappingNode> heads)

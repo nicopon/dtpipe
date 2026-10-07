@@ -27,7 +27,7 @@ internal sealed class DtPipeCommand(string dtpipe, string workingDirectory, IRea
 
     public string WorkingDirectory => workingDirectory;
 
-    public async Task<DtPipeCommandResult> RunAsync(IEnumerable<string> args, CancellationToken ct, TimeSpan? timeout = null)
+    public async Task<DtPipeCommandResult> RunAsync(IEnumerable<string> args, CancellationToken ct, TimeSpan? timeout = null, string? inDirectory = null)
     {
         var bound = timeout ?? DefaultTimeout;
         var psi = new ProcessStartInfo
@@ -36,7 +36,7 @@ internal sealed class DtPipeCommand(string dtpipe, string workingDirectory, IRea
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-            WorkingDirectory = workingDirectory,
+            WorkingDirectory = inDirectory ?? workingDirectory,
         };
         foreach (var (name, value) in environment) psi.Environment[name] = value;
         foreach (var arg in args) psi.ArgumentList.Add(arg);

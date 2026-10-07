@@ -79,7 +79,7 @@ start_idp() {
 # arguments are passed on. The one way the server starts, for this script and for tools/campaign.py.
 exec_coordinator() {
     exec dotnet "$STATE/bin/coordinator/DtPipe.Coordinator.Server.dll" --urls "$URL" \
-        --Coordinator:StateDirectory="$STATE" --Coordinator:DtPipe="$DTPIPE" --Coordinator:Authority="$IDP_URL" \
+        --Coordinator:StateDirectory="$STATE" --Coordinator:Authority="$IDP_URL" \
         --Coordinator:LabMode=true --Coordinator:Scenarios="$LAB/pipelines" \
         --Coordinator:LibrarySeed="$LAB/library-seed" --Coordinator:RightsSeed="$LAB/rights-seed.json" \
         --Coordinator:Ui:ClientSecret=coordinator-ui-lab-secret --Coordinator:Roles:Admin="${LAB_ADMIN:-labadmin}@dtpipe.test" \

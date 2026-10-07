@@ -51,11 +51,12 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
 - **The server never opens a node's data.** What reads it asks the node that hosts it, through
   `NodeRequests`: a brick preview, `/api/query` (`QueryDataset`), a cut (`SplitBranch`), and a
   designer's check (`DesignValidator`): each source brick's node sends its first row as Arrow IPC
-  (`SampleBrick`, written by the `arrow:-` writer its fragment uses), dtpipe dry-runs the runner's
-  view of the job here, and each sink brick's node checks its target against the contract that
+  (`SampleBrick`, written by the `arrow:-` writer its fragment uses), a runner dry-runs the job as
+  the runner will see it (`ValidateJob`), and each sink brick's node checks its target against the contract that
   reaches it (`CheckSink`). A branch that reaches a node's data without being its brick is refused
-  before anything runs. A node announces a variable's name, never its value, and `DtPipeCli`
-  hands dtpipe no node variable. `[local: the lab's smoke.py bricks — a designer's check, a sink that refuses;
+  before anything runs. **The server runs no dtpipe**: a designer's check and the import of a
+  command line (`ExportJob`) go to a runner, and with none online they refuse. A node announces a
+  variable's name, never its value. `[local: the lab's smoke.py bricks — a designer's check, a sink that refuses;
   sandbox — a cut on its node]`
 - **A new state directory starts from the seeds, or empty.** `Coordinator:LibrarySeed` (one
   `.yaml` per pipeline) and `Coordinator:RightsSeed`; with neither, the library has no pipeline
@@ -64,8 +65,8 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   driven by the `git` command line with a fixed identity (the image needs `git`); run history lives
   in `runs/`, outside git; deployments are in memory.
 - **Cuts inside a branch belong to `dtpipe split`**, run on the node whose data the branch reads
-  (`BranchCut`: the branch alone, its two halves back), or here for a branch that reads no node's
-  data. `PlanBuilder` puts the consumer half in the branch's place, only regroups whole branches
+  (`BranchCut`: the branch alone, its two halves back); a branch that reads no node's data is not
+  cut. `PlanBuilder` puts the consumer half in the branch's place, only regroups whole branches
   and adds `arrow:-` endpoints or relay branches; it never edits an option or moves a transformer.
   `AutoPlacer` only chooses a placement for `PlanBuilder` and cuts nothing. `[local: the lab's smoke.py]`
 - **A brick is matched by content, never by name.** A branch is a brick when its canonical form

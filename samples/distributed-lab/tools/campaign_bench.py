@@ -134,7 +134,7 @@ def launched_binaries(state_dir, node_names):
     values = set()
     for _, _, kind, args in lab_processes():
         if kind in ("host", "coordinator"):
-            m = re.search(r"(?:--dtpipe\s+|--Coordinator:DtPipe=)(\S+)", args)
+            m = re.search(r"--dtpipe\s+(\S+)", args)
             if m:
                 values.add(m.group(1))
     return values

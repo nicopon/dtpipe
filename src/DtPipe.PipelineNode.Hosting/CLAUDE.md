@@ -18,6 +18,11 @@ none. One node per process; a second `AddDtPipeNode` throws.
   run executes the branch's transformers on the node); the node answers only when its own
   `DtPipeNodeOptions.LabMode` is on, off by default, and queries only a variable given an engine. `[local: Hosting.Tests
   LabRequestsTests; the lab's smoke.py, whose checks read the warehouse this way]`
+- **A runner runs dtpipe for the coordinator, a data node never does.** `DelegatedJobs` answers
+  `ValidateJob` (a designer's job dry-run over one-row samples, writers neutralised) and `ExportJob`
+  (a command line as a job) only on a host that runs any fragment; any other host says it is no
+  runner. An alias names a file in the request's own directory, so it is a plain word.
+  `[local: Hosting.Tests DelegatedJobsTests; the lab's smoke.py bricks, ui_check.py]`
 - **A node reads its bricks for a designer's check, never more.** `BrickHost.SampleAsync` reads a
   source brick it announced, with `output: arrow:-` and `--limit`, the bytes its fragment would
   send; a real bounded read like a preview, so `--dry-run`'s source-side guarantees do not apply.

@@ -10,9 +10,6 @@ public sealed class CoordinatorServerOptions
     /// <summary>Where the library, the run journal, the rights document and every plan's scratch files live.</summary>
     public required string StateDir { get; init; }
 
-    /// <summary>The dtpipe binary the server runs itself: <c>split</c>, <c>--export-job</c>, <c>--dry-run</c>.</summary>
-    public required string DtPipeExecutable { get; init; }
-
     /// <summary>The issuer of every token the server accepts: an OpenID Connect provider it trusts.</summary>
     public required string Authority { get; init; }
 
@@ -52,9 +49,6 @@ public sealed class CoordinatorServerOptions
         return new CoordinatorServerOptions
         {
             StateDir = PathOf("StateDirectory") ?? Path.GetFullPath("state"),
-            DtPipeExecutable = section["DtPipe"] is { Length: > 0 } dtpipe && (dtpipe.Contains('/') || dtpipe.Contains('\\'))
-                ? Path.GetFullPath(dtpipe)
-                : section["DtPipe"] is { Length: > 0 } name ? name : "dtpipe",
             Authority = (section["Authority"] ?? throw new InvalidOperationException("Coordinator:Authority is required: the issuer this server trusts.")).TrimEnd('/'),
             Audience = section["Audience"] ?? "dtpipe-coordinator",
             UiClientId = section["Ui:ClientId"] ?? "coordinator-ui",

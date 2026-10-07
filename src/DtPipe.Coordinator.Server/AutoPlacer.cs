@@ -32,7 +32,7 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
         var errors = new List<string>();
         var placement = new Dictionary<string, string>(StringComparer.Ordinal);
         var nodes = inventory.Snapshot();
-        var runner = nodes.Where(n => n.Role == NodeRole.Runner).OrderByDescending(n => n.Online).ThenBy(n => n.Name, StringComparer.Ordinal).FirstOrDefault();
+        var runner = inventory.PreferredRunner();
         var hostOf = nodes.SelectMany(n => n.Datasets.Select(d => (d.Variable, n.Name))).ToDictionary(x => x.Variable, x => x.Name, StringComparer.Ordinal);
 
         try

@@ -64,6 +64,10 @@ public sealed class NodeInventory
         }
     }
 
+    /// <summary>The runner a request for the coordinator goes to: one online first, then by name; <c>null</c> when none is known.</summary>
+    public NodeView? PreferredRunner() => Snapshot().Where(n => n.Role == NodeRole.Runner)
+        .OrderByDescending(n => n.Online).ThenBy(n => n.Name, StringComparer.Ordinal).FirstOrDefault();
+
     public string? ClientIdOf(string node)
     {
         lock (_lock) return _nodes.TryGetValue(node, out var e) && e.ConnectionId is not null ? e.ClientId : null;

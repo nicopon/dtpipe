@@ -35,7 +35,7 @@ public sealed class NodeChannelHubTests : IDisposable
         File.WriteAllText(seed, """{ "version": 2, "identities": [ { "clientId": "known", "name": "node-known", "description": "", "groups": ["crm", "audit"] } ], "matrix": {} }""");
         _options = new CoordinatorServerOptions
         {
-            StateDir = Path.Combine(_dir, "state"), DtPipeExecutable = "dtpipe", Authority = "http://idp", Audience = "test",
+            StateDir = Path.Combine(_dir, "state"), Authority = "http://idp", Audience = "test",
             UiClientId = "ui", UiClientSecret = "secret", RightsSeed = seed, IdentityLabelClaims = ["team"],
         };
         _rights = new RightsStore(_options);

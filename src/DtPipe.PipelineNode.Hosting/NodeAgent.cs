@@ -26,6 +26,7 @@ internal sealed class NodeAgent : BackgroundService
     private readonly IReadOnlyDictionary<string, string> _environment;
     private readonly BrickHost _bricks;
     private readonly LabRequests _lab;
+    private readonly DelegatedJobs _jobs;
     private readonly OidcTokenClient _tokens;
     private readonly NodeLogForwarder _forwarder = new();
     private readonly ILoggerFactory _hostLoggers;
@@ -62,6 +63,7 @@ internal sealed class NodeAgent : BackgroundService
         var dtpipe = new DtPipeCommand(_options.DtPipe, _stateDir, _environment);
         _bricks = new BrickHost(_options.Name, definition.Bricks, dtpipe, _logger);
         _lab = new LabRequests(_options.Name, _options.LabMode, definition.Variables, dtpipe);
+        _jobs = new DelegatedJobs(_options.Name, _policy == FragmentPolicy.AnyFragment, dtpipe);
         _tokens = new OidcTokenClient(_options.Oidc);
     }
 
@@ -83,6 +85,8 @@ internal sealed class NodeAgent : BackgroundService
         hub.On<string, string, SinkCheck>(NodeChannel.CheckSink, (id, contract) => _bricks.CheckSinkAsync(id, contract));
         hub.On<string, string, int, DatasetQueryResult>(NodeChannel.QueryDataset, (variable, sql, rows) => _lab.QueryAsync(variable, sql, rows));
         hub.On<string, string, int, BranchSplit>(NodeChannel.SplitBranch, (alias, job, at) => _lab.SplitAsync(alias, job, at));
+        hub.On<JobCheck, JobCheckResult>(NodeChannel.ValidateJob, check => _jobs.ValidateAsync(check));
+        hub.On<string[], ExportedJob>(NodeChannel.ExportJob, args => _jobs.ExportAsync(args));
         hub.Reconnected += async _ => await AnnounceAsync();
         // A connection the coordinator closes (a reconnect it asked for, an announcement it refused)
         // is not retried by SignalR's own policy: the reconnect loop starts it again, so a node the
