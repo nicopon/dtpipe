@@ -130,6 +130,32 @@ pre.diff .del { color: var(--bad); }
 .port.ref { left: -8px; top: 59px; border-color: var(--warn); }
 .port-label.ref { position: absolute; left: 10px; top: 59px; font-size: 10px; color: var(--warn); }
 .dcard.kind-sql .dcard-node { padding-left: 32px; }
+.dcard-zoom {
+  position: absolute; top: 3px; right: 6px; width: 24px; height: 22px; padding: 0; border: none; background: transparent;
+  color: var(--muted); display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.dcard-zoom:hover { color: var(--accent); }
+.dcard.kind-transform .dcard-head { padding-right: 32px; }
+.palette.dimmed { opacity: .45; pointer-events: none; }
+/* The chain: a Transform step's transformers, in order, between its input and its output. */
+.chain-view { padding: 14px 18px; min-height: 100%; }
+.crumbs { display: flex; gap: 8px; align-items: baseline; margin-bottom: 18px; font-size: 14px; }
+.crumbs a { color: var(--accent); text-decoration: none; }
+.crumbs a:hover { text-decoration: underline; }
+.crumbs .sep { color: var(--muted); }
+.chain { display: flex; align-items: center; flex-wrap: wrap; row-gap: 16px; }
+.chain-link { width: 28px; height: 0; border-top: 2px solid var(--memory); flex: none; }
+.chain-end { padding: 6px 10px; border: 1px dashed var(--border); border-radius: 8px; font-size: 12.5px; display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; max-width: 220px; }
+.chain-end .kind { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.chain-item {
+  width: 190px; padding: 6px 10px 8px; background: var(--surface); border: 1px solid var(--border); border-top: 4px solid var(--runner-1);
+  border-radius: 8px; box-shadow: var(--shadow); font-size: 12.5px; cursor: pointer;
+}
+.chain-item:hover { border-color: var(--accent); }
+.chain-item.selected { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chain-type { font-weight: 700; display: flex; gap: 6px; align-items: baseline; }
+.chain-type .idx { font-weight: 400; font-size: 11px; color: var(--muted); }
+.chain-sub { color: var(--muted); font-size: 11.5px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .port:hover { background: var(--accent); }
 .dedge { fill: none; stroke: var(--memory); stroke-width: 2; }
 .dedge.ref { stroke: var(--warn); stroke-dasharray: 5 4; }

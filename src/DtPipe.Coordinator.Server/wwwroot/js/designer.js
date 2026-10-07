@@ -33,7 +33,8 @@ let host = null;
 let id = null;
 let model = null;          // { title, description, check, steps, layout }
 let result = null;         // the last compose answer
-let selected = null;       // { alias } or { edge: { from, to, port } }
+let selected = null;       // { alias } (+ t, a transformer's index, while zoomed) or { edge: { from, to, port } }
+let zoom = null;           // the alias of the Transform step shown as a chain of its transformers
 let dirty = false;
 let validation = null;     // { ok, dryRun, errors }
 let drawer = "yaml";       // yaml | problems | edit
@@ -43,7 +44,7 @@ let composeTimer = null;
 export function mount(el, params) {
   host = el;
   id = params[0] || null;
-  model = null; result = null; selected = null; dirty = false; validation = null; drawer = "yaml";
+  model = null; result = null; selected = null; zoom = null; dirty = false; validation = null; drawer = "yaml";
   if (!id) { renderPicker(); return; }
   load().catch((e) => { host.innerHTML = `<p class="mismatch">${esc(e.message)}</p>`; });
 }
@@ -158,8 +159,10 @@ function removeStep(alias) {
   model.steps = model.steps.filter((s) => s.alias !== alias);
   for (const s of model.steps) { s.from = s.from.filter((a) => a !== alias); s.ref = s.ref.filter((a) => a !== alias); }
   delete model.layout[alias];
+  if (zoom === alias) zoom = null;
   selected = null;
   touch({ inspector: true });
+  applyZoom();
 }
 
 function renameStep(from, to) {
@@ -175,6 +178,7 @@ function renameStep(from, to) {
   }
   model.layout[to] = model.layout[from];
   delete model.layout[from];
+  if (zoom === from) zoom = to;
   selected = { alias: to };
   touch({ inspector: true });
 }
@@ -223,6 +227,72 @@ function autoLayout(render = true) {
   if (render) touch({ recompose: false });
 }
 
+// ---------------------------------------------------------------- zoom
+
+// A Transform step opens as the linear chain of its transformers; every edit goes through the same model.
+function enterZoom(alias) {
+  const step = stepOf(alias);
+  if (step?.kind !== "transform") return;
+  zoom = alias;
+  selected = { alias, t: step.transformers?.length ? 0 : undefined };
+  applyZoom();
+}
+
+function exitZoom() {
+  if (!zoom) return;
+  selected = { alias: zoom };
+  zoom = null;
+  applyZoom();
+}
+
+// Shows the canvas or the chain, whichever the zoom state names, and the inspector that goes with it.
+function applyZoom() {
+  $("d-inner").hidden = !!zoom;
+  $("d-chain").hidden = !zoom;
+  $("d-palette").classList.toggle("dimmed", !!zoom);
+  renderCanvas();
+  renderInspector();
+}
+
+function addTransformer(step) {
+  (step.transformers ||= []).push({ type: "project", options: {} });
+  if (zoom) selected = { alias: step.alias, t: step.transformers.length - 1 };
+  touch({ inspector: true });
+}
+
+function removeTransformer(step, i) {
+  step.transformers.splice(i, 1);
+  if (zoom) selected = { alias: step.alias, t: step.transformers.length ? Math.min(i, step.transformers.length - 1) : undefined };
+}
+
+function transformerSummary(t) {
+  const parts = [...Object.keys(t.mappings || {}), ...Object.entries(t.options || {}).map(([k, v]) => `${k}: ${v ?? ""}`)];
+  return parts.join(", ").slice(0, 70) || "nothing set yet";
+}
+
+function renderChain() {
+  const el = $("d-chain");
+  const step = zoom ? stepOf(zoom) : null;
+  if (!el || !step) return;
+  const items = (step.transformers || []).map((t, i) => `
+    <span class="chain-link"></span>
+    <div class="chain-item ${selected?.t === i ? "selected" : ""}" data-t="${i}" tabindex="0" title="Select to edit it in the inspector">
+      <div class="chain-type"><span class="idx">${i + 1}</span>${esc(t.type)}</div>
+      <div class="chain-sub">${esc(transformerSummary(t))}</div>
+    </div>`).join("");
+  el.innerHTML = `
+    <nav class="crumbs"><a href="#" data-crumb title="Back to the pipeline (Esc)">${esc(model.title || id)}</a><span class="sep">›</span><b>${esc(step.alias)}</b></nav>
+    <div class="chain">
+      <div class="chain-end"><span class="kind">input</span>${step.from.length ? step.from.map((a) => `<code>${esc(a)}</code>`).join(" ") : `<span class="hint">not wired</span>`}</div>
+      ${items}
+      <span class="chain-link"></span>
+      <button class="chain-add" data-chain-add title="Add a transformer at the end of the chain">+ transformer</button>
+      <span class="chain-link"></span>
+      <div class="chain-end"><span class="kind">output</span><code>${esc(step.alias)}</code></div>
+    </div>
+    ${step.transformers?.length ? "" : `<p class="hint">No transformer yet: the step passes its input through unchanged.</p>`}`;
+}
+
 // ---------------------------------------------------------------- rendering
 
 function renderShell() {
@@ -242,7 +312,7 @@ function renderShell() {
       </div>
       <div class="designer-body">
         <aside class="palette card" id="d-palette"></aside>
-        <div class="canvas card" id="d-canvas"><div class="canvas-inner" id="d-inner"><svg id="d-svg"></svg></div></div>
+        <div class="canvas card" id="d-canvas"><div class="canvas-inner" id="d-inner"><svg id="d-svg"></svg></div><div class="chain-view" id="d-chain" hidden></div></div>
         <aside class="inspector card" id="d-inspector"></aside>
         <div class="split split-col split-pal" data-split="pal" role="separator" aria-orientation="vertical" aria-label="Resize the palette" tabindex="0"></div>
         <div class="split split-col split-insp" data-split="insp" role="separator" aria-orientation="vertical" aria-label="Resize the inspector" tabindex="0"></div>
@@ -251,7 +321,7 @@ function renderShell() {
       <div class="drawer card" id="d-drawer"></div>
     </div>`;
 
-  $("d-title").addEventListener("input", (e) => { model.title = e.target.value; touch({ canvas: false }); });
+  $("d-title").addEventListener("input", (e) => { model.title = e.target.value; touch({ canvas: !!zoom }); });
   $("d-description").addEventListener("input", (e) => { model.description = e.target.value; touch({ canvas: false }); });
   $("d-layout").addEventListener("click", () => autoLayout());
   $("d-validate").addEventListener("click", validate);
@@ -260,14 +330,14 @@ function renderShell() {
   applySizes();
   bindSplits();
   bindCanvas();
+  bindChain();
   bindPalette();
   bindInspector();
   bindDrawer();
   document.removeEventListener("keydown", onKey);
   document.addEventListener("keydown", onKey);
   renderPalette();
-  renderInspector();
-  renderCanvas();
+  applyZoom();
   renderDrawer();
   renderToolbarState();
 }
@@ -358,6 +428,7 @@ const KIND_LABEL = { source: "source", sink: "sink", transform: "transform", sql
 function renderCanvas() {
   const inner = $("d-inner");
   if (!inner || !model) return;
+  if (zoom) { renderChain(); return; }
   const problems = new Set((result?.errors || []).flatMap((e) => [...e.matchAll(/'([^']+)'/g)].map((m) => m[1])));
   inner.querySelectorAll(".dcard").forEach((c) => c.remove());
   let width = 900, height = 520;
@@ -372,6 +443,7 @@ function renderCanvas() {
     card.style.setProperty("--node-color", nodeColor(node));
     card.innerHTML = `
       <div class="dcard-head"><span class="kind">${KIND_LABEL[step.kind] || step.kind}</span><span class="alias">${esc(step.alias)}</span></div>
+      ${step.kind === "transform" ? `<button class="dcard-zoom" title="Zoom into the transformers (or double-click the card)" aria-label="Zoom into ${esc(step.alias)}"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="6.5" cy="6.5" r="4.5"/><path d="M10 10l4.5 4.5"/></svg></button>` : ""}
       <div class="dcard-sub">${esc(subtitle)}</div>
       <div class="dcard-node"><span class="dot on" style="background:var(--node-color)"></span>${esc(node || "?")}</div>
       ${step.kind !== "source" ? `<span class="port in" data-port="in" title="${step.kind === "merge" ? "inputs (several)" : "input"}"></span>` : ""}
@@ -442,6 +514,11 @@ function bindCanvas() {
     const inPort = e.target.closest(".port.in, .port.ref");
     const card = e.target.closest(".dcard");
     const edge = e.target.closest(".dedge-hit");
+    if (e.target.closest(".dcard-zoom") && card) {
+      enterZoom(card.dataset.alias);
+      e.preventDefault();
+      return;
+    }
     if (e.target.closest(".edge-delete")) {
       disconnect(selected.edge);
       e.preventDefault();
@@ -524,15 +601,41 @@ function bindCanvas() {
     }
   });
 
+  inner.addEventListener("dblclick", (e) => {
+    const card = e.target.closest(".dcard");
+    if (card && !e.target.closest(".port")) enterZoom(card.dataset.alias);
+  });
+
   const canvas = $("d-canvas");
   canvas.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; });
   canvas.addEventListener("drop", (e) => {
     e.preventDefault();
+    if (zoom) return;
     let item;
     try { item = JSON.parse(e.dataTransfer.getData("application/json") || "null"); } catch { item = null; }
     if (!item) return;
     const p = canvasPoint(e);
     addStep(item.kind, item.brick, p.x - CARD_W / 2, p.y - 20);
+  });
+}
+
+function bindChain() {
+  const el = $("d-chain");
+  const select = (item) => {
+    selected = { alias: zoom, t: +item.dataset.t };
+    renderChain();
+    renderInspector();
+  };
+  el.addEventListener("click", (e) => {
+    if (e.target.closest("[data-crumb]")) { e.preventDefault(); exitZoom(); return; }
+    if (e.target.closest("[data-chain-add]")) { addTransformer(stepOf(zoom)); return; }
+    const item = e.target.closest(".chain-item");
+    if (item) select(item);
+    else if (e.target === el) { selected = { alias: zoom }; renderChain(); renderInspector(); }
+  });
+  el.addEventListener("keydown", (e) => {
+    const item = e.target.closest(".chain-item");
+    if (item && (e.key === "Enter" || e.key === " ")) { select(item); e.preventDefault(); }
   });
 }
 
@@ -557,6 +660,16 @@ function bindPalette() {
 function onKey(e) {
   if (!model || !host?.isConnected) return;
   if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
+  if (zoom) {
+    // Zoomed, Delete removes the selected transformer, never the step.
+    if (e.key === "Escape") { exitZoom(); e.preventDefault(); }
+    else if ((e.key === "Delete" || e.key === "Backspace") && selected?.t !== undefined) {
+      removeTransformer(stepOf(zoom), selected.t);
+      touch({ inspector: true });
+      e.preventDefault();
+    }
+    return;
+  }
   if (e.key === "Delete" || e.key === "Backspace") {
     if (selected?.alias) { removeStep(selected.alias); e.preventDefault(); }
     else if (selected?.edge) { disconnect(selected.edge); e.preventDefault(); }
@@ -593,6 +706,18 @@ function columnsOf(alias, seen = new Set()) {
   return null;
 }
 
+// One transformer's editor: its type, order buttons, mappings and options. `data-index` is its place in the step.
+function transformerHtml(step, t, i) {
+  const spec = TRANSFORMERS[t.type] || { hint: "", mapping: "key", value: "value" };
+  return `<div class="transformer" data-index="${i}">
+    <div class="row"><select data-ttype>${Object.keys(TRANSFORMERS).concat(TRANSFORMERS[t.type] ? [] : [t.type]).map((k) => `<option ${k === t.type ? "selected" : ""}>${esc(k)}</option>`).join("")}</select>
+    <span class="actions"><button class="small ghost" data-tmove="-1" ${i === 0 ? "disabled" : ""}>↑</button><button class="small ghost" data-tmove="1" ${i === step.transformers.length - 1 ? "disabled" : ""}>↓</button><button class="small ghost danger" data-tremove>×</button></span></div>
+    <p class="hint">${esc(spec.hint)}</p>
+    ${spec.mapping !== null || t.mappings ? `<div class="sub">mappings</div>${kvRows(t.mappings, "mappings", i, [spec.mapping || "key", spec.value ?? "value"])}` : ""}
+    <div class="sub">options</div>${kvRows(t.options, "options", i, ["option", "value"])}
+  </div>`;
+}
+
 function renderInspector() {
   const el = $("d-inspector");
   if (!el) return;
@@ -613,6 +738,14 @@ function renderInspector() {
       <p class="hint">Select a card to edit it. A card's colour is the node it runs on: a brick on its own node, every other step on the runner.</p>`;
     return;
   }
+  if (zoom && step.alias === zoom) {
+    const t = selected.t !== undefined ? step.transformers?.[selected.t] : null;
+    const cols = step.from[0] ? columnsOf(step.from[0]) : null;
+    el.innerHTML = `<div class="row"><h2>${t ? `Transformer ${selected.t + 1}` : "Transformers"}</h2></div>
+      ${t ? transformerHtml(step, t, selected.t) : `<p class="hint">Select a transformer in the chain to edit it, or add one.</p>`}
+      ${cols ? `<h3>Input columns</h3><div class="cols">${cols.map((c) => `<code title="${esc(c.type)}">${esc(c.name)}</code>`).join(" ")}</div>` : ""}`;
+    return;
+  }
   const brick = step.brick ? brickOf(step.brick) : null;
   let body = "";
   if (step.kind === "source" || step.kind === "sink") {
@@ -627,16 +760,7 @@ function renderInspector() {
     if (step.kind === "sink") body = inputsList(step) + body;
   } else if (step.kind === "transform") {
     body = inputsList(step) + `<h3>Transformers <span class="hint">applied in order</span></h3>
-      ${(step.transformers || []).map((t, i) => {
-        const spec = TRANSFORMERS[t.type] || { hint: "", mapping: "key", value: "value" };
-        return `<div class="transformer" data-index="${i}">
-          <div class="row"><select data-ttype>${Object.keys(TRANSFORMERS).concat(TRANSFORMERS[t.type] ? [] : [t.type]).map((k) => `<option ${k === t.type ? "selected" : ""}>${esc(k)}</option>`).join("")}</select>
-          <span class="actions"><button class="small ghost" data-tmove="-1" ${i === 0 ? "disabled" : ""}>↑</button><button class="small ghost" data-tmove="1" ${i === step.transformers.length - 1 ? "disabled" : ""}>↓</button><button class="small ghost danger" data-tremove>×</button></span></div>
-          <p class="hint">${esc(spec.hint)}</p>
-          ${spec.mapping !== null || t.mappings ? `<div class="sub">mappings</div>${kvRows(t.mappings, "mappings", i, [spec.mapping || "key", spec.value ?? "value"])}` : ""}
-          <div class="sub">options</div>${kvRows(t.options, "options", i, ["option", "value"])}
-        </div>`;
-      }).join("")}
+      ${(step.transformers || []).map((t, i) => transformerHtml(step, t, i)).join("")}
       <button data-tadd>+ transformer</button>`;
     const cols = step.from[0] ? columnsOf(step.from[0]) : null;
     if (cols) body += `<h3>Input columns</h3><div class="cols">${cols.map((c) => `<code title="${esc(c.type)}">${esc(c.name)}</code>`).join(" ")}</div>`;
@@ -698,17 +822,18 @@ function bindInspector() {
     if (b.dataset.unwire !== undefined) { disconnect({ from: b.dataset.unwire, to: b.dataset.to || step.alias, port: b.dataset.port }); return; }
     if (!step) return;
     if (b.dataset.removeStep !== undefined) { removeStep(step.alias); return; }
-    if (b.dataset.tadd !== undefined) { (step.transformers ||= []).push({ type: "project", options: {} }); touch({ inspector: true }); return; }
+    if (b.dataset.tadd !== undefined) { addTransformer(step); return; }
     const box = b.closest(".transformer");
     if (!box) {
       if (b.dataset.kvAdd !== undefined) return;
       return;
     }
     const i = +box.dataset.index;
-    if (b.dataset.tremove !== undefined) step.transformers.splice(i, 1);
+    if (b.dataset.tremove !== undefined) removeTransformer(step, i);
     else if (b.dataset.tmove) {
       const j = i + +b.dataset.tmove;
       [step.transformers[i], step.transformers[j]] = [step.transformers[j], step.transformers[i]];
+      if (zoom) selected = { alias: step.alias, t: j };
     } else if (b.dataset.kvAdd !== undefined) {
       const section = b.closest(".kv").dataset.section;
       const t = step.transformers[i];
@@ -772,6 +897,7 @@ function bindDrawer() {
         model.layout = Object.fromEntries(Object.entries(layout).filter(([a]) => stepOf(a)));
         if (model.steps.some((s) => !model.layout[s.alias])) autoLayout(false);
         selected = null;
+        zoom = null;
         drawer = "yaml";
         dirty = true;
         renderShell();

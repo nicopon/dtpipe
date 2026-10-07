@@ -12,6 +12,8 @@ Writes one screenshot per step.
      transformer, composed by the coordinator and validated by dtpipe. Nothing is saved.
   4. Designer panels: the palette and inspector handles and the drawer handle dragged with the
      mouse, each panel measured before and after.
+  5. Designer zoom: the Transform card opened as a chain with its magnifier, edited and extended
+     there, and left by the breadcrumb.
 
 Usage: ui_check.py [lab-url] [out-dir]     (defaults: http://127.0.0.1:5180, .state/ui)
 The lab must be up. Exits 1 if any step fails.
@@ -170,6 +172,37 @@ def designer_panels(browser):
     report(not errors, "designer resize errors", "none" if not errors else f"errors: {errors}", shot)
 
 
+def designer_zoom(browser):
+    # The scenario's Transform card carries one transformer (project, dropping the country).
+    click = lambda x, y: (browser.mouse("mouseMoved", x, y), browser.mouse("mousePressed", x, y), browser.mouse("mouseReleased", x, y))
+    click(*browser.center('.dcard[data-alias="transform"] .dcard-zoom'))
+    zoomed = browser.wait_for("document.querySelector('#d-chain .crumbs')?.textContent.replace(/\\s/g, '').includes('UIscenario›transform')"
+                              " && document.querySelectorAll('#d-chain .chain-item').length === 1"
+                              " && document.querySelector('#d-chain .chain-item').textContent.includes('project')"
+                              " && document.querySelectorAll('.dcard').length === 3 && document.getElementById('d-inner').hidden", 10)
+    report(zoomed, "designer zoom", "breadcrumb and a one-transformer chain", "")
+
+    # An edit in the zoom reaches the YAML: the chain edits the pipeline's own model.
+    browser.js("""{ const row = [...document.querySelectorAll('#d-inspector .kv[data-section="options"] .kv-row')].pop();
+        const v = row.querySelectorAll('input')[1]; v.value = 'customer_id'; v.dispatchEvent(new Event('input', { bubbles: true })); }""")
+    edited = browser.wait_for("document.getElementById('d-yaml')?.textContent.includes('drop: customer_id')", 15)
+    # A transformer added at the end of the chain, then removed from the inspector.
+    browser.js("document.querySelector('#d-chain [data-chain-add]').click()")
+    added = browser.wait_for("document.querySelectorAll('#d-chain .chain-item').length === 2"
+                             " && document.querySelector('#d-chain .chain-item.selected')?.dataset.t === '1'", 5)
+    shot = browser.shot(os.path.join(OUT, "designer-zoom.png"))
+    browser.js("document.querySelector('#d-inspector [data-tremove]').click()")
+    removed = browser.wait_for("document.querySelectorAll('#d-chain .chain-item').length === 1", 5)
+    report(edited and added and removed, "designer zoom edits", f"edited={edited} added={added} removed={removed}", shot)
+
+    # The pipeline crumb leaves the zoom: the canvas, with its three cards, is back.
+    browser.js("document.querySelector('#d-chain [data-crumb]').click()")
+    left = browser.wait_for("document.getElementById('d-chain').hidden && !document.getElementById('d-inner').hidden"
+                            " && document.querySelectorAll('.dcard').length === 3", 5)
+    errors = page_errors(browser)
+    report(left and not errors, "designer zoom leave", "canvas back" if left else "still zoomed" + (f"  errors: {errors}" if errors else ""), "")
+
+
 def sign_in(browser):
     browser.goto(URL + "/", 2)
     on_form = browser.wait_for("!!document.querySelector('form input[name=password]')", 20)
@@ -189,6 +222,7 @@ try:
     coordinator_views(browser)
     designer_scenario(browser)
     designer_panels(browser)
+    designer_zoom(browser)
 finally:
     browser.close()
 sys.exit(1 if failed else 0)
