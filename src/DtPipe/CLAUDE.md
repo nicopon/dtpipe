@@ -179,6 +179,11 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   for a job (`StudioLocalFiles`) lives under `.dtpipe/studio/`, which `SessionStore.EnsureIgnored`
   keeps out of git; nothing there is reached through a link, and a link refuses the save before the
   job is written.
+- **A variable's name is the contract.** `StudioVariables` reads a job's `${{…}}` with the run's own
+  grammar (`CompositeStringContentResolver.Expressions`), and a sample sets each chosen value in the
+  process environment for that sample only, restored after, so the real resolver reads it. The
+  launch file holds an alias or a typed text, never a keyring value; the page sees names and
+  aliases only. The keyring is opened only for a job that needs it: opening it can ask the person.
 - Quit from the page exits 0, Ctrl+C 130.
 
 `[CI: StudioServerTests (no script writes HTML or an inline style), StudioSampleTests,

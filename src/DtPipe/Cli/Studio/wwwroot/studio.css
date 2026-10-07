@@ -168,6 +168,13 @@ textarea { width: 100%; resize: vertical; }
 .tabs .count { background: var(--bad); color: #fff; border-radius: 999px; padding: 0 6px; font-size: 11px; margin-left: 4px; }
 .drawer-status { margin-left: auto; font-size: 12.5px; }
 .msgs { margin: 4px 0; padding-left: 20px; }
+.vars td { font-family: inherit; font-size: 12.5px; vertical-align: middle; white-space: nowrap; max-width: none; }
+.vars td.wrap { white-space: normal; }
+.vars input { width: 220px; margin-left: 6px; }
+.vars button { margin-left: 4px; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+.dot.good { background: var(--good); }
+.dot.bad { background: var(--bad); }
 
 /* A sample's report */
 .branch { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; margin: 10px 0; }

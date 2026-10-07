@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using DtPipe.Cli.Mcp;
+using DtPipe.Cli.Security;
 using DtPipe.Cli.Studio;
 using DtPipe.Core.Abstractions;
 using DtPipe.Jobs;
@@ -22,6 +23,7 @@ public sealed class StudioServerTests : IAsyncLifetime
     private readonly HttpClient _http = new();
     private StudioServer _server = null!;
     private StudioSampler _sampler = (_, _, _) => Task.FromResult("{}");
+    private readonly InMemorySecretsManager _secrets = new();
 
     public async ValueTask InitializeAsync()
     {
@@ -33,7 +35,7 @@ public sealed class StudioServerTests : IAsyncLifetime
         File.WriteAllText(Path.Combine(_dir, "notes.txt"), "not a job\n");
         _server = await StudioServer.StartAsync(new StudioFolder(_dir), 0, new StudioTools(
             (y, r, ct) => _sampler(y, r, ct), new DesignService(IBrickLookup.None),
-            [new StudioComponent("csv", "Files")], [new StudioComponent("duck", "Databases")]), CancellationToken.None);
+            [new StudioComponent("csv", "Files")], [new StudioComponent("duck", "Databases")], _secrets), CancellationToken.None);
     }
 
     public async ValueTask DisposeAsync()
@@ -440,6 +442,84 @@ public sealed class StudioServerTests : IAsyncLifetime
         Assert.True((await OpenAsync("hand.yaml")).GetProperty("rewrites").GetBoolean());
     }
 
+    // ── Variables ────────────────────────────────────────────────────────────
+
+    private const string Sentinel = "s3ntinel-never-shown";
+
+    [Fact]
+    public async Task Each_variable_is_shown_by_name_with_whether_something_resolves_it_never_a_value()
+    {
+        _secrets.SetSecret("known", Sentinel);
+        Environment.SetEnvironmentVariable("STUDIO_T_SET", Sentinel);
+        try
+        {
+            const string yaml = "main:\n  input: \"csv:${{STUDIO_T_UNSET}}\"\n  output: \"pg:Password=${{ keyring://known }};${{keyring://ghost}};${{STUDIO_T_SET}}\"\n"
+                + "  cursor: id\n  state: \"${{cursor://state.json|0}}\"\n";
+
+            var (status, body) = await SendAsync(Request(HttpMethod.Post, "/api/variables", body: new { path = "a.yaml", yaml }));
+
+            Assert.Equal(HttpStatusCode.OK, status);
+            var shown = body.GetProperty("variables").EnumerateArray().Select(v =>
+                $"{v.GetProperty("kind").GetString()}:{v.GetProperty("name").GetString()}:{v.GetProperty("defined").GetBoolean()}:{v.GetProperty("ready").GetBoolean()}");
+            Assert.Equal(["env:STUDIO_T_UNSET:False:False", "keyring:known:True:True", "keyring:ghost:False:False", "env:STUDIO_T_SET:True:True",
+                "cursor:state.json|0:True:True"], shown);
+            Assert.Equal(["known"], body.GetProperty("aliases").EnumerateArray().Select(a => a.GetString()));
+            Assert.DoesNotContain(Sentinel, body.ToString());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("STUDIO_T_SET", null);
+        }
+    }
+
+    [Fact]
+    public async Task A_sample_is_refused_before_it_runs_naming_what_nothing_resolves()
+    {
+        var ran = false;
+        _sampler = (_, _, _) => { ran = true; return Task.FromResult("{}"); };
+
+        var (status, body) = await SendAsync(Request(HttpMethod.Post, "/api/sample",
+            body: new { yaml = "main:\n  input: \"csv:${{STUDIO_T_MISSING}}\"\n  output: \"csv:${{keyring://ghost}}\"\n", rows = 3 }));
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, status);
+        Assert.Contains("'STUDIO_T_MISSING'", body.GetProperty("error").GetString());
+        Assert.Contains("'ghost'", body.GetProperty("error").GetString());
+        Assert.False(ran);
+    }
+
+    [Theory]
+    [InlineData("keyring")]
+    [InlineData("value")]
+    public async Task A_launch_value_reaches_the_run_and_leaves_with_it(string how)
+    {
+        _secrets.SetSecret("pass", Sentinel);
+        string? seen = null;
+        _sampler = (_, _, _) => { seen = Environment.GetEnvironmentVariable("STUDIO_T_PASS"); return Task.FromResult("{\"success\": true}"); };
+        object chosen = how == "keyring" ? new { keyring = "pass" } : new { value = "typed by hand" };
+
+        var (launched, _) = await SendAsync(Request(HttpMethod.Put, "/api/launch",
+            body: new { path = "a.yaml", overrides = new Dictionary<string, object> { ["STUDIO_T_PASS"] = chosen } }));
+        var (sampled, _) = await SendAsync(Request(HttpMethod.Post, "/api/sample",
+            body: new { yaml = "main:\n  input: \"csv:${{STUDIO_T_PASS}}\"\n", rows = 3, path = "a.yaml" }));
+
+        Assert.Equal(HttpStatusCode.NoContent, launched);
+        Assert.Equal(HttpStatusCode.OK, sampled);
+        Assert.Equal(how == "keyring" ? Sentinel : "typed by hand", seen);
+        Assert.Null(Environment.GetEnvironmentVariable("STUDIO_T_PASS"));
+        var file = File.ReadAllText(Path.Combine(_dir, ".dtpipe", "studio", "a.yaml-launch.json"));
+        Assert.DoesNotContain(Sentinel, file);
+        Assert.Contains(how == "keyring" ? "\"pass\"" : "typed by hand", file);
+    }
+
+    [Fact]
+    public async Task A_launch_value_is_an_alias_or_a_text_never_both()
+    {
+        var (status, _) = await SendAsync(Request(HttpMethod.Put, "/api/launch",
+            body: new { path = "a.yaml", overrides = new Dictionary<string, object> { ["X"] = new { keyring = "a", value = "b" } } }));
+
+        Assert.Equal(HttpStatusCode.BadRequest, status);
+    }
+
     [Fact]
     public async Task Quitting_from_the_page_ends_the_session()
     {
@@ -526,5 +606,61 @@ public sealed class StudioSampleTests
         Assert.True(JsonDocument.Parse(json).RootElement.GetProperty("success").GetBoolean(), json);
         Assert.Contains("doubled", json);
         Assert.Equal(3, Branch(json).GetProperty("rowsDelivered").GetInt64());
+    }
+
+    /// <summary>
+    /// A keyring value launched into a job reaches the run, never the page: not in the sample's
+    /// answer, even when the connection it opens fails and reports why.
+    /// </summary>
+    [Fact]
+    public async Task A_secret_launched_into_a_failing_connection_never_reaches_the_page()
+    {
+        const string sentinel = "Zq7-sentinel-Xw9";
+        var services = new ServiceCollection();
+        Program.ConfigureServices(services);
+        services.AddSingleton<IAnsiConsole>(AnsiConsole.Create(new AnsiConsoleSettings
+        {
+            Out = new AnsiConsoleOutput(new StringWriter()), Ansi = AnsiSupport.No, Interactive = InteractionSupport.No,
+        }));
+        var secrets = new InMemorySecretsManager();
+        secrets.SetSecret("pgpass", sentinel);
+        services.AddSingleton<ISecretsManager>(secrets);
+        var provider = services.BuildServiceProvider();
+        var mcp = provider.GetRequiredService<DtPipeMcpTools>();
+        var dir = Path.Combine(Path.GetTempPath(), "studio-leak-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        await using var server = await StudioServer.StartAsync(new StudioFolder(dir), 0, new StudioTools(
+            (y, r, ct) => mcp.SampleAsync(y, r, shownRows: r, ct), new DesignService(IBrickLookup.None), [], [], secrets), CancellationToken.None);
+        using var http = new HttpClient();
+        async Task<string> Send(HttpMethod method, string path, object body)
+        {
+            var request = new HttpRequestMessage(method, $"http://127.0.0.1:{server.Port}{path}")
+            {
+                Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json"),
+            };
+            request.Headers.Add(StudioServer.TokenHeader, server.Token);
+            using var response = await http.SendAsync(request);
+            return await response.Content.ReadAsStringAsync();
+        }
+        try
+        {
+            await Send(HttpMethod.Put, "/api/launch", new { path = "job.yaml", overrides = new { STUDIO_T_DB_PASS = new { keyring = "pgpass" } } });
+            foreach (var password in new[] { "${{STUDIO_T_DB_PASS}}", "${{keyring://pgpass}}" })
+            {
+                var yaml = $"main:\n  input: \"pg:Host=127.0.0.1;Port=1;Username=u;Password={password};Timeout=2\"\n"
+                    + "  provider-options:\n    pg:\n      query: \"SELECT 1\"\n  output: \"null:\"\n";
+
+                var answer = await Send(HttpMethod.Post, "/api/sample", new { yaml, rows = 1, path = "job.yaml" });
+                var variables = await Send(HttpMethod.Post, "/api/variables", new { yaml, path = "job.yaml" });
+
+                Assert.Contains("\"success\": false", answer);
+                Assert.DoesNotContain(sentinel, answer);
+                Assert.DoesNotContain(sentinel, variables);
+            }
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
     }
 }

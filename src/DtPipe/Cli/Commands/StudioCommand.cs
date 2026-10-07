@@ -1,5 +1,6 @@
 using System.CommandLine;
 using DtPipe.Cli.Mcp;
+using DtPipe.Cli.Security;
 using DtPipe.Cli.Studio;
 using DtPipe.Core.Abstractions;
 using DtPipe.Jobs;
@@ -50,7 +51,8 @@ public sealed class StudioCommand : Command
                 (yaml, rows, token) => mcp.SampleAsync(yaml, rows, shownRows: rows, token),
                 new DesignService(IBrickLookup.None, new ComponentEndpointRules(readers, writers)),
                 readers.Select(r => new StudioComponent(r.ComponentName, r.Category)).OrderBy(c => c.Name, StringComparer.Ordinal).ToList(),
-                writers.Select(w => new StudioComponent(w.ComponentName, w.Category)).OrderBy(c => c.Name, StringComparer.Ordinal).ToList());
+                writers.Select(w => new StudioComponent(w.ComponentName, w.Category)).OrderBy(c => c.Name, StringComparer.Ordinal).ToList(),
+                serviceProvider.GetRequiredService<ISecretsManager>());
             StudioServer server;
             try
             {

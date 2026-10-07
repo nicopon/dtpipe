@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using DtPipe.Cli.Security;
 using DtPipe.Core.Security;
 using DtPipe.Jobs;
 using Microsoft.AspNetCore.Builder;
@@ -22,10 +23,12 @@ public sealed record StudioComponent(string Name, string Category);
 
 /// <summary>
 /// What the studio's server works with: the sample path, the designer's model (the coordinator's
-/// own, with dtpipe's components for endpoints) and the components the palette lists.
+/// own, with dtpipe's components for endpoints), the components the palette lists, and the keyring
+/// a variable may be launched from.
 /// </summary>
 public sealed record StudioTools(
-    StudioSampler Sample, DesignService Design, IReadOnlyList<StudioComponent> Readers, IReadOnlyList<StudioComponent> Writers);
+    StudioSampler Sample, DesignService Design, IReadOnlyList<StudioComponent> Readers, IReadOnlyList<StudioComponent> Writers,
+    ISecretsManager Secrets);
 
 /// <summary>
 /// The local server behind <c>dtpipe studio</c>. It runs dtpipe with the person's own access, so it
@@ -67,6 +70,7 @@ public sealed class StudioServer : IAsyncDisposable
     private readonly StudioFolder _folder;
     private readonly StudioTools _tools;
     private readonly StudioLocalFiles _local;
+    private readonly StudioVariables _variables;
     private readonly byte[] _token;
     private readonly SemaphoreSlim _sampling = new(1, 1);
     private readonly TaskCompletionSource _quit = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -77,6 +81,7 @@ public sealed class StudioServer : IAsyncDisposable
         _folder = folder;
         _tools = tools;
         _local = new StudioLocalFiles(folder);
+        _variables = new StudioVariables(_local, tools.Secrets);
         Token = token;
         _token = Encoding.UTF8.GetBytes(token);
     }
@@ -154,6 +159,16 @@ public sealed class StudioServer : IAsyncDisposable
                     var decompose = await BodyAsync<DecomposeRequest>(context);
                     await JsonAsync(context, _tools.Design.Decompose(decompose.Yaml ?? "", decompose.Layout));
                     break;
+                case ("POST", "/api/variables"):
+                    var asked = await BodyAsync<VariablesRequest>(context);
+                    var variables = _variables.Of(JobPath(asked.Path), asked.Yaml ?? "");
+                    // The keyring's aliases are listed only for a job with a variable to launch.
+                    var aliases = variables.Any(v => v.Kind == "env") ? _variables.Aliases() : [];
+                    await JsonAsync(context, new { variables, aliases });
+                    break;
+                case ("PUT", "/api/launch"):
+                    await LaunchAsync(context);
+                    break;
                 case ("POST", "/api/sample"):
                     await SampleAsync(context);
                     break;
@@ -222,6 +237,35 @@ public sealed class StudioServer : IAsyncDisposable
         await JsonAsync(context, new { path = save.Path, hash, yaml = composed.Yaml });
     }
 
+    /// <summary>A job's path, confined to the folder, or null for none.</summary>
+    private string? JobPath(string? relative)
+    {
+        if (string.IsNullOrEmpty(relative)) return null;
+        _folder.ResolveForWrite(relative);
+        return relative;
+    }
+
+    /// <summary>
+    /// Keeps what each variable of a job is launched with: a keyring alias or a typed text. A value
+    /// from the keyring is never stored, only its alias.
+    /// </summary>
+    private async Task LaunchAsync(HttpContext context)
+    {
+        var launch = await BodyAsync<LaunchRequest>(context);
+        var job = JobPath(launch.Path) ?? throw new StudioRefusal(400, "Launch values belong to a job: name its path.");
+        var overrides = new Dictionary<string, StudioOverride>(StringComparer.Ordinal);
+        foreach (var (name, chosen) in launch.Overrides ?? [])
+        {
+            if (chosen is null || chosen.Keyring is null == chosen.Value is null)
+                throw new StudioRefusal(400, $"'{name}' is launched with either a keyring alias or a text.");
+            if (chosen.Value is { Length: > 65_536 })
+                throw new StudioRefusal(413, $"The text for '{name}' is too long.");
+            overrides[name] = chosen;
+        }
+        _local.WriteLaunch(job, overrides);
+        context.Response.StatusCode = StatusCodes.Status204NoContent;
+    }
+
     private async Task SampleAsync(HttpContext context)
     {
         if (!(context.Request.ContentType ?? "").StartsWith("application/json", StringComparison.OrdinalIgnoreCase))
@@ -229,21 +273,30 @@ public sealed class StudioServer : IAsyncDisposable
 
         string yaml;
         int rows;
+        string? path;
         try
         {
             using var body = await JsonDocument.ParseAsync(context.Request.Body, cancellationToken: context.RequestAborted);
             yaml = body.RootElement.GetProperty("yaml").GetString() ?? "";
             rows = body.RootElement.TryGetProperty("rows", out var r) && r.TryGetInt32(out var n) ? n : 10;
+            path = body.RootElement.TryGetProperty("path", out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
         }
         catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException)
         {
             throw new StudioRefusal(400, "A sample is asked as {\"yaml\": \"...\", \"rows\": n}.");
         }
 
+        // Every variable resolves before anything runs, and is named when it would not.
+        var launch = _variables.LaunchEnvironment(JobPath(path), yaml);
+
         if (!await _sampling.WaitAsync(0))
             throw new StudioRefusal(409, "A sample is already running: wait for it to finish.");
+        // The run reads ${{NAME}} from the environment, through its own resolver: each chosen value is
+        // set for this sample only, which no other runs beside, and the environment restored after.
+        var previous = launch.Keys.ToDictionary(k => k, Environment.GetEnvironmentVariable, StringComparer.Ordinal);
         try
         {
+            foreach (var (name, value) in launch) Environment.SetEnvironmentVariable(name, value);
             // Nobody watches the terminal for a prompt: a run that would ask one fails instead.
             using var _ = NonInteractiveGuard.Suppress();
             var json = await _tools.Sample(yaml, Math.Clamp(rows, 1, MaxRows), context.RequestAborted);
@@ -252,6 +305,7 @@ public sealed class StudioServer : IAsyncDisposable
         }
         finally
         {
+            foreach (var (name, value) in previous) Environment.SetEnvironmentVariable(name, value);
             _sampling.Release();
         }
     }
@@ -290,6 +344,10 @@ public sealed class StudioServer : IAsyncDisposable
     private sealed record DecomposeRequest(string? Yaml, JsonObject? Layout);
 
     private sealed record SaveRequest(string? Path, string? Hash, DesignModel? Model, bool AcceptErrors);
+
+    private sealed record VariablesRequest(string? Path, string? Yaml);
+
+    private sealed record LaunchRequest(string? Path, Dictionary<string, StudioOverride?>? Overrides);
 
     public async ValueTask DisposeAsync()
     {

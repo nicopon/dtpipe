@@ -166,9 +166,10 @@ public sealed class StudioFolder
 
 /// <summary>
 /// What the studio keeps for a job beside the folder's files, never in them and never in git: where
-/// its cards were drawn (<c>&lt;job&gt;-layout.json</c>), under <c>.dtpipe/studio/</c>, whose
-/// <c>.dtpipe</c> ignores itself. No directory on the way may be a link: a clone could carry a
-/// <c>.dtpipe</c> that points anywhere. <paramref name="job"/> is a path the folder already confined.
+/// its cards were drawn (<c>&lt;job&gt;-layout.json</c>) and what its variables are launched with
+/// (<c>&lt;job&gt;-launch.json</c>: a keyring alias or a typed text, never a keyring value), under
+/// <c>.dtpipe/studio/</c>, whose <c>.dtpipe</c> ignores itself. No directory on the way may be a link:
+/// a clone could carry a <c>.dtpipe</c> that points anywhere. A job is a path the folder confined.
 /// </summary>
 public sealed class StudioLocalFiles(StudioFolder folder)
 {
@@ -182,6 +183,21 @@ public sealed class StudioLocalFiles(StudioFolder folder)
 
     /// <summary>Refuses, before anything is written, a layout the studio could only keep through a link.</summary>
     public void CheckLayout(string job) => RefuseLinks(PathOf(job, "layout"));
+
+    private static readonly JsonSerializerOptions LaunchJson = new(JsonSerializerOptions.Web)
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+        WriteIndented = true,
+    };
+
+    public Dictionary<string, StudioOverride> ReadLaunch(string job)
+    {
+        try { return Read(job, "launch")?.Deserialize<Dictionary<string, StudioOverride>>(LaunchJson) ?? []; }
+        catch (JsonException) { return []; }
+    }
+
+    public void WriteLaunch(string job, IReadOnlyDictionary<string, StudioOverride> overrides) =>
+        Write(job, "launch", JsonSerializer.SerializeToNode(overrides, LaunchJson)!);
 
     private JsonNode? Read(string job, string kind)
     {

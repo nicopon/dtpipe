@@ -1236,6 +1236,13 @@ refuses a file that changed on disk since it was opened, never creates a folder,
 overwrites an existing file with a new job. Where each card sits is kept outside the job, in
 `.dtpipe/studio/<job>-layout.json` under the folder; `.dtpipe/` ignores itself in git.
 
+The Variables tab lists every `${{…}}` the job reads, by name, and whether something resolves it.
+The job keeps `${{NAME}}`; for a sample you may launch it with a keyring alias (see
+[Secret Management](#secret-management)) or a typed text, kept in
+`.dtpipe/studio/<job>-launch.json`. That file holds aliases and what you typed, never a value from
+the keyring, and the page is shown no value it was not given. A sample that would leave a variable
+or an alias unresolved is refused before it runs, naming each.
+
 ```bash
 dtpipe studio ./jobs              # prints the address to open, then serves until stopped
 dtpipe studio ./jobs --port 8765  # a fixed port instead of any free one
