@@ -21,15 +21,6 @@ public class DelegatedJobsTests
         Assert.Contains("only a runner does", answer.Report);
     }
 
-    [Fact]
-    public async Task A_host_that_is_no_runner_exports_nothing_for_the_coordinator()
-    {
-        var answer = await new DelegatedJobs("node-1", enabled: false, Unreachable).ExportAsync(["--input", "generate:5"]);
-
-        Assert.Null(answer.Yaml);
-        Assert.Contains("only a runner does", answer.Error);
-    }
-
     [Theory]
     [InlineData("../escape")]
     [InlineData("a/b")]

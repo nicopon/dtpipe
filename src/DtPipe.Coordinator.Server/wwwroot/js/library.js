@@ -1,6 +1,6 @@
 // Library: the pipelines kept in the coordinator's git repository, their plan and deployment
-// state, their history, and the ways in: a new pipeline, pasted YAML, or a dtpipe command line.
-import { ago, api, deploymentOf, esc, isActive, lastRunOf, store, toast } from "./core.js";
+// state and their history. A pipeline is written with dtpipe studio and published into it.
+import { ago, api, deploymentOf, esc, isActive, lastRunOf, toast } from "./core.js";
 import * as detail from "./library-detail.js";
 
 let host = null;
@@ -8,8 +8,6 @@ let entries = [];
 let historyOf = null;      // pipeline id whose history is unfolded
 let history = [];
 let shown = null;          // { commit, yaml, diff }
-let importing = false;
-let creating = false;      // the new-pipeline form is open
 let page = null;           // the detail page, when #/library/{id} is open
 
 export function mount(el, params) {
@@ -17,8 +15,6 @@ export function mount(el, params) {
   page = params[0] ? detail : null;
   if (page) { page.mount(el, params); return; }
   host.addEventListener("click", onClick);
-  host.addEventListener("input", onInput);
-  host.addEventListener("keydown", onKeydown);
   load();
 }
 
@@ -67,13 +63,12 @@ function render() {
   if (!host) return;
   const rows = entries.map((e) => `
     <tr>
-      <td><a href="#/designer/${encodeURIComponent(e.id)}" class="strong">${esc(e.title)}</a><div class="hint mono">${esc(e.id)}</div></td>
+      <td><a href="#/library/${encodeURIComponent(e.id)}" class="strong">${esc(e.title)}</a><div class="hint mono">${esc(e.id)}</div></td>
       <td class="wrap hint">${esc(e.description || "")}</td>
       <td>${planChip(e)} ${deploymentChip(e.id)}</td>
       <td>${runCell(e.id)}</td>
       <td class="hint">${esc(e.message || "")}<div>${esc(ago(e.updatedAt))}</div></td>
       <td class="actions-cell">
-        <a class="button small" href="#/designer/${encodeURIComponent(e.id)}">Design</a>
         <a class="button small" href="#/library/${encodeURIComponent(e.id)}" title="Its plan, its fragments and its runs">Open</a>
         ${deployRowActions(e)}
         <button class="small ghost" data-history="${esc(e.id)}">${historyOf === e.id ? "Hide history" : "History"}</button>
@@ -85,14 +80,8 @@ function render() {
   host.innerHTML = `
     <div class="view-head">
       <h1>Library</h1>
-      <p class="hint">Pipelines kept in the coordinator's own git repository. Each save is a commit; each one is a plain dtpipe job that also runs whole on one machine.</p>
-      <div class="actions">
-        <button class="primary" data-new>${creating ? "Cancel" : "New pipeline"}</button>
-        <button data-import>${importing ? "Close import" : "Import YAML or a command line"}</button>
-      </div>
+      <p class="hint">Pipelines kept in the coordinator's own git repository. Each save is a commit; each one is a plain dtpipe job that also runs whole on one machine. Write one with <code>dtpipe studio --coordinator</code> and publish it here.</p>
     </div>
-    ${creating ? newPanel() : ""}
-    ${importing ? importPanel() : ""}
     <section class="card">
       <table class="library">
         <tr><th>pipeline</th><th>description</th><th>state</th><th>last run</th><th>last change</th><th></th></tr>
@@ -117,123 +106,11 @@ function diffHtml(diff) {
     l.startsWith("+") && !l.startsWith("+++") ? `<span class="add">${l}</span>` : l.startsWith("-") && !l.startsWith("---") ? `<span class="del">${l}</span>` : l).join("\n");
 }
 
-// An id field with its rule beside it and its problem under it, checked as it is typed.
-function idField(inputId) {
-  return `<div class="row"><label>Id <input id="${inputId}" class="mono" placeholder="my-pipeline" autocomplete="off" spellcheck="false"></label>
-      <span class="hint">${ID_RULE}</span></div>
-      <p class="mismatch" id="${inputId}-problem" hidden></p>`;
-}
-
-function newPanel() {
-  return `
-    <section class="card import">
-      ${idField("new-id")}
-      <button class="primary" data-create>Open in the designer</button>
-    </section>`;
-}
-
-function importPanel() {
-  return `
-    <section class="card import">
-      ${idField("import-id")}
-      <div class="grid2">
-        <div><h3>A dtpipe job (YAML)</h3><textarea id="import-yaml" rows="10" spellcheck="false" placeholder="orders:\n  input: duck:\${{LAB_SALES_DB}}\n  ..."></textarea>
-          <button data-import-yaml>Open in the designer</button></div>
-        <div><h3>A dtpipe command line</h3><textarea id="import-command" rows="4" spellcheck="false" class="mono" placeholder="-i sqlite:\${{LAB_CRM_DB}} -q &quot;SELECT * FROM customers&quot; -o duck:\${{LAB_WAREHOUSE_DB}} --table t"></textarea>
-          <p class="hint">Converted by dtpipe's own <code>--export-job</code>, then taken apart into one card per step; a branch that reads or writes a brick becomes that brick.</p>
-          <button data-import-command>Convert and open</button></div>
-      </div>
-    </section>`;
-}
-
-function splitArgs(line) {
-  const args = [];
-  let current = "", quote = null, has = false;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (quote) {
-      if (c === quote) quote = null;
-      else if (c === "\\" && quote === '"' && i + 1 < line.length) current += line[++i];
-      else current += c;
-    } else if (c === "'" || c === '"') { quote = c; has = true; }
-    else if (/\s/.test(c)) { if (has || current) { args.push(current); current = ""; has = false; } }
-    else if (c === "\\" && i + 1 < line.length) { current += line[++i]; has = true; }
-    else { current += c; has = true; }
-  }
-  if (has || current) args.push(current);
-  if (args[0] === "dtpipe") args.shift();
-  return args;
-}
-
-const ID_RULE = "lowercase letters, digits and '-', starting with a letter or a digit, 63 at most";
-
-// What is wrong with an id, or null: the library's own rule (PipelineLibrary.IsValidId).
-function idProblem(id) {
-  if (!id) return "Give the pipeline an id.";
-  if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(id)) {
-    const bad = [...new Set(id.replace(/[a-z0-9-]/g, ""))].map((c) => (c === " " ? "a space" : `'${c}'`));
-    return bad.length ? `'${id}' is not a pipeline id: ${bad.join(", ")} not allowed (${ID_RULE}).`
-      : id.length > 63 ? `'${id}' is too long: 63 characters at most.`
-      : `'${id}' is not a pipeline id: it must start with a letter or a digit.`;
-  }
-  return entries.some((e) => e.id === id) ? `'${id}' already exists in the library.` : null;
-}
-
-// The id typed in the field inputId, or null with its problem shown under the field.
-function checkedId(inputId) {
-  const id = document.getElementById(inputId).value.trim();
-  const problem = idProblem(id);
-  const line = document.getElementById(`${inputId}-problem`);
-  line.textContent = problem || "";
-  line.hidden = !problem;
-  if (problem) document.getElementById(inputId).focus();
-  return problem ? null : id;
-}
-
-function onInput(e) {
-  if (e.target.id !== "new-id" && e.target.id !== "import-id") return;
-  const line = document.getElementById(`${e.target.id}-problem`);
-  const problem = e.target.value.trim() ? idProblem(e.target.value.trim()) : null;
-  line.textContent = problem || "";
-  line.hidden = !problem;
-}
-
-function onKeydown(e) {
-  if (e.target.id === "new-id" && e.key === "Enter") host.querySelector("[data-create]")?.click();
-}
-
-async function openDraft(id, yaml) {
-  const result = await api("/api/design/decompose", { yaml });
-  store.draft = { id, model: result.model };
-  location.hash = `#/designer/${encodeURIComponent(id)}`;
-}
-
 async function onClick(e) {
   const t = e.target.closest("button");
   if (!t) return;
   try {
-    if (t.dataset.new !== undefined) {
-      creating = !creating;
-      render();
-      if (creating) document.getElementById("new-id").focus();
-    } else if (t.dataset.create !== undefined) {
-      const id = checkedId("new-id");
-      if (!id) return;
-      creating = false;
-      store.draft = { id, model: { title: "Untitled pipeline", description: "", check: null, steps: [], layout: {} } };
-      location.hash = `#/designer/${encodeURIComponent(id)}`;
-    } else if (t.dataset.import !== undefined) {
-      importing = !importing;
-      render();
-    } else if (t.dataset.importYaml !== undefined || t.dataset.importCommand !== undefined) {
-      const id = checkedId("import-id");
-      if (!id) return;
-      let yaml = document.getElementById("import-yaml").value;
-      if (t.dataset.importCommand !== undefined) {
-        yaml = (await api("/api/pipelines/from-command", { args: splitArgs(document.getElementById("import-command").value) })).yaml;
-      }
-      await openDraft(id, yaml);
-    } else if (t.dataset.history) {
+    if (t.dataset.history) {
       const id = t.dataset.history;
       shown = null;
       if (historyOf === id) { historyOf = null; render(); return; }

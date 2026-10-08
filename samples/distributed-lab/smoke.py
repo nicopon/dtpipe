@@ -184,20 +184,6 @@ def library_pass(ctx):
             doc = call(f"/api/library/{pid}")
             check = ctx.witness("library-" + pid, doc["yaml"])
             plan = call(f"/api/library/{pid}/distribute", {"save": True, "message": "smoke: distribute"})["plan"]
-            # What the designer shows before saving is what the library distributes: the same fragments, nodes and edges.
-            # Versions differ for a hand-written seed (compose writes the job in its own key order), so they are
-            # compared on the designer's own text: composing what it composed gives the same fragments again.
-            model = call("/api/design/decompose", {"yaml": doc["yaml"]})["model"]
-            placed = call("/api/design/place", {"id": pid, "model": model})
-            if placed["errors"] or not placed["plan"]:
-                raise AssertionError(f"the designer's placement of {pid} failed: {placed['errors']}")
-            shape = lambda p, versions=False: sorted((f["name"], f["node"], sorted((e["direction"], e["alias"]) for e in f["edges"]),
-                                                      f["version"] if versions else None) for f in p["fragments"])
-            if shape(placed["plan"]) != shape(plan):
-                raise AssertionError(f"the designer's placement of {pid} differs from the library's: {shape(placed['plan'])} != {shape(plan)}")
-            again = call("/api/design/place", {"id": pid, "model": call("/api/design/decompose", {"yaml": call("/api/design/compose", model)["yaml"]})["model"]})
-            if shape(again["plan"], True) != shape(placed["plan"], True):
-                raise AssertionError(f"the designer's job for {pid} is not stable under compose: its fragment versions change")
             call(f"/api/library/{pid}/deploy", {})
             queued.append((pid, plan, check))
         except Exception as e:
@@ -363,12 +349,7 @@ def rights_pass():
             plan = call("/api/library/customers-anonymized/distribute", {})["plan"]
             if plan["deployable"] or "crm -> runner" not in (plan.get("flowRejection") or ""):
                 raise RuntimeError(f"plan not refused: {plan.get('flowRejection')}")
-            # The designer's placement refuses the same way, with the same words.
-            doc = call("/api/library/customers-anonymized")
-            placed = call("/api/design/place", {"id": "customers-anonymized", "model": call("/api/design/decompose", {"yaml": doc["yaml"]})["model"]})["plan"]
-            if placed["deployable"] or placed["flowRejection"] != plan["flowRejection"]:
-                raise RuntimeError(f"the designer's placement was not refused like the library's: {placed['flowRejection']}")
-            return "crm -> runner revoked: plan refused, in the library and in the designer"
+            return "crm -> runner revoked: plan refused"
         finally:
             call("/api/rights/matrix", {"matrix": matrix}, "PUT")
 
@@ -558,7 +539,8 @@ def rights_pass():
         expected = {
             "reader GET /api/library": (status(lambda: reader.call("/api/library")), 200),
             "reader PUT /api/rights/matrix": (status(lambda: reader.call("/api/rights/matrix", {"matrix": policy}, "PUT")), 403),
-            "designer POST /api/design/compose": (status(lambda: designer.call("/api/design/compose", {"title": "roles", "steps": []})), 200),
+            "reader POST /api/library/{id}/distribute": (status(lambda: reader.call("/api/library/customers-mirror/distribute", {})), 403),
+            "designer POST /api/library/{id}/distribute": (status(lambda: designer.call("/api/library/customers-mirror/distribute", {})), 200),
             "designer PUT /api/rights/matrix": (status(lambda: designer.call("/api/rights/matrix", {"matrix": policy}, "PUT")), 403),
             "designer GET /api/pipelines (lab mode)": (status(lambda: designer.call("/api/pipelines")), 403),
             "no role GET /api/nodes": (status(lambda: nobody.call("/api/nodes")), 403),
@@ -809,13 +791,6 @@ def bricks_pass():
                     pass
         return f"{len(names)} library pipelines accepted as written"
 
-    def import_command():
-        # A command line becomes a job through dtpipe's own --export-job, which a runner runs for the coordinator.
-        answer = call("/api/pipelines/from-command", {"args": ["--input", "generate:5", "--output", "csv:-"]})
-        if "generate:5" not in answer["yaml"]:
-            raise RuntimeError(f"the exported job does not hold the command: {answer['yaml'][:200]}")
-        return "a command line exported as a job by the runner"
-
     def sink_refuses():
         yaml = open(os.path.join(LIBRARY_SEED, "revenue-by-country.yaml")).read()
         wrong = yaml.replace("table: revenue_by_country\n      strategy: Recreate",
@@ -888,7 +863,6 @@ def bricks_pass():
     check("a sink brick by a hair", sink_by_a_hair)
     check("relays", relays)
     check("a library save's check", library_save_check)
-    check("a command line imported", import_command)
     check("a sink that refuses", sink_refuses)
     return failures[0]
 

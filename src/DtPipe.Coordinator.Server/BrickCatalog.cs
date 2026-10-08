@@ -21,7 +21,7 @@ public sealed record BrickView(
 /// brick's, never because of a name: a job stays a plain dtpipe job, and a brick its owner changed
 /// stops matching the pipelines written against its old form.
 /// </summary>
-public sealed class BrickCatalog(NodeInventory inventory) : IBrickLookup
+public sealed class BrickCatalog(NodeInventory inventory)
 {
     private sealed record Resolved(BrickView View, YamlMappingNode Branch, string Canonical, string Declared);
 
@@ -70,16 +70,6 @@ public sealed class BrickCatalog(NodeInventory inventory) : IBrickLookup
         }
         return null;
     }
-
-    DesignBrick? IBrickLookup.Find(string key) => Card(Find(key));
-    YamlMappingNode IBrickLookup.BranchOf(DesignBrick brick) => BranchOf(brick.Key);
-    DesignBrick? IBrickLookup.Match(YamlMappingNode branch) => Card(Match(branch));
-    DesignBrick? IBrickLookup.Contained(YamlMappingNode branch, string kind) =>
-        Card(Contained(branch, kind == StepKinds.Sink ? BrickKind.Sink : BrickKind.Source));
-
-    private static DesignBrick? Card(BrickView? view) => view is null
-        ? null
-        : new DesignBrick(view.Key, KindOf(view.Kind), view.Node, view.Version, view.Title, view.Online);
 
     private List<Resolved> Resolve()
     {

@@ -13,7 +13,6 @@ export const store = {
   connected: false,
   labMode: false, // the server's own word: the Lab view and the query panel exist only then
   me: null,       // { name, email, roles }: who is signed in, and what the server lets them do
-  draft: null,       // { id, model }: a pipeline imported but not saved yet, handed to the designer
 };
 
 const listeners = new Set();

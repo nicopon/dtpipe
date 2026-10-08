@@ -5,18 +5,9 @@ Writes one screenshot per step.
   0. Sign in: the coordinator's page sends the browser to the IdP's form, filled and submitted as
      the lab's admin, and comes back naming them with the admin role.
   1. Lab view: every catalog pipeline selected in turn, its graph and plan drawn.
-  2. Coordinator: each view rendered (nodes, library, a pipeline's page, designer, runs, access).
+  2. Coordinator: each view rendered (nodes, library, a pipeline's page with its job read only, runs, access).
   2b. Library: the row actions agree with the plans and deployments, and Open shows the pipeline's page.
-  3. Designer scenario: a pipeline built with the mouse from the palette - a source brick, a
-     Transform step, a sink brick, wired port to port; a wire picked up by its input end and
-     dropped in the void, another removed with its x button, both wired again - then given a
-     transformer, composed by the coordinator and validated by dtpipe. Nothing is saved.
-  4. Designer panels: the palette and inspector handles and the drawer handle dragged with the
-     mouse, each panel measured before and after.
-  6. Designer placement: the same unsaved pipeline switched to Placement (one frame per node, from
-     the plan the coordinator makes of the cards), its Fragments tab, and back to the canvas.
-  5. Designer zoom: the Transform card opened as a chain with its magnifier, edited and extended
-     there, and left by the breadcrumb.
+  3. No designer: no Designer entry in the navigation, no Design button, and no New or Import on the library.
 
 Usage: ui_check.py [lab-url] [out-dir]     (defaults: http://127.0.0.1:5180, .state/ui)
 The lab must be up. Exits 1 if any step fails.
@@ -72,8 +63,8 @@ def coordinator_views(browser):
     checks = [
         ("nodes", "document.querySelectorAll('.node-card').length > 0 && document.querySelectorAll('.brick').length > 0"),
         ("library", f"document.querySelectorAll('table.library tr').length === {len(library) + 1}"),
-        (f"designer/{pid}", "document.querySelectorAll('.dcard').length > 0 && document.querySelector('#d-yaml')?.textContent.length > 0"),
-        (f"library/{pid}", "document.querySelectorAll('.xbox').length > 0 && document.querySelectorAll('.lanes svg path').length > 0"),
+        (f"library/{pid}", "document.querySelectorAll('.xbox').length > 0 && document.querySelectorAll('.lanes svg path').length > 0"
+                           " && (document.getElementById('x-job')?.textContent || '').length > 0"),
         ("runs", "!!document.getElementById('r-journal') && !!document.getElementById('r-deployments')"),
         ("access", "document.querySelectorAll('table.matrix.edit input').length > 0 && document.querySelectorAll('[data-identity]').length > 0"),
     ]
@@ -113,145 +104,25 @@ def library_page(browser):
            f"rows={len(entries)} opened={opened} no distribution entry={gone}" + (f"  wrong: {wrong}" if wrong else "") + (f"  errors: {errors}" if errors else ""), "")
 
 
-def designer_scenario(browser):
-    bricks = SESSION.call("/api/bricks")
-    source = next(b for b in bricks if b["key"] == "node-1/customer-countries")
-    sink = next(b for b in bricks if b["key"] == "node-4/dim-customers")
-    draft = {"id": "ui-scenario", "model": {"title": "UI scenario", "description": "", "check": None, "steps": [], "layout": {}}}
+def no_designer(browser):
+    # The coordinator writes no job: the person writes it with dtpipe studio and publishes it.
+    entries = SESSION.call("/api/library")
     browser.console.clear()
-    browser.js(f"window.lab.store.draft = {json.dumps(draft)}; location.hash = '#/designer/ui-scenario'")
-    if not browser.wait_for("!!document.querySelector('#d-palette .pal-item')", 20):
-        report(False, "designer scenario", "palette not rendered", "")
-        return
-
-    # Three cards from the palette's + buttons, each placed in its kind's column.
-    for selector in (f'.pal-item[data-brick="{source["key"]}"] [data-add]', '.pal-item[data-kind="transform"] [data-add]',
-                     f'.pal-item[data-brick="{sink["key"]}"] [data-add]'):
-        browser.js(f"document.querySelector({json.dumps(selector)}).click()")
-    browser.wait_for("document.querySelectorAll('.dcard').length === 3", 10)
-
-    # Wires, dragged with the mouse from an output port to an input port.
-    card = lambda alias: f'.dcard[data-alias="{alias}"]'
-    browser.drag(browser.center(card(source["id"]) + " .port.out"), browser.center(card("transform") + " .port.in"))
-    browser.drag(browser.center(card("transform") + " .port.out"), browser.center(card(sink["id"]) + " .port.in"))
-
-    wires = "document.querySelectorAll('.dedge-hit').length"
-    wired = browser.wait_for(f"{wires} === 2", 5)
-
-    # Picked up by its input end and dropped in the void: removed. Wired again.
-    sink_in = browser.center(card(sink["id"]) + " .port.in")
-    browser.drag(sink_in, (sink_in[0] + 40, sink_in[1] + 260))
-    dropped = browser.wait_for(f"{wires} === 1", 5)
-    browser.drag(browser.center(card("transform") + " .port.out"), browser.center(card(sink["id"]) + " .port.in"))
-
-    # Selected by a click on its middle, removed with its x button. Wired again.
-    mid = browser.js("""(() => { const p = [...document.querySelectorAll('.dedge-hit')].find(p => p.dataset.to === 'transform');
-        const m = p.getPointAtLength(p.getTotalLength() / 2); const r = document.getElementById('d-inner').getBoundingClientRect();
-        return [r.left + m.x, r.top + m.y]; })()""")
-    browser.mouse("mouseMoved", *mid); browser.mouse("mousePressed", *mid); browser.mouse("mouseReleased", *mid)
-    browser.wait_for("!!document.querySelector('.edge-delete')", 5)
-    x, y = browser.center(".edge-delete")
-    browser.mouse("mousePressed", x, y); browser.mouse("mouseReleased", x, y)
-    crossed = browser.wait_for(f"{wires} === 1", 5)
-    browser.drag(browser.center(card(source["id"]) + " .port.out"), browser.center(card("transform") + " .port.in"))
-    rewired = browser.wait_for(f"{wires} === 2", 5)
-    wiring = wired and dropped and crossed and rewired
-
-    # A transformer on the Transform card: project, dropping the country.
-    x, y = browser.center(card("transform") + " .dcard-sub")
-    browser.mouse("mousePressed", x, y); browser.mouse("mouseReleased", x, y)
-    browser.wait_for("!!document.querySelector('#d-inspector [data-tadd]')", 5)
-    browser.js("document.querySelector('#d-inspector [data-tadd]').click()")
-    browser.wait_for("!!document.querySelector('#d-inspector .kv[data-section=\"options\"] [data-kv-add]')", 5)
-    browser.js("document.querySelector('#d-inspector .kv[data-section=\"options\"] [data-kv-add]').click()")
-    browser.js("""{ const row = [...document.querySelectorAll('#d-inspector .kv[data-section="options"] .kv-row')].pop();
-        const [k, v] = row.querySelectorAll('input');
-        k.value = 'drop'; k.dispatchEvent(new Event('input', { bubbles: true }));
-        v.value = 'country'; v.dispatchEvent(new Event('input', { bubbles: true })); }""")
-
-    expected = [f"from: {source['id']}", "from: transform", "drop: country", "table: dim_customers"]
-    composed = browser.wait_for(
-        "(() => { const y = document.getElementById('d-yaml')?.textContent || '';"
-        f" return {json.dumps(expected)}.every(s => y.includes(s)); }})()", 15)
-    browser.js("document.getElementById('d-validate').click()")
-    validated = browser.wait_for("!!document.querySelector('.drawer-status')?.textContent.includes('dtpipe accepts it')", 60)
+    browser.js("location.hash = '#/library'")
+    browser.wait_for(f"document.querySelectorAll('table.library [data-run]').length === {len(entries)}", 20)
+    on_list = browser.js("({nav: !!document.querySelector('#nav a[data-view=\"designer\"]'),"
+                         " design: !![...document.querySelectorAll('a, button')].find(e => /^design$/i.test(e.textContent.trim())),"
+                         " creation: !!document.querySelector('[data-new], [data-import]')})")
+    browser.js(f"location.hash = '#/library/{entries[0]['id']}'")
+    browser.wait_for("!!document.getElementById('x-job')", 20)
+    on_page = browser.js("({design: !![...document.querySelectorAll('a, button')].find(e => /^design$/i.test(e.textContent.trim())),"
+                         " editable: !!document.querySelector('#x-job').closest('textarea')})")
+    browser.js("location.hash = '#/designer'")
+    time.sleep(0.5)
+    fallback = browser.js("document.querySelector('#nav a.active')?.dataset.view")
     errors = page_errors(browser)
-    shot = browser.shot(os.path.join(OUT, "designer-scenario.png"))
-    detail = f"wiring={wiring} composed={composed} validated={validated}" + (f"  errors: {errors}" if errors else "")
-    if not composed:
-        detail += "  yaml: " + (browser.js("document.getElementById('d-yaml')?.textContent") or "")[:400]
-    report(wiring and composed and validated and not errors, "designer scenario", detail, shot)
-
-
-def designer_panels(browser):
-    # The scenario leaves its pipeline open: every panel is measured, dragged by its handle, measured again.
-    size = lambda selector, axis: browser.js(f"document.querySelector({json.dumps(selector)}).getBoundingClientRect().{axis}")
-    cases = (("palette", "#d-palette", "width", ".split-pal", (60, 0)),
-             ("inspector", "#d-inspector", "width", ".split-insp", (-60, 0)),
-             ("drawer", "#d-drawer", "height", ".split-row", (0, -60)))
-    for name, panel, axis, handle, (dx, dy) in cases:
-        before = size(panel, axis)
-        x, y = browser.center(handle)
-        browser.drag((x, y), (x + dx, y + dy))
-        browser.wait_for(f"Math.abs(document.querySelector({json.dumps(panel)}).getBoundingClientRect().{axis} - {before}) > 20", 5)
-        after = size(panel, axis)
-        report(abs(after - before) > 20, "designer resize " + name, f"{axis} {before:.0f} -> {after:.0f}", "")
-    errors = page_errors(browser)
-    shot = browser.shot(os.path.join(OUT, "designer-resized.png"))
-    report(not errors, "designer resize errors", "none" if not errors else f"errors: {errors}", shot)
-
-
-def designer_zoom(browser):
-    # The scenario's Transform card carries one transformer (project, dropping the country).
-    click = lambda x, y: (browser.mouse("mouseMoved", x, y), browser.mouse("mousePressed", x, y), browser.mouse("mouseReleased", x, y))
-    click(*browser.center('.dcard[data-alias="transform"] .dcard-zoom'))
-    zoomed = browser.wait_for("document.querySelector('#d-chain .crumbs')?.textContent.replace(/\\s/g, '').includes('UIscenario›transform')"
-                              " && document.querySelectorAll('#d-chain .chain-item').length === 1"
-                              " && document.querySelector('#d-chain .chain-item').textContent.includes('project')"
-                              " && document.querySelectorAll('.dcard').length === 3 && document.getElementById('d-inner').hidden", 10)
-    report(zoomed, "designer zoom", "breadcrumb and a one-transformer chain", "")
-
-    # An edit in the zoom reaches the YAML: the chain edits the pipeline's own model.
-    browser.js("""{ const row = [...document.querySelectorAll('#d-inspector .kv[data-section="options"] .kv-row')].pop();
-        const v = row.querySelectorAll('input')[1]; v.value = 'customer_id'; v.dispatchEvent(new Event('input', { bubbles: true })); }""")
-    edited = browser.wait_for("document.getElementById('d-yaml')?.textContent.includes('drop: customer_id')", 15)
-    # A transformer added at the end of the chain, then removed from the inspector.
-    browser.js("document.querySelector('#d-chain [data-chain-add]').click()")
-    added = browser.wait_for("document.querySelectorAll('#d-chain .chain-item').length === 2"
-                             " && document.querySelector('#d-chain .chain-item.selected')?.dataset.t === '1'", 5)
-    shot = browser.shot(os.path.join(OUT, "designer-zoom.png"))
-    browser.js("document.querySelector('#d-inspector [data-tremove]').click()")
-    removed = browser.wait_for("document.querySelectorAll('#d-chain .chain-item').length === 1", 5)
-    report(edited and added and removed, "designer zoom edits", f"edited={edited} added={added} removed={removed}", shot)
-
-    # The pipeline crumb leaves the zoom: the canvas, with its three cards, is back.
-    browser.js("document.querySelector('#d-chain [data-crumb]').click()")
-    left = browser.wait_for("document.getElementById('d-chain').hidden && !document.getElementById('d-inner').hidden"
-                            " && document.querySelectorAll('.dcard').length === 3", 5)
-    errors = page_errors(browser)
-    report(left and not errors, "designer zoom leave", "canvas back" if left else "still zoomed" + (f"  errors: {errors}" if errors else ""), "")
-
-
-def designer_placement(browser):
-    # The scenario's pipeline is still unsaved: its placement comes from /api/design/place, never the library.
-    browser.js("document.getElementById('d-mode-place').click()")
-    placed = browser.wait_for("!document.getElementById('d-place').hidden && document.getElementById('d-inner').hidden"
-                              " && document.querySelectorAll('#d-place .xbox').length === 3"
-                              " && document.querySelectorAll('#d-place .lanes svg path.edge').length === 2", 15)
-    nodes = browser.js("[...document.querySelectorAll('#d-place .xbox .node-name')].map(n => n.textContent).sort().join(',')")
-    shot = browser.shot(os.path.join(OUT, "designer-placement.png"))
-    report(placed and nodes == "node-1,node-4,runner-1", "designer placement", f"frames on {nodes}", shot)
-
-    browser.js("document.querySelector('#d-drawer [data-tab=\"fragments\"]').click()")
-    listed = browser.wait_for("document.querySelectorAll('#d-drawer .frag-card').length === 3", 10)
-    browser.js("document.querySelector('#d-drawer [data-tab=\"problems\"]').click()")
-    clean = browser.wait_for("!document.querySelector('#d-drawer .msgs.errors') && !!document.querySelector('#d-drawer .drawer-status')", 5)
-    browser.js("document.getElementById('d-mode-canvas').click()")
-    back = browser.wait_for("document.getElementById('d-place').hidden && !document.getElementById('d-inner').hidden"
-                            " && document.querySelectorAll('.dcard').length === 3", 5)
-    errors = page_errors(browser)
-    report(listed and clean and back and not errors, "designer placement tabs",
-           f"fragments={listed} problems clean={clean} canvas back={back}" + (f"  errors: {errors}" if errors else ""), "")
+    gone = not any(on_list.values()) and not any(on_page.values()) and fallback == "library"
+    report(gone and not errors, "no designer", f"list={on_list} page={on_page} #/designer -> {fallback}" + (f"  errors: {errors}" if errors else ""), "")
 
 
 def sign_in(browser):
@@ -272,10 +143,7 @@ try:
     lab_view(browser)
     coordinator_views(browser)
     library_page(browser)
-    designer_scenario(browser)
-    designer_panels(browser)
-    designer_zoom(browser)
-    designer_placement(browser)
+    no_designer(browser)
 finally:
     browser.close()
 sys.exit(1 if failed else 0)

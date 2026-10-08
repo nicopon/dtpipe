@@ -39,7 +39,7 @@ open http://127.0.0.1:5180          # sign in as labadmin / labadminpwd; the Lab
 | `./lab.sh status` | which processes run, and what the coordinator sees of each node |
 | `./lab.sh smoke [lab\|sandbox\|library\|rights\|faults\|bricks] [id…]` | runs the end-to-end check, optionally one pass or some pipelines only; restarts the node hosts in the mode each pass needs |
 | `./lab.sh nodes strict\|sandbox` | restarts the node hosts in that mode after undoing every deployment (`LAB_NODE_SANDBOX=1 ./lab.sh up` starts them in sandbox mode) |
-| `./lab.sh ui` | drives both pages in headless Chrome, a designer scenario, its panels, its zoom and its placement included; screenshots to `.state/ui/` |
+| `./lab.sh ui` | drives both pages in headless Chrome, the library without any designer entry, a pipeline's page with its job read only; screenshots to `.state/ui/` |
 | `./lab.sh seed` | rebuilds the databases (`LAB_SCALE=5` multiplies the row counts) |
 | `./lab.sh logs` | follows every log |
 | `./lab.sh down` / `reset` | stops everything / also deletes `.state/` |
@@ -181,17 +181,15 @@ python3 tools/idp_check.py          # discovery, both flows, and the refusals th
 | View | Does |
 |---|---|
 | Nodes | every node, its bricks (schema, version, preview), the fragments it hosts, the flow matrix |
-| Library | the pipelines kept, their plan and deployment state, last run, git history, diff, restore, import (YAML or a command line) |
-| Designer | a palette of bricks and steps (Transform, SQL, Merge), a canvas wired port to port, an inspector per card, the composed YAML to copy or edit |
+| Library | the pipelines kept, their plan and deployment state, last run, git history, diff, restore; a pipeline's page shows its plan, its fragments and its job, read only. A pipeline is written with `dtpipe studio --coordinator` and published here |
 | Distribution | the plan placed automatically, drawn in lanes (sources, runner, sinks); save it, deploy, run |
 | Runs | deployments, the runs in flight and the queue, the journal with each run's report, node events, a query on any database |
 | Access | the trusted IdP, the hosts waiting for approval, identities (node name, groups, enabled, reconnect), the editable flow matrix, the audit |
 
 **A pipeline is a plain dtpipe job**, one branch per card, that also runs whole on one machine
 (`smoke.py` uses it as the witness). A branch *is* a brick when its content equals the brick's:
-no reference in the YAML, and a brick its owner changes stops matching. Importing a job takes
-each branch apart around the bricks it contains (a branch reading a brick, transforming, then
-writing a brick becomes three cards).
+no reference in the YAML, and a brick its owner changes stops matching. `dtpipe studio` takes a job apart around the bricks it contains (a branch reading a brick,
+transforming, then writing a brick becomes three cards).
 
 **Distribution is automatic**: a brick runs on its node, every other branch on the runner, and a
 source wired straight into a sink goes directly, without the runner. `PlanBuilder` then builds
@@ -210,9 +208,6 @@ and writes no brick declares, so it needs the sandbox mode: `./lab.sh nodes sand
 chip). A sandbox node accepts a job as written, which still may only read and write, through any
 reader or writer. The switch belongs to the host's own environment, and only the Lab view's manual
 planning ever sends a job as written.
-
-In the designer, a wire is moved or removed by its input end: drag it off the input port and drop
-it on another input, or anywhere else to remove it. A selected wire also shows a × to remove it.
 
 **The library** is a git repository under `.state/library`, started from `library-seed/`: each
 save and each saved plan is a commit. Several pipelines may be deployed at once. Their runs are in
@@ -254,7 +249,7 @@ between the witness and the lab's warehouse.
 ```
 
 **Planning** (`PlanBuilder`) turns a monolithic job into one fragment per node, in two steps; the
-Lab view gives it cuts and a placement, the Library and the designer only the placement `AutoPlacer`
+Lab view gives it cuts and a placement, the Library only the placement `AutoPlacer`
 chose:
 
 1. *Cuts inside a branch* are `dtpipe split --at k`, run by the node whose data the branch reads.
@@ -279,7 +274,7 @@ afterwards (a fresh instance each) before it accepts the next run.
 ## Limits
 
 - Everything runs on one machine, but nothing relies on it: the coordinator never opens a node's
-  database. A cut, the query panel, a brick preview and the designer's check are each read by the
+  database. A cut, the query panel, a brick preview and a library save's check are each read by the
   node that hosts the data; only `smoke.py`'s witness reads the seeded files directly.
 - People sign in through `Lab.Idp`: `labadmin`, `labdesigner` and `labreader` (password: the name
   followed by `pwd`) hold the coordinator's three roles; any other name signs in with none. Tokens last 12 hours
@@ -294,7 +289,7 @@ afterwards (a fresh instance each) before it accepts the next run.
   in flight (the library and the finished runs of the run journal survive), and the node hosts keep
   running the lost runs' fragments until they are restarted. After a coordinator restart, restart the lab (`./lab.sh down`, then
   `./lab.sh up`); nothing reconstructs a run from the nodes reconnecting.
-- The designer knows a source brick's columns, not those after a step: dtpipe offers no schema of
+- A studio knows a source brick's columns, not those after a step: dtpipe offers no schema of
   a job's branch without running it.
 - `lab.sh` needs bash. The node host itself uses no POSIX-only API, but the lab is not tested on
   Windows.
@@ -313,8 +308,7 @@ sign a person in and out.
 | `GET /api/me`, `/api/info` | who is signed in and with which roles; whether the server runs in lab mode |
 | `GET /api/nodes`, `/api/bricks`, `/api/flow-matrix`, `/api/pipelines`, `/api/state` | what the pages draw |
 | `POST /api/bricks/{node}/{id}/preview` | a few rows, read by the node that owns the brick |
-| `POST /api/design/compose`, `/decompose`, `/validate` | cards → job, job → cards, `dtpipe --dry-run 1` over one row per source brick sent by its node, then each sink brick's node checks its target |
-| `GET /api/library` · `GET`/`PUT`/`DELETE /api/library/{id}` | pipelines; `PUT {yaml, layout, message}` commits |
+| `GET /api/library` · `GET`/`PUT`/`DELETE /api/library/{id}` | pipelines; `PUT {yaml, layout, message}` commits what a check accepted: `dtpipe --dry-run 1` over one row per source brick sent by its node, then each sink brick's node checks its target (422 and nothing written otherwise) |
 | `GET /api/library/{id}/history`, `/at/{commit}` | commits; the job, layout and diff at one |
 | `POST /api/library/{id}/distribute` | `{save?, message?}` → the automatic plan, saved as a commit on request |
 | `POST /api/library/{id}/deploy` | deploys the saved plan (409 if the job changed since) |
@@ -327,6 +321,5 @@ sign a person in and out.
 | `POST /api/runs` · `GET /api/runs`, `/api/runs/queue` | `{pipelineId?, pins?}` queues a run; the journal; in flight and queued |
 | `POST /api/runs/cancel` | `{runId?}`: a run in flight or queued; with no id, the one in flight (409 when several are) |
 | `POST /api/fragments/{name}/kill`, `/variant` | fault injection |
-| `POST /api/pipelines/from-command` | `{args: [...]}` → YAML through `--export-job`, run by a runner (the coordinator runs no dtpipe; none online, no import) |
 | `POST /api/query` | `{variable, sql}` → CSV of a node's database, read by that node |
 | `GET /api/events` | server-sent events: nodes, fragment states, logs, bytes, runs |

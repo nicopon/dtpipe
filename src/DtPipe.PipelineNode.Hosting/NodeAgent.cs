@@ -92,7 +92,6 @@ internal sealed class NodeAgent : BackgroundService
         hub.On<string, string, SinkCheck>(NodeChannel.CheckSink, (id, contract) => _bricks.CheckSinkAsync(id, contract));
         hub.On<string, string, NodeResponse>(NodeChannel.Request, (name, payload) => AnswerAsync(name, payload));
         hub.On<JobCheck, JobCheckResult>(NodeChannel.ValidateJob, check => _jobs.ValidateAsync(check));
-        hub.On<string[], ExportedJob>(NodeChannel.ExportJob, args => _jobs.ExportAsync(args));
         hub.Reconnected += async _ => await AnnounceAsync();
         // A connection the coordinator closes (a reconnect it asked for, an announcement it refused)
         // is not retried by SignalR's own policy: the reconnect loop starts it again, so a node the

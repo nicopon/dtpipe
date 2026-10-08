@@ -34,11 +34,10 @@ public static class NodeChannel
     // query a dataset and to cut a branch this way; a host that registered nothing answers that it does not.
     public const string Request = nameof(Request);
 
-    // Coordinator -> runner, answered: the dtpipe runs the coordinator no longer makes itself. A designer's
-    // job checked over one-row samples with its writers neutralised, and a command line turned into a job.
-    // Only a host that runs any fragment answers them.
+    // Coordinator -> runner, answered: the dtpipe run the coordinator no longer makes itself. A library
+    // save's job checked over one-row samples with its writers neutralised. Only a host that runs any
+    // fragment answers it.
     public const string ValidateJob = nameof(ValidateJob);
-    public const string ExportJob = nameof(ExportJob);
 }
 
 /// <summary>
@@ -111,9 +110,6 @@ public sealed record JobCheck(string Job, IReadOnlyDictionary<string, byte[]> Sa
 
 /// <summary>What <c>ValidateJob</c> answers: whether dtpipe accepts the job, its report when it does not, and each sink's contract by alias.</summary>
 public sealed record JobCheckResult(bool Ok, string Report, IReadOnlyDictionary<string, string> Contracts);
-
-/// <summary>What <c>ExportJob</c> answers: the job dtpipe's <c>--export-job</c> wrote for a command line, or why it did not.</summary>
-public sealed record ExportedJob(string? Yaml, string? Error);
 
 /// <summary>What a <c>Request</c> answers: the handler's payload (JSON), or why the host does not answer it.</summary>
 public sealed record NodeResponse(string? Payload, string? Error);

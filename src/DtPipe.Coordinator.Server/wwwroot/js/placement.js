@@ -1,6 +1,5 @@
 // Placement: a plan drawn in lanes (sources, runner, sinks), one frame per fragment in its node's
-// colour, the edges between them, and the fragments' jobs. Shared by the library's detail page and
-// the designer's Placement mode, so one drawing serves both.
+// colour, the edges between them, and the fragments' jobs.
 import { esc, fmt, nodeColor, store } from "./core.js";
 
 const BOX_W = 290;

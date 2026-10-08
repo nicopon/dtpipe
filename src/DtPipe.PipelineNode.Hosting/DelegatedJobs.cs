@@ -5,14 +5,13 @@ using DtPipe.Coordinator.Contracts;
 namespace DtPipe.PipelineNode.Hosting;
 
 /// <summary>
-/// The dtpipe runs the coordinator asks of a runner because it runs none itself: a designer's job
-/// dry-run over one-row samples, and a command line exported as a job. Only a host that runs any
-/// fragment answers; any other says so. Each request works in a directory of its own, removed after.
+/// The dtpipe run the coordinator asks of a runner because it runs none itself: a library save's job
+/// dry-run over one-row samples. Only a host that runs any fragment answers; any other says so. Each
+/// request works in a directory of its own, removed after.
 /// </summary>
 internal sealed partial class DelegatedJobs(string node, bool enabled, DtPipeCommand dtpipe)
 {
     private static readonly TimeSpan DryRunTimeout = TimeSpan.FromSeconds(60);
-    private static readonly TimeSpan ExportTimeout = TimeSpan.FromSeconds(30);
 
     private string Refused => $"{node} runs no job for the coordinator: only a runner does.";
 
@@ -52,29 +51,6 @@ internal sealed partial class DelegatedJobs(string node, bool enabled, DtPipeCom
         catch (Exception ex)
         {
             return new JobCheckResult(false, ex.Message, new Dictionary<string, string>());
-        }
-        finally
-        {
-            try { Directory.Delete(dir, recursive: true); } catch (IOException) { }
-        }
-    }
-
-    public async Task<ExportedJob> ExportAsync(string[] args)
-    {
-        if (!enabled) return new ExportedJob(null, Refused);
-        var dir = Path.Combine(dtpipe.WorkingDirectory, "exports", Guid.NewGuid().ToString("N"));
-        try
-        {
-            Directory.CreateDirectory(dir);
-            var jobPath = Path.Combine(dir, "job.yaml");
-            var result = await dtpipe.RunAsync([.. args, "--export-job", jobPath], CancellationToken.None, ExportTimeout, dir);
-            return result.Succeeded && File.Exists(jobPath)
-                ? new ExportedJob(await File.ReadAllTextAsync(jobPath), null)
-                : new ExportedJob(null, result.Diagnostic);
-        }
-        catch (Exception ex)
-        {
-            return new ExportedJob(null, ex.Message);
         }
         finally
         {

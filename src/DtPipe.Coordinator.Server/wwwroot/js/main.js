@@ -2,13 +2,12 @@
 import { $, addLog, bytes, start, store, subscribe, toast } from "./core.js";
 import * as nodes from "./nodes.js";
 import * as library from "./library.js";
-import * as designer from "./designer.js";
 import * as runs from "./runs.js";
 import * as access from "./access.js";
 
-const views = { nodes, library, designer, runs, access };
+const views = { nodes, library, runs, access };
 
-// For scripted checks (tools/ui_check.py): the live store, to hand the designer a draft.
+// For scripted checks (tools/ui_check.py): the live store.
 window.lab = { store };
 let current = null;
 

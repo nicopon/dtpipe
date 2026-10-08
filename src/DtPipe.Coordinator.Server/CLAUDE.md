@@ -4,7 +4,7 @@ Mechanics for editing the coordinator's server. The rules themselves are in the 
 the hub, the barrier and admission are `DtPipe.Coordinator`'s (`src/DtPipe.Coordinator/CLAUDE.md`).
 
 The server hosts `DtPipe.Coordinator` (`AddCoordinatorHub`) and adds what a person needs around it:
-the node channel (`NodeChannel`, `NodeChannelHub`), bricks, the designer, the git-backed library,
+the node channel (`NodeChannel`, `NodeChannelHub`), bricks, the git-backed library,
 automatic distribution, deployments and the run queue, rights, and the pages. Its settings are the
 `Coordinator` configuration section (`CoordinatorServerOptions`), from the environment first.
 
@@ -62,8 +62,8 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   (`SampleBrick`, written by the `arrow:-` writer its fragment uses), a runner dry-runs the job as
   the runner will see it (`ValidateJob`), and each sink brick's node checks its target against the contract that
   reaches it (`CheckSink`). A branch that reaches a node's data without being its brick is refused
-  before anything runs. **The server runs no dtpipe**: a library save's check and the import of a
-  command line (`ExportJob`) go to a runner, and with none online they refuse. A node announces a
+  before anything runs. **The server runs no dtpipe**: a library save's check goes to a runner,
+  and with none online it refuses. A node announces a
   variable's name, never its value. `[local: the lab's smoke.py bricks — a library save's check, a sink that refuses;
   sandbox — a cut on its node]`
 - **What `dtpipe studio` calls is a contract** (`DtPipe.Jobs/Coordinator`: `CoordinatorApi`, the
@@ -104,21 +104,18 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   `AutoPlacer` only chooses a placement for `PlanBuilder` and cuts nothing. `[local: the lab's smoke.py]`
 - **A brick is matched by content, never by name.** A branch is a brick when its canonical form
   (`BrickRules.Canonical`) equals the one its node declares; a pipeline stays a plain dtpipe job with
-  no reference to a brick in it. `DesignService.Decompose` may take an imported branch apart
-  around the bricks it contains (authoring, before anything is saved); the planner never does.
+  no reference to a brick in it. `dtpipe studio` may take an imported branch apart around the bricks
+  it contains (authoring, before anything is saved, through the recognition this server answers); the
+  planner never does.
   `[local: the lab's smoke.py, ui_check.py]`
 - **A fragment declares each edge alias once**, so a branch that receives an edge under its own
   alias (a cut's tail) sends on through a relay, never with `output: arrow:-` on itself.
   `[local: the lab's smoke.py lab]`
-- **The designer's model is dtpipe's** (`DtPipe.Jobs`, rule in the root `CLAUDE.md`). The server
-  offers `BrickCatalog` as its `IBrickLookup` and maps the page's `check` to the job's `lab-check:`
-  directive (`PageDesignModel`); it adds no rule of its own to the cards. A brick's canonical form
-  and version are pinned by `BrickFormTests`: changing either gives every brick a new version.
-  `[local: DtPipe.Coordinator.Server.Tests, the lab's smoke.py, ui_check.py]`
-- **A designer's placement is the library's placement.** `/api/design/place` composes the cards
-  and hands the job to `AutoPlacer` like `/api/library/{id}/distribute`, saves nothing and accepts
-  an id not yet in the library. It cuts nothing, so it asks no node and starts no `dtpipe`; keep
-  it so. `[local: the lab's smoke.py library]`
+- **The server designs nothing.** A pipeline reaches the library by a save that is checked
+  (`PUT /api/library/{id}`) from `dtpipe studio`, whose designer is `DtPipe.Jobs`' (rule in the root
+  `CLAUDE.md`); the pages list, read, restore, place and run it, and show its job read only. A
+  brick's canonical form and version are pinned by `BrickFormTests`: changing either gives every
+  brick a new version. `[local: DtPipe.Coordinator.Server.Tests, the lab's smoke.py, ui_check.py]`
 - **A `PipelineNode` serves one run.** `DeploymentManager` re-arms every fragment of a pipeline
   after its run, and holds that deployment's gate from before it reports the run finished until
   the fragments are registered again, so no run starts on a spent instance.

@@ -507,27 +507,6 @@ async function runQuery() {
   }
 }
 
-// ---------------------------------------------------------------- command line
-
-function splitArgs(line) {
-  const args = [];
-  let current = "", quote = null, has = false;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (quote) {
-      if (c === quote) quote = null;
-      else if (c === "\\" && quote === '"' && i + 1 < line.length) current += line[++i];
-      else current += c;
-    } else if (c === "'" || c === '"') { quote = c; has = true; }
-    else if (/\s/.test(c)) { if (has || current) { args.push(current); current = ""; has = false; } }
-    else if (c === "\\" && i + 1 < line.length) { current += line[++i]; has = true; }
-    else { current += c; has = true; }
-  }
-  if (has || current) args.push(current);
-  if (args[0] === "dtpipe") args.shift();
-  return args;
-}
-
 // ---------------------------------------------------------------- wiring
 
 function useCustomYaml(yaml, title) {
@@ -545,21 +524,12 @@ function bind() {
     selectPipeline(state.catalog.find((x) => x.id === e.target.value));
   });
   $("toggle-yaml").addEventListener("click", () => { $("yaml-editor").hidden = !$("yaml-editor").hidden; });
-  $("toggle-command").addEventListener("click", () => { $("command-editor").hidden = !$("command-editor").hidden; });
   $("reset-layout").addEventListener("click", () => {
     const entry = state.catalog.find((x) => x.id === state.pipeline?.id);
     if (entry) selectPipeline(entry);
     else { state.cuts = []; state.placement = {}; replan(); }
   });
   $("apply-yaml").addEventListener("click", () => useCustomYaml($("yaml-text").value, "Custom job"));
-  $("apply-command").addEventListener("click", async () => {
-    try {
-      const { yaml } = await api("/api/pipelines/from-command", { args: splitArgs($("command-text").value) });
-      $("yaml-text").value = yaml;
-      $("yaml-editor").hidden = false;
-      useCustomYaml(yaml, "From a command line");
-    } catch (e) { toast(e.message); }
-  });
 
   $("graph").addEventListener("change", (e) => {
     const unit = e.target.dataset.place;

@@ -46,7 +46,6 @@ builder.Services.AddSingleton<BrickCatalog>();
 builder.Services.AddSingleton<PipelineCatalog>();
 builder.Services.AddSingleton<PlanBuilder>();
 builder.Services.AddSingleton<AutoPlacer>();
-builder.Services.AddSingleton(sp => new DesignService(sp.GetRequiredService<BrickCatalog>()));
 builder.Services.AddSingleton<DesignValidator>();
 builder.Services.AddSingleton<PipelineLibrary>();
 builder.Services.AddSingleton<RunJournal>();
@@ -191,31 +190,6 @@ designer.MapPost("/bricks/{node}/{id}/preview", async (string node, string id, N
     return preview.Error is null ? Results.Ok(new { csv = preview.Csv }) : Results.BadRequest(new { error = preview.Error });
 });
 
-designer.MapPost("/graph", (GraphRequest request) =>
-{
-    try { return Results.Ok(JobGraph.Describe(JobYaml.Parse(request.Yaml))); }
-    catch (Exception ex) { return Results.BadRequest(new { error = ex.Message }); }
-});
-
-// A command line becomes a job through dtpipe's own --export-job, run by a runner: the coordinator runs no dtpipe.
-designer.MapPost("/pipelines/from-command", async (CommandRequest request, NodeRequests nodes, CancellationToken ct) =>
-{
-    try
-    {
-        var exported = await nodes.AskRunnerAsync<ExportedJob>(NodeChannel.ExportJob, [request.Args], TimeSpan.FromSeconds(40), ct);
-        return exported.Yaml is { } yaml ? Results.Ok(new { yaml }) : Results.BadRequest(new { error = exported.Error });
-    }
-    catch (ConflictException ex)
-    {
-        return Results.BadRequest(new { error = ex.Message });
-    }
-    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-    {
-        return Results.BadRequest(new { error = "The runner did not answer in time." });
-    }
-});
-
-
 // The Lab view's snapshot: the plan deployed last and its own run, whatever else is in flight.
 api.MapGet("/state", (DeploymentManager deployments, RunJournal journal) =>
 {
@@ -236,17 +210,6 @@ designer.MapDelete("/deployments/{id}", async (string id, DeploymentManager depl
 {
     await deployments.UndeployAsync(id, ct);
     return Results.Accepted();
-});
-
-// The designer: cards to job and back. The page never writes YAML itself.
-designer.MapPost("/design/compose", (PageDesignModel model, DesignService design) => PageDesignResult.From(design.Compose(model.ToModel())));
-designer.MapPost("/design/decompose", (DecomposeRequest request, DesignService design) => PageDesignResult.From(design.Decompose(request.Yaml, request.Layout)));
-designer.MapPost("/design/validate", async (PageDesignModel model, DesignService design, DesignValidator validator, CancellationToken ct) =>
-{
-    var composed = design.Compose(model.ToModel());
-    if (!composed.Valid) return Results.Ok(new { composed.Errors, dryRun = (string?)null, ok = false });
-    var check = await validator.ValidateAsync(composed.Yaml, ct);
-    return Results.Ok(new { composed.Errors, dryRun = check.Report, ok = check.Ok });
 });
 
 // The library.
@@ -308,15 +271,6 @@ designer.MapPost("/library/{id}/distribute", async (string id, DistributeRequest
         bus.Publish("library", new { id, commit });
     }
     return Results.Ok(new { plan, commit, bricks = placer.BrickAliases(doc.Yaml) });
-});
-// The same placement for a pipeline still being designed: its cards composed, then placed, nothing saved.
-designer.MapPost("/design/place", async (PlaceRequest request, DesignService design, AutoPlacer placer, CancellationToken ct) =>
-{
-    if (!CoordinatorApi.IsPipelineId(request.Id)) return Results.BadRequest(new { error = $"'{request.Id}' is not a pipeline id: lowercase letters, digits and '-'." });
-    var composed = design.Compose(request.Model.ToModel());
-    if (!composed.Valid) return Results.Ok(new { errors = composed.Errors, plan = (DistributionPlan?)null, bricks = new Dictionary<string, string>() });
-    var plan = await placer.PlanAsync(request.Id, composed.Yaml, ct);
-    return Results.Ok(new { errors = Array.Empty<string>(), plan, bricks = placer.BrickAliases(composed.Yaml) });
 });
 designer.MapPost("/library/{id}/deploy", async (string id, PipelineLibrary library, DeploymentManager deployments, CancellationToken ct) =>
 {
@@ -455,12 +409,8 @@ static async ValueTask<object?> RequireCsrfHeader(EndpointFilterInvocationContex
     return Results.Problem($"A request that changes something carries the {TrustedIdp.CsrfHeader} header.", statusCode: StatusCodes.Status403Forbidden);
 }
 
-internal sealed record GraphRequest(string Yaml);
-internal sealed record CommandRequest(string[] Args);
 internal sealed record RunRequest(Dictionary<string, string>? Pins, string? PipelineId = null);
 internal sealed record CancelRequest(string? RunId);
-internal sealed record DecomposeRequest(string Yaml, System.Text.Json.Nodes.JsonObject? Layout = null);
-internal sealed record PlaceRequest(string Id, PageDesignModel Model);
 internal sealed record DistributeRequest(bool Save = false, string? Message = null);
 internal sealed record MatrixRequest(Dictionary<string, List<string>> Matrix);
 internal sealed record AcceptRequest(string? Name, string? Description, List<string>? Groups);

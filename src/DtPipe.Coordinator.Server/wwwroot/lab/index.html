@@ -35,18 +35,12 @@
           <label for="pipeline-select">Pipeline</label>
           <select id="pipeline-select"></select>
           <button id="toggle-yaml" class="ghost">Edit YAML</button>
-          <button id="toggle-command" class="ghost">From a command line</button>
           <button id="reset-layout" class="ghost" title="Back to the catalog's proposed cuts and placement">Reset layout</button>
         </div>
         <p id="pipeline-description" class="hint"></p>
         <div id="yaml-editor" hidden>
           <textarea id="yaml-text" spellcheck="false" rows="14"></textarea>
           <div class="row"><button id="apply-yaml">Apply</button><span class="hint">A job file: one top-level key per branch alias.</span></div>
-        </div>
-        <div id="command-editor" hidden>
-          <input id="command-text" class="mono" spellcheck="false"
-                 placeholder="-i sqlite:${{LAB_CRM_DB}} -q &quot;SELECT * FROM customers&quot; -o duck:${{LAB_WAREHOUSE_DB}} --table t">
-          <div class="row"><button id="apply-command">Convert with --export-job</button><span class="hint">dtpipe arguments, without the binary name. Quote as in a shell.</span></div>
         </div>
       </div>
 

@@ -1,6 +1,6 @@
 // A library pipeline's page: the plan the coordinator computes with no help from the user (every
 // brick on its node, every other step on the runner), drawn in lanes, its refusals, its fragments'
-// jobs and its last run. The plan is saved to the library, deployed and run from here.
+// jobs, the job's text read only, and its last run. The plan is saved to the library, deployed and run from here.
 import { $, api, deploymentOf, duration, esc, isActive, lastRunOf, shortNode, toast } from "./core.js";
 import { drawLanes, fragmentJobs, legend, planProblems } from "./placement.js";
 
@@ -67,7 +67,6 @@ function render() {
       <div class="row">${status}
         <span class="actions">
           <a class="button" href="#/library">← Library</a>
-          <a class="button" href="#/designer/${encodeURIComponent(id)}">Design</a>
           <button id="x-save" ${plan.deployable && !savedCurrent && !busy ? "" : "disabled"}>Save plan</button>
           <button id="x-deploy" ${canDeploy && !busy ? "" : "disabled"} title="${savedCurrent ? "" : "Save the plan first"}">${deployedPlanMatches ? "Redeploy" : "Deploy"}</button>
           <button id="x-run" class="primary" ${canRun && !busy ? "" : "disabled"}>Run</button>
@@ -83,7 +82,9 @@ function render() {
       <div class="lanes" id="x-lanes"></div>
     </section>
     ${runPanel(run, runMatches || !run?.result)}
-    <section class="card"><h2>Fragment jobs</h2>${fragmentJobs(plan)}</section>`;
+    <section class="card"><h2>Fragment jobs</h2>${fragmentJobs(plan)}</section>
+    <section class="card"><div class="card-head"><h2>Job</h2><span class="hint">Read only: write it with <code>dtpipe studio</code> and publish it.</span></div>
+      <pre id="x-job">${esc(doc.yaml)}</pre></section>`;
   drawLanes($("x-lanes"), plan, brickOfUnit, { run, running, current: runMatches });
 }
 
