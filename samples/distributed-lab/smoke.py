@@ -11,7 +11,8 @@ The faults': a run cancelled while a fully wired fragment's child has nothing to
 verdict must come within the grace period.
 The bricks': on strict nodes, a fragment whose branch is not one of the node's bricks, or is one only
 by a hair, is refused by the node at once and leaves nothing deployed; the same wiring built from the
-bricks as declared deploys, relays included.
+bricks as declared deploys, relays included. The studio's routes give the catalog, what a job's
+branches are and a brick's Arrow sample.
 The sandbox': on sandbox nodes any reader or writer is accepted, but a join or a processor on a data
 node is refused all the same: a data node only reads and writes. Runs on disjoint data nodes are in
 flight together, the runner they share notwithstanding.
@@ -50,6 +51,19 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def call(path, body=None, method=None):
     return SESSION.call(path, body, method)
+
+
+def bearer(token, path, body=None, method="GET", csrf=True, headers=None):
+    """(status, body bytes, headers) of one call with a person's bearer token, as dtpipe studio makes it."""
+    sent = {"Authorization": "Bearer " + token, "Content-Type": "application/json", **(headers or {})}
+    if csrf:
+        sent["X-Dtpipe-Csrf"] = "1"
+    req = urllib.request.Request(URL + path, None if body is None else json.dumps(body).encode(), sent, method=method)
+    try:
+        with urllib.request.build_opener(_NoRedirect).open(req, timeout=60) as r:
+            return r.status, r.read(), r.headers
+    except urllib.error.HTTPError as e:
+        return e.code, e.read(), e.headers
 
 
 def until(predicate, timeout, what):
@@ -216,7 +230,57 @@ def library_pass(ctx):
     except Exception as e:
         failures += 1
         print(f"FAIL  library  {'a shared node, in turn':28} {e}")
+
+    try:
+        print(f"PASS  library  {'a studio publishes':28} {studio_publishes([pid for pid, _, _ in queued])}")
+    except Exception as e:
+        failures += 1
+        print(f"FAIL  library  {'a studio publishes':28} {e}")
     return failures
+
+
+def studio_publishes(deployed):
+    """dtpipe studio publishes with a person's bearer token and says which version it read: a new id only
+    while absent, a replacement only of the job's commit it names (412 otherwise, with the commit in
+    place). Publishing over a distributed, deployed pipeline says its plan must be redone and that the
+    deployment still runs the version before; the text is then put back as it was."""
+    token = studio_tokens(URL, "labdesigner")["access_token"]
+
+    def publish(pid, yaml, **headers):
+        status, body, _ = bearer(token, f"/api/library/{pid}", {"yaml": yaml, "layout": None, "message": "smoke: studio"}, "PUT", headers=headers)
+        return status, json.loads(body or b"null")
+
+    pid = "smoke-studio-publish"
+    job = "# Studio publication\na:\n  input: generate:3\n  output: csv:-\n"
+    try:
+        status, first = publish(pid, job, **{"If-None-Match": "*"})
+        if status != 200:
+            raise RuntimeError(f"creation -> {status} {first}")
+        status, again = publish(pid, job, **{"If-None-Match": "*"})
+        status_stale, stale = publish(pid, job + "# b\n", **{"If-Match": '"0000000"'})
+        if (status, again["commit"], status_stale, stale["commit"]) != (412, first["commit"], 412, first["commit"]):
+            raise RuntimeError(f"created again -> {status} {again}; stale If-Match -> {status_stale} {stale}")
+        status, replaced = publish(pid, job + "# b\n", **{"If-Match": f'"{first["commit"]}"'})
+        if status != 200 or replaced["commit"] == first["commit"]:
+            raise RuntimeError(f"replacing the version read -> {status} {replaced}")
+    finally:
+        try:
+            call(f"/api/library/{pid}", None, "DELETE")
+        except ApiError:
+            pass
+
+    if not deployed:
+        raise RuntimeError("no library pipeline was deployed: the redistribution message is not checked")
+    target = deployed[0]
+    original = call(f"/api/library/{target}")["yaml"]
+    status, changed = publish(target, original + "# published from a studio\n")
+    status_back, back = publish(target, original)
+    if status != 200 or not changed["redistribute"] or not changed["deployed"]:
+        raise RuntimeError(f"publishing over {target} -> {status} {changed}: redistribute and deployed expected")
+    if status_back != 200 or back["redistribute"] or back["deployed"]:
+        raise RuntimeError(f"putting {target} back -> {status_back} {back}: its plan and deployment are current again")
+    return (f"created only while absent, replaced only at the commit read (412 otherwise); over {target}: "
+            "redistribute and deployed, then current again once put back")
 
 
 def data_nodes(plan):
@@ -534,20 +598,10 @@ def rights_pass():
         # dtpipe studio signs a person in through its own public client and calls /api with their
         # bearer token: the roles are the same configuration's, a change still needs the CSRF header,
         # and the token reaches no part of the data plane.
-        def bearer(token, path, body=None, method="GET", csrf=True):
-            headers = {"Authorization": "Bearer " + token, "Content-Type": "application/json"}
-            if csrf:
-                headers["X-Dtpipe-Csrf"] = "1"
-            req = urllib.request.Request(URL + path, None if body is None else json.dumps(body).encode(), headers, method=method)
-            try:
-                with urllib.request.build_opener(_NoRedirect).open(req, timeout=20) as r:
-                    return r.status, json.loads(r.read() or b"null")
-            except urllib.error.HTTPError as e:
-                return e.code, None
-
         designer = studio_tokens(URL, "labdesigner")["access_token"]
         reader = studio_tokens(URL, "labreader")["access_token"]
         me = bearer(designer, "/api/me")
+        me = (me[0], json.loads(me[1]) if me[0] == 200 else None)
         save = {"yaml": "a:\n  input: x\n", "layout": None, "message": "smoke: refused"}
         expected = {
             "designer bearer GET /api/me": ((me[0], (me[1] or {}).get("roles")), (200, ["designer", "reader"])),
@@ -763,6 +817,36 @@ def bricks_pass():
             raise RuntimeError(f"node-4 should refuse: {answer}")
         return "node-4 refuses revenue rows for customers_mirror"
 
+    def studio_routes():
+        # dtpipe studio's view of the bricks, through a person's bearer token: the catalog, what a library
+        # job's branches are (the coordinator decides), and a source brick's sample as Arrow, which dtpipe reads.
+        token = studio_tokens(URL, "labdesigner")["access_token"]
+        status, body, _ = bearer(token, "/api/catalog")
+        catalog = json.loads(body)
+        brick = next((b for b in catalog["bricks"] if b["key"] == "node-1/customers"), None)
+        if status != 200 or not brick or brick["kind"] != "source" or "input" not in brick["branch"]:
+            raise RuntimeError(f"the catalog has no source node-1/customers: {status} {body[:300]!r}")
+        if not any(n["name"] == "runner-1" and n["role"] == "runner" for n in catalog["nodes"]):
+            raise RuntimeError(f"the catalog lists no runner: {catalog['nodes']}")
+        status, body, _ = bearer(token, "/api/bricks/recognize", {"job": mirror}, "POST")
+        found = {r[k] for r in json.loads(body)["branches"].values() for k in ("match", "source", "sink") if r[k]}
+        if status != 200 or not {"node-1/customers", "node-4/customers-mirror"} <= found:
+            raise RuntimeError(f"recognition of customers-mirror: {status} {body[:300]!r}")
+        status, arrow, headers = bearer(token, "/api/bricks/node-1/customers/sample?rows=7", None, "POST")
+        if status != 200 or headers.get("Content-Type") != "application/vnd.apache.arrow.stream":
+            raise RuntimeError(f"sample -> {status} {headers.get('Content-Type')} {arrow[:200]!r}")
+        folder = os.path.join(STATE, "studio-sample")
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, "customers.arrows")
+        with open(path, "wb") as f:
+            f.write(arrow)
+        out = subprocess.run([DTPIPE, "--input", "arrow:" + path, "--output", "csv:-", "--no-stats"], capture_output=True, text=True, timeout=60)
+        rows = [line for line in out.stdout.splitlines() if line.strip()]
+        if out.returncode != 0 or len(rows) != 8:
+            raise RuntimeError(f"dtpipe read {len(rows)} line(s) of the sample: {out.stderr[-300:]}")
+        return f"catalog, recognition of customers-mirror's bricks, a 7-row Arrow sample read back by dtpipe ({len(arrow):,} bytes)"
+
+    check("the studio's routes", studio_routes)
     check("a source brick by a hair", source_by_a_hair)
     check("a sink brick by a hair", sink_by_a_hair)
     check("relays", relays)

@@ -22,6 +22,25 @@ public sealed record LibraryDocument(string Id, string Yaml, JsonObject? Layout,
 public sealed record LibraryCommit(string Hash, DateTimeOffset Date, string Message);
 
 /// <summary>
+/// What a save must find in place: no pipeline (<see cref="Absent"/>), or the pipeline's job at its last
+/// commit <see cref="Commit"/>. A plan saved since does not change the job's version: only an edit does.
+/// </summary>
+public sealed record SavePrecondition(bool Absent, string? Commit);
+
+/// <summary>
+/// A save's outcome. <see cref="Commit"/> is the last commit of the pipeline's job, which an unchanged
+/// text leaves as it was. <see cref="Changed"/>: the text differs from the one before. <see cref="PlanStale"/>:
+/// a plan is saved for the pipeline and no longer matches its text. <see cref="PlanId"/>: that plan's id.
+/// </summary>
+public sealed record SaveOutcome(string? Commit, bool Changed, bool PlanStale, string? PlanId);
+
+/// <summary>A save whose <see cref="SavePrecondition"/> does not hold, with the pipeline's commit in place, if any.</summary>
+public sealed class PreconditionFailedException(string message, string? commit) : Exception(message)
+{
+    public string? Commit { get; } = commit;
+}
+
+/// <summary>
 /// The pipelines people keep, in a git repository of their own under <c>library/</c> in the state directory, driven
 /// through the <c>git</c> command line. One directory per pipeline: <c>pipeline.yaml</c> (the
 /// logical job, runnable whole), <c>layout.json</c> (where the designer drew each card) and
@@ -79,15 +98,38 @@ public sealed partial class PipelineLibrary
         return new LibraryDocument(id, yaml, layout, plan, plan is not null && plan.PipelineSha == Sha(yaml), last?.Hash);
     }, ct);
 
-    public async Task<string?> SaveAsync(string id, string yaml, JsonObject? layout, string message, CancellationToken ct) => await Locked(async () =>
+    /// <summary>
+    /// Writes the job (and its layout, when one is sent; the one in place stays otherwise) and commits
+    /// it. A <paramref name="precondition"/> is checked under the library's lock, so no other save
+    /// slips between the check and the write.
+    /// </summary>
+    public async Task<SaveOutcome> SaveAsync(string id, string yaml, JsonObject? layout, string message, CancellationToken ct,
+        SavePrecondition? precondition = null) => await Locked(async () =>
     {
         var dir = PipelineDir(id);
+        var yamlPath = Path.Combine(dir, "pipeline.yaml");
+        var before = File.Exists(yamlPath) ? await File.ReadAllTextAsync(yamlPath, ct) : null;
+        if (precondition is not null)
+        {
+            var current = before is null ? null : await JobCommitAsync(id, ct);
+            if (precondition.Absent && before is not null)
+                throw new PreconditionFailedException($"'{id}' is already in the library.", current);
+            if (precondition.Commit is { } expected && (before is null || current != expected))
+                throw new PreconditionFailedException(before is null
+                    ? $"'{id}' is not in the library."
+                    : $"'{id}' changed since {Short(expected)}: the library holds {Short(current)}.", current);
+        }
         Directory.CreateDirectory(dir);
-        await File.WriteAllTextAsync(Path.Combine(dir, "pipeline.yaml"), yaml, ct);
+        await File.WriteAllTextAsync(yamlPath, yaml, ct);
         var layoutPath = Path.Combine(dir, "layout.json");
         if (layout is not null) await File.WriteAllTextAsync(layoutPath, layout.ToJsonString(Json), ct);
-        return await CommitAsync($"pipelines/{id}", Message(message, $"Save {id}"), ct);
+        await CommitAsync($"pipelines/{id}", Message(message, $"Save {id}"), ct);
+        var plan = ReadPlan(id);
+        return new SaveOutcome(await JobCommitAsync(id, ct), before != yaml,
+            plan is not null && plan.PipelineSha != Sha(yaml), plan?.Plan.Id);
     }, ct);
+
+    private static string Short(string? commit) => commit is null ? "nothing" : commit[..Math.Min(8, commit.Length)];
 
     public async Task<string?> SavePlanAsync(string id, DistributionPlan plan, string message, CancellationToken ct) => await Locked(async () =>
     {
@@ -149,6 +191,10 @@ public sealed partial class PipelineLibrary
             .Select(p => new LibraryCommit(p[0], DateTimeOffset.Parse(p[1]), p[2]))
             .ToList();
     }
+
+    /// <summary>The last commit that changed the pipeline's job, whatever was saved beside it since.</summary>
+    private async Task<string?> JobCommitAsync(string id, CancellationToken ct) =>
+        (await TryGitAsync(["log", "-1", "--format=%H", "--", $"pipelines/{id}/pipeline.yaml"], ct))?.Trim() is { Length: > 0 } hash ? hash : null;
 
     private async Task<string?> CommitAsync(string path, string message, CancellationToken ct)
     {

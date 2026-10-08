@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using DtPipe.Coordinator.Contracts;
 using DtPipe.Jobs;
+using DtPipe.Jobs.Coordinator;
 using YamlDotNet.RepresentationModel;
 
 namespace DtPipe.Coordinator.Server;
@@ -22,9 +23,17 @@ public sealed record BrickView(
 /// </summary>
 public sealed class BrickCatalog(NodeInventory inventory) : IBrickLookup
 {
-    private sealed record Resolved(BrickView View, YamlMappingNode Branch, string Canonical);
+    private sealed record Resolved(BrickView View, YamlMappingNode Branch, string Canonical, string Declared);
 
     public IReadOnlyList<BrickView> List() => Resolve().Select(r => r.View).ToList();
+
+    /// <summary>Every brick as <c>dtpipe studio</c> reads it: its branch as its node declares it, as JSON.</summary>
+    public IReadOnlyList<CatalogBrick> Catalog() => Resolve().Select(r => new CatalogBrick(
+        r.View.Key, r.View.Node, r.View.Id, KindOf(r.View.Kind), r.View.Title, r.View.Description, (JsonObject)JsonNode.Parse(r.Declared)!,
+        r.View.Version, r.View.Schema?.Select(c => new CatalogColumn(c.Name, c.Type, c.IsNullable)).ToList(), r.View.SchemaError,
+        r.View.Online)).ToList();
+
+    public static string KindOf(BrickKind kind) => kind == BrickKind.Sink ? StepKinds.Sink : StepKinds.Source;
 
     public BrickView? Find(string key) => Resolve().FirstOrDefault(r => r.View.Key == key)?.View;
 
@@ -70,7 +79,7 @@ public sealed class BrickCatalog(NodeInventory inventory) : IBrickLookup
 
     private static DesignBrick? Card(BrickView? view) => view is null
         ? null
-        : new DesignBrick(view.Key, view.Kind == BrickKind.Sink ? StepKinds.Sink : StepKinds.Source, view.Node, view.Version, view.Title, view.Online);
+        : new DesignBrick(view.Key, KindOf(view.Kind), view.Node, view.Version, view.Title, view.Online);
 
     private List<Resolved> Resolve()
     {
@@ -88,7 +97,7 @@ public sealed class BrickCatalog(NodeInventory inventory) : IBrickLookup
                 resolved.Add(new Resolved(
                     new BrickView($"{node.Name}/{brick.Id}", node.Name, brick.Id, brick.Kind, brick.Title, brick.Description, yaml,
                         version, brick.Schema, brick.SchemaError, node.Online),
-                    branch, canonical));
+                    branch, canonical, brick.Branch));
             }
         }
         return resolved;

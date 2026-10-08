@@ -66,6 +66,22 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   command line (`ExportJob`) go to a runner, and with none online they refuse. A node announces a
   variable's name, never its value. `[local: the lab's smoke.py bricks — a designer's check, a sink that refuses;
   sandbox — a cut on its node]`
+- **What `dtpipe studio` calls is a contract** (`DtPipe.Jobs/Coordinator`: `CoordinatorApi`, the
+  records): the server maps those routes and writes those records, and the metadata document
+  announces `CoordinatorApi.Contract`; a change a deployed studio would misread takes a new number.
+  `/api/catalog` lists nodes and bricks with each brick's declared branch; `/api/bricks/recognize`
+  says what each top-level branch of a job is, by `BrickCatalog`'s own `Match` and `Contained`, so the
+  studio never decides a brick itself; `/api/bricks/{node}/{id}/sample` asks the node for at most
+  `MaxSampleRows` rows as Arrow IPC (`SampleBrick`, which the node host bounds in bytes before it
+  sends, below the channel's message limit). `[local: CoordinatorContractTests, StudioRoutesTests,
+  the lab's smoke.py bricks — the studio's routes]`
+- **A save may say which version it read.** `PUT /api/library/{id}` with `If-None-Match: *` creates
+  only, with `If-Match: "<commit>"` replaces only that version: 412 otherwise, with the commit in
+  place. The check runs under the library's lock. The version is the last commit of the job file,
+  never the directory's: a plan saved beside it is no edit. Without either header a save overwrites,
+  as the pages do. The answer says when the saved plan no longer matches (`redistribute`) and when a
+  deployment still runs another version (`deployed`). `[local: StudioRoutesTests, the lab's smoke.py
+  library — a studio publishes]`
 - **A new state directory starts from the seeds, or empty.** `Coordinator:LibrarySeed` (one
   `.yaml` per pipeline) and `Coordinator:RightsSeed`; with neither, the library has no pipeline
   and the rights no identity and an empty matrix: nobody may send anything until an administrator

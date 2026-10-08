@@ -35,8 +35,8 @@ public sealed record CatalogBrick(
 
 public sealed record BrickCatalogView(IReadOnlyList<CatalogNode> Nodes, IReadOnlyList<CatalogBrick> Bricks);
 
-/// <summary>Branches to recognise, by alias: each one's YAML, as <see cref="JobYaml.Serialize"/> writes a branch.</summary>
-public sealed record RecognizeRequest(IReadOnlyDictionary<string, string> Branches);
+/// <summary>A job whose top-level branches are to be recognised, as <see cref="JobYaml.Serialize"/> writes it.</summary>
+public sealed record RecognizeRequest(string Job);
 
 /// <summary>
 /// What a branch is, by brick key: the brick it is whole (<see cref="Match"/>), or the brick it starts
@@ -45,14 +45,15 @@ public sealed record RecognizeRequest(IReadOnlyDictionary<string, string> Branch
 /// </summary>
 public sealed record Recognition(string? Match, string? Source, string? Sink);
 
+/// <summary>What each top-level branch of the job is, by alias.</summary>
 public sealed record RecognizeResponse(IReadOnlyDictionary<string, Recognition> Branches);
 
 /// <summary>A job saved into the library, with the message of its commit.</summary>
 public sealed record LibrarySave(string Yaml, JsonObject? Layout, string? Message);
 
 /// <summary>
-/// A save's outcome. <see cref="Commit"/> is the pipeline's own last commit, the version a later
-/// <c>If-Match</c> names. <see cref="Redistribute"/>: the plan saved for it no longer matches its job.
+/// A save's outcome. <see cref="Commit"/> is the last commit of the pipeline's job, the version a later
+/// <c>If-Match</c> names: a plan saved beside it does not change it. <see cref="Redistribute"/>: the plan saved for it no longer matches its job.
 /// <see cref="Deployed"/>: a deployment still runs the version before.
 /// </summary>
 public sealed record LibrarySaved(string Id, string? Commit, bool Redistribute, bool Deployed);

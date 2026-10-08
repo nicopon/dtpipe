@@ -45,7 +45,7 @@ public sealed class CoordinatorContractTests
             """{"nodes":[{"name":"n1","online":true,"role":"data","dtpipeVersion":"1.0.0"}],"bricks":[{"key":"n1/b","node":"n1","id":"b","kind":"source","title":"B","description":"","branch":{"input":"duck:x.db"},"version":"0123456789ab","schema":[{"name":"id","type":"int","isNullable":false}],"schemaError":null,"online":true}]}""",
             Write(new BrickCatalogView([new CatalogNode("n1", true, "data", "1.0.0")],
                 [new CatalogBrick("n1/b", "n1", "b", "source", "B", "", branch, "0123456789ab", [new CatalogColumn("id", "int", false)], null, true)])));
-        Assert.Equal("""{"branches":{"a":"input: x\n"}}""", Write(new RecognizeRequest(new Dictionary<string, string> { ["a"] = "input: x\n" })));
+        Assert.Equal("""{"job":"a:\n  input: x\n"}""", Write(new RecognizeRequest("a:\n  input: x\n")));
         Assert.Equal("""{"branches":{"a":{"match":"n1/b","source":null,"sink":null}}}""",
             Write(new RecognizeResponse(new Dictionary<string, Recognition> { ["a"] = new("n1/b", null, null) })));
         Assert.Equal("""{"id":"p","commit":"abc","redistribute":true,"deployed":false}""", Write(new LibrarySaved("p", "abc", true, false)));
