@@ -98,10 +98,12 @@ export function parseCsv(text) {
   return rows;
 }
 
-export function csvTable(csv, limit = 200) {
+// `types` are the columns' types by name, when the caller knows them: the CSV carries values only.
+export function csvTable(csv, limit = 200, types = null) {
   const [header, ...rows] = parseCsv(csv || "");
   if (!header) return `<p class="hint">No rows.</p>`;
-  return `<div class="table-wrap"><table><tr>${header.map((h) => `<th>${esc(h)}</th>`).join("")}</tr>${rows.slice(0, limit).map((r) => `<tr>${r.map((v) => `<td>${esc(v)}</td>`).join("")}</tr>`).join("")}</table></div>`;
+  const typeOf = (name) => (types?.find((c) => c.name === name)?.type ?? "");
+  return `<div class="table-wrap"><table><tr>${header.map((h) => `<th>${esc(h)}${typeOf(h) ? `<div class="hint">${esc(typeOf(h))}</div>` : ""}</th>`).join("")}</tr>${rows.slice(0, limit).map((r) => `<tr>${r.map((v) => `<td>${esc(v)}</td>`).join("")}</tr>`).join("")}</table></div>`;
 }
 
 export function deploymentOf(pipelineId) { return store.deployments.find((d) => d.pipelineId === pipelineId) || null; }

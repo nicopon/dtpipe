@@ -84,8 +84,11 @@ public sealed record BrickInfo(
     string Id, BrickKind Kind, string Title, string Description, string Branch,
     IReadOnlyList<BrickColumn>? Schema, string? SchemaError);
 
-/// <summary>What <c>PreviewBrick</c> answers: CSV text, or why the node could not read it.</summary>
-public sealed record BrickPreview(string? Csv, string? Error);
+/// <summary>
+/// What <c>PreviewBrick</c> answers: CSV text, or why the node could not read it. For a source brick
+/// <see cref="Columns"/> are the types of the Arrow the preview was read from, which the CSV cannot carry.
+/// </summary>
+public sealed record BrickPreview(string? Csv, string? Error, IReadOnlyList<BrickColumn>? Columns = null);
 
 /// <summary>
 /// What <c>SampleBrick</c> answers: the source brick's first rows as an Arrow IPC stream, written by

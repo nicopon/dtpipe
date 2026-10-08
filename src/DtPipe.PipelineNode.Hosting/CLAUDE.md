@@ -29,12 +29,15 @@ none. One node per process; a second `AddDtPipeNode` throws.
   `[local: Hosting.Tests DelegatedJobsTests; the lab's smoke.py bricks, ui_check.py]`
 - **A node reads its bricks for a library save's check or a studio's sample, never more.**
   `BrickHost.SampleAsync` reads a source brick it announced, with `output: arrow:-` and `--limit`,
-  the bytes its fragment would send; a real bounded read like a preview, so `--dry-run`'s
-  source-side guarantees do not apply. It refuses by name a sample over `MaxSampleBytes` before
+  the bytes its fragment would send; a real bounded read, so `--dry-run`'s source-side guarantees do
+  not apply. A source brick's preview is that sample (`PreviewSourceAsync`): its types come from
+  `dtpipe inspect` on the sample's own bytes and its values from the same file, never from the
+  schema announced at start, which `inspect` reads from the input and query alone. A sink's preview
+  reads its table. It refuses by name a sample over `MaxSampleBytes` before
   sending, so an answer stays under the coordinator's channel message limit.
   `CheckSinkAsync` runs `dtpipe contract check` on a sink brick fed from `arrow:-`, which inspects
   the target and writes nothing. Checking a save is the product's, so neither is a registered request.
-  `[local: the lab's smoke.py bricks — a library save's check]`
+  `[local: Hosting.Tests BrickPreviewTests; the lab's smoke.py bricks — a library save's check, a brick's preview]`
 - **A node announces its dtpipe's version**, what `dtpipe --version` says once at start
   (`DtPipeCommand.VersionAsync`), or none when the binary does not answer: a version is shown beside
   a studio's, never a reason to stop the host. `[local: Hosting.Tests DtPipeVersionTests; the lab's

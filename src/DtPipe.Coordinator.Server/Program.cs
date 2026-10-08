@@ -187,7 +187,7 @@ designer.MapPost(CoordinatorApi.SampleRoute, async (string node, string id, int?
 designer.MapPost("/bricks/{node}/{id}/preview", async (string node, string id, NodeRequests nodes, CancellationToken ct) =>
 {
     var preview = await nodes.AskAsync<BrickPreview>(node, NodeChannel.PreviewBrick, [id, 20], TimeSpan.FromSeconds(40), ct);
-    return preview.Error is null ? Results.Ok(new { csv = preview.Csv }) : Results.BadRequest(new { error = preview.Error });
+    return preview.Error is null ? Results.Ok(new { csv = preview.Csv, columns = preview.Columns }) : Results.BadRequest(new { error = preview.Error });
 });
 
 // The Lab view's snapshot: the plan deployed last and its own run, whatever else is in flight.

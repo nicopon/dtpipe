@@ -60,31 +60,57 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
         Forms = bricks.Select(b => BrickRules.Declared(b.Kind, b.Branch)).ToList();
     }
 
-    /// <summary>A source's first rows, or what a sink's table holds now.</summary>
+    /// <summary>A source's first rows, as its declared branch reads them, or what a sink's table holds now.</summary>
     public async Task<BrickPreview> PreviewAsync(string id, int rows)
     {
         var brick = declared.FirstOrDefault(b => b.Id == id);
         if (brick is null) return new BrickPreview(null, $"{node} offers no brick '{id}'.");
+        if (brick.Kind == BrickKind.Source) return await PreviewSourceAsync(id, rows);
         try
         {
-            string input;
-            string? query;
-            if (brick.Kind == BrickKind.Source) (input, query) = SourceRead(brick);
-            else
-            {
-                var branch = Branch(brick);
-                input = Scalar(branch, "output") ?? throw new InvalidOperationException("The sink names no output.");
-                var table = ProviderOption(branch, "-writer", "table") ?? throw new InvalidOperationException("The sink names no table.");
-                query = $"SELECT * FROM {table}";
-            }
+            var branch = Branch(brick);
+            var input = Scalar(branch, "output") ?? throw new InvalidOperationException("The sink names no output.");
+            var table = ProviderOption(branch, "-writer", "table") ?? throw new InvalidOperationException("The sink names no table.");
             var result = await dtpipe.RunAsync(
-                ["--input", input, .. query is null ? Array.Empty<string>() : ["--query", query], "--limit", rows.ToString(), "--output", "csv:-", "--no-stats"],
+                ["--input", input, "--query", $"SELECT * FROM {table}", "--limit", rows.ToString(), "--output", "csv:-", "--no-stats"],
                 CancellationToken.None);
             return result.Succeeded ? new BrickPreview(result.Stdout, null) : new BrickPreview(null, result.Diagnostic);
         }
         catch (Exception ex)
         {
             return new BrickPreview(null, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// A source brick's preview is its sample: the declared branch run to <c>arrow:-</c> with all its
+    /// options, bounded like a sample. The types and the values are then read from those same bytes, the
+    /// types by <c>dtpipe inspect</c> and the values as CSV, so a column's type is the Arrow's own.
+    /// </summary>
+    private async Task<BrickPreview> PreviewSourceAsync(string id, int rows)
+    {
+        var sample = await SampleAsync(id, rows);
+        if (sample.Arrow is not { } arrow) return new BrickPreview(null, sample.Error);
+        var dir = Path.Combine(dtpipe.WorkingDirectory, "bricks", Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(dir);
+            var file = Path.Combine(dir, "preview.arrows");
+            await File.WriteAllBytesAsync(file, arrow);
+            var types = await dtpipe.RunAsync(["inspect", "--input", "arrow:" + file, "--format", "json"], CancellationToken.None);
+            if (!types.Succeeded) return new BrickPreview(null, types.Diagnostic);
+            var values = await dtpipe.RunAsync(["--input", "arrow:" + file, "--output", "csv:-", "--no-stats"], CancellationToken.None);
+            return values.Succeeded
+                ? new BrickPreview(values.Stdout, null, JsonSerializer.Deserialize<List<BrickColumn>>(types.Stdout, Json))
+                : new BrickPreview(null, values.Diagnostic);
+        }
+        catch (Exception ex)
+        {
+            return new BrickPreview(null, ex.Message);
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch (IOException) { }
         }
     }
 

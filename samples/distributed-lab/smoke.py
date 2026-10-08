@@ -868,6 +868,29 @@ def bricks_pass():
         return (f"catalog, recognition of customers-mirror's bricks, a 7-row Arrow sample read back by dtpipe ({len(arrow):,} bytes), "
                 "the library listed and a job read at the version of its file")
 
+    def brick_preview():
+        # A source's preview is its declared branch's sample: the columns carry the Arrow's own types, and the
+        # first values are those of the sample Arrow, read back by dtpipe.
+        token = studio_tokens(URL, "labdesigner")["access_token"]
+        status, arrow, _ = bearer(token, "/api/bricks/node-1/customers/sample?rows=5", None, "POST")
+        if status != 200:
+            raise RuntimeError(f"sample -> {status}")
+        folder = os.path.join(STATE, "studio-sample")
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, "customers-preview.arrows")
+        with open(path, "wb") as f:
+            f.write(arrow)
+        out = subprocess.run([DTPIPE, "--input", "arrow:" + path, "--output", "csv:-", "--no-stats"], capture_output=True, text=True, timeout=60)
+        expected = [line for line in out.stdout.splitlines() if line.strip()]
+        preview = call("/api/bricks/node-1/customers/preview", {})
+        shown = [line for line in preview["csv"].splitlines() if line.strip()]
+        names = [c["name"] for c in preview.get("columns") or []]
+        if out.returncode != 0 or not expected or shown[:len(expected)] != expected:
+            raise RuntimeError(f"preview {shown[:3]} does not start with the sample's {expected[:3]}")
+        if names != expected[0].split(",") or not all(c["type"] for c in preview["columns"]):
+            raise RuntimeError(f"preview columns {preview.get('columns')} are not the sample's header {expected[0]}")
+        return f"{len(names)} typed columns and the first {len(expected) - 1} rows are the sample's"
+
     def versions():
         # Every node host announces what its dtpipe binary says of itself: here, the release binary.
         expected = subprocess.run([DTPIPE, "--version"], capture_output=True, text=True, timeout=30).stdout.split()[1]
@@ -879,6 +902,7 @@ def bricks_pass():
 
     check("versions", versions)
     check("the studio's routes", studio_routes)
+    check("a brick's preview", brick_preview)
     check("a source brick by a hair", source_by_a_hair)
     check("a sink brick by a hair", sink_by_a_hair)
     check("relays", relays)

@@ -91,8 +91,8 @@ async function onClick(e) {
     previews[key] = `<p class="hint">Reading on ${esc(node)}…</p>`;
     render();
     try {
-      const { csv } = await api(`/api/bricks/${encodeURIComponent(node)}/${encodeURIComponent(id)}/preview`, {});
-      previews[key] = csvTable(csv) + `<p class="hint">First rows, read by ${esc(node)}.</p>`;
+      const { csv, columns } = await api(`/api/bricks/${encodeURIComponent(node)}/${encodeURIComponent(id)}/preview`, {});
+      previews[key] = csvTable(csv, 200, columns) + `<p class="hint">First rows, read by ${esc(node)} through the brick's declared branch.</p>`;
     } catch (err) {
       previews[key] = `<p class="mismatch">${esc(err.message)}</p>`;
     }
