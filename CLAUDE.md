@@ -262,13 +262,16 @@ Full patterns: `EXTENDING.md`.
 transformers, segmentation and bridges. Never add an analyser beside `PipelineExecutor`; a second
 engine disagrees with the real run. The sink mirrors the real writer's capability (row or
 columnar), never a fixed sink. Sample mode suppresses schema migration, all four hooks, the cursor
-and the metrics file.
+and the metrics file. The neutralisation aims at writers that leave the process: the channel between
+two branches carries its rows as in the real run, and the bound `N` applies to a source reader
+only (`IStreamReaderFactory.IsSource`), never to a branch reading another, a processor or a
+checkpoint.
 
 Safety is a **read-side** problem: a source can mutate (`DELETE … RETURNING`, `--duck-init`,
 `ATTACH`). `SampleModeSafetyGate` classifies the resolved source SQL; `ReadOnlySessionSql` lets the
 server refuse. **Never report a guarantee that is sometimes absent as always there.**
 
-`[CI: SampleModeEquivalenceTests, SampleModeSafetyGateTests, validate_single_engine.sh,
+`[CI: SampleModeEquivalenceTests, SampleModeDagTests, SampleModeSafetyGateTests, validate_single_engine.sh,
 validate_sample_safety.sh]` Detail: `src/DtPipe/CLAUDE.md`.
 
 ### Checkpoints

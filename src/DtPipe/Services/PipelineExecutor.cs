@@ -161,6 +161,9 @@ public sealed class PipelineExecutor
                     var sampler = options.SamplingSeed.HasValue ? new Random(options.SamplingSeed.Value) : Random.Shared;
                     source = ApplySamplingAsync(source, options.SamplingRate, sampler, ct);
                 }
+                // The bound sits ahead of the tap, as it does in the segmented path: the reader stage
+                // reports what the run read, not the whole batch the limit then cut.
+                if (options.Limit > 0) source = ApplyLimitAsync(source, options.Limit, ct);
                 source = TapBatchesAsync(source, tap, ReaderStage, ct);
                 if (materialise is not null) source = materialise(source);
                 await DirectColumnarTransferAsync(source, cw, options.Limit, progress, ct);

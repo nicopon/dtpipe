@@ -60,6 +60,15 @@ outside — tell them apart first:
   contract first, at the entry and at the writer boundary, so `NullDataWriter` pulls a row-mode
   pipeline into Arrow and back out.
 - **`SampleRun`** — the capture, read by both the renderer and the checkpoint store.
+- **The sink replaces a writer that leaves the process, never the channel between two branches.**
+  `ExportRunState.NeutralisesWriter` reads `WriterFactory.CapabilityKind`, the capability the
+  orchestrator routes by: a channel writer is initialised, fed and completed as in the real run, or
+  the branch reading it waits on a stream nobody closes. Its sample still keeps the tap and the
+  safety gate, and still advances no cursor.
+- **`--dry-run N` bounds a source only.** `IStreamReaderFactory.IsSource` is false for a channel
+  reader, a processor and a checkpoint; `EffectiveLimit` leaves those at `--limit`, so a one-to-many
+  expansion upstream arrives whole. The tap sits behind the bound in every path, direct transfer
+  included: the reader stage counts what the run read.
 
 Sample mode also suppresses `ValidateAndMigrateAsync` (it can CREATE/ALTER the target), **all four
 hooks** (SQL on the target connection), the cursor and the metrics file.
@@ -78,7 +87,7 @@ users to pass `--allow-destructive` by reflex, which unlocks the source side too
 SQL Server returns `null` for `ReadOnlySessionSql`: `ApplicationIntent=ReadOnly` routes to a replica
 and does not make a session read-only. The report states which guarantee the run had.
 
-`[CI: SampleModeSafetyGateTests, validate_sample_safety.sh]` `[unchecked: a query that writes
+`[CI: SampleModeSafetyGateTests, SampleModeDagTests, validate_sample_safety.sh]` `[unchecked: a query that writes
 through a function — SELECT my_function() passes a verb scan, hence the server-enforced form]`
 
 ## Checkpoints — mechanics

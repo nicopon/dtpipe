@@ -73,6 +73,14 @@ internal sealed partial class ExportRunState
     internal bool IsSampleMode => Options.DryRunCount > 0;
 
     /// <summary>
+    /// Whether a sample run swaps this branch's writer for a sink. The neutralisation aims at
+    /// writers that leave the process: a channel to another branch (a capability, never a
+    /// provider name) carries rows inside it, and starving it would hand the branch that reads it
+    /// an empty stream where the real run hands it the rows.
+    /// </summary>
+    internal bool NeutralisesWriter => IsSampleMode && WriterFactory.CapabilityKind is null;
+
+    /// <summary>
     /// Rows the reader is allowed to produce. A sample never reads more than it shows, which
     /// is what keeps it cheap against a large source; an explicit --limit still wins if tighter.
     /// The bound belongs to a source: a reader fed by another branch, a processor or a stored

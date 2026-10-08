@@ -31,14 +31,19 @@ internal sealed partial class ExportRunState
         if (IsSampleMode)
         {
             SchemaValidationService.RejectContradictorySettings(writerSchemaSettings);
-            await PrepareSampleWriterAsync(exportableSchema, retryCt);
-            return;
+            EnforceSampleSafety();
+            if (NeutralisesWriter)
+            {
+                await PrepareSampleWriterAsync(exportableSchema, retryCt);
+                return;
+            }
         }
 
-        // Cursor tracking: wrap the writer if --cursor is specified
+        // Cursor tracking: wrap the writer if --cursor is specified. A sample advances no
+        // watermark, including when its writer is the channel to the next branch.
         CursorTracker = null;
         EffectiveWriter = Writer;
-        if (!string.IsNullOrEmpty(Options.Cursor) && !string.IsNullOrEmpty(Options.State))
+        if (!IsSampleMode && !string.IsNullOrEmpty(Options.Cursor) && !string.IsNullOrEmpty(Options.State))
         {
             if (Writer is IColumnarDataWriter columnar)
             {
@@ -71,6 +76,8 @@ internal sealed partial class ExportRunState
 
         await EffectiveWriter.InitializeAsync(exportableSchema, retryCt);
 
+        if (IsSampleMode) BeginSampleCapture();
+
         Progress = CreateProgress();
 
         LinkedCts = CancellationTokenSource.CreateLinkedTokenSource(retryCt);
@@ -94,11 +101,11 @@ internal sealed partial class ExportRunState
     /// </list>
     ///
     /// InitializeAsync is called on the SINK, never on the real writer: for a file writer that
-    /// call is what creates the file.
+    /// call is what creates the file. A writer that does not leave the process (the channel to
+    /// another branch) is not replaced: it takes the ordinary path, minus the cursor.
     /// </summary>
     private async Task PrepareSampleWriterAsync(IReadOnlyList<PipeColumnInfo> exportableSchema, CancellationToken retryCt)
     {
-        EnforceSampleSafety();
         CursorTracker = null;
         EffectiveWriter = SampleModeSink.Wrap(Writer);
 
@@ -118,14 +125,22 @@ internal sealed partial class ExportRunState
 
         await EffectiveWriter.InitializeAsync(exportableSchema, retryCt);
 
-        // The ceiling guards memory; --dry-run N bounds the source through EffectiveLimit.
-        SampleTap = new DtPipe.DryRun.SampleTapRecorder();
-        DeclareSampleStages();
+        BeginSampleCapture();
 
         Progress = CreateProgress();
         LinkedCts = CancellationTokenSource.CreateLinkedTokenSource(retryCt);
 
         PropagateSegmentArrowSchemas();
+    }
+
+    /// <summary>
+    /// Starts the capture every branch of a sample run keeps, whatever its writer. The ceiling
+    /// guards memory; --dry-run N bounds the source through EffectiveLimit.
+    /// </summary>
+    private void BeginSampleCapture()
+    {
+        SampleTap = new DtPipe.DryRun.SampleTapRecorder();
+        DeclareSampleStages();
     }
 
     /// <summary>
@@ -272,7 +287,10 @@ internal sealed partial class ExportRunState
             {
                 // Nothing was written, so nothing is completed, hooked, tracked or measured.
                 // CompleteAsync on a real writer is what flushes a Parquet footer or commits a
-                // transaction — the sink's is a no-op and the real writer never sees one.
+                // transaction — the sink's is a no-op and the real writer never sees one. The
+                // channel to the next branch is not such a writer: it stays open until completed,
+                // and the branch reading it waits for that.
+                if (!NeutralisesWriter) await Writer.CompleteAsync(retryCt);
                 SampleResult = SampleTap!.Build(
                     Progress.GetMetrics().ReadCount,
                     (EffectiveWriter as ISampleModeSink)?.RowsWritten ?? 0);
