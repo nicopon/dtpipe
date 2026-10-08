@@ -88,6 +88,7 @@ services:
       Coordinator__LibrarySeed: /lab/library-seed
       Coordinator__RightsSeed: /lab/rights-seed.json
       Coordinator__Ui__ClientSecret: ${LAB_UI_SECRET:-coordinator-ui-lab-secret}
+      Coordinator__Studio__ClientId: dtpipe-studio
       Coordinator__Roles__Admin: ${LAB_ADMIN:-labadmin}@dtpipe.test
       Coordinator__Roles__Designer: labdesigner@dtpipe.test
       Coordinator__Roles__Reader: labreader@dtpipe.test

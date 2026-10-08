@@ -11,11 +11,13 @@ using OpenIddict.Server.AspNetCore;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 // A test identity provider for the distributed lab: OpenIddict, client credentials for services and
-// authorization code with PKCE for front ends. It says who a caller is; what a caller may do belongs
+// authorization code with PKCE for front ends, with refresh tokens for a client that asks for them. It says who a caller is; what a caller may do belongs
 // to the services that trust it.
 var builder = WebApplication.CreateBuilder(args);
 var options = IdpOptions.From(builder.Configuration, builder.Environment.ContentRootPath);
 builder.Services.AddSingleton(options);
+var clients = ClientCatalog.Load(options.ClientsFile);
+builder.Services.AddSingleton(clients);
 builder.Logging.AddFilter("OpenIddict", LogLevel.Warning);
 builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
 builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
@@ -45,9 +47,9 @@ builder.Services.AddOpenIddict()
         o.SetAuthorizationEndpointUris("connect/authorize")
          .SetTokenEndpointUris("connect/token")
          .SetEndSessionEndpointUris("connect/logout");
-        o.AllowAuthorizationCodeFlow().AllowClientCredentialsFlow();
+        o.AllowAuthorizationCodeFlow().AllowClientCredentialsFlow().AllowRefreshTokenFlow();
         o.RequireProofKeyForCodeExchange();
-        o.RegisterScopes(Scopes.OpenId, Scopes.Email, Scopes.Profile);
+        o.RegisterScopes(Scopes.OpenId, Scopes.Email, Scopes.Profile, Scopes.OfflineAccess);
         // Access tokens are signed JWTs any service can validate against the published keys. The
         // encryption key only protects authorization codes, which do not need to outlive a restart.
         o.AddEphemeralEncryptionKey();
@@ -104,6 +106,9 @@ app.MapMethods("/connect/authorize", [HttpMethods.Get, HttpMethods.Post], async 
     }
 
     var identity = TestUsers.Identity(user, options, request.GetScopes());
+    // A client that names an audience gets access tokens that service accepts; any other client's
+    // tokens name none, so no service takes them for its own.
+    if (clients.FirstOrDefault(c => c.ClientId == request.ClientId)?.Audience is { } audience) identity.SetResources(audience);
     return Results.SignIn(new ClaimsPrincipal(identity), authenticationScheme: OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
 });
 
@@ -125,14 +130,14 @@ app.MapPost("/connect/token", async (HttpContext context, IOpenIddictApplication
         return Results.SignIn(new ClaimsPrincipal(identity), authenticationScheme: OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
     }
 
-    if (request.IsAuthorizationCodeGrantType())
+    if (request.IsAuthorizationCodeGrantType() || request.IsRefreshTokenGrantType())
     {
-        // The code carries the principal the authorization endpoint signed in, destinations included;
-        // a test user never changes, so it is issued again as it is.
-        var code = await context.AuthenticateAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
-        return code.Principal is { } principal
+        // The code or the refresh token carries the principal the authorization endpoint signed in,
+        // destinations and audience included; a test user never changes, so it is issued again as it is.
+        var grant = await context.AuthenticateAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+        return grant.Principal is { } principal
             ? Results.SignIn(principal, authenticationScheme: OpenIddictServerAspNetCoreDefaults.AuthenticationScheme)
-            : Forbid(Errors.InvalidGrant, "The authorization code is no longer valid.");
+            : Forbid(Errors.InvalidGrant, "The authorization code or refresh token is no longer valid.");
     }
 
     return Forbid(Errors.UnsupportedGrantType, "This grant type is not supported.");

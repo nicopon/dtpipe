@@ -82,7 +82,8 @@ exec_coordinator() {
         --Coordinator:StateDirectory="$STATE" --Coordinator:Authority="$IDP_URL" \
         --Coordinator:LabMode=true --Coordinator:Scenarios="$LAB/pipelines" \
         --Coordinator:LibrarySeed="$LAB/library-seed" --Coordinator:RightsSeed="$LAB/rights-seed.json" \
-        --Coordinator:Ui:ClientSecret=coordinator-ui-lab-secret --Coordinator:Roles:Admin="${LAB_ADMIN:-labadmin}@dtpipe.test" \
+        --Coordinator:Ui:ClientSecret=coordinator-ui-lab-secret --Coordinator:Studio:ClientId=dtpipe-studio \
+        --Coordinator:Roles:Admin="${LAB_ADMIN:-labadmin}@dtpipe.test" \
         --Coordinator:Roles:Designer=labdesigner@dtpipe.test --Coordinator:Roles:Reader=labreader@dtpipe.test "$@"
 }
 

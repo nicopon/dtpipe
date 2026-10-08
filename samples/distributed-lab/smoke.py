@@ -5,7 +5,7 @@ Six passes. The Lab view's: each pipelines/*.yaml with its catalog layout, deplo
 after the other. The library's: each library pipeline distributed automatically and its plan
 saved, then all of them deployed at once and their runs queued together, as the page does: runs
 that share a data node must never be in flight together.
-The rights': the embedded IDP, the flow matrix refusing a plan and then, edited under a deployed
+The rights': the embedded IDP, people's sessions and the studio's bearer tokens, the flow matrix refusing a plan and then, edited under a deployed
 pipeline and, edited under a deployed pipeline, a transfer at run time; every edit is undone.
 The faults': a run cancelled while a fully wired fragment's child has nothing to write, whose
 verdict must come within the grace period.
@@ -39,7 +39,7 @@ RUN_TIMEOUT = 180
 
 # /api serves people: smoke signs in as the lab's admin, through the IdP, as a browser would.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
-from lab_session import ApiError, Session  # noqa: E402
+from lab_session import ApiError, Session, studio_tokens  # noqa: E402
 SESSION = Session(URL, timeout=RUN_TIMEOUT)
 
 
@@ -530,8 +530,43 @@ def rights_pass():
         except urllib.error.HTTPError as e:
             return e.code
 
+    def studio():
+        # dtpipe studio signs a person in through its own public client and calls /api with their
+        # bearer token: the roles are the same configuration's, a change still needs the CSRF header,
+        # and the token reaches no part of the data plane.
+        def bearer(token, path, body=None, method="GET", csrf=True):
+            headers = {"Authorization": "Bearer " + token, "Content-Type": "application/json"}
+            if csrf:
+                headers["X-Dtpipe-Csrf"] = "1"
+            req = urllib.request.Request(URL + path, None if body is None else json.dumps(body).encode(), headers, method=method)
+            try:
+                with urllib.request.build_opener(_NoRedirect).open(req, timeout=20) as r:
+                    return r.status, json.loads(r.read() or b"null")
+            except urllib.error.HTTPError as e:
+                return e.code, None
+
+        designer = studio_tokens(URL, "labdesigner")["access_token"]
+        reader = studio_tokens(URL, "labreader")["access_token"]
+        me = bearer(designer, "/api/me")
+        save = {"yaml": "a:\n  input: x\n", "layout": None, "message": "smoke: refused"}
+        expected = {
+            "designer bearer GET /api/me": ((me[0], (me[1] or {}).get("roles")), (200, ["designer", "reader"])),
+            "reader bearer PUT /api/library": (bearer(reader, "/api/library/smoke-refused", save, "PUT")[0], 403),
+            "designer bearer PUT without CSRF": (bearer(designer, "/api/library/smoke-refused", save, "PUT", csrf=False)[0], 403),
+            "service token GET /api/me": (bearer(service_token(), "/api/me")[0], 401),
+            "designer bearer on the node channel": (bearer(designer, "/node-channel/negotiate?negotiateVersion=1", {}, "POST")[0], 401),
+            "designer bearer on TransportR's hub": (bearer(designer, "/hub/command/negotiate?negotiateVersion=1", {}, "POST")[0], 401),
+        }
+        wrong = {k: v for k, v in expected.items() if v[0] != v[1]}
+        if wrong:
+            raise RuntimeError("; ".join(f"{k}: {got} (expected {want})" for k, (got, want) in wrong.items()))
+        if any(p["subject"] in ("labdesigner", "labreader") for p in call("/api/rights")["pending"]):
+            raise RuntimeError("a person's token was taken for a host waiting for approval")
+        return f"{len(expected)} rules hold for the studio's bearer: roles, CSRF, no service on /api, no person on the data plane"
+
     check("identity provider", idp)
     check("roles and sessions", roles)
+    check("studio bearer", studio)
     check("enrollment", enrollment)
     check("identity, disabled", disabled)
     check("flow matrix, plan", matrix_plan)

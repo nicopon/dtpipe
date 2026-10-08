@@ -9,10 +9,13 @@ whom `lab.sh` lists in Coordinator:Roles:Admin. Standard library only.
     session = Session("http://127.0.0.1:5180")
     nodes = session.call("/api/nodes")
 """
+import base64
+import hashlib
 import html.parser
 import http.cookiejar
 import json
 import os
+import secrets
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -88,6 +91,58 @@ class Session:
                 except ValueError:
                     message = text
                 raise ApiError(path, e.code, message) from None
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+STUDIO_CLIENT = "dtpipe-studio"
+
+
+def studio_tokens(base, user, port=53190):
+    """A person's tokens through dtpipe studio's client, as the studio obtains them: the coordinator's
+    metadata names the IdP, the IdP's login form signs `user` in, and the code is read off the
+    redirect to the loopback (nothing needs to listen there), then exchanged with its PKCE verifier."""
+    jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar), _NoRedirect)
+
+    def get(url, form=None):
+        data = urllib.parse.urlencode(form).encode() if form is not None else None
+        try:
+            with opener.open(urllib.request.Request(url, data), timeout=30) as r:
+                return r.status, r.headers, r.read().decode()
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers, e.read().decode()
+
+    _, _, body = get(base.rstrip("/") + "/.well-known/oauth-protected-resource")
+    issuer = json.loads(body)["authorization_servers"][0].rstrip("/")
+    _, _, body = get(issuer + "/.well-known/openid-configuration")
+    meta = json.loads(body)
+    verifier = secrets.token_urlsafe(48)
+    redirect = f"http://127.0.0.1:{port}/callback"
+    authorize = meta["authorization_endpoint"] + "?" + urllib.parse.urlencode({
+        "client_id": STUDIO_CLIENT, "response_type": "code", "redirect_uri": redirect,
+        "scope": "openid email profile offline_access", "state": "lab",
+        "code_challenge": base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode(),
+        "code_challenge_method": "S256"})
+    _, headers, _ = get(authorize)
+    login = urllib.parse.urljoin(issuer, headers.get("Location", ""))
+    _, _, page = get(login)
+    parser = _Hidden()
+    parser.feed(page)
+    get(urllib.parse.urljoin(login, "/account/login"), {**parser.fields, "user": user, "password": user + "pwd"})
+    _, headers, _ = get(authorize)
+    landed = headers.get("Location", "")
+    if not landed.startswith(redirect + "?"):
+        raise RuntimeError(f"signing {user} in for the studio did not reach the loopback: {landed}")
+    code = urllib.parse.parse_qs(urllib.parse.urlparse(landed).query)["code"][0]
+    status, _, body = get(meta["token_endpoint"], {"grant_type": "authorization_code", "code": code, "redirect_uri": redirect,
+                                                    "client_id": STUDIO_CLIENT, "code_verifier": verifier})
+    if status != 200:
+        raise RuntimeError(f"the studio's code was not exchanged: {status} {body}")
+    return json.loads(body)
 
 
 if __name__ == "__main__":

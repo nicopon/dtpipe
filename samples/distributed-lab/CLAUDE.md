@@ -37,8 +37,15 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   restarts it with shorter tokens for trials. `[local: tools/campaign.py S3, S5]`
 - **`Lab.Idp` says who, never what.** Its tokens carry a subject, a name and an email; no group,
   role or permission enters a token or the clients file, because what a caller may do belongs to
-  the coordinator. It stands alone: no reference to dtpipe, TransportR or the coordinator.
-  `[local: tools/idp_check.py]`
+  the coordinator. A client's `audience` and `refreshTokens` are protocol, not a right. It stands
+  alone: no reference to dtpipe, TransportR or the coordinator. `[local: tools/idp_check.py]`
+- **`dtpipe-studio` is the studio's client**: native and public, registered at
+  `http://127.0.0.1/callback` with no port, so any loopback port is accepted (RFC 8252), never at
+  an extra origin; its people's access tokens name the coordinator's audience, and it may refresh
+  them. `lab.sh exec-coordinator` names it in `Coordinator:Studio:ClientId`; `coordinator-ui`'s
+  tokens name no audience. `lab_session.studio_tokens` signs a person in through it, the code read
+  off the redirect to the loopback. Its refresh tokens live in the IdP's memory: an IdP restart
+  signs every studio out. `[local: tools/idp_check.py, smoke.py rights — studio bearer]`
 - A node's tokens come from the IdP its `Oidc:Authority` names, through the discovery document:
   `lab.sh` starts `Lab.Idp` first and points the coordinator (`--authority`) and every node at it.
   The secrets live in `idp-clients.json` (the IdP) and the node files (the clients), never in the

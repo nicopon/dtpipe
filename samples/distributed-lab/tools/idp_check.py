@@ -4,8 +4,8 @@
     python3 tools/idp_check.py [http://127.0.0.1:5190]
 
 Client credentials (a node), authorization code with PKCE (the coordinator's front end, through
-the login form), and the refusals that matter: a wrong secret, a wrong password, a redirect URI the
-client did not register. Standard library only; prints one line per check and exits non-zero on the
+the login form; dtpipe studio, a native client on the loopback, with refresh tokens), and the
+refusals that matter: a wrong secret, a wrong password, a redirect URI the client did not register. Standard library only; prints one line per check and exits non-zero on the
 first failure.
 """
 import base64
@@ -23,6 +23,7 @@ IDP = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:5190").rstrip("/"
 UI = {"id": "coordinator-ui", "secret": "coordinator-ui-lab-secret",
       "redirect": "http://127.0.0.1:5180/signin-oidc", "logout": "http://127.0.0.1:5180/signout-callback-oidc"}
 NODE = {"id": "node-1", "secret": "node-1-lab-secret"}
+STUDIO = {"id": "dtpipe-studio", "audience": "dtpipe-coordinator"}
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -77,7 +78,7 @@ status, _, body = call(IDP + "/.well-known/openid-configuration")
 check("discovery answers", status == 200, status)
 meta = json.loads(body)
 check("issuer is the configured one", meta["issuer"].rstrip("/") == IDP, meta["issuer"])
-for grant in ("authorization_code", "client_credentials"):
+for grant in ("authorization_code", "client_credentials", "refresh_token"):
     check(f"grant {grant} advertised", grant in meta["grant_types_supported"], meta["grant_types_supported"])
 
 # Client credentials: a node
@@ -138,6 +139,49 @@ identity = claims(tokens["id_token"])
 check("the identity token names toto", identity.get("sub") == "toto" and identity.get("name") == "toto", identity)
 check("and gives the email toto@dtpipe.test", identity.get("email") == "toto@dtpipe.test", identity)
 check("and no role or group", not any(k in identity for k in ("role", "roles", "groups")), identity)
+check("the front end's access token names no audience", "aud" not in claims(tokens["access_token"]), claims(tokens["access_token"]))
+
+
+# dtpipe studio: a native public client on the loopback, any port, with refresh tokens
+def studio_authorize(redirect, verifier):
+    return meta["authorization_endpoint"] + "?" + urllib.parse.urlencode({
+        "client_id": STUDIO["id"], "response_type": "code", "redirect_uri": redirect,
+        "scope": "openid email profile offline_access", "state": "s",
+        "code_challenge": base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode(),
+        "code_challenge_method": "S256"})
+
+
+studio_verifier = secrets.token_urlsafe(48)
+studio_redirect = "http://127.0.0.1:53123/callback"
+status, headers, _ = call(studio_authorize(studio_redirect, studio_verifier))
+landed = headers.get("Location", "")
+check("the studio's code reaches the loopback at a port of its choosing",
+      status == 302 and landed.startswith(studio_redirect + "?"), (status, landed))
+for other in ("http://localhost:53123/callback", "http://127.0.0.1:53123/other"):
+    status, headers, _ = call(studio_authorize(other, studio_verifier))
+    check(f"another host or path is refused: {other}", status == 400 and not headers.get("Location", "").startswith(other), (status, headers.get("Location")))
+
+studio_code = urllib.parse.parse_qs(urllib.parse.urlparse(landed).query)["code"][0]
+status, _, body = call(meta["token_endpoint"], {"grant_type": "authorization_code", "code": studio_code, "redirect_uri": studio_redirect,
+                                                "client_id": STUDIO["id"], "code_verifier": studio_verifier})
+check("the studio exchanges its code without a secret", status == 200, body)
+studio = json.loads(body)
+access = claims(studio["access_token"])
+check("its access token names the coordinator, the studio and toto's email",
+      access.get("aud") in (STUDIO["audience"], [STUDIO["audience"]]) and access.get("client_id") == STUDIO["id"]
+      and access.get("sub") == "toto" and access.get("email") == "toto@dtpipe.test", access)
+check("and carries no role or group", not any(k in access for k in ("role", "roles", "groups")), access)
+check("a refresh token comes with it", bool(studio.get("refresh_token")), studio.keys())
+
+refresh = studio["refresh_token"]
+for turn in (1, 2):
+    status, _, body = call(meta["token_endpoint"], {"grant_type": "refresh_token", "refresh_token": refresh, "client_id": STUDIO["id"]})
+    check(f"refresh {turn} gives a new access token", status == 200 and "access_token" in body, (status, body))
+    renewed = json.loads(body)
+    again = claims(renewed["access_token"])
+    check(f"refresh {turn} keeps the audience and the client", again.get("aud") == access.get("aud") and again.get("client_id") == STUDIO["id"], again)
+    # A rolling refresh token replaces the one spent: the next refresh uses the new one.
+    refresh = renewed.get("refresh_token") or refresh
 
 wrong = authorize.replace(urllib.parse.quote(UI["redirect"], safe=""), urllib.parse.quote("http://evil.test/cb", safe=""))
 status, headers, _ = call(wrong)
