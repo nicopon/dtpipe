@@ -40,6 +40,10 @@ internal sealed class StudioFakes : IAsyncDisposable
     public Dictionary<string, Recognition> Answers = [];
     public string? Recognized;
     public int SampleRows;
+    public readonly Dictionary<string, (string Yaml, string Commit)> Library = [];
+    public string? LastSaveBody;
+    public bool Redistribute;
+    public int Commits;
     public string SinkTarget = "csv:target.csv";
 
     public const string SourceKey = "n1/orders", SinkKey = "n1/archive";
@@ -168,6 +172,21 @@ internal sealed class StudioFakes : IAsyncDisposable
             SampleRows = int.Parse(context.Request.Query["rows"]!);
             context.Response.ContentType = "application/vnd.apache.arrow.stream";
             await context.Response.Body.WriteAsync(Arrow(Math.Min(SampleRows, 3)));
+            break;
+        case { } library when library.StartsWith("/api/library/", StringComparison.Ordinal):
+            var id = library["/api/library/".Length..];
+            LastSaveBody = await new StreamReader(context.Request.Body).ReadToEndAsync();
+            var save = JsonSerializer.Deserialize<LibrarySave>(LastSaveBody, JsonSerializerOptions.Web)!;
+            var exists = Library.TryGetValue(id, out var current);
+            var ifMatch = context.Request.Headers.IfMatch.ToString();
+            if (context.Request.Headers.IfNoneMatch == "*" && exists || ifMatch.Length > 0 && (!exists || ifMatch.Trim('"') != current.Commit))
+            {
+                context.Response.StatusCode = 412;
+                await context.Response.WriteAsJsonAsync(new LibraryConflict("not the version expected", exists ? current.Commit : null), JsonSerializerOptions.Web);
+                return;
+            }
+            Library[id] = (save.Yaml, $"commit-{Library.Count + Commits++}");
+            await context.Response.WriteAsJsonAsync(new LibrarySaved(id, Library[id].Commit, Redistribute, false), JsonSerializerOptions.Web);
             break;
         case "/api/elsewhere":
                 context.Response.Redirect(IdpUrl + "/stolen");

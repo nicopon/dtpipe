@@ -164,10 +164,14 @@ public sealed class StudioFolder
         && (ext.Equals(".yaml", StringComparison.OrdinalIgnoreCase) || ext.Equals(".yml", StringComparison.OrdinalIgnoreCase));
 }
 
+/// <summary>A job published from this studio: to which coordinator, under which id, at which commit of its job.</summary>
+public sealed record StudioPublication(string Coordinator, string Id, string? Commit);
+
 /// <summary>
 /// What the studio keeps for a job beside the folder's files, never in them and never in git: where
-/// its cards were drawn (<c>&lt;job&gt;-layout.json</c>) and what its variables are launched with
-/// (<c>&lt;job&gt;-launch.json</c>: a keyring alias or a typed text, never a keyring value), under
+/// its cards were drawn (<c>&lt;job&gt;-layout.json</c>), what its variables are launched with
+/// (<c>&lt;job&gt;-launch.json</c>: a keyring alias or a typed text, never a keyring value) and where it
+/// was published last (<c>&lt;job&gt;-publish.json</c>), under
 /// <c>.dtpipe/studio/</c>, whose <c>.dtpipe</c> ignores itself. No directory on the way may be a link:
 /// a clone could carry a <c>.dtpipe</c> that points anywhere. A job is a path the folder confined.
 /// </summary>
@@ -198,6 +202,16 @@ public sealed class StudioLocalFiles(StudioFolder folder)
 
     public void WriteLaunch(string job, IReadOnlyDictionary<string, StudioOverride> overrides) =>
         Write(job, "launch", JsonSerializer.SerializeToNode(overrides, LaunchJson)!);
+
+    /// <summary>Where a job was published last from here, for the next publication to name the version it replaces.</summary>
+    public StudioPublication? ReadPublication(string job)
+    {
+        try { return Read(job, "publish")?.Deserialize<StudioPublication>(LaunchJson); }
+        catch (JsonException) { return null; }
+    }
+
+    public void WritePublication(string job, StudioPublication publication) =>
+        Write(job, "publish", JsonSerializer.SerializeToNode(publication, LaunchJson)!);
 
     private string SamplesDirectory => Path.Combine(DtpipeDirectory, "studio", "samples");
 

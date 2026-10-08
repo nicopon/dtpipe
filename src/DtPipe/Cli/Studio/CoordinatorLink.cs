@@ -229,6 +229,26 @@ public sealed class CoordinatorLink : IDisposable
         return await response.Content.ReadAsByteArrayAsync(ct);
     }
 
+    /// <summary>
+    /// Saves <paramref name="yaml"/> into the coordinator's library as <paramref name="id"/>, with no layout:
+    /// only while absent when <paramref name="ifMatch"/> is null, else only over that commit of its job.
+    /// Returns the outcome, or the conflict (412) with the commit in place.
+    /// </summary>
+    public async Task<(LibrarySaved? Saved, LibraryConflict? Conflict)> PublishAsync(string id, string yaml, string? message, string? ifMatch, CancellationToken ct)
+    {
+        if (!CoordinatorApi.IsPipelineId(id)) throw new CoordinatorLinkException($"'{id}' is not a pipeline id: lowercase letters, digits and '-'.");
+        var body = JsonSerializer.SerializeToUtf8Bytes(new LibrarySave(yaml, null, message), JsonSerializerOptions.Web);
+        var headers = ifMatch is null
+            ? new Dictionary<string, string> { ["If-None-Match"] = "*" }
+            : new Dictionary<string, string> { ["If-Match"] = $"\"{ifMatch}\"" };
+        using var response = await SendAsync(HttpMethod.Put, CoordinatorApi.Library(id), body, headers: headers, ct: ct);
+        if (response.StatusCode == HttpStatusCode.PreconditionFailed)
+            return (null, await response.Content.ReadFromJsonAsync<LibraryConflict>(JsonSerializerOptions.Web, ct));
+        if (!response.IsSuccessStatusCode)
+            throw new CoordinatorLinkException($"{Url} did not save '{id}': {await ErrorOf(response, ct)}");
+        return (await response.Content.ReadFromJsonAsync<LibrarySaved>(JsonSerializerOptions.Web, ct), null);
+    }
+
     /// <summary>Why the coordinator refused: its <c>error</c>, or its status.</summary>
     private static async Task<string> ErrorOf(HttpResponseMessage response, CancellationToken ct)
     {

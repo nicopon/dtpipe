@@ -207,8 +207,13 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   `.dtpipe/studio/samples/`, created owner-only, deleted when the sample ends and purged when the
   studio starts, never reached through a link. A brick's branch is out of the Variables tab: its node
   resolves those.
+- **A publication sends the job saved in the folder, nothing beside it.** `/api/publish` reads the
+  file again and refuses one whose hash is not the one the page saved; the layout and the launch
+  file stay on this machine. The first publication of an id creates only (`If-None-Match: *`); a
+  later one replaces only the commit published last from here (`<job>-publish.json`, under
+  `.dtpipe/studio/`), and a 412 is replaced only when the person names the commit in place.
 - Quit from the page exits 0, Ctrl+C 130.
 
 `[CI: StudioServerTests (no script writes HTML or an inline style), StudioSampleTests,
-StudioCoordinatorTests, StudioBrickTests, DesignServiceTests, LocalEndpointCardTests]` `[unchecked: the page's behaviour - no test drives a
+StudioCoordinatorTests, StudioBrickTests, StudioPublishTests, DesignServiceTests, LocalEndpointCardTests]` `[unchecked: the page's behaviour - no test drives a
 browser]`

@@ -62,6 +62,7 @@ export async function api(path, body, method) {
   if (!response.ok) {
     const error = new Error(data.error || `${response.status} ${response.statusText}`);
     error.status = response.status;
+    error.data = data;
     throw error;
   }
   return data;

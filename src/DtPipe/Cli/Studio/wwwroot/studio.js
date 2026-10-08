@@ -1,7 +1,7 @@
 // dtpipe studio: the jobs of a folder, opened as cards, sampled through the real engine and saved.
 
 import { $, api, el, fill, forgetToken, status, token } from "./dom.js";
-import { onCoordinator, refreshCoordinator } from "./coordinator.js";
+import { coordinator, onCoordinator, refreshCoordinator } from "./coordinator.js";
 import { brickBranches, cards, compose, isDirty, markSaved, mountDesigner, openBlank, openJob, refreshDrawer, setCatalog, showTab } from "./designer.js";
 
 // The job open: its path, the hash a save must find on disk (null for a job not written yet), and
@@ -28,6 +28,7 @@ async function open(path) {
   try {
     const job = await api(`/api/job?path=${encodeURIComponent(path)}`);
     current = { path, hash: job.hash, rewrites: job.rewrites };
+    publication = null;
     $("job-name").textContent = path;
     await openJob(job.yaml, job.layout);
     status(job.rewrites ? "saving rewrites this file" : "", job.rewrites ? "warn" : "");
@@ -43,6 +44,7 @@ async function newJob() {
   if (!path) return;
   if (!/\.ya?ml$/i.test(path)) { status("A job is a .yaml or .yml file.", "bad"); return; }
   current = { path, hash: null, rewrites: false };
+  publication = null;
   $("job-name").textContent = `${path} (new)`;
   await openBlank(path.replace(/^.*\//, "").replace(/\.ya?ml$/i, ""));
   await loadJobs();
@@ -155,6 +157,69 @@ async function loadBricks() {
   }
 }
 
+// ---------------------------------------------------------------- publication
+
+// The last publication's outcome, for its tab: { id, saved } or { id, conflict }.
+let publication = null;
+let publishing = null;
+
+const short = (commit) => String(commit || "").slice(0, 8) || "nothing";
+const defaultId = (path) => path.replace(/^.*\//, "").replace(/\.ya?ml$/i, "").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "pipeline";
+
+// The coordinator receives the job saved in the folder, never the cards: its layout and its launch
+// values stay on this machine. `replace` names the commit the person chose to replace after a conflict.
+async function publish(replace) {
+  if (!current) return;
+  if (isDirty() || !current.hash) {
+    status("Save the job first: the coordinator receives the job saved in the folder.", "bad");
+    return;
+  }
+  if (replace === undefined) {
+    let last = null;
+    try { last = (await api(`/api/publish?path=${encodeURIComponent(current.path)}`)).publication; } catch { /* none */ }
+    const id = prompt("The pipeline's id in the coordinator's library (lowercase letters, digits and '-'):", last?.id || defaultId(current.path));
+    if (!id) return;
+    const message = prompt("Describe this version (the commit message):", `Publish ${current.path} from dtpipe studio`);
+    if (message === null) return;
+    publishing = { id, message };
+  }
+  try {
+    const saved = await api("/api/publish", { path: current.path, hash: current.hash, id: publishing.id, message: publishing.message, replace });
+    publication = { id: publishing.id, saved };
+    status(`published at ${short(saved.commit)}`, "good");
+  } catch (e) {
+    if (e.status !== 412) { status(e.message, "bad"); return; }
+    const commit = e.data?.commit ?? null;
+    publication = { id: publishing.id, conflict: { error: e.data?.error || e.message, commit } };
+    showTab("publish");
+    const question = commit
+      ? `The library holds ${publishing.id} at ${short(commit)}, not the version this studio published last. Replace it with this job?`
+      : `${publishing.id} is no longer in the library. Publish this job as a new pipeline?`;
+    if (confirm(question)) return publish(commit ?? "");
+    status("not published", "warn");
+    return;
+  }
+  showTab("publish");
+}
+
+function publicationView() {
+  if (!coordinator()) return el("p", { class: "hint" }, "Open the studio with --coordinator to publish a job into a coordinator's library.");
+  if (!publication) {
+    return el("p", { class: "hint" }, "Publish sends the job as saved in this folder to the coordinator's library. Its layout and its launch values stay on this machine.");
+  }
+  if (publication.conflict) {
+    const { error, commit } = publication.conflict;
+    return [el("p", { class: "warn" }, `${publication.id} was not published: ${error}`),
+      commit ? el("p", {}, "The library holds the commit ", el("code", {}, short(commit)), ".") : null];
+  }
+  const saved = publication.saved;
+  return [
+    el("p", { class: "good" }, `${saved.id} is published at the commit `, el("code", {}, short(saved.commit)), "."),
+    saved.redistribute ? el("p", { class: "warn" }, "This pipeline had a plan: it no longer matches. Redistribute it, then redeploy it from the coordinator's console.") : null,
+    saved.deployed ? el("p", { class: "warn" }, "The version in production stays the previous one until it is redeployed.") : null,
+  ];
+}
+
 async function quit() {
   if (isDirty() && !confirm("Changes are not saved. Quit anyway?")) return;
   try { await api("/api/quit", {}); } catch { /* the server may already be gone */ }
@@ -165,7 +230,10 @@ async function quit() {
 async function start() {
   const components = await api("/api/components");
   mountDesigner($("designer"), components, {
-    toolbar: () => el("button", { id: "d-save", title: "Write the job and its layout (Ctrl+S)", onclick: () => save() }, "Save"),
+    toolbar: () => [
+      el("button", { id: "d-save", title: "Write the job and its layout (Ctrl+S)", onclick: () => save() }, "Save"),
+      coordinator() ? el("button", { id: "d-publish", title: "Send the saved job to the coordinator's library", onclick: () => publish() }, "Publish") : null,
+    ],
     onComposed: loadVariables,
     sample,
     extraTabs: [{
@@ -173,6 +241,10 @@ async function start() {
       label: "Variables ",
       badge: () => { const n = vars.variables.filter((v) => !v.ready).length; return n ? el("span", { class: "count" }, n) : null; },
       render: variablesView,
+    }, {
+      name: "publish",
+      label: "Publish",
+      render: publicationView,
     }],
   });
   await loadJobs();

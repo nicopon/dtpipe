@@ -208,6 +208,13 @@ public sealed class StudioServer : IAsyncDisposable
                     _tools.Coordinator?.SignOutNow();
                     context.Response.StatusCode = StatusCodes.Status204NoContent;
                     break;
+                case ("GET", "/api/publish"):
+                    var published = JobPath(request.Query["path"].ToString()) is { } publishedJob ? _local.ReadPublication(publishedJob) : null;
+                    await JsonAsync(context, new { publication = published?.Coordinator == _tools.Coordinator?.Origin.ToString() ? published : null });
+                    break;
+                case ("POST", "/api/publish"):
+                    await PublishAsync(context);
+                    break;
                 case ("POST", "/api/quit"):
                     context.Response.StatusCode = StatusCodes.Status202Accepted;
                     _quit.TrySetResult();
@@ -416,6 +423,41 @@ public sealed class StudioServer : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Publishes the job as it is saved in the folder, never the page's cards: read again from disk and
+    /// refused when it is not the text the page saved (its hash). Its launch file and its layout stay on
+    /// this machine. A first publication creates only; a later one replaces only the commit published
+    /// last from here, or the one the person chose to replace after a 412.
+    /// </summary>
+    private async Task PublishAsync(HttpContext context)
+    {
+        var link = _tools.Coordinator ?? throw new StudioRefusal(404, "This studio was opened without --coordinator.");
+        var asked = await BodyAsync<PublishRequest>(context);
+        var path = JobPath(asked.Path) ?? throw new StudioRefusal(400, "Publish a job saved in the folder: name its path.");
+        if (!CoordinatorApi.IsPipelineId(asked.Id))
+            throw new StudioRefusal(400, $"'{asked.Id}' is not a pipeline id: lowercase letters, digits and '-'.");
+        var job = _folder.ReadJob(path);
+        if (asked.Hash is null || asked.Hash != job.Hash)
+            throw new StudioRefusal(409, $"{path} is not the job saved last: save it, then publish.");
+
+        var origin = link.Origin.ToString();
+        var last = _local.ReadPublication(path) is { } p && p.Coordinator == origin && p.Id == asked.Id ? p : null;
+        (LibrarySaved? Saved, LibraryConflict? Conflict) outcome;
+        // Replace names the commit the person chose to replace; empty, it creates a pipeline gone since.
+        var expected = asked.Replace is { } chosen ? (chosen.Length == 0 ? null : chosen) : last?.Commit;
+        try { outcome = await link.PublishAsync(asked.Id!, job.Text, asked.Message, expected, context.RequestAborted); }
+        catch (CoordinatorLinkException ex) { throw new StudioRefusal(502, ex.Message); }
+        if (outcome.Conflict is { } conflict)
+        {
+            context.Response.StatusCode = StatusCodes.Status412PreconditionFailed;
+            await JsonAsync(context, new { error = conflict.Error, commit = conflict.Commit });
+            return;
+        }
+        var saved = outcome.Saved!;
+        _local.WritePublication(path, new StudioPublication(origin, saved.Id, saved.Commit));
+        await JsonAsync(context, saved);
+    }
+
     /// <summary>A location a binding can carry: its pairs are separated by commas.</summary>
     private static string Bindable(string path) => path.Contains(',')
         ? throw new StudioRefusal(400, "The folder's path holds a comma, which a binding cannot carry: open the studio on another folder to sample a brick.")
@@ -507,6 +549,8 @@ public sealed class StudioServer : IAsyncDisposable
     private sealed record DecomposeRequest(string? Yaml, JsonObject? Layout);
 
     private sealed record SaveRequest(string? Path, string? Hash, DesignModel? Model, bool AcceptErrors);
+
+    private sealed record PublishRequest(string? Path, string? Hash, string? Id, string? Message, string? Replace);
 
     private sealed record VariablesRequest(string? Path, string? Yaml, List<SampledBrick>? Bricks);
 
