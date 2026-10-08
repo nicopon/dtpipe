@@ -22,7 +22,7 @@ public sealed class StudioServerTests : IAsyncLifetime
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "studio-" + Guid.NewGuid().ToString("N"));
     private readonly HttpClient _http = new();
     private StudioServer _server = null!;
-    private StudioSampler _sampler = (_, _, _) => Task.FromResult("{}");
+    private StudioSampler _sampler = (_, _, _, _) => Task.FromResult("{}");
     private readonly InMemorySecretsManager _secrets = new();
 
     public async ValueTask InitializeAsync()
@@ -34,7 +34,7 @@ public sealed class StudioServerTests : IAsyncLifetime
         File.WriteAllText(Path.Combine(_dir, ".hidden", "c.yaml"), "c: 1\n");
         File.WriteAllText(Path.Combine(_dir, "notes.txt"), "not a job\n");
         _server = await StudioServer.StartAsync(new StudioFolder(_dir), 0, new StudioTools(
-            (y, r, ct) => _sampler(y, r, ct), new DesignService(IBrickLookup.None),
+            (y, r, b, ct) => _sampler(y, r, b, ct), new DesignService(IBrickLookup.None),
             [new StudioComponent("csv", "Files")], [new StudioComponent("duck", "Databases")], _secrets), CancellationToken.None);
     }
 
@@ -183,7 +183,7 @@ public sealed class StudioServerTests : IAsyncLifetime
     {
         var release = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        _sampler = (_, _, _) => { started.TrySetResult(); return release.Task; };
+        _sampler = (_, _, _, _) => { started.TrySetResult(); return release.Task; };
 
         var first = SendAsync(Request(HttpMethod.Post, "/api/sample", body: new { yaml = "a: 1", rows = 5 }));
         await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
@@ -198,7 +198,7 @@ public sealed class StudioServerTests : IAsyncLifetime
     public async Task The_rows_asked_are_bounded()
     {
         var asked = 0;
-        _sampler = (_, rows, _) => { asked = rows; return Task.FromResult("{}"); };
+        _sampler = (_, rows, _, _) => { asked = rows; return Task.FromResult("{}"); };
 
         await SendAsync(Request(HttpMethod.Post, "/api/sample", body: new { yaml = "a: 1", rows = 1_000_000 }));
 
@@ -477,7 +477,7 @@ public sealed class StudioServerTests : IAsyncLifetime
     public async Task A_sample_is_refused_before_it_runs_naming_what_nothing_resolves()
     {
         var ran = false;
-        _sampler = (_, _, _) => { ran = true; return Task.FromResult("{}"); };
+        _sampler = (_, _, _, _) => { ran = true; return Task.FromResult("{}"); };
 
         var (status, body) = await SendAsync(Request(HttpMethod.Post, "/api/sample",
             body: new { yaml = "main:\n  input: \"csv:${{STUDIO_T_MISSING}}\"\n  output: \"csv:${{keyring://ghost}}\"\n", rows = 3 }));
@@ -495,7 +495,7 @@ public sealed class StudioServerTests : IAsyncLifetime
     {
         _secrets.SetSecret("pass", Sentinel);
         string? seen = null;
-        _sampler = (_, _, _) => { seen = Environment.GetEnvironmentVariable("STUDIO_T_PASS"); return Task.FromResult("{\"success\": true}"); };
+        _sampler = (_, _, _, _) => { seen = Environment.GetEnvironmentVariable("STUDIO_T_PASS"); return Task.FromResult("{\"success\": true}"); };
         object chosen = how == "keyring" ? new { keyring = "pass" } : new { value = "typed by hand" };
 
         var (launched, _) = await SendAsync(Request(HttpMethod.Put, "/api/launch",
@@ -631,7 +631,7 @@ public sealed class StudioSampleTests
         var dir = Path.Combine(Path.GetTempPath(), "studio-leak-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         await using var server = await StudioServer.StartAsync(new StudioFolder(dir), 0, new StudioTools(
-            (y, r, ct) => mcp.SampleAsync(y, r, shownRows: r, ct), new DesignService(IBrickLookup.None), [], [], secrets), CancellationToken.None);
+            (y, r, b, ct) => mcp.SampleAsync(y, r, shownRows: r, ct, b.Input, b.Output), new DesignService(IBrickLookup.None), [], [], secrets), CancellationToken.None);
         using var http = new HttpClient();
         async Task<string> Send(HttpMethod method, string path, object body)
         {

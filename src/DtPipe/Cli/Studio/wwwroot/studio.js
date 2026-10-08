@@ -1,8 +1,8 @@
 // dtpipe studio: the jobs of a folder, opened as cards, sampled through the real engine and saved.
 
 import { $, api, el, fill, forgetToken, status, token } from "./dom.js";
-import { refreshCoordinator } from "./coordinator.js";
-import { cards, compose, isDirty, markSaved, mountDesigner, openBlank, openJob, refreshDrawer, showTab } from "./designer.js";
+import { onCoordinator, refreshCoordinator } from "./coordinator.js";
+import { brickBranches, cards, compose, isDirty, markSaved, mountDesigner, openBlank, openJob, refreshDrawer, setCatalog, showTab } from "./designer.js";
 
 // The job open: its path, the hash a save must find on disk (null for a job not written yet), and
 // whether saving rewrites a text written by hand.
@@ -72,7 +72,7 @@ async function save() {
 async function loadVariables(result) {
   const seq = ++varsSeq;
   try {
-    const answer = await api("/api/variables", { path: current?.path || null, yaml: result?.yaml || "" });
+    const answer = await api("/api/variables", { path: current?.path || null, yaml: result?.yaml || "", bricks: brickBranches() });
     if (seq !== varsSeq) return;
     vars = answer;
   } catch (e) {
@@ -137,10 +137,21 @@ function variablesView() {
 
 async function sample(yaml, rows) {
   try {
-    return await api("/api/sample", { yaml, rows, path: current?.path || null });
+    return await api("/api/sample", { yaml, rows, path: current?.path || null, bricks: brickBranches() });
   } catch (e) {
     if (e.status === 422) showTab("variables");
     throw e;
+  }
+}
+
+// The coordinator's bricks for the palette; the catalog read last when it cannot be read again.
+async function loadBricks() {
+  try {
+    const answer = await api("/api/bricks");
+    setCatalog(answer);
+    if (answer.error) status(answer.error, "warn");
+  } catch (e) {
+    status(e.message, "bad");
   }
 }
 
@@ -165,7 +176,9 @@ async function start() {
     }],
   });
   await loadJobs();
+  onCoordinator(loadBricks);
   await refreshCoordinator();
+  await loadBricks();
 }
 
 $("quit").addEventListener("click", quit);

@@ -35,6 +35,8 @@ try { Object.assign(sizes, JSON.parse(localStorage.getItem(SIZE_KEY) || "{}")); 
 
 let host = null;
 let components = { readers: [], writers: [] };
+// The coordinator's catalog read last (its nodes and bricks) and this studio's version; empty with none.
+let catalog = { nodes: [], bricks: [], studioVersion: "" };
 let hooks = {};
 let model = null;          // { title, description, directives, steps, layout }
 let result = null;         // the last compose answer
@@ -73,6 +75,24 @@ export async function openBlank(title) {
   result = null; selected = null; zoom = null; dirty = true; sample = null; drawer = "yaml";
   renderShell();
   await compose();
+}
+
+/** The coordinator's nodes and bricks: the palette offers them, the inspector describes them. */
+export function setCatalog(next) {
+  catalog = { nodes: next?.nodes || [], bricks: next?.bricks || [], studioVersion: next?.studioVersion || "" };
+  renderPalette();
+  if (model) { renderCanvas(); renderInspector(); }
+}
+
+const brickOf = (key) => catalog.bricks.find((b) => b.key === key);
+
+/** Each brick card, by the branch of the composed job that runs it: a sample takes its rows from its node. */
+export function brickBranches() {
+  if (!model) return [];
+  return model.steps.filter((s) => s.brick).map((s) => ({
+    branch: result?.steps?.find((i) => i.alias === s.alias)?.branch || s.alias,
+    key: s.brick,
+  }));
 }
 
 export const isDirty = () => dirty;
@@ -134,12 +154,13 @@ function freshAlias(base) {
   return candidate;
 }
 
-function addStep(kind, component, x, y) {
-  const alias = freshAlias(component || kind);
+function addStep(kind, component, x, y, brick) {
+  const alias = freshAlias(brick ? brick.replace(/^.*\//, "") : component || kind);
   const step = { alias, kind, from: [], ref: [] };
+  if (brick) step.brick = brick;
   // A local endpoint starts as its component's prefix: the person completes the address.
-  if (kind === "source") step.yaml = `input: "${component}:"\n`;
-  if (kind === "sink") step.yaml = `output: "${component}:"\n`;
+  if (kind === "source" && !brick) step.yaml = `input: "${component}:"\n`;
+  if (kind === "sink" && !brick) step.yaml = `output: "${component}:"\n`;
   if (kind === "transform") step.transformers = [];
   if (kind === "sql") step.query = "SELECT *\nFROM input";
   model.steps.push(step);
@@ -382,14 +403,46 @@ function renderPalette() {
   const endpoints = (list, kind) => list.length
     ? list.map((c) => item(kind, c.name, `${c.category} · ${kind === "source" ? "reads" : "writes"} through the ${c.name} component`, c.name))
     : el("p", { class: "hint" }, "none");
+  const brickItem = (b) => {
+    const node = el("div",
+      { class: `pal-item kind-${b.kind}${b.online ? "" : " offline"}`, draggable: "true", "data-kind": b.kind, "data-brick": b.key,
+        title: `${b.kind} brick of ${b.node} · version ${b.version}${b.online ? "" : " · its node is offline"}${b.description ? "\n" + b.description : ""}` },
+      el("span", {}, b.title || b.id), el("button", { class: "small ghost", "data-add": true, title: "Add to the canvas" }, "+"));
+    return node;
+  };
+  const nodes = catalog.nodes.filter((n) => catalog.bricks.some((b) => b.node === n.name));
+  const bricks = catalog.bricks.length ? [
+    el("h3", {}, "Bricks ", el("span", { class: "hint" }, "of the coordinator's nodes")),
+    nodes.map((n) => [
+      el("h4", { class: n.online ? "" : "offline" }, n.name, n.online ? "" : " (offline)"),
+      catalog.bricks.filter((b) => b.node === n.name).map(brickItem),
+    ]),
+  ] : null;
   fill(view,
+    bricks,
     el("h3", {}, "Sources"), endpoints(components.readers, "source"),
     el("h3", {}, "Steps"),
     item("transform", "Transform", "An ordered list of transformers over one input"),
     item("sql", "SQL", "A DuckDB query over one main input, joined to others as ref"),
     item("merge", "Merge", "UNION ALL of several inputs with the same schema"),
     el("h3", {}, "Sinks"), endpoints(components.writers, "sink"),
-    el("p", { class: "hint" }, "Drag a component or a step onto the canvas, then wire an output port (right) to an input port (left). Drag a wire's end off its input port to move it or, dropped in the void, to remove it."));
+    el("p", { class: "hint" }, "Drag a component or a step onto the canvas, then wire an output port (right) to an input port (left). Drag a wire's end off its input port to move it or, dropped in the void, to remove it."),
+    versions());
+}
+
+// This studio's dtpipe and each node's: a difference is shown, never refused, since the coordinator
+// checks a pipeline again when it is published.
+function versions() {
+  if (!catalog.nodes.length) return null;
+  const differ = catalog.nodes.filter((n) => n.dtpipeVersion !== catalog.studioVersion);
+  return [
+    el("h3", {}, "Versions"),
+    el("ul", { class: "versions" },
+      el("li", {}, "this studio: ", el("code", {}, catalog.studioVersion || "unknown")),
+      catalog.nodes.map((n) => el("li", { class: n.dtpipeVersion === catalog.studioVersion ? "" : "warn" },
+        `${n.name}: `, el("code", {}, n.dtpipeVersion || "unknown")))),
+    differ.length ? el("p", { class: "hint warn" }, `${differ.length} node(s) run another dtpipe: a sample here may differ from a run there. The coordinator checks a pipeline again when it is published.`) : null,
+  ];
 }
 
 // What a local endpoint names: its input or output, read from its own YAML for the card's subtitle.
@@ -401,7 +454,9 @@ function endpointOf(step) {
 function cardInfo(step) {
   const info = result?.steps?.find((s) => s.alias === step.alias);
   let subtitle = "";
-  if (isEndpoint(step)) subtitle = step.brick || endpointOf(step) || `no ${step.kind === "source" ? "input" : "output"} yet`;
+  const brick = step.brick ? brickOf(step.brick) : null;
+  if (brick) subtitle = `${brick.title || brick.id} · ${brick.node}`;
+  else if (isEndpoint(step)) subtitle = step.brick || endpointOf(step) || `no ${step.kind === "source" ? "input" : "output"} yet`;
   else if (step.kind === "transform") subtitle = step.transformers?.length ? step.transformers.map((t) => t.type).join(" → ") : "no transformer yet";
   else if (step.kind === "sql") subtitle = (step.query || "").replace(/\s+/g, " ").slice(0, 60);
   else if (step.kind === "merge") subtitle = `UNION ALL of ${step.from.length} input(s)`;
@@ -611,7 +666,7 @@ function bindCanvas() {
     try { item = JSON.parse(e.dataTransfer.getData("application/json") || "null"); } catch { item = null; }
     if (!item) return;
     const p = canvasPoint(e);
-    addStep(item.kind, item.component, p.x - CARD_W / 2, p.y - 20);
+    addStep(item.kind, item.component, p.x - CARD_W / 2, p.y - 20, item.brick);
   });
 }
 
@@ -640,7 +695,7 @@ function bindPalette() {
   view.addEventListener("dragstart", (e) => {
     const item = e.target.closest(".pal-item");
     if (!item) return;
-    e.dataTransfer.setData("application/json", JSON.stringify({ kind: item.dataset.kind, component: item.dataset.component || null }));
+    e.dataTransfer.setData("application/json", JSON.stringify({ kind: item.dataset.kind, component: item.dataset.component || null, brick: item.dataset.brick || null }));
     e.dataTransfer.effectAllowed = "copy";
   });
   view.addEventListener("click", (e) => {
@@ -649,7 +704,7 @@ function bindPalette() {
     // Placed after the cards already there, in the column its kind usually takes.
     const column = { source: 0, transform: 1, sql: 1, merge: 1, sink: 2 }[item.dataset.kind] ?? 1;
     const inColumn = model.steps.filter((s) => (model.layout[s.alias]?.x ?? 0) >= 30 + column * (CARD_W + 70) - 20 && (model.layout[s.alias]?.x ?? 0) < 30 + (column + 1) * (CARD_W + 70) - 20);
-    addStep(item.dataset.kind, item.dataset.component || null, 30 + column * (CARD_W + 70), 30 + inColumn.length * (CARD_H + 36));
+    addStep(item.dataset.kind, item.dataset.component || null, 30 + column * (CARD_W + 70), 30 + inColumn.length * (CARD_H + 36), item.dataset.brick || null);
   });
 }
 
@@ -742,7 +797,7 @@ function renderInspector() {
         ? "input, the keys that bound or sample what it reads (limit, cursor, sampling-rate…), and its reader's provider-options blocks."
         : "output, the keys that govern what it writes (prefix, checkpoint, contract-save), and its writer's provider-options blocks.")];
   } else if (isEndpoint(step)) {
-    body = [step.kind === "sink" ? inputsList(step) : null, el("p", {}, el("code", {}, step.brick))];
+    body = [step.kind === "sink" ? inputsList(step) : null, brickView(step)];
   } else if (step.kind === "transform") {
     body = [inputsList(step), el("h3", {}, "Transformers ", el("span", { class: "hint" }, "applied in order")),
       (step.transformers || []).map((t, i) => transformerEditor(step, t, i)),
@@ -761,6 +816,29 @@ function renderInspector() {
     el("div", { class: "row" }, el("h2", {}, KIND_LABEL[step.kind] || step.kind), el("button", { class: "small ghost danger", "data-remove-step": true }, "Delete card")),
     el("label", { class: "field" }, "Alias ", el("input", { id: "i-alias", class: "mono", value: step.alias })),
     body);
+}
+
+// A brick card: what the coordinator's catalog says of it. Its branch is its node's, never edited here.
+function brickView(step) {
+  const brick = brickOf(step.brick);
+  if (!brick) return [el("p", {}, el("code", {}, step.brick)), el("p", { class: "hint warn" }, "Not in the catalog read last: sign in to the coordinator to read it.")];
+  return [
+    el("p", {}, el("b", {}, brick.title || brick.id), " ", el("span", { class: "hint" }, `${brick.kind} brick`)),
+    brick.description ? el("p", { class: "hint" }, brick.description) : null,
+    el("table", { class: "vars" }, el("tbody", {},
+      el("tr", {}, el("td", {}, "node"), el("td", {}, brick.node, brick.online ? "" : " (offline)")),
+      el("tr", {}, el("td", {}, "brick"), el("td", {}, el("code", {}, brick.key))),
+      el("tr", {}, el("td", {}, "version"), el("td", {}, el("code", {}, brick.version))))),
+    brick.kind === "source" ? [
+      el("h3", {}, "Columns"),
+      brick.schema?.length
+        ? el("table", { class: "vars" }, el("tbody", {}, brick.schema.map((c) => el("tr", {}, el("td", {}, el("code", {}, c.name)), el("td", {}, c.type, c.isNullable ? "" : " not null")))))
+        : el("p", { class: "hint" }, brick.schemaError || "Its node read no schema."),
+    ] : null,
+    el("p", { class: "hint" }, step.kind === "source"
+      ? "A sample reads its rows from its node, through the coordinator."
+      : "A sample writes nothing to it: its rows end in a throwaway file."),
+  ];
 }
 
 function bindInspector() {

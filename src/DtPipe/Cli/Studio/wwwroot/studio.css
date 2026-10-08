@@ -203,3 +203,9 @@ td.null { color: var(--muted); font-style: italic; }
   .split { display: none; }
   .drawer { height: auto; max-height: 420px; }
 }
+
+/* The coordinator's bricks and versions */
+.palette h4 { margin: 8px 0 4px; font-size: 12px; color: var(--muted); }
+.palette h4.offline, .pal-item.offline { opacity: .55; }
+.versions { margin: 4px 0; padding-left: 18px; font-size: 12.5px; }
+.versions li.warn { color: var(--warn); }

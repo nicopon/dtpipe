@@ -63,13 +63,15 @@ public sealed class StudioCommand : Command
             var mcp = serviceProvider.GetRequiredService<DtPipeMcpTools>();
             var readers = serviceProvider.GetServices<IStreamReaderFactory>().ToList();
             var writers = serviceProvider.GetServices<IDataWriterFactory>().ToList();
+            var endpoints = new ComponentEndpointRules(readers, writers);
             var tools = new StudioTools(
-                (yaml, rows, token) => mcp.SampleAsync(yaml, rows, shownRows: rows, token),
-                new DesignService(IBrickLookup.None, new ComponentEndpointRules(readers, writers)),
+                (yaml, rows, bindings, token) => mcp.SampleAsync(yaml, rows, shownRows: rows, token, bindings.Input, bindings.Output),
+                new DesignService(IBrickLookup.None, endpoints),
                 readers.Select(r => new StudioComponent(r.ComponentName, r.Category)).OrderBy(c => c.Name, StringComparer.Ordinal).ToList(),
                 writers.Select(w => new StudioComponent(w.ComponentName, w.Category)).OrderBy(c => c.Name, StringComparer.Ordinal).ToList(),
                 serviceProvider.GetRequiredService<ISecretsManager>(),
-                link);
+                link,
+                lookup => new DesignService(lookup, endpoints));
             StudioServer server;
             try
             {

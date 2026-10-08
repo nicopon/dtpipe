@@ -71,6 +71,7 @@ public sealed class CoordinatorLink : IDisposable
     private Tokens? _tokens;
     private CoordinatorMe? _me;
     private string? _reason;
+    private BrickCatalogView? _catalog;
 
     /// <param name="coordinator">The coordinator's address: its origin is the only one a token is sent to.</param>
     public CoordinatorLink(Uri coordinator, TimeProvider? time = null)
@@ -170,6 +171,75 @@ public sealed class CoordinatorLink : IDisposable
         var me = await response.Content.ReadFromJsonAsync<CoordinatorMe>(JsonSerializerOptions.Web, ct);
         lock (_lock) _me = me;
         return me?.Email ?? me?.Name ?? "a person the coordinator does not name";
+    }
+
+    /// <summary>
+    /// The catalog read last. It stays after a sign-out, so a brick card already open still composes and
+    /// saves; only recognising a brick and sampling one need the coordinator.
+    /// </summary>
+    public BrickCatalogView? Catalog
+    {
+        get { lock (_lock) return _catalog; }
+    }
+
+    private bool IsSignedIn
+    {
+        get { lock (_lock) return _tokens is not null; }
+    }
+
+    /// <summary>The coordinator's catalog, read again when a person is signed in; the last one read otherwise.</summary>
+    public async Task<BrickCatalogView?> RefreshCatalogAsync(CancellationToken ct)
+    {
+        if (!IsSignedIn) return Catalog;
+        using var response = await SendAsync(HttpMethod.Get, CoordinatorApi.Catalog, ct: ct);
+        if (!response.IsSuccessStatusCode)
+            throw new CoordinatorLinkException($"{Url} did not give its catalog: {await ErrorOf(response, ct)}");
+        var catalog = await response.Content.ReadFromJsonAsync<BrickCatalogView>(JsonSerializerOptions.Web, ct);
+        lock (_lock) _catalog = catalog;
+        return catalog;
+    }
+
+    /// <summary>
+    /// What each top-level branch of <paramref name="job"/> is, by alias, as the coordinator decides; null
+    /// when nobody is signed in or the coordinator does not answer, and the job then opens with no brick.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<string, Recognition>?> RecognizeAsync(string job, CancellationToken ct)
+    {
+        if (!IsSignedIn) return null;
+        try
+        {
+            var body = JsonSerializer.SerializeToUtf8Bytes(new RecognizeRequest(job), JsonSerializerOptions.Web);
+            using var response = await SendAsync(HttpMethod.Post, CoordinatorApi.Recognize, body, ct: ct);
+            if (!response.IsSuccessStatusCode) return null;
+            return (await response.Content.ReadFromJsonAsync<RecognizeResponse>(JsonSerializerOptions.Web, ct))?.Branches;
+        }
+        catch (Exception ex) when (ex is CoordinatorLinkException or HttpRequestException or JsonException
+                                   || ex is OperationCanceledException && !ct.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>A source brick's first <paramref name="rows"/> rows as Arrow IPC, read by its node.</summary>
+    public async Task<byte[]> SampleAsync(string node, string id, int rows, CancellationToken ct)
+    {
+        using var response = await SendAsync(HttpMethod.Post, $"{CoordinatorApi.Sample(node, id)}?rows={rows}", ct: ct);
+        if (!response.IsSuccessStatusCode || response.Content.Headers.ContentType?.MediaType != "application/vnd.apache.arrow.stream")
+            throw new CoordinatorLinkException($"{node}/{id} sent no sample: {await ErrorOf(response, ct)}");
+        return await response.Content.ReadAsByteArrayAsync(ct);
+    }
+
+    /// <summary>Why the coordinator refused: its <c>error</c>, or its status.</summary>
+    private static async Task<string> ErrorOf(HttpResponseMessage response, CancellationToken ct)
+    {
+        try
+        {
+            if (JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct)).RootElement.TryGetProperty("error", out var error)
+                && error.GetString() is { Length: > 0 } text)
+                return text;
+        }
+        catch (JsonException) { }
+        return $"{(int)response.StatusCode} {response.ReasonPhrase}";
     }
 
     /// <summary>Forgets the tokens: the person signs in again to reach the coordinator.</summary>

@@ -193,8 +193,22 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   two minutes ahead, a 401 renews once and sends once, a refused renewal signs out with its reason.
   The link's client sends to the coordinator's origin only, follows no redirect, and always carries
   the CSRF header.
+- **The coordinator decides what a brick is; the studio reads its answer.** Before taking a job
+  apart, the studio sends it to `/api/bricks/recognize` and gives `DesignService` a `StudioBricks`
+  that finds each answer again by the top-level branch's YAML, a key and never a matching rule
+  (`Match`/`Contained` see each top-level branch whole: `StudioBrickTests` pins it). Nobody signed
+  in, or no answer: no branch is a brick, and each opens as a local card. `Find`/`BranchOf` read the
+  catalog read last, kept after a sign-out, so a brick card still composes and saves.
+- **A brick samples here through the run's own binding.** `BrickSampling` turns a source brick's
+  branch into `input: arrow:-` and a sink brick's into `output: arrow:-`; `SampleAsync` binds them as
+  `--bind-input`/`--bind-output` do (`AliasBindingApplier`, before validation): never a second
+  binding path. A source's rows come from its node through the coordinator, at most
+  `CoordinatorApi.MaxSampleRows`; a sink's end in a throwaway file. Those files live under
+  `.dtpipe/studio/samples/`, created owner-only, deleted when the sample ends and purged when the
+  studio starts, never reached through a link. A brick's branch is out of the Variables tab: its node
+  resolves those.
 - Quit from the page exits 0, Ctrl+C 130.
 
 `[CI: StudioServerTests (no script writes HTML or an inline style), StudioSampleTests,
-StudioCoordinatorTests, DesignServiceTests, LocalEndpointCardTests]` `[unchecked: the page's behaviour - no test drives a
+StudioCoordinatorTests, StudioBrickTests, DesignServiceTests, LocalEndpointCardTests]` `[unchecked: the page's behaviour - no test drives a
 browser]`

@@ -1,0 +1,186 @@
+using System.Net;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Apache.Arrow;
+using Apache.Arrow.Ipc;
+using Apache.Arrow.Types;
+using DtPipe.Jobs;
+using DtPipe.Jobs.Coordinator;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace DtPipe.Tests.Unit.Cli;
+
+internal sealed class ManualTime : TimeProvider
+{
+    public DateTimeOffset Now { get; set; } = new(2026, 10, 8, 12, 0, 0, TimeSpan.Zero);
+    public override DateTimeOffset GetUtcNow() => Now;
+}
+
+/// <summary>
+/// A provider that signs "ann" in at once, and a coordinator that accepts the provider's latest access
+/// token and offers one source brick and one sink brick, built on the records the real coordinator writes.
+/// </summary>
+internal sealed class StudioFakes : IAsyncDisposable
+{
+    public string IdpUrl = "", CoordinatorUrl = "";
+    public int Contract = CoordinatorApi.Contract;
+    public string? IssuerAnswered;
+    public int ExpiresIn = 600;
+    public bool RefuseRefresh, RotateRefresh = true;
+    public int Refreshes, MeCalls;
+    public string? ValidAccess, LastCsrf;
+    public readonly List<string> IdpPaths = [];
+    public Dictionary<string, Recognition> Answers = [];
+    public string? Recognized;
+    public int SampleRows;
+    public string SinkTarget = "csv:target.csv";
+
+    public const string SourceKey = "n1/orders", SinkKey = "n1/archive";
+
+    public BrickCatalogView Catalog => new(
+        [new CatalogNode("n1", true, "data", "1.0.0+node")],
+        [
+            new CatalogBrick(SourceKey, "n1", "orders", StepKinds.Source, "Orders", "", (JsonObject)JsonNode.Parse(
+                """{"input": "duck:${{NODE_ONLY_DB}}", "provider-options": {"duck": {"query": "SELECT id FROM orders"}}}""")!,
+                "aaaaaaaaaaaa", [new CatalogColumn("id", "BIGINT", false)], null, true),
+            new CatalogBrick(SinkKey, "n1", "archive", StepKinds.Sink, "Archive", "", new JsonObject { ["output"] = SinkTarget },
+                "bbbbbbbbbbbb", null, null, true),
+        ]);
+
+    /// <summary>Rows <c>id</c> 1..n, as an Arrow IPC stream written by Apache.Arrow.</summary>
+    public static byte[] Arrow(int rows)
+    {
+        var ids = new Int64Array.Builder();
+        for (var i = 1; i <= rows; i++) ids.Append(i);
+        var schema = new Schema.Builder().Field(f => f.Name("id").DataType(Int64Type.Default).Nullable(false)).Build();
+        using var batch = new RecordBatch(schema, [ids.Build()], rows);
+        using var stream = new MemoryStream();
+        using (var writer = new ArrowStreamWriter(stream, schema))
+        {
+            writer.WriteRecordBatch(batch);
+            writer.WriteEnd();
+        }
+        return stream.ToArray();
+    }
+    private string? _challenge, _redirect, _refresh;
+    private int _issued;
+    private WebApplication? _idp, _coordinator;
+
+    public async Task StartAsync()
+    {
+        (_idp, IdpUrl) = await ServeAsync(IdpAsync);
+        (_coordinator, CoordinatorUrl) = await ServeAsync(CoordinatorAsync);
+    }
+
+    private static async Task<(WebApplication, string)> ServeAsync(RequestDelegate handler)
+    {
+        var builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions());
+        builder.WebHost.UseKestrelCore().ConfigureKestrel(o => o.Listen(IPAddress.Loopback, 0));
+        var app = builder.Build();
+        app.Run(handler);
+        await app.StartAsync();
+        return (app, app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First());
+    }
+
+    private async Task IdpAsync(HttpContext context)
+    {
+        var path = context.Request.Path.Value!;
+        IdpPaths.Add(path);
+        switch (path)
+        {
+            case "/.well-known/openid-configuration":
+                await context.Response.WriteAsJsonAsync(new Dictionary<string, string>
+                {
+                    ["issuer"] = IssuerAnswered ?? IdpUrl + "/",
+                    ["authorization_endpoint"] = IdpUrl + "/authorize",
+                    ["token_endpoint"] = IdpUrl + "/token",
+                });
+                break;
+            case "/authorize":
+                var query = context.Request.Query;
+                _challenge = query["code_challenge"];
+                _redirect = query["redirect_uri"];
+                var ok = query["client_id"] == "studio" && query["code_challenge_method"] == "S256" && query["scope"].ToString().Contains("offline_access");
+                context.Response.Redirect($"{_redirect}?code={(ok ? "code-1" : "refused")}&state={Uri.EscapeDataString(query["state"]!)}&iss={Uri.EscapeDataString(IdpUrl + "/")}");
+                break;
+            case "/token":
+                var form = await context.Request.ReadFormAsync();
+                var granted = form["grant_type"].ToString() switch
+                {
+                    "authorization_code" => form["code"] == "code-1" && form["redirect_uri"] == _redirect && form["client_id"] == "studio"
+                        && Convert.ToBase64String(SHA256.HashData(Encoding.ASCII.GetBytes(form["code_verifier"]!))).TrimEnd('=').Replace('+', '-').Replace('/', '_') == _challenge,
+                    "refresh_token" => !RefuseRefresh && form["refresh_token"] == _refresh && ++Refreshes > 0,
+                    _ => false,
+                };
+                if (!granted)
+                {
+                    context.Response.StatusCode = 400;
+                    await context.Response.WriteAsJsonAsync(new { error = "invalid_grant" });
+                    return;
+                }
+                var access = $"access-{++_issued}";
+                var refresh = _refresh is null || RotateRefresh ? $"refresh-{_issued}" : null;
+                ValidAccess = access;
+                _refresh = refresh ?? _refresh;
+                await context.Response.WriteAsJsonAsync(new Dictionary<string, object?>
+                {
+                    ["access_token"] = access, ["refresh_token"] = refresh, ["expires_in"] = ExpiresIn, ["token_type"] = "Bearer",
+                });
+                break;
+            default:
+                context.Response.StatusCode = 404;
+                break;
+        }
+    }
+
+    private async Task CoordinatorAsync(HttpContext context)
+    {
+        switch (context.Request.Path.Value)
+        {
+            case CoordinatorApi.Metadata:
+                await context.Response.WriteAsJsonAsync(new ResourceMetadata(CoordinatorUrl, [IdpUrl], ["header"], Contract, "studio"));
+                break;
+            case "/api/me":
+                MeCalls++;
+                LastCsrf = context.Request.Headers[CoordinatorApi.CsrfHeader];
+                if (context.Request.Headers.Authorization != $"Bearer {ValidAccess}")
+                {
+                    context.Response.StatusCode = 401;
+                    return;
+                }
+                await context.Response.WriteAsJsonAsync(new CoordinatorMe("ann", "ann@x.test", ["designer", "reader"]), JsonSerializerOptions.Web);
+                break;
+            case "/api/catalog":
+            await context.Response.WriteAsJsonAsync(Catalog, JsonSerializerOptions.Web);
+            break;
+        case "/api/bricks/recognize":
+            Recognized = (await context.Request.ReadFromJsonAsync<RecognizeRequest>(JsonSerializerOptions.Web))!.Job;
+            await context.Response.WriteAsJsonAsync(new RecognizeResponse(Answers), JsonSerializerOptions.Web);
+            break;
+        case "/api/bricks/n1/orders/sample":
+            SampleRows = int.Parse(context.Request.Query["rows"]!);
+            context.Response.ContentType = "application/vnd.apache.arrow.stream";
+            await context.Response.Body.WriteAsync(Arrow(Math.Min(SampleRows, 3)));
+            break;
+        case "/api/elsewhere":
+                context.Response.Redirect(IdpUrl + "/stolen");
+                break;
+            default:
+                context.Response.StatusCode = 404;
+                break;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_idp is not null) await _idp.DisposeAsync();
+        if (_coordinator is not null) await _coordinator.DisposeAsync();
+    }
+}

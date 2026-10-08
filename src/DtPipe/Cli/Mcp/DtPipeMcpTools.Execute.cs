@@ -29,12 +29,16 @@ public partial class DtPipeMcpTools
         JobDagDefinition Dag,
         List<string> Errors);
 
-    private YamlParseResult ParseAndValidateYaml(string yamlContent)
+    /// <param name="bindInput">Alias bindings applied as <c>--bind-input</c> applies them, before validation.</param>
+    /// <param name="bindOutput">Likewise for <c>--bind-output</c>.</param>
+    private YamlParseResult ParseAndValidateYaml(string yamlContent, string? bindInput = null, string? bindOutput = null)
     {
         var build = DagTopologyService.FromServices(_serviceProvider).Build(yamlContent);
 
+        // The run's own binding, at the run's own point: a bound job is checked like a complete one.
+        var errors = Pipeline.AliasBindingApplier.Apply(build.Jobs, bindInput, bindOutput);
         var streamTransformerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamTransformerFactory>>();
-        var errors = PipelineValidator.Validate(build.Dag, build.Jobs, streamTransformerFactories).ToList();
+        errors.AddRange(PipelineValidator.Validate(build.Dag, build.Jobs, streamTransformerFactories));
         errors.AddRange(BranchesWithNothingToRead(build.Dag, build.Jobs, streamTransformerFactories));
         errors.AddRange(ValidateJobTransformers(build.Jobs));
         errors.AddRange(ValidateProviderOptionKeys(build.Jobs));

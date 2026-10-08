@@ -199,6 +199,41 @@ public sealed class StudioLocalFiles(StudioFolder folder)
     public void WriteLaunch(string job, IReadOnlyDictionary<string, StudioOverride> overrides) =>
         Write(job, "launch", JsonSerializer.SerializeToNode(overrides, LaunchJson)!);
 
+    private string SamplesDirectory => Path.Combine(DtpipeDirectory, "studio", "samples");
+
+    /// <summary>
+    /// A new throwaway file under <c>.dtpipe/studio/samples/</c>, created readable by its owner only
+    /// and holding <paramref name="bytes"/>; with none, only its path, for a run to write. The caller
+    /// deletes it.
+    /// </summary>
+    public string SampleFile(byte[]? bytes)
+    {
+        RefuseLinks(SamplesDirectory);
+        SessionStore.EnsureIgnored(DtpipeDirectory);
+        Directory.CreateDirectory(SamplesDirectory);
+        RefuseLinks(SamplesDirectory);
+        var path = Path.Combine(SamplesDirectory, Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(16)) + ".arrows");
+        if (bytes is null) return path;
+        var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write };
+        if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        using var stream = new FileStream(path, options);
+        stream.Write(bytes);
+        return path;
+    }
+
+    /// <summary>Removes what a studio that stopped short left under <c>.dtpipe/studio/samples/</c>; never through a link.</summary>
+    public void PurgeSamples()
+    {
+        try
+        {
+            RefuseLinks(SamplesDirectory);
+            if (!Directory.Exists(SamplesDirectory)) return;
+            foreach (var file in Directory.EnumerateFiles(SamplesDirectory))
+                if ((File.GetAttributes(file) & FileAttributes.ReparsePoint) == 0) File.Delete(file);
+        }
+        catch (Exception ex) when (ex is StudioRefusal or IOException or UnauthorizedAccessException) { }
+    }
+
     private JsonNode? Read(string job, string kind)
     {
         var path = PathOf(job, kind);
