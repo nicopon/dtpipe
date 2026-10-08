@@ -3,7 +3,7 @@ using DtPipe.Sessions;
 using DtPipe.Tests.Helpers;
 using Xunit;
 
-namespace DtPipe.Tests.Integration.E2E;
+namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
 /// A checkpoint key names what produces its rows. These run the real command line in process and

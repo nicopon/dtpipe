@@ -36,8 +36,9 @@ namespace DtPipe.Cli.Services;
 /// </para>
 ///
 /// <para>
-/// <b>Secrets.</b> The text is hashed, never stored, and every free-text value goes through
-/// <see cref="ConnectionStringSanitizer"/> first, a connection through <c>Redact</c>. A job read
+/// <b>Secrets.</b> The text is hashed, never stored. The source goes through <c>Redact</c> (the job
+/// carries it, so its argument is dropped from the slices), every other free-text value through
+/// <c>Sanitize</c> first. A job read
 /// from YAML arrives already interpolated, so a <c>${{…}}</c> value is hashed resolved, masked only
 /// where its key looks sensitive. A value starting with <c>@</c> that names a file contributes the
 /// file's content: a script that changed is a transformer that changed.
@@ -180,6 +181,8 @@ internal static class BranchFingerprint
     {
         "--alias", "--from", "--ref", "--checkpoint", "--session",
         "-o", "--output", "--metrics-path", "--log",
+        // The source is a connection string: the job carries it, and it goes through Redact there.
+        "-i", "--input",
     };
 
     private static string WithFileContent(string value)

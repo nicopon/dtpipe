@@ -116,7 +116,7 @@ bridges back. Add that segment **only** when `materialise is not null`, so an or
 unchanged.
 
 `[CI: CheckpointCipherTests, CheckpointKeyTests, CheckpointRoundTripTests; CheckpointKeyIdentityTests
-for the caller of `Compute`]`
+for the caller of `Compute`, BranchFingerprintTests]`
 `[local: validate_checkpoint.sh]`
 
 ## MCP server and agent
