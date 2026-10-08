@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using DtPipe.Cli.Expressions;
 using DtPipe.Cli.Mcp;
 using DtPipe.Cli.Security;
 using DtPipe.Cli.Studio;
@@ -488,14 +489,22 @@ public sealed class StudioServerTests : IAsyncLifetime
         Assert.False(ran);
     }
 
+    private static Task<string?> Resolve(string name) =>
+        new CompositeStringContentResolver([new LaunchValueInterpolator(), new EnvVarInterpolator()]).ResolveAsync("${{" + name + "}}");
+
     [Theory]
     [InlineData("keyring")]
     [InlineData("value")]
-    public async Task A_launch_value_reaches_the_run_and_leaves_with_it(string how)
+    public async Task A_launch_value_reaches_the_run_through_its_resolver_and_never_the_environment(string how)
     {
         _secrets.SetSecret("pass", Sentinel);
-        string? seen = null;
-        _sampler = (_, _, _, _) => { seen = Environment.GetEnvironmentVariable("STUDIO_T_PASS"); return Task.FromResult("{\"success\": true}"); };
+        string? seen = null, environmentDuring = "unset";
+        _sampler = async (_, _, _, _) =>
+        {
+            seen = await Resolve("STUDIO_T_PASS");
+            environmentDuring = Environment.GetEnvironmentVariable("STUDIO_T_PASS");
+            return "{\"success\": true}";
+        };
         object chosen = how == "keyring" ? new { keyring = "pass" } : new { value = "typed by hand" };
 
         var (launched, _) = await SendAsync(Request(HttpMethod.Put, "/api/launch",
@@ -506,10 +515,42 @@ public sealed class StudioServerTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NoContent, launched);
         Assert.Equal(HttpStatusCode.OK, sampled);
         Assert.Equal(how == "keyring" ? Sentinel : "typed by hand", seen);
+        Assert.Null(environmentDuring);
         Assert.Null(Environment.GetEnvironmentVariable("STUDIO_T_PASS"));
         var file = File.ReadAllText(Path.Combine(_dir, ".dtpipe", "studio", "a.yaml-launch.json"));
         Assert.DoesNotContain(Sentinel, file);
         Assert.Contains(how == "keyring" ? "\"pass\"" : "typed by hand", file);
+    }
+
+    [Fact]
+    public async Task A_value_armed_for_one_action_is_not_seen_by_a_request_beside_it()
+    {
+        var running = new TaskCompletionSource();
+        var release = new TaskCompletionSource();
+        string? insideRun = null;
+        _sampler = async (_, _, _, _) =>
+        {
+            insideRun = await Resolve("STUDIO_T_PASS");
+            running.SetResult();
+            await release.Task;
+            return "{\"success\": true}";
+        };
+        await SendAsync(Request(HttpMethod.Put, "/api/launch",
+            body: new { path = "a.yaml", overrides = new Dictionary<string, object> { ["STUDIO_T_PASS"] = new { value = "armed" } } }));
+
+        var sample = SendAsync(Request(HttpMethod.Post, "/api/sample",
+            body: new { yaml = "main:\n  input: \"csv:${{STUDIO_T_PASS}}\"\n", rows = 3, path = "a.yaml" }));
+        await running.Task.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+        // Another request of the same studio, while the sample runs: it resolves nothing of the sample's.
+        var (_, vars) = await SendAsync(Request(HttpMethod.Post, "/api/variables", body: new { yaml = "main:\n  input: \"csv:${{STUDIO_T_PASS}}\"\n", path = "a.yaml" }));
+        Assert.False(vars.GetProperty("variables")[0].GetProperty("defined").GetBoolean());
+        Assert.Equal("${{STUDIO_T_PASS}}", await Resolve("STUDIO_T_PASS"));
+        Assert.Null(Environment.GetEnvironmentVariable("STUDIO_T_PASS"));
+
+        release.SetResult();
+        Assert.Equal(HttpStatusCode.OK, (await sample).Status);
+        Assert.Equal("armed", insideRun);
     }
 
     [Fact]
@@ -715,4 +756,23 @@ public sealed class StudioSampleTests
             Directory.Delete(dir, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task A_launch_value_reaches_every_branch_of_a_dag_though_the_environment_holds_none()
+    {
+        // Parsing resolves STUDIO_T_A to the text ${{STUDIO_T_B}}, which each branch's own resolver then reads, inside the
+        // tasks the DAG starts: the armed values must flow there, or the generator gets a placeholder.
+        const string yaml = "# ${{STUDIO_T_B}}\n"
+            + "a:\n  input: \"generate:${{STUDIO_T_A}}\"\n  output: \"null:\"\n"
+            + "b:\n  input: \"generate:${{STUDIO_T_A}}\"\n  output: \"null:\"\n";
+        Assert.Null(Environment.GetEnvironmentVariable("STUDIO_T_B"));
+        using var armed = LaunchValues.Arm(new Dictionary<string, string> { ["STUDIO_T_A"] = "${{STUDIO_T_B}}", ["STUDIO_T_B"] = "7" });
+
+        var json = await Tools().SampleAsync(yaml, rows: 3, shownRows: 3, CancellationToken.None);
+
+        var root = JsonDocument.Parse(json).RootElement;
+        Assert.True(root.GetProperty("success").GetBoolean(), json);
+        Assert.Equal(2, root.GetProperty("branches").GetArrayLength());
+    }
 }
+

@@ -322,6 +322,7 @@ class Program
 		}
 
 		services.AddSingleton<DtPipe.Core.Expressions.IStringContentResolver, DtPipe.Cli.Expressions.CompositeStringContentResolver>();
+		services.AddSingleton<DtPipe.Core.Expressions.IStringInterpolator, DtPipe.Cli.Expressions.LaunchValueInterpolator>();
 		services.AddSingleton<DtPipe.Core.Expressions.IStringInterpolator, DtPipe.Cli.Expressions.EnvVarInterpolator>();
 		services.AddSingleton<DtPipe.Core.Expressions.IStringInterpolator, DtPipe.Cli.Security.KeyringInterpolator>();
 		services.AddSingleton<DtPipe.Core.Expressions.IStringInterpolator, DtPipe.Cli.Incremental.CursorInterpolator>();

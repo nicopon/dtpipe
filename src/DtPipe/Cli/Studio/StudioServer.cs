@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using DtPipe.Cli.Expressions;
 using DtPipe.Cli.Security;
 using DtPipe.Core.Security;
 using DtPipe.Jobs;
@@ -398,9 +399,6 @@ public sealed class StudioServer : IAsyncDisposable
 
         if (!await _sampling.WaitAsync(0))
             throw new StudioRefusal(409, "A sample is already running: wait for it to finish.");
-        // The run reads ${{NAME}} from the environment, through its own resolver: each chosen value is
-        // set for this sample only, which no other runs beside, and the environment restored after.
-        var previous = launch.Keys.ToDictionary(k => k, Environment.GetEnvironmentVariable, StringComparer.Ordinal);
         var files = new List<string>();
         try
         {
@@ -421,7 +419,9 @@ public sealed class StudioServer : IAsyncDisposable
             }
             var bindings = new StudioBindings(inputs.Count > 0 ? string.Join(',', inputs) : null, outputs.Count > 0 ? string.Join(',', outputs) : null);
 
-            foreach (var (name, value) in launch) Environment.SetEnvironmentVariable(name, value);
+            // The run reads ${{NAME}} through its own resolver, which asks the launch values first: each chosen
+            // value is this action's alone, and the process environment is never written.
+            using var armed = LaunchValues.Arm(launch);
             // Nobody watches the terminal for a prompt: a run that would ask one fails instead.
             using var _ = NonInteractiveGuard.Suppress();
             var json = await _tools.Sample(sampling.Yaml, rows, bindings, context.RequestAborted);
@@ -430,7 +430,6 @@ public sealed class StudioServer : IAsyncDisposable
         }
         finally
         {
-            foreach (var (name, value) in previous) Environment.SetEnvironmentVariable(name, value);
             foreach (var file in files) File.Delete(file);
             _sampling.Release();
         }

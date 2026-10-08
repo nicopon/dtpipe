@@ -49,6 +49,7 @@ public sealed class StudioVariables(StudioLocalFiles local, ISecretsManager secr
                 variables.Add(new StudioVariable(expression, "cursor", expression[CursorPrefix.Length..], true, null, true));
             else
             {
+                // The process's own environment: a value armed for a running action is never in it.
                 var defined = Environment.GetEnvironmentVariable(expression) is not null;
                 var chosen = overrides.GetValueOrDefault(expression);
                 var ready = chosen switch
@@ -64,8 +65,8 @@ public sealed class StudioVariables(StudioLocalFiles local, ISecretsManager secr
     }
 
     /// <summary>
-    /// The environment a sample of <paramref name="yaml"/> runs with: each variable's chosen value.
-    /// Refuses, naming them, the variables a run would leave unresolved.
+    /// The values a sample of <paramref name="yaml"/> is launched with, by variable name: each one's chosen
+    /// value, for <see cref="LaunchValues.Arm"/>. Refuses, naming them, the variables a run would leave unresolved.
     /// </summary>
     public IReadOnlyDictionary<string, string> LaunchEnvironment(string? job, string yaml)
     {

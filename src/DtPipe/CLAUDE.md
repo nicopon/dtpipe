@@ -198,8 +198,12 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   keeps out of git; nothing there is reached through a link, and a link refuses the save before the
   job is written.
 - **A variable's name is the contract.** `StudioVariables` reads a job's `${{…}}` with the run's own
-  grammar (`CompositeStringContentResolver.Expressions`), and a sample sets each chosen value in the
-  process environment for that sample only, restored after, so the real resolver reads it. The
+  grammar (`CompositeStringContentResolver.Expressions`), and an action arms each chosen value for
+  its own call chain (`LaunchValues.Arm`, an `AsyncLocal` like `NonInteractiveGuard`) which
+  `LaunchValueInterpolator` gives the real resolver ahead of the environment, in the DI chain and in
+  `JobFileParser`'s own. Nothing writes the process environment, so a request beside the action never
+  resolves its values; the Variables tab reads the real environment only.
+  `[CI: StudioServerTests, StudioSampleTests — the values reach every branch of a DAG]` The
   launch file holds an alias or a typed text, never a keyring value; the page sees names and
   aliases only. The keyring is opened only for a job that needs it: opening it can ask the person.
 - **The command line names the coordinator, never the page.** `--coordinator <url>` gives the studio
