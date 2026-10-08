@@ -39,7 +39,11 @@ public sealed record StudioComponent(string Name, string Category);
 /// </summary>
 public sealed record StudioTools(
     StudioSampler Sample, DesignService Design, IReadOnlyList<StudioComponent> Readers, IReadOnlyList<StudioComponent> Writers,
-    ISecretsManager Secrets, CoordinatorLink? Coordinator = null, Func<IBrickLookup, DesignService>? DesignWith = null);
+    ISecretsManager Secrets, CoordinatorLink? Coordinator = null, Func<IBrickLookup, DesignService>? DesignWith = null,
+    StudioImporter? Import = null);
+
+/// <summary>A command line, as the arguments of one process, as the text of the job file it stands for.</summary>
+public delegate string StudioImporter(IReadOnlyList<string> args);
 
 /// <summary>
 /// The local server behind <c>dtpipe studio</c>. It runs dtpipe with the person's own access, so it
@@ -214,6 +218,9 @@ public sealed class StudioServer : IAsyncDisposable
                     break;
                 case ("POST", "/api/publish"):
                     await PublishAsync(context);
+                    break;
+                case ("POST", "/api/import"):
+                    await ImportAsync(context);
                     break;
                 case ("GET", "/api/library"):
                     await LibraryAsync(context);
@@ -470,6 +477,30 @@ public sealed class StudioServer : IAsyncDisposable
         await JsonAsync(context, saved);
     }
 
+    /// <summary>
+    /// The job a command line stands for, as <c>--export-job</c> would write it: the arguments arrive as the
+    /// array the page split, never as one string to cut here. The result is not saved anywhere.
+    /// </summary>
+    private async Task ImportAsync(HttpContext context)
+    {
+        var import = _tools.Import ?? throw new StudioRefusal(404, "This studio imports no command line.");
+        var asked = await BodyAsync<ImportRequest>(context);
+        if (asked.Args is not { Count: > 0 } args || args.Any(a => a is null))
+            throw new StudioRefusal(400, "An import carries the arguments of a command as 'args'.");
+        if (args.Sum(a => a!.Length) > 65_536) throw new StudioRefusal(413, "The command is too long.");
+        string yaml;
+        try
+        {
+            using var _ = NonInteractiveGuard.Suppress();
+            yaml = import(args!);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new StudioRefusal(422, $"This command does not make a job: {ConnectionStringSanitizer.Sanitize(ex.Message)}");
+        }
+        await JsonAsync(context, new { yaml });
+    }
+
     /// <summary>The coordinator's link when a person is signed in to it; a refusal that names what is missing otherwise.</summary>
     private CoordinatorLink SignedInLink() =>
         _tools.Coordinator is not { } link ? throw new StudioRefusal(404, "This studio was opened without --coordinator.")
@@ -597,6 +628,8 @@ public sealed class StudioServer : IAsyncDisposable
     private sealed record SaveRequest(string? Path, string? Hash, DesignModel? Model, bool AcceptErrors);
 
     private sealed record OpenLibraryRequest(string? Id);
+
+    private sealed record ImportRequest(List<string?>? Args);
 
     private sealed record PublishRequest(string? Path, string? Hash, string? Id, string? Message, string? Replace);
 

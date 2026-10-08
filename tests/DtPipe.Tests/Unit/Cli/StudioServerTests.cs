@@ -529,6 +529,57 @@ public sealed class StudioServerTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Accepted, status);
         await _server.Quit.WaitAsync(TimeSpan.FromSeconds(5));
     }
+
+    [Fact]
+    public async Task An_imported_command_line_reaches_the_importer_as_the_array_the_page_split()
+    {
+        IReadOnlyList<string>? received = null;
+        await using var server = await StudioServer.StartAsync(new StudioFolder(_dir), 0, new StudioTools(
+            (y, r, b, ct) => _sampler(y, r, b, ct), new DesignService(IBrickLookup.None), [], [], _secrets,
+            Import: args => { received = args; return "main:\n  input: csv:a b.csv\n"; }), CancellationToken.None);
+        using var http = new HttpClient();
+        async Task<(HttpStatusCode Status, JsonElement Body)> Import(object body)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, $"http://127.0.0.1:{server.Port}/api/import")
+            {
+                Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json"),
+            };
+            request.Headers.Add(StudioServer.TokenHeader, server.Token);
+            using var response = await http.SendAsync(request);
+            return (response.StatusCode, JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.Clone());
+        }
+
+        var (ok, answer) = await Import(new { args = new[] { "--input", "csv:a b.csv", "-o", "csv:x.csv" } });
+        Assert.Equal(HttpStatusCode.OK, ok);
+        Assert.Equal(["--input", "csv:a b.csv", "-o", "csv:x.csv"], received);
+        Assert.Equal("main:\n  input: csv:a b.csv\n", answer.GetProperty("yaml").GetString());
+        Assert.Empty(Directory.GetFiles(_dir, "*.yaml").Where(f => !new[] { "a.yaml" }.Contains(Path.GetFileName(f))));
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await Import(new { args = Array.Empty<string>() })).Status);
+        Assert.Equal(HttpStatusCode.BadRequest, (await Import(new { })).Status);
+    }
+
+    [Fact]
+    public async Task A_command_that_does_not_make_a_job_is_refused_by_name_and_without_a_secret()
+    {
+        await using var server = await StudioServer.StartAsync(new StudioFolder(_dir), 0, new StudioTools(
+            (y, r, b, ct) => _sampler(y, r, b, ct), new DesignService(IBrickLookup.None), [], [], _secrets,
+            Import: _ => throw new ArgumentException("no reader for Password=hunter2;")), CancellationToken.None);
+        using var http = new HttpClient();
+        var request = new HttpRequestMessage(HttpMethod.Post, $"http://127.0.0.1:{server.Port}/api/import")
+        {
+            Content = new StringContent("""{"args":["--input","x"]}""", Encoding.UTF8, "application/json"),
+        };
+        request.Headers.Add(StudioServer.TokenHeader, server.Token);
+        using var response = await http.SendAsync(request);
+        var text = await response.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Contains("does not make a job", text);
+        Assert.DoesNotContain("hunter2", text);
+
+        var (missing, _) = await SendAsync(Request(HttpMethod.Post, "/api/import", body: new { args = new[] { "-i", "x" } }));
+        Assert.Equal(HttpStatusCode.NotFound, missing);
+    }
 }
 
 /// <summary>

@@ -1,5 +1,6 @@
 using System.CommandLine;
 using DtPipe.Cli.Mcp;
+using DtPipe.Cli.Pipeline;
 using DtPipe.Cli.Security;
 using DtPipe.Cli.Studio;
 using DtPipe.Core.Abstractions;
@@ -71,7 +72,8 @@ public sealed class StudioCommand : Command
                 writers.Select(w => new StudioComponent(w.ComponentName, w.Category)).OrderBy(c => c.Name, StringComparer.Ordinal).ToList(),
                 serviceProvider.GetRequiredService<ISecretsManager>(),
                 link,
-                lookup => new DesignService(lookup, endpoints));
+                lookup => new DesignService(lookup, endpoints),
+                args => CommandLineJob.Export(serviceProvider, args));
             StudioServer server;
             try
             {

@@ -231,6 +231,11 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   later one replaces only the commit published last from here (`<job>-publish.json`, under
   `.dtpipe/studio/`), and a 412 is replaced only when the person names the commit in place. A 422 is
   the coordinator's check refusing the job: the report is shown and nothing was published.
+- **A command line imports through `--export-job`'s own path.** `POST /api/import` takes the
+  arguments as the array the page split (never one string to cut here) and answers the text
+  `CommandLineJob.Export` gives, which `Program.cs` shares for its refusal of `--bind-input`/
+  `--bind-output`; a `${{…}}` stays as typed, and nothing is saved until the person saves the new
+  job. `[CI: CommandLineJobTests, StudioServerTests]`
 - **A library pipeline opens as a new file, never over one.** `POST /api/library/open` writes
   `<id>.yaml` through `WriteJob` (create only, 409 when the file exists) and keeps the version read in
   `<job>-publish.json`, so the next publication sends `If-Match` for it; a link under `.dtpipe/`

@@ -56,8 +56,8 @@ export function mountDesigner(root, list, options = {}) {
   document.addEventListener("keydown", onKey);
 }
 
-/** Opens a job: its text taken apart into cards by the server, with the layout it was saved with. */
-export async function openJob(yaml, layout) {
+/** Opens a job: its text taken apart into cards by the server, with the layout it was saved with. A job not on disk opens as unsaved changes. */
+export async function openJob(yaml, layout, unsaved = false) {
   const answer = await api("/api/design/decompose", { yaml, layout: layout || null });
   model = normalize(answer.model);
   model.layout = Object.fromEntries(Object.entries(model.layout).filter(([a]) => stepOf(a)));
@@ -67,6 +67,7 @@ export async function openJob(yaml, layout) {
   drawer = result.errors?.length ? "problems" : "yaml";
   renderShell();
   await compose();
+  dirty = unsaved;
 }
 
 /** Starts from no card at all. */

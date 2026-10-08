@@ -76,6 +76,57 @@ async function newJob() {
   await loadJobs();
 }
 
+// A command line cut into the arguments of one process, as a shell would: whitespace separates, quotes
+// group, a backslash escapes outside single quotes. The studio takes the array, never a string to cut.
+function splitCommand(text) {
+  const args = [];
+  let word = null;
+  let quote = null;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote) {
+      if (c === quote) quote = null;
+      else if (c === "\\" && quote === "\"" && i + 1 < text.length) word += text[++i];
+      else word += c;
+    } else if (c === "'" || c === "\"") {
+      quote = c;
+      word ??= "";
+    } else if (c === "\\" && i + 1 < text.length) {
+      word = (word ?? "") + text[++i];
+    } else if (/\s/.test(c)) {
+      if (word !== null) { args.push(word); word = null; }
+    } else {
+      word = (word ?? "") + c;
+    }
+  }
+  if (quote) throw new Error("A quote is not closed.");
+  if (word !== null) args.push(word);
+  return args;
+}
+
+// The job a dtpipe command line stands for, as --export-job writes it, opened as a new job not saved yet.
+async function importCommand() {
+  if (!leaveCurrent()) return;
+  const text = prompt("A dtpipe command line (no ${{…}} is resolved; --bind-input and --bind-output are refused):", "dtpipe --input csv:in.csv --output csv:out.csv");
+  if (!text) return;
+  try {
+    const args = splitCommand(text);
+    if (args[0] === "dtpipe") args.shift();
+    const { yaml } = await api("/api/import", { args });
+    const path = prompt("The imported job's path in the folder (its folder must exist):", "imported.yaml");
+    if (!path) return;
+    if (!/\.ya?ml$/i.test(path)) { status("A job is a .yaml or .yml file.", "bad"); return; }
+    current = { path, hash: null, rewrites: false };
+    publication = null;
+    $("job-name").textContent = `${path} (new)`;
+    await openJob(yaml, null, true);
+    status("imported: save it to keep it", "good");
+    await loadJobs();
+  } catch (e) {
+    status(e.message, "bad");
+  }
+}
+
 // The server writes the job it composes from the cards, and the cards' layout under .dtpipe/.
 async function save() {
   if (!current) return;
@@ -294,6 +345,7 @@ async function start() {
 
 $("quit").addEventListener("click", quit);
 $("new-job").addEventListener("click", newJob);
+$("import-command").addEventListener("click", importCommand);
 $("library-refresh").addEventListener("click", loadLibrary);
 document.addEventListener("keydown", (e) => {
   if (e.key === "s" && (e.ctrlKey || e.metaKey) && current) { e.preventDefault(); save(); }

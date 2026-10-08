@@ -120,12 +120,9 @@ class Program
 
 			if (!string.IsNullOrEmpty(parsedPipeline.Globals.ExportJobFile))
 			{
-				// A binding is a run-specific location, not something to commit: exporting it
-				// would write a path meaningful only to this run into a file meant for git.
-				if (!string.IsNullOrEmpty(parsedPipeline.Globals.BindInput) || !string.IsNullOrEmpty(parsedPipeline.Globals.BindOutput))
+				if (CommandLineJob.BindingRefusal(parsedPipeline.Globals) is { } refusal)
 				{
-					Console.Error.WriteLine("[ERROR] --export-job cannot be combined with --bind-input/--bind-output: "
-						+ "a binding names a run-specific location, and exporting it would write that path into a file meant for git.");
+					Console.Error.WriteLine($"[ERROR] {refusal}");
 					return 1;
 				}
 
