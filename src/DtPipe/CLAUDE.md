@@ -184,8 +184,17 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   process environment for that sample only, restored after, so the real resolver reads it. The
   launch file holds an alias or a typed text, never a keyring value; the page sees names and
   aliases only. The keyring is opened only for a job that needs it: opening it can ask the person.
+- **The command line names the coordinator, never the page.** `--coordinator <url>` gives the studio
+  a `CoordinatorLink` to that origin: the coordinator's metadata (RFC 9728) and contract number, its
+  provider's discovery (issuer equal, no HTTPS downgrade), then authorization code with PKCE through
+  a new tab, back to `/callback`, the one path reached without the session's token: a GET, the
+  `Host` check kept, a single-use `state` that a wrong one leaves waiting, `iss` checked when sent.
+  The tokens live in the process only, never in a response or the page; the access token is renewed
+  two minutes ahead, a 401 renews once and sends once, a refused renewal signs out with its reason.
+  The link's client sends to the coordinator's origin only, follows no redirect, and always carries
+  the CSRF header.
 - Quit from the page exits 0, Ctrl+C 130.
 
 `[CI: StudioServerTests (no script writes HTML or an inline style), StudioSampleTests,
-DesignServiceTests, LocalEndpointCardTests]` `[unchecked: the page's behaviour - no test drives a
+StudioCoordinatorTests, DesignServiceTests, LocalEndpointCardTests]` `[unchecked: the page's behaviour - no test drives a
 browser]`

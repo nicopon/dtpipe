@@ -23,12 +23,12 @@ public sealed record StudioComponent(string Name, string Category);
 
 /// <summary>
 /// What the studio's server works with: the sample path, the designer's model (the coordinator's
-/// own, with dtpipe's components for endpoints), the components the palette lists, and the keyring
-/// a variable may be launched from.
+/// own, with dtpipe's components for endpoints), the components the palette lists, the keyring
+/// a variable may be launched from, and the coordinator the command line named, if any.
 /// </summary>
 public sealed record StudioTools(
     StudioSampler Sample, DesignService Design, IReadOnlyList<StudioComponent> Readers, IReadOnlyList<StudioComponent> Writers,
-    ISecretsManager Secrets);
+    ISecretsManager Secrets, CoordinatorLink? Coordinator = null);
 
 /// <summary>
 /// The local server behind <c>dtpipe studio</c>. It runs dtpipe with the person's own access, so it
@@ -41,7 +41,9 @@ public sealed record StudioTools(
 /// reaches the page in the URL's fragment, which the browser never sends; no cookie is set, since
 /// cookies are shared by every port of a host;</item>
 /// <item>a request with another <c>Origin</c>, or that the browser marks cross-site, is refused, and
-/// no CORS header is ever sent;</item>
+/// no CORS header is ever sent. Only <see cref="CoordinatorLink.Callback"/> is reached without the
+/// token, by a navigation from the identity provider: a GET that answers by checking its single-use
+/// <c>state</c>;</item>
 /// <item>the pages run no inline script (<c>Content-Security-Policy</c>) and send no referrer.</item>
 /// </list>
 /// One sample runs at a time: the sample mode's collector belongs to the whole process.
@@ -61,6 +63,7 @@ public sealed class StudioServer : IAsyncDisposable
         ["/studio.js"] = ("studio/studio.js", "text/javascript; charset=utf-8"),
         ["/dom.js"] = ("studio/dom.js", "text/javascript; charset=utf-8"),
         ["/designer.js"] = ("studio/designer.js", "text/javascript; charset=utf-8"),
+        ["/coordinator.js"] = ("studio/coordinator.js", "text/javascript; charset=utf-8"),
         ["/studio.css"] = ("studio/studio.css", "text/css; charset=utf-8"),
     };
 
@@ -128,8 +131,13 @@ public sealed class StudioServer : IAsyncDisposable
 
         try
         {
-            Admit(request);
             var path = request.Path.Value ?? "/";
+            if (path == CoordinatorLink.Callback)
+            {
+                await CallbackAsync(context);
+                return;
+            }
+            Admit(request);
             if (!path.StartsWith("/api/", StringComparison.Ordinal))
             {
                 await ServeAssetAsync(context, path);
@@ -172,6 +180,18 @@ public sealed class StudioServer : IAsyncDisposable
                 case ("POST", "/api/sample"):
                     await SampleAsync(context);
                     break;
+                case ("GET", "/api/coordinator"):
+                    await JsonAsync(context, (object?)_tools.Coordinator?.Status() ?? new { url = (string?)null });
+                    break;
+                case ("POST", "/api/coordinator/login"):
+                    var link = _tools.Coordinator ?? throw new StudioRefusal(404, "This studio was opened without --coordinator.");
+                    try { await JsonAsync(context, new { url = await link.BeginSignInAsync(Port, context.RequestAborted) }); }
+                    catch (CoordinatorLinkException ex) { throw new StudioRefusal(502, ex.Message); }
+                    break;
+                case ("POST", "/api/coordinator/logout"):
+                    _tools.Coordinator?.SignOutNow();
+                    context.Response.StatusCode = StatusCodes.Status204NoContent;
+                    break;
                 case ("POST", "/api/quit"):
                     context.Response.StatusCode = StatusCodes.Status202Accepted;
                     _quit.TrySetResult();
@@ -195,16 +215,57 @@ public sealed class StudioServer : IAsyncDisposable
     /// <summary>Refuses a request this session's page could not have sent.</summary>
     private void Admit(HttpRequest request)
     {
+        AdmitHost(request);
+
+        var origin = request.Headers.Origin.ToString();
+        if (origin.Length > 0 && !origin.Equals($"http://{request.Host.Value}", StringComparison.OrdinalIgnoreCase))
+            throw new StudioRefusal(403, "A request from another site is refused.");
+        if (request.Headers["Sec-Fetch-Site"].ToString() is { Length: > 0 } site && site is not ("same-origin" or "none"))
+            throw new StudioRefusal(403, "A request from another site is refused.");
+    }
+
+    /// <summary>Refuses a name other than the loopback's, or another port: a page served from a name that resolves here.</summary>
+    private void AdmitHost(HttpRequest request)
+    {
         var host = request.Host;
         if (host.Port != Port || !(host.Host.Equals("127.0.0.1", StringComparison.Ordinal)
                                    || host.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)))
             throw new StudioRefusal(403, "dtpipe studio answers only at 127.0.0.1 or localhost, at its own port.");
+    }
 
-        var origin = request.Headers.Origin.ToString();
-        if (origin.Length > 0 && !origin.Equals($"http://{host.Value}", StringComparison.OrdinalIgnoreCase))
-            throw new StudioRefusal(403, "A request from another site is refused.");
-        if (request.Headers["Sec-Fetch-Site"].ToString() is { Length: > 0 } site && site is not ("same-origin" or "none"))
-            throw new StudioRefusal(403, "A request from another site is refused.");
+    /// <summary>
+    /// The identity provider sends the browser back here with a code: a cross-site navigation, so no
+    /// token and no same-origin check, only the host's. What makes it this studio's is the single-use
+    /// <c>state</c> the link checks before exchanging the code. The answer is a line of text, and never
+    /// shows a token.
+    /// </summary>
+    private async Task CallbackAsync(HttpContext context)
+    {
+        AdmitHost(context.Request);
+        if (context.Request.Method != "GET") throw new StudioRefusal(405, "The sign-in comes back as a GET.");
+        string message;
+        if (_tools.Coordinator is not { } link)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            message = "This studio was opened without --coordinator.";
+        }
+        else
+        {
+            var query = context.Request.Query;
+            string? Value(string name) => query[name] is { Count: 1 } v ? v.ToString() : null;
+            try
+            {
+                var who = await link.CompleteSignInAsync(Value("code"), Value("state"), Value("iss"), Value("error"), context.RequestAborted);
+                message = $"Signed in to {link.Origin.ToString().TrimEnd('/')} as {who}. You can close this tab and go back to dtpipe studio.";
+            }
+            catch (CoordinatorLinkException ex)
+            {
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                message = ex.Message;
+            }
+        }
+        context.Response.ContentType = "text/plain; charset=utf-8";
+        await context.Response.WriteAsync(message + "\n", context.RequestAborted);
     }
 
     /// <summary>

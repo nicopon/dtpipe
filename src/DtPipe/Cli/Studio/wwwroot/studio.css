@@ -19,6 +19,8 @@
 body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); background: var(--bg); }
 header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
 header #quit { margin-left: auto; }
+header #coordinator { margin-left: auto; font-size: 12.5px; }
+header #coordinator:not([hidden]) + #quit { margin-left: 0; }
 main { display: grid; grid-template-columns: 220px minmax(0, 1fr); height: calc(100vh - 49px); }
 .jobs-pane { border-right: 1px solid var(--line); padding: 12px; overflow: auto; background: var(--panel); }
 .jobs-pane .row { justify-content: space-between; margin-bottom: 8px; }
@@ -175,6 +177,7 @@ textarea { width: 100%; resize: vertical; }
 .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
 .dot.good { background: var(--good); }
 .dot.bad { background: var(--bad); }
+.dot.warn { background: var(--warn); }
 
 /* A sample's report */
 .branch { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; margin: 10px 0; }

@@ -211,6 +211,7 @@ public sealed class StudioServerTests : IAsyncLifetime
     [InlineData("/studio.css", "text/css")]
     [InlineData("/dom.js", "text/javascript")]
     [InlineData("/designer.js", "text/javascript")]
+    [InlineData("/coordinator.js", "text/javascript")]
     public async Task The_page_is_served_from_the_binary_without_a_token(string path, string type)
     {
         using var response = await _http.SendAsync(Request(HttpMethod.Get, path, token: null));

@@ -1,6 +1,7 @@
 // dtpipe studio: the jobs of a folder, opened as cards, sampled through the real engine and saved.
 
 import { $, api, el, fill, forgetToken, status, token } from "./dom.js";
+import { refreshCoordinator } from "./coordinator.js";
 import { cards, compose, isDirty, markSaved, mountDesigner, openBlank, openJob, refreshDrawer, showTab } from "./designer.js";
 
 // The job open: its path, the hash a save must find on disk (null for a job not written yet), and
@@ -164,6 +165,7 @@ async function start() {
     }],
   });
   await loadJobs();
+  await refreshCoordinator();
 }
 
 $("quit").addEventListener("click", quit);
