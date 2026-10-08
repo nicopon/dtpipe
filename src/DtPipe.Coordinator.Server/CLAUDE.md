@@ -58,27 +58,36 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   route outside `MapLabMode`. `[unchecked]`
 - **The server never opens a node's data.** What reads it asks the node that hosts it, through
   `NodeRequests`: a brick preview, `/api/query` and a cut (the named requests `lab.query` and `lab.split`, which only a lab host registers), and a
-  designer's check (`DesignValidator`): each source brick's node sends its first row as Arrow IPC
+  library save's check (`DesignValidator`): each source brick's node sends its first row as Arrow IPC
   (`SampleBrick`, written by the `arrow:-` writer its fragment uses), a runner dry-runs the job as
   the runner will see it (`ValidateJob`), and each sink brick's node checks its target against the contract that
   reaches it (`CheckSink`). A branch that reaches a node's data without being its brick is refused
-  before anything runs. **The server runs no dtpipe**: a designer's check and the import of a
+  before anything runs. **The server runs no dtpipe**: a library save's check and the import of a
   command line (`ExportJob`) go to a runner, and with none online they refuse. A node announces a
-  variable's name, never its value. `[local: the lab's smoke.py bricks — a designer's check, a sink that refuses;
+  variable's name, never its value. `[local: the lab's smoke.py bricks — a library save's check, a sink that refuses;
   sandbox — a cut on its node]`
 - **What `dtpipe studio` calls is a contract** (`DtPipe.Jobs/Coordinator`: `CoordinatorApi`, the
   records): the server maps those routes and writes those records, and the metadata document
   announces `CoordinatorApi.Contract`; a change a deployed studio would misread takes a new number.
+  The library's listing and `GET /api/library/{id}` are part of it: the studio opens a pipeline from them.
   `/api/catalog` lists nodes and bricks with each brick's declared branch; `/api/bricks/recognize`
   says what each top-level branch of a job is, by `BrickCatalog`'s own `Match` and `Contained`, so the
   studio never decides a brick itself; `/api/bricks/{node}/{id}/sample` asks the node for at most
   `MaxSampleRows` rows as Arrow IPC (`SampleBrick`, which the node host bounds in bytes before it
   sends, below the channel's message limit). `[local: CoordinatorContractTests, StudioRoutesTests,
   the lab's smoke.py bricks — the studio's routes]`
+- **Every save into the library is checked first, and a refused one writes nothing.** The handler of
+  `PUT /api/library/{id}` passes the text as received to `DesignValidator`, after the rights and the
+  CSRF header and before `SaveAsync`: a job it refuses answers 422 with `LibraryRefused` (its report),
+  and with no runner or no brick node online the check cannot run, so it refuses by name; never a
+  commit that was not checked. It covers the studio and the pages alike; `SavePlanAsync`, `DeleteAsync`
+  and the seeds loaded at start check nothing. `[local: StudioRoutesTests, the lab's smoke.py bricks —
+  a library save's check, a sink that refuses]`
 - **A save may say which version it read.** `PUT /api/library/{id}` with `If-None-Match: *` creates
   only, with `If-Match: "<commit>"` replaces only that version: 412 otherwise, with the commit in
   place. The check runs under the library's lock. The version is the last commit of the job file,
-  never the directory's: a plan saved beside it is no edit. Without either header a save overwrites,
+  never the directory's: a plan saved beside it is no edit, and `GET /api/library/{id}` and the listing
+  give that same commit. Without either header a save overwrites,
   as the pages do. The answer says when the saved plan no longer matches (`redistribute`) and when a
   deployment still runs another version (`deployed`). `[local: StudioRoutesTests, the lab's smoke.py
   library — a studio publishes]`

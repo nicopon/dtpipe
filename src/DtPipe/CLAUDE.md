@@ -229,7 +229,12 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   file again and refuses one whose hash is not the one the page saved; the layout and the launch
   file stay on this machine. The first publication of an id creates only (`If-None-Match: *`); a
   later one replaces only the commit published last from here (`<job>-publish.json`, under
-  `.dtpipe/studio/`), and a 412 is replaced only when the person names the commit in place.
+  `.dtpipe/studio/`), and a 412 is replaced only when the person names the commit in place. A 422 is
+  the coordinator's check refusing the job: the report is shown and nothing was published.
+- **A library pipeline opens as a new file, never over one.** `POST /api/library/open` writes
+  `<id>.yaml` through `WriteJob` (create only, 409 when the file exists) and keeps the version read in
+  `<job>-publish.json`, so the next publication sends `If-Match` for it; a link under `.dtpipe/`
+  refuses before the job is written. `[CI: StudioPublishTests]`
 - Quit from the page exits 0, Ctrl+C 130.
 
 `[CI: StudioServerTests (no script writes HTML or an inline style), StudioSampleTests,

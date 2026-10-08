@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using DtPipe.Coordinator.Contracts;
+using DtPipe.Coordinator.Server;
 using DtPipe.Jobs.Coordinator;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -14,7 +15,11 @@ namespace DtPipe.Coordinator.Server.Tests;
 public sealed class StudioRoutesTests : IDisposable
 {
     private const string Source = """{"input": "duck:shop.db", "provider-options": {"duck": {"query": "SELECT 1"}}}""";
-    private readonly CoordinatorHost _host = new();
+    private readonly CoordinatorHost _host;
+    private DesignCheck _verdict = new(true, null);
+    private string? _checked;
+
+    public StudioRoutesTests() => _host = new(check: yaml => { _checked = yaml; return _verdict; });
 
     public void Dispose() => _host.Dispose();
 
@@ -150,4 +155,72 @@ public sealed class StudioRoutesTests : IDisposable
         Assert.True(changed.Saved!.Redistribute);
         Assert.False(changed.Saved.Deployed);
     }
+
+    private Task<HttpResponseMessage> Put(HttpClient client, string id, string yaml)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Put, CoordinatorApi.Library(id)) { Content = JsonContent.Create(new LibrarySave(yaml, null, "m")) };
+        return client.SendAsync(request, Ct);
+    }
+
+    [Fact]
+    public async Task A_Save_The_Check_Refuses_Writes_And_Commits_Nothing()
+    {
+        var first = await Save("orders", "a:\n  input: x\n");
+        _verdict = new DesignCheck(false, "'a': n1/orders does not accept what reaches it");
+
+        using var refused = await Put(As(CoordinatorHost.Designer), "orders", "a:\n  input: z\n");
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
+        var body = await refused.Content.ReadFromJsonAsync<LibraryRefused>(Ct);
+        Assert.Equal("'a': n1/orders does not accept what reaches it", body!.Report);
+
+        using var fresh = await Put(As(CoordinatorHost.Designer), "never", "a:\n  input: z\n");
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, fresh.StatusCode);
+
+        var library = _host.Services.GetRequiredService<PipelineLibrary>();
+        var doc = await library.GetAsync("orders", Ct);
+        Assert.Equal((first.Saved!.Commit, "a:\n  input: x\n"), (doc!.Commit, doc.Yaml));
+        Assert.Null(await library.GetAsync("never", Ct));
+        Assert.Equal("a:\n  input: z\n", _checked);
+    }
+
+    [Fact]
+    public async Task The_Check_Reads_The_Job_As_It_Was_Sent()
+    {
+        const string raw = "# A comment\na:   {input:   x}\n";
+        Assert.Equal(HttpStatusCode.OK, (await Save("orders", raw)).Status);
+        Assert.Equal(raw, _checked);
+        Assert.Equal(raw, (await _host.Services.GetRequiredService<PipelineLibrary>().GetAsync("orders", Ct))!.Yaml);
+    }
+
+    [Fact]
+    public async Task Without_A_Runner_The_Real_Check_Refuses_And_Names_Why()
+    {
+        using var host = new CoordinatorHost();
+        using var client = host.Bearer(CoordinatorHost.Person(CoordinatorHost.Designer));
+        client.DefaultRequestHeaders.Add(CoordinatorApi.CsrfHeader, "1");
+        using var response = await Put(client, "orders", "a:\n  input: x\n");
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Contains("No runner is online", (await response.Content.ReadFromJsonAsync<LibraryRefused>(Ct))!.Report);
+        Assert.Null(await host.Services.GetRequiredService<PipelineLibrary>().GetAsync("orders", Ct));
+    }
+
+    [Fact]
+    public async Task The_Library_Is_Listed_And_Read_At_The_Version_Of_Its_Job()
+    {
+        var created = await Save("orders", "a:\n  input: x\n");
+        var plan = new DistributionPlan("plan-1", "orders", [], [], [], [], [], [], null);
+        await _host.Services.GetRequiredService<PipelineLibrary>().SavePlanAsync("orders", plan, "plan", Ct);
+
+        var reader = As(CoordinatorHost.Reader);
+        var listing = await reader.GetFromJsonAsync<LibraryItem[]>(CoordinatorApi.LibraryList, Ct);
+        Assert.Equal(("orders", created.Saved!.Commit), (Assert.Single(listing!).Id, listing![0].Commit));
+
+        // The plan saved beside the job is a commit of the folder, not an edit: the job's version stays.
+        var job = await reader.GetFromJsonAsync<LibraryJob>(CoordinatorApi.Library("orders"), Ct);
+        Assert.Equal(new LibraryJob("orders", "a:\n  input: x\n", created.Saved.Commit), job);
+
+        using var missing = await reader.GetAsync(CoordinatorApi.Library("nothing"), Ct);
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+    }
 }
+

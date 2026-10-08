@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
@@ -13,9 +14,11 @@ namespace DtPipe.Coordinator.Server.Tests;
 /// <summary>
 /// The coordinator's server in memory, trusting a test provider: its configuration is handed over
 /// directly, with a key generated here, so nothing is discovered over the network. The state
-/// directory is a fresh temporary one.
+/// directory is a fresh temporary one. <c>check</c> stands for the designer's check, which needs a runner and
+/// the bricks' nodes; without it the real one runs.
 /// </summary>
-public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.StudioClient) : WebApplicationFactory<Program>
+public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.StudioClient, Func<string, DesignCheck>? check = null)
+    : WebApplicationFactory<Program>
 {
     public const string Issuer = "http://idp.test/";
     public const string Audience = "dtpipe-coordinator";
@@ -37,6 +40,7 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
         builder.UseSetting("Coordinator:Studio:ClientId", studioClientId ?? "");
         builder.ConfigureTestServices(services =>
         {
+            if (check is not null) services.AddSingleton<DesignValidator>(new StubValidator(check));
             var configuration = new OpenIdConnectConfiguration
             {
                 Issuer = Issuer,
@@ -87,4 +91,10 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
         base.Dispose(disposing);
         if (disposing && Directory.Exists(_state)) Directory.Delete(_state, recursive: true);
     }
+}
+
+/// <summary>The designer's check answered by a function, for tests that exercise what is around it.</summary>
+internal sealed class StubValidator(Func<string, DesignCheck> check) : DesignValidator(null!, null!)
+{
+    public override Task<DesignCheck> ValidateAsync(string yaml, CancellationToken ct) => Task.FromResult(check(yaml));
 }

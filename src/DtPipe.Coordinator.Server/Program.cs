@@ -255,9 +255,17 @@ api.MapGet("/library/{id}", async (string id, PipelineLibrary library, Cancellat
     await library.GetAsync(id, ct) is { } doc ? Results.Ok(doc) : Results.NotFound(new { error = $"'{id}' is not in the library." }));
 // A save may say what it expects in place (If-None-Match: * for a new pipeline, If-Match: "<commit>"
 // for the version it read): 412 otherwise, with the commit in place. Without either, it overwrites.
+// Every save is checked first, the studio's and the pages' alike: a job the check refuses is neither
+// written nor committed, and with no runner or no brick node online the check cannot run, so it refuses.
 designer.MapPut(CoordinatorApi.LibraryRoute, async (string id, LibrarySave request, HttpRequest http, PipelineLibrary library,
-    DeploymentManager deployments, EventBus bus, CancellationToken ct) =>
+    DesignValidator validator, DeploymentManager deployments, EventBus bus, CancellationToken ct) =>
 {
+    DesignCheck check;
+    try { check = await validator.ValidateAsync(request.Yaml, ct); }
+    catch (Exception ex) when (ex is not OperationCanceledException) { check = new DesignCheck(false, $"The job is not readable: {ex.Message}"); }
+    if (!check.Ok)
+        return Results.Json(new LibraryRefused("The designer's check refused this job: nothing was saved.", check.Report),
+            statusCode: StatusCodes.Status422UnprocessableEntity);
     var absent = http.Headers.IfNoneMatch.ToString().Trim() == "*";
     var expected = http.Headers.IfMatch.ToString().Trim() is { Length: > 0 } tag ? (tag.StartsWith("W/") ? tag[2..] : tag).Trim('"') : null;
     var precondition = absent || expected is not null ? new SavePrecondition(absent, expected) : null;

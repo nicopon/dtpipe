@@ -32,7 +32,7 @@ public sealed class CoordinatorContractTests
     public void Metadata_Uses_The_Rfc_Names_And_Omits_An_Absent_Client()
     {
         Assert.Equal(
-            """{"resource":"http://c.test","authorization_servers":["http://idp.test/"],"bearer_methods_supported":["header"],"dtpipe_contract":1,"dtpipe_studio_client_id":"studio"}""",
+            """{"resource":"http://c.test","authorization_servers":["http://idp.test/"],"bearer_methods_supported":["header"],"dtpipe_contract":2,"dtpipe_studio_client_id":"studio"}""",
             Write(new ResourceMetadata("http://c.test", ["http://idp.test/"], ["header"], CoordinatorApi.Contract, "studio")));
         Assert.DoesNotContain("dtpipe_studio_client_id", Write(new ResourceMetadata("http://c.test", ["http://idp.test/"], ["header"], 1)));
     }
@@ -50,6 +50,9 @@ public sealed class CoordinatorContractTests
             Write(new RecognizeResponse(new Dictionary<string, Recognition> { ["a"] = new("n1/b", null, null) })));
         Assert.Equal("""{"id":"p","commit":"abc","redistribute":true,"deployed":false}""", Write(new LibrarySaved("p", "abc", true, false)));
         Assert.Equal("""{"error":"e","commit":null}""", Write(new LibraryConflict("e", null)));
+        Assert.Equal("""{"error":"e","report":"r"}""", Write(new LibraryRefused("e", "r")));
+        Assert.Equal("""{"id":"p","title":"T","description":null,"commit":"abc"}""", Write(new LibraryItem("p", "T", null, "abc")));
+        Assert.Equal("""{"id":"p","yaml":"a: {}","commit":"abc"}""", Write(new LibraryJob("p", "a: {}", "abc")));
         var save = JsonSerializer.Deserialize<LibrarySave>("""{"yaml":"a: {}","layout":null,"message":"m"}""", Server)!;
         Assert.Equal(("a: {}", "m"), (save.Yaml, save.Message));
     }
@@ -70,5 +73,6 @@ public sealed class CoordinatorContractTests
     {
         Assert.Equal("/api/bricks/n%2F1/a%20b/sample", CoordinatorApi.Sample("n/1", "a b"));
         Assert.Equal("/api/library/orders", CoordinatorApi.Library("orders"));
+        Assert.Equal("/api/library", CoordinatorApi.LibraryList);
     }
 }

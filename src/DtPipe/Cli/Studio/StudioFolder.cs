@@ -210,6 +210,9 @@ public sealed class StudioLocalFiles(StudioFolder folder)
         catch (JsonException) { return null; }
     }
 
+    /// <summary>Refuses, before anything is written, a publication the studio could only keep through a link.</summary>
+    public void CheckPublication(string job) => RefuseLinks(PathOf(job, "publish"));
+
     public void WritePublication(string job, StudioPublication publication) =>
         Write(job, "publish", JsonSerializer.SerializeToNode(publication, LaunchJson)!);
 

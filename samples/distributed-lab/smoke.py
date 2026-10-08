@@ -788,16 +788,26 @@ def bricks_pass():
 
     check("strict nodes", strict)
     check("a read that is no brick", no_brick)
-    def designer_check():
-        # The server opens no node database and runs no dtpipe: each source brick's node sends one row, a
-        # runner dry-runs the job over them, and each sink brick's node judges its own target.
+    def library_save_check():
+        # Every save into the library is checked, the studio's and the pages' alike. The server opens no node
+        # database and runs no dtpipe: each source brick's node sends one row, a runner dry-runs the job over
+        # them, and each sink brick's node judges its own target. Each seed, sent as its file holds it under a
+        # probe id, is accepted.
+        token = studio_tokens(URL, "labdesigner")["access_token"]
         names = sorted(n for n in os.listdir(LIBRARY_SEED) if n.endswith(".yaml"))
         for name in names:
-            yaml = open(os.path.join(LIBRARY_SEED, name)).read()
-            answer = call("/api/design/validate", call("/api/design/decompose", {"yaml": yaml})["model"])
-            if not answer["ok"]:
-                raise RuntimeError(f"{name}: {answer.get('errors')} {answer.get('dryRun')}")
-        return f"{len(names)} library pipelines accepted"
+            pid = "smoke-seed-" + name[:-len(".yaml")]
+            status, body, _ = bearer(token, f"/api/library/{pid}", {"yaml": open(os.path.join(LIBRARY_SEED, name)).read(), "layout": None,
+                                                                   "message": "smoke: a seed as written"}, "PUT")
+            try:
+                if status != 200:
+                    raise RuntimeError(f"{name}: HTTP {status} {body[:300]!r}")
+            finally:
+                try:
+                    call(f"/api/library/{pid}", None, "DELETE")
+                except ApiError:
+                    pass
+        return f"{len(names)} library pipelines accepted as written"
 
     def import_command():
         # A command line becomes a job through dtpipe's own --export-job, which a runner runs for the coordinator.
@@ -812,10 +822,20 @@ def bricks_pass():
                              "table: customers_mirror\n      strategy: Upsert\n      key: customer_id")
         if wrong == yaml:
             raise RuntimeError("library-seed/revenue-by-country.yaml no longer loads its table this way")
-        answer = call("/api/design/validate", call("/api/design/decompose", {"yaml": wrong})["model"])
-        if answer["ok"] or "node-4/customers-mirror" not in (answer.get("dryRun") or ""):
-            raise RuntimeError(f"node-4 should refuse: {answer}")
-        return "node-4 refuses revenue rows for customers_mirror"
+        token = studio_tokens(URL, "labdesigner")["access_token"]
+        pid = "smoke-refused-probe"
+        status, body, _ = bearer(token, f"/api/library/{pid}", {"yaml": wrong, "layout": None, "message": "smoke: refused"}, "PUT")
+        answer = json.loads(body or b"null") or {}
+        if status != 422 or "node-4/customers-mirror" not in (answer.get("report") or ""):
+            raise RuntimeError(f"node-4 should refuse the save: {status} {body[:400]!r}")
+        try:
+            call(f"/api/library/{pid}")
+        except ApiError as e:
+            if e.status != 404:
+                raise
+        else:
+            raise RuntimeError("a refused save was written into the library")
+        return "node-4 refuses revenue rows for customers_mirror: 422, and nothing is saved"
 
     def studio_routes():
         # dtpipe studio's view of the bricks, through a person's bearer token: the catalog, what a library
@@ -844,7 +864,14 @@ def bricks_pass():
         rows = [line for line in out.stdout.splitlines() if line.strip()]
         if out.returncode != 0 or len(rows) != 8:
             raise RuntimeError(f"dtpipe read {len(rows)} line(s) of the sample: {out.stderr[-300:]}")
-        return f"catalog, recognition of customers-mirror's bricks, a 7-row Arrow sample read back by dtpipe ({len(arrow):,} bytes)"
+        status, body, _ = bearer(token, "/api/library")
+        entry = next((e for e in json.loads(body) if e["id"] == "customers-mirror"), None)
+        status_doc, body_doc, _ = bearer(token, "/api/library/customers-mirror")
+        doc = json.loads(body_doc)
+        if status != 200 or not entry or status_doc != 200 or not entry["commit"] or doc["commit"] != entry["commit"] or "yaml" not in doc:
+            raise RuntimeError(f"library listing {status}, customers-mirror {status_doc}: {entry} {str(doc)[:200]}")
+        return (f"catalog, recognition of customers-mirror's bricks, a 7-row Arrow sample read back by dtpipe ({len(arrow):,} bytes), "
+                "the library listed and a job read at the version of its file")
 
     def versions():
         # Every node host announces what its dtpipe binary says of itself: here, the release binary.
@@ -860,7 +887,7 @@ def bricks_pass():
     check("a source brick by a hair", source_by_a_hair)
     check("a sink brick by a hair", sink_by_a_hair)
     check("relays", relays)
-    check("a designer's check", designer_check)
+    check("a library save's check", library_save_check)
     check("a command line imported", import_command)
     check("a sink that refuses", sink_refuses)
     return failures[0]

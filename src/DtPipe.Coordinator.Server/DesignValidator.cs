@@ -15,14 +15,14 @@ public sealed record DesignCheck(bool Ok, string? Report);
 /// own target against its contract (<c>CheckSink</c>). Every other branch is dtpipe's as written; one that
 /// reaches a node's data without being its brick is refused before anything runs.
 /// </summary>
-public sealed class DesignValidator(BrickCatalog bricks, NodeRequests nodes)
+public class DesignValidator(BrickCatalog bricks, NodeRequests nodes)
 {
     private static readonly TimeSpan NodeBound = TimeSpan.FromSeconds(40);
     private static readonly TimeSpan RunnerBound = TimeSpan.FromSeconds(75);
 
     private sealed record Placed(string Alias, BrickView Brick);
 
-    public async Task<DesignCheck> ValidateAsync(string yaml, CancellationToken ct)
+    public virtual async Task<DesignCheck> ValidateAsync(string yaml, CancellationToken ct)
     {
         var rewritten = new YamlMappingNode();
         var sources = new List<Placed>();

@@ -215,6 +215,12 @@ public sealed class StudioServer : IAsyncDisposable
                 case ("POST", "/api/publish"):
                     await PublishAsync(context);
                     break;
+                case ("GET", "/api/library"):
+                    await LibraryAsync(context);
+                    break;
+                case ("POST", "/api/library/open"):
+                    await OpenFromLibraryAsync(context);
+                    break;
                 case ("POST", "/api/quit"):
                     context.Response.StatusCode = StatusCodes.Status202Accepted;
                     _quit.TrySetResult();
@@ -442,7 +448,7 @@ public sealed class StudioServer : IAsyncDisposable
 
         var origin = link.Origin.ToString();
         var last = _local.ReadPublication(path) is { } p && p.Coordinator == origin && p.Id == asked.Id ? p : null;
-        (LibrarySaved? Saved, LibraryConflict? Conflict) outcome;
+        (LibrarySaved? Saved, LibraryConflict? Conflict, LibraryRefused? Refused) outcome;
         // Replace names the commit the person chose to replace; empty, it creates a pipeline gone since.
         var expected = asked.Replace is { } chosen ? (chosen.Length == 0 ? null : chosen) : last?.Commit;
         try { outcome = await link.PublishAsync(asked.Id!, job.Text, asked.Message, expected, context.RequestAborted); }
@@ -453,9 +459,49 @@ public sealed class StudioServer : IAsyncDisposable
             await JsonAsync(context, new { error = conflict.Error, commit = conflict.Commit });
             return;
         }
+        if (outcome.Refused is { } refused)
+        {
+            context.Response.StatusCode = StatusCodes.Status422UnprocessableEntity;
+            await JsonAsync(context, new { error = refused.Error, report = refused.Report });
+            return;
+        }
         var saved = outcome.Saved!;
         _local.WritePublication(path, new StudioPublication(origin, saved.Id, saved.Commit));
         await JsonAsync(context, saved);
+    }
+
+    /// <summary>The coordinator's link when a person is signed in to it; a refusal that names what is missing otherwise.</summary>
+    private CoordinatorLink SignedInLink() =>
+        _tools.Coordinator is not { } link ? throw new StudioRefusal(404, "This studio was opened without --coordinator.")
+        : link.Status().State != CoordinatorLink.SignedIn ? throw new StudioRefusal(409, "Sign in to the coordinator to read its library.")
+        : link;
+
+    private async Task LibraryAsync(HttpContext context)
+    {
+        var link = SignedInLink();
+        try { await JsonAsync(context, new { pipelines = await link.LibraryAsync(context.RequestAborted) }); }
+        catch (Exception ex) when (ex is CoordinatorLinkException or HttpRequestException) { throw new StudioRefusal(502, ex.Message); }
+    }
+
+    /// <summary>
+    /// Opens a library pipeline as a new file of the folder, <c>&lt;id&gt;.yaml</c>: created only, never over a
+    /// file there, and with the version read kept as the one published last, so a later publication
+    /// replaces exactly that version.
+    /// </summary>
+    private async Task OpenFromLibraryAsync(HttpContext context)
+    {
+        var link = SignedInLink();
+        var asked = await BodyAsync<OpenLibraryRequest>(context);
+        if (!CoordinatorApi.IsPipelineId(asked.Id))
+            throw new StudioRefusal(400, $"'{asked.Id}' is not a pipeline id: lowercase letters, digits and '-'.");
+        LibraryJob job;
+        try { job = await link.LibraryJobAsync(asked.Id!, context.RequestAborted) ?? throw new StudioRefusal(404, $"'{asked.Id}' is not in the library."); }
+        catch (Exception ex) when (ex is CoordinatorLinkException or HttpRequestException) { throw new StudioRefusal(502, ex.Message); }
+        var path = asked.Id + ".yaml";
+        _local.CheckPublication(path);
+        var hash = _folder.WriteJob(path, job.Yaml, null);
+        _local.WritePublication(path, new StudioPublication(link.Origin.ToString(), job.Id, job.Commit));
+        await JsonAsync(context, new { path, hash });
     }
 
     /// <summary>A location a binding can carry: its pairs are separated by commas.</summary>
@@ -549,6 +595,8 @@ public sealed class StudioServer : IAsyncDisposable
     private sealed record DecomposeRequest(string? Yaml, JsonObject? Layout);
 
     private sealed record SaveRequest(string? Path, string? Hash, DesignModel? Model, bool AcceptErrors);
+
+    private sealed record OpenLibraryRequest(string? Id);
 
     private sealed record PublishRequest(string? Path, string? Hash, string? Id, string? Message, string? Replace);
 

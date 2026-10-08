@@ -15,7 +15,7 @@ public static partial class CoordinatorApi
     /// anything else: a studio and a coordinator deployed at different times refuse each other by name
     /// rather than misreading each other.
     /// </summary>
-    public const int Contract = 1;
+    public const int Contract = 2;
 
     /// <summary>The protected resource metadata (RFC 9728): anonymous, the one entry point a studio needs.</summary>
     public const string Metadata = "/.well-known/oauth-protected-resource";
@@ -33,6 +33,7 @@ public static partial class CoordinatorApi
     public const string CatalogRoute = "/catalog";
     public const string RecognizeRoute = "/bricks/recognize";
     public const string SampleRoute = "/bricks/{node}/{id}/sample";
+    public const string LibraryListRoute = "/library";
     public const string LibraryRoute = "/library/{id}";
 
     public static string Me => Prefix + MeRoute;
@@ -41,6 +42,8 @@ public static partial class CoordinatorApi
 
     public static string Sample(string node, string id) =>
         Prefix + SampleRoute.Replace("{node}", Uri.EscapeDataString(node)).Replace("{id}", Uri.EscapeDataString(id));
+
+    public static string LibraryList => Prefix + LibraryListRoute;
 
     public static string Library(string id) => Prefix + LibraryRoute.Replace("{id}", Uri.EscapeDataString(id));
 

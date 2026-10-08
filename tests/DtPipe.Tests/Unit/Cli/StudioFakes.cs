@@ -42,6 +42,7 @@ internal sealed class StudioFakes : IAsyncDisposable
     public int SampleRows;
     public readonly Dictionary<string, (string Yaml, string Commit)> Library = [];
     public string? LastSaveBody;
+    public LibraryRefused? Refusal;
     public bool Redistribute;
     public int Commits;
     public string SinkTarget = "csv:target.csv";
@@ -173,10 +174,29 @@ internal sealed class StudioFakes : IAsyncDisposable
             context.Response.ContentType = "application/vnd.apache.arrow.stream";
             await context.Response.Body.WriteAsync(Arrow(Math.Min(SampleRows, 3)));
             break;
+        case CoordinatorApi.Prefix + CoordinatorApi.LibraryListRoute:
+            await context.Response.WriteAsJsonAsync(
+                Library.Select(p => new LibraryItem(p.Key, p.Key, null, p.Value.Commit)).ToArray(), JsonSerializerOptions.Web);
+            break;
+        case { } library when library.StartsWith("/api/library/", StringComparison.Ordinal) && context.Request.Method == "GET":
+            var wanted = library["/api/library/".Length..];
+            if (!Library.TryGetValue(wanted, out var held))
+            {
+                context.Response.StatusCode = 404;
+                return;
+            }
+            await context.Response.WriteAsJsonAsync(new LibraryJob(wanted, held.Yaml, held.Commit), JsonSerializerOptions.Web);
+            break;
         case { } library when library.StartsWith("/api/library/", StringComparison.Ordinal):
             var id = library["/api/library/".Length..];
             LastSaveBody = await new StreamReader(context.Request.Body).ReadToEndAsync();
             var save = JsonSerializer.Deserialize<LibrarySave>(LastSaveBody, JsonSerializerOptions.Web)!;
+            if (Refusal is not null)
+            {
+                context.Response.StatusCode = 422;
+                await context.Response.WriteAsJsonAsync(Refusal, JsonSerializerOptions.Web);
+                return;
+            }
             var exists = Library.TryGetValue(id, out var current);
             var ifMatch = context.Request.Headers.IfMatch.ToString();
             if (context.Request.Headers.IfNoneMatch == "*" && exists || ifMatch.Length > 0 && (!exists || ifMatch.Trim('"') != current.Commit))

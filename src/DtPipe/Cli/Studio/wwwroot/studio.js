@@ -21,10 +21,36 @@ async function loadJobs() {
     : el("li", { class: "muted" }, "No .yaml or .yml file in this folder."));
 }
 
+// The coordinator's library, when a person is signed in: each pipeline opens as a new file of the folder.
+async function loadLibrary() {
+  const pane = $("library-pane");
+  if (coordinator()?.state !== "signed-in") { pane.hidden = true; return; }
+  pane.hidden = false;
+  try {
+    const { pipelines } = await api("/api/library");
+    fill($("library"), pipelines.length
+      ? pipelines.map((p) => el("li", {}, el("button", { class: "job", title: p.description || p.title || p.id, onclick: () => openFromLibrary(p.id) }, p.id)))
+      : el("li", { class: "muted" }, "The library holds no pipeline."));
+  } catch (e) {
+    fill($("library"), el("li", { class: "warn" }, e.message));
+  }
+}
+
+async function openFromLibrary(id) {
+  if (!leaveCurrent()) return;
+  try {
+    const { path } = await api("/api/library/open", { id });
+    await loadJobs();
+    await open(path, true);
+  } catch (e) {
+    status(e.message, "bad");
+  }
+}
+
 const leaveCurrent = () => !isDirty() || confirm(`${current?.path || "This job"} has changes that are not saved. Leave it anyway?`);
 
-async function open(path) {
-  if (!leaveCurrent()) return;
+async function open(path, left = false) {
+  if (!left && !leaveCurrent()) return;
   try {
     const job = await api(`/api/job?path=${encodeURIComponent(path)}`);
     current = { path, hash: job.hash, rewrites: job.rewrites };
@@ -188,6 +214,12 @@ async function publish(replace) {
     publication = { id: publishing.id, saved };
     status(`published at ${short(saved.commit)}`, "good");
   } catch (e) {
+    if (e.status === 422) {
+      publication = { id: publishing.id, refused: { error: e.data?.error || e.message, report: e.data?.report ?? null } };
+      status("not published: the coordinator's check refused the job", "bad");
+      showTab("publish");
+      return;
+    }
     if (e.status !== 412) { status(e.message, "bad"); return; }
     const commit = e.data?.commit ?? null;
     publication = { id: publishing.id, conflict: { error: e.data?.error || e.message, commit } };
@@ -206,6 +238,11 @@ function publicationView() {
   if (!coordinator()) return el("p", { class: "hint" }, "Open the studio with --coordinator to publish a job into a coordinator's library.");
   if (!publication) {
     return el("p", { class: "hint" }, "Publish sends the job as saved in this folder to the coordinator's library. Its layout and its launch values stay on this machine.");
+  }
+  if (publication.refused) {
+    const { error, report } = publication.refused;
+    return [el("p", { class: "warn" }, `${publication.id} was not published: ${error}`),
+      report ? el("pre", {}, report) : el("p", { class: "hint" }, "The check could not run: it needs a runner and the nodes of the bricks online.")];
   }
   if (publication.conflict) {
     const { error, commit } = publication.conflict;
@@ -249,12 +286,15 @@ async function start() {
   });
   await loadJobs();
   onCoordinator(loadBricks);
+  onCoordinator(loadLibrary);
   await refreshCoordinator();
   await loadBricks();
+  await loadLibrary();
 }
 
 $("quit").addEventListener("click", quit);
 $("new-job").addEventListener("click", newJob);
+$("library-refresh").addEventListener("click", loadLibrary);
 document.addEventListener("keydown", (e) => {
   if (e.key === "s" && (e.ctrlKey || e.metaKey) && current) { e.preventDefault(); save(); }
 });

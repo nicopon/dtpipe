@@ -17,6 +17,7 @@ public sealed record LibraryEntry(
     string Id, string Title, string? Description, string? Commit, DateTimeOffset? UpdatedAt, string? Message,
     bool Distributed, bool PlanCurrent);
 
+/// <summary><see cref="Commit"/> is the last commit of the job file, the version a later <c>If-Match</c> names.</summary>
 public sealed record LibraryDocument(string Id, string Yaml, JsonObject? Layout, SavedPlan? Plan, bool PlanCurrent, string? Commit);
 
 public sealed record LibraryCommit(string Hash, DateTimeOffset Date, string Message);
@@ -79,7 +80,7 @@ public sealed partial class PipelineLibrary
             var (title, description, _) = DesignService.ReadHeader(yaml);
             var plan = ReadPlan(id);
             var last = (await HistoryCoreAsync(id, 1, ct)).FirstOrDefault();
-            entries.Add(new LibraryEntry(id, title, description, last?.Hash, last?.Date, last?.Message, plan is not null,
+            entries.Add(new LibraryEntry(id, title, description, await JobCommitAsync(id, ct), last?.Date, last?.Message, plan is not null,
                 plan is not null && plan.PipelineSha == Sha(yaml)));
         }
         return entries;
@@ -94,8 +95,7 @@ public sealed partial class PipelineLibrary
         var layoutPath = Path.Combine(dir, "layout.json");
         var layout = File.Exists(layoutPath) ? JsonNode.Parse(await File.ReadAllTextAsync(layoutPath, ct)) as JsonObject : null;
         var plan = ReadPlan(id);
-        var last = (await HistoryCoreAsync(id, 1, ct)).FirstOrDefault();
-        return new LibraryDocument(id, yaml, layout, plan, plan is not null && plan.PipelineSha == Sha(yaml), last?.Hash);
+        return new LibraryDocument(id, yaml, layout, plan, plan is not null && plan.PipelineSha == Sha(yaml), await JobCommitAsync(id, ct));
     }, ct);
 
     /// <summary>

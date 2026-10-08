@@ -5,6 +5,7 @@ using System.Text.Json;
 using DtPipe.Cli.Security;
 using DtPipe.Cli.Studio;
 using DtPipe.Jobs;
+using DtPipe.Jobs.Coordinator;
 using Xunit;
 
 namespace DtPipe.Tests.Unit.Cli;
@@ -153,4 +154,63 @@ public sealed class StudioPublishTests : IAsyncLifetime
         var (status, _) = await CallAsync(HttpMethod.Post, "/api/publish", new { path = "orders.yaml", hash = await HashAsync(), id = "../Orders" });
         Assert.Equal(HttpStatusCode.BadRequest, status);
     }
+
+    [Fact]
+    public async Task A_refused_publication_shows_the_report_of_the_coordinators_check()
+    {
+        await SignInAsync();
+        _fakes.Refusal = new LibraryRefused("The designer's check refused this job: nothing was saved.", "'main': n1/archive does not accept what reaches it");
+
+        var (status, answer) = await PublishAsync(await HashAsync());
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, status);
+        Assert.Equal("'main': n1/archive does not accept what reaches it", answer.GetProperty("report").GetString());
+        Assert.Empty(_fakes.Library);
+        var (_, kept) = await CallAsync(HttpMethod.Get, "/api/publish?path=orders.yaml");
+        Assert.Equal(JsonValueKind.Null, kept.GetProperty("publication").ValueKind);
+    }
+
+    [Fact]
+    public async Task A_library_pipeline_opens_as_a_new_file_and_the_next_publication_replaces_that_version()
+    {
+        _fakes.Library["customers"] = ("# Customers\nmain:\n  input: duck:${{DB}}\n  output: csv:c.csv\n", "commit-theirs");
+        var (signedOut, _) = await CallAsync(HttpMethod.Get, "/api/library");
+        Assert.Equal(HttpStatusCode.Conflict, signedOut);
+        await SignInAsync();
+
+        var (listed, listing) = await CallAsync(HttpMethod.Get, "/api/library");
+        Assert.Equal(HttpStatusCode.OK, listed);
+        Assert.Equal("customers", Assert.Single(listing.GetProperty("pipelines").EnumerateArray()).GetProperty("id").GetString());
+
+        var (opened, open) = await CallAsync(HttpMethod.Post, "/api/library/open", new { id = "customers" });
+        Assert.Equal(HttpStatusCode.OK, opened);
+        Assert.Equal("customers.yaml", open.GetProperty("path").GetString());
+        Assert.Equal(_fakes.Library["customers"].Yaml, File.ReadAllText(Path.Combine(_dir, "customers.yaml")));
+
+        // The file is never overwritten, even by the same pipeline opened twice.
+        File.AppendAllText(Path.Combine(_dir, "customers.yaml"), "# mine\n");
+        var (again, refused) = await CallAsync(HttpMethod.Post, "/api/library/open", new { id = "customers" });
+        Assert.Equal(HttpStatusCode.Conflict, again);
+        Assert.Contains("already exists", refused.GetProperty("error").GetString());
+        Assert.Contains("# mine", File.ReadAllText(Path.Combine(_dir, "customers.yaml")));
+
+        // The version read was kept: the publication sends If-Match for it, and the library accepts it.
+        var hash = (await CallAsync(HttpMethod.Get, "/api/job?path=customers.yaml")).Body.GetProperty("hash").GetString();
+        var (published, saved) = await CallAsync(HttpMethod.Post, "/api/publish", new { path = "customers.yaml", hash, id = "customers", message = "m" });
+        Assert.Equal(HttpStatusCode.OK, published);
+        Assert.NotEqual("commit-theirs", saved.GetProperty("commit").GetString());
+        Assert.Contains("# mine", _fakes.Library["customers"].Yaml);
+    }
+
+    [Fact]
+    public async Task A_pipeline_the_library_does_not_hold_or_an_id_that_is_none_is_not_opened()
+    {
+        await SignInAsync();
+        var (missing, _) = await CallAsync(HttpMethod.Post, "/api/library/open", new { id = "nothing" });
+        Assert.Equal(HttpStatusCode.NotFound, missing);
+        var (bad, _) = await CallAsync(HttpMethod.Post, "/api/library/open", new { id = "../orders" });
+        Assert.Equal(HttpStatusCode.BadRequest, bad);
+        Assert.False(File.Exists(Path.Combine(_dir, "nothing.yaml")));
+    }
 }
+

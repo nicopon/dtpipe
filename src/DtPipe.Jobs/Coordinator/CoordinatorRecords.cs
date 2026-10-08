@@ -60,3 +60,15 @@ public sealed record LibrarySaved(string Id, string? Commit, bool Redistribute, 
 
 /// <summary>A save refused by its precondition (412), with the pipeline's commit in place, if any.</summary>
 public sealed record LibraryConflict(string Error, string? Commit);
+
+/// <summary>
+/// A save the designer's check refused (422): nothing was written or committed. <see cref="Report"/> is
+/// the check's report, absent when it could not run (no runner or no brick node online).
+/// </summary>
+public sealed record LibraryRefused(string Error, string? Report);
+
+/// <summary>One pipeline of the library as the studio lists it; <see cref="Commit"/> is the job's version.</summary>
+public sealed record LibraryItem(string Id, string? Title, string? Description, string? Commit);
+
+/// <summary>A pipeline's job as the library holds it, at <see cref="Commit"/>, the version a later <c>If-Match</c> names.</summary>
+public sealed record LibraryJob(string Id, string Yaml, string? Commit);
