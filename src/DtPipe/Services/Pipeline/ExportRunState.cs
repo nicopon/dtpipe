@@ -75,8 +75,11 @@ internal sealed partial class ExportRunState
     /// <summary>
     /// Rows the reader is allowed to produce. A sample never reads more than it shows, which
     /// is what keeps it cheap against a large source; an explicit --limit still wins if tighter.
+    /// The bound belongs to a source: a reader fed by another branch, a processor or a stored
+    /// checkpoint reads what was already bounded where it came from, and bounding it again would
+    /// cut a one-to-many expansion short.
     /// </summary>
-    internal int EffectiveLimit => IsSampleMode
+    internal int EffectiveLimit => IsSampleMode && ReaderFactory.IsSource
         ? (Options.Limit > 0 ? Math.Min(Options.Limit, Options.DryRunCount) : Options.DryRunCount)
         : Options.Limit;
 

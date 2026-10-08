@@ -166,11 +166,13 @@ public class JobService
 				if (!globals.Quiet)
 					orchestrator.OnLogEvent = msg => _console.MarkupLine(msg);
 
+				var fingerprints = DtPipe.Cli.Services.BranchFingerprint.ForDag(dag, jobs, contexts);
 				Func<BranchDefinition, BranchChannelContext, CancellationToken, Task<int>> branchExecutor = async (branch, ctx, token) =>
 				{
 					var job = jobs[branch.Alias];
 					contexts.TryGetValue(branch.Alias, out var branchCtx);
-					return await RunSingleJobAsync(job, branchCtx, branch.Alias, true, ctx, resultsCollector, token, globals, userCts.Token, branchFailures);
+					var fingerprinted = ctx with { DefinitionFingerprint = fingerprints.GetValueOrDefault(branch.Alias) };
+					return await RunSingleJobAsync(job, branchCtx, branch.Alias, true, fingerprinted, resultsCollector, token, globals, userCts.Token, branchFailures);
 				};
 
 				int exitCode;

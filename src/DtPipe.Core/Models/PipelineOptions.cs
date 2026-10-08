@@ -51,6 +51,12 @@ public sealed record PipelineOptions : IOptionSet
 	public string? Checkpoint { get; init; }
 	public string? FromCheckpoint { get; init; }
 
+	/// <summary>
+	/// What defines the rows this branch produces, upstream branches included — set by
+	/// LinearPipelineService; the checkpoint key hashes it. Never the alias that labels the branch.
+	/// </summary>
+	public string? DefinitionFingerprint { get; init; }
+
 	// Contract — set from JobDefinition by LinearPipelineService
 	public string? ContractSave { get; init; }
 	public string? FromContract { get; init; }

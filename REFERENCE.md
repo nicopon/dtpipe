@@ -984,10 +984,15 @@ conversion is inherent to checkpointing rather than to where the tee sits. What 
 that a row-mode pipeline's values pass through the Arrow type map on the way in, which can
 normalise a type the row path would have carried loosely.
 
-**Checkpoints are addressed by content.** The key is a hash of what produces the rows — connection
-(credentials stripped), query, the transformers up to the point, and the sampling parameters — not
-of the alias. Two different pipelines run in the same directory therefore cannot collide, and an
-unchanged prefix is reused. Renaming an alias changes nothing.
+**Checkpoints are addressed by content.** The key is a hash of what produces the rows — the source
+and its connection (credentials stripped), the query, every transformer with its configuration and
+in order, a processor's options, the effective row limit, the sampling parameters and, for a branch
+that reads another (`from:`), the definition of that branch — not of the alias. Two different
+pipelines run in the same directory therefore cannot collide, a sample (`--dry-run N`) never shares
+a key with the full run, and an unchanged prefix is reused. Renaming an alias changes nothing. A
+change to the file a transformer reads with `@file` changes the key; the writer's options and the
+checkpoint's label (`--checkpoint <label>`) are not part of it, but a writer option that shares its
+key with the reader's is: it can only cost a miss, never a collision.
 
 ### The schema a pipeline produces is a contract
 

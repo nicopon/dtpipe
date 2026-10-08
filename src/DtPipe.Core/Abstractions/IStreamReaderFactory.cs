@@ -28,4 +28,12 @@ public interface IStreamReaderFactory : IDataFactory
 	/// Default is false.
 	/// </summary>
 	bool YieldsColumnarOutput => false;
+
+	/// <summary>
+	/// Whether this reader opens an external source of its own. False for a reader fed by what
+	/// another stage produced: an internal channel (<see cref="IDataFactory.CapabilityKind"/>), a
+	/// stream processor or a stored checkpoint. A sample bound (<c>--dry-run N</c>) and a checkpoint
+	/// key's limit apply to a source only: what a non-source reads is already bounded upstream.
+	/// </summary>
+	bool IsSource => CapabilityKind is null;
 }

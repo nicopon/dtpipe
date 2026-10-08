@@ -7,8 +7,10 @@ namespace DtPipe.Sessions;
 /// <summary>
 /// Names a checkpoint by <b>what produces it</b>, not by what it was called.
 ///
-/// The key hashes the definition of the branch prefix — connection, query, the transformers up
-/// to the point, and the sampling parameters. Three things follow, and they are why the
+/// The key hashes the definition of the branch prefix — the reader and its connection, the query,
+/// the effective limit and sampling parameters, and the branch's fingerprint
+/// (<c>BranchFingerprint</c>: each transformer with its configuration, a processor's options and
+/// the definition of every branch it reads). Three things follow, and they are why the
 /// implicit working-directory session is safe:
 ///
 /// <list type="bullet">
@@ -30,15 +32,25 @@ public static class CheckpointKey
     /// <summary>
     /// Computes the key for a branch prefix.
     /// </summary>
+    /// <param name="component">The reader's component name. Part of the identity on its own: a
+    /// route's connection is the text after the prefix, so <c>csv:x</c> and <c>jsonl:x</c>
+    /// read the same.</param>
     /// <param name="connection">The reader's connection string. Redacted before hashing —
     /// a credential must never end up inside a cache key, where it would sit in a directory
     /// name and in every listing that prints one. It goes through the same entry point as every
     /// other connection string the product handles, so this site is not an exception a grep has
     /// to learn about.</param>
+    /// <param name="definition">What defines the rows beyond the reader: each transformer's
+    /// configuration, a processor's options and the branches upstream (<c>BranchFingerprint</c>).
+    /// A type name alone cannot tell two configurations of one transformer apart.</param>
+    /// <param name="limit">The reader's effective limit. A sample and a full run never share a
+    /// key.</param>
     public static string Compute(
+        string? component,
         string? connection,
         string? query,
         IEnumerable<string>? transformerDefinitions,
+        string? definition,
         double samplingRate,
         int? samplingSeed,
         int limit,
@@ -47,6 +59,7 @@ public static class CheckpointKey
         int segmentIndex)
     {
         var sb = new StringBuilder();
+        Append(sb, "component", component ?? "");
         Append(sb, "conn", ConnectionStringSanitizer.Redact(connection ?? ""));
         Append(sb, "query", query ?? "");
 
@@ -54,6 +67,7 @@ public static class CheckpointKey
         foreach (var t in transformerDefinitions ?? Enumerable.Empty<string>())
             Append(sb, $"t{index++}", t);
 
+        Append(sb, "definition", definition ?? "");
         Append(sb, "rate", samplingRate.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
         Append(sb, "seed", samplingSeed?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "");
         Append(sb, "limit", limit.ToString(System.Globalization.CultureInfo.InvariantCulture));

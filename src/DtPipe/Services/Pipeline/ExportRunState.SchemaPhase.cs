@@ -92,7 +92,9 @@ internal sealed partial class ExportRunState
 
     /// <summary>
     /// The content-addressed name for this branch's prefix — the definition that produces the
-    /// rows, not the alias that labels them (see CheckpointKey).
+    /// rows, not the alias that labels them (see CheckpointKey). What the run reads (the
+    /// connection, the query, the effective limit) comes from the resolved run; what defines the
+    /// transformers, a processor and the branches upstream comes from the branch's fingerprint.
     /// </summary>
     internal string ComputeCheckpointKey()
     {
@@ -103,12 +105,16 @@ internal sealed partial class ExportRunState
         var query = (Registry.Get(ReaderFactory.OptionsType) as DtPipe.Core.Options.IQueryAwareOptions)?.Query;
 
         return DtPipe.Sessions.CheckpointKey.Compute(
-            route?.Input ?? ProviderName,
+            ProviderName,
+            // A non-source reader's route is the alias of the channel it reads: a label, and the
+            // upstream's definition (the fingerprint) already stands for what it carries.
+            ReaderFactory.IsSource ? route?.Input : null,
             query,
             Pipeline.Select(t => t.GetType().FullName ?? t.GetType().Name),
+            Options.DefinitionFingerprint,
             Options.SamplingRate,
             Options.SamplingSeed,
-            Options.Limit,
+            EffectiveLimit,
             Options.BatchSize,
             Options.MaxBatchBytes,
             segmentIndex: Segments.Count);

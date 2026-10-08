@@ -84,9 +84,17 @@ through a function — SELECT my_function() passes a verb scan, hence the server
 ## Checkpoints — mechanics
 
 `--checkpoint` tees the columnar stream into the session store; `--from-checkpoint` reads it back.
-The key is a hash of the branch prefix's **definition** (sanitised connection, query, transformers,
-sampling parameters), never the alias: two pipelines in one directory cannot collide, and an
-unchanged prefix is reused.
+The key is a hash of the branch prefix's **definition**, never the alias: two pipelines in one
+directory cannot collide, and an unchanged prefix is reused. `ExportRunState.ComputeCheckpointKey`
+passes what the resolved run knows (component, sanitised connection, query, `EffectiveLimit`,
+sampling) and `PipelineOptions.DefinitionFingerprint`, computed by `BranchFingerprint` from the job as
+written: transformer configuration, a processor's options and, recursively, the fingerprint of
+each branch it reads. A plain `from:` takes its upstream's fingerprint alone, a processor takes
+(alias, fingerprint) pairs because its query names them. `JobService` computes the whole DAG
+before it starts, since branches run concurrently and an upstream without `--checkpoint` computes
+no key. A non-source reader (`IStreamReaderFactory.IsSource`) contributes no connection: its route
+is a channel alias. Pass a new part of a branch's definition through the fingerprint, never through
+a runtime handoff between branches.
 
 Encryption (AES-GCM) does not buy confidentiality at rest — the key is on the same disk. It buys two
 properties of the **store as a whole**: an inert copy, and a purge made reliable by destroying the
@@ -98,7 +106,8 @@ row reader feeding a columnar writer — so the chain reaches Arrow at the write
 bridges back. Add that segment **only** when `materialise is not null`, so an ordinary run is
 unchanged.
 
-`[CI: CheckpointCipherTests, CheckpointKeyTests, CheckpointRoundTripTests]`
+`[CI: CheckpointCipherTests, CheckpointKeyTests, CheckpointRoundTripTests; CheckpointKeyIdentityTests
+for the caller of `Compute`]`
 `[local: validate_checkpoint.sh]`
 
 ## MCP server and agent

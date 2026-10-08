@@ -12,16 +12,18 @@ namespace DtPipe.Tests.Unit.Sessions;
 public class CheckpointKeyTests
 {
 	private static string Key(
+		string? component = "pg",
 		string? conn = "pg:Host=db;Database=app",
 		string? query = "SELECT * FROM orders",
 		IEnumerable<string>? transformers = null,
+		string? definition = "def",
 		double rate = 1.0,
 		int? seed = 42,
 		int limit = 0,
 		int batchSize = 32768,
 		long maxBytes = 0,
 		int segment = 0)
-		=> CheckpointKey.Compute(conn, query, transformers ?? ["mask:email"], rate, seed, limit, batchSize, maxBytes, segment);
+		=> CheckpointKey.Compute(component, conn, query, transformers ?? ["mask:email"], definition, rate, seed, limit, batchSize, maxBytes, segment);
 
 	[Fact]
 	public void The_Same_Definition_Gives_The_Same_Key()
@@ -35,6 +37,8 @@ public class CheckpointKeyTests
 	public static TheoryData<string, string> Variations() => new()
 	{
 		{ "the query",           Key(query: "SELECT * FROM customers") },
+		{ "the component",       Key(component: "mysql") },
+		{ "the definition",      Key(definition: "other") },
 		{ "the connection",      Key(conn: "pg:Host=other;Database=app") },
 		{ "a transformer",       Key(transformers: ["mask:phone"]) },
 		{ "transformer order",   Key(transformers: ["b", "a"]) },
@@ -48,9 +52,9 @@ public class CheckpointKeyTests
 	public void A_Password_Never_Enters_The_Key()
 	{
 		var withSecret = CheckpointKey.Compute(
-			"pg:Host=db;Username=app;Password=hunter2", "SELECT 1", null, 1.0, null, 0, 1, 0, 0);
+			"pg", "pg:Host=db;Username=app;Password=hunter2", "SELECT 1", null, null, 1.0, null, 0, 1, 0, 0);
 		var withOther = CheckpointKey.Compute(
-			"pg:Host=db;Username=app;Password=different", "SELECT 1", null, 1.0, null, 0, 1, 0, 0);
+			"pg", "pg:Host=db;Username=app;Password=different", "SELECT 1", null, null, 1.0, null, 0, 1, 0, 0);
 
 		withSecret.Should().Be(withOther,
 			"the connection is sanitised before hashing — a credential must not sit in a directory name");
@@ -59,8 +63,8 @@ public class CheckpointKeyTests
 	[Fact]
 	public void Adjacent_Parts_Cannot_Be_Confused_For_One_Another()
 	{
-		var a = CheckpointKey.Compute("ab", "c", null, 1.0, null, 0, 1, 0, 0);
-		var b = CheckpointKey.Compute("a", "bc", null, 1.0, null, 0, 1, 0, 0);
+		var a = CheckpointKey.Compute(null, "ab", "c", null, null, 1.0, null, 0, 1, 0, 0);
+		var b = CheckpointKey.Compute(null, "a", "bc", null, null, 1.0, null, 0, 1, 0, 0);
 
 		a.Should().NotBe(b, "parts are length-prefixed, so a boundary cannot be moved unnoticed");
 	}

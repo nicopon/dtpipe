@@ -225,6 +225,8 @@ public class LinearPipelineService
             State        = job.State,
             Checkpoint   = job.Checkpoint,
             FromCheckpoint = job.FromCheckpoint,
+            DefinitionFingerprint = ctx?.DefinitionFingerprint
+                ?? BranchFingerprint.Of(job, context, System.Array.Empty<(string, string)>(), namesInputs: false),
             ContractSave = job.ContractSave,
             FromContract = job.FromContract,
             Session      = job.Session
@@ -453,6 +455,7 @@ internal class StreamTransformerReaderAdapter : IStreamReaderFactory, IStreamPro
     public Type OptionsType => typeof(PipelineOptions);
     public bool RequiresQuery => false;
     public bool YieldsColumnarOutput => true;
+    public bool IsSource => false;
 
     public IStreamReader Create(OptionsRegistry registry) => new WrappedStreamReader(_transformer);
     public IEnumerable<Type> GetSupportedOptionTypes() => Enumerable.Empty<Type>();
