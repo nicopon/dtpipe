@@ -49,7 +49,7 @@ public sealed record Recognition(string? Match, string? Source, string? Sink);
 public sealed record RecognizeResponse(IReadOnlyDictionary<string, Recognition> Branches);
 
 /// <summary>A job saved into the library, with the message of its commit.</summary>
-public sealed record LibrarySave(string Yaml, JsonObject? Layout, string? Message);
+public sealed record LibrarySave(string Yaml, string? Message);
 
 /// <summary>
 /// A save's outcome. <see cref="Commit"/> is the last commit of the pipeline's job, the version a later

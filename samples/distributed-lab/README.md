@@ -308,8 +308,8 @@ sign a person in and out.
 | `GET /api/me`, `/api/info` | who is signed in and with which roles; whether the server runs in lab mode |
 | `GET /api/nodes`, `/api/bricks`, `/api/flow-matrix`, `/api/pipelines`, `/api/state` | what the pages draw |
 | `POST /api/bricks/{node}/{id}/preview` | a few rows, read by the node that owns the brick |
-| `GET /api/library` · `GET`/`PUT`/`DELETE /api/library/{id}` | pipelines; `PUT {yaml, layout, message}` commits what a check accepted: `dtpipe --dry-run 1` over one row per source brick sent by its node, then each sink brick's node checks its target (422 and nothing written otherwise) |
-| `GET /api/library/{id}/history`, `/at/{commit}` | commits; the job, layout and diff at one |
+| `GET /api/library` · `GET`/`PUT`/`DELETE /api/library/{id}` | pipelines; `PUT {yaml, message}` commits what a check accepted: `dtpipe --dry-run 1` over one row per source brick sent by its node, then each sink brick's node checks its target (422 and nothing written otherwise) |
+| `GET /api/library/{id}/history`, `/at/{commit}` | commits; the job and the diff at one |
 | `POST /api/library/{id}/distribute` | `{save?, message?}` → the automatic plan, saved as a commit on request |
 | `POST /api/library/{id}/deploy` | deploys the saved plan (409 if the job changed since) |
 | `POST /api/plan` | Lab view: `{pipelineId, yaml, cuts, placement}` → units, fragments, edges, errors |

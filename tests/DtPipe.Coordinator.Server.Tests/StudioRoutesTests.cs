@@ -102,7 +102,7 @@ public sealed class StudioRoutesTests : IDisposable
 
     private async Task<(HttpStatusCode Status, LibrarySaved? Saved, LibraryConflict? Conflict)> Save(string id, string yaml, string? ifMatch = null, bool create = false)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Put, CoordinatorApi.Library(id)) { Content = JsonContent.Create(new LibrarySave(yaml, null, "m")) };
+        using var request = new HttpRequestMessage(HttpMethod.Put, CoordinatorApi.Library(id)) { Content = JsonContent.Create(new LibrarySave(yaml, "m")) };
         if (ifMatch is not null) request.Headers.TryAddWithoutValidation("If-Match", $"\"{ifMatch}\"");
         if (create) request.Headers.TryAddWithoutValidation("If-None-Match", "*");
         using var response = await As(CoordinatorHost.Designer).SendAsync(request, Ct);
@@ -158,7 +158,7 @@ public sealed class StudioRoutesTests : IDisposable
 
     private Task<HttpResponseMessage> Put(HttpClient client, string id, string yaml)
     {
-        var request = new HttpRequestMessage(HttpMethod.Put, CoordinatorApi.Library(id)) { Content = JsonContent.Create(new LibrarySave(yaml, null, "m")) };
+        var request = new HttpRequestMessage(HttpMethod.Put, CoordinatorApi.Library(id)) { Content = JsonContent.Create(new LibrarySave(yaml, "m")) };
         return client.SendAsync(request, Ct);
     }
 

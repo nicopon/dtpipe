@@ -222,7 +222,27 @@ def library_pass(ctx):
     except Exception as e:
         failures += 1
         print(f"FAIL  library  {'a studio publishes':28} {e}")
+    try:
+        print(f"PASS  library  {'no layouts':28} {layouts_gone()}")
+    except Exception as e:
+        failures += 1
+        print(f"FAIL  library  {'no layouts':28} {e}")
     return failures
+
+
+def layouts_gone():
+    """No coordinator designer remains, so no pipeline of the library keeps a layout: the library drops
+    those it still tracked in one commit of its own, which its history keeps."""
+    repo = os.path.join(STATE, "library")
+    git = lambda *a: subprocess.run(["git", "-C", repo, *a], capture_output=True, text=True, check=True).stdout
+    tracked = git("ls-files", ":(glob)pipelines/*/layout.json").split()
+    if tracked:
+        raise RuntimeError(f"still tracked: {tracked}")
+    ever = git("log", "--all", "--format=%h", "--", ":(glob)pipelines/*/layout.json").split()
+    removed = [c for c in git("log", "--format=%s").splitlines() if c == "Remove the designer's layouts"]
+    if ever and len(removed) != 1:
+        raise RuntimeError(f"{len(ever)} commit(s) touched a layout, {len(removed)} removal commit(s)")
+    return f"none tracked; {len(ever)} commit(s) ever touched one, removed by {len(removed)} commit of their own"
 
 
 def studio_publishes(deployed):
@@ -233,7 +253,7 @@ def studio_publishes(deployed):
     token = studio_tokens(URL, "labdesigner")["access_token"]
 
     def publish(pid, yaml, **headers):
-        status, body, _ = bearer(token, f"/api/library/{pid}", {"yaml": yaml, "layout": None, "message": "smoke: studio"}, "PUT", headers=headers)
+        status, body, _ = bearer(token, f"/api/library/{pid}", {"yaml": yaml, "message": "smoke: studio"}, "PUT", headers=headers)
         return status, json.loads(body or b"null")
 
     pid = "smoke-studio-publish"
@@ -584,7 +604,7 @@ def rights_pass():
         reader = studio_tokens(URL, "labreader")["access_token"]
         me = bearer(designer, "/api/me")
         me = (me[0], json.loads(me[1]) if me[0] == 200 else None)
-        save = {"yaml": "a:\n  input: x\n", "layout": None, "message": "smoke: refused"}
+        save = {"yaml": "a:\n  input: x\n", "message": "smoke: refused"}
         expected = {
             "designer bearer GET /api/me": ((me[0], (me[1] or {}).get("roles")), (200, ["designer", "reader"])),
             "reader bearer PUT /api/library": (bearer(reader, "/api/library/smoke-refused", save, "PUT")[0], 403),
@@ -779,7 +799,7 @@ def bricks_pass():
         names = sorted(n for n in os.listdir(LIBRARY_SEED) if n.endswith(".yaml"))
         for name in names:
             pid = "smoke-seed-" + name[:-len(".yaml")]
-            status, body, _ = bearer(token, f"/api/library/{pid}", {"yaml": open(os.path.join(LIBRARY_SEED, name)).read(), "layout": None,
+            status, body, _ = bearer(token, f"/api/library/{pid}", {"yaml": open(os.path.join(LIBRARY_SEED, name)).read(),
                                                                    "message": "smoke: a seed as written"}, "PUT")
             try:
                 if status != 200:
@@ -799,7 +819,7 @@ def bricks_pass():
             raise RuntimeError("library-seed/revenue-by-country.yaml no longer loads its table this way")
         token = studio_tokens(URL, "labdesigner")["access_token"]
         pid = "smoke-refused-probe"
-        status, body, _ = bearer(token, f"/api/library/{pid}", {"yaml": wrong, "layout": None, "message": "smoke: refused"}, "PUT")
+        status, body, _ = bearer(token, f"/api/library/{pid}", {"yaml": wrong, "message": "smoke: refused"}, "PUT")
         answer = json.loads(body or b"null") or {}
         if status != 422 or "node-4/customers-mirror" not in (answer.get("report") or ""):
             raise RuntimeError(f"node-4 should refuse the save: {status} {body[:400]!r}")

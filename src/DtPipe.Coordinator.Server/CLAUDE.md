@@ -91,6 +91,9 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   as the pages do. The answer says when the saved plan no longer matches (`redistribute`) and when a
   deployment still runs another version (`deployed`). `[local: StudioRoutesTests, the lab's smoke.py
   library — a studio publishes]`
+- **The library keeps a job and its plan, nothing a designer drew.** `pipelines/<id>/` holds
+  `pipeline.yaml` and `distributed/`; a library that still tracks a `layout.json` drops them all in
+  one commit when it first opens. `[local: the lab's smoke.py library — no layouts]`
 - **A new state directory starts from the seeds, or empty.** `Coordinator:LibrarySeed` (one
   `.yaml` per pipeline) and `Coordinator:RightsSeed`; with neither, the library has no pipeline
   and the rights no identity and an empty matrix: nobody may send anything until an administrator

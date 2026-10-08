@@ -250,7 +250,7 @@ public sealed class CoordinatorLink : IDisposable
     }
 
     /// <summary>
-    /// Saves <paramref name="yaml"/> into the coordinator's library as <paramref name="id"/>, with no layout:
+    /// Saves <paramref name="yaml"/> into the coordinator's library as <paramref name="id"/>:
     /// only while absent when <paramref name="ifMatch"/> is null, else only over that commit of its job.
     /// Returns the outcome, the conflict (412) with the commit in place, or the refusal (422) of the
     /// coordinator's check with its report: nothing was saved then.
@@ -258,7 +258,7 @@ public sealed class CoordinatorLink : IDisposable
     public async Task<(LibrarySaved? Saved, LibraryConflict? Conflict, LibraryRefused? Refused)> PublishAsync(string id, string yaml, string? message, string? ifMatch, CancellationToken ct)
     {
         if (!CoordinatorApi.IsPipelineId(id)) throw new CoordinatorLinkException($"'{id}' is not a pipeline id: lowercase letters, digits and '-'.");
-        var body = JsonSerializer.SerializeToUtf8Bytes(new LibrarySave(yaml, null, message), JsonSerializerOptions.Web);
+        var body = JsonSerializer.SerializeToUtf8Bytes(new LibrarySave(yaml, message), JsonSerializerOptions.Web);
         var headers = ifMatch is null
             ? new Dictionary<string, string> { ["If-None-Match"] = "*" }
             : new Dictionary<string, string> { ["If-Match"] = $"\"{ifMatch}\"" };

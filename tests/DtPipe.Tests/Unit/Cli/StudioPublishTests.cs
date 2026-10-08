@@ -81,7 +81,7 @@ public sealed class StudioPublishTests : IAsyncLifetime
         Assert.DoesNotContain(Witness, _fakes.LastSaveBody);
         var body = JsonDocument.Parse(_fakes.LastSaveBody!).RootElement;
         Assert.Equal(File.ReadAllText(Path.Combine(_dir, "orders.yaml")), body.GetProperty("yaml").GetString());
-        Assert.Equal(JsonValueKind.Null, body.GetProperty("layout").ValueKind);
+        Assert.False(body.TryGetProperty("layout", out _));
     }
 
     [Fact]

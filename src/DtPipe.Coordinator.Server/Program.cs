@@ -233,7 +233,7 @@ designer.MapPut(CoordinatorApi.LibraryRoute, async (string id, LibrarySave reque
     var expected = http.Headers.IfMatch.ToString().Trim() is { Length: > 0 } tag ? (tag.StartsWith("W/") ? tag[2..] : tag).Trim('"') : null;
     var precondition = absent || expected is not null ? new SavePrecondition(absent, expected) : null;
     SaveOutcome saved;
-    try { saved = await library.SaveAsync(id, request.Yaml, request.Layout, request.Message ?? "", ct, precondition); }
+    try { saved = await library.SaveAsync(id, request.Yaml, request.Message ?? "", ct, precondition); }
     catch (PreconditionFailedException ex)
     {
         return Results.Json(new LibraryConflict(ex.Message, ex.Commit), statusCode: StatusCodes.Status412PreconditionFailed);
@@ -253,8 +253,8 @@ designer.MapDelete("/library/{id}", async (string id, PipelineLibrary library, E
 api.MapGet("/library/{id}/history", async (string id, PipelineLibrary library, CancellationToken ct) => await library.HistoryAsync(id, ct));
 api.MapGet("/library/{id}/at/{commit}", async (string id, string commit, PipelineLibrary library, CancellationToken ct) =>
 {
-    var (yaml, layout, diff) = await library.AtAsync(id, commit, ct);
-    return new { yaml, layout, diff };
+    var (yaml, diff) = await library.AtAsync(id, commit, ct);
+    return new { yaml, diff };
 });
 
 // Distribution: the library's job placed automatically, previewed or saved as the pipeline's plan.

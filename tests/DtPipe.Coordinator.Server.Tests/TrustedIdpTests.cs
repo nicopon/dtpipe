@@ -117,7 +117,7 @@ public sealed class TrustedIdpTests : IDisposable
     public async Task A_Bearer_Changing_Something_Carries_The_Csrf_Header()
     {
         using var response = await _host.Bearer(CoordinatorHost.Person(CoordinatorHost.Designer))
-            .PutAsJsonAsync("/api/library/some-pipeline", new LibrarySave("a: {input: x}\n", null, null), Ct);
+            .PutAsJsonAsync("/api/library/some-pipeline", new LibrarySave("a: {input: x}\n", null), Ct);
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 

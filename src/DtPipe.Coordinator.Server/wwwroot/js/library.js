@@ -124,7 +124,7 @@ async function onClick(e) {
     } else if (t.dataset.restore) {
       const id = t.dataset.id;
       const at = await api(`/api/library/${encodeURIComponent(id)}/at/${t.dataset.restore}`);
-      await api(`/api/library/${encodeURIComponent(id)}`, { yaml: at.yaml, layout: at.layout, message: `Restore ${t.dataset.restore.slice(0, 8)}` }, "PUT");
+      await api(`/api/library/${encodeURIComponent(id)}`, { yaml: at.yaml, message: `Restore ${t.dataset.restore.slice(0, 8)}` }, "PUT");
       history = await api(`/api/library/${encodeURIComponent(id)}/history`);
       shown = null;
       toast(`${id} restored to ${t.dataset.restore.slice(0, 8)}.`, "info");

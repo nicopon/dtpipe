@@ -18,7 +18,7 @@ public sealed record LibraryEntry(
     bool Distributed, bool PlanCurrent);
 
 /// <summary><see cref="Commit"/> is the last commit of the job file, the version a later <c>If-Match</c> names.</summary>
-public sealed record LibraryDocument(string Id, string Yaml, JsonObject? Layout, SavedPlan? Plan, bool PlanCurrent, string? Commit);
+public sealed record LibraryDocument(string Id, string Yaml, SavedPlan? Plan, bool PlanCurrent, string? Commit);
 
 public sealed record LibraryCommit(string Hash, DateTimeOffset Date, string Message);
 
@@ -44,8 +44,8 @@ public sealed class PreconditionFailedException(string message, string? commit) 
 /// <summary>
 /// The pipelines people keep, in a git repository of their own under <c>library/</c> in the state directory, driven
 /// through the <c>git</c> command line. One directory per pipeline: <c>pipeline.yaml</c> (the
-/// logical job, runnable whole), <c>layout.json</c> (where the designer drew each card) and
-/// <c>distributed/</c> (the last plan saved, with each fragment's job). Every save is a commit.
+/// logical job, runnable whole) and <c>distributed/</c> (the last plan saved, with each fragment's
+/// job). Every save is a commit.
 /// The repository starts from the job files under <c>library-seed/</c>.
 /// </summary>
 public sealed partial class PipelineLibrary
@@ -92,18 +92,16 @@ public sealed partial class PipelineLibrary
         var yamlPath = Path.Combine(dir, "pipeline.yaml");
         if (!File.Exists(yamlPath)) return null;
         var yaml = await File.ReadAllTextAsync(yamlPath, ct);
-        var layoutPath = Path.Combine(dir, "layout.json");
-        var layout = File.Exists(layoutPath) ? JsonNode.Parse(await File.ReadAllTextAsync(layoutPath, ct)) as JsonObject : null;
         var plan = ReadPlan(id);
-        return new LibraryDocument(id, yaml, layout, plan, plan is not null && plan.PipelineSha == Sha(yaml), await JobCommitAsync(id, ct));
+        return new LibraryDocument(id, yaml, plan, plan is not null && plan.PipelineSha == Sha(yaml), await JobCommitAsync(id, ct));
     }, ct);
 
     /// <summary>
-    /// Writes the job (and its layout, when one is sent; the one in place stays otherwise) and commits
+    /// Writes the job and commits
     /// it. A <paramref name="precondition"/> is checked under the library's lock, so no other save
     /// slips between the check and the write.
     /// </summary>
-    public async Task<SaveOutcome> SaveAsync(string id, string yaml, JsonObject? layout, string message, CancellationToken ct,
+    public async Task<SaveOutcome> SaveAsync(string id, string yaml, string message, CancellationToken ct,
         SavePrecondition? precondition = null) => await Locked(async () =>
     {
         var dir = PipelineDir(id);
@@ -121,8 +119,6 @@ public sealed partial class PipelineLibrary
         }
         Directory.CreateDirectory(dir);
         await File.WriteAllTextAsync(yamlPath, yaml, ct);
-        var layoutPath = Path.Combine(dir, "layout.json");
-        if (layout is not null) await File.WriteAllTextAsync(layoutPath, layout.ToJsonString(Json), ct);
         await CommitAsync($"pipelines/{id}", Message(message, $"Save {id}"), ct);
         var plan = ReadPlan(id);
         return new SaveOutcome(await JobCommitAsync(id, ct), before != yaml,
@@ -158,14 +154,13 @@ public sealed partial class PipelineLibrary
     public async Task<IReadOnlyList<LibraryCommit>> HistoryAsync(string id, CancellationToken ct) =>
         await Locked(() => HistoryCoreAsync(id, 100, ct), ct);
 
-    /// <summary>The job, its layout and the change a commit made to the pipeline's directory.</summary>
-    public async Task<(string Yaml, JsonObject? Layout, string Diff)> AtAsync(string id, string commit, CancellationToken ct) => await Locked(async () =>
+    /// <summary>The job and the change a commit made to the pipeline's directory.</summary>
+    public async Task<(string Yaml, string Diff)> AtAsync(string id, string commit, CancellationToken ct) => await Locked(async () =>
     {
         if (!CommitPattern().IsMatch(commit)) throw new ConflictException($"'{commit}' is not a commit.");
         var yaml = await GitAsync(["show", $"{commit}:pipelines/{id}/pipeline.yaml"], ct);
-        var layout = await TryGitAsync(["show", $"{commit}:pipelines/{id}/layout.json"], ct);
         var diff = await GitAsync(["show", "--format=", commit, "--", $"pipelines/{id}"], ct);
-        return (yaml, layout is null ? null : JsonNode.Parse(layout) as JsonObject, diff);
+        return (yaml, diff);
     }, ct);
 
     private SavedPlan? ReadPlan(string id)
@@ -234,7 +229,21 @@ public sealed partial class PipelineLibrary
             // An empty library has nothing to commit: its first save is its first commit.
             if (seeds.Length > 0) await CommitAsync("pipelines", $"Start the library from {Path.GetFileName(_seedDir)}/", ct);
         }
+        await RemoveLayoutsAsync(ct);
         _ready = true;
+    }
+
+    /// <summary>
+    /// A layout.json is where a coordinator's designer drew each card; no designer remains, so a library
+    /// that still tracks any drops them all in one commit. Idempotent: with none tracked, it commits nothing.
+    /// </summary>
+    private async Task RemoveLayoutsAsync(CancellationToken ct)
+    {
+        var tracked = (await TryGitAsync(["ls-files", "-z", "--", ":(glob)pipelines/*/layout.json"], ct) ?? "")
+            .Split('\0', StringSplitOptions.RemoveEmptyEntries);
+        if (tracked.Length == 0) return;
+        await GitAsync(["rm", "-q", "--", .. tracked], ct);
+        await GitAsync(["commit", "-q", "-m", "Remove the designer's layouts"], ct);
     }
 
     private string PipelineDir(string id)
