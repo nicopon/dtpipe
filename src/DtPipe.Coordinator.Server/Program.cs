@@ -65,6 +65,22 @@ app.Use(async (context, next) =>
     }
 });
 
+// A 401 from /api names the document a client reads to learn how to sign in (RFC 9728).
+app.Use((context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments(CoordinatorApi.Prefix))
+        context.Response.OnStarting(() =>
+        {
+            if (context.Response.StatusCode != StatusCodes.Status401Unauthorized) return Task.CompletedTask;
+            var metadata = $"resource_metadata=\"{OriginOf(context)}{CoordinatorApi.Metadata}\"";
+            var challenge = context.Response.Headers.WWWAuthenticate.ToString();
+            context.Response.Headers.WWWAuthenticate = challenge.StartsWith("Bearer ", StringComparison.Ordinal)
+                ? $"{challenge}, {metadata}"
+                : $"Bearer {metadata}";
+            return Task.CompletedTask;
+        });
+    return next(context);
+});
 app.UseAuthentication();
 // The Lab view's pages exist only in lab mode, like the endpoints they call.
 if (!server.LabMode)
@@ -108,6 +124,9 @@ app.MapHub<NodeChannelHub>(NodeChannel.Path).RequireAuthorization();
 
 // Anonymous: whether the server answers at all, for a container's health check.
 app.MapGet("/healthz", () => Results.Ok());
+// Anonymous: where a person signs in for dtpipe studio, and the contract this server speaks.
+app.MapGet(CoordinatorApi.Metadata, (HttpContext context, CoordinatorServerOptions options) =>
+    new ResourceMetadata(OriginOf(context), [options.Authority], ["header"], CoordinatorApi.Contract, options.StudioClientId));
 
 // A person signs in and out through the provider; the pages send them here.
 app.MapGet("/account/login", (string? returnUrl) => Results.Challenge(
@@ -119,9 +138,9 @@ app.MapGet("/account/denied", () => AccessPage(StatusCodes.Status200OK,
     "That account holds no role on this coordinator, so it has been signed out, here and at the identity provider.",
     ("/", "Sign in with another account")));
 
-// /api serves the pages, by the session cookie, with three cumulative roles: a reader sees
-// everything, a designer also changes pipelines, deploys and runs them, an admin also changes the
-// rights and, in lab mode, uses the bench's tools. A request that changes something carries the CSRF
+// /api serves the pages by the session cookie, and dtpipe studio by a person's bearer token, with
+// three cumulative roles: a reader sees everything, a designer also changes pipelines, deploys and
+// runs them, an admin also changes the rights and, in lab mode, uses the bench's tools. A request that changes something carries the CSRF
 // header. TransportR's own routes under /api (client, stream) are mapped by MapDataHub, not here.
 var account = app.MapGroup("/api").RequireAuthorization(TrustedIdp.SignedIn).AddEndpointFilter(RequireCsrfHeader);
 account.MapGet(CoordinatorApi.MeRoute, (HttpContext context) => new CoordinatorMe(
@@ -362,6 +381,8 @@ api.MapGet("/events", async (HttpContext context, EventBus bus, NodeInventory in
 app.Run();
 
 static string? EmailOf(HttpContext context) => context.User.FindFirst("email")?.Value;
+
+static string OriginOf(HttpContext context) => $"{context.Request.Scheme}://{context.Request.Host}";
 
 // A refused page navigation: a sentence and its ways out, readable without the pages' scripts.
 // The message is HTML already encoded.

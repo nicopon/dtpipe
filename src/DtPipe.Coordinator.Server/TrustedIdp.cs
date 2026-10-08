@@ -15,48 +15,64 @@ namespace DtPipe.Coordinator.Server;
 
 /// <summary>
 /// The coordinator trusts an external OpenID Connect provider to say <b>who</b> a caller is, and
-/// decides <b>what</b> it may do itself. Two kinds of caller, two schemes:
+/// decides <b>what</b> it may do itself. Two kinds of caller, told apart by the token's claims, never by
+/// what a caller says of itself:
 /// <list type="bullet">
 /// <item>a service (a node, the runner) presents a bearer token the provider signed for this
-///   coordinator's audience; its group comes from <see cref="RightsStore"/>, never from the token.
-///   The default policy, which the node channel and TransportR's hub and streams use, accepts
-///   only this scheme;</item>
+///   coordinator's audience through client credentials, so its subject is its client
+///   (<c>sub == client_id</c>); its group comes from <see cref="RightsStore"/>, never from the token.
+///   The default policy, which the node channel and TransportR's hub and streams use, accepts only
+///   this scheme (<see cref="ServiceScheme"/>);</item>
 /// <item>a person signs in through the provider (authorization code with PKCE) and holds a session
-///   cookie; their roles come from the server's configuration (<see cref="CoordinatorRoles"/>), never
-///   from the token. <c>/api</c> and the pages accept only this scheme.</item>
+///   cookie, or presents a bearer token <c>dtpipe studio</c> obtained for them through
+///   <c>Coordinator:Studio:ClientId</c> (<see cref="PersonScheme"/>: that client, and a subject that is
+///   not it). Their roles come from the server's configuration (<see cref="CoordinatorRoles"/>), never
+///   from the token. <c>/api</c> accepts either (<see cref="ApiScheme"/>); the pages only the cookie.</item>
 /// </list>
+/// Each scheme refuses the other kind of token when it validates it, so a person's token never
+/// reaches the data plane, whichever endpoint reads it, and a service's never reaches <c>/api</c>.
 /// </summary>
 public static class TrustedIdp
 {
     public const string CookieScheme = CookieAuthenticationDefaults.AuthenticationScheme;
     public const string OidcScheme = OpenIdConnectDefaults.AuthenticationScheme;
+    public const string ServiceScheme = JwtBearerDefaults.AuthenticationScheme;
+    public const string PersonScheme = "PersonBearer";
+
+    /// <summary>What <c>/api</c> authenticates with: a person's bearer token when the request carries one, else the cookie.</summary>
+    public const string ApiScheme = "Api";
 
     /// <summary>
-    /// The header a cookie-authenticated request that changes something must carry. A page of
+    /// The header a request to <c>/api</c> that changes something must carry, a bearer's too. A page of
     /// another site cannot set it without a CORS preflight, which this server never answers, so it
     /// is what stops a forged request riding the session cookie.
     /// </summary>
-    public const string CsrfHeader = "X-Dtpipe-Csrf";
+    public const string CsrfHeader = DtPipe.Jobs.Coordinator.CoordinatorApi.CsrfHeader;
 
     public static void AddTrustedIdp(this IServiceCollection services, CoordinatorServerOptions server)
     {
         var https = server.Authority.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+        void Trust(JwtBearerOptions o)
+        {
+            o.Authority = server.Authority;
+            o.Audience = server.Audience;
+            // A test provider on plain HTTP; a real deployment points Authority at an HTTPS issuer.
+            o.RequireHttpsMetadata = https;
+            o.MapInboundClaims = false;
+            o.TokenValidationParameters = new TokenValidationParameters { NameClaimType = "sub" };
+        }
+
         services.AddAuthentication(o =>
             {
                 o.DefaultScheme = CookieScheme;
                 o.DefaultChallengeScheme = OidcScheme;
             })
-            .AddJwtBearer(o =>
+            .AddJwtBearer(ServiceScheme, o =>
             {
-                o.Authority = server.Authority;
-                o.Audience = server.Audience;
-                // A test provider on plain HTTP; a real deployment points Authority at an HTTPS issuer.
-                o.RequireHttpsMetadata = https;
-                o.MapInboundClaims = false;
-                o.TokenValidationParameters = new TokenValidationParameters { NameClaimType = "sub" };
-                // The node channel is SignalR, which may carry its token as the access_token query.
+                Trust(o);
                 o.Events = new JwtBearerEvents
                 {
+                    // The node channel is SignalR, which may carry its token as the access_token query.
                     OnMessageReceived = context =>
                     {
                         if (context.Request.Path.StartsWithSegments(DtPipe.Coordinator.Contracts.NodeChannel.Path)
@@ -64,8 +80,29 @@ public static class TrustedIdp
                             context.Token = token;
                         return Task.CompletedTask;
                     },
+                    OnTokenValidated = context =>
+                    {
+                        if (!IsService(context.Principal)) context.Fail("Only a service's token reaches the data plane.");
+                        return Task.CompletedTask;
+                    },
                 };
             })
+            .AddJwtBearer(PersonScheme, o =>
+            {
+                Trust(o);
+                o.TokenValidationParameters.NameClaimType = "name";
+                o.Events = new JwtBearerEvents
+                {
+                    OnTokenValidated = context =>
+                    {
+                        if (!IsStudioPerson(context.Principal, server.StudioClientId))
+                            context.Fail("Only a person's token obtained through the studio's client reaches /api.");
+                        return Task.CompletedTask;
+                    },
+                };
+            })
+            .AddPolicyScheme(ApiScheme, ApiScheme, o => o.ForwardDefaultSelector = context =>
+                context.Request.Headers.Authorization.ToString().StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? PersonScheme : CookieScheme)
             .AddCookie(CookieScheme, o =>
             {
                 o.Cookie.Name = "dtpipe-coordinator";
@@ -119,10 +156,10 @@ public static class TrustedIdp
         {
             // The node channel and TransportR's endpoints map RequireAuthorization() with no policy:
             // they accept a service's bearer token and nothing else.
-            o.DefaultPolicy = new AuthorizationPolicyBuilder(JwtBearerDefaults.AuthenticationScheme).RequireAuthenticatedUser().Build();
+            o.DefaultPolicy = new AuthorizationPolicyBuilder(ServiceScheme).RequireAuthenticatedUser().Build();
             foreach (var role in CoordinatorRoles.All)
-                o.AddPolicy(role, p => p.AddAuthenticationSchemes(CookieScheme).RequireRole(role));
-            o.AddPolicy(SignedIn, p => p.AddAuthenticationSchemes(CookieScheme).RequireAuthenticatedUser());
+                o.AddPolicy(role, p => p.AddAuthenticationSchemes(ApiScheme).RequireRole(role));
+            o.AddPolicy(SignedIn, p => p.AddAuthenticationSchemes(ApiScheme).RequireAuthenticatedUser());
         });
         services.AddSingleton<IClaimsTransformation, CoordinatorRoles>();
         // The session cookie is encrypted with keys kept in the state directory, so a restart does
@@ -138,6 +175,19 @@ public static class TrustedIdp
         HttpMethods.IsGet(request.Method)
         && (request.Path == "/" || request.Path == "/index.html" || request.Path.StartsWithSegments("/lab")
             || request.Path.StartsWithSegments("/account"));
+
+    /// <summary>
+    /// A client-credentials token: no resource owner, so its subject is its client (RFC 9068). A
+    /// provider whose service tokens name another subject has its services refused here: fail-closed.
+    /// </summary>
+    public static bool IsService(ClaimsPrincipal? token) =>
+        token?.FindFirst("sub")?.Value is { Length: > 0 } subject && subject == token.FindFirst("client_id")?.Value;
+
+    /// <summary>A person's token obtained through <paramref name="studioClientId"/>: that client, and a subject that is not it.</summary>
+    public static bool IsStudioPerson(ClaimsPrincipal? token, string? studioClientId) =>
+        !string.IsNullOrEmpty(studioClientId)
+        && token?.FindFirst("client_id")?.Value == studioClientId
+        && token.FindFirst("sub")?.Value is { Length: > 0 } subject && subject != studioClientId;
 
     /// <summary>The <c>sub</c> of an authenticated caller: the client id the provider issued its token to.</summary>
     public static string? SubjectOf(ClaimsPrincipal? user) => user?.FindFirst("sub")?.Value;
@@ -163,7 +213,7 @@ public sealed class CoordinatorRoles(IConfiguration configuration) : IClaimsTran
     public Task<ClaimsPrincipal> TransformAsync(ClaimsPrincipal principal)
     {
         // A principal already transformed carries our roles. A service's token carries no claim
-        // naming a person, so it gains none; the policies that grant roles accept the cookie only.
+        // naming a person, so it gains none; the policies that grant roles accept a person only.
         if (principal.Identity is not ClaimsIdentity { IsAuthenticated: true } identity
             || identity.HasClaim(c => c.Type == identity.RoleClaimType && c.Issuer == Issuer))
             return Task.FromResult(principal);

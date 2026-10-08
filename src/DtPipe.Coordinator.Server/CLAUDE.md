@@ -25,20 +25,28 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   in the query so the Lax correlation cookies ride the redirect) into the `dtpipe-coordinator`
   cookie. `CoordinatorRoles` (an `IClaimsTransformation`) reads `Coordinator:Roles:Admin|Designer|
   Reader` (lists of the claim `Coordinator:Roles:Claim`, `email` by default) on every request:
-  cumulative roles, none for anyone unlisted (403, never reader by default). `/api` and the pages
-  accept the cookie only; the default policy, which the node channel and TransportR's hub and
-  streams use, accepts a service's bearer token only, so a person's session never reaches the
-  data plane and a service's token never reaches `/api`. Only a page navigation
-  (`TrustedIdp.IsPageNavigation`) is sent to the provider; any other request is told 401.
+  cumulative roles, none for anyone unlisted (403, never reader by default). The pages accept the
+  cookie only. Only a page navigation (`TrustedIdp.IsPageNavigation`) is sent to the provider; any
+  other request is told 401, with `WWW-Authenticate: Bearer resource_metadata="…"` on `/api`.
   `[local: the lab's smoke.py rights — roles and sessions]`
+- **A person and a service are told apart by the token's claims.** A service's token comes from
+  client credentials, so its subject is its client (`sub == client_id`, RFC 9068): the default
+  policy (the node channel, TransportR's hub and streams) accepts that and nothing else. `/api`
+  accepts the cookie or a person's bearer token obtained through `Coordinator:Studio:ClientId`
+  (`dtpipe studio`'s public client): that `client_id`, a `sub` that is not it. Each scheme fails the
+  other kind of token in `OnTokenValidated`, so the refusal holds whatever endpoint reads it, and an
+  empty `Studio:ClientId` lets no bearer reach `/api`. **Limit, fail-closed**: a provider whose
+  service tokens carry a `sub` other than their `client_id` has its services refused here.
+  `[local: DtPipe.Coordinator.Server.Tests TrustedIdpTests, the lab's smoke.py rights]`
 - **A refused page gives a way out.** A person with no role who opens a page is signed out here
   and at the provider and lands on `/account/denied`: keeping the provider's session would sign
   the same person in again on the next try. A person who lacks only the admin role gets a 403 page
   linking back to `/` and to `/account/logout`. `AccessPage` writes both; a message it shows is
   HTML-encoded first. `[local: the lab's smoke.py rights — roles and sessions]`
 - **A request that changes something carries `X-Dtpipe-Csrf`** (`RequireCsrfHeader`, on every
-  `/api` group): another site cannot set it without a CORS preflight this server never answers.
-  The pages' `api()` helpers send it. Never add a cookie-authenticated route outside those groups.
+  `/api` group), a bearer's too: another site cannot set it without a CORS preflight this server
+  never answers. The pages' `api()` helpers send it. Never add a cookie-authenticated route outside
+  those groups.
   `[local: the lab's smoke.py rights]`
 - **Every rights change names its author** (`AuditEntry.By`, the signed-in email). The session
   cookie's keys live in `keys/` in the state directory, so a restart signs nobody out.
@@ -128,6 +136,7 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   bricks, sandbox]`
 - The pages are served from the `wwwroot` published beside the binary (`dotnet publish`): `index.html`
   + `js/` (the coordinator's views, ES modules, no build) and `lab/` (the Lab view, lab mode only).
-  `window.lab.store` exists for the lab's `tools/ui_check.py`. `/healthz` is the only anonymous
-  route. Verify a change with the lab's `./lab.sh smoke`, and a page change with
+  `window.lab.store` exists for the lab's `tools/ui_check.py`. `/healthz` and the protected resource
+  metadata (`CoordinatorApi.Metadata`, RFC 9728: the provider, the contract, the studio's client) are
+  the only anonymous routes. Verify a change with the lab's `./lab.sh smoke`, and a page change with
   `./lab.sh ui` too.

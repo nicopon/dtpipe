@@ -20,6 +20,13 @@ public sealed class CoordinatorServerOptions
     public required string UiClientId { get; init; }
     public required string UiClientSecret { get; init; }
 
+    /// <summary>
+    /// The provider's client <c>dtpipe studio</c> signs people in with (<c>Coordinator:Studio:ClientId</c>,
+    /// a public authorization-code client): a person's bearer token obtained through it reaches <c>/api</c>.
+    /// None when unset, and then no bearer token reaches <c>/api</c>.
+    /// </summary>
+    public string? StudioClientId { get; init; }
+
     /// <summary>Pipelines a new library starts with, one <c>.yaml</c> each; none when unset.</summary>
     public string? LibrarySeed { get; init; }
 
@@ -53,6 +60,7 @@ public sealed class CoordinatorServerOptions
             Audience = section["Audience"] ?? "dtpipe-coordinator",
             UiClientId = section["Ui:ClientId"] ?? "coordinator-ui",
             UiClientSecret = section["Ui:ClientSecret"] ?? throw new InvalidOperationException("Coordinator:Ui:ClientSecret is required: the secret of the pages' client at the provider."),
+            StudioClientId = section["Studio:ClientId"] is { Length: > 0 } studio ? studio : null,
             LibrarySeed = PathOf("LibrarySeed"),
             RightsSeed = PathOf("RightsSeed"),
             IdentityLabelClaims = section.GetSection("Identity:LabelClaims").Get<string[]>() ?? [],
