@@ -45,7 +45,11 @@ function render() {
 async function signIn() {
   try {
     const { url } = await api("/api/coordinator/login", {});
-    if (!window.open(url, "_blank", "noopener")) status("The browser blocked the sign-in tab: allow pop-ups for this page.", "bad");
+    // "noopener" would make window.open return null whether or not the tab opened: the opener link is
+    // cut by hand instead, before the tab leaves this origin.
+    const tab = window.open("about:blank", "_blank");
+    if (tab) { tab.opener = null; tab.location.href = url; }
+    else status("The browser blocked the sign-in tab: allow pop-ups for this page.", "bad");
     await refreshCoordinator();
     poll();
   } catch (e) {
