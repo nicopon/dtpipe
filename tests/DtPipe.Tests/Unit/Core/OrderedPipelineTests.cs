@@ -297,6 +297,13 @@ public class OrderedPipelineTests
 	}
 
 	[Fact]
+	public void StreamTransformerReaderAdapter_IsNotASource()
+	{
+		new StreamTransformerReaderAdapter(Mock.Of<IStreamTransformer>()).IsSource.Should().BeFalse(
+			"a processor reads what the branches upstream produced, so --dry-run N does not bound it again");
+	}
+
+	[Fact]
 	public async Task StreamTransformerReaderAdapter_ReadBatchesAsync_ShouldConvertColumnarToRows()
 	{
 		// Arrange

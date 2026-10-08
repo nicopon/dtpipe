@@ -154,6 +154,28 @@ public sealed class SampleModeDagTests : IDisposable
 	}
 
 	[Fact]
+	public async Task A_One_To_Many_Expansion_Arrives_Whole_At_The_Next_Branch()
+	{
+		const string job = """
+			a:
+			  input: generate:100
+			s:
+			  from: a
+			  provider-options:
+			    sql:
+			      query: SELECT a.* FROM a, range(3)
+			c:
+			  from: s
+			  output: csv:out.csv
+			""";
+
+		var report = await SampleAsync(job, rows: 5);
+
+		Branch(report, "s").GetProperty("rowsDelivered").GetInt64().Should().Be(15, "the bound is the source's, applied once");
+		Seen(Branch(report, "c"))[0].Should().Be(15, "c reads what s delivered, not five of it");
+	}
+
+	[Fact]
 	public void A_Reader_Fed_By_Another_Stage_Is_Not_A_Source()
 	{
 		new CheckpointReaderFactory("abc", null).IsSource.Should().BeFalse(

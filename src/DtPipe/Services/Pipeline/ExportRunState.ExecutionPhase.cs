@@ -293,7 +293,7 @@ internal sealed partial class ExportRunState
                 if (!NeutralisesWriter) await Writer.CompleteAsync(retryCt);
                 SampleResult = SampleTap!.Build(
                     Progress.GetMetrics().ReadCount,
-                    (EffectiveWriter as ISampleModeSink)?.RowsWritten ?? 0);
+                    (EffectiveWriter as ISampleModeSink)?.RowsWritten ?? Progress.GetMetrics().WriteCount);
                 Progress.Complete();
                 return;
             }
