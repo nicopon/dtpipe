@@ -28,12 +28,18 @@ none. One node per process; a second `AddDtPipeNode` throws.
   (a command line as a job) only on a host that runs any fragment; any other host says it is no
   runner. An alias names a file in the request's own directory, so it is a plain word.
   `[local: Hosting.Tests DelegatedJobsTests; the lab's smoke.py bricks, ui_check.py]`
-- **A node reads its bricks for a designer's check, never more.** `BrickHost.SampleAsync` reads a
-  source brick it announced, with `output: arrow:-` and `--limit`, the bytes its fragment would
-  send; a real bounded read like a preview, so `--dry-run`'s source-side guarantees do not apply.
+- **A node reads its bricks for a designer's check or a studio's sample, never more.**
+  `BrickHost.SampleAsync` reads a source brick it announced, with `output: arrow:-` and `--limit`,
+  the bytes its fragment would send; a real bounded read like a preview, so `--dry-run`'s
+  source-side guarantees do not apply. It refuses by name a sample over `MaxSampleBytes` before
+  sending, so an answer stays under the coordinator's channel message limit.
   `CheckSinkAsync` runs `dtpipe contract check` on a sink brick fed from `arrow:-`, which inspects
   the target and writes nothing. Checking a design is the product's, so neither is a registered request.
   `[local: the lab's smoke.py bricks — a designer's check]`
+- **A node announces its dtpipe's version**, what `dtpipe --version` says once at start
+  (`DtPipeCommand.VersionAsync`), or none when the binary does not answer: a version is shown beside
+  a studio's, never a reason to stop the host. `[local: Hosting.Tests DtPipeVersionTests; the lab's
+  smoke.py bricks — versions]`
 - **`BrickRules` (`DtPipe.Coordinator.Contracts`) over `JobYaml` (`DtPipe.Jobs`) is the one
   reading of a branch**, shared with the coordinator, so the designer never calls something a brick
   the node then declines. `BrickHost` does not announce a declared brick that fails the structure rule.

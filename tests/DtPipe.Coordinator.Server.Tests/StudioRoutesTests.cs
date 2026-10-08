@@ -31,7 +31,8 @@ public sealed class StudioRoutesTests : IDisposable
     {
         var inventory = _host.Services.GetRequiredService<NodeInventory>();
         inventory.Announce("c1", new NodeAnnouncement("n1", "", [], NodeRole.Data,
-            [new BrickInfo("orders", BrickKind.Source, "Orders", "every order", Source, [new BrickColumn("id", "BIGINT", false)], null)]), "n1", ["g"], () => { });
+            [new BrickInfo("orders", BrickKind.Source, "Orders", "every order", Source, [new BrickColumn("id", "BIGINT", false)], null)],
+            DtpipeVersion: "9.9.9+abc"), "n1", ["g"], () => { });
         if (!online) inventory.Disconnected("c1");
         return inventory;
     }
@@ -41,7 +42,7 @@ public sealed class StudioRoutesTests : IDisposable
     {
         Announce();
         var catalog = await As(CoordinatorHost.Reader).GetFromJsonAsync<BrickCatalogView>(CoordinatorApi.Catalog, Ct);
-        Assert.Equal(new CatalogNode("n1", true, "data", null), Assert.Single(catalog!.Nodes));
+        Assert.Equal(new CatalogNode("n1", true, "data", "9.9.9+abc"), Assert.Single(catalog!.Nodes));
         var brick = Assert.Single(catalog.Bricks);
         Assert.Equal(("n1/orders", "source", "Orders"), (brick.Key, brick.Kind, brick.Title));
         Assert.Equal("duck:shop.db", brick.Branch["input"]!.GetValue<string>());

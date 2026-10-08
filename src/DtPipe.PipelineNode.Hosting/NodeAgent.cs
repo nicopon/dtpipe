@@ -29,6 +29,8 @@ internal sealed class NodeAgent : BackgroundService
     private readonly FragmentGate? _gate;
     private readonly IReadOnlyDictionary<string, NodeRequestHandler> _requests;
     private readonly NodeDtPipe _dtpipe;
+    private readonly DtPipeCommand _command;
+    private string? _dtpipeVersion;
     private readonly OidcTokenClient _tokens;
     private readonly NodeLogForwarder _forwarder = new();
     private readonly ILoggerFactory _hostLoggers;
@@ -67,6 +69,7 @@ internal sealed class NodeAgent : BackgroundService
         _gate = definition.Gate;
         _requests = new Dictionary<string, NodeRequestHandler>(definition.Requests, StringComparer.Ordinal);
         _dtpipe = new NodeDtPipe(dtpipe);
+        _command = dtpipe;
         _jobs = new DelegatedJobs(_options.Name, _policy == FragmentPolicy.AnyFragment, dtpipe);
         _tokens = new OidcTokenClient(_options.Oidc);
     }
@@ -104,6 +107,8 @@ internal sealed class NodeAgent : BackgroundService
         // Schemas are inspected before the first announcement, so the coordinator never shows a
         // brick without the columns its node could read.
         await _bricks.InspectAsync(ct);
+        _dtpipeVersion = await _command.VersionAsync(ct);
+        if (_dtpipeVersion is null) _logger.LogWarning("{DtPipe} did not say its version: the node announces none", _options.DtPipe);
 
         await ConnectAsync(hub, ct);
         _logger.LogInformation("Node {Name} ({Role}, {Bricks} brick(s), {Policy}) connected to {Url} as {ClientId}",
@@ -168,7 +173,8 @@ internal sealed class NodeAgent : BackgroundService
         using var bounded = new CancellationTokenSource(AnnounceTimeout);
         await _hub!.InvokeAsync(NodeChannel.Announce,
             new NodeAnnouncement(_options.Name, _options.Description, _datasets, Role, _bricks.Bricks,
-                Capabilities: [.. _gate is null ? [] : new[] { NodeAnnouncement.RawFragments }, .. _requests.Keys.Order(StringComparer.Ordinal)]), bounded.Token);
+                Capabilities: [.. _gate is null ? [] : new[] { NodeAnnouncement.RawFragments }, .. _requests.Keys.Order(StringComparer.Ordinal)],
+                DtpipeVersion: _dtpipeVersion), bounded.Token);
 
         FragmentStatus[] statuses;
         await _commands.WaitAsync();

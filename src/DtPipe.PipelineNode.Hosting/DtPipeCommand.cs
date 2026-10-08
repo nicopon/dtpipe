@@ -27,6 +27,26 @@ internal sealed class DtPipeCommand(string dtpipe, string workingDirectory, IRea
 
     public string WorkingDirectory => workingDirectory;
 
+    /// <summary>
+    /// What the binary says of itself (<c>dtpipe --version</c>, its name left out), or null when it does
+    /// not start, fails or answers anything else: a version is information, never a reason to stop.
+    /// </summary>
+    public async Task<string?> VersionAsync(CancellationToken ct)
+    {
+        try
+        {
+            var result = await RunAsync(["--version"], ct, TimeSpan.FromSeconds(15));
+            var line = result.Stdout.Split('\n', 2)[0].Trim();
+            return result.Succeeded && line.StartsWith("dtpipe ", StringComparison.Ordinal) && line.Length > "dtpipe ".Length
+                ? line["dtpipe ".Length..].Trim()
+                : null;
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
     public async Task<DtPipeCommandResult> RunAsync(IEnumerable<string> args, CancellationToken ct, TimeSpan? timeout = null, string? inDirectory = null)
     {
         var bound = timeout ?? DefaultTimeout;

@@ -846,6 +846,16 @@ def bricks_pass():
             raise RuntimeError(f"dtpipe read {len(rows)} line(s) of the sample: {out.stderr[-300:]}")
         return f"catalog, recognition of customers-mirror's bricks, a 7-row Arrow sample read back by dtpipe ({len(arrow):,} bytes)"
 
+    def versions():
+        # Every node host announces what its dtpipe binary says of itself: here, the release binary.
+        expected = subprocess.run([DTPIPE, "--version"], capture_output=True, text=True, timeout=30).stdout.split()[1]
+        nodes = call("/api/catalog")["nodes"]
+        wrong = {n["name"]: n["dtpipeVersion"] for n in nodes if n["dtpipeVersion"] != expected}
+        if wrong or not nodes:
+            raise RuntimeError(f"expected {expected} on every node: {wrong or 'no node'}")
+        return f"{len(nodes)} nodes announce dtpipe {expected}"
+
+    check("versions", versions)
     check("the studio's routes", studio_routes)
     check("a source brick by a hair", source_by_a_hair)
     check("a sink brick by a hair", sink_by_a_hair)

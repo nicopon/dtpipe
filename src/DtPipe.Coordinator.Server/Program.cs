@@ -158,7 +158,7 @@ api.MapGet("/bricks", (BrickCatalog bricks) => bricks.List());
 // What dtpipe studio reads of the bricks: the catalog, and what each branch of a job is. Recognition
 // is the coordinator's, by content (BrickCatalog); the studio only reads the answer back.
 api.MapGet(CoordinatorApi.CatalogRoute, (NodeInventory inventory, BrickCatalog bricks) => new BrickCatalogView(
-    [.. inventory.Snapshot().Select(n => new CatalogNode(n.Name, n.Online, n.Role == NodeRole.Runner ? "runner" : "data", null))],
+    [.. inventory.Snapshot().Select(n => new CatalogNode(n.Name, n.Online, n.Role == NodeRole.Runner ? "runner" : "data", n.DtpipeVersion))],
     bricks.Catalog()));
 api.MapPost(CoordinatorApi.RecognizeRoute, (RecognizeRequest request, BrickCatalog bricks) =>
 {

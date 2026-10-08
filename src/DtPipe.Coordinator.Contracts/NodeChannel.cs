@@ -57,10 +57,12 @@ public enum NodeRole { Data, Runner }
 /// approval. <see cref="Capabilities"/> only report how the host was configured: <see cref="RawFragments"/>
 /// when its own configuration lets it run a fragment that is no brick, and the name of each request it
 /// answers. The coordinator shows them and never sets them; the host enforces what it offers.
+/// <see cref="DtpipeVersion"/> is what the host's dtpipe binary says of itself (<c>--version</c>), null
+/// when it did not say: shown beside a studio's own, never a reason to refuse.
 /// </summary>
 public sealed record NodeAnnouncement(
     string Name, string Description, IReadOnlyList<DatasetInfo> Datasets, NodeRole Role,
-    IReadOnlyList<BrickInfo> Bricks, IReadOnlyList<string>? Capabilities = null)
+    IReadOnlyList<BrickInfo> Bricks, IReadOnlyList<string>? Capabilities = null, string? DtpipeVersion = null)
 {
     /// <summary>The capability of a host that accepts a fragment written as a job, not only one made of its bricks.</summary>
     public const string RawFragments = "raw-fragments";
