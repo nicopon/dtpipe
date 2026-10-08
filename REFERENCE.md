@@ -1246,11 +1246,39 @@ or an alias unresolved is refused before it runs, naming each.
 ```bash
 dtpipe studio ./jobs              # prints the address to open, then serves until stopped
 dtpipe studio ./jobs --port 8765  # a fixed port instead of any free one
+dtpipe studio ./jobs --coordinator https://coordinator.example  # signed in to a coordinator
 ```
 
 | Option | Description |
 |---|---|
 | `--port` | Port on 127.0.0.1. Default: any free port |
+| `--coordinator` | A distributed pipeline's coordinator, by its address: its bricks and its library. Default: none |
+
+### With a coordinator
+
+`--coordinator` names the one coordinator the studio talks to; the page never chooses another.
+**Sign in** opens your identity provider in a new tab, so the cards you have not saved stay where
+they are, and comes back to the studio on its own address. The studio learns everything from the
+coordinator's address: the identity provider it trusts, the client to sign in with, and the
+version of the API it speaks, which this dtpipe must speak too, or it says so and stops there.
+Your tokens stay in the studio's memory, never on disk or in the page; quitting the studio, or
+**Sign out**, forgets them. A coordinator lets you in only if its administrator listed you
+(`Coordinator:Studio:ClientId` names the studio's client, and your roles are the coordinator's).
+
+Once signed in, the palette offers the bricks of the coordinator's nodes, grouped by node, a node
+offline greyed out, and lists this studio's dtpipe version beside each node's: a difference is
+shown, never refused. When you open a job, the coordinator says which of its branches are bricks,
+which then open as brick cards; signed out, they open as plain cards and save unchanged. A sample
+of a job with bricks runs here: a source brick's rows (at most 100) come from its node through the
+coordinator, and a sink brick receives nothing, its rows ending in a throwaway file under
+`.dtpipe/studio/samples/`. A brick's variables belong to its node and leave the Variables tab.
+
+**Publish** sends the job as saved in the folder to the coordinator's library, under an id you
+choose: an unsaved change is refused, and its layout and launch values stay on this machine. The
+first publication of an id creates it only, a later one replaces only the version published last
+from this studio; when someone else saved the pipeline since, the studio shows the version in
+place and replaces it only if you say so. A pipeline that already had a distributed plan must be
+redistributed then redeployed from the coordinator's console, and the page says so.
 
 The page runs dtpipe with your own access. It listens on 127.0.0.1 only and answers only the
 address it printed: the address carries a token for this session, which every request must
