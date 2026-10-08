@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using DtPipe.Jobs;
+using DtPipe.Jobs.Coordinator;
 
 namespace DtPipe.Coordinator.Server;
 
@@ -192,11 +193,12 @@ public sealed partial class PipelineLibrary
 
     private string PipelineDir(string id)
     {
-        if (!IdPattern().IsMatch(id)) throw new ConflictException($"'{id}' is not a pipeline id: lowercase letters, digits and '-'.");
+        if (!CoordinatorApi.IsPipelineId(id)) throw new ConflictException($"'{id}' is not a pipeline id: lowercase letters, digits and '-'.");
         return Path.Combine(_root, "pipelines", id);
     }
 
-    public static bool IsValidId(string id) => IdPattern().IsMatch(id);
+    /// <summary>The library's ids, which the rights reuse for client ids and node names: <see cref="CoordinatorApi.IsPipelineId"/>.</summary>
+    public static bool IsValidId(string id) => CoordinatorApi.IsPipelineId(id);
 
     public static string Sha(string text) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
 
@@ -235,9 +237,6 @@ public sealed partial class PipelineLibrary
             throw new InvalidOperationException($"git {string.Join(' ', args)}: {(await stderr).Trim()}");
         return await stdout;
     }
-
-    [GeneratedRegex("^[a-z0-9][a-z0-9-]{0,62}$")]
-    private static partial Regex IdPattern();
 
     [GeneratedRegex("^[0-9a-f]{7,40}$")]
     private static partial Regex CommitPattern();

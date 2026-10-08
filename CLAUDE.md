@@ -136,7 +136,7 @@ example to make it checked]`
 | `src/DtPipe.Processors` | SQL stream processors (DuckDB, Merge) |
 | `src/Apache.Arrow.Ado` | Standalone ADO.NET → Arrow; depends on `Apache.Arrow.Serialization` only |
 | `src/Apache.Arrow.Serialization` | Standalone CLR↔Arrow type map + POCO serializer |
-| `src/DtPipe.Jobs` | A job file as a YAML tree (`JobYaml`) and the designer's cards (`DesignService`) |
+| `src/DtPipe.Jobs` | A job file as a YAML tree (`JobYaml`), the designer's cards (`DesignService`), the coordinator's API the studio calls (`Coordinator/`) |
 | `src/DtPipe.Coordinator` | Central hub of a distributed pipeline: the control plane over TransportR |
 | `src/DtPipe.PipelineNode` | Runs one distributed-pipeline fragment under the coordinator's control |
 | `src/DtPipe.Coordinator.Server` | The coordinator's server: API, pages, planner, library, rights; lab mode for benches |

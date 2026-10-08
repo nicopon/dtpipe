@@ -4,6 +4,7 @@ using DtPipe.Coordinator;
 using DtPipe.Coordinator.Contracts;
 using DtPipe.Coordinator.Server;
 using DtPipe.Jobs;
+using DtPipe.Jobs.Coordinator;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -123,12 +124,8 @@ app.MapGet("/account/denied", () => AccessPage(StatusCodes.Status200OK,
 // rights and, in lab mode, uses the bench's tools. A request that changes something carries the CSRF
 // header. TransportR's own routes under /api (client, stream) are mapped by MapDataHub, not here.
 var account = app.MapGroup("/api").RequireAuthorization(TrustedIdp.SignedIn).AddEndpointFilter(RequireCsrfHeader);
-account.MapGet("/me", (HttpContext context) => new
-{
-    name = context.User.Identity?.Name,
-    email = context.User.FindFirst("email")?.Value,
-    roles = CoordinatorRoles.All.Where(context.User.IsInRole),
-});
+account.MapGet(CoordinatorApi.MeRoute, (HttpContext context) => new CoordinatorMe(
+    context.User.Identity?.Name, context.User.FindFirst("email")?.Value, [.. CoordinatorRoles.All.Where(context.User.IsInRole)]));
 account.MapGet("/info", (CoordinatorServerOptions options) => new { labMode = options.LabMode });
 
 var api = app.MapGroup("/api").RequireAuthorization(CoordinatorRoles.Reader).AddEndpointFilter(RequireCsrfHeader);
@@ -208,7 +205,7 @@ designer.MapPost("/design/validate", async (PageDesignModel model, DesignService
 api.MapGet("/library", async (PipelineLibrary library, CancellationToken ct) => await library.ListAsync(ct));
 api.MapGet("/library/{id}", async (string id, PipelineLibrary library, CancellationToken ct) =>
     await library.GetAsync(id, ct) is { } doc ? Results.Ok(doc) : Results.NotFound(new { error = $"'{id}' is not in the library." }));
-designer.MapPut("/library/{id}", async (string id, SaveRequest request, PipelineLibrary library, EventBus bus, CancellationToken ct) =>
+designer.MapPut(CoordinatorApi.LibraryRoute, async (string id, LibrarySave request, PipelineLibrary library, EventBus bus, CancellationToken ct) =>
 {
     var commit = await library.SaveAsync(id, request.Yaml, request.Layout, request.Message ?? "", ct);
     bus.Publish("library", new { id, commit });
@@ -245,7 +242,7 @@ designer.MapPost("/library/{id}/distribute", async (string id, DistributeRequest
 // The same placement for a pipeline still being designed: its cards composed, then placed, nothing saved.
 designer.MapPost("/design/place", async (PlaceRequest request, DesignService design, AutoPlacer placer, CancellationToken ct) =>
 {
-    if (!PipelineLibrary.IsValidId(request.Id)) return Results.BadRequest(new { error = $"'{request.Id}' is not a pipeline id: lowercase letters, digits and '-'." });
+    if (!CoordinatorApi.IsPipelineId(request.Id)) return Results.BadRequest(new { error = $"'{request.Id}' is not a pipeline id: lowercase letters, digits and '-'." });
     var composed = design.Compose(request.Model.ToModel());
     if (!composed.Valid) return Results.Ok(new { errors = composed.Errors, plan = (DistributionPlan?)null, bricks = new Dictionary<string, string>() });
     var plan = await placer.PlanAsync(request.Id, composed.Yaml, ct);
@@ -391,7 +388,6 @@ internal sealed record CommandRequest(string[] Args);
 internal sealed record RunRequest(Dictionary<string, string>? Pins, string? PipelineId = null);
 internal sealed record CancelRequest(string? RunId);
 internal sealed record DecomposeRequest(string Yaml, System.Text.Json.Nodes.JsonObject? Layout = null);
-internal sealed record SaveRequest(string Yaml, System.Text.Json.Nodes.JsonObject? Layout, string? Message);
 internal sealed record PlaceRequest(string Id, PageDesignModel Model);
 internal sealed record DistributeRequest(bool Save = false, string? Message = null);
 internal sealed record MatrixRequest(Dictionary<string, List<string>> Matrix);
