@@ -112,8 +112,8 @@ public partial class DtPipeMcpTools
 
     /// <summary>
     /// The rule the engine applies when it resolves a reader: a branch reads from its
-    /// <c>input:</c>, or from a stream processor claiming it. Neither means the run stops before a
-    /// row moves.
+    /// <c>input:</c>, from another branch, from a checkpoint or a contract, or from a stream
+    /// processor claiming it. None of these means the run stops before a row moves.
     ///
     /// <para>
     /// It lives on the YAML-content path only. A branch built from command-line arguments carries
@@ -142,6 +142,9 @@ public partial class DtPipeMcpTools
             // engine runs it. Demanding a query here refused the very shape a job needs to build
             // two related tables — one branch produces, one writes, a third joins.
             if (!string.IsNullOrWhiteSpace(job.From)) continue;
+            // A checkpoint or a contract is a reader the engine resolves by capability, with no
+            // 'input:' to name it.
+            if (!string.IsNullOrWhiteSpace(job.FromCheckpoint) || !string.IsNullOrWhiteSpace(job.FromContract)) continue;
 
             yield return $"Branch '{branch.Alias}' has nothing to read: it has no 'input:', no 'from:' and "
                        + "no stream processor. Give it an 'input:', stream from another branch with "

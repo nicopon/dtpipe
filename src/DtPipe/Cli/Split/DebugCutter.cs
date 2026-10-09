@@ -44,8 +44,6 @@ public sealed class DebugCutter(
     /// <summary>What a mini-branch's alias carries after the branch's own: the studio reserves it.</summary>
     public const string Mark = "__level";
 
-    private const string ResumeInput = "generate:1";
-
     /// <summary>The session the debug runs of a studio keep their checkpoints in.</summary>
     public const string SessionName = "studio-debug";
 
@@ -83,11 +81,9 @@ public sealed class DebugCutter(
                     // The level read back: no read, no transformer, no new checkpoint of its own, and nothing that
                     // bounds or samples a reader. The last level keeps its writer.
                     var last = k == chain.Count - 1;
-                    // The job validator asks every branch for an input, a 'from' or a processor and does not count
-                    // 'from-checkpoint'; the engine reads the checkpoint and ignores the input, so a stand-in does.
                     mini = JobCutter.Without(mini, BranchSides.Read) with
                     {
-                        Input = ResumeInput, Transformers = null, Checkpoint = null, FromCheckpoint = resume!.Key, From = null, Ref = [],
+                        Input = null, Transformers = null, Checkpoint = null, FromCheckpoint = resume!.Key, From = null, Ref = [],
                         ProviderOptions = last ? mini.ProviderOptions : null, Session = SessionName,
                     };
                 }
