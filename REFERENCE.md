@@ -1285,6 +1285,33 @@ from this studio; when someone else saved the pipeline since, the studio shows t
 place and replaces it only if you say so. A pipeline that already had a distributed plan must be
 redistributed then redeployed from the coordinator's console, and the page says so.
 
+**Open from library** lists the coordinator's pipelines and writes the one you pick as a new file,
+`<id>.yaml`, in the folder: it never overwrites a file, and it remembers the version it read, so a
+later **Publish** replaces exactly that version. The coordinator checks every pipeline it is sent: a
+job it refuses is not saved, and the studio shows the check's report.
+
+**Import** turns a dtpipe command line (without the binary's name) into a job, as
+[`--export-job`](#reference-for-job-files) writes it: it opens as a new job that you save or leave.
+A `${{NAME}}` in it stays as typed, and `--bind-input` and `--bind-output` are refused.
+
+**Run** executes the job saved in the folder on this machine, as `dtpipe --job` would, after you
+confirm what it writes: each branch's target (a connection string with its secrets masked) and the
+writer's block as the file holds it. A run is real, so the page asks again if the job or the values
+it launches with changed since. A job that reads a coordinator's brick is not run here, since its
+rows would recreate a real target; a sink brick is written to a throwaway file, never to its node.
+One action runs at a time (a sample, a debug run or a run), the studio does not quit during a run,
+and **Stop** ends it with the verdict 130, however the engine answers the cancellation; a run that
+had finished before keeps its own code.
+
+**Debug run** samples a copy of the job cut after each of its transformers, into pieces linked by
+`from:`, each keeping a checkpoint in the studio's own session (`.dtpipe/sessions/studio-debug/`).
+You choose how many rows each source reads (up to 100000; a stage shows at most 1000 of them). Each
+level shows what it delivered, and **Resume here** starts a later run from a level instead of
+rereading and recomputing what precedes it, if nothing that produced the level changed and its
+checkpoint is still in the session. It is not the job's run: every cut passes through Arrow (see
+[checkpoints](#checkpoints)), batches differ and so does the concurrency. The cut is never saved or
+published.
+
 The page runs dtpipe with your own access. It listens on 127.0.0.1 only and answers only the
 address it printed: the address carries a token for this session, which every request must
 present, and a request from another site is refused. It reads only the `.yaml` and `.yml` files

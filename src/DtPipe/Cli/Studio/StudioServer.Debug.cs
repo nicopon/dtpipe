@@ -33,7 +33,7 @@ public sealed partial class StudioServer
         if (asked.Resume is not null && job is null) throw new StudioRefusal(400, "Resume a debug run of a job saved in the folder: name its path.");
 
         DebugCut? cut = null;
-        string Rewrite(string yaml)
+        (string, IReadOnlySet<string>) Rewrite(string yaml)
         {
             try
             {
@@ -41,7 +41,7 @@ public sealed partial class StudioServer
                 if (asked.Resume is { } resume) cut = cutter.Cut(yaml, ResumeOf(job!, resume, cut));
             }
             catch (InvalidOperationException ex) { throw new StudioRefusal(422, ex.Message); }
-            return cut.Yaml;
+            return (cut.Yaml, cut.Dropped);
         }
 
         var json = await SampleCoreAsync(asked.Yaml, rows, asked.Path, asked.Bricks, _tools.DebugSample ?? _tools.Sample, Rewrite, context.RequestAborted);

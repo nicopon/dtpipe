@@ -83,6 +83,7 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   through `coordinator-lab`, `node`, `idp` or `compose.yaml`'s environment, so those two targets
   can leave `samples/` unchanged. Every .NET service runs under `init: true`: dotnet as PID 1 hangs
   on its own crash, and the nodes start dtpipe children. `[unchecked]`
-- Verify a change with `./lab.sh smoke`, and a page change with `./lab.sh ui` too: it drives
-  headless Chrome over the DevTools protocol (`tools/cdp.py`), because Chrome's own `--screenshot`
-  stops the page before its fetches finish. `tools/cdp.py` also clicks and drags with the mouse.
+- Verify a change with `./lab.sh smoke`, a page change with `./lab.sh ui` too, and a change to what
+  `dtpipe studio` calls with `./lab.sh studio` (`tools/studio_check.py`, outside CI). The page checks
+  drive headless Chrome over the DevTools protocol (`tools/cdp.py`), because Chrome's own
+  `--screenshot` stops the page before its fetches finish. `tools/cdp.py` also clicks and drags with the mouse.

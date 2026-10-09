@@ -15,8 +15,11 @@ namespace DtPipe.Cli.Split;
 /// </summary>
 public sealed record DebugLevel(string Branch, int Level, string Alias, string Digest);
 
-/// <summary>The job for a debug run, as YAML, and the levels it holds.</summary>
-public sealed record DebugCut(string Yaml, IReadOnlyList<DebugLevel> Levels);
+/// <summary>
+/// The job for a debug run, as YAML, and the levels it holds. <see cref="Dropped"/> are the branches a resume left
+/// out because nothing reads them any more: a binding that names one has nothing to bind.
+/// </summary>
+public sealed record DebugCut(string Yaml, IReadOnlyList<DebugLevel> Levels, IReadOnlySet<string> Dropped);
 
 /// <summary>The level to start from, and the checkpoint its earlier run kept.</summary>
 public sealed record DebugResume(string Branch, int Level, string Key);
@@ -91,8 +94,8 @@ public sealed class DebugCutter(
                 result[chain[k].Alias] = mini;
             }
         }
-        if (resume is not null) Prune(result);
-        return new DebugCut(JobFileWriter.Serialize(result), levels);
+        var dropped = resume is not null ? Prune(result) : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        return new DebugCut(JobFileWriter.Serialize(result), levels, dropped);
     }
 
     /// <summary>The mini-branches of one branch, level 0 first; the last carries the branch's alias.</summary>
@@ -142,14 +145,15 @@ public sealed class DebugCutter(
     /// A resumed job no longer reads what its first levels read: a branch that then has no output and that
     /// nothing reads is dropped, since the engine refuses a branch whose rows would be discarded.
     /// </summary>
-    private static void Prune(Dictionary<string, JobDefinition> jobs)
+    private static HashSet<string> Prune(Dictionary<string, JobDefinition> jobs)
     {
+        var dropped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         while (true)
         {
             var read = jobs.Values.SelectMany(j => j.From is null ? j.Ref : [j.From, .. j.Ref]).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var useless = jobs.Where(kv => string.IsNullOrEmpty(kv.Value.Output) && !read.Contains(kv.Key)).Select(kv => kv.Key).ToList();
-            if (useless.Count == 0) return;
-            foreach (var alias in useless) jobs.Remove(alias);
+            if (useless.Count == 0) return dropped;
+            foreach (var alias in useless) { jobs.Remove(alias); dropped.Add(alias); }
         }
     }
 }

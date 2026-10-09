@@ -424,7 +424,7 @@ public sealed partial class StudioServer : IAsyncDisposable
     /// gives the job to run from the one the bricks left: the debug run's cut.
     /// </summary>
     private async Task<string> SampleCoreAsync(string yaml, int rows, string? path, List<SampledBrick>? bricks, StudioSampler sampler,
-        Func<string, string>? rewrite, CancellationToken ct)
+        Func<string, (string Yaml, IReadOnlySet<string> Dropped)>? rewrite, CancellationToken ct)
     {
         // Each brick's branch is read or written on its node: here, its rows come from the coordinator.
         var sampling = BrickSampling.Of(yaml, bricks, _tools.Coordinator?.Catalog);
@@ -439,29 +439,33 @@ public sealed partial class StudioServer : IAsyncDisposable
         var files = new List<string>();
         try
         {
-            var inputs = new List<string>();
+            var inputs = new List<(string Alias, string Path)>();
             foreach (var (alias, brick) in sampling.Sources)
             {
                 byte[] arrow;
                 try { arrow = await _tools.Coordinator!.SampleAsync(brick.Node, brick.Id, Math.Min(rows, CoordinatorApi.MaxSampleRows), ct); }
                 catch (CoordinatorLinkException ex) { throw new StudioRefusal(502, $"'{alias}': {ex.Message}"); }
                 files.Add(_local.SampleFile(arrow));
-                inputs.Add($"{alias}={Bindable(files[^1])}");
+                inputs.Add((alias, Bindable(files[^1])));
             }
-            var outputs = new List<string>();
+            var outputs = new List<(string Alias, string Path)>();
             foreach (var alias in sampling.Sinks)
             {
                 files.Add(_local.SampleFile(null));
-                outputs.Add($"{alias}={Bindable(files[^1])}");
+                outputs.Add((alias, Bindable(files[^1])));
             }
-            var bindings = new StudioBindings(inputs.Count > 0 ? string.Join(',', inputs) : null, outputs.Count > 0 ? string.Join(',', outputs) : null);
+            // The job to run, and the bindings of the branches it still has.
+            var (yamlToRun, dropped) = rewrite?.Invoke(sampling.Yaml) ?? (sampling.Yaml, new HashSet<string>());
+            string? Join(List<(string Alias, string Path)> pairs) =>
+                pairs.Where(p => !dropped.Contains(p.Alias)).Select(p => $"{p.Alias}={p.Path}").ToList() is { Count: > 0 } kept ? string.Join(',', kept) : null;
+            var bindings = new StudioBindings(Join(inputs), Join(outputs));
 
             // The run reads ${{NAME}} through its own resolver, which asks the launch values first: each chosen
             // value is this action's alone, and the process environment is never written.
             using var armed = LaunchValues.Arm(launch);
             // Nobody watches the terminal for a prompt: a run that would ask one fails instead.
             using var _ = NonInteractiveGuard.Suppress();
-            return await sampler(rewrite is null ? sampling.Yaml : rewrite(sampling.Yaml), rows, bindings, ct);
+            return await sampler(yamlToRun, rows, bindings, ct);
         }
         finally
         {

@@ -47,6 +47,14 @@ async function openFromLibrary(id) {
   }
 }
 
+// What a debug run, a run or a publication showed belongs to the job it was for: another job starts clean.
+// A run still going is kept, since it goes on whatever is open.
+function forgetResults() {
+  debug = null;
+  publication = null;
+  if (run && run.phase !== "running") run = null;
+}
+
 const leaveCurrent = () => !isDirty() || confirm(`${current?.path || "This job"} has changes that are not saved. Leave it anyway?`);
 
 async function open(path, left = false) {
@@ -54,7 +62,7 @@ async function open(path, left = false) {
   try {
     const job = await api(`/api/job?path=${encodeURIComponent(path)}`);
     current = { path, hash: job.hash, rewrites: job.rewrites };
-    publication = null;
+    forgetResults();
     $("job-name").textContent = path;
     await openJob(job.yaml, job.layout);
     status(job.rewrites ? "saving rewrites this file" : "", job.rewrites ? "warn" : "");
@@ -70,7 +78,7 @@ async function newJob() {
   if (!path) return;
   if (!/\.ya?ml$/i.test(path)) { status("A job is a .yaml or .yml file.", "bad"); return; }
   current = { path, hash: null, rewrites: false };
-  publication = null;
+  forgetResults();
   $("job-name").textContent = `${path} (new)`;
   await openBlank(path.replace(/^.*\//, "").replace(/\.ya?ml$/i, ""));
   await loadJobs();
@@ -117,7 +125,7 @@ async function importCommand() {
     if (!path) return;
     if (!/\.ya?ml$/i.test(path)) { status("A job is a .yaml or .yml file.", "bad"); return; }
     current = { path, hash: null, rewrites: false };
-    publication = null;
+    forgetResults();
     $("job-name").textContent = `${path} (new)`;
     await openJob(yaml, null, true);
     status("imported: save it to keep it", "good");

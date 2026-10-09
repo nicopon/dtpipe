@@ -13,6 +13,7 @@
 #   ./lab.sh seed      rebuild the four databases (LAB_SCALE multiplies the row counts)
 #   ./lab.sh smoke     every pipeline, distributed, against its monolithic witness
 #   ./lab.sh ui        both pages render, and the coordinator has no designer (headless Chrome)
+#   ./lab.sh studio    dtpipe studio against the lab: library, sample, debug run, run and stop, publish (headless Chrome)
 #   ./lab.sh logs      follow every log
 #   ./lab.sh reset     down, then delete .state/
 set -euo pipefail
@@ -235,6 +236,7 @@ case "${1:-}" in
     idp) shift; mkdir -p "$STATE/logs" "$STATE/run"; start_idp "$@" ;;
     smoke) shift; smoke "$@" ;;
     ui) python3 "$LAB/tools/ui_check.py" "$URL" "$STATE/ui" ;;
+    studio) python3 "$LAB/tools/studio_check.py" "$URL" "$DTPIPE" "$STATE/studio" ;;
     logs) tail -n 20 -F "$STATE"/logs/*.log ;;
     reset) down; rm -rf "$STATE"; echo "Removed $STATE" ;;
     *) awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"; exit 1 ;;

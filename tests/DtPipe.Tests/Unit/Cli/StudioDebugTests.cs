@@ -138,6 +138,18 @@ public sealed class StudioDebugTests : IAsyncLifetime
         Assert.Contains("a__level0", error.Message);
     }
 
+    [Fact]
+    public void A_resume_drops_the_branch_nothing_reads_any_more_and_names_it_for_the_bindings()
+    {
+        const string job = "src:\n  input: \"arrow:-\"\na:\n  from: src\n  transformers:\n  - type: filter\n    mappings:\n      row.GenerateIndex > 1: ''\n  output: \"null:\"\n";
+
+        var cut = Cutter().Cut(job, new DebugResume("a", 0, "0123456789abcdef0123456789abcdef"));
+
+        Assert.Contains("src", cut.Dropped);
+        Assert.DoesNotContain("src:", cut.Yaml);
+        Assert.Contains("from-checkpoint", cut.Yaml);
+    }
+
     // ---- the run
 
     [Fact]
