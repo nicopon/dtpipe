@@ -86,10 +86,12 @@ dtpipe --from-checkpoint <key> --compute "total:row.price*row.qty" -o csv:out.cs
 The materialisation point is the **end** of the transformer chain, so a checkpoint holds what the
 writer would have received.
 
-**Checkpoints are addressed by content.** The key is a hash of what produced the rows — connection
-with credentials stripped, query, the transformers up to that point, the sampling parameters — not
-of the alias. Two pipelines in the same directory cannot collide, an unchanged prefix is reused,
-and renaming an alias changes nothing.
+**Checkpoints are addressed by content.** The key is a hash of what produced the rows — the
+source with credentials stripped, the query, each transformer with its configuration, the row
+limit, the sampling parameters and, for a branch that reads another with `from:`, that branch's
+own definition — not of the alias. Two pipelines in the same directory cannot collide, a sample
+never shares a key with the full run, an unchanged prefix is reused, and renaming an alias
+changes nothing.
 
 **They are always encrypted** (AES-GCM), with no opt-out. What that buys is not confidentiality at
 rest — the key is on the same disk — but two properties of the store as a whole: a copy of it is

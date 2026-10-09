@@ -143,22 +143,32 @@ public partial class DtPipeMcpTools
 
     [McpServerTool(Name = "dry-run")]
     [System.ComponentModel.Description("Run a pipeline over a small sample of its source, through the real execution path, with the writer neutralised so nothing is written to the target. Returns the rows as they leave each stage, the target compatibility report, and what could actually be guaranteed about the source not being modified.")]
-    public async Task<string> DryRun(
+    public Task<string> DryRun(
         [System.ComponentModel.Description("The complete YAML configuration string representing the pipeline")] string yamlContent,
         [System.ComponentModel.Description("Source rows to run through the pipeline (default 10, max 1000)")] int rows = 10,
-        CancellationToken ct = default)
+        CancellationToken ct = default) => SampleAsync(yamlContent, rows, shownRows: 10, ct);
+
+    /// <summary>
+    /// The one sample path, for the <c>dry-run</c> tool and for <c>dtpipe studio</c>: validates the
+    /// job, runs it in sample mode and shapes what each stage saw. Each stage shows at most
+    /// <paramref name="shownRows"/> of the rows it passed: a model is given ten, a person may ask for
+    /// every row read. <paramref name="bindInput"/> and <paramref name="bindOutput"/> bind the job's
+    /// <c>arrow:-</c> boundaries as <c>--bind-input</c> and <c>--bind-output</c> do: no second binding path.
+    /// </summary>
+    internal async Task<string> SampleAsync(string yamlContent, int rows, int shownRows, CancellationToken ct,
+        string? bindInput = null, string? bindOutput = null, int maxRows = 1000)
     {
         if (string.IsNullOrWhiteSpace(yamlContent))
             return JsonSerializer.Serialize(new { success = false, error = "YAML job content cannot be empty." });
 
         try
         {
-            var parsed = ParseAndValidateYaml(yamlContent);
+            var parsed = ParseAndValidateYaml(yamlContent, bindInput, bindOutput);
             if (parsed.Errors.Count > 0)
                 return JsonSerializer.Serialize(new { success = false, stage = "validation", errors = parsed.Errors },
                     new JsonSerializerOptions { WriteIndented = true });
 
-            var report = await RunSampleAsync(parsed, Math.Clamp(rows, 1, 1000), ct,
+            var report = await RunSampleAsync(parsed, Math.Clamp(rows, 1, maxRows), shownRows, ct,
                 // Not a pointer to 'execute-yaml-job': in plan mode that tool is hidden and the role
                 // prompt forbids it, so naming it here sends the reader after something it cannot
                 // reach — the same mistake 'help' made and had removed.
@@ -188,7 +198,7 @@ public partial class DtPipeMcpTools
     /// dry-run tool opened the reader and listed columns; it never ran a transformer at all,
     /// so it could not have told a model that its --window step produced nothing.
     /// </summary>
-    private async Task<object> RunSampleAsync(YamlParseResult parsed, int rows, CancellationToken ct, string? nextStep = null)
+    private async Task<object> RunSampleAsync(YamlParseResult parsed, int rows, int shownRows, CancellationToken ct, string? nextStep = null)
     {
         var collector = _serviceProvider.GetRequiredService<DtPipe.DryRun.SampleReportCollector>();
         var jobService = _serviceProvider.GetRequiredService<DtPipe.Cli.JobService>();
@@ -249,12 +259,12 @@ public partial class DtPipeMcpTools
             // false` states the fact; nextStep states the consequence, and the model acts on the
             // second.
             nextStep,
-            branches = collector.Reports.Select(kv => Shape(kv.Key, kv.Value)).ToList()
+            branches = collector.Reports.Select(kv => Shape(kv.Key, kv.Value, shownRows)).ToList()
         };
     }
 
     /// <summary>Shapes one branch's report. Values become strings: a model reads them, it does not compute on them.</summary>
-    private static object Shape(string alias, DtPipe.DryRun.SampleReport report) => new
+    private static object Shape(string alias, DtPipe.DryRun.SampleReport report, int shownRows) => new
     {
         branch = alias,
         checkpoint = report.CheckpointKey,
@@ -272,7 +282,7 @@ public partial class DtPipeMcpTools
             columnar = s.IsColumnar,
             rowsSeen = s.TotalSeen,
             columns = s.Schema.Select(c => new { c.Name, type = c.ClrType?.Name ?? "unknown", c.IsNullable }).ToList(),
-            sample = s.Rows.Take(10).Select(r => r.Select(v => v?.ToString()).ToList()).ToList()
+            sample = s.Rows.Take(shownRows).Select(r => r.Select(v => v?.ToString()).ToList()).ToList()
         }).ToList(),
         schemaCompatibility = report.CompatibilityReport is null ? null : new
         {

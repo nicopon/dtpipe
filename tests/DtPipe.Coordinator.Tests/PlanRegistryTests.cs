@@ -22,7 +22,7 @@ public class PlanRegistryTests
             CanSendTo = ["orders-consumer"]
         });
 
-        var plan = new FlowPlan("join", [new PlanEdge("orders", "orders-producer", "orders-consumer")]);
+        var plan = new FlowPlan("join", [new PlanEdge("orders", ["orders-producer"], ["orders-consumer"])]);
 
         registry.Register(plan);
     }
@@ -37,8 +37,8 @@ public class PlanRegistryTests
 
         var plan = new FlowPlan("join",
         [
-            new PlanEdge("orders", "orders-producer", "orders-consumer"),
-            new PlanEdge("customers", "customers-producer", "orders-consumer"),
+            new PlanEdge("orders", ["orders-producer"], ["orders-consumer"]),
+            new PlanEdge("customers", ["customers-producer"], ["orders-consumer"]),
         ]);
 
         var ex = Assert.Throws<PlanRejectedException>(() => registry.Register(plan));
@@ -58,10 +58,10 @@ public class PlanRegistryTests
 
         var registry = host.Host.Services.GetRequiredService<IPlanRegistry>();
 
-        registry.Register(new FlowPlan("a-to-b", [new PlanEdge("edge", "a", "b")]));
+        registry.Register(new FlowPlan("a-to-b", [new PlanEdge("edge", ["a"], ["b"])]));
 
         var ex = Assert.Throws<PlanRejectedException>(() =>
-            registry.Register(new FlowPlan("b-to-a", [new PlanEdge("edge", "b", "a")])));
+            registry.Register(new FlowPlan("b-to-a", [new PlanEdge("edge", ["b"], ["a"])])));
         Assert.Equal("edge", ex.ForbiddenEdges[0].Name);
     }
 }

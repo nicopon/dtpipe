@@ -1,0 +1,33 @@
+# The stack's only published port. Browsers and containers reach the IdP under one name, so a token
+# names the same issuer for both: compose.yaml gives this service the network aliases below.
+# Caddy keeps the Host header, which the coordinator builds its sign-in redirect from, and flushes
+# the pages' server-sent events as they come. The data plane never crosses it: nodes reach the
+# coordinator directly.
+{
+	auto_https off
+	admin off
+}
+
+http://idp.localtest.me:{$LAB_STACK_HTTP_PORT} {
+	reverse_proxy idp:8080
+}
+
+http://coordinator.localtest.me:{$LAB_STACK_HTTP_PORT} {
+	reverse_proxy coordinator:8080
+}
+
+# The home page, and the services' health under its own origin so the page can read it.
+http://lab.localtest.me:{$LAB_STACK_HTTP_PORT} {
+	handle /health/coordinator {
+		rewrite * /healthz
+		reverse_proxy coordinator:8080
+	}
+	handle /health/idp {
+		rewrite * /healthz
+		reverse_proxy idp:8080
+	}
+	handle {
+		root * /srv
+		file_server
+	}
+}

@@ -130,17 +130,18 @@ public static partial class JobFileParser
 
 	/// <summary>
 	/// Interpolates ${{VAR}} patterns through the canonical resolver chain (F11):
-	/// env → keyring → cursor, exactly the engine used for CLI connection strings.
+	/// launch values → keyring → cursor → env, exactly the engine used for CLI connection strings.
 	/// The compiled regex stays only as the matcher for ${{...}} tokens.
 	/// </summary>
 	internal static string InterpolateVariables(string content, DtPipe.Cli.Security.ISecretsManager? secretsManager)
 	{
 		var interpolators = new List<DtPipe.Core.Expressions.IStringInterpolator>
 		{
+			new DtPipe.Cli.Expressions.LaunchValueInterpolator(),
 			new DtPipe.Cli.Incremental.CursorInterpolator(),
 		};
 		if (secretsManager != null)
-			interpolators.Insert(0, new DtPipe.Cli.Security.KeyringInterpolator(secretsManager));
+			interpolators.Insert(1, new DtPipe.Cli.Security.KeyringInterpolator(secretsManager));
 		interpolators.Add(new DtPipe.Cli.Expressions.EnvVarInterpolator());
 
 		var resolver = new DtPipe.Cli.Expressions.CompositeStringContentResolver(interpolators);

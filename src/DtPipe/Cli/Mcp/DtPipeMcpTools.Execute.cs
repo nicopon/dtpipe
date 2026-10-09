@@ -29,17 +29,42 @@ public partial class DtPipeMcpTools
         JobDagDefinition Dag,
         List<string> Errors);
 
-    private YamlParseResult ParseAndValidateYaml(string yamlContent)
+    /// <param name="bindInput">Alias bindings applied as <c>--bind-input</c> applies them, before validation.</param>
+    /// <param name="bindOutput">Likewise for <c>--bind-output</c>.</param>
+    private YamlParseResult ParseAndValidateYaml(string yamlContent, string? bindInput = null, string? bindOutput = null)
     {
         var build = DagTopologyService.FromServices(_serviceProvider).Build(yamlContent);
 
+        // The run's own binding, at the run's own point: a bound job is checked like a complete one.
+        var errors = Pipeline.AliasBindingApplier.Apply(build.Jobs, bindInput, bindOutput);
         var streamTransformerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamTransformerFactory>>();
-        var errors = PipelineValidator.Validate(build.Dag, build.Jobs, streamTransformerFactories).ToList();
+        errors.AddRange(PipelineValidator.Validate(build.Dag, build.Jobs, streamTransformerFactories));
         errors.AddRange(BranchesWithNothingToRead(build.Dag, build.Jobs, streamTransformerFactories));
         errors.AddRange(ValidateJobTransformers(build.Jobs));
         errors.AddRange(ValidateProviderOptionKeys(build.Jobs));
 
         return new YamlParseResult(build.Jobs, build.Dag, errors);
+    }
+
+    /// <summary>
+    /// The studio's real run: <paramref name="yamlContent"/> through <c>JobService.ExecutePipelineAsync</c>, as
+    /// <c>execute-yaml-job</c> runs it, with the same SQL safety check (destructive and network verbs refused).
+    /// The person's confirmation is the page's, so no approval gate is asked. <paramref name="branchFailures"/>
+    /// is filled with the reason each failing branch stopped. Returns the engine's exit code; a job that does
+    /// not validate or that the safety policy refuses throws, naming why, before anything runs.
+    /// </summary>
+    internal async Task<int> RunJobAsync(string yamlContent, string? bindInput, string? bindOutput,
+        System.Collections.Concurrent.ConcurrentDictionary<string, string> branchFailures, CancellationToken ct)
+    {
+        var parsed = ParseAndValidateYaml(yamlContent, bindInput, bindOutput);
+        if (parsed.Errors.Count > 0) throw new InvalidOperationException(string.Join(" ", parsed.Errors));
+        var safety = DefaultSqlSafetyPolicy.DryRunYaml(yamlContent, new SqlSafetyOptions());
+        if (!safety.Allowed)
+            throw new InvalidOperationException("The SQL safety policy refuses this job: " + string.Join(" ", safety.Violations)
+                + " Run it with dtpipe --job and the appropriate --allow-* flag.");
+        var contexts = parsed.Jobs.ToDictionary(kv => kv.Key, kv => new CliJobContext(null, null, null, Array.Empty<string>()));
+        var jobService = _serviceProvider.GetRequiredService<DtPipe.Cli.JobService>();
+        return await jobService.ExecutePipelineAsync(parsed.Jobs, parsed.Dag, contexts, new GlobalOptions { Quiet = true }, ct, branchFailures);
     }
 
     /// <summary>
@@ -87,8 +112,8 @@ public partial class DtPipeMcpTools
 
     /// <summary>
     /// The rule the engine applies when it resolves a reader: a branch reads from its
-    /// <c>input:</c>, or from a stream processor claiming it. Neither means the run stops before a
-    /// row moves.
+    /// <c>input:</c>, from another branch, from a checkpoint or a contract, or from a stream
+    /// processor claiming it. None of these means the run stops before a row moves.
     ///
     /// <para>
     /// It lives on the YAML-content path only. A branch built from command-line arguments carries
@@ -117,6 +142,9 @@ public partial class DtPipeMcpTools
             // engine runs it. Demanding a query here refused the very shape a job needs to build
             // two related tables — one branch produces, one writes, a third joins.
             if (!string.IsNullOrWhiteSpace(job.From)) continue;
+            // A checkpoint or a contract is a reader the engine resolves by capability, with no
+            // 'input:' to name it.
+            if (!string.IsNullOrWhiteSpace(job.FromCheckpoint) || !string.IsNullOrWhiteSpace(job.FromContract)) continue;
 
             yield return $"Branch '{branch.Alias}' has nothing to read: it has no 'input:', no 'from:' and "
                        + "no stream processor. Give it an 'input:', stream from another branch with "
@@ -271,7 +299,7 @@ public partial class DtPipeMcpTools
                     // pipeline would actually do — which is the loop this cycle exists to close.
                 if (!consentedApply)
                         {
-                       var sample = await RunSampleAsync(parsed, rows: 10, ct,
+                       var sample = await RunSampleAsync(parsed, rows: 10, shownRows: 10, ct,
                            nextStep: "NOTHING WAS WRITTEN. This ran the pipeline over a sample with the writer "
                                    + "neutralised, so you can see what it would do. The target file or table has "
                                    + "NOT been created or modified. Call execute-yaml-job again with apply=true to "

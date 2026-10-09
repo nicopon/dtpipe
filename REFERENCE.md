@@ -22,6 +22,7 @@
 - [Incremental Loading](#incremental-loading)
 - [Sample Mode and Materialisation](#sample-mode-and-materialisation)
 - [Shell Completion](#shell-completion)
+- [Studio](#studio-dtpipe-studio)
 - [Model Context Protocol (MCP) Server](#model-context-protocol-mcp-server)
 - [AI Agent Subcommand](#ai-agent-subcommand-dtpipe-agent)
 - [Agent Guardrails](#agent-guardrails-isqlsafetypolicy--iapprovalgate)
@@ -983,10 +984,15 @@ conversion is inherent to checkpointing rather than to where the tee sits. What 
 that a row-mode pipeline's values pass through the Arrow type map on the way in, which can
 normalise a type the row path would have carried loosely.
 
-**Checkpoints are addressed by content.** The key is a hash of what produces the rows — connection
-(credentials stripped), query, the transformers up to the point, and the sampling parameters — not
-of the alias. Two different pipelines run in the same directory therefore cannot collide, and an
-unchanged prefix is reused. Renaming an alias changes nothing.
+**Checkpoints are addressed by content.** The key is a hash of what produces the rows — the source
+and its connection (credentials stripped), the query, every transformer with its configuration and
+in order, a processor's options, the effective row limit, the sampling parameters and, for a branch
+that reads another (`from:`), the definition of that branch — not of the alias. Two different
+pipelines run in the same directory therefore cannot collide, a sample (`--dry-run N`) never shares
+a key with the full run, and an unchanged prefix is reused. Renaming an alias changes nothing. A
+change to the file a transformer reads with `@file` changes the key; the writer's options and the
+checkpoint's label (`--checkpoint <label>`) are not part of it, but a writer option that shares its
+key with the reader's is: it can only cost a miss, never a collision.
 
 ### The schema a pipeline produces is a contract
 
@@ -1210,6 +1216,110 @@ dtpipe completion --install   # installs for bash, zsh, or PowerShell
 
 Restart your terminal (or `source ~/.zshrc`) to activate. Completion suggests providers
 (`pg:`, `csv:`…) strategies (`Append`, `Upsert`…), and flag names based on cursor position.
+
+---
+
+## Studio (`dtpipe studio`)
+
+`dtpipe studio [folder]` opens a local page over the YAML jobs of a folder (default: the current
+directory). A job opens as cards: one per source, step and sink, wired as the job reads them. A
+branch's own reader and writer become a source card and a sink card, each holding its endpoint
+and the keys of its side (the same split as
+[`dtpipe split`](#offering-the-points-a-job-could-be-cut-at)); when the
+cards still form one chain, the job composes back into that one branch. A branch no card can
+describe stays one card, as written. Edit the cards, or the job as YAML, and sample it: the job
+runs through the real engine, as `--dry-run` does, over the source rows you ask for (at most
+1000), with the writer neutralised: the target is never written. Each stage shows the rows it
+passed, with its columns and types. A sample writes no file; a job that asks for a checkpoint
+still stores it in the folder's session store, as `--dry-run` does. The sample mode's safety gate
+applies, and each branch reports which source protection it had (see
+[Sample Mode](#sample-mode-and-materialisation)).
+
+Save writes the job the studio composes from the cards, never a text the page sends: a job written
+by hand loses its inner comments and its key order, and the page says so when it opens one. A save
+refuses a file that changed on disk since it was opened, never creates a folder, and never
+overwrites an existing file with a new job. Where each card sits is kept outside the job, in
+`.dtpipe/studio/<job>-layout.json` under the folder; `.dtpipe/` ignores itself in git.
+
+The Variables tab lists every `${{…}}` the job reads, by name, and whether something resolves it.
+The job keeps `${{NAME}}`; for a sample you may launch it with a keyring alias (see
+[Secret Management](#secret-management)) or a typed text, kept in
+`.dtpipe/studio/<job>-launch.json`. That file holds aliases and what you typed, never a value from
+the keyring, and the page is shown no value it was not given. A sample that would leave a variable
+or an alias unresolved is refused before it runs, naming each.
+
+```bash
+dtpipe studio ./jobs              # prints the address to open, then serves until stopped
+dtpipe studio ./jobs --port 8765  # a fixed port instead of any free one
+dtpipe studio ./jobs --coordinator https://coordinator.example  # signed in to a coordinator
+```
+
+| Option | Description |
+|---|---|
+| `--port` | Port on 127.0.0.1. Default: any free port |
+| `--coordinator` | A distributed pipeline's coordinator, by its address: its bricks and its library. Default: none |
+
+### With a coordinator
+
+`--coordinator` names the one coordinator the studio talks to; the page never chooses another.
+**Sign in** opens your identity provider in a new tab, so the cards you have not saved stay where
+they are, and comes back to the studio on its own address. The studio learns everything from the
+coordinator's address: the identity provider it trusts, the client to sign in with, and the
+version of the API it speaks, which this dtpipe must speak too, or it says so and stops there.
+Your tokens stay in the studio's memory, never on disk or in the page; quitting the studio, or
+**Sign out**, forgets them. A coordinator lets you in only if its administrator listed you
+(`Coordinator:Studio:ClientId` names the studio's client, and your roles are the coordinator's).
+
+Once signed in, the palette offers the bricks of the coordinator's nodes, grouped by node, a node
+offline greyed out, and lists this studio's dtpipe version beside each node's: a difference is
+shown, never refused. When you open a job, the coordinator says which of its branches are bricks,
+which then open as brick cards; signed out, they open as plain cards and save unchanged. A sample
+of a job with bricks runs here: a source brick's rows (at most 100) come from its node through the
+coordinator, and a sink brick receives nothing, its rows ending in a throwaway file under
+`.dtpipe/studio/samples/`. A brick's variables belong to its node and leave the Variables tab.
+
+**Publish** sends the job as saved in the folder to the coordinator's library, under an id you
+choose: an unsaved change is refused, and its layout and launch values stay on this machine. The
+first publication of an id creates it only, a later one replaces only the version published last
+from this studio; when someone else saved the pipeline since, the studio shows the version in
+place and replaces it only if you say so. A pipeline that already had a distributed plan must be
+redistributed then redeployed from the coordinator's console, and the page says so.
+
+**Open from library** lists the coordinator's pipelines and writes the one you pick as a new file,
+`<id>.yaml`, in the folder: it never overwrites a file, and it remembers the version it read, so a
+later **Publish** replaces exactly that version. The coordinator checks every pipeline it is sent: a
+job it refuses is not saved, and the studio shows the check's report.
+
+**Import** turns a dtpipe command line (without the binary's name) into a job, as
+[`--export-job`](#reference-for-job-files) writes it: it opens as a new job that you save or leave.
+A `${{NAME}}` in it stays as typed, and `--bind-input` and `--bind-output` are refused.
+
+**Run** executes the job saved in the folder on this machine, as `dtpipe --job` would, after you
+confirm what it writes: each branch's target (a connection string with its secrets masked) and the
+writer's block as the file holds it. A run is real, so the page asks again if the job or the values
+it launches with changed since. A job that reads a coordinator's brick is not run here, since its
+rows would recreate a real target; a sink brick is written to a throwaway file, never to its node.
+One action runs at a time (a sample, a debug run or a run), the studio does not quit during a run,
+and **Stop** ends it with the verdict 130, however the engine answers the cancellation; a run that
+had finished before keeps its own code.
+
+**Debug run** samples a copy of the job cut after each of its transformers, into pieces linked by
+`from:`, each keeping a checkpoint in the studio's own session (`.dtpipe/sessions/studio-debug/`).
+You choose how many rows each source reads (up to 100000; a stage shows at most 1000 of them). Each
+level shows what it delivered, and **Resume here** starts a later run from a level instead of
+rereading and recomputing what precedes it, if nothing that produced the level changed and its
+checkpoint is still in the session. It is not the job's run: every cut passes through Arrow (see
+[checkpoints](#checkpoints)), batches differ and so does the concurrency. The cut is never saved or
+published.
+
+The page runs dtpipe with your own access. It listens on 127.0.0.1 only and answers only the
+address it printed: the address carries a token for this session, which every request must
+present, and a request from another site is refused. It reads only the `.yaml` and `.yml` files
+under the folder, and writes only those and its own files under `.dtpipe/studio/`, never a hidden
+one or one reached through a link. A job's relative paths resolve from the folder, as
+`dtpipe --job` run there would.
+
+Quit from the page ends the session (exit 0); Ctrl+C ends it with exit 130.
 
 ---
 

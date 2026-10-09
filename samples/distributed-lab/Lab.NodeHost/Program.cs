@@ -1,18 +1,60 @@
-using System.Runtime.InteropServices;
-using DtPipe.Lab.NodeHost;
+using DtPipe.Coordinator.Contracts;
+using DtPipe.PipelineNode.Hosting;
+using Lab.NodeHost;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
-var options = NodeHostOptions.Parse(args);
-var config = NodeConfig.Load(options.ConfigPath);
+// One lab data node: a plain host that adds a dtpipe node to itself, read from nodes/<node>.json.
+//
+//   Lab.NodeHost --config <node.json> --state <dir> --coordinator <url> --idp <url> --dtpipe <path>
+//
+// The node's databases live under <state>/<node>/ and reach its fragments as ${{VARIABLE}}. Its
+// identity is the IdP client named in the file. LAB_NODE_SANDBOX=1 (or true) in this
+// process's environment lets it run any reader or writer, not only its bricks: the switch is the
+// host's own, never something the coordinator sends.
+var arguments = new ConfigurationBuilder().AddCommandLine(args).Build();
+string Required(string key) => arguments[key]
+    ?? throw new ArgumentException($"Missing --{key}. Usage: --config <node.json> --state <dir> --coordinator <url> --idp <url> --dtpipe <path>");
 
-// Held until the host has disposed its fragments: an orderly stop must not leave a dtpipe child behind.
-using var shutdown = new CancellationTokenSource();
-void Stop(PosixSignalContext context) { context.Cancel = true; shutdown.Cancel(); }
-using var sigint = PosixSignalRegistration.Create(PosixSignal.SIGINT, Stop);
-using var sigterm = PosixSignalRegistration.Create(PosixSignal.SIGTERM, Stop);
+var file = new ConfigurationBuilder().AddJsonFile(Path.GetFullPath(Required("config")), optional: false).Build();
+var name = file["name"] ?? throw new InvalidOperationException("The node file names no node.");
+var state = Path.GetFullPath(Required("state"));
+var coordinator = Required("coordinator").TrimEnd('/');
+var sandbox = Environment.GetEnvironmentVariable("LAB_NODE_SANDBOX") is "1" or "true" or "TRUE" or "True";
 
-await using var host = new NodeHost(options, config);
-try
+var builder = Host.CreateApplicationBuilder();
+builder.Logging.ClearProviders().AddSimpleConsole(o => { o.SingleLine = true; o.TimestampFormat = "HH:mm:ss "; });
+builder.Logging.AddFilter("TransportR", LogLevel.Warning).AddFilter("Microsoft", LogLevel.Warning);
+
+var node = builder.Services.AddDtPipeNode(o =>
 {
-    await host.RunAsync(shutdown.Token);
+    o.Name = name;
+    o.Description = file["description"] ?? "";
+    o.CoordinatorUrl = coordinator;
+    o.DtPipe = Path.GetFullPath(Required("dtpipe"));
+    o.StateDirectory = Path.Combine(state, name);
+    o.Policy = FragmentPolicy.Bricks;
+    o.Oidc.Authority = Required("idp");
+    o.Oidc.ClientId = file["clientId"] ?? name;
+    o.Oidc.ClientSecret = file["secret"] ?? "";
+});
+
+// A database reaches the node's dtpipe children as ${{VARIABLE}}: the file under the node's own
+// state directory. The coordinator learns its name and engine, never where it is.
+foreach (var dataset in file.GetSection("datasets").GetChildren())
+{
+    node.WithVariable(dataset["variable"]!, Path.Combine(state, name, dataset["file"]!), dataset["description"], dataset["engine"]);
 }
-catch (OperationCanceledException) when (shutdown.IsCancellationRequested) { }
+node.AddBricks(file.GetSection("bricks"));
+
+// The coordinator's lab mode has its query panel and smoke's checks read the warehouse through the node, and
+// cuts a branch where its data is: every lab node answers both, strict or sandbox.
+var lab = new LabRequests(name, [.. file.GetSection("datasets").GetChildren().Where(d => d["engine"] is not null).Select(d => (d["variable"]!, d["engine"]!))]);
+node.WithRequest("lab.query", lab.QueryAsync).WithRequest("lab.split", lab.SplitAsync);
+
+// Sandbox mode lets a lab node run a fragment that reads or writes through any reader or writer, not only
+// through its bricks: its own switch, and the one the Lab view's manual planning needs.
+if (sandbox) node.WithFragmentGate((deployment, bricks) => BrickRules.FragmentRefusal(deployment.Yaml, bricks, requireBricks: false));
+
+await builder.Build().RunAsync();

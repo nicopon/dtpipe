@@ -2,25 +2,28 @@
 """Drives the lab's pages in headless Chrome and checks what they render, with no page error.
 Writes one screenshot per step.
 
+  0. Sign in: the coordinator's page sends the browser to the IdP's form, filled and submitted as
+     the lab's admin, and comes back naming them with the admin role.
   1. Lab view: every catalog pipeline selected in turn, its graph and plan drawn.
-  2. Coordinator: each view rendered (nodes, library, designer, distribution, runs, access).
-  3. Designer scenario: a pipeline built with the mouse from the palette - a source brick, a
-     Transform step, a sink brick, wired port to port; a wire picked up by its input end and
-     dropped in the void, another removed with its x button, both wired again - then given a
-     transformer, composed by the coordinator and validated by dtpipe. Nothing is saved.
+  2. Coordinator: each view rendered (nodes, library, a pipeline's page with its job read only, runs, access).
+  2b. Library: the row actions agree with the plans and deployments, and Open shows the pipeline's page.
+  3. No designer: no Designer entry in the navigation, no Design button, and no New or Import on the library.
 
 Usage: ui_check.py [lab-url] [out-dir]     (defaults: http://127.0.0.1:5180, .state/ui)
 The lab must be up. Exits 1 if any step fails.
 """
-import json, os, sys, time, urllib.request
+import json, os, sys, time, urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cdp import Browser
+from lab_session import ADMIN, Session
 
 URL = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:5180").rstrip("/")
 OUT = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(__file__), "..", ".state", "ui")
 os.makedirs(OUT, exist_ok=True)
 failed = False
+# The tool's own calls sign in through the IdP; the browser signs in through the IdP's form.
+SESSION = Session(URL)
 
 
 def report(ok, name, detail, shot):
@@ -35,8 +38,8 @@ def page_errors(browser):
 
 
 def lab_view(browser):
-    catalog = json.load(urllib.request.urlopen(URL + "/api/pipelines"))
-    browser.goto(URL + "/lab.html", 1)
+    catalog = SESSION.call("/api/pipelines")
+    browser.goto(URL + "/lab/", 1)
     for entry in catalog:
         pid = json.dumps(entry["id"])
         browser.js(f"{{ const s = document.getElementById('pipeline-select'); s.value = {pid};"
@@ -55,13 +58,13 @@ def lab_view(browser):
 
 
 def coordinator_views(browser):
-    library = json.load(urllib.request.urlopen(URL + "/api/library"))
+    library = SESSION.call("/api/library")
     pid = library[0]["id"] if library else ""
     checks = [
         ("nodes", "document.querySelectorAll('.node-card').length > 0 && document.querySelectorAll('.brick').length > 0"),
         ("library", f"document.querySelectorAll('table.library tr').length === {len(library) + 1}"),
-        (f"designer/{pid}", "document.querySelectorAll('.dcard').length > 0 && document.querySelector('#d-yaml')?.textContent.length > 0"),
-        (f"distribution/{pid}", "document.querySelectorAll('.xbox').length > 0 && document.querySelectorAll('.lanes svg path').length > 0"),
+        (f"library/{pid}", "document.querySelectorAll('.xbox').length > 0 && document.querySelectorAll('.lanes svg path').length > 0"
+                           " && (document.getElementById('x-job')?.textContent || '').length > 0"),
         ("runs", "!!document.getElementById('r-journal') && !!document.getElementById('r-deployments')"),
         ("access", "document.querySelectorAll('table.matrix.edit input').length > 0 && document.querySelectorAll('[data-identity]').length > 0"),
     ]
@@ -71,85 +74,76 @@ def coordinator_views(browser):
         browser.js(f"location.hash = {json.dumps('#/' + view)}")
         rendered = browser.wait_for(predicate, 20)
         errors = page_errors(browser)
-        shot = browser.shot(os.path.join(OUT, "app-" + view.split("/")[0] + ".png"))
+        shot = browser.shot(os.path.join(OUT, "app-library-detail.png" if view.startswith("library/") else "app-" + view.split("/")[0] + ".png"))
         report(rendered and not errors, "view " + view, "rendered" if rendered else "not rendered" + (f"  errors: {errors}" if errors else ""), shot)
 
 
-def designer_scenario(browser):
-    bricks = json.load(urllib.request.urlopen(URL + "/api/bricks"))
-    source = next(b for b in bricks if b["key"] == "node-1/customer-countries")
-    sink = next(b for b in bricks if b["key"] == "node-4/dim-customers")
-    draft = {"id": "ui-scenario", "model": {"title": "UI scenario", "description": "", "check": None, "steps": [], "layout": {}}}
+def library_page(browser):
+    # The list's row actions agree with the library's and the deployments' state, and Open leads to the pipeline's page.
+    entries = SESSION.call("/api/library")
+    deployments = {d["pipelineId"]: d for d in SESSION.call("/api/deployments")}
     browser.console.clear()
-    browser.js(f"window.lab.store.draft = {json.dumps(draft)}; location.hash = '#/designer/ui-scenario'")
-    if not browser.wait_for("!!document.querySelector('#d-palette .pal-item')", 20):
-        report(False, "designer scenario", "palette not rendered", "")
-        return
-
-    # Three cards from the palette's + buttons, each placed in its kind's column.
-    for selector in (f'.pal-item[data-brick="{source["key"]}"] [data-add]', '.pal-item[data-kind="transform"] [data-add]',
-                     f'.pal-item[data-brick="{sink["key"]}"] [data-add]'):
-        browser.js(f"document.querySelector({json.dumps(selector)}).click()")
-    browser.wait_for("document.querySelectorAll('.dcard').length === 3", 10)
-
-    # Wires, dragged with the mouse from an output port to an input port.
-    card = lambda alias: f'.dcard[data-alias="{alias}"]'
-    browser.drag(browser.center(card(source["id"]) + " .port.out"), browser.center(card("transform") + " .port.in"))
-    browser.drag(browser.center(card("transform") + " .port.out"), browser.center(card(sink["id"]) + " .port.in"))
-
-    wires = "document.querySelectorAll('.dedge-hit').length"
-    wired = browser.wait_for(f"{wires} === 2", 5)
-
-    # Picked up by its input end and dropped in the void: removed. Wired again.
-    sink_in = browser.center(card(sink["id"]) + " .port.in")
-    browser.drag(sink_in, (sink_in[0] + 40, sink_in[1] + 260))
-    dropped = browser.wait_for(f"{wires} === 1", 5)
-    browser.drag(browser.center(card("transform") + " .port.out"), browser.center(card(sink["id"]) + " .port.in"))
-
-    # Selected by a click on its middle, removed with its x button. Wired again.
-    mid = browser.js("""(() => { const p = [...document.querySelectorAll('.dedge-hit')].find(p => p.dataset.to === 'transform');
-        const m = p.getPointAtLength(p.getTotalLength() / 2); const r = document.getElementById('d-inner').getBoundingClientRect();
-        return [r.left + m.x, r.top + m.y]; })()""")
-    browser.mouse("mouseMoved", *mid); browser.mouse("mousePressed", *mid); browser.mouse("mouseReleased", *mid)
-    browser.wait_for("!!document.querySelector('.edge-delete')", 5)
-    x, y = browser.center(".edge-delete")
-    browser.mouse("mousePressed", x, y); browser.mouse("mouseReleased", x, y)
-    crossed = browser.wait_for(f"{wires} === 1", 5)
-    browser.drag(browser.center(card(source["id"]) + " .port.out"), browser.center(card("transform") + " .port.in"))
-    rewired = browser.wait_for(f"{wires} === 2", 5)
-    wiring = wired and dropped and crossed and rewired
-
-    # A transformer on the Transform card: project, dropping the country.
-    x, y = browser.center(card("transform") + " .dcard-sub")
-    browser.mouse("mousePressed", x, y); browser.mouse("mouseReleased", x, y)
-    browser.wait_for("!!document.querySelector('#d-inspector [data-tadd]')", 5)
-    browser.js("document.querySelector('#d-inspector [data-tadd]').click()")
-    browser.wait_for("!!document.querySelector('#d-inspector .kv[data-section=\"options\"] [data-kv-add]')", 5)
-    browser.js("document.querySelector('#d-inspector .kv[data-section=\"options\"] [data-kv-add]').click()")
-    browser.js("""{ const row = [...document.querySelectorAll('#d-inspector .kv[data-section="options"] .kv-row')].pop();
-        const [k, v] = row.querySelectorAll('input');
-        k.value = 'drop'; k.dispatchEvent(new Event('input', { bubbles: true }));
-        v.value = 'country'; v.dispatchEvent(new Event('input', { bubbles: true })); }""")
-
-    expected = [f"from: {source['id']}", "from: transform", "drop: country", "table: dim_customers"]
-    composed = browser.wait_for(
-        "(() => { const y = document.getElementById('d-yaml')?.textContent || '';"
-        f" return {json.dumps(expected)}.every(s => y.includes(s)); }})()", 15)
-    browser.js("document.getElementById('d-validate').click()")
-    validated = browser.wait_for("!!document.querySelector('.drawer-status')?.textContent.includes('dtpipe accepts it')", 60)
+    browser.js("location.hash = '#/library'")
+    browser.wait_for(f"document.querySelectorAll('table.library [data-run]').length === {len(entries)}", 20)
+    wrong = []
+    for e in entries:
+        deployment = deployments.get(e["id"])
+        row = f"[data-deploy={json.dumps(e['id'])}]"
+        deploy_off = browser.js(f"document.querySelector({json.dumps(row)}).disabled")
+        run_off = browser.js(f"document.querySelector('[data-run={json.dumps(e['id'])}]').disabled")
+        if deploy_off != (not (e["distributed"] and e["planCurrent"])):
+            wrong.append(f"{e['id']} deploy disabled={deploy_off}")
+        if run_off != (not deployment or deployment["state"] == "failed"):
+            wrong.append(f"{e['id']} run disabled={run_off}")
+    pid = entries[0]["id"]
+    browser.js(f"document.querySelector('table.library a[href=\"#/library/{pid}\"]').click()")
+    opened = browser.wait_for("document.querySelectorAll('.xbox').length > 0 && !!document.getElementById('x-deploy') && !!document.getElementById('x-run')", 20)
+    gone = browser.js("!document.querySelector('#nav a[data-view=\"distribution\"]')")
     errors = page_errors(browser)
-    shot = browser.shot(os.path.join(OUT, "designer-scenario.png"))
-    detail = f"wiring={wiring} composed={composed} validated={validated}" + (f"  errors: {errors}" if errors else "")
-    if not composed:
-        detail += "  yaml: " + (browser.js("document.getElementById('d-yaml')?.textContent") or "")[:400]
-    report(wiring and composed and validated and not errors, "designer scenario", detail, shot)
+    report(not wrong and opened and gone and not errors, "library row actions and page",
+           f"rows={len(entries)} opened={opened} no distribution entry={gone}" + (f"  wrong: {wrong}" if wrong else "") + (f"  errors: {errors}" if errors else ""), "")
+
+
+def no_designer(browser):
+    # The coordinator writes no job: the person writes it with dtpipe studio and publishes it.
+    entries = SESSION.call("/api/library")
+    browser.console.clear()
+    browser.js("location.hash = '#/library'")
+    browser.wait_for(f"document.querySelectorAll('table.library [data-run]').length === {len(entries)}", 20)
+    on_list = browser.js("({nav: !!document.querySelector('#nav a[data-view=\"designer\"]'),"
+                         " design: !![...document.querySelectorAll('a, button')].find(e => /^design$/i.test(e.textContent.trim())),"
+                         " creation: !!document.querySelector('[data-new], [data-import]')})")
+    browser.js(f"location.hash = '#/library/{entries[0]['id']}'")
+    browser.wait_for("!!document.getElementById('x-job')", 20)
+    on_page = browser.js("({design: !![...document.querySelectorAll('a, button')].find(e => /^design$/i.test(e.textContent.trim())),"
+                         " editable: !!document.querySelector('#x-job').closest('textarea')})")
+    browser.js("location.hash = '#/designer'")
+    time.sleep(0.5)
+    fallback = browser.js("document.querySelector('#nav a.active')?.dataset.view")
+    errors = page_errors(browser)
+    gone = not any(on_list.values()) and not any(on_page.values()) and fallback == "library"
+    report(gone and not errors, "no designer", f"list={on_list} page={on_page} #/designer -> {fallback}" + (f"  errors: {errors}" if errors else ""), "")
+
+
+def sign_in(browser):
+    browser.goto(URL + "/", 2)
+    on_form = browser.wait_for("!!document.querySelector('form input[name=password]')", 20)
+    if on_form:
+        browser.js(f"(() => {{ const f = document.querySelector('form'); f.user.value = {json.dumps(ADMIN)};"
+                   f" f.password.value = {json.dumps(ADMIN + 'pwd')}; f.submit(); }})()")
+    back = browser.wait_for(f"location.origin === {json.dumps(URL)} && (document.getElementById('me')?.textContent || '').includes('admin')", 30)
+    who = browser.js("document.getElementById('me')?.textContent || location.href")
+    shot = browser.shot(os.path.join(OUT, "sign-in.png"))
+    report(on_form and back and not page_errors(browser), "sign in through the IdP", who, shot)
 
 
 browser = Browser(height=1200)
 try:
+    sign_in(browser)
     lab_view(browser)
     coordinator_views(browser)
-    designer_scenario(browser)
+    library_page(browser)
+    no_designer(browser)
 finally:
     browser.close()
 sys.exit(1 if failed else 0)

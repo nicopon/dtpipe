@@ -12,7 +12,7 @@ and runs each on a different host, with the Arrow data streaming between them.
 |:---|:---|:---|
 | **`DtPipe.Coordinator`** | The control plane of a distributed pipeline: it checks a plan, knows which nodes are present, starts every fragment and every transfer between them, and gives the run one verdict | `src/DtPipe.Coordinator/` |
 | **`DtPipe.PipelineNode`** | Runs one fragment on its host as a `dtpipe` child process and relays its Arrow streams to the peers | `src/DtPipe.PipelineNode/` |
-| **The lab** | A demonstrator that hosts both libraries: a coordinator, four data nodes with their own databases and a runner, as local processes, with a page to assemble, cut, place and run a pipeline | `samples/distributed-lab/` |
+| **The lab** | A demonstrator that hosts both libraries: a coordinator, four data nodes with their own databases and a runner, as local processes or a compose stack, with a page to assemble, cut, place and run a pipeline | `samples/distributed-lab/` |
 
 The two libraries move the data over [TransportR](https://github.com/nicopon/TransportR), a
 separate transport library; nothing else in dtpipe depends on it. The lab, with its test nodes

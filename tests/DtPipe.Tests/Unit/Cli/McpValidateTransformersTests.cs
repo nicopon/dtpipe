@@ -210,6 +210,16 @@ write:
         Assert.DoesNotContain("nothing to read", json);
     }
 
+    /// <summary>The engine reads a checkpoint or a contract with no 'input:'; the validator accepts the same job.</summary>
+    [Theory]
+    [InlineData("from-checkpoint: \"0123456789abcdef\"")]
+    [InlineData("from-contract: \"orders.contract.yaml\"")]
+    public void A_Branch_Reading_A_Checkpoint_Or_A_Contract_Has_Something_To_Read(string reader)
+    {
+        var json = _tools.ValidateYamlJob($"main:\n  {reader}\n  output: \"out.csv\"\n");
+        Assert.DoesNotContain("nothing to read", json);
+    }
+
     [Fact]
     public void An_Unregistered_Type_Still_Names_The_Type()
     {

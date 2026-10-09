@@ -1,10 +1,11 @@
 {
+  "version": 2,
   "identities": [
-    { "clientId": "node-1", "displayName": "CRM node", "secret": "node-1-lab-secret", "group": "crm", "node": "node-1" },
-    { "clientId": "node-2", "displayName": "Sales node", "secret": "node-2-lab-secret", "group": "sales", "node": "node-2" },
-    { "clientId": "node-3", "displayName": "Catalog node", "secret": "node-3-lab-secret", "group": "catalog", "node": "node-3" },
-    { "clientId": "node-4", "displayName": "Warehouse node", "secret": "node-4-lab-secret", "group": "warehouse", "node": "node-4" },
-    { "clientId": "runner-1", "displayName": "Runner", "secret": "runner-1-lab-secret", "group": "runner", "node": "runner-1" }
+    { "clientId": "node-1", "name": "node-1", "description": "CRM node", "groups": ["crm"] },
+    { "clientId": "node-2", "name": "node-2", "description": "Sales node", "groups": ["sales"] },
+    { "clientId": "node-3", "name": "node-3", "description": "Catalog node", "groups": ["catalog"] },
+    { "clientId": "node-4", "name": "node-4", "description": "Warehouse node", "groups": ["warehouse"] },
+    { "clientId": "runner-1", "name": "runner-1", "description": "Runner", "groups": ["runner"] }
   ],
   "matrix": {
     "crm": ["catalog", "warehouse", "runner"],
@@ -12,6 +13,5 @@
     "catalog": ["warehouse", "runner"],
     "runner": ["warehouse"],
     "warehouse": []
-  },
-  "brickPolicies": {}
+  }
 }

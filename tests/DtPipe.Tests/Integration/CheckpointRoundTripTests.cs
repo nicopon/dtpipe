@@ -174,7 +174,7 @@ public class CheckpointRoundTripTests : IDisposable
 	public void The_Sampling_Seed_Is_Part_Of_The_Checkpoint_Identity()
 	{
 		string Key(int? seed) => DtPipe.Sessions.CheckpointKey.Compute(
-			"csv:in.csv", "SELECT *", null, 0.5, seed, 0, 1024, 0, 0);
+			"csv", "csv:in.csv", "SELECT *", null, null, 0.5, seed, 0, 1024, 0, 0);
 
 		Key(42).Should().NotBe(Key(1234));
 		Key(42).Should().Be(Key(42));

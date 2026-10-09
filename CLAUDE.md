@@ -8,7 +8,7 @@ Every rule that must hold is stated here. Each area also has a nested `CLAUDE.md
 you need when editing it, loaded when you read a file under it: `src/DtPipe/`, `src/DtPipe.Core/`,
 `src/DtPipe.Transformers/`, `src/DtPipe.Adapters/`, `src/DtPipe.Adapters.Shared/`,
 `src/DtPipe.Processors/`, `src/Apache.Arrow.Serialization/`, `src/DtPipe.Coordinator/`,
-`src/DtPipe.PipelineNode/`.
+`src/DtPipe.PipelineNode/`, `src/DtPipe.PipelineNode.Hosting/`, `src/DtPipe.Coordinator.Server/`.
 
 Each rule ends with its guard: `[CI: check]`, `[local: check]` (runs only when someone runs it), or
 `[unchecked]` (this file is the only defence).
@@ -128,7 +128,7 @@ example to make it checked]`
 
 | Project | Role |
 |---|---|
-| `src/DtPipe` | CLI entry, DI wiring, `JobService`, `ExportService`, MCP server, AI agent |
+| `src/DtPipe` | CLI entry, DI wiring, `JobService`, `ExportService`, MCP server, AI agent, studio |
 | `src/DtPipe.Core` | Abstractions, DAG engine, pipeline models, helpers |
 | `src/DtPipe.Adapters` | Readers and writers (`Adapters/<Name>/`) |
 | `src/DtPipe.Adapters.Shared` | Infrastructure shared by adapters and processors (DuckDB read path) |
@@ -136,18 +136,25 @@ example to make it checked]`
 | `src/DtPipe.Processors` | SQL stream processors (DuckDB, Merge) |
 | `src/Apache.Arrow.Ado` | Standalone ADO.NET → Arrow; depends on `Apache.Arrow.Serialization` only |
 | `src/Apache.Arrow.Serialization` | Standalone CLR↔Arrow type map + POCO serializer |
+| `src/DtPipe.Jobs` | A job file as a YAML tree (`JobYaml`), the designer's cards (`DesignService`, used by `dtpipe studio`), the coordinator's API the studio calls (`Coordinator/`) |
 | `src/DtPipe.Coordinator` | Central hub of a distributed pipeline: the control plane over TransportR |
 | `src/DtPipe.PipelineNode` | Runs one distributed-pipeline fragment under the coordinator's control |
+| `src/DtPipe.Coordinator.Server` | The coordinator's server: API, pages, planner, library, rights; lab mode for benches |
+| `src/DtPipe.Coordinator.Contracts` | Node channel messages, `BrickRules`: what coordinator and nodes share |
+| `src/DtPipe.PipelineNode.Hosting` | `AddDtPipeNode`: makes any .NET host a node (bricks, fragments, tokens) |
+| `src/DtPipe.PipelineNode.Runner` | The official runner: a node that hosts no data and runs any fragment |
 | `tests/DtPipe.Tests` | xunit.v3 unit and integration tests |
 
-`DtPipe.Core` holds abstractions, models and the engine only. `DtPipe.Coordinator` and
-`DtPipe.PipelineNode` reference TransportR as NuGet packages and stay outside `DtPipe.sln`, so
-`build.yml` never builds or tests them; `build.sh` discovers their test projects, so `agentic-ci.yml`
-does.
-They are libraries (a host owns `Program`, the identity provider and the address). Nothing else
-in `src/` names TransportR; only they, their tests and the lab do. The lab under
-`samples/distributed-lab` is a host, and it and its sample data are named nowhere else. `[CI: validate_distributed_boundary.sh — names, references and
-project shape, not behaviour]`
+`DtPipe.Core` holds abstractions, models and the engine only. The **distributed family** is every
+project named `DtPipe.Coordinator*` or `DtPipe.PipelineNode*`: it references TransportR as NuGet
+packages and stays outside `DtPipe.sln`, so `build.yml` never builds or tests it; `build.sh`
+discovers its test projects, so `agentic-ci.yml` does.
+`DtPipe.Coordinator` and `DtPipe.PipelineNode` are libraries; a host owns `Program`, authentication
+and the address, and an executable of the family is such a host. Nothing else in `src/` names
+TransportR; only the family, its tests and the lab do. The family references `DtPipe.Jobs` and no
+other project of the solution, so none of its hosts runs dtpipe in its own process. The lab under
+`samples/distributed-lab` is a host, and it and its sample data are named nowhere else.
+`[CI: validate_distributed_boundary.sh — names, references and project shape, not behaviour]`
 
 Data flow: `args` → `PipelineLexer.Parse` → `PipelineToJobConverter` → `DagOrchestrator` →
 `LinearPipelineService` → `ExportService.RunExportAsync` → `PipelineExecutor` → `IDataWriter`.
@@ -255,13 +262,16 @@ Full patterns: `EXTENDING.md`.
 transformers, segmentation and bridges. Never add an analyser beside `PipelineExecutor`; a second
 engine disagrees with the real run. The sink mirrors the real writer's capability (row or
 columnar), never a fixed sink. Sample mode suppresses schema migration, all four hooks, the cursor
-and the metrics file.
+and the metrics file. The neutralisation aims at writers that leave the process: the channel between
+two branches carries its rows as in the real run, and the bound `N` applies to a source reader
+only (`IStreamReaderFactory.IsSource`), never to a branch reading another, a processor or a
+checkpoint.
 
 Safety is a **read-side** problem: a source can mutate (`DELETE … RETURNING`, `--duck-init`,
 `ATTACH`). `SampleModeSafetyGate` classifies the resolved source SQL; `ReadOnlySessionSql` lets the
 server refuse. **Never report a guarantee that is sometimes absent as always there.**
 
-`[CI: SampleModeEquivalenceTests, SampleModeSafetyGateTests, validate_single_engine.sh,
+`[CI: SampleModeEquivalenceTests, SampleModeDagTests, SampleModeSafetyGateTests, validate_single_engine.sh,
 validate_sample_safety.sh]` Detail: `src/DtPipe/CLAUDE.md`.
 
 ### Checkpoints
@@ -289,9 +299,27 @@ by a node. The coordinator is the control plane; TransportR carries the data pla
 - **The node is a byte relay**, and the only TransportR client of its fragment. dtpipe reaches it
   through `arrow:` and references no TransportR assembly.
 - **Cancel by stream rupture, never by signal**: the node must run on Windows.
+- **A node host decides what it runs**: its `FragmentPolicy` comes from its own configuration, never
+  from a message the coordinator sends.
+- **A person never reaches the data plane, a service never `/api`**: told apart by the token's own
+  claims (a service's `sub` is its `client_id`), each scheme failing the other's tokens. `dtpipe
+  studio` reaches `/api` with a person's token, through the routes and records of
+  `DtPipe.Jobs/Coordinator`, whose contract number both sides check.
 
-`[local: DtPipe.Coordinator.Tests, DtPipe.PipelineNode.Tests]` `[unchecked: Windows]` Detail:
-`src/DtPipe.Coordinator/CLAUDE.md`, `src/DtPipe.PipelineNode/CLAUDE.md`.
+`[local: DtPipe.Coordinator.Tests, DtPipe.PipelineNode.Tests, DtPipe.Coordinator.Server.Tests, the lab's
+smoke.py]`
+`[unchecked: Windows]` Detail: `src/DtPipe.Coordinator/CLAUDE.md`, `src/DtPipe.PipelineNode/CLAUDE.md`,
+`src/DtPipe.PipelineNode.Hosting/CLAUDE.md`.
+
+### The designer writes the job, the page never does
+
+`DesignService.Compose` (`DtPipe.Jobs`) is the only writer of a designed job's YAML, and `dtpipe
+studio` the only host that designs: a page sends cards and reads back the text. The coordinator's
+pages design nothing; they read a job and show it, and what a person writes there arrives published
+from a studio. **One model, never a copy per host**: a host adds what only it knows behind
+`IBrickLookup` (the studio, the coordinator's bricks) and maps its page's fields, never a second
+composer.
+`[CI: DesignServiceTests]` `[unchecked: a page that builds YAML itself]`
 
 ### Exit codes
 

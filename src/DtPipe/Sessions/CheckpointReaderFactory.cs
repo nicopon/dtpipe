@@ -35,6 +35,9 @@ public sealed class CheckpointReaderFactory : IStreamReaderFactory
     public Type OptionsType => typeof(CheckpointReaderOptions);
     public bool RequiresQuery => false;
 
+    /// <summary>A stored checkpoint holds rows an earlier run already bounded.</summary>
+    public bool IsSource => false;
+
     /// <summary>
     /// Always false. A checkpoint is never reached by inspecting a connection string — the
     /// router selects this factory from the flag, and nothing else may claim the key.

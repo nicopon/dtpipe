@@ -36,6 +36,11 @@ public sealed class PipelineNodeOptions
     public required string FragmentJobPath { get; init; }
     public required IReadOnlyList<EdgeBinding> Edges { get; init; }
 
+    /// <summary>Variables set in the child's environment on top of this process's own, which it
+    /// inherits: what a fragment resolves through <c>${{NAME}}</c>. The host's own environment is
+    /// never changed for them.</summary>
+    public IReadOnlyDictionary<string, string>? ChildEnvironment { get; init; }
+
     /// <summary>Items per TransportR batch. Bounds sender memory together with <see cref="MaxInFlightBatches"/>:
     /// roughly <see cref="ReadChunkBytes"/> × this × <see cref="MaxInFlightBatches"/> bytes in flight.</summary>
     public int BatchSize { get; init; } = 8;
@@ -417,6 +422,8 @@ public sealed class PipelineNode : IAsyncDisposable
             RedirectStandardError = true,
             UseShellExecute = false,
         };
+        foreach (var (name, value) in options.ChildEnvironment ?? new Dictionary<string, string>())
+            psi.Environment[name] = value;
         psi.ArgumentList.Add("--job");
         psi.ArgumentList.Add(options.FragmentJobPath);
         if (bindInputPairs.Count > 0) { psi.ArgumentList.Add("--bind-input"); psi.ArgumentList.Add(string.Join(",", bindInputPairs)); }

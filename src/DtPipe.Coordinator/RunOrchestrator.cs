@@ -100,6 +100,23 @@ public sealed class RunOrchestratorOptions
     public int TransferTimeoutMs { get; init; } = 20_000;
 }
 
+/// <summary>
+/// A run refused because a fragment it names is already in another run in flight: a pipeline node
+/// serves one run, so which runs may overlap is the caller's to decide before it asks.
+/// </summary>
+public sealed class FragmentInFlightException : Exception
+{
+    public string FragmentName { get; }
+    public string RunId { get; }
+
+    public FragmentInFlightException(string fragmentName, string runId)
+        : base($"Run refused, fragment '{fragmentName}' is already in run '{runId}'.")
+    {
+        FragmentName = fragmentName;
+        RunId = runId;
+    }
+}
+
 public interface IRunOrchestrator
 {
     Task<RunResult> RunAsync(RunSpec spec, CancellationToken ct = default);
@@ -115,8 +132,10 @@ public interface IRunOrchestrator
 /// a fragment's own local failure, the caller's cancellation, or - once a fragment has failed
 /// <see cref="FaultOrigin.Remote"/> - <see cref="RunOrchestratorOptions.RemoteFailureGrace"/> for its peers to
 /// report. A run in which nothing has failed has no clock.
-/// One run in flight at a time: a second call to <see cref="RunAsync"/> is refused outright, not
-/// queued - concurrent runs are not supported yet.
+/// Several runs may be in flight at once, each with its own state, found by run id; everything that
+/// ends a run (a lost fragment, a local failure, a cancellation, the grace) ends that run alone. A run
+/// naming a fragment already in another run in flight is refused (<see cref="FragmentInFlightException"/>),
+/// never queued: which runs may overlap is the caller's choice.
 /// </summary>
 public sealed class RunOrchestrator : IRunOrchestrator
 {
@@ -129,14 +148,19 @@ public sealed class RunOrchestrator : IRunOrchestrator
     private readonly RunOrchestratorOptions _options;
     private readonly ILogger<RunOrchestrator> _logger;
 
-    private readonly SemaphoreSlim _singleRun = new(1, 1);
+    /// <summary>One run's state, built before its admission and dropped from the map before its abort is disposed.</summary>
+    private sealed class ActiveRun
+    {
+        public required RunSpec Spec { get; init; }
+        public required Dictionary<string, TaskCompletionSource> Ready { get; init; }
+        public required Dictionary<string, TaskCompletionSource<FragmentExitReport>> Exited { get; init; }
+        public required CancellationTokenSource Abort { get; init; }
+        public TaskCompletionSource RemoteFailure { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
 
-    // Live only while a run is in flight; (re)built at the start of RunAsync, cleared in its finally.
-    private string? _activeRunId;
-    private Dictionary<string, TaskCompletionSource>? _ready;
-    private Dictionary<string, TaskCompletionSource<FragmentExitReport>>? _exited;
-    private CancellationTokenSource? _abort;
-    private TaskCompletionSource? _remoteFailure;
+    private readonly object _lock = new();
+    private readonly Dictionary<string, ActiveRun> _runs = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _runByFragment = new(StringComparer.Ordinal);
 
     public RunOrchestrator(
         AdmissionGate admission,
@@ -160,23 +184,11 @@ public sealed class RunOrchestrator : IRunOrchestrator
 
     public async Task<RunResult> RunAsync(RunSpec spec, CancellationToken ct = default)
     {
-        if (!await _singleRun.WaitAsync(0, ct))
-            throw new InvalidOperationException("A run is already in flight; concurrent runs are not supported.");
-
+        var run = Begin(spec, ct);
         try
         {
-            _activeRunId = spec.RunId;
-            _ready = spec.Fragments.ToDictionary(
-                p => p.FragmentName, _ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
-                StringComparer.Ordinal);
-            _exited = spec.Fragments.ToDictionary(
-                p => p.FragmentName, _ => new TaskCompletionSource<FragmentExitReport>(TaskCreationOptions.RunContinuationsAsynchronously),
-                StringComparer.Ordinal);
-            _remoteFailure = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-
+            var abort = run.Abort;
             var fragmentNames = spec.Fragments.Select(p => p.FragmentName).ToList();
-            using var abort = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            _abort = abort;
             string? lostFragment = null;
             string? wiringFailure = null;
             var launched = new HashSet<string>(StringComparer.Ordinal);
@@ -210,7 +222,7 @@ public sealed class RunOrchestrator : IRunOrchestrator
                 if (clientIdByFragment is null || !clientIdByFragment.TryGetValue(fragment, out var admittedClientId)
                     || admittedClientId != clientId)
                     return;
-                if (_exited!.TryGetValue(fragment, out var tcs) && tcs.Task.IsCompleted) return;
+                if (run.Exited.TryGetValue(fragment, out var tcs) && tcs.Task.IsCompleted) return;
                 lostFragment ??= fragment;
                 abort.Cancel();
             }
@@ -247,11 +259,11 @@ public sealed class RunOrchestrator : IRunOrchestrator
                 {
                     try
                     {
-                        await Task.WhenAll(_ready.Values.Select(t => t.Task)).WaitAsync(_options.ReadyTimeout, abort.Token);
+                        await Task.WhenAll(run.Ready.Values.Select(t => t.Task)).WaitAsync(_options.ReadyTimeout, abort.Token);
                     }
                     catch (TimeoutException)
                     {
-                        lostFragment ??= spec.Fragments.Select(p => p.FragmentName).FirstOrDefault(f => !_ready[f].Task.IsCompleted);
+                        lostFragment ??= spec.Fragments.Select(p => p.FragmentName).FirstOrDefault(f => !run.Ready[f].Task.IsCompleted);
                         abort.Cancel();
                     }
                     catch (OperationCanceledException) { /* ct, FragmentLost or a local failure already set abort */ }
@@ -310,16 +322,16 @@ public sealed class RunOrchestrator : IRunOrchestrator
                 {
                     try
                     {
-                        var allExited = Task.WhenAll(_exited.Values.Select(t => t.Task));
-                        var remoteFailure = _remoteFailure.Task;
+                        var allExited = Task.WhenAll(run.Exited.Values.Select(t => t.Task));
+                        var remoteFailure = run.RemoteFailure.Task;
                         if (await Task.WhenAny(allExited, remoteFailure).WaitAsync(abort.Token) == remoteFailure && !allExited.IsCompleted)
                         {
                             try { await allExited.WaitAsync(_options.RemoteFailureGrace, abort.Token); }
                             catch (TimeoutException)
                             {
-                                var reported = fragmentNames.Where(f => _exited[f].Task.IsCompleted).ToHashSet(StringComparer.Ordinal);
+                                var reported = fragmentNames.Where(f => run.Exited[f].Task.IsCompleted).ToHashSet(StringComparer.Ordinal);
                                 var failedRemotely = fragmentNames
-                                    .Where(f => _exited[f].Task.IsCompletedSuccessfully && _exited[f].Task.Result.Origin == FaultOrigin.Remote)
+                                    .Where(f => run.Exited[f].Task.IsCompletedSuccessfully && run.Exited[f].Task.Result.Origin == FaultOrigin.Remote)
                                     .ToHashSet(StringComparer.Ordinal);
                                 unresponsive.UnionWith(PeersOwingAReport(spec.Edges, failedRemotely, reported));
                                 _logger.LogWarning(
@@ -339,7 +351,7 @@ public sealed class RunOrchestrator : IRunOrchestrator
                 if (abort.IsCancellationRequested)
                 {
                     await TeardownAsync(
-                        spec, lostFragment, clientIdByFragment, launched, openTransfers,
+                        run, lostFragment, clientIdByFragment, launched, openTransfers,
                         totalEdgesByFragment, wiredEdgesByFragment, cancelledFragments);
                 }
             }
@@ -349,20 +361,61 @@ public sealed class RunOrchestrator : IRunOrchestrator
             }
 
             var reports = fragmentNames
-                .Where(f => _exited[f].Task.IsCompletedSuccessfully)
-                .ToDictionary(f => f, f => _exited[f].Task.Result, StringComparer.Ordinal);
+                .Where(f => run.Exited[f].Task.IsCompletedSuccessfully)
+                .ToDictionary(f => f, f => run.Exited[f].Task.Result, StringComparer.Ordinal);
 
             return DetermineOutcome(reports, spec.Edges, fragmentNames, cancelledFragments, ct.IsCancellationRequested, wiringFailure, unresponsive);
         }
         finally
         {
-            _activeRunId = null;
-            _abort = null;
-            _remoteFailure = null;
-            _ready = null;
-            _exited = null;
-            _singleRun.Release();
+            End(run);
         }
+    }
+
+    /// <summary>
+    /// Claims the run's id and every fragment it names in one step, so two runs racing for one
+    /// fragment never both pass: the second is refused, naming the run that holds it.
+    /// </summary>
+    private ActiveRun Begin(RunSpec spec, CancellationToken ct)
+    {
+        lock (_lock)
+        {
+            if (_runs.ContainsKey(spec.RunId))
+                throw new ArgumentException($"A run named '{spec.RunId}' is already in flight.", nameof(spec));
+            foreach (var pin in spec.Fragments)
+                if (_runByFragment.TryGetValue(pin.FragmentName, out var holder))
+                    throw new FragmentInFlightException(pin.FragmentName, holder);
+
+            var run = new ActiveRun
+            {
+                Spec = spec,
+                Ready = spec.Fragments.ToDictionary(
+                    p => p.FragmentName, _ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
+                    StringComparer.Ordinal),
+                Exited = spec.Fragments.ToDictionary(
+                    p => p.FragmentName, _ => new TaskCompletionSource<FragmentExitReport>(TaskCreationOptions.RunContinuationsAsynchronously),
+                    StringComparer.Ordinal),
+                Abort = CancellationTokenSource.CreateLinkedTokenSource(ct),
+            };
+            _runs[spec.RunId] = run;
+            foreach (var pin in spec.Fragments) _runByFragment[pin.FragmentName] = spec.RunId;
+            return run;
+        }
+    }
+
+    private void End(ActiveRun run)
+    {
+        lock (_lock)
+        {
+            _runs.Remove(run.Spec.RunId);
+            foreach (var pin in run.Spec.Fragments) _runByFragment.Remove(pin.FragmentName);
+        }
+        run.Abort.Dispose();
+    }
+
+    private ActiveRun? Find(string runId)
+    {
+        lock (_lock) return _runs.GetValueOrDefault(runId);
     }
 
     private static RunResult CancelledByRequester(IReadOnlyList<RunEdge> edges) =>
@@ -377,7 +430,7 @@ public sealed class RunOrchestrator : IRunOrchestrator
     /// <c>FaultOrigin.Remote</c> consequence a mid-flow peer death already produces.
     /// </summary>
     private async Task TeardownAsync(
-        RunSpec spec, string? lostFragment, Dictionary<string, Guid> clientIdByFragment, HashSet<string> launched,
+        ActiveRun run, string? lostFragment, Dictionary<string, Guid> clientIdByFragment, HashSet<string> launched,
         List<string> openTransfers, Dictionary<string, int> totalEdgesByFragment,
         Dictionary<string, int> wiredEdgesByFragment, HashSet<string> cancelledFragments)
     {
@@ -398,7 +451,7 @@ public sealed class RunOrchestrator : IRunOrchestrator
         foreach (var fragment in launched)
         {
             if (fragment == lostFragment) continue;
-            if (_exited![fragment].Task.IsCompleted) continue;
+            if (run.Exited[fragment].Task.IsCompleted) continue;
 
             var connectionId = await ResolveConnectionIdAsync(clientIdByFragment[fragment]);
             if (connectionId is null) { unreachable.Add(fragment); continue; }
@@ -406,13 +459,13 @@ public sealed class RunOrchestrator : IRunOrchestrator
             var isFullyWired = totalEdgesByFragment.TryGetValue(fragment, out var total) && total > 0
                 && wiredEdgesByFragment.GetValueOrDefault(fragment) == total;
             if (!isFullyWired) cancelledFragments.Add(fragment);
-            try { await _hub.Clients.Client(connectionId).SendAsync("Cancel", spec.RunId); }
+            try { await _hub.Clients.Client(connectionId).SendAsync("Cancel", run.Spec.RunId); }
             catch (Exception ex) { _logger.LogWarning(ex, "Cancel delivery failed for fragment {Fragment}", fragment); }
         }
 
         var pending = launched
-            .Where(f => !unreachable.Contains(f) && !_exited![f].Task.IsCompleted)
-            .Select(f => _exited![f].Task).ToArray();
+            .Where(f => !unreachable.Contains(f) && !run.Exited[f].Task.IsCompleted)
+            .Select(f => run.Exited[f].Task).ToArray();
         if (pending.Length > 0)
         {
             try { await Task.WhenAll(pending).WaitAsync(_options.ExitTimeout); }
@@ -436,7 +489,7 @@ public sealed class RunOrchestrator : IRunOrchestrator
 
     public Task OnReadyAsync(string runId, string fragment)
     {
-        if (runId != _activeRunId || _ready is null || !_ready.TryGetValue(fragment, out var tcs))
+        if (Find(runId) is not { } run || !run.Ready.TryGetValue(fragment, out var tcs))
         {
             _logger.LogWarning("Ready from {Fragment} for run {RunId}, no such run in flight", fragment, runId);
             return Task.CompletedTask;
@@ -449,7 +502,7 @@ public sealed class RunOrchestrator : IRunOrchestrator
         string runId, string fragment, int exitCode, string origin, string? firstFault,
         IReadOnlyDictionary<string, long> rowCounts)
     {
-        if (runId != _activeRunId || _exited is null || !_exited.TryGetValue(fragment, out var tcs))
+        if (Find(runId) is not { } run || !run.Exited.TryGetValue(fragment, out var tcs))
         {
             _logger.LogWarning("Exited from {Fragment} for run {RunId}, no such run in flight", fragment, runId);
             return Task.CompletedTask;
@@ -461,16 +514,16 @@ public sealed class RunOrchestrator : IRunOrchestrator
 
         // A fragment whose transfer failed under it is not the cause of anything yet: its peers owe the
         // run their own report, within RemoteFailureGrace.
-        if (parsedOrigin == FaultOrigin.Remote) _remoteFailure?.TrySetResult();
+        if (parsedOrigin == FaultOrigin.Remote) run.RemoteFailure.TrySetResult();
 
         // A fragment whose own process failed has decided the run: the verdict is Failed whatever
         // its peers do next. Waiting for them to notice would leave a peer with nothing to write
         // (an aggregate over a slow source) holding the verdict until its source ends, since the
         // torn-down transfer never reaches a child that does not write. The teardown tells every
-        // fragment still running to Cancel.
+        // fragment of this run still running to Cancel; another run in flight is untouched.
         if (parsedOrigin == FaultOrigin.Local)
         {
-            try { _abort?.Cancel(); }
+            try { run.Abort.Cancel(); }
             catch (ObjectDisposedException) { /* the run already ended */ }
         }
         return Task.CompletedTask;

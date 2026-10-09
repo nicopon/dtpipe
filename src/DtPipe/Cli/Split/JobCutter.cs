@@ -1,8 +1,11 @@
+using System.Reflection;
 using DtPipe.Cli.Pipeline;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Pipelines;
 using DtPipe.Core.Security;
+using DtPipe.Jobs;
+using YamlDotNet.Serialization.NamingConventions;
 
 namespace DtPipe.Cli.Split;
 
@@ -102,35 +105,20 @@ public static class JobCutter
 
         var options = SplitProviderOptions(job, readerFactories, writerFactories);
 
-        var producerJob = job with
+        // The producer has no target of its own; the consumer reads a finished stream, so nothing
+        // there still has a source to bound, resume from or sample.
+        var producerJob = Without(job, BranchSides.Write.Concat(BranchSides.Diagnostics)) with
         {
             Output = Link,
             Transformers = upstream.Count > 0 ? upstream : null,
             ProviderOptions = options.Reader,
-            // Write side, and the producer has no target of its own.
-            Prefix = null,
-            Checkpoint = null,
-            ContractSave = null,
-            MetricsPath = null,
-            LogPath = null,
         };
 
-        var consumerJob = job with
+        var consumerJob = Without(job, BranchSides.Read.Concat(BranchSides.Diagnostics)) with
         {
             Input = Link,
             Transformers = downstream.Count > 0 ? downstream : null,
             ProviderOptions = options.Writer,
-            // Read side: the consumer reads a finished stream, so nothing here still has a source
-            // to bound, resume from or sample.
-            Cursor = null,
-            State = null,
-            Limit = 0,
-            SamplingRate = 1.0,
-            SamplingSeed = null,
-            FromCheckpoint = null,
-            FromContract = null,
-            MetricsPath = null,
-            LogPath = null,
         };
 
         var consumer = new Dictionary<string, JobDefinition>(jobs, StringComparer.OrdinalIgnoreCase)
@@ -238,8 +226,38 @@ public static class JobCutter
         var unplaceable = new List<string>();
         if (job.ProviderOptions is not { Count: > 0 }) return (null, null, unplaceable);
 
-        var reader = PipelineToJobConverter.ResolveFactory(job.Input, readerFactories);
-        var writer = PipelineToJobConverter.ResolveFactory(job.Output, writerFactories);
+        var owners = OwnersOf(job.Input, job.Output, job.ProviderOptions.Keys, readerFactories, writerFactories);
+        unplaceable.AddRange(owners.Unplaceable);
+
+        var readerBlocks = new Dictionary<string, Dictionary<string, object?>>(StringComparer.OrdinalIgnoreCase);
+        var writerBlocks = new Dictionary<string, Dictionary<string, object?>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (key, entries) in job.ProviderOptions)
+        {
+            if (owners.Reader.Contains(key)) readerBlocks[key] = entries;
+            else if (owners.Writer.Contains(key)) writerBlocks[key] = entries;
+        }
+
+        return (readerBlocks.Count > 0 ? readerBlocks : null,
+                writerBlocks.Count > 0 ? writerBlocks : null,
+                unplaceable);
+    }
+
+    /// <summary>
+    /// Which of a branch's provider-options blocks its reader owns and which its writer owns, from
+    /// the components behind <paramref name="input"/> and <paramref name="output"/>. A block neither
+    /// owns is listed in <c>Unplaceable</c>, never guessed at. The one reading of a block's side,
+    /// for a cut and for the designer's source and sink cards.
+    /// </summary>
+    public static (IReadOnlySet<string> Reader, IReadOnlySet<string> Writer, IReadOnlyList<string> Unplaceable) OwnersOf(
+        string? input,
+        string? output,
+        IEnumerable<string> blocks,
+        IEnumerable<IStreamReaderFactory> readerFactories,
+        IEnumerable<IDataWriterFactory> writerFactories)
+    {
+        var reader = PipelineToJobConverter.ResolveFactory(input, readerFactories);
+        var writer = PipelineToJobConverter.ResolveFactory(output, writerFactories);
 
         var readerKeys = KeysOwnedBy(reader?.ComponentName, "-reader");
         var writerKeys = KeysOwnedBy(writer?.ComponentName, "-writer");
@@ -254,19 +272,30 @@ public static class JobCutter
             writerKeys.Remove(writer.ComponentName);
         }
 
-        var readerBlocks = new Dictionary<string, Dictionary<string, object?>>(StringComparer.OrdinalIgnoreCase);
-        var writerBlocks = new Dictionary<string, Dictionary<string, object?>>(StringComparer.OrdinalIgnoreCase);
+        var unplaceable = blocks.Where(b => !readerKeys.Contains(b) && !writerKeys.Contains(b)).ToList();
+        return (readerKeys, writerKeys, unplaceable);
+    }
 
-        foreach (var (key, entries) in job.ProviderOptions)
+    private static readonly JobDefinition Unset = new();
+
+    private static readonly Dictionary<string, PropertyInfo> KeyProperties = typeof(JobDefinition).GetProperties()
+        .ToDictionary(p => HyphenatedNamingConvention.Instance.Apply(p.Name), StringComparer.Ordinal);
+
+    /// <summary>
+    /// A copy of the job with each key, named as a job file names it, back at its default. A key
+    /// <see cref="JobDefinition"/> does not have throws: a side list that names nothing is a list
+    /// that drifted.
+    /// </summary>
+    internal static JobDefinition Without(JobDefinition job, IEnumerable<string> keys)
+    {
+        var copy = job with { };
+        foreach (var key in keys)
         {
-            if (readerKeys.Contains(key)) readerBlocks[key] = entries;
-            else if (writerKeys.Contains(key)) writerBlocks[key] = entries;
-            else unplaceable.Add(key);
+            var property = KeyProperties.TryGetValue(key, out var p) ? p
+                : throw new InvalidOperationException($"'{key}' is not a branch key.");
+            property.SetValue(copy, property.GetValue(Unset));
         }
-
-        return (readerBlocks.Count > 0 ? readerBlocks : null,
-                writerBlocks.Count > 0 ? writerBlocks : null,
-                unplaceable);
+        return copy;
     }
 
     private static HashSet<string> KeysOwnedBy(string? component, string suffix)

@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- What the coordinator and every node host share: the node channel's messages, and BrickRules
+         over DtPipe.Jobs' JobYaml, so both read a branch the same way. No TransportR: the channel is
+         plain SignalR. -->
+    <ProjectReference Include="..\DtPipe.Jobs\DtPipe.Jobs.csproj" />
+  </ItemGroup>
+
+</Project>

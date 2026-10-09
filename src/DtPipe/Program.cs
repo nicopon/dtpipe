@@ -120,12 +120,9 @@ class Program
 
 			if (!string.IsNullOrEmpty(parsedPipeline.Globals.ExportJobFile))
 			{
-				// A binding is a run-specific location, not something to commit: exporting it
-				// would write a path meaningful only to this run into a file meant for git.
-				if (!string.IsNullOrEmpty(parsedPipeline.Globals.BindInput) || !string.IsNullOrEmpty(parsedPipeline.Globals.BindOutput))
+				if (CommandLineJob.BindingRefusal(parsedPipeline.Globals) is { } refusal)
 				{
-					Console.Error.WriteLine("[ERROR] --export-job cannot be combined with --bind-input/--bind-output: "
-						+ "a binding names a run-specific location, and exporting it would write that path into a file meant for git.");
+					Console.Error.WriteLine($"[ERROR] {refusal}");
 					return 1;
 				}
 
@@ -325,6 +322,7 @@ class Program
 		}
 
 		services.AddSingleton<DtPipe.Core.Expressions.IStringContentResolver, DtPipe.Cli.Expressions.CompositeStringContentResolver>();
+		services.AddSingleton<DtPipe.Core.Expressions.IStringInterpolator, DtPipe.Cli.Expressions.LaunchValueInterpolator>();
 		services.AddSingleton<DtPipe.Core.Expressions.IStringInterpolator, DtPipe.Cli.Expressions.EnvVarInterpolator>();
 		services.AddSingleton<DtPipe.Core.Expressions.IStringInterpolator, DtPipe.Cli.Security.KeyringInterpolator>();
 		services.AddSingleton<DtPipe.Core.Expressions.IStringInterpolator, DtPipe.Cli.Incremental.CursorInterpolator>();

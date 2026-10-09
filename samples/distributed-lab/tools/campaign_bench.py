@@ -33,10 +33,12 @@ def lab_processes():
         base = os.path.basename(comm)
         if base == "dotnet":
             args = _args(pid)
-            if "Lab.NodeHost.dll" in args:
+            if "Lab.NodeHost.dll" in args or "DtPipe.PipelineNode.Runner.dll" in args:
                 rows.append((pid, ppid, "host", args))
-            elif "Lab.Coordinator.dll" in args:
+            elif "DtPipe.Coordinator.Server.dll" in args:
                 rows.append((pid, ppid, "coordinator", args))
+            elif "Lab.Idp.dll" in args:
+                rows.append((pid, ppid, "idp", args))
         elif base == "toxiproxy-server":
             rows.append((pid, ppid, "toxiproxy", ""))
         elif base == "dtpipe":
@@ -60,7 +62,7 @@ def known_pids(state_dir, names):
 def foreign(state_dir, node_names):
     """What runs that the lab's pid files do not name, and every toxiproxy and fragment child: between campaigns
     there are none."""
-    known = known_pids(state_dir, list(node_names) + ["coordinator"])
+    known = known_pids(state_dir, list(node_names) + ["coordinator", "idp"])
     return [row for row in lab_processes()
             if row[2] in ("toxiproxy", "fragment child") or row[0] not in known]
 
@@ -106,7 +108,7 @@ def busy_machine(state_dir, node_names, transportr_dir=None):
     while pid and pid not in mine:
         mine.add(pid)
         pid = parents.get(pid, 0)
-    lab = {row[0] for row in lab_processes()} | known_pids(state_dir, list(node_names) + ["coordinator"])
+    lab = {row[0] for row in lab_processes()} | known_pids(state_dir, list(node_names) + ["coordinator", "idp"])
     found = []
     root = os.path.realpath(transportr_dir) + os.sep if transportr_dir else None
     for pid, cpu, comm, args in _ps_full():
@@ -174,7 +176,8 @@ def frozen_problems(repo, dtpipe, state_dir, node_names, expected=None):
                  "Directory.Build.props").splitlines()
     if dirty:
         problems.append(f"{len(dirty)} tracked file(s) changed since the frozen commit, e.g. {dirty[0].strip()}")
-    for dll in (os.path.join("node", "Lab.NodeHost.dll"), os.path.join("coordinator", "Lab.Coordinator.dll")):
+    for dll in (os.path.join("node", "Lab.NodeHost.dll"), os.path.join("runner", "DtPipe.PipelineNode.Runner.dll"),
+                os.path.join("coordinator", "DtPipe.Coordinator.Server.dll"), os.path.join("idp", "Lab.Idp.dll")):
         path = os.path.join(state_dir, "bin", dll)
         try:
             with open(path, "rb") as f:

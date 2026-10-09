@@ -3,6 +3,7 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
+using DtPipe.Jobs;
 using Xunit;
 
 namespace DtPipe.Tests.Unit.Cli;
@@ -133,6 +134,15 @@ public class JobCutterTests
         Assert.Equal(1.0, consumer.SamplingRate);
         Assert.Null(consumer.SamplingSeed);
         Assert.Null(consumer.FromContract);
+    }
+
+    [Fact]
+    public void Every_Key_A_Side_Names_Is_A_Branch_Key()
+    {
+        foreach (var key in BranchSides.Read.Concat(BranchSides.Write).Concat(BranchSides.Diagnostics))
+            JobCutter.Without(new JobDefinition(), [key]);
+
+        Assert.Throws<InvalidOperationException>(() => JobCutter.Without(new JobDefinition(), ["no-such-key"]));
     }
 
     [Fact]

@@ -28,6 +28,8 @@ import campaign_security as sec  # noqa: E402
 
 URL, DTPIPE, STATE, CAMPAIGN = _ARGS[1].rstrip("/"), _ARGS[2], _ARGS[3], _ARGS[4]
 CELLS = _ARGS[5:]
+# The IdP lab.sh starts: every token comes from it, the coordinator only trusts it.
+IDP_URL = f"http://127.0.0.1:{os.environ.get('LAB_IDP_PORT', '5190')}"
 LAB = os.path.dirname(HERE)
 OUT = os.path.join(STATE, "campaign", CAMPAIGN)
 NODES = ["node-1", "node-2", "node-3", "node-4", "runner-1"]
@@ -159,6 +161,53 @@ def hosts_online():
     return len(nodes) == len(NODES) and all(n["online"] for n in nodes)
 
 
+def await_hosts(what, timeout=120):
+    """Waits for the five hosts, and names the ones still offline when they do not come: the reference check reads the
+    warehouse through node-4, so an I4 that follows a missing host must say which one."""
+    try:
+        S.until(hosts_online, timeout, what)
+    except RuntimeError:
+        try:
+            online = {n["name"] for n in S.call("/api/nodes") if n["online"]}
+            missing = f"offline {[n for n in NODES if n not in online]}"
+        except Exception as e:
+            missing = f"the coordinator does not answer: {str(e)[:80]}"
+        raise RuntimeError(f"timed out waiting for {what}: {missing}") from None
+
+
+def _gone(pid):
+    """Whether a process has exited; reaps it when it is a child of this harness, so a zombie never counts as alive."""
+    try:
+        if os.waitpid(pid, os.WNOHANG)[0] == pid:
+            return True
+    except ChildProcessError:
+        pass
+    try:
+        os.kill(pid, 0)
+        return False
+    except ProcessLookupError:
+        return True
+
+
+def stop_pid(pid, grace=10):
+    """SIGTERM, then SIGKILL if the process is still there after `grace` seconds; returns once it is gone."""
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    deadline = time.time() + grace
+    while time.time() < deadline:
+        if _gone(pid):
+            return
+        time.sleep(0.2)
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    while not _gone(pid):
+        time.sleep(0.1)
+
+
 def restart_lab():
     lab = os.path.join(LAB, "lab.sh")
     subprocess.run([lab, "down"], capture_output=True, timeout=120)
@@ -168,13 +217,16 @@ def restart_lab():
 
 
 def recover():
-    """Bring the lab back to nine online hosts and no deployment, the way an operator would."""
+    """Bring the lab back to five online hosts and no deployment, the way an operator would."""
     wait_ports_free()
     if queue_is_stuck(S.call):
         restart_lab()
         return "lab restarted (a run stayed in the queue)"
     if not hosts_online():
-        subprocess.run([os.path.join(LAB, "lab.sh"), "nodes", "strict"], capture_output=True, timeout=300)
+        out = subprocess.run([os.path.join(LAB, "lab.sh"), "nodes", "strict"], capture_output=True, text=True, timeout=300)
+        if out.returncode != 0:
+            raise RuntimeError(f"lab.sh nodes strict exited {out.returncode}: {(out.stderr or out.stdout).strip()[-150:]}")
+        await_hosts("the hosts after a restart")
         return "hosts restarted"
     for d in S.call("/api/deployments"):
         undeploy(d["pipelineId"])
@@ -403,10 +455,25 @@ def stop_start_coordinator(*extra):
     os.kill(pid_of("coordinator"), signal.SIGKILL)
     time.sleep(2)
     log = open(os.path.join(STATE, "logs", "coordinator.log"), "a")
-    p = subprocess.Popen(["dotnet", os.path.join(STATE, "bin", "coordinator", "Lab.Coordinator.dll"), "--urls", URL,
-                          "--lab-root", LAB, "--state", STATE, "--dtpipe", DTPIPE, *extra], stdout=log, stderr=log, start_new_session=True)
+    p = subprocess.Popen([os.path.join(LAB, "lab.sh"), "exec-coordinator", *extra],
+                         env=os.environ | {"DTPIPE": DTPIPE}, stdout=log, stderr=log, start_new_session=True)
     with open(os.path.join(STATE, "run", "coordinator.pid"), "w") as f:
         f.write(str(p.pid))
+
+
+def stop_start_idp(*extra):
+    """The IdP is gone before `lab.sh idp` starts another: a live one would be kept as "already running"."""
+    stop_pid(pid_of("idp"))
+    subprocess.run([os.path.join(LAB, "lab.sh"), "idp", *extra], capture_output=True, timeout=120, check=True)
+
+
+def idp_token_lifetime():
+    """The lifetime, in seconds, of the token the IdP issues now to node-1's credentials."""
+    node = json.load(open(os.path.join(LAB, "nodes", "node-1.json")))
+    status, answer = sec.token_answer(IDP_URL, node["clientId"], node["secret"])
+    if "expires_in" not in answer:
+        raise RuntimeError(f"no token for node-1 (HTTP {status})")
+    return answer["expires_in"]
 
 
 def survivors():
@@ -561,25 +628,28 @@ def toxic_remove(proxy, name):
         toxi("toxic", "remove", "-n", name + suffix, proxy)
 
 
-def hosts_through_proxies():
-    """Undo everything, then start the five hosts pointed at their own proxy in front of the coordinator."""
+def start_hosts(coordinator_of, what):
+    """Undo everything, stop the five hosts, then start each again in strict mode, pointed at `coordinator_of(node)`.
+    A host started here fetches its first token from the IdP as it is now."""
     for d in S.call("/api/deployments"):
         undeploy(d["pipelineId"])
     for n in NODES:
         try:
-            os.kill(pid_of(n), signal.SIGTERM)
-        except Exception:
+            stop_pid(pid_of(n))
+        except (OSError, ValueError):
             pass
-    time.sleep(3)
     for n in NODES:
         log = open(os.path.join(STATE, "logs", n + ".log"), "a")
-        env = {k: v for k, v in os.environ.items() if k != "LAB_NODE_SANDBOX"}
-        p = subprocess.Popen(["dotnet", os.path.join(STATE, "bin", "node", "Lab.NodeHost.dll"), "--config", os.path.join(LAB, "nodes", n + ".json"),
-                              "--state", STATE, "--coordinator", f"http://127.0.0.1:{PORTS[n]}", "--dtpipe", DTPIPE],
+        env = {k: v for k, v in os.environ.items() if k != "LAB_NODE_SANDBOX"} | {"DTPIPE": DTPIPE}
+        p = subprocess.Popen([os.path.join(LAB, "lab.sh"), "exec-node", n, coordinator_of(n)],
                              stdout=log, stderr=log, env=env, start_new_session=True)
         with open(os.path.join(STATE, "run", n + ".pid"), "w") as f:
             f.write(str(p.pid))
-    S.until(hosts_online, 120, "the hosts through their proxies")
+    await_hosts(what)
+
+
+def hosts_through_proxies():
+    start_hosts(lambda n: f"http://127.0.0.1:{PORTS[n]}", "the hosts through their proxies")
 
 
 def bench_selftest():
@@ -767,24 +837,31 @@ def expect_status(what, actual, allowed=(401, 403)):
 
 
 def check_S2():
+    """The statuses are recorded: which of 401 and 403 the coordinator answers is what its default policy decides."""
     base = URL
     bogus = sec.bogus_jwt()
-    expect_status("command hub negotiate, no token", sec.negotiate_status(base, sec.COMMAND_HUB, None))
-    expect_status("command hub negotiate, unsigned token", sec.negotiate_status(base, sec.COMMAND_HUB, bogus))
-    expect_status("lab hub negotiate, no token", sec.negotiate_status(base, sec.LAB_HUB, None))
-    expect_status("lab hub negotiate, unsigned token", sec.negotiate_status(base, sec.LAB_HUB, bogus))
-    expect_status("data plane, no token", sec.stream_status(base, None))
-    expect_status("data plane, unsigned token", sec.stream_status(base, bogus))
+    seen = []
+    for what, status in (
+            ("command hub negotiate, no token", sec.negotiate_status(base, sec.COMMAND_HUB, None)),
+            ("command hub negotiate, unsigned token", sec.negotiate_status(base, sec.COMMAND_HUB, bogus)),
+            ("node channel negotiate, no token", sec.negotiate_status(base, sec.LAB_HUB, None)),
+            ("node channel negotiate, unsigned token", sec.negotiate_status(base, sec.LAB_HUB, bogus)),
+            ("data plane, no token", sec.stream_status(base, None)),
+            ("data plane, unsigned token", sec.stream_status(base, bogus))):
+        expect_status(what, status)
+        seen.append(status)
+    issued = []
     for label, client, secret in (("wrong secret", "node-1", "not-the-secret"), ("unknown client", "node-9", "x")):
-        status, token = sec.token_for(base, client, secret)
+        status, token = sec.token_for(IDP_URL, client, secret)
         if token is not None or status not in (400, 401):
             raise Violation(f"token endpoint, {label}: HTTP {status}, token issued={token is not None}")
-    return "six entry points and two credential failures refused"
+        issued.append(status)
+    return f"six entry points refused (HTTP {seen}) and two credential failures (HTTP {issued})"
 
 
 def check_S4():
     node = json.load(open(os.path.join(LAB, "nodes", "node-1.json")))
-    status, token = sec.token_for(URL, node["clientId"], node["secret"])
+    status, token = sec.token_for(IDP_URL, node["clientId"], node["secret"])
     if not token:
         raise RuntimeError(f"no token for node-1 (HTTP {status})")
     hub = sec.LongPollingHub(URL, sec.COMMAND_HUB, token).open()
@@ -805,32 +882,41 @@ def check_S4():
 
 def check_S1():
     out = subprocess.run([sys.executable, os.path.join(LAB, "smoke.py"), URL, DTPIPE, STATE, "rights"], capture_output=True, text=True, timeout=300)
-    line = next((l for l in out.stdout.splitlines() if "announcement, impostor" in l), "")
+    line = next((l for l in out.stdout.splitlines() if "PASS  rights   enrollment" in l or "FAIL  rights   enrollment" in l), "")
     if not line.startswith("PASS"):
-        raise Violation(f"impostor announcement: {line or out.stdout[-200:]}")
+        raise Violation(f"enrollment of an unknown host: {line or out.stdout[-200:]}")
     return line[:160]
 
 
 def cell_S():
     for rep in range(REPS):
-        security_trial("S1 impostor announcement", rep, check_S1)
+        security_trial("S1 unknown host announcement", rep, check_S1)
     for rep in range(REPS):
         security_trial("S2 unauthenticated entry points", rep, check_S2)
     for rep in range(REPS):
         security_trial("S4 peer-initiated transfer", rep, check_S4)
 
 
+SHORT_TOKEN = 20
+
+
 def short_token_trials(label, before=None):
-    """The coordinator issues 20-second tokens, the hosts restart to fetch them, and a run of P2 follows. It
-    either finishes (tokens renewed) or fails saying so; it never hangs, and the lab is usable afterwards."""
+    """The IdP issues 20-second tokens, the hosts restart to fetch them, and a run of P2 follows. It either
+    finishes (tokens renewed) or fails saying so; it never hangs, and the lab is usable afterwards. The hosts are
+    stopped and started here, never through `lab.sh nodes`, which leaves hosts already online in their mode as they
+    are, with the tokens they hold. The IdP must answer node-1's credentials with a 20-second token (19 once rounded
+    down), or the trial is the harness's (H)."""
     for rep in range(REPS):
         try:
-            stop_start_coordinator("--token-lifetime-seconds", "20")
-            time.sleep(3)
-            subprocess.run([os.path.join(LAB, "lab.sh"), "nodes", "strict"], capture_output=True, timeout=300)
-            S.until(hosts_online, 120, "the hosts with short-lived tokens")
+            stop_start_idp(f"--Idp:AccessTokenLifetimeSeconds={SHORT_TOKEN}")
+            lifetime = idp_token_lifetime()
+            # expires_in counts the whole seconds left when the answer is written: one under the lifetime is the same token.
+            if not SHORT_TOKEN - 1 <= lifetime <= SHORT_TOKEN:
+                raise RuntimeError(f"the IdP issues {lifetime}-second tokens, not {SHORT_TOKEN}")
+            start_hosts(lambda n: URL, "the hosts with short-lived tokens")
             trial(label, rep, "sensor-stream", 0, lambda run, plan: "", {"succeeded", "failed"}, 150,
-                  wait_running=False, before=before, after=restart_lab)
+                  wait_running=False, before=before, after=restart_lab,
+                  note=f"IdP tokens of {lifetime}s, the five hosts restarted after the IdP")
         except Exception as e:
             record({"cell": label, "rep": rep, "pipeline": "sensor-stream", "expect": [], "at": 0,
                     "campaign": CAMPAIGN, "time": time.strftime("%Y-%m-%dT%H:%M:%S"), "elapsed": 0, "state": "?",

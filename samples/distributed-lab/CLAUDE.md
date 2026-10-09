@@ -1,97 +1,99 @@
 # samples/distributed-lab
 
-Mechanics for editing the lab. What it is and how to run it: `README.md`.
+Mechanics for editing the lab. What it is and how to run it: `README.md`. The coordinator it runs
+is the product's, `src/DtPipe.Coordinator.Server` (its rules: that project's `CLAUDE.md`); the
+nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Hosting/CLAUDE.md`).
 
-- **The lab uses dtpipe, it never changes it.** No file under `src/` and nothing in `DtPipe.sln`
-  moves for the lab. It reaches dtpipe through the binary (`split`, `--export-job`, `--job`,
-  `inspect`, `--dry-run`) and hosts `DtPipe.Coordinator` / `DtPipe.PipelineNode` as libraries. A
-  need the libraries do not meet is reported to the user, not patched in. `[unchecked]`
-- **Cuts inside a branch belong to `dtpipe split`.** `PlanBuilder` only regroups whole branches
-  and adds `arrow:-` endpoints or relay branches; it never edits an option or moves a transformer.
-  `AutoPlacer` only chooses a placement for `PlanBuilder` and cuts nothing. `[local: smoke.py]`
-- **A brick is matched by content, never by name.** A branch is a brick when its canonical form
-  (`JobYaml.Canonical`) equals the one its node declares; a pipeline stays a plain dtpipe job with
-  no reference to a brick in it. `DesignService.Decompose` may take an imported branch apart
-  around the bricks it contains (authoring, before anything is saved); the planner never does.
-  `[local: smoke.py, ui_check.py]`
-- **A data node only reads and writes, and runs only its bricks.** `NodeHost.DeployAsync` reads
-  every branch through `BrickRules` (`Lab.Contracts`, the same reading `BrickCatalog.Match` uses)
-  before any `PipelineNode` registers, and refuses the fragment with a `Failed` status in the
-  deployment's generation. Structure, always: a branch carries only `input`, `output`, `from`,
-  `provider-options` and the volume settings `dtpipe split` writes, no processor, and reads at most
-  one branch; a key not on that list is refused, so a key dtpipe adds later waits for a decision.
-  Bricks, unless the host runs in sandbox mode: the branch is also one of the node's own bricks, a
-  bare `input: arrow:-`, or a `from` + `output: arrow:-` relay of a branch of the fragment. A source
-  brick sent straight to another node gains `output: arrow:-`, which `FormOf` sets aside. Sandbox
-  (`LAB_NODE_SANDBOX=1` in the host's environment, the Lab view's mode) keeps only the structure:
-  any reader or writer, whatever it reads or writes. The runner hosts no data and runs any fragment; what
-  contains it is network isolation, not this rule. That switch is the host process's environment only, never a field of `FragmentDeployment` or of
-  anything else the coordinator sends (a brick id or a skip flag in a message would return to
-  matching by name); only `1` or `true` turns it on. `BrickRules.Processors`
-  is the one list of processors, shared with `JobGraph`. `DeploymentManager.WaitRegisteredAsync`
-  fails on the first `Failed` main instance of the current generation and `DeployAsync` then
-  undeploys the plan's fragments. `BrickHost` does not announce a declared brick that would fail
-  the structure rule itself, so the designer never places one the node then declines. `lab.sh smoke`
-  restarts the hosts strict or sandbox per pass. `[local: smoke.py bricks, smoke.py sandbox]`
-  `[unchecked: a declared brick that fails the structure rule]`
-- **A fragment declares each edge alias once**, so a branch that receives an edge under its own
-  alias (a cut's tail) sends on through a relay, never with `output: arrow:-` on itself.
-  `[local: smoke.py lab]`
-- **The server writes the job, the page never does.** `DesignService.Compose` is the only writer
-  of a designer pipeline's YAML; the page sends cards and reads back the text. `[unchecked]`
-- **A `PipelineNode` serves one run.** `DeploymentManager` re-arms every fragment of a pipeline
-  after its run, and holds that deployment's gate from before it reports the run finished until
-  the fragments are registered again, so no run starts on a spent instance. Runs of every
-  pipeline wait in one queue, since `RunOrchestrator` refuses a second one in flight.
-  `[local: smoke.py]`
-- **Ready means the main instance is registered.** A node unregisters from the coordinator before
-  it disconnects, so a closed instance is never left for admission to pick.
-  `WaitRegisteredAsync` requires the main instance in the deployment's current generation, held by
-  the registry at the fragment's version. Every `Deploy` and `Rearm` carries a new generation,
-  echoed in `FragmentStatus`. `[local: smoke.py]`
-- **A node is who its token says.** Every client of the coordinator authenticates with the
-  embedded IDP (`EmbeddedIdp`, OpenIddict, client credentials); a node's group is its identity's,
-  carried as `transportr:group:<g>` and read by TransportR's `JwtIdentityProvider`, never the one a
-  node declares. `LabHub.Announce` refuses a host announcing a node its identity is not bound to.
-  `[local: smoke.py rights]`
-- **The IDP's signing key survives a coordinator restart.** A node host reuses its cached token until
-  shortly before it expires, so `PersistentSigningKey` reads the key from `.state/idp/signing-key.pem`
-  (generated once, readable by its owner only, outside git) instead of generating one per process.
-  `--token-lifetime-seconds` shortens the lifetime for trials. `[local: tools/campaign.py F4]`
-- **A disconnected host is forgotten fragment by fragment.** `NodeInventory.Disconnected` drops what
-  the host last reported: a killed host would otherwise leave its fragments "Launched" for good. A host
-  that only lost its connection reports them all again when it announces itself.
-  `[local: tools/campaign.py F3]`
-- **One source of rights.** `RightsStore` holds the identities, the flow matrix and the brick
-  policies; `RightsFlowControl` replaces TransportR's `IFlowControlService`, so the hub checks the
-  matrix as it is now on every transfer, and every plan (`/api/plan`, `/api/deploy`, `AutoPlacer`,
-  a library deploy) goes through `RightsStore.WithPolicies`. Never add a second matrix.
-  `[local: smoke.py rights]`
-- A node host hands each pipeline node `PipelineNodeOptions.AccessTokenProvider`, bound to
-  `IdpTokenClient.GetAsync(fresh: true)`: TransportR retries a stream refused with 401 through the
-  provider, so it must return a new token, not the cached one. `FragmentSupervisor` asks once before
-  connecting because TransportR swallows a provider that throws. `[local: smoke.py rights — the token
-  reaches the hub]` `[unchecked: the fresh token on retry, the ask before connecting]`
-- The library is a git repository of its own under `.state/library`, driven by the `git` command
-  line with a fixed identity; it never touches the dtpipe repository around it. It starts from
-  `library-seed/`. Run history lives in `.state/runs/`, outside git. Deployments are in memory.
-- The pages are served from `Lab.Coordinator/wwwroot` in the sources, not from the build output:
-  `index.html` + `js/` (the coordinator's views, ES modules, no build) and `lab.html` + `app.js`
-  (the Lab view). `window.lab.store` exists for `tools/ui_check.py`. The page and `/api` are not
-  authenticated: the lab has one operator.
+- **The lab uses dtpipe, it never changes it.** Nothing in `DtPipe.sln` moves for the lab. It
+  reaches the engine through the binary (`split`, `--export-job`, `--job`, `inspect`, `--dry-run`)
+  and hosts the distributed family (`src/DtPipe.Coordinator*`, `src/DtPipe.PipelineNode*`) as a
+  consumer: product code a lab need may shape, never code written for the lab alone. A need of the
+  engine is reported to the user, not patched in. `[unchecked]`
+- **The lab runs the server in lab mode, on its own seeds.** `lab.sh exec-coordinator` is the one
+  way the server starts, for `lab.sh` and `tools/campaign.py`: `Coordinator:LabMode`, the scenarios
+  in `pipelines/`, the library from `library-seed/`, the rights from `rights-seed.json`, the state in
+  `.state/`. A lab scenario, brick or pipeline is named under `samples/` only.
+  `[CI: validate_distributed_boundary.sh]`
+- **Lab tools sign in as people, through the IdP.** `tools/lab_session.py` follows the real flow
+  (login form, code back to `/signin-oidc`) and sends the CSRF header; every tool reaches `/api`
+  through it (`smoke.call`, `ui_check.py`, `nodes_report.py`, `lab.sh`). `ui_check.py` also signs its
+  browser in through the IdP's form, so the flow a person follows runs on every pass. `lab.sh exec-coordinator` lists `labadmin`, `labdesigner` and
+  `labreader` (`@dtpipe.test`) in the three roles; any other `{user}` / `{user}pwd` signs in with
+  none. `[local: smoke.py rights — roles and sessions]`
+- **Sandbox is a lab node's own switch.** `LAB_NODE_SANDBOX=1` (or `true`) in `Lab.NodeHost`'s
+  environment registers a fragment gate that accepts any reader or writer, the Lab view's mode; `lab.sh nodes
+  strict|sandbox` restarts the hosts in a mode, and `lab.sh smoke` does so per pass. The runner
+  runs any fragment in both. `[local: smoke.py bricks, sandbox]`
+- **Lab nodes are disposable hosts of `DtPipe.PipelineNode.Hosting`.** `Lab.NodeHost` reads
+  `nodes/<node>.json` into `AddDtPipeNode`; a node file whose `role` is `runner` starts the official
+  `DtPipe.PipelineNode.Runner` instead, configured through its environment. `lab.sh exec-node` is
+  the one way a node starts, for `lab.sh` and `tools/campaign.py`. Every lab node registers `lab.query` and
+  `lab.split` (`Lab.NodeHost/LabRequests.cs`), so `smoke.py` reads the warehouse through `/api/query`; its witness reads the databases
+  `seed.sh` wrote, located from the node files, never from the coordinator. Node mechanics:
+  `src/DtPipe.PipelineNode.Hosting/CLAUDE.md`. `[local: smoke.py]`
+- **The IdP's signing key survives an IdP restart.** A node host reuses its cached token until
+  shortly before it expires, so `Lab.Idp` reads its key from `.state/idp/signing-key.pem` (generated
+  once, readable by its owner only, outside git). `lab.sh idp --Idp:AccessTokenLifetimeSeconds=N`
+  restarts it with shorter tokens for trials. `[local: tools/campaign.py S3, S5]`
+- **`Lab.Idp` says who, never what.** Its tokens carry a subject, a name and an email; no group,
+  role or permission enters a token or the clients file, because what a caller may do belongs to
+  the coordinator. A client's `audience` and `refreshTokens` are protocol, not a right. It stands
+  alone: no reference to dtpipe, TransportR or the coordinator. `[local: tools/idp_check.py]`
+- **`dtpipe-studio` is the studio's client**: native and public, registered at
+  `http://127.0.0.1/callback` with no port, so any loopback port is accepted (RFC 8252), never at
+  an extra origin; its people's access tokens name the coordinator's audience, and it may refresh
+  them. `lab.sh exec-coordinator` names it in `Coordinator:Studio:ClientId`; `coordinator-ui`'s
+  tokens name no audience. `lab_session.studio_tokens` signs a person in through it, the code read
+  off the redirect to the loopback. Its refresh tokens live in the IdP's memory: an IdP restart
+  signs every studio out. `[local: tools/idp_check.py, smoke.py rights — studio bearer]`
+- A node's tokens come from the IdP its `Oidc:Authority` names, through the discovery document:
+  `lab.sh` starts `Lab.Idp` first and points the coordinator (`--authority`) and every node at it.
+  The secrets live in `idp-clients.json` (the IdP) and the node files (the clients), never in the
+  rights document. `[local: smoke.py rights]`
 - `tools/campaign.py` plays a fixed matrix of faults (a killed child or host, a cancellation, a
   coordinator restart, network faults through toxiproxy, revoked rights, rapid cycles) against the
   running lab and judges every trial on the same invariants: it ends, the verdict is right, nothing
   is left running, the lab still runs a reference pipeline. It needs the lab seeded with
   `LAB_SCALE=60` (shorter runs end before a timed fault reaches them), strict nodes, and the
   toxiproxy binaries (`TOXIPROXY_DIR`) for the network cells. Its security cells call the hub as a
-  peer would (`campaign_security.py`, a SignalR client over long polling) and start the coordinator
-  with `--token-lifetime-seconds`. It records, it never fixes. It starts only on a bench it can judge
+  peer would (`campaign_security.py`, a SignalR client over long polling); S3 and S5 restart the IdP
+  with shorter tokens through `lab.sh idp`, check the lifetime it now issues, and restart the hosts
+  themselves (`lab.sh nodes` leaves hosts already in their mode, and their tokens, alone). Every
+  wait for the hosts names the ones still offline, so a reference check that reads the warehouse
+  through node-4 never fails for a node-4 not yet back. It records, it never fixes. It starts only on a bench it can judge
   (`campaign_bench.py`): only the lab's own processes, a machine with no build, test run or TransportR
   process, and the binary the hosts run starts and reports the full hash of the frozen commit with a
   clean tracked tree. Every call retried on `EADDRINUSE`/`EADDRNOTAVAIL` and every port-exhaustion line
   in the lab's logs is counted into the trial's `I7`, never absorbed. `[local: tools/campaign.py with
   CAMPAIGN_PREFLIGHT=report prints the checks without refusing]`
-- Verify a change with `./lab.sh smoke`, and a page change with `./lab.sh ui` too: it drives
-  headless Chrome over the DevTools protocol (`tools/cdp.py`), because Chrome's own `--screenshot`
-  stops the page before its fetches finish. `tools/cdp.py` also clicks and drags with the mouse.
+- **The compose stack mounts nothing across services.** `compose.yaml` gives each service its own
+  directory under `.stack/` (a node its database, the coordinator its state, the IdP its key) and
+  the runner none: the stack is the proof that the coordinator reads no node's data, so a volume
+  shared between two services voids it. A node seeds its own database on first start
+  (`docker/node-entrypoint.sh`, `seed.sh` with its name) and refuses a scale other than the one it
+  recorded. `[local: lab.sh stack smoke]`
+- **The IdP has one name for browsers and containers.** The proxy carries `idp.localtest.me` as a
+  network alias and publishes the same port, so a token names one issuer everywhere; the authority
+  stays `http://`, a choice of the lab. `idp-clients.json` registers only the local lab's URIs;
+  the stack hands the IdP its coordinator's origin (`Idp:ExtraOrigins`, port included), so any
+  `LAB_STACK_HTTP_PORT` works unedited. The coordinator is browsed at `coordinator.localtest.me`,
+  never `127.0.0.1` or `localhost`, which the local lab's cookies hold. Nodes reach the coordinator
+  directly, never through the proxy. The issuer spells a port only when `LAB_STACK_HTTP_PORT` is set:
+  the IdP names itself without a default port, and `dtpipe studio` refuses an authority that differs
+  from that name by more than a trailing slash, an explicit `:80` included. `[local: lab.sh stack
+  studio, on port 80 only]`
+- **The `coordinator` and `runner` image targets hold nothing of the lab**: lab content enters
+  through `coordinator-lab`, `node`, `idp` or `compose.yaml`'s environment, so those two targets
+  can leave `samples/` unchanged. Every .NET service runs under `init: true`: dotnet as PID 1 hangs
+  on its own crash, and the nodes start dtpipe children. `[unchecked]`
+- **The stack is a target of the lab's checks, never a second set.** `lab.sh stack smoke|ui|studio`
+  run `smoke.py`, `tools/ui_check.py` and `tools/studio_check.py` against `STACK_URL`;
+  `LAB_TARGET=stack` is the only switch, read where the stack differs (the library directory, the
+  coordinator's log, the enrollment host, the version of each node's own binary). A new check that
+  starts a process or reads a path of the local lab takes its stack form there too.
+  `[local: lab.sh stack smoke, ui, studio]`
+- Verify a change with `./lab.sh smoke`, a page change with `./lab.sh ui` too, and a change to what
+  `dtpipe studio` calls with `./lab.sh studio` (`tools/studio_check.py`, outside CI); one that touches
+  the images, `compose.yaml` or a check's stack form with `./lab.sh stack smoke|ui|studio` as well. The page checks
+  drive headless Chrome over the DevTools protocol (`tools/cdp.py`), because Chrome's own
+  `--screenshot` stops the page before its fetches finish. `tools/cdp.py` also clicks and drags with the mouse.

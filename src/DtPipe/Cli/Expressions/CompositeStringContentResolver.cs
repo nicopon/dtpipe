@@ -15,6 +15,14 @@ public sealed class CompositeStringContentResolver : IStringContentResolver
     private static readonly Regex InterpolationPattern =
         new(@"\$\{\{([^}]+)\}\}", RegexOptions.Compiled);
 
+    /// <summary>
+    /// The expressions a text interpolates, each once, in order, as this resolver reads them: what is
+    /// inside <c>${{…}}</c>, trimmed. For a caller that has to name a job's variables without
+    /// resolving them, so it never reads the token grammar differently from the run.
+    /// </summary>
+    public static IReadOnlyList<string> Expressions(string text) =>
+        InterpolationPattern.Matches(text).Select(m => m.Groups[1].Value.Trim()).Distinct(StringComparer.Ordinal).ToList();
+
     private readonly IEnumerable<IStringInterpolator> _interpolators;
 
     public CompositeStringContentResolver(IEnumerable<IStringInterpolator> interpolators)

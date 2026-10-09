@@ -59,8 +59,15 @@ then `Build()`).
 fragment `RunSpec.Fragments` names registered in `INodeRegistry`, pushes `Launch` to each, waits for
 every `Ready`, opens each `RunSpec.Edges` entry through `ITransferInitiator` and pushes `Wire`, then
 waits for every `Exited` and applies `DetermineOutcome`. `RunAsync` is an in-process API - no
-`RegisterPlan`/`Run`/`Status` network surface yet - and one run at a time; a second call while one is
-in flight throws instead of queuing.
+`RegisterPlan`/`Run`/`Status` network surface yet.
+
+- **Several runs may be in flight; each is judged alone.** Each run has its own state, found by run
+  id: `Ready` and `Exited` reach their run through the id they carry, and an id no run in flight
+  holds is logged and ignored. A lost fragment, a local failure, the requester's cancellation and the
+  grace after a remote failure end only the run they belong to. A run that names a fragment already
+  in another run in flight is refused before admission (`FragmentInFlightException`, naming the run
+  that holds it): a `PipelineNode` serves one run. Which runs may overlap is the caller's choice; the
+  orchestrator never queues. `[local: ConcurrentRunsTests]`
 
 - **A fragment's identity is never a method argument.** `Register` resolves the caller's `ClientId`
   through `IStateStore.GetClientByConnectionIdAsync(Context.ConnectionId)` - TransportR's own
@@ -186,7 +193,7 @@ the grace.
 
 ## State and availability
 
-- **The coordinator is not highly available.** Its state - the node registry, the plans, the run in
+- **The coordinator is not highly available.** Its state - the node registry, the plans, the runs in
   flight - and TransportR's own (the default in-memory store) live in the process: a restart loses
   all of it, and the transfers it carried are gone. **Nothing reconstructs that state from what the
   nodes do next**: a node registering again is an ordinary registration, never evidence of a run, and

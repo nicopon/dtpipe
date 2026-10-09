@@ -50,7 +50,7 @@ public class QuietEngineTests
     private static (Dictionary<string, JobDefinition> Jobs, JobDagDefinition Dag) Parse(DtPipeMcpTools tools, string yaml)
     {
         var method = typeof(DtPipeMcpTools).GetMethod("ParseAndValidateYaml", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var result = method.Invoke(tools, new object[] { yaml })!;
+        var result = method.Invoke(tools, new object?[] { yaml, null, null })!;
         var jobs = (Dictionary<string, JobDefinition>)result.GetType().GetProperty("Jobs")!.GetValue(result)!;
         var dag = (JobDagDefinition)result.GetType().GetProperty("Dag")!.GetValue(result)!;
         return (jobs, dag);

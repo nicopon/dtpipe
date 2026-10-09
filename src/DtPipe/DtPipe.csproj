@@ -39,12 +39,20 @@
     <ProjectReference Include="../DtPipe.Adapters.Shared/DtPipe.Adapters.Shared.csproj" />
     <ProjectReference Include="..\DtPipe.Processors\DtPipe.Processors.csproj" />
     <ProjectReference Include="..\DtPipe.Transformers\DtPipe.Transformers.csproj" />
+    <ProjectReference Include="..\DtPipe.Jobs\DtPipe.Jobs.csproj" />
+  </ItemGroup>
+
+  <!-- Kestrel, for dtpipe studio's local page and nothing else. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Cli/Studio/wwwroot/**" LogicalName="studio/%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="KeySharp" Version="1.0.5" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.11" />
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.11" />
     <PackageReference Include="ModelContextProtocol" Version="2.2.0" />
     <PackageReference Include="OpenAI" Version="2.13.0" />
     <PackageReference Include="Serilog" Version="4.4.0" />

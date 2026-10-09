@@ -27,4 +27,11 @@ public record BranchChannelContext
 
     /// <summary>When <see langword="true"/>, the branch is an intermediate (non-terminal) node and should suppress user-facing stats.</summary>
     public bool SuppressStats { get; init; }
+
+    /// <summary>
+    /// The host's fingerprint of what defines this branch's rows, upstream branches included
+    /// (see <c>BranchFingerprint</c>). <see langword="null"/> when the host computed none: the
+    /// branch then fingerprints itself, which is exact for a branch with no upstream.
+    /// </summary>
+    public string? DefinitionFingerprint { get; init; }
 }

@@ -1,8 +1,10 @@
 # dtpipe distributed lab
 
 A self-contained demonstrator for dtpipe's distributed pipelines: one coordinator, four data
-nodes each with its own database, and a runner, run as plain local processes (no container).
-Every node authenticates with the coordinator's own identity provider, which decides its group.
+nodes each with its own database, and a runner, run as plain local processes or as a compose
+stack ([below](#the-compose-stack)).
+Every node authenticates with a test identity provider, `Lab.Idp`, which says who it is; the
+coordinator decides what it may do.
 
 Each data node offers **bricks**: reads and writes its owner preconfigured on its database. The
 coordinator's page assembles bricks and processing steps into a pipeline by drag and drop, keeps
@@ -10,9 +12,11 @@ it in a git-backed **library**, places every brick on its node and every other s
 runner, deploys the fragments and runs them, live. A second page, the **Lab view**, cuts and
 places a job by hand and injects faults.
 
-The lab **uses** dtpipe and changes nothing in it. It drives the `dtpipe` binary like a user
-(`split`, `--export-job`, `--job`) and hosts `DtPipe.Coordinator` and `DtPipe.PipelineNode` as
-libraries, exactly as their own tests do. It sits outside `DtPipe.sln`: CI never builds it.
+The lab **uses** dtpipe and changes nothing in it. Its coordinator is the product's server,
+`src/DtPipe.Coordinator.Server`, run in **lab mode** (the Lab view, fault injection and the query
+panel exist only then); its runner is the official `DtPipe.PipelineNode.Runner`; its data nodes are
+disposable hosts of `DtPipe.PipelineNode.Hosting`. They drive the `dtpipe` binary like a user
+(`split`, `--export-job`, `--job`). None of it is in `DtPipe.sln`: `build.yml` never builds it.
 
 ## Quick start
 
@@ -24,24 +28,85 @@ built binary:
 ./build.sh                          # at the repository root: produces dist/release/dtpipe
 cd samples/distributed-lab
 ./lab.sh up                         # build, seed the four databases, start everything
-open http://127.0.0.1:5180          # the coordinator's page; the Lab view is /lab.html
+open http://127.0.0.1:5180          # sign in as labadmin / labadminpwd; the Lab view is /lab/
 ./lab.sh smoke                      # every pipeline, distributed, against its witness
 ./lab.sh down
 ```
 
 | Command | Does |
 |---|---|
-| `./lab.sh up` | builds the lab, seeds the databases on first use, starts the coordinator then the nodes |
+| `./lab.sh up` | builds the lab, seeds the databases on first use, starts the IdP, the coordinator, then the nodes |
 | `./lab.sh status` | which processes run, and what the coordinator sees of each node |
 | `./lab.sh smoke [lab\|sandbox\|library\|rights\|faults\|bricks] [id…]` | runs the end-to-end check, optionally one pass or some pipelines only; restarts the node hosts in the mode each pass needs |
 | `./lab.sh nodes strict\|sandbox` | restarts the node hosts in that mode after undoing every deployment (`LAB_NODE_SANDBOX=1 ./lab.sh up` starts them in sandbox mode) |
-| `./lab.sh ui` | drives both pages in headless Chrome, a designer scenario included; screenshots to `.state/ui/` |
+| `./lab.sh studio` | drives `dtpipe studio` against the lab in headless Chrome: open from the library, sample a pipeline of bricks, debug run and resume, import, run and stop, publish and a refusal; screenshots to `.state/studio/`, outside CI |
+| `./lab.sh ui` | drives both pages in headless Chrome, the library without any designer entry, a pipeline's page with its job read only; screenshots to `.state/ui/` |
 | `./lab.sh seed` | rebuilds the databases (`LAB_SCALE=5` multiplies the row counts) |
 | `./lab.sh logs` | follows every log |
+| `./lab.sh stack up\|down\|status\|nodes\|smoke\|ui\|studio\|logs` | the same commands against [the compose stack](#the-compose-stack) |
 | `./lab.sh down` / `reset` | stops everything / also deletes `.state/` |
 
-`LAB_PORT` changes the port (default `5180`), `DTPIPE` the binary. Everything the lab writes lives
+Every page and `/api` call needs a person signed in through the IdP, with a role: `labadmin`
+(`labadminpwd`) may do everything, `labdesigner` everything but the rights and the Lab view,
+`labreader` look. The lab's tools sign in as `labadmin` through the same flow.
+
+`LAB_PORT` changes the coordinator's port (default `5180`), `LAB_IDP_PORT` the IdP's (`5190`),
+`DTPIPE` the binary. Everything the lab writes lives
 under `.state/`: databases, fragment jobs, plans, logs, build output.
+
+## The compose stack
+
+The same lab in containers, each service on its own data: no service mounts another's
+directory, and the coordinator never reads a node's database. Prerequisites: Docker with
+Compose, and port 80 free. The images build dtpipe for Linux themselves, so no `./build.sh` is
+needed to start it.
+
+```bash
+cd samples/distributed-lab
+./lab.sh stack up                   # build the images, seed each node on first start, start all
+open http://lab.localtest.me        # the home page: links, health, test accounts
+./lab.sh stack smoke                # the same checks as the local lab's, against the stack
+./lab.sh stack down                 # stops everything; .stack/ keeps the data
+```
+
+`docker compose up -d --build` and `down` do the same as `stack up` and `stack down`.
+`*.localtest.me` resolves to `127.0.0.1`: the host needs a DNS that answers for it. A proxy (Caddy)
+publishes the stack's only port and routes by host name: `coordinator.localtest.me` to the
+coordinator, `idp.localtest.me` to the IdP, `lab.localtest.me` to the home page. Inside the
+network the proxy carries the same names, so the IdP has one issuer for browsers and containers.
+The nodes reach the coordinator directly; the data plane never crosses the proxy. The
+coordinator's distinct host name also keeps its session cookie apart from the local lab's, so both
+run side by side. Browse the coordinator at that name, never `127.0.0.1`.
+
+| Directory | Mounted by | Holds |
+|---|---|---|
+| `.stack/idp/` | `idp` | its signing key |
+| `.stack/coordinator/` | `coordinator` | library, runs, rights, session keys |
+| `.stack/node-N/` | `node-N` | its database, seeded on first start, and its fragment jobs |
+
+The runner mounts nothing. `LAB_SCALE` (default `1`) multiplies the seeded rows for every node: a
+node's rows reference the others' counts, so a node seeded at another scale refuses to start; delete
+`.stack/` to seed again. `LAB_NODE_SANDBOX=1 ./lab.sh stack up` starts the data nodes in sandbox
+mode. `LAB_STACK_HTTP_PORT` moves the proxy off port 80, outside and inside: tokens name the issuer
+with that port, and the IdP accepts the coordinator's redirects at it (`Idp:ExtraOrigins`). Leave
+it unset for port 80: the IdP names itself without a default port, and `dtpipe studio` refuses an
+authority that differs from that name by more than a trailing slash, an explicit `:80` included.
+
+`./lab.sh stack smoke`, `ui` and `studio` run the scripts the local lab runs, from the host with
+`./build.sh`'s binary, pointed at the coordinator's name; `stack nodes strict|sandbox` recreates
+the four node containers in a mode, after undoing every deployment, as `lab.sh nodes` restarts the
+local hosts. The witness reads the databases the nodes seeded under `.stack/`. Where the stack
+differs, `smoke.py` follows `LAB_TARGET=stack`, which `lab.sh` sets:
+
+- the library check reads the coordinator's own directory, `.stack/coordinator/library`;
+- the coordinator's log is the container's output (`docker compose logs coordinator`);
+- the enrollment check's host is a throwaway container of the `node` image on the stack's network,
+  reaching the coordinator at `http://coordinator:8080`;
+- the version check compares each node with the `dtpipe` of its own container: the image builds it
+  from the tree without its git metadata, so it carries no revision suffix.
+
+The containers run in UTC whatever the host's zone; the witness runs in the host's. The campaign
+(`tools/campaign.py`) is not played on the stack.
 
 ## The nodes
 
@@ -59,75 +124,111 @@ The node inspects each source's schema itself (`dtpipe inspect`) and reads previ
 the coordinator never opens a brick's database.
 
 `seed/seed.sh` builds them with dtpipe itself (`generate:`, `--fake`, a DuckDB `--sql`);
-row-seeded fakes and hashed values make every seed identical. A node publishes its database as an
-environment variable (`LAB_CRM_DB`, …) that its `dtpipe` children inherit, so a job names
+row-seeded fakes and hashed values make every seed identical. A node publishes its database as a
+variable (`LAB_CRM_DB`, …) that its `dtpipe` children see, so a job names
 `sqlite:${{LAB_CRM_DB}}` and never a path: the fragment runs against whichever node hosts it.
 
-A node's group is not in its file: the coordinator's IDP gives it (below). The flow matrix says
+A data node is `Lab.NodeHost`, a plain .NET host that adds a node to itself with
+`DtPipe.PipelineNode.Hosting` (`AddDtPipeNode`), as any business service would. `runner-1` is the
+official runner, `DtPipe.PipelineNode.Runner`, configured only through its environment
+(`DtPipeNode__Name`, `DtPipeNode__CoordinatorUrl`, `DtPipeNode__Oidc__Authority`, …): `lab.sh`
+starts it that way for a node file whose `role` is `runner`.
+
+A node's groups are not in its file, nor in its token: the coordinator gives them (below). The flow matrix says
 which group may send to which: every data group may feed the `runner`, the `runner` feeds
 `warehouse`, and the direct links the Lab view's scenarios use stay.
 
 ## Rights and the identity provider
 
-The coordinator carries its own IDP, after TransportR's SimpleIdp: OpenIddict, the
-client-credentials flow, `POST /connect/token`. Each node host holds a client id and secret in its
-`nodes/<node>.json`; the token it obtains names it (`sub`) and carries its group as the
-`transportr:group:<group>` scope, which TransportR's hub reads. What is allowed lives in one
-document, `.state/rights.json`, started from `rights-seed.json` and edited in the **Access** view:
+Tokens come from `Lab.Idp` (below), which the coordinator trusts for its audience. Each node host
+holds a client id and secret in its `nodes/<node>.json`, which `idp-clients.json` registers; the
+token it obtains names it (`sub`) and grants nothing. The coordinator gives that subject its groups,
+which TransportR's hub then enforces: a node sends to another only if every group of the sender may
+send to every group of the receiver. What is allowed lives in one document, `.state/rights.json`,
+started from `rights-seed.json` and edited in the **Access** view:
 
 | | Enforced |
 |---|---|
-| **Who**: identities, each bound to one group and to the one node it may announce | by the IDP (no token for an unknown or disabled client) and by the control channel (an announcement of another node is refused) |
+| **Who**: identities, each a client of the IdP with a node name and one or more groups | by the coordinator (no group for an unknown or disabled client, from its next connection or token renewal) and by the control channel (a host is filed under its identity's node name, whatever it proposes; a disabled identity is refused) |
 | **To whom**: the flow matrix between groups | by the hub on **every transfer**, live, and on every plan |
-| **What**: per source brick, the groups its rows may be sent to as they leave their node | on every plan (the hub sees groups, not bricks) |
 
 Every change is audited. A node host gives each of its pipeline nodes a token provider
-(`PipelineNodeOptions.AccessTokenProvider`) that asks the IDP for the node's token. The IDP's signing
-key is generated once and kept in `.state/idp/signing-key.pem` (readable by its owner only, outside
-git), so a coordinator restart does not invalidate the tokens in circulation.
+(`PipelineNodeOptions.AccessTokenProvider`) that asks the IdP for the node's token. Adding a node
+takes its client in `idp-clients.json` (then an IdP restart); its identity then comes from the Access view, or by approval:
+a host whose token no identity knows is not a node. It waits in the Access view's *Waiting for approval* card,
+with the name, description and bricks it proposes (and the token's claims listed by
+`Coordinator:Identity:LabelClaims`, none by default), and an administrator accepts it by giving it a node name and
+groups, or sets it aside for 24 hours. The list lives in memory, holds 50 hosts, and never evicts one that waits.
+
+### The stand-alone test IdP (`Lab.Idp`)
+
+The identity provider of the lab, standing in for whatever provider a deployment trusts. It says
+**who** a caller is, never what the caller may do: its tokens carry a subject, a name and an email,
+no group and no role. `lab.sh` starts it on `LAB_IDP_PORT`, its signing key in
+`.state/idp/signing-key.pem` (generated once, readable by its owner only), so tokens in circulation
+survive its restart.
+
+| Caller | Flow | Token |
+|---|---|---|
+| a service (node, runner) | `client_credentials`, client id and secret from `idp-clients.json` | `sub` = client id, `aud` = `Idp:Audience` |
+| a front end (`coordinator-ui`) | `authorization_code` + PKCE, through the IdP's login form | `sub`, `name`, `email` = `<user>@Idp:EmailDomain` |
+
+Any user name of letters, digits, `.`, `_` or `-` signs in with that name followed by `pwd`
+(`toto` / `totopwd`). Settings are the `Idp` configuration section, from the environment
+(`Idp__Issuer`) or the command line (`--Idp:Issuer`):
+
+| Setting | Default |
+|---|---|
+| `Issuer` | `http://localhost:5190/` (the lab passes `http://127.0.0.1:5190`): the one address browsers and services both reach |
+| `ClientsFile` | `clients.json` in the content root; the lab's is `idp-clients.json` |
+| `SigningKeyFile` | `.state/signing-key.pem` in the content root, created on first start |
+| `EmailDomain` · `Audience` · `AccessTokenLifetimeSeconds` | `dtpipe.test` · `dtpipe-coordinator` · `43200` |
+
+```bash
+./lab.sh up                         # starts it on 5190 with the lab's clients
+python3 tools/idp_check.py          # discovery, both flows, and the refusals that matter
+```
 
 ## The coordinator's page
 
 | View | Does |
 |---|---|
 | Nodes | every node, its bricks (schema, version, preview), the fragments it hosts, the flow matrix |
-| Library | the pipelines kept, their plan and deployment state, last run, git history, diff, restore, import (YAML or a command line) |
-| Designer | a palette of bricks and steps (Transform, SQL, Merge), a canvas wired port to port, an inspector per card, the composed YAML to copy or edit |
+| Library | the pipelines kept, their plan and deployment state, last run, git history, diff, restore; a pipeline's page shows its plan, its fragments and its job, read only. A pipeline is written with `dtpipe studio --coordinator` and published here |
 | Distribution | the plan placed automatically, drawn in lanes (sources, runner, sinks); save it, deploy, run |
-| Runs | deployments, the run in flight and the queue, the journal with each run's report, node events, a query on any database |
-| Access | the IDP, identities (group, bound node, enabled, reconnect), the editable flow matrix, brick policies, the audit |
+| Runs | deployments, the runs in flight and the queue, the journal with each run's report, node events, a query on any database |
+| Access | the trusted IdP, the hosts waiting for approval, identities (node name, groups, enabled, reconnect), the editable flow matrix, the audit |
 
 **A pipeline is a plain dtpipe job**, one branch per card, that also runs whole on one machine
 (`smoke.py` uses it as the witness). A branch *is* a brick when its content equals the brick's:
-no reference in the YAML, and a brick its owner changes stops matching. Importing a job takes
-each branch apart around the bricks it contains (a branch reading a brick, transforming, then
-writing a brick becomes three cards).
+no reference in the YAML, and a brick its owner changes stops matching. `dtpipe studio` takes a job apart around the bricks it contains (a branch reading a brick,
+transforming, then writing a brick becomes three cards).
 
 **Distribution is automatic**: a brick runs on its node, every other branch on the runner, and a
 source wired straight into a sink goes directly, without the runner. `PlanBuilder` then builds
 the fragments exactly as for a placement chosen by hand. A saved plan records the hash of the job
 it came from; a job changed since is refused at deployment until it is distributed again.
 
-**A data node only reads and writes, and runs only its bricks.** Whatever the coordinator sends, a
-node host reads each branch of a fragment and refuses the fragment, at once and by name, unless
-every branch only reads or writes (no transformer, no `sql` or `merge`, at most one `from`) and is
-one of its own bricks as its owner declared them, a bare `input: arrow:-`, or a relay of another
-branch onto an edge. Everything between a read and a write belongs on a runner, which hosts no data
-and runs what it is given. The **Lab view** places branches by hand, including reads and writes no
-brick declares, so it needs the sandbox mode: `./lab.sh nodes sandbox` (the variable
-`LAB_NODE_SANDBOX=1` in the host process's environment; the Nodes view shows a `sandbox` chip). A
-sandbox node still only reads and writes, but any reader or writer will do. The switch belongs to the
-host's own environment and is never a field of a message the coordinator sends.
-
-In the designer, a wire is moved or removed by its input end: drag it off the input port and drop
-it on another input, or anywhere else to remove it. A selected wire also shows a × to remove it.
+**A data node only reads and writes, and runs only its bricks.** The coordinator sends a data node
+the ids of its bricks, in order, and the version of the job they make; the node composes the job
+from what its owner declared and refuses the fragment, at once and by name, when a brick changed
+since the plan. A fragment is made of a source brick, a sink brick, the bare `input: arrow:-` end
+of an edge, and relays of a branch onto an edge, and the planner refuses, naming why, any branch of
+a data node that is none of them: everything between a read and a write belongs on a runner, which
+hosts no data and runs what it is given. The **Lab view** places branches by hand, including reads
+and writes no brick declares, so it needs the sandbox mode: `./lab.sh nodes sandbox` (the variable
+`LAB_NODE_SANDBOX=1` in the host process's environment; the Nodes view shows a `raw fragments`
+chip). A sandbox node accepts a job as written, which still may only read and write, through any
+reader or writer. The switch belongs to the host's own environment, and only the Lab view's manual
+planning ever sends a job as written.
 
 **The library** is a git repository under `.state/library`, started from `library-seed/`: each
-save and each saved plan is a commit. Several pipelines may be deployed at once; their runs wait
-in one queue, since the coordinator runs one at a time. Finished runs are kept in `.state/runs/`.
+save and each saved plan is a commit. Several pipelines may be deployed at once. Their runs are in
+flight together when they share no data node; otherwise they wait their turn in the order they came
+(the runner never counts). Finished runs are kept in `.state/runs/`.
 
 
-## Lab view scenarios (`/lab.html`)
+## Lab view scenarios (`/lab/`)
 
 | Pipeline | Shows | Try |
 |---|---|---|
@@ -147,25 +248,26 @@ between the witness and the lab's warehouse.
 ## How it works
 
 ```
- browser ──HTTP / SSE──▶ Lab.Coordinator :5180
+ browser ──HTTP / SSE──▶ DtPipe.Coordinator.Server :5180 (lab mode)
                           ├─ AddCoordinatorHub()  TransportR hub: registry, admission, runs, bytes
-                          ├─ /lab                 the lab's control channel to the node hosts
+                          ├─ /node-channel        the control channel to the node hosts
                           ├─ /api                 bricks, design, library, plan, deploy, runs, events
                           └─ DeploymentManager    deployments, the run queue, re-arming
                                   ▲                      ▲
-                   /lab (SignalR) │                      │ TransportR (Arrow IPC bytes)
+          /node-channel (SignalR) │                      │ TransportR (Arrow IPC bytes)
       ┌─────────────┬─────────────┼─────────────┬────────┴────┬─────────────┐
-      │ node-1      │ node-2      │ node-3      │ node-4      │ runner-1    │  Lab.NodeHost
+      │ node-1      │ node-2      │ node-3      │ node-4      │ runner-1    │  AddDtPipeNode
       │ bricks, and a PipelineNode per fragment deployed here, each running a dtpipe child │
       └─────────────┴─────────────┴─────────────┴─────────────┴─────────────┘
 ```
 
 **Planning** (`PlanBuilder`) turns a monolithic job into one fragment per node, in two steps; the
-Lab view gives it cuts and a placement, the Distribution view only the placement `AutoPlacer`
+Lab view gives it cuts and a placement, the Library only the placement `AutoPlacer`
 chose:
 
-1. *Cuts inside a branch* are `dtpipe split --at k`. The lab keeps both halves as dtpipe wrote
-   them, so where each option lands, and the secret check, stay dtpipe's decisions.
+1. *Cuts inside a branch* are `dtpipe split --at k`, run by the node whose data the branch reads.
+   The lab keeps both halves as dtpipe wrote them, so where each option lands, and the secret
+   check, stay dtpipe's decisions.
 2. *Regrouping whole branches* is the lab's own rewrite. A `from`/`ref` dependency that crosses two
    nodes becomes an `arrow:-` input branch on the consumer's side and an `arrow:-` output on the
    producer's — the shape `split` gives a cut. A branch that already writes somewhere, is also
@@ -184,21 +286,23 @@ afterwards (a fresh instance each) before it accepts the next run.
 
 ## Limits
 
-- Everything runs on one machine, which the lab uses as a shortcut: `split` samples the sources
-  and the query panel opens a node's file from the coordinator's process.
-- The page and `/api` are not authenticated: only the nodes are. Tokens last 12 hours
-  (`--token-lifetime-seconds` changes it). Each node renews its token before it expires, so a
+- Everything runs on one machine, but nothing relies on it: the coordinator never opens a node's
+  database. A cut, the query panel, a brick preview and a library save's check are each read by the
+  node that hosts the data; only `smoke.py`'s witness reads the seeded files directly.
+- People sign in through `Lab.Idp`: `labadmin`, `labdesigner` and `labreader` (password: the name
+  followed by `pwd`) hold the coordinator's three roles; any other name signs in with none. Tokens last 12 hours
+  (the IdP's `Idp:AccessTokenLifetimeSeconds` changes it). Each node renews its token before it expires, so a
   deployment can sit idle, or run, past its tokens' lifetime. A node that cannot renew (the
   identity provider unreachable for longer than the renewal advance) is closed by the hub and its
   runs end.
 - A transfer the hub refuses under the flow matrix shows in the run's verdict as an unresponsive
   fragment: the coordinator's log carries the refusal.
-- One run at a time, as `RunOrchestrator` allows: runs queue. The coordinator is not highly
-  available: a restart loses every deployment and the run in flight (the library and the finished
-  runs of the run journal survive), and the node hosts keep running the lost run's fragments until
-  they are restarted. After a coordinator restart, restart the lab (`./lab.sh down`, then
+- One run at a time per data node: the runner's fragments of two runs share its host with no bound
+  on either. The coordinator is not highly available: a restart loses every deployment and the runs
+  in flight (the library and the finished runs of the run journal survive), and the node hosts keep
+  running the lost runs' fragments until they are restarted. After a coordinator restart, restart the lab (`./lab.sh down`, then
   `./lab.sh up`); nothing reconstructs a run from the nodes reconnecting.
-- The designer knows a source brick's columns, not those after a step: dtpipe offers no schema of
+- A studio knows a source brick's columns, not those after a step: dtpipe offers no schema of
   a job's branch without running it.
 - `lab.sh` needs bash. The node host itself uses no POSIX-only API, but the lab is not tested on
   Windows.
@@ -207,24 +311,28 @@ afterwards (a fresh instance each) before it accepts the next run.
 
 ## API
 
+Every route below needs the session cookie of a person with a role (reader for a `GET`, designer to
+change a pipeline, deploy or run, admin for the rights and the lab-mode routes) and, unless it is a
+`GET`, the header `X-Dtpipe-Csrf`. `/healthz` is anonymous; `/account/login` and `/account/logout`
+sign a person in and out.
+
 | Endpoint | |
 |---|---|
+| `GET /api/me`, `/api/info` | who is signed in and with which roles; whether the server runs in lab mode |
 | `GET /api/nodes`, `/api/bricks`, `/api/flow-matrix`, `/api/pipelines`, `/api/state` | what the pages draw |
 | `POST /api/bricks/{node}/{id}/preview` | a few rows, read by the node that owns the brick |
-| `POST /api/design/compose`, `/decompose`, `/validate` | cards → job, job → cards, `dtpipe --dry-run 1` over the job |
-| `GET /api/library` · `GET`/`PUT`/`DELETE /api/library/{id}` | pipelines; `PUT {yaml, layout, message}` commits |
-| `GET /api/library/{id}/history`, `/at/{commit}` | commits; the job, layout and diff at one |
+| `GET /api/library` · `GET`/`PUT`/`DELETE /api/library/{id}` | pipelines; `PUT {yaml, message}` commits what a check accepted: `dtpipe --dry-run 1` over one row per source brick sent by its node, then each sink brick's node checks its target (422 and nothing written otherwise) |
+| `GET /api/library/{id}/history`, `/at/{commit}` | commits; the job and the diff at one |
 | `POST /api/library/{id}/distribute` | `{save?, message?}` → the automatic plan, saved as a commit on request |
 | `POST /api/library/{id}/deploy` | deploys the saved plan (409 if the job changed since) |
 | `POST /api/plan` | Lab view: `{pipelineId, yaml, cuts, placement}` → units, fragments, edges, errors |
 | `POST /api/deploy` | Lab view: the same body; plans, then deploys (409 if not deployable) |
 | `GET /api/deployments` · `DELETE /api/deployments/{id}` | what is deployed; undeploy |
-| `POST /connect/token` | the embedded IDP: `grant_type=client_credentials`, `client_id`, `client_secret` |
-| `GET /api/rights` · `PUT /api/rights/matrix` · `PUT /api/rights/bricks/{node}/{id}` | rights, the flow matrix, a brick's policy (`{groups}` or `null`) |
+| `GET /api/rights` · `PUT /api/rights/matrix` | rights, the flow matrix |
 | `POST /api/rights/identities` · `PUT`/`DELETE /api/rights/identities/{id}` · `POST …/{id}/reconnect` | identities; reconnect drops a node's control connection so it fetches a new token |
+| `POST /api/rights/pending/{subject}/accept` (`{name, groups, description?}`) · `…/ignore` | a host waiting for approval: accept it as an identity, or set it aside for 24 hours |
 | `POST /api/runs` · `GET /api/runs`, `/api/runs/queue` | `{pipelineId?, pins?}` queues a run; the journal; in flight and queued |
-| `POST /api/runs/cancel` | `{runId?}`: the run in flight, or a queued one |
+| `POST /api/runs/cancel` | `{runId?}`: a run in flight or queued; with no id, the one in flight (409 when several are) |
 | `POST /api/fragments/{name}/kill`, `/variant` | fault injection |
-| `POST /api/pipelines/from-command` | `{args: [...]}` → YAML through `--export-job` |
-| `POST /api/query` | `{variable, sql}` → CSV of a node's database |
+| `POST /api/query` | `{variable, sql}` → CSV of a node's database, read by that node |
 | `GET /api/events` | server-sent events: nodes, fragment states, logs, bytes, runs |
