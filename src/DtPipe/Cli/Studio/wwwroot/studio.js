@@ -256,11 +256,14 @@ async function debugRun(resume) {
     if (asked === null) return;
     rows = Math.max(1, Math.min(100000, parseInt(asked, 10) || 1000));
   }
+  const forPath = current.path;
   try {
     status("debug run…", "warn");
     const answer = await api("/api/debug", {
       yaml: result?.yaml || "", rows, path: current.hash ? current.path : null, bricks: brickBranches(), resume: resume || null,
     });
+    // Another job may have been opened while it ran: its answer is not that job's.
+    if (current?.path !== forPath) { status(`debug run of ${forPath} ended`, "warn"); return; }
     debug = { rows, answer };
     status(answer.report.success ? "debug run done" : "debug run failed", answer.report.success ? "good" : "bad");
   } catch (e) {
@@ -312,7 +315,9 @@ async function prepareRun() {
     return;
   }
   try {
+    const forPath = current.path;
     const prepared = await api("/api/run/prepare", { path: current.path, hash: current.hash, bricks: brickBranches() });
+    if (current?.path !== forPath) return;
     run = { phase: "confirm", prepared, bricks: brickBranches(), hash: current.hash, path: current.path };
     showTab("run");
   } catch (e) {

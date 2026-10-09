@@ -12,6 +12,7 @@ One screenshot per step. Not run by CI: it needs the lab up and the release bina
   6. Publish: a job the coordinator accepts is created, a job its check refuses is shown with its
      report and is not saved.
   7. No error reached the page's console.
+  8. Ctrl+C during a run: the run stops and the studio exits 130.
 
 Usage: studio_check.py [lab-url] [dtpipe-binary] [out-dir]
        (defaults: http://127.0.0.1:5180, dist/release/dtpipe, .state/studio)
@@ -124,7 +125,9 @@ def main():
         click(browser, "#d-sample")
         sampled = browser.wait_for("document.querySelectorAll('.stage').length >= 3", 60)
         stages = browser.js("document.querySelectorAll('.stage').length")
-        report(sampled, "sample, source brick to sink brick", f"{stages} stages shown", shot(browser, "sample"))
+        # The real POST /api/sample, from the page: every stage, the steps after the brick included, saw rows.
+        empty = browser.js("[...document.querySelectorAll('.stage')].filter(s => !(parseInt((s.textContent.match(/(\\d[\\d,]*) rows/) || [])[1]?.replace(/,/g, '') || '0', 10) > 0)).length")
+        report(sampled and empty == 0, "sample, source brick to sink brick", f"{stages} stages shown, {empty} with no row", shot(browser, "sample"))
 
         # 4. Debug run and resume
         stub_dialogs(browser, ["50"])
@@ -221,5 +224,39 @@ def main():
         shutil.rmtree(folder, ignore_errors=True)
 
 
+def ctrl_c():
+    """Ctrl+C during a run stops it and the studio exits 130: JobService holds its own CancelKeyPress handler."""
+    import signal, urllib.request
+    folder = tempfile.mkdtemp(prefix="studio-ctrlc-")
+    with open(os.path.join(folder, "long.yaml"), "w") as f:
+        f.write('main:\n  input: "generate:2000000000"\n  output: "null:"\n')
+    proc = subprocess.Popen([DTPIPE, "studio", folder], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=folder)
+    try:
+        address = proc.stdout.readline().strip()
+        base, token = address.split("#")[0].rstrip("/"), address.split("#")[1]
+
+        def call(method, path, body=None):
+            req = urllib.request.Request(base + path, json.dumps(body).encode() if body is not None else None,
+                                         {"X-Dtpipe-Studio": token, "Content-Type": "application/json"}, method=method)
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.loads(r.read() or b"{}")
+
+        digest = call("POST", "/api/run/prepare", {"path": "long.yaml", "hash": call("GET", "/api/job?path=long.yaml")["hash"]})["digest"]
+        call("POST", "/api/run", {"path": "long.yaml", "hash": call("GET", "/api/job?path=long.yaml")["hash"], "digest": digest})
+        time.sleep(2.5)
+        running = call("GET", "/api/run").get("running")
+        proc.send_signal(signal.SIGINT)
+        try:
+            code = proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            code = None
+        report(running and code == 130, "Ctrl+C during a run", f"running={running}, exit code {code}")
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        shutil.rmtree(folder, ignore_errors=True)
+
+
 main()
+ctrl_c()
 sys.exit(1 if failed else 0)
