@@ -89,8 +89,8 @@ node's rows reference the others' counts, so a node seeded at another scale refu
 `.stack/` to seed again. `LAB_NODE_SANDBOX=1 ./lab.sh stack up` starts the data nodes in sandbox
 mode. `LAB_STACK_HTTP_PORT` moves the proxy off port 80, outside and inside: tokens name the issuer
 with that port, and the IdP accepts the coordinator's redirects at it (`Idp:ExtraOrigins`). Leave
-it unset for port 80: the IdP names itself without a default port, and a client compares that
-name with the authority it was given character for character.
+it unset for port 80: the IdP names itself without a default port, and `dtpipe studio` refuses an
+authority that differs from that name by more than a trailing slash, an explicit `:80` included.
 
 `./lab.sh stack smoke`, `ui` and `studio` run the scripts the local lab runs, from the host with
 `./build.sh`'s binary, pointed at the coordinator's name; `stack nodes strict|sandbox` recreates

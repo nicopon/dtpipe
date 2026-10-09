@@ -10,9 +10,10 @@
 # LAB_SCALE (default 1) multiplies the seeded rows and is shared by every node.
 # LAB_STACK_HTTP_PORT (default 80) is the proxy's port, outside and inside: a token names the
 # issuer with it, and the IdP accepts the coordinator's sign-in redirects at it. The issuer spells
-# the port only when the variable is set: the IdP names itself without a default port, and a client
-# compares the authority it was given with the issuer the IdP states, character for character.
-# Leave the variable unset for port 80 (lab.sh does).
+# the port only when the variable is set: the IdP names itself without a default port, and dtpipe
+# studio (RFC 8414, section 3.3) accepts no difference between the authority it was given and the
+# issuer the IdP states but a trailing slash, so an explicit :80 is refused. Leave the variable
+# unset for port 80 (lab.sh does).
 name: dtpipe-lab-stack
 
 x-dotnet-service: &dotnet-service

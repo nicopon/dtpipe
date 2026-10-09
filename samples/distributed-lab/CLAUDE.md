@@ -79,8 +79,9 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   `LAB_STACK_HTTP_PORT` works unedited. The coordinator is browsed at `coordinator.localtest.me`,
   never `127.0.0.1` or `localhost`, which the local lab's cookies hold. Nodes reach the coordinator
   directly, never through the proxy. The issuer spells a port only when `LAB_STACK_HTTP_PORT` is set:
-  the IdP names itself without a default port, and `dtpipe studio` refuses an authority that is not
-  that name character for character. `[local: lab.sh stack studio]`
+  the IdP names itself without a default port, and `dtpipe studio` refuses an authority that differs
+  from that name by more than a trailing slash, an explicit `:80` included. `[local: lab.sh stack
+  studio, on port 80 only]`
 - **The `coordinator` and `runner` image targets hold nothing of the lab**: lab content enters
   through `coordinator-lab`, `node`, `idp` or `compose.yaml`'s environment, so those two targets
   can leave `samples/` unchanged. Every .NET service runs under `init: true`: dotnet as PID 1 hangs
