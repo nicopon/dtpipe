@@ -156,7 +156,7 @@ public partial class DtPipeMcpTools
     /// <c>arrow:-</c> boundaries as <c>--bind-input</c> and <c>--bind-output</c> do: no second binding path.
     /// </summary>
     internal async Task<string> SampleAsync(string yamlContent, int rows, int shownRows, CancellationToken ct,
-        string? bindInput = null, string? bindOutput = null)
+        string? bindInput = null, string? bindOutput = null, int maxRows = 1000)
     {
         if (string.IsNullOrWhiteSpace(yamlContent))
             return JsonSerializer.Serialize(new { success = false, error = "YAML job content cannot be empty." });
@@ -168,7 +168,7 @@ public partial class DtPipeMcpTools
                 return JsonSerializer.Serialize(new { success = false, stage = "validation", errors = parsed.Errors },
                     new JsonSerializerOptions { WriteIndented = true });
 
-            var report = await RunSampleAsync(parsed, Math.Clamp(rows, 1, 1000), shownRows, ct,
+            var report = await RunSampleAsync(parsed, Math.Clamp(rows, 1, maxRows), shownRows, ct,
                 // Not a pointer to 'execute-yaml-job': in plan mode that tool is hidden and the role
                 // prompt forbids it, so naming it here sends the reader after something it cannot
                 // reach — the same mistake 'help' made and had removed.

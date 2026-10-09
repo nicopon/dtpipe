@@ -234,6 +234,61 @@ async function loadBricks() {
   }
 }
 
+// ---------------------------------------------------------------- debug run
+
+// The last debug run: { rows, answer }, answer being the server's { report, levels, notice }.
+let debug = null;
+
+async function debugRun(resume) {
+  if (!current) return;
+  const result = await compose();
+  let rows = debug?.rows ?? 1000;
+  if (!resume) {
+    const asked = prompt("Source rows to read from each source (1 to 100000). Each stage shows at most 1000 of them:", String(rows));
+    if (asked === null) return;
+    rows = Math.max(1, Math.min(100000, parseInt(asked, 10) || 1000));
+  }
+  try {
+    status("debug run…", "warn");
+    const answer = await api("/api/debug", {
+      yaml: result?.yaml || "", rows, path: current.hash ? current.path : null, bricks: brickBranches(), resume: resume || null,
+    });
+    debug = { rows, answer };
+    status(answer.report.success ? "debug run done" : "debug run failed", answer.report.success ? "good" : "bad");
+  } catch (e) {
+    if (e.status === 422) showTab("variables");
+    status(e.message, "bad");
+    return;
+  }
+  showTab("debug");
+}
+
+function debugView() {
+  if (!debug) {
+    return el("p", { class: "hint" }, "A debug run samples the job cut after each transformer, keeps what every level delivered and lets you start again from a level. It is not the job's run.");
+  }
+  const { answer } = debug;
+  const reports = Object.fromEntries((answer.report.branches || []).map((b) => [b.branch, b]));
+  const byBranch = {};
+  for (const level of answer.levels) (byBranch[level.branch] ||= []).push(level);
+  return [
+    el("p", { class: "hint warn" }, answer.notice),
+    answer.report.error ? el("p", { class: "warn" }, answer.report.error) : null,
+    Object.entries(byBranch).map(([branch, levels]) => el("div", { class: "debug-branch" },
+      el("h4", {}, branch),
+      levels.map((level) => {
+        const stage = (reports[level.alias]?.stages || []).at(-1);
+        return el("div", { class: "debug-level" },
+          el("p", {}, `level ${level.level}`, level.level === 0 ? " (the read)" : "", " · ",
+            level.key ? el("code", {}, level.key.slice(0, 8)) : "no checkpoint kept", " ",
+            level.key && current?.hash ? el("button", { class: "small ghost", onclick: () => debugRun({ branch, level: level.level }) }, "Resume here") : null),
+          stage ? el("table", {},
+            el("tr", {}, (stage.columns || []).map((c) => el("th", {}, c.Name))),
+            (stage.sample || []).slice(0, 10).map((row) => el("tr", {}, row.map((v) => el("td", {}, v ?? ""))))) : null);
+      }))),
+  ];
+}
+
 // ---------------------------------------------------------------- run
 
 // The real run of the saved job. phase: "confirm" (what it would write, to confirm), "running", "done".
@@ -407,6 +462,7 @@ async function start() {
   mountDesigner($("designer"), components, {
     toolbar: () => [
       el("button", { id: "d-save", title: "Write the job and its layout (Ctrl+S)", onclick: () => save() }, "Save"),
+      el("button", { id: "d-debug", title: "Sample the job cut after each transformer, keeping every level", onclick: () => debugRun() }, "Debug run"),
       el("button", { id: "d-run", title: "Run the saved job here, after you confirm what it writes", onclick: () => prepareRun() }, "Run"),
       coordinator() ? el("button", { id: "d-publish", title: "Send the saved job to the coordinator's library", onclick: () => publish() }, "Publish") : null,
     ],
@@ -417,6 +473,10 @@ async function start() {
       label: "Variables ",
       badge: () => { const n = vars.variables.filter((v) => !v.ready).length; return n ? el("span", { class: "count" }, n) : null; },
       render: variablesView,
+    }, {
+      name: "debug",
+      label: "Debug",
+      render: debugView,
     }, {
       name: "run",
       label: "Run",

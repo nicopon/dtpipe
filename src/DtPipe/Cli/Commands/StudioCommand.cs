@@ -1,6 +1,7 @@
 using System.CommandLine;
 using DtPipe.Cli.Mcp;
 using DtPipe.Cli.Pipeline;
+using DtPipe.Cli.Split;
 using DtPipe.Cli.Security;
 using DtPipe.Cli.Studio;
 using DtPipe.Core.Abstractions;
@@ -74,7 +75,10 @@ public sealed class StudioCommand : Command
                 link,
                 lookup => new DesignService(lookup, endpoints),
                 args => CommandLineJob.Export(serviceProvider, args),
-                (yaml, bindings, failures, token) => mcp.RunJobAsync(yaml, bindings.Input, bindings.Output, failures, token));
+                (yaml, bindings, failures, token) => mcp.RunJobAsync(yaml, bindings.Input, bindings.Output, failures, token),
+                new DebugCutter(readers, writers, serviceProvider.GetServices<IStreamTransformerFactory>().ToList()),
+                (yaml, rows, bindings, token) => mcp.SampleAsync(yaml, rows, shownRows: Math.Min(rows, StudioServer.MaxRows), token,
+                    bindings.Input, bindings.Output, maxRows: StudioServer.DebugMaxRows));
             StudioServer server;
             try
             {

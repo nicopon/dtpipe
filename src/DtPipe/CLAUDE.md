@@ -259,9 +259,20 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   **A stop asked while the run was unfinished ends in 130**, whether the engine threw (a linear
   job) or answered 1 or 0 (a DAG); a run finished before the stop keeps its code and a later stop
   is a 409. `[CI: StudioRunTests]` `[local: studio_check.py]`
+- **A debug run is the real sample of a cut copy, never the job's run.** `DebugCutter` cuts each
+  branch after every transformer into mini-branches joined by `from:` (`__level` is reserved), each
+  with a checkpoint in the studio's own session, through `JobCutter.Cut` and `BranchSides`: the head
+  keeps the reader and what bounds it, the last piece keeps the branch's alias, output and writer
+  side, and a branch with a processor, no transformer or one `JobCutter` refuses stays whole. It
+  runs through `SampleCoreAsync` (bricks bound as a sample binds them), the bound applies to each
+  source alone (at most `DebugMaxRows`, a thousand rows shown per stage) and a checkpoint read back
+  is not bounded again. `.dtpipe/studio/<job>-debug.json` keeps each level's key and a digest of the
+  text that produced it (never the text); a resume replaces the levels up to k with `from-checkpoint`
+  and is refused, by name, when that text changed or the checkpoint left the session. The cut is
+  never saved or published. `[CI: StudioDebugTests]`
 - Quit from the page exits 0, Ctrl+C 130. A quit is refused while a run goes on; Ctrl+C cancels
   the run and the studio then exits.
 
 `[CI: StudioServerTests (no script writes HTML or an inline style), StudioSampleTests,
-StudioCoordinatorTests, StudioBrickTests, StudioPublishTests, StudioRunTests, DesignServiceTests, LocalEndpointCardTests]` `[unchecked: the page's behaviour - no test drives a
+StudioCoordinatorTests, StudioBrickTests, StudioPublishTests, StudioRunTests, StudioDebugTests, DesignServiceTests, LocalEndpointCardTests]` `[unchecked: the page's behaviour - no test drives a
 browser]`

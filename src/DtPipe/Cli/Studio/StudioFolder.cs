@@ -210,6 +210,14 @@ public sealed class StudioLocalFiles(StudioFolder folder)
         catch (JsonException) { return null; }
     }
 
+    /// <summary>What a debug run kept of a job: the checkpoint key of each level, and a digest of what produced it.</summary>
+    public JsonObject? ReadDebug(string job) => Read(job, "debug") as JsonObject;
+
+    public void WriteDebug(string job, JsonObject state) => Write(job, "debug", state);
+
+    /// <summary>Refuses, before anything is written, a debug state the studio could only keep through a link.</summary>
+    public void CheckDebug(string job) => RefuseLinks(PathOf(job, "debug"));
+
     /// <summary>Refuses, before anything is written, a publication the studio could only keep through a link.</summary>
     public void CheckPublication(string job) => RefuseLinks(PathOf(job, "publish"));
 

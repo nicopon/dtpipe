@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using DtPipe.Cli.Expressions;
 using DtPipe.Cli.Security;
+using DtPipe.Cli.Split;
 using DtPipe.Core.Security;
 using DtPipe.Jobs;
 using DtPipe.Jobs.Coordinator;
@@ -42,7 +43,7 @@ public sealed record StudioComponent(string Name, string Category);
 public sealed record StudioTools(
     StudioSampler Sample, DesignService Design, IReadOnlyList<StudioComponent> Readers, IReadOnlyList<StudioComponent> Writers,
     ISecretsManager Secrets, CoordinatorLink? Coordinator = null, Func<IBrickLookup, DesignService>? DesignWith = null,
-    StudioImporter? Import = null, StudioRunner? Run = null);
+    StudioImporter? Import = null, StudioRunner? Run = null, DebugCutter? Debug = null, StudioSampler? DebugSample = null);
 
 /// <summary>
 /// The real run of a saved job, the writers of its sink bricks bound to throwaway files: the engine's exit
@@ -236,6 +237,9 @@ public sealed partial class StudioServer : IAsyncDisposable
                 case ("POST", "/api/library/open"):
                     await OpenFromLibraryAsync(context);
                     break;
+                case ("POST", "/api/debug"):
+                    await DebugAsync(context);
+                    break;
                 case ("POST", "/api/run/prepare"):
                     await PrepareRunAsync(context);
                     break;
@@ -409,7 +413,19 @@ public sealed partial class StudioServer : IAsyncDisposable
             throw new StudioRefusal(400, "A sample is asked as {\"yaml\": \"...\", \"rows\": n}.");
         }
         rows = Math.Clamp(rows, 1, MaxRows);
+        var json = await SampleCoreAsync(yaml, rows, path, bricks, _tools.Sample, rewrite: null, context.RequestAborted);
+        context.Response.ContentType = "application/json; charset=utf-8";
+        await context.Response.WriteAsync(json, context.RequestAborted);
+    }
 
+    /// <summary>
+    /// The sample of <paramref name="yaml"/> through the studio's one sample path, with its bricks bound as a
+    /// sample binds them, its variables armed for this call alone and the engine slot held. <paramref name="rewrite"/>
+    /// gives the job to run from the one the bricks left: the debug run's cut.
+    /// </summary>
+    private async Task<string> SampleCoreAsync(string yaml, int rows, string? path, List<SampledBrick>? bricks, StudioSampler sampler,
+        Func<string, string>? rewrite, CancellationToken ct)
+    {
         // Each brick's branch is read or written on its node: here, its rows come from the coordinator.
         var sampling = BrickSampling.Of(yaml, bricks, _tools.Coordinator?.Catalog);
         if (sampling.Sources.Count > 0 && _tools.Coordinator?.Status().State != CoordinatorLink.SignedIn)
@@ -427,7 +443,7 @@ public sealed partial class StudioServer : IAsyncDisposable
             foreach (var (alias, brick) in sampling.Sources)
             {
                 byte[] arrow;
-                try { arrow = await _tools.Coordinator!.SampleAsync(brick.Node, brick.Id, Math.Min(rows, CoordinatorApi.MaxSampleRows), context.RequestAborted); }
+                try { arrow = await _tools.Coordinator!.SampleAsync(brick.Node, brick.Id, Math.Min(rows, CoordinatorApi.MaxSampleRows), ct); }
                 catch (CoordinatorLinkException ex) { throw new StudioRefusal(502, $"'{alias}': {ex.Message}"); }
                 files.Add(_local.SampleFile(arrow));
                 inputs.Add($"{alias}={Bindable(files[^1])}");
@@ -445,9 +461,7 @@ public sealed partial class StudioServer : IAsyncDisposable
             using var armed = LaunchValues.Arm(launch);
             // Nobody watches the terminal for a prompt: a run that would ask one fails instead.
             using var _ = NonInteractiveGuard.Suppress();
-            var json = await _tools.Sample(sampling.Yaml, rows, bindings, context.RequestAborted);
-            context.Response.ContentType = "application/json; charset=utf-8";
-            await context.Response.WriteAsync(json, context.RequestAborted);
+            return await sampler(rewrite is null ? sampling.Yaml : rewrite(sampling.Yaml), rows, bindings, ct);
         }
         finally
         {
