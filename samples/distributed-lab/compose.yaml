@@ -9,7 +9,10 @@
 # network aliases, so the IdP has one issuer for browsers and containers alike.
 # LAB_SCALE (default 1) multiplies the seeded rows and is shared by every node.
 # LAB_STACK_HTTP_PORT (default 80) is the proxy's port, outside and inside: a token names the
-# issuer with it, and the IdP accepts the coordinator's sign-in redirects at it.
+# issuer with it, and the IdP accepts the coordinator's sign-in redirects at it. The issuer spells
+# the port only when the variable is set: the IdP names itself without a default port, and a client
+# compares the authority it was given with the issuer the IdP states, character for character.
+# Leave the variable unset for port 80 (lab.sh does).
 name: dtpipe-lab-stack
 
 x-dotnet-service: &dotnet-service
@@ -36,7 +39,7 @@ x-node: &node
 x-node-environment: &node-environment
   LAB_SCALE: ${LAB_SCALE:-1}
   LAB_COORDINATOR_URL: http://coordinator:8080
-  LAB_IDP_URL: http://idp.localtest.me:${LAB_STACK_HTTP_PORT:-80}
+  LAB_IDP_URL: http://idp.localtest.me${LAB_STACK_HTTP_PORT:+:}${LAB_STACK_HTTP_PORT:-}
   LAB_NODE_SANDBOX: ${LAB_NODE_SANDBOX:-}
 
 services:
@@ -64,10 +67,10 @@ services:
       <<: *build
       target: idp
     environment:
-      Idp__Issuer: http://idp.localtest.me:${LAB_STACK_HTTP_PORT:-80}
+      Idp__Issuer: http://idp.localtest.me${LAB_STACK_HTTP_PORT:+:}${LAB_STACK_HTTP_PORT:-}
       Idp__ClientsFile: /lab/idp-clients.json
       Idp__SigningKeyFile: /state/signing-key.pem
-      Idp__ExtraOrigins: http://coordinator.localtest.me:${LAB_STACK_HTTP_PORT:-80}
+      Idp__ExtraOrigins: http://coordinator.localtest.me${LAB_STACK_HTTP_PORT:+:}${LAB_STACK_HTTP_PORT:-}
     volumes:
       - ./.stack/idp:/state
     healthcheck:
@@ -82,7 +85,7 @@ services:
       <<: *build
       target: coordinator-lab
     environment:
-      Coordinator__Authority: http://idp.localtest.me:${LAB_STACK_HTTP_PORT:-80}
+      Coordinator__Authority: http://idp.localtest.me${LAB_STACK_HTTP_PORT:+:}${LAB_STACK_HTTP_PORT:-}
       Coordinator__LabMode: "true"
       Coordinator__Scenarios: /lab/pipelines
       Coordinator__LibrarySeed: /lab/library-seed
@@ -138,7 +141,7 @@ services:
       DtPipeNode__Name: runner-1
       DtPipeNode__Description: Runner - no database, carries every step between the bricks
       DtPipeNode__CoordinatorUrl: http://coordinator:8080
-      DtPipeNode__Oidc__Authority: http://idp.localtest.me:${LAB_STACK_HTTP_PORT:-80}
+      DtPipeNode__Oidc__Authority: http://idp.localtest.me${LAB_STACK_HTTP_PORT:+:}${LAB_STACK_HTTP_PORT:-}
       DtPipeNode__Oidc__ClientId: runner-1
       DtPipeNode__Oidc__ClientSecret: ${LAB_RUNNER_SECRET:-runner-1-lab-secret}
     depends_on:
