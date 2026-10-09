@@ -41,7 +41,13 @@ public sealed record StudioComponent(string Name, string Category);
 public sealed record StudioTools(
     StudioSampler Sample, DesignService Design, IReadOnlyList<StudioComponent> Readers, IReadOnlyList<StudioComponent> Writers,
     ISecretsManager Secrets, CoordinatorLink? Coordinator = null, Func<IBrickLookup, DesignService>? DesignWith = null,
-    StudioImporter? Import = null);
+    StudioImporter? Import = null, StudioRunner? Run = null);
+
+/// <summary>
+/// The real run of a saved job, the writers of its sink bricks bound to throwaway files: the engine's exit
+/// code, with the reason each failing branch stopped in <paramref name="failures"/>.
+/// </summary>
+public delegate Task<int> StudioRunner(string yaml, StudioBindings bindings, System.Collections.Concurrent.ConcurrentDictionary<string, string> failures, CancellationToken ct);
 
 /// <summary>A command line, as the arguments of one process, as the text of the job file it stands for.</summary>
 public delegate string StudioImporter(IReadOnlyList<string> args);
@@ -64,7 +70,7 @@ public delegate string StudioImporter(IReadOnlyList<string> args);
 /// </list>
 /// One sample runs at a time: the sample mode's collector belongs to the whole process.
 /// </summary>
-public sealed class StudioServer : IAsyncDisposable
+public sealed partial class StudioServer : IAsyncDisposable
 {
     public const string TokenHeader = "X-Dtpipe-Studio";
     public const int MaxRows = 1000;
@@ -229,7 +235,21 @@ public sealed class StudioServer : IAsyncDisposable
                 case ("POST", "/api/library/open"):
                     await OpenFromLibraryAsync(context);
                     break;
+                case ("POST", "/api/run/prepare"):
+                    await PrepareRunAsync(context);
+                    break;
+                case ("POST", "/api/run"):
+                    await StartRunAsync(context);
+                    break;
+                case ("GET", "/api/run"):
+                    await JsonAsync(context, RunStatus());
+                    break;
+                case ("POST", "/api/run/stop"):
+                    StopRun();
+                    context.Response.StatusCode = StatusCodes.Status202Accepted;
+                    break;
                 case ("POST", "/api/quit"):
+                    if (RunInProgress) throw new StudioRefusal(409, "A run is in progress: stop it, or wait for it, before quitting.");
                     context.Response.StatusCode = StatusCodes.Status202Accepted;
                     _quit.TrySetResult();
                     break;
@@ -398,7 +418,7 @@ public sealed class StudioServer : IAsyncDisposable
         var launch = _variables.LaunchEnvironment(JobPath(path), sampling.Yaml);
 
         if (!await _sampling.WaitAsync(0))
-            throw new StudioRefusal(409, "A sample is already running: wait for it to finish.");
+            throw new StudioRefusal(409, "An action is already running: wait for it to finish.");
         var files = new List<string>();
         try
         {
@@ -638,6 +658,7 @@ public sealed class StudioServer : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        await StopRunAndWaitAsync();
         await _app.StopAsync();
         await _app.DisposeAsync();
         _sampling.Dispose();

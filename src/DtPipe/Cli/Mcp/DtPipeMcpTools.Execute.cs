@@ -47,6 +47,27 @@ public partial class DtPipeMcpTools
     }
 
     /// <summary>
+    /// The studio's real run: <paramref name="yamlContent"/> through <c>JobService.ExecutePipelineAsync</c>, as
+    /// <c>execute-yaml-job</c> runs it, with the same SQL safety check (destructive and network verbs refused).
+    /// The person's confirmation is the page's, so no approval gate is asked. <paramref name="branchFailures"/>
+    /// is filled with the reason each failing branch stopped. Returns the engine's exit code; a job that does
+    /// not validate or that the safety policy refuses throws, naming why, before anything runs.
+    /// </summary>
+    internal async Task<int> RunJobAsync(string yamlContent, string? bindInput, string? bindOutput,
+        System.Collections.Concurrent.ConcurrentDictionary<string, string> branchFailures, CancellationToken ct)
+    {
+        var parsed = ParseAndValidateYaml(yamlContent, bindInput, bindOutput);
+        if (parsed.Errors.Count > 0) throw new InvalidOperationException(string.Join(" ", parsed.Errors));
+        var safety = DefaultSqlSafetyPolicy.DryRunYaml(yamlContent, new SqlSafetyOptions());
+        if (!safety.Allowed)
+            throw new InvalidOperationException("The SQL safety policy refuses this job: " + string.Join(" ", safety.Violations)
+                + " Run it with dtpipe --job and the appropriate --allow-* flag.");
+        var contexts = parsed.Jobs.ToDictionary(kv => kv.Key, kv => new CliJobContext(null, null, null, Array.Empty<string>()));
+        var jobService = _serviceProvider.GetRequiredService<DtPipe.Cli.JobService>();
+        return await jobService.ExecutePipelineAsync(parsed.Jobs, parsed.Dag, contexts, new GlobalOptions { Quiet = true }, ct, branchFailures);
+    }
+
+    /// <summary>
     /// What the job is shaped like, returned beside the verdict.
     ///
     /// <para>

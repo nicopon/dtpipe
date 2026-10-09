@@ -234,6 +234,88 @@ async function loadBricks() {
   }
 }
 
+// ---------------------------------------------------------------- run
+
+// The real run of the saved job. phase: "confirm" (what it would write, to confirm), "running", "done".
+let run = null;
+let runTimer = null;
+
+const runLabel = (status) => status.code === 0 ? "succeeded" : status.code === 130 ? "stopped" : `failed (code ${status.code})`;
+
+async function prepareRun() {
+  if (!current) return;
+  if (isDirty() || !current.hash) {
+    status("Save the job first: a run executes the job saved in the folder.", "bad");
+    return;
+  }
+  try {
+    const prepared = await api("/api/run/prepare", { path: current.path, hash: current.hash, bricks: brickBranches() });
+    run = { phase: "confirm", prepared, bricks: brickBranches(), hash: current.hash, path: current.path };
+    showTab("run");
+  } catch (e) {
+    run = null;
+    status(e.message, "bad");
+  }
+}
+
+async function startRun() {
+  try {
+    await api("/api/run", { path: run.path, hash: run.hash, bricks: run.bricks, digest: run.prepared.digest });
+    run = { ...run, phase: "running", status: null };
+    pollRun();
+    showTab("run");
+  } catch (e) {
+    status(e.message, "bad");
+  }
+}
+
+function pollRun() {
+  clearInterval(runTimer);
+  runTimer = setInterval(async () => {
+    try {
+      const now = await api("/api/run");
+      run = { ...run, status: now, phase: now.running ? "running" : "done" };
+      if (!now.running) { clearInterval(runTimer); status(`run ${runLabel(now)}`, now.code === 0 ? "good" : "warn"); }
+      showTab("run");
+    } catch (e) {
+      clearInterval(runTimer);
+      status(e.message, "bad");
+    }
+  }, 1000);
+}
+
+async function stopRun() {
+  try { await api("/api/run/stop", {}); status("stop asked", "warn"); } catch (e) { status(e.message, "bad"); }
+}
+
+function runView() {
+  if (!run) return el("p", { class: "hint" }, "Run executes the job saved in this folder, as dtpipe --job would, on this machine. You confirm what it writes first.");
+  if (run.phase === "confirm") {
+    const writes = run.prepared.writes;
+    return [
+      el("p", { class: "warn" }, "This run is real: its writers write their targets. A sink brick is written to a throwaway file here, never to its node."),
+      writes.length ? writes.map((w) => el("div", { class: "run-write" },
+        el("p", {}, el("b", {}, w.alias), w.throwaway ? " → a throwaway file (the brick's node is not reached)" : [" → ", el("code", {}, w.output)]),
+        w.block ? el("pre", {}, w.block) : null)) : el("p", { class: "hint" }, "No branch of this job writes anywhere."),
+      el("div", { class: "row" },
+        el("button", { id: "d-run-confirm", class: "primary", onclick: startRun }, "Confirm and run"),
+        el("button", { class: "ghost", onclick: () => { run = null; showTab("run"); } }, "Cancel")),
+    ];
+  }
+  const now = run.status;
+  if (run.phase === "running" || !now) {
+    return [el("p", {}, "Running ", el("code", {}, run.path), "…"),
+      el("button", { id: "d-run-stop", class: "ghost danger", onclick: stopRun }, "Stop")];
+  }
+  const failures = Object.entries(now.failures || {});
+  return [
+    el("p", { class: now.code === 0 ? "good" : "warn" }, `${run.path}: ${runLabel(now)}.`),
+    now.stopRequested && now.code === 130 ? el("p", { class: "hint" }, "You stopped it: what it had written before is not undone.") : null,
+    now.error ? el("p", { class: "warn" }, now.error) : null,
+    failures.map(([alias, why]) => el("p", { class: "warn" }, el("b", {}, alias), ": ", why)),
+  ];
+}
+
 // ---------------------------------------------------------------- publication
 
 // The last publication's outcome, for its tab: { id, saved } or { id, conflict }.
@@ -310,7 +392,12 @@ function publicationView() {
 
 async function quit() {
   if (isDirty() && !confirm("Changes are not saved. Quit anyway?")) return;
-  try { await api("/api/quit", {}); } catch { /* the server may already be gone */ }
+  try {
+    await api("/api/quit", {});
+  } catch (e) {
+    // A refusal (a run in progress) leaves the studio open; only a server already gone is a quit.
+    if (e.status) { status(e.message, "bad"); return; }
+  }
   forgetToken();
   fill(document.body, el("p", { class: "closed" }, "dtpipe studio has stopped. You can close this tab."));
 }
@@ -320,6 +407,7 @@ async function start() {
   mountDesigner($("designer"), components, {
     toolbar: () => [
       el("button", { id: "d-save", title: "Write the job and its layout (Ctrl+S)", onclick: () => save() }, "Save"),
+      el("button", { id: "d-run", title: "Run the saved job here, after you confirm what it writes", onclick: () => prepareRun() }, "Run"),
       coordinator() ? el("button", { id: "d-publish", title: "Send the saved job to the coordinator's library", onclick: () => publish() }, "Publish") : null,
     ],
     onComposed: loadVariables,
@@ -329,6 +417,10 @@ async function start() {
       label: "Variables ",
       badge: () => { const n = vars.variables.filter((v) => !v.ready).length; return n ? el("span", { class: "count" }, n) : null; },
       render: variablesView,
+    }, {
+      name: "run",
+      label: "Run",
+      render: runView,
     }, {
       name: "publish",
       label: "Publish",

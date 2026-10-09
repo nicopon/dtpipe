@@ -244,7 +244,20 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   `<id>.yaml` through `WriteJob` (create only, 409 when the file exists) and keeps the version read in
   `<job>-publish.json`, so the next publication sends `If-Match` for it; a link under `.dtpipe/`
   refuses before the job is written. `[CI: StudioPublishTests]`
-- Quit from the page exits 0, Ctrl+C 130.
+- **A run is the saved file, confirmed first, one engine action at a time.** `POST /api/run/prepare`
+  re-reads the file (its hash is the page's), refuses a job that reads a brick (its rows would
+  recreate a real target), resolves every variable and lists what each branch writes: the output
+  through `ConnectionStringSanitizer.Redact`, the writer's block as the file holds it (never
+  interpreted), a sink brick as a throwaway file. Its digest, an HMAC of the text and the launch
+  values by name under the session's token, is what `POST /api/run` must carry: another text or
+  another value is a 409. The run goes through `JobService.ExecutePipelineAsync` (`RunJobAsync`,
+  the SQL safety policy kept), holds the sample's semaphore (409 for a sample, a run or a quit
+  beside it), and reports each branch's failure through `ConnectionStringSanitizer.Sanitize`.
+  **A stop asked while the run was unfinished ends in 130**, whether the engine threw (a linear
+  job) or answered 1 or 0 (a DAG); a run finished before the stop keeps its code and a later stop
+  is a 409. `[CI: StudioRunTests]` `[local: studio_check.py]`
+- Quit from the page exits 0, Ctrl+C 130. A quit is refused while a run goes on; Ctrl+C cancels
+  the run and the studio then exits.
 
 `[CI: StudioServerTests (no script writes HTML or an inline style), StudioSampleTests,
 StudioCoordinatorTests, StudioBrickTests, StudioPublishTests, DesignServiceTests, LocalEndpointCardTests]` `[unchecked: the page's behaviour - no test drives a

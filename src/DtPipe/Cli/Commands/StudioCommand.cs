@@ -73,7 +73,8 @@ public sealed class StudioCommand : Command
                 serviceProvider.GetRequiredService<ISecretsManager>(),
                 link,
                 lookup => new DesignService(lookup, endpoints),
-                args => CommandLineJob.Export(serviceProvider, args));
+                args => CommandLineJob.Export(serviceProvider, args),
+                (yaml, bindings, failures, token) => mcp.RunJobAsync(yaml, bindings.Input, bindings.Output, failures, token));
             StudioServer server;
             try
             {
