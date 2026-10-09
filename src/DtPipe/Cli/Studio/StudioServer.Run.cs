@@ -72,8 +72,9 @@ public sealed partial class StudioServer
         {
             if (JobYaml.Scalar(branch, "output") is not { } output) continue;
             if (sampling.Sinks.Contains(alias)) { writes.Add(new RunWrite(alias, true, null, null)); continue; }
-            // The writer's block as the file holds it: its options are not read or judged here.
-            var block = new YamlMappingNode { { "output", output } };
+            // The writer's block as the file holds it, its options neither read nor judged, but for the
+            // connection string, which is redacted as one before the block is text.
+            var block = new YamlMappingNode { { "output", ConnectionStringSanitizer.Redact(output) } };
             foreach (var key in BranchSides.Write)
                 if (branch.Children.TryGetValue(new YamlScalarNode(key), out var value)) block.Add(key, value);
             if (branch.Children.TryGetValue(new YamlScalarNode("provider-options"), out var options)) block.Add("provider-options", options);

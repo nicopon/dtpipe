@@ -53,7 +53,7 @@ public sealed class RunJournal
 
     public void Record(RunView run)
     {
-        var dir = Path.Combine(_dir, Safe(run.PipelineId ?? run.PlanId));
+        var dir = Path.Combine(_dir, DirectoryName(run.PipelineId ?? run.PlanId));
         Directory.CreateDirectory(dir);
         File.WriteAllText(Path.Combine(dir, run.RunId + ".json"), JsonSerializer.Serialize(run, Json));
         lock (_lock)
@@ -69,6 +69,6 @@ public sealed class RunJournal
         lock (_lock) return _runs.Where(r => pipelineId is null || r.PipelineId == pipelineId).Take(limit).ToList();
     }
 
-    private static string Safe(string name) =>
+    private static string DirectoryName(string name) =>
         string.Concat(name.Select(c => char.IsLetterOrDigit(c) || c is '-' or '_' ? c : '_'));
 }

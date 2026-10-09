@@ -94,7 +94,7 @@ pass "every helper the check lets through is defined over Redact"
 #    Adding a name here is the moment to ask whether the value really has no grammar.
 #    If it is a connection string, the answer is Redact.
 # ----------------------------------------------------------------------------
-PROSE_ARGUMENTS='ex\.Message|reason|text|kv\.Value|report\.SchemaInspectionError|\$"'
+PROSE_ARGUMENTS='ex\.Message|reason|text|kv\.Value|f\.Value|report\.SchemaInspectionError|JobYaml\.Serialize\(|WithFileContent\(|\$"'
 
 UNDECLARED=""
 while IFS= read -r line; do
