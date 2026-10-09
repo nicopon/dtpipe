@@ -26,6 +26,9 @@ For every pipeline of the first two:
 
 Usage: smoke.py <lab-url> <dtpipe> <state-dir> [lab|library|rights|faults|bricks|sandbox] [pipeline-id-substring ...]
 A leading pass name runs that pass alone.
+Against the compose stack (`lab.sh stack smoke`, LAB_TARGET=stack) the state directory is `.stack/`: the
+witness reads the databases the nodes seeded there, the library is the coordinator's own directory, its
+log is the container's, and the enrollment check's host is a throwaway container of the stack's `node` image.
 Exits 0 when every selected pipeline passes, 1 otherwise. Standard library only.
 """
 import base64, csv, io, itertools, json, os, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
@@ -36,6 +39,8 @@ PASSES = {"lab", "library", "rights", "faults", "bricks", "sandbox"}
 ONLY = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] in PASSES else None
 SELECTED = sys.argv[5:] if ONLY else sys.argv[4:]
 RUN_TIMEOUT = 180
+LAB_DIR = os.path.dirname(os.path.abspath(__file__))
+STACK = os.environ.get("LAB_TARGET") == "stack"
 
 
 # /api serves people: smoke signs in as the lab's admin, through the IdP, as a browser would.
@@ -64,6 +69,16 @@ def bearer(token, path, body=None, method="GET", csrf=True, headers=None):
             return r.status, r.read(), r.headers
     except urllib.error.HTTPError as e:
         return e.code, e.read(), e.headers
+
+
+def coordinator_log():
+    """Everything the coordinator has logged so far: its file on the local lab, its container's output on the stack."""
+    if STACK:
+        out = subprocess.run(["docker", "compose", "-f", os.path.join(LAB_DIR, "compose.yaml"), "logs", "--no-color", "coordinator"],
+                             capture_output=True, text=True, check=True)
+        return out.stdout
+    with open(os.path.join(STATE, "logs", "coordinator.log"), errors="replace") as f:
+        return f.read()
 
 
 def until(predicate, timeout, what):
@@ -97,10 +112,9 @@ def check_of(yaml):
 def seeded_databases():
     """Every node database as seed.sh wrote it on this machine, by variable: what the witness reads.
     The node files say where; the coordinator never knows."""
-    lab = os.path.dirname(os.path.abspath(__file__))
     databases = {}
-    for name in sorted(os.listdir(os.path.join(lab, "nodes"))):
-        with open(os.path.join(lab, "nodes", name)) as f:
+    for name in sorted(os.listdir(os.path.join(LAB_DIR, "nodes"))):
+        with open(os.path.join(LAB_DIR, "nodes", name)) as f:
             node = json.load(f)
         for d in node.get("datasets", []):
             databases[d["variable"]] = os.path.join(STATE, node["name"], d["file"])
@@ -233,7 +247,7 @@ def library_pass(ctx):
 def layouts_gone():
     """No coordinator designer remains, so no pipeline of the library keeps a layout: the library drops
     those it still tracked in one commit of its own, which its history keeps."""
-    repo = os.path.join(STATE, "library")
+    repo = os.path.join(STATE, "coordinator" if STACK else "", "library")
     git = lambda *a: subprocess.run(["git", "-C", repo, *a], capture_output=True, text=True, check=True).stdout
     tracked = git("ls-files", ":(glob)pipelines/*/layout.json").split()
     if tracked:
@@ -453,9 +467,20 @@ def rights_pass():
         config = os.path.join(root, "node.json")
         with open(config, "w") as f:
             json.dump({"name": "node-2", "description": "proposes to be node-2", "clientId": "node-enroll", "secret": "node-enroll-lab-secret"}, f)
-        host = subprocess.Popen(["dotnet", os.path.join(STATE, "bin", "node", "Lab.NodeHost.dll"), "--config", config,
-                                 "--state", root, "--coordinator", URL, "--idp", rights["idp"]["issuer"], "--dtpipe", DTPIPE],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if STACK:
+            # A host the stack did not declare: a throwaway container of the node image, on the stack's network,
+            # reaching the coordinator directly and the IdP by the one name browsers and containers share.
+            container = "lab-enroll-host"
+            subprocess.run(["docker", "rm", "-f", container], capture_output=True)
+            host = subprocess.Popen(["docker", "run", "--rm", "--init", "--name", container, "--network", "dtpipe-lab-stack_default",
+                                     "-v", f"{root}:/enroll", "--entrypoint", "dotnet", "dtpipe-lab-stack/node", "/app/Lab.NodeHost.dll",
+                                     "--config", "/enroll/node.json", "--state", "/enroll", "--coordinator", "http://coordinator:8080",
+                                     "--idp", rights["idp"]["issuer"], "--dtpipe", "/usr/local/bin/dtpipe"],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            host = subprocess.Popen(["dotnet", os.path.join(STATE, "bin", "node", "Lab.NodeHost.dll"), "--config", config,
+                                     "--state", root, "--coordinator", URL, "--idp", rights["idp"]["issuer"], "--dtpipe", DTPIPE],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         def waiting():
             return next((p for p in call("/api/rights")["pending"] if p["subject"] == "node-enroll"), None)
@@ -477,7 +502,10 @@ def rights_pass():
             if enrolled["groups"] != ["crm"] or waiting() or (node("node-2") or {}).get("groups") != ["sales"]:
                 raise RuntimeError(f"enrolled {enrolled}, still waiting {waiting()}, node-2 {node('node-2')}")
         finally:
-            host.terminate()
+            if STACK:
+                subprocess.run(["docker", "rm", "-f", "lab-enroll-host"], capture_output=True)
+            else:
+                host.terminate()
             host.wait(10)
             if "node-enroll" in {i["clientId"] for i in call("/api/rights")["identities"]}:
                 call("/api/rights/identities/node-enroll", None, "DELETE")
@@ -496,15 +524,12 @@ def rights_pass():
         def online():
             return next((n["online"] for n in call("/api/nodes") if n["name"] == "node-3"), False)
 
-        log = os.path.join(STATE, "logs", "coordinator.log")
-        seen = os.path.getsize(log)
+        seen = len(coordinator_log())
         try:
             update(False)
 
             def refused():
-                with open(log, errors="replace") as f:
-                    f.seek(seen)
-                    return "Announcement of node-3 refused: 'node-3' is disabled" in f.read()
+                return "Announcement of node-3 refused: 'node-3' is disabled" in coordinator_log()[seen:]
             until(refused, 30, "node-3's refusal while disabled")
             if online():
                 raise RuntimeError("node-3 is online while its identity is disabled")
@@ -892,13 +917,18 @@ def bricks_pass():
         return f"{len(names)} typed columns and the first {len(expected) - 1} rows are the sample's"
 
     def versions():
-        # Every node host announces what its dtpipe binary says of itself: here, the release binary.
-        expected = subprocess.run([DTPIPE, "--version"], capture_output=True, text=True, timeout=30).stdout.split()[1]
+        # Every node host announces what its dtpipe binary says of itself: here, the release binary; on the
+        # stack, the one in each node's own image, built from the tree without its git metadata.
+        def says(name):
+            command = (["docker", "compose", "-f", os.path.join(LAB_DIR, "compose.yaml"), "exec", "-T", name, "dtpipe"] if STACK else [DTPIPE])
+            return subprocess.run([*command, "--version"], capture_output=True, text=True, timeout=30).stdout.split()[1]
+
         nodes = call("/api/catalog")["nodes"]
-        wrong = {n["name"]: n["dtpipeVersion"] for n in nodes if n["dtpipeVersion"] != expected}
+        expected = {n["name"]: says(n["name"]) for n in nodes}
+        wrong = {n["name"]: n["dtpipeVersion"] for n in nodes if n["dtpipeVersion"] != expected[n["name"]]}
         if wrong or not nodes:
-            raise RuntimeError(f"expected {expected} on every node: {wrong or 'no node'}")
-        return f"{len(nodes)} nodes announce dtpipe {expected}"
+            raise RuntimeError(f"expected {expected} of the nodes: {wrong or 'no node'}")
+        return f"{len(nodes)} nodes announce dtpipe {', '.join(sorted(set(expected.values())))}"
 
     check("versions", versions)
     check("the studio's routes", studio_routes)

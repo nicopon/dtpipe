@@ -71,19 +71,28 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   the runner none: the stack is the proof that the coordinator reads no node's data, so a volume
   shared between two services voids it. A node seeds its own database on first start
   (`docker/node-entrypoint.sh`, `seed.sh` with its name) and refuses a scale other than the one it
-  recorded. `[local: smoke.py library against the stack]`
+  recorded. `[local: lab.sh stack smoke]`
 - **The IdP has one name for browsers and containers.** The proxy carries `idp.localtest.me` as a
   network alias and publishes the same port, so a token names one issuer everywhere; the authority
   stays `http://`, a choice of the lab. `idp-clients.json` registers only the local lab's URIs;
   the stack hands the IdP its coordinator's origin (`Idp:ExtraOrigins`, port included), so any
   `LAB_STACK_HTTP_PORT` works unedited. The coordinator is browsed at `coordinator.localtest.me`,
   never `127.0.0.1` or `localhost`, which the local lab's cookies hold. Nodes reach the coordinator
-  directly, never through the proxy. `[unchecked]`
+  directly, never through the proxy. The issuer spells a port only when `LAB_STACK_HTTP_PORT` is set:
+  the IdP names itself without a default port, and `dtpipe studio` refuses an authority that is not
+  that name character for character. `[local: lab.sh stack studio]`
 - **The `coordinator` and `runner` image targets hold nothing of the lab**: lab content enters
   through `coordinator-lab`, `node`, `idp` or `compose.yaml`'s environment, so those two targets
   can leave `samples/` unchanged. Every .NET service runs under `init: true`: dotnet as PID 1 hangs
   on its own crash, and the nodes start dtpipe children. `[unchecked]`
+- **The stack is a target of the lab's checks, never a second set.** `lab.sh stack smoke|ui|studio`
+  run `smoke.py`, `tools/ui_check.py` and `tools/studio_check.py` against `STACK_URL`;
+  `LAB_TARGET=stack` is the only switch, read where the stack differs (the library directory, the
+  coordinator's log, the enrollment host, the version of each node's own binary). A new check that
+  starts a process or reads a path of the local lab takes its stack form there too.
+  `[local: lab.sh stack smoke, ui, studio]`
 - Verify a change with `./lab.sh smoke`, a page change with `./lab.sh ui` too, and a change to what
-  `dtpipe studio` calls with `./lab.sh studio` (`tools/studio_check.py`, outside CI). The page checks
+  `dtpipe studio` calls with `./lab.sh studio` (`tools/studio_check.py`, outside CI); one that touches
+  the images, `compose.yaml` or a check's stack form with `./lab.sh stack smoke|ui|studio` as well. The page checks
   drive headless Chrome over the DevTools protocol (`tools/cdp.py`), because Chrome's own
   `--screenshot` stops the page before its fetches finish. `tools/cdp.py` also clicks and drags with the mouse.

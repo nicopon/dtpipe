@@ -43,6 +43,7 @@ open http://127.0.0.1:5180          # sign in as labadmin / labadminpwd; the Lab
 | `./lab.sh ui` | drives both pages in headless Chrome, the library without any designer entry, a pipeline's page with its job read only; screenshots to `.state/ui/` |
 | `./lab.sh seed` | rebuilds the databases (`LAB_SCALE=5` multiplies the row counts) |
 | `./lab.sh logs` | follows every log |
+| `./lab.sh stack up\|down\|status\|nodes\|smoke\|ui\|studio\|logs` | the same commands against [the compose stack](#the-compose-stack) |
 | `./lab.sh down` / `reset` | stops everything / also deletes `.state/` |
 
 Every page and `/api` call needs a person signed in through the IdP, with a role: `labadmin`
@@ -62,17 +63,20 @@ needed to start it.
 
 ```bash
 cd samples/distributed-lab
-docker compose up -d --build        # build the images, seed each node on first start, start all
+./lab.sh stack up                   # build the images, seed each node on first start, start all
 open http://lab.localtest.me        # the home page: links, health, test accounts
-docker compose down                 # stops everything; .stack/ keeps the data
+./lab.sh stack smoke                # the same checks as the local lab's, against the stack
+./lab.sh stack down                 # stops everything; .stack/ keeps the data
 ```
 
-`*.localtest.me` resolves to `127.0.0.1`. A proxy (Caddy) publishes the stack's only port and
-routes by host name: `coordinator.localtest.me` to the coordinator, `idp.localtest.me` to the
-IdP, `lab.localtest.me` to the home page. Inside the network the proxy carries the same names, so
-the IdP has one issuer for browsers and containers. The nodes reach the coordinator directly; the
-data plane never crosses the proxy. The coordinator's distinct host name also keeps its session
-cookie apart from the local lab's, so both run side by side.
+`docker compose up -d --build` and `down` do the same as `stack up` and `stack down`.
+`*.localtest.me` resolves to `127.0.0.1`: the host needs a DNS that answers for it. A proxy (Caddy)
+publishes the stack's only port and routes by host name: `coordinator.localtest.me` to the
+coordinator, `idp.localtest.me` to the IdP, `lab.localtest.me` to the home page. Inside the
+network the proxy carries the same names, so the IdP has one issuer for browsers and containers.
+The nodes reach the coordinator directly; the data plane never crosses the proxy. The
+coordinator's distinct host name also keeps its session cookie apart from the local lab's, so both
+run side by side. Browse the coordinator at that name, never `127.0.0.1`.
 
 | Directory | Mounted by | Holds |
 |---|---|---|
@@ -82,19 +86,27 @@ cookie apart from the local lab's, so both run side by side.
 
 The runner mounts nothing. `LAB_SCALE` (default `1`) multiplies the seeded rows for every node: a
 node's rows reference the others' counts, so a node seeded at another scale refuses to start; delete
-`.stack/` to seed again. `LAB_NODE_SANDBOX=1` starts the data nodes in sandbox mode.
-`LAB_STACK_HTTP_PORT` moves the proxy off port 80, outside and inside: tokens name the issuer with
-that port, and the IdP accepts the coordinator's redirects at it (`Idp:ExtraOrigins`).
+`.stack/` to seed again. `LAB_NODE_SANDBOX=1 ./lab.sh stack up` starts the data nodes in sandbox
+mode. `LAB_STACK_HTTP_PORT` moves the proxy off port 80, outside and inside: tokens name the issuer
+with that port, and the IdP accepts the coordinator's redirects at it (`Idp:ExtraOrigins`). Leave
+it unset for port 80: the IdP names itself without a default port, and a client compares that
+name with the authority it was given character for character.
 
-The smoke check's `library` pass runs against the stack from the host, with `./build.sh`'s binary,
-its witness reading the seeded databases under `.stack/`. The other passes drive local processes
-(`lab.sh nodes`, a host no identity knows) and need the local lab.
+`./lab.sh stack smoke`, `ui` and `studio` run the scripts the local lab runs, from the host with
+`./build.sh`'s binary, pointed at the coordinator's name; `stack nodes strict|sandbox` recreates
+the four node containers in a mode, after undoing every deployment, as `lab.sh nodes` restarts the
+local hosts. The witness reads the databases the nodes seeded under `.stack/`. Where the stack
+differs, `smoke.py` follows `LAB_TARGET=stack`, which `lab.sh` sets:
 
-```bash
-python3 smoke.py http://coordinator.localtest.me ../../dist/release/dtpipe .stack library
-```
+- the library check reads the coordinator's own directory, `.stack/coordinator/library`;
+- the coordinator's log is the container's output (`docker compose logs coordinator`);
+- the enrollment check's host is a throwaway container of the `node` image on the stack's network,
+  reaching the coordinator at `http://coordinator:8080`;
+- the version check compares each node with the `dtpipe` of its own container: the image builds it
+  from the tree without its git metadata, so it carries no revision suffix.
 
-The containers run in UTC whatever the host's zone; the witness runs in the host's.
+The containers run in UTC whatever the host's zone; the witness runs in the host's. The campaign
+(`tools/campaign.py`) is not played on the stack.
 
 ## The nodes
 

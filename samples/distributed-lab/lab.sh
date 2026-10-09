@@ -16,6 +16,10 @@
 #   ./lab.sh studio    dtpipe studio against the lab: library, sample, debug run, run and stop, publish (headless Chrome)
 #   ./lab.sh logs      follow every log
 #   ./lab.sh reset     down, then delete .state/
+#   ./lab.sh stack C   the same lab as the compose stack (compose.yaml), C being
+#                        up      build the images and start the services (LAB_NODE_SANDBOX=1: sandbox nodes)
+#                        down    stop them; .stack/ keeps the data
+#                        nodes M, status, smoke [pass], ui, studio, logs: as above, against the stack
 set -euo pipefail
 
 LAB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,6 +29,12 @@ PORT="${LAB_PORT:-5180}"
 URL="http://127.0.0.1:$PORT"
 IDP_URL="http://127.0.0.1:${LAB_IDP_PORT:-5190}"
 DTPIPE="${DTPIPE:-$REPO/dist/release/dtpipe}"
+STACK="$LAB/.stack"
+# Port 80 is never spelled: the stack's issuer names a port only when the variable is set (compose.yaml).
+[[ "${LAB_STACK_HTTP_PORT:-}" == 80 ]] && unset LAB_STACK_HTTP_PORT
+STACK_PORT="${LAB_STACK_HTTP_PORT:-80}"
+STACK_SUFFIX="$([[ "$STACK_PORT" == 80 ]] || echo ":$STACK_PORT")"
+STACK_URL="http://coordinator.localtest.me$STACK_SUFFIX"
 NODES=(node-1 node-2 node-3 node-4 runner-1)
 
 require_dtpipe() {
@@ -115,8 +125,34 @@ start_nodes() {
     done
 }
 
-# Whether every node host announces the mode $1 (waiting up to $2 seconds): their own word is the only truth.
-nodes_report() { python3 "$LAB/tools/nodes_report.py" "$URL" "$1" "$2" "${#NODES[@]}"; }
+# Whether every node host of the coordinator at $1 announces the mode $2 (waiting up to $3 seconds):
+# their own word is the only truth.
+nodes_report() { python3 "$LAB/tools/nodes_report.py" "$1" "$2" "$3" "${#NODES[@]}"; }
+
+# Undoes every deployment of the coordinator at $1: the fragments a node host holds go with it.
+undeploy_all() {
+    python3 - "$1" "$LAB/tools" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[2])
+from lab_session import Session
+session = Session(sys.argv[1], timeout=60)
+for d in session.call("/api/deployments"):
+    try: session.call(f"/api/deployments/{d['pipelineId']}", method="DELETE")
+    except Exception as e: print(f"  {d['pipelineId']}: not undeployed ({e})")
+PY
+}
+
+# The nodes the coordinator at $1 sees, one line each.
+nodes_table() {
+    python3 "$LAB/tools/lab_session.py" "$1" /api/nodes | python3 -c "$(cat <<'EOF'
+import json, sys
+for n in json.load(sys.stdin):
+    frags = ", ".join(f["fragment"] + ":" + f["state"] for f in n["fragments"]) or "-"
+    state = "online " if n["online"] else "offline"
+    print(f"  {n['name']:8} {state} {'+'.join(n['groups']):10} {frags}")
+EOF
+)"
+}
 
 up() {
     require_dtpipe
@@ -144,18 +180,10 @@ up() {
 nodes_mode() {
     local mode="${1:-}"
     [[ "$mode" == strict || "$mode" == sandbox ]] || { echo "usage: $0 nodes strict|sandbox" >&2; exit 1; }
-    if nodes_report "$mode" 0; then return; fi
+    if nodes_report "$URL" "$mode" 0; then return; fi
 
     echo "Nodes: $mode"
-    python3 - "$URL" "$LAB/tools" <<'PY'
-import sys
-sys.path.insert(0, sys.argv[2])
-from lab_session import Session
-session = Session(sys.argv[1], timeout=60)
-for d in session.call("/api/deployments"):
-    try: session.call(f"/api/deployments/{d['pipelineId']}", method="DELETE")
-    except Exception as e: print(f"  {d['pipelineId']}: not undeployed ({e})")
-PY
+    undeploy_all "$URL"
     for node in "${NODES[@]}"; do
         if is_running "$node"; then kill -TERM "$(cat "$STATE/run/$node.pid")" 2>/dev/null || true; fi
     done
@@ -165,19 +193,22 @@ PY
         rm -f "$STATE/run/$node.pid"
     done
     start_nodes "$mode"
-    nodes_report "$mode" 90 || { echo "The node hosts did not come back in $mode mode." >&2; exit 1; }
+    nodes_report "$URL" "$mode" 90 || { echo "The node hosts did not come back in $mode mode." >&2; exit 1; }
 }
 
-# The lab pass puts branches that are not bricks on data nodes, so it runs on sandbox nodes; every
-# other pass runs on strict ones, which is what they prove.
-smoke() {
+# The passes of smoke.py, each on nodes in the mode it needs: the lab pass puts branches that are not
+# bricks on data nodes, so it runs on sandbox nodes; every other pass runs on strict ones, which is
+# what they prove. $1 is the function that switches the node hosts, $2 and $3 the coordinator's URL
+# and the state directory smoke.py reads; the rest are the caller's arguments.
+smoke_passes() {
+    local switch="$1" url="$2" state="$3"; shift 3
     local pass="${1:-}"
     case "$pass" in lab|library|rights|faults|bricks|sandbox) shift ;; *) pass="" ;; esac
     local code=0
     run_pass() {
         local mode="$1" name="$2"; shift 2
-        nodes_mode "$mode"
-        python3 -u "$LAB/smoke.py" "$URL" "$DTPIPE" "$STATE" "$name" "$@" || code=1
+        "$switch" "$mode"
+        python3 -u "$LAB/smoke.py" "$url" "$DTPIPE" "$state" "$name" "$@" || code=1
     }
     if [[ -z "$pass" ]]; then
         run_pass sandbox lab "$@"
@@ -214,15 +245,51 @@ status() {
     done
     if curl -fs "$URL/healthz" >/dev/null 2>&1; then
         echo
-        python3 "$LAB/tools/lab_session.py" "$URL" /api/nodes | python3 -c "$(cat <<'EOF'
-import json, sys
-for n in json.load(sys.stdin):
-    frags = ", ".join(f["fragment"] + ":" + f["state"] for f in n["fragments"]) or "-"
-    state = "online " if n["online"] else "offline"
-    print(f"  {n['name']:8} {state} {'+'.join(n['groups']):10} {frags}")
-EOF
-)"
+        nodes_table "$URL"
     fi
+}
+
+# The compose stack: the same lab in containers, reached by the names its proxy answers to (never
+# 127.0.0.1, which the local lab's cookies hold). smoke.py, ui_check.py and studio_check.py are the
+# ones the local lab runs, pointed at STACK_URL; LAB_TARGET=stack tells smoke.py where the stack differs.
+compose() { (cd "$LAB" && docker compose "$@"); }
+
+# The node services take their mode from LAB_NODE_SANDBOX, which compose reads from this shell.
+stack_nodes_mode() {
+    local mode="${1:-}"
+    [[ "$mode" == strict || "$mode" == sandbox ]] || { echo "usage: $0 stack nodes strict|sandbox" >&2; exit 1; }
+    if nodes_report "$STACK_URL" "$mode" 0; then return; fi
+
+    echo "Stack nodes: $mode"
+    undeploy_all "$STACK_URL"
+    LAB_NODE_SANDBOX="$([[ "$mode" == sandbox ]] && echo 1 || true)" \
+        compose up -d --no-deps --force-recreate node-1 node-2 node-3 node-4
+    nodes_report "$STACK_URL" "$mode" 90 || { echo "The stack's node hosts did not come back in $mode mode." >&2; exit 1; }
+}
+
+stack() {
+    local command="${1:-}"; [[ $# -gt 0 ]] && shift
+    case "$command" in
+        up)
+            compose up -d --build --wait
+            nodes_report "$STACK_URL" "$([[ "${LAB_NODE_SANDBOX:-}" == 1 ]] && echo sandbox || echo strict)" 90 \
+                || { echo "The stack's node hosts did not come online; see ./lab.sh stack logs" >&2; exit 1; }
+            echo
+            echo "Stack ready: $STACK_URL (home page: http://lab.localtest.me$STACK_SUFFIX)" ;;
+        down) compose down ;;
+        nodes) stack_nodes_mode "${1:-}" ;;
+        status)
+            compose ps --format '  {{.Service}}  {{.Status}}'
+            if curl -fs "$STACK_URL/healthz" >/dev/null 2>&1; then
+                echo
+                nodes_table "$STACK_URL"
+            fi ;;
+        smoke) LAB_TARGET=stack smoke_passes stack_nodes_mode "$STACK_URL" "$STACK" "$@" ;;
+        ui) python3 "$LAB/tools/ui_check.py" "$STACK_URL" "$STACK/ui" ;;
+        studio) python3 "$LAB/tools/studio_check.py" "$STACK_URL" "$DTPIPE" "$STACK/studio" ;;
+        logs) compose logs --tail 20 -f ;;
+        *) echo "usage: $0 stack up|down|nodes M|status|smoke [pass]|ui|studio|logs" >&2; exit 1 ;;
+    esac
 }
 
 case "${1:-}" in
@@ -234,7 +301,8 @@ case "${1:-}" in
     exec-node) shift; exec_node "$@" ;;
     exec-coordinator) shift; exec_coordinator "$@" ;;
     idp) shift; mkdir -p "$STATE/logs" "$STATE/run"; start_idp "$@" ;;
-    smoke) shift; smoke "$@" ;;
+    smoke) shift; smoke_passes nodes_mode "$URL" "$STATE" "$@" ;;
+    stack) shift; stack "$@" ;;
     ui) python3 "$LAB/tools/ui_check.py" "$URL" "$STATE/ui" ;;
     studio) python3 "$LAB/tools/studio_check.py" "$URL" "$DTPIPE" "$STATE/studio" ;;
     logs) tail -n 20 -F "$STATE"/logs/*.log ;;
