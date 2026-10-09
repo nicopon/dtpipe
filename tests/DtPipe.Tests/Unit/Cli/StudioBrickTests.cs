@@ -111,6 +111,35 @@ public sealed class StudioBrickTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_branch_of_this_machine_never_leaves_it_for_the_recognition()
+    {
+        const string witness = "witness-password-9Zq";
+        var job = Job + $"\nmine:\n  input: \"pg:Host=localhost;Username=me;Password={witness};Database=d\"\n  output: csv:m.csv\n"
+            + "plain:\n  input: csv:local.csv\n  output: csv:p.csv\n";
+        await SignInAsync();
+        _fakes.Answers = new() { ["src"] = new Recognition(StudioFakes.SourceKey, StudioFakes.SourceKey, null) };
+
+        var (_, decomposed) = await CallAsync(HttpMethod.Post, "/api/design/decompose", new { yaml = job });
+
+        Assert.DoesNotContain(witness, _fakes.Recognized);
+        Assert.DoesNotContain("local.csv", _fakes.Recognized);
+        Assert.Contains("NODE_ONLY_DB", _fakes.Recognized);
+        Assert.Equal(StudioFakes.SourceKey, BrickOf(decomposed, "src"));
+        Assert.Null(BrickOf(decomposed, "mine"));
+    }
+
+    [Fact]
+    public async Task A_job_with_no_branch_naming_a_node_variable_asks_nothing()
+    {
+        await SignInAsync();
+        _fakes.Recognized = null;
+
+        await CallAsync(HttpMethod.Post, "/api/design/decompose", new { yaml = "plain:\n  input: csv:local.csv\n  output: csv:p.csv\n" });
+
+        Assert.Null(_fakes.Recognized);
+    }
+
+    [Fact]
     public async Task A_job_with_a_brick_card_saves_once_its_person_is_signed_out()
     {
         await SignInAsync();

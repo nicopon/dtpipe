@@ -14,6 +14,7 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using YamlDotNet.RepresentationModel;
 
 namespace DtPipe.Cli.Studio;
 
@@ -571,10 +572,32 @@ public sealed partial class StudioServer : IAsyncDisposable
     {
         if (_tools.DesignWith is not { } with || _tools.Coordinator is not { } link) return _tools.Design;
         string job;
-        try { job = JobYaml.Serialize(JobYaml.Parse(yaml)); }
+        try { job = ForRecognition(yaml, link.Catalog); }
         catch (Exception) { return Design(); }
-        var answers = await link.RecognizeAsync(job, ct);
+        // Nothing to ask for a job none of whose branches names a node's variable: it never leaves this machine.
+        var answers = job.Length == 0 ? null : await link.RecognizeAsync(job, ct);
         return with(new StudioBricks(link.Catalog, job, answers));
+    }
+
+    /// <summary>
+    /// What the coordinator is asked to recognise: only the top-level branches whose input or output names a
+    /// variable that a node's brick announces, so a branch of this machine, a connection string included, is
+    /// never sent. A brick it misses opens as a local card, which loses nothing. Empty when no branch qualifies.
+    /// </summary>
+    internal static string ForRecognition(string yaml, BrickCatalogView? catalog)
+    {
+        var announced = (catalog?.Bricks ?? [])
+            .SelectMany(b => CompositeStringContentResolver.Expressions(b.Branch.ToJsonString()))
+            .Where(e => !e.Contains("://", StringComparison.Ordinal))
+            .ToHashSet(StringComparer.Ordinal);
+        var kept = new YamlMappingNode();
+        foreach (var (alias, branch) in JobYaml.Branches(JobYaml.Parse(yaml)))
+        {
+            var ends = new[] { JobYaml.Scalar(branch, "input"), JobYaml.Scalar(branch, "output") };
+            if (ends.Any(end => end is not null && CompositeStringContentResolver.Expressions(end).Any(announced.Contains)))
+                kept.Add(alias, JobYaml.CloneBranch(branch));
+        }
+        return kept.Children.Count == 0 ? "" : JobYaml.Serialize(kept);
     }
 
     /// <summary>The job with each brick's branch replaced as a sample replaces it; as it is when that cannot be done.</summary>

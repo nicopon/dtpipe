@@ -220,7 +220,10 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   that finds each answer again by the top-level branch's YAML, a key and never a matching rule
   (`Match`/`Contained` see each top-level branch whole: `StudioBrickTests` pins it). Nobody signed
   in, or no answer: no branch is a brick, and each opens as a local card. `Find`/`BranchOf` read the
-  catalog read last, kept after a sign-out, so a brick card still composes and saves.
+  catalog read last, kept after a sign-out, so a brick card still composes and saves. **Only a
+  branch whose input or output names a variable a node's brick announces is sent** (`ForRecognition`):
+  a branch of this machine, a connection string included, never leaves it, and a brick it misses
+  opens as a local card. `[CI: StudioBrickTests]`
 - **A brick samples here through the run's own binding.** `BrickSampling` turns a source brick's
   branch into `input: arrow:-` and a sink brick's into `output: arrow:-`; `SampleAsync` binds them as
   `--bind-input`/`--bind-output` do (`AliasBindingApplier`, before validation): never a second
@@ -260,5 +263,5 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   the run and the studio then exits.
 
 `[CI: StudioServerTests (no script writes HTML or an inline style), StudioSampleTests,
-StudioCoordinatorTests, StudioBrickTests, StudioPublishTests, DesignServiceTests, LocalEndpointCardTests]` `[unchecked: the page's behaviour - no test drives a
+StudioCoordinatorTests, StudioBrickTests, StudioPublishTests, StudioRunTests, DesignServiceTests, LocalEndpointCardTests]` `[unchecked: the page's behaviour - no test drives a
 browser]`
