@@ -81,6 +81,9 @@ public class RefreshRegistrationTests
         await using var _host = host;
         rights.BySubject["node-x"] = ["before"];
         await using var node = await ConnectAsync(host, jwt, "node-x");
+        // The client pushes its token as soon as it connects and the hub reads the groups again for it: a call made at the
+        // rights as they are is served after that push, so the rights can change without the push meeting them.
+        await node.RefreshRegistrationAsync();
         var held = await RegistrationOfAsync(host, node);
 
         rights.BySubject["node-x"] = [];
