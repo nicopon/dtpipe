@@ -42,20 +42,22 @@ public class MemoryCeilingTests
         using var fixture = SplitFixture.Create(rowCount: 2_000_000, cutAt: 1, extraArgs: ["--fake", "noise:random.guid"]);
         await using var host = await NodeTestHost.StartAsync();
 
-        await using var producer = await PipelineNode.StartAsync(new PipelineNodeOptions
-        {
-            HubUrl = host.Url,
-            DtPipeExecutable = DtPipeExecutableLocator.Path,
-            FragmentJobPath = fixture.ProducerJobPath,
-            Edges = [new EdgeBinding("main", EdgeDirection.Outbound)],
-        });
-        await using var consumer = await PipelineNode.StartAsync(new PipelineNodeOptions
-        {
-            HubUrl = host.Url,
-            DtPipeExecutable = DtPipeExecutableLocator.Path,
-            FragmentJobPath = fixture.ConsumerJobPath,
-            Edges = [new EdgeBinding("main", EdgeDirection.Inbound)],
-        });
+        await using var producer = await HandWiredNode.StartAsync(
+            new NodeClientOptions { HubUrl = host.Url },
+            new FragmentLaunch
+            {
+                DtPipeExecutable = DtPipeExecutableLocator.Path,
+                FragmentJobPath = fixture.ProducerJobPath,
+                Edges = [new EdgeBinding("main", EdgeDirection.Outbound)],
+            });
+        await using var consumer = await HandWiredNode.StartAsync(
+            new NodeClientOptions { HubUrl = host.Url },
+            new FragmentLaunch
+            {
+                DtPipeExecutable = DtPipeExecutableLocator.Path,
+                FragmentJobPath = fixture.ConsumerJobPath,
+                Edges = [new EdgeBinding("main", EdgeDirection.Inbound)],
+            });
 
         Signal(consumer.ChildProcessId, SIGSTOP);
         try

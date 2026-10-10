@@ -37,9 +37,8 @@ public class CoordinatorDrivenTests
         ]);
 
     /// <summary>
-    /// The barrier itself, not just <see cref="AdmissionGate"/> in isolation: with C never
-    /// connected, <see cref="RunOrchestrator.RunAsync"/> refuses the run naming it, and neither A nor
-    /// B - both registered - was launched while waiting.
+    /// The barrier: with C never connected, <see cref="RunOrchestrator.RunAsync"/> refuses the run
+    /// naming it, and neither A nor B - both announced - was launched while waiting.
     /// </summary>
     [Fact]
     public async Task RunAsync_WithAFragmentNeverRegistered_RefusesWithoutLaunchingTheOthers()

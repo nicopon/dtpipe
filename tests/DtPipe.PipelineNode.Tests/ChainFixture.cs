@@ -5,9 +5,8 @@ namespace DtPipe.PipelineNode.Tests;
 /// single unsplit run of the same source produces. <c>dtpipe split</c> only cuts a job into a
 /// producer/consumer pair, so the middle fragment is a plain hand-written <c>arrow:- -&gt; arrow:-</c>
 /// passthrough rather than a second cut - there is no transformer stage to cut it at either side of.
-/// Used instead of a join: <see cref="PipelineNode.StartAsync"/> refuses more than one inbound edge
-/// per node, so a fragment with two producers feeding it is not runnable yet. A chain still exercises
-/// three fragments, a middle one dying mid-flow, and the other two reported as consequences.
+/// A chain exercises three fragments, a middle one dying mid-flow, and the other two reported as
+/// consequences.
 /// </summary>
 internal sealed class ChainFixture : IDisposable
 {

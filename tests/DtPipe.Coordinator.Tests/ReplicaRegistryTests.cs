@@ -80,6 +80,22 @@ public class ReplicaRegistryTests
         Assert.Empty(lost);
     }
 
+    /// <summary>A host announces again on the connection it already holds (its data plane came up after the first announcement): the same replica, and its own connection stays open.</summary>
+    [Fact]
+    public void AnAnnouncementRepeatedOnItsOwnConnection_IsTheSameReplica_AndClosesNothing()
+    {
+        var registry = new ReplicaRegistry();
+        var closed = 0;
+        var key = Announce(registry, "c1", "n", Instance(1), () => closed++);
+
+        var again = Announce(registry, "c1", "n", Instance(1), () => closed++);
+
+        Assert.Equal(key, again);
+        Assert.Equal(0, closed);
+        Assert.Equal("c1", Assert.Single(registry.Replicas("n")).ConnectionId);
+        Assert.Equal(key, registry.OfConnection("c1")!.Key);
+    }
+
     [Fact]
     public async Task ADroppedConnection_IsReclaimedInsideItsGrace_AndLostOnlyOutsideIt()
     {
@@ -129,6 +145,24 @@ public class ReplicaRegistryTests
 
         Assert.Equal([key], lost);
         Assert.Single(registry.Replicas("n"));
+    }
+
+    /// <summary>A dropped connection is not looked up by id: the grace period ends the replica, not a leave that arrives after the drop, however often.</summary>
+    [Fact]
+    public async Task ALeaveArrivingAfterTheConnectionDropped_IsIgnored_AndTheGraceDeclaresTheLossOnce()
+    {
+        var registry = new ReplicaRegistry(new ReplicaRegistryOptions { DisconnectGracePeriod = TimeSpan.FromMilliseconds(300) });
+        var lost = new List<ReplicaKey>();
+        registry.ReplicaLost += lost.Add;
+        var key = Announce(registry, "c1", "n", Instance(1));
+        registry.Disconnected("c1");
+
+        registry.Leave("c1");
+        registry.Leave("c1");
+        Assert.Empty(lost);
+
+        await Task.Delay(600);
+        Assert.Equal([key], lost);
     }
 
     [Fact]

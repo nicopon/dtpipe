@@ -82,7 +82,7 @@ function render() {
         <tr><th>issuer</th><td><code>${esc(rights.idp.issuer)}</code></td></tr>
         <tr><th>audience</th><td><code>${esc(rights.idp.audience)}</code></td></tr>
       </table>
-      <p class="hint">A node host presents its token on the control channel, and gives each pipeline node a token provider (<code>PipelineNodeOptions.AccessTokenProvider</code>) for the data hub.</p>
+      <p class="hint">A node host presents its token on the control channel, and gives its pipeline node a token provider (<code>NodeClientOptions.AccessTokenProvider</code>) for the data hub.</p>
     </section>
 
     ${pending ? `<section class="card">

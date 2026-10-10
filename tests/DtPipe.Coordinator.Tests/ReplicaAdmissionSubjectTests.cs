@@ -71,6 +71,42 @@ public class ReplicaAdmissionSubjectTests
         Assert.Empty(foreign.Launches);
     }
 
+    /// <summary>The only replica that announces the node's name is of another identity: the node has none, and the run is refused for it.</summary>
+    [Fact]
+    public async Task OnlyAReplicaOfAnotherIdentityAnnouncingTheNodesName_LeavesTheNodeWithNoReplica()
+    {
+        var jwt = new TestJwt();
+        await using var host = await StartAsync(jwt);
+        await using var foreign = await FakeNode.StartAsync(host, "node-legit", As(jwt, "node-foreign"));
+        var orchestrator = host.Host.Services.GetRequiredService<IRunOrchestrator>();
+
+        var ex = await Assert.ThrowsAsync<NoEligibleReplicaException>(
+            () => orchestrator.RunAsync(Run("run-1", Fragment("frag-a", "node-legit"))).WaitAsync(Wait));
+
+        Assert.Contains("no replica of its node is online", ex.Reasons["frag-a"]);
+        Assert.Empty(foreign.Launches);
+    }
+
+    /// <summary>A hub that attests subjects admits no replica whose connection attests none; one that attests none files it under the name it proposes.</summary>
+    [Fact]
+    public async Task AnAnnouncementThatAttestsNoSubject_IsRefused_UnlessTheHubAttestsNone()
+    {
+        await using var strict = await StartAsync(new TestJwt());
+        await using var dev = await CoordinatorTestHost.StartAsync(_ => { });
+        var announcement = new NodeAnnouncement("node-x", "", [], NodeRole.Runner, [], InstanceId: Guid.NewGuid());
+
+        var (refused, reason) = await strict.Host.Services.GetRequiredService<ReplicaProtocol>()
+            .OnAnnouncedAsync("c1", subject: null, announcement, [], () => { });
+        var (filed, none) = await dev.Host.Services.GetRequiredService<ReplicaProtocol>()
+            .OnAnnouncedAsync("c1", subject: null, announcement, [], () => { });
+
+        Assert.Null(refused);
+        Assert.Contains("attests no subject", reason);
+        Assert.Empty(strict.Host.Services.GetRequiredService<ReplicaRegistry>().Replicas());
+        Assert.Null(none);
+        Assert.Equal("node-x", filed!.Value.Node);
+    }
+
     /// <summary>
     /// A replica of another identity says, while the legitimate node runs the fragment, that the fragment exited with a
     /// local fault. The report is not the placed replica's: the coordinator answers that it did not admit it, and the

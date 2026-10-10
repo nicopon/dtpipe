@@ -48,7 +48,7 @@ none. One node per process, which is one replica of its node's identity; a secon
   the node then declines. `BrickHost` does not announce a declared brick that fails the structure rule.
   `[unchecked: a declared brick that fails the structure rule]`
 - **A variable's value never leaves the node.** The announcement names it, with an engine for a
-  database, so the coordinator never holds a path or a secret to open. Variables reach a child through `PipelineNodeOptions.ChildEnvironment`
+  database, so the coordinator never holds a path or a secret to open. Variables reach a child through `FragmentLaunch.ChildEnvironment`
   and `DtPipeCommand` (the node's own reads), never through this process's environment: the host
   is someone else's service. `[unchecked]`
 - **The token provider returns a fresh token.** TransportR retries a stream refused with 401

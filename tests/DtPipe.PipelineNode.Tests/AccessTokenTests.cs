@@ -6,7 +6,7 @@ namespace DtPipe.PipelineNode.Tests;
 
 /// <summary>
 /// A hub in production mode identifies every client by a bearer token, so a
-/// <see cref="PipelineNode"/> can only reach it through <see cref="PipelineNodeOptions.AccessTokenProvider"/>.
+/// <see cref="PipelineNode"/> can only reach it through <see cref="NodeClientOptions.AccessTokenProvider"/>.
 /// </summary>
 public class AccessTokenTests
 {
@@ -20,26 +20,34 @@ public class AccessTokenTests
         await using var host = await NodeTestHost.StartAsync(jwt);
 
         var producerCalls = 0;
-        await using var producer = await PipelineNode.StartAsync(new PipelineNodeOptions
-        {
-            HubUrl = host.Url,
-            AccessTokenProvider = () =>
+        await using var producer = await HandWiredNode.StartAsync(
+            new NodeClientOptions
             {
-                Interlocked.Increment(ref producerCalls);
-                return Task.FromResult(jwt.Mint("producer", "test", TimeSpan.FromHours(1)));
+                HubUrl = host.Url,
+                AccessTokenProvider = () =>
+                {
+                    Interlocked.Increment(ref producerCalls);
+                    return Task.FromResult(jwt.Mint("producer", "test", TimeSpan.FromHours(1)));
+                },
             },
-            DtPipeExecutable = DtPipeExecutableLocator.Path,
-            FragmentJobPath = fixture.ProducerJobPath,
-            Edges = [new EdgeBinding("main", EdgeDirection.Outbound)],
-        });
-        await using var consumer = await PipelineNode.StartAsync(new PipelineNodeOptions
-        {
-            HubUrl = host.Url,
-            AccessTokenProvider = () => Task.FromResult(jwt.Mint("consumer", "test", TimeSpan.FromHours(1))),
-            DtPipeExecutable = DtPipeExecutableLocator.Path,
-            FragmentJobPath = fixture.ConsumerJobPath,
-            Edges = [new EdgeBinding("main", EdgeDirection.Inbound)],
-        });
+            new FragmentLaunch
+            {
+                DtPipeExecutable = DtPipeExecutableLocator.Path,
+                FragmentJobPath = fixture.ProducerJobPath,
+                Edges = [new EdgeBinding("main", EdgeDirection.Outbound)],
+            });
+        await using var consumer = await HandWiredNode.StartAsync(
+            new NodeClientOptions
+            {
+                HubUrl = host.Url,
+                AccessTokenProvider = () => Task.FromResult(jwt.Mint("consumer", "test", TimeSpan.FromHours(1))),
+            },
+            new FragmentLaunch
+            {
+                DtPipeExecutable = DtPipeExecutableLocator.Path,
+                FragmentJobPath = fixture.ConsumerJobPath,
+                Edges = [new EdgeBinding("main", EdgeDirection.Inbound)],
+            });
 
         var transferId = await host.TransferInitiator.InitTransferAsync(
             producer.ClientId, consumer.ClientId, batchSize: 8, timeoutMs: 20_000);
@@ -67,13 +75,14 @@ public class AccessTokenTests
 
         await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
-            await using var node = await PipelineNode.StartAsync(new PipelineNodeOptions
-            {
-                HubUrl = host.Url,
-                DtPipeExecutable = DtPipeExecutableLocator.Path,
-                FragmentJobPath = fixture.ProducerJobPath,
-                Edges = [new EdgeBinding("main", EdgeDirection.Outbound)],
-            });
+            await using var node = await HandWiredNode.StartAsync(
+                new NodeClientOptions { HubUrl = host.Url },
+                new FragmentLaunch
+                {
+                    DtPipeExecutable = DtPipeExecutableLocator.Path,
+                    FragmentJobPath = fixture.ProducerJobPath,
+                    Edges = [new EdgeBinding("main", EdgeDirection.Outbound)],
+                });
         }).WaitAsync(TimeSpan.FromSeconds(60));
     }
 
@@ -88,14 +97,18 @@ public class AccessTokenTests
 
         await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
-            await using var node = await PipelineNode.StartAsync(new PipelineNodeOptions
-            {
-                HubUrl = host.Url,
-                AccessTokenProvider = () => Task.FromResult(stranger.Mint("producer", "test", TimeSpan.FromHours(1))),
-                DtPipeExecutable = DtPipeExecutableLocator.Path,
-                FragmentJobPath = fixture.ProducerJobPath,
-                Edges = [new EdgeBinding("main", EdgeDirection.Outbound)],
-            });
+            await using var node = await HandWiredNode.StartAsync(
+                new NodeClientOptions
+                {
+                    HubUrl = host.Url,
+                    AccessTokenProvider = () => Task.FromResult(stranger.Mint("producer", "test", TimeSpan.FromHours(1))),
+                },
+                new FragmentLaunch
+                {
+                    DtPipeExecutable = DtPipeExecutableLocator.Path,
+                    FragmentJobPath = fixture.ProducerJobPath,
+                    Edges = [new EdgeBinding("main", EdgeDirection.Outbound)],
+                });
         }).WaitAsync(TimeSpan.FromSeconds(60));
     }
 }

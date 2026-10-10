@@ -73,10 +73,12 @@ stdin/stdout and TransportR. It speaks to no coordinator itself.
   first. `[local: PipelineNode.Tests, DtPipe.Coordinator.Tests.RunOrchestratorTests]`
 - `ConnectAsync` connects the replica's client and launches nothing; `Launch` spawns a run's child and
   `WireAsync(run, alias, transferId)` hands it one edge's transfer, `true` when it was the last edge the run
-  declares. `StartAsync` connects and launches one run at once, for the hand-wired path with no coordinator.
+  declares.
+- **A run is its launcher's to dispose.** Disposing the node closes its client and releases the handles no run
+  claimed; it ends no run. `[unchecked]`
 
 `tests/DtPipe.PipelineNode.Tests` spawns the real `dist/release/dtpipe` against an in-process
-TransportR hub (`NodeTestHost`) or a real `DtPipe.Coordinator` hub (`CoordinatorTestHost`, from
+TransportR hub (`NodeTestHost`, where `HandWiredNode` wires a run by hand) or a real `DtPipe.Coordinator` hub (`CoordinatorTestHost`, from
 `DtPipe.Coordinator.Tests` - referenced as a project, not duplicated), whose replicas are `TestNode`s that
 answer the node channel with the host's own run protocol; build the binary first. Both
 projects are outside `DtPipe.sln`, so `build.yml` never runs their tests; `build.sh` discovers

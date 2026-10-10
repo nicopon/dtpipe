@@ -33,10 +33,9 @@ public class CoordinatorAbortTests
 
     /// <summary>
     /// The requester's own cancellation firing during admission - before any fragment is even
-    /// launched - is deterministic to reproduce (no real-process timing to race against) and
-    /// exercises the same path <see cref="AdmissionGateTests.ARequesterCancellation_ThrowsOperationCanceled_NeverAdmissionRefused"/>
-    /// covers in isolation: it must report <see cref="RunOutcome.Cancelled"/>, never
-    /// <see cref="AdmissionRefusedException"/>, and never launch anything.
+    /// launched - is deterministic to reproduce (no real-process timing to race against): it must
+    /// report <see cref="RunOutcome.Cancelled"/>, never <see cref="NoEligibleReplicaException"/>, and
+    /// never launch anything.
     /// </summary>
     [Fact]
     public async Task RequesterCancelsDuringAdmission_ReportsCancelled_LaunchesNothing()

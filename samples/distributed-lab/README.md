@@ -152,8 +152,8 @@ started from `rights-seed.json` and edited in the **Access** view:
 | **Who**: identities, each a client of the IdP with a node name and one or more groups | by the coordinator (no group for an unknown or disabled client, from its next connection or token renewal) and by the control channel (a host is filed under its identity's node name, whatever it proposes; a disabled identity is refused) |
 | **To whom**: the flow matrix between groups | by the hub on **every transfer**, live, and on every plan |
 
-Every change is audited. A node host gives each of its pipeline nodes a token provider
-(`PipelineNodeOptions.AccessTokenProvider`) that asks the IdP for the node's token. Adding a node
+Every change is audited. A node host gives its pipeline node a token provider
+(`NodeClientOptions.AccessTokenProvider`) that asks the IdP for the node's token. Adding a node
 takes its client in `idp-clients.json` (then an IdP restart); its identity then comes from the Access view, or by approval:
 a host whose token no identity knows is not a node. It waits in the Access view's *Waiting for approval* card,
 with the name, description and bricks it proposes (and the token's claims listed by

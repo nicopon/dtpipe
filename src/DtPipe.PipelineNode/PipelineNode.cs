@@ -51,39 +51,6 @@ public sealed class NodeClientOptions
 }
 
 /// <summary>
-/// The options of a node that runs a single fragment with no coordinator, the hand-wired path
-/// (<see cref="PipelineNode.StartAsync"/>): the replica's (<see cref="Client"/>) and the run's (<see cref="Launch"/>) together.
-/// </summary>
-public sealed class PipelineNodeOptions
-{
-    public required string HubUrl { get; init; }
-    public Func<Task<string>>? AccessTokenProvider { get; init; }
-
-    public required string DtPipeExecutable { get; init; }
-    public required string FragmentJobPath { get; init; }
-    public required IReadOnlyList<EdgeBinding> Edges { get; init; }
-    public IReadOnlyDictionary<string, string>? ChildEnvironment { get; init; }
-
-    public int BatchSize { get; init; } = 8;
-    public int? MaxInFlightBatches { get; init; } = 8;
-    public int? ReceiveMaxItems { get; init; }
-    public long? ReceiveMaxBytes { get; init; }
-    public int ReadChunkBytes { get; init; } = 65536;
-
-    internal NodeClientOptions Client => new()
-    {
-        HubUrl = HubUrl, AccessTokenProvider = AccessTokenProvider, BatchSize = BatchSize, MaxInFlightBatches = MaxInFlightBatches,
-        ReceiveMaxItems = ReceiveMaxItems, ReceiveMaxBytes = ReceiveMaxBytes, ReadChunkBytes = ReadChunkBytes,
-    };
-
-    internal FragmentLaunch Launch => new()
-    {
-        DtPipeExecutable = DtPipeExecutable, FragmentJobPath = FragmentJobPath, Edges = Edges,
-        ChildEnvironment = ChildEnvironment, ReadChunkBytes = ReadChunkBytes,
-    };
-}
-
-/// <summary>
 /// One replica's side of the data plane: a single TransportR client, the book of the transfer handles it is given,
 /// and the runs it launches, each a <see cref="FragmentRun"/> with a dtpipe child of its own. The node is a byte
 /// relay for every run it hosts, and the only TransportR client they have.
@@ -100,20 +67,9 @@ public sealed class PipelineNode : IAsyncDisposable
     private readonly ILogger _logger;
     private readonly SignalRDataClient<byte[]> _client;
 
-    /// <summary>The one run of a node started with <see cref="StartAsync"/>.</summary>
-    private FragmentRun? _run;
-
     private readonly ConcurrentDictionary<string, TaskCompletionSource<object>> _handles = new();
 
     public Guid ClientId => _client.ClientId;
-    public int ChildProcessId => _run!.ChildProcessId;
-    public bool ChildHasExited => _run!.ChildHasExited;
-    public IReadOnlyDictionary<string, long> RowCounts => _run?.RowCounts ?? new Dictionary<string, long>();
-    public string? FirstFault => _run?.FirstFault;
-    public FaultOrigin? Origin => _run?.Origin;
-
-    /// <summary>True once <see cref="StartAsync"/> has spawned the child.</summary>
-    public bool IsLaunched => _run is { IsLaunched: true };
 
     private PipelineNode(NodeClientOptions options, ILogger logger, SignalRDataClient<byte[]> client)
     {
@@ -160,16 +116,6 @@ public sealed class PipelineNode : IAsyncDisposable
             await client.DisposeAsync();
             throw;
         }
-        return node;
-    }
-
-    /// <summary>Connects and launches the one fragment <paramref name="options"/> names, to be wired by hand: no coordinator drives it.</summary>
-    public static async Task<PipelineNode> StartAsync(
-        PipelineNodeOptions options, ILoggerFactory? loggerFactory = null, CancellationToken ct = default)
-    {
-        ValidateEdges(options.Edges);
-        var node = await ConnectAsync(options.Client, loggerFactory, ct);
-        node._run = node.Launch(options.Launch);
         return node;
     }
 
@@ -293,23 +239,6 @@ public sealed class PipelineNode : IAsyncDisposable
         return run.Wire(alias, handle);
     }
 
-    /// <summary>The hand-wired path: the same as <see cref="WireAsync(FragmentRun,string,string,CancellationToken)"/> for the one run of this node.</summary>
-    public async Task WireAsync(string alias, string transferId, CancellationToken ct = default)
-    {
-        var run = _run!;
-        if (run.Edges.All(e => e.Alias != alias))
-            throw new ArgumentException($"'{alias}' is not a declared edge of this node.", nameof(alias));
-        run.NoteWireRequested();
-        var handle = await ClaimHandleAsync(transferId, ct);
-        run.Wire(alias, handle);
-    }
-
-    /// <summary>
-    /// Waits for every wired edge to finish relaying, then for the child itself, and returns the
-    /// child's own exit code, or 1 if the fragment faulted (see <see cref="FragmentRun.RunToCompletionAsync"/>).
-    /// </summary>
-    public Task<int> RunToCompletionAsync(CancellationToken ct = default) => _run!.RunToCompletionAsync(ct);
-
     /// <summary>
     /// Whether the hub knows this client's connection, which is what a registration is: false after the hub lost it or
     /// refused it (an identity it has since disabled), and null while the connection is not up to be asked.
@@ -355,7 +284,5 @@ public sealed class PipelineNode : IAsyncDisposable
         foreach (var (_, tcs) in _handles)
             if (tcs.Task.IsCompletedSuccessfully) await ReleaseAsync(tcs.Task.Result);
         _handles.Clear();
-
-        if (_run is not null) await _run.DisposeAsync();
     }
 }
