@@ -6,6 +6,14 @@ A pipeline node runs one fragment of a distributed pipeline under the control of
 (`src/DtPipe.Coordinator/`). It launches the fragment as a `dtpipe` child process and relays the
 Arrow IPC bytes of each edge between the child's stdin/stdout and TransportR.
 
+- **A run is a `FragmentRun`; `PipelineNode` holds what surrounds it.** `FragmentRun` owns the child, the
+  named pipes of the excess edges, the relays, the first fault and the row counts - `LaunchChild`,
+  `ConnectPipeAsync`, `Rupture`, `WatchChild`, `Fault`, `RunToCompletionAsync` (which `PipelineNode`
+  forwards) and `WaitForChildExitAsync` below are its - and
+  knows neither the TransportR client nor the coordinator: it is given each transfer handle once
+  resolved. `PipelineNode` holds the client, the handles, the dialogue with the coordinator
+  (`ConnectAsync`, `LaunchAsync`, `WireAsync`, `CancelAsync`, the held `Exited` report) and the order of
+  disposal. `[local: PipelineNode.Tests]`
 - **The node is a byte relay.** It references no DtPipe project and never rewrites a batch; the
   child's `arrow:` reader and writer own the format. Put engine logic in dtpipe, never here.
   `ArrowIpcRowCounter` reads the IPC framing only to count rows.
