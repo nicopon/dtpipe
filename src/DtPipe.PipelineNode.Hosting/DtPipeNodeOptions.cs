@@ -38,7 +38,12 @@ public sealed class DtPipeNodeOptions
     /// <summary>The dtpipe binary every fragment runs as a child of this process; a bare name is looked up on the PATH.</summary>
     public string DtPipe { get; set; } = "dtpipe";
 
-    /// <summary>Where fragment jobs are written and dtpipe runs; a directory per node under the temp directory by default.</summary>
+    /// <summary>
+    /// The parent of the directory this process writes fragment jobs in and runs dtpipe from; a directory per node
+    /// under the temp directory by default. Each process makes its own subdirectory under it, named by its instance
+    /// id, so replicas that share a configuration never share a directory. Databases and variables are the host's
+    /// own and do not live here.
+    /// </summary>
     public string? StateDirectory { get; set; }
 
     public FragmentPolicy Policy { get; set; } = FragmentPolicy.Bricks;
@@ -48,8 +53,9 @@ public sealed class DtPipeNodeOptions
     /// <summary>Variables every dtpipe child sees, which a fragment resolves through <c>${{NAME}}</c>. Their values never leave the node.</summary>
     public Dictionary<string, string> Variables { get; set; } = new(StringComparer.Ordinal);
 
-    internal string ResolvedStateDirectory =>
-        Path.GetFullPath(StateDirectory ?? Path.Combine(Path.GetTempPath(), "dtpipe-node", Name));
+    /// <summary>The directory of the process whose instance id is <paramref name="instanceId"/>: one per process, whatever the configuration.</summary>
+    internal string ProcessDirectory(Guid instanceId) =>
+        Path.Combine(Path.GetFullPath(StateDirectory ?? Path.Combine(Path.GetTempPath(), "dtpipe-node", Name)), instanceId.ToString("N"));
 
     internal IEnumerable<string> Validate()
     {

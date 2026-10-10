@@ -408,7 +408,7 @@ def nodes_of(pid):
 def child_alive(node):
     """Whether a fragment child of `node` is running: the kill endpoint answers 202 whatever it hit."""
     out = subprocess.run(["ps", "-axo", "pid,command"], capture_output=True, text=True).stdout
-    return any(f"/{node}/fragments/" in l and "release/dtpipe --job" in l for l in out.splitlines())
+    return any(f"/{node}/" in l and "/fragments/" in l and "release/dtpipe --job" in l for l in out.splitlines())
 
 
 def kill_if_alive(node):

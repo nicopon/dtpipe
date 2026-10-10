@@ -38,7 +38,7 @@ public sealed class EnrollmentQueue(TimeProvider? time = null)
 {
     public const int MaxPending = 50;
     public static readonly TimeSpan Lifetime = TimeSpan.FromHours(24);
-    public const int MaxSubject = 128, MaxName = 63, MaxDescription = 200, MaxBricks = 20, MaxBrick = 80, MaxLabels = 10, MaxLabelKey = 40, MaxLabelValue = 120;
+    public const int MaxSubject = 128, MaxName = 63, MaxDescription = 200, MaxOrigin = 120, MaxBricks = 20, MaxBrick = 80, MaxLabels = 10, MaxLabelKey = 40, MaxLabelValue = 120;
     private const int MaxIgnored = 500;
 
     private readonly TimeProvider _time = time ?? TimeProvider.System;

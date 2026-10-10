@@ -4,7 +4,9 @@
 # fragments, library, runs, logs).
 #
 #   ./lab.sh up        build, seed if needed, start everything, print the page URL
-#                      (LAB_NODE_SANDBOX=1 starts the nodes in sandbox mode: see "nodes")
+#                      (LAB_NODE_SANDBOX=1 starts the nodes in sandbox mode: see "nodes";
+#                      LAB_REPLICAS="node-4=2,runner-1=2" starts that many hosts for those nodes,
+#                      all of one identity: the first is named for the node, the others <node>.r2, ...)
 #   ./lab.sh down      stop every lab process
 #   ./lab.sh nodes M   restart the node hosts, M = strict (a data node runs only its own bricks,
 #                      the default) or sandbox (it runs any reader or writer, whatever it reads or
@@ -36,6 +38,34 @@ STACK_PORT="${LAB_STACK_HTTP_PORT:-80}"
 STACK_SUFFIX="$([[ "$STACK_PORT" == 80 ]] || echo ":$STACK_PORT")"
 STACK_URL="http://coordinator.localtest.me$STACK_SUFFIX"
 NODES=(node-1 node-2 node-3 node-4 runner-1)
+
+# The processes that carry the nodes: one per node, and the extra replicas LAB_REPLICAS asks for ("node=count",
+# comma-separated), each named <node>.r<n>. A count that is not a number is an error, never one replica.
+PROCS=()
+for node in "${NODES[@]}"; do
+    count=1
+    for entry in $(echo "${LAB_REPLICAS:-}" | tr ',' ' '); do
+        if [[ "${entry%%=*}" == "$node" ]]; then
+            count="${entry#*=}"
+            [[ "$count" =~ ^[1-9][0-9]*$ ]] || { echo "LAB_REPLICAS: '$entry' is not node=count" >&2; exit 1; }
+        fi
+    done
+    PROCS+=("$node")
+    for ((n = 2; n <= count; n++)); do PROCS+=("$node.r$n"); done
+done
+# The node a process carries: <node>.r<n> carries <node>.
+node_of() { echo "${1%.r[0-9]*}"; }
+
+# What to stop and to show: the processes above, and every replica a pid file still records, which a run of this
+# script without the LAB_REPLICAS that started it would not otherwise see and would leave running.
+ALL_PROCS=("${PROCS[@]}")
+for node in "${NODES[@]}"; do
+    for file in "$STATE"/run/"$node".r[0-9]*.pid; do
+        [[ -e "$file" ]] || continue
+        name="$(basename "$file" .pid)"
+        [[ " ${ALL_PROCS[*]} " == *" $name "* ]] || ALL_PROCS+=("$name")
+    done
+done
 
 require_dtpipe() {
     if [[ ! -x "$DTPIPE" ]]; then
@@ -120,8 +150,8 @@ exec_node() {
 start_nodes() {
     local setting=(-u LAB_NODE_SANDBOX)
     [[ "$1" == sandbox ]] && setting=(LAB_NODE_SANDBOX=1)
-    for node in "${NODES[@]}"; do
-        start "$node" env "${setting[@]}" "$LAB/lab.sh" exec-node "$node" "$URL"
+    for proc in "${PROCS[@]}"; do
+        start "$proc" env "${setting[@]}" "$LAB/lab.sh" exec-node "$(node_of "$proc")" "$URL"
     done
 }
 
@@ -184,13 +214,13 @@ nodes_mode() {
 
     echo "Nodes: $mode"
     undeploy_all "$URL"
-    for node in "${NODES[@]}"; do
-        if is_running "$node"; then kill -TERM "$(cat "$STATE/run/$node.pid")" 2>/dev/null || true; fi
+    for proc in "${ALL_PROCS[@]}"; do
+        if is_running "$proc"; then kill -TERM "$(cat "$STATE/run/$proc.pid")" 2>/dev/null || true; fi
     done
-    for node in "${NODES[@]}"; do
-        for _ in $(seq 1 20); do is_running "$node" || break; sleep 0.25; done
-        if is_running "$node"; then kill -KILL "$(cat "$STATE/run/$node.pid")" 2>/dev/null || true; fi
-        rm -f "$STATE/run/$node.pid"
+    for proc in "${ALL_PROCS[@]}"; do
+        for _ in $(seq 1 20); do is_running "$proc" || break; sleep 0.25; done
+        if is_running "$proc"; then kill -KILL "$(cat "$STATE/run/$proc.pid")" 2>/dev/null || true; fi
+        rm -f "$STATE/run/$proc.pid"
     done
     start_nodes "$mode"
     nodes_report "$URL" "$mode" 90 || { echo "The node hosts did not come back in $mode mode." >&2; exit 1; }
@@ -224,9 +254,9 @@ smoke_passes() {
 }
 
 down() {
-    local names=(coordinator idp "${NODES[@]}")
+    local names=(coordinator idp "${ALL_PROCS[@]}")
     # Nodes first, so each can tear down its own dtpipe children while the coordinator still answers.
-    for name in "${NODES[@]}" coordinator idp; do
+    for name in "${ALL_PROCS[@]}" coordinator idp; do
         if is_running "$name"; then
             kill -TERM "$(cat "$STATE/run/$name.pid")" 2>/dev/null || true
         fi
@@ -240,7 +270,7 @@ down() {
 }
 
 status() {
-    for name in idp coordinator "${NODES[@]}"; do
+    for name in idp coordinator "${ALL_PROCS[@]}"; do
         if is_running "$name"; then echo "  $name  running (pid $(cat "$STATE/run/$name.pid"))"; else echo "  $name  stopped"; fi
     done
     if curl -fs "$URL/healthz" >/dev/null 2>&1; then

@@ -125,4 +125,127 @@ public sealed class NodeChannelHubTests : IDisposable
         var node = Assert.Single(_inventory.Snapshot());
         Assert.False(node.Online);
     }
+
+    [Fact]
+    public async Task A_Node_Stays_Online_While_Any_Of_Its_Replicas_Is_Connected()
+    {
+        var (first, _) = Connect("c1", "known");
+        var (second, _) = Connect("c2", "known");
+        await first.Announce(Proposing("node-known"));
+        await second.Announce(Proposing("node-known"));
+
+        await second.OnDisconnectedAsync(null);
+        Assert.True(Assert.Single(_inventory.Snapshot()).Online);
+
+        await first.OnDisconnectedAsync(null);
+        Assert.False(Assert.Single(_inventory.Snapshot()).Online);
+    }
+
+    [Fact]
+    public async Task What_Every_Replica_Reports_Is_Received()
+    {
+        var (first, _) = Connect("c1", "known");
+        var (second, _) = Connect("c2", "known");
+        await first.Announce(Proposing("node-known"));
+        await second.Announce(Proposing("node-known"));
+
+        await first.ReportFragment(new FragmentStatus("node-known", "p@node-known", "main", "g1", FragmentState.Registered, "v", null, null, null));
+        await second.ReportFragment(new FragmentStatus("node-known", "q@node-known", "main", "g1", FragmentState.Registered, "v", null, null, null));
+
+        var node = Assert.Single(_inventory.Snapshot());
+        Assert.Equal(["p@node-known", "q@node-known"], node.Fragments.Select(f => f.Fragment).Order(StringComparer.Ordinal));
+    }
+
+    private static NodeAnnouncement Replica(Guid instance, string description = "proposed description", string? origin = null) =>
+        new("node-known", description, [], NodeRole.Data, [], InstanceId: instance, Origin: origin);
+
+    [Fact]
+    public async Task A_Reconnection_Of_The_Same_Instance_Is_The_Same_Replica()
+    {
+        var instance = Guid.NewGuid();
+        var (first, firstCaller) = Connect("c1", "known");
+        var (again, _) = Connect("c3", "known");
+        await first.Announce(Replica(instance));
+        await again.Announce(Replica(instance));
+
+        var node = Assert.Single(_inventory.Snapshot());
+        Assert.Single(node.Replicas);
+        Assert.Equal("c3", _inventory.ConnectionOf("node-known"));
+        Assert.True(firstCaller.Aborted);
+    }
+
+    [Fact]
+    public async Task The_Late_Close_Of_A_Replaced_Connection_Leaves_The_Replica_Online()
+    {
+        var instance = Guid.NewGuid();
+        var (first, _) = Connect("c1", "known");
+        var (again, _) = Connect("c3", "known");
+        await first.Announce(Replica(instance));
+        await again.Announce(Replica(instance));
+
+        await first.OnDisconnectedAsync(null);
+
+        var node = Assert.Single(_inventory.Snapshot());
+        Assert.True(node.Online);
+        Assert.Equal("c3", _inventory.ConnectionOf("node-known"));
+    }
+
+    [Fact]
+    public async Task A_Node_Of_A_Removed_Identity_Is_Forgotten_With_Its_Last_Replica()
+    {
+        var (first, _) = Connect("c1", "known");
+        var (second, _) = Connect("c2", "known");
+        await first.Announce(Proposing("node-known"));
+        await second.Announce(Proposing("node-known"));
+        _rights.RemoveIdentity("known");
+
+        await first.OnDisconnectedAsync(null);
+        Assert.Single(_inventory.Snapshot());
+
+        await second.OnDisconnectedAsync(null);
+        Assert.Empty(_inventory.Snapshot());
+    }
+
+    [Fact]
+    public async Task The_Node_Shows_Its_Oldest_Connected_Replica_Which_Is_Also_The_One_Deployed_To()
+    {
+        var (first, _) = Connect("c1", "known");
+        var (second, _) = Connect("c2", "known");
+        await first.Announce(Replica(Guid.NewGuid(), "older"));
+        await second.Announce(Replica(Guid.NewGuid(), "newer"));
+
+        Assert.Equal("older", Assert.Single(_inventory.Snapshot()).Description);
+        Assert.Equal("c1", _inventory.ConnectionOf("node-known"));
+        Assert.Equal(["c1", "c2"], _inventory.ConnectionsOf("node-known").Order(StringComparer.Ordinal));
+
+        await first.OnDisconnectedAsync(null);
+
+        Assert.Equal("newer", Assert.Single(_inventory.Snapshot()).Description);
+        Assert.Equal("c2", _inventory.ConnectionOf("node-known"));
+        Assert.Equal(["c2"], _inventory.ConnectionsOf("node-known"));
+    }
+
+    [Fact]
+    public async Task A_Replica_Origin_Is_Cut_Before_It_Is_Kept()
+    {
+        var (hub, _) = Connect("c1", "known");
+        await hub.Announce(Replica(Guid.NewGuid(), origin: new string('x', 5000)));
+
+        var replica = Assert.Single(Assert.Single(_inventory.Snapshot()).Replicas);
+        Assert.InRange(replica.Origin!.Length, 1, 200);
+    }
+
+    [Fact]
+    public async Task Disconnecting_An_Identity_Interrupts_Every_Replica()
+    {
+        var (first, firstCaller) = Connect("c1", "known");
+        var (second, secondCaller) = Connect("c2", "known");
+        await first.Announce(Proposing("node-known"));
+        await second.Announce(Proposing("node-known"));
+
+        Assert.Equal(2, _inventory.Disconnect("known"));
+
+        Assert.True(firstCaller.Aborted);
+        Assert.True(secondCaller.Aborted);
+    }
 }

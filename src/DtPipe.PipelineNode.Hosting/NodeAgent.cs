@@ -20,6 +20,7 @@ internal sealed class NodeAgent : BackgroundService
 {
     private readonly DtPipeNodeOptions _options;
     private readonly FragmentPolicy _policy;
+    private readonly Guid _instanceId = Guid.NewGuid();
     private readonly string _stateDir;
     private readonly string _fragmentsDir;
     private readonly IReadOnlyList<DatasetInfo> _datasets;
@@ -47,7 +48,7 @@ internal sealed class NodeAgent : BackgroundService
     {
         _options = options.Value;
         _policy = definition.Policy ?? _options.Policy;
-        _stateDir = _options.ResolvedStateDirectory;
+        _stateDir = _options.ProcessDirectory(_instanceId);
         _fragmentsDir = Path.Combine(_stateDir, "fragments");
         Directory.CreateDirectory(_fragmentsDir);
 
@@ -173,7 +174,7 @@ internal sealed class NodeAgent : BackgroundService
         await _hub!.InvokeAsync(NodeChannel.Announce,
             new NodeAnnouncement(_options.Name, _options.Description, _datasets, Role, _bricks.Bricks,
                 Capabilities: [.. _gate is null ? [] : new[] { NodeAnnouncement.RawFragments }, .. _requests.Keys.Order(StringComparer.Ordinal)],
-                DtpipeVersion: _dtpipeVersion), bounded.Token);
+                DtpipeVersion: _dtpipeVersion, InstanceId: _instanceId, Origin: $"{Environment.MachineName}:{Environment.ProcessId}"), bounded.Token);
 
         FragmentStatus[] statuses;
         await _commands.WaitAsync();
@@ -296,6 +297,8 @@ internal sealed class NodeAgent : BackgroundService
             _commands.Release();
         }
         if (_hub is not null) await _hub.DisposeAsync();
+        // The directory belongs to this process alone, and nothing runs from it any more.
+        try { Directory.Delete(_stateDir, recursive: true); } catch (Exception) { /* shutting down */ }
     }
 
     public override void Dispose()

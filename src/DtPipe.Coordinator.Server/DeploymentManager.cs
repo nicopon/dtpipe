@@ -176,7 +176,7 @@ public sealed class DeploymentManager
     {
         foreach (var node in _inventory.Snapshot().Where(n => n.Online))
             foreach (var name in fragmentNames)
-                await SendAsync(node.Name, NodeChannel.Undeploy, name, ct);
+                await SendToEveryReplicaAsync(node.Name, NodeChannel.Undeploy, name, ct);
     }
 
     public async Task UndeployAsync(string pipelineId, CancellationToken ct)
@@ -192,7 +192,7 @@ public sealed class DeploymentManager
         {
             foreach (var node in _inventory.Snapshot().Where(n => n.Online))
                 foreach (var fragment in deployment.Plan.Fragments)
-                    await SendAsync(node.Name, NodeChannel.Undeploy, fragment.Name, ct);
+                    await SendToEveryReplicaAsync(node.Name, NodeChannel.Undeploy, fragment.Name, ct);
             lock (_lock)
             {
                 _deployments.Remove(pipelineId);
@@ -260,7 +260,7 @@ public sealed class DeploymentManager
     }
 
     public Task KillAsync(string fragmentName, CancellationToken ct) =>
-        SendAsync(RequireFragment(fragmentName).Fragment.Node, NodeChannel.Kill, fragmentName, ct);
+        SendToEveryReplicaAsync(RequireFragment(fragmentName).Fragment.Node, NodeChannel.Kill, fragmentName, ct);
 
     /// <summary>
     /// A second instance of one fragment on the same node, from a job that differs by a comment:
@@ -512,5 +512,14 @@ public sealed class DeploymentManager
     {
         var connection = _inventory.ConnectionOf(node) ?? throw new ConflictException($"{node} is offline.");
         return _labHub.Clients.Client(connection).SendAsync(method, argument, ct);
+    }
+
+    /// <summary>A command that concerns the whole node, not the replica a deployment went to.</summary>
+    private async Task SendToEveryReplicaAsync(string node, string method, object argument, CancellationToken ct)
+    {
+        var connections = _inventory.ConnectionsOf(node);
+        if (connections.Count == 0) throw new ConflictException($"{node} is offline.");
+        foreach (var connection in connections)
+            await _labHub.Clients.Client(connection).SendAsync(method, argument, ct);
     }
 }

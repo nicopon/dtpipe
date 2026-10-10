@@ -64,6 +64,12 @@ none. One node per process; a second `AddDtPipeNode` throws.
 - **A `PipelineNode` serves one run**: `FragmentSupervisor.RearmAsync` replaces it with a fresh
   instance under the new generation; every `FragmentStatus` echoes the generation of the command it
   answers.
+- **A node host works in a directory of its own process.** `DtPipeNodeOptions.StateDirectory` is a
+  parent: the host makes `<parent>/<instance id>` for its fragment jobs and its dtpipe runs, so replicas
+  that share a configuration never share a directory, and removes it when it stops in order. Its
+  databases and variables are not there. The instance id is chosen once per process and sent with every
+  `Announce`, with where the process runs. `[local: Hosting.Tests ProcessDirectoryTests — the path]`
+  `[unchecked: the removal at an orderly stop]`
 - **Stopping disposes every fragment before the host exits** (`NodeAgent.StopAsync`), and each
   `PipelineNode` unregisters before it disconnects, so no dtpipe child outlives the host and no
   closed instance stays admissible.

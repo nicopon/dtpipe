@@ -31,6 +31,10 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   `lab.split` (`Lab.NodeHost/LabRequests.cs`), so `smoke.py` reads the warehouse through `/api/query`; its witness reads the databases
   `seed.sh` wrote, located from the node files, never from the coordinator. Node mechanics:
   `src/DtPipe.PipelineNode.Hosting/CLAUDE.md`. `[local: smoke.py]`
+- **`LAB_REPLICAS` starts more hosts of one node's identity** (`<node>.r<n>`, `lab.sh`'s header): each
+  makes its own working directory and the databases stay shared. `lab.sh down`, `nodes` and `status` also
+  take in any replica a pid file records, so a run without the variable that started them stops them.
+  `[unchecked: the smoke runs one host per node]`
 - **The IdP's signing key survives an IdP restart.** A node host reuses its cached token until
   shortly before it expires, so `Lab.Idp` reads its key from `.state/idp/signing-key.pem` (generated
   once, readable by its owner only, outside git). `lab.sh idp --Idp:AccessTokenLifetimeSeconds=N`

@@ -57,11 +57,16 @@ public enum NodeRole { Data, Runner }
 /// when its own configuration lets it run a fragment that is no brick, and the name of each request it
 /// answers. The coordinator shows them and never sets them; the host enforces what it offers.
 /// <see cref="DtpipeVersion"/> is what the host's dtpipe binary says of itself (<c>--version</c>), null
-/// when it did not say: shown beside a studio's own, never a reason to refuse.
+/// when it did not say: shown beside a studio's own, never a reason to refuse. One identity may be
+/// carried by several hosts, its replicas: <see cref="InstanceId"/> is chosen by the host process once and
+/// sent with every announcement, so a reconnection is told from a second replica; a host that sends none
+/// is told apart by its connection. <see cref="Origin"/> says where the host runs (machine and process),
+/// for people to read: untrusted text, never a ground for a decision.
 /// </summary>
 public sealed record NodeAnnouncement(
     string Name, string Description, IReadOnlyList<DatasetInfo> Datasets, NodeRole Role,
-    IReadOnlyList<BrickInfo> Bricks, IReadOnlyList<string>? Capabilities = null, string? DtpipeVersion = null)
+    IReadOnlyList<BrickInfo> Bricks, IReadOnlyList<string>? Capabilities = null, string? DtpipeVersion = null,
+    Guid? InstanceId = null, string? Origin = null)
 {
     /// <summary>The capability of a host that accepts a fragment written as a job, not only one made of its bricks.</summary>
     public const string RawFragments = "raw-fragments";

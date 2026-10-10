@@ -35,7 +35,7 @@ open http://127.0.0.1:5180          # sign in as labadmin / labadminpwd; the Lab
 
 | Command | Does |
 |---|---|
-| `./lab.sh up` | builds the lab, seeds the databases on first use, starts the IdP, the coordinator, then the nodes |
+| `./lab.sh up` | builds the lab, seeds the databases on first use, starts the IdP, the coordinator, then the nodes (`LAB_REPLICAS="node-4=2,runner-1=2"` starts that many hosts of one identity for those nodes: the first is named for the node, the others `node-4.r2`, …; each makes its own directory under the node's, the databases stay shared) |
 | `./lab.sh status` | which processes run, and what the coordinator sees of each node |
 | `./lab.sh smoke [lab\|sandbox\|library\|rights\|faults\|bricks] [id…]` | runs the end-to-end check, optionally one pass or some pipelines only; restarts the node hosts in the mode each pass needs |
 | `./lab.sh nodes strict\|sandbox` | restarts the node hosts in that mode after undoing every deployment (`LAB_NODE_SANDBOX=1 ./lab.sh up` starts them in sandbox mode) |

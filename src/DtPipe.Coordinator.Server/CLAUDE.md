@@ -18,7 +18,7 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   under the name its connection announced. A token no identity knows is no node: its host waits in
   `EnrollmentQueue` (bounded, expired, never evicting a waiting subject), and what it proposes is
   untrusted text, cut here and escaped by the page. A disabled identity is refused. A node whose
-  identity is gone or renamed leaves the inventory with its host.
+  identity is gone or renamed leaves the inventory with its last replica.
   `[local: DtPipe.Coordinator.Server.Tests, the lab's smoke.py rights]`
 - **A person's rights are the server's configuration, never the token's.** People sign in through
   the provider (`Coordinator:Ui:ClientId`, a confidential authorization-code client, PKCE, the code
@@ -136,10 +136,17 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   `WaitRegisteredAsync` requires the main instance in the deployment's current generation, held by
   the registry at the fragment's version. Every `Deploy` and `Rearm` carries a new generation,
   echoed in `FragmentStatus`. `[local: the lab's smoke.py]`
-- **A disconnected host is forgotten fragment by fragment.** `NodeInventory.Disconnected` drops what
-  the host last reported: a killed host would otherwise leave its fragments "Launched" for good. A host
-  that only lost its connection reports them all again when it announces itself.
-  `[local: the lab's tools/campaign.py F3]`
+- **A node is one identity carried by one or more replicas.** Each replica is a host with its own
+  control connection, told apart by the instance id it announces (a host that announces none, by its
+  connection); the node is online while any replica is connected. What the node announces, and where a
+  deployment, a re-arming and a read go, is its oldest connected replica's; `Undeploy` and `Kill` go to
+  every replica. `NodeInventory.Disconnected` drops one replica with what it last reported: a killed host
+  would otherwise leave its fragments "Launched" for good. A host that only lost its connection reports
+  them all again when it announces itself on its new one, and the connection it left, which no replica
+  owns any more, changes nothing. `Disconnect` interrupts the connections of every replica of an
+  identity. `Origin`, where a replica says it runs, is untrusted text: cut at `Announce`, the ground of
+  no decision. `[local: NodeChannelHubTests; the lab's tools/campaign.py F3]`
+  `[unchecked: Undeploy and Kill reaching every replica]`
 - **A run names the subject of each fragment's node.** `DeploymentManager` reads it from the rights when
   the run starts (`RightsStore.SubjectOf`: the client id of the identity named after the fragment's
   node, the `sub` its tokens carry) and puts it in each `FragmentPin`; admission then takes only
