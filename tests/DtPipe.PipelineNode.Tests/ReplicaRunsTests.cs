@@ -5,6 +5,7 @@ using DtPipe.Coordinator.Tests.Infrastructure;
 using DtPipe.PipelineNode.Hosting;
 using DtPipe.PipelineNode.Tests.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -20,6 +21,37 @@ public class ReplicaRunsTests : IDisposable
     private const string WaitsOnItsInput = "a:\n  input: arrow:-\n  output: csv:/dev/null\n";
 
     private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("replica-runs-");
+
+    /// <summary>The coordinator's node link, noting when it holds the replica's answer to a <c>Launch</c>.</summary>
+    private sealed class LaunchAnswerSignal(INodeLink inner) : INodeLink
+    {
+        public TaskCompletionSource Answered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<LaunchResult> LaunchAsync(ReplicaKey replica, LaunchRequest request, CancellationToken ct)
+        {
+            try
+            {
+                var result = await inner.LaunchAsync(replica, request, ct);
+                Answered.TrySetResult();
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Answered.TrySetException(ex);
+                throw;
+            }
+        }
+
+        public Task<bool> WireAsync(ReplicaKey replica, string runId, string fragment, string alias, string transferId, CancellationToken ct) =>
+            inner.WireAsync(replica, runId, fragment, alias, transferId, ct);
+
+        public Task<bool> CancelAsync(ReplicaKey replica, string runId, string fragment, CancellationToken ct) =>
+            inner.CancelAsync(replica, runId, fragment, ct);
+
+        public Task<FragmentCheck> CheckAsync(ReplicaKey replica, FragmentSpec spec, CancellationToken ct) => inner.CheckAsync(replica, spec, ct);
+
+        public Task<int> KillAsync(ReplicaKey replica, string fragment, CancellationToken ct) => inner.KillAsync(replica, fragment, ct);
+    }
 
     public void Dispose() => _dir.Delete(recursive: true);
 
@@ -152,17 +184,17 @@ public class ReplicaRunsTests : IDisposable
     {
         var job = Path.Combine(_dir.FullName, "job.yaml");
         File.WriteAllText(job, $"a:\n  input: generate:50\n  provider-options:\n    generate:\n      rows-per-second: 10\n  output: csv:{Path.Combine(_dir.FullName, "out.csv")}\n");
-        await using var host = await CoordinatorTestHost.StartAsync(o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] });
+        await using var host = await CoordinatorTestHost.StartAsync(
+            o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] },
+            services => services.Replace(ServiceDescriptor.Singleton<INodeLink>(sp => new LaunchAnswerSignal(ActivatorUtilities.CreateInstance<HubNodeLink<TestNodeHub>>(sp)))));
         await using var node = await TestNode.StartAsync(host, "A", job, []);
         var orchestrator = host.Host.Services.GetRequiredService<IRunOrchestrator>();
+        var launch = (LaunchAnswerSignal)host.Host.Services.GetRequiredService<INodeLink>();
 
         var run = orchestrator.RunAsync(new RunSpec("run-held", [node.Fragment], []));
-        var deadline = DateTime.UtcNow + Bound;
-        while (!node.IsLaunched)
-        {
-            if (DateTime.UtcNow > deadline) throw new TimeoutException("the fragment was never launched");
-            await Task.Delay(10);
-        }
+        // The channel is cut once the coordinator holds the answer to its Launch: a replica whose child is up but whose answer is still
+        // on its way would otherwise be a fragment that went quiet, and the run would end at once.
+        await launch.Answered.Task.WaitAsync(Bound);
         await node.StopChannelAsync();
 
         await node.Completion.WaitAsync(Bound); // the fragment ended and tried to report
