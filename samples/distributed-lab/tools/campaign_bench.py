@@ -130,11 +130,12 @@ def busy_machine(state_dir, node_names, transportr_dir=None):
 
 
 def launched_binaries(state_dir, node_names):
-    """The `--dtpipe` values the coordinator and the hosts were started with: the binary every fragment child runs."""
+    """The `--dtpipe` values the coordinator and the hosts were started with: the binary every fragment child runs.
+    `ps` prints arguments unquoted, so a value runs to the next flag or the end of the line: the path may hold spaces."""
     values = set()
     for _, _, kind, args in lab_processes():
         if kind in ("host", "coordinator"):
-            m = re.search(r"--dtpipe\s+(\S+)", args)
+            m = re.search(r"--dtpipe\s+(.+?)(?=\s+--\S|\s*$)", args)
             if m:
                 values.add(m.group(1))
     return values
