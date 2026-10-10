@@ -75,11 +75,12 @@ for helper in "${HELPERS[@]}"; do
     DEFS=$(grep -rlE "(string|var) +${helper}\(" "$PROJECT_ROOT/src" --include="*.cs" 2>/dev/null \
         | grep -v "/bin/" | grep -v "/obj/" || true)
     [ -n "$DEFS" ] || fail "allowed helper '${helper}' is not defined anywhere"
-    for def in $DEFS; do
+    # Read line by line: the repository path may contain spaces, which word splitting would cut.
+    while IFS= read -r def; do
         grep -A3 -E "(string|var) +${helper}\(" "$def" \
             | grep -q "ConnectionStringSanitizer\.Redact(" \
-            || fail "allowed helper '${helper}' in ${def#$PROJECT_ROOT/} is not defined over Redact"
-    done
+            || fail "allowed helper '${helper}' in ${def#"$PROJECT_ROOT"/} is not defined over Redact"
+    done <<< "$DEFS"
 done
 pass "every helper the check lets through is defined over Redact"
 
