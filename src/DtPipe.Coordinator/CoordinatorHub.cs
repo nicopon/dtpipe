@@ -62,7 +62,7 @@ public class CoordinatorHub : CommandHub
     {
         var client = await _stateStore.GetClientByConnectionIdAsync(Context.ConnectionId)
             ?? throw new HubException("Register: call Connect first.");
-        _nodeRegistry.Register(client.ClientId, Context.ConnectionId, fragmentName, version);
+        _nodeRegistry.Register(client.ClientId, Context.ConnectionId, fragmentName, version, client.Subject);
     }
 
     /// <summary>

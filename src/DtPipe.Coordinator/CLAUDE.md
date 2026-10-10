@@ -56,7 +56,8 @@ then `Build()`).
 ## The barrier
 
 `RunOrchestrator.RunAsync` is the barrier: it admits a run only once `AdmissionGate` sees every
-fragment `RunSpec.Fragments` names registered in `INodeRegistry`, pushes `Launch` to each, waits for
+fragment `RunSpec.Fragments` names registered in `INodeRegistry` by an instance of its node's identity,
+pushes `Launch` to each, waits for
 every `Ready`, opens each `RunSpec.Edges` entry through `ITransferInitiator` and pushes `Wire`, then
 waits for every `Exited` and applies `DetermineOutcome`. `RunAsync` is an in-process API - no
 `RegisterPlan`/`Run`/`Status` network surface yet.
@@ -68,6 +69,19 @@ waits for every `Exited` and applies `DetermineOutcome`. `RunAsync` is an in-pro
   in another run in flight is refused before admission (`FragmentInFlightException`, naming the run
   that holds it): a `PipelineNode` serves one run. Which runs may overlap is the caller's choice; the
   orchestrator never queues. `[local: ConcurrentRunsTests]`
+- **Admission binds a fragment to its node's identity, never to a name an instance proposes.** Each
+  `FragmentPin` carries the subject its node connects under. `Register` records the subject TransportR
+  attested at `Connect` (`ClientRegistration.Subject`, the token's `sub`) in `RegisteredNode.Subject`,
+  and `AdmissionGate.Resolve` keeps only the instances of that subject before it reads a version: an
+  instance of another identity that registers the same name is not admitted and is left out of the
+  alignment check, and one that attests no subject never serves a pin that names one. A pin that names
+  no subject admits nothing and is refused at once (`UnboundFragmentException`); only
+  `AdmissionOptions.AdmitUnboundFragments`, set by a host whose hub attests no subject (development, a
+  test with no token), reads it as no filter, and a host with an identity provider never sets it. The
+  caller supplies the subject; the library never infers it. **This is admission only**: `Ready` and
+  `Exited` still find their fragment by the name their sender registered, so a sender of another
+  identity that registered the name can still report for a run it was never admitted to.
+  `[local: AdmissionGateTests, AdmissionSubjectTests; the lab's smoke.py rights - a foreign registration]`
 
 - **A fragment's identity is never a method argument.** `Register` resolves the caller's `ClientId`
   through `IStateStore.GetClientByConnectionIdAsync(Context.ConnectionId)` - TransportR's own
@@ -77,8 +91,8 @@ waits for every `Exited` and applies `DetermineOutcome`. `RunAsync` is an in-pro
   `[local: NodeRegistryTests]`
 - **`NodeRegistry` never refuses a fragment name - it tracks one entry per (fragment name, `ClientId`)
   pair, not one per name.** A second, previously-unseen `ClientId` registering an already-live name is
-  a new, additional instance (redundancy, horizontal scaling), never a collision; whether every live
-  instance of a name agrees on version is instance alignment, checked at admission
+  a new, additional instance (redundancy, horizontal scaling), never a collision; whether every instance
+  of a name that the pin's subject admits agrees on version is instance alignment, checked at admission
   (`AdmissionGate.Resolve`, see "Versions" below), not here. A disconnected instance stays reclaimable
   by its own `ClientId` for its disconnect grace period (see below), and a *live* instance's own
   `ClientId` reclaiming under a new `ConnectionId` is always allowed too - the reconnect's `Register`
@@ -219,8 +233,9 @@ reports. Pinning names an exact version; "rollback" is not a separate mechanism,
 version that still - or again - has a live instance behind it
 (`AdmissionGateTests.RollbackIsFree...`).
 
-Instance alignment - every live instance of one fragment name agreeing on version - is checked by
-`AdmissionGate.Resolve` **unconditionally, even for a pinned request**: two disagreeing instances are
+Instance alignment - every instance of one fragment name that the pin's subject admits agreeing on
+version - is checked by `AdmissionGate.Resolve` **unconditionally, even for a pinned request**: two
+disagreeing instances are
 a defect of the peer itself, never something a pin could paper over by picking a side. Per-instance
 version filtering (admit whichever instances happen to match, ignore the rest) was considered and
 rejected: it would make canary-style partial rollout possible, which nothing here needs, and it would
@@ -228,8 +243,9 @@ quietly reopen the "which instance did this run actually use" question the whole
 close - instance selection stays free (any live instance will do) only because every one of them is
 guaranteed equivalent.
 
-Four distinct admission refusals, each naming the fragment: **absent** (`AdmissionRefusedException`,
-unpinned, no live instance at all) · **unknown version** (`PinnedVersionUnavailableException`,
+Five distinct admission refusals, each naming the fragment: **unbound** (`UnboundFragmentException`,
+the fragment names no subject; refused before any wait) · **absent** (`AdmissionRefusedException`,
+unpinned, no live instance of the node's identity) · **unknown version** (`PinnedVersionUnavailableException`,
 `Reason: Unknown`, a pin nobody has ever reported) · **retired version** (same exception,
 `Reason: Retired`, a pin once reported but nothing currently hosts - operationally: redeploy that
 version, or pin to whatever is live) · **misaligned instances**
@@ -237,7 +253,7 @@ version, or pin to whatever is live) · **misaligned instances**
 hosting this fragment disagree with each other, fix the deployment before retrying, no pin will help").
 `NodeRegistry.HasKnownVersion` is what tells unknown from retired apart; it is never pruned - old
 versions are appended to forever, since retention is a deferred product decision, not this registry's
-job. `[local: NodeRegistryTests, AdmissionGateTests]`
+job. `[local: NodeRegistryTests, AdmissionGateTests, AdmissionSubjectTests]`
 
 `tests/DtPipe.Coordinator.Tests` is outside `DtPipe.sln`, so `build.yml` never runs it; `build.sh`
 discovers it, so `agentic-ci.yml` runs it on Linux.

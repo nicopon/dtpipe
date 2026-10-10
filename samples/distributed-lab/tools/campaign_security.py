@@ -66,12 +66,17 @@ def stream_status(base, token):
 class LongPollingHub:
     """One connection to a SignalR hub: handshake, invoke, close."""
 
+    # A poll the server holds without anything to say ends on its own side after 90 seconds; the client
+    # waits longer, and asks again when it still times out.
+    POLL_TIMEOUT = 120
+
     def __init__(self, base, hub_path, token):
         self.base, self.hub_path, self.token = base, hub_path, token
         self.headers = {"Authorization": f"Bearer {token}"}
         self.messages = []
         self.stopped = False
         self._lock = threading.Lock()
+        self._invocations = 0
 
     def open(self):
         status, text = http(f"{self.base}{self.hub_path}/negotiate?negotiateVersion=1", "POST", self.headers)
@@ -95,7 +100,13 @@ class LongPollingHub:
 
     def _poll(self):
         while not self.stopped:
-            status, text = http(self.url, "GET", self.headers, timeout=30)
+            try:
+                status, text = http(self.url, "GET", self.headers, timeout=self.POLL_TIMEOUT)
+            except OSError:
+                status, text = 0, ""
+            if status == 0 and not self.stopped:
+                time.sleep(0.5)
+                continue
             if status == 204 or status == 0 and self.stopped:
                 return
             if status != 200:
@@ -119,8 +130,11 @@ class LongPollingHub:
 
     def invoke(self, target, *arguments):
         """The completion of the call: {"result": ...} or {"error": "..."}."""
-        self._post(json.dumps({"type": 1, "invocationId": "1", "target": target, "arguments": list(arguments)}) + RECORD_SEPARATOR)
-        return self._wait(lambda m: m.get("type") == 3 and m.get("invocationId") == "1", 15)
+        with self._lock:
+            self._invocations += 1
+            invocation = str(self._invocations)
+        self._post(json.dumps({"type": 1, "invocationId": invocation, "target": target, "arguments": list(arguments)}) + RECORD_SEPARATOR)
+        return self._wait(lambda m: m.get("type") == 3 and m.get("invocationId") == invocation, 15)
 
     def close(self):
         self.stopped = True

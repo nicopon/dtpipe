@@ -56,6 +56,7 @@ public sealed class DeploymentManager
     private readonly IRunOrchestrator _orchestrator;
     private readonly INodeRegistry _registry;
     private readonly IFlowControlService _flowControl;
+    private readonly RightsStore _rights;
     private readonly EventBus _bus;
     private readonly RunJournal _journal;
     private readonly ILogger<DeploymentManager> _logger;
@@ -70,10 +71,10 @@ public sealed class DeploymentManager
 
     public DeploymentManager(
         NodeInventory inventory, IHubContext<NodeChannelHub> labHub, IRunOrchestrator orchestrator, INodeRegistry registry,
-        IFlowControlService flowControl, EventBus bus, RunJournal journal, ILogger<DeploymentManager> logger)
+        IFlowControlService flowControl, RightsStore rights, EventBus bus, RunJournal journal, ILogger<DeploymentManager> logger)
     {
-        (_inventory, _labHub, _orchestrator, _registry, _flowControl, _bus, _journal, _logger) =
-            (inventory, labHub, orchestrator, registry, flowControl, bus, journal, logger);
+        (_inventory, _labHub, _orchestrator, _registry, _flowControl, _rights, _bus, _journal, _logger) =
+            (inventory, labHub, orchestrator, registry, flowControl, rights, bus, journal, logger);
     }
 
     /// <summary>The plan deployed last: what the Lab view shows and what a run naming no pipeline runs.</summary>
@@ -335,12 +336,14 @@ public sealed class DeploymentManager
 
         // The deployment's gate: held from here until its fragments are re-armed after the run.
         var gated = false;
+        IReadOnlyDictionary<string, string> subjects;
         try
         {
             if (deployment is null) throw new ConflictException($"'{pipelineId}' is no longer deployed.");
             await deployment.Gate.WaitAsync(ticket.Cancel.Token);
             gated = true;
             if (deployment.State != "ready") throw new ConflictException($"'{pipelineId}' is not ready: {deployment.State} {deployment.Message}".Trim());
+            subjects = SubjectsOf(deployment.Plan);
         }
         catch (Exception ex)
         {
@@ -359,7 +362,7 @@ public sealed class DeploymentManager
 
         var spec = new RunSpec(
             view.RunId,
-            plan.Fragments.Select(f => new FragmentPin(f.Name, view.Pins?.GetValueOrDefault(f.Name) is { Length: > 0 } v ? v : null)).ToList(),
+            plan.Fragments.Select(f => new FragmentPin(f.Name, view.Pins?.GetValueOrDefault(f.Name) is { Length: > 0 } v ? v : null, subjects[f.Node])).ToList(),
             plan.Edges.Select(e => new RunEdge(e.ProducerFragment, e.ProducerAlias, e.ConsumerFragment, e.ConsumerAlias)).ToList());
 
         RunView final;
@@ -368,7 +371,7 @@ public sealed class DeploymentManager
             var result = await _orchestrator.RunAsync(spec, ticket.Cancel.Token);
             final = view with { State = result.Outcome.ToString().ToLowerInvariant(), Result = result, Description = result.Describe() };
         }
-        catch (Exception ex) when (ex is AdmissionRefusedException or MisalignedInstancesException
+        catch (Exception ex) when (ex is AdmissionRefusedException or UnboundFragmentException or MisalignedInstancesException
                                        or PinnedVersionUnavailableException or FragmentInFlightException)
         {
             final = view with { State = "refused", Refusal = ex.Message };
@@ -466,6 +469,13 @@ public sealed class DeploymentManager
             await Task.Delay(100, ct);
         }
     }
+
+    /// <summary>
+    /// The subject each node of the plan connects under, read from the rights as they are now: a run
+    /// is admitted only from instances attested under it.
+    /// </summary>
+    private IReadOnlyDictionary<string, string> SubjectsOf(DistributionPlan plan) =>
+        plan.Fragments.Select(f => f.Node).Distinct(StringComparer.Ordinal).ToDictionary(node => node, _rights.SubjectOf, StringComparer.Ordinal);
 
     private void ThrowIfBusy(string pipelineId)
     {

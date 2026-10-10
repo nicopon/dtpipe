@@ -51,6 +51,31 @@ public sealed class RightsStoreTests : IDisposable
     }
 
     [Fact]
+    public void A_Node_Connects_Under_The_Client_Id_Of_Its_Identity()
+    {
+        var store = StoreOf(Version2);
+        Assert.Equal("a", store.SubjectOf("node-a"));
+        Assert.Equal("b", store.SubjectOf("node-b"));
+    }
+
+    [Fact]
+    public void A_Node_Without_An_Identity_Has_No_Subject()
+    {
+        var store = StoreOf(Version2);
+        var error = Assert.Throws<ConflictException>(() => store.SubjectOf("node-z"));
+        Assert.Contains("node-z", error.Message);
+    }
+
+    [Fact]
+    public void A_Renamed_Node_Is_Known_By_Its_New_Name_Only()
+    {
+        var store = StoreOf(Version2);
+        store.UpdateIdentity("a", "node-a2", "A", ["crm"], true);
+        Assert.Equal("a", store.SubjectOf("node-a2"));
+        Assert.Throws<ConflictException>(() => store.SubjectOf("node-a"));
+    }
+
+    [Fact]
     public void A_Version_2_Document_Keeps_Its_Names_And_Groups()
     {
         var store = StoreOf(Version2);

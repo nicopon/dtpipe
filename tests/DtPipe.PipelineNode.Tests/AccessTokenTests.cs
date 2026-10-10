@@ -1,3 +1,4 @@
+using DtPipe.Coordinator.Tests.Infrastructure;
 using DtPipe.PipelineNode.Tests.Infrastructure;
 using Xunit;
 

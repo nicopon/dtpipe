@@ -1,18 +1,49 @@
 namespace DtPipe.Coordinator;
 
-/// <summary>A fragment a run needs, optionally pinned to a version - null is Docker's own "latest": whatever a live instance currently reports.</summary>
-public sealed record FragmentPin(string FragmentName, string? Version = null);
+/// <summary>
+/// A fragment a run needs, optionally pinned to a version - null is Docker's own "latest": whatever a
+/// live instance currently reports. <paramref name="Subject"/> is the identity an instance must have
+/// connected under to serve it (<see cref="RegisteredNode.Subject"/>): the run's own word on who may
+/// host the fragment, never the instance's.
+/// </summary>
+public sealed record FragmentPin(string FragmentName, string? Version = null, string? Subject = null);
 
-/// <summary>Admission refused a run: at least one unpinned fragment never registered at all (no live instance, any version).</summary>
+/// <summary>Admission refused a run: at least one unpinned fragment has no live instance of its node's identity, whatever the version.</summary>
 public sealed class AdmissionRefusedException : Exception
 {
     public IReadOnlyList<string> AbsentFragments { get; }
 
     public AdmissionRefusedException(IReadOnlyList<string> absentFragments)
-        : base("Run refused, fragment(s) never registered: " + string.Join(", ", absentFragments))
+        : base("Run refused, fragment(s) never registered by their node: " + string.Join(", ", absentFragments))
     {
         AbsentFragments = absentFragments;
     }
+}
+
+/// <summary>
+/// A run naming a fragment bound to no identity: nothing says which node may host it, and a hub that
+/// attests subjects admits no instance on that footing (see <see cref="AdmissionOptions"/>).
+/// </summary>
+public sealed class UnboundFragmentException : Exception
+{
+    public string FragmentName { get; }
+
+    public UnboundFragmentException(string fragmentName)
+        : base($"Run refused, fragment '{fragmentName}' names no node identity: nothing says which instance may host it.")
+    {
+        FragmentName = fragmentName;
+    }
+}
+
+/// <summary>What <see cref="AdmissionGate"/> reads as a fragment bound to no identity.</summary>
+public sealed class AdmissionOptions
+{
+    /// <summary>
+    /// A fragment that names no subject is admitted from any instance. For hosts whose hub attests no
+    /// subject (development, tests with no token); a host with an identity provider never sets it.
+    /// Off by default: a fragment bound to no identity is refused.
+    /// </summary>
+    public bool AdmitUnboundFragments { get; init; }
 }
 
 /// <summary>
@@ -80,23 +111,34 @@ public sealed class AdmissionGate
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(20);
 
     private readonly INodeRegistry _registry;
+    private readonly AdmissionOptions _options;
 
-    public AdmissionGate(INodeRegistry registry)
+    public AdmissionGate(INodeRegistry registry, AdmissionOptions? options = null)
     {
         _registry = registry;
+        _options = options ?? new AdmissionOptions();
     }
 
     /// <summary>
-    /// Pure. Instance alignment is checked first and unconditionally, even for a pinned request: two
-    /// live instances of one name disagreeing on version is a defect of the peer, never resolved by
-    /// what was asked for. Otherwise, with a single agreed live version (or none at all): an unpinned
-    /// pin resolves to that version, or is refused as <see cref="PinRefusalReason.Absent"/> when no
-    /// instance exists; a pinned request resolves only on an exact match, and otherwise is refused,
-    /// named unknown or retired via <paramref name="hasKnownVersion"/>.
+    /// Pure. Only the instances the pin's subject names are candidates: an instance connected under
+    /// another subject, or attesting none, is neither admitted nor compared with the others, whatever
+    /// name and version it registered. A pin that names no subject has no candidate, unless
+    /// <paramref name="admitUnbound"/> lets it take any instance. Among the candidates, instance
+    /// alignment is checked first and unconditionally, even for a pinned request: two candidates
+    /// disagreeing on version is a defect of the peer, never resolved by what was asked for.
+    /// Otherwise, with a single agreed live version (or none at all): an unpinned pin resolves to that
+    /// version, or is refused as <see cref="PinRefusalReason.Absent"/> when no candidate exists; a
+    /// pinned request resolves only on an exact match, and otherwise is refused, named unknown or
+    /// retired via <paramref name="hasKnownVersion"/>.
     /// </summary>
     internal static PinResolution Resolve(
-        FragmentPin pin, IReadOnlyList<RegisteredNode> liveInstances, Func<string, bool> hasKnownVersion)
+        FragmentPin pin, IReadOnlyList<RegisteredNode> liveInstances, Func<string, bool> hasKnownVersion,
+        bool admitUnbound = false)
     {
+        liveInstances = liveInstances
+            .Where(n => pin.Subject is null ? admitUnbound : string.Equals(n.Subject, pin.Subject, StringComparison.Ordinal))
+            .ToList();
+
         if (liveInstances.Count == 0)
         {
             if (pin.Version is null) return new PinRefused(PinRefusalReason.Absent);
@@ -118,6 +160,7 @@ public sealed class AdmissionGate
         return new PinRefused(hasKnownVersion(pin.Version) ? PinRefusalReason.Retired : PinRefusalReason.Unknown);
     }
 
+    /// <exception cref="UnboundFragmentException">A fragment names no subject and <see cref="AdmissionOptions.AdmitUnboundFragments"/> is off - refused before any wait.</exception>
     /// <exception cref="MisalignedInstancesException">A fragment's live instances disagree on version - checked before any pin refusal.</exception>
     /// <exception cref="PinnedVersionUnavailableException">A pinned fragment's version is unknown or retired.</exception>
     /// <exception cref="AdmissionRefusedException">
@@ -132,6 +175,11 @@ public sealed class AdmissionGate
     public async Task<IReadOnlyList<RegisteredNode>> AwaitAllAsync(
         IReadOnlyList<FragmentPin> pins, TimeSpan timeout, CancellationToken ct = default)
     {
+        if (!_options.AdmitUnboundFragments)
+            foreach (var pin in pins)
+                if (pin.Subject is null)
+                    throw new UnboundFragmentException(pin.FragmentName);
+
         using var timeoutCts = new CancellationTokenSource(timeout);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
 
@@ -139,7 +187,8 @@ public sealed class AdmissionGate
         {
             var resolved = pins
                 .Select(pin => (Pin: pin, Resolution: Resolve(
-                    pin, _registry.GetLiveInstances(pin.FragmentName), v => _registry.HasKnownVersion(pin.FragmentName, v))))
+                    pin, _registry.GetLiveInstances(pin.FragmentName), v => _registry.HasKnownVersion(pin.FragmentName, v),
+                    _options.AdmitUnboundFragments)))
                 .ToList();
 
             if (resolved.All(r => r.Resolution is PinResolved))

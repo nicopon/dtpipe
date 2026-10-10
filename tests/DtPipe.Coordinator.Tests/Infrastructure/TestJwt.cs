@@ -3,12 +3,12 @@ using System.Security.Cryptography;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 
-namespace DtPipe.PipelineNode.Tests.Infrastructure;
+namespace DtPipe.Coordinator.Tests.Infrastructure;
 
 /// <summary>
-/// The signing key of a production-mode <see cref="NodeTestHost"/>, and the tokens it accepts. A
-/// token carries the subject and the <c>transportr:group:&lt;g&gt;</c> scope TransportR's
-/// <c>JwtIdentityProvider</c> reads its client's identity from.
+/// The signing key of a production-mode test hub (<c>CoordinatorTestHost</c>, <c>NodeTestHost</c>), and
+/// the tokens it accepts. A token carries the subject and the <c>transportr:group:&lt;g&gt;</c> scope
+/// TransportR's <c>JwtIdentityProvider</c> reads its client's identity from.
 /// </summary>
 public sealed class TestJwt
 {

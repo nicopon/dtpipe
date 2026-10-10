@@ -140,6 +140,13 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   the host last reported: a killed host would otherwise leave its fragments "Launched" for good. A host
   that only lost its connection reports them all again when it announces itself.
   `[local: the lab's tools/campaign.py F3]`
+- **A run names the subject of each fragment's node.** `DeploymentManager` reads it from the rights when
+  the run starts (`RightsStore.SubjectOf`: the client id of the identity named after the fragment's
+  node, the `sub` its tokens carry) and puts it in each `FragmentPin`; admission then takes only
+  instances attested under it. A node that no identity carries any more refuses the run
+  (`refused`), and the server never sets `AdmissionOptions.AdmitUnboundFragments`.
+  `[local: RightsStoreTests, the lab's smoke.py rights - a foreign registration]`
+  `[unchecked: the refused run of a node without an identity]`
 - **One source of rights.** `RightsStore` holds the identities and the flow matrix;
   `RightsFlowControl` replaces TransportR's `IFlowControlService`, so the hub checks the matrix as
   it is now on every transfer, and the planner and a deployment check every edge against it. A

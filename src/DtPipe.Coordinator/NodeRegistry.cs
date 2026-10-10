@@ -4,9 +4,11 @@ namespace DtPipe.Coordinator;
 /// A pipeline node's coordinator-side identity: its TransportR client, its live connection, and the
 /// version of the fragment it hosts - the hash of that fragment's own job YAML
 /// (<c>PipelineNode</c>'s own version helper), never the contract hash a run's edges are checked
-/// against (a different, out-of-scope concept here).
+/// against (a different, out-of-scope concept here). <paramref name="Subject"/> is the identity the
+/// token provider attested when the node connected (TransportR's <c>ClientRegistration.Subject</c>),
+/// null when the hub attests none (a development host).
 /// </summary>
-public sealed record RegisteredNode(Guid ClientId, string ConnectionId, string FragmentName, string Version);
+public sealed record RegisteredNode(Guid ClientId, string ConnectionId, string FragmentName, string Version, string? Subject = null);
 
 public sealed class NodeRegistryOptions
 {
@@ -37,7 +39,7 @@ public interface INodeRegistry
     /// within its own grace period is a reconnect: its ConnectionId and Version are updated in place
     /// and its grace, if any, is cancelled.
     /// </summary>
-    void Register(Guid clientId, string connectionId, string fragmentName, string version);
+    void Register(Guid clientId, string connectionId, string fragmentName, string version, string? subject = null);
 
     /// <summary>
     /// Called from <c>OnDisconnectedAsync</c>. Does not drop the instance outright: it starts that
@@ -114,7 +116,7 @@ public sealed class NodeRegistry : INodeRegistry
         _options = options ?? new NodeRegistryOptions();
     }
 
-    public void Register(Guid clientId, string connectionId, string fragmentName, string version)
+    public void Register(Guid clientId, string connectionId, string fragmentName, string version, string? subject = null)
     {
         lock (_lock)
         {
@@ -145,7 +147,7 @@ public sealed class NodeRegistry : INodeRegistry
                 if (existing.Node.ConnectionId != connectionId)
                     _byConnection.Remove(existing.Node.ConnectionId);
 
-                existing.Node = new RegisteredNode(clientId, connectionId, fragmentName, version);
+                existing.Node = new RegisteredNode(clientId, connectionId, fragmentName, version, subject);
             }
             else
             {
@@ -155,7 +157,7 @@ public sealed class NodeRegistry : INodeRegistry
                 // own ClientId key and this insert cannot touch it, so a restarted node's old identity
                 // just times out on its own grace period like any other drop, while its replacement
                 // (if it gets a fresh ClientId) registers as an ordinary new instance here.
-                instances[clientId] = new Entry { Node = new RegisteredNode(clientId, connectionId, fragmentName, version) };
+                instances[clientId] = new Entry { Node = new RegisteredNode(clientId, connectionId, fragmentName, version, subject) };
             }
 
             _byConnection[connectionId] = (fragmentName, clientId);

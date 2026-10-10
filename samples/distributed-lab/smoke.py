@@ -6,7 +6,8 @@ after the other. The library's: each library pipeline distributed automatically 
 saved, then all of them deployed at once and their runs queued together, as the page does: runs
 that share a data node must never be in flight together.
 The rights': the embedded IDP, people's sessions and the studio's bearer tokens, the flow matrix refusing a plan and then, edited under a deployed
-pipeline and, edited under a deployed pipeline, a transfer at run time; every edit is undone.
+pipeline and, edited under a deployed pipeline, a transfer at run time; a node of another identity that registers the name of a deployed
+fragment is neither admitted nor counted; every edit is undone.
 The faults': a run cancelled while a fully wired fragment's child has nothing to write, whose
 verdict must come within the grace period.
 The bricks': on strict nodes, a fragment whose branch is not one of the node's bricks, or is one only
@@ -45,6 +46,7 @@ STACK = os.environ.get("LAB_TARGET") == "stack"
 
 # /api serves people: smoke signs in as the lab's admin, through the IdP, as a browser would.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
+import campaign_security as sec  # noqa: E402
 from lab_session import ApiError, Session, studio_tokens  # noqa: E402
 SESSION = Session(URL, timeout=RUN_TIMEOUT)
 
@@ -409,6 +411,41 @@ def rights_pass():
             raise RuntimeError(f"revoked -> {refused['state']}, restored -> {ok['state']}")
         return f"revoked at run time -> {refused['state']}; restored -> {ok['state']}"
 
+    def foreign_registration():
+        # A node of another identity registers the name of a deployed fragment, at another version, and keeps its
+        # connection for the whole run. Admission binds a fragment to the identity of its node: the stranger is
+        # neither admitted nor counted, so the run succeeds on the legitimate node and nothing is launched on it.
+        stranger = json.load(open(os.path.join(LAB_DIR, "nodes", "node-2.json")))
+        status, access = sec.token_for(rights["idp"]["issuer"], stranger["clientId"], stranger["secret"])
+        if not access:
+            raise RuntimeError(f"no token for node-2 (HTTP {status})")
+        pipeline = "customers-mirror"
+        hub = None
+        try:
+            call(f"/api/library/{pipeline}/distribute", {"save": True, "message": "smoke: a foreign registration"})
+            call(f"/api/library/{pipeline}/deploy", {})
+            fragment = next(f["name"] for d in call("/api/deployments") if d["pipelineId"] == pipeline
+                            for f in d["fragments"] if f["node"] == "node-1")
+            hub = sec.LongPollingHub(URL, sec.COMMAND_HUB, access).open()
+            for method, arguments in (("Connect", (None, None)), ("Register", (fragment, "version-of-a-stranger"))):
+                answer = hub.invoke(method, *arguments)
+                if "error" in answer:
+                    raise RuntimeError(f"{method} refused, so the check proves nothing: {answer['error']}")
+            run = call("/api/runs", {"pipelineId": pipeline})
+            final = until(lambda: _finished(run["runId"]), RUN_TIMEOUT, "the run beside a stranger's registration")
+            if final["state"] != "succeeded":
+                raise RuntimeError(f"a stranger registered {fragment} -> {final['state']}: {final.get('refusal') or final.get('description')}")
+            if any(m.get("type") == 1 and m.get("target") == "Launch" for m in hub.messages):
+                raise RuntimeError(f"the stranger holding {fragment} was launched")
+            # A closed long-polling connection answers nothing: this one held for the whole run.
+            if "error" in hub.invoke("Unregister"):
+                raise RuntimeError("the stranger's connection did not hold for the whole run")
+        finally:
+            if hub is not None:
+                hub.close()
+            undeploy(pipeline)
+        return f"node-2 registered {fragment} at another version for the whole run: the run on node-1 and node-4 succeeded, nothing launched on it"
+
     def several_groups():
         # A node in several groups sends to another only if every group of the sender may send to every group of
         # the receiver. runner-1 joins `audit`: crm -> runner then needs crm -> audit, and runner -> warehouse needs
@@ -658,6 +695,7 @@ def rights_pass():
     check("identity, disabled", disabled)
     check("flow matrix, plan", matrix_plan)
     check("flow matrix, run time", matrix_runtime)
+    check("a foreign registration", foreign_registration)
     check("flow matrix, several groups", several_groups)
     return failures
 

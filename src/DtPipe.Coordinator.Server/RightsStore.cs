@@ -71,6 +71,18 @@ public sealed class RightsStore
         lock (_lock) return _doc.Identities.FirstOrDefault(i => i.ClientId == clientId);
     }
 
+    /// <summary>
+    /// The subject node <paramref name="node"/> connects under: the client id of the one identity that
+    /// announces itself with that name (a node name belongs to one identity). Refused when no identity
+    /// carries the name any more, as nothing then says who may host the node's fragments.
+    /// </summary>
+    public string SubjectOf(string node)
+    {
+        lock (_lock)
+            return _doc.Identities.FirstOrDefault(i => i.Name == node)?.ClientId
+                ?? throw new ConflictException($"Node '{node}' has no identity in the rights: nothing says who may host its fragments.");
+    }
+
     public IReadOnlyList<string> Groups()
     {
         lock (_lock)
