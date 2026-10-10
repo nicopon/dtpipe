@@ -65,9 +65,9 @@ bytes between nodes.
 `RunOrchestrator.RunAsync` is the barrier. It places every fragment of `RunSpec.Fragments` on a replica of
 its node (`ReplicaAdmission`), launches them all (`Launch`, answered), opens each `RunSpec.Edges` entry through
 `ITransferInitiator` and hands both ends their transfer (`Wire`, answered), waits for every `Exited` and
-applies `DetermineOutcome`. `RunAsync` is an in-process API - no `RegisterPlan`/`Run`/`Status` network
-surface yet. Every message to a replica goes through `INodeLink`, bounded, and is an invocation the replica
-answers: a replica's client handles pushes one after another, so a push that takes time delays the next.
+applies `DetermineOutcome`. `RunAsync` is an in-process API: the library maps no route for it. Every message to
+a replica goes through `INodeLink`, bounded, and is an invocation the replica answers: a replica's client
+handles pushes one after another, so a push that takes time delays the next.
 
 - **Several runs may be in flight; each is judged alone.** Each run has its own state, found by run id. A
   lost replica, a local failure, the requester's cancellation and the grace after a remote failure end only
@@ -85,9 +85,10 @@ answers: a replica's client handles pushes one after another, so a push that tak
   by a host whose hub attests no subject (development, a test with no token), files a replica under the name
   it proposes and reads absent groups as no comparison. A host with an identity provider never sets it.
   `[local: ReplicaAdmissionSubjectTests, ReplicaRegistryTests]`
-- **A fragment's replica is chosen once for the run, and the run is never moved.** A replica lost mid-run ends
-  the runs it holds; none is retried on another replica. The replica each fragment ran on is in
-  `RunResult.Replicas`. `[local: ReplicaAdmissionSubjectTests]`
+- **A replica is leased for the run, and nothing moves the run.** The lease `ReplicaRegistry` takes at admission
+  lasts until the run ends or the replica is lost, and no path retries a fragment on another replica. The replica
+  each fragment ran on is in `RunResult.Replicas`.
+  `[local: ReplicaRegistryTests, ReplicaAdmissionSubjectTests]` `[unchecked: no retry on another replica]`
 - **A refused launch is the cause, as a message.** A replica that answers `Launch` with a refusal ran nothing:
   the fragment is excluded from cause and consequence, as one the coordinator cancelled, the run is torn down,
   and `Cause` reads `<fragment> could not start on replica <id>: <reason>` with `CauseIsUnresponsive` false.
@@ -164,11 +165,11 @@ answers: a replica's client handles pushes one after another, so a push that tak
 
 A replica is one host carrying a node's identity. `ReplicaRegistry` is the one table of them: keyed by the
 subject of the connection and an instance id the host chose once for its process, holding what each
-announced, its grace, and the runs the coordinator placed on it (a lease per run and fragment, given back by
-the run's end or by the loss of the replica). A node is online while any replica is connected.
+announced, its grace, and the runs the coordinator placed on it (a lease per run and fragment). A node is online
+while any replica is connected.
 
-- **Replicas are interchangeable.** They share the node's data, variables and bricks; nothing a run needs
-  lives in one replica alone, and nothing in the coordinator names one but the run's own record.
+- **A plan, a deployment and a run request name a node, never a replica.** The replica is chosen at admission,
+  for the run. `[unchecked]`
 - **A replica is eligible for a fragment when** it is connected; it is of the fragment's node; its
   TransportR client is verified; and the bricks it announces compose the version of the plan.
   `ReplicaChooser` is that rule, pure. The client is verified when it is announced, registered, still

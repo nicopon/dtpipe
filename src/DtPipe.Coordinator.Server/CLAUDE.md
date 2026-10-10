@@ -149,6 +149,10 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   it registers again admission places no run on it. `Origin`, where a replica says it runs, is untrusted
   text: cut at `Announce`, the ground of no decision.
   `[local: NodeChannelHubTests; the lab's tools/campaign.py F3, S7]`
+- **A run that was placed records the replica of each fragment.** `RunJournal` keeps the `RunResult` whole,
+  `RunResult.Replicas` included: an instance id and the `Origin` the replica announced, untrusted text the pages
+  escape. A run refused at admission has none, and a file that names none reads as a run with none.
+  `[local: RunJournalTests]` `[unchecked: the pages' escaping of Origin]`
 - **A run names the subject and the groups of each fragment's node.** `DeploymentManager` reads them from the
   rights when the run starts (`RightsStore.SubjectOf`: the client id of the identity named after the
   fragment's node, the `sub` its tokens carry; `GroupsOf`) and puts them in each `RunFragment`; admission

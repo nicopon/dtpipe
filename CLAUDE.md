@@ -300,11 +300,14 @@ the control plane, over each replica's node channel; TransportR carries the data
 - **A replica has one TransportR client for all its runs, and is the only TransportR client they
   have.** The node is a byte relay: dtpipe reaches it through `arrow:` and references no TransportR
   assembly.
+- **A node's replicas must be interchangeable**: one database, the same variables, the same bricks outside
+  a rolling update. Nothing checks it; any eligible replica may run a fragment. `[unchecked]`
 - **A fragment runs on a replica of its node's identity, and only that replica speaks for it.** Admission
   places each fragment on a replica connected under the subject of its node whose bricks compose the plan's
-  version and whose TransportR client holds exactly the node's groups; the replica is chosen once for the
-  run. The coordinator knows a message's sender by its connection alone, so an `Exited` from any other
-  replica, of another identity or of the same, is not heard.
+  version and whose TransportR client holds exactly the node's groups. The replica is chosen once for the
+  run and never changed: one that is lost ends the runs placed on it, and none resumes on another. The run's
+  result names the replica of each fragment. The coordinator knows a message's sender by its connection
+  alone, so an `Exited` from any other replica, of another identity or of the same, is not heard.
 - **Cancel by stream rupture, never by signal**: the node must run on Windows.
 - **A node host decides what it runs**: its `FragmentPolicy` comes from its own configuration, never
   from a message the coordinator sends.
