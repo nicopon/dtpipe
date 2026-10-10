@@ -177,9 +177,11 @@ nodes_table() {
     python3 "$LAB/tools/lab_session.py" "$1" /api/nodes | python3 -c "$(cat <<'EOF'
 import json, sys
 for n in json.load(sys.stdin):
-    frags = ", ".join(f["fragment"] + ":" + f["state"] for f in n["fragments"]) or "-"
+    replicas = n["replicas"]
+    connected = sum(1 for r in replicas if r["connected"])
+    runs = sum(r["runs"] for r in replicas)
     state = "online " if n["online"] else "offline"
-    print(f"  {n['name']:8} {state} {'+'.join(n['groups']):10} {frags}")
+    print(f"  {n['name']:8} {state} {'+'.join(n['groups']):10} replicas {connected}/{len(replicas)}  runs {runs}")
 EOF
 )"
 }
