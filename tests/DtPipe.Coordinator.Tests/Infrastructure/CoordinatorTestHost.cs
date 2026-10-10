@@ -1,8 +1,11 @@
+using DtPipe.Coordinator.Contracts;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using TransportR.Client.SignalR;
@@ -14,11 +17,40 @@ using TransportR.Serialization.MessagePack;
 namespace DtPipe.Coordinator.Tests.Infrastructure;
 
 /// <summary>
+/// The node channel of a test coordinator: a hub whose methods each forward to <see cref="ReplicaProtocol"/>, as the
+/// server's does, with the rights and the enrolment left out. The caller is the connection, and its subject is the
+/// token's <c>sub</c>, none in dev mode.
+/// </summary>
+public sealed class TestNodeHub(ReplicaProtocol protocol) : Hub
+{
+    public async Task Announce(NodeAnnouncement announcement)
+    {
+        var subject = Context.User?.FindFirst("sub")?.Value;
+        var (replica, _) = await protocol.OnAnnouncedAsync(Context.ConnectionId, subject, announcement, [], Context.Abort);
+        if (replica is null) Context.Abort();
+    }
+
+    public Task<ExitedAck> Exited(FragmentExit exit) => protocol.OnExitedAsync(Context.ConnectionId, exit);
+
+    public Task Leave()
+    {
+        protocol.OnLeave(Context.ConnectionId);
+        return Task.CompletedTask;
+    }
+
+    public override Task OnDisconnectedAsync(Exception? exception)
+    {
+        protocol.OnDisconnected(Context.ConnectionId);
+        return base.OnDisconnectedAsync(exception);
+    }
+}
+
+/// <summary>
 /// A coordinator hosted in-process on Kestrel bound to a random port, sharing
-/// <c>AddCoordinatorHub</c> with <c>DtPipe.Coordinator.Program</c> but not its dev mode defaults or
+/// <c>AddCoordinatorHub</c> with <c>DtPipe.Coordinator.Server</c> but not its dev mode defaults or
 /// its hosting model: dev mode here carries a default group so a client that supplies none can
 /// still connect, fragments bound to no identity are admitted, and the flow control matrix is
-/// caller-supplied instead of empty. A real port,
+/// caller-supplied instead of empty. Replicas announce themselves on the node channel (<see cref="CreateNodeChannel"/>). A real port,
 /// rather than <c>TestServer</c>'s in-memory handler, is what lets a peer connect through
 /// <see cref="TransportRClientBuilder{T}"/> - the same public API a real pipeline node uses -
 /// instead of the package's internal connection plumbing, which only <c>TransportR.Tests</c> may
@@ -72,7 +104,8 @@ public sealed class CoordinatorTestHost : IAsyncDisposable
                             services.AddAuthorization();
                         }
                         hub.Build();
-                        // After AddCoordinatorHub: lets a test override NodeRegistryOptions or
+                        services.AddNodeLink<TestNodeHub>();
+                        // After AddCoordinatorHub: lets a test override ReplicaRegistryOptions or
                         // RunOrchestratorOptions, neither registered by default (both types resolve
                         // their own default when DI has nothing for them).
                         configureServices?.Invoke(services);
@@ -85,7 +118,12 @@ public sealed class CoordinatorTestHost : IAsyncDisposable
                             app.UseAuthentication();
                             app.UseAuthorization();
                         }
-                        app.UseEndpoints(endpoints => endpoints.MapDataHub(requireAuth: jwt is not null));
+                        app.UseEndpoints(endpoints =>
+                        {
+                            endpoints.MapDataHub(requireAuth: jwt is not null);
+                            var node = endpoints.MapHub<TestNodeHub>(NodeChannel.Path);
+                            if (jwt is not null) node.RequireAuthorization();
+                        });
                     });
             })
             .Build();
@@ -112,6 +150,14 @@ public sealed class CoordinatorTestHost : IAsyncDisposable
             builder.WithTokenProvider(() => Task.FromResult(token));
         return builder.Build();
     }
+
+    /// <summary>A node channel connection, not started: the transport a replica announces itself and reports on.</summary>
+    public HubConnection CreateNodeChannel(string? token = null) => new HubConnectionBuilder()
+        .WithUrl(Url + NodeChannel.Path, options =>
+        {
+            if (token is not null) options.AccessTokenProvider = () => Task.FromResult<string?>(token);
+        })
+        .Build();
 
     public async ValueTask DisposeAsync()
     {

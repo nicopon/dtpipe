@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using DtPipe.Coordinator;
 using DtPipe.Coordinator.Tests.Infrastructure;
+using DtPipe.PipelineNode.Tests.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using TransportR.FlowControl;
 using TransportR.Interfaces;
@@ -17,25 +18,19 @@ public class RemoteFailureGraceTests
 {
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(60);
 
-    private static async Task<PipelineNode> ConnectNode(
+    private static Task<TestNode> ConnectNode(
         CoordinatorTestHost host, string jobPath, string fragmentName, params EdgeBinding[] edges) =>
-        await PipelineNode.ConnectAsync(new PipelineNodeOptions
-        {
-            HubUrl = host.Url,
-            DtPipeExecutable = DtPipeExecutableLocator.Path,
-            FragmentJobPath = jobPath,
-            Edges = edges,
-        }, fragmentName);
+        TestNode.StartAsync(host, fragmentName, jobPath, edges);
 
     private static Task<CoordinatorTestHost> StartHost(TimeSpan grace) =>
         CoordinatorTestHost.StartAsync(
             o => o.Groups["test"] = new GroupAccess { CanSendTo = ["test"] },
             services => services.AddSingleton(new RunOrchestratorOptions { RemoteFailureGrace = grace }));
 
-    private static RunSpec PairSpec(string runId) => new(
-        runId, [new FragmentPin("A"), new FragmentPin("B")], [new RunEdge("A", "out", "B", "in")]);
+    private static RunSpec PairSpec(string runId, TestNode a, TestNode b) => new(
+        runId, [a.Fragment, b.Fragment], [new RunEdge("A", "out", "B", "in")]);
 
-    private static async Task WaitLaunched(params PipelineNode[] nodes)
+    private static async Task WaitLaunched(params TestNode[] nodes)
     {
         var deadline = DateTime.UtcNow + Bound;
         while (!nodes.All(n => n.IsLaunched))
@@ -88,7 +83,7 @@ public class RemoteFailureGraceTests
             await using var a = await ConnectNode(host, producerJob, "A", new EdgeBinding("out", EdgeDirection.Outbound));
             await using var b = await ConnectNode(host, consumerJob, "B", new EdgeBinding("in", EdgeDirection.Inbound));
 
-            var runTask = orchestrator.RunAsync(PairSpec("run-silent-peer"));
+            var runTask = orchestrator.RunAsync(PairSpec("run-silent-peer", a, b));
             await WaitLaunched(a, b);
             var transferId = await WaitForTheTransfer(host);
             await Task.Delay(1500); // data flowing, the consumer's sink blocked
@@ -137,7 +132,7 @@ public class RemoteFailureGraceTests
             await using var a = await ConnectNode(host, producerJob, "A", new EdgeBinding("out", EdgeDirection.Outbound));
             await using var b = await ConnectNode(host, consumerJob, "B", new EdgeBinding("in", EdgeDirection.Inbound));
 
-            var runTask = orchestrator.RunAsync(PairSpec("run-prompt-peers"));
+            var runTask = orchestrator.RunAsync(PairSpec("run-prompt-peers", a, b));
             await WaitLaunched(a, b);
             var transferId = await WaitForTheTransfer(host);
             await Task.Delay(1500);
@@ -180,7 +175,7 @@ public class RemoteFailureGraceTests
             await using var b = await ConnectNode(host, consumerJob, "B", new EdgeBinding("in", EdgeDirection.Inbound));
 
             var sw = Stopwatch.StartNew();
-            var result = await orchestrator.RunAsync(PairSpec("run-no-failure")).WaitAsync(Bound);
+            var result = await orchestrator.RunAsync(PairSpec("run-no-failure", a, b)).WaitAsync(Bound);
             sw.Stop();
 
             Assert.Equal(RunOutcome.Succeeded, result.Outcome);

@@ -6,7 +6,8 @@ namespace DtPipe.Coordinator.Server;
 
 /// <summary>
 /// Asks a node, over the node channel, to read its own data: a brick preview, a lab query, a cut. The
-/// server never opens a node's database; the node that hosts it answers, or says why it will not.
+/// server never opens a node's database; a replica of the node that hosts it answers (the one with the fewest runs), or
+/// says why it will not. A read is not tried on a second replica when the first fails: the answer says which was asked.
 /// </summary>
 public sealed class NodeRequests(NodeInventory inventory, IHubContext<NodeChannelHub> hub)
 {
@@ -47,7 +48,7 @@ public sealed class NodeRequests(NodeInventory inventory, IHubContext<NodeChanne
     /// </summary>
     public async Task<T> AskAsync<T>(string node, string method, object?[] args, TimeSpan bound, CancellationToken ct)
     {
-        var connection = inventory.ConnectionOf(node) ?? throw new ConflictException($"{node} is offline.");
+        var connection = inventory.ConnectionForRead(node) ?? throw new ConflictException($"{node} is offline.");
         using var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct);
         bounded.CancelAfter(bound);
         return await hub.Clients.Client(connection).InvokeCoreAsync<T>(method, args, bounded.Token);

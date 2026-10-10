@@ -55,6 +55,6 @@ node.WithRequest("lab.query", lab.QueryAsync).WithRequest("lab.split", lab.Split
 
 // Sandbox mode lets a lab node run a fragment that reads or writes through any reader or writer, not only
 // through its bricks: its own switch, and the one the Lab view's manual planning needs.
-if (sandbox) node.WithFragmentGate((deployment, bricks) => BrickRules.FragmentRefusal(deployment.Yaml, bricks, requireBricks: false));
+if (sandbox) node.WithFragmentGate((fragment, bricks) => BrickRules.FragmentRefusal(fragment.Yaml ?? "", bricks, requireBricks: false));
 
 await builder.Build().RunAsync();

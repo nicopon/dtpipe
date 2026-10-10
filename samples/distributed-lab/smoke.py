@@ -6,8 +6,9 @@ after the other. The library's: each library pipeline distributed automatically 
 saved, then all of them deployed at once and their runs queued together, as the page does: runs
 that share a data node must never be in flight together.
 The rights': the embedded IDP, people's sessions and the studio's bearer tokens, the flow matrix refusing a plan and then, edited under a deployed
-pipeline and, edited under a deployed pipeline, a transfer at run time; a node of another identity that registers the name of a deployed
-fragment is neither admitted nor counted; every edit is undone.
+pipeline and, edited under a deployed pipeline, a transfer at run time; a host of another identity that announces itself is placed
+no fragment of other nodes and speaks for no run it was not placed on; a data plane client of another identity is never announced;
+every edit is undone.
 The faults': a run cancelled while a fully wired fragment's child has nothing to write, whose
 verdict must come within the grace period.
 The bricks': on strict nodes, a fragment whose branch is not one of the node's bricks, or is one only
@@ -32,7 +33,7 @@ witness reads the databases the nodes seeded there, the library is the coordinat
 log is the container's, and the enrollment check's host is a throwaway container of the stack's `node` image.
 Exits 0 when every selected pipeline passes, 1 otherwise. Standard library only.
 """
-import base64, csv, io, itertools, json, os, re, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
+import base64, csv, io, itertools, json, os, re, subprocess, sys, time, urllib.error, urllib.parse, urllib.request, uuid
 from datetime import datetime
 
 URL, DTPIPE, STATE = sys.argv[1].rstrip("/"), sys.argv[2], sys.argv[3]
@@ -411,40 +412,136 @@ def rights_pass():
             raise RuntimeError(f"revoked -> {refused['state']}, restored -> {ok['state']}")
         return f"revoked at run time -> {refused['state']}; restored -> {ok['state']}"
 
-    def foreign_registration():
-        # A node of another identity registers the name of a deployed fragment, at another version, and keeps its
-        # connection for the whole run. Admission binds a fragment to the identity of its node: the stranger is
-        # neither admitted nor counted, so the run succeeds on the legitimate node and nothing is launched on it.
-        stranger = json.load(open(os.path.join(LAB_DIR, "nodes", "node-2.json")))
-        status, access = sec.token_for(rights["idp"]["issuer"], stranger["clientId"], stranger["secret"])
+    def stranger_token():
+        node = json.load(open(os.path.join(LAB_DIR, "nodes", "node-2.json")))
+        status, access = sec.token_for(rights["idp"]["issuer"], node["clientId"], node["secret"])
         if not access:
             raise RuntimeError(f"no token for node-2 (HTTP {status})")
+        return access
+
+    def announce_as_a_replica_of_node_2(access, origin):
+        # A host of node-2's identity that is none of node-2's replicas: it announces what node-2 announces (the node shows
+        # its most recently arrived replica, so an announcement of its own would show on the catalog), under an instance
+        # of its own.
+        view = next(n for n in call("/api/nodes") if n["name"] == "node-2")
+        kinds, roles = {"Source": 0, "Sink": 1}, {"Data": 0, "Runner": 1}
+        hub = sec.LongPollingHub(URL, sec.LAB_HUB, access).open()
+        answer = hub.invoke("Announce", {
+            "name": view["name"], "description": view["description"], "datasets": view["datasets"], "role": roles[view["role"]],
+            "bricks": [{**b, "kind": kinds[b["kind"]]} for b in view["bricks"]], "capabilities": view["capabilities"],
+            "dtpipeVersion": view["dtpipeVersion"], "instanceId": str(uuid.uuid4()), "origin": origin})
+        if "error" in answer:
+            hub.close()
+            raise RuntimeError(f"the announcement was refused, so the check proves nothing: {answer['error']}")
+        return hub
+
+    def exited_forged(hub, run_id, fragment):
+        answer = hub.invoke("Exited", {"runId": run_id, "fragment": fragment, "exitCode": 1, "origin": "Local",
+                                       "firstFault": "a report forged by a stranger", "rowCounts": {}})
+        return answer.get("result", answer.get("error"))
+
+    def foreign_replica():
+        # A host of another identity (node-2's) announces itself and keeps its connection for the whole run of a pipeline
+        # of node-1 and node-4. A run is placed on the replicas of its fragments' own nodes: the stranger is never launched,
+        # and the run succeeds on the legitimate nodes.
+        access = stranger_token()
         pipeline = "customers-mirror"
         hub = None
         try:
-            call(f"/api/library/{pipeline}/distribute", {"save": True, "message": "smoke: a foreign registration"})
+            call(f"/api/library/{pipeline}/distribute", {"save": True, "message": "smoke: a foreign replica"})
             call(f"/api/library/{pipeline}/deploy", {})
-            fragment = next(f["name"] for d in call("/api/deployments") if d["pipelineId"] == pipeline
-                            for f in d["fragments"] if f["node"] == "node-1")
-            hub = sec.LongPollingHub(URL, sec.COMMAND_HUB, access).open()
-            for method, arguments in (("Connect", (None, None)), ("Register", (fragment, "version-of-a-stranger"))):
-                answer = hub.invoke(method, *arguments)
-                if "error" in answer:
-                    raise RuntimeError(f"{method} refused, so the check proves nothing: {answer['error']}")
+            hub = announce_as_a_replica_of_node_2(access, "smoke:foreign-replica")
             run = call("/api/runs", {"pipelineId": pipeline})
-            final = until(lambda: _finished(run["runId"]), RUN_TIMEOUT, "the run beside a stranger's registration")
+            final = until(lambda: _finished(run["runId"]), RUN_TIMEOUT, "the run beside a stranger's replica")
             if final["state"] != "succeeded":
-                raise RuntimeError(f"a stranger registered {fragment} -> {final['state']}: {final.get('refusal') or final.get('description')}")
+                raise RuntimeError(f"a stranger announced as node-2 -> {final['state']}: {final.get('refusal') or final.get('description')}")
             if any(m.get("type") == 1 and m.get("target") == "Launch" for m in hub.messages):
-                raise RuntimeError(f"the stranger holding {fragment} was launched")
+                raise RuntimeError("the stranger was launched a fragment of another node")
             # A closed long-polling connection answers nothing: this one held for the whole run.
-            if "error" in hub.invoke("Unregister"):
+            if "error" in hub.invoke("Leave"):
                 raise RuntimeError("the stranger's connection did not hold for the whole run")
         finally:
             if hub is not None:
                 hub.close()
             undeploy(pipeline)
-        return f"node-2 registered {fragment} at another version for the whole run: the run on node-1 and node-4 succeeded, nothing launched on it"
+        return "a host of node-2's identity held its connection for the whole run: the run on node-1 and node-4 succeeded, nothing launched on it"
+
+    def foreign_report():
+        # The same host, while a slow run of node-4's fragment is in flight, reports that the fragment exited with a local
+        # fault. The report is a replica's about a run it was placed on: the coordinator answers that it did not admit it,
+        # and the run ends on what the real fragments say.
+        access = stranger_token()
+        with open(os.path.join(LAB_DIR, "library-seed", "sensor-stream.yaml")) as f:
+            yaml = f.read()
+        placement = {"readings": "runner-1", "enrich": "runner-1", "customers": "node-1", "load": "node-4"}
+        pipeline = "smoke-foreign-report"
+        hub = None
+        try:
+            call("/api/deploy", {"pipelineId": pipeline, "yaml": yaml, "cuts": [], "placement": placement})
+            fragment = f"{pipeline}@node-4"
+            hub = announce_as_a_replica_of_node_2(access, "smoke:foreign-report")
+            run = call("/api/runs", {"pipelineId": pipeline})
+            until(lambda: any(r["runId"] == run["runId"] and r["state"] == "running" for r in call("/api/runs/queue")), 60, "the run to start")
+            time.sleep(3)
+            answered = exited_forged(hub, run["runId"], fragment)
+            final = until(lambda: _finished(run["runId"]), RUN_TIMEOUT, "the run beside a forged report")
+            if answered != "NotAdmitted":
+                raise RuntimeError(f"the forged report was answered {answered!r}, not NotAdmitted")
+            if final["state"] != "succeeded":
+                raise RuntimeError(f"a stranger reported {fragment} exited -> {final['state']}: {final.get('refusal') or final.get('description')}")
+            if "error" in hub.invoke("Leave"):
+                raise RuntimeError("the stranger's connection did not hold for the whole run")
+        finally:
+            if hub is not None:
+                hub.close()
+            undeploy(pipeline)
+        return f"node-2's host reported {fragment} exited with a local fault in the middle of a run: NotAdmitted, and the verdict stayed the real fragments' (succeeded)"
+
+    def stolen_data_plane_client():
+        # A host announces the TransportR client of another identity. The client is registered under node-2's subject; the
+        # host connects as node-1: its announcement is refused, so it is never one of node-1's replicas, and no transfer of
+        # node-2's reaches it.
+        access = stranger_token()
+        client = str(uuid.uuid4())
+        node1 = json.load(open(os.path.join(LAB_DIR, "nodes", "node-1.json")))
+        status, thief = sec.token_for(rights["idp"]["issuer"], node1["clientId"], node1["secret"])
+        if not thief:
+            raise RuntimeError(f"no token for node-1 (HTTP {status})")
+        owner = sec.LongPollingHub(URL, sec.COMMAND_HUB, access).open()
+        claimant = None
+        try:
+            answer = owner.invoke("Connect", client, None)
+            if "error" in answer:
+                raise RuntimeError(f"node-2's client was not registered, so the check proves nothing: {answer['error']}")
+            claimant = sec.LongPollingHub(URL, sec.LAB_HUB, thief).open()
+            try:
+                claimant.invoke("Announce", {"name": "node-1", "description": "", "datasets": [], "role": 0, "bricks": [],
+                                             "instanceId": str(uuid.uuid4()), "origin": "smoke:stolen-client", "dataPlaneClientId": client})
+            except RuntimeError:
+                pass  # the coordinator closes the connection of a refused announcement before it answers
+            time.sleep(1)
+            replicas = next(n["replicas"] for n in call("/api/nodes") if n["name"] == "node-1")
+            if any(r["origin"] == "smoke:stolen-client" for r in replicas):
+                raise RuntimeError("a host announcing node-2's data plane client became a replica of node-1")
+        finally:
+            if claimant is not None:
+                claimant.close()
+            owner.close()
+        return "node-1's token announcing a client registered under node-2's subject: refused, no replica of node-1"
+
+    def data_hub_takes_no_run_message():
+        # The data hub serves the data plane and nothing about a run: a fragment's registration and its report are
+        # not methods of it.
+        access = stranger_token()
+        hub = sec.LongPollingHub(URL, sec.COMMAND_HUB, access).open()
+        try:
+            for method, arguments in (("Register", ("smoke-fragment", "v")), ("Exited", ("run-1", 1, "Local", None, {}))):
+                answer = hub.invoke(method, *arguments)
+                if "does not exist" not in answer.get("error", ""):
+                    raise RuntimeError(f"{method} on the data hub was answered {json.dumps(answer)[:160]}")
+        finally:
+            hub.close()
+        return "Register and Exited on the data hub: the methods do not exist"
 
     def several_groups():
         # A node in several groups sends to another only if every group of the sender may send to every group of
@@ -695,7 +792,10 @@ def rights_pass():
     check("identity, disabled", disabled)
     check("flow matrix, plan", matrix_plan)
     check("flow matrix, run time", matrix_runtime)
-    check("a foreign registration", foreign_registration)
+    check("a foreign replica", foreign_replica)
+    check("a foreign report", foreign_report)
+    check("a stolen data plane client", stolen_data_plane_client)
+    check("no run message on the data hub", data_hub_takes_no_run_message)
     check("flow matrix, several groups", several_groups)
     return failures
 
@@ -735,7 +835,11 @@ RELAY_PLACEMENT = {"customers": "node-1", "mirror": "node-4", "copy": "runner-1"
 
 
 def left_behind(prefix):
-    return [f["fragment"] for n in call("/api/nodes") for f in n["fragments"] if f["fragment"].startswith(prefix)]
+    """What a refused deployment left: a deployment is the coordinator's and a refused one is not kept, and no replica runs
+    anything the refusal started."""
+    kept = [f["name"] for d in call("/api/deployments") for f in d["fragments"] if f["name"].startswith(prefix)]
+    running = [f"{n['name']}/{r['id']}" for n in call("/api/nodes") for r in n["replicas"] if r["runs"]]
+    return kept + running
 
 
 def undeploy(pipeline):

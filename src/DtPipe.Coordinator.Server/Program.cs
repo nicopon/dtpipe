@@ -29,6 +29,7 @@ builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Ad
 // by the planner on every plan.
 builder.Services.AddSingleton<RightsStore>();
 builder.Services.AddCoordinatorHub(_ => { }).Build();
+builder.Services.AddNodeLink<NodeChannelHub>();
 // A node answers a designer's check with a source brick's first row, larger than SignalR's 32 KB default.
 builder.Services.Configure<HubOptions<NodeChannelHub>>(o => o.MaximumReceiveMessageSize = 1024 * 1024);
 builder.Services.Replace(ServiceDescriptor.Singleton<IFlowControlService, RightsFlowControl>());
@@ -196,7 +197,7 @@ api.MapGet("/state", (DeploymentManager deployments, RunJournal journal) =>
     var plan = deployments.ActivePlan;
     return new { plan, run = deployments.CurrentRun(plan?.PipelineId), history = journal.List(limit: 20) };
 });
-designer.MapPost("/runs", (RunRequest? request, DeploymentManager deployments) => deployments.Enqueue(request?.PipelineId, request?.Pins));
+designer.MapPost("/runs", (RunRequest? request, DeploymentManager deployments) => deployments.Enqueue(request?.PipelineId));
 api.MapGet("/runs", (string? pipeline, RunJournal journal) => journal.List(pipeline));
 api.MapGet("/runs/queue", (DeploymentManager deployments) => deployments.Queue);
 designer.MapPost("/runs/cancel", (CancelRequest? request, DeploymentManager deployments) =>
@@ -205,7 +206,7 @@ designer.MapPost("/runs/cancel", (CancelRequest? request, DeploymentManager depl
     return Results.Accepted();
 });
 
-api.MapGet("/deployments", (DeploymentManager deployments) => deployments.Deployments);
+api.MapGet("/deployments", async (DeploymentManager deployments) => await deployments.DeploymentsAsync());
 designer.MapDelete("/deployments/{id}", async (string id, DeploymentManager deployments, CancellationToken ct) =>
 {
     await deployments.UndeployAsync(id, ct);
@@ -240,8 +241,8 @@ designer.MapPut(CoordinatorApi.LibraryRoute, async (string id, LibrarySave reque
     }
     bus.Publish("library", new { id, commit = saved.Commit });
     // A deployment runs the text it was planned from: only the saved plan, still current, is this text.
-    var deployed = deployments.Deployments.FirstOrDefault(d => d.PipelineId == id) is { } deployment
-        && (saved.PlanStale || saved.PlanId is null || deployment.PlanId != saved.PlanId);
+    var deployed = deployments.DeployedPlanId(id) is { } deployedPlan
+        && (saved.PlanStale || saved.PlanId is null || deployedPlan != saved.PlanId);
     return Results.Ok(new LibrarySaved(id, saved.Commit, saved.PlanStale, deployed));
 });
 designer.MapDelete("/library/{id}", async (string id, PipelineLibrary library, EventBus bus, CancellationToken ct) =>
@@ -319,17 +320,22 @@ admin.MapPut("/rights/identities/{id}", (string id, IdentityRequest request, Rig
 {
     var before = rights.Find(id);
     rights.UpdateIdentity(id, request.Name ?? id, request.Description ?? "", request.Groups ?? [], request.Enabled ?? true, EmailOf(http));
-    // A node renamed connects again under its new name; the old one is forgotten once its host is gone.
-    if (before is not null && rights.Find(id)!.Name != before.Name) { inventory.Disconnect(id); inventory.Forget(before.Name); }
+    // A node renamed connects again under its new name. A node whose groups changed connects again too, and its data
+    // plane client registers again: until then a replica's registration holds the groups it had, and admission
+    // places no run on it.
+    if (before is not null)
+    {
+        var after = rights.Find(id)!;
+        if (after.Name != before.Name || !after.Groups.ToHashSet().SetEquals(before.Groups)) inventory.Disconnect(id);
+    }
     bus.Publish("rights", new { });
     return Results.Ok();
 });
 admin.MapDelete("/rights/identities/{id}", (string id, RightsStore rights, NodeInventory inventory, EventBus bus, HttpContext http) =>
 {
-    var name = rights.Find(id)?.Name;
     rights.RemoveIdentity(id, EmailOf(http));
     inventory.Disconnect(id);
-    if (name is not null) inventory.Forget(name);
+    inventory.Forget(id);
     bus.Publish("rights", new { });
     return Results.Accepted();
 });
@@ -348,9 +354,8 @@ admin.MapPost("/rights/pending/{subject}/ignore", (string subject, EnrollmentQue
     bus.Publish("rights", new { });
     return Results.Ok();
 });
-// TransportR records a node's group when it connects and when it renews its token: dropping its
-// control connection makes its host connect again under its current group. Fragments already
-// deployed keep theirs until they are re-armed.
+// TransportR records a node's group when it connects and when it renews its token: dropping the control
+// connection of its replicas makes them register their data plane clients again under the current group.
 admin.MapPost("/rights/identities/{id}/reconnect", (string id, NodeInventory inventory) =>
     Results.Ok(new { disconnected = inventory.Disconnect(id) }));
 
@@ -375,7 +380,7 @@ api.MapGet("/events", async (HttpContext context, EventBus bus, NodeInventory in
         await WriteAsync("nodes", inventory.Snapshot());
         var plan = deployments.ActivePlan;
         await WriteAsync("state", new { plan, run = deployments.CurrentRun(plan?.PipelineId) });
-        await WriteAsync("deployments", deployments.Deployments);
+        await WriteAsync("deployments", await deployments.DeploymentsAsync());
         foreach (var evt in backlog.Where(e => e.Type == "log").TakeLast(150)) await WriteAsync(evt.Type, evt.Data);
         await foreach (var evt in live.ReadAllAsync(context.RequestAborted)) await WriteAsync(evt.Type, evt.Data);
     }
@@ -409,7 +414,7 @@ static async ValueTask<object?> RequireCsrfHeader(EndpointFilterInvocationContex
     return Results.Problem($"A request that changes something carries the {TrustedIdp.CsrfHeader} header.", statusCode: StatusCodes.Status403Forbidden);
 }
 
-internal sealed record RunRequest(Dictionary<string, string>? Pins, string? PipelineId = null);
+internal sealed record RunRequest(string? PipelineId = null);
 internal sealed record CancelRequest(string? RunId);
 internal sealed record DistributeRequest(bool Save = false, string? Message = null);
 internal sealed record MatrixRequest(Dictionary<string, List<string>> Matrix);

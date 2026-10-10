@@ -292,12 +292,19 @@ pattern on `\b`**: it finds no boundary at `_` or a capital, so `SecretAccessKey
 
 ### Distributed pipelines
 
-A distributed pipeline runs its fragments on pipeline nodes, each a `dtpipe` child process driven
-by a node. The coordinator is the control plane; TransportR carries the data plane.
+A distributed pipeline runs its fragments on pipeline nodes. A node is an identity carried by one or more
+hosts, its **replicas**, each driving `dtpipe` child processes for the runs placed on it. The coordinator is
+the control plane, over each replica's node channel; TransportR carries the data plane.
 - **Peers never address each other**: only the coordinator opens a transfer, and it checks a plan's
   edges against the flow-control matrix before any opens.
-- **The node is a byte relay**, and the only TransportR client of its fragment. dtpipe reaches it
-  through `arrow:` and references no TransportR assembly.
+- **A replica has one TransportR client for all its runs, and is the only TransportR client they
+  have.** The node is a byte relay: dtpipe reaches it through `arrow:` and references no TransportR
+  assembly.
+- **A fragment runs on a replica of its node's identity, and only that replica speaks for it.** Admission
+  places each fragment on a replica connected under the subject of its node whose bricks compose the plan's
+  version and whose TransportR client holds exactly the node's groups; the replica is chosen once for the
+  run. The coordinator knows a message's sender by its connection alone, so an `Exited` from any other
+  replica, of another identity or of the same, is not heard.
 - **Cancel by stream rupture, never by signal**: the node must run on Windows.
 - **A node host decides what it runs**: its `FragmentPolicy` comes from its own configuration, never
   from a message the coordinator sends.

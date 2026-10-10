@@ -20,8 +20,7 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
     public IReadOnlyList<BrickInfo> Bricks { get; private set; } = [];
 
     /// <summary>The branch of the announced brick <paramref name="id"/> as its owner declared it, or <c>null</c> when none of that kind is offered.</summary>
-    public YamlMappingNode? DeclaredBranch(string id, BrickKind kind) =>
-        Bricks.FirstOrDefault(b => b.Id == id && b.Kind == kind) is { } brick ? (YamlMappingNode)JobYaml.FromJson(JsonNode.Parse(brick.Branch)) : null;
+    public YamlMappingNode? DeclaredBranch(string id, BrickKind kind) => FragmentJob.Over(Bricks)(id, kind);
 
     /// <summary>What every announced brick is, for <see cref="BrickRules"/>; set once with <see cref="Bricks"/>.</summary>
     public IReadOnlyList<BrickForm> Forms { get; private set; } = [];
@@ -181,7 +180,7 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
         Directory.CreateDirectory(dir);
         try
         {
-            var branch = (YamlMappingNode)JobYaml.FromJson(JsonNode.Parse(brick.Branch));
+            var branch = FragmentJob.Declared(brick) ?? throw new InvalidOperationException($"The brick '{brick.Id}' declares no branch.");
             JobYaml.Set(branch, endpoint, BrickRules.ArrowEndpoint);
             var job = Path.Combine(dir, "job.yaml");
             await File.WriteAllTextAsync(job, JobYaml.Serialize(new YamlMappingNode { { "brick", branch } }));

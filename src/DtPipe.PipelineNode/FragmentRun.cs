@@ -19,21 +19,21 @@ namespace DtPipe.PipelineNode;
 /// reader/writer already turns into a truncated-stream exit 1, then the child is killed after a grace
 /// period if closing its streams alone did not end it.
 /// </remarks>
-internal sealed class FragmentRun : IAsyncDisposable
+public sealed class FragmentRun : IAsyncDisposable
 {
     private const int GracePeriodMs = 3000;
 
     /// <summary>How long the relays get to fail on their own once the child has died, before the fragment reports without them.</summary>
     private const int RelayDrainAfterChildFailureMs = 1000;
 
-    private readonly PipelineNodeOptions _options;
+    private readonly FragmentLaunch _options;
     private readonly ILogger _logger;
     private Process _child = null!;
 
     /// <summary>
     /// One server pipe per excess edge (the second-and-later edge of a direction), keyed by
     /// <see cref="EdgeBinding.Alias"/> — empty for a fragment with at most one inbound and one
-    /// outbound edge, which still rides stdin/stdout exactly as before J2.
+    /// outbound edge, which still rides stdin/stdout.
     /// </summary>
     private Dictionary<string, NamedPipeServerStream> _pipes = new(StringComparer.Ordinal);
 
@@ -45,28 +45,30 @@ internal sealed class FragmentRun : IAsyncDisposable
     /// <summary>Completed when the child exits with a non-zero code, whatever its relays are doing.</summary>
     private readonly TaskCompletionSource _childFailed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _ruptured;
-    private string? _firstFault;
-    private FaultOrigin? _faultOrigin;
+
+    /// <summary>The first fault, origin and reason together: one value, so a reader never sees a reason without its origin.</summary>
+    private sealed record FaultInfo(FaultOrigin Origin, string Reason);
+    private FaultInfo? _fault;
 
     private int _wiredCount;
     /// <summary>Wire pushes received, counted on arrival: the coordinator's own view of "fully wired".</summary>
     private int _wireRequests;
 
-    public FragmentRun(PipelineNodeOptions options, ILogger logger)
+    internal FragmentRun(FragmentLaunch options, ILogger logger)
     {
         _options = options;
         _logger = logger;
     }
 
+    /// <summary>The edges this run declares, in order.</summary>
+    public IReadOnlyList<EdgeBinding> Edges => _options.Edges;
+
     public int ChildProcessId => _child.Id;
     public bool ChildHasExited => _child.HasExited;
     public IReadOnlyDictionary<string, long> RowCounts { get { lock (_rowCountsLock) return new Dictionary<string, long>(_rowCounts); } }
 
-    /// <summary>The counts as the relays write them, for the report that sends them as they are.</summary>
-    internal Dictionary<string, long> LiveRowCounts => _rowCounts;
-
-    public string? FirstFault => _firstFault;
-    public FaultOrigin? Origin => _faultOrigin;
+    public string? FirstFault => _fault?.Reason;
+    public FaultOrigin? Origin => _fault?.Origin;
 
     /// <summary>True once <see cref="Launch"/> has spawned the child - before that, <see cref="ChildProcessId"/> throws.</summary>
     public bool IsLaunched => _child is not null;
@@ -75,7 +77,7 @@ internal sealed class FragmentRun : IAsyncDisposable
     public int WireRequests => Volatile.Read(ref _wireRequests);
 
     /// <summary>Spawns the child and watches it.</summary>
-    public void Launch()
+    internal void Launch()
     {
         (_child, _pipes) = LaunchChild(_options, _logger);
         WatchChild();
@@ -101,7 +103,7 @@ internal sealed class FragmentRun : IAsyncDisposable
     private static string NewPipeName() => Guid.NewGuid().ToString("N")[..10];
 
     private static (Process Child, Dictionary<string, NamedPipeServerStream> Pipes) LaunchChild(
-        PipelineNodeOptions options, ILogger logger)
+        FragmentLaunch options, ILogger logger)
     {
         var inbound = options.Edges.Where(e => e.Direction == EdgeDirection.Inbound).ToList();
         var outbound = options.Edges.Where(e => e.Direction == EdgeDirection.Outbound).ToList();
@@ -314,13 +316,10 @@ internal sealed class FragmentRun : IAsyncDisposable
     /// a second relay task's own fault (this fragment can have one inbound and one outbound edge)
     /// never mixes its origin with the first one's message. Every fault ruptures the child at once.
     /// </summary>
-    internal void Fault(FaultOrigin origin, string reason)
+    public void Fault(FaultOrigin origin, string reason)
     {
-        if (Interlocked.CompareExchange(ref _firstFault, reason, null) is null)
-        {
-            _faultOrigin = origin;
+        if (Interlocked.CompareExchange(ref _fault, new FaultInfo(origin, reason), null) is null)
             _logger.LogError("Node faulted ({Origin}): {Reason}", origin, reason);
-        }
         Interlocked.Exchange(ref _faulted, 1);
         Rupture();
     }
@@ -409,6 +408,13 @@ internal sealed class FragmentRun : IAsyncDisposable
     }
 
     private const int ExitPollMs = 200;
+
+    /// <summary>Runs <see cref="RunToCompletionAsync"/> and says how the run ended, as the coordinator is told.</summary>
+    public async Task<FragmentOutcome> CompleteAsync(CancellationToken ct = default)
+    {
+        var exitCode = await RunToCompletionAsync(ct);
+        return new FragmentOutcome(exitCode, Origin, FirstFault, RowCounts);
+    }
 
     public ValueTask DisposeAsync()
     {

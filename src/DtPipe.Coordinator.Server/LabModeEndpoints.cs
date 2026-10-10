@@ -28,11 +28,6 @@ public static class LabModeEndpoints
             await deployments.KillAsync(name, ct);
             return Results.Accepted();
         });
-        api.MapPost("/fragments/{name}/variant", async (string name, DeploymentManager deployments, CancellationToken ct) =>
-        {
-            await deployments.DeployVariantAsync(name, ct);
-            return Results.Accepted();
-        });
 
         // A query on a node's dataset, to show what a run wrote: the node that hosts it reads it, if
         // its own configuration answers lab requests; the server never opens a node's database.

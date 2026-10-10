@@ -1,204 +1,133 @@
+using System.Security.Cryptography;
+using System.Text;
 using DtPipe.Coordinator.Contracts;
 using Microsoft.AspNetCore.SignalR;
 
 namespace DtPipe.Coordinator.Server;
 
-/// <summary>One host carrying a node's identity: <see cref="Id"/> is the start of its instance id, <see cref="Origin"/> the text it gave.</summary>
-public sealed record ReplicaView(string Id, DateTimeOffset Since, string? Origin);
+/// <summary>
+/// One host carrying a node's identity, as a page shows it. <see cref="Id"/> is the start of its instance id,
+/// <see cref="Origin"/> the text it gave (untrusted: the page escapes it), <see cref="Bricks"/> a hash of the bricks it
+/// announces, which differs from a sibling's while a rolling update is under way, and <see cref="Runs"/> the runs the
+/// coordinator placed on it.
+/// </summary>
+public sealed record NodeReplica(
+    string Id, DateTimeOffset Since, string? Origin, bool Connected, string? DtpipeVersion, string Bricks,
+    IReadOnlyList<string> Capabilities, int Runs);
 
 public sealed record NodeView(
     string Name, IReadOnlyList<string> Groups, string Description, bool Online, IReadOnlyList<DatasetInfo> Datasets,
-    IReadOnlyList<FragmentStatus> Fragments, NodeRole Role, IReadOnlyList<BrickInfo> Bricks, IReadOnlyList<string> Capabilities,
-    string? DtpipeVersion, IReadOnlyList<ReplicaView> Replicas);
+    NodeRole Role, IReadOnlyList<BrickInfo> Bricks, IReadOnlyList<string> Capabilities,
+    string? DtpipeVersion, IReadOnlyList<NodeReplica> Replicas, bool ReplicasDisagree);
 
 /// <summary>
-/// The node hosts it knows of and what each reports about its fragments. A node is one identity of the
-/// rights and may be carried by several hosts, its replicas, each with its own control connection: the
-/// node is online while any replica is connected, and what it announces is read from its oldest connected
-/// replica, the one a deployment is sent to. A replica that disconnects leaves the inventory with
-/// the fragments it reported; the node keeps its last announcement for as long as its identity exists.
+/// The nodes the coordinator knows of, by the name their rights give them, over <see cref="ReplicaRegistry"/>, the one
+/// table of the hosts present. A node is online while any of its replicas is connected. What the node announces is read from
+/// its most recently arrived connected replica (the same host reconnecting does not change which); a node with none keeps
+/// the announcement it last made for as long as its identity exists.
 /// </summary>
-public sealed class NodeInventory
+public sealed class NodeInventory(ReplicaRegistry registry)
 {
-    private sealed class Replica
+    private sealed class Node
     {
-        /// <summary>The instance id the host chose, or, for a host that sent none, its connection.</summary>
-        public required string Key;
-        public required string ConnectionId;
-        public required Action Abort;
+        /// <summary>The name the rights give the identity, as the last announcement carried it.</summary>
+        public required string Name;
         public required NodeAnnouncement Announcement;
-        public DateTimeOffset FirstAnnouncedAt = DateTimeOffset.UtcNow;
-        public readonly Dictionary<string, FragmentStatus> Fragments = new(StringComparer.Ordinal);
-    }
-
-    private sealed class Entry
-    {
-        public required NodeAnnouncement Announcement;
-        public IReadOnlyList<string> Groups = [];
-        public string? ClientId;
-        /// <summary>The connected replicas, oldest first.</summary>
-        public readonly List<Replica> Replicas = [];
+        public required IReadOnlyList<string> Groups;
     }
 
     private readonly object _lock = new();
-    private readonly Dictionary<string, Entry> _nodes = new(StringComparer.Ordinal);
+    // By subject: the identity's client id, which is also the key of its replicas in the registry. A rename changes
+    // the name an entry shows when the host announces under it, and never makes a second entry.
+    private readonly Dictionary<string, Node> _nodes = new(StringComparer.Ordinal);
 
-    public void Announce(string connectionId, NodeAnnouncement announcement, string clientId, IReadOnlyList<string> groups, Action abort)
-    {
-        Action? replaced = null;
-        lock (_lock)
-        {
-            if (!_nodes.TryGetValue(announcement.Name, out var entry))
-                _nodes[announcement.Name] = entry = new Entry { Announcement = announcement };
-            entry.Announcement = announcement;
-            entry.Groups = groups;
-            entry.ClientId = clientId;
-
-            var key = announcement.InstanceId?.ToString("N") ?? "connection-" + connectionId;
-            var replica = entry.Replicas.FirstOrDefault(r => r.Key == key);
-            if (replica is null)
-            {
-                entry.Replicas.Add(new Replica { Key = key, ConnectionId = connectionId, Abort = abort, Announcement = announcement });
-            }
-            else
-            {
-                // The same host on a new connection: the old one is dead or about to be, and must not outlive its replacement.
-                if (replica.ConnectionId != connectionId) replaced = replica.Abort;
-                replica.ConnectionId = connectionId;
-                replica.Abort = abort;
-                replica.Announcement = announcement;
-            }
-        }
-        Abort(replaced);
-    }
-
-    /// <summary>Closes a connection. One that is already closed is the usual case, never a failure of the call that found it.</summary>
-    private static void Abort(Action? abort)
-    {
-        try { abort?.Invoke(); }
-        catch (Exception) { /* closed already */ }
-    }
-
-    /// <summary>The node a control connection announced itself as, once the coordinator accepted it.</summary>
-    public string? NodeOf(string connectionId)
-    {
-        lock (_lock) return _nodes.Where(n => n.Value.Replicas.Any(r => r.ConnectionId == connectionId)).Select(n => (string?)n.Key).FirstOrDefault();
-    }
-
-    /// <summary>Drops the control connection of every replica of every node <paramref name="clientId"/> announced: their hosts reconnect with a new token.</summary>
-    public int Disconnect(string clientId)
-    {
-        List<Action> aborts;
-        lock (_lock) aborts = _nodes.Values.Where(e => e.ClientId == clientId).SelectMany(e => e.Replicas).Select(r => r.Abort).ToList();
-        foreach (var abort in aborts) Abort(abort);
-        return aborts.Count;
-    }
-
-    /// <summary>Drops an offline node from the inventory: its identity is gone or named it otherwise. A node with a connected replica stays.</summary>
-    public void Forget(string node)
+    /// <summary>Records what a replica announced, once the registry took it.</summary>
+    public void Announced(string name, string subject, NodeAnnouncement announcement, IReadOnlyList<string> groups)
     {
         lock (_lock)
-        {
-            if (_nodes.TryGetValue(node, out var entry) && entry.Replicas.Count == 0) _nodes.Remove(node);
-        }
+            _nodes[subject] = new Node { Name = name, Announcement = announcement, Groups = groups };
+    }
+
+    /// <summary>The subject of the node whose replica holds <paramref name="connectionId"/>, once the coordinator accepted its announcement.</summary>
+    public string? SubjectOf(string connectionId) => registry.OfConnection(connectionId)?.Key.Node;
+
+    /// <summary>The node whose replica holds <paramref name="connectionId"/>, by the name its rights give it.</summary>
+    public string? NodeOf(string connectionId) => registry.OfConnection(connectionId)?.Announcement.Name;
+
+    /// <summary>Drops the control connection of every replica of the node <paramref name="subject"/> carries: their hosts announce again, with a new token.</summary>
+    public int Disconnect(string subject) => registry.Disconnect(subject);
+
+    /// <summary>
+    /// Drops an offline node from the inventory: its identity is gone. The replicas it has that are not connected are lost, and the
+    /// runs placed on them end; a node with a connected replica stays until that one goes.
+    /// </summary>
+    public void Forget(string subject)
+    {
+        registry.Forget(subject);
+        if (registry.Replicas(subject).Count > 0) return;
+        lock (_lock) _nodes.Remove(subject);
     }
 
     /// <summary>The runner a request for the coordinator goes to: one online first, then by name; <c>null</c> when none is known.</summary>
     public NodeView? PreferredRunner() => Snapshot().Where(n => n.Role == NodeRole.Runner)
         .OrderByDescending(n => n.Online).ThenBy(n => n.Name, StringComparer.Ordinal).FirstOrDefault();
 
-    public string? ClientIdOf(string node)
+    private string? SubjectNamed(string name)
     {
-        lock (_lock) return _nodes.TryGetValue(node, out var e) && e.Replicas.Count > 0 ? e.ClientId : null;
+        lock (_lock) return _nodes.FirstOrDefault(n => n.Value.Name == name).Key;
     }
 
-    /// <summary>
-    /// The host behind <paramref name="connectionId"/> is gone: what it last reported about its fragments
-    /// is no longer known to be true (a killed host leaves a fragment "Launched" for good), so it leaves
-    /// with it. A host that only lost its connection reports them all again when it announces itself on
-    /// reconnecting. A connection that no replica owns any more, because its host announced on a new one,
-    /// changes nothing.
-    /// </summary>
-    public void Disconnected(string connectionId)
-    {
-        lock (_lock)
-        {
-            foreach (var entry in _nodes.Values)
-            {
-                var replica = entry.Replicas.FirstOrDefault(r => r.ConnectionId == connectionId);
-                if (replica is null) continue;
-                entry.Replicas.Remove(replica);
-                if (entry.Replicas.Count == 0) entry.Announcement = replica.Announcement;
-            }
-        }
-    }
+    /// <summary>The subject a node is carried under, while a replica of it is connected: its identity's client id.</summary>
+    public string? ClientIdOf(string name) =>
+        SubjectNamed(name) is { } subject && registry.Replicas(subject).Any(r => r.Connected) ? subject : null;
 
-    /// <summary>Files what the replica behind <paramref name="connectionId"/> reports; a connection no replica owns reports nothing.</summary>
-    public void Update(string connectionId, FragmentStatus status)
-    {
-        lock (_lock)
-        {
-            var replica = _nodes.Values.SelectMany(e => e.Replicas).FirstOrDefault(r => r.ConnectionId == connectionId);
-            if (replica is null) return;
-            var key = $"{status.Fragment}#{status.Instance}";
-            if (status.State == FragmentState.Undeployed) replica.Fragments.Remove(key);
-            else replica.Fragments[key] = status;
-        }
-    }
+    /// <summary>The connection a read of the node goes to: one of its connected replicas, the one with the fewest runs. Null when none is connected.</summary>
+    public string? ConnectionForRead(string name) =>
+        SubjectNamed(name) is { } subject ? registry.ConnectionForRead(subject) : null;
 
-    /// <summary>The connection a deployment, a re-arming or a read goes to: the oldest connected replica's.</summary>
-    public string? ConnectionOf(string node)
-    {
-        lock (_lock) return _nodes.TryGetValue(node, out var e) ? e.Replicas.FirstOrDefault()?.ConnectionId : null;
-    }
-
-    /// <summary>The connection of every connected replica of the node, oldest first: what a command to the whole node goes to.</summary>
-    public IReadOnlyList<string> ConnectionsOf(string node)
-    {
-        lock (_lock) return _nodes.TryGetValue(node, out var e) ? e.Replicas.Select(r => r.ConnectionId).ToList() : [];
-    }
-
-    /// <summary>What the node hosts currently report for a fragment, every instance and every replica included.</summary>
-    public IReadOnlyList<FragmentStatus> Reported(string fragment)
-    {
-        lock (_lock)
-        {
-            return _nodes.Values.SelectMany(e => e.Replicas).SelectMany(r => r.Fragments.Values).Where(f => f.Fragment == fragment).ToList();
-        }
-    }
+    /// <summary>The key and connection of every connected replica of the node, oldest first: what a message to the whole node goes to.</summary>
+    public IReadOnlyList<(ReplicaKey Key, string ConnectionId)> ReplicasOf(string name) =>
+        SubjectNamed(name) is { } subject ? registry.ConnectionsOf(subject) : [];
 
     public IReadOnlyList<NodeView> Snapshot()
     {
-        lock (_lock)
+        List<KeyValuePair<string, Node>> nodes;
+        lock (_lock) nodes = _nodes.OrderBy(n => n.Value.Name, StringComparer.Ordinal).ToList();
+
+        return nodes.Select(n =>
         {
-            return _nodes
-                .OrderBy(n => n.Key, StringComparer.Ordinal)
-                .Select(n =>
-                {
-                    var (entry, reference) = (n.Value, n.Value.Replicas.FirstOrDefault()?.Announcement ?? n.Value.Announcement);
-                    return new NodeView(
-                        n.Key, entry.Groups, reference.Description, entry.Replicas.Count > 0, reference.Datasets,
-                        entry.Replicas.SelectMany(r => r.Fragments.Values).OrderBy(f => f.Fragment, StringComparer.Ordinal).ThenBy(f => f.Instance).ToList(),
-                        reference.Role, reference.Bricks ?? [], reference.Capabilities ?? [], reference.DtpipeVersion,
-                        entry.Replicas.Select(r => new ReplicaView(
-                            r.Key.Length > 8 ? r.Key[..8] : r.Key, r.FirstAnnouncedAt, r.Announcement.Origin)).ToList());
-                })
-                .ToList();
-        }
+            var replicas = registry.Replicas(n.Key);
+            var connected = replicas.Where(r => r.Connected).ToList();
+            var reference = connected.OrderByDescending(r => r.FirstAnnouncedAt).FirstOrDefault();
+            var announcement = reference?.Announcement ?? n.Value.Announcement;
+            var views = replicas.Select(r => new NodeReplica(
+                r.Key.Short, r.FirstAnnouncedAt, r.Announcement.Origin, r.Connected, r.Announcement.DtpipeVersion,
+                BricksHash(r.Announcement.Bricks), r.Announcement.Capabilities ?? [], r.Leases.Count)).ToList();
+            return new NodeView(
+                n.Value.Name, reference?.Groups ?? n.Value.Groups, announcement.Description, connected.Count > 0, announcement.Datasets,
+                announcement.Role, announcement.Bricks ?? [], announcement.Capabilities ?? [], announcement.DtpipeVersion, views,
+                views.Where(v => v.Connected).Select(v => v.Bricks).Distinct().Count() > 1);
+        }).ToList();
     }
+
+    /// <summary>The start of a hash of the bricks a replica announces: equal on replicas that offer the same, different while one is being updated.</summary>
+    private static string BricksHash(IReadOnlyList<BrickInfo>? bricks) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n',
+            (bricks ?? []).OrderBy(b => b.Id, StringComparer.Ordinal).Select(b => $"{b.Id}\t{b.Kind}\t{b.Branch}")))))[..8];
 }
 
 /// <summary>
-/// The node channel (<see cref="NodeChannel"/>), one connection per node host, each authenticated by
-/// the trusted IdP. A host is who its token says, and the rights say what that is: the node name and
-/// the groups are its identity's, and the name a host proposes for itself is only ever a proposal, shown
-/// to an administrator when no identity knows the token's subject. Everything a host reports is filed
-/// under the name of the node its connection announced.
+/// The node channel (<see cref="NodeChannel"/>), one connection per replica, each authenticated by the trusted IdP. A
+/// host is who its token says, and the rights say what that is: the node name and the groups are its identity's, and the
+/// name a host proposes for itself is only ever a proposal, shown to an administrator when no identity knows the token's
+/// subject. The coordinator knows the caller of each message by its connection alone: what a replica reports is filed
+/// under the node its connection announced, and what it says of a run is heard only if the run placed it there.
 /// </summary>
 public sealed class NodeChannelHub(
-    NodeInventory inventory, RightsStore rights, EnrollmentQueue enrollment, CoordinatorServerOptions options, EventBus bus, ILogger<NodeChannelHub> logger) : Hub
+    NodeInventory inventory, ReplicaProtocol protocol, RightsStore rights, EnrollmentQueue enrollment, CoordinatorServerOptions options,
+    EventBus bus, ILogger<NodeChannelHub> logger) : Hub
 {
-    public Task Announce(NodeAnnouncement announcement)
+    public async Task Announce(NodeAnnouncement announcement)
     {
         var clientId = TrustedIdp.SubjectOf(Context.User);
         var identity = rights.Find(clientId);
@@ -206,20 +135,26 @@ public sealed class NodeChannelHub(
         {
             Propose(clientId, announcement);
             Context.Abort();
-            return Task.CompletedTask;
+            return;
         }
         if (!identity.Enabled)
         {
             Refuse(identity.Name, $"'{clientId}' is disabled");
             Context.Abort();
-            return Task.CompletedTask;
+            return;
         }
-        var context = Context;
         // Where a host runs is its own word, shown to people: cut here and escaped by the page.
         var origin = announcement.Origin is null ? null : EnrollmentQueue.Clean(announcement.Origin, EnrollmentQueue.MaxOrigin);
-        inventory.Announce(Context.ConnectionId, announcement with { Name = identity.Name, Origin = origin }, identity.ClientId, identity.Groups, context.Abort);
+        var named = announcement with { Name = identity.Name, Origin = origin };
+        var (replica, refusal) = await protocol.OnAnnouncedAsync(Context.ConnectionId, identity.ClientId, named, identity.Groups, Context.Abort);
+        if (replica is null)
+        {
+            Refuse(identity.Name, refusal ?? "the announcement was not accepted");
+            Context.Abort();
+            return;
+        }
+        inventory.Announced(identity.Name, identity.ClientId, named, identity.Groups);
         bus.Publish("nodes", inventory.Snapshot());
-        return Task.CompletedTask;
     }
 
     /// <summary>A valid token no identity knows: the host waits for an administrator, and nothing else of it is let in.</summary>
@@ -252,13 +187,13 @@ public sealed class NodeChannelHub(
         bus.Publish("log", new NodeLogLine("coordinator", null, "Error", $"Announcement of {node} refused: {reason}."));
     }
 
-    public Task ReportFragment(FragmentStatus status)
+    /// <summary>How one run of a fragment ended on this replica. The orchestrator hears it only from the replica the run placed the fragment on.</summary>
+    public Task<ExitedAck> Exited(FragmentExit exit) => protocol.OnExitedAsync(Context.ConnectionId, exit);
+
+    /// <summary>This replica is leaving for good: its runs end now, ahead of the close this host is about to make.</summary>
+    public Task Leave()
     {
-        // A host reports only on the node its connection announced, under that node's name.
-        if (inventory.NodeOf(Context.ConnectionId) is not { } node) return Task.CompletedTask;
-        status = status with { Node = node };
-        inventory.Update(Context.ConnectionId, status);
-        bus.Publish("fragment", status);
+        protocol.OnLeave(Context.ConnectionId);
         bus.Publish("nodes", inventory.Snapshot());
         return Task.CompletedTask;
     }
@@ -272,11 +207,11 @@ public sealed class NodeChannelHub(
 
     public override Task OnDisconnectedAsync(Exception? exception)
     {
-        var node = inventory.NodeOf(Context.ConnectionId);
-        var clientId = node is null ? null : inventory.ClientIdOf(node);
-        inventory.Disconnected(Context.ConnectionId);
-        // A node whose identity is gone, or now carries another name, is no longer a node of this coordinator.
-        if (node is not null && rights.Find(clientId)?.Name != node) inventory.Forget(node);
+        var subject = inventory.SubjectOf(Context.ConnectionId);
+        protocol.OnDisconnected(Context.ConnectionId);
+        // A node whose identity is gone is no longer a node of this coordinator. A rename is not that: the host
+        // announces again under the new name, and the entry takes it.
+        if (subject is not null && rights.Find(subject) is null) inventory.Forget(subject);
         bus.Publish("nodes", inventory.Snapshot());
         return base.OnDisconnectedAsync(exception);
     }

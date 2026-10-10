@@ -11,9 +11,11 @@ public static class CoordinatorServiceCollectionExtensions
     /// <summary>
     /// Registers the coordinator's share of hosting the hub: the flow control matrix backing
     /// <see cref="IPlanRegistry"/>, the progress monitor <c>AddDataHub()</c> does not provide on its
-    /// own, and the anti peer-to-peer filter. Returns TransportR's own builder, already pointed at
-    /// <see cref="CoordinatorHub"/>, so the caller finishes it (<c>UseDevMode</c> or a JWT identity
-    /// provider, then <c>Build()</c>) the same way any other TransportR host does.
+    /// own, the anti peer-to-peer filter, and the replica registry, admission and orchestrator that drive runs
+    /// over the host's node channel (<see cref="NodeLinkServiceCollectionExtensions.AddNodeLink{THub}"/> names
+    /// that hub; <see cref="ReplicaProtocol"/> is what its methods call). Returns TransportR's own builder, so the
+    /// caller finishes it (<c>UseDevMode</c> or a JWT identity provider, then <c>Build()</c>) the same way any
+    /// other TransportR host does: the TransportR hub carries the data plane and nothing else.
     /// </summary>
     public static DataHubBuilder AddCoordinatorHub(
         this IServiceCollection services, Action<FlowControlOptions> configureFlowControl)
@@ -27,10 +29,11 @@ public static class CoordinatorServiceCollectionExtensions
         services.AddSingleton<IHubProgressMonitor, LoggingHubProgressMonitor>();
         services.AddSignalR(options => options.AddFilter<PeerToPeerHubFilter>());
 
-        services.AddSingleton<INodeRegistry, NodeRegistry>();
-        services.AddSingleton<AdmissionGate>();
+        services.AddSingleton<ReplicaRegistry>();
+        services.AddSingleton<ReplicaAdmission>();
         services.AddSingleton<IRunOrchestrator, RunOrchestrator>();
+        services.AddSingleton<ReplicaProtocol>();
 
-        return services.AddDataHub().UseHub<CoordinatorHub>();
+        return services.AddDataHub();
     }
 }

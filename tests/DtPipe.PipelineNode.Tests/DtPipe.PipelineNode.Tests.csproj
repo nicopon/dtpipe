@@ -10,6 +10,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DtPipe.PipelineNode\DtPipe.PipelineNode.csproj" />
+    <!-- ReplicaRuns, the run protocol of a replica: the same class the host's agent drives, so a test node answers the
+         coordinator as a host does. -->
+    <ProjectReference Include="..\..\src\DtPipe.PipelineNode.Hosting\DtPipe.PipelineNode.Hosting.csproj" />
     <ProjectReference Include="..\..\src\DtPipe.Coordinator\DtPipe.Coordinator.csproj" />
     <!-- CoordinatorTestHost: the same in-process Kestrel-hosted coordinator DtPipe.Coordinator.Tests
          uses, reused here rather than duplicated. -->

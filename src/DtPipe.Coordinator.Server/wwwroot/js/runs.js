@@ -63,7 +63,7 @@ function renderDeployments() {
       <td>${d.origin === "library" ? `<a href="#/library/${encodeURIComponent(d.pipelineId)}">${esc(d.pipelineId)}</a>` : esc(d.pipelineId)}</td>
       <td>${esc(d.origin === "lab" ? "Lab view" : "library")}</td>
       <td><span class="chip ${d.state === "ready" ? "ok" : d.state === "failed" ? "bad" : "warn"}" title="${esc(d.message || "")}">${esc(d.state)}</span></td>
-      <td class="wrap">${d.fragments.map((f) => `<span class="chip" style="color:${nodeColor(f.node)}" title="${esc(f.name)} · ${esc(f.version.slice(0, 12))}">${esc(f.node)}</span>`).join(" ")}</td>
+      <td class="wrap">${d.fragments.map((f) => `<span class="chip" style="color:${nodeColor(f.node)}" title="${esc(f.name)} · ${esc(f.version.slice(0, 12))} · ${f.replicas ?? 0} replica(s) could run it now">${esc(f.node)}${f.replicas != null ? ` · ${f.replicas}` : ""}</span>`).join(" ")}</td>
       <td class="num">${d.edges}</td><td class="num">${d.queued || ""}</td>
       <td class="actions-cell"><button class="small" data-run="${esc(d.pipelineId)}" ${d.state === "failed" ? "disabled" : ""}>Run</button>
         <button class="small ghost danger" data-undeploy="${esc(d.pipelineId)}" ${d.runningRunId || d.queued ? "disabled" : ""}>Undeploy</button></td>
@@ -108,7 +108,7 @@ function report(r) {
     ${res?.consequences?.length ? `<p><b>Consequences:</b> ${res.consequences.map((c) => esc(shortNode(c))).join(", ")}</p>` : ""}
     ${edges ? `<table><tr><th>from</th><th>to</th><th>sent</th><th>received</th></tr>${edges}</table>` : ""}
     ${exits ? `<h3>Exit reports</h3><table><tr><th>fragment</th><th>exit</th><th>origin</th><th>first fault</th></tr>${exits}</table>` : ""}
-    ${r.pins && Object.keys(r.pins).length ? `<p class="hint">Pinned: ${esc(JSON.stringify(r.pins))}</p>` : ""}
+    ${res?.replicas && Object.keys(res.replicas).length ? `<p class="hint">Ran on: ${Object.entries(res.replicas).map(([fragment, replica]) => `${esc(shortNode(fragment))} on <code title="${esc(replica.origin ?? "")}">${esc(replica.id)}</code>`).join(", ")}</p>` : ""}
   </div>`;
 }
 

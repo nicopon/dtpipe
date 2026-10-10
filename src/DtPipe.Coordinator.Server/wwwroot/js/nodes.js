@@ -1,5 +1,5 @@
 // Nodes: every node and runner, the bricks each offers with their schema and a preview read by
-// the node itself, the fragments of deployed pipelines it holds, and the flow matrix.
+// the node itself, the replicas that carry it, and the flow matrix.
 import { api, csvTable, esc, nodeColor, store } from "./core.js";
 
 let host = null;
@@ -44,7 +44,7 @@ function render() {
   if (!host) return;
   const cards = store.nodes.map((n) => {
     const bricks = store.bricks.filter((b) => b.node === n.name);
-    const fragments = n.fragments;
+    const replicas = n.replicas;
     return `
       <section class="card node-card ${n.online ? "" : "offline"}" style="--node-color:${nodeColor(n.name)}">
         <div class="node-head">
@@ -55,11 +55,12 @@ function render() {
         ${n.datasets.map((d) => `<div class="dataset"><code>\${{${esc(d.variable)}}}</code> ${esc(d.engine)} · ${esc(d.description)}</div>`).join("")}
         ${n.role === "Runner" ? `<p class="hint">Carries every step between the bricks: transformers, SQL, merges.</p>` : ""}
         ${bricks.length ? `<h3>Bricks</h3>${bricks.map(brickRow).join("")}` : n.role === "Runner" ? "" : `<p class="hint">No brick offered.</p>`}
-        ${fragments.length ? `<h3 title="A fragment is the part of a deployed pipeline placed on this node: its bricks, or for a runner the steps between them.">Deployed here (${fragments.length})</h3>
-        ${fragments.map((f) => `
-          <div class="frag-line"><span>${esc(f.fragment)}${f.instance !== "main" ? ` <span class="chip">${esc(f.instance)}</span>` : ""}</span>
-          <span class="state ${esc(f.state)}">${esc(f.state)}${f.exitCode != null ? ` ${f.exitCode}` : ""}</span></div>`).join("")}`
-          : `<p class="hint">No pipeline deployed here.</p>`}
+        ${replicas.length ? `<h3 title="A replica is one host carrying this node's identity: a run is placed on one of them that can run its fragment.">Replicas (${replicas.filter((r) => r.connected).length}/${replicas.length})</h3>
+        ${n.replicasDisagree ? `<p class="hint mismatch">The replicas do not offer the same bricks: a rolling update is under way, and a run goes to a replica that composes its plan.</p>` : ""}
+        ${replicas.map((r) => `
+          <div class="frag-line" title="${esc(r.origin ?? "")}"><span><code>${esc(r.id)}</code>${r.dtpipeVersion ? ` <span class="chip">dtpipe ${esc(r.dtpipeVersion)}</span>` : ""} <span class="hint">${esc(r.origin ?? "")}</span></span>
+          <span class="state ${r.connected ? "Registered" : "Failed"}">${r.connected ? "connected" : "away"}${r.runs ? ` · ${r.runs} run${r.runs > 1 ? "s" : ""}` : ""}</span></div>`).join("")}`
+          : `<p class="hint">No replica of this node has announced itself.</p>`}
       </section>`;
   }).join("");
 

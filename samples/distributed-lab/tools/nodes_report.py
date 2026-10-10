@@ -15,8 +15,11 @@ session = Session(url)
 while True:
     try:
         nodes = session.call("/api/nodes")
-        # A runner runs any fragment in either mode: only data nodes announce one.
-        if len(nodes) >= count and all(n["online"] and (n["role"] == "Runner" or ("raw-fragments" in n["capabilities"]) == (mode == "sandbox")) for n in nodes):
+        # A runner runs any fragment in either mode: only data nodes announce one. Every connected replica of a node must
+        # announce the mode, not only the one the node shows.
+        def in_mode(n):
+            return n["role"] == "Runner" or all(("raw-fragments" in r["capabilities"]) == (mode == "sandbox") for r in n["replicas"] if r["connected"])
+        if len(nodes) >= count and all(n["online"] and in_mode(n) for n in nodes):
             sys.exit(0)
     except Exception:
         pass

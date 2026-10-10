@@ -78,9 +78,8 @@ public sealed class BrickCatalog(NodeInventory inventory)
         {
             foreach (var brick in node.Bricks)
             {
-                YamlMappingNode branch;
-                try { branch = (YamlMappingNode)JobYaml.FromJson(JsonNode.Parse(brick.Branch)); }
-                catch (Exception) { continue; }
+                // The one reading of an announced brick, the node's and the replica chooser's too.
+                if (FragmentJob.Declared(brick) is not { } branch) continue;
                 var canonical = BrickRules.Declared(brick.Kind, branch).Canonical;
                 var version = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)))[..12];
                 var yaml = JobYaml.Serialize(branch);

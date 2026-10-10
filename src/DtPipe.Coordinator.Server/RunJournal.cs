@@ -6,7 +6,7 @@ namespace DtPipe.Coordinator.Server;
 
 public sealed record RunView(
     string RunId, string PlanId, string State, DateTimeOffset StartedAt, DateTimeOffset? FinishedAt,
-    IReadOnlyDictionary<string, string>? Pins, RunResult? Result, string? Description, string? Refusal,
+    RunResult? Result, string? Description, string? Refusal,
     string? PipelineId = null, DateTimeOffset? QueuedAt = null)
 {
     [JsonIgnore] public bool IsOver => State is not ("queued" or "running");

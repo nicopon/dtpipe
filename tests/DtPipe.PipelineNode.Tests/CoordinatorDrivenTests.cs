@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using DtPipe.Coordinator;
 using DtPipe.Coordinator.Tests.Infrastructure;
+using DtPipe.PipelineNode.Tests.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -9,8 +10,8 @@ namespace DtPipe.PipelineNode.Tests;
 /// <summary>
 /// The barrier: a <see cref="RunOrchestrator"/> admits three registered fragments, launches them,
 /// wires each declared edge once both endpoints report ready, and applies the outcome rule to what
-/// they report back - exercised here against real <see cref="PipelineNode"/> instances and real
-/// <c>dtpipe</c> children, not fakes. <see cref="AdmissionGateTests"/> covers admission alone.
+/// they report back - exercised here against real replicas (<see cref="TestNode"/>) and real
+/// <c>dtpipe</c> children, not fakes. <c>ReplicaAdmissionSubjectTests</c> covers admission alone.
 /// </summary>
 public class CoordinatorDrivenTests
 {
@@ -22,19 +23,13 @@ public class CoordinatorDrivenTests
     // macOS/Darwin value (SDK sys/signal.h), same pattern as MemoryCeilingTests.
     private const int SIGKILL = 9;
 
-    private static async Task<PipelineNode> ConnectNode(
+    private static Task<TestNode> ConnectNode(
         CoordinatorTestHost host, string jobPath, string fragmentName, params EdgeBinding[] edges) =>
-        await PipelineNode.ConnectAsync(new PipelineNodeOptions
-        {
-            HubUrl = host.Url,
-            DtPipeExecutable = DtPipeExecutableLocator.Path,
-            FragmentJobPath = jobPath,
-            Edges = edges,
-        }, fragmentName);
+        TestNode.StartAsync(host, fragmentName, jobPath, edges);
 
-    private static RunSpec ChainSpec(string runId) => new(
+    private static RunSpec ChainSpec(string runId, params RunFragment[] fragments) => new(
         runId,
-        Fragments: [new FragmentPin("A"), new FragmentPin("B"), new FragmentPin("C")],
+        Fragments: fragments,
         Edges:
         [
             new RunEdge("A", "out", "B", "in"),
@@ -59,10 +54,11 @@ public class CoordinatorDrivenTests
             new EdgeBinding("in", EdgeDirection.Inbound), new EdgeBinding("out", EdgeDirection.Outbound));
         // C is never connected.
 
-        var ex = await Assert.ThrowsAsync<AdmissionRefusedException>(
-            () => orchestrator.RunAsync(ChainSpec("run-refused")));
+        var ex = await Assert.ThrowsAsync<NoEligibleReplicaException>(
+            () => orchestrator.RunAsync(ChainSpec("run-refused", a.Fragment, b.Fragment,
+                TestNode.FragmentOf("C", fixture.FragmentCJobPath, new EdgeBinding("in", EdgeDirection.Inbound)))));
 
-        Assert.Contains("C", ex.AbsentFragments);
+        Assert.Contains("C", ex.Reasons.Keys);
         Assert.False(a.IsLaunched);
         Assert.False(b.IsLaunched);
     }
@@ -80,7 +76,7 @@ public class CoordinatorDrivenTests
             new EdgeBinding("in", EdgeDirection.Inbound), new EdgeBinding("out", EdgeDirection.Outbound));
         await using var c = await ConnectNode(host, fixture.FragmentCJobPath, "C", new EdgeBinding("in", EdgeDirection.Inbound));
 
-        var result = await orchestrator.RunAsync(ChainSpec("run-happy")).WaitAsync(Bound);
+        var result = await orchestrator.RunAsync(ChainSpec("run-happy", a.Fragment, b.Fragment, c.Fragment)).WaitAsync(Bound);
 
         Assert.Equal(RunOutcome.Succeeded, result.Outcome);
         Assert.Null(result.Cause);
@@ -116,7 +112,7 @@ public class CoordinatorDrivenTests
             new EdgeBinding("in", EdgeDirection.Inbound), new EdgeBinding("out", EdgeDirection.Outbound));
         await using var c = await ConnectNode(host, fixture.FragmentCJobPath, "C", new EdgeBinding("in", EdgeDirection.Inbound));
 
-        var runTask = orchestrator.RunAsync(ChainSpec("run-cause"));
+        var runTask = orchestrator.RunAsync(ChainSpec("run-cause", a.Fragment, b.Fragment, c.Fragment));
 
         var deadline = DateTime.UtcNow + Bound;
         while (!b.IsLaunched)

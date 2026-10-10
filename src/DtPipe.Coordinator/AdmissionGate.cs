@@ -21,32 +21,6 @@ public sealed class AdmissionRefusedException : Exception
 }
 
 /// <summary>
-/// A run naming a fragment bound to no identity: nothing says which node may host it, and a hub that
-/// attests subjects admits no instance on that footing (see <see cref="AdmissionOptions"/>).
-/// </summary>
-public sealed class UnboundFragmentException : Exception
-{
-    public string FragmentName { get; }
-
-    public UnboundFragmentException(string fragmentName)
-        : base($"Run refused, fragment '{fragmentName}' names no node identity: nothing says which instance may host it.")
-    {
-        FragmentName = fragmentName;
-    }
-}
-
-/// <summary>What <see cref="AdmissionGate"/> reads as a fragment bound to no identity.</summary>
-public sealed class AdmissionOptions
-{
-    /// <summary>
-    /// A fragment that names no subject is admitted from any instance. For hosts whose hub attests no
-    /// subject (development, tests with no token); a host with an identity provider never sets it.
-    /// Off by default: a fragment bound to no identity is refused.
-    /// </summary>
-    public bool AdmitUnboundFragments { get; init; }
-}
-
-/// <summary>
 /// A run pinned to a fragment version with no live instance behind it - <see cref="PinRefusalReason.Unknown"/>
 /// when that version was never registered by anyone, <see cref="PinRefusalReason.Retired"/> when it
 /// was but nothing hosts it anymore (the free "rollback" is simply pinning to a version that still,

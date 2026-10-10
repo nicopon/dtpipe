@@ -3,6 +3,7 @@ using DtPipe.Coordinator.Contracts;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Abstractions;
+using TransportR.Services;
 using Xunit;
 
 namespace DtPipe.Coordinator.Server.Tests;
@@ -22,7 +23,9 @@ public sealed class NodeChannelHubTests : IDisposable
     }
 
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "hub-" + Guid.NewGuid().ToString("N"));
-    private readonly NodeInventory _inventory = new();
+    private readonly ReplicaRegistry _registry = new();
+    private readonly NodeInventory _inventory;
+    private readonly ReplicaProtocol _protocol;
     private readonly EnrollmentQueue _enrollment = new();
     private readonly EventBus _bus = new();
     private readonly RightsStore _rights;
@@ -39,6 +42,15 @@ public sealed class NodeChannelHubTests : IDisposable
             UiClientId = "ui", UiClientSecret = "secret", RightsSeed = seed, IdentityLabelClaims = ["team"],
         };
         _rights = new RightsStore(_options);
+        _inventory = new NodeInventory(_registry);
+        _protocol = new ReplicaProtocol(_registry, new NoRuns(), new InMemoryStateStore(), NullLogger<ReplicaProtocol>.Instance);
+    }
+
+    /// <summary>The orchestrator behind the protocol: no run is ever in flight here.</summary>
+    private sealed class NoRuns : IRunOrchestrator
+    {
+        public Task<RunResult> RunAsync(RunSpec spec, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<ExitedAck> OnExitedAsync(ReplicaKey replica, FragmentExit exit) => Task.FromResult(ExitedAck.NotAdmitted);
     }
 
     public void Dispose() => Directory.Delete(_dir, recursive: true);
@@ -46,7 +58,7 @@ public sealed class NodeChannelHubTests : IDisposable
     private (NodeChannelHub Hub, Caller Caller) Connect(string connectionId, string subject)
     {
         var caller = new Caller(connectionId, subject);
-        return (new NodeChannelHub(_inventory, _rights, _enrollment, _options, _bus, NullLogger<NodeChannelHub>.Instance) { Context = caller }, caller);
+        return (new NodeChannelHub(_inventory, _protocol, _rights, _enrollment, _options, _bus, NullLogger<NodeChannelHub>.Instance) { Context = caller }, caller);
     }
 
     private static NodeAnnouncement Proposing(string name) => new(name, "proposed description", [], NodeRole.Data, []);
@@ -76,23 +88,39 @@ public sealed class NodeChannelHubTests : IDisposable
         Assert.Empty(_enrollment.List());
     }
 
+    private IReadOnlyList<NodeLogLine> LogLines()
+    {
+        var (backlog, _, unsubscribe) = _bus.Subscribe();
+        unsubscribe();
+        return backlog.Where(e => e.Type == "log").Select(e => (NodeLogLine)e.Data).ToList();
+    }
+
     [Fact]
     public async Task What_A_Host_Reports_Is_Filed_Under_The_Name_The_Rights_Gave_It()
     {
         var (hub, _) = Connect("c1", "known");
         await hub.Announce(Proposing("some-other-name"));
-        await hub.ReportFragment(new FragmentStatus("some-other-name", "p@node-known", "main", "g1", FragmentState.Registered, "v", null, null, null));
-        var node = Assert.Single(_inventory.Snapshot());
-        Assert.Single(node.Fragments);
-        Assert.Equal("node-known", node.Fragments[0].Node);
+        await hub.ReportLog(new NodeLogLine("some-other-name", "p@node-known", "Information", "running"));
+        var line = Assert.Single(LogLines());
+        Assert.Equal("node-known", line.Node);
+        Assert.Equal("running", line.Message);
     }
 
     [Fact]
     public async Task A_Report_On_A_Connection_That_Announced_Nothing_Is_Dropped()
     {
         var (hub, _) = Connect("c9", "known");
-        await hub.ReportFragment(new FragmentStatus("node-known", "p@node-known", "main", "g1", FragmentState.Registered, "v", null, null, null));
+        await hub.ReportLog(new NodeLogLine("node-known", "p@node-known", "Information", "running"));
+        Assert.Empty(LogLines());
         Assert.Empty(_inventory.Snapshot());
+    }
+
+    [Fact]
+    public async Task A_Run_Report_On_A_Connection_That_Announced_Nothing_Is_Not_Heard()
+    {
+        var (hub, _) = Connect("c9", "known");
+        var exit = new FragmentExit("run-1", "p@node-known", 1, "Local", "forged", new Dictionary<string, long>());
+        Assert.Equal(ExitedAck.UnknownConnection, await hub.Exited(exit));
     }
 
     [Fact]
@@ -142,18 +170,49 @@ public sealed class NodeChannelHubTests : IDisposable
     }
 
     [Fact]
-    public async Task What_Every_Replica_Reports_Is_Received()
+    public async Task What_Every_Replica_Logs_Is_Received_Under_The_Node()
     {
         var (first, _) = Connect("c1", "known");
         var (second, _) = Connect("c2", "known");
         await first.Announce(Proposing("node-known"));
         await second.Announce(Proposing("node-known"));
 
-        await first.ReportFragment(new FragmentStatus("node-known", "p@node-known", "main", "g1", FragmentState.Registered, "v", null, null, null));
-        await second.ReportFragment(new FragmentStatus("node-known", "q@node-known", "main", "g1", FragmentState.Registered, "v", null, null, null));
+        await first.ReportLog(new NodeLogLine("node-known", "p@node-known", "Information", "from the first"));
+        await second.ReportLog(new NodeLogLine("node-known", "q@node-known", "Information", "from the second"));
+
+        Assert.Equal(["from the first", "from the second"], LogLines().Select(l => l.Message));
+        Assert.All(LogLines(), l => Assert.Equal("node-known", l.Node));
+    }
+
+    [Fact]
+    public async Task A_Replica_That_Leaves_Is_Gone_At_Once_And_The_Node_Goes_Offline_With_Its_Last()
+    {
+        var (first, _) = Connect("c1", "known");
+        var (second, _) = Connect("c2", "known");
+        await first.Announce(Replica(Guid.NewGuid()));
+        await second.Announce(Replica(Guid.NewGuid()));
+
+        await first.Leave();
+        var node = Assert.Single(_inventory.Snapshot());
+        Assert.True(node.Online);
+        Assert.Single(node.Replicas);
+
+        await second.Leave();
+        Assert.False(Assert.Single(_inventory.Snapshot()).Online);
+    }
+
+    [Fact]
+    public async Task A_Renamed_Identity_Is_The_Same_Node_Under_Its_New_Name()
+    {
+        var (hub, _) = Connect("c1", "known");
+        await hub.Announce(Proposing("node-known"));
+        _rights.UpdateIdentity("known", "node-renamed", "", ["crm", "audit"], enabled: true);
+        var (again, _) = Connect("c2", "known");
+        await again.Announce(Proposing("node-known"));
 
         var node = Assert.Single(_inventory.Snapshot());
-        Assert.Equal(["p@node-known", "q@node-known"], node.Fragments.Select(f => f.Fragment).Order(StringComparer.Ordinal));
+        Assert.Equal("node-renamed", node.Name);
+        Assert.Equal(2, node.Replicas.Count);
     }
 
     private static NodeAnnouncement Replica(Guid instance, string description = "proposed description", string? origin = null) =>
@@ -170,7 +229,7 @@ public sealed class NodeChannelHubTests : IDisposable
 
         var node = Assert.Single(_inventory.Snapshot());
         Assert.Single(node.Replicas);
-        Assert.Equal("c3", _inventory.ConnectionOf("node-known"));
+        Assert.Equal("c3", _registry.ConnectionOf(Assert.Single(_registry.Replicas("known")).Key));
         Assert.True(firstCaller.Aborted);
     }
 
@@ -187,7 +246,7 @@ public sealed class NodeChannelHubTests : IDisposable
 
         var node = Assert.Single(_inventory.Snapshot());
         Assert.True(node.Online);
-        Assert.Equal("c3", _inventory.ConnectionOf("node-known"));
+        Assert.Equal("c3", _registry.ConnectionOf(Assert.Single(_registry.Replicas("known")).Key));
     }
 
     [Fact]
@@ -206,23 +265,42 @@ public sealed class NodeChannelHubTests : IDisposable
         Assert.Empty(_inventory.Snapshot());
     }
 
+    /// <summary>
+    /// What the node announces is read from its connected replica that arrived last, which a reconnection of the same host does not
+    /// change; a read of the node goes to one of its replicas.
+    /// </summary>
     [Fact]
-    public async Task The_Node_Shows_Its_Oldest_Connected_Replica_Which_Is_Also_The_One_Deployed_To()
+    public async Task The_Node_Shows_Its_Most_Recent_Connected_Replica()
     {
         var (first, _) = Connect("c1", "known");
         var (second, _) = Connect("c2", "known");
         await first.Announce(Replica(Guid.NewGuid(), "older"));
+        await Task.Delay(20);
         await second.Announce(Replica(Guid.NewGuid(), "newer"));
 
-        Assert.Equal("older", Assert.Single(_inventory.Snapshot()).Description);
-        Assert.Equal("c1", _inventory.ConnectionOf("node-known"));
-        Assert.Equal(["c1", "c2"], _inventory.ConnectionsOf("node-known").Order(StringComparer.Ordinal));
-
-        await first.OnDisconnectedAsync(null);
-
         Assert.Equal("newer", Assert.Single(_inventory.Snapshot()).Description);
-        Assert.Equal("c2", _inventory.ConnectionOf("node-known"));
-        Assert.Equal(["c2"], _inventory.ConnectionsOf("node-known"));
+        Assert.Equal(["c1", "c2"], _inventory.ReplicasOf("node-known").Select(r => r.ConnectionId).Order(StringComparer.Ordinal));
+
+        await second.OnDisconnectedAsync(null);
+
+        Assert.Equal("older", Assert.Single(_inventory.Snapshot()).Description);
+        Assert.Equal(["c1"], _inventory.ReplicasOf("node-known").Select(r => r.ConnectionId));
+    }
+
+    [Fact]
+    public async Task A_Rolling_Update_Shows_As_Replicas_That_Disagree_On_Their_Bricks()
+    {
+        BrickInfo Brick(string input) => new("src", BrickKind.Source, "source", "", $$"""{"input":"{{input}}"}""", null, null);
+        var (first, _) = Connect("c1", "known");
+        var (second, _) = Connect("c2", "known");
+        await first.Announce(Replica(Guid.NewGuid()) with { Bricks = [Brick("sqlite:a")] });
+        Assert.False(Assert.Single(_inventory.Snapshot()).ReplicasDisagree);
+
+        await second.Announce(Replica(Guid.NewGuid()) with { Bricks = [Brick("sqlite:b")] });
+
+        var node = Assert.Single(_inventory.Snapshot());
+        Assert.True(node.ReplicasDisagree);
+        Assert.Equal(2, node.Replicas.Select(r => r.Bricks).Distinct().Count());
     }
 
     [Fact]

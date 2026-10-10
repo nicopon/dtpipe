@@ -1,4 +1,3 @@
-using System.Text;
 using System.Threading.Channels;
 using DtPipe.Coordinator.Contracts;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -9,12 +8,11 @@ using Microsoft.Extensions.Options;
 namespace DtPipe.PipelineNode.Hosting;
 
 /// <summary>
-/// One node: announces the variables it describes and the bricks it offers over the coordinator's
-/// node channel, and keeps every fragment the coordinator deploys on it registered through its own
-/// <see cref="FragmentSupervisor"/>. Commands are applied one at a time, in arrival order; a brick
-/// preview and a lab request answer outside that queue. Whatever the coordinator asks, a fragment
-/// runs only under the node's own <see cref="FragmentPolicy"/>, read from its configuration and
-/// never from a message.
+/// One replica of a node: announces the variables it describes and the bricks it offers over the coordinator's node
+/// channel, with the TransportR client its runs move their bytes with, and runs the fragments the coordinator launches
+/// on it (<see cref="ReplicaRuns"/>). Whatever the coordinator asks, a fragment runs only under the node's own
+/// <see cref="FragmentPolicy"/>, read from its configuration and never from a message. Messages are answered as they
+/// arrive and never queued behind a run; a brick preview and a lab request answer on the same footing.
 /// </summary>
 internal sealed class NodeAgent : BackgroundService
 {
@@ -36,10 +34,20 @@ internal sealed class NodeAgent : BackgroundService
     private readonly NodeLogForwarder _forwarder = new();
     private readonly ILoggerFactory _hostLoggers;
     private readonly ILogger _logger;
-    private readonly Dictionary<string, FragmentSupervisor> _fragments = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, FragmentStatus> _refusals = new(StringComparer.Ordinal);
-    private readonly SemaphoreSlim _commands = new(1, 1);
     private HubConnection? _hub;
+
+    // The replica's TransportR side and its runs, made on the first connection and kept: the client id they announce
+    // is the same for every announcement of this process.
+    private PipelineNode? _node;
+    private ReplicaRuns? _runs;
+
+    // The coordinator closed this replica's channel while runs were in flight: its TransportR registration is
+    // renewed at the first moment none is.
+    private volatile bool _refreshWhenIdle;
+
+    // One connection of the client at a time: the connection loop and the watch both ask for it, and a second client
+    // would leak the first and answer every message twice.
+    private readonly SemaphoreSlim _connecting = new(1, 1);
 
     // Signalled by every close of the connection; one loop reads it and connects again.
     private readonly Channel<bool> _closed = Channel.CreateBounded<bool>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
@@ -84,10 +92,6 @@ internal sealed class NodeAgent : BackgroundService
             .WithAutomaticReconnect(new KeepRetrying())
             .Build();
 
-        hub.On<FragmentDeployment>(NodeChannel.Deploy, d => Enqueue(() => DeployAsync(d, ct)));
-        hub.On<string>(NodeChannel.Undeploy, f => Enqueue(() => UndeployAsync(f)));
-        hub.On<string, string>(NodeChannel.Rearm, (f, generation) => Enqueue(() => RearmAsync(f, generation, ct)));
-        hub.On<string>(NodeChannel.Kill, f => Enqueue(() => KillAsync(f)));
         hub.On<string, int, BrickPreview>(NodeChannel.PreviewBrick, (id, rows) => _bricks.PreviewAsync(id, rows));
         hub.On<string, int, BrickSample>(NodeChannel.SampleBrick, (id, rows) => _bricks.SampleAsync(id, rows));
         hub.On<string, string, SinkCheck>(NodeChannel.CheckSink, (id, contract) => _bricks.CheckSinkAsync(id, contract));
@@ -114,6 +118,7 @@ internal sealed class NodeAgent : BackgroundService
         _logger.LogInformation("Node {Name} ({Role}, {Bricks} brick(s), {Policy}) connected to {Url} as {ClientId}",
             _options.Name, Role, _bricks.Bricks.Count, _policy, _options.CoordinatorUrl, _tokens.ClientId);
         _ = ReconnectLoopAsync(hub, ct);
+        _ = WatchDataPlaneAsync(hub, ct);
 
         await foreach (var line in _forwarder.Reader.ReadAllAsync(ct))
         {
@@ -132,6 +137,7 @@ internal sealed class NodeAgent : BackgroundService
                 if (hub.State != HubConnectionState.Disconnected) continue;
                 _logger.LogWarning("The coordinator closed the connection; connecting again");
                 await Task.Delay(ReconnectDelay, ct);
+                await RefreshDataPlaneAsync(ct);
                 await ConnectAsync(hub, ct);
             }
         }
@@ -141,7 +147,7 @@ internal sealed class NodeAgent : BackgroundService
     private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan AnnounceTimeout = TimeSpan.FromSeconds(30);
 
-    /// <summary>Starts the connection, retrying until the coordinator answers, then announces the node.</summary>
+    /// <summary>Starts the connection, retrying until the coordinator answers, then announces the replica.</summary>
     private async Task ConnectAsync(HubConnection hub, CancellationToken ct)
     {
         while (true)
@@ -150,6 +156,7 @@ internal sealed class NodeAgent : BackgroundService
             try
             {
                 if (hub.State == HubConnectionState.Disconnected) await hub.StartAsync(ct);
+                await EnsureNodeAsync(ct);
                 await AnnounceAsync();
                 return;
             }
@@ -167,6 +174,95 @@ internal sealed class NodeAgent : BackgroundService
         }
     }
 
+    /// <summary>
+    /// Connects the replica's TransportR client, once it can: it registers with the coordinator's hub under this node's identity,
+    /// and its client id is what the announcement carries, so the coordinator opens transfers to it. An identity the coordinator
+    /// does not know yet, or has disabled, cannot register one, and the announcement is how it becomes known: it announces without a
+    /// client (and so is placed no run), and <see cref="WatchDataPlaneAsync"/> connects the client when it can.
+    /// </summary>
+    private async Task<bool> EnsureNodeAsync(CancellationToken ct)
+    {
+        if (_node is not null) return true;
+        await _connecting.WaitAsync(ct);
+        try
+        {
+            if (_node is not null) return true;
+            return await ConnectNodeAsync(ct);
+        }
+        finally
+        {
+            _connecting.Release();
+        }
+    }
+
+    private async Task<bool> ConnectNodeAsync(CancellationToken ct)
+    {
+        // TransportR keeps the previous token when its provider throws, and a refused identity would then surface as a
+        // bare 401 after its connection retries: ask once here so the provider's refusal is what gets reported.
+        await _tokens.GetAsync(fresh: true);
+        PipelineNode node;
+        try
+        {
+            node = await PipelineNode.ConnectAsync(new NodeClientOptions
+            {
+                HubUrl = _options.CoordinatorUrl.TrimEnd('/'),
+                AccessTokenProvider = () => _tokens.GetAsync(fresh: true),
+            }, _forwarder.For(_hostLoggers, _options.Name, fragment: null), ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogInformation("The data plane did not register ({Reason}): announcing without it", ex.Message);
+            return false;
+        }
+
+        var runs = new ReplicaRuns(
+            _hub!, node, _options.Name, _options.DtPipe, _environment, _fragmentsDir,
+            spec => FragmentIntake.JobOf(spec, _policy, _gate, _bricks.DeclaredBranch, _bricks.Forms),
+            fragment => _forwarder.For(_hostLoggers, _options.Name, fragment).CreateLogger(typeof(FragmentRun).FullName!),
+            _logger, _options.UnwiredRunTimeout);
+        runs.Bind();
+        runs.Idle += OnIdle;
+        (_node, _runs) = (node, runs);
+        return true;
+    }
+
+    /// <summary>
+    /// While the replica is announced, keeps its data plane registered: connects the client that could not register at the
+    /// announcement, and registers again one the hub does not know (a coordinator that lost it, an identity it disabled and
+    /// enabled again), which TransportR would otherwise do at its next presence heartbeat. A client the hub does not know holds
+    /// no registration to be stale, so the replica is placed no run on it meanwhile; it is left alone while runs are in flight.
+    /// </summary>
+    private async Task WatchDataPlaneAsync(HubConnection hub, CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                await Task.Delay(DataPlaneWatchInterval, ct);
+                if (hub.State != HubConnectionState.Connected) continue;
+                try
+                {
+                    if (_node is null)
+                    {
+                        if (await EnsureNodeAsync(ct)) await AnnounceAsync();
+                    }
+                    else if (_runs!.Count == 0 && await _node.IsRegisteredAsync(ct) == false)
+                    {
+                        _logger.LogInformation("The hub does not know this replica's data plane: registering it again");
+                        await _node.RefreshRegistrationAsync(DataPlaneRefreshTimeout, ct);
+                    }
+                }
+                catch (Exception ex) when (!ct.IsCancellationRequested)
+                {
+                    _logger.LogDebug(ex, "The data plane could not be checked");
+                }
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+    }
+
+    private static readonly TimeSpan DataPlaneWatchInterval = TimeSpan.FromSeconds(3);
+
     private async Task AnnounceAsync()
     {
         // Bounded: a connection the coordinator aborts as it refuses the announcement may never answer it.
@@ -174,13 +270,49 @@ internal sealed class NodeAgent : BackgroundService
         await _hub!.InvokeAsync(NodeChannel.Announce,
             new NodeAnnouncement(_options.Name, _options.Description, _datasets, Role, _bricks.Bricks,
                 Capabilities: [.. _gate is null ? [] : new[] { NodeAnnouncement.RawFragments }, .. _requests.Keys.Order(StringComparer.Ordinal)],
-                DtpipeVersion: _dtpipeVersion, InstanceId: _instanceId, Origin: $"{Environment.MachineName}:{Environment.ProcessId}"), bounded.Token);
+                DtpipeVersion: _dtpipeVersion, InstanceId: _instanceId, Origin: $"{Environment.MachineName}:{Environment.ProcessId}",
+                DataPlaneClientId: _node?.ClientId), bounded.Token);
 
-        FragmentStatus[] statuses;
-        await _commands.WaitAsync();
-        try { statuses = _fragments.Values.Select(f => f.LastStatus).Concat(_refusals.Values).ToArray(); }
-        finally { _commands.Release(); }
-        foreach (var status in statuses) await ReportAsync(status);
+        // Accepted again: what could not be reported before is sent once.
+        if (_runs is not null) await _runs.OnAnnouncedAsync();
+    }
+
+    private static readonly TimeSpan DataPlaneRefreshTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// The coordinator closes a replica's channel so that it takes its rights again; its TransportR client registered with the
+    /// groups it had, and only registers again when told. With no run in flight that is done now, while the replica is not
+    /// announced and so is placed on no run: the client restarts and registers with the groups of the moment. With runs in
+    /// flight it waits for the last one (<see cref="OnIdle"/>), which would otherwise be interrupted.
+    /// </summary>
+    private async Task RefreshDataPlaneAsync(CancellationToken ct)
+    {
+        if (_node is null || _runs is null) return;
+        if (_runs.Count > 0)
+        {
+            _refreshWhenIdle = true;
+            return;
+        }
+        _refreshWhenIdle = false;
+        try
+        {
+            if (!await _node.RefreshRegistrationAsync(DataPlaneRefreshTimeout, ct))
+                _logger.LogWarning("The data plane did not come back within {Timeout}", DataPlaneRefreshTimeout);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "The data plane could not be registered again");
+        }
+    }
+
+    /// <summary>
+    /// The last run is gone. If the coordinator closed the channel while it ran, the replica closes it once more, for the
+    /// refresh the closing owed: the reconnection loop does it with nothing in flight.
+    /// </summary>
+    private void OnIdle()
+    {
+        if (!_refreshWhenIdle || _hub is not { State: HubConnectionState.Connected } hub) return;
+        _ = hub.StopAsync();
     }
 
     /// <summary>A request the host registered a handler for, answered outside the command queue; any other is said not to be answered.</summary>
@@ -198,104 +330,25 @@ internal sealed class NodeAgent : BackgroundService
         }
     }
 
-    private Task Enqueue(Func<Task> command) => Task.Run(async () =>
-    {
-        await _commands.WaitAsync();
-        try { await command(); }
-        catch (Exception ex) { _logger.LogError(ex, "Command failed"); }
-        finally { _commands.Release(); }
-    });
-
-    private async Task DeployAsync(FragmentDeployment deployment, CancellationToken ct)
-    {
-        var key = FragmentSupervisor.KeyOf(deployment.Fragment, deployment.Instance);
-        if (_fragments.Remove(key, out var previous))
-            await previous.DisposeAsync();
-        _refusals.Remove(key);
-
-        // Before anything registers: a registered instance is admissible, and admission is the
-        // coordinator's to grant, not this node's to leave open.
-        var (yaml, reason) = FragmentIntake.JobOf(deployment, _policy, _gate, _bricks.DeclaredBranch, _bricks.Forms);
-        if (yaml is null)
-        {
-            _logger.LogWarning("Refusing {Fragment}: {Reason}", key, reason);
-            var refusal = new FragmentStatus(_options.Name, deployment.Fragment, deployment.Instance, deployment.Generation,
-                FragmentState.Failed, null, null, null, $"refused by {_options.Name}: {reason}");
-            _refusals[key] = refusal;
-            await ReportAsync(refusal);
-            return;
-        }
-
-        var jobPath = Path.Combine(_fragmentsDir, SafeFileName(key) + ".yaml");
-        await File.WriteAllTextAsync(jobPath, yaml, new UTF8Encoding(false), ct);
-
-        var supervisor = new FragmentSupervisor(
-            _options.Name, deployment, jobPath, _options.CoordinatorUrl.TrimEnd('/'), _options.DtPipe, _environment,
-            () => _tokens.GetAsync(fresh: true), _forwarder.For(_hostLoggers, _options.Name, deployment.Fragment), ReportAsync);
-        _fragments[key] = supervisor;
-        _logger.LogInformation("Deploying {Fragment} ({Edges})", key,
-            string.Join(", ", deployment.Edges.Select(e => $"{e.Direction} {e.Alias}")));
-        await supervisor.ConnectAsync(ct);
-    }
-
-    /// <summary>Every instance of <paramref name="fragment"/> on this node, or every fragment for <c>*</c>.</summary>
-    private List<FragmentSupervisor> Matching(string fragment) =>
-        _fragments.Values.Where(s => fragment == "*" || s.Fragment == fragment).ToList();
-
-    private async Task UndeployAsync(string fragment)
-    {
-        foreach (var supervisor in Matching(fragment))
-        {
-            _fragments.Remove(supervisor.Key);
-            await supervisor.DisposeAsync();
-        }
-        foreach (var (key, refusal) in _refusals.Where(r => fragment == "*" || r.Value.Fragment == fragment).ToList())
-        {
-            _refusals.Remove(key);
-            await ReportAsync(refusal with { State = FragmentState.Undeployed });
-        }
-    }
-
-    private async Task RearmAsync(string fragment, string generation, CancellationToken ct)
-    {
-        foreach (var supervisor in Matching(fragment))
-            await supervisor.RearmAsync(generation, ct);
-    }
-
-    private Task KillAsync(string fragment)
-    {
-        var killed = Matching(fragment).Count(s => s.KillChild());
-        _logger.LogWarning("Killed {Count} dtpipe child(ren) of {Fragment}", killed, fragment);
-        return Task.CompletedTask;
-    }
-
-    private async Task ReportAsync(FragmentStatus status)
-    {
-        if (_hub is not { State: HubConnectionState.Connected } hub) return;
-        try { await hub.SendAsync(NodeChannel.ReportFragment, status); }
-        catch (Exception ex) { _logger.LogDebug(ex, "Status report dropped"); }
-    }
-
-    private static string SafeFileName(string name) =>
-        string.Concat(name.Select(c => char.IsLetterOrDigit(c) || c is '-' or '_' or '.' ? c : '_'));
-
-    /// <summary>An orderly stop disposes every fragment first, so no dtpipe child outlives the host.</summary>
+    /// <summary>
+    /// An orderly stop says so before it closes: the coordinator ends this replica's runs at once, with no grace period to
+    /// wait out, and then every run is thrown away, so no dtpipe child outlives the host.
+    /// </summary>
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
         await base.StopAsync(cancellationToken);
-        await _commands.WaitAsync(cancellationToken);
-        try
+        if (_hub is { State: HubConnectionState.Connected } hub)
         {
-            foreach (var supervisor in _fragments.Values)
+            try
             {
-                try { await supervisor.DisposeAsync(); } catch { /* shutting down */ }
+                using var bounded = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                bounded.CancelAfter(TimeSpan.FromSeconds(2));
+                await hub.InvokeAsync(NodeChannel.Leave, bounded.Token);
             }
-            _fragments.Clear();
+            catch (Exception) { /* the coordinator's own disconnect handling covers a host that cannot say so */ }
         }
-        finally
-        {
-            _commands.Release();
-        }
+        if (_runs is not null) await _runs.DisposeAsync();
+        if (_node is not null) await _node.DisposeAsync();
         if (_hub is not null) await _hub.DisposeAsync();
         // The directory belongs to this process alone, and nothing runs from it any more.
         try { Directory.Delete(_stateDir, recursive: true); } catch (Exception) { /* shutting down */ }

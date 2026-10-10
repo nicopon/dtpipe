@@ -1,5 +1,7 @@
 using DtPipe.Coordinator;
 using DtPipe.Coordinator.Tests.Infrastructure;
+using DtPipe.PipelineNode.Tests.Infrastructure;
+using DtPipe.Coordinator.Contracts;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -16,19 +18,13 @@ public class CoordinatorAbortTests
 {
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(30);
 
-    private static async Task<PipelineNode> ConnectNode(
+    private static Task<TestNode> ConnectNode(
         CoordinatorTestHost host, string jobPath, string fragmentName, params EdgeBinding[] edges) =>
-        await PipelineNode.ConnectAsync(new PipelineNodeOptions
-        {
-            HubUrl = host.Url,
-            DtPipeExecutable = DtPipeExecutableLocator.Path,
-            FragmentJobPath = jobPath,
-            Edges = edges,
-        }, fragmentName);
+        TestNode.StartAsync(host, fragmentName, jobPath, edges);
 
-    private static RunSpec ChainSpec(string runId) => new(
+    private static RunSpec ChainSpec(string runId, params RunFragment[] fragments) => new(
         runId,
-        Fragments: [new FragmentPin("A"), new FragmentPin("B"), new FragmentPin("C")],
+        Fragments: fragments,
         Edges:
         [
             new RunEdge("A", "out", "B", "in"),
@@ -56,7 +52,8 @@ public class CoordinatorAbortTests
         // C is never connected, so admission polls rather than resolving on its first check.
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
-        var result = await orchestrator.RunAsync(ChainSpec("run-requester-cancel"), cts.Token).WaitAsync(Bound);
+        var result = await orchestrator.RunAsync(ChainSpec("run-requester-cancel", a.Fragment, b.Fragment,
+            TestNode.FragmentOf("C", fixture.FragmentCJobPath, new EdgeBinding("in", EdgeDirection.Inbound))), cts.Token).WaitAsync(Bound);
 
         Assert.Equal(RunOutcome.Cancelled, result.Outcome);
         Assert.Null(result.Cause);
@@ -65,7 +62,7 @@ public class CoordinatorAbortTests
     }
 
     /// <summary>
-    /// C registers (passes admission) but never handles the coordinator's own <c>Launch</c> push - a
+    /// C is placed (passes admission) but never answers the coordinator's own <c>Launch</c> - a
     /// deterministic stand-in for a fragment that stops responding right after admission, without
     /// racing real child-process startup. The <c>ReadyTimeout</c> must abort the run naming C rather
     /// than hang on it, and A and B - launched, neither ever wired - must each receive <c>Cancel</c>
@@ -88,11 +85,12 @@ public class CoordinatorAbortTests
         await using var b = await ConnectNode(host, fixture.FragmentBJobPath, "B",
             new EdgeBinding("in", EdgeDirection.Inbound), new EdgeBinding("out", EdgeDirection.Outbound));
 
-        await using var c = host.CreateClient();
-        await c.ConnectAsync();
-        await c.ControlConnection.InvokeAsync("Register", "C", "v-test");
+        // C is a replica that announces itself, with a TransportR client, and never answers a Launch.
+        await using var c = await FakeNode.StartAsync(host, "C");
+        c.OnLaunch = _ => new TaskCompletionSource<LaunchResult>().Task;
 
-        var result = await orchestrator.RunAsync(ChainSpec("run-ready-timeout")).WaitAsync(Bound);
+        var result = await orchestrator.RunAsync(ChainSpec("run-ready-timeout", a.Fragment, b.Fragment,
+            TestNode.FragmentOf("C", fixture.FragmentCJobPath, new EdgeBinding("in", EdgeDirection.Inbound)))).WaitAsync(Bound);
 
         Assert.Equal(RunOutcome.Failed, result.Outcome);
         Assert.Equal("C", result.Cause);
@@ -109,12 +107,12 @@ public class CoordinatorAbortTests
     /// throttled so the kill lands mid-stream, not before either edge has carried anything.
     /// </summary>
     /// <remarks>
-    /// Disposal unregisters the node before it closes, so <c>FragmentLost</c> fires at once through
-    /// <c>NodeRegistry.Withdraw</c>; the disconnect grace period a node that dies without saying so
-    /// waits out is covered by <c>NodeRegistryTests</c> alone, since no in-process node can drop its
+    /// Disposal says the replica is leaving before it closes, so <c>ReplicaLost</c> fires at once through
+    /// <c>ReplicaRegistry.Leave</c>; the disconnect grace period a node that dies without saying so
+    /// waits out is covered by <c>ReplicaRegistryTests</c> alone, since no in-process node can drop its
     /// connection without going through its own disposal.
-    /// Proves that <c>FragmentLost</c> is what ends the execution-phase wait and resolves the run
-    /// (confirmed by temporarily disabling the <c>abort.Cancel()</c> call it drives - the run then
+    /// Proves that <c>ReplicaLost</c> is what ends the execution-phase wait and resolves the run
+    /// (confirmed by temporarily disabling the <c>abort</c> it drives - the run then
     /// hangs until <c>Bound</c> and the test fails), and that the result names B correctly, quickly.
     /// It does <b>not</b> isolate <c>ITransferTerminator.TerminateAsync</c> as what unblocks A and C:
     /// disposing <see cref="PipelineNode"/> in-process closes its own data-plane connections cleanly,
@@ -138,7 +136,7 @@ public class CoordinatorAbortTests
             new EdgeBinding("in", EdgeDirection.Inbound), new EdgeBinding("out", EdgeDirection.Outbound));
         await using var c = await ConnectNode(host, fixture.FragmentCJobPath, "C", new EdgeBinding("in", EdgeDirection.Inbound));
 
-        var runTask = orchestrator.RunAsync(ChainSpec("run-vanish"));
+        var runTask = orchestrator.RunAsync(ChainSpec("run-vanish", a.Fragment, b.Fragment, c.Fragment));
 
         var deadline = DateTime.UtcNow + Bound;
         while (!b.IsLaunched)
@@ -193,7 +191,7 @@ public class CoordinatorAbortTests
 
             using var cts = new CancellationTokenSource();
             var runTask = orchestrator.RunAsync(new RunSpec("run-silent-cancel",
-                [new FragmentPin("A"), new FragmentPin("B")], [new RunEdge("A", "out", "B", "in")]), cts.Token);
+                [a.Fragment, b.Fragment], [new RunEdge("A", "out", "B", "in")]), cts.Token);
 
             var deadline = DateTime.UtcNow + Bound;
             while (!(a.IsLaunched && b.IsLaunched))
@@ -221,21 +219,18 @@ public class CoordinatorAbortTests
     }
 
     /// <summary>
-    /// Two live instances of "A" - the same job, hence the same version, so instance alignment
-    /// passes and admission is free to pick either. <see cref="RunOrchestrator.OnFragmentLost"/>
-    /// (untouched by this lot) already discriminates a <c>FragmentLost</c> report by comparing its
-    /// ClientId against the one this run actually admitted; this proves that path for real, against a
-    /// fragment name with more than one live instance - the shape the pre-lot <c>NodeRegistry</c>
-    /// could not even represent.
+    /// Two replicas of the node "A": admission is free to pick either. The orchestrator compares a lost replica
+    /// with the one it placed the fragment on; this proves that path for real, against a node with more than one
+    /// replica: the one that was not placed can go without touching the run.
     /// </summary>
     [Fact]
-    public async Task ANonSelectedInstanceOfAnAlignedFragmentName_CanDropWithoutAffectingAnInFlightRun()
+    public async Task ANonSelectedReplicaOfANode_CanGoWithoutAffectingAnInFlightRun()
     {
         using var fixture = ChainFixture.Create(rowCount: 1_000);
         await using var host = await CoordinatorTestHost.StartAsync(
             o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] });
         var orchestrator = host.Host.Services.GetRequiredService<IRunOrchestrator>();
-        var registry = host.Host.Services.GetRequiredService<INodeRegistry>();
+        var registry = host.Host.Services.GetRequiredService<ReplicaRegistry>();
 
         var a1 = await ConnectNode(host, fixture.FragmentAJobPath, "A", new EdgeBinding("out", EdgeDirection.Outbound));
         var a2 = await ConnectNode(host, fixture.FragmentAJobPath, "A", new EdgeBinding("out", EdgeDirection.Outbound));
@@ -243,10 +238,10 @@ public class CoordinatorAbortTests
             new EdgeBinding("in", EdgeDirection.Inbound), new EdgeBinding("out", EdgeDirection.Outbound));
         await using var c = await ConnectNode(host, fixture.FragmentCJobPath, "C", new EdgeBinding("in", EdgeDirection.Inbound));
 
-        var lost = new List<(string Fragment, Guid ClientId)>();
-        registry.FragmentLost += (fragment, clientId) => lost.Add((fragment, clientId));
+        var lost = new List<ReplicaKey>();
+        registry.ReplicaLost += lost.Add;
 
-        var runTask = orchestrator.RunAsync(ChainSpec("run-redundant-a"));
+        var runTask = orchestrator.RunAsync(ChainSpec("run-redundant-a", a1.Fragment, b.Fragment, c.Fragment));
 
         var deadline = DateTime.UtcNow + Bound;
         while (!a1.IsLaunched && !a2.IsLaunched)
@@ -257,12 +252,11 @@ public class CoordinatorAbortTests
         // Whichever of the two admission happened to pick keeps running the actual chain; the other
         // never receives Launch at all, and is the one this test drops.
         var (selected, notSelected) = a1.IsLaunched ? (a1, a2) : (a2, a1);
-        var notSelectedClientId = notSelected.ClientId;
 
         await notSelected.DisposeAsync(); // the whole non-selected instance vanishes - never wired, never launched
         await Task.Delay(500); // the withdrawal has long been processed
 
-        Assert.Contains(lost, e => e.Fragment == "A" && e.ClientId == notSelectedClientId);
+        Assert.Equal([notSelected.Key], lost);
 
         var result = await runTask.WaitAsync(Bound);
 

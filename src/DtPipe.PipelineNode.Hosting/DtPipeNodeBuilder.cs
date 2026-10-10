@@ -18,11 +18,11 @@ public sealed record BrickDeclaration(string Id, BrickKind Kind, string Title, s
 public sealed record NodeVariable(string Name, string Value, string? Description, string? Engine);
 
 /// <summary>
-/// Why a data node must not run <paramref name="deployment"/>'s job, or <c>null</c> when it may. A host registers
+/// Why a data node must not run <paramref name="fragment"/>'s job as written, or <c>null</c> when it may. A host registers
 /// one with <see cref="DtPipeNodeBuilder.WithFragmentGate"/> to run fragments that are no brick of its own;
 /// the node still reads every branch against the structure rule of <c>BrickRules</c> only if the gate does.
 /// </summary>
-public delegate string? FragmentGate(FragmentDeployment deployment, IReadOnlyList<BrickForm> bricks);
+public delegate string? FragmentGate(FragmentSpec fragment, IReadOnlyList<BrickForm> bricks);
 
 /// <summary>What a named request hands its handler: the request's payload, and a way to run dtpipe as the node's own children do.</summary>
 public sealed class NodeRequestContext
@@ -95,7 +95,7 @@ public sealed class DtPipeNodeBuilder
     }
 
     /// <summary>
-    /// Replaces the check a data node makes of a fragment before it registers. The host's own word, like
+    /// Replaces the check a data node makes of a fragment before it runs it. The host's own word, like
     /// <see cref="FragmentPolicy"/>: nothing the coordinator sends reaches it. The node announces the
     /// <see cref="NodeAnnouncement.RawFragments"/> capability.
     /// </summary>

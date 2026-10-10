@@ -83,6 +83,14 @@ public sealed class RightsStore
                 ?? throw new ConflictException($"Node '{node}' has no identity in the rights: nothing says who may host its fragments.");
     }
 
+    /// <summary>The groups the rights give the node named <paramref name="node"/> now, which its replicas' data plane clients must hold.</summary>
+    public IReadOnlyList<string> GroupsOf(string node)
+    {
+        lock (_lock)
+            return _doc.Identities.FirstOrDefault(i => i.Name == node)?.Groups
+                ?? throw new ConflictException($"Node '{node}' has no identity in the rights: nothing says which groups it holds.");
+    }
+
     public IReadOnlyList<string> Groups()
     {
         lock (_lock)

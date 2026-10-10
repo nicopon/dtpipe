@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using DtPipe.Coordinator;
 using DtPipe.Coordinator.Tests.Infrastructure;
+using DtPipe.PipelineNode.Tests.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using TransportR.FlowControl;
 using Xunit;
@@ -22,18 +23,12 @@ public class FaultVerdictTests
     // macOS/Darwin value (SDK sys/signal.h), same pattern as CoordinatorDrivenTests.
     private const int SIGKILL = 9;
 
-    private static async Task<PipelineNode> ConnectNode(
+    private static Task<TestNode> ConnectNode(
         CoordinatorTestHost host, string jobPath, string fragmentName, params EdgeBinding[] edges) =>
-        await PipelineNode.ConnectAsync(new PipelineNodeOptions
-        {
-            HubUrl = host.Url,
-            DtPipeExecutable = DtPipeExecutableLocator.Path,
-            FragmentJobPath = jobPath,
-            Edges = edges,
-        }, fragmentName);
+        TestNode.StartAsync(host, fragmentName, jobPath, edges);
 
-    private static RunSpec PairSpec(string runId) => new(
-        runId, [new FragmentPin("A"), new FragmentPin("B")], [new RunEdge("A", "out", "B", "in")]);
+    private static RunSpec PairSpec(string runId, TestNode a, TestNode b) => new(
+        runId, [a.Fragment, b.Fragment], [new RunEdge("A", "out", "B", "in")]);
 
     /// <summary>
     /// Two producers feed a merging consumer. A produces nothing until its slow source ends (an
@@ -66,7 +61,7 @@ public class FaultVerdictTests
                 new EdgeBinding("a", EdgeDirection.Inbound), new EdgeBinding("b", EdgeDirection.Inbound));
 
             var runTask = orchestrator.RunAsync(new RunSpec("run-local-fault",
-                [new FragmentPin("A"), new FragmentPin("B"), new FragmentPin("C")],
+                [a.Fragment, b.Fragment, c.Fragment],
                 [new RunEdge("A", "agg", "C", "a"), new RunEdge("B", "main", "C", "b")]));
 
             var deadline = DateTime.UtcNow + Bound;
@@ -120,7 +115,7 @@ public class FaultVerdictTests
             await using var b = await ConnectNode(host, consumerJob, "B", new EdgeBinding("in", EdgeDirection.Inbound));
 
             var runTask = orchestrator.RunAsync(new RunSpec("run-child-death",
-                [new FragmentPin("A"), new FragmentPin("B")], [new RunEdge("A", "agg", "B", "in")]));
+                [a.Fragment, b.Fragment], [new RunEdge("A", "agg", "B", "in")]));
 
             var deadline = DateTime.UtcNow + Bound;
             while (!(a.IsLaunched && b.IsLaunched))
@@ -166,7 +161,7 @@ public class FaultVerdictTests
 
         host.Host.Services.GetRequiredService<FlowControlOptions>().Groups["test"] = new GroupAccess { CanSendTo = [] };
 
-        var result = await orchestrator.RunAsync(PairSpec("run-refused-transfer")).WaitAsync(Bound);
+        var result = await orchestrator.RunAsync(PairSpec("run-refused-transfer", a, b)).WaitAsync(Bound);
 
         Assert.Equal(RunOutcome.Failed, result.Outcome);
         Assert.False(result.CauseIsUnresponsive);

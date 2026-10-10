@@ -18,7 +18,8 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   under the name its connection announced. A token no identity knows is no node: its host waits in
   `EnrollmentQueue` (bounded, expired, never evicting a waiting subject), and what it proposes is
   untrusted text, cut here and escaped by the page. A disabled identity is refused. A node whose
-  identity is gone or renamed leaves the inventory with its last replica.
+  identity is gone leaves the inventory with its last replica; one that is renamed is the same node under
+  its new name, once its host announces again.
   `[local: DtPipe.Coordinator.Server.Tests, the lab's smoke.py rights]`
 - **A person's rights are the server's configuration, never the token's.** People sign in through
   the provider (`Coordinator:Ui:ClientId`, a confidential authorization-code client, PKCE, the code
@@ -119,40 +120,42 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   `CLAUDE.md`); the pages list, read, restore, place and run it, and show its job read only. A
   brick's canonical form and version are pinned by `BrickFormTests`: changing either gives every
   brick a new version. `[local: DtPipe.Coordinator.Server.Tests, the lab's smoke.py, ui_check.py]`
-- **A `PipelineNode` serves one run.** `DeploymentManager` re-arms every fragment of a pipeline
-  after its run, and holds that deployment's gate from before it reports the run finished until
-  the fragments are registered again, so no run starts on a spent instance.
-  `[local: the lab's smoke.py]`
+- **A deployment is the coordinator's, and nothing of it is left on a node.** `DeployAsync` asks every
+  connected replica of each node whether it would run the fragments (`Check`, answered, spawning nothing) and
+  is ready when each fragment has a replica that said yes and that admission could place a run on. One
+  replica that refuses does not fail it while another can run the fragment (a rolling update leaves some at
+  the old brick); it fails at once only when every replica asked has answered and none said yes, naming the
+  node and why (`refused by <node>: …`), and a refused deployment is not kept. A replica that arrives
+  later is as good as one that was asked, and one that goes takes nothing with it: what decides a run is
+  admission, at the run. A deployment's gate is held while it is deployed or removed; a run passes it to
+  read the state and does not hold it. `[local: DeploymentManagerTests, the lab's smoke.py]`
 - **One run at a time per data node, first come first served.** `RunDispatch` decides, at each
   enqueue and each finish, which waiting runs `DeploymentManager` sends: one that no run already
   sent, and no older run still waiting, shares a data node with. A run's data nodes are its plan's
   fragment nodes that the inventory does not list as runners; a node it does not know counts
-  (fail-closed). A run holds them from being sent until it finishes, its wait on its deployment's
-  gate included, and is never sent twice. A runner never counts, so its fragments of two runs share
+  (fail-closed). A run holds them from being sent until it finishes, and is never sent twice. A runner never counts, so its fragments of two runs share
   its host with no resource bound. With no id, `/api/runs/cancel` refuses (409) while several runs
   are in flight rather than guess. `[local: RunDispatchTests, the lab's smoke.py library and sandbox]`
-- **Ready means the main instance is registered.** A node unregisters from the coordinator before
-  it disconnects, so a closed instance is never left for admission to pick.
-  `WaitRegisteredAsync` requires the main instance in the deployment's current generation, held by
-  the registry at the fragment's version. Every `Deploy` and `Rearm` carries a new generation,
-  echoed in `FragmentStatus`. `[local: the lab's smoke.py]`
-- **A node is one identity carried by one or more replicas.** Each replica is a host with its own
-  control connection, told apart by the instance id it announces (a host that announces none, by its
-  connection); the node is online while any replica is connected. What the node announces, and where a
-  deployment, a re-arming and a read go, is its oldest connected replica's; `Undeploy` and `Kill` go to
-  every replica. `NodeInventory.Disconnected` drops one replica with what it last reported: a killed host
-  would otherwise leave its fragments "Launched" for good. A host that only lost its connection reports
-  them all again when it announces itself on its new one, and the connection it left, which no replica
-  owns any more, changes nothing. `Disconnect` interrupts the connections of every replica of an
-  identity. `Origin`, where a replica says it runs, is untrusted text: cut at `Announce`, the ground of
-  no decision. `[local: NodeChannelHubTests; the lab's tools/campaign.py F3]`
-  `[unchecked: Undeploy and Kill reaching every replica]`
-- **A run names the subject of each fragment's node.** `DeploymentManager` reads it from the rights when
-  the run starts (`RightsStore.SubjectOf`: the client id of the identity named after the fragment's
-  node, the `sub` its tokens carry) and puts it in each `FragmentPin`; admission then takes only
-  instances attested under it. A node that no identity carries any more refuses the run
-  (`refused`), and the server never sets `AdmissionOptions.AdmitUnboundFragments`.
-  `[local: RightsStoreTests, the lab's smoke.py rights - a foreign registration]`
+- **A node is one identity carried by one or more replicas, and `ReplicaRegistry` is the one table of
+  them.** `NodeInventory` adds what the registry does not hold: the name the rights give the node, the
+  groups, the last announcement of a node with no replica connected, and the page's view. The node is
+  online while any replica is connected, and shows the announcement of the connected replica that
+  arrived last (a reconnection of the same host does not change which); `NodeView.Replicas` lists each
+  with the runs placed on it and a hash of its bricks, and `ReplicasDisagree` says two connected replicas
+  offer different bricks. A read (a preview, a sample, a sink check, a lab request) goes to one connected
+  replica, the one with the fewest runs, and is not tried on a second when it fails. `Disconnect` interrupts
+  the connections of every replica of an identity, and `PUT /api/rights/identities/{id}` does it when the
+  name or the **groups** change: a replica's data plane client holds the groups it registered with, and until
+  it registers again admission places no run on it. `Origin`, where a replica says it runs, is untrusted
+  text: cut at `Announce`, the ground of no decision.
+  `[local: NodeChannelHubTests; the lab's tools/campaign.py F3, S7]`
+- **A run names the subject and the groups of each fragment's node.** `DeploymentManager` reads them from the
+  rights when the run starts (`RightsStore.SubjectOf`: the client id of the identity named after the
+  fragment's node, the `sub` its tokens carry; `GroupsOf`) and puts them in each `RunFragment`; admission
+  then places the run only on replicas whose connection attests that subject and whose data plane client holds
+  exactly those groups. A node that no identity carries any more refuses the run (`refused`), and the server
+  never sets `AdmissionOptions.AdmitUnboundFragments`.
+  `[local: RightsStoreTests, DeploymentManagerTests, the lab's smoke.py rights - a foreign replica]`
   `[unchecked: the refused run of a node without an identity]`
 - **One source of rights.** `RightsStore` holds the identities and the flow matrix;
   `RightsFlowControl` replaces TransportR's `IFlowControlService`, so the hub checks the matrix as
@@ -170,8 +173,7 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   (`allowRaw`) sends a job as written, and only to a host that announces `raw-fragments`; the library
   and `AutoPlacer` never do. A saved plan whose fragments do not say how they reach their node
   (`FragmentForm`) is read as no plan. `BrickRules.Processors` is the one list of processors, shared with `JobGraph`.
-  `DeploymentManager.WaitRegisteredAsync` fails on the first `Failed` main instance of the current
-  generation and `DeployAsync` then undeploys the plan's fragments. `[local: the lab's smoke.py
+  The replica decides again at `Launch`, with the same function. `[local: the lab's smoke.py
   bricks, sandbox]`
 - The pages are served from the `wwwroot` published beside the binary (`dotnet publish`): `index.html`
   + `js/` (the coordinator's views, ES modules, no build) and `lab/` (the Lab view, lab mode only).

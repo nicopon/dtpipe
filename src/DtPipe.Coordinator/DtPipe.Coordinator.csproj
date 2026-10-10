@@ -16,6 +16,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The node channel's messages and the one composition of a fragment's job, shared with every node host. -->
+    <ProjectReference Include="..\DtPipe.Coordinator.Contracts\DtPipe.Coordinator.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- TransportR.FlowControl (DefaultFlowControlService, the plan's edge check) ships inside
          this package's assembly now; there is no separate TransportR.FlowControl package. -->
     <PackageReference Include="TransportR" Version="0.3.1" />

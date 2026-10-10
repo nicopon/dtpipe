@@ -15,12 +15,12 @@ public class FragmentIntakeTests
 
     private static readonly FragmentUnit[] Units = [new("anonymize", FragmentUnitKind.Inbound), new("load", FragmentUnitKind.Sink, "dim", "anonymize")];
 
-    private static FragmentDeployment Planned(string? version = null) => new(
-        "p@node-4", "", [], "g1", Units: Units, Version: version ?? FragmentJob.VersionOf(FragmentJob.Compose(Units, (id, kind) => Declared(id, kind)).Yaml!));
+    private static FragmentSpec Planned(string? version = null) => new(
+        "p@node-4", version ?? FragmentJob.VersionOf(FragmentJob.Compose(Units, (id, kind) => Declared(id, kind)).Yaml!), [], Units: Units);
 
-    private static (string? Yaml, string? Reason) Resolve(FragmentDeployment deployment, FragmentPolicy policy = FragmentPolicy.Bricks, FragmentGate? gate = null,
+    private static (string? Yaml, string? Reason) Resolve(FragmentSpec fragment, FragmentPolicy policy = FragmentPolicy.Bricks, FragmentGate? gate = null,
         FragmentJob.BranchOfBrick? branch = null) =>
-        FragmentIntake.JobOf(deployment, policy, gate, branch ?? ((id, kind) => Declared(id, kind)), []);
+        FragmentIntake.JobOf(fragment, policy, gate, branch ?? ((id, kind) => Declared(id, kind)), []);
 
     [Fact]
     public void A_data_node_composes_the_job_the_coordinator_planned_from_its_own_bricks()
@@ -71,7 +71,7 @@ public class FragmentIntakeTests
     [Fact]
     public void A_runner_runs_a_job_as_written()
     {
-        var (yaml, reason) = Resolve(new FragmentDeployment("p@runner-1", "a:\n  input: generate:5\n", [], "g1"), FragmentPolicy.AnyFragment);
+        var (yaml, reason) = Resolve(new FragmentSpec("p@runner-1", "v", [], Yaml: "a:\n  input: generate:5\n"), FragmentPolicy.AnyFragment);
 
         Assert.Null(reason);
         Assert.Contains("generate:5", yaml);
@@ -80,7 +80,7 @@ public class FragmentIntakeTests
     [Fact]
     public void A_data_node_takes_no_job_as_written_unless_its_host_registered_a_gate()
     {
-        var job = new FragmentDeployment("p@node-1", "a:\n  input: csv:/etc/hosts\n", [], "g1");
+        var job = new FragmentSpec("p@node-1", "v", [], Yaml: "a:\n  input: csv:/etc/hosts\n");
 
         var strict = Resolve(job);
         var lax = Resolve(job, gate: (_, _) => null);

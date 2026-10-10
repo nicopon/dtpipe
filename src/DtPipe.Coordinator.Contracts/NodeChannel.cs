@@ -1,23 +1,33 @@
+using System.Text.Json.Serialization;
+
 namespace DtPipe.Coordinator.Contracts;
 
 /// <summary>
 /// The control channel between a node host and the coordinator, a SignalR hub separate from the
-/// coordinator's TransportR hub: it places fragments on hosts and reports what they do. Run
-/// admission, launch and wiring never travel here; they belong to the TransportR hub.
+/// coordinator's TransportR hub: it places runs on replicas, wires them and reports what they do. The
+/// TransportR hub carries only the data plane. Everything the coordinator sends is an invocation the
+/// host answers, never a push: the client handles pushes one after the other, so a push that takes
+/// time delays the next. A handler answers as soon as it has received the message and never waits for
+/// a run or for a transfer.
 /// </summary>
 public static class NodeChannel
 {
     public const string Path = "/node-channel";
 
-    // Node host -> coordinator.
+    // Node host -> coordinator. Who calls is the connection, never an argument. Exited is answered
+    // (ExitedAck); Leave says this host is going away for good.
     public const string Announce = nameof(Announce);
-    public const string ReportFragment = nameof(ReportFragment);
+    public const string Leave = nameof(Leave);
+    public const string Exited = nameof(Exited);
     public const string ReportLog = nameof(ReportLog);
 
-    // Coordinator -> node host. Kill is fault injection: it ends a fragment's child outright.
-    public const string Deploy = nameof(Deploy);
-    public const string Undeploy = nameof(Undeploy);
-    public const string Rearm = nameof(Rearm);
+    // Coordinator -> node host, answered. Launch spawns a fragment's child (LaunchResult); Wire hands
+    // the child an edge's transfer; Cancel ruptures a run; Check says whether the host would run a
+    // fragment (FragmentCheck), spawning nothing. Kill is fault injection: it ends a run's child outright.
+    public const string Launch = nameof(Launch);
+    public const string Wire = nameof(Wire);
+    public const string Cancel = nameof(Cancel);
+    public const string Check = nameof(Check);
     public const string Kill = nameof(Kill);
 
     // Coordinator -> node host, answered: a few rows of a brick, read by the node that owns it.
@@ -61,12 +71,14 @@ public enum NodeRole { Data, Runner }
 /// carried by several hosts, its replicas: <see cref="InstanceId"/> is chosen by the host process once and
 /// sent with every announcement, so a reconnection is told from a second replica; a host that sends none
 /// is told apart by its connection. <see cref="Origin"/> says where the host runs (machine and process),
-/// for people to read: untrusted text, never a ground for a decision.
+/// for people to read: untrusted text, never a ground for a decision. <see cref="DataPlaneClientId"/> is the
+/// TransportR client the host moves a run's bytes with: the coordinator takes it only when that client is
+/// registered under the same subject as the connection, and opens every transfer to it.
 /// </summary>
 public sealed record NodeAnnouncement(
     string Name, string Description, IReadOnlyList<DatasetInfo> Datasets, NodeRole Role,
     IReadOnlyList<BrickInfo> Bricks, IReadOnlyList<string>? Capabilities = null, string? DtpipeVersion = null,
-    Guid? InstanceId = null, string? Origin = null)
+    Guid? InstanceId = null, string? Origin = null, Guid? DataPlaneClientId = null)
 {
     /// <summary>The capability of a host that accepts a fragment written as a job, not only one made of its bricks.</summary>
     public const string RawFragments = "raw-fragments";
@@ -166,22 +178,36 @@ public enum FragmentUnitKind
 public sealed record FragmentUnit(string Key, FragmentUnitKind Kind, string? Brick = null, string? From = null);
 
 /// <summary>
-/// <see cref="Instance"/> tells two deployments of one fragment name apart on the same node: a
-/// second instance is how admission's refusal of misaligned versions is shown and tested.
-/// <see cref="Generation"/> is echoed in every <see cref="FragmentStatus"/>, and renewed by each
-/// <c>Rearm</c>, so the coordinator never reads a status that predates its last command as current.
-/// A fragment for a data node is its <see cref="Units"/>, in order, with the <see cref="Version"/> of the job
-/// they compose to (<see cref="FragmentJob"/>): the node composes the job itself and refuses it when its
-/// bricks no longer give that version. A runner takes <see cref="Yaml"/>, the job as written.
+/// A fragment as a host is asked to run it, or to say whether it would: the same record for <c>Launch</c>
+/// and <c>Check</c>, so a check verifies what a launch will. A fragment for a data node is its
+/// <see cref="Units"/>, in order, with the <see cref="Version"/> of the job they compose to
+/// (<see cref="FragmentJob"/>): the host composes the job itself and refuses it when its bricks no longer
+/// give that version. A runner takes <see cref="Yaml"/>, the job as written.
 /// </summary>
-public sealed record FragmentDeployment(
-    string Fragment, string Yaml, IReadOnlyList<FragmentEdge> Edges, string Generation, string Instance = "main",
-    IReadOnlyList<FragmentUnit>? Units = null, string? Version = null);
+public sealed record FragmentSpec(
+    string Fragment, string Version, IReadOnlyList<FragmentEdge> Edges,
+    IReadOnlyList<FragmentUnit>? Units = null, string? Yaml = null);
 
-public enum FragmentState { Registering, Registered, Launched, Exited, Failed, Undeployed }
+/// <summary>What <c>Launch</c> asks: run <see cref="Spec"/> as part of the run <see cref="RunId"/>.</summary>
+public sealed record LaunchRequest(string RunId, FragmentSpec Spec);
 
-public sealed record FragmentStatus(
-    string Node, string Fragment, string Instance, string Generation, FragmentState State, string? Version, Guid? ClientId,
-    int? ExitCode, string? Message);
+/// <summary>What <c>Launch</c> answers: the child is spawned and its edges can be wired, or why the host refused to run the fragment.</summary>
+public sealed record LaunchResult(bool Started, string? Refusal = null);
+
+/// <summary>What <c>Check</c> answers: whether the host would run the fragment, and why not.</summary>
+public sealed record FragmentCheck(bool Ok, string? Reason = null);
+
+/// <summary>What <c>Exited</c> carries: how one run of a fragment ended.</summary>
+public sealed record FragmentExit(
+    string RunId, string Fragment, int ExitCode, string Origin, string? FirstFault, IReadOnlyDictionary<string, long> RowCounts);
+
+/// <summary>
+/// What <c>Exited</c> answers. <see cref="NotAdmitted"/>: the coordinator did not admit this host for that
+/// fragment of that run (or the run is over), and a report sent again would be answered the same.
+/// <see cref="UnknownConnection"/>: the connection announced nothing the coordinator accepted, so the host
+/// keeps its report and sends it once after its next announcement.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<ExitedAck>))]
+public enum ExitedAck { Accepted, NotAdmitted, UnknownConnection }
 
 public sealed record NodeLogLine(string Node, string? Fragment, string Level, string Message);

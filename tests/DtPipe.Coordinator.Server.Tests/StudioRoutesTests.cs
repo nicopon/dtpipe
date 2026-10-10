@@ -35,10 +35,13 @@ public sealed class StudioRoutesTests : IDisposable
     private NodeInventory Announce(bool online = true)
     {
         var inventory = _host.Services.GetRequiredService<NodeInventory>();
-        inventory.Announce("c1", new NodeAnnouncement("n1", "", [], NodeRole.Data,
+        var registry = _host.Services.GetRequiredService<ReplicaRegistry>();
+        var announcement = new NodeAnnouncement("n1", "", [], NodeRole.Data,
             [new BrickInfo("orders", BrickKind.Source, "Orders", "every order", Source, [new BrickColumn("id", "BIGINT", false)], null)],
-            DtpipeVersion: "9.9.9+abc"), "n1", ["g"], () => { });
-        if (!online) inventory.Disconnected("c1");
+            DtpipeVersion: "9.9.9+abc");
+        registry.Announce("c1", "n1", announcement, ["g"], () => { });
+        inventory.Announced("n1", "n1", announcement, ["g"]);
+        if (!online) registry.Disconnected("c1");
         return inventory;
     }
 

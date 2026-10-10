@@ -148,8 +148,9 @@ def children():
     return [int(l.split(None, 1)[0]) for l in out.splitlines() if "release/dtpipe --job" in l and witness not in l]
 
 
-def fragment_states():
-    return {f["fragment"]: f["state"] for n in S.call("/api/nodes") for f in n["fragments"]}
+def replica_runs():
+    """The runs the coordinator still counts on a replica, by node and replica: what a replica holds is the runs placed on it."""
+    return {f"{n['name']}/{r['id']}": r["runs"] for n in S.call("/api/nodes") for r in n["replicas"] if r["runs"]}
 
 
 def hosts_online():
@@ -265,10 +266,9 @@ def judge(rec, pid, final, elapsed, expect, bound, cause_of=None):
     left = children()
     if left:
         inv["I3"] = f"{len(left)} fragment child process(es) alive 10s after the verdict"
-    states = fragment_states()
-    stuck = [f for f, s in states.items() if s in ("Launched", "Running")]
-    if stuck:
-        inv["I6"] = f"fragments still {sorted(set(states[f] for f in stuck))}: {stuck[:3]}"
+    held = replica_runs()
+    if held:
+        inv["I6"] = f"replicas still hold runs 10s after the verdict: {held}"
     queue = [r for r in S.call("/api/runs/queue") if r["state"] == "running"]
     if queue:
         inv["I6"] = (inv.get("I6", "") + f" queue still running {[r['runId'] for r in queue]}").strip()
@@ -888,6 +888,23 @@ def check_S1():
     return line[:160]
 
 
+def check_smoke_rights(label, what):
+    """One of the rights pass's checks, run alone: the coordinator under a stranger's report, a stolen client."""
+    out = subprocess.run([sys.executable, os.path.join(LAB, "smoke.py"), URL, DTPIPE, STATE, "rights"], capture_output=True, text=True, timeout=600)
+    line = next((l for l in out.stdout.splitlines() if f"rights   {label}" in l and (l.startswith("PASS") or l.startswith("FAIL"))), "")
+    if not line.startswith("PASS"):
+        raise Violation(f"{what}: {line or out.stdout[-200:]}")
+    return line[:200]
+
+
+def check_S6():
+    return check_smoke_rights("a foreign report", "a report for a run the sender was not placed on")
+
+
+def check_S7():
+    return check_smoke_rights("a stolen data plane client", "a data plane client announced under another subject")
+
+
 def cell_S():
     for rep in range(REPS):
         security_trial("S1 unknown host announcement", rep, check_S1)
@@ -895,6 +912,10 @@ def cell_S():
         security_trial("S2 unauthenticated entry points", rep, check_S2)
     for rep in range(REPS):
         security_trial("S4 peer-initiated transfer", rep, check_S4)
+    for rep in range(REPS):
+        security_trial("S6 report from a replica not placed on the run", rep, check_S6)
+    for rep in range(REPS):
+        security_trial("S7 data plane client of another identity", rep, check_S7)
 
 
 SHORT_TOKEN = 20

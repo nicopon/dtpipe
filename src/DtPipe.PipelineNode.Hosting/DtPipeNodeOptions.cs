@@ -48,6 +48,13 @@ public sealed class DtPipeNodeOptions
 
     public FragmentPolicy Policy { get; set; } = FragmentPolicy.Bricks;
 
+    /// <summary>
+    /// How long a run this host launched may wait for the coordinator to wire its edges before the host abandons it. The
+    /// coordinator wires a run at once after launching it; a run still unwired after this has lost its coordinator, and
+    /// would otherwise keep its dtpipe child until the host stops. Only the wait for the last <c>Wire</c> is bounded.
+    /// </summary>
+    public TimeSpan UnwiredRunTimeout { get; set; } = TimeSpan.FromMinutes(5);
+
     public NodeOidcOptions Oidc { get; set; } = new();
 
     /// <summary>Variables every dtpipe child sees, which a fragment resolves through <c>${{NAME}}</c>. Their values never leave the node.</summary>
@@ -65,5 +72,6 @@ public sealed class DtPipeNodeOptions
         if (string.IsNullOrWhiteSpace(Oidc.ClientId)) yield return "Oidc:ClientId is required.";
         if (string.IsNullOrEmpty(Oidc.ClientSecret)) yield return "Oidc:ClientSecret is required.";
         if (string.IsNullOrWhiteSpace(DtPipe)) yield return "DtPipe is required.";
+        if (UnwiredRunTimeout <= TimeSpan.Zero) yield return "UnwiredRunTimeout must be positive.";
     }
 }

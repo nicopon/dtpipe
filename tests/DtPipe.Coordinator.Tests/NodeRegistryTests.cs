@@ -109,22 +109,6 @@ public class NodeRegistryTests
     /// Registering the same fragment name from two live connections is no longer refused: it is
     /// exactly what a second, redundant instance registering looks like on the wire.
     /// </summary>
-    [Fact]
-    public async Task Register_SameFragmentFromTwoLiveConnections_BothBecomeLiveInstances()
-    {
-        await using var host = await CoordinatorTestHost.StartAsync(_ => { });
-        await using var a = host.CreateClient();
-        await using var b = host.CreateClient();
-        await a.ConnectAsync();
-        await b.ConnectAsync();
-
-        await a.ControlConnection.InvokeAsync("Register", "B", V1);
-        await b.ControlConnection.InvokeAsync("Register", "B", V1);
-
-        var registry = host.Host.Services.GetRequiredService<INodeRegistry>();
-        Assert.Equal(2, registry.GetLiveInstances("B").Count);
-    }
-
     /// <summary>
     /// Models the reconnect's Register landing before the old connection's own OnDisconnectedAsync
     /// has run: the entry is still live (no Unregister happened yet), but it is the very same

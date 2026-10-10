@@ -158,9 +158,6 @@ export async function start() {
       case "deploy":
         if (data.state === "failed") addLog({ node: "coordinator", level: "Error", message: `${data.pipelineId}: deployment failed: ${data.message}` });
         break;
-      case "fragment":
-        addLog({ node: data.node, fragment: data.fragment, level: data.state === "Failed" ? "Warning" : "Information", message: `${data.state}${data.exitCode != null ? ` (exit ${data.exitCode})` : ""}${data.message ? ` · ${data.message}` : ""}` });
-        break;
       case "log": addLog({ node: data.node, fragment: data.fragment, level: data.level, message: data.message }); break;
       case "bytes": store.bytes = data; emit("bytes"); break;
       case "library": emit("library"); break;

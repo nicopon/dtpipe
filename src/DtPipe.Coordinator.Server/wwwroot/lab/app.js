@@ -11,7 +11,6 @@ const state = {
   pipeline: null,        // { id, title, description, yaml, cuts, placement } as proposed
   cuts: [],
   placement: {},
-  pins: {},
   plan: null,            // last /api/plan answer for the current layout
   deployed: null,        // the plan the coordinator holds
   deployState: "",
@@ -91,7 +90,6 @@ function selectPipeline(entry, layout) {
   state.pipeline = { ...entry };
   state.cuts = structuredClone(layout?.cuts ?? entry.cuts ?? []);
   state.placement = { ...(layout?.placement ?? entry.placement ?? {}) };
-  state.pins = {};
   $("pipeline-select").value = entry.id;
   $("pipeline-description").textContent = entry.description || "";
   $("yaml-text").value = entry.yaml;
@@ -115,13 +113,13 @@ function renderNodes() {
       </div>
       <div class="hint" style="margin:2px 0">${esc(n.description)}</div>
       ${n.datasets.map((d) => `<div class="dataset"><code>\${{${esc(d.variable)}}}</code> ${esc(d.engine)} · ${esc(d.description)}</div>`).join("")}
-      ${n.fragments.map((f) => `
+      ${n.replicas.map((r) => `
         <div class="frag">
           <div class="frag-line">
-            <span>${esc(f.fragment)}${f.instance !== "main" ? ` <span class="chip">${esc(f.instance)}</span>` : ""}</span>
-            <span class="state ${esc(f.state)}">${esc(f.state)}${f.exitCode != null ? ` ${f.exitCode}` : ""}</span>
+            <span><code>${esc(r.id)}</code>${r.dtpipeVersion ? ` <span class="chip">dtpipe ${esc(r.dtpipeVersion)}</span>` : ""}</span>
+            <span class="state ${r.connected ? "Registered" : "Failed"}">${r.connected ? "connected" : "away"}${r.runs ? ` · ${r.runs} run${r.runs > 1 ? "s" : ""}` : ""}</span>
           </div>
-          <div class="msg">v ${esc((f.version || "").slice(0, 10))}${f.message ? ` · ${esc(f.message)}` : ""}</div>
+          <div class="msg">${esc(r.origin ?? "")}${n.replicasDisagree ? ` · bricks ${esc(r.bricks)}` : ""}</div>
         </div>`).join("")}
     </div>`).join("") || `<p class="hint">No node connected yet. Start them with <code>./lab.sh up</code>.</p>`;
 
@@ -299,7 +297,7 @@ function renderPlan() {
   if (plan.warnings?.length) parts.push(`<ul class="msgs">${plan.warnings.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>`);
   if (plan.deployable) {
     parts.push(`<p class="ok-line">${plan.fragments.length} fragments, ${plan.edges.length} arrow edge(s)` +
-      (deployedHere ? (ready ? " — deployed, every fragment registered." : ` — deployed (${esc(state.deployState)}).`) : " — not deployed yet.") + `</p>`);
+      (deployedHere ? (ready ? " — deployed, every fragment has a replica that can run it." : ` — deployed (${esc(state.deployState)}).`) : " — not deployed yet.") + `</p>`);
   }
 
   for (const f of plan.fragments) {
@@ -311,14 +309,11 @@ function renderPlan() {
           <b>${esc(f.name)}</b>
           <span class="actions">
             <button class="small danger ghost" data-kill="${esc(f.name)}" ${deployedHere && running ? "" : "disabled"} title="Kill this fragment's dtpipe child, as a crashed host would">kill</button>
-            <button class="small ghost" data-variant="${esc(f.name)}" ${deployedHere && !running && ready && f.form === "Job" ? "" : "disabled"} title="Deploy a second instance whose job differs by a comment: admission then refuses the run as misaligned">+ misaligned instance</button>
           </span>
         </div>
         <div class="edges">${f.groups.length > 1 ? "groups" : "group"} ${esc(f.groups.join(" + "))} · in: ${inbound.map(esc).join(", ") || "—"} · out: ${outbound.map(esc).join(", ") || "—"} · version <code>${esc(f.version.slice(0, 12))}</code></div>
-        <details><summary>job and pin</summary>
+        <details><summary>job</summary>
           <pre>${esc(f.yaml)}</pre>
-          <div class="row" style="margin-top:6px"><span class="hint">Pin this run to version</span>
-            <input data-pin="${esc(f.name)}" placeholder="latest" value="${esc(state.pins[f.name] || "")}" class="mono"></div>
         </details>
       </div>`);
   }
@@ -361,9 +356,9 @@ function renderRun() {
 
 function renderStatus() {
   const pill = $("deploy-state");
-  const labels = { deploying: "deploying…", rearming: "re-arming fragments…", ready: "deployed · ready", failed: "deployment failed", variant: "deployed · extra instance" };
+  const labels = { deploying: "deploying…", ready: "deployed · ready", failed: "deployment failed" };
   pill.textContent = isRunning() ? `${state.run.runId} running` : (state.deployed ? `${state.deployed.pipelineId}: ${labels[state.deployState] || state.deployState || "deployed"}` : "nothing deployed");
-  pill.className = "pill " + (isRunning() || ["deploying", "rearming"].includes(state.deployState) ? "busy" : state.deployState === "failed" ? "off" : state.deployed ? "on" : "");
+  pill.className = "pill " + (isRunning() || state.deployState === "deploying" ? "busy" : state.deployState === "failed" ? "off" : state.deployed ? "on" : "");
   const b = state.bytes.total;
   const human = b > 1 << 30 ? (b / (1 << 30)).toFixed(2) + " GiB" : b > 1 << 20 ? (b / (1 << 20)).toFixed(1) + " MiB" : b > 1024 ? (b / 1024).toFixed(0) + " KiB" : b + " B";
   $("bytes").textContent = `hub ${human}${state.bytes.activeTransfers > 0 ? ` · ${state.bytes.activeTransfers} transfer(s)` : ""}`;
@@ -439,9 +434,6 @@ function connectEvents() {
           addLog({ node: "lab", level: data.state === "succeeded" ? "Information" : "Warning", message: `${data.runId} ${data.state}${data.refusal ? `: ${data.refusal}` : ""}` });
         }
         renderAll();
-        break;
-      case "fragment":
-        addLog({ node: data.node, fragment: data.fragment, level: data.state === "Failed" ? "Warning" : "Information", message: `${data.state}${data.exitCode != null ? ` (exit ${data.exitCode})` : ""}${data.message ? ` · ${data.message}` : ""}` });
         break;
       case "log":
         addLog({ node: data.node, fragment: data.fragment, level: data.level, message: data.message });
@@ -550,16 +542,10 @@ function bind() {
     replan();
   });
 
-  $("plan").addEventListener("input", (e) => {
-    const fragment = e.target.dataset.pin;
-    if (fragment !== undefined) state.pins[fragment] = e.target.value.trim();
-  });
   $("plan").addEventListener("click", async (e) => {
     const kill = e.target.closest("button[data-kill]");
-    const variant = e.target.closest("button[data-variant]");
     try {
       if (kill) await api(`/api/fragments/${encodeURIComponent(kill.dataset.kill)}/kill`, {});
-      if (variant) await api(`/api/fragments/${encodeURIComponent(variant.dataset.variant)}/variant`, {});
     } catch (err) { toast(err.message); }
   });
 
@@ -571,13 +557,11 @@ function bind() {
       const plan = await api("/api/deploy", planBody());
       state.deployed = plan;
       state.plan = plan;
-      state.pins = {};
     } catch (e) { toast(e.message); }
     renderAll();
   });
   $("run-btn").addEventListener("click", async () => {
-    const pins = Object.fromEntries(Object.entries(state.pins).filter(([, v]) => v));
-    try { state.run = await api("/api/runs", { pins, pipelineId: state.deployed?.pipelineId }); renderAll(); } catch (e) { toast(e.message); }
+    try { state.run = await api("/api/runs", { pipelineId: state.deployed?.pipelineId }); renderAll(); } catch (e) { toast(e.message); }
   });
   $("cancel-btn").addEventListener("click", () => {
     // Never without an id: with several runs in flight the server would refuse to guess.

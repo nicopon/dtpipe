@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="DtPipe.PipelineNode.Hosting.Tests" />
+    <InternalsVisibleTo Include="DtPipe.PipelineNode.Tests" />
   </ItemGroup>
 
   <ItemGroup>

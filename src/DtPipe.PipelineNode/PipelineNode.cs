@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Security.Cryptography;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -19,7 +18,8 @@ namespace DtPipe.PipelineNode;
 /// </summary>
 public enum FaultOrigin { Local, Remote }
 
-public sealed class PipelineNodeOptions
+/// <summary>What a replica needs to move bytes: its TransportR client, and the bounds that keep a fast sender from racing ahead of a slow receiver.</summary>
+public sealed class NodeClientOptions
 {
     public required string HubUrl { get; init; }
 
@@ -29,15 +29,6 @@ public sealed class PipelineNodeOptions
     /// refused with 401. Null connects anonymously, which only a development-mode hub accepts. A
     /// provider that throws leaves the previous token in place.</summary>
     public Func<Task<string>>? AccessTokenProvider { get; init; }
-
-    public required string DtPipeExecutable { get; init; }
-    public required string FragmentJobPath { get; init; }
-    public required IReadOnlyList<EdgeBinding> Edges { get; init; }
-
-    /// <summary>Variables set in the child's environment on top of this process's own, which it
-    /// inherits: what a fragment resolves through <c>${{NAME}}</c>. The host's own environment is
-    /// never changed for them.</summary>
-    public IReadOnlyDictionary<string, string>? ChildEnvironment { get; init; }
 
     /// <summary>Items per TransportR batch. Bounds sender memory together with <see cref="MaxInFlightBatches"/>:
     /// roughly <see cref="ReadChunkBytes"/> × this × <see cref="MaxInFlightBatches"/> bytes in flight.</summary>
@@ -51,12 +42,51 @@ public sealed class PipelineNodeOptions
     public int? ReceiveMaxItems { get; init; }
     public long? ReceiveMaxBytes { get; init; }
     public int ReadChunkBytes { get; init; } = 65536;
+
+    /// <summary>
+    /// How long a transfer handle waits for the run that claims it (its <c>Wire</c>), and a <c>Wire</c> for the handle
+    /// its transfer is to deliver. A handle nobody wires in that time (its run was torn down first) is dropped.
+    /// </summary>
+    public TimeSpan UnclaimedTransferTimeout { get; init; } = TimeSpan.FromSeconds(60);
 }
 
 /// <summary>
-/// Launches one dtpipe child per fragment and relays the Arrow IPC bytes of each declared edge
-/// between the child's own stdin/stdout and a single TransportR client — the node is the sole
-/// TransportR client for the fragment it hosts.
+/// The options of a node that runs a single fragment with no coordinator, the hand-wired path
+/// (<see cref="PipelineNode.StartAsync"/>): the replica's (<see cref="Client"/>) and the run's (<see cref="Launch"/>) together.
+/// </summary>
+public sealed class PipelineNodeOptions
+{
+    public required string HubUrl { get; init; }
+    public Func<Task<string>>? AccessTokenProvider { get; init; }
+
+    public required string DtPipeExecutable { get; init; }
+    public required string FragmentJobPath { get; init; }
+    public required IReadOnlyList<EdgeBinding> Edges { get; init; }
+    public IReadOnlyDictionary<string, string>? ChildEnvironment { get; init; }
+
+    public int BatchSize { get; init; } = 8;
+    public int? MaxInFlightBatches { get; init; } = 8;
+    public int? ReceiveMaxItems { get; init; }
+    public long? ReceiveMaxBytes { get; init; }
+    public int ReadChunkBytes { get; init; } = 65536;
+
+    internal NodeClientOptions Client => new()
+    {
+        HubUrl = HubUrl, AccessTokenProvider = AccessTokenProvider, BatchSize = BatchSize, MaxInFlightBatches = MaxInFlightBatches,
+        ReceiveMaxItems = ReceiveMaxItems, ReceiveMaxBytes = ReceiveMaxBytes, ReadChunkBytes = ReadChunkBytes,
+    };
+
+    internal FragmentLaunch Launch => new()
+    {
+        DtPipeExecutable = DtPipeExecutable, FragmentJobPath = FragmentJobPath, Edges = Edges,
+        ChildEnvironment = ChildEnvironment, ReadChunkBytes = ReadChunkBytes,
+    };
+}
+
+/// <summary>
+/// One replica's side of the data plane: a single TransportR client, the book of the transfer handles it is given,
+/// and the runs it launches, each a <see cref="FragmentRun"/> with a dtpipe child of its own. The node is a byte
+/// relay for every run it hosts, and the only TransportR client they have.
 /// </summary>
 /// <remarks>
 /// Cancellation is by stream rupture, never by signal — Windows has no console to deliver one to
@@ -66,23 +96,14 @@ public sealed class PipelineNodeOptions
 /// </remarks>
 public sealed class PipelineNode : IAsyncDisposable
 {
-    private readonly PipelineNodeOptions _options;
+    private readonly NodeClientOptions _options;
     private readonly ILogger _logger;
     private readonly SignalRDataClient<byte[]> _client;
 
+    /// <summary>The one run of a node started with <see cref="StartAsync"/>.</summary>
     private FragmentRun? _run;
 
     private readonly ConcurrentDictionary<string, TaskCompletionSource<object>> _handles = new();
-
-    private bool _coordinatorDriven;
-
-    /// <summary>Set once disposal starts: a reconnect that lands after must not register the fragment again.</summary>
-    private volatile bool _disposing;
-    private string? _runId;
-    /// <summary>Set when <see cref="ReportExitedAsync"/> fails - retried once a reconnect's re-Register succeeds.</summary>
-    private string? _pendingExitedRunId;
-    private int _pendingExitedCode;
-    private readonly TaskCompletionSource<int> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public Guid ClientId => _client.ClientId;
     public int ChildProcessId => _run!.ChildProcessId;
@@ -91,20 +112,10 @@ public sealed class PipelineNode : IAsyncDisposable
     public string? FirstFault => _run?.FirstFault;
     public FaultOrigin? Origin => _run?.Origin;
 
-    /// <summary>
-    /// Resolves with this fragment's exit code once every edge a coordinator wired has finished
-    /// relaying and the coordinator has been told (or the report failed, and is held for a
-    /// reconnect) - the self-driving path started by <see cref="ConnectAsync"/>. A caller may dispose
-    /// the node the moment this resolves: its <c>Unregister</c> cannot overtake its own <c>Exited</c>.
-    /// Never resolves for a
-    /// node started with <see cref="StartAsync"/>, which has no coordinator to drive it.
-    /// </summary>
-    public Task<int> Completion => _completion.Task;
-
-    /// <summary>True once <see cref="LaunchAsync"/> has spawned the child - before that, <see cref="ChildProcessId"/> throws.</summary>
+    /// <summary>True once <see cref="StartAsync"/> has spawned the child.</summary>
     public bool IsLaunched => _run is { IsLaunched: true };
 
-    private PipelineNode(PipelineNodeOptions options, ILogger logger, SignalRDataClient<byte[]> client)
+    private PipelineNode(NodeClientOptions options, ILogger logger, SignalRDataClient<byte[]> client)
     {
         _options = options;
         _logger = logger;
@@ -112,223 +123,76 @@ public sealed class PipelineNode : IAsyncDisposable
     }
 
     /// <summary>
-    /// The only invariant left once a direction can carry more than one edge: <see cref="WireAsync"/>
+    /// The only invariant left once a direction can carry more than one edge: <see cref="WireAsync(FragmentRun,string,string,CancellationToken)"/>
     /// and the run's pipes both key purely on <see cref="EdgeBinding.Alias"/>, regardless of
     /// direction, so two edges sharing one would collide silently instead of relaying independently.
     /// </summary>
-    private static void ValidateEdges(PipelineNodeOptions options)
+    private static void ValidateEdges(IReadOnlyList<EdgeBinding> edges)
     {
-        var duplicate = options.Edges.GroupBy(e => e.Alias, StringComparer.Ordinal).FirstOrDefault(g => g.Count() > 1);
+        var duplicate = edges.GroupBy(e => e.Alias, StringComparer.Ordinal).FirstOrDefault(g => g.Count() > 1);
         if (duplicate is not null)
-            throw new ArgumentException($"Edge alias '{duplicate.Key}' is declared more than once.", nameof(options));
+            throw new ArgumentException($"Edge alias '{duplicate.Key}' is declared more than once.", nameof(edges));
     }
 
-    public static async Task<PipelineNode> StartAsync(
-        PipelineNodeOptions options, ILoggerFactory? loggerFactory = null, CancellationToken ct = default)
+    /// <summary>
+    /// Connects this replica's TransportR client, which registers it with the hub, and launches nothing. Each run
+    /// is then started by <see cref="Launch"/> and wired by <see cref="WireAsync(FragmentRun,string,string,CancellationToken)"/>.
+    /// </summary>
+    public static async Task<PipelineNode> ConnectAsync(
+        NodeClientOptions options, ILoggerFactory? loggerFactory = null, CancellationToken ct = default)
     {
-        ValidateEdges(options);
-
         loggerFactory ??= NullLoggerFactory.Instance;
         var logger = loggerFactory.CreateLogger<PipelineNode>();
 
-        var client = BuildClient(options, loggerFactory, controlConnectionSetup: null);
+        var client = BuildClient(options, loggerFactory);
         var node = new PipelineNode(options, logger, client);
 
         client.OnSendRequested += node.HandleSendRequested;
         client.OnTransferStarted += node.HandleTransferStarted;
 
-        await client.ConnectAsync(cancellationToken: ct);
-        node._run = new FragmentRun(options, logger);
-        node._run.Launch();
-
-        return node;
-    }
-
-    /// <summary>
-    /// Connects to the coordinator and declares this fragment (<c>Register</c>), but does not
-    /// launch the child yet: the coordinator's admission barrier decides when, by pushing
-    /// <c>Launch</c> - handled here by <see cref="LaunchAsync"/> - once every fragment a run needs
-    /// has registered. <c>Wire</c> pushes are handled the same way, through <see cref="WireAsync"/>;
-    /// once every declared edge is wired, the node runs itself to completion and reports
-    /// <c>Exited</c> without further prompting - see <see cref="Completion"/>.
-    /// </summary>
-    public static async Task<PipelineNode> ConnectAsync(
-        PipelineNodeOptions options, string fragmentName, ILoggerFactory? loggerFactory = null, CancellationToken ct = default)
-    {
-        ValidateEdges(options);
-
-        loggerFactory ??= NullLoggerFactory.Instance;
-        var logger = loggerFactory.CreateLogger<PipelineNode>();
-        var version = ComputeFragmentVersion(options.FragmentJobPath);
-
-        PipelineNode? node = null;
-        var client = BuildClient(options, loggerFactory, controlConnectionSetup: conn =>
-        {
-            conn.On<string>("Launch", async runId =>
-            {
-                try { await node!.LaunchAsync(runId); }
-                catch (Exception ex) { logger.LogError(ex, "Launch handler failed for run {RunId}", runId); }
-            });
-            conn.On<string, string, string>("Wire", async (runId, alias, transferId) =>
-            {
-                try { await node!.WireAsync(alias, transferId); }
-                catch (Exception ex) { logger.LogError(ex, "Wire handler failed for run {RunId}, alias {Alias}", runId, alias); }
-            });
-            conn.On<string>("Cancel", async runId =>
-            {
-                try { await node!.CancelAsync(runId); }
-                catch (Exception ex) { logger.LogError(ex, "Cancel handler failed for run {RunId}", runId); }
-            });
-
-            // TransportR re-issues its own Connect on this same event (SignalRDataClient); the
-            // coordinator's Register is a second, application-level registration on top of it that
-            // TransportR has no reason to know about, so nothing re-issues it but this node. A bare
-            // reconnect gives this connection a new SignalR ConnectionId, so without this the
-            // fragment's inventory entry in NodeRegistry keeps pointing at a dead one until its
-            // disconnect grace period lapses and declares the fragment lost outright.
-            conn.Reconnected += async _ =>
-            {
-                if (node!._disposing) return;
-                await ReRegisterWithRetryAsync(conn, fragmentName, version, logger);
-                await node!.RetryPendingExitedReportAsync();
-            };
-        });
-
-        node = new PipelineNode(options, logger, client) { _coordinatorDriven = true };
-        client.OnSendRequested += node.HandleSendRequested;
-        client.OnTransferStarted += node.HandleTransferStarted;
-
-        await client.ConnectAsync(cancellationToken: ct);
-        await client.ControlConnection.InvokeAsync("Register", fragmentName, version, ct);
-
-        return node;
-    }
-
-    /// <summary>
-    /// This fragment's own identity: the SHA-256 hash of its job YAML's bytes, hex-encoded - cheap
-    /// and requires no sample run, unlike the contract hash (a different, out-of-scope concept: it
-    /// hashes the executed schema, not the file). The coordinator's instance alignment
-    /// (<c>AdmissionGate.Resolve</c>) compares this string across every live instance of one fragment
-    /// name.
-    /// </summary>
-    private static string ComputeFragmentVersion(string fragmentJobPath)
-    {
-        using var stream = File.OpenRead(fragmentJobPath);
-        return Convert.ToHexStringLower(SHA256.HashData(stream));
-    }
-
-    /// <summary>Spawns the child and reports this fragment ready for every declared edge to be wired.</summary>
-    public async Task LaunchAsync(string runId, CancellationToken ct = default)
-    {
-        _run = new FragmentRun(_options, _logger);
-        _runId = runId;
-        _run.Launch();
-        await _client.ControlConnection.InvokeAsync("Ready", runId, ct);
-    }
-
-    /// <summary>
-    /// A bounded retry, not a single best-effort attempt: unlike TransportR's own presence heartbeat
-    /// (which repairs a missed re-registration on its own next tick), nothing else ever retries this
-    /// application-level call, and the reconnect this runs on can itself race the hub's own
-    /// bookkeeping for the dropped connection - an immediate Register can still find the old
-    /// connection's <c>Connect</c> record not yet superseded and be refused. Giving up after every
-    /// attempt fails is deliberate: the coordinator's own disconnect grace period is the backstop,
-    /// and it will correctly declare the fragment lost.
-    /// </summary>
-    private static async Task ReRegisterWithRetryAsync(HubConnection connection, string fragmentName, string version, ILogger logger)
-    {
-        const int maxAttempts = 5;
-        var delay = TimeSpan.FromMilliseconds(200);
-        for (var attempt = 1; attempt <= maxAttempts; attempt++)
-        {
-            try
-            {
-                await connection.InvokeAsync("Register", fragmentName, version);
-                return;
-            }
-            catch (Exception ex) when (attempt < maxAttempts)
-            {
-                logger.LogWarning(ex,
-                    "Re-Register attempt {Attempt}/{MaxAttempts} failed for fragment {Fragment} after reconnect",
-                    attempt, maxAttempts, fragmentName);
-                await Task.Delay(delay);
-                delay += delay;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex,
-                    "Fragment {Fragment} could not re-Register after reconnect; the coordinator's " +
-                    "disconnect grace period will declare it lost", fragmentName);
-            }
-        }
-    }
-
-    /// <summary>
-    /// The coordinator's own request to abandon this run: a run the requester cancelled, or another
-    /// fragment failing. Reuses the rupture any fault takes - closing the child's stdio turns into its
-    /// own truncated-stream exit, and the grace-period kill follows. A stale or mistargeted message
-    /// (not this fragment's current run) is silently ignored.
-    /// <para>
-    /// A fully wired fragment is already completing on its own (<see cref="CompleteAndReportAsync"/>),
-    /// and its torn-down transfers fault it - but only once a relay touches them, which a child with
-    /// nothing to write never makes happen. Its fault is <see cref="FaultOrigin.Remote"/>: the run
-    /// ended around it. A fragment not yet fully wired has nothing else to finish it, so this call
-    /// runs it to completion and reports; the coordinator excludes that one from cause and
-    /// consequence.
-    /// </para>
-    /// </summary>
-    public async Task CancelAsync(string runId, CancellationToken ct = default)
-    {
-        if (runId != _runId) return;
-
-        // Judged on the Wire pushes received, as the coordinator judges on the ones it sent: a Cancel
-        // racing a WireAsync still waiting on its handle must not read as "not yet wired".
-        if (_coordinatorDriven && _run!.WireRequests == _options.Edges.Count)
-        {
-            _run.Fault(FaultOrigin.Remote, "run torn down by the coordinator");
-            return;
-        }
-
-        _run!.Fault(FaultOrigin.Local, "cancelled by coordinator before this fragment opened any transfer");
-
-        var exitCode = await RunToCompletionAsync(ct);
-        try { await ReportExitedWithFallbackAsync(runId, exitCode, "after Cancel", ct); }
-        finally { _completion.TrySetResult(exitCode); }
-    }
-
-    /// <summary>
-    /// Retries a report <see cref="ReportExitedAsync"/> could not deliver, once a reconnect's
-    /// re-Register has (or has not) had its chance: a report sent on a fresh connection before its
-    /// own re-Register lands fails <c>ResolveFragment</c> on the hub side, and nothing but this retry
-    /// would ever send it again.
-    /// </summary>
-    private async Task RetryPendingExitedReportAsync()
-    {
-        if (_pendingExitedRunId is not { } runId) return;
         try
         {
-            await ReportExitedAsync(runId, _pendingExitedCode);
-            _pendingExitedRunId = null;
+            await client.ConnectAsync(cancellationToken: ct);
         }
-        catch (Exception ex)
+        catch
         {
-            _logger.LogError(ex, "Retry of Exited for run {RunId} failed again after reconnect", runId);
+            // A refused registration (an identity the coordinator does not know, or has disabled) leaves a started connection behind.
+            await client.DisposeAsync();
+            throw;
         }
+        return node;
     }
 
-    private async Task ReportExitedWithFallbackAsync(string runId, int exitCode, string when, CancellationToken ct)
+    /// <summary>Connects and launches the one fragment <paramref name="options"/> names, to be wired by hand: no coordinator drives it.</summary>
+    public static async Task<PipelineNode> StartAsync(
+        PipelineNodeOptions options, ILoggerFactory? loggerFactory = null, CancellationToken ct = default)
     {
-        try { await ReportExitedAsync(runId, exitCode, ct); }
-        catch (Exception ex)
+        ValidateEdges(options.Edges);
+        var node = await ConnectAsync(options.Client, loggerFactory, ct);
+        node._run = node.Launch(options.Launch);
+        return node;
+    }
+
+    /// <summary>Spawns the dtpipe child of one run. The child is the run's alone; this node's client carries its edges.</summary>
+    /// <exception cref="ArgumentException">Two edges share an alias.</exception>
+    public FragmentRun Launch(FragmentLaunch launch, ILogger? logger = null)
+    {
+        ValidateEdges(launch.Edges);
+        var run = new FragmentRun(launch, logger ?? _logger);
+        try
         {
-            _logger.LogError(ex, "Failed to report Exited {When} for run {RunId}; will retry after the next successful Register", when, runId);
-            _pendingExitedRunId = runId;
-            _pendingExitedCode = exitCode;
+            run.Launch();
+            return run;
+        }
+        catch
+        {
+            // A launch that could not start its child leaves nothing to tear down.
+            _ = run.DisposeAsync();
+            throw;
         }
     }
 
-    private static SignalRDataClient<byte[]> BuildClient(
-        PipelineNodeOptions options, ILoggerFactory loggerFactory, Action<HubConnection>? controlConnectionSetup)
+    private static SignalRDataClient<byte[]> BuildClient(NodeClientOptions options, ILoggerFactory loggerFactory)
     {
         var builder = new TransportRClientBuilder<byte[]>()
             .WithUrl(options.HubUrl)
@@ -339,15 +203,13 @@ public sealed class PipelineNode : IAsyncDisposable
         if (options.AccessTokenProvider is { } tokenProvider)
             builder.WithTokenProvider(tokenProvider);
 
-        if (controlConnectionSetup is not null)
-            builder.WithControlConnection(controlConnectionSetup);
-
         if (options.MaxInFlightBatches is { } maxInFlight)
             builder.WithMaxInFlightBatches(maxInFlight);
 
         // A receive byte cap is always set, even when the caller leaves ReceiveMaxBytes null: an
         // unset receive capacity is exactly the unbounded-backlog configuration MaxInFlightBatches
-        // alone does not fix (a bound at one end only moves the backlog to the other).
+        // alone does not fix (a bound at one end only moves the backlog to the other). The client
+        // applies it to each transfer it receives, so a replica running several carries one bound apiece.
         var receiveMaxBytes = options.ReceiveMaxBytes
             ?? (long)options.ReadChunkBytes * options.BatchSize * (options.MaxInFlightBatches ?? 8);
         builder.WithReceiveCapacity(options.ReceiveMaxItems, receiveMaxBytes);
@@ -367,34 +229,79 @@ public sealed class PipelineNode : IAsyncDisposable
         return Task.CompletedTask;
     }
 
-    private void HandleHandle(string transferId, object handle) =>
-        _handles.GetOrAdd(transferId, _ => new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously))
-            .TrySetResult(handle);
+    private void HandleHandle(string transferId, object handle)
+    {
+        var tcs = _handles.GetOrAdd(transferId, _ => new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously));
+        if (tcs.TrySetResult(handle)) _ = DropIfUnclaimedAsync(transferId, tcs, handle);
+    }
+
+    /// <summary>A handle no run wires within the timeout belongs to a run torn down before its Wire: it is released, not kept.</summary>
+    private async Task DropIfUnclaimedAsync(string transferId, TaskCompletionSource<object> tcs, object handle)
+    {
+        try { await Task.Delay(_options.UnclaimedTransferTimeout); }
+        catch (Exception) { return; }
+        if (!_handles.TryRemove(new KeyValuePair<string, TaskCompletionSource<object>>(transferId, tcs))) return;
+        _logger.LogWarning("Transfer {TransferId} was never wired by a run; releasing it", transferId);
+        await ReleaseAsync(handle);
+    }
+
+    private static async ValueTask ReleaseAsync(object handle)
+    {
+        try
+        {
+            if (handle is IAsyncDisposable disposable) await disposable.DisposeAsync();
+        }
+        catch (Exception) { /* best-effort */ }
+    }
 
     /// <summary>
-    /// Correlates a declared local alias to whichever handle <c>OnSendRequested</c> or
-    /// <c>OnTransferStarted</c> produces for <paramref name="transferId"/> — before or after this
-    /// call, since the handshake races the caller's own <c>InitTransferAsync</c> (both sides key on
-    /// the transfer id, neither waits for the other) — then starts relaying it.
+    /// The handle <c>OnSendRequested</c> or <c>OnTransferStarted</c> produces for <paramref name="transferId"/> — before
+    /// or after this call, since the handshake races the coordinator's own <c>InitTransferAsync</c> (both sides key on the
+    /// transfer id, neither waits for the other). Claimed once.
     /// </summary>
+    private async Task<object> ClaimHandleAsync(string transferId, CancellationToken ct)
+    {
+        var tcs = _handles.GetOrAdd(transferId, _ => new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously));
+        try
+        {
+            var handle = await tcs.Task.WaitAsync(_options.UnclaimedTransferTimeout, ct);
+            if (!_handles.TryRemove(new KeyValuePair<string, TaskCompletionSource<object>>(transferId, tcs)))
+                throw new TimeoutException($"Transfer {transferId} was released before it was wired.");
+            return handle;
+        }
+        catch (TimeoutException)
+        {
+            _handles.TryRemove(new KeyValuePair<string, TaskCompletionSource<object>>(transferId, tcs));
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Correlates the edge <paramref name="alias"/> of <paramref name="run"/> to the handle of <paramref name="transferId"/>
+    /// and starts relaying it. True when it was the last edge the run declares. A transfer that never reaches this node
+    /// faults the run (<see cref="FaultOrigin.Remote"/>) and returns false.
+    /// </summary>
+    public async Task<bool> WireAsync(FragmentRun run, string alias, string transferId, CancellationToken ct = default)
+    {
+        object handle;
+        try { handle = await ClaimHandleAsync(transferId, ct); }
+        catch (TimeoutException ex)
+        {
+            run.Fault(FaultOrigin.Remote, $"transfer {transferId} for edge '{alias}' never reached this node: {ex.Message}");
+            return false;
+        }
+        return run.Wire(alias, handle);
+    }
+
+    /// <summary>The hand-wired path: the same as <see cref="WireAsync(FragmentRun,string,string,CancellationToken)"/> for the one run of this node.</summary>
     public async Task WireAsync(string alias, string transferId, CancellationToken ct = default)
     {
-        if (_options.Edges.All(e => e.Alias != alias))
+        var run = _run!;
+        if (run.Edges.All(e => e.Alias != alias))
             throw new ArgumentException($"'{alias}' is not a declared edge of this node.", nameof(alias));
-        _run!.NoteWireRequested();
-
-        var tcs = _handles.GetOrAdd(transferId, _ => new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously));
-        var handle = await tcs.Task.WaitAsync(ct);
-        _handles.TryRemove(transferId, out _);
-
-        var lastEdge = _run.Wire(alias, handle);
-
-        // Self-driving path only (ConnectAsync): once every declared edge has started relaying, run
-        // this fragment to completion and report Exited without further prompting from the
-        // coordinator - StartAsync's hand-wired callers drive RunToCompletionAsync themselves and
-        // never touch _coordinatorDriven.
-        if (_coordinatorDriven && lastEdge)
-            _ = Task.Run(() => CompleteAndReportAsync(_runId!));
+        run.NoteWireRequested();
+        var handle = await ClaimHandleAsync(transferId, ct);
+        run.Wire(alias, handle);
     }
 
     /// <summary>
@@ -403,47 +310,52 @@ public sealed class PipelineNode : IAsyncDisposable
     /// </summary>
     public Task<int> RunToCompletionAsync(CancellationToken ct = default) => _run!.RunToCompletionAsync(ct);
 
-    private async Task CompleteAndReportAsync(string runId)
+    /// <summary>
+    /// Whether the hub knows this client's connection, which is what a registration is: false after the hub lost it or
+    /// refused it (an identity it has since disabled), and null while the connection is not up to be asked.
+    /// </summary>
+    public async Task<bool?> IsRegisteredAsync(CancellationToken ct = default)
     {
-        var exitCode = await RunToCompletionAsync();
-        try { await ReportExitedWithFallbackAsync(runId, exitCode, "on completion", default); }
-        finally { _completion.TrySetResult(exitCode); }
+        var connection = _client.ControlConnection;
+        if (connection.State != HubConnectionState.Connected) return null;
+        try { return await connection.InvokeAsync<bool>("Heartbeat", ct); }
+        catch (Exception) when (!ct.IsCancellationRequested) { return null; }
     }
 
-    /// <summary>Reports this fragment's own outcome to the coordinator: exit code, fault origin, row counts.</summary>
-    public Task ReportExitedAsync(string runId, int exitCode, CancellationToken ct = default) =>
-        _client.ControlConnection.InvokeAsync(
-            "Exited", runId, exitCode, (_run!.Origin ?? FaultOrigin.Local).ToString(), _run.FirstFault, _run.LiveRowCounts, ct);
-
-
-    /// <summary>How long disposal waits for the coordinator to acknowledge <c>Unregister</c> before closing anyway.</summary>
-    private static readonly TimeSpan UnregisterTimeout = TimeSpan.FromSeconds(2);
+    /// <summary>
+    /// Registers this client with the hub again, so the hub takes the groups its rights give the node now and a fresh
+    /// token. TransportR's client does the work (<c>ReRegisterAsync</c>, then a token push) on every restart of its
+    /// control connection, and offers no way to ask for it: <c>ConnectAsync</c> refuses on a started client and a
+    /// disconnected one cannot start again. So the connection is stopped and the client's own recovery restarts it,
+    /// with the same client id. Call it with no run in flight (a restart interrupts the client's control channel). A client
+    /// the hub holds a registration of is refreshed while the node is not announced as able to take a run: until the
+    /// connection is back, the client carries nothing. A client the hub does not know (<see cref="IsRegisteredAsync"/>)
+    /// holds no groups to be stale, and is registered again at any time. Returns whether the connection was back within
+    /// <paramref name="timeout"/>.
+    /// </summary>
+    public async Task<bool> RefreshRegistrationAsync(TimeSpan timeout, CancellationToken ct = default)
+    {
+        var connection = _client.ControlConnection;
+        await connection.StopAsync(ct);
+        var deadline = DateTime.UtcNow + timeout;
+        while (connection.State != HubConnectionState.Connected)
+        {
+            if (DateTime.UtcNow > deadline) return false;
+            await Task.Delay(50, ct);
+        }
+        return true;
+    }
 
     public async ValueTask DisposeAsync()
     {
-        _disposing = true;
-
-        // The coordinator drops this instance from its inventory only when it processes the closed
-        // connection, some time after the close; until then admission can still pick it. Saying so
-        // first makes the removal precede the close. Best effort: a node that cannot reach the
-        // coordinator is covered by the coordinator's own disconnect handling.
-        if (_coordinatorDriven)
-        {
-            try
-            {
-                using var timeout = new CancellationTokenSource(UnregisterTimeout);
-                await _client.ControlConnection.InvokeAsync("Unregister", timeout.Token);
-            }
-            catch { }
-        }
-
         try { await _client.DisconnectAsync(); } catch { }
         await _client.DisposeAsync();
 
-        // Null for a ConnectAsync node never reached by a Launch push (e.g. disposed while still
-        // waiting on admission): there is no child to tear down, and no pipe was ever created either.
-        if (_run is null) return;
+        // A handle delivered and never wired belongs to no run any more.
+        foreach (var (_, tcs) in _handles)
+            if (tcs.Task.IsCompletedSuccessfully) await ReleaseAsync(tcs.Task.Result);
+        _handles.Clear();
 
-        await _run.DisposeAsync();
+        if (_run is not null) await _run.DisposeAsync();
     }
 }

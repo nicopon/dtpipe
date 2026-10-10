@@ -235,10 +235,10 @@ flight together when they share no data node; otherwise they wait their turn in 
 | `01-customers-anonymized` | a cut inside a branch, by `dtpipe split`: read on node-1, anonymized on the runner, loaded on node-4 | move the ✂ one stage later, after `fake`: the head keeps that transformer and node-1 refuses to run it |
 | `02-revenue-by-country` | a three-source join on the runner, three inbound edges on one node | move `revenue` to node-3: the plan is fine and the node refuses to run a join |
 | `03-order-history` | `--merge` of a DuckDB and a SQLite source, on the runner | read the source queries: each casts to the shared schema, dtpipe converts nothing |
-| `04-slow-sensor-stream` | a 30-second throttled run | kill a fragment mid-run, cancel, add a misaligned instance, pin a version |
+| `04-slow-sensor-stream` | a 30-second throttled run | kill a fragment mid-run, cancel |
 
 Every refusal the page shows is the coordinator's own: `PlanRegistry` for the flow matrix,
-`AdmissionGate` for a misaligned instance or an unknown pinned version, `RunOrchestrator` for the
+`ReplicaAdmission` for a node with no replica that can run a fragment, `RunOrchestrator` for the
 cause of a failed run and the row counts of each edge.
 
 A job header carries three lab directives among its comments: `# lab-cut: branch@stage` and
@@ -249,15 +249,15 @@ between the witness and the lab's warehouse.
 
 ```
  browser ──HTTP / SSE──▶ DtPipe.Coordinator.Server :5180 (lab mode)
-                          ├─ AddCoordinatorHub()  TransportR hub: registry, admission, runs, bytes
+                          ├─ AddCoordinatorHub()  TransportR hub (bytes), replica registry, admission, runs
                           ├─ /node-channel        the control channel to the node hosts
                           ├─ /api                 bricks, design, library, plan, deploy, runs, events
-                          └─ DeploymentManager    deployments, the run queue, re-arming
+                          └─ DeploymentManager    deployments, the run queue
                                   ▲                      ▲
           /node-channel (SignalR) │                      │ TransportR (Arrow IPC bytes)
       ┌─────────────┬─────────────┼─────────────┬────────┴────┬─────────────┐
       │ node-1      │ node-2      │ node-3      │ node-4      │ runner-1    │  AddDtPipeNode
-      │ bricks, and a PipelineNode per fragment deployed here, each running a dtpipe child │
+      │ bricks; a run of a fragment here is a dtpipe child, relayed by the replica's client │
       └─────────────┴─────────────┴─────────────┴─────────────┴─────────────┘
 ```
 
@@ -278,11 +278,14 @@ The plan is then checked before anything is deployed: every fragment exchanges a
 (a pipeline node completes only once all its edges are wired), every `${{VAR}}` it uses is hosted
 by its node, and every edge passes the flow matrix (`IPlanRegistry`).
 
-**Deploying** sends each fragment's YAML to its node host, which writes it and opens a
-`PipelineNode` for it; the fragment registers with the coordinator under the name
-`<pipeline>@<node>`, versioned by the SHA-256 of its YAML. **Running** is one call to
-`IRunOrchestrator.RunAsync`. A `PipelineNode` serves one run, so the lab re-arms every fragment
-afterwards (a fresh instance each) before it accepts the next run.
+**Deploying** is the coordinator's: it asks every connected replica of each node whether it would run
+the fragments of the plan (`Check`, which spawns nothing and leaves nothing on the node), and the
+deployment is ready when every fragment has a replica that says so and that a run could be placed on.
+A fragment is named `<pipeline>@<node>` and versioned by the SHA-256 of its job. **Running** is one
+call to `IRunOrchestrator.RunAsync`: it places each fragment on a replica of its node (the
+connected one with the fewest runs whose bricks compose the plan's version), launches it, and wires
+the edges. A replica serves several runs, one dtpipe child each, and the run's journal says which
+replica ran each fragment.
 
 ## Limits
 
@@ -331,8 +334,8 @@ sign a person in and out.
 | `GET /api/rights` · `PUT /api/rights/matrix` | rights, the flow matrix |
 | `POST /api/rights/identities` · `PUT`/`DELETE /api/rights/identities/{id}` · `POST …/{id}/reconnect` | identities; reconnect drops a node's control connection so it fetches a new token |
 | `POST /api/rights/pending/{subject}/accept` (`{name, groups, description?}`) · `…/ignore` | a host waiting for approval: accept it as an identity, or set it aside for 24 hours |
-| `POST /api/runs` · `GET /api/runs`, `/api/runs/queue` | `{pipelineId?, pins?}` queues a run; the journal; in flight and queued |
+| `POST /api/runs` · `GET /api/runs`, `/api/runs/queue` | `{pipelineId?}` queues a run; the journal; in flight and queued |
 | `POST /api/runs/cancel` | `{runId?}`: a run in flight or queued; with no id, the one in flight (409 when several are) |
-| `POST /api/fragments/{name}/kill`, `/variant` | fault injection |
+| `POST /api/fragments/{name}/kill` | fault injection: ends the fragment's child on every replica of its node |
 | `POST /api/query` | `{variable, sql}` → CSV of a node's database, read by that node |
-| `GET /api/events` | server-sent events: nodes, fragment states, logs, bytes, runs |
+| `GET /api/events` | server-sent events: nodes, deployments, logs, bytes, runs |

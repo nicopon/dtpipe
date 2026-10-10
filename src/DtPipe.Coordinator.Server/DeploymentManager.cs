@@ -1,6 +1,5 @@
 using DtPipe.Coordinator;
 using DtPipe.Coordinator.Contracts;
-using Microsoft.AspNetCore.SignalR;
 using TransportR.Interfaces;
 
 namespace DtPipe.Coordinator.Server;
@@ -8,23 +7,27 @@ namespace DtPipe.Coordinator.Server;
 /// <summary>A request the server refuses in its current state (HTTP 409).</summary>
 public sealed class ConflictException(string message) : Exception(message);
 
-public sealed record DeployedFragment(string Name, string Node, string Version);
+/// <summary><paramref name="Replicas"/>: how many replicas of the node could run the fragment now, which is what a run needs.</summary>
+public sealed record DeployedFragment(string Name, string Node, string Version, int? Replicas = null);
 
 public sealed record DeploymentView(
     string PipelineId, string PlanId, string Origin, string State, DateTimeOffset DeployedAt, string? Message,
     IReadOnlyList<DeployedFragment> Fragments, int Edges, int Queued, string? RunningRunId);
 
 /// <summary>
-/// Deploys plans on their nodes and drives runs through the coordinator's own
-/// <see cref="IRunOrchestrator"/>, which admits, launches, wires and judges; this class only asks.
+/// Deploys plans and drives runs through the coordinator's own <see cref="IRunOrchestrator"/>, which places,
+/// launches, wires and judges; this class only asks. A deployment is the coordinator's: the plan, where it came from,
+/// and a state. Deploying asks every connected replica of each node whether it would run its fragments (<c>Check</c>), for
+/// an early answer; it is ready when every fragment has a replica that says so and that admission could place a run on.
+/// Nothing is left on a node, so a replica that arrives later is as good as one that was asked, and one that goes away
+/// takes nothing with it. What decides a run is admission, at the run.
 /// <para>
 /// Several pipelines may be deployed at once, their fragments told apart by name
 /// (<c>&lt;pipeline&gt;@&lt;node&gt;</c>). A run is sent to the orchestrator once no run already
 /// sent, and no older run still waiting, uses one of its data nodes (<see cref="RunDispatch"/>): runs
 /// on disjoint data nodes are in flight together, and a runner never counts. A run sent holds its data
-/// nodes until it finishes. Each deployment has a gate, held while it deploys, runs and re-arms: a run
-/// starts only on registered, unspent instances, and a deployment is never replaced under a run. A run
-/// sent that waits on its deployment's gate keeps its data nodes and is never sent twice.
+/// nodes until it finishes. Each deployment has a gate, held while it is deployed or removed; a run passes it to read the
+/// state and does not hold it while it runs.
 /// </para>
 /// </summary>
 public sealed class DeploymentManager
@@ -36,7 +39,6 @@ public sealed class DeploymentManager
         public required DistributionPlan Plan;
         public required string Origin;
         public required DateTimeOffset DeployedAt;
-        public string Generation = "";
         public string State = "deploying";
         public string? Message;
         public readonly SemaphoreSlim Gate = new(1, 1);
@@ -52,9 +54,9 @@ public sealed class DeploymentManager
     }
 
     private readonly NodeInventory _inventory;
-    private readonly IHubContext<NodeChannelHub> _labHub;
+    private readonly INodeLink _link;
     private readonly IRunOrchestrator _orchestrator;
-    private readonly INodeRegistry _registry;
+    private readonly ReplicaAdmission _admission;
     private readonly IFlowControlService _flowControl;
     private readonly RightsStore _rights;
     private readonly EventBus _bus;
@@ -70,11 +72,11 @@ public sealed class DeploymentManager
     private string? _lastDeployed;
 
     public DeploymentManager(
-        NodeInventory inventory, IHubContext<NodeChannelHub> labHub, IRunOrchestrator orchestrator, INodeRegistry registry,
+        NodeInventory inventory, INodeLink link, IRunOrchestrator orchestrator, ReplicaAdmission admission,
         IFlowControlService flowControl, RightsStore rights, EventBus bus, RunJournal journal, ILogger<DeploymentManager> logger)
     {
-        (_inventory, _labHub, _orchestrator, _registry, _flowControl, _rights, _bus, _journal, _logger) =
-            (inventory, labHub, orchestrator, registry, flowControl, rights, bus, journal, logger);
+        (_inventory, _link, _orchestrator, _admission, _flowControl, _rights, _bus, _journal, _logger) =
+            (inventory, link, orchestrator, admission, flowControl, rights, bus, journal, logger);
     }
 
     /// <summary>The plan deployed last: what the Lab view shows and what a run naming no pipeline runs.</summary>
@@ -101,9 +103,26 @@ public sealed class DeploymentManager
         _sent.Where(t => t.Running).OrderBy(t => t.View.StartedAt)
             .Concat(_sent.Where(t => !t.Running).Concat(_queued).OrderBy(t => t.View.QueuedAt));
 
-    public IReadOnlyList<DeploymentView> Deployments
+    /// <summary>The deployments, each fragment with the number of replicas that could run it now.</summary>
+    public async Task<IReadOnlyList<DeploymentView>> DeploymentsAsync()
     {
-        get { lock (_lock) return _deployments.Values.OrderByDescending(d => d.DeployedAt).Select(View).ToList(); }
+        List<Deployment> deployments;
+        lock (_lock) deployments = _deployments.Values.OrderByDescending(d => d.DeployedAt).ToList();
+        var views = new List<DeploymentView>();
+        foreach (var deployment in deployments)
+        {
+            IReadOnlyDictionary<string, FragmentEligibility>? eligibility = null;
+            try { eligibility = await _admission.EvaluateAsync(RunFragmentsOf(deployment.Plan)); }
+            catch (Exception ex) when (ex is ConflictException) { /* its node lost its identity: no replica can run it */ }
+            lock (_lock) views.Add(View(deployment, eligibility));
+        }
+        return views;
+    }
+
+    /// <summary>The plan id a pipeline is deployed from, or null when it is not deployed.</summary>
+    public string? DeployedPlanId(string pipelineId)
+    {
+        lock (_lock) return _deployments.GetValueOrDefault(pipelineId)?.Plan.Id;
     }
 
     public DistributionPlan? PlanOf(string pipelineId)
@@ -122,7 +141,7 @@ public sealed class DeploymentManager
         var refused = plan.Edges.Where(e => !_flowControl.CanSendTo(e.ProducerGroups.ToHashSet(), e.ConsumerGroups.ToHashSet())).ToList();
         if (refused.Count > 0)
             throw new ConflictException("The flow matrix refuses " + string.Join(", ", refused.Select(e => $"{string.Join("+", e.ProducerGroups)} -> {string.Join("+", e.ConsumerGroups)}")) + ".");
-        var offline = plan.Fragments.Where(f => _inventory.ConnectionOf(f.Node) is null).Select(f => f.Node).Distinct().ToList();
+        var offline = plan.Fragments.Where(f => _inventory.ReplicasOf(f.Node).Count == 0).Select(f => f.Node).Distinct().ToList();
         if (offline.Count > 0) throw new ConflictException($"Offline: {string.Join(", ", offline)}.");
 
         Deployment? previous;
@@ -133,7 +152,7 @@ public sealed class DeploymentManager
         }
         if (previous is not null) await previous.Gate.WaitAsync(ct);
 
-        var deployment = new Deployment { Plan = plan, Origin = origin, DeployedAt = DateTimeOffset.UtcNow, Generation = NewGeneration() };
+        var deployment = new Deployment { Plan = plan, Origin = origin, DeployedAt = DateTimeOffset.UtcNow };
         await deployment.Gate.WaitAsync(ct);
         try
         {
@@ -144,25 +163,17 @@ public sealed class DeploymentManager
             }
             Publish(deployment);
 
-            var names = plan.Fragments.Select(f => f.Name).Concat(previous?.Plan.Fragments.Select(f => f.Name) ?? []).Distinct().ToList();
-            await UndeployEverywhereAsync(names, ct);
-            foreach (var fragment in plan.Fragments)
-                await SendAsync(fragment.Node, NodeChannel.Deploy,
-                    new FragmentDeployment(fragment.Name, fragment.Form == FragmentForm.Bricks ? "" : fragment.Yaml, fragment.Edges, deployment.Generation,
-                        Units: fragment.Composition, Version: fragment.Version), ct);
-
-            await WaitRegisteredAsync(deployment, ct);
+            await CheckAsync(deployment, ct);
             deployment.State = "ready";
             Publish(deployment);
         }
         catch (Exception ex)
         {
+            // A deployment is all of its fragments or none: a refused one is not kept.
             deployment.State = "failed";
             deployment.Message = ex.Message;
             Publish(deployment);
-            // A deployment is all of its fragments or none: what did register must not stay admissible.
-            try { await UndeployEverywhereAsync(plan.Fragments.Select(f => f.Name).ToList(), CancellationToken.None); }
-            catch (Exception cleanup) { _logger.LogWarning(cleanup, "Undeploying the fragments of {Pipeline} failed", plan.PipelineId); }
+            Forget(deployment);
             throw;
         }
         finally
@@ -172,11 +183,17 @@ public sealed class DeploymentManager
         }
     }
 
-    private async Task UndeployEverywhereAsync(IReadOnlyList<string> fragmentNames, CancellationToken ct)
+    /// <summary>Drops the deployment, if it is still the one registered for its pipeline.</summary>
+    private void Forget(Deployment deployment)
     {
-        foreach (var node in _inventory.Snapshot().Where(n => n.Online))
-            foreach (var name in fragmentNames)
-                await SendToEveryReplicaAsync(node.Name, NodeChannel.Undeploy, name, ct);
+        lock (_lock)
+        {
+            if (!_deployments.TryGetValue(deployment.Plan.PipelineId, out var current) || current != deployment) return;
+            _deployments.Remove(deployment.Plan.PipelineId);
+            if (_lastDeployed == deployment.Plan.PipelineId)
+                _lastDeployed = _deployments.Values.OrderByDescending(d => d.DeployedAt).FirstOrDefault()?.Plan.PipelineId;
+        }
+        PublishDeployments();
     }
 
     public async Task UndeployAsync(string pipelineId, CancellationToken ct)
@@ -190,16 +207,13 @@ public sealed class DeploymentManager
         await deployment.Gate.WaitAsync(ct);
         try
         {
-            foreach (var node in _inventory.Snapshot().Where(n => n.Online))
-                foreach (var fragment in deployment.Plan.Fragments)
-                    await SendToEveryReplicaAsync(node.Name, NodeChannel.Undeploy, fragment.Name, ct);
             lock (_lock)
             {
                 _deployments.Remove(pipelineId);
                 if (_lastDeployed == pipelineId) _lastDeployed = _deployments.Values.OrderByDescending(d => d.DeployedAt).FirstOrDefault()?.Plan.PipelineId;
             }
             _bus.Publish("deploy", new { planId = deployment.Plan.Id, pipelineId, state = "undeployed" });
-            _bus.Publish("deployments", Deployments);
+            PublishDeployments();
         }
         finally
         {
@@ -208,7 +222,7 @@ public sealed class DeploymentManager
     }
 
     /// <summary>Queues a run of <paramref name="pipelineId"/>, or of the plan deployed last when it is null.</summary>
-    public RunView Enqueue(string? pipelineId, IReadOnlyDictionary<string, string>? pins)
+    public RunView Enqueue(string? pipelineId)
     {
         Ticket ticket;
         lock (_lock)
@@ -217,12 +231,12 @@ public sealed class DeploymentManager
             var deployment = _deployments.GetValueOrDefault(pipelineId) ?? throw new ConflictException($"'{pipelineId}' is not deployed.");
             if (deployment.State == "failed") throw new ConflictException($"The deployment of '{pipelineId}' failed: {deployment.Message}");
             var now = DateTimeOffset.UtcNow;
-            ticket = new Ticket(new RunView(_journal.NextRunId(), deployment.Plan.Id, "queued", now, null, pins, null, null, null, pipelineId, now));
+            ticket = new Ticket(new RunView(_journal.NextRunId(), deployment.Plan.Id, "queued", now, null, null, null, null, pipelineId, now));
             _queued.Add(ticket);
         }
         var view = ticket.View;
         _bus.Publish("run", view);
-        _bus.Publish("deployments", Deployments);
+        PublishDeployments();
         Dispatch();
         return view;
     }
@@ -259,24 +273,18 @@ public sealed class DeploymentManager
             Finish(waiting, waiting.View with { State = "cancelled", StartedAt = DateTimeOffset.UtcNow, Refusal = "Cancelled while queued." });
     }
 
-    public Task KillAsync(string fragmentName, CancellationToken ct) =>
-        SendToEveryReplicaAsync(RequireFragment(fragmentName).Fragment.Node, NodeChannel.Kill, fragmentName, ct);
-
-    /// <summary>
-    /// A second instance of one fragment on the same node, from a job that differs by a comment:
-    /// same behaviour, different version. Admission then refuses the run as misaligned.
-    /// </summary>
-    public async Task DeployVariantAsync(string fragmentName, CancellationToken ct)
+    /// <summary>Fault injection: ends the child of the fragment's run on every replica of its node.</summary>
+    public async Task KillAsync(string fragmentName, CancellationToken ct)
     {
-        var (deployment, fragment) = RequireFragment(fragmentName);
-        lock (_lock) ThrowIfBusy(deployment.Plan.PipelineId);
-        if (deployment.Gate.CurrentCount == 0) throw new ConflictException("Fragments are being deployed.");
-        if (fragment.Form != FragmentForm.Job)
-            throw new ConflictException($"{fragment.Name} is made of its node's bricks, which the node composes by id: a variant is a job as written, so only a runner or a node that accepts raw fragments takes one.");
-        var yaml = fragment.Yaml + $"# variant {Guid.NewGuid():N}\n";
-        await SendAsync(fragment.Node, NodeChannel.Deploy,
-            new FragmentDeployment(fragment.Name, yaml, fragment.Edges, NewGeneration(), Instance: "variant"), ct);
-        _bus.Publish("deploy", new { planId = deployment.Plan.Id, pipelineId = deployment.Plan.PipelineId, state = "variant", fragment = fragment.Name });
+        var node = RequireFragment(fragmentName).Fragment.Node;
+        var replicas = _inventory.ReplicasOf(node);
+        if (replicas.Count == 0) throw new ConflictException($"{node} is offline.");
+        foreach (var (key, _) in replicas)
+        {
+            using var bound = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            bound.CancelAfter(TimeSpan.FromSeconds(10));
+            await _link.KillAsync(key, fragmentName, bound.Token);
+        }
     }
 
     /// <summary>
@@ -334,20 +342,24 @@ public sealed class DeploymentManager
             deployment = _deployments.GetValueOrDefault(pipelineId);
         }
 
-        // The deployment's gate: held from here until its fragments are re-armed after the run.
-        var gated = false;
-        IReadOnlyDictionary<string, string> subjects;
+        // The deployment's gate is passed to read its state, not held: it is held while it is deployed or removed.
+        IReadOnlyList<RunFragment> fragments;
         try
         {
             if (deployment is null) throw new ConflictException($"'{pipelineId}' is no longer deployed.");
             await deployment.Gate.WaitAsync(ticket.Cancel.Token);
-            gated = true;
-            if (deployment.State != "ready") throw new ConflictException($"'{pipelineId}' is not ready: {deployment.State} {deployment.Message}".Trim());
-            subjects = SubjectsOf(deployment.Plan);
+            try
+            {
+                if (deployment.State != "ready") throw new ConflictException($"'{pipelineId}' is not ready: {deployment.State} {deployment.Message}".Trim());
+            }
+            finally
+            {
+                deployment.Gate.Release();
+            }
+            fragments = RunFragmentsOf(deployment.Plan);
         }
         catch (Exception ex)
         {
-            if (gated) deployment!.Gate.Release();
             lock (_lock) if (!_sent.Contains(ticket)) return;
             var cancelled = ex is OperationCanceledException;
             Finish(ticket, view with { State = cancelled ? "cancelled" : "refused", StartedAt = DateTimeOffset.UtcNow, Refusal = cancelled ? "Cancelled while queued." : ex.Message });
@@ -358,11 +370,10 @@ public sealed class DeploymentManager
         view = view with { State = "running", StartedAt = DateTimeOffset.UtcNow };
         lock (_lock) ticket.View = view;
         _bus.Publish("run", view);
-        _bus.Publish("deployments", Deployments);
+        PublishDeployments();
 
         var spec = new RunSpec(
-            view.RunId,
-            plan.Fragments.Select(f => new FragmentPin(f.Name, view.Pins?.GetValueOrDefault(f.Name) is { Length: > 0 } v ? v : null, subjects[f.Node])).ToList(),
+            view.RunId, fragments,
             plan.Edges.Select(e => new RunEdge(e.ProducerFragment, e.ProducerAlias, e.ConsumerFragment, e.ConsumerAlias)).ToList());
 
         RunView final;
@@ -371,8 +382,7 @@ public sealed class DeploymentManager
             var result = await _orchestrator.RunAsync(spec, ticket.Cancel.Token);
             final = view with { State = result.Outcome.ToString().ToLowerInvariant(), Result = result, Description = result.Describe() };
         }
-        catch (Exception ex) when (ex is AdmissionRefusedException or UnboundFragmentException or MisalignedInstancesException
-                                       or PinnedVersionUnavailableException or FragmentInFlightException)
+        catch (Exception ex) when (ex is NoEligibleReplicaException or UnboundFragmentException)
         {
             final = view with { State = "refused", Refusal = ex.Message };
         }
@@ -381,12 +391,7 @@ public sealed class DeploymentManager
             _logger.LogError(ex, "Run {RunId} failed unexpectedly", spec.RunId);
             final = view with { State = "error", Refusal = ex.Message };
         }
-
-        // A PipelineNode serves one run: every instance is replaced before this pipeline can run
-        // again. The gate, still held, is released only once they are registered.
-        deployment.State = "rearming";
         Finish(ticket, final);
-        _ = Task.Run(() => RearmAsync(deployment));
     }
 
     private void Finish(Ticket ticket, RunView final)
@@ -401,81 +406,67 @@ public sealed class DeploymentManager
         // The token source is left to the collector: a run finished here may still be waiting on
         // its deployment's gate with that token.
         _bus.Publish("run", final);
-        _bus.Publish("deployments", Deployments);
+        PublishDeployments();
         Dispatch();
     }
 
-    private async Task RearmAsync(Deployment deployment)
-    {
-        try
-        {
-            Publish(deployment);
-            var generation = NewGeneration();
-            deployment.Generation = generation;
-            foreach (var fragment in deployment.Plan.Fragments)
-            {
-                var connection = _inventory.ConnectionOf(fragment.Node) ?? throw new ConflictException($"{fragment.Node} is offline.");
-                await _labHub.Clients.Client(connection).SendAsync(NodeChannel.Rearm, fragment.Name, generation);
-            }
-            await WaitRegisteredAsync(deployment, CancellationToken.None);
-            deployment.State = "ready";
-            deployment.Message = null;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Re-arming {Pipeline} failed", deployment.Plan.PipelineId);
-            deployment.State = "failed";
-            deployment.Message = ex.Message;
-        }
-        finally
-        {
-            deployment.Gate.Release();
-            Publish(deployment);
-        }
-    }
+    /// <summary>The fragment as a replica is asked to run it.</summary>
+    private static FragmentSpec SpecOf(PlannedFragment fragment) => new(
+        fragment.Name, fragment.Version, fragment.Edges, fragment.Composition, fragment.Form == FragmentForm.Bricks ? null : fragment.Yaml);
 
     /// <summary>
-    /// Ready means the main instance reports itself registered in the deployment's current
-    /// generation and the coordinator's registry holds it at the fragment's version. A closed
-    /// instance has left the registry by then (a node unregisters before it disconnects), so
-    /// admission has no stale one to pick.
+    /// The plan's fragments as a run names them, read from the rights as they are now: the subject each node connects
+    /// under, which admission binds a fragment to, and the groups its replicas' data plane clients must hold.
     /// </summary>
-    private async Task WaitRegisteredAsync(Deployment deployment, CancellationToken ct)
+    private IReadOnlyList<RunFragment> RunFragmentsOf(DistributionPlan plan) =>
+        plan.Fragments.Select(f => new RunFragment(SpecOf(f), _rights.SubjectOf(f.Node), _rights.GroupsOf(f.Node))).ToList();
+
+    /// <summary>
+    /// Asks every connected replica of each node whether it would run its fragments, then waits, up to the registration
+    /// timeout, until each fragment has a replica that said yes and that a run could be placed on. This is an early
+    /// word and nothing stays on any replica. A replica that refuses is not the answer while another may do (a rolling
+    /// update leaves some at the old brick): a fragment fails at once only when every replica asked has answered and none
+    /// said yes, naming the node and why the first said no; otherwise it waits for one that did.
+    /// </summary>
+    private async Task CheckAsync(Deployment deployment, CancellationToken ct)
     {
-        bool Ready(PlannedFragment fragment)
-        {
-            var main = _inventory.Reported(fragment.Name).FirstOrDefault(s => s.Instance == "main");
-            if (main is not { State: FragmentState.Registered, ClientId: { } clientId } || main.Generation != deployment.Generation)
-                return false;
-            return _registry.GetLiveInstances(fragment.Name).Any(i => i.ClientId == clientId && i.Version == fragment.Version);
-        }
+        var plan = deployment.Plan;
+        var fragments = RunFragmentsOf(plan);
+
+        using var bound = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        bound.CancelAfter(RegistrationTimeout);
+        var asks = plan.Fragments
+            .SelectMany(f => _inventory.ReplicasOf(f.Node).Select(r => (Fragment: f, r.Key, Answer: _link.CheckAsync(r.Key, SpecOf(f), bound.Token))))
+            .ToList();
+        foreach (var ask in asks)
+            try { await ask.Answer; } catch (Exception) { /* told below, by fragment */ }
+
+        bool Said(PlannedFragment f, bool yes) =>
+            asks.Any(a => a.Fragment == f && a.Answer.IsCompletedSuccessfully && a.Answer.Result.Ok == yes);
+
+        // Every replica answered and none said yes, at least one saying why not: that is the answer, at once.
+        var refusals = plan.Fragments.Where(f => !Said(f, true) && Said(f, false)).Select(f =>
+            $"{f.Name} was not registered: refused by {f.Node}: " +
+            asks.Where(a => a.Fragment == f && a.Answer.IsCompletedSuccessfully && !a.Answer.Result.Ok).Select(a => a.Answer.Result.Reason).First()).ToList();
+        if (refusals.Count > 0) throw new ConflictException(string.Join(" ", refusals));
 
         var deadline = DateTime.UtcNow + RegistrationTimeout;
         while (true)
         {
-            // A host that refuses or fails to register a fragment says so in this generation; waiting
-            // out the timeout would only hide why.
-            foreach (var fragment in deployment.Plan.Fragments)
+            ct.ThrowIfCancellationRequested();
+            var eligibility = await _admission.EvaluateAsync(fragments);
+            var missing = plan.Fragments.Where(f =>
             {
-                var failed = _inventory.Reported(fragment.Name)
-                    .FirstOrDefault(s => s.Instance == "main" && s.State == FragmentState.Failed && s.Generation == deployment.Generation);
-                if (failed is not null)
-                    throw new ConflictException($"{fragment.Name} was not registered: {failed.Message}");
-            }
-            var missing = deployment.Plan.Fragments.Where(f => !Ready(f)).Select(f => f.Name).ToList();
+                var said = asks.Where(a => a.Fragment == f && a.Answer.IsCompletedSuccessfully && a.Answer.Result.Ok).Select(a => a.Key).ToHashSet();
+                return !eligibility[f.Name].Eligible.Any(said.Contains);
+            }).ToList();
             if (missing.Count == 0) return;
             if (DateTime.UtcNow > deadline)
-                throw new ConflictException($"Not registered with the coordinator in time: {string.Join(", ", missing)}.");
-            await Task.Delay(100, ct);
+                throw new ConflictException("No replica could run: " + string.Join(" ", missing.Select(f =>
+                    $"{f.Name} ({eligibility[f.Name].Reason ?? "no replica that was asked is eligible."})")));
+            await Task.Delay(200, ct);
         }
     }
-
-    /// <summary>
-    /// The subject each node of the plan connects under, read from the rights as they are now: a run
-    /// is admitted only from instances attested under it.
-    /// </summary>
-    private IReadOnlyDictionary<string, string> SubjectsOf(DistributionPlan plan) =>
-        plan.Fragments.Select(f => f.Node).Distinct(StringComparer.Ordinal).ToDictionary(node => node, _rights.SubjectOf, StringComparer.Ordinal);
 
     private void ThrowIfBusy(string pipelineId)
     {
@@ -494,32 +485,27 @@ public sealed class DeploymentManager
         throw new ConflictException($"'{fragmentName}' is not a fragment of a deployed plan.");
     }
 
-    private DeploymentView View(Deployment d) => new(
+    private DeploymentView View(Deployment d, IReadOnlyDictionary<string, FragmentEligibility>? eligibility) => new(
         d.Plan.PipelineId, d.Plan.Id, d.Origin, d.State, d.DeployedAt, d.Message,
-        d.Plan.Fragments.Select(f => new DeployedFragment(f.Name, f.Node, f.Version)).ToList(), d.Plan.Edges.Count,
+        d.Plan.Fragments.Select(f => new DeployedFragment(f.Name, f.Node, f.Version, eligibility?.GetValueOrDefault(f.Name)?.Eligible.Count ?? 0)).ToList(),
+        d.Plan.Edges.Count,
         _sent.Where(t => !t.Running).Concat(_queued).Count(t => t.View.PipelineId == d.Plan.PipelineId),
         _sent.FirstOrDefault(t => t.Running && t.View.PipelineId == d.Plan.PipelineId)?.View.RunId);
 
     private void Publish(Deployment deployment)
     {
         _bus.Publish("deploy", new { planId = deployment.Plan.Id, pipelineId = deployment.Plan.PipelineId, state = deployment.State, message = deployment.Message });
-        _bus.Publish("deployments", Deployments);
+        PublishDeployments();
     }
 
-    private static string NewGeneration() => Guid.NewGuid().ToString("N");
+    // One snapshot at a time, each taken when its turn comes: a later one is never overtaken by an earlier one.
+    private readonly SemaphoreSlim _publishing = new(1, 1);
 
-    private Task SendAsync(string node, string method, object argument, CancellationToken ct)
+    private void PublishDeployments() => _ = Task.Run(async () =>
     {
-        var connection = _inventory.ConnectionOf(node) ?? throw new ConflictException($"{node} is offline.");
-        return _labHub.Clients.Client(connection).SendAsync(method, argument, ct);
-    }
-
-    /// <summary>A command that concerns the whole node, not the replica a deployment went to.</summary>
-    private async Task SendToEveryReplicaAsync(string node, string method, object argument, CancellationToken ct)
-    {
-        var connections = _inventory.ConnectionsOf(node);
-        if (connections.Count == 0) throw new ConflictException($"{node} is offline.");
-        foreach (var connection in connections)
-            await _labHub.Clients.Client(connection).SendAsync(method, argument, ct);
-    }
+        await _publishing.WaitAsync();
+        try { _bus.Publish("deployments", await DeploymentsAsync()); }
+        catch (Exception ex) { _logger.LogWarning(ex, "The deployments could not be published"); }
+        finally { _publishing.Release(); }
+    });
 }
