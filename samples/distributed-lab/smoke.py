@@ -8,7 +8,7 @@ that share a data node must never be in flight together.
 The rights': the embedded IDP, people's sessions and the studio's bearer tokens, the flow matrix refusing a plan and then, edited under a deployed
 pipeline and, edited under a deployed pipeline, a transfer at run time; a host of another identity that announces itself is placed
 no fragment of other nodes and speaks for no run it was not placed on; a data plane client of another identity is never announced;
-every edit is undone.
+a disabled identity is refused and its host drops its data plane client, then takes a run once enabled; every edit is undone.
 The faults': a run cancelled while a fully wired fragment's child has nothing to write, whose
 verdict must come within the grace period.
 The bricks': on strict nodes, a fragment whose branch is not one of the node's bricks, or is one only
@@ -74,14 +74,18 @@ def bearer(token, path, body=None, method="GET", csrf=True, headers=None):
         return e.code, e.read(), e.headers
 
 
-def coordinator_log():
-    """Everything the coordinator has logged so far: its file on the local lab, its container's output on the stack."""
+def service_log(name):
+    """Everything a service has logged so far: its file on the local lab, its container's output on the stack."""
     if STACK:
-        out = subprocess.run(["docker", "compose", "-f", os.path.join(LAB_DIR, "compose.yaml"), "logs", "--no-color", "coordinator"],
+        out = subprocess.run(["docker", "compose", "-f", os.path.join(LAB_DIR, "compose.yaml"), "logs", "--no-color", name],
                              capture_output=True, text=True, check=True)
         return out.stdout
-    with open(os.path.join(STATE, "logs", "coordinator.log"), errors="replace") as f:
+    with open(os.path.join(STATE, "logs", f"{name}.log"), errors="replace") as f:
         return f.read()
+
+
+def coordinator_log():
+    return service_log("coordinator")
 
 
 def until(predicate, timeout, what):
@@ -667,7 +671,9 @@ def rights_pass():
 
     def disabled():
         # The coordinator decides what an identity may do: disabled, node-3 is refused when it connects
-        # again, whatever token the IdP still issues it; enabled again, it comes back on its own.
+        # again, whatever token the IdP still issues it, and its host drops the data plane client the hub
+        # would otherwise keep with the groups it had; enabled again, it comes back on its own, and a run
+        # through it succeeds.
         def update(enabled):
             node3 = next(i for i in call("/api/rights")["identities"] if i["clientId"] == "node-3")
             call("/api/rights/identities/node-3", {"clientId": "node-3", "name": node3["name"], "description": node3["description"],
@@ -677,19 +683,33 @@ def rights_pass():
         def online():
             return next((n["online"] for n in call("/api/nodes") if n["name"] == "node-3"), False)
 
-        seen = len(coordinator_log())
+        seen, seen_host = len(coordinator_log()), len(service_log("node-3"))
         try:
             update(False)
 
             def refused():
                 return "Announcement of node-3 refused: 'node-3' is disabled" in coordinator_log()[seen:]
             until(refused, 30, "node-3's refusal while disabled")
+
+            def dropped():
+                return "dropping its data plane client" in service_log("node-3")[seen_host:]
+            until(dropped, 30, "node-3's host dropping its data plane client")
             if online():
                 raise RuntimeError("node-3 is online while its identity is disabled")
         finally:
             update(True)
         until(online, 30, "node-3 back online once enabled")
-        return "disabled: node-3 refused when it connects again; enabled: back online"
+        pipeline = "revenue-by-country"
+        call(f"/api/library/{pipeline}/distribute", {"save": True, "message": "smoke: node-3 enabled again"})
+        call(f"/api/library/{pipeline}/deploy", {})
+        try:
+            run = call("/api/runs", {"pipelineId": pipeline})
+            final = until(lambda: _finished(run["runId"]), RUN_TIMEOUT, "the run through node-3, enabled again")
+        finally:
+            undeploy(pipeline)
+        if final["state"] != "succeeded":
+            raise RuntimeError(f"a run through node-3 once enabled again -> {final['state']}: {final.get('refusal') or final.get('description')}")
+        return "disabled: node-3 refused when it connects again, its host dropped its data plane client; enabled: back online, and a run through it succeeded"
 
     def roles():
         # A person's rights are the coordinator's configuration: labreader reads, labdesigner also

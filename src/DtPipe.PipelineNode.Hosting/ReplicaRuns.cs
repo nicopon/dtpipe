@@ -9,17 +9,18 @@ namespace DtPipe.PipelineNode.Hosting;
 
 /// <summary>
 /// The run protocol of one replica: what it does with the coordinator's <c>Launch</c>, <c>Wire</c>, <c>Cancel</c>,
-/// <c>Check</c> and <c>Kill</c>, and how it reports <c>Exited</c>. The replica's TransportR side is a single
-/// <see cref="PipelineNode"/>; each run is a <see cref="FragmentRun"/> in a table keyed by (run, fragment). Every
+/// <c>Check</c> and <c>Kill</c>, and how it reports <c>Exited</c>. The replica's TransportR side is one
+/// <see cref="PipelineNode"/> at a time (<see cref="UseNode"/>); each run is a <see cref="FragmentRun"/> in a table keyed by (run, fragment). Every
 /// handler answers as soon as it has received the message and never waits for a transfer or for a run: the node
 /// channel's client handles messages one after another, and the coordinator bounds each answer. A run ends in
 /// one place, <see cref="CompleteAndReportAsync"/>: it is reported, then thrown away.
 /// </summary>
 internal sealed class ReplicaRuns : IAsyncDisposable
 {
-    private sealed class Entry(FragmentRun run, FragmentSpec spec, string jobPath)
+    private sealed class Entry(FragmentRun run, FragmentSpec spec, string jobPath, PipelineNode node)
     {
         public FragmentRun Run { get; } = run;
+        public PipelineNode Node { get; } = node;
         public FragmentSpec Spec { get; } = spec;
         public string JobPath { get; } = jobPath;
         public int CompletionStarted;
@@ -27,7 +28,7 @@ internal sealed class ReplicaRuns : IAsyncDisposable
     }
 
     private readonly HubConnection _channel;
-    private readonly PipelineNode _node;
+    private volatile PipelineNode? _node;
     private readonly string _name;
     private readonly string _dtpipe;
     private readonly IReadOnlyDictionary<string, string> _environment;
@@ -53,6 +54,12 @@ internal sealed class ReplicaRuns : IAsyncDisposable
         (_intake, _loggerOf, _logger, _unwiredTimeout) = (intake, loggerOf, logger, unwiredTimeout);
         Directory.CreateDirectory(_jobsDirectory);
     }
+
+    /// <summary>
+    /// The TransportR client new runs are launched and wired with: null once it was dropped, until another is registered. A
+    /// run keeps the node it was launched with, so a transfer is never claimed from another client's book.
+    /// </summary>
+    public void UseNode(PipelineNode? node) => _node = node;
 
     /// <summary>
     /// Answers the coordinator's run messages on the node channel: the one table from message to method, for the agent
@@ -93,6 +100,7 @@ internal sealed class ReplicaRuns : IAsyncDisposable
         var spec = request.Spec;
         var key = (request.RunId, spec.Fragment);
         if (_runs.ContainsKey(key)) return new LaunchResult(false, $"{spec.Fragment} already runs in {request.RunId}.");
+        if (_node is not { } node) return new LaunchResult(false, "this replica holds no data plane client.");
 
         var (yaml, reason) = _intake(spec);
         if (yaml is null)
@@ -114,7 +122,7 @@ internal sealed class ReplicaRuns : IAsyncDisposable
                     .Select(e => new EdgeBinding(e.Alias, e.Direction == FragmentEdgeDirection.Inbound ? EdgeDirection.Inbound : EdgeDirection.Outbound))
                     .ToList(),
             };
-            var entry = new Entry(_node.Launch(launch, _loggerOf(spec.Fragment)), spec, jobPath);
+            var entry = new Entry(node.Launch(launch, _loggerOf(spec.Fragment)), spec, jobPath, node);
             if (!_runs.TryAdd(key, entry))
             {
                 await entry.Run.DisposeAsync();
@@ -152,7 +160,14 @@ internal sealed class ReplicaRuns : IAsyncDisposable
     {
         try
         {
-            var lastEdge = await _node.WireAsync(entry.Run, alias, transferId);
+            // A client dropped since the launch carries no transfer: the run fails now, not after the wait for a handle that cannot come.
+            if (!ReferenceEquals(entry.Node, _node))
+            {
+                entry.Run.Fault(FaultOrigin.Remote, $"the replica's data plane client was dropped before edge '{alias}' was wired");
+                StartCompletion(key, entry);
+                return;
+            }
+            var lastEdge = await entry.Node.WireAsync(entry.Run, alias, transferId);
             // Once every declared edge is relaying, the run goes to completion and reports on its own.
             if (lastEdge || entry.Run.WireRequests >= entry.Run.Edges.Count && entry.Run.Origin is not null) StartCompletion(key, entry);
         }

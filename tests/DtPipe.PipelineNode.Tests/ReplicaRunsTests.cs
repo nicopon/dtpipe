@@ -105,6 +105,43 @@ public class ReplicaRunsTests : IDisposable
         Assert.Equal(1, runs.Count);
     }
 
+    /// <summary>A replica that holds no data plane client launches nothing: the run protocol answers that the run did not start.</summary>
+    [Fact]
+    public async Task WithNoDataPlaneClient_ALaunchIsRefused()
+    {
+        var (host, node, runs) = await StartAsync(unwired: TimeSpan.FromMinutes(5));
+        await using var _host = host;
+        await using var _node = node;
+        await using var _runs = runs;
+        runs.UseNode(null);
+
+        var result = await runs.LaunchAsync(WaitingRun("run-1"));
+
+        Assert.False(result.Started);
+        Assert.Equal(0, runs.Count);
+    }
+
+    /// <summary>A run asked to wire after its client was dropped fails at once, not after the wait for a transfer that cannot come.</summary>
+    [Fact]
+    public async Task ARunWiredAfterItsClientWasDropped_FailsAtOnce()
+    {
+        var (host, node, runs) = await StartAsync(unwired: TimeSpan.FromMinutes(5));
+        await using var _host = host;
+        await using var _node = node;
+        await using var _runs = runs;
+        Assert.True((await runs.LaunchAsync(WaitingRun("run-1"))).Started);
+        runs.UseNode(null);
+
+        Assert.True(runs.Wire("run-1", "A", "in", "a-transfer-that-never-opens"));
+
+        var deadline = DateTime.UtcNow + Bound;
+        while (runs.Count > 0)
+        {
+            if (DateTime.UtcNow > deadline) throw new TimeoutException("the run whose client was dropped never ended");
+            await Task.Delay(50);
+        }
+    }
+
     /// <summary>
     /// The replica's channel drops while its fragment runs. The fragment ends and cannot say so; the coordinator keeps the
     /// replica for its grace period, and the report goes out once the same host announces itself again, so the run still

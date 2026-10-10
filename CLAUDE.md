@@ -297,7 +297,7 @@ hosts, its **replicas**, each driving `dtpipe` child processes for the runs plac
 the control plane, over each replica's node channel; TransportR carries the data plane.
 - **Peers never address each other**: only the coordinator opens a transfer, and it checks a plan's
   edges against the flow-control matrix before any opens.
-- **A replica has one TransportR client for all its runs, and is the only TransportR client they
+- **A replica has one TransportR client at a time for all its runs, and is the only TransportR client they
   have.** The node is a byte relay: dtpipe reaches it through `arrow:` and references no TransportR
   assembly.
 - **A node's replicas must be interchangeable**: one database, the same variables, the same bricks outside

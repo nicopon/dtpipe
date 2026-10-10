@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using DtPipe.Coordinator.Contracts;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -36,8 +37,9 @@ internal sealed class NodeAgent : BackgroundService
     private readonly ILogger _logger;
     private HubConnection? _hub;
 
-    // The replica's TransportR side and its runs, made on the first connection and kept: the client id they announce
-    // is the same for every announcement of this process.
+    // The replica's TransportR client and its runs. The runs are made with the first client and kept; the client is
+    // dropped when the hub refuses its registration and another is made when the identity can register one, so the client
+    // id an announcement carries is the current client's, or none.
     private PipelineNode? _node;
     private ReplicaRuns? _runs;
 
@@ -211,13 +213,22 @@ internal sealed class NodeAgent : BackgroundService
             return false;
         }
 
-        var runs = new ReplicaRuns(
-            _hub!, node, _options.Name, _options.DtPipe, _environment, _fragmentsDir,
-            spec => FragmentIntake.JobOf(spec, _policy, _gate, _bricks.DeclaredBranch, _bricks.Forms),
-            fragment => _forwarder.For(_hostLoggers, _options.Name, fragment).CreateLogger(typeof(FragmentRun).FullName!),
-            _logger, _options.UnwiredRunTimeout);
-        runs.Bind();
-        (_node, _runs) = (node, runs);
+        // The channel's handlers are bound once, by the first run protocol; a later client goes to the one that exists.
+        if (_runs is null)
+        {
+            var runs = new ReplicaRuns(
+                _hub!, node, _options.Name, _options.DtPipe, _environment, _fragmentsDir,
+                spec => FragmentIntake.JobOf(spec, _policy, _gate, _bricks.DeclaredBranch, _bricks.Forms),
+                fragment => _forwarder.For(_hostLoggers, _options.Name, fragment).CreateLogger(typeof(FragmentRun).FullName!),
+                _logger, _options.UnwiredRunTimeout);
+            runs.Bind();
+            _runs = runs;
+        }
+        else
+        {
+            _runs.UseNode(node);
+        }
+        _node = node;
         return true;
     }
 
@@ -237,14 +248,22 @@ internal sealed class NodeAgent : BackgroundService
                 if (hub.State != HubConnectionState.Connected) continue;
                 try
                 {
-                    if (_node is null)
+                    if (_node is not { } node)
                     {
                         if (await EnsureNodeAsync(ct)) await AnnounceAsync();
                     }
-                    else if (await _node.IsRegisteredAsync(ct) == false)
+                    else if (await node.IsRegisteredAsync(ct) == false)
                     {
                         _logger.LogInformation("The hub does not know this replica's data plane: registering it again");
-                        await _node.RefreshRegistrationAsync(ct);
+                        try
+                        {
+                            await node.RefreshRegistrationAsync(ct);
+                        }
+                        catch (HubException ex)
+                        {
+                            await DropDataPlaneAsync(node, ex, ct);
+                            await AnnounceAsync();
+                        }
                     }
                 }
                 catch (Exception ex) when (!ct.IsCancellationRequested)
@@ -276,24 +295,52 @@ internal sealed class NodeAgent : BackgroundService
     /// The coordinator closes a replica's channel so that it takes its rights again; its TransportR client registered with the
     /// groups it had, and has the hub take the groups of the moment when asked. That is done at once, runs in flight or not: the
     /// client keeps its connection, and the hub ends the transfers the new groups refuse. A client whose connection is not up
-    /// registers by itself when it is back, with the groups of that moment, so the refusal is not retried. A refusal is logged
-    /// and does not end the loop that connects the channel again.
+    /// registers by itself when it is back, with the groups of that moment, so that refusal is not retried. A hub that refuses
+    /// the refresh (<see cref="HubException"/>: the identity holds no group, so nothing is written and the old groups would
+    /// stay) has the client dropped. Any other failure is logged and does not end the loop that connects the channel again.
     /// </summary>
     private async Task RefreshDataPlaneAsync(CancellationToken ct)
     {
-        if (_node is null) return;
+        if (_node is not { } node) return;
         try
         {
-            await _node.RefreshRegistrationAsync(ct);
+            await node.RefreshRegistrationAsync(ct);
         }
         catch (InvalidOperationException ex)
         {
             _logger.LogDebug(ex, "The data plane's connection is not up: it registers by itself when it is back");
         }
+        catch (HubException ex)
+        {
+            await DropDataPlaneAsync(node, ex, ct);
+        }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             _logger.LogWarning(ex, "The data plane could not be registered again");
         }
+    }
+
+    /// <summary>
+    /// Closes the TransportR client the hub refused to renew, so the hub holds no connected registration with the groups the identity
+    /// has lost; the runs keep going to their end without it, and announcements carry no client until <see cref="EnsureNodeAsync"/>
+    /// registers another. Only the client that was refused is dropped: the loop that connects the channel and the watch can both
+    /// meet the refusal, and the second finds it gone.
+    /// </summary>
+    private async Task DropDataPlaneAsync(PipelineNode node, HubException reason, CancellationToken ct)
+    {
+        await _connecting.WaitAsync(ct);
+        try
+        {
+            if (!ReferenceEquals(_node, node)) return;
+            _node = null;
+            _runs?.UseNode(null);
+        }
+        finally
+        {
+            _connecting.Release();
+        }
+        _logger.LogWarning("The hub refused to renew the data plane registration ({Reason}): dropping its data plane client", reason.Message);
+        await node.DisposeAsync();
     }
 
     /// <summary>A request the host registered a handler for, answered outside the command queue; any other is said not to be answered.</summary>

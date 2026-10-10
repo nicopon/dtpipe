@@ -19,9 +19,11 @@ stdin/stdout and TransportR. It speaks to no coordinator itself.
 - **The node is a byte relay.** It references no DtPipe project and never rewrites a batch; the
   child's `arrow:` reader and writer own the format. Put engine logic in dtpipe, never here.
   `ArrowIpcRowCounter` reads the IPC framing only to count rows.
-- **A replica has one TransportR client, shared by all its runs, and is the only TransportR client they
-  have.** dtpipe has no TransportR adapter and reaches the node only through `arrow:`. The client bounds each
-  transfer it receives (`WithReceiveCapacity`), so a replica running several carries one bound apiece.
+- **A replica has one TransportR client at a time, shared by all its runs, and is the only TransportR client
+  they have.** dtpipe has no TransportR adapter and reaches the node only through `arrow:`. The client bounds each
+  transfer it receives (`WithReceiveCapacity`), so a replica running several carries one bound apiece. A run keeps
+  the client it was launched with; a client the hub refuses to renew is dropped and another registered
+  (`src/DtPipe.PipelineNode.Hosting/CLAUDE.md`).
 - **A transfer handle is claimed once, and an unclaimed one is released.** The handshake delivers a handle on
   its own schedule, before or after the run's `Wire` asks for it. One no run wires within
   `NodeClientOptions.UnclaimedTransferTimeout` (its run was torn down first) is disposed, not kept, and a
