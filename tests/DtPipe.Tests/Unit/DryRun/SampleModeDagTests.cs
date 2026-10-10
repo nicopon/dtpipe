@@ -120,6 +120,45 @@ public sealed class SampleModeDagTests : IDisposable
 	}
 
 	[Fact]
+	public async Task Rows_Read_Is_What_The_Source_Delivered_For_A_Columnar_Reader()
+	{
+		var report = await SampleAsync("a:\n  input: generate:100\n  output: csv:out.csv\n", rows: 7);
+
+		var branch = Branch(report, "a");
+		branch.GetProperty("rowsRead").GetInt64().Should().Be(7);
+		branch.GetProperty("rowsRead").GetInt64().Should().Be(Seen(branch)[0], "the reader stage counts the same rows");
+	}
+
+	[Fact]
+	public async Task Rows_Read_Is_What_The_Source_Delivered_For_A_Row_Reader()
+	{
+		File.WriteAllText("people.csv", "id,name\n1,a\n2,b\n3,c\n");
+
+		var report = await SampleAsync("a:\n  input: csv:people.csv\n  output: csv:out.csv\n", rows: 10);
+
+		var branch = Branch(report, "a");
+		branch.GetProperty("rowsRead").GetInt64().Should().Be(3);
+		branch.GetProperty("rowsRead").GetInt64().Should().Be(Seen(branch)[0], "the reader stage counts the same rows");
+	}
+
+	[Fact]
+	public async Task Two_Samples_At_Once_Each_Report_Only_Their_Own_Branch()
+	{
+		var tools = Tools();
+		var big = tools.SampleAsync("alpha:\n  input: generate:200000\n  output: csv:o1.csv\n", 100000, shownRows: 3, CancellationToken.None);
+		var small = tools.SampleAsync("beta:\n  input: generate:50\n  output: csv:o2.csv\n", 10, shownRows: 3, CancellationToken.None);
+
+		var replies = await Task.WhenAll(big, small);
+
+		var branches = replies
+			.Select(r => JsonDocument.Parse(r).RootElement.GetProperty("branches").EnumerateArray()
+				.Select(b => b.GetProperty("branch").GetString()).ToArray())
+			.ToArray();
+		branches[0].Should().Equal("alpha");
+		branches[1].Should().Equal("beta");
+	}
+
+	[Fact]
 	public async Task A_Processor_Reads_The_Rows_Of_Its_Upstream()
 	{
 		const string job = """

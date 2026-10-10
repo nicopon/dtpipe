@@ -203,6 +203,10 @@ public partial class DtPipeMcpTools
         var collector = _serviceProvider.GetRequiredService<DtPipe.DryRun.SampleReportCollector>();
         var jobService = _serviceProvider.GetRequiredService<DtPipe.Cli.JobService>();
 
+        // Held until the reports are read: the collector is the process's, and two samples of one
+        // agent turn (F5) would otherwise clear and switch it off under each other.
+        using var turn = await collector.TakeTurnAsync(ct);
+
         var jobs = parsed.Jobs.ToDictionary(
             kv => kv.Key,
             kv => kv.Value with { DryRunCount = rows },

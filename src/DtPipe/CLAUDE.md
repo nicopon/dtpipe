@@ -155,6 +155,14 @@ Mandatory MCP directives:
    `[unchecked]`
 4. Fail closed: default `apply=false`, reject on ambiguity. `[CI: ExecuteYamlJobGuardrailTests]`
 
+### One collecting sample at a time
+
+`SampleReportCollector` belongs to the process, and the agent runs the tools of a turn in parallel
+(F5). `RunSampleAsync` therefore holds `TakeTurnAsync` from before it clears the collector until it
+has read its reports: two `dry-run` calls run one after the other, never clearing or disabling each
+other's capture. `dtpipe mcp` serves until it is stopped, so a signal is its only end and it exits
+130. `[CI: SampleModeDagTests, McpCommandTests]`
+
 ### The session trace
 
 `dtpipe agent --trace <path>` (or `$DTPIPE_AGENT_TRACE`) records a session as JSON lines: what the

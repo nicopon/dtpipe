@@ -34,6 +34,29 @@ public sealed class SampleReportCollector
 
     public IReadOnlyDictionary<string, SampleReport> Reports => _reports;
 
+    private readonly SemaphoreSlim _turn = new(1, 1);
+
+    /// <summary>
+    /// One collecting run at a time: the collector belongs to the process, so a second run's
+    /// <see cref="Clear"/> would empty the first's reports and the first to finish would switch
+    /// <see cref="Enabled"/> off under the other. A caller holds the turn from before it clears
+    /// until it has read <see cref="Reports"/>; concurrent samples then run one after the other.
+    /// </summary>
+    public async Task<IDisposable> TakeTurnAsync(CancellationToken ct)
+    {
+        await _turn.WaitAsync(ct);
+        return new Turn(_turn);
+    }
+
+    private sealed class Turn(SemaphoreSlim turn) : IDisposable
+    {
+        private int _released;
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _released, 1) == 0) turn.Release();
+        }
+    }
+
     public void Clear()
     {
         _reports.Clear();
