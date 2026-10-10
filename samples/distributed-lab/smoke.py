@@ -31,7 +31,7 @@ witness reads the databases the nodes seeded there, the library is the coordinat
 log is the container's, and the enrollment check's host is a throwaway container of the stack's `node` image.
 Exits 0 when every selected pipeline passes, 1 otherwise. Standard library only.
 """
-import base64, csv, io, itertools, json, os, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
+import base64, csv, io, itertools, json, os, re, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
 from datetime import datetime
 
 URL, DTPIPE, STATE = sys.argv[1].rstrip("/"), sys.argv[2], sys.argv[3]
@@ -309,8 +309,14 @@ def data_nodes(plan):
     return {f["node"] for f in plan["fragments"]} - runners
 
 
+def instant(text):
+    """A timestamp as the coordinator writes it. Its fraction of a second loses its trailing zeros, and
+    `fromisoformat` of Python 3.9 reads only three or six digits: pad it to six."""
+    return datetime.fromisoformat(re.sub(r"\.(\d+)", lambda m: "." + m.group(1)[:6].ljust(6, "0"), text))
+
+
 def span(final):
-    return datetime.fromisoformat(final["startedAt"]), datetime.fromisoformat(final["finishedAt"])
+    return instant(final["startedAt"]), instant(final["finishedAt"])
 
 
 def overlap(a, b):
