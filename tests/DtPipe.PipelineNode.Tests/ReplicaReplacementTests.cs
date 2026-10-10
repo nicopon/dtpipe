@@ -13,6 +13,7 @@ namespace DtPipe.PipelineNode.Tests;
 /// disconnect, standing in for a coordinator behind a slow network or a busy thread pool, so the window that a fast
 /// local hub closes by luck stays open.
 /// </summary>
+[Collection(ChildExitTimingCollection.Name)]
 public class ReplicaReplacementTests
 {
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(30);

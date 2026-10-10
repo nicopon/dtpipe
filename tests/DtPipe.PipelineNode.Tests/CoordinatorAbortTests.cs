@@ -14,6 +14,7 @@ namespace DtPipe.PipelineNode.Tests;
 /// fault of its own. <see cref="CoordinatorDrivenTests"/> covers the mid-flow child death that this
 /// file does not - C0bis's <c>Abort</c> already suffices there.
 /// </summary>
+[Collection(ChildExitTimingCollection.Name)]
 public class CoordinatorAbortTests
 {
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(30);

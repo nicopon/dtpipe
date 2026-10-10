@@ -76,6 +76,12 @@ stdin/stdout and TransportR. It speaks to no coordinator itself.
   declares.
 - **A run is its launcher's to dispose.** Disposing the node closes its client and releases the handles no run
   claimed; it ends no run. `[unchecked]`
+- **A test whose verdict depends on how soon a child starts or how soon its end is seen joins
+  `ChildExitTimingCollection`**: an elapsed-time bound on a child, or a short run timeout. While a child is being started, the process
+  observes no other child's end until that start returns, so such a test beside another class's launch can fail on that
+  launch's speed. The collection runs its classes one at a time, after the parallel ones: while one runs, no other class of the project starts
+  a child. The children of one test are not separated.
+  `[unchecked: a class that depends on child timing without joining the collection]`
 
 `tests/DtPipe.PipelineNode.Tests` spawns the real `dist/release/dtpipe` against an in-process
 TransportR hub (`NodeTestHost`, where `HandWiredNode` wires a run by hand) or a real `DtPipe.Coordinator` hub (`CoordinatorTestHost`, from

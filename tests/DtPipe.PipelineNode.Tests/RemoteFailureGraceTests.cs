@@ -14,6 +14,7 @@ namespace DtPipe.PipelineNode.Tests;
 /// owe the run their own report within <see cref="RunOrchestratorOptions.RemoteFailureGrace"/>, or the
 /// run is torn down naming the ones that did not report. A run in which nothing has failed has no clock.
 /// </summary>
+[Collection(ChildExitTimingCollection.Name)]
 public class RemoteFailureGraceTests
 {
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(60);

@@ -14,6 +14,7 @@ namespace DtPipe.PipelineNode.Tests;
 /// join operator, then the join's own producer dying mid-flow - the "C demande X à A et Y à B, et B
 /// tombe" sequence the coordinator's design has described since C4.
 /// </summary>
+[Collection(ChildExitTimingCollection.Name)]
 public class JoinTests
 {
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(30);

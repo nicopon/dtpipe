@@ -13,6 +13,7 @@ namespace DtPipe.PipelineNode.Tests;
 /// they report back - exercised here against real replicas (<see cref="TestNode"/>) and real
 /// <c>dtpipe</c> children, not fakes. <c>ReplicaAdmissionSubjectTests</c> covers admission alone.
 /// </summary>
+[Collection(ChildExitTimingCollection.Name)]
 public class CoordinatorDrivenTests
 {
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(30);

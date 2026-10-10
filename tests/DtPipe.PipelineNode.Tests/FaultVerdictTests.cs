@@ -13,6 +13,7 @@ namespace DtPipe.PipelineNode.Tests;
 /// fault ends the run at once whatever the peers are doing, and a transfer the hub refuses is named
 /// as such - never as a fragment that went quiet.
 /// </summary>
+[Collection(ChildExitTimingCollection.Name)]
 public class FaultVerdictTests
 {
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(20);

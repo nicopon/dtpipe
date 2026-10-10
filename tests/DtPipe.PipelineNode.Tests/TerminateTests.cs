@@ -4,6 +4,7 @@ using Xunit;
 
 namespace DtPipe.PipelineNode.Tests;
 
+[Collection(ChildExitTimingCollection.Name)]
 public class TerminateTests
 {
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(30);
