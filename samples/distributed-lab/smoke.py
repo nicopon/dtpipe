@@ -547,7 +547,7 @@ def rights_pass():
         # A node in several groups sends to another only if every group of the sender may send to every group of
         # the receiver. runner-1 joins `audit`: crm -> runner then needs crm -> audit, and runner -> warehouse needs
         # audit -> warehouse too. Each is added in turn, in the plan and then at run time; the identity, the
-        # matrix and the deployment are restored.
+        # matrix, the deployment and the saved plan are restored.
         runner = next(i for i in call("/api/rights")["identities"] if i["clientId"] == "runner-1")
 
         def put_identity(groups):
@@ -566,6 +566,7 @@ def rights_pass():
                 edited.setdefault(sender, []).append(receiver)
             call("/api/rights/matrix", {"matrix": edited}, "PUT")
 
+        saved, completed = False, False
         try:
             for deployment in call("/api/deployments"):
                 call(f"/api/deployments/{deployment['pipelineId']}", None, "DELETE")
@@ -583,6 +584,7 @@ def rights_pass():
             # The hub enforces the same rule on every transfer: deployed and run with both groups allowed it
             # succeeds; with audit -> warehouse revoked under the deployment, the transfer is refused.
             call("/api/library/customers-anonymized/distribute", {"save": True, "message": "smoke: several groups"})
+            saved = True
             call("/api/library/customers-anonymized/deploy", {})
             run = call("/api/runs", {"pipelineId": "customers-anonymized"})
             allowed = until(lambda: _finished(run["runId"]), RUN_TIMEOUT, "the run with every group allowed")
@@ -591,11 +593,22 @@ def rights_pass():
             refused = until(lambda: _finished(run["runId"]), RUN_TIMEOUT, "the run with audit -> warehouse revoked")
             if allowed["state"] != "succeeded" or refused["state"] == "succeeded":
                 raise RuntimeError(f"every group allowed -> {allowed['state']}, audit -> warehouse revoked -> {refused['state']}")
+            completed = True
         finally:
             call("/api/rights/matrix", {"matrix": matrix}, "PUT")
             for deployment in call("/api/deployments"):
                 call(f"/api/deployments/{deployment['pipelineId']}", None, "DELETE")
             put_identity(runner["groups"])
+            if saved:
+                # The plan saved above carries runner-1's groups of the moment, and the library keeps it: saved again once the
+                # identity and the matrix are back, so the saved plan carries the groups the rights give its nodes now. A
+                # failure of the check itself stays the one reported.
+                try:
+                    call("/api/library/customers-anonymized/distribute", {"save": True, "message": "smoke: several groups, restored"})
+                except Exception as e:
+                    if completed:
+                        raise
+                    print(f"  the saved plan of customers-anonymized could not be restored: {e}", file=sys.stderr)
         return "runner-1 in runner+audit: refused until crm -> audit and audit -> warehouse are both allowed; the run succeeds, and fails once audit -> warehouse is revoked"
 
     def enrollment():
