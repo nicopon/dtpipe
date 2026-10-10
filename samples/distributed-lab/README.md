@@ -21,7 +21,7 @@ disposable hosts of `DtPipe.PipelineNode.Hosting`. They drive the `dtpipe` binar
 ## Quick start
 
 Prerequisites: the .NET 10 SDK, `python3`, a bash shell, network access to nuget.org for the
-TransportR `0.3.1` packages (restored like any other dependency of `DtPipe.Coordinator`), and a
+TransportR `0.4.0` packages (restored like any other dependency of `DtPipe.Coordinator`), and a
 built binary:
 
 ```bash
