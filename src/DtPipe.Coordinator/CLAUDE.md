@@ -21,10 +21,11 @@ bytes between nodes.
   `DtPipe.PipelineNode` before moving it.
 - `DefaultFlowControlService`/`FlowControlOptions` (namespace `TransportR.FlowControl`) ship inside
   the `TransportR.Hub.SignalR` package; there is no separate `TransportR.FlowControl` package.
-- **The coordinator and every `DtPipe.PipelineNode` it drives run the same TransportR version.** A
-  hub and clients of different versions interoperate, but a transfer then fails to resume after a
-  transient cut of a node's link, and nothing reports it: deploy the coordinator and the nodes
-  together. `[unchecked]`
+- **The coordinator and every `DtPipe.PipelineNode` it drives run the same TransportR version; when they
+  cannot move at once, the coordinator, which hosts the hub, moves first.** A node's refresh needs a hub of its
+  own release: an older hub writes the connection's older expiry between the call's two steps, and its sweep can
+  end the transfers of a client it then finds expired. Mixed versions also lose the resume of a transfer after a
+  transient cut of a node's link, and nothing reports it. `[unchecked: mixed versions - a refresh against an older hub, the resume after a cut]`
 - **A reverse proxy in front of the hub must accept `Expect: 100-continue`.** The client sends it on
   every write stream, and a proxy that answers `417` fails all of them. `[unchecked]`
 - **A reverse proxy that filters by path must let `/api/client/*` through**, as it does
@@ -190,12 +191,12 @@ while any replica is connected.
 - **Among the eligible, the replica with the fewest runs is chosen, then the least recently chosen, then the
   lowest instance id**, for every fragment of the run in one step: the choice is read again under the
   registry's lock against the replica as it is, and leased there, or none is. `[local: ReplicaRegistryTests]`
-- **The groups of a client are renewed by restarting its connection**, not by asking it to register again:
-  the TransportR client has no call for that. `PipelineNode.RefreshRegistrationAsync` stops the control
-  connection and the client's own recovery registers it again under the same client id. A replica does it with no
-  run in flight, and for a client the hub holds a registration of, only while the replica is not announced (a
-  client the hub does not know holds no groups to be stale, and is registered again at any time).
-  `[local: GroupRefreshTests]`
+- **The hub reads a client's groups from the rights each time the client registers or renews its token.** A replica
+  has it done on demand with `PipelineNode.RefreshRegistrationAsync` (the call's contract is in
+  `src/DtPipe.PipelineNode/CLAUDE.md`), and the hub judges each open transfer against the new groups before that call
+  returns. Admission does not wait for it: it reads the rights when it chooses, so a replica whose client holds other
+  groups than the rights give its node is out until its registration matches.
+  `[local: GroupRefreshTests, PipelineNode.Tests RefreshRegistrationTests, ReplicaAdmissionSubjectTests]`
 
 ## State and availability
 

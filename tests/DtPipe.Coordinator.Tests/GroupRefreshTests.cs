@@ -1,10 +1,7 @@
-using System.Collections.Concurrent;
-using System.Security.Claims;
 using DtPipe.Coordinator.Tests.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using TransportR.Client.SignalR.Services;
-using TransportR.Identity;
 using TransportR.Interfaces;
 using TransportR.Models;
 using Xunit;
@@ -14,25 +11,12 @@ namespace DtPipe.Coordinator.Tests;
 /// <summary>
 /// How a node's TransportR client takes the groups its identity holds now. The hub writes a client's
 /// groups when the client registers; a coordinator reads them from its rights at that moment, as
-/// <c>RightsIdentityProvider</c> does, so a client that never registers again keeps the groups it had.
+/// <c>RightsIdentityProvider</c> does, so a client that never registers again keeps the groups it had. The client's own
+/// call has the hub read them again.
 /// </summary>
 public class GroupRefreshTests
 {
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(15);
-
-    /// <summary>Groups per subject, read at every registration: the rights document of the real coordinator.</summary>
-    private sealed class MutableGroups : IClientIdentityProvider
-    {
-        public readonly ConcurrentDictionary<string, string[]> BySubject = new();
-        private readonly JwtIdentityProvider _token = new();
-
-        public ClientIdentity? ResolveIdentity(ClaimsPrincipal? user, Guid? providedClientId, IEnumerable<string>? providedGroups)
-        {
-            var identity = _token.ResolveIdentity(user, providedClientId, providedGroups);
-            if (identity is null) return null;
-            return identity with { Groups = BySubject.TryGetValue(identity.Subject ?? "", out var groups) ? groups.ToHashSet() : [] };
-        }
-    }
 
     private static async Task<(CoordinatorTestHost Host, MutableGroups Rights, string Token)> StartAsync()
     {
@@ -46,38 +30,37 @@ public class GroupRefreshTests
     /// <summary>The client pushes the token it holds as soon as it connects, and the hub reads the groups again for it: let that settle.</summary>
     private static Task SettleAsync() => Task.Delay(TimeSpan.FromSeconds(2));
 
-    private static async Task<string> RegisteredGroupsAsync(CoordinatorTestHost host, Guid clientId) =>
-        string.Join(",", ((await host.Host.Services.GetRequiredService<IStateStore>().GetClientAsync(clientId))?.Groups ?? []).Order());
-
     /// <summary>
-    /// A started client cannot be told to register again: <c>ConnectAsync</c> refuses. This is why a node restarts the client's
-    /// connection instead (<see cref="StoppingTheControlConnection_MakesTheClientRegisterAgain"/>); the day this test fails,
-    /// <c>PipelineNode.RefreshRegistrationAsync</c> can be a plain call.
+    /// Refreshing a connected client has the hub take the groups its identity holds then, under the same client id and on
+    /// the connection it already has: nothing restarts, and the call returns once the hub has written them.
     /// </summary>
     [Fact]
-    public async Task ConnectingAgain_OnAStartedClient_IsRefused()
+    public async Task RefreshingTheRegistration_TakesTheGroupsOfTheMoment_OnTheSameConnection()
     {
         var (host, rights, token) = await StartAsync();
         await using var _host = host;
         await using var client = host.CreateClient(token);
         await client.ConnectAsync();
         await SettleAsync();
-        Assert.Equal("before", await RegisteredGroupsAsync(host, client.ClientId));
+        var store = host.Host.Services.GetRequiredService<IStateStore>();
+        var before = await store.GetClientAsync(client.ClientId);
 
         rights.BySubject["node-x"] = ["after"];
-        var ex = await Record.ExceptionAsync(() => client.ConnectAsync());
+        await client.RefreshRegistrationAsync();
 
-        Assert.NotNull(ex);
-        Assert.Equal("before", await RegisteredGroupsAsync(host, client.ClientId));
+        var after = await store.GetClientAsync(client.ClientId);
+        Assert.Equal("after", string.Join(",", after!.Groups.Order()));
+        Assert.Equal(before!.ConnectionId, after.ConnectionId);
+        Assert.Equal(before.Subject, after.Subject);
+        Assert.Null(after.DisconnectedAtUtc);
     }
 
     /// <summary>
-    /// Stopping the control connection makes the client start it again and register with the groups its identity holds
-    /// then, under the same client id: the registration is on a new connection (not merely renewed by the token push the client
-    /// makes as it connects), and it holds the new groups.
+    /// A control connection that stops and comes back registers by itself, with the groups its identity holds then and under the
+    /// same subject: a replica that is refused a refresh because the connection is down relies on it.
     /// </summary>
     [Fact]
-    public async Task StoppingTheControlConnection_MakesTheClientRegisterAgain()
+    public async Task AControlConnectionThatRestarts_RegistersWithTheGroupsOfTheMoment()
     {
         var (host, rights, token) = await StartAsync();
         await using var _host = host;
@@ -95,11 +78,11 @@ public class GroupRefreshTests
         while (DateTime.UtcNow < deadline)
         {
             after = await store.GetClientAsync(client.ClientId);
-            if (after is { DisconnectedAtUtc: null } && after.ConnectionId != before!.ConnectionId) break;
+            if (after is { DisconnectedAtUtc: null } && string.Join(",", after.Groups.Order()) == "after") break;
             await Task.Delay(100);
         }
-        Assert.NotEqual(before!.ConnectionId, after!.ConnectionId);
-        Assert.Equal("after", string.Join(",", after.Groups.Order()));
-        Assert.Equal(before.Subject, after.Subject);
+        Assert.Equal("after", string.Join(",", after!.Groups.Order()));
+        Assert.Null(after.DisconnectedAtUtc);
+        Assert.Equal(before!.Subject, after.Subject);
     }
 }

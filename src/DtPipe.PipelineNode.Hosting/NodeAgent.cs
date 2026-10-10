@@ -41,10 +41,6 @@ internal sealed class NodeAgent : BackgroundService
     private PipelineNode? _node;
     private ReplicaRuns? _runs;
 
-    // The coordinator closed this replica's channel while runs were in flight: its TransportR registration is
-    // renewed at the first moment none is.
-    private volatile bool _refreshWhenIdle;
-
     // One connection of the client at a time: the connection loop and the watch both ask for it, and a second client
     // would leak the first and answer every message twice.
     private readonly SemaphoreSlim _connecting = new(1, 1);
@@ -221,16 +217,15 @@ internal sealed class NodeAgent : BackgroundService
             fragment => _forwarder.For(_hostLoggers, _options.Name, fragment).CreateLogger(typeof(FragmentRun).FullName!),
             _logger, _options.UnwiredRunTimeout);
         runs.Bind();
-        runs.Idle += OnIdle;
         (_node, _runs) = (node, runs);
         return true;
     }
 
     /// <summary>
     /// While the replica is announced, keeps its data plane registered: connects the client that could not register at the
-    /// announcement, and registers again one the hub does not know (a coordinator that lost it, an identity it disabled and
-    /// enabled again), which TransportR would otherwise do at its next presence heartbeat. A client the hub does not know holds
-    /// no registration to be stale, so the replica is placed no run on it meanwhile; it is left alone while runs are in flight.
+    /// announcement, and registers again one the hub does not know (a coordinator that lost it), which TransportR would
+    /// otherwise do at its next presence heartbeat. A client the hub does not know holds no registration to be stale, so the
+    /// replica is placed no run on it meanwhile.
     /// </summary>
     private async Task WatchDataPlaneAsync(HubConnection hub, CancellationToken ct)
     {
@@ -246,10 +241,10 @@ internal sealed class NodeAgent : BackgroundService
                     {
                         if (await EnsureNodeAsync(ct)) await AnnounceAsync();
                     }
-                    else if (_runs!.Count == 0 && await _node.IsRegisteredAsync(ct) == false)
+                    else if (await _node.IsRegisteredAsync(ct) == false)
                     {
                         _logger.LogInformation("The hub does not know this replica's data plane: registering it again");
-                        await _node.RefreshRegistrationAsync(DataPlaneRefreshTimeout, ct);
+                        await _node.RefreshRegistrationAsync(ct);
                     }
                 }
                 catch (Exception ex) when (!ct.IsCancellationRequested)
@@ -277,42 +272,28 @@ internal sealed class NodeAgent : BackgroundService
         if (_runs is not null) await _runs.OnAnnouncedAsync();
     }
 
-    private static readonly TimeSpan DataPlaneRefreshTimeout = TimeSpan.FromSeconds(30);
-
     /// <summary>
     /// The coordinator closes a replica's channel so that it takes its rights again; its TransportR client registered with the
-    /// groups it had, and only registers again when told. With no run in flight that is done now, while the replica is not
-    /// announced and so is placed on no run: the client restarts and registers with the groups of the moment. With runs in
-    /// flight it waits for the last one (<see cref="OnIdle"/>), which would otherwise be interrupted.
+    /// groups it had, and has the hub take the groups of the moment when asked. That is done at once, runs in flight or not: the
+    /// client keeps its connection, and the hub ends the transfers the new groups refuse. A client whose connection is not up
+    /// registers by itself when it is back, with the groups of that moment, so the refusal is not retried. A refusal is logged
+    /// and does not end the loop that connects the channel again.
     /// </summary>
     private async Task RefreshDataPlaneAsync(CancellationToken ct)
     {
-        if (_node is null || _runs is null) return;
-        if (_runs.Count > 0)
-        {
-            _refreshWhenIdle = true;
-            return;
-        }
-        _refreshWhenIdle = false;
+        if (_node is null) return;
         try
         {
-            if (!await _node.RefreshRegistrationAsync(DataPlaneRefreshTimeout, ct))
-                _logger.LogWarning("The data plane did not come back within {Timeout}", DataPlaneRefreshTimeout);
+            await _node.RefreshRegistrationAsync(ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogDebug(ex, "The data plane's connection is not up: it registers by itself when it is back");
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             _logger.LogWarning(ex, "The data plane could not be registered again");
         }
-    }
-
-    /// <summary>
-    /// The last run is gone. If the coordinator closed the channel while it ran, the replica closes it once more, for the
-    /// refresh the closing owed: the reconnection loop does it with nothing in flight.
-    /// </summary>
-    private void OnIdle()
-    {
-        if (!_refreshWhenIdle || _hub is not { State: HubConnectionState.Connected } hub) return;
-        _ = hub.StopAsync();
     }
 
     /// <summary>A request the host registered a handler for, answered outside the command queue; any other is said not to be answered.</summary>

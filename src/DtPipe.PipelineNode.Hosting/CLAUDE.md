@@ -80,16 +80,16 @@ none. One node per process, which is one replica of its node's identity; a secon
   Its client cannot register (it holds no group), and its announcement is how it becomes known, so `NodeAgent`
   connects the channel first and the client second, and announces without `DataPlaneClientId` when the
   client could not register: the replica is eligible to nothing. `WatchDataPlaneAsync` then connects the
-  client as soon as it can and announces again, and registers again, with no run in flight, a client the hub
-  has stopped knowing (a coordinator that lost it, an identity disabled and enabled again), which TransportR
-  would otherwise do at its next presence heartbeat. One connection of the client at a time.
+  client as soon as it can and announces again, and registers again a client the hub has stopped knowing (a
+  coordinator that lost it), which TransportR would otherwise do at its next presence heartbeat. One
+  connection of the client at a time.
   `[local: the lab's smoke.py rights - enrollment, identity disabled, flow matrix run time]`
-- **The coordinator closing the channel renews the data plane's registration, with no run in flight.** A
-  client's groups are those it registered with, so `NodeAgent` restarts the connection of its TransportR
-  client (`PipelineNode.RefreshRegistrationAsync`) after the coordinator closed the channel, while the replica
-  is not announced; with runs in flight it waits for the last, then closes the channel itself for the refresh
-  the first closing owed. `[local: the lab's smoke.py rights - several groups]`
-  `[unchecked: the deferral while runs are in flight]`
+- **The coordinator closing the channel renews the data plane's registration, without waiting for the runs to
+  end.** A client's groups are those it registered with, so once the coordinator has closed the channel `NodeAgent`
+  calls `PipelineNode.RefreshRegistrationAsync` (the call's contract is in `src/DtPipe.PipelineNode/CLAUDE.md`)
+  before it connects the channel again, runs in flight or not. A refusal is logged and never ends the loop that
+  connects the channel. `[local: the lab's smoke.py rights - several groups]`
+  `[unchecked: the agent's call with runs in flight]`
 - **A node host works in a directory of its own process.** `DtPipeNodeOptions.StateDirectory` is a
   parent: the host makes `<parent>/<instance id>` for its fragment jobs and its dtpipe runs, so replicas
   that share a configuration never share a directory, and removes it when it stops in order. Its

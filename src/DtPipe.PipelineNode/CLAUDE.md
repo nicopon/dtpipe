@@ -52,14 +52,16 @@ stdin/stdout and TransportR. It speaks to no coordinator itself.
   `RunToCompletionAsync` uses `WaitForChildExitAsync`: `Process.WaitForExitAsync` alone can stay
   pending after the child has exited, which holds the `Exited` report, and so the run's verdict,
   back for good; a cancelled fragment whose child ends on its own is the case that shows it. `[unchecked: the race is not reproducible on demand]`
-- **The client's registration is renewed by restarting its connection.** The groups the hub holds for a client
-  are those it registered with; TransportR's client re-registers on every restart of its control connection and
-  offers no call for it. `RefreshRegistrationAsync` stops the connection and waits for the client's own
-  recovery, under the same client id. Call it with no run in flight. For a client the hub holds a
-  registration of, also while the host is not announced as able to take a run; a client the hub does not
-  know (`IsRegisteredAsync`, which asks the hub's `Heartbeat`, the only public sign of a registration)
-  holds no groups to be stale, and is registered again at any time. `[local: GroupRefreshTests,
-  RegistrationTests]`
+- **The client's registration is renewed with the client's own call.** The groups the hub holds for a client
+  are those it registered with. `RefreshRegistrationAsync` has the hub take the identity's groups now and a fresh
+  token: the client keeps its connection, and the hub keeps the transfers the new groups allow and ends the others.
+  It may be made at any time, runs in flight or not. It is refused with an `InvalidOperationException` while the
+  connection is down (a connection that comes back registers by itself), and with a `HubException` for an identity
+  that holds no group, which leaves the groups the hub held until the client's next token renewal withdraws them.
+  A client the hub does not know (`IsRegisteredAsync`, which asks the hub's `Heartbeat`, the only public sign of a
+  registration) holds no groups to be stale, and the same call registers it again.
+  `[local: RefreshRegistrationTests, GroupRefreshTests, RegistrationTests]`
+  `[unchecked: the withdrawal at the next token renewal]`
 - **The node must run on Windows**: no POSIX-only API (FIFO, signals). `[unchecked: nothing runs
   the node on Windows]`
 - Keep `MaxInFlightBatches` non-null: a null bound lets a sender race ahead of a slow receiver.

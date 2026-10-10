@@ -240,8 +240,8 @@ public sealed class PipelineNode : IAsyncDisposable
     }
 
     /// <summary>
-    /// Whether the hub knows this client's connection, which is what a registration is: false after the hub lost it or
-    /// refused it (an identity it has since disabled), and null while the connection is not up to be asked.
+    /// Whether the hub knows this client's connection, which is what a registration is: false once the hub has lost it,
+    /// and null while the connection is not up to be asked.
     /// </summary>
     public async Task<bool?> IsRegisteredAsync(CancellationToken ct = default)
     {
@@ -252,28 +252,15 @@ public sealed class PipelineNode : IAsyncDisposable
     }
 
     /// <summary>
-    /// Registers this client with the hub again, so the hub takes the groups its rights give the node now and a fresh
-    /// token. TransportR's client does the work (<c>ReRegisterAsync</c>, then a token push) on every restart of its
-    /// control connection, and offers no way to ask for it: <c>ConnectAsync</c> refuses on a started client and a
-    /// disconnected one cannot start again. So the connection is stopped and the client's own recovery restarts it,
-    /// with the same client id. Call it with no run in flight (a restart interrupts the client's control channel). A client
-    /// the hub holds a registration of is refreshed while the node is not announced as able to take a run: until the
-    /// connection is back, the client carries nothing. A client the hub does not know (<see cref="IsRegisteredAsync"/>)
-    /// holds no groups to be stale, and is registered again at any time. Returns whether the connection was back within
-    /// <paramref name="timeout"/>.
+    /// Has the hub take the groups this node's identity holds now, and a fresh token, with the client's own call: the
+    /// client keeps its connection, and the hub judges each transfer again against the new groups, keeps the ones they
+    /// allow and ends the others. It returns once the hub has written both. It may be made at any time, runs in flight or
+    /// not. Refused with an <see cref="InvalidOperationException"/> while the client's connection is not up (a connection
+    /// that comes back registers by itself, with the groups of that moment), and with a <c>HubException</c> when the
+    /// identity holds no group: nothing is written then, and the hub keeps the groups it held until the client's next
+    /// token renewal withdraws them.
     /// </summary>
-    public async Task<bool> RefreshRegistrationAsync(TimeSpan timeout, CancellationToken ct = default)
-    {
-        var connection = _client.ControlConnection;
-        await connection.StopAsync(ct);
-        var deadline = DateTime.UtcNow + timeout;
-        while (connection.State != HubConnectionState.Connected)
-        {
-            if (DateTime.UtcNow > deadline) return false;
-            await Task.Delay(50, ct);
-        }
-        return true;
-    }
+    public Task RefreshRegistrationAsync(CancellationToken ct = default) => _client.RefreshRegistrationAsync(ct);
 
     public async ValueTask DisposeAsync()
     {
