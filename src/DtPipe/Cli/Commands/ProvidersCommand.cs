@@ -19,11 +19,28 @@ public class ProvidersCommand : Command
     {
         _console = serviceProvider.GetRequiredService<IAnsiConsole>();
 
+        var formatOption = new Option<string>("--format") { Description = "Output format (table, json)" };
+        formatOption.DefaultValueFactory = _ => "table";
+        formatOption.AcceptOnlyFromAmong("table", "json");
+        Options.Add(formatOption);
+
         this.SetAction((parseResult, ct) =>
         {
             var readers = serviceProvider.GetServices<IStreamReaderFactory>();
             var writers = serviceProvider.GetServices<IDataWriterFactory>();
             var streamTransformers = serviceProvider.GetServices<IStreamTransformerFactory>();
+
+            if (string.Equals(parseResult.GetValue(formatOption), "json", StringComparison.OrdinalIgnoreCase))
+            {
+                // The inventory is this command's primary data, so it goes to stdout like
+                // `inspect --format json`; the table keeps the console.
+                var entries = readers.Select(r => Describe(r, "reader"))
+                    .Concat(writers.Select(w => Describe(w, "writer")))
+                    .Concat(streamTransformers.Select(st => new ProviderEntry(st.ComponentName, "stream-processor", false, st.Category)))
+                    .OrderBy(e => e.Name, StringComparer.Ordinal).ThenBy(e => e.Kind, StringComparer.Ordinal);
+                Console.Out.WriteLine(System.Text.Json.JsonSerializer.Serialize(entries, JsonOptions));
+                return Task.CompletedTask;
+            }
 
             var table = new Table()
                 .AddColumn("Provider")
@@ -81,4 +98,15 @@ public class ProvidersCommand : Command
             return Task.CompletedTask;
         });
     }
+
+    private static readonly System.Text.Json.JsonSerializerOptions JsonOptions = new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+    };
+
+    private sealed record ProviderEntry(string Name, string Kind, bool Stdio, string Category);
+
+    private static ProviderEntry Describe(IDataFactory factory, string kind)
+        => new(factory.ComponentName, kind, factory.SupportsStdio, factory.Category);
 }

@@ -91,7 +91,8 @@ dtpipe --help
 ```
 
 `dtpipe providers` is the authority on what this build supports — the catalog is derived from the
-registered components, so it cannot drift from the binary you are holding.
+registered components, so it cannot drift from the binary you are holding. A script reads the same
+inventory with `dtpipe providers --format json`.
 
 ---
 

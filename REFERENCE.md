@@ -181,6 +181,10 @@ dtpipe -i duck:memory --duck-init "keyring://s3-init" ...
 | **Null** | — | ✅ | `null:` | — | — |
 | **Checksum** | — | ✅ | `checksum:` | — | — |
 
+> `dtpipe providers` lists what the binary carries, as a table on stderr. `dtpipe providers --format
+> json` writes the same inventory to stdout for a script: one object per component with `name`,
+> `kind` (`reader`, `writer` or `stream-processor`), `stdio` and `category`.
+
 > For Stdin/Stdout: use `-` as the connection string (`csv:-`) or the bare provider name (`csv` =
 > `csv:-`).
 
