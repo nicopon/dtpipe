@@ -1,6 +1,10 @@
-"""Which processes belong to the bench. A campaign judges what the lab did, so it starts only when every lab
-process is one its pid files name: a host or a toxiproxy left over from an earlier session reconnects through the
-proxies the campaign creates and doubles a node, which no verdict shows."""
+"""Which processes and which saved plans belong to the bench. A campaign judges what the lab did, so it starts only
+when every lab process is one its pid files name: a host or a toxiproxy left over from an earlier session reconnects
+through the proxies the campaign creates and doubles a node, which no verdict shows. The saved plans are the bench's too:
+the reference pipeline deploys the plan the library holds, and one that carries other groups than the rights give its
+nodes is refused by the flow matrix, which every trial would then read as a failure of the lab."""
+import glob
+import json
 import os
 import re
 import subprocess
@@ -129,16 +133,57 @@ def busy_machine(state_dir, node_names, transportr_dir=None):
     return found
 
 
+# `ps` prints arguments and environment unquoted, so a value runs to the next flag, the next `NAME=`, or the end of the line:
+# the path may hold spaces.
+DTPIPE_FLAG = re.compile(r"--dtpipe\s+(.+?)(?=\s+--\S|\s*$)")
+RUNNER_ENV = re.compile(r"(?<![A-Za-z0-9_])DtPipeNode__DtPipe=(.+?)(?=\s+[A-Za-z_][A-Za-z0-9_]*=|\s*$)")
+
+
+def _environment(pid):
+    """A process's command line followed by its environment, as `ps eww` prints them."""
+    return subprocess.run(["ps", "eww", "-o", "command=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+
+
 def launched_binaries(state_dir, node_names):
-    """The `--dtpipe` values the coordinator and the hosts were started with: the binary every fragment child runs.
-    `ps` prints arguments unquoted, so a value runs to the next flag or the end of the line: the path may hold spaces."""
+    """The dtpipe binary every fragment child runs, as the coordinator and the hosts were started with it: the value of
+    `--dtpipe` on the command line of a data node host, `DtPipeNode__DtPipe` in the environment of the official runner,
+    which takes no such flag. A runner whose environment names none yields a value that does not
+    start, so the bench check reports it."""
     values = set()
-    for _, _, kind, args in lab_processes():
-        if kind in ("host", "coordinator"):
-            m = re.search(r"--dtpipe\s+(.+?)(?=\s+--\S|\s*$)", args)
-            if m:
-                values.add(m.group(1))
+    for pid, _, kind, args in lab_processes():
+        if kind not in ("host", "coordinator"):
+            continue
+        if m := DTPIPE_FLAG.search(args):
+            values.add(m.group(1))
+        elif "DtPipe.PipelineNode.Runner.dll" in args:
+            m = RUNNER_ENV.search(_environment(pid))
+            values.add(m.group(1) if m else f"<no DtPipeNode__DtPipe in the environment of pid {pid}>")
     return values
+
+
+def stale_plans(state_dir):
+    """Why a saved plan does not match the rights, as a list of sentences (empty when every one does): the groups a
+    plan's fragments carry must be the groups the rights give their node now. A file that cannot be read is a finding."""
+    try:
+        with open(os.path.join(state_dir, "rights.json"), encoding="utf-8") as f:
+            groups = {i["name"]: sorted(i["groups"]) for i in json.load(f)["identities"]}
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        return [f"the rights cannot be read to judge the saved plans: {e}"]
+    problems = []
+    for path in sorted(glob.glob(os.path.join(state_dir, "library", "pipelines", "*", "distributed", "plan.json"))):
+        pipeline = path.split(os.sep)[-3]
+        try:
+            with open(path, encoding="utf-8") as f:
+                fragments = json.load(f)["plan"]["fragments"]
+            differing = [f"{x['node']} (plan {'+'.join(sorted(x['groups'])) or 'none'}, rights "
+                         f"{'+'.join(groups[x['node']]) if x['node'] in groups else 'no identity'})"
+                         for x in fragments if x["node"] not in groups or sorted(x["groups"]) != groups[x["node"]]]
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            problems.append(f"the saved plan of {pipeline} cannot be read: {e}")
+            continue
+        if differing:
+            problems.append(f"the saved plan of {pipeline} carries other groups than the rights give: {', '.join(differing)}")
+    return problems
 
 
 def _git(repo, *args):

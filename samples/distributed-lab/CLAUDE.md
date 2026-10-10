@@ -66,8 +66,9 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   wait for the hosts names the ones still offline, so a reference check that reads the warehouse
   through node-4 never fails for a node-4 not yet back. It records, it never fixes. It starts only on a bench it can judge
   (`campaign_bench.py`): only the lab's own processes, a machine with no build, test run or TransportR
-  process, and the binary the hosts run starts and reports the full hash of the frozen commit with a
-  clean tracked tree. Every call retried on `EADDRINUSE`/`EADDRNOTAVAIL` and every port-exhaustion line
+  process, every saved plan carrying the groups the rights give its nodes now, and every host's binary
+  (`--dtpipe` for a data node, `DtPipeNode__DtPipe` in its environment for the runner) starting and
+  reporting the full hash of the frozen commit with a clean tracked tree. Every call retried on `EADDRINUSE`/`EADDRNOTAVAIL` and every port-exhaustion line
   in the lab's logs is counted into the trial's `I7`, never absorbed. `[local: tools/campaign.py with
   CAMPAIGN_PREFLIGHT=report prints the checks without refusing]`
 - **The compose stack mounts nothing across services.** `compose.yaml` gives each service its own
