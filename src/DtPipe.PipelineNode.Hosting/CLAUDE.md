@@ -88,8 +88,7 @@ none. One node per process, which is one replica of its node's identity; a secon
   end.** A client's groups are those it registered with, so once the coordinator has closed the channel `NodeAgent`
   calls `PipelineNode.RefreshRegistrationAsync` (the call's contract is in `src/DtPipe.PipelineNode/CLAUDE.md`)
   before it connects the channel again, runs in flight or not. A refusal is logged and never ends the loop that
-  connects the channel. `[local: the lab's smoke.py rights - several groups]`
-  `[unchecked: the agent's call with runs in flight]`
+  connects the channel. `[local: the lab's smoke.py rights - several groups; tools/campaign.py F6g]`
 - **A host whose identity the hub refuses to renew drops its data plane client.** An identity that holds no group
   (disabled, or not known) cannot register, and a refused refresh writes nothing: the hub would keep the client's
   registration, with the groups it had, until the client's next token renewal withdraws them or its token expires. So

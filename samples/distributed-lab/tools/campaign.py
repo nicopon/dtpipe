@@ -6,7 +6,8 @@ before the first trial; this script only plays and records them.
   campaign.py <lab-url> <dtpipe> <state-dir> <campaign-id> [cell ...]
 
 Cells are F1 ... F11, then S, S3 and S5 for the security volet (a prefix selects: F1 alone is F1 and F10 only as
-F10). Every trial is one line of JSON in <state-dir>/campaign/<campaign-id>/trials.jsonl, and every line the lab
+F10). F6g, a node's groups changed under a run, is outside that matrix: it is played when it is named, never by default.
+Every trial is one line of JSON in <state-dir>/campaign/<campaign-id>/trials.jsonl, and every line the lab
 logs is kept, stamped, in <state-dir>/campaign/<campaign-id>/logs/. The lab must be up on strict nodes
 (./lab.sh up), and the start is checked: nothing of the lab runs that the pid files do not name, the machine is at rest
 (no build, no test run, no TransportR process), the dtpipe the hosts run (the runner's included) starts and reports the
@@ -325,7 +326,7 @@ def record(rec):
           f"{rec.get('elapsed', 0):>5.1f}s  inv:{bad}  {json.dumps(rec['inv']) if rec['inv'] else ''}", flush=True)
 
 
-def trial(cell, rep, pid, at, inject, expect, bound, cause_of=None, wait_running=True, note=None, before=None, after=None):
+def trial(cell, rep, pid, at, inject, expect, bound, cause_of=None, wait_running=True, note=None, before=None, after=None, evidence=None):
     rec = {"cell": cell, "rep": rep, "pipeline": pid, "expect": sorted(expect), "at": at, "campaign": CAMPAIGN,
            "time": time.strftime("%Y-%m-%dT%H:%M:%S")}
     t_fault = time.time()
@@ -343,6 +344,8 @@ def trial(cell, rep, pid, at, inject, expect, bound, cause_of=None, wait_running
         elapsed = t_end - t_fault
         rec["elapsed"] = round(elapsed, 2)
         judge(rec, pid, final, elapsed, expect, bound, cause_of)
+        if evidence and final is not None and "I2" not in rec["inv"] and (problem := evidence(rec, final)):
+            rec["inv"]["I2"] = problem
         if rec["inv"]:
             rec["logs"] = capture_logs(STATE)
         if final is None and os.environ.get("CAMPAIGN_CANCEL_STUCK"):
@@ -545,6 +548,44 @@ def cell_F6():
 
     for rep in range(REPS):
         trial("F6 rights revoked", rep, "sensor-stream", 4, inject, {"succeeded", "failed"}, 60, after=restore)
+
+
+def cell_F6g():
+    """A node's groups change in the middle of a run. runner-1 joins `audit` while sensor-stream sends from runner-1 to node-4,
+    and the matrix has no `audit -> warehouse`: the node's data plane client takes the groups of the moment, and the hub
+    judges the transfer again against them. The run must fail, the coordinator's log must say the hub ended a transfer, and
+    the verdict must name the edge that transfer carried: a run that failed otherwise did not show the refresh. The identity
+    is put back at the end."""
+    runner = next(i for i in S.call("/api/rights")["identities"] if i["clientId"] == "runner-1")
+    seen = {}
+
+    def put(groups):
+        S.call("/api/rights/identities/runner-1", {"clientId": "runner-1", "name": runner["name"], "description": runner["description"],
+                                                  "groups": groups, "enabled": True}, "PUT")
+        S.call("/api/rights/identities/runner-1/reconnect", {})
+
+    def inject(run, plan):
+        seen["log"] = len(S.coordinator_log())
+        put(["runner", "audit"])
+        return "runner-1 joins audit"
+
+    def restore():
+        put(runner["groups"])
+        S.until(lambda: next((n["groups"] == sorted(runner["groups"]) and n["online"] for n in S.call("/api/nodes") if n["name"] == "runner-1"), False),
+                90, "runner-1 back in its groups")
+
+    def evidence(rec, final):
+        ended = [l.strip() for l in S.coordinator_log()[seen["log"]:].splitlines() if "Ending transfer" in l]
+        rec["hub_ended"] = ended[:3]
+        if not ended:
+            return "the run failed without the hub ending any transfer"
+        edge, description = "sensor-stream@runner-1.enrich -> sensor-stream@node-4.enrich", final.get("description") or ""
+        if edge not in description or "(mismatch)" not in description:
+            return f"the verdict does not name the edge {edge}: {description[:200]!r}"
+        return None
+
+    for rep in range(REPS):
+        trial("F6g groups changed", rep, "sensor-stream", 4, inject, {"failed"}, 60, after=restore, evidence=evidence)
 
 
 def cell_F7():
@@ -958,6 +999,7 @@ def cell_S5():
 
 CELL_FUNCS = {"F1": cell_F1, "F2": cell_F2, "F3": cell_F3, "F4": cell_F4, "F5": cell_F5, "F6": cell_F6, "F7": cell_F7,
               "F8": cell_F8, "F9": cell_F9, "F10": cell_F10, "F11": cell_F11, "S": cell_S, "S3": cell_S3, "S5": cell_S5}
+NAMED_ONLY = {"F6g": cell_F6g}
 
 
 def preflight():
@@ -992,7 +1034,7 @@ def main():
         wanted = CELLS or list(CELL_FUNCS)
         for name in wanted:
             print(f"== {name}", flush=True)
-            CELL_FUNCS[name]()
+            (CELL_FUNCS.get(name) or NAMED_ONLY[name])()
     finally:
         stop_logs.set()
         print(f"ports: {sum(RETRIED.values())} call(s) retried {RETRIED}, {port_lines()} log line(s) in all", flush=True)
