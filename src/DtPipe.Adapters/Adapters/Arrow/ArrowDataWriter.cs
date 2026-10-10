@@ -38,6 +38,9 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
     {
         using (batch)
         {
+            // The first batch declares the stream: only a batch carries a timestamp's zone and the
+            // metadata of an extension type, which the columns cannot.
+            OpenIpcWriter(batch.Schema);
             if (_isIpcFile)
                 await _arrowFileWriter!.WriteRecordBatchAsync(batch, ct);
             else
@@ -154,12 +157,19 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
                          _path.EndsWith(".arrowfile", StringComparison.OrdinalIgnoreCase);
 		}
 
+		// What a stream with no batch declares; replaced by the first batch's own schema.
 		_schema = BuildSchema(columns);
+	}
 
-        if (_isIpcFile)
-            _arrowFileWriter = new ArrowFileWriter(_outputStream, _schema, leaveOpen: true);
-        else
-    		_arrowStreamWriter = new ArrowStreamWriter(_outputStream, _schema, leaveOpen: true);
+	private void OpenIpcWriter(Schema schema)
+	{
+		if (_arrowStreamWriter != null || _arrowFileWriter != null) return;
+
+		_schema = schema;
+		if (_isIpcFile)
+			_arrowFileWriter = new ArrowFileWriter(_outputStream!, schema, leaveOpen: true);
+		else
+			_arrowStreamWriter = new ArrowStreamWriter(_outputStream!, schema, leaveOpen: true);
 	}
 
 	private static Schema BuildSchema(IReadOnlyList<PipeColumnInfo> columns)
@@ -167,6 +177,15 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
 
 	public async ValueTask CompleteAsync(CancellationToken ct = default)
 	{
+		if (_arrowStreamWriter == null && _arrowFileWriter == null && _schema != null)
+		{
+			// No batch arrived. The end marker alone carries no schema, and a reader of an empty
+			// stream (the next fragment of a distributed pipeline) must still learn the columns.
+			OpenIpcWriter(_schema);
+			if (_arrowStreamWriter != null) await _arrowStreamWriter.WriteStartAsync(ct);
+			if (_arrowFileWriter != null) await _arrowFileWriter.WriteStartAsync(ct);
+		}
+
 		if (_arrowStreamWriter != null)
 		{
 			await _arrowStreamWriter.WriteEndAsync(ct);

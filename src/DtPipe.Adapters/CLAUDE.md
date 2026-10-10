@@ -35,6 +35,15 @@ sees through symbolic and hard links, which a path comparison does not. **Never 
 process at the other end. A boundary between processes is stdio (`arrow:-`) or a named pipe
 (`arrow:pipe://<name>`). `[local: run_catalog_tests.sh T81]` `[CI: validate_bind.sh]`
 `[unchecked: DuckDB reading a file from inside a query, which takes no .NET lock]`
+## The `arrow:` writer declares its schema from the first batch
+
+A timestamp's zone and an extension type's metadata (`arrow.uuid`) live on the batch's `Field`, which
+`PipeColumnInfo` cannot carry. The writer opens its IPC writer on the first `WriteRecordBatchAsync`
+with that batch's schema, so the stream reads back under the contract it left with; the target
+(file, stdout or pipe) is opened at `InitializeAsync`. With no batch, `CompleteAsync` writes the
+schema of the columns explicitly: the end marker alone carries none, and an empty stream would
+otherwise tell the next fragment nothing. `[CI: ArrowWriterSchemaFidelityTests, validate_arrow_roundtrip.sh]`
+
 ## Writing adapter help (`[Description]` / `[ComponentHelp]`)
 
 `get-adapter-help` is the only view a model gets of an adapter, so these attributes are a contract.
