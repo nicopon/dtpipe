@@ -56,7 +56,8 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   rights document. `[local: smoke.py rights]`
 - `tools/campaign.py` plays a fixed matrix of faults (a killed child or host, a cancellation, a
   coordinator restart, network faults through toxiproxy, revoked rights, rapid cycles; F6g, a node's
-  groups changed under a run, is outside the matrix and played only when named) against the
+  groups changed under a run, and F12, a runner host's child killed while it starts another run's, are
+  outside the matrix and played only when named, and naming a cell plays only the cells named) against the
   running lab and judges every trial on the same invariants: it ends, the verdict is right, nothing
   is left running, the lab still runs a reference pipeline. It needs the lab seeded with
   `LAB_SCALE=60` (shorter runs end before a timed fault reaches them), strict nodes, and the

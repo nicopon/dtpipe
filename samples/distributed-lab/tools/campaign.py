@@ -6,7 +6,8 @@ before the first trial; this script only plays and records them.
   campaign.py <lab-url> <dtpipe> <state-dir> <campaign-id> [cell ...]
 
 Cells are F1 ... F11, then S, S3 and S5 for the security volet (a prefix selects: F1 alone is F1 and F10 only as
-F10). F6g, a node's groups changed under a run, is outside that matrix: it is played when it is named, never by default.
+F10). F6g, a node's groups changed under a run, and F12, two runs on one runner host with one of them killed, are outside
+that matrix: they are played when they are named, never by default; naming a cell plays only the cells named.
 Every trial is one line of JSON in <state-dir>/campaign/<campaign-id>/trials.jsonl, and every line the lab
 logs is kept, stamped, in <state-dir>/campaign/<campaign-id>/logs/. The lab must be up on strict nodes
 (./lab.sh up), and the start is checked: nothing of the lab runs that the pid files do not name, the machine is at rest
@@ -588,6 +589,133 @@ def cell_F6g():
         trial("F6g groups changed", rep, "sensor-stream", 4, inject, {"failed"}, 60, after=restore, evidence=evidence)
 
 
+# F12's two pipelines read one data node each, disjoint, so the runs are in flight together through the runner: A is a slow
+# stream joined with node-1's customers (about 30 s on the runner), B reads node-3's products and ends in a moment.
+PAIR_A = """readings:
+  input: generate:300000
+  provider-options:
+    generate:
+      rows-per-second: 10000
+customers:
+  input: sqlite:${{LAB_CRM_DB}}
+  provider-options:
+    sqlite-reader:
+      query: SELECT customer_id, country FROM customers
+enrich:
+  from: readings
+  ref:
+  - customers
+  provider-options:
+    sql:
+      query: |-
+        SELECT r.GenerateIndex AS reading_id, c.country, (r.GenerateIndex * 37) % 1000 / 10.0 AS value
+        FROM readings r JOIN customers c ON c.customer_id = 1 + r.GenerateIndex % 20000
+sink:
+  from: enrich
+  output: "null:"
+"""
+PAIR_B = """products:
+  input: sqlite:${{LAB_CATALOG_DB}}
+  provider-options:
+    sqlite-reader:
+      query: SELECT product_id, category, unit_price FROM products
+sink:
+  from: products
+  output: "null:"
+"""
+LAGS = (0.1, 0.3, 0.6)
+PAIR = {"campaign-pair-a": (PAIR_A, {"readings": "runner-1", "customers": "node-1", "enrich": "runner-1", "sink": "runner-1"}),
+        "campaign-pair-b": (PAIR_B, {"products": "node-3", "sink": "runner-1"})}
+
+
+def child_of_run(run_id):
+    """Whether the runner's child for `run_id` is running: its job file, named after the run and the fragment, is on its command line."""
+    out = subprocess.run(["ps", "-axo", "pid,command"], capture_output=True, text=True).stdout
+    return any(f"{run_id}-campaign-pair-a" in l and "release/dtpipe --job" in l for l in out.splitlines())
+
+
+def pair_trial(variant, rep, with_b, lag=0.0):
+    """One run A on the runner host, its child killed after 4 s; with B, a second run whose child the same host starts is
+    in flight when it is, `lag` seconds after the coordinator sent B. It measures, and judges only the invariants every
+    trial is: see cell_F12."""
+    rec = {"cell": f"F12 {variant}", "rep": rep, "pipeline": "campaign-pair-a", "expect": ["failed"], "at": 4, "campaign": CAMPAIGN,
+           "time": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    t_fault, run_a, run_b, seen = time.time(), None, None, 0
+    try:
+        recover()
+        seen = len(S.service_log("runner-1"))
+        for pid, (yaml, placement) in PAIR.items():
+            S.call("/api/deploy", {"pipelineId": pid, "yaml": yaml, "cuts": [], "placement": placement})
+        run_a = submit("campaign-pair-a")
+        time.sleep(4)
+        if not child_of_run(run_a["runId"]):
+            raise NotApplicable("the child of run A had already exited")
+        if with_b:
+            # B is in the queue as running before A is killed, so the host is starting its child when A's dies; the
+            # millisecond overlap of the two is not in the harness's hands.
+            run_b = S.call("/api/runs", {"pipelineId": "campaign-pair-b"})
+            S.until(lambda: any(r["runId"] == run_b["runId"] and r["state"] == "running" for r in S.call("/api/runs/queue")), 60, "run B to start")
+            time.sleep(lag)
+            rec["lag_s"] = lag
+        t_fault = time.time()
+        S.call("/api/fragments/campaign-pair-a@runner-1/kill", {})
+        rec["injected"] = "kill the child of A" + (f" {lag:.2f}s after B was sent" if with_b else " alone")
+        final, t_end = await_final(run_a["runId"], BOUND["kill"] + 30)
+        elapsed = t_end - t_fault
+        rec["elapsed"] = round(elapsed, 2)
+        final_b = None
+        if run_b is not None:
+            final_b, _ = await_final(run_b["runId"], 60)
+        judge(rec, "campaign-pair-a", final, elapsed, {"failed"}, BOUND["kill"], cause_of="@runner-1")
+        if run_b is not None:
+            if final_b is None or final_b["state"] != "succeeded":
+                rec["inv"]["I2"] = (rec["inv"].get("I2", "") + f" run B {final_b['state'] if final_b else 'gave no verdict'}").strip()
+            elif final:
+                a0, a1 = S.span(final)
+                b0, b1 = S.span(final_b)
+                rec["timeline"] = {"b_started_after_a_s": round((b0 - a0).total_seconds(), 2), "a_total_s": round((a1 - a0).total_seconds(), 2),
+                                   "b_total_s": round((b1 - b0).total_seconds(), 2), "a_ended_after_b_started_s": round((a1 - b0).total_seconds(), 2)}
+        rec["runner_log"] = [l[:170] for l in S.service_log("runner-1")[seen:].splitlines()
+                             if any(r["runId"] in l for r in (run_a, run_b) if r)][:10]
+        if rec["inv"]:
+            rec["logs"] = capture_logs(STATE)
+    except NotApplicable as e:
+        rec["inv"], rec["state"], rec["note"], rec["elapsed"] = {}, "n/a", str(e), 0
+    except Exception as e:
+        rec["inv"] = {"H": f"harness: {str(e)[:200]}"}
+        rec["elapsed"] = round(time.time() - t_fault, 2)
+    finally:
+        for r in (run_a, run_b):
+            if r:
+                try:
+                    S.call("/api/runs/cancel", {"runId": r["runId"]})
+                except Exception:
+                    pass
+        for pid in PAIR:
+            undeploy(pid)
+        problem = reference_ok(rec)
+        if problem:
+            rec.setdefault("inv", {})["I4"] = problem
+    record(rec)
+    return rec
+
+
+def cell_F12():
+    """Two runs on the runner host, the child of one of them killed. A host starts the children of all its runs from one process,
+    and .NET holds a lock for the whole of `execve` that the handler of a child's exit also takes: a slow start can delay the
+    end a host sees of another child. A is killed while B, a second run through the same runner, is being started; the kill
+    of A alone is the reference. Both are judged on the bound F1 uses and on the invariants, and the verdict delay of the
+    first is read against the second: a delay that is the same says the coupling was not seen in this trial, never that
+    there is none. The kill of A is a shorter path than the start of B (the coordinator's queue, admission, the launch, the
+    job file, then `execve`), so a kill sent as B shows `running` lands before B's child starts: it is sent LAGS seconds
+    after, a sample of instants around that start, and which of them met the start of B is not known. The timeline records
+    the instants the harness can read (the coordinator's, to the half second; the host's log, to the second)."""
+    for rep in range(REPS):
+        pair_trial("kill alone", rep, with_b=False)
+        for lag in LAGS:
+            pair_trial(f"kill {lag:.2f}s after another run starts", rep, with_b=True, lag=lag)
+
+
 def cell_F7():
     def inject(run, plan):
         # P2's source is the runner (it generates the slow stream); node-1's customers read ends in under a second.
@@ -999,7 +1127,7 @@ def cell_S5():
 
 CELL_FUNCS = {"F1": cell_F1, "F2": cell_F2, "F3": cell_F3, "F4": cell_F4, "F5": cell_F5, "F6": cell_F6, "F7": cell_F7,
               "F8": cell_F8, "F9": cell_F9, "F10": cell_F10, "F11": cell_F11, "S": cell_S, "S3": cell_S3, "S5": cell_S5}
-NAMED_ONLY = {"F6g": cell_F6g}
+NAMED_ONLY = {"F6g": cell_F6g, "F12": cell_F12}
 
 
 def preflight():
