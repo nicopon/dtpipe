@@ -25,6 +25,9 @@ public sealed class FakeNodeOptions
 
     /// <summary>A real node answers a <c>Cancel</c> before it is fully wired with a local exit of its killed child.</summary>
     public bool ExitOnCancel { get; init; } = true;
+
+    /// <summary>False: the node announces itself as a version that does not return a launch's token.</summary>
+    public bool AnnounceLaunchToken { get; init; } = true;
 }
 
 /// <summary>
@@ -93,15 +96,28 @@ public sealed class FakeNode : IAsyncDisposable
     }
 
     public Task AnnounceAsync() => Channel.InvokeAsync(NodeChannel.Announce, new NodeAnnouncement(
-        Name, "", [], _options.Role, _options.Bricks, Capabilities: null, DtpipeVersion: null,
+        Name, "", [], _options.Role, _options.Bricks,
+        Capabilities: _options.AnnounceLaunchToken ? [NodeAnnouncement.LaunchToken] : null, DtpipeVersion: null,
         InstanceId: InstanceId, Origin: "test", DataPlaneClientId: _options.AnnouncedDataPlaneClientId ?? DataPlane?.ClientId));
 
-    /// <summary>Reports how the fragment of <paramref name="runId"/> ended; the answer is the coordinator's.</summary>
+    /// <summary>The token of the launch of <paramref name="fragment"/> in <paramref name="runId"/> this node received, null when it received none.</summary>
+    public string? LaunchTokenOf(string runId, string fragment) =>
+        Launches.FirstOrDefault(l => l.RunId == runId && l.Spec.Fragment == fragment)?.LaunchToken;
+
+    /// <summary>
+    /// Reports how the fragment of <paramref name="runId"/> ended; the answer is the coordinator's. The report carries the token
+    /// of this node's own launch of that fragment, as a real node's does; <paramref name="launchToken"/> sends another, and
+    /// <paramref name="withoutToken"/> none.
+    /// </summary>
     public Task<ExitedAck> ExitAsync(int exitCode, string origin = "Local", string? runId = null, string? fragment = null,
-        IReadOnlyDictionary<string, long>? rowCounts = null) =>
-        Channel.InvokeAsync<ExitedAck>(NodeChannel.Exited, new FragmentExit(
-            runId ?? RunId, fragment ?? FragmentName, exitCode, origin, exitCode == 0 ? null : $"{fragment ?? FragmentName} failed",
-            rowCounts ?? new Dictionary<string, long>()));
+        IReadOnlyDictionary<string, long>? rowCounts = null, string? launchToken = null, bool withoutToken = false)
+    {
+        var run = runId ?? RunId;
+        var name = fragment ?? FragmentName;
+        return Channel.InvokeAsync<ExitedAck>(NodeChannel.Exited, new FragmentExit(
+            run, name, exitCode, origin, exitCode == 0 ? null : $"{name} failed", rowCounts ?? new Dictionary<string, long>(),
+            withoutToken ? null : launchToken ?? LaunchTokenOf(run, name)));
+    }
 
     /// <summary>The replica says it is leaving for good.</summary>
     public Task LeaveAsync() => Channel.InvokeAsync(NodeChannel.Leave);

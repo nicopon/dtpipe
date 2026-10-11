@@ -187,7 +187,7 @@ public sealed class NodeChannelHub(
         bus.Publish("log", new NodeLogLine("coordinator", null, "Error", $"Announcement of {node} refused: {reason}."));
     }
 
-    /// <summary>How one run of a fragment ended on this replica. The orchestrator hears it only from the replica the run placed the fragment on.</summary>
+    /// <summary>How one run of a fragment ended on this replica. The orchestrator hears it only from the replica the run placed the fragment on, under the token of the launch that started the child.</summary>
     public Task<ExitedAck> Exited(FragmentExit exit) => protocol.OnExitedAsync(Context.ConnectionId, exit);
 
     /// <summary>This replica is leaving for good: its runs end now, ahead of the close this host is about to make.</summary>

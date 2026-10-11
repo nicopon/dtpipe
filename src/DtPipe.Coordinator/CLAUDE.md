@@ -78,7 +78,16 @@ handles pushes one after another, so a push that takes time delays the next.
   a message arrived on. An `Exited` is heard only from the replica the run placed that fragment on: any
   other, a replica of the same identity included, is answered `NotAdmitted`, and a connection that announced
   nothing `UnknownConnection`. The fragment an `Exited` names finds its slot; it never says who the sender is.
-  `[local: ReplicaAdmissionSubjectTests; the lab's smoke.py rights - a foreign report]`
+  `[local: ReplicaAdmissionSubjectTests, ConcurrentRunsTests, RunOrchestratorTests]`
+- **An `Exited` is also the report of the launch that started the child, or it is not heard.** The orchestrator
+  mints a random token for each launch of each fragment, publishes it with the placement, and sends it in
+  `LaunchRequest`; the replica returns it in `FragmentExit`. A report is admitted on the run, the fragment, the
+  replica and the token together (`RunOrchestrator.IsReportOfItsLaunch`), whatever the order of the report and of
+  the answer to the `Launch`; a report with none, or another launch's, is `NotAdmitted`. A run id is reassigned
+  after the coordinator restarts, so an earlier child that held the same run id, fragment and replica reports
+  under another token. The token is no secret (the replica holds it) and authenticates nobody: the
+  connection still names the sender. Never mint it from a counter, or from anything that restarts with the
+  process. `[local: ExitBeforeLaunchAnswerTests, RunOrchestratorTests, LaunchTokenWireTests; the lab's smoke.py rights - a foreign report]`
 - **Admission binds a fragment to its node's identity.** `RunFragment.Node` is the subject the node's
   connections attest (`ReplicaRegistry` keys a replica by the subject of its connection, never by the name it
   proposes), and the caller supplies it: the library never infers it. A fragment that names no node, or no
@@ -171,8 +180,9 @@ while any replica is connected.
 
 - **A plan, a deployment and a run request name a node, never a replica.** The replica is chosen at admission,
   for the run. `[unchecked]`
-- **A replica is eligible for a fragment when** it is connected; it is of the fragment's node; its
-  TransportR client is verified; and the bricks it announces compose the version of the plan.
+- **A replica is eligible for a fragment when** it is connected; it is of the fragment's node; it announces
+  `NodeAnnouncement.LaunchToken`; its TransportR client is verified; and the bricks it announces compose the
+  version of the plan.
   `ReplicaChooser` is that rule, pure. The client is verified when it is announced, registered, still
   connected, registered under the subject of the replica's connection, and holding exactly the groups the
   rights give the node now: closed by default, so a registration written before the rights changed is out
@@ -183,6 +193,13 @@ while any replica is connected.
   update leaves replicas at two versions of a brick: the run goes to one that composes the plan. Admission
   refuses only when none does (`NoEligibleReplicaException`, naming each fragment and why, replica by
   replica) after `AdmissionTimeout`. `[local: ReplicaAdmissionSubjectTests]`
+- **A replica that does not announce `NodeAnnouncement.LaunchToken` is out of every run.** Its report would carry
+  no token and could not be told from a stale one, so it is never placed: a node updates replica by replica
+  without interruption, and the runs of a node whose only replica is older are refused, naming the reason,
+  until that replica is updated. A host updated before its coordinator is not refused: the older coordinator
+  ignores the field and the capability. The order of an update that cannot move at once is the TransportR
+  rule above, the coordinator first.
+  `[local: LaunchTokenEligibilityTests, LaunchTokenWireTests]` `[unchecked: a host updated before its coordinator]`
 - **The client id a replica announces is verified twice.** At the announcement, as a courtesy: one registered
   under another subject, or announced by another replica, is refused. At admission, as the authority: the
   registration is read at the moment of choosing. Only the second sees a client registered after the

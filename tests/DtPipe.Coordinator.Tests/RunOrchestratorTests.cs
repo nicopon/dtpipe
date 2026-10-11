@@ -1,4 +1,5 @@
 using DtPipe.Coordinator;
+using DtPipe.Coordinator.Contracts;
 using Xunit;
 
 namespace DtPipe.Coordinator.Tests;
@@ -406,5 +407,50 @@ public class RunOrchestratorTests
         var edges = new[] { new RunEdge("A", "out", "B", "in") };
 
         Assert.Empty(RunOrchestrator.PeersOwingAReport(edges, failedRemotely: Set("A"), reported: Set("A", "B")));
+    }
+
+    private static FragmentExit ExitOf(string fragment, string? token) =>
+        new("run-1", fragment, 0, "Local", null, NoRows, token);
+
+    private static RunOrchestrator.Placement PlacementOf(ReplicaKey replica, string token) =>
+        new(new Dictionary<string, ReplicaKey> { ["A"] = replica }, new Dictionary<string, string> { ["A"] = token });
+
+    /// <summary>The report of the launch: the replica the run placed the fragment on, under the token of that launch.</summary>
+    [Fact]
+    public void AReportFromThePlacedReplicaUnderTheLaunchsToken_IsTheReportOfItsLaunch()
+    {
+        var placed = new ReplicaKey("node", "r1");
+
+        Assert.True(RunOrchestrator.IsReportOfItsLaunch(PlacementOf(placed, "tok"), placed, ExitOf("A", "tok")));
+    }
+
+    /// <summary>An earlier child that held the same run id, fragment and replica reports another token, or none.</summary>
+    [Fact]
+    public void AReportWithNoTokenOrAnotherOne_IsNeverTheReportOfTheLaunch()
+    {
+        var placed = new ReplicaKey("node", "r1");
+
+        Assert.False(RunOrchestrator.IsReportOfItsLaunch(PlacementOf(placed, "tok"), placed, ExitOf("A", null)));
+        Assert.False(RunOrchestrator.IsReportOfItsLaunch(PlacementOf(placed, "tok"), placed, ExitOf("A", "an-earlier-token")));
+        Assert.False(RunOrchestrator.IsReportOfItsLaunch(PlacementOf(placed, "tok"), placed, ExitOf("A", "TOK")));
+    }
+
+    /// <summary>The token alone names no sender: the replica the run did not place the fragment on is refused with the right token.</summary>
+    [Fact]
+    public void AReportFromAnotherReplica_IsRefused_WithTheRightToken()
+    {
+        var placed = new ReplicaKey("node", "r1");
+
+        Assert.False(RunOrchestrator.IsReportOfItsLaunch(PlacementOf(placed, "tok"), new ReplicaKey("node", "r2"), ExitOf("A", "tok")));
+    }
+
+    /// <summary>A fragment the run did not place, and a run not placed yet, have no report to admit.</summary>
+    [Fact]
+    public void AReportForAFragmentNotPlaced_OrBeforeTheRunIsPlaced_IsRefused()
+    {
+        var placed = new ReplicaKey("node", "r1");
+
+        Assert.False(RunOrchestrator.IsReportOfItsLaunch(PlacementOf(placed, "tok"), placed, ExitOf("B", "tok")));
+        Assert.False(RunOrchestrator.IsReportOfItsLaunch(null, placed, ExitOf("A", "tok")));
     }
 }

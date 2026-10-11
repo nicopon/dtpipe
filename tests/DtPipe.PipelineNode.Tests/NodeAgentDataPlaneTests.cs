@@ -93,6 +93,31 @@ public class NodeAgentDataPlaneTests : IDisposable
     private static string GroupsOf(ClientRegistration? registration) => string.Join(",", (registration?.Groups ?? []).Order());
 
     /// <summary>
+    /// A host's replica announces that it returns a launch's token in its reports: without it admission places no run on the
+    /// replica, because a report with no token could not be told from a stale one.
+    /// </summary>
+    [Fact]
+    public async Task TheAgentAnnouncesThatItReturnsALaunchToken()
+    {
+        var (host, idp, agent, _) = await StartAsync();
+        await using var _host = host;
+        await using var _idp = idp;
+        var registry = host.Host.Services.GetRequiredService<ReplicaRegistry>();
+        try
+        {
+            await AnnouncedClientAsync(registry);
+
+            var replica = Assert.Single(registry.Replicas(Node));
+            Assert.True(replica.Announcement.Offers(DtPipe.Coordinator.Contracts.NodeAnnouncement.LaunchToken));
+        }
+        finally
+        {
+            await agent.StopAsync(CancellationToken.None);
+            agent.Dispose();
+        }
+    }
+
+    /// <summary>
     /// The identity loses every group and the coordinator closes the channel: the host takes the groups of the moment, is
     /// refused, and holds no client any more, so the hub's registration is disconnected and the replica announces none.
     /// When the groups return, a client registers again and is announced.

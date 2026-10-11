@@ -17,12 +17,15 @@ namespace DtPipe.PipelineNode.Hosting;
 /// </summary>
 internal sealed class ReplicaRuns : IAsyncDisposable
 {
-    private sealed class Entry(FragmentRun run, FragmentSpec spec, string jobPath, PipelineNode node)
+    private sealed class Entry(FragmentRun run, FragmentSpec spec, string jobPath, PipelineNode node, string? launchToken)
     {
         public FragmentRun Run { get; } = run;
         public PipelineNode Node { get; } = node;
         public FragmentSpec Spec { get; } = spec;
         public string JobPath { get; } = jobPath;
+
+        /// <summary>The token the coordinator minted for the launch that started this child, returned in its report.</summary>
+        public string? LaunchToken { get; } = launchToken;
         public int CompletionStarted;
         public readonly CancellationTokenSource Unwired = new();
     }
@@ -122,7 +125,7 @@ internal sealed class ReplicaRuns : IAsyncDisposable
                     .Select(e => new EdgeBinding(e.Alias, e.Direction == FragmentEdgeDirection.Inbound ? EdgeDirection.Inbound : EdgeDirection.Outbound))
                     .ToList(),
             };
-            var entry = new Entry(node.Launch(launch, _loggerOf(spec.Fragment)), spec, jobPath, node);
+            var entry = new Entry(node.Launch(launch, _loggerOf(spec.Fragment)), spec, jobPath, node, request.LaunchToken);
             if (!_runs.TryAdd(key, entry))
             {
                 await entry.Run.DisposeAsync();
@@ -240,7 +243,8 @@ internal sealed class ReplicaRuns : IAsyncDisposable
         {
             var outcome = await entry.Run.CompleteAsync();
             await ReportAsync(new FragmentExit(
-                key.RunId, key.Fragment, outcome.ExitCode, (outcome.Origin ?? FaultOrigin.Local).ToString(), outcome.FirstFault, outcome.RowCounts));
+                key.RunId, key.Fragment, outcome.ExitCode, (outcome.Origin ?? FaultOrigin.Local).ToString(), outcome.FirstFault, outcome.RowCounts,
+                entry.LaunchToken));
         }
         catch (Exception ex)
         {

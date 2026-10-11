@@ -147,7 +147,9 @@ public class ConcurrentRunsTests
         var run = orchestrator.RunAsync(Spec("run-1", "a"));
         await a.Launched.Task.WaitAsync(Wait);
 
-        Assert.Equal(ExitedAck.NotAdmitted, await a.ExitAsync(1, runId: "run-0"));
+        // The token is the one of a real launch of this node, so that only the rule on the run can refuse it.
+        var realToken = (await a.Launched.Task).LaunchToken;
+        Assert.Equal(ExitedAck.NotAdmitted, await a.ExitAsync(1, runId: "run-0", fragment: a.FragmentName, launchToken: realToken));
         await Settle();
         Assert.False(run.IsCompleted);
 

@@ -124,7 +124,8 @@ public class ReplicaAdmissionSubjectTests
         var run = orchestrator.RunAsync(Run("run-1", Fragment("frag-a", "node-legit")));
         var launched = await LaunchedAsync(legit, run);
 
-        var answer = await foreign.ExitAsync(1, "Local", launched.RunId, "frag-a");
+        // It sends the launch's own token, so that only the replica rule can refuse it.
+        var answer = await foreign.ExitAsync(1, "Local", launched.RunId, "frag-a", launchToken: launched.LaunchToken);
         Assert.Equal(ExitedAck.NotAdmitted, answer);
         Assert.False(run.IsCompleted);
 
@@ -152,7 +153,7 @@ public class ReplicaAdmissionSubjectTests
         var launched = await LaunchedAsync(placed, run);
         Assert.Empty(sibling.Launches);
 
-        Assert.Equal(ExitedAck.NotAdmitted, await sibling.ExitAsync(1, "Local", launched.RunId, "frag-a"));
+        Assert.Equal(ExitedAck.NotAdmitted, await sibling.ExitAsync(1, "Local", launched.RunId, "frag-a", launchToken: launched.LaunchToken));
         Assert.False(run.IsCompleted);
 
         await placed.ExitAsync(0);

@@ -472,8 +472,9 @@ def rights_pass():
 
     def foreign_report():
         # The same host, while a slow run of node-4's fragment is in flight, reports that the fragment exited with a local
-        # fault. The report is a replica's about a run it was placed on: the coordinator answers that it did not admit it,
-        # and the run ends on what the real fragments say.
+        # fault. It is not the replica the run placed the fragment on and it cannot know the launch's token: the coordinator
+        # answers that it did not admit the report, and the run ends on what the real fragments say. Which of the two rules
+        # refused it is the unit tests' to show.
         access = stranger_token()
         with open(os.path.join(LAB_DIR, "library-seed", "sensor-stream.yaml")) as f:
             yaml = f.read()

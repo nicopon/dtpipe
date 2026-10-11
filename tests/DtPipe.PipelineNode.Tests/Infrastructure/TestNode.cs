@@ -84,7 +84,7 @@ internal sealed class TestNode : IAsyncDisposable
         var test = new TestNode(name, node, channel, runs, id, FragmentOf(name, jobPath, edges));
         await channel.StartAsync();
         await channel.InvokeAsync(NodeChannel.Announce, new NodeAnnouncement(
-            name, "", [], NodeRole.Runner, [], InstanceId: id, Origin: "test", DataPlaneClientId: node.ClientId));
+            name, "", [], NodeRole.Runner, [], Capabilities: [NodeAnnouncement.LaunchToken], InstanceId: id, Origin: "test", DataPlaneClientId: node.ClientId));
         await runs.OnAnnouncedAsync();
         return test;
     }
@@ -97,7 +97,7 @@ internal sealed class TestNode : IAsyncDisposable
     {
         await _channel.StartAsync();
         await _channel.InvokeAsync(NodeChannel.Announce, new NodeAnnouncement(
-            Name, "", [], NodeRole.Runner, [], InstanceId: InstanceId, Origin: "test", DataPlaneClientId: Node.ClientId));
+            Name, "", [], NodeRole.Runner, [], Capabilities: [NodeAnnouncement.LaunchToken], InstanceId: InstanceId, Origin: "test", DataPlaneClientId: Node.ClientId));
         await _runs.OnAnnouncedAsync();
     }
 

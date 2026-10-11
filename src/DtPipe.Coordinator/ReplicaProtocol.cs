@@ -57,7 +57,7 @@ public sealed class ReplicaProtocol
         return (_registry.Announce(connectionId, node, announcement, groups, abort), null);
     }
 
-    /// <summary>The replica reports how one fragment of one run ended. Only the replica the run was placed on is heard.</summary>
+    /// <summary>The replica reports how one fragment of one run ended. Only the replica the run was placed on is heard, and only under the token of the launch that started the child.</summary>
     public async Task<ExitedAck> OnExitedAsync(string connectionId, FragmentExit exit)
     {
         if (_registry.OfConnection(connectionId) is not { } replica)

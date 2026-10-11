@@ -115,8 +115,9 @@ public interface IRunOrchestrator
     Task<RunResult> RunAsync(RunSpec spec, CancellationToken ct = default);
 
     /// <summary>
-    /// A replica reports how a fragment ended. Heard only from the replica the run placed that fragment on:
-    /// anything else, including a replica of the same node, is <see cref="ExitedAck.NotAdmitted"/>.
+    /// A replica reports how a fragment ended. Heard only from the replica the run placed that fragment on, and only
+    /// under the token of the launch that started the child: anything else, including a replica of the same node and a
+    /// report with no token or another launch's, is <see cref="ExitedAck.NotAdmitted"/>.
     /// </summary>
     Task<ExitedAck> OnExitedAsync(ReplicaKey replica, FragmentExit exit);
 }
@@ -149,9 +150,15 @@ public sealed class RunOrchestrator : IRunOrchestrator
         public required CancellationTokenSource Abort { get; init; }
         public TaskCompletionSource RemoteFailure { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        /// <summary>The replica each fragment was placed on, set once admission has chosen; null before.</summary>
-        public volatile IReadOnlyDictionary<string, ReplicaKey>? Placed;
+        /// <summary>Where each fragment was placed and under which launch token, set once admission has chosen; null before.</summary>
+        public volatile Placement? Placed;
     }
+
+    /// <summary>
+    /// The replica each fragment of a run was placed on, and the token of its launch, published together: a report that
+    /// finds the placement finds the token it must carry.
+    /// </summary>
+    internal sealed record Placement(IReadOnlyDictionary<string, ReplicaKey> Replicas, IReadOnlyDictionary<string, string> Tokens);
 
     private readonly object _lock = new();
     private readonly Dictionary<string, ActiveRun> _runs = new(StringComparer.Ordinal);
@@ -214,7 +221,9 @@ public sealed class RunOrchestrator : IRunOrchestrator
             // UnboundFragmentException and NoEligibleReplicaException propagate unchanged: nothing was launched yet.
 
             var placed = chosen.ToDictionary(c => c.Key, c => c.Value.Key, StringComparer.Ordinal);
-            run.Placed = placed;
+            // Random, minted for this launch alone: nothing that restarts with the process, or an old child's report would match.
+            var tokens = chosen.ToDictionary(c => c.Key, _ => Guid.NewGuid().ToString("N"), StringComparer.Ordinal);
+            run.Placed = new Placement(placed, tokens);
 
             // Subscribed only once the run is placed, so a replica lost during admission itself is never seen
             // here: an unplaced run is already admission's own refusal and must not also surface as a Failed
@@ -239,7 +248,7 @@ public sealed class RunOrchestrator : IRunOrchestrator
                 {
                     using var launchBound = CancellationTokenSource.CreateLinkedTokenSource(abort.Token);
                     launchBound.CancelAfter(_options.ReadyTimeout);
-                    var attempts = await Task.WhenAll(spec.Fragments.Select(f => LaunchOneAsync(run, f, placed[f.Name], launched, launchBound.Token)));
+                    var attempts = await Task.WhenAll(spec.Fragments.Select(f => LaunchOneAsync(run, f, placed[f.Name], tokens[f.Name], launched, launchBound.Token)));
                     foreach (var attempt in attempts)
                     {
                         switch (attempt.Kind)
@@ -403,12 +412,12 @@ public sealed class RunOrchestrator : IRunOrchestrator
     /// <paramref name="launched"/> from before the message is sent, so a teardown tells it to <c>Cancel</c> whatever happened.
     /// </summary>
     private async Task<LaunchAttempt> LaunchOneAsync(
-        ActiveRun run, RunFragment fragment, ReplicaKey replica, HashSet<string> launched, CancellationToken bound)
+        ActiveRun run, RunFragment fragment, ReplicaKey replica, string token, HashSet<string> launched, CancellationToken bound)
     {
         lock (launched) launched.Add(fragment.Name);
         try
         {
-            var result = await _link.LaunchAsync(replica, new LaunchRequest(run.Spec.RunId, fragment.Spec), bound);
+            var result = await _link.LaunchAsync(replica, new LaunchRequest(run.Spec.RunId, fragment.Spec, token), bound);
             return result.Started ? new LaunchAttempt(fragment.Name, LaunchKind.Started)
                 : new LaunchAttempt(fragment.Name, LaunchKind.Refused, result.Refusal ?? "the replica gave no reason.");
         }
@@ -536,12 +545,13 @@ public sealed class RunOrchestrator : IRunOrchestrator
 
     public Task<ExitedAck> OnExitedAsync(ReplicaKey replica, FragmentExit exit)
     {
-        // The fragment name an exit cites finds the fragment; only the replica the run placed it on may report it.
-        if (Find(exit.RunId) is not { } run || run.Placed is not { } placed
-            || !placed.TryGetValue(exit.Fragment, out var admitted) || admitted != replica
+        // The fragment name an exit cites finds the fragment; only the replica the run placed it on may report it, and
+        // only under the token of the launch that started its child.
+        if (Find(exit.RunId) is not { } run || !IsReportOfItsLaunch(run.Placed, replica, exit)
             || !run.Exited.TryGetValue(exit.Fragment, out var tcs))
         {
-            _logger.LogWarning("Exited from {Replica} for {Fragment} of run {RunId}, not a replica that run placed it on", replica, exit.Fragment, exit.RunId);
+            _logger.LogWarning(
+                "Exited from {Replica} for {Fragment} of run {RunId}, not the report of the launch that run placed there", replica, exit.Fragment, exit.RunId);
             return Task.FromResult(ExitedAck.NotAdmitted);
         }
 
@@ -566,6 +576,18 @@ public sealed class RunOrchestrator : IRunOrchestrator
         }
         return Task.FromResult(ExitedAck.Accepted);
     }
+
+    /// <summary>
+    /// Pure. Whether <paramref name="exit"/> is the report of the launch the run made of its fragment: the run placed the
+    /// fragment on <paramref name="replica"/>, and the report carries the token of that launch. A report with no token, or
+    /// another one, is never admitted: it is the report of an earlier child that held the same run id, fragment and replica.
+    /// </summary>
+    internal static bool IsReportOfItsLaunch(Placement? placement, ReplicaKey replica, FragmentExit exit) =>
+        placement is not null
+        && placement.Replicas.TryGetValue(exit.Fragment, out var placedOn) && placedOn == replica
+        && exit.LaunchToken is { } token
+        && placement.Tokens.TryGetValue(exit.Fragment, out var expected)
+        && string.Equals(token, expected, StringComparison.Ordinal);
 
     private static IReadOnlyList<EdgeCount> BuildEdgeCounts(
         IReadOnlyDictionary<string, FragmentExitReport> reports, IReadOnlyList<RunEdge> edges) =>

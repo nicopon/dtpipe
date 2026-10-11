@@ -63,9 +63,12 @@ public enum NodeRole { Data, Runner }
 /// <summary>
 /// What a node host says of itself. <see cref="Name"/> and <see cref="Description"/> are proposals: the
 /// coordinator names the node from its rights, and a host its rights do not know only waits for
-/// approval. <see cref="Capabilities"/> only report how the host was configured: <see cref="RawFragments"/>
-/// when its own configuration lets it run a fragment that is no brick, and the name of each request it
-/// answers. The coordinator shows them and never sets them; the host enforces what it offers.
+/// approval. <see cref="Capabilities"/> are what the host offers: <see cref="RawFragments"/> when its own
+/// configuration lets it run a fragment that is no brick, the name of each request it answers, and
+/// <see cref="LaunchToken"/>, a mark of the protocol every host of a version that returns a launch's token
+/// announces. Admission reads <see cref="RawFragments"/> and <see cref="LaunchToken"/> to tell the replicas
+/// that can run a fragment from the others. The coordinator shows them and never sets them; the host enforces
+/// what it offers.
 /// <see cref="DtpipeVersion"/> is what the host's dtpipe binary says of itself (<c>--version</c>), null
 /// when it did not say: shown beside a studio's own, never a reason to refuse. One identity may be
 /// carried by several hosts, its replicas: <see cref="InstanceId"/> is chosen by the host process once and
@@ -82,6 +85,12 @@ public sealed record NodeAnnouncement(
 {
     /// <summary>The capability of a host that accepts a fragment written as a job, not only one made of its bricks.</summary>
     public const string RawFragments = "raw-fragments";
+
+    /// <summary>
+    /// The mark of a host that returns, in <see cref="FragmentExit.LaunchToken"/>, the token its <c>Launch</c> carried. A
+    /// replica that does not announce it is never placed on a run: its report could not be told from a stale one.
+    /// </summary>
+    public const string LaunchToken = "launch-token";
 
     public bool Offers(string capability) => Capabilities?.Contains(capability, StringComparer.Ordinal) == true;
 }
@@ -188,8 +197,12 @@ public sealed record FragmentSpec(
     string Fragment, string Version, IReadOnlyList<FragmentEdge> Edges,
     IReadOnlyList<FragmentUnit>? Units = null, string? Yaml = null);
 
-/// <summary>What <c>Launch</c> asks: run <see cref="Spec"/> as part of the run <see cref="RunId"/>.</summary>
-public sealed record LaunchRequest(string RunId, FragmentSpec Spec);
+/// <summary>
+/// What <c>Launch</c> asks: run <see cref="Spec"/> as part of the run <see cref="RunId"/>. <see cref="LaunchToken"/> is
+/// minted by the coordinator for this launch alone and returned by the replica in its <c>Exited</c>: it tells the report of
+/// this child from the report of an earlier one that held the same run id, fragment and replica. It is no secret.
+/// </summary>
+public sealed record LaunchRequest(string RunId, FragmentSpec Spec, string? LaunchToken = null);
 
 /// <summary>What <c>Launch</c> answers: the child is spawned and its edges can be wired, or why the host refused to run the fragment.</summary>
 public sealed record LaunchResult(bool Started, string? Refusal = null);
@@ -197,13 +210,17 @@ public sealed record LaunchResult(bool Started, string? Refusal = null);
 /// <summary>What <c>Check</c> answers: whether the host would run the fragment, and why not.</summary>
 public sealed record FragmentCheck(bool Ok, string? Reason = null);
 
-/// <summary>What <c>Exited</c> carries: how one run of a fragment ended.</summary>
+/// <summary>
+/// What <c>Exited</c> carries: how one run of a fragment ended, and the <see cref="LaunchToken"/> of the launch that
+/// started the child, copied from its <see cref="LaunchRequest"/>.
+/// </summary>
 public sealed record FragmentExit(
-    string RunId, string Fragment, int ExitCode, string Origin, string? FirstFault, IReadOnlyDictionary<string, long> RowCounts);
+    string RunId, string Fragment, int ExitCode, string Origin, string? FirstFault, IReadOnlyDictionary<string, long> RowCounts,
+    string? LaunchToken = null);
 
 /// <summary>
 /// What <c>Exited</c> answers. <see cref="NotAdmitted"/>: the coordinator did not admit this host for that
-/// fragment of that run (or the run is over), and a report sent again would be answered the same.
+/// fragment of that run under that launch token (or the run is over), and a report sent again would be answered the same.
 /// <see cref="UnknownConnection"/>: the connection announced nothing the coordinator accepted, so the host
 /// keeps its report and sends it once after its next announcement.
 /// </summary>
