@@ -45,7 +45,7 @@ public sealed class RunJournalTests : IDisposable
         var journal = new RunJournal(options, NullLogger<RunJournal>.Instance);
         var result = new RunResult(RunOutcome.Succeeded, null, [], new Dictionary<string, FragmentExitReport>(), [],
             Replicas: new Dictionary<string, RunReplica> { ["p@n"] = new("1a2b3c4d", "host:42") });
-        journal.Record(new RunView("run-1", "plan-1", "succeeded", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, result, "ok", null, "p", DateTimeOffset.UtcNow));
+        journal.Record(new RunView("run-1", "plan-1", RunState.Succeeded, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, result, "ok", null, "p", DateTimeOffset.UtcNow));
 
         var again = new RunJournal(options, NullLogger<RunJournal>.Instance);
 

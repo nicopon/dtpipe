@@ -27,13 +27,16 @@ public sealed class StateWireTests : IDisposable
     }
 
     private static RunView RunIn(string word, string runId = "run-1") => new(
-        runId, "plan-1", word, DateTimeOffset.Parse("2026-01-01T00:00:00+00:00"), DateTimeOffset.Parse("2026-01-01T00:00:10+00:00"),
+        runId, "plan-1", Enum.Parse<RunState>(word, ignoreCase: true), DateTimeOffset.Parse("2026-01-01T00:00:00+00:00"), DateTimeOffset.Parse("2026-01-01T00:00:10+00:00"),
         new RunResult(RunOutcome.Succeeded, null, [], new Dictionary<string, FragmentExitReport>(), []), "Outcome: Succeeded", null,
         "p", DateTimeOffset.Parse("2026-01-01T00:00:00+00:00"));
 
     private static DeploymentView DeploymentIn(string word) => new(
-        "p", "plan-1", "test", word, DateTimeOffset.Parse("2026-01-01T00:00:00+00:00"), null,
+        "p", "plan-1", "test", Enum.Parse<DeploymentState>(word, ignoreCase: true), DateTimeOffset.Parse("2026-01-01T00:00:00+00:00"), null,
         [new DeployedFragment("p@n", "n", "v1", 1)], 0, 0, null);
+
+    /// <summary>The word a state is written with, read here from its name and not from the code under test.</summary>
+    private static string WordOf(RunState state) => state.ToString().ToLowerInvariant();
 
     private static CoordinatorServerOptions OptionsIn(string dir) =>
         new() { StateDir = dir, Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret" };
@@ -50,7 +53,7 @@ public sealed class StateWireTests : IDisposable
             var element = JsonSerializer.SerializeToElement(RunIn(word), json);
             Assert.Equal(word, element.GetProperty("state").GetString());
             Assert.Equal("Succeeded", element.GetProperty("result").GetProperty("outcome").GetString());
-            Assert.Equal(word, JsonSerializer.Deserialize<RunView>(element, json)!.State);
+            Assert.Equal(word, WordOf(JsonSerializer.Deserialize<RunView>(element, json)!.State));
         }
         foreach (var word in DeploymentWords)
         {
@@ -86,7 +89,7 @@ public sealed class StateWireTests : IDisposable
             Assert.Contains($"\"state\": \"{word}\"", File.ReadAllText(Path.Combine(_dir, "runs", "p", $"run-{i + 1}.json")));
 
         var again = new RunJournal(OptionsIn(_dir), NullLogger<RunJournal>.Instance);
-        Assert.Equal(RunWords.Order(), again.List().Select(r => r.State).Order());
+        Assert.Equal(RunWords.Order(), again.List().Select(r => WordOf(r.State)).Order());
         Assert.Equal("run-8", again.NextRunId());
     }
 
@@ -109,8 +112,28 @@ public sealed class StateWireTests : IDisposable
 
         Assert.Equal(RunWords.Count(), journal.List().Count);
         foreach (var (word, i) in RunWords.Select((w, i) => (w, i)))
-            Assert.Equal(word, journal.List().Single(r => r.RunId == $"run-{(i + 1) * 3}").State);
+            Assert.Equal(word, WordOf(journal.List().Single(r => r.RunId == $"run-{(i + 1) * 3}").State));
         Assert.Equal("run-22", journal.NextRunId());
-        Assert.All(journal.List(), r => Assert.Equal(r.State is not ("queued" or "running"), r.IsOver));
+        Assert.All(journal.List(), r => Assert.Equal(r.State is not (RunState.Queued or RunState.Running), r.IsOver));
+    }
+
+    /// <summary>A journal file whose state is none of the seven, or a number, cannot be read: it is skipped, and the others are read and the journal starts.</summary>
+    [Fact]
+    public void A_Journal_File_Whose_State_Is_None_Of_The_Seven_Or_A_Number_Is_Skipped_And_The_Others_Are_Read()
+    {
+        var runs = Path.Combine(_dir, "runs", "p");
+        Directory.CreateDirectory(runs);
+        foreach (var (id, state) in new[] { ("run-1", "\"succeeded\""), ("run-2", "\"paused\""), ("run-3", "3") })
+            File.WriteAllText(Path.Combine(runs, id + ".json"), $$"""
+                {
+                  "runId": "{{id}}", "planId": "plan-1", "state": {{state}},
+                  "startedAt": "2026-01-01T00:00:00+00:00", "finishedAt": "2026-01-01T00:00:10+00:00",
+                  "result": null, "description": null, "refusal": null, "pipelineId": "p", "queuedAt": "2026-01-01T00:00:00+00:00"
+                }
+                """);
+
+        var journal = new RunJournal(OptionsIn(_dir), NullLogger<RunJournal>.Instance);
+
+        Assert.Equal("run-1", Assert.Single(journal.List()).RunId);
     }
 }

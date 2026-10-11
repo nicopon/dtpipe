@@ -48,9 +48,9 @@ internal sealed class RunQueue
         {
             pipelineId ??= _ledger.LastDeployed ?? throw new ConflictException("Deploy a plan first.");
             var deployment = _ledger.Deployments.GetValueOrDefault(pipelineId) ?? throw new ConflictException($"'{pipelineId}' is not deployed.");
-            if (deployment.State == "failed") throw new ConflictException($"The deployment of '{pipelineId}' failed: {deployment.Message}");
+            if (deployment.State == DeploymentState.Failed) throw new ConflictException($"The deployment of '{pipelineId}' failed: {deployment.Message}");
             var now = DateTimeOffset.UtcNow;
-            ticket = new Ticket(new RunView(_journal.NextRunId(), deployment.Plan.Id, "queued", now, null, null, null, null, pipelineId, now));
+            ticket = new Ticket(new RunView(_journal.NextRunId(), deployment.Plan.Id, RunState.Queued, now, null, null, null, null, pipelineId, now));
             _ledger.Queued.Add(ticket);
         }
         var view = ticket.View;
@@ -89,7 +89,7 @@ internal sealed class RunQueue
             if (waiting is not null) _ledger.Queued.Remove(waiting);
         }
         if (waiting is not null)
-            Finish(waiting, waiting.View with { State = "cancelled", StartedAt = DateTimeOffset.UtcNow, Refusal = "Cancelled while queued." });
+            Finish(waiting, waiting.View with { State = RunState.Cancelled, StartedAt = DateTimeOffset.UtcNow, Refusal = "Cancelled while queued." });
     }
 
     /// <summary>
@@ -132,7 +132,7 @@ internal sealed class RunQueue
             // Its data nodes are released only when it finishes.
             bool sent;
             lock (_ledger.Lock) sent = _ledger.Sent.Contains(ticket);
-            if (sent) Finish(ticket, ticket.View with { State = "error", Refusal = ex.Message });
+            if (sent) Finish(ticket, ticket.View with { State = RunState.Error, Refusal = ex.Message });
         }
     }
 
@@ -155,7 +155,7 @@ internal sealed class RunQueue
             await deployment.Gate.WaitAsync(ticket.Cancel.Token);
             try
             {
-                if (deployment.State != "ready") throw new ConflictException($"'{pipelineId}' is not ready: {deployment.State} {deployment.Message}".Trim());
+                if (deployment.State != DeploymentState.Ready) throw new ConflictException($"'{pipelineId}' is not ready: {deployment.State.Word()} {deployment.Message}".Trim());
             }
             finally
             {
@@ -167,12 +167,12 @@ internal sealed class RunQueue
         {
             lock (_ledger.Lock) if (!_ledger.Sent.Contains(ticket)) return;
             var cancelled = ex is OperationCanceledException;
-            Finish(ticket, view with { State = cancelled ? "cancelled" : "refused", StartedAt = DateTimeOffset.UtcNow, Refusal = cancelled ? "Cancelled while queued." : ex.Message });
+            Finish(ticket, view with { State = cancelled ? RunState.Cancelled : RunState.Refused, StartedAt = DateTimeOffset.UtcNow, Refusal = cancelled ? "Cancelled while queued." : ex.Message });
             return;
         }
 
         var plan = deployment.Plan;
-        view = view with { State = "running", StartedAt = DateTimeOffset.UtcNow };
+        view = view with { State = RunState.Running, StartedAt = DateTimeOffset.UtcNow };
         lock (_ledger.Lock) ticket.View = view;
         _bus.Publish("run", view);
         _deployments.PublishDeployments();
@@ -185,19 +185,27 @@ internal sealed class RunQueue
         try
         {
             var result = await _orchestrator.RunAsync(spec, ticket.Cancel.Token);
-            final = view with { State = result.Outcome.ToString().ToLowerInvariant(), Result = result, Description = result.Describe() };
+            final = view with { State = StateOf(result.Outcome), Result = result, Description = result.Describe() };
         }
         catch (Exception ex) when (ex is NoEligibleReplicaException or UnboundFragmentException)
         {
-            final = view with { State = "refused", Refusal = ex.Message };
+            final = view with { State = RunState.Refused, Refusal = ex.Message };
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Run {RunId} failed unexpectedly", spec.RunId);
-            final = view with { State = "error", Refusal = ex.Message };
+            final = view with { State = RunState.Error, Refusal = ex.Message };
         }
         Finish(ticket, final);
     }
+
+    private static RunState StateOf(RunOutcome outcome) => outcome switch
+    {
+        RunOutcome.Succeeded => RunState.Succeeded,
+        RunOutcome.Failed => RunState.Failed,
+        RunOutcome.Cancelled => RunState.Cancelled,
+        _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome, "No state for this outcome."),
+    };
 
     private void Finish(Ticket ticket, RunView final)
     {

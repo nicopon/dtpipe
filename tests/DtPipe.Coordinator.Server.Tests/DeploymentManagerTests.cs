@@ -102,7 +102,7 @@ public sealed class DeploymentManagerTests : IDisposable
         await _deployments.DeployAsync(Plan(), "test", CancellationToken.None);
 
         var deployment = Assert.Single(await _deployments.DeploymentsAsync());
-        Assert.Equal("ready", deployment.State);
+        Assert.Equal(DeploymentState.Ready, deployment.State);
         Assert.Equal(1, Assert.Single(deployment.Fragments).Replicas);
         Assert.Equal(2, _link.Checked.Count);
         Assert.Contains(_link.Checked, c => c.Replica == updated);
@@ -141,7 +141,7 @@ public sealed class DeploymentManagerTests : IDisposable
             if (DateTime.UtcNow > deadline) throw new TimeoutException("the run was never finished");
             await Task.Delay(10, TestContext.Current.CancellationToken);
         }
-        Assert.Equal("refused", run.State);
+        Assert.Equal(RunState.Refused, run.State);
         Assert.Contains("disabled", run.Refusal);
         Assert.Equal(0, Assert.Single((await _deployments.DeploymentsAsync()).Single().Fragments).Replicas);
     }

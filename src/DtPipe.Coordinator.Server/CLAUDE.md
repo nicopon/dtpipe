@@ -162,6 +162,12 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   identity again cuts nothing, no host of it being connected. `Origin`, where a replica says it runs, is untrusted
   text: cut at `Announce`, the ground of no decision.
   `[local: NodeChannelHubTests, RightsRoutesTests; the lab's smoke.py rights - identity, disabled; tools/campaign.py F3, S7]`
+- **A state is written as a lowercase word, by the converter on the property that carries it.** `RunView.State` and
+  `DeploymentView.State` are a `RunState` and a `DeploymentState`; the pages, the event stream and the journal's files
+  carry the name of the value in lowercase, never as declared. Where no property carries a deployment's state (the
+  `deploy` event, the text of a refusal), `StateWords.Word` writes it; `undeployed` is the word of an event, not a
+  state. A journal file whose state is none of the values, or a number, is skipped when the server starts.
+  `[local: StateWireTests, RunQueueTests]`
 - **A run that was placed records the replica of each fragment.** `RunJournal` keeps the `RunResult` whole,
   `RunResult.Replicas` included: an instance id and the `Origin` the replica announced, untrusted text the pages
   escape. A run refused at admission has none, and a file that names none reads as a run with none.

@@ -34,7 +34,7 @@ internal sealed class Deployment
     public required DistributionPlan Plan;
     public required string Origin;
     public required DateTimeOffset DeployedAt;
-    public string State = "deploying";
+    public DeploymentState State = DeploymentState.Deploying;
     public string? Message;
     public readonly SemaphoreSlim Gate = new(1, 1);
 }
@@ -45,5 +45,5 @@ internal sealed class Ticket(RunView view)
     public readonly CancellationTokenSource Cancel = new();
     /// <summary>The data nodes it holds, from when it is sent until it finishes.</summary>
     public IReadOnlySet<string> Held = new HashSet<string>();
-    public bool Running => View.State == "running";
+    public bool Running => View.State == RunState.Running;
 }

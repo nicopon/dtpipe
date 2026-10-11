@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using DtPipe.Coordinator;
 using DtPipe.Coordinator.Contracts;
 using TransportR.Interfaces;
@@ -11,7 +12,8 @@ public sealed class ConflictException(string message) : Exception(message);
 public sealed record DeployedFragment(string Name, string Node, string Version, int? Replicas = null);
 
 public sealed record DeploymentView(
-    string PipelineId, string PlanId, string Origin, string State, DateTimeOffset DeployedAt, string? Message,
+    string PipelineId, string PlanId, string Origin, [property: JsonConverter(typeof(WireEnumConverter<DeploymentState>))] DeploymentState State,
+    DateTimeOffset DeployedAt, string? Message,
     IReadOnlyList<DeployedFragment> Fragments, int Edges, int Queued, string? RunningRunId);
 
 /// <summary>

@@ -1,8 +1,8 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using DtPipe.Coordinator.Contracts;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using TransportR.Models;
 using TransportR.Services;
 using Xunit;
@@ -150,7 +150,7 @@ public sealed class RunQueueTests : IDisposable
     }
 
     private Task RunningAsync(string runId) =>
-        UntilAsync(() => _deployments.Queue.Any(r => r.RunId == runId && r.State == "running"), $"{runId} to run");
+        UntilAsync(() => _deployments.Queue.Any(r => r.RunId == runId && r.State == RunState.Running), $"{runId} to run");
 
     private Task FinishedAsync(string runId) =>
         UntilAsync(() => _journal.List().Any(r => r.RunId == runId), $"{runId} to be journaled");
@@ -176,7 +176,7 @@ public sealed class RunQueueTests : IDisposable
         await DeployAsync(DataPlan("p", "n"));
 
         var queued = _deployments.Enqueue(null);
-        Assert.Equal("queued", queued.State);
+        Assert.Equal(RunState.Queued, queued.State);
         await RunningAsync(queued.RunId);
 
         var spec = Assert.Single(_runs.Specs);
@@ -192,16 +192,16 @@ public sealed class RunQueueTests : IDisposable
         await FinishedAsync(queued.RunId);
 
         var done = Journaled(queued.RunId);
-        Assert.Equal(("succeeded", "Outcome: Succeeded"), (done.State, done.Description));
+        Assert.Equal((RunState.Succeeded, "Outcome: Succeeded"), (done.State, done.Description));
         Assert.NotNull(done.FinishedAt);
         Assert.Empty(_deployments.Queue);
         Assert.Equal(queued.RunId, _deployments.CurrentRun("p")!.RunId);
     }
 
     [Theory]
-    [InlineData(RunOutcome.Failed, "failed")]
-    [InlineData(RunOutcome.Cancelled, "cancelled")]
-    public async Task The_State_Of_A_Finished_Run_Is_The_Lowercase_Word_Of_Its_Outcome(RunOutcome outcome, string word)
+    [InlineData(RunOutcome.Failed, RunState.Failed)]
+    [InlineData(RunOutcome.Cancelled, RunState.Cancelled)]
+    public async Task The_State_Of_A_Finished_Run_Is_The_One_Of_Its_Outcome(RunOutcome outcome, RunState state)
     {
         await ReplicaAsync("n");
         await DeployAsync(DataPlan("p", "n"));
@@ -211,7 +211,7 @@ public sealed class RunQueueTests : IDisposable
         _runs.End(run.RunId, outcome);
         await FinishedAsync(run.RunId);
 
-        Assert.Equal(word, Journaled(run.RunId).State);
+        Assert.Equal(state, Journaled(run.RunId).State);
     }
 
     [Fact]
@@ -229,10 +229,10 @@ public sealed class RunQueueTests : IDisposable
         await FinishedAsync(second.RunId);
 
         var refused = Journaled(first.RunId);
-        Assert.Equal("refused", refused.State);
+        Assert.Equal(RunState.Refused, refused.State);
         Assert.Contains("none", refused.Refusal);
         var error = Journaled(second.RunId);
-        Assert.Equal(("error", "boom"), (error.State, error.Refusal));
+        Assert.Equal((RunState.Error, "boom"), (error.State, error.Refusal));
     }
 
     [Fact]
@@ -255,7 +255,7 @@ public sealed class RunQueueTests : IDisposable
         await Task.WhenAll(RunningAsync(p.RunId), RunningAsync(s.RunId), RunningAsync(t.RunId), RunningAsync(u.RunId));
 
         Assert.False(_runs.Saw(q.RunId));
-        Assert.Equal("queued", _deployments.Queue.Single(r => r.RunId == q.RunId).State);
+        Assert.Equal(RunState.Queued, _deployments.Queue.Single(r => r.RunId == q.RunId).State);
         Assert.Equal(q.RunId, _deployments.Queue.Last().RunId);
         var views = await _deployments.DeploymentsAsync();
         var waiting = views.Single(d => d.PipelineId == "q");
@@ -284,18 +284,18 @@ public sealed class RunQueueTests : IDisposable
         await RunningAsync(p.RunId);
         _deployments.Cancel();
         await FinishedAsync(p.RunId);
-        Assert.Equal("cancelled", Journaled(p.RunId).State);
+        Assert.Equal(RunState.Cancelled, Journaled(p.RunId).State);
 
         var again = _deployments.Enqueue("p");
         var s = _deployments.Enqueue("s");
         await Task.WhenAll(RunningAsync(again.RunId), RunningAsync(s.RunId));
         var ex = Assert.Throws<ConflictException>(() => _deployments.Cancel());
         Assert.Equal("2 runs are in flight: name the one to cancel.", ex.Message);
-        Assert.Equal(2, _deployments.Queue.Count(r => r.State == "running"));
+        Assert.Equal(2, _deployments.Queue.Count(r => r.State == RunState.Running));
 
         _deployments.Cancel(s.RunId);
         await FinishedAsync(s.RunId);
-        Assert.Equal("cancelled", Journaled(s.RunId).State);
+        Assert.Equal(RunState.Cancelled, Journaled(s.RunId).State);
         _runs.End(again.RunId, RunOutcome.Succeeded);
         await FinishedAsync(again.RunId);
     }
@@ -314,7 +314,7 @@ public sealed class RunQueueTests : IDisposable
         _deployments.Cancel("run-unknown");
 
         var cancelled = Journaled(q.RunId);
-        Assert.Equal(("cancelled", "Cancelled while queued."), (cancelled.State, cancelled.Refusal));
+        Assert.Equal((RunState.Cancelled, "Cancelled while queued."), (cancelled.State, cancelled.Refusal));
         _runs.End(p.RunId, RunOutcome.Succeeded);
         await FinishedAsync(p.RunId);
         await Task.Delay(300);
@@ -413,7 +413,7 @@ public sealed class RunQueueTests : IDisposable
         _deployments.Cancel(first.RunId);
         await FinishedAsync(first.RunId);
         var ended = Journaled(first.RunId);
-        Assert.Equal(("cancelled", "Cancelled while queued."), (ended.State, ended.Refusal));
+        Assert.Equal((RunState.Cancelled, "Cancelled while queued."), (ended.State, ended.Refusal));
         Assert.False(_runs.Saw(first.RunId));
 
         _link.CheckGate.SetResult(new FragmentCheck(true));
@@ -440,7 +440,7 @@ public sealed class RunQueueTests : IDisposable
         await FinishedAsync(run.RunId);
 
         var refused = Journaled(run.RunId);
-        Assert.Equal("refused", refused.State);
+        Assert.Equal(RunState.Refused, refused.State);
         Assert.StartsWith("'p' is not ready: failed ", refused.Refusal);
         Assert.Contains("refused by n: no thanks", refused.Refusal);
         Assert.False(_runs.Saw(run.RunId));
@@ -489,7 +489,9 @@ public sealed class RunQueueTests : IDisposable
     [Fact]
     public async Task The_Events_Of_A_Deployment_And_Of_A_Run_Carry_The_States_As_Words()
     {
-        var json = new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
+        using var host = new CoordinatorHost();
+        using var started = host.CreateClient();
+        var json = host.Services.GetRequiredService<IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>>().Value.SerializerOptions;
         var (_, live, unsubscribe) = _bus.Subscribe();
         try
         {

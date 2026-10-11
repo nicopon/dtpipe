@@ -99,13 +99,13 @@ internal sealed class DeploymentService
             Publish(deployment);
 
             await CheckAsync(deployment, ct);
-            deployment.State = "ready";
+            deployment.State = DeploymentState.Ready;
             Publish(deployment);
         }
         catch (Exception ex)
         {
             // A deployment is all of its fragments or none: a refused one is not kept.
-            deployment.State = "failed";
+            deployment.State = DeploymentState.Failed;
             deployment.Message = ex.Message;
             Publish(deployment);
             Forget(deployment);
@@ -223,7 +223,7 @@ internal sealed class DeploymentService
 
     private void Publish(Deployment deployment)
     {
-        _bus.Publish("deploy", new { planId = deployment.Plan.Id, pipelineId = deployment.Plan.PipelineId, state = deployment.State, message = deployment.Message });
+        _bus.Publish("deploy", new { planId = deployment.Plan.Id, pipelineId = deployment.Plan.PipelineId, state = deployment.State.Word(), message = deployment.Message });
         PublishDeployments();
     }
 

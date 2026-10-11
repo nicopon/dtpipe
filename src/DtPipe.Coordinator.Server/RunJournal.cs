@@ -5,11 +5,12 @@ using DtPipe.Coordinator;
 namespace DtPipe.Coordinator.Server;
 
 public sealed record RunView(
-    string RunId, string PlanId, string State, DateTimeOffset StartedAt, DateTimeOffset? FinishedAt,
+    string RunId, string PlanId, [property: JsonConverter(typeof(WireEnumConverter<RunState>))] RunState State, DateTimeOffset StartedAt,
+    DateTimeOffset? FinishedAt,
     RunResult? Result, string? Description, string? Refusal,
     string? PipelineId = null, DateTimeOffset? QueuedAt = null)
 {
-    [JsonIgnore] public bool IsOver => State is not ("queued" or "running");
+    [JsonIgnore] public bool IsOver => State is not (RunState.Queued or RunState.Running);
 }
 
 /// <summary>
