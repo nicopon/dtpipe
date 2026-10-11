@@ -70,10 +70,17 @@ applies `DetermineOutcome`. `RunAsync` is an in-process API: the library maps no
 a replica goes through `INodeLink`, bounded, and is an invocation the replica answers: a replica's client
 handles pushes one after another, so a push that takes time delays the next.
 
+A call is one `RunSession`, which `RunOrchestrator` builds and keeps in its table of runs while the call lasts. Its
+methods are the phases, in the order of that sentence, then the teardown of a run that was aborted. Two entries run on
+the thread of a hub method: `OnExitedAsync` (the session's report slots, its abort and its placement) and the handler of
+`ReplicaLost`, subscribed once the run is placed (the placement, the lost fragment, the abort). `RunOrchestrator` keeps
+the table, `OnExitedAsync` and the pure rules (`DetermineOutcome`, `PeersOwingAReport`, `IsReportOfItsLaunch`).
+`[local: RunPhasesTests]`
+
 - **Several runs may be in flight; each is judged alone.** Each run has its own state, found by run id. A
   lost replica, a local failure, the requester's cancellation and the grace after a remote failure end only
   the run they belong to. A replica serves several runs, even of one fragment. Which runs may overlap is the
-  caller's choice; the orchestrator never queues. `[local: ConcurrentRunsTests]`
+  caller's choice; the orchestrator never queues. `[local: ConcurrentRunsTests, RunPhasesTests]`
 - **A caller is its connection, never an argument.** `ReplicaProtocol` finds a replica through the connection
   a message arrived on. An `Exited` is heard only from the replica the run placed that fragment on: any
   other, a replica of the same identity included, is answered `NotAdmitted`, and a connection that announced
@@ -87,7 +94,7 @@ handles pushes one after another, so a push that takes time delays the next.
   after the coordinator restarts, so an earlier child that held the same run id, fragment and replica reports
   under another token. The token is no secret (the replica holds it) and authenticates nobody: the
   connection still names the sender. Never mint it from a counter, or from anything that restarts with the
-  process. `[local: ExitBeforeLaunchAnswerTests, RunOrchestratorTests, LaunchTokenWireTests; the lab's smoke.py rights - a foreign report]`
+  process. `[local: ExitBeforeLaunchAnswerTests, RunOrchestratorTests, LaunchTokenWireTests, RunPhasesTests; the lab's smoke.py rights - a foreign report]`
 - **Admission binds a fragment to its node's identity.** `RunFragment.Node` is the subject the node's
   connections attest (`ReplicaRegistry` keys a replica by the subject of its connection, never by the name it
   proposes), and the caller supplies it: the library never infers it. A fragment that names no node, or no
@@ -103,7 +110,7 @@ handles pushes one after another, so a push that takes time delays the next.
   the fragment is excluded from cause and consequence, as one the coordinator cancelled, the run is torn down,
   and `Cause` reads `<fragment> could not start on replica <id>: <reason>` with `CauseIsUnresponsive` false.
   A replica that does not answer within `ReadyTimeout`, or has no connection to ask on, is a fragment gone
-  quiet instead. `[local: ReplicaAdmissionSubjectTests, CoordinatorAbortTests]`
+  quiet instead. `[local: ReplicaAdmissionSubjectTests, CoordinatorAbortTests, RunPhasesTests]`
 - **A 0 exit code is not proof of delivery.** `DetermineOutcome` also compares each edge's two row
   counts (`RunResult.EdgeCounts`) and fails the run, naming the edge, on a mismatch even when every
   fragment reported 0 - a fragment attests its own process, not what its peer received. A count
@@ -123,12 +130,12 @@ handles pushes one after another, so a push that takes time delays the next.
   arrives: a node reports once its relays have ended, so a fragment whose child died while its
   relay waits on a silent peer reports nothing yet. The abort is raised with `CancelAsync`, so the teardown
   never runs in the hub method that carried the report, where a replica's messages are serialised.
-  `[local: FaultVerdictTests]`
+  `[local: FaultVerdictTests]` `[unchecked: CancelAsync rather than Cancel]`
 - **A transfer the hub cannot open is the cause, as a message.** When `InitTransferAsync` or a `Wire`
   fails (or a replica answers that it knows no such edge), the run tears down and `Cause` reads `transfer P
   -> C could not be opened by the hub`: no fragment is blamed as unresponsive, and the verdict gives no
   reason (which side, which group, which rule) to whoever reads it; the hub's log holds the detail. A
-  fragment that went silent still outranks it. `[local: RunOrchestratorTests, FaultVerdictTests]`
+  fragment that went silent still outranks it. `[local: RunOrchestratorTests, FaultVerdictTests, ScriptedRunTests]`
 - **A fragment absent from the reports is never read as success.** `DetermineOutcome` takes the
   fragment *names* from `RunSpec.Fragments` as well as the reports collected so far, precisely so a
   fragment that never reported `Exited` at all - distinct from one that reported a fault - is still named
@@ -141,7 +148,7 @@ handles pushes one after another, so a push that takes time delays the next.
   in-flight run. A run subscribes to `ReplicaLost` only once it is placed, and compares the lost key with the
   replica it placed each fragment on, so a sibling replica dropping, or a replacement of this one, is never
   read as this run's own fragment going quiet. The disconnect handling stays the only cover for a node
-  that dies without saying so. `[local: ReplicaRegistryTests, ReplicaAdmissionSubjectTests, CoordinatorAbortTests]`
+  that dies without saying so. `[local: ReplicaRegistryTests, ReplicaAdmissionSubjectTests, CoordinatorAbortTests, RunPhasesTests]`
 - **A run in which no fragment has failed has no coordinator-side clock; a remote failure starts one.** A
   legitimately long transfer, or a slow consumer, must not be reported failed for taking time, so the
   transfer phase is bounded only by `abort.Token`: the requester's own cancellation, `ReplicaLost`, or a
@@ -154,7 +161,7 @@ handles pushes one after another, so a push that takes time delays the next.
   because its own peer is, or one on a branch the failure never touched. Keep the grace above
   `ReplicaRegistryOptions.DisconnectGracePeriod`, so a lost node is named by its loss and not by its
   silence. `ExitTimeout` bounds only the *teardown's* wait for an already-cancelled or
-  already-terminated fragment to finish reporting. `[local: RemoteFailureGraceTests, RunOrchestratorTests]`
+  already-terminated fragment to finish reporting. `[local: RemoteFailureGraceTests, RunOrchestratorTests, ScriptedRunTests]`
 - **On teardown, every launched fragment still running is told to `Cancel`**, in parallel and each bounded by
   `LinkTimeout`, after `ITransferTerminator.TerminateAsync` has ended each open transfer. A torn-down transfer
   faults a fully wired fragment only once one of its relays touches it, which never happens while its child
@@ -169,7 +176,7 @@ handles pushes one after another, so a push that takes time delays the next.
   happens to still receive. A fragment whose `Cancel` cannot be delivered is unreachable, and one whose replica
   answers that it knows no such run never started: neither can report on its own, and counting them among the
   stragglers would wait out the full `ExitTimeout` for nothing.
-  `[local: RunOrchestratorTests, CoordinatorAbortTests]`
+  `[local: RunOrchestratorTests, CoordinatorAbortTests, RunPhasesTests, ScriptedRunTests]`
 
 ## Replicas and eligibility
 

@@ -26,6 +26,12 @@ public sealed class FakeNodeOptions
     /// <summary>A real node answers a <c>Cancel</c> before it is fully wired with a local exit of its killed child.</summary>
     public bool ExitOnCancel { get; init; } = true;
 
+    /// <summary>How long after a <c>Cancel</c> the node reports that exit; none by default.</summary>
+    public TimeSpan ExitOnCancelAfter { get; init; } = TimeSpan.Zero;
+
+    /// <summary>False: the node answers a <c>Cancel</c> that it knows no such run.</summary>
+    public bool KnowsTheRun { get; init; } = true;
+
     /// <summary>False: the node announces itself as a version that does not return a launch's token.</summary>
     public bool AnnounceLaunchToken { get; init; } = true;
 }
@@ -89,10 +95,16 @@ public sealed class FakeNode : IAsyncDisposable
         Channel.On<string, string, bool>(NodeChannel.Cancel, (runId, fragment) =>
         {
             Cancelled.TrySetResult();
-            if (_options.ExitOnCancel) _ = ExitAsync(1, runId: runId, fragment: fragment);
-            return Task.FromResult(true);
+            if (_options.ExitOnCancel) _ = ExitOnCancelAsync(runId, fragment);
+            return Task.FromResult(_options.KnowsTheRun);
         });
         Channel.On<FragmentSpec, FragmentCheck>(NodeChannel.Check, _ => Task.FromResult(new FragmentCheck(true)));
+    }
+
+    private async Task ExitOnCancelAsync(string runId, string fragment)
+    {
+        if (_options.ExitOnCancelAfter > TimeSpan.Zero) await Task.Delay(_options.ExitOnCancelAfter);
+        await ExitAsync(1, runId: runId, fragment: fragment);
     }
 
     public Task AnnounceAsync() => Channel.InvokeAsync(NodeChannel.Announce, new NodeAnnouncement(

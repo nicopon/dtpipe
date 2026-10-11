@@ -134,25 +134,8 @@ public interface IRunOrchestrator
 /// </summary>
 public sealed class RunOrchestrator : IRunOrchestrator
 {
-    private readonly ReplicaAdmission _admission;
-    private readonly ReplicaRegistry _registry;
-    private readonly INodeLink _link;
-    private readonly ITransferInitiator _transferInitiator;
-    private readonly ITransferTerminator _transferTerminator;
-    private readonly RunOrchestratorOptions _options;
+    private readonly RunServices _services;
     private readonly ILogger<RunOrchestrator> _logger;
-
-    /// <summary>One run's state, built before its admission and dropped from the map before its abort is disposed.</summary>
-    private sealed class ActiveRun
-    {
-        public required RunSpec Spec { get; init; }
-        public required Dictionary<string, TaskCompletionSource<FragmentExitReport>> Exited { get; init; }
-        public required CancellationTokenSource Abort { get; init; }
-        public TaskCompletionSource RemoteFailure { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        /// <summary>Where each fragment was placed and under which launch token, set once admission has chosen; null before.</summary>
-        public volatile Placement? Placed;
-    }
 
     /// <summary>
     /// The replica each fragment of a run was placed on, and the token of its launch, published together: a report that
@@ -161,7 +144,7 @@ public sealed class RunOrchestrator : IRunOrchestrator
     internal sealed record Placement(IReadOnlyDictionary<string, ReplicaKey> Replicas, IReadOnlyDictionary<string, string> Tokens);
 
     private readonly object _lock = new();
-    private readonly Dictionary<string, ActiveRun> _runs = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, RunSession> _runs = new(StringComparer.Ordinal);
 
     public RunOrchestrator(
         ReplicaAdmission admission,
@@ -172,13 +155,8 @@ public sealed class RunOrchestrator : IRunOrchestrator
         ILogger<RunOrchestrator> logger,
         RunOrchestratorOptions? options = null)
     {
-        _admission = admission;
-        _registry = registry;
-        _link = link;
-        _transferInitiator = transferInitiator;
-        _transferTerminator = transferTerminator;
+        _services = new RunServices(admission, registry, link, transferInitiator, transferTerminator, options ?? new RunOrchestratorOptions(), logger);
         _logger = logger;
-        _options = options ?? new RunOrchestratorOptions();
     }
 
     public async Task<RunResult> RunAsync(RunSpec spec, CancellationToken ct = default)
@@ -186,188 +164,7 @@ public sealed class RunOrchestrator : IRunOrchestrator
         var run = Begin(spec, ct);
         try
         {
-            var abort = run.Abort;
-            var fragmentNames = spec.Fragments.Select(f => f.Name).ToList();
-            string? lostFragment = null;
-            string? wiringFailure = null;
-            var launched = new HashSet<string>(StringComparer.Ordinal);
-            var refused = new HashSet<string>(StringComparer.Ordinal);
-            var cancelledFragments = new HashSet<string>(StringComparer.Ordinal);
-            var unresponsive = new HashSet<string>(StringComparer.Ordinal);
-            var openTransfers = new List<string>();
-
-            // Total edge participation per fragment (at most one inbound + one outbound -
-            // PipelineNode.ValidateEdges), so a teardown can tell a fragment whose every declared
-            // edge is already wired - it self-completes once its transfer is torn down, the same
-            // path a mid-flow child death already takes - from one still waiting on a Wire it will
-            // now never get, which needs an explicit Cancel to ever finish at all.
-            var totalEdgesByFragment = new Dictionary<string, int>(StringComparer.Ordinal);
-            foreach (var edge in spec.Edges)
-            {
-                totalEdgesByFragment[edge.ProducerFragment] = totalEdgesByFragment.GetValueOrDefault(edge.ProducerFragment) + 1;
-                totalEdgesByFragment[edge.ConsumerFragment] = totalEdgesByFragment.GetValueOrDefault(edge.ConsumerFragment) + 1;
-            }
-            var wiredEdgesByFragment = new Dictionary<string, int>(StringComparer.Ordinal);
-
-            IReadOnlyDictionary<string, ReplicaView> chosen;
-            try
-            {
-                chosen = await AdmitAsync(spec, ct);
-            }
-            catch (OperationCanceledException)
-            {
-                return CancelledByRequester(spec.Edges);
-            }
-            // UnboundFragmentException and NoEligibleReplicaException propagate unchanged: nothing was launched yet.
-
-            var placed = chosen.ToDictionary(c => c.Key, c => c.Value.Key, StringComparer.Ordinal);
-            // Random, minted for this launch alone: nothing that restarts with the process, or an old child's report would match.
-            var tokens = chosen.ToDictionary(c => c.Key, _ => Guid.NewGuid().ToString("N"), StringComparer.Ordinal);
-            run.Placed = new Placement(placed, tokens);
-
-            // Subscribed only once the run is placed, so a replica lost during admission itself is never seen
-            // here: an unplaced run is already admission's own refusal and must not also surface as a Failed
-            // run from this handler. Compared against the replica each fragment was placed on, so a replica
-            // of the same node dropping, or a replacement of this one, is never read as this run's own.
-            void OnReplicaLost(ReplicaKey lost)
-            {
-                var gone = spec.Fragments.Select(f => f.Name)
-                    .Where(f => placed[f] == lost && !run.Exited[f].Task.IsCompleted).ToList();
-                if (gone.Count == 0) return;
-                lostFragment ??= gone[0];
-                // CancelAsync, not Cancel: the teardown this wakes must not run inline, in the hub method of
-                // the replica that said it was leaving, which serialises everything that replica sends.
-                try { _ = run.Abort.CancelAsync(); }
-                catch (ObjectDisposedException) { /* the run already ended */ }
-            }
-            _registry.ReplicaLost += OnReplicaLost;
-
-            try
-            {
-                if (!abort.IsCancellationRequested)
-                {
-                    using var launchBound = CancellationTokenSource.CreateLinkedTokenSource(abort.Token);
-                    launchBound.CancelAfter(_options.ReadyTimeout);
-                    var attempts = await Task.WhenAll(spec.Fragments.Select(f => LaunchOneAsync(run, f, placed[f.Name], tokens[f.Name], launched, launchBound.Token)));
-                    foreach (var attempt in attempts)
-                    {
-                        switch (attempt.Kind)
-                        {
-                            case LaunchKind.Started:
-                                break;
-                            case LaunchKind.Refused:
-                                // The replica ran nothing: the coordinator's own teardown excludes the fragment from
-                                // cause and consequence, and the reason is the cause.
-                                refused.Add(attempt.Fragment);
-                                cancelledFragments.Add(attempt.Fragment);
-                                wiringFailure ??= $"{attempt.Fragment} could not start on replica {placed[attempt.Fragment].Short}: {attempt.Reason}";
-                                abort.Cancel();
-                                break;
-                            case LaunchKind.Silent when !abort.IsCancellationRequested:
-                                // No answer within ReadyTimeout, or no connection to ask on: the fragment went quiet.
-                                lostFragment ??= attempt.Fragment;
-                                abort.Cancel();
-                                break;
-                        }
-                    }
-                }
-
-                if (!abort.IsCancellationRequested)
-                {
-                    foreach (var edge in spec.Edges)
-                    {
-                        if (abort.IsCancellationRequested) break;
-
-                        try
-                        {
-                            var producer = chosen[edge.ProducerFragment];
-                            var consumer = chosen[edge.ConsumerFragment];
-                            var transferId = await _transferInitiator.InitTransferAsync(
-                                producer.DataPlaneClientId!.Value, consumer.DataPlaneClientId!.Value,
-                                _options.BatchSize, _options.TransferTimeoutMs, abort.Token);
-                            openTransfers.Add(transferId);
-
-                            await WireAsync(placed[edge.ProducerFragment], spec.RunId, edge.ProducerFragment, edge.ProducerAlias, transferId, abort.Token);
-                            await WireAsync(placed[edge.ConsumerFragment], spec.RunId, edge.ConsumerFragment, edge.ConsumerAlias, transferId, abort.Token);
-
-                            wiredEdgesByFragment[edge.ProducerFragment] = wiredEdgesByFragment.GetValueOrDefault(edge.ProducerFragment) + 1;
-                            wiredEdgesByFragment[edge.ConsumerFragment] = wiredEdgesByFragment.GetValueOrDefault(edge.ConsumerFragment) + 1;
-                        }
-                        catch (OperationCanceledException) when (abort.IsCancellationRequested) { break; }
-                        catch (ReplicaUnreachableException ex)
-                        {
-                            lostFragment ??= fragmentNames.First(f => placed[f] == ex.Replica);
-                            abort.Cancel();
-                            break;
-                        }
-                        catch (Exception ex)
-                        {
-                            // InitTransferAsync's documented failure modes (unknown client, expired
-                            // token, unauthorized, unreachable, handshake timeout) name neither party
-                            // in the exception itself, and neither fragment is known to have gone
-                            // quiet: the edge is the cause. The verdict carries no reason beyond
-                            // that (which side, which rule); the hub's log holds the detail.
-                            _logger.LogWarning(ex, "Wiring edge {Producer}->{Consumer} failed", edge.ProducerFragment, edge.ConsumerFragment);
-                            wiringFailure ??= $"transfer {edge.ProducerFragment} -> {edge.ConsumerFragment} could not be opened by the hub";
-                            abort.Cancel();
-                            break;
-                        }
-                    }
-                }
-
-                // Execution: nothing times a run in which no fragment has failed. It ends when every
-                // fragment has reported, or by the abort a lost replica, a fragment's own local failure or
-                // the requester's own ct raises - or, once a fragment has failed Remote, when its peers
-                // have not reported within RemoteFailureGrace: the run is then torn down, and the verdict
-                // names the fragments that had not reported, never the ones that failed because of them.
-                if (!abort.IsCancellationRequested)
-                {
-                    try
-                    {
-                        var allExited = Task.WhenAll(run.Exited.Values.Select(t => t.Task));
-                        var remoteFailure = run.RemoteFailure.Task;
-                        if (await Task.WhenAny(allExited, remoteFailure).WaitAsync(abort.Token) == remoteFailure && !allExited.IsCompleted)
-                        {
-                            try { await allExited.WaitAsync(_options.RemoteFailureGrace, abort.Token); }
-                            catch (TimeoutException)
-                            {
-                                var reported = fragmentNames.Where(f => run.Exited[f].Task.IsCompleted).ToHashSet(StringComparer.Ordinal);
-                                var failedRemotely = fragmentNames
-                                    .Where(f => run.Exited[f].Task.IsCompletedSuccessfully && run.Exited[f].Task.Result.Origin == FaultOrigin.Remote)
-                                    .ToHashSet(StringComparer.Ordinal);
-                                unresponsive.UnionWith(PeersOwingAReport(spec.Edges, failedRemotely, reported));
-                                _logger.LogWarning(
-                                    "Run {RunId}: {Fragments} did not report within {Grace} of a fragment failing remotely; tearing the run down",
-                                    spec.RunId, string.Join(", ", fragmentNames.Where(f => !reported.Contains(f))), _options.RemoteFailureGrace);
-                                abort.Cancel();
-                            }
-                        }
-                        else
-                        {
-                            await allExited.WaitAsync(abort.Token);
-                        }
-                    }
-                    catch (OperationCanceledException) { /* falls through to the teardown below */ }
-                }
-
-                if (abort.IsCancellationRequested)
-                {
-                    await TeardownAsync(
-                        run, lostFragment, placed, launched, refused, openTransfers,
-                        totalEdgesByFragment, wiredEdgesByFragment, cancelledFragments);
-                }
-            }
-            finally
-            {
-                _registry.ReplicaLost -= OnReplicaLost;
-            }
-
-            var reports = fragmentNames
-                .Where(f => run.Exited[f].Task.IsCompletedSuccessfully)
-                .ToDictionary(f => f, f => run.Exited[f].Task.Result, StringComparer.Ordinal);
-
-            return DetermineOutcome(reports, spec.Edges, fragmentNames, cancelledFragments, ct.IsCancellationRequested, wiringFailure, unresponsive)
-                with { Replicas = chosen.ToDictionary(c => c.Key, c => new RunReplica(c.Value.Key.Short, c.Value.Announcement.Origin), StringComparer.Ordinal) };
+            return await run.ExecuteAsync(ct);
         }
         finally
         {
@@ -376,172 +173,36 @@ public sealed class RunOrchestrator : IRunOrchestrator
     }
 
     /// <summary>
-    /// Waits, up to <see cref="RunOrchestratorOptions.AdmissionTimeout"/>, for a replica of every fragment's node that
-    /// can run it, and places the whole run in one step. Gives up with the reason for each fragment that never had one.
-    /// </summary>
-    private async Task<IReadOnlyDictionary<string, ReplicaView>> AdmitAsync(RunSpec spec, CancellationToken ct)
-    {
-        _admission.ThrowIfUnbound(spec.Fragments);
-
-        using var timeoutCts = new CancellationTokenSource(_options.AdmissionTimeout);
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
-        IReadOnlyDictionary<string, string> reasons;
-        while (true)
-        {
-            var (chosen, why) = await _admission.TryReserveAsync(spec.RunId, spec.Fragments);
-            if (chosen is not null) return chosen;
-            reasons = why;
-
-            ct.ThrowIfCancellationRequested();
-            if (timeoutCts.IsCancellationRequested)
-                throw new NoEligibleReplicaException(reasons.Count > 0 ? reasons
-                    : spec.Fragments.ToDictionary(f => f.Name, _ => "no replica could be placed.", StringComparer.Ordinal));
-
-            try { await Task.Delay(_options.AdmissionPollInterval, linked.Token); }
-            catch (OperationCanceledException) { /* loop once more to tell which side fired above */ }
-        }
-    }
-
-    private enum LaunchKind { Started, Refused, Silent }
-
-    private sealed record LaunchAttempt(string Fragment, LaunchKind Kind, string? Reason = null);
-
-    /// <summary>
-    /// Sends one <c>Launch</c> and says how it was received. Never throws: a refusal is the replica's answer; an
-    /// unreachable replica, or one that did not answer within the bound, is a fragment gone quiet. The fragment is in
-    /// <paramref name="launched"/> from before the message is sent, so a teardown tells it to <c>Cancel</c> whatever happened.
-    /// </summary>
-    private async Task<LaunchAttempt> LaunchOneAsync(
-        ActiveRun run, RunFragment fragment, ReplicaKey replica, string token, HashSet<string> launched, CancellationToken bound)
-    {
-        lock (launched) launched.Add(fragment.Name);
-        try
-        {
-            var result = await _link.LaunchAsync(replica, new LaunchRequest(run.Spec.RunId, fragment.Spec, token), bound);
-            return result.Started ? new LaunchAttempt(fragment.Name, LaunchKind.Started)
-                : new LaunchAttempt(fragment.Name, LaunchKind.Refused, result.Refusal ?? "the replica gave no reason.");
-        }
-        // Whatever the cancellation of the message looks like on the wire, it is not an answer of the replica.
-        catch (Exception) when (bound.IsCancellationRequested) { return new LaunchAttempt(fragment.Name, LaunchKind.Silent); }
-        catch (ReplicaUnreachableException) { return new LaunchAttempt(fragment.Name, LaunchKind.Silent); }
-        catch (HubException ex) { return new LaunchAttempt(fragment.Name, LaunchKind.Refused, ex.Message); }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Launch of {Fragment} on {Replica} failed", fragment.Name, replica);
-            return new LaunchAttempt(fragment.Name, LaunchKind.Silent);
-        }
-    }
-
-    /// <summary>Hands one end of a transfer to the replica that runs the fragment; a replica that does not know the run or the edge is a failure of the edge.</summary>
-    private async Task WireAsync(ReplicaKey replica, string runId, string fragment, string alias, string transferId, CancellationToken abort)
-    {
-        using var bound = CancellationTokenSource.CreateLinkedTokenSource(abort);
-        bound.CancelAfter(_options.LinkTimeout);
-        if (!await _link.WireAsync(replica, runId, fragment, alias, transferId, bound.Token))
-            throw new InvalidOperationException($"{replica} knows no edge '{alias}' of {fragment} in run {runId}.");
-    }
-
-    /// <summary>
     /// Claims the run's id in one step, so two runs of one id never both pass. Several runs of the same fragments
     /// may be in flight: which may overlap is the caller's to decide before it asks.
     /// </summary>
-    private ActiveRun Begin(RunSpec spec, CancellationToken ct)
+    private RunSession Begin(RunSpec spec, CancellationToken ct)
     {
         lock (_lock)
         {
             if (_runs.ContainsKey(spec.RunId))
                 throw new ArgumentException($"A run named '{spec.RunId}' is already in flight.", nameof(spec));
 
-            var run = new ActiveRun
-            {
-                Spec = spec,
-                Exited = spec.Fragments.ToDictionary(
-                    f => f.Name, _ => new TaskCompletionSource<FragmentExitReport>(TaskCreationOptions.RunContinuationsAsynchronously),
-                    StringComparer.Ordinal),
-                Abort = CancellationTokenSource.CreateLinkedTokenSource(ct),
-            };
+            var run = new RunSession(_services, spec, ct);
             _runs[spec.RunId] = run;
             return run;
         }
     }
 
-    private void End(ActiveRun run)
+    private void End(RunSession run)
     {
         lock (_lock) _runs.Remove(run.Spec.RunId);
-        _registry.Release(run.Spec.RunId);
+        _services.Registry.Release(run.Spec.RunId);
         run.Abort.Dispose();
     }
 
-    private ActiveRun? Find(string runId)
+    private RunSession? Find(string runId)
     {
         lock (_lock) return _runs.GetValueOrDefault(runId);
     }
 
-    private static RunResult CancelledByRequester(IReadOnlyList<RunEdge> edges) =>
+    internal static RunResult CancelledByRequester(IReadOnlyList<RunEdge> edges) =>
         new(RunOutcome.Cancelled, null, [], new Dictionary<string, FragmentExitReport>(), BuildEdgeCounts(new Dictionary<string, FragmentExitReport>(), edges));
-
-    /// <summary>
-    /// Terminates every transfer this run opened, tells every launched fragment still running to
-    /// <c>Cancel</c>, then waits, bounded by <see cref="RunOrchestratorOptions.ExitTimeout"/>, for
-    /// whichever of those it could actually reach to finish reporting. A fully wired fragment is told
-    /// too - its torn-down transfer faults it only once a relay touches it, which a child with nothing
-    /// to write never does - but it stays out of <paramref name="cancelledFragments"/>: it reports the
-    /// <c>FaultOrigin.Remote</c> consequence a mid-flow peer death already produces. A fragment whose replica
-    /// refused the launch ran nothing, and a replica that knows no such run has nothing to report: neither is waited for.
-    /// </summary>
-    private async Task TeardownAsync(
-        ActiveRun run, string? lostFragment, IReadOnlyDictionary<string, ReplicaKey> placed, HashSet<string> launched, HashSet<string> refused,
-        List<string> openTransfers, Dictionary<string, int> totalEdgesByFragment,
-        Dictionary<string, int> wiredEdgesByFragment, HashSet<string> cancelledFragments)
-    {
-        foreach (var transferId in openTransfers)
-            await _transferTerminator.TerminateAsync(transferId);
-
-        // A fragment unreachable here can never report Exited on its own - it is unreachable precisely
-        // because nothing can tell it anything, itself included - and a fragment that was fully wired but
-        // has since gone silent (the canonical pair muet case) is still unreachable and must be excluded the
-        // same way, not just skipped for Cancel. The identified cause itself is excluded outright, even when
-        // its own replica still answers (a fragment that never became ready is still connected): it must stay
-        // silent for DetermineOutcome to name it, not be masked by a Cancel it happens to still receive.
-        var unreachable = new HashSet<string>(StringComparer.Ordinal);
-        if (lostFragment is not null) unreachable.Add(lostFragment);
-        var knowsNothing = new HashSet<string>(StringComparer.Ordinal);
-
-        async Task CancelOneAsync(string fragment)
-        {
-            var isFullyWired = totalEdgesByFragment.TryGetValue(fragment, out var total) && total > 0
-                && wiredEdgesByFragment.GetValueOrDefault(fragment) == total;
-            try
-            {
-                using var bound = new CancellationTokenSource(_options.LinkTimeout);
-                var known = await _link.CancelAsync(placed[fragment], run.Spec.RunId, fragment, bound.Token);
-                lock (cancelledFragments)
-                {
-                    if (!isFullyWired) cancelledFragments.Add(fragment);
-                    if (!known) knowsNothing.Add(fragment);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Cancel delivery failed for fragment {Fragment}", fragment);
-                lock (cancelledFragments) unreachable.Add(fragment);
-            }
-        }
-
-        string[] toCancel;
-        lock (launched)
-            toCancel = launched.Where(f => f != lostFragment && !refused.Contains(f) && !run.Exited[f].Task.IsCompleted).ToArray();
-        await Task.WhenAll(toCancel.Select(CancelOneAsync));
-
-        var pending = toCancel
-            .Where(f => !unreachable.Contains(f) && !knowsNothing.Contains(f) && !run.Exited[f].Task.IsCompleted)
-            .Select(f => run.Exited[f].Task).ToArray();
-        if (pending.Length > 0)
-        {
-            try { await Task.WhenAll(pending).WaitAsync(_options.ExitTimeout); }
-            catch (TimeoutException) { /* still-missing fragments become the silent ones in DetermineOutcome */ }
-        }
-    }
 
     public Task<ExitedAck> OnExitedAsync(ReplicaKey replica, FragmentExit exit)
     {
