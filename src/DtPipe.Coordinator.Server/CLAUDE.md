@@ -129,14 +129,19 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   node and why (`refused by <node>: …`), and a refused deployment is not kept. A replica that arrives
   later is as good as one that was asked, and one that goes takes nothing with it: what decides a run is
   admission, at the run. A deployment's gate is held while it is deployed or removed; a run passes it to
-  read the state and does not hold it. `[local: DeploymentManagerTests, the lab's smoke.py]`
+  read the state and does not hold it. `[local: DeploymentManagerTests, RunQueueTests, the lab's smoke.py]`
+- **Deployments and runs are decided under one lock.** `DeploymentManager` is what the routes call, over three
+  parts and the one `DeploymentLedger` they share: `DeploymentService` (the deployments), `RunQueue` (the queue
+  and the dispatch) and `LabFaults`. A decision that reads both sides, such as a deployment refused while a run of
+  its pipeline is queued or in flight, is taken under the ledger's lock; give a part no lock of its own.
+  `[local: RunQueueTests]` `[unchecked: the lock itself]`
 - **One run at a time per data node, first come first served.** `RunDispatch` decides, at each
-  enqueue and each finish, which waiting runs `DeploymentManager` sends: one that no run already
+  enqueue and each finish, which waiting runs `RunQueue` sends: one that no run already
   sent, and no older run still waiting, shares a data node with. A run's data nodes are its plan's
   fragment nodes that the inventory does not list as runners; a node it does not know counts
   (fail-closed). A run holds them from being sent until it finishes, and is never sent twice. A runner never counts, so its fragments of two runs share
   its host with no resource bound. With no id, `/api/runs/cancel` refuses (409) while several runs
-  are in flight rather than guess. `[local: RunDispatchTests, the lab's smoke.py library and sandbox]`
+  are in flight rather than guess. `[local: RunDispatchTests, RunQueueTests, the lab's smoke.py library and sandbox]`
 - **A node is one identity carried by one or more replicas, and `ReplicaRegistry` is the one table of
   them.** `NodeInventory` adds what the registry does not hold: the name the rights give the node, the
   groups, the last announcement of a node with no replica connected, and the page's view. The node is
@@ -156,13 +161,14 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   `RunResult.Replicas` included: an instance id and the `Origin` the replica announced, untrusted text the pages
   escape. A run refused at admission has none, and a file that names none reads as a run with none.
   `[local: RunJournalTests]` `[unchecked: the pages' escaping of Origin]`
-- **A run names the subject and the groups of each fragment's node.** `DeploymentManager` reads them from the
-  rights when the run starts (`RightsStore.SubjectOf`: the client id of the identity named after the
-  fragment's node, the `sub` its tokens carry; `GroupsOf`) and puts them in each `RunFragment`; admission
+- **A run names the subject and the groups of each fragment's node.** `RunQueue` reads them from the
+  rights when the run starts, through `DeploymentService.RunFragmentsOf` (`RightsStore.SubjectOf`: the client id of
+  the identity named after the fragment's node, the `sub` its tokens carry; `GroupsOf`), and puts them in each
+  `RunFragment`; admission
   then places the run only on replicas whose connection attests that subject and whose data plane client holds
   exactly those groups. A node that no identity carries any more, or whose identity is disabled, refuses the
   run (`refused`), and the server never sets `AdmissionOptions.AdmitUnboundFragments`.
-  `[local: RightsStoreTests, DeploymentManagerTests, the lab's smoke.py rights - a foreign replica]`
+  `[local: RightsStoreTests, DeploymentManagerTests, RunQueueTests, the lab's smoke.py rights - a foreign replica]`
   `[unchecked: the refused run of a node without an identity]`
 - **One source of rights.** `RightsStore` holds the identities and the flow matrix;
   `RightsFlowControl` replaces TransportR's `IFlowControlService`, so the hub checks the matrix as
