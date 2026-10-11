@@ -37,8 +37,10 @@ async function load() {
   render();
 }
 
+// Two plans are the same when they place the same fragments, at the same versions, on nodes holding the same groups.
+const fragmentKey = (f) => [f.name, f.version, [...f.groups].sort().join("+")];
 const sameFragments = (a, b) => !!a && !!b &&
-  JSON.stringify(a.fragments.map((f) => [f.name, f.version]).sort()) === JSON.stringify(b.fragments.map((f) => [f.name, f.version]).sort());
+  JSON.stringify(a.fragments.map(fragmentKey).sort()) === JSON.stringify(b.fragments.map(fragmentKey).sort());
 
 function render() {
   if (!host || !doc || !plan) return;

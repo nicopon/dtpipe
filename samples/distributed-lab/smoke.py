@@ -573,9 +573,27 @@ def rights_pass():
 
         saved, completed = False, False
         try:
+            # The check makes its own precondition: the plan is saved while runner-1 holds the groups it has, so it does not
+            # depend on what an earlier pass left in the library. It is saved again when the check ends.
+            call("/api/library/customers-anonymized/distribute", {"save": True, "message": "smoke: several groups, plan before"})
+            saved = True
+            if not next(e for e in call("/api/library") if e["id"] == "customers-anonymized")["planCurrent"]:
+                raise RuntimeError("the plan just saved for customers-anonymized is not listed current")
             for deployment in call("/api/deployments"):
                 call(f"/api/deployments/{deployment['pipelineId']}", None, "DELETE")
             put_identity(["runner", "audit"])
+            # That plan was made while runner-1 held `runner` alone: it is not the plan a new distribution would make any
+            # more, so it is listed stale for its groups and its deployment is refused, saying why.
+            listed = next(e for e in call("/api/library") if e["id"] == "customers-anonymized")
+            if listed["planCurrent"] or listed.get("planStaleCause") != "groups":
+                raise RuntimeError(f"runner-1 holds other groups than its saved plan names, and the plan is listed {listed}")
+            try:
+                call("/api/library/customers-anonymized/deploy", {})
+            except ApiError as e:
+                if e.status != 409 or "groups" not in str(e) or "distribute it again" not in str(e):
+                    raise RuntimeError(f"the deployment of a plan made for other groups was refused, but not as it should: {e}")
+            else:
+                raise RuntimeError("a plan made for other groups was deployed")
             refused = plan()
             if refused["deployable"] or "audit" not in (refused.get("flowRejection") or ""):
                 raise RuntimeError(f"runner+audit with no matrix entry for audit: {refused.get('flowRejection')}")

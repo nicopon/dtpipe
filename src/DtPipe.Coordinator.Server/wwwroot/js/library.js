@@ -31,7 +31,9 @@ async function load() {
 
 function planChip(e) {
   if (!e.distributed) return `<span class="chip">not distributed</span>`;
-  return e.planCurrent ? `<span class="chip ok">plan saved</span>` : `<span class="chip warn" title="The job changed after its plan was saved">plan stale</span>`;
+  if (e.planCurrent) return `<span class="chip ok">plan saved</span>`;
+  const why = e.planStaleCause === "job" ? "The job changed after its plan was saved" : "A node of its plan holds other groups now, or has no enabled identity";
+  return `<span class="chip warn" title="${why}">plan stale</span>`;
 }
 
 function deploymentChip(id) {

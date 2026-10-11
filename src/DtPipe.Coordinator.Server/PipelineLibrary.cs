@@ -13,12 +13,29 @@ namespace DtPipe.Coordinator.Server;
 /// <summary>A distributed plan as the library keeps it, with the hash of the job it was computed from.</summary>
 public sealed record SavedPlan(string PipelineSha, DateTimeOffset SavedAt, DistributionPlan Plan);
 
+/// <summary>
+/// <see cref="PlanStaleCause"/> says why a saved plan is not current: <see cref="PlanStaleCauses.Job"/> or
+/// <see cref="PlanStaleCauses.Groups"/>; null when there is no plan or it is current.
+/// </summary>
 public sealed record LibraryEntry(
     string Id, string Title, string? Description, string? Commit, DateTimeOffset? UpdatedAt, string? Message,
-    bool Distributed, bool PlanCurrent);
+    bool Distributed, bool PlanCurrent, string? PlanStaleCause = null);
 
-/// <summary><see cref="Commit"/> is the last commit of the job file, the version a later <c>If-Match</c> names.</summary>
-public sealed record LibraryDocument(string Id, string Yaml, SavedPlan? Plan, bool PlanCurrent, string? Commit);
+/// <summary>
+/// <see cref="Commit"/> is the last commit of the job file, the version a later <c>If-Match</c> names.
+/// <see cref="PlanStaleCause"/> is that of <see cref="LibraryEntry"/>.
+/// </summary>
+public sealed record LibraryDocument(string Id, string Yaml, SavedPlan? Plan, bool PlanCurrent, string? Commit, string? PlanStaleCause = null);
+
+/// <summary>Why a saved plan is not the one a new distribution would make.</summary>
+public static class PlanStaleCauses
+{
+    /// <summary>The job changed after the plan was saved.</summary>
+    public const string Job = "job";
+
+    /// <summary>A node the plan places a fragment on holds other groups now, or has no enabled identity.</summary>
+    public const string Groups = "groups";
+}
 
 public sealed record LibraryCommit(string Hash, DateTimeOffset Date, string Message);
 
@@ -61,10 +78,15 @@ public sealed partial class PipelineLibrary
     private readonly SemaphoreSlim _lock = new(1, 1);
     private bool _ready;
 
-    public PipelineLibrary(CoordinatorServerOptions options)
+    private readonly Func<string, IReadOnlyList<string>?> _groupsOfNode;
+
+    /// <param name="options">Where the library lives.</param>
+    /// <param name="groupsOfNode">The groups the rights give a node now, null for a node with no identity or a disabled one.</param>
+    public PipelineLibrary(CoordinatorServerOptions options, Func<string, IReadOnlyList<string>?> groupsOfNode)
     {
         _root = Path.Combine(options.StateDir, "library");
         _seedDir = options.LibrarySeed;
+        _groupsOfNode = groupsOfNode;
     }
 
     public async Task<IReadOnlyList<LibraryEntry>> ListAsync(CancellationToken ct) => await Locked(async () =>
@@ -80,8 +102,9 @@ public sealed partial class PipelineLibrary
             var (title, description, _) = DesignService.ReadHeader(yaml);
             var plan = ReadPlan(id);
             var last = (await HistoryCoreAsync(id, 1, ct)).FirstOrDefault();
+            var cause = StaleCause(plan, yaml);
             entries.Add(new LibraryEntry(id, title, description, await JobCommitAsync(id, ct), last?.Date, last?.Message, plan is not null,
-                plan is not null && plan.PipelineSha == Sha(yaml)));
+                plan is not null && cause is null, cause));
         }
         return entries;
     }, ct);
@@ -93,7 +116,8 @@ public sealed partial class PipelineLibrary
         if (!File.Exists(yamlPath)) return null;
         var yaml = await File.ReadAllTextAsync(yamlPath, ct);
         var plan = ReadPlan(id);
-        return new LibraryDocument(id, yaml, plan, plan is not null && plan.PipelineSha == Sha(yaml), await JobCommitAsync(id, ct));
+        var cause = StaleCause(plan, yaml);
+        return new LibraryDocument(id, yaml, plan, plan is not null && cause is null, await JobCommitAsync(id, ct), cause);
     }, ct);
 
     /// <summary>
@@ -124,6 +148,17 @@ public sealed partial class PipelineLibrary
         return new SaveOutcome(await JobCommitAsync(id, ct), before != yaml,
             plan is not null && plan.PipelineSha != Sha(yaml), plan?.Plan.Id);
     }, ct);
+
+    /// <summary>
+    /// Why a saved plan is not the one a new distribution would make, or null when it is (or there is none): the job changed
+    /// since the plan was made (<see cref="PlanStaleCauses.Job"/>), or a node the plan places a fragment on holds, now, other
+    /// groups than the plan names, compared as sets, or has no enabled identity (<see cref="PlanStaleCauses.Groups"/>).
+    /// </summary>
+    private string? StaleCause(SavedPlan? plan, string yaml) =>
+        plan is null ? null
+        : plan.PipelineSha != Sha(yaml) ? PlanStaleCauses.Job
+        : plan.Plan.Fragments.All(f => _groupsOfNode(f.Node) is { } now && now.ToHashSet(StringComparer.Ordinal).SetEquals(f.Groups)) ? null
+        : PlanStaleCauses.Groups;
 
     private static string Short(string? commit) => commit is null ? "nothing" : commit[..Math.Min(8, commit.Length)];
 

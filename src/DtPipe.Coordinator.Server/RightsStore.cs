@@ -91,10 +91,18 @@ public sealed class RightsStore
         lock (_lock) return ActiveHostLocked(node, "which groups it holds").Groups;
     }
 
+    /// <summary>The groups the rights give the node named <paramref name="node"/> now, or null when no identity carries the name or it is disabled.</summary>
+    public IReadOnlyList<string>? ActiveGroupsOf(string node)
+    {
+        lock (_lock) return IdentityNamedLocked(node) is { Enabled: true } identity ? identity.Groups : null;
+    }
+
+    private Identity? IdentityNamedLocked(string node) => _doc.Identities.FirstOrDefault(i => i.Name == node);
+
     /// <summary>The identity that can host <paramref name="node"/> now: the one that carries the name, if it is enabled.</summary>
     private Identity ActiveHostLocked(string node, string nothingSays)
     {
-        var identity = _doc.Identities.FirstOrDefault(i => i.Name == node)
+        var identity = IdentityNamedLocked(node)
             ?? throw new ConflictException($"Node '{node}' has no identity in the rights: nothing says {nothingSays}.");
         return identity.Enabled
             ? identity

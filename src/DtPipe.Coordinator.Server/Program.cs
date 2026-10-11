@@ -48,7 +48,8 @@ builder.Services.AddSingleton<PipelineCatalog>();
 builder.Services.AddSingleton<PlanBuilder>();
 builder.Services.AddSingleton<AutoPlacer>();
 builder.Services.AddSingleton<DesignValidator>();
-builder.Services.AddSingleton<PipelineLibrary>();
+builder.Services.AddSingleton(services => new PipelineLibrary(
+    services.GetRequiredService<CoordinatorServerOptions>(), services.GetRequiredService<RightsStore>().ActiveGroupsOf));
 builder.Services.AddSingleton<RunJournal>();
 builder.Services.AddSingleton<DeploymentManager>();
 
@@ -277,7 +278,13 @@ designer.MapPost("/library/{id}/deploy", async (string id, PipelineLibrary libra
 {
     var doc = await library.GetAsync(id, ct);
     if (doc?.Plan is null) return Results.Conflict(new { error = $"'{id}' has no saved distributed plan: distribute it first." });
-    if (!doc.PlanCurrent) return Results.Conflict(new { error = $"'{id}' changed since its plan was saved: distribute it again." });
+    if (!doc.PlanCurrent)
+        return Results.Conflict(new
+        {
+            error = doc.PlanStaleCause == PlanStaleCauses.Job
+                ? $"'{id}' changed since its plan was saved: distribute it again."
+                : $"A node of '{id}' holds other groups than its plan names, or has no enabled identity: distribute it again.",
+        });
     await deployments.DeployAsync(doc.Plan.Plan, "library", ct);
     return Results.Ok(doc.Plan.Plan);
 });

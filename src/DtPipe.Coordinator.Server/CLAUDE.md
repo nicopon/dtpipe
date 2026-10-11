@@ -172,6 +172,14 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   `RightsStore` reads only a document that says `"version": 2`; a saved plan without its groups is
   read as no plan.
   `[local: the lab's smoke.py rights]`
+- **A saved plan is current only while its job and its nodes' groups are those it was made from.** The library
+  lists it, and `GET /api/library/{id}` shows it, as current when it was made from the job as it is and each of
+  its fragments sits on a node that holds, now, the groups the plan names, compared as sets (the server gives
+  the library `RightsStore.ActiveGroupsOf`, null for a node with no identity or a disabled one). One function
+  of the library decides why a plan is not current, `planStaleCause` (`job` or `groups`), which the list, the
+  document, the page's chip and the refusal of a deployment from the library all read. The studio does not read
+  it: the `redistribute` of a save's answer, which it does read, measures only the edit of the job.
+  `[local: SavedPlanTests, StalePlanRoutesTests, RightsStoreTests, the lab's smoke.py rights - several groups]`
 - **A data node only reads and writes, and runs only its bricks, which it composes by id.**
   `PlanBuilder` gives a data node's fragment as `FragmentUnit`s and composes the job with
   `FragmentJob` (`DtPipe.Coordinator.Contracts`), the function the node calls again on its own
