@@ -113,7 +113,7 @@ public sealed class DeploymentManager
         {
             IReadOnlyDictionary<string, FragmentEligibility>? eligibility = null;
             try { eligibility = await _admission.EvaluateAsync(RunFragmentsOf(deployment.Plan)); }
-            catch (Exception ex) when (ex is ConflictException) { /* its node lost its identity: no replica can run it */ }
+            catch (Exception ex) when (ex is ConflictException) { /* its node has no identity, or a disabled one: no replica can run it */ }
             lock (_lock) views.Add(View(deployment, eligibility));
         }
         return views;

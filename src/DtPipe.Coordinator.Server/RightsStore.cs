@@ -74,21 +74,31 @@ public sealed class RightsStore
     /// <summary>
     /// The subject node <paramref name="node"/> connects under: the client id of the one identity that
     /// announces itself with that name (a node name belongs to one identity). Refused when no identity
-    /// carries the name any more, as nothing then says who may host the node's fragments.
+    /// carries the name any more, or when the identity is disabled, as nothing then says who may host the
+    /// node's fragments.
     /// </summary>
     public string SubjectOf(string node)
     {
-        lock (_lock)
-            return _doc.Identities.FirstOrDefault(i => i.Name == node)?.ClientId
-                ?? throw new ConflictException($"Node '{node}' has no identity in the rights: nothing says who may host its fragments.");
+        lock (_lock) return ActiveHostLocked(node, "who may host its fragments").ClientId;
     }
 
-    /// <summary>The groups the rights give the node named <paramref name="node"/> now, which its replicas' data plane clients must hold.</summary>
+    /// <summary>
+    /// The groups the rights give the node named <paramref name="node"/> now, which its replicas' data plane clients must hold.
+    /// Refused for a node with no identity or a disabled one, as <see cref="SubjectOf"/> is.
+    /// </summary>
     public IReadOnlyList<string> GroupsOf(string node)
     {
-        lock (_lock)
-            return _doc.Identities.FirstOrDefault(i => i.Name == node)?.Groups
-                ?? throw new ConflictException($"Node '{node}' has no identity in the rights: nothing says which groups it holds.");
+        lock (_lock) return ActiveHostLocked(node, "which groups it holds").Groups;
+    }
+
+    /// <summary>The identity that can host <paramref name="node"/> now: the one that carries the name, if it is enabled.</summary>
+    private Identity ActiveHostLocked(string node, string nothingSays)
+    {
+        var identity = _doc.Identities.FirstOrDefault(i => i.Name == node)
+            ?? throw new ConflictException($"Node '{node}' has no identity in the rights: nothing says {nothingSays}.");
+        return identity.Enabled
+            ? identity
+            : throw new ConflictException($"Node '{node}' is disabled: its identity may not connect, so no run is placed on it.");
     }
 
     public IReadOnlyList<string> Groups()

@@ -322,11 +322,13 @@ admin.MapPut("/rights/identities/{id}", (string id, IdentityRequest request, Rig
     rights.UpdateIdentity(id, request.Name ?? id, request.Description ?? "", request.Groups ?? [], request.Enabled ?? true, EmailOf(http));
     // A node renamed connects again under its new name. A node whose groups changed connects again too, and its data
     // plane client registers again: until then a replica's registration holds the groups it had, and admission
-    // places no run on it.
+    // places no run on it. A node whose identity is disabled loses its connections: its hosts are refused when they
+    // announce again, and the runs placed on them end. Enabling it again drops nothing, no host being connected.
     if (before is not null)
     {
         var after = rights.Find(id)!;
-        if (after.Name != before.Name || !after.Groups.ToHashSet().SetEquals(before.Groups)) inventory.Disconnect(id);
+        if (after.Name != before.Name || !after.Groups.ToHashSet().SetEquals(before.Groups) || (before.Enabled && !after.Enabled))
+            inventory.Disconnect(id);
     }
     bus.Publish("rights", new { });
     return Results.Ok();

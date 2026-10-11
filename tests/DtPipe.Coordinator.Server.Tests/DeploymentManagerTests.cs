@@ -43,6 +43,7 @@ public sealed class DeploymentManagerTests : IDisposable
     private readonly InMemoryStateStore _state = new();
     private readonly NodeInventory _inventory;
     private readonly Replicas _link = new();
+    private readonly RunJournal _journal;
     private readonly DeploymentManager _deployments;
 
     public DeploymentManagerTests()
@@ -56,9 +57,10 @@ public sealed class DeploymentManagerTests : IDisposable
         };
         _rights = new RightsStore(options);
         _inventory = new NodeInventory(_registry);
+        _journal = new RunJournal(options, NullLogger<RunJournal>.Instance);
         _deployments = new DeploymentManager(
             _inventory, _link, new NoRuns(), new ReplicaAdmission(_registry, _state), new RightsFlowControl(_rights), _rights, new EventBus(),
-            new RunJournal(options, NullLogger<RunJournal>.Instance), NullLogger<DeploymentManager>.Instance);
+            _journal, NullLogger<DeploymentManager>.Instance);
     }
 
     public void Dispose() => Directory.Delete(_dir, recursive: true);
@@ -117,6 +119,31 @@ public sealed class DeploymentManagerTests : IDisposable
         Assert.Contains("refused by n", ex.Message);
         Assert.Contains("'copy'", ex.Message);
         Assert.Empty(await _deployments.DeploymentsAsync());
+    }
+
+    /// <summary>
+    /// A deployment that was ready stays in place while its node's identity is disabled; a run of it is refused at its
+    /// start, naming the reason, and no replica is counted as able to run the fragment.
+    /// </summary>
+    [Fact]
+    public async Task A_Run_On_A_Node_Whose_Identity_Is_Disabled_Is_Refused_And_Says_Why()
+    {
+        await ReplicaAsync(1, Brick("sqlite:a"));
+        await _deployments.DeployAsync(Plan(), "test", CancellationToken.None);
+        _rights.UpdateIdentity("node-n", "n", "", ["crm"], false);
+
+        var queued = _deployments.Enqueue("p");
+
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        RunView? run;
+        while ((run = _journal.List().FirstOrDefault(r => r.RunId == queued.RunId)) is null)
+        {
+            if (DateTime.UtcNow > deadline) throw new TimeoutException("the run was never finished");
+            await Task.Delay(10, TestContext.Current.CancellationToken);
+        }
+        Assert.Equal("refused", run.State);
+        Assert.Contains("disabled", run.Refusal);
+        Assert.Equal(0, Assert.Single((await _deployments.DeploymentsAsync()).Single().Fragments).Replicas);
     }
 
     [Fact]

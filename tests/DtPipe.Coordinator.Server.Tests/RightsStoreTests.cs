@@ -76,6 +76,24 @@ public sealed class RightsStoreTests : IDisposable
     }
 
     [Fact]
+    public void A_Disabled_Node_Has_No_Subject_And_No_Groups_Until_It_Is_Enabled_Again()
+    {
+        var store = StoreOf(Version2);
+        store.UpdateIdentity("a", "node-a", "A", ["crm"], false);
+
+        var subject = Assert.Throws<ConflictException>(() => store.SubjectOf("node-a"));
+        Assert.Contains("node-a", subject.Message);
+        Assert.Contains("disabled", subject.Message);
+        var groups = Assert.Throws<ConflictException>(() => store.GroupsOf("node-a"));
+        Assert.Contains("disabled", groups.Message);
+        Assert.Equal("b", store.SubjectOf("node-b"));
+
+        store.UpdateIdentity("a", "node-a", "A", ["crm"], true);
+        Assert.Equal("a", store.SubjectOf("node-a"));
+        Assert.Equal(["crm"], store.GroupsOf("node-a"));
+    }
+
+    [Fact]
     public void A_Version_2_Document_Keeps_Its_Names_And_Groups()
     {
         var store = StoreOf(Version2);

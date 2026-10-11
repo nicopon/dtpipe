@@ -23,6 +23,7 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
     public const string Issuer = "http://idp.test/";
     public const string Audience = "dtpipe-coordinator";
     public const string StudioClient = "studio";
+    public const string Admin = "root@x.test";
     public const string Designer = "ann@x.test";
     public const string Reader = "rae@x.test";
 
@@ -35,6 +36,7 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
         builder.UseSetting("Coordinator:Authority", Issuer.TrimEnd('/'));
         builder.UseSetting("Coordinator:StateDirectory", _state);
         builder.UseSetting("Coordinator:Ui:ClientSecret", "ui-secret");
+        builder.UseSetting("Coordinator:Roles:Admin", Admin);
         builder.UseSetting("Coordinator:Roles:Designer", Designer);
         builder.UseSetting("Coordinator:Roles:Reader", Reader);
         builder.UseSetting("Coordinator:Studio:ClientId", studioClientId ?? "");

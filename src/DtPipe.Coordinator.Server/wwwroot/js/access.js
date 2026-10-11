@@ -99,7 +99,7 @@ function render() {
         <button class="primary" data-create>Create</button></div>` : ""}
       <datalist id="groups-list">${groups.map((g) => `<option>${esc(g)}</option>`).join("")}</datalist>
       <table><tr><th>client</th><th>node name</th><th>groups</th><th>description</th><th></th><th>state</th><th></th></tr>${identities}</table>
-      <p class="hint">An identity is a client the IdP already knows, by its client id: its secret lives in the IdP. A node sends to another only if every one of its groups may send to every group of the receiver, in the matrix below. New groups or a disabled identity take effect when the node connects again or renews its token: reconnect it, then redeploy what runs there. A disabled identity may not announce and holds no group.</p>
+      <p class="hint">An identity is a client the IdP already knows, by its client id: its secret lives in the IdP. A node sends to another only if every one of its groups may send to every group of the receiver, in the matrix below. A change of name or groups, or disabling an identity, drops the control connections of its node's hosts, which connect again under the new rights. A disabled identity is refused when its hosts announce again and holds no group: the runs placed on them end. Reconnect drops the connections without changing anything.</p>
     </section>
 
     <section class="card">

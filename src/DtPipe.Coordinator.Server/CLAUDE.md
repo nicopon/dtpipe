@@ -17,9 +17,10 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   files a known host under its identity's name whatever it proposes, and everything it reports
   under the name its connection announced. A token no identity knows is no node: its host waits in
   `EnrollmentQueue` (bounded, expired, never evicting a waiting subject), and what it proposes is
-  untrusted text, cut here and escaped by the page. A disabled identity is refused. A node whose
-  identity is gone leaves the inventory with its last replica; one that is renamed is the same node under
-  its new name, once its host announces again.
+  untrusted text, cut here and escaped by the page. A disabled identity is refused when its host
+  announces, and by `RightsStore.SubjectOf` and `GroupsOf` as an unknown one is, so no run is placed
+  on its node. A node whose identity is gone leaves the inventory with its last replica; one that is
+  renamed is the same node under its new name, once its host announces again.
   `[local: DtPipe.Coordinator.Server.Tests, the lab's smoke.py rights]`
 - **A person's rights are the server's configuration, never the token's.** People sign in through
   the provider (`Coordinator:Ui:ClientId`, a confidential authorization-code client, PKCE, the code
@@ -145,10 +146,12 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   offer different bricks. A read (a preview, a sample, a sink check, a lab request) goes to one connected
   replica, the one with the fewest runs, and is not tried on a second when it fails. `Disconnect` interrupts
   the connections of every replica of an identity, and `PUT /api/rights/identities/{id}` does it when the
-  name or the **groups** change: a replica's data plane client holds the groups it registered with, and until
-  it registers again admission places no run on it. `Origin`, where a replica says it runs, is untrusted
+  name or the **groups** change, or when the identity goes from enabled to disabled: a replica's data plane
+  client holds the groups it registered with, and until it registers again admission places no run on it; a
+  disabled identity's replicas are cut at once, and the runs placed on them end with them. Enabling an
+  identity again cuts nothing, no host of it being connected. `Origin`, where a replica says it runs, is untrusted
   text: cut at `Announce`, the ground of no decision.
-  `[local: NodeChannelHubTests; the lab's tools/campaign.py F3, S7]`
+  `[local: NodeChannelHubTests, RightsRoutesTests; the lab's smoke.py rights - identity, disabled; tools/campaign.py F3, S7]`
 - **A run that was placed records the replica of each fragment.** `RunJournal` keeps the `RunResult` whole,
   `RunResult.Replicas` included: an instance id and the `Origin` the replica announced, untrusted text the pages
   escape. A run refused at admission has none, and a file that names none reads as a run with none.
@@ -157,8 +160,8 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   rights when the run starts (`RightsStore.SubjectOf`: the client id of the identity named after the
   fragment's node, the `sub` its tokens carry; `GroupsOf`) and puts them in each `RunFragment`; admission
   then places the run only on replicas whose connection attests that subject and whose data plane client holds
-  exactly those groups. A node that no identity carries any more refuses the run (`refused`), and the server
-  never sets `AdmissionOptions.AdmitUnboundFragments`.
+  exactly those groups. A node that no identity carries any more, or whose identity is disabled, refuses the
+  run (`refused`), and the server never sets `AdmissionOptions.AdmitUnboundFragments`.
   `[local: RightsStoreTests, DeploymentManagerTests, the lab's smoke.py rights - a foreign replica]`
   `[unchecked: the refused run of a node without an identity]`
 - **One source of rights.** `RightsStore` holds the identities and the flow matrix;

@@ -670,15 +670,14 @@ def rights_pass():
         return "node-enroll proposing node-2: waits, node-2 untouched; accepted as enrolled-node in crm: online; removed: gone"
 
     def disabled():
-        # The coordinator decides what an identity may do: disabled, node-3 is refused when it connects
-        # again, whatever token the IdP still issues it, and its host drops the data plane client the hub
-        # would otherwise keep with the groups it had; enabled again, it comes back on its own, and a run
-        # through it succeeds.
+        # The coordinator decides what an identity may do: disabling it drops its host's connection with no
+        # reconnect asked for, node-3 is then refused when it connects again, whatever token the IdP still
+        # issues it, and its host drops the data plane client the hub would otherwise keep with the groups it
+        # had; enabled again, it comes back on its own, and a run through it succeeds.
         def update(enabled):
             node3 = next(i for i in call("/api/rights")["identities"] if i["clientId"] == "node-3")
             call("/api/rights/identities/node-3", {"clientId": "node-3", "name": node3["name"], "description": node3["description"],
                                                   "groups": node3["groups"], "enabled": enabled}, "PUT")
-            call("/api/rights/identities/node-3/reconnect", {})
 
         def online():
             return next((n["online"] for n in call("/api/nodes") if n["name"] == "node-3"), False)
