@@ -13,8 +13,9 @@ namespace DtPipe.PipelineNode.Tests;
 /// The one clock a run has: once a fragment has failed because its transfer failed under it, its peers
 /// owe the run their own report within <see cref="RunOrchestratorOptions.RemoteFailureGrace"/>, or the
 /// run is torn down naming the ones that did not report. A run in which nothing has failed has no clock.
+/// Bounds a child's timing but is not in <see cref="ChildExitTimingCollection"/>: serialising it costs more than the exposure, and a
+/// timing failure here is a finding, not noise.
 /// </summary>
-[Collection(ChildExitTimingCollection.Name)]
 public class RemoteFailureGraceTests
 {
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(60);

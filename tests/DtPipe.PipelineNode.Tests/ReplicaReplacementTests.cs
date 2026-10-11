@@ -12,8 +12,9 @@ namespace DtPipe.PipelineNode.Tests;
 /// processing the connection's close: a run placed in between must never pick it. The hub here delays every
 /// disconnect, standing in for a coordinator behind a slow network or a busy thread pool, so the window that a fast
 /// local hub closes by luck stays open.
+/// Bounds a child's timing but is not in <see cref="ChildExitTimingCollection"/>: serialising it costs more than the exposure, and a
+/// timing failure here is a finding, not noise.
 /// </summary>
-[Collection(ChildExitTimingCollection.Name)]
 public class ReplicaReplacementTests
 {
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(30);
