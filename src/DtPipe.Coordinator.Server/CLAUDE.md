@@ -49,7 +49,12 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   `/api` group), a bearer's too: another site cannot set it without a CORS preflight this server
   never answers. The pages' `api()` helpers send it. Never add a cookie-authenticated route outside
   those groups.
-  `[local: the lab's smoke.py rights]`
+  `[local: RouteTableTests, the lab's smoke.py rights]`
+- **A route's authorization is the group it is mapped on, and `Program.cs` declares the groups.** The reader, designer and
+  admin groups of `/api` (their roles, and the CSRF filter they inherit) are built once there. `NodeEndpoints`,
+  `LibraryEndpoints`, `RightsEndpoints` and `RunEndpoints` each map their domain on the reader group they extend and on
+  the designer or admin group they receive, as `LabModeEndpoints` maps the bench on the admin group; `Program.cs` keeps
+  the `account` group, `/healthz`, the metadata document, `/account/*` and the hubs. `[local: RouteTableTests]`
 - **Every rights change names its author** (`AuditEntry.By`, the signed-in email). The session
   cookie's keys live in `keys/` in the state directory, so a restart signs nobody out.
 - **Lab mode is off by default, and everything only a bench needs sits behind it.**
@@ -57,7 +62,7 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   `/api/deploy`), fault injection and `/api/query`, for admins; the pages under `wwwroot/lab/`
   answer 404 without it (and 403 to anyone but an admin), and `GET /api/info` tells the pages
   which mode they run in. Never add a bench-only
-  route outside `MapLabMode`. `[unchecked]`
+  route outside `MapLabMode`. `[local: RouteTableTests]` `[unchecked: whether a new route belongs to the bench]`
 - **The server never opens a node's data.** What reads it asks the node that hosts it, through
   `NodeRequests`: a brick preview, `/api/query` and a cut (the named requests `lab.query` and `lab.split`, which only a lab host registers), and a
   library save's check (`DesignValidator`): each source brick's node sends its first row as Arrow IPC

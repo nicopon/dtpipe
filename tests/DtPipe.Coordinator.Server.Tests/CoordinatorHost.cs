@@ -14,10 +14,10 @@ namespace DtPipe.Coordinator.Server.Tests;
 /// <summary>
 /// The coordinator's server in memory, trusting a test provider: its configuration is handed over
 /// directly, with a key generated here, so nothing is discovered over the network. The state
-/// directory is a fresh temporary one. <c>check</c> stands for the designer's check, which needs a runner and
+/// directory is a fresh temporary one, and lab mode is off unless asked. <c>check</c> stands for the designer's check, which needs a runner and
 /// the bricks' nodes; without it the real one runs.
 /// </summary>
-public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.StudioClient, Func<string, DesignCheck>? check = null)
+public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.StudioClient, Func<string, DesignCheck>? check = null, bool labMode = false)
     : WebApplicationFactory<Program>
 {
     public const string Issuer = "http://idp.test/";
@@ -40,6 +40,7 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
         builder.UseSetting("Coordinator:Roles:Designer", Designer);
         builder.UseSetting("Coordinator:Roles:Reader", Reader);
         builder.UseSetting("Coordinator:Studio:ClientId", studioClientId ?? "");
+        builder.UseSetting("Coordinator:LabMode", labMode ? "true" : "false");
         builder.ConfigureTestServices(services =>
         {
             if (check is not null) services.AddSingleton<DesignValidator>(new StubValidator(check));

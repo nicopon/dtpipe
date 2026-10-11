@@ -1,9 +1,7 @@
-using System.Text.Json;
 using System.Text.Json.Serialization;
 using DtPipe.Coordinator;
 using DtPipe.Coordinator.Contracts;
 using DtPipe.Coordinator.Server;
-using DtPipe.Jobs;
 using DtPipe.Jobs.Coordinator;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.SignalR;
@@ -109,7 +107,7 @@ app.Use(async (context, next) =>
     }
     if (context.Request.Path.StartsWithSegments("/lab") && !context.User.IsInRole(CoordinatorRoles.Admin))
     {
-        var who = System.Net.WebUtility.HtmlEncode(EmailOf(context) ?? context.User.Identity.Name ?? "This account");
+        var who = System.Net.WebUtility.HtmlEncode(TrustedIdp.EmailOf(context) ?? context.User.Identity.Name ?? "This account");
         await AccessPage(StatusCodes.Status403Forbidden, $"{who} is not an admin of this coordinator: the Lab view is for administrators.",
             ("/", "Back to the coordinator"), ("/account/logout", "Sign out")).ExecuteAsync(context);
         return;
@@ -152,254 +150,14 @@ var api = app.MapGroup("/api").RequireAuthorization(CoordinatorRoles.Reader).Add
 var designer = api.MapGroup("").RequireAuthorization(CoordinatorRoles.Designer);
 var admin = api.MapGroup("").RequireAuthorization(CoordinatorRoles.Admin);
 
-api.MapGet("/nodes", (NodeInventory inventory) => inventory.Snapshot());
-api.MapGet("/flow-matrix", (RightsStore rights) => new { groups = rights.Snapshot().Matrix });
-api.MapGet("/bricks", (BrickCatalog bricks) => bricks.List());
-
-// What dtpipe studio reads of the bricks: the catalog, and what each branch of a job is. Recognition
-// is the coordinator's, by content (BrickCatalog); the studio only reads the answer back.
-api.MapGet(CoordinatorApi.CatalogRoute, (NodeInventory inventory, BrickCatalog bricks) => new BrickCatalogView(
-    [.. inventory.Snapshot().Select(n => new CatalogNode(n.Name, n.Online, n.Role == NodeRole.Runner ? "runner" : "data", n.DtpipeVersion))],
-    bricks.Catalog()));
-api.MapPost(CoordinatorApi.RecognizeRoute, (RecognizeRequest request, BrickCatalog bricks) =>
-{
-    YamlDotNet.RepresentationModel.YamlMappingNode job;
-    try { job = JobYaml.Parse(request.Job); }
-    catch (Exception ex) { return Results.BadRequest(new { error = $"The job is not readable: {ex.Message}" }); }
-    var answers = new Dictionary<string, Recognition>(StringComparer.Ordinal);
-    foreach (var (alias, branch) in JobYaml.Branches(job))
-        answers[alias] = new Recognition(bricks.Match(branch)?.Key, bricks.Contained(branch, BrickKind.Source)?.Key, bricks.Contained(branch, BrickKind.Sink)?.Key);
-    return Results.Ok(new RecognizeResponse(answers));
-});
-
-// A brick is read by the node that owns it, never by the coordinator.
-designer.MapPost(CoordinatorApi.SampleRoute, async (string node, string id, int? rows, NodeRequests nodes, CancellationToken ct) =>
-{
-    var bound = TimeSpan.FromSeconds(40);
-    try
-    {
-        var sample = await nodes.AskAsync<BrickSample>(node, NodeChannel.SampleBrick, [id, Math.Clamp(rows ?? CoordinatorApi.MaxSampleRows, 1, CoordinatorApi.MaxSampleRows)], bound, ct);
-        return sample.Arrow is { } arrow ? Results.Bytes(arrow, "application/vnd.apache.arrow.stream") : Results.BadRequest(new { error = sample.Error });
-    }
-    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-    {
-        return Results.Json(new { error = $"{node} did not answer within {bound.TotalSeconds:F0}s." }, statusCode: StatusCodes.Status504GatewayTimeout);
-    }
-});
-designer.MapPost("/bricks/{node}/{id}/preview", async (string node, string id, NodeRequests nodes, CancellationToken ct) =>
-{
-    var preview = await nodes.AskAsync<BrickPreview>(node, NodeChannel.PreviewBrick, [id, 20], TimeSpan.FromSeconds(40), ct);
-    return preview.Error is null ? Results.Ok(new { csv = preview.Csv, columns = preview.Columns }) : Results.BadRequest(new { error = preview.Error });
-});
-
-// The Lab view's snapshot: the plan deployed last and its own run, whatever else is in flight.
-api.MapGet("/state", (DeploymentManager deployments, RunJournal journal) =>
-{
-    var plan = deployments.ActivePlan;
-    return new { plan, run = deployments.CurrentRun(plan?.PipelineId), history = journal.List(limit: 20) };
-});
-designer.MapPost("/runs", (RunRequest? request, DeploymentManager deployments) => deployments.Enqueue(request?.PipelineId));
-api.MapGet("/runs", (string? pipeline, RunJournal journal) => journal.List(pipeline));
-api.MapGet("/runs/queue", (DeploymentManager deployments) => deployments.Queue);
-designer.MapPost("/runs/cancel", (CancelRequest? request, DeploymentManager deployments) =>
-{
-    deployments.Cancel(request?.RunId);
-    return Results.Accepted();
-});
-
-api.MapGet("/deployments", async (DeploymentManager deployments) => await deployments.DeploymentsAsync());
-designer.MapDelete("/deployments/{id}", async (string id, DeploymentManager deployments, CancellationToken ct) =>
-{
-    await deployments.UndeployAsync(id, ct);
-    return Results.Accepted();
-});
-
-// The library.
-api.MapGet("/library", async (PipelineLibrary library, CancellationToken ct) => await library.ListAsync(ct));
-api.MapGet("/library/{id}", async (string id, PipelineLibrary library, CancellationToken ct) =>
-    await library.GetAsync(id, ct) is { } doc ? Results.Ok(doc) : Results.NotFound(new { error = $"'{id}' is not in the library." }));
-// A save may say what it expects in place (If-None-Match: * for a new pipeline, If-Match: "<commit>"
-// for the version it read): 412 otherwise, with the commit in place. Without either, it overwrites.
-// Every save is checked first, the studio's and the pages' alike: a job the check refuses is neither
-// written nor committed, and with no runner or no brick node online the check cannot run, so it refuses.
-designer.MapPut(CoordinatorApi.LibraryRoute, async (string id, LibrarySave request, HttpRequest http, PipelineLibrary library,
-    DesignValidator validator, DeploymentManager deployments, EventBus bus, CancellationToken ct) =>
-{
-    DesignCheck check;
-    try { check = await validator.ValidateAsync(request.Yaml, ct); }
-    catch (Exception ex) when (ex is not OperationCanceledException) { check = new DesignCheck(false, $"The job is not readable: {ex.Message}"); }
-    if (!check.Ok)
-        return Results.Json(new LibraryRefused("The designer's check refused this job: nothing was saved.", check.Report),
-            statusCode: StatusCodes.Status422UnprocessableEntity);
-    var absent = http.Headers.IfNoneMatch.ToString().Trim() == "*";
-    var expected = http.Headers.IfMatch.ToString().Trim() is { Length: > 0 } tag ? (tag.StartsWith("W/") ? tag[2..] : tag).Trim('"') : null;
-    var precondition = absent || expected is not null ? new SavePrecondition(absent, expected) : null;
-    SaveOutcome saved;
-    try { saved = await library.SaveAsync(id, request.Yaml, request.Message ?? "", ct, precondition); }
-    catch (PreconditionFailedException ex)
-    {
-        return Results.Json(new LibraryConflict(ex.Message, ex.Commit), statusCode: StatusCodes.Status412PreconditionFailed);
-    }
-    bus.Publish("library", new { id, commit = saved.Commit });
-    // A deployment runs the text it was planned from: only the saved plan, still current, is this text.
-    var deployed = deployments.DeployedPlanId(id) is { } deployedPlan
-        && (saved.PlanStale || saved.PlanId is null || deployedPlan != saved.PlanId);
-    return Results.Ok(new LibrarySaved(id, saved.Commit, saved.PlanStale, deployed));
-});
-designer.MapDelete("/library/{id}", async (string id, PipelineLibrary library, EventBus bus, CancellationToken ct) =>
-{
-    await library.DeleteAsync(id, ct);
-    bus.Publish("library", new { id, commit = (string?)null });
-    return Results.Accepted();
-});
-api.MapGet("/library/{id}/history", async (string id, PipelineLibrary library, CancellationToken ct) => await library.HistoryAsync(id, ct));
-api.MapGet("/library/{id}/at/{commit}", async (string id, string commit, PipelineLibrary library, CancellationToken ct) =>
-{
-    var (yaml, diff) = await library.AtAsync(id, commit, ct);
-    return new { yaml, diff };
-});
-
-// Distribution: the library's job placed automatically, previewed or saved as the pipeline's plan.
-designer.MapPost("/library/{id}/distribute", async (string id, DistributeRequest? request, PipelineLibrary library, AutoPlacer placer, EventBus bus, CancellationToken ct) =>
-{
-    var doc = await library.GetAsync(id, ct);
-    if (doc is null) return Results.NotFound(new { error = $"'{id}' is not in the library." });
-    var plan = await placer.PlanAsync(id, doc.Yaml, ct);
-    string? commit = null;
-    if (request?.Save == true)
-    {
-        if (!plan.Deployable) return Results.Conflict(new { error = "This plan cannot be saved: " + string.Join(" ", plan.Errors.Append(plan.FlowRejection ?? "")) });
-        commit = await library.SavePlanAsync(id, plan, request.Message ?? "", ct);
-        bus.Publish("library", new { id, commit });
-    }
-    return Results.Ok(new { plan, commit, bricks = placer.BrickAliases(doc.Yaml) });
-});
-designer.MapPost("/library/{id}/deploy", async (string id, PipelineLibrary library, DeploymentManager deployments, CancellationToken ct) =>
-{
-    var doc = await library.GetAsync(id, ct);
-    if (doc?.Plan is null) return Results.Conflict(new { error = $"'{id}' has no saved distributed plan: distribute it first." });
-    if (!doc.PlanCurrent)
-        return Results.Conflict(new
-        {
-            error = doc.PlanStaleCause == PlanStaleCauses.Job
-                ? $"'{id}' changed since its plan was saved: distribute it again."
-                : $"A node of '{id}' holds other groups than its plan names, or has no enabled identity: distribute it again.",
-        });
-    await deployments.DeployAsync(doc.Plan.Plan, "library", ct);
-    return Results.Ok(doc.Plan.Plan);
-});
-
-// Rights: who may send what to whom. The page edits them; every change is audited and applies at once.
-api.MapGet("/rights", (RightsStore rights, NodeInventory inventory, EnrollmentQueue enrollment, CoordinatorServerOptions options) =>
-{
-    var doc = rights.Snapshot();
-    var online = inventory.Snapshot().Where(n => n.Online).Select(n => n.Name).ToHashSet();
-    return new
-    {
-        idp = new { issuer = options.Authority, audience = options.Audience, grant = "client_credentials" },
-        identities = doc.Identities.Select(i => new
-        {
-            i.ClientId, i.Name, i.Description, i.Groups, i.Enabled,
-            connected = online.Contains(i.Name) && inventory.ClientIdOf(i.Name) == i.ClientId,
-        }),
-        groups = rights.Groups(),
-        pending = enrollment.List(),
-        matrix = doc.Matrix,
-        audit = doc.Audit,
-    };
-});
-admin.MapPut("/rights/matrix", (MatrixRequest request, RightsStore rights, EventBus bus, HttpContext http) =>
-{
-    rights.SetMatrix(request.Matrix, EmailOf(http));
-    bus.Publish("rights", new { });
-    return Results.Ok();
-});
-admin.MapPost("/rights/identities", (IdentityRequest request, RightsStore rights, EnrollmentQueue enrollment, EventBus bus, HttpContext http) =>
-{
-    if (!PipelineLibrary.IsValidId(request.ClientId)) throw new ConflictException($"'{request.ClientId}' is not a client id: lowercase letters, digits and '-'.");
-    rights.AddIdentity(new Identity(request.ClientId, string.IsNullOrWhiteSpace(request.Name) ? request.ClientId : request.Name, request.Description ?? "",
-        request.Groups ?? [], request.Enabled ?? true), EmailOf(http));
-    enrollment.Remove(request.ClientId);
-    bus.Publish("rights", new { });
-    return Results.Ok();
-});
-admin.MapPut("/rights/identities/{id}", (string id, IdentityRequest request, RightsStore rights, NodeInventory inventory, EventBus bus, HttpContext http) =>
-{
-    var before = rights.Find(id);
-    rights.UpdateIdentity(id, request.Name ?? id, request.Description ?? "", request.Groups ?? [], request.Enabled ?? true, EmailOf(http));
-    // A node renamed connects again under its new name. A node whose groups changed connects again too, and its data
-    // plane client registers again: until then a replica's registration holds the groups it had, and admission
-    // places no run on it. A node whose identity is disabled loses its connections: its hosts are refused when they
-    // announce again, and the runs placed on them end. Enabling it again drops nothing, no host being connected.
-    if (before is not null)
-    {
-        var after = rights.Find(id)!;
-        if (after.Name != before.Name || !after.Groups.ToHashSet().SetEquals(before.Groups) || (before.Enabled && !after.Enabled))
-            inventory.Disconnect(id);
-    }
-    bus.Publish("rights", new { });
-    return Results.Ok();
-});
-admin.MapDelete("/rights/identities/{id}", (string id, RightsStore rights, NodeInventory inventory, EventBus bus, HttpContext http) =>
-{
-    rights.RemoveIdentity(id, EmailOf(http));
-    inventory.Disconnect(id);
-    inventory.Forget(id);
-    bus.Publish("rights", new { });
-    return Results.Accepted();
-});
-// A host no identity knows waits here: the administrator names it and gives it its groups, or sets it aside.
-admin.MapPost("/rights/pending/{subject}/accept", (string subject, AcceptRequest request, RightsStore rights, EnrollmentQueue enrollment, EventBus bus, HttpContext http) =>
-{
-    var pending = enrollment.Find(subject) ?? throw new ConflictException($"'{subject}' does not wait for approval.");
-    rights.AddIdentity(new Identity(subject, request.Name ?? "", request.Description ?? pending.Description, request.Groups ?? [], true), EmailOf(http));
-    enrollment.Remove(subject);
-    bus.Publish("rights", new { });
-    return Results.Ok();
-});
-admin.MapPost("/rights/pending/{subject}/ignore", (string subject, EnrollmentQueue enrollment, EventBus bus) =>
-{
-    enrollment.Ignore(subject);
-    bus.Publish("rights", new { });
-    return Results.Ok();
-});
-// TransportR records a node's group when it connects and when it renews its token: dropping the control
-// connection of its replicas makes them register their data plane clients again under the current group.
-admin.MapPost("/rights/identities/{id}/reconnect", (string id, NodeInventory inventory) =>
-    Results.Ok(new { disconnected = inventory.Disconnect(id) }));
-
+api.MapNodes(designer);
+api.MapLibrary(designer);
+api.MapRights(admin);
+api.MapRuns(designer);
 
 if (server.LabMode) admin.MapLabMode();
 
-api.MapGet("/events", async (HttpContext context, EventBus bus, NodeInventory inventory, DeploymentManager deployments) =>
-{
-    context.Response.Headers.ContentType = "text/event-stream";
-    context.Response.Headers.CacheControl = "no-cache";
-    var json = context.RequestServices.GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>>().Value.SerializerOptions;
-
-    async Task WriteAsync(string type, object data)
-    {
-        await context.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { type, data }, json)}\n\n");
-        await context.Response.Body.FlushAsync();
-    }
-
-    var (backlog, live, unsubscribe) = bus.Subscribe();
-    try
-    {
-        await WriteAsync("nodes", inventory.Snapshot());
-        var plan = deployments.ActivePlan;
-        await WriteAsync("state", new { plan, run = deployments.CurrentRun(plan?.PipelineId) });
-        await WriteAsync("deployments", await deployments.DeploymentsAsync());
-        foreach (var evt in backlog.Where(e => e.Type == "log").TakeLast(150)) await WriteAsync(evt.Type, evt.Data);
-        await foreach (var evt in live.ReadAllAsync(context.RequestAborted)) await WriteAsync(evt.Type, evt.Data);
-    }
-    catch (OperationCanceledException) { }
-    finally { unsubscribe(); }
-});
-
 app.Run();
-
-static string? EmailOf(HttpContext context) => context.User.FindFirst("email")?.Value;
 
 static string OriginOf(HttpContext context) => $"{context.Request.Scheme}://{context.Request.Host}";
 
@@ -422,10 +180,3 @@ static async ValueTask<object?> RequireCsrfHeader(EndpointFilterInvocationContex
         return await next(context);
     return Results.Problem($"A request that changes something carries the {TrustedIdp.CsrfHeader} header.", statusCode: StatusCodes.Status403Forbidden);
 }
-
-internal sealed record RunRequest(string? PipelineId = null);
-internal sealed record CancelRequest(string? RunId);
-internal sealed record DistributeRequest(bool Save = false, string? Message = null);
-internal sealed record MatrixRequest(Dictionary<string, List<string>> Matrix);
-internal sealed record AcceptRequest(string? Name, string? Description, List<string>? Groups);
-internal sealed record IdentityRequest(string ClientId, string? Name, string? Description, List<string>? Groups, bool? Enabled);

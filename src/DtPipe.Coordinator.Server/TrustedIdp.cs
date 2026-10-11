@@ -170,6 +170,9 @@ public static class TrustedIdp
     /// <summary>A person signed in, whatever their role: who they are is all <c>/api/me</c> needs.</summary>
     public const string SignedIn = "signed-in";
 
+    /// <summary>The email claim of the signed-in person, or null when there is none.</summary>
+    public static string? EmailOf(HttpContext context) => context.User.FindFirst("email")?.Value;
+
     /// <summary>A page a browser opens: the only requests a missing session sends to the provider.</summary>
     public static bool IsPageNavigation(HttpRequest request) =>
         HttpMethods.IsGet(request.Method)
