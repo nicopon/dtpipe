@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text.Json.Nodes;
 using DtPipe.Coordinator.Contracts;
 using DtPipe.Jobs;
@@ -18,10 +19,20 @@ public sealed record BrickView(
 /// Every brick the nodes announce. A branch of a job <b>is</b> a brick when its content equals the
 /// brick's, never because of a name: a job stays a plain dtpipe job, and a brick its owner changed
 /// stops matching the pipelines written against its old form.
+/// <para>
+/// What the catalog reads of each announced brick (its branch, canonical form, version and text) it keeps, and a brick
+/// announced again is read anew. The node's name and whether it is online are read from the inventory at every call.
+/// </para>
 /// </summary>
 public sealed class BrickCatalog(NodeInventory inventory)
 {
     private sealed record Resolved(BrickView View, YamlMappingNode Branch, string Canonical, string Declared);
+
+    /// <summary>What reading an announced brick gives, which depends on the brick alone; <see cref="Branch"/> is <c>null</c> for a brick whose text is no mapping.</summary>
+    private sealed record Read(YamlMappingNode? Branch, string Canonical, string Version, string Yaml);
+
+    // By the announced object: a brick announced again is another object, so it is read again.
+    private readonly ConditionalWeakTable<BrickInfo, Read> _read = new();
 
     public IReadOnlyList<BrickView> List() => Resolve().Select(r => r.View).ToList();
 
@@ -76,17 +87,23 @@ public sealed class BrickCatalog(NodeInventory inventory)
         {
             foreach (var brick in node.Bricks)
             {
-                // The one reading of an announced brick, the node's and the replica chooser's too.
-                if (FragmentJob.Declared(brick) is not { } branch) continue;
-                var canonical = BrickRules.Declared(brick.Kind, branch).Canonical;
-                var version = ContentHash.Of(canonical, 12);
-                var yaml = JobYaml.Serialize(branch);
+                if (_read.GetValue(brick, ReadOf) is not { Branch: { } branch } read) continue;
                 resolved.Add(new Resolved(
-                    new BrickView($"{node.Name}/{brick.Id}", node.Name, brick.Id, brick.Kind, brick.Title, brick.Description, yaml,
-                        version, brick.Schema, brick.SchemaError, node.Online),
-                    branch, canonical, brick.Branch));
+                    new BrickView($"{node.Name}/{brick.Id}", node.Name, brick.Id, brick.Kind, brick.Title, brick.Description, read.Yaml,
+                        read.Version, brick.Schema, brick.SchemaError, node.Online),
+                    branch, read.Canonical, brick.Branch));
             }
         }
         return resolved;
+    }
+
+    private static Read ReadOf(BrickInfo brick)
+    {
+        // The one reading of an announced brick, the node's and the replica chooser's too.
+        if (FragmentJob.Declared(brick) is not { } branch) return new Read(null, "", "", "");
+        var canonical = BrickRules.Declared(brick.Kind, branch).Canonical;
+        var version = ContentHash.Of(canonical, 12);
+        var yaml = JobYaml.Serialize(branch);
+        return new Read(branch, canonical, version, yaml);
     }
 }

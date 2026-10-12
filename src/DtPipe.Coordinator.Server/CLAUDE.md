@@ -116,8 +116,12 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   (`BrickRules.Canonical`) equals the one its node declares; a pipeline stays a plain dtpipe job with
   no reference to a brick in it. `dtpipe studio` may take an imported branch apart around the bricks
   it contains (authoring, before anything is saved, through the recognition this server answers); the
-  planner never does.
-  `[local: the lab's smoke.py, ui_check.py]`
+  planner never does. `BrickCatalog` keeps what it reads of each announced brick (its branch, canonical form, version
+  and text) and reads a brick announced again anew; the node's name and whether it is online are read at every call, so
+  a brick is offline as soon as its node has no connected replica, one in its grace period included. It hands out a
+  copy of a branch, never the one it keeps.
+  `[local: BrickCatalogTests, the lab's smoke.py, ui_check.py]` `[unchecked: concurrent readers of the branch kept per
+  brick; that an entry goes with its announcement]`
 - **A fragment declares each edge alias once**, so a branch that receives an edge under its own
   alias (a cut's tail) sends on through a relay, never with `output: arrow:-` on itself.
   `[local: the lab's smoke.py lab]`
