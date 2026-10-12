@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using DtPipe.Coordinator.Contracts;
 using Microsoft.AspNetCore.SignalR;
 
@@ -112,8 +110,7 @@ public sealed class NodeInventory(ReplicaRegistry registry)
 
     /// <summary>The start of a hash of the bricks a replica announces: equal on replicas that offer the same, different while one is being updated.</summary>
     private static string BricksHash(IReadOnlyList<BrickInfo>? bricks) =>
-        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n',
-            (bricks ?? []).OrderBy(b => b.Id, StringComparer.Ordinal).Select(b => $"{b.Id}\t{b.Kind}\t{b.Branch}")))))[..8];
+        ContentHash.Of(string.Join('\n', (bricks ?? []).OrderBy(b => b.Id, StringComparer.Ordinal).Select(b => $"{b.Id}\t{b.Kind}\t{b.Branch}")), 8);
 }
 
 /// <summary>

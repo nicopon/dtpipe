@@ -1,10 +1,9 @@
 using System.Diagnostics;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using DtPipe.Coordinator.Contracts;
 using DtPipe.Jobs;
 using DtPipe.Jobs.Coordinator;
 
@@ -290,7 +289,7 @@ public sealed partial class PipelineLibrary
     /// <summary>The library's ids, which the rights reuse for client ids and node names: <see cref="CoordinatorApi.IsPipelineId"/>.</summary>
     public static bool IsValidId(string id) => CoordinatorApi.IsPipelineId(id);
 
-    public static string Sha(string text) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+    public static string Sha(string text) => ContentHash.Of(text);
 
     private static string Message(string? message, string fallback) =>
         string.IsNullOrWhiteSpace(message) ? fallback : message.Trim();

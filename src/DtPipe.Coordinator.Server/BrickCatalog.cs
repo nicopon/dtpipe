@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json.Nodes;
 using DtPipe.Coordinator.Contracts;
 using DtPipe.Jobs;
@@ -81,7 +79,7 @@ public sealed class BrickCatalog(NodeInventory inventory)
                 // The one reading of an announced brick, the node's and the replica chooser's too.
                 if (FragmentJob.Declared(brick) is not { } branch) continue;
                 var canonical = BrickRules.Declared(brick.Kind, branch).Canonical;
-                var version = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)))[..12];
+                var version = ContentHash.Of(canonical, 12);
                 var yaml = JobYaml.Serialize(branch);
                 resolved.Add(new Resolved(
                     new BrickView($"{node.Name}/{brick.Id}", node.Name, brick.Id, brick.Kind, brick.Title, brick.Description, yaml,

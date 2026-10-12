@@ -125,7 +125,11 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   (`PUT /api/library/{id}`) from `dtpipe studio`, whose designer is `DtPipe.Jobs`' (rule in the root
   `CLAUDE.md`); the pages list, read, restore, place and run it, and show its job read only. A
   brick's canonical form and version are pinned by `BrickFormTests`: changing either gives every
-  brick a new version. `[local: DtPipe.Coordinator.Server.Tests, the lab's smoke.py, ui_check.py]`
+  brick a new version. `HashValueTests` pins the values of the hashes the server compares or shows (a saved
+  plan's job, a brick's version, a replica's bricks), and `Hosting.Tests FragmentJobTests` a fragment's version;
+  they are computed by `ContentHash` (`DtPipe.Coordinator.Contracts`).
+  `[local: DtPipe.Coordinator.Server.Tests, Hosting.Tests FragmentJobTests, the lab's smoke.py, ui_check.py]`
+  `[unchecked: a site that hashes on its own]`
 - **A deployment is the coordinator's, and nothing of it is left on a node.** `DeployAsync` asks every
   connected replica of each node whether it would run the fragments (`Check`, answered, spawning nothing) and
   is ready when each fragment has a replica that said yes and that admission could place a run on. One

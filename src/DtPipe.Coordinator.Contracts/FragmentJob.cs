@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using DtPipe.Jobs;
@@ -102,7 +100,7 @@ public static partial class FragmentJob
     }
 
     /// <summary>The version of a composed job: the hash admission compares, of the bytes a node writes.</summary>
-    public static string VersionOf(string yaml) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(yaml)));
+    public static string VersionOf(string yaml) => ContentHash.Of(yaml);
 
     private static YamlMappingNode? Declared(FragmentUnit unit, BrickKind kind, BranchOfBrick branchOf) =>
         unit.Brick is { Length: > 0 } id ? branchOf(id, kind) is { } branch ? JobYaml.CloneBranch(branch) : null : null;

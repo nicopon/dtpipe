@@ -20,6 +20,12 @@ public class FragmentJobTests
     private static (string? Yaml, string? Error) Compose(params FragmentUnit[] units) => FragmentJob.Compose(units, Declared);
 
     [Fact]
+    public void A_version_is_the_lowercase_sha256_of_the_composed_text()
+    {
+        Assert.Equal("6e97d1eecab3903be5d7e57b5d9b31adc4eb6be9bbdd3daf2c3a707f79ff53a9", FragmentJob.VersionOf("src:\n  input: sqlite:a\n  output: arrow:-\n"));
+    }
+
+    [Fact]
     public void A_source_that_sends_its_rows_and_a_relay_compose_in_the_order_given()
     {
         var (yaml, error) = Compose(
