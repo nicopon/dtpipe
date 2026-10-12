@@ -393,7 +393,7 @@ public sealed class RunQueueTests : IDisposable
         var errors = await Assert.ThrowsAsync<ConflictException>(() => DeployAsync(failing));
         Assert.Equal("This plan cannot be deployed: a cut is missing no flow", errors.Message);
         var matrix = await Assert.ThrowsAsync<ConflictException>(() => DeployAsync(refused));
-        Assert.Equal("The flow matrix refuses crm -> crm.", matrix.Message);
+        Assert.Equal("Plan rejected, edge(s) not permitted by the flow control matrix: p@n.out -> p@n.in (crm -> crm)", matrix.Message);
         Assert.Empty(_link.Killed);
     }
 

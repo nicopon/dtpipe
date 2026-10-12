@@ -1,5 +1,4 @@
 using DtPipe.Coordinator.Contracts;
-using TransportR.Interfaces;
 
 namespace DtPipe.Coordinator.Server;
 
@@ -19,17 +18,17 @@ internal sealed class DeploymentService
     private readonly NodeInventory _inventory;
     private readonly INodeLink _link;
     private readonly ReplicaAdmission _admission;
-    private readonly IFlowControlService _flowControl;
+    private readonly IPlanRegistry _planRegistry;
     private readonly RightsStore _rights;
     private readonly EventBus _bus;
     private readonly ILogger _logger;
 
     public DeploymentService(
         DeploymentLedger ledger, NodeInventory inventory, INodeLink link, ReplicaAdmission admission,
-        IFlowControlService flowControl, RightsStore rights, EventBus bus, ILogger logger)
+        IPlanRegistry planRegistry, RightsStore rights, EventBus bus, ILogger logger)
     {
-        (_ledger, _inventory, _link, _admission, _flowControl, _rights, _bus, _logger) =
-            (ledger, inventory, link, admission, flowControl, rights, bus, logger);
+        (_ledger, _inventory, _link, _admission, _planRegistry, _rights, _bus, _logger) =
+            (ledger, inventory, link, admission, planRegistry, rights, bus, logger);
     }
 
     /// <summary>The plan deployed last: what the Lab view shows and what a run naming no pipeline runs.</summary>
@@ -73,9 +72,7 @@ internal sealed class DeploymentService
             throw new ConflictException("This plan cannot be deployed: " +
                 string.Join(" ", plan.Errors.Append(plan.FlowRejection ?? "").Where(s => s.Length > 0)));
         // A plan read back from the library is checked against the matrix as it is now.
-        var refused = plan.Edges.Where(e => !_flowControl.CanSendTo(e.ProducerGroups.ToHashSet(), e.ConsumerGroups.ToHashSet())).ToList();
-        if (refused.Count > 0)
-            throw new ConflictException("The flow matrix refuses " + string.Join(", ", refused.Select(e => $"{string.Join("+", e.ProducerGroups)} -> {string.Join("+", e.ConsumerGroups)}")) + ".");
+        if (PlanFlow.Judge(_planRegistry, plan.Id, plan.Edges).Rejection is { } rejection) throw new ConflictException(rejection);
         var offline = plan.Fragments.Where(f => _inventory.ReplicasOf(f.Node).Count == 0).Select(f => f.Node).Distinct().ToList();
         if (offline.Count > 0) throw new ConflictException($"Offline: {string.Join(", ", offline)}.");
 

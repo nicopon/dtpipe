@@ -187,12 +187,13 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   `[unchecked: the refused run of a node without an identity]`
 - **One source of rights.** `RightsStore` holds the identities and the flow matrix;
   `RightsFlowControl` replaces TransportR's `IFlowControlService`, so the hub checks the matrix as
-  it is now on every transfer, and the planner and a deployment check every edge against it. A
+  it is now on every transfer, and the planner and a deployment check every edge against it, each by one
+  pass of `IPlanRegistry` (`PlanFlow`) and in the same sentence, a plan made under an earlier matrix included. A
   node in several groups sends only if every one of its groups may send to every group of the
   receiver, on both sides, and an edge carries the groups of both ends. Never add a second matrix.
   `RightsStore` reads only a document that says `"version": 2`; a saved plan without its groups is
   read as no plan.
-  `[local: the lab's smoke.py rights]`
+  `[local: FlowMatrixEvaluationTests, the lab's smoke.py rights]`
 - **A saved plan is current only while its job and its nodes' groups are those it was made from.** The library
   lists it, and `GET /api/library/{id}` shows it, as current when it was made from the job as it is and each of
   its fragments sits on a node that holds, now, the groups the plan names, compared as sets (the server gives

@@ -34,7 +34,7 @@ public sealed class DeploymentManager
         IFlowControlService flowControl, RightsStore rights, EventBus bus, RunJournal journal, ILogger<DeploymentManager> logger)
     {
         var ledger = new DeploymentLedger();
-        _deployments = new DeploymentService(ledger, inventory, link, admission, flowControl, rights, bus, logger);
+        _deployments = new DeploymentService(ledger, inventory, link, admission, new PlanRegistry(flowControl), rights, bus, logger);
         _runs = new RunQueue(ledger, _deployments, inventory, orchestrator, bus, journal, logger);
         _lab = new LabFaults(ledger, inventory, link);
     }

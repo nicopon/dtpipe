@@ -3,7 +3,6 @@ using System.Text;
 using DtPipe.Coordinator;
 using DtPipe.Coordinator.Contracts;
 using DtPipe.Jobs;
-using TransportR.Interfaces;
 using YamlDotNet.RepresentationModel;
 
 namespace DtPipe.Coordinator.Server;
@@ -40,7 +39,12 @@ public sealed record PlannedFragment(
 
 public sealed record PlannedEdge(
     string ProducerFragment, string ProducerAlias, string ConsumerFragment, string ConsumerAlias,
-    IReadOnlyList<string> ProducerGroups, IReadOnlyList<string> ConsumerGroups, bool Allowed);
+    IReadOnlyList<string> ProducerGroups, IReadOnlyList<string> ConsumerGroups, bool Allowed)
+{
+    /// <summary>The edge as the flow matrix is asked about it, named the way a refusal names it.</summary>
+    internal PlanEdge ToFlowEdge() =>
+        new($"{ProducerFragment}.{ProducerAlias} -> {ConsumerFragment}.{ConsumerAlias}", ProducerGroups, ConsumerGroups);
+}
 
 public sealed record DistributionPlan(
     string Id, string PipelineId, IReadOnlyList<CutRequest> Cuts, IReadOnlyList<UnitView> Units,
@@ -61,7 +65,7 @@ public sealed record DistributionPlan(
 /// </para>
 /// </summary>
 public sealed class PlanBuilder(
-    NodeInventory inventory, NodeRequests nodes, BrickCatalog bricks, IPlanRegistry planRegistry, IFlowControlService flowControl)
+    NodeInventory inventory, NodeRequests nodes, BrickCatalog bricks, IPlanRegistry planRegistry)
 {
     private const string ArrowEndpoint = "arrow:-";
     private static readonly TimeSpan SplitTimeout = TimeSpan.FromSeconds(90);
@@ -267,23 +271,11 @@ public sealed class PlanBuilder(
             fragments.Add(new PlannedFragment(draft.Name, draft.Node, draft.Groups, yaml, version, draft.Edges, draft.Units, form, composition));
         }
 
-        var plannedEdges = runEdges.Select(e => new PlannedEdge(
-            e.Producer.Name, e.ProducerAlias, e.Consumer.Name, e.ConsumerAlias, e.Producer.Groups, e.Consumer.Groups,
-            flowControl.CanSendTo(e.Producer.Groups.ToHashSet(), e.Consumer.Groups.ToHashSet())))
+        // Allowed starts false: the matrix decides it, once, for the whole plan.
+        var asked = runEdges.Select(e => new PlannedEdge(
+            e.Producer.Name, e.ProducerAlias, e.Consumer.Name, e.ConsumerAlias, e.Producer.Groups, e.Consumer.Groups, Allowed: false))
             .ToList();
-
-        string? flowRejection = null;
-        try
-        {
-            planRegistry.Register(new FlowPlan(planId, plannedEdges
-                .Select(e => new PlanEdge($"{e.ProducerFragment}.{e.ProducerAlias} -> {e.ConsumerFragment}.{e.ConsumerAlias}",
-                    e.ProducerGroups, e.ConsumerGroups))
-                .ToList()));
-        }
-        catch (PlanRejectedException ex)
-        {
-            flowRejection = ex.Message;
-        }
+        var (plannedEdges, flowRejection) = PlanFlow.Judge(planRegistry, planId, asked);
 
         return Result(unitViews, fragments, plannedEdges, flowRejection);
     }
