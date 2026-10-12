@@ -208,8 +208,9 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   error naming why (`BrickRules`), never a job sent to run. Only the Lab view's manual planning
   (`allowRaw`) sends a job as written, and only to a host that announces `raw-fragments`; the library
   and `AutoPlacer` never do. A saved plan whose fragments do not say how they reach their node
-  (`FragmentForm`) is read as no plan. `BrickRules.Processors` is the one list of processors, shared with `JobGraph`.
-  The replica decides again at `Launch`, with the same function. `[local: the lab's smoke.py
+  (`FragmentForm`) is read as no plan. `BrickRules.Processors` is the one list of processors, shared with `JobGraph`;
+  it must equal the `stream-processor` entries of `dtpipe providers --format json`. The replica decides again at
+  `Launch`, with the same function. `[local: PipelineNode.Tests BrickRulesProcessorsTests, the lab's smoke.py
   bricks, sandbox]`
 - The pages are served from the `wwwroot` published beside the binary (`dotnet publish`): `index.html`
   + `js/` (the coordinator's views, ES modules, no build) and `lab/` (the Lab view, lab mode only).

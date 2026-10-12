@@ -24,7 +24,10 @@ public static class BrickRules
 {
     public const string ArrowEndpoint = "arrow:-";
 
-    /// <summary>provider-options keys that name a processor rather than a reader or writer.</summary>
+    /// <summary>
+    /// provider-options keys that name a processor rather than a reader or writer: the <c>stream-processor</c> entries of
+    /// <c>dtpipe providers</c>, which <c>BrickRulesProcessorsTests</c> compares with this list.
+    /// </summary>
     public static readonly IReadOnlyList<string> Processors = ["sql", "merge"];
 
     private const string RunnerHint = "a data node only reads and writes, and everything between belongs on a runner";
