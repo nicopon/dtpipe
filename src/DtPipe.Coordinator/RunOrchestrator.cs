@@ -5,7 +5,10 @@ using TransportR.Interfaces;
 
 namespace DtPipe.Coordinator;
 
-/// <summary>Mirrors <c>DtPipe.PipelineNode.FaultOrigin</c> on the wire - the two projects never share a type.</summary>
+/// <summary>
+/// Where the fault that ended a fragment began, as a report's <see cref="ExitOrigins"/> word reads. <c>DtPipe.PipelineNode</c>
+/// declares an enumeration of the same two members, since it references no project of this family.
+/// </summary>
 public enum FaultOrigin { Local, Remote }
 
 /// <summary>One flow from a producer fragment's outbound alias to a consumer fragment's inbound alias.</summary>
@@ -217,7 +220,7 @@ public sealed class RunOrchestrator : IRunOrchestrator
         }
 
         // A fragment that exited 0 carries no origin: there was no fault to attribute.
-        FaultOrigin? parsedOrigin = exit.ExitCode == 0 ? null : Enum.TryParse<FaultOrigin>(exit.Origin, out var origin) ? origin : FaultOrigin.Local;
+        FaultOrigin? parsedOrigin = exit.ExitCode == 0 ? null : exit.Origin == ExitOrigins.Remote ? FaultOrigin.Remote : FaultOrigin.Local;
         tcs.TrySetResult(new FragmentExitReport(exit.Fragment, exit.ExitCode, parsedOrigin, exit.FirstFault, exit.RowCounts));
 
         // A fragment whose transfer failed under it is not the cause of anything yet: its peers owe the

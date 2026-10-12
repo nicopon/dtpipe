@@ -219,6 +219,19 @@ public sealed record FragmentExit(
     string? LaunchToken = null);
 
 /// <summary>
+/// The two words <see cref="FragmentExit.Origin"/> carries, each by what it does to the run's verdict. The node writes
+/// one of them, and the coordinator reads any word other than <see cref="Remote"/> as <see cref="Local"/>.
+/// </summary>
+public static class ExitOrigins
+{
+    /// <summary>The fragment's own fault, which ends the run at once.</summary>
+    public const string Local = "Local";
+
+    /// <summary>A consequence: the fragment's transfer failed or was torn down under it, and its peers owe a report within the grace.</summary>
+    public const string Remote = "Remote";
+}
+
+/// <summary>
 /// What <c>Exited</c> answers. <see cref="NotAdmitted"/>: the coordinator did not admit this host for that
 /// fragment of that run under that launch token (or the run is over), and a report sent again would be answered the same.
 /// <see cref="UnknownConnection"/>: the connection announced nothing the coordinator accepted, so the host

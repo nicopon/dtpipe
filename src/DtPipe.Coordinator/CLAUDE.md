@@ -122,7 +122,9 @@ the table, `OnExitedAsync` and the pure rules (`DetermineOutcome`, `PeersOwingAR
   own order - never arrival order - only when no report carries that origin. A fragment the
   coordinator itself told to `Cancel` is excluded from both cause and consequence: its own child was
   killed on command, and reports a plain non-zero `Local` exit indistinguishable on the wire from an
-  organic one. `[local: RunOrchestratorTests, CoordinatorDrivenTests]`
+  organic one. A report's origin is one of the two words of `ExitOrigins`, and any other word reads as `Local`;
+  `DtPipe.PipelineNode` declares its own `FaultOrigin`, which `FaultOriginWordsTests` compares with this one.
+  `[local: RunOrchestratorTests, CoordinatorDrivenTests, ScriptedRunTests, PipelineNode.Tests FaultOriginWordsTests]`
 - **A fragment's own failure ends the run at once.** `OnExitedAsync` raises the run's abort on the
   first `Exited` that is non-zero with a `FaultOrigin.Local` origin, so the teardown tells every
   fragment still running to `Cancel` without waiting for its peers to notice: a peer whose child has

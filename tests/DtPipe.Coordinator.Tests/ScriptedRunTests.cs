@@ -244,6 +244,52 @@ public class ScriptedRunTests
         Assert.Contains("c", harness.Link.Cancels);
     }
 
+    /// <summary>
+    /// The origin word a failed fragment reports: only the exact word <c>Remote</c> makes its fault remote, any other
+    /// word a fault of the fragment itself, and a fragment that exited 0 has no origin whatever it says.
+    /// </summary>
+    [Theory]
+    [InlineData("Local", FaultOrigin.Local)]
+    [InlineData("Remote", FaultOrigin.Remote)]
+    [InlineData("remote", FaultOrigin.Local)]
+    [InlineData("unknown", FaultOrigin.Local)]
+    [InlineData("", FaultOrigin.Local)]
+    public async Task AnOriginWord_ReadsAsRemoteOnlyWhenItIsTheWordRemote(string word, FaultOrigin expected)
+    {
+        var harness = await new Harness().WithNodesAsync("p", "c");
+        var run = harness.Orchestrator.RunAsync(Harness.Pair());
+        await harness.UntilAsync(() => harness.Link.Wires.Count == 2, "both ends of the edge to be wired");
+
+        await harness.Link.ExitAsync("p", 1, word);
+        await harness.Link.ExitAsync("c", 0, "Remote");
+        var result = await run.WaitAsync(Wait);
+
+        Assert.Equal(expected, result.Reports["p"].Origin);
+        Assert.Null(result.Reports["c"].Origin);
+    }
+
+    /// <summary>
+    /// A word that is not exactly <c>Remote</c> is a local fault, a number and a word with blanks around it included: the
+    /// origin is read from the two words the wire has, never parsed as the name of an enumeration.
+    /// </summary>
+    [Theory]
+    [InlineData("1")]
+    [InlineData("2")]
+    [InlineData(" Remote")]
+    [InlineData("Local, Remote")]
+    public async Task AnOriginWordThatIsNotExactlyRemote_ReadsAsLocal(string word)
+    {
+        var harness = await new Harness().WithNodesAsync("p", "c");
+        var run = harness.Orchestrator.RunAsync(Harness.Pair());
+        await harness.UntilAsync(() => harness.Link.Wires.Count == 2, "both ends of the edge to be wired");
+
+        await harness.Link.ExitAsync("p", 1, word);
+        await harness.Link.ExitAsync("c", 0);
+        var result = await run.WaitAsync(Wait);
+
+        Assert.Equal(FaultOrigin.Local, result.Reports["p"].Origin);
+    }
+
     /// <summary>A run in which nothing failed has no clock: a peer that takes longer than the grace is never torn down for it.</summary>
     [Fact]
     public async Task ARunInWhichNothingFailed_IsNotBoundedByTheGrace()

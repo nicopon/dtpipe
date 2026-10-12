@@ -243,7 +243,7 @@ internal sealed class ReplicaRuns : IAsyncDisposable
         {
             var outcome = await entry.Run.CompleteAsync();
             await ReportAsync(new FragmentExit(
-                key.RunId, key.Fragment, outcome.ExitCode, (outcome.Origin ?? FaultOrigin.Local).ToString(), outcome.FirstFault, outcome.RowCounts,
+                key.RunId, key.Fragment, outcome.ExitCode, OriginWord(outcome.Origin), outcome.FirstFault, outcome.RowCounts,
                 entry.LaunchToken));
         }
         catch (Exception ex)
@@ -255,6 +255,9 @@ internal sealed class ReplicaRuns : IAsyncDisposable
             await DiscardAsync(key, entry);
         }
     }
+
+    /// <summary>The word a fault's origin travels as: <c>Remote</c> for a fault of the run's transfer, <c>Local</c> for any other and for a run with none.</summary>
+    internal static string OriginWord(FaultOrigin? origin) => origin == FaultOrigin.Remote ? ExitOrigins.Remote : ExitOrigins.Local;
 
     /// <summary>
     /// Tells the coordinator how a run ended. A report that cannot be delivered, or that reaches a connection the coordinator
