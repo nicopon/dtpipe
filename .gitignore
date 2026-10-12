@@ -82,3 +82,7 @@ tests/agentic/artifacts/
 
 # Local agent workspace
 .opencode/
+
+# Python bytecode
+__pycache__/
+*.pyc
