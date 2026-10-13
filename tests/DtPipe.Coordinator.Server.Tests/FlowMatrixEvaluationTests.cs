@@ -92,7 +92,7 @@ public sealed class FlowMatrixEvaluationTests : IDisposable
     private void Allow(string from, params string[] to) => _matrix.Groups[from] = new GroupAccess { CanSendTo = [.. to] };
 
     private Task<DistributionPlan> PlanAsync(string yaml, params (string Unit, string Node)[] placement) =>
-        _planner.BuildAsync(new PlanRequest("p", yaml, null, placement.ToDictionary(p => p.Unit, p => p.Node)), allowRaw: false, TestContext.Current.CancellationToken);
+        _planner.BuildAsync(new PlanRequest("p", yaml, null, placement.ToDictionary(p => p.Unit, p => p.Node)), PlanMode.Library, TestContext.Current.CancellationToken);
 
     [Fact]
     public async Task A_Plan_The_Matrix_Allows_Has_No_Rejection_And_Every_Edge_Allowed()

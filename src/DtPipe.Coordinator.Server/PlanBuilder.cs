@@ -54,6 +54,16 @@ public sealed record DistributionPlan(
     public bool Deployable => Errors.Count == 0 && FlowRejection is null && Fragments.Count > 0;
 }
 
+/// <summary>Who asks for a plan, which says what the planner may do for it.</summary>
+public enum PlanMode
+{
+    /// <summary>A plan the coordinator places itself, for a pipeline of the library: a data node's fragment is made of its bricks, and nothing in it is cut.</summary>
+    Library,
+
+    /// <summary>The Lab view's planning by hand: the only plan that asks a node to cut a branch, and the only one that sends a data node a fragment written as a job.</summary>
+    Manual,
+}
+
 /// <summary>
 /// Turns one monolithic job, a set of cuts and a placement into one fragment per node.
 /// <para>
@@ -96,10 +106,11 @@ public sealed class PlanBuilder(
 
     /// <summary>
     /// Plans <paramref name="request"/>. A data node's fragment is made of its bricks by id; one that is not
-    /// is an error naming why, unless <paramref name="allowRaw"/> (the Lab view's manual planning) and the
-    /// node announces that it accepts raw fragments, when it goes as a job as written.
+    /// is an error naming why, unless the plan is <see cref="PlanMode.Manual"/> and the node announces that it
+    /// accepts raw fragments, when it goes as a job as written. A request that carries cuts is an error in any
+    /// other mode, before any node is asked.
     /// </summary>
-    public async Task<DistributionPlan> BuildAsync(PlanRequest request, bool allowRaw, CancellationToken ct)
+    public async Task<DistributionPlan> BuildAsync(PlanRequest request, PlanMode mode, CancellationToken ct)
     {
         var planId = $"{DateTime.UtcNow:HHmmss}-{Guid.NewGuid().ToString("N")[..6]}";
         var pipelineId = Sanitize(request.PipelineId);
@@ -119,7 +130,7 @@ public sealed class PlanBuilder(
         }
 
         // 1. Cuts inside branches, one dtpipe split each, applied in turn to what remains.
-        var heads = await ApplyCutsAsync(planId, request.Yaml, cuts, errors, ct);
+        var heads = await ApplyCutsAsync(planId, request.Yaml, mode, cuts, errors, ct);
         if (heads is null) return Result(DescribeUnits(BuildUnits(job, new Dictionary<string, YamlMappingNode>()), request.Placement));
         var (remaining, headBranches) = heads.Value;
 
@@ -248,7 +259,7 @@ public sealed class PlanBuilder(
                 {
                     (yaml, form, composition) = (composed, FragmentForm.Bricks, pieces);
                 }
-                else if (!(allowRaw && node.Capabilities.Contains(NodeAnnouncement.RawFragments)))
+                else if (!(mode == PlanMode.Manual && node.Capabilities.Contains(NodeAnnouncement.RawFragments)))
                 {
                     var forms = node.Bricks.Select(b => BrickRules.Declared(b.Kind, b.Branch)).ToList();
                     errors.Add($"{draft.Name}: {BrickRules.FragmentRefusal(yaml, forms, requireBricks: true) ?? "this node runs bricks by id, and this fragment is not made of them."}");
@@ -308,8 +319,14 @@ public sealed class PlanBuilder(
         bricks.Find($"{node}/{id}") is { } view && view.Kind == kind ? bricks.BranchOf(view) : null;
 
     private async Task<(YamlMappingNode Remaining, Dictionary<string, YamlMappingNode> Heads)?> ApplyCutsAsync(
-        string planId, string yaml, IReadOnlyList<CutRequest> cuts, List<string> errors, CancellationToken ct)
+        string planId, string yaml, PlanMode mode, IReadOnlyList<CutRequest> cuts, List<string> errors, CancellationToken ct)
     {
+        if (cuts.Count > 0 && mode != PlanMode.Manual)
+        {
+            errors.Add("Cuts belong to the Lab view's planning by hand: this plan is not one, so it takes none.");
+            return null;
+        }
+
         var heads = new Dictionary<string, YamlMappingNode>(StringComparer.Ordinal);
 
         var current = yaml;

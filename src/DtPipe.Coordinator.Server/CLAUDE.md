@@ -112,6 +112,11 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   cut. `PlanBuilder` puts the consumer half in the branch's place, only regroups whole branches
   and adds `arrow:-` endpoints or relay branches; it never edits an option or moves a transformer.
   `AutoPlacer` only chooses a placement for `PlanBuilder` and cuts nothing. `[local: the lab's smoke.py]`
+- **Only a plan in `PlanMode.Manual` is cut, and it is the only one that sends a data node a fragment
+  written as a job.** The two planning routes of lab mode, `/api/plan` and `/api/deploy`, plan that way;
+  every other caller plans in `Library`, where a request that carries cuts is refused before any node
+  is asked. `[local: PlanModeTests; the lab's smoke.py lab (a cut through /api/deploy), sandbox (a cut
+  through /api/plan)]` `[unchecked: a new route that plans in Manual]`
 - **A brick is matched by content, never by name.** A branch is a brick when its canonical form
   (`BrickRules.Canonical`) equals the one its node declares; a pipeline stays a plain dtpipe job with
   no reference to a brick in it. `dtpipe studio` may take an imported branch apart around the bricks
