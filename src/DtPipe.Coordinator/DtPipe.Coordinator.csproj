@@ -23,8 +23,8 @@
   <ItemGroup>
     <!-- TransportR.FlowControl (DefaultFlowControlService, the plan's edge check) ships inside
          this package's assembly now; there is no separate TransportR.FlowControl package. -->
-    <PackageReference Include="TransportR" Version="0.4.0" />
-    <PackageReference Include="TransportR.Hub.SignalR" Version="0.4.0" />
+    <PackageReference Include="TransportR" Version="0.5.1" />
+    <PackageReference Include="TransportR.Hub.SignalR" Version="0.5.1" />
   </ItemGroup>
 
 </Project>

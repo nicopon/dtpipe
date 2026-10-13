@@ -19,14 +19,13 @@ public sealed class TestHub : CommandHub
         IStateStore stateStore,
         ITransferManager transferManager,
         IClientIdentityProvider identityProvider,
-        IBridgeManager bridgeManager,
         SignalRTransferInitiator initiator,
         AccessPolicy policy,
         ConnectionRegistry connections,
         IOptions<AffinityOptions> affinityOptions,
         ILogger<CommandHub> logger,
         TimeProvider timeProvider)
-        : base(stateStore, transferManager, identityProvider, bridgeManager, initiator, policy, connections, affinityOptions, logger, timeProvider)
+        : base(stateStore, transferManager, identityProvider, initiator, policy, connections, affinityOptions, logger, timeProvider)
     {
     }
 }

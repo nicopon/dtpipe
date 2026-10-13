@@ -78,6 +78,7 @@ public sealed class RouteTableTests
         "POST /api/rights/pending/{subject}/ignore [reader > admin]",
         "POST /api/runs [reader > designer]",
         "POST /api/runs/cancel [reader > designer]",
+        "POST api/stream/{transferId}/abort [default]",
         "POST api/stream/{transferId}/send [default]",
         "PUT /api/library/{id} [reader > designer]",
         "PUT /api/rights/identities/{id} [reader > admin]",

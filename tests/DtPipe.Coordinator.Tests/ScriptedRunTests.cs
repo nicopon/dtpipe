@@ -78,6 +78,9 @@ public class ScriptedRunTests
             Terminated.Enqueue(transferId);
             return Task.CompletedTask;
         }
+
+        // The hub's data server retires a transfer that ended well; the orchestrator never does.
+        public Task RetireAsync(string transferId) => throw new NotSupportedException();
     }
 
     private sealed class Harness
