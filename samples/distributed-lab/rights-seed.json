@@ -1,5 +1,4 @@
 {
-  "version": 2,
   "identities": [
     { "clientId": "node-1", "name": "node-1", "description": "CRM node", "groups": ["crm"] },
     { "clientId": "node-2", "name": "node-2", "description": "Sales node", "groups": ["sales"] },

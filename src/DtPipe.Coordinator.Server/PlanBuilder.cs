@@ -23,9 +23,6 @@ public sealed record UnitView(
 /// <summary>How a fragment reaches its node: <see cref="Bricks"/> composed by the node from its own declarations, or a <see cref="Job"/> as written.</summary>
 public enum FragmentForm
 {
-    /// <summary>Not said: a plan saved before fragments had a form, which is no plan.</summary>
-    Unknown = 0,
-
     /// <summary>A data node's fragment, made of its bricks by id (<see cref="PlannedFragment.Composition"/>).</summary>
     Bricks,
 
@@ -35,7 +32,7 @@ public enum FragmentForm
 
 public sealed record PlannedFragment(
     string Name, string Node, IReadOnlyList<string> Groups, string Yaml, string Version, IReadOnlyList<FragmentEdge> Edges,
-    IReadOnlyList<string> Units, FragmentForm Form = FragmentForm.Unknown, IReadOnlyList<FragmentUnit>? Composition = null);
+    IReadOnlyList<string> Units, FragmentForm Form, IReadOnlyList<FragmentUnit>? Composition = null);
 
 public sealed record PlannedEdge(
     string ProducerFragment, string ProducerAlias, string ConsumerFragment, string ConsumerAlias,

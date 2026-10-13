@@ -67,7 +67,7 @@ public sealed class PlanModeTests : IDisposable
         Directory.CreateDirectory(_dir);
         var seed = Path.Combine(_dir, "seed.json");
         File.WriteAllText(seed, """
-            { "version": 2, "identities": [
+            { "identities": [
               { "clientId": "node-r", "name": "r", "description": "", "groups": ["run"] },
               { "clientId": "node-d", "name": "d", "description": "", "groups": ["data"] } ], "matrix": {} }
             """);

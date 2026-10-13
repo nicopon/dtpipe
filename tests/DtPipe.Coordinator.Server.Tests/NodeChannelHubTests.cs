@@ -35,7 +35,7 @@ public sealed class NodeChannelHubTests : IDisposable
     {
         Directory.CreateDirectory(_dir);
         var seed = Path.Combine(_dir, "seed.json");
-        File.WriteAllText(seed, """{ "version": 2, "identities": [ { "clientId": "known", "name": "node-known", "description": "", "groups": ["crm", "audit"] } ], "matrix": {} }""");
+        File.WriteAllText(seed, """{ "identities": [ { "clientId": "known", "name": "node-known", "description": "", "groups": ["crm", "audit"] } ], "matrix": {} }""");
         _options = new CoordinatorServerOptions
         {
             StateDir = Path.Combine(_dir, "state"), Authority = "http://idp", Audience = "test",

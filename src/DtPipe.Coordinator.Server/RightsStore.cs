@@ -15,9 +15,9 @@ public sealed record Identity(string ClientId, string Name, string Description, 
 /// <summary>One change to the rights, and who made it (the email of the person signed in), when known.</summary>
 public sealed record AuditEntry(DateTimeOffset At, string Change, string? By = null);
 
-/// <summary>The rights document. <see cref="Version"/> is <see cref="RightsStore.CurrentVersion"/>; a document that does not say so is refused.</summary>
+/// <summary>The rights document: the identities, the flow matrix between groups, and the changes made to them.</summary>
 public sealed record RightsDocument(
-    int Version, List<Identity> Identities, Dictionary<string, List<string>> Matrix, List<AuditEntry>? Audit = null);
+    List<Identity> Identities, Dictionary<string, List<string>> Matrix, List<AuditEntry>? Audit = null);
 
 /// <summary>
 /// Who may send what to whom, in one editable document, <c>rights.json</c> in the state directory,
@@ -32,9 +32,6 @@ public sealed record RightsDocument(
 /// </summary>
 public sealed class RightsStore
 {
-    /// <summary>The document format this server reads and writes.</summary>
-    public const int CurrentVersion = 2;
-
     private const int AuditKept = 200;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
@@ -51,11 +48,9 @@ public sealed class RightsStore
         // may send anything until an administrator says so.
         var source = File.Exists(_path) ? _path : options.RightsSeed;
         _doc = source is null
-            ? new RightsDocument(CurrentVersion, [], [])
+            ? new RightsDocument([], [])
             : JsonSerializer.Deserialize<RightsDocument>(File.ReadAllText(source), Json)
               ?? throw new InvalidOperationException($"{source}: empty rights document.");
-        if (_doc.Version != CurrentVersion)
-            throw new InvalidOperationException($"{source}: a rights document must say \"version\": {CurrentVersion} (found {_doc.Version}).");
         _doc = _doc with { Identities = [.. _doc.Identities.Select(Normalized)], Audit = _doc.Audit ?? [] };
         CheckUnique(_doc.Identities);
         if (source != _path) Save(source is null ? "Rights started empty" : $"Rights started from {Path.GetFileName(source)}");

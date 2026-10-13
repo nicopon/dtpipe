@@ -205,8 +205,6 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   pass of `IPlanRegistry` (`PlanFlow`) and in the same sentence, a plan made under an earlier matrix included. A
   node in several groups sends only if every one of its groups may send to every group of the
   receiver, on both sides, and an edge carries the groups of both ends. Never add a second matrix.
-  `RightsStore` reads only a document that says `"version": 2`; a saved plan without its groups is
-  read as no plan.
   `[local: FlowMatrixEvaluationTests, the lab's smoke.py rights]`
 - **A saved plan is current only while its job and its nodes' groups are those it was made from.** The library
   lists it, and `GET /api/library/{id}` shows it, as current when it was made from the job as it is and each of
@@ -225,8 +223,7 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   declarations, so both hash the same bytes; a branch that is none of the node's bricks is a planner
   error naming why (`BrickRules`), never a job sent to run. Only the Lab view's manual planning
   (`allowRaw`) sends a job as written, and only to a host that announces `raw-fragments`; the library
-  and `AutoPlacer` never do. A saved plan whose fragments do not say how they reach their node
-  (`FragmentForm`) is read as no plan. `BrickRules.Processors` is the one list of processors, shared with `JobGraph`;
+  and `AutoPlacer` never do. `BrickRules.Processors` is the one list of processors, shared with `JobGraph`;
   it must equal the `stream-processor` entries of `dtpipe providers --format json`. The replica decides again at
   `Launch`, with the same function. `[local: PipelineNode.Tests BrickRulesProcessorsTests, the lab's smoke.py
   bricks, sandbox]`

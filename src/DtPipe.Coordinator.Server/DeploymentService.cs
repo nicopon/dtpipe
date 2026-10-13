@@ -66,8 +66,6 @@ internal sealed class DeploymentService
 
     public async Task DeployAsync(DistributionPlan plan, string origin, CancellationToken ct)
     {
-        if (plan.Fragments.Any(f => f.Form == FragmentForm.Unknown))
-            throw new ConflictException("This plan does not say how each fragment reaches its node: distribute the pipeline again.");
         if (!plan.Deployable)
             throw new ConflictException("This plan cannot be deployed: " +
                 string.Join(" ", plan.Errors.Append(plan.FlowRejection ?? "").Where(s => s.Length > 0)));

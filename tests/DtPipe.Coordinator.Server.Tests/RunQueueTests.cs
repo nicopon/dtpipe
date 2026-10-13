@@ -83,7 +83,7 @@ public sealed class RunQueueTests : IDisposable
         Directory.CreateDirectory(_dir);
         var seed = Path.Combine(_dir, "seed.json");
         File.WriteAllText(seed, """
-            { "version": 2, "matrix": {}, "identities": [
+            { "matrix": {}, "identities": [
               { "clientId": "node-n", "name": "n", "description": "", "groups": ["crm"] },
               { "clientId": "node-m", "name": "m", "description": "", "groups": ["crm"] },
               { "clientId": "node-r", "name": "r", "description": "", "groups": ["crm"] } ] }
@@ -383,13 +383,10 @@ public sealed class RunQueueTests : IDisposable
     public async Task A_Plan_That_Cannot_Be_Deployed_Is_Refused_Saying_Why_Before_Any_Replica_Is_Asked()
     {
         var bricks = DataPlan("p", "n");
-        var unknown = bricks with { Fragments = [bricks.Fragments[0] with { Form = FragmentForm.Unknown }] };
         var failing = bricks with { Errors = ["a cut is missing"], FlowRejection = "no flow" };
         var edge = new PlannedEdge("p@n", "out", "p@n", "in", ["crm"], ["crm"], true);
         var refused = bricks with { Edges = [edge] };
 
-        var form = await Assert.ThrowsAsync<ConflictException>(() => DeployAsync(unknown));
-        Assert.Equal("This plan does not say how each fragment reaches its node: distribute the pipeline again.", form.Message);
         var errors = await Assert.ThrowsAsync<ConflictException>(() => DeployAsync(failing));
         Assert.Equal("This plan cannot be deployed: a cut is missing no flow", errors.Message);
         var matrix = await Assert.ThrowsAsync<ConflictException>(() => DeployAsync(refused));

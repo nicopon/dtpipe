@@ -50,7 +50,7 @@ public sealed class DeploymentManagerTests : IDisposable
     {
         Directory.CreateDirectory(_dir);
         var seed = Path.Combine(_dir, "seed.json");
-        File.WriteAllText(seed, """{ "version": 2, "identities": [ { "clientId": "node-n", "name": "n", "description": "", "groups": ["crm"] } ], "matrix": {} }""");
+        File.WriteAllText(seed, """{ "identities": [ { "clientId": "node-n", "name": "n", "description": "", "groups": ["crm"] } ], "matrix": {} }""");
         var options = new CoordinatorServerOptions
         {
             StateDir = Path.Combine(_dir, "state"), Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret", RightsSeed = seed,
