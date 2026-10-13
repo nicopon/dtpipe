@@ -145,6 +145,7 @@ services:
       DtPipeNode__Oidc__Authority: http://idp.localtest.me${LAB_STACK_HTTP_PORT:+:}${LAB_STACK_HTTP_PORT:-}
       DtPipeNode__Oidc__ClientId: runner-1
       DtPipeNode__Oidc__ClientSecret: ${LAB_RUNNER_SECRET:-runner-1-lab-secret}
+      DtPipeNode__FaultInjection: "true"
     depends_on:
       coordinator: { condition: service_healthy }
       proxy: { condition: service_healthy }

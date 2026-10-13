@@ -336,6 +336,6 @@ sign a person in and out.
 | `POST /api/rights/pending/{subject}/accept` (`{name, groups, description?}`) · `…/ignore` | a host waiting for approval: accept it as an identity, or set it aside for 24 hours |
 | `POST /api/runs` · `GET /api/runs`, `/api/runs/queue` | `{pipelineId?}` queues a run; the journal; in flight and queued |
 | `POST /api/runs/cancel` | `{runId?}`: a run in flight or queued; with no id, the one in flight (409 when several are) |
-| `POST /api/fragments/{name}/kill` | fault injection: ends the fragment's child on every replica of its node |
+| `POST /api/fragments/{name}/kill` | fault injection: ends the fragment's child on every replica of its node whose host enabled it (every lab host does) |
 | `POST /api/query` | `{variable, sql}` → CSV of a node's database, read by that node |
 | `GET /api/events` | server-sent events: nodes, deployments, logs, bytes, runs |

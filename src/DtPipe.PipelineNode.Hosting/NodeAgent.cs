@@ -220,7 +220,7 @@ internal sealed class NodeAgent : BackgroundService
                 _hub!, node, _options.Name, _options.DtPipe, _environment, _fragmentsDir,
                 spec => FragmentIntake.JobOf(spec, _policy, _gate, _bricks.DeclaredBranch, _bricks.Forms),
                 fragment => _forwarder.For(_hostLoggers, _options.Name, fragment).CreateLogger(typeof(FragmentRun).FullName!),
-                _logger, _options.UnwiredRunTimeout);
+                _logger, _options.UnwiredRunTimeout, _options.FaultInjection);
             runs.Bind();
             _runs = runs;
         }

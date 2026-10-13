@@ -310,7 +310,8 @@ the control plane, over each replica's node channel; TransportR carries the data
   alone, so an `Exited` from any other replica, of another identity or of the same, is not heard.
 - **Cancel by stream rupture, never by signal**: the node must run on Windows.
 - **A node host decides what it runs**: its `FragmentPolicy` comes from its own configuration, never
-  from a message the coordinator sends.
+  from a message the coordinator sends. So does whether it ends a run's child (`FaultInjection`): a host
+  that did not enable it answers the coordinator's `Kill` with `0` and logs why.
 - **A person never reaches the data plane, a service never `/api`**: told apart by the token's own
   claims (a service's `sub` is its `client_id`), each scheme failing the other's tokens. `dtpipe
   studio` reaches `/api` with a person's token, through the routes and records of

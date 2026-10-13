@@ -5,7 +5,7 @@ namespace DtPipe.Coordinator.Server;
 /// <summary>What only a test bench asks of a deployment: fault injection on the fragments it deployed. Called by the routes of lab mode.</summary>
 internal sealed class LabFaults(DeploymentLedger ledger, NodeInventory inventory, INodeLink link)
 {
-    /// <summary>Fault injection: ends the child of the fragment's run on every replica of its node.</summary>
+    /// <summary>Fault injection: asks every replica of the fragment's node to end the child of its run; a replica whose host did not enable it ends none.</summary>
     public async Task KillAsync(string fragmentName, CancellationToken ct)
     {
         var node = RequireFragment(fragmentName).Fragment.Node;

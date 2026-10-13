@@ -55,6 +55,13 @@ public sealed class DtPipeNodeOptions
     /// </summary>
     public TimeSpan UnwiredRunTimeout { get; set; } = TimeSpan.FromMinutes(5);
 
+    /// <summary>
+    /// Whether this host ends the child of a run when the coordinator asks it to (<c>Kill</c>), which a test bench does to inject a
+    /// fault. Off by default: a host that did not enable it ends nothing, answers that it ended none and logs why. Only the host's own
+    /// configuration enables it, never a message.
+    /// </summary>
+    public bool FaultInjection { get; set; }
+
     public NodeOidcOptions Oidc { get; set; } = new();
 
     /// <summary>Variables every dtpipe child sees, which a fragment resolves through <c>${{NAME}}</c>. Their values never leave the node.</summary>

@@ -139,7 +139,7 @@ exec_node() {
             'import json,sys; n=json.load(open(sys.argv[1])); print(n.get("clientId", n["name"])); print(n["secret"]); print(n.get("description", ""))' "$file")
         export DtPipeNode__Name="$node" DtPipeNode__Description="$description" DtPipeNode__CoordinatorUrl="$coordinator" \
             DtPipeNode__DtPipe="$DTPIPE" DtPipeNode__StateDirectory="$STATE/$node" DtPipeNode__Oidc__Authority="$IDP_URL" \
-            DtPipeNode__Oidc__ClientId="$id" DtPipeNode__Oidc__ClientSecret="$secret"
+            DtPipeNode__Oidc__ClientId="$id" DtPipeNode__Oidc__ClientSecret="$secret" DtPipeNode__FaultInjection=true
         exec dotnet "$STATE/bin/runner/DtPipe.PipelineNode.Runner.dll"
     fi
     exec dotnet "$STATE/bin/node/Lab.NodeHost.dll" --config "$file" --state "$STATE" --coordinator "$coordinator" --idp "$IDP_URL" --dtpipe "$DTPIPE"

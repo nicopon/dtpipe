@@ -28,6 +28,11 @@ none. One node per process, which is one replica of its node's identity; a secon
   `ValidateJob` (a library save's job dry-run over one-row samples, writers neutralised) only on a
   host that runs any fragment; any other host says it is no runner. An alias names a file in the request's own directory, so it is a plain word.
   `[local: Hosting.Tests DelegatedJobsTests; the lab's smoke.py bricks, ui_check.py]`
+- **Ending a run's child is the host's own word.** `DtPipeNodeOptions.FaultInjection` is off by default
+  (`DtPipeNode__FaultInjection` for a host configured by its environment); the coordinator's `Kill` ends
+  the child of a run only on a host that enabled it. Any other host answers `0` and logs a warning that
+  names the setting, with or without a run of the fragment in flight, and its handler stays bound.
+  `[local: PipelineNode.Tests FaultInjectionTests, Hosting.Tests FaultInjectionOptionTests; the lab's tools/campaign.py F12, for the environment form]`
 - **A node reads its bricks for a library save's check or a studio's sample, never more.**
   `BrickHost.SampleAsync` reads a source brick it announced, with `output: arrow:-` and `--limit`,
   the bytes its fragment would send; a real bounded read, so `--dry-run`'s source-side guarantees do

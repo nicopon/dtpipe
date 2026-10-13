@@ -70,7 +70,8 @@ internal sealed class TestNode : IAsyncDisposable
     }
 
     public static async Task<TestNode> StartAsync(
-        CoordinatorTestHost host, string name, string jobPath, EdgeBinding[] edges, TimeSpan? unwiredTimeout = null, Guid? instance = null)
+        CoordinatorTestHost host, string name, string jobPath, EdgeBinding[] edges, TimeSpan? unwiredTimeout = null, Guid? instance = null,
+        bool faultInjection = false)
     {
         var node = await PipelineNode.ConnectAsync(new NodeClientOptions { HubUrl = host.Url });
         var channel = host.CreateNodeChannel();
@@ -79,7 +80,7 @@ internal sealed class TestNode : IAsyncDisposable
         var runs = new ReplicaRuns(
             channel, node, name, DtPipeExecutableLocator.Path, new Dictionary<string, string>(), dir,
             spec => FragmentIntake.JobOf(spec, FragmentPolicy.AnyFragment, null, (_, _) => null, []),
-            _ => NullLogger.Instance, NullLogger.Instance, unwiredTimeout ?? TimeSpan.FromMinutes(5));
+            _ => NullLogger.Instance, NullLogger.Instance, unwiredTimeout ?? TimeSpan.FromMinutes(5), faultInjection);
         runs.Bind();
         var test = new TestNode(name, node, channel, runs, id, FragmentOf(name, jobPath, edges));
         await channel.StartAsync();

@@ -40,6 +40,7 @@ internal sealed class ReplicaRuns : IAsyncDisposable
     private readonly Func<string, ILogger> _loggerOf;
     private readonly ILogger _logger;
     private readonly TimeSpan _unwiredTimeout;
+    private readonly bool _faultInjection;
 
     private readonly ConcurrentDictionary<(string RunId, string Fragment), Entry> _runs = new();
     private readonly List<FragmentExit> _held = [];
@@ -51,10 +52,11 @@ internal sealed class ReplicaRuns : IAsyncDisposable
 
     public ReplicaRuns(
         HubConnection channel, PipelineNode node, string name, string dtpipe, IReadOnlyDictionary<string, string> environment, string jobsDirectory,
-        Func<FragmentSpec, (string? Yaml, string? Reason)> intake, Func<string, ILogger> loggerOf, ILogger logger, TimeSpan unwiredTimeout)
+        Func<FragmentSpec, (string? Yaml, string? Reason)> intake, Func<string, ILogger> loggerOf, ILogger logger, TimeSpan unwiredTimeout,
+        bool faultInjection = false)
     {
         (_channel, _node, _name, _dtpipe, _environment, _jobsDirectory) = (channel, node, name, dtpipe, environment, jobsDirectory);
-        (_intake, _loggerOf, _logger, _unwiredTimeout) = (intake, loggerOf, logger, unwiredTimeout);
+        (_intake, _loggerOf, _logger, _unwiredTimeout, _faultInjection) = (intake, loggerOf, logger, unwiredTimeout, faultInjection);
         Directory.CreateDirectory(_jobsDirectory);
     }
 
@@ -203,9 +205,21 @@ internal sealed class ReplicaRuns : IAsyncDisposable
         return true;
     }
 
-    /// <summary>Fault injection: kills the child of every run of <paramref name="fragment"/>, the way a crashed host would. How many it killed.</summary>
+    /// <summary>
+    /// Fault injection: kills the child of every run of <paramref name="fragment"/>, the way a crashed host would, and says how many it
+    /// killed. A host that did not enable fault injection kills none, even when a run of the fragment is in flight: it answers 0 and
+    /// logs a warning that names the setting.
+    /// </summary>
     public int Kill(string fragment)
     {
+        if (!_faultInjection)
+        {
+            _logger.LogWarning(
+                "Declining to kill the child of {Fragment}: this host did not enable fault injection (DtPipeNodeOptions.FaultInjection, DtPipeNode__FaultInjection)",
+                fragment);
+            return 0;
+        }
+
         var killed = 0;
         foreach (var (key, entry) in _runs)
         {

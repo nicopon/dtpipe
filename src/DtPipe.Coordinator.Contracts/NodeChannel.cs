@@ -23,7 +23,8 @@ public static class NodeChannel
 
     // Coordinator -> node host, answered. Launch spawns a fragment's child (LaunchResult); Wire hands
     // the child an edge's transfer; Cancel ruptures a run; Check says whether the host would run a
-    // fragment (FragmentCheck), spawning nothing. Kill is fault injection: it ends a run's child outright.
+    // fragment (FragmentCheck), spawning nothing. Kill is fault injection: it ends a run's child outright on a host that
+    // enabled it, and the answer is how many children it ended.
     public const string Launch = nameof(Launch);
     public const string Wire = nameof(Wire);
     public const string Cancel = nameof(Cancel);

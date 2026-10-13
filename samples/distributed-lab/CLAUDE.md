@@ -29,8 +29,12 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   `DtPipe.PipelineNode.Runner` instead, configured through its environment. `lab.sh exec-node` is
   the one way a node starts, for `lab.sh` and `tools/campaign.py`. Every lab node registers `lab.query` and
   `lab.split` (`Lab.NodeHost/LabRequests.cs`), so `smoke.py` reads the warehouse through `/api/query`; its witness reads the databases
-  `seed.sh` wrote, located from the node files, never from the coordinator. Node mechanics:
-  `src/DtPipe.PipelineNode.Hosting/CLAUDE.md`. `[local: smoke.py]`
+  `seed.sh` wrote, located from the node files, never from the coordinator. Every lab node also enables
+  fault injection (`FaultInjection` in `Lab.NodeHost`'s options, `DtPipeNode__FaultInjection` in the
+  environment of the runner `lab.sh exec-node` starts and of `runner-1` in `compose.yaml`), so the kill
+  route of lab mode reaches the hosts of a plan. Node mechanics: `src/DtPipe.PipelineNode.Hosting/CLAUDE.md`.
+  `[local: smoke.py, for the two requests; tools/campaign.py F1 (the data hosts) and F12 (the runner `lab.sh` starts), named]`
+  `[unchecked: runner-1 of compose.yaml enabling it]`
 - **`LAB_REPLICAS` starts more hosts of one node's identity** (`<node>.r<n>`, `lab.sh`'s header): each
   makes its own working directory and the databases stay shared. `lab.sh down`, `nodes` and `status` also
   take in any replica a pid file records, so a run without the variable that started them stops them.

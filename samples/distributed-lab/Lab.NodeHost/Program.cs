@@ -35,6 +35,9 @@ var node = builder.Services.AddDtPipeNode(o =>
     o.DtPipe = Path.GetFullPath(Required("dtpipe"));
     o.StateDirectory = Path.Combine(state, name);
     o.Policy = FragmentPolicy.Bricks;
+    // The coordinator's lab mode ends a fragment's child on request, to inject a fault; a host answers that only when its own
+    // configuration enables it.
+    o.FaultInjection = true;
     o.Oidc.Authority = Required("idp");
     o.Oidc.ClientId = file["clientId"] ?? name;
     o.Oidc.ClientSecret = file["secret"] ?? "";

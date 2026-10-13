@@ -63,6 +63,9 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   answer 404 without it (and 403 to anyone but an admin), and `GET /api/info` tells the pages
   which mode they run in. Never add a bench-only
   route outside `MapLabMode`. `[local: RouteTableTests]` `[unchecked: whether a new route belongs to the bench]`
+- **Fault injection ends a fragment's child only on a replica whose host enabled it.** A replica that did
+  not answers that it ended none, and the kill route does not report that.
+  `[local: PipelineNode.Tests FaultInjectionTests]` `[unchecked: the route's answer to a kill nobody carried out]`
 - **The server never opens a node's data.** What reads it asks the node that hosts it, through
   `NodeRequests`: a brick preview, `/api/query` and a cut (the named requests `lab.query` and `lab.split`, which only a lab host registers), and a
   library save's check (`DesignValidator`): each source brick's node sends its first row as Arrow IPC
