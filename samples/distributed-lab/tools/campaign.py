@@ -6,8 +6,9 @@ before the first trial; this script only plays and records them.
   campaign.py <lab-url> <dtpipe> <state-dir> <campaign-id> [cell ...]
 
 Cells are F1 ... F11, then S, S3 and S5 for the security volet (a prefix selects: F1 alone is F1 and F10 only as
-F10). F6g, a node's groups changed under a run, and F12, two runs on one runner host with one of them killed, are outside
-that matrix: they are played when they are named, never by default; naming a cell plays only the cells named.
+F10). F6g, a node's groups changed under a run, F12, two runs on one runner host with one of them killed, and F13, the
+replica of a node that executes a fragment killed (the lab started with LAB_REPLICAS=node-4=2), are outside that matrix:
+they are played when they are named, never by default; naming a cell plays only the cells named.
 Every trial is one line of JSON in <state-dir>/campaign/<campaign-id>/trials.jsonl, and every line the lab
 logs is kept, stamped, in <state-dir>/campaign/<campaign-id>/logs/. The lab must be up on strict nodes
 (./lab.sh up), and the start is checked: nothing of the lab runs that the pid files do not name, the machine is at rest
@@ -716,6 +717,101 @@ def cell_F12():
             pair_trial(f"kill {lag:.2f}s after another run starts", rep, with_b=True, lag=lag)
 
 
+# A lost replica ends its runs when the coordinator loses it, DisconnectGracePeriod (45 s) after the cut. The bound stays
+# under RemoteFailureGrace (60 s): a verdict past it says the loss was not heard.
+REPLICA_LOST_BOUND = 55
+
+
+def restore_replica(name):
+    """The host `name` back as the lab starts it, and node-4 carried by two connected hosts again."""
+    if S.host_exited(S.host_pid(name)):
+        S.start_host(name)
+    S.await_replicas(2, f"{name} to be back")
+
+
+def next_run_on(survivor):
+    """I4 after a lost replica: an unfaulted run of the reference pipeline succeeds on the replica that is left, and the
+    journal says so. Returns the problem, or None."""
+    try:
+        deploy(REFERENCE)
+        run = submit(REFERENCE, wait_running=False)
+        final, _ = await_final(run["runId"], 120)
+        if final is None:
+            return "the run after the loss gave no verdict in 120s"
+        ctx().verdict(final, check_for(REFERENCE))
+        on = S.host_name(S.replica_pid(final["result"]["replicas"][f"{REFERENCE}@node-4"]))
+        return None if on == survivor else f"the run after the loss ran on {on}, not on the replica that is left ({survivor})"
+    except Exception as e:
+        return f"the run after the loss: {str(e)[:170]}"
+
+
+def replica_lost_trial(rep):
+    """One run of sensor-stream with the host of the replica that executes its node-4 fragment killed 4 s in. Judged on the
+    bound of a lost host and on the invariants, with the cause naming the fragment; then the next run is the reference
+    pipeline, which must succeed on the replica that is left, and the killed host is started again."""
+    rec = {"cell": "F13 replica lost in flight", "rep": rep, "pipeline": P2, "expect": ["failed"], "at": 4, "campaign": CAMPAIGN,
+           "time": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    t_fault, killed, run = time.time(), None, None
+    try:
+        recover()
+        try:
+            S.await_replicas(2, "node-4 to have two connected replicas", timeout=10)
+        except RuntimeError:
+            raise RuntimeError("F13 needs the lab started with LAB_REPLICAS=node-4=2, and the variable exported here") from None
+        check_for(P2)
+        deploy(P2)
+        run = submit(P2)
+        time.sleep(4)
+        holders = [r for r in S.node_replicas() if r["runs"]]
+        if len(holders) != 1:
+            raise NotApplicable(f"{len(holders)} replica(s) of node-4 hold the run at +4 s")
+        killed = S.host_name(S.replica_pid(holders[0]))
+        survivor = next(S.host_name(S.replica_pid(r)) for r in S.node_replicas() if r["id"] != holders[0]["id"])
+        t_fault = time.time()
+        os.kill(S.host_pid(killed), signal.SIGKILL)
+        rec["injected"] = f"SIGKILL host {killed}"
+        final, t_end = await_final(run["runId"], BOUND["host"] + 30)
+        elapsed = t_end - t_fault
+        rec["elapsed"] = round(elapsed, 2)
+        judge(rec, P2, final, elapsed, {"failed"}, REPLICA_LOST_BOUND, cause_of="@node-4")
+        if final is not None and final["state"] == "failed" and not (final.get("result") or {}).get("causeIsUnresponsive"):
+            rec["inv"]["I2"] = "the cause is not marked unresponsive: the loss of the replica did not end the run"
+        if (problem := next_run_on(survivor)):
+            rec["inv"]["I4"] = problem
+        if rec["inv"]:
+            rec["logs"] = capture_logs(STATE)
+    except NotApplicable as e:
+        rec["inv"], rec["state"], rec["note"], rec["elapsed"] = {}, "n/a", str(e), 0
+        try:
+            S.call("/api/runs/cancel", {"runId": run["runId"]})
+            await_final(run["runId"], 60)
+        except Exception:
+            pass
+    except Exception as e:
+        rec["inv"] = {"H": f"harness: {str(e)[:200]}"}
+        rec["elapsed"] = round(time.time() - t_fault, 2)
+    finally:
+        try:
+            if killed:
+                restore_replica(killed)
+        except Exception as e:
+            rec.setdefault("inv", {})["H"] = f"harness: the killed host did not come back: {str(e)[:150]}"
+        problem = reference_ok(rec)
+        if problem:
+            rec.setdefault("inv", {})["I4"] = (rec.get("inv", {}).get("I4", "") + " " + problem).strip()
+    record(rec)
+    return rec
+
+
+def cell_F13():
+    """A replica lost in flight. node-4 is carried by two hosts (LAB_REPLICAS=node-4=2); the one that executes the fragment of a
+    run is killed. Its grace runs out, the coordinator loses the replica and the run fails naming the fragment, as unresponsive, within
+    REPLICA_LOST_BOUND; no child of the killed host is left; the replicas hold no run; and the next run succeeds on the other
+    replica, the journal saying which. The killed host is started again before the next trial."""
+    for rep in range(REPS):
+        replica_lost_trial(rep)
+
+
 def cell_F7():
     def inject(run, plan):
         # P2's source is the runner (it generates the slow stream); node-1's customers read ends in under a second.
@@ -1127,7 +1223,7 @@ def cell_S5():
 
 CELL_FUNCS = {"F1": cell_F1, "F2": cell_F2, "F3": cell_F3, "F4": cell_F4, "F5": cell_F5, "F6": cell_F6, "F7": cell_F7,
               "F8": cell_F8, "F9": cell_F9, "F10": cell_F10, "F11": cell_F11, "S": cell_S, "S3": cell_S3, "S5": cell_S5}
-NAMED_ONLY = {"F6g": cell_F6g, "F12": cell_F12}
+NAMED_ONLY = {"F6g": cell_F6g, "F12": cell_F12, "F13": cell_F13}
 
 
 def preflight():

@@ -66,7 +66,8 @@ def known_pids(state_dir, names):
 def foreign(state_dir, node_names):
     """What runs that the lab's pid files do not name, and every toxiproxy and fragment child: between campaigns
     there are none."""
-    known = known_pids(state_dir, list(node_names) + ["coordinator", "idp"])
+    replicas = [os.path.basename(f)[:-len(".pid")] for f in glob.glob(os.path.join(state_dir, "run", "*.r[0-9]*.pid"))]
+    known = known_pids(state_dir, list(node_names) + replicas + ["coordinator", "idp"])
     return [row for row in lab_processes()
             if row[2] in ("toxiproxy", "fragment child") or row[0] not in known]
 

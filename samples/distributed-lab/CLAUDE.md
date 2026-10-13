@@ -48,7 +48,7 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   of mode without it stops a replica and starts none, so export it to every call. `LAB_NODE_FILE` makes
   `exec-node` read another declaration of the node, which is how `smoke.py replicas` starts a replica at another
   version of a brick. That pass is named only, refuses the compose stack (it starts hosts), and leaves the hosts
-  started as the lab starts them. `[local: smoke.py replicas]`
+  started as the lab starts them. `[local: smoke.py replicas, tools/campaign.py F13]`
 - **The IdP's signing key survives an IdP restart.** A node host reuses its cached token until
   shortly before it expires, so `Lab.Idp` reads its key from `.state/idp/signing-key.pem` (generated
   once, readable by its owner only, outside git). `lab.sh idp --Idp:AccessTokenLifetimeSeconds=N`
@@ -70,7 +70,8 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   rights document. `[local: smoke.py rights]`
 - `tools/campaign.py` plays a fixed matrix of faults (a killed child or host, a cancellation, a
   coordinator restart, network faults through toxiproxy, revoked rights, rapid cycles; F6g, a node's
-  groups changed under a run, and F12, a runner host's child killed while it starts another run's, are
+  groups changed under a run, F12, a runner host's child killed while it starts another run's, and F13, the
+  replica of node-4 that executes a fragment killed (the lab started with `LAB_REPLICAS=node-4=2`), are
   outside the matrix and played only when named, and naming a cell plays only the cells named) against the
   running lab and judges every trial on the same invariants: it ends, the verdict is right, nothing
   is left running, the lab still runs a reference pipeline. It needs the lab seeded with
