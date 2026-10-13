@@ -44,7 +44,7 @@ open http://127.0.0.1:5180          # sign in as labadmin / labadminpwd; the Lab
 | `./lab.sh seed` | rebuilds the databases (`LAB_SCALE=5` multiplies the row counts) |
 | `./lab.sh logs` | follows every log |
 | `./lab.sh stack up\|down\|status\|nodes\|smoke\|ui\|studio\|logs` | the same commands against [the compose stack](#the-compose-stack) |
-| `./lab.sh down` / `reset` | stops everything / also deletes `.state/` |
+| `./lab.sh down` / `reset` | stops everything, including a process of the lab whose pid file was lost (it says "Lab stopped" only when none is left, and otherwise lists them and fails) / also deletes `.state/` |
 
 Every page and `/api` call needs a person signed in through the IdP, with a role: `labadmin`
 (`labadminpwd`) may do everything, `labdesigner` everything but the rights and the Lab view,

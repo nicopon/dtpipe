@@ -35,6 +35,13 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   route of lab mode reaches the hosts of a plan. Node mechanics: `src/DtPipe.PipelineNode.Hosting/CLAUDE.md`.
   `[local: smoke.py, for the two requests; tools/campaign.py F1 (the data hosts) and F12 (the runner `lab.sh` starts), named]`
   `[unchecked: runner-1 of compose.yaml enabling it]`
+- **The lab is stopped only when nothing of it runs.** A process of the lab is one whose command line names
+  the state directory (`.state/`, or `LAB_STATE`). `lab.sh down` stops the processes the pid files name, then
+  every other one, and answers "Lab stopped" only when none is left; otherwise it lists them and fails. `up`
+  refuses to start over a process of the lab that no pid file names and that does not descend from one that a
+  pid file names (a host's `dtpipe` children are not refused), or, when `lsof` is installed, over a port the
+  coordinator or the IdP needs that something else holds; `status` shows those processes.
+  `[local: tools/validate_lab_down.sh]`
 - **`LAB_REPLICAS` starts more hosts of one node's identity** (`<node>.r<n>`, `lab.sh`'s header): each
   makes its own working directory and the databases stay shared. `lab.sh down`, `nodes` and `status` also
   take in any replica a pid file records, so a run without the variable that started them stops them.

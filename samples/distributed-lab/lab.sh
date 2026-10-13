@@ -7,11 +7,15 @@
 #                      (LAB_NODE_SANDBOX=1 starts the nodes in sandbox mode: see "nodes";
 #                      LAB_REPLICAS="node-4=2,runner-1=2" starts that many hosts for those nodes,
 #                      all of one identity: the first is named for the node, the others <node>.r2, ...)
-#   ./lab.sh down      stop every lab process
+#   LAB_STATE=DIR      moves the state directory (an absolute path), for a throw-away run: a relative one would not
+#                      match the absolute paths in the command lines of the hosts' children
+#   ./lab.sh down      stop every lab process: those the pid files name, and any other whose command line names the state
+#                      directory (a lab whose pid files were lost). It says "Lab stopped" only when none is left, and
+#                      otherwise lists them and fails
 #   ./lab.sh nodes M   restart the node hosts, M = strict (a data node runs only its own bricks,
 #                      the default) or sandbox (it runs any reader or writer, whatever it reads or
 #                      writes: the Lab view's mode; compute goes to the runner in both)
-#   ./lab.sh status    which processes run, and what the coordinator sees
+#   ./lab.sh status    which processes run (those no pid file names too), and what the coordinator sees
 #   ./lab.sh seed      rebuild the four databases (LAB_SCALE multiplies the row counts)
 #   ./lab.sh smoke     every pipeline, distributed, against its monolithic witness
 #   ./lab.sh ui        both pages render, and the coordinator has no designer (headless Chrome)
@@ -26,7 +30,7 @@ set -euo pipefail
 
 LAB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$LAB/../.." && pwd)"
-STATE="$LAB/.state"
+STATE="${LAB_STATE:-$LAB/.state}"
 PORT="${LAB_PORT:-5180}"
 URL="http://127.0.0.1:$PORT"
 IDP_URL="http://127.0.0.1:${LAB_IDP_PORT:-5190}"
@@ -94,6 +98,73 @@ seed() {
 }
 
 is_running() { [[ -f "$STATE/run/$1.pid" ]] && kill -0 "$(cat "$STATE/run/$1.pid")" 2>/dev/null; }
+
+# Every process whose command line names the state directory, as "pid<TAB>command", except this script and its ancestors: the
+# processes of a lab that no pid file records are found this way, and so are the dtpipe children a killed host left behind.
+lab_processes() {
+    local keep=" $$ " pid="$$" ppid args
+    while pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"; [[ -n "$pid" && "$pid" -gt 1 ]]; do keep+="$pid "; done
+    while read -r pid ppid args; do
+        [[ "$keep" == *" $pid "* ]] && continue
+        [[ "$args" == *"$STATE/"* ]] && printf '%s\t%s\n' "$pid" "$args"
+    done < <(ps -ww -eo pid=,ppid=,args=)
+    return 0
+}
+
+# Whether $1 is a process a pid file records, or a descendant of one.
+is_tracked() {
+    local pid="$1" file
+    while [[ -n "$pid" && "$pid" -gt 1 ]]; do
+        for file in "$STATE"/run/*.pid; do
+            [[ -e "$file" && "$(cat "$file")" == "$pid" ]] && return 0
+        done
+        pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"
+    done
+    return 1
+}
+
+# The lab processes no pid file accounts for, as lab_processes prints them.
+untracked_processes() {
+    local pid args
+    while IFS=$'\t' read -r pid args; do
+        [[ -n "$pid" ]] && ! is_tracked "$pid" && printf '%s\t%s\n' "$pid" "$args"
+    done < <(lab_processes)
+    return 0
+}
+
+# Stops every lab process the pid files did not stop: TERM, a moment to end, then KILL. Prints what it stops.
+sweep() {
+    local found pid args
+    found="$(lab_processes)"
+    [[ -n "$found" ]] || return 0
+    while IFS=$'\t' read -r pid args; do
+        echo "  stopping pid $pid: ${args:0:110}"
+        kill -TERM "$pid" 2>/dev/null || true
+    done <<<"$found"
+    for _ in $(seq 1 20); do [[ -z "$(lab_processes)" ]] && return 0; sleep 0.25; done
+    while IFS=$'\t' read -r pid _; do kill -KILL "$pid" 2>/dev/null || true; done <<<"$(lab_processes)"
+    for _ in $(seq 1 12); do [[ -z "$(lab_processes)" ]] && return 0; sleep 0.25; done
+}
+
+# Refuses to start over what an earlier lab left: a process of the lab no pid file names, or a port the coordinator or the
+# IdP needs that something else holds. Both make the next start fail later, and without saying why.
+require_clean_start() {
+    local found port pid
+    found="$(untracked_processes)"
+    if [[ -n "$found" ]]; then
+        echo "Processes of the lab that no pid file names are running; ./lab.sh down stops them:" >&2
+        echo "$found" | cut -c1-150 | sed 's/^/  /' >&2
+        exit 1
+    fi
+    command -v lsof >/dev/null 2>&1 || return 0
+    for port in "$PORT" "${LAB_IDP_PORT:-5190}"; do
+        for pid in $(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null); do
+            is_tracked "$pid" && continue
+            echo "Port $port is held by pid $pid, which is not the lab's: $(ps -o args= -p "$pid" | cut -c1-110)" >&2
+            exit 1
+        done
+    done
+}
 
 start() {
     local name="$1"; shift
@@ -188,6 +259,7 @@ EOF
 
 up() {
     require_dtpipe
+    require_clean_start
     mkdir -p "$STATE/logs" "$STATE/run"
     build
     [[ -f "$STATE/node-1/crm.sqlite" ]] || seed
@@ -268,6 +340,14 @@ down() {
         if is_running "$name"; then kill -KILL "$(cat "$STATE/run/$name.pid")" 2>/dev/null || true; fi
         rm -f "$STATE/run/$name.pid"
     done
+    sweep
+    local left
+    left="$(lab_processes)"
+    if [[ -n "$left" ]]; then
+        echo "The lab is NOT stopped: these processes of it are still running:" >&2
+        echo "$left" | cut -c1-150 | sed 's/^/  /' >&2
+        exit 1
+    fi
     echo "Lab stopped"
 }
 
@@ -275,6 +355,10 @@ status() {
     for name in idp coordinator "${ALL_PROCS[@]}"; do
         if is_running "$name"; then echo "  $name  running (pid $(cat "$STATE/run/$name.pid"))"; else echo "  $name  stopped"; fi
     done
+    local pid args
+    while IFS=$'\t' read -r pid args; do
+        [[ -n "$pid" ]] && echo "  untracked  pid $pid: ${args:0:100}"
+    done < <(untracked_processes)
     if curl -fs "$URL/healthz" >/dev/null 2>&1; then
         echo
         nodes_table "$URL"
