@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using DtPipe.Coordinator.Contracts;
 using DtPipe.Jobs.Coordinator;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -100,5 +101,49 @@ public sealed class StalePlanRoutesTests : IDisposable
         var error = (await deploy.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("error").GetString()!;
         Assert.Contains("changed since its plan was saved", error);
         Assert.DoesNotContain("groups", error);
+    }
+
+    /// <summary>
+    /// A node announced under one group and edited to another while it is offline: distributing again makes a plan that is
+    /// current. The planner takes the groups the rights give the node now, not those of its last announcement.
+    /// </summary>
+    [Fact]
+    public async Task DistributingAgain_RepairsAPlanWhoseNodeChangedGroupsWhileItWasOffline()
+    {
+        var source = new BrickInfo("customers", BrickKind.Source, "Customers", "", """{"input":"sqlite:${{LAB_DB}}"}""", null, null);
+        foreach (var identity in new[] { new IdentityBody("a", "node-a", "A", ["crm"], true), new IdentityBody("r", "runner", "R", ["run"], true) })
+        {
+            using var created = await _admin.PostAsJsonAsync("/api/rights/identities", identity, Web, Ct);
+            created.EnsureSuccessStatusCode();
+        }
+        using var matrix = await _admin.PutAsJsonAsync("/api/rights/matrix", new { matrix = new Dictionary<string, string[]> { ["crm"] = ["run"], ["audit"] = ["run"] } }, Web, Ct);
+        matrix.EnsureSuccessStatusCode();
+        var registry = _host.Services.GetRequiredService<ReplicaRegistry>();
+        var inventory = _host.Services.GetRequiredService<NodeInventory>();
+        void Announce(string connection, string subject, NodeAnnouncement announcement, string group)
+        {
+            registry.Announce(connection, subject, announcement, [group], () => { });
+            inventory.Announced(announcement.Name, subject, announcement, [group]);
+        }
+        Announce("c-a", "a", new NodeAnnouncement("node-a", "", [new DatasetInfo("LAB_DB", "sqlite", "")], NodeRole.Data, [source], InstanceId: Guid.NewGuid()), "crm");
+        Announce("c-r", "r", new NodeAnnouncement("runner", "", [], NodeRole.Runner, [], InstanceId: Guid.NewGuid()), "run");
+        var library = _host.Services.GetRequiredService<PipelineLibrary>();
+        await library.SaveAsync("orders", "a:\n  input: sqlite:${{LAB_DB}}\nb:\n  from: a\n  output: csv:out.csv\n", "create", Ct);
+
+        using var first = await _admin.PostAsJsonAsync("/api/library/orders/distribute", new { save = true }, Web, Ct);
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.True((await ListedAsync()).PlanCurrent);
+
+        using var changed = await _admin.PutAsJsonAsync("/api/rights/identities/a", new IdentityBody("a", "node-a", "A", ["audit"], true), Web, Ct);
+        changed.EnsureSuccessStatusCode();
+        registry.Disconnected("c-a");
+        Assert.Equal("groups", (await ListedAsync()).PlanStaleCause);
+
+        using var again = await _admin.PostAsJsonAsync("/api/library/orders/distribute", new { save = true }, Web, Ct);
+
+        Assert.Equal(HttpStatusCode.OK, again.StatusCode);
+        var listed = await ListedAsync();
+        Assert.True(listed.PlanCurrent);
+        Assert.Null(listed.PlanStaleCause);
     }
 }

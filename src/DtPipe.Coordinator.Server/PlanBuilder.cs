@@ -75,7 +75,7 @@ public enum PlanMode
 /// </para>
 /// </summary>
 public sealed class PlanBuilder(
-    NodeInventory inventory, NodeRequests nodes, BrickCatalog bricks, IPlanRegistry planRegistry)
+    NodeInventory inventory, NodeRequests nodes, BrickCatalog bricks, IPlanRegistry planRegistry, RightsStore rights)
 {
     private const string ArrowEndpoint = "arrow:-";
     private static readonly TimeSpan SplitTimeout = TimeSpan.FromSeconds(90);
@@ -139,11 +139,25 @@ public sealed class PlanBuilder(
         var unitViews = DescribeUnits(units, request.Placement);
         var nodes = inventory.Snapshot().ToDictionary(n => n.Name, StringComparer.Ordinal);
         var placement = new Dictionary<string, string>(StringComparer.Ordinal);
+        // The groups a node holds are the rights', now: the inventory keeps those of its last announcement, which a change of the
+        // rights leaves behind, and a node whose identity is disabled or gone may not connect, so nothing is placed on it.
+        var groupsOf = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
         foreach (var view in unitViews)
         {
             if (view.Node is null) errors.Add($"'{view.Id}' is not placed on a node.");
             else if (!nodes.ContainsKey(view.Node)) errors.Add($"'{view.Id}' is placed on unknown node '{view.Node}'.");
-            else placement[view.Id] = view.Node;
+            else
+            {
+                try
+                {
+                    if (!groupsOf.ContainsKey(view.Node)) groupsOf[view.Node] = rights.GroupsOf(view.Node);
+                    placement[view.Id] = view.Node;
+                }
+                catch (ConflictException ex)
+                {
+                    errors.Add($"'{view.Id}' cannot be placed: {ex.Message}");
+                }
+            }
         }
         if (errors.Count > 0) return Result(unitViews);
 
@@ -151,7 +165,7 @@ public sealed class PlanBuilder(
         var drafts = new Dictionary<string, FragmentDraft>(StringComparer.Ordinal);
         FragmentDraft DraftOf(string node) => drafts.TryGetValue(node, out var d)
             ? d
-            : drafts[node] = new FragmentDraft($"{pipelineId}@{node}", node, nodes[node].Groups);
+            : drafts[node] = new FragmentDraft($"{pipelineId}@{node}", node, groupsOf[node]);
 
         foreach (var unit in units)
         {

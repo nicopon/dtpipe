@@ -11,7 +11,7 @@ namespace DtPipe.Coordinator.Server.Tests;
 /// What each way of planning may do: only the Lab view's manual planning cuts a branch and sends a data node a fragment
 /// written as a job. The planner is real, over a hub that answers a node's requests and notes each one.
 /// </summary>
-public sealed class PlanModeTests
+public sealed class PlanModeTests : IDisposable
 {
     /// <summary>Notes every message sent to a node and answers a <c>Request</c> with what the test set.</summary>
     private sealed class RecordingHub : IHubContext<NodeChannelHub>
@@ -60,17 +60,31 @@ public sealed class PlanModeTests
     private readonly NodeInventory _inventory;
     private readonly RecordingHub _hub = new();
     private readonly PlanBuilder _planner;
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), "plan-mode-" + Guid.NewGuid().ToString("N"));
 
     public PlanModeTests()
     {
+        Directory.CreateDirectory(_dir);
+        var seed = Path.Combine(_dir, "seed.json");
+        File.WriteAllText(seed, """
+            { "version": 2, "identities": [
+              { "clientId": "node-r", "name": "r", "description": "", "groups": ["run"] },
+              { "clientId": "node-d", "name": "d", "description": "", "groups": ["data"] } ], "matrix": {} }
+            """);
+        var rights = new RightsStore(new CoordinatorServerOptions
+        {
+            StateDir = Path.Combine(_dir, "state"), Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret", RightsSeed = seed,
+        });
         _inventory = new NodeInventory(_registry);
         _planner = new PlanBuilder(
             _inventory, new NodeRequests(_inventory, _hub), new BrickCatalog(_inventory),
-            new PlanRegistry(new DefaultFlowControlService(_matrix)));
+            new PlanRegistry(new DefaultFlowControlService(_matrix)), rights);
         _matrix.Groups["data"] = new GroupAccess { CanSendTo = ["run"] };
 
         Announce("r", "run", NodeRole.Runner, [], []);
     }
+
+    public void Dispose() => Directory.Delete(_dir, recursive: true);
 
     private void Announce(string name, string group, NodeRole role, DatasetInfo[] datasets, string[] capabilities)
     {

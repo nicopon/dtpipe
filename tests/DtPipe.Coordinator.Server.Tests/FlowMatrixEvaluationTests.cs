@@ -62,7 +62,7 @@ public sealed class FlowMatrixEvaluationTests : IDisposable
     {
         Directory.CreateDirectory(_dir);
         var seed = Path.Combine(_dir, "seed.json");
-        File.WriteAllText(seed, """{ "version": 2, "identities": [ { "clientId": "node-r1", "name": "r1", "description": "", "groups": ["crm"] } ], "matrix": {} }""");
+        File.WriteAllText(seed, """{ "version": 2, "identities": [ { "clientId": "node-r1", "name": "r1", "description": "", "groups": ["crm"] }, { "clientId": "node-r2", "name": "r2", "description": "", "groups": ["audit"] }, { "clientId": "node-r3", "name": "r3", "description": "", "groups": ["ops"] } ], "matrix": {} }""");
         var options = new CoordinatorServerOptions
         {
             StateDir = Path.Combine(_dir, "state"), Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret", RightsSeed = seed,
@@ -70,7 +70,7 @@ public sealed class FlowMatrixEvaluationTests : IDisposable
         var rights = new RightsStore(options);
         _flow = new CountingFlow(new DefaultFlowControlService(_matrix));
         _inventory = new NodeInventory(_registry);
-        _planner = new PlanBuilder(_inventory, new NodeRequests(_inventory, new NoHub()), new BrickCatalog(_inventory), new PlanRegistry(_flow));
+        _planner = new PlanBuilder(_inventory, new NodeRequests(_inventory, new NoHub()), new BrickCatalog(_inventory), new PlanRegistry(_flow), rights);
         _deployments = new DeploymentManager(
             _inventory, new NoLink(), new NoRuns(), new ReplicaAdmission(_registry, new InMemoryStateStore()), _flow, rights, new EventBus(),
             new RunJournal(options, NullLogger<RunJournal>.Instance), NullLogger<DeploymentManager>.Instance);
