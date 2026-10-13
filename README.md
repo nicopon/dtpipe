@@ -52,6 +52,13 @@ no coordinator; `--coordinator` only adds the bricks and the pipeline library of
 [distributed setup](./docs/experimentation.md). Details in
 [REFERENCE.md](./REFERENCE.md#studio-dtpipe-studio).
 
+> **Not everything in this release is stable.** The distributed pipeline (coordinator, pipeline
+> nodes, runner) and `dtpipe studio` are new: they may change or disappear without notice, and the
+> distributed projects ship in no package. Do not build a workload on them yet. What was there
+> before, reading, transforming and writing through the CLI, a job file or the MCP server, is
+> versioned as it always was. The distributed family has not been run on Windows; see
+> [docs/experimentation.md](./docs/experimentation.md).
+
 ## What it connects to
 
 | Family | Examples | Prefix |
