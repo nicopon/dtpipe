@@ -22,9 +22,10 @@ separate transport library; nothing else in dtpipe depends on it, and the CLI ho
 nor a hub. These projects sit outside `DtPipe.sln`, so `build.yml` does not build them; the lab,
 with its test nodes and their data, sits outside the solution and the build.
 
-The lab exists to try the idea and to find where it breaks, not to serve a workload. To see it run,
-follow its [README](../samples/distributed-lab/README.md). The rules the server holds to (rights,
-library, placement, runs) are in its [CLAUDE.md](../src/DtPipe.Coordinator.Server/CLAUDE.md).
+The lab exists to try the idea and to find where it breaks, not to serve a workload. None of this
+has been run on Windows. To see it run, follow its
+[README](../samples/distributed-lab/README.md). The rules the server holds to (rights, library,
+placement, runs) are in its [CLAUDE.md](../src/DtPipe.Coordinator.Server/CLAUDE.md).
 
 ## Nodes and replicas
 
