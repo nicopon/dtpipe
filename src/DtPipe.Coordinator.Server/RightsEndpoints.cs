@@ -43,7 +43,7 @@ internal static class RightsEndpoints
         admin.MapPut("/rights/identities/{id}", (string id, IdentityRequest request, RightsStore rights, NodeInventory inventory, EventBus bus, HttpContext http) =>
         {
             var before = rights.Find(id);
-            rights.UpdateIdentity(id, request.Name ?? id, request.Description ?? "", request.Groups ?? [], request.Enabled ?? true, TrustedIdp.EmailOf(http));
+            rights.UpdateIdentity(id, request.Name, request.Description, request.Groups, request.Enabled, TrustedIdp.EmailOf(http));
             // A node renamed connects again under its new name. A node whose groups changed connects again too, and its data
             // plane client registers again: until then a replica's registration holds the groups it had, and admission
             // places no run on it. A node whose identity is disabled loses its connections: its hosts are refused when they

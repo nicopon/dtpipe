@@ -157,14 +157,22 @@ public sealed class RightsStore
         }
     }
 
-    public void UpdateIdentity(string clientId, string name, string description, IReadOnlyList<string> groups, bool enabled, string? by = null)
+    /// <summary>
+    /// Edits an identity. An argument that is null is left as the identity has it: an edit says what it changes, and a field it
+    /// leaves out is neither emptied, renamed nor enabled by the omission. The identity is read and written under one lock.
+    /// </summary>
+    public void UpdateIdentity(string clientId, string? name, string? description, IReadOnlyList<string>? groups, bool? enabled, string? by = null)
     {
         lock (_lock)
         {
             var index = _doc.Identities.FindIndex(i => i.ClientId == clientId);
             if (index < 0) throw new ConflictException($"'{clientId}' does not exist.");
             var before = _doc.Identities[index];
-            var after = Normalized(before with { Name = name, Description = description, Groups = groups, Enabled = enabled });
+            var after = Normalized(before with
+            {
+                Name = name ?? before.Name, Description = description ?? before.Description,
+                Groups = groups ?? before.Groups, Enabled = enabled ?? before.Enabled,
+            });
             CheckUnique(_doc.Identities.Select((i, at) => at == index ? after : i).ToList());
             _doc.Identities[index] = after;
             var changes = new List<string>();

@@ -72,6 +72,85 @@ public sealed class RightsRoutesTests : IDisposable
         Assert.Equal(0, _aborts);
     }
 
+    /// <summary>The identity <c>a</c> as the rights hold it now, read back through the route the page reads.</summary>
+    private async Task<JsonElement> StoredAsync()
+    {
+        var rights = await _admin.GetFromJsonAsync<JsonElement>("/api/rights", Web, Ct);
+        return rights.GetProperty("identities").EnumerateArray().Single(i => i.GetProperty("clientId").GetString() == "a");
+    }
+
+    /// <summary>The edit of <c>a</c> that sends every field of <paramref name="body"/> but <paramref name="omitted"/>.</summary>
+    private Task<HttpResponseMessage> PutWithout(string omitted, IdentityBody body)
+    {
+        var fields = new Dictionary<string, object>
+        {
+            ["clientId"] = body.ClientId, ["name"] = body.Name, ["description"] = body.Description, ["groups"] = body.Groups, ["enabled"] = body.Enabled,
+        };
+        fields.Remove(omitted);
+        return _admin.PutAsJsonAsync("/api/rights/identities/a", fields, Web, Ct);
+    }
+
+    /// <summary>An edit says what it changes: a field it leaves out stays as the identity has it, and the omission neither enables, renames, empties nor refuses.</summary>
+    [Fact]
+    public async Task An_Edit_That_Omits_Enabled_Leaves_A_Disabled_Identity_Disabled()
+    {
+        var identity = await AnIdentityWithAReplicaAsync(enabled: false);
+
+        using var response = await PutWithout("enabled", identity with { Description = "described again" });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var stored = await StoredAsync();
+        Assert.False(stored.GetProperty("enabled").GetBoolean());
+        Assert.Equal("described again", stored.GetProperty("description").GetString());
+    }
+
+    [Fact]
+    public async Task An_Edit_That_Omits_Enabled_Leaves_An_Enabled_Identity_Enabled_And_Drops_Nothing()
+    {
+        var identity = await AnIdentityWithAReplicaAsync();
+
+        using var response = await PutWithout("enabled", identity with { Description = "described again" });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True((await StoredAsync()).GetProperty("enabled").GetBoolean());
+        Assert.Equal(0, _aborts);
+    }
+
+    [Fact]
+    public async Task An_Edit_That_Omits_The_Name_Keeps_It_And_Drops_Nothing()
+    {
+        var identity = await AnIdentityWithAReplicaAsync();
+
+        using var response = await PutWithout("name", identity with { Description = "described again" });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("node-a", (await StoredAsync()).GetProperty("name").GetString());
+        Assert.Equal(0, _aborts);
+    }
+
+    [Fact]
+    public async Task An_Edit_That_Omits_The_Description_Keeps_It()
+    {
+        var identity = await AnIdentityWithAReplicaAsync();
+
+        using var response = await PutWithout("description", identity);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("A", (await StoredAsync()).GetProperty("description").GetString());
+    }
+
+    [Fact]
+    public async Task An_Edit_That_Omits_The_Groups_Keeps_Them_And_Drops_Nothing()
+    {
+        var identity = await AnIdentityWithAReplicaAsync();
+
+        using var response = await PutWithout("groups", identity with { Description = "described again" });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(["crm"], (await StoredAsync()).GetProperty("groups").EnumerateArray().Select(g => g.GetString()));
+        Assert.Equal(0, _aborts);
+    }
+
     [Fact]
     public async Task Enabling_An_Identity_Drops_Nothing()
     {

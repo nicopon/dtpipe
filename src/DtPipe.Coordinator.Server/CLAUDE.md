@@ -175,7 +175,9 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   name or the **groups** change, or when the identity goes from enabled to disabled: a replica's data plane
   client holds the groups it registered with, and until it registers again admission places no run on it; a
   disabled identity's replicas are cut at once, and the runs placed on them end with them. Enabling an
-  identity again cuts nothing, no host of it being connected. `Origin`, where a replica says it runs, is untrusted
+  identity again cuts nothing, no host of it being connected. An edit that leaves out a field (`name`,
+  `description`, `groups` or `enabled`) leaves it as the identity has it: the omission neither enables, renames
+  nor empties. `Origin`, where a replica says it runs, is untrusted
   text: cut at `Announce`, the ground of no decision.
   `[local: NodeChannelHubTests, RightsRoutesTests; the lab's smoke.py rights - identity, disabled; tools/campaign.py F3, S7]`
 - **A state is written as a lowercase word, by the converter on the property that carries it.** `RunView.State` and
