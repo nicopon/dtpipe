@@ -37,6 +37,11 @@ internal sealed class NodeAgent : BackgroundService
     private readonly ILogger _logger;
     private HubConnection? _hub;
 
+    // Whether the coordinator accepted this replica's announcement on the connection that is up. The data plane client is asked
+    // for only while it is: a host whose identity the coordinator refuses cannot register a client, and asking would cost it a
+    // token and a connection every time it is refused.
+    private volatile bool _announced;
+
     // The replica's TransportR client and its runs. The runs are made with the first client and kept; the client is
     // dropped when the hub refuses its registration and another is made when the identity can register one, so the client
     // id an announcement carries is the current client's, or none.
@@ -95,6 +100,11 @@ internal sealed class NodeAgent : BackgroundService
         hub.On<string, string, SinkCheck>(NodeChannel.CheckSink, (id, contract) => _bricks.CheckSinkAsync(id, contract));
         hub.On<string, string, NodeResponse>(NodeChannel.Request, (name, payload) => AnswerAsync(name, payload));
         hub.On<JobCheck, JobCheckResult>(NodeChannel.ValidateJob, check => _jobs.ValidateAsync(check));
+        hub.Reconnecting += _ =>
+        {
+            _announced = false;
+            return Task.CompletedTask;
+        };
         hub.Reconnected += async _ => await AnnounceAsync();
         // A connection the coordinator closes (a reconnect it asked for, an announcement it refused)
         // is not retried by SignalR's own policy: the reconnect loop starts it again, so a node the
@@ -102,6 +112,7 @@ internal sealed class NodeAgent : BackgroundService
         // signals: starting the connection from inside it races the next close.
         hub.Closed += _ =>
         {
+            _announced = false;
             _closed.Writer.TryWrite(true);
             return Task.CompletedTask;
         };
@@ -145,7 +156,10 @@ internal sealed class NodeAgent : BackgroundService
     private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan AnnounceTimeout = TimeSpan.FromSeconds(30);
 
-    /// <summary>Starts the connection, retrying until the coordinator answers, then announces the replica.</summary>
+    /// <summary>
+    /// Starts the connection, retrying until the coordinator answers, then announces the replica. The announcement comes first: a
+    /// coordinator that accepts it knows the identity, and only then is the data plane client asked for, and announced in turn.
+    /// </summary>
     private async Task ConnectAsync(HubConnection hub, CancellationToken ct)
     {
         while (true)
@@ -153,9 +167,12 @@ internal sealed class NodeAgent : BackgroundService
             ct.ThrowIfCancellationRequested();
             try
             {
+                // Nothing is announced on a connection that has not been announced on yet.
+                _announced = false;
                 if (hub.State == HubConnectionState.Disconnected) await hub.StartAsync(ct);
-                await EnsureNodeAsync(ct);
+                var hadClient = _node is not null;
                 await AnnounceAsync();
+                if (!hadClient && await EnsureNodeAsync(ct)) await AnnounceAsync();
                 return;
             }
             // Only the host's own stop ends the loop: an invocation the coordinator's close cancels
@@ -174,9 +191,10 @@ internal sealed class NodeAgent : BackgroundService
 
     /// <summary>
     /// Connects the replica's TransportR client, once it can: it registers with the coordinator's hub under this node's identity,
-    /// and its client id is what the announcement carries, so the coordinator opens transfers to it. An identity the coordinator
-    /// does not know yet, or has disabled, cannot register one, and the announcement is how it becomes known: it announces without a
-    /// client (and so is placed no run), and <see cref="WatchDataPlaneAsync"/> connects the client when it can.
+    /// and its client id is what the announcement carries, so the coordinator opens transfers to it. It is asked for only after an
+    /// announcement the coordinator accepted: an identity it does not know, or has disabled, is refused there and could not register
+    /// one. A replica announced without a client is placed no run, and <see cref="WatchDataPlaneAsync"/> connects the client when
+    /// it can.
     /// </summary>
     private async Task<bool> EnsureNodeAsync(CancellationToken ct)
     {
@@ -245,7 +263,7 @@ internal sealed class NodeAgent : BackgroundService
             while (!ct.IsCancellationRequested)
             {
                 await Task.Delay(DataPlaneWatchInterval, ct);
-                if (hub.State != HubConnectionState.Connected) continue;
+                if (hub.State != HubConnectionState.Connected || !_announced) continue;
                 try
                 {
                     if (_node is not { } node)
@@ -281,11 +299,20 @@ internal sealed class NodeAgent : BackgroundService
     {
         // Bounded: a connection the coordinator aborts as it refuses the announcement may never answer it.
         using var bounded = new CancellationTokenSource(AnnounceTimeout);
-        await _hub!.InvokeAsync(NodeChannel.Announce,
-            new NodeAnnouncement(_options.Name, _options.Description, _datasets, Role, _bricks.Bricks,
-                Capabilities: [NodeAnnouncement.LaunchToken, .. _gate is null ? [] : new[] { NodeAnnouncement.RawFragments }, .. _requests.Keys.Order(StringComparer.Ordinal)],
-                DtpipeVersion: _dtpipeVersion, InstanceId: _instanceId, Origin: $"{Environment.MachineName}:{Environment.ProcessId}",
-                DataPlaneClientId: _node?.ClientId), bounded.Token);
+        try
+        {
+            await _hub!.InvokeAsync(NodeChannel.Announce,
+                new NodeAnnouncement(_options.Name, _options.Description, _datasets, Role, _bricks.Bricks,
+                    Capabilities: [NodeAnnouncement.LaunchToken, .. _gate is null ? [] : new[] { NodeAnnouncement.RawFragments }, .. _requests.Keys.Order(StringComparer.Ordinal)],
+                    DtpipeVersion: _dtpipeVersion, InstanceId: _instanceId, Origin: $"{Environment.MachineName}:{Environment.ProcessId}",
+                    DataPlaneClientId: _node?.ClientId), bounded.Token);
+        }
+        catch (Exception)
+        {
+            _announced = false;
+            throw;
+        }
+        _announced = true;
 
         // Accepted again: what could not be reported before is sent once.
         if (_runs is not null) await _runs.OnAnnouncedAsync();

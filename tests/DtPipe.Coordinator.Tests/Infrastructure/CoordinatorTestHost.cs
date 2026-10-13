@@ -21,10 +21,18 @@ namespace DtPipe.Coordinator.Tests.Infrastructure;
 /// server's does, with the rights and the enrolment left out. The caller is the connection, and its subject is the
 /// token's <c>sub</c>, none in dev mode.
 /// </summary>
-public sealed class TestNodeHub(ReplicaProtocol protocol) : Hub
+public sealed class TestNodeHub(ReplicaProtocol protocol, AnnouncementGate gate) : Hub
 {
     public async Task Announce(NodeAnnouncement announcement)
     {
+        gate.Arrived();
+        if (gate.Refusing)
+        {
+            // The connection stays open while the refusal is held, as a coordinator that is slow to refuse leaves it.
+            if (gate.RefuseAfter > TimeSpan.Zero) await Task.Delay(gate.RefuseAfter);
+            Context.Abort();
+            return;
+        }
         var subject = Context.User?.FindFirst("sub")?.Value;
         var (replica, _) = await protocol.OnAnnouncedAsync(Context.ConnectionId, subject, announcement, [], Context.Abort);
         if (replica is null) Context.Abort();
@@ -43,6 +51,30 @@ public sealed class TestNodeHub(ReplicaProtocol protocol) : Hub
         protocol.OnDisconnected(Context.ConnectionId);
         return base.OnDisconnectedAsync(exception);
     }
+}
+
+/// <summary>
+/// What a test coordinator does with an announcement: accepts it, or, once a test sets <see cref="Refusing"/>, closes the
+/// connection after <see cref="RefuseAfter"/>, as the real coordinator does with a host whose identity is unknown or disabled.
+/// It counts the announcements that reached the node channel.
+/// </summary>
+public sealed class AnnouncementGate
+{
+    private int _arrived;
+    private volatile bool _refusing;
+    private long _refuseAfterTicks;
+
+    public bool Refusing { get => _refusing; set => _refusing = value; }
+
+    public TimeSpan RefuseAfter
+    {
+        get => TimeSpan.FromTicks(Interlocked.Read(ref _refuseAfterTicks));
+        set => Interlocked.Exchange(ref _refuseAfterTicks, value.Ticks);
+    }
+
+    public int Announcements => Volatile.Read(ref _arrived);
+
+    internal void Arrived() => Interlocked.Increment(ref _arrived);
 }
 
 /// <summary>
@@ -104,6 +136,7 @@ public sealed class CoordinatorTestHost : IAsyncDisposable
                             services.AddAuthorization();
                         }
                         hub.Build();
+                        services.AddSingleton<AnnouncementGate>();
                         services.AddNodeLink<TestNodeHub>();
                         // After AddCoordinatorHub: lets a test override ReplicaRegistryOptions or
                         // RunOrchestratorOptions, neither registered by default (both types resolve

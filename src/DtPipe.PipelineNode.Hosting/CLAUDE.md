@@ -85,14 +85,17 @@ none. One node per process, which is one replica of its node's identity; a secon
 - **A run the coordinator never wires is abandoned.** `DtPipeNodeOptions.UnwiredRunTimeout` bounds the wait
   from `Launch` to the last `Wire` asked for, so a coordinator that vanished does not leave a child until the
   host stops. `[local: PipelineNode.Tests ReplicaRunsTests]`
-- **An identity the coordinator does not know yet, or has disabled, announces without a data plane client.**
-  Its client cannot register (it holds no group), and its announcement is how it becomes known, so `NodeAgent`
-  connects the channel first and the client second, and announces without `DataPlaneClientId` when the
-  client could not register: the replica is eligible to nothing. `WatchDataPlaneAsync` then connects the
-  client as soon as it can and announces again, and registers again a client the hub has stopped knowing (a
-  coordinator that lost it), which TransportR would otherwise do at its next presence heartbeat. One
-  connection of the client at a time.
-  `[local: the lab's smoke.py rights - enrollment, identity disabled, flow matrix run time]`
+- **A host asks for its data plane client only once the coordinator has accepted its announcement.**
+  `NodeAgent` connects the channel and announces without `DataPlaneClientId`; when that announcement is
+  accepted it connects the client and announces again with the client's id, and a replica announced without
+  one is eligible to nothing. The coordinator accepts only an identity it knows and has enabled (any other
+  has its connection closed), so a host refused at the announcement asks the IdP for no new token and
+  connects no client, however often it is refused. `WatchDataPlaneAsync` acts only while an announcement
+  stands: it connects the client as soon as it can and announces again, and registers again a client the hub
+  has stopped knowing (a coordinator that lost it), which TransportR would otherwise do at its next presence
+  heartbeat. One connection of the client at a time.
+  `[local: PipelineNode.Tests DataPlaneAfterAnnouncementTests, NodeAgentDataPlaneTests; the lab's smoke.py rights - enrollment, identity disabled, flow matrix run time]`
+  `[unchecked: a close that lands as an announcement is accepted]`
 - **The coordinator closing the channel renews the data plane's registration, without waiting for the runs to
   end.** A client's groups are those it registered with, so once the coordinator has closed the channel `NodeAgent`
   calls `PipelineNode.RefreshRegistrationAsync` (the call's contract is in `src/DtPipe.PipelineNode/CLAUDE.md`)
