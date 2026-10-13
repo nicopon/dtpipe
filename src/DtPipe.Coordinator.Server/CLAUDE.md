@@ -76,6 +76,12 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   and with none online it refuses. A node announces a
   variable's name, never its value. `[local: the lab's smoke.py bricks — a library save's check, a sink that refuses;
   sandbox — a cut on its node]`
+- **The coordinator manages flows and nothing around them.** It never does a schedule or a trigger (only a
+  person starts a run: a service never reaches `/api`), a dependency between pipelines, an automatic retry or
+  a backfill, a priority in the queue (`RunDispatch` stays a first-come admission check), or a transformation
+  (it runs no dtpipe: see "The server never opens a node's data"). A distribution plan is a placement, not a
+  calendar. `[local: RunDispatchTests — the order of the queue, TrustedIdpTests — a service never reaches /api]`
+  `[unchecked: the rest; nothing fails when a scheduler, a trigger or a retry is added]`
 - **What `dtpipe studio` calls is a contract** (`DtPipe.Jobs/Coordinator`: `CoordinatorApi`, the
   records): the server maps those routes and writes those records, and the metadata document
   announces `CoordinatorApi.Contract`; a change a deployed studio would misread takes a new number.

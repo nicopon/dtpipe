@@ -316,6 +316,11 @@ the control plane, over each replica's node channel; TransportR carries the data
   claims (a service's `sub` is its `client_id`), each scheme failing the other's tokens. `dtpipe
   studio` reaches `/api` with a person's token, through the routes and records of
   `DtPipe.Jobs/Coordinator`, whose contract number both sides check.
+- **The CLI hosts neither a node nor a hub.** `dtpipe` is the child a node drives, reached through `arrow:`;
+  it references no TransportR assembly and no project of the family, maps no SignalR hub, and `dtpipe
+  studio` is a client of the coordinator's `/api`, only when it is given `--coordinator`.
+  `[CI: validate_distributed_boundary.sh — names and references, and no SignalR hub under src/DtPipe]`
+  `[unchecked: a listener of the CLI that is no SignalR hub]`
 
 `[local: DtPipe.Coordinator.Tests, DtPipe.PipelineNode.Tests, DtPipe.Coordinator.Server.Tests, the lab's
 smoke.py]`

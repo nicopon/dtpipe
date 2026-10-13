@@ -6,7 +6,7 @@ set -e
 # family (every project named DtPipe.Coordinator* or DtPipe.PipelineNode*), its tests and the lab; no
 # core project reaches it; the two base libraries stay libraries; the lab and its sample data stay
 # under samples/, outside the solution and the build; the family reaches the solution only through
-# DtPipe.Jobs.
+# DtPipe.Jobs; the CLI maps no SignalR hub.
 #
 # Scope: names and references, not behaviour. A type that crosses the line without naming TransportR
 # (a transitive use) is not seen here.
@@ -109,6 +109,19 @@ if [ -n "$HITS" ]; then
     fail "a project of the family references a solution project other than DtPipe.Jobs"
 fi
 pass "the family references DtPipe.Jobs and nothing else of the solution"
+
+# 7. The CLI hosts no hub. The ASP.NET Core framework the studio brings carries SignalR, so no
+#    reference check sees a hub of the CLI's own.
+HITS=""
+for f in $(echo "$FILES" | grep -E '^src/DtPipe/.*\.cs$' || true); do
+    [ -f "$f" ] || continue
+    if grep -qE 'AddSignalR|MapHub|IHubContext|Microsoft\.AspNetCore\.SignalR' "$f"; then HITS="$HITS\n  $f"; fi
+done
+if [ -n "$HITS" ]; then
+    echo -e "$HITS"
+    fail "the CLI maps or uses a SignalR hub"
+fi
+pass "the CLI hosts no SignalR hub"
 
 echo ""
 echo -e "${GREEN}Distributed boundary checks passed.${NC}"

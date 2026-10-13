@@ -223,6 +223,13 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   two minutes ahead, a 401 renews once and sends once, a refused renewal signs out with its reason.
   The link's client sends to the coordinator's origin only, follows no redirect, and always carries
   the CSRF header.
+- **Without `--coordinator` the studio is whole, minus the bricks, the library and the publication.**
+  `StudioTools.Coordinator` is null: `/api/coordinator` has no address, `/api/bricks` an empty catalogue,
+  `GET /api/publish` no publication, and `/api/coordinator/login`, `/api/library`, `/api/library/open` and
+  `POST /api/publish` answer 404 "opened without --coordinator". Jobs, cards, variables and samples never
+  ask for the link; a route that needs it refuses the same way.
+  `[CI: StudioServerTests — jobs, cards, variables, samples and the four refusals]`
+  `[unchecked: import, debug and run without a coordinator; that a new route needing the link refuses]`
 - **The coordinator decides what a brick is; the studio reads its answer.** Before taking a job
   apart, the studio sends it to `/api/bricks/recognize` and gives `DesignService` a `StudioBricks`
   that finds each answer again by the top-level branch's YAML, a key and never a matching rule

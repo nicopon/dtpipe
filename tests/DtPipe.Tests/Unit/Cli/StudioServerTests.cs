@@ -300,6 +300,61 @@ public sealed class StudioServerTests : IAsyncLifetime
         Assert.Equal(["a", "b"], decomposed.GetProperty("model").GetProperty("steps").EnumerateArray().Select(s => s.GetProperty("alias").GetString()));
     }
 
+    /// <summary>
+    /// This fixture opens the studio without a coordinator. What only a coordinator gives is the bricks,
+    /// the library and the publication; everything else is the studio's own and does not ask for one.
+    /// </summary>
+    [Fact]
+    public async Task Without_a_coordinator_everything_works_except_the_bricks_the_library_and_the_publication()
+    {
+        async Task<List<string>> StatusesAsync(params (HttpMethod Method, string Path, object? Body)[] calls)
+        {
+            var seen = new List<string>();
+            foreach (var (method, path, body) in calls)
+            {
+                var (status, _) = await SendAsync(Request(method, path, body: body));
+                seen.Add($"{method} {path} {(int)status}");
+            }
+            return seen;
+        }
+
+        var hash = (await OpenAsync("a.yaml")).GetProperty("hash").GetString();
+
+        Assert.Equal(
+        [
+            "GET /api/jobs 200", "GET /api/job?path=a.yaml 200", "GET /api/components 200", "GET /api/bricks 200",
+            "GET /api/publish?path=a.yaml 200", "POST /api/design/compose 200", "POST /api/design/decompose 200",
+            "POST /api/variables 200", "POST /api/sample 200",
+        ],
+        await StatusesAsync(
+            (HttpMethod.Get, "/api/jobs", null), (HttpMethod.Get, "/api/job?path=a.yaml", null),
+            (HttpMethod.Get, "/api/components", null), (HttpMethod.Get, "/api/bricks", null),
+            (HttpMethod.Get, "/api/publish?path=a.yaml", null),
+            (HttpMethod.Post, "/api/design/compose", Cards("csv:b.csv")),
+            (HttpMethod.Post, "/api/design/decompose", new { yaml = Copy }),
+            (HttpMethod.Post, "/api/variables", new { path = "a.yaml", yaml = Copy }),
+            (HttpMethod.Post, "/api/sample", new { yaml = "a: 1", rows = 5 })));
+
+        var (_, coordinator) = await SendAsync(Request(HttpMethod.Get, "/api/coordinator"));
+        Assert.Equal(JsonValueKind.Null, coordinator.GetProperty("url").ValueKind);
+        var (_, bricks) = await SendAsync(Request(HttpMethod.Get, "/api/bricks"));
+        Assert.Equal(0, bricks.GetProperty("bricks").GetArrayLength());
+        Assert.Equal(0, bricks.GetProperty("nodes").GetArrayLength());
+        var (_, publication) = await SendAsync(Request(HttpMethod.Get, "/api/publish?path=a.yaml"));
+        Assert.Equal(JsonValueKind.Null, publication.GetProperty("publication").ValueKind);
+
+        (HttpMethod, string, object?)[] needingOne =
+        [
+            (HttpMethod.Get, "/api/library", null), (HttpMethod.Post, "/api/library/open", new { id = "orders" }),
+            (HttpMethod.Post, "/api/coordinator/login", null), (HttpMethod.Post, "/api/publish", new { path = "a.yaml", hash, id = "orders" }),
+        ];
+        Assert.Equal(
+            needingOne.Select(c => $"{c.Item1} {c.Item2} 404"),
+            await StatusesAsync(needingOne));
+        var (_, refusal) = await SendAsync(Request(HttpMethod.Post, "/api/publish", body: new { path = "a.yaml", hash, id = "orders" }));
+        Assert.Equal("This studio was opened without --coordinator.", refusal.GetProperty("error").GetString());
+    }
+
     [Fact]
     public async Task A_body_the_route_cannot_read_is_refused()
     {
