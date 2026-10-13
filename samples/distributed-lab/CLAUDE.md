@@ -44,8 +44,11 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   `[local: tools/validate_lab_down.sh]`
 - **`LAB_REPLICAS` starts more hosts of one node's identity** (`<node>.r<n>`, `lab.sh`'s header): each
   makes its own working directory and the databases stay shared. `lab.sh down`, `nodes` and `status` also
-  take in any replica a pid file records, so a run without the variable that started them stops them.
-  `[unchecked: the smoke runs one host per node]`
+  take in any replica a pid file records, so a run without the variable that started them stops them; a switch
+  of mode without it stops a replica and starts none, so export it to every call. `LAB_NODE_FILE` makes
+  `exec-node` read another declaration of the node, which is how `smoke.py replicas` starts a replica at another
+  version of a brick. That pass is named only, refuses the compose stack (it starts hosts), and leaves the hosts
+  started as the lab starts them. `[local: smoke.py replicas]`
 - **The IdP's signing key survives an IdP restart.** A node host reuses its cached token until
   shortly before it expires, so `Lab.Idp` reads its key from `.state/idp/signing-key.pem` (generated
   once, readable by its owner only, outside git). `lab.sh idp --Idp:AccessTokenLifetimeSeconds=N`

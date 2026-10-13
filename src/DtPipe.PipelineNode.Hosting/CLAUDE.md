@@ -119,10 +119,10 @@ none. One node per process, which is one replica of its node's identity; a secon
   that share a configuration never share a directory, and removes it when it stops in order. Its
   databases and variables are not there. The instance id is chosen once per process and sent with every
   `Announce`, with where the process runs. `[local: Hosting.Tests ProcessDirectoryTests — the path]`
-  `[unchecked: the removal at an orderly stop]`
+  `[local: samples/distributed-lab smoke.py replicas — the removal at an orderly stop]`
 - **Stopping says so, then disposes every run before the host exits** (`NodeAgent.StopAsync`): `Leave` ends
   the replica's runs at the coordinator at once, with no grace period to wait out, and no dtpipe child
-  outlives the host. `[unchecked]`
+  outlives the host. `[local: samples/distributed-lab smoke.py replicas — Leave of an idle replica]` `[unchecked: runs in flight at an orderly stop, children that outlive the host]`
 - Logs reach the host's own loggers and the coordinator (`NodeLogForwarder`, bounded and lossy: a
   slow coordinator never blocks a relay that logs). The coordinator gets Debug and up, TransportR
   and the framework from Warning.

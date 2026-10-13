@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end check of the lab: every pipeline, distributed, against its monolithic witness.
 
-Six passes. The Lab view's: each pipelines/*.yaml with its catalog layout, deployed and run one
+Six passes by default and a seventh, named. The Lab view's: each pipelines/*.yaml with its catalog layout, deployed and run one
 after the other. The library's: each library pipeline distributed automatically and its plan
 saved, then all of them deployed at once and their runs queued together, as the page does: runs
 that share a data node must never be in flight together.
@@ -26,18 +26,22 @@ For every pipeline of the first two:
   3. the verdict: outcome Succeeded, every edge's two row counts equal, and the job's
      `# lab-check:` query returning the same row on both warehouses.
 
-Usage: smoke.py <lab-url> <dtpipe> <state-dir> [lab|library|rights|faults|bricks|sandbox] [pipeline-id-substring ...]
+The replicas': node-4 carried by two hosts (LAB_REPLICAS=node-4=2), played only when named: a run names the replica
+it ran on; a replica that stops says so, is gone at once and removes its directory; one that is cut is listed disconnected,
+then lost once its grace has run out, and the next run goes to the other; a replica announcing another declaration of a brick is passed over for a plan made from
+the first one, and when none is left the run is refused, until the pipeline is deployed again. Local lab only.
+Usage: smoke.py <lab-url> <dtpipe> <state-dir> [lab|library|rights|faults|bricks|sandbox|replicas] [pipeline-id-substring ...]
 A leading pass name runs that pass alone.
 Against the compose stack (`lab.sh stack smoke`, LAB_TARGET=stack) the state directory is `.stack/`: the
 witness reads the databases the nodes seeded there, the library is the coordinator's own directory, its
 log is the container's, and the enrollment check's host is a throwaway container of the stack's `node` image.
 Exits 0 when every selected pipeline passes, 1 otherwise. Standard library only.
 """
-import base64, csv, io, itertools, json, os, re, subprocess, sys, time, urllib.error, urllib.parse, urllib.request, uuid
+import base64, csv, glob, io, itertools, json, os, re, signal, subprocess, sys, time, urllib.error, urllib.parse, urllib.request, uuid
 from datetime import datetime
 
 URL, DTPIPE, STATE = sys.argv[1].rstrip("/"), sys.argv[2], sys.argv[3]
-PASSES = {"lab", "library", "rights", "faults", "bricks", "sandbox"}
+PASSES = {"lab", "library", "rights", "faults", "bricks", "sandbox", "replicas"}
 ONLY = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] in PASSES else None
 SELECTED = sys.argv[5:] if ONLY else sys.argv[4:]
 RUN_TIMEOUT = 180
@@ -1263,11 +1267,255 @@ def faults_pass():
         return 1
 
 
+REPLICA_PROBE = "replicas-probe"
+REPLICA_NODE = "node-4"
+_hosts = {}  # the processes this script started, by the name lab.sh gives them: kept to be reaped
+
+
+def node_replicas(node=REPLICA_NODE):
+    return next(n for n in call("/api/nodes") if n["name"] == node)["replicas"]
+
+
+def replica_pid(replica):
+    """A host announces where it runs as `machine:pid`."""
+    return int(replica["origin"].rsplit(":", 1)[1])
+
+
+def host_name(pid):
+    """The name lab.sh gave the process with this pid (node-4, node-4.r2), from the pid files."""
+    run = os.path.join(STATE, "run")
+    for file in os.listdir(run):
+        if file.endswith(".pid") and open(os.path.join(run, file)).read().strip() == str(pid):
+            return file[:-len(".pid")]
+    raise RuntimeError(f"no pid file names process {pid}")
+
+
+def host_exited(pid):
+    child = next((c for c in _hosts.values() if c.pid == pid), None)
+    if child is not None:
+        return child.poll() is not None
+    try:
+        os.kill(pid, 0)
+        return False
+    except ProcessLookupError:
+        return True
+
+
+def signal_host(pid, sig):
+    """Sends `sig` to a host and returns once the process is gone."""
+    os.kill(pid, sig)
+    until(lambda: host_exited(pid), 30, f"process {pid} to exit")
+
+
+def start_host(name, node_file=None):
+    """Starts the host `name` the way lab.sh does, on the node file given (another declaration of its bricks) or its own."""
+    env = {**os.environ, "DTPIPE": DTPIPE, "LAB_STATE": STATE}
+    env.pop("LAB_NODE_SANDBOX", None)
+    env.pop("LAB_NODE_FILE", None)
+    if node_file:
+        env["LAB_NODE_FILE"] = node_file
+    with open(os.path.join(STATE, "logs", name + ".log"), "w") as log:
+        child = subprocess.Popen([os.path.join(LAB_DIR, "lab.sh"), "exec-node", re.sub(r"\.r\d+$", "", name), URL],
+                                 env=env, stdout=log, stderr=log, start_new_session=True)
+    with open(os.path.join(STATE, "run", name + ".pid"), "w") as f:
+        f.write(str(child.pid))
+    _hosts[name] = child
+
+
+def await_replicas(count, what, timeout=90):
+    """Exactly `count` replicas of the node, all connected: the replicas of a host that is gone are listed until its grace is out."""
+    def ready():
+        replicas = node_replicas()
+        return replicas if len(replicas) == count and all(r["connected"] for r in replicas) else None
+    return until(ready, timeout, what)
+
+
+def host_pid(name):
+    with open(os.path.join(STATE, "run", name + ".pid")) as f:
+        return int(f.read())
+
+
+def declared_apart():
+    """The node file of a replica that declares `customers-mirror` over another table than the lab's."""
+    node = json.load(open(os.path.join(LAB_DIR, "nodes", REPLICA_NODE + ".json")))
+    brick = next(b for b in node["bricks"] if b["id"] == "customers-mirror")
+    brick["branch"]["provider-options"]["duck-writer"]["table"] = "customers_elsewhere"
+    os.makedirs(os.path.join(STATE, "replicas"), exist_ok=True)
+    path = os.path.join(STATE, "replicas", REPLICA_NODE + ".json")
+    with open(path, "w") as f:
+        json.dump(node, f)
+    return path
+
+
+def replicas_pass():
+    """node-4 carried by two hosts, and the replica model played against them: the replica a run goes to is named in its
+    journal; a host that stops says so, is gone at once and removes its directory; a host that is cut is listed disconnected, then
+    lost once its grace has run out, and the next run goes to the other; a replica that announces another declaration of a brick is out for a plan made from the first, and with
+    none left the run is refused, naming the brick, until the pipeline is deployed again. The pipeline is deployed under
+    its own id and no plan is saved; the hosts are started again as the lab starts them when the pass ends."""
+    failures = [0]
+    check = checker("replicas", failures)
+    if STACK:
+        print(f"FAIL  replicas {'setup':28} the compose stack runs one host per node: this pass needs the local lab")
+        return 1
+    mirror, _, elsewhere = mirror_jobs()
+    fragment = f"{REPLICA_PROBE}@{REPLICA_NODE}"
+    declared = {}  # host -> "lab" or "apart": which declaration of its bricks the host was last started with
+    hosts = []
+
+    def run_probe():
+        """One run of the probe, to its verdict: the final record, whose result names the replica of each fragment."""
+        run = call("/api/runs", {"pipelineId": REPLICA_PROBE})
+        return until(lambda: _finished(run["runId"]), RUN_TIMEOUT, f"{run['runId']} to finish")
+
+    def ran_on(final):
+        """The host a succeeded run's fragment on the node ran on."""
+        if final["state"] != "succeeded":
+            raise RuntimeError(f"{final['runId']} {final['state']}: {final.get('refusal') or final.get('description')}")
+        bad = [e for e in final["result"]["edgeCounts"] if e["sent"] is None or e["sent"] != e["received"]]
+        if bad:
+            raise RuntimeError(f"edge counts disagree: {bad}")
+        pid = replica_pid(final["result"]["replicas"][fragment])
+        if pid not in [host_pid(h) for h in hosts]:
+            raise RuntimeError(f"the journal names process {pid}, which is none of the node's hosts")
+        return host_name(pid)
+
+    def deployed_on():
+        """How many replicas of the node could run the deployed fragment now, as the deployment reports it."""
+        return next(f["replicas"] for d in call("/api/deployments") if d["pipelineId"] == REPLICA_PROBE
+                    for f in d["fragments"] if f["name"] == fragment)
+
+    def disagree():
+        return next(n for n in call("/api/nodes") if n["name"] == REPLICA_NODE)["replicasDisagree"]
+
+    def launch(name, node_file=None):
+        start_host(name, node_file)
+        declared[name] = "apart" if node_file else "lab"
+
+    def restart(name, node_file=None):
+        """The host `name` stopped if it runs, then started on `node_file` (its own declaration by default)."""
+        pid = host_pid(name)
+        if not host_exited(pid):
+            signal_host(pid, signal.SIGTERM)
+        until(lambda: all(replica_pid(r) != pid for r in node_replicas()), 30, f"{name} to leave the registry")
+        launch(name, node_file)
+        await_replicas(2, f"{name} to be back")
+
+    try:
+        replicas = node_replicas()
+        if len(replicas) != 2 or not all(r["connected"] for r in replicas):
+            raise RuntimeError(f"{REPLICA_NODE} must be carried by two connected hosts (LAB_REPLICAS={REPLICA_NODE}=2), "
+                               f"it has {[(r['id'], r['connected']) for r in replicas]}")
+        hosts.extend(sorted(host_name(replica_pid(r)) for r in replicas))
+        declared.update({h: "lab" for h in hosts})
+        apart = declared_apart()
+        call("/api/deploy", {"pipelineId": REPLICA_PROBE, "yaml": mirror, "cuts": [], "placement": MIRROR_PLACEMENT})
+        first = []  # the host of the first run, then the other
+
+        def named():
+            first.append(ran_on(run_probe()))
+            first.append(next(h for h in hosts if h != first[0]))
+            return f"ran on {first[0]} (pid {host_pid(first[0])}); the deployment counts {deployed_on()} replicas"
+        check("a run names its replica", named)
+        if not first:
+            raise RuntimeError("no run to build on")
+        x, y = first
+
+        def process_directory(host):
+            """The directory a host makes for its process under the node's: named by the instance id, which the replica id prefixes."""
+            replica = next(r for r in node_replicas() if replica_pid(r) == host_pid(host))
+            return glob.glob(os.path.join(STATE, REPLICA_NODE, replica["id"] + "*"))
+
+        def stopped():
+            if not process_directory(x):
+                raise RuntimeError(f"{x} has no process directory under {REPLICA_NODE}/ while it runs")
+            directory = process_directory(x)
+            stopped_at = time.time()
+            signal_host(host_pid(x), signal.SIGTERM)
+            until(lambda: len(node_replicas()) == 1, 20, f"{x} to leave the registry")
+            left = time.time() - stopped_at
+            if any(os.path.exists(d) for d in directory):
+                raise RuntimeError(f"{x} stopped in order and left its process directory {directory}")
+            on = ran_on(run_probe())
+            if on != y:
+                raise RuntimeError(f"the next run went to {on}, not to {y}")
+            return f"{x} stopped, gone from the registry in {left:.1f}s with no grace waited, its directory removed; the next run ran on {y}"
+        check("a stopped replica leaves", stopped)
+
+        def cut():
+            launch(x)
+            await_replicas(2, f"{x} to be back")
+            os.kill(host_pid(y), signal.SIGKILL)
+            until(lambda: host_exited(host_pid(y)), 10, f"{y} to die")
+            until(lambda: any(not r["connected"] for r in node_replicas()), 30, f"{y} to be seen cut")
+            cut_at = time.time()
+            until(lambda: len(node_replicas()) == 1, 120, f"{y} to be lost")
+            lost_after = time.time() - cut_at
+            on = ran_on(run_probe())
+            if on != x:
+                raise RuntimeError(f"the next run went to {on}, not to {x}")
+            return (f"{y} cut, listed disconnected, lost {lost_after:.0f}s later, once its grace had run out; the next run ran on {x}, "
+                    f"which came after the deployment")
+        check("a cut replica is lost", cut)
+
+        def one_apart():
+            launch(y)
+            await_replicas(2, f"{y} to be back")
+            if deployed_on() != 2:
+                raise RuntimeError(f"the deployment counts {deployed_on()} replicas before the update")
+            restart(x, apart)
+            until(disagree, 30, "the replicas to disagree")
+            if deployed_on() != 1:
+                raise RuntimeError(f"the deployment counts {deployed_on()} replicas with one of two updated")
+            ran = [ran_on(run_probe()) for _ in range(3)]
+            if set(ran) != {y}:
+                raise RuntimeError(f"runs went to {ran}; only {y} composes the plan")
+            return f"{x} announces another declaration of the brick; 3 runs of the plan as made all ran on {y}"
+        check("an updated replica is passed over", one_apart)
+
+        def none_left():
+            restart(y, apart)
+            until(lambda: not disagree(), 30, "the replicas to agree")
+            if deployed_on() != 0:
+                raise RuntimeError(f"the deployment counts {deployed_on()} replicas with both updated")
+            started = time.time()
+            final = run_probe()
+            said = final.get("refusal") or final.get("description") or ""
+            if final["state"] == "succeeded" or "changed since the plan was made" not in said:
+                raise RuntimeError(f"expected a refusal naming the changed brick, got {final['state']}: {said}")
+            held = [f"{n['name']}/{r['id']}" for n in call("/api/nodes") for r in n["replicas"] if r["runs"]]
+            if held:
+                raise RuntimeError(f"replicas still hold runs after the refusal: {held}")
+            return f"refused after {time.time() - started:.1f}s: {said[:110]}"
+        check("none left composes the plan", none_left)
+
+        def deployed_again():
+            undeploy(REPLICA_PROBE)
+            call("/api/deploy", {"pipelineId": REPLICA_PROBE, "yaml": elsewhere, "cuts": [], "placement": MIRROR_PLACEMENT})
+            return f"deployed again from the declaration now announced, ran on {ran_on(run_probe())}"
+        check("deployed again, it runs", deployed_again)
+    except Exception as e:
+        failures[0] += 1
+        print(f"FAIL  replicas {'setup':28} {e}")
+    finally:
+        undeploy(REPLICA_PROBE)
+        try:
+            for name in hosts:
+                if declared[name] != "lab" or host_exited(host_pid(name)):
+                    restart(name)
+            await_replicas(2, "both hosts to be back as the lab starts them")
+        except Exception as e:
+            failures[0] += 1
+            print(f"FAIL  replicas {'restore':28} the hosts are not back as the lab starts them: {e}")
+    return failures[0]
+
+
 def main():
     ctx = Context()
     failures = (catalog_pass(ctx) if ONLY in (None, "lab") else 0) + (library_pass(ctx) if ONLY in (None, "library") else 0) \
         + (rights_pass() if ONLY in (None, "rights") else 0) + (faults_pass() if ONLY in (None, "faults") else 0) \
-        + (bricks_pass() if ONLY in (None, "bricks") else 0) + (sandbox_pass() if ONLY in (None, "sandbox") else 0)
+        + (bricks_pass() if ONLY in (None, "bricks") else 0) + (sandbox_pass() if ONLY in (None, "sandbox") else 0) \
+        + (replicas_pass() if ONLY == "replicas" else 0)
     return 1 if failures else 0
 
 

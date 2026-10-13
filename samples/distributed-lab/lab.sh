@@ -18,6 +18,7 @@
 #   ./lab.sh status    which processes run (those no pid file names too), and what the coordinator sees
 #   ./lab.sh seed      rebuild the four databases (LAB_SCALE multiplies the row counts)
 #   ./lab.sh smoke     every pipeline, distributed, against its monolithic witness
+#   ./lab.sh smoke replicas   the replica model against node-4 carried by two hosts (LAB_REPLICAS=node-4=2, local lab only)
 #   ./lab.sh ui        both pages render, and the coordinator has no designer (headless Chrome)
 #   ./lab.sh studio    dtpipe studio against the lab: library, sample, debug run, run and stop, publish (headless Chrome)
 #   ./lab.sh logs      follow every log
@@ -201,9 +202,10 @@ exec_coordinator() {
 
 # Replaces this shell with node $1's host, pointed at the coordinator $2: the official runner for a
 # node file whose role is runner, configured through its environment, else the lab's data node host.
-# The one way a node starts, for this script and for tools/campaign.py.
+# LAB_NODE_FILE names another declaration of the node (a replica at another version of a brick).
+# The one way a node starts, for this script and for tools/campaign.py and smoke.py.
 exec_node() {
-    local node="$1" coordinator="$2" file="$LAB/nodes/$1.json"
+    local node="$1" coordinator="$2" file="${LAB_NODE_FILE:-$LAB/nodes/$1.json}"
     if [[ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("role", ""))' "$file")" == runner ]]; then
         local id secret description
         { read -r id; read -r secret; read -r description; } < <(python3 -c \
@@ -302,12 +304,13 @@ nodes_mode() {
 
 # The passes of smoke.py, each on nodes in the mode it needs: the lab pass puts branches that are not
 # bricks on data nodes, so it runs on sandbox nodes; every other pass runs on strict ones, which is
-# what they prove. $1 is the function that switches the node hosts, $2 and $3 the coordinator's URL
+# what they prove. The replicas pass is played only when named, on a lab started with LAB_REPLICAS=node-4=2.
+# $1 is the function that switches the node hosts, $2 and $3 the coordinator's URL
 # and the state directory smoke.py reads; the rest are the caller's arguments.
 smoke_passes() {
     local switch="$1" url="$2" state="$3"; shift 3
     local pass="${1:-}"
-    case "$pass" in lab|library|rights|faults|bricks|sandbox) shift ;; *) pass="" ;; esac
+    case "$pass" in lab|library|rights|faults|bricks|sandbox|replicas) shift ;; *) pass="" ;; esac
     local code=0
     run_pass() {
         local mode="$1" name="$2"; shift 2
