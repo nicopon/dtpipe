@@ -44,6 +44,14 @@ dtpipe \
 
 More, from a first pipeline to a DAG: [docs/quickstart.md](./docs/quickstart.md).
 
+## Studio
+
+`dtpipe studio ./jobs` opens a local page over the YAML jobs of a folder: each job as cards you
+edit and sample on the real engine, with the target never written. It is part of the CLI and needs
+no coordinator; `--coordinator` only adds the bricks and the pipeline library of a
+[distributed setup](./docs/experimentation.md). Details in
+[REFERENCE.md](./REFERENCE.md#studio-dtpipe-studio).
+
 ## What it connects to
 
 | Family | Examples | Prefix |
