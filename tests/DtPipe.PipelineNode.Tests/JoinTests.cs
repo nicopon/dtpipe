@@ -8,11 +8,8 @@ using Xunit;
 namespace DtPipe.PipelineNode.Tests;
 
 /// <summary>
-/// J2: a node that takes more than one edge per direction, the join C4's own design motivated but
-/// could not run distributed until now (<c>PipelineNode.ValidateEdges</c> refused it outright).
-/// The three guards run in the order the plan lays out: plumbing alone (<c>--merge</c>), the real
-/// join operator, then the join's own producer dying mid-flow - the "C demande X à A et Y à B, et B
-/// tombe" sequence the coordinator's design has described since C4.
+/// A node that takes more than one edge per direction. Three guards, in this order: the plumbing
+/// alone (<c>--merge</c>), the real join operator, then the join's second producer dying mid-flow.
 /// </summary>
 [Collection(ChildExitTimingCollection.Name)]
 public class JoinTests
@@ -85,9 +82,8 @@ public class JoinTests
     }
 
     /// <summary>
-    /// The join's own second producer killed mid-flow - the sequence the coordinator's C4 design
-    /// motivated ("C demande X à A et Y à B, et B tombe") but that stayed unrunnable in a distributed
-    /// setting until J2. Throttled so the kill lands mid-stream, same margin as
+    /// The join's second producer killed mid-flow: the consumer reads X from A and Y from B, and B
+    /// dies. Throttled so the kill lands mid-stream, same margin as
     /// <see cref="CoordinatorDrivenTests.MiddleFragmentDies_RunFailsWithItAsCause_OthersAsConsequences"/>.
     /// </summary>
     [Fact]

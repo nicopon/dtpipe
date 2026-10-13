@@ -321,7 +321,7 @@ internal sealed class RunSession
 
         // A fragment unreachable here can never report Exited on its own - it is unreachable precisely
         // because nothing can tell it anything, itself included - and a fragment that was fully wired but
-        // has since gone silent (the canonical pair muet case) is still unreachable and must be excluded the
+        // has since gone silent is still unreachable and must be excluded the
         // same way, not just skipped for Cancel. The identified cause itself is excluded outright, even when
         // its own replica still answers (a fragment that never became ready is still connected): it must stay
         // silent for DetermineOutcome to name it, not be masked by a Cancel it happens to still receive.

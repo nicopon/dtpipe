@@ -10,10 +10,10 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Adapters.Arrow;
 
 /// <summary>
-/// <c>arrow:pipe://&lt;name&gt;</c>, the location form a pipeline node's own excess edge (J2) wires
-/// a fragment's <c>--bind-input</c>/<c>--bind-output</c> onto. Client-only by design - every test
-/// here plays the server itself, the role a real pipeline node always takes before launching the
-/// child that opens this side.
+/// <c>arrow:pipe://&lt;name&gt;</c>, the location form a pipeline node wires onto a fragment's
+/// <c>--bind-input</c>/<c>--bind-output</c> for each edge beyond the primary one on the standard
+/// streams. Client-only by design - every test here plays the server itself, the role a real
+/// pipeline node always takes before launching the child that opens this side.
 /// </summary>
 public class ArrowPipeTests
 {

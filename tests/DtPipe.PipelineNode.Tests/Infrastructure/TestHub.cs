@@ -10,8 +10,8 @@ namespace DtPipe.PipelineNode.Tests.Infrastructure;
 
 /// <summary>
 /// TransportR's own <see cref="CommandHub"/> has no usable concrete form of its own — every real
-/// host, including the coordinator, derives one. This one adds nothing: C2 has no coordinator, so
-/// the test harness plays that role directly through <c>ITransferInitiator</c>/<c>ITransferTerminator</c>.
+/// host, including the coordinator, derives one. This one adds nothing: these tests have no coordinator,
+/// so the test harness plays that role directly through <c>ITransferInitiator</c>/<c>ITransferTerminator</c>.
 /// </summary>
 public sealed class TestHub : CommandHub
 {

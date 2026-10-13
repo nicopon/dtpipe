@@ -1,9 +1,8 @@
 namespace DtPipe.PipelineNode.Tests;
 
 /// <summary>
-/// Two producers joined on a shared key by a consumer with two inbound edges - the join C4's own
-/// design motivated (<c>--from X --ref Y --sql</c>) but that could not run distributed until J2
-/// lifted <see cref="PipelineNode"/>'s one-inbound-edge cap. Both producers emit <c>generate:</c>
+/// Two producers joined on a shared key by a consumer with two inbound edges
+/// (<c>--from X --ref Y --sql</c>). Both producers emit <c>generate:</c>
 /// rows (a deterministic <c>GenerateIndex</c> column, no database needed), joined 1:1 on it so the
 /// witness needs no fixture data of its own. The consumer job is hand-built via
 /// <c>--export-job</c> rather than derived from <c>dtpipe split</c>, which only ever cuts a single

@@ -101,7 +101,7 @@ public class CoordinatorAbortTests
 
     /// <summary>
     /// A fragment's whole node going away (simulated by disposing it outright, not just killing its
-    /// child) once it is fully wired and actively relaying is the pair muet case: no <c>Exited</c>, no
+    /// child) once it is fully wired and actively relaying leaves no <c>Exited</c>, no
     /// <c>Fault</c>, nothing at all from that side. Modelled on
     /// <see cref="CoordinatorDrivenTests.MiddleFragmentDies_RunFailsWithItAsCause_OthersAsConsequences"/> -
     /// throttled so the kill lands mid-stream, not before either edge has carried anything.

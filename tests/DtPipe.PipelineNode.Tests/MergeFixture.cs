@@ -1,8 +1,8 @@
 namespace DtPipe.PipelineNode.Tests;
 
 /// <summary>
-/// Two producers merged by a consumer with two inbound edges - isolates J2's own plumbing (a
-/// second, named-pipe edge alongside the primary stdin one) from any join semantics, which
+/// Two producers merged by a consumer with two inbound edges - isolates the plumbing of a
+/// second, named-pipe edge alongside the primary stdin one from any join semantics, which
 /// <see cref="JoinFixture"/> covers instead. The consumer job is hand-built via <c>--export-job</c>
 /// rather than derived from <c>dtpipe split</c>, which only ever cuts a single linear job at one
 /// point and never produces a two-producer topology.
