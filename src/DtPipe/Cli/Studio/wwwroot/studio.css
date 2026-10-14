@@ -112,6 +112,16 @@ textarea { width: 100%; resize: vertical; }
   color: var(--muted); cursor: pointer; font-size: 15px;
 }
 .dcard-zoom:hover { color: var(--accent); }
+.dcard-tools { position: absolute; right: 6px; bottom: 3px; display: flex; gap: 2px; }
+.ctool {
+  width: 22px; height: 20px; padding: 0; border: none; border-radius: 4px; background: transparent;
+  color: var(--muted); cursor: pointer; font-size: 13px; line-height: 1;
+}
+.ctool:hover { color: var(--accent); }
+.ctool.bp.on { color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, transparent); }
+.ctool.pipette.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.ctool[aria-disabled="true"] { opacity: .35; cursor: not-allowed; }
+.designer-bar .toggle.on { background: var(--accent); color: var(--panel); border-color: var(--accent); }
 .port {
   position: absolute; width: 14px; height: 14px; border-radius: 50%; background: var(--panel);
   border: 2px solid var(--accent); cursor: crosshair;

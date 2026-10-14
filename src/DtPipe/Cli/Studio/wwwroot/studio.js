@@ -2,7 +2,10 @@
 
 import { $, api, el, fill, forgetToken, status, token } from "./dom.js";
 import { coordinator, onCoordinator, refreshCoordinator } from "./coordinator.js";
-import { brickBranches, cards, compose, isDirty, markSaved, mountDesigner, openBlank, openJob, refreshDrawer, setCatalog, showTab } from "./designer.js";
+import {
+  brickBranches, cards, cardWatch, compose, composed, focusCard, isDirty, markSaved, mountDesigner, openBlank, openJob, refreshCanvas, refreshDrawer,
+  sampleCard, setCatalog, showTab, stageTable,
+} from "./designer.js";
 
 // The job open: its path, the hash a save must find on disk (null for a job not written yet), and
 // whether saving rewrites a text written by hand.
@@ -48,9 +51,11 @@ async function openFromLibrary(id) {
 }
 
 // What a debug run, a run or a publication showed belongs to the job it was for: another job starts clean.
-// A run still going is kept, since it goes on whatever is open.
+// A run still going is kept, since it goes on whatever is open. Debug stays on or off, as the person left it.
 function forgetResults() {
-  debug = null;
+  clearTimeout(debugTimer);
+  debugSeq++;
+  dbg = { ...freshDebug(dbg.on), rows: dbg.rows };
   publication = null;
   if (run && run.phase !== "running") run = null;
 }
@@ -143,8 +148,11 @@ async function save() {
   const acceptErrors = result.errors?.length > 0;
   if (acceptErrors && !confirm(`${result.errors.length} problem(s) remain: the job written may not run. Save anyway?`)) return;
   try {
+    const draft = current.hash ? null : current.draft;
     const answer = await api("/api/job", { path: current.path, hash: current.hash, model: cards(), acceptErrors }, "PUT");
     current = { path: current.path, hash: answer.hash, rewrites: false };
+    // What a debug run kept before the first save belongs to the job now.
+    if (draft) await debugSync({ adopt: draft }, true);
     $("job-name").textContent = current.path;
     markSaved();
     status("saved", "good");
@@ -222,15 +230,6 @@ function variablesView() {
   ];
 }
 
-async function sample(yaml, rows) {
-  try {
-    return await api("/api/sample", { yaml, rows, path: current?.path || null, bricks: brickBranches() });
-  } catch (e) {
-    if (e.status === 422) showTab("variables");
-    throw e;
-  }
-}
-
 // The coordinator's bricks for the palette; the catalog read last when it cannot be read again.
 async function loadBricks() {
   try {
@@ -242,62 +241,259 @@ async function loadBricks() {
   }
 }
 
-// ---------------------------------------------------------------- debug run
+// ---------------------------------------------------------------- debug
 
-// The last debug run: { rows, answer }, answer being the server's { report, levels, notice }.
-let debug = null;
+// Debug watches cards. A watched card keeps the rows it delivers and a checkpoint of them; Play runs the job up
+// to a card, from the last level kept, with the writer neutralised. The server holds the watchers and the
+// checkpoints beside the job and settles them against the job's text; this page shows what it answers.
+//   watch: { branch, at, card, break, level, key, alias } per watcher, `break` being where Continue stops, `card` being the card it sits on, which keeps its name when the
+//   branch that runs it is renamed; loaded: the server's answer for this job was read; branches: { branch, transformers, cuttable };
+//   samples: what each watched place showed last, by place; running: a Play is under way.
+const freshDebug = (on = false) => ({ on, rows: 1000, loaded: false, watch: [], branches: [], samples: new Map(), running: false, notice: null, report: null });
+let dbg = freshDebug();
+let debugSeq = 0;
+let debugTimer = null;
 
-async function debugRun(resume) {
-  if (!current) return;
-  const result = await compose();
-  let rows = debug?.rows ?? 1000;
-  if (!resume) {
-    const asked = prompt("Source rows to read from each source (1 to 100000). Each stage shows at most 1000 of them:", String(rows));
-    if (asked === null) return;
-    rows = Math.max(1, Math.min(100000, parseInt(asked, 10) || 1000));
-  }
-  const forPath = current.path;
-  try {
-    status("debug run…", "warn");
-    const answer = await api("/api/debug", {
-      yaml: result?.yaml || "", rows, path: current.hash ? current.path : null, bricks: brickBranches(), resume: resume || null,
-    });
-    // Another job may have been opened while it ran: its answer is not that job's.
-    if (current?.path !== forPath) { status(`debug run of ${forPath} ended`, "warn"); return; }
-    debug = { rows, answer };
-    status(answer.report.success ? "debug run done" : "debug run failed", answer.report.success ? "good" : "bad");
-  } catch (e) {
-    if (e.status === 422) showTab("variables");
-    status(e.message, "bad");
-    return;
-  }
-  showTab("debug");
+const MAX_DEBUG_ROWS = 100000;
+// What a watcher's rows are filed under: its card, which keeps its name when the branch is renamed.
+const placeKey = (w) => w.card || `${w.branch}#${w.at}`;
+const watcherOf = (alias) => dbg.watch.find((w) => w.card === alias) || null;
+// Where a card is watched now: a branch changes name when cards are joined or split, a card does not.
+const placeOf = (alias) => { const place = cardWatch(alias); return place && { ...place, card: alias }; };
+// What the server is told of a watcher; null once its card is gone.
+const spec = (w) => { const place = w.card ? placeOf(w.card) : { branch: w.branch, at: w.at }; return place && { ...place, break: !!w.break }; };
+const sameWatcher = (a, b) => a.branch === b.branch && a.at === b.at;
+const newDraft = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
+
+// A job on disk is named by its path; one not saved yet by a draft, which its first save hands to the job.
+function debugScope() {
+  if (current.hash) return { path: current.path };
+  current.draft ??= newDraft();
+  return { draft: current.draft };
 }
 
-function debugView() {
-  if (!debug) {
-    return el("p", { class: "hint" }, "A debug run samples the job cut after each transformer, keeps what every level delivered and lets you start again from a level. It is not the job's run.");
+function redrawDebug() {
+  $("d-mode")?.classList.toggle("on", dbg.on);
+  $("d-mode")?.setAttribute("aria-pressed", String(dbg.on));
+  for (const id of ["d-watch-rows-label", "d-watch-reset", "d-continue", "d-step"]) if ($(id)) $(id).hidden = !dbg.on;
+  for (const id of ["d-continue", "d-step"]) if ($(id)) $(id).disabled = dbg.running;
+  refreshCanvas();
+  refreshDrawer();
+}
+
+function applyView(view) {
+  dbg.loaded = true;
+  dbg.watch = view.watch;
+  dbg.branches = view.branches;
+  // A checkpoint is valid or it does not exist: rows shown for a place that holds none are gone.
+  for (const [place, shown] of [...dbg.samples]) {
+    if (!dbg.watch.some((w) => placeKey(w) === place && w.key === shown.key)) dbg.samples.delete(place);
   }
-  const { answer } = debug;
-  const reports = Object.fromEntries((answer.report.branches || []).map((b) => [b.branch, b]));
-  const byBranch = {};
-  for (const level of answer.levels) (byBranch[level.branch] ||= []).push(level);
-  return [
-    el("p", { class: "hint warn" }, answer.notice),
-    answer.report.error ? el("p", { class: "warn" }, answer.report.error) : null,
-    Object.entries(byBranch).map(([branch, levels]) => el("div", { class: "debug-branch" },
-      el("h4", {}, branch),
-      levels.map((level) => {
-        const stage = (reports[level.alias]?.stages || []).at(-1);
-        return el("div", { class: "debug-level" },
-          el("p", {}, `level ${level.level}`, level.level === 0 ? " (the read)" : "", " · ",
-            level.key ? el("code", {}, level.key.slice(0, 8)) : "no checkpoint kept", " ",
-            level.key && current?.hash ? el("button", { class: "small ghost", onclick: () => debugRun({ branch, level: level.level }) }, "Resume here") : null),
-          stage ? el("table", {},
-            el("tr", {}, (stage.columns || []).map((c) => el("th", {}, c.Name))),
-            (stage.sample || []).slice(0, 10).map((row) => el("tr", {}, row.map((v) => el("td", {}, v ?? ""))))) : null);
-      }))),
-  ];
+  redrawDebug();
+}
+
+// Tells the server what the page watches or resets and what the job's text now is; it answers what it still holds.
+// The server takes one state change at a time (409 otherwise), so the page sends them one after the other.
+let debugQueue = Promise.resolve();
+// `extra` may be a function, read when its turn comes: what a click asks is built from what the server last said.
+function queued(task) {
+  const turn = debugQueue.then(task);
+  debugQueue = turn.catch(() => {});
+  return turn;
+}
+
+const debugSync = (extra = {}, force = false) => queued(() => debugSyncNow(extra, force));
+
+async function debugSyncNow(extra, force) {
+  if (!current || (!dbg.on && !force) || dbg.running) return false;
+  const result = composed();
+  if (!result?.yaml || result.errors?.length) return false;
+  const forJob = current;
+  const seq = ++debugSeq;
+  const asked = typeof extra === "function" ? extra() : extra;
+  // Once the server's watchers are known, every sync tells where their cards sit now.
+  const watch = asked.watch ?? (dbg.loaded ? dbg.watch.map(spec) : undefined);
+  try {
+    const answer = await api("/api/debug/state", {
+      ...debugScope(), yaml: result.yaml, rows: dbg.rows, ...asked, watch: watch?.filter(Boolean),
+    });
+    if (seq !== debugSeq || forJob !== current) return false;
+    applyView(answer.view);
+    return true;
+  } catch (e) {
+    status(e.message, "bad");
+    return false;
+  }
+}
+
+// After every composition the server settles the checkpoints against the text: what an edit made untrue goes.
+function debugComposed() {
+  if (!dbg.on) return;
+  clearTimeout(debugTimer);
+  debugTimer = setTimeout(() => debugSync(), 300);
+}
+
+async function toggleDebug() {
+  dbg.on = !dbg.on;
+  redrawDebug();
+  if (dbg.on) await debugSync();
+}
+
+async function setDebugRows(e) {
+  dbg.rows = Math.max(1, Math.min(MAX_DEBUG_ROWS, parseInt(e.target.value, 10) || 1000));
+  e.target.value = String(dbg.rows);
+  await debugSync();
+}
+
+// A play is one more turn of the queue: it never meets a state change still holding the engine slot.
+const debugPlay = (place) => (!current || dbg.running ? Promise.resolve() : queued(() => debugPlayNow(place)));
+
+// The cards in the order the job reaches them: a card after every card it reads.
+function cardOrder() {
+  const steps = cards()?.steps || [];
+  const byAlias = new Map(steps.map((s) => [s.alias, s]));
+  const order = [];
+  const seen = new Set();
+  const visit = (step) => {
+    if (seen.has(step.alias)) return;
+    seen.add(step.alias);
+    for (const from of [...step.from, ...step.ref]) if (byAlias.has(from)) visit(byAlias.get(from));
+    order.push(step.alias);
+  };
+  steps.forEach(visit);
+  return order;
+}
+
+// Where Continue (breakpoints only) or Step (every watcher) stops: the first watched card, in the order the job reaches
+// them, that holds nothing yet. Null when none is left, which runs the job to its end.
+function nextStop(breaksOnly) {
+  const order = cardOrder();
+  const ahead = dbg.watch.filter((w) => w.card && !w.key && (!breaksOnly || w.break) && order.includes(w.card))
+    .sort((a, b) => order.indexOf(a.card) - order.indexOf(b.card));
+  return ahead.length ? placeOf(ahead[0].card) : null;
+}
+
+const debugGo = (breaksOnly) => debugPlay(nextStop(breaksOnly));
+
+async function debugPlayNow(place) {
+  if (!current || dbg.running) return;
+  const result = await compose();
+  if (result.errors?.length) { showTab("problems"); status("The cards do not compose into a job yet: see Problems.", "bad"); return; }
+  const forJob = current;
+  clearTimeout(debugTimer);
+  dbg.running = true;
+  redrawDebug();
+  status("debug run…", "warn");
+  try {
+    const answer = await api("/api/debug", { ...debugScope(), yaml: result.yaml, rows: dbg.rows, bricks: brickBranches(), upTo: place });
+    // Another job may have been opened while it ran: its answer is not that job's.
+    if (forJob !== current) { status("debug run ended", "warn"); return; }
+    dbg.running = false;
+    applyView(answer.view);
+    const byAlias = Object.fromEntries((answer.report.branches || []).map((b) => [b.branch, b]));
+    for (const w of answer.view.watch) {
+      const stage = w.alias && w.key ? byAlias[w.alias]?.stages?.at(-1) : null;
+      if (stage) dbg.samples.set(placeKey(w), { stage, key: w.key });
+    }
+    dbg.notice = answer.notice;
+    dbg.report = answer.report;
+    if (answer.report.success && place?.card) focusCard(place.card);
+    status(answer.report.success ? (place?.card ? `stopped at ${place.card}` : "debug run reached the end") : "debug run failed",
+      answer.report.success ? "good" : "bad");
+  } catch (e) {
+    if (e.status === 422 && vars.variables.some((v) => !v.ready)) showTab("variables");
+    status(e.message, "bad");
+  } finally {
+    dbg.running = false;
+    redrawDebug();
+  }
+}
+
+function cardTools(alias) {
+  if (!dbg.on) return null;
+  const place = cardWatch(alias);
+  if (!place) return null;
+  const watcher = watcherOf(alias);
+  const branch = dbg.branches.find((b) => b.branch === place.branch);
+  // A branch with a stream processor, or that cannot be cut, runs whole: only its end is watched.
+  const whole = place.at === "read" && branch && !branch.cuttable && branch.transformers > 0;
+  const tool = (name, glyph, title, extra = {}) => el("button",
+    { class: "ctool", "data-card-tool": name, title, "aria-label": title, "aria-disabled": whole && name !== "reset" ? "true" : null, ...extra }, glyph);
+  return el("div", { class: "dcard-tools" },
+    tool("break", "●", whole ? "This card runs whole with its branch: it cannot be watched" : watcher?.break ? "Breakpoint: Continue stops here. Click to remove it" : "Breakpoint: make Continue stop here",
+      { class: watcher?.break ? "ctool bp on" : "ctool bp", "aria-pressed": String(!!watcher?.break) }),
+    tool("watch", "◉", whole ? "This card runs whole with its branch: it cannot be watched" : watcher ? "Watching: click to show its rows, again to stop" : "Watch this card",
+      { class: watcher ? "ctool pipette on" : "ctool pipette", "aria-pressed": String(!!watcher) }),
+    tool("play", "▶", "Run the job up to this card"),
+    watcher ? tool("reset", "↺", "Forget what this card and every card after it kept") : null);
+}
+
+async function cardTool(alias, name) {
+  const place = placeOf(alias);
+  if (!place || !dbg.on || dbg.running) return;
+  const watcher = watcherOf(alias);
+  const branch = dbg.branches.find((b) => b.branch === place.branch);
+  if (name !== "reset" && place.at === "read" && branch && !branch.cuttable && branch.transformers > 0) {
+    status(`${alias} runs whole with its branch: watch the step after it.`, "warn");
+    return;
+  }
+  if (name === "watch") {
+    if (watcher && sampleCard() === alias) {
+      // The panel is already on this card: the pipette turns off, and the card forgets its rows.
+      await debugSync(() => ({ watch: dbg.watch.filter((w) => !sameWatcher(w, watcher)).map(spec) }));
+    } else if (watcher) {
+      focusCard(alias);
+    } else if (await debugSync(() => ({ watch: [...dbg.watch.map(spec), place] }))) {
+      focusCard(alias);
+    }
+  } else if (name === "break") {
+    // A breakpoint watches its card; removing it leaves the card watched.
+    const others = dbg.watch.filter((w) => !watcher || !sameWatcher(w, watcher)).map(spec);
+    const asked = [...others, { ...place, break: !watcher?.break }];
+    if (await debugSync(() => ({ watch: asked })) && !watcher) focusCard(alias);
+  } else if (name === "play") {
+    await debugPlay(place);
+  } else if (name === "reset") {
+    await debugSync({ reset: [place] });
+  }
+}
+
+function sampleView(alias) {
+  if (!dbg.on) {
+    return el("p", { class: "hint" }, "Turn Debug on to watch a card: a watched card keeps the rows it delivers, and Play runs the job up to it. "
+      + "The writer is neutralised, so no target is written.");
+  }
+  const place = alias ? cardWatch(alias) : null;
+  const parts = [];
+  if (dbg.running) parts.push(el("p", { class: "warn" }, "Running…"));
+  if (!place) {
+    parts.push(el("p", { class: "hint" }, alias ? `${alias} writes a target and holds nothing of its own: select the card before it.` : "Select a card to see the rows it delivers."));
+    return parts;
+  }
+  const branch = dbg.branches.find((b) => b.branch === place.branch);
+  if (branch && !branch.cuttable && branch.transformers > 0) {
+    parts.push(el("p", { class: "hint" }, `${alias} belongs to the branch ${place.branch}, which runs whole (a stream processor or a job the cut refuses): it is watched at its end, not inside.`));
+  }
+  const watcher = watcherOf(alias);
+  const shown = watcher && dbg.samples.get(placeKey(watcher));
+  if (!watcher) {
+    parts.push(el("p", { class: "hint" }, `${alias} is not watched: click its ◉ to watch it, then ▶ to run the job up to it, `
+      + "or Step to run to the next watched card."));
+  } else if (!shown) {
+    parts.push(el("p", { class: "hint" }, watcher.key
+      ? `${alias} holds a checkpoint: ▶ reads it back and shows its rows.`
+      : `Nothing kept for ${alias} yet: ▶ runs the job up to it.`));
+  } else {
+    parts.push(el("p", { class: "muted" }, `${alias}: ${shown.stage.rowsSeen} rows delivered. The target was not written.`),
+      el("div", { class: "scroll" }, stageTable(shown.stage)));
+  }
+  const errors = dbg.report?.errors || (dbg.report?.error ? [dbg.report.error] : []);
+  if (dbg.report && !dbg.report.success) {
+    parts.push(el("p", { class: "bad" }, `The last debug run failed${dbg.report.stage ? ` (${dbg.report.stage})` : ""}.`),
+      errors.length ? el("ul", { class: "msgs bad" }, errors.map((m) => el("li", {}, m))) : null);
+  }
+  if (dbg.notice) parts.push(el("p", { class: "hint warn" }, dbg.notice));
+  return parts;
 }
 
 // ---------------------------------------------------------------- run
@@ -511,21 +707,27 @@ async function start() {
   mountDesigner($("designer"), components, {
     toolbar: () => [
       el("button", { id: "d-save", title: "Write the job and its layout (Ctrl+S)", onclick: () => save() }, "Save"),
-      el("button", { id: "d-debug", title: "Sample the job cut after each transformer, keeping every level", onclick: () => debugRun() }, "Debug run"),
+      el("button", { id: "d-mode", class: dbg.on ? "toggle on" : "toggle", "aria-pressed": String(dbg.on), onclick: toggleDebug,
+        title: "Debug: watch cards, keep the rows they deliver and run up to a card. The writer is neutralised." }, "Debug"),
+      el("label", { id: "d-watch-rows-label", class: "rows", hidden: !dbg.on, title: "Source rows each source reads (each card shows at most 1000 of them)" },
+        "rows ", el("input", { id: "d-watch-rows", type: "number", min: "1", max: String(MAX_DEBUG_ROWS), value: String(dbg.rows), onchange: setDebugRows })),
+      el("button", { id: "d-watch-reset", hidden: !dbg.on, title: "Forget everything the watchers kept", onclick: () => debugSync({ resetAll: true }) }, "Reset"),
+      el("button", { id: "d-step", hidden: !dbg.on, title: "Run to the next watched card that holds nothing yet, or to the end",
+        onclick: () => debugGo(false) }, "Step"),
+      el("button", { id: "d-continue", hidden: !dbg.on, title: "Run to the next breakpoint (●) that holds nothing yet, or to the end",
+        onclick: () => debugGo(true) }, "Continue"),
       el("button", { id: "d-run", title: "Run the saved job here, after you confirm what it writes", onclick: () => prepareRun() }, "Run"),
       coordinator() ? el("button", { id: "d-publish", title: "Send the saved job to the coordinator's library", onclick: () => publish() }, "Publish") : null,
     ],
-    onComposed: loadVariables,
-    sample,
+    onComposed: (result) => { loadVariables(result); debugComposed(); },
+    cardTools,
+    cardTool,
+    sampleView,
     extraTabs: [{
       name: "variables",
       label: "Variables ",
       badge: () => { const n = vars.variables.filter((v) => !v.ready).length; return n ? el("span", { class: "count" }, n) : null; },
       render: variablesView,
-    }, {
-      name: "debug",
-      label: "Debug",
-      render: debugView,
     }, {
       name: "run",
       label: "Run",

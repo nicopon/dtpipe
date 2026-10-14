@@ -20,7 +20,7 @@
 #   ./lab.sh smoke     every pipeline, distributed, against its monolithic witness
 #   ./lab.sh smoke replicas   the replica model against node-4 carried by two hosts (LAB_REPLICAS=node-4=2, local lab only)
 #   ./lab.sh ui        both pages render, and the coordinator has no designer (headless Chrome)
-#   ./lab.sh studio    dtpipe studio against the lab: library, sample, debug run, run and stop, publish (headless Chrome)
+#   ./lab.sh studio    dtpipe studio against the lab: library, debug (watch, play, reset), run and stop, publish (headless Chrome)
 #   ./lab.sh logs      follow every log
 #   ./lab.sh reset     down, then delete .state/
 #   ./lab.sh stack C   the same lab as the compose stack (compose.yaml), C being

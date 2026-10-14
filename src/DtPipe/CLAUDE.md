@@ -281,17 +281,33 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   **A stop asked while the run was unfinished ends in 130**, whether the engine threw (a linear
   job) or answered 1 or 0 (a DAG); a run finished before the stop keeps its code and a later stop
   is a 409. `[CI: StudioRunTests]` `[local: studio_check.py]`
-- **A debug run is the real sample of a cut copy, never the job's run.** `DebugCutter` cuts each
-  branch after every transformer into mini-branches joined by `from:` (`__level` is reserved), each
-  with a checkpoint in the studio's own session, through `JobCutter.Cut` and `BranchSides`: the head
-  keeps the reader and what bounds it, the last piece keeps the branch's alias, output and writer
-  side, and a branch with a processor, no transformer or one `JobCutter` refuses stays whole. It
-  runs through `SampleCoreAsync` (bricks bound as a sample binds them), the bound applies to each
+- **A debug run is the real sample of a copy cut at the watched cards, never the job's run.** A
+  watcher sits at a card's read (level 0) or at the end of its branch. `DebugCutter` cuts a branch
+  there into mini-branches joined by `from:` (`__level` is reserved), each with a checkpoint in the
+  studio's own session, through `JobCutter.Cut` and `BranchSides`: the head keeps the reader and what
+  bounds it, the last piece keeps the branch's alias, output and writer side. With no watcher nothing
+  is cut; a branch with a processor, no transformer or one `JobCutter` refuses runs whole and keeps
+  an end checkpoint only. A run stops at a card and drops what the stop does not need (`Dropped`),
+  reading each branch it needs back from the highest level held (`Unread`: no input left to bind).
+  It runs through `SampleCoreAsync` (bricks bound as a sample binds them), the bound applies to each
   source alone (at most `DebugMaxRows`, a thousand rows shown per stage) and a checkpoint read back
-  is not bounded again. `.dtpipe/studio/<job>-debug.json` keeps each level's key and a digest of the
-  text that produced it (never the text); a resume replaces the levels up to k with `from-checkpoint`
-  and is refused, by name, when that text changed or the checkpoint left the session. The cut is
-  never saved or published. `[CI: StudioDebugTests]`
+  is not bounded again. With no stop the run reaches the end of the job: only the branches that write
+  or that nothing reads start it, so a branch whose reader reads a checkpoint back is left out.
+- **A stop is a new run, never a paused process.** Continue and Step are the page choosing a stop
+  (`nextStop`): the first watched card, in the order the job reaches its cards, that holds no
+  checkpoint (breakpoints only for Continue), or none, which runs to the end. The server holds a
+  breakpoint as a flag of its watcher (`DebugWatch.Break`), which the cutter never reads and a reset
+  keeps; removing the watcher removes it.
+- **A level's digest comes from the job as written, never from the cut.** It hashes the branches the
+  level reads, the reader side, the transformers up to it and the rows asked, so watching another card
+  invalidates nothing. A launch value is not in it.
+- **A checkpoint is valid or does not exist.** `POST /api/debug` and `POST /api/debug/state` settle the
+  watchers and held levels against the text under the engine slot, delete from the session what the
+  text, the rows or a reset no longer supports (a reset takes everything downstream with it), and
+  answer what is held; the page never decides validity. `.dtpipe/studio/<job>-debug.json` keeps the
+  watchers and each held level's key and digest, never the text; a job not saved yet keeps it under
+  `drafts/<id>`, adopted at its first save and purged when the studio starts. The cut is never saved
+  or published. `[CI: StudioDebugTests]`
 - Quit from the page exits 0, Ctrl+C 130. A quit is refused while a run goes on; Ctrl+C cancels
   the run and the studio then exits.
 

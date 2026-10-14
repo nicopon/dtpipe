@@ -43,8 +43,7 @@ let result = null;         // the last compose answer
 let selected = null;       // { alias } (+ t, a transformer's index, while zoomed) or { edge: { from, to, port } }
 let zoom = null;           // the alias of the Transform step shown as a chain of its transformers
 let dirty = false;
-let drawer = "yaml";       // yaml | problems | edit | sample
-let sample = null;         // the last sample report, or null
+let drawer = "yaml";       // yaml | problems | edit | sample, or a tab the host adds
 let composeSeq = 0;
 let composeTimer = null;
 
@@ -63,7 +62,7 @@ export async function openJob(yaml, layout, unsaved = false) {
   model.layout = Object.fromEntries(Object.entries(model.layout).filter(([a]) => stepOf(a)));
   if (model.steps.some((s) => !model.layout[s.alias])) autoLayout(false);
   result = answer;
-  selected = null; zoom = null; dirty = false; sample = null;
+  selected = null; zoom = null; dirty = false;
   drawer = result.errors?.length ? "problems" : "yaml";
   renderShell();
   await compose();
@@ -73,7 +72,7 @@ export async function openJob(yaml, layout, unsaved = false) {
 /** Starts from no card at all. */
 export async function openBlank(title) {
   model = normalize({ title, steps: [], layout: {} });
-  result = null; selected = null; zoom = null; dirty = true; sample = null; drawer = "yaml";
+  result = null; selected = null; zoom = null; dirty = true; drawer = "yaml";
   renderShell();
   await compose();
 }
@@ -95,6 +94,31 @@ export function brickBranches() {
     key: s.brick,
   }));
 }
+
+/**
+ * Where a card's output can be watched: the branch of the composed job that runs it, and the place on it. A source
+ * is watched at its read, a step at the end of its branch; a sink holds nothing the branch does not already show.
+ */
+export function cardWatch(alias) {
+  const step = model && stepOf(alias);
+  if (!step || step.kind === "sink") return null;
+  return { branch: result?.steps?.find((i) => i.alias === alias)?.branch || alias, at: step.kind === "source" ? "read" : "end" };
+}
+
+/** Selects a card and shows its rows in the Sample panel. */
+export function focusCard(alias) {
+  if (!model || !stepOf(alias)) return;
+  selected = { alias };
+  drawer = "sample";
+  renderCanvas();
+  renderInspector();
+  renderDrawer();
+}
+
+/** The card the Sample panel is showing, or null when the panel is closed. */
+export const sampleCard = () => (drawer === "sample" ? selected?.alias ?? null : null);
+
+export const refreshCanvas = () => { if (model) renderCanvas(); };
 
 export const isDirty = () => dirty;
 export const composed = () => result;
@@ -320,8 +344,6 @@ function renderShell() {
       el("span", { id: "d-dirty", class: "pill warn", hidden: true }, "unsaved"),
       el("span", { class: "actions" },
         seg("d-layout", "Arrange", "Arrange the cards in columns, sources first"),
-        el("label", { class: "rows" }, "rows ", el("input", { id: "d-rows", type: "number", min: "1", max: "1000", value: "20" })),
-        el("button", { id: "d-sample", class: "primary", title: "Run the job over its first source rows, the writer neutralised (Ctrl+Enter)" }, "Sample"),
         hooks.toolbar?.() || null)),
     el("div", { class: "designer-body" },
       el("aside", { class: "palette card", id: "d-palette" }),
@@ -337,7 +359,6 @@ function renderShell() {
   $("d-title").addEventListener("input", (e) => { model.title = e.target.value; touch({ canvas: !!zoom }); });
   $("d-description").addEventListener("input", (e) => { model.description = e.target.value; touch({ canvas: false }); });
   $("d-layout").addEventListener("click", () => autoLayout());
-  $("d-sample").addEventListener("click", runSample);
   applySizes();
   bindSplits();
   bindCanvas();
@@ -483,6 +504,7 @@ function renderCanvas() {
     },
       el("div", { class: "dcard-head" }, el("span", { class: "kind" }, KIND_LABEL[step.kind] || step.kind), el("span", { class: "alias" }, step.alias)),
       step.kind === "transform" ? el("button", { class: "dcard-zoom", title: "Zoom into the transformers (or double-click the card)", "aria-label": `Zoom into ${step.alias}` }, "⌕") : null,
+      hooks.cardTools?.(step.alias) || null,
       el("div", { class: "dcard-sub" }, subtitle),
       el("div", { class: "dcard-branch" }, branch),
       step.kind !== "source" ? el("span", { class: "port in", "data-port": "in", title: step.kind === "merge" ? "inputs (several)" : "input" }) : null,
@@ -558,6 +580,12 @@ function bindCanvas() {
     const inPort = e.target.closest(".port.in, .port.ref");
     const card = e.target.closest(".dcard");
     const edge = e.target.closest(".dedge-hit");
+    const tool = e.target.closest("[data-card-tool]");
+    if (tool && card) {
+      hooks.cardTool?.(card.dataset.alias, tool.dataset.cardTool);
+      e.preventDefault();
+      return;
+    }
     if (e.target.closest(".dcard-zoom") && card) {
       enterZoom(card.dataset.alias);
       e.preventDefault();
@@ -711,7 +739,6 @@ function bindPalette() {
 
 function onKey(e) {
   if (!model || !host?.isConnected) return;
-  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runSample(); return; }
   if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
   if (zoom) {
     // Zoomed, Delete removes the selected transformer, never the step.
@@ -939,7 +966,7 @@ function renderDrawer() {
       el("div", { class: "row" }, el("button", { "data-apply": true }, "Apply"),
         el("span", { class: "hint" }, "The job is taken apart into cards again; cards that keep their alias keep their place."))];
   } else if (drawer === "sample") {
-    body = sampleView();
+    body = hooks.sampleView?.(selected?.alias || null) || null;
   } else {
     body = (hooks.extraTabs || []).find((t) => t.name === drawer)?.render() || null;
   }
@@ -980,65 +1007,12 @@ function bindDrawer() {
   });
 }
 
-// ---------------------------------------------------------------- sample
+// ---------------------------------------------------------------- sample tables
 
-async function runSample() {
-  if (!model) return;
-  const button = $("d-sample");
-  button.disabled = true;
-  status("sampling…", "busy");
-  try {
-    const composedNow = await compose();
-    if (composedNow.errors?.length) { showTab("problems"); status("The cards do not compose into a job yet: see Problems.", "bad"); return; }
-    const rows = Number($("d-rows").value) || 20;
-    sample = await (hooks.sample ? hooks.sample(composedNow.yaml, rows) : api("/api/sample", { yaml: composedNow.yaml, rows }));
-    showTab("sample");
-    status(sample.success ? "sampled" : "failed", sample.success ? "good" : "bad");
-  } catch (e) {
-    status(e.message, "bad");
-  } finally {
-    button.disabled = false;
-  }
-}
-
-const list = (title, items, kind) => (items && items.length
-  ? el("div", { class: `notes ${kind}` }, el("b", {}, title), el("ul", {}, items.map((i) => el("li", {}, i))))
-  : null);
-
-function stageTable(stage) {
+export function stageTable(stage) {
   const columns = stage.columns || [];
   return el("table", {},
     el("thead", {}, el("tr", {}, columns.map((c) => el("th", {}, c.Name ?? c.name, el("small", {}, c.type))))),
     el("tbody", {}, (stage.sample || []).map((row) => el("tr", {},
       row.map((v) => (v === null ? el("td", { class: "null" }, "null") : el("td", {}, v)))))));
-}
-
-function branchReport(branch) {
-  return el("article", { class: "branch" },
-    el("h3", {}, branch.branch),
-    el("p", { class: "muted" },
-      `${branch.rowsDelivered} rows delivered to the neutralised writer · source protection: ${branch.sourceProtection}`),
-    list("Schema errors", branch.schemaCompatibility?.errors, "bad"),
-    list("Schema warnings", branch.schemaCompatibility?.warnings, "warn"),
-    branch.schemaInspectionError ? list("Schema inspection", [branch.schemaInspectionError], "warn") : null,
-    list("Hints", branch.performanceHints, "info"),
-    (branch.stages || []).map((stage) => el("section", { class: "stage" },
-      el("h4", {}, `${stage.index}. ${stage.name}`,
-        el("span", { class: "muted" }, ` ${stage.rowsSeen} rows${stage.columnar ? " · columnar" : ""}`)),
-      el("div", { class: "scroll" }, stageTable(stage)))));
-}
-
-// The selected card's branch, or every branch: a card the server joined into a branch shows that branch.
-function sampleView() {
-  if (!sample) return el("p", { class: "hint" }, "A sample runs the job through the real engine over the first source rows, with the writer neutralised: the target is never written. Each stage shows the rows it passed.");
-  const errors = sample.errors || (sample.error ? [sample.error] : []);
-  const card = selected?.alias ? result?.steps?.find((s) => s.alias === selected.alias) : null;
-  const branches = (sample.branches || []).filter((b) => !card || b.branch === (card.branch || card.alias));
-  return [
-    el("p", { class: sample.success ? "good" : "bad" },
-      sample.success ? `Sampled ${sample.rowsRequested} source rows. The target was not written.` : `The sample failed${sample.stage ? ` (${sample.stage})` : ""}. The target was not written.`),
-    list("Errors", errors, "bad"),
-    card ? el("p", { class: "hint" }, `Branch ${card.branch || card.alias}, which runs the card ${card.alias}. Click the canvas to see every branch.`) : null,
-    branches.map(branchReport),
-  ];
 }

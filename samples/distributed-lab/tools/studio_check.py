@@ -4,9 +4,11 @@ One screenshot per step. Not run by CI: it needs the lab up and the release bina
 
   1. Sign in to the coordinator, as the lab's designer, through the IdP's own form.
   2. Open from library: a pipeline lands as a new file of the folder, and is never written over.
-  3. Sample a job that reads a source brick and writes a sink brick, with a transformer between: every
-     stage shows its rows.
-  4. Debug run, then Resume here from a level it kept.
+  3. Debug a job that reads a source brick and writes a sink brick, with a transformer between: watch the
+     transformer's card, Play up to it, and its rows show in the Sample panel.
+  4. Watch the source brick too and Play again: the run starts from what the watchers kept. Reset a card
+     and it shows nothing; turning the pipette off forgets its rows. A breakpoint on the step makes
+     Continue stop there, and Continue again runs to the end.
   5. Import a command line, save it, run it after confirming what it writes, and stop a long run: the
      run ends with 130 and the studio does not quit while it goes on.
   6. Publish: a job the coordinator accepts is created, a job its check refuses is shown with its
@@ -120,29 +122,52 @@ def main():
         again = studio_api(browser, token, "POST", "/api/library/open", {"id": target})
         report(again["status"] == 409, "a library file is not overwritten", f"HTTP {again['status']}")
 
-        # 3. Sample, bricks and the steps between them
+        # 3. Debug: watch the step between the bricks, play up to it
         browser.wait_for("document.querySelectorAll('.dcard').length > 0", 20)
-        click(browser, "#d-sample")
-        sampled = browser.wait_for("document.querySelectorAll('.stage').length >= 3", 60)
-        stages = browser.js("document.querySelectorAll('.stage').length")
-        # The real POST /api/sample, from the page: every stage, the steps after the brick included, saw rows.
-        empty = browser.js("[...document.querySelectorAll('.stage')].filter(s => !(parseInt((s.textContent.match(/(\\d[\\d,]*) rows/) || [])[1]?.replace(/,/g, '') || '0', 10) > 0)).length")
-        report(sampled and empty == 0, "sample, source brick to sink brick", f"{stages} stages shown, {empty} with no row", shot(browser, "sample"))
+        step, source = ".dcard.kind-transform", ".dcard.kind-source"
+        click(browser, "#d-mode")
+        browser.wait_for(f"!!document.querySelector('{step} [data-card-tool=watch]')", 10)
+        click(browser, f"{step} [data-card-tool=watch]")
+        armed = browser.wait_for(f"document.querySelector('{step} .pipette')?.classList.contains('on')", 20)
+        empty = "Nothing kept" in text(browser, "#d-drawer")
+        report(armed and empty, "watch a card", "armed, panel empty until a run", shot(browser, "watched"))
 
-        # 4. Debug run and resume
-        stub_dialogs(browser, ["50"])
-        click(browser, "#d-debug")
-        debugged = browser.wait_for("document.querySelectorAll('.debug-level').length > 0", 90)
-        levels = browser.js("document.querySelectorAll('.debug-level').length")
-        report(debugged, "debug run", f"{levels} levels", shot(browser, "debug"))
-        resumed = False
-        if browser.js("!![...document.querySelectorAll('.debug-level button')].find(b => b.textContent === 'Resume here')"):
-            # The status still reads the first debug run's verdict: clear it, or the wait ends at once.
-            browser.js("document.getElementById('status').textContent = ''")
-            click(browser, ".debug-level button")
-            browser.wait_for("/debug run (done|failed)/.test(document.getElementById('status').textContent)", 120)
-            resumed = text(browser, "#status").strip() == "debug run done"
-        report(resumed, "resume from a level", text(browser, "#status").strip(), shot(browser, "resumed"))
+        browser.js("document.getElementById('status').textContent = ''")
+        click(browser, f"{step} [data-card-tool=play]")
+        browser.wait_for("/debug run (done|failed)/.test(document.getElementById('status').textContent)", 120)
+        done = text(browser, "#status").strip() == "debug run done"
+        rows = browser.js("document.querySelectorAll('#d-drawer table tbody tr').length")
+        report(done and rows > 0, "play up to a card", f"{rows} rows shown", shot(browser, "debug"))
+
+        # 4. Watch the source brick too: the next play starts from what is kept
+        click(browser, f"{source} [data-card-tool=watch]")
+        browser.wait_for(f"document.querySelector('{source} .pipette')?.classList.contains('on')", 20)
+        browser.js("document.getElementById('status').textContent = ''")
+        click(browser, f"{step} [data-card-tool=play]")
+        browser.wait_for("/debug run (done|failed)/.test(document.getElementById('status').textContent)", 120)
+        again = text(browser, "#status").strip() == "debug run done"
+        report(again, "play again with a second watcher", text(browser, "#status").strip(), shot(browser, "resumed"))
+        click(browser, f"{step} [data-card-tool=reset]")
+        browser.wait_for("document.querySelectorAll('#d-drawer table tbody tr').length === 0", 20)
+        reset = "Nothing kept" in text(browser, "#d-drawer")
+        report(reset, "reset a card", "its rows are gone", shot(browser, "reset"))
+        click(browser, f"{step} [data-card-tool=watch]")
+        off = browser.wait_for(f"!document.querySelector('{step} .pipette')?.classList.contains('on')", 20)
+        report(off, "turn a pipette off", "the card is no longer watched")
+
+        # Breakpoint on the step: Continue stops there, Step stops at the source brick, nothing left runs to the end
+        click(browser, f"{step} [data-card-tool=break]")
+        browser.wait_for(f"document.querySelector('{step} .bp')?.classList.contains('on')", 20)
+        browser.js("document.getElementById('status').textContent = ''")
+        click(browser, "#d-continue")
+        browser.wait_for("/(stopped at|reached the end|failed)/.test(document.getElementById('status').textContent)", 120)
+        stopped = text(browser, "#status").strip().startswith("stopped at")
+        report(stopped, "continue stops at a breakpoint", text(browser, "#status").strip(), shot(browser, "breakpoint"))
+        browser.js("document.getElementById('status').textContent = ''")
+        click(browser, "#d-continue")
+        browser.wait_for("/(stopped at|reached the end|failed)/.test(document.getElementById('status').textContent)", 120)
+        report(text(browser, "#status").strip() == "debug run reached the end", "continue with none left runs to the end", text(browser, "#status").strip())
+        click(browser, "#d-mode")
 
         # 5. Import, save, run, stop
         stub_dialogs(browser, ["dtpipe --input generate:2000000000 --output null:", "long.yaml"])

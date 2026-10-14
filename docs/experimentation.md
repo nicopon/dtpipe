@@ -39,7 +39,7 @@ same bricks outside a rolling update); nothing checks it. The lab starts several
 ## The studio
 
 `dtpipe studio` belongs to the CLI, not to the distributed projects. It opens a local page over the
-YAML jobs of a folder, to design, sample and run them, with no coordinator at all. Given
+YAML jobs of a folder, to design, debug and run them, with no coordinator at all. Given
 `--coordinator`, it also offers the bricks the nodes declare, opens pipelines from the coordinator's
 library and publishes a job there. The coordinator's own pages design nothing: what a person writes
 reaches its library from a studio. The command is in the

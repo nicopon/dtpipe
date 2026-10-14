@@ -218,6 +218,45 @@ public sealed class StudioLocalFiles(StudioFolder folder)
     /// <summary>Refuses, before anything is written, a debug state the studio could only keep through a link.</summary>
     public void CheckDebug(string job) => RefuseLinks(PathOf(job, "debug"));
 
+    /// <summary>
+    /// A job saved for the first time takes over the state its draft kept: the file moves, unless the job already
+    /// has one.
+    /// </summary>
+    public void AdoptDebug(string draft, string job)
+    {
+        var from = PathOf(draft, "debug");
+        RefuseLinks(from);
+        if (!File.Exists(from)) return;
+        if (Read(job, "debug") is null && Read(draft, "debug") is { } state) Write(job, "debug", state);
+        File.Delete(from);
+    }
+
+    /// <summary>
+    /// Forgets the debug state of the jobs that were never saved, handing each checkpoint key it held to
+    /// <paramref name="forget"/>. A studio that stopped has no page left that could adopt them.
+    /// </summary>
+    public void PurgeDrafts(Action<string> forget)
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(PathOf("drafts/x", "debug"))!;
+            RefuseLinks(directory);
+            if (!Directory.Exists(directory)) return;
+            foreach (var file in Directory.EnumerateFiles(directory, "*-debug.json"))
+            {
+                if ((File.GetAttributes(file) & FileAttributes.ReparsePoint) != 0) continue;
+                try
+                {
+                    foreach (var level in JsonNode.Parse(File.ReadAllText(file))?["levels"] as JsonArray ?? [])
+                        if ((string?)level?["key"] is { Length: > 0 } key) forget(key);
+                }
+                catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException) { }
+                File.Delete(file);
+            }
+        }
+        catch (Exception ex) when (ex is StudioRefusal or IOException or UnauthorizedAccessException) { }
+    }
+
     /// <summary>Refuses, before anything is written, a publication the studio could only keep through a link.</summary>
     public void CheckPublication(string job) => RefuseLinks(PathOf(job, "publish"));
 

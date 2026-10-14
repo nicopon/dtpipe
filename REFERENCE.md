@@ -1227,17 +1227,17 @@ Restart your terminal (or `source ~/.zshrc`) to activate. Completion suggests pr
 
 `dtpipe studio [folder]` opens a local page over the YAML jobs of a folder (default: the current
 directory). A job opens as cards: one per source, step and sink, wired as the job reads them. A
-branch's own reader and writer become a source card and a sink card, each holding its endpoint
-and the keys of its side (the same split as
-[`dtpipe split`](#offering-the-points-a-job-could-be-cut-at)); when the
-cards still form one chain, the job composes back into that one branch. A branch no card can
-describe stays one card, as written. Edit the cards, or the job as YAML, and sample it: the job
-runs through the real engine, as `--dry-run` does, over the source rows you ask for (at most
-1000), with the writer neutralised: the target is never written. Each stage shows the rows it
-passed, with its columns and types. A sample writes no file; a job that asks for a checkpoint
-still stores it in the folder's session store, as `--dry-run` does. The sample mode's safety gate
-applies, and each branch reports which source protection it had (see
-[Sample Mode](#sample-mode-and-materialisation)).
+branch's own reader and writer become a source card and a sink card, each holding its endpoint and
+the keys of its side (the same split as
+[`dtpipe split`](#offering-the-points-a-job-could-be-cut-at)); when the cards still form one chain,
+the job composes back into that one branch. A branch no card can describe stays one card, as
+written. Edit the cards, or the job as YAML. **Debug**, a switch in the bar, shows what the job
+delivers card by card without writing a target: the job runs through the real engine, as `--dry-run`
+does, over the source rows you ask for (up to 100000 per source; a card shows at most 1000 of them),
+with the writer neutralised. Each card shows its rows with their columns and types. A debug run
+writes no file; a job that asks for a checkpoint still stores it in the folder's session store, as
+`--dry-run` does. The sample mode's safety gate applies, and each branch reports which source
+protection it had (see [Sample Mode](#sample-mode-and-materialisation)).
 
 Save writes the job the studio composes from the cards, never a text the page sends: a job written
 by hand loses its inner comments and its key order, and the page says so when it opens one. A save
@@ -1246,11 +1246,11 @@ overwrites an existing file with a new job. Where each card sits is kept outside
 `.dtpipe/studio/<job>-layout.json` under the folder; `.dtpipe/` ignores itself in git.
 
 The Variables tab lists every `${{…}}` the job reads, by name, and whether something resolves it.
-The job keeps `${{NAME}}`; for a sample you may launch it with a keyring alias (see
+The job keeps `${{NAME}}`; for a debug run you may launch it with a keyring alias (see
 [Secret Management](#secret-management)) or a typed text, kept in
 `.dtpipe/studio/<job>-launch.json`. That file holds aliases and what you typed, never a value from
-the keyring, and the page is shown no value it was not given. A sample that would leave a variable
-or an alias unresolved is refused before it runs, naming each.
+the keyring, and the page is shown no value it was not given. A debug run that would leave a
+variable or an alias unresolved is refused before it runs, naming each.
 
 ```bash
 dtpipe studio ./jobs              # prints the address to open, then serves until stopped
@@ -1277,7 +1277,7 @@ Your tokens stay in the studio's memory, never on disk or in the page; quitting 
 Once signed in, the palette offers the bricks of the coordinator's nodes, grouped by node, a node
 offline greyed out, and lists this studio's dtpipe version beside each node's: a difference is
 shown, never refused. When you open a job, the coordinator says which of its branches are bricks,
-which then open as brick cards; signed out, they open as plain cards and save unchanged. A sample
+which then open as brick cards; signed out, they open as plain cards and save unchanged. A debug run
 of a job with bricks runs here: a source brick's rows (at most 100) come from its node through the
 coordinator, and a sink brick receives nothing, its rows ending in a throwaway file under
 `.dtpipe/studio/samples/`. A brick's variables belong to its node and leave the Variables tab.
@@ -1303,18 +1303,37 @@ confirm what it writes: each branch's target (a connection string with its secre
 writer's block as the file holds it. A run is real, so the page asks again if the job or the values
 it launches with changed since. A job that reads a coordinator's brick is not run here, since its
 rows would recreate a real target; a sink brick is written to a throwaway file, never to its node.
-One action runs at a time (a sample, a debug run or a run), the studio does not quit during a run,
-and **Stop** ends it with the verdict 130, however the engine answers the cancellation; a run that
-had finished before keeps its own code.
+One action runs at a time (a debug run, a change to what is watched, or a run), the studio does not
+quit during a run, and **Stop** ends it with the verdict 130, however the engine answers the
+cancellation; a run that had finished before keeps its own code.
 
-**Debug run** samples a copy of the job cut after each of its transformers, into pieces linked by
-`from:`, each keeping a checkpoint in the studio's own session (`.dtpipe/sessions/studio-debug/`).
-You choose how many rows each source reads (up to 100000; a stage shows at most 1000 of them). Each
-level shows what it delivered, and **Resume here** starts a later run from a level instead of
-rereading and recomputing what precedes it, if nothing that produced the level changed and its
-checkpoint is still in the session. It is not the job's run: every cut passes through Arrow (see
-[checkpoints](#checkpoints)), batches differ and so does the concurrency. The cut is never saved or
-published.
+**Debug** puts a pipette (◉) on every card that holds rows; a sink holds none. A card whose pipette
+is on is *watched*: it keeps the rows it delivers, shown in the Sample panel, and a checkpoint of
+them in the studio's own session (`.dtpipe/sessions/studio-debug/`). A click on a pipette turns it
+on and shows the card's rows; on a watched card whose rows are not shown, it shows them; on the
+card whose rows are shown, it turns off and forgets them. **▶** on a card runs the job up to that
+card and stops there: nothing downstream runs, and each branch starts from the highest level it
+holds instead of rereading and recomputing what precedes it. **↺** forgets what a card kept and
+what every card after it kept; **Reset** in the bar forgets everything and keeps the pipettes on.
+
+A breakpoint (●) on a card watches it and marks where **Continue** stops; removing the breakpoint
+leaves the card watched, and turning its pipette off removes both. **Continue** runs to the next
+breakpoint that holds nothing yet, **Step** to the next watched card that holds nothing yet, both in
+the order the job reaches its cards; with none left they run the job to its end, writer
+neutralised. Each stop shows the card's rows in the Sample panel. A stop is a new run that reads the
+checkpoints back, not a process held open. A reset keeps the breakpoints.
+
+A source is watched at its read, any other card at the end of its branch, and only watched cards
+are cut out of the flow: with none, the run is the job's own flow, and the more cards you watch the
+further it moves from it. A branch with a stream processor, or one that cannot be cut, runs whole
+and is watched at its end only. A checkpoint is valid or it does not exist: editing a card,
+changing the rows, or a reset forgets at once, from the session too, every checkpoint that
+depended on it. What is watched and held is kept beside the job, in
+`.dtpipe/studio/<job>-debug.json`; a job not saved yet keeps it under `drafts/`, handed to the job
+at its first save and forgotten when the studio starts. The values of the Variables tab are not
+part of what a checkpoint remembers: after changing one, press **Reset**. A debug run is not the
+job's run: every cut passes through Arrow (see [checkpoints](#checkpoints)), batches differ and so
+does the concurrency. The cut is never saved or published.
 
 The page runs dtpipe with your own access. It listens on 127.0.0.1 only and answers only the
 address it printed: the address carries a token for this session, which every request must

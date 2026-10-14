@@ -40,7 +40,7 @@ open http://127.0.0.1:5180          # sign in as labadmin / labadminpwd; the Lab
 | `./lab.sh smoke [lab\|sandbox\|library\|rights\|faults\|bricks] [id…]` | runs the end-to-end check, optionally one pass or some pipelines only; restarts the node hosts in the mode each pass needs |
 | `LAB_REPLICAS=node-4=2 ./lab.sh smoke replicas` | the replica model against node-4 carried by two hosts: a run names its replica, a stopped one leaves at once and removes its directory, a cut one is listed disconnected then lost after its grace, an updated one is passed over, and a run is refused when none left composes its plan; played only when named, local lab only, and the variable must be exported to every `lab.sh` call that restarts hosts |
 | `./lab.sh nodes strict\|sandbox` | restarts the node hosts in that mode after undoing every deployment (`LAB_NODE_SANDBOX=1 ./lab.sh up` starts them in sandbox mode) |
-| `./lab.sh studio` | drives `dtpipe studio` against the lab in headless Chrome: open from the library, sample a pipeline of bricks, debug run and resume, import, run and stop, publish and a refusal; screenshots to `.state/studio/`, outside CI |
+| `./lab.sh studio` | drives `dtpipe studio` against the lab in headless Chrome: open from the library, debug a pipeline of bricks (watch, play, reset), import, run and stop, publish and a refusal; screenshots to `.state/studio/`, outside CI |
 | `./lab.sh ui` | drives both pages in headless Chrome, the library without any designer entry, a pipeline's page with its job read only; screenshots to `.state/ui/` |
 | `./lab.sh seed` | rebuilds the databases (`LAB_SCALE=5` multiplies the row counts) |
 | `./lab.sh logs` | follows every log |

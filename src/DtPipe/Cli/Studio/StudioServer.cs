@@ -110,6 +110,7 @@ public sealed partial class StudioServer : IAsyncDisposable
         _local = new StudioLocalFiles(folder);
         _variables = new StudioVariables(_local, tools.Secrets);
         _local.PurgeSamples();
+        PurgeDrafts();
         Token = token;
         _token = Encoding.UTF8.GetBytes(token);
     }
@@ -242,6 +243,9 @@ public sealed partial class StudioServer : IAsyncDisposable
                     break;
                 case ("POST", "/api/debug"):
                     await DebugAsync(context);
+                    break;
+                case ("POST", "/api/debug/state"):
+                    await DebugStateAsync(context);
                     break;
                 case ("POST", "/api/run/prepare"):
                     await PrepareRunAsync(context);
@@ -427,7 +431,7 @@ public sealed partial class StudioServer : IAsyncDisposable
     /// gives the job to run from the one the bricks left: the debug run's cut.
     /// </summary>
     private async Task<string> SampleCoreAsync(string yaml, int rows, string? path, List<SampledBrick>? bricks, StudioSampler sampler,
-        Func<string, (string Yaml, IReadOnlySet<string> Dropped)>? rewrite, CancellationToken ct)
+        Func<string, (string Yaml, IReadOnlySet<string> Dropped, IReadOnlySet<string> Unread)>? rewrite, CancellationToken ct)
     {
         // Each brick's branch is read or written on its node: here, its rows come from the coordinator.
         var sampling = BrickSampling.Of(yaml, bricks, _tools.Coordinator?.Catalog);
@@ -458,10 +462,11 @@ public sealed partial class StudioServer : IAsyncDisposable
                 outputs.Add((alias, Bindable(files[^1])));
             }
             // The job to run, and the bindings of the branches it still has.
-            var (yamlToRun, dropped) = rewrite?.Invoke(sampling.Yaml) ?? (sampling.Yaml, new HashSet<string>());
-            string? Join(List<(string Alias, string Path)> pairs) =>
-                pairs.Where(p => !dropped.Contains(p.Alias)).Select(p => $"{p.Alias}={p.Path}").ToList() is { Count: > 0 } kept ? string.Join(',', kept) : null;
-            var bindings = new StudioBindings(Join(inputs), Join(outputs));
+            var (yamlToRun, dropped, unread) = rewrite?.Invoke(sampling.Yaml) ?? (sampling.Yaml, new HashSet<string>(), new HashSet<string>());
+            // A branch read back from a checkpoint reads nothing: no input to bind.
+            string? Join(List<(string Alias, string Path)> pairs, IReadOnlySet<string> skipped) =>
+                pairs.Where(p => !dropped.Contains(p.Alias) && !skipped.Contains(p.Alias)).Select(p => $"{p.Alias}={p.Path}").ToList() is { Count: > 0 } kept ? string.Join(',', kept) : null;
+            var bindings = new StudioBindings(Join(inputs, unread), Join(outputs, new HashSet<string>()));
 
             // The run reads ${{NAME}} through its own resolver, which asks the launch values first: each chosen
             // value is this action's alone, and the process environment is never written.
