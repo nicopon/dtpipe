@@ -212,5 +212,71 @@ public sealed class StudioPublishTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.BadRequest, bad);
         Assert.False(File.Exists(Path.Combine(_dir, "nothing.yaml")));
     }
-}
 
+    private LibrarySave LastSave() => JsonSerializer.Deserialize<LibrarySave>(_fakes.LastSaveBody!, JsonSerializerOptions.Web)!;
+
+    [Fact]
+    public async Task A_brick_only_one_node_offers_is_published_with_its_node()
+    {
+        await SignInAsync();
+        _fakes.Answers["main"] = new Recognition("n1/orders", null, null, ["n1"]);
+
+        var (status, _) = await PublishAsync(await HashAsync());
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal("n1", LastSave().Placement!["main"]);
+    }
+
+    [Fact]
+    public async Task A_brick_two_nodes_offer_is_published_unnamed()
+    {
+        await SignInAsync();
+        _fakes.Answers["main"] = new Recognition("n1/orders", null, null, ["n1", "n2"]);
+
+        var (status, _) = await PublishAsync(await HashAsync());
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Empty(LastSave().Placement ?? new Dictionary<string, string>());
+    }
+
+    [Fact]
+    public async Task The_page_lists_the_nodes_that_offer_each_brick_branch()
+    {
+        await SignInAsync();
+        _fakes.Answers["main"] = new Recognition("n1/orders", null, null, ["n1", "n2"]);
+        _fakes.Answers["other"] = new Recognition(null, null, null);
+
+        var (status, body) = await CallAsync(HttpMethod.Get, "/api/placement?path=orders.yaml");
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        var branch = Assert.Single(body.GetProperty("branches").EnumerateArray());
+        Assert.Equal("main", branch.GetProperty("alias").GetString());
+        Assert.Equal(["n1", "n2"], branch.GetProperty("nodes").EnumerateArray().Select(n => n.GetString()));
+    }
+
+    [Fact]
+    public async Task A_node_the_person_chose_is_published_for_a_brick_several_nodes_offer()
+    {
+        await SignInAsync();
+        _fakes.Answers["main"] = new Recognition("n1/orders", null, null, ["n1", "n2"]);
+
+        var (status, _) = await CallAsync(HttpMethod.Post, "/api/publish",
+            new { path = "orders.yaml", hash = await HashAsync(), id = "orders", message = "m", placement = new { main = "n2" } });
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal("n2", LastSave().Placement!["main"]);
+    }
+
+    [Fact]
+    public async Task A_node_that_does_not_offer_the_brick_is_refused_and_nothing_is_published()
+    {
+        await SignInAsync();
+        _fakes.Answers["main"] = new Recognition("n1/orders", null, null, ["n1", "n2"]);
+
+        var (status, _) = await CallAsync(HttpMethod.Post, "/api/publish",
+            new { path = "orders.yaml", hash = await HashAsync(), id = "orders", message = "m", placement = new { main = "n3" } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, status);
+        Assert.Null(_fakes.LastSaveBody);
+    }
+}

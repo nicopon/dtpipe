@@ -386,15 +386,19 @@ function runView() {
 
 // ---------------------------------------------------------------- publication
 
-// The last publication's outcome, for its tab: { id, saved } or { id, conflict }.
+// The last publication's outcome, for its tab: { id, saved }, { id, conflict } or, while the person
+// chooses the node of the bricks several nodes offer, { id, choosing }.
 let publication = null;
 let publishing = null;
+// The node chosen for each brick branch, by alias: sent with the next publication, left out where empty.
+let placementChoice = {};
 
 const short = (commit) => String(commit || "").slice(0, 8) || "nothing";
 const defaultId = (path) => path.replace(/^.*\//, "").replace(/\.ya?ml$/i, "").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "pipeline";
 
 // The coordinator receives the job saved in the folder, never the cards: its layout and its launch
 // values stay on this machine. `replace` names the commit the person chose to replace after a conflict.
+// A brick that several nodes offer asks the person for its node first; one that a single node offers needs no choice.
 async function publish(replace) {
   if (!current) return;
   if (isDirty() || !current.hash) {
@@ -409,9 +413,23 @@ async function publish(replace) {
     const message = prompt("Describe this version (the commit message):", `Publish ${current.path} from dtpipe studio`);
     if (message === null) return;
     publishing = { id, message };
+    placementChoice = {};
+    let branches = [];
+    try { branches = (await api(`/api/placement?path=${encodeURIComponent(current.path)}`)).branches; } catch { /* the coordinator names what it can */ }
+    if (branches.some((b) => b.nodes.length > 1)) {
+      publication = { id, choosing: branches };
+      status("choose the node of each brick, then publish", "warn");
+      showTab("publish");
+      return;
+    }
   }
+  return send(replace);
+}
+
+async function send(replace) {
   try {
-    const saved = await api("/api/publish", { path: current.path, hash: current.hash, id: publishing.id, message: publishing.message, replace });
+    const placement = Object.fromEntries(Object.entries(placementChoice).filter(([, node]) => node));
+    const saved = await api("/api/publish", { path: current.path, hash: current.hash, id: publishing.id, message: publishing.message, replace, placement });
     publication = { id: publishing.id, saved };
     status(`published at ${short(saved.commit)}`, "good");
   } catch (e) {
@@ -435,11 +453,29 @@ async function publish(replace) {
   showTab("publish");
 }
 
+// One selector per brick branch: the node that runs it, among the nodes that offer the brick. Left empty, the branch is
+// published unnamed, and the coordinator keeps the node it already holds for it, or lists it as a problem to settle there.
+function choosingView({ id, choosing }) {
+  return [
+    el("p", {}, `Which node runs each brick of ${id}? The runner is never named.`),
+    el("table", {}, choosing.map(({ alias, nodes }) => el("tr", {},
+      el("td", {}, el("code", {}, alias)),
+      el("td", {}, el("select", {
+        "aria-label": `Node of ${alias}`,
+        onchange: (e) => { placementChoice[alias] = e.target.value; },
+      },
+      el("option", { value: "", selected: !placementChoice[alias] && nodes.length > 1 }, "leave it to the coordinator"),
+      nodes.map((node) => el("option", { value: node, selected: placementChoice[alias] ? placementChoice[alias] === node : nodes.length === 1 }, node))))))),
+    el("p", {}, el("button", { id: "d-publish-now", onclick: () => send() }, "Publish")),
+  ];
+}
+
 function publicationView() {
   if (!coordinator()) return el("p", { class: "hint" }, "Open the studio with --coordinator to publish a job into a coordinator's library.");
   if (!publication) {
     return el("p", { class: "hint" }, "Publish sends the job as saved in this folder to the coordinator's library. Its layout and its launch values stay on this machine.");
   }
+  if (publication.choosing) return choosingView(publication);
   if (publication.refused) {
     const { error, report } = publication.refused;
     return [el("p", { class: "warn" }, `${publication.id} was not published: ${error}`),
