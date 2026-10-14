@@ -9,28 +9,38 @@ using DtPipe.Jobs.Coordinator;
 
 namespace DtPipe.Coordinator.Server;
 
-/// <summary>A distributed plan as the library keeps it, with the hash of the job it was computed from.</summary>
-public sealed record SavedPlan(string PipelineSha, DateTimeOffset SavedAt, DistributionPlan Plan);
+/// <summary>
+/// A distributed plan as the library keeps it, with the hash of the job it was computed from and that of the placement
+/// (<see cref="Placement.Sha"/>: null for none).
+/// </summary>
+public sealed record SavedPlan(string PipelineSha, DateTimeOffset SavedAt, DistributionPlan Plan, string? PlacementSha = null);
 
 /// <summary>
-/// <see cref="PlanStaleCause"/> says why a saved plan is not current: <see cref="PlanStaleCauses.Job"/> or
-/// <see cref="PlanStaleCauses.Groups"/>; null when there is no plan or it is current.
+/// <see cref="PlanStaleCause"/> says why a saved plan is not current: <see cref="PlanStaleCauses.Job"/>,
+/// <see cref="PlanStaleCauses.Placement"/> or <see cref="PlanStaleCauses.Groups"/>; null when there is no plan or it is current.
+/// <see cref="PlacementProblems"/>: why the pipeline's placement does not hold now, empty when it does.
 /// </summary>
 public sealed record LibraryEntry(
     string Id, string Title, string? Description, string? Commit, DateTimeOffset? UpdatedAt, string? Message,
-    bool Distributed, bool PlanCurrent, string? PlanStaleCause = null);
+    bool Distributed, bool PlanCurrent, IReadOnlyList<PlacementProblem> PlacementProblems, string? PlanStaleCause = null);
 
 /// <summary>
 /// <see cref="Commit"/> is the last commit of the job file, the version a later <c>If-Match</c> names.
-/// <see cref="PlanStaleCause"/> is that of <see cref="LibraryEntry"/>.
+/// <see cref="PlanStaleCause"/> and <see cref="PlacementProblems"/> are those of <see cref="LibraryEntry"/>.
+/// <see cref="Placement"/> is the node of each brick branch, by alias.
 /// </summary>
-public sealed record LibraryDocument(string Id, string Yaml, SavedPlan? Plan, bool PlanCurrent, string? Commit, string? PlanStaleCause = null);
+public sealed record LibraryDocument(
+    string Id, string Yaml, SavedPlan? Plan, bool PlanCurrent, string? Commit, IReadOnlyDictionary<string, string> Placement,
+    IReadOnlyList<PlacementProblem> PlacementProblems, string? PlanStaleCause = null);
 
 /// <summary>Why a saved plan is not the one a new distribution would make.</summary>
 public static class PlanStaleCauses
 {
     /// <summary>The job changed after the plan was saved.</summary>
     public const string Job = "job";
+
+    /// <summary>The placement of the job's bricks changed after the plan was saved.</summary>
+    public const string Placement = "placement";
 
     /// <summary>A node the plan places a fragment on holds other groups now, or has no enabled identity.</summary>
     public const string Groups = "groups";
@@ -60,9 +70,9 @@ public sealed class PreconditionFailedException(string message, string? commit) 
 /// <summary>
 /// The pipelines people keep, in a git repository of their own under <c>library/</c> in the state directory, driven
 /// through the <c>git</c> command line. One directory per pipeline: <c>pipeline.yaml</c> (the
-/// logical job, runnable whole) and <c>distributed/</c> (the last plan saved, with each fragment's
-/// job). Every save is a commit.
-/// The repository starts from the job files under <c>library-seed/</c>.
+/// logical job, runnable whole), <c>placement.json</c> (the node of each brick branch, see <see cref="Placement"/>) and
+/// <c>distributed/</c> (the last plan saved, with each fragment's job). Every save is a commit.
+/// The repository starts from the job files under <c>library-seed/</c>, each with the <c>.placement.json</c> beside it, if any.
 /// </summary>
 public sealed partial class PipelineLibrary
 {
@@ -78,14 +88,18 @@ public sealed partial class PipelineLibrary
     private bool _ready;
 
     private readonly Func<string, IReadOnlyList<string>?> _groupsOfNode;
+    private readonly Func<string, IReadOnlyDictionary<string, string>, IReadOnlyList<PlacementProblem>> _placementProblems;
 
     /// <param name="options">Where the library lives.</param>
     /// <param name="groupsOfNode">The groups the rights give a node now, null for a node with no identity or a disabled one.</param>
-    public PipelineLibrary(CoordinatorServerOptions options, Func<string, IReadOnlyList<string>?> groupsOfNode)
+    /// <param name="placementProblems">Why a placement does not hold for a job now; with none given, nothing is wrong.</param>
+    public PipelineLibrary(CoordinatorServerOptions options, Func<string, IReadOnlyList<string>?> groupsOfNode,
+        Func<string, IReadOnlyDictionary<string, string>, IReadOnlyList<PlacementProblem>>? placementProblems = null)
     {
         _root = Path.Combine(options.StateDir, "library");
         _seedDir = options.LibrarySeed;
         _groupsOfNode = groupsOfNode;
+        _placementProblems = placementProblems ?? ((_, _) => []);
     }
 
     public async Task<IReadOnlyList<LibraryEntry>> ListAsync(CancellationToken ct) => await Locked(async () =>
@@ -100,10 +114,11 @@ public sealed partial class PipelineLibrary
             var yaml = await File.ReadAllTextAsync(yamlPath, ct);
             var (title, description, _) = DesignService.ReadHeader(yaml);
             var plan = ReadPlan(id);
+            var placement = ReadPlacement(id);
             var last = (await HistoryCoreAsync(id, 1, ct)).FirstOrDefault();
-            var cause = StaleCause(plan, yaml);
+            var cause = StaleCause(plan, yaml, placement);
             entries.Add(new LibraryEntry(id, title, description, await JobCommitAsync(id, ct), last?.Date, last?.Message, plan is not null,
-                plan is not null && cause is null, cause));
+                plan is not null && cause is null, _placementProblems(yaml, placement), cause));
         }
         return entries;
     }, ct);
@@ -115,17 +130,20 @@ public sealed partial class PipelineLibrary
         if (!File.Exists(yamlPath)) return null;
         var yaml = await File.ReadAllTextAsync(yamlPath, ct);
         var plan = ReadPlan(id);
-        var cause = StaleCause(plan, yaml);
-        return new LibraryDocument(id, yaml, plan, plan is not null && cause is null, await JobCommitAsync(id, ct), cause);
+        var placement = ReadPlacement(id);
+        var cause = StaleCause(plan, yaml, placement);
+        return new LibraryDocument(id, yaml, plan, plan is not null && cause is null, await JobCommitAsync(id, ct), placement,
+            _placementProblems(yaml, placement), cause);
     }, ct);
 
     /// <summary>
     /// Writes the job and commits
     /// it. A <paramref name="precondition"/> is checked under the library's lock, so no other save
-    /// slips between the check and the write.
+    /// slips between the check and the write. A <paramref name="placement"/> is set into the one the library keeps, entry by
+    /// entry, in the same commit; null leaves it as it is.
     /// </summary>
     public async Task<SaveOutcome> SaveAsync(string id, string yaml, string message, CancellationToken ct,
-        SavePrecondition? precondition = null) => await Locked(async () =>
+        SavePrecondition? precondition = null, IReadOnlyDictionary<string, string>? placement = null) => await Locked(async () =>
     {
         var dir = PipelineDir(id);
         var yamlPath = Path.Combine(dir, "pipeline.yaml");
@@ -142,20 +160,30 @@ public sealed partial class PipelineLibrary
         }
         Directory.CreateDirectory(dir);
         await File.WriteAllTextAsync(yamlPath, yaml, ct);
+        var kept = ReadPlacement(id);
+        if (placement is { Count: > 0 })
+        {
+            var merged = new Dictionary<string, string>(kept);
+            foreach (var (alias, node) in placement) merged[alias] = node;
+            kept = merged;
+            await File.WriteAllTextAsync(Path.Combine(dir, PlacementFile), Placement.Serialize(kept), ct);
+        }
         await CommitAsync($"pipelines/{id}", Message(message, $"Save {id}"), ct);
         var plan = ReadPlan(id);
         return new SaveOutcome(await JobCommitAsync(id, ct), before != yaml,
-            plan is not null && plan.PipelineSha != Sha(yaml), plan?.Plan.Id);
+            plan is not null && (plan.PipelineSha != Sha(yaml) || plan.PlacementSha != Placement.Sha(kept)), plan?.Plan.Id);
     }, ct);
 
     /// <summary>
     /// Why a saved plan is not the one a new distribution would make, or null when it is (or there is none): the job changed
-    /// since the plan was made (<see cref="PlanStaleCauses.Job"/>), or a node the plan places a fragment on holds, now, other
-    /// groups than the plan names, compared as sets, or has no enabled identity (<see cref="PlanStaleCauses.Groups"/>).
+    /// since the plan was made (<see cref="PlanStaleCauses.Job"/>), its placement changed (<see cref="PlanStaleCauses.Placement"/>),
+    /// or a node the plan places a fragment on holds, now, other groups than the plan names, compared as sets, or has no
+    /// enabled identity (<see cref="PlanStaleCauses.Groups"/>).
     /// </summary>
-    private string? StaleCause(SavedPlan? plan, string yaml) =>
+    private string? StaleCause(SavedPlan? plan, string yaml, IReadOnlyDictionary<string, string> placement) =>
         plan is null ? null
         : plan.PipelineSha != Sha(yaml) ? PlanStaleCauses.Job
+        : plan.PlacementSha != Placement.Sha(placement) ? PlanStaleCauses.Placement
         : plan.Plan.Fragments.All(f => _groupsOfNode(f.Node) is { } now && now.ToHashSet(StringComparer.Ordinal).SetEquals(f.Groups)) ? null
         : PlanStaleCauses.Groups;
 
@@ -169,11 +197,31 @@ public sealed partial class PipelineLibrary
         var distributed = Path.Combine(dir, "distributed");
         if (Directory.Exists(distributed)) Directory.Delete(distributed, recursive: true);
         Directory.CreateDirectory(distributed);
-        var saved = new SavedPlan(Sha(await File.ReadAllTextAsync(yamlPath, ct)), DateTimeOffset.UtcNow, plan);
+        var saved = new SavedPlan(Sha(await File.ReadAllTextAsync(yamlPath, ct)), DateTimeOffset.UtcNow, plan, Placement.Sha(ReadPlacement(id)));
         await File.WriteAllTextAsync(Path.Combine(distributed, "plan.json"), JsonSerializer.Serialize(saved, Json), ct);
         foreach (var fragment in plan.Fragments)
             await File.WriteAllTextAsync(Path.Combine(distributed, fragment.Node + ".yaml"), fragment.Yaml, ct);
         return await CommitAsync($"pipelines/{id}", Message(message, $"Distribute {id}"), ct);
+    }, ct);
+
+    /// <summary>The outcome of a placement save: the commit it made, and whether the plan saved for the pipeline no longer matches it.</summary>
+    public sealed record PlacementSaved(string? Commit, bool PlanStale);
+
+    /// <summary>
+    /// Replaces the node of each brick branch of the pipeline's job and commits it. What it names is kept as given, a node that is
+    /// absent included: it is listed as a problem of the pipeline, not refused, so a placement can be written before its node exists.
+    /// </summary>
+    public async Task<PlacementSaved> SavePlacementAsync(string id, IReadOnlyDictionary<string, string> placement, string message, CancellationToken ct) => await Locked(async () =>
+    {
+        var dir = PipelineDir(id);
+        var yamlPath = Path.Combine(dir, "pipeline.yaml");
+        if (!File.Exists(yamlPath)) throw new ConflictException($"'{id}' is not in the library.");
+        var path = Path.Combine(dir, PlacementFile);
+        if (placement.Count == 0) File.Delete(path);
+        else await File.WriteAllTextAsync(path, Placement.Serialize(placement), ct);
+        var commit = await CommitAsync($"pipelines/{id}", Message(message, $"Place {id}"), ct);
+        var plan = ReadPlan(id);
+        return new PlacementSaved(commit, plan is not null && plan.PlacementSha != Placement.Sha(placement));
     }, ct);
 
     public async Task DeleteAsync(string id, CancellationToken ct) => await Locked(async () =>
@@ -196,6 +244,19 @@ public sealed partial class PipelineLibrary
         var diff = await GitAsync(["show", "--format=", commit, "--", $"pipelines/{id}"], ct);
         return (yaml, diff);
     }, ct);
+
+    private const string PlacementFile = "placement.json";
+
+    private IReadOnlyDictionary<string, string> ReadPlacement(string id)
+    {
+        var path = Path.Combine(PipelineDir(id), PlacementFile);
+        if (!File.Exists(path)) return new Dictionary<string, string>();
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(path)) ?? new Dictionary<string, string>();
+        }
+        catch (JsonException) { return new Dictionary<string, string>(); }
+    }
 
     private SavedPlan? ReadPlan(string id)
     {
@@ -257,6 +318,8 @@ public sealed partial class PipelineLibrary
                 var dir = PipelineDir(Path.GetFileNameWithoutExtension(seed));
                 Directory.CreateDirectory(dir);
                 File.Copy(seed, Path.Combine(dir, "pipeline.yaml"));
+                var placement = Path.ChangeExtension(seed, ".placement.json");
+                if (File.Exists(placement)) File.Copy(placement, Path.Combine(dir, PlacementFile));
             }
             // An empty library has nothing to commit: its first save is its first commit.
             if (seeds.Length > 0) await CommitAsync("pipelines", $"Start the library from {Path.GetFileName(_seedDir)}/", ct);

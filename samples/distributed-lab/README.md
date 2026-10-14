@@ -224,7 +224,8 @@ reader or writer. The switch belongs to the host's own environment, and only the
 planning ever sends a job as written.
 
 **The library** is a git repository under `.state/library`, started from `library-seed/`: each
-save and each saved plan is a commit. Several pipelines may be deployed at once. Their runs are in
+save and each saved plan is a commit. A seed `<id>.yaml` brings its `<id>.placement.json`, which names the
+node of each source and sink branch; the runner is never named. Several pipelines may be deployed at once. Their runs are in
 flight together when they share no data node; otherwise they wait their turn in the order they came
 (the runner never counts). Finished runs are kept in `.state/runs/`.
 

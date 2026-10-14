@@ -40,23 +40,29 @@ public sealed record RecognizeRequest(string Job);
 
 /// <summary>
 /// What a branch is, by brick key: the brick it is whole (<see cref="Match"/>), or the brick it starts
-/// with (<see cref="Source"/>) or ends with (<see cref="Sink"/>). The coordinator decides; the studio
+/// with (<see cref="Source"/>) or ends with (<see cref="Sink"/>). <see cref="Nodes"/>: every node that offers the brick it is
+/// whole, null when it is none, so a brick two nodes offer is told from one only one does. The coordinator decides; the studio
 /// only reads the answer back.
 /// </summary>
-public sealed record Recognition(string? Match, string? Source, string? Sink);
+public sealed record Recognition(string? Match, string? Source, string? Sink, IReadOnlyList<string>? Nodes = null);
 
 /// <summary>What each top-level branch of the job is, by alias.</summary>
 public sealed record RecognizeResponse(IReadOnlyDictionary<string, Recognition> Branches);
 
-/// <summary>A job saved into the library, with the message of its commit.</summary>
-public sealed record LibrarySave(string Yaml, string? Message);
+/// <summary>
+/// A job saved into the library, with the message of its commit. <see cref="Placement"/> names the node of the brick branches
+/// the publisher knows, by alias: each is set, the entries the library already keeps for other aliases stay, and none leaves the
+/// placement as it was.
+/// </summary>
+public sealed record LibrarySave(string Yaml, string? Message, IReadOnlyDictionary<string, string>? Placement = null);
 
 /// <summary>
 /// A save's outcome. <see cref="Commit"/> is the last commit of the pipeline's job, the version a later
 /// <c>If-Match</c> names: a plan saved beside it does not change it. <see cref="Redistribute"/>: the plan saved for it no longer matches its job.
-/// <see cref="Deployed"/>: a deployment still runs the version before.
+/// <see cref="Deployed"/>: a deployment still runs the version before. <see cref="PlacementProblems"/>: why the pipeline's placement
+/// does not hold now, as the library words it.
 /// </summary>
-public sealed record LibrarySaved(string Id, string? Commit, bool Redistribute, bool Deployed);
+public sealed record LibrarySaved(string Id, string? Commit, bool Redistribute, bool Deployed, IReadOnlyList<string>? PlacementProblems = null);
 
 /// <summary>A save refused by its precondition (412), with the pipeline's commit in place, if any.</summary>
 public sealed record LibraryConflict(string Error, string? Commit);

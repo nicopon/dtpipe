@@ -15,7 +15,7 @@ public static partial class CoordinatorApi
     /// anything else: a studio and a coordinator deployed at different times refuse each other by name
     /// rather than misreading each other.
     /// </summary>
-    public const int Contract = 2;
+    public const int Contract = 3;
 
     /// <summary>The protected resource metadata (RFC 9728): anonymous, the one entry point a studio needs.</summary>
     public const string Metadata = "/.well-known/oauth-protected-resource";

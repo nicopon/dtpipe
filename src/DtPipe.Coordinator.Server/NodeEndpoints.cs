@@ -26,7 +26,11 @@ internal static class NodeEndpoints
             catch (Exception ex) { return Results.BadRequest(new { error = $"The job is not readable: {ex.Message}" }); }
             var answers = new Dictionary<string, Recognition>(StringComparer.Ordinal);
             foreach (var (alias, branch) in JobYaml.Branches(job))
-                answers[alias] = new Recognition(bricks.Match(branch)?.Key, bricks.Contained(branch, BrickKind.Source)?.Key, bricks.Contained(branch, BrickKind.Sink)?.Key);
+            {
+                var whole = bricks.MatchAll(branch);
+                answers[alias] = new Recognition(whole.FirstOrDefault()?.Key, bricks.Contained(branch, BrickKind.Source)?.Key, bricks.Contained(branch, BrickKind.Sink)?.Key,
+                    whole.Count == 0 ? null : [.. whole.Select(b => b.Node).Distinct()]);
+            }
             return Results.Ok(new RecognizeResponse(answers));
         });
 

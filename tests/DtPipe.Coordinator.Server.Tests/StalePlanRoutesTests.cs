@@ -103,12 +103,8 @@ public sealed class StalePlanRoutesTests : IDisposable
         Assert.DoesNotContain("groups", error);
     }
 
-    /// <summary>
-    /// A node announced under one group and edited to another while it is offline: distributing again makes a plan that is
-    /// current. The planner takes the groups the rights give the node now, not those of its last announcement.
-    /// </summary>
-    [Fact]
-    public async Task DistributingAgain_RepairsAPlanWhoseNodeChangedGroupsWhileItWasOffline()
+    /// <summary>Node A offers the customers brick under <c>crm</c>, a runner is connected, and A may send to it.</summary>
+    private async Task<(ReplicaRegistry Registry, NodeInventory Inventory)> NodeAAndARunnerAsync()
     {
         var source = new BrickInfo("customers", BrickKind.Source, "Customers", "", """{"input":"sqlite:${{LAB_DB}}"}""", null, null);
         foreach (var identity in new[] { new IdentityBody("a", "node-a", "A", ["crm"], true), new IdentityBody("r", "runner", "R", ["run"], true) })
@@ -127,8 +123,20 @@ public sealed class StalePlanRoutesTests : IDisposable
         }
         Announce("c-a", "a", new NodeAnnouncement("node-a", "", [new DatasetInfo("LAB_DB", "sqlite", "")], NodeRole.Data, [source], InstanceId: Guid.NewGuid()), "crm");
         Announce("c-r", "r", new NodeAnnouncement("runner", "", [], NodeRole.Runner, [], InstanceId: Guid.NewGuid()), "run");
+        return (registry, inventory);
+    }
+
+    /// <summary>
+    /// A node announced under one group and edited to another while it is offline: distributing again makes a plan that is
+    /// current. The planner takes the groups the rights give the node now, not those of its last announcement.
+    /// </summary>
+    [Fact]
+    public async Task DistributingAgain_RepairsAPlanWhoseNodeChangedGroupsWhileItWasOffline()
+    {
+        var (registry, inventory) = await NodeAAndARunnerAsync();
         var library = _host.Services.GetRequiredService<PipelineLibrary>();
         await library.SaveAsync("orders", "a:\n  input: sqlite:${{LAB_DB}}\nb:\n  from: a\n  output: csv:out.csv\n", "create", Ct);
+        await library.SavePlacementAsync("orders", new Dictionary<string, string> { ["a"] = "node-a" }, "place", Ct);
 
         using var first = await _admin.PostAsJsonAsync("/api/library/orders/distribute", new { save = true }, Web, Ct);
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
@@ -145,5 +153,40 @@ public sealed class StalePlanRoutesTests : IDisposable
         var listed = await ListedAsync();
         Assert.True(listed.PlanCurrent);
         Assert.Null(listed.PlanStaleCause);
+    }
+
+    /// <summary>
+    /// A brick branch with no node cannot be saved as a plan, and says which nodes offer it; once the placement names the node,
+    /// the plan is saved. A node the placement names that does not exist is listed as a problem, and the deployment is refused.
+    /// </summary>
+    [Fact]
+    public async Task ABrickNeedsItsNode_AndAPlacementOnAnAbsentNodeIsListedAndRefusesDeployment()
+    {
+        await NodeAAndARunnerAsync();
+        var library = _host.Services.GetRequiredService<PipelineLibrary>();
+        await library.SaveAsync("orders", "a:\n  input: sqlite:${{LAB_DB}}\nb:\n  from: a\n  output: csv:out.csv\n", "create", Ct);
+
+        using var preview = await _admin.PostAsJsonAsync("/api/library/orders/distribute", new { }, Web, Ct);
+        var offers = (await preview.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("offers");
+        Assert.Equal("node-a", Assert.Single(offers.GetProperty("a").EnumerateArray()).GetString());
+
+        using var unplaced = await _admin.PostAsJsonAsync("/api/library/orders/distribute", new { save = true }, Web, Ct);
+        Assert.Equal(HttpStatusCode.Conflict, unplaced.StatusCode);
+        Assert.Contains("node-a", await unplaced.Content.ReadAsStringAsync(Ct));
+
+        using var placed = await _admin.PutAsJsonAsync("/api/library/orders/placement", new { placement = new Dictionary<string, string> { ["a"] = "node-a" } }, Web, Ct);
+        placed.EnsureSuccessStatusCode();
+        using var saved = await _admin.PostAsJsonAsync("/api/library/orders/distribute", new { save = true }, Web, Ct);
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+
+        using var moved = await _admin.PutAsJsonAsync("/api/library/orders/placement", new { placement = new Dictionary<string, string> { ["a"] = "node-gone" } }, Web, Ct);
+        moved.EnsureSuccessStatusCode();
+        var problems = (await moved.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("problems");
+        Assert.Equal("unknown-node", Assert.Single(problems.EnumerateArray()).GetProperty("cause").GetString());
+        var listed = (await _admin.GetFromJsonAsync<JsonElement[]>("/api/library", Web, Ct))!.Single();
+        Assert.Single(listed.GetProperty("placementProblems").EnumerateArray());
+        using var deploy = await _admin.PostAsync("/api/library/orders/deploy", null, Ct);
+        Assert.Equal(HttpStatusCode.Conflict, deploy.StatusCode);
+        Assert.Contains("does not hold", await deploy.Content.ReadAsStringAsync(Ct));
     }
 }

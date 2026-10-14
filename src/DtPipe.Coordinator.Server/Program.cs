@@ -47,7 +47,8 @@ builder.Services.AddSingleton<PlanBuilder>();
 builder.Services.AddSingleton<AutoPlacer>();
 builder.Services.AddSingleton<DesignValidator>();
 builder.Services.AddSingleton(services => new PipelineLibrary(
-    services.GetRequiredService<CoordinatorServerOptions>(), services.GetRequiredService<RightsStore>().ActiveGroupsOf));
+    services.GetRequiredService<CoordinatorServerOptions>(), services.GetRequiredService<RightsStore>().ActiveGroupsOf,
+    services.GetRequiredService<AutoPlacer>().Check));
 builder.Services.AddSingleton<RunJournal>();
 builder.Services.AddSingleton<DeploymentManager>();
 

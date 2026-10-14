@@ -80,7 +80,8 @@ public sealed class StudioRoutesTests : IDisposable
             """;
         using var response = await As(CoordinatorHost.Reader).PostAsJsonAsync(CoordinatorApi.Recognize, new RecognizeRequest(job), Ct);
         var answer = await response.Content.ReadFromJsonAsync<RecognizeResponse>(Ct);
-        Assert.Equal(new Recognition("n1/orders", "n1/orders", null), answer!.Branches["whole"]);
+        Assert.Equal(("n1/orders", "n1/orders", (string?)null), (answer!.Branches["whole"].Match, answer.Branches["whole"].Source, answer.Branches["whole"].Sink));
+        Assert.Equal(["n1"], answer.Branches["whole"].Nodes);
         Assert.Equal(new Recognition(null, "n1/orders", null), answer.Branches["around"]);
         Assert.Equal(new Recognition(null, null, null), answer.Branches["other"]);
     }

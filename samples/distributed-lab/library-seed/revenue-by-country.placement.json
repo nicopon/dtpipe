@@ -1,0 +1,6 @@
+{
+  "customers": "node-1",
+  "load": "node-4",
+  "orders": "node-2",
+  "products": "node-3"
+}

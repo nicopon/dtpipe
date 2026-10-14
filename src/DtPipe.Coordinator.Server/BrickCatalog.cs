@@ -51,10 +51,13 @@ public sealed class BrickCatalog(NodeInventory inventory)
     private YamlMappingNode BranchOf(string key) => JobYaml.CloneBranch(Resolve().First(r => r.View.Key == key).Branch);
 
     /// <summary>The brick a whole branch is, read the way every node host reads it (<see cref="BrickRules.FormOf"/>).</summary>
-    public BrickView? Match(YamlMappingNode branch)
+    public BrickView? Match(YamlMappingNode branch) => MatchAll(branch).FirstOrDefault();
+
+    /// <summary>Every brick a whole branch is: one per node that offers it, in the inventory's order. A placement picks among them.</summary>
+    public IReadOnlyList<BrickView> MatchAll(YamlMappingNode branch)
     {
         var form = BrickRules.FormOf(branch);
-        return Resolve().FirstOrDefault(r => r.View.Kind == form.Kind && r.Canonical == form.Canonical)?.View;
+        return Resolve().Where(r => r.View.Kind == form.Kind && r.Canonical == form.Canonical).Select(r => r.View).ToList();
     }
 
     /// <summary>

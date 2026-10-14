@@ -107,9 +107,29 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   as the pages do. The answer says when the saved plan no longer matches (`redistribute`) and when a
   deployment still runs another version (`deployed`). `[local: StudioRoutesTests, the lab's smoke.py
   library — a studio publishes]`
-- **The library keeps a job and its plan, nothing a designer drew.** `pipelines/<id>/` holds
-  `pipeline.yaml` and `distributed/`; a library that still tracks a `layout.json` drops them all in
+- **A save may carry the placement it knows, and a studio names only what is unambiguous.** `LibrarySave.Placement` sets
+  the nodes it names into the placement the library keeps, entry by entry, in the same commit as the job; an alias it does
+  not name keeps its node, and none leaves the placement as it was. `POST /api/bricks/recognize` answers, with each branch
+  that is a brick, `Nodes`: every node that offers it. The studio publishes the node of a brick one node offers and of each
+  brick the person chose; a brick two nodes offer that nobody chose stays unnamed, which the answer's `placementProblems`
+  says and the pipeline's page then lets a person choose. `[local: PlacementTests, StudioRoutesTests, StudioPublishTests]`
+- **The library keeps a job, its placement and its plan, nothing a designer drew.** `pipelines/<id>/` holds
+  `pipeline.yaml`, `placement.json` and `distributed/`; a library that still tracks a `layout.json` drops them all in
   one commit when it first opens. `[local: the lab's smoke.py library — no layouts]`
+- **A brick branch runs on the node its placement names, and the placement never names the runner.** `placement.json`
+  maps the alias of each source or sink branch of the job to a node; every other branch goes to the runner, which is
+  stateless. `AutoPlacer.Check` is the one function that says why a placement does not hold: a brick branch with no
+  node (`unassigned`), a node with no identity (`unknown-node`), a node that does not offer the brick (`not-offered`),
+  an entry for a branch that is no brick or not in the job (`not-a-brick`, `no-branch`), all blocking, and a node with no
+  connected replica (`offline`), which is not. `BrickCatalog.Match` is first-match and so unfit to choose a node: placing
+  goes through `MatchAll`. The placement lives beside the job so a pipeline stays a plain dtpipe job. It is saved as given,
+  an absent node included, through `PUT /api/library/{id}/placement`, and a seed brings its own as `<id>.placement.json`.
+  The list and the document carry the problems, the planner refuses a plan that has a blocking one, and a deployment is
+  refused naming them. A saved plan keeps the hash of the placement it was made from, so a new placement makes it stale
+  (`placement`), without changing the job's commit.
+  The designer's check (`DesignValidator`) samples each brick on the node the save's placement names, the library's entries
+  with the request's over them; a brick the placement does not place is sampled on the first node that offers it.
+  `[local: PlacementTests, StalePlanRoutesTests]`
 - **A new state directory starts from the seeds, or empty.** `Coordinator:LibrarySeed` (one
   `.yaml` per pipeline) and `Coordinator:RightsSeed`; with neither, the library has no pipeline
   and the rights no identity and an empty matrix: nobody may send anything until an administrator
@@ -212,14 +232,14 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   node in several groups sends only if every one of its groups may send to every group of the
   receiver, on both sides, and an edge carries the groups of both ends. Never add a second matrix.
   `[local: FlowMatrixEvaluationTests, the lab's smoke.py rights]`
-- **A saved plan is current only while its job and its nodes' groups are those it was made from.** The library
+- **A saved plan is current only while its job, its placement and its nodes' groups are those it was made from.** The library
   lists it, and `GET /api/library/{id}` shows it, as current when it was made from the job as it is and each of
   its fragments sits on a node that holds, now, the groups the plan names, compared as sets (the server gives
   the library `RightsStore.ActiveGroupsOf`, null for a node with no identity or a disabled one). A new plan
   names the groups the rights give each node now, never those of the node's last announcement, and refuses a
   unit placed on a node with no identity or a disabled one, so that distributing again repairs a plan whose
   node changed groups while it was offline. One function
-  of the library decides why a plan is not current, `planStaleCause` (`job` or `groups`), which the list, the
+  of the library decides why a plan is not current, `planStaleCause` (`job`, `placement` or `groups`), which the list, the
   document, the page's chip and the refusal of a deployment from the library all read. The studio does not read
   it: the `redistribute` of a save's answer, which it does read, measures only the edit of the job.
   `[local: SavedPlanTests, StalePlanRoutesTests, PlanRightsTests, RightsStoreTests, the lab's smoke.py rights - several groups]`
