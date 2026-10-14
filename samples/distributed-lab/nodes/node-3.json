@@ -6,7 +6,6 @@
   "datasets": [
     {
       "variable": "LAB_CATALOG_DB",
-      "engine": "sqlite",
       "file": "catalog.sqlite",
       "description": "products, legacy_orders"
     }

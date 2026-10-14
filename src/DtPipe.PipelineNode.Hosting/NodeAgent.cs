@@ -67,11 +67,11 @@ internal sealed class NodeAgent : BackgroundService
         foreach (var variable in definition.Variables) environment[variable.Name] = variable.Value;
         _environment = environment;
 
-        // No value is announced: the coordinator learns a variable's name, and for a database its
-        // engine; whatever reads it runs here.
+        // No value is announced: the coordinator learns a variable's name and description;
+        // whatever reads it runs here.
         _datasets = definition.Variables
-            .Select(v => new DatasetInfo(v.Name, v.Engine ?? "", v.Description ?? ""))
-            .Concat(_options.Variables.Keys.Where(k => definition.Variables.All(v => v.Name != k)).Select(k => new DatasetInfo(k, "", "")))
+            .Select(v => new DatasetInfo(v.Name, v.Description ?? ""))
+            .Concat(_options.Variables.Keys.Where(k => definition.Variables.All(v => v.Name != k)).Select(k => new DatasetInfo(k, "")))
             .ToList();
 
         _hostLoggers = loggers;

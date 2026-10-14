@@ -132,11 +132,6 @@ def seeded_databases():
     return databases
 
 
-def lab_query(variable, sql):
-    """A query on a node's dataset, read by that node through the coordinator."""
-    return list(csv.reader(io.StringIO(call("/api/query", {"variable": variable, "sql": sql})["csv"])))
-
-
 class Context:
     def __init__(self):
         self.databases = seeded_databases()
@@ -166,7 +161,7 @@ class Context:
         if bad:
             raise RuntimeError(f"edge counts disagree: {bad}")
         expected = query(f"duck:{self.witness_db}", check)
-        actual = lab_query(self.warehouse, check)
+        actual = query(f"duck:{self.databases[self.warehouse]}", check)
         if expected != actual:
             raise RuntimeError(f"check differs\n    witness: {expected}\n    lab:     {actual}")
         rows = sum(e["received"] for e in final["result"]["edgeCounts"])

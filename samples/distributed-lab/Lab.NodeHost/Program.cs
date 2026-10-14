@@ -44,17 +44,15 @@ var node = builder.Services.AddDtPipeNode(o =>
 });
 
 // A database reaches the node's dtpipe children as ${{VARIABLE}}: the file under the node's own
-// state directory. The coordinator learns its name and engine, never where it is.
+// state directory. The coordinator learns its name, never where it is.
 foreach (var dataset in file.GetSection("datasets").GetChildren())
 {
-    node.WithVariable(dataset["variable"]!, Path.Combine(state, name, dataset["file"]!), dataset["description"], dataset["engine"]);
+    node.WithVariable(dataset["variable"]!, Path.Combine(state, name, dataset["file"]!), dataset["description"]);
 }
 node.AddBricks(file.GetSection("bricks"));
 
-// The coordinator's lab mode has its query panel and smoke's checks read the warehouse through the node, and
-// cuts a branch where its data is: every lab node answers both, strict or sandbox.
-var lab = new LabRequests(name, [.. file.GetSection("datasets").GetChildren().Where(d => d["engine"] is not null).Select(d => (d["variable"]!, d["engine"]!))]);
-node.WithRequest("lab.query", lab.QueryAsync).WithRequest("lab.split", lab.SplitAsync);
+// The coordinator's lab mode cuts a branch where its data is: every lab node answers it, strict or sandbox.
+node.WithRequest("lab.split", new LabRequests(name).SplitAsync);
 
 // Sandbox mode lets a lab node run a fragment that reads or writes through any reader or writer, not only
 // through its bricks: its own switch, and the one the Lab view's manual planning needs.

@@ -121,7 +121,7 @@ public sealed class StalePlanRoutesTests : IDisposable
             registry.Announce(connection, subject, announcement, [group], () => { });
             inventory.Announced(announcement.Name, subject, announcement, [group]);
         }
-        Announce("c-a", "a", new NodeAnnouncement("node-a", "", [new DatasetInfo("LAB_DB", "sqlite", "")], NodeRole.Data, [source], InstanceId: Guid.NewGuid()), "crm");
+        Announce("c-a", "a", new NodeAnnouncement("node-a", "", [new DatasetInfo("LAB_DB", "")], NodeRole.Data, [source], InstanceId: Guid.NewGuid()), "crm");
         Announce("c-r", "r", new NodeAnnouncement("runner", "", [], NodeRole.Runner, [], InstanceId: Guid.NewGuid()), "run");
         return (registry, inventory);
     }

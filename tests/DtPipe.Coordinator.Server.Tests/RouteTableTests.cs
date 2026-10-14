@@ -92,7 +92,6 @@ public sealed class RouteTableTests
         "POST /api/deploy [reader > admin]",
         "POST /api/fragments/{name}/kill [reader > admin]",
         "POST /api/plan [reader > admin]",
-        "POST /api/query [reader > admin]",
     ];
 
     [Fact]

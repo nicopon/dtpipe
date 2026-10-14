@@ -21,8 +21,8 @@ none. One node per process, which is one replica of its node's identity; a secon
 - **What a host offers beyond its bricks is its own registration.** `WithFragmentGate` replaces the
   check a data node makes of a fragment (the host's word, like the policy), and `WithRequest`
   answers a named request of the coordinator; both are announced as capabilities, which the
-  coordinator shows and never sets. No product code answers a query or a cut: the lab's host
-  registers `lab.query` and `lab.split` itself, and the node says it does not answer any name it
+  coordinator shows and never sets. No product code answers a cut: the lab's host
+  registers `lab.split` itself, and the node says it does not answer any name it
   did not register. `[local: Hosting.Tests DtPipeNodeBuilderTests; the lab's smoke.py lab, sandbox]`
 - **A runner runs dtpipe for the coordinator, a data node never does.** `DelegatedJobs` answers
   `ValidateJob` (a library save's job dry-run over one-row samples, writers neutralised) only on a

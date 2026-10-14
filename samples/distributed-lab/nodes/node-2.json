@@ -6,7 +6,6 @@
   "datasets": [
     {
       "variable": "LAB_SALES_DB",
-      "engine": "duck",
       "file": "sales.duckdb",
       "description": "orders (current year)"
     }

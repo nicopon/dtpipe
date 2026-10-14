@@ -91,11 +91,11 @@ public class DtPipeNodeBuilderTests
         var services = new ServiceCollection();
         services.AddDtPipeNode(o => o.Name = "lab-1")
             .WithFragmentGate((_, _) => null)
-            .WithRequest("lab.query", _ => Task.FromResult("{}"));
+            .WithRequest("lab.split", _ => Task.FromResult("{}"));
 
         var definition = DefinitionOf(services);
         Assert.NotNull(definition.Gate);
-        Assert.Contains("lab.query", definition.Requests.Keys);
+        Assert.Contains("lab.split", definition.Requests.Keys);
     }
 
     [Fact]

@@ -34,7 +34,7 @@ public sealed class PlanRightsTests : IDisposable
         foreach (var group in new[] { "data", "audit" }) _matrix.Groups[group] = new GroupAccess { CanSendTo = ["run"] };
 
         Announce("r", "run", NodeRole.Runner, [], []);
-        Announce("d", "data", NodeRole.Data, [new DatasetInfo("LAB_DB", "sqlite", "")], [NodeAnnouncement.RawFragments]);
+        Announce("d", "data", NodeRole.Data, [new DatasetInfo("LAB_DB", "")], [NodeAnnouncement.RawFragments]);
     }
 
     public void Dispose() => Directory.Delete(_dir, recursive: true);

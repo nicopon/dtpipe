@@ -27,8 +27,8 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
 - **Lab nodes are disposable hosts of `DtPipe.PipelineNode.Hosting`.** `Lab.NodeHost` reads
   `nodes/<node>.json` into `AddDtPipeNode`; a node file whose `role` is `runner` starts the official
   `DtPipe.PipelineNode.Runner` instead, configured through its environment. `lab.sh exec-node` is
-  the one way a node starts, for `lab.sh` and `tools/campaign.py`. Every lab node registers `lab.query` and
-  `lab.split` (`Lab.NodeHost/LabRequests.cs`), so `smoke.py` reads the warehouse through `/api/query`; its witness reads the databases
+  the one way a node starts, for `lab.sh` and `tools/campaign.py`. Every lab node registers `lab.split`
+  (`Lab.NodeHost/LabRequests.cs`). `smoke.py` reads the warehouse and its witness reads the databases
   `seed.sh` wrote, located from the node files, never from the coordinator. Every lab node also enables
   fault injection (`FaultInjection` in `Lab.NodeHost`'s options, `DtPipeNode__FaultInjection` in the
   environment of the runner `lab.sh exec-node` starts and of `runner-1` in `compose.yaml`), so the kill

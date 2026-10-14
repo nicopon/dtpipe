@@ -5,7 +5,7 @@ namespace DtPipe.Coordinator.Server;
 /// <summary>
 /// What only a test bench needs, mapped in <see cref="CoordinatorServerOptions.LabMode"/> alone: the
 /// Lab view's scenario catalog and manual planning (cuts and a placement chosen by hand, the routes that plan in
-/// <see cref="PlanMode.Manual"/>), fault injection, and a query on a node's dataset, read by that node.
+/// <see cref="PlanMode.Manual"/>), and fault injection.
 /// </summary>
 public static class LabModeEndpoints
 {
@@ -28,19 +28,5 @@ public static class LabModeEndpoints
             await deployments.KillAsync(name, ct);
             return Results.Accepted();
         });
-
-        // A query on a node's dataset, to show what a run wrote: the node that hosts it reads it, if
-        // its own configuration answers lab requests; the server never opens a node's database.
-        api.MapPost("/query", async (QueryRequest request, NodeInventory inventory, NodeRequests nodes, CancellationToken ct) =>
-        {
-            var host = inventory.Snapshot().FirstOrDefault(n => n.Datasets.Any(d => d.Variable == request.Variable && d.Engine.Length > 0));
-            if (host is null) return Results.BadRequest(new { error = $"No node announces a dataset at {request.Variable}." });
-            var answer = await nodes.RequestAsync(
-                host.Name, "lab.query", new { variable = request.Variable, sql = request.Sql, rows = 200 }, TimeSpan.FromSeconds(40),
-                why => new DatasetQueryResult(null, why), ct);
-            return answer.Error is null ? Results.Ok(new { csv = answer.Csv }) : Results.BadRequest(new { error = answer.Error });
-        });
     }
-
-    private sealed record QueryRequest(string Variable, string Sql);
 }

@@ -95,7 +95,7 @@ public sealed class PlanModeTests : IDisposable
 
     /// <summary>A data node that hosts the database <c>LAB_DB</c>, with no brick: nothing it runs is a brick.</summary>
     private void DataNode(string name, bool acceptsRaw) =>
-        Announce(name, "data", NodeRole.Data, [new DatasetInfo("LAB_DB", "sqlite", "")], acceptsRaw ? [NodeAnnouncement.RawFragments] : []);
+        Announce(name, "data", NodeRole.Data, [new DatasetInfo("LAB_DB", "")], acceptsRaw ? [NodeAnnouncement.RawFragments] : []);
 
     private Task<DistributionPlan> PlanAsync(bool manual, IReadOnlyList<CutRequest>? cuts, params (string Unit, string Node)[] placement) =>
         _planner.BuildAsync(

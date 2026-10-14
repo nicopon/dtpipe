@@ -12,10 +12,8 @@ public sealed record BrickDeclaration(string Id, BrickKind Kind, string Title, s
 
 /// <summary>
 /// A variable described to the coordinator by its name; its value stays on the node.
-/// <see cref="Engine"/> makes it a database the node queries for the coordinator's lab mode
-/// (<c>engine:${{Name}}</c>).
 /// </summary>
-public sealed record NodeVariable(string Name, string Value, string? Description, string? Engine);
+public sealed record NodeVariable(string Name, string Value, string? Description);
 
 /// <summary>
 /// Why a data node must not run <paramref name="fragment"/>'s job as written, or <c>null</c> when it may. A host registers
@@ -60,9 +58,9 @@ public sealed class DtPipeNodeBuilder
     public IServiceCollection Services { get; }
 
     /// <summary>A variable every dtpipe child sees, described to the coordinator.</summary>
-    public DtPipeNodeBuilder WithVariable(string name, string value, string? description = null, string? engine = null)
+    public DtPipeNodeBuilder WithVariable(string name, string value, string? description = null)
     {
-        _definition.Variables.Add(new NodeVariable(name, value, description, engine));
+        _definition.Variables.Add(new NodeVariable(name, value, description));
         return this;
     }
 

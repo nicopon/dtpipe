@@ -6,41 +6,16 @@ using DtPipe.PipelineNode.Hosting;
 namespace Lab.NodeHost;
 
 /// <summary>
-/// What the coordinator's lab mode asks of a lab node beyond its fragments, registered as named requests: a
-/// query on one of its datasets (<c>lab.query</c>), and <c>dtpipe split</c> of a branch that reads them
-/// (<c>lab.split</c>), whose sample run executes the branch's transformers here. Only a variable given an
-/// engine is queried, and a node of the lab answers both whatever mode its fragments run in.
+/// What the coordinator's lab mode asks of a lab node beyond its fragments, registered as a named request:
+/// <c>dtpipe split</c> of a branch that reads its datasets (<c>lab.split</c>), whose sample run executes the
+/// branch's transformers here. A node of the lab answers it whatever mode its fragments run in.
 /// </summary>
-internal sealed class LabRequests(string node, IReadOnlyList<(string Variable, string Engine)> datasets)
+internal sealed class LabRequests(string node)
 {
     private static readonly TimeSpan SplitTimeout = TimeSpan.FromSeconds(90);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    private sealed record Query(string Variable, string Sql, int Rows);
-
     private sealed record Split(string Alias, string Job, int At);
-
-    public async Task<string> QueryAsync(NodeRequestContext request)
-    {
-        var query = JsonSerializer.Deserialize<Query>(request.Payload, Json)!;
-        return JsonSerializer.Serialize(await RunQueryAsync(request.DtPipe, query), Json);
-    }
-
-    private async Task<DatasetQueryResult> RunQueryAsync(NodeDtPipe dtpipe, Query query)
-    {
-        var dataset = datasets.FirstOrDefault(d => d.Variable == query.Variable);
-        if (dataset.Engine is null) return new DatasetQueryResult(null, $"{node} hosts no dataset at {query.Variable}.");
-        try
-        {
-            var result = await dtpipe.RunAsync(
-                ["--input", dataset.Engine + ":${{" + query.Variable + "}}", "--query", query.Sql, "--limit", query.Rows.ToString(), "--output", "csv:-", "--no-stats"]);
-            return result.Succeeded ? new DatasetQueryResult(result.Stdout, null) : new DatasetQueryResult(null, result.Diagnostic);
-        }
-        catch (Exception ex)
-        {
-            return new DatasetQueryResult(null, ex.Message);
-        }
-    }
 
     /// <summary>Cuts the job's one branch after stage <c>at</c>.</summary>
     public async Task<string> SplitAsync(NodeRequestContext request)

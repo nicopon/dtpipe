@@ -59,7 +59,7 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   cookie's keys live in `keys/` in the state directory, so a restart signs nobody out.
 - **Lab mode is off by default, and everything only a bench needs sits behind it.**
   `LabModeEndpoints` maps the Lab view's scenario catalog and manual planning (`/api/plan`,
-  `/api/deploy`), fault injection and `/api/query`, for admins; the pages under `wwwroot/lab/`
+  `/api/deploy`), and fault injection, for admins; the pages under `wwwroot/lab/`
   answer 404 without it (and 403 to anyone but an admin), and `GET /api/info` tells the pages
   which mode they run in. Never add a bench-only
   route outside `MapLabMode`. `[local: RouteTableTests]` `[unchecked: whether a new route belongs to the bench]`
@@ -67,7 +67,7 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   not answers that it ended none, and the kill route does not report that.
   `[local: PipelineNode.Tests FaultInjectionTests]` `[unchecked: the route's answer to a kill nobody carried out]`
 - **The server never opens a node's data.** What reads it asks the node that hosts it, through
-  `NodeRequests`: a brick preview, `/api/query` and a cut (the named requests `lab.query` and `lab.split`, which only a lab host registers), and a
+  `NodeRequests`: a brick preview and a cut (the named request `lab.split`, which only a lab host registers), and a
   library save's check (`DesignValidator`): each source brick's node sends its first row as Arrow IPC
   (`SampleBrick`, written by the `arrow:-` writer its fragment uses), a runner dry-runs the job as
   the runner will see it (`ValidateJob`), and each sink brick's node checks its target against the contract that

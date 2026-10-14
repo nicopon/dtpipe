@@ -53,10 +53,9 @@ public static class NodeChannel
 
 /// <summary>
 /// A variable a node describes, reachable from a fragment's job through <c>${{Variable}}</c>. Its value
-/// never leaves the node; <see cref="Engine"/> says it is a database the node queries for the
-/// coordinator's lab mode, and is empty for any other variable.
+/// never leaves the node, and the coordinator learns nothing of what it points at.
 /// </summary>
-public sealed record DatasetInfo(string Variable, string Engine, string Description);
+public sealed record DatasetInfo(string Variable, string Description);
 
 /// <summary>A data node hosts databases and offers bricks; a runner hosts neither and carries every step between them.</summary>
 public enum NodeRole { Data, Runner }
@@ -143,9 +142,6 @@ public sealed record JobCheckResult(bool Ok, string Report, IReadOnlyDictionary<
 
 /// <summary>What a <c>Request</c> answers: the handler's payload (JSON), or why the host does not answer it.</summary>
 public sealed record NodeResponse(string? Payload, string? Error);
-
-/// <summary>What the lab's <c>lab.query</c> request answers: CSV text, or why the node did not or could not read it.</summary>
-public sealed record DatasetQueryResult(string? Csv, string? Error);
 
 /// <summary>
 /// What the lab's <c>lab.split</c> request answers: the cut branch's producer and consumer halves, each a one-branch

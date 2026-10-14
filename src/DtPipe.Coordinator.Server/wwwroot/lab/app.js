@@ -112,7 +112,7 @@ function renderNodes() {
         <span class="chip">${esc(n.groups.join(" + "))}</span>
       </div>
       <div class="hint" style="margin:2px 0">${esc(n.description)}</div>
-      ${n.datasets.map((d) => `<div class="dataset"><code>\${{${esc(d.variable)}}}</code> ${esc(d.engine)} · ${esc(d.description)}</div>`).join("")}
+      ${n.datasets.map((d) => `<div class="dataset"><code>\${{${esc(d.variable)}}}</code> ${esc(d.description)}</div>`).join("")}
       ${n.replicas.map((r) => `
         <div class="frag">
           <div class="frag-line">
@@ -127,15 +127,6 @@ function renderNodes() {
   const current = filter.value;
   filter.innerHTML = `<option value="">all nodes</option>` + state.nodes.map((n) => `<option>${esc(n.name)}</option>`).join("") + `<option>lab</option>`;
   filter.value = current;
-
-  const datasets = state.nodes.flatMap((n) => n.datasets.filter((d) => d.engine).map((d) => ({ ...d, node: n.name })));
-  const qs = $("query-dataset");
-  if (qs.options.length !== datasets.length) {
-    const previous = qs.value;
-    qs.innerHTML = datasets.map((d) => `<option value="${esc(d.variable)}" data-engine="${esc(d.engine)}">${esc(d.node)} · ${esc(d.variable)}</option>`).join("");
-    qs.value = previous || datasets.find((d) => d.variable.includes("WAREHOUSE"))?.variable || datasets[0]?.variable || "";
-    defaultQuery();
-  }
 }
 
 function renderMatrix() {
@@ -457,48 +448,6 @@ function restoreDeployedLayout() {
   selectPipeline(entry, { cuts: state.deployed.cuts, placement });
 }
 
-// ---------------------------------------------------------------- query
-
-function defaultQuery() {
-  const option = $("query-dataset").selectedOptions[0];
-  if (!option) return;
-  $("query-sql").value = option.dataset.engine === "sqlite"
-    ? "SELECT name FROM sqlite_master WHERE type = 'table'"
-    : "SELECT table_name, estimated_size AS rows FROM duckdb_tables()";
-}
-
-function parseCsv(text) {
-  const rows = [];
-  let row = [], field = "", quoted = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (quoted) {
-      if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
-      else if (c === '"') quoted = false;
-      else field += c;
-    } else if (c === '"') quoted = true;
-    else if (c === ",") { row.push(field); field = ""; }
-    else if (c === "\n") { row.push(field.replace(/\r$/, "")); rows.push(row); row = []; field = ""; }
-    else field += c;
-  }
-  if (field || row.length) { row.push(field.replace(/\r$/, "")); rows.push(row); }
-  return rows;
-}
-
-async function runQuery() {
-  const host = $("query-result");
-  host.innerHTML = `<p class="hint">Querying…</p>`;
-  try {
-    const { csv } = await api("/api/query", { variable: $("query-dataset").value, sql: $("query-sql").value });
-    const [header, ...rows] = parseCsv(csv);
-    if (!header) { host.innerHTML = `<p class="hint">No rows.</p>`; return; }
-    host.innerHTML = `<table><tr>${header.map((h) => `<th>${esc(h)}</th>`).join("")}</tr>${rows.map((r) => `<tr>${r.map((v) => `<td>${esc(v)}</td>`).join("")}</tr>`).join("")}</table>
-      <p class="hint">${rows.length} row(s)${rows.length >= 200 ? ", first 200 only" : ""}.</p>`;
-  } catch (e) {
-    host.innerHTML = `<p class="mismatch" style="white-space:pre-wrap">${esc(e.message)}</p>`;
-  }
-}
-
 // ---------------------------------------------------------------- wiring
 
 function useCustomYaml(yaml, title) {
@@ -568,9 +517,6 @@ function bind() {
     if (state.run?.runId) api("/api/runs/cancel", { runId: state.run.runId }).catch((e) => toast(e.message));
   });
 
-  $("query-dataset").addEventListener("change", defaultQuery);
-  $("query-btn").addEventListener("click", runQuery);
-  $("query-sql").addEventListener("keydown", (e) => { if (e.key === "Enter") runQuery(); });
   $("log-filter").addEventListener("change", renderLog);
   $("log-debug").addEventListener("change", renderLog);
   $("log-clear").addEventListener("click", () => { state.logs = []; renderLog(); });

@@ -41,8 +41,7 @@ public sealed class CoordinatorServerOptions
 
     /// <summary>
     /// Turns on what only a test bench needs: the Lab view and its manual planning (<c>/api/plan</c>,
-    /// <c>/api/deploy</c>, the scenario catalog), fault injection, and <c>/api/query</c>, which opens
-    /// a node's database from the server's own process. Off by default.
+    /// <c>/api/deploy</c>, the scenario catalog), and fault injection. Off by default.
     /// </summary>
     public bool LabMode { get; init; }
 
