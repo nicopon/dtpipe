@@ -32,8 +32,17 @@ async function load() {
 function planChip(e) {
   if (!e.distributed) return `<span class="chip">not distributed</span>`;
   if (e.planCurrent) return `<span class="chip ok">plan saved</span>`;
-  const why = e.planStaleCause === "job" ? "The job changed after its plan was saved" : "A node of its plan holds other groups now, or has no enabled identity";
+  const why = { job: "The job changed after its plan was saved", placement: "Its placement changed after its plan was saved" }[e.planStaleCause]
+    ?? "A node of its plan holds other groups now, or has no enabled identity";
   return `<span class="chip warn" title="${why}">plan stale</span>`;
+}
+
+// Why the nodes of a pipeline's bricks do not hold: a node it names is absent or does not offer the brick, or a brick has none.
+function placementChip(e) {
+  const problems = e.placementProblems || [];
+  if (!problems.length) return "";
+  const blocking = problems.some((p) => p.blocking);
+  return `<span class="chip ${blocking ? "bad" : "warn"}" title="${esc(problems.map((p) => p.message).join(" "))}">placement: ${problems.length} problem${problems.length > 1 ? "s" : ""}</span>`;
 }
 
 function deploymentChip(id) {
@@ -54,9 +63,9 @@ function runCell(id) {
 function deployRowActions(e) {
   const deployment = deploymentOf(e.id);
   const active = isActive(lastRunOf(e.id));
-  const deploy = e.distributed && e.planCurrent && !active;
+  const deploy = e.distributed && e.planCurrent && !active && !(e.placementProblems || []).some((p) => p.blocking);
   const run = deployment && deployment.state !== "failed";
-  return `<button class="small" data-deploy="${esc(e.id)}" ${deploy ? "" : "disabled"} title="${e.distributed && e.planCurrent ? "" : "Save its plan first, on its page"}">${deployment ? "Redeploy" : "Deploy"}</button>
+  return `<button class="small" data-deploy="${esc(e.id)}" ${deploy ? "" : "disabled"} title="${e.distributed && e.planCurrent ? ((e.placementProblems || []).some((p) => p.blocking) ? "Its placement does not hold" : "") : "Save its plan first, on its page"}">${deployment ? "Redeploy" : "Deploy"}</button>
         <button class="small primary" data-run="${esc(e.id)}" ${run ? "" : "disabled"}>Run</button>
         ${deployment ? `<button class="small ghost danger" data-undeploy="${esc(e.id)}" ${active ? "disabled" : ""}>Undeploy</button>` : ""}`;
 }
@@ -67,7 +76,7 @@ function render() {
     <tr>
       <td><a href="#/library/${encodeURIComponent(e.id)}" class="strong">${esc(e.title)}</a><div class="hint mono">${esc(e.id)}</div></td>
       <td class="wrap hint">${esc(e.description || "")}</td>
-      <td>${planChip(e)} ${deploymentChip(e.id)}</td>
+      <td>${planChip(e)} ${deploymentChip(e.id)} ${placementChip(e)}</td>
       <td>${runCell(e.id)}</td>
       <td class="hint">${esc(e.message || "")}<div>${esc(ago(e.updatedAt))}</div></td>
       <td class="actions-cell">
