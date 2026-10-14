@@ -34,6 +34,21 @@ public sealed class SampleReportCollector
 
     public IReadOnlyDictionary<string, SampleReport> Reports => _reports;
 
+    private readonly ConcurrentDictionary<string, string> _checkpoints = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The key of the checkpoint each branch committed, in a real run as in a sample: the one place a caller
+    /// that cannot read the console learns where a branch's rows were kept.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> Checkpoints => _checkpoints;
+
+    /// <summary>Notes the checkpoint a branch committed; ignored while the collector is off.</summary>
+    public void RecordCheckpoint(string? branchAlias, string key)
+    {
+        if (!Enabled) return;
+        _checkpoints[branchAlias ?? LinearBranch ?? "main"] = key;
+    }
+
     private readonly SemaphoreSlim _turn = new(1, 1);
 
     /// <summary>
@@ -60,6 +75,7 @@ public sealed class SampleReportCollector
     public void Clear()
     {
         _reports.Clear();
+        _checkpoints.Clear();
         LinearBranch = null;
     }
 }

@@ -27,6 +27,7 @@ public class ExportService
 	internal readonly OptionsRegistry _optionsRegistry;
 	internal readonly IExportObserver _observer;
 	internal readonly IMemoryChannelRegistry? _channelRegistry;
+	internal readonly DtPipe.DryRun.SampleReportCollector? _reports;
 	internal readonly ILogger<ExportService> _logger;
 	internal readonly HookExecutor _hookExecutor;
 	internal readonly MetricsService _metricsService;
@@ -45,8 +46,10 @@ public class ExportService
 		MetricsService metricsService,
 		SchemaValidationService schemaValidator,
 		PipelineExecutor pipelineExecutor,
-		IMemoryChannelRegistry? channelRegistry = null)
+		IMemoryChannelRegistry? channelRegistry = null,
+		DtPipe.DryRun.SampleReportCollector? reports = null)
 	{
+		_reports = reports;
 		_readerFactories = readerFactories;
 		_writerFactories = writerFactories;
 		_transformerFactories = transformerFactories;

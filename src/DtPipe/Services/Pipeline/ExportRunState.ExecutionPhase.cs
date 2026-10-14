@@ -280,6 +280,9 @@ internal sealed partial class ExportRunState
             await _svc._pipelineExecutor.ExecuteSegmentedPipelineAsync(
                 Reader, EffectiveWriter, Segments, exportableSchema, effectiveOptions, Progress, LinkedCts, effectiveCt, SampleTap, materialise);
 
+            // The tee has committed: the stream was consumed to its end.
+            if (CheckpointKey is not null) _svc._reports?.RecordCheckpoint(Alias, CheckpointKey);
+
             if (contractTee is not null)
                 WriteContract(contractTee, exportableSchema);
 
