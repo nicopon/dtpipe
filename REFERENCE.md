@@ -1307,6 +1307,20 @@ One action runs at a time (a debug run, a change to what is watched, or a run), 
 quit during a run, and **Stop** ends it with the verdict 130, however the engine answers the
 cancellation; a run that had finished before keeps its own code.
 
+With **Debug** on, **Run** is the same real run cut at the watched cards (see below), and the
+confirmation lists its stages: what each reads, whether it keeps every row it delivers, and which
+one writes. It stops at the next breakpoint that holds nothing yet, before anything is written:
+the rows it holds show in the Sample panel (at most the first 1000), the button reads **Continue
+the run**, and the next stage reads them back and writes the target. **Abandon** forgets them.
+Nothing is written before that stage, and the cursor's state file (`--state`) moves only with the
+stage that writes. The write consumes the rows that fed it, so the next run reads the source again.
+Those rows are every row of the level, encrypted in the studio's session and kept until the write,
+**Abandon** or **Reset**: about the size of the data as Arrow (300 000 rows of six columns took
+19 MB), so watch few cards on a large source. Meanwhile a sample, and a change of what is watched,
+are refused. Rows held for a real run serve no sample, and a sample's serve no real run: the first
+forgets the other's. They are also forgotten when the job's text, a launch value or the cursor's
+state file changed, and when the studio restarts.
+
 **Debug** puts a pipette (◉) on every card that holds rows; a sink holds none. A card whose pipette
 is on is *watched*: it keeps the rows it delivers, shown in the Sample panel, and a checkpoint of
 them in the studio's own session (`.dtpipe/sessions/studio-debug/`). A click on a pipette turns it
@@ -1331,9 +1345,10 @@ changing the rows, or a reset forgets at once, from the session too, every check
 depended on it. What is watched and held is kept beside the job, in
 `.dtpipe/studio/<job>-debug.json`; a job not saved yet keeps it under `drafts/`, handed to the job
 at its first save and forgotten when the studio starts. The values of the Variables tab are not
-part of what a checkpoint remembers: after changing one, press **Reset**. A debug run is not the
-job's run: every cut passes through Arrow (see [checkpoints](#checkpoints)), batches differ and so
-does the concurrency. The cut is never saved or published.
+part of what a sample's checkpoint remembers: after changing one, press **Reset**. A sample is not
+the job's run: every cut passes through Arrow (see [checkpoints](#checkpoints)), batches differ and
+so does the concurrency; the rows reach the target in the order a plain run writes them. The cut is
+never saved or published.
 
 The page runs dtpipe with your own access. It listens on 127.0.0.1 only and answers only the
 address it printed: the address carries a token for this session, which every request must

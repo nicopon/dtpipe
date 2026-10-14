@@ -43,13 +43,21 @@ public sealed record StudioComponent(string Name, string Category);
 public sealed record StudioTools(
     StudioSampler Sample, DesignService Design, IReadOnlyList<StudioComponent> Readers, IReadOnlyList<StudioComponent> Writers,
     ISecretsManager Secrets, CoordinatorLink? Coordinator = null, Func<IBrickLookup, DesignService>? DesignWith = null,
-    StudioImporter? Import = null, StudioRunner? Run = null, DebugCutter? Debug = null, StudioSampler? DebugSample = null);
+    StudioImporter? Import = null, StudioRunner? Run = null, DebugCutter? Debug = null, StudioSampler? DebugSample = null,
+    StudioDebugRunner? DebugRun = null);
 
 /// <summary>
 /// The real run of a saved job, the writers of its sink bricks bound to throwaway files: the engine's exit
 /// code, with the reason each failing branch stopped in <paramref name="failures"/>.
 /// </summary>
 public delegate Task<int> StudioRunner(string yaml, StudioBindings bindings, System.Collections.Concurrent.ConcurrentDictionary<string, string> failures, CancellationToken ct);
+
+/// <summary>
+/// A staged run: <see cref="StudioRunner"/> that also tells, in <paramref name="checkpoints"/>, the key of the checkpoint each
+/// branch committed.
+/// </summary>
+public delegate Task<int> StudioDebugRunner(string yaml, StudioBindings bindings, System.Collections.Concurrent.ConcurrentDictionary<string, string> failures,
+    System.Collections.Concurrent.ConcurrentDictionary<string, string> checkpoints, CancellationToken ct);
 
 /// <summary>A command line, as the arguments of one process, as the text of the job file it stands for.</summary>
 public delegate string StudioImporter(IReadOnlyList<string> args);
@@ -246,6 +254,9 @@ public sealed partial class StudioServer : IAsyncDisposable
                     break;
                 case ("POST", "/api/debug/state"):
                     await DebugStateAsync(context);
+                    break;
+                case ("POST", "/api/debug/rows"):
+                    await DebugRowsAsync(context);
                     break;
                 case ("POST", "/api/run/prepare"):
                     await PrepareRunAsync(context);

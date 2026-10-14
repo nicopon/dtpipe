@@ -130,7 +130,7 @@ public sealed class DebugCutter(
         (job.From?.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries) ?? []).Concat(job.Ref);
 
     /// <summary>Every level a watcher can sit on, with the digest of what produces it. Pure: nothing runs.</summary>
-    public DebugPlan Plan(string yaml, int rows)
+    public DebugPlan Plan(string yaml, int rows, string? salt = null)
     {
         var jobs = Parse(yaml);
         var infos = Inspect(jobs);
@@ -140,7 +140,7 @@ public sealed class DebugCutter(
         {
             branches.Add(new DebugBranch(alias, info.Transformers, info.Cuttable));
             foreach (var level in info.Cuttable ? new[] { 0, info.Transformers } : [info.Transformers])
-                levels.Add(new DebugLevel(alias, level, Digest(jobs, alias, info, level, rows)));
+                levels.Add(new DebugLevel(alias, level, Digest(jobs, alias, info, level, rows, salt)));
         }
         var readersOf = new Dictionary<string, IReadOnlySet<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var (alias, job) in jobs)
@@ -153,8 +153,10 @@ public sealed class DebugCutter(
     /// The job to run. <paramref name="upTo"/> stops the run at that level, and drops what it does not need;
     /// <paramref name="held"/> are the levels the run may read back instead of producing.
     /// </summary>
+    /// <param name="write">The run is the job's own, not a sample: the writer is not neutralised by the engine, so a stop
+    /// is a piece with no writer at all, and the cursor and its state file stay with the piece that writes.</param>
     /// <exception cref="InvalidOperationException">The stop names no branch, or one that runs whole at that level.</exception>
-    public DebugCut Cut(string yaml, IEnumerable<DebugWatch> watch, DebugWatch? upTo = null, IReadOnlyList<DebugHeld>? held = null)
+    public DebugCut Cut(string yaml, IEnumerable<DebugWatch> watch, DebugWatch? upTo = null, IReadOnlyList<DebugHeld>? held = null, bool write = false)
     {
         var jobs = Parse(yaml);
         var infos = Inspect(jobs);
@@ -204,7 +206,7 @@ public sealed class DebugCutter(
             if (!plan.TryGetValue(alias, out var run)) { dropped.Add(alias); continue; }
             if (run.From is not null) unread.Add(alias);
             Emit(jobs, alias, infos[alias], run.Stop, run.From, run.Key, target?.Branch.Equals(alias, StringComparison.OrdinalIgnoreCase) == true,
-                watched, result, pieces);
+                write && target is not null, write, watched, result, pieces);
         }
         return new DebugCut(JobFileWriter.Serialize(result), pieces, dropped, unread);
     }
@@ -216,7 +218,26 @@ public sealed class DebugCutter(
         at == DebugAt.End ? info.Transformers : info.Cuttable || info.Transformers == 0 ? 0 : null;
 
     private void Emit(
-        Dictionary<string, JobDefinition> jobs, string alias, Info info, int stop, int? from, string? key, bool isTarget,
+        Dictionary<string, JobDefinition> jobs, string alias, Info info, int stop, int? from, string? key, bool isTarget, bool silent, bool write,
+        HashSet<(string Branch, int Level)> watched, Dictionary<string, JobDefinition> result, List<DebugPiece> pieces)
+    {
+        EmitPieces(jobs, alias, info, stop, from, key, isTarget, silent, write, watched, result, pieces);
+        if (!write) return;
+
+        // The cursor tracks what the writer wrote, and its state file is read as the next run's start: it advances
+        // with the piece that writes the branch's target, never with a piece that only keeps a checkpoint.
+        var job = info.Job;
+        var writer = !silent && result.ContainsKey(alias) ? alias : null;
+        foreach (var name in result.Keys.Where(k => k.Equals(alias, StringComparison.OrdinalIgnoreCase) || k.StartsWith(alias + Mark, StringComparison.OrdinalIgnoreCase)).ToList())
+            result[name] = result[name] with
+            {
+                Cursor = name.Equals(writer, StringComparison.OrdinalIgnoreCase) ? job.Cursor : null,
+                State = name.Equals(writer, StringComparison.OrdinalIgnoreCase) ? job.State : null,
+            };
+    }
+
+    private void EmitPieces(
+        Dictionary<string, JobDefinition> jobs, string alias, Info info, int stop, int? from, string? key, bool isTarget, bool silent, bool write,
         HashSet<(string Branch, int Level)> watched, Dictionary<string, JobDefinition> result, List<DebugPiece> pieces)
     {
         var job = info.Job;
@@ -224,31 +245,46 @@ public sealed class DebugCutter(
         bool Watches(int level) => watched.Contains((alias, level));
         string Checkpoint(int level) => $"level-{level}";
         string Name(int level) => level == count ? alias : $"{alias}{Mark}{level}";
-        // A target nothing reads and that writes nowhere would be refused by the engine: its rows are the answer.
-        JobDefinition Terminal(JobDefinition piece, bool last) =>
-            !isTarget || last && !string.IsNullOrEmpty(piece.Output) ? piece : piece with { Output = "null:" };
+        // A target nothing reads and that writes nowhere would be refused by the engine: its rows are the answer. In a
+        // sample the engine neutralises the writer, so the last piece may keep its output; a real run has no such net:
+        // while it stops, no branch of it has a writer, or the stop is refused.
+        JobDefinition Terminal(JobDefinition piece, bool last, bool producerForm)
+        {
+            if (silent)
+            {
+                // A branch that only feeds another has no output to neutralise and gets none.
+                var output = isTarget || !string.IsNullOrEmpty(job.Output) ? "null:" : null;
+                return producerForm ? piece with { Output = output } : JobCutter.Without(piece, BranchSides.Write) with { Output = output, ProviderOptions = null };
+            }
+            if (!isTarget) return piece;
+            return last && !string.IsNullOrEmpty(piece.Output) ? piece : piece with { Output = "null:" };
+        }
+        // A branch that runs whole cannot be stopped before its writer.
+        var detach = silent && stop == count;
+        if (detach && !info.Splittable && !string.IsNullOrEmpty(job.Output))
+            throw new InvalidOperationException($"'{alias}' runs whole: it cannot be stopped before its writer.");
 
-        if (!info.Cuttable)
+        if (!info.Cuttable && !(detach && info.Splittable && from is null))
         {
             if (from is { } && key is not null)
             {
-                result[alias] = Terminal(ReadBack(jobs, alias, info, key, last: true), last: true);
+                result[alias] = Terminal(ReadBack(jobs, alias, info, key, last: true), last: true, producerForm: false);
                 pieces.Add(new DebugPiece(alias, count, alias));
                 return;
             }
             var whole = Watches(count) ? job with { Checkpoint = Checkpoint(count), Session = SessionName } : job;
-            result[alias] = Terminal(whole, last: true);
+            result[alias] = Terminal(whole, last: true, producerForm: true);
             if (Watches(count)) pieces.Add(new DebugPiece(alias, count, alias));
             return;
         }
 
         var start = from ?? -1;
         var ends = new[] { 0 }.Where(l => l > start && l < stop && Watches(l)).Append(stop).Where(l => l > start).ToList();
-        if (start < 0 && ends is [var only] && only == count)
+        if (start < 0 && ends is [var only] && only == count && !(detach && info.Splittable))
         {
             // No watcher inside: the branch runs as the job states it, with a checkpoint at its end when watched.
             var whole = Watches(count) ? job with { Checkpoint = Checkpoint(count), Session = SessionName } : job;
-            result[alias] = Terminal(whole, last: true);
+            result[alias] = Terminal(whole, last: true, producerForm: true);
             if (Watches(count)) pieces.Add(new DebugPiece(alias, count, alias));
             return;
         }
@@ -260,7 +296,7 @@ public sealed class DebugCutter(
             var last = start == count;
             var back = ReadBack(jobs, alias, info, key!, last);
             previous = Name(start);
-            result[previous] = start == stop ? Terminal(back, last) : back;
+            result[previous] = start == stop ? Terminal(back, last, producerForm: false) : back;
             pieces.Add(new DebugPiece(alias, start, previous));
         }
         foreach (var end in ends)
@@ -272,7 +308,7 @@ public sealed class DebugCutter(
                 ? JobCutter.Cut(jobs, alias, end, readers, writers).Producer[alias] with { Output = null }
                 : JobCutter.Cut(jobs, alias, previousLevel, readers, writers).Consumer[alias] with { Input = null, Ref = [], From = previous };
             piece = piece with { Session = SessionName, Checkpoint = Watches(end) ? Checkpoint(end) : null };
-            result[name] = end == stop ? Terminal(piece, last) : piece;
+            result[name] = end == stop ? Terminal(piece, last, producerForm: previous is null) : piece;
             if (Watches(end)) pieces.Add(new DebugPiece(alias, end, name));
             previous = name;
             previousLevel = end;
@@ -307,7 +343,7 @@ public sealed class DebugCutter(
     /// states them, its reader side and its first transformers, and the rows the run reads. Hashed, so no secret
     /// is kept.
     /// </summary>
-    private string Digest(Dictionary<string, JobDefinition> jobs, string alias, Info info, int level, int rows)
+    private string Digest(Dictionary<string, JobDefinition> jobs, string alias, Info info, int level, int rows, string? salt)
     {
         var parts = new Dictionary<string, JobDefinition>(StringComparer.Ordinal);
         var pending = new Stack<string>(Reads(info.Job));
@@ -321,6 +357,6 @@ public sealed class DebugCutter(
         parts[alias] = info.Cuttable
             ? JobCutter.Cut(jobs, alias, level, readers, writers).Producer[alias] with { Output = null }
             : JobCutter.Without(info.Job, BranchSides.Write.Concat(BranchSides.Diagnostics));
-        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes($"rows={rows};level={level}\n{JobFileWriter.Serialize(parts)}")));
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes($"rows={rows};salt={salt};level={level}\n{JobFileWriter.Serialize(parts)}")));
     }
 }

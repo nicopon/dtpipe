@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using DtPipe.Cli.Split;
+using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Sessions;
 using Microsoft.AspNetCore.Http;
 
@@ -38,6 +39,9 @@ public sealed partial class StudioServer
     {
         public List<DebugWatch> Watch { get; set; } = [];
         public List<HeldLevel> Levels { get; set; } = [];
+
+        /// <summary>The levels held are the rows of a real run that has not written its target yet.</summary>
+        public bool Real { get; set; }
     }
 
     private static DebugWatch WatchOf(DebugAtRequest? asked)
@@ -63,10 +67,10 @@ public sealed partial class StudioServer
         throw new StudioRefusal(400, "A debug run belongs to a job: name its path, or the draft of a job not saved yet.");
     }
 
-    private DebugPlan PlanOf(DebugCutter cutter, string? yaml, int rows)
+    private DebugPlan PlanOf(DebugCutter cutter, string? yaml, int rows, string? salt = null)
     {
         if (string.IsNullOrWhiteSpace(yaml)) throw new StudioRefusal(400, "A debug request carries {\"yaml\": \"...\", \"rows\": n}.");
-        try { return cutter.Plan(yaml, rows); }
+        try { return cutter.Plan(yaml, rows, salt); }
         catch (Exception ex) when (ex is InvalidOperationException or FormatException or YamlDotNet.Core.YamlException)
         {
             throw new StudioRefusal(422, ex.Message);
@@ -89,6 +93,7 @@ public sealed partial class StudioServer
             foreach (var l in node?["levels"] as JsonArray ?? [])
                 if ((string?)l?["branch"] is { } branch && (int?)l["level"] is { } level && (string?)l["digest"] is { } digest && (string?)l["key"] is { Length: > 0 } held)
                     state.Levels.Add(new HeldLevel(branch, level, digest, held));
+            state.Real = (bool?)node?["real"] == true && state.Levels.Count > 0;
         }
         catch (Exception ex) when (ex is InvalidOperationException or FormatException) { return new DebugState(); }
         return state;
@@ -97,32 +102,52 @@ public sealed partial class StudioServer
     private void SaveDebug(string key, DebugState state) => _local.WriteDebug(key, new JsonObject
     {
         ["session"] = DebugCutter.SessionName,
+        ["real"] = state.Real && state.Levels.Count > 0,
         ["watch"] = new JsonArray(state.Watch.Select(w => (JsonNode)new JsonObject { ["branch"] = w.Branch, ["at"] = AtName(w.At), ["card"] = w.Card, ["break"] = w.Break }).ToArray()),
         ["levels"] = new JsonArray(state.Levels.Select(l => (JsonNode)new JsonObject
             { ["branch"] = l.Branch, ["level"] = l.Level, ["digest"] = l.Digest, ["key"] = l.Key }).ToArray()),
     });
 
     /// <summary>
-    /// Keeps only what is still true: a watcher on a branch that can be watched there, and a level that a watcher
-    /// sits on, whose text has not changed and whose checkpoint is in the session. What it drops, and
-    /// <paramref name="forgotten"/>, leaves the session: a checkpoint is valid or it does not exist.
+    /// What is still true: the watchers that can be watched there, the levels a watcher sits on whose text has not
+    /// changed and whose checkpoint is in the session, and the keys that are not (with <paramref name="forgotten"/>).
+    /// Pure: nothing leaves the session.
     /// </summary>
-    private void Settle(DebugState state, DebugPlan plan, IEnumerable<string> forgotten)
+    private (List<DebugWatch> Watch, List<HeldLevel> Keep, HashSet<string> Drop) Judge(DebugState state, DebugPlan plan, IEnumerable<string> forgotten)
     {
         var store = DebugStore();
         var drop = new HashSet<string>(forgotten);
-        state.Watch = state.Watch.Where(w => plan.Resolve(w) is not null).DistinctBy(w => (w.Branch.ToLowerInvariant(), w.At)).ToList();
+        var watch = state.Watch.Where(w => plan.Resolve(w) is not null).DistinctBy(w => (w.Branch.ToLowerInvariant(), w.At)).ToList();
         var keep = new List<HeldLevel>();
         foreach (var held in state.Levels)
         {
             var valid = plan.Levels.Any(p => Same(p.Branch, held.Branch) && p.Level == held.Level && p.Digest == held.Digest)
-                && state.Watch.Any(w => Same(w.Branch, held.Branch) && plan.Resolve(w) == held.Level)
+                && watch.Any(w => Same(w.Branch, held.Branch) && plan.Resolve(w) == held.Level)
                 && store.Contains(held.Key);
             if (valid) keep.Add(held); else drop.Add(held.Key);
         }
-        state.Levels = keep;
         drop.ExceptWith(keep.Select(h => h.Key));
+        return (watch, keep, drop);
+    }
+
+    /// <summary>
+    /// Keeps only what is still true (<see cref="Judge"/>). What it drops, and <paramref name="forgotten"/>, leaves
+    /// the session: a checkpoint is valid or it does not exist.
+    /// </summary>
+    private void Settle(DebugState state, DebugPlan plan, IEnumerable<string> forgotten)
+    {
+        var (watch, keep, drop) = Judge(state, plan, forgotten);
+        state.Watch = watch;
+        state.Levels = keep;
+        if (keep.Count == 0) state.Real = false;
+        var store = DebugStore();
         foreach (var key in drop) ForgetCheckpoint(store, key);
+    }
+
+    private static void RefuseWhileSuspended(DebugState state)
+    {
+        if (state.Real)
+            throw new StudioRefusal(409, "A real run is suspended before its target is written: continue it, or abandon it to forget its rows.");
     }
 
     private static void ForgetCheckpoint(CheckpointStore store, string key)
@@ -133,6 +158,7 @@ public sealed partial class StudioServer
 
     private object DebugView(DebugPlan plan, DebugState state, IReadOnlyList<DebugPiece>? pieces) => new
     {
+        real = state.Real,
         branches = plan.Branches.Select(b => new { branch = b.Branch, transformers = b.Transformers, cuttable = b.Cuttable }),
         watch = state.Watch.Select(w =>
         {
@@ -166,6 +192,7 @@ public sealed partial class StudioServer
         {
             // The engine slot is held here: what is settled and cut cannot change under another action.
             state = LoadDebug(key);
+            RefuseWhileSuspended(state);
             if (upTo is not null && !state.Watch.Any(w => Same(w.Branch, upTo.Branch) && w.At == upTo.At)) state.Watch.Add(upTo);
             Settle(state, plan, []);
             try { cut = cutter.Cut(yaml, state.Watch, upTo, state.Levels.Select(l => new DebugHeld(l.Branch, l.Level, l.Key)).ToList()); }
@@ -199,10 +226,15 @@ public sealed partial class StudioServer
     /// <summary>What a debug run keeps for the next: the checkpoint each watched piece wrote, under the digest of its level.</summary>
     private void Keep(string key, DebugState state, DebugPlan plan, DebugCut cut, string reported)
     {
-        var store = DebugStore();
         var keys = (JsonNode.Parse(reported)?["branches"] as JsonArray ?? [])
             .Where(b => (string?)b?["checkpoint"] is { Length: > 0 })
             .ToDictionary(b => (string)b!["branch"]!, b => (string)b!["checkpoint"]!, StringComparer.OrdinalIgnoreCase);
+        Keep(key, state, plan, cut, keys);
+    }
+
+    private void Keep(string key, DebugState state, DebugPlan plan, DebugCut cut, IReadOnlyDictionary<string, string> keys)
+    {
+        var store = DebugStore();
         foreach (var piece in cut.Pieces)
         {
             // A level read back wrote nothing: it keeps the key it was held under.
@@ -239,6 +271,14 @@ public sealed partial class StudioServer
         {
             if (adopted is not null) _local.AdoptDebug(adopted, key);
             var state = LoadDebug(key);
+            // Abandoning a suspended real run is the one change it allows: its rows belong to the text and the values it started with.
+            // Asking what it holds changes nothing, and is answered as it is: a sample's plan would judge those rows by the wrong digest.
+            if (state.Real && asked.ResetAll != true)
+            {
+                if (wanted is not null || reset.Count > 0) RefuseWhileSuspended(state);
+                await JsonAsync(context, new { rows, view = DebugView(plan, state, null) });
+                return;
+            }
             if (wanted is not null) state.Watch = wanted;
             var forgotten = new List<string>();
             if (asked.ResetAll == true)
@@ -259,5 +299,48 @@ public sealed partial class StudioServer
             await JsonAsync(context, new { rows, view = DebugView(plan, state, null) });
         }
         finally { _sampling.Release(); }
+    }
+
+    private sealed record DebugRowsRequest(string? Path, string? Draft, string? Key);
+
+    /// <summary>
+    /// The first rows of a checkpoint this job holds, shaped as a stage of a sample: how a real run, which reports no rows,
+    /// shows a person what is held before its target is written. Only a key the job's state holds is read.
+    /// </summary>
+    private async Task DebugRowsAsync(HttpContext context)
+    {
+        var asked = await BodyAsync<DebugRowsRequest>(context);
+        var key = DebugKey(asked.Path, asked.Draft);
+        _local.CheckDebug(key);
+        if (asked.Key is not { Length: > 0 } held || !LoadDebug(key).Levels.Any(l => l.Key == held))
+            throw new StudioRefusal(404, "This job holds no such checkpoint.");
+
+        var store = DebugStore();
+        var rows = new List<List<string?>>();
+        List<object> columns = [];
+        var more = false;
+        try
+        {
+            await foreach (var batch in store.ReadAsync(held, context.RequestAborted))
+            {
+                using (batch)
+                {
+                    if (columns.Count == 0)
+                        columns = batch.Schema.FieldsList.Select(f => (object)new { name = f.Name, type = f.DataType.Name, isNullable = f.IsNullable }).ToList();
+                    for (var i = 0; i < batch.Length; i++)
+                    {
+                        if (rows.Count >= MaxRows) { more = true; break; }
+                        rows.Add(Enumerable.Range(0, batch.Schema.FieldsList.Count)
+                            .Select(c => ArrowTypeMapper.GetValueForField(batch.Column(c), batch.Schema.FieldsList[c], i)?.ToString()).ToList());
+                    }
+                }
+                if (more) break;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            throw new StudioRefusal(404, "This checkpoint can no longer be read.");
+        }
+        await JsonAsync(context, new { stage = new { index = 0, name = "checkpoint", columns, rowsSeen = rows.Count, more, sample = rows } });
     }
 }

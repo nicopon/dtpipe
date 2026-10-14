@@ -293,6 +293,23 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   source alone (at most `DebugMaxRows`, a thousand rows shown per stage) and a checkpoint read back
   is not bounded again. With no stop the run reaches the end of the job: only the branches that write
   or that nothing reads start it, so a branch whose reader reads a checkpoint back is left out.
+- **A staged run is the job's own run cut at the watched cards, and nothing leaves the process before its
+  last stage.** `POST /api/run/prepare` and `POST /api/run` take `debug` and `upTo` (the page's choice: the
+  next breakpoint that holds nothing); the saved file only, and the digest also binds the stop, the watchers
+  and the keys held. `DebugCutter.Cut(write: true)` makes the cut: a run that stops has no branch with a
+  writer (upstream branches included; one that runs whole with an output is refused), because the engine
+  neutralises nothing outside a sample. The cursor and its state file move with the piece that writes the
+  branch (`JobCutter` puts them on the head, which would advance them for rows no target received). The
+  engine reports the key of each committed checkpoint through `SampleReportCollector.Checkpoints`
+  (`StudioDebugRunner`). A level of a real run is keyed to every row and to a salt (an HMAC under the
+  session's token of the launch values and the state files a cursor reads), so it serves no sample and no
+  other values; a write that reached the end of the job deletes the levels that fed it, one that stopped
+  or failed keeps what it completed as `real` (`DebugState.Real`), and until it is continued or abandoned
+  (`resetAll`) a sample or a change of watchers is a 409. `POST /api/debug/rows` reads the first rows of a
+  held key, the only way a person sees them before the write. A failed last stage leaves the target as
+  its writer does in a plain run, and the held rows for a retry; a partial failure of several branches
+  re-runs them all when continued. `[CI: StudioStagedRunTests]` `[unchecked: the page, a writer other
+  than the local ones tried]`
 - **A stop is a new run, never a paused process.** Continue and Step are the page choosing a stop
   (`nextStop`): the first watched card, in the order the job reaches its cards, that holds no
   checkpoint (breakpoints only for Continue), or none, which runs to the end. The server holds a
@@ -300,7 +317,7 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   keeps; removing the watcher removes it.
 - **A level's digest comes from the job as written, never from the cut.** It hashes the branches the
   level reads, the reader side, the transformers up to it and the rows asked, so watching another card
-  invalidates nothing. A launch value is not in it.
+  invalidates nothing. A launch value is not in a sample's, but is in a real run's (the salt).
 - **A checkpoint is valid or does not exist.** `POST /api/debug` and `POST /api/debug/state` settle the
   watchers and held levels against the text under the engine slot, delete from the session what the
   text, the rows or a reset no longer supports (a reset takes everything downstream with it), and

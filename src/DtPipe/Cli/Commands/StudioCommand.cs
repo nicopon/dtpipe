@@ -78,7 +78,8 @@ public sealed class StudioCommand : Command
                 (yaml, bindings, failures, token) => mcp.RunJobAsync(yaml, bindings.Input, bindings.Output, failures, token),
                 new DebugCutter(readers, writers, serviceProvider.GetServices<IStreamTransformerFactory>().ToList()),
                 (yaml, rows, bindings, token) => mcp.SampleAsync(yaml, rows, shownRows: Math.Min(rows, StudioServer.MaxRows), token,
-                    bindings.Input, bindings.Output, maxRows: StudioServer.DebugMaxRows));
+                    bindings.Input, bindings.Output, maxRows: StudioServer.DebugMaxRows),
+                (yaml, bindings, failures, checkpoints, token) => mcp.RunJobAsync(yaml, bindings.Input, bindings.Output, failures, token, checkpoints));
             StudioServer server;
             try
             {

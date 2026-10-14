@@ -248,8 +248,9 @@ async function loadBricks() {
 // checkpoints beside the job and settles them against the job's text; this page shows what it answers.
 //   watch: { branch, at, card, break, level, key, alias } per watcher, `break` being where Continue stops, `card` being the card it sits on, which keeps its name when the
 //   branch that runs it is renamed; loaded: the server's answer for this job was read; branches: { branch, transformers, cuttable };
-//   samples: what each watched place showed last, by place; running: a Play is under way.
-const freshDebug = (on = false) => ({ on, rows: 1000, loaded: false, watch: [], branches: [], samples: new Map(), running: false, notice: null, report: null });
+//   samples: what each watched place showed last, by place; running: a Play is under way; real: a real run is suspended
+//   before its target is written, holding every row it read.
+const freshDebug = (on = false) => ({ on, rows: 1000, loaded: false, real: false, watch: [], branches: [], samples: new Map(), running: false, notice: null, report: null });
 let dbg = freshDebug();
 let debugSeq = 0;
 let debugTimer = null;
@@ -276,13 +277,16 @@ function redrawDebug() {
   $("d-mode")?.classList.toggle("on", dbg.on);
   $("d-mode")?.setAttribute("aria-pressed", String(dbg.on));
   for (const id of ["d-watch-rows-label", "d-watch-reset", "d-continue", "d-step"]) if ($(id)) $(id).hidden = !dbg.on;
-  for (const id of ["d-continue", "d-step"]) if ($(id)) $(id).disabled = dbg.running;
+  for (const id of ["d-continue", "d-step", "d-watch-reset", "d-watch-rows"]) if ($(id)) $(id).disabled = dbg.running || dbg.real;
+  if ($("d-abandon")) $("d-abandon").hidden = !(dbg.on && dbg.real);
+  if ($("d-run")) $("d-run").textContent = dbg.on && dbg.real ? "Continue the run" : "Run";
   refreshCanvas();
   refreshDrawer();
 }
 
 function applyView(view) {
   dbg.loaded = true;
+  dbg.real = !!view.real;
   dbg.watch = view.watch;
   dbg.branches = view.branches;
   // A checkpoint is valid or it does not exist: rows shown for a place that holds none are gone.
@@ -290,6 +294,7 @@ function applyView(view) {
     if (!dbg.watch.some((w) => placeKey(w) === place && w.key === shown.key)) dbg.samples.delete(place);
   }
   redrawDebug();
+  if (dbg.real) loadHeld();
 }
 
 // Tells the server what the page watches or resets and what the job's text now is; it answers what it still holds.
@@ -311,6 +316,8 @@ async function debugSyncNow(extra, force) {
   const forJob = current;
   const seq = ++debugSeq;
   const asked = typeof extra === "function" ? extra() : extra;
+  // A suspended real run keeps its rows for its own text: an edit is judged when the run is continued, not here.
+  if (dbg.real && !asked.resetAll && dbg.loaded) return false;
   // Once the server's watchers are known, every sync tells where their cards sit now.
   const watch = asked.watch ?? (dbg.loaded ? dbg.watch.map(spec) : undefined);
   try {
@@ -431,6 +438,12 @@ function cardTools(alias) {
 async function cardTool(alias, name) {
   const place = placeOf(alias);
   if (!place || !dbg.on || dbg.running) return;
+  if (dbg.real) {
+    // The rows of a real run belong to its text; a card can still be looked at, nothing else changes.
+    if (watcherOf(alias)) focusCard(alias);
+    status("A real run is suspended: continue it, or abandon it to change what is watched.", "warn");
+    return;
+  }
   const watcher = watcherOf(alias);
   const branch = dbg.branches.find((b) => b.branch === place.branch);
   if (name !== "reset" && place.at === "read" && branch && !branch.cuttable && branch.transformers > 0) {
@@ -481,10 +494,10 @@ function sampleView(alias) {
       + "or Step to run to the next watched card."));
   } else if (!shown) {
     parts.push(el("p", { class: "hint" }, watcher.key
-      ? `${alias} holds a checkpoint: ▶ reads it back and shows its rows.`
+      ? (dbg.real ? `${alias} holds the rows of a real run: loading them…` : `${alias} holds a checkpoint: ▶ reads it back and shows its rows.`)
       : `Nothing kept for ${alias} yet: ▶ runs the job up to it.`));
   } else {
-    parts.push(el("p", { class: "muted" }, `${alias}: ${shown.stage.rowsSeen} rows delivered. The target was not written.`),
+    parts.push(el("p", { class: "muted" }, `${alias}: ${shown.stage.rowsSeen}${shown.stage.more ? "+" : ""} rows${dbg.real ? " held (at most the first 1000 shown). The target is not written yet." : " delivered. The target was not written."}`),
       el("div", { class: "scroll" }, stageTable(shown.stage)));
   }
   const errors = dbg.report?.errors || (dbg.report?.error ? [dbg.report.error] : []);
@@ -512,9 +525,11 @@ async function prepareRun() {
   }
   try {
     const forPath = current.path;
-    const prepared = await api("/api/run/prepare", { path: current.path, hash: current.hash, bricks: brickBranches() });
+    // With Debug on, the run is cut at the watched cards and stops at the next breakpoint that holds nothing yet.
+    const staged = dbg.on ? { debug: true, upTo: nextStop(true) } : {};
+    const prepared = await api("/api/run/prepare", { path: current.path, hash: current.hash, bricks: brickBranches(), ...staged });
     if (current?.path !== forPath) return;
-    run = { phase: "confirm", prepared, bricks: brickBranches(), hash: current.hash, path: current.path };
+    run = { phase: "confirm", prepared, bricks: brickBranches(), hash: current.hash, path: current.path, staged };
     showTab("run");
   } catch (e) {
     run = null;
@@ -524,7 +539,7 @@ async function prepareRun() {
 
 async function startRun() {
   try {
-    await api("/api/run", { path: run.path, hash: run.hash, bricks: run.bricks, digest: run.prepared.digest });
+    await api("/api/run", { path: run.path, hash: run.hash, bricks: run.bricks, digest: run.prepared.digest, ...run.staged });
     run = { ...run, phase: "running", status: null };
     pollRun();
     showTab("run");
@@ -539,7 +554,12 @@ function pollRun() {
     try {
       const now = await api("/api/run");
       run = { ...run, status: now, phase: now.running ? "running" : "done" };
-      if (!now.running) { clearInterval(runTimer); status(`run ${runLabel(now)}`, now.code === 0 ? "good" : "warn"); }
+      if (!now.running) {
+        clearInterval(runTimer);
+        status(`run ${runLabel(now)}`, now.code === 0 ? "good" : "warn");
+        // A run that stopped holding rows shows them; the verdict is in the status line.
+        if (now.view && await showHeld(now.view)) return;
+      }
       showTab("run");
     } catch (e) {
       clearInterval(runTimer);
@@ -548,16 +568,72 @@ function pollRun() {
   }, 1000);
 }
 
+// A staged run ends holding rows or none: the cards redraw from what the server holds, and the card it stopped at shows them.
+async function showHeld(view) {
+  applyView(view);
+  const first = dbg.real ? await heldLoading : null;
+  if (first) focusCard(first);
+  return !!first;
+}
+
+// The rows a suspended real run holds come from the server, which keeps them: loaded for every held card the page shows nothing of.
+let heldLoading = Promise.resolve(null);
+function loadHeld() {
+  heldLoading = (async () => {
+    let first = null;
+    let loaded = false;
+    for (const w of dbg.watch) {
+      if (!w.key) continue;
+      first ??= w.card;
+      if (dbg.samples.get(placeKey(w))?.key === w.key) continue;
+      try {
+        const { stage } = await api("/api/debug/rows", { ...debugScope(), key: w.key });
+        dbg.samples.set(placeKey(w), { stage, key: w.key });
+        loaded = true;
+      } catch (e) { status(e.message, "bad"); }
+    }
+    // Rows the page did not have (a reload, another tab) are shown where they are held.
+    if (loaded && first) focusCard(first); else refreshDrawer();
+    return first;
+  })();
+  return heldLoading;
+}
+
+async function abandonRun() {
+  if (await debugSync({ resetAll: true }, true)) { dbg.samples.clear(); redrawDebug(); status("real run abandoned: nothing was written", "good"); }
+}
+
 async function stopRun() {
   try { await api("/api/run/stop", {}); status("stop asked", "warn"); } catch (e) { status(e.message, "bad"); }
+}
+
+// What a staged run will do, stage by stage, and what it holds on disk meanwhile.
+function stagedView(staged) {
+  const size = (bytes) => bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} kB`;
+  const stopsAt = staged.stopsAt ? (staged.stopsAt.card || staged.stopsAt.branch) : null;
+  return [
+    staged.writesNow
+      ? el("p", { class: "warn" }, "This run is real and reaches the end of the job: its last stage writes the target. A sink brick is written to a throwaway file here, never to its node.")
+      : el("p", { class: "warn" }, `This run is real but stops at ${stopsAt}, before anything is written. It holds every row it read, encrypted in this studio's session, `
+        + "until you continue the run (the same button writes the target) or abandon it. The rows of a sample are not used."),
+    el("ol", { class: "run-stages" }, staged.stages.map((st) => el("li", {},
+      el("b", {}, st.branch), " reads ", el("code", {}, st.reads || "its source"),
+      st.keeps ? ", keeps every row it delivers" : "",
+      st.writes ? [", WRITES ", el("code", {}, st.writes)] : ", writes nothing"))),
+    staged.held.length ? el("p", { class: "hint" }, "Held from before: ", staged.held.map((h) =>
+      `${h.card || h.branch} (${size(h.bytes)}, read ${h.readAt ? new Date(h.readAt).toLocaleString() : "earlier"})`).join("; "),
+      ". Continuing writes these rows, not a new read of the source.") : null,
+    staged.discards ? el("p", { class: "warn" }, `${staged.discards} held checkpoint(s) no longer match the job or the values it reads with, or come from a sample: they are forgotten.`) : null,
+  ];
 }
 
 function runView() {
   if (!run) return el("p", { class: "hint" }, "Run executes the job saved in this folder, as dtpipe --job would, on this machine. You confirm what it writes first.");
   if (run.phase === "confirm") {
     const writes = run.prepared.writes;
+    const staged = run.prepared.staged;
     return [
-      el("p", { class: "warn" }, "This run is real: its writers write their targets. A sink brick is written to a throwaway file here, never to its node."),
+      staged ? stagedView(staged) : el("p", { class: "warn" }, "This run is real: its writers write their targets. A sink brick is written to a throwaway file here, never to its node."),
       writes.length ? writes.map((w) => el("div", { class: "run-write" },
         el("p", {}, el("b", {}, w.alias), w.throwaway ? " → a throwaway file (the brick's node is not reached)" : [" → ", el("code", {}, w.output)]),
         w.block ? el("pre", {}, w.block) : null)) : el("p", { class: "hint" }, "No branch of this job writes anywhere."),
@@ -708,7 +784,7 @@ async function start() {
     toolbar: () => [
       el("button", { id: "d-save", title: "Write the job and its layout (Ctrl+S)", onclick: () => save() }, "Save"),
       el("button", { id: "d-mode", class: dbg.on ? "toggle on" : "toggle", "aria-pressed": String(dbg.on), onclick: toggleDebug,
-        title: "Debug: watch cards, keep the rows they deliver and run up to a card. The writer is neutralised." }, "Debug"),
+        title: "Debug: watch cards, keep the rows they deliver and run up to a card. A sample neutralises the writer; Run stops at breakpoints before writing." }, "Debug"),
       el("label", { id: "d-watch-rows-label", class: "rows", hidden: !dbg.on, title: "Source rows each source reads (each card shows at most 1000 of them)" },
         "rows ", el("input", { id: "d-watch-rows", type: "number", min: "1", max: String(MAX_DEBUG_ROWS), value: String(dbg.rows), onchange: setDebugRows })),
       el("button", { id: "d-watch-reset", hidden: !dbg.on, title: "Forget everything the watchers kept", onclick: () => debugSync({ resetAll: true }) }, "Reset"),
@@ -716,7 +792,9 @@ async function start() {
         onclick: () => debugGo(false) }, "Step"),
       el("button", { id: "d-continue", hidden: !dbg.on, title: "Run to the next breakpoint (●) that holds nothing yet, or to the end",
         onclick: () => debugGo(true) }, "Continue"),
-      el("button", { id: "d-run", title: "Run the saved job here, after you confirm what it writes", onclick: () => prepareRun() }, "Run"),
+      el("button", { id: "d-abandon", class: "ghost danger", hidden: !(dbg.on && dbg.real), title: "Forget the rows this real run holds; nothing was written",
+        onclick: abandonRun }, "Abandon"),
+      el("button", { id: "d-run", title: "Run the saved job here, after you confirm what it writes. With Debug on, it stops at the next breakpoint and is continued from the same button.", onclick: () => prepareRun() }, dbg.on && dbg.real ? "Continue the run" : "Run"),
       coordinator() ? el("button", { id: "d-publish", title: "Send the saved job to the coordinator's library", onclick: () => publish() }, "Publish") : null,
     ],
     onComposed: (result) => { loadVariables(result); debugComposed(); },
