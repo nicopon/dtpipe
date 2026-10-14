@@ -31,6 +31,18 @@ public sealed class CheckpointStore
 
     public bool Contains(string checkpointKey) => File.Exists(PathFor(checkpointKey));
 
+    /// <summary>
+    /// Forgets one checkpoint: its directory, once. A key is a hexadecimal hash; anything else names no
+    /// checkpoint and is refused rather than joined into a path.
+    /// </summary>
+    public void Delete(string checkpointKey)
+    {
+        if (checkpointKey.Length == 0 || !checkpointKey.All(Uri.IsHexDigit))
+            throw new ArgumentException($"'{checkpointKey}' is not a checkpoint key.", nameof(checkpointKey));
+        var directory = _session.CheckpointPath(checkpointKey);
+        if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+    }
+
     /// <summary>Checkpoint keys present in this session.</summary>
     public IReadOnlyList<string> List()
     {

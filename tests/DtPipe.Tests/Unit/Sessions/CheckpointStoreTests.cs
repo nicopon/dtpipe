@@ -63,6 +63,23 @@ public class CheckpointStoreTests : IDisposable
 		}
 	}
 
+	[Fact]
+	public async Task A_deleted_checkpoint_is_gone_and_a_key_that_is_not_hexadecimal_is_refused()
+	{
+		const string key = "0123456789abcdef0123456789abcdef";
+		const string other = "fedcba9876543210fedcba9876543210";
+		await _store.WriteAsync(key, Batches(1, 3));
+		await _store.WriteAsync(other, Batches(1, 3));
+
+		_store.Delete(key);
+		_store.Delete(key);
+
+		_store.Contains(key).Should().BeFalse();
+		_store.Contains(other).Should().BeTrue();
+		Assert.Throws<ArgumentException>(() => _store.Delete("../escape"));
+		Assert.Throws<ArgumentException>(() => _store.Delete(""));
+	}
+
 	private static async Task<List<(int Id, string? Name)>> Drain(IAsyncEnumerable<RecordBatch> batches)
 	{
 		var rows = new List<(int, string?)>();
