@@ -94,7 +94,7 @@ textarea { width: 100%; resize: vertical; }
 .canvas-inner > svg { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
 .canvas-empty { position: absolute; left: 30px; top: 30px; }
 .dcard {
-  position: absolute; width: 210px; height: 96px; background: var(--panel); border: 1px solid var(--line);
+  position: absolute; width: 210px; height: 114px; background: var(--panel); border: 1px solid var(--line);
   border-top: 4px solid var(--kind); border-radius: 8px; box-shadow: var(--shadow); font-size: 12.5px;
   cursor: move; user-select: none;
 }
@@ -104,6 +104,10 @@ textarea { width: 100%; resize: vertical; }
 .dcard-head .kind { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 .dcard-head .alias { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dcard-sub { padding: 2px 10px; color: var(--muted); height: 34px; overflow: hidden; line-height: 1.3; font-size: 11.5px; overflow-wrap: anywhere; }
+.dcard-badge { padding: 0 10px; height: 16px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.dcard-badge.fresh { color: var(--good); }
+.dcard-badge.error { color: var(--bad); }
+.dcard-badge.running, .dcard-badge.edited { color: var(--warn); }
 .dcard-branch { padding: 0 10px; font-size: 11px; color: var(--kind); font-weight: 600; }
 .dcard.kind-sql .dcard-branch { padding-left: 32px; }
 .dcard.kind-transform .dcard-head { padding-right: 32px; }
@@ -118,10 +122,8 @@ textarea { width: 100%; resize: vertical; }
   color: var(--muted); cursor: pointer; font-size: 13px; line-height: 1;
 }
 .ctool:hover { color: var(--accent); }
-.ctool.bp.on { color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, transparent); }
-.ctool.pipette.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.ctool.pin.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
 .ctool[aria-disabled="true"] { opacity: .35; cursor: not-allowed; }
-.designer-bar .toggle.on { background: var(--accent); color: var(--panel); border-color: var(--accent); }
 .port {
   position: absolute; width: 14px; height: 14px; border-radius: 50%; background: var(--panel);
   border: 2px solid var(--accent); cursor: crosshair;

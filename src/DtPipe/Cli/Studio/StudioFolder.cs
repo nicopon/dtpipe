@@ -215,6 +215,14 @@ public sealed class StudioLocalFiles(StudioFolder folder)
 
     public void WriteDebug(string job, JsonObject state) => Write(job, "debug", state);
 
+    /// <summary>Removes the debug state of a job that watches and holds nothing: such a job leaves no file.</summary>
+    public void ClearDebug(string job)
+    {
+        var path = PathOf(job, "debug");
+        RefuseLinks(path);
+        if (File.Exists(path)) File.Delete(path);
+    }
+
     /// <summary>Refuses, before anything is written, a debug state the studio could only keep through a link.</summary>
     public void CheckDebug(string job) => RefuseLinks(PathOf(job, "debug"));
 

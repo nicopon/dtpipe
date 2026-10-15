@@ -281,21 +281,28 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   **A stop asked while the run was unfinished ends in 130**, whether the engine threw (a linear
   job) or answered 1 or 0 (a DAG); a run finished before the stop keeps its code and a later stop
   is a 409. `[CI: StudioRunTests]` `[local: studio_check.py]`
-- **A debug run is the real sample of a copy cut at the watched cards, never the job's run.** A
-  watcher sits at a card's read (level 0) or at the end of its branch. `DebugCutter` cuts a branch
+- **A preview is the real sample of the job, cut only at the pinned cards, never the job's run.** A
+  watcher (the page's pin) sits at a card's read (level 0) or at the end of its branch. `DebugCutter` cuts a branch
   there into mini-branches joined by `from:` (`__level` is reserved), each with a checkpoint in the
   studio's own session, through `JobCutter.Cut` and `BranchSides`: the head keeps the reader and what
   bounds it, the last piece keeps the branch's alias, output and writer side. With no watcher nothing
   is cut; a branch with a processor, no transformer or one `JobCutter` refuses runs whole and keeps
-  an end checkpoint only. A run stops at a card and drops what the stop does not need (`Dropped`),
+  an end checkpoint only. A run stops at a card (`upTo`) and drops what the stop does not need (`Dropped`),
   reading each branch it needs back from the highest level held (`Unread`: no input left to bind).
-  It runs through `SampleCoreAsync` (bricks bound as a sample binds them), the bound applies to each
-  source alone (at most `DebugMaxRows`, a thousand rows shown per stage) and a checkpoint read back
-  is not bounded again. With no stop the run reaches the end of the job: only the branches that write
-  or that nothing reads start it, so a branch whose reader reads a checkpoint back is left out.
-- **A staged run is the job's own run cut at the watched cards, and nothing leaves the process before its
-  last stage.** `POST /api/run/prepare` and `POST /api/run` take `debug` and `upTo` (the page's choice: the
-  next breakpoint that holds nothing); the saved file only, and the digest also binds the stop, the watchers
+  **A stop is for its run only**: it is not added to the watchers, and the checkpoint it wrote is deleted
+  unless a level held has the same key. It runs through `SampleCoreAsync` (bricks bound as a sample binds them),
+  the bound applies to each source alone (at most `DebugMaxRows`, a thousand rows shown per stage) and a
+  checkpoint read back is not bounded again. With no stop the run reaches the end of the job: only the branches
+  that write or that nothing reads start it, so a branch whose reader reads a checkpoint back is left out.
+- **The server says where a card's rows are; the page never rebuilds the cut's names.** The view lists
+  `places`, one per branch read and end, with the digest of what its rows depend on and, after a run, the `alias` of
+  the piece of the report that holds it (first stage for a read, last for an end) or null when the run did not
+  produce it (read back from a level held, upstream of a stop). A null place keeps the rows it showed, while
+  its digest is unchanged. `POST /api/debug/plan` answers the places of a text and nothing else: pure, no engine
+  slot, no file. After an edit the page compares digests as strings and clears the rows they no longer
+  support. `[CI: StudioDebugTests]`
+- **A staged run is the job's own run cut at the pinned cards, and nothing leaves the process before its
+  last stage.** `POST /api/run/prepare` and `POST /api/run` take `debug` and `upTo`; the saved file only, and the digest also binds the stop, the watchers
   and the keys held. `DebugCutter.Cut(write: true)` makes the cut: a run that stops has no branch with a
   writer (upstream branches included; one that runs whole with an output is refused), because the engine
   neutralises nothing outside a sample. The cursor and its state file move with the piece that writes the
@@ -310,19 +317,18 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   its writer does in a plain run, and the held rows for a retry; a partial failure of several branches
   re-runs them all when continued. `[CI: StudioStagedRunTests]` `[unchecked: the page, a writer other
   than the local ones tried]`
-- **A stop is a new run, never a paused process.** Continue and Step are the page choosing a stop
-  (`nextStop`): the first watched card, in the order the job reaches its cards, that holds no
-  checkpoint (breakpoints only for Continue), or none, which runs to the end. The server holds a
-  breakpoint as a flag of its watcher (`DebugWatch.Break`), which the cutter never reads and a reset
-  keeps; removing the watcher removes it.
+- **A stop is a new run, never a paused process.** ▶ on a card is the page choosing a stop: the run reads the
+  checkpoints back from the highest level held and goes no further. A watcher has a branch, a place and the card
+  it sits on, nothing else.
 - **A level's digest comes from the job as written, never from the cut.** It hashes the branches the
-  level reads, the reader side, the transformers up to it and the rows asked, so watching another card
+  level reads, the reader side, the transformers up to it and the rows asked, so pinning another card
   invalidates nothing. A launch value is not in a sample's, but is in a real run's (the salt).
 - **A checkpoint is valid or does not exist.** `POST /api/debug` and `POST /api/debug/state` settle the
   watchers and held levels against the text under the engine slot, delete from the session what the
   text, the rows or a reset no longer supports (a reset takes everything downstream with it), and
   answer what is held; the page never decides validity. `.dtpipe/studio/<job>-debug.json` keeps the
-  watchers and each held level's key and digest, never the text; a job not saved yet keeps it under
+  watchers and each held level's key and digest, never the text, and does not exist for a job that
+  holds none; a job not saved yet keeps it under
   `drafts/<id>`, adopted at its first save and purged when the studio starts. The cut is never saved
   or published. `[CI: StudioDebugTests]`
 - Quit from the page exits 0, Ctrl+C 130. A quit is refused while a run goes on; Ctrl+C cancels

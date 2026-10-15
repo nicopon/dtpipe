@@ -14,9 +14,9 @@ public enum DebugAt { Read, End }
 /// <summary>
 /// A card whose output a debug run keeps, named by the branch of the composed job that runs it. <see cref="Card"/> is
 /// the page's own name for the card: a branch is renamed when cards are joined or split, the card is not.
-/// <see cref="Break"/> is where the page's Continue stops. The cutter reads neither.
+/// The cutter reads the branch and the place only.
 /// </summary>
-public sealed record DebugWatch(string Branch, DebugAt At, string? Card = null, bool Break = false);
+public sealed record DebugWatch(string Branch, DebugAt At, string? Card = null);
 
 /// <summary>A level a debug run kept: the checkpoint that holds what the branch had delivered after <see cref="Level"/> transformers.</summary>
 public sealed record DebugHeld(string Branch, int Level, string Key);
@@ -48,6 +48,18 @@ public sealed record DebugPlan(IReadOnlyList<DebugBranch> Branches, IReadOnlyLis
         if (branch is null) return null;
         if (watch.At == DebugAt.End) return branch.Transformers;
         return branch.Cuttable || branch.Transformers == 0 ? 0 : null;
+    }
+
+    /// <summary>
+    /// The digest of what a card's rows depend on. A read of a branch that runs whole has no level of its own, so it
+    /// takes the digest of the branch's end: it changes whenever the branch does.
+    /// </summary>
+    public string? DigestAt(string branch, DebugAt at)
+    {
+        var info = Branches.FirstOrDefault(b => b.Branch.Equals(branch, StringComparison.OrdinalIgnoreCase));
+        if (info is null) return null;
+        var level = at == DebugAt.Read && (info.Cuttable || info.Transformers == 0) ? 0 : info.Transformers;
+        return Levels.FirstOrDefault(l => l.Branch.Equals(branch, StringComparison.OrdinalIgnoreCase) && l.Level == level)?.Digest;
     }
 
     /// <summary>Every branch that reads <paramref name="branch"/>, directly or through others.</summary>

@@ -268,7 +268,7 @@ public sealed class StudioDebugTests : IAsyncLifetime
     public async Task A_run_to_a_card_keeps_the_watched_levels_and_the_next_run_starts_from_them()
     {
         File.WriteAllText(Path.Combine(_dir, "job.yaml"), Chain);
-        var (_, armed) = await StateAsync(new { yaml = Chain, rows = 20, path = "job.yaml", watch = new[] { At("b", "read"), At("b", "end") } });
+        var (_, armed) = await StateAsync(new { yaml = Chain, rows = 20, path = "job.yaml", watch = new[] { At("b", "read"), At("b", "end"), At("c", "end") } });
         Assert.Null(KeyOf(armed, "b", "read"));
 
         var (status, whole) = await DebugAsync(new { yaml = Chain, rows = 20, path = "job.yaml", upTo = At("b", "end") });
@@ -358,32 +358,119 @@ public sealed class StudioDebugTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task A_breakpoint_is_kept_beside_the_job_survives_a_reset_and_goes_with_its_watcher()
+    public async Task A_file_written_with_a_breakpoint_still_loads_and_the_flag_is_not_answered()
     {
         File.WriteAllText(Path.Combine(_dir, "job.yaml"), Chain);
-        var armed = new object[] { new { branch = "b", at = "read" }, new { branch = "b", at = "end", @break = true } };
+        var file = Path.Combine(_dir, ".dtpipe", "studio", "job.yaml-debug.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        File.WriteAllText(file, """{"session":"studio-debug","real":false,"watch":[{"branch":"b","at":"end","card":"b","break":true}],"levels":[]}""");
 
-        var (_, set) = await StateAsync(new { yaml = Chain, rows = 20, path = "job.yaml", watch = armed });
-        var (_, back) = await StateAsync(new { yaml = Chain, rows = 20, path = "job.yaml" });
+        var (status, view) = await StateAsync(new { yaml = Chain, rows = 20, path = "job.yaml" });
 
-        Assert.True(WatcherOf(set, "b", "end").GetProperty("break").GetBoolean());
-        Assert.True(WatcherOf(back, "b", "end").GetProperty("break").GetBoolean());
-        Assert.False(WatcherOf(back, "b", "read").GetProperty("break").GetBoolean());
+        Assert.Equal(HttpStatusCode.OK, status);
+        var watcher = WatcherOf(view, "b", "end");
+        Assert.Equal("b", watcher.GetProperty("card").GetString());
+        Assert.False(watcher.TryGetProperty("break", out _));
+        Assert.DoesNotContain("break", File.ReadAllText(file));
+    }
 
-        await DebugAsync(new { yaml = Chain, rows = 20, path = "job.yaml", upTo = At("b", "end") });
-        var (_, reset) = await StateAsync(new { yaml = Chain, rows = 20, path = "job.yaml", resetAll = true });
+    [Fact]
+    public async Task A_job_nobody_watches_leaves_no_state_file()
+    {
+        File.WriteAllText(Path.Combine(_dir, "job.yaml"), Chain);
+        var file = Path.Combine(_dir, ".dtpipe", "studio", "job.yaml-debug.json");
 
-        // A reset forgets what was kept, not where the person stops.
-        Assert.Null(KeyOf(reset, "b", "end"));
-        Assert.True(WatcherOf(reset, "b", "end").GetProperty("break").GetBoolean());
+        await StateAsync(new { yaml = Chain, rows = 20, path = "job.yaml" });
+        Assert.False(File.Exists(file));
 
-        var (_, off) = await StateAsync(new { yaml = Chain, rows = 20, path = "job.yaml", watch = new[] { At("b", "end") } });
-        Assert.False(WatcherOf(off, "b", "end").GetProperty("break").GetBoolean());
+        await StateAsync(new { yaml = Chain, rows = 20, path = "job.yaml", watch = new[] { At("b", "end") } });
+        Assert.True(File.Exists(file));
 
-        var (_, gone) = await StateAsync(new { yaml = Chain, rows = 20, path = "job.yaml", watch = new[] { At("b", "read") } });
-        var (_, again) = await StateAsync(new { yaml = Chain, rows = 20, path = "job.yaml", watch = armed });
-        Assert.Equal(1, gone.GetProperty("view").GetProperty("watch").GetArrayLength());
-        Assert.True(WatcherOf(again, "b", "end").GetProperty("break").GetBoolean());
+        await StateAsync(new { yaml = Chain, rows = 20, path = "job.yaml", watch = Array.Empty<object>() });
+        Assert.False(File.Exists(file));
+    }
+
+    [Fact]
+    public async Task A_stop_nobody_watches_is_neither_watched_nor_kept()
+    {
+        File.WriteAllText(Path.Combine(_dir, "job.yaml"), Chain);
+
+        var (status, stopped) = await DebugAsync(new { yaml = Chain, rows = 20, path = "job.yaml", upTo = At("b", "end") });
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.True(stopped.GetProperty("report").GetProperty("success").GetBoolean(), stopped.ToString());
+        Assert.DoesNotContain("c", Ran(stopped));
+        Assert.Equal(0, stopped.GetProperty("view").GetProperty("watch").GetArrayLength());
+        var sessions = Path.Combine(_dir, ".dtpipe", "sessions", DebugCutter.SessionName);
+        Assert.Empty(Directory.Exists(sessions) ? Directory.GetDirectories(sessions) : []);
+        Assert.False(File.Exists(Path.Combine(_dir, ".dtpipe", "studio", "job.yaml-debug.json")));
+    }
+
+    // ---- where a card is read
+
+    private static JsonElement PlaceOf(JsonElement answer, string branch, string at) => answer.GetProperty("view").GetProperty("places").EnumerateArray()
+        .First(p => p.GetProperty("branch").GetString() == branch && p.GetProperty("at").GetString() == at);
+
+    private static string? AliasOf(JsonElement answer, string branch, string at) =>
+        PlaceOf(answer, branch, at).GetProperty("alias") is { ValueKind: JsonValueKind.String } alias ? alias.GetString() : null;
+
+    [Fact]
+    public async Task A_run_with_no_watcher_reads_every_card_in_its_own_branch()
+    {
+        File.WriteAllText(Path.Combine(_dir, "job.yaml"), Chain);
+
+        var (_, run) = await DebugAsync(new { yaml = Chain, rows = 20, path = "job.yaml" });
+
+        Assert.True(run.GetProperty("report").GetProperty("success").GetBoolean(), run.ToString());
+        foreach (var branch in new[] { "a", "b", "c" })
+            foreach (var at in new[] { "read", "end" })
+                Assert.Equal(branch, AliasOf(run, branch, at));
+        var stages = run.GetProperty("report").GetProperty("branches").EnumerateArray().First(b => b.GetProperty("branch").GetString() == "b").GetProperty("stages");
+        Assert.Equal(3, stages.GetArrayLength());
+        Assert.Equal(20, stages[0].GetProperty("rowsSeen").GetInt32());
+        Assert.Equal(10, stages[2].GetProperty("rowsSeen").GetInt32());
+    }
+
+    [Fact]
+    public async Task A_cut_branch_is_read_in_its_pieces_and_a_branch_read_back_says_it_did_not_run()
+    {
+        File.WriteAllText(Path.Combine(_dir, "job.yaml"), Chain);
+        await StateAsync(new { yaml = Chain, rows = 20, path = "job.yaml", watch = new[] { At("b", "read"), At("b", "end") } });
+
+        var (_, cut) = await DebugAsync(new { yaml = Chain, rows = 20, path = "job.yaml" });
+
+        Assert.Equal("b__level0", AliasOf(cut, "b", "read"));
+        Assert.Equal("b", AliasOf(cut, "b", "end"));
+        Assert.Equal("a", AliasOf(cut, "a", "end"));
+
+        // Only the end is held now: b is read back at it, so its read and the branch upstream did not run.
+        await StateAsync(new { yaml = Chain, rows = 20, path = "job.yaml", watch = new[] { At("b", "end") } });
+        var (_, back) = await DebugAsync(new { yaml = Chain, rows = 20, path = "job.yaml" });
+
+        Assert.Null(AliasOf(back, "a", "end"));
+        Assert.Null(AliasOf(back, "b", "read"));
+        Assert.Equal("b", AliasOf(back, "b", "end"));
+        Assert.Equal("c", AliasOf(back, "c", "end"));
+    }
+
+    [Fact]
+    public async Task The_plan_tells_the_digest_of_every_place_without_holding_the_engine_or_writing_a_file()
+    {
+        File.WriteAllText(Path.Combine(_dir, "job.yaml"), Chain);
+
+        var (status, plan) = await PostAsync("/api/debug/plan", new { yaml = Chain, rows = 20 });
+        var (_, edited) = await PostAsync("/api/debug/plan", new { yaml = Chain.Replace("% 2 == 0", "% 3 == 0"), rows = 20 });
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        string? Digest(JsonElement answer, string branch, string at) => PlaceOf(answer, branch, at).GetProperty("digest").GetString();
+        Assert.All(new[] { "a", "b", "c" }, branch => Assert.False(string.IsNullOrEmpty(Digest(plan, branch, "end"))));
+        Assert.Equal(Digest(plan, "a", "end"), Digest(edited, "a", "end"));
+        // The edit is in b's transformers: its read is unchanged, its end and what reads it are not.
+        Assert.Equal(Digest(plan, "b", "read"), Digest(edited, "b", "read"));
+        Assert.NotEqual(Digest(plan, "b", "end"), Digest(edited, "b", "end"));
+        Assert.NotEqual(Digest(plan, "c", "end"), Digest(edited, "c", "end"));
+        Assert.Null(AliasOf(plan, "b", "end"));
+        Assert.False(Directory.Exists(Path.Combine(_dir, ".dtpipe", "studio")));
     }
 
     [Fact]
@@ -419,6 +506,7 @@ public sealed class StudioDebugTests : IAsyncLifetime
     [Fact]
     public async Task A_job_not_saved_yet_keeps_its_state_in_a_draft_that_the_first_save_hands_to_the_job()
     {
+        await StateAsync(new { yaml = Chain, rows = 20, draft = Draft, watch = new[] { At("b", "end") } });
         var (status, whole) = await DebugAsync(new { yaml = Chain, rows = 20, draft = Draft, upTo = At("b", "end") });
 
         Assert.Equal(HttpStatusCode.OK, status);
@@ -454,6 +542,7 @@ public sealed class StudioDebugTests : IAsyncLifetime
     public async Task A_branch_with_a_processor_watched_at_its_end_is_read_back_instead_of_run_again()
     {
         const string job = "a:\n  input: generate:20\nb:\n  from: a\n  provider-options:\n    sql:\n      query: SELECT * FROM a WHERE GenerateIndex < 7\nc:\n  from: b\n  transformers:\n  - type: compute\n    mappings:\n      x:row.GenerateIndex: ''\n  output: \"null:\"\n";
+        await StateAsync(new { yaml = job, rows = 20, draft = Draft, watch = new[] { At("b", "end"), At("c", "end") } });
         var (_, first) = await DebugAsync(new { yaml = job, rows = 20, draft = Draft, upTo = At("b", "end") });
         Assert.True(first.GetProperty("report").GetProperty("success").GetBoolean(), first.ToString());
         Assert.Equal(7, await RowsOfAsync(KeyOf(first, "b", "end")!));
@@ -509,7 +598,7 @@ public sealed class StudioDebugTests : IAsyncLifetime
     // ---- the page
 
     [Fact]
-    public void The_page_has_no_sample_button_and_no_debug_tab()
+    public void The_page_has_no_sample_button_and_no_debug_tab_of_its_own()
     {
         var assembly = typeof(StudioServer).Assembly;
         var page = string.Join('\n', assembly.GetManifestResourceNames().Where(n => n.StartsWith("studio/")).Select(name =>
@@ -517,10 +606,6 @@ public sealed class StudioDebugTests : IAsyncLifetime
             using var reader = new StreamReader(assembly.GetManifestResourceStream(name)!);
             return reader.ReadToEnd();
         }));
-        Assert.Contains("d-mode", page);
-        Assert.Contains("d-continue", page);
-        Assert.Contains("d-step", page);
-
         Assert.DoesNotContain("d-sample", page);
         Assert.DoesNotContain("d-debug", page);
         Assert.DoesNotContain("Resume here", page);

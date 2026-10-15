@@ -1231,13 +1231,15 @@ branch's own reader and writer become a source card and a sink card, each holdin
 the keys of its side (the same split as
 [`dtpipe split`](#offering-the-points-a-job-could-be-cut-at)); when the cards still form one chain,
 the job composes back into that one branch. A branch no card can describe stays one card, as
-written. Edit the cards, or the job as YAML. **Debug**, a switch in the bar, shows what the job
-delivers card by card without writing a target: the job runs through the real engine, as `--dry-run`
-does, over the source rows you ask for (up to 100000 per source; a card shows at most 1000 of them),
-with the writer neutralised. Each card shows its rows with their columns and types. A debug run
-writes no file; a job that asks for a checkpoint still stores it in the folder's session store, as
-`--dry-run` does. The sample mode's safety gate applies, and each branch reports which source
-protection it had (see [Sample Mode](#sample-mode-and-materialisation)).
+written. Edit the cards, or the job as YAML. **▶ Preview** in the bar shows what the job delivers
+card by card without writing a target: the job runs through the real engine, as `--dry-run` does,
+over the source rows you ask for (up to 100000 per source; a card shows at most 1000 of them), with
+the writer neutralised. Every card then shows its rows with their columns and types in the Preview
+panel when you click it, and a badge on the card says its state (no preview, running, failed, edited
+since preview) and `n rows · m col`. A preview writes no file; a job that asks for a checkpoint
+still stores it in the folder's session store, as `--dry-run` does. The sample mode's safety gate
+applies, and each branch reports which source protection it had (see
+[Sample Mode](#sample-mode-and-materialisation)).
 
 Save writes the job the studio composes from the cards, never a text the page sends: a job written
 by hand loses its inner comments and its key order, and the page says so when it opens one. A save
@@ -1246,10 +1248,10 @@ overwrites an existing file with a new job. Where each card sits is kept outside
 `.dtpipe/studio/<job>-layout.json` under the folder; `.dtpipe/` ignores itself in git.
 
 The Variables tab lists every `${{…}}` the job reads, by name, and whether something resolves it.
-The job keeps `${{NAME}}`; for a debug run you may launch it with a keyring alias (see
+The job keeps `${{NAME}}`; for a preview you may launch it with a keyring alias (see
 [Secret Management](#secret-management)) or a typed text, kept in
 `.dtpipe/studio/<job>-launch.json`. That file holds aliases and what you typed, never a value from
-the keyring, and the page is shown no value it was not given. A debug run that would leave a
+the keyring, and the page is shown no value it was not given. A preview that would leave a
 variable or an alias unresolved is refused before it runs, naming each.
 
 ```bash
@@ -1277,7 +1279,7 @@ Your tokens stay in the studio's memory, never on disk or in the page; quitting 
 Once signed in, the palette offers the bricks of the coordinator's nodes, grouped by node, a node
 offline greyed out, and lists this studio's dtpipe version beside each node's: a difference is
 shown, never refused. When you open a job, the coordinator says which of its branches are bricks,
-which then open as brick cards; signed out, they open as plain cards and save unchanged. A debug run
+which then open as brick cards; signed out, they open as plain cards and save unchanged. A preview
 of a job with bricks runs here: a source brick's rows (at most 100) come from its node through the
 coordinator, and a sink brick receives nothing, its rows ending in a throwaway file under
 `.dtpipe/studio/samples/`. A brick's variables belong to its node and leave the Variables tab.
@@ -1303,51 +1305,43 @@ confirm what it writes: each branch's target (a connection string with its secre
 writer's block as the file holds it. A run is real, so the page asks again if the job or the values
 it launches with changed since. A job that reads a coordinator's brick is not run here, since its
 rows would recreate a real target; a sink brick is written to a throwaway file, never to its node.
-One action runs at a time (a debug run, a change to what is watched, or a run), the studio does not
+One action runs at a time (a preview, a change to what is pinned, or a run), the studio does not
 quit during a run, and **Stop** ends it with the verdict 130, however the engine answers the
 cancellation; a run that had finished before keeps its own code.
 
-With **Debug** on, **Run** is the same real run cut at the watched cards (see below), and the
-confirmation lists its stages: what each reads, whether it keeps every row it delivers, and which
-one writes. It stops at the next breakpoint that holds nothing yet, before anything is written:
-the rows it holds show in the Sample panel (at most the first 1000), the button reads **Continue
-the run**, and the next stage reads them back and writes the target. **Abandon** forgets them.
-Nothing is written before that stage, and the cursor's state file (`--state`) moves only with the
-stage that writes. The write consumes the rows that fed it, so the next run reads the source again.
-Those rows are every row of the level, encrypted in the studio's session and kept until the write,
-**Abandon** or **Reset**: about the size of the data as Arrow (300 000 rows of six columns took
-19 MB), so watch few cards on a large source. Meanwhile a sample, and a change of what is watched,
-are refused. Rows held for a real run serve no sample, and a sample's serve no real run: the first
-forgets the other's. They are also forgotten when the job's text, a launch value or the cursor's
-state file changed, and when the studio restarts.
+A real run that holds the rows it read before its target is written (the server can stop a run
+there) shows **Continue the run**, which writes the target from those rows, and **Abandon**, which
+forgets them; nothing is written before that stage, and the cursor's state file (`--state`) moves
+only with the stage that writes. The write consumes the rows that fed it, so the next run reads the
+source again. Those rows are every row of the level, encrypted in the studio's session and kept
+until the write or **Abandon**: about the size of the data as Arrow (300 000 rows of six columns
+took 19 MB). Meanwhile a preview and a change of what is pinned are refused. Rows held for a real
+run serve no preview, and a preview's serve no real run: the first forgets the other's. They are
+also forgotten when the job's text, a launch value or the cursor's state file changed, and when the
+studio restarts.
 
-**Debug** puts a pipette (◉) on every card that holds rows; a sink holds none. A card whose pipette
-is on is *watched*: it keeps the rows it delivers, shown in the Sample panel, and a checkpoint of
-them in the studio's own session (`.dtpipe/sessions/studio-debug/`). A click on a pipette turns it
-on and shows the card's rows; on a watched card whose rows are not shown, it shows them; on the
-card whose rows are shown, it turns off and forgets them. **▶** on a card runs the job up to that
-card and stops there: nothing downstream runs, and each branch starts from the highest level it
-holds instead of rereading and recomputing what precedes it. **↺** forgets what a card kept and
-what every card after it kept; **Reset** in the bar forgets everything and keeps the pipettes on.
+Each card that holds rows carries **▶** and **📌**; a sink holds none. **▶** runs the job up to
+that card and stops there: nothing downstream runs, and each branch starts from the highest level
+it holds instead of rereading and recomputing what precedes it. It keeps nothing of its own, and
+it leaves the pins as they were. **📌** pins the card: it keeps the rows it delivers and a
+checkpoint of them in the studio's own session (`.dtpipe/sessions/studio-debug/`), so a later run
+reads the checkpoint back. A second click unpins it and forgets the checkpoint. **Forget pins** in
+the bar unpins every card and forgets everything they kept. A stop is a new run that reads the
+checkpoints back, not a process held open.
 
-A breakpoint (●) on a card watches it and marks where **Continue** stops; removing the breakpoint
-leaves the card watched, and turning its pipette off removes both. **Continue** runs to the next
-breakpoint that holds nothing yet, **Step** to the next watched card that holds nothing yet, both in
-the order the job reaches its cards; with none left they run the job to its end, writer
-neutralised. Each stop shows the card's rows in the Sample panel. A stop is a new run that reads the
-checkpoints back, not a process held open. A reset keeps the breakpoints.
-
-A source is watched at its read, any other card at the end of its branch, and only watched cards
-are cut out of the flow: with none, the run is the job's own flow, and the more cards you watch the
+A source is pinned at its read, any other card at the end of its branch, and only pinned cards are
+cut out of the flow: with none, the run is the job's own flow, and the more cards you pin the
 further it moves from it. A branch with a stream processor, or one that cannot be cut, runs whole
-and is watched at its end only. A checkpoint is valid or it does not exist: editing a card,
-changing the rows, or a reset forgets at once, from the session too, every checkpoint that
-depended on it. What is watched and held is kept beside the job, in
-`.dtpipe/studio/<job>-debug.json`; a job not saved yet keeps it under `drafts/`, handed to the job
-at its first save and forgotten when the studio starts. The values of the Variables tab are not
-part of what a sample's checkpoint remembers: after changing one, press **Reset**. A sample is not
-the job's run: every cut passes through Arrow (see [checkpoints](#checkpoints)), batches differ and
-so does the concurrency; the rows reach the target in the order a plain run writes them. The cut is
+and is pinned at its end only; the card of its read says so. A preview is true of the text that
+produced it: editing a card, or the rows asked, clears the rows of every card that depends on it,
+which then reads *edited since preview*. A checkpoint is valid or it does not exist: the same edit
+forgets, from the session too, every checkpoint that depended on it. What is pinned and held is kept
+beside the job, in `.dtpipe/studio/<job>-debug.json` (a job nobody pins leaves no file); a job not
+saved yet keeps it under `drafts/`, handed to the job at its first save and forgotten when the
+studio starts. The values of the Variables tab are not part of what a preview or a checkpoint
+remembers: after changing one, press **Forget pins** and run Preview again. A preview is not the
+job's run: every cut passes through Arrow (see [checkpoints](#checkpoints)), batches differ and so
+does the concurrency; the rows reach the target in the order a plain run writes them. The cut is
 never saved or published.
 
 The page runs dtpipe with your own access. It listens on 127.0.0.1 only and answers only the

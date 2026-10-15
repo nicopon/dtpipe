@@ -252,6 +252,9 @@ public sealed partial class StudioServer : IAsyncDisposable
                 case ("POST", "/api/debug"):
                     await DebugAsync(context);
                     break;
+                case ("POST", "/api/debug/plan"):
+                    await DebugPlanAsync(context);
+                    break;
                 case ("POST", "/api/debug/state"):
                     await DebugStateAsync(context);
                     break;

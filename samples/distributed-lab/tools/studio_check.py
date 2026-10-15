@@ -4,11 +4,10 @@ One screenshot per step. Not run by CI: it needs the lab up and the release bina
 
   1. Sign in to the coordinator, as the lab's designer, through the IdP's own form.
   2. Open from library: a pipeline lands as a new file of the folder, and is never written over.
-  3. Debug a job that reads a source brick and writes a sink brick, with a transformer between: watch the
-     transformer's card, Play up to it, and its rows show in the Sample panel.
-  4. Watch the source brick too and Play again: the run starts from what the watchers kept. Reset a card
-     and it shows nothing; turning the pipette off forgets its rows. A breakpoint on the step makes
-     Continue stop there, and Continue again runs to the end.
+  3. Preview a job that reads a source brick and writes a sink brick, with a transformer between: every
+     card shows a badge, and the transformer's rows show in the Preview panel.
+  4. Pin the transformer, then the source brick, and run up to the transformer with its ▶: the run starts
+     from what the pins kept and pins nothing more. Forget pins unpins every card.
   5. Import a command line, save it, run it after confirming what it writes, and stop a long run: the
      run ends with 130 and the studio does not quit while it goes on.
   6. Publish: a job the coordinator accepts is created, a job its check refuses is shown with its
@@ -122,52 +121,36 @@ def main():
         again = studio_api(browser, token, "POST", "/api/library/open", {"id": target})
         report(again["status"] == 409, "a library file is not overwritten", f"HTTP {again['status']}")
 
-        # 3. Debug: watch the step between the bricks, play up to it
+        # 3. Preview: every card has rows and a badge, the step's rows show in the panel
         browser.wait_for("document.querySelectorAll('.dcard').length > 0", 20)
         step, source = ".dcard.kind-transform", ".dcard.kind-source"
-        click(browser, "#d-mode")
-        browser.wait_for(f"!!document.querySelector('{step} [data-card-tool=watch]')", 10)
-        click(browser, f"{step} [data-card-tool=watch]")
-        armed = browser.wait_for(f"document.querySelector('{step} .pipette')?.classList.contains('on')", 20)
-        empty = "Nothing kept" in text(browser, "#d-drawer")
-        report(armed and empty, "watch a card", "armed, panel empty until a run", shot(browser, "watched"))
+        browser.js("document.getElementById('status').textContent = ''")
+        click(browser, "#d-preview")
+        browser.wait_for("/preview (done|failed)/.test(document.getElementById('status').textContent)", 120)
+        done = text(browser, "#status").strip() == "preview done"
+        badges = browser.js("[...document.querySelectorAll('.dcard-badge')].map(b => b.textContent).join(' | ')")
+        report(done and "rows" in badges, "preview the whole job", badges, shot(browser, "preview"))
+        click(browser, f"{step} .dcard-head")
+        rows = browser.wait_for("document.querySelectorAll('#d-drawer table tbody tr').length > 0", 20)
+        report(rows, "click a card to see its rows", "the step's rows are in the Preview panel", shot(browser, "card"))
 
+        # 4. Pin the step and the source brick: ▶ starts from what the pins kept and pins nothing more
+        click(browser, f"{step} [data-card-tool=pin]")
+        browser.wait_for(f"document.querySelector('{step} [data-card-tool=pin]')?.getAttribute('aria-pressed') === 'true'", 20)
+        click(browser, f"{source} [data-card-tool=pin]")
+        browser.wait_for(f"document.querySelector('{source} [data-card-tool=pin]')?.getAttribute('aria-pressed') === 'true'", 20)
+        browser.js("document.getElementById('status').textContent = ''")
+        click(browser, "#d-preview")
+        browser.wait_for("/preview (done|failed)/.test(document.getElementById('status').textContent)", 120)
         browser.js("document.getElementById('status').textContent = ''")
         click(browser, f"{step} [data-card-tool=play]")
-        browser.wait_for("/debug run (done|failed)/.test(document.getElementById('status').textContent)", 120)
-        done = text(browser, "#status").strip() == "debug run done"
-        rows = browser.js("document.querySelectorAll('#d-drawer table tbody tr').length")
-        report(done and rows > 0, "play up to a card", f"{rows} rows shown", shot(browser, "debug"))
-
-        # 4. Watch the source brick too: the next play starts from what is kept
-        click(browser, f"{source} [data-card-tool=watch]")
-        browser.wait_for(f"document.querySelector('{source} .pipette')?.classList.contains('on')", 20)
-        browser.js("document.getElementById('status').textContent = ''")
-        click(browser, f"{step} [data-card-tool=play]")
-        browser.wait_for("/debug run (done|failed)/.test(document.getElementById('status').textContent)", 120)
-        again = text(browser, "#status").strip() == "debug run done"
-        report(again, "play again with a second watcher", text(browser, "#status").strip(), shot(browser, "resumed"))
-        click(browser, f"{step} [data-card-tool=reset]")
-        browser.wait_for("document.querySelectorAll('#d-drawer table tbody tr').length === 0", 20)
-        reset = "Nothing kept" in text(browser, "#d-drawer")
-        report(reset, "reset a card", "its rows are gone", shot(browser, "reset"))
-        click(browser, f"{step} [data-card-tool=watch]")
-        off = browser.wait_for(f"!document.querySelector('{step} .pipette')?.classList.contains('on')", 20)
-        report(off, "turn a pipette off", "the card is no longer watched")
-
-        # Breakpoint on the step: Continue stops there, Step stops at the source brick, nothing left runs to the end
-        click(browser, f"{step} [data-card-tool=break]")
-        browser.wait_for(f"document.querySelector('{step} .bp')?.classList.contains('on')", 20)
-        browser.js("document.getElementById('status').textContent = ''")
-        click(browser, "#d-continue")
-        browser.wait_for("/(stopped at|reached the end|failed)/.test(document.getElementById('status').textContent)", 120)
-        stopped = text(browser, "#status").strip().startswith("stopped at")
-        report(stopped, "continue stops at a breakpoint", text(browser, "#status").strip(), shot(browser, "breakpoint"))
-        browser.js("document.getElementById('status').textContent = ''")
-        click(browser, "#d-continue")
-        browser.wait_for("/(stopped at|reached the end|failed)/.test(document.getElementById('status').textContent)", 120)
-        report(text(browser, "#status").strip() == "debug run reached the end", "continue with none left runs to the end", text(browser, "#status").strip())
-        click(browser, "#d-mode")
+        browser.wait_for("/(ran up to|failed)/.test(document.getElementById('status').textContent)", 120)
+        again = text(browser, "#status").strip().startswith("ran up to")
+        pins = browser.js("document.querySelectorAll('.dcard [data-card-tool=pin][aria-pressed=true]').length")
+        report(again and pins == 2, "run up to a card from the pins", f"{text(browser, '#status').strip()}; {pins} pinned", shot(browser, "resumed"))
+        click(browser, "#d-forget-pins")
+        off = browser.wait_for("document.querySelectorAll('.dcard [data-card-tool=pin][aria-pressed=true]').length === 0", 20)
+        report(off, "forget the pins", "no card is pinned")
 
         # 5. Import, save, run, stop
         stub_dialogs(browser, ["dtpipe --input generate:2000000000 --output null:", "long.yaml"])

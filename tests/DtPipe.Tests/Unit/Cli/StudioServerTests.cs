@@ -264,6 +264,24 @@ public sealed class StudioServerTests : IAsyncLifetime
         }
     }
 
+    /// <summary>
+    /// The preview is always there: no switch, no step, no breakpoint. A page that brought one back would hide
+    /// the rows of every card behind a mode again.
+    /// </summary>
+    [Fact]
+    public void The_page_has_no_debug_switch_no_step_and_no_continue()
+    {
+        var assembly = typeof(StudioServer).Assembly;
+        var page = string.Join('\n', assembly.GetManifestResourceNames().Where(n => n.StartsWith("studio/")).Select(name =>
+        {
+            using var reader = new StreamReader(assembly.GetManifestResourceStream(name)!);
+            return reader.ReadToEnd();
+        }));
+        Assert.Contains("d-preview", page);
+        foreach (var gone in new[] { "d-mode", "d-step", "d-continue" })
+            Assert.False(page.Contains(gone, StringComparison.Ordinal), $"the page still has {gone}");
+    }
+
     [Fact]
     public async Task The_palette_lists_the_components()
     {

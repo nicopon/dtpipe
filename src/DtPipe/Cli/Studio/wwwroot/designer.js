@@ -6,7 +6,7 @@
 import { $, api, el, fill, status, svg } from "./dom.js";
 
 const CARD_W = 210;
-const CARD_H = 96;
+const CARD_H = 114;
 const PORT_IN_Y = 34;
 const PORT_REF_Y = 66;
 
@@ -43,7 +43,7 @@ let result = null;         // the last compose answer
 let selected = null;       // { alias } (+ t, a transformer's index, while zoomed) or { edge: { from, to, port } }
 let zoom = null;           // the alias of the Transform step shown as a chain of its transformers
 let dirty = false;
-let drawer = "yaml";       // yaml | problems | edit | sample, or a tab the host adds
+let drawer = "yaml";       // yaml | problems | edit | preview, or a tab the host adds
 let composeSeq = 0;
 let composeTimer = null;
 
@@ -105,18 +105,21 @@ export function cardWatch(alias) {
   return { branch: result?.steps?.find((i) => i.alias === alias)?.branch || alias, at: step.kind === "source" ? "read" : "end" };
 }
 
-/** Selects a card and shows its rows in the Sample panel. */
+/** The branch of the composed job that runs a card, whatever its kind: the page reads a sink's failure there. */
+export const cardBranch = (alias) => (model && stepOf(alias) ? result?.steps?.find((i) => i.alias === alias)?.branch || alias : null);
+
+/** Selects a card and shows its rows in the Preview panel. */
 export function focusCard(alias) {
   if (!model || !stepOf(alias)) return;
   selected = { alias };
-  drawer = "sample";
+  drawer = "preview";
   renderCanvas();
   renderInspector();
   renderDrawer();
 }
 
-/** The card the Sample panel is showing, or null when the panel is closed. */
-export const sampleCard = () => (drawer === "sample" ? selected?.alias ?? null : null);
+/** The card the Preview panel is showing, or null when the panel is closed. */
+export const previewCard = () => (drawer === "preview" ? selected?.alias ?? null : null);
 
 export const refreshCanvas = () => { if (model) renderCanvas(); };
 
@@ -506,6 +509,7 @@ function renderCanvas() {
       step.kind === "transform" ? el("button", { class: "dcard-zoom", title: "Zoom into the transformers (or double-click the card)", "aria-label": `Zoom into ${step.alias}` }, "⌕") : null,
       hooks.cardTools?.(step.alias) || null,
       el("div", { class: "dcard-sub" }, subtitle),
+      hooks.cardBadge?.(step.alias) || null,
       el("div", { class: "dcard-branch" }, branch),
       step.kind !== "source" ? el("span", { class: "port in", "data-port": "in", title: step.kind === "merge" ? "inputs (several)" : "input" }) : null,
       step.kind === "sql" ? [el("span", { class: "port ref", "data-port": "ref", title: "joined inputs (ref)" }), el("span", { class: "port-label ref" }, "ref")] : null,
@@ -626,7 +630,9 @@ function bindCanvas() {
         renderInspector();
         inner.querySelectorAll(".dcard").forEach((c) => c.classList.toggle("selected", c === card));
         drawEdges();
-        if (drawer === "sample") renderDrawer();
+        // Clicking a card shows what it delivers, unless the person is reading another tab.
+        if (drawer === "yaml") drawer = "preview";
+        if (drawer === "preview") renderDrawer();
       }
       inner.setPointerCapture(e.pointerId);
     } else if (edge) {
@@ -637,7 +643,7 @@ function bindCanvas() {
       selected = null;
       renderCanvas();
       renderInspector();
-      if (drawer === "sample") renderDrawer();
+      if (drawer === "preview") renderDrawer();
     }
   });
 
@@ -938,7 +944,7 @@ function bindInspector() {
   });
 }
 
-// ---------------------------------------------------------------- drawer: YAML, problems, sample
+// ---------------------------------------------------------------- drawer: YAML, problems, preview
 
 function renderDrawer() {
   const view = $("d-drawer");
@@ -949,7 +955,7 @@ function renderDrawer() {
     tab("yaml", "YAML"),
     tab("problems", "Problems ", problems ? el("span", { class: "count" }, problems) : null),
     tab("edit", "Edit as YAML"),
-    tab("sample", "Sample"),
+    tab("preview", "Preview"),
     (hooks.extraTabs || []).map((t) => tab(t.name, t.label, t.badge?.())),
     el("span", { class: "drawer-status" }, result.errors?.length ? el("span", { class: "bad" }, `${result.errors.length} error(s)`) : el("span", { class: "good" }, "composes")));
   let body;
@@ -965,8 +971,8 @@ function renderDrawer() {
     body = [el("textarea", { id: "d-edit", class: "mono", rows: "16", spellcheck: "false", value: result.yaml }),
       el("div", { class: "row" }, el("button", { "data-apply": true }, "Apply"),
         el("span", { class: "hint" }, "The job is taken apart into cards again; cards that keep their alias keep their place."))];
-  } else if (drawer === "sample") {
-    body = hooks.sampleView?.(selected?.alias || null) || null;
+  } else if (drawer === "preview") {
+    body = hooks.previewView?.(selected?.alias || null) || null;
   } else {
     body = (hooks.extraTabs || []).find((t) => t.name === drawer)?.render() || null;
   }
