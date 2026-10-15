@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using DtPipe.PipelineNode.Hosting;
 using Xunit;
 
@@ -10,6 +11,7 @@ public sealed class DtPipeVersionTests : IDisposable
 
     public void Dispose() => Directory.Delete(_dir, recursive: true);
 
+    [UnsupportedOSPlatform("windows")]
     private DtPipeCommand Binary(string script)
     {
         var path = Path.Combine(_dir, "dtpipe");

@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using DtPipe.Coordinator.Contracts;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -17,6 +18,7 @@ public sealed class BrickPreviewTests : IDisposable
 
     // A dtpipe that answers by its arguments: the branch run to Arrow writes fixed bytes, and an Arrow
     // file it is later asked to read must be those very bytes.
+    [UnsupportedOSPlatform("windows")]
     private DtPipeCommand Binary()
     {
         File.WriteAllText(Path.Combine(_dir, "fixture.arrows"), "ARROW-BYTES");
@@ -36,6 +38,7 @@ public sealed class BrickPreviewTests : IDisposable
         return new DtPipeCommand(path, _dir, new Dictionary<string, string>());
     }
 
+    [UnsupportedOSPlatform("windows")]
     private async Task<BrickHost> HostAsync(params BrickDeclaration[] bricks)
     {
         var host = new BrickHost("n1", bricks, Binary(), NullLogger.Instance);
