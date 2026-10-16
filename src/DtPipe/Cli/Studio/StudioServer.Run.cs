@@ -7,6 +7,7 @@ using DtPipe.Cli.Split;
 using DtPipe.Configuration;
 using DtPipe.Core.Security;
 using DtPipe.Jobs;
+using DtPipe.Sessions;
 using Microsoft.AspNetCore.Http;
 using YamlDotNet.RepresentationModel;
 
@@ -43,7 +44,7 @@ public sealed partial class StudioServer
         public object? View { get; set; }
     }
 
-    private sealed record RunRequest(string? Path, string? Hash, List<SampledBrick>? Bricks, string? Digest, bool? Debug = null, DebugAtRequest? UpTo = null);
+    private sealed record RunRequest(string? Path, string? Hash, List<SampledBrick>? Bricks, string? Digest, bool? Debug = null, bool? Review = null);
 
     private sealed record RunWrite(string Alias, bool Throwaway, string? Output, string? Block);
 
@@ -53,11 +54,13 @@ public sealed partial class StudioServer
 
     /// <summary>
     /// A real run cut at the cards the person watches: the job to run, the levels it may read back, and what it
-    /// tells the person before they confirm. <see cref="Drop"/> are the checkpoints the run no longer relies on.
+    /// tells the person before they confirm. <see cref="Drop"/> are the checkpoints the run no longer relies on. A
+    /// <see cref="Review"/> stops every branch that writes just before its writer: <see cref="Holds"/> are those branches' ends,
+    /// kept for the run and never pinned.
     /// </summary>
     private sealed record StagedRun(
-        DebugPlan Plan, DebugState State, DebugWatch? UpTo, List<DebugWatch> Watch, List<HeldLevel> Keep, HashSet<string> Drop, DebugCut Cut,
-        object Stages, object Held, int Discards, string Signature);
+        DebugPlan Plan, DebugState State, bool Review, List<DebugWatch> Holds, List<DebugWatch> Watch, List<HeldLevel> Keep, HashSet<string> Drop,
+        DebugCut Cut, object Stages, object Held, int Discards, string Signature);
 
     private bool RunInProgress
     {
@@ -81,6 +84,10 @@ public sealed partial class StudioServer
                 + string.Join(", ", sampling.Sources.Select(s => $"'{s.Alias}' ({s.Brick.Key})"))
                 + ". Its rows would recreate a real target on this machine. Sample it, or run it on its node.");
         var launch = _variables.LaunchEnvironment(path, sampling.Yaml);
+        var staged = asked.Debug == true || asked.Review == true;
+        // A suspended run has its rows; any run but its continuation would write the job again and leave them to be written twice.
+        if (!staged && LoadDebug(DebugKey(path, null)).Real)
+            throw new StudioRefusal(409, "A real run is suspended before its targets are written: write it or abandon it from the sink cards first.");
 
         var writes = new List<RunWrite>();
         foreach (var (alias, branch) in JobYaml.Branches(JobYaml.Parse(sampling.Yaml)))
@@ -96,14 +103,14 @@ public sealed partial class StudioServer
             writes.Add(new RunWrite(alias, false, ConnectionStringSanitizer.Redact(output), ConnectionStringSanitizer.Sanitize(JobYaml.Serialize(block))));
         }
 
-        var staged = asked.Debug == true ? Stage(asked, path, job.Text, sampling, launch) : null;
+        var stagedRun = staged ? Stage(asked, path, job.Text, sampling, launch) : null;
 
         var material = new StringBuilder(job.Text).Append('\0');
         foreach (var (name, value) in launch.OrderBy(p => p.Key, StringComparer.Ordinal)) material.Append(name).Append('=').Append(value).Append('\0');
         foreach (var alias in sampling.Sinks.Order(StringComparer.Ordinal)) material.Append("throwaway:").Append(alias).Append('\0');
-        if (staged is not null) material.Append("staged:").Append(staged.Signature).Append('\0');
+        if (stagedRun is not null) material.Append("staged:").Append(stagedRun.Signature).Append('\0');
         var digest = Convert.ToHexStringLower(HMACSHA256.HashData(_token, Encoding.UTF8.GetBytes(material.ToString())));
-        return new RunPlan(path, sampling, launch, writes, digest, staged);
+        return new RunPlan(path, sampling, launch, writes, digest, stagedRun);
     }
 
     /// <summary>
@@ -117,15 +124,25 @@ public sealed partial class StudioServer
         if (_tools.DebugRun is null) throw new StudioRefusal(404, "This studio runs no debug run.");
         var key = DebugKey(path, null);
         _local.CheckDebug(key);
-        var upTo = asked.UpTo is null ? null : WatchOf(asked.UpTo);
+        var review = asked.Review == true;
         var plan = PlanOf(cutter, text, 0, RealSalt(text, launch));
         var state = LoadDebug(key);
-        if (upTo is not null && !state.Watch.Any(w => Same(w.Branch, upTo.Branch) && w.At == upTo.At)) state.Watch.Add(upTo);
+        if (state.Real && review)
+            throw new StudioRefusal(409, "A real run is suspended before its targets are written: write it or abandon it before reviewing another.");
         var (watch, keep, drop) = Judge(state, plan, []);
 
+        // A suspended run is continued whole or not at all: a target that holds nothing would be read from its source and written unreviewed.
+        if (state.Real)
+        {
+            var missing = plan.Branches.Where(b => b.Writes && !keep.Any(h => Same(h.Branch, b.Branch) && h.Level == b.Transformers)).Select(b => b.Branch).ToList();
+            if (missing.Count > 0)
+                throw new StudioRefusal(409, $"The suspended run does not hold the rows of every target ({string.Join(", ", missing)}): abandon it, then review again.");
+        }
+
         DebugCut cut;
-        try { cut = cutter.Cut(sampling.Yaml, watch, upTo, keep.Select(l => new DebugHeld(l.Branch, l.Level, l.Key)).ToList(), write: true); }
+        try { cut = cutter.Cut(sampling.Yaml, watch, null, keep.Select(l => new DebugHeld(l.Branch, l.Level, l.Key)).ToList(), write: true, beforeWriters: review); }
         catch (InvalidOperationException ex) { throw new StudioRefusal(422, ex.Message); }
+        var holds = review ? plan.Branches.Where(b => b.Writes).Select(b => new DebugWatch(b.Branch, DebugAt.End)).ToList() : [];
 
         var stages = JobFileParser.ParseContent(cut.Yaml, null, interpolate: false).Select(kv => new
         {
@@ -145,10 +162,10 @@ public sealed partial class StudioServer
             return new { branch = h.Branch, card = at?.Card, at = at is null ? null : AtName(at.At), bytes = file.Exists ? file.Length : 0L, readAt = file.Exists ? (DateTime?)file.LastWriteTimeUtc : null };
         }).ToList();
 
-        var signature = string.Join('|', new[] { $"stop={(upTo is null ? "" : upTo.Branch + "/" + AtName(upTo.At))}" }
+        var signature = string.Join('|', new[] { $"review={(review ? 1 : 0)}" }
             .Concat(watch.Select(w => $"w:{w.Branch}/{AtName(w.At)}").Order(StringComparer.Ordinal))
             .Concat(keep.Select(h => $"h:{h.Branch}/{h.Level}/{h.Key}").Order(StringComparer.Ordinal)));
-        return new StagedRun(plan, state, upTo, watch, keep, drop, cut, stages, held, state.Levels.Count - keep.Count, signature);
+        return new StagedRun(plan, state, review, holds, watch, keep, drop, cut, stages, held, state.Levels.Count - keep.Count, signature);
     }
 
     /// <summary>What a held level was read with, hashed under the session's token: the launch values and the state files a cursor reads.</summary>
@@ -182,8 +199,8 @@ public sealed partial class StudioServer
                 stages = staged.Stages,
                 held = staged.Held,
                 discards = staged.Discards,
-                stopsAt = staged.UpTo is null ? null : new { branch = staged.UpTo.Branch, at = AtName(staged.UpTo.At), card = staged.UpTo.Card },
-                writesNow = staged.UpTo is null,
+                holds = staged.Holds.Select(h => h.Branch),
+                writesNow = !staged.Review,
             },
         });
     }
@@ -202,7 +219,7 @@ public sealed partial class StudioServer
         try
         {
             // What the levels hold may have moved while the slot was awaited: the confirmation is of what is held now.
-            if (asked.Debug == true)
+            if (plan.Staged is not null)
             {
                 plan = PlanRun(asked);
                 if (asked.Digest != plan.Digest) throw new StudioRefusal(409, Changed);
@@ -264,7 +281,7 @@ public sealed partial class StudioServer
             {
                 bool stopped;
                 lock (_runLock) stopped = state.StopRequested;
-                try { state.View = FinishStaged(plan.Path, staged, checkpoints, stopped ? Stopped : code); }
+                try { state.View = await FinishStagedAsync(plan.Path, staged, checkpoints, stopped ? Stopped : code); }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
                     error ??= "The checkpoints of this run could not be settled: " + ConnectionStringSanitizer.Sanitize(ex.Message);
@@ -289,20 +306,47 @@ public sealed partial class StudioServer
     /// they are a snapshot of one moment, and the next run reads the source again. A run that stopped, failed or was
     /// stopped keeps what it completed, suspended until it is continued or abandoned.
     /// </summary>
-    private object FinishStaged(string path, StagedRun staged, IReadOnlyDictionary<string, string> keys, int code)
+    private async Task<object> FinishStagedAsync(string path, StagedRun staged, IReadOnlyDictionary<string, string> keys, int code)
     {
         var key = DebugKey(path, null);
         var state = staged.State;
+        // The ends a review held are kept for this run and are no pin: they leave the watchers before the state is saved.
+        var pins = state.Watch;
+        state.Watch = pins.Concat(staged.Holds.Where(h => !pins.Any(p => Same(p.Branch, h.Branch) && p.At == h.At))).ToList();
         Keep(key, state, staged.Plan, staged.Cut, keys);
-        if (code == 0 && staged.UpTo is null)
+        state.Watch = pins;
+        if (code == 0 && !staged.Review)
         {
             var store = DebugStore();
             foreach (var held in state.Levels) ForgetCheckpoint(store, held.Key);
             state.Levels.Clear();
         }
         state.Real = state.Levels.Count > 0;
+        if (staged.Review)
+        {
+            // Nothing on disk says how many rows a level holds, and the page tells the person how many wait: counted once, here.
+            var store = DebugStore();
+            for (var i = 0; i < state.Levels.Count; i++)
+            {
+                var held = state.Levels[i];
+                if (staged.Plan.Branches.Any(b => b.Writes && Same(b.Branch, held.Branch) && b.Transformers == held.Level))
+                    state.Levels[i] = held with { Rows = await CountRowsAsync(store, held.Key) };
+            }
+        }
         SaveDebug(key, state);
         return DebugView(staged.Plan, state, staged.Cut.Pieces);
+    }
+
+    private static async Task<long?> CountRowsAsync(CheckpointStore store, string key)
+    {
+        long rows = 0;
+        try
+        {
+            await foreach (var batch in store.ReadAsync(key))
+                using (batch) rows += batch.Length;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { return null; }
+        return rows;
     }
 
     private object RunStatus()

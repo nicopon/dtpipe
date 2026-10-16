@@ -31,13 +31,18 @@
  *   plans them; places: the digest of what each (branch, read|end) depends on, by `branch#at`; shown: what each card
  *   showed last, by card; edited: the cards whose rows an edit made untrue; failed: the cards a failed branch runs;
  *   running: a preview is under way; ranYaml: the text the last preview was for; draft: the name a job not saved yet
- *   keeps its pins under, handed to the job at its first save.
+ *   keeps its pins under, handed to the job at its first save. queue: while a real run is suspended, one entry per branch
+ *   that writes, `{ branch, key, rows }`, the key and the count being null when the run holds none of its rows; held: the rows
+ *   of those keys, by branch, as the server gave them.
  * @typedef {{ rows: number, loaded: boolean, real: boolean, watch: Watch[], branches: any[], places: Map<string, string>,
  *   shown: Map<string, { stage: any, digest: string | undefined, key?: string }>, edited: Set<string>, failed: Set<string>,
- *   running: boolean, notice: string | null, report: any, ranYaml: string | null, draft: string | null }} Preview
+ *   running: boolean, notice: string | null, report: any, ranYaml: string | null, draft: string | null,
+ *   queue: { branch: string, key: string | null, rows: number | null }[], held: Map<string, { stage: any, key: string }> }} Preview
  */
 
 /** The real run of the saved job. phase: "confirm" (what it would write, to confirm), "running", "done". @typedef {any} Run */
+
+/** How the targets are written: `review` stops the real run before every writer, to be read before it writes. @typedef {{ review: boolean }} Writing */
 
 /**
  * The last publication's outcome ({ id, saved }, { id, conflict }, { id, refused } or, while the person chooses the
@@ -49,7 +54,7 @@
 /** @returns {Preview} */
 export const freshPreview = () => ({
   rows: 1000, loaded: false, real: false, watch: [], branches: [], places: new Map(), shown: new Map(), edited: new Set(),
-  failed: new Set(), running: false, notice: null, report: null, ranYaml: null, draft: null,
+  failed: new Set(), running: false, notice: null, report: null, ranYaml: null, draft: null, queue: [], held: new Map(),
 });
 
 export const state = {
@@ -62,6 +67,8 @@ export const state = {
   preview: freshPreview(),
   /** @type {Run | null} */
   run: null,
+  /** @type {Writing} */
+  writing: { review: false },
   /** @type {Publication} */
   publication: { outcome: null, request: null, placement: {} },
   /** The variables of the composed job, by name, and the keyring's aliases: never a value the person did not type. @type {{ variables: any[], aliases: string[], error?: string }} */

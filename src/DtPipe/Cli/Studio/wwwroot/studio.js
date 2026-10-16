@@ -6,17 +6,16 @@
 import { $, api, el, fill, forgetToken, status, token } from "./dom.js";
 import { onCoordinator, refreshCoordinator } from "./coordinator.js";
 import { compose, markSaved, mountDesigner, openBlank, openJob, restoreSizes, setCatalog } from "./designer.js";
-import { readView, rememberView, viewRestored } from "./prefs.js";
+import { readView, rememberView, sizesRead, viewRestored } from "./prefs.js";
 import { afterFlush, invalidate, onZone } from "./render.js";
 import { sequence, state } from "./state.js";
-import { abandonRun, adoptDraft, cardBadge, cardTool, cardTools, debugComposed, forgetPins, forgetPreview, previewView, restoreRows, runPreview, setDebugRows } from "./preview.js";
-import { forgetRun, prepareRun, runView } from "./run.js";
+import { adoptDraft, cardBadge, cardTool, cardTools, debugComposed, forgetPins, forgetPreview, previewView, restoreRows, runPreview, setDebugRows } from "./preview.js";
+import { forgetRun, prepareRun, restoreReview, runView } from "./run.js";
 import { forgetPublication, publicationView, publish } from "./publish.js";
 import { loadVariables, unreadyCount, variablesView } from "./variables.js";
 
 const MAX_DEBUG_ROWS = 100000;
 const opening = sequence();
-let sizesRead = false;
 
 // ---------------------------------------------------------------- the jobs
 
@@ -70,6 +69,7 @@ async function openFromLibrary(id) {
 
 // What a preview, a run or a publication showed belongs to the job it was for: another job starts clean.
 function forgetResults() {
+  restoreReview(false);
   forgetPreview();
   forgetPublication();
   forgetRun();
@@ -87,10 +87,9 @@ async function open(path, left = false) {
     state.job = { path, hash: job.hash, rewrites: job.rewrites };
     forgetResults();
     invalidate("jobs");
-    // The panes keep the sizes of the session once it has read them; the rows asked are the person's last, unless the job kept its own.
-    if (!sizesRead && view.sizes) restoreSizes(view.sizes);
-    sizesRead = true;
+    // The rows asked are the person's last, unless the job kept its own.
     if (view.job?.rows) restoreRows(view.job.rows);
+    restoreReview(view.job?.review === true);
     if (!(await openJob(job.yaml, job.layout, false, view.job))) return;
     viewRestored(path, view.job);
     status(job.rewrites ? "saving rewrites this file" : "", job.rewrites ? "warn" : "");
@@ -205,25 +204,28 @@ async function loadBricks() {
 function renderBar() {
   const dbg = state.preview;
   const set = (id, props) => { const node = $(id); if (node) Object.assign(node, props); };
-  set("d-preview", { disabled: dbg.running });
+  const suspended = dbg.real;
+  set("d-preview", { disabled: dbg.running || suspended, title: suspended ? SUSPENDED : PREVIEW_TITLE });
+  set("d-suspended", { hidden: !suspended });
   // The rows are typed here: a drawing never rewrites what the person is typing.
   set("d-watch-rows", { disabled: dbg.running || dbg.real, ...(document.activeElement === $("d-watch-rows") ? {} : { value: String(dbg.rows) }) });
   set("d-forget-pins", { disabled: dbg.running || dbg.real, hidden: dbg.watch.length === 0 });
-  set("d-abandon", { hidden: !dbg.real });
-  set("d-run", { textContent: dbg.real ? "Continue the run" : "Run" });
+  set("d-run", { disabled: dbg.running || suspended, title: suspended ? SUSPENDED : RUN_TITLE });
 }
+
+const SUSPENDED = "A real run is suspended before its targets are written: write it or abandon it from the sink cards.";
+const PREVIEW_TITLE = "Run the whole job over the first source rows, with the writers neutralised: every card shows the rows it delivers";
+const RUN_TITLE = "Run the saved job here and write its targets, after you confirm what it writes";
 
 function barButtons() {
   return [
     el("button", { id: "d-save", title: "Write the job and its layout (Ctrl+S)", onclick: () => save() }, "Save"),
-    el("button", { id: "d-preview", class: "primary", title: "Run the whole job over the first source rows, with the writers neutralised: every card shows the rows it delivers",
-      onclick: () => runPreview(null) }, "▶ Preview"),
+    el("button", { id: "d-preview", class: "primary", title: PREVIEW_TITLE, onclick: () => runPreview(null) }, "▶ Preview"),
     el("label", { id: "d-watch-rows-label", class: "rows", title: "Source rows each source reads (each card shows at most 1000 of them)" },
       "rows ", el("input", { id: "d-watch-rows", type: "number", min: "1", max: String(MAX_DEBUG_ROWS), value: String(state.preview.rows), onchange: setDebugRows })),
     el("button", { id: "d-forget-pins", class: "ghost small", hidden: true, title: "Unpin every card and forget the checkpoints they kept", onclick: forgetPins }, "Forget pins"),
-    el("button", { id: "d-abandon", class: "ghost danger", hidden: true, title: "Forget the rows this real run holds; nothing was written",
-      onclick: abandonRun }, "Abandon"),
-    el("button", { id: "d-run", title: "Run the saved job here, after you confirm what it writes", onclick: () => prepareRun() }, "Run"),
+    el("span", { id: "d-suspended", class: "suspended", hidden: true, title: SUSPENDED }, "⏸ run suspended: write or abandon it on the sink cards"),
+    el("button", { id: "d-run", class: "danger", title: RUN_TITLE, onclick: () => prepareRun() }, "Write targets…"),
     state.coordinator ? el("button", { id: "d-publish", title: "Send the saved job to the coordinator's library", onclick: () => publish() }, "Publish") : null,
   ];
 }
@@ -250,7 +252,8 @@ async function start() {
     onComposed: (result) => { loadVariables(result); debugComposed(); },
     cardTools,
     cardBadge,
-    cardTool,
+    // A sink writes the run it waits on; the rest of the card's tools belong to the preview.
+    cardTool: (alias, name) => (name === "write" ? prepareRun(true) : cardTool(alias, name)),
     previewView,
     extraTabs: [{
       name: "variables",
@@ -267,6 +270,10 @@ async function start() {
       render: publicationView,
     }],
   });
+  // The panes come back as they were left, before anything is kept of them.
+  const kept = await readView();
+  if (kept.sizes) restoreSizes(kept.sizes);
+  sizesRead();
   await loadJobs();
   onCoordinator(loadBricks);
   onCoordinator(loadLibrary);

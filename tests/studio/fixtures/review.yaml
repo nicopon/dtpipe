@@ -1,0 +1,20 @@
+a:
+  input: generate:20
+b:
+  from: a
+  transformers:
+  - type: filter
+    mappings:
+      row.GenerateIndex % 2 == 0: ''
+c:
+  from: b
+  output: "csv:c.csv"
+d:
+  from: a
+  transformers:
+  - type: compute
+    mappings:
+      x:row.GenerateIndex * 10: ''
+e:
+  from: d
+  output: "csv:e.csv"

@@ -301,25 +301,31 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   its digest is unchanged. `POST /api/debug/plan` answers the places of a text and nothing else: pure, no engine
   slot, no file. After an edit the page compares digests as strings and clears the rows they no longer
   support. `[CI: StudioDebugTests]`
-- **A staged run is the job's own run cut at the pinned cards, and nothing leaves the process before its
-  last stage.** `POST /api/run/prepare` and `POST /api/run` take `debug` and `upTo`; the saved file only, and the digest also binds the stop, the watchers
-  and the keys held. `DebugCutter.Cut(write: true)` makes the cut: a run that stops has no branch with a
-  writer (upstream branches included; one that runs whole with an output is refused), because the engine
-  neutralises nothing outside a sample. The cursor and its state file move with the piece that writes the
-  branch (`JobCutter` puts them on the head, which would advance them for rows no target received). The
+- **A staged run is the job's own run, and nothing leaves the process before its last stage.**
+  `POST /api/run/prepare` and `POST /api/run` take `debug` and `review`; the saved file only, and the
+  digest also binds the mode, the watchers and the keys held. `DebugCutter.Cut(write: true)` makes the
+  cut at the pinned cards. With `review` (`beforeWriters`) every branch that has an output ends at its
+  end with a checkpoint and no writer (upstream branches included; one that runs whole with an output
+  is refused, and so is a job no branch of which writes), because the engine neutralises nothing
+  outside a sample. The cursor and its state file move with the piece that writes the branch
+  (`JobCutter` puts them on the head, which would advance them for rows no target received). The
   engine reports the key of each committed checkpoint through `SampleReportCollector.Checkpoints`
   (`StudioDebugRunner`). A level of a real run is keyed to every row and to a salt (an HMAC under the
   session's token of the launch values and the state files a cursor reads), so it serves no sample and no
   other values; a write that reached the end of the job deletes the levels that fed it, one that stopped
   or failed keeps what it completed as `real` (`DebugState.Real`), and until it is continued or abandoned
-  (`resetAll`) a sample or a change of watchers is a 409. `POST /api/debug/rows` reads the first rows of a
-  held key, the only way a person sees them before the write. A failed last stage leaves the target as
-  its writer does in a plain run, and the held rows for a retry; a partial failure of several branches
-  re-runs them all when continued. `[CI: StudioStagedRunTests]` `[unchecked: the page, a writer other
-  than the local ones tried]`
-- **A stop is a new run, never a paused process.** ▶ on a card is the page choosing a stop: the run reads the
-  checkpoints back from the highest level held and goes no further. A watcher has a branch, a place and the card
-  it sits on, nothing else.
+  (`resetAll`) a sample, a change of watchers and any run but its continuation are a 409.
+  **A review's holds are the run's, never pins**: they are watchers for the run only, leave `state.Watch`
+  before it is saved, and `Judge` keeps a held end of a writing branch without a pin while `Real`. The
+  continuation is refused (409) unless every writing branch holds its end, so no row is written unread.
+  `view.queue` lists, while `real`, every writing branch of the saved file with its key and the rows
+  counted once when the review ended (`HeldLevel.Rows`, a count in the clear file, never a row).
+  `POST /api/debug/rows` reads the first rows of a held key, the only way a person sees them before the
+  write. A failed last stage leaves the target as its writer does in a plain run, and the held rows for a
+  retry. `[CI: StudioStagedRunTests]` `[unchecked: the page, a writer other than the local ones tried]`
+- **A stop is a new run, never a paused process.** A review is a run that ends before its writers; the
+  continuation reads the checkpoints back from the highest level held and writes. A watcher has a branch,
+  a place and the card it sits on, nothing else.
 - **A level's digest comes from the job as written, never from the cut.** It hashes the branches the
   level reads, the reader side, the transformers up to it and the rows asked, so pinning another card
   invalidates nothing. A launch value is not in a sample's, but is in a real run's (the salt).

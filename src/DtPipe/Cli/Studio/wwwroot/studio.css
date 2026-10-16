@@ -107,7 +107,7 @@ textarea { width: 100%; resize: vertical; }
 .dcard-badge { padding: 0 10px; height: 16px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
 .dcard-badge.fresh { color: var(--good); }
 .dcard-badge.error { color: var(--bad); }
-.dcard-badge.running, .dcard-badge.edited { color: var(--warn); }
+.dcard-badge.running, .dcard-badge.edited, .dcard-badge.held { color: var(--warn); }
 .dcard-branch { padding: 0 10px; font-size: 11px; color: var(--kind); font-weight: 600; }
 .dcard.kind-sql .dcard-branch { padding-left: 32px; }
 .dcard.kind-transform .dcard-head { padding-right: 32px; }
@@ -122,6 +122,10 @@ textarea { width: 100%; resize: vertical; }
   color: var(--muted); cursor: pointer; font-size: 13px; line-height: 1;
 }
 .ctool:hover { color: var(--accent); }
+.ctool.wide { width: auto; padding: 0 6px; font-size: 11px; border: 1px solid var(--line); background: var(--panel); }
+.ctool.wide.danger { color: var(--bad); }
+.designer-bar .suspended { color: var(--warn); font-size: 12px; }
+label.review { display: block; margin: 0 0 8px; }
 .ctool.pin.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
 .ctool[aria-disabled="true"] { opacity: .35; cursor: not-allowed; }
 .port {

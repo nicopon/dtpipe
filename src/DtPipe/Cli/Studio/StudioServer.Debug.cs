@@ -33,7 +33,8 @@ public sealed partial class StudioServer
     private sealed record DebugStateRequest(
         string? Yaml, int? Rows, string? Path, string? Draft, List<DebugAtRequest>? Watch, bool? ResetAll, List<DebugAtRequest>? Reset, string? Adopt);
 
-    private sealed record HeldLevel(string Branch, int Level, string Digest, string Key);
+    /// <summary><see cref="Rows"/> is the count of a level a real run holds before its writer, read once when the run ended; null when unknown.</summary>
+    private sealed record HeldLevel(string Branch, int Level, string Digest, string Key, long? Rows = null);
 
     private sealed class DebugState
     {
@@ -92,7 +93,7 @@ public sealed partial class StudioServer
                     state.Watch.Add(new DebugWatch(branch, (string?)w["at"] == "read" ? DebugAt.Read : DebugAt.End, (string?)w["card"]));
             foreach (var l in node?["levels"] as JsonArray ?? [])
                 if ((string?)l?["branch"] is { } branch && (int?)l["level"] is { } level && (string?)l["digest"] is { } digest && (string?)l["key"] is { Length: > 0 } held)
-                    state.Levels.Add(new HeldLevel(branch, level, digest, held));
+                    state.Levels.Add(new HeldLevel(branch, level, digest, held, (long?)l["rows"]));
             state.Real = (bool?)node?["real"] == true && state.Levels.Count > 0;
         }
         catch (Exception ex) when (ex is InvalidOperationException or FormatException) { return new DebugState(); }
@@ -108,7 +109,7 @@ public sealed partial class StudioServer
             ["real"] = state.Real && state.Levels.Count > 0,
             ["watch"] = new JsonArray(state.Watch.Select(w => (JsonNode)new JsonObject { ["branch"] = w.Branch, ["at"] = AtName(w.At), ["card"] = w.Card }).ToArray()),
             ["levels"] = new JsonArray(state.Levels.Select(l => (JsonNode)new JsonObject
-                { ["branch"] = l.Branch, ["level"] = l.Level, ["digest"] = l.Digest, ["key"] = l.Key }).ToArray()),
+                { ["branch"] = l.Branch, ["level"] = l.Level, ["digest"] = l.Digest, ["key"] = l.Key, ["rows"] = l.Rows }).ToArray()),
         });
     }
 
@@ -126,13 +127,20 @@ public sealed partial class StudioServer
         foreach (var held in state.Levels)
         {
             var valid = plan.Levels.Any(p => Same(p.Branch, held.Branch) && p.Level == held.Level && p.Digest == held.Digest)
-                && watch.Any(w => Same(w.Branch, held.Branch) && plan.Resolve(w) == held.Level)
+                && (watch.Any(w => Same(w.Branch, held.Branch) && plan.Resolve(w) == held.Level) || IsQueued(state, plan, held))
                 && store.Contains(held.Key);
             if (valid) keep.Add(held); else drop.Add(held.Key);
         }
         drop.ExceptWith(keep.Select(h => h.Key));
         return (watch, keep, drop);
     }
+
+    /// <summary>
+    /// The rows a real run holds before the branch's writer: the end of a branch that writes, while the run is suspended. No
+    /// pin sits there, and none is made: a pin is the person's choice, and this is the run's.
+    /// </summary>
+    private static bool IsQueued(DebugState state, DebugPlan plan, HeldLevel held) =>
+        state.Real && plan.Branches.Any(b => b.Writes && Same(b.Branch, held.Branch) && b.Transformers == held.Level);
 
     /// <summary>
     /// Keeps only what is still true (<see cref="Judge"/>). What it drops, and <paramref name="forgotten"/>, leaves
@@ -146,6 +154,17 @@ public sealed partial class StudioServer
         if (keep.Count == 0) state.Real = false;
         var store = DebugStore();
         foreach (var key in drop) ForgetCheckpoint(store, key);
+    }
+
+    /// <summary>
+    /// The plan of the job a suspended run was of: the file as saved, whose branches the run held. The cards the page composes may name
+    /// them differently until the studio writes the file, and the queue names the branches the rows are held under.
+    /// </summary>
+    private DebugPlan SuspendedPlan(DebugCutter cutter, string? path, DebugPlan fallback)
+    {
+        if (JobPath(path) is not { } job) return fallback;
+        try { return cutter.Plan(_folder.ReadJob(job).Text, 0); }
+        catch (Exception ex) when (ex is StudioRefusal or InvalidOperationException or FormatException or YamlDotNet.Core.YamlException or IOException) { return fallback; }
     }
 
     private static void RefuseWhileSuspended(DebugState state)
@@ -166,10 +185,17 @@ public sealed partial class StudioServer
     /// (its first stage for a read, its last for an end), or is null when this run did not produce it: its rows
     /// were read back, or its branch did not run.
     /// </summary>
-    private object DebugView(DebugPlan plan, DebugState state, IReadOnlyList<DebugPiece>? pieces, DebugCut? cut = null, IReadOnlySet<string>? ran = null) => new
+    private object DebugView(
+        DebugPlan plan, DebugState state, IReadOnlyList<DebugPiece>? pieces, DebugCut? cut = null, IReadOnlySet<string>? ran = null, DebugPlan? suspended = null) => new
     {
         real = state.Real,
-        branches = plan.Branches.Select(b => new { branch = b.Branch, transformers = b.Transformers, cuttable = b.Cuttable }),
+        branches = plan.Branches.Select(b => new { branch = b.Branch, transformers = b.Transformers, cuttable = b.Cuttable, writes = b.Writes }),
+        // Where a suspended run waits: every branch that writes, with the rows it holds before its writer when it holds them.
+        queue = !state.Real ? new List<object>() : (suspended ?? plan).Branches.Where(b => b.Writes).Select(b =>
+        {
+            var held = state.Levels.FirstOrDefault(h => Same(h.Branch, b.Branch) && h.Level == b.Transformers);
+            return (object)new { branch = b.Branch, key = held?.Key, rows = held?.Rows };
+        }).ToList(),
         places = plan.Branches.SelectMany(b => new[] { DebugAt.Read, DebugAt.End }.Select(at => new
         {
             branch = b.Branch,
@@ -316,7 +342,7 @@ public sealed partial class StudioServer
             if (state.Real && asked.ResetAll != true)
             {
                 if (wanted is not null || reset.Count > 0) RefuseWhileSuspended(state);
-                await JsonAsync(context, new { rows, view = DebugView(plan, state, null) });
+                await JsonAsync(context, new { rows, view = DebugView(plan, state, null, suspended: SuspendedPlan(cutter, asked.Path, plan)) });
                 return;
             }
             if (wanted is not null) state.Watch = wanted;

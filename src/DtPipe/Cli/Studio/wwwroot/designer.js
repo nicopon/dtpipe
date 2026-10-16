@@ -132,6 +132,7 @@ export function focusCard(alias) {
 /** The sizes the panes were left at; a value out of range is clamped when they are applied. @param {Record<string, number>} sizes */
 export function restoreSizes(sizes) {
   for (const name of Object.keys(SIZE_LIMITS)) if (Number.isFinite(sizes[name])) state.view.sizes[name] = sizes[name];
+  applySizes();
 }
 
 export function markSaved() { cards.dirty = false; invalidate("bar"); }

@@ -457,6 +457,7 @@ public sealed partial class StudioServer : IAsyncDisposable
             if (kept.Tab is not null) jobView["tab"] = kept.Tab;
             if (kept.Rows is not null) jobView["rows"] = kept.Rows;
             if (kept.Card is not null) jobView["card"] = kept.Card;
+            if (kept.Review is not null) jobView["review"] = kept.Review;
         }
 
         _local.UpdateView(sizes, job, jobView);
@@ -796,7 +797,7 @@ public sealed partial class StudioServer : IAsyncDisposable
 
     private sealed record DecomposeRequest(string? Yaml, JsonObject? Layout);
 
-    private sealed record ViewJobRequest(string? Tab, int? Rows, string? Card);
+    private sealed record ViewJobRequest(string? Tab, int? Rows, string? Card, bool? Review = null);
 
     private sealed record ViewRequest(Dictionary<string, double>? Sizes, string? Path, ViewJobRequest? Job);
 

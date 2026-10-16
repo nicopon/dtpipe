@@ -296,7 +296,7 @@ public sealed class StudioServerTests : IAsyncLifetime
             return reader.ReadToEnd();
         }));
         Assert.Contains("d-preview", page);
-        foreach (var gone in new[] { "d-mode", "d-step", "d-continue" })
+        foreach (var gone in new[] { "d-mode", "d-step", "d-continue", "d-abandon" })
             Assert.False(page.Contains(gone, StringComparison.Ordinal), $"the page still has {gone}");
     }
 
@@ -649,7 +649,7 @@ public sealed class StudioServerTests : IAsyncLifetime
     {
         var (put, _) = await SendAsync(Request(HttpMethod.Put, "/api/view", body: new
         {
-            sizes = new { pal = 200, drawer = 300 }, path = "a.yaml", job = new { tab = "preview", rows = 50, card = "b" },
+            sizes = new { pal = 200, drawer = 300 }, path = "a.yaml", job = new { tab = "preview", rows = 50, card = "b", review = true },
         }));
         var (_, a) = await SendAsync(Request(HttpMethod.Get, "/api/view?path=a.yaml"));
         var (_, other) = await SendAsync(Request(HttpMethod.Get, "/api/view?path=sub/b.yml"));
@@ -660,6 +660,7 @@ public sealed class StudioServerTests : IAsyncLifetime
         Assert.Equal("preview", a.GetProperty("job").GetProperty("tab").GetString());
         Assert.Equal(50, a.GetProperty("job").GetProperty("rows").GetInt32());
         Assert.Equal("b", a.GetProperty("job").GetProperty("card").GetString());
+        Assert.True(a.GetProperty("job").GetProperty("review").GetBoolean());
         Assert.Equal(JsonValueKind.Null, other.GetProperty("job").ValueKind);
         Assert.Equal(300, none.GetProperty("sizes").GetProperty("drawer").GetInt32());
         Assert.True(File.Exists(Path.Combine(_dir, ".dtpipe", "studio", "view.json")));
@@ -670,6 +671,7 @@ public sealed class StudioServerTests : IAsyncLifetime
     [InlineData("{\"sizes\":{\"pal\":99999}}")]
     [InlineData("{\"path\":\"a.yaml\",\"job\":{\"tab\":\"run\"}}")]
     [InlineData("{\"path\":\"a.yaml\",\"job\":{\"rows\":0}}")]
+    [InlineData("{\"path\":\"a.yaml\",\"job\":{\"review\":\"yes\"}}")]
     public async Task A_preference_out_of_range_is_refused_and_nothing_is_written(string body)
     {
         var request = Request(HttpMethod.Put, "/api/view");

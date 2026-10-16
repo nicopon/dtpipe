@@ -1302,25 +1302,34 @@ job it refuses is not saved, and the studio shows the check's report.
 [`--export-job`](#reference-for-job-files) writes it: it opens as a new job that you save or leave.
 A `${{NAME}}` in it stays as typed, and `--bind-input` and `--bind-output` are refused.
 
-**Run** executes the job saved in the folder on this machine, as `dtpipe --job` would, after you
-confirm what it writes: each branch's target (a connection string with its secrets masked) and the
-writer's block as the file holds it. A run is real, so the page asks again if the job or the values
-it launches with changed since. A job that reads a coordinator's brick is not run here, since its
-rows would recreate a real target; a sink brick is written to a throwaway file, never to its node.
-One action runs at a time (a preview, a change to what is pinned, or a run), the studio does not
-quit during a run, and **Stop** ends it with the verdict 130, however the engine answers the
-cancellation; a run that had finished before keeps its own code.
+**Write targets…** executes the job saved in the folder on this machine, as `dtpipe --job` would,
+after you confirm what it writes: each branch's target (a connection string with its secrets
+masked) and the writer's block as the file holds it. A run is real, so the page asks again if the
+job or the values it launches with changed since. A job that reads a coordinator's brick is not run
+here, since its rows would recreate a real target; a sink brick is written to a throwaway file,
+never to its node. One action runs at a time (a preview, a change to what is pinned, or a run), the
+studio does not quit during a run, and **Stop** ends it with the verdict 130, however the engine
+answers the cancellation; a run that had finished before keeps its own code.
 
-A real run that holds the rows it read before its target is written (the server can stop a run
-there) shows **Continue the run**, which writes the target from those rows, and **Abandon**, which
-forgets them; nothing is written before that stage, and the cursor's state file (`--state`) moves
-only with the stage that writes. The write consumes the rows that fed it, so the next run reads the
-source again. Those rows are every row of the level, encrypted in the studio's session and kept
-until the write or **Abandon**: about the size of the data as Arrow (300 000 rows of six columns
-took 19 MB). Meanwhile a preview and a change of what is pinned are refused. Rows held for a real
-run serve no preview, and a preview's serve no real run: the first forgets the other's. They are
-also forgotten when the job's text, a launch value or the cursor's state file changed, and when the
-studio restarts.
+The case **Review before writing** in the confirmation (unticked by default, and kept for the job)
+makes the run stop just before every branch that writes, whatever the cards. Nothing is written: the
+run holds every row each target would receive, and each sink card shows **⏸ n rows queued** with
+**Write** and **Abandon**; selecting the sink shows those rows. **Write** asks for a confirmation
+again and writes every target the run waits on from the rows held, which it consumes, so the next
+run reads the source again; **Abandon** forgets the rows of all of them. Either acts on the whole
+run, never on one sink. The cursor's state file (`--state`) moves only with the stage that writes.
+Those rows are every row of the level, encrypted in the studio's session and kept until the write
+or **Abandon**: about the size of the data as Arrow (300 000 rows of six columns took 19 MB). A
+review pins nothing, and `.dtpipe/studio/<job>-debug.json` keeps the count of the rows it holds
+beside their key.
+
+While a run is suspended, **Write targets…** and **Preview** are held back (the server refuses
+them too), and the bar says so. A run that was stopped or failed before every target held its rows
+cannot be written, only abandoned, so that no row is written unread. A branch that runs whole with
+a stream processor and writes cannot be stopped before its writer: the review is refused. Rows held
+for a real run serve no preview, and a preview's serve no real run: the first forgets the other's.
+They are also forgotten when the job's text, a launch value or the cursor's state file changed, and
+when the studio restarts.
 
 Each card that holds rows carries **▶** and **📌**; a sink holds none. **▶** runs the job up to
 that card and stops there: nothing downstream runs, and each branch starts from the highest level

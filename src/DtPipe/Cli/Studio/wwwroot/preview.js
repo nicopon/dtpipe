@@ -31,6 +31,12 @@ const sameWatcher = (a, b) => a.branch === b.branch && a.at === b.at;
 const newDraft = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
 const wholeBranch = (place) => { const b = place && dbg.branches.find((x) => x.branch === place.branch); return !!b && !b.cuttable && b.transformers > 0; };
 const composedYaml = () => state.cards.result?.yaml;
+// Where a suspended run waits for a sink card: its entry in the queue the server lists, or null (a card that is no sink, or no run
+// suspended). The run was of the file as saved, whose branch is the sink's own name when the studio did not write the file, and the
+// branch the cards compose for it when it did.
+const waitsOn = (alias, branch) => branch === alias || branch === cardBranch(alias);
+const queueOf = (alias) => (dbg.real && !cardWatch(alias) ? dbg.queue.find((q) => waitsOn(alias, q.branch)) ?? null : null);
+const sinkOf = (branch) => (state.cards.model?.steps || []).find((s) => s.kind === "sink" && waitsOn(s.alias, branch))?.alias ?? null;
 
 /** What a preview showed belongs to the job it was for: another job starts clean. The rows asked stay as the person left them. */
 export function forgetPreview() {
@@ -82,6 +88,8 @@ export function takeView(view) {
   dbg.loaded = true;
   dbg.real = !!view.real;
   dbg.watch = view.watch;
+  dbg.queue = view.queue ?? [];
+  if (!dbg.real) dbg.held.clear();
   dbg.branches = view.branches;
   takePlaces(view.places);
   redrawPreview();
@@ -229,6 +237,8 @@ function cardState(alias) {
   if (sameText && dbg.failed.has(alias)) return { name: "error", glyph: "✕", text: "failed" };
   const place = cardWatch(alias);
   if (!place) {
+    const waiting = queueOf(alias);
+    if (waiting) return { name: "held", glyph: "⏸", text: waiting.rows != null ? `${waiting.rows} rows queued` : waiting.key ? "rows queued" : "no rows held" };
     // A writer holds no rows: it says only whether the last preview, run on this very text, reached it.
     return sameText && dbg.report?.success ? { name: "fresh", glyph: "●", text: "not written" } : { name: "never", glyph: "○", text: "no preview" };
   }
@@ -245,7 +255,8 @@ export function cardBadge(alias) {
   const cardState_ = cardState(alias);
   const watcher = watcherOf(alias);
   const place = cardWatch(alias);
-  const title = wholeBranch(place) && place.at === "read" ? "This card runs whole with its branch: its rows are those of its read, and it cannot be pinned inside." : cardState_.text;
+  const title = cardState_.name === "held" ? "A real run is suspended before its targets are written: Write writes every target it waits on, Abandon forgets its rows."
+    : wholeBranch(place) && place.at === "read" ? "This card runs whole with its branch: its rows are those of its read, and it cannot be pinned inside." : cardState_.text;
   return el("div", { class: `dcard-badge ${cardState_.name}`, "data-card-state": cardState_.name, title },
     `${cardState_.glyph} ${cardState_.text}${watcher ? " · 📌" : ""}`);
 }
@@ -253,7 +264,14 @@ export function cardBadge(alias) {
 /** The actions of a card. @param {string} alias */
 export function cardTools(alias) {
   const place = cardWatch(alias);
-  if (!place) return null;
+  if (!place) {
+    // A sink a suspended run waits on writes or forgets the rows of the whole run: it is the only place to do either.
+    if (!queueOf(alias)) return null;
+    const word = (name, label, title, extra = "") => el("button", { class: `ctool wide ${extra}`, "data-card-tool": name, title, "aria-label": title }, label);
+    return el("div", { class: "dcard-tools queue" },
+      word("write", "Write", "Write the rows this run holds to every target it waits on"),
+      word("abandon", "Abandon", "Forget the rows this run holds, for every target: nothing was written", "danger"));
+  }
   const watcher = watcherOf(alias);
   const whole = place.at === "read" && wholeBranch(place);
   const tool = (name, glyph, title, extra = {}) => el("button",
@@ -268,6 +286,7 @@ export function cardTools(alias) {
 
 /** @param {string} alias @param {string} name */
 export async function cardTool(alias, name) {
+  if (name === "abandon") { if (!dbg.running) await abandonRun(); return; }
   const place = placeOf(alias);
   if (!place || dbg.running) return;
   if (dbg.real) {
@@ -299,7 +318,22 @@ export function previewView(alias) {
   const place = alias ? cardWatch(alias) : null;
   const parts = [];
   if (dbg.running) parts.push(el("p", { class: "warn" }, "Running…"));
-  if (!place) {
+  const waiting = alias && !place ? queueOf(alias) : null;
+  if (waiting) {
+    const held = dbg.held.get(waiting.branch);
+    if (held) {
+      const stage = held.stage;
+      const total = waiting.rows ?? `${stage.rowsSeen}${stage.more ? "+" : ""}`;
+      const cut = (stage.sample || []).length < (waiting.rows ?? stage.rowsSeen) ? " (the first 1000 shown)" : "";
+      parts.push(el("p", { class: "muted" }, `${alias}: ${total} rows queued for its target${cut}. Nothing is written until you write.`),
+        el("div", { class: "scroll" }, stageTable(stage)));
+    } else {
+      parts.push(el("p", { class: "hint" }, waiting.key
+        ? `${alias} waits on rows a real run holds: loading them…`
+        : `The suspended run holds none of the rows ${alias} waits on: abandon it, then review again.`));
+    }
+    parts.push(el("p", { class: "hint" }, "Write writes every target the run waits on; Abandon forgets the rows of all of them."));
+  } else if (!place) {
     parts.push(el("p", { class: "hint" }, alias
       ? `${alias} writes a target and holds no rows of its own: select the card before it.`
       : "Select a card to see the rows it delivers. Preview runs the whole job; ▶ on a card runs it up to that card. The writers are neutralised: no target is written."));
@@ -350,6 +384,7 @@ function loadHeld() {
   heldLoading = (async () => {
     let first = null;
     let loaded = false;
+    let sink = null;
     for (const w of dbg.watch) {
       if (!w.key || !w.card) continue;
       first ??= w.card;
@@ -362,8 +397,20 @@ function loadHeld() {
         loaded = true;
       } catch (e) { if (!stale()) status(e.message, "bad"); }
     }
+    for (const q of dbg.queue) {
+      if (!q.key) continue;
+      sink ??= sinkOf(q.branch);
+      if (dbg.held.get(q.branch)?.key === q.key) continue;
+      try {
+        const { stage } = await api("/api/debug/rows", { ...debugScope(), key: q.key });
+        if (stale()) return null;
+        dbg.held.set(q.branch, { stage, key: q.key });
+        loaded = true;
+      } catch (e) { if (!stale()) status(e.message, "bad"); }
+    }
     if (stale()) return null;
-    // Rows the page did not have (a reload, another tab) are shown where they are held.
+    // Rows the page did not have (a reload, another tab) are shown where they are held: a sink the run waits on first, as it is what is read before writing.
+    first = sink ?? first;
     if (loaded && first) focusCard(first); else invalidate("drawer");
     return first;
   })();
@@ -379,5 +426,5 @@ export async function showHeld(view) {
 }
 
 export async function abandonRun() {
-  if (await debugSync({ resetAll: true })) { dbg.shown.clear(); redrawPreview(); status("real run abandoned: nothing was written", "good"); }
+  if (await debugSync({ resetAll: true })) { dbg.shown.clear(); dbg.held.clear(); redrawPreview(); status("real run abandoned: nothing was written", "good"); }
 }

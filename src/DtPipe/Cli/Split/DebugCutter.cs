@@ -24,9 +24,9 @@ public sealed record DebugHeld(string Branch, int Level, string Key);
 /// <summary>
 /// What a debug run knows of a branch: its transformers, and whether it can be cut inside. A branch with a
 /// stream processor, or that <see cref="JobCutter"/> refuses (a literal secret, a block no side owns), runs
-/// whole: only its end can be watched.
+/// whole: only its end can be watched. <see cref="Writes"/> is a branch with an output: the one place a run leaves the process.
 /// </summary>
-public sealed record DebugBranch(string Branch, int Transformers, bool Cuttable);
+public sealed record DebugBranch(string Branch, int Transformers, bool Cuttable, bool Writes = false);
 
 /// <summary>
 /// A level a watcher can sit on (0 is the read, the last is the end of the branch) and <see cref="Digest"/>, the hash of the text that produces it:
@@ -150,7 +150,7 @@ public sealed class DebugCutter(
         var levels = new List<DebugLevel>();
         foreach (var (alias, info) in infos)
         {
-            branches.Add(new DebugBranch(alias, info.Transformers, info.Cuttable));
+            branches.Add(new DebugBranch(alias, info.Transformers, info.Cuttable, !string.IsNullOrEmpty(info.Job.Output)));
             foreach (var level in info.Cuttable ? new[] { 0, info.Transformers } : [info.Transformers])
                 levels.Add(new DebugLevel(alias, level, Digest(jobs, alias, info, level, rows, salt)));
         }
@@ -163,12 +163,15 @@ public sealed class DebugCutter(
 
     /// <summary>
     /// The job to run. <paramref name="upTo"/> stops the run at that level, and drops what it does not need;
-    /// <paramref name="held"/> are the levels the run may read back instead of producing.
+    /// <paramref name="beforeWriters"/> stops every branch that has an output at its end instead, whatever its card; <paramref name="held"/>
+    /// are the levels the run may read back instead of producing.
     /// </summary>
     /// <param name="write">The run is the job's own, not a sample: the writer is not neutralised by the engine, so a stop
     /// is a piece with no writer at all, and the cursor and its state file stay with the piece that writes.</param>
-    /// <exception cref="InvalidOperationException">The stop names no branch, or one that runs whole at that level.</exception>
-    public DebugCut Cut(string yaml, IEnumerable<DebugWatch> watch, DebugWatch? upTo = null, IReadOnlyList<DebugHeld>? held = null, bool write = false)
+    /// <exception cref="InvalidOperationException">The stop names no branch, or one that runs whole at that level; no branch has an
+    /// output to stop before.</exception>
+    public DebugCut Cut(
+        string yaml, IEnumerable<DebugWatch> watch, DebugWatch? upTo = null, IReadOnlyList<DebugHeld>? held = null, bool write = false, bool beforeWriters = false)
     {
         var jobs = Parse(yaml);
         var infos = Inspect(jobs);
@@ -178,17 +181,24 @@ public sealed class DebugCutter(
         foreach (var w in watch)
             if (infos.TryGetValue(w.Branch, out var info) && Resolve(info, w.At) is { } level) watched.Add((Canonical(jobs, w.Branch), level));
 
-        (string Branch, int Level)? target = null;
+        // The levels the run stops at: the card it was asked for, or the end of every branch that writes.
+        var targets = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         if (upTo is not null)
         {
             var info = infos.GetValueOrDefault(upTo.Branch) ?? throw new InvalidOperationException($"The job has no branch '{upTo.Branch}'.");
             var level = Resolve(info, upTo.At) ?? throw new InvalidOperationException(
                 $"'{upTo.Branch}' runs whole: it can be watched at its end only, not at its read.");
-            target = (Canonical(jobs, upTo.Branch), level);
-            watched.Add(target.Value);
+            targets[Canonical(jobs, upTo.Branch)] = level;
         }
+        if (beforeWriters)
+        {
+            foreach (var (alias, info) in infos)
+                if (!string.IsNullOrEmpty(info.Job.Output)) targets[alias] = info.Transformers;
+            if (targets.Count == 0) throw new InvalidOperationException("No branch of this job writes: there is nothing to stop before.");
+        }
+        foreach (var (alias, level) in targets) watched.Add((alias, level));
 
-        // What must run: the target (or every branch), each from the highest level held at or below the one it must
+        // What must run: the targets (or every branch), each from the highest level held at or below the one it must
         // reach; a branch read back needs nothing upstream of the level.
         var plan = new Dictionary<string, (int Stop, int? From, string? Key)>(StringComparer.OrdinalIgnoreCase);
         void Need(string alias, int stop)
@@ -199,7 +209,10 @@ public sealed class DebugCutter(
             plan[alias] = (stop, back?.Level, back?.Key);
             if (back is null) foreach (var read in Reads(info.Job)) Need(read, infos.GetValueOrDefault(read)?.Transformers ?? 0);
         }
-        if (target is { } t) Need(t.Branch, t.Level);
+        if (targets.Count > 0)
+        {
+            foreach (var (alias, level) in targets) Need(alias, level);
+        }
         else
         {
             // The end of the job: every branch that writes or that nobody reads. One read back from a checkpoint
@@ -217,8 +230,8 @@ public sealed class DebugCutter(
         {
             if (!plan.TryGetValue(alias, out var run)) { dropped.Add(alias); continue; }
             if (run.From is not null) unread.Add(alias);
-            Emit(jobs, alias, infos[alias], run.Stop, run.From, run.Key, target?.Branch.Equals(alias, StringComparison.OrdinalIgnoreCase) == true,
-                write && target is not null, write, watched, result, pieces);
+            Emit(jobs, alias, infos[alias], run.Stop, run.From, run.Key, targets.ContainsKey(alias),
+                write && targets.Count > 0, write, watched, result, pieces);
         }
         return new DebugCut(JobFileWriter.Serialize(result), pieces, dropped, unread);
     }
@@ -266,7 +279,9 @@ public sealed class DebugCutter(
             {
                 // A branch that only feeds another has no output to neutralise and gets none.
                 var output = isTarget || !string.IsNullOrEmpty(job.Output) ? "null:" : null;
-                return producerForm ? piece with { Output = output } : JobCutter.Without(piece, BranchSides.Write) with { Output = output, ProviderOptions = null };
+                // The checkpoint is what a stop keeps: it stays when the writer's other keys go.
+                return producerForm ? piece with { Output = output }
+                    : JobCutter.Without(piece, BranchSides.Write.Where(k => k != "checkpoint")) with { Output = output, ProviderOptions = null };
             }
             if (!isTarget) return piece;
             return last && !string.IsNullOrEmpty(piece.Output) ? piece : piece with { Output = "null:" };
