@@ -1,3 +1,4 @@
+using DtPipe.Cli;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -782,7 +783,7 @@ public sealed class StudioServerTests : IAsyncLifetime
 [Collection("console-serial")]
 public sealed class StudioSampleTests
 {
-    private static DtPipeMcpTools Tools()
+    private static JobAnalysis Tools()
     {
         var services = new ServiceCollection();
         Program.ConfigureServices(services);
@@ -790,7 +791,7 @@ public sealed class StudioSampleTests
         {
             Out = new AnsiConsoleOutput(new StringWriter()), Ansi = AnsiSupport.No, Interactive = InteractionSupport.No,
         }));
-        return services.BuildServiceProvider().GetRequiredService<DtPipeMcpTools>();
+        return services.BuildServiceProvider().GetRequiredService<JobAnalysis>();
     }
 
     private static JsonElement Branch(string json) =>
@@ -847,7 +848,7 @@ public sealed class StudioSampleTests
         Assert.Empty(cards.Errors);
         Assert.Equal(["main_source:source", "main:transform", "main_sink:sink"], cards.Model.Steps.Select(c => $"{c.Alias}:{c.Kind}"));
         Assert.Single(JobYaml.Branches(JobYaml.Parse(cards.Yaml)));
-        var json = await provider.GetRequiredService<DtPipeMcpTools>().SampleAsync(cards.Yaml, rows: 10, shownRows: 10, CancellationToken.None);
+        var json = await provider.GetRequiredService<JobAnalysis>().SampleAsync(cards.Yaml, rows: 10, shownRows: 10, CancellationToken.None);
         Assert.True(JsonDocument.Parse(json).RootElement.GetProperty("success").GetBoolean(), json);
         Assert.Contains("doubled", json);
         Assert.Equal(3, Branch(json).GetProperty("rowsDelivered").GetInt64());

@@ -1,5 +1,4 @@
 using System.CommandLine;
-using DtPipe.Cli.Mcp;
 using DtPipe.Cli.Pipeline;
 using DtPipe.Cli.Split;
 using DtPipe.Cli.Security;
@@ -66,7 +65,7 @@ public sealed class StudioCommand : Command
             var writers = serviceProvider.GetServices<IDataWriterFactory>().ToList();
             var endpoints = new ComponentEndpointRules(readers, writers);
             var engine = new StudioEngine(
-                serviceProvider.GetRequiredService<DtPipeMcpTools>(), serviceProvider.GetRequiredService<JobRunner>(),
+                serviceProvider.GetRequiredService<JobAnalysis>(), serviceProvider.GetRequiredService<JobRunner>(),
                 new DebugCutter(readers, writers, serviceProvider.GetServices<IStreamTransformerFactory>().ToList()));
             var tools = new StudioTools(
                 engine,

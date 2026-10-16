@@ -1,3 +1,4 @@
+using DtPipe.Cli;
 using DtPipe.Cli.Studio;
 using DtPipe.Tests.Unit.Cli;
 using AwesomeAssertions;
@@ -53,7 +54,7 @@ public sealed class ConcurrentRunCollectionTests : IDisposable
 	public async Task A_Real_Linear_Run_Beside_A_Sample_Leaves_The_Sample_Its_Own_Branch_And_Keys()
 	{
 		var sp = Provider();
-		var tools = sp.GetRequiredService<DtPipeMcpTools>();
+		var tools = sp.GetRequiredService<JobAnalysis>();
 		var ct = TestContext.Current.CancellationToken;
 
 		// A real run that commits a checkpoint, and a sample of another linear job, started together.

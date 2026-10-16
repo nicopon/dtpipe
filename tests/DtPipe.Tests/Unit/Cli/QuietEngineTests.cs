@@ -47,13 +47,10 @@ public class QuietEngineTests
         return (services.BuildServiceProvider(), sw);
     }
 
-    private static (Dictionary<string, JobDefinition> Jobs, JobDagDefinition Dag) Parse(DtPipeMcpTools tools, string yaml)
+    private static (Dictionary<string, JobDefinition> Jobs, JobDagDefinition Dag) Parse(JobAnalysis analysis, string yaml)
     {
-        var method = typeof(DtPipeMcpTools).GetMethod("ParseAndValidateYaml", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var result = method.Invoke(tools, new object?[] { yaml, null, null })!;
-        var jobs = (Dictionary<string, JobDefinition>)result.GetType().GetProperty("Jobs")!.GetValue(result)!;
-        var dag = (JobDagDefinition)result.GetType().GetProperty("Dag")!.GetValue(result)!;
-        return (jobs, dag);
+        var parsed = analysis.Parse(yaml);
+        return (parsed.Jobs, parsed.Dag);
     }
 
     private static Dictionary<string, CliJobContext> Contexts(Dictionary<string, JobDefinition> jobs)
@@ -63,8 +60,8 @@ public class QuietEngineTests
     public async Task Quiet_False_Renders_The_Topology()
     {
         var (sp, sw) = BuildEngine();
-        var tools = sp.GetRequiredService<DtPipeMcpTools>();
-        var (jobs, dag) = Parse(tools, Yaml);
+        var analysis = sp.GetRequiredService<JobAnalysis>();
+        var (jobs, dag) = Parse(analysis, Yaml);
         var jobService = sp.GetRequiredService<JobService>();
 
         var exit = await jobService.ExecutePipelineAsync(jobs, dag, Contexts(jobs), new GlobalOptions(), CancellationToken.None);
@@ -78,8 +75,8 @@ public class QuietEngineTests
     public async Task Quiet_True_Writes_Nothing()
     {
         var (sp, sw) = BuildEngine();
-        var tools = sp.GetRequiredService<DtPipeMcpTools>();
-        var (jobs, dag) = Parse(tools, Yaml);
+        var analysis = sp.GetRequiredService<JobAnalysis>();
+        var (jobs, dag) = Parse(analysis, Yaml);
         var jobService = sp.GetRequiredService<JobService>();
 
         var exit = await jobService.ExecutePipelineAsync(jobs, dag, Contexts(jobs), new GlobalOptions { Quiet = true }, CancellationToken.None);

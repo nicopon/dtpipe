@@ -1,3 +1,4 @@
+using DtPipe.Cli;
 using AwesomeAssertions;
 using System.Text.Json;
 using DtPipe.Cli.Mcp;
@@ -38,7 +39,7 @@ public sealed class SampleModeDagTests : IDisposable
 		try { Directory.Delete(_tmp, recursive: true); } catch { /* best effort */ }
 	}
 
-	private static DtPipeMcpTools Tools()
+	private static JobAnalysis Tools()
 	{
 		var services = new ServiceCollection();
 		Program.ConfigureServices(services);
@@ -46,7 +47,7 @@ public sealed class SampleModeDagTests : IDisposable
 		{
 			Out = new AnsiConsoleOutput(new StringWriter()), Ansi = AnsiSupport.No, Interactive = InteractionSupport.No,
 		}));
-		return services.BuildServiceProvider().GetRequiredService<DtPipeMcpTools>();
+		return services.BuildServiceProvider().GetRequiredService<JobAnalysis>();
 	}
 
 	private static async Task<JsonElement> SampleAsync(string yaml, int rows)

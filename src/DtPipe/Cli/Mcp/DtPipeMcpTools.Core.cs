@@ -27,6 +27,7 @@ public partial class DtPipeMcpTools
     private readonly IEnumerable<IDataWriterFactory> _writerFactories;
     private readonly IMcpHelpService _mcpHelpService;
     private readonly IServiceProvider _serviceProvider;
+    private readonly JobAnalysis _analysis;
 
        /// <summary>
         /// Optional agent-scoped options (F1/F2). When set by the agent command, governs the
@@ -58,5 +59,6 @@ public partial class DtPipeMcpTools
         _writerFactories = writerFactories;
         _mcpHelpService = mcpHelpService;
         _serviceProvider = serviceProvider;
+        _analysis = new JobAnalysis(serviceProvider, readerFactories, writerFactories);
     }
 }

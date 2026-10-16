@@ -24,52 +24,10 @@ namespace DtPipe.Cli.Mcp;
 public partial class DtPipeMcpTools
 {
 
-    private record YamlParseResult(
-        Dictionary<string, JobDefinition> Jobs,
-        JobDagDefinition Dag,
-        List<string> Errors);
-
-    /// <param name="bindInput">Alias bindings applied as <c>--bind-input</c> applies them, before validation.</param>
-    /// <param name="bindOutput">Likewise for <c>--bind-output</c>.</param>
-    private YamlParseResult ParseAndValidateYaml(string yamlContent, string? bindInput = null, string? bindOutput = null)
-    {
-        var build = DagTopologyService.FromServices(_serviceProvider).Build(yamlContent);
-
-        // The run's own binding, at the run's own point: a bound job is checked like a complete one.
-        var errors = Pipeline.AliasBindingApplier.Apply(build.Jobs, bindInput, bindOutput);
-        var streamTransformerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamTransformerFactory>>();
-        errors.AddRange(PipelineValidator.Validate(build.Dag, build.Jobs, streamTransformerFactories));
-        errors.AddRange(BranchesWithNothingToRead(build.Dag, build.Jobs, streamTransformerFactories));
-        errors.AddRange(ValidateJobTransformers(build.Jobs));
-        errors.AddRange(ValidateProviderOptionKeys(build.Jobs));
-
-        return new YamlParseResult(build.Jobs, build.Dag, errors);
-    }
-
-    /// <summary>
-    /// A job text turned into what a real run executes, with the checks <c>execute-yaml-job</c> makes before it
-    /// runs: it validates, then the SQL safety policy (destructive and network access refused) judges it. The
-    /// person's confirmation is the caller's, so no approval gate is asked. A job that does not validate or that
-    /// the policy refuses throws, naming why, before anything runs.
-    /// </summary>
-    internal (Dictionary<string, JobDefinition> Jobs, JobDagDefinition Dag) ResolveForRun(string yamlContent, string? bindInput, string? bindOutput)
-    {
-        var parsed = ParseAndValidateYaml(yamlContent, bindInput, bindOutput);
-        if (parsed.Errors.Count > 0) throw new InvalidOperationException(string.Join(" ", parsed.Errors));
-        var safety = CheckJobSafety(parsed, new SqlSafetyOptions());
-        if (!safety.Allowed)
-            throw new InvalidOperationException("The SQL safety policy refuses this job: " + string.Join(" ", safety.Violations)
-                + " Run it with dtpipe --job and the appropriate --allow-* flag.");
-        return (parsed.Jobs, parsed.Dag);
-    }
-
-    /// <summary>
-    /// The SQL safety verdict on a parsed job: the SQL it carries, as the run will read it,
-    /// judged by the policy the sample run uses (see <see cref="Sessions.JobSqlSafety"/>).
-    /// </summary>
-    private SqlSafetyResult CheckJobSafety(YamlParseResult parsed, SqlSafetyOptions options) =>
-        Sessions.JobSqlSafety.Evaluate(
-            parsed.Jobs, _readerFactories, _writerFactories, new DefaultSqlSafetyPolicy(), options);
+    /// <summary>The pointers a refusal gives to the tools of this server that answer it.</summary>
+    private static readonly JobHints McpHints = new(
+        " Call 'list-providers' to see valid transformer types (e.g., 'fake', 'compute', 'filter', 'project').",
+        HelpPointerFor);
 
     /// <summary>
     /// What the job is shaped like, returned beside the verdict.
@@ -82,7 +40,7 @@ public partial class DtPipeMcpTools
     /// in the tool the model actually returns to, is not advice; it is the shape it just made.
     /// </para>
     /// </summary>
-    private static object Shape(YamlParseResult parsed)
+    private static object Shape(ParsedJob parsed)
     {
         var branches = parsed.Dag.Branches
             .Select(b => new
@@ -114,50 +72,6 @@ public partial class DtPipeMcpTools
         };
     }
 
-    /// <summary>
-    /// The rule the engine applies when it resolves a reader: a branch reads from its
-    /// <c>input:</c>, from another branch, from a checkpoint or a contract, or from a stream
-    /// processor claiming it. None of these means the run stops before a row moves.
-    ///
-    /// <para>
-    /// It lives on the YAML-content path only. A branch built from command-line arguments carries
-    /// its input elsewhere — a channel endpoint, a resumed checkpoint — so asking the same question
-    /// of <see cref="PipelineValidator"/>, which both paths share, refused pipelines that run.
-    /// </para>
-    ///
-    /// <para>
-    /// A recorded session invented a job shaped <c>job: / sources: / transformers:</c>, was told it
-    /// was valid, and spent the rest of its turn re-reading a plan that could never run: a model
-    /// with no error to act on has nothing to correct.
-    /// </para>
-    /// </summary>
-    private static IEnumerable<string> BranchesWithNothingToRead(
-        JobDagDefinition dag, Dictionary<string, JobDefinition> jobs, IEnumerable<IStreamTransformerFactory> processorFactories)
-    {
-        var factories = processorFactories.ToList();
-
-        foreach (var branch in dag.Branches)
-        {
-            if (!jobs.TryGetValue(branch.Alias, out var job)) continue;
-            if (!string.IsNullOrWhiteSpace(job.Input)) continue;
-            if (factories.Any(f => f.IsApplicable(job))) continue;
-            // A branch streaming from another reads that branch's channel, with or without a
-            // processor: 'from: x' plus an 'output:' is the plain write half of a fan-out, and the
-            // engine runs it. Demanding a query here refused the very shape a job needs to build
-            // two related tables — one branch produces, one writes, a third joins.
-            if (!string.IsNullOrWhiteSpace(job.From)) continue;
-            // A checkpoint or a contract is a reader the engine resolves by capability, with no
-            // 'input:' to name it.
-            if (!string.IsNullOrWhiteSpace(job.FromCheckpoint) || !string.IsNullOrWhiteSpace(job.FromContract)) continue;
-
-            yield return $"Branch '{branch.Alias}' has nothing to read: it has no 'input:', no 'from:' and "
-                       + "no stream processor. Give it an 'input:', stream from another branch with "
-                       + "'from:', or — when it combines several — a query under "
-                       + "'provider-options -> sql -> query'.";
-        }
-    }
-
-
     [McpServerTool(Name = "validate-yaml-job")]
     [System.ComponentModel.Description("Validate a pipeline configuration specified directly as YAML. Checks for syntax errors and schema validation issues without executing.")]
     public string ValidateYamlJob(
@@ -168,7 +82,7 @@ public partial class DtPipeMcpTools
 
         try
         {
-            var parsed = ParseAndValidateYaml(yamlContent);
+            var parsed = _analysis.Parse(yamlContent, hints: McpHints);
 
             if (parsed.Errors.Count > 0)
             {
@@ -226,7 +140,7 @@ public partial class DtPipeMcpTools
 
          try
           {
-            var parsed = ParseAndValidateYaml(yamlContent);
+            var parsed = _analysis.Parse(yamlContent, hints: McpHints);
 
             if (parsed.Errors.Count > 0)
                 {
@@ -246,7 +160,7 @@ public partial class DtPipeMcpTools
              bool effectiveAllowDestructive = agentOpts?.AllowDestructive ?? allowDestructive;
              bool effectiveAllowNetwork = agentOpts?.AllowNetwork ?? allowNetwork;
 
-              var safety = CheckJobSafety(parsed, new SqlSafetyOptions
+              var safety = _analysis.CheckSafety(parsed, new SqlSafetyOptions
                     {
                   AllowDestructive = effectiveAllowDestructive,
                   AllowNetwork = effectiveAllowNetwork
@@ -303,7 +217,7 @@ public partial class DtPipeMcpTools
                     // pipeline would actually do — which is the loop this cycle exists to close.
                 if (!consentedApply)
                         {
-                       var sample = await RunSampleAsync(parsed, rows: 10, shownRows: 10, ct,
+                       var sample = await _analysis.RunSampleAsync(parsed, rows: 10, shownRows: 10, ct,
                            nextStep: "NOTHING WAS WRITTEN. This ran the pipeline over a sample with the writer "
                                    + "neutralised, so you can see what it would do. The target file or table has "
                                    + "NOT been created or modified. Call execute-yaml-job again with apply=true to "
@@ -433,72 +347,6 @@ public partial class DtPipeMcpTools
 
 
     /// <summary>
-    /// Checks every key under <c>provider-options</c> against the options it would bind to.
-    ///
-    /// <para>
-    /// This is the one class of mistake an agent cannot otherwise learn from. A key that binds to
-    /// nothing is a warning on the engine's stderr, which never reaches a tool result — so the run
-    /// succeeds, quietly using the default, and the trace of the session shows nothing wrong. The
-    /// validator is where a caller comes to be told what is wrong before running, so it is where
-    /// this belongs.
-    /// </para>
-    ///
-    /// <para>
-    /// A plain block (<c>csv:</c>) may legitimately carry keys for only one side of a reader/writer
-    /// pair, so it is checked against both; a suffixed block (<c>csv-writer:</c>) is checked against
-    /// that side alone.
-    /// </para>
-    /// </summary>
-    private List<string> ValidateProviderOptionKeys(Dictionary<string, JobDefinition> jobs)
-    {
-        var errors = new List<string>();
-        // The factories this instance was built with, not the container's: they are the same set,
-        // and asking the container for a collection nobody registered returns an empty one rather
-        // than failing, which would silently turn every check below into a no-op.
-        var factories = _readerFactories.Cast<DtPipe.Core.Abstractions.IDataFactory>()
-            .Concat(_writerFactories).ToList();
-
-        foreach (var (alias, job) in jobs)
-        {
-            if (job.ProviderOptions is null) continue;
-
-            foreach (var (block, options) in job.ProviderOptions)
-            {
-                if (options is null || options.Count == 0) continue;
-
-                var (component, writerOnly, readerOnly) = SplitBlock(block);
-                var targets = factories
-                    .Where(f => f.ComponentName.Equals(component, StringComparison.OrdinalIgnoreCase))
-                    .Where(f => !(writerOnly && f is not DtPipe.Core.Abstractions.IDataWriterFactory)
-                             && !(readerOnly && f is DtPipe.Core.Abstractions.IDataWriterFactory))
-                    .ToList();
-
-                // Silence when the block matches no registered factory. A container assembled for
-                // one purpose does not register every provider, and absence of a factory is not
-                // evidence of a wrong key — only a factory we found tells us what the valid keys are.
-                if (targets.Count == 0) continue;
-
-                var known = targets
-                    .SelectMany(t => t.OptionsType.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
-                    .Where(p => p.CanWrite)
-                    .Select(p => p.Name.Replace("-", string.Empty).Replace("_", string.Empty).ToLowerInvariant())
-                    .ToHashSet(StringComparer.Ordinal);
-
-                foreach (var key in options.Keys)
-                {
-                    if (known.Contains(key.Replace("-", string.Empty).Replace("_", string.Empty).ToLowerInvariant()))
-                        continue;
-
-                    errors.Add($"Branch '{alias}', provider-options '{block}': "
-                             + Pipeline.OptionBinder.DescribeUnknownKey(targets[0].OptionsType, key));
-                }
-            }
-        }
-
-        return errors;
-    }
-
-    /// <summary>
     /// The tool that answers the question a refusal raises, named where naming it is true.
     ///
     /// <para>
@@ -511,55 +359,5 @@ public partial class DtPipeMcpTools
         transformerType.Equals("fake", StringComparison.OrdinalIgnoreCase)
             ? " Call 'get-anonymization-help' for every dataset and method at once."
             : $" Call 'get-transformer-help' with '{transformerType}' for its options and examples.";
-
-    /// <summary>A provider-options block name split into its component and the side it pins, if any.</summary>
-    private static (string Component, bool WriterOnly, bool ReaderOnly) SplitBlock(string block) =>
-        block.EndsWith("-writer", StringComparison.OrdinalIgnoreCase) ? (block[..^7], true, false)
-        : block.EndsWith("-reader", StringComparison.OrdinalIgnoreCase) ? (block[..^7], false, true)
-        : (block, false, false);
-
-    /// <summary>
-    /// A transformer is checked by building it, which is what the engine does with the same
-    /// factory and the same <see cref="YamlTransformerBuilder"/> — construction only, no reader,
-    /// no connection, no row.
-    ///
-    /// <para>
-    /// Checking the type name alone made the validator weaker than the engine on everything a
-    /// transformer rejects at construction: a faker method that does not exist, a rename that is
-    /// not 'Old:New', an options block that produces nothing. A recorded session was told a job
-    /// was valid and delivered it; the run died on 'Unknown faker method' before a row moved.
-    /// </para>
-    /// </summary>
-    private List<string> ValidateJobTransformers(Dictionary<string, JobDefinition> jobs)
-    {
-        var errors = new List<string>();
-        var transformerFactories = _serviceProvider.GetRequiredService<IEnumerable<IDataTransformerFactory>>().ToList();
-
-        foreach (var (alias, job) in jobs)
-        {
-            foreach (var t in job.Transformers ?? new List<Core.Pipelines.TransformerConfig>())
-            {
-                if (string.IsNullOrEmpty(t.Type)) continue;
-
-                var factory = transformerFactories.FirstOrDefault(f => f.ComponentName.Equals(t.Type, StringComparison.OrdinalIgnoreCase));
-                if (factory is null)
-                {
-                    errors.Add($"Branch '{alias}': Unknown transformer type '{t.Type}'. Call 'list-providers' to see valid transformer types (e.g., 'fake', 'compute', 'filter', 'project'). Note: Joins across data sources are configured using the 'sql' provider under 'provider-options', not as a transformer type.");
-                    continue;
-                }
-
-                try
-                {
-                    (YamlTransformerBuilder.Build(factory, t) as IDisposable)?.Dispose();
-                }
-                catch (Exception ex)
-                {
-                    errors.Add($"Branch '{alias}', transformer '{t.Type}': {ToolError.Describe(ex)}{HelpPointerFor(t.Type)}");
-                }
-            }
-        }
-
-        return errors;
-    }
 
 }

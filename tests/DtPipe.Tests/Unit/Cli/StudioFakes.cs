@@ -277,7 +277,7 @@ internal static class StudioEngines
 {
     /// <summary>The engine <c>dtpipe studio</c> builds, over the services of a test.</summary>
     public static StudioEngine Real(IServiceProvider services) => new(
-        services.GetRequiredService<DtPipeMcpTools>(), services.GetRequiredService<JobRunner>(),
+        services.GetRequiredService<JobAnalysis>(), services.GetRequiredService<JobRunner>(),
         new DebugCutter(services.GetServices<IStreamReaderFactory>().ToList(), services.GetServices<IDataWriterFactory>().ToList(),
             services.GetServices<IStreamTransformerFactory>().ToList()));
 }

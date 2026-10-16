@@ -171,6 +171,11 @@ singleton the engine and the observer publish to; it forwards to the collection 
 armed, branches included, and drops everything when none is armed. Never read it from a caller, and
 never arm it from an `async` method that returns before the run ends: the value is gone with the frame.
 `dtpipe mcp` serves until it is stopped, so a signal is its only end and it exits 130.
+
+`JobAnalysis` (`Cli/`) is the matching path for a job text: parse, validate, judge the SQL it carries
+(`JobSqlSafety`), sample, resolve for a run. MCP and the studio call it; `DtPipeMcpTools` keeps only the tool
+surface and the wording written for a model. A refusal that names a tool of this server goes through `JobHints`, so
+a caller that has none gets the refusal without the pointer. Never copy a validator into a caller.
 `[CI: ConcurrentRunCollectionTests, SampleReportCollectorTests, SampleModeDagTests, McpCommandTests]`
 
 ### The session trace
@@ -191,8 +196,8 @@ publishing it. Look first at what dtpipe tells the model about itself.
 
 `dtpipe studio [folder]` (`StudioCommand`, `Cli/Studio/`) serves a local page over a folder's YAML
 jobs and runs them through `IStudioEngine` (`StudioTools.Engine`, never null: a test double implements all of
-it). `StudioEngine` samples through `DtPipeMcpTools.SampleAsync`, the `dry-run` tool's own path: never a
-second sample path, and runs through `DtPipeMcpTools.ResolveForRun` and `JobRunner`. `StudioServer` runs
+it). `StudioEngine` samples and validates through `JobAnalysis`, the path the `dry-run` tool shares: never a
+second sample path, and runs through `JobAnalysis.ResolveForRun` and `JobRunner`. `StudioServer` runs
 one engine action at a time (409 otherwise), as the debug state and the quit require. Kestrel is referenced
 for this server alone.
 
