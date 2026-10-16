@@ -1,0 +1,12 @@
+a:
+  input: generate:20
+b:
+  from: a
+  provider-options:
+    sql:
+      query: SELECT * FROM a WHERE GenerateIndex < 7
+  transformers:
+  - type: filter
+    mappings:
+      row.GenerateIndex > 1: ''
+  output: "null:"

@@ -1,3 +1,4 @@
+// @ts-check
 // What every module of the studio's page shares: the session's token, the API, and building nodes.
 // Every value the page shows comes from a job or a source, so it is set as text, never as HTML: a
 // script slipped into a sampled value would run dtpipe with the person's own access.
@@ -60,13 +61,13 @@ export async function api(path, body, method) {
   const text = await response.text();
   const data = text ? JSON.parse(text) : {};
   if (!response.ok) {
-    const error = new Error(data.error || `${response.status} ${response.statusText}`);
-    error.status = response.status;
-    error.data = data;
-    throw error;
+    throw Object.assign(new Error(data.error || `${response.status} ${response.statusText}`), { status: response.status, data });
   }
   return data;
 }
+
+/** The element an event was aimed at: the page's listeners all sit on elements. @param {Event} e @returns {any} */
+export const targetOf = (e) => /** @type {any} */ (e.target);
 
 export function status(text, kind = "") {
   $("status").textContent = text;

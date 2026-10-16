@@ -1,0 +1,14 @@
+a:
+  input: generate:20
+b:
+  from: a
+  transformers:
+  - type: filter
+    mappings:
+      row.GenerateIndex % 2 == 0: ''
+  - type: compute
+    mappings:
+      x:row.GenerateIndex * 10: ''
+c:
+  from: b
+  output: "null:"

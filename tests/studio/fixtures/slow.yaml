@@ -1,0 +1,9 @@
+a:
+  input: generate:2000000000
+b:
+  from: a
+  transformers:
+  - type: filter
+    mappings:
+      row.GenerateIndex % 2 == 0: ''
+  output: "null:"

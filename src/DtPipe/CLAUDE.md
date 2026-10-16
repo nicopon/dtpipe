@@ -331,9 +331,22 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   holds none; a job not saved yet keeps it under
   `drafts/<id>`, adopted at its first save and purged when the studio starts. The cut is never saved
   or published. `[CI: StudioDebugTests]`
+- **One state, one drawing, one counter per request; nothing the browser keeps is true.** The page
+  keeps what it knows in `state` (`wwwroot/state.js`), one part per screen, and only the module of a
+  screen writes its part. A change names the zones it touches (`invalidate`) and `render.js` draws
+  them once, in a fixed order; a zone holding what the person is doing (the inspector's focused field,
+  the drawer's scroll) is invalidated by what makes it untrue, never by its own events. Each kind of
+  request has its own `sequence()`, so a stale answer of one never drops the answer of another, and an
+  answer about a job is dropped once another job is open. The page keeps nothing in `localStorage`:
+  how it was left (tab, rows, selected card, pane sizes) goes through `PUT /api/view` to
+  `.dtpipe/studio/view.json`, whose values the server checks and rewrites, and which is read only as a
+  preference. A new script needs its route in `StudioServer.Assets`.
+  `[CI: StudioServerTests (every module is served, every import resolves; the view's bounds)]`
+  `[local: tests/studio/page_smoke.mjs - Node 22+, Chrome and a built dtpipe; types are checked by the
+  editor alone (// @ts-check), no tool runs them]`
 - Quit from the page exits 0, Ctrl+C 130. A quit is refused while a run goes on; Ctrl+C cancels
   the run and the studio then exits.
 
 `[CI: StudioServerTests (no script writes HTML or an inline style), StudioSampleTests,
-StudioCoordinatorTests, StudioBrickTests, StudioPublishTests, StudioRunTests, StudioDebugTests, DesignServiceTests, LocalEndpointCardTests]` `[unchecked: the page's behaviour - no test drives a
+StudioCoordinatorTests, StudioBrickTests, StudioPublishTests, StudioRunTests, StudioDebugTests, DesignServiceTests, LocalEndpointCardTests]` `[unchecked: the page's behaviour beyond page_smoke.mjs - no CI test drives a
 browser]`

@@ -210,15 +210,33 @@ public sealed class StudioServerTests : IAsyncLifetime
     [InlineData("/", "text/html")]
     [InlineData("/studio.js", "text/javascript")]
     [InlineData("/studio.css", "text/css")]
-    [InlineData("/dom.js", "text/javascript")]
-    [InlineData("/designer.js", "text/javascript")]
-    [InlineData("/coordinator.js", "text/javascript")]
     public async Task The_page_is_served_from_the_binary_without_a_token(string path, string type)
     {
         using var response = await _http.SendAsync(Request(HttpMethod.Get, path, token: null));
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.StartsWith(type, response.Content.Headers.ContentType!.ToString());
+    }
+
+    /// <summary>
+    /// A module the server has no route for answers 404 and the page stays blank, so every script embedded in the
+    /// binary is served, and every module it imports is one of them.
+    /// </summary>
+    [Fact]
+    public async Task Every_module_of_the_page_is_served_and_every_import_resolves()
+    {
+        var assembly = typeof(StudioServer).Assembly;
+        var modules = assembly.GetManifestResourceNames().Where(n => n.StartsWith("studio/") && n.EndsWith(".js")).ToList();
+        Assert.NotEmpty(modules);
+        foreach (var name in modules)
+        {
+            using var response = await _http.SendAsync(Request(HttpMethod.Get, "/" + name["studio/".Length..], token: null));
+            Assert.True(response.StatusCode == HttpStatusCode.OK, $"{name} is embedded but not served");
+
+            var code = await response.Content.ReadAsStringAsync();
+            foreach (System.Text.RegularExpressions.Match import in System.Text.RegularExpressions.Regex.Matches(code, "from \"\\./([^\"]+)\""))
+                Assert.Contains($"studio/{import.Groups[1].Value}", modules);
+        }
     }
 
     /// <summary>The policy forbids inline script and style: a page that used either would break, or tempt a looser policy.</summary>
@@ -624,6 +642,65 @@ public sealed class StudioServerTests : IAsyncLifetime
         release.SetResult();
         Assert.Equal(HttpStatusCode.OK, (await sample).Status);
         Assert.Equal("armed", insideRun);
+    }
+
+    [Fact]
+    public async Task How_the_page_was_left_is_kept_beside_the_folder_and_read_back_for_its_job()
+    {
+        var (put, _) = await SendAsync(Request(HttpMethod.Put, "/api/view", body: new
+        {
+            sizes = new { pal = 200, drawer = 300 }, path = "a.yaml", job = new { tab = "preview", rows = 50, card = "b" },
+        }));
+        var (_, a) = await SendAsync(Request(HttpMethod.Get, "/api/view?path=a.yaml"));
+        var (_, other) = await SendAsync(Request(HttpMethod.Get, "/api/view?path=sub/b.yml"));
+        var (_, none) = await SendAsync(Request(HttpMethod.Get, "/api/view"));
+
+        Assert.Equal(HttpStatusCode.NoContent, put);
+        Assert.Equal(200, a.GetProperty("sizes").GetProperty("pal").GetInt32());
+        Assert.Equal("preview", a.GetProperty("job").GetProperty("tab").GetString());
+        Assert.Equal(50, a.GetProperty("job").GetProperty("rows").GetInt32());
+        Assert.Equal("b", a.GetProperty("job").GetProperty("card").GetString());
+        Assert.Equal(JsonValueKind.Null, other.GetProperty("job").ValueKind);
+        Assert.Equal(300, none.GetProperty("sizes").GetProperty("drawer").GetInt32());
+        Assert.True(File.Exists(Path.Combine(_dir, ".dtpipe", "studio", "view.json")));
+    }
+
+    [Theory]
+    [InlineData("{\"sizes\":{\"nowhere\":10}}")]
+    [InlineData("{\"sizes\":{\"pal\":99999}}")]
+    [InlineData("{\"path\":\"a.yaml\",\"job\":{\"tab\":\"run\"}}")]
+    [InlineData("{\"path\":\"a.yaml\",\"job\":{\"rows\":0}}")]
+    public async Task A_preference_out_of_range_is_refused_and_nothing_is_written(string body)
+    {
+        var request = Request(HttpMethod.Put, "/api/view");
+        request.Content = new StringContent(body, Encoding.UTF8, "application/json");
+
+        var (status, _) = await SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, status);
+        Assert.False(File.Exists(Path.Combine(_dir, ".dtpipe", "studio", "view.json")));
+    }
+
+    [Fact]
+    public async Task The_preferences_of_a_job_outside_the_folder_are_refused()
+    {
+        var (status, _) = await SendAsync(Request(HttpMethod.Put, "/api/view", body: new { path = "../x.yaml", job = new { tab = "yaml" } }));
+
+        Assert.NotEqual(HttpStatusCode.NoContent, status);
+        Assert.False(File.Exists(Path.Combine(_dir, ".dtpipe", "studio", "view.json")));
+    }
+
+    [Fact]
+    public async Task The_preferences_keep_the_last_hundred_jobs_written()
+    {
+        for (var i = 0; i < 105; i++)
+            await SendAsync(Request(HttpMethod.Put, "/api/view", body: new { path = $"job{i}.yaml", job = new { tab = "yaml" } }));
+
+        var kept = JsonDocument.Parse(File.ReadAllText(Path.Combine(_dir, ".dtpipe", "studio", "view.json"))).RootElement.GetProperty("jobs");
+
+        Assert.Equal(100, kept.EnumerateObject().Count());
+        Assert.False(kept.TryGetProperty("job0.yaml", out _));
+        Assert.True(kept.TryGetProperty("job104.yaml", out _));
     }
 
     [Fact]

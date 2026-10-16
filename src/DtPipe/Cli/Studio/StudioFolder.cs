@@ -171,7 +171,7 @@ public sealed record StudioPublication(string Coordinator, string Id, string? Co
 /// What the studio keeps for a job beside the folder's files, never in them and never in git: where
 /// its cards were drawn (<c>&lt;job&gt;-layout.json</c>), what its variables are launched with
 /// (<c>&lt;job&gt;-launch.json</c>: a keyring alias or a typed text, never a keyring value) and where it
-/// was published last (<c>&lt;job&gt;-publish.json</c>), under
+/// was published last (<c>&lt;job&gt;-publish.json</c>), and how the page was left (<c>view.json</c>), under
 /// <c>.dtpipe/studio/</c>, whose <c>.dtpipe</c> ignores itself. No directory on the way may be a link:
 /// a clone could carry a <c>.dtpipe</c> that points anywhere. A job is a path the folder confined.
 /// </summary>
@@ -306,6 +306,51 @@ public sealed class StudioLocalFiles(StudioFolder folder)
         catch (Exception ex) when (ex is StudioRefusal or IOException or UnauthorizedAccessException) { }
     }
 
+    private const int MaxViewJobs = 100;
+    private readonly object _viewLock = new();
+
+    private string ViewPath => Path.GetFullPath(Path.Combine(DtpipeDirectory, "studio", "view.json"));
+
+    /// <summary>
+    /// The page's own preferences, kept in one file for the folder (<c>.dtpipe/studio/view.json</c>): the sizes of its
+    /// panes, and for each job the drawer's tab, the rows asked and the card selected. Nothing in it is true of a
+    /// job: the page draws the same without it.
+    /// </summary>
+    public JsonObject ReadView()
+    {
+        lock (_viewLock) return ReadViewLocked();
+    }
+
+    private JsonObject ReadViewLocked()
+    {
+        RefuseLinks(ViewPath);
+        if (!File.Exists(ViewPath) || new FileInfo(ViewPath).Length > MaxBytes) return [];
+        try { return JsonNode.Parse(File.ReadAllText(ViewPath)) as JsonObject ?? []; }
+        catch (JsonException) { return []; }
+    }
+
+    /// <summary>
+    /// Replaces the sizes, and a job's preferences, when given. The jobs kept are the last <see cref="MaxViewJobs"/>
+    /// written, so the file does not grow with every job ever opened.
+    /// </summary>
+    public void UpdateView(JsonObject? sizes, string? job, JsonObject? jobView)
+    {
+        lock (_viewLock)
+        {
+            var view = ReadViewLocked();
+            if (sizes is not null) view["sizes"] = sizes;
+            if (job is not null && jobView is not null)
+            {
+                var jobs = view["jobs"] as JsonObject ?? [];
+                jobs.Remove(job);
+                jobs[job] = jobView;
+                while (jobs.Count > MaxViewJobs) jobs.Remove(jobs.First().Key);
+                view["jobs"] = jobs;
+            }
+            WriteTo(ViewPath, view);
+        }
+    }
+
     private JsonNode? Read(string job, string kind)
     {
         var path = PathOf(job, kind);
@@ -315,9 +360,10 @@ public sealed class StudioLocalFiles(StudioFolder folder)
         catch (JsonException) { return null; }
     }
 
-    private void Write(string job, string kind, JsonNode value)
+    private void Write(string job, string kind, JsonNode value) => WriteTo(PathOf(job, kind), value);
+
+    private void WriteTo(string path, JsonNode value)
     {
-        var path = PathOf(job, kind);
         RefuseLinks(path);
         SessionStore.EnsureIgnored(DtpipeDirectory);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);

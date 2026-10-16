@@ -1,30 +1,33 @@
+// @ts-check
 // The coordinator the command line named, if any: who is signed in, and signing in through the
 // browser. The page never sees a token: it asks the studio, which keeps them, and reads a status.
 
 import { $, api, el, fill, status } from "./dom.js";
+import { invalidate, onZone } from "./render.js";
+import { state } from "./state.js";
 
 const POLL_MS = 2000;
 const POLL_FOR_MS = 10 * 60 * 1000;
 
-let link = null;     // { url, state, reason, me, studioVersion, contract }, or null with no coordinator
 let polling = null;
 const listeners = [];
-
-export const coordinator = () => link;
 
 // Called with the status each time the person signs in or out.
 export function onCoordinator(listener) { listeners.push(listener); }
 
 export async function refreshCoordinator() {
-  const before = link?.state;
+  const before = state.coordinator?.state;
   const next = await api("/api/coordinator");
-  link = next.url ? next : null;
-  render();
-  if (link && link.state !== before) for (const listener of listeners) listener(link);
-  return link;
+  state.coordinator = next.url ? next : null;
+  invalidate("coordinator");
+  if (state.coordinator && state.coordinator.state !== before) for (const listener of listeners) listener(state.coordinator);
+  return state.coordinator;
 }
 
+onZone("coordinator", render);
+
 function render() {
+  const link = state.coordinator;
   const host = $("coordinator");
   if (!link) { host.hidden = true; return; }
   host.hidden = false;

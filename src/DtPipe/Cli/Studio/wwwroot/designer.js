@@ -1,9 +1,13 @@
+// @ts-check
 // The studio's designer: a job of the folder as cards, one per source, step and sink. The server
 // composes the job (POST /api/design/compose) on every change and takes a job apart into cards
 // (POST /api/design/decompose); this page never writes YAML itself. Built with DOM calls only: the
 // page's policy forbids inline script and style, and every value is set as text.
 
-import { $, api, el, fill, status, svg } from "./dom.js";
+import { $, api, el, fill, status, svg, targetOf } from "./dom.js";
+import { KEPT_TABS } from "./prefs.js";
+import { flush, invalidate, onZone } from "./render.js";
+import { sequence, state } from "./state.js";
 
 const CARD_W = 210;
 const CARD_H = 114;
@@ -29,68 +33,77 @@ const KIND_LABEL = { source: "source", sink: "sink", transform: "transform", sql
 
 // The panels' sizes, kept across visits.
 const SIZE_LIMITS = { pal: [160, 420], insp: [240, 640], drawer: [100, 640] };
-const SIZE_KEY = "dtpipe.studio.sizes";
-const sizes = { pal: 220, insp: 330, drawer: 260 };
-try { Object.assign(sizes, JSON.parse(localStorage.getItem(SIZE_KEY) || "{}")); } catch { /* storage unavailable: defaults */ }
 
+const cards = state.cards;
 let host = null;
-let components = { readers: [], writers: [] };
-// The coordinator's catalog read last (its nodes and bricks) and this studio's version; empty with none.
-let catalog = { nodes: [], bricks: [], studioVersion: "" };
 let hooks = {};
-let model = null;          // { title, description, directives, steps, layout }
-let result = null;         // the last compose answer
-let selected = null;       // { alias } (+ t, a transformer's index, while zoomed) or { edge: { from, to, port } }
-let zoom = null;           // the alias of the Transform step shown as a chain of its transformers
-let dirty = false;
-let drawer = "yaml";       // yaml | problems | edit | preview, or a tab the host adds
-let composeSeq = 0;
+const composing = sequence();
+const opening = sequence();
+
+onZone("palette", renderPalette);
+onZone("canvas", renderCanvas);
+onZone("inspector", renderInspector);
+onZone("drawer", renderDrawer);
+onZone("bar", renderToolbarState);
 let composeTimer = null;
 
-/** Builds the designer in `root`. `options.onChange` hears every edit; `options.extraTabs` adds drawer tabs. */
-export function mountDesigner(root, list, options = {}) {
+/**
+ * Builds the designer in `root`. The host gives what only it knows: `toolbar` (the bar's buttons), `onComposed`,
+ * `cardTools`, `cardBadge` and `cardTool` (what a card shows and does), `previewView` (the Preview tab) and `extraTabs`.
+ */
+export function mountDesigner(root, options = {}) {
   host = root;
-  components = list;
   hooks = options;
   document.addEventListener("keydown", onKey);
 }
 
-/** Opens a job: its text taken apart into cards by the server, with the layout it was saved with. A job not on disk opens as unsaved changes. */
-export async function openJob(yaml, layout, unsaved = false) {
+/**
+ * Opens a job: its text taken apart into cards by the server, with the layout it was saved with. A job not on disk opens
+ * as unsaved changes. `kept` is how the page was left on it: the tab and the card, where they are still there.
+ * @param {string} yaml @param {any} layout @param {boolean} [unsaved] @param {{ tab?: string, card?: string } | null} [kept]
+ */
+export async function openJob(yaml, layout, unsaved = false, kept = null) {
+  const ticket = opening.begin();
   const answer = await api("/api/design/decompose", { yaml, layout: layout || null });
-  model = normalize(answer.model);
-  model.layout = Object.fromEntries(Object.entries(model.layout).filter(([a]) => stepOf(a)));
-  if (model.steps.some((s) => !model.layout[s.alias])) autoLayout(false);
-  result = answer;
-  selected = null; zoom = null; dirty = false;
-  drawer = result.errors?.length ? "problems" : "yaml";
+  // Another job was asked for meanwhile: its cards are the ones to show.
+  if (opening.stale(ticket)) return false;
+  cards.model = normalize(answer.model);
+  cards.model.layout = Object.fromEntries(Object.entries(cards.model.layout).filter(([a]) => stepOf(a)));
+  if (cards.model.steps.some((s) => !cards.model.layout[s.alias])) autoLayout(false);
+  cards.result = answer;
+  cards.selected = kept?.card && stepOf(kept.card) ? { alias: kept.card } : null;
+  cards.zoom = null; cards.dirty = false;
+  // A job that does not compose opens on its problems, whatever was kept.
+  state.view.drawer = cards.result.errors?.length ? "problems" : kept?.tab && KEPT_TABS.includes(kept.tab) ? kept.tab : "yaml";
   renderShell();
   await compose();
-  dirty = unsaved;
+  if (!opening.stale(ticket)) cards.dirty = unsaved;
+  return !opening.stale(ticket);
 }
 
 /** Starts from no card at all. */
 export async function openBlank(title) {
-  model = normalize({ title, steps: [], layout: {} });
-  result = null; selected = null; zoom = null; dirty = true; drawer = "yaml";
+  opening.cancel();
+  cards.model = normalize({ title, steps: [], layout: {} });
+  cards.result = null; cards.selected = null; cards.zoom = null; cards.dirty = true; state.view.drawer = "yaml";
   renderShell();
   await compose();
 }
 
 /** The coordinator's nodes and bricks: the palette offers them, the inspector describes them. */
 export function setCatalog(next) {
-  catalog = { nodes: next?.nodes || [], bricks: next?.bricks || [], studioVersion: next?.studioVersion || "" };
-  renderPalette();
-  if (model) { renderCanvas(); renderInspector(); }
+  state.catalog = { nodes: next?.nodes || [], bricks: next?.bricks || [], studioVersion: next?.studioVersion || "" };
+  invalidate("palette");
+  if (cards.model) invalidate("canvas", "inspector");
 }
 
-const brickOf = (key) => catalog.bricks.find((b) => b.key === key);
+const brickOf = (key) => state.catalog.bricks.find((b) => b.key === key);
 
 /** Each brick card, by the branch of the composed job that runs it: a sample takes its rows from its node. */
 export function brickBranches() {
-  if (!model) return [];
-  return model.steps.filter((s) => s.brick).map((s) => ({
-    branch: result?.steps?.find((i) => i.alias === s.alias)?.branch || s.alias,
+  if (!cards.model) return [];
+  return cards.model.steps.filter((s) => s.brick).map((s) => ({
+    branch: cards.result?.steps?.find((i) => i.alias === s.alias)?.branch || s.alias,
     key: s.brick,
   }));
 }
@@ -100,33 +113,28 @@ export function brickBranches() {
  * is watched at its read, a step at the end of its branch; a sink holds nothing the branch does not already show.
  */
 export function cardWatch(alias) {
-  const step = model && stepOf(alias);
+  const step = cards.model && stepOf(alias);
   if (!step || step.kind === "sink") return null;
-  return { branch: result?.steps?.find((i) => i.alias === alias)?.branch || alias, at: step.kind === "source" ? "read" : "end" };
+  return { branch: cards.result?.steps?.find((i) => i.alias === alias)?.branch || alias, at: step.kind === "source" ? "read" : "end" };
 }
 
 /** The branch of the composed job that runs a card, whatever its kind: the page reads a sink's failure there. */
-export const cardBranch = (alias) => (model && stepOf(alias) ? result?.steps?.find((i) => i.alias === alias)?.branch || alias : null);
+export const cardBranch = (alias) => (cards.model && stepOf(alias) ? cards.result?.steps?.find((i) => i.alias === alias)?.branch || alias : null);
 
 /** Selects a card and shows its rows in the Preview panel. */
 export function focusCard(alias) {
-  if (!model || !stepOf(alias)) return;
-  selected = { alias };
-  drawer = "preview";
-  renderCanvas();
-  renderInspector();
-  renderDrawer();
+  if (!cards.model || !stepOf(alias)) return;
+  cards.selected = { alias };
+  state.view.drawer = "preview";
+  invalidate("canvas", "inspector", "drawer");
 }
 
-/** The card the Preview panel is showing, or null when the panel is closed. */
-export const previewCard = () => (drawer === "preview" ? selected?.alias ?? null : null);
+/** The sizes the panes were left at; a value out of range is clamped when they are applied. @param {Record<string, number>} sizes */
+export function restoreSizes(sizes) {
+  for (const name of Object.keys(SIZE_LIMITS)) if (Number.isFinite(sizes[name])) state.view.sizes[name] = sizes[name];
+}
 
-export const refreshCanvas = () => { if (model) renderCanvas(); };
-
-export const isDirty = () => dirty;
-export const composed = () => result;
-export const cards = () => model;
-export function markSaved() { dirty = false; renderToolbarState(); }
+export function markSaved() { cards.dirty = false; invalidate("bar"); }
 
 function normalize(m) {
   return {
@@ -145,33 +153,30 @@ function scheduleCompose() {
 
 export async function compose() {
   clearTimeout(composeTimer);
-  const seq = ++composeSeq;
+  const seq = composing.begin();
   try {
-    const answer = await api("/api/design/compose", model);
-    if (seq !== composeSeq) return result;
-    result = answer;
+    const answer = await api("/api/design/compose", cards.model);
+    if (composing.stale(seq)) return cards.result;
+    cards.result = answer;
   } catch (e) {
-    if (seq === composeSeq) result = { yaml: "", steps: [], errors: [e.message], warnings: [] };
+    if (!composing.stale(seq)) cards.result = { yaml: "", steps: [], errors: [e.message], warnings: [] };
   }
-  renderCanvas();
-  renderDrawer();
-  renderToolbarState();
-  hooks.onComposed?.(result);
-  return result;
+  invalidate("canvas", "drawer", "bar");
+  hooks.onComposed?.(cards.result);
+  return cards.result;
 }
 
 function touch({ recompose = true, inspector = false, canvas = true } = {}) {
-  dirty = true;
-  if (canvas) renderCanvas();
-  if (inspector) renderInspector();
-  renderToolbarState();
+  cards.dirty = true;
+  if (canvas) invalidate("canvas");
+  if (inspector) invalidate("inspector");
+  invalidate("bar");
   if (recompose) scheduleCompose();
-  hooks.onChange?.();
 }
 
 // ---------------------------------------------------------------- model edits
 
-const stepOf = (alias) => model.steps.find((s) => s.alias === alias);
+const stepOf = (alias) => cards.model.steps.find((s) => s.alias === alias);
 const isEndpoint = (step) => step.kind === "source" || step.kind === "sink";
 
 function freshAlias(base) {
@@ -191,18 +196,18 @@ function addStep(kind, component, x, y, brick) {
   if (kind === "sink" && !brick) step.yaml = `output: "${component}:"\n`;
   if (kind === "transform") step.transformers = [];
   if (kind === "sql") step.query = "SELECT *\nFROM input";
-  model.steps.push(step);
-  model.layout[alias] = { x: Math.max(10, Math.round(x)), y: Math.max(10, Math.round(y)) };
-  selected = { alias };
+  cards.model.steps.push(step);
+  cards.model.layout[alias] = { x: Math.max(10, Math.round(x)), y: Math.max(10, Math.round(y)) };
+  cards.selected = { alias };
   touch({ inspector: true });
 }
 
 function removeStep(alias) {
-  model.steps = model.steps.filter((s) => s.alias !== alias);
-  for (const s of model.steps) { s.from = s.from.filter((a) => a !== alias); s.ref = s.ref.filter((a) => a !== alias); }
-  delete model.layout[alias];
-  if (zoom === alias) zoom = null;
-  selected = null;
+  cards.model.steps = cards.model.steps.filter((s) => s.alias !== alias);
+  for (const s of cards.model.steps) { s.from = s.from.filter((a) => a !== alias); s.ref = s.ref.filter((a) => a !== alias); }
+  delete cards.model.layout[alias];
+  if (cards.zoom === alias) cards.zoom = null;
+  cards.selected = null;
   touch({ inspector: true });
   applyView();
 }
@@ -210,18 +215,18 @@ function removeStep(alias) {
 function renameStep(from, to) {
   to = to.trim();
   if (to === from) return;
-  if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(to)) { status(`'${to}' is not a usable alias: a letter first, then letters, digits, '_' or '-'.`, "bad"); renderInspector(); return; }
-  if (stepOf(to)) { status(`A step is already named '${to}'.`, "bad"); renderInspector(); return; }
+  if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(to)) { status(`'${to}' is not a usable alias: a letter first, then letters, digits, '_' or '-'.`, "bad"); invalidate("inspector"); return; }
+  if (stepOf(to)) { status(`A step is already named '${to}'.`, "bad"); invalidate("inspector"); return; }
   stepOf(from).alias = to;
-  for (const s of model.steps) {
+  for (const s of cards.model.steps) {
     s.from = s.from.map((a) => (a === from ? to : a));
     s.ref = s.ref.map((a) => (a === from ? to : a));
     if (s.kind === "sql" && s.query) s.query = s.query.replace(new RegExp(`\\b${from}\\b`, "g"), to);
   }
-  model.layout[to] = model.layout[from];
-  delete model.layout[from];
-  if (zoom === from) zoom = to;
-  selected = { alias: to };
+  cards.model.layout[to] = cards.model.layout[from];
+  delete cards.model.layout[from];
+  if (cards.zoom === from) cards.zoom = to;
+  cards.selected = { alias: to };
   touch({ inspector: true });
 }
 
@@ -237,7 +242,7 @@ function connect(fromAlias, toAlias, port) {
     target.from = [fromAlias];
     target.ref = target.ref.filter((a) => a !== fromAlias);
   }
-  touch({ inspector: selected?.alias === toAlias });
+  touch({ inspector: cards.selected?.alias === toAlias });
 }
 
 function disconnect(edge) {
@@ -245,12 +250,12 @@ function disconnect(edge) {
   if (!target) return;
   if (edge.port === "ref") target.ref = target.ref.filter((a) => a !== edge.from);
   else target.from = target.from.filter((a) => a !== edge.from);
-  selected = null;
+  cards.selected = null;
   touch({ inspector: true });
 }
 
 function autoLayout(render = true) {
-  const byAlias = Object.fromEntries(model.steps.map((s) => [s.alias, s]));
+  const byAlias = Object.fromEntries(cards.model.steps.map((s) => [s.alias, s]));
   const depth = {};
   const depthOf = (s, seen = new Set()) => {
     if (depth[s.alias] !== undefined) return depth[s.alias];
@@ -259,12 +264,12 @@ function autoLayout(render = true) {
     const d = [...s.from, ...s.ref].filter((a) => byAlias[a]).reduce((m, a) => Math.max(m, depthOf(byAlias[a], seen) + 1), 0);
     return (depth[s.alias] = d);
   };
-  model.steps.forEach((s) => depthOf(s));
+  cards.model.steps.forEach((s) => depthOf(s));
   const rows = {};
-  for (const s of model.steps) {
+  for (const s of cards.model.steps) {
     const d = depth[s.alias];
     const row = rows[d] = (rows[d] ?? -1) + 1;
-    model.layout[s.alias] = { x: 30 + d * (CARD_W + 70), y: 30 + row * (CARD_H + 36) };
+    cards.model.layout[s.alias] = { x: 30 + d * (CARD_W + 70), y: 30 + row * (CARD_H + 36) };
   }
   if (render) touch({ recompose: false });
 }
@@ -275,35 +280,32 @@ function autoLayout(render = true) {
 function enterZoom(alias) {
   const step = stepOf(alias);
   if (step?.kind !== "transform") return;
-  zoom = alias;
-  selected = { alias, t: step.transformers?.length ? 0 : undefined };
+  cards.zoom = alias;
+  cards.selected = { alias, t: step.transformers?.length ? 0 : undefined };
   applyView();
 }
 
 function exitZoom() {
-  if (!zoom) return;
-  selected = { alias: zoom };
-  zoom = null;
+  if (!cards.zoom) return;
+  cards.selected = { alias: cards.zoom };
+  cards.zoom = null;
   applyView();
 }
 
+// The canvas shows the cards, or the chain of the zoomed card.
 function applyView() {
-  $("d-inner").hidden = !!zoom;
-  $("d-chain").hidden = !zoom;
-  $("d-palette").classList.toggle("dimmed", !!zoom);
-  renderCanvas();
-  renderInspector();
+  invalidate("canvas", "inspector");
 }
 
 function addTransformer(step) {
   (step.transformers ||= []).push({ type: "project", options: {} });
-  if (zoom) selected = { alias: step.alias, t: step.transformers.length - 1 };
+  if (cards.zoom) cards.selected = { alias: step.alias, t: step.transformers.length - 1 };
   touch({ inspector: true });
 }
 
 function removeTransformer(step, i) {
   step.transformers.splice(i, 1);
-  if (zoom) selected = { alias: step.alias, t: step.transformers.length ? Math.min(i, step.transformers.length - 1) : undefined };
+  if (cards.zoom) cards.selected = { alias: step.alias, t: step.transformers.length ? Math.min(i, step.transformers.length - 1) : undefined };
 }
 
 function transformerSummary(t) {
@@ -313,18 +315,18 @@ function transformerSummary(t) {
 
 function renderChain() {
   const view = $("d-chain");
-  const step = zoom ? stepOf(zoom) : null;
+  const step = cards.zoom ? stepOf(cards.zoom) : null;
   if (!view || !step) return;
   const link = () => el("span", { class: "chain-link" });
   const items = (step.transformers || []).flatMap((t, i) => [
     link(),
-    el("div", { class: `chain-item ${selected?.t === i ? "selected" : ""}`, "data-t": i, tabindex: "0", title: "Select to edit it in the inspector" },
+    el("div", { class: `chain-item ${cards.selected?.t === i ? "selected" : ""}`, "data-t": i, tabindex: "0", title: "Select to edit it in the inspector" },
       el("div", { class: "chain-type" }, el("span", { class: "idx" }, i + 1), t.type),
       el("div", { class: "chain-sub" }, transformerSummary(t))),
   ]);
   fill(view,
     el("nav", { class: "crumbs" },
-      el("a", { href: "#", "data-crumb": true, title: "Back to the job (Esc)" }, model.title), el("span", { class: "sep" }, "›"), el("b", {}, step.alias)),
+      el("a", { href: "#", "data-crumb": true, title: "Back to the job (Esc)" }, cards.model.title), el("span", { class: "sep" }, "›"), el("b", {}, step.alias)),
     el("div", { class: "chain" },
       el("div", { class: "chain-end" }, el("span", { class: "kind" }, "input"),
         step.from.length ? step.from.map((a) => el("code", {}, a)) : el("span", { class: "hint" }, "not wired")),
@@ -342,8 +344,8 @@ function renderShell() {
   const seg = (id, label, title) => el("button", { id, title }, label);
   fill(host,
     el("div", { class: "designer-bar" },
-      el("input", { id: "d-title", class: "title-input", value: model.title, "aria-label": "Title" }),
-      el("input", { id: "d-description", class: "grow", value: model.description, placeholder: "What this job does", "aria-label": "Description" }),
+      el("input", { id: "d-title", class: "title-input", value: cards.model.title, "aria-label": "Title" }),
+      el("input", { id: "d-description", class: "grow", value: cards.model.description, placeholder: "What this job does", "aria-label": "Description" }),
       el("span", { id: "d-dirty", class: "pill warn", hidden: true }, "unsaved"),
       el("span", { class: "actions" },
         seg("d-layout", "Arrange", "Arrange the cards in columns, sources first"),
@@ -359,8 +361,8 @@ function renderShell() {
     el("div", { class: "split split-row", "data-split": "drawer", role: "separator", "aria-orientation": "horizontal", "aria-label": "Resize the drawer", tabindex: "0" }),
     el("div", { class: "drawer card", id: "d-drawer" }));
 
-  $("d-title").addEventListener("input", (e) => { model.title = e.target.value; touch({ canvas: !!zoom }); });
-  $("d-description").addEventListener("input", (e) => { model.description = e.target.value; touch({ canvas: false }); });
+  $("d-title").addEventListener("input", (e) => { cards.model.title = targetOf(e).value; touch({ canvas: !!cards.zoom }); });
+  $("d-description").addEventListener("input", (e) => { cards.model.description = targetOf(e).value; touch({ canvas: false }); });
   $("d-layout").addEventListener("click", () => autoLayout());
   applySizes();
   bindSplits();
@@ -369,23 +371,22 @@ function renderShell() {
   bindPalette();
   bindInspector();
   bindDrawer();
-  renderPalette();
-  applyView();
-  renderDrawer();
-  renderToolbarState();
+  invalidate("palette", "canvas", "inspector", "drawer", "bar");
+  flush();
 }
 
 function applySizes() {
   for (const [name, [lo, hi]] of Object.entries(SIZE_LIMITS)) {
-    sizes[name] = Math.min(hi, Math.max(lo, Math.round(+sizes[name] || lo)));
-    host.style.setProperty(name === "pal" ? "--pal-w" : name === "insp" ? "--insp-w" : "--drawer-h", `${sizes[name]}px`);
+    state.view.sizes[name] = Math.min(hi, Math.max(lo, Math.round(+state.view.sizes[name] || lo)));
+    host.style.setProperty(name === "pal" ? "--pal-w" : name === "insp" ? "--insp-w" : "--drawer-h", `${state.view.sizes[name]}px`);
   }
 }
 
 function resize(name, value, persist) {
-  sizes[name] = value;
+  state.view.sizes[name] = value;
   applySizes();
-  if (persist) { try { localStorage.setItem(SIZE_KEY, JSON.stringify(sizes)); } catch { /* storage unavailable */ } }
+  // The sizes are kept after a drawing (prefs.js): asking for one is how a finished move is noticed.
+  if (persist) invalidate("bar");
 }
 
 // A handle is dragged with the pointer, or moved with the arrow keys; the size is clamped to its limits.
@@ -400,14 +401,14 @@ function bindSplits() {
     };
     handle.addEventListener("pointerdown", (e) => { handle.setPointerCapture(e.pointerId); handle.classList.add("dragging"); e.preventDefault(); });
     handle.addEventListener("pointermove", (e) => { if (handle.hasPointerCapture(e.pointerId)) resize(name, target(e), false); });
-    const end = (e) => { if (handle.hasPointerCapture(e.pointerId)) { handle.releasePointerCapture(e.pointerId); handle.classList.remove("dragging"); resize(name, sizes[name], true); } };
+    const end = (e) => { if (handle.hasPointerCapture(e.pointerId)) { handle.releasePointerCapture(e.pointerId); handle.classList.remove("dragging"); resize(name, state.view.sizes[name], true); } };
     handle.addEventListener("pointerup", end);
     handle.addEventListener("pointercancel", end);
     handle.addEventListener("keydown", (e) => {
       const grow = { pal: "ArrowRight", insp: "ArrowLeft", drawer: "ArrowUp" }[name];
       const shrink = { pal: "ArrowLeft", insp: "ArrowRight", drawer: "ArrowDown" }[name];
       if (e.key !== grow && e.key !== shrink) return;
-      resize(name, sizes[name] + (e.key === grow ? 16 : -16), true);
+      resize(name, state.view.sizes[name] + (e.key === grow ? 16 : -16), true);
       e.preventDefault();
     });
   }
@@ -415,9 +416,8 @@ function bindSplits() {
 
 function renderToolbarState() {
   const flag = $("d-dirty");
-  if (flag) flag.hidden = !dirty;
-  hooks.onState?.({ dirty, result });
-}
+  if (flag) flag.hidden = !cards.dirty;
+  }
 
 function renderPalette() {
   const view = $("d-palette");
@@ -435,22 +435,22 @@ function renderPalette() {
       el("span", {}, b.title || b.id), el("button", { class: "small ghost", "data-add": true, title: "Add to the canvas" }, "+"));
     return node;
   };
-  const nodes = catalog.nodes.filter((n) => catalog.bricks.some((b) => b.node === n.name));
-  const bricks = catalog.bricks.length ? [
+  const nodes = state.catalog.nodes.filter((n) => state.catalog.bricks.some((b) => b.node === n.name));
+  const bricks = state.catalog.bricks.length ? [
     el("h3", {}, "Bricks ", el("span", { class: "hint" }, "of the coordinator's nodes")),
     nodes.map((n) => [
       el("h4", { class: n.online ? "" : "offline" }, n.name, n.online ? "" : " (offline)"),
-      catalog.bricks.filter((b) => b.node === n.name).map(brickItem),
+      state.catalog.bricks.filter((b) => b.node === n.name).map(brickItem),
     ]),
   ] : null;
   fill(view,
     bricks,
-    el("h3", {}, "Sources"), endpoints(components.readers, "source"),
+    el("h3", {}, "Sources"), endpoints(state.components.readers, "source"),
     el("h3", {}, "Steps"),
     item("transform", "Transform", "An ordered list of transformers over one input"),
     item("sql", "SQL", "A DuckDB query over one main input, joined to others as ref"),
     item("merge", "Merge", "UNION ALL of several inputs with the same schema"),
-    el("h3", {}, "Sinks"), endpoints(components.writers, "sink"),
+    el("h3", {}, "Sinks"), endpoints(state.components.writers, "sink"),
     el("p", { class: "hint" }, "Drag a component or a step onto the canvas, then wire an output port (right) to an input port (left). Drag a wire's end off its input port to move it or, dropped in the void, to remove it."),
     versions());
 }
@@ -458,13 +458,13 @@ function renderPalette() {
 // This studio's dtpipe and each node's: a difference is shown, never refused, since the coordinator
 // checks a pipeline again when it is published.
 function versions() {
-  if (!catalog.nodes.length) return null;
-  const differ = catalog.nodes.filter((n) => n.dtpipeVersion !== catalog.studioVersion);
+  if (!state.catalog.nodes.length) return null;
+  const differ = state.catalog.nodes.filter((n) => n.dtpipeVersion !== state.catalog.studioVersion);
   return [
     el("h3", {}, "Versions"),
     el("ul", { class: "versions" },
-      el("li", {}, "this studio: ", el("code", {}, catalog.studioVersion || "unknown")),
-      catalog.nodes.map((n) => el("li", { class: n.dtpipeVersion === catalog.studioVersion ? "" : "warn" },
+      el("li", {}, "this studio: ", el("code", {}, state.catalog.studioVersion || "unknown")),
+      state.catalog.nodes.map((n) => el("li", { class: n.dtpipeVersion === state.catalog.studioVersion ? "" : "warn" },
         `${n.name}: `, el("code", {}, n.dtpipeVersion || "unknown")))),
     differ.length ? el("p", { class: "hint warn" }, `${differ.length} node(s) run another dtpipe: a sample here may differ from a run there. The coordinator checks a pipeline again when it is published.`) : null,
   ];
@@ -477,7 +477,7 @@ function endpointOf(step) {
 }
 
 function cardInfo(step) {
-  const info = result?.steps?.find((s) => s.alias === step.alias);
+  const info = cards.result?.steps?.find((s) => s.alias === step.alias);
   let subtitle = "";
   const brick = step.brick ? brickOf(step.brick) : null;
   if (brick) subtitle = `${brick.title || brick.id} · ${brick.node}`;
@@ -493,16 +493,19 @@ function cardInfo(step) {
 
 function renderCanvas() {
   const inner = $("d-inner");
-  if (!inner || !model) return;
-  if (zoom) { renderChain(); return; }
-  const problems = new Set((result?.errors || []).flatMap((e) => [...e.matchAll(/'([^']+)'/g)].map((m) => m[1])));
+  if (!inner || !cards.model) return;
+  inner.hidden = !!cards.zoom;
+  $("d-chain").hidden = !cards.zoom;
+  $("d-palette").classList.toggle("dimmed", !!cards.zoom);
+  if (cards.zoom) { renderChain(); return; }
+  const problems = new Set((cards.result?.errors || []).flatMap((e) => [...e.matchAll(/'([^']+)'/g)].map((m) => m[1])));
   inner.querySelectorAll(".dcard, .canvas-empty").forEach((c) => c.remove());
   let width = 900, height = 520;
-  for (const step of model.steps) {
-    const pos = model.layout[step.alias] || { x: 20, y: 20 };
+  for (const step of cards.model.steps) {
+    const pos = cards.model.layout[step.alias] || { x: 20, y: 20 };
     const { subtitle, branch } = cardInfo(step);
     const card = el("div", {
-      class: `dcard kind-${step.kind} ${selected?.alias === step.alias ? "selected" : ""} ${problems.has(step.alias) ? "problem" : ""}`,
+      class: `dcard kind-${step.kind} ${cards.selected?.alias === step.alias ? "selected" : ""} ${problems.has(step.alias) ? "problem" : ""}`,
       "data-alias": step.alias,
     },
       el("div", { class: "dcard-head" }, el("span", { class: "kind" }, KIND_LABEL[step.kind] || step.kind), el("span", { class: "alias" }, step.alias)),
@@ -523,11 +526,11 @@ function renderCanvas() {
   inner.style.width = `${width}px`;
   inner.style.height = `${height}px`;
   drawEdges();
-  if (!model.steps.length) inner.appendChild(el("p", { class: "canvas-empty hint" }, "Drag sources, steps and sinks here from the palette."));
+  if (!cards.model.steps.length) inner.appendChild(el("p", { class: "canvas-empty hint" }, "Drag sources, steps and sinks here from the palette."));
 }
 
 function portPoint(alias, port) {
-  const pos = model.layout[alias] || { x: 0, y: 0 };
+  const pos = cards.model.layout[alias] || { x: 0, y: 0 };
   if (port === "out") return { x: pos.x + CARD_W, y: pos.y + PORT_IN_Y };
   return { x: pos.x, y: pos.y + (port === "ref" ? PORT_REF_Y : PORT_IN_Y) };
 }
@@ -538,15 +541,15 @@ function drawEdges(temp) {
   const canvasSvg = $("d-svg");
   const inner = $("d-inner");
   if (!canvasSvg) return;
-  canvasSvg.setAttribute("width", inner.offsetWidth);
-  canvasSvg.setAttribute("height", inner.offsetHeight);
+  canvasSvg.setAttribute("width", String(inner.offsetWidth));
+  canvasSvg.setAttribute("height", String(inner.offsetHeight));
   const parts = [];
   let selectedHit = null;
-  for (const step of model.steps) {
+  for (const step of cards.model.steps) {
     for (const [port, list] of [["in", step.from], ["ref", step.ref]]) {
       for (const from of list) {
         if (!stepOf(from)) continue;
-        const isSel = selected?.edge && selected.edge.from === from && selected.edge.to === step.alias && selected.edge.port === port;
+        const isSel = cards.selected?.edge && cards.selected.edge.from === from && cards.selected.edge.to === step.alias && cards.selected.edge.port === port;
         const d = curve(portPoint(from, "out"), portPoint(step.alias, port));
         const hit = svg("path", { class: "dedge-hit", "data-from": from, "data-to": step.alias, "data-port": port, d });
         parts.push(svg("path", { class: `dedge ${port} ${isSel ? "selected" : ""}`, d }), hit);
@@ -580,23 +583,23 @@ function bindCanvas() {
   let drag = null;
 
   inner.addEventListener("pointerdown", (e) => {
-    const port = e.target.closest(".port.out");
-    const inPort = e.target.closest(".port.in, .port.ref");
-    const card = e.target.closest(".dcard");
-    const edge = e.target.closest(".dedge-hit");
-    const tool = e.target.closest("[data-card-tool]");
+    const port = targetOf(e).closest(".port.out");
+    const inPort = targetOf(e).closest(".port.in, .port.ref");
+    const card = targetOf(e).closest(".dcard");
+    const edge = targetOf(e).closest(".dedge-hit");
+    const tool = targetOf(e).closest("[data-card-tool]");
     if (tool && card) {
       hooks.cardTool?.(card.dataset.alias, tool.dataset.cardTool);
       e.preventDefault();
       return;
     }
-    if (e.target.closest(".dcard-zoom") && card) {
+    if (targetOf(e).closest(".dcard-zoom") && card) {
       enterZoom(card.dataset.alias);
       e.preventDefault();
       return;
     }
-    if (e.target.closest(".edge-delete")) {
-      disconnect(selected.edge);
+    if (targetOf(e).closest(".edge-delete")) {
+      disconnect(cards.selected.edge);
       e.preventDefault();
       return;
     }
@@ -610,7 +613,7 @@ function bindCanvas() {
         const from = list[list.length - 1];
         list.splice(list.length - 1, 1);
         drag = { type: "link", from, picked: { to: target.alias, port: portName } };
-        selected = null;
+        cards.selected = null;
         inner.setPointerCapture(e.pointerId);
         drawEdges({ a: portPoint(from, "out"), b: canvasPoint(e) });
         e.preventDefault();
@@ -621,29 +624,27 @@ function bindCanvas() {
       drag = { type: "link", from: card.dataset.alias };
       inner.setPointerCapture(e.pointerId);
       e.preventDefault();
-    } else if (card && !e.target.closest(".port")) {
-      const pos = model.layout[card.dataset.alias];
+    } else if (card && !targetOf(e).closest(".port")) {
+      const pos = cards.model.layout[card.dataset.alias];
       const p = canvasPoint(e);
       drag = { type: "move", alias: card.dataset.alias, dx: p.x - pos.x, dy: p.y - pos.y, moved: false };
-      if (selected?.alias !== card.dataset.alias) {
-        selected = { alias: card.dataset.alias };
-        renderInspector();
+      if (cards.selected?.alias !== card.dataset.alias) {
+        cards.selected = { alias: card.dataset.alias };
+        invalidate("inspector");
         inner.querySelectorAll(".dcard").forEach((c) => c.classList.toggle("selected", c === card));
         drawEdges();
         // Clicking a card shows what it delivers, unless the person is reading another tab.
-        if (drawer === "yaml") drawer = "preview";
-        if (drawer === "preview") renderDrawer();
+        if (state.view.drawer === "yaml") state.view.drawer = "preview";
+        if (state.view.drawer === "preview") invalidate("drawer");
       }
       inner.setPointerCapture(e.pointerId);
     } else if (edge) {
-      selected = { edge: { from: edge.dataset.from, to: edge.dataset.to, port: edge.dataset.port } };
-      renderCanvas();
-      renderInspector();
-    } else if (e.target === inner || e.target.id === "d-svg") {
-      selected = null;
-      renderCanvas();
-      renderInspector();
-      if (drawer === "preview") renderDrawer();
+      cards.selected = { edge: { from: edge.dataset.from, to: edge.dataset.to, port: edge.dataset.port } };
+      invalidate("canvas", "inspector");
+    } else if (targetOf(e) === inner || targetOf(e).id === "d-svg") {
+      cards.selected = null;
+      invalidate("canvas", "inspector");
+      if (state.view.drawer === "preview") invalidate("drawer");
     }
   });
 
@@ -653,9 +654,9 @@ function bindCanvas() {
     if (drag.type === "link") drawEdges({ a: portPoint(drag.from, "out"), b: p });
     else {
       const pos = { x: Math.max(0, Math.round(p.x - drag.dx)), y: Math.max(0, Math.round(p.y - drag.dy)) };
-      model.layout[drag.alias] = pos;
+      cards.model.layout[drag.alias] = pos;
       drag.moved = true;
-      const card = inner.querySelector(`.dcard[data-alias="${CSS.escape(drag.alias)}"]`);
+      const card = /** @type {HTMLElement} */ (inner.querySelector(`.dcard[data-alias="${CSS.escape(drag.alias)}"]`));
       card.style.left = `${pos.x}px`;
       card.style.top = `${pos.y}px`;
       drawEdges();
@@ -668,8 +669,8 @@ function bindCanvas() {
     drag = null;
     if (d.type === "link") {
       const target = document.elementFromPoint(e.clientX, e.clientY);
-      const port = target?.closest(".port.in, .port.ref");
-      const card = target?.closest(".dcard");
+      const port = /** @type {HTMLElement | null | undefined} */ (target?.closest(".port.in, .port.ref"));
+      const card = /** @type {HTMLElement | null | undefined} */ (target?.closest(".dcard"));
       if (card) {
         // Dropped on a SQL card but beside its ports: the first wire is its main input, the next ones joins.
         const step = stepOf(card.dataset.alias);
@@ -680,23 +681,21 @@ function bindCanvas() {
         status(`Wire ${d.from} → ${d.picked.to} removed.`);
       } else drawEdges();
     } else if (d.moved) {
-      dirty = true;
-      renderToolbarState();
-      renderCanvas();
-      hooks.onChange?.();
+      cards.dirty = true;
+      invalidate("bar", "canvas");
     }
   });
 
   inner.addEventListener("dblclick", (e) => {
-    const card = e.target.closest(".dcard");
-    if (card && !e.target.closest(".port")) enterZoom(card.dataset.alias);
+    const card = targetOf(e).closest(".dcard");
+    if (card && !targetOf(e).closest(".port")) enterZoom(card.dataset.alias);
   });
 
   const canvas = $("d-canvas");
   canvas.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; });
   canvas.addEventListener("drop", (e) => {
     e.preventDefault();
-    if (zoom) return;
+    if (cards.zoom) return;
     let item;
     try { item = JSON.parse(e.dataTransfer.getData("application/json") || "null"); } catch { item = null; }
     if (!item) return;
@@ -708,19 +707,18 @@ function bindCanvas() {
 function bindChain() {
   const view = $("d-chain");
   const select = (item) => {
-    selected = { alias: zoom, t: +item.dataset.t };
-    renderChain();
-    renderInspector();
+    cards.selected = { alias: cards.zoom, t: +item.dataset.t };
+    invalidate("canvas", "inspector");
   };
   view.addEventListener("click", (e) => {
-    if (e.target.closest("[data-crumb]")) { e.preventDefault(); exitZoom(); return; }
-    if (e.target.closest("[data-chain-add]")) { addTransformer(stepOf(zoom)); return; }
-    const item = e.target.closest(".chain-item");
+    if (targetOf(e).closest("[data-crumb]")) { e.preventDefault(); exitZoom(); return; }
+    if (targetOf(e).closest("[data-chain-add]")) { addTransformer(stepOf(cards.zoom)); return; }
+    const item = targetOf(e).closest(".chain-item");
     if (item) select(item);
-    else if (e.target === view) { selected = { alias: zoom }; renderChain(); renderInspector(); }
+    else if (targetOf(e) === view) { cards.selected = { alias: cards.zoom }; invalidate("canvas", "inspector"); }
   });
   view.addEventListener("keydown", (e) => {
-    const item = e.target.closest(".chain-item");
+    const item = targetOf(e).closest(".chain-item");
     if (item && (e.key === "Enter" || e.key === " ")) { select(item); e.preventDefault(); }
   });
 }
@@ -728,37 +726,37 @@ function bindChain() {
 function bindPalette() {
   const view = $("d-palette");
   view.addEventListener("dragstart", (e) => {
-    const item = e.target.closest(".pal-item");
+    const item = targetOf(e).closest(".pal-item");
     if (!item) return;
     e.dataTransfer.setData("application/json", JSON.stringify({ kind: item.dataset.kind, component: item.dataset.component || null, brick: item.dataset.brick || null }));
     e.dataTransfer.effectAllowed = "copy";
   });
   view.addEventListener("click", (e) => {
-    if (!e.target.closest("[data-add]")) return;
-    const item = e.target.closest(".pal-item");
+    if (!targetOf(e).closest("[data-add]")) return;
+    const item = targetOf(e).closest(".pal-item");
     // Placed after the cards already there, in the column its kind usually takes.
     const column = { source: 0, transform: 1, sql: 1, merge: 1, sink: 2 }[item.dataset.kind] ?? 1;
-    const inColumn = model.steps.filter((s) => (model.layout[s.alias]?.x ?? 0) >= 30 + column * (CARD_W + 70) - 20 && (model.layout[s.alias]?.x ?? 0) < 30 + (column + 1) * (CARD_W + 70) - 20);
+    const inColumn = cards.model.steps.filter((s) => (cards.model.layout[s.alias]?.x ?? 0) >= 30 + column * (CARD_W + 70) - 20 && (cards.model.layout[s.alias]?.x ?? 0) < 30 + (column + 1) * (CARD_W + 70) - 20);
     addStep(item.dataset.kind, item.dataset.component || null, 30 + column * (CARD_W + 70), 30 + inColumn.length * (CARD_H + 36), item.dataset.brick || null);
   });
 }
 
 function onKey(e) {
-  if (!model || !host?.isConnected) return;
+  if (!cards.model || !host?.isConnected) return;
   if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
-  if (zoom) {
+  if (cards.zoom) {
     // Zoomed, Delete removes the selected transformer, never the step.
     if (e.key === "Escape") { exitZoom(); e.preventDefault(); }
-    else if ((e.key === "Delete" || e.key === "Backspace") && selected?.t !== undefined) {
-      removeTransformer(stepOf(zoom), selected.t);
+    else if ((e.key === "Delete" || e.key === "Backspace") && cards.selected?.t !== undefined) {
+      removeTransformer(stepOf(cards.zoom), cards.selected.t);
       touch({ inspector: true });
       e.preventDefault();
     }
     return;
   }
   if (e.key === "Delete" || e.key === "Backspace") {
-    if (selected?.alias) { removeStep(selected.alias); e.preventDefault(); }
-    else if (selected?.edge) { disconnect(selected.edge); e.preventDefault(); }
+    if (cards.selected?.alias) { removeStep(cards.selected.alias); e.preventDefault(); }
+    else if (cards.selected?.edge) { disconnect(cards.selected.edge); e.preventDefault(); }
   }
 }
 
@@ -799,27 +797,27 @@ function transformerEditor(step, t, i) {
 function renderInspector() {
   const view = $("d-inspector");
   if (!view) return;
-  if (selected?.edge) {
-    const e = selected.edge;
+  if (cards.selected?.edge) {
+    const e = cards.selected.edge;
     fill(view, el("h2", {}, "Connection"),
       el("p", {}, el("code", {}, e.from), " → ", el("code", {}, e.to), e.port === "ref" ? " (ref)" : ""),
       el("button", { class: "danger", "data-unwire": e.from, "data-port": e.port, "data-to": e.to }, "Disconnect"),
       el("p", { class: "hint" }, "Or press Delete, or click the × on the wire. To move it, drag its end off the input port and drop it on another input; dropped anywhere else, it is removed."));
     return;
   }
-  const step = selected?.alias ? stepOf(selected.alias) : null;
+  const step = cards.selected?.alias ? stepOf(cards.selected.alias) : null;
   if (!step) {
-    const errors = result?.errors?.length || 0;
+    const errors = cards.result?.errors?.length || 0;
     fill(view, el("h2", {}, "Job"),
-      el("p", { class: "hint" }, `${model.steps.length} card(s). `, errors ? el("span", { class: "bad" }, `${errors} problem(s)`) : "Composes cleanly."),
+      el("p", { class: "hint" }, `${cards.model.steps.length} card(s). `, errors ? el("span", { class: "bad" }, `${errors} problem(s)`) : "Composes cleanly."),
       el("p", { class: "hint" }, "Select a card to edit it. A source and a sink of their own carry their endpoint as YAML; the server joins a source, its transform and its sink back into one branch when nothing else reads between them."),
-      model.directives.length ? [el("h3", {}, "Header directives"), el("ul", { class: "inputs" }, model.directives.map((d) => el("li", {}, el("code", {}, d))))] : null);
+      cards.model.directives.length ? [el("h3", {}, "Header directives"), el("ul", { class: "inputs" }, cards.model.directives.map((d) => el("li", {}, el("code", {}, d))))] : null);
     return;
   }
-  if (zoom && step.alias === zoom) {
-    const t = selected.t !== undefined ? step.transformers?.[selected.t] : null;
-    fill(view, el("div", { class: "row" }, el("h2", {}, t ? `Transformer ${selected.t + 1}` : "Transformers")),
-      t ? transformerEditor(step, t, selected.t) : el("p", { class: "hint" }, "Select a transformer in the chain to edit it, or add one."));
+  if (cards.zoom && step.alias === cards.zoom) {
+    const t = cards.selected.t !== undefined ? step.transformers?.[cards.selected.t] : null;
+    fill(view, el("div", { class: "row" }, el("h2", {}, t ? `Transformer ${cards.selected.t + 1}` : "Transformers")),
+      t ? transformerEditor(step, t, cards.selected.t) : el("p", { class: "hint" }, "Select a transformer in the chain to edit it, or add one."));
     return;
   }
   let body;
@@ -877,15 +875,15 @@ function brickView(step) {
 
 function bindInspector() {
   const view = $("d-inspector");
-  const current = () => (selected?.alias ? stepOf(selected.alias) : null);
+  const current = () => (cards.selected?.alias ? stepOf(cards.selected.alias) : null);
 
   view.addEventListener("change", (e) => {
     const step = current();
-    if (e.target.id === "i-alias" && step) renameStep(step.alias, e.target.value);
-    else if (e.target.matches("[data-ttype]") && step) {
-      const i = +e.target.closest(".transformer").dataset.index;
+    if (targetOf(e).id === "i-alias" && step) renameStep(step.alias, targetOf(e).value);
+    else if (targetOf(e).matches("[data-ttype]") && step) {
+      const i = +targetOf(e).closest(".transformer").dataset.index;
       const t = step.transformers[i];
-      t.type = e.target.value;
+      t.type = targetOf(e).value;
       if (TRANSFORMERS[t.type]?.mapping === null) delete t.mappings;
       touch({ inspector: true });
     }
@@ -894,10 +892,10 @@ function bindInspector() {
   view.addEventListener("input", (e) => {
     const step = current();
     if (!step) return;
-    if (e.target.id === "i-query") { step.query = e.target.value; touch(); }
-    else if (e.target.id === "i-yaml") { step.yaml = e.target.value; touch(); }
-    else if (e.target.dataset.kv) {
-      const kv = e.target.closest(".kv");
+    if (targetOf(e).id === "i-query") { step.query = targetOf(e).value; touch(); }
+    else if (targetOf(e).id === "i-yaml") { step.yaml = targetOf(e).value; touch(); }
+    else if (targetOf(e).dataset.kv) {
+      const kv = targetOf(e).closest(".kv");
       const t = step.transformers[+kv.dataset.index];
       const section = kv.dataset.section;
       const rows = [...kv.querySelectorAll(".kv-row")].map((r) => [r.querySelector('[data-kv="key"]').value, r.querySelector('[data-kv="value"]').value]);
@@ -909,7 +907,7 @@ function bindInspector() {
   });
 
   view.addEventListener("click", (e) => {
-    const b = e.target.closest("button");
+    const b = targetOf(e).closest("button");
     if (!b) return;
     const step = current();
     if (b.dataset.unwire !== undefined) { disconnect({ from: b.dataset.unwire, to: b.dataset.to || step.alias, port: b.dataset.port }); return; }
@@ -923,13 +921,14 @@ function bindInspector() {
     else if (b.dataset.tmove) {
       const j = i + +b.dataset.tmove;
       [step.transformers[i], step.transformers[j]] = [step.transformers[j], step.transformers[i]];
-      if (zoom) selected = { alias: step.alias, t: j };
+      if (cards.zoom) cards.selected = { alias: step.alias, t: j };
     } else if (b.dataset.kvAdd !== undefined) {
       const section = b.closest(".kv").dataset.section;
       const t = step.transformers[i];
       t[section] = { ...(t[section] || {}), "": null };
       // An empty key is kept on screen only: the row is written once it has a name.
-      renderInspector();
+      invalidate("inspector");
+      flush();
       const rows = view.querySelectorAll(`.transformer[data-index="${i}"] .kv[data-section="${section}"] .kv-row`);
       rows[rows.length - 1]?.querySelector("input")?.focus();
       delete t[section][""];
@@ -948,66 +947,65 @@ function bindInspector() {
 
 function renderDrawer() {
   const view = $("d-drawer");
-  if (!view || !result) return;
-  const problems = (result.errors?.length || 0) + (result.warnings?.length || 0);
-  const tab = (name, label, extra) => el("button", { class: drawer === name ? "active" : "", "data-tab": name }, label, extra || null);
+  if (!view || !cards.result) return;
+  const problems = (cards.result.errors?.length || 0) + (cards.result.warnings?.length || 0);
+  const tab = (name, label, extra) => el("button", { class: state.view.drawer === name ? "active" : "", "data-tab": name }, label, extra || null);
   const tabs = el("div", { class: "tabs" },
     tab("yaml", "YAML"),
     tab("problems", "Problems ", problems ? el("span", { class: "count" }, problems) : null),
     tab("edit", "Edit as YAML"),
     tab("preview", "Preview"),
     (hooks.extraTabs || []).map((t) => tab(t.name, t.label, t.badge?.())),
-    el("span", { class: "drawer-status" }, result.errors?.length ? el("span", { class: "bad" }, `${result.errors.length} error(s)`) : el("span", { class: "good" }, "composes")));
+    el("span", { class: "drawer-status" }, cards.result.errors?.length ? el("span", { class: "bad" }, `${cards.result.errors.length} error(s)`) : el("span", { class: "good" }, "composes")));
   let body;
-  if (drawer === "yaml") {
+  if (state.view.drawer === "yaml") {
     body = [el("div", { class: "row" }, el("button", { "data-copy": true }, "Copy"),
       el("span", { class: "hint" }, "The job the server composed: a plain dtpipe job, runnable whole with dtpipe --job.")),
-    el("pre", { id: "d-yaml" }, result.yaml)];
-  } else if (drawer === "problems") {
-    body = [result.errors?.length ? el("ul", { class: "msgs bad" }, result.errors.map((m) => el("li", {}, m))) : null,
-      result.warnings?.length ? el("ul", { class: "msgs warn" }, result.warnings.map((m) => el("li", {}, m))) : null,
+    el("pre", { id: "d-yaml" }, cards.result.yaml)];
+  } else if (state.view.drawer === "problems") {
+    body = [cards.result.errors?.length ? el("ul", { class: "msgs bad" }, cards.result.errors.map((m) => el("li", {}, m))) : null,
+      cards.result.warnings?.length ? el("ul", { class: "msgs warn" }, cards.result.warnings.map((m) => el("li", {}, m))) : null,
       problems ? null : el("p", { class: "hint" }, "Nothing to report.")];
-  } else if (drawer === "edit") {
-    body = [el("textarea", { id: "d-edit", class: "mono", rows: "16", spellcheck: "false", value: result.yaml }),
+  } else if (state.view.drawer === "edit") {
+    body = [el("textarea", { id: "d-edit", class: "mono", rows: "16", spellcheck: "false", value: cards.result.yaml }),
       el("div", { class: "row" }, el("button", { "data-apply": true }, "Apply"),
         el("span", { class: "hint" }, "The job is taken apart into cards again; cards that keep their alias keep their place."))];
-  } else if (drawer === "preview") {
-    body = hooks.previewView?.(selected?.alias || null) || null;
+  } else if (state.view.drawer === "preview") {
+    body = hooks.previewView?.(cards.selected?.alias || null) || null;
   } else {
-    body = (hooks.extraTabs || []).find((t) => t.name === drawer)?.render() || null;
+    body = (hooks.extraTabs || []).find((t) => t.name === state.view.drawer)?.render() || null;
   }
   fill(view, tabs, el("div", { class: "drawer-body" }, body));
 }
 
 export function showTab(name) {
-  drawer = name;
-  renderDrawer();
+  state.view.drawer = name;
+  invalidate("drawer");
 }
-
-export const refreshDrawer = () => renderDrawer();
 
 function bindDrawer() {
   $("d-drawer").addEventListener("click", async (e) => {
-    const b = e.target.closest("button");
+    const b = targetOf(e).closest("button");
     if (!b) return;
     if (b.dataset.tab) showTab(b.dataset.tab);
     else if (b.dataset.copy !== undefined) {
-      try { await navigator.clipboard.writeText(result.yaml); status("YAML copied."); }
+      try { await navigator.clipboard.writeText(cards.result.yaml); status("YAML copied."); }
       catch { window.getSelection().selectAllChildren($("d-yaml")); status("Selected: copy it with your keyboard."); }
     } else if (b.dataset.apply !== undefined) {
       try {
-        const answer = await api("/api/design/decompose", { yaml: $("d-edit").value, layout: model.layout });
-        const layout = model.layout;
-        model = normalize(answer.model);
-        model.layout = Object.fromEntries(Object.entries(layout).filter(([a]) => stepOf(a)));
-        if (model.steps.some((s) => !model.layout[s.alias])) autoLayout(false);
-        selected = null;
-        zoom = null;
-        drawer = "yaml";
-        dirty = true;
+        const ticket = opening.begin();
+        const answer = await api("/api/design/decompose", { yaml: /** @type {HTMLTextAreaElement} */ ($("d-edit")).value, layout: cards.model.layout });
+        if (opening.stale(ticket)) return;
+        const layout = cards.model.layout;
+        cards.model = normalize(answer.model);
+        cards.model.layout = Object.fromEntries(Object.entries(layout).filter(([a]) => stepOf(a)));
+        if (cards.model.steps.some((s) => !cards.model.layout[s.alias])) autoLayout(false);
+        cards.selected = null;
+        cards.zoom = null;
+        state.view.drawer = "yaml";
+        cards.dirty = true;
         renderShell();
         await compose();
-        hooks.onChange?.();
       } catch (err) { status(err.message, "bad"); }
     }
   });

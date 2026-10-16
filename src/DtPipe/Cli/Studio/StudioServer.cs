@@ -96,6 +96,13 @@ public sealed partial class StudioServer : IAsyncDisposable
         ["/dom.js"] = ("studio/dom.js", "text/javascript; charset=utf-8"),
         ["/designer.js"] = ("studio/designer.js", "text/javascript; charset=utf-8"),
         ["/coordinator.js"] = ("studio/coordinator.js", "text/javascript; charset=utf-8"),
+        ["/state.js"] = ("studio/state.js", "text/javascript; charset=utf-8"),
+        ["/render.js"] = ("studio/render.js", "text/javascript; charset=utf-8"),
+        ["/prefs.js"] = ("studio/prefs.js", "text/javascript; charset=utf-8"),
+        ["/preview.js"] = ("studio/preview.js", "text/javascript; charset=utf-8"),
+        ["/run.js"] = ("studio/run.js", "text/javascript; charset=utf-8"),
+        ["/publish.js"] = ("studio/publish.js", "text/javascript; charset=utf-8"),
+        ["/variables.js"] = ("studio/variables.js", "text/javascript; charset=utf-8"),
         ["/studio.css"] = ("studio/studio.css", "text/css; charset=utf-8"),
     };
 
@@ -214,6 +221,14 @@ public sealed partial class StudioServer : IAsyncDisposable
                     break;
                 case ("PUT", "/api/launch"):
                     await LaunchAsync(context);
+                    break;
+                case ("GET", "/api/view"):
+                    var viewed = _local.ReadView();
+                    var viewedJob = JobPath(request.Query["path"].ToString());
+                    await JsonAsync(context, new { sizes = viewed["sizes"], job = viewedJob is null ? null : viewed["jobs"]?[viewedJob] });
+                    break;
+                case ("PUT", "/api/view"):
+                    await ViewAsync(context);
                     break;
                 case ("POST", "/api/sample"):
                     await SampleAsync(context);
@@ -407,6 +422,44 @@ public sealed partial class StudioServer : IAsyncDisposable
             overrides[name] = chosen;
         }
         _local.WriteLaunch(job, overrides);
+        context.Response.StatusCode = StatusCodes.Status204NoContent;
+    }
+
+    private static readonly string[] PaneNames = ["pal", "insp", "drawer"];
+    private static readonly string[] ViewTabs = ["yaml", "preview", "variables"];
+
+    /// <summary>
+    /// Keeps how the page was left: the sizes of its panes and, for a job, its tab, the rows asked and the selected card.
+    /// Each value is checked and rewritten, so the file holds nothing the page did not mean as a preference.
+    /// </summary>
+    private async Task ViewAsync(HttpContext context)
+    {
+        var view = await BodyAsync<ViewRequest>(context);
+        JsonObject? sizes = null;
+        if (view.Sizes is not null)
+        {
+            sizes = [];
+            foreach (var (pane, size) in view.Sizes)
+            {
+                if (!PaneNames.Contains(pane) || !(size is >= 0 and <= 5000)) throw new StudioRefusal(400, $"'{pane}' is no pane, or its size is out of range.");
+                sizes[pane] = (int)size;
+            }
+        }
+
+        JsonObject? jobView = null;
+        var job = JobPath(view.Path);
+        if (job is not null && view.Job is { } kept)
+        {
+            if (kept.Tab is not null && !ViewTabs.Contains(kept.Tab)) throw new StudioRefusal(400, $"'{kept.Tab}' is no tab to keep.");
+            if (kept.Rows is not null && !(kept.Rows is >= 1 and <= DebugMaxRows)) throw new StudioRefusal(400, "The rows asked are out of range.");
+            if (kept.Card is { Length: > 200 }) throw new StudioRefusal(400, "The card's name is too long.");
+            jobView = [];
+            if (kept.Tab is not null) jobView["tab"] = kept.Tab;
+            if (kept.Rows is not null) jobView["rows"] = kept.Rows;
+            if (kept.Card is not null) jobView["card"] = kept.Card;
+        }
+
+        _local.UpdateView(sizes, job, jobView);
         context.Response.StatusCode = StatusCodes.Status204NoContent;
     }
 
@@ -742,6 +795,10 @@ public sealed partial class StudioServer : IAsyncDisposable
     }
 
     private sealed record DecomposeRequest(string? Yaml, JsonObject? Layout);
+
+    private sealed record ViewJobRequest(string? Tab, int? Rows, string? Card);
+
+    private sealed record ViewRequest(Dictionary<string, double>? Sizes, string? Path, ViewJobRequest? Job);
 
     private sealed record SaveRequest(string? Path, string? Hash, DesignModel? Model, bool AcceptErrors);
 

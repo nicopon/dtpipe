@@ -1245,7 +1245,9 @@ Save writes the job the studio composes from the cards, never a text the page se
 by hand loses its inner comments and its key order, and the page says so when it opens one. A save
 refuses a file that changed on disk since it was opened, never creates a folder, and never
 overwrites an existing file with a new job. Where each card sits is kept outside the job, in
-`.dtpipe/studio/<job>-layout.json` under the folder; `.dtpipe/` ignores itself in git.
+`.dtpipe/studio/<job>-layout.json` under the folder; `.dtpipe/` ignores itself in git. How the page
+was left (the drawer's tab, the rows asked and the selected card of each job, the sizes of the
+panes) is kept in `.dtpipe/studio/view.json`, so it comes back whatever port the studio listens on.
 
 The Variables tab lists every `${{…}}` the job reads, by name, and whether something resolves it.
 The job keeps `${{NAME}}`; for a preview you may launch it with a keyring alias (see
