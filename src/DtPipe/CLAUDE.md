@@ -333,7 +333,7 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   watchers and held levels against the text under the engine slot, delete from the session what the
   text, the rows or a reset no longer supports (a reset takes everything downstream with it), and
   answer what is held; the page never decides validity. `.dtpipe/studio/<job>-debug.json` keeps the
-  watchers and each held level's key and digest, never the text, and does not exist for a job that
+  watchers and each held level's key and digest (and, for the end of a branch a review holds, its row count), never the text, and does not exist for a job that
   holds none; a job not saved yet keeps it under
   `drafts/<id>`, adopted at its first save and purged when the studio starts. The cut is never saved
   or published. `[CI: StudioDebugTests]`

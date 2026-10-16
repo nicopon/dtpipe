@@ -345,7 +345,8 @@ public sealed partial class StudioServer
             await foreach (var batch in store.ReadAsync(key))
                 using (batch) rows += batch.Length;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { return null; }
+        // The count only feeds the display, and this runs before the engine slot is released: whatever a checkpoint throws, it is unknown.
+        catch (Exception) { return null; }
         return rows;
     }
 

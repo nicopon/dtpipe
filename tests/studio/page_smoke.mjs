@@ -15,7 +15,7 @@
 // DTPIPE_SMOKE_BIN     a dtpipe executable, used instead of the DLL
 // Exit code 1 on any FAIL and on any script error the page raises.
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -42,8 +42,9 @@ function findChrome() {
 }
 
 const CHROME = findChrome();
-const DLL = process.env.DTPIPE_SMOKE_DLL || path.join(repo, "src/DtPipe/bin/Debug/net10.0/DtPipe.dll");
-const BIN = process.env.DTPIPE_SMOKE_BIN || null;
+// The studio is started in the job's folder, so a path given relatively is resolved here, once; a bare command name stays one for the PATH.
+const DLL = path.resolve(process.env.DTPIPE_SMOKE_DLL || path.join(repo, "src/DtPipe/bin/Debug/net10.0/DtPipe.dll"));
+const BIN = process.env.DTPIPE_SMOKE_BIN ? (/[\\/]/.test(process.env.DTPIPE_SMOKE_BIN) ? path.resolve(process.env.DTPIPE_SMOKE_BIN) : process.env.DTPIPE_SMOKE_BIN) : null;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const freePort = () => new Promise((resolve, reject) => {
@@ -63,7 +64,8 @@ const check = (name, ok, extra = "") => {
 
 // A process and what it started: Windows leaves the children of a killed parent running.
 function kill(child) {
-  if (process.platform === "win32" && child.pid) spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+  // Waited for: the folder of the run is removed right after, and a process still holding it keeps it on Windows.
+  if (process.platform === "win32" && child.pid) spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
   else child.kill("SIGKILL");
 }
 
@@ -543,7 +545,7 @@ for (const name of names) {
     check(`${name} runs to its end`, false, e.stack || String(e));
   } finally {
     studio?.stop();
-    fs.rmSync(folder, { recursive: true, force: true });
+    try { fs.rmSync(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { /* still held: the system cleans the temp folder */ }
   }
   const logs = page.logs.slice(logsBefore);
   check(`${name}: the page raised no script error`, logs.length === 0, logs.join(" ; "));
