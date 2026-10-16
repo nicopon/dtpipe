@@ -152,14 +152,9 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
     public IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync(CancellationToken ct = default)
         => ReadAllAsync(ct);
 
-    private List<PipeColumnInfo> MapSchema(Schema schema)
-    {
-        return schema.FieldsList.Select(f => new PipeColumnInfo(
-            f.Name,
-            ArrowTypeMapper.GetClrTypeFromField(f),
-            f.IsNullable
-        )).ToList();
-    }
+    // The schema-to-columns rule has one home: a copy here drops the width an Arrow decimal declares.
+    private static List<PipeColumnInfo> MapSchema(Schema schema)
+        => ArrowSchemaFactory.ToPipeColumns(schema).ToList();
 
 
 	public async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(

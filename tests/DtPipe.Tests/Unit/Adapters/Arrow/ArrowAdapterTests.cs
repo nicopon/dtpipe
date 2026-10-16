@@ -129,6 +129,46 @@ public class ArrowAdapterTests : IAsyncLifetime
 		readRows[2][1].Should().BeNull();
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task ArrowAdapter_Reader_KeepsTheDecimalWidthTheWriterDeclared(bool withBatch)
+	{
+		var columns = new List<PipeColumnInfo>
+		{
+			new("Declared", typeof(decimal), true, Precision: 10, Scale: 2),
+			new("Undeclared", typeof(decimal), true)
+		};
+
+		var writer = new ArrowAdapterDataWriter(_testArrowPath, new ArrowWriterOptions { BatchSize = 10 });
+		await writer.InitializeAsync(columns);
+		if (withBatch)
+		{
+			var bridge = new ArrowRowToColumnarBridge();
+			await bridge.InitializeAsync(columns, 10);
+			var writeTask = Task.Run(async () =>
+			{
+				await foreach (var batch in bridge.ReadRecordBatchesAsync())
+					await writer.WriteRecordBatchAsync(batch);
+			});
+			await bridge.IngestRowsAsync(new[] { new object?[] { 12.50m, 1.25m } });
+			await bridge.CompleteAsync();
+			await writeTask;
+		}
+		await writer.CompleteAsync();
+		await writer.DisposeAsync();
+
+		var reader = new ArrowAdapterStreamReader(_testArrowPath, new ArrowReaderOptions());
+		await reader.OpenAsync();
+		var read = reader.Columns!;
+		await reader.DisposeAsync();
+
+		read[0].Precision.Should().Be(10);
+		read[0].Scale.Should().Be(2);
+		read[1].Precision.Should().BeNull();
+		read[1].Scale.Should().BeNull();
+	}
+
 	[Fact]
 	public void ValueConverter_DateTimeOffset_To_DateTime_ShouldReturnUtcDateTime()
 	{

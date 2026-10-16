@@ -114,6 +114,39 @@ got="$(mysql_shape probe_declared_dec_chan_decl)"
 if [ "$got" = "10,2" ]; then ok "channel: declared decimal keeps its width"; else fail "channel declared: expected '10,2', got '$got'"; fi
 docker exec dtpipe-integ-mysql mysql -utestuser -ppassword integration -e "drop table if exists probe_declared_dec_chan_none; drop table if exists probe_declared_dec_chan_decl" >/dev/null 2>&1 || true
 
+# Through an `arrow:` hop: the reader returns the width the Arrow schema declares, so the CREATE TABLE
+# built before the first batch matches a direct read. Each catalog reports the width its own way.
+"$DTPIPE" -i "duck::memory:" --query "select 12.50::DECIMAL(10,2) as amount" -o "arrow:$TMP_DIR/hop.arrow" --no-stats >/dev/null 2>&1 \
+  || fail "arrow hop: writing the file failed"
+arrow_shape() {
+  case "$1" in
+    postgres) docker exec dtpipe-integ-postgres psql -U postgres -d integration -tAc \
+      "select numeric_precision||','||numeric_scale from information_schema.columns where table_name='probe_arrow_dec'" ;;
+    mysql) docker exec dtpipe-integ-mysql mysql -N -utestuser -ppassword integration -e \
+      "select concat(numeric_precision, ',', numeric_scale) from information_schema.columns where table_schema='integration' and table_name='probe_arrow_dec'" 2>/dev/null ;;
+    sqlserver) docker exec dtpipe-integ-mssql-tools bash -c "/opt/mssql-tools*/bin/sqlcmd -C -S dtpipe-integ-mssql -U sa -P 'Password123!' -h -1 -W -Q \"set nocount on; select cast(numeric_precision as varchar)+','+cast(numeric_scale as varchar) from master.information_schema.columns where table_name='probe_arrow_dec'\"" ;;
+    oracle) docker exec -i dtpipe-integ-oracle sqlplus -s system/password@//localhost:1521/FREEPDB1 <<'SQL'
+set heading off feedback off
+select data_precision||','||data_scale from all_tab_columns where owner='TESTUSER' and table_name='PROBE_ARROW_DEC';
+SQL
+    ;;
+  esac
+}
+for target in "postgres|$PG" "mysql|$MYSQL" "sqlserver|$MSSQL" "oracle|$ORA"; do
+  label="${target%%|*}"; conn="${target#*|}"
+  if ! "$DTPIPE" -i "arrow:$TMP_DIR/hop.arrow" -o "$conn" --table probe_arrow_dec --strategy Recreate --no-stats >/dev/null 2>&1; then
+    fail "$label arrow hop: dtpipe failed"; continue
+  fi
+  got="$(arrow_shape "$label" | tr -d ' \r' | grep -v '^$' | head -1)"
+  if [ "$got" = "10,2" ]; then ok "$label arrow hop keeps the declared width"; else fail "$label arrow hop: expected '10,2', got '$got'"; fi
+done
+docker exec dtpipe-integ-postgres psql -U postgres -d integration -c "drop table if exists probe_arrow_dec" >/dev/null 2>&1 || true
+docker exec dtpipe-integ-mysql mysql -utestuser -ppassword integration -e "drop table if exists probe_arrow_dec" >/dev/null 2>&1 || true
+docker exec dtpipe-integ-mssql-tools bash -c '/opt/mssql-tools*/bin/sqlcmd -C -S dtpipe-integ-mssql -U sa -P "Password123!" -Q "drop table if exists master.dbo.probe_arrow_dec"' >/dev/null 2>&1 || true
+docker exec -i dtpipe-integ-oracle sqlplus -s system/password@//localhost:1521/FREEPDB1 >/dev/null 2>&1 <<'SQL' || true
+drop table testuser.probe_arrow_dec purge;
+SQL
+
 docker exec dtpipe-integ-postgres psql -U postgres -d integration -c "drop table if exists probe_declared_dec_w" >/dev/null 2>&1 || true
 docker exec dtpipe-integ-mysql mysql -utestuser -ppassword integration -e "drop table if exists probe_declared_dec_w" >/dev/null 2>&1 || true
 docker exec dtpipe-integ-mssql-tools bash -c '/opt/mssql-tools*/bin/sqlcmd -C -S dtpipe-integ-mssql -U sa -P "Password123!" -Q "drop table if exists master.dbo.probe_declared_dec_w; drop table if exists master.dbo.probe_declared_dec"' >/dev/null 2>&1 || true
