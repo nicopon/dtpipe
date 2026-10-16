@@ -239,7 +239,7 @@ public sealed partial class StudioServer
 
     private async Task DebugAsync(HttpContext context)
     {
-        var cutter = _tools.Debug ?? throw new StudioRefusal(404, "This studio runs no debug run.");
+        var cutter = _tools.Engine.Cutter;
         var asked = await BodyAsync<DebugRequest>(context);
         var rows = Math.Clamp(asked.Rows ?? 1000, 1, DebugMaxRows);
         var key = DebugKey(asked.Path, asked.Draft);
@@ -261,7 +261,7 @@ public sealed partial class StudioServer
             return (cut.Yaml, cut.Dropped, cut.Unread);
         }
 
-        var sampler = _tools.DebugSample ?? _tools.Sample;
+        var sampler = _tools.Engine.DebugSampleAsync;
         string? reported = null;
         async Task<string> Run(string yaml, int n, StudioBindings bindings, CancellationToken ct)
         {
@@ -320,7 +320,7 @@ public sealed partial class StudioServer
     /// </summary>
     private async Task DebugStateAsync(HttpContext context)
     {
-        var cutter = _tools.Debug ?? throw new StudioRefusal(404, "This studio runs no debug run.");
+        var cutter = _tools.Engine.Cutter;
         var asked = await BodyAsync<DebugStateRequest>(context);
         var rows = Math.Clamp(asked.Rows ?? 1000, 1, DebugMaxRows);
         var key = DebugKey(asked.Path, asked.Draft);
@@ -375,7 +375,7 @@ public sealed partial class StudioServer
     /// </summary>
     private async Task DebugPlanAsync(HttpContext context)
     {
-        var cutter = _tools.Debug ?? throw new StudioRefusal(404, "This studio runs no debug run.");
+        var cutter = _tools.Engine.Cutter;
         var asked = await BodyAsync<DebugPlanRequest>(context);
         var plan = PlanOf(cutter, asked.Yaml, Math.Clamp(asked.Rows ?? 1000, 1, DebugMaxRows));
         await JsonAsync(context, new { view = DebugView(plan, new DebugState(), null) });

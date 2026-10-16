@@ -14,6 +14,13 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using System.Collections.Concurrent;
+using DtPipe.Cli;
+using DtPipe.Cli.Mcp;
+using DtPipe.Cli.Split;
+using DtPipe.Cli.Studio;
+using DtPipe.Core.Abstractions;
+using DtPipe.DryRun;
 
 namespace DtPipe.Tests.Unit.Cli;
 
@@ -222,4 +229,55 @@ internal sealed class StudioFakes : IAsyncDisposable
         if (_idp is not null) await _idp.DisposeAsync();
         if (_coordinator is not null) await _coordinator.DisposeAsync();
     }
+}
+
+/// <summary>
+/// A studio engine that answers what a test sets. <see cref="Run"/> reports through <c>failures</c> and its
+/// exception comes back as the outcome's fault, as <see cref="JobRunner"/> returns it.
+/// </summary>
+internal sealed class FakeStudioEngine : IStudioEngine
+{
+    public Func<string, int, StudioBindings, CancellationToken, Task<string>> Sample { get; init; } = (_, _, _, _) => Task.FromResult("{}");
+
+    public Func<string, StudioBindings, ConcurrentDictionary<string, string>, CancellationToken, Task<int>> Run { get; init; } =
+        (_, _, _, _) => Task.FromResult(0);
+
+    public DebugCutter Cutter { get; } = new([], [], []);
+
+    public Task<string> SampleAsync(string yaml, int rows, StudioBindings bindings, CancellationToken ct) => Sample(yaml, rows, bindings, ct);
+
+    public Task<string> DebugSampleAsync(string yaml, int rows, StudioBindings bindings, CancellationToken ct) => Sample(yaml, rows, bindings, ct);
+
+    public async Task<RunOutcome> RunAsync(string yaml, StudioBindings bindings, CancellationToken ct)
+    {
+        var failures = new ConcurrentDictionary<string, string>();
+        var code = 1;
+        Exception? fault = null;
+        try { code = await Run(yaml, bindings, failures, ct); }
+        catch (Exception ex) { fault = ex; }
+        return new RunOutcome(code, fault, failures, new Dictionary<string, SampleReport>(), new Dictionary<string, string>());
+    }
+}
+
+/// <summary>An engine whose sample a test may replace while the rest stays the real one.</summary>
+internal sealed class SwitchableEngine(IStudioEngine inner, Func<Func<string, int, StudioBindings, CancellationToken, Task<string>>?> sample) : IStudioEngine
+{
+    public DebugCutter Cutter => inner.Cutter;
+
+    public Task<string> SampleAsync(string yaml, int rows, StudioBindings bindings, CancellationToken ct) =>
+        sample() is { } replaced ? replaced(yaml, rows, bindings, ct) : inner.SampleAsync(yaml, rows, bindings, ct);
+
+    public Task<string> DebugSampleAsync(string yaml, int rows, StudioBindings bindings, CancellationToken ct) =>
+        inner.DebugSampleAsync(yaml, rows, bindings, ct);
+
+    public Task<RunOutcome> RunAsync(string yaml, StudioBindings bindings, CancellationToken ct) => inner.RunAsync(yaml, bindings, ct);
+}
+
+internal static class StudioEngines
+{
+    /// <summary>The engine <c>dtpipe studio</c> builds, over the services of a test.</summary>
+    public static StudioEngine Real(IServiceProvider services) => new(
+        services.GetRequiredService<DtPipeMcpTools>(), services.GetRequiredService<JobRunner>(),
+        new DebugCutter(services.GetServices<IStreamReaderFactory>().ToList(), services.GetServices<IDataWriterFactory>().ToList(),
+            services.GetServices<IStreamTransformerFactory>().ToList()));
 }

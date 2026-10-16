@@ -1,4 +1,5 @@
-using System.Collections.Concurrent;
+using DtPipe.Cli.Studio;
+using DtPipe.Tests.Unit.Cli;
 using AwesomeAssertions;
 using DtPipe.Cli.Mcp;
 using DtPipe.Sessions;
@@ -56,18 +57,17 @@ public sealed class ConcurrentRunCollectionTests : IDisposable
 		var ct = TestContext.Current.CancellationToken;
 
 		// A real run that commits a checkpoint, and a sample of another linear job, started together.
-		var checkpoints = new ConcurrentDictionary<string, string>();
-		var real = tools.RunJobAsync(
-			"real:\n  input: generate:200000\n  checkpoint: held\n  output: \"null:\"\n",
-			bindInput: null, bindOutput: null, new ConcurrentDictionary<string, string>(), ct, checkpoints);
+		var real = StudioEngines.Real(sp).RunAsync(
+			"real:\n  input: generate:200000\n  checkpoint: held\n  output: \"null:\"\n", StudioBindings.None, ct);
 		var sample = await tools.SampleAsync("sample:\n  input: generate:50\n  output: \"null:\"\n", rows: 5, shownRows: 5, ct);
-		(await real).Should().Be(0);
+		var outcome = await real;
+		outcome.ExitCode.Should().Be(0);
 
 		var branches = System.Text.Json.JsonDocument.Parse(sample).RootElement.GetProperty("branches");
 		branches.EnumerateArray().Select(b => b.GetProperty("branch").GetString())
 			.Should().Equal(["sample"], "the sample reports its own branch, not the real run's");
 		branches[0].GetProperty("checkpoint").ValueKind.Should().Be(System.Text.Json.JsonValueKind.Null,
 			"the sample took no checkpoint, and the real run's key is not its own");
-		checkpoints.Keys.Should().ContainSingle().Which.Should().Be("real", "the real run reads the key of its own checkpoint");
+		outcome.Checkpoints.Keys.Should().ContainSingle().Which.Should().Be("real", "the real run reads the key of its own checkpoint");
 	}
 }

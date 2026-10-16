@@ -23,7 +23,7 @@ public sealed class StudioServerTests : IAsyncLifetime
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "studio-" + Guid.NewGuid().ToString("N"));
     private readonly HttpClient _http = new();
     private StudioServer _server = null!;
-    private StudioSampler _sampler = (_, _, _, _) => Task.FromResult("{}");
+    private Func<string, int, StudioBindings, CancellationToken, Task<string>> _sampler = (_, _, _, _) => Task.FromResult("{}");
     private readonly InMemorySecretsManager _secrets = new();
 
     public async ValueTask InitializeAsync()
@@ -35,7 +35,7 @@ public sealed class StudioServerTests : IAsyncLifetime
         File.WriteAllText(Path.Combine(_dir, ".hidden", "c.yaml"), "c: 1\n");
         File.WriteAllText(Path.Combine(_dir, "notes.txt"), "not a job\n");
         _server = await StudioServer.StartAsync(new StudioFolder(_dir), 0, new StudioTools(
-            (y, r, b, ct) => _sampler(y, r, b, ct), new DesignService(IBrickLookup.None),
+            new FakeStudioEngine { Sample = (y, r, b, ct) => _sampler(y, r, b, ct) }, new DesignService(IBrickLookup.None),
             [new StudioComponent("csv", "Files")], [new StudioComponent("duck", "Databases")], _secrets), CancellationToken.None);
     }
 
@@ -728,7 +728,7 @@ public sealed class StudioServerTests : IAsyncLifetime
     {
         IReadOnlyList<string>? received = null;
         await using var server = await StudioServer.StartAsync(new StudioFolder(_dir), 0, new StudioTools(
-            (y, r, b, ct) => _sampler(y, r, b, ct), new DesignService(IBrickLookup.None), [], [], _secrets,
+            new FakeStudioEngine { Sample = (y, r, b, ct) => _sampler(y, r, b, ct) }, new DesignService(IBrickLookup.None), [], [], _secrets,
             Import: args => { received = args; return "main:\n  input: csv:a b.csv\n"; }), CancellationToken.None);
         using var http = new HttpClient();
         async Task<(HttpStatusCode Status, JsonElement Body)> Import(object body)
@@ -756,7 +756,7 @@ public sealed class StudioServerTests : IAsyncLifetime
     public async Task A_command_that_does_not_make_a_job_is_refused_by_name_and_without_a_secret()
     {
         await using var server = await StudioServer.StartAsync(new StudioFolder(_dir), 0, new StudioTools(
-            (y, r, b, ct) => _sampler(y, r, b, ct), new DesignService(IBrickLookup.None), [], [], _secrets,
+            new FakeStudioEngine { Sample = (y, r, b, ct) => _sampler(y, r, b, ct) }, new DesignService(IBrickLookup.None), [], [], _secrets,
             Import: _ => throw new ArgumentException("no reader for Password=hunter2;")), CancellationToken.None);
         using var http = new HttpClient();
         var request = new HttpRequestMessage(HttpMethod.Post, $"http://127.0.0.1:{server.Port}/api/import")
@@ -871,11 +871,10 @@ public sealed class StudioSampleTests
         secrets.SetSecret("pgpass", sentinel);
         services.AddSingleton<ISecretsManager>(secrets);
         var provider = services.BuildServiceProvider();
-        var mcp = provider.GetRequiredService<DtPipeMcpTools>();
         var dir = Path.Combine(Path.GetTempPath(), "studio-leak-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         await using var server = await StudioServer.StartAsync(new StudioFolder(dir), 0, new StudioTools(
-            (y, r, b, ct) => mcp.SampleAsync(y, r, shownRows: r, ct, b.Input, b.Output), new DesignService(IBrickLookup.None), [], [], secrets), CancellationToken.None);
+            StudioEngines.Real(provider), new DesignService(IBrickLookup.None), [], [], secrets), CancellationToken.None);
         using var http = new HttpClient();
         async Task<string> Send(HttpMethod method, string path, object body)
         {

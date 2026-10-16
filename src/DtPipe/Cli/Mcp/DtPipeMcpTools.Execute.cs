@@ -47,16 +47,12 @@ public partial class DtPipeMcpTools
     }
 
     /// <summary>
-    /// The studio's real run: <paramref name="yamlContent"/> through <c>JobService.ExecutePipelineAsync</c>, as
-    /// <c>execute-yaml-job</c> runs it, with the same SQL safety check (destructive and network access refused).
-    /// The person's confirmation is the page's, so no approval gate is asked. <paramref name="branchFailures"/>
-    /// is filled with the reason each failing branch stopped, and <paramref name="checkpoints"/>, when given, with the key of
-    /// the checkpoint each branch committed. Returns the engine's exit code; a job that does
-    /// not validate or that the safety policy refuses throws, naming why, before anything runs.
+    /// A job text turned into what a real run executes, with the checks <c>execute-yaml-job</c> makes before it
+    /// runs: it validates, then the SQL safety policy (destructive and network access refused) judges it. The
+    /// person's confirmation is the caller's, so no approval gate is asked. A job that does not validate or that
+    /// the policy refuses throws, naming why, before anything runs.
     /// </summary>
-    internal async Task<int> RunJobAsync(string yamlContent, string? bindInput, string? bindOutput,
-        System.Collections.Concurrent.ConcurrentDictionary<string, string> branchFailures, CancellationToken ct,
-        System.Collections.Concurrent.ConcurrentDictionary<string, string>? checkpoints = null)
+    internal (Dictionary<string, JobDefinition> Jobs, JobDagDefinition Dag) ResolveForRun(string yamlContent, string? bindInput, string? bindOutput)
     {
         var parsed = ParseAndValidateYaml(yamlContent, bindInput, bindOutput);
         if (parsed.Errors.Count > 0) throw new InvalidOperationException(string.Join(" ", parsed.Errors));
@@ -64,14 +60,7 @@ public partial class DtPipeMcpTools
         if (!safety.Allowed)
             throw new InvalidOperationException("The SQL safety policy refuses this job: " + string.Join(" ", safety.Violations)
                 + " Run it with dtpipe --job and the appropriate --allow-* flag.");
-        var contexts = parsed.Jobs.ToDictionary(kv => kv.Key, kv => new CliJobContext(null, null, null, Array.Empty<string>()));
-        var runner = _serviceProvider.GetRequiredService<DtPipe.Cli.JobRunner>();
-        var outcome = await runner.RunAsync(parsed.Jobs, parsed.Dag, contexts, new GlobalOptions { Quiet = true }, ct);
-        foreach (var (alias, reason) in outcome.Failures) branchFailures[alias] = reason;
-        if (checkpoints is not null)
-            foreach (var (alias, key) in outcome.Checkpoints) checkpoints[alias] = key;
-        outcome.ThrowIfFaulted();
-        return outcome.ExitCode;
+        return (parsed.Jobs, parsed.Dag);
     }
 
     /// <summary>

@@ -19,12 +19,6 @@ using YamlDotNet.RepresentationModel;
 
 namespace DtPipe.Cli.Studio;
 
-/// <summary>
-/// Samples a job: its YAML, the source rows to read, the <c>arrow:-</c> boundaries to bind and the
-/// call's cancellation. Returns the sample as JSON.
-/// </summary>
-public delegate Task<string> StudioSampler(string yaml, int rows, StudioBindings bindings, CancellationToken ct);
-
 /// <summary>What <c>--bind-input</c> and <c>--bind-output</c> would say: <c>alias=location</c> pairs, comma-separated.</summary>
 public sealed record StudioBindings(string? Input, string? Output)
 {
@@ -35,29 +29,41 @@ public sealed record StudioBindings(string? Input, string? Output)
 public sealed record StudioComponent(string Name, string Category);
 
 /// <summary>
-/// What the studio's server works with: the sample path, the designer's model (the coordinator's
-/// own, with dtpipe's components for endpoints), the components the palette lists, the keyring
-/// a variable may be launched from, and the coordinator the command line named, if any.
+/// What the studio's server works with: the engine, the designer's model (the coordinator's own, with
+/// dtpipe's components for endpoints), the components the palette lists, the keyring a variable may be
+/// launched from, and the coordinator the command line named, if any.
 /// <see cref="DesignWith"/> gives the same model over the coordinator's bricks; without it, <see cref="Design"/> alone.
 /// </summary>
 public sealed record StudioTools(
-    StudioSampler Sample, DesignService Design, IReadOnlyList<StudioComponent> Readers, IReadOnlyList<StudioComponent> Writers,
+    IStudioEngine Engine, DesignService Design, IReadOnlyList<StudioComponent> Readers, IReadOnlyList<StudioComponent> Writers,
     ISecretsManager Secrets, CoordinatorLink? Coordinator = null, Func<IBrickLookup, DesignService>? DesignWith = null,
-    StudioImporter? Import = null, StudioRunner? Run = null, DebugCutter? Debug = null, StudioSampler? DebugSample = null,
-    StudioDebugRunner? DebugRun = null);
+    StudioImporter? Import = null);
 
 /// <summary>
-/// The real run of a saved job, the writers of its sink bricks bound to throwaway files: the engine's exit
-/// code, with the reason each failing branch stopped in <paramref name="failures"/>.
+/// The engine as the studio asks it: a sample, a real run, and the cut a preview runs. Each call carries the
+/// <c>arrow:-</c> boundaries it binds and its cancellation; a variable is armed by the caller, for the call alone.
 /// </summary>
-public delegate Task<int> StudioRunner(string yaml, StudioBindings bindings, System.Collections.Concurrent.ConcurrentDictionary<string, string> failures, CancellationToken ct);
+public interface IStudioEngine
+{
+    /// <summary>Cuts a job at the cards a preview pins.</summary>
+    DebugCutter Cutter { get; }
 
-/// <summary>
-/// A staged run: <see cref="StudioRunner"/> that also tells, in <paramref name="checkpoints"/>, the key of the checkpoint each
-/// branch committed.
-/// </summary>
-public delegate Task<int> StudioDebugRunner(string yaml, StudioBindings bindings, System.Collections.Concurrent.ConcurrentDictionary<string, string> failures,
-    System.Collections.Concurrent.ConcurrentDictionary<string, string> checkpoints, CancellationToken ct);
+    /// <summary>The sample of a job over <paramref name="rows"/> source rows, as the <c>dry-run</c> tool answers it: JSON.</summary>
+    Task<string> SampleAsync(string yaml, int rows, StudioBindings bindings, CancellationToken ct);
+
+    /// <summary>
+    /// The sample of a cut job: each source read for up to <see cref="StudioServer.DebugMaxRows"/> rows, and
+    /// <see cref="StudioServer.MaxRows"/> of them shown per stage.
+    /// </summary>
+    Task<string> DebugSampleAsync(string yaml, int rows, StudioBindings bindings, CancellationToken ct);
+
+    /// <summary>
+    /// The real run of a saved job, or of its cut, writers of the sink bricks bound to throwaway files. A job that
+    /// does not validate or that the SQL safety policy refuses throws, naming why, before anything runs; an engine fault
+    /// comes back in <see cref="RunOutcome.Fault"/> beside the failures and the checkpoints the run reached.
+    /// </summary>
+    Task<RunOutcome> RunAsync(string yaml, StudioBindings bindings, CancellationToken ct);
+}
 
 /// <summary>A command line, as the arguments of one process, as the text of the job file it stands for.</summary>
 public delegate string StudioImporter(IReadOnlyList<string> args);
@@ -488,7 +494,7 @@ public sealed partial class StudioServer : IAsyncDisposable
             throw new StudioRefusal(400, "A sample is asked as {\"yaml\": \"...\", \"rows\": n}.");
         }
         rows = Math.Clamp(rows, 1, MaxRows);
-        var json = await SampleCoreAsync(yaml, rows, path, bricks, _tools.Sample, rewrite: null, context.RequestAborted);
+        var json = await SampleCoreAsync(yaml, rows, path, bricks, _tools.Engine.SampleAsync, rewrite: null, context.RequestAborted);
         context.Response.ContentType = "application/json; charset=utf-8";
         await context.Response.WriteAsync(json, context.RequestAborted);
     }
@@ -498,7 +504,8 @@ public sealed partial class StudioServer : IAsyncDisposable
     /// sample binds them, its variables armed for this call alone and the engine slot held. <paramref name="rewrite"/>
     /// gives the job to run from the one the bricks left: the debug run's cut.
     /// </summary>
-    private async Task<string> SampleCoreAsync(string yaml, int rows, string? path, List<SampledBrick>? bricks, StudioSampler sampler,
+    private async Task<string> SampleCoreAsync(string yaml, int rows, string? path, List<SampledBrick>? bricks,
+        Func<string, int, StudioBindings, CancellationToken, Task<string>> sampler,
         Func<string, (string Yaml, IReadOnlySet<string> Dropped, IReadOnlySet<string> Unread)>? rewrite, CancellationToken ct)
     {
         // Each brick's branch is read or written on its node: here, its rows come from the coordinator.

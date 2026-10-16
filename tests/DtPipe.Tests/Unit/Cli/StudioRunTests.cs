@@ -41,25 +41,27 @@ public sealed class StudioRunTests : IAsyncLifetime
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private static DtPipeMcpTools Mcp()
+    private static StudioEngine Real()
     {
         var services = new ServiceCollection();
         Program.ConfigureServices(services);
-        return services.BuildServiceProvider().GetRequiredService<DtPipeMcpTools>();
+        return StudioEngines.Real(services.BuildServiceProvider());
     }
 
-    private async Task StartAsync(StudioRunner? runner = null, StudioSampler? sampler = null, bool coordinator = false)
+    private async Task StartAsync(Func<string, StudioBindings, ConcurrentDictionary<string, string>, CancellationToken, Task<int>>? runner = null,
+        Func<string, int, StudioBindings, CancellationToken, Task<string>>? sampler = null, bool coordinator = false)
     {
-        var mcp = runner is null ? Mcp() : null;
-        runner ??= (yaml, b, f, ct) => mcp!.RunJobAsync(yaml, b.Input, b.Output, f, ct);
+        IStudioEngine engine = runner is null
+            ? Real()
+            : new FakeStudioEngine { Run = runner, Sample = sampler ?? ((_, _, _, _) => Task.FromResult("{}")) };
         if (coordinator)
         {
             await _fakes.StartAsync();
             _link = new CoordinatorLink(new Uri(_fakes.CoordinatorUrl));
         }
         _server = await StudioServer.StartAsync(new StudioFolder(_dir), 0, new StudioTools(
-            sampler ?? ((_, _, _, _) => Task.FromResult("{}")), new DesignService(IBrickLookup.None), [], [], new InMemorySecretsManager(), _link,
-            _link is null ? null : lookup => new DesignService(lookup), Run: runner), Ct);
+            engine, new DesignService(IBrickLookup.None), [], [], new InMemorySecretsManager(), _link,
+            _link is null ? null : lookup => new DesignService(lookup)), Ct);
         if (coordinator)
         {
             var (_, login) = await CallAsync(HttpMethod.Post, "/api/coordinator/login", new { });

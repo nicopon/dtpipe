@@ -36,7 +36,7 @@ public sealed class StudioCoordinatorTests : IAsyncLifetime
         await _fakes.StartAsync();
         _link = new CoordinatorLink(new Uri(_fakes.CoordinatorUrl), _time);
         _studio = await StudioServer.StartAsync(new StudioFolder(_dir), 0, new StudioTools(
-            (_, _, _, _) => Task.FromResult("{}"), new DesignService(IBrickLookup.None), [], [], new InMemorySecretsManager(), _link), CancellationToken.None);
+            new FakeStudioEngine(), new DesignService(IBrickLookup.None), [], [], new InMemorySecretsManager(), _link), CancellationToken.None);
     }
 
     public async ValueTask DisposeAsync()

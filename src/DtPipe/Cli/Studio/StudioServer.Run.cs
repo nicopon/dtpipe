@@ -120,8 +120,7 @@ public sealed partial class StudioServer
     /// </summary>
     private StagedRun Stage(RunRequest asked, string path, string text, BrickSampling sampling, IReadOnlyDictionary<string, string> launch)
     {
-        var cutter = _tools.Debug ?? throw new StudioRefusal(404, "This studio runs no debug run.");
-        if (_tools.DebugRun is null) throw new StudioRefusal(404, "This studio runs no debug run.");
+        var cutter = _tools.Engine.Cutter;
         var key = DebugKey(path, null);
         _local.CheckDebug(key);
         var review = asked.Review == true;
@@ -188,7 +187,6 @@ public sealed partial class StudioServer
 
     private async Task PrepareRunAsync(HttpContext context)
     {
-        if (_tools.Run is null) throw new StudioRefusal(404, "This studio runs no job.");
         var plan = PlanRun(await BodyAsync<RunRequest>(context));
         await JsonAsync(context, new
         {
@@ -207,7 +205,6 @@ public sealed partial class StudioServer
 
     private async Task StartRunAsync(HttpContext context)
     {
-        var runner = _tools.Run ?? throw new StudioRefusal(404, "This studio runs no job.");
         var asked = await BodyAsync<RunRequest>(context);
         var plan = PlanRun(asked);
         const string Changed = "The job or the values it launches with changed since you confirmed: confirm what it writes again.";
@@ -245,7 +242,7 @@ public sealed partial class StudioServer
             }
             var state = new RunState(plan.Path, new CancellationTokenSource());
             lock (_runLock) _run = state;
-            state.Task = Task.Run(() => RunAsync(runner, plan, bindings, state, files));
+            state.Task = Task.Run(() => RunAsync(plan, bindings, state, files));
         }
         catch
         {
@@ -257,19 +254,23 @@ public sealed partial class StudioServer
         await JsonAsync(context, new { started = true });
     }
 
-    private async Task RunAsync(StudioRunner runner, RunPlan plan, StudioBindings bindings, RunState state, List<string> files)
+    private async Task RunAsync(RunPlan plan, StudioBindings bindings, RunState state, List<string> files)
     {
         var code = 1;
         string? error = null;
-        var checkpoints = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        IReadOnlyDictionary<string, string> checkpoints = new Dictionary<string, string>();
         try
         {
             // Armed inside the task, for this run's call chain alone; the environment is never written.
             using var armed = LaunchValues.Arm(plan.Launch);
             using var quiet = NonInteractiveGuard.Suppress();
-            code = plan.Staged is { } staged
-                ? await _tools.DebugRun!(staged.Cut.Yaml, bindings, state.Failures, checkpoints, state.Cts.Token)
-                : await runner(plan.Sampling.Yaml, bindings, state.Failures, state.Cts.Token);
+            var outcome = await _tools.Engine.RunAsync(plan.Staged?.Cut.Yaml ?? plan.Sampling.Yaml, bindings, state.Cts.Token);
+            code = outcome.ExitCode;
+            checkpoints = outcome.Checkpoints;
+            foreach (var (alias, reason) in outcome.Failures) state.Failures[alias] = reason;
+            // The engine answers a fault and a cancellation alike as a fault: a stop asked decides the verdict below.
+            if (outcome.Fault is not null && outcome.Fault is not OperationCanceledException)
+                error = ConnectionStringSanitizer.Sanitize(outcome.Fault.Message);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { error = ConnectionStringSanitizer.Sanitize(ex.Message); }

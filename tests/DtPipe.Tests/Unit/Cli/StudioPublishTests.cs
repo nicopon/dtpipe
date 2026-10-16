@@ -29,7 +29,7 @@ public sealed class StudioPublishTests : IAsyncLifetime
         await _fakes.StartAsync();
         _link = new CoordinatorLink(new Uri(_fakes.CoordinatorUrl));
         _studio = await StudioServer.StartAsync(new StudioFolder(_dir), 0, new StudioTools(
-            (_, _, _, _) => Task.FromResult("{}"), new DesignService(IBrickLookup.None), [], [], new InMemorySecretsManager(), _link,
+            new FakeStudioEngine(), new DesignService(IBrickLookup.None), [], [], new InMemorySecretsManager(), _link,
             lookup => new DesignService(lookup)), CancellationToken.None);
         File.WriteAllText(Path.Combine(_dir, "orders.yaml"), "# Orders\nmain:\n  input: duck:${{DB}}\n  output: csv:o.csv\n");
     }

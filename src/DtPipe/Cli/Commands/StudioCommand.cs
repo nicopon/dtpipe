@@ -62,24 +62,21 @@ public sealed class StudioCommand : Command
             // from the folder, as `dtpipe --job` run there would.
             Directory.SetCurrentDirectory(folder.Root);
 
-            var mcp = serviceProvider.GetRequiredService<DtPipeMcpTools>();
             var readers = serviceProvider.GetServices<IStreamReaderFactory>().ToList();
             var writers = serviceProvider.GetServices<IDataWriterFactory>().ToList();
             var endpoints = new ComponentEndpointRules(readers, writers);
+            var engine = new StudioEngine(
+                serviceProvider.GetRequiredService<DtPipeMcpTools>(), serviceProvider.GetRequiredService<JobRunner>(),
+                new DebugCutter(readers, writers, serviceProvider.GetServices<IStreamTransformerFactory>().ToList()));
             var tools = new StudioTools(
-                (yaml, rows, bindings, token) => mcp.SampleAsync(yaml, rows, shownRows: rows, token, bindings.Input, bindings.Output),
+                engine,
                 new DesignService(IBrickLookup.None, endpoints),
                 readers.Select(r => new StudioComponent(r.ComponentName, r.Category)).OrderBy(c => c.Name, StringComparer.Ordinal).ToList(),
                 writers.Select(w => new StudioComponent(w.ComponentName, w.Category)).OrderBy(c => c.Name, StringComparer.Ordinal).ToList(),
                 serviceProvider.GetRequiredService<ISecretsManager>(),
                 link,
                 lookup => new DesignService(lookup, endpoints),
-                args => CommandLineJob.Export(serviceProvider, args),
-                (yaml, bindings, failures, token) => mcp.RunJobAsync(yaml, bindings.Input, bindings.Output, failures, token),
-                new DebugCutter(readers, writers, serviceProvider.GetServices<IStreamTransformerFactory>().ToList()),
-                (yaml, rows, bindings, token) => mcp.SampleAsync(yaml, rows, shownRows: Math.Min(rows, StudioServer.MaxRows), token,
-                    bindings.Input, bindings.Output, maxRows: StudioServer.DebugMaxRows),
-                (yaml, bindings, failures, checkpoints, token) => mcp.RunJobAsync(yaml, bindings.Input, bindings.Output, failures, token, checkpoints));
+                args => CommandLineJob.Export(serviceProvider, args));
             StudioServer server;
             try
             {

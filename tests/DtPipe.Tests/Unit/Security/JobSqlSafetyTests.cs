@@ -1,4 +1,6 @@
 using DtPipe.Cli.Mcp;
+using DtPipe.Cli.Studio;
+using DtPipe.Tests.Unit.Cli;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -24,15 +26,23 @@ public sealed class JobSqlSafetyTests : IDisposable
         return services.BuildServiceProvider().GetRequiredService<DtPipeMcpTools>();
     }
 
+    private static StudioEngine Engine()
+    {
+        var services = new ServiceCollection();
+        Program.ConfigureServices(services);
+        return StudioEngines.Real(services.BuildServiceProvider());
+    }
+
     private const string ProjectDrop =
         "main:\n  input: \"generate:5\"\n  output: \"null:\"\n  transformers:\n    - type: project\n      options:\n        drop: GenerateIndex\n";
 
     [Fact]
     public async Task A_Project_Drop_Option_Is_Not_A_Destructive_Verb_In_A_Real_Run()
     {
-        var exit = await Mcp().RunJobAsync(ProjectDrop, null, null, new(), Ct);
+        var outcome = await Engine().RunAsync(ProjectDrop, StudioBindings.None, Ct);
 
-        Assert.Equal(0, exit);
+        Assert.Null(outcome.Fault);
+        Assert.Equal(0, outcome.ExitCode);
     }
 
     [Theory]

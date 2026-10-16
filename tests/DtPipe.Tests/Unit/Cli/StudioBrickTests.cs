@@ -39,7 +39,7 @@ public sealed class StudioBrickTests : IAsyncLifetime
     private ServiceProvider _services = null!;
     private CoordinatorLink _link = null!;
     private StudioServer _studio = null!;
-    private StudioSampler? _sampler;
+    private Func<string, int, StudioBindings, CancellationToken, Task<string>>? _sampler;
 
     public async ValueTask InitializeAsync()
     {
@@ -52,10 +52,10 @@ public sealed class StudioBrickTests : IAsyncLifetime
             Out = new AnsiConsoleOutput(new StringWriter()), Ansi = AnsiSupport.No, Interactive = InteractionSupport.No,
         }));
         _services = services.BuildServiceProvider();
-        var mcp = _services.GetRequiredService<DtPipeMcpTools>();
+        var real = StudioEngines.Real(_services);
         _link = new CoordinatorLink(new Uri(_fakes.CoordinatorUrl), _time);
         _studio = await StudioServer.StartAsync(new StudioFolder(_dir), 0, new StudioTools(
-            (y, r, b, ct) => _sampler?.Invoke(y, r, b, ct) ?? mcp.SampleAsync(y, r, shownRows: r, ct, b.Input, b.Output),
+            new SwitchableEngine(real, () => _sampler),
             new DesignService(IBrickLookup.None), [], [], new InMemorySecretsManager(), _link, lookup => new DesignService(lookup)),
             CancellationToken.None);
     }

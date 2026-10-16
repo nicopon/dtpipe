@@ -164,7 +164,7 @@ Mandatory MCP directives:
 ### One run, one report collection
 
 The agent runs the tools of a turn in parallel (F5), so two runs overlap. `JobRunner` is the only
-caller-facing way to run a resolved job (MCP, `split`, `contract`): it arms a `RunReports` for the run
+caller-facing way to run a resolved job (MCP, `split`, `contract`, the studio): it arms a `RunReports` for the run
 through `SampleReportCollector.Begin`, around the whole `ExecutePipelineAsync`, and returns a
 `RunOutcome` (exit code, branch failures, reports, checkpoint keys). `SampleReportCollector` is the
 singleton the engine and the observer publish to; it forwards to the collection the calling async flow
@@ -190,9 +190,11 @@ publishing it. Look first at what dtpipe tells the model about itself.
 ## Studio
 
 `dtpipe studio [folder]` (`StudioCommand`, `Cli/Studio/`) serves a local page over a folder's YAML
-jobs and samples them through `DtPipeMcpTools.SampleAsync`, the `dry-run` tool's own path: never a
-second sample path. `StudioServer` runs one engine action at a time (409 otherwise), as the debug state
-and the quit require. Kestrel is referenced for this server alone.
+jobs and runs them through `IStudioEngine` (`StudioTools.Engine`, never null: a test double implements all of
+it). `StudioEngine` samples through `DtPipeMcpTools.SampleAsync`, the `dry-run` tool's own path: never a
+second sample path, and runs through `DtPipeMcpTools.ResolveForRun` and `JobRunner`. `StudioServer` runs
+one engine action at a time (409 otherwise), as the debug state and the quit require. Kestrel is referenced
+for this server alone.
 
 The page is the designer: `DesignService` (`DtPipe.Jobs`, the coordinator's own model) composes the
 cards and takes a job apart, never the page. `ComponentEndpointRules` gives it dtpipe's readers and
@@ -285,9 +287,9 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   through `ConnectionStringSanitizer.Redact`, the writer's block as the file holds it (never
   interpreted), a sink brick as a throwaway file. Its digest, an HMAC of the text and the launch
   values by name under the session's token, is what `POST /api/run` must carry: another text or
-  another value is a 409. The run goes through `JobService.ExecutePipelineAsync` (`RunJobAsync`,
-  the SQL safety policy kept), holds the sample's semaphore (409 for a sample, a run or a quit
-  beside it), and reports each branch's failure through `ConnectionStringSanitizer.Sanitize`.
+  another value is a 409. The run goes through `IStudioEngine.RunAsync`: `ResolveForRun` validates the
+  job, then the SQL safety policy judges it, and only then `JobRunner` runs it. It holds the sample's
+  semaphore (409 for a sample, a run or a quit beside it), and reports each branch's failure through `ConnectionStringSanitizer.Sanitize`.
   **A stop asked while the run was unfinished ends in 130**, whether the engine threw (a linear
   job) or answered 1 or 0 (a DAG); a run finished before the stop keeps its code and a later stop
   is a 409. `[CI: StudioRunTests]` `[local: studio_check.py]`
@@ -319,9 +321,8 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   loses only the writer's keys and blocks, `WithoutWriter`; a job no branch of which writes is refused), because the engine neutralises nothing
   outside a sample. The cursor and its state file move with the piece that writes the branch
   (`JobCutter` puts them on the head, which would advance them for rows no target received). The
-  engine reports the key of each committed checkpoint through `RunOutcome.Checkpoints`
-  (`StudioDebugRunner`). A level of a real run is keyed to every row and to a salt (an HMAC under the
-  session's token of the launch values and the state files a cursor reads), so it serves no sample and no
+  engine reports the key of each committed checkpoint through `RunOutcome.Checkpoints`. A level of a real run is keyed to every row and to a salt (an HMAC
+  under the session's token of the launch values and the state files a cursor reads), so it serves no sample and no
   other values; a write that reached the end of the job deletes the levels that fed it, one that stopped
   or failed keeps what it completed as `real` (`DebugState.Real`), and until it is continued or abandoned
   (`resetAll`) a sample, a change of watchers and any run but its continuation are a 409.

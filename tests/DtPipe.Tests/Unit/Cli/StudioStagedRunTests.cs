@@ -34,14 +34,8 @@ public sealed class StudioStagedRunTests : IAsyncLifetime
         var services = new ServiceCollection();
         Program.ConfigureServices(services);
         _services = services.BuildServiceProvider();
-        var mcp = _services.GetRequiredService<DtPipeMcpTools>();
         _server = await StudioServer.StartAsync(new StudioFolder(_dir), 0, new StudioTools(
-            (y, r, b, ct) => mcp.SampleAsync(y, r, shownRows: r, ct, b.Input, b.Output), new DesignService(IBrickLookup.None), [], [],
-            new InMemorySecretsManager(),
-            Run: (y, b, f, ct) => mcp.RunJobAsync(y, b.Input, b.Output, f, ct),
-            Debug: Cutter(),
-            DebugSample: (y, r, b, ct) => mcp.SampleAsync(y, r, shownRows: Math.Min(r, 1000), ct, b.Input, b.Output, maxRows: StudioServer.DebugMaxRows),
-            DebugRun: (y, b, f, c, ct) => mcp.RunJobAsync(y, b.Input, b.Output, f, ct, c)), CancellationToken.None);
+            StudioEngines.Real(_services), new DesignService(IBrickLookup.None), [], [], new InMemorySecretsManager()), CancellationToken.None);
     }
 
     public async ValueTask DisposeAsync()
