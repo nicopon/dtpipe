@@ -48,7 +48,7 @@ public partial class DtPipeMcpTools
 
     /// <summary>
     /// The studio's real run: <paramref name="yamlContent"/> through <c>JobService.ExecutePipelineAsync</c>, as
-    /// <c>execute-yaml-job</c> runs it, with the same SQL safety check (destructive and network verbs refused).
+    /// <c>execute-yaml-job</c> runs it, with the same SQL safety check (destructive and network access refused).
     /// The person's confirmation is the page's, so no approval gate is asked. <paramref name="branchFailures"/>
     /// is filled with the reason each failing branch stopped, and <paramref name="checkpoints"/>, when given, with the key of
     /// the checkpoint each branch committed. Returns the engine's exit code; a job that does
@@ -60,7 +60,7 @@ public partial class DtPipeMcpTools
     {
         var parsed = ParseAndValidateYaml(yamlContent, bindInput, bindOutput);
         if (parsed.Errors.Count > 0) throw new InvalidOperationException(string.Join(" ", parsed.Errors));
-        var safety = DefaultSqlSafetyPolicy.DryRunYaml(yamlContent, new SqlSafetyOptions());
+        var safety = CheckJobSafety(parsed, new SqlSafetyOptions());
         if (!safety.Allowed)
             throw new InvalidOperationException("The SQL safety policy refuses this job: " + string.Join(" ", safety.Violations)
                 + " Run it with dtpipe --job and the appropriate --allow-* flag.");
@@ -84,6 +84,14 @@ public partial class DtPipeMcpTools
             foreach (var (alias, key) in collector.Checkpoints) checkpoints[alias] = key;
         }
     }
+
+    /// <summary>
+    /// The SQL safety verdict on a parsed job: the SQL it carries, as the run will read it,
+    /// judged by the policy the sample run uses (see <see cref="Sessions.JobSqlSafety"/>).
+    /// </summary>
+    private SqlSafetyResult CheckJobSafety(YamlParseResult parsed, SqlSafetyOptions options) =>
+        Sessions.JobSqlSafety.Evaluate(
+            parsed.Jobs, _readerFactories, _writerFactories, new DefaultSqlSafetyPolicy(), options);
 
     /// <summary>
     /// What the job is shaped like, returned beside the verdict.
@@ -260,7 +268,7 @@ public partial class DtPipeMcpTools
              bool effectiveAllowDestructive = agentOpts?.AllowDestructive ?? allowDestructive;
              bool effectiveAllowNetwork = agentOpts?.AllowNetwork ?? allowNetwork;
 
-              var safety = DefaultSqlSafetyPolicy.DryRunYaml(yamlContent, new SqlSafetyOptions
+              var safety = CheckJobSafety(parsed, new SqlSafetyOptions
                     {
                   AllowDestructive = effectiveAllowDestructive,
                   AllowNetwork = effectiveAllowNetwork

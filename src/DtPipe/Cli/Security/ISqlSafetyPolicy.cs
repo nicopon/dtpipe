@@ -135,19 +135,4 @@ public sealed class DefaultSqlSafetyPolicy : ISqlSafetyPolicy
                   DetectedDestructive = destructiveMatches
                  };
             }
-
-          /// <summary>
-           /// Analyzes a whole YAML job string for destructive verbs / network access. This is the
-           /// guardrail's fast pre-check: it fails closed on the raw text so an obviously unsafe plan
-           /// is refused before it is executed. (Per-branch provider-option inspection is a
-           /// finer-grained follow-up; the text scan covers the common cases.)
-           /// </summary>
-        public static SqlSafetyResult DryRunYaml(string yaml, SqlSafetyOptions options)
-             {
-              if (string.IsNullOrWhiteSpace(yaml))
-                   return SqlSafetyResult.Ok();
-
-              var policy = new DefaultSqlSafetyPolicy();
-              return policy.Analyze(yaml, options);
-                  }
-          }
+}

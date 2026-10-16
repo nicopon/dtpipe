@@ -78,7 +78,7 @@ hooks** (SQL on the target connection), the cursor and the metrics file.
 A reader can mutate: `DELETE … RETURNING`, `… OUTPUT`, `--duck-init`, an `ATTACH` inside `--sql`.
 `--limit` bounds what the client reads, never what the server already destroyed.
 `SampleModeSafetyGate` classifies the **resolved** pipeline's source SQL (so a `@file` query is
-covered, unlike the YAML text scan), and `ISqlDialect.ReadOnlySessionSql` lets the server refuse
+covered), and `ISqlDialect.ReadOnlySessionSql` lets the server refuse
 instead of a regex guessing.
 
 Never classify writer hooks: they are already suppressed, so refusing them adds no safety and trains
@@ -87,7 +87,13 @@ users to pass `--allow-destructive` by reflex, which unlocks the source side too
 SQL Server returns `null` for `ReadOnlySessionSql`: `ApplicationIntent=ReadOnly` routes to a replica
 and does not make a session read-only. The report states which guarantee the run had.
 
-`[CI: SampleModeSafetyGateTests, SampleModeDagTests, validate_sample_safety.sh]` `[unchecked: a query that writes
+A real run (`execute-yaml-job`, the studio's run) is checked by `JobSqlSafety` on the **parsed** job,
+with the same rule and policy: the SQL of each provider block (a reader's query, a writer's hooks, a
+stream processor's text values) and the network reach of each endpoint, never the YAML text, a key, a
+comment or a transformer option. A real run executes the writer's hooks, so they are classified there.
+The "what is SQL" rule lives once, in `SampleModeSafetyGate.SqlBearingValues`.
+
+`[CI: SampleModeSafetyGateTests, SampleModeDagTests, JobSqlSafetyTests, validate_sample_safety.sh]` `[unchecked: a query that writes
 through a function — SELECT my_function() passes a verb scan, hence the server-enforced form]`
 
 ## Checkpoints — mechanics

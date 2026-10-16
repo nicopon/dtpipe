@@ -31,9 +31,8 @@ public sealed record SampleSafetyVerdict(
 /// Two differences from the guardrail that existed before:
 ///
 /// <list type="bullet">
-/// <item><b>It classifies the RESOLVED pipeline, not the YAML text.</b> The MCP pre-check runs
-/// before IStringContentResolver, so <c>query: "@/tmp/x.sql"</c> passed it with its contents
-/// never seen.</item>
+/// <item><b>It classifies the RESOLVED pipeline, not the YAML text.</b> A <c>query: "@/tmp/x.sql"</c>
+/// is judged by its contents; <see cref="JobSqlSafety"/> applies the same rule to a job before a real run.</item>
 /// <item><b>It covers the CLI too.</b> There was exactly one call site for ISqlSafetyPolicy in
 /// the repository, on execute-yaml-job; the MCP dry-run tool and --dry-run had none — they were
 /// protected by not executing, and this path executes.</item>
@@ -51,7 +50,7 @@ public static class SampleModeSafetyGate
     /// A comment is not executed, so each value is classified without its comments, by the rule of
     /// <see cref="SqlQueryGuard.StripComments"/>; a text that rule cannot read the way every engine
     /// does is classified whole. That also stops a network pattern inside a comment from refusing the
-    /// run. The policy itself still scans raw text: the MCP pre-check hands it YAML, which is not SQL.
+    /// run. The policy scans the text it is given, so its caller hands it SQL, never a YAML document.
     /// </summary>
     public static SampleSafetyVerdict Evaluate(
         ISqlSafetyPolicy policy,
@@ -88,11 +87,29 @@ public static class SampleModeSafetyGate
     /// </summary>
     public static IEnumerable<string?> CollectSqlBearingValues(OptionsRegistry registry, Type? readerOptionsType)
     {
-        if (readerOptionsType is null) yield break;
+        if (readerOptionsType is null) return [];
 
-        var readerOpts = registry.Get(readerOptionsType);
-        if (readerOpts is IQueryAwareOptions q) yield return q.Query;
-        foreach (var v in SqlishProperties(readerOpts)) yield return v;
+        return SqlBearingValues(registry.Get(readerOptionsType), includeWriterHooks: false);
+    }
+
+    /// <summary>
+    /// The SQL one options object carries: its query, the properties whose name marks them as SQL
+    /// and, for a run that executes the writer, its four hooks. The one rule that says what is SQL,
+    /// for a sample run and for a real one.
+    /// </summary>
+    public static IEnumerable<string?> SqlBearingValues(object? options, bool includeWriterHooks)
+    {
+        if (options is null) yield break;
+
+        if (options is IQueryAwareOptions q) yield return q.Query;
+        if (includeWriterHooks && options is IHookAware hooks)
+        {
+            yield return hooks.PreExec;
+            yield return hooks.PostExec;
+            yield return hooks.OnErrorExec;
+            yield return hooks.FinallyExec;
+        }
+        foreach (var v in SqlishProperties(options)) yield return v;
     }
 
     /// <summary>

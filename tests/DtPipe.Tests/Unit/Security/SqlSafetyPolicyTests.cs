@@ -69,31 +69,6 @@ public class DefaultSqlSafetyPolicyTests
              Assert.True(result.Allowed);
               }
 
-         [Fact]
-    public void DryRunYaml_Blocks_Destructive_Inside_Yaml()
-            {
-             var yaml = "main:\n  input: \"pg:host=localhost;Database=prod\"\n  provider-options:\n    pg:\n      pre-exec: \"DROP TABLE IF EXISTS sales\"\n";
-             var result = DefaultSqlSafetyPolicy.DryRunYaml(yaml, new SqlSafetyOptions());
-             Assert.False(result.Allowed);
-             Assert.Contains(result.DetectedDestructive, d => d == "DROP");
-              }
-
-         [Fact]
-    public void DryRunYaml_Blocks_Network_Inside_Yaml()
-            {
-             var yaml = "main:\n  input: \"duck:m.db\"\n  provider-options:\n    duck:\n      duck-init: \"LOAD httpfs; SET s3_region='eu'\"\n";
-             var result = DefaultSqlSafetyPolicy.DryRunYaml(yaml, new SqlSafetyOptions());
-             Assert.False(result.Allowed);
-             Assert.True(result.NetworkDetected);
-              }
-
-         [Fact]
-    public void DryRunYaml_Allows_Pure_Read_Yaml()
-              {
-               var yaml = "main:\n  input: \"csv:sales.csv\"\n  output: \"parquet:sales.parquet\"\n";
-              var result = DefaultSqlSafetyPolicy.DryRunYaml(yaml, new SqlSafetyOptions());
-              Assert.True(result.Allowed);
-                }
         /// <summary>
         /// F2 regression: the s3/azure providers fetch over the network without any SQL in the
         /// job, so scanning only for read_parquet(...) let "input: s3://..." bypass the gate.
@@ -120,17 +95,6 @@ public class DefaultSqlSafetyPolicyTests
             var result = _policy.Analyze(connectionString, new SqlSafetyOptions { AllowNetwork = true });
 
             Assert.True(result.Allowed);
-            Assert.True(result.NetworkDetected);
-        }
-
-        [Fact]
-        public void DryRunYaml_Blocks_ObjectStorage_Input()
-        {
-            var yaml = "main:\n  input: \"s3://bucket/events.parquet\"\n  output: \"out.csv\"\n";
-
-            var result = DefaultSqlSafetyPolicy.DryRunYaml(yaml, new SqlSafetyOptions());
-
-            Assert.False(result.Allowed);
             Assert.True(result.NetworkDetected);
         }
 

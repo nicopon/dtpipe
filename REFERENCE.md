@@ -1537,6 +1537,9 @@ than executes. Every unlock flag is documented so nothing is implicit.
    - Network access: `LOAD httpfs` / `LOAD azure`, and `read_parquet`/`read_csv`/`read_json`
      over `http(s)://`, `s3://`, `ftp://` or `gs://` → unblock with `--allow-network`.
    - Pure `SELECT`-style reads always pass.
+   - The check reads the SQL the job carries (a reader's query, a writer's hooks, a SQL processor's
+     text, `@file` contents included) and each endpoint's connection string for network access.
+     A key, a comment or a transformer option (`drop:` of `project`) is never read as SQL.
 - **Approval gate** (`DefaultApprovalGate`). A real write is approved only when `apply` is set
    **and** either the context is interactive or an override predicate grants it. Non-interactive
    ⇒ write denied (read-only).
