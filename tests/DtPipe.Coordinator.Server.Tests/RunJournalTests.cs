@@ -52,4 +52,21 @@ public sealed class RunJournalTests : IDisposable
         var replica = Assert.Single(Assert.Single(again.List()).Result!.Replicas!);
         Assert.Equal(("p@n", "1a2b3c4d", "host:42"), (replica.Key, replica.Value.Id, replica.Value.Origin));
     }
+
+    [Fact]
+    public void The_Plan_A_Run_Ran_Is_Kept_With_The_Run()
+    {
+        var options = new CoordinatorServerOptions { StateDir = _dir, Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret" };
+        var plan = new RunPlan(
+            "plan-9", "runner-1", [new RunPlanFragment("p@n", "n", "v1"), new RunPlanFragment("p@runner-1", "runner-1", "v2")],
+            [new RunPlanBinding("src", "n", "customers", "b1", "strict", BindingVerdicts.Exact)]);
+        new RunJournal(options, NullLogger<RunJournal>.Instance).Record(
+            new RunView("run-1", "plan-9", RunState.Succeeded, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null, null, null, "p", DateTimeOffset.UtcNow, plan));
+
+        var back = Assert.Single(new RunJournal(options, NullLogger<RunJournal>.Instance).List());
+
+        Assert.Equal(plan.Runner, back.Plan!.Runner);
+        Assert.Equal(plan.Fragments, back.Plan.Fragments);
+        Assert.Equal(plan.Bindings, back.Plan.Bindings);
+    }
 }

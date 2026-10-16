@@ -14,11 +14,12 @@ public sealed record DeployedFragment(string Name, string Node, string Version, 
 public sealed record DeploymentView(
     string PipelineId, string PlanId, string Origin, [property: JsonConverter(typeof(WireEnumConverter<DeploymentState>))] DeploymentState State,
     DateTimeOffset DeployedAt, string? Message,
-    IReadOnlyList<DeployedFragment> Fragments, int Edges, int Queued, string? RunningRunId);
+    IReadOnlyList<DeployedFragment> Fragments, int Edges, int Queued, string? RunningRunId,
+    string? Commit = null, IReadOnlyList<string>? Nodes = null);
 
 /// <summary>
-/// What the routes see of deployments and runs. A deployment is the coordinator's: the plan, where it came from, and a
-/// state (<see cref="DeploymentService"/>); nothing of it is left on a node. A run is queued, sent to the orchestrator and
+/// What the routes see of deployments and runs. A deployment is the coordinator's: a library pipeline armed at a commit, or a
+/// plan the Lab view fixed, where it came from, and a state (<see cref="DeploymentService"/>); nothing of it is left on a node. A run is queued, sent to the orchestrator and
 /// journaled (<see cref="RunQueue"/>); several pipelines may be deployed at once, their fragments told apart by name
 /// (<c>&lt;pipeline&gt;@&lt;node&gt;</c>). Fault injection on a deployed fragment is the bench's (<see cref="LabFaults"/>).
 /// The three share one <see cref="DeploymentLedger"/> and its lock; this class composes them and decides nothing.
@@ -28,14 +29,19 @@ public sealed class DeploymentManager
     private readonly DeploymentService _deployments;
     private readonly RunQueue _runs;
     private readonly LabFaults _lab;
+    private readonly LaunchPlanner _planner;
 
     public DeploymentManager(
         NodeInventory inventory, INodeLink link, IRunOrchestrator orchestrator, ReplicaAdmission admission,
-        IFlowControlService flowControl, RightsStore rights, EventBus bus, RunJournal journal, ILogger<DeploymentManager> logger)
+        IFlowControlService flowControl, RightsStore rights, EventBus bus, RunJournal journal,
+        AutoPlacer placer, BrickCatalog bricks, IJobSource jobs, CoordinatorServerOptions options, ILogger<DeploymentManager> logger)
     {
         var ledger = new DeploymentLedger();
-        _deployments = new DeploymentService(ledger, inventory, link, admission, new PlanRegistry(flowControl), rights, bus, logger);
-        _runs = new RunQueue(ledger, _deployments, inventory, orchestrator, bus, journal, logger);
+        var planner = new LaunchPlanner(placer, bricks, inventory, admission, rights);
+        _planner = planner;
+        _deployments = new DeploymentService(
+            ledger, inventory, link, admission, new PlanRegistry(flowControl), planner, new DeploymentStore(options.StateDir, logger), jobs, bus, logger);
+        _runs = new RunQueue(ledger, _deployments, planner, inventory, orchestrator, bus, journal, logger);
         _lab = new LabFaults(ledger, inventory, link);
     }
 
@@ -56,7 +62,18 @@ public sealed class DeploymentManager
 
     public DistributionPlan? PlanOf(string pipelineId) => _deployments.PlanOf(pipelineId);
 
+    /// <summary>The plan a launch of <paramref name="yaml"/> under <paramref name="bindings"/> would make now, runner included. Nothing is kept.</summary>
+    public Task<Launch> PlanLaunchAsync(string pipelineId, string yaml, IReadOnlyDictionary<string, DtPipe.Jobs.Coordinator.Binding> bindings, CancellationToken ct) =>
+        _planner.ChooseAsync(pipelineId, yaml, bindings, ct);
+
+    /// <summary>What a library pipeline is armed with, or null when it is not armed.</summary>
+    public ArmedDeployment? ArmedOf(string pipelineId) => _deployments.ArmedOf(pipelineId);
+
+    /// <summary>Deploys a plan the Lab view fixed.</summary>
     public Task DeployAsync(DistributionPlan plan, string origin, CancellationToken ct) => _deployments.DeployAsync(plan, origin, ct);
+
+    /// <summary>Arms a library pipeline at a commit (see <see cref="DeploymentService.ArmAsync"/>).</summary>
+    public Task ArmAsync(ArmedDeployment armed, string job, CancellationToken ct) => _deployments.ArmAsync(armed, job, ct);
 
     public Task UndeployAsync(string pipelineId, CancellationToken ct) => _deployments.UndeployAsync(pipelineId, ct);
 

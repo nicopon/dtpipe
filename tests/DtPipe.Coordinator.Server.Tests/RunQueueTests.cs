@@ -72,6 +72,7 @@ public sealed class RunQueueTests : IDisposable
     private readonly NodeInventory _inventory;
     private readonly Replicas _link = new();
     private readonly ScriptedRuns _runs = new();
+    private readonly FakeJobs _jobs = new();
     private readonly RunJournal _journal;
     private readonly EventBus _bus = new();
     private readonly DeploymentManager _deployments;
@@ -95,9 +96,9 @@ public sealed class RunQueueTests : IDisposable
         _rights = new RightsStore(options);
         _inventory = new NodeInventory(_registry);
         _journal = new RunJournal(options, NullLogger<RunJournal>.Instance);
-        _deployments = new DeploymentManager(
+        _deployments = TestDeployments.Create(
             _inventory, _link, _runs, new ReplicaAdmission(_registry, _state), new RightsFlowControl(_rights), _rights, _bus,
-            _journal, NullLogger<DeploymentManager>.Instance);
+            _journal, options, _jobs);
     }
 
     public void Dispose() => Directory.Delete(_dir, recursive: true);

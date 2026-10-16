@@ -350,7 +350,7 @@ public class ReplicaAdmissionSubjectTests
         await using var host = await CoordinatorTestHost.StartAsync(_ => { });
         await using var a = await FakeNode.StartAsync(host, "a");
         await using var b = await FakeNode.StartAsync(host, "b");
-        b.OnLaunch = _ => Task.FromResult(new LaunchResult(false, "a brick of b (src) changed since the plan was made: distribute it again."));
+        b.OnLaunch = _ => Task.FromResult(new LaunchResult(false, "a brick of b (src) changed since the plan was made: launch it again."));
         var orchestrator = host.Host.Services.GetRequiredService<IRunOrchestrator>();
 
         var result = await orchestrator.RunAsync(Run("run-1", TestFragments.Edgeless("a"), TestFragments.Edgeless("b"))).WaitAsync(Wait);

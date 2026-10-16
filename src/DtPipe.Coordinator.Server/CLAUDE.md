@@ -5,7 +5,7 @@ the hub, the barrier and admission are `DtPipe.Coordinator`'s (`src/DtPipe.Coord
 
 The server hosts `DtPipe.Coordinator` (`AddCoordinatorHub`) and adds what a person needs around it:
 the node channel (`NodeChannel`, `NodeChannelHub`), bricks, the git-backed library,
-automatic distribution, deployments and the run queue, rights, and the pages. Its settings are the
+the plan a launch makes, deployments and the run queue, rights, and the pages. Its settings are the
 `Coordinator` configuration section (`CoordinatorServerOptions`), from the environment first.
 
 - **The server trusts an IdP for who, and decides what.** `TrustedIdp` validates the tokens of
@@ -97,15 +97,15 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   CSRF header and before `SaveAsync`: a job it refuses answers 422 with `LibraryRefused` (its report),
   and with no runner or no brick node online the check cannot run, so it refuses by name; never a
   commit that was not checked. It covers the studio and the pages alike, and `PUT /api/library/{id}/bindings`, which
-  checks the job the library holds under the bindings it receives; `SavePlanAsync`, `DeleteAsync` and the seeds loaded at
+  checks the job the library holds under the bindings it receives; `DeleteAsync` and the seeds loaded at
   start check nothing. `[local: StudioRoutesTests, the lab's smoke.py bricks — a library save's check, a sink that refuses]`
 - **A save may say which version it read.** `PUT /api/library/{id}` with `If-None-Match: *` creates
   only, with `If-Match: "<commit>"` replaces only that version: 412 otherwise, with the commit in
   place. The check runs under the library's lock. The version is the last commit of the job file,
-  never the directory's: a plan saved beside it is no edit, and `GET /api/library/{id}` and the listing
+  never the directory's: bindings saved beside it are no edit, and `GET /api/library/{id}` and the listing
   give that same commit. Without either header a save overwrites,
-  as the pages do. The answer says when the saved plan no longer matches (`redistribute`) and when a
-  deployment still runs another version (`deployed`). `[local: StudioRoutesTests, the lab's smoke.py
+  as the pages do. The answer says when a deployment still runs another version (`deployed`), judged by content: the hashes
+  of the job and of the bindings it was armed with, so a commit that puts the old text back is the same version. `[local: StudioRoutesTests, the lab's smoke.py
   library — a studio publishes]`
 - **A save may carry the bindings it knows, and a studio names only what is unambiguous.** `LibrarySave.Bindings` sets the
   bindings it names into the ones the library keeps, entry by entry, in the same commit as the job; an alias it does not name
@@ -118,8 +118,8 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   the node of a brick one node offers and of each brick the person chose; a brick two nodes offer that nobody chose stays
   unbound, which the answer's `bindingProblems` says and the pipeline's page then lets a person choose.
   `[local: BindingTests, StudioRoutesTests, StudioPublishTests]`
-- **The library keeps a job, its bindings and its plan, nothing a designer drew.** `pipelines/<id>/` holds
-  `pipeline.yaml`, `bindings.json` and `distributed/`; a library that still tracks a `layout.json` drops them all in
+- **The library keeps a job and its bindings, no plan, nothing a designer drew.** `pipelines/<id>/` holds
+  `pipeline.yaml` and `bindings.json`; a library that still tracks a `layout.json` drops them all in
   one commit when it first opens. `[local: the lab's smoke.py library — no layouts]`
 - **The binding decides where a brick branch runs, and a bound branch never runs on the runner.** `bindings.json` maps the
   alias of each source or sink branch of the job to `{node, brick, mode}`; every branch that is neither bound nor a brick goes
@@ -132,17 +132,17 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   (`offline`), which is not. `BrickCatalog.Match` is first-match and so unfit to choose a node: placing goes through `MatchAll`.
   The bindings live beside the job so a pipeline stays a plain dtpipe job. They are saved as given, an absent node included,
   through `PUT /api/library/{id}/bindings`, and a seed brings its own as `<id>.bindings.json`. The list and the document carry
-  the problems, the planner refuses a plan that has a blocking one, and a deployment is refused naming them. A saved plan keeps
-  the hash of the bindings it was made from, so new bindings make it stale (`bindings`), without changing the job's commit.
+  the problems, the planner refuses a plan that has a blocking one, and a deployment is refused naming them. A deployment keeps
+  the bindings it was armed with, so new bindings change nothing that runs until it is armed again.
   The designer's check (`DesignValidator`) samples each brick on the node the save's bindings name, the library's entries
   with the request's over them; a brick no binding places is sampled on the first node that offers it.
-  `[local: BindingTests, StalePlanRoutesTests]`
+  `[local: BindingTests, LaunchRoutesTests]`
 - **A new state directory starts from the seeds, or empty.** `Coordinator:LibrarySeed` (one
   `.yaml` per pipeline) and `Coordinator:RightsSeed`; with neither, the library has no pipeline
   and the rights no identity and an empty matrix: nobody may send anything until an administrator
   says so. The library is a git repository of its own under `library/` in the state directory,
   driven by the `git` command line with a fixed identity (the image needs `git`); run history lives
-  in `runs/`, outside git; deployments are in memory.
+  in `runs/` and armed deployments in `deployments/`, outside git and read back at start; the Lab view's fixed plan is in memory.
 - **Cuts inside a branch belong to `dtpipe split`**, run on the node whose data the branch reads
   (`BranchCut`: the branch alone, its two halves back); a branch that reads no node's data is not
   cut. `PlanBuilder` puts the consumer half in the branch's place, only regroups whole branches
@@ -176,15 +176,20 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   they are computed by `ContentHash` (`DtPipe.Coordinator.Contracts`).
   `[local: DtPipe.Coordinator.Server.Tests, Hosting.Tests FragmentJobTests, the lab's smoke.py, ui_check.py]`
   `[unchecked: a site that hashes on its own]`
-- **A deployment is the coordinator's, and nothing of it is left on a node.** `DeployAsync` asks every
-  connected replica of each node whether it would run the fragments (`Check`, answered, spawning nothing) and
-  is ready when each fragment has a replica that said yes and that admission could place a run on. One
+- **A deployment is the coordinator's, and nothing of it is left on a node.** A library pipeline is *armed*: `{pipeline, commit
+  of the job, the bindings at that commit, when, by whom}` (`ArmedDeployment`), written to `deployments/<id>.json` once its
+  deployment is ready and read back at start as ready, with no check, since no replica is connected yet; undeploying, a refused
+  arming and a fixed plan that replaces it delete the file, so memory and disk change together. A run reads the job at the armed
+  commit (`IJobSource`, the library) and the armed bindings, never the library as it is now. A node whose identity is gone stays
+  armed, and a run is refused naming it. `DeployAsync` is the Lab view's fixed plan, in memory only. Deploying plans as a launch
+  would, then asks every connected replica of each node whether it would run the fragments (`Check`, answered, spawning nothing)
+  and is ready when each fragment has a replica that said yes and that admission could place a run on. One
   replica that refuses does not fail it while another can run the fragment (a rolling update leaves some at
   the old brick); it fails at once only when every replica asked has answered and none said yes, naming the
   node and why (`refused by <node>: …`), and a refused deployment is not kept. A replica that arrives
   later is as good as one that was asked, and one that goes takes nothing with it: what decides a run is
   admission, at the run. A deployment's gate is held while it is deployed or removed; a run passes it to
-  read the state and does not hold it. `[local: DeploymentManagerTests, RunQueueTests, the lab's smoke.py]`
+  read the state and does not hold it. `[local: DeploymentManagerTests, RunQueueTests, ArmedDeploymentTests, the lab's smoke.py]`
 - **Deployments and runs are decided under one lock.** `DeploymentManager` is what the routes call, over three
   parts and the one `DeploymentLedger` they share: `DeploymentService` (the deployments), `RunQueue` (the queue
   and the dispatch) and `LabFaults`. A decision that reads both sides, such as a deployment refused while a run of
@@ -192,11 +197,12 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   `[local: RunQueueTests]` `[unchecked: the lock itself]`
 - **One run at a time per data node, first come first served.** `RunDispatch` decides, at each
   enqueue and each finish, which waiting runs `RunQueue` sends: one that no run already
-  sent, and no older run still waiting, shares a data node with. A run's data nodes are its plan's
-  fragment nodes that the inventory does not list as runners; a node it does not know counts
-  (fail-closed). A run holds them from being sent until it finishes, and is never sent twice. A runner never counts, so its fragments of two runs share
+  sent, and no older run still waiting, shares a data node with. A run's data nodes are the nodes its deployment's bindings name
+  (a fixed plan's, its fragments' nodes) that the inventory does not list as runners; a node it does not know counts
+  (fail-closed). A run holds them from being sent until it finishes, and is never sent twice. Its plan is computed afterwards, and
+  a plan that reaches a data node the run does not hold is refused (`RunDispatch.Unheld`). A runner never counts, so its fragments of two runs share
   its host with no resource bound. With no id, `/api/runs/cancel` refuses (409) while several runs
-  are in flight rather than guess. `[local: RunDispatchTests, RunQueueTests, the lab's smoke.py library and sandbox]`
+  are in flight rather than guess. `[local: RunDispatchTests, RunQueueTests, ArmedDeploymentTests, the lab's smoke.py library and sandbox]`
 - **A node is one identity carried by one or more replicas, and `ReplicaRegistry` is the one table of
   them.** `NodeInventory` adds what the registry does not hold: the name the rights give the node, the
   groups, the last announcement of a node with no replica connected, and the page's view. The node is
@@ -225,7 +231,7 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   escape. A run refused at admission has none, and a file that names none reads as a run with none.
   `[local: RunJournalTests]` `[unchecked: the pages' escaping of Origin]`
 - **A run names the subject and the groups of each fragment's node.** `RunQueue` reads them from the
-  rights when the run starts, through `DeploymentService.RunFragmentsOf` (`RightsStore.SubjectOf`: the client id of
+  rights when the run starts, through `LaunchPlanner.RunFragmentsOf` (`RightsStore.SubjectOf`: the client id of
   the identity named after the fragment's node, the `sub` its tokens carry; `GroupsOf`), and puts them in each
   `RunFragment`; admission
   then places the run only on replicas whose connection attests that subject and whose data plane client holds
@@ -240,17 +246,18 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   node in several groups sends only if every one of its groups may send to every group of the
   receiver, on both sides, and an edge carries the groups of both ends. Never add a second matrix.
   `[local: FlowMatrixEvaluationTests, the lab's smoke.py rights]`
-- **A saved plan is current only while its job, its bindings and its nodes' groups are those it was made from.** The library
-  lists it, and `GET /api/library/{id}` shows it, as current when it was made from the job as it is and each of
-  its fragments sits on a node that holds, now, the groups the plan names, compared as sets (the server gives
-  the library `RightsStore.ActiveGroupsOf`, null for a node with no identity or a disabled one). A new plan
-  names the groups the rights give each node now, never those of the node's last announcement, and refuses a
-  unit placed on a node with no identity or a disabled one, so that distributing again repairs a plan whose
-  node changed groups while it was offline. One function
-  of the library decides why a plan is not current, `planStaleCause` (`job`, `bindings` or `groups`), which the list, the
-  document, the page's chip and the refusal of a deployment from the library all read. The studio does not read
-  it: the `redistribute` of a save's answer, which it does read, measures only the edit of the job.
-  `[local: SavedPlanTests, StalePlanRoutesTests, PlanRightsTests, RightsStoreTests, the lab's smoke.py rights - several groups]`
+- **A library pipeline is planned when it is launched, and the runner is chosen by one function.** `RunQueue.RunOneAsync`, once
+  the run is sent and outside the ledger's lock, asks `LaunchPlanner.ChooseAsync` for the plan of the armed job under the armed
+  bindings, and so do `GET /api/library/{id}/plan` (the plan a launch would make now, nothing written) and arming. The
+  runners online are tried by runs in flight, then by name; the first whose plan is deployable (the planner already judges its edges
+  against the matrix, which is how a runner in the wrong groups is skipped) and whose every fragment has an eligible replica is
+  used. A plan that does not use the runner fails whichever is chosen and is returned at once; when none serves, the refusal
+  names each runner and why. `NodeInventory.PreferredRunner` is for reads that need any runner, never a plan. The groups a plan
+  names are the rights' at that moment, so a node's groups changing needs no redistribution.
+  `[local: ArmedDeploymentTests, LaunchRoutesTests, PlanRightsTests, RightsStoreTests, the lab's smoke.py rights - several groups]`
+- **A run records the plan it ran.** `RunView.Plan` (`RunPlan`): the plan's id, the runner it used, each fragment at its version, and
+  each binding with the brick version it met and its mode's verdict. A run refused before it had a plan has none.
+  `[local: ArmedDeploymentTests, RunJournalTests]`
 - **A data node only reads and writes, and runs only its bricks, which it composes by id.**
   `PlanBuilder` gives a data node's fragment as `FragmentUnit`s and composes the job with
   `FragmentJob` (`DtPipe.Coordinator.Contracts`), the function the node calls again on its own

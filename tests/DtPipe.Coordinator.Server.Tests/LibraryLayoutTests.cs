@@ -18,7 +18,7 @@ public sealed class LibraryLayoutTests : IDisposable
     private PipelineLibrary Open() => new(new CoordinatorServerOptions
     {
         StateDir = _dir, Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret",
-    }, _ => null);
+    });
 
     private string Git(params string[] args)
     {

@@ -13,8 +13,8 @@ Every trial is one line of JSON in <state-dir>/campaign/<campaign-id>/trials.jso
 logs is kept, stamped, in <state-dir>/campaign/<campaign-id>/logs/. The lab must be up on strict nodes
 (./lab.sh up), and the start is checked: nothing of the lab runs that the pid files do not name, the machine is at rest
 (no build, no test run, no TransportR process), the dtpipe the hosts run (the runner's included) starts and reports the
-frozen commit (HEAD, or CAMPAIGN_FROZEN) with a clean tree, and every saved plan carries the groups the rights give its
-nodes. The campaign refuses to start otherwise. CAMPAIGN_PREFLIGHT=report runs the same
+frozen commit (HEAD, or CAMPAIGN_FROZEN) with a clean tree, and every armed deployment binds only nodes the rights give an
+identity. The campaign refuses to start otherwise. CAMPAIGN_PREFLIGHT=report runs the same
 checks, prints what they find and plays on (the harness pass); CAMPAIGN_SKIP_PREFLIGHT=1 skips them. Standard library
 only.
 """
@@ -110,7 +110,7 @@ def check_for(pid):
 
 
 def deploy(pid):
-    plan = S.call(f"/api/library/{pid}/distribute", {})["plan"]
+    plan = S.call(f"/api/library/{pid}/plan")["plan"]
     S.call(f"/api/library/{pid}/deploy", {})
     return plan
 
@@ -407,7 +407,7 @@ def kill_host(node):
 
 
 def nodes_of(pid):
-    plan = S.call(f"/api/library/{pid}/distribute", {})["plan"]
+    plan = S.call(f"/api/library/{pid}/plan")["plan"]
     return [(f["node"], f["name"]) for f in plan["fragments"]]
 
 
@@ -1232,14 +1232,14 @@ def preflight():
     found = [("stray", f"{kind} pid {pid} (parent {ppid}) {args[:140]}") for pid, ppid, kind, args in bench.foreign(STATE, NODES)]
     found += [("busy", f"pid {pid}: {why}: {args[:140]}") for pid, why, args in bench.busy_machine(STATE, NODES, os.path.dirname(TOXI))]
     found += [("version", p) for p in bench.frozen_problems(repo, DTPIPE, STATE, NODES, os.environ.get("CAMPAIGN_FROZEN"))]
-    found += [("plans", p) for p in bench.stale_plans(STATE)]
+    found += [("deployments", p) for p in bench.armed_deployments(STATE)]
     return found
 
 
 REMEDY = {"stray": "stop them (./lab.sh down, then ./lab.sh up)",
           "busy": "let the work finish, or stop it (`dotnet build-server shutdown` ends the resident compilers)",
           "version": "rebuild at the frozen commit (./build.sh, then ./lab.sh down and up) and start again",
-          "plans": "save the plans again (POST /api/library/<id>/distribute with {\"save\": true})"}
+          "deployments": "undeploy them, or give their nodes an identity again (DELETE /api/deployments/<id>)"}
 
 
 def main():

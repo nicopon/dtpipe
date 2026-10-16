@@ -33,7 +33,19 @@ public static class RunDispatch
     /// data node: an offline runner then serialises runs, never lets two share a data node.
     /// </summary>
     public static IReadOnlySet<string> DataNodes(DistributionPlan plan, IReadOnlyDictionary<string, NodeRole> roles) =>
-        plan.Fragments.Select(f => f.Node)
+        DataNodes(plan.Fragments.Select(f => f.Node), roles);
+
+    /// <summary>The data nodes among <paramref name="nodes"/>: what an armed deployment's bindings name.</summary>
+    public static IReadOnlySet<string> DataNodes(IEnumerable<string> nodes, IReadOnlyDictionary<string, NodeRole> roles) =>
+        nodes
             .Where(node => !roles.TryGetValue(node, out var role) || role != NodeRole.Runner)
             .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The data nodes of <paramref name="plan"/> that the run does not hold, empty when it holds them all. A run holds its data
+    /// nodes from the bindings of its deployment, before its plan exists, and a plan that reaches another data node would run
+    /// beside a run it was never ordered after: it is refused.
+    /// </summary>
+    public static IReadOnlyList<string> Unheld(DistributionPlan plan, IReadOnlySet<string> held, IReadOnlyDictionary<string, NodeRole> roles) =>
+        DataNodes(plan, roles).Where(node => !held.Contains(node)).Order(StringComparer.Ordinal).ToList();
 }

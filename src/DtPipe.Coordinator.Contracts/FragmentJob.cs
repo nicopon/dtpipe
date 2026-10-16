@@ -46,7 +46,7 @@ public static partial class FragmentJob
         if (composed is null) return (null, error);
         if (VersionOf(composed) == spec.Version) return (composed, null);
         var bricks = string.Join(", ", units.Where(u => u.Brick is not null).Select(u => u.Brick).Distinct());
-        return (null, $"a brick of {spec.Fragment} ({bricks}) changed since the plan was made: distribute it again.");
+        return (null, $"a brick of {spec.Fragment} ({bricks}) changed since the plan was made: launch it again.");
     }
 
     [GeneratedRegex("^[A-Za-z][A-Za-z0-9_-]*$")]

@@ -135,14 +135,14 @@ public sealed class StudioPublishTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task A_publication_says_when_its_plan_must_be_redone()
+    public async Task A_publication_says_when_a_deployment_still_runs_the_version_before()
     {
         await SignInAsync();
-        _fakes.Redistribute = true;
+        _fakes.Deployed = true;
 
         var (_, saved) = await PublishAsync(await HashAsync());
 
-        Assert.True(saved.GetProperty("redistribute").GetBoolean());
+        Assert.True(saved.GetProperty("deployed").GetBoolean());
         var (_, again) = await CallAsync(HttpMethod.Get, "/api/publish?path=orders.yaml");
         Assert.Equal("orders", again.GetProperty("publication").GetProperty("id").GetString());
     }

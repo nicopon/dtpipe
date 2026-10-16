@@ -71,11 +71,11 @@ public sealed record LibrarySave(string Yaml, string? Message, IReadOnlyDictiona
 
 /// <summary>
 /// A save's outcome. <see cref="Commit"/> is the last commit of the pipeline's job, the version a later
-/// <c>If-Match</c> names: a plan saved beside it does not change it. <see cref="Redistribute"/>: the plan saved for it no longer matches its job.
+/// <c>If-Match</c> names: bindings saved beside it do not change it.
 /// <see cref="Deployed"/>: a deployment still runs the version before. <see cref="BindingProblems"/>: why the pipeline's bindings
 /// do not hold now, as the library words it.
 /// </summary>
-public sealed record LibrarySaved(string Id, string? Commit, bool Redistribute, bool Deployed, IReadOnlyList<string>? BindingProblems = null);
+public sealed record LibrarySaved(string Id, string? Commit, bool Deployed, IReadOnlyList<string>? BindingProblems = null);
 
 /// <summary>A save refused by its precondition (412), with the pipeline's commit in place, if any.</summary>
 public sealed record LibraryConflict(string Error, string? Commit);

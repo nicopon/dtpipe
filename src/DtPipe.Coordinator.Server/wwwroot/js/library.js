@@ -29,14 +29,6 @@ async function load() {
   render();
 }
 
-function planChip(e) {
-  if (!e.distributed) return `<span class="chip">not distributed</span>`;
-  if (e.planCurrent) return `<span class="chip ok">plan saved</span>`;
-  const why = { job: "The job changed after its plan was saved", bindings: "Its bindings changed after its plan was saved" }[e.planStaleCause]
-    ?? "A node of its plan holds other groups now, or has no enabled identity";
-  return `<span class="chip warn" title="${why}">plan stale</span>`;
-}
-
 // Why the bindings of a pipeline's bricks do not hold: a node it names is absent or does not offer the brick, a brick has none,
 // or its text is no longer the brick it is bound to.
 function bindingsChip(e) {
@@ -46,9 +38,13 @@ function bindingsChip(e) {
   return `<span class="chip ${blocking ? "bad" : "warn"}" title="${esc(problems.map((p) => p.message).join(" "))}">bindings: ${problems.length} problem${problems.length > 1 ? "s" : ""}</span>`;
 }
 
-function deploymentChip(id) {
-  const d = deploymentOf(id);
-  return d ? `<span class="chip ${d.state === "failed" ? "bad" : d.state === "ready" ? "ok" : "warn"}">${esc(d.state)}</span>` : `<span class="chip">not deployed</span>`;
+// A pipeline is armed at a commit: the list says so, and says when the library has moved on from it.
+function deploymentChip(e) {
+  const d = deploymentOf(e.id);
+  if (!d) return `<span class="chip">not deployed</span>`;
+  const older = d.commit && e.commit && d.commit !== e.commit;
+  return `<span class="chip ${d.state === "failed" ? "bad" : d.state === "ready" ? "ok" : "warn"}">${esc(d.state)}${d.commit ? ` @ ${esc(d.commit.slice(0, 8))}` : ""}</span>`
+    + (older ? ` <span class="chip warn" title="The library holds a later version of the job: deploy it again to run that one">older version</span>` : "");
 }
 
 function runCell(id) {
@@ -58,15 +54,15 @@ function runCell(id) {
   return `<span class="outcome-chip ${esc(run.state)}">${esc(run.state)}</span> <span class="hint">${isActive(run) ? "" : ago(run.finishedAt)}${rows ? ` · ${rows.toLocaleString("en-US")} rows` : ""}</span>`;
 }
 
-// Deploy, Run and Undeploy from the list. The list knows only whether the saved plan is current and
-// what is deployed; the page of the pipeline compares the deployed plan with today's, and the server
-// decides in every case.
+// Deploy, Run and Undeploy from the list. Deploying arms the pipeline at the commit the library holds, and the server
+// decides in every case: it refuses bindings that do not hold and a plan no node could run.
 function deployRowActions(e) {
   const deployment = deploymentOf(e.id);
   const active = isActive(lastRunOf(e.id));
-  const deploy = e.distributed && e.planCurrent && !active && !(e.bindingProblems || []).some((p) => p.blocking);
+  const unbound = (e.bindingProblems || []).some((p) => p.blocking);
+  const deploy = !active && !unbound;
   const run = deployment && deployment.state !== "failed";
-  return `<button class="small" data-deploy="${esc(e.id)}" ${deploy ? "" : "disabled"} title="${e.distributed && e.planCurrent ? ((e.bindingProblems || []).some((p) => p.blocking) ? "Its bindings do not hold" : "") : "Save its plan first, on its page"}">${deployment ? "Redeploy" : "Deploy"}</button>
+  return `<button class="small" data-deploy="${esc(e.id)}" ${deploy ? "" : "disabled"} title="${unbound ? "Its bindings do not hold" : ""}">${deployment ? "Redeploy" : "Deploy"}</button>
         <button class="small primary" data-run="${esc(e.id)}" ${run ? "" : "disabled"}>Run</button>
         ${deployment ? `<button class="small ghost danger" data-undeploy="${esc(e.id)}" ${active ? "disabled" : ""}>Undeploy</button>` : ""}`;
 }
@@ -77,11 +73,11 @@ function render() {
     <tr>
       <td><a href="#/library/${encodeURIComponent(e.id)}" class="strong">${esc(e.title)}</a><div class="hint mono">${esc(e.id)}</div></td>
       <td class="wrap hint">${esc(e.description || "")}</td>
-      <td>${planChip(e)} ${deploymentChip(e.id)} ${bindingsChip(e)}</td>
+      <td>${deploymentChip(e)} ${bindingsChip(e)}</td>
       <td>${runCell(e.id)}</td>
       <td class="hint">${esc(e.message || "")}<div>${esc(ago(e.updatedAt))}</div></td>
       <td class="actions-cell">
-        <a class="button small" href="#/library/${encodeURIComponent(e.id)}" title="Its plan, its fragments and its runs">Open</a>
+        <a class="button small" href="#/library/${encodeURIComponent(e.id)}" title="The plan a launch would make, and its runs">Open</a>
         ${deployRowActions(e)}
         <button class="small ghost" data-history="${esc(e.id)}">${historyOf === e.id ? "Hide history" : "History"}</button>
         <button class="small ghost danger" data-delete="${esc(e.id)}">Delete</button>

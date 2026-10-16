@@ -4,8 +4,8 @@ using Xunit;
 namespace DtPipe.Coordinator.Server.Tests;
 
 /// <summary>
-/// The hashes the server persists, shows or compares, as literal values computed outside this code. A saved plan keeps
-/// its job's hash on disk, so a change to it makes every saved plan read as made from another job; a brick's version is
+/// The hashes the server persists, shows or compares, as literal values computed outside this code. An armed deployment keeps
+/// its job's hash on disk, so a change to it makes every armed deployment read as another job's; a brick's version is
 /// what the studio and the pages read, and a replica's bricks hash is what the Lab view shows beside it.
 /// </summary>
 public sealed class HashValueTests

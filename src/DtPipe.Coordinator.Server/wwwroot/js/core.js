@@ -167,3 +167,13 @@ export async function start() {
     }
   };
 }
+
+// The plan a run ran, as the coordinator journaled it when the run started: the runner it chose, each fragment at its version,
+// and each binding with the brick version it met and what its mode found.
+export function ranPlan(p) {
+  if (!p) return "";
+  const fragments = p.fragments.map((f) => `<li><span class="mono">${esc(f.name)}</span> on ${esc(f.node)} <span class="hint">${esc(f.version.slice(0, 12))}</span></li>`).join("");
+  const bindings = p.bindings.map((b) => `<li><span class="mono">${esc(b.alias)}</span> → brick ${esc(b.brick)} on ${esc(b.node)} <span class="hint">${esc(b.brickVersion.slice(0, 12))} · ${esc(b.mode)}: ${esc(b.verdict)}</span></li>`).join("");
+  return `<p><b>Plan it ran</b> <span class="hint">${esc(p.planId)}${p.runner ? ` · runner ${esc(p.runner)}` : ""}</span></p>
+    <ul class="msgs">${fragments}</ul>${bindings ? `<ul class="msgs">${bindings}</ul>` : ""}`;
+}

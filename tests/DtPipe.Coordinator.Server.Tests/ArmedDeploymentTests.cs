@@ -1,0 +1,300 @@
+using System.Collections.Concurrent;
+using DtPipe.Coordinator.Contracts;
+using DtPipe.Jobs.Coordinator;
+using Microsoft.Extensions.Logging.Abstractions;
+using TransportR.Models;
+using TransportR.Services;
+using Xunit;
+
+namespace DtPipe.Coordinator.Server.Tests;
+
+/// <summary>
+/// A library pipeline is armed at a commit and planned when it is launched: the runner is chosen then, the plan a run ran is
+/// journaled with it, and what is armed is kept on disk and read back. Two data nodes (<c>n</c>, <c>m</c>) and two runners
+/// (<c>r1</c>, <c>r2</c>) share one state directory across the "restart" the tests make.
+/// </summary>
+public sealed class ArmedDeploymentTests : IDisposable
+{
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
+    private const string Job = "src:\n  input: sqlite:a\nout:\n  from: src\n  output: csv:out.csv\n";
+    private const string Commit = "0123456789abcdef";
+
+    private sealed class Replicas : INodeLink
+    {
+        public Task<FragmentCheck> CheckAsync(ReplicaKey replica, FragmentSpec spec, CancellationToken ct) => Task.FromResult(new FragmentCheck(true));
+        public Task<int> KillAsync(ReplicaKey replica, string fragment, CancellationToken ct) => Task.FromResult(1);
+        public Task<LaunchResult> LaunchAsync(ReplicaKey replica, LaunchRequest request, CancellationToken ct) => throw new NotSupportedException();
+        public Task<bool> WireAsync(ReplicaKey replica, string runId, string fragment, string alias, string transferId, CancellationToken ct) => throw new NotSupportedException();
+        public Task<bool> CancelAsync(ReplicaKey replica, string runId, string fragment, CancellationToken ct) => throw new NotSupportedException();
+    }
+
+    /// <summary>An orchestrator whose runs end as soon as they are sent, remembering what they were sent.</summary>
+    private sealed class Runs : IRunOrchestrator
+    {
+        public ConcurrentQueue<RunSpec> Specs { get; } = new();
+
+        public Task<RunResult> RunAsync(RunSpec spec, CancellationToken ct = default)
+        {
+            Specs.Enqueue(spec);
+            return Task.FromResult(new RunResult(RunOutcome.Succeeded, null, [], new Dictionary<string, FragmentExitReport>(), []));
+        }
+
+        public Task<ExitedAck> OnExitedAsync(ReplicaKey replica, FragmentExit exit) => throw new NotSupportedException();
+    }
+
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), "armed-" + Guid.NewGuid().ToString("N"));
+    private CoordinatorServerOptions _options;
+    private readonly FakeJobs _jobs = new();
+    private readonly InMemoryStateStore _state = new();
+    private readonly Runs _runs = new();
+    private readonly Replicas _link = new();
+    private RightsStore _rights;
+    private ReplicaRegistry _registry = new();
+    private NodeInventory _inventory;
+    private RunJournal _journal;
+    private DeploymentManager _deployments;
+    private int _connections;
+
+    public ArmedDeploymentTests()
+    {
+        Directory.CreateDirectory(_dir);
+        _jobs.Jobs[("p", Commit)] = Job;
+        _options = OptionsOf("state", "crm");
+        (_rights, _inventory, _journal, _deployments) = Start(_registry);
+    }
+
+    private CoordinatorServerOptions OptionsOf(string state, string runnerOneGroup) => new()
+    {
+        StateDir = Path.Combine(_dir, state), Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret",
+        RightsSeed = Seed(runnerOneGroup),
+    };
+
+    /// <summary>Starts over in a new state directory where runner <c>r1</c> sits in <paramref name="group"/>.</summary>
+    private void RunnerOneIn(string group)
+    {
+        _options = OptionsOf("state-" + group, group);
+        Restart();
+    }
+
+    public void Dispose() => Directory.Delete(_dir, recursive: true);
+
+    /// <summary>The rights: <c>n</c> and <c>m</c> in <c>crm</c>, runner <c>r2</c> in <c>crm</c>, and <c>r1</c> in <paramref name="runnerOneGroup"/>; crm may send to crm.</summary>
+    private string Seed(string runnerOneGroup)
+    {
+        var path = Path.Combine(_dir, $"seed-{runnerOneGroup}.json");
+        File.WriteAllText(path, $$"""
+            { "matrix": { "crm": ["crm"] }, "identities": [
+              { "clientId": "node-n", "name": "n", "description": "", "groups": ["crm"] },
+              { "clientId": "node-m", "name": "m", "description": "", "groups": ["crm"] },
+              { "clientId": "node-r1", "name": "r1", "description": "", "groups": ["{{runnerOneGroup}}"] },
+              { "clientId": "node-r2", "name": "r2", "description": "", "groups": ["crm"] } ] }
+            """);
+        return path;
+    }
+
+    private (RightsStore, NodeInventory, RunJournal, DeploymentManager) Start(ReplicaRegistry registry)
+    {
+        var rights = new RightsStore(_options);
+        var inventory = new NodeInventory(registry);
+        var journal = new RunJournal(_options, NullLogger<RunJournal>.Instance);
+        var deployments = TestDeployments.Create(
+            inventory, _link, _runs, new ReplicaAdmission(registry, _state), new RightsFlowControl(rights), rights, new EventBus(), journal, _options, _jobs);
+        return (rights, inventory, journal, deployments);
+    }
+
+    /// <summary>Starts again over the same state directory, with no host connected: what a restart of the coordinator is.</summary>
+    private void Restart()
+    {
+        _registry = new ReplicaRegistry();
+        (_rights, _inventory, _journal, _deployments) = Start(_registry);
+    }
+
+    private static BrickInfo Brick() => new("src", BrickKind.Source, "source", "", """{"input":"sqlite:a"}""", null, null);
+
+    private async Task NodeAsync(string name, string group, NodeRole role)
+    {
+        var client = Guid.NewGuid();
+        var subject = "node-" + name;
+        await _state.SaveClientAsync(new ClientRegistration(client, "data-" + name, [group], null, null, DateTime.UtcNow, Subject: subject));
+        var announcement = new NodeAnnouncement(
+            name, "", [], role, role == NodeRole.Data ? [Brick()] : [], Capabilities: [NodeAnnouncement.LaunchToken],
+            InstanceId: Guid.NewGuid(), DataPlaneClientId: client);
+        var connection = $"c-{name}-{Interlocked.Increment(ref _connections)}";
+        _registry.Announce(connection, subject, announcement, [group], () => { });
+        _inventory.Announced(name, subject, announcement, [group]);
+    }
+
+    private static ArmedDeployment Armed(string node = "n", string job = Job) => new(
+        "p", Commit, PipelineLibrary.Sha(job), null, new Dictionary<string, Binding> { ["src"] = new Binding(node, "src", "strict") },
+        DateTimeOffset.UtcNow, "ann@x.test");
+
+    private async Task RanAsync(RunView queued)
+    {
+        var deadline = DateTime.UtcNow + Wait;
+        while (!_journal.List().Any(r => r.RunId == queued.RunId))
+        {
+            if (DateTime.UtcNow > deadline) throw new TimeoutException(queued.RunId);
+            await Task.Delay(10);
+        }
+    }
+
+    private RunView Journaled(string runId) => _journal.List().Single(r => r.RunId == runId);
+
+    [Fact]
+    public async Task A_Run_Plans_At_Launch_And_Journals_The_Plan_It_Ran()
+    {
+        await NodeAsync("n", "crm", NodeRole.Data);
+        await NodeAsync("r1", "crm", NodeRole.Runner);
+        var armed = Armed();
+
+        await _deployments.ArmAsync(armed, Job, CancellationToken.None);
+        var run = _deployments.Enqueue("p");
+        await RanAsync(run);
+
+        Assert.Equal(armed, _deployments.ArmedOf("p"));
+        var spec = Assert.Single(_runs.Specs);
+        Assert.Equal(["p@n", "p@r1"], spec.Fragments.Select(f => f.Name).Order());
+        var done = Journaled(run.RunId);
+        Assert.Equal(RunState.Succeeded, done.State);
+        var plan = done.Plan!;
+        Assert.Equal((done.PlanId, "r1"), (plan.PlanId, plan.Runner));
+        Assert.Equal(["p@n", "p@r1"], plan.Fragments.Select(f => f.Name).Order());
+        var binding = Assert.Single(plan.Bindings);
+        Assert.Equal(("src", "n", "src", "strict", BindingVerdicts.Exact), (binding.Alias, binding.Node, binding.Brick, binding.Mode, binding.Verdict));
+        Assert.NotEmpty(binding.BrickVersion);
+    }
+
+    [Fact]
+    public async Task A_Runner_In_Groups_The_Matrix_Refuses_Is_Skipped_And_The_Next_One_Is_Chosen()
+    {
+        RunnerOneIn("audit");
+        await NodeAsync("n", "crm", NodeRole.Data);
+        await NodeAsync("r1", "audit", NodeRole.Runner);
+        await NodeAsync("r2", "crm", NodeRole.Runner);
+
+        var launch = await _deployments.PlanLaunchAsync("p", Job, Armed().Bindings, CancellationToken.None);
+
+        Assert.True(launch.Ok);
+        Assert.Equal("r2", launch.Runner);
+        Assert.Contains(launch.Plan.Fragments, f => f.Node == "r2");
+        Assert.DoesNotContain(launch.Plan.Fragments, f => f.Node == "r1");
+    }
+
+    [Fact]
+    public async Task The_Runners_Are_Tried_By_Name_When_None_Is_Busier_And_A_Launch_No_Runner_Serves_Names_Each()
+    {
+        RunnerOneIn("audit");
+        await NodeAsync("n", "crm", NodeRole.Data);
+        await NodeAsync("r1", "audit", NodeRole.Runner);
+
+        var launch = await _deployments.PlanLaunchAsync("p", Job, Armed().Bindings, CancellationToken.None);
+
+        Assert.False(launch.Ok);
+        Assert.Null(launch.Runner);
+        Assert.Contains("Runner r1:", Assert.Single(launch.Refusals));
+        await Assert.ThrowsAsync<ConflictException>(() => _deployments.ArmAsync(Armed(), Job, CancellationToken.None));
+        Assert.Null(_deployments.ArmedOf("p"));
+    }
+
+    [Fact]
+    public async Task A_Job_That_Needs_No_Runner_Launches_Without_One()
+    {
+        await NodeAsync("n", "crm", NodeRole.Data);
+        await NodeAsync("m", "crm", NodeRole.Data);
+        const string both = "src:\n  input: sqlite:a\n  output: arrow:-\n";
+        // A plan with every branch bound is refused here only for what it lacks, never for a runner it does not use.
+        var launch = await _deployments.PlanLaunchAsync("p", both, new Dictionary<string, Binding> { ["src"] = new Binding("n", "src") }, CancellationToken.None);
+
+        Assert.Null(launch.Runner);
+        Assert.DoesNotContain(launch.Plan.Errors, e => e.Contains("runner"));
+    }
+
+    [Fact]
+    public async Task A_Restart_Reads_The_Armed_Deployment_Back_As_Ready_And_A_Run_Is_Refused_Naming_What_Is_Not_Back()
+    {
+        await NodeAsync("n", "crm", NodeRole.Data);
+        await NodeAsync("r1", "crm", NodeRole.Runner);
+        var armed = Armed();
+        await _deployments.ArmAsync(armed, Job, CancellationToken.None);
+        Assert.True(File.Exists(Path.Combine(_dir, "state", "deployments", "p.json")));
+
+        Restart();
+
+        Assert.Equal(armed.Commit, _deployments.ArmedOf("p")!.Commit);
+        Assert.Equal(armed.Bindings, _deployments.ArmedOf("p")!.Bindings);
+        var view = Assert.Single(await _deployments.DeploymentsAsync());
+        Assert.Equal((DeploymentState.Ready, Commit, "library"), (view.State, view.Commit, view.Origin));
+        Assert.Equal(["n"], view.Nodes);
+        // No replica is connected yet: the run is refused, naming the node of the binding, and is not an error.
+        var run = _deployments.Enqueue("p");
+        await RanAsync(run);
+        var refused = Journaled(run.RunId);
+        Assert.Equal(RunState.Refused, refused.State);
+        // The refusal names the alias and the node of the binding. Its cause is that of a catalog with no brick yet.
+        Assert.Contains("'src' is bound to brick 'src' on n", refused.Refusal);
+        Assert.Empty(_runs.Specs);
+
+        // The nodes come back: the same deployment runs.
+        await NodeAsync("n", "crm", NodeRole.Data);
+        await NodeAsync("r1", "crm", NodeRole.Runner);
+        var again = _deployments.Enqueue("p");
+        await RanAsync(again);
+        Assert.Equal(RunState.Succeeded, Journaled(again.RunId).State);
+    }
+
+    [Fact]
+    public async Task A_Deployment_Whose_Node_Lost_Its_Identity_Stays_Armed_And_Its_Run_Is_Refused_By_Name()
+    {
+        await NodeAsync("n", "crm", NodeRole.Data);
+        await NodeAsync("r1", "crm", NodeRole.Runner);
+        await _deployments.ArmAsync(Armed(), Job, CancellationToken.None);
+        _rights.RemoveIdentity("node-n");
+        Restart();
+
+        var run = _deployments.Enqueue("p");
+        await RanAsync(run);
+
+        Assert.NotNull(_deployments.ArmedOf("p"));
+        var refused = Journaled(run.RunId);
+        Assert.Equal(RunState.Refused, refused.State);
+        Assert.Contains("'src' is bound to brick 'src' on n", refused.Refusal);
+    }
+
+    [Fact]
+    public async Task A_Run_Reads_The_Job_At_The_Armed_Commit_And_Is_Refused_When_The_Library_Cannot_Give_It()
+    {
+        await NodeAsync("n", "crm", NodeRole.Data);
+        await NodeAsync("r1", "crm", NodeRole.Runner);
+        await _deployments.ArmAsync(Armed(), Job, CancellationToken.None);
+        Restart();
+        _jobs.Jobs.Clear();
+        await NodeAsync("n", "crm", NodeRole.Data);
+        await NodeAsync("r1", "crm", NodeRole.Runner);
+
+        var run = _deployments.Enqueue("p");
+        await RanAsync(run);
+
+        var refused = Journaled(run.RunId);
+        Assert.Equal(RunState.Refused, refused.State);
+        Assert.Contains("cannot be read at 01234567", refused.Refusal);
+    }
+
+    [Fact]
+    public async Task Undeploying_Or_Replacing_An_Armed_Deployment_Leaves_No_File()
+    {
+        await NodeAsync("n", "crm", NodeRole.Data);
+        await NodeAsync("r1", "crm", NodeRole.Runner);
+        var file = Path.Combine(_dir, "state", "deployments", "p.json");
+        await _deployments.ArmAsync(Armed(), Job, CancellationToken.None);
+        Assert.True(File.Exists(file));
+
+        await _deployments.UndeployAsync("p", CancellationToken.None);
+        Assert.False(File.Exists(file));
+
+        await _deployments.ArmAsync(Armed(), Job, CancellationToken.None);
+        var fixedPlan = (await _deployments.PlanLaunchAsync("p", Job, Armed().Bindings, CancellationToken.None)).Plan;
+        await _deployments.DeployAsync(fixedPlan, "lab", CancellationToken.None);
+        Assert.False(File.Exists(file));
+        Assert.Null(_deployments.ArmedOf("p"));
+    }
+}

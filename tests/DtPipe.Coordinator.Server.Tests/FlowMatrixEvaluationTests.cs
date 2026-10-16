@@ -71,9 +71,9 @@ public sealed class FlowMatrixEvaluationTests : IDisposable
         _flow = new CountingFlow(new DefaultFlowControlService(_matrix));
         _inventory = new NodeInventory(_registry);
         _planner = new PlanBuilder(_inventory, new NodeRequests(_inventory, new NoHub()), new BrickCatalog(_inventory), new PlanRegistry(_flow), rights);
-        _deployments = new DeploymentManager(
+        _deployments = TestDeployments.Create(
             _inventory, new NoLink(), new NoRuns(), new ReplicaAdmission(_registry, new InMemoryStateStore()), _flow, rights, new EventBus(),
-            new RunJournal(options, NullLogger<RunJournal>.Instance), NullLogger<DeploymentManager>.Instance);
+            new RunJournal(options, NullLogger<RunJournal>.Instance), options);
 
         Runner("r1", "crm");
         Runner("r2", "audit");

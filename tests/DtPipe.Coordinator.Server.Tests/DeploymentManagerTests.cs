@@ -58,9 +58,9 @@ public sealed class DeploymentManagerTests : IDisposable
         _rights = new RightsStore(options);
         _inventory = new NodeInventory(_registry);
         _journal = new RunJournal(options, NullLogger<RunJournal>.Instance);
-        _deployments = new DeploymentManager(
+        _deployments = TestDeployments.Create(
             _inventory, _link, new NoRuns(), new ReplicaAdmission(_registry, _state), new RightsFlowControl(_rights), _rights, new EventBus(),
-            _journal, NullLogger<DeploymentManager>.Instance);
+            _journal, options);
     }
 
     public void Dispose() => Directory.Delete(_dir, recursive: true);
@@ -97,7 +97,7 @@ public sealed class DeploymentManagerTests : IDisposable
     {
         var old = await ReplicaAsync(1, Brick("sqlite:b"));
         var updated = await ReplicaAsync(2, Brick("sqlite:a"));
-        _link.Answers[old] = new FragmentCheck(false, "a brick of p@n (src) changed since the plan was made: distribute it again.");
+        _link.Answers[old] = new FragmentCheck(false, "a brick of p@n (src) changed since the plan was made: launch it again.");
 
         await _deployments.DeployAsync(Plan(), "test", CancellationToken.None);
 

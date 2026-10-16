@@ -1,14 +1,16 @@
-// A library pipeline's page: the plan the coordinator computes with no help from the user (every
-// brick on its node, every other step on the runner), drawn in lanes, its refusals, its fragments'
-// jobs, the job's text read only, and its last run. The node of each source and sink branch is chosen here, among the nodes
-// that offer its brick; the runner is never named. The bindings, the plan, the deployment and the run are saved from here.
-import { $, api, deploymentOf, duration, esc, isActive, lastRunOf, shortNode, toast } from "./core.js";
+// A library pipeline's page: the plan a launch would make now, which the coordinator computes with no help from the user (every
+// brick on its node, every other step on a runner it picks at the launch), drawn in lanes, its refusals, its fragments'
+// jobs, the job's text read only, and its last run with the plan that run ran. The node of each source and sink branch is
+// chosen here, among the nodes that offer its brick; the runner is never named. The bindings are saved from here, and the
+// pipeline is deployed (armed at the commit the library holds) and run.
+import { $, api, deploymentOf, duration, esc, isActive, lastRunOf, ranPlan, shortNode, toast } from "./core.js";
 import { drawLanes, fragmentJobs, legend, planProblems } from "./placement.js";
 
 let host = null;
 let id = null;
 let doc = null;
 let plan = null;
+let runner = null;       // the runner a launch would use now, if one passes
 let brickOfUnit = {};
 let offers = {};          // alias -> the nodes that offer the brick of that branch
 let draft = {};           // alias -> the node chosen on the page, saved or not
@@ -31,8 +33,9 @@ export function update(kind) {
 async function load() {
   try {
     doc = await api(`/api/library/${encodeURIComponent(id)}`);
-    const answer = await api(`/api/library/${encodeURIComponent(id)}/distribute`, {});
+    const answer = await api(`/api/library/${encodeURIComponent(id)}/plan`);
     plan = answer.plan;
+    runner = answer.runner;
     brickOfUnit = answer.bricks || {};
     offers = answer.offers || {};
     draft = nodesOf(doc.bindings);
@@ -42,11 +45,6 @@ async function load() {
   }
   render();
 }
-
-// Two plans are the same when they place the same fragments, at the same versions, on nodes holding the same groups.
-const fragmentKey = (f) => [f.name, f.version, [...f.groups].sort().join("+")];
-const sameFragments = (a, b) => !!a && !!b &&
-  JSON.stringify(a.fragments.map(fragmentKey).sort()) === JSON.stringify(b.fragments.map(fragmentKey).sort());
 
 // A binding is kept with its brick and mode; the page chooses only the node, and the server resolves the brick.
 const nodesOf = (bindings) => Object.fromEntries(Object.entries(bindings || {}).map(([alias, b]) => [alias, b.node]));
@@ -95,33 +93,31 @@ function onChange(e) {
 function render() {
   if (!host || !doc || !plan) return;
   const deployment = deploymentOf(id);
-  const deployedPlanMatches = deployment && doc.plan && sameFragments(doc.plan.plan, plan);
-  const saved = doc.plan;
-  const savedCurrent = saved && doc.planCurrent && sameFragments(saved.plan, plan);
+  // A deployment runs the job it was armed at: it is this version when it is armed at the commit the library holds.
+  const current = deployment && deployment.commit === doc.commit;
   const run = lastRunOf(id);
-  const running = run?.state === "running" && deployedPlanMatches;
+  const running = run?.state === "running";
   // Fragment names are stable per pipeline and node: a run's edges apply when they are this plan's.
   const edgeKey = (e) => `${e.producerFragment}|${e.producerAlias}|${e.consumerFragment}|${e.consumerAlias}`;
   const planEdges = new Set(plan.edges.map(edgeKey));
   const runMatches = !!run?.result && run.result.edgeCounts.length === planEdges.size && run.result.edgeCounts.every((e) => planEdges.has(edgeKey(e)));
-  const canDeploy = savedCurrent && !isActive(run);
-  const canRun = deployment && deployment.state !== "failed" && deployedPlanMatches;
+  const canDeploy = plan.deployable && !isActive(run);
+  const canRun = deployment && deployment.state !== "failed";
 
   const status = [
-    saved ? (savedCurrent ? `<span class="chip ok">plan saved</span>` : `<span class="chip warn">saved plan is stale</span>`) : `<span class="chip">plan not saved</span>`,
-    deployment ? `<span class="chip ${deployment.state === "ready" ? "ok" : deployment.state === "failed" ? "bad" : "warn"}">${deployedPlanMatches ? "deployed" : "an older plan is deployed"}: ${esc(deployment.state)}</span>` : `<span class="chip">not deployed</span>`,
+    deployment ? `<span class="chip ${deployment.state === "ready" ? "ok" : deployment.state === "failed" ? "bad" : "warn"}">${current ? "deployed" : "an older version is deployed"}: ${esc(deployment.state)} @ ${esc((deployment.commit || "").slice(0, 8))}</span>` : `<span class="chip">not deployed</span>`,
+    plan.deployable ? `<span class="chip ok">a launch would run${runner ? ` on ${esc(runner)}` : ""}</span>` : `<span class="chip bad">a launch would be refused</span>`,
     bindingsChip(),
   ].join(" ");
 
   host.innerHTML = `
     <div class="view-head">
       <h1>${esc(doc.yaml.split("\n")[0].replace(/^#\s*/, ""))} <span class="mono muted">${esc(id)}</span></h1>
-      <p class="hint">Placed automatically: every brick on the node that offers it, every other step on the runner. A source wired straight into a sink crosses no runner.</p>
+      <p class="hint">Planned at each launch: every brick on the node it is bound to, every other step on a runner chosen then. A source wired straight into a sink crosses no runner.</p>
       <div class="row">${status}
         <span class="actions">
           <a class="button" href="#/library">← Library</a>
-          <button id="x-save" ${plan.deployable && !savedCurrent && !busy && !bindingsDirty() ? "" : "disabled"} title="${bindingsDirty() ? "Save the bindings first" : ""}">Save plan</button>
-          <button id="x-deploy" ${canDeploy && !busy ? "" : "disabled"} title="${savedCurrent ? "" : "Save the plan first"}">${deployedPlanMatches ? "Redeploy" : "Deploy"}</button>
+          <button id="x-deploy" ${canDeploy && !busy && !bindingsDirty() ? "" : "disabled"} title="${bindingsDirty() ? "Save the bindings first" : ""}">${current ? "Deploy again" : "Deploy"}</button>
           <button id="x-run" class="primary" ${canRun && !busy ? "" : "disabled"}>Run</button>
           ${deployment ? `<button id="x-undeploy" class="ghost danger" ${isActive(run) || busy ? "disabled" : ""}>Undeploy</button>` : ""}
         </span>
@@ -149,6 +145,7 @@ function runPanel(run, current) {
     <div class="outcome ${esc(run.state)}">${esc(run.runId)} · ${esc(run.state)} <span class="hint">${esc(duration(run))}</span></div>
     ${current ? "" : `<p class="hint">It ran a plan with other edges than this one.</p>`}
     ${run.refusal ? `<p class="mismatch">${esc(run.refusal)}</p>` : ""}
+    ${ranPlan(run.plan)}
     ${r?.cause ? `<p><b>Cause:</b> ${esc(shortNode(r.cause))}${r.causeIsUnresponsive ? " (unresponsive)" : ""}</p>` : ""}
     ${r?.consequences?.length ? `<p><b>Consequences:</b> ${r.consequences.map((c) => esc(shortNode(c))).join(", ")}</p>` : ""}
   </section>`;
@@ -165,18 +162,12 @@ async function onClick(e) {
       const bindings = Object.fromEntries(Object.entries(draft).filter(([, v]) => v).map(([alias, node]) => [alias, { node }]));
       const saved = await api(`/api/library/${encodeURIComponent(id)}/bindings`, { bindings, message: `Bind ${id}` }, "PUT");
       await load();
-      toast(saved.redistribute ? "Bindings saved: its plan must be saved again." : "Bindings saved.", "info");
-    } else if (b.id === "x-save") {
-      const message = prompt("Describe this plan (the commit message):", `Distribute ${id}`);
-      if (message !== null) {
-        await api(`/api/library/${encodeURIComponent(id)}/distribute`, { save: true, message });
-        doc = await api(`/api/library/${encodeURIComponent(id)}`);
-        toast("Plan saved in the library.", "info");
-      }
+      toast(saved.problems?.length ? "Bindings saved: some do not hold yet." : "Bindings saved.", "info");
     } else if (b.id === "x-deploy") {
       toast(`Deploying ${id}…`, "info");
       await api(`/api/library/${encodeURIComponent(id)}/deploy`, {});
       toast(`${id} deployed: every fragment registered.`, "info");
+      doc = await api(`/api/library/${encodeURIComponent(id)}`);
     } else if (b.id === "x-run") {
       const run = await api("/api/runs", { pipelineId: id });
       toast(`${run.runId} ${run.state}.`, "info");

@@ -10,56 +10,34 @@ using DtPipe.Jobs.Coordinator;
 namespace DtPipe.Coordinator.Server;
 
 /// <summary>
-/// A distributed plan as the library keeps it, with the hash of the job it was computed from and that of the bindings
-/// (<see cref="Bindings.Sha"/>: null for none).
-/// </summary>
-public sealed record SavedPlan(string PipelineSha, DateTimeOffset SavedAt, DistributionPlan Plan, string? BindingsSha = null);
-
-/// <summary>
-/// <see cref="PlanStaleCause"/> says why a saved plan is not current: <see cref="PlanStaleCauses.Job"/>,
-/// <see cref="PlanStaleCauses.Bindings"/> or <see cref="PlanStaleCauses.Groups"/>; null when there is no plan or it is current.
+/// <see cref="Commit"/> is the last commit of the job file, the version a later <c>If-Match</c> names.
 /// <see cref="BindingProblems"/>: why the pipeline's bindings do not hold now, empty when they do.
 /// </summary>
 public sealed record LibraryEntry(
     string Id, string Title, string? Description, string? Commit, DateTimeOffset? UpdatedAt, string? Message,
-    bool Distributed, bool PlanCurrent, IReadOnlyList<BindingProblem> BindingProblems, string? PlanStaleCause = null);
+    IReadOnlyList<BindingProblem> BindingProblems);
 
 /// <summary>
-/// <see cref="Commit"/> is the last commit of the job file, the version a later <c>If-Match</c> names.
-/// <see cref="PlanStaleCause"/> and <see cref="BindingProblems"/> are those of <see cref="LibraryEntry"/>.
+/// <see cref="Commit"/> and <see cref="BindingProblems"/> are those of <see cref="LibraryEntry"/>.
 /// <see cref="Bindings"/> binds each brick branch to a node and a brick, by alias.
 /// </summary>
 public sealed record LibraryDocument(
-    string Id, string Yaml, SavedPlan? Plan, bool PlanCurrent, string? Commit, IReadOnlyDictionary<string, Binding> Bindings,
-    IReadOnlyList<BindingProblem> BindingProblems, string? PlanStaleCause = null);
-
-/// <summary>Why a saved plan is not the one a new distribution would make.</summary>
-public static class PlanStaleCauses
-{
-    /// <summary>The job changed after the plan was saved.</summary>
-    public const string Job = "job";
-
-    /// <summary>The bindings of the job's bricks changed after the plan was saved.</summary>
-    public const string Bindings = "bindings";
-
-    /// <summary>A node the plan places a fragment on holds other groups now, or has no enabled identity.</summary>
-    public const string Groups = "groups";
-}
+    string Id, string Yaml, string? Commit, IReadOnlyDictionary<string, Binding> Bindings, IReadOnlyList<BindingProblem> BindingProblems);
 
 public sealed record LibraryCommit(string Hash, DateTimeOffset Date, string Message);
 
 /// <summary>
 /// What a save must find in place: no pipeline (<see cref="Absent"/>), or the pipeline's job at its last
-/// commit <see cref="Commit"/>. A plan saved since does not change the job's version: only an edit does.
+/// commit <see cref="Commit"/>. Bindings saved since do not change the job's version: only an edit does.
 /// </summary>
 public sealed record SavePrecondition(bool Absent, string? Commit);
 
 /// <summary>
 /// A save's outcome. <see cref="Commit"/> is the last commit of the pipeline's job, which an unchanged
-/// text leaves as it was. <see cref="Changed"/>: the text differs from the one before. <see cref="PlanStale"/>:
-/// a plan is saved for the pipeline and no longer matches its text. <see cref="PlanId"/>: that plan's id.
+/// text leaves as it was. <see cref="Changed"/>: the text differs from the one before. <see cref="Bindings"/>: the bindings
+/// the library holds after the save.
 /// </summary>
-public sealed record SaveOutcome(string? Commit, bool Changed, bool PlanStale, string? PlanId);
+public sealed record SaveOutcome(string? Commit, bool Changed, IReadOnlyDictionary<string, Binding> Bindings);
 
 /// <summary>A save whose <see cref="SavePrecondition"/> does not hold, with the pipeline's commit in place, if any.</summary>
 public sealed class PreconditionFailedException(string message, string? commit) : Exception(message)
@@ -70,11 +48,11 @@ public sealed class PreconditionFailedException(string message, string? commit) 
 /// <summary>
 /// The pipelines people keep, in a git repository of their own under <c>library/</c> in the state directory, driven
 /// through the <c>git</c> command line. One directory per pipeline: <c>pipeline.yaml</c> (the
-/// logical job, runnable whole), <c>bindings.json</c> (the node and brick of each brick branch, see <see cref="Bindings"/>) and
-/// <c>distributed/</c> (the last plan saved, with each fragment's job). Every save is a commit.
+/// logical job, runnable whole) and <c>bindings.json</c> (the node and brick of each brick branch, see <see cref="Bindings"/>).
+/// Every save is a commit.
 /// The repository starts from the job files under <c>library-seed/</c>, each with the <c>.bindings.json</c> beside it, if any.
 /// </summary>
-public sealed partial class PipelineLibrary
+public sealed partial class PipelineLibrary : IJobSource
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
@@ -87,21 +65,18 @@ public sealed partial class PipelineLibrary
     private readonly SemaphoreSlim _lock = new(1, 1);
     private bool _ready;
 
-    private readonly Func<string, IReadOnlyList<string>?> _groupsOfNode;
     private readonly Func<string, IReadOnlyDictionary<string, Binding>, IReadOnlyList<BindingProblem>> _bindingProblems;
     private readonly Func<string, IReadOnlyDictionary<string, Binding>, IReadOnlyDictionary<string, Binding>> _resolveBricks;
 
     /// <param name="options">Where the library lives.</param>
-    /// <param name="groupsOfNode">The groups the rights give a node now, null for a node with no identity or a disabled one.</param>
     /// <param name="bindingProblems">Why bindings do not hold for a job now; with none given, nothing is wrong.</param>
     /// <param name="resolveBricks">The bindings with the brick each one lacks filled in from the job; with none given, they are kept as they are.</param>
-    public PipelineLibrary(CoordinatorServerOptions options, Func<string, IReadOnlyList<string>?> groupsOfNode,
+    public PipelineLibrary(CoordinatorServerOptions options,
         Func<string, IReadOnlyDictionary<string, Binding>, IReadOnlyList<BindingProblem>>? bindingProblems = null,
         Func<string, IReadOnlyDictionary<string, Binding>, IReadOnlyDictionary<string, Binding>>? resolveBricks = null)
     {
         _root = Path.Combine(options.StateDir, "library");
         _seedDir = options.LibrarySeed;
-        _groupsOfNode = groupsOfNode;
         _bindingProblems = bindingProblems ?? ((_, _) => []);
         _resolveBricks = resolveBricks ?? ((_, bindings) => bindings);
     }
@@ -117,12 +92,10 @@ public sealed partial class PipelineLibrary
             if (!File.Exists(yamlPath)) continue;
             var yaml = await File.ReadAllTextAsync(yamlPath, ct);
             var (title, description, _) = DesignService.ReadHeader(yaml);
-            var plan = ReadPlan(id);
             var bindings = ReadBindings(id);
             var last = (await HistoryCoreAsync(id, 1, ct)).FirstOrDefault();
-            var cause = StaleCause(plan, yaml, bindings);
-            entries.Add(new LibraryEntry(id, title, description, await JobCommitAsync(id, ct), last?.Date, last?.Message, plan is not null,
-                plan is not null && cause is null, _bindingProblems(yaml, bindings), cause));
+            entries.Add(new LibraryEntry(id, title, description, await JobCommitAsync(id, ct), last?.Date, last?.Message,
+                _bindingProblems(yaml, bindings)));
         }
         return entries;
     }, ct);
@@ -133,11 +106,8 @@ public sealed partial class PipelineLibrary
         var yamlPath = Path.Combine(dir, "pipeline.yaml");
         if (!File.Exists(yamlPath)) return null;
         var yaml = await File.ReadAllTextAsync(yamlPath, ct);
-        var plan = ReadPlan(id);
         var bindings = ReadBindings(id);
-        var cause = StaleCause(plan, yaml, bindings);
-        return new LibraryDocument(id, yaml, plan, plan is not null && cause is null, await JobCommitAsync(id, ct), bindings,
-            _bindingProblems(yaml, bindings), cause);
+        return new LibraryDocument(id, yaml, await JobCommitAsync(id, ct), bindings, _bindingProblems(yaml, bindings));
     }, ct);
 
     /// <summary>
@@ -177,43 +147,13 @@ public sealed partial class PipelineLibrary
             await WriteBindingsAsync(dir, kept, ct);
         }
         await CommitAsync($"pipelines/{id}", Message(message, $"Save {id}"), ct);
-        var plan = ReadPlan(id);
-        return new SaveOutcome(await JobCommitAsync(id, ct), before != yaml,
-            plan is not null && (plan.PipelineSha != Sha(yaml) || plan.BindingsSha != Bindings.Sha(kept)), plan?.Plan.Id);
+        return new SaveOutcome(await JobCommitAsync(id, ct), before != yaml, kept);
     }, ct);
-
-    /// <summary>
-    /// Why a saved plan is not the one a new distribution would make, or null when it is (or there is none): the job changed
-    /// since the plan was made (<see cref="PlanStaleCauses.Job"/>), its bindings changed (<see cref="PlanStaleCauses.Bindings"/>),
-    /// or a node the plan places a fragment on holds, now, other groups than the plan names, compared as sets, or has no
-    /// enabled identity (<see cref="PlanStaleCauses.Groups"/>).
-    /// </summary>
-    private string? StaleCause(SavedPlan? plan, string yaml, IReadOnlyDictionary<string, Binding> bindings) =>
-        plan is null ? null
-        : plan.PipelineSha != Sha(yaml) ? PlanStaleCauses.Job
-        : plan.BindingsSha != Bindings.Sha(bindings) ? PlanStaleCauses.Bindings
-        : plan.Plan.Fragments.All(f => _groupsOfNode(f.Node) is { } now && now.ToHashSet(StringComparer.Ordinal).SetEquals(f.Groups)) ? null
-        : PlanStaleCauses.Groups;
 
     private static string Short(string? commit) => commit is null ? "nothing" : commit[..Math.Min(8, commit.Length)];
 
-    public async Task<string?> SavePlanAsync(string id, DistributionPlan plan, string message, CancellationToken ct) => await Locked(async () =>
-    {
-        var dir = PipelineDir(id);
-        var yamlPath = Path.Combine(dir, "pipeline.yaml");
-        if (!File.Exists(yamlPath)) throw new ConflictException($"'{id}' is not in the library.");
-        var distributed = Path.Combine(dir, "distributed");
-        if (Directory.Exists(distributed)) Directory.Delete(distributed, recursive: true);
-        Directory.CreateDirectory(distributed);
-        var saved = new SavedPlan(Sha(await File.ReadAllTextAsync(yamlPath, ct)), DateTimeOffset.UtcNow, plan, Bindings.Sha(ReadBindings(id)));
-        await File.WriteAllTextAsync(Path.Combine(distributed, "plan.json"), JsonSerializer.Serialize(saved, Json), ct);
-        foreach (var fragment in plan.Fragments)
-            await File.WriteAllTextAsync(Path.Combine(distributed, fragment.Node + ".yaml"), fragment.Yaml, ct);
-        return await CommitAsync($"pipelines/{id}", Message(message, $"Distribute {id}"), ct);
-    }, ct);
-
-    /// <summary>The outcome of a bindings save: the commit it made, and whether the plan saved for the pipeline no longer matches it.</summary>
-    public sealed record BindingsSaved(string? Commit, bool PlanStale);
+    /// <summary>The outcome of a bindings save: the commit it made.</summary>
+    public sealed record BindingsSaved(string? Commit);
 
     /// <summary>
     /// Replaces the bindings of the pipeline's job and commits them, each lacking brick resolved from the job as the library holds it.
@@ -227,9 +167,7 @@ public sealed partial class PipelineLibrary
         if (!File.Exists(yamlPath)) throw new ConflictException($"'{id}' is not in the library.");
         var resolved = _resolveBricks(await File.ReadAllTextAsync(yamlPath, ct), bindings);
         await WriteBindingsAsync(dir, resolved, ct);
-        var commit = await CommitAsync($"pipelines/{id}", Message(message, $"Bind {id}"), ct);
-        var plan = ReadPlan(id);
-        return new BindingsSaved(commit, plan is not null && plan.BindingsSha != Bindings.Sha(resolved));
+        return new BindingsSaved(await CommitAsync($"pipelines/{id}", Message(message, $"Bind {id}"), ct));
     }, ct);
 
     private static async Task WriteBindingsAsync(string dir, IReadOnlyDictionary<string, Binding> bindings, CancellationToken ct)
@@ -260,6 +198,13 @@ public sealed partial class PipelineLibrary
         return (yaml, diff);
     }, ct);
 
+    /// <summary>The job as a commit holds it: a commit is immutable, so what is read here never changes.</summary>
+    public async Task<string?> JobAtAsync(string id, string commit, CancellationToken ct) => await Locked(async () =>
+    {
+        if (!CommitPattern().IsMatch(commit)) return null;
+        return await TryGitAsync(["show", $"{commit}:pipelines/{PipelineName(id)}/pipeline.yaml"], ct);
+    }, ct);
+
     private const string BindingsFile = "bindings.json";
 
     private IReadOnlyDictionary<string, Binding> ReadBindings(string id)
@@ -271,17 +216,6 @@ public sealed partial class PipelineLibrary
             return JsonSerializer.Deserialize<Dictionary<string, Binding>>(File.ReadAllText(path), Json) ?? new Dictionary<string, Binding>();
         }
         catch (JsonException) { return new Dictionary<string, Binding>(); }
-    }
-
-    private SavedPlan? ReadPlan(string id)
-    {
-        var path = Path.Combine(PipelineDir(id), "distributed", "plan.json");
-        if (!File.Exists(path)) return null;
-        try
-        {
-            return JsonSerializer.Deserialize<SavedPlan>(File.ReadAllText(path), Json);
-        }
-        catch (JsonException) { return null; }
     }
 
     private async Task<IReadOnlyList<LibraryCommit>> HistoryCoreAsync(string id, int limit, CancellationToken ct)
@@ -356,11 +290,11 @@ public sealed partial class PipelineLibrary
         await GitAsync(["commit", "-q", "-m", "Remove the designer's layouts"], ct);
     }
 
-    private string PipelineDir(string id)
-    {
-        if (!CoordinatorApi.IsPipelineId(id)) throw new ConflictException($"'{id}' is not a pipeline id: lowercase letters, digits and '-'.");
-        return Path.Combine(_root, "pipelines", id);
-    }
+    private string PipelineDir(string id) => Path.Combine(_root, "pipelines", PipelineName(id));
+
+    private static string PipelineName(string id) => CoordinatorApi.IsPipelineId(id)
+        ? id
+        : throw new ConflictException($"'{id}' is not a pipeline id: lowercase letters, digits and '-'.");
 
     /// <summary>The library's ids, which the rights reuse for client ids and node names: <see cref="CoordinatorApi.IsPipelineId"/>.</summary>
     public static bool IsValidId(string id) => CoordinatorApi.IsPipelineId(id);

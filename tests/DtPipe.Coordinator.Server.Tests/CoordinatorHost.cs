@@ -32,6 +32,9 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
 
     private readonly string _state = Path.Combine(Path.GetTempPath(), "coordinator-host-" + Guid.NewGuid().ToString("N"));
 
+    /// <summary>The server's state directory, which the host removes when it is disposed.</summary>
+    public string StateDirectory => _state;
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseSetting("Coordinator:Authority", Issuer.TrimEnd('/'));

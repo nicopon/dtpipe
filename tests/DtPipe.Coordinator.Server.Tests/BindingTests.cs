@@ -153,7 +153,7 @@ public sealed class BindingTests : IDisposable
         _inventory.Announced("runner-1", "runner-1", announcement, ["crm"]);
         var placer = new AutoPlacer(new BrickCatalog(_inventory), _inventory, Planner());
 
-        var plan = await placer.PlanAsync("p", Job.Replace("sqlite:a", "sqlite:b"), On("node-a"), Ct);
+        var plan = await placer.PlanAsync("p", Job.Replace("sqlite:a", "sqlite:b"), On("node-a"), _inventory.Snapshot().Single(n => n.Name == "runner-1"), Ct);
 
         Assert.DoesNotContain(plan.Units, u => u.Id == "customers" && u.Node == "runner-1");
         Assert.False(plan.Deployable);
@@ -166,11 +166,9 @@ public sealed class BindingTests : IDisposable
         new(new CoordinatorServerOptions
         {
             StateDir = _dir, Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret",
-        }, _ => ["crm"], problems, _placer.Resolve);
+        }, problems, _placer.Resolve);
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
-
-    private static DistributionPlan APlan() => new("plan-1", "p", [], [], [], [], [], [], null);
 
     [Fact]
     public void A_Bound_Brick_Is_Checked_Against_The_Brick_The_Text_Designates_On_The_Node()
@@ -226,21 +224,31 @@ public sealed class BindingTests : IDisposable
     }
 
     [Fact]
-    public async Task Bindings_Saved_After_The_Plan_Make_The_Plan_Stale_Without_Changing_The_Version_Of_The_Job()
+    public async Task Bindings_Saved_After_The_Job_Do_Not_Change_The_Version_Of_The_Job()
     {
         var library = Library();
         await library.SaveAsync("p", Job, "create", Ct);
         await library.SaveBindingsAsync("p", On("node-a"), "bind", Ct);
-        await library.SavePlanAsync("p", APlan(), "plan", Ct);
         var jobCommit = (await library.GetAsync("p", Ct))!.Commit;
-        Assert.True((await library.GetAsync("p", Ct))!.PlanCurrent);
 
-        var saved = await library.SaveBindingsAsync("p", On("node-b"), "move", Ct);
+        await library.SaveBindingsAsync("p", On("node-b"), "move", Ct);
 
         var document = (await library.GetAsync("p", Ct))!;
-        Assert.True(saved.PlanStale);
-        Assert.Equal((false, PlanStaleCauses.Bindings), (document.PlanCurrent, document.PlanStaleCause));
+        Assert.Equal("node-b", document.Bindings["customers"].Node);
         Assert.Equal(jobCommit, document.Commit);
+    }
+
+    [Fact]
+    public async Task A_Job_Is_Read_At_A_Commit_Whatever_Was_Saved_Since()
+    {
+        var library = Library();
+        await library.SaveAsync("p", Job, "create", Ct);
+        var first = (await library.GetAsync("p", Ct))!.Commit!;
+        await library.SaveAsync("p", Job + "# edited\n", "edit", Ct);
+
+        Assert.Equal(Job, await library.JobAtAsync("p", first, Ct));
+        Assert.Null(await library.JobAtAsync("p", "0000000", Ct));
+        Assert.Null(await library.JobAtAsync("p", "not a commit", Ct));
     }
 
     [Fact]
@@ -266,7 +274,7 @@ public sealed class BindingTests : IDisposable
         var library = new PipelineLibrary(new CoordinatorServerOptions
         {
             StateDir = _dir, LibrarySeed = seeds, Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret",
-        }, _ => ["crm"]);
+        });
 
         Assert.Equal(new Binding("node-a", "customers", "strict"), (await library.GetAsync("p", Ct))!.Bindings["customers"]);
     }

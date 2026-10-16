@@ -61,6 +61,30 @@ public sealed class RunDispatchTests
         Assert.Equal(Nodes("node-1", "runner-1"), RunDispatch.DataNodes(Plan("node-1", "runner-1"), roles));
     }
 
+    /// <summary>An armed deployment holds the nodes its bindings name, before any plan exists, and a runner among them never counts.</summary>
+    [Fact]
+    public void The_Nodes_A_Run_Holds_Are_Read_From_The_Nodes_Its_Bindings_Name()
+    {
+        var roles = new Dictionary<string, NodeRole> { ["node-1"] = NodeRole.Data, ["runner-1"] = NodeRole.Runner };
+
+        var held = RunDispatch.DataNodes(["node-1", "node-1", "runner-1", "node-9"], roles);
+
+        Assert.Equal(Nodes("node-1", "node-9"), held);
+        Assert.Empty(RunDispatch.Startable([held], [Run("r2", "node-9")]));
+        Assert.Equal(["r2"], RunDispatch.Startable([held], [Run("r2", "node-2")]));
+    }
+
+    /// <summary>The plan computed after the run was sent must stay inside what the run holds: another data node is refused, closed by default.</summary>
+    [Fact]
+    public void A_Plan_Whose_Data_Nodes_Leave_The_Held_Set_Is_Unheld()
+    {
+        var roles = new Dictionary<string, NodeRole> { ["node-1"] = NodeRole.Data, ["node-2"] = NodeRole.Data, ["runner-1"] = NodeRole.Runner };
+
+        Assert.Empty(RunDispatch.Unheld(Plan("node-1", "runner-1"), Nodes("node-1"), roles));
+        Assert.Equal(["node-2"], RunDispatch.Unheld(Plan("node-1", "node-2", "runner-1"), Nodes("node-1"), roles));
+        Assert.Equal(["node-3"], RunDispatch.Unheld(Plan("node-3"), Nodes("node-1"), roles));
+    }
+
     private static DistributionPlan Plan(params string[] nodes) => new(
         "1", "p", [], [],
         nodes.Select(n => new PlannedFragment($"p@{n}", n, [], "", "v", [], [], FragmentForm.Bricks)).ToList(),

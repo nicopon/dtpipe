@@ -2,8 +2,7 @@
 """End-to-end check of the lab: every pipeline, distributed, against its monolithic witness.
 
 Six passes by default and a seventh, named. The Lab view's: each pipelines/*.yaml with its catalog layout, deployed and run one
-after the other. The library's: each library pipeline distributed automatically and its plan
-saved, then all of them deployed at once and their runs queued together, as the page does: runs
+after the other. The library's: each library pipeline planned automatically, then all of them deployed at once and their runs queued together, as the page does: runs
 that share a data node must never be in flight together.
 The rights': the embedded IDP, people's sessions and the studio's bearer tokens, the flow matrix refusing a plan and then, edited under a deployed
 pipeline and, edited under a deployed pipeline, a transfer at run time; a host of another identity that announces itself is placed
@@ -203,7 +202,7 @@ def library_pass(ctx):
         try:
             doc = call(f"/api/library/{pid}")
             check = ctx.witness("library-" + pid, doc["yaml"])
-            plan = call(f"/api/library/{pid}/distribute", {"save": True, "message": "smoke: distribute"})["plan"]
+            plan = call(f"/api/library/{pid}/plan")["plan"]
             call(f"/api/library/{pid}/deploy", {})
             queued.append((pid, plan, check))
         except Exception as e:
@@ -268,8 +267,8 @@ def layouts_gone():
 def studio_publishes(deployed):
     """dtpipe studio publishes with a person's bearer token and says which version it read: a new id only
     while absent, a replacement only of the job's commit it names (412 otherwise, with the commit in
-    place). Publishing over a distributed, deployed pipeline says its plan must be redone and that the
-    deployment still runs the version before; the text is then put back as it was."""
+    place). Publishing over a deployed pipeline says the deployment still runs the version before; the
+    text is then put back as it was, and the deployment is the current version again."""
     token = studio_tokens(URL, "labdesigner")["access_token"]
 
     def publish(pid, yaml, **headers):
@@ -296,17 +295,17 @@ def studio_publishes(deployed):
             pass
 
     if not deployed:
-        raise RuntimeError("no library pipeline was deployed: the redistribution message is not checked")
+        raise RuntimeError("no library pipeline was deployed: the deployed message is not checked")
     target = deployed[0]
     original = call(f"/api/library/{target}")["yaml"]
     status, changed = publish(target, original + "# published from a studio\n")
     status_back, back = publish(target, original)
-    if status != 200 or not changed["redistribute"] or not changed["deployed"]:
-        raise RuntimeError(f"publishing over {target} -> {status} {changed}: redistribute and deployed expected")
-    if status_back != 200 or back["redistribute"] or back["deployed"]:
-        raise RuntimeError(f"putting {target} back -> {status_back} {back}: its plan and deployment are current again")
+    if status != 200 or not changed["deployed"]:
+        raise RuntimeError(f"publishing over {target} -> {status} {changed}: deployed expected")
+    if status_back != 200 or back["deployed"]:
+        raise RuntimeError(f"putting {target} back -> {status_back} {back}: the deployment is the current version again")
     return (f"created only while absent, replaced only at the commit read (412 otherwise); over {target}: "
-            "redistribute and deployed, then current again once put back")
+            "deployed, then the current version again once put back")
 
 
 def data_nodes(plan):
@@ -392,7 +391,7 @@ def rights_pass():
     def matrix_plan():
         try:
             call("/api/rights/matrix", {"matrix": revoked}, "PUT")
-            plan = call("/api/library/customers-anonymized/distribute", {})["plan"]
+            plan = call("/api/library/customers-anonymized/plan")["plan"]
             if plan["deployable"] or "crm -> runner" not in (plan.get("flowRejection") or ""):
                 raise RuntimeError(f"plan not refused: {plan.get('flowRejection')}")
             return "crm -> runner revoked: plan refused"
@@ -401,7 +400,6 @@ def rights_pass():
 
     def matrix_runtime():
         # Deployed under the full matrix, then run with crm -> runner revoked: the hub refuses the transfer.
-        call("/api/library/revenue-by-country/distribute", {"save": True, "message": "smoke: distribute"})
         call("/api/library/revenue-by-country/deploy", {})
         try:
             call("/api/rights/matrix", {"matrix": revoked}, "PUT")
@@ -451,7 +449,6 @@ def rights_pass():
         pipeline = "customers-mirror"
         hub = None
         try:
-            call(f"/api/library/{pipeline}/distribute", {"save": True, "message": "smoke: a foreign replica"})
             call(f"/api/library/{pipeline}/deploy", {})
             hub = announce_as_a_replica_of_node_2(access, "smoke:foreign-replica")
             run = call("/api/runs", {"pipelineId": pipeline})
@@ -551,7 +548,7 @@ def rights_pass():
         # A node in several groups sends to another only if every group of the sender may send to every group of
         # the receiver. runner-1 joins `audit`: crm -> runner then needs crm -> audit, and runner -> warehouse needs
         # audit -> warehouse too. Each is added in turn, in the plan and then at run time; the identity, the
-        # matrix, the deployment and the saved plan are restored.
+        # matrix and the deployment are restored.
         runner = next(i for i in call("/api/rights")["identities"] if i["clientId"] == "runner-1")
 
         def put_identity(groups):
@@ -562,7 +559,7 @@ def rights_pass():
                   60, f"runner-1 online in {groups}")
 
         def plan():
-            return call("/api/library/customers-anonymized/distribute", {})["plan"]
+            return call("/api/library/customers-anonymized/plan")["plan"]
 
         def allowing(*edges):
             edited = {g: list(t) for g, t in matrix.items()}
@@ -570,30 +567,16 @@ def rights_pass():
                 edited.setdefault(sender, []).append(receiver)
             call("/api/rights/matrix", {"matrix": edited}, "PUT")
 
-        saved, completed = False, False
         try:
-            # The check makes its own precondition: the plan is saved while runner-1 holds the groups it has, so it does not
-            # depend on what an earlier pass left in the library. It is saved again when the check ends.
-            call("/api/library/customers-anonymized/distribute", {"save": True, "message": "smoke: several groups, plan before"})
-            saved = True
-            if not next(e for e in call("/api/library") if e["id"] == "customers-anonymized")["planCurrent"]:
-                raise RuntimeError("the plan just saved for customers-anonymized is not listed current")
             for deployment in call("/api/deployments"):
                 call(f"/api/deployments/{deployment['pipelineId']}", None, "DELETE")
             put_identity(["runner", "audit"])
-            # That plan was made while runner-1 held `runner` alone: it is not the plan a new distribution would make any
-            # more, so it is listed stale for its groups and its deployment is refused, saying why.
-            listed = next(e for e in call("/api/library") if e["id"] == "customers-anonymized")
-            if listed["planCurrent"] or listed.get("planStaleCause") != "groups":
-                raise RuntimeError(f"runner-1 holds other groups than its saved plan names, and the plan is listed {listed}")
-            try:
-                call("/api/library/customers-anonymized/deploy", {})
-            except ApiError as e:
-                if e.status != 409 or "groups" not in str(e) or "distribute it again" not in str(e):
-                    raise RuntimeError(f"the deployment of a plan made for other groups was refused, but not as it should: {e}")
-            else:
-                raise RuntimeError("a plan made for other groups was deployed")
+            # Nothing was saved of the plan: the next plan names the groups the rights give runner-1 now, with no
+            # redistribution, and the matrix judges it under them.
             refused = plan()
+            held = [sorted(f["groups"]) for f in refused["fragments"] if f["node"] == "runner-1"]
+            if held != [["audit", "runner"]]:
+                raise RuntimeError(f"runner-1 holds runner+audit now, and the plan names {held}")
             if refused["deployable"] or "audit" not in (refused.get("flowRejection") or ""):
                 raise RuntimeError(f"runner+audit with no matrix entry for audit: {refused.get('flowRejection')}")
             allowing(("crm", "audit"))
@@ -605,8 +588,6 @@ def rights_pass():
                 raise RuntimeError(f"every group allowed, still refused: {plan().get('flowRejection')}")
             # The hub enforces the same rule on every transfer: deployed and run with both groups allowed it
             # succeeds; with audit -> warehouse revoked under the deployment, the transfer is refused.
-            call("/api/library/customers-anonymized/distribute", {"save": True, "message": "smoke: several groups"})
-            saved = True
             call("/api/library/customers-anonymized/deploy", {})
             run = call("/api/runs", {"pipelineId": "customers-anonymized"})
             allowed = until(lambda: _finished(run["runId"]), RUN_TIMEOUT, "the run with every group allowed")
@@ -615,22 +596,11 @@ def rights_pass():
             refused = until(lambda: _finished(run["runId"]), RUN_TIMEOUT, "the run with audit -> warehouse revoked")
             if allowed["state"] != "succeeded" or refused["state"] == "succeeded":
                 raise RuntimeError(f"every group allowed -> {allowed['state']}, audit -> warehouse revoked -> {refused['state']}")
-            completed = True
         finally:
             call("/api/rights/matrix", {"matrix": matrix}, "PUT")
             for deployment in call("/api/deployments"):
                 call(f"/api/deployments/{deployment['pipelineId']}", None, "DELETE")
             put_identity(runner["groups"])
-            if saved:
-                # The plan saved above carries runner-1's groups of the moment, and the library keeps it: saved again once the
-                # identity and the matrix are back, so the saved plan carries the groups the rights give its nodes now. A
-                # failure of the check itself stays the one reported.
-                try:
-                    call("/api/library/customers-anonymized/distribute", {"save": True, "message": "smoke: several groups, restored"})
-                except Exception as e:
-                    if completed:
-                        raise
-                    print(f"  the saved plan of customers-anonymized could not be restored: {e}", file=sys.stderr)
         return "runner-1 in runner+audit: refused until crm -> audit and audit -> warehouse are both allowed; the run succeeds, and fails once audit -> warehouse is revoked"
 
     def enrollment():
@@ -717,7 +687,6 @@ def rights_pass():
             update(True)
         until(online, 30, "node-3 back online once enabled")
         pipeline = "revenue-by-country"
-        call(f"/api/library/{pipeline}/distribute", {"save": True, "message": "smoke: node-3 enabled again"})
         call(f"/api/library/{pipeline}/deploy", {})
         try:
             run = call("/api/runs", {"pipelineId": pipeline})
@@ -774,8 +743,8 @@ def rights_pass():
         expected = {
             "reader GET /api/library": (status(lambda: reader.call("/api/library")), 200),
             "reader PUT /api/rights/matrix": (status(lambda: reader.call("/api/rights/matrix", {"matrix": policy}, "PUT")), 403),
-            "reader POST /api/library/{id}/distribute": (status(lambda: reader.call("/api/library/customers-mirror/distribute", {})), 403),
-            "designer POST /api/library/{id}/distribute": (status(lambda: designer.call("/api/library/customers-mirror/distribute", {})), 200),
+            "reader GET /api/library/{id}/plan": (status(lambda: reader.call("/api/library/customers-mirror/plan")), 200),
+            "reader POST /api/library/{id}/deploy": (status(lambda: reader.call("/api/library/customers-mirror/deploy", {})), 403),
             "designer PUT /api/rights/matrix": (status(lambda: designer.call("/api/rights/matrix", {"matrix": policy}, "PUT")), 403),
             "designer GET /api/pipelines (lab mode)": (status(lambda: designer.call("/api/pipelines")), 403),
             "no role GET /api/nodes": (status(lambda: nobody.call("/api/nodes")), 403),

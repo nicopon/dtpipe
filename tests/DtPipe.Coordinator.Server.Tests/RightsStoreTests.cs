@@ -79,20 +79,6 @@ public sealed class RightsStoreTests : IDisposable
     }
 
     [Fact]
-    public void The_Active_Groups_Of_A_Node_Are_Null_When_It_Has_No_Identity_Or_A_Disabled_One()
-    {
-        var store = StoreOf(Document);
-        Assert.Equal(["crm"], store.ActiveGroupsOf("node-a"));
-        Assert.Null(store.ActiveGroupsOf("node-z"));
-
-        store.UpdateIdentity("a", "node-a", "A", ["crm"], false);
-        Assert.Null(store.ActiveGroupsOf("node-a"));
-
-        store.UpdateIdentity("a", "node-a", "A", ["crm"], true);
-        Assert.Equal(["crm"], store.ActiveGroupsOf("node-a"));
-    }
-
-    [Fact]
     public void A_Version_2_Document_Keeps_Its_Names_And_Groups()
     {
         var store = StoreOf(Document);

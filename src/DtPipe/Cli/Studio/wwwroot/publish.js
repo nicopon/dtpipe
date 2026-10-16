@@ -119,7 +119,6 @@ export function publicationView() {
   const saved = outcome.saved;
   return [
     el("p", { class: "good" }, `${saved.id} is published at the commit `, el("code", {}, short(saved.commit)), "."),
-    saved.redistribute ? el("p", { class: "warn" }, "This pipeline had a plan: it no longer matches. Redistribute it, then redeploy it from the coordinator's console.") : null,
-    saved.deployed ? el("p", { class: "warn" }, "The version in production stays the previous one until it is redeployed.") : null,
+    saved.deployed ? el("p", { class: "warn" }, "The version in production stays the previous one until it is deployed again from the coordinator's console.") : null,
   ];
 }

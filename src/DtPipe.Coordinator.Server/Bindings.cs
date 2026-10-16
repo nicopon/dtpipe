@@ -58,7 +58,7 @@ public static class Bindings
             new SortedDictionary<string, Binding>(
                 bindings.ToDictionary(b => b.Key, b => b.Value with { Mode = ModeOf(b.Value) }), StringComparer.Ordinal), Json);
 
-    /// <summary>The hash a saved plan keeps of the bindings it was made from; null for none, so no bindings and no file are the same.</summary>
+    /// <summary>The hash an armed deployment keeps of the bindings it was armed with; null for none, so no bindings and no file are the same.</summary>
     public static string? Sha(IReadOnlyDictionary<string, Binding> bindings) =>
         bindings.Count == 0 ? null : PipelineLibrary.Sha(Serialize(bindings));
 }

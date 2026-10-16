@@ -2,7 +2,7 @@ using DtPipe.Jobs.Coordinator;
 
 namespace DtPipe.Coordinator.Server;
 
-/// <summary>The library: the pipelines, their history, their automatic distribution, and the deployment of a saved plan.</summary>
+/// <summary>The library: the pipelines, their history, the plan a launch would make now, and their deployment.</summary>
 internal static class LibraryEndpoints
 {
     public static void MapLibrary(this RouteGroupBuilder api, RouteGroupBuilder designer)
@@ -32,11 +32,12 @@ internal static class LibraryEndpoints
                 return Results.Json(new LibraryConflict(ex.Message, ex.Commit), statusCode: StatusCodes.Status412PreconditionFailed);
             }
             bus.Publish("library", new { id, commit = saved.Commit });
-            // A deployment runs the text it was planned from: only the saved plan, still current, is this text.
-            var deployed = deployments.DeployedPlanId(id) is { } deployedPlan
-                && (saved.PlanStale || saved.PlanId is null || deployedPlan != saved.PlanId);
+            // A deployment runs the job and the bindings it was armed with: it is another version unless the library holds, by
+            // content, the same ones (a commit that put the old text back is the same job).
+            var deployed = deployments.ArmedOf(id) is { } armed
+                && (armed.JobSha != PipelineLibrary.Sha(request.Yaml) || armed.BindingsSha != Bindings.Sha(saved.Bindings));
             var problems = (await library.GetAsync(id, ct))?.BindingProblems.Select(p => p.Message).ToList() ?? [];
-            return Results.Ok(new LibrarySaved(id, saved.Commit, saved.PlanStale, deployed, problems));
+            return Results.Ok(new LibrarySaved(id, saved.Commit, deployed, problems));
         });
         designer.MapDelete("/library/{id}", async (string id, PipelineLibrary library, EventBus bus, CancellationToken ct) =>
         {
@@ -63,42 +64,32 @@ internal static class LibraryEndpoints
             var saved = await library.SaveBindingsAsync(id, bindings, request.Message ?? "", ct);
             bus.Publish("library", new { id, commit = saved.Commit });
             var problems = (await library.GetAsync(id, ct))?.BindingProblems ?? [];
-            return Results.Ok(new { id, commit = saved.Commit, redistribute = saved.PlanStale, problems });
+            return Results.Ok(new { id, commit = saved.Commit, problems });
         });
 
-        // Distribution: the library's job placed automatically, previewed or saved as the pipeline's plan.
-        designer.MapPost("/library/{id}/distribute", async (string id, DistributeRequest? request, PipelineLibrary library, AutoPlacer placer, EventBus bus, CancellationToken ct) =>
+        // The plan a launch would make now, from the job and the bindings the library holds: nothing is written. The runner it names
+        // is the one a launch would pick at this moment.
+        api.MapGet("/library/{id}/plan", async (string id, PipelineLibrary library, AutoPlacer placer, DeploymentManager deployments, CancellationToken ct) =>
         {
             var doc = await library.GetAsync(id, ct);
             if (doc is null) return Results.NotFound(new { error = $"'{id}' is not in the library." });
-            var plan = await placer.PlanAsync(id, doc.Yaml, doc.Bindings, ct);
-            string? commit = null;
-            if (request?.Save == true)
-            {
-                if (!plan.Deployable) return Results.Conflict(new { error = "This plan cannot be saved: " + string.Join(" ", plan.Errors.Append(plan.FlowRejection ?? "")) });
-                commit = await library.SavePlanAsync(id, plan, request.Message ?? "", ct);
-                bus.Publish("library", new { id, commit });
-            }
-            return Results.Ok(new { plan, commit, bricks = placer.BrickAliases(doc.Yaml, doc.Bindings), offers = placer.Offers(doc.Yaml) });
+            var launch = await deployments.PlanLaunchAsync(id, doc.Yaml, doc.Bindings, ct);
+            return Results.Ok(new { plan = launch.Plan, runner = launch.Runner, bricks = placer.BrickAliases(doc.Yaml, doc.Bindings), offers = placer.Offers(doc.Yaml) });
         });
-        designer.MapPost("/library/{id}/deploy", async (string id, PipelineLibrary library, DeploymentManager deployments, CancellationToken ct) =>
+        // Arms the pipeline at the commit the library holds, with the bindings it holds. The plan a launch would make now must
+        // hold and every node must answer for its fragments; a refused arming is not kept.
+        designer.MapPost("/library/{id}/deploy", async (string id, HttpContext http, PipelineLibrary library, DeploymentManager deployments, CancellationToken ct) =>
         {
             var doc = await library.GetAsync(id, ct);
-            if (doc?.Plan is null) return Results.Conflict(new { error = $"'{id}' has no saved distributed plan: distribute it first." });
+            if (doc is null) return Results.NotFound(new { error = $"'{id}' is not in the library." });
+            if (doc.Commit is null) return Results.Conflict(new { error = $"'{id}' has no commit to arm." });
             if (doc.BindingProblems.Where(p => p.Blocking).Select(p => p.Message).ToList() is { Count: > 0 } refused)
                 return Results.Conflict(new { error = $"The bindings of '{id}' do not hold: " + string.Join(" ", refused) });
-            if (!doc.PlanCurrent)
-                return Results.Conflict(new
-                {
-                    error = doc.PlanStaleCause switch
-                    {
-                        PlanStaleCauses.Job => $"'{id}' changed since its plan was saved: distribute it again.",
-                        PlanStaleCauses.Bindings => $"The bindings of '{id}' changed since its plan was saved: distribute it again.",
-                        _ => $"A node of '{id}' holds other groups than its plan names, or has no enabled identity: distribute it again.",
-                    },
-                });
-            await deployments.DeployAsync(doc.Plan.Plan, "library", ct);
-            return Results.Ok(doc.Plan.Plan);
+            var armed = new ArmedDeployment(
+                id, doc.Commit, PipelineLibrary.Sha(doc.Yaml), Bindings.Sha(doc.Bindings), doc.Bindings, DateTimeOffset.UtcNow,
+                TrustedIdp.EmailOf(http) ?? http.User.Identity?.Name ?? "unknown");
+            await deployments.ArmAsync(armed, doc.Yaml, ct);
+            return Results.Ok(armed);
         });
     }
 
@@ -123,7 +114,5 @@ internal static class LibraryEndpoints
                 statusCode: StatusCodes.Status422UnprocessableEntity);
     }
 }
-
-internal sealed record DistributeRequest(bool Save = false, string? Message = null);
 
 internal sealed record BindingsRequest(IReadOnlyDictionary<string, Binding>? Bindings, string? Message = null);

@@ -1290,8 +1290,8 @@ coordinator, and a sink brick receives nothing, its rows ending in a throwaway f
 choose: an unsaved change is refused, and its layout and launch values stay on this machine. The
 first publication of an id creates it only, a later one replaces only the version published last
 from this studio; when someone else saved the pipeline since, the studio shows the version in
-place and replaces it only if you say so. A pipeline that already had a distributed plan must be
-redistributed then redeployed from the coordinator's console, and the page says so.
+place and replaces it only if you say so. A pipeline that is deployed keeps running the version
+it was armed at until it is deployed again from the coordinator's console, and the page says so.
 
 **Open from library** lists the coordinator's pipelines and writes the one you pick as a new file,
 `<id>.yaml`, in the folder: it never overwrites a file, and it remembers the version it read, so a

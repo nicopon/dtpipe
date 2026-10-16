@@ -145,19 +145,13 @@ public sealed class StudioRoutesTests : IDisposable
     }
 
     [Fact]
-    public async Task A_Save_Says_When_The_Saved_Plan_No_Longer_Matches()
+    public async Task A_Save_Says_Nothing_Is_Deployed_For_A_Pipeline_That_Is_Not_Armed()
     {
         var created = await Save("orders", "a:\n  input: x\n");
-        Assert.False(created.Saved!.Redistribute);
-        var plan = new DistributionPlan("plan-1", "orders", [], [], [], [], [], [], null);
-        await _host.Services.GetRequiredService<PipelineLibrary>().SavePlanAsync("orders", plan, "plan", Ct);
-
-        // The plan's commit is not an edit of the job: the version read before it still holds.
-        var same = await Save("orders", "a:\n  input: x\n", ifMatch: created.Saved.Commit);
-        Assert.False(same.Saved!.Redistribute);
         var changed = await Save("orders", "a:\n  input: z\n");
-        Assert.True(changed.Saved!.Redistribute);
-        Assert.False(changed.Saved.Deployed);
+
+        Assert.False(created.Saved!.Deployed);
+        Assert.False(changed.Saved!.Deployed);
     }
 
     private Task<HttpResponseMessage> Put(HttpClient client, string id, string yaml)
@@ -272,14 +266,14 @@ public sealed class StudioRoutesTests : IDisposable
     public async Task The_Library_Is_Listed_And_Read_At_The_Version_Of_Its_Job()
     {
         var created = await Save("orders", "a:\n  input: x\n");
-        var plan = new DistributionPlan("plan-1", "orders", [], [], [], [], [], [], null);
-        await _host.Services.GetRequiredService<PipelineLibrary>().SavePlanAsync("orders", plan, "plan", Ct);
+        await _host.Services.GetRequiredService<PipelineLibrary>().SaveBindingsAsync(
+            "orders", new Dictionary<string, Binding> { ["a"] = new Binding("node-a") }, "bind", Ct);
 
         var reader = As(CoordinatorHost.Reader);
         var listing = await reader.GetFromJsonAsync<LibraryItem[]>(CoordinatorApi.LibraryList, Ct);
         Assert.Equal(("orders", created.Saved!.Commit), (Assert.Single(listing!).Id, listing![0].Commit));
 
-        // The plan saved beside the job is a commit of the folder, not an edit: the job's version stays.
+        // The bindings saved beside the job are a commit of the folder, not an edit: the job's version stays.
         var job = await reader.GetFromJsonAsync<LibraryJob>(CoordinatorApi.Library("orders"), Ct);
         Assert.Equal(new LibraryJob("orders", "a:\n  input: x\n", created.Saved.Commit), job);
 

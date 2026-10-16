@@ -12,6 +12,7 @@ internal sealed class RunQueue
 {
     private readonly DeploymentLedger _ledger;
     private readonly DeploymentService _deployments;
+    private readonly LaunchPlanner _planner;
     private readonly NodeInventory _inventory;
     private readonly IRunOrchestrator _orchestrator;
     private readonly EventBus _bus;
@@ -19,11 +20,11 @@ internal sealed class RunQueue
     private readonly ILogger _logger;
 
     public RunQueue(
-        DeploymentLedger ledger, DeploymentService deployments, NodeInventory inventory, IRunOrchestrator orchestrator,
+        DeploymentLedger ledger, DeploymentService deployments, LaunchPlanner planner, NodeInventory inventory, IRunOrchestrator orchestrator,
         EventBus bus, RunJournal journal, ILogger logger)
     {
-        (_ledger, _deployments, _inventory, _orchestrator, _bus, _journal, _logger) =
-            (ledger, deployments, inventory, orchestrator, bus, journal, logger);
+        (_ledger, _deployments, _planner, _inventory, _orchestrator, _bus, _journal, _logger) =
+            (ledger, deployments, planner, inventory, orchestrator, bus, journal, logger);
     }
 
     /// <summary>The oldest run in flight, else the next waiting, else the last finished: of one pipeline, or of any.</summary>
@@ -50,7 +51,7 @@ internal sealed class RunQueue
             var deployment = _ledger.Deployments.GetValueOrDefault(pipelineId) ?? throw new ConflictException($"'{pipelineId}' is not deployed.");
             if (deployment.State == DeploymentState.Failed) throw new ConflictException($"The deployment of '{pipelineId}' failed: {deployment.Message}");
             var now = DateTimeOffset.UtcNow;
-            ticket = new Ticket(new RunView(_journal.NextRunId(), deployment.Plan.Id, RunState.Queued, now, null, null, null, null, pipelineId, now));
+            ticket = new Ticket(new RunView(_journal.NextRunId(), deployment.PlanId, RunState.Queued, now, null, null, null, null, pipelineId, now));
             _ledger.Queued.Add(ticket);
         }
         var view = ticket.View;
@@ -106,7 +107,7 @@ internal sealed class RunQueue
         {
             // A run whose pipeline is gone holds nothing: it is sent at once and refused.
             var waiting = _ledger.Queued.Select(t => (Ticket: t, Nodes: _ledger.Deployments.GetValueOrDefault(t.View.PipelineId!) is { } d
-                ? RunDispatch.DataNodes(d.Plan, roles) : new HashSet<string>())).ToList();
+                ? _deployments.HeldNodes(d, roles) : new HashSet<string>())).ToList();
             var startable = RunDispatch.Startable(
                 _ledger.Sent.Select(t => t.Held), waiting.Select(w => new RunDispatch.Waiting(w.Ticket.View.RunId, w.Nodes)).ToList());
             foreach (var (ticket, nodes) in waiting.Where(w => startable.Contains(w.Ticket.View.RunId)))
@@ -148,6 +149,9 @@ internal sealed class RunQueue
         }
 
         // The deployment's gate is passed to read its state, not held: it is held while it is deployed or removed.
+        // The plan is computed here, once the run is sent and outside the ledger's lock: it asks no node, but it reads the library.
+        DistributionPlan plan;
+        RunPlan journaled;
         IReadOnlyList<RunFragment> fragments;
         try
         {
@@ -161,7 +165,15 @@ internal sealed class RunQueue
             {
                 deployment.Gate.Release();
             }
-            fragments = _deployments.RunFragmentsOf(deployment.Plan);
+            var (launch, bindings) = await _deployments.PlanForRunAsync(deployment, ticket.Cancel.Token);
+            if (!launch.Ok) throw new ConflictException(launch.Refusal);
+            plan = launch.Plan;
+            var roles = new Dictionary<string, NodeRole>(StringComparer.Ordinal);
+            foreach (var node in _inventory.Snapshot()) roles[node.Name] = node.Role;
+            if (RunDispatch.Unheld(plan, ticket.Held, roles) is { Count: > 0 } unheld)
+                throw new ConflictException($"The plan of '{pipelineId}' reaches {string.Join(", ", unheld)}, which the run does not hold: it is not run.");
+            journaled = _planner.Describe(plan, launch.Runner, bindings);
+            fragments = _deployments.RunFragmentsOf(plan);
         }
         catch (Exception ex)
         {
@@ -171,8 +183,7 @@ internal sealed class RunQueue
             return;
         }
 
-        var plan = deployment.Plan;
-        view = view with { State = RunState.Running, StartedAt = DateTimeOffset.UtcNow };
+        view = view with { State = RunState.Running, StartedAt = DateTimeOffset.UtcNow, PlanId = plan.Id, Plan = journaled };
         lock (_ledger.Lock) ticket.View = view;
         _bus.Publish("run", view);
         _deployments.PublishDeployments();

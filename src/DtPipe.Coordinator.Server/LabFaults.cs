@@ -24,7 +24,7 @@ internal sealed class LabFaults(DeploymentLedger ledger, NodeInventory inventory
         lock (ledger.Lock)
         {
             foreach (var deployment in ledger.Deployments.Values)
-                if (deployment.Plan.Fragments.FirstOrDefault(f => f.Name == fragmentName) is { } fragment)
+                if (deployment.Plan?.Fragments.FirstOrDefault(f => f.Name == fragmentName) is { } fragment)
                     return (deployment, fragment);
         }
         throw new ConflictException($"'{fragmentName}' is not a fragment of a deployed plan.");

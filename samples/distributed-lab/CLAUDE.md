@@ -83,7 +83,7 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   wait for the hosts names the ones still offline, so a reference check that reads the warehouse
   through node-4 never fails for a node-4 not yet back. It records, it never fixes. It starts only on a bench it can judge
   (`campaign_bench.py`): only the lab's own processes, a machine with no build, test run or TransportR
-  process, every saved plan carrying the groups the rights give its nodes now, and every host's binary
+  process, every armed deployment binding only nodes the rights give an identity, and every host's binary
   (`--dtpipe` for a data node, `DtPipeNode__DtPipe` in its environment for the runner) starting and
   reporting the full hash of the frozen commit with a clean tracked tree. Every call retried on `EADDRINUSE`/`EADDRNOTAVAIL` and every port-exhaustion line
   in the lab's logs is counted into the trial's `I7`, never absorbed. `[local: tools/campaign.py with

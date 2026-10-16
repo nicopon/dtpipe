@@ -126,12 +126,16 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
         return problems;
     }
 
-    public async Task<DistributionPlan> PlanAsync(string pipelineId, string yaml, IReadOnlyDictionary<string, Binding> bindings, CancellationToken ct)
+    /// <summary>
+    /// The plan of <paramref name="yaml"/> under <paramref name="bindings"/>, with every branch that is neither bound nor a brick on
+    /// <paramref name="runner"/> (null: none is available, and such a branch is an error). Which runner is <see cref="LaunchPlanner"/>'s.
+    /// </summary>
+    public async Task<DistributionPlan> PlanAsync(
+        string pipelineId, string yaml, IReadOnlyDictionary<string, Binding> bindings, NodeView? runner, CancellationToken ct)
     {
         var errors = new List<string>();
         var placed = new Dictionary<string, string>(StringComparer.Ordinal);
         var nodes = inventory.Snapshot();
-        var runner = inventory.PreferredRunner();
         var hostOf = nodes.SelectMany(n => n.Datasets.Select(d => (d.Variable, n.Name))).ToDictionary(x => x.Variable, x => x.Name, StringComparer.Ordinal);
         var problems = Check(yaml, bindings);
         var refused = problems.Where(p => p.Blocking).Select(p => p.Alias).ToHashSet(StringComparer.Ordinal);

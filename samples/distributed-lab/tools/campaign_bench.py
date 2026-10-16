@@ -1,8 +1,8 @@
-"""Which processes and which saved plans belong to the bench. A campaign judges what the lab did, so it starts only
+"""Which processes and which armed deployments belong to the bench. A campaign judges what the lab did, so it starts only
 when every lab process is one its pid files name: a host or a toxiproxy left over from an earlier session reconnects
-through the proxies the campaign creates and doubles a node, which no verdict shows. The saved plans are the bench's too:
-the reference pipeline deploys the plan the library holds, and one that carries other groups than the rights give its
-nodes is refused by the flow matrix, which every trial would then read as a failure of the lab."""
+through the proxies the campaign creates and doubles a node, which no verdict shows. The armed deployments are the bench's too:
+a run plans from the bindings it was armed with, and one that binds a node the rights give no identity is refused,
+which every trial would then read as a failure of the lab."""
 import glob
 import json
 import os
@@ -162,28 +162,26 @@ def launched_binaries(state_dir, node_names):
     return values
 
 
-def stale_plans(state_dir):
-    """Why a saved plan does not match the rights, as a list of sentences (empty when every one does): the groups a
-    plan's fragments carry must be the groups the rights give their node now. A file that cannot be read is a finding."""
+def armed_deployments(state_dir):
+    """Why an armed deployment cannot run as the rights stand, as a list of sentences (empty when every one can): each node
+    its bindings name must have an identity, since a plan is made at each launch from the rights as they are. A file that
+    cannot be read is a finding."""
     try:
         with open(os.path.join(state_dir, "rights.json"), encoding="utf-8") as f:
-            groups = {i["name"]: sorted(i["groups"]) for i in json.load(f)["identities"]}
+            names = {i["name"] for i in json.load(f)["identities"]}
     except (OSError, ValueError, KeyError, TypeError) as e:
-        return [f"the rights cannot be read to judge the saved plans: {e}"]
+        return [f"the rights cannot be read to judge the armed deployments: {e}"]
     problems = []
-    for path in sorted(glob.glob(os.path.join(state_dir, "library", "pipelines", "*", "distributed", "plan.json"))):
-        pipeline = path.split(os.sep)[-3]
+    for path in sorted(glob.glob(os.path.join(state_dir, "deployments", "*.json"))):
+        pipeline = os.path.splitext(os.path.basename(path))[0]
         try:
             with open(path, encoding="utf-8") as f:
-                fragments = json.load(f)["plan"]["fragments"]
-            differing = [f"{x['node']} (plan {'+'.join(sorted(x['groups'])) or 'none'}, rights "
-                         f"{'+'.join(groups[x['node']]) if x['node'] in groups else 'no identity'})"
-                         for x in fragments if x["node"] not in groups or sorted(x["groups"]) != groups[x["node"]]]
+                nodes = {b["node"] for b in json.load(f)["bindings"].values()}
         except (OSError, ValueError, KeyError, TypeError) as e:
-            problems.append(f"the saved plan of {pipeline} cannot be read: {e}")
+            problems.append(f"the armed deployment of {pipeline} cannot be read: {e}")
             continue
-        if differing:
-            problems.append(f"the saved plan of {pipeline} carries other groups than the rights give: {', '.join(differing)}")
+        if nodes - names:
+            problems.append(f"the armed deployment of {pipeline} binds {', '.join(sorted(nodes - names))}, which the rights give no identity")
     return problems
 
 

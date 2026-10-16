@@ -29,14 +29,26 @@ internal sealed class DeploymentLedger
     }
 }
 
+/// <summary>
+/// A deployment: a plan fixed by the Lab view (<see cref="Armed"/> null, in memory only) or a library pipeline armed at a commit
+/// (<see cref="Armed"/>, persisted), whose plan is computed at each launch. <see cref="Plan"/> is the fixed plan, or the last plan
+/// computed for an armed deployment (null until one is).
+/// </summary>
 internal sealed class Deployment
 {
-    public required DistributionPlan Plan;
+    public required string PipelineId;
+    public DistributionPlan? Plan;
+    public ArmedDeployment? Armed;
+    /// <summary>The armed job's text, read from the library once.</summary>
+    public string? Job;
     public required string Origin;
     public required DateTimeOffset DeployedAt;
     public DeploymentState State = DeploymentState.Deploying;
     public string? Message;
     public readonly SemaphoreSlim Gate = new(1, 1);
+
+    /// <summary>What the pages and runs call the plan deployed: the fixed plan's id, or the pipeline at its armed commit.</summary>
+    public string PlanId => Armed is { } armed ? $"{PipelineId}@{armed.Commit[..Math.Min(8, armed.Commit.Length)]}" : Plan!.Id;
 }
 
 internal sealed class Ticket(RunView view)

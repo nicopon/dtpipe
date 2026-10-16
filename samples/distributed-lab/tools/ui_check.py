@@ -82,6 +82,7 @@ def library_page(browser):
     # The list's row actions agree with the library's and the deployments' state, and Open leads to the pipeline's page.
     entries = SESSION.call("/api/library")
     deployments = {d["pipelineId"]: d for d in SESSION.call("/api/deployments")}
+    queue = SESSION.call("/api/runs/queue")
     browser.console.clear()
     browser.js("location.hash = '#/library'")
     browser.wait_for(f"document.querySelectorAll('table.library [data-run]').length === {len(entries)}", 20)
@@ -91,7 +92,8 @@ def library_page(browser):
         row = f"[data-deploy={json.dumps(e['id'])}]"
         deploy_off = browser.js(f"document.querySelector({json.dumps(row)}).disabled")
         run_off = browser.js(f"document.querySelector('[data-run={json.dumps(e['id'])}]').disabled")
-        if deploy_off != (not (e["distributed"] and e["planCurrent"])):
+        blocked = any(p["blocking"] for p in e["bindingProblems"]) or any(r["pipelineId"] == e["id"] for r in queue)
+        if deploy_off != blocked:
             wrong.append(f"{e['id']} deploy disabled={deploy_off}")
         if run_off != (not deployment or deployment["state"] == "failed"):
             wrong.append(f"{e['id']} run disabled={run_off}")

@@ -50,7 +50,7 @@ internal sealed class StudioFakes : IAsyncDisposable
     public readonly Dictionary<string, (string Yaml, string Commit)> Library = [];
     public string? LastSaveBody;
     public LibraryRefused? Refusal;
-    public bool Redistribute;
+    public bool Deployed;
     public int Commits;
     public string SinkTarget = "csv:target.csv";
 
@@ -213,7 +213,7 @@ internal sealed class StudioFakes : IAsyncDisposable
                 return;
             }
             Library[id] = (save.Yaml, $"commit-{Library.Count + Commits++}");
-            await context.Response.WriteAsJsonAsync(new LibrarySaved(id, Library[id].Commit, Redistribute, false), JsonSerializerOptions.Web);
+            await context.Response.WriteAsJsonAsync(new LibrarySaved(id, Library[id].Commit, Deployed), JsonSerializerOptions.Web);
             break;
         case "/api/elsewhere":
                 context.Response.Redirect(IdpUrl + "/stolen");
