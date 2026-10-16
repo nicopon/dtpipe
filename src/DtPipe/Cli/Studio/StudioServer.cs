@@ -78,7 +78,7 @@ public delegate string StudioImporter(IReadOnlyList<string> args);
 /// <c>state</c>;</item>
 /// <item>the pages run no inline script (<c>Content-Security-Policy</c>) and send no referrer.</item>
 /// </list>
-/// One sample runs at a time: the sample mode's collector belongs to the whole process.
+/// One engine action runs at a time: a sample, a run and a quit refuse each other (409).
 /// </summary>
 public sealed partial class StudioServer : IAsyncDisposable
 {

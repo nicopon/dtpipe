@@ -65,24 +65,13 @@ public partial class DtPipeMcpTools
             throw new InvalidOperationException("The SQL safety policy refuses this job: " + string.Join(" ", safety.Violations)
                 + " Run it with dtpipe --job and the appropriate --allow-* flag.");
         var contexts = parsed.Jobs.ToDictionary(kv => kv.Key, kv => new CliJobContext(null, null, null, Array.Empty<string>()));
-        var jobService = _serviceProvider.GetRequiredService<DtPipe.Cli.JobService>();
-        if (checkpoints is null)
-            return await jobService.ExecutePipelineAsync(parsed.Jobs, parsed.Dag, contexts, new GlobalOptions { Quiet = true }, ct, branchFailures);
-
-        // The collector is the process's: the run holds its turn until the keys of the checkpoints it committed are read.
-        var collector = _serviceProvider.GetRequiredService<DtPipe.DryRun.SampleReportCollector>();
-        using var turn = await collector.TakeTurnAsync(ct);
-        collector.Clear();
-        collector.Enabled = true;
-        try
-        {
-            return await jobService.ExecutePipelineAsync(parsed.Jobs, parsed.Dag, contexts, new GlobalOptions { Quiet = true }, ct, branchFailures);
-        }
-        finally
-        {
-            collector.Enabled = false;
-            foreach (var (alias, key) in collector.Checkpoints) checkpoints[alias] = key;
-        }
+        var runner = _serviceProvider.GetRequiredService<DtPipe.Cli.JobRunner>();
+        var outcome = await runner.RunAsync(parsed.Jobs, parsed.Dag, contexts, new GlobalOptions { Quiet = true }, ct);
+        foreach (var (alias, reason) in outcome.Failures) branchFailures[alias] = reason;
+        if (checkpoints is not null)
+            foreach (var (alias, key) in outcome.Checkpoints) checkpoints[alias] = key;
+        outcome.ThrowIfFaulted();
+        return outcome.ExitCode;
     }
 
     /// <summary>

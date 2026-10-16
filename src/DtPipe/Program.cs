@@ -307,6 +307,7 @@ class Program
 		services.AddSingleton<DtPipe.Core.Security.IMcpSecurityContext, DtPipe.Core.Security.McpSecurityContext>();
 		services.AddSingleton<Spectre.Console.IAnsiConsole>(sp => DtPipe.Cli.Infrastructure.SharedConsole.Create());
 		services.AddSingleton<JobService>();
+		services.AddSingleton<JobRunner>();
 
 		var useFakeKeyring = Environment.GetEnvironmentVariable("DTPIPE_UNSAFE_INSECURE_FAKE_KEYRING");
 		if (useFakeKeyring == "1" || useFakeKeyring == "true")

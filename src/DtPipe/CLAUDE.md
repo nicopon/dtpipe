@@ -161,13 +161,17 @@ Mandatory MCP directives:
    `[unchecked]`
 4. Fail closed: default `apply=false`, reject on ambiguity. `[CI: ExecuteYamlJobGuardrailTests]`
 
-### One collecting sample at a time
+### One run, one report collection
 
-`SampleReportCollector` belongs to the process, and the agent runs the tools of a turn in parallel
-(F5). `RunSampleAsync` therefore holds `TakeTurnAsync` from before it clears the collector until it
-has read its reports: two `dry-run` calls run one after the other, never clearing or disabling each
-other's capture. `dtpipe mcp` serves until it is stopped, so a signal is its only end and it exits
-130. `[CI: SampleModeDagTests, McpCommandTests]`
+The agent runs the tools of a turn in parallel (F5), so two runs overlap. `JobRunner` is the only
+caller-facing way to run a resolved job (MCP, `split`, `contract`): it arms a `RunReports` for the run
+through `SampleReportCollector.Begin`, around the whole `ExecutePipelineAsync`, and returns a
+`RunOutcome` (exit code, branch failures, reports, checkpoint keys). `SampleReportCollector` is the
+singleton the engine and the observer publish to; it forwards to the collection the calling async flow
+armed, branches included, and drops everything when none is armed. Never read it from a caller, and
+never arm it from an `async` method that returns before the run ends: the value is gone with the frame.
+`dtpipe mcp` serves until it is stopped, so a signal is its only end and it exits 130.
+`[CI: ConcurrentRunCollectionTests, SampleReportCollectorTests, SampleModeDagTests, McpCommandTests]`
 
 ### The session trace
 
@@ -187,8 +191,8 @@ publishing it. Look first at what dtpipe tells the model about itself.
 
 `dtpipe studio [folder]` (`StudioCommand`, `Cli/Studio/`) serves a local page over a folder's YAML
 jobs and samples them through `DtPipeMcpTools.SampleAsync`, the `dry-run` tool's own path: never a
-second sample path. `SampleReportCollector` belongs to the process, so `StudioServer` runs one sample
-at a time (409 otherwise). Kestrel is referenced for this server alone.
+second sample path. `StudioServer` runs one engine action at a time (409 otherwise), as the debug state
+and the quit require. Kestrel is referenced for this server alone.
 
 The page is the designer: `DesignService` (`DtPipe.Jobs`, the coordinator's own model) composes the
 cards and takes a job apart, never the page. `ComponentEndpointRules` gives it dtpipe's readers and
@@ -315,7 +319,7 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   loses only the writer's keys and blocks, `WithoutWriter`; a job no branch of which writes is refused), because the engine neutralises nothing
   outside a sample. The cursor and its state file move with the piece that writes the branch
   (`JobCutter` puts them on the head, which would advance them for rows no target received). The
-  engine reports the key of each committed checkpoint through `SampleReportCollector.Checkpoints`
+  engine reports the key of each committed checkpoint through `RunOutcome.Checkpoints`
   (`StudioDebugRunner`). A level of a real run is keyed to every row and to a salt (an HMAC under the
   session's token of the launch values and the state files a cursor reads), so it serves no sample and no
   other values; a write that reached the end of the job deletes the levels that fed it, one that stopped

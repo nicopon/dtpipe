@@ -200,12 +200,7 @@ public partial class DtPipeMcpTools
     /// </summary>
     private async Task<object> RunSampleAsync(YamlParseResult parsed, int rows, int shownRows, CancellationToken ct, string? nextStep = null)
     {
-        var collector = _serviceProvider.GetRequiredService<DtPipe.DryRun.SampleReportCollector>();
-        var jobService = _serviceProvider.GetRequiredService<DtPipe.Cli.JobService>();
-
-        // Held until the reports are read: the collector is the process's, and two samples of one
-        // agent turn (F5) would otherwise clear and switch it off under each other.
-        using var turn = await collector.TakeTurnAsync(ct);
+        var runner = _serviceProvider.GetRequiredService<DtPipe.Cli.JobRunner>();
 
         var jobs = parsed.Jobs.ToDictionary(
             kv => kv.Key,
@@ -214,38 +209,25 @@ public partial class DtPipeMcpTools
 
         var contexts = jobs.ToDictionary(kv => kv.Key, kv => new CliJobContext(null, null, null, System.Array.Empty<string>()));
 
-        collector.Clear();
-        collector.Enabled = true;
-        var branchFailures = new System.Collections.Concurrent.ConcurrentDictionary<string, string>();
-        int exitCode;
+        // Quiet: the caller is a model reading JSON, not a person watching the run. NoStats
+        // alone leaves the topology panel and the results table on the console.
+        var outcome = await runner.RunAsync(jobs, parsed.Dag, contexts,
+            new GlobalOptions { NoStats = true, Quiet = true }, ct);
+        var exitCode = outcome.ExitCode;
         string? failure = null;
-        try
-        {
-            // Quiet: the caller is a model reading JSON, not a person watching the run. NoStats
-            // alone leaves the topology panel and the results table on the console.
-            exitCode = await jobService.ExecutePipelineAsync(jobs, parsed.Dag, contexts,
-                new GlobalOptions { NoStats = true, Quiet = true }, ct, branchFailures);
-        }
-        catch (Exception ex)
-        {
-            // A failed sample is still a sample that wrote nothing. Reporting it as a bare
-            // error would drop `applied: false`, and a model could no longer tell "nothing was
-            // written" from "something was written and then it failed" — which is exactly the
-            // distinction F2 exists to keep visible.
-            exitCode = 1;
-            failure = DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(ex.Message);
-        }
-        finally
-        {
-            collector.Enabled = false;
-        }
+        // A failed sample is still a sample that wrote nothing. Reporting it as a bare
+        // error would drop `applied: false`, and a model could no longer tell "nothing was
+        // written" from "something was written and then it failed" — which is exactly the
+        // distinction F2 exists to keep visible.
+        if (outcome.Fault is not null)
+            failure = DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(outcome.Fault.Message);
 
         // A branch that fails does not throw here: the orchestrator turns it into an exit code and
         // the reason goes to the console, which this run has silenced. Reported without them, a
         // failed sample was `success: false` with `error: null` — and validate-yaml-job now sends
         // every caller straight to this tool.
-        if (failure is null && branchFailures.Count > 0)
-            failure = string.Join(" ", branchFailures
+        if (failure is null && outcome.Failures.Count > 0)
+            failure = string.Join(" ", outcome.Failures
                 .OrderBy(kv => kv.Key, StringComparer.Ordinal)
                 .Select(kv => $"Branch '{kv.Key}': {DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(kv.Value)}"));
 
@@ -263,7 +245,7 @@ public partial class DtPipeMcpTools
             // false` states the fact; nextStep states the consequence, and the model acts on the
             // second.
             nextStep,
-            branches = collector.Reports.Select(kv => Shape(kv.Key, kv.Value, shownRows)).ToList()
+            branches = outcome.Reports.Select(kv => Shape(kv.Key, kv.Value, shownRows)).ToList()
         };
     }
 

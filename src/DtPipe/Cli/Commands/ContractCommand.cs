@@ -222,24 +222,14 @@ public class ContractCommand : Command
             DryRunCount = 1,
         };
 
-        var collector = _serviceProvider.GetRequiredService<DtPipe.DryRun.SampleReportCollector>();
-        var jobService = _serviceProvider.GetRequiredService<DtPipe.Cli.JobService>();
+        var runner = _serviceProvider.GetRequiredService<DtPipe.Cli.JobRunner>();
         var contexts = jobs.ToDictionary(kv => kv.Key, kv => new CliJobContext(null, null, null, Array.Empty<string>()),
                                          StringComparer.OrdinalIgnoreCase);
 
-        collector.Clear();
-        collector.Enabled = true;
-        var failures = new System.Collections.Concurrent.ConcurrentDictionary<string, string>();
-
-        int exitCode;
-        try
+        var outcome = await runner.RunAsync(jobs, build.Dag, contexts, new GlobalOptions { NoStats = true, Quiet = true }, ct);
+        if (outcome.Fault is not null)
         {
-            exitCode = await jobService.ExecutePipelineAsync(
-                jobs, build.Dag, contexts, new GlobalOptions { NoStats = true, Quiet = true }, ct, failures);
-        }
-        catch (Exception ex)
-        {
-            _console.MarkupLine($"[red]The consumer could not run over this contract: {Markup.Escape(ex.Message)}[/]");
+            _console.MarkupLine($"[red]The consumer could not run over this contract: {Markup.Escape(outcome.Fault.Message)}[/]");
             return 1;
         }
 
@@ -247,15 +237,15 @@ public class ContractCommand : Command
                           + $"→ branch [bold]{Markup.Escape(target)}[/] of {Markup.Escape(Path.GetFileName(jobPath))}");
         _console.WriteLine();
 
-        if (exitCode != 0)
+        if (outcome.ExitCode != 0)
         {
-            foreach (var (alias, reason) in failures)
+            foreach (var (alias, reason) in outcome.Failures)
                 _console.MarkupLine($"[red]Branch '{Markup.Escape(alias)}': {Markup.Escape(reason)}[/]");
             _console.MarkupLine("[red]The consumer does not run over this contract.[/]");
             return 1;
         }
 
-        return RenderVerdict(collector.Reports);
+        return RenderVerdict(outcome.Reports);
     }
 
     /// <summary>

@@ -146,37 +146,27 @@ public class SplitCommand : Command
         // cursor, the metrics file and the schema migration are suppressed with it.
         jobs[target] = jobs[target] with { DryRunCount = rows };
 
-        var collector = _serviceProvider.GetRequiredService<SampleReportCollector>();
-        var jobService = _serviceProvider.GetRequiredService<DtPipe.Cli.JobService>();
+        var runner = _serviceProvider.GetRequiredService<DtPipe.Cli.JobRunner>();
         var contexts = jobs.ToDictionary(kv => kv.Key,
                                          kv => new CliJobContext(null, null, null, Array.Empty<string>()),
                                          StringComparer.OrdinalIgnoreCase);
 
-        collector.Clear();
-        collector.Enabled = true;
-        var failures = new System.Collections.Concurrent.ConcurrentDictionary<string, string>();
-
-        int exitCode;
-        try
+        var outcome = await runner.RunAsync(jobs, build.Dag, contexts, new GlobalOptions { NoStats = true, Quiet = true }, ct);
+        if (outcome.Fault is not null)
         {
-            exitCode = await jobService.ExecutePipelineAsync(
-                jobs, build.Dag, contexts, new GlobalOptions { NoStats = true, Quiet = true }, ct, failures);
-        }
-        catch (Exception ex)
-        {
-            _console.MarkupLine($"[red]The job could not be sampled: {Markup.Escape(ex.Message)}[/]");
+            _console.MarkupLine($"[red]The job could not be sampled: {Markup.Escape(outcome.Fault.Message)}[/]");
             return 1;
         }
 
-        if (exitCode != 0)
+        if (outcome.ExitCode != 0)
         {
-            foreach (var (alias, reason) in failures)
+            foreach (var (alias, reason) in outcome.Failures)
                 _console.MarkupLine($"[red]Branch '{Markup.Escape(alias)}': {Markup.Escape(reason)}[/]");
             _console.MarkupLine("[red]A job that does not run has no cut points to offer.[/]");
             return 1;
         }
 
-        if (!collector.Reports.TryGetValue(target, out var report) || report.Run.Stages.Count == 0)
+        if (!outcome.Reports.TryGetValue(target, out var report) || report.Run.Stages.Count == 0)
         {
             _console.MarkupLine($"[red]The sample observed no stage on branch '{Markup.Escape(target)}'.[/]");
             return 1;
