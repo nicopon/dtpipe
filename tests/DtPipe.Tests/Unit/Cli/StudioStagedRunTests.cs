@@ -188,14 +188,23 @@ public sealed class StudioStagedRunTests : IAsyncLifetime
     }
 
     [Fact]
-    public void A_branch_that_runs_whole_is_not_stopped_before_a_writer_it_cannot_leave_out()
+    public void A_branch_that_runs_whole_is_stopped_before_its_writer_with_the_writer_s_keys_left_out()
     {
-        const string job = "a:\n  input: generate:20\nb:\n  from: a\n  provider-options:\n    sql:\n      query: SELECT * FROM a\n  output: csv:b.csv\n";
+        const string job = "a:\n  input: generate:20\nb:\n  from: a\n  provider-options:\n    sql:\n      query: SELECT * FROM a\n    csv-writer:\n      separator: ';'\n"
+            + "  prefix: p\n  contract-save: c.json\n  output: csv:b.csv\n";
 
-        var error = Assert.Throws<InvalidOperationException>(() =>
-            Cutter().Cut(job, [new DebugWatch("b", DebugAt.End)], new DebugWatch("b", DebugAt.End), write: true));
+        var stopped = Parsed(Cutter().Cut(job, [], new DebugWatch("b", DebugAt.End), write: true));
+        var reviewed = Parsed(Cutter().Cut(job, [], null, null, write: true, beforeWriters: true));
 
-        Assert.Contains("runs whole", error.Message);
+        foreach (var cut in new[] { stopped, reviewed })
+        {
+            Assert.Equal("null:", cut["b"].Output);
+            Assert.Equal("level-0", cut["b"].Checkpoint);
+            Assert.Null(cut["b"].Prefix);
+            Assert.Null(cut["b"].ContractSave);
+            Assert.Equal(["sql"], cut["b"].ProviderOptions!.Keys.ToArray());
+        }
+        // Without a stop the branch is the job's own.
         Assert.Contains("b.csv", Cutter().Cut(job, [new DebugWatch("b", DebugAt.End)], null, null, write: true).Yaml);
     }
 
@@ -498,17 +507,30 @@ public sealed class StudioStagedRunTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task A_review_of_a_job_no_branch_of_which_writes_or_whose_writer_runs_whole_is_refused_at_the_confirmation()
+    public async Task A_review_of_a_job_no_branch_of_which_writes_is_refused_at_the_confirmation()
     {
         var none = await SaveAsync("a:\n  input: generate:20\nb:\n  from: a\n  transformers:\n  - type: compute\n    mappings:\n      x:row.GenerateIndex: ''\n");
-        var (silent, nothing) = await PostAsync("/api/run/prepare", new { path = "job.yaml", hash = none, debug = true, review = true });
-        var whole = await SaveAsync("a:\n  input: generate:20\nb:\n  from: a\n  provider-options:\n    sql:\n      query: SELECT * FROM a\n  output: csv:b.csv\n");
-        var (processor, refused) = await PostAsync("/api/run/prepare", new { path = "job.yaml", hash = whole, debug = true, review = true });
 
-        Assert.Equal(HttpStatusCode.UnprocessableEntity, silent);
-        Assert.Contains("No branch of this job writes", nothing.GetProperty("error").GetString());
-        Assert.Equal(HttpStatusCode.UnprocessableEntity, processor);
-        Assert.Contains("runs whole", refused.GetProperty("error").GetString());
+        var (status, body) = await PostAsync("/api/run/prepare", new { path = "job.yaml", hash = none, debug = true, review = true });
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, status);
+        Assert.Contains("No branch of this job writes", body.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task A_review_holds_the_rows_of_a_branch_with_a_processor_and_writes_them_when_continued()
+    {
+        var b = Path.Combine(_dir, "b.csv");
+        var hash = await SaveAsync("a:\n  input: generate:20\nb:\n  from: a\n  provider-options:\n    sql:\n      query: SELECT * FROM a WHERE GenerateIndex < 7\n"
+            + "  transformers:\n  - type: filter\n    mappings:\n      row.GenerateIndex > 1: ''\n  output: csv:b.csv\n");
+
+        var reviewed = await RunAsync(hash, review: true);
+
+        Assert.Equal(0, reviewed.GetProperty("code").GetInt32());
+        Assert.False(File.Exists(b));
+        var done = await RunAsync(hash, review: false);
+        Assert.Equal(0, done.GetProperty("code").GetInt32());
+        Assert.Equal(1 + 5, File.ReadAllLines(b).Length);
     }
 
     [Fact]

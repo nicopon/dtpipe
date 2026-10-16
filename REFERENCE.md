@@ -1325,8 +1325,7 @@ beside their key.
 
 While a run is suspended, **Write targets…** and **Preview** are held back (the server refuses
 them too), and the bar says so. A run that was stopped or failed before every target held its rows
-cannot be written, only abandoned, so that no row is written unread. A branch that runs whole with
-a stream processor and writes cannot be stopped before its writer: the review is refused. Rows held
+cannot be written, only abandoned, so that no row is written unread. Rows held
 for a real run serve no preview, and a preview's serve no real run: the first forgets the other's.
 They are also forgotten when the job's text, a launch value or the cursor's state file changed, and
 when the studio restarts.

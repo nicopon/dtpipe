@@ -311,8 +311,8 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   `POST /api/run/prepare` and `POST /api/run` take `debug` and `review`; the saved file only, and the
   digest also binds the mode, the watchers and the keys held. `DebugCutter.Cut(write: true)` makes the
   cut at the pinned cards. With `review` (`beforeWriters`) every branch that has an output ends at its
-  end with a checkpoint and no writer (upstream branches included; one that runs whole with an output
-  is refused, and so is a job no branch of which writes), because the engine neutralises nothing
+  end with a checkpoint and no writer (upstream branches included; one that runs whole keeps its processor and
+  loses only the writer's keys and blocks, `WithoutWriter`; a job no branch of which writes is refused), because the engine neutralises nothing
   outside a sample. The cursor and its state file move with the piece that writes the branch
   (`JobCutter` puts them on the head, which would advance them for rows no target received). The
   engine reports the key of each committed checkpoint through `SampleReportCollector.Checkpoints`

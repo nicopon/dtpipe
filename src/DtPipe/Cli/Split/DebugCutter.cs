@@ -286,10 +286,7 @@ public sealed class DebugCutter(
             if (!isTarget) return piece;
             return last && !string.IsNullOrEmpty(piece.Output) ? piece : piece with { Output = "null:" };
         }
-        // A branch that runs whole cannot be stopped before its writer.
         var detach = silent && stop == count;
-        if (detach && !info.Splittable && !string.IsNullOrEmpty(job.Output))
-            throw new InvalidOperationException($"'{alias}' runs whole: it cannot be stopped before its writer.");
 
         if (!info.Cuttable && !(detach && info.Splittable && from is null))
         {
@@ -299,8 +296,9 @@ public sealed class DebugCutter(
                 pieces.Add(new DebugPiece(alias, count, alias));
                 return;
             }
+            // Reader, processor and writer share this branch's keys: while it is stopped the writer's go, the rest runs.
             var whole = Watches(count) ? job with { Checkpoint = Checkpoint(count), Session = SessionName } : job;
-            result[alias] = Terminal(whole, last: true, producerForm: true);
+            result[alias] = Terminal(silent ? WithoutWriter(alias, whole) : whole, last: true, producerForm: true);
             if (Watches(count)) pieces.Add(new DebugPiece(alias, count, alias));
             return;
         }
@@ -340,6 +338,24 @@ public sealed class DebugCutter(
             previous = name;
             previousLevel = end;
         }
+    }
+
+    /// <summary>
+    /// A branch that runs whole, with the keys of its writer taken off: what the writer owns in
+    /// <c>provider-options</c> and the keys of <see cref="BranchSides.Write"/>, the checkpoint apart. The processor's
+    /// block stays, whatever component answers to its name.
+    /// </summary>
+    private JobDefinition WithoutWriter(string alias, JobDefinition piece)
+    {
+        var blocks = piece.ProviderOptions;
+        if (blocks is { Count: > 0 })
+        {
+            var owned = JobCutter.OwnersOf(piece.Input, piece.Output, blocks.Keys, readers, writers).Writer;
+            var processor = BranchDefinition.FromJob(alias, piece, processors).ProcessorName;
+            blocks = blocks.Where(kv => !owned.Contains(kv.Key) || kv.Key.Equals(processor, StringComparison.OrdinalIgnoreCase))
+                .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+        }
+        return JobCutter.Without(piece, BranchSides.Write.Where(k => k != "checkpoint")) with { ProviderOptions = blocks is { Count: > 0 } ? blocks : null };
     }
 
     /// <summary>
